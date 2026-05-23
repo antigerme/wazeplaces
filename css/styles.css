@@ -191,22 +191,13 @@ button:active {
 .dark .diff-from { color: #f87171; }
 .dark .diff-to { color: #4ade80; }
 
-.image-gallery {
-  display: flex;
-  gap: 0.5rem;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
+.card-content {
+  min-height: 0;
 }
 
-.image-gallery::-webkit-scrollbar {
-  display: none;
-}
-
-.image-gallery img {
-  flex: 0 0 100%;
-  scroll-snap-align: start;
-  object-fit: cover;
+.card-content .card-name {
+  font-size: 1.35rem;
+  line-height: 1.2;
 }
 
 .undo-banner {
