@@ -1,119 +1,125 @@
-// API para comunicação com backend PHP
 const API = {
     baseUrl: '/api',
-    cookies: null,
+    sessionToken: null,
+    region: 'row',
+    countryId: 30,
 
-    // Define cookies para todas as requisições
-    setCookies(cookies) {
-        this.cookies = cookies;
-        sessionStorage.setItem('waze_cookies', cookies);
-    },
-
-    // Recupera cookies do sessionStorage
-    getCookies() {
-        if (!this.cookies) {
-            this.cookies = sessionStorage.getItem('waze_cookies');
+    setSession(token) {
+        this.sessionToken = token;
+        if (token) {
+            sessionStorage.setItem('waze_session_token', token);
+        } else {
+            sessionStorage.removeItem('waze_session_token');
         }
-        return this.cookies;
     },
 
-    // Testa se os cookies são válidos
-    async testCookies(cookies) {
+    getSession() {
+        if (!this.sessionToken) {
+            this.sessionToken = sessionStorage.getItem('waze_session_token');
+        }
+        return this.sessionToken;
+    },
+
+    setRegion(region) {
+        this.region = region || 'row';
+        localStorage.setItem('waze_region', this.region);
+    },
+
+    getRegion() {
+        const stored = localStorage.getItem('waze_region');
+        if (stored) this.region = stored;
+        return this.region;
+    },
+
+    setCountry(id) {
+        this.countryId = parseInt(id, 10) || 30;
+        localStorage.setItem('waze_country', this.countryId);
+    },
+
+    getCountry() {
+        const stored = localStorage.getItem('waze_country');
+        if (stored) this.countryId = parseInt(stored, 10) || 30;
+        return this.countryId;
+    },
+
+    async _post(endpoint, body) {
         try {
-            const response = await fetch(`${this.baseUrl}/testar-cookies.php`, {
+            const response = await fetch(`${this.baseUrl}/${endpoint}`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ cookies })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
             });
-
             const data = await response.json();
-            return data;
-        } catch (error) {
-            console.error('Erro ao testar cookies:', error);
-            return { success: false, error: 'Erro de conexão' };
-        }
-    },
-
-    // Busca places pendentes
-    async fetchPlaces(page = 1) {
-        try {
-            const cookies = this.getCookies();
-            if (!cookies) {
-                throw new Error('Cookies não encontrados');
+            if (response.status === 401) {
+                this.setSession(null);
             }
-
-            const response = await fetch(`${this.baseUrl}/buscar-places.php`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ cookies, page })
-            });
-
-            const data = await response.json();
             return data;
         } catch (error) {
-            console.error('Erro ao buscar places:', error);
+            console.error(`Erro em ${endpoint}:`, error);
             return { success: false, error: 'Erro de conexão' };
         }
     },
 
-    // Marca place como lido
+    async testCookies(cookies, region, countryId) {
+        const result = await this._post('testar-cookies.php', {
+            cookies,
+            region: region || this.getRegion(),
+            countryId: countryId || this.getCountry()
+        });
+        if (result.success && result.sessionToken) {
+            this.setSession(result.sessionToken);
+        }
+        return result;
+    },
+
+    async fetchPlaces(page = 1, filters = {}) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: 'Sessão expirada' };
+        }
+        return this._post('buscar-places.php', {
+            sessionToken,
+            region: this.getRegion(),
+            countryId: this.getCountry(),
+            page,
+            ...filters
+        });
+    },
+
     async markAsRead(venueID, updateRequestID) {
-        try {
-            const cookies = this.getCookies();
-            if (!cookies) {
-                throw new Error('Cookies não encontrados');
-            }
-
-            const response = await fetch(`${this.baseUrl}/marcar-lido.php`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    cookies,
-                    venueID,
-                    updateRequestID
-                })
-            });
-
-            const data = await response.json();
-            return data;
-        } catch (error) {
-            console.error('Erro ao marcar como lido:', error);
-            return { success: false, error: 'Erro de conexão' };
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: 'Sessão expirada' };
         }
+        return this._post('marcar-lido.php', {
+            sessionToken,
+            region: this.getRegion(),
+            venueID,
+            updateRequestID
+        });
     },
 
-    // Valida place (aprovar/rejeitar)
-    async validatePlace(venueID, updateRequestID, approve) {
-        try {
-            const cookies = this.getCookies();
-            if (!cookies) {
-                throw new Error('Cookies não encontrados');
-            }
-
-            const response = await fetch(`${this.baseUrl}/validar-place.php`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    cookies,
-                    venueID,
-                    updateRequestID,
-                    approve
-                })
-            });
-
-            const data = await response.json();
-            return data;
-        } catch (error) {
-            console.error('Erro ao validar place:', error);
-            return { success: false, error: 'Erro de conexão' };
+    async rejectPlace(venueID, updateRequestID) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: 'Sessão expirada' };
         }
+        return this._post('validar-place.php', {
+            sessionToken,
+            region: this.getRegion(),
+            venueID,
+            updateRequestID
+        });
+    },
+
+    async destroySession() {
+        const sessionToken = this.getSession();
+        if (!sessionToken) return { success: true };
+        const result = await this._post('sessao.php', {
+            action: 'destroy',
+            sessionToken
+        });
+        this.setSession(null);
+        return result;
     }
 };

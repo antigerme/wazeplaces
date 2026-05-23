@@ -1,373 +1,151 @@
-# Waze Places - Validação PWA
+# Waze Places - Limpeza de Pedidos (PWA)
 
-Aplicação PWA (Progressive Web App) para validação de places do Waze Map Editor com interface estilo Tinder. Arraste para aprovar ou rejeitar places pendentes de forma rápida e intuitiva.
+PWA para editores do Waze Map Editor limparem rapidamente os pedidos de places enviados por usuários — fotos lixo, nomes ruins, endereços errados, categorias absurdas. Interface estilo Tinder: arraste pra rejeitar (lixo) ou marque como lido (decide depois no WME).
+
+> **A aplicação nunca aprova places.** Aprovação exige ajuste no mapa e precisa ser feita pelo WME oficial. Aqui você só rejeita ou marca como lido, eliminando o lixo antes que outro editor novato aprove besteira.
 
 ## 🚀 Características
 
-- ✅ Interface estilo Tinder (swipe left/right)
-- ✅ 100% em português
-- ✅ PWA instalável no dispositivo
-- ✅ Funciona offline (cache de assets)
-- ✅ Backend PHP stateless (sem armazenamento de dados)
-- ✅ Proxy transparente para APIs do Waze
-- ✅ Autenticação via cookies.txt
-- ✅ Responsivo (mobile e desktop)
-- ✅ Animações suaves
-- ✅ Contador de validações
+- Interface estilo Tinder (swipe esquerda/direita/cima)
+- 100% em português
+- PWA instalável no dispositivo (sem precisar de Play Store / App Store)
+- Funciona offline (cache de assets) com network-first para HTML
+- Backend PHP com sessão criptografada (cookies não trafegam após login)
+- Proxy transparente para APIs do Waze
+- Multi-região (ROW, NA, IL, World) e país configurável
+- Modo escuro
+- Filtros por tipo de pedido (Local Novo, Foto, Atualização) e residencial
+- Diff "antes/depois" para pedidos de atualização
+- Galeria de imagens (não apenas a primeira)
+- Link direto pro WME no card
+- Botão "Pular" (apenas avança, não chama API)
+- Undo de 3s — desfaça antes da requisição ir
+- Stats persistidas (read / rejected / skipped)
+- Atalhos: ← Rejeitar, → Lido, ↑ Pular
 
 ## 📋 Requisitos
 
 ### Servidor
-- Apache 2.4+
-- PHP 7.4+ com extensões:
-  - cURL
-  - JSON
-  - OpenSSL
-- mod_rewrite habilitado
-- mod_headers habilitado (opcional, mas recomendado)
+- Apache 2.4+ (ou Nginx)
+- PHP 7.4+ com extensões: cURL, JSON, OpenSSL
+- mod_rewrite habilitado (Apache)
+- HTTPS (necessário pra instalação PWA real)
 
 ### Cliente
 - Navegador moderno (Chrome, Firefox, Edge, Safari)
 - Conta ativa no Waze Map Editor
-- Extensão para exportar cookies (ver seção abaixo)
+- Extensão de exportação de cookies
 
 ## 🔧 Instalação
 
-### 1. Upload dos Arquivos
+1. Faça upload de todos os arquivos pro servidor.
+2. Garanta que `api/` é gravável (pra criar `.encryption-key` e `/tmp/waze_places_sessions/`).
+3. Renomeie `.htaccess.todo` pra `.htaccess` (se Apache) — aplica headers de segurança e cache.
+4. Habilite HTTPS via Certbot ou similar.
+5. Acesse pela URL e instale como PWA pelo menu do navegador.
 
-Faça upload de todos os arquivos para o diretório do seu servidor Apache:
-
-```
-/var/www/html/waze-places/
-├── index.html
-├── manifest.json
-├── service-worker.js
-├── .htaccess
-├── css/
-│   └── styles.css
-├── js/
-│   ├── app.js
-│   ├── api.js
-│   └── swipe.js
-└── api/
-    ├── config.php
-    ├── testar-cookies.php
-    ├── buscar-places.php
-    └── validar-place.php
-```
-
-### 2. Configurar Permissões
+### Permissões mínimas
 
 ```bash
-# Permissões dos diretórios
-chmod 755 /var/www/html/waze-places
-chmod 755 /var/www/html/waze-places/api
-chmod 755 /var/www/html/waze-places/css
-chmod 755 /var/www/html/waze-places/js
-
-# Permissões dos arquivos
-chmod 644 /var/www/html/waze-places/*.html
-chmod 644 /var/www/html/waze-places/*.json
-chmod 644 /var/www/html/waze-places/*.js
-chmod 644 /var/www/html/waze-places/css/*
-chmod 644 /var/www/html/waze-places/js/*
-chmod 644 /var/www/html/waze-places/api/*.php
-chmod 644 /var/www/html/waze-places/.htaccess
+chmod 755 api/
+# api/.encryption-key será criado automaticamente em 0600 no 1º uso
 ```
 
-### 3. Verificar Módulos Apache
-
-```bash
-# Habilitar mod_rewrite
-sudo a2enmod rewrite
-
-# Habilitar mod_headers (opcional)
-sudo a2enmod headers
-
-# Reiniciar Apache
-sudo systemctl restart apache2
-```
-
-### 4. Configurar Virtual Host (Opcional)
-
-Se desejar usar um domínio/subdomínio específico:
-
-```apache
-<VirtualHost *:80>
-    ServerName waze-places.seudominio.com
-    DocumentRoot /var/www/html/waze-places
-    
-    <Directory /var/www/html/waze-places>
-        AllowOverride All
-        Require all granted
-    </Directory>
-    
-    ErrorLog ${APACHE_LOG_DIR}/waze-places-error.log
-    CustomLog ${APACHE_LOG_DIR}/waze-places-access.log combined
-</VirtualHost>
-```
-
-### 5. SSL/HTTPS (Altamente Recomendado)
-
-Para usar HTTPS (necessário para algumas funcionalidades PWA):
-
-```bash
-# Usando Certbot (Let's Encrypt)
-sudo apt install certbot python3-certbot-apache
-sudo certbot --apache -d waze-places.seudominio.com
-```
-
-## 🍪 Como Obter o Arquivo cookies.txt
+## 🍪 Como Obter o cookies.txt
 
 ### Chrome / Edge / Brave
-
-1. Instale a extensão **"Get cookies.txt LOCALLY"**
-   - Link: https://chrome.google.com/webstore/detail/get-cookiestxt-locally/
-   
-2. Acesse https://www.waze.com/editor e faça login
-
-3. Clique no ícone da extensão
-
-4. Clique em "Export" ou "Download"
-
-5. Salve o arquivo `cookies.txt`
+Instale a extensão **"Get cookies.txt LOCALLY"**, acesse `https://www.waze.com/editor`, faça login, clique no ícone da extensão e exporte.
 
 ### Firefox
+Instale **"cookies.txt"** ([addons.mozilla.org](https://addons.mozilla.org/firefox/addon/cookies-txt/)), faça login no WME, exporte.
 
-1. Instale a extensão **"cookies.txt"**
-   - Link: https://addons.mozilla.org/firefox/addon/cookies-txt/
-   
-2. Acesse https://www.waze.com/editor e faça login
-
-3. Clique no ícone da extensão
-
-4. Clique em "Export cookies.txt"
-
-5. Salve o arquivo
-
-### Formato Esperado
-
-O arquivo deve estar no formato Netscape:
-
-```
-# Netscape HTTP Cookie File
-.waze.com	TRUE	/	FALSE	1234567890	cookie_name	cookie_value
-.waze.com	TRUE	/	TRUE	1234567890	csrf_token	abc123xyz
-```
-
-**Importante:** O cookie `csrf_token` é obrigatório!
+**Importante:** o cookie `_csrf_token` é obrigatório. Sem ele a app rejeita o arquivo.
 
 ## 📱 Como Usar
 
-### 1. Acesse a Aplicação
-
-Abra o navegador e acesse:
-- `http://localhost/waze-places/` (desenvolvimento local)
-- `https://waze-places.seudominio.com/` (produção)
-
-### 2. Forneça os Cookies
-
-Na tela inicial, você tem duas opções:
-
-**Opção A: Upload do Arquivo**
-1. Clique em "Fazer Upload do cookies.txt"
-2. Selecione o arquivo exportado
-3. Aguarde a validação
-
-**Opção B: Colar Conteúdo**
-1. Clique em "Colar Conteúdo dos Cookies"
-2. Abra o arquivo cookies.txt em um editor de texto
-3. Copie todo o conteúdo (Ctrl+A, Ctrl+C)
-4. Cole no campo de texto
-5. Clique em "Confirmar"
-
-### 3. Validar Places
-
-Após autenticação bem-sucedida:
-
-- **Arrastar para direita** ou clicar em **✅ Aprovar**: Aprova o place
-- **Arrastar para esquerda** ou clicar em **❌ Rejeitar**: Rejeita o place
-- Os cards são carregados automaticamente
-- Estatísticas são atualizadas em tempo real
-
-### 4. Instalar como App (Opcional)
-
-No Chrome/Edge:
-1. Clique nos 3 pontos (menu)
-2. Selecione "Instalar Waze Places"
-3. Confirme a instalação
-
-No Firefox:
-1. Clique no ícone de "+" na barra de endereços
-2. Selecione "Instalar"
+1. Selecione **Região** (Brasil = ROW) e **País** (Brasil = 30) na tela inicial.
+2. Faça upload ou cole o conteúdo do `cookies.txt`.
+3. O servidor valida, cria uma sessão criptografada (2h de validade) e retorna apenas um token de sessão pro seu dispositivo.
+4. Processe os cards:
+   - **← / Arrastar esquerda / Rejeitar**: marca como lixo (não aprovado)
+   - **→ / Arrastar direita / Lido**: marca como lido (você decide no WME depois)
+   - **↑ / Arrastar pra cima / Pular**: só avança, não chama API
+   - **Ícone ↗ no card**: abre o local diretamente no WME pra ajustar e aprovar manualmente
 
 ## 🔒 Segurança
 
-### Dados do Usuário
+- Cookies do Waze são **criptografados** com AES-256-CBC no servidor (chave gerada uma vez em `api/.encryption-key`)
+- O cliente só guarda um **session token** opaco (válido 2h)
+- Sessões expiradas são removidas automaticamente do `/tmp`
+- Cookies do Waze **não trafegam** novamente após o login
+- Headers de segurança (X-Frame-Options, X-Content-Type-Options, CSP) via `.htaccess`
+- Arquivos temporários de cookies usados pelo cURL têm permissão `0600` e são deletados após cada chamada
 
-- ✅ Cookies armazenados **apenas no navegador** (sessionStorage)
-- ✅ Nenhum dado persistido no servidor
-- ✅ Arquivos temporários deletados imediatamente após uso
-- ✅ Permissões restritas (0600) em arquivos temporários
-- ✅ Comunicação via HTTPS (recomendado)
+### O que **não** está implementado (conscientemente)
+- Rate limiting (foi pedido pra não implementar)
+- HTTPS forçado por código (config do servidor)
+- Bloqueio de IP / WAF (fica no nível do servidor)
 
-### Headers de Segurança
+## 🌍 Multi-região
 
-A aplicação implementa:
-- `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
-- `X-XSS-Protection: 1; mode=block`
-- `Content-Security-Policy` (configurável)
-- CORS restrito
+A app suporta as URLs base do Waze:
 
-### Boas Práticas
+| Região | Endpoint base                              | Uso típico                |
+|--------|--------------------------------------------|---------------------------|
+| `row`  | `www.waze.com/row-Descartes/...`           | Brasil, Europa, outros    |
+| `na`   | `www.waze.com/na-Descartes/...`            | EUA, Canadá               |
+| `il`   | `www.waze.com/il-Descartes/...`            | Israel                    |
+| `world`| `www.waze.com/Descartes/...`               | Fallback                  |
 
-1. **Use HTTPS em produção**
-2. **Mantenha PHP atualizado**
-3. **Configure firewall adequadamente**
-4. **Monitore logs do Apache**
-5. **Renove cookies periodicamente**
+Configure pelo seletor na tela de login ou pelo modal de filtros.
 
 ## 🐛 Solução de Problemas
 
-### Erro: "Cookies inválidos"
+### "Sessão expirada ou inválida"
+Sua sessão passou de 2h ou o servidor foi reiniciado. Refaça login com cookies novos.
 
-**Causa:** Cookies expirados ou formato incorreto
+### "Token CSRF não encontrado"
+O `cookies.txt` está incompleto. Certifique-se de estar logado no WME ao exportar.
 
-**Solução:**
-1. Faça logout do Waze Map Editor
-2. Faça login novamente
-3. Exporte novos cookies
-4. Tente novamente na aplicação
+### "Erro ao buscar places (HTTP 401/403)"
+Cookies expiraram do lado do Waze. Faça login de novo no WME e re-exporte.
 
-### Erro: "Token CSRF não encontrado"
+### Cards não aparecem
+Não há pedidos pendentes pro filtro atual. Tente abrir o modal de filtros e ampliar.
 
-**Causa:** Arquivo cookies.txt incompleto
+## 📊 Arquitetura
 
-**Solução:**
-1. Certifique-se de estar logado no WME
-2. Use uma extensão confiável para exportar
-3. Verifique se o arquivo contém a linha com `csrf_token`
-
-### Erro: "Erro ao buscar places"
-
-**Causa:** Problema de conexão ou cookies expirados
-
-**Solução:**
-1. Verifique sua conexão com a internet
-2. Renove os cookies
-3. Verifique os logs do PHP: `/var/log/apache2/error.log`
-
-### Cards não carregam
-
-**Causa:** Pode não haver places pendentes
-
-**Solução:**
-1. Clique em "Recarregar"
-2. Verifique se há places pendentes no WME
-3. Tente mudar o país/região nas configurações (editar `api/buscar-places.php`, linha `countryId`)
-
-### Gestos de swipe não funcionam
-
-**Causa:** JavaScript desabilitado ou navegador incompatível
-
-**Solução:**
-1. Habilite JavaScript no navegador
-2. Use um navegador moderno (Chrome, Firefox, Edge, Safari)
-3. Limpe o cache do navegador
-
-## 📊 Logs e Monitoramento
-
-### Logs do Apache
-
-```bash
-# Erros
-tail -f /var/log/apache2/error.log
-
-# Acessos
-tail -f /var/log/apache2/access.log
 ```
-
-### Logs do PHP
-
-Edite `api/config.php` para habilitar debug (apenas em desenvolvimento):
-
-```php
-// No topo do arquivo, adicione:
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
+PWA (HTML/JS/Tailwind)
+  ↓ POST /api/sessao.php (cookies → token criptografado)
+  ↓ POST /api/buscar-places.php (token → places normalizados)
+  ↓ POST /api/marcar-lido.php (token, venueID, updateRequestID)
+  ↓ POST /api/validar-place.php (token, venueID, updateRequestID)
+PHP backend (stateless por request)
+  ↓ cURL com cookies descriptografados
+  ↓ Sempre adiciona X-CSRF-Token + headers de origem
+APIs internas do Waze
+  - /Issues/Search/List
+  - /Issues/Read
+  - /Features (rejeição)
 ```
-
-**⚠️ NUNCA deixe isso habilitado em produção!**
-
-## 🔄 Atualizações
-
-Para atualizar a aplicação:
-
-1. Faça backup dos arquivos atuais
-2. Substitua pelos novos arquivos
-3. Limpe o cache do navegador (Ctrl+Shift+Delete)
-4. Recarregue a página (Ctrl+F5)
 
 ## 📝 Personalização
 
-### Alterar País/Região
+### Tema padrão
+Edite a chave `waze_places_theme` no `localStorage` ou clique no ícone de sol/lua no header.
 
-Edite `api/buscar-places.php` e `api/testar-cookies.php`:
+### Filtros padrão
+Os filtros são persistidos em `localStorage` (`waze_places_filters`). Reset limpando o storage.
 
-```php
-'countryId' => 30, // 30 = Brasil, altere conforme necessário
-```
+### Cores e estilo
+Edite `css/styles.css` ou as classes Tailwind nos templates de `index.html`.
 
-### Ajustar Filtros
+## ⚠️ Avisos
 
-Em `api/buscar-places.php`, você pode adicionar filtros adicionais:
-
-```php
-'venueUpdateRequestsFilter' => [
-    'categories' => ['GAS_STATION', 'RESTAURANT'], // Filtrar por categoria
-    'lockRanks' => [0, 1, 2], // Apenas ranks específicos
-    'residential' => false, // Excluir residenciais
-    // ... outros filtros
-]
-```
-
-### Modificar Cores/Tema
-
-Edite `css/styles.css` ou as classes Tailwind em `index.html`.
-
-## 🤝 Suporte
-
-Para problemas ou dúvidas:
-
-1. Verifique a seção "Solução de Problemas"
-2. Consulte os logs do servidor
-3. Verifique a documentação do Waze Map Editor
-4. Entre em contato com a comunidade Waze Brasil
-
-## 📄 Licença
-
-Este projeto é fornecido "como está", sem garantias. Use por sua conta e risco.
-
-## ⚠️ Avisos Importantes
-
-1. **Não compartilhe seu arquivo cookies.txt** - ele contém suas credenciais de acesso
-2. **Renove os cookies regularmente** - eles expiram após algum tempo
-3. **Use HTTPS em produção** - proteja seus dados
-4. **Esta aplicação NÃO é oficial do Waze** - é uma ferramenta da comunidade
-5. **Respeite as diretrizes do Waze** - valide apenas places legítimos
-
-## 🎯 Roadmap
-
-Funcionalidades futuras planejadas:
-
-- [ ] Filtros avançados de places
-- [ ] Histórico de validações
-- [ ] Estatísticas detalhadas
-- [ ] Modo escuro
-- [ ] Suporte a múltiplos países
-- [ ] Notificações push
-- [ ] Exportar relatórios
+1. **Não compartilhe seu `cookies.txt`** — ele contém suas credenciais
+2. **Esta aplicação NÃO é oficial do Waze** — é uma ferramenta da comunidade
+3. **Respeite as diretrizes do Waze** — não rejeite em massa sem analisar
 
 ---
 
