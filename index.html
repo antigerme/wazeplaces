@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Validação de Places do Waze Map Editor - Interface Estilo Tinder">
+    <meta name="theme-color" content="#33CCFF">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: blob:; connect-src 'self' https:; font-src 'self' data: https:; worker-src 'self' blob:;">
+    <title>Waze Places - Validação</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- PWA Meta Tags -->
+    <!-- <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Waze Places"> -->
+    
+    <!-- Tailwind CSS -->
+    <!-- <script src="https://cdn.tailwindcss.com"></script> -->
+    <script src="js/tailwindcss_3_4_17.js"></script>
+    
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen text-slate-800 antialiased selection:bg-blue-200">
+    
+    <!-- Header -->
+    <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-slate-200/50">
+        <div class="container mx-auto px-4 py-4 flex items-center justify-between max-w-md">
+            <div class="flex items-center space-x-3">
+                <div class="bg-gradient-to-tr from-cyan-500 to-blue-500 p-2 rounded-xl shadow-sm">
+                    <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                    </svg>
+                </div>
+                <h1 class="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-600">Waze Places</h1>
+            </div>
+            <button id="helpBtn" aria-label="Ajuda" class="p-2 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="container mx-auto px-4 py-6 max-w-md">
+        
+        <!-- Auth Screen -->
+        <div id="authScreen" class="space-y-6">
+            <div class="bg-white/90 backdrop-blur-xl rounded-3xl shadow-xl border border-white/20 p-8 transform transition-all">
+                <div class="text-center mb-8">
+                    <h2 class="text-3xl font-extrabold text-slate-800 mb-2">Bem-vindo!</h2>
+                    <p class="text-slate-500 text-sm leading-relaxed">Para começar a validar places do Waze, você precisa fornecer seus cookies de autenticação.</p>
+                </div>
+                
+                <div class="space-y-4">
+                    <button id="uploadBtn" class="group w-full relative overflow-hidden bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-cyan-500/25 active:scale-[0.98]">
+                        <span class="relative z-10 flex items-center justify-center space-x-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                            <span>Fazer Upload do cookies.txt</span>
+                        </span>
+                    </button>
+                    <input type="file" id="fileInput" accept=".txt" class="hidden">
+                    
+                    <div class="relative py-2">
+                        <div class="absolute inset-0 flex items-center">
+                            <div class="w-full border-t border-slate-200"></div>
+                        </div>
+                        <div class="relative flex justify-center text-sm font-medium">
+                            <span class="px-4 bg-white text-slate-400">ou</span>
+                        </div>
+                    </div>
+                    
+                    <button id="pasteBtn" class="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 active:scale-[0.98] flex items-center justify-center space-x-2">
+                        <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                        <span>Colar Conteúdo dos Cookies</span>
+                    </button>
+                </div>
+                
+                <div class="mt-8 p-4 bg-blue-50/50 border border-blue-100 rounded-2xl flex items-start space-x-3">
+                    <svg class="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <p class="text-xs text-blue-800/80 leading-relaxed">
+                        Seus cookies são armazenados apenas no navegador e nunca são salvos no servidor.
+                    </p>
+                </div>
+            </div>
+            
+            <button id="byAuthor" class="w-full text-slate-400 hover:text-cyan-600 font-medium text-sm transition-colors text-center pb-8">
+                By AG
+            </button>
+        </div>
+
+        <!-- Paste Modal -->
+        <div id="pasteModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6">
+                <h3 class="text-xl font-bold text-gray-800 mb-4">Cole o Conteúdo dos Cookies</h3>
+                <textarea id="cookiesTextarea" class="w-full h-48 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt..."></textarea>
+                <div class="flex space-x-3 mt-4">
+                    <button id="confirmPaste" class="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition">
+                        Confirmar
+                    </button>
+                    <button id="cancelPaste" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg transition">
+                        Cancelar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- App Screen -->
+        <div id="appScreen" class="hidden space-y-6">
+            
+            <!-- Stats -->
+            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-5">
+                <div class="flex justify-around text-center divide-x divide-slate-100">
+                    <div class="flex-1">
+                        <p class="text-3xl font-black text-emerald-500 tracking-tight" id="approvedCount">0</p>
+                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mt-1">Lidos</p>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-3xl font-black text-rose-500 tracking-tight" id="rejectedCount">0</p>
+                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mt-1">Rejeitados</p>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-3xl font-black text-slate-800 tracking-tight" id="totalCount">0</p>
+                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mt-1">Total</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card Stack -->
+            <div id="cardStack" class="relative h-[550px] w-full max-w-[400px] mx-auto perspective-1000">
+                <!-- Loading State -->
+                <div id="loadingCard" class="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-sm rounded-3xl z-50">
+                    <div class="text-center">
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-500 mx-auto mb-4"></div>
+                        <p class="text-slate-500 font-medium animate-pulse">Buscando places...</p>
+                    </div>
+                </div>
+
+                <!-- No More Cards -->
+                <div id="noMoreCards" class="hidden absolute inset-0 flex items-center justify-center bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
+                    <div class="text-center p-8">
+                        <div class="bg-white p-4 rounded-full shadow-sm inline-block mb-4">
+                            <svg class="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-800 mb-2">Tudo limpo!</h3>
+                        <p class="text-slate-500 text-sm mb-6">Você validou todos os places pendentes no momento.</p>
+                        <button id="reloadBtn" class="bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 px-8 rounded-xl transition-all shadow-md active:scale-95">
+                            Verificar novamente
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Place Card Template -->
+                <template id="cardTemplate">
+                    <div class="place-card absolute inset-0 bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden cursor-grab active:cursor-grabbing will-change-transform">
+                        <div class="h-full flex flex-col relative z-10">
+                            <!-- Image Header -->
+                            <div class="h-56 bg-slate-100 relative overflow-hidden group">
+                                <img class="card-image w-full h-full object-cover hidden transition-transform duration-700 group-hover:scale-105" alt="Place">
+                                <div class="card-no-image absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
+                                    <svg class="w-16 h-16 text-slate-300 mb-2" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                                    </svg>
+                                    <span class="text-sm font-medium text-slate-400">Sem Imagem</span>
+                                </div>
+                                <!-- Swipe Overlays -->
+                                <div class="swipe-indicator swipe-left absolute inset-0 bg-gradient-to-r from-rose-500/80 to-transparent flex items-center justify-start p-8 transition-opacity opacity-0 z-20">
+                                    <div class="bg-white/20 backdrop-blur-md rounded-full p-4 border border-white/50">
+                                        <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </div>
+                                </div>
+                                <div class="swipe-indicator swipe-right absolute inset-0 bg-gradient-to-l from-emerald-500/80 to-transparent flex items-center justify-end p-8 transition-opacity opacity-0 z-20">
+                                    <div class="bg-white/20 backdrop-blur-md rounded-full p-4 border border-white/50">
+                                        <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Content -->
+                            <div class="flex-1 p-6 flex flex-col relative z-10 bg-white">
+                                <div class="flex-1">
+                                    <h3 class="card-name text-2xl font-bold text-slate-800 leading-tight mb-4"></h3>
+                                    
+                                    <div class="space-y-4">
+                                        <div class="flex items-start space-x-3 group">
+                                            <div class="bg-cyan-50 p-2 rounded-lg text-cyan-600 group-hover:bg-cyan-100 transition-colors">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+                                                </svg>
+                                            </div>
+                                            <div class="flex-1 pt-1">
+                                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Categorias</p>
+                                                <span class="card-category text-sm text-slate-700 font-medium line-clamp-2"></span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="card-address-container flex items-start space-x-3 group">
+                                            <div class="bg-blue-50 p-2 rounded-lg text-blue-600 group-hover:bg-blue-100 transition-colors">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                                </svg>
+                                            </div>
+                                            <div class="flex-1 pt-1">
+                                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Endereço</p>
+                                                <span class="card-address text-sm text-slate-700 font-medium line-clamp-2"></span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="grid grid-cols-2 gap-3 mt-4">
+                                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Tipo</p>
+                                                <span class="card-type text-sm text-slate-700 font-medium truncate block"></span>
+                                            </div>
+                                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Criador</p>
+                                                <span class="card-creator text-sm text-slate-700 font-medium truncate block"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Action Buttons -->
+                                <div class="mt-6 flex gap-4 pt-4 border-t border-slate-100">
+                                    <button class="reject-btn flex-1 group relative overflow-hidden bg-white border-2 border-rose-100 hover:border-rose-500 text-rose-500 hover:text-white font-bold py-3.5 rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2">
+                                        <div class="absolute inset-0 w-full h-full bg-rose-500 scale-x-0 group-hover:scale-x-100 origin-left transition-transform duration-300 ease-out z-0"></div>
+                                        <svg class="w-6 h-6 relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                        <span class="relative z-10">Rejeitar</span>
+                                    </button>
+                                    <button class="approve-btn flex-1 group relative overflow-hidden bg-white border-2 border-emerald-100 hover:border-emerald-500 text-emerald-500 hover:text-white font-bold py-3.5 rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2">
+                                        <div class="absolute inset-0 w-full h-full bg-emerald-500 scale-x-0 group-hover:scale-x-100 origin-left transition-transform duration-300 ease-out z-0"></div>
+                                        <svg class="w-6 h-6 relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
+                                        <span class="relative z-10">Lido</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Instructions -->
+            <div class="text-center px-4 mt-2">
+                <p class="text-xs font-medium text-slate-400 bg-slate-100 inline-block px-4 py-2 rounded-full">
+                    Arraste ou use setas do teclado (← / →)
+                </p>
+            </div>
+
+            <!-- Logout -->
+            <div class="text-center pt-4">
+                <button id="logoutBtn" class="text-slate-400 hover:text-rose-500 font-medium text-sm transition-colors flex items-center justify-center mx-auto space-x-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                    <span>Sair e Limpar Dados</span>
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[80vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-2xl font-bold text-gray-800">Ajuda</h3>
+                <button id="closeHelp" class="text-gray-500 hover:text-gray-700">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="space-y-4 text-gray-600">
+                <div>
+                    <h4 class="font-semibold text-gray-800 mb-2">Como usar:</h4>
+                    <ol class="list-decimal list-inside space-y-1 text-sm">
+                        <li>Faça login no Waze Map Editor no seu navegador</li>
+                        <li>Exporte seus cookies usando uma extensão de navegador</li>
+                        <li>Faça upload do arquivo cookies.txt nesta aplicação</li>
+                        <li>Arraste os cards ou use os botões para validar places</li>
+                    </ol>
+                </div>
+                
+                <div>
+                    <h4 class="font-semibold text-gray-800 mb-2">Gestos:</h4>
+                    <ul class="list-disc list-inside space-y-1 text-sm">
+                        <li><strong>Arrastar para direita:</strong> Marcar como lido</li>
+                        <li><strong>Arrastar para esquerda:</strong> Rejeitar place</li>
+                        <li><strong>Botões:</strong> Alternativa aos gestos</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h4 class="font-semibold text-gray-800 mb-2">Segurança:</h4>
+                    <p class="text-sm">Seus cookies são armazenados apenas no seu navegador (sessionStorage) e enviados diretamente para as APIs do Waze através do nosso servidor proxy. Nenhum dado é salvo no servidor.</p>
+                </div>
+                
+                <div>
+                    <h4 class="font-semibold text-gray-800 mb-2">Extensões recomendadas:</h4>
+                    <ul class="list-disc list-inside space-y-1 text-sm">
+                        <li><strong>Chrome/Edge:</strong> "Get cookies.txt LOCALLY"</li>
+                        <li><strong>Firefox:</strong> "cookies.txt"</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+    <!-- Scripts -->
+    <script src="js/api.js"></script>
+    <script src="js/swipe.js"></script>
+    <script src="js/app.js"></script>
+    
+    <script>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js')
+                .then(reg => console.log('Service Worker registrado'))
+                .catch(err => console.log('Erro ao registrar Service Worker:', err));
+        }
+        
+        // Habilita swipe nos cards quando criados
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.classList && node.classList.contains('place-card')) {
+                        enableSwipeOnCard(node);
+                    }
+                });
+            });
+        });
+        
+        observer.observe(document.getElementById('cardStack'), {
+            childList: true,
+            subtree: true
+        });
+    </script>
+</body>
+</html>
