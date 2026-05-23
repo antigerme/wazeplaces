@@ -320,7 +320,7 @@ function showCurrentPlace() {
             });
         }
     } else {
-        img.classList.add('hidden');
+        gallery.classList.add('hidden');
         noImg.classList.remove('hidden');
     }
 
