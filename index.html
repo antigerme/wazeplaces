@@ -248,15 +248,19 @@
                 <template id="cardTemplate">
                     <div class="place-card absolute inset-0 bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden cursor-grab active:cursor-grabbing will-change-transform">
                         <div class="h-full flex flex-col relative z-10">
-                            <div class="h-56 bg-slate-100 relative overflow-hidden">
-                                <div class="card-gallery image-gallery h-full w-full hidden"></div>
+                            <div class="h-52 bg-slate-100 relative overflow-hidden">
+                                <img class="card-image w-full h-full object-cover hidden" alt="Place">
                                 <div class="card-no-image absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
                                     <svg class="w-16 h-16 text-slate-300 mb-2" fill="currentColor" viewBox="0 0 24 24">
                                         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
                                     </svg>
                                     <span class="text-sm font-medium text-slate-400">Sem Imagem</span>
                                 </div>
-                                <div class="card-image-count hidden absolute bottom-2 right-2 bg-black/60 text-white text-xs font-medium px-2 py-1 rounded-full"></div>
+                                <div class="card-image-nav hidden absolute bottom-2 inset-x-2 flex items-center justify-between z-30">
+                                    <button type="button" class="card-image-prev bg-black/60 hover:bg-black/80 text-white w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold">‹</button>
+                                    <span class="card-image-count bg-black/60 text-white text-xs font-medium px-3 py-1 rounded-full"></span>
+                                    <button type="button" class="card-image-next bg-black/60 hover:bg-black/80 text-white w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold">›</button>
+                                </div>
                                 <div class="swipe-indicator swipe-left absolute inset-0 bg-gradient-to-r from-rose-500/80 to-transparent flex items-center justify-start p-8 transition-opacity opacity-0 z-20">
                                     <div class="bg-white/20 backdrop-blur-md rounded-full p-4 border border-white/50">
                                         <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -269,7 +273,7 @@
                                 </div>
                             </div>
 
-                            <div class="flex-1 p-6 flex flex-col relative z-10 bg-white overflow-y-auto">
+                            <div class="flex-1 p-5 flex flex-col relative z-10 bg-white card-content">
                                 <div class="flex-1">
                                     <div class="flex items-start justify-between mb-3">
                                         <h3 class="card-name text-2xl font-bold text-slate-800 leading-tight flex-1"></h3>
@@ -413,14 +417,40 @@
     <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
     <div id="undoContainer"></div>
 
+    <footer class="text-center pb-4">
+        <span class="text-[10px] text-slate-300 font-mono" id="appVersionDisplay"></span>
+    </footer>
+
     <script src="js/api.js"></script>
     <script src="js/swipe.js"></script>
     <script src="js/app.js"></script>
 
     <script>
         if ('serviceWorker' in navigator) {
+            let refreshing = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (refreshing) return;
+                refreshing = true;
+                window.location.reload();
+            });
+
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('service-worker.js')
+                    .then(reg => {
+                        reg.addEventListener('updatefound', () => {
+                            const newWorker = reg.installing;
+                            if (!newWorker) return;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    if (window.showToast) {
+                                        window.showToast('Nova versão disponível. Atualizando...', 'info');
+                                    }
+                                    newWorker.postMessage({ type: 'SKIP_WAITING' });
+                                }
+                            });
+                        });
+                        setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+                    })
                     .catch(err => console.log('Erro ao registrar Service Worker:', err));
             });
         }

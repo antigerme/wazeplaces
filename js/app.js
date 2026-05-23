@@ -1,7 +1,9 @@
+const APP_VERSION = '2.0.0';
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const THEME_KEY = 'waze_places_theme';
 const UNDO_WINDOW_MS = 3000;
+const MAX_CHANGES_DISPLAY = 4;
 
 const AppState = {
     authenticated: false,
@@ -23,6 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initApp() {
+    const versionEl = document.getElementById('appVersionDisplay');
+    if (versionEl) versionEl.textContent = 'v' + APP_VERSION;
+
     loadStats();
     loadFilters();
     applyTheme(localStorage.getItem(THEME_KEY) || 'light');
@@ -276,28 +281,42 @@ function showCurrentPlace() {
     const region = API.getRegion();
     const envParam = region === 'na' ? 'usa' : region;
     if (place.lat && place.lon) {
-        wmeLink.href = `https://www.waze.com/editor?env=${envParam}&lat=${place.lat}&lon=${place.lon}&zoomLevel=18&segments=${place.venueID}`;
+        wmeLink.href = `https://www.waze.com/editor?env=${envParam}&lat=${place.lat}&lon=${place.lon}&zoom=18`;
     } else {
         wmeLink.href = `https://www.waze.com/editor?env=${envParam}`;
     }
 
-    const gallery = card.querySelector('.card-gallery');
+    const img = card.querySelector('.card-image');
     const noImg = card.querySelector('.card-no-image');
+    const imgNav = card.querySelector('.card-image-nav');
     const imgCount = card.querySelector('.card-image-count');
+    const imgPrev = card.querySelector('.card-image-prev');
+    const imgNext = card.querySelector('.card-image-next');
     const urls = place.imageUrls && place.imageUrls.length > 0
         ? place.imageUrls
         : (place.imageUrl ? [place.imageUrl] : []);
 
     if (urls.length > 0) {
-        gallery.innerHTML = urls.map(u => `<img src="${u}" alt="Place" class="w-full h-full">`).join('');
-        gallery.classList.remove('hidden');
+        let currentImgIdx = 0;
+        const updateImage = () => {
+            img.src = urls[currentImgIdx];
+            imgCount.textContent = `${currentImgIdx + 1} / ${urls.length}`;
+        };
+        img.classList.remove('hidden');
         noImg.classList.add('hidden');
+        updateImage();
+
         if (urls.length > 1) {
-            imgCount.textContent = `1/${urls.length}`;
-            imgCount.classList.remove('hidden');
-            gallery.addEventListener('scroll', () => {
-                const idx = Math.round(gallery.scrollLeft / gallery.clientWidth);
-                imgCount.textContent = `${idx + 1}/${urls.length}`;
+            imgNav.classList.remove('hidden');
+            imgPrev.addEventListener('click', (e) => {
+                e.stopPropagation();
+                currentImgIdx = (currentImgIdx - 1 + urls.length) % urls.length;
+                updateImage();
+            });
+            imgNext.addEventListener('click', (e) => {
+                e.stopPropagation();
+                currentImgIdx = (currentImgIdx + 1) % urls.length;
+                updateImage();
             });
         }
     } else {
@@ -308,13 +327,19 @@ function showCurrentPlace() {
     const changesBox = card.querySelector('.card-changes');
     const changesList = card.querySelector('.card-changes-list');
     if (place.changes && place.changes.length > 0) {
-        changesList.innerHTML = place.changes.map(c => `
+        const visible = place.changes.slice(0, MAX_CHANGES_DISPLAY);
+        const hiddenCount = place.changes.length - visible.length;
+        let html = visible.map(c => `
             <div class="diff-row">
                 <span class="text-xs font-semibold text-slate-600">${escapeHtml(c.label)}:</span>
                 <span class="diff-from">${escapeHtml(c.from)}</span>
                 <span class="diff-to">${escapeHtml(c.to)}</span>
             </div>
         `).join('');
+        if (hiddenCount > 0) {
+            html += `<div class="text-xs text-slate-500 italic pt-1">+ ${hiddenCount} outra(s) mudança(s)</div>`;
+        }
+        changesList.innerHTML = html;
         changesBox.classList.remove('hidden');
     }
 
@@ -578,3 +603,4 @@ function onSwipeUp() { handleSkip(); }
 window.onSwipeLeft = onSwipeLeft;
 window.onSwipeRight = onSwipeRight;
 window.onSwipeUp = onSwipeUp;
+window.showToast = showToast;

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-places-v2';
+const CACHE_NAME = 'waze-places-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -7,14 +7,15 @@ const STATIC_ASSETS = [
   '/js/api.js',
   '/js/swipe.js',
   '/js/tailwindcss_3_4_17.js',
-  '/manifest.json'
+  '/manifest.json',
+  '/icons/icon-192.svg',
+  '/icons/icon-512.svg'
 ];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(STATIC_ASSETS).catch(() => {}))
-      .then(() => self.skipWaiting())
   );
 });
 
@@ -30,6 +31,12 @@ self.addEventListener('activate', event => {
       );
     }).then(() => self.clients.claim())
   );
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', event => {
