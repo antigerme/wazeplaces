@@ -689,6 +689,27 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+function showWorkerWarning() {
+    if (document.getElementById('workerWarning')) return;
+    const banner = document.createElement('div');
+    banner.id = 'workerWarning';
+    banner.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-amber-500 text-amber-950 px-4 py-3 rounded-xl shadow-2xl z-50 max-w-sm text-sm flex items-start gap-3';
+    banner.innerHTML = `
+        <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
+        </svg>
+        <div class="flex-1">
+            <p class="font-semibold mb-1">Servidor lento detectado</p>
+            <p class="text-xs leading-relaxed">A app pode travar entre cliques. Pare o servidor (<strong>Ctrl+C</strong>) e inicie com <code class="bg-amber-200 px-1 rounded font-mono">./start.sh</code> (Linux/macOS) ou <code class="bg-amber-200 px-1 rounded font-mono">start.bat</code> (Windows).</p>
+        </div>
+        <button type="button" id="workerWarningClose" class="text-amber-950 hover:text-amber-700 flex-shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+    `;
+    document.body.appendChild(banner);
+    document.getElementById('workerWarningClose').addEventListener('click', () => banner.remove());
+}
+
 function onSwipeLeft() { handleReject(); }
 function onSwipeRight() { handleMarkAsRead(); }
 function onSwipeUp() { handleSkip(); }
@@ -696,3 +717,4 @@ window.onSwipeLeft = onSwipeLeft;
 window.onSwipeRight = onSwipeRight;
 window.onSwipeUp = onSwipeUp;
 window.showToast = showToast;
+window.showWorkerWarning = showWorkerWarning;
