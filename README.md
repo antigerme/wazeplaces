@@ -163,7 +163,7 @@ Browser (PWA)
   ↓ POST /api/validar-place.php (sessionToken, venueID, updateRequestID)
 PHP Backend (stateless por request)
   ↓ Lê sessão em /tmp/waze_places_sessions/sess_<hash>
-  ↓ Descriptografa cookies com chave em api/.encryption-key
+  ↓ Descriptografa cookies com chave em /tmp/waze_places.key
   ↓ Monta requisição cURL ao Waze (CSRF token + headers de origem)
 APIs internas do Waze
   - /Issues/Search/List      (buscar pedidos)
@@ -195,9 +195,9 @@ wazeplaces/
 │   ├── buscar-places.php    # Lista pedidos pendentes
 │   ├── marcar-lido.php      # Marca como lido (Issues/Read)
 │   └── validar-place.php    # Rejeita (Features endpoint, approve=false)
-├── .htaccess.todo       # Renomeie para .htaccess em produção Apache
-├── start.sh             # Wrapper (Linux/macOS): seta PHP_CLI_SERVER_WORKERS=4 e chama php -S
-├── start.bat            # Wrapper (Windows): mesma coisa
+├── .htaccess            # Config Apache (rewrite, headers, cache, compressão)
+├── start.sh             # Wrapper dev (Linux/macOS): PHP_CLI_SERVER_WORKERS=4 + php -S
+├── start.bat            # Wrapper dev (Windows): idem
 ├── README.md
 └── .gitignore
 ```
@@ -218,12 +218,12 @@ Configure pelo seletor na tela de login ou pelo modal de filtros (header).
 ### Segurança
 
 - **Cookies trafegam apenas no login.** O backend troca por um session token e os cookies originais ficam criptografados (AES-256-CBC) em `/tmp/waze_places_sessions/sess_<hash>` com permissão `0600`.
-- **Chave de encriptação** é gerada uma única vez em `api/.encryption-key` (`0600`, gitignored). Se perder, todas as sessões existentes ficam inválidas.
+- **Chave de encriptação** é gerada uma única vez em `/tmp/waze_places.key` (`0600`). No Apache do Red Hat, `/tmp` é isolado por `PrivateTmp=yes` (systemd), então só o próprio Apache lê/escreve. Se o Apache reinicia, chave nova e sessões antigas viram inválidas — comportamento aceitável dado o TTL de 2h.
 - **TTL de sessão:** 2 horas (`SESSION_TTL` em `api/config.php`). Cada uso renova o tempo (touch).
 - **Arquivos temporários** de cookies usados pelo cURL têm `0600` e são deletados imediatamente após cada chamada.
 - **Sessões expiradas** são limpas automaticamente em cada criação de sessão.
-- **CSP** definida em `index.html` (precisa `unsafe-eval` por causa do Tailwind via JS — remova ao pré-compilar).
-- Headers extras (X-Frame-Options, X-Content-Type-Options, Referrer-Policy) ficam no `.htaccess.todo` para Apache.
+- **CSP** definida em `index.html` e no `.htaccess` (precisa `unsafe-eval` por causa do Tailwind via JS — remova ao pré-compilar).
+- **Nada é escrito no DocumentRoot.** Apache só lê os arquivos do repo; tudo que precisa ser writable vai pro `/tmp`.
 
 ### O que NÃO está implementado (decisão consciente)
 
@@ -232,35 +232,44 @@ Configure pelo seletor na tela de login ou pelo modal de filtros (header).
 - Bloqueio por IP / WAF (fica no nível do servidor)
 - Tailwind pré-compilado (usa o bundle JS pesado por enquanto)
 
-### Deploy em produção
+### Deploy
 
-#### Apache
+#### Red Hat / RHEL / Rocky / Alma (Apache + PHP já instalados)
 
-1. Faça upload de todos os arquivos para o `DocumentRoot` (ex: `/var/www/html/waze-places/`)
-2. **Renomeie** `.htaccess.todo` para `.htaccess` (ativa headers de segurança, cache, compressão)
-3. Garanta que `api/` é gravável pelo usuário do Apache (criação de `.encryption-key`)
-4. Habilite `mod_rewrite` e `mod_headers`:
-   ```bash
-   sudo a2enmod rewrite headers expires deflate
-   sudo systemctl restart apache2
-   ```
-5. Configure HTTPS (necessário para PWA instalar):
-   ```bash
-   sudo certbot --apache -d waze-places.seudominio.com
-   ```
-
-#### Nginx
-
-Use uma config equivalente — o roteamento é simples (servir estáticos + passar `*.php` para PHP-FPM). Os headers de segurança devem ser replicados manualmente na config do servidor.
-
-#### Permissões
+Três comandos. Sem editar nada além do que é estritamente necessário:
 
 ```bash
-chown -R www-data:www-data /var/www/html/waze-places
-chmod 755 /var/www/html/waze-places
-chmod 755 /var/www/html/waze-places/api
-# .encryption-key será criado em 0600 pelo PHP na primeira execução
-# /tmp/waze_places_sessions/ é criado pelo PHP em 0700
+sudo git clone https://github.com/antigerme/wazeplaces.git /var/www/html/wazeplaces
+sudo restorecon -R /var/www/html/wazeplaces
+sudo setsebool -P httpd_can_network_connect 1
+```
+
+Acesse `http://servidor/wazeplaces/`. Pronto.
+
+**Por que cada comando:**
+- `restorecon` — aplica o contexto SELinux correto (`httpd_sys_content_t`) nos arquivos recém-clonados
+- `setsebool httpd_can_network_connect` — libera Apache pra fazer cURL pro `waze.com` (necessário; sem isso o backend retorna erro de conexão)
+
+**Não é necessário:**
+- Mexer em permissões — Apache só precisa **ler** os arquivos (escritas vão pro `/tmp` isolado por PrivateTmp do systemd)
+- Renomear `.htaccess` — já vem ativo no repo
+- Habilitar módulos Apache — `mod_rewrite`, `mod_headers`, `mod_deflate`, `mod_expires` já vêm habilitados no RHEL padrão
+- `AllowOverride All` — a app funciona com `AllowOverride None` (default RHEL); só perde otimizações de cache e headers extras do `.htaccess`
+
+**Atualizar depois:**
+```bash
+cd /var/www/html/wazeplaces && sudo git pull && sudo restorecon -R .
+```
+
+#### Outras distros / Nginx
+
+- Debian/Ubuntu: `chown -R www-data:www-data /var/www/html/wazeplaces` e pronto (sem SELinux)
+- Nginx: roteamento padrão (servir estáticos + `*.php` via PHP-FPM); replique os headers do `.htaccess` na config do server block
+
+#### HTTPS (recomendado para PWA instalar)
+
+```bash
+sudo certbot --apache -d seudominio.com
 ```
 
 ### Desenvolvendo

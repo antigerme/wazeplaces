@@ -21,7 +21,7 @@ define('USER_AGENT', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML,
 
 define('SESSION_DIR', sys_get_temp_dir() . '/waze_places_sessions');
 define('SESSION_TTL', 7200);
-define('SESSION_KEY_FILE', __DIR__ . '/.encryption-key');
+define('SESSION_KEY_FILE', sys_get_temp_dir() . '/waze_places.key');
 
 function wazeIssuesEndpoint($region) {
     $base = WAZE_REGIONS[$region] ?? WAZE_REGIONS['row'];
