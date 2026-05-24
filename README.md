@@ -64,32 +64,27 @@ Deve aparecer algo como `PHP 8.x.x`. **Precisa ser 7.4 ou maior.**
 
 #### Passo 3 — Rodar a aplicação
 
-Abra um terminal **dentro da pasta `wazeplaces`** (a que você baixou) e rode:
+Dentro da pasta `wazeplaces` (a que você baixou), rode o script de inicialização:
 
-**Linux / macOS:**
+**Linux / macOS** (no terminal):
 ```bash
-PHP_CLI_SERVER_WORKERS=4 php -S 0.0.0.0:8080
+./start.sh
 ```
 
-**Windows (cmd):**
+**Windows** — dê duplo clique em `start.bat`, ou rode no cmd/PowerShell:
 ```cmd
-set PHP_CLI_SERVER_WORKERS=4 && php -S 0.0.0.0:8080
+start.bat
 ```
-
-**Windows (PowerShell):**
-```powershell
-$env:PHP_CLI_SERVER_WORKERS=4; php -S 0.0.0.0:8080
-```
-
-> ⚠️ **Importante:** o `PHP_CLI_SERVER_WORKERS=4` faz o servidor atender 4 requisições ao mesmo tempo. **Sem isso**, o PHP atende uma de cada vez e a app fica travando entre cada ação (porque cada requisição ao Waze leva 1-2 segundos).
 
 Pronto! Abra o navegador (Chrome, Firefox, Edge…) e acesse:
 
 👉 **http://localhost:8080**
 
-> 💡 **Para parar o servidor:** aperte `Ctrl+C` no terminal.
+> 💡 **Para parar o servidor:** aperte `Ctrl+C` no terminal (ou feche a janela do `start.bat`).
 
 > 💡 **Para acessar do celular na mesma rede Wi-Fi:** descubra o IP do PC (`ipconfig` no Windows, `ifconfig` ou `ip addr` no Linux/Mac) e acesse `http://SEU-IP:8080` no celular. Ex: `http://192.168.0.10:8080`.
+
+> 💡 **No Linux/macOS, se der "permission denied"** ao rodar `./start.sh`, primeiro rode `chmod +x start.sh` uma vez.
 
 ### Como exportar seus cookies do Waze
 
@@ -145,6 +140,7 @@ Vai virar um ícone normal no seu celular, abrindo em tela cheia sem barra do na
 | **A app não atualiza para a versão nova** | No navegador: `Ctrl+Shift+R` (Windows/Linux) ou `Cmd+Shift+R` (Mac). No celular: feche e reabra o app |
 | **PHP não inicia** | Confirme que está dentro da pasta `wazeplaces` (`ls` ou `dir` deve mostrar `index.html`) |
 | **Erro "cURL not loaded"** | Instale a extensão cURL do PHP: `sudo apt install php-curl` (Linux) ou habilite no `php.ini` (Windows) |
+| **A app trava ao clicar várias vezes** | Use o script `start.sh` / `start.bat` em vez de rodar `php -S` direto (eles ligam o modo multi-tarefa do PHP) |
 
 ---
 
@@ -200,6 +196,8 @@ wazeplaces/
 │   ├── marcar-lido.php      # Marca como lido (Issues/Read)
 │   └── validar-place.php    # Rejeita (Features endpoint, approve=false)
 ├── .htaccess.todo       # Renomeie para .htaccess em produção Apache
+├── start.sh             # Wrapper (Linux/macOS): seta PHP_CLI_SERVER_WORKERS=4 e chama php -S
+├── start.bat            # Wrapper (Windows): mesma coisa
 ├── README.md
 └── .gitignore
 ```
@@ -267,7 +265,22 @@ chmod 755 /var/www/html/waze-places/api
 
 ### Desenvolvendo
 
-Hot reload básico (use `PHP_CLI_SERVER_WORKERS=4` para evitar bloqueio entre requests, já que cada chamada cURL ao Waze leva 1-2s):
+Os scripts `start.sh` e `start.bat` configuram `PHP_CLI_SERVER_WORKERS=4` por padrão e chamam `php -S 0.0.0.0:8080`. Esse flag é **essencial** — sem ele o servidor builtin do PHP atende uma request por vez, e cada cURL ao Waze leva 1-2s, bloqueando todas as outras requisições e fazendo a app parecer travada.
+
+Os scripts respeitam variáveis de ambiente caso você queira customizar:
+
+```bash
+PHP_CLI_SERVER_WORKERS=8 PORT=9000 HOST=127.0.0.1 ./start.sh
+```
+
+| Variável                  | Padrão      | O que faz                                                  |
+|---------------------------|-------------|------------------------------------------------------------|
+| `PHP_CLI_SERVER_WORKERS`  | `4`         | Workers paralelos do `php -S` (requer PHP 7.4+)            |
+| `PORT`                    | `8080`      | Porta de escuta                                            |
+| `HOST`                    | `0.0.0.0`   | Host bind (use `127.0.0.1` para restringir ao localhost)   |
+
+Se preferir rodar manualmente sem os scripts:
+
 ```bash
 PHP_CLI_SERVER_WORKERS=4 php -S 0.0.0.0:8080
 ```
