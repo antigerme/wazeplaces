@@ -1,20 +1,23 @@
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const THEME_KEY = 'waze_places_theme';
 const UNDO_WINDOW_MS = 3000;
 const MAX_CHANGES_DISPLAY = 4;
+const PREFETCH_THRESHOLD = 3;
+const MAX_EMPTY_PAGES = 5;
 
 const AppState = {
     authenticated: false,
     currentPlace: null,
-    places: [],
-    currentIndex: 0,
-    page: 1,
-    hasMore: false,
+    queue: [],
+    nextPage: 1,
+    hasMore: true,
+    emptyPagesInRow: 0,
+    fetching: false,
     stats: { read: 0, rejected: 0, skipped: 0 },
-    loading: false,
     pendingAction: null,
+    inFlightActions: 0,
     filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '' }
 };
 
@@ -32,22 +35,21 @@ function initApp() {
     loadFilters();
     applyTheme(localStorage.getItem(THEME_KEY) || 'light');
 
-    const savedToken = API.getSession();
     API.getRegion();
     API.getCountry();
-
-    if (savedToken) {
-        showMainScreen();
-        loadPlaces();
-    } else {
-        showAuthScreen();
-    }
 
     setupAuthListeners();
     setupAppListeners();
     setupModalListeners();
-
     if (window.initSwipe) window.initSwipe();
+
+    const savedToken = API.getSession();
+    if (savedToken) {
+        showMainScreen();
+        startFetching();
+    } else {
+        showAuthScreen();
+    }
 }
 
 function setupAuthListeners() {
@@ -81,8 +83,8 @@ function setupAppListeners() {
     $('cancelLogout').addEventListener('click', () => $('logoutModal').classList.add('hidden'));
 
     $('reloadBtn').addEventListener('click', () => {
-        AppState.page = 1;
-        loadPlaces();
+        resetQueue();
+        startFetching();
     });
     $('helpBtn').addEventListener('click', () => $('helpModal').classList.remove('hidden'));
     $('closeHelp').addEventListener('click', () => $('helpModal').classList.add('hidden'));
@@ -118,12 +120,12 @@ function applyFiltersFromModal() {
     API.setRegion($('filterRegion').value);
     saveFilters();
     $('filtersModal').classList.add('hidden');
-    AppState.page = 1;
-    loadPlaces();
+    resetQueue();
+    startFetching();
 }
 
 function handleKeyDown(e) {
-    if (!document.querySelector('.place-card') || AppState.loading) return;
+    if (!AppState.currentPlace) return;
     if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
 
     if (e.key === 'ArrowLeft') {
@@ -183,7 +185,8 @@ async function authenticateWithCookies(cookies) {
         const result = await API.testCookies(cookies);
         if (result.success) {
             showMainScreen();
-            await loadPlaces();
+            resetQueue();
+            startFetching();
             showToast('Autenticado com sucesso!', 'success');
         } else {
             showToast(result.error || 'Cookies inválidos', 'error');
@@ -196,67 +199,119 @@ async function authenticateWithCookies(cookies) {
 async function handleLogout() {
     document.getElementById('logoutModal').classList.add('hidden');
     await API.destroySession();
-    AppState.places = [];
-    AppState.currentIndex = 0;
-    AppState.page = 1;
+    resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+    AppState.pendingAction = null;
+    AppState.inFlightActions = 0;
+    removeUndoBanner();
+    updateInFlightIndicator();
     saveStats();
     updateStats();
     showAuthScreen();
+    removeCurrentCardEl();
     showToast('Sessão encerrada', 'info');
 }
 
-async function loadPlaces() {
-    if (AppState.loading) return;
+function resetQueue() {
+    AppState.queue = [];
+    AppState.nextPage = 1;
+    AppState.hasMore = true;
+    AppState.emptyPagesInRow = 0;
+    AppState.currentPlace = null;
+}
 
-    AppState.loading = true;
-    document.getElementById('loadingCard').classList.remove('hidden');
-    document.getElementById('noMoreCards').classList.add('hidden');
+function showLoading(visible) {
+    document.getElementById('loadingCard').classList.toggle('hidden', !visible);
+}
 
+async function fetchNextPage() {
+    if (AppState.fetching) return;
+    if (!AppState.hasMore) return;
+    if (!AppState.authenticated) return;
+
+    AppState.fetching = true;
     const filters = {};
     if (AppState.filters.types.length < 3) filters.types = AppState.filters.types;
     if (AppState.filters.residential === 'true') filters.residential = true;
     if (AppState.filters.residential === 'false') filters.residential = false;
 
     try {
-        const result = await API.fetchPlaces(AppState.page, filters);
-
-        if (result.success) {
-            AppState.places = result.places || [];
-            AppState.hasMore = result.hasMore || false;
-            AppState.currentIndex = 0;
-
-            if (AppState.places.length > 0) {
-                showCurrentPlace();
-            } else if (AppState.hasMore) {
-                AppState.page++;
-                AppState.loading = false;
-                return loadPlaces();
+        const result = await API.fetchPlaces(AppState.nextPage, filters);
+        if (!result.success) {
+            if (result.error && result.error.toLowerCase().includes('sess')) {
+                AppState.hasMore = false;
+                showAuthScreen();
             } else {
-                showNoPlaces();
+                showToast(result.error || 'Erro ao carregar places', 'error');
+                AppState.hasMore = false;
+            }
+            return;
+        }
+
+        AppState.hasMore = !!result.hasMore;
+        AppState.nextPage++;
+
+        const newPlaces = result.places || [];
+        if (newPlaces.length === 0) {
+            AppState.emptyPagesInRow++;
+            if (AppState.emptyPagesInRow >= MAX_EMPTY_PAGES) {
+                AppState.hasMore = false;
             }
         } else {
-            if (result.error && result.error.includes('Sessão')) {
-                showAuthScreen();
-            }
-            showToast(result.error || 'Erro ao carregar places', 'error');
-            showNoPlaces();
+            AppState.emptyPagesInRow = 0;
+            AppState.queue.push(...newPlaces);
         }
     } catch (error) {
+        console.error('fetchNextPage error', error);
         showToast('Erro ao carregar places', 'error');
-        showNoPlaces();
+        AppState.hasMore = false;
     } finally {
-        AppState.loading = false;
-        document.getElementById('loadingCard').classList.add('hidden');
+        AppState.fetching = false;
     }
 }
 
+async function startFetching() {
+    showLoading(true);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    removeCurrentCardEl();
+
+    while (AppState.queue.length === 0 && AppState.hasMore) {
+        await fetchNextPage();
+    }
+
+    showLoading(false);
+
+    if (AppState.queue.length > 0) {
+        showCurrentPlace();
+        maybePrefetch();
+    } else {
+        showNoPlaces();
+    }
+}
+
+function maybePrefetch() {
+    if (AppState.queue.length <= PREFETCH_THRESHOLD && AppState.hasMore && !AppState.fetching) {
+        fetchNextPage().then(() => {
+            if (!AppState.currentPlace && AppState.queue.length > 0) {
+                showCurrentPlace();
+            }
+        });
+    }
+}
+
+function removeCurrentCardEl() {
+    const cardStack = document.getElementById('cardStack');
+    const existingCard = cardStack.querySelector('.place-card');
+    if (existingCard) existingCard.remove();
+}
+
 function showCurrentPlace() {
-    const place = AppState.places[AppState.currentIndex];
+    const place = AppState.queue[0];
     if (!place) {
+        AppState.currentPlace = null;
         if (AppState.hasMore) {
-            AppState.page++;
-            loadPlaces();
+            showLoading(true);
+            startFetching();
         } else {
             showNoPlaces();
         }
@@ -310,11 +365,13 @@ function showCurrentPlace() {
             imgNav.classList.remove('hidden');
             imgPrev.addEventListener('click', (e) => {
                 e.stopPropagation();
+                e.preventDefault();
                 currentImgIdx = (currentImgIdx - 1 + urls.length) % urls.length;
                 updateImage();
             });
             imgNext.addEventListener('click', (e) => {
                 e.stopPropagation();
+                e.preventDefault();
                 currentImgIdx = (currentImgIdx + 1) % urls.length;
                 updateImage();
             });
@@ -345,32 +402,32 @@ function showCurrentPlace() {
 
     card.querySelector('.reject-btn').addEventListener('click', (e) => {
         e.stopPropagation();
+        e.preventDefault();
         if (window.triggerSwipe) window.triggerSwipe('left', handleReject);
         else handleReject();
     });
     card.querySelector('.approve-btn').addEventListener('click', (e) => {
         e.stopPropagation();
+        e.preventDefault();
         if (window.triggerSwipe) window.triggerSwipe('right', handleMarkAsRead);
         else handleMarkAsRead();
     });
     card.querySelector('.skip-btn').addEventListener('click', (e) => {
         e.stopPropagation();
+        e.preventDefault();
         if (window.triggerSwipe) window.triggerSwipe('up', handleSkip);
         else handleSkip();
     });
 
-    const cardStack = document.getElementById('cardStack');
-    const existingCard = cardStack.querySelector('.place-card');
-    if (existingCard) existingCard.remove();
-    cardStack.appendChild(card);
-
+    removeCurrentCardEl();
+    document.getElementById('cardStack').appendChild(card);
     document.getElementById('noMoreCards').classList.add('hidden');
 }
 
 function showNoPlaces() {
-    const cardStack = document.getElementById('cardStack');
-    const existingCard = cardStack.querySelector('.place-card');
-    if (existingCard) existingCard.remove();
+    AppState.currentPlace = null;
+    removeCurrentCardEl();
+    showLoading(false);
     document.getElementById('noMoreCards').classList.remove('hidden');
 }
 
@@ -390,7 +447,7 @@ function handleMarkAsRead() {
     AppState.stats.read++;
     updateStats();
     saveStats();
-    nextPlace();
+    advanceQueue();
     scheduleAction('read', place, async () => {
         const result = await API.markAsRead(place.venueID, place.updateRequestID);
         if (!result.success) {
@@ -408,7 +465,7 @@ function handleReject() {
     AppState.stats.rejected++;
     updateStats();
     saveStats();
-    nextPlace();
+    advanceQueue();
     scheduleAction('reject', place, async () => {
         const result = await API.rejectPlace(place.venueID, place.updateRequestID);
         if (!result.success) {
@@ -425,23 +482,50 @@ function handleSkip() {
     AppState.stats.skipped++;
     updateStats();
     saveStats();
-    nextPlace();
+    advanceQueue();
+}
+
+function advanceQueue() {
+    AppState.queue.shift();
+    AppState.currentPlace = null;
+
+    if (AppState.queue.length > 0) {
+        showCurrentPlace();
+        maybePrefetch();
+    } else if (AppState.hasMore) {
+        startFetching();
+    } else {
+        showNoPlaces();
+    }
 }
 
 function scheduleAction(type, place, executor) {
     if (AppState.pendingAction) {
         AppState.pendingAction.execute();
         AppState.pendingAction = null;
-        removeUndoBanner();
     }
+    removeUndoBanner();
 
     let executed = false;
+    const runExecutor = async () => {
+        AppState.inFlightActions++;
+        updateInFlightIndicator();
+        try {
+            await executor();
+        } catch (err) {
+            console.error('action error', err);
+        } finally {
+            AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
+            updateInFlightIndicator();
+        }
+    };
+
     const timerId = setTimeout(() => {
         if (!executed) {
             executed = true;
-            executor();
             AppState.pendingAction = null;
             removeUndoBanner();
+            runExecutor();
         }
     }, UNDO_WINDOW_MS);
 
@@ -452,7 +536,7 @@ function scheduleAction(type, place, executor) {
             if (!executed) {
                 executed = true;
                 clearTimeout(timerId);
-                executor();
+                runExecutor();
             }
         },
         undo: () => {
@@ -463,8 +547,7 @@ function scheduleAction(type, place, executor) {
                 if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
                 updateStats();
                 saveStats();
-                AppState.places.splice(AppState.currentIndex, 0, place);
-                AppState.currentPlace = place;
+                AppState.queue.unshift(place);
                 showCurrentPlace();
             }
         }
@@ -479,7 +562,7 @@ function showUndoBanner(message) {
     const banner = document.createElement('div');
     banner.className = 'undo-banner';
     banner.innerHTML = `
-        <span>${message}</span>
+        <span>${escapeHtml(message)}</span>
         <button type="button" id="undoBtn">Desfazer</button>
     `;
     container.appendChild(banner);
@@ -494,19 +577,28 @@ function showUndoBanner(message) {
 
 function removeUndoBanner() {
     const container = document.getElementById('undoContainer');
-    container.innerHTML = '';
+    if (container) container.innerHTML = '';
 }
 
-function nextPlace() {
-    AppState.currentIndex++;
-    if (AppState.currentIndex < AppState.places.length) {
-        showCurrentPlace();
-    } else if (AppState.hasMore) {
-        AppState.page++;
-        loadPlaces();
-    } else {
-        showNoPlaces();
+function updateInFlightIndicator() {
+    let el = document.getElementById('inFlightIndicator');
+    if (AppState.inFlightActions <= 0) {
+        if (el) el.remove();
+        return;
     }
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'inFlightIndicator';
+        el.className = 'fixed top-20 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg z-40 flex items-center gap-2';
+        document.body.appendChild(el);
+    }
+    el.innerHTML = `
+        <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+        </svg>
+        <span>Enviando ${AppState.inFlightActions}…</span>
+    `;
 }
 
 function updateStats() {

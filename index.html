@@ -428,8 +428,10 @@
     <script>
         if ('serviceWorker' in navigator) {
             let refreshing = false;
+            const hadController = !!navigator.serviceWorker.controller;
             navigator.serviceWorker.addEventListener('controllerchange', () => {
                 if (refreshing) return;
+                if (!hadController) return;
                 refreshing = true;
                 window.location.reload();
             });

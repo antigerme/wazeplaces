@@ -66,9 +66,22 @@ Deve aparecer algo como `PHP 8.x.x`. **Precisa ser 7.4 ou maior.**
 
 Abra um terminal **dentro da pasta `wazeplaces`** (a que você baixou) e rode:
 
+**Linux / macOS:**
 ```bash
-php -S 0.0.0.0:8080
+PHP_CLI_SERVER_WORKERS=4 php -S 0.0.0.0:8080
 ```
+
+**Windows (cmd):**
+```cmd
+set PHP_CLI_SERVER_WORKERS=4 && php -S 0.0.0.0:8080
+```
+
+**Windows (PowerShell):**
+```powershell
+$env:PHP_CLI_SERVER_WORKERS=4; php -S 0.0.0.0:8080
+```
+
+> ⚠️ **Importante:** o `PHP_CLI_SERVER_WORKERS=4` faz o servidor atender 4 requisições ao mesmo tempo. **Sem isso**, o PHP atende uma de cada vez e a app fica travando entre cada ação (porque cada requisição ao Waze leva 1-2 segundos).
 
 Pronto! Abra o navegador (Chrome, Firefox, Edge…) e acesse:
 
@@ -254,9 +267,9 @@ chmod 755 /var/www/html/waze-places/api
 
 ### Desenvolvendo
 
-Hot reload básico:
+Hot reload básico (use `PHP_CLI_SERVER_WORKERS=4` para evitar bloqueio entre requests, já que cada chamada cURL ao Waze leva 1-2s):
 ```bash
-php -S 0.0.0.0:8080
+PHP_CLI_SERVER_WORKERS=4 php -S 0.0.0.0:8080
 ```
 
 Validação rápida de sintaxe antes de commitar:
