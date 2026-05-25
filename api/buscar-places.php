@@ -11,6 +11,9 @@ $region = requireRegion($data);
 
 $page = isset($data['page']) ? max(1, (int)$data['page']) : 1;
 $countryId = isset($data['countryId']) ? (int)$data['countryId'] : 30;
+$stateId = isset($data['stateId']) && $data['stateId'] !== '' ? (int)$data['stateId'] : null;
+$managedAreaId = isset($data['managedAreaId']) && $data['managedAreaId'] !== '' ? (int)$data['managedAreaId'] : null;
+$bbox = isset($data['bbox']) && is_array($data['bbox']) && count($data['bbox']) === 4 ? $data['bbox'] : null;
 
 $filterTypes = isset($data['types']) && is_array($data['types']) && count($data['types']) > 0
     ? $data['types'] : null;
@@ -36,11 +39,12 @@ try {
         'fromUpdateTime' => null,
         'toCreationTime' => null,
         'toUpdateTime' => null,
-        'bbox' => null,
+        'bbox' => $bbox,
         'cityId' => null,
-        'countryId' => $countryId,
-        'managedAreaId' => null,
-        'stateId' => null,
+        'countryId' => $bbox ? null : $countryId,
+        'managedAreaId' => $managedAreaId,
+        'managedAreaIds' => null,
+        'stateId' => $stateId,
         'userPropertiesFilter' => [
             'isRead' => false
         ],
@@ -49,7 +53,8 @@ try {
             'lockRanks' => [0, 1, 2, 3, 4, 5],
             'page' => $page,
             'residential' => $residential,
-            'types' => $filterTypes
+            'types' => $filterTypes,
+            'orderBy' => 'SORTING_UPDATE_TIME_DESC'
         ]
     ];
 
@@ -90,6 +95,17 @@ try {
     if (isset($responseData['states']['objects'])) {
         foreach ($responseData['states']['objects'] as $st) {
             $statesDict[$st['id']] = $st['name'];
+        }
+    }
+
+    $categoryBrands = $responseData['venues']['categoryBrands'] ?? [];
+    $brandLookup = [];
+    foreach ($categoryBrands as $cat => $brands) {
+        foreach ($brands as $b) {
+            $brandKey = mb_strtolower(trim($b));
+            if ($brandKey !== '') {
+                $brandLookup[$brandKey] = true;
+            }
         }
     }
 
@@ -161,6 +177,15 @@ try {
                 }
             }
 
+            $brand = $venue['brand'] ?? null;
+            if (isset($updateRequest['changedVenue']['brand'])) {
+                $brand = $updateRequest['changedVenue']['brand'];
+            }
+            $brandKnown = null;
+            if ($brand !== null && trim($brand) !== '') {
+                $brandKnown = isset($brandLookup[mb_strtolower(trim($brand))]);
+            }
+
             $place = [
                 'venueID' => $venue['id'],
                 'updateRequestID' => $updateRequest['id'],
@@ -174,6 +199,8 @@ try {
                 'imageUrl' => null,
                 'imageUrls' => [],
                 'changes' => $changes,
+                'brand' => $brand,
+                'brandKnown' => $brandKnown,
                 'lat' => null,
                 'lon' => null
             ];

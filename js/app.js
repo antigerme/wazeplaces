@@ -1,4 +1,4 @@
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const THEME_KEY = 'waze_places_theme';
@@ -18,7 +18,10 @@ const AppState = {
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
-    filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '' }
+    filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false },
+    profile: null,
+    countries: [],
+    statesByCountry: {}
 };
 
 window.AppState = AppState;
@@ -46,6 +49,7 @@ function initApp() {
     const savedToken = API.getSession();
     if (savedToken) {
         showMainScreen();
+        loadProfileAndAuxData();
         startFetching();
     } else {
         showAuthScreen();
@@ -68,11 +72,8 @@ function setupAuthListeners() {
     });
 
     const regionSelect = $('regionSelect');
-    const countryInput = $('countryInput');
     regionSelect.value = API.getRegion();
-    countryInput.value = API.getCountry();
     regionSelect.addEventListener('change', () => API.setRegion(regionSelect.value));
-    countryInput.addEventListener('change', () => API.setCountry(countryInput.value));
 }
 
 function setupAppListeners() {
@@ -90,6 +91,8 @@ function setupAppListeners() {
     $('closeHelp').addEventListener('click', () => $('helpModal').classList.add('hidden'));
     $('themeBtn').addEventListener('click', toggleTheme);
     $('filtersBtn').addEventListener('click', openFiltersModal);
+    $('notificationsBtn').addEventListener('click', openNotificationsModal);
+    $('closeNotifications').addEventListener('click', () => $('notificationsModal').classList.add('hidden'));
 
     window.addEventListener('keydown', handleKeyDown);
 }
@@ -99,16 +102,101 @@ function setupModalListeners() {
     $('closeFilters').addEventListener('click', () => $('filtersModal').classList.add('hidden'));
     $('cancelFilters').addEventListener('click', () => $('filtersModal').classList.add('hidden'));
     $('applyFilters').addEventListener('click', applyFiltersFromModal);
+    $('filterCountry').addEventListener('change', (e) => {
+        loadStatesIntoSelect(parseInt(e.target.value, 10));
+    });
+    $('filterMyArea').addEventListener('change', (e) => {
+        const checked = e.target.checked;
+        $('filterCountry').disabled = checked;
+        $('filterState').disabled = checked;
+        $('filterManagedArea').disabled = checked;
+    });
 }
 
-function openFiltersModal() {
+function populateCountrySelect() {
+    const select = document.getElementById('filterCountry');
+    const hint = document.getElementById('filterCountryHint');
+    const editable = (AppState.profile && AppState.profile.editableCountryIDs) || [];
+    let countries = AppState.countries;
+
+    if (editable.length > 0) {
+        const filtered = countries.filter(c => editable.includes(c.id));
+        if (filtered.length > 0) {
+            countries = filtered;
+            hint.classList.remove('hidden');
+        }
+    }
+
+    select.innerHTML = countries.map(c =>
+        `<option value="${c.id}">${escapeHtml(c.name)}</option>`
+    ).join('');
+
+    const current = API.getCountry();
+    if (countries.some(c => c.id === current)) {
+        select.value = current;
+    } else if (countries.length > 0) {
+        select.value = countries[0].id;
+        API.setCountry(countries[0].id);
+    }
+}
+
+async function loadStatesIntoSelect(countryId) {
+    const select = document.getElementById('filterState');
+    select.innerHTML = '<option value="">Todos os estados</option>';
+    if (!countryId) return;
+
+    let states = AppState.statesByCountry[countryId];
+    if (!states) {
+        const result = await API.listStates(countryId);
+        if (result.success) {
+            states = result.states || [];
+            AppState.statesByCountry[countryId] = states;
+        } else {
+            return;
+        }
+    }
+
+    for (const s of states) {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name;
+        select.appendChild(opt);
+    }
+    if (AppState.filters.stateId) {
+        select.value = AppState.filters.stateId;
+    }
+}
+
+function populateManagedAreaSelect() {
+    const select = document.getElementById('filterManagedArea');
+    const areas = (AppState.profile && AppState.profile.managedAreas) || [];
+    select.innerHTML = '<option value="">Nenhuma</option>' +
+        areas.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+    if (AppState.filters.managedAreaId) select.value = AppState.filters.managedAreaId;
+}
+
+async function openFiltersModal() {
     const $ = id => document.getElementById(id);
     document.querySelectorAll('.filter-type').forEach(cb => {
         cb.checked = AppState.filters.types.includes(cb.value);
     });
     $('filterResidential').value = AppState.filters.residential;
-    $('filterCountry').value = API.getCountry();
     $('filterRegion').value = API.getRegion();
+
+    if (AppState.countries.length === 0) {
+        const r = await API.listCountries();
+        if (r.success) AppState.countries = r.countries;
+    }
+    populateCountrySelect();
+    populateManagedAreaSelect();
+    await loadStatesIntoSelect(API.getCountry());
+
+    $('filterMyArea').checked = AppState.filters.myArea;
+    const disabled = AppState.filters.myArea;
+    $('filterCountry').disabled = disabled;
+    $('filterState').disabled = disabled;
+    $('filterManagedArea').disabled = disabled;
+
     $('filtersModal').classList.remove('hidden');
 }
 
@@ -116,6 +204,9 @@ function applyFiltersFromModal() {
     const $ = id => document.getElementById(id);
     AppState.filters.types = Array.from(document.querySelectorAll('.filter-type:checked')).map(cb => cb.value);
     AppState.filters.residential = $('filterResidential').value;
+    AppState.filters.stateId = $('filterState').value;
+    AppState.filters.managedAreaId = $('filterManagedArea').value;
+    AppState.filters.myArea = $('filterMyArea').checked;
     API.setCountry($('filterCountry').value);
     API.setRegion($('filterRegion').value);
     saveFilters();
@@ -147,7 +238,10 @@ function showAuthScreen() {
     document.getElementById('authScreen').classList.remove('hidden');
     document.getElementById('appScreen').classList.add('hidden');
     document.getElementById('filtersBtn').classList.add('hidden');
+    document.getElementById('notificationsBtn').classList.add('hidden');
+    document.getElementById('userProfileBadge').classList.add('hidden');
     AppState.authenticated = false;
+    AppState.profile = null;
 }
 
 function showMainScreen() {
@@ -186,6 +280,7 @@ async function authenticateWithCookies(cookies) {
         if (result.success) {
             showMainScreen();
             resetQueue();
+            loadProfileAndAuxData();
             startFetching();
             showToast('Autenticado com sucesso!', 'success');
         } else {
@@ -194,6 +289,86 @@ async function authenticateWithCookies(cookies) {
     } catch (error) {
         showToast('Erro ao validar cookies', 'error');
     }
+}
+
+async function loadProfileAndAuxData() {
+    const [profileRes, countriesRes, notifsRes] = await Promise.all([
+        API.getProfile(),
+        API.listCountries(),
+        API.getNotifications()
+    ]);
+    if (profileRes.success) {
+        AppState.profile = profileRes.profile;
+        renderProfileHeader();
+    }
+    if (countriesRes.success) {
+        AppState.countries = countriesRes.countries;
+    }
+    if (notifsRes.success) {
+        renderNotificationsBadge(notifsRes.count, notifsRes.notifications);
+    }
+}
+
+function renderProfileHeader() {
+    const p = AppState.profile;
+    if (!p) return;
+    const badge = document.getElementById('userProfileBadge');
+    const avatar = document.getElementById('userAvatar');
+    const nameEl = document.getElementById('userName');
+    const rankEl = document.getElementById('userRank');
+    if (p.profileImageUrl) {
+        avatar.src = p.profileImageUrl;
+    } else {
+        avatar.style.display = 'none';
+    }
+    nameEl.textContent = p.userName || '';
+    const tags = [];
+    if (p.rank !== null && p.rank !== undefined) tags.push('L' + p.rank);
+    if (p.isStaff) tags.push('Staff');
+    else if (p.isAreaManager) tags.push('AM');
+    rankEl.textContent = tags.join(' · ');
+    badge.classList.remove('hidden');
+}
+
+function renderNotificationsBadge(count, list) {
+    const btn = document.getElementById('notificationsBtn');
+    const badge = document.getElementById('notificationsBadge');
+    btn.classList.remove('hidden');
+    if (count > 0) {
+        badge.textContent = count > 9 ? '9+' : String(count);
+        badge.classList.remove('hidden');
+    } else {
+        badge.classList.add('hidden');
+    }
+    AppState._notifications = list || [];
+}
+
+async function openNotificationsModal() {
+    const modal = document.getElementById('notificationsModal');
+    const listEl = document.getElementById('notificationsList');
+    modal.classList.remove('hidden');
+    listEl.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">Carregando…</p>';
+    const r = await API.getNotifications();
+    if (!r.success) {
+        listEl.innerHTML = `<p class="text-sm text-rose-500 text-center py-8">${escapeHtml(r.error || 'Erro')}</p>`;
+        return;
+    }
+    renderNotificationsBadge(r.count, r.notifications);
+    if (!r.notifications || r.notifications.length === 0) {
+        listEl.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">Sem notificações.</p>';
+        return;
+    }
+    listEl.innerHTML = r.notifications.map(n => {
+        const when = n.timestamp ? new Date(n.timestamp).toLocaleString('pt-BR') : '';
+        const msg = n.shortMessage || n.message || n.title || n.type || '';
+        const who = n.username ? `<span class="text-cyan-700 font-medium">@${escapeHtml(n.username)}</span> ` : '';
+        return `
+            <div class="bg-slate-50 border border-slate-100 rounded-xl p-3">
+                <p class="text-xs text-slate-400 mb-1">${escapeHtml(when)} · ${escapeHtml(n.type || '')}</p>
+                <p class="text-sm text-slate-700">${who}${escapeHtml(msg)}</p>
+            </div>
+        `;
+    }).join('');
 }
 
 async function handleLogout() {
@@ -234,6 +409,13 @@ async function fetchNextPage() {
     if (AppState.filters.types.length < 3) filters.types = AppState.filters.types;
     if (AppState.filters.residential === 'true') filters.residential = true;
     if (AppState.filters.residential === 'false') filters.residential = false;
+    if (AppState.filters.myArea && AppState.profile && AppState.profile.areas) {
+        const driveArea = AppState.profile.areas.find(a => a.type === 'drive' && a.bbox);
+        if (driveArea) filters.bbox = driveArea.bbox;
+    } else {
+        if (AppState.filters.stateId) filters.stateId = AppState.filters.stateId;
+        if (AppState.filters.managedAreaId) filters.managedAreaId = AppState.filters.managedAreaId;
+    }
 
     try {
         const result = await API.fetchPlaces(AppState.nextPage, filters);
@@ -379,6 +561,17 @@ function showCurrentPlace() {
     } else {
         gallery.classList.add('hidden');
         noImg.classList.remove('hidden');
+    }
+
+    const brandRow = card.querySelector('.card-brand-row');
+    if (place.brand && place.brand.trim() !== '') {
+        card.querySelector('.card-brand').textContent = place.brand;
+        if (place.brandKnown === true) {
+            card.querySelector('.card-brand-known').classList.remove('hidden');
+        } else if (place.brandKnown === false) {
+            card.querySelector('.card-brand-unknown').classList.remove('hidden');
+        }
+        brandRow.classList.remove('hidden');
     }
 
     const changesBox = card.querySelector('.card-changes');
@@ -641,6 +834,9 @@ function loadFilters() {
             const parsed = JSON.parse(raw);
             AppState.filters.types = parsed.types || ['VENUE', 'IMAGE', 'REQUEST'];
             AppState.filters.residential = parsed.residential || '';
+            AppState.filters.stateId = parsed.stateId || '';
+            AppState.filters.managedAreaId = parsed.managedAreaId || '';
+            AppState.filters.myArea = !!parsed.myArea;
         }
     } catch (e) {}
 }

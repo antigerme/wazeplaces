@@ -112,6 +112,18 @@ const API = {
         });
     },
 
+    async markAsReadBatch(items) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: 'Sessão expirada' };
+        }
+        return this._post('marcar-lido.php', {
+            sessionToken,
+            region: this.getRegion(),
+            items
+        });
+    },
+
     async rejectPlace(venueID, updateRequestID) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
@@ -122,6 +134,51 @@ const API = {
             region: this.getRegion(),
             venueID,
             updateRequestID
+        });
+    },
+
+    async getProfile() {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: 'Sessão expirada' };
+        }
+        return this._post('perfil.php', {
+            sessionToken,
+            region: this.getRegion()
+        });
+    },
+
+    async listCountries() {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: 'Sessão expirada' };
+        }
+        return this._post('lista-paises.php', {
+            sessionToken,
+            region: this.getRegion()
+        });
+    },
+
+    async listStates(countryId) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: 'Sessão expirada' };
+        }
+        return this._post('lista-estados.php', {
+            sessionToken,
+            region: this.getRegion(),
+            countryId: parseInt(countryId, 10)
+        });
+    },
+
+    async getNotifications() {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: 'Sessão expirada' };
+        }
+        return this._post('notificacoes.php', {
+            sessionToken,
+            region: this.getRegion()
         });
     },
 
