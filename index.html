@@ -244,19 +244,23 @@
 
         <div id="appScreen" class="hidden space-y-6">
 
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-5">
-                <div class="flex justify-around text-center divide-x divide-slate-100">
-                    <div class="flex-1">
-                        <p class="text-3xl font-black text-emerald-500 tracking-tight" id="readCount">0</p>
-                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mt-1">Lidos</p>
+            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-4">
+                <div class="grid grid-cols-4 text-center divide-x divide-slate-100">
+                    <div>
+                        <p class="text-2xl font-black text-emerald-500 tracking-tight" id="readCount">0</p>
+                        <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wider mt-1">Lidos</p>
                     </div>
-                    <div class="flex-1">
-                        <p class="text-3xl font-black text-rose-500 tracking-tight" id="rejectedCount">0</p>
-                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mt-1">Rejeitados</p>
+                    <div>
+                        <p class="text-2xl font-black text-rose-500 tracking-tight" id="rejectedCount">0</p>
+                        <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wider mt-1">Rejeitados</p>
                     </div>
-                    <div class="flex-1">
-                        <p class="text-3xl font-black text-amber-500 tracking-tight" id="skippedCount">0</p>
-                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mt-1">Pulados</p>
+                    <div>
+                        <p class="text-2xl font-black text-amber-500 tracking-tight" id="skippedCount">0</p>
+                        <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wider mt-1">Pulados</p>
+                    </div>
+                    <div>
+                        <p class="text-2xl font-black text-cyan-600 tracking-tight" id="pendingCount" title="Restam na fila (carregados localmente). Sinal + significa que há mais páginas a buscar">—</p>
+                        <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wider mt-1">Restam</p>
                     </div>
                 </div>
             </div>

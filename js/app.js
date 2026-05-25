@@ -1,4 +1,4 @@
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.0';
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const THEME_KEY = 'waze_places_theme';
@@ -369,6 +369,7 @@ function resetQueue() {
     AppState.hasMore = true;
     AppState.emptyPagesInRow = 0;
     AppState.currentPlace = null;
+    updatePendingCount();
 }
 
 function showLoading(visible) {
@@ -427,6 +428,7 @@ async function fetchNextPage() {
         AppState.hasMore = false;
     } finally {
         AppState.fetching = false;
+        updatePendingCount();
     }
 }
 
@@ -434,6 +436,7 @@ async function startFetching() {
     showLoading(true);
     document.getElementById('noMoreCards').classList.add('hidden');
     removeCurrentCardEl();
+    updatePendingCount();
 
     while (AppState.queue.length === 0 && AppState.hasMore) {
         await fetchNextPage();
@@ -680,6 +683,7 @@ function handleSkip() {
 function advanceQueue() {
     AppState.queue.shift();
     AppState.currentPlace = null;
+    updatePendingCount();
 
     if (AppState.queue.length > 0) {
         showCurrentPlace();
@@ -758,6 +762,7 @@ function scheduleAction(type, place, executor) {
                 updateStats();
                 saveStats();
                 AppState.queue.unshift(place);
+                updatePendingCount();
                 showCurrentPlace();
             }
         }
@@ -815,6 +820,22 @@ function updateStats() {
     document.getElementById('readCount').textContent = AppState.stats.read;
     document.getElementById('rejectedCount').textContent = AppState.stats.rejected;
     document.getElementById('skippedCount').textContent = AppState.stats.skipped;
+    updatePendingCount();
+}
+
+function updatePendingCount() {
+    const el = document.getElementById('pendingCount');
+    if (!el) return;
+    if (!AppState.authenticated) {
+        el.textContent = '—';
+        return;
+    }
+    if (AppState.fetching && AppState.queue.length === 0) {
+        el.textContent = '…';
+        return;
+    }
+    const n = AppState.queue.length;
+    el.textContent = AppState.hasMore ? (n + '+') : String(n);
 }
 
 function saveStats() {

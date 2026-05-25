@@ -144,6 +144,10 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 - **Filtros 📂** para país/estado/área/tipo de pedido (e checkbox "Apenas pedidos não lidos", ligado por padrão — desmarque se quiser revisar pedidos já marcados como lidos)
 - **Tema 🌙** alterna entre claro e escuro
 
+**Caixa de estatísticas:**
+- **Lidos** · **Rejeitados** · **Pulados** · **Restam**
+- "Restam" mostra quantos pedidos ainda estão na fila carregada. Se aparecer com sinal `+` (ex: `215+`), significa que ainda há mais páginas a buscar conforme você for processando.
+
 ### Instalar como app no celular
 
 Depois de abrir a app no celular:
