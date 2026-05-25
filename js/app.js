@@ -1,4 +1,6 @@
-const APP_VERSION = '2.4.1';
+const APP_VERSION = '2.5.0';
+const TRANSIENT_RETRY_ATTEMPTS = 2;
+const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const THEME_KEY = 'waze_places_theme';
@@ -639,6 +641,46 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
+async function callWithRetry(fn) {
+    let result = await fn();
+    let attempt = 0;
+    while (result && !result.success && result.errorCategory === 'transient' && attempt < TRANSIENT_RETRY_ATTEMPTS) {
+        const delay = TRANSIENT_RETRY_DELAYS_MS[attempt] || 5000;
+        await new Promise(r => setTimeout(r, delay));
+        attempt++;
+        result = await fn();
+    }
+    return result;
+}
+
+function handleActionResult(actionType, place, result) {
+    if (!result) return;
+    if (result.success) return;
+
+    const cat = result.errorCategory || 'unknown';
+
+    if (cat === 'already_processed' || cat === 'not_found') {
+        showToast('Já tratado por outro editor 👍', 'info');
+        return;
+    }
+
+    if (cat === 'unauthorized') {
+        showToast('Sessão expirou — faça login novamente', 'error');
+        API.setSession(null);
+        AppState.profile = null;
+        setTimeout(() => showAuthScreen(), 800);
+        return;
+    }
+
+    const statKey = actionType === 'read' ? 'read' : 'rejected';
+    AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
+    AppState.serverTotal++;
+    updateStats();
+    saveStats();
+    const verb = actionType === 'read' ? 'marcar como lido' : 'rejeitar place';
+    showToast((result.error || `Erro ao ${verb}`) + ' (não contabilizado)', 'error');
+}
+
 function handleMarkAsRead() {
     if (!AppState.currentPlace) return;
     const place = AppState.currentPlace;
@@ -648,14 +690,8 @@ function handleMarkAsRead() {
     saveStats();
     advanceQueue();
     scheduleAction('read', place, async () => {
-        const result = await API.markAsRead(place.venueID, place.updateRequestID);
-        if (!result.success) {
-            AppState.stats.read = Math.max(0, AppState.stats.read - 1);
-            AppState.serverTotal++;
-            updateStats();
-            saveStats();
-            showToast(result.error || 'Erro ao marcar como lido', 'error');
-        }
+        const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID));
+        handleActionResult('read', place, result);
     });
 }
 
@@ -668,14 +704,8 @@ function handleReject() {
     saveStats();
     advanceQueue();
     scheduleAction('reject', place, async () => {
-        const result = await API.rejectPlace(place.venueID, place.updateRequestID);
-        if (!result.success) {
-            AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
-            AppState.serverTotal++;
-            updateStats();
-            saveStats();
-            showToast(result.error || 'Erro ao rejeitar place', 'error');
-        }
+        const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID));
+        handleActionResult('reject', place, result);
     });
 }
 

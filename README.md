@@ -243,6 +243,22 @@ A app suporta as URLs base do Waze:
 
 Configure pelo seletor na tela de login ou pelo modal de filtros (header).
 
+### Resiliência a race conditions entre editores
+
+Vários editores tratam o mesmo place ao mesmo tempo. A app trata o cenário "outro editor chegou primeiro" sem quebrar o fluxo nem zerar stats injustamente.
+
+O backend (`validar-place.php`, `marcar-lido.php`) categoriza o erro do Waze via `categorizeWazeError($httpCode, $body, $curlError)` em `config.php` e devolve `errorCategory` no JSON:
+
+| Categoria | Quando | Frontend (`handleActionResult`) |
+|---|---|---|
+| `already_processed` | HTTP 409, ou 400/422/200 com palavras como "already", "duplicate", "no longer", "has been resolved" | Toast info "Já tratado por outro editor 👍", **mantém** stats (objetivo do user foi cumprido) |
+| `not_found` | HTTP 404 | Idem `already_processed` |
+| `unauthorized` | HTTP 401/403 | Toast de erro, invalida sessão local, volta pra tela de login |
+| `transient` | HTTP 5xx, 408, 429, 0, ou erro de cURL | `callWithRetry` tenta de novo 2x com backoff (1.5s, 3.5s) antes de aceitar falha |
+| `unknown` | Outros | Reverte stat (`stats.read--`/`stats.rejected--` + `serverTotal++`), toast de erro |
+
+A heurística de palavras-chave do `already_processed` é conservadora — se algum caso de race escapar pra `unknown` em produção, basta refinar a lista em `categorizeWazeError`.
+
 ### Segurança
 
 - **Cookies trafegam apenas no login.** O backend troca por um session token e os cookies originais ficam criptografados (AES-256-CBC) em `/tmp/waze_places_sessions/sess_<hash>` com permissão `0600`.

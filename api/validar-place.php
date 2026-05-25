@@ -55,23 +55,28 @@ try {
     $result = makeCurlRequest(wazeFeaturesEndpoint($region), $tempFile, $csrfToken, $payload, $region);
     deleteTempCookieFile($tempFile);
 
-    if ($result['httpCode'] !== 200) {
-        jsonError("Erro ao rejeitar place (HTTP {$result['httpCode']})", 500);
-    }
+    $cat = categorizeWazeError($result['httpCode'], $result['response'], $result['error']);
 
-    $responseData = json_decode($result['response'], true);
-
-    if (json_last_error() !== JSON_ERROR_NONE && !empty($result['response'])) {
-        jsonError('Resposta inválida da API do Waze', 500);
+    if ($result['httpCode'] === 200 && $cat['category'] !== 'already_processed') {
+        jsonResponse([
+            'success' => true,
+            'message' => 'Place rejeitado com sucesso',
+            'action' => 'rejected'
+        ]);
     }
 
     jsonResponse([
-        'success' => true,
-        'message' => 'Place rejeitado com sucesso',
-        'action' => 'rejected'
-    ]);
+        'success' => false,
+        'error' => $cat['message'],
+        'errorCategory' => $cat['category'],
+        'httpCode' => $result['httpCode']
+    ], $cat['category'] === 'already_processed' || $cat['category'] === 'not_found' ? 200 : 500);
 
 } catch (Exception $e) {
     deleteTempCookieFile($tempFile);
-    jsonError('Erro ao rejeitar place: ' . $e->getMessage(), 500);
+    jsonResponse([
+        'success' => false,
+        'error' => 'Erro ao rejeitar place: ' . $e->getMessage(),
+        'errorCategory' => 'unknown'
+    ], 500);
 }
