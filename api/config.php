@@ -264,42 +264,57 @@ function makeCurlRequest($url, $cookieFile, $csrfToken, $postData = null, $regio
  *   - unauthorized: cookies/sessão do Waze rejeitados
  *   - transient: erro temporário (5xx, timeout, rede) — vale retry
  *   - unknown: caso desconhecido — UI deve mostrar erro genérico
+ *
+ * Códigos do Waze observados em race conditions:
+ *   - Features (rejeitar) → HTTP 404 + errorList.code=702 + "was not found"
+ *   - Issues/Read (marcar lido) → HTTP 500 + errorList.code=300 + "Failed to handle request"
  */
 function categorizeWazeError($httpCode, $responseBody, $curlError = '') {
-    $bodyLower = strtolower((string)$responseBody);
-    $hasAlreadyProcessed = strpos($bodyLower, 'already') !== false
-        || strpos($bodyLower, 'duplicate') !== false
-        || strpos($bodyLower, 'updated by another') !== false
-        || strpos($bodyLower, 'processed') !== false
-        || strpos($bodyLower, 'has been resolved') !== false
-        || strpos($bodyLower, 'no longer') !== false;
-
     if (!empty($curlError)) {
         return ['category' => 'transient', 'message' => 'Erro de conexão: ' . $curlError];
-    }
-
-    if ($httpCode >= 500 || $httpCode === 408 || $httpCode === 429 || $httpCode === 0) {
-        return ['category' => 'transient', 'message' => "Servidor Waze indisponível (HTTP {$httpCode})"];
     }
 
     if ($httpCode === 401 || $httpCode === 403) {
         return ['category' => 'unauthorized', 'message' => 'Cookies expirados ou inválidos'];
     }
 
-    if ($httpCode === 404) {
-        return ['category' => 'not_found', 'message' => 'Place não existe mais (possivelmente já tratado)'];
+    $errorCode = null;
+    $errorDetails = '';
+    $parsed = json_decode((string)$responseBody, true);
+    if (is_array($parsed) && isset($parsed['errorList'][0])) {
+        $errorCode = $parsed['errorList'][0]['code'] ?? null;
+        $errorDetails = strtolower((string)($parsed['errorList'][0]['details'] ?? ''));
+    }
+    $bodyLower = strtolower((string)$responseBody);
+
+    if ($errorCode === 702 || strpos($errorDetails, 'was not found') !== false) {
+        return ['category' => 'already_processed', 'message' => 'Já tratado por outro editor'];
+    }
+
+    if ($errorCode === 300 && strpos($errorDetails, 'failed to handle') !== false) {
+        return ['category' => 'already_processed', 'message' => 'Já tratado ou modificado por outro editor'];
     }
 
     if ($httpCode === 409) {
         return ['category' => 'already_processed', 'message' => 'Já tratado por outro editor'];
     }
 
-    if (($httpCode === 400 || $httpCode === 422) && $hasAlreadyProcessed) {
+    if ($httpCode === 404) {
+        return ['category' => 'not_found', 'message' => 'Place não existe mais (possivelmente já tratado)'];
+    }
+
+    $hasAlreadyHint = strpos($bodyLower, 'already') !== false
+        || strpos($bodyLower, 'duplicate') !== false
+        || strpos($bodyLower, 'updated by another') !== false
+        || strpos($bodyLower, 'no longer') !== false
+        || strpos($bodyLower, 'has been resolved') !== false;
+
+    if (($httpCode === 200 || $httpCode === 400 || $httpCode === 422) && $hasAlreadyHint) {
         return ['category' => 'already_processed', 'message' => 'Já tratado por outro editor'];
     }
 
-    if ($httpCode === 200 && $hasAlreadyProcessed) {
-        return ['category' => 'already_processed', 'message' => 'Já tratado por outro editor'];
+    if ($httpCode >= 500 || $httpCode === 408 || $httpCode === 429 || $httpCode === 0) {
+        return ['category' => 'transient', 'message' => "Servidor Waze indisponível (HTTP {$httpCode})"];
     }
 
     return ['category' => 'unknown', 'message' => "Erro do Waze (HTTP {$httpCode})"];

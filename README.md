@@ -247,17 +247,21 @@ Configure pelo seletor na tela de login ou pelo modal de filtros (header).
 
 Vários editores tratam o mesmo place ao mesmo tempo. A app trata o cenário "outro editor chegou primeiro" sem quebrar o fluxo nem zerar stats injustamente.
 
-O backend (`validar-place.php`, `marcar-lido.php`) categoriza o erro do Waze via `categorizeWazeError($httpCode, $body, $curlError)` em `config.php` e devolve `errorCategory` no JSON:
+O backend (`validar-place.php`, `marcar-lido.php`) categoriza o erro do Waze via `categorizeWazeError($httpCode, $body, $curlError)` em `config.php` e devolve `errorCategory` no JSON.
+
+**Códigos de erro reais observados em race conditions (capturados via HAR do WME):**
+- `Features` (rejeitar) → HTTP **404** com `errorList[0].code: 702` e `details` contendo `"was not found"`
+- `Issues/Read` (marcar lido) → HTTP **500** com `errorList[0].code: 300` e `details: "Failed to handle request"`
 
 | Categoria | Quando | Frontend (`handleActionResult`) |
 |---|---|---|
-| `already_processed` | HTTP 409, ou 400/422/200 com palavras como "already", "duplicate", "no longer", "has been resolved" | Toast info "Já tratado por outro editor 👍", **mantém** stats (objetivo do user foi cumprido) |
-| `not_found` | HTTP 404 | Idem `already_processed` |
+| `already_processed` | `errorList[0].code` ∈ {702, 300+"failed to handle"}, HTTP 409, ou hint textual ("was not found", "already", "duplicate", "no longer", "has been resolved") | Toast info "Já tratado por outro editor 👍", **mantém** stats (objetivo do user foi cumprido) |
+| `not_found` | HTTP 404 sem código específico | Idem `already_processed` |
 | `unauthorized` | HTTP 401/403 | Toast de erro, invalida sessão local, volta pra tela de login |
-| `transient` | HTTP 5xx, 408, 429, 0, ou erro de cURL | `callWithRetry` tenta de novo 2x com backoff (1.5s, 3.5s) antes de aceitar falha |
+| `transient` | HTTP 5xx (sem padrão de race), 408, 429, 0, ou erro de cURL | `callWithRetry` tenta de novo 2x com backoff (1.5s, 3.5s) antes de aceitar falha |
 | `unknown` | Outros | Reverte stat (`stats.read--`/`stats.rejected--` + `serverTotal++`), toast de erro |
 
-A heurística de palavras-chave do `already_processed` é conservadora — se algum caso de race escapar pra `unknown` em produção, basta refinar a lista em `categorizeWazeError`.
+Importante: a checagem do `errorList[0].code` acontece **antes** da regra `5xx → transient`, pra que uma race no `Issues/Read` (HTTP 500) não seja confundida com instabilidade real do servidor.
 
 ### Segurança
 
