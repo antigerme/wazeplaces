@@ -146,7 +146,8 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 
 **Caixa de estatísticas:**
 - **Lidos** · **Rejeitados** · **Pulados** · **Restam**
-- "Restam" mostra quantos pedidos ainda estão na fila carregada. Se aparecer com sinal `+` (ex: `215+`), significa que ainda há mais páginas a buscar conforme você for processando.
+- "Restam" mostra quantos pedidos ainda estão pendentes no Waze (equivalente ao "PUR (N)" no WME oficial). O número diminui a cada `Lido` ou `Rejeitado`. **Pular não diminui** — o pedido continua pendente para você ou outro editor.
+- Se aparecer com sinal `+` (ex: `215+`), significa que ainda há mais páginas a buscar do Waze conforme você for processando.
 
 ### Instalar como app no celular
 

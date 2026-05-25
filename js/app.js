@@ -1,4 +1,4 @@
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.4.1';
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const THEME_KEY = 'waze_places_theme';
@@ -15,6 +15,7 @@ const AppState = {
     hasMore: true,
     emptyPagesInRow: 0,
     fetching: false,
+    serverTotal: 0,
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
@@ -369,6 +370,7 @@ function resetQueue() {
     AppState.hasMore = true;
     AppState.emptyPagesInRow = 0;
     AppState.currentPlace = null;
+    AppState.serverTotal = 0;
     updatePendingCount();
 }
 
@@ -421,6 +423,7 @@ async function fetchNextPage() {
         } else {
             AppState.emptyPagesInRow = 0;
             AppState.queue.push(...newPlaces);
+            AppState.serverTotal += newPlaces.length;
         }
     } catch (error) {
         console.error('fetchNextPage error', error);
@@ -640,6 +643,7 @@ function handleMarkAsRead() {
     if (!AppState.currentPlace) return;
     const place = AppState.currentPlace;
     AppState.stats.read++;
+    AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
     updateStats();
     saveStats();
     advanceQueue();
@@ -647,6 +651,7 @@ function handleMarkAsRead() {
         const result = await API.markAsRead(place.venueID, place.updateRequestID);
         if (!result.success) {
             AppState.stats.read = Math.max(0, AppState.stats.read - 1);
+            AppState.serverTotal++;
             updateStats();
             saveStats();
             showToast(result.error || 'Erro ao marcar como lido', 'error');
@@ -658,6 +663,7 @@ function handleReject() {
     if (!AppState.currentPlace) return;
     const place = AppState.currentPlace;
     AppState.stats.rejected++;
+    AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
     updateStats();
     saveStats();
     advanceQueue();
@@ -665,6 +671,7 @@ function handleReject() {
         const result = await API.rejectPlace(place.venueID, place.updateRequestID);
         if (!result.success) {
             AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
+            AppState.serverTotal++;
             updateStats();
             saveStats();
             showToast(result.error || 'Erro ao rejeitar place', 'error');
@@ -759,6 +766,7 @@ function scheduleAction(type, place, executor) {
                 clearTimeout(timerId);
                 if (type === 'read') AppState.stats.read = Math.max(0, AppState.stats.read - 1);
                 if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
+                AppState.serverTotal++;
                 updateStats();
                 saveStats();
                 AppState.queue.unshift(place);
@@ -830,12 +838,11 @@ function updatePendingCount() {
         el.textContent = '—';
         return;
     }
-    if (AppState.fetching && AppState.queue.length === 0) {
+    if (AppState.fetching && AppState.serverTotal === 0) {
         el.textContent = '…';
         return;
     }
-    const n = AppState.queue.length;
-    el.textContent = AppState.hasMore ? (n + '+') : String(n);
+    el.textContent = AppState.hasMore ? (AppState.serverTotal + '+') : String(AppState.serverTotal);
 }
 
 function saveStats() {
