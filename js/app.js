@@ -1,4 +1,4 @@
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.2.1';
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const THEME_KEY = 'waze_places_theme';
@@ -28,6 +28,28 @@ window.AppState = AppState;
 
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
+});
+
+window.addEventListener('error', (e) => {
+    console.error('Erro JS não-tratado:', e.error || e.message, e.filename, e.lineno);
+    if (window.showToast) {
+        window.showToast('Erro inesperado: ' + (e.message || 'recarregue a página'), 'error');
+    }
+    if (window.AppState && window.AppState.authenticated) {
+        const cardStack = document.getElementById('cardStack');
+        if (cardStack && !cardStack.querySelector('.place-card') &&
+            document.getElementById('loadingCard').classList.contains('hidden') &&
+            document.getElementById('noMoreCards').classList.contains('hidden')) {
+            console.warn('Estado inconsistente detectado, tentando recuperar…');
+            setTimeout(() => {
+                if (typeof advanceQueue === 'function') advanceQueue();
+            }, 100);
+        }
+    }
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+    console.error('Promise rejeitada:', e.reason);
 });
 
 function initApp() {
@@ -488,6 +510,26 @@ function removeCurrentCardEl() {
 }
 
 function showCurrentPlace() {
+    try {
+        renderCurrentCard();
+    } catch (err) {
+        console.error('Erro ao montar card, pulando place:', err, AppState.queue[0]);
+        if (window.showToast) {
+            window.showToast('Erro ao mostrar place, pulando…', 'error');
+        }
+        AppState.queue.shift();
+        AppState.currentPlace = null;
+        if (AppState.queue.length > 0) {
+            setTimeout(showCurrentPlace, 0);
+        } else if (AppState.hasMore) {
+            startFetching();
+        } else {
+            showNoPlaces();
+        }
+    }
+}
+
+function renderCurrentCard() {
     const place = AppState.queue[0];
     if (!place) {
         AppState.currentPlace = null;
@@ -559,13 +601,14 @@ function showCurrentPlace() {
             });
         }
     } else {
-        gallery.classList.add('hidden');
+        img.classList.add('hidden');
         noImg.classList.remove('hidden');
     }
 
     const brandRow = card.querySelector('.card-brand-row');
-    if (place.brand && place.brand.trim() !== '') {
-        card.querySelector('.card-brand').textContent = place.brand;
+    const brandStr = (place.brand !== null && place.brand !== undefined) ? String(place.brand).trim() : '';
+    if (brandStr !== '') {
+        card.querySelector('.card-brand').textContent = brandStr;
         if (place.brandKnown === true) {
             card.querySelector('.card-brand-known').classList.remove('hidden');
         } else if (place.brandKnown === false) {
@@ -690,6 +733,24 @@ function advanceQueue() {
     } else {
         showNoPlaces();
     }
+
+    setTimeout(() => {
+        const stack = document.getElementById('cardStack');
+        if (!stack) return;
+        const hasCard = !!stack.querySelector('.place-card');
+        const loadingHidden = document.getElementById('loadingCard').classList.contains('hidden');
+        const noMoreHidden = document.getElementById('noMoreCards').classList.contains('hidden');
+        if (!hasCard && loadingHidden && noMoreHidden) {
+            console.warn('Estado inconsistente após advanceQueue, forçando recuperação');
+            if (AppState.queue.length > 0) {
+                showCurrentPlace();
+            } else if (AppState.hasMore) {
+                startFetching();
+            } else {
+                showNoPlaces();
+            }
+        }
+    }, 200);
 }
 
 function scheduleAction(type, place, executor) {
