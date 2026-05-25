@@ -20,6 +20,7 @@ $filterTypes = isset($data['types']) && is_array($data['types']) && count($data[
 $filterCategories = isset($data['categories']) && is_array($data['categories']) && count($data['categories']) > 0
     ? $data['categories'] : null;
 $residential = isset($data['residential']) ? (bool)$data['residential'] : null;
+$unreadOnly = isset($data['unreadOnly']) ? (bool)$data['unreadOnly'] : true;
 
 if (!validateCookiesFormat($cookiesContent)) {
     jsonError('Formato de cookies inválido');
@@ -45,9 +46,7 @@ try {
         'managedAreaId' => $managedAreaId,
         'managedAreaIds' => null,
         'stateId' => $stateId,
-        'userPropertiesFilter' => [
-            'isRead' => false
-        ],
+        'userPropertiesFilter' => $unreadOnly ? ['isRead' => false] : new stdClass(),
         'venueUpdateRequestsFilter' => [
             'categories' => $filterCategories,
             'lockRanks' => [0, 1, 2, 3, 4, 5],

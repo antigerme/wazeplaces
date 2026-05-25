@@ -1,4 +1,4 @@
-const APP_VERSION = '2.2.1';
+const APP_VERSION = '2.3.0';
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const THEME_KEY = 'waze_places_theme';
@@ -18,7 +18,7 @@ const AppState = {
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
-    filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false },
+    filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true },
     profile: null,
     countries: [],
     statesByCountry: {}
@@ -113,8 +113,6 @@ function setupAppListeners() {
     $('closeHelp').addEventListener('click', () => $('helpModal').classList.add('hidden'));
     $('themeBtn').addEventListener('click', toggleTheme);
     $('filtersBtn').addEventListener('click', openFiltersModal);
-    $('notificationsBtn').addEventListener('click', openNotificationsModal);
-    $('closeNotifications').addEventListener('click', () => $('notificationsModal').classList.add('hidden'));
 
     window.addEventListener('keydown', handleKeyDown);
 }
@@ -199,6 +197,7 @@ function populateManagedAreaSelect() {
 
 async function openFiltersModal() {
     const $ = id => document.getElementById(id);
+    $('filterUnreadOnly').checked = AppState.filters.unreadOnly !== false;
     document.querySelectorAll('.filter-type').forEach(cb => {
         cb.checked = AppState.filters.types.includes(cb.value);
     });
@@ -224,6 +223,7 @@ async function openFiltersModal() {
 
 function applyFiltersFromModal() {
     const $ = id => document.getElementById(id);
+    AppState.filters.unreadOnly = $('filterUnreadOnly').checked;
     AppState.filters.types = Array.from(document.querySelectorAll('.filter-type:checked')).map(cb => cb.value);
     AppState.filters.residential = $('filterResidential').value;
     AppState.filters.stateId = $('filterState').value;
@@ -260,7 +260,6 @@ function showAuthScreen() {
     document.getElementById('authScreen').classList.remove('hidden');
     document.getElementById('appScreen').classList.add('hidden');
     document.getElementById('filtersBtn').classList.add('hidden');
-    document.getElementById('notificationsBtn').classList.add('hidden');
     document.getElementById('userProfileBadge').classList.add('hidden');
     AppState.authenticated = false;
     AppState.profile = null;
@@ -314,10 +313,9 @@ async function authenticateWithCookies(cookies) {
 }
 
 async function loadProfileAndAuxData() {
-    const [profileRes, countriesRes, notifsRes] = await Promise.all([
+    const [profileRes, countriesRes] = await Promise.all([
         API.getProfile(),
-        API.listCountries(),
-        API.getNotifications()
+        API.listCountries()
     ]);
     if (profileRes.success) {
         AppState.profile = profileRes.profile;
@@ -325,9 +323,6 @@ async function loadProfileAndAuxData() {
     }
     if (countriesRes.success) {
         AppState.countries = countriesRes.countries;
-    }
-    if (notifsRes.success) {
-        renderNotificationsBadge(notifsRes.count, notifsRes.notifications);
     }
 }
 
@@ -350,47 +345,6 @@ function renderProfileHeader() {
     else if (p.isAreaManager) tags.push('AM');
     rankEl.textContent = tags.join(' · ');
     badge.classList.remove('hidden');
-}
-
-function renderNotificationsBadge(count, list) {
-    const btn = document.getElementById('notificationsBtn');
-    const badge = document.getElementById('notificationsBadge');
-    btn.classList.remove('hidden');
-    if (count > 0) {
-        badge.textContent = count > 9 ? '9+' : String(count);
-        badge.classList.remove('hidden');
-    } else {
-        badge.classList.add('hidden');
-    }
-    AppState._notifications = list || [];
-}
-
-async function openNotificationsModal() {
-    const modal = document.getElementById('notificationsModal');
-    const listEl = document.getElementById('notificationsList');
-    modal.classList.remove('hidden');
-    listEl.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">Carregando…</p>';
-    const r = await API.getNotifications();
-    if (!r.success) {
-        listEl.innerHTML = `<p class="text-sm text-rose-500 text-center py-8">${escapeHtml(r.error || 'Erro')}</p>`;
-        return;
-    }
-    renderNotificationsBadge(r.count, r.notifications);
-    if (!r.notifications || r.notifications.length === 0) {
-        listEl.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">Sem notificações.</p>';
-        return;
-    }
-    listEl.innerHTML = r.notifications.map(n => {
-        const when = n.timestamp ? new Date(n.timestamp).toLocaleString('pt-BR') : '';
-        const msg = n.shortMessage || n.message || n.title || n.type || '';
-        const who = n.username ? `<span class="text-cyan-700 font-medium">@${escapeHtml(n.username)}</span> ` : '';
-        return `
-            <div class="bg-slate-50 border border-slate-100 rounded-xl p-3">
-                <p class="text-xs text-slate-400 mb-1">${escapeHtml(when)} · ${escapeHtml(n.type || '')}</p>
-                <p class="text-sm text-slate-700">${who}${escapeHtml(msg)}</p>
-            </div>
-        `;
-    }).join('');
 }
 
 async function handleLogout() {
@@ -427,7 +381,9 @@ async function fetchNextPage() {
     if (!AppState.authenticated) return;
 
     AppState.fetching = true;
-    const filters = {};
+    const filters = {
+        unreadOnly: AppState.filters.unreadOnly !== false
+    };
     if (AppState.filters.types.length < 3) filters.types = AppState.filters.types;
     if (AppState.filters.residential === 'true') filters.residential = true;
     if (AppState.filters.residential === 'false') filters.residential = false;
@@ -898,6 +854,7 @@ function loadFilters() {
             AppState.filters.stateId = parsed.stateId || '';
             AppState.filters.managedAreaId = parsed.managedAreaId || '';
             AppState.filters.myArea = !!parsed.myArea;
+            AppState.filters.unreadOnly = parsed.unreadOnly !== false;
         }
     } catch (e) {}
 }
