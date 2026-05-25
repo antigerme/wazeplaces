@@ -9,6 +9,13 @@ define('WAZE_REGIONS', [
     'world' => 'https://www.waze.com/Descartes/app/v1',
 ]);
 
+define('WAZE_BASE_REGIONS', [
+    'row' => 'https://www.waze.com/row-Descartes/app',
+    'na'  => 'https://www.waze.com/na-Descartes/app',
+    'il'  => 'https://www.waze.com/il-Descartes/app',
+    'world' => 'https://www.waze.com/Descartes/app',
+]);
+
 define('WAZE_FEATURES_REGIONS', [
     'row' => 'https://www.waze.com/row-Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
     'na'  => 'https://www.waze.com/na-Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
@@ -35,6 +42,26 @@ function wazeMarkReadEndpoint($region) {
 
 function wazeFeaturesEndpoint($region) {
     return WAZE_FEATURES_REGIONS[$region] ?? WAZE_FEATURES_REGIONS['row'];
+}
+
+function wazeSessionEndpoint($region) {
+    $base = WAZE_BASE_REGIONS[$region] ?? WAZE_BASE_REGIONS['row'];
+    return $base . '/Session?language=pt-BR';
+}
+
+function wazeCountriesEndpoint($region) {
+    $base = WAZE_BASE_REGIONS[$region] ?? WAZE_BASE_REGIONS['row'];
+    return $base . '/LocationSearch/Countries';
+}
+
+function wazeStatesEndpoint($region, $countryId) {
+    $base = WAZE_BASE_REGIONS[$region] ?? WAZE_BASE_REGIONS['row'];
+    return $base . '/LocationSearch/States?countryId=' . (int)$countryId;
+}
+
+function wazeNotificationsEndpoint($region) {
+    $base = WAZE_BASE_REGIONS[$region] ?? WAZE_BASE_REGIONS['row'];
+    return $base . '/Feed/Notifications';
 }
 
 function wazeRefererEnv($region) {

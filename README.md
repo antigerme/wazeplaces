@@ -120,18 +120,30 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 
 ### Usando a aplicação
 
-1. Na tela inicial, escolha sua **Região** e o **País**:
-   - **Brasil** → Região: `ROW`, País: `30`
-   - **Portugal** → Região: `ROW`, País: `181`
-   - **EUA** → Região: `NA`, País: `235`
-   - **Outros** → use `ROW` ou `World` e experimente o ID do país
+1. Na tela inicial, escolha sua **Região do Waze**:
+   - **Brasil, Portugal, Europa, América Latina** → `ROW`
+   - **EUA, Canadá** → `NA`
+   - **Israel** → `IL`
 2. Clique em **"Fazer Upload do cookies.txt"** e escolha o arquivo que você baixou (ou cole o conteúdo).
-3. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"** e os cards começam a carregar.
-4. Processe os pedidos:
+3. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"**, seu **avatar do Waze e nome** aparecem no topo, e os cards começam a carregar (Brasil é o padrão).
+4. Pra trocar o **país** ou filtrar por **estado** ou **área gerenciada**, clique no ícone de **filtros 📂** no topo. Os países/estados aparecem em listas com nomes (sem precisar saber ID).
+5. Processe os pedidos:
    - Use o **mouse / dedo** para arrastar os cards
    - Use as **setas do teclado**: `←` Rejeitar · `↑` Pular · `→` Lido
    - Use os **botões** abaixo do card se preferir
-5. Cometeu um erro? Tem uma **janela de 3 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
+6. Cometeu um erro? Tem uma **janela de 3 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
+
+**Coisas que aparecem no card:**
+- **Marca** do place + selo "✓ conhecida" (se está na lista oficial do Waze) ou "? não listada" (suspeita)
+- **Galeria de fotos** (se houver mais de uma)
+- **Mudanças propostas** lado a lado (antes → depois) para pedidos de atualização
+- **Link ↗** para abrir o local direto no WME
+
+**Header:**
+- **Avatar + nome** do seu usuário Waze
+- **Sino com badge** mostrando notificações pendentes
+- **Filtros 📂** para país/estado/área/tipo de pedido
+- **Tema 🌙** alterna entre claro e escuro
 
 ### Instalar como app no celular
 

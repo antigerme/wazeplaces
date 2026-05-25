@@ -41,6 +41,13 @@
                 </div>
                 <h1 class="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-600">Waze Places</h1>
             </div>
+            <div id="userProfileBadge" class="hidden flex items-center gap-2 mx-auto">
+                <img id="userAvatar" class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100" alt="">
+                <div class="leading-tight">
+                    <p id="userName" class="text-xs font-bold text-slate-700"></p>
+                    <p id="userRank" class="text-[10px] text-slate-400 uppercase tracking-wider"></p>
+                </div>
+            </div>
             <div class="flex items-center gap-1">
                 <button id="themeBtn" type="button" aria-label="Alternar tema" class="p-2 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
                     <svg id="themeIconLight" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -54,6 +61,12 @@
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
                     </svg>
+                </button>
+                <button id="notificationsBtn" type="button" aria-label="Notificações" class="hidden relative p-2 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                    </svg>
+                    <span id="notificationsBadge" class="hidden absolute -top-0.5 -right-0.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center"></span>
                 </button>
                 <button id="helpBtn" type="button" aria-label="Ajuda" class="p-2 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -74,20 +87,15 @@
                 </div>
 
                 <div class="space-y-4">
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Região</label>
-                            <select id="regionSelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-cyan-500/50 focus:border-transparent">
-                                <option value="row">ROW (Brasil, Europa, etc.)</option>
-                                <option value="na">NA (EUA, Canadá)</option>
-                                <option value="il">IL (Israel)</option>
-                                <option value="world">World (fallback)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">País (ID)</label>
-                            <input id="countryInput" type="number" value="30" min="1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-cyan-500/50 focus:border-transparent">
-                        </div>
+                    <div>
+                        <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Região do Waze</label>
+                        <select id="regionSelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-cyan-500/50 focus:border-transparent">
+                            <option value="row">ROW (Brasil, Europa, América Latina)</option>
+                            <option value="na">NA (EUA, Canadá)</option>
+                            <option value="il">IL (Israel)</option>
+                            <option value="world">World (fallback)</option>
+                        </select>
+                        <p class="text-[11px] text-slate-400 mt-1">País e estado você escolhe depois, no botão de filtros (📂)</p>
                     </div>
 
                     <button id="uploadBtn" type="button" class="group w-full relative overflow-hidden bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-cyan-500/25 active:scale-[0.98]">
@@ -152,6 +160,20 @@
             </div>
         </div>
 
+        <div id="notificationsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 max-h-[80vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold text-slate-800">Notificações</h3>
+                    <button id="closeNotifications" type="button" class="text-slate-500 hover:text-slate-700">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div id="notificationsList" class="space-y-2">
+                    <p class="text-sm text-slate-500 text-center py-8">Carregando…</p>
+                </div>
+            </div>
+        </div>
+
         <div id="filtersModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 max-h-[85vh] overflow-y-auto">
                 <div class="flex justify-between items-center mb-4">
@@ -181,11 +203,6 @@
                     </div>
 
                     <div>
-                        <label class="text-sm font-semibold text-slate-700 block mb-2">País (ID)</label>
-                        <input id="filterCountry" type="number" value="30" min="1" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
-                    </div>
-
-                    <div>
                         <label class="text-sm font-semibold text-slate-700 block mb-2">Região</label>
                         <select id="filterRegion" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
                             <option value="row">ROW</option>
@@ -193,6 +210,38 @@
                             <option value="il">IL</option>
                             <option value="world">World</option>
                         </select>
+                    </div>
+
+                    <div>
+                        <label class="text-sm font-semibold text-slate-700 block mb-2">País</label>
+                        <select id="filterCountry" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                            <option value="30">Brasil</option>
+                        </select>
+                        <p id="filterCountryHint" class="hidden text-[11px] text-amber-600 mt-1">Mostrando apenas países que você pode editar.</p>
+                    </div>
+
+                    <div>
+                        <label class="text-sm font-semibold text-slate-700 block mb-2">Estado</label>
+                        <select id="filterState" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                            <option value="">Todos os estados</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="text-sm font-semibold text-slate-700 block mb-2">Área gerenciada</label>
+                        <select id="filterManagedArea" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                            <option value="">Nenhuma</option>
+                        </select>
+                    </div>
+
+                    <div class="bg-cyan-50 border border-cyan-100 rounded-xl p-3">
+                        <label class="flex items-start gap-2 text-sm cursor-pointer">
+                            <input id="filterMyArea" type="checkbox" class="mt-0.5">
+                            <span>
+                                <span class="font-semibold text-slate-700">Filtrar pela minha área de edição</span>
+                                <span class="block text-xs text-slate-500">Usa o bbox da sua "drive area" do Waze (ignora país/estado)</span>
+                            </span>
+                        </label>
                     </div>
 
                     <div class="flex space-x-3 pt-4">
@@ -317,6 +366,13 @@
                                                 <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Criador</p>
                                                 <span class="card-creator text-sm text-slate-700 font-medium truncate block"></span>
                                             </div>
+                                        </div>
+
+                                        <div class="card-brand-row hidden flex items-center gap-2">
+                                            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Marca:</span>
+                                            <span class="card-brand text-sm text-slate-700 font-medium"></span>
+                                            <span class="card-brand-known hidden text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700" title="Marca reconhecida pelo Waze">✓ conhecida</span>
+                                            <span class="card-brand-unknown hidden text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-700" title="Marca não está na lista oficial do Waze">? não listada</span>
                                         </div>
 
                                         <div class="card-changes hidden bg-amber-50 border border-amber-100 rounded-xl p-3">
