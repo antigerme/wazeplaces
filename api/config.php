@@ -21,7 +21,7 @@ define('USER_AGENT', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML,
 
 define('SESSION_DIR', sys_get_temp_dir() . '/waze_places_sessions');
 define('SESSION_TTL', 7200);
-define('SESSION_KEY_FILE', __DIR__ . '/.encryption-key');
+define('SESSION_KEY_FILE', sys_get_temp_dir() . '/waze_places.key');
 
 function wazeIssuesEndpoint($region) {
     $base = WAZE_REGIONS[$region] ?? WAZE_REGIONS['row'];
@@ -245,9 +245,21 @@ function validateCookiesFormat($cookiesContent) {
     return false;
 }
 
+function getServerWorkers() {
+    $workers = getenv('PHP_CLI_SERVER_WORKERS');
+    if ($workers !== false && (int)$workers > 0) {
+        return (int)$workers;
+    }
+    return php_sapi_name() === 'cli-server' ? 1 : null;
+}
+
 function jsonResponse($data, $statusCode = 200) {
     http_response_code($statusCode);
     header('Content-Type: application/json; charset=utf-8');
+    $workers = getServerWorkers();
+    if ($workers !== null) {
+        header('X-Server-Workers: ' . $workers);
+    }
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }

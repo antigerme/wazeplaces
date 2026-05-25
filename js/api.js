@@ -42,6 +42,18 @@ const API = {
         return this.countryId;
     },
 
+    _workersChecked: false,
+
+    _checkWorkers(response) {
+        if (this._workersChecked) return;
+        const workers = response.headers.get('X-Server-Workers');
+        if (workers === null) return;
+        this._workersChecked = true;
+        if (parseInt(workers, 10) <= 1 && window.showWorkerWarning) {
+            window.showWorkerWarning();
+        }
+    },
+
     async _post(endpoint, body) {
         try {
             const response = await fetch(`${this.baseUrl}/${endpoint}`, {
@@ -49,6 +61,7 @@ const API = {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
             });
+            this._checkWorkers(response);
             const data = await response.json();
             if (response.status === 401) {
                 this.setSession(null);
