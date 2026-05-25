@@ -141,8 +141,7 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 
 **Header:**
 - **Avatar + nome** do seu usuário Waze
-- **Sino com badge** mostrando notificações pendentes
-- **Filtros 📂** para país/estado/área/tipo de pedido
+- **Filtros 📂** para país/estado/área/tipo de pedido (e checkbox "Apenas pedidos não lidos", ligado por padrão — desmarque se quiser revisar pedidos já marcados como lidos)
 - **Tema 🌙** alterna entre claro e escuro
 
 ### Instalar como app no celular

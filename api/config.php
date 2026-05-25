@@ -59,11 +59,6 @@ function wazeStatesEndpoint($region, $countryId) {
     return $base . '/LocationSearch/States?countryId=' . (int)$countryId;
 }
 
-function wazeNotificationsEndpoint($region) {
-    $base = WAZE_BASE_REGIONS[$region] ?? WAZE_BASE_REGIONS['row'];
-    return $base . '/Feed/Notifications';
-}
-
 function wazeRefererEnv($region) {
     return $region === 'na' ? 'usa' : ($region === 'il' ? 'il' : 'row');
 }

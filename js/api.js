@@ -171,17 +171,6 @@ const API = {
         });
     },
 
-    async getNotifications() {
-        const sessionToken = this.getSession();
-        if (!sessionToken) {
-            return { success: false, error: 'Sessão expirada' };
-        }
-        return this._post('notificacoes.php', {
-            sessionToken,
-            region: this.getRegion()
-        });
-    },
-
     async destroySession() {
         const sessionToken = this.getSession();
         if (!sessionToken) return { success: true };
