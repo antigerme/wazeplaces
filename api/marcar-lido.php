@@ -51,17 +51,28 @@ try {
     $result = makeCurlRequest(wazeMarkReadEndpoint($region), $tempFile, $csrfToken, $payload, $region);
     deleteTempCookieFile($tempFile);
 
-    if ($result['httpCode'] !== 200) {
-        jsonError("Erro ao marcar como lido (HTTP {$result['httpCode']})", 500);
+    $cat = categorizeWazeError($result['httpCode'], $result['response'], $result['error']);
+
+    if ($result['httpCode'] === 200 && $cat['category'] !== 'already_processed') {
+        jsonResponse([
+            'success' => true,
+            'count' => count($ids),
+            'message' => count($ids) === 1 ? 'Place marcado como lido com sucesso' : count($ids) . ' places marcados como lidos'
+        ]);
     }
 
     jsonResponse([
-        'success' => true,
-        'count' => count($ids),
-        'message' => count($ids) === 1 ? 'Place marcado como lido com sucesso' : count($ids) . ' places marcados como lidos'
-    ]);
+        'success' => false,
+        'error' => $cat['message'],
+        'errorCategory' => $cat['category'],
+        'httpCode' => $result['httpCode']
+    ], $cat['category'] === 'already_processed' || $cat['category'] === 'not_found' ? 200 : 500);
 
 } catch (Exception $e) {
     deleteTempCookieFile($tempFile);
-    jsonError('Erro ao marcar como lido: ' . $e->getMessage(), 500);
+    jsonResponse([
+        'success' => false,
+        'error' => 'Erro ao marcar como lido: ' . $e->getMessage(),
+        'errorCategory' => 'unknown'
+    ], 500);
 }

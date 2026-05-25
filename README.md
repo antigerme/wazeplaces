@@ -144,6 +144,11 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 - **Filtros 📂** para país/estado/área/tipo de pedido (e checkbox "Apenas pedidos não lidos", ligado por padrão — desmarque se quiser revisar pedidos já marcados como lidos)
 - **Tema 🌙** alterna entre claro e escuro
 
+**Caixa de estatísticas:**
+- **Lidos** · **Rejeitados** · **Pulados** · **Restam**
+- "Restam" mostra quantos pedidos ainda estão pendentes no Waze (equivalente ao "PUR (N)" no WME oficial). O número diminui a cada `Lido` ou `Rejeitado`. **Pular não diminui** — o pedido continua pendente para você ou outro editor.
+- Se aparecer com sinal `+` (ex: `215+`), significa que ainda há mais páginas a buscar do Waze conforme você for processando.
+
 ### Instalar como app no celular
 
 Depois de abrir a app no celular:
@@ -237,6 +242,26 @@ A app suporta as URLs base do Waze:
 | `world`  | `www.waze.com/Descartes/...`             | Fallback                  |
 
 Configure pelo seletor na tela de login ou pelo modal de filtros (header).
+
+### Resiliência a race conditions entre editores
+
+Vários editores tratam o mesmo place ao mesmo tempo. A app trata o cenário "outro editor chegou primeiro" sem quebrar o fluxo nem zerar stats injustamente.
+
+O backend (`validar-place.php`, `marcar-lido.php`) categoriza o erro do Waze via `categorizeWazeError($httpCode, $body, $curlError)` em `config.php` e devolve `errorCategory` no JSON.
+
+**Códigos de erro reais observados em race conditions (capturados via HAR do WME):**
+- `Features` (rejeitar) → HTTP **404** com `errorList[0].code: 702` e `details` contendo `"was not found"`
+- `Issues/Read` (marcar lido) → HTTP **500** com `errorList[0].code: 300` e `details: "Failed to handle request"`
+
+| Categoria | Quando | Frontend (`handleActionResult`) |
+|---|---|---|
+| `already_processed` | `errorList[0].code` ∈ {702, 300+"failed to handle"}, HTTP 409, ou hint textual ("was not found", "already", "duplicate", "no longer", "has been resolved") | Toast info "Já tratado por outro editor 👍", **mantém** stats (objetivo do user foi cumprido) |
+| `not_found` | HTTP 404 sem código específico | Idem `already_processed` |
+| `unauthorized` | HTTP 401/403 | Toast de erro, invalida sessão local, volta pra tela de login |
+| `transient` | HTTP 5xx (sem padrão de race), 408, 429, 0, ou erro de cURL | `callWithRetry` tenta de novo 2x com backoff (1.5s, 3.5s) antes de aceitar falha |
+| `unknown` | Outros | Reverte stat (`stats.read--`/`stats.rejected--` + `serverTotal++`), toast de erro |
+
+Importante: a checagem do `errorList[0].code` acontece **antes** da regra `5xx → transient`, pra que uma race no `Issues/Read` (HTTP 500) não seja confundida com instabilidade real do servidor.
 
 ### Segurança
 

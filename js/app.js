@@ -1,4 +1,6 @@
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.5.1';
+const TRANSIENT_RETRY_ATTEMPTS = 2;
+const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const THEME_KEY = 'waze_places_theme';
@@ -15,6 +17,7 @@ const AppState = {
     hasMore: true,
     emptyPagesInRow: 0,
     fetching: false,
+    serverTotal: 0,
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
@@ -369,6 +372,8 @@ function resetQueue() {
     AppState.hasMore = true;
     AppState.emptyPagesInRow = 0;
     AppState.currentPlace = null;
+    AppState.serverTotal = 0;
+    updatePendingCount();
 }
 
 function showLoading(visible) {
@@ -420,6 +425,7 @@ async function fetchNextPage() {
         } else {
             AppState.emptyPagesInRow = 0;
             AppState.queue.push(...newPlaces);
+            AppState.serverTotal += newPlaces.length;
         }
     } catch (error) {
         console.error('fetchNextPage error', error);
@@ -427,6 +433,7 @@ async function fetchNextPage() {
         AppState.hasMore = false;
     } finally {
         AppState.fetching = false;
+        updatePendingCount();
     }
 }
 
@@ -434,6 +441,7 @@ async function startFetching() {
     showLoading(true);
     document.getElementById('noMoreCards').classList.add('hidden');
     removeCurrentCardEl();
+    updatePendingCount();
 
     while (AppState.queue.length === 0 && AppState.hasMore) {
         await fetchNextPage();
@@ -633,21 +641,57 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
+async function callWithRetry(fn) {
+    let result = await fn();
+    let attempt = 0;
+    while (result && !result.success && result.errorCategory === 'transient' && attempt < TRANSIENT_RETRY_ATTEMPTS) {
+        const delay = TRANSIENT_RETRY_DELAYS_MS[attempt] || 5000;
+        await new Promise(r => setTimeout(r, delay));
+        attempt++;
+        result = await fn();
+    }
+    return result;
+}
+
+function handleActionResult(actionType, place, result) {
+    if (!result) return;
+    if (result.success) return;
+
+    const cat = result.errorCategory || 'unknown';
+
+    if (cat === 'already_processed' || cat === 'not_found') {
+        showToast('Já tratado por outro editor 👍', 'info');
+        return;
+    }
+
+    if (cat === 'unauthorized') {
+        showToast('Sessão expirou — faça login novamente', 'error');
+        API.setSession(null);
+        AppState.profile = null;
+        setTimeout(() => showAuthScreen(), 800);
+        return;
+    }
+
+    const statKey = actionType === 'read' ? 'read' : 'rejected';
+    AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
+    AppState.serverTotal++;
+    updateStats();
+    saveStats();
+    const verb = actionType === 'read' ? 'marcar como lido' : 'rejeitar place';
+    showToast((result.error || `Erro ao ${verb}`) + ' (não contabilizado)', 'error');
+}
+
 function handleMarkAsRead() {
     if (!AppState.currentPlace) return;
     const place = AppState.currentPlace;
     AppState.stats.read++;
+    AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
     updateStats();
     saveStats();
     advanceQueue();
     scheduleAction('read', place, async () => {
-        const result = await API.markAsRead(place.venueID, place.updateRequestID);
-        if (!result.success) {
-            AppState.stats.read = Math.max(0, AppState.stats.read - 1);
-            updateStats();
-            saveStats();
-            showToast(result.error || 'Erro ao marcar como lido', 'error');
-        }
+        const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID));
+        handleActionResult('read', place, result);
     });
 }
 
@@ -655,17 +699,13 @@ function handleReject() {
     if (!AppState.currentPlace) return;
     const place = AppState.currentPlace;
     AppState.stats.rejected++;
+    AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
     updateStats();
     saveStats();
     advanceQueue();
     scheduleAction('reject', place, async () => {
-        const result = await API.rejectPlace(place.venueID, place.updateRequestID);
-        if (!result.success) {
-            AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
-            updateStats();
-            saveStats();
-            showToast(result.error || 'Erro ao rejeitar place', 'error');
-        }
+        const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID));
+        handleActionResult('reject', place, result);
     });
 }
 
@@ -680,6 +720,7 @@ function handleSkip() {
 function advanceQueue() {
     AppState.queue.shift();
     AppState.currentPlace = null;
+    updatePendingCount();
 
     if (AppState.queue.length > 0) {
         showCurrentPlace();
@@ -755,9 +796,11 @@ function scheduleAction(type, place, executor) {
                 clearTimeout(timerId);
                 if (type === 'read') AppState.stats.read = Math.max(0, AppState.stats.read - 1);
                 if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
+                AppState.serverTotal++;
                 updateStats();
                 saveStats();
                 AppState.queue.unshift(place);
+                updatePendingCount();
                 showCurrentPlace();
             }
         }
@@ -815,6 +858,21 @@ function updateStats() {
     document.getElementById('readCount').textContent = AppState.stats.read;
     document.getElementById('rejectedCount').textContent = AppState.stats.rejected;
     document.getElementById('skippedCount').textContent = AppState.stats.skipped;
+    updatePendingCount();
+}
+
+function updatePendingCount() {
+    const el = document.getElementById('pendingCount');
+    if (!el) return;
+    if (!AppState.authenticated) {
+        el.textContent = '—';
+        return;
+    }
+    if (AppState.fetching && AppState.serverTotal === 0) {
+        el.textContent = '…';
+        return;
+    }
+    el.textContent = AppState.hasMore ? (AppState.serverTotal + '+') : String(AppState.serverTotal);
 }
 
 function saveStats() {
