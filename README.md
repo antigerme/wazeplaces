@@ -76,6 +76,18 @@ Dentro da pasta `wazeplaces` (a que você baixou), rode o script de inicializaç
 start.bat
 ```
 
+**Windows (cmd):**
+```cmd
+set PHP_CLI_SERVER_WORKERS=4 && php -S 0.0.0.0:8080
+```
+
+**Windows (PowerShell):**
+```powershell
+$env:PHP_CLI_SERVER_WORKERS=4; php -S 0.0.0.0:8080
+```
+
+> ⚠️ **Importante:** o `PHP_CLI_SERVER_WORKERS=4` faz o servidor atender 4 requisições ao mesmo tempo. **Sem isso**, o PHP atende uma de cada vez e a app fica travando entre cada ação (porque cada requisição ao Waze leva 1-2 segundos).
+
 Pronto! Abra o navegador (Chrome, Firefox, Edge…) e acesse:
 
 👉 **http://localhost:8080**
