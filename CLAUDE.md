@@ -289,6 +289,8 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 13. **Apache do RHEL costuma vir com `mod_pagespeed` habilitado** por padrão, que também reordena/combina/minifica scripts e quebra a ordem `api.js → app.js`. O `.htaccess` da app desabilita via `<IfModule pagespeed_module>ModPagespeed off</IfModule>`.
 
+14. **CSP do `.htaccess` precisa permitir domínios externos do Waze**. Browser aplica a INTERSEÇÃO de todas as CSPs ativas (header HTTP + meta) — vence a mais restritiva. Quando a do header era apenas `connect-src 'self'`, fetches de fonts/imagens externos eram bloqueados. Lista mínima atualmente: `img-src` precisa de `venue-image.waze.com` (fotos de places) e `social-row.waze.com` (avatar do perfil); `connect-src` precisa dos mesmos + `fonts.googleapis.com` e `fonts.gstatic.com` (caso o SW velho intercepte antes de atualizar). **Sempre que adicionar um host externo na app, atualizar a CSP no `.htaccess` E no `<meta>` do `index.html`** — manter as duas em sync.
+
 ---
 
 ## 🛠 Workflows típicos
