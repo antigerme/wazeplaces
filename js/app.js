@@ -1,4 +1,4 @@
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.7.1';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -540,15 +540,24 @@ function renderCurrentCard() {
     const imgCount = card.querySelector('.card-image-count');
     const imgPrev = card.querySelector('.card-image-prev');
     const imgNext = card.querySelector('.card-image-next');
+    const newBadge = card.querySelector('.card-image-new-badge');
+    const newBorder = card.querySelector('.card-image-new-border');
     const urls = place.imageUrls && place.imageUrls.length > 0
         ? place.imageUrls
         : (place.imageUrl ? [place.imageUrl] : []);
 
     if (urls.length > 0) {
-        let currentImgIdx = 0;
+        const newImageIdx = place.updateRequestID
+            ? urls.findIndex(u => u.indexOf(place.updateRequestID) !== -1)
+            : -1;
+        let currentImgIdx = newImageIdx >= 0 ? newImageIdx : 0;
+
         const updateImage = () => {
             img.src = urls[currentImgIdx];
             imgCount.textContent = `${currentImgIdx + 1} / ${urls.length}`;
+            const isNew = currentImgIdx === newImageIdx;
+            newBadge.classList.toggle('hidden', !isNew);
+            newBorder.classList.toggle('hidden', !isNew);
         };
         img.classList.remove('hidden');
         noImg.classList.add('hidden');
