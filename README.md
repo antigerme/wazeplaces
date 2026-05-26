@@ -159,10 +159,22 @@ Depois de abrir a app no celular:
 
 Vai virar um ícone normal no seu celular, abrindo em tela cheia sem barra do navegador.
 
+### Quem pode usar
+
+Esta aplicação é **restrita** a editores do Waze com perfil mais avançado, para reduzir risco de uso indevido por editores novatos:
+
+- **Staff do Waze** (qualquer nível) → libera direto
+- **Area Manager** com nível **3 ou maior** → libera
+
+Editores nível 1-2, ou editores sem badge de Area Manager, vão receber a mensagem **"Acesso restrito"** ao tentar fazer login.
+
+Se você acha que deveria ter acesso, abra seu perfil no Waze Map Editor e confirme que você tem `Area Manager` ativo e nível ≥ 3.
+
 ### Problemas comuns
 
 | Problema | O que fazer |
 |----------|-------------|
+| **"Acesso restrito"** | Você precisa ser Staff do Waze ou Area Manager nível 3+. Verifique seu perfil no WME |
 | **"Cookies expirados ou inválidos"** | Faça logout do WME, faça login de novo, exporte os cookies novamente |
 | **"Token CSRF não encontrado"** | O arquivo `cookies.txt` está incompleto. Confirme que você fez login antes de exportar |
 | **"Não há places para mostrar"** | Não tem nada na fila daquela região/país. Tente outro país no menu de filtros |
@@ -243,6 +255,20 @@ A app suporta as URLs base do Waze:
 | `world`  | `www.waze.com/Descartes/...`             | Fallback                  |
 
 Configure pelo seletor na tela de login ou pelo modal de filtros (header).
+
+### Gate de acesso (quem pode usar)
+
+A app aplica um critério mínimo de permissão **no backend** em `testar-cookies.php` antes mesmo de criar a sessão. Helper `isUserAllowed($profile)` em `config.php`:
+
+```php
+isStaff === true                              → libera
+(rank >= MIN_RANK_WAZE && isAreaManager)      → libera
+caso contrário                                → 403 access_denied
+```
+
+`MIN_RANK_WAZE = 2` (Waze é 0-indexed; equivale a "display L3+"). Pra ajustar, mude essa constante em `config.php`.
+
+Frontend trata `errorCategory: 'access_denied'` mostrando o modal `accessDeniedModal` com o perfil do user (userName + rank+1 + AM/não-AM/Staff) e mantém na tela de auth. Como a checagem é no PHP **antes** de `createSession`, não há como burlar editando JS no DevTools — o cookie nem chega a virar sessão útil.
 
 ### Resiliência a race conditions entre editores
 

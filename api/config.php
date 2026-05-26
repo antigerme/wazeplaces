@@ -373,3 +373,36 @@ function requireRegion($data) {
     if (!isset(WAZE_REGIONS[$region])) $region = 'row';
     return $region;
 }
+
+/**
+ * Critério de acesso à aplicação:
+ *   - Staff sempre passa
+ *   - Caso contrário, precisa ser Area Manager com rank >= 2 (display L3+, Waze é 0-indexed)
+ *
+ * Retorna ['allowed' => bool, 'reason' => string|null]
+ */
+define('MIN_RANK_WAZE', 2);
+
+function isUserAllowed($profile) {
+    if (!is_array($profile)) {
+        return ['allowed' => false, 'reason' => 'Perfil inválido'];
+    }
+    if (!empty($profile['isStaff'])) {
+        return ['allowed' => true, 'reason' => null];
+    }
+    $rank = isset($profile['rank']) ? (int)$profile['rank'] : -1;
+    $isAM = !empty($profile['isAreaManager']);
+    if ($rank >= MIN_RANK_WAZE && $isAM) {
+        return ['allowed' => true, 'reason' => null];
+    }
+    $displayRank = $rank >= 0 ? ($rank + 1) : '?';
+    $tags = [];
+    $tags[] = 'L' . $displayRank;
+    $tags[] = $isAM ? 'AM' : 'não-AM';
+    $minDisplay = MIN_RANK_WAZE + 1;
+    return [
+        'allowed' => false,
+        'reason' => "Acesso restrito a editores Area Manager com nível {$minDisplay}+ ou Staff. Seu perfil: " . implode(' · ', $tags) . '.'
+    ];
+}
+
