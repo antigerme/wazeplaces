@@ -179,6 +179,11 @@ button:active {
   text-decoration: line-through;
   font-size: 0.75rem;
   word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .diff-to {
@@ -186,6 +191,11 @@ button:active {
   font-weight: 600;
   font-size: 0.75rem;
   word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .dark .diff-from { color: #f87171; }

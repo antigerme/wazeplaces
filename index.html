@@ -265,7 +265,7 @@
                 </div>
             </div>
 
-            <div id="cardStack" class="relative h-[600px] w-full max-w-[400px] mx-auto">
+            <div id="cardStack" class="relative h-[min(80dvh,640px)] min-h-[520px] w-full max-w-[400px] mx-auto">
                 <div id="loadingCard" class="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-sm rounded-3xl z-50">
                     <div class="text-center">
                         <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-500 mx-auto mb-4"></div>
@@ -319,7 +319,7 @@
                             <div class="flex-1 p-5 flex flex-col relative z-10 bg-white card-content">
                                 <div class="flex-1">
                                     <div class="flex items-start justify-between mb-3">
-                                        <h3 class="card-name text-2xl font-bold text-slate-800 leading-tight flex-1"></h3>
+                                        <h3 class="card-name text-2xl font-bold text-slate-800 leading-tight flex-1 line-clamp-2 break-words min-w-0"></h3>
                                         <a class="card-wme-link ml-2 p-2 bg-cyan-50 text-cyan-600 rounded-lg hover:bg-cyan-100 transition-colors" target="_blank" rel="noopener" title="Abrir no WME">
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                         </a>
@@ -334,7 +334,7 @@
                                             </div>
                                             <div class="flex-1 pt-1">
                                                 <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Categorias</p>
-                                                <span class="card-category text-sm text-slate-700 font-medium"></span>
+                                                <span class="card-category text-sm text-slate-700 font-medium line-clamp-2 break-words"></span>
                                             </div>
                                         </div>
 
@@ -347,14 +347,14 @@
                                             </div>
                                             <div class="flex-1 pt-1">
                                                 <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Endereço</p>
-                                                <span class="card-address text-sm text-slate-700 font-medium"></span>
+                                                <span class="card-address text-sm text-slate-700 font-medium line-clamp-2 break-words"></span>
                                             </div>
                                         </div>
 
                                         <div class="grid grid-cols-2 gap-3">
                                             <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
                                                 <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Tipo</p>
-                                                <span class="card-type text-sm text-slate-700 font-medium block"></span>
+                                                <span class="card-type text-sm text-slate-700 font-medium block line-clamp-2 break-words"></span>
                                             </div>
                                             <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
                                                 <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Criador</p>
@@ -362,16 +362,16 @@
                                             </div>
                                         </div>
 
-                                        <div class="card-brand-row hidden flex items-center gap-2">
-                                            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Marca:</span>
-                                            <span class="card-brand text-sm text-slate-700 font-medium"></span>
-                                            <span class="card-brand-known hidden text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700" title="Marca reconhecida pelo Waze">✓ conhecida</span>
-                                            <span class="card-brand-unknown hidden text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-700" title="Marca não está na lista oficial do Waze">? não listada</span>
+                                        <div class="card-brand-row hidden flex items-center gap-2 min-w-0">
+                                            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider flex-shrink-0">Marca:</span>
+                                            <span class="card-brand text-sm text-slate-700 font-medium truncate min-w-0 flex-1"></span>
+                                            <span class="card-brand-known hidden flex-shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700" title="Marca reconhecida pelo Waze">✓ conhecida</span>
+                                            <span class="card-brand-unknown hidden flex-shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-700" title="Marca não está na lista oficial do Waze">? não listada</span>
                                         </div>
 
                                         <div class="card-changes hidden bg-amber-50 border border-amber-100 rounded-xl p-3">
                                             <p class="text-xs font-semibold text-amber-700 uppercase tracking-wider mb-2">Mudanças propostas</p>
-                                            <div class="card-changes-list space-y-1"></div>
+                                            <div class="card-changes-list space-y-1 max-h-32 overflow-y-auto"></div>
                                         </div>
                                     </div>
                                 </div>
