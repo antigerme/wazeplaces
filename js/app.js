@@ -1,4 +1,4 @@
-const APP_VERSION = '2.8.0';
+const APP_VERSION = '2.9.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -69,6 +69,7 @@ function initApp() {
     setupAuthListeners();
     setupAppListeners();
     setupModalListeners();
+    setupLightbox();
     if (window.initSwipe) window.initSwipe();
 
     const savedToken = API.getSession();
@@ -135,6 +136,66 @@ function setupModalListeners() {
         $('filterState').disabled = checked;
         $('filterManagedArea').disabled = checked;
     });
+}
+
+const Lightbox = {
+    urls: [],
+    idx: 0,
+    newIdx: -1,
+    isOpen() {
+        return !document.getElementById('imageLightbox').classList.contains('hidden');
+    },
+    open(urls, startIdx, newImageIdx) {
+        if (!urls || urls.length === 0) return;
+        this.urls = urls;
+        this.idx = Math.max(0, Math.min(startIdx || 0, urls.length - 1));
+        this.newIdx = (newImageIdx !== undefined && newImageIdx !== null) ? newImageIdx : -1;
+        document.getElementById('imageLightbox').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        this._render();
+    },
+    close() {
+        document.getElementById('imageLightbox').classList.add('hidden');
+        document.body.style.overflow = '';
+        document.getElementById('lightboxImage').removeAttribute('src');
+    },
+    prev() {
+        if (this.urls.length < 2) return;
+        this.idx = (this.idx - 1 + this.urls.length) % this.urls.length;
+        this._render();
+    },
+    next() {
+        if (this.urls.length < 2) return;
+        this.idx = (this.idx + 1) % this.urls.length;
+        this._render();
+    },
+    _render() {
+        document.getElementById('lightboxImage').src = this.urls[this.idx];
+        const prevBtn = document.getElementById('lightboxPrev');
+        const nextBtn = document.getElementById('lightboxNext');
+        const count = document.getElementById('lightboxCount');
+        const badge = document.getElementById('lightboxNewBadge');
+        const multiple = this.urls.length > 1;
+        prevBtn.classList.toggle('hidden', !multiple);
+        nextBtn.classList.toggle('hidden', !multiple);
+        count.classList.toggle('hidden', !multiple);
+        if (multiple) count.textContent = `${this.idx + 1} / ${this.urls.length}`;
+        badge.classList.toggle('hidden', this.idx !== this.newIdx);
+    }
+};
+
+function setupLightbox() {
+    const lb = document.getElementById('imageLightbox');
+    document.getElementById('lightboxClose').addEventListener('click', () => Lightbox.close());
+    document.getElementById('lightboxPrev').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.prev(); });
+    document.getElementById('lightboxNext').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.next(); });
+    lb.addEventListener('click', (e) => {
+        if (e.target === lb) Lightbox.close();
+    });
+}
+
+function openLightbox(urls, startIdx, newImageIdx) {
+    Lightbox.open(urls, startIdx, newImageIdx);
 }
 
 function populateCountrySelect() {
@@ -242,6 +303,13 @@ function applyFiltersFromModal() {
 }
 
 function handleKeyDown(e) {
+    if (Lightbox.isOpen()) {
+        if (e.key === 'Escape') { e.preventDefault(); Lightbox.close(); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); Lightbox.prev(); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); Lightbox.next(); }
+        return;
+    }
+
     if (!AppState.currentPlace) return;
     if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
 
@@ -582,8 +650,15 @@ function renderCurrentCard() {
             newBorder.classList.toggle('hidden', !isNew);
         };
         img.classList.remove('hidden');
+        img.classList.add('cursor-zoom-in');
         noImg.classList.add('hidden');
         updateImage();
+
+        img.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            openLightbox(urls, currentImgIdx, newImageIdx);
+        });
 
         if (urls.length > 1) {
             imgNav.classList.remove('hidden');
