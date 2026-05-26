@@ -407,6 +407,17 @@
 
     </main>
 
+    <div id="imageLightbox" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[60] flex items-center justify-center select-none">
+        <button id="lightboxClose" type="button" aria-label="Fechar" class="absolute top-3 right-3 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-10 h-10 flex items-center justify-center text-xl transition-colors">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+        <button id="lightboxPrev" type="button" aria-label="Foto anterior" class="hidden absolute left-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">‹</button>
+        <button id="lightboxNext" type="button" aria-label="Próxima foto" class="hidden absolute right-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">›</button>
+        <span id="lightboxCount" class="hidden absolute top-3 left-3 z-10 text-white bg-black/40 text-sm font-medium px-3 py-1.5 rounded-full"></span>
+        <span id="lightboxNewBadge" class="hidden absolute top-3 left-1/2 -translate-x-1/2 z-10 text-3xl leading-none pointer-events-none" style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido">✨</span>
+        <img id="lightboxImage" class="max-w-full max-h-full object-contain" alt="">
+    </div>
+
     <div id="helpModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[80vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-4">
