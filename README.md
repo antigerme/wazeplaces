@@ -127,11 +127,12 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 2. Clique em **"Fazer Upload do cookies.txt"** e escolha o arquivo que você baixou (ou cole o conteúdo).
 3. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"**, seu **avatar do Waze e nome** aparecem no topo, e os cards começam a carregar (Brasil é o padrão).
 4. Pra trocar o **país** ou filtrar por **estado** ou **área gerenciada**, clique no ícone de **filtros 📂** no topo. Os países/estados aparecem em listas com nomes (sem precisar saber ID).
-5. Processe os pedidos:
-   - Use o **mouse / dedo** para arrastar os cards
-   - Use as **setas do teclado**: `←` Rejeitar · `↑` Pular · `→` Lido
-   - Use os **botões** abaixo do card se preferir
+5. Processe os pedidos arrastando os cards (ou usando as setas do teclado):
+   - **← (esquerda):** Rejeitar (lixo)
+   - **→ (direita):** Marcar como lido
+   - **↑ (cima):** Pular (não chama API, só passa pro próximo)
 6. Cometeu um erro? Tem uma **janela de 3 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
+7. O botão de **ajuda (?)** no topo abre um painel com os atalhos, instruções e o botão **"Sair e Limpar Dados"**.
 
 **Coisas que aparecem no card:**
 - **Marca** do place + selo "✓ conhecida" (se está na lista oficial do Waze) ou "? não listada" (suspeita)
