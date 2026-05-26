@@ -1,4 +1,4 @@
-const APP_VERSION = '2.5.1';
+const APP_VERSION = '2.6.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -264,6 +264,8 @@ function showAuthScreen() {
     document.getElementById('appScreen').classList.add('hidden');
     document.getElementById('filtersBtn').classList.add('hidden');
     document.getElementById('userProfileBadge').classList.add('hidden');
+    const brandTitle = document.getElementById('brandTitle');
+    if (brandTitle) brandTitle.classList.remove('hidden');
     AppState.authenticated = false;
     AppState.profile = null;
 }
@@ -338,16 +340,19 @@ function renderProfileHeader() {
     const rankEl = document.getElementById('userRank');
     if (p.profileImageUrl) {
         avatar.src = p.profileImageUrl;
+        avatar.style.display = '';
     } else {
         avatar.style.display = 'none';
     }
     nameEl.textContent = p.userName || '';
     const tags = [];
-    if (p.rank !== null && p.rank !== undefined) tags.push('L' + p.rank);
+    if (p.rank !== null && p.rank !== undefined) tags.push('L' + (p.rank + 1));
     if (p.isStaff) tags.push('Staff');
     else if (p.isAreaManager) tags.push('AM');
     rankEl.textContent = tags.join(' · ');
     badge.classList.remove('hidden');
+    const brandTitle = document.getElementById('brandTitle');
+    if (brandTitle) brandTitle.classList.add('hidden');
 }
 
 async function handleLogout() {
@@ -599,25 +604,6 @@ function renderCurrentCard() {
         changesList.innerHTML = html;
         changesBox.classList.remove('hidden');
     }
-
-    card.querySelector('.reject-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        if (window.triggerSwipe) window.triggerSwipe('left', handleReject);
-        else handleReject();
-    });
-    card.querySelector('.approve-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        if (window.triggerSwipe) window.triggerSwipe('right', handleMarkAsRead);
-        else handleMarkAsRead();
-    });
-    card.querySelector('.skip-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        if (window.triggerSwipe) window.triggerSwipe('up', handleSkip);
-        else handleSkip();
-    });
 
     removeCurrentCardEl();
     document.getElementById('cardStack').appendChild(card);

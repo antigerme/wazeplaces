@@ -32,21 +32,21 @@
 <body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen text-slate-800 antialiased selection:bg-blue-200">
 
     <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-slate-200/50">
-        <div class="container mx-auto px-4 py-4 flex items-center justify-between max-w-md">
-            <div class="flex items-center space-x-3">
-                <div class="bg-gradient-to-tr from-cyan-500 to-blue-500 p-2 rounded-xl shadow-sm">
-                    <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+        <div class="container mx-auto px-4 py-3 flex items-center justify-between gap-2 max-w-md">
+            <div id="brandBlock" class="flex items-center space-x-2 min-w-0">
+                <div class="bg-gradient-to-tr from-cyan-500 to-blue-500 p-1.5 rounded-lg shadow-sm flex-shrink-0">
+                    <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
                     </svg>
                 </div>
-                <h1 class="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-600">Waze Places</h1>
+                <h1 id="brandTitle" class="text-base font-bold tracking-tight text-slate-700 truncate">Waze Places</h1>
             </div>
-            <div id="userProfileBadge" class="hidden flex items-center gap-2 mx-auto">
-                <img id="userAvatar" class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100" alt="">
-                <div class="leading-tight">
-                    <p id="userName" class="text-xs font-bold text-slate-700"></p>
-                    <p id="userRank" class="text-[10px] text-slate-400 uppercase tracking-wider"></p>
+            <div id="userProfileBadge" class="hidden flex items-center gap-2 min-w-0 flex-1 justify-end">
+                <div class="leading-tight text-right min-w-0">
+                    <p id="userName" class="text-xs font-bold text-slate-700 truncate"></p>
+                    <p id="userRank" class="text-[10px] text-slate-400 uppercase tracking-wider truncate"></p>
                 </div>
+                <img id="userAvatar" class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100 flex-shrink-0" alt="">
             </div>
             <div class="flex items-center gap-1">
                 <button id="themeBtn" type="button" aria-label="Alternar tema" class="p-2 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
@@ -62,7 +62,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
                     </svg>
                 </button>
-                <button id="helpBtn" type="button" aria-label="Ajuda" class="p-2 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
+                <button id="helpBtn" type="button" aria-label="Ajuda e configurações" title="Ajuda, atalhos, sair" class="p-2 text-cyan-600 hover:text-white hover:bg-cyan-500 bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
@@ -73,7 +73,7 @@
 
     <main class="container mx-auto px-4 py-6 max-w-md">
 
-        <div id="authScreen" class="space-y-6">
+        <div id="authScreen" class="space-y-4">
             <div class="bg-white/90 backdrop-blur-xl rounded-3xl shadow-xl border border-white/20 p-8 transform transition-all">
                 <div class="text-center mb-8">
                     <h2 class="text-3xl font-extrabold text-slate-800 mb-2">Bem-vindo!</h2>
@@ -242,7 +242,7 @@
             </div>
         </div>
 
-        <div id="appScreen" class="hidden space-y-6">
+        <div id="appScreen" class="hidden space-y-4">
 
             <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-4">
                 <div class="grid grid-cols-4 text-center divide-x divide-slate-100">
@@ -375,38 +375,12 @@
                                         </div>
                                     </div>
                                 </div>
-
-                                <div class="mt-6 flex gap-3 pt-4 border-t border-slate-100">
-                                    <button type="button" class="reject-btn flex-1 bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2">
-                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
-                                        <span>Rejeitar</span>
-                                    </button>
-                                    <button type="button" class="skip-btn px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-3 rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-1" title="Pular (não chama API)">
-                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg>
-                                    </button>
-                                    <button type="button" class="approve-btn flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2">
-                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
-                                        <span>Lido</span>
-                                    </button>
-                                </div>
                             </div>
                         </div>
                     </div>
                 </template>
             </div>
 
-            <div class="text-center px-4 mt-2">
-                <p class="text-xs font-medium text-slate-400 bg-slate-100 inline-block px-4 py-2 rounded-full">
-                    ← Rejeitar &nbsp;·&nbsp; ↑ Pular &nbsp;·&nbsp; → Lido
-                </p>
-            </div>
-
-            <div class="text-center pt-4">
-                <button id="logoutBtn" type="button" class="text-slate-400 hover:text-rose-500 font-medium text-sm transition-colors flex items-center justify-center mx-auto space-x-1">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
-                    <span>Sair e Limpar Dados</span>
-                </button>
-            </div>
         </div>
 
     </main>
@@ -423,29 +397,41 @@
             </div>
 
             <div class="space-y-4 text-slate-600">
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <h4 class="font-semibold text-slate-800 mb-2 text-sm uppercase tracking-wider">Como processar</h4>
+                    <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div class="bg-white border border-rose-100 rounded-lg p-2">
+                            <div class="text-rose-500 font-bold text-lg leading-none mb-1">←</div>
+                            <div class="text-slate-700 font-medium">Rejeitar</div>
+                            <div class="text-slate-400 text-[10px]">arrastar esq.</div>
+                        </div>
+                        <div class="bg-white border border-amber-100 rounded-lg p-2">
+                            <div class="text-amber-500 font-bold text-lg leading-none mb-1">↑</div>
+                            <div class="text-slate-700 font-medium">Pular</div>
+                            <div class="text-slate-400 text-[10px]">arrastar cima</div>
+                        </div>
+                        <div class="bg-white border border-emerald-100 rounded-lg p-2">
+                            <div class="text-emerald-500 font-bold text-lg leading-none mb-1">→</div>
+                            <div class="text-slate-700 font-medium">Lido</div>
+                            <div class="text-slate-400 text-[10px]">arrastar dir.</div>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-2">Use mouse/dedo, setas do teclado, ou arraste o card.</p>
+                </div>
+
                 <div>
                     <h4 class="font-semibold text-slate-800 mb-2">Como usar:</h4>
                     <ol class="list-decimal list-inside space-y-1 text-sm">
                         <li>Faça login no Waze Map Editor no seu navegador</li>
                         <li>Exporte seus cookies usando uma extensão de navegador</li>
                         <li>Faça upload ou cole o conteúdo do <code>cookies.txt</code></li>
-                        <li>Arraste os cards ou use os botões para processar</li>
+                        <li>Processe os cards (arraste ou use setas do teclado)</li>
                     </ol>
                 </div>
 
                 <div>
-                    <h4 class="font-semibold text-slate-800 mb-2">Ações:</h4>
-                    <ul class="list-disc list-inside space-y-1 text-sm">
-                        <li><strong>← / Rejeitar:</strong> Recusa o pedido (lixo)</li>
-                        <li><strong>→ / Lido:</strong> Marca como lido (decide depois no WME)</li>
-                        <li><strong>↑ / Pular:</strong> Não chama a API, só passa pro próximo</li>
-                        <li><strong>Botão ↗ no card:</strong> abre o place direto no WME</li>
-                    </ul>
-                </div>
-
-                <div>
                     <h4 class="font-semibold text-slate-800 mb-2">Importante:</h4>
-                    <p class="text-sm">Esta aplicação <strong>nunca aprova</strong> places — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão de link externo no card.</p>
+                    <p class="text-sm">Esta aplicação <strong>nunca aprova</strong> places — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs">↗</span> no card.</p>
                 </div>
 
                 <div>
@@ -459,6 +445,13 @@
                         <li><strong>Chrome/Edge:</strong> "Get cookies.txt LOCALLY"</li>
                         <li><strong>Firefox:</strong> "cookies.txt"</li>
                     </ul>
+                </div>
+
+                <div class="pt-3 border-t border-slate-200">
+                    <button id="logoutBtn" type="button" class="w-full bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                        <span>Sair e Limpar Dados</span>
+                    </button>
                 </div>
             </div>
         </div>
