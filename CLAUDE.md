@@ -291,6 +291,8 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 14. **CSP do `.htaccess` precisa permitir domínios externos do Waze**. Browser aplica a INTERSEÇÃO de todas as CSPs ativas (header HTTP + meta) — vence a mais restritiva. Quando a do header era apenas `connect-src 'self'`, fetches de fonts/imagens externos eram bloqueados. Lista mínima atualmente: `img-src` precisa de `venue-image.waze.com` (fotos de places) e `social-row.waze.com` (avatar do perfil); `connect-src` precisa dos mesmos + `fonts.googleapis.com` e `fonts.gstatic.com` (caso o SW velho intercepte antes de atualizar). **Sempre que adicionar um host externo na app, atualizar a CSP no `.htaccess` E no `<meta>` do `index.html`** — manter as duas em sync.
 
+15. **Gate de acesso (`isUserAllowed` em `config.php`)**: a app só permite login pra editores **`isStaff` OU `(rank >= MIN_RANK_WAZE && isAreaManager)`**. Como o Waze usa rank 0-indexed e a UI mostra `rank + 1`, `MIN_RANK_WAZE = 2` significa "display L3+". Mudar o critério aqui afeta todo login. `testar-cookies.php` chama `/Session` como smoke test e nega `createSession` se não passar — frontend mostra modal `accessDeniedModal` com perfil do user e mensagem clara, sem persistir nada. Bloqueio acontece no backend; **não dá pra burlar editando JS**.
+
 ---
 
 ## 🛠 Workflows típicos

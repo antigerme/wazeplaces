@@ -1,4 +1,4 @@
-const APP_VERSION = '2.7.2';
+const APP_VERSION = '2.8.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -95,6 +95,7 @@ function setupAuthListeners() {
     $('byAuthor').addEventListener('click', () => {
         window.open('https://www.waze.com/user/editor/antigerme', '_blank');
     });
+    $('closeAccessDenied').addEventListener('click', () => $('accessDeniedModal').classList.add('hidden'));
 
     const regionSelect = $('regionSelect');
     regionSelect.value = API.getRegion();
@@ -309,12 +310,33 @@ async function authenticateWithCookies(cookies) {
             loadProfileAndAuxData();
             startFetching();
             showToast('Autenticado com sucesso!', 'success');
+        } else if (result.errorCategory === 'access_denied') {
+            showAccessDenied(result);
         } else {
             showToast(result.error || 'Cookies inválidos', 'error');
         }
     } catch (error) {
         showToast('Erro ao validar cookies', 'error');
     }
+}
+
+function showAccessDenied(result) {
+    const modal = document.getElementById('accessDeniedModal');
+    const msg = document.getElementById('accessDeniedMessage');
+    const profileBox = document.getElementById('accessDeniedProfile');
+    msg.textContent = result.error || 'Acesso negado.';
+    if (result.profile && result.profile.userName) {
+        const p = result.profile;
+        const displayRank = (p.rank !== null && p.rank !== undefined) ? ('L' + (p.rank + 1)) : '';
+        const tags = [];
+        if (displayRank) tags.push(displayRank);
+        tags.push(p.isStaff ? 'Staff' : (p.isAreaManager ? 'AM' : 'não-AM'));
+        profileBox.innerHTML = `<strong>${escapeHtml(p.userName)}</strong> <span class="text-slate-400">· ${escapeHtml(tags.join(' · '))}</span>`;
+        profileBox.classList.remove('hidden');
+    } else {
+        profileBox.classList.add('hidden');
+    }
+    modal.classList.remove('hidden');
 }
 
 async function loadProfileAndAuxData() {
