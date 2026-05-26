@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-places-v5';
+const CACHE_NAME = 'waze-places-v6';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -40,15 +40,13 @@ self.addEventListener('message', event => {
 });
 
 self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
+
   const url = new URL(event.request.url);
 
-  if (url.pathname.startsWith('/api/')) {
-    return;
-  }
+  if (url.origin !== self.location.origin) return;
 
-  if (event.request.method !== 'GET') {
-    return;
-  }
+  if (url.pathname.startsWith('/api/')) return;
 
   const isHTML = event.request.mode === 'navigate' ||
     (event.request.headers.get('accept') || '').includes('text/html');
@@ -77,6 +75,6 @@ self.addEventListener('fetch', event => {
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseToCache));
         return response;
       });
-    }).catch(() => caches.match('/index.html'))
+    })
   );
 });

@@ -4,6 +4,12 @@
 # este arquivo é ignorado — a app ainda funciona, só perde cache/headers
 # extras.
 
+# mod_pagespeed reordena/combina/minifica scripts e quebra a ordem de
+# carregamento (api.js precisa vir antes de app.js). Desabilita pra esta app.
+<IfModule pagespeed_module>
+    ModPagespeed off
+</IfModule>
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
