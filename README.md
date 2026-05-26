@@ -321,6 +321,32 @@ cd /var/www/html/wazeplaces && sudo git pull && sudo restorecon -R .
 sudo certbot --apache -d seudominio.com
 ```
 
+#### Atrás de Cloudflare (ou outro CDN/proxy reescritor)
+
+Se você for usar Cloudflare na frente da app, **desabilite** essas features no painel da CF — elas reescrevem o HTML/JS e quebram a app:
+
+| Feature | Onde fica | Por quê desabilitar |
+|---|---|---|
+| **Rocket Loader** | Speed → Optimization → Content Optimization | Carrega scripts em modo async e quebra a ordem `api.js → app.js` (`API is not defined`) |
+| **Auto Minify** (JS) | Speed → Optimization → Content Optimization | Pode estragar templates do Tailwind e comentários funcionais |
+| **Mirage** / **Polish** | Speed → Optimization → Image Optimization | Mexem em imagens de places (URLs já são CDN do Waze, não precisa) |
+| **Email Obfuscation** | Scrape Shield | Insere `<script>` injetado no HTML, pode bagunçar layout |
+| **Web Analytics** beacon | Analytics → Web Analytics | Insere `<script defer>` em `cloudflareinsights.com`. Não quebra a app desde a v2.6.1, mas é um request a mais |
+| **Script Monitor** (Page Shield) | Security → Page Shield | Adiciona header `content-security-policy-report-only` com `connect-src 'none'` e enche o console de avisos (não bloqueia, só ruído) |
+
+Funções da CF que **vale a pena manter**:
+- **Caching** (estáticos)
+- **TLS / HTTPS**
+- **WAF / Bot Fight Mode** (com cuidado — `Bot Fight Mode` muito agressivo pode fazer challenge para o próprio editor)
+- **Brotli/Gzip compression**
+
+A app já tem defesa contra parte desses casos:
+- O service worker (v6+) **ignora requests cross-origin** (não intercepta beacon do CF, etc)
+- O service worker **não usa mais `index.html` como fallback para JS** (evitava o caso clássico em que um `api.js` falho era servido como HTML, causando `API is not defined`)
+- O `.htaccess` desabilita `mod_pagespeed` (que também reescreve JS no Apache do RHEL)
+
+Se mesmo assim aparecer `Uncaught ReferenceError: API is not defined`, abra o DevTools → Application → Service Workers → Unregister e Application → Storage → Clear site data, depois recarregue (Ctrl+Shift+R).
+
 ### Desenvolvendo
 
 Os scripts `start.sh` e `start.bat` configuram `PHP_CLI_SERVER_WORKERS=4` por padrão e chamam `php -S 0.0.0.0:8080`. Esse flag é **essencial** — sem ele o servidor builtin do PHP atende uma request por vez, e cada cURL ao Waze leva 1-2s, bloqueando todas as outras requisições e fazendo a app parecer travada.

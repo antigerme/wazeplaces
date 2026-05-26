@@ -283,6 +283,12 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 10. **Não exponha cookies em logs/toasts**. São credenciais.
 
+11. **Service worker NÃO pode usar `caches.match('/index.html')` como fallback genérico** para requests não-HTML. Em produção atrás de Cloudflare/mod_pagespeed, se um JS falha por qualquer motivo, o fallback retornava HTML como resposta de `api.js` → o browser engasga e `const API = {...}` nunca executa → toast "API is not defined" no `app.js`. Desde v6: fetch nativo segue, sem fallback HTML pra assets. **Também ignorar requests cross-origin** (`url.origin !== self.location.origin → return`) — senão o SW intercepta o `cloudflareinsights.com/beacon.min.js` e dá `TypeError: Failed to convert value to 'Response'`.
+
+12. **Atrás de Cloudflare**: desabilitar **Rocket Loader**, **Auto Minify**, **Script Monitor** (Page Shield). Esses reescrevem HTML/JS. Documentado em detalhe no README seção "Atrás de Cloudflare".
+
+13. **Apache do RHEL costuma vir com `mod_pagespeed` habilitado** por padrão, que também reordena/combina/minifica scripts e quebra a ordem `api.js → app.js`. O `.htaccess` da app desabilita via `<IfModule pagespeed_module>ModPagespeed off</IfModule>`.
+
 ---
 
 ## 🛠 Workflows típicos
