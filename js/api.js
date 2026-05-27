@@ -7,15 +7,24 @@ const API = {
     setSession(token) {
         this.sessionToken = token;
         if (token) {
-            sessionStorage.setItem('waze_session_token', token);
+            localStorage.setItem('waze_session_token', token);
         } else {
-            sessionStorage.removeItem('waze_session_token');
+            localStorage.removeItem('waze_session_token');
         }
     },
 
     getSession() {
         if (!this.sessionToken) {
-            this.sessionToken = sessionStorage.getItem('waze_session_token');
+            this.sessionToken = localStorage.getItem('waze_session_token');
+            // Migração de versões anteriores que usavam sessionStorage (some ao fechar aba).
+            if (!this.sessionToken) {
+                const legacy = sessionStorage.getItem('waze_session_token');
+                if (legacy) {
+                    localStorage.setItem('waze_session_token', legacy);
+                    sessionStorage.removeItem('waze_session_token');
+                    this.sessionToken = legacy;
+                }
+            }
         }
         return this.sessionToken;
     },
