@@ -220,16 +220,23 @@ try {
                 'lon' => null
             ];
 
+            // GeoJSON: Point [lon,lat], Polygon [[[lon,lat],...]], MultiPolygon [[[[lon,lat],...]]].
+            // Desce recursivamente até achar o primeiro par [lon, lat] numérico.
+            $extractLonLat = function($coords) use (&$extractLonLat) {
+                if (!is_array($coords) || count($coords) === 0) return null;
+                if (is_numeric($coords[0]) && isset($coords[1]) && is_numeric($coords[1])) {
+                    return [$coords[0], $coords[1]];
+                }
+                if (is_array($coords[0])) {
+                    return $extractLonLat($coords[0]);
+                }
+                return null;
+            };
             if (isset($venue['geometry']['coordinates'])) {
-                $coords = $venue['geometry']['coordinates'];
-                if (is_array($coords) && count($coords) >= 2) {
-                    if (is_numeric($coords[0])) {
-                        $place['lon'] = $coords[0];
-                        $place['lat'] = $coords[1];
-                    } elseif (is_array($coords[0]) && is_array($coords[0][0]) && count($coords[0][0]) >= 2) {
-                        $place['lon'] = $coords[0][0][0];
-                        $place['lat'] = $coords[0][0][1];
-                    }
+                $pair = $extractLonLat($venue['geometry']['coordinates']);
+                if ($pair) {
+                    $place['lon'] = $pair[0];
+                    $place['lat'] = $pair[1];
                 }
             }
 

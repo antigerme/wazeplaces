@@ -1,4 +1,4 @@
-const APP_VERSION = '2.10.1';
+const APP_VERSION = '2.10.2';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -641,11 +641,14 @@ function renderCurrentCard() {
     const wmeLink = card.querySelector('.card-wme-link');
     const region = API.getRegion();
     const envParam = region === 'na' ? 'usa' : region;
+    const wmeParams = [`env=${envParam}`];
     if (place.lat && place.lon) {
-        wmeLink.href = `https://www.waze.com/editor?env=${envParam}&lat=${place.lat}&lon=${place.lon}&zoom=18`;
-    } else {
-        wmeLink.href = `https://www.waze.com/editor?env=${envParam}`;
+        wmeParams.push(`lat=${place.lat}`, `lon=${place.lon}`, 'zoomLevel=22');
     }
+    if (place.updateRequestID) {
+        wmeParams.push(`venueUpdateRequest=${encodeURIComponent(place.updateRequestID)}`);
+    }
+    wmeLink.href = `https://www.waze.com/pt-BR/editor?${wmeParams.join('&')}`;
 
     const img = card.querySelector('.card-image');
     const noImg = card.querySelector('.card-no-image');
