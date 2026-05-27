@@ -1,4 +1,4 @@
-const APP_VERSION = '2.10.2';
+const APP_VERSION = '2.10.3';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -645,8 +645,11 @@ function renderCurrentCard() {
     if (place.lat && place.lon) {
         wmeParams.push(`lat=${place.lat}`, `lon=${place.lon}`, 'zoomLevel=22');
     }
-    if (place.updateRequestID) {
-        wmeParams.push(`venueUpdateRequest=${encodeURIComponent(place.updateRequestID)}`);
+    // O parâmetro venueUpdateRequest do WME espera o venueID (formato dotted
+    // tipo "205522459.2055159053.3242788"), NÃO o id do venueUpdateRequest
+    // (que é um UUID). Confirmado via HAR comparando URL do WME nativo.
+    if (place.venueID) {
+        wmeParams.push(`venueUpdateRequest=${encodeURIComponent(place.venueID)}`);
     }
     wmeLink.href = `https://www.waze.com/pt-BR/editor?${wmeParams.join('&')}`;
 
