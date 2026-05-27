@@ -138,6 +138,12 @@ try {
     if (isset($responseData['venues']['objects']) && is_array($responseData['venues']['objects'])) {
         foreach ($responseData['venues']['objects'] as $venue) {
             if (!isset($venue['venueUpdateRequests'][0])) continue;
+
+            // Filtra venues sem permissão de edição: Waze devolve permissions como bitmask
+            // signed 32-bit. permissions < 0 (ex: -1) = bits setados = pode editar.
+            // permissions >= 0 (ex: 0) = sem permissão. Campo ausente → não filtra (defensivo).
+            if (isset($venue['permissions']) && $venue['permissions'] >= 0) continue;
+
             $updateRequest = $venue['venueUpdateRequests'][0];
 
             $creatorId = $updateRequest['createdBy'] ?? null;

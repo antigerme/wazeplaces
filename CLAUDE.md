@@ -130,6 +130,16 @@ Volta `{ success, places[], hasMore, page, total }`. Cada `place`:
 
 O Waze **devolve todos os places de uma vez** numa única chamada (`hasMore: false` normalmente) — confirmado via HAR: ~200 places, response de ~2MB. O WME pagina client-side em chunks de 30. Nossa app trata tudo como uma queue local.
 
+### Filtro de permissão de edição
+
+`buscar-places.php` **descarta** venues que o usuário logado não pode editar antes de devolver pra app. Campo `venue.permissions` é um **bitmask signed 32-bit**:
+
+- `permissions < 0` (ex: `-1` = todos os bits) → pode editar → **entra na fila**
+- `permissions >= 0` (ex: `0` = nenhum bit) → sem permissão → **silenciosamente descartado**
+- Campo ausente → entra (defensivo)
+
+Resultado: `serverTotal`/header "Restam" reflete apenas o que o usuário pode realmente tratar. Sem badge 🔒, sem atalhos desabilitados — o PUR simplesmente não aparece. Tradeoff: perde-se visibilidade de "total da minha região no Waze". Se precisar adicionar, expor um segundo contador (`totalAll` × `editáveis`).
+
 ---
 
 ## ⚠️ Race conditions e categorização de erros (IMPORTANTE)
