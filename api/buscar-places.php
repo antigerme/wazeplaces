@@ -147,6 +147,8 @@ try {
             $reqType = $updateRequest['type'] ?? '';
             $reqSubType = $updateRequest['subType'] ?? '';
             $changes = [];
+            $isDelete = false;
+            $flagComment = null;
 
             if ($reqType === 'VENUE') {
                 $updateTypeStr = 'Novo Local';
@@ -154,6 +156,10 @@ try {
                 $updateTypeStr = 'Nova Foto';
             } elseif ($reqType === 'REQUEST' && $reqSubType === 'FLAG') {
                 $updateTypeStr = 'Reporte (Sinalização)';
+                $flagComment = trim((string)($updateRequest['flagComment'] ?? '')) ?: null;
+            } elseif ($reqType === 'REQUEST' && $reqSubType === 'DELETE') {
+                $updateTypeStr = 'Pedido de remoção';
+                $isDelete = true;
             } elseif ($reqType === 'REQUEST' && $reqSubType === 'UPDATE') {
                 if (isset($updateRequest['changedVenue']) && is_array($updateRequest['changedVenue'])) {
                     foreach ($updateRequest['changedVenue'] as $k => $newValue) {
@@ -194,6 +200,10 @@ try {
                 'updateType' => $updateTypeStr,
                 'reqType' => $reqType,
                 'reqSubType' => $reqSubType,
+                'isDelete' => $isDelete,
+                'flagComment' => $flagComment,
+                'dateAdded' => $updateRequest['dateAdded'] ?? null,
+                'isStarred' => !empty($updateRequest['isStarred']),
                 'createdBy' => $creatorName,
                 'imageUrl' => null,
                 'imageUrls' => [],

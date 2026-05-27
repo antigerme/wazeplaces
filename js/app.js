@@ -1,4 +1,4 @@
-const APP_VERSION = '2.9.1';
+const APP_VERSION = '2.10.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -615,6 +615,29 @@ function renderCurrentCard() {
     card.querySelector('.card-type').textContent = place.updateType || 'Tipo desconhecido';
     card.querySelector('.card-creator').textContent = place.createdBy || 'Desconhecido';
 
+    if (place.isDelete) {
+        card.querySelector('.card-delete-banner').classList.remove('hidden');
+    }
+
+    if (place.isStarred) {
+        card.querySelector('.card-starred').classList.remove('hidden');
+    }
+
+    const ageStr = formatRelativeTime(place.dateAdded);
+    if (ageStr) {
+        const ageEl = card.querySelector('.card-age');
+        ageEl.textContent = ageStr;
+        ageEl.title = new Date(place.dateAdded).toLocaleString('pt-BR');
+        ageEl.classList.remove('hidden');
+    }
+
+    if (place.flagComment) {
+        const box = card.querySelector('.card-flag-comment');
+        const text = card.querySelector('.card-flag-comment-text');
+        text.textContent = place.flagComment;
+        box.classList.remove('hidden');
+    }
+
     const wmeLink = card.querySelector('.card-wme-link');
     const region = API.getRegion();
     const envParam = region === 'na' ? 'usa' : region;
@@ -721,6 +744,24 @@ function showNoPlaces() {
     removeCurrentCardEl();
     showLoading(false);
     document.getElementById('noMoreCards').classList.remove('hidden');
+}
+
+function formatRelativeTime(ts) {
+    if (!ts || typeof ts !== 'number' || ts <= 0) return null;
+    const diff = Date.now() - ts;
+    if (diff < 0) return 'agora';
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60) return 'agora';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `há ${min}min`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `há ${hr}h`;
+    const days = Math.floor(hr / 24);
+    if (days < 30) return `há ${days}d`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return `há ${months}m`;
+    const years = Math.floor(days / 365);
+    return `há ${years}a`;
 }
 
 function escapeHtml(str) {
