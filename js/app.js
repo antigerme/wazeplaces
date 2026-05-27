@@ -1,4 +1,4 @@
-const APP_VERSION = '2.11.0';
+const APP_VERSION = '2.11.1';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';

@@ -27,7 +27,7 @@ define('WAZE_IMAGE_BASE', 'https://venue-image.waze.com/thumbs/thumb700_');
 define('USER_AGENT', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36');
 
 define('SESSION_DIR', sys_get_temp_dir() . '/waze_places_sessions');
-define('SESSION_TTL', 2592000); // 30 dias — touch a cada uso. Cookies do Waze duram semanas; quando expirarem de verdade o backend devolve 401 e o frontend cai pra authScreen.
+define('SESSION_TTL', 1814400); // 21 dias — touch a cada uso. Cookies do Waze duram ~28 dias; deixamos folga de 7 dias pra evitar 401 inesperado. Quando expirarem, backend devolve 401 e frontend cai pra authScreen.
 define('SESSION_KEY_FILE', sys_get_temp_dir() . '/waze_places.key');
 
 function wazeIssuesEndpoint($region) {

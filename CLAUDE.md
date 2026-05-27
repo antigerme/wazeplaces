@@ -89,7 +89,7 @@ Os scripts respeitam env vars `PHP_CLI_SERVER_WORKERS`, `PORT`, `HOST` se já es
    - Retorna `sessionToken` (32 bytes base64) ao client
 4. Client armazena o `sessionToken` em `localStorage` (persiste entre abas e dias) e usa em **todas** as chamadas seguintes
 5. Cookies originais **nunca mais trafegam** após o login
-6. Sessão expira em 30 dias (`SESSION_TTL` em `config.php`); cada uso renova via `touch()`. Quando os cookies do Waze expiram de verdade, o backend devolve 401 e o frontend invalida a sessão local (`API.setSession(null)` + `showAuthScreen`)
+6. Sessão expira em 21 dias (`SESSION_TTL` em `config.php`); cada uso renova via `touch()`. Cookies do Waze duram ~28 dias — TTL menor dá folga de 1 semana. Quando os cookies expiram de verdade, o backend devolve 401 e o frontend invalida a sessão local (`API.setSession(null)` + `showAuthScreen`)
 7. Limpeza de sessões expiradas acontece automaticamente em cada `createSession`
 
 **Por que `/tmp` e não `api/.encryption-key`?** Apache do Red Hat tem `PrivateTmp=yes` no systemd, então `/tmp` é isolado do Apache — só ele lê/escreve. Vantagem: **zero permissão de escrita** necessária no DocumentRoot. Editor avançado faz `git clone /var/www/html/wazeplaces` + `restorecon -R` + `setsebool -P httpd_can_network_connect 1` e acabou.

@@ -294,7 +294,7 @@ Importante: a checagem do `errorList[0].code` acontece **antes** da regra `5xx �
 
 - **Cookies trafegam apenas no login.** O backend troca por um session token e os cookies originais ficam criptografados (AES-256-CBC) em `/tmp/waze_places_sessions/sess_<hash>` com permissão `0600`.
 - **Chave de encriptação** é gerada uma única vez em `/tmp/waze_places.key` (`0600`). No Apache do Red Hat, `/tmp` é isolado por `PrivateTmp=yes` (systemd), então só o próprio Apache lê/escreve. Se o Apache reinicia, chave nova e sessões antigas viram inválidas — usuários fazem login novamente.
-- **TTL de sessão:** 30 dias (`SESSION_TTL` em `api/config.php`). Cada uso renova o tempo (touch). Token fica em `localStorage` (persiste entre abas/dias). Quando os cookies do Waze expiram de verdade, o backend devolve 401 e o frontend cai pra tela de login automaticamente.
+- **TTL de sessão:** 21 dias (`SESSION_TTL` em `api/config.php`). Cada uso renova o tempo (touch). Token fica em `localStorage` (persiste entre abas/dias). Cookies do Waze duram ~28 dias — o TTL menor garante folga de uma semana, evitando que o usuário caia num 401 inesperado no meio de uma ação. Quando os cookies do Waze expiram de verdade, o backend devolve 401 e o frontend cai pra tela de login automaticamente.
 - **Arquivos temporários** de cookies usados pelo cURL têm `0600` e são deletados imediatamente após cada chamada.
 - **Sessões expiradas** são limpas automaticamente em cada criação de sessão.
 - **CSP** definida em `index.html` e no `.htaccess` (precisa `unsafe-eval` por causa do Tailwind via JS — remova ao pré-compilar).
