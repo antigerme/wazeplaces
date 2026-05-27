@@ -223,11 +223,12 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 ## ⚡ Service Worker e versionamento
 
-- `CACHE_NAME = 'waze-places-vN'` em `service-worker.js` — **bump quando mudar HTML/CSS/JS** pra invalidar cache
+- `CACHE_NAME = 'waze-places-vN'` em `service-worker.js` — **OBRIGATÓRIO: bump em TODA PR que toque em `index.html`, qualquer arquivo `js/`, `css/`, ou `icons/`**. Sem isso, users que já têm o SW instalado continuam vendo a versão velha (cache-first pra assets). Bug típico: "feature X parou de funcionar" depois de várias PRs sem bump.
+- Checklist antes do PR: tocou em `index.html` / `js/*.js` / `css/*.css` / `icons/*`? → bump `CACHE_NAME` E `APP_VERSION`.
 - HTML: **network-first** (sempre tenta fresh, fallback cache); assets: **cache-first**
 - `/api/*` NÃO é interceptado (sempre vai direto à rede)
 - **Auto-update**: detecta nova versão via `registration.updatefound` → posta `SKIP_WAITING` → `controllerchange` dispara reload **apenas se já havia controller anterior** (evita flicker na primeira instalação)
-- `APP_VERSION` em `js/app.js` vai no rodapé (`#appVersionDisplay`) — bump em conjunto com `CACHE_NAME` quando relevante. Usa **semver suave**: `MAJOR.MINOR.PATCH` (não tem release process rígido)
+- `APP_VERSION` em `js/app.js` vai no rodapé (`#appVersionDisplay`) — sobe junto com `CACHE_NAME`. Usa **semver suave**: `MAJOR.MINOR.PATCH` (não tem release process rígido)
 
 ---
 
@@ -299,6 +300,8 @@ Bugs já encontrados e corrigidos — **não repita**:
     - Adicionou novo cálculo de rank? Confira nos dois lados (display vs comparação). Confundir os dois é fonte garantida de bug silencioso (todo mundo permitido / ninguém permitido)
 
 16. **Gate de acesso (`isUserAllowed` em `config.php`)**: a app só permite login pra editores **`isStaff` OU `(rank >= MIN_RANK_WAZE && isAreaManager)`**. Como o Waze usa rank 0-indexed e a UI mostra `rank + 1`, `MIN_RANK_WAZE = 2` significa "display L3+". Mudar o critério aqui afeta todo login. `testar-cookies.php` chama `/Session` como smoke test e nega `createSession` se não passar — frontend mostra modal `accessDeniedModal` com perfil do user e mensagem clara, sem persistir nada. Bloqueio acontece no backend; **não dá pra burlar editando JS**.
+
+17. **Esquecer de bumpar `CACHE_NAME` do SW é o bug mais ranzinza do projeto**. Já aconteceu múltiplas vezes: PR adiciona feature em JS, deploy ok, mas users que já tinham o SW instalado **continuam vendo a versão velha por dias** porque SW é cache-first pra assets. Sintoma típico: "feature X parou de funcionar" relatado por um user, mas outros confirmam que funciona (cache deles é mais novo). **Cheque-list**: tocou em `index.html`, `js/*`, `css/*`, ou `icons/*`? → bump `CACHE_NAME` no `service-worker.js` E `APP_VERSION` no `js/app.js` juntos no mesmo commit. Se passou batido, basta um PR posterior fazendo só o bump pra liberar pra todos.
 
 ---
 
