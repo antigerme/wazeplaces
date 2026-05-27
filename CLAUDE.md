@@ -296,7 +296,7 @@ Bugs já encontrados e corrigidos — **não repita**:
     - **Toda comparação interna** usa o valor cru do Waze (`MIN_RANK_WAZE = 2` no gate = "display L3+")
     - **Mensagens de erro/permissão** que citam nível devem mostrar `rank + 1` pra não confundir o user
     - Owner disse explicitamente: "um editor nível 1 nos dados do Waze aparece como nível 0, um editor nível 6 aparece como nível 5"
-    - Adicionou novo cálculo de rank? Confira nos dois lados (display vs comparação). Confundir os dois é fonte garantida de bug silencioso (todo mundo permitido / ninguém permitido)
+    - Adicionou novo cálculo de rank? Confira nos dois lados (display vs comparação). Confundir os dois é fonte garantida de bug com erro silencioso (todo mundo permitido / ninguém permitido)
 
 16. **Gate de acesso (`isUserAllowed` em `config.php`)**: a app só permite login pra editores **`isStaff` OU `(rank >= MIN_RANK_WAZE && isAreaManager)`**. Como o Waze usa rank 0-indexed e a UI mostra `rank + 1`, `MIN_RANK_WAZE = 2` significa "display L3+". Mudar o critério aqui afeta todo login. `testar-cookies.php` chama `/Session` como smoke test e nega `createSession` se não passar — frontend mostra modal `accessDeniedModal` com perfil do user e mensagem clara, sem persistir nada. Bloqueio acontece no backend; **não dá pra burlar editando JS**.
 
