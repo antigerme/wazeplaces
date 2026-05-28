@@ -168,14 +168,30 @@ try {
                 $isDelete = true;
             } elseif ($reqType === 'REQUEST' && $reqSubType === 'UPDATE') {
                 if (isset($updateRequest['changedVenue']) && is_array($updateRequest['changedVenue'])) {
+                    // Campos que são IDs e precisam ser resolvidos pelo nome no respectivo dict.
+                    // Sem isso o card mostra "Rua: 17788982 → 16542127" em vez de "Rua: (sem nome) → R. Guaniqué".
+                    $resolveIdField = function($field, $value) use ($streetsDict, $citiesDict) {
+                        if ($value === null || $value === '') return null;
+                        if ($field === 'streetID' && isset($streetsDict[$value])) {
+                            $name = trim($streetsDict[$value]['name'] ?? '');
+                            return $name !== '' ? $name : '(sem nome)';
+                        }
+                        if ($field === 'cityID' && isset($citiesDict[$value])) {
+                            $name = trim($citiesDict[$value]['name'] ?? '');
+                            return $name !== '' ? $name : '(sem nome)';
+                        }
+                        return null;
+                    };
                     foreach ($updateRequest['changedVenue'] as $k => $newValue) {
                         if ($k === 'permissions') continue;
                         $label = $fieldLabels[$k] ?? ucfirst($k);
+                        $resolvedFrom = $resolveIdField($k, $venue[$k] ?? null);
+                        $resolvedTo = $resolveIdField($k, $newValue);
                         $changes[] = [
                             'field' => $k,
                             'label' => $label,
-                            'from' => $formatValue($venue[$k] ?? null),
-                            'to' => $formatValue($newValue)
+                            'from' => $resolvedFrom !== null ? $resolvedFrom : $formatValue($venue[$k] ?? null),
+                            'to' => $resolvedTo !== null ? $resolvedTo : $formatValue($newValue)
                         ];
                     }
                 }
