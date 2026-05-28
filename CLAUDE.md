@@ -182,7 +182,7 @@ Estrutura unificada na resposta de erro de `validar-place.php` e `marcar-lido.ph
   pendingAction,          // ação no buffer de undo de 3s (null se preferências.undoEnabled=false → executa direto)
   inFlightActions,        // ações já enviadas, aguardando resposta
   filters,                // tipos, residencial, país, estado, área, myArea, unreadOnly
-  preferences,            // undoEnabled — toggle no modal "Filtros e Preferências", persiste em localStorage waze_places_preferences
+  preferences,            // undoEnabled — toggle no modal "Filtros e Preferências", persiste em localStorage waze_places_preferences. Sujeito a gate de experiência: novatos não podem desligar até bater cota ceil(3000/(rank+1)) de read+rejected (staff isento). Ver canDisableUndo()
   profile, countries, statesByCountry
 }
 ```
