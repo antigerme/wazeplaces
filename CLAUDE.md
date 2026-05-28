@@ -281,6 +281,8 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 3. **`Issues/Search/List` retorna tudo de uma vez** — confirmado via HAR. Não tente implementar "paginação real" assumindo que cada page tem N items. Use `hasMore` como verdade e trate a queue como global.
 
+3.5. **Um venue pode ter VÁRIOS `venueUpdateRequests`** (consertado v2.14.0). Caso típico: usuário sobe 2 fotos novas pra mesma loja, então o mesmo venue volta com 2 PURs do tipo IMAGE. Pegar só `venueUpdateRequests[0]` (como o código antigo fazia) causa bug "place volta": user marca o primeiro lido, próximo fetch o venue reaparece com o segundo. Tratamento certo: **um card por updateRequest**, não por venue. Pareamento de imagem por PUR: `image.id === updateRequest.id` para `type === 'IMAGE'` (confirmado via HAR). Pra outros tipos de PUR, mostrar todas as imagens do venue como contexto.
+
 4. **PHP_CLI_SERVER_WORKERS** (commit `b2e633e` e prévios): `php -S` é single-thread por padrão. Owner enviou HAR mostrando app "travando" porque cada cURL ao Waze bloqueava todas as outras requests. Solução: `start.sh`/`start.bat` setam `=4` por padrão. **Nunca documente `php -S` puro** — sempre os scripts.
 
 5. **Filtro padrão = não lidos** (commit `419c9bc`): backend manda `userPropertiesFilter: {isRead: false}` por padrão (vs WME que manda `{}` = tudo). Owner quis o filtro como default mas configurável via checkbox no modal.

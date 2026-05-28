@@ -136,123 +136,50 @@ try {
     $places = [];
 
     if (isset($responseData['venues']['objects']) && is_array($responseData['venues']['objects'])) {
+        // GeoJSON: Point [lon,lat], Polygon [[[lon,lat],...]], MultiPolygon [[[[lon,lat],...]]].
+        // Desce recursivamente até achar o primeiro par [lon, lat] numérico.
+        $extractLonLat = function($coords) use (&$extractLonLat) {
+            if (!is_array($coords) || count($coords) === 0) return null;
+            if (is_numeric($coords[0]) && isset($coords[1]) && is_numeric($coords[1])) {
+                return [$coords[0], $coords[1]];
+            }
+            if (is_array($coords[0])) {
+                return $extractLonLat($coords[0]);
+            }
+            return null;
+        };
+
+        // Campos que são IDs e precisam ser resolvidos pelo nome no respectivo dict.
+        // Sem isso o card mostra "Rua: 17788982 → 16542127" em vez de "Rua: (sem nome) → R. Guaniqué".
+        $resolveIdField = function($field, $value) use ($streetsDict, $citiesDict) {
+            if ($value === null || $value === '') return null;
+            if ($field === 'streetID' && isset($streetsDict[$value])) {
+                $name = trim($streetsDict[$value]['name'] ?? '');
+                return $name !== '' ? $name : '(sem nome)';
+            }
+            if ($field === 'cityID' && isset($citiesDict[$value])) {
+                $name = trim($citiesDict[$value]['name'] ?? '');
+                return $name !== '' ? $name : '(sem nome)';
+            }
+            return null;
+        };
+
         foreach ($responseData['venues']['objects'] as $venue) {
-            if (!isset($venue['venueUpdateRequests'][0])) continue;
+            if (empty($venue['venueUpdateRequests']) || !is_array($venue['venueUpdateRequests'])) continue;
 
             // Filtra venues sem permissão de edição: Waze devolve permissions como bitmask
             // signed 32-bit. permissions < 0 (ex: -1) = bits setados = pode editar.
             // permissions >= 0 (ex: 0) = sem permissão. Campo ausente → não filtra (defensivo).
             if (isset($venue['permissions']) && $venue['permissions'] >= 0) continue;
 
-            $updateRequest = $venue['venueUpdateRequests'][0];
-
-            $creatorId = $updateRequest['createdBy'] ?? null;
-            $creatorName = $creatorId && isset($usersDict[$creatorId]) ? $usersDict[$creatorId] : $creatorId;
-
-            $updateTypeStr = 'Desconhecido';
-            $reqType = $updateRequest['type'] ?? '';
-            $reqSubType = $updateRequest['subType'] ?? '';
-            $changes = [];
-            $isDelete = false;
-            $flagComment = null;
-
-            if ($reqType === 'VENUE') {
-                $updateTypeStr = 'Novo Local';
-            } elseif ($reqType === 'IMAGE') {
-                $updateTypeStr = 'Nova Foto';
-            } elseif ($reqType === 'REQUEST' && $reqSubType === 'FLAG') {
-                $updateTypeStr = 'Reporte (Sinalização)';
-                $flagComment = trim((string)($updateRequest['flagComment'] ?? '')) ?: null;
-            } elseif ($reqType === 'REQUEST' && $reqSubType === 'DELETE') {
-                $updateTypeStr = 'Pedido de remoção';
-                $isDelete = true;
-            } elseif ($reqType === 'REQUEST' && $reqSubType === 'UPDATE') {
-                if (isset($updateRequest['changedVenue']) && is_array($updateRequest['changedVenue'])) {
-                    // Campos que são IDs e precisam ser resolvidos pelo nome no respectivo dict.
-                    // Sem isso o card mostra "Rua: 17788982 → 16542127" em vez de "Rua: (sem nome) → R. Guaniqué".
-                    $resolveIdField = function($field, $value) use ($streetsDict, $citiesDict) {
-                        if ($value === null || $value === '') return null;
-                        if ($field === 'streetID' && isset($streetsDict[$value])) {
-                            $name = trim($streetsDict[$value]['name'] ?? '');
-                            return $name !== '' ? $name : '(sem nome)';
-                        }
-                        if ($field === 'cityID' && isset($citiesDict[$value])) {
-                            $name = trim($citiesDict[$value]['name'] ?? '');
-                            return $name !== '' ? $name : '(sem nome)';
-                        }
-                        return null;
-                    };
-                    foreach ($updateRequest['changedVenue'] as $k => $newValue) {
-                        if ($k === 'permissions') continue;
-                        $label = $fieldLabels[$k] ?? ucfirst($k);
-                        $resolvedFrom = $resolveIdField($k, $venue[$k] ?? null);
-                        $resolvedTo = $resolveIdField($k, $newValue);
-                        $changes[] = [
-                            'field' => $k,
-                            'label' => $label,
-                            'from' => $resolvedFrom !== null ? $resolvedFrom : $formatValue($venue[$k] ?? null),
-                            'to' => $resolvedTo !== null ? $resolvedTo : $formatValue($newValue)
-                        ];
-                    }
-                }
-                if (count($changes) > 0) {
-                    $updateTypeStr = 'Atualização: ' . implode(', ', array_map(function($c) {
-                        return $c['label'];
-                    }, $changes));
-                } else {
-                    $updateTypeStr = 'Atualização (Detalhes)';
-                }
-            }
-
-            $brand = $venue['brand'] ?? null;
-            if (isset($updateRequest['changedVenue']['brand'])) {
-                $brand = $updateRequest['changedVenue']['brand'];
-            }
-            $brandKnown = null;
-            if ($brand !== null && trim($brand) !== '') {
-                $brandKnown = isset($brandLookup[mb_strtolower(trim($brand))]);
-            }
-
-            $place = [
-                'venueID' => $venue['id'],
-                'updateRequestID' => $updateRequest['id'],
-                'name' => $venue['name'] ?? 'Sem nome',
-                'categories' => $venue['categories'] ?? [],
-                'address' => null,
-                'updateType' => $updateTypeStr,
-                'reqType' => $reqType,
-                'reqSubType' => $reqSubType,
-                'isDelete' => $isDelete,
-                'flagComment' => $flagComment,
-                'dateAdded' => $updateRequest['dateAdded'] ?? null,
-                'isStarred' => !empty($updateRequest['isStarred']),
-                'createdBy' => $creatorName,
-                'imageUrl' => null,
-                'imageUrls' => [],
-                'changes' => $changes,
-                'brand' => $brand,
-                'brandKnown' => $brandKnown,
-                'lat' => null,
-                'lon' => null
-            ];
-
-            // GeoJSON: Point [lon,lat], Polygon [[[lon,lat],...]], MultiPolygon [[[[lon,lat],...]]].
-            // Desce recursivamente até achar o primeiro par [lon, lat] numérico.
-            $extractLonLat = function($coords) use (&$extractLonLat) {
-                if (!is_array($coords) || count($coords) === 0) return null;
-                if (is_numeric($coords[0]) && isset($coords[1]) && is_numeric($coords[1])) {
-                    return [$coords[0], $coords[1]];
-                }
-                if (is_array($coords[0])) {
-                    return $extractLonLat($coords[0]);
-                }
-                return null;
-            };
+            // Calcula partes comuns do venue (mesma em todos os PURs deste venue)
+            $venueLat = null;
+            $venueLon = null;
             if (isset($venue['geometry']['coordinates'])) {
                 $pair = $extractLonLat($venue['geometry']['coordinates']);
                 if ($pair) {
-                    $place['lon'] = $pair[0];
-                    $place['lat'] = $pair[1];
+                    $venueLon = $pair[0];
+                    $venueLat = $pair[1];
                 }
             }
 
@@ -283,21 +210,111 @@ try {
                     $addressParts[] = trim($venue['houseNumber']);
                 }
             }
+            $venueAddress = !empty($addressParts) ? implode(', ', $addressParts) : null;
 
-            $place['address'] = !empty($addressParts) ? implode(', ', $addressParts) : null;
-
+            // Índice rápido id-da-imagem → url, pra parear IMAGE PURs com a foto submetida.
+            // image.id é igual ao updateRequest.id quando type=IMAGE (confirmado via HAR).
+            $imagesById = [];
+            $allImageUrls = [];
             if (isset($venue['images']) && is_array($venue['images'])) {
                 foreach ($venue['images'] as $img) {
                     if (isset($img['id'])) {
-                        $place['imageUrls'][] = WAZE_IMAGE_BASE . $img['id'];
+                        $url = WAZE_IMAGE_BASE . $img['id'];
+                        $imagesById[$img['id']] = $url;
+                        $allImageUrls[] = $url;
                     }
-                }
-                if (count($place['imageUrls']) > 0) {
-                    $place['imageUrl'] = $place['imageUrls'][0];
                 }
             }
 
-            $places[] = $place;
+            // Um card POR updateRequest. Antes pegávamos só [0] e venues com 2+ PURs
+            // (ex: 2 fotos novas pra mesma loja) ficavam "voltando" no feed depois de
+            // marcar lido — bug reportado.
+            foreach ($venue['venueUpdateRequests'] as $updateRequest) {
+                $creatorId = $updateRequest['createdBy'] ?? null;
+                $creatorName = $creatorId && isset($usersDict[$creatorId]) ? $usersDict[$creatorId] : $creatorId;
+
+                $updateTypeStr = 'Desconhecido';
+                $reqType = $updateRequest['type'] ?? '';
+                $reqSubType = $updateRequest['subType'] ?? '';
+                $changes = [];
+                $isDelete = false;
+                $flagComment = null;
+
+                if ($reqType === 'VENUE') {
+                    $updateTypeStr = 'Novo Local';
+                } elseif ($reqType === 'IMAGE') {
+                    $updateTypeStr = 'Nova Foto';
+                } elseif ($reqType === 'REQUEST' && $reqSubType === 'FLAG') {
+                    $updateTypeStr = 'Reporte (Sinalização)';
+                    $flagComment = trim((string)($updateRequest['flagComment'] ?? '')) ?: null;
+                } elseif ($reqType === 'REQUEST' && $reqSubType === 'DELETE') {
+                    $updateTypeStr = 'Pedido de remoção';
+                    $isDelete = true;
+                } elseif ($reqType === 'REQUEST' && $reqSubType === 'UPDATE') {
+                    if (isset($updateRequest['changedVenue']) && is_array($updateRequest['changedVenue'])) {
+                        foreach ($updateRequest['changedVenue'] as $k => $newValue) {
+                            if ($k === 'permissions') continue;
+                            $label = $fieldLabels[$k] ?? ucfirst($k);
+                            $resolvedFrom = $resolveIdField($k, $venue[$k] ?? null);
+                            $resolvedTo = $resolveIdField($k, $newValue);
+                            $changes[] = [
+                                'field' => $k,
+                                'label' => $label,
+                                'from' => $resolvedFrom !== null ? $resolvedFrom : $formatValue($venue[$k] ?? null),
+                                'to' => $resolvedTo !== null ? $resolvedTo : $formatValue($newValue)
+                            ];
+                        }
+                    }
+                    if (count($changes) > 0) {
+                        $updateTypeStr = 'Atualização: ' . implode(', ', array_map(function($c) {
+                            return $c['label'];
+                        }, $changes));
+                    } else {
+                        $updateTypeStr = 'Atualização (Detalhes)';
+                    }
+                }
+
+                $brand = $venue['brand'] ?? null;
+                if (isset($updateRequest['changedVenue']['brand'])) {
+                    $brand = $updateRequest['changedVenue']['brand'];
+                }
+                $brandKnown = null;
+                if ($brand !== null && trim($brand) !== '') {
+                    $brandKnown = isset($brandLookup[mb_strtolower(trim($brand))]);
+                }
+
+                // Imagens: pra IMAGE PUR, apenas a foto que foi submetida pareada por
+                // image.id === updateRequest.id (WME mostra só ela, não a galeria do venue).
+                // Pros outros tipos, todas as fotos do venue como contexto.
+                if ($reqType === 'IMAGE' && isset($imagesById[$updateRequest['id']])) {
+                    $imageUrls = [$imagesById[$updateRequest['id']]];
+                } else {
+                    $imageUrls = $allImageUrls;
+                }
+
+                $places[] = [
+                    'venueID' => $venue['id'],
+                    'updateRequestID' => $updateRequest['id'],
+                    'name' => $venue['name'] ?? 'Sem nome',
+                    'categories' => $venue['categories'] ?? [],
+                    'address' => $venueAddress,
+                    'updateType' => $updateTypeStr,
+                    'reqType' => $reqType,
+                    'reqSubType' => $reqSubType,
+                    'isDelete' => $isDelete,
+                    'flagComment' => $flagComment,
+                    'dateAdded' => $updateRequest['dateAdded'] ?? null,
+                    'isStarred' => !empty($updateRequest['isStarred']),
+                    'createdBy' => $creatorName,
+                    'imageUrl' => count($imageUrls) > 0 ? $imageUrls[0] : null,
+                    'imageUrls' => $imageUrls,
+                    'changes' => $changes,
+                    'brand' => $brand,
+                    'brandKnown' => $brandKnown,
+                    'lat' => $venueLat,
+                    'lon' => $venueLon
+                ];
+            }
         }
     }
 
