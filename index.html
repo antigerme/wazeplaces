@@ -146,10 +146,11 @@
         <div id="logoutModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
                 <h3 class="text-xl font-bold text-slate-800 mb-2">Sair?</h3>
-                <p class="text-sm text-slate-500 mb-6">Sua sessão será encerrada e seus cookies removidos deste dispositivo.</p>
-                <div class="flex space-x-3">
-                    <button id="confirmLogout" type="button" class="flex-1 bg-rose-500 hover:bg-rose-600 text-white font-semibold py-2 px-4 rounded-lg transition">Sair</button>
-                    <button id="cancelLogout" type="button" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
+                <p class="text-sm text-slate-500 mb-4">Sua sessão será encerrada e seus cookies removidos deste dispositivo. Suas estatísticas, filtros e preferências ficam guardadas.</p>
+                <div class="flex flex-col gap-2">
+                    <button id="confirmLogout" type="button" class="w-full bg-rose-500 hover:bg-rose-600 text-white font-semibold py-2 px-4 rounded-lg transition">Sair</button>
+                    <button id="cancelLogout" type="button" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
+                    <button id="confirmLogoutWipe" type="button" class="w-full mt-2 text-xs text-rose-600 hover:text-rose-700 hover:underline">Sair e limpar todos os dados (estatísticas, filtros e preferências)</button>
                 </div>
             </div>
         </div>

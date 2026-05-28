@@ -1,4 +1,4 @@
-const APP_VERSION = '2.16.0';
+const APP_VERSION = '2.17.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -111,6 +111,7 @@ function setupAppListeners() {
 
     $('logoutBtn').addEventListener('click', () => $('logoutModal').classList.remove('hidden'));
     $('confirmLogout').addEventListener('click', handleLogout);
+    $('confirmLogoutWipe').addEventListener('click', handleLogoutAndWipe);
     $('cancelLogout').addEventListener('click', () => $('logoutModal').classList.add('hidden'));
 
     $('reloadBtn').addEventListener('click', () => {
@@ -353,6 +354,10 @@ function showMainScreen() {
     document.getElementById('appScreen').classList.remove('hidden');
     document.getElementById('filtersBtn').classList.remove('hidden');
     AppState.authenticated = true;
+    // Re-renderiza o header com os stats preservados (caso o user esteja
+    // voltando depois de logout/expiração). Sem isso, os números podem ficar
+    // congelados no estado anterior do DOM.
+    updateStats();
 }
 
 async function handleFileUpload(e) {
@@ -469,20 +474,51 @@ function renderProfileHeader() {
     if (brandTitle) brandTitle.classList.add('hidden');
 }
 
+// Encerra sessão sem zerar nada do que o usuário acumulou. Igual ao que
+// handleUnauthorized já faz quando o cookie expira — só sai e deixa stats,
+// filtros e preferências (incluindo unlock do gate de undo) intactos pro
+// próximo login.
 async function handleLogout() {
+    document.getElementById('logoutModal').classList.add('hidden');
+    await API.destroySession();
+    resetQueue();
+    AppState.pendingAction = null;
+    AppState.inFlightActions = 0;
+    AppState.profile = null;
+    AppState.authenticated = false;
+    removeUndoBanner();
+    updateInFlightIndicator();
+    showAuthScreen();
+    removeCurrentCardEl();
+    showToast('Sessão encerrada. Suas estatísticas continuam guardadas.', 'info');
+}
+
+// Versão destrutiva: zera stats, filtros e preferências antes de sair.
+// Só roda quando o user explicitamente pede no botão "Sair e limpar todos
+// os dados". Após confirmar, NÃO há undo — gate de undo volta a zero, etc.
+async function handleLogoutAndWipe() {
+    if (!confirm('Tem certeza? Suas estatísticas, filtros e preferências (incluindo o desbloqueio do "Desfazer") serão zerados. Esta ação não pode ser desfeita.')) {
+        return;
+    }
     document.getElementById('logoutModal').classList.add('hidden');
     await API.destroySession();
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
     AppState.pendingAction = null;
     AppState.inFlightActions = 0;
+    AppState.profile = null;
+    AppState.authenticated = false;
+    AppState.filters = { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
+    AppState.preferences = { undoEnabled: true };
     removeUndoBanner();
     updateInFlightIndicator();
     saveStats();
+    saveFilters();
+    savePreferences();
     updateStats();
     showAuthScreen();
     removeCurrentCardEl();
-    showToast('Sessão encerrada', 'info');
+    showToast('Sessão encerrada e dados limpos.', 'info');
 }
 
 function resetQueue() {
