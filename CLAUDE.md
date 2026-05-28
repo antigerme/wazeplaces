@@ -179,15 +179,16 @@ Estrutura unificada na resposta de erro de `validar-place.php` e `marcar-lido.ph
   nextPage, hasMore, emptyPagesInRow, fetching,
   serverTotal,            // total visível no header "Restam"; reflete total real do Waze ajustado por ações locais
   stats: { read, rejected, skipped },
-  pendingAction,          // ação no buffer de undo de 3s
+  pendingAction,          // ação no buffer de undo de 3s (null se preferências.undoEnabled=false → executa direto)
   inFlightActions,        // ações já enviadas, aguardando resposta
   filters,                // tipos, residencial, país, estado, área, myArea, unreadOnly
+  preferences,            // undoEnabled — toggle no modal "Filtros e Preferências", persiste em localStorage waze_places_preferences
   profile, countries, statesByCountry
 }
 ```
 
 Constantes em `app.js`:
-- `UNDO_WINDOW_MS = 3000` — janela de undo antes de a ação ser enviada ao Waze
+- `UNDO_WINDOW_MS = 3000` — janela de undo antes de a ação ser enviada ao Waze (só aplica se `AppState.preferences.undoEnabled === true`, padrão; quando desativado em `scheduleAction`, o executor roda na hora)
 - `MAX_CHANGES_DISPLAY = 4` — máximo de mudanças exibidas no card (UPDATE requests)
 - `PREFETCH_THRESHOLD = 3` — quando a fila tem ≤3 cards, dispara próximo `fetchNextPage` em background
 - `MAX_EMPTY_PAGES = 5` — guarda contra loop infinito se Waze retornar páginas vazias com `hasMore: true`

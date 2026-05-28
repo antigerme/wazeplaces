@@ -1,8 +1,9 @@
-const APP_VERSION = '2.12.1';
+const APP_VERSION = '2.13.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
+const PREFERENCES_KEY = 'waze_places_preferences';
 const THEME_KEY = 'waze_places_theme';
 const UNDO_WINDOW_MS = 3000;
 const MAX_CHANGES_DISPLAY = 4;
@@ -22,6 +23,7 @@ const AppState = {
     pendingAction: null,
     inFlightActions: 0,
     filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true },
+    preferences: { undoEnabled: true },
     profile: null,
     countries: [],
     statesByCountry: {}
@@ -61,6 +63,7 @@ function initApp() {
 
     loadStats();
     loadFilters();
+    loadPreferences();
     applyTheme(localStorage.getItem(THEME_KEY) || 'light');
 
     API.getRegion();
@@ -262,6 +265,7 @@ function populateManagedAreaSelect() {
 
 async function openFiltersModal() {
     const $ = id => document.getElementById(id);
+    $('prefUndoEnabled').checked = AppState.preferences.undoEnabled !== false;
     $('filterUnreadOnly').checked = AppState.filters.unreadOnly !== false;
     document.querySelectorAll('.filter-type').forEach(cb => {
         cb.checked = AppState.filters.types.includes(cb.value);
@@ -288,6 +292,9 @@ async function openFiltersModal() {
 
 function applyFiltersFromModal() {
     const $ = id => document.getElementById(id);
+    AppState.preferences.undoEnabled = $('prefUndoEnabled').checked;
+    savePreferences();
+
     AppState.filters.unreadOnly = $('filterUnreadOnly').checked;
     AppState.filters.types = Array.from(document.querySelectorAll('.filter-type:checked')).map(cb => cb.value);
     AppState.filters.residential = $('filterResidential').value;
@@ -910,6 +917,12 @@ function scheduleAction(type, place, executor) {
         }
     };
 
+    if (!AppState.preferences.undoEnabled) {
+        executed = true;
+        runExecutor();
+        return;
+    }
+
     const timerId = setTimeout(() => {
         if (!executed) {
             executed = true;
@@ -1052,6 +1065,22 @@ function loadFilters() {
             AppState.filters.managedAreaId = parsed.managedAreaId || '';
             AppState.filters.myArea = !!parsed.myArea;
             AppState.filters.unreadOnly = parsed.unreadOnly !== false;
+        }
+    } catch (e) {}
+}
+
+function savePreferences() {
+    try {
+        localStorage.setItem(PREFERENCES_KEY, JSON.stringify(AppState.preferences));
+    } catch (e) {}
+}
+
+function loadPreferences() {
+    try {
+        const raw = localStorage.getItem(PREFERENCES_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            AppState.preferences.undoEnabled = parsed.undoEnabled !== false;
         }
     } catch (e) {}
 }
