@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-places-v14';
+const CACHE_NAME = 'waze-places-v16';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
