@@ -21,7 +21,13 @@ try {
     deleteTempCookieFile($tempFile);
 
     if ($result['httpCode'] !== 200) {
-        jsonError("Erro ao buscar países (HTTP {$result['httpCode']})", 500);
+        $cat = categorizeWazeError($result['httpCode'], $result['response'], $result['error']);
+        jsonResponse([
+            'success' => false,
+            'error' => $cat['message'],
+            'errorCategory' => $cat['category'],
+            'httpCode' => $result['httpCode']
+        ], $cat['category'] === 'unauthorized' ? 401 : 500);
     }
 
     $responseData = json_decode($result['response'], true);

@@ -1,4 +1,4 @@
-const APP_VERSION = '2.15.3';
+const APP_VERSION = '2.16.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -421,6 +421,13 @@ async function loadProfileAndAuxData() {
         API.getProfile(),
         API.listCountries()
     ]);
+    // Se qualquer um dos dois detectar sessão expirada/revogada no Waze (401/403),
+    // deslogar e mandar pra tela de auth. Sem isso o user fica preso vendo
+    // "Erro ao buscar X (HTTP 403)" sem entender por quê.
+    if (profileRes.errorCategory === 'unauthorized' || countriesRes.errorCategory === 'unauthorized') {
+        handleUnauthorized();
+        return;
+    }
     if (profileRes.success) {
         AppState.profile = profileRes.profile;
         renderProfileHeader();
@@ -428,6 +435,14 @@ async function loadProfileAndAuxData() {
     if (countriesRes.success) {
         AppState.countries = countriesRes.countries;
     }
+}
+
+function handleUnauthorized() {
+    showToast('Sessão expirou — faça login novamente', 'error');
+    API.setSession(null);
+    AppState.profile = null;
+    AppState.authenticated = false;
+    setTimeout(() => showAuthScreen(), 800);
 }
 
 function renderProfileHeader() {
@@ -507,9 +522,10 @@ async function fetchNextPage() {
     try {
         const result = await API.fetchPlaces(AppState.nextPage, filters);
         if (!result.success) {
-            if (result.error && result.error.toLowerCase().includes('sess')) {
+            if (result.errorCategory === 'unauthorized' ||
+                (result.error && result.error.toLowerCase().includes('sess'))) {
                 AppState.hasMore = false;
-                showAuthScreen();
+                handleUnauthorized();
             } else {
                 showToast(result.error || 'Erro ao carregar places', 'error');
                 AppState.hasMore = false;
@@ -813,10 +829,7 @@ function handleActionResult(actionType, place, result) {
     }
 
     if (cat === 'unauthorized') {
-        showToast('Sessão expirou — faça login novamente', 'error');
-        API.setSession(null);
-        AppState.profile = null;
-        setTimeout(() => showAuthScreen(), 800);
+        handleUnauthorized();
         return;
     }
 
