@@ -1,4 +1,4 @@
-const APP_VERSION = '2.14.0';
+const APP_VERSION = '2.15.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -265,7 +265,7 @@ function populateManagedAreaSelect() {
 
 async function openFiltersModal() {
     const $ = id => document.getElementById(id);
-    $('prefUndoEnabled').checked = AppState.preferences.undoEnabled !== false;
+    renderUndoGateUI();
     $('filterUnreadOnly').checked = AppState.filters.unreadOnly !== false;
     document.querySelectorAll('.filter-type').forEach(cb => {
         cb.checked = AppState.filters.types.includes(cb.value);
@@ -292,7 +292,9 @@ async function openFiltersModal() {
 
 function applyFiltersFromModal() {
     const $ = id => document.getElementById(id);
-    AppState.preferences.undoEnabled = $('prefUndoEnabled').checked;
+    // Gate: se o user ainda não atingiu a cota, ignora o checkbox e força true.
+    // Evita que alguém burle pelo DevTools no DOM (`document.getElementById('prefUndoEnabled').disabled=false`).
+    AppState.preferences.undoEnabled = canDisableUndo() ? $('prefUndoEnabled').checked : true;
     savePreferences();
 
     AppState.filters.unreadOnly = $('filterUnreadOnly').checked;
@@ -917,7 +919,9 @@ function scheduleAction(type, place, executor) {
         }
     };
 
-    if (!AppState.preferences.undoEnabled) {
+    // Gate de experiência: mesmo se a pref está salva como false (ex: legado de
+    // versão sem gate, ou outro dispositivo), só pula o undo se o user qualifica.
+    if (AppState.preferences.undoEnabled === false && canDisableUndo()) {
         executed = true;
         runExecutor();
         return;
@@ -1083,6 +1087,52 @@ function loadPreferences() {
             AppState.preferences.undoEnabled = parsed.undoEnabled !== false;
         }
     } catch (e) {}
+}
+
+// Gate de experiência pro toggle "Permitir desfazer ações".
+// Ideia: novatos não conseguem desligar o undo até pegarem ritmo. Editores de
+// nível mais alto têm cota menor (são mais experientes).
+// Fórmula: ceil(3000 / (rank + 1)). Waze devolve rank 0-indexed:
+//   rank 5 (L6) → 500 PURs, rank 4 (L5) → 600, rank 3 (L4) → 750, rank 2 (L3) → 1000.
+// "PURs tratados" = read + rejected (skipped não treina o ritmo de ação destrutiva).
+// Staff são isentos. Esta NÃO é proteção de segurança — é UX/educação. localStorage
+// pode ser editado pelo user esperto; o objetivo é proteger quem é genuinamente novato.
+function getUndoTreatedCount() {
+    return (AppState.stats.read || 0) + (AppState.stats.rejected || 0);
+}
+
+function getUndoUnlockThreshold() {
+    if (AppState.profile && AppState.profile.isStaff) return 0;
+    const rank = AppState.profile && AppState.profile.rank;
+    if (typeof rank !== 'number') return Infinity;
+    return Math.ceil(3000 / (rank + 1));
+}
+
+function canDisableUndo() {
+    return getUndoTreatedCount() >= getUndoUnlockThreshold();
+}
+
+function renderUndoGateUI() {
+    const checkbox = document.getElementById('prefUndoEnabled');
+    const gateMsg = document.getElementById('prefUndoGateMsg');
+    if (canDisableUndo()) {
+        checkbox.disabled = false;
+        checkbox.checked = AppState.preferences.undoEnabled !== false;
+        gateMsg.classList.add('hidden');
+        gateMsg.textContent = '';
+        return;
+    }
+    checkbox.disabled = true;
+    checkbox.checked = true; // gate força ligado
+    const threshold = getUndoUnlockThreshold();
+    const current = getUndoTreatedCount();
+    if (!isFinite(threshold)) {
+        gateMsg.textContent = '🔒 Disponível depois de você logar e a app carregar seu perfil.';
+    } else {
+        const remaining = Math.max(0, threshold - current);
+        gateMsg.textContent = `🔒 Disponível depois de tratar ${threshold} PURs (você tem ${current} — faltam ${remaining}). Desbloqueia automaticamente.`;
+    }
+    gateMsg.classList.remove('hidden');
 }
 
 function applyTheme(theme) {
