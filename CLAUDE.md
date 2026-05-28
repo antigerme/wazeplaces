@@ -288,7 +288,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 7. **Service worker primeira instalação não deve recarregar a página** (commit `1632ad4`): listener de `controllerchange` só dispara reload se `hadController` era truthy no início. Senão fica flickering eterno na primeira visita.
 
-8. **Critério de install do PWA (Chrome) exige PNG**, não SVG, no campo `icons` do manifest. Mesmo que o SVG renderize visualmente, o Chrome (Android e Desktop) não dispara o prompt "Instalar app" sem PNGs de 192×192 e 512×512. Solução desde v2.12: PNGs gerados via `cairosvg` a partir dos SVGs em `icons/icon-{192,512}{,-maskable}.png`. SVGs ficaram como fallback. Ícones maskable (`purpose: "maskable"`) precisam de safe area circular central de 80% — versão sem cantos arredondados, porque o OS aplica a máscara.
+8. **iOS Safari não suporta SVG inline em `data:` para PWA icons**. Use arquivos em `icons/icon-*.svg`. Se quiser instalável em iPhone bonitinho, vai precisar PNG real algum dia.
 
 9. **`AppState.queue` é mutável e referenciado em vários lugares**. Toda mutação chama `updatePendingCount`. Se adicionar nova mutação, adicione a chamada também.
 

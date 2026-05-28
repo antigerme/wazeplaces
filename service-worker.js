@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-places-v15';
+const CACHE_NAME = 'waze-places-v14';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -8,10 +8,6 @@ const STATIC_ASSETS = [
   '/js/swipe.js',
   '/js/tailwindcss_3_4_17.js',
   '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/icon-192-maskable.png',
-  '/icons/icon-512-maskable.png',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'
 ];
