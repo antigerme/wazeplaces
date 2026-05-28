@@ -212,16 +212,14 @@ try {
             }
             $venueAddress = !empty($addressParts) ? implode(', ', $addressParts) : null;
 
-            // Índice rápido id-da-imagem → url, pra parear IMAGE PURs com a foto submetida.
-            // image.id é igual ao updateRequest.id quando type=IMAGE (confirmado via HAR).
-            $imagesById = [];
+            // Todas as fotos do venue (aprovadas + pendentes). Para IMAGE PURs, a foto nova
+            // submetida tem image.id === updateRequest.id (confirmado via HAR) — o frontend
+            // usa essa equivalência pra abrir o carrossel na foto certa e marcar com ✨.
             $allImageUrls = [];
             if (isset($venue['images']) && is_array($venue['images'])) {
                 foreach ($venue['images'] as $img) {
                     if (isset($img['id'])) {
-                        $url = WAZE_IMAGE_BASE . $img['id'];
-                        $imagesById[$img['id']] = $url;
-                        $allImageUrls[] = $url;
+                        $allImageUrls[] = WAZE_IMAGE_BASE . $img['id'];
                     }
                 }
             }
@@ -283,14 +281,11 @@ try {
                     $brandKnown = isset($brandLookup[mb_strtolower(trim($brand))]);
                 }
 
-                // Imagens: pra IMAGE PUR, apenas a foto que foi submetida pareada por
-                // image.id === updateRequest.id (WME mostra só ela, não a galeria do venue).
-                // Pros outros tipos, todas as fotos do venue como contexto.
-                if ($reqType === 'IMAGE' && isset($imagesById[$updateRequest['id']])) {
-                    $imageUrls = [$imagesById[$updateRequest['id']]];
-                } else {
-                    $imageUrls = $allImageUrls;
-                }
+                // Sempre devolve TODAS as fotos do venue, mesmo em IMAGE PURs. Editor
+                // precisa comparar a foto submetida com as existentes pra decidir se
+                // aprova/rejeita. O frontend (renderCurrentCard) já marca qual é a "nova"
+                // com badge ✨ + borda âmbar, pareando image.id === updateRequest.id.
+                $imageUrls = $allImageUrls;
 
                 $places[] = [
                     'venueID' => $venue['id'],
