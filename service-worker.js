@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-places-v17';
+const CACHE_NAME = 'waze-places-v18';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -39,6 +39,13 @@ self.addEventListener('message', event => {
   }
 });
 
+// Estratégia: network-first pra HTML, JS, CSS e JSON (incluindo manifest).
+// Garante que código (JS/CSS) e UI (HTML) ficam SEMPRE em sync. Antes desta
+// versão, HTML era network-first e JS era cache-first, gerando "version skew"
+// quando o user pegava HTML novo + JS velho — features novas falhavam até o
+// SW novo completar install/activate/reload (Ctrl+Shift+R como workaround).
+// Imagens/SVG/fontes continuam cache-first (raramente mudam, ganho de perf
+// vale mais que sync exato).
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
 
@@ -50,16 +57,25 @@ self.addEventListener('fetch', event => {
 
   const isHTML = event.request.mode === 'navigate' ||
     (event.request.headers.get('accept') || '').includes('text/html');
+  const isCode = /\.(js|css|json)$/i.test(url.pathname);
 
-  if (isHTML) {
+  if (isHTML || isCode) {
     event.respondWith(
       fetch(event.request)
         .then(response => {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseClone));
+          if (response && response.status === 200 && response.type === 'basic') {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseClone));
+          }
           return response;
         })
-        .catch(() => caches.match(event.request).then(r => r || caches.match('/index.html')))
+        .catch(() => caches.match(event.request).then(cached => {
+          if (cached) return cached;
+          // Fallback HTML só pra navegação. NUNCA devolver HTML pra request de JS/CSS
+          // (browser engasga ao tentar parsear HTML como script — ver gotcha #11).
+          if (isHTML) return caches.match('/index.html');
+          return Response.error();
+        }))
     );
     return;
   }
