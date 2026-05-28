@@ -538,18 +538,34 @@
                 window.location.reload();
             });
 
+            const activateWaitingWorker = (worker) => {
+                if (!worker) return;
+                if (window.showToast) {
+                    window.showToast('Nova versão disponível. Atualizando...', 'info');
+                }
+                worker.postMessage({ type: 'SKIP_WAITING' });
+            };
+
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('service-worker.js')
+                // updateViaCache:'none' — força browser a sempre revalidar service-worker.js
+                // contra a rede, ignorando HTTP cache. Defesa contra CDN/proxy cacheando o SW.
+                navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' })
                     .then(reg => {
+                        // Cobre o caso de SW novo já estar em "waiting" desde uma sessão anterior
+                        // (instalou mas nunca ativou). Sem isso, updatefound não dispara de novo
+                        // e o user fica preso na versão velha até reload manual.
+                        if (reg.waiting && navigator.serviceWorker.controller) {
+                            activateWaitingWorker(reg.waiting);
+                        }
+                        // Check imediato por nova versão (sem esperar o intervalo de 1h)
+                        reg.update().catch(() => {});
+
                         reg.addEventListener('updatefound', () => {
                             const newWorker = reg.installing;
                             if (!newWorker) return;
                             newWorker.addEventListener('statechange', () => {
                                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    if (window.showToast) {
-                                        window.showToast('Nova versão disponível. Atualizando...', 'info');
-                                    }
-                                    newWorker.postMessage({ type: 'SKIP_WAITING' });
+                                    activateWaitingWorker(newWorker);
                                 }
                             });
                         });
