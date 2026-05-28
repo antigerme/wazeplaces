@@ -1,4 +1,4 @@
-const APP_VERSION = '2.15.0';
+const APP_VERSION = '2.15.1';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -1130,7 +1130,7 @@ function renderUndoGateUI() {
         gateMsg.textContent = '🔒 Disponível depois de você logar e a app carregar seu perfil.';
     } else {
         const remaining = Math.max(0, threshold - current);
-        gateMsg.textContent = `🔒 Disponível depois de tratar ${threshold} PURs (você tem ${current} — faltam ${remaining}). Desbloqueia automaticamente.`;
+        gateMsg.textContent = `🔒 Disponível depois de tratar ${threshold} PURs (você tem ${current} — faltam ${remaining}).`;
     }
     gateMsg.classList.remove('hidden');
 }
