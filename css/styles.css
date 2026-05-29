@@ -242,3 +242,12 @@ button:active {
   from { transform: translate(-50%, 100px); opacity: 0; }
   to { transform: translate(-50%, 0); opacity: 1; }
 }
+
+/* Versão no rodapé tem trigger oculto pro Modo Desenvolvedor (7 taps).
+   Cursor fica como default (não pointer) e texto não é selecionável,
+   pra não dar pista visual de que é interativo. */
+#appVersionDisplay {
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}

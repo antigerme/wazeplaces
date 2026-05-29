@@ -183,6 +183,7 @@ Estrutura unificada na resposta de erro de `validar-place.php` e `marcar-lido.ph
   inFlightActions,        // ações já enviadas, aguardando resposta
   filters,                // tipos, residencial, país, estado, área, myArea, unreadOnly
   preferences,            // undoEnabled — toggle no modal "Filtros e Preferências", persiste em localStorage waze_places_preferences. Sujeito a gate de experiência: novatos não podem desligar até bater cota ceil(3000/(rank+1)) de read+rejected (staff isento). Ver canDisableUndo()
+  devMode,                // { unlocked, active } — easter egg estilo Android. 7 taps na versão do rodapé desbloqueia; toggle no modal "Avançado" ativa. Quando active=true, canDisableUndo() retorna true (bypassa o gate). NÃO é segurança — qualquer um seta via DevTools; só esconde de usuário comum. handleLogout limpa ambas as flags.
   profile, countries, statesByCountry
 }
 ```
