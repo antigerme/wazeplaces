@@ -1,10 +1,13 @@
-const APP_VERSION = '2.17.2';
+const APP_VERSION = '2.18.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
 const FILTERS_KEY = 'waze_places_filters';
 const PREFERENCES_KEY = 'waze_places_preferences';
+const DEVMODE_KEY = 'waze_places_devmode';
 const THEME_KEY = 'waze_places_theme';
+const DEVMODE_TAPS_NEEDED = 7;
+const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
 const MAX_CHANGES_DISPLAY = 4;
 const PREFETCH_THRESHOLD = 3;
@@ -24,6 +27,7 @@ const AppState = {
     inFlightActions: 0,
     filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true },
     preferences: { undoEnabled: true },
+    devMode: { unlocked: false, active: false },
     profile: null,
     countries: [],
     statesByCountry: {}
@@ -59,11 +63,15 @@ window.addEventListener('unhandledrejection', (e) => {
 
 function initApp() {
     const versionEl = document.getElementById('appVersionDisplay');
-    if (versionEl) versionEl.textContent = 'v' + APP_VERSION;
+    if (versionEl) {
+        versionEl.textContent = 'v' + APP_VERSION;
+        setupDevModeTapTrigger(versionEl);
+    }
 
     loadStats();
     loadFilters();
     loadPreferences();
+    loadDevMode();
     applyTheme(localStorage.getItem(THEME_KEY) || 'light');
 
     API.getRegion();
@@ -271,6 +279,7 @@ function populateManagedAreaSelect() {
 
 async function openFiltersModal() {
     const $ = id => document.getElementById(id);
+    renderDevModeSection();
     renderUndoGateUI();
     $('filterUnreadOnly').checked = AppState.filters.unreadOnly !== false;
     document.querySelectorAll('.filter-type').forEach(cb => {
@@ -298,8 +307,15 @@ async function openFiltersModal() {
 
 function applyFiltersFromModal() {
     const $ = id => document.getElementById(id);
-    // Gate: se o user ainda não atingiu a cota, ignora o checkbox e força true.
-    // Evita que alguém burle pelo DevTools no DOM (`document.getElementById('prefUndoEnabled').disabled=false`).
+    // Dev Mode: aplicado antes pra que canDisableUndo já reflita a nova flag
+    // antes de a gente decidir o undoEnabled.
+    if (AppState.devMode.unlocked) {
+        AppState.devMode.active = $('prefDevModeActive').checked;
+        saveDevMode();
+        updateDevBadge();
+    }
+    // Gate: se o user ainda não atingiu a cota (e dev mode não tá ativo),
+    // ignora o checkbox e força true. Evita burla via DevTools no DOM.
     AppState.preferences.undoEnabled = canDisableUndo() ? $('prefUndoEnabled').checked : true;
     savePreferences();
 
@@ -359,6 +375,7 @@ function showMainScreen() {
     document.getElementById('appScreen').classList.remove('hidden');
     document.getElementById('filtersBtn').classList.remove('hidden');
     AppState.authenticated = true;
+    updateDevBadge();
 }
 
 async function handleFileUpload(e) {
@@ -487,6 +504,7 @@ async function handleLogout() {
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
     AppState.filters = { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
     AppState.preferences = { undoEnabled: true };
+    AppState.devMode = { unlocked: false, active: false };
     AppState.profile = null;
     AppState.authenticated = false;
     AppState.pendingAction = null;
@@ -494,11 +512,13 @@ async function handleLogout() {
     saveStats();
     saveFilters();
     savePreferences();
+    saveDevMode();
     API.setRegion('row');
     API.setCountry(30);
     removeUndoBanner();
     updateInFlightIndicator();
     updateStats();
+    updateDevBadge();
     removeCurrentCardEl();
     showAuthScreen();
     const regionSelect = document.getElementById('regionSelect');
@@ -1123,6 +1143,70 @@ function loadPreferences() {
     } catch (e) {}
 }
 
+// Modo Desenvolvedor: easter egg estilo Android. User toca 7 vezes na versão
+// no rodapé (timeout de 3s entre taps reseta contador). Quando desbloqueado,
+// uma seção "Avançado" aparece no modal de Preferências com toggle para ativar.
+// Quando ativo, AppState.devMode.active = true bypassa restrições (hoje só o
+// gate do undo). NÃO é segurança — qualquer um pode setar via DevTools.
+// É só pra esconder de usuário comum.
+function saveDevMode() {
+    try {
+        localStorage.setItem(DEVMODE_KEY, JSON.stringify(AppState.devMode));
+    } catch (e) {}
+}
+
+function loadDevMode() {
+    try {
+        const raw = localStorage.getItem(DEVMODE_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            AppState.devMode.unlocked = !!parsed.unlocked;
+            AppState.devMode.active = !!parsed.active && !!parsed.unlocked;
+        }
+    } catch (e) {}
+}
+
+function setupDevModeTapTrigger(el) {
+    let tapCount = 0;
+    let resetTimer = null;
+    el.addEventListener('click', () => {
+        if (AppState.devMode.unlocked) return;
+        tapCount++;
+        if (resetTimer) clearTimeout(resetTimer);
+        resetTimer = setTimeout(() => { tapCount = 0; }, DEVMODE_TAP_TIMEOUT_MS);
+        const remaining = DEVMODE_TAPS_NEEDED - tapCount;
+        if (remaining === 0) {
+            AppState.devMode.unlocked = true;
+            saveDevMode();
+            tapCount = 0;
+            if (window.showToast) window.showToast('Modo Desenvolvedor desbloqueado 🛠️', 'success');
+        } else if (remaining > 0 && remaining <= 3) {
+            if (window.showToast) {
+                window.showToast(`Faltam ${remaining} para o Modo Desenvolvedor`, 'info');
+            }
+        }
+    });
+}
+
+function updateDevBadge() {
+    const badge = document.getElementById('devModeBadge');
+    if (!badge) return;
+    badge.classList.toggle('hidden', !AppState.devMode.active);
+}
+
+function renderDevModeSection() {
+    const section = document.getElementById('devModeSection');
+    const checkbox = document.getElementById('prefDevModeActive');
+    if (!section || !checkbox) return;
+    if (AppState.devMode.unlocked) {
+        section.classList.remove('hidden');
+        checkbox.checked = !!AppState.devMode.active;
+    } else {
+        section.classList.add('hidden');
+        checkbox.checked = false;
+    }
+}
+
 // Gate de experiência pro toggle "Permitir desfazer ações".
 // Ideia: novatos não conseguem desligar o undo até pegarem ritmo. Editores de
 // nível mais alto têm cota menor (são mais experientes).
@@ -1143,6 +1227,8 @@ function getUndoUnlockThreshold() {
 }
 
 function canDisableUndo() {
+    // Modo Desenvolvedor bypassa o gate de experiência completamente.
+    if (AppState.devMode && AppState.devMode.active) return true;
     return getUndoTreatedCount() >= getUndoUnlockThreshold();
 }
 

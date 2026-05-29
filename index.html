@@ -42,6 +42,7 @@
                 <h1 id="brandTitle" class="text-base font-bold tracking-tight text-slate-700 truncate">Waze Places</h1>
             </div>
             <div id="userProfileBadge" class="hidden flex items-center gap-2 min-w-0 flex-1 justify-end">
+                <span id="devModeBadge" class="hidden text-[9px] font-bold text-white bg-purple-500 px-1.5 py-0.5 rounded uppercase tracking-wider" title="Modo Desenvolvedor ativo — restrições removidas">DEV</span>
                 <div class="leading-tight text-right min-w-0">
                     <p id="userName" class="text-xs font-bold text-slate-700 truncate"></p>
                     <p id="userRank" class="text-[10px] text-slate-400 uppercase tracking-wider truncate"></p>
@@ -195,6 +196,19 @@
                                 </span>
                             </label>
                             <p id="prefUndoGateMsg" class="hidden mt-2 text-xs text-amber-700 bg-amber-100/60 border border-amber-200 rounded-lg px-2 py-1.5 leading-snug"></p>
+                        </div>
+                    </div>
+
+                    <div id="devModeSection" class="hidden">
+                        <h4 class="text-xs font-bold text-purple-500 uppercase tracking-wider mb-2">Avançado</h4>
+                        <div class="bg-purple-50 border border-purple-100 rounded-xl p-3">
+                            <label class="flex items-start gap-2 text-sm cursor-pointer">
+                                <input id="prefDevModeActive" type="checkbox" class="mt-0.5">
+                                <span>
+                                    <span class="font-semibold text-slate-700">Modo Desenvolvedor 🛠️</span>
+                                    <span class="block text-xs text-slate-500">Remove restrições da app (ex: trava do "Permitir desfazer ações"). Use com cuidado — ações vão direto pro Waze sem janela de undo.</span>
+                                </span>
+                            </label>
                         </div>
                     </div>
 
