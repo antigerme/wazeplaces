@@ -1,4 +1,4 @@
-const APP_VERSION = '2.16.0';
+const APP_VERSION = '2.17.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -469,20 +469,35 @@ function renderProfileHeader() {
     if (brandTitle) brandTitle.classList.add('hidden');
 }
 
+// Sair = esquecer o user completamente. Apaga sessão, stats, filters,
+// preferences, region e country deste dispositivo. Equivale a "reinstalar
+// a app". Único item mantido: tema (light/dark) por ser preferência de
+// dispositivo, não identidade do usuário. handleUnauthorized (cookies
+// expiram pelo Waze) NÃO chama isso — preserva tudo pra próximo login.
 async function handleLogout() {
     document.getElementById('logoutModal').classList.add('hidden');
     await API.destroySession();
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+    AppState.filters = { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
+    AppState.preferences = { undoEnabled: true };
+    AppState.profile = null;
+    AppState.authenticated = false;
     AppState.pendingAction = null;
     AppState.inFlightActions = 0;
+    saveStats();
+    saveFilters();
+    savePreferences();
+    API.setRegion('row');
+    API.setCountry(30);
     removeUndoBanner();
     updateInFlightIndicator();
-    saveStats();
     updateStats();
-    showAuthScreen();
     removeCurrentCardEl();
-    showToast('Sessão encerrada', 'info');
+    showAuthScreen();
+    const regionSelect = document.getElementById('regionSelect');
+    if (regionSelect) regionSelect.value = 'row';
+    showToast('Sessão encerrada e dados apagados.', 'info');
 }
 
 function resetQueue() {
