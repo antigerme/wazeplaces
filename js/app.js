@@ -1,4 +1,4 @@
-const APP_VERSION = '2.17.0';
+const APP_VERSION = '2.17.1';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -109,7 +109,13 @@ function setupAuthListeners() {
 function setupAppListeners() {
     const $ = id => document.getElementById(id);
 
-    $('logoutBtn').addEventListener('click', () => $('logoutModal').classList.remove('hidden'));
+    // Fecha o helpModal antes de abrir o logoutModal porque ambos têm z-50 e
+    // helpModal está depois no DOM (renderizaria por cima, escondendo a
+    // confirmação de Sair até o user fechar o help manualmente).
+    $('logoutBtn').addEventListener('click', () => {
+        $('helpModal').classList.add('hidden');
+        $('logoutModal').classList.remove('hidden');
+    });
     $('confirmLogout').addEventListener('click', handleLogout);
     $('cancelLogout').addEventListener('click', () => $('logoutModal').classList.add('hidden'));
 
