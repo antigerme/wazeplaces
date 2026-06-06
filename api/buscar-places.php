@@ -52,7 +52,10 @@ try {
             'lockRanks' => [0, 1, 2, 3, 4, 5],
             'page' => $page,
             'residential' => $residential,
-            'types' => $filterTypes,
+            // types vai SEMPRE null pro Waze. Array parcial (ex: ["VENUE","IMAGE"]
+            // sem REQUEST) faz Waze devolver 406. Filtramos por reqType no loop
+            // abaixo, baseado em $filterTypes recebido do frontend.
+            'types' => null,
             'orderBy' => 'SORTING_UPDATE_TIME_DESC'
         ]
     ];
@@ -240,6 +243,9 @@ try {
                 $updateTypeStr = 'Desconhecido';
                 $reqType = $updateRequest['type'] ?? '';
                 $reqSubType = $updateRequest['subType'] ?? '';
+                // Filtro de tipos aplicado aqui (não no payload do Waze, que rejeita
+                // arrays parciais com 406). $filterTypes é null = sem filtro.
+                if ($filterTypes !== null && !in_array($reqType, $filterTypes, true)) continue;
                 $changes = [];
                 $isDelete = false;
                 $flagComment = null;
