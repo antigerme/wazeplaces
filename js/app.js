@@ -1,4 +1,4 @@
-const APP_VERSION = '2.18.0';
+const APP_VERSION = '2.19.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -25,7 +25,7 @@ const AppState = {
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
-    filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true },
+    filters: { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true },
     preferences: { undoEnabled: true },
     devMode: { unlocked: false, active: false },
     profile: null,
@@ -72,6 +72,7 @@ function initApp() {
     loadFilters();
     loadPreferences();
     loadDevMode();
+    enforceDevGatedFilters();
     applyTheme(localStorage.getItem(THEME_KEY) || 'light');
 
     API.getRegion();
@@ -280,6 +281,7 @@ function populateManagedAreaSelect() {
 async function openFiltersModal() {
     const $ = id => document.getElementById(id);
     renderDevModeSection();
+    renderRequestTypeRow();
     renderUndoGateUI();
     $('filterUnreadOnly').checked = AppState.filters.unreadOnly !== false;
     document.querySelectorAll('.filter-type').forEach(cb => {
@@ -321,6 +323,9 @@ function applyFiltersFromModal() {
 
     AppState.filters.unreadOnly = $('filterUnreadOnly').checked;
     AppState.filters.types = Array.from(document.querySelectorAll('.filter-type:checked')).map(cb => cb.value);
+    // Se o user desligou dev mode neste mesmo Apply, REQUEST pode ter ficado
+    // checked no DOM mas precisa sair do filtro.
+    enforceDevGatedFilters();
     AppState.filters.residential = $('filterResidential').value;
     AppState.filters.stateId = $('filterState').value;
     AppState.filters.managedAreaId = $('filterManagedArea').value;
@@ -502,7 +507,7 @@ async function handleLogout() {
     await API.destroySession();
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
-    AppState.filters = { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
+    AppState.filters = { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
     AppState.preferences = { undoEnabled: true };
     AppState.devMode = { unlocked: false, active: false };
     AppState.profile = null;
@@ -1117,7 +1122,7 @@ function loadFilters() {
         const raw = localStorage.getItem(FILTERS_KEY);
         if (raw) {
             const parsed = JSON.parse(raw);
-            AppState.filters.types = parsed.types || ['VENUE', 'IMAGE', 'REQUEST'];
+            AppState.filters.types = parsed.types || ['VENUE', 'IMAGE'];
             AppState.filters.residential = parsed.residential || '';
             AppState.filters.stateId = parsed.stateId || '';
             AppState.filters.managedAreaId = parsed.managedAreaId || '';
@@ -1205,6 +1210,27 @@ function renderDevModeSection() {
         section.classList.add('hidden');
         checkbox.checked = false;
     }
+}
+
+// REQUEST (Reportes/Atualizações) é gated por dev mode enquanto o flow de
+// UPDATE PURs (mudanças, flags, deletes) ainda tem casos não cobertos.
+// Quando estiver maduro, é só remover esse gate.
+function renderRequestTypeRow() {
+    const row = document.getElementById('filterTypeRequestRow');
+    if (!row) return;
+    row.classList.toggle('hidden', !AppState.devMode.active);
+}
+
+// Remove tipos gated do filtro salvo se o user não tem mais permissão.
+// Cobre 2 cenários:
+//   (1) migração: user com saved=['VENUE','IMAGE','REQUEST'] sem dev mode
+//       precisa ter REQUEST retirado (default novo é só VENUE+IMAGE)
+//   (2) user desliga dev mode no modal e tinha REQUEST checado → tira
+function enforceDevGatedFilters() {
+    if (AppState.devMode.active) return;
+    const before = AppState.filters.types.length;
+    AppState.filters.types = AppState.filters.types.filter(t => t !== 'REQUEST');
+    if (AppState.filters.types.length !== before) saveFilters();
 }
 
 // Gate de experiência pro toggle "Permitir desfazer ações".
