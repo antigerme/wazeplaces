@@ -61,10 +61,15 @@ wazeplaces/
 ├── .htaccess                # Apache config (rewrite, headers, cache, compressão)
 ├── start.sh                 # Wrapper dev Linux/macOS: PHP_CLI_SERVER_WORKERS=4 + php -S
 ├── start.bat                # Wrapper dev Windows: idem
+├── docs/                    # Referência pra dev (NÃO servido em runtime)
+│   ├── README.md            # Procedência dos docs
+│   └── wme-sdk-typings.d.ts # Tipagens oficiais do WME SDK (Waze) — referência canônica de schemas
 ├── README.md                # Doc pública (editores leigos + devs)
 ├── CLAUDE.md                # Este arquivo
 └── .gitignore
 ```
+
+**`docs/wme-sdk-typings.d.ts`**: tipagem oficial do Waze Map Editor SDK (v2.354). Não é importada em runtime — está aqui só pra consultar quando surgir dúvida sobre o schema do Waze (campos do `Venue`, valores válidos de enum, formato de `OpeningHour`/`NavigationPoint`, etc.). Use sempre como referência canônica antes de inventar estrutura no `buscar-places.php`.
 
 ---
 
