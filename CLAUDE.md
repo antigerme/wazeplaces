@@ -276,6 +276,12 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 - **Owner sempre faz squash merge + apaga a branch ao aprovar** — agente sincroniza main e deleta local sem perguntar
 - **Sempre que abrir PR, agente subscreve no `subscribe_pr_activity`** e acompanha CI/review comments até a branch ser mergeada. Bugs apontados no review devem ser corrigidos no mesmo PR (push direto na branch). CI vermelho deve ser corrigido (não ignorado).
 
+### Perfis de editor do Waze (referência rápida)
+- **URL canônica do perfil**: `https://www.waze.com/pt-BR/user/editor/<username>` (sem `pt-BR/` também funciona, redirect pra locale do user)
+- Quando mencionar nome de editor da comunidade WME (próprio owner, colaboradores tipo @daflash etc), sempre transformar em link clicável `target="_blank" rel="noopener noreferrer"` apontando pra esse perfil
+- Padrão visual: cor de destaque (cyan/purple), `hover:underline`, `font-semibold`. Ver exemplo `index.html#filterTypeRequestRow` da extensão @daflash
+- Owner do projeto: `@antigerme` → `https://www.waze.com/user/editor/antigerme` (já linkado no `byAuthor` button do auth screen)
+
 ### Estilo de mensagens ao usuário
 - Toasts curtos em português; emoji ocasional onde ajuda ("Já tratado por outro editor 👍")
 - Erros de Waze nunca expõem detalhes técnicos crus pro editor (vira "Servidor Waze indisponível" etc)
