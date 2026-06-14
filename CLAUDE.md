@@ -271,6 +271,11 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 - Squash merge é o padrão do owner — não precisa rebase manual
 - Owner faz merge + delete da branch no GitHub UI; agente espera próxima task
 
+### Workflow PR ↔ owner (regras fixadas pelo owner)
+- **Agente pode abrir PR sempre que sentir que a branch tá madura** — não precisa pedir permissão pra abrir
+- **Owner sempre faz squash merge + apaga a branch ao aprovar** — agente sincroniza main e deleta local sem perguntar
+- **Sempre que abrir PR, agente subscreve no `subscribe_pr_activity`** e acompanha CI/review comments até a branch ser mergeada. Bugs apontados no review devem ser corrigidos no mesmo PR (push direto na branch). CI vermelho deve ser corrigido (não ignorado).
+
 ### Estilo de mensagens ao usuário
 - Toasts curtos em português; emoji ocasional onde ajuda ("Já tratado por outro editor 👍")
 - Erros de Waze nunca expõem detalhes técnicos crus pro editor (vira "Servidor Waze indisponível" etc)
