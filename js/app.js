@@ -1,4 +1,4 @@
-const APP_VERSION = '2.20.0';
+const APP_VERSION = '2.20.1';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -109,10 +109,10 @@ function setupAuthListeners() {
         window.open('https://www.waze.com/user/editor/antigerme', '_blank');
     });
     $('closeAccessDenied').addEventListener('click', () => $('accessDeniedModal').classList.add('hidden'));
-
-    const regionSelect = $('regionSelect');
-    regionSelect.value = API.getRegion();
-    regionSelect.addEventListener('change', () => API.setRegion(regionSelect.value));
+    // Região default sempre 'row' pra fluxos novos (público alvo BR/Latam).
+    // Quem precisa de NA/IL/world muda no modal "Filtros e Preferências"
+    // depois de logar (filterRegion). Não exibimos picker no authScreen
+    // porque era fricção desnecessária pra 95% dos usuários.
 }
 
 function setupAppListeners() {
@@ -526,8 +526,6 @@ async function handleLogout() {
     updateDevBadge();
     removeCurrentCardEl();
     showAuthScreen();
-    const regionSelect = document.getElementById('regionSelect');
-    if (regionSelect) regionSelect.value = 'row';
     showToast('Sessão encerrada e dados apagados.', 'info');
 }
 
