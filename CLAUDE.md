@@ -63,7 +63,10 @@ wazeplaces/
 ├── start.bat                # Wrapper dev Windows: idem
 ├── docs/                    # Referência pra dev (NÃO servido em runtime)
 │   ├── README.md            # Procedência dos docs
-│   └── wme-sdk-typings.d.ts # Tipagens oficiais do WME SDK (Waze) — referência canônica de schemas
+│   ├── wme-sdk-typings.d.ts # Tipagens oficiais do WME SDK (Waze) — referência canônica de schemas
+│   ├── native-android-analysis.md  # Discussão sobre eventual versão Android nativa
+│   ├── native-android-analysis.pdf # Mesmo doc renderizado pra compartilhar
+│   └── scripts/md2pdf.py    # Conversor markdown → PDF estilizado (paleta cyan da app)
 ├── README.md                # Doc pública (editores leigos + devs)
 ├── CLAUDE.md                # Este arquivo
 └── .gitignore
