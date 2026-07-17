@@ -1,11 +1,12 @@
 {
+  "id": "/",
   "name": "Waze Places - Validação",
   "short_name": "Waze Places",
   "description": "PWA para limpar pedidos de places do Waze Map Editor com interface estilo Tinder",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
+  "background_color": "#f8fafc",
   "theme_color": "#33CCFF",
   "orientation": "portrait",
   "lang": "pt-BR",

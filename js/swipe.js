@@ -5,6 +5,14 @@ let currentY = 0;
 let isDragging = false;
 let currentCard = null;
 let dragHandlers = null;
+// Amostras recentes do drag pra calcular velocidade no soltar (flick).
+let moveSamples = [];
+
+// Velocidade mínima (px/ms) pra comitar um flick mesmo abaixo do
+// threshold de distância. ~0.6px/ms ≈ 600px/s, na faixa que M3 usa
+// pra distinguir fling de drag.
+const FLICK_VELOCITY = 0.6;
+const FLICK_MIN_DISTANCE = 40;
 
 function initSwipe() {}
 
@@ -15,7 +23,10 @@ function enableSwipeOnCard(card) {
 
 function handleDragStart(e) {
     if (window.AppState && window.AppState.loading) return;
-    if (e.target.closest('button, a, input, select, textarea')) return;
+    // Controles interativos e áreas de scroll interno não iniciam drag —
+    // sem a exceção das listas, o touch-action:none do card mataria o
+    // scroll de "Mudanças propostas" e do reporte no mobile.
+    if (e.target.closest('button, a, input, select, textarea, .card-changes-list, .card-flag-comment-text')) return;
 
     isDragging = true;
     currentCard = e.currentTarget;
@@ -29,6 +40,7 @@ function handleDragStart(e) {
     }
     currentX = startX;
     currentY = startY;
+    moveSamples = [{ x: startX, y: startY, t: performance.now() }];
 
     currentCard.style.transition = 'none';
 
@@ -54,6 +66,13 @@ function handleDragMove(e) {
         currentY = e.touches[0].clientY;
     }
 
+    const now = performance.now();
+    moveSamples.push({ x: currentX, y: currentY, t: now });
+    // Só interessam os últimos ~120ms pra velocidade instantânea
+    while (moveSamples.length > 2 && now - moveSamples[0].t > 120) {
+        moveSamples.shift();
+    }
+
     const deltaX = currentX - startX;
     const deltaY = currentY - startY;
     const dominantVertical = Math.abs(deltaY) > Math.abs(deltaX) && deltaY < -30;
@@ -69,6 +88,14 @@ function handleDragMove(e) {
     }
 }
 
+function dragVelocity() {
+    if (moveSamples.length < 2) return { vx: 0, vy: 0 };
+    const first = moveSamples[0];
+    const last = moveSamples[moveSamples.length - 1];
+    const dt = Math.max(1, last.t - first.t);
+    return { vx: (last.x - first.x) / dt, vy: (last.y - first.y) / dt };
+}
+
 function handleDragEnd(e) {
     if (!isDragging || !currentCard) return;
     isDragging = false;
@@ -77,6 +104,7 @@ function handleDragEnd(e) {
     const deltaY = currentY - startY;
     const thresholdX = window.innerWidth * 0.25;
     const thresholdY = 120;
+    const { vx, vy } = dragVelocity();
 
     if (dragHandlers) {
         document.removeEventListener('mousemove', dragHandlers.move);
@@ -86,11 +114,17 @@ function handleDragEnd(e) {
         dragHandlers = null;
     }
 
-    if (Math.abs(deltaY) > thresholdY && deltaY < 0 && Math.abs(deltaY) > Math.abs(deltaX)) {
+    // Commit por distância OU por flick (velocidade alta com deslocamento mínimo)
+    const commitUp = (Math.abs(deltaY) > thresholdY && deltaY < 0 && Math.abs(deltaY) > Math.abs(deltaX)) ||
+        (vy < -FLICK_VELOCITY && deltaY < -FLICK_MIN_DISTANCE && Math.abs(deltaY) > Math.abs(deltaX));
+    const commitX = Math.abs(deltaX) > thresholdX ||
+        (Math.abs(vx) > FLICK_VELOCITY && Math.abs(deltaX) > FLICK_MIN_DISTANCE && Math.abs(deltaX) > Math.abs(deltaY));
+
+    if (commitUp) {
         animateSwipeOut('up', () => {
             if (typeof onSwipeUp === 'function') onSwipeUp();
         });
-    } else if (Math.abs(deltaX) > thresholdX) {
+    } else if (commitX) {
         const dir = deltaX > 0 ? 'right' : 'left';
         animateSwipeOut(dir, () => {
             if (dir === 'right' && typeof onSwipeRight === 'function') onSwipeRight();
@@ -116,6 +150,9 @@ function animateSwipeOut(direction, callback) {
 
     const card = currentCard;
     currentCard = null;
+
+    // Feedback tátil no commit (Android; iOS ignora silenciosamente)
+    if (navigator.vibrate) navigator.vibrate(12);
 
     if (direction === 'up') {
         card.style.transition = 'transform 0.3s ease, opacity 0.3s ease';

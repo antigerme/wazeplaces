@@ -1,4 +1,4 @@
-const APP_VERSION = '2.20.2';
+const APP_VERSION = '2.21.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -8,7 +8,7 @@ const DEVMODE_KEY = 'waze_places_devmode';
 const THEME_KEY = 'waze_places_theme';
 const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
-const UNDO_WINDOW_MS = 3000;
+const UNDO_WINDOW_MS = 5000;
 const MAX_CHANGES_DISPLAY = 4;
 const PREFETCH_THRESHOLD = 3;
 const MAX_EMPTY_PAGES = 5;
@@ -73,7 +73,14 @@ function initApp() {
     loadPreferences();
     loadDevMode();
     enforceDevGatedFilters();
-    applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+    // Tema: segue o sistema até o user escolher manualmente (M3/HIG).
+    applyTheme(getPreferredTheme());
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+    if (systemTheme.addEventListener) {
+        systemTheme.addEventListener('change', (e) => {
+            if (!localStorage.getItem(THEME_KEY)) applyTheme(e.matches ? 'dark' : 'light');
+        });
+    }
 
     API.getRegion();
     API.getCountry();
@@ -94,21 +101,62 @@ function initApp() {
     }
 }
 
+// ── Gerenciador de modais ─────────────────────────────────────────────────
+// Todos os diálogos (role="dialog") passam por aqui: foco entra no modal ao
+// abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
+// (via handleKeyDown); clique no scrim fecha; body trava o scroll.
+// Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal'];
+let lastFocusedBeforeModal = null;
+
+function openModal(id) {
+    const m = document.getElementById(id);
+    if (!m) return;
+    // Modais não empilham: fecha qualquer outro aberto (ex.: Sair a partir da Ajuda)
+    MODAL_IDS.forEach(other => {
+        if (other !== id) document.getElementById(other)?.classList.add('hidden');
+    });
+    lastFocusedBeforeModal = document.activeElement;
+    m.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    const focusable = m.querySelector('textarea, input:not([type=hidden]):not(:disabled), select, button');
+    if (focusable) focusable.focus();
+}
+
+function closeModal(id) {
+    const m = document.getElementById(id);
+    if (!m || m.classList.contains('hidden')) return;
+    m.classList.add('hidden');
+    if (!topOpenModal() && !Lightbox.isOpen()) document.body.style.overflow = '';
+    if (lastFocusedBeforeModal && document.body.contains(lastFocusedBeforeModal)) {
+        lastFocusedBeforeModal.focus();
+    }
+    lastFocusedBeforeModal = null;
+}
+
+function topOpenModal() {
+    for (const id of MODAL_IDS) {
+        const m = document.getElementById(id);
+        if (m && !m.classList.contains('hidden')) return m;
+    }
+    return null;
+}
+
 function setupAuthListeners() {
     const $ = id => document.getElementById(id);
 
     $('uploadBtn').addEventListener('click', () => $('fileInput').click());
     $('fileInput').addEventListener('change', handleFileUpload);
-    $('pasteBtn').addEventListener('click', () => $('pasteModal').classList.remove('hidden'));
+    $('pasteBtn').addEventListener('click', () => openModal('pasteModal'));
     $('confirmPaste').addEventListener('click', handlePasteConfirm);
     $('cancelPaste').addEventListener('click', () => {
-        $('pasteModal').classList.add('hidden');
+        closeModal('pasteModal');
         $('cookiesTextarea').value = '';
     });
     $('byAuthor').addEventListener('click', () => {
         window.open('https://www.waze.com/user/editor/antigerme', '_blank');
     });
-    $('closeAccessDenied').addEventListener('click', () => $('accessDeniedModal').classList.add('hidden'));
+    $('closeAccessDenied').addEventListener('click', () => closeModal('accessDeniedModal'));
     // Região default sempre 'row' pra fluxos novos (público alvo BR/Latam).
     // Quem precisa de NA/IL/world muda no modal "Filtros e Preferências"
     // depois de logar (filterRegion). Não exibimos picker no authScreen
@@ -118,32 +166,39 @@ function setupAuthListeners() {
 function setupAppListeners() {
     const $ = id => document.getElementById(id);
 
-    // Fecha o helpModal antes de abrir o logoutModal porque ambos têm z-50 e
-    // helpModal está depois no DOM (renderizaria por cima, escondendo a
-    // confirmação de Sair até o user fechar o help manualmente).
-    $('logoutBtn').addEventListener('click', () => {
-        $('helpModal').classList.add('hidden');
-        $('logoutModal').classList.remove('hidden');
-    });
+    // openModal fecha o helpModal automaticamente (modais não empilham)
+    $('logoutBtn').addEventListener('click', () => openModal('logoutModal'));
     $('confirmLogout').addEventListener('click', handleLogout);
-    $('cancelLogout').addEventListener('click', () => $('logoutModal').classList.add('hidden'));
+    $('cancelLogout').addEventListener('click', () => closeModal('logoutModal'));
 
     $('reloadBtn').addEventListener('click', () => {
         resetQueue();
         startFetching();
     });
-    $('helpBtn').addEventListener('click', () => $('helpModal').classList.remove('hidden'));
-    $('closeHelp').addEventListener('click', () => $('helpModal').classList.add('hidden'));
+    $('refreshBtn').addEventListener('click', () => {
+        if (AppState.fetching) return;
+        resetQueue();
+        startFetching();
+        showToast('Atualizando fila…', 'info');
+    });
+    $('helpBtn').addEventListener('click', () => openModal('helpModal'));
+    $('closeHelp').addEventListener('click', () => closeModal('helpModal'));
     $('themeBtn').addEventListener('click', toggleTheme);
     $('filtersBtn').addEventListener('click', openFiltersModal);
+
+    // Clique no scrim fecha o modal (padrão M3/HIG pra diálogos dispensáveis)
+    MODAL_IDS.forEach(id => {
+        const m = $(id);
+        if (m) m.addEventListener('click', (e) => { if (e.target === m) closeModal(id); });
+    });
 
     window.addEventListener('keydown', handleKeyDown);
 }
 
 function setupModalListeners() {
     const $ = id => document.getElementById(id);
-    $('closeFilters').addEventListener('click', () => $('filtersModal').classList.add('hidden'));
-    $('cancelFilters').addEventListener('click', () => $('filtersModal').classList.add('hidden'));
+    $('closeFilters').addEventListener('click', () => closeModal('filtersModal'));
+    $('cancelFilters').addEventListener('click', () => closeModal('filtersModal'));
     $('applyFilters').addEventListener('click', applyFiltersFromModal);
     $('filterCountry').addEventListener('change', (e) => {
         loadStatesIntoSelect(parseInt(e.target.value, 10));
@@ -160,22 +215,36 @@ const Lightbox = {
     urls: [],
     idx: 0,
     newIdx: -1,
+    placeName: '',
+    // Estado de zoom/pan (gestos estilo visualizador de fotos: pinch,
+    // double-tap, arrastar pra trocar/fechar quando sem zoom)
+    scale: 1,
+    tx: 0,
+    ty: 0,
     isOpen() {
         return !document.getElementById('imageLightbox').classList.contains('hidden');
     },
-    open(urls, startIdx, newImageIdx) {
+    open(urls, startIdx, newImageIdx, placeName) {
         if (!urls || urls.length === 0) return;
         this.urls = urls;
         this.idx = Math.max(0, Math.min(startIdx || 0, urls.length - 1));
         this.newIdx = (newImageIdx !== undefined && newImageIdx !== null) ? newImageIdx : -1;
+        this.placeName = placeName || '';
         document.getElementById('imageLightbox').classList.remove('hidden');
         document.body.style.overflow = 'hidden';
+        const hint = document.getElementById('lightboxZoomHint');
+        if (hint) {
+            hint.classList.remove('hidden');
+            clearTimeout(this._hintTimer);
+            this._hintTimer = setTimeout(() => hint.classList.add('hidden'), 4000);
+        }
         this._render();
     },
     close() {
         document.getElementById('imageLightbox').classList.add('hidden');
-        document.body.style.overflow = '';
+        if (!topOpenModal()) document.body.style.overflow = '';
         document.getElementById('lightboxImage').removeAttribute('src');
+        this.resetZoom();
     },
     prev() {
         if (this.urls.length < 2) return;
@@ -187,8 +256,48 @@ const Lightbox = {
         this.idx = (this.idx + 1) % this.urls.length;
         this._render();
     },
+    resetZoom() {
+        this.scale = 1;
+        this.tx = 0;
+        this.ty = 0;
+        this._applyTransform();
+    },
+    zoomTo(scale, cx, cy) {
+        // cx/cy em coordenadas de viewport; mantém o ponto tocado sob o dedo
+        const img = document.getElementById('lightboxImage');
+        const rect = img.getBoundingClientRect();
+        const prevScale = this.scale;
+        this.scale = Math.max(1, Math.min(4, scale));
+        if (this.scale === 1) {
+            this.tx = 0;
+            this.ty = 0;
+        } else if (cx !== undefined) {
+            const imgCx = rect.left + rect.width / 2;
+            const imgCy = rect.top + rect.height / 2;
+            const ratio = this.scale / prevScale;
+            this.tx = (this.tx - (cx - imgCx)) * ratio + (cx - imgCx);
+            this.ty = (this.ty - (cy - imgCy)) * ratio + (cy - imgCy);
+        }
+        this._applyTransform();
+    },
+    panBy(dx, dy) {
+        if (this.scale <= 1) return;
+        this.tx += dx;
+        this.ty += dy;
+        this._applyTransform();
+    },
+    _applyTransform() {
+        const img = document.getElementById('lightboxImage');
+        if (!img) return;
+        img.style.transform = this.scale === 1 && this.tx === 0 && this.ty === 0
+            ? ''
+            : `translate(${this.tx}px, ${this.ty}px) scale(${this.scale})`;
+    },
     _render() {
-        document.getElementById('lightboxImage').src = this.urls[this.idx];
+        this.resetZoom();
+        const img = document.getElementById('lightboxImage');
+        img.src = this.urls[this.idx];
+        img.alt = this.placeName ? `Foto de ${this.placeName}` : 'Foto do place';
         const prevBtn = document.getElementById('lightboxPrev');
         const nextBtn = document.getElementById('lightboxNext');
         const count = document.getElementById('lightboxCount');
@@ -204,16 +313,108 @@ const Lightbox = {
 
 function setupLightbox() {
     const lb = document.getElementById('imageLightbox');
+    const img = document.getElementById('lightboxImage');
     document.getElementById('lightboxClose').addEventListener('click', () => Lightbox.close());
     document.getElementById('lightboxPrev').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.prev(); });
     document.getElementById('lightboxNext').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.next(); });
     lb.addEventListener('click', (e) => {
         if (e.target === lb) Lightbox.close();
     });
+
+    // ── Gestos (Pointer Events): pinch zoom, double-tap, pan, swipe ──
+    const pointers = new Map();
+    let pinchStartDist = 0;
+    let pinchStartScale = 1;
+    let lastTapTime = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragging = false;
+
+    img.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        img.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (pointers.size === 2) {
+            const [a, b] = [...pointers.values()];
+            pinchStartDist = Math.hypot(b.x - a.x, b.y - a.y);
+            pinchStartScale = Lightbox.scale;
+            dragging = false;
+            return;
+        }
+
+        // Double-tap → alterna zoom no ponto tocado
+        const now = performance.now();
+        if (now - lastTapTime < 300 && Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < 40) {
+            lastTapTime = 0;
+            if (Lightbox.scale > 1) Lightbox.resetZoom();
+            else Lightbox.zoomTo(2.5, e.clientX, e.clientY);
+            return;
+        }
+        lastTapTime = now;
+        lastTapX = e.clientX;
+        lastTapY = e.clientY;
+
+        dragging = true;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+    });
+
+    img.addEventListener('pointermove', (e) => {
+        if (!pointers.has(e.pointerId)) return;
+        const prev = pointers.get(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (pointers.size === 2) {
+            const [a, b] = [...pointers.values()];
+            const dist = Math.hypot(b.x - a.x, b.y - a.y);
+            if (pinchStartDist > 0) {
+                const cx = (a.x + b.x) / 2;
+                const cy = (a.y + b.y) / 2;
+                Lightbox.zoomTo(pinchStartScale * (dist / pinchStartDist), cx, cy);
+            }
+            return;
+        }
+
+        if (Lightbox.scale > 1) {
+            Lightbox.panBy(e.clientX - prev.x, e.clientY - prev.y);
+        }
+    });
+
+    const endPointer = (e) => {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.delete(e.pointerId);
+        if (pointers.size < 2) pinchStartDist = 0;
+
+        // Sem zoom: swipe horizontal troca foto, vertical pra baixo fecha
+        if (dragging && pointers.size === 0 && Lightbox.scale === 1) {
+            const dx = e.clientX - dragStartX;
+            const dy = e.clientY - dragStartY;
+            if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+                if (dx < 0) Lightbox.next();
+                else Lightbox.prev();
+            } else if (dy > 80 && Math.abs(dy) > Math.abs(dx)) {
+                Lightbox.close();
+            }
+        }
+        if (pointers.size === 0) dragging = false;
+    };
+    img.addEventListener('pointerup', endPointer);
+    img.addEventListener('pointercancel', endPointer);
+
+    // Desktop: scroll do mouse dá zoom no cursor
+    lb.addEventListener('wheel', (e) => {
+        if (!Lightbox.isOpen()) return;
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+        Lightbox.zoomTo(Lightbox.scale * factor, e.clientX, e.clientY);
+    }, { passive: false });
 }
 
-function openLightbox(urls, startIdx, newImageIdx) {
-    Lightbox.open(urls, startIdx, newImageIdx);
+function openLightbox(urls, startIdx, newImageIdx, placeName) {
+    Lightbox.open(urls, startIdx, newImageIdx, placeName);
 }
 
 function populateCountrySelect() {
@@ -304,7 +505,7 @@ async function openFiltersModal() {
     $('filterState').disabled = disabled;
     $('filterManagedArea').disabled = disabled;
 
-    $('filtersModal').classList.remove('hidden');
+    openModal('filtersModal');
 }
 
 function applyFiltersFromModal() {
@@ -333,7 +534,7 @@ function applyFiltersFromModal() {
     API.setCountry($('filterCountry').value);
     API.setRegion($('filterRegion').value);
     saveFilters();
-    $('filtersModal').classList.add('hidden');
+    closeModal('filtersModal');
     resetQueue();
     startFetching();
 }
@@ -343,6 +544,17 @@ function handleKeyDown(e) {
         if (e.key === 'Escape') { e.preventDefault(); Lightbox.close(); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); Lightbox.prev(); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); Lightbox.next(); }
+        return;
+    }
+
+    // Com modal aberto: Esc fecha, e as setas NÃO disparam swipe no card
+    // atrás do diálogo (antes disparavam — ação destrutiva invisível).
+    const openedModal = topOpenModal();
+    if (openedModal) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeModal(openedModal.id);
+        }
         return;
     }
 
@@ -368,6 +580,7 @@ function showAuthScreen() {
     document.getElementById('authScreen').classList.remove('hidden');
     document.getElementById('appScreen').classList.add('hidden');
     document.getElementById('filtersBtn').classList.add('hidden');
+    document.getElementById('refreshBtn').classList.add('hidden');
     document.getElementById('userProfileBadge').classList.add('hidden');
     const brandTitle = document.getElementById('brandTitle');
     if (brandTitle) brandTitle.classList.remove('hidden');
@@ -379,6 +592,7 @@ function showMainScreen() {
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('appScreen').classList.remove('hidden');
     document.getElementById('filtersBtn').classList.remove('hidden');
+    document.getElementById('refreshBtn').classList.remove('hidden');
     AppState.authenticated = true;
     updateDevBadge();
 }
@@ -400,7 +614,7 @@ async function handlePasteConfirm() {
         showToast('Por favor, cole o conteúdo dos cookies', 'error');
         return;
     }
-    document.getElementById('pasteModal').classList.add('hidden');
+    closeModal('pasteModal');
     await authenticateWithCookies(content);
     document.getElementById('cookiesTextarea').value = '';
 }
@@ -436,12 +650,12 @@ function showAccessDenied(result) {
         const tags = [];
         if (displayRank) tags.push(displayRank);
         tags.push(p.isStaff ? 'Staff' : (p.isAreaManager ? 'AM' : 'não-AM'));
-        profileBox.innerHTML = `<strong>${escapeHtml(p.userName)}</strong> <span class="text-slate-400">· ${escapeHtml(tags.join(' · '))}</span>`;
+        profileBox.innerHTML = `<strong>${escapeHtml(p.userName)}</strong> <span class="text-slate-500">· ${escapeHtml(tags.join(' · '))}</span>`;
         profileBox.classList.remove('hidden');
     } else {
         profileBox.classList.add('hidden');
     }
-    modal.classList.remove('hidden');
+    openModal('accessDeniedModal');
 }
 
 async function loadProfileAndAuxData() {
@@ -503,7 +717,7 @@ function renderProfileHeader() {
 // dispositivo, não identidade do usuário. handleUnauthorized (cookies
 // expiram pelo Waze) NÃO chama isso — preserva tudo pra próximo login.
 async function handleLogout() {
-    document.getElementById('logoutModal').classList.add('hidden');
+    closeModal('logoutModal');
     await API.destroySession();
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
@@ -742,6 +956,7 @@ function renderCurrentCard() {
 
         const updateImage = () => {
             img.src = urls[currentImgIdx];
+            img.alt = `Foto de ${place.name || 'place'} (${currentImgIdx + 1} de ${urls.length})`;
             imgCount.textContent = `${currentImgIdx + 1} / ${urls.length}`;
             const isNew = currentImgIdx === newImageIdx;
             newBadge.classList.toggle('hidden', !isNew);
@@ -755,7 +970,7 @@ function renderCurrentCard() {
         img.addEventListener('click', (e) => {
             e.stopPropagation();
             e.preventDefault();
-            openLightbox(urls, currentImgIdx, newImageIdx);
+            openLightbox(urls, currentImgIdx, newImageIdx, place.name);
         });
 
         if (urls.length > 1) {
@@ -808,6 +1023,19 @@ function renderCurrentCard() {
         changesList.innerHTML = html;
         changesBox.classList.remove('hidden');
     }
+
+    // Botões de ação explícitos — gesto é atalho, nunca o único caminho
+    // (M3/HIG). Também é o único caminho acessível a leitor de tela.
+    let actionFired = false;
+    const fireAction = (direction, handler) => {
+        if (actionFired) return;
+        actionFired = true;
+        if (window.triggerSwipe) window.triggerSwipe(direction, handler);
+        else handler();
+    };
+    card.querySelector('.card-btn-reject').addEventListener('click', () => fireAction('left', handleReject));
+    card.querySelector('.card-btn-skip').addEventListener('click', () => fireAction('up', handleSkip));
+    card.querySelector('.card-btn-read').addEventListener('click', () => fireAction('right', handleMarkAsRead));
 
     removeCurrentCardEl();
     document.getElementById('cardStack').appendChild(card);
@@ -1030,6 +1258,7 @@ function showUndoBanner(message) {
     banner.innerHTML = `
         <span>${escapeHtml(message)}</span>
         <button type="button" id="undoBtn">Desfazer</button>
+        <span class="undo-progress" style="animation-duration: ${UNDO_WINDOW_MS}ms" aria-hidden="true"></span>
     `;
     container.appendChild(banner);
     document.getElementById('undoBtn').addEventListener('click', () => {
@@ -1279,14 +1508,23 @@ function renderUndoGateUI() {
     gateMsg.classList.remove('hidden');
 }
 
+// Tema: preferência explícita do user (localStorage) vence; sem preferência,
+// segue o sistema (M3/HIG). O listener em initApp acompanha mudanças do SO.
+function getPreferredTheme() {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 function applyTheme(theme) {
     const isDark = theme === 'dark';
     document.documentElement.classList.toggle('dark', isDark);
     document.body.classList.toggle('dark', isDark);
     document.getElementById('themeIconLight').classList.toggle('hidden', isDark);
     document.getElementById('themeIconDark').classList.toggle('hidden', !isDark);
+    // Status bar (Android/PWA) acompanha a surface do header, não a cor da marca
     const themeColor = document.querySelector('meta[name="theme-color"]');
-    if (themeColor) themeColor.setAttribute('content', isDark ? '#0f172a' : '#33CCFF');
+    if (themeColor) themeColor.setAttribute('content', isDark ? '#0f172a' : '#f8fafc');
 }
 
 function toggleTheme() {
@@ -1296,51 +1534,63 @@ function toggleTheme() {
     applyTheme(next);
 }
 
-function showToast(message, type = 'info') {
+// Snackbar M3: bottom-center (via #notifyStack), desliza de baixo, um clique
+// dispensa. Duração 4s (mínimo M3). aria-live está no container (index.html).
+function showToast(message, type = 'info', durationMs = 4000) {
     const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
 
     const colors = {
-        success: 'bg-emerald-500',
-        error: 'bg-rose-500',
-        info: 'bg-cyan-500'
+        success: 'bg-emerald-600',
+        error: 'bg-rose-600',
+        info: 'bg-slate-800 dark:bg-slate-100 dark:text-slate-900'
     };
 
     const icons = {
-        success: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
-        error: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>',
-        info: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+        success: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
+        error: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>',
+        info: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
     };
 
-    toast.className = `${colors[type]} text-white px-5 py-3 rounded-xl shadow-lg transform transition-all duration-300 translate-x-full flex items-center space-x-3 backdrop-blur-sm border border-white/20 font-medium`;
-    toast.innerHTML = `${icons[type]}<span>${escapeHtml(message)}</span>`;
+    toast.className = `toast ${colors[type]} text-white font-medium text-sm`;
+    toast.innerHTML = `${icons[type]}<span class="flex-1">${escapeHtml(message)}</span>`;
+    toast.title = 'Toque para dispensar';
+
+    let removed = false;
+    const dismiss = () => {
+        if (removed) return;
+        removed = true;
+        toast.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(20px)';
+        setTimeout(() => toast.remove(), 250);
+    };
+    toast.addEventListener('click', dismiss);
 
     container.appendChild(toast);
-    requestAnimationFrame(() => { toast.style.transform = 'translateX(0)'; });
-    setTimeout(() => {
-        toast.style.transform = 'translateX(150%)';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    setTimeout(dismiss, durationMs);
 }
 
 function showWorkerWarning() {
     if (document.getElementById('workerWarning')) return;
+    const container = document.getElementById('toastContainer');
     const banner = document.createElement('div');
     banner.id = 'workerWarning';
-    banner.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-amber-500 text-amber-950 px-4 py-3 rounded-xl shadow-2xl z-50 max-w-sm text-sm flex items-start gap-3';
+    banner.className = 'toast bg-amber-500 text-amber-950 items-start';
+    banner.style.cursor = 'default';
     banner.innerHTML = `
-        <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
         </svg>
         <div class="flex-1">
-            <p class="font-semibold mb-1">Servidor lento detectado</p>
+            <p class="font-semibold mb-1 text-sm">Servidor lento detectado</p>
             <p class="text-xs leading-relaxed">A app pode travar entre cliques. Pare o servidor (<strong>Ctrl+C</strong>) e inicie com <code class="bg-amber-200 px-1 rounded font-mono">./start.sh</code> (Linux/macOS) ou <code class="bg-amber-200 px-1 rounded font-mono">start.bat</code> (Windows).</p>
         </div>
-        <button type="button" id="workerWarningClose" class="text-amber-950 hover:text-amber-700 flex-shrink-0">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+        <button type="button" id="workerWarningClose" aria-label="Fechar aviso" class="text-amber-950 hover:text-amber-700 flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center -m-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
     `;
-    document.body.appendChild(banner);
+    container.appendChild(banner);
     document.getElementById('workerWarningClose').addEventListener('click', () => banner.remove());
 }
 
