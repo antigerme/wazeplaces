@@ -1,0 +1,14 @@
+# Arquivos que NÃO devem ser publicados como estáticos no Cloudflare Pages.
+# functions/ é tratado à parte (vira as Functions), não precisa listar.
+server
+docs
+node_modules
+wrangler.jsonc
+package.json
+package-lock.json
+README.md
+CLAUDE.md
+.assetsignore
+.gitignore
+start.sh
+start.bat

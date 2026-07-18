@@ -22,12 +22,15 @@ PWA = instala no celular sem precisar de Play Store / App Store. Funciona offlin
 |---|---|---|
 | **Frontend** | HTML + JavaScript **vanilla** + Tailwind CSS | Zero build. Editor leigo baixa, roda, funciona. |
 | **Tailwind** | Bundle JS local em `js/tailwindcss_3_4_17.js` (~407KB) | Sem `npm install`. Tradeoff: bundle gordo. Vale considerar pré-compilar em produção mas mantém zero-build pra dev. |
-| **Backend** | PHP 7.4+ stateless (sessão criptografada em `/tmp`) | PHP é o que editores costumam ter no servidor. Stateless = simples. |
-| **Auth** | Cookies do WME do usuário → session token AES-256-CBC server-side | Cookies não trafegam mais que uma vez. Token opaco no client. |
-| **PWA** | manifest + service worker network-first pra HTML, cache-first pra assets | HTML sempre fresco, assets rápidos. Auto-update via `controllerchange`. |
+| **Backend** | JavaScript ESM (**sem build, sem npm install**) no padrão **core compartilhado + adaptadores** | `server/core.mjs` = lógica; `functions/api/[[route]].js` = adaptador Cloudflare; `server/node.mjs` = adaptador VM. Só usa `fetch` + Web Crypto → roda igual em Workers e Node 18+. |
+| **Auth** | Cookies do WME do usuário → session token, cookies criptografados **AES-256-GCM** server-side | Cookies não trafegam mais que uma vez. Token opaco no client. |
+| **Sessão** | Store abstrato: **Workers KV** (Cloudflare) ou **filesystem** (VM) | KV tem TTL nativo; VM espelha o modelo `/tmp` antigo. Injetado no core pelo adaptador. |
+| **PWA** | manifest + service worker network-first pra HTML/JS/CSS, cache-first pra imagens | HTML/código sempre fresco (fim do version skew), imagens rápidas. Auto-update via `controllerchange`. |
 | **i18n** | Português puro na UI; código em português + inglês misturado | Editores Waze BR são o público-alvo. |
 
-**Não introduza build step, framework, npm, bundler, ORM, ou banco de dados sem discussão explícita com o usuário.** Esse é um valor explícito do projeto: simplicidade extrema para que qualquer editor possa rodar local.
+> **v3.0 — migração PHP → JS (Cloudflare/Node).** Até a v2.x o backend era PHP 7.4 + Apache + `.htaccess`, sessões em `/tmp` com AES-256-CBC, `start.sh`/`start.bat` com `PHP_CLI_SERVER_WORKERS`. Tudo isso foi **removido**. Se você achar referência a PHP/`.htaccess`/`start.sh`/cURL/`config.php` em qualquer lugar (fora de `docs/` histórico), é resíduo — corrija. Contrato de API preservado (mesmos paths, agora **sem `.php`**). Mapa de conversão: `docs/cloudflare-migration.md`.
+
+**Não introduza build step, framework, bundler, ORM, ou banco de dados sem discussão explícita com o usuário.** Valor explícito do projeto: simplicidade extrema. O backend é ESM puro rodável direto com `node` (sem `npm install` — zero dependências).
 
 ---
 
@@ -44,23 +47,20 @@ wazeplaces/
 ├── css/
 │   └── styles.css           # Estilos custom + dark mode overrides do Tailwind
 ├── js/
-│   ├── api.js               # Wrapper fetch() dos endpoints /api/*.php (única fonte de chamadas HTTP)
+│   ├── api.js               # Wrapper fetch() dos endpoints /api/* (única fonte de chamadas HTTP; SEM .php)
 │   ├── app.js               # AppState, render, handlers, fila, prefetch, error handling
 │   ├── swipe.js             # Gestos drag/swipe (esquerda, direita, cima)
 │   └── tailwindcss_3_4_17.js # Tailwind CDN bundle congelado localmente
-├── api/
-│   ├── config.php           # Constantes, helpers: sessão, cURL, categorização de erro
-│   ├── sessao.php           # POST {action: create|destroy}
-│   ├── testar-cookies.php   # Valida cookies + cria sessão (1ª chamada após login)
-│   ├── buscar-places.php    # Lista pedidos (Issues/Search/List)
-│   ├── marcar-lido.php      # POST: aceita item único OU items[] (batch) — Issues/Read
-│   ├── validar-place.php    # POST: rejeita (Features endpoint, sempre approve=false)
-│   ├── perfil.php           # GET Session do Waze (userName, rank, areas, editableCountryIDs)
-│   ├── lista-paises.php     # GET LocationSearch/Countries
-│   └── lista-estados.php    # GET LocationSearch/States?countryId=N
-├── .htaccess                # Apache config (rewrite, headers, cache, compressão)
-├── start.sh                 # Wrapper dev Linux/macOS: PHP_CLI_SERVER_WORKERS=4 + php -S
-├── start.bat                # Wrapper dev Windows: idem
+├── server/
+│   ├── core.mjs             # Lógica compartilhada: sessões, cripto (AES-GCM), callWaze (fetch),
+│   │                        #   categorizeWazeError, isUserAllowed, 8 handlers, dispatch(). ÚNICO lugar de lógica.
+│   └── node.mjs             # Adaptador VM/Node: http server + estáticos + fs sessions + key auto-gen
+├── functions/
+│   └── api/[[route]].js     # Adaptador Cloudflare Pages Functions: dispatch com store=KV, key=Secret
+├── _headers                 # Cloudflare: headers/CSP/cache (substitui o antigo .htaccess)
+├── wrangler.jsonc           # Cloudflare: binding do KV SESSIONS + compat date
+├── .assetsignore            # Exclui server/docs/etc do publish estático do Pages
+├── package.json             # Scripts: start (node), cf:dev, cf:deploy. Zero dependências.
 ├── docs/                    # Referência pra dev (NÃO servido em runtime)
 │   ├── README.md            # Procedência dos docs
 │   ├── wme-sdk-typings.d.ts # Tipagens oficiais do WME SDK (Waze) — referência canônica de schemas
@@ -74,56 +74,61 @@ wazeplaces/
 └── .gitignore
 ```
 
-**`docs/wme-sdk-typings.d.ts`**: tipagem oficial do Waze Map Editor SDK (v2.354). Não é importada em runtime — está aqui só pra consultar quando surgir dúvida sobre o schema do Waze (campos do `Venue`, valores válidos de enum, formato de `OpeningHour`/`NavigationPoint`, etc.). Use sempre como referência canônica antes de inventar estrutura no `buscar-places.php`.
+**`docs/wme-sdk-typings.d.ts`**: tipagem oficial do Waze Map Editor SDK (v2.354). Não é importada em runtime — está aqui só pra consultar quando surgir dúvida sobre o schema do Waze (campos do `Venue`, valores válidos de enum, formato de `OpeningHour`/`NavigationPoint`, etc.). Use sempre como referência canônica antes de inventar estrutura no `handleBuscarPlaces` (em `server/core.mjs`).
 
 ---
 
 ## 🚀 Como rodar local (CRÍTICO)
 
-**Sempre use `./start.sh` (Linux/macOS) ou `start.bat` (Windows).** Eles setam `PHP_CLI_SERVER_WORKERS=4` por padrão. **Nunca recomende `php -S 0.0.0.0:8080` puro** ao usuário, porque single-thread bloqueia todas as outras requisições enquanto um cURL ao Waze (1-2s) está em andamento — vira "app travada".
+**`node server/node.mjs`** (precisa Node 18+). Sobe em `http://localhost:8080`, serve os estáticos e roteia `/api/*`. Zero `npm install` — o backend não tem dependências. Env vars opcionais: `PORT`, `HOST`, `ENCRYPTION_KEY` (auto-gera se ausente), `SESSION_DIR`, `SESSION_KEY_FILE`.
 
-Os scripts respeitam env vars `PHP_CLI_SERVER_WORKERS`, `PORT`, `HOST` se já estiverem setadas.
+Pra simular o ambiente Cloudflare (Functions + KV): `npx wrangler pages dev .`.
 
-**Sandbox/CI:** o ambiente onde este agente roda **tem allowlist de hosts** que bloqueia `*.waze.com` (resposta `403 Host not in allowlist` com header `x-deny-reason: host_not_allowed`). Você NÃO consegue testar contra o Waze real — valide com **fixtures de HAR reais** que o usuário envia, ou peça pra ele testar na máquina dele.
+**Validação rápida antes de commitar:**
+```bash
+for f in js/*.js server/*.mjs "functions/api/[[route]].js"; do node --check "$f"; done
+node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
+```
+
+**Sandbox/CI:** o ambiente onde este agente roda **tem allowlist de hosts** que bloqueia `*.waze.com` (resposta `403 Host not in allowlist`). Você NÃO consegue testar contra o Waze real — valide com **fixtures de HAR reais** que o usuário envia, ou peça pra ele testar. Mas dá pra testar TUDO que não é o Waze: subir o `node server/node.mjs` e exercitar cripto/sessão/roteamento/erros (o `fetch` ao Waze retorna o 403 do allowlist, que o core categoriza como `unauthorized` — prova que o pipeline funciona).
 
 ---
 
 ## 🔐 Fluxo de autenticação
 
-1. Editor exporta `cookies.txt` do navegador (extensão "Get cookies.txt LOCALLY" ou similar) após login no WME
-2. Frontend manda o `cookies.txt` cru para `POST /api/sessao.php?action=create`
-3. Backend (`config.php::createSession`):
+1. Editor autentica de uma de duas formas: (a) extensão Chrome **WazePlaces Rapid Access** (@daflash) que coleta cookies e chama `testar-cookies`; (b) upload/colar do `cookies.txt` cru
+2. Frontend manda os cookies para `POST /api/testar-cookies` (ou `sessao` action=create)
+3. Backend (`server/core.mjs`, via `makeSessions().createSession`):
    - Valida formato e extrai `_csrf_token`
-   - Criptografa cookies com **AES-256-CBC** usando chave em `/tmp/waze_places.key` (criada na 1ª vez, `0600`)
-   - Grava em `/tmp/waze_places_sessions/sess_<sha256(token)>` com `0600`
+   - Criptografa cookies com **AES-256-GCM** (Web Crypto) usando a chave injetada pelo adaptador (Secret no CF / env/arquivo na VM)
+   - Grava no store: `sess_<sha256(token)>` → blob `base64(iv)::base64(ct)`
    - Retorna `sessionToken` (32 bytes base64) ao client
 4. Client armazena o `sessionToken` em `localStorage` (persiste entre abas e dias) e usa em **todas** as chamadas seguintes
 5. Cookies originais **nunca mais trafegam** após o login
-6. Sessão expira em 21 dias (`SESSION_TTL` em `config.php`); cada uso renova via `touch()`. Cookies do Waze duram ~28 dias — TTL menor dá folga de 1 semana. Quando os cookies expiram de verdade, o backend devolve 401 e o frontend invalida a sessão local (`API.setSession(null)` + `showAuthScreen`)
-7. Limpeza de sessões expiradas acontece automaticamente em cada `createSession`
+6. Sessão expira em 21 dias (`SESSION_TTL` em `core.mjs`). No **KV** expira sozinha (TTL nativo); na **VM** por mtime + `touch` a cada uso. Cookies do Waze duram ~28 dias — TTL menor dá folga de 1 semana. Quando os cookies expiram de verdade, o backend devolve 401 e o frontend invalida a sessão local (`API.setSession(null)` + `showAuthScreen`)
 
-**Por que `/tmp` e não `api/.encryption-key`?** Apache do Red Hat tem `PrivateTmp=yes` no systemd, então `/tmp` é isolado do Apache — só ele lê/escreve. Vantagem: **zero permissão de escrita** necessária no DocumentRoot. Editor avançado faz `git clone /var/www/html/wazeplaces` + `restorecon -R` + `setsebool -P httpd_can_network_connect 1` e acabou.
+**Chave de criptografia:** Secret `ENCRYPTION_KEY` (base64, 32 bytes) no Cloudflare; env var ou arquivo `0600` auto-gerado na VM. **Nunca commitada.** O core não sabe de onde vem — o adaptador injeta `keyBytes` em `makeSessions({ store, keyBytes })`.
 
 ---
 
 ## 🌐 Endpoints proxy → Waze
 
-Todos os endpoints PHP em `api/` são **proxies stateless** que recebem `sessionToken`, lêem cookies criptografados, fazem cURL ao Waze, normalizam resposta. Multi-região (`row`/`na`/`il`/`world`) via helpers em `config.php` (`wazeIssuesEndpoint`, `wazeSessionEndpoint`, etc).
+Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sessionToken`, carregam os cookies criptografados do store, fazem `fetch` ao Waze (via `callWaze`), normalizam a resposta. Roteados por `dispatch(name, data, { sessions })`. O nome do endpoint é **sem `.php`** (o dispatch tolera sufixo `.php` por compat de cache antigo). Multi-região (`row`/`na`/`il`/`world`) via helpers em `core.mjs` (`wazeIssuesEndpoint`, etc).
 
 | App endpoint | Waze endpoint | Notas |
 |---|---|---|
-| `sessao.php` | — (apenas local) | `action: create\|destroy` |
-| `testar-cookies.php` | `Issues/Search/List` (1 chamada de smoke test) | Cria sessão e devolve token |
-| `buscar-places.php` | `/row-Descartes/app/v1/Issues/Search/List` | Aceita `page`, `countryId`, `stateId`, `managedAreaId`, `bbox`, `types[]`, `categories[]`, `residential`, `unreadOnly`. Envia `orderBy: SORTING_UPDATE_TIME_DESC`. |
-| `marcar-lido.php` | `/row-Descartes/app/v1/Issues/Read` | Aceita single (`venueID`+`updateRequestID`) ou batch (`items[]`) |
-| `validar-place.php` | `/row-Descartes/app/Features` (sempre `approve: false`) | Único caminho de "rejeitar" |
-| `perfil.php` | `/row-Descartes/app/Session?language=pt-BR` | Extrai bbox de `areas[].geometry.coordinates` |
-| `lista-paises.php` | `/row-Descartes/app/LocationSearch/Countries` | Ordenado alfabeticamente |
-| `lista-estados.php` | `/row-Descartes/app/LocationSearch/States?countryId=N` | Idem |
+| `sessao` | — (apenas local) | `action: create\|destroy` |
+| `testar-cookies` | `Session` (smoke test + gate) | Valida, checa `isUserAllowed`, cria sessão e devolve token |
+| `buscar-places` | `/row-Descartes/app/v1/Issues/Search/List` | Aceita `page`, `countryId`, `stateId`, `managedAreaId`, `bbox`, `types[]`, `categories[]`, `residential`, `unreadOnly`. Envia `orderBy: SORTING_UPDATE_TIME_DESC`. |
+| `marcar-lido` | `/row-Descartes/app/v1/Issues/Read` | Aceita single (`venueID`+`updateRequestID`) ou batch (`items[]`) |
+| `validar-place` | `/row-Descartes/app/Features` (sempre `approve: false`) | Único caminho de "rejeitar" |
+| `perfil` | `/row-Descartes/app/Session?language=pt-BR` | Extrai bbox de `areas[].geometry.coordinates` |
+| `lista-paises` | `/row-Descartes/app/LocationSearch/Countries` | Ordenado alfabeticamente |
+| `lista-estados` | `/row-Descartes/app/LocationSearch/States?countryId=N` | Idem |
 
-**Headers críticos no cURL ao Waze** (em `makeCurlRequest`): `Referer: https://www.waze.com/pt-BR/editor?env=<env>&tab=issue_tracker`, `X-CSRF-Token: <extraído dos cookies>`, `Origin`, sec-ch-ua-*, sec-fetch-*. Mudar isso quebra a comunicação. O `env` segue tabela `row → row`, `na → usa`, `il → il`, `world → row` (em `wazeRefererEnv`).
+**Headers críticos no `fetch` ao Waze** (em `callWaze`): `Cookie: <montado dos cookies salvos>`, `Referer: https://www.waze.com/pt-BR/editor?env=<env>&tab=issue_tracker`, `X-CSRF-Token: <extraído dos cookies>`, `Origin`, sec-ch-ua-*, sec-fetch-*. Mudar isso quebra a comunicação. O `env` segue tabela `row → row`, `na → usa`, `il → il`, `world → row` (em `wazeRefererEnv`).
 
-### Resposta do `buscar-places.php`
+### Resposta do `buscar-places`
 
 Volta `{ success, places[], hasMore, page, total }`. Cada `place`:
 ```js
@@ -142,7 +147,7 @@ O Waze **devolve todos os places de uma vez** numa única chamada (`hasMore: fal
 
 ### Filtro de permissão de edição
 
-`buscar-places.php` **descarta** venues que o usuário logado não pode editar antes de devolver pra app. Campo `venue.permissions` é um **bitmask signed 32-bit**:
+`handleBuscarPlaces` (em `server/core.mjs`) **descarta** venues que o usuário logado não pode editar antes de devolver pra app. Campo `venue.permissions` é um **bitmask signed 32-bit**:
 
 - `permissions < 0` (ex: `-1` = todos os bits) → pode editar → **entra na fila**
 - `permissions >= 0` (ex: `0` = nenhum bit) → sem permissão → **silenciosamente descartado**
@@ -161,14 +166,14 @@ Estrutura unificada na resposta de erro de `validar-place.php` e `marcar-lido.ph
 { "success": false, "error": "...", "errorCategory": "...", "httpCode": 500 }
 ```
 
-`categorizeWazeError($httpCode, $body, $curlError)` em `config.php` produz a categoria, **parseando `errorList[0].code` do body JSON** primeiro (antes de regras por HTTP status):
+`categorizeWazeError(httpCode, body, fetchError)` em `server/core.mjs` produz a categoria, **parseando `errorList[0].code` do body JSON** primeiro (antes de regras por HTTP status):
 
 | Categoria | Identificadores reais (do HAR) | Frontend (`handleActionResult`) |
 |---|---|---|
 | `already_processed` | `errorList[0].code === 702` + "was not found"; `code === 300` + "failed to handle"; HTTP 409; ou hint textual (`already`, `duplicate`, `no longer`, `has been resolved`) em body | Toast info ("Já tratado por outro editor 👍"), **mantém stats** — objetivo do usuário foi cumprido independente de quem fez |
 | `not_found` | HTTP 404 puro | Idem `already_processed` |
 | `unauthorized` | HTTP 401/403 | Toast erro, invalida sessão local, volta pra `authScreen` |
-| `transient` | HTTP 5xx **sem** padrão de race, 408, 429, 0, cURL error | `callWithRetry` tenta 2x com backoff (1.5s, 3.5s) antes de aceitar falha |
+| `transient` | HTTP 5xx **sem** padrão de race, 408, 429, 0, erro de fetch/rede | `callWithRetry` tenta 2x com backoff (1.5s, 3.5s) antes de aceitar falha |
 | `unknown` | Resto | Reverte stat (`--`) e `serverTotal++`, toast erro genérico |
 
 **Casos reais já mapeados (do HAR enviado):**
@@ -262,14 +267,15 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 ## 📐 Convenções
 
-### PHP
-- Stateless por request, sem session_start nativo (sessão = arquivo em `/tmp`)
-- `getCookiesFromRequest($data)` resolve `sessionToken` → cookies decriptados (em qualquer endpoint que precise)
-- Sempre `jsonResponse($data, $status)` ou `jsonError($msg, $status)` — nunca `echo`/`print` direto
-- Erros do Waze sempre passam por `categorizeWazeError` (já é padrão)
-- Sintaxe limpa: `php -l api/*.php` antes de commit
+### Backend (server/core.mjs)
+- ESM puro, zero dependência. Só `fetch` + Web Crypto (roda em Workers e Node 18+). **Nada de API específica de Node no core** (`node:fs`, `process`, etc) — isso vive só nos adaptadores.
+- `resolveCookies(data, sessions)` resolve `sessionToken` → cookies decriptados (em qualquer handler que precise). Lança `ApiError` 401 se inválido.
+- Handlers retornam `{ status, body }` — nunca escrevem resposta direto. Erro → `apiError(msg, status)` (lança `ApiError`, capturado pelo `dispatch`).
+- Erros do Waze sempre passam por `categorizeWazeError` (já é padrão).
+- Novo endpoint → adicionar handler + entrada em `ROUTES`. Adaptadores não mudam (o `[[route]].js` e o `node.mjs` roteiam por nome automaticamente).
+- Validação: `node --check server/core.mjs` + smoke test `node server/node.mjs`.
 
-### JavaScript
+### JavaScript (frontend)
 - Vanilla. Zero framework. Zero dependência npm.
 - Async/await. Sem callback hell. Sem Promise chain longo.
 - Funções globais expostas em `window.*` quando precisarem ser chamadas de outro arquivo (`window.triggerSwipe`, `window.enableSwipeOnCard`, `window.showToast`, etc)
@@ -311,7 +317,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 3.5. **Um venue pode ter VÁRIOS `venueUpdateRequests`** (consertado v2.14.0). Caso típico: usuário sobe 2 fotos novas pra mesma loja, então o mesmo venue volta com 2 PURs do tipo IMAGE. Pegar só `venueUpdateRequests[0]` (como o código antigo fazia) causa bug "place volta": user marca o primeiro lido, próximo fetch o venue reaparece com o segundo. Tratamento certo: **um card por updateRequest**, não por venue. **Sempre devolver TODAS as imagens do venue** (aprovadas + pendentes) em `imageUrls`, mesmo pra IMAGE PUR — o editor precisa comparar a foto nova com as existentes. O frontend identifica a foto nova via `image.id === updateRequest.id` (confirmado via HAR) e marca com ✨ + borda âmbar. Já regredi isso uma vez (v2.14.0 enviava só a foto pareada, escondendo o carrossel) — não regredir de novo.
 
-4. **PHP_CLI_SERVER_WORKERS** (commit `b2e633e` e prévios): `php -S` é single-thread por padrão. Owner enviou HAR mostrando app "travando" porque cada cURL ao Waze bloqueava todas as outras requests. Solução: `start.sh`/`start.bat` setam `=4` por padrão. **Nunca documente `php -S` puro** — sempre os scripts.
+4. ~~**PHP_CLI_SERVER_WORKERS**~~ **(OBSOLETO na v3.0 — histórico)**: no backend PHP, `php -S` single-thread travava a app (cada cURL ao Waze bloqueava as outras requests); `start.sh` setava `=4`. Não se aplica mais — Workers escalam por request e o Node é assíncrono. Registrado só pra contexto.
 
 5. **Filtro padrão = não lidos** (commit `419c9bc`): backend manda `userPropertiesFilter: {isRead: false}` por padrão (vs WME que manda `{}` = tudo). Owner quis o filtro como default mas configurável via checkbox no modal.
 
@@ -329,9 +335,9 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 12. **Atrás de Cloudflare**: desabilitar **Rocket Loader**, **Auto Minify**, **Script Monitor** (Page Shield). Esses reescrevem HTML/JS. Documentado em detalhe no README seção "Atrás de Cloudflare".
 
-13. **Apache do RHEL costuma vir com `mod_pagespeed` habilitado** por padrão, que também reordena/combina/minifica scripts e quebra a ordem `api.js → app.js`. O `.htaccess` da app desabilita via `<IfModule pagespeed_module>ModPagespeed off</IfModule>`.
+13. ~~**mod_pagespeed do Apache**~~ **(OBSOLETO na v3.0 — histórico)**: no deploy Apache/RHEL, `mod_pagespeed` reordenava/minificava scripts e quebrava a ordem `api.js → app.js`; o `.htaccess` desabilitava. Não se aplica ao Cloudflare/Node. Registrado só pra contexto.
 
-14. **CSP do `.htaccess` precisa permitir domínios externos do Waze**. Browser aplica a INTERSEÇÃO de todas as CSPs ativas (header HTTP + meta) — vence a mais restritiva. Quando a do header era apenas `connect-src 'self'`, fetches de fonts/imagens externos eram bloqueados. Lista mínima atualmente: `img-src` precisa de `venue-image.waze.com` (fotos de places) e `social-row.waze.com` (avatar do perfil); `connect-src` precisa dos mesmos + `fonts.googleapis.com` e `fonts.gstatic.com` (caso o SW velho intercepte antes de atualizar). **Sempre que adicionar um host externo na app, atualizar a CSP no `.htaccess` E no `<meta>` do `index.html`** — manter as duas em sync.
+14. **CSP precisa permitir domínios externos do Waze**. Browser aplica a INTERSEÇÃO de todas as CSPs ativas — vence a mais restritiva. `img-src` precisa de `venue-image.waze.com` (fotos de places) e `social-row.waze.com` (avatar); `font-src`/`connect-src` precisam de `fonts.googleapis.com`/`fonts.gstatic.com`. **Duas cópias da CSP em sync**: o `<meta>` do `index.html` E o arquivo **`_headers`** (Cloudflare) / o header no `server/node.mjs` se um dia setar lá. Ao adicionar host externo, atualize as duas. (Nota: as chamadas ao Waze são server-side agora — `connect-src` do browser continua só `'self'` + fontes/imagens.)
 
 15. **Rank do editor é 0-indexed no Waze, +1 na UI** (regra de convenção sagrada deste projeto). O `/Session` do Waze retorna `rank: 0..5` mas humanos contam `1..6`:
     - **Toda exibição pro user** usa `rank + 1` (já implementado em `renderProfileHeader` como `'L' + (p.rank + 1)`)
@@ -340,35 +346,34 @@ Bugs já encontrados e corrigidos — **não repita**:
     - Owner disse explicitamente: "um editor nível 1 nos dados do Waze aparece como nível 0, um editor nível 6 aparece como nível 5"
     - Adicionou novo cálculo de rank? Confira nos dois lados (display vs comparação). Confundir os dois é fonte garantida de bug com erro silencioso (todo mundo permitido / ninguém permitido)
 
-16. **Gate de acesso (`isUserAllowed` em `config.php`)**: a app só permite login pra editores **`isStaff` OU `(rank >= MIN_RANK_WAZE && isAreaManager)`**. Como o Waze usa rank 0-indexed e a UI mostra `rank + 1`, `MIN_RANK_WAZE = 2` significa "display L3+". Mudar o critério aqui afeta todo login. `testar-cookies.php` chama `/Session` como smoke test e nega `createSession` se não passar — frontend mostra modal `accessDeniedModal` com perfil do user e mensagem clara, sem persistir nada. Bloqueio acontece no backend; **não dá pra burlar editando JS**.
+16. **Gate de acesso (`isUserAllowed` em `server/core.mjs`)**: a app só permite login pra editores **`isStaff` OU `(rank >= MIN_RANK_WAZE && isAreaManager)`**. Como o Waze usa rank 0-indexed e a UI mostra `rank + 1`, `MIN_RANK_WAZE = 2` significa "display L3+". Mudar o critério aqui afeta todo login. `handleTestarCookies` chama `/Session` como smoke test e nega a criação de sessão se não passar — frontend mostra modal `accessDeniedModal` com perfil do user e mensagem clara, sem persistir nada. Bloqueio acontece no backend; **não dá pra burlar editando JS**.
 
 17. **Esquecer de bumpar `CACHE_NAME` do SW é o bug mais ranzinza do projeto**. Já aconteceu múltiplas vezes: PR adiciona feature em JS, deploy ok, mas users que já tinham o SW instalado **continuam vendo a versão velha por dias** porque SW é cache-first pra assets. Sintoma típico: "feature X parou de funcionar" relatado por um user, mas outros confirmam que funciona (cache deles é mais novo). **Cheque-list**: tocou em `index.html`, `js/*`, `css/*`, ou `icons/*`? → bump `CACHE_NAME` no `service-worker.js` E `APP_VERSION` no `js/app.js` juntos no mesmo commit. Se passou batido, basta um PR posterior fazendo só o bump pra liberar pra todos.
 
-18. **Version skew HTML vs JS — 2 camadas de cache** (consertado parcialmente em v2.13.1, completado em v2.17.2). Antes: HTML era network-first no SW e JS era cache-first. Quando deployava uma feature nova (HTML novo referenciando funções/IDs novos), o user pegava o HTML fresh mas continuava com o JS velho do cache. Resultado: feature aparecia na UI (HTML novo tem o checkbox), mas não funcionava (JS velho não conhece o ID, não salva no localStorage). Sintoma diagnóstico: F5 não conserta — só `Ctrl+Shift+R` (cache bypass total). **Mobile não tem `Ctrl+Shift+R`**, então o user fica preso. Fix v2.13.1: JS/CSS/JSON network-first no SW. Mas regrediu em v2.17.1 — F5 ainda não funcionava no mobile! Causa: o `fetch()` do SW passa pelo **HTTP cache do navegador** antes da rede. O `.htaccess` mandava `Cache-Control: max-age=2592000` (1 mês) pra JS via `ExpiresByType` → mesmo com SW network-first, o browser servia do HTTP cache local. Fix v2.17.2 (defesa em duas camadas): (a) `fetch(req, { cache: 'reload' })` no SW força bypass do HTTP cache; (b) `.htaccess` com `Cache-Control: no-cache, must-revalidate` pra JS/CSS/manifest (atenção à ordem dos `<FilesMatch>` — regra genérica antes da específica do `service-worker.js` porque `Header set` posterior sobrescreve). Também: `updateViaCache: 'none'` + `reg.update()` imediato + tratamento de `reg.waiting` no register. **Antes de quebrar essas regras**: lembrar que pra atualização funcionar com F5 no mobile, três camadas precisam estar alinhadas — estratégia do SW, opção `cache` do `fetch`, e Cache-Control do servidor. Mexer em uma só rompe a cadeia.
+18. **Version skew HTML vs JS — 2 camadas de cache** (consertado parcialmente em v2.13.1, completado em v2.17.2). Antes: HTML era network-first no SW e JS era cache-first. Quando deployava uma feature nova (HTML novo referenciando funções/IDs novos), o user pegava o HTML fresh mas continuava com o JS velho do cache. Resultado: feature aparecia na UI (HTML novo tem o checkbox), mas não funcionava (JS velho não conhece o ID, não salva no localStorage). Sintoma diagnóstico: F5 não conserta — só `Ctrl+Shift+R` (cache bypass total). **Mobile não tem `Ctrl+Shift+R`**, então o user fica preso. Fix v2.13.1: JS/CSS/JSON network-first no SW. Mas regrediu em v2.17.1 — F5 ainda não funcionava no mobile! Causa: o `fetch()` do SW passa pelo **HTTP cache do navegador** antes da rede. O `.htaccess` mandava `Cache-Control: max-age=2592000` (1 mês) pra JS via `ExpiresByType` → mesmo com SW network-first, o browser servia do HTTP cache local. Fix v2.17.2 (defesa em duas camadas): (a) `fetch(req, { cache: 'reload' })` no SW força bypass do HTTP cache; (b) Cache-Control `no-cache, must-revalidate` pra JS/CSS/manifest — na v3.0 isso vive no **`_headers`** (Cloudflare) e no `serveStatic` do `server/node.mjs` (o `.htaccess` foi removido). Também: `updateViaCache: 'none'` + `reg.update()` imediato + tratamento de `reg.waiting` no register. **Antes de quebrar essas regras**: pra atualização funcionar com F5 no mobile, três camadas precisam estar alinhadas — estratégia do SW, opção `cache` do `fetch`, e Cache-Control do servidor (`_headers`/Node). Mexer em uma só rompe a cadeia.
 
 ---
 
 ## 🛠 Workflows típicos
 
 ### Adicionar novo endpoint Waze
-1. Adicionar helper de URL em `config.php` (`wazeXxxEndpoint($region)`)
-2. Criar `api/xxx.php` seguindo o padrão dos outros (POST → `readJsonInput` → `getCookiesFromRequest` → `extractCSRFToken` → `createTempCookieFile` → `makeCurlRequest` → `categorizeWazeError` ou parsing direto)
-3. Adicionar método em `js/api.js` (sempre passa `sessionToken` e `region` no body)
-4. Usar em `app.js`
-5. Documentar a tabela de endpoints neste CLAUDE.md
-6. Bump `APP_VERSION` se for visível ao usuário
+1. Adicionar helper de URL em `server/core.mjs` (`wazeXxxEndpoint(region)`)
+2. Escrever `async function handleXxx(data, { sessions })` seguindo o padrão (→ `resolveCookies` → `prepareAuth` → `callWaze` → `categorizeWazeError` ou parsing direto → retorna `{ status, body }`)
+3. Registrar em `ROUTES` (`'xxx': handleXxx`). Os adaptadores roteiam por nome — não precisam mudar.
+4. Adicionar método em `js/api.js` (sempre passa `sessionToken` e `region` no body; nome do endpoint **sem `.php`**)
+5. Usar em `app.js`; documentar a tabela de endpoints neste CLAUDE.md
+6. Bump `APP_VERSION` + `CACHE_NAME` se tocou frontend
 
 ### Adicionar novo filtro
-1. Backend: aceitar campo no payload de `buscar-places.php` e propagar pro `$payload` do cURL
+1. Backend: ler o campo em `handleBuscarPlaces` e propagar pro `payload` do `callWaze`
 2. HTML: adicionar input no `#filtersModal`
 3. `app.js`: adicionar campo em `AppState.filters`, popular em `openFiltersModal`, ler em `applyFiltersFromModal`, propagar em `fetchNextPage`, persistir em `loadFilters`/`saveFilters`
-4. Testar com fixture do HAR (ver seção "Validação sem Waze ao vivo" abaixo)
+4. Testar com fixture do HAR
 
 ### Validar mudanças quando sandbox bloqueia o Waze
-- Sintaxe: `for f in api/*.php; do php -l "$f"; done` + `node --check js/*.js`
-- Lógica de parsing PHP: rodar script de teste que importa `config.php` e alimenta `categorizeWazeError`/`makeCurlRequest` com fixtures extraídas de HARs antigos
-- Lógica frontend isolada: rodar em `node` com mocks de DOM (já tem exemplos nos commits anteriores)
-- Endpoint roteamento: subir `./start.sh` e curl com `sessionToken` fake — esperar erro de Waze 403/401 e validar que o JSON de resposta tem o `errorCategory` certo
+- Sintaxe: `for f in js/*.js server/*.mjs "functions/api/[[route]].js"; do node --check "$f"; done`
+- Lógica pura do core: `import('./server/core.mjs')` e alimentar `categorizeWazeError`/`isUserAllowed`/`makeSessions` com fixtures/valores (ver o smoke test usado na migração v3.0 no histórico de commits)
+- Pipeline completo: subir `node server/node.mjs` e `curl` nos endpoints — sessão fake dá 401 limpo; sessão válida tenta o Waze e o 403 do allowlist vira `errorCategory: unauthorized` (prova que roteamento + cripto + fetch funcionam)
 
 ### Investigar bug reportado pelo usuário
 1. Pedir HAR do Chrome/Firefox DevTools (sempre o owner manda)
@@ -383,9 +388,9 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 | Decisão | PR/Commit | Por quê |
 |---|---|---|
-| `start.sh` com `PHP_CLI_SERVER_WORKERS=4` por padrão | (vários, sprint Red Hat) | App travava com `php -S` puro |
-| Sessão criptografada em `/tmp` (não em `api/`) | (deploy RHEL express) | Apache do RHEL tem PrivateTmp; zero permissão escrita no DocumentRoot |
-| `.htaccess` ativo no repo (não `.htaccess.todo`) | (deploy RHEL express) | Mesma coisa: zero ação manual |
+| **Backend JS (Cloudflare/Node), core+adapters** | v3.0 | Sem servidor pra manter, escala automática, edge; VM Node como fallback. Padrão validado no botequei. Ver `docs/cloudflare-migration.md` |
+| Sessões em Workers KV (CF) / filesystem (VM), AES-256-GCM | v3.0 | KV tem TTL nativo; GCM é autenticado; store injetado no core |
+| ~~`start.sh` / `/tmp` / `.htaccess`~~ | v2.x (removido na v3.0) | Eram do stack PHP+Apache; histórico só |
 | Total "Restam" via `serverTotal` (não `queue.length`) | (PR add-total-pendentes) | Skip não deveria mudar contador — usuário não tratou |
 | Categorização de erro com parsing de `errorList[0].code` | (PR #8) | HAR mostrou `Issues/Read 500 + code 300` que não era erro real |
 | Notificações removidas | (PR #6) | Owner não queria. Simplificar UI |

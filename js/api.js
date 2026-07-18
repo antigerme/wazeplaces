@@ -51,18 +51,6 @@ const API = {
         return this.countryId;
     },
 
-    _workersChecked: false,
-
-    _checkWorkers(response) {
-        if (this._workersChecked) return;
-        const workers = response.headers.get('X-Server-Workers');
-        if (workers === null) return;
-        this._workersChecked = true;
-        if (parseInt(workers, 10) <= 1 && window.showWorkerWarning) {
-            window.showWorkerWarning();
-        }
-    },
-
     async _post(endpoint, body) {
         try {
             const response = await fetch(`${this.baseUrl}/${endpoint}`, {
@@ -70,7 +58,6 @@ const API = {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
             });
-            this._checkWorkers(response);
             const data = await response.json();
             if (response.status === 401) {
                 this.setSession(null);
@@ -83,7 +70,7 @@ const API = {
     },
 
     async testCookies(cookies, region, countryId) {
-        const result = await this._post('testar-cookies.php', {
+        const result = await this._post('testar-cookies', {
             cookies,
             region: region || this.getRegion(),
             countryId: countryId || this.getCountry()
@@ -99,7 +86,7 @@ const API = {
         if (!sessionToken) {
             return { success: false, error: 'Sessão expirada' };
         }
-        return this._post('buscar-places.php', {
+        return this._post('buscar-places', {
             sessionToken,
             region: this.getRegion(),
             countryId: this.getCountry(),
@@ -113,7 +100,7 @@ const API = {
         if (!sessionToken) {
             return { success: false, error: 'Sessão expirada' };
         }
-        return this._post('marcar-lido.php', {
+        return this._post('marcar-lido', {
             sessionToken,
             region: this.getRegion(),
             venueID,
@@ -126,7 +113,7 @@ const API = {
         if (!sessionToken) {
             return { success: false, error: 'Sessão expirada' };
         }
-        return this._post('marcar-lido.php', {
+        return this._post('marcar-lido', {
             sessionToken,
             region: this.getRegion(),
             items
@@ -138,7 +125,7 @@ const API = {
         if (!sessionToken) {
             return { success: false, error: 'Sessão expirada' };
         }
-        return this._post('validar-place.php', {
+        return this._post('validar-place', {
             sessionToken,
             region: this.getRegion(),
             venueID,
@@ -151,7 +138,7 @@ const API = {
         if (!sessionToken) {
             return { success: false, error: 'Sessão expirada' };
         }
-        return this._post('perfil.php', {
+        return this._post('perfil', {
             sessionToken,
             region: this.getRegion()
         });
@@ -162,7 +149,7 @@ const API = {
         if (!sessionToken) {
             return { success: false, error: 'Sessão expirada' };
         }
-        return this._post('lista-paises.php', {
+        return this._post('lista-paises', {
             sessionToken,
             region: this.getRegion()
         });
@@ -173,7 +160,7 @@ const API = {
         if (!sessionToken) {
             return { success: false, error: 'Sessão expirada' };
         }
-        return this._post('lista-estados.php', {
+        return this._post('lista-estados', {
             sessionToken,
             region: this.getRegion(),
             countryId: parseInt(countryId, 10)
@@ -183,7 +170,7 @@ const API = {
     async destroySession() {
         const sessionToken = this.getSession();
         if (!sessionToken) return { success: true };
-        const result = await this._post('sessao.php', {
+        const result = await this._post('sessao', {
             action: 'destroy',
             sessionToken
         });

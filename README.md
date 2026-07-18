@@ -10,9 +10,11 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
 
 - [🟢 Para Editores (Guia Simples)](#-para-editores-guia-simples)
   - [O que essa app faz](#o-que-essa-app-faz)
-  - [Como rodar na sua máquina (3 passos)](#como-rodar-na-sua-própria-máquina-3-passos)
+  - [Como usar (a forma mais fácil)](#como-usar-a-forma-mais-fácil)
   - [Como exportar seus cookies do Waze](#como-exportar-seus-cookies-do-waze)
   - [Usando a aplicação](#usando-a-aplicação)
+  - [Instalar como app no celular](#instalar-como-app-no-celular)
+  - [Quem pode usar](#quem-pode-usar)
   - [Problemas comuns](#problemas-comuns)
 - [🔧 Para Desenvolvedores (Avançado)](#-para-desenvolvedores-avançado)
 
@@ -29,74 +31,23 @@ Esta aplicação mostra os pedidos em formato de **cards estilo Tinder**:
 - **Arraste para a esquerda (←)** → Rejeita o pedido (lixo)
 - **Arraste para a direita (→)** → Marca como lido (você decide depois no WME)
 - **Arraste para cima (↑)** → Pula (não chama nada, só avança)
+- **Botões ✕ / ↑ / ✓** no rodapé do card fazem o mesmo (o gesto é atalho)
 - **Botão ↗ no card** → Abre o local direto no WME para você ajustar e aprovar manualmente
 
 Funciona no celular, no tablet ou no PC, e pode ser **instalada como app no seu celular** (sem precisar de Play Store / App Store).
 
-### Como rodar na sua própria máquina (3 passos)
+### Como usar (a forma mais fácil)
 
-A app é simples e roda com o **PHP** (que já vem instalado em muitos sistemas, ou é fácil instalar).
+Você **não precisa instalar nada** — a app roda hospedada. Basta acessar:
 
-#### Passo 1 — Baixe o código
+👉 **https://places.wazebrasil.com**
 
-**Opção A (botão):** Vá em https://github.com/antigerme/wazeplaces, clique em **"Code"** → **"Download ZIP"** e descompacte em alguma pasta do seu computador (ex: `Documentos/wazeplaces`).
+Aí é só fazer login com seus cookies do Waze (veja abaixo). A forma mais cômoda no desktop é a extensão de login automático:
 
-**Opção B (linha de comando):** Se você tem `git` instalado:
-```bash
-git clone https://github.com/antigerme/wazeplaces.git
-cd wazeplaces
-```
+- **Login automático (recomendado, Chrome):** instale a extensão **WazePlaces Rapid Access** ([Chrome Web Store](https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn), feita por [@daflash](https://www.waze.com/pt-BR/user/editor/daflash) da comunidade WME). Estando logado no WME, clique nela e a app abre já autenticada — sem copiar cookies.
+- **Login manual:** exporte seu `cookies.txt` do Waze (instruções abaixo) e faça upload / cole na tela inicial.
 
-#### Passo 2 — Instale o PHP (se ainda não tem)
-
-| Sistema | Como instalar |
-|---------|---------------|
-| **Windows** | Baixe o ZIP em https://windows.php.net/download/ → descompacte numa pasta (ex: `C:\php`) → adicione `C:\php` no PATH do sistema → abra um **novo** terminal (cmd ou PowerShell) e teste com `php -v` |
-| **macOS**   | PHP geralmente já vem instalado. Se não vier: `brew install php` (precisa do [Homebrew](https://brew.sh)) |
-| **Linux** (Ubuntu/Debian) | `sudo apt update && sudo apt install -y php php-curl` |
-| **Linux** (Fedora) | `sudo dnf install -y php php-curl` |
-
-Para conferir, abra o terminal e rode:
-```bash
-php -v
-```
-Deve aparecer algo como `PHP 8.x.x`. **Precisa ser 7.4 ou maior.**
-
-#### Passo 3 — Rodar a aplicação
-
-Dentro da pasta `wazeplaces` (a que você baixou), rode o script de inicialização:
-
-**Linux / macOS** (no terminal):
-```bash
-./start.sh
-```
-
-**Windows** — dê duplo clique em `start.bat`, ou rode no cmd/PowerShell:
-```cmd
-start.bat
-```
-
-**Windows (cmd):**
-```cmd
-set PHP_CLI_SERVER_WORKERS=4 && php -S 0.0.0.0:8080
-```
-
-**Windows (PowerShell):**
-```powershell
-$env:PHP_CLI_SERVER_WORKERS=4; php -S 0.0.0.0:8080
-```
-
-> ⚠️ **Importante:** o `PHP_CLI_SERVER_WORKERS=4` faz o servidor atender 4 requisições ao mesmo tempo. **Sem isso**, o PHP atende uma de cada vez e a app fica travando entre cada ação (porque cada requisição ao Waze leva 1-2 segundos).
-
-Pronto! Abra o navegador (Chrome, Firefox, Edge…) e acesse:
-
-👉 **http://localhost:8080**
-
-> 💡 **Para parar o servidor:** aperte `Ctrl+C` no terminal (ou feche a janela do `start.bat`).
-
-> 💡 **Para acessar do celular na mesma rede Wi-Fi:** descubra o IP do PC (`ipconfig` no Windows, `ifconfig` ou `ip addr` no Linux/Mac) e acesse `http://SEU-IP:8080` no celular. Ex: `http://192.168.0.10:8080`.
-
-> 💡 **No Linux/macOS, se der "permission denied"** ao rodar `./start.sh`, primeiro rode `chmod +x start.sh` uma vez.
+> 📱 **No celular** (onde não há extensões): use o login manual com o `cookies.txt`.
 
 ### Como exportar seus cookies do Waze
 
@@ -120,35 +71,23 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 
 ### Usando a aplicação
 
-1. Na tela inicial, escolha sua **Região do Waze**:
-   - **Brasil, Portugal, Europa, América Latina** → `ROW`
-   - **EUA, Canadá** → `NA`
-   - **Israel** → `IL`
-2. Clique em **"Fazer Upload do cookies.txt"** e escolha o arquivo que você baixou (ou cole o conteúdo).
-3. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"**, seu **avatar do Waze e nome** aparecem no topo, e os cards começam a carregar (Brasil é o padrão).
-4. Pra trocar o **país** ou filtrar por **estado** ou **área gerenciada**, clique no ícone de **filtros 📂** no topo. Os países/estados aparecem em listas com nomes (sem precisar saber ID).
-5. Processe os pedidos arrastando os cards (ou usando as setas do teclado):
+1. Faça login (extensão de login automático ou upload/colar do `cookies.txt`).
+2. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"**, seu **avatar do Waze e nome** aparecem no topo, e os cards começam a carregar (Brasil é o padrão).
+3. Pra trocar o **país**, a **região** ou filtrar por **estado** / **área gerenciada**, clique no ícone de **filtros 📂** no topo. Os países/estados aparecem em listas com nomes (sem precisar saber ID).
+4. Processe os pedidos arrastando os cards, usando os **botões do card**, ou as setas do teclado:
    - **← (esquerda):** Rejeitar (lixo)
    - **→ (direita):** Marcar como lido
    - **↑ (cima):** Pular (não chama API, só passa pro próximo)
-6. Cometeu um erro? Tem uma **janela de 3 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
-7. O botão de **ajuda (?)** no topo abre um painel com os atalhos, instruções e o botão **"Sair e Limpar Dados"**.
+5. Cometeu um erro? Tem uma **janela de 5 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
+6. O botão de **ajuda (?)** no topo abre um painel com atalhos, legenda, instruções e o botão **"Sair"**.
 
 **Coisas que aparecem no card:**
 - **Marca** do place + selo "✓ conhecida" (se está na lista oficial do Waze) ou "? não listada" (suspeita)
-- **Galeria de fotos** (se houver mais de uma)
+- **Carrossel de fotos** (compare a foto nova ✨ com as existentes — toque pra ampliar, com zoom por pinça)
 - **Mudanças propostas** lado a lado (antes → depois) para pedidos de atualização
 - **Link ↗** para abrir o local direto no WME
 
-**Header:**
-- **Avatar + nome** do seu usuário Waze
-- **Filtros 📂** para país/estado/área/tipo de pedido (e checkbox "Apenas pedidos não lidos", ligado por padrão — desmarque se quiser revisar pedidos já marcados como lidos)
-- **Tema 🌙** alterna entre claro e escuro
-
-**Caixa de estatísticas:**
-- **Lidos** · **Rejeitados** · **Pulados** · **Restam**
-- "Restam" mostra quantos pedidos ainda estão pendentes no Waze (equivalente ao "PUR (N)" no WME oficial). O número diminui a cada `Lido` ou `Rejeitado`. **Pular não diminui** — o pedido continua pendente para você ou outro editor.
-- Se aparecer com sinal `+` (ex: `215+`), significa que ainda há mais páginas a buscar do Waze conforme você for processando.
+**Caixa de estatísticas:** **Lidos** · **Rejeitados** · **Pulados** · **Restam**. "Restam" mostra quantos pedidos ainda estão pendentes no Waze; diminui a cada `Lido`/`Rejeitado` (pular não diminui). Sinal `+` (ex: `215+`) = ainda há mais páginas a buscar.
 
 ### Instalar como app no celular
 
@@ -166,9 +105,7 @@ Esta aplicação é **restrita** a editores do Waze com perfil mais avançado, p
 - **Staff do Waze** (qualquer nível) → libera direto
 - **Area Manager** com nível **3 ou maior** → libera
 
-Editores nível 1-2, ou editores sem badge de Area Manager, vão receber a mensagem **"Acesso restrito"** ao tentar fazer login.
-
-Se você acha que deveria ter acesso, abra seu perfil no Waze Map Editor e confirme que você tem `Area Manager` ativo e nível ≥ 3.
+Editores nível 1-2, ou sem badge de Area Manager, recebem a mensagem **"Acesso restrito"** ao tentar fazer login.
 
 ### Problemas comuns
 
@@ -178,10 +115,7 @@ Se você acha que deveria ter acesso, abra seu perfil no Waze Map Editor e confi
 | **"Cookies expirados ou inválidos"** | Faça logout do WME, faça login de novo, exporte os cookies novamente |
 | **"Token CSRF não encontrado"** | O arquivo `cookies.txt` está incompleto. Confirme que você fez login antes de exportar |
 | **"Não há places para mostrar"** | Não tem nada na fila daquela região/país. Tente outro país no menu de filtros |
-| **A app não atualiza para a versão nova** | No navegador: `Ctrl+Shift+R` (Windows/Linux) ou `Cmd+Shift+R` (Mac). No celular: feche e reabra o app |
-| **PHP não inicia** | Confirme que está dentro da pasta `wazeplaces` (`ls` ou `dir` deve mostrar `index.html`) |
-| **Erro "cURL not loaded"** | Instale a extensão cURL do PHP: `sudo apt install php-curl` (Linux) ou habilite no `php.ini` (Windows) |
-| **A app trava ao clicar várias vezes** | Use o script `start.sh` / `start.bat` em vez de rodar `php -S` direto (eles ligam o modo multi-tarefa do PHP) |
+| **A app não atualiza para a versão nova** | No navegador: `Ctrl+Shift+R`. No celular: geralmente atualiza sozinha; se não, feche e reabra o app |
 
 ---
 
@@ -189,243 +123,272 @@ Se você acha que deveria ter acesso, abra seu perfil no Waze Map Editor e confi
 
 ### Stack
 
-- **Frontend:** HTML + JavaScript vanilla + Tailwind CSS (carregado via `tailwindcss_3_4_17.js`)
-- **Backend:** PHP 7.4+ stateless (apenas sessões temporárias em `/tmp`)
-- **Auth:** cookies do WME exportados pelo usuário → sessão criptografada server-side (AES-256-CBC)
-- **PWA:** manifest.json + service worker com network-first para HTML
+- **Frontend:** HTML + JavaScript vanilla + Tailwind CSS (bundle JS local `tailwindcss_3_4_17.js`) + PWA (manifest + service worker)
+- **Backend:** JavaScript (ESM), **sem build**, no padrão **core compartilhado + adaptadores**:
+  - `server/core.mjs` — toda a lógica (proxy pro Waze, sessões, cripto, gate). Só usa `fetch` e Web Crypto → roda **igual** em Cloudflare Workers e Node 18+.
+  - `functions/api/[[route]].js` — adaptador **Cloudflare Pages** (sessões em Workers KV, chave em Secret).
+  - `server/node.mjs` — adaptador **VM/Node** (sessões em filesystem, chave em env/arquivo).
+- **Auth:** cookies do WME → sessão criptografada server-side (**AES-256-GCM**). O client só guarda um `sessionToken` opaco.
+
+> Histórico: até a v2.x o backend era PHP + Apache. A v3.0 migrou pra JS (Cloudflare/Node) mantendo o mesmo contrato de API. O planejamento e o mapa de conversão estão em [`docs/cloudflare-migration.md`](docs/cloudflare-migration.md).
 
 ### Arquitetura
 
 ```
 Browser (PWA)
-  ↓ POST /api/sessao.php (cookies → sessionToken criptografado)
-  ↓ POST /api/buscar-places.php (sessionToken → places normalizados)
-  ↓ POST /api/marcar-lido.php (sessionToken, venueID, updateRequestID)
-  ↓ POST /api/validar-place.php (sessionToken, venueID, updateRequestID)
-PHP Backend (stateless por request)
-  ↓ Lê sessão em /tmp/waze_places_sessions/sess_<hash>
-  ↓ Descriptografa cookies com chave em /tmp/waze_places.key
-  ↓ Monta requisição cURL ao Waze (CSRF token + headers de origem)
+  ↓ POST /api/testar-cookies   (cookies → sessionToken criptografado)
+  ↓ POST /api/buscar-places    (sessionToken → places normalizados)
+  ↓ POST /api/marcar-lido      (sessionToken, venueID, updateRequestID)
+  ↓ POST /api/validar-place    (sessionToken, venueID, updateRequestID)
+Backend (server/core.mjs, stateless por request)
+  ↓ Lê a sessão no store (KV no Cloudflare / filesystem na VM)
+  ↓ Descriptografa os cookies (AES-256-GCM)
+  ↓ fetch() ao Waze (CSRF token + headers de origem)
 APIs internas do Waze
   - /Issues/Search/List      (buscar pedidos)
   - /Issues/Read             (marcar como lido)
   - /Descartes/app/Features  (rejeitar)
+  - /Session, /LocationSearch/{Countries,States}
 ```
 
 ### Estrutura de arquivos
 
 ```
 wazeplaces/
-├── index.html           # Single-page app
-├── manifest.json        # PWA manifest
-├── service-worker.js    # Service worker (cache + auto-update)
-├── icons/
-│   ├── icon-192.svg
-│   └── icon-512.svg
-├── css/
-│   └── styles.css
+├── index.html              # Single-page app
+├── manifest.json           # PWA manifest
+├── service-worker.js       # Service worker (cache + auto-update)
+├── icons/                  # icon-192.svg, icon-512.svg
+├── css/styles.css
 ├── js/
-│   ├── app.js                    # Lógica principal, AppState, UI
-│   ├── api.js                    # Wrapper do fetch() para /api/*
-│   ├── swipe.js                  # Gestos drag/swipe (horizontal + up)
-│   └── tailwindcss_3_4_17.js     # Tailwind via JS (substituir por build estático em prod)
-├── api/
-│   ├── config.php           # Constantes, sessões, cURL, regiões
-│   ├── sessao.php           # POST {action: create|destroy}
-│   ├── testar-cookies.php   # Valida cookies + cria sessão
-│   ├── buscar-places.php    # Lista pedidos pendentes
-│   ├── marcar-lido.php      # Marca como lido (Issues/Read)
-│   └── validar-place.php    # Rejeita (Features endpoint, approve=false)
-├── .htaccess            # Config Apache (rewrite, headers, cache, compressão)
-├── start.sh             # Wrapper dev (Linux/macOS): PHP_CLI_SERVER_WORKERS=4 + php -S
-├── start.bat            # Wrapper dev (Windows): idem
+│   ├── app.js              # Lógica principal, AppState, UI
+│   ├── api.js              # Wrapper do fetch() para /api/*
+│   ├── swipe.js            # Gestos drag/swipe
+│   └── tailwindcss_3_4_17.js
+├── server/
+│   ├── core.mjs            # Lógica compartilhada (proxy Waze, sessões, cripto, gate)
+│   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)
+├── functions/
+│   └── api/[[route]].js    # Adaptador Cloudflare Pages Functions (KV + Secret)
+├── _headers                # Headers/CSP no Cloudflare (substitui o antigo .htaccess)
+├── wrangler.jsonc          # Config Cloudflare (binding do KV)
+├── .assetsignore           # Exclui server/docs/etc do publish estático
+├── package.json            # Scripts (start / cf:dev / cf:deploy)
+├── docs/                   # Referência de dev (NÃO servido em runtime)
 ├── README.md
-└── .gitignore
+└── CLAUDE.md
 ```
 
-### Multi-região
+### Rodar local
 
-A app suporta as URLs base do Waze:
+Precisa de **Node 18+** (nada de npm install — zero dependências):
 
-| Região   | Endpoint base                            | Uso típico                |
-|----------|------------------------------------------|---------------------------|
-| `row`    | `www.waze.com/row-Descartes/...`         | Brasil, Europa, outros    |
-| `na`     | `www.waze.com/na-Descartes/...`          | EUA, Canadá               |
-| `il`     | `www.waze.com/il-Descartes/...`          | Israel                    |
-| `world`  | `www.waze.com/Descartes/...`             | Fallback                  |
-
-Configure pelo seletor na tela de login ou pelo modal de filtros (header).
-
-### Gate de acesso (quem pode usar)
-
-A app aplica um critério mínimo de permissão **no backend** em `testar-cookies.php` antes mesmo de criar a sessão. Helper `isUserAllowed($profile)` em `config.php`:
-
-```php
-isStaff === true                              → libera
-(rank >= MIN_RANK_WAZE && isAreaManager)      → libera
-caso contrário                                → 403 access_denied
+```bash
+git clone https://github.com/antigerme/wazeplaces.git
+cd wazeplaces
+node server/node.mjs          # http://localhost:8080
 ```
 
-`MIN_RANK_WAZE = 2` (Waze é 0-indexed; equivale a "display L3+"). Pra ajustar, mude essa constante em `config.php`.
+Variáveis de ambiente (todas opcionais):
 
-Frontend trata `errorCategory: 'access_denied'` mostrando o modal `accessDeniedModal` com o perfil do user (userName + rank+1 + AM/não-AM/Staff) e mantém na tela de auth. Como a checagem é no PHP **antes** de `createSession`, não há como burlar editando JS no DevTools — o cookie nem chega a virar sessão útil.
-
-### Resiliência a race conditions entre editores
-
-Vários editores tratam o mesmo place ao mesmo tempo. A app trata o cenário "outro editor chegou primeiro" sem quebrar o fluxo nem zerar stats injustamente.
-
-O backend (`validar-place.php`, `marcar-lido.php`) categoriza o erro do Waze via `categorizeWazeError($httpCode, $body, $curlError)` em `config.php` e devolve `errorCategory` no JSON.
-
-**Códigos de erro reais observados em race conditions (capturados via HAR do WME):**
-- `Features` (rejeitar) → HTTP **404** com `errorList[0].code: 702` e `details` contendo `"was not found"`
-- `Issues/Read` (marcar lido) → HTTP **500** com `errorList[0].code: 300` e `details: "Failed to handle request"`
-
-| Categoria | Quando | Frontend (`handleActionResult`) |
+| Variável | Padrão | O que faz |
 |---|---|---|
-| `already_processed` | `errorList[0].code` ∈ {702, 300+"failed to handle"}, HTTP 409, ou hint textual ("was not found", "already", "duplicate", "no longer", "has been resolved") | Toast info "Já tratado por outro editor 👍", **mantém** stats (objetivo do user foi cumprido) |
-| `not_found` | HTTP 404 sem código específico | Idem `already_processed` |
-| `unauthorized` | HTTP 401/403 | Toast de erro, invalida sessão local, volta pra tela de login |
-| `transient` | HTTP 5xx (sem padrão de race), 408, 429, 0, ou erro de cURL | `callWithRetry` tenta de novo 2x com backoff (1.5s, 3.5s) antes de aceitar falha |
-| `unknown` | Outros | Reverte stat (`stats.read--`/`stats.rejected--` + `serverTotal++`), toast de erro |
+| `PORT` | `8080` | Porta de escuta |
+| `HOST` | `0.0.0.0` | Host bind (`127.0.0.1` restringe ao localhost) |
+| `ENCRYPTION_KEY` | auto-gera | Chave AES base64 (32 bytes). Sem ela, gera uma em `SESSION_KEY_FILE` |
+| `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
+| `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
 
-Importante: a checagem do `errorList[0].code` acontece **antes** da regra `5xx → transient`, pra que uma race no `Issues/Read` (HTTP 500) não seja confundida com instabilidade real do servidor.
-
-### Segurança
-
-- **Cookies trafegam apenas no login.** O backend troca por um session token e os cookies originais ficam criptografados (AES-256-CBC) em `/tmp/waze_places_sessions/sess_<hash>` com permissão `0600`.
-- **Chave de encriptação** é gerada uma única vez em `/tmp/waze_places.key` (`0600`). No Apache do Red Hat, `/tmp` é isolado por `PrivateTmp=yes` (systemd), então só o próprio Apache lê/escreve. Se o Apache reinicia, chave nova e sessões antigas viram inválidas — usuários fazem login novamente.
-- **TTL de sessão:** 21 dias (`SESSION_TTL` em `api/config.php`). Cada uso renova o tempo (touch). Token fica em `localStorage` (persiste entre abas/dias). Cookies do Waze duram ~28 dias — o TTL menor garante folga de uma semana, evitando que o usuário caia num 401 inesperado no meio de uma ação. Quando os cookies do Waze expiram de verdade, o backend devolve 401 e o frontend cai pra tela de login automaticamente.
-- **Arquivos temporários** de cookies usados pelo cURL têm `0600` e são deletados imediatamente após cada chamada.
-- **Sessões expiradas** são limpas automaticamente em cada criação de sessão.
-- **CSP** definida em `index.html` e no `.htaccess` (precisa `unsafe-eval` por causa do Tailwind via JS — remova ao pré-compilar).
-- **Nada é escrito no DocumentRoot.** Apache só lê os arquivos do repo; tudo que precisa ser writable vai pro `/tmp`.
-
-### O que NÃO está implementado (decisão consciente)
-
-- Rate limiting (no nível do app)
-- HTTPS forçado por código (responsabilidade do servidor)
-- Bloqueio por IP / WAF (fica no nível do servidor)
-- Tailwind pré-compilado (usa o bundle JS pesado por enquanto)
+Para simular o ambiente Cloudflare localmente (Functions + KV): `npx wrangler pages dev .` (precisa do `wrangler`).
 
 ### Deploy
 
-#### Red Hat / RHEL / Rocky / Alma (Apache + PHP já instalados)
-
-Três comandos. Sem editar nada além do que é estritamente necessário:
+#### Opção A — Cloudflare Pages + Workers (recomendado)
 
 ```bash
-sudo git clone https://github.com/antigerme/wazeplaces.git /var/www/html/wazeplaces
-sudo restorecon -R /var/www/html/wazeplaces
+# 1. Namespace KV pras sessões (cole o id em wrangler.jsonc)
+npx wrangler kv namespace create SESSIONS
+
+# 2. Chave de criptografia como Secret
+openssl rand -base64 32 | npx wrangler pages secret put ENCRYPTION_KEY
+
+# 3. Deploy
+npx wrangler pages deploy .
+```
+
+Ou conecte o repositório no dashboard (**Workers & Pages → Create → Connect to Git**) pra deploy automático a cada push na `main`. Configure o binding KV `SESSIONS` e o Secret `ENCRYPTION_KEY` nas *Settings* do projeto.
+
+Ganhos: sem servidor pra manter, escala automática, edge global, HTTPS automático. O `_headers` cuida da CSP e do cache. **Free tier:** 100k requests/dia, 100k leituras KV/dia, 1k escritas/dia (cada login = 1 escrita; cada ação = 1 leitura). Passou disso, Workers Paid custa US$5/mês.
+
+#### Opção B — VM Red Hat / RHEL / Rocky / Alma (Node + Apache)
+
+Fallback sem depender do Cloudflare. Mesma `server/core.mjs`, zero divergência. O
+backend agora é **Node** (não é mais PHP), então o Apache entra só como **reverse
+proxy** na frente do processo Node — quem serve tudo (estáticos + `/api/*`) é o
+`server/node.mjs`.
+
+**1. Node + serviço systemd:**
+
+```bash
+sudo dnf install -y nodejs git
+sudo git clone https://github.com/antigerme/wazeplaces /opt/wazeplaces
+sudo mkdir -p /var/lib/wazeplaces/sessions
+```
+
+Serviço systemd (`/etc/systemd/system/wazeplaces.service`):
+
+```ini
+[Service]
+User=nobody
+ExecStart=/usr/bin/node /opt/wazeplaces/server/node.mjs
+Environment=PORT=8080
+Environment=ENCRYPTION_KEY=<gere com: openssl rand -base64 32>
+Environment=SESSION_DIR=/var/lib/wazeplaces/sessions
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now wazeplaces
+```
+
+**2. Apache como reverse proxy** (`/etc/httpd/conf.d/wazeplaces.conf`):
+
+```apache
+<VirtualHost *:80>
+    ServerName places.seudominio.com
+
+    ProxyPreserveHost On
+    ProxyPass        / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+
+    RequestHeader set X-Forwarded-Proto "http"
+</VirtualHost>
+```
+
+```bash
+# módulos de proxy (no RHEL geralmente já vêm; garanta que estão carregados)
+sudo dnf install -y httpd mod_ssl
+# SELinux: libera o Apache a conectar no Node local (senão o proxy dá 503)
 sudo setsebool -P httpd_can_network_connect 1
+sudo systemctl enable --now httpd
+sudo systemctl restart httpd
 ```
 
-Acesse `http://servidor/wazeplaces/`. Pronto.
-
-**Por que cada comando:**
-- `restorecon` — aplica o contexto SELinux correto (`httpd_sys_content_t`) nos arquivos recém-clonados
-- `setsebool httpd_can_network_connect` — libera Apache pra fazer cURL pro `waze.com` (necessário; sem isso o backend retorna erro de conexão)
-
-**Não é necessário:**
-- Mexer em permissões — Apache só precisa **ler** os arquivos (escritas vão pro `/tmp` isolado por PrivateTmp do systemd)
-- Renomear `.htaccess` — já vem ativo no repo
-- Habilitar módulos Apache — `mod_rewrite`, `mod_headers`, `mod_deflate`, `mod_expires` já vêm habilitados no RHEL padrão
-- `AllowOverride All` — a app funciona com `AllowOverride None` (default RHEL); só perde otimizações de cache e headers extras do `.htaccess`
-
-**Atualizar depois:**
-```bash
-cd /var/www/html/wazeplaces && sudo git pull && sudo restorecon -R .
-```
-
-#### Outras distros / Nginx
-
-- Debian/Ubuntu: `chown -R www-data:www-data /var/www/html/wazeplaces` e pronto (sem SELinux)
-- Nginx: roteamento padrão (servir estáticos + `*.php` via PHP-FPM); replique os headers do `.htaccess` na config do server block
-
-#### HTTPS (recomendado para PWA instalar)
+**3. HTTPS** (recomendado pra PWA instalar):
 
 ```bash
-sudo certbot --apache -d seudominio.com
+sudo dnf install -y certbot python3-certbot-apache
+sudo certbot --apache -d places.seudominio.com
 ```
 
-#### Atrás de Cloudflare (ou outro CDN/proxy reescritor)
+O `certbot --apache` cria o `<VirtualHost *:443>` com TLS e o redirect 80→443
+sozinho. Depois disso, ajuste o `RequestHeader set X-Forwarded-Proto "https"` no
+vhost 443 (o certbot costuma duplicar o bloco).
 
-Se você for usar Cloudflare na frente da app, **desabilite** essas features no painel da CF — elas reescrevem o HTML/JS e quebram a app:
+> **Por que Apache só como proxy e não roda a app direto?** Na v2.x o Apache
+> servia PHP via mod_php. Na v3.0 o backend é Node — Apache não executa JS, então
+> o papel dele é encaminhar pro `server/node.mjs`. Um processo Node só, sem
+> `restorecon`, sem tuning de workers, e o único boolean SELinux necessário é o
+> `httpd_can_network_connect` (pro proxy alcançar a porta local).
 
-| Feature | Onde fica | Por quê desabilitar |
+<details>
+<summary>Alternativa: nginx no lugar do Apache</summary>
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+`sudo certbot --nginx -d places.seudominio.com` pro TLS.
+</details>
+
+### Multi-região
+
+| Região | Endpoint base | Uso típico |
 |---|---|---|
-| **Rocket Loader** | Speed → Optimization → Content Optimization | Carrega scripts em modo async e quebra a ordem `api.js → app.js` (`API is not defined`) |
-| **Auto Minify** (JS) | Speed → Optimization → Content Optimization | Pode estragar templates do Tailwind e comentários funcionais |
-| **Mirage** / **Polish** | Speed → Optimization → Image Optimization | Mexem em imagens de places (URLs já são CDN do Waze, não precisa) |
-| **Email Obfuscation** | Scrape Shield | Insere `<script>` injetado no HTML, pode bagunçar layout |
-| **Web Analytics** beacon | Analytics → Web Analytics | Insere `<script defer>` em `cloudflareinsights.com`. Não quebra a app desde a v2.6.1, mas é um request a mais |
-| **Script Monitor** (Page Shield) | Security → Page Shield | Adiciona header `content-security-policy-report-only` com `connect-src 'none'` e enche o console de avisos (não bloqueia, só ruído) |
+| `row` | `www.waze.com/row-Descartes/...` | Brasil, Europa, outros |
+| `na` | `www.waze.com/na-Descartes/...` | EUA, Canadá |
+| `il` | `www.waze.com/il-Descartes/...` | Israel |
+| `world` | `www.waze.com/Descartes/...` | Fallback |
 
-Funções da CF que **vale a pena manter**:
-- **Caching** (estáticos)
-- **TLS / HTTPS**
-- **WAF / Bot Fight Mode** (com cuidado — `Bot Fight Mode` muito agressivo pode fazer challenge para o próprio editor)
-- **Brotli/Gzip compression**
+Configure pelo modal de filtros (header). Default `row`.
 
-A app já tem defesa contra parte desses casos:
-- O service worker (v6+) **ignora requests cross-origin** (não intercepta beacon do CF, etc)
-- O service worker **não usa mais `index.html` como fallback para JS** (evitava o caso clássico em que um `api.js` falho era servido como HTML, causando `API is not defined`)
-- O `.htaccess` desabilita `mod_pagespeed` (que também reescreve JS no Apache do RHEL)
+### Gate de acesso (quem pode usar)
 
-Se mesmo assim aparecer `Uncaught ReferenceError: API is not defined`, abra o DevTools → Application → Service Workers → Unregister e Application → Storage → Clear site data, depois recarregue (Ctrl+Shift+R).
+Critério mínimo aplicado **no backend** (`isUserAllowed` em `server/core.mjs`), dentro do `testar-cookies` antes de criar a sessão:
 
-### Desenvolvendo
-
-Os scripts `start.sh` e `start.bat` configuram `PHP_CLI_SERVER_WORKERS=4` por padrão e chamam `php -S 0.0.0.0:8080`. Esse flag é **essencial** — sem ele o servidor builtin do PHP atende uma request por vez, e cada cURL ao Waze leva 1-2s, bloqueando todas as outras requisições e fazendo a app parecer travada.
-
-Os scripts respeitam variáveis de ambiente caso você queira customizar:
-
-```bash
-PHP_CLI_SERVER_WORKERS=8 PORT=9000 HOST=127.0.0.1 ./start.sh
+```
+isStaff === true                          → libera
+(rank >= MIN_RANK_WAZE && isAreaManager)  → libera
+caso contrário                            → 403 access_denied
 ```
 
-| Variável                  | Padrão      | O que faz                                                  |
-|---------------------------|-------------|------------------------------------------------------------|
-| `PHP_CLI_SERVER_WORKERS`  | `4`         | Workers paralelos do `php -S` (requer PHP 7.4+)            |
-| `PORT`                    | `8080`      | Porta de escuta                                            |
-| `HOST`                    | `0.0.0.0`   | Host bind (use `127.0.0.1` para restringir ao localhost)   |
+`MIN_RANK_WAZE = 2` (Waze é 0-indexed; equivale a "display L3+"). Como a checagem é no servidor **antes** de criar a sessão, não dá pra burlar editando JS no DevTools.
 
-Se preferir rodar manualmente sem os scripts:
+### Resiliência a race conditions entre editores
 
-```bash
-PHP_CLI_SERVER_WORKERS=4 php -S 0.0.0.0:8080
-```
+Vários editores tratam o mesmo place ao mesmo tempo. `categorizeWazeError(httpCode, body, err)` em `server/core.mjs` classifica a resposta do Waze e o backend devolve `errorCategory` no JSON.
 
-Validação rápida de sintaxe antes de commitar:
-```bash
-# JS
-for f in js/*.js; do node --check "$f"; done
+**Códigos reais observados (via HAR do WME):**
+- `Features` (rejeitar) → HTTP **404** + `errorList[0].code: 702` + `"was not found"`
+- `Issues/Read` (marcar lido) → HTTP **500** + `errorList[0].code: 300` + `"Failed to handle request"`
 
-# PHP
-for f in api/*.php; do php -l "$f"; done
-```
+| Categoria | Quando | Frontend |
+|---|---|---|
+| `already_processed` | code ∈ {702, 300+"failed to handle"}, HTTP 409, ou hint textual | Toast "Já tratado por outro editor 👍", **mantém** stats |
+| `not_found` | HTTP 404 puro | Idem |
+| `unauthorized` | HTTP 401/403 | Invalida sessão local, volta pra tela de login |
+| `transient` | 5xx sem padrão de race, 408, 429, 0, erro de rede | `callWithRetry` 2x com backoff (1.5s, 3.5s) |
+| `unknown` | Resto | Reverte stat, toast de erro |
+
+A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient`, pra uma race no `Issues/Read` (HTTP 500) não virar "instabilidade real".
+
+### Segurança
+
+- **Cookies trafegam apenas no login.** Viram um `sessionToken` opaco; os cookies ficam criptografados (**AES-256-GCM**) no store (KV/filesystem).
+- **Chave de criptografia:** Secret `ENCRYPTION_KEY` no Cloudflare; env var ou arquivo `0600` na VM. Nunca commitada.
+- **TTL de sessão:** 21 dias (`SESSION_TTL` em `server/core.mjs`). No KV expira sozinho (TTL nativo); na VM, por mtime + touch. Cookies do Waze duram ~28 dias — o TTL menor dá folga. Quando expiram de verdade, o backend devolve 401 e o frontend cai pra tela de login.
+- **Erros 500 não vazam detalhe interno** — o `dispatch` devolve mensagem genérica.
+- **CSP** definida em `index.html` e no `_headers` (precisa `unsafe-eval` por causa do Tailwind via JS — remova ao pré-compilar).
+
+### O que NÃO está implementado (decisão consciente)
+
+- Rate limiting no nível do app (Waze Staff pediu pra manter sem, por ora)
+- Tailwind pré-compilado (usa o bundle JS por enquanto)
+- iOS/desktop nativo (a PWA cobre; ver `docs/native-android-analysis.md`)
 
 ### Service Worker
 
-- **Versão atual:** `waze-places-v3`
-- **Estratégia HTML:** network-first (sempre tenta buscar versão nova, cai pro cache se offline)
-- **Estratégia assets:** cache-first (rápido, atualiza em background)
-- **Auto-update:** detecta nova versão e força reload automático via `controllerchange`
-- **Pra invalidar caches:** incremente `CACHE_NAME` em `service-worker.js`
+- **Estratégia:** network-first pra HTML/JS/CSS/JSON (com `cache: 'reload'` pra bypassar o HTTP cache); cache-first pra imagens/fontes. Cache é fallback offline.
+- **Pra invalidar caches:** bump `CACHE_NAME` em `service-worker.js` **e** `APP_VERSION` em `js/app.js`, juntos, em toda PR que toque em `index.html`/`js`/`css`/`icons`.
+
+### Validação rápida antes de commitar
+
+```bash
+for f in js/*.js server/*.mjs "functions/api/[[route]].js"; do node --check "$f"; done
+node server/node.mjs   # smoke test: sobe, serve estáticos, /api/* responde
+```
+
+> ⚠️ O sandbox de CI e agentes tem allowlist que bloqueia `*.waze.com`. Não dá pra testar contra o Waze real automaticamente — valide com fixtures de HAR ou teste manual.
 
 ### Contribuindo
 
-PRs são bem-vindos. Fluxo:
-
 1. Fork → branch a partir de `main`
-2. Faça as mudanças, valide com `php -l` e `node --check`
-3. Teste manualmente com `php -S` antes de commitar
-4. PR com descrição do **porquê** (não só o quê)
+2. Mudanças + `node --check`
+3. PR com descrição do **porquê** (não só o quê)
 
 ---
 
 ## ⚠️ Avisos
 
-1. **Não compartilhe seu `cookies.txt`** — ele contém suas credenciais de login do Waze
+1. **Não compartilhe seu `cookies.txt`** — contém suas credenciais de login do Waze
 2. **Esta aplicação NÃO é oficial do Waze** — é uma ferramenta da comunidade
 3. **Respeite as diretrizes do Waze** — não rejeite em massa sem analisar cada pedido
 

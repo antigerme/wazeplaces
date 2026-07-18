@@ -274,19 +274,42 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-**HTTPS via nginx** (reverse proxy na frente do Node):
+**HTTPS via Apache** (reverse proxy na frente do Node — opção preferida do owner).
+`/etc/httpd/conf.d/wazeplaces.conf`:
+
+```apache
+<VirtualHost *:80>
+    ServerName places.seudominio.com
+    ProxyPreserveHost On
+    ProxyPass        / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+    RequestHeader set X-Forwarded-Proto "http"
+</VirtualHost>
+```
+
+```bash
+sudo setsebool -P httpd_can_network_connect 1     # SELinux: proxy → porta local
+sudo systemctl restart httpd
+sudo dnf install -y certbot python3-certbot-apache
+sudo certbot --apache -d places.seudominio.com    # cria o vhost :443 + redirect
+```
+
+Como o backend agora é Node (não mais PHP via mod_php), o Apache aqui é **só
+reverse proxy** — quem serve estáticos + `/api/*` é o `server/node.mjs`. Único
+boolean SELinux necessário: `httpd_can_network_connect`. Alternativa nginx:
 
 ```nginx
 location / {
     proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
 
-Vantagem sobre o Apache+PHP de hoje: um processo Node só, sem SELinux booleans,
-sem `restorecon`, sem `PHP_CLI_SERVER_WORKERS`. E é **a mesma `server/core.mjs`**
-que roda no Cloudflare — zero divergência de comportamento.
+Vantagem sobre o Apache+PHP antigo: um processo Node só, sem `restorecon`, sem
+`PHP_CLI_SERVER_WORKERS`, e é **a mesma `server/core.mjs`** que roda no
+Cloudflare — zero divergência de comportamento.
 
 ---
 
