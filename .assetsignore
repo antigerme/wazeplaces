@@ -1,5 +1,7 @@
 # Arquivos que NÃO devem ser publicados como estáticos (Cloudflare Workers Assets).
 # assets.directory é "." (raiz), então tudo que não é do frontend precisa ficar fora.
+.git
+.wrangler
 worker
 server
 docs

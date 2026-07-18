@@ -18,5 +18,11 @@
       "binding": "SESSIONS",
       "id": "75ffae4a7cfd42b19bc3a1ed6ce41224"
     }
+  ],
+  // Domínio custom declarado aqui pra sobreviver a `wrangler deploy`. Sem isto, um
+  // deploy pode remover o domínio (que ficava só no dashboard). custom_domain: true
+  // faz o wrangler criar/adotar o Custom Domain apontando pra este Worker.
+  "routes": [
+    { "pattern": "places.wazebrasil.com", "custom_domain": true }
   ]
 }
