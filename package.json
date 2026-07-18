@@ -1,0 +1,15 @@
+{
+  "name": "wazeplaces",
+  "version": "3.0.0",
+  "private": true,
+  "description": "PWA estilo Tinder pra editores do Waze Map Editor triarem pedidos de places",
+  "scripts": {
+    "start": "node server/node.mjs",
+    "dev": "node server/node.mjs",
+    "cf:dev": "wrangler pages dev .",
+    "cf:deploy": "wrangler pages deploy ."
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

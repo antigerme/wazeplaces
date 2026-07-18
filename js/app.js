@@ -1,4 +1,4 @@
-const APP_VERSION = '2.21.0';
+const APP_VERSION = '3.0.0';
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -1571,29 +1571,6 @@ function showToast(message, type = 'info', durationMs = 4000) {
     setTimeout(dismiss, durationMs);
 }
 
-function showWorkerWarning() {
-    if (document.getElementById('workerWarning')) return;
-    const container = document.getElementById('toastContainer');
-    const banner = document.createElement('div');
-    banner.id = 'workerWarning';
-    banner.className = 'toast bg-amber-500 text-amber-950 items-start';
-    banner.style.cursor = 'default';
-    banner.innerHTML = `
-        <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
-        </svg>
-        <div class="flex-1">
-            <p class="font-semibold mb-1 text-sm">Servidor lento detectado</p>
-            <p class="text-xs leading-relaxed">A app pode travar entre cliques. Pare o servidor (<strong>Ctrl+C</strong>) e inicie com <code class="bg-amber-200 px-1 rounded font-mono">./start.sh</code> (Linux/macOS) ou <code class="bg-amber-200 px-1 rounded font-mono">start.bat</code> (Windows).</p>
-        </div>
-        <button type="button" id="workerWarningClose" aria-label="Fechar aviso" class="text-amber-950 hover:text-amber-700 flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center -m-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
-    `;
-    container.appendChild(banner);
-    document.getElementById('workerWarningClose').addEventListener('click', () => banner.remove());
-}
-
 function onSwipeLeft() { handleReject(); }
 function onSwipeRight() { handleMarkAsRead(); }
 function onSwipeUp() { handleSkip(); }
@@ -1601,4 +1578,3 @@ window.onSwipeLeft = onSwipeLeft;
 window.onSwipeRight = onSwipeRight;
 window.onSwipeUp = onSwipeUp;
 window.showToast = showToast;
-window.showWorkerWarning = showWorkerWarning;

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-places-v35';
+const CACHE_NAME = 'waze-places-v36';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -61,10 +61,10 @@ self.addEventListener('fetch', event => {
 
   if (isHTML || isCode) {
     // cache: 'reload' força o SW a bypassar o HTTP cache do navegador. Sem isso,
-    // o ExpiresByType "1 month" do .htaccess pra JS/CSS fazia o browser servir
-    // versões velhas do HTTP cache local, mesmo com SW network-first — F5 não
-    // pegava versão nova, só Ctrl+Shift+R (que mobile não tem). Defesa
-    // adicional no .htaccess via Cache-Control: no-cache.
+    // um Cache-Control longo pra JS/CSS faria o browser servir versões velhas do
+    // HTTP cache local, mesmo com SW network-first — F5 não pegava versão nova,
+    // só Ctrl+Shift+R (que mobile não tem). Defesa adicional no servidor via
+    // Cache-Control: no-cache (arquivo _headers no Cloudflare / adaptador Node).
     event.respondWith(
       fetch(event.request, { cache: 'reload' })
         .then(response => {
