@@ -145,7 +145,7 @@ export function validateCookiesFormat(cookiesContent) {
 }
 
 // Um cookie pertence ao domínio do Waze? (coluna de domínio do formato Netscape)
-function isWazeCookieDomain(domain) {
+export function isWazeCookieDomain(domain) {
   const d = String(domain).replace(/^\./, '').toLowerCase();
   return d === 'waze.com' || d.endsWith('.waze.com');
 }
@@ -157,7 +157,7 @@ function isWazeCookieDomain(domain) {
 // (30KB+ vs ~1.7KB só do Waze) → o Waze/Cloudflare rejeita com HTTP 400. Filtramos
 // na entrada pra que o store só persista cookies do Waze. Formato header (sem tabs)
 // não expõe o domínio → devolve como veio (a extensão já coleta só cookies do Waze).
-function filterWazeCookies(cookiesContent) {
+export function filterWazeCookies(cookiesContent) {
   const s = String(cookiesContent).trim();
   if (!s.includes('\t')) return s;
   const kept = [];
@@ -172,7 +172,7 @@ function filterWazeCookies(cookiesContent) {
 
 // Constrói o valor do header `Cookie:` a partir do conteúdo salvo.
 // Aceita formato Netscape (cookies.txt, com tabs) ou header ("a=b; c=d").
-function cookieHeaderFrom(cookiesContent) {
+export function cookieHeaderFrom(cookiesContent) {
   const s = String(cookiesContent).trim();
   if (!s.includes('\t')) {
     // já é formato header (ou uma linha só) — normaliza
@@ -224,9 +224,15 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region) {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30000);
-    const res = await fetch(url, { ...init, signal: controller.signal });
-    clearTimeout(timer);
-    const response = await res.text();
+    let res, response;
+    try {
+      res = await fetch(url, { ...init, signal: controller.signal });
+      // Leitura do corpo DENTRO da janela do timer — resposta lenta no body
+      // também aborta nos 30s (antes o clearTimeout vinha antes do .text()).
+      response = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
     return { httpCode: res.status, response, error: '' };
   } catch (e) {
     return { httpCode: 0, response: '', error: e && e.message ? e.message : 'fetch failed' };

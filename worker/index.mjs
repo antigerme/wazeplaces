@@ -30,24 +30,31 @@ export default {
         return json({ success: false, error: 'Backend não configurado (falta KV SESSIONS ou Secret ENCRYPTION_KEY)' }, 500);
       }
 
-      const route = url.pathname.slice(5); // remove "/api/"
-      let data = {};
       try {
-        data = await request.json();
-      } catch {
-        data = {};
+        const route = url.pathname.slice(5); // remove "/api/"
+        let data = {};
+        try {
+          data = await request.json();
+        } catch {
+          data = {};
+        }
+
+        // base64ToBytes lança se o Secret ENCRYPTION_KEY estiver malformado.
+        // Sem este try/catch, o Worker devolveria a página HTML 1101 em vez de JSON.
+        const keyBytes = base64ToBytes(env.ENCRYPTION_KEY);
+        const store = {
+          get: (h) => env.SESSIONS.get('sess_' + h),
+          put: (h, blob, ttl) => env.SESSIONS.put('sess_' + h, blob, { expirationTtl: ttl || SESSION_TTL }),
+          delete: (h) => env.SESSIONS.delete('sess_' + h),
+        };
+        const sessions = makeSessions({ store, keyBytes });
+
+        const { status, body } = await dispatch(route, data, { sessions });
+        return json(body, status);
+      } catch (err) {
+        console.error('Erro no handler /api:', err);
+        return json({ success: false, error: 'Erro interno' }, 500);
       }
-
-      const keyBytes = base64ToBytes(env.ENCRYPTION_KEY);
-      const store = {
-        get: (h) => env.SESSIONS.get('sess_' + h),
-        put: (h, blob, ttl) => env.SESSIONS.put('sess_' + h, blob, { expirationTtl: ttl || SESSION_TTL }),
-        delete: (h) => env.SESSIONS.delete('sess_' + h),
-      };
-      const sessions = makeSessions({ store, keyBytes });
-
-      const { status, body } = await dispatch(route, data, { sessions });
-      return json(body, status);
     }
 
     // Tudo que não é /api/ → arquivos estáticos (index.html, css, js, icons…)

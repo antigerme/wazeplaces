@@ -8,16 +8,20 @@
 // Env:     PORT (8080), HOST (0.0.0.0), ENCRYPTION_KEY (base64; auto-gera se
 //          ausente), SESSION_DIR, SESSION_KEY_FILE
 //
-// Deploy RedHat: ver README (systemd + nginx pra HTTPS).
+// Deploy RedHat: ver README (systemd + Apache/nginx pra HTTPS).
 
 import { createServer } from 'node:http';
-import { readFile, writeFile, unlink, stat, mkdir, utimes } from 'node:fs/promises';
+import { readFile, writeFile, unlink, stat, mkdir, utimes, readdir } from 'node:fs/promises';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dispatch, makeSessions, base64ToBytes, SESSION_TTL } from './core.mjs';
+
+// Rede de segurança pra VM: um erro não capturado não pode derrubar o processo.
+process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
+process.on('uncaughtException', (e) => console.error('uncaughtException', e));
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)); // raiz do repo
 const PORT = parseInt(process.env.PORT, 10) || 8080;
@@ -31,8 +35,17 @@ function loadOrCreateKey() {
   if (process.env.ENCRYPTION_KEY) return base64ToBytes(process.env.ENCRYPTION_KEY.trim());
   if (existsSync(SESSION_KEY_FILE)) return base64ToBytes(readFileSync(SESSION_KEY_FILE, 'utf8').trim());
   const key = randomBytes(32);
-  writeFileSync(SESSION_KEY_FILE, key.toString('base64'), { mode: 0o600 });
-  return new Uint8Array(key);
+  try {
+    // 'wx' = criação exclusiva: se outro processo gravou a chave nesse meio-tempo,
+    // lança EEXIST em vez de sobrescrever (evita race não-atômica no boot).
+    writeFileSync(SESSION_KEY_FILE, key.toString('base64'), { flag: 'wx', mode: 0o600 });
+    return new Uint8Array(key);
+  } catch (e) {
+    if (e && e.code === 'EEXIST') {
+      return base64ToBytes(readFileSync(SESSION_KEY_FILE, 'utf8').trim());
+    }
+    throw e;
+  }
 }
 const keyBytes = loadOrCreateKey();
 
@@ -64,6 +77,32 @@ const fsStore = {
 };
 const sessions = makeSessions({ store: fsStore, keyBytes });
 
+// ── GC de sessões órfãs ─────────────────────────────────────────────────────
+// O fsStore só apaga uma sessão quando ela é reacessada (mtime no .get). Quem
+// nunca mais volta deixa o blob no disco pra sempre → cresce sem limite. Varre
+// o SESSION_DIR periodicamente e remove arquivos com idade > SESSION_TTL.
+const GC_INTERVAL_MS = 60 * 60 * 1000; // 1h
+async function gcSessions() {
+  try {
+    const files = await readdir(SESSION_DIR);
+    const now = Date.now();
+    for (const name of files) {
+      if (!name.startsWith('sess_')) continue;
+      const f = join(SESSION_DIR, name);
+      try {
+        const st = await stat(f);
+        if (now - st.mtimeMs > SESSION_TTL * 1000) await unlink(f).catch(() => {});
+      } catch {
+        // arquivo sumiu no meio da varredura — ignora
+      }
+    }
+  } catch {
+    // SESSION_DIR ainda não existe ou erro de FS — nunca pode quebrar o processo
+  }
+}
+gcSessions(); // varredura no boot
+setInterval(gcSessions, GC_INTERVAL_MS).unref(); // não segura o event loop
+
 // ── Estáticos ──────────────────────────────────────────────────────────────
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -79,83 +118,160 @@ const MIME = {
 // no-cache pra código (SW controla versão); cache longo pra imagens/fontes
 const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest']);
 
-// Pastas/arquivos que NÃO devem ser servidos como estático
-const BLOCKED = ['/server/', '/functions/', '/docs/', '/node_modules/', '/.git/'];
+// Headers de segurança (paridade com o _headers do Cloudflare). A CSP NÃO entra
+// aqui — vive no <meta> do index.html + no _headers, gerida à parte.
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+};
 
-async function serveStatic(res, urlPath) {
-  let rel = decodeURIComponent(urlPath.split('?')[0]);
-  if (rel === '/' || rel === '') rel = '/index.html';
-  const safe = normalize(rel).replace(/^(\.\.[/\\])+/, '');
-  if (BLOCKED.some((b) => ('/' + safe).includes(b)) || safe.includes('..')) {
-    return serveIndexFallback(res);
+// ALLOWLIST de estáticos: só o frontend conhecido é servido do disco. Qualquer
+// outra coisa (wrangler.jsonc, CLAUDE.md, README.md, package.json, _headers,
+// dotfiles, server/, docs/, worker/…) nunca é lida. Mais seguro que a blocklist
+// antiga, que servia com 200 os arquivos da raiz não listados.
+const ALLOWED_DIRS = ['/css/', '/js/', '/icons/'];
+const ALLOWED_ROOT_FILES = new Set([
+  '/index.html',
+  '/manifest.json',
+  '/service-worker.js',
+  '/favicon.ico',
+  '/favicon.svg',
+]);
+function isAllowedAsset(path) {
+  if (ALLOWED_ROOT_FILES.has(path)) return true;
+  return ALLOWED_DIRS.some((d) => path.startsWith(d));
+}
+
+async function serveStatic(req, res, urlPath) {
+  let rel;
+  try {
+    rel = decodeURIComponent(urlPath.split('?')[0]);
+  } catch {
+    // URI malformada (ex.: GET '/%') — decodeURIComponent lança URIError.
+    // Responde 400 sem derrubar o processo.
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
+    res.end('Bad request');
+    return;
   }
+
+  const accept = req.headers['accept'] || '';
+  const isRoot = rel === '/' || rel === '';
+  // Navegação = raiz ou request que aceita HTML → serve o shell da SPA no miss.
+  const isNavigation = isRoot || accept.includes('text/html');
+  if (isRoot) rel = '/index.html';
+
+  const safe = normalize(rel).replace(/^(\.\.[/\\])+/, '');
+
+  // Path traversal + allowlist: fora do frontend conhecido → 404 (ou SPA se navegação).
+  if (safe.includes('..') || !isAllowedAsset(safe)) {
+    return notFound(res, isNavigation);
+  }
+
   const file = join(ROOT, safe);
   try {
     const buf = await readFile(file);
     const ext = extname(file).toLowerCase();
-    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', ...SECURITY_HEADERS };
     if (file.endsWith('service-worker.js')) headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
     else if (noCache.has(ext)) headers['Cache-Control'] = 'no-cache, must-revalidate';
     else headers['Cache-Control'] = 'public, max-age=31536000, immutable';
-    headers['X-Content-Type-Options'] = 'nosniff';
     res.writeHead(200, headers);
     res.end(buf);
   } catch {
-    serveIndexFallback(res);
+    // Consta na allowlist mas não existe no disco.
+    return notFound(res, isNavigation);
   }
+}
+
+function notFound(res, isNavigation) {
+  if (isNavigation) return serveIndexFallback(res);
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
+  res.end('Not found');
 }
 
 async function serveIndexFallback(res) {
   try {
     const buf = await readFile(join(ROOT, 'index.html'));
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
     res.end(buf);
   } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
     res.end('Not found');
   }
 }
 
-function readBody(req) {
+const MAX_BODY_BYTES = 5_000_000;
+function readBody(req, res) {
   return new Promise((resolve) => {
     let data = '';
+    let tooLarge = false;
     req.on('data', (c) => {
+      if (tooLarge) return;
       data += c;
-      if (data.length > 5_000_000) req.destroy(); // guarda contra body gigante
+      if (data.length > MAX_BODY_BYTES) {
+        tooLarge = true;
+        // Responde 413 limpo antes de cortar a conexão (em vez de só req.destroy()).
+        if (!res.headersSent) {
+          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: false, error: 'Corpo da requisição muito grande' }));
+        }
+        req.destroy();
+        resolve(null); // sinaliza pro chamador que a resposta já foi enviada
+      }
     });
-    req.on('end', () => resolve(data));
-    req.on('error', () => resolve(''));
+    req.on('end', () => { if (!tooLarge) resolve(data); });
+    req.on('error', () => { if (!tooLarge) resolve(''); });
   });
 }
 
 const server = createServer(async (req, res) => {
   const url = req.url || '/';
-
-  if (url.startsWith('/api/')) {
-    if (req.method !== 'POST') {
-      res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: 'Método não permitido' }));
+  try {
+    if (url.startsWith('/api/')) {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Método não permitido' }));
+        return;
+      }
+      const route = url.slice(5).split('?')[0];
+      const raw = await readBody(req, res);
+      if (raw === null) return; // body grande demais → 413 já respondido
+      let data = {};
+      try {
+        data = JSON.parse(raw) || {};
+      } catch {
+        data = {};
+      }
+      const { status, body } = await dispatch(route, data, { sessions });
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(body));
       return;
     }
-    const route = url.slice(5).split('?')[0];
-    let data = {};
-    try {
-      data = JSON.parse(await readBody(req)) || {};
-    } catch {
-      data = {};
-    }
-    const { status, body } = await dispatch(route, data, { sessions });
-    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(body));
-    return;
-  }
 
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    res.writeHead(405, { 'Content-Type': 'text/plain' });
-    res.end('Method not allowed');
-    return;
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Method not allowed');
+      return;
+    }
+    await serveStatic(req, res, url);
+  } catch (err) {
+    // Handler async sem try/catch derrubava a request (e podia escalar).
+    // Responde 500 limpo: JSON pra /api/*, texto pros estáticos.
+    console.error('Erro no handler de request:', err);
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
+    if (url.startsWith('/api/')) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: 'Erro interno' }));
+    } else {
+      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Erro interno');
+    }
   }
-  await serveStatic(res, url);
 });
 
 server.listen(PORT, HOST, () => {
