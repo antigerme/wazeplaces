@@ -1,18 +1,22 @@
 {
-  // Cloudflare Pages + Functions. O frontend (raiz) é servido como estático;
-  // functions/api/[[route]].js vira a API em /api/*.
+  // Cloudflare Worker com static assets (mesmo modelo do botequei).
+  // O Worker (worker/index.mjs) roteia /api/* e delega o resto pro binding ASSETS.
   //
   // Setup inicial:
-  //   1. wrangler kv namespace create SESSIONS   → cole o "id" retornado abaixo
-  //   2. wrangler pages secret put ENCRYPTION_KEY → cole: openssl rand -base64 32
-  //   3. wrangler pages deploy .   (ou conecte o repo no dash pra deploy no git push)
+  //   1. npx wrangler kv namespace create SESSIONS   → cole o "id" retornado em kv_namespaces abaixo
+  //   2. openssl rand -base64 32 | npx wrangler secret put ENCRYPTION_KEY   (ou pelo dashboard como Secret)
+  //   3. npx wrangler deploy   (ou conecte o repo no dash pra deploy no git push)
   "name": "wazeplaces",
+  "main": "worker/index.mjs",
   "compatibility_date": "2024-11-01",
-  "pages_build_output_dir": ".",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS"
+  },
   "kv_namespaces": [
     {
       "binding": "SESSIONS",
-      "id": "<preencher com o id de: wrangler kv namespace create SESSIONS>"
+      "id": "75ffae4a7cfd42b19bc3a1ed6ce41224"
     }
   ]
 }

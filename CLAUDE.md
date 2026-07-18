@@ -22,7 +22,7 @@ PWA = instala no celular sem precisar de Play Store / App Store. Funciona offlin
 |---|---|---|
 | **Frontend** | HTML + JavaScript **vanilla** + Tailwind CSS | Zero build. Editor leigo baixa, roda, funciona. |
 | **Tailwind** | Bundle JS local em `js/tailwindcss_3_4_17.js` (~407KB) | Sem `npm install`. Tradeoff: bundle gordo. Vale considerar pré-compilar em produção mas mantém zero-build pra dev. |
-| **Backend** | JavaScript ESM (**sem build, sem npm install**) no padrão **core compartilhado + adaptadores** | `server/core.mjs` = lógica; `functions/api/[[route]].js` = adaptador Cloudflare; `server/node.mjs` = adaptador VM. Só usa `fetch` + Web Crypto → roda igual em Workers e Node 18+. |
+| **Backend** | JavaScript ESM (**sem build, sem npm install**) no padrão **core compartilhado + adaptadores** | `server/core.mjs` = lógica; `worker/index.mjs` = adaptador Cloudflare Workers; `server/node.mjs` = adaptador VM. Só usa `fetch` + Web Crypto → roda igual em Workers e Node 18+. |
 | **Auth** | Cookies do WME do usuário → session token, cookies criptografados **AES-256-GCM** server-side | Cookies não trafegam mais que uma vez. Token opaco no client. |
 | **Sessão** | Store abstrato: **Workers KV** (Cloudflare) ou **filesystem** (VM) | KV tem TTL nativo; VM espelha o modelo `/tmp` antigo. Injetado no core pelo adaptador. |
 | **PWA** | manifest + service worker network-first pra HTML/JS/CSS, cache-first pra imagens | HTML/código sempre fresco (fim do version skew), imagens rápidas. Auto-update via `controllerchange`. |
@@ -55,8 +55,8 @@ wazeplaces/
 │   ├── core.mjs             # Lógica compartilhada: sessões, cripto (AES-GCM), callWaze (fetch),
 │   │                        #   categorizeWazeError, isUserAllowed, 8 handlers, dispatch(). ÚNICO lugar de lógica.
 │   └── node.mjs             # Adaptador VM/Node: http server + estáticos + fs sessions + key auto-gen
-├── functions/
-│   └── api/[[route]].js     # Adaptador Cloudflare Pages Functions: dispatch com store=KV, key=Secret
+├── worker/
+│   └── index.mjs            # Adaptador Cloudflare Workers: roteia /api/* (store=KV, key=Secret) e delega estáticos pro ASSETS
 ├── _headers                 # Cloudflare: headers/CSP/cache (substitui o antigo .htaccess)
 ├── wrangler.jsonc           # Cloudflare: binding do KV SESSIONS + compat date
 ├── .assetsignore            # Exclui server/docs/etc do publish estático do Pages
@@ -82,11 +82,11 @@ wazeplaces/
 
 **`node server/node.mjs`** (precisa Node 18+). Sobe em `http://localhost:8080`, serve os estáticos e roteia `/api/*`. Zero `npm install` — o backend não tem dependências. Env vars opcionais: `PORT`, `HOST`, `ENCRYPTION_KEY` (auto-gera se ausente), `SESSION_DIR`, `SESSION_KEY_FILE`.
 
-Pra simular o ambiente Cloudflare (Functions + KV): `npx wrangler pages dev .`.
+Pra simular o ambiente Cloudflare (Worker + KV): `npx wrangler dev`.
 
 **Validação rápida antes de commitar:**
 ```bash
-for f in js/*.js server/*.mjs "functions/api/[[route]].js"; do node --check "$f"; done
+for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
 ```
 
@@ -371,7 +371,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 4. Testar com fixture do HAR
 
 ### Validar mudanças quando sandbox bloqueia o Waze
-- Sintaxe: `for f in js/*.js server/*.mjs "functions/api/[[route]].js"; do node --check "$f"; done`
+- Sintaxe: `for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done`
 - Lógica pura do core: `import('./server/core.mjs')` e alimentar `categorizeWazeError`/`isUserAllowed`/`makeSessions` com fixtures/valores (ver o smoke test usado na migração v3.0 no histórico de commits)
 - Pipeline completo: subir `node server/node.mjs` e `curl` nos endpoints — sessão fake dá 401 limpo; sessão válida tenta o Waze e o 403 do allowlist vira `errorCategory: unauthorized` (prova que roteamento + cripto + fetch funcionam)
 
