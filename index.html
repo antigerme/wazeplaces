@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="description" content="Validação de Places do Waze Map Editor - Interface Estilo Tinder">
     <meta name="theme-color" content="#33CCFF">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:;">
@@ -31,7 +31,7 @@
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen text-slate-800 antialiased selection:bg-blue-200">
 
-    <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-slate-200/50">
+    <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-slate-200/50" style="padding-top: env(safe-area-inset-top)">
         <div class="container mx-auto px-4 py-3 flex items-center justify-between gap-2 max-w-md">
             <div id="brandBlock" class="flex items-center space-x-2 min-w-0">
                 <div class="bg-gradient-to-tr from-cyan-500 to-blue-500 p-1.5 rounded-lg shadow-sm flex-shrink-0">
@@ -50,21 +50,26 @@
                 <img id="userAvatar" class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100 flex-shrink-0" alt="">
             </div>
             <div class="flex items-center gap-1">
-                <button id="themeBtn" type="button" aria-label="Alternar tema" class="p-2 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
-                    <svg id="themeIconLight" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button id="themeBtn" type="button" aria-label="Alternar tema" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 rounded-full transition-all">
+                    <svg id="themeIconLight" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
                     </svg>
-                    <svg id="themeIconDark" class="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg id="themeIconDark" class="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
                     </svg>
                 </button>
-                <button id="filtersBtn" type="button" aria-label="Filtros" class="hidden p-2 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button id="refreshBtn" type="button" aria-label="Buscar novamente" title="Buscar novamente" class="hidden min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 rounded-full transition-all">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                </button>
+                <button id="filtersBtn" type="button" aria-label="Filtros" class="hidden min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 rounded-full transition-all">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
                     </svg>
                 </button>
-                <button id="helpBtn" type="button" aria-label="Ajuda e configurações" title="Ajuda, atalhos, sair" class="p-2 text-cyan-600 hover:text-white hover:bg-cyan-500 bg-cyan-50 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button id="helpBtn" type="button" aria-label="Ajuda e configurações" title="Ajuda, atalhos, sair" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-cyan-600 hover:text-white hover:bg-cyan-500 bg-cyan-50 dark:bg-cyan-500/10 rounded-full transition-all">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
                 </button>
@@ -82,20 +87,20 @@
                 </div>
 
                 <div class="space-y-4">
-                    <div class="bg-gradient-to-r from-purple-50 to-cyan-50 border border-purple-200 rounded-2xl p-5">
+                    <div class="bg-gradient-to-r from-purple-50 to-cyan-50 dark:from-purple-500/10 dark:to-cyan-500/10 border border-purple-200 dark:border-purple-500/30 rounded-2xl p-5">
                         <div class="flex items-start gap-3">
-                            <span class="text-2xl flex-shrink-0">🚀</span>
+                            <span class="text-2xl flex-shrink-0" aria-hidden="true">🚀</span>
                             <div class="flex-1 min-w-0">
-                                <h3 class="font-bold text-slate-800">Login automático <span class="text-[10px] font-semibold text-purple-500 uppercase tracking-wider ml-1">recomendado</span></h3>
+                                <h3 class="font-bold text-slate-800">Login automático <span class="text-[10px] font-semibold text-purple-500 dark:text-purple-300 uppercase tracking-wider ml-1">recomendado</span></h3>
                                 <p class="text-xs text-slate-600 leading-relaxed mt-1">
                                     Instale a extensão <b>WazePlaces Rapid Access</b> no Chrome. Faz login direto a partir do WME — sem precisar copiar cookies.
                                 </p>
                                 <a href="https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn" target="_blank" rel="noopener noreferrer"
-                                   class="inline-flex items-center gap-1 mt-3 bg-purple-500 hover:bg-purple-600 text-white text-sm font-semibold py-2 px-4 rounded-lg transition-all">
+                                   class="inline-flex items-center gap-1 mt-3 min-h-[44px] bg-purple-500 hover:bg-purple-600 text-white text-sm font-semibold py-2.5 px-4 rounded-lg transition-all">
                                     <span>Instalar na Chrome Web Store</span>
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                 </a>
-                                <p class="text-[10px] text-slate-400 mt-2">Extensão por <a href="https://www.waze.com/pt-BR/user/editor/daflash" target="_blank" rel="noopener noreferrer" class="text-purple-600 hover:text-purple-700 hover:underline font-semibold">@daflash</a> · comunidade WME</p>
+                                <p class="text-[10px] text-slate-500 mt-2">Extensão por <a href="https://www.waze.com/pt-BR/user/editor/daflash" target="_blank" rel="noopener noreferrer" class="text-purple-600 dark:text-purple-300 hover:text-purple-700 hover:underline font-semibold">@daflash</a> · comunidade WME</p>
                             </div>
                         </div>
                     </div>
@@ -109,7 +114,7 @@
                         </div>
                     </div>
 
-                    <button id="uploadBtn" type="button" class="group w-full relative overflow-hidden bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-cyan-500/25 active:scale-[0.98]">
+                    <button id="uploadBtn" type="button" class="group w-full relative overflow-hidden bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-cyan-500/25">
                         <span class="relative z-10 flex items-center justify-center space-x-2">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
                             <span>Fazer Upload do cookies.txt</span>
@@ -117,7 +122,7 @@
                     </button>
                     <input type="file" id="fileInput" accept=".txt" class="hidden">
 
-                    <button id="pasteBtn" type="button" class="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 active:scale-[0.98] flex items-center justify-center space-x-2">
+                    <button id="pasteBtn" type="button" class="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 flex items-center justify-center space-x-2">
                         <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
                         <span>Colar Conteúdo dos Cookies</span>
                     </button>
@@ -131,122 +136,122 @@
                 </div>
             </div>
 
-            <button id="byAuthor" type="button" class="w-full text-slate-400 hover:text-cyan-600 font-medium text-sm transition-colors text-center pb-8">
+            <button id="byAuthor" type="button" class="w-full min-h-[44px] text-slate-500 hover:text-cyan-600 font-medium text-sm transition-colors text-center pb-8">
                 By AG
             </button>
         </div>
 
-        <div id="pasteModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div id="pasteModal" role="dialog" aria-modal="true" aria-labelledby="pasteModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6">
-                <h3 class="text-xl font-bold text-slate-800 mb-4">Cole o Conteúdo dos Cookies</h3>
-                <textarea id="cookiesTextarea" class="w-full h-48 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt..."></textarea>
+                <h3 id="pasteModalTitle" class="text-xl font-bold text-slate-800 mb-4">Cole o Conteúdo dos Cookies</h3>
+                <textarea id="cookiesTextarea" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" class="w-full h-48 p-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt..."></textarea>
                 <div class="flex space-x-3 mt-4">
-                    <button id="confirmPaste" type="button" class="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition">
-                        Confirmar
-                    </button>
-                    <button id="cancelPaste" type="button" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">
+                    <button id="cancelPaste" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">
                         Cancelar
                     </button>
+                    <button id="confirmPaste" type="button" class="flex-1 min-h-[48px] bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition">
+                        Confirmar
+                    </button>
                 </div>
             </div>
         </div>
 
-        <div id="logoutModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div id="logoutModal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
-                <h3 class="text-xl font-bold text-slate-800 mb-2">Sair?</h3>
+                <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2">Sair?</h3>
                 <p class="text-sm text-slate-500 mb-6">Sua sessão será encerrada e <strong>todos os dados locais</strong> (cookies, estatísticas, filtros e preferências) serão apagados deste dispositivo. Esta ação não pode ser desfeita.</p>
                 <div class="flex space-x-3">
-                    <button id="confirmLogout" type="button" class="flex-1 bg-rose-500 hover:bg-rose-600 text-white font-semibold py-2 px-4 rounded-lg transition">Sair</button>
-                    <button id="cancelLogout" type="button" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
+                    <button id="cancelLogout" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
+                    <button id="confirmLogout" type="button" class="flex-1 min-h-[48px] bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2 px-4 rounded-lg transition">Sair</button>
                 </div>
             </div>
         </div>
 
-        <div id="accessDeniedModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div id="accessDeniedModal" role="dialog" aria-modal="true" aria-labelledby="accessDeniedTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
                 <div class="flex items-start gap-3 mb-4">
-                    <div class="bg-rose-100 p-2 rounded-full flex-shrink-0">
-                        <svg class="w-6 h-6 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div class="bg-rose-100 dark:bg-rose-500/20 p-2 rounded-full flex-shrink-0">
+                        <svg class="w-6 h-6 text-rose-600 dark:text-rose-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
                         </svg>
                     </div>
                     <div>
-                        <h3 class="text-xl font-bold text-slate-800">Acesso restrito</h3>
-                        <p class="text-xs text-slate-400 mt-0.5">Esta aplicação é exclusiva para certos níveis de editor</p>
+                        <h3 id="accessDeniedTitle" class="text-xl font-bold text-slate-800">Acesso restrito</h3>
+                        <p class="text-xs text-slate-500 mt-0.5">Esta aplicação é exclusiva para certos níveis de editor</p>
                     </div>
                 </div>
                 <p id="accessDeniedMessage" class="text-sm text-slate-600 mb-3"></p>
                 <div id="accessDeniedProfile" class="hidden text-sm bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4"></div>
                 <p class="text-xs text-slate-500 mb-5">Se você acredita que deveria ter acesso, peça para verificar suas permissões no Waze Map Editor (rank e status de Area Manager).</p>
-                <button id="closeAccessDenied" type="button" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-2.5 px-4 rounded-lg transition">Entendi</button>
+                <button id="closeAccessDenied" type="button" class="w-full min-h-[48px] bg-slate-800 hover:bg-slate-700 text-white font-semibold py-2.5 px-4 rounded-lg transition">Entendi</button>
             </div>
         </div>
 
-        <div id="filtersModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 max-h-[85vh] overflow-y-auto">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-xl font-bold text-slate-800">Filtros e Preferências</h3>
-                    <button id="closeFilters" type="button" class="text-slate-500 hover:text-slate-700">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        <div id="filtersModal" role="dialog" aria-modal="true" aria-labelledby="filtersModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full flex flex-col max-h-[85dvh]">
+                <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100 flex-shrink-0">
+                    <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800">Filtros e Preferências</h3>
+                    <button id="closeFilters" type="button" aria-label="Fechar" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                 </div>
 
-                <div class="space-y-4">
+                <div class="flex-1 overflow-y-auto overscroll-contain px-6 py-4 space-y-4">
                     <div>
-                        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Preferências</h4>
-                        <div class="bg-amber-50 border border-amber-100 rounded-xl p-3">
-                            <label class="flex items-start gap-2 text-sm cursor-pointer">
-                                <input id="prefUndoEnabled" type="checkbox" class="mt-0.5" checked>
+                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Preferências</h4>
+                        <div class="bg-amber-50 dark:bg-amber-400/10 border border-amber-100 dark:border-amber-400/30 rounded-xl p-3">
+                            <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
                                 <span>
                                     <span class="font-semibold text-slate-700">Permitir desfazer ações</span>
-                                    <span class="block text-xs text-slate-500">Mostra um banner por 3 segundos pra você desfazer "Lido" ou "Rejeitar" antes do envio.</span>
+                                    <span class="block text-xs text-slate-500">Mostra um aviso por 5 segundos pra você desfazer "Lido" ou "Rejeitar" antes do envio.</span>
                                 </span>
+                                <input id="prefUndoEnabled" type="checkbox" class="ui-switch" checked>
                             </label>
-                            <p id="prefUndoGateMsg" class="hidden mt-2 text-xs text-amber-700 bg-amber-100/60 border border-amber-200 rounded-lg px-2 py-1.5 leading-snug"></p>
+                            <p id="prefUndoGateMsg" class="hidden mt-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-100/60 dark:bg-amber-400/10 border border-amber-200 dark:border-amber-400/30 rounded-lg px-2 py-1.5 leading-snug"></p>
                         </div>
                     </div>
 
                     <div id="devModeSection" class="hidden">
-                        <h4 class="text-xs font-bold text-purple-500 uppercase tracking-wider mb-2">Avançado</h4>
-                        <div class="bg-purple-50 border border-purple-100 rounded-xl p-3">
-                            <label class="flex items-start gap-2 text-sm cursor-pointer">
-                                <input id="prefDevModeActive" type="checkbox" class="mt-0.5">
+                        <h4 class="text-xs font-bold text-purple-500 dark:text-purple-300 uppercase tracking-wider mb-2">Avançado</h4>
+                        <div class="bg-purple-50 dark:bg-purple-400/10 border border-purple-100 dark:border-purple-400/30 rounded-xl p-3">
+                            <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
                                 <span>
                                     <span class="font-semibold text-slate-700">Modo Desenvolvedor 🛠️</span>
                                     <span class="block text-xs text-slate-500">Remove restrições da app (ex: trava do "Permitir desfazer ações"). Use com cuidado — ações vão direto pro Waze sem janela de undo.</span>
                                 </span>
+                                <input id="prefDevModeActive" type="checkbox" class="ui-switch">
                             </label>
                         </div>
                     </div>
 
                     <div>
-                        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Filtros</h4>
-                        <div class="bg-cyan-50 border border-cyan-100 rounded-xl p-3">
-                            <label class="flex items-start gap-2 text-sm cursor-pointer">
-                                <input id="filterUnreadOnly" type="checkbox" class="mt-0.5" checked>
+                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filtros</h4>
+                        <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3">
+                            <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
                                 <span>
                                     <span class="font-semibold text-slate-700">Apenas pedidos não lidos</span>
                                     <span class="block text-xs text-slate-500">Padrão. Desmarque para incluir pedidos já marcados como lidos.</span>
                                 </span>
+                                <input id="filterUnreadOnly" type="checkbox" class="ui-switch" checked>
                             </label>
                         </div>
                     </div>
 
                     <div>
                         <label class="text-sm font-semibold text-slate-700 block mb-2">Tipos de Pedido</label>
-                        <div class="space-y-2">
-                            <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="filter-type" value="VENUE" checked> Novos Locais</label>
-                            <label class="flex items-center gap-2 text-sm"><input type="checkbox" class="filter-type" value="IMAGE" checked> Novas Fotos</label>
-                            <label id="filterTypeRequestRow" class="hidden flex items-center gap-2 text-sm">
-                                <input type="checkbox" class="filter-type" value="REQUEST">
-                                <span>Reportes/Atualizações <span class="text-[10px] text-purple-500 font-semibold uppercase tracking-wider ml-1">DEV</span></span>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="VENUE" checked> Novos Locais</label>
+                            <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="IMAGE" checked> Novas Fotos</label>
+                            <label id="filterTypeRequestRow" class="hidden flex items-center gap-3 text-sm min-h-[44px] cursor-pointer">
+                                <input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="REQUEST">
+                                <span>Reportes/Atualizações <span class="text-[10px] text-purple-500 dark:text-purple-300 font-semibold uppercase tracking-wider ml-1">DEV</span></span>
                             </label>
                         </div>
                     </div>
 
                     <div>
-                        <label class="text-sm font-semibold text-slate-700 block mb-2">Residenciais</label>
-                        <select id="filterResidential" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                        <label for="filterResidential" class="text-sm font-semibold text-slate-700 block mb-2">Residenciais</label>
+                        <select id="filterResidential" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
                             <option value="">Indiferente</option>
                             <option value="false">Excluir residenciais</option>
                             <option value="true">Apenas residenciais</option>
@@ -254,8 +259,8 @@
                     </div>
 
                     <div>
-                        <label class="text-sm font-semibold text-slate-700 block mb-2">Região</label>
-                        <select id="filterRegion" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                        <label for="filterRegion" class="text-sm font-semibold text-slate-700 block mb-2">Região</label>
+                        <select id="filterRegion" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
                             <option value="row">ROW</option>
                             <option value="na">NA</option>
                             <option value="il">IL</option>
@@ -264,41 +269,41 @@
                     </div>
 
                     <div>
-                        <label class="text-sm font-semibold text-slate-700 block mb-2">País</label>
-                        <select id="filterCountry" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                        <label for="filterCountry" class="text-sm font-semibold text-slate-700 block mb-2">País</label>
+                        <select id="filterCountry" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
                             <option value="30">Brasil</option>
                         </select>
-                        <p id="filterCountryHint" class="hidden text-[11px] text-amber-600 mt-1">Mostrando apenas países que você pode editar.</p>
+                        <p id="filterCountryHint" class="hidden text-[11px] text-amber-600 dark:text-amber-300 mt-1">Mostrando apenas países que você pode editar.</p>
                     </div>
 
                     <div>
-                        <label class="text-sm font-semibold text-slate-700 block mb-2">Estado</label>
-                        <select id="filterState" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                        <label for="filterState" class="text-sm font-semibold text-slate-700 block mb-2">Estado</label>
+                        <select id="filterState" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
                             <option value="">Todos os estados</option>
                         </select>
                     </div>
 
                     <div>
-                        <label class="text-sm font-semibold text-slate-700 block mb-2">Área gerenciada</label>
-                        <select id="filterManagedArea" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                        <label for="filterManagedArea" class="text-sm font-semibold text-slate-700 block mb-2">Área gerenciada</label>
+                        <select id="filterManagedArea" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
                             <option value="">Nenhuma</option>
                         </select>
                     </div>
 
-                    <div class="bg-cyan-50 border border-cyan-100 rounded-xl p-3">
-                        <label class="flex items-start gap-2 text-sm cursor-pointer">
-                            <input id="filterMyArea" type="checkbox" class="mt-0.5">
+                    <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3">
+                        <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
                             <span>
                                 <span class="font-semibold text-slate-700">Filtrar pela minha área de edição</span>
                                 <span class="block text-xs text-slate-500">Usa o bbox da sua "drive area" do Waze (ignora país/estado)</span>
                             </span>
+                            <input id="filterMyArea" type="checkbox" class="ui-switch">
                         </label>
                     </div>
+                </div>
 
-                    <div class="flex space-x-3 pt-4">
-                        <button id="applyFilters" type="button" class="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition">Aplicar</button>
-                        <button id="cancelFilters" type="button" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
-                    </div>
+                <div class="flex space-x-3 px-6 py-4 border-t border-slate-100 flex-shrink-0">
+                    <button id="cancelFilters" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
+                    <button id="applyFilters" type="button" class="flex-1 min-h-[48px] bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition">Aplicar</button>
                 </div>
             </div>
         </div>
@@ -306,32 +311,53 @@
         <div id="appScreen" class="hidden space-y-4">
 
             <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-4">
-                <div class="grid grid-cols-4 text-center divide-x divide-slate-100">
+                <div class="grid grid-cols-4 text-center divide-x divide-slate-100 dark:divide-slate-700">
                     <div>
-                        <p class="text-2xl font-black text-emerald-500 tracking-tight" id="readCount">0</p>
-                        <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wider mt-1">Lidos</p>
+                        <p class="text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight tnum" id="readCount">0</p>
+                        <p class="text-[11px] font-medium text-slate-500 uppercase tracking-wider mt-1">Lidos</p>
                     </div>
                     <div>
-                        <p class="text-2xl font-black text-rose-500 tracking-tight" id="rejectedCount">0</p>
-                        <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wider mt-1">Rejeitados</p>
+                        <p class="text-2xl font-black text-rose-600 dark:text-rose-400 tracking-tight tnum" id="rejectedCount">0</p>
+                        <p class="text-[11px] font-medium text-slate-500 uppercase tracking-wider mt-1">Rejeitados</p>
                     </div>
                     <div>
-                        <p class="text-2xl font-black text-amber-500 tracking-tight" id="skippedCount">0</p>
-                        <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wider mt-1">Pulados</p>
+                        <p class="text-2xl font-black text-amber-600 dark:text-amber-400 tracking-tight tnum" id="skippedCount">0</p>
+                        <p class="text-[11px] font-medium text-slate-500 uppercase tracking-wider mt-1">Pulados</p>
                     </div>
                     <div>
-                        <p class="text-2xl font-black text-cyan-600 tracking-tight" id="pendingCount" title="Restam na fila (carregados localmente). Sinal + significa que há mais páginas a buscar">—</p>
-                        <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wider mt-1">Restam</p>
+                        <p class="text-2xl font-black text-cyan-600 dark:text-cyan-400 tracking-tight tnum" id="pendingCount" title="Restam na fila (carregados localmente). Sinal + significa que há mais páginas a buscar" aria-label="Restantes na fila">—</p>
+                        <p class="text-[11px] font-medium text-slate-500 uppercase tracking-wider mt-1">Restam</p>
                     </div>
                 </div>
             </div>
 
-            <div id="cardStack" class="relative h-[min(80dvh,640px)] min-h-[520px] w-full max-w-[400px] mx-auto">
-                <div id="loadingCard" class="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-sm rounded-3xl z-50">
-                    <div class="text-center">
-                        <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-500 mx-auto mb-4"></div>
-                        <p class="text-slate-500 font-medium animate-pulse">Buscando places...</p>
+            <div id="cardStack" class="relative h-[min(80dvh,640px)] min-h-[min(520px,85dvh)] w-full max-w-[400px] mx-auto">
+                <div id="loadingCard" class="absolute inset-0 rounded-3xl z-50 overflow-hidden bg-white shadow-xl border border-slate-100" role="status">
+                    <div aria-hidden="true" class="h-full flex flex-col">
+                        <div class="skeleton h-52 flex-shrink-0"></div>
+                        <div class="p-5 space-y-4 flex-1">
+                            <div class="skeleton h-7 w-3/4 rounded-lg"></div>
+                            <div class="flex items-start gap-3">
+                                <div class="skeleton w-9 h-9 rounded-lg flex-shrink-0"></div>
+                                <div class="flex-1 space-y-2 pt-1">
+                                    <div class="skeleton h-3 w-20 rounded"></div>
+                                    <div class="skeleton h-4 w-2/3 rounded"></div>
+                                </div>
+                            </div>
+                            <div class="flex items-start gap-3">
+                                <div class="skeleton w-9 h-9 rounded-lg flex-shrink-0"></div>
+                                <div class="flex-1 space-y-2 pt-1">
+                                    <div class="skeleton h-3 w-20 rounded"></div>
+                                    <div class="skeleton h-4 w-5/6 rounded"></div>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="skeleton h-16 rounded-xl"></div>
+                                <div class="skeleton h-16 rounded-xl"></div>
+                            </div>
+                        </div>
                     </div>
+                    <p class="sr-only">Buscando places…</p>
                 </div>
 
                 <div id="noMoreCards" class="hidden absolute inset-0 flex items-center justify-center bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
@@ -343,7 +369,7 @@
                         </div>
                         <h3 class="text-xl font-bold text-slate-800 mb-2">Tudo limpo!</h3>
                         <p class="text-slate-500 text-sm mb-6">Você processou todos os pedidos pendentes na fila atual.</p>
-                        <button id="reloadBtn" type="button" class="bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 px-8 rounded-xl transition-all shadow-md active:scale-95">
+                        <button id="reloadBtn" type="button" class="min-h-[48px] bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 px-8 rounded-xl transition-all shadow-md">
                             Verificar novamente
                         </button>
                     </div>
@@ -352,66 +378,56 @@
                 <template id="cardTemplate">
                     <div class="place-card absolute inset-0 bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden cursor-grab active:cursor-grabbing will-change-transform">
                         <div class="h-full flex flex-col relative z-10">
-                            <div class="h-52 bg-slate-100 relative overflow-hidden">
-                                <img class="card-image w-full h-full object-cover hidden" alt="Place">
+                            <div class="h-52 bg-slate-100 relative overflow-hidden flex-shrink-0">
+                                <img class="card-image w-full h-full object-cover hidden" alt="">
                                 <div class="card-image-new-border hidden absolute inset-0 ring-4 ring-amber-400 ring-inset pointer-events-none z-20"></div>
                                 <div class="card-image-new-badge hidden absolute top-1 left-2 z-30 text-3xl leading-none select-none pointer-events-none" style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido">✨</div>
                                 <div class="card-no-image absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
-                                    <svg class="w-16 h-16 text-slate-300 mb-2" fill="currentColor" viewBox="0 0 24 24">
+                                    <svg class="w-16 h-16 text-slate-300 mb-2" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
                                     </svg>
-                                    <span class="text-sm font-medium text-slate-400">Sem Imagem</span>
+                                    <span class="text-sm font-medium text-slate-500">Sem Imagem</span>
                                 </div>
                                 <div class="card-image-nav hidden absolute bottom-2 inset-x-2 flex items-center justify-between z-30">
-                                    <button type="button" class="card-image-prev bg-black/60 hover:bg-black/80 text-white w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold">‹</button>
-                                    <span class="card-image-count bg-black/60 text-white text-xs font-medium px-3 py-1 rounded-full"></span>
-                                    <button type="button" class="card-image-next bg-black/60 hover:bg-black/80 text-white w-8 h-8 rounded-full flex items-center justify-center text-lg font-bold">›</button>
-                                </div>
-                                <div class="swipe-indicator swipe-left absolute inset-0 bg-gradient-to-r from-rose-500/80 to-transparent flex items-center justify-start p-8 transition-opacity opacity-0 z-20">
-                                    <div class="bg-white/20 backdrop-blur-md rounded-full p-4 border border-white/50">
-                                        <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path></svg>
-                                    </div>
-                                </div>
-                                <div class="swipe-indicator swipe-right absolute inset-0 bg-gradient-to-l from-emerald-500/80 to-transparent flex items-center justify-end p-8 transition-opacity opacity-0 z-20">
-                                    <div class="bg-white/20 backdrop-blur-md rounded-full p-4 border border-white/50">
-                                        <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
-                                    </div>
+                                    <button type="button" aria-label="Foto anterior" class="card-image-prev bg-black/60 hover:bg-black/80 text-white w-11 h-11 rounded-full flex items-center justify-center text-xl font-bold">‹</button>
+                                    <span class="card-image-count bg-black/60 text-white text-xs font-medium px-3 py-1 rounded-full tnum"></span>
+                                    <button type="button" aria-label="Próxima foto" class="card-image-next bg-black/60 hover:bg-black/80 text-white w-11 h-11 rounded-full flex items-center justify-center text-xl font-bold">›</button>
                                 </div>
                             </div>
 
-                            <div class="flex-1 p-5 flex flex-col relative z-10 bg-white card-content">
+                            <div class="flex-1 p-5 pb-2 flex flex-col relative z-10 bg-white card-content">
                                 <div class="flex-1">
-                                    <span class="card-delete-banner hidden mb-2 inline-block bg-rose-100 text-rose-700 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">⚠ Pedido de remoção</span>
+                                    <span class="card-delete-banner hidden mb-2 inline-block bg-rose-100 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">⚠ Pedido de remoção</span>
                                     <div class="flex items-start justify-between mb-3 gap-2">
                                         <h3 class="card-name text-2xl font-bold text-slate-800 leading-tight flex-1 line-clamp-2 break-words min-w-0"></h3>
                                         <span class="card-starred hidden text-2xl leading-none flex-shrink-0" title="Favoritado no WME">⭐</span>
-                                        <a class="card-wme-link p-2 bg-cyan-50 text-cyan-600 rounded-lg hover:bg-cyan-100 transition-colors flex-shrink-0" target="_blank" rel="noopener" title="Abrir no WME">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                        <a class="card-wme-link min-w-[44px] min-h-[44px] flex items-center justify-center bg-cyan-50 text-cyan-600 rounded-lg hover:bg-cyan-100 transition-colors flex-shrink-0" target="_blank" rel="noopener" title="Abrir no WME" aria-label="Abrir no WME">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                         </a>
                                     </div>
 
                                     <div class="space-y-3">
                                         <div class="flex items-start space-x-3">
-                                            <div class="bg-cyan-50 p-2 rounded-lg text-cyan-600">
+                                            <div class="bg-cyan-50 p-2 rounded-lg text-cyan-600" aria-hidden="true">
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
                                                 </svg>
                                             </div>
                                             <div class="flex-1 pt-1">
-                                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Categorias</p>
+                                                <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Categorias</p>
                                                 <span class="card-category text-sm text-slate-700 font-medium line-clamp-2 break-words"></span>
                                             </div>
                                         </div>
 
                                         <div class="flex items-start space-x-3">
-                                            <div class="bg-blue-50 p-2 rounded-lg text-blue-600">
+                                            <div class="bg-blue-50 p-2 rounded-lg text-blue-600" aria-hidden="true">
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
                                                 </svg>
                                             </div>
                                             <div class="flex-1 pt-1">
-                                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Endereço</p>
+                                                <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Endereço</p>
                                                 <span class="card-address text-sm text-slate-700 font-medium line-clamp-2 break-words"></span>
                                             </div>
                                         </div>
@@ -419,35 +435,58 @@
                                         <div class="grid grid-cols-2 gap-3">
                                             <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
                                                 <div class="flex items-baseline justify-between gap-1 mb-1">
-                                                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tipo</p>
-                                                    <span class="card-age hidden text-[10px] text-slate-400 font-medium truncate" title=""></span>
+                                                    <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Tipo</p>
+                                                    <span class="card-age hidden text-[10px] text-slate-500 font-medium truncate" title=""></span>
                                                 </div>
                                                 <span class="card-type text-sm text-slate-700 font-medium block line-clamp-2 break-words"></span>
                                             </div>
                                             <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Criador</p>
+                                                <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Criador</p>
                                                 <span class="card-creator text-sm text-slate-700 font-medium truncate block"></span>
                                             </div>
                                         </div>
 
-                                        <div class="card-flag-comment hidden bg-rose-50 border border-rose-100 rounded-xl p-3">
-                                            <p class="text-xs font-semibold text-rose-700 uppercase tracking-wider mb-1">Reporte do usuário</p>
-                                            <p class="card-flag-comment-text text-sm text-slate-700 leading-snug whitespace-pre-wrap break-words max-h-24 overflow-y-auto"></p>
+                                        <div class="card-flag-comment hidden bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/30 rounded-xl p-3">
+                                            <p class="text-[11px] font-semibold text-rose-700 dark:text-rose-300 uppercase tracking-wider mb-1">Reporte do usuário</p>
+                                            <p class="card-flag-comment-text text-sm text-slate-700 leading-snug whitespace-pre-wrap break-words max-h-24 overflow-y-auto overscroll-contain"></p>
                                         </div>
 
                                         <div class="card-brand-row hidden flex items-center gap-2 min-w-0">
-                                            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider flex-shrink-0">Marca:</span>
+                                            <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0">Marca:</span>
                                             <span class="card-brand text-sm text-slate-700 font-medium truncate min-w-0 flex-1"></span>
-                                            <span class="card-brand-known hidden flex-shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700" title="Marca reconhecida pelo Waze">✓ conhecida</span>
-                                            <span class="card-brand-unknown hidden flex-shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-700" title="Marca não está na lista oficial do Waze">? não listada</span>
+                                            <span class="card-brand-known hidden flex-shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-400/20 text-emerald-700 dark:text-emerald-300" title="Marca reconhecida pelo Waze">✓ conhecida</span>
+                                            <span class="card-brand-unknown hidden flex-shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-400/20 text-amber-700 dark:text-amber-300" title="Marca não está na lista oficial do Waze">? não listada</span>
                                         </div>
 
-                                        <div class="card-changes hidden bg-amber-50 border border-amber-100 rounded-xl p-3">
-                                            <p class="text-xs font-semibold text-amber-700 uppercase tracking-wider mb-2">Mudanças propostas</p>
-                                            <div class="card-changes-list space-y-1 max-h-32 overflow-y-auto"></div>
+                                        <div class="card-changes hidden bg-amber-50 dark:bg-amber-400/10 border border-amber-100 dark:border-amber-400/30 rounded-xl p-3">
+                                            <p class="text-[11px] font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wider mb-2">Mudanças propostas</p>
+                                            <div class="card-changes-list space-y-1 max-h-32 overflow-y-auto overscroll-contain"></div>
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+
+                            <div class="card-actions flex items-center justify-center gap-5 px-5 py-3 flex-shrink-0 bg-white border-t border-slate-100">
+                                <button type="button" aria-label="Rejeitar" title="Rejeitar (←)" class="card-btn-reject w-14 h-14 rounded-full bg-white dark:bg-slate-800 border-2 border-rose-500 text-rose-600 dark:text-rose-400 shadow-md flex items-center justify-center hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors">
+                                    <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                                <button type="button" aria-label="Pular" title="Pular (↑)" class="card-btn-skip w-12 h-12 rounded-full bg-white dark:bg-slate-800 border-2 border-amber-500 text-amber-600 dark:text-amber-400 shadow-md flex items-center justify-center hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18"/></svg>
+                                </button>
+                                <button type="button" aria-label="Marcar como lido" title="Marcar como lido (→)" class="card-btn-read w-14 h-14 rounded-full bg-white dark:bg-slate-800 border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 shadow-md flex items-center justify-center hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors">
+                                    <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="swipe-indicator swipe-left absolute inset-0 z-30 bg-gradient-to-r from-rose-500/80 to-transparent flex items-center justify-start p-8 transition-opacity opacity-0">
+                            <div class="bg-white/20 backdrop-blur-md rounded-full p-4 border border-white/50">
+                                <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </div>
+                        </div>
+                        <div class="swipe-indicator swipe-right absolute inset-0 z-30 bg-gradient-to-l from-emerald-500/80 to-transparent flex items-center justify-end p-8 transition-opacity opacity-0">
+                            <div class="bg-white/20 backdrop-blur-md rounded-full p-4 border border-white/50">
+                                <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
                             </div>
                         </div>
                     </div>
@@ -458,23 +497,24 @@
 
     </main>
 
-    <div id="imageLightbox" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[60] flex items-center justify-center select-none">
-        <button id="lightboxClose" type="button" aria-label="Fechar" class="absolute top-3 right-3 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-10 h-10 flex items-center justify-center text-xl transition-colors">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    <div id="imageLightbox" role="dialog" aria-modal="true" aria-label="Visualização de foto" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[60] flex items-center justify-center select-none overflow-hidden">
+        <button id="lightboxClose" type="button" aria-label="Fechar" class="absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
         <button id="lightboxPrev" type="button" aria-label="Foto anterior" class="hidden absolute left-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">‹</button>
         <button id="lightboxNext" type="button" aria-label="Próxima foto" class="hidden absolute right-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">›</button>
-        <span id="lightboxCount" class="hidden absolute top-3 left-3 z-10 text-white bg-black/40 text-sm font-medium px-3 py-1.5 rounded-full"></span>
-        <span id="lightboxNewBadge" class="hidden absolute top-3 left-1/2 -translate-x-1/2 z-10 text-3xl leading-none pointer-events-none" style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido">✨</span>
-        <img id="lightboxImage" class="max-w-full max-h-full object-contain" alt="">
+        <span id="lightboxCount" class="hidden absolute z-10 text-white bg-black/40 text-sm font-medium px-3 py-1.5 rounded-full tnum" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem"></span>
+        <span id="lightboxNewBadge" class="hidden absolute left-1/2 -translate-x-1/2 z-10 text-3xl leading-none pointer-events-none" style="top: calc(0.75rem + env(safe-area-inset-top)); filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido">✨</span>
+        <p id="lightboxZoomHint" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 text-white/70 text-xs bg-black/40 px-3 py-1.5 rounded-full pointer-events-none" style="bottom: calc(1rem + env(safe-area-inset-bottom))">Toque duplo pra dar zoom · arraste pro lado pra trocar de foto</p>
+        <img id="lightboxImage" class="max-w-full max-h-full object-contain will-change-transform" style="touch-action: none" alt="" draggable="false">
     </div>
 
-    <div id="helpModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[80vh] overflow-y-auto">
+    <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[85dvh] overflow-y-auto overscroll-contain">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-2xl font-bold text-slate-800">Ajuda</h3>
-                <button id="closeHelp" type="button" class="text-slate-500 hover:text-slate-700">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <h3 id="helpModalTitle" class="text-2xl font-bold text-slate-800">Ajuda</h3>
+                <button id="closeHelp" type="button" aria-label="Fechar" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
                 </button>
@@ -484,23 +524,34 @@
                 <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
                     <h4 class="font-semibold text-slate-800 mb-2 text-sm uppercase tracking-wider">Como processar</h4>
                     <div class="grid grid-cols-3 gap-2 text-center text-xs">
-                        <div class="bg-white border border-rose-100 rounded-lg p-2">
-                            <div class="text-rose-500 font-bold text-lg leading-none mb-1">←</div>
+                        <div class="bg-white border border-rose-100 dark:border-rose-400/30 rounded-lg p-2">
+                            <div class="text-rose-600 dark:text-rose-400 font-bold text-lg leading-none mb-1">←</div>
                             <div class="text-slate-700 font-medium">Rejeitar</div>
-                            <div class="text-slate-400 text-[10px]">arrastar esq.</div>
+                            <div class="text-slate-500 text-[10px]">botão ou arrastar esq.</div>
                         </div>
-                        <div class="bg-white border border-amber-100 rounded-lg p-2">
-                            <div class="text-amber-500 font-bold text-lg leading-none mb-1">↑</div>
+                        <div class="bg-white border border-amber-100 dark:border-amber-400/30 rounded-lg p-2">
+                            <div class="text-amber-600 dark:text-amber-400 font-bold text-lg leading-none mb-1">↑</div>
                             <div class="text-slate-700 font-medium">Pular</div>
-                            <div class="text-slate-400 text-[10px]">arrastar cima</div>
+                            <div class="text-slate-500 text-[10px]">botão ou arrastar cima</div>
                         </div>
-                        <div class="bg-white border border-emerald-100 rounded-lg p-2">
-                            <div class="text-emerald-500 font-bold text-lg leading-none mb-1">→</div>
+                        <div class="bg-white border border-emerald-100 dark:border-emerald-400/30 rounded-lg p-2">
+                            <div class="text-emerald-600 dark:text-emerald-400 font-bold text-lg leading-none mb-1">→</div>
                             <div class="text-slate-700 font-medium">Lido</div>
-                            <div class="text-slate-400 text-[10px]">arrastar dir.</div>
+                            <div class="text-slate-500 text-[10px]">botão ou arrastar dir.</div>
                         </div>
                     </div>
-                    <p class="text-[11px] text-slate-500 mt-2">Use mouse/dedo, setas do teclado, ou arraste o card.</p>
+                    <p class="text-[11px] text-slate-500 mt-2">Use os botões do card, mouse/dedo, setas do teclado, ou arraste o card.</p>
+                </div>
+
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <h4 class="font-semibold text-slate-800 mb-2 text-sm uppercase tracking-wider">Legenda</h4>
+                    <ul class="space-y-1.5 text-sm">
+                        <li><span aria-hidden="true">✨</span> — foto <strong>nova</strong> proposta neste pedido (borda âmbar no carrossel)</li>
+                        <li><span class="inline-block text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-400/20 text-emerald-700 dark:text-emerald-300">✓ conhecida</span> — marca está na lista oficial do Waze</li>
+                        <li><span class="inline-block text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-400/20 text-amber-700 dark:text-amber-300">? não listada</span> — marca fora da lista oficial</li>
+                        <li><strong>Restam</strong> com <code>+</code> (ex.: 30+) — ainda há mais páginas pra buscar no Waze</li>
+                        <li><span aria-hidden="true">⭐</span> — place favoritado no WME</li>
+                    </ul>
                 </div>
 
                 <div>
@@ -532,8 +583,8 @@
                 </div>
 
                 <div class="pt-3 border-t border-slate-200">
-                    <button id="logoutBtn" type="button" class="w-full bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                    <button id="logoutBtn" type="button" class="w-full min-h-[48px] bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                         <span>Sair</span>
                     </button>
                 </div>
@@ -541,11 +592,13 @@
         </div>
     </div>
 
-    <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
-    <div id="undoContainer"></div>
+    <div id="notifyStack" class="fixed inset-x-0 z-[70] flex flex-col items-center gap-2 px-4 pointer-events-none" style="bottom: calc(1rem + env(safe-area-inset-bottom))">
+        <div id="toastContainer" class="w-full max-w-sm flex flex-col items-stretch gap-2 empty:hidden pointer-events-auto" role="status" aria-live="polite"></div>
+        <div id="undoContainer" class="w-full max-w-sm empty:hidden pointer-events-auto" role="status" aria-live="polite"></div>
+    </div>
 
-    <footer class="text-center pb-4">
-        <span class="text-[10px] text-slate-300 font-mono" id="appVersionDisplay"></span>
+    <footer class="text-center pb-4" style="padding-bottom: calc(1rem + env(safe-area-inset-bottom))">
+        <span class="text-[10px] text-slate-400 dark:text-slate-600 font-mono" id="appVersionDisplay"></span>
     </footer>
 
     <script src="js/api.js"></script>

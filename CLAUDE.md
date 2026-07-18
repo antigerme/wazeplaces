@@ -197,7 +197,7 @@ Estrutura unificada na resposta de erro de `validar-place.php` e `marcar-lido.ph
 ```
 
 Constantes em `app.js`:
-- `UNDO_WINDOW_MS = 3000` — janela de undo antes de a ação ser enviada ao Waze (só aplica se `AppState.preferences.undoEnabled === true`, padrão; quando desativado em `scheduleAction`, o executor roda na hora)
+- `UNDO_WINDOW_MS = 5000` — janela de undo antes de a ação ser enviada ao Waze (só aplica se `AppState.preferences.undoEnabled === true`, padrão; quando desativado em `scheduleAction`, o executor roda na hora). Banner mostra countdown visual (`.undo-progress`)
 - `MAX_CHANGES_DISPLAY = 4` — máximo de mudanças exibidas no card (UPDATE requests)
 - `PREFETCH_THRESHOLD = 3` — quando a fila tem ≤3 cards, dispara próximo `fetchNextPage` em background
 - `MAX_EMPTY_PAGES = 5` — guarda contra loop infinito se Waze retornar páginas vazias com `hasMore: true`
@@ -224,10 +224,16 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 ## 🎨 Padrões de UI
 
-- **Header**: logo + perfil (avatar/nome/rank) + filtros + tema + ajuda
-- **Stats**: grid de 4 colunas — `Lidos · Rejeitados · Pulados · Restam`
-- **Card** (`<template id="cardTemplate">`): imagem (+ nav prev/next se múltiplas) → nome → categorias → endereço → tipo/criador → brand + selo (✓ conhecida / ? não listada via `categoryBrands` da resposta do Waze) → mudanças propostas (diff antes/depois para UPDATE requests) → botões Rejeitar / Pular / Lido
-- **Tema escuro**: classes `.dark` no `<html>` + overrides Tailwind em `css/styles.css`. Persistido em `localStorage.waze_places_theme`
+- **Header**: logo + perfil (avatar/nome/rank) + refresh + filtros + tema + ajuda. Alvos de toque mínimos 44px (`min-w-[44px] min-h-[44px]`) — régua M3 (48dp) / HIG (44pt); manter em botões novos
+- **Stats**: grid de 4 colunas — `Lidos · Rejeitados · Pulados · Restam`. Números com `.tnum` (tabular) e shades -600 no light (contraste WCAG)
+- **Card** (`<template id="cardTemplate">`): imagem (+ nav prev/next se múltiplas) → nome → categorias → endereço → tipo/criador → brand + selo (✓ conhecida / ? não listada via `categoryBrands` da resposta do Waze) → mudanças propostas (diff antes/depois para UPDATE requests) → **barra de botões ✕/↑/✓** (`.card-btn-reject/skip/read`). Gesto é atalho; botão é o caminho canônico e acessível — NÃO remover os botões
+- **Modais**: SEMPRE via `openModal(id)`/`closeModal(id)` (app.js) — cuidam de foco, Esc, clique no scrim e scroll-lock. Modal novo → adicionar id em `MODAL_IDS` + `role="dialog" aria-modal="true" aria-labelledby`. Ordem de botões: dismissiva à esquerda, afirmativa à direita (M3/HIG)
+- **Snackbar/toast**: `showToast(msg, type, durationMs=4000)` — bottom-center no `#notifyStack` (respeita safe-area), clique dispensa, `aria-live` no container. Undo banner vive no mesmo stack
+- **Switches vs checkboxes**: preferência on/off = `<input type="checkbox" class="ui-switch">` (estilo M3, JS lê `.checked` normal); seleção múltipla (tipos) = checkbox com `accent-cyan-600`
+- **Tema**: segue o sistema até o user tocar no toggle (aí persiste em `localStorage.waze_places_theme`). `applyTheme` também atualiza `<meta name="theme-color">`. Dark mode: usar variantes `dark:` do Tailwind no HTML em código novo; os overrides `!important` do styles.css são legado
+- **Safe areas (iOS PWA)**: header tem `padding-top: env(safe-area-inset-top)`; `#notifyStack`/footer usam `env(safe-area-inset-bottom)`. Não criar elemento fixed sem considerar isso
+- **Zoom NUNCA bloqueado** no viewport (WCAG 1.4.4). Lightbox tem pinch/double-tap/wheel zoom + swipe pra trocar/fechar
+- **Reduced motion**: media query global em styles.css zera animações — não criar animação essencial sem fallback estático
 - **Versão visível**: rodapé fixo `v{APP_VERSION}` — sempre bump em mudança visual (`2.5.x` formato)
 
 ### Gestos (swipe.js)

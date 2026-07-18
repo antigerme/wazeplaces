@@ -2,6 +2,16 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Form controls, scrollbars e teclado nativos acompanham o tema (M3/HIG) */
+:root {
+  color-scheme: light;
+}
+
+.dark,
+:root:has(body.dark) {
+  color-scheme: dark;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   overscroll-behavior: none;
@@ -12,6 +22,17 @@ body {
 body.dark {
   background-color: #0f172a;
   color: #e2e8f0;
+}
+
+/* Anel de foco visível pra navegação por teclado (WCAG 2.4.7) */
+:focus-visible {
+  outline: 2px solid #0891b2;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.dark :focus-visible {
+  outline-color: #22d3ee;
 }
 
 .place-card {
@@ -53,18 +74,99 @@ body.dark {
   transition: opacity 0.2s ease;
 }
 
+/* Áreas de scroll interno do card: sem isso o touch-action:none do
+   .place-card engole o gesto e listas longas ficam ilegíveis no mobile */
+.card-changes-list,
+.card-flag-comment-text {
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+}
+
+/* Snackbar (toast) — bottom-center, estilo M3, entra deslizando de baixo */
 .toast {
-  min-width: 250px;
-  padding: 1rem 1.5rem;
+  width: 100%;
+  padding: 0.875rem 1.25rem;
   border-radius: 0.75rem;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  cursor: pointer;
+  animation: slideUp 0.25s ease;
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Skeleton do loading (silhueta do card enquanto busca) */
+.skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.dark .skeleton {
+  background: linear-gradient(90deg, #334155 25%, #1e293b 50%, #334155 75%);
+  background-size: 200% 100%;
+}
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
+/* Números que mudam sem "dançar" a largura */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Switch M3 (usa <input type="checkbox" class="ui-switch">, JS lê .checked normal) */
+input.ui-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: #cbd5e1;
+  position: relative;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+  cursor: pointer;
+  margin: 0;
+}
+
+input.ui-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+input.ui-switch:checked {
+  background: #0891b2;
+}
+
+input.ui-switch:checked::after {
+  transform: translateX(18px);
+}
+
+input.ui-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dark input.ui-switch {
+  background: #475569;
+}
+
+.dark input.ui-switch:checked {
+  background: #06b6d4;
 }
 
 ::-webkit-scrollbar {
@@ -117,14 +219,18 @@ body.dark {
   -webkit-user-select: none;
 }
 
+/* Press state único pra todos os botões (não duplicar com active:scale-* do Tailwind) */
 button:active {
-  transform: scale(0.95);
+  transform: scale(0.97);
 }
 
-#pasteModal, #helpModal, #logoutModal, #filtersModal {
+#pasteModal, #helpModal, #logoutModal, #filtersModal, #accessDeniedModal {
   backdrop-filter: blur(4px);
 }
 
+/* ── Overrides legados de dark mode ──────────────────────────────────────
+   Preferir variantes dark: do Tailwind direto no HTML em código novo.
+   Estes overrides globais ficam pra cobrir o que ainda não migrou. */
 .dark .bg-white { background-color: #1e293b !important; color: #e2e8f0; }
 .dark .bg-white\/80 { background-color: rgba(30, 41, 59, 0.8) !important; }
 .dark .bg-white\/90 { background-color: rgba(30, 41, 59, 0.9) !important; }
@@ -210,37 +316,63 @@ button:active {
   line-height: 1.2;
 }
 
+/* Snackbar de undo — vive dentro do #notifyStack (bottom-center, safe-area ok) */
 .undo-banner {
-  position: fixed;
-  bottom: 1rem;
-  left: 50%;
-  transform: translateX(-50%);
+  position: relative;
+  width: 100%;
   background: #1e293b;
   color: white;
-  padding: 0.75rem 1.25rem;
+  padding: 0.75rem 0.75rem 0.75rem 1.25rem;
   border-radius: 0.75rem;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-  z-index: 60;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 1rem;
   font-size: 0.875rem;
   animation: slideUp 0.3s ease;
+  overflow: hidden;
+}
+
+.dark .undo-banner {
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .undo-banner button {
   background: #f59e0b;
   color: #1f2937;
   border: none;
-  padding: 0.375rem 0.75rem;
+  padding: 0.5rem 1rem;
+  min-height: 44px;
   border-radius: 0.5rem;
   font-weight: 600;
   cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Contagem regressiva da janela de undo (largura anima 100% → 0) */
+.undo-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: #f59e0b;
+  transform-origin: left;
+  animation-name: undoCountdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes undoCountdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
 @keyframes slideUp {
-  from { transform: translate(-50%, 100px); opacity: 0; }
-  to { transform: translate(-50%, 0); opacity: 1; }
+  from { transform: translateY(100px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 /* Versão no rodapé tem trigger oculto pro Modo Desenvolvedor (7 taps).
@@ -250,4 +382,24 @@ button:active {
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* Respeita a preferência de movimento reduzido do sistema (M3/HIG a11y).
+   A barra de undo fica estática (cheia) — a janela continua funcionando. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .undo-progress {
+    animation: none;
+  }
+  .skeleton {
+    animation: none;
+    background: #e2e8f0;
+  }
+  .dark .skeleton {
+    background: #334155;
+  }
 }
