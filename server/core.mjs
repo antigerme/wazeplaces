@@ -144,6 +144,32 @@ export function validateCookiesFormat(cookiesContent) {
   return false;
 }
 
+// Um cookie pertence ao domínio do Waze? (coluna de domínio do formato Netscape)
+function isWazeCookieDomain(domain) {
+  const d = String(domain).replace(/^\./, '').toLowerCase();
+  return d === 'waze.com' || d.endsWith('.waze.com');
+}
+
+// Mantém apenas as linhas de cookies de waze.com (formato Netscape). O cookies.txt
+// exportado do navegador traz cookies de TODOS os sites logados (redhat, microsoft,
+// github, ifood…) — dezenas deles. Enviá-los/guardá-los seria (a) VAZAR credenciais
+// de terceiros pro servidor do Waze e (b) estourar o tamanho do header `Cookie`
+// (30KB+ vs ~1.7KB só do Waze) → o Waze/Cloudflare rejeita com HTTP 400. Filtramos
+// na entrada pra que o store só persista cookies do Waze. Formato header (sem tabs)
+// não expõe o domínio → devolve como veio (a extensão já coleta só cookies do Waze).
+function filterWazeCookies(cookiesContent) {
+  const s = String(cookiesContent).trim();
+  if (!s.includes('\t')) return s;
+  const kept = [];
+  for (const line of s.split('\n')) {
+    const t = line.trim();
+    if (!t || t[0] === '#') continue;
+    const parts = t.split(/\s+/);
+    if (parts.length >= 7 && isWazeCookieDomain(parts[0])) kept.push(t);
+  }
+  return kept.join('\n');
+}
+
 // Constrói o valor do header `Cookie:` a partir do conteúdo salvo.
 // Aceita formato Netscape (cookies.txt, com tabs) ou header ("a=b; c=d").
 function cookieHeaderFrom(cookiesContent) {
@@ -163,7 +189,9 @@ function cookieHeaderFrom(cookiesContent) {
     const t = line.trim();
     if (!t || t[0] === '#') continue;
     const parts = t.split(/\s+/);
-    if (parts.length >= 7) pairs.push(parts[5] + '=' + parts[6]);
+    // Defesa em profundidade: só cookies de waze.com viram header (mesmo que algo
+    // não-filtrado tenha sido armazenado). Ver filterWazeCookies acima.
+    if (parts.length >= 7 && isWazeCookieDomain(parts[0])) pairs.push(parts[5] + '=' + parts[6]);
   }
   return pairs.join('; ');
 }
@@ -339,8 +367,9 @@ async function handleSessao(data, { sessions }) {
   const action = (data && data.action) || 'create';
   if (action === 'create') {
     if (!data.cookies) apiError('Cookies não fornecidos');
-    const cookies = String(data.cookies).trim();
-    if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido');
+    // Filtra pro domínio do Waze antes de armazenar (ver filterWazeCookies).
+    const cookies = filterWazeCookies(String(data.cookies).trim());
+    if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado');
     if (!extractCSRFToken(cookies)) apiError('Token CSRF não encontrado');
     const token = await sessions.createSession(cookies);
     return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL } };
@@ -354,9 +383,12 @@ async function handleSessao(data, { sessions }) {
 
 async function handleTestarCookies(data, { sessions }) {
   if (!data || !data.cookies) apiError('Cookies não fornecidos');
-  const cookies = String(data.cookies).trim();
   const region = requireRegion(data);
-  if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido. Certifique-se de usar o formato Netscape.');
+  // Filtra pro domínio do Waze logo na entrada: o cookies.txt do navegador traz
+  // cookies de dezenas de sites — guardar/enviar só os do Waze evita vazar
+  // credenciais de terceiros e o HTTP 400 por header gigante. Ver filterWazeCookies.
+  const cookies = filterWazeCookies(String(data.cookies).trim());
+  if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado. Exporte os cookies logado no Waze Map Editor (formato Netscape).');
   const csrf = extractCSRFToken(cookies);
   if (!csrf) apiError('Token CSRF não encontrado nos cookies. Certifique-se de estar logado no Waze Map Editor.');
 
