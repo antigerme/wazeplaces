@@ -7,6 +7,10 @@ let currentCard = null;
 let dragHandlers = null;
 // Amostras recentes do drag pra calcular velocidade no soltar (flick).
 let moveSamples = [];
+// Trava reentrância durante a animação de saída (~350ms): sem isso, uma segunda
+// seta/gesto agia no PRÓXIMO card (currentPlace já tinha avançado) — ação
+// destrutiva no card errado.
+let animating = false;
 
 // Velocidade mínima (px/ms) pra comitar um flick mesmo abaixo do
 // threshold de distância. ~0.6px/ms ≈ 600px/s, na faixa que M3 usa
@@ -14,15 +18,13 @@ let moveSamples = [];
 const FLICK_VELOCITY = 0.6;
 const FLICK_MIN_DISTANCE = 40;
 
-function initSwipe() {}
-
 function enableSwipeOnCard(card) {
     card.addEventListener('mousedown', handleDragStart);
     card.addEventListener('touchstart', handleDragStart, { passive: false });
 }
 
 function handleDragStart(e) {
-    if (window.AppState && window.AppState.loading) return;
+    if (animating) return; // não inicia drag durante a animação de saída
     // Controles interativos e áreas de scroll interno não iniciam drag —
     // sem a exceção das listas, o touch-action:none do card mataria o
     // scroll de "Mudanças propostas" e do reporte no mobile.
@@ -150,6 +152,7 @@ function animateSwipeOut(direction, callback) {
 
     const card = currentCard;
     currentCard = null;
+    animating = true;
 
     // Feedback tátil no commit (Android; iOS ignora silenciosamente)
     if (navigator.vibrate) navigator.vibrate(12);
@@ -167,6 +170,7 @@ function animateSwipeOut(direction, callback) {
     }
 
     setTimeout(() => {
+        animating = false;
         updateSwipeIndicator(0, 0);
         if (callback) callback();
     }, 350);
@@ -191,6 +195,7 @@ function updateSwipeIndicator(deltaX, opacity) {
 }
 
 function triggerSwipe(direction, callback) {
+    if (animating) return; // ignora enquanto uma animação de saída está em curso
     const card = document.querySelector('.place-card');
     if (!card) {
         if (callback) callback();
@@ -202,4 +207,4 @@ function triggerSwipe(direction, callback) {
 
 window.enableSwipeOnCard = enableSwipeOnCard;
 window.triggerSwipe = triggerSwipe;
-window.initSwipe = initSwipe;
+window.isSwipeAnimating = () => animating;
