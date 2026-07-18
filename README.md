@@ -126,7 +126,7 @@ Editores nível 1-2, ou sem badge de Area Manager, recebem a mensagem **"Acesso 
 - **Frontend:** HTML + JavaScript vanilla + Tailwind CSS (bundle JS local `tailwindcss_3_4_17.js`) + PWA (manifest + service worker)
 - **Backend:** JavaScript (ESM), **sem build**, no padrão **core compartilhado + adaptadores**:
   - `server/core.mjs` — toda a lógica (proxy pro Waze, sessões, cripto, gate). Só usa `fetch` e Web Crypto → roda **igual** em Cloudflare Workers e Node 18+.
-  - `functions/api/[[route]].js` — adaptador **Cloudflare Pages** (sessões em Workers KV, chave em Secret).
+  - `worker/index.mjs` — adaptador **Cloudflare Workers** (roteia /api/*, serve estáticos via ASSETS; sessões em KV, chave em Secret).
   - `server/node.mjs` — adaptador **VM/Node** (sessões em filesystem, chave em env/arquivo).
 - **Auth:** cookies do WME → sessão criptografada server-side (**AES-256-GCM**). O client só guarda um `sessionToken` opaco.
 
@@ -168,8 +168,8 @@ wazeplaces/
 ├── server/
 │   ├── core.mjs            # Lógica compartilhada (proxy Waze, sessões, cripto, gate)
 │   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)
-├── functions/
-│   └── api/[[route]].js    # Adaptador Cloudflare Pages Functions (KV + Secret)
+├── worker/
+│   └── index.mjs           # Adaptador Cloudflare Workers (roteia /api/*, delega estáticos pro ASSETS)
 ├── _headers                # Headers/CSP no Cloudflare (substitui o antigo .htaccess)
 ├── wrangler.jsonc          # Config Cloudflare (binding do KV)
 ├── .assetsignore           # Exclui server/docs/etc do publish estático
@@ -199,24 +199,40 @@ Variáveis de ambiente (todas opcionais):
 | `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
 | `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
 
-Para simular o ambiente Cloudflare localmente (Functions + KV): `npx wrangler pages dev .` (precisa do `wrangler`).
+Para simular o ambiente Cloudflare localmente (Worker + KV): `npx wrangler dev` (precisa do `wrangler`).
 
 ### Deploy
 
-#### Opção A — Cloudflare Pages + Workers (recomendado)
+#### Opção A — Cloudflare Workers (recomendado)
+
+É um **Worker com static assets** (mesmo modelo do botequei): `worker/index.mjs` roteia `/api/*` e serve o frontend via binding `ASSETS`. Deploy por CLI ou conectando o repo no dashboard.
+
+**Antes de tudo — criar KV e Secret (uma vez):**
 
 ```bash
-# 1. Namespace KV pras sessões (cole o id em wrangler.jsonc)
+# 1. Namespace KV pras sessões → copie o "id" retornado e cole em wrangler.jsonc (kv_namespaces)
 npx wrangler kv namespace create SESSIONS
 
 # 2. Chave de criptografia como Secret
-openssl rand -base64 32 | npx wrangler pages secret put ENCRYPTION_KEY
-
-# 3. Deploy
-npx wrangler pages deploy .
+openssl rand -base64 32 | npx wrangler secret put ENCRYPTION_KEY
 ```
 
-Ou conecte o repositório no dashboard (**Workers & Pages → Create → Connect to Git**) pra deploy automático a cada push na `main`. Configure o binding KV `SESSIONS` e o Secret `ENCRYPTION_KEY` nas *Settings* do projeto.
+**Deploy manual (CLI):**
+
+```bash
+npx wrangler deploy
+```
+
+**Deploy automático via Git** (a cada push na `main`) — no dashboard, **Workers & Pages → Create → Workers → Connect to Git** (ou "Import a repository"), escolha `antigerme/wazeplaces` e preencha:
+
+| Campo do assistente | Valor |
+|---|---|
+| Nome do projeto | `wazeplaces` |
+| Comando da build | *(deixe vazio — não tem build)* |
+| Comando de implantação | `npx wrangler deploy` |
+| Compilações para ramificações de não produção | deixe marcado (gera preview de cada PR) |
+
+Clique **Implantar**. O binding `SESSIONS` vem do `wrangler.jsonc` (por isso o `id` precisa estar preenchido — passo 1). O Secret `ENCRYPTION_KEY` você já criou no passo 2 (ou configure no dashboard: projeto → **Settings → Variables and Secrets → Add → tipo Secret**). Detalhes em [`docs/cloudflare-migration.md`](docs/cloudflare-migration.md).
 
 Ganhos: sem servidor pra manter, escala automática, edge global, HTTPS automático. O `_headers` cuida da CSP e do cache. **Free tier:** 100k requests/dia, 100k leituras KV/dia, 1k escritas/dia (cada login = 1 escrita; cada ação = 1 leitura). Passou disso, Workers Paid custa US$5/mês.
 
@@ -372,7 +388,7 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 ### Validação rápida antes de commitar
 
 ```bash
-for f in js/*.js server/*.mjs "functions/api/[[route]].js"; do node --check "$f"; done
+for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done
 node server/node.mjs   # smoke test: sobe, serve estáticos, /api/* responde
 ```
 

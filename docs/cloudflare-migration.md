@@ -7,6 +7,13 @@ Cloudflare Pages + Workers, mantendo um **fallback pra VM RedHat**. O desenho
 segue o mesmo padrão que deu certo no projeto **botequei**: um núcleo de lógica
 compartilhado com adaptadores finos por plataforma.
 
+> **Nota (implementado na v3.0):** este documento é o planejamento original e cita
+> um adaptador estilo *Pages Functions* (`functions/api/*.js`). Na implementação
+> final optou-se pelo modelo **Worker com static assets** (`worker/index.mjs` +
+> `assets` no `wrangler.jsonc`, deploy `npx wrangler deploy`) — igual ao botequei.
+> A lógica (`server/core.mjs`) e o resto do plano valem sem mudança; só o formato
+> do adaptador Cloudflare difere do descrito aqui.
+
 ---
 
 ## 1. Ponto de partida: o que temos hoje

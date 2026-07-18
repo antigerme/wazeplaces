@@ -1,5 +1,6 @@
-# Arquivos que NÃO devem ser publicados como estáticos no Cloudflare Pages.
-# functions/ é tratado à parte (vira as Functions), não precisa listar.
+# Arquivos que NÃO devem ser publicados como estáticos (Cloudflare Workers Assets).
+# assets.directory é "." (raiz), então tudo que não é do frontend precisa ficar fora.
+worker
 server
 docs
 node_modules
@@ -10,5 +11,3 @@ README.md
 CLAUDE.md
 .assetsignore
 .gitignore
-start.sh
-start.bat
