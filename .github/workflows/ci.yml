@@ -1,0 +1,38 @@
+name: CI
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Sintaxe (node --check)
+        run: for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done
+      - name: Testes (node --test)
+        run: |
+          if [ -d test ]; then
+            node --test
+          else
+            echo "Sem diretório test/ ainda — pulando testes."
+          fi
+      - name: Boot smoke do adaptador Node
+        run: |
+          PORT=8099 node server/node.mjs & SRV=$!
+          sleep 1.5
+          curl -fsS localhost:8099/ | grep -qi '<title'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8099/api/perfil -H 'Content-Type: application/json' -d '{}')" = "401"
+          kill $SRV
+      - name: Guard do bump de CACHE_NAME (gotcha #17)
+        if: github.event_name == 'pull_request'
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$base" HEAD | grep -qE '^(index\.html|js/|css/|icons/)'; then
+            if ! git diff "$base" HEAD -- service-worker.js | grep -q 'CACHE_NAME'; then
+              echo "::error::Frontend mudou (index.html/js/css/icons) mas CACHE_NAME não foi bumpado no service-worker.js"; exit 1
+            fi
+          fi
