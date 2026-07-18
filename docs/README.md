@@ -79,3 +79,29 @@ python3 docs/scripts/md2pdf.py docs/native-android-analysis.md docs/native-andro
 
 (Ver `docs/scripts/md2pdf.py` — script de ~30 linhas com CSS pra A4 + paleta cyan que combina com a app.)
 
+---
+
+## `cloudflare-migration.md` + `.pdf`
+
+Planejamento técnico de migração do stack atual (PHP + Apache) para Cloudflare
+Pages + Workers, mantendo fallback pra VM RedHat. Cobre:
+
+- Padrão **core compartilhado + adaptadores** (aprendido do projeto `botequei`):
+  uma lógica só, cascas finas por plataforma — resolve o "dois backends dobram
+  manutenção"
+- Mapa de conversão função-a-função PHP → JS (`config.php` + 9 endpoints)
+- Sessões: `/tmp` → Workers KV (CF) / filesystem (VM), com ajuste de TTL pro
+  limite de escrita do KV
+- Cripto: `openssl` → Web Crypto (roda igual em Worker e Node), sugestão de subir
+  pra AES-GCM
+- Estrutura de arquivos, `_headers`, `wrangler.jsonc`, Secrets
+- Fallback VM RedHat com systemd + nginx (espelhando o README do botequei)
+- Passo a passo, esforço (~3-4 dias) e limites do free tier
+
+**Gerado em**: junho 2026, em resposta ao interesse em migrar pra Cloudflare
+(precedente: o `botequei` fez essa migração com sucesso).
+
+**Pra que serve aqui**: base de decisão e roteiro de implementação. Como os
+outros docs, o `.md` é a fonte e o `.pdf` é o entregável pra compartilhar.
+Regenerar o PDF: `python3 docs/scripts/md2pdf.py docs/cloudflare-migration.md docs/cloudflare-migration.pdf`.
+

@@ -66,6 +66,8 @@ wazeplaces/
 │   ├── wme-sdk-typings.d.ts # Tipagens oficiais do WME SDK (Waze) — referência canônica de schemas
 │   ├── native-android-analysis.md  # Discussão sobre eventual versão Android nativa
 │   ├── native-android-analysis.pdf # Mesmo doc renderizado pra compartilhar
+│   ├── cloudflare-migration.md     # Planejamento de migração Cloudflare Pages/Workers (+ fallback VM RedHat)
+│   ├── cloudflare-migration.pdf    # Mesmo doc renderizado pra compartilhar
 │   └── scripts/md2pdf.py    # Conversor markdown → PDF estilizado (paleta cyan da app)
 ├── README.md                # Doc pública (editores leigos + devs)
 ├── CLAUDE.md                # Este arquivo
