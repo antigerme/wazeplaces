@@ -173,7 +173,7 @@ function setupAuthListeners() {
         $('cookiesTextarea').value = '';
     });
     $('byAuthor').addEventListener('click', () => {
-        window.open('https://www.waze.com/user/editor/antigerme', '_blank');
+        window.open('https://www.waze.com/user/editor/antigerme', '_blank', 'noopener');
     });
     $('closeAccessDenied').addEventListener('click', () => closeModal('accessDeniedModal'));
     // Região default sempre 'row' pra fluxos novos (público alvo BR/Latam).
@@ -699,7 +699,7 @@ function showAuthScreen() {
     document.getElementById('refreshBtn').classList.add('hidden');
     document.getElementById('userProfileBadge').classList.add('hidden');
     const brandTitle = document.getElementById('brandTitle');
-    if (brandTitle) brandTitle.classList.remove('hidden');
+    if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
     AppState.profile = null;
 }
@@ -857,7 +857,9 @@ function renderProfileHeader() {
     badge.title = pstats.length ? ((p.userName || '') + ' — ' + pstats.join(' · ')) : (p.userName || '');
     badge.classList.remove('hidden');
     const brandTitle = document.getElementById('brandTitle');
-    if (brandTitle) brandTitle.classList.add('hidden');
+    // sr-only (não 'hidden'): some visualmente mas fica na árvore de a11y como h1
+    // — mantém a hierarquia de headings contínua (h1 → h2 fila → h3 card).
+    if (brandTitle) brandTitle.classList.add('sr-only');
 }
 
 // Sair = esquecer o user completamente. Apaga sessão, stats, filters,
@@ -1915,6 +1917,8 @@ function applyTheme(theme) {
     document.body.classList.toggle('dark', isDark);
     document.getElementById('themeIconLight').classList.toggle('hidden', isDark);
     document.getElementById('themeIconDark').classList.toggle('hidden', !isDark);
+    const themeBtn = document.getElementById('themeBtn');
+    if (themeBtn) themeBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
     // Status bar (Android/PWA) acompanha a surface do header, não a cor da marca
     const themeColor = document.querySelector('meta[name="theme-color"]');
     if (themeColor) themeColor.setAttribute('content', isDark ? '#0f172a' : '#f8fafc');

@@ -68,3 +68,16 @@ test('i18n: toda chave usada no index.html (data-i18n*) existe no dicionário', 
   const orphans = [...used].filter((k) => !(k in DICT.pt));
   assert.equal(orphans.length, 0, 'data-i18n no HTML sem chave no dicionário:\n' + orphans.join('\n'));
 });
+
+test('i18n: toda chave t(\'...\') do app.js/api.js existe no dicionário', () => {
+  const src = read('js/app.js') + '\n' + read('js/api.js');
+  const keys = new Set();
+  let m;
+  // t('chave' ...) e t(cond ? 'a' : 'b' ...)
+  const re1 = /t\(\s*\??\s*['"]([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)+)['"]/g;
+  while ((m = re1.exec(src)) !== null) keys.add(m[1]);
+  const re2 = /[?:]\s*['"]([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)+)['"]/g;
+  while ((m = re2.exec(src)) !== null) keys.add(m[1]);
+  const orphans = [...keys].filter((k) => !(k in DICT.pt));
+  assert.equal(orphans.length, 0, "t('chave') sem correspondência no dicionário:\n" + orphans.join('\n'));
+});
