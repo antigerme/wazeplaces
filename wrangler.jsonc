@@ -16,7 +16,7 @@
   "kv_namespaces": [
     {
       "binding": "SESSIONS",
-      "id": "<preencher com o id de: wrangler kv namespace create SESSIONS>"
+      "id": "75ffae4a7cfd42b19bc3a1ed6ce41224"
     }
   ]
 }
