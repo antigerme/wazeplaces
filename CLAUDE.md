@@ -47,6 +47,7 @@ wazeplaces/
 ├── css/
 │   └── styles.css           # Estilos custom + dark mode overrides do Tailwind
 ├── js/
+│   ├── version.js           # FONTE ÚNICA da versão: serial de zona DNS YYYYMMDDnn (APP_VERSION + verLabel). Carregado antes do app.js
 │   ├── api.js               # Wrapper fetch() dos endpoints /api/* (única fonte de chamadas HTTP; SEM .php)
 │   ├── app.js               # AppState, render, handlers, fila, prefetch, error handling
 │   ├── swipe.js             # Gestos drag/swipe (esquerda, direita, cima)
@@ -246,7 +247,7 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 - **Safe areas (iOS PWA)**: header tem `padding-top: env(safe-area-inset-top)`; `#notifyStack`/footer usam `env(safe-area-inset-bottom)`. Não criar elemento fixed sem considerar isso
 - **Zoom NUNCA bloqueado** no viewport (WCAG 1.4.4). Lightbox tem pinch/double-tap/wheel zoom + swipe pra trocar/fechar
 - **Reduced motion**: media query global em styles.css zera animações — não criar animação essencial sem fallback estático
-- **Versão visível**: rodapé fixo `v{APP_VERSION}` — sempre bump em mudança visual (`2.5.x` formato)
+- **Versão visível**: rodapé fixo `v{verLabel(APP_VERSION)}` (ex.: `v2026.07.18-01`) — sempre bump o serial em mudança visual (formato `YYYYMMDDnn`, ver seção do Service Worker)
 
 ### Gestos (swipe.js)
 
@@ -261,12 +262,12 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 ## ⚡ Service Worker e versionamento
 
-- `CACHE_NAME = 'waze-places-vN'` em `service-worker.js` — **OBRIGATÓRIO: bump em TODA PR que toque em `index.html`, qualquer arquivo `js/`, `css/`, ou `icons/`**. Sem isso, users que já têm o SW instalado continuam vendo a versão velha (cache-first pra assets). Bug típico: "feature X parou de funcionar" depois de várias PRs sem bump.
-- Checklist antes do PR: tocou em `index.html` / `js/*.js` / `css/*.css` / `icons/*`? → bump `CACHE_NAME` E `APP_VERSION`.
+- `CACHE_NAME = 'waze-places-<serial>'` em `service-worker.js` — **OBRIGATÓRIO: bump em TODA PR que toque em `index.html`, qualquer arquivo `js/`, `css/`, ou `icons/`**. Sem isso, users que já têm o SW instalado continuam vendo a versão velha (cache-first pra assets). Bug típico: "feature X parou de funcionar" depois de várias PRs sem bump.
+- Checklist antes do PR: tocou em `index.html` / `js/*.js` / `css/*.css` / `icons/*`? → bump o serial em **`js/version.js`** (`APP_VERSION`) **E** no `service-worker.js` (`CACHE_NAME`), juntos (a auditoria `test/version.test.mjs` falha se divergirem).
 - HTML: **network-first** (sempre tenta fresh, fallback cache); assets: **cache-first**
 - `/api/*` NÃO é interceptado (sempre vai direto à rede)
 - **Auto-update**: detecta nova versão via `registration.updatefound` → posta `SKIP_WAITING` → `controllerchange` dispara reload **apenas se já havia controller anterior** (evita flicker na primeira instalação)
-- `APP_VERSION` em `js/app.js` vai no rodapé (`#appVersionDisplay`) — sobe junto com `CACHE_NAME`. Usa **semver suave**: `MAJOR.MINOR.PATCH` (não tem release process rígido)
+- **Versionamento = serial de zona DNS (RFC 1912): `YYYYMMDDnn`** (data + revisão do dia; ex.: `2026071801` = 1ª revisão de 2026-07-18). Fonte única: `APP_VERSION` em **`js/version.js`** — carregado como `<script>` clássico ANTES do `app.js`, expõe `APP_VERSION`/`verLabel` no escopo global (como o `API` do api.js). O `CACHE_NAME` do `service-worker.js` é `'waze-places-' + o MESMO serial` (hardcoded). A auditoria `test/version.test.mjs` trava paridade + formato no CI. O rodapé (`#appVersionDisplay`) mostra `verLabel()` → `v2026.07.18-01`. Cresce sempre, compara como número, e diz DE QUANDO é a versão só de olhar. (Ideia trazida do projeto botequei.)
 
 ---
 
@@ -353,7 +354,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 16. **Gate de acesso (`isUserAllowed` em `server/core.mjs`)**: a app só permite login pra editores **`isStaff` OU `(rank >= MIN_RANK_WAZE && isAreaManager)`**. Como o Waze usa rank 0-indexed e a UI mostra `rank + 1`, `MIN_RANK_WAZE = 2` significa "display L3+". Mudar o critério aqui afeta todo login. `handleTestarCookies` chama `/Session` como smoke test e nega a criação de sessão se não passar — frontend mostra modal `accessDeniedModal` com perfil do user e mensagem clara, sem persistir nada. Bloqueio acontece no backend; **não dá pra burlar editando JS**.
 
-17. **Esquecer de bumpar `CACHE_NAME` do SW é o bug mais ranzinza do projeto**. Já aconteceu múltiplas vezes: PR adiciona feature em JS, deploy ok, mas users que já tinham o SW instalado **continuam vendo a versão velha por dias** porque SW é cache-first pra assets. Sintoma típico: "feature X parou de funcionar" relatado por um user, mas outros confirmam que funciona (cache deles é mais novo). **Cheque-list**: tocou em `index.html`, `js/*`, `css/*`, ou `icons/*`? → bump `CACHE_NAME` no `service-worker.js` E `APP_VERSION` no `js/app.js` juntos no mesmo commit. Se passou batido, basta um PR posterior fazendo só o bump pra liberar pra todos.
+17. **Esquecer de bumpar `CACHE_NAME` do SW é o bug mais ranzinza do projeto**. Já aconteceu múltiplas vezes: PR adiciona feature em JS, deploy ok, mas users que já tinham o SW instalado **continuam vendo a versão velha por dias** porque SW é cache-first pra assets. Sintoma típico: "feature X parou de funcionar" relatado por um user, mas outros confirmam que funciona (cache deles é mais novo). **Cheque-list**: tocou em `index.html`, `js/*`, `css/*`, ou `icons/*`? → bump o serial em `js/version.js` (`APP_VERSION`) E no `service-worker.js` (`CACHE_NAME`) juntos no mesmo commit (a auditoria `test/version.test.mjs` trava a paridade). Se passou batido, basta um PR posterior fazendo só o bump pra liberar pra todos.
 
 19. **`startFetching` não pode busy-loopar em microtasks** (P0 consertado v3.1.0). O laço `while (queue.length===0 && hasMore) await fetchNextPage()` congelava a aba quando um fetch já estava em voo: o guard `if (fetching) return` saía síncrono, o laço virava cascata de microtasks e **impedia o event loop de processar a resposta em voo** → `fetching` nunca zerava → freeze permanente. Fix: `fetchNextPage` retorna a **mesma promise em voo** (`_fetchPromise`) quando `fetching`, então o `await` realmente espera (event loop livre); e o laço checa `&& authenticated`. **Regra**: nunca `while (cond) await fn()` onde `fn` pode retornar síncrono sem progredir — garanta que o await ceda o event loop.
 
@@ -371,7 +372,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 3. Registrar em `ROUTES` (`'xxx': handleXxx`). Os adaptadores roteiam por nome — não precisam mudar.
 4. Adicionar método em `js/api.js` (sempre passa `sessionToken` e `region` no body; nome do endpoint **sem `.php`**)
 5. Usar em `app.js`; documentar a tabela de endpoints neste CLAUDE.md
-6. Bump `APP_VERSION` + `CACHE_NAME` se tocou frontend
+6. Bump o serial (`js/version.js` + `CACHE_NAME` do `service-worker.js`) se tocou frontend
 
 ### Adicionar novo filtro
 1. Backend: ler o campo em `handleBuscarPlaces` e propagar pro `payload` do `callWaze`
@@ -389,7 +390,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 2. Parsear com `jq` ou Python (cuidado, HARs costumam ter 5-20MB)
 3. Olhar request payloads (o que **a app** enviou) e response bodies (o que **o Waze** devolveu)
 4. Confirmar se é bug do app, do Waze, ou expectativa errada
-5. Se for bug do app, reproduzir mentalmente o fluxo, adicionar defesa + try-catch onde fizer sentido, bump `APP_VERSION`
+5. Se for bug do app, reproduzir mentalmente o fluxo, adicionar defesa + try-catch onde fizer sentido, bump o serial (`js/version.js` + `service-worker.js`)
 
 ---
 

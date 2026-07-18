@@ -385,7 +385,7 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 ### Service Worker
 
 - **Estratégia:** network-first pra HTML/JS/CSS/JSON (com `cache: 'reload'` pra bypassar o HTTP cache); cache-first pra imagens/fontes. Cache é fallback offline.
-- **Pra invalidar caches:** bump `CACHE_NAME` em `service-worker.js` **e** `APP_VERSION` em `js/app.js`, juntos, em toda PR que toque em `index.html`/`js`/`css`/`icons`.
+- **Pra invalidar caches:** bump o serial de versão (formato `YYYYMMDDnn`) em `js/version.js` (`APP_VERSION`) **e** no `CACHE_NAME` do `service-worker.js`, juntos, em toda PR que toque em `index.html`/`js`/`css`/`icons`.
 
 ### Validação rápida antes de commitar
 

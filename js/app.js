@@ -1,4 +1,4 @@
-const APP_VERSION = '3.1.0';
+// APP_VERSION (serial de zona DNS) vem de js/version.js — carregado antes deste.
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -71,7 +71,7 @@ window.addEventListener('unhandledrejection', (e) => {
 function initApp() {
     const versionEl = document.getElementById('appVersionDisplay');
     if (versionEl) {
-        versionEl.textContent = 'v' + APP_VERSION;
+        versionEl.textContent = 'v' + (typeof verLabel === 'function' ? verLabel(APP_VERSION) : APP_VERSION);
         setupDevModeTapTrigger(versionEl);
     }
 
