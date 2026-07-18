@@ -220,13 +220,19 @@ Ou conecte o repositório no dashboard (**Workers & Pages → Create → Connect
 
 Ganhos: sem servidor pra manter, escala automática, edge global, HTTPS automático. O `_headers` cuida da CSP e do cache. **Free tier:** 100k requests/dia, 100k leituras KV/dia, 1k escritas/dia (cada login = 1 escrita; cada ação = 1 leitura). Passou disso, Workers Paid custa US$5/mês.
 
-#### Opção B — VM Red Hat / RHEL / Rocky / Alma (Node + nginx)
+#### Opção B — VM Red Hat / RHEL / Rocky / Alma (Node + Apache)
 
-Fallback sem depender do Cloudflare. Mesma `server/core.mjs`, zero divergência.
+Fallback sem depender do Cloudflare. Mesma `server/core.mjs`, zero divergência. O
+backend agora é **Node** (não é mais PHP), então o Apache entra só como **reverse
+proxy** na frente do processo Node — quem serve tudo (estáticos + `/api/*`) é o
+`server/node.mjs`.
+
+**1. Node + serviço systemd:**
 
 ```bash
 sudo dnf install -y nodejs git
 sudo git clone https://github.com/antigerme/wazeplaces /opt/wazeplaces
+sudo mkdir -p /var/lib/wazeplaces/sessions
 ```
 
 Serviço systemd (`/etc/systemd/system/wazeplaces.service`):
@@ -245,21 +251,63 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo mkdir -p /var/lib/wazeplaces/sessions
 sudo systemctl enable --now wazeplaces
 ```
 
-HTTPS via nginx (reverse proxy na frente do Node):
+**2. Apache como reverse proxy** (`/etc/httpd/conf.d/wazeplaces.conf`):
+
+```apache
+<VirtualHost *:80>
+    ServerName places.seudominio.com
+
+    ProxyPreserveHost On
+    ProxyPass        / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+
+    RequestHeader set X-Forwarded-Proto "http"
+</VirtualHost>
+```
+
+```bash
+# módulos de proxy (no RHEL geralmente já vêm; garanta que estão carregados)
+sudo dnf install -y httpd mod_ssl
+# SELinux: libera o Apache a conectar no Node local (senão o proxy dá 503)
+sudo setsebool -P httpd_can_network_connect 1
+sudo systemctl enable --now httpd
+sudo systemctl restart httpd
+```
+
+**3. HTTPS** (recomendado pra PWA instalar):
+
+```bash
+sudo dnf install -y certbot python3-certbot-apache
+sudo certbot --apache -d places.seudominio.com
+```
+
+O `certbot --apache` cria o `<VirtualHost *:443>` com TLS e o redirect 80→443
+sozinho. Depois disso, ajuste o `RequestHeader set X-Forwarded-Proto "https"` no
+vhost 443 (o certbot costuma duplicar o bloco).
+
+> **Por que Apache só como proxy e não roda a app direto?** Na v2.x o Apache
+> servia PHP via mod_php. Na v3.0 o backend é Node — Apache não executa JS, então
+> o papel dele é encaminhar pro `server/node.mjs`. Um processo Node só, sem
+> `restorecon`, sem tuning de workers, e o único boolean SELinux necessário é o
+> `httpd_can_network_connect` (pro proxy alcançar a porta local).
+
+<details>
+<summary>Alternativa: nginx no lugar do Apache</summary>
 
 ```nginx
 location / {
     proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
 
-`sudo certbot --nginx -d seudominio.com` pro TLS. Vantagem sobre o stack PHP antigo: um processo Node só, sem SELinux booleans, sem `restorecon`, sem tuning de workers.
+`sudo certbot --nginx -d places.seudominio.com` pro TLS.
+</details>
 
 ### Multi-região
 
