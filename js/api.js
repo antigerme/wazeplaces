@@ -80,7 +80,7 @@ const API = {
             // Rede caiu / abortou por timeout / 5xx sem JSON → transient, pra a
             // política de retry (callWithRetry) atuar. Era o caso mais comum e
             // ficava sem categoria, então nunca era retentado.
-            return { success: false, error: 'Erro de conexão', errorCategory: 'transient' };
+            return { success: false, error: t('api.error.connection'), errorCategory: 'transient' };
         } finally {
             clearTimeout(timer);
         }
@@ -101,7 +101,7 @@ const API = {
     async fetchPlaces(page = 1, filters = {}) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: 'Sessão expirada' };
+            return { success: false, error: t('api.error.noSession') };
         }
         return this._post('buscar-places', {
             sessionToken,
@@ -115,7 +115,7 @@ const API = {
     async markAsRead(venueID, updateRequestID) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: 'Sessão expirada' };
+            return { success: false, error: t('api.error.noSession') };
         }
         return this._post('marcar-lido', {
             sessionToken,
@@ -128,7 +128,7 @@ const API = {
     async markAsReadBatch(items) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: 'Sessão expirada' };
+            return { success: false, error: t('api.error.noSession') };
         }
         return this._post('marcar-lido', {
             sessionToken,
@@ -140,7 +140,7 @@ const API = {
     async rejectPlace(venueID, updateRequestID) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: 'Sessão expirada' };
+            return { success: false, error: t('api.error.noSession') };
         }
         return this._post('validar-place', {
             sessionToken,
@@ -153,7 +153,7 @@ const API = {
     async getProfile() {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: 'Sessão expirada' };
+            return { success: false, error: t('api.error.noSession') };
         }
         return this._post('perfil', {
             sessionToken,
@@ -164,7 +164,7 @@ const API = {
     async listCountries() {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: 'Sessão expirada' };
+            return { success: false, error: t('api.error.noSession') };
         }
         return this._post('lista-paises', {
             sessionToken,
@@ -175,7 +175,7 @@ const API = {
     async listStates(countryId) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: 'Sessão expirada' };
+            return { success: false, error: t('api.error.noSession') };
         }
         return this._post('lista-estados', {
             sessionToken,

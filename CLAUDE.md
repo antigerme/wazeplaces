@@ -48,6 +48,7 @@ wazeplaces/
 │   └── styles.css           # Estilos custom + dark mode overrides do Tailwind
 ├── js/
 │   ├── version.js           # FONTE ÚNICA da versão: serial de zona DNS YYYYMMDDnn (APP_VERSION + verLabel). Carregado antes do app.js
+│   ├── i18n.js              # i18n pt/en/es (sem lib): I18N_DICT + t()/applyI18n()/setLang(). FONTE ÚNICA de strings de UI. Carregado antes do app.js
 │   ├── api.js               # Wrapper fetch() dos endpoints /api/* (única fonte de chamadas HTTP; SEM .php)
 │   ├── app.js               # AppState, render, handlers, fila, prefetch, error handling
 │   ├── swipe.js             # Gestos drag/swipe (esquerda, direita, cima)
@@ -202,7 +203,9 @@ Estrutura unificada na resposta de erro de `validar-place` e `marcar-lido`:
   fetchEpoch,             // ++ em resetQueue; fetchNextPage descarta resultado se a época mudou durante o await (não injeta places de filtro/região antigos na fila nova)
   loadError,              // true quando a fila esvaziou por FALHA → mostra estado de erro (#loadErrorState) em vez de "Tudo limpo!"
   // _fetchPromise/_profilePromise — promises em voo (await compartilhado, sem busy-loop)
-  filters,                // tipos, residencial, país, estado, área, myArea, unreadOnly
+  filters,                // tipos, residencial, país, estado, área, myArea, unreadOnly, categories[] (filtro B5, server-side), sortOrder ('newest'|'oldest', client-side em sortQueue)
+  seenCategories,         // categorias vistas nos places carregados — fonte do select de categoria (B5)
+  history,                // acumulado histórico { 'YYYY-MM-DD': {read,rejected} } em localStorage waze_places_history — registrado em handleActionResult (só ações confirmadas), zerado no logout. Ver getHistoryStats/renderHistory
   preferences,            // undoEnabled — toggle no modal "Filtros e Preferências", persiste em localStorage waze_places_preferences. Sujeito a gate de experiência: novatos não podem desligar até bater cota ceil(3000/(rank+1)) de read+rejected (staff isento). Ver canDisableUndo()
   devMode,                // { unlocked, active } — easter egg estilo Android. 7 taps na versão do rodapé desbloqueia; toggle no modal "Avançado" ativa. Quando active=true, canDisableUndo() retorna true (bypassa o gate). NÃO é segurança — qualquer um seta via DevTools; só esconde de usuário comum. handleLogout limpa ambas as flags.
   profile, countries, statesByCountry
@@ -288,6 +291,16 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 - `escapeHtml(str)` SEMPRE em strings que vão pra `innerHTML` (XSS guard)
 - Validação rápida: `node --check js/app.js` antes de commit
 
+### i18n (pt/en/es) — REGRA PERMANENTE
+- **TODA string de UI nasce em `js/i18n.js`, nas TRÊS línguas (pt/en/es).** Nunca hardcode texto pt no HTML ou no JS.
+- **HTML**: `data-i18n="chave"` (textContent), `data-i18n-html` (innerHTML — só valores do próprio dicionário, nunca dado da rede), `data-i18n-ph` (placeholder), `data-i18n-aria` (aria-label), `data-i18n-title` (title). O `applyI18n()` preenche em runtime.
+- **JS**: `t('chave', { var: valor })` — interpola `{var}`. String que vai pra innerHTML → `escapeHtml(t(...))`.
+- **Plural**: chaves separadas (`.x` singular / `.xPlural`), escolhidas com `n === 1 ? 'x' : 'xPlural'`. Sem ICU.
+- **Números/datas**: use `i18nLocale()` no `toLocaleString(...)` — nunca hardcode `'pt-BR'`.
+- **Adicionou UMA string? Adicione nas TRÊS línguas.** A auditoria `test/i18n.test.mjs` (CI) FALHA se faltar paridade, houver valor vazio, placeholders divergentes, ou `data-i18n` sem chave no dicionário.
+- Idioma detectado de `navigator.language`, persiste em `localStorage.waze_places_lang`, trocável no seletor do modal de filtros. `js/i18n.js` carrega como `<script>` clássico antes do `app.js` (expõe `t`/`applyI18n`/`setLang`/`getLang`/`i18nLocale` no escopo global). Mecanismo espelhado do botequei.
+- **Não traduzir**: marcas/nomes (Waze, WME, cookies.txt, @daflash), siglas (ROW/NA/IL, PUR, AM/Staff), serial de versão, emojis.
+
 ### Git
 - Branches do agente: `claude/<descrição-curta-kebab>`
 - Commit messages: descritivos, em português, body explica **por que** não só o **o quê**
@@ -306,7 +319,7 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 - Owner do projeto: `@antigerme` → `https://www.waze.com/user/editor/antigerme` (já linkado no `byAuthor` button do auth screen)
 
 ### Estilo de mensagens ao usuário
-- Toasts curtos em português; emoji ocasional onde ajuda ("Já tratado por outro editor 👍")
+- Toasts curtos, via `t('toast.…')` (pt/en/es — ver seção **i18n**, nunca hardcode); emoji ocasional onde ajuda ("Já tratado por outro editor 👍")
 - Erros de Waze nunca expõem detalhes técnicos crus pro editor (vira "Servidor Waze indisponível" etc)
 
 ---
