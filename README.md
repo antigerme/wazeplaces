@@ -234,6 +234,8 @@ npx wrangler deploy
 
 Clique **Implantar**. O binding `SESSIONS` vem do `wrangler.jsonc` (por isso o `id` precisa estar preenchido — passo 1). O Secret `ENCRYPTION_KEY` você já criou no passo 2 (ou configure no dashboard: projeto → **Settings → Variables and Secrets → Add → tipo Secret**). Detalhes em [`docs/cloudflare-migration.md`](docs/cloudflare-migration.md).
 
+> **Fork / instância própria:** o `wrangler.jsonc` fixa `routes` com o Custom Domain `places.wazebrasil.com` (domínio da instância oficial). Em outra conta esse `wrangler deploy` falha — ajuste o `pattern` pro seu próprio domínio ou remova o bloco `routes` inteiro (aí o Worker fica no subdomínio `*.workers.dev`).
+
 Ganhos: sem servidor pra manter, escala automática, edge global, HTTPS automático. O `_headers` cuida da CSP e do cache. **Free tier:** 100k requests/dia, 100k leituras KV/dia, 1k escritas/dia (cada login = 1 escrita; cada ação = 1 leitura). Passou disso, Workers Paid custa US$5/mês.
 
 #### Opção B — VM Red Hat / RHEL / Rocky / Alma (Node + Apache)

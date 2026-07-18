@@ -59,7 +59,7 @@ wazeplaces/
 │   └── index.mjs            # Adaptador Cloudflare Workers: roteia /api/* (store=KV, key=Secret) e delega estáticos pro ASSETS
 ├── _headers                 # Cloudflare: headers/CSP/cache (substitui o antigo .htaccess)
 ├── wrangler.jsonc           # Cloudflare: binding do KV SESSIONS + compat date
-├── .assetsignore            # Exclui server/docs/etc do publish estático do Pages
+├── .assetsignore            # Exclui server/docs/etc do publish estático dos Workers (static assets)
 ├── package.json             # Scripts: start (node), cf:dev, cf:deploy. Zero dependências.
 ├── docs/                    # Referência pra dev (NÃO servido em runtime)
 │   ├── README.md            # Procedência dos docs
@@ -86,9 +86,11 @@ Pra simular o ambiente Cloudflare (Worker + KV): `npx wrangler dev`.
 
 **Validação rápida antes de commitar:**
 ```bash
-for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done
+npm run check          # node --check em js/*.js server/*.mjs worker/*.mjs
+npm test               # node --test — suite pura do core (test/core.test.mjs), ZERO deps
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
 ```
+CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump de `CACHE_NAME`** (gotcha #17) em todo PR/push. A suite de testes usa só `node:test`/`node:assert` (built-in) e cobre cripto/sessão, `categorizeWazeError`, `isUserAllowed`, parsing de cookies e o filtro de domínio.
 
 **Sandbox/CI:** o ambiente onde este agente roda **tem allowlist de hosts** que bloqueia `*.waze.com` (resposta `403 Host not in allowlist`). Você NÃO consegue testar contra o Waze real — valide com **fixtures de HAR reais** que o usuário envia, ou peça pra ele testar. Mas dá pra testar TUDO que não é o Waze: subir o `node server/node.mjs` e exercitar cripto/sessão/roteamento/erros (o `fetch` ao Waze retorna o 403 do allowlist, que o core categoriza como `unauthorized` — prova que o pipeline funciona).
 
@@ -161,7 +163,7 @@ Resultado: `serverTotal`/header "Restam" reflete apenas o que o usuário pode re
 
 Vários editores tratam o mesmo place ao mesmo tempo. Quando outro chega primeiro, a app **não pode quebrar nem culpar o usuário**.
 
-Estrutura unificada na resposta de erro de `validar-place.php` e `marcar-lido.php`:
+Estrutura unificada na resposta de erro de `validar-place` e `marcar-lido`:
 ```json
 { "success": false, "error": "...", "errorCategory": "...", "httpCode": 500 }
 ```
@@ -194,8 +196,11 @@ Estrutura unificada na resposta de erro de `validar-place.php` e `marcar-lido.ph
   nextPage, hasMore, emptyPagesInRow, fetching,
   serverTotal,            // total visível no header "Restam"; reflete total real do Waze ajustado por ações locais
   stats: { read, rejected, skipped },
-  pendingAction,          // ação no buffer de undo de 3s (null se preferências.undoEnabled=false → executa direto)
+  pendingAction,          // ação no buffer de undo de 5s. Tem execute()/undo()/cancel(): cancel() descarta sem enviar (logout/sessão expirada) revertendo o stat otimista. Também cobre 'skip' (undo no Pular)
   inFlightActions,        // ações já enviadas, aguardando resposta
+  fetchEpoch,             // ++ em resetQueue; fetchNextPage descarta resultado se a época mudou durante o await (não injeta places de filtro/região antigos na fila nova)
+  loadError,              // true quando a fila esvaziou por FALHA → mostra estado de erro (#loadErrorState) em vez de "Tudo limpo!"
+  // _fetchPromise/_profilePromise — promises em voo (await compartilhado, sem busy-loop)
   filters,                // tipos, residencial, país, estado, área, myArea, unreadOnly
   preferences,            // undoEnabled — toggle no modal "Filtros e Preferências", persiste em localStorage waze_places_preferences. Sujeito a gate de experiência: novatos não podem desligar até bater cota ceil(3000/(rank+1)) de read+rejected (staff isento). Ver canDisableUndo()
   devMode,                // { unlocked, active } — easter egg estilo Android. 7 taps na versão do rodapé desbloqueia; toggle no modal "Avançado" ativa. Quando active=true, canDisableUndo() retorna true (bypassa o gate). NÃO é segurança — qualquer um seta via DevTools; só esconde de usuário comum. handleLogout limpa ambas as flags.
@@ -272,7 +277,7 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 - `resolveCookies(data, sessions)` resolve `sessionToken` → cookies decriptados (em qualquer handler que precise). Lança `ApiError` 401 se inválido.
 - Handlers retornam `{ status, body }` — nunca escrevem resposta direto. Erro → `apiError(msg, status)` (lança `ApiError`, capturado pelo `dispatch`).
 - Erros do Waze sempre passam por `categorizeWazeError` (já é padrão).
-- Novo endpoint → adicionar handler + entrada em `ROUTES`. Adaptadores não mudam (o `[[route]].js` e o `node.mjs` roteiam por nome automaticamente).
+- Novo endpoint → adicionar handler + entrada em `ROUTES`. Adaptadores não mudam (o `worker/index.mjs` e o `node.mjs` roteiam por nome automaticamente).
 - Validação: `node --check server/core.mjs` + smoke test `node server/node.mjs`.
 
 ### JavaScript (frontend)
@@ -311,7 +316,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 1. **Variável `gallery` órfã** (commit `1632ad4`): quando troquei galeria horizontal por carousel single-image, deixei `gallery.classList.add('hidden')` num else branch. Qualquer place sem imagens (`imageUrls: []`) lançava `ReferenceError`, matava `showCurrentPlace` silenciosamente e a tela inteira ficava órfã. **Lição**: refatorou variável? `grep` pelo nome no projeto inteiro antes de commit. E `try-catch` ao redor do render do card sempre vale.
 
-2. **Notificações removidas** (commit `419c9bc`): tinha sino com badge no header. Owner pediu remoção. Se aparecer demanda de "notificações" de novo, considere ressuscitar `api/notificacoes.php` (estava chamando `/Feed/Notifications`).
+2. **Notificações removidas** (commit `419c9bc`): tinha sino com badge no header. Owner pediu remoção. Se aparecer demanda de "notificações" de novo, considere ressuscitar o endpoint de notificações (`/Feed/Notifications`) como handler no core.
 
 3. **`Issues/Search/List` retorna tudo de uma vez** — confirmado via HAR. Não tente implementar "paginação real" assumindo que cada page tem N items. Use `hasMore` como verdade e trate a queue como global.
 
@@ -349,6 +354,10 @@ Bugs já encontrados e corrigidos — **não repita**:
 16. **Gate de acesso (`isUserAllowed` em `server/core.mjs`)**: a app só permite login pra editores **`isStaff` OU `(rank >= MIN_RANK_WAZE && isAreaManager)`**. Como o Waze usa rank 0-indexed e a UI mostra `rank + 1`, `MIN_RANK_WAZE = 2` significa "display L3+". Mudar o critério aqui afeta todo login. `handleTestarCookies` chama `/Session` como smoke test e nega a criação de sessão se não passar — frontend mostra modal `accessDeniedModal` com perfil do user e mensagem clara, sem persistir nada. Bloqueio acontece no backend; **não dá pra burlar editando JS**.
 
 17. **Esquecer de bumpar `CACHE_NAME` do SW é o bug mais ranzinza do projeto**. Já aconteceu múltiplas vezes: PR adiciona feature em JS, deploy ok, mas users que já tinham o SW instalado **continuam vendo a versão velha por dias** porque SW é cache-first pra assets. Sintoma típico: "feature X parou de funcionar" relatado por um user, mas outros confirmam que funciona (cache deles é mais novo). **Cheque-list**: tocou em `index.html`, `js/*`, `css/*`, ou `icons/*`? → bump `CACHE_NAME` no `service-worker.js` E `APP_VERSION` no `js/app.js` juntos no mesmo commit. Se passou batido, basta um PR posterior fazendo só o bump pra liberar pra todos.
+
+19. **`startFetching` não pode busy-loopar em microtasks** (P0 consertado v3.1.0). O laço `while (queue.length===0 && hasMore) await fetchNextPage()` congelava a aba quando um fetch já estava em voo: o guard `if (fetching) return` saía síncrono, o laço virava cascata de microtasks e **impedia o event loop de processar a resposta em voo** → `fetching` nunca zerava → freeze permanente. Fix: `fetchNextPage` retorna a **mesma promise em voo** (`_fetchPromise`) quando `fetching`, então o `await` realmente espera (event loop livre); e o laço checa `&& authenticated`. **Regra**: nunca `while (cond) await fn()` onde `fn` pode retornar síncrono sem progredir — garanta que o await ceda o event loop.
+
+20. **Reset de fila precisa lidar com fetch em voo E ação no buffer de undo** (v3.1.0). `resetQueue` faz `fetchEpoch++` (invalida resultado obsoleto do fetch em voo) e descarrega o `pendingAction` (`execute()` no refresh/filtros — honra o swipe; `cancel()` no logout/sessão-expirada — descarta sem enviar, revertendo o stat). Sem isso: places de filtro antigo entravam na fila nova e o "Desfazer" duplicava place + dobrava stats. Toda nova origem de reset passa por `resetQueue` (ou cancela o pending antes, como `handleLogout`/`handleUnauthorized`).
 
 18. **Version skew HTML vs JS — 2 camadas de cache** (consertado parcialmente em v2.13.1, completado em v2.17.2). Antes: HTML era network-first no SW e JS era cache-first. Quando deployava uma feature nova (HTML novo referenciando funções/IDs novos), o user pegava o HTML fresh mas continuava com o JS velho do cache. Resultado: feature aparecia na UI (HTML novo tem o checkbox), mas não funcionava (JS velho não conhece o ID, não salva no localStorage). Sintoma diagnóstico: F5 não conserta — só `Ctrl+Shift+R` (cache bypass total). **Mobile não tem `Ctrl+Shift+R`**, então o user fica preso. Fix v2.13.1: JS/CSS/JSON network-first no SW. Mas regrediu em v2.17.1 — F5 ainda não funcionava no mobile! Causa: o `fetch()` do SW passa pelo **HTTP cache do navegador** antes da rede. O `.htaccess` mandava `Cache-Control: max-age=2592000` (1 mês) pra JS via `ExpiresByType` → mesmo com SW network-first, o browser servia do HTTP cache local. Fix v2.17.2 (defesa em duas camadas): (a) `fetch(req, { cache: 'reload' })` no SW força bypass do HTTP cache; (b) Cache-Control `no-cache, must-revalidate` pra JS/CSS/manifest — na v3.0 isso vive no **`_headers`** (Cloudflare) e no `serveStatic` do `server/node.mjs` (o `.htaccess` foi removido). Também: `updateViaCache: 'none'` + `reg.update()` imediato + tratamento de `reg.waiting` no register. **Antes de quebrar essas regras**: pra atualização funcionar com F5 no mobile, três camadas precisam estar alinhadas — estratégia do SW, opção `cache` do `fetch`, e Cache-Control do servidor (`_headers`/Node). Mexer em uma só rompe a cadeia.
 
