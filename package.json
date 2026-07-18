@@ -3,11 +3,18 @@
   "version": "3.0.0",
   "private": true,
   "description": "PWA estilo Tinder pra editores do Waze Map Editor triarem pedidos de places",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/antigerme/wazeplaces.git"
+  },
   "scripts": {
     "start": "node server/node.mjs",
     "dev": "node server/node.mjs",
-    "cf:dev": "wrangler pages dev .",
-    "cf:deploy": "wrangler pages deploy ."
+    "check": "for f in js/*.js server/*.mjs worker/*.mjs; do node --check \"$f\"; done",
+    "test": "node --test",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy"
   },
   "engines": {
     "node": ">=18"

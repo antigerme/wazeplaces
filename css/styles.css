@@ -253,8 +253,14 @@ button:active {
 .dark .bg-blue-50\/50 { background-color: rgba(37, 99, 235, 0.15) !important; }
 .dark .border-blue-100 { border-color: rgba(37, 99, 235, 0.4) !important; }
 .dark .text-blue-800\/80 { color: #93c5fd !important; }
-.dark .from-slate-800 { --tw-gradient-from: #f1f5f9 !important; }
-.dark .to-slate-600 { --tw-gradient-to: #cbd5e1 !important; }
+/* Restaura o hover no dark mode dos interativos cujo bg base é coberto pelos
+   overrides !important acima (o dark:hover:* do Tailwind perdia pro !important). */
+.dark .card-btn-reject:hover { background-color: rgba(244, 63, 94, 0.14) !important; }
+.dark .card-btn-skip:hover   { background-color: rgba(245, 158, 11, 0.14) !important; }
+.dark .card-btn-read:hover   { background-color: rgba(16, 185, 129, 0.14) !important; }
+.dark #helpBtn:hover         { background-color: #06b6d4 !important; }
+.dark #pasteBtn:hover        { background-color: #334155 !important; }
+.dark .card-wme-link:hover   { background-color: rgba(8, 145, 178, 0.28) !important; }
 
 @media (max-width: 640px) {
   .container {

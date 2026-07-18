@@ -1,4 +1,4 @@
-const APP_VERSION = '3.0.0';
+// APP_VERSION (serial de zona DNS) vem de js/version.js — carregado antes deste.
 const TRANSIENT_RETRY_ATTEMPTS = 2;
 const TRANSIENT_RETRY_DELAYS_MS = [1500, 3500];
 const STATS_KEY = 'waze_places_stats';
@@ -12,6 +12,9 @@ const UNDO_WINDOW_MS = 5000;
 const MAX_CHANGES_DISPLAY = 4;
 const PREFETCH_THRESHOLD = 3;
 const MAX_EMPTY_PAGES = 5;
+const TYPES_ALL = ['VENUE', 'IMAGE', 'REQUEST'];
+const UNAUTHORIZED_REDIRECT_MS = 800;
+const STATE_RECOVERY_MS = 200;
 
 const AppState = {
     authenticated: false,
@@ -25,6 +28,10 @@ const AppState = {
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
+    fetchEpoch: 0,
+    _fetchPromise: null,
+    _profilePromise: null,
+    loadError: false,
     filters: { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true },
     preferences: { undoEnabled: true },
     devMode: { unlocked: false, active: false },
@@ -64,7 +71,7 @@ window.addEventListener('unhandledrejection', (e) => {
 function initApp() {
     const versionEl = document.getElementById('appVersionDisplay');
     if (versionEl) {
-        versionEl.textContent = 'v' + APP_VERSION;
+        versionEl.textContent = 'v' + (typeof verLabel === 'function' ? verLabel(APP_VERSION) : APP_VERSION);
         setupDevModeTapTrigger(versionEl);
     }
 
@@ -78,7 +85,9 @@ function initApp() {
     const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
     if (systemTheme.addEventListener) {
         systemTheme.addEventListener('change', (e) => {
-            if (!localStorage.getItem(THEME_KEY)) applyTheme(e.matches ? 'dark' : 'light');
+            let stored = null;
+            try { stored = localStorage.getItem(THEME_KEY); } catch (err) {}
+            if (!stored) applyTheme(e.matches ? 'dark' : 'light');
         });
     }
 
@@ -89,12 +98,11 @@ function initApp() {
     setupAppListeners();
     setupModalListeners();
     setupLightbox();
-    if (window.initSwipe) window.initSwipe();
 
     const savedToken = API.getSession();
     if (savedToken) {
         showMainScreen();
-        loadProfileAndAuxData();
+        AppState._profilePromise = loadProfileAndAuxData();
         startFetching();
     } else {
         showAuthScreen();
@@ -106,7 +114,7 @@ function initApp() {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal'];
 let lastFocusedBeforeModal = null;
 
 function openModal(id) {
@@ -181,6 +189,10 @@ function setupAppListeners() {
         startFetching();
         showToast('Atualizando fila…', 'info');
     });
+    $('retryLoadBtn')?.addEventListener('click', () => {
+        resetQueue();
+        startFetching();
+    });
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
     $('closeHelp').addEventListener('click', () => closeModal('helpModal'));
     $('themeBtn').addEventListener('click', toggleTheme);
@@ -200,6 +212,9 @@ function setupModalListeners() {
     $('closeFilters').addEventListener('click', () => closeModal('filtersModal'));
     $('cancelFilters').addEventListener('click', () => closeModal('filtersModal'));
     $('applyFilters').addEventListener('click', applyFiltersFromModal);
+    $('batchReadBtn')?.addEventListener('click', openBatchReadConfirm);
+    $('confirmBatchRead')?.addEventListener('click', handleBatchMarkRead);
+    $('cancelBatchRead')?.addEventListener('click', () => closeModal('batchReadModal'));
     $('filterCountry').addEventListener('change', (e) => {
         loadStatesIntoSelect(parseInt(e.target.value, 10));
     });
@@ -232,6 +247,8 @@ const Lightbox = {
         this.placeName = placeName || '';
         document.getElementById('imageLightbox').classList.remove('hidden');
         document.body.style.overflow = 'hidden';
+        const closeBtn = document.getElementById('lightboxClose');
+        if (closeBtn) closeBtn.focus(); // foco entra no lightbox (Esc/Enter acessíveis)
         const hint = document.getElementById('lightboxZoomHint');
         if (hint) {
             hint.classList.remove('hidden');
@@ -432,15 +449,16 @@ function populateCountrySelect() {
     }
 
     select.innerHTML = countries.map(c =>
-        `<option value="${c.id}">${escapeHtml(c.name)}</option>`
+        `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
     ).join('');
 
     const current = API.getCountry();
     if (countries.some(c => c.id === current)) {
         select.value = current;
     } else if (countries.length > 0) {
+        // Só ajusta o select visualmente; a persistência do país acontece no
+        // Aplicar (antes, abrir o modal já trocava o país mesmo cancelando).
         select.value = countries[0].id;
-        API.setCountry(countries[0].id);
     }
 }
 
@@ -475,7 +493,7 @@ function populateManagedAreaSelect() {
     const select = document.getElementById('filterManagedArea');
     const areas = (AppState.profile && AppState.profile.managedAreas) || [];
     select.innerHTML = '<option value="">Nenhuma</option>' +
-        areas.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+        areas.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('');
     if (AppState.filters.managedAreaId) select.value = AppState.filters.managedAreaId;
 }
 
@@ -510,6 +528,15 @@ async function openFiltersModal() {
 
 function applyFiltersFromModal() {
     const $ = id => document.getElementById(id);
+
+    // Valida ANTES de mutar qualquer estado: 0 tipos = sem filtro = todos os tipos
+    // (inclusive REQUEST gated). Bloqueia o Aplicar com aviso.
+    const selectedTypes = Array.from(document.querySelectorAll('.filter-type:checked')).map(cb => cb.value);
+    if (selectedTypes.length === 0) {
+        showToast('Selecione ao menos um tipo de pedido', 'error');
+        return;
+    }
+
     // Dev Mode: aplicado antes pra que canDisableUndo já reflita a nova flag
     // antes de a gente decidir o undoEnabled.
     if (AppState.devMode.unlocked) {
@@ -523,16 +550,25 @@ function applyFiltersFromModal() {
     savePreferences();
 
     AppState.filters.unreadOnly = $('filterUnreadOnly').checked;
-    AppState.filters.types = Array.from(document.querySelectorAll('.filter-type:checked')).map(cb => cb.value);
+    AppState.filters.types = selectedTypes;
     // Se o user desligou dev mode neste mesmo Apply, REQUEST pode ter ficado
     // checked no DOM mas precisa sair do filtro.
     enforceDevGatedFilters();
+    // Segurança: se o gate esvaziou os tipos (edge: só REQUEST + dev desligado),
+    // volta ao default em vez de virar "todos os tipos".
+    if (AppState.filters.types.length === 0) AppState.filters.types = ['VENUE', 'IMAGE'];
     AppState.filters.residential = $('filterResidential').value;
     AppState.filters.stateId = $('filterState').value;
     AppState.filters.managedAreaId = $('filterManagedArea').value;
     AppState.filters.myArea = $('filterMyArea').checked;
     API.setCountry($('filterCountry').value);
-    API.setRegion($('filterRegion').value);
+    // Troca de região invalida o cache de países/estados (eram da região anterior).
+    const newRegion = $('filterRegion').value;
+    if (newRegion !== API.getRegion()) {
+        AppState.countries = [];
+        AppState.statesByCountry = {};
+    }
+    API.setRegion(newRegion);
     saveFilters();
     closeModal('filtersModal');
     resetQueue();
@@ -554,12 +590,24 @@ function handleKeyDown(e) {
         if (e.key === 'Escape') {
             e.preventDefault();
             closeModal(openedModal.id);
+        } else if (e.key === 'Tab') {
+            trapTabInModal(e, openedModal);
         }
         return;
     }
 
-    if (!AppState.currentPlace) return;
     if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+
+    // Desfazer via teclado (power-user opera por teclas): z (ou Ctrl/Cmd+Z).
+    if ((e.key === 'z' || e.key === 'Z') && AppState.pendingAction) {
+        e.preventDefault();
+        AppState.pendingAction.undo();
+        AppState.pendingAction = null;
+        removeUndoBanner();
+        return;
+    }
+
+    if (!AppState.currentPlace) return;
 
     if (e.key === 'ArrowLeft') {
         e.preventDefault();
@@ -573,6 +621,23 @@ function handleKeyDown(e) {
         e.preventDefault();
         if (window.triggerSwipe) window.triggerSwipe('up', handleSkip);
         else handleSkip();
+    }
+}
+
+// Confina o Tab dentro do modal aberto — sem isso, Tab saía do diálogo e Enter
+// podia disparar uma ação destrutiva no card invisível atrás (M3/HIG).
+function trapTabInModal(e, modal) {
+    const sel = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([type=hidden]):not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const list = Array.from(modal.querySelectorAll(sel)).filter(el => el.offsetParent !== null);
+    if (list.length === 0) return;
+    const first = list[0];
+    const last = list[list.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
     }
 }
 
@@ -599,12 +664,14 @@ function showMainScreen() {
 
 async function handleFileUpload(e) {
     const file = e.target.files[0];
-    if (!file) return;
+    if (!file) { e.target.value = ''; return; }
     try {
         const content = await file.text();
         await authenticateWithCookies(content);
     } catch (error) {
         showToast('Erro ao ler arquivo', 'error');
+    } finally {
+        e.target.value = ''; // permite re-selecionar o mesmo arquivo (dispara change)
     }
 }
 
@@ -619,14 +686,18 @@ async function handlePasteConfirm() {
     document.getElementById('cookiesTextarea').value = '';
 }
 
+let authInFlight = false;
 async function authenticateWithCookies(cookies) {
+    if (authInFlight) return;            // evita duplo-envio (criaria 2 sessões)
+    authInFlight = true;
+    setAuthLoading(true);
     showToast('Validando cookies...', 'info');
     try {
         const result = await API.testCookies(cookies);
         if (result.success) {
             showMainScreen();
             resetQueue();
-            loadProfileAndAuxData();
+            AppState._profilePromise = loadProfileAndAuxData();
             startFetching();
             showToast('Autenticado com sucesso!', 'success');
         } else if (result.errorCategory === 'access_denied') {
@@ -636,7 +707,22 @@ async function authenticateWithCookies(cookies) {
         }
     } catch (error) {
         showToast('Erro ao validar cookies', 'error');
+    } finally {
+        authInFlight = false;
+        setAuthLoading(false);
     }
+}
+
+// Desabilita os botões de login enquanto valida (feedback + trava duplo-envio).
+function setAuthLoading(loading) {
+    ['uploadBtn', 'pasteBtn'].forEach(id => {
+        const b = document.getElementById(id);
+        if (b) {
+            b.disabled = loading;
+            b.classList.toggle('opacity-60', loading);
+            b.classList.toggle('cursor-wait', loading);
+        }
+    });
 }
 
 function showAccessDenied(result) {
@@ -680,11 +766,18 @@ async function loadProfileAndAuxData() {
 }
 
 function handleUnauthorized() {
+    // Cancela ação pendente: a sessão já morreu no Waze, o executor falharia e
+    // mostraria "erro ao marcar" na tela de login. Cancelar reverte o stat otimista.
+    if (AppState.pendingAction) {
+        AppState.pendingAction.cancel();
+        AppState.pendingAction = null;
+    }
+    removeUndoBanner();
     showToast('Sessão expirou — faça login novamente', 'error');
     API.setSession(null);
     AppState.profile = null;
     AppState.authenticated = false;
-    setTimeout(() => showAuthScreen(), 800);
+    setTimeout(() => showAuthScreen(), UNAUTHORIZED_REDIRECT_MS);
 }
 
 function renderProfileHeader() {
@@ -706,6 +799,11 @@ function renderProfileHeader() {
     if (p.isStaff) tags.push('Staff');
     else if (p.isAreaManager) tags.push('AM');
     rankEl.textContent = tags.join(' · ');
+    // Pontos/edições no tooltip do badge (feature barata; já vem do /Session).
+    const pstats = [];
+    if (p.totalPoints) pstats.push(Number(p.totalPoints).toLocaleString('pt-BR') + ' pontos');
+    if (p.totalEdits) pstats.push(Number(p.totalEdits).toLocaleString('pt-BR') + ' edições');
+    badge.title = pstats.length ? ((p.userName || '') + ' — ' + pstats.join(' · ')) : (p.userName || '');
     badge.classList.remove('hidden');
     const brandTitle = document.getElementById('brandTitle');
     if (brandTitle) brandTitle.classList.add('hidden');
@@ -718,6 +816,13 @@ function renderProfileHeader() {
 // expiram pelo Waze) NÃO chama isso — preserva tudo pra próximo login.
 async function handleLogout() {
     closeModal('logoutModal');
+    // Cancela ação pendente ANTES de destruir a sessão: logout = esquecer tudo,
+    // então descartamos (não enviamos) o swipe em buffer e evitamos o executor
+    // rodando com sessão nula (que mostrava "erro ao marcar" na tela de login).
+    if (AppState.pendingAction) {
+        AppState.pendingAction.cancel();
+        AppState.pendingAction = null;
+    }
     await API.destroySession();
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
@@ -744,12 +849,23 @@ async function handleLogout() {
 }
 
 function resetQueue() {
+    // Descarrega ação no buffer de undo ANTES de zerar a fila: sem isso, a ação
+    // pendente (nunca enviada ao Waze) era re-buscada e o "Desfazer" duplicava o
+    // place + dobrava stats. Refresh/filtros honram o swipe (execute); logout e
+    // sessão expirada cancelam a ação antes de chamar resetQueue.
+    if (AppState.pendingAction) {
+        AppState.pendingAction.execute();
+        AppState.pendingAction = null;
+    }
+    removeUndoBanner();
+    AppState.fetchEpoch++;              // invalida fetch em voo (descarta obsoleto)
     AppState.queue = [];
     AppState.nextPage = 1;
     AppState.hasMore = true;
     AppState.emptyPagesInRow = 0;
     AppState.currentPlace = null;
     AppState.serverTotal = 0;
+    AppState.loadError = false;
     updatePendingCount();
 }
 
@@ -757,71 +873,102 @@ function showLoading(visible) {
     document.getElementById('loadingCard').classList.toggle('hidden', !visible);
 }
 
-async function fetchNextPage() {
-    if (AppState.fetching) return;
-    if (!AppState.hasMore) return;
-    if (!AppState.authenticated) return;
+function fetchNextPage() {
+    // Reentrância: se já há um fetch em voo, devolve a MESMA promise (não gira
+    // busy-loop de microtasks — era o P0 que congelava a aba no startFetching).
+    if (AppState.fetching) return AppState._fetchPromise || Promise.resolve();
+    if (!AppState.hasMore) return Promise.resolve();
+    if (!AppState.authenticated) return Promise.resolve();
 
     AppState.fetching = true;
+    // Época capturada aqui: se resetQueue() rodar durante o await (refresh, troca
+    // de filtro, logout), a época muda e descartamos o resultado obsoleto pra não
+    // injetar places de filtros/região antigos na fila nova.
+    const epoch = AppState.fetchEpoch;
+    const pageToFetch = AppState.nextPage;
     const filters = {
         unreadOnly: AppState.filters.unreadOnly !== false
     };
-    if (AppState.filters.types.length < 3) filters.types = AppState.filters.types;
+    if (AppState.filters.types.length > 0 && AppState.filters.types.length < TYPES_ALL.length) {
+        filters.types = AppState.filters.types;
+    }
     if (AppState.filters.residential === 'true') filters.residential = true;
     if (AppState.filters.residential === 'false') filters.residential = false;
     if (AppState.filters.myArea && AppState.profile && AppState.profile.areas) {
-        const driveArea = AppState.profile.areas.find(a => a.type === 'drive' && a.bbox);
-        if (driveArea) filters.bbox = driveArea.bbox;
+        const areas = AppState.profile.areas;
+        // Prefere a área de gerência (drive); cai pra qualquer área com bbox
+        // (managed areas não-drive) se não houver drive — amplia o "minha área".
+        const area = areas.find(a => a.type === 'drive' && a.bbox) || areas.find(a => a.bbox);
+        if (area) filters.bbox = area.bbox;
     } else {
         if (AppState.filters.stateId) filters.stateId = AppState.filters.stateId;
         if (AppState.filters.managedAreaId) filters.managedAreaId = AppState.filters.managedAreaId;
     }
 
-    try {
-        const result = await API.fetchPlaces(AppState.nextPage, filters);
-        if (!result.success) {
-            if (result.errorCategory === 'unauthorized' ||
-                (result.error && result.error.toLowerCase().includes('sess'))) {
-                AppState.hasMore = false;
-                handleUnauthorized();
+    AppState._fetchPromise = (async () => {
+        try {
+            const result = await API.fetchPlaces(pageToFetch, filters);
+            if (epoch !== AppState.fetchEpoch) return; // reset durante o fetch → descarta
+            if (!result.success) {
+                if (result.errorCategory === 'unauthorized' ||
+                    (result.error && result.error.toLowerCase().includes('sess'))) {
+                    AppState.hasMore = false;
+                    handleUnauthorized();
+                } else {
+                    showToast(result.error || 'Erro ao carregar places', 'error');
+                    AppState.loadError = true;
+                    AppState.hasMore = false;
+                }
+                return;
+            }
+
+            AppState.hasMore = !!result.hasMore;
+            AppState.nextPage++;
+
+            const newPlaces = result.places || [];
+            if (newPlaces.length === 0) {
+                AppState.emptyPagesInRow++;
+                if (AppState.emptyPagesInRow >= MAX_EMPTY_PAGES) {
+                    AppState.hasMore = false;
+                }
             } else {
-                showToast(result.error || 'Erro ao carregar places', 'error');
+                AppState.emptyPagesInRow = 0;
+                AppState.queue.push(...newPlaces);
+                AppState.serverTotal += newPlaces.length;
+            }
+        } catch (error) {
+            console.error('fetchNextPage error', error);
+            if (epoch === AppState.fetchEpoch) {
+                showToast('Erro ao carregar places', 'error');
+                AppState.loadError = true;
                 AppState.hasMore = false;
             }
-            return;
+        } finally {
+            // Sempre limpa: esta invocação é a dona da flag fetching. Sem o guard
+            // de época aqui (senão fetching ficaria preso true e voltaria o freeze).
+            AppState.fetching = false;
+            AppState._fetchPromise = null;
+            updatePendingCount();
         }
-
-        AppState.hasMore = !!result.hasMore;
-        AppState.nextPage++;
-
-        const newPlaces = result.places || [];
-        if (newPlaces.length === 0) {
-            AppState.emptyPagesInRow++;
-            if (AppState.emptyPagesInRow >= MAX_EMPTY_PAGES) {
-                AppState.hasMore = false;
-            }
-        } else {
-            AppState.emptyPagesInRow = 0;
-            AppState.queue.push(...newPlaces);
-            AppState.serverTotal += newPlaces.length;
-        }
-    } catch (error) {
-        console.error('fetchNextPage error', error);
-        showToast('Erro ao carregar places', 'error');
-        AppState.hasMore = false;
-    } finally {
-        AppState.fetching = false;
-        updatePendingCount();
-    }
+    })();
+    return AppState._fetchPromise;
 }
 
 async function startFetching() {
+    AppState.loadError = false;
     showLoading(true);
     document.getElementById('noMoreCards').classList.add('hidden');
+    document.getElementById('loadErrorState')?.classList.add('hidden');
     removeCurrentCardEl();
     updatePendingCount();
 
-    while (AppState.queue.length === 0 && AppState.hasMore) {
+    // "Minha área" precisa do perfil (áreas/bbox). Se ainda não chegou, espera —
+    // senão o 1º fetch cai no ramo país/estado e carrega places de fora da área.
+    if (AppState.filters.myArea && !(AppState.profile && AppState.profile.areas) && AppState._profilePromise) {
+        try { await AppState._profilePromise; } catch (e) {}
+    }
+
+    while (AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {
         await fetchNextPage();
     }
 
@@ -860,7 +1007,11 @@ function showCurrentPlace() {
             window.showToast('Erro ao mostrar place, pulando…', 'error');
         }
         AppState.queue.shift();
+        // Place quebrado descartado conta como tratado: decrementa o total e
+        // atualiza o contador (invariante do serverTotal — antes superconta).
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
         AppState.currentPlace = null;
+        updatePendingCount();
         if (AppState.queue.length > 0) {
             setTimeout(showCurrentPlace, 0);
         } else if (AppState.hasMore) {
@@ -885,6 +1036,13 @@ function renderCurrentCard() {
     }
 
     AppState.currentPlace = place;
+
+    // Anuncia o novo card a leitor de tela (a fila avança sem foco mudar).
+    const liveRegion = document.getElementById('cardLiveRegion');
+    if (liveRegion) {
+        liveRegion.textContent = 'Novo pedido: ' + (place.name || 'sem nome') +
+            (place.updateType ? ', ' + place.updateType : '');
+    }
 
     const template = document.getElementById('cardTemplate');
     const clone = template.content.cloneNode(true);
@@ -965,6 +1123,9 @@ function renderCurrentCard() {
         img.classList.remove('hidden');
         img.classList.add('cursor-zoom-in');
         noImg.classList.add('hidden');
+        img.decoding = 'async';
+        // Foto quebrada (404 do Waze) → cai pro placeholder "Sem Imagem".
+        img.onerror = () => { img.classList.add('hidden'); noImg.classList.remove('hidden'); };
         updateImage();
 
         img.addEventListener('click', (e) => {
@@ -1040,13 +1201,32 @@ function renderCurrentCard() {
     removeCurrentCardEl();
     document.getElementById('cardStack').appendChild(card);
     document.getElementById('noMoreCards').classList.add('hidden');
+    prefetchNextImage();
+}
+
+// Pré-carrega a imagem do próximo place da fila — mata o flash branco no swipe.
+function prefetchNextImage() {
+    const next = AppState.queue[1];
+    if (!next) return;
+    const url = (next.imageUrls && next.imageUrls[0]) || next.imageUrl;
+    if (url) { const im = new Image(); im.src = url; }
 }
 
 function showNoPlaces() {
     AppState.currentPlace = null;
     removeCurrentCardEl();
     showLoading(false);
-    document.getElementById('noMoreCards').classList.remove('hidden');
+    const noMore = document.getElementById('noMoreCards');
+    const errEl = document.getElementById('loadErrorState');
+    if (AppState.loadError && errEl) {
+        // Falha de rede/servidor: NÃO mostra "Tudo limpo!" (o editor acharia que
+        // zerou o backlog). Mostra estado de erro com "Tentar novamente".
+        noMore.classList.add('hidden');
+        errEl.classList.remove('hidden');
+    } else {
+        if (errEl) errEl.classList.add('hidden');
+        noMore.classList.remove('hidden');
+    }
 }
 
 function formatRelativeTime(ts) {
@@ -1144,10 +1324,60 @@ function handleReject() {
 
 function handleSkip() {
     if (!AppState.currentPlace) return;
+    const place = AppState.currentPlace;
     AppState.stats.skipped++;
     updateStats();
     saveStats();
     advanceQueue();
+    // Skip não envia nada ao Waze (o place segue pendente) — executor no-op.
+    // Passa pelo scheduleAction só pra ganhar a janela de Desfazer (feature).
+    scheduleAction('skip', place, async () => {});
+}
+
+// ── Marcar em lote (o backend já aceita items[]; feature de UI) ────────────
+// Marca como lido TODOS os places atualmente na fila local. Como o Waze devolve
+// tudo de uma vez (hasMore geralmente false), a fila local ≈ tudo que resta.
+function openBatchReadConfirm() {
+    const n = AppState.queue.length;
+    if (n === 0) { showToast('Nada na fila para marcar', 'info'); return; }
+    const msgEl = document.getElementById('batchReadMessage');
+    if (msgEl) msgEl.textContent = `Marcar como lido os ${n} pedido(s) que já estão na fila? Vai direto pro Waze e não dá pra desfazer em lote.`;
+    openModal('batchReadModal');
+}
+
+async function handleBatchMarkRead() {
+    closeModal('batchReadModal');
+    const items = AppState.queue
+        .filter(p => p.venueID && p.updateRequestID)
+        .map(p => ({ venueID: p.venueID, updateRequestID: p.updateRequestID }));
+    if (items.length === 0) { showToast('Nada na fila para marcar', 'info'); return; }
+    // Descarrega qualquer undo pendente antes (consistência de estado).
+    if (AppState.pendingAction) { AppState.pendingAction.execute(); AppState.pendingAction = null; }
+    removeUndoBanner();
+    const n = items.length;
+    AppState.inFlightActions++;
+    updateInFlightIndicator();
+    showToast(`Marcando ${n} como lidos…`, 'info');
+    try {
+        const result = await callWithRetry(() => API.markAsReadBatch(items));
+        if (result && result.success) {
+            AppState.stats.read += n;
+            updateStats();
+            saveStats();
+            resetQueue();       // zera a fila local; startFetching re-busca o que sobrou
+            startFetching();
+            showToast(`${n} pedido(s) marcados como lidos 👍`, 'success');
+        } else if (result && result.errorCategory === 'unauthorized') {
+            handleUnauthorized();
+        } else {
+            showToast((result && result.error) || 'Erro ao marcar em lote', 'error');
+        }
+    } catch (e) {
+        showToast('Erro ao marcar em lote', 'error');
+    } finally {
+        AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
+        updateInFlightIndicator();
+    }
 }
 
 function advanceQueue() {
@@ -1231,13 +1461,26 @@ function scheduleAction(type, place, executor) {
                 runExecutor();
             }
         },
+        // Descarta a ação sem enviar e reverte o stat otimista. Usado no logout e
+        // na sessão expirada (não há sessão válida pra enviar). Não re-enfileira
+        // nem re-renderiza — o chamador reseta/zera a fila.
+        cancel: () => {
+            if (!executed) {
+                executed = true;
+                clearTimeout(timerId);
+                if (type === 'read') AppState.stats.read = Math.max(0, AppState.stats.read - 1);
+                else if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
+                else if (type === 'skip') AppState.stats.skipped = Math.max(0, AppState.stats.skipped - 1);
+            }
+        },
         undo: () => {
             if (!executed) {
                 executed = true;
                 clearTimeout(timerId);
                 if (type === 'read') AppState.stats.read = Math.max(0, AppState.stats.read - 1);
-                if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
-                AppState.serverTotal++;
+                else if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
+                else if (type === 'skip') AppState.stats.skipped = Math.max(0, AppState.stats.skipped - 1);
+                if (type !== 'skip') AppState.serverTotal++; // skip nunca decrementou o total
                 updateStats();
                 saveStats();
                 AppState.queue.unshift(place);
@@ -1247,7 +1490,8 @@ function scheduleAction(type, place, executor) {
         }
     };
 
-    showUndoBanner(type === 'reject' ? 'Place rejeitado' : 'Marcado como lido');
+    const undoMsg = type === 'reject' ? 'Place rejeitado' : type === 'skip' ? 'Place pulado' : 'Marcado como lido';
+    showUndoBanner(undoMsg);
 }
 
 function showUndoBanner(message) {
@@ -1511,7 +1755,8 @@ function renderUndoGateUI() {
 // Tema: preferência explícita do user (localStorage) vence; sem preferência,
 // segue o sistema (M3/HIG). O listener em initApp acompanha mudanças do SO.
 function getPreferredTheme() {
-    const stored = localStorage.getItem(THEME_KEY);
+    let stored = null;
+    try { stored = localStorage.getItem(THEME_KEY); } catch (e) {}
     if (stored === 'light' || stored === 'dark') return stored;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
@@ -1530,7 +1775,7 @@ function applyTheme(theme) {
 function toggleTheme() {
     const isDark = document.documentElement.classList.contains('dark');
     const next = isDark ? 'light' : 'dark';
-    localStorage.setItem(THEME_KEY, next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
     applyTheme(next);
 }
 
@@ -1541,7 +1786,7 @@ function showToast(message, type = 'info', durationMs = 4000) {
     const toast = document.createElement('div');
 
     const colors = {
-        success: 'bg-emerald-600',
+        success: 'bg-emerald-700',
         error: 'bg-rose-600',
         info: 'bg-slate-800 dark:bg-slate-100 dark:text-slate-900'
     };
@@ -1567,6 +1812,11 @@ function showToast(message, type = 'info', durationMs = 4000) {
     };
     toast.addEventListener('click', dismiss);
 
+    // Teto de empilhamento: no máx. 3 toasts (remove o mais antigo) pra não cobrir
+    // os botões do card numa rajada de erros.
+    while (container.children.length >= 3) {
+        container.removeChild(container.firstElementChild);
+    }
     container.appendChild(toast);
     setTimeout(dismiss, durationMs);
 }

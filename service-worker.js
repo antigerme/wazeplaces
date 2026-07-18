@@ -1,21 +1,27 @@
-const CACHE_NAME = 'waze-places-v36';
+// CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
+// FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
+// Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
+const CACHE_NAME = 'waze-places-2026071801';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/css/styles.css',
+  '/js/version.js',
   '/js/app.js',
   '/js/api.js',
   '/js/swipe.js',
   '/js/tailwindcss_3_4_17.js',
   '/manifest.json',
   '/icons/icon-192.svg',
-  '/icons/icon-512.svg'
+  '/icons/icon-512.svg',
+  '/icons/icon-maskable.svg'
 ];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(STATIC_ASSETS).catch(() => {}))
+      // allSettled: um asset 404 não derruba o precache inteiro (addAll é atômico).
+      .then(cache => Promise.allSettled(STATIC_ASSETS.map(u => cache.add(u))))
   );
 });
 
@@ -57,7 +63,10 @@ self.addEventListener('fetch', event => {
 
   const isHTML = event.request.mode === 'navigate' ||
     (event.request.headers.get('accept') || '').includes('text/html');
-  const isCode = /\.(js|css|json)$/i.test(url.pathname);
+  // Vendor Tailwind tem a versão no nome (immutable) → cache-first, sem re-baixar
+  // 407KB a cada load. O gotcha #18 (skew) não se aplica: o nome muda com a versão.
+  const isImmutableVendor = url.pathname === '/js/tailwindcss_3_4_17.js';
+  const isCode = !isImmutableVendor && /\.(js|css|json)$/i.test(url.pathname);
 
   if (isHTML || isCode) {
     // cache: 'reload' força o SW a bypassar o HTTP cache do navegador. Sem isso,

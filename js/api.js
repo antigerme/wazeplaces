@@ -1,3 +1,11 @@
+// localStorage pode lançar (modo privado, "bloquear todos os cookies") — nunca
+// deixar isso derrubar o initApp. Wrapper tolerante a falha.
+const safeLS = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    remove(k) { try { localStorage.removeItem(k); } catch (e) {} }
+};
+
 const API = {
     baseUrl: '/api',
     sessionToken: null,
@@ -6,24 +14,23 @@ const API = {
 
     setSession(token) {
         this.sessionToken = token;
-        if (token) {
-            localStorage.setItem('waze_session_token', token);
-        } else {
-            localStorage.removeItem('waze_session_token');
-        }
+        if (token) safeLS.set('waze_session_token', token);
+        else safeLS.remove('waze_session_token');
     },
 
     getSession() {
         if (!this.sessionToken) {
-            this.sessionToken = localStorage.getItem('waze_session_token');
+            this.sessionToken = safeLS.get('waze_session_token');
             // Migração de versões anteriores que usavam sessionStorage (some ao fechar aba).
             if (!this.sessionToken) {
-                const legacy = sessionStorage.getItem('waze_session_token');
-                if (legacy) {
-                    localStorage.setItem('waze_session_token', legacy);
-                    sessionStorage.removeItem('waze_session_token');
-                    this.sessionToken = legacy;
-                }
+                try {
+                    const legacy = sessionStorage.getItem('waze_session_token');
+                    if (legacy) {
+                        safeLS.set('waze_session_token', legacy);
+                        sessionStorage.removeItem('waze_session_token');
+                        this.sessionToken = legacy;
+                    }
+                } catch (e) {}
             }
         }
         return this.sessionToken;
@@ -31,32 +38,37 @@ const API = {
 
     setRegion(region) {
         this.region = region || 'row';
-        localStorage.setItem('waze_region', this.region);
+        safeLS.set('waze_region', this.region);
     },
 
     getRegion() {
-        const stored = localStorage.getItem('waze_region');
+        const stored = safeLS.get('waze_region');
         if (stored) this.region = stored;
         return this.region;
     },
 
     setCountry(id) {
         this.countryId = parseInt(id, 10) || 30;
-        localStorage.setItem('waze_country', this.countryId);
+        safeLS.set('waze_country', this.countryId);
     },
 
     getCountry() {
-        const stored = localStorage.getItem('waze_country');
+        const stored = safeLS.get('waze_country');
         if (stored) this.countryId = parseInt(stored, 10) || 30;
         return this.countryId;
     },
 
     async _post(endpoint, body) {
+        // Timeout no lado browser→backend: sem isso um fetch pendurado deixava
+        // AppState.fetching preso e o botão de refresh (com guard) mudo.
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 45000);
         try {
             const response = await fetch(`${this.baseUrl}/${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
+                body: JSON.stringify(body),
+                signal: controller.signal
             });
             const data = await response.json();
             if (response.status === 401) {
@@ -65,7 +77,12 @@ const API = {
             return data;
         } catch (error) {
             console.error(`Erro em ${endpoint}:`, error);
-            return { success: false, error: 'Erro de conexão' };
+            // Rede caiu / abortou por timeout / 5xx sem JSON → transient, pra a
+            // política de retry (callWithRetry) atuar. Era o caso mais comum e
+            // ficava sem categoria, então nunca era retentado.
+            return { success: false, error: 'Erro de conexão', errorCategory: 'transient' };
+        } finally {
+            clearTimeout(timer);
         }
     },
 

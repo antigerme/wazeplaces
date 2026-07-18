@@ -19,7 +19,7 @@ Tipagens oficiais do Waze Map Editor SDK (TypeScript declaration file).
 Nossa app fala com a API interna do Waze (`Issues/Search/List`, `Features`, `Session`, etc.) raspando cookies. O SDK oficial cobre uma superfície parcialmente sobreposta — usar a tipagem como **referência canônica** ajuda quando:
 
 - Surge dúvida sobre o que é um campo do `Venue` (tipo `lockRank`, `isAdLocked`, formato de `openingHours`)
-- Vamos adicionar parsing de novo campo no `buscar-places.php`
+- Vamos adicionar parsing de novo campo no `handleBuscarPlaces` (server/core.mjs)
 - Precisamos confirmar valores válidos de enums (categorias, tipos de PUR, payment types, etc.)
 - Queremos comparar o modelo do Waze com o que extraímos
 
