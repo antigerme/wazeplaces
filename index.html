@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="description" content="Validação de Places do Waze Map Editor - Interface Estilo Tinder">
     <meta name="theme-color" content="#33CCFF">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,6 +27,22 @@
       }
     </script>
 
+    <script>
+      // Aplica o tema ANTES do first paint: evita flash de tela clara + status bar
+      // cyan em quem usa dark (o app.js só roda no DOMContentLoaded, tarde demais).
+      (function () {
+        try {
+          var t = localStorage.getItem('waze_places_theme');
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          if (t === 'dark') document.documentElement.classList.add('dark');
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute('content', t === 'dark' ? '#0f172a' : '#f8fafc');
+        } catch (e) {}
+      })();
+    </script>
+
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen text-slate-800 antialiased selection:bg-blue-200">
@@ -42,10 +58,10 @@
                 <h1 id="brandTitle" class="text-base font-bold tracking-tight text-slate-700 truncate">Waze Places</h1>
             </div>
             <div id="userProfileBadge" class="hidden flex items-center gap-2 min-w-0 flex-1 justify-end">
-                <span id="devModeBadge" class="hidden text-[9px] font-bold text-white bg-purple-500 px-1.5 py-0.5 rounded uppercase tracking-wider" title="Modo Desenvolvedor ativo — restrições removidas">DEV</span>
+                <span id="devModeBadge" class="hidden text-[9px] font-bold text-white bg-purple-600 px-1.5 py-0.5 rounded uppercase tracking-wider" title="Modo Desenvolvedor ativo — restrições removidas">DEV</span>
                 <div class="leading-tight text-right min-w-0">
                     <p id="userName" class="text-xs font-bold text-slate-700 truncate"></p>
-                    <p id="userRank" class="text-[10px] text-slate-400 uppercase tracking-wider truncate"></p>
+                    <p id="userRank" class="text-[10px] text-slate-500 uppercase tracking-wider truncate"></p>
                 </div>
                 <img id="userAvatar" class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100 flex-shrink-0" alt="">
             </div>
@@ -110,7 +126,7 @@
                             <div class="w-full border-t border-slate-200"></div>
                         </div>
                         <div class="relative flex justify-center text-xs font-medium">
-                            <span class="px-3 bg-white text-slate-400 uppercase tracking-wider">ou login manual</span>
+                            <span class="px-3 bg-white text-slate-500 uppercase tracking-wider">ou login manual</span>
                         </div>
                     </div>
 
@@ -136,7 +152,7 @@
                 </div>
             </div>
 
-            <button id="byAuthor" type="button" class="w-full min-h-[44px] text-slate-500 hover:text-cyan-600 font-medium text-sm transition-colors text-center pb-8">
+            <button id="byAuthor" type="button" aria-label="Perfil do autor (@antigerme) no Waze Map Editor" class="w-full min-h-[44px] text-slate-500 hover:text-cyan-600 font-medium text-sm transition-colors text-center pb-8">
                 By AG
             </button>
         </div>
@@ -144,9 +160,9 @@
         <div id="pasteModal" role="dialog" aria-modal="true" aria-labelledby="pasteModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6">
                 <h3 id="pasteModalTitle" class="text-xl font-bold text-slate-800 mb-4">Cole o Conteúdo dos Cookies</h3>
-                <textarea id="cookiesTextarea" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" class="w-full h-48 p-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt..."></textarea>
+                <textarea id="cookiesTextarea" aria-label="Conteúdo do arquivo cookies.txt" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" class="w-full h-48 p-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt…"></textarea>
                 <div class="flex space-x-3 mt-4">
-                    <button id="cancelPaste" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">
+                    <button id="cancelPaste" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition">
                         Cancelar
                     </button>
                     <button id="confirmPaste" type="button" class="flex-1 min-h-[48px] bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition">
@@ -161,7 +177,7 @@
                 <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2">Sair?</h3>
                 <p class="text-sm text-slate-500 mb-6">Sua sessão será encerrada e <strong>todos os dados locais</strong> (cookies, estatísticas, filtros e preferências) serão apagados deste dispositivo. Esta ação não pode ser desfeita.</p>
                 <div class="flex space-x-3">
-                    <button id="cancelLogout" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
+                    <button id="cancelLogout" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
                     <button id="confirmLogout" type="button" class="flex-1 min-h-[48px] bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2 px-4 rounded-lg transition">Sair</button>
                 </div>
             </div>
@@ -237,8 +253,8 @@
                         </div>
                     </div>
 
-                    <div>
-                        <label class="text-sm font-semibold text-slate-700 block mb-2">Tipos de Pedido</label>
+                    <fieldset>
+                        <legend class="text-sm font-semibold text-slate-700 block mb-2">Tipos de Pedido</legend>
                         <div class="space-y-1">
                             <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="VENUE" checked> Novos Locais</label>
                             <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="IMAGE" checked> Novas Fotos</label>
@@ -247,7 +263,7 @@
                                 <span>Reportes/Atualizações <span class="text-[10px] text-purple-500 dark:text-purple-300 font-semibold uppercase tracking-wider ml-1">DEV</span></span>
                             </label>
                         </div>
-                    </div>
+                    </fieldset>
 
                     <div>
                         <label for="filterResidential" class="text-sm font-semibold text-slate-700 block mb-2">Residenciais</label>
@@ -273,7 +289,7 @@
                         <select id="filterCountry" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
                             <option value="30">Brasil</option>
                         </select>
-                        <p id="filterCountryHint" class="hidden text-[11px] text-amber-600 dark:text-amber-300 mt-1">Mostrando apenas países que você pode editar.</p>
+                        <p id="filterCountryHint" class="hidden text-[11px] text-amber-700 dark:text-amber-300 mt-1">Mostrando apenas países que você pode editar.</p>
                     </div>
 
                     <div>
@@ -299,16 +315,39 @@
                             <input id="filterMyArea" type="checkbox" class="ui-switch">
                         </label>
                     </div>
+
+                    <div>
+                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Ações em lote</h4>
+                        <button id="batchReadBtn" type="button" class="w-full min-h-[48px] bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-emerald-100 dark:border-emerald-400/30">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            <span>Marcar todos os pendentes como lidos</span>
+                        </button>
+                        <p class="text-[11px] text-slate-500 mt-1.5">Marca de uma vez todos os pedidos já carregados na fila. Vai direto pro Waze, sem desfazer.</p>
+                    </div>
                 </div>
 
                 <div class="flex space-x-3 px-6 py-4 border-t border-slate-100 flex-shrink-0">
-                    <button id="cancelFilters" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
+                    <button id="cancelFilters" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
                     <button id="applyFilters" type="button" class="flex-1 min-h-[48px] bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition">Aplicar</button>
                 </div>
             </div>
         </div>
 
+        <div id="batchReadModal" role="dialog" aria-modal="true" aria-labelledby="batchReadTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
+                <h3 id="batchReadTitle" class="text-xl font-bold text-slate-800 mb-2">Marcar em lote?</h3>
+                <p id="batchReadMessage" class="text-sm text-slate-500 mb-6">Marcar como lido os pedidos da fila?</p>
+                <div class="flex space-x-3">
+                    <button id="cancelBatchRead" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition">Cancelar</button>
+                    <button id="confirmBatchRead" type="button" class="flex-1 min-h-[48px] bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 px-4 rounded-lg transition">Marcar lidos</button>
+                </div>
+            </div>
+        </div>
+
         <div id="appScreen" class="hidden space-y-4">
+
+            <h2 class="sr-only">Fila de pedidos de places</h2>
+            <div id="cardLiveRegion" class="sr-only" role="status" aria-live="polite"></div>
 
             <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-4">
                 <div class="grid grid-cols-4 text-center divide-x divide-slate-100 dark:divide-slate-700">
@@ -325,7 +364,7 @@
                         <p class="text-[11px] font-medium text-slate-500 uppercase tracking-wider mt-1">Pulados</p>
                     </div>
                     <div>
-                        <p class="text-2xl font-black text-cyan-600 dark:text-cyan-400 tracking-tight tnum" id="pendingCount" title="Restam na fila (carregados localmente). Sinal + significa que há mais páginas a buscar" aria-label="Restantes na fila">—</p>
+                        <p class="text-2xl font-black text-cyan-600 dark:text-cyan-400 tracking-tight tnum" id="pendingCount" title="Restam na fila (carregados localmente). Sinal + significa que há mais páginas a buscar">—</p>
                         <p class="text-[11px] font-medium text-slate-500 uppercase tracking-wider mt-1">Restam</p>
                     </div>
                 </div>
@@ -375,6 +414,21 @@
                     </div>
                 </div>
 
+                <div id="loadErrorState" class="hidden absolute inset-0 flex items-center justify-center bg-slate-50 rounded-3xl border-2 border-dashed border-rose-200" role="alert">
+                    <div class="text-center p-8">
+                        <div class="bg-white p-4 rounded-full shadow-sm inline-block mb-4">
+                            <svg class="w-12 h-12 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-800 mb-2">Falha ao carregar</h3>
+                        <p class="text-slate-500 text-sm mb-6">Não deu pra buscar os pedidos agora. Verifique sua conexão e tente de novo.</p>
+                        <button id="retryLoadBtn" type="button" class="min-h-[48px] bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-3 px-8 rounded-xl transition-all shadow-md">
+                            Tentar novamente
+                        </button>
+                    </div>
+                </div>
+
                 <template id="cardTemplate">
                     <div class="place-card absolute inset-0 bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden cursor-grab active:cursor-grabbing will-change-transform">
                         <div class="h-full flex flex-col relative z-10">
@@ -401,7 +455,7 @@
                                     <div class="flex items-start justify-between mb-3 gap-2">
                                         <h3 class="card-name text-2xl font-bold text-slate-800 leading-tight flex-1 line-clamp-2 break-words min-w-0"></h3>
                                         <span class="card-starred hidden text-2xl leading-none flex-shrink-0" title="Favoritado no WME">⭐</span>
-                                        <a class="card-wme-link min-w-[44px] min-h-[44px] flex items-center justify-center bg-cyan-50 text-cyan-600 rounded-lg hover:bg-cyan-100 transition-colors flex-shrink-0" target="_blank" rel="noopener" title="Abrir no WME" aria-label="Abrir no WME">
+                                        <a class="card-wme-link min-w-[44px] min-h-[44px] flex items-center justify-center bg-cyan-50 text-cyan-600 rounded-lg hover:bg-cyan-100 transition-colors flex-shrink-0" target="_blank" rel="noopener noreferrer" title="Abrir no WME" aria-label="Abrir no WME">
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                         </a>
                                     </div>
@@ -557,10 +611,11 @@
                 <div>
                     <h4 class="font-semibold text-slate-800 mb-2">Como usar:</h4>
                     <ol class="list-decimal list-inside space-y-1 text-sm">
-                        <li>Faça login no Waze Map Editor no seu navegador</li>
+                        <li><strong>Mais fácil:</strong> instale a extensão <b>WazePlaces Rapid Access</b> (Chrome) e faça login direto do WME — sem copiar cookies.</li>
+                        <li>Ou, manualmente: faça login no Waze Map Editor no navegador</li>
                         <li>Exporte seus cookies usando uma extensão de navegador</li>
                         <li>Faça upload ou cole o conteúdo do <code>cookies.txt</code></li>
-                        <li>Processe os cards (arraste ou use setas do teclado)</li>
+                        <li>Processe os cards (botões, arraste ou setas do teclado; <code>z</code> desfaz)</li>
                     </ol>
                 </div>
 
@@ -598,7 +653,7 @@
     </div>
 
     <footer class="text-center pb-4" style="padding-bottom: calc(1rem + env(safe-area-inset-bottom))">
-        <span class="text-[10px] text-slate-400 dark:text-slate-600 font-mono" id="appVersionDisplay"></span>
+        <span class="text-[10px] text-slate-500 dark:text-slate-400 font-mono" id="appVersionDisplay"></span>
     </footer>
 
     <script src="js/api.js"></script>
