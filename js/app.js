@@ -6,6 +6,8 @@ const FILTERS_KEY = 'waze_places_filters';
 const PREFERENCES_KEY = 'waze_places_preferences';
 const DEVMODE_KEY = 'waze_places_devmode';
 const THEME_KEY = 'waze_places_theme';
+const LANG_KEY = 'waze_places_lang';
+const HISTORY_KEY = 'waze_places_history';
 const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 5000;
@@ -32,12 +34,14 @@ const AppState = {
     _fetchPromise: null,
     _profilePromise: null,
     loadError: false,
-    filters: { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true },
+    filters: { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
     preferences: { undoEnabled: true },
     devMode: { unlocked: false, active: false },
     profile: null,
     countries: [],
-    statesByCountry: {}
+    statesByCountry: {},
+    seenCategories: [],      // categorias vistas nos places carregados (fonte do filtro de categoria)
+    history: null            // acumulado histórico { 'YYYY-MM-DD': { read, rejected } } (carregado lazy)
 };
 
 window.AppState = AppState;
@@ -49,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
 window.addEventListener('error', (e) => {
     console.error('Erro JS não-tratado:', e.error || e.message, e.filename, e.lineno);
     if (window.showToast) {
-        window.showToast('Erro inesperado: ' + (e.message || 'recarregue a página'), 'error');
+        window.showToast(t('toast.unexpectedError', { msg: e.message || t('toast.unexpectedError.reload') }), 'error');
     }
     if (window.AppState && window.AppState.authenticated) {
         const cardStack = document.getElementById('cardStack');
@@ -73,6 +77,13 @@ function initApp() {
     if (versionEl) {
         versionEl.textContent = 'v' + (typeof verLabel === 'function' ? verLabel(APP_VERSION) : APP_VERSION);
         setupDevModeTapTrigger(versionEl);
+    }
+
+    // i18n: idioma salvo (localStorage) ou detectado do navegador; aplica o
+    // dicionário ao DOM estático logo no início (antes de renderizar o resto).
+    if (typeof setLang === 'function') {
+        setLang(safeLS.get(LANG_KEY) || undefined);
+        applyI18n();
     }
 
     loadStats();
@@ -162,7 +173,7 @@ function setupAuthListeners() {
         $('cookiesTextarea').value = '';
     });
     $('byAuthor').addEventListener('click', () => {
-        window.open('https://www.waze.com/user/editor/antigerme', '_blank');
+        window.open('https://www.waze.com/user/editor/antigerme', '_blank', 'noopener');
     });
     $('closeAccessDenied').addEventListener('click', () => closeModal('accessDeniedModal'));
     // Região default sempre 'row' pra fluxos novos (público alvo BR/Latam).
@@ -187,7 +198,7 @@ function setupAppListeners() {
         if (AppState.fetching) return;
         resetQueue();
         startFetching();
-        showToast('Atualizando fila…', 'info');
+        showToast(t('toast.refreshing'), 'info');
     });
     $('retryLoadBtn')?.addEventListener('click', () => {
         resetQueue();
@@ -207,6 +218,24 @@ function setupAppListeners() {
     window.addEventListener('keydown', handleKeyDown);
 }
 
+// Seletor de idioma (no modal de filtros). Troca a língua, persiste, reaplica o
+// dicionário e re-renderiza as partes dinâmicas.
+function setupLanguageSwitcher() {
+    const sel = document.getElementById('langSelect');
+    if (!sel || typeof setLang !== 'function') return;
+    sel.value = (typeof getLang === 'function') ? getLang() : 'pt';
+    sel.addEventListener('change', () => {
+        setLang(sel.value);
+        safeLS.set(LANG_KEY, sel.value);
+        applyI18n();
+        if (AppState.profile) renderProfileHeader(AppState.profile);
+        if (AppState.currentPlace) showCurrentPlace();
+        updateStats();
+        updatePendingCount();
+        if (typeof showToast === 'function') showToast(t('toast.langChanged'), 'success');
+    });
+}
+
 function setupModalListeners() {
     const $ = id => document.getElementById(id);
     $('closeFilters').addEventListener('click', () => closeModal('filtersModal'));
@@ -215,6 +244,7 @@ function setupModalListeners() {
     $('batchReadBtn')?.addEventListener('click', openBatchReadConfirm);
     $('confirmBatchRead')?.addEventListener('click', handleBatchMarkRead);
     $('cancelBatchRead')?.addEventListener('click', () => closeModal('batchReadModal'));
+    setupLanguageSwitcher();
     $('filterCountry').addEventListener('change', (e) => {
         loadStatesIntoSelect(parseInt(e.target.value, 10));
     });
@@ -314,7 +344,7 @@ const Lightbox = {
         this.resetZoom();
         const img = document.getElementById('lightboxImage');
         img.src = this.urls[this.idx];
-        img.alt = this.placeName ? `Foto de ${this.placeName}` : 'Foto do place';
+        img.alt = this.placeName ? t('lightbox.img.alt', { name: this.placeName }) : t('lightbox.img.altGeneric');
         const prevBtn = document.getElementById('lightboxPrev');
         const nextBtn = document.getElementById('lightboxNext');
         const count = document.getElementById('lightboxCount');
@@ -464,7 +494,7 @@ function populateCountrySelect() {
 
 async function loadStatesIntoSelect(countryId) {
     const select = document.getElementById('filterState');
-    select.innerHTML = '<option value="">Todos os estados</option>';
+    select.innerHTML = '<option value="">' + escapeHtml(t('filters.state.all')) + '</option>';
     if (!countryId) return;
 
     let states = AppState.statesByCountry[countryId];
@@ -492,9 +522,22 @@ async function loadStatesIntoSelect(countryId) {
 function populateManagedAreaSelect() {
     const select = document.getElementById('filterManagedArea');
     const areas = (AppState.profile && AppState.profile.managedAreas) || [];
-    select.innerHTML = '<option value="">Nenhuma</option>' +
+    select.innerHTML = '<option value="">' + escapeHtml(t('filters.managedArea.none')) + '</option>' +
         areas.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('');
     if (AppState.filters.managedAreaId) select.value = AppState.filters.managedAreaId;
+}
+
+// Preenche o select de categoria a partir das categorias vistas (B5).
+function populateCategorySelect() {
+    const sel = document.getElementById('filterCategory');
+    if (!sel) return;
+    const current = (AppState.filters.categories && AppState.filters.categories[0]) || '';
+    const opts = ['<option value="">' + escapeHtml(t('filters.category.all')) + '</option>'];
+    for (const c of AppState.seenCategories) {
+        opts.push('<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>');
+    }
+    sel.innerHTML = opts.join('');
+    sel.value = current;
 }
 
 async function openFiltersModal() {
@@ -523,6 +566,11 @@ async function openFiltersModal() {
     $('filterState').disabled = disabled;
     $('filterManagedArea').disabled = disabled;
 
+    populateCategorySelect();
+    const sortSel = $('filterSort');
+    if (sortSel) sortSel.value = AppState.filters.sortOrder || 'newest';
+    renderHistory();
+
     openModal('filtersModal');
 }
 
@@ -533,7 +581,7 @@ function applyFiltersFromModal() {
     // (inclusive REQUEST gated). Bloqueia o Aplicar com aviso.
     const selectedTypes = Array.from(document.querySelectorAll('.filter-type:checked')).map(cb => cb.value);
     if (selectedTypes.length === 0) {
-        showToast('Selecione ao menos um tipo de pedido', 'error');
+        showToast(t('toast.selectAtLeastOneType'), 'error');
         return;
     }
 
@@ -569,6 +617,9 @@ function applyFiltersFromModal() {
         AppState.statesByCountry = {};
     }
     API.setRegion(newRegion);
+    const catVal = $('filterCategory') ? $('filterCategory').value : '';
+    AppState.filters.categories = catVal ? [catVal] : [];
+    AppState.filters.sortOrder = ($('filterSort') && $('filterSort').value === 'oldest') ? 'oldest' : 'newest';
     saveFilters();
     closeModal('filtersModal');
     resetQueue();
@@ -648,7 +699,7 @@ function showAuthScreen() {
     document.getElementById('refreshBtn').classList.add('hidden');
     document.getElementById('userProfileBadge').classList.add('hidden');
     const brandTitle = document.getElementById('brandTitle');
-    if (brandTitle) brandTitle.classList.remove('hidden');
+    if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
     AppState.profile = null;
 }
@@ -669,7 +720,7 @@ async function handleFileUpload(e) {
         const content = await file.text();
         await authenticateWithCookies(content);
     } catch (error) {
-        showToast('Erro ao ler arquivo', 'error');
+        showToast(t('toast.fileReadError'), 'error');
     } finally {
         e.target.value = ''; // permite re-selecionar o mesmo arquivo (dispara change)
     }
@@ -678,7 +729,7 @@ async function handleFileUpload(e) {
 async function handlePasteConfirm() {
     const content = document.getElementById('cookiesTextarea').value.trim();
     if (!content) {
-        showToast('Por favor, cole o conteúdo dos cookies', 'error');
+        showToast(t('toast.pasteEmpty'), 'error');
         return;
     }
     closeModal('pasteModal');
@@ -691,7 +742,7 @@ async function authenticateWithCookies(cookies) {
     if (authInFlight) return;            // evita duplo-envio (criaria 2 sessões)
     authInFlight = true;
     setAuthLoading(true);
-    showToast('Validando cookies...', 'info');
+    showToast(t('toast.validatingCookies'), 'info');
     try {
         const result = await API.testCookies(cookies);
         if (result.success) {
@@ -699,14 +750,14 @@ async function authenticateWithCookies(cookies) {
             resetQueue();
             AppState._profilePromise = loadProfileAndAuxData();
             startFetching();
-            showToast('Autenticado com sucesso!', 'success');
+            showToast(t('toast.authSuccess'), 'success');
         } else if (result.errorCategory === 'access_denied') {
             showAccessDenied(result);
         } else {
-            showToast(result.error || 'Cookies inválidos', 'error');
+            showToast(result.error || t('toast.invalidCookies'), 'error');
         }
     } catch (error) {
-        showToast('Erro ao validar cookies', 'error');
+        showToast(t('toast.authError'), 'error');
     } finally {
         authInFlight = false;
         setAuthLoading(false);
@@ -729,13 +780,13 @@ function showAccessDenied(result) {
     const modal = document.getElementById('accessDeniedModal');
     const msg = document.getElementById('accessDeniedMessage');
     const profileBox = document.getElementById('accessDeniedProfile');
-    msg.textContent = result.error || 'Acesso negado.';
+    msg.textContent = result.error || t('accessDenied.defaultMsg');
     if (result.profile && result.profile.userName) {
         const p = result.profile;
         const displayRank = (p.rank !== null && p.rank !== undefined) ? ('L' + (p.rank + 1)) : '';
         const tags = [];
         if (displayRank) tags.push(displayRank);
-        tags.push(p.isStaff ? 'Staff' : (p.isAreaManager ? 'AM' : 'não-AM'));
+        tags.push(p.isStaff ? t('profile.tag.staff') : (p.isAreaManager ? t('profile.tag.am') : t('profile.tag.notAm')));
         profileBox.innerHTML = `<strong>${escapeHtml(p.userName)}</strong> <span class="text-slate-500">· ${escapeHtml(tags.join(' · '))}</span>`;
         profileBox.classList.remove('hidden');
     } else {
@@ -773,7 +824,7 @@ function handleUnauthorized() {
         AppState.pendingAction = null;
     }
     removeUndoBanner();
-    showToast('Sessão expirou — faça login novamente', 'error');
+    showToast(t('toast.sessionExpired'), 'error');
     API.setSession(null);
     AppState.profile = null;
     AppState.authenticated = false;
@@ -796,17 +847,19 @@ function renderProfileHeader() {
     nameEl.textContent = p.userName || '';
     const tags = [];
     if (p.rank !== null && p.rank !== undefined) tags.push('L' + (p.rank + 1));
-    if (p.isStaff) tags.push('Staff');
-    else if (p.isAreaManager) tags.push('AM');
+    if (p.isStaff) tags.push(t('profile.tag.staff'));
+    else if (p.isAreaManager) tags.push(t('profile.tag.am'));
     rankEl.textContent = tags.join(' · ');
     // Pontos/edições no tooltip do badge (feature barata; já vem do /Session).
     const pstats = [];
-    if (p.totalPoints) pstats.push(Number(p.totalPoints).toLocaleString('pt-BR') + ' pontos');
-    if (p.totalEdits) pstats.push(Number(p.totalEdits).toLocaleString('pt-BR') + ' edições');
+    if (p.totalPoints) pstats.push(t('profile.points', { n: Number(p.totalPoints).toLocaleString(i18nLocale()) }));
+    if (p.totalEdits) pstats.push(t('profile.edits', { n: Number(p.totalEdits).toLocaleString(i18nLocale()) }));
     badge.title = pstats.length ? ((p.userName || '') + ' — ' + pstats.join(' · ')) : (p.userName || '');
     badge.classList.remove('hidden');
     const brandTitle = document.getElementById('brandTitle');
-    if (brandTitle) brandTitle.classList.add('hidden');
+    // sr-only (não 'hidden'): some visualmente mas fica na árvore de a11y como h1
+    // — mantém a hierarquia de headings contínua (h1 → h2 fila → h3 card).
+    if (brandTitle) brandTitle.classList.add('sr-only');
 }
 
 // Sair = esquecer o user completamente. Apaga sessão, stats, filters,
@@ -833,6 +886,8 @@ async function handleLogout() {
     AppState.authenticated = false;
     AppState.pendingAction = null;
     AppState.inFlightActions = 0;
+    AppState.history = {};
+    safeLS.remove(HISTORY_KEY); // logout = esquecer tudo (inclui histórico)
     saveStats();
     saveFilters();
     savePreferences();
@@ -845,7 +900,7 @@ async function handleLogout() {
     updateDevBadge();
     removeCurrentCardEl();
     showAuthScreen();
-    showToast('Sessão encerrada e dados apagados.', 'info');
+    showToast(t('toast.loggedOut'), 'info');
 }
 
 function resetQueue() {
@@ -871,6 +926,26 @@ function resetQueue() {
 
 function showLoading(visible) {
     document.getElementById('loadingCard').classList.toggle('hidden', !visible);
+}
+
+// Ordena a fila por data do pedido conforme AppState.filters.sortOrder. Client-side:
+// o Waze devolve tudo de uma vez, então ordenar localmente é confiável (B6).
+function sortQueue() {
+    const asc = AppState.filters.sortOrder === 'oldest';
+    AppState.queue.sort((a, b) => {
+        const da = (a && a.dateAdded) || 0;
+        const db = (b && b.dateAdded) || 0;
+        return asc ? da - db : db - da;
+    });
+}
+
+// Acumula as categorias vistas nos places carregados — fonte do filtro de categoria (B5).
+function trackSeenCategories(places) {
+    const set = new Set(AppState.seenCategories);
+    for (const p of places) {
+        if (Array.isArray(p.categories)) for (const c of p.categories) if (c) set.add(c);
+    }
+    AppState.seenCategories = [...set].sort((a, b) => String(a).localeCompare(String(b), i18nLocale()));
 }
 
 function fetchNextPage() {
@@ -904,6 +979,9 @@ function fetchNextPage() {
         if (AppState.filters.stateId) filters.stateId = AppState.filters.stateId;
         if (AppState.filters.managedAreaId) filters.managedAreaId = AppState.filters.managedAreaId;
     }
+    if (Array.isArray(AppState.filters.categories) && AppState.filters.categories.length > 0) {
+        filters.categories = AppState.filters.categories; // backend filtra server-side (core.mjs já aceita)
+    }
 
     AppState._fetchPromise = (async () => {
         try {
@@ -915,7 +993,7 @@ function fetchNextPage() {
                     AppState.hasMore = false;
                     handleUnauthorized();
                 } else {
-                    showToast(result.error || 'Erro ao carregar places', 'error');
+                    showToast(result.error || t('toast.loadPlacesError'), 'error');
                     AppState.loadError = true;
                     AppState.hasMore = false;
                 }
@@ -935,11 +1013,13 @@ function fetchNextPage() {
                 AppState.emptyPagesInRow = 0;
                 AppState.queue.push(...newPlaces);
                 AppState.serverTotal += newPlaces.length;
+                trackSeenCategories(newPlaces);
+                sortQueue();
             }
         } catch (error) {
             console.error('fetchNextPage error', error);
             if (epoch === AppState.fetchEpoch) {
-                showToast('Erro ao carregar places', 'error');
+                showToast(t('toast.loadPlacesError'), 'error');
                 AppState.loadError = true;
                 AppState.hasMore = false;
             }
@@ -1004,7 +1084,7 @@ function showCurrentPlace() {
     } catch (err) {
         console.error('Erro ao montar card, pulando place:', err, AppState.queue[0]);
         if (window.showToast) {
-            window.showToast('Erro ao mostrar place, pulando…', 'error');
+            window.showToast(t('toast.renderCardError'), 'error');
         }
         AppState.queue.shift();
         // Place quebrado descartado conta como tratado: decrementa o total e
@@ -1040,8 +1120,10 @@ function renderCurrentCard() {
     // Anuncia o novo card a leitor de tela (a fila avança sem foco mudar).
     const liveRegion = document.getElementById('cardLiveRegion');
     if (liveRegion) {
-        liveRegion.textContent = 'Novo pedido: ' + (place.name || 'sem nome') +
-            (place.updateType ? ', ' + place.updateType : '');
+        liveRegion.textContent = t('card.live.newRequest', {
+            name: place.name || t('card.noName'),
+            type: place.updateType ? ', ' + place.updateType : ''
+        });
     }
 
     const template = document.getElementById('cardTemplate');
@@ -1051,10 +1133,10 @@ function renderCurrentCard() {
     card.querySelector('.card-name').textContent = place.name;
     card.querySelector('.card-category').textContent = place.categories && place.categories.length > 0
         ? place.categories.join(', ')
-        : 'Sem categoria';
-    card.querySelector('.card-address').textContent = place.address || 'Endereço não disponível';
-    card.querySelector('.card-type').textContent = place.updateType || 'Tipo desconhecido';
-    card.querySelector('.card-creator').textContent = place.createdBy || 'Desconhecido';
+        : t('card.categories.empty');
+    card.querySelector('.card-address').textContent = place.address || t('card.address.empty');
+    card.querySelector('.card-type').textContent = place.updateType || t('card.type.empty');
+    card.querySelector('.card-creator').textContent = place.createdBy || t('card.creator.empty');
 
     if (place.isDelete) {
         card.querySelector('.card-delete-banner').classList.remove('hidden');
@@ -1068,7 +1150,7 @@ function renderCurrentCard() {
     if (ageStr) {
         const ageEl = card.querySelector('.card-age');
         ageEl.textContent = ageStr;
-        ageEl.title = new Date(place.dateAdded).toLocaleString('pt-BR');
+        ageEl.title = new Date(place.dateAdded).toLocaleString(i18nLocale());
         ageEl.classList.remove('hidden');
     }
 
@@ -1094,65 +1176,7 @@ function renderCurrentCard() {
     }
     wmeLink.href = `https://www.waze.com/pt-BR/editor?${wmeParams.join('&')}`;
 
-    const img = card.querySelector('.card-image');
-    const noImg = card.querySelector('.card-no-image');
-    const imgNav = card.querySelector('.card-image-nav');
-    const imgCount = card.querySelector('.card-image-count');
-    const imgPrev = card.querySelector('.card-image-prev');
-    const imgNext = card.querySelector('.card-image-next');
-    const newBadge = card.querySelector('.card-image-new-badge');
-    const newBorder = card.querySelector('.card-image-new-border');
-    const urls = place.imageUrls && place.imageUrls.length > 0
-        ? place.imageUrls
-        : (place.imageUrl ? [place.imageUrl] : []);
-
-    if (urls.length > 0) {
-        const newImageIdx = place.updateRequestID
-            ? urls.findIndex(u => u.indexOf(place.updateRequestID) !== -1)
-            : -1;
-        let currentImgIdx = newImageIdx >= 0 ? newImageIdx : 0;
-
-        const updateImage = () => {
-            img.src = urls[currentImgIdx];
-            img.alt = `Foto de ${place.name || 'place'} (${currentImgIdx + 1} de ${urls.length})`;
-            imgCount.textContent = `${currentImgIdx + 1} / ${urls.length}`;
-            const isNew = currentImgIdx === newImageIdx;
-            newBadge.classList.toggle('hidden', !isNew);
-            newBorder.classList.toggle('hidden', !isNew);
-        };
-        img.classList.remove('hidden');
-        img.classList.add('cursor-zoom-in');
-        noImg.classList.add('hidden');
-        img.decoding = 'async';
-        // Foto quebrada (404 do Waze) → cai pro placeholder "Sem Imagem".
-        img.onerror = () => { img.classList.add('hidden'); noImg.classList.remove('hidden'); };
-        updateImage();
-
-        img.addEventListener('click', (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            openLightbox(urls, currentImgIdx, newImageIdx, place.name);
-        });
-
-        if (urls.length > 1) {
-            imgNav.classList.remove('hidden');
-            imgPrev.addEventListener('click', (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                currentImgIdx = (currentImgIdx - 1 + urls.length) % urls.length;
-                updateImage();
-            });
-            imgNext.addEventListener('click', (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                currentImgIdx = (currentImgIdx + 1) % urls.length;
-                updateImage();
-            });
-        }
-    } else {
-        img.classList.add('hidden');
-        noImg.classList.remove('hidden');
-    }
+    renderCardImages(card, place);
 
     const brandRow = card.querySelector('.card-brand-row');
     const brandStr = (place.brand !== null && place.brand !== undefined) ? String(place.brand).trim() : '';
@@ -1166,24 +1190,7 @@ function renderCurrentCard() {
         brandRow.classList.remove('hidden');
     }
 
-    const changesBox = card.querySelector('.card-changes');
-    const changesList = card.querySelector('.card-changes-list');
-    if (place.changes && place.changes.length > 0) {
-        const visible = place.changes.slice(0, MAX_CHANGES_DISPLAY);
-        const hiddenCount = place.changes.length - visible.length;
-        let html = visible.map(c => `
-            <div class="diff-row">
-                <span class="text-xs font-semibold text-slate-600">${escapeHtml(c.label)}:</span>
-                <span class="diff-from">${escapeHtml(c.from)}</span>
-                <span class="diff-to">${escapeHtml(c.to)}</span>
-            </div>
-        `).join('');
-        if (hiddenCount > 0) {
-            html += `<div class="text-xs text-slate-500 italic pt-1">+ ${hiddenCount} outra(s) mudança(s)</div>`;
-        }
-        changesList.innerHTML = html;
-        changesBox.classList.remove('hidden');
-    }
+    renderCardChanges(card, place);
 
     // Botões de ação explícitos — gesto é atalho, nunca o único caminho
     // (M3/HIG). Também é o único caminho acessível a leitor de tela.
@@ -1202,6 +1209,91 @@ function renderCurrentCard() {
     document.getElementById('cardStack').appendChild(card);
     document.getElementById('noMoreCards').classList.add('hidden');
     prefetchNextImage();
+}
+
+// Renderiza a imagem/carrossel do card (extraído de renderCurrentCard — A1).
+function renderCardImages(card, place) {
+    const img = card.querySelector('.card-image');
+    const noImg = card.querySelector('.card-no-image');
+    const imgNav = card.querySelector('.card-image-nav');
+    const imgCount = card.querySelector('.card-image-count');
+    const imgPrev = card.querySelector('.card-image-prev');
+    const imgNext = card.querySelector('.card-image-next');
+    const newBadge = card.querySelector('.card-image-new-badge');
+    const newBorder = card.querySelector('.card-image-new-border');
+    const urls = place.imageUrls && place.imageUrls.length > 0
+        ? place.imageUrls
+        : (place.imageUrl ? [place.imageUrl] : []);
+
+    if (urls.length === 0) {
+        img.classList.add('hidden');
+        noImg.classList.remove('hidden');
+        return;
+    }
+
+    const newImageIdx = place.updateRequestID
+        ? urls.findIndex(u => u.indexOf(place.updateRequestID) !== -1)
+        : -1;
+    let currentImgIdx = newImageIdx >= 0 ? newImageIdx : 0;
+
+    const updateImage = () => {
+        img.src = urls[currentImgIdx];
+        img.alt = t('card.img.alt', { name: place.name || t('card.noName'), i: currentImgIdx + 1, n: urls.length });
+        imgCount.textContent = `${currentImgIdx + 1} / ${urls.length}`;
+        const isNew = currentImgIdx === newImageIdx;
+        newBadge.classList.toggle('hidden', !isNew);
+        newBorder.classList.toggle('hidden', !isNew);
+    };
+    img.classList.remove('hidden');
+    img.classList.add('cursor-zoom-in');
+    noImg.classList.add('hidden');
+    img.decoding = 'async';
+    // Foto quebrada (404 do Waze) → cai pro placeholder "Sem Imagem".
+    img.onerror = () => { img.classList.add('hidden'); noImg.classList.remove('hidden'); };
+    updateImage();
+
+    img.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        openLightbox(urls, currentImgIdx, newImageIdx, place.name);
+    });
+
+    if (urls.length > 1) {
+        imgNav.classList.remove('hidden');
+        imgPrev.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            currentImgIdx = (currentImgIdx - 1 + urls.length) % urls.length;
+            updateImage();
+        });
+        imgNext.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            currentImgIdx = (currentImgIdx + 1) % urls.length;
+            updateImage();
+        });
+    }
+}
+
+// Renderiza o diff de mudanças propostas (extraído de renderCurrentCard — A1).
+function renderCardChanges(card, place) {
+    if (!place.changes || place.changes.length === 0) return;
+    const changesBox = card.querySelector('.card-changes');
+    const changesList = card.querySelector('.card-changes-list');
+    const visible = place.changes.slice(0, MAX_CHANGES_DISPLAY);
+    const hiddenCount = place.changes.length - visible.length;
+    let html = visible.map(c => `
+            <div class="diff-row">
+                <span class="text-xs font-semibold text-slate-600">${escapeHtml(c.label)}:</span>
+                <span class="diff-from">${escapeHtml(c.from)}</span>
+                <span class="diff-to">${escapeHtml(c.to)}</span>
+            </div>
+        `).join('');
+    if (hiddenCount > 0) {
+        html += `<div class="text-xs text-slate-500 italic pt-1">${escapeHtml(t(hiddenCount === 1 ? 'card.changes.more' : 'card.changes.morePlural', { n: hiddenCount }))}</div>`;
+    }
+    changesList.innerHTML = html;
+    changesBox.classList.remove('hidden');
 }
 
 // Pré-carrega a imagem do próximo place da fila — mata o flash branco no swipe.
@@ -1232,19 +1324,19 @@ function showNoPlaces() {
 function formatRelativeTime(ts) {
     if (!ts || typeof ts !== 'number' || ts <= 0) return null;
     const diff = Date.now() - ts;
-    if (diff < 0) return 'agora';
+    if (diff < 0) return t('time.now');
     const sec = Math.floor(diff / 1000);
-    if (sec < 60) return 'agora';
+    if (sec < 60) return t('time.now');
     const min = Math.floor(sec / 60);
-    if (min < 60) return `há ${min}min`;
+    if (min < 60) return t('time.minutes', { n: min });
     const hr = Math.floor(min / 60);
-    if (hr < 24) return `há ${hr}h`;
+    if (hr < 24) return t('time.hours', { n: hr });
     const days = Math.floor(hr / 24);
-    if (days < 30) return `há ${days}d`;
+    if (days < 30) return t('time.days', { n: days });
     const months = Math.floor(days / 30);
-    if (months < 12) return `há ${months}m`;
+    if (months < 12) return t('time.months', { n: months });
     const years = Math.floor(days / 365);
-    return `há ${years}a`;
+    return t('time.years', { n: years });
 }
 
 function escapeHtml(str) {
@@ -1269,14 +1361,70 @@ async function callWithRetry(fn) {
     return result;
 }
 
+// ── Histórico acumulado (B7): buckets diários em localStorage ────────────────
+function loadHistory() {
+    if (AppState.history) return AppState.history;
+    let h = {};
+    try { h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}') || {}; } catch (e) { h = {}; }
+    AppState.history = h;
+    return h;
+}
+function historyTodayKey() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+// Registra no histórico persistente. type: 'read' | 'reject'. delta normalmente +1.
+function recordHistory(type, delta) {
+    if (type !== 'read' && type !== 'reject') return;
+    const h = loadHistory();
+    const k = historyTodayKey();
+    if (!h[k]) h[k] = { read: 0, rejected: 0 };
+    const field = type === 'read' ? 'read' : 'rejected';
+    h[k][field] = Math.max(0, (h[k][field] || 0) + (delta || 0));
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); } catch (e) {}
+}
+function getHistoryStats() {
+    const h = loadHistory();
+    const now = Date.now();
+    const tk = historyTodayKey();
+    const acc = { today: { read: 0, rejected: 0 }, week: { read: 0, rejected: 0 }, month: { read: 0, rejected: 0 }, total: { read: 0, rejected: 0 } };
+    for (const [k, v] of Object.entries(h)) {
+        const r = v.read || 0, j = v.rejected || 0;
+        acc.total.read += r; acc.total.rejected += j;
+        if (k === tk) { acc.today.read += r; acc.today.rejected += j; }
+        const ageDays = Math.floor((now - new Date(k + 'T00:00:00').getTime()) / 86400000);
+        if (ageDays >= 0 && ageDays < 7) { acc.week.read += r; acc.week.rejected += j; }
+        if (ageDays >= 0 && ageDays < 30) { acc.month.read += r; acc.month.rejected += j; }
+    }
+    return acc;
+}
+function renderHistory() {
+    const el = document.getElementById('historyBody');
+    if (!el) return;
+    const s = getHistoryStats();
+    if (s.total.read + s.total.rejected === 0) {
+        el.innerHTML = `<p class="text-xs text-slate-500">${escapeHtml(t('stats.history.empty'))}</p>`;
+        return;
+    }
+    const rows = [['today', s.today], ['week', s.week], ['month', s.month], ['total', s.total]];
+    el.innerHTML = rows.map(([k, v]) =>
+        `<div class="flex justify-between items-baseline text-sm py-0.5">` +
+        `<span class="text-slate-600 dark:text-slate-300">${escapeHtml(t('stats.history.' + k))}</span>` +
+        `<span class="tnum font-medium"><span class="text-emerald-700 dark:text-emerald-400">${v.read}</span>` +
+        ` · <span class="text-rose-600 dark:text-rose-400">${v.rejected}</span></span></div>`
+    ).join('');
+}
+
 function handleActionResult(actionType, place, result) {
     if (!result) return;
-    if (result.success) return;
+    if (result.success) { recordHistory(actionType, 1); return; }
 
     const cat = result.errorCategory || 'unknown';
 
     if (cat === 'already_processed' || cat === 'not_found') {
-        showToast('Já tratado por outro editor 👍', 'info');
+        recordHistory(actionType, 1);
+        showToast(t('toast.alreadyProcessed'), 'info');
         return;
     }
 
@@ -1290,8 +1438,8 @@ function handleActionResult(actionType, place, result) {
     AppState.serverTotal++;
     updateStats();
     saveStats();
-    const verb = actionType === 'read' ? 'marcar como lido' : 'rejeitar place';
-    showToast((result.error || `Erro ao ${verb}`) + ' (não contabilizado)', 'error');
+    const verb = actionType === 'read' ? t('action.verb.read') : t('action.verb.reject');
+    showToast(result.error || t('toast.actionError', { verb }), 'error');
 }
 
 function handleMarkAsRead() {
@@ -1339,9 +1487,9 @@ function handleSkip() {
 // tudo de uma vez (hasMore geralmente false), a fila local ≈ tudo que resta.
 function openBatchReadConfirm() {
     const n = AppState.queue.length;
-    if (n === 0) { showToast('Nada na fila para marcar', 'info'); return; }
+    if (n === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
     const msgEl = document.getElementById('batchReadMessage');
-    if (msgEl) msgEl.textContent = `Marcar como lido os ${n} pedido(s) que já estão na fila? Vai direto pro Waze e não dá pra desfazer em lote.`;
+    if (msgEl) msgEl.textContent = t(n === 1 ? 'modal.batchRead.body' : 'modal.batchRead.bodyPlural', { n });
     openModal('batchReadModal');
 }
 
@@ -1350,14 +1498,14 @@ async function handleBatchMarkRead() {
     const items = AppState.queue
         .filter(p => p.venueID && p.updateRequestID)
         .map(p => ({ venueID: p.venueID, updateRequestID: p.updateRequestID }));
-    if (items.length === 0) { showToast('Nada na fila para marcar', 'info'); return; }
+    if (items.length === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
     // Descarrega qualquer undo pendente antes (consistência de estado).
     if (AppState.pendingAction) { AppState.pendingAction.execute(); AppState.pendingAction = null; }
     removeUndoBanner();
     const n = items.length;
     AppState.inFlightActions++;
     updateInFlightIndicator();
-    showToast(`Marcando ${n} como lidos…`, 'info');
+    showToast(t('toast.batchMarking', { n }), 'info');
     try {
         const result = await callWithRetry(() => API.markAsReadBatch(items));
         if (result && result.success) {
@@ -1366,14 +1514,14 @@ async function handleBatchMarkRead() {
             saveStats();
             resetQueue();       // zera a fila local; startFetching re-busca o que sobrou
             startFetching();
-            showToast(`${n} pedido(s) marcados como lidos 👍`, 'success');
+            showToast(t(n === 1 ? 'toast.batchDone' : 'toast.batchDonePlural', { n }), 'success');
         } else if (result && result.errorCategory === 'unauthorized') {
             handleUnauthorized();
         } else {
-            showToast((result && result.error) || 'Erro ao marcar em lote', 'error');
+            showToast((result && result.error) || t('toast.batchError'), 'error');
         }
     } catch (e) {
-        showToast('Erro ao marcar em lote', 'error');
+        showToast(t('toast.batchError'), 'error');
     } finally {
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
@@ -1490,7 +1638,7 @@ function scheduleAction(type, place, executor) {
         }
     };
 
-    const undoMsg = type === 'reject' ? 'Place rejeitado' : type === 'skip' ? 'Place pulado' : 'Marcado como lido';
+    const undoMsg = type === 'reject' ? t('undo.reject') : type === 'skip' ? t('undo.skip') : t('undo.read');
     showUndoBanner(undoMsg);
 }
 
@@ -1501,7 +1649,7 @@ function showUndoBanner(message) {
     banner.className = 'undo-banner';
     banner.innerHTML = `
         <span>${escapeHtml(message)}</span>
-        <button type="button" id="undoBtn">Desfazer</button>
+        <button type="button" id="undoBtn">${escapeHtml(t('undo.button'))}</button>
         <span class="undo-progress" style="animation-duration: ${UNDO_WINDOW_MS}ms" aria-hidden="true"></span>
     `;
     container.appendChild(banner);
@@ -1536,7 +1684,7 @@ function updateInFlightIndicator() {
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
         </svg>
-        <span>Enviando ${AppState.inFlightActions}…</span>
+        <span>${escapeHtml(t('indicator.sending', { n: AppState.inFlightActions }))}</span>
     `;
 }
 
@@ -1599,6 +1747,8 @@ function loadFilters() {
             AppState.filters.managedAreaId = parsed.managedAreaId || '';
             AppState.filters.myArea = !!parsed.myArea;
             AppState.filters.unreadOnly = parsed.unreadOnly !== false;
+            AppState.filters.categories = Array.isArray(parsed.categories) ? parsed.categories : [];
+            AppState.filters.sortOrder = parsed.sortOrder === 'oldest' ? 'oldest' : 'newest';
         }
     } catch (e) {}
 }
@@ -1655,10 +1805,10 @@ function setupDevModeTapTrigger(el) {
             AppState.devMode.unlocked = true;
             saveDevMode();
             tapCount = 0;
-            if (window.showToast) window.showToast('Modo Desenvolvedor desbloqueado 🛠️', 'success');
+            if (window.showToast) window.showToast(t('toast.devUnlocked'), 'success');
         } else if (remaining > 0 && remaining <= 3) {
             if (window.showToast) {
-                window.showToast(`Faltam ${remaining} para o Modo Desenvolvedor`, 'info');
+                window.showToast(t('toast.devCountdown', { n: remaining }), 'info');
             }
         }
     });
@@ -1744,10 +1894,10 @@ function renderUndoGateUI() {
     const threshold = getUndoUnlockThreshold();
     const current = getUndoTreatedCount();
     if (!isFinite(threshold)) {
-        gateMsg.textContent = '🔒 Disponível depois de você logar e a app carregar seu perfil.';
+        gateMsg.textContent = t('prefs.undo.gate.noProfile');
     } else {
         const remaining = Math.max(0, threshold - current);
-        gateMsg.textContent = `🔒 Disponível depois de tratar ${threshold} PURs (você tem ${current} — faltam ${remaining}).`;
+        gateMsg.textContent = t('prefs.undo.gate.countdown', { threshold, current, remaining });
     }
     gateMsg.classList.remove('hidden');
 }
@@ -1767,6 +1917,8 @@ function applyTheme(theme) {
     document.body.classList.toggle('dark', isDark);
     document.getElementById('themeIconLight').classList.toggle('hidden', isDark);
     document.getElementById('themeIconDark').classList.toggle('hidden', !isDark);
+    const themeBtn = document.getElementById('themeBtn');
+    if (themeBtn) themeBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
     // Status bar (Android/PWA) acompanha a surface do header, não a cor da marca
     const themeColor = document.querySelector('meta[name="theme-color"]');
     if (themeColor) themeColor.setAttribute('content', isDark ? '#0f172a' : '#f8fafc');
@@ -1799,7 +1951,7 @@ function showToast(message, type = 'info', durationMs = 4000) {
 
     toast.className = `toast ${colors[type]} text-white font-medium text-sm`;
     toast.innerHTML = `${icons[type]}<span class="flex-1">${escapeHtml(message)}</span>`;
-    toast.title = 'Toque para dispensar';
+    toast.title = t('toast.dismissHint');
 
     let removed = false;
     const dismiss = () => {
