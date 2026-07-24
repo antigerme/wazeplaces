@@ -21,6 +21,7 @@ import {
   filterWazeCookies,
   cookieHeaderFrom,
   isWazeCookieDomain,
+  buildPlacesFromSearch,
   SESSION_TTL,
   WAZE_REGIONS,
 } from '../server/core.mjs';
@@ -148,4 +149,91 @@ test('isWazeCookieDomain: aceita waze.com/subdomínios, rejeita look-alikes', ()
 test('constantes de sanidade', () => {
   assert.equal(SESSION_TTL, 1814400);
   assert.ok(WAZE_REGIONS.row.includes('waze.com'));
+});
+
+// ─── buildPlacesFromSearch: expansão de PURs em cards ────────────────────────
+// Fixture derivada de HAR REAL (bug "place volta", 2026-07-24): venue
+// "3o Batalhão PMDF" com 2 PURs — IMAGE já lida + REQUEST/UPDATE não-lido.
+// O filtro isRead do Waze é POR VENUE, então o venue volta na busca de não
+// lidos enquanto o REQUEST (gated, invisível na app) seguir não-lido. O core
+// PRECISA pular PURs já lidos, senão a foto lida re-vira card eternamente.
+const harBatalhao = () => ({
+  users: { objects: [{ id: 2254353226, userName: 'AoInfinito' }] },
+  streets: { objects: [] },
+  cities: { objects: [] },
+  states: { objects: [] },
+  venues: {
+    objects: [
+      {
+        id: '204539498.2045591592.1970007',
+        name: '3o Batalhão PMDF',
+        permissions: -1,
+        categories: ['POLICE_STATION'],
+        images: [{ id: 'img-aprovada-1' }],
+        venueUpdateRequests: [
+          {
+            id: '3f0be7f8-d26f-4d59-96e0-4a62e3cbc380',
+            venueID: '204539498.2045591592.1970007',
+            type: 'REQUEST',
+            subType: 'UPDATE',
+            changedVenue: { categories: ['OTHER', 'POLICE_STATION'] },
+            createdBy: 2254353226,
+            isRead: false,
+          },
+          {
+            id: '5dd54258-1bfe-4739-8b72-db4c418b1e79',
+            venueID: '204539498.2045591592.1970007',
+            type: 'IMAGE',
+            createdBy: 2254353226,
+            isRead: true,
+          },
+        ],
+      },
+    ],
+  },
+});
+
+test('buildPlacesFromSearch: PUR já lido NÃO vira card com unreadOnly (bug do "place volta")', () => {
+  // Cenário exato do HAR: user marcou a foto como lida, venue volta na busca
+  // por causa do REQUEST irmão. Antes do fix: 1 card (a foto lida, de novo).
+  const places = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
+  assert.equal(places.length, 0, 'foto já lida não pode voltar como card');
+});
+
+test('buildPlacesFromSearch: unreadOnly=false inclui PURs lidos (modo "incluir lidos")', () => {
+  const places = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: false });
+  assert.equal(places.length, 1);
+  assert.equal(places[0].updateRequestID, '5dd54258-1bfe-4739-8b72-db4c418b1e79');
+  assert.equal(places[0].reqType, 'IMAGE');
+});
+
+test('buildPlacesFromSearch: PUR não-lido vira card normalmente', () => {
+  const rd = harBatalhao();
+  rd.venues.objects[0].venueUpdateRequests[1].isRead = false;
+  const places = buildPlacesFromSearch(rd, { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
+  assert.equal(places.length, 1);
+  assert.equal(places[0].updateRequestID, '5dd54258-1bfe-4739-8b72-db4c418b1e79');
+});
+
+test('buildPlacesFromSearch: isRead ausente entra na fila (defensivo, como permissions)', () => {
+  const rd = harBatalhao();
+  delete rd.venues.objects[0].venueUpdateRequests[1].isRead;
+  const places = buildPlacesFromSearch(rd, { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
+  assert.equal(places.length, 1);
+});
+
+test('buildPlacesFromSearch: REQUEST/UPDATE não-lido vira card quando o tipo é pedido (dev mode)', () => {
+  const places = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['REQUEST'], unreadOnly: true });
+  assert.equal(places.length, 1);
+  assert.equal(places[0].reqType, 'REQUEST');
+  assert.equal(places[0].createdBy, 'AoInfinito');
+  assert.ok(places[0].changes.some((c) => c.field === 'categories'));
+});
+
+test('buildPlacesFromSearch: venue sem permissão de edição é descartado inteiro', () => {
+  const rd = harBatalhao();
+  rd.venues.objects[0].permissions = 0;
+  rd.venues.objects[0].venueUpdateRequests.forEach((ur) => { ur.isRead = false; });
+  const places = buildPlacesFromSearch(rd, { filterTypes: null, unreadOnly: true });
+  assert.equal(places.length, 0);
 });

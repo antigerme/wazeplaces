@@ -491,6 +491,15 @@ async function handleBuscarPlaces(data, { sessions }) {
     apiError('Resposta inválida da API do Waze', 500);
   }
 
+  const places = buildPlacesFromSearch(rd, { filterTypes, unreadOnly });
+
+  const hasMore = !!(rd?.mapIssues?.venueUpdateRequests?.hasMore);
+  return { status: 200, body: { success: true, places, hasMore, page, total: places.length } };
+}
+
+// Expansão pura da resposta do Issues/Search/List em cards (um por PUR).
+// Exportada pra suite testar com fixtures de HAR real, sem rede.
+export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = true } = {}) {
   const usersDict = {};
   for (const u of rd?.users?.objects || []) usersDict[u.id] = u.userName;
   const streetsDict = {};
@@ -582,6 +591,13 @@ async function handleBuscarPlaces(data, { sessions }) {
 
       const reqType = ur.type || '';
       const reqSubType = ur.subType || '';
+      // O filtro isRead que mandamos ao Waze (userPropertiesFilter) é POR VENUE:
+      // o venue volta se QUALQUER PUR dele estiver não-lido. Sem este skip por
+      // PUR, uma foto já lida re-vira card eternamente enquanto um PUR irmão
+      // (ex.: REQUEST, gated e invisível na app) seguir não-lido — o place
+      // "volta" sem o user ter como sair do loop. Confirmado via HAR (Batalhão
+      // PMDF: IMAGE isRead:true + REQUEST isRead:false → venue retornava sempre).
+      if (unreadOnly && ur.isRead === true) continue;
       if (filterTypes !== null && !filterTypes.includes(reqType)) continue;
 
       let updateTypeStr = 'Desconhecido';
@@ -648,8 +664,7 @@ async function handleBuscarPlaces(data, { sessions }) {
     }
   }
 
-  const hasMore = !!(rd?.mapIssues?.venueUpdateRequests?.hasMore);
-  return { status: 200, body: { success: true, places, hasMore, page, total: places.length } };
+  return places;
 }
 
 async function handleMarcarLido(data, { sessions }) {
