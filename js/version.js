@@ -4,7 +4,7 @@
 // FONTE ÚNICA: o CACHE_NAME do service-worker.js usa ESTE serial ('waze-places-' +
 // APP_VERSION) e a auditoria (test/version.test.mjs) trava a paridade/formato —
 // bump de versão = mexer AQUI e no service-worker.js juntos.
-const APP_VERSION = '2026071802';
+const APP_VERSION = '2026071901';
 
 // '2026071801' → '2026.07.18-01' (pra gente ler; o serial cru fica pras máquinas)
 function verLabel(v) {
