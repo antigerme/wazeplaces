@@ -48,6 +48,7 @@ const I18N_DICT = {
     // filters
     'filters.section.preferences': 'Preferências', 'filters.section.advanced': 'Avançado',
     'filters.section.filters': 'Filtros', 'filters.section.batch': 'Ações em lote',
+    'filters.section.location': 'Localização',
     'filters.language.label': 'Idioma',
     'prefs.undo.label': 'Permitir desfazer ações',
     'prefs.undo.desc': 'Mostra um aviso por 3 segundos pra você desfazer "Lido" ou "Rejeitar" antes do envio.',
@@ -197,6 +198,7 @@ const I18N_DICT = {
     'modal.batchRead.confirm': 'Mark read',
     'filters.section.preferences': 'Preferences', 'filters.section.advanced': 'Advanced',
     'filters.section.filters': 'Filters', 'filters.section.batch': 'Bulk actions',
+    'filters.section.location': 'Location',
     'filters.language.label': 'Language',
     'prefs.undo.label': 'Allow undoing actions',
     'prefs.undo.desc': 'Shows a 3-second banner so you can undo "Read" or "Reject" before it is sent.',
@@ -334,6 +336,7 @@ const I18N_DICT = {
     'modal.batchRead.confirm': 'Marcar leídos',
     'filters.section.preferences': 'Preferencias', 'filters.section.advanced': 'Avanzado',
     'filters.section.filters': 'Filtros', 'filters.section.batch': 'Acciones en lote',
+    'filters.section.location': 'Ubicación',
     'filters.language.label': 'Idioma',
     'prefs.undo.label': 'Permitir deshacer acciones',
     'prefs.undo.desc': 'Muestra un aviso de 3 segundos para deshacer "Leído" o "Rechazar" antes del envío.',
