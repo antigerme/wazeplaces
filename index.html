@@ -203,18 +203,146 @@
             </div>
         </div>
 
+        <!-- Modal Filtros e Preferências: 3 abas (Filtros | Preferências | Histórico).
+             Rodapé é CONTEXTUAL: Cancelar/Aplicar só na aba Filtros (formulário);
+             Preferências aplicam na hora (padrão M3 pra settings) e Histórico é só
+             leitura → ambas usam "Fechar". IDs de todos os campos preservados. -->
         <div id="filtersModal" role="dialog" aria-modal="true" aria-labelledby="filtersModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full flex flex-col max-h-[85dvh]">
-                <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100 flex-shrink-0">
+                <div class="flex justify-between items-center px-6 pt-4 pb-2 flex-shrink-0">
                     <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800" data-i18n="modal.filters.title">Filtros e Preferências</h3>
                     <button id="closeFilters" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                 </div>
 
-                <div class="flex-1 overflow-y-auto overscroll-contain px-6 py-4 space-y-4">
-                    <div>
-                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2" data-i18n="filters.section.preferences">Preferências</h4>
+                <div class="px-6 pb-3 border-b border-slate-100 flex-shrink-0">
+                    <div role="tablist" aria-labelledby="filtersModalTitle" class="seg-tabs">
+                        <button type="button" role="tab" id="filtersTabFilters" aria-selected="true" aria-controls="filtersPanelFilters" class="seg-tab" data-i18n="filters.section.filters">Filtros</button>
+                        <button type="button" role="tab" id="filtersTabPrefs" aria-selected="false" tabindex="-1" aria-controls="filtersPanelPrefs" class="seg-tab" data-i18n="filters.section.preferences">Preferências</button>
+                        <button type="button" role="tab" id="filtersTabHistory" aria-selected="false" tabindex="-1" aria-controls="filtersPanelHistory" class="seg-tab" data-i18n="stats.history.title">Histórico</button>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-y-auto overscroll-contain px-6 py-4">
+
+                    <!-- ══ ABA FILTROS ══ -->
+                    <div id="filtersPanelFilters" role="tabpanel" aria-labelledby="filtersTabFilters" class="space-y-4">
+                        <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3">
+                            <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
+                                <span>
+                                    <span class="font-semibold text-slate-700" data-i18n="filters.unreadOnly.label">Apenas pedidos não lidos</span>
+                                    <span class="block text-xs text-slate-500" data-i18n="filters.unreadOnly.desc">Padrão. Desmarque para incluir pedidos já marcados como lidos.</span>
+                                </span>
+                                <input id="filterUnreadOnly" type="checkbox" class="ui-switch" checked>
+                            </label>
+                        </div>
+
+                        <fieldset>
+                            <legend class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.types.legend">Tipos de Pedido</legend>
+                            <div class="space-y-1">
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="VENUE" checked> <span data-i18n="filters.types.venue">Novos Locais</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="IMAGE" checked> <span data-i18n="filters.types.image">Novas Fotos</span></label>
+                                <label id="filterTypeRequestRow" class="hidden flex items-center gap-3 text-sm min-h-[44px] cursor-pointer">
+                                    <input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="REQUEST">
+                                    <span><span data-i18n="filters.types.request">Reportes/Atualizações</span> <span class="text-[10px] text-purple-500 dark:text-purple-300 font-semibold uppercase tracking-wider ml-1">DEV</span></span>
+                                </label>
+                            </div>
+                        </fieldset>
+
+                        <div>
+                            <label for="filterCategory" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.category.label">Categoria</label>
+                            <select id="filterCategory" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
+                                <option value="" data-i18n="filters.category.all">Todas as categorias</option>
+                            </select>
+                            <p class="text-[11px] text-slate-500 mt-1" data-i18n="filters.category.hint">Categorias vistas nos pedidos já carregados.</p>
+                        </div>
+
+                        <div>
+                            <label for="filterResidential" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.residential.label">Residenciais</label>
+                            <select id="filterResidential" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
+                                <option value="" data-i18n="filters.residential.any">Indiferente</option>
+                                <option value="false" data-i18n="filters.residential.exclude">Excluir residenciais</option>
+                                <option value="true" data-i18n="filters.residential.only">Apenas residenciais</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="filterSort" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.sort.label">Ordenar por</label>
+                            <select id="filterSort" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
+                                <option value="newest" data-i18n="filters.sort.newest">Mais recentes primeiro</option>
+                                <option value="oldest" data-i18n="filters.sort.oldest">Mais antigos primeiro</option>
+                            </select>
+                        </div>
+
+                        <div class="pt-1">
+                            <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2" data-i18n="filters.section.location">Localização</h4>
+                            <div class="space-y-4">
+                                <div>
+                                    <label for="filterRegion" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.region.label">Região</label>
+                                    <select id="filterRegion" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
+                                        <option value="row">ROW</option>
+                                        <option value="na">NA</option>
+                                        <option value="il">IL</option>
+                                        <option value="world">World</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label for="filterCountry" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.country.label">País</label>
+                                    <select id="filterCountry" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
+                                        <option value="30">Brasil</option>
+                                    </select>
+                                    <p id="filterCountryHint" class="hidden text-[11px] text-amber-700 dark:text-amber-300 mt-1" data-i18n="filters.country.hint">Mostrando apenas países que você pode editar.</p>
+                                </div>
+
+                                <div>
+                                    <label for="filterState" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.state.label">Estado</label>
+                                    <select id="filterState" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
+                                        <option value="" data-i18n="filters.state.all">Todos os estados</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label for="filterManagedArea" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.managedArea.label">Área gerenciada</label>
+                                    <select id="filterManagedArea" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
+                                        <option value="" data-i18n="filters.managedArea.none">Nenhuma</option>
+                                    </select>
+                                </div>
+
+                                <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3">
+                                    <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
+                                        <span>
+                                            <span class="font-semibold text-slate-700" data-i18n="filters.myArea.label">Filtrar pela minha área de edição</span>
+                                            <span class="block text-xs text-slate-500" data-i18n="filters.myArea.desc">Usa o bbox da sua "drive area" do Waze (ignora país/estado)</span>
+                                        </span>
+                                        <input id="filterMyArea" type="checkbox" class="ui-switch">
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="pt-1 border-t border-slate-100 dark:border-slate-700">
+                            <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-3" data-i18n="filters.section.batch">Ações em lote</h4>
+                            <button id="batchReadBtn" type="button" class="w-full min-h-[48px] bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-emerald-100 dark:border-emerald-400/30">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                <span data-i18n="batch.button">Marcar todos os pendentes como lidos</span>
+                            </button>
+                            <p class="text-[11px] text-slate-500 mt-1.5" data-i18n="batch.hint">Marca de uma vez todos os pedidos já carregados na fila. Vai direto pro Waze, sem desfazer.</p>
+                        </div>
+                    </div>
+
+                    <!-- ══ ABA PREFERÊNCIAS (aplicam na hora, sem "Aplicar") ══ -->
+                    <div id="filtersPanelPrefs" role="tabpanel" aria-labelledby="filtersTabPrefs" class="hidden space-y-4">
+                        <div>
+                            <label for="langSelect" class="text-sm font-semibold text-slate-700 block mb-1" data-i18n="filters.language.label">Idioma</label>
+                            <select id="langSelect" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
+                                <option value="pt">Português</option>
+                                <option value="en">English</option>
+                                <option value="es">Español</option>
+                            </select>
+                        </div>
+
                         <div class="bg-amber-50 dark:bg-amber-400/10 border border-amber-100 dark:border-amber-400/30 rounded-xl p-3">
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
                                 <span>
@@ -225,132 +353,23 @@
                             </label>
                             <p id="prefUndoGateMsg" class="hidden mt-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-100/60 dark:bg-amber-400/10 border border-amber-200 dark:border-amber-400/30 rounded-lg px-2 py-1.5 leading-snug"></p>
                         </div>
-                        <div class="mt-3">
-                            <label for="langSelect" class="text-sm font-semibold text-slate-700 block mb-1" data-i18n="filters.language.label">Idioma</label>
-                            <select id="langSelect" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
-                                <option value="pt">Português</option>
-                                <option value="en">English</option>
-                                <option value="es">Español</option>
-                            </select>
+
+                        <div id="devModeSection" class="hidden">
+                            <h4 class="text-xs font-bold text-purple-500 dark:text-purple-300 uppercase tracking-wider mb-2" data-i18n="filters.section.advanced">Avançado</h4>
+                            <div class="bg-purple-50 dark:bg-purple-400/10 border border-purple-100 dark:border-purple-400/30 rounded-xl p-3">
+                                <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
+                                    <span>
+                                        <span class="font-semibold text-slate-700" data-i18n="prefs.devMode.label">Modo Desenvolvedor 🛠️</span>
+                                        <span class="block text-xs text-slate-500" data-i18n="prefs.devMode.desc">Remove restrições da app (ex: trava do "Permitir desfazer ações"). Use com cuidado — ações vão direto pro Waze sem janela de undo.</span>
+                                    </span>
+                                    <input id="prefDevModeActive" type="checkbox" class="ui-switch">
+                                </label>
+                            </div>
                         </div>
                     </div>
 
-                    <div id="devModeSection" class="hidden">
-                        <h4 class="text-xs font-bold text-purple-500 dark:text-purple-300 uppercase tracking-wider mb-2" data-i18n="filters.section.advanced">Avançado</h4>
-                        <div class="bg-purple-50 dark:bg-purple-400/10 border border-purple-100 dark:border-purple-400/30 rounded-xl p-3">
-                            <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                <span>
-                                    <span class="font-semibold text-slate-700" data-i18n="prefs.devMode.label">Modo Desenvolvedor 🛠️</span>
-                                    <span class="block text-xs text-slate-500" data-i18n="prefs.devMode.desc">Remove restrições da app (ex: trava do "Permitir desfazer ações"). Use com cuidado — ações vão direto pro Waze sem janela de undo.</span>
-                                </span>
-                                <input id="prefDevModeActive" type="checkbox" class="ui-switch">
-                            </label>
-                        </div>
-                    </div>
-
-                    <div>
-                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2" data-i18n="header.filters.aria">Filtros</h4>
-                        <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3">
-                            <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                <span>
-                                    <span class="font-semibold text-slate-700" data-i18n="filters.unreadOnly.label">Apenas pedidos não lidos</span>
-                                    <span class="block text-xs text-slate-500" data-i18n="filters.unreadOnly.desc">Padrão. Desmarque para incluir pedidos já marcados como lidos.</span>
-                                </span>
-                                <input id="filterUnreadOnly" type="checkbox" class="ui-switch" checked>
-                            </label>
-                        </div>
-                    </div>
-
-                    <fieldset>
-                        <legend class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.types.legend">Tipos de Pedido</legend>
-                        <div class="space-y-1">
-                            <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="VENUE" checked> <span data-i18n="filters.types.venue">Novos Locais</span></label>
-                            <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="IMAGE" checked> <span data-i18n="filters.types.image">Novas Fotos</span></label>
-                            <label id="filterTypeRequestRow" class="hidden flex items-center gap-3 text-sm min-h-[44px] cursor-pointer">
-                                <input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="REQUEST">
-                                <span><span data-i18n="filters.types.request">Reportes/Atualizações</span> <span class="text-[10px] text-purple-500 dark:text-purple-300 font-semibold uppercase tracking-wider ml-1">DEV</span></span>
-                            </label>
-                        </div>
-                    </fieldset>
-
-                    <div>
-                        <label for="filterResidential" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.residential.label">Residenciais</label>
-                        <select id="filterResidential" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
-                            <option value="" data-i18n="filters.residential.any">Indiferente</option>
-                            <option value="false" data-i18n="filters.residential.exclude">Excluir residenciais</option>
-                            <option value="true" data-i18n="filters.residential.only">Apenas residenciais</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label for="filterCategory" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.category.label">Categoria</label>
-                        <select id="filterCategory" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
-                            <option value="" data-i18n="filters.category.all">Todas as categorias</option>
-                        </select>
-                        <p class="text-[11px] text-slate-500 mt-1" data-i18n="filters.category.hint">Categorias vistas nos pedidos já carregados.</p>
-                    </div>
-
-                    <div>
-                        <label for="filterSort" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.sort.label">Ordenar por</label>
-                        <select id="filterSort" class="w-full min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm">
-                            <option value="newest" data-i18n="filters.sort.newest">Mais recentes primeiro</option>
-                            <option value="oldest" data-i18n="filters.sort.oldest">Mais antigos primeiro</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label for="filterRegion" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.region.label">Região</label>
-                        <select id="filterRegion" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
-                            <option value="row">ROW</option>
-                            <option value="na">NA</option>
-                            <option value="il">IL</option>
-                            <option value="world">World</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label for="filterCountry" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.country.label">País</label>
-                        <select id="filterCountry" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
-                            <option value="30">Brasil</option>
-                        </select>
-                        <p id="filterCountryHint" class="hidden text-[11px] text-amber-700 dark:text-amber-300 mt-1" data-i18n="filters.country.hint">Mostrando apenas países que você pode editar.</p>
-                    </div>
-
-                    <div>
-                        <label for="filterState" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.state.label">Estado</label>
-                        <select id="filterState" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
-                            <option value="" data-i18n="filters.state.all">Todos os estados</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label for="filterManagedArea" class="text-sm font-semibold text-slate-700 block mb-2" data-i18n="filters.managedArea.label">Área gerenciada</label>
-                        <select id="filterManagedArea" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
-                            <option value="" data-i18n="filters.managedArea.none">Nenhuma</option>
-                        </select>
-                    </div>
-
-                    <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3">
-                        <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                            <span>
-                                <span class="font-semibold text-slate-700" data-i18n="filters.myArea.label">Filtrar pela minha área de edição</span>
-                                <span class="block text-xs text-slate-500" data-i18n="filters.myArea.desc">Usa o bbox da sua "drive area" do Waze (ignora país/estado)</span>
-                            </span>
-                            <input id="filterMyArea" type="checkbox" class="ui-switch">
-                        </label>
-                    </div>
-
-                    <div>
-                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2" data-i18n="filters.section.batch">Ações em lote</h4>
-                        <button id="batchReadBtn" type="button" class="w-full min-h-[48px] bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-emerald-100 dark:border-emerald-400/30">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                            <span data-i18n="batch.button">Marcar todos os pendentes como lidos</span>
-                        </button>
-                        <p class="text-[11px] text-slate-500 mt-1.5" data-i18n="batch.hint">Marca de uma vez todos os pedidos já carregados na fila. Vai direto pro Waze, sem desfazer.</p>
-                    </div>
-
-                    <div>
-                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2" data-i18n="stats.history.title">Histórico</h4>
+                    <!-- ══ ABA HISTÓRICO (só leitura) ══ -->
+                    <div id="filtersPanelHistory" role="tabpanel" aria-labelledby="filtersTabHistory" class="hidden">
                         <div class="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl p-3">
                             <div class="flex justify-end gap-3 text-[10px] uppercase tracking-wider mb-1.5">
                                 <span class="text-emerald-700 dark:text-emerald-400" data-i18n="stats.read">Lidos</span>
@@ -361,9 +380,11 @@
                     </div>
                 </div>
 
-                <div class="flex space-x-3 px-6 py-4 border-t border-slate-100 flex-shrink-0">
+                <!-- Rodapé contextual: gap-3 (e não space-x) pra botão escondido não deixar vão -->
+                <div class="flex gap-3 px-6 py-4 border-t border-slate-100 flex-shrink-0">
                     <button id="cancelFilters" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.cancel">Cancelar</button>
                     <button id="applyFilters" type="button" class="flex-1 min-h-[48px] bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.apply">Aplicar</button>
+                    <button id="closeFiltersFooter" type="button" class="hidden flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.close">Fechar</button>
                 </div>
             </div>
         </div>

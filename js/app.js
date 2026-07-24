@@ -236,14 +236,62 @@ function setupLanguageSwitcher() {
     });
 }
 
+// Abas do modal "Filtros e Preferências" (padrão WAI-ARIA Tabs: aria-selected,
+// roving tabindex, navegação por setas). Cada aba mostra seu painel e ajusta o
+// rodapé: Filtros é formulário (Cancelar/Aplicar); Preferências aplicam na hora
+// e Histórico é só leitura (ambas mostram só "Fechar").
+const FILTER_TABS = [
+    { tab: 'filtersTabFilters', panel: 'filtersPanelFilters' },
+    { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' },
+    { tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }
+];
+
+function switchFilterTab(tabId) {
+    const $ = id => document.getElementById(id);
+    FILTER_TABS.forEach(({ tab, panel }) => {
+        const selected = tab === tabId;
+        const btn = $(tab);
+        if (!btn) return;
+        btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+        btn.tabIndex = selected ? 0 : -1;
+        $(panel).classList.toggle('hidden', !selected);
+    });
+    const isFilters = tabId === 'filtersTabFilters';
+    $('cancelFilters').classList.toggle('hidden', !isFilters);
+    $('applyFilters').classList.toggle('hidden', !isFilters);
+    $('closeFiltersFooter').classList.toggle('hidden', isFilters);
+}
+
+function setupFilterTabs() {
+    const $ = id => document.getElementById(id);
+    FILTER_TABS.forEach(({ tab }, i) => {
+        const btn = $(tab);
+        if (!btn) return;
+        btn.addEventListener('click', () => switchFilterTab(tab));
+        btn.addEventListener('keydown', (e) => {
+            let target = null;
+            if (e.key === 'ArrowRight') target = FILTER_TABS[(i + 1) % FILTER_TABS.length];
+            else if (e.key === 'ArrowLeft') target = FILTER_TABS[(i - 1 + FILTER_TABS.length) % FILTER_TABS.length];
+            else if (e.key === 'Home') target = FILTER_TABS[0];
+            else if (e.key === 'End') target = FILTER_TABS[FILTER_TABS.length - 1];
+            if (!target) return;
+            e.preventDefault();
+            switchFilterTab(target.tab);
+            $(target.tab).focus();
+        });
+    });
+}
+
 function setupModalListeners() {
     const $ = id => document.getElementById(id);
     $('closeFilters').addEventListener('click', () => closeModal('filtersModal'));
     $('cancelFilters').addEventListener('click', () => closeModal('filtersModal'));
+    $('closeFiltersFooter').addEventListener('click', () => closeModal('filtersModal'));
     $('applyFilters').addEventListener('click', applyFiltersFromModal);
     $('batchReadBtn')?.addEventListener('click', openBatchReadConfirm);
     $('confirmBatchRead')?.addEventListener('click', handleBatchMarkRead);
     $('cancelBatchRead')?.addEventListener('click', () => closeModal('batchReadModal'));
+    setupFilterTabs();
     setupLanguageSwitcher();
     $('filterCountry').addEventListener('change', (e) => {
         loadStatesIntoSelect(parseInt(e.target.value, 10));
@@ -253,6 +301,37 @@ function setupModalListeners() {
         $('filterCountry').disabled = checked;
         $('filterState').disabled = checked;
         $('filterManagedArea').disabled = checked;
+    });
+
+    // Preferências aplicam NA HORA (padrão M3 pra settings: switch = efeito
+    // imediato; o "Aplicar" do rodapé pertence só à aba Filtros). O idioma já
+    // funcionava assim (setupLanguageSwitcher); undo e dev mode agora também —
+    // antes, trocar o switch e fechar sem "Aplicar" perdia a mudança em silêncio.
+    $('prefUndoEnabled').addEventListener('change', (e) => {
+        // Gate: sem cota o checkbox fica disabled e nem dispara change; o
+        // canDisableUndo aqui é cinto de segurança contra DOM editado à mão.
+        AppState.preferences.undoEnabled = canDisableUndo() ? e.target.checked : true;
+        savePreferences();
+    });
+    $('prefDevModeActive').addEventListener('change', (e) => {
+        if (!AppState.devMode.unlocked) return;
+        AppState.devMode.active = e.target.checked;
+        saveDevMode();
+        updateDevBadge();
+        renderRequestTypeRow(); // linha REQUEST aparece/some ao vivo na aba Filtros
+        if (!e.target.checked) {
+            // Dev off: desmarca REQUEST no DOM (a linha some, mas um checked
+            // fantasma iria junto no próximo Aplicar) e tira do filtro salvo.
+            const reqCb = document.querySelector('.filter-type[value="REQUEST"]');
+            if (reqCb) reqCb.checked = false;
+            enforceDevGatedFilters();
+            // Dev off pode re-travar o gate do undo → força ligado de novo.
+            if (!canDisableUndo() && AppState.preferences.undoEnabled === false) {
+                AppState.preferences.undoEnabled = true;
+                savePreferences();
+            }
+        }
+        renderUndoGateUI();
     });
 }
 
@@ -542,6 +621,9 @@ function populateCategorySelect() {
 
 async function openFiltersModal() {
     const $ = id => document.getElementById(id);
+    // Sempre abre na aba Filtros (uso primário do botão do header); as outras
+    // abas ficam a um toque, sem "lembrar" estado velho de forma surpreendente.
+    switchFilterTab('filtersTabFilters');
     renderDevModeSection();
     renderRequestTypeRow();
     renderUndoGateUI();
@@ -585,22 +667,13 @@ function applyFiltersFromModal() {
         return;
     }
 
-    // Dev Mode: aplicado antes pra que canDisableUndo já reflita a nova flag
-    // antes de a gente decidir o undoEnabled.
-    if (AppState.devMode.unlocked) {
-        AppState.devMode.active = $('prefDevModeActive').checked;
-        saveDevMode();
-        updateDevBadge();
-    }
-    // Gate: se o user ainda não atingiu a cota (e dev mode não tá ativo),
-    // ignora o checkbox e força true. Evita burla via DevTools no DOM.
-    AppState.preferences.undoEnabled = canDisableUndo() ? $('prefUndoEnabled').checked : true;
-    savePreferences();
-
+    // Preferências (undo/dev/idioma) NÃO passam por aqui — aplicam na hora,
+    // via change listeners na aba Preferências (ver setupModalListeners).
+    // Este handler é só da aba Filtros.
     AppState.filters.unreadOnly = $('filterUnreadOnly').checked;
     AppState.filters.types = selectedTypes;
-    // Se o user desligou dev mode neste mesmo Apply, REQUEST pode ter ficado
-    // checked no DOM mas precisa sair do filtro.
+    // Backstop: se REQUEST entrou em selectedTypes com dev mode desligado
+    // (DOM editado à mão, estado velho), sai do filtro aqui.
     enforceDevGatedFilters();
     // Segurança: se o gate esvaziou os tipos (edge: só REQUEST + dev desligado),
     // volta ao default em vez de virar "todos os tipos".
