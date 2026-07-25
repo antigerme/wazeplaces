@@ -27,6 +27,7 @@ const AppState = {
     emptyPagesInRow: 0,
     fetching: false,
     serverTotal: 0,
+    serverBlocked: 0,   // D13: pedidos da região que este editor não pode editar
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
@@ -115,6 +116,7 @@ function initApp() {
         showMainScreen();
         AppState._profilePromise = loadProfileAndAuxData();
         startFetching();
+        handleLaunchAction();
     } else {
         showAuthScreen();
     }
@@ -280,6 +282,27 @@ function setupFilterTabs() {
             $(target.tab).focus();
         });
     });
+}
+
+// Atalhos do manifest PWA (long-press no ícone da app): /?action=filters e
+// /?action=refresh. Só valem com sessão ativa — deslogado a tela de auth manda.
+// A query é limpa da URL depois (replaceState) pra um F5 não repetir a ação.
+function handleLaunchAction() {
+    let action = null;
+    try {
+        action = new URLSearchParams(window.location.search).get('action');
+    } catch (e) { return; }
+    if (!action) return;
+    try {
+        window.history.replaceState({}, '', window.location.pathname);
+    } catch (e) {}
+    if (action === 'filters') {
+        openFiltersModal();
+    } else if (action === 'refresh') {
+        resetQueue();
+        startFetching();
+        showToast(t('toast.refreshing'), 'info');
+    }
 }
 
 function setupModalListeners() {
@@ -860,7 +883,7 @@ function showAccessDenied(result) {
         const tags = [];
         if (displayRank) tags.push(displayRank);
         tags.push(p.isStaff ? t('profile.tag.staff') : (p.isAreaManager ? t('profile.tag.am') : t('profile.tag.notAm')));
-        profileBox.innerHTML = `<strong>${escapeHtml(p.userName)}</strong> <span class="text-slate-500">· ${escapeHtml(tags.join(' · '))}</span>`;
+        profileBox.innerHTML = `<strong>${escapeHtml(p.userName)}</strong> <span class="text-slate-500 dark:text-slate-400">· ${escapeHtml(tags.join(' · '))}</span>`;
         profileBox.classList.remove('hidden');
     } else {
         profileBox.classList.add('hidden');
@@ -993,6 +1016,7 @@ function resetQueue() {
     AppState.emptyPagesInRow = 0;
     AppState.currentPlace = null;
     AppState.serverTotal = 0;
+    AppState.serverBlocked = 0;
     AppState.loadError = false;
     updatePendingCount();
 }
@@ -1075,6 +1099,10 @@ function fetchNextPage() {
 
             AppState.hasMore = !!result.hasMore;
             AppState.nextPage++;
+
+            // D13: acumula igual ao serverTotal (uma busca pode vir em páginas).
+            // Backend antigo não manda o campo → 0, e a dica simplesmente não aparece.
+            AppState.serverBlocked += Number(result.blocked) || 0;
 
             const newPlaces = result.places || [];
             if (newPlaces.length === 0) {
@@ -1357,13 +1385,13 @@ function renderCardChanges(card, place) {
     const hiddenCount = place.changes.length - visible.length;
     let html = visible.map(c => `
             <div class="diff-row">
-                <span class="text-xs font-semibold text-slate-600">${escapeHtml(c.label)}:</span>
+                <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(c.label)}:</span>
                 <span class="diff-from">${escapeHtml(c.from)}</span>
                 <span class="diff-to">${escapeHtml(c.to)}</span>
             </div>
         `).join('');
     if (hiddenCount > 0) {
-        html += `<div class="text-xs text-slate-500 italic pt-1">${escapeHtml(t(hiddenCount === 1 ? 'card.changes.more' : 'card.changes.morePlural', { n: hiddenCount }))}</div>`;
+        html += `<div class="text-xs text-slate-500 italic pt-1 dark:text-slate-400">${escapeHtml(t(hiddenCount === 1 ? 'card.changes.more' : 'card.changes.morePlural', { n: hiddenCount }))}</div>`;
     }
     changesList.innerHTML = html;
     changesBox.classList.remove('hidden');
@@ -1477,7 +1505,7 @@ function renderHistory() {
     if (!el) return;
     const s = getHistoryStats();
     if (s.total.read + s.total.rejected === 0) {
-        el.innerHTML = `<p class="text-xs text-slate-500">${escapeHtml(t('stats.history.empty'))}</p>`;
+        el.innerHTML = `<p class="text-xs text-slate-500 dark:text-slate-400">${escapeHtml(t('stats.history.empty'))}</p>`;
         return;
     }
     const rows = [['today', s.today], ['week', s.week], ['month', s.month], ['total', s.total]];
@@ -1780,6 +1808,27 @@ function updatePendingCount() {
         return;
     }
     el.textContent = AppState.hasMore ? (AppState.serverTotal + '+') : String(AppState.serverTotal);
+    updatePendingTotalHint();
+}
+
+// D13: "de N na região". `serverBlocked` são pedidos que existem na região mas
+// cujo venue este editor não pode editar — o backend os tira da fila (senão o
+// editor via card que não consegue tratar). Sem essa linha, o número da app
+// parece "errado" contra o que o WME mostra. Só aparece quando há bloqueados.
+function updatePendingTotalHint() {
+    const hint = document.getElementById('pendingTotalHint');
+    if (!hint) return;
+    const blocked = AppState.serverBlocked || 0;
+    if (!AppState.authenticated || blocked <= 0) {
+        hint.classList.add('hidden');
+        hint.textContent = '';
+        hint.removeAttribute('title');
+        return;
+    }
+    const total = AppState.serverTotal + blocked;
+    hint.textContent = t('stats.pending.ofRegion', { total });
+    hint.title = t('stats.pending.ofRegion.title', { blocked });
+    hint.classList.remove('hidden');
 }
 
 function saveStats() {

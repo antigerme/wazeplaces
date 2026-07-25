@@ -491,13 +491,29 @@ async function handleBuscarPlaces(data, { sessions }) {
     apiError('Resposta inválida da API do Waze', 500);
   }
 
-  const places = buildPlacesFromSearch(rd, { filterTypes, unreadOnly });
+  const { places, blocked } = buildPlacesFromSearch(rd, { filterTypes, unreadOnly });
 
   const hasMore = !!(rd?.mapIssues?.venueUpdateRequests?.hasMore);
-  return { status: 200, body: { success: true, places, hasMore, page, total: places.length } };
+  return {
+    status: 200,
+    body: {
+      success: true,
+      places,
+      hasMore,
+      page,
+      total: places.length,
+      // totalAll = o que existe na região pros filtros atuais, INCLUINDO os que
+      // este editor não pode editar (venue.permissions >= 0). A app trata só os
+      // editáveis; o extra vira a dica "de N na região" no contador (D13).
+      totalAll: places.length + blocked,
+      blocked,
+    },
+  };
 }
 
 // Expansão pura da resposta do Issues/Search/List em cards (um por PUR).
+// Devolve { places, blocked }: `blocked` são PURs que passariam nos filtros de
+// tipo/leitura mas cujo venue o usuário não tem permissão de editar.
 // Exportada pra suite testar com fixtures de HAR real, sem rede.
 export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = true } = {}) {
   const usersDict = {};
@@ -546,10 +562,25 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   };
 
   const places = [];
+  let blocked = 0;
   for (const venue of rd?.venues?.objects || []) {
     if (!Array.isArray(venue.venueUpdateRequests) || venue.venueUpdateRequests.length === 0) continue;
-    // permissions: bitmask signed 32-bit. <0 = pode editar; >=0 = descartar.
-    if (venue.permissions !== undefined && venue.permissions >= 0) continue;
+    // permissions: bitmask signed 32-bit. <0 = pode editar; >=0 = sem permissão.
+    // Antes descartávamos o venue aqui. Agora seguimos o laço só pra CONTAR
+    // (blocked) os PURs que passariam nos demais filtros — é o que alimenta o
+    // "de N na região" (D13). Nenhum card é emitido pra venue não-editável.
+    const editable = !(venue.permissions !== undefined && venue.permissions >= 0);
+    if (!editable) {
+      // Só contagem: aplica os MESMOS filtros de leitura/tipo pra que o número
+      // seja comparável com places.length, e pula o trabalho caro (endereço,
+      // imagens, diff de mudanças) que nunca vai virar card.
+      for (const ur of venue.venueUpdateRequests) {
+        if (unreadOnly && ur.isRead === true) continue;
+        if (filterTypes !== null && !filterTypes.includes(ur.type || '')) continue;
+        blocked++;
+      }
+      continue;
+    }
 
     let venueLat = null, venueLon = null;
     if (venue.geometry && venue.geometry.coordinates) {
@@ -664,7 +695,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     }
   }
 
-  return places;
+  return { places, blocked };
 }
 
 async function handleMarcarLido(data, { sessions }) {

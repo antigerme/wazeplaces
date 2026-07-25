@@ -1,0 +1,7 @@
+/* Entrada do Tailwind. Gera css/tailwind.css via `npm run css`.
+   O CSS gerado É COMMITADO — quem só roda a app não precisa de build nenhum
+   (valor "zero build" do projeto). Rode `npm run css` apenas se mexer em
+   classes do Tailwind no HTML/JS. O CI valida que o CSS está em dia. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

@@ -37,5 +37,37 @@
       "purpose": "maskable"
     }
   ],
-  "categories": ["productivity", "utilities"]
+  "categories": ["productivity", "utilities"],
+  "screenshots": [
+    {
+      "src": "icons/screenshots/screenshot-narrow.png",
+      "sizes": "540x960",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Card de pedido com as mudanças propostas e os botões de ação"
+    },
+    {
+      "src": "icons/screenshots/screenshot-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Fila de pedidos no tema escuro"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Filtros e Preferências",
+      "short_name": "Filtros",
+      "description": "Abre direto os filtros da fila",
+      "url": "/?action=filters",
+      "icons": [{ "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Buscar novamente",
+      "short_name": "Atualizar",
+      "description": "Recarrega a fila de pedidos",
+      "url": "/?action=refresh",
+      "icons": [{ "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    }
+  ]
 }

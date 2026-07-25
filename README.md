@@ -123,7 +123,7 @@ Editores nível 1-2, ou sem badge de Area Manager, recebem a mensagem **"Acesso 
 
 ### Stack
 
-- **Frontend:** HTML + JavaScript vanilla + Tailwind CSS (bundle JS local `tailwindcss_3_4_17.js`) + PWA (manifest + service worker)
+- **Frontend:** HTML + JavaScript vanilla + Tailwind CSS (pré-compilado em `css/tailwind.css`) + PWA (manifest + service worker)
 - **Backend:** JavaScript (ESM), **sem build**, no padrão **core compartilhado + adaptadores**:
   - `server/core.mjs` — toda a lógica (proxy pro Waze, sessões, cripto, gate). Só usa `fetch` e Web Crypto → roda **igual** em Cloudflare Workers e Node 18+.
   - `worker/index.mjs` — adaptador **Cloudflare Workers** (roteia /api/*, serve estáticos via ASSETS; sessões em KV, chave em Secret).
@@ -164,7 +164,7 @@ wazeplaces/
 │   ├── app.js              # Lógica principal, AppState, UI
 │   ├── api.js              # Wrapper do fetch() para /api/*
 │   ├── swipe.js            # Gestos drag/swipe
-│   └── tailwindcss_3_4_17.js
+│   └── (Tailwind pré-compilado em css/tailwind.css)
 ├── server/
 │   ├── core.mjs            # Lógica compartilhada (proxy Waze, sessões, cripto, gate)
 │   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)

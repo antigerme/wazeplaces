@@ -1,0 +1,48 @@
+name: 💡 Sugerir uma melhoria
+description: Uma ideia pra deixar a triagem de places mais rápida ou mais clara
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideias de quem usa de verdade são as melhores. Só um lembrete do escopo:
+
+        **A app nunca aprova places** — só rejeita ou marca como lido. Aprovar exige ajuste no mapa pelo WME oficial (por isso todo card tem o link "↗ abrir no WME"). Sugestões de "aprovar pela app" ficam fora por decisão de produto.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qual problema isso resolve
+      description: Descreva a situação real que te atrapalha hoje, não a solução.
+      placeholder: Quando pego 200 pedidos de uma cidade, não consigo separar os de posto de gasolina dos de restaurante.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: O que você imagina
+      placeholder: Um filtro por categoria no modal de filtros.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Com que frequência isso te afeta
+      options:
+        - Toda sessão de edição
+        - Algumas vezes por semana
+        - De vez em quando
+        - Foi uma situação pontual
+    validations:
+      required: true
+
+  - type: input
+    id: rank
+    attributes:
+      label: Seu nível de editor (opcional)
+      description: Ajuda a entender o contexto de uso (AM, staff, nível no WME).
+      placeholder: L4, Area Manager
+    validations:
+      required: false

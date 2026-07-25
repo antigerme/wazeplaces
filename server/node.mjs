@@ -114,6 +114,8 @@ const MIME = {
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json',
   '.ico': 'image/x-icon',
+  // Fonte Inter auto-hospedada. MIME errado aqui = browser recusa a fonte.
+  '.woff2': 'font/woff2',
 };
 // no-cache pra código (SW controla versão); cache longo pra imagens/fontes
 const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest']);
@@ -131,7 +133,7 @@ const SECURITY_HEADERS = {
 // outra coisa (wrangler.jsonc, CLAUDE.md, README.md, package.json, _headers,
 // dotfiles, server/, docs/, worker/…) nunca é lida. Mais seguro que a blocklist
 // antiga, que servia com 200 os arquivos da raiz não listados.
-const ALLOWED_DIRS = ['/css/', '/js/', '/icons/'];
+const ALLOWED_DIRS = ['/css/', '/js/', '/icons/', '/fonts/'];
 const ALLOWED_ROOT_FILES = new Set([
   '/index.html',
   '/manifest.json',
