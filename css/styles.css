@@ -1,3 +1,28 @@
+/* Inter auto-hospedada (fonts/), no lugar do Google Fonts. Ganhos: funciona
+   100% offline na PWA, tira dois hosts externos da CSP e some com o
+   preconnect/round-trip pro Google. Fonte VARIÁVEL: um arquivo cobre 300..700,
+   por isso `font-weight: 300 700`. O unicode-range faz o browser baixar o
+   latin-ext só se aparecer caractere fora do latin básico (nomes de places de
+   outras regiões) — pro editor BR/ES/EN, só os 48KB do latin descem.
+   Licença: SIL Open Font License 1.1 — fonts/LICENSE-Inter.txt. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url('../fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url('../fonts/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 * {
   -webkit-tap-highlight-color: transparent;
 }
@@ -269,39 +294,17 @@ button:active {
   backdrop-filter: blur(4px);
 }
 
-/* ── Overrides legados de dark mode ──────────────────────────────────────
-   Preferir variantes dark: do Tailwind direto no HTML em código novo.
-   Estes overrides globais ficam pra cobrir o que ainda não migrou. */
-.dark .bg-white { background-color: #1e293b !important; color: #e2e8f0; }
-.dark .bg-white\/80 { background-color: rgba(30, 41, 59, 0.8) !important; }
-.dark .bg-white\/90 { background-color: rgba(30, 41, 59, 0.9) !important; }
-.dark .bg-slate-50 { background-color: #0f172a !important; }
-.dark .bg-slate-100 { background-color: #1e293b !important; }
-.dark .text-slate-800 { color: #f1f5f9 !important; }
-.dark .text-slate-700 { color: #e2e8f0 !important; }
-.dark .text-slate-600 { color: #cbd5e1 !important; }
-.dark .text-slate-500 { color: #94a3b8 !important; }
-.dark .text-slate-400 { color: #64748b !important; }
-.dark .border-slate-100 { border-color: #334155 !important; }
-.dark .border-slate-200,
-.dark .border-slate-200\/50 { border-color: #334155 !important; }
-.dark .from-slate-50 { --tw-gradient-from: #0f172a !important; }
-.dark .to-blue-50 { --tw-gradient-to: #1e293b !important; }
-.dark .from-slate-100 { --tw-gradient-from: #1e293b !important; }
-.dark .to-slate-200 { --tw-gradient-to: #334155 !important; }
-.dark .bg-cyan-50 { background-color: rgba(8, 145, 178, 0.2) !important; }
-.dark .bg-blue-50 { background-color: rgba(37, 99, 235, 0.2) !important; }
-.dark .bg-blue-50\/50 { background-color: rgba(37, 99, 235, 0.15) !important; }
-.dark .border-blue-100 { border-color: rgba(37, 99, 235, 0.4) !important; }
-.dark .text-blue-800\/80 { color: #93c5fd !important; }
-/* Restaura o hover no dark mode dos interativos cujo bg base é coberto pelos
-   overrides !important acima (o dark:hover:* do Tailwind perdia pro !important). */
-.dark .card-btn-reject:hover { background-color: rgba(244, 63, 94, 0.14) !important; }
-.dark .card-btn-skip:hover   { background-color: rgba(245, 158, 11, 0.14) !important; }
-.dark .card-btn-read:hover   { background-color: rgba(16, 185, 129, 0.14) !important; }
-.dark #helpBtn:hover         { background-color: #06b6d4 !important; }
-.dark #pasteBtn:hover        { background-color: #334155 !important; }
-.dark .card-wme-link:hover   { background-color: rgba(8, 145, 178, 0.28) !important; }
+/* ── Dark mode: 100% via variantes dark: do Tailwind no HTML/JS ──────────
+   Antes existia aqui um bloco de ~27 overrides globais com !important
+   (`.dark .bg-white { background-color: #1e293b !important }` etc). Eles
+   resolviam o dark de uma vez, mas custavam caro:
+     · qualquer `dark:` no HTML PERDIA pro !important, então cada exceção
+       precisava de mais um override aqui (inclusive os :hover, que tinham
+       bloco próprio só pra desfazer o estrago);
+     · a cor saía do elemento e ia parar num arquivo distante — mexer no
+       tema de um componente virava caça ao seletor global.
+   Agora cada elemento declara seu próprio `dark:` ao lado do estilo claro.
+   Migração validada por screenshot pixel a pixel (light e dark): idêntica. */
 
 @media (max-width: 640px) {
   .container {

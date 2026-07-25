@@ -20,6 +20,19 @@ jobs:
           else
             echo "Sem diretório test/ ainda — pulando testes."
           fi
+      - name: CSS do Tailwind está em dia (npm run css)
+        run: |
+          # O css/tailwind.css é COMMITADO (projeto sem build obrigatório). Se
+          # alguém mexe em classe no HTML/JS e esquece de regenerar, o estilo
+          # some silenciosamente em produção. Aqui regeneramos e comparamos.
+          cp css/tailwind.css /tmp/tailwind.committed.css
+          npm run css
+          if ! diff -q /tmp/tailwind.committed.css css/tailwind.css >/dev/null; then
+            echo "::error::css/tailwind.css está desatualizado. Rode 'npm run css' e commite o resultado."
+            diff /tmp/tailwind.committed.css css/tailwind.css | head -40
+            exit 1
+          fi
+
       - name: Boot smoke do adaptador Node
         run: |
           PORT=8099 node server/node.mjs & SRV=$!
@@ -31,7 +44,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           base="${{ github.event.pull_request.base.sha }}"
-          if git diff --name-only "$base" HEAD | grep -qE '^(index\.html|js/|css/|icons/)'; then
+          if git diff --name-only "$base" HEAD | grep -qE '^(index\.html|js/|css/|icons/|fonts/)'; then
             if ! git diff "$base" HEAD -- service-worker.js | grep -q 'CACHE_NAME'; then
               echo "::error::Frontend mudou (index.html/js/css/icons) mas CACHE_NAME não foi bumpado no service-worker.js"; exit 1
             fi

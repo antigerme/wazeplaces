@@ -1,17 +1,18 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026072401';
+const CACHE_NAME = 'waze-places-2026072402';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
+  '/css/tailwind.css',
   '/css/styles.css',
   '/js/version.js',
   '/js/i18n.js',
   '/js/app.js',
   '/js/api.js',
   '/js/swipe.js',
-  '/js/tailwindcss_3_4_17.js',
+  '/fonts/inter-latin-wght-normal.woff2',
   '/manifest.json',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg',
@@ -64,10 +65,11 @@ self.addEventListener('fetch', event => {
 
   const isHTML = event.request.mode === 'navigate' ||
     (event.request.headers.get('accept') || '').includes('text/html');
-  // Vendor Tailwind tem a versão no nome (immutable) → cache-first, sem re-baixar
-  // 407KB a cada load. O gotcha #18 (skew) não se aplica: o nome muda com a versão.
-  const isImmutableVendor = url.pathname === '/js/tailwindcss_3_4_17.js';
-  const isCode = !isImmutableVendor && /\.(js|css|json)$/i.test(url.pathname);
+  // Todo JS/CSS/JSON é código nosso agora (o vendor Tailwind de 407KB saiu na
+  // pré-compilação) → network-first, sem exceção. O css/tailwind.css gerado muda
+  // junto com o HTML, então precisa da mesma garantia anti-skew (gotcha #18).
+  // Fontes (.woff2) caem no ramo cache-first abaixo — imutáveis por natureza.
+  const isCode = /\.(js|css|json)$/i.test(url.pathname);
 
   if (isHTML || isCode) {
     // cache: 'reload' força o SW a bypassar o HTTP cache do navegador. Sem isso,

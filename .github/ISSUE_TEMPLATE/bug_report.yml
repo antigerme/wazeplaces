@@ -1,0 +1,85 @@
+name: 🐛 Reportar um problema
+description: Algo não funciona como deveria na app
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por reportar! Quanto mais preciso o relato, mais rápido o conserto.
+
+        ⚠️ **Nunca cole seus cookies, o conteúdo do `cookies.txt` ou um HAR aqui** — são credenciais da sua conta do Waze e esta issue é pública. Se um HAR for necessário, o mantenedor pede em canal privado.
+
+  - type: input
+    id: version
+    attributes:
+      label: Versão da app
+      description: Está no rodapé da tela, no formato `v2026.07.24-01`. É o dado que mais ajuda — sem ele, não dá pra saber se você já está com a correção.
+      placeholder: v2026.07.24-01
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: O que aconteceu
+      description: Descreva o problema e o que você esperava que acontecesse.
+      placeholder: |
+        Marquei um place como lido e ele voltou pra fila na busca seguinte.
+        Esperava que ele sumisse.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Como reproduzir
+      placeholder: |
+        1. Abri a app e entrei com meus cookies
+        2. Deslizei o card pra direita (marcar como lido)
+        3. Toquei em atualizar
+        4. O mesmo place apareceu de novo
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Print da tela
+      description: Arraste a imagem pra cá. Se aparecer nome de place ou de usuário, tudo bem — isso é público no WME.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Onde aconteceu
+      options:
+        - Celular Android (Chrome)
+        - Celular Android (app instalada / PWA)
+        - iPhone (Safari)
+        - iPhone (app instalada / PWA)
+        - Computador (Chrome / Edge)
+        - Computador (Firefox)
+        - Computador (Safari)
+        - Outro
+    validations:
+      required: true
+
+  - type: input
+    id: place
+    attributes:
+      label: Place envolvido (se aplicável)
+      description: Nome do local, ou o link "↗ abrir no WME" do card. Ajuda a reproduzir com dados reais.
+      placeholder: Padaria do Moinho
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Antes de enviar
+      options:
+        - label: Confirmei que a versão no rodapé é a mais recente (recarreguei a página)
+          required: false
+        - label: Não colei cookies, `cookies.txt` nem HAR nesta issue
+          required: true

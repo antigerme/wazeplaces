@@ -196,12 +196,12 @@ const harBatalhao = () => ({
 test('buildPlacesFromSearch: PUR já lido NÃO vira card com unreadOnly (bug do "place volta")', () => {
   // Cenário exato do HAR: user marcou a foto como lida, venue volta na busca
   // por causa do REQUEST irmão. Antes do fix: 1 card (a foto lida, de novo).
-  const places = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
   assert.equal(places.length, 0, 'foto já lida não pode voltar como card');
 });
 
 test('buildPlacesFromSearch: unreadOnly=false inclui PURs lidos (modo "incluir lidos")', () => {
-  const places = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: false });
+  const { places } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: false });
   assert.equal(places.length, 1);
   assert.equal(places[0].updateRequestID, '5dd54258-1bfe-4739-8b72-db4c418b1e79');
   assert.equal(places[0].reqType, 'IMAGE');
@@ -210,7 +210,7 @@ test('buildPlacesFromSearch: unreadOnly=false inclui PURs lidos (modo "incluir l
 test('buildPlacesFromSearch: PUR não-lido vira card normalmente', () => {
   const rd = harBatalhao();
   rd.venues.objects[0].venueUpdateRequests[1].isRead = false;
-  const places = buildPlacesFromSearch(rd, { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
   assert.equal(places.length, 1);
   assert.equal(places[0].updateRequestID, '5dd54258-1bfe-4739-8b72-db4c418b1e79');
 });
@@ -218,12 +218,12 @@ test('buildPlacesFromSearch: PUR não-lido vira card normalmente', () => {
 test('buildPlacesFromSearch: isRead ausente entra na fila (defensivo, como permissions)', () => {
   const rd = harBatalhao();
   delete rd.venues.objects[0].venueUpdateRequests[1].isRead;
-  const places = buildPlacesFromSearch(rd, { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
   assert.equal(places.length, 1);
 });
 
 test('buildPlacesFromSearch: REQUEST/UPDATE não-lido vira card quando o tipo é pedido (dev mode)', () => {
-  const places = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['REQUEST'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['REQUEST'], unreadOnly: true });
   assert.equal(places.length, 1);
   assert.equal(places[0].reqType, 'REQUEST');
   assert.equal(places[0].createdBy, 'AoInfinito');
@@ -234,6 +234,34 @@ test('buildPlacesFromSearch: venue sem permissão de edição é descartado inte
   const rd = harBatalhao();
   rd.venues.objects[0].permissions = 0;
   rd.venues.objects[0].venueUpdateRequests.forEach((ur) => { ur.isRead = false; });
-  const places = buildPlacesFromSearch(rd, { filterTypes: null, unreadOnly: true });
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: null, unreadOnly: true });
   assert.equal(places.length, 0);
+});
+
+// ─── D13: contagem de PURs bloqueados por permissão (contador "de N na região")
+test('buildPlacesFromSearch: conta em `blocked` os PURs de venue não-editável', () => {
+  const rd = harBatalhao();
+  rd.venues.objects[0].permissions = 0; // sem permissão
+  rd.venues.objects[0].venueUpdateRequests.forEach((ur) => { ur.isRead = false; });
+  const { places, blocked } = buildPlacesFromSearch(rd, { filterTypes: null, unreadOnly: true });
+  assert.equal(places.length, 0, 'não emite card pra venue sem permissão');
+  assert.equal(blocked, 2, 'mas contabiliza os 2 PURs pendentes dele');
+});
+
+test('buildPlacesFromSearch: `blocked` respeita os MESMOS filtros de tipo e leitura', () => {
+  const rd = harBatalhao();
+  rd.venues.objects[0].permissions = 0;
+  // 1 IMAGE já lida + 1 REQUEST não-lido (estado original da fixture)
+  const soImagem = buildPlacesFromSearch(rd, { filterTypes: ['IMAGE'], unreadOnly: true });
+  assert.equal(soImagem.blocked, 0, 'a única IMAGE está lida → não conta');
+  const incluindoLidos = buildPlacesFromSearch(rd, { filterTypes: ['IMAGE'], unreadOnly: false });
+  assert.equal(incluindoLidos.blocked, 1, 'com lidos incluídos, a IMAGE entra na conta');
+  const soRequest = buildPlacesFromSearch(rd, { filterTypes: ['REQUEST'], unreadOnly: true });
+  assert.equal(soRequest.blocked, 1, 'o REQUEST não-lido conta');
+});
+
+test('buildPlacesFromSearch: venue editável não gera `blocked`', () => {
+  const { places, blocked } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['REQUEST'], unreadOnly: true });
+  assert.equal(places.length, 1);
+  assert.equal(blocked, 0);
 });

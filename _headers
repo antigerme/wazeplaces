@@ -7,7 +7,7 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
   Strict-Transport-Security: max-age=31536000; includeSubDomains
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';
 
 # Service worker e código: sempre revalidar (SW controla a versão dos assets).
 # Ver gotcha #18 — mismatch HTML/JS quando o código fica cacheado.
@@ -23,10 +23,10 @@
 /manifest.json
   Cache-Control: no-cache, must-revalidate
 
-# Vendor Tailwind: versão no nome → cache agressivo (regra específica vence /js/*).
-/js/tailwindcss_3_4_17.js
-  Cache-Control: public, max-age=31536000, immutable
-
 # Ícones/imagens estáticas: cache curto no navegador/edge.
 /icons/*
   Cache-Control: public, max-age=86400
+
+# Fontes: conteúdo imutável (o nome muda se a fonte mudar) → cache agressivo.
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable

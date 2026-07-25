@@ -21,7 +21,7 @@ PWA = instala no celular sem precisar de Play Store / App Store. Funciona offlin
 | Camada | Escolha | Por quê |
 |---|---|---|
 | **Frontend** | HTML + JavaScript **vanilla** + Tailwind CSS | Zero build. Editor leigo baixa, roda, funciona. |
-| **Tailwind** | Bundle JS local em `js/tailwindcss_3_4_17.js` (~407KB) | Sem `npm install`. Tradeoff: bundle gordo. Vale considerar pré-compilar em produção mas mantém zero-build pra dev. |
+| **Tailwind** | **Pré-compilado** em `css/tailwind.css` (~34KB, COMMITADO) via `npm run css` | Zero build pra quem só roda a app (o CSS já está no repo). Tirou 407KB e o `unsafe-eval` da CSP. Mexeu em classe? `npm run css` (o CI cobra com diff). |
 | **Backend** | JavaScript ESM (**sem build, sem npm install**) no padrão **core compartilhado + adaptadores** | `server/core.mjs` = lógica; `worker/index.mjs` = adaptador Cloudflare Workers; `server/node.mjs` = adaptador VM. Só usa `fetch` + Web Crypto → roda igual em Workers e Node 18+. |
 | **Auth** | Cookies do WME do usuário → session token, cookies criptografados **AES-256-GCM** server-side | Cookies não trafegam mais que uma vez. Token opaco no client. |
 | **Sessão** | Store abstrato: **Workers KV** (Cloudflare) ou **filesystem** (VM) | KV tem TTL nativo; VM espelha o modelo `/tmp` antigo. Injetado no core pelo adaptador. |
@@ -45,14 +45,19 @@ wazeplaces/
 │   ├── icon-192.svg
 │   └── icon-512.svg
 ├── css/
-│   └── styles.css           # Estilos custom + dark mode overrides do Tailwind
+│   ├── styles.css           # Estilos custom (@font-face da Inter, componentes)
+│   ├── tailwind.css         # GERADO por `npm run css` — commitado, NÃO editar à mão
+│   └── tailwind.src.css     # Entrada (@tailwind base/components/utilities)
+├── fonts/                   # Inter auto-hospedada (woff2 variável) + licença OFL
+├── tailwind.config.js       # Config do build de CSS (darkMode: 'class', content)
+├── CHANGELOG.md             # Histórico de mudanças voltado ao editor (não é git log)
 ├── js/
 │   ├── version.js           # FONTE ÚNICA da versão: serial de zona DNS YYYYMMDDnn (APP_VERSION + verLabel). Carregado antes do app.js
 │   ├── i18n.js              # i18n pt/en/es (sem lib): I18N_DICT + t()/applyI18n()/setLang(). FONTE ÚNICA de strings de UI. Carregado antes do app.js
 │   ├── api.js               # Wrapper fetch() dos endpoints /api/* (única fonte de chamadas HTTP; SEM .php)
 │   ├── app.js               # AppState, render, handlers, fila, prefetch, error handling
 │   ├── swipe.js             # Gestos drag/swipe (esquerda, direita, cima)
-│   └── tailwindcss_3_4_17.js # Tailwind CDN bundle congelado localmente
+│   └── (sem vendor: Tailwind é pré-compilado em css/tailwind.css)
 ├── server/
 │   ├── core.mjs             # Lógica compartilhada: sessões, cripto (AES-GCM), callWaze (fetch),
 │   │                        #   categorizeWazeError, isUserAllowed, 8 handlers, dispatch(). ÚNICO lugar de lógica.
@@ -90,8 +95,19 @@ Pra simular o ambiente Cloudflare (Worker + KV): `npx wrangler dev`.
 ```bash
 npm run check          # node --check em js/*.js server/*.mjs worker/*.mjs
 npm test               # node --test — suite pura do core (test/core.test.mjs), ZERO deps
+npm run css            # SÓ se mexeu em classe do Tailwind (regenera css/tailwind.css; CI cobra)
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
 ```
+
+**Testar em BROWSER de verdade (existe Chromium no ambiente!):** o sandbox tem
+Playwright + Chromium (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`,
+`require('/opt/node22/lib/node_modules/playwright')`). Dá pra subir o
+`server/node.mjs`, abrir a app, **injetar estado fake** (`AppState.queue`,
+`showCurrentPlace()`) pra renderizar card/modais sem tocar o Waze, e tirar
+screenshot. Foi assim que o A2 (dark mode) foi validado: capturar antes/depois e
+comparar **pixel a pixel** (PIL disponível). Para refactor visual, essa é a
+prova — não confie em leitura de código. Use um worktree
+(`git worktree add --detach <dir> origin/main`) pro "antes" em vez de `git stash`.
 CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump de `CACHE_NAME`** (gotcha #17) em todo PR/push. A suite de testes usa só `node:test`/`node:assert` (built-in) e cobre cripto/sessão, `categorizeWazeError`, `isUserAllowed`, parsing de cookies e o filtro de domínio.
 
 **Sandbox/CI:** o ambiente onde este agente roda **tem allowlist de hosts** que bloqueia `*.waze.com` (resposta `403 Host not in allowlist`). Você NÃO consegue testar contra o Waze real — valide com **fixtures de HAR reais** que o usuário envia, ou peça pra ele testar. Mas dá pra testar TUDO que não é o Waze: subir o `node server/node.mjs` e exercitar cripto/sessão/roteamento/erros (o `fetch` ao Waze retorna o 403 do allowlist, que o core categoriza como `unauthorized` — prova que o pipeline funciona).
@@ -375,6 +391,11 @@ Bugs já encontrados e corrigidos — **não repita**:
 20. **Reset de fila precisa lidar com fetch em voo E ação no buffer de undo** (v3.1.0). `resetQueue` faz `fetchEpoch++` (invalida resultado obsoleto do fetch em voo) e descarrega o `pendingAction` (`execute()` no refresh/filtros — honra o swipe; `cancel()` no logout/sessão-expirada — descarta sem enviar, revertendo o stat). Sem isso: places de filtro antigo entravam na fila nova e o "Desfazer" duplicava place + dobrava stats. Toda nova origem de reset passa por `resetQueue` (ou cancela o pending antes, como `handleLogout`/`handleUnauthorized`).
 
 21. **O filtro `isRead` do Waze é POR VENUE, não por PUR** (consertado 2026-07-24, HAR do "3o Batalhão PMDF"). `userPropertiesFilter: {isRead:false}` devolve o venue se **qualquer** PUR dele estiver não-lido — inclusive quando o único não-lido é um REQUEST (gated por dev mode, invisível na app). Sem filtrar `ur.isRead` na expansão (`buildPlacesFromSearch` em `server/core.mjs`), uma foto já lida re-virava card eternamente: user marcava de novo (Waze aceita, no-op), venue voltava na próxima busca → boomerang sem saída pela app. **Regra**: a expansão pula `ur.isRead === true` quando `unreadOnly`; campo ausente entra (defensivo). Teste de regressão com a fixture do HAR real em `test/core.test.mjs`. Se um place "volta" de novo um dia: conferir se o venue tem PUR irmão não-lido de tipo não exibido (só tratável no WME) — a app não deve re-emitir os lidos.
+
+22. **`css/tailwind.css` é GERADO e commitado — nunca edite à mão** (v2026.07.24-02). O Tailwind deixou de compilar no browser: mexeu em classe no `index.html`/`js/*`? rode **`npm run css`** e commite o CSS junto. O CI regenera e falha no diff se esquecer. Some com o estilo em produção sem nenhum erro no console — é silencioso.
+    **A ORDEM dos `<link>` importa**: `styles.css` vem ANTES de `tailwind.css`. O bundle runtime antigo injetava o CSS gerado no fim do `<head>`, então as utilities venciam empates de especificidade contra o `styles.css`. Inverter a ordem muda anéis de foco/cantos de leve. Se precisar mexer, valide com o harness de screenshot (Playwright) — foi assim que isso apareceu.
+
+23. **Dark mode é 100% `dark:` no HTML/JS — não crie override global** (v2026.07.24-02). O bloco `.dark .bg-white { !important }` do styles.css MORREU. Ele obrigava toda exceção (inclusive `:hover`) a virar mais um override global. Componente novo → declare `dark:` ao lado do estilo claro. Se um `dark:` "não pega", é empate de especificidade: use `dark:hover:` explícito (foi o caso do `#helpBtn`, onde `dark:bg-*` vencia o `hover:bg-*`).
 
 18. **Version skew HTML vs JS — 2 camadas de cache** (consertado parcialmente em v2.13.1, completado em v2.17.2). Antes: HTML era network-first no SW e JS era cache-first. Quando deployava uma feature nova (HTML novo referenciando funções/IDs novos), o user pegava o HTML fresh mas continuava com o JS velho do cache. Resultado: feature aparecia na UI (HTML novo tem o checkbox), mas não funcionava (JS velho não conhece o ID, não salva no localStorage). Sintoma diagnóstico: F5 não conserta — só `Ctrl+Shift+R` (cache bypass total). **Mobile não tem `Ctrl+Shift+R`**, então o user fica preso. Fix v2.13.1: JS/CSS/JSON network-first no SW. Mas regrediu em v2.17.1 — F5 ainda não funcionava no mobile! Causa: o `fetch()` do SW passa pelo **HTTP cache do navegador** antes da rede. O `.htaccess` mandava `Cache-Control: max-age=2592000` (1 mês) pra JS via `ExpiresByType` → mesmo com SW network-first, o browser servia do HTTP cache local. Fix v2.17.2 (defesa em duas camadas): (a) `fetch(req, { cache: 'reload' })` no SW força bypass do HTTP cache; (b) Cache-Control `no-cache, must-revalidate` pra JS/CSS/manifest — na v3.0 isso vive no **`_headers`** (Cloudflare) e no `serveStatic` do `server/node.mjs` (o `.htaccess` foi removido). Também: `updateViaCache: 'none'` + `reg.update()` imediato + tratamento de `reg.waiting` no register. **Antes de quebrar essas regras**: pra atualização funcionar com F5 no mobile, três camadas precisam estar alinhadas — estratégia do SW, opção `cache` do `fetch`, e Cache-Control do servidor (`_headers`/Node). Mexer em uma só rompe a cadeia.
 
