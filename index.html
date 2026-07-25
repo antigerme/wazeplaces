@@ -6,9 +6,14 @@
     <meta name="description" content="Validação de Places do Waze Map Editor - Interface Estilo Tinder">
     <meta name="theme-color" content="#33CCFF">
     <!-- CSP: mantida em sync com o arquivo _headers (Cloudflare) — ver gotcha #14.
-         Sem 'unsafe-eval' (Tailwind agora é pré-compilado) e sem fonts.googleapis/
-         gstatic (a Inter é auto-hospedada em fonts/). -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+         Sem 'unsafe-eval' (Tailwind é pré-compilado) e sem fonts.googleapis/gstatic
+         (a Inter é auto-hospedada em fonts/).
+         cloudflareinsights: o Cloudflare INJETA o beacon do Web Analytics no HTML
+         quando o request vem de um navegador — sem estes dois hosts ele era
+         bloqueado e sobrava só o erro no console. São dois porque o script vem de
+         static.cloudflareinsights.com e a telemetria vai pra cloudflareinsights.com
+         (/cdn-cgi/rum), ou seja: script-src E connect-src. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://cloudflareinsights.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).
