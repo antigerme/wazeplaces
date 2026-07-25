@@ -40,6 +40,29 @@ jobs:
           curl -fsS localhost:8099/ | grep -qi '<title'
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8099/api/perfil -H 'Content-Type: application/json' -d '{}')" = "401"
           kill $SRV
+      - name: A data do serial bate com a do commit que bumpou
+        if: github.event_name == 'pull_request'
+        run: |
+          # O serial é YYYYMMDDnn e a promessa dele é "diz DE QUANDO é a versão".
+          # Já foi quebrada uma vez: a revisão foi incrementada num dia novo sem
+          # trocar a data (2026072403 publicado em 25/07), e o rodapé passou a
+          # mentir. Aqui comparamos com a data do COMMIT HEAD do PR — não com
+          # "hoje". Isso é de propósito: usar "hoje" falharia sozinho num PR
+          # aberto num dia e mergeado no outro, e CI que falha sem culpa treina
+          # todo mundo a ignorar CI.
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          if ! git diff --quiet "$base" "$head" -- js/version.js; then
+            serial=$(git show "$head":js/version.js | grep -oE "APP_VERSION *= *'[0-9]{10}'" | grep -oE "[0-9]{10}")
+            data_serial="${serial:0:8}"
+            data_commit=$(TZ=UTC git show -s --date=format-local:'%Y%m%d' --format=%cd "$head")
+            echo "serial=$serial (data $data_serial) | commit HEAD do PR=$data_commit (UTC)"
+            if [ "$data_serial" != "$data_commit" ]; then
+              echo "::error::O serial diz $data_serial mas o commit é de $data_commit. Em dia novo, ZERE a revisão: use ${data_commit}01 (rode 'date -u +%Y%m%d'). Se o PR ficou aberto de um dia pro outro, re-bumpe."
+              exit 1
+            fi
+          fi
+
       - name: Guard do bump de CACHE_NAME (gotcha #17)
         if: github.event_name == 'pull_request'
         run: |
