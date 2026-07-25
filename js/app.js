@@ -28,6 +28,7 @@ const AppState = {
     fetching: false,
     serverTotal: 0,
     serverBlocked: 0,   // D13: pedidos da região que este editor não pode editar
+    blockedPartial: false, // true = paramos antes do fim → serverBlocked é piso
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
@@ -1017,6 +1018,7 @@ function resetQueue() {
     AppState.currentPlace = null;
     AppState.serverTotal = 0;
     AppState.serverBlocked = 0;
+    AppState.blockedPartial = false;
     AppState.loadError = false;
     updatePendingCount();
 }
@@ -1108,6 +1110,12 @@ function fetchNextPage() {
             if (newPlaces.length === 0) {
                 AppState.emptyPagesInRow++;
                 if (AppState.emptyPagesInRow >= MAX_EMPTY_PAGES) {
+                    // Desistimos com o Waze ainda dizendo hasMore → o que contamos
+                    // até aqui (inclusive `blocked`) é um PISO, não o total. Sem
+                    // esta flag a dica do D13 mostraria número parcial com cara de
+                    // exato. Acontece de verdade: região onde o editor não pode
+                    // editar nada devolve páginas cheias de bloqueados e zero cards.
+                    if (result.hasMore) AppState.blockedPartial = true;
                     AppState.hasMore = false;
                 }
             } else {
@@ -1825,8 +1833,11 @@ function updatePendingTotalHint() {
         hint.removeAttribute('title');
         return;
     }
+    // "+" quando a contagem é piso (paramos por MAX_EMPTY_PAGES com o Waze
+    // ainda oferecendo páginas) — mesma convenção do contador "Restam".
     const total = AppState.serverTotal + blocked;
-    hint.textContent = t('stats.pending.ofRegion', { total });
+    const rotulo = AppState.blockedPartial ? total + '+' : String(total);
+    hint.textContent = t('stats.pending.ofRegion', { total: rotulo });
     hint.title = t('stats.pending.ofRegion.title', { blocked });
     hint.classList.remove('hidden');
 }
