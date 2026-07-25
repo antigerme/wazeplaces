@@ -24,7 +24,16 @@ function serialFromServiceWorker() {
 function isValidSerial(s) {
   if (!/^\d{10}$/.test(String(s))) return false;
   const y = +s.slice(0, 4), mo = +s.slice(4, 6), d = +s.slice(6, 8), nn = +s.slice(8, 10);
-  return y >= 2024 && y <= 2099 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && nn >= 1 && nn <= 99;
+  if (y < 2024 || y > 2099 || nn < 1 || nn > 99) return false;
+  // Data de CALENDÁRIO real: a checagem antiga (d <= 31) deixava passar 20260231.
+  // O Date normaliza datas impossíveis (31/02 vira 03/03), então comparamos de volta.
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
+// Data do serial em UTC, à meia-noite.
+function serialDate(s) {
+  return new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
 }
 
 test('serial existe em js/version.js e no service-worker.js', () => {
@@ -34,6 +43,20 @@ test('serial existe em js/version.js e no service-worker.js', () => {
 
 test('formato do serial é YYYYMMDDnn (zona DNS, RFC 1912)', () => {
   assert.ok(isValidSerial(serialFromVersionJs()), 'js/version.js: serial fora do formato YYYYMMDDnn');
+});
+
+// A data do serial não pode estar no FUTURO. Pega erro de digitação (mês/dia
+// trocados, ano errado) sem nenhum risco de falso positivo: carimbar uma versão
+// com data futura nunca é intencional. A tolerância de 1 dia cobre o fuso do
+// runner e a virada de meia-noite entre commit e execução do teste.
+test('data do serial não está no futuro', () => {
+  const s = serialFromVersionJs();
+  const dias = (serialDate(s) - Date.now()) / 86400000;
+  assert.ok(
+    dias <= 1,
+    `Serial ${s} tem data no futuro (${Math.round(dias)} dias à frente). ` +
+    'Rode `date -u +%Y%m%d` e use a data de hoje com revisão 01.'
+  );
 });
 
 test('paridade: version.js e service-worker.js usam o MESMO serial', () => {
