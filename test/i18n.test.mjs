@@ -81,3 +81,17 @@ test('i18n: toda chave t(\'...\') do app.js/api.js existe no dicionário', () =>
   const orphans = [...keys].filter((k) => !(k in DICT.pt));
   assert.equal(orphans.length, 0, "t('chave') sem correspondência no dicionário:\n" + orphans.join('\n'));
 });
+
+// Regressão: o card é clonado de um <template>, e conteúdo de template NÃO é
+// alcançado por document.querySelectorAll — então o applyI18n() global nunca
+// via as chaves de dentro dele. Efeito: em en/es o card voltava pro português
+// A CADA SWIPE. A única correção possível é traduzir o clone; se alguém tirar
+// essa chamada, o bug volta silencioso (nada quebra, só fica em pt).
+test("i18n: renderCurrentCard aplica o dicionário no clone do <template>", () => {
+  const src = read('js/app.js');
+  assert.ok(
+    /applyI18n\(\s*card\s*\)/.test(src),
+    'js/app.js precisa chamar applyI18n(card) no clone do cardTemplate — sem isso ' +
+    'o card fica sempre em português pra quem usa inglês/espanhol'
+  );
+});
