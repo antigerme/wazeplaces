@@ -96,7 +96,138 @@ body.dark {
 
 .swipe-indicator {
   pointer-events: none;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.15s ease;
+}
+
+/* ── Selo de swipe (carimbo estilo Waze) ────────────────────────────────────
+   Aparece DURANTE o arraste, então não custa tempo nenhum ao editor: roda
+   enquanto o dedo já está se movendo. Regra do projeto: animação nunca entra
+   entre o swipe e o próximo card.
+   A escala vem do swipe.js pela variável --p (proporcional à distância
+   arrastada) — o selo "assenta" conforme você decide. Como é manipulação
+   direta (igual o card seguindo o dedo), não é transition: sem lag. */
+.swipe-stamp {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: 4px solid currentColor;
+  border-radius: 0.875rem;
+  font-size: 1.375rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.3);
+  pointer-events: none;
+  transform: translateX(var(--tx, 0)) rotate(var(--rot, 0deg)) scale(var(--p, 0.6));
+  will-change: transform;
+}
+
+.dark .swipe-stamp {
+  background: rgba(15, 23, 42, 0.93);
+}
+
+/* O sufixo é o GESTO, não a posição — e a posição é a BORDA OPOSTA de propósito.
+   Arrastando pra esquerda, a metade esquerda do card sai da tela; um selo
+   ancorado ali sairia junto (o primeiro teste mostrou "EITAR" cortado). Ancorando
+   na borda que fica, o carimbo permanece legível o gesto inteiro. É a mesma razão
+   de o selo de "pular" ficar abaixo do meio: arrastando pra cima, o topo é que
+   some. Mesma lógica vale pro gradiente no HTML — a cor vive na borda que fica. */
+.swipe-stamp-left  { top: 2.5rem; right: 1.5rem; color: #e11d48; --rot: 14deg; }
+.swipe-stamp-right { top: 2.5rem; left: 1.5rem;  color: #059669; --rot: -14deg; }
+.swipe-stamp-up    { top: 46%; left: 50%; color: #d97706; --tx: -50%; --rot: -6deg; }
+
+/* ── Entrada do próximo card (mola) ─────────────────────────────────────────
+   Overshoot leve — a assinatura da animação do Waze. Roda em 280ms ENQUANTO o
+   dedo já está indo pro próximo gesto; ninguém espera por ela. Sem fill-mode
+   de propósito: terminada a animação o elemento volta ao transform identidade
+   (o mesmo estado final), então nada sobrescreve o arraste depois. Durante a
+   animação, quem sobrescreve seria a animação — por isso o swipe.js remove
+   esta classe no início do arraste. */
+.card-enter {
+  animation: cardEnter 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes cardEnter {
+  from { transform: translateY(26px) scale(0.94); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* ── Comemoração do "Tudo limpo!" ───────────────────────────────────────────
+   O único momento da app em que o editor TERMINOU algo — e o único onde festa
+   é de graça, porque não há próxima ação esperando. Só toca quando ele de fato
+   tratou algo na sessão (ver showNoPlaces): abrir a app numa fila já vazia não
+   é conquista. */
+.confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.confetti span {
+  position: absolute;
+  /* Começa logo acima da borda, não muito longe: com `ease-in` e um offset
+     grande, as peças passavam quase metade da animação clipadas fora da caixa
+     e a festa só aparecia no fim. Medido no browser, não chutado. */
+  top: -7%;
+  width: 10px;
+  height: 16px;
+  border-radius: 2px;
+  opacity: 0;
+}
+
+.celebrate .confetti span {
+  animation: confettiFall 1.6s cubic-bezier(0.35, 0.15, 0.6, 1) forwards;
+}
+
+@keyframes confettiFall {
+  0%   { opacity: 0; transform: translateY(0) rotate(0deg); }
+  8%   { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(600px) rotate(560deg); }
+}
+
+/* Paleta Waze: cyan, âmbar, verde, rosa, roxo. Posição/atraso variados pra não
+   parecer chuva sincronizada. */
+.confetti span:nth-child(1)  { left: 8%;  background: #33ccff; animation-delay: 0s; }
+.confetti span:nth-child(2)  { left: 18%; background: #f59e0b; animation-delay: .12s; }
+.confetti span:nth-child(3)  { left: 27%; background: #10b981; animation-delay: .05s; }
+.confetti span:nth-child(4)  { left: 36%; background: #f43f5e; animation-delay: .28s; }
+.confetti span:nth-child(5)  { left: 45%; background: #a855f7; animation-delay: .17s; }
+.confetti span:nth-child(6)  { left: 54%; background: #33ccff; animation-delay: .33s; }
+.confetti span:nth-child(7)  { left: 63%; background: #f59e0b; animation-delay: .09s; }
+.confetti span:nth-child(8)  { left: 72%; background: #10b981; animation-delay: .24s; }
+.confetti span:nth-child(9)  { left: 81%; background: #f43f5e; animation-delay: .38s; }
+.confetti span:nth-child(10) { left: 90%; background: #a855f7; animation-delay: .02s; }
+.confetti span:nth-child(11) { left: 13%; background: #10b981; animation-delay: .44s; }
+.confetti span:nth-child(12) { left: 68%; background: #33ccff; animation-delay: .5s; }
+
+/* Pulo do contador quando o número muda. É o que comunica "isso mexeu" no caso
+   de +1 — onde contar não mostraria nada (não há inteiro entre 12 e 13).
+   `scale` não afeta layout, então nada empurra os vizinhos do grid. */
+.count-pop {
+  animation: countPop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: inline-block; /* transform não se aplica a caixa inline pura */
+}
+
+@keyframes countPop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+.celebrate .empty-badge {
+  animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes popIn {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
 }
 
 /* Áreas de scroll interno do card: sem isso o touch-action:none do
@@ -452,4 +583,16 @@ button:active {
   .dark .skeleton {
     background: #334155;
   }
+  /* Confete é puramente decorativo: some inteiro. O "Tudo limpo!" continua
+     legível e completo sem ele. */
+  .confetti {
+    display: none;
+  }
+  .card-enter,
+  .celebrate .empty-badge {
+    animation: none;
+  }
+  /* O selo NÃO entra aqui de propósito: ele é informação (qual gesto você está
+     fazendo), não enfeite — e a escala acompanha o dedo, que é manipulação
+     direta, não animação. Sumir com ele deixaria o arraste sem retorno. */
 }

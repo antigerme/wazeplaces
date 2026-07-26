@@ -480,9 +480,16 @@
                 </div>
 
                 <div id="noMoreCards" class="hidden absolute inset-0 flex items-center justify-center bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 dark:bg-slate-900 dark:border-slate-700">
-                    <div class="text-center p-8">
-                        <div class="bg-white p-4 rounded-full shadow-sm inline-block mb-4 dark:bg-slate-800 dark:text-slate-200">
-                            <svg class="w-12 h-12 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <!-- Confete: só anima quando o pai ganha .celebrate (ver showNoPlaces),
+                         ou seja, quando o editor de fato tratou algo na sessão. Doze peças
+                         em CSS puro — sem lib, sem imagem, sem custo de download. -->
+                    <div class="confetti" aria-hidden="true">
+                        <span></span><span></span><span></span><span></span><span></span><span></span>
+                        <span></span><span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                    <div class="text-center p-8 relative">
+                        <div class="empty-badge bg-white p-4 rounded-full shadow-sm inline-block mb-4 dark:bg-slate-800 dark:text-slate-200">
+                            <svg class="w-12 h-12 text-emerald-500 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                             </svg>
                         </div>
@@ -613,15 +620,28 @@
                             </div>
                         </div>
 
-                        <div class="swipe-indicator swipe-left absolute inset-0 z-30 bg-gradient-to-r from-rose-500/80 to-transparent flex items-center justify-start p-8 transition-opacity opacity-0">
-                            <div class="bg-white/20 backdrop-blur-md rounded-full p-4 border border-white/50">
-                                <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path></svg>
-                            </div>
+                        <!-- Selos de gesto: o gradiente dá o sinal periférico (cor) e o
+                             selo diz a palavra. Os três gestos têm o seu — antes o
+                             "Pular" (arrastar pra cima) era o único sem retorno visual.
+                             aria-hidden: é reforço visual do gesto; quem usa leitor de
+                             tela opera pelos botões ✕/↑/✓, que já são rotulados. -->
+                        <div class="swipe-indicator swipe-left absolute inset-0 z-30 bg-gradient-to-l from-rose-500/70 to-transparent transition-opacity opacity-0" aria-hidden="true">
+                            <span class="swipe-stamp swipe-stamp-left">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                <span data-i18n="card.stamp.reject">Rejeitar</span>
+                            </span>
                         </div>
-                        <div class="swipe-indicator swipe-right absolute inset-0 z-30 bg-gradient-to-l from-emerald-500/80 to-transparent flex items-center justify-end p-8 transition-opacity opacity-0">
-                            <div class="bg-white/20 backdrop-blur-md rounded-full p-4 border border-white/50">
-                                <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
-                            </div>
+                        <div class="swipe-indicator swipe-right absolute inset-0 z-30 bg-gradient-to-r from-emerald-500/70 to-transparent transition-opacity opacity-0" aria-hidden="true">
+                            <span class="swipe-stamp swipe-stamp-right">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3.5" d="M5 13l4 4L19 7"></path></svg>
+                                <span data-i18n="card.stamp.read">Lido</span>
+                            </span>
+                        </div>
+                        <div class="swipe-indicator swipe-up absolute inset-0 z-30 bg-gradient-to-b from-amber-500/70 to-transparent transition-opacity opacity-0" aria-hidden="true">
+                            <span class="swipe-stamp swipe-stamp-up">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3.5" d="M5 15l7-7 7 7"></path></svg>
+                                <span data-i18n="card.stamp.skip">Pular</span>
+                            </span>
                         </div>
                     </div>
                 </template>

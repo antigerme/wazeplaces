@@ -32,6 +32,10 @@ function handleDragStart(e) {
 
     isDragging = true;
     currentCard = e.currentTarget;
+    // Se o card ainda está entrando (mola de 280ms), a animação venceria o
+    // transform inline do arraste e travaria o card no lugar. Tira a classe
+    // e o dedo assume na hora.
+    currentCard.classList.remove('card-enter');
 
     if (e.type === 'mousedown') {
         startX = e.clientX;
@@ -81,7 +85,9 @@ function handleDragMove(e) {
 
     if (dominantVertical) {
         currentCard.style.transform = `translate(0, ${deltaY}px) scale(${Math.max(0.85, 1 + deltaY / 1000)})`;
-        updateSwipeIndicator(0, 0);
+        // Antes: updateSwipeIndicator(0, 0) — arrastar pra cima era o ÚNICO gesto
+        // sem retorno visual. Agora o selo "Pular" acende igual aos outros dois.
+        updateSwipeIndicator(0, 0, Math.min(Math.abs(deltaY) / 100, 1));
     } else {
         const rotation = deltaX * 0.1;
         currentCard.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(${rotation}deg)`;
@@ -176,22 +182,22 @@ function animateSwipeOut(direction, callback) {
     }, 350);
 }
 
-function updateSwipeIndicator(deltaX, opacity) {
+// Acende o indicador do gesto em curso. `upOpacity` é opcional: as chamadas
+// antigas `updateSwipeIndicator(0, 0)` continuam apagando os três.
+// Além da opacidade do gradiente, empurra a escala do selo pela custom property
+// --p (0.6 → 1.0): o carimbo cresce conforme você se compromete com o gesto.
+function updateSwipeIndicator(deltaX, opacity, upOpacity = 0) {
     if (!currentCard) return;
-    const leftIndicator = currentCard.querySelector('.swipe-left');
-    const rightIndicator = currentCard.querySelector('.swipe-right');
-    if (!leftIndicator || !rightIndicator) return;
-
-    if (deltaX < 0) {
-        leftIndicator.style.opacity = opacity;
-        rightIndicator.style.opacity = 0;
-    } else if (deltaX > 0) {
-        rightIndicator.style.opacity = opacity;
-        leftIndicator.style.opacity = 0;
-    } else {
-        leftIndicator.style.opacity = 0;
-        rightIndicator.style.opacity = 0;
-    }
+    const setOne = (seletor, valor) => {
+        const el = currentCard.querySelector(seletor);
+        if (!el) return;
+        el.style.opacity = valor;
+        const stamp = el.querySelector('.swipe-stamp');
+        if (stamp) stamp.style.setProperty('--p', 0.6 + 0.4 * valor);
+    };
+    setOne('.swipe-left', deltaX < 0 ? opacity : 0);
+    setOne('.swipe-right', deltaX > 0 ? opacity : 0);
+    setOne('.swipe-up', upOpacity);
 }
 
 function triggerSwipe(direction, callback) {
@@ -202,6 +208,11 @@ function triggerSwipe(direction, callback) {
         return;
     }
     currentCard = card;
+    // Botão e teclado não arrastam, então nunca acendiam o selo — o mesmo gesto
+    // dava retornos diferentes conforme o caminho. Acende no talo antes de sair,
+    // e o card já está saindo: nada é adicionado ao tempo do editor.
+    const porGesto = { left: [-1, 1, 0], right: [1, 1, 0], up: [0, 0, 1] }[direction];
+    if (porGesto) updateSwipeIndicator(porGesto[0], porGesto[1], porGesto[2]);
     animateSwipeOut(direction, callback);
 }
 

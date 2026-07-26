@@ -1314,8 +1314,24 @@ function renderCurrentCard() {
     card.querySelector('.card-btn-skip').addEventListener('click', () => fireAction('up', handleSkip));
     card.querySelector('.card-btn-read').addEventListener('click', () => fireAction('right', handleMarkAsRead));
 
+    // BUG CORRIGIDO: o card é clonado de um <template>, e conteúdo de template
+    // NÃO é alcançado por document.querySelectorAll — então o applyI18n() global
+    // nunca via estas 25 chaves. Resultado: em inglês/espanhol o card voltava pro
+    // português A CADA SWIPE (o clone traz o texto pt hardcoded do HTML).
+    // Traduzir aqui, no clone, é o único ponto que pega todo card novo.
+    if (typeof applyI18n === 'function') applyI18n(card);
+
+    // Mola na entrada (280ms). Roda enquanto o dedo já vai pro próximo gesto —
+    // ninguém espera por ela. A classe sai no fim pra não sobrescrever o
+    // transform do arraste (o swipe.js também tira, se você agarrar antes).
+    card.classList.add('card-enter');
+    card.addEventListener('animationend', () => card.classList.remove('card-enter'), { once: true });
+
     removeCurrentCardEl();
     document.getElementById('cardStack').appendChild(card);
+    // Tira o .celebrate junto: sem isso o confete não reinicia quando a fila
+    // zerar de novo (a classe ficaria pendurada do "Tudo limpo!" anterior).
+    document.getElementById('noMoreCards').classList.remove('celebrate');
     document.getElementById('noMoreCards').classList.add('hidden');
     prefetchNextImage();
 }
@@ -1427,6 +1443,16 @@ function showNoPlaces() {
     } else {
         if (errEl) errEl.classList.add('hidden');
         noMore.classList.remove('hidden');
+        // Festa só quando o editor de fato zerou algo NESTA sessão. Abrir a app
+        // numa fila já vazia não é conquista — confete ali seria ruído.
+        const tratou = (AppState.stats.read || 0) + (AppState.stats.rejected || 0) > 0;
+        noMore.classList.remove('celebrate');
+        if (tratou) {
+            // Reflow forçado: sem isso o browser junta remove+add num só estilo
+            // computado e a animação não reinicia na segunda vez que a fila zera.
+            void noMore.offsetWidth;
+            noMore.classList.add('celebrate');
+        }
     }
 }
 
@@ -1797,10 +1823,67 @@ function updateInFlightIndicator() {
     `;
 }
 
+// Feedback quando um número muda. São DOIS mecanismos, porque contar não serve
+// pro caso mais comum: cada swipe move o contador em 1, e entre 12 e 13 não
+// existe inteiro nenhum pra mostrar — a "contagem" seria invisível.
+//   · pulo (pop):  SEMPRE que o número muda. É o que comunica "isso mexeu".
+//   · contagem:    só com |Δ| >= 2, aí sim há valores intermediários (ex.: a
+//                  fila carregando de 0 pra 191).
+// Ambos rodam em paralelo com o próximo card entrando: custo zero pro editor.
+const COUNT_ANIM_MIN_MS = 220;
+const COUNT_ANIM_MAX_MS = 650;
+
+function setCount(el, valor, sufixo = '') {
+    if (!el) return;
+    const anterior = parseInt(String(el.textContent).replace(/\D/g, ''), 10);
+    const alvo = Number(valor);
+    const mudou = !Number.isFinite(anterior) || anterior !== alvo;
+
+    if (!Number.isFinite(alvo) || prefersReducedMotion()) {
+        el.textContent = String(valor) + sufixo;
+        return;
+    }
+    // Sem valor anterior legível ('—', '…'): escreve direto, mas ainda pula.
+    if (!Number.isFinite(anterior) || Math.abs(alvo - anterior) < 2) {
+        el.textContent = String(alvo) + sufixo;
+        if (mudou) popCount(el);
+        return;
+    }
+
+    // Um contador por elemento: cancela o anterior antes de começar outro,
+    // senão dois rAF disputam o mesmo textContent e o número treme.
+    if (el._countRaf) cancelAnimationFrame(el._countRaf);
+    const dur = Math.min(COUNT_ANIM_MAX_MS, COUNT_ANIM_MIN_MS + Math.abs(alvo - anterior) * 6);
+    const inicio = performance.now();
+    const passo = (agora) => {
+        const p = Math.min(1, (agora - inicio) / dur);
+        const eased = 1 - Math.pow(1 - p, 3); // ease-out: rápido no começo
+        el.textContent = String(Math.round(anterior + (alvo - anterior) * eased)) + sufixo;
+        if (p < 1) el._countRaf = requestAnimationFrame(passo);
+        else el._countRaf = null;
+    };
+    el._countRaf = requestAnimationFrame(passo);
+    popCount(el);
+}
+
+// Reinicia o pulo mesmo em mudanças seguidas (swipe rápido): tirar a classe,
+// forçar reflow e recolocar — sem o reflow o browser junta tudo num estilo só
+// e a animação não toca de novo.
+function popCount(el) {
+    el.classList.remove('count-pop');
+    void el.offsetWidth;
+    el.classList.add('count-pop');
+    el.addEventListener('animationend', () => el.classList.remove('count-pop'), { once: true });
+}
+
+function prefersReducedMotion() {
+    try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
+}
+
 function updateStats() {
-    document.getElementById('readCount').textContent = AppState.stats.read;
-    document.getElementById('rejectedCount').textContent = AppState.stats.rejected;
-    document.getElementById('skippedCount').textContent = AppState.stats.skipped;
+    setCount(document.getElementById('readCount'), AppState.stats.read);
+    setCount(document.getElementById('rejectedCount'), AppState.stats.rejected);
+    setCount(document.getElementById('skippedCount'), AppState.stats.skipped);
     updatePendingCount();
 }
 
@@ -1815,7 +1898,7 @@ function updatePendingCount() {
         el.textContent = '…';
         return;
     }
-    el.textContent = AppState.hasMore ? (AppState.serverTotal + '+') : String(AppState.serverTotal);
+    setCount(el, AppState.serverTotal, AppState.hasMore ? '+' : '');
     updatePendingTotalHint();
 }
 
