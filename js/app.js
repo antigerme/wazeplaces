@@ -1486,6 +1486,17 @@ function renderCurrentCard() {
     // Traduzir aqui, no clone, é o único ponto que pega todo card novo.
     if (typeof applyI18n === 'function') applyI18n(card);
 
+    // Quando o texto não cabe, ele passa a rolar — e aí o arraste vertical
+    // precisa rolar em vez de disparar "pular". Só nesse caso: com conteúdo
+    // curto (a maioria) o gesto de pular continua valendo em todo o card. O
+    // botão ↑ nunca some, então nada fica inacessível de qualquer forma.
+    // A medição espera o layout assentar; antes disso scrollHeight mente.
+    requestAnimationFrame(() => {
+        const conteudo = card.querySelector('.card-content');
+        if (!conteudo) return;
+        conteudo.classList.toggle('card-content-rola', conteudo.scrollHeight > conteudo.clientHeight + 1);
+    });
+
     // Mola na entrada (280ms). Roda enquanto o dedo já vai pro próximo gesto —
     // ninguém espera por ela. A classe sai no fim pra não sobrescrever o
     // transform do arraste (o swipe.js também tira, se você agarrar antes).

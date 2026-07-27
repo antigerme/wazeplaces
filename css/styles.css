@@ -375,7 +375,11 @@ body.dark {
 /* Áreas de scroll interno do card: sem isso o touch-action:none do
    .place-card engole o gesto e listas longas ficam ilegíveis no mobile */
 .card-changes-list,
-.card-flag-comment-text {
+.card-flag-comment-text,
+/* `.card-content-rola` só existe quando o texto realmente não coube (app.js
+   liga/desliga a cada card). Sem essa condição, deixar a área de texto rolável
+   mataria o gesto de "pular" no card inteiro — e ele é a maioria dos casos. */
+.card-content-rola {
   touch-action: pan-y;
   overscroll-behavior: contain;
 }

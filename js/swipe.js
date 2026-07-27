@@ -52,12 +52,14 @@ function handleDragStart(e) {
 
     dragHandlers = {
         move: handleDragMove,
-        end: handleDragEnd
+        end: handleDragEnd,
+        cancel: handleDragCancel
     };
     document.addEventListener('mousemove', dragHandlers.move);
     document.addEventListener('mouseup', dragHandlers.end);
     document.addEventListener('touchmove', dragHandlers.move, { passive: false });
     document.addEventListener('touchend', dragHandlers.end);
+    document.addEventListener('touchcancel', dragHandlers.cancel);
 }
 
 function handleDragMove(e) {
@@ -104,6 +106,29 @@ function dragVelocity() {
     return { vx: (last.x - first.x) / dt, vy: (last.y - first.y) / dt };
 }
 
+// O browser tirou o gesto da gente (rolagem nativa numa área `pan-y`, chamada
+// do sistema, gesto de voltar). Desfaz o arraste sem cometer ação: quem estava
+// rolando o texto não queria pular o card.
+function handleDragCancel() {
+    if (!isDragging || !currentCard) return;
+    isDragging = false;
+    if (dragHandlers) {
+        document.removeEventListener('mousemove', dragHandlers.move);
+        document.removeEventListener('mouseup', dragHandlers.end);
+        document.removeEventListener('touchmove', dragHandlers.move);
+        document.removeEventListener('touchend', dragHandlers.end);
+        document.removeEventListener('touchcancel', dragHandlers.cancel);
+        dragHandlers = null;
+    }
+    currentCard.classList.remove('dragging');
+    updateSwipeIndicator(0, 0, 0);
+    currentCard.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+    currentCard.style.transform = 'translate(0, 0) rotate(0deg)';
+    const cardRef = currentCard;
+    setTimeout(() => { if (cardRef) cardRef.style.transition = ''; }, 400);
+    currentCard = null;
+}
+
 function handleDragEnd(e) {
     if (!isDragging || !currentCard) return;
     isDragging = false;
@@ -119,6 +144,7 @@ function handleDragEnd(e) {
         document.removeEventListener('mouseup', dragHandlers.end);
         document.removeEventListener('touchmove', dragHandlers.move);
         document.removeEventListener('touchend', dragHandlers.end);
+        document.removeEventListener('touchcancel', dragHandlers.cancel);
         dragHandlers = null;
     }
 
