@@ -85,6 +85,24 @@ test('grid de stats vira 2 colunas abaixo de 360px', () => {
   assert.match(bloco, /nth-child\(n \+ 3\)/, 'falta a divisória horizontal entre as fileiras');
 });
 
+test('o countdown do dev mode não volta a ser toast', () => {
+  // O toast é bottom-center em z-[70] com pointer-events-auto, e a versão fica
+  // no fim do modal de Ajuda: o countdown por toast cobria o próprio alvo, então
+  // do 5º toque em diante o clique ia pro toast e os 3 últimos nunca chegavam —
+  // dev mode impossível de desbloquear, em qualquer aparelho (gotcha #26).
+  // Isso é oclusão, que só um browser mede de verdade; o que dá pra travar aqui
+  // é a decisão: countdown inline, nunca toast.
+  assert.match(HTML, /id="devTapHint"/, 'sumiu o #devTapHint onde o countdown aparece');
+  const JS = read('js/app.js');
+  const fn = JS.match(/function setupDevModeTapTrigger[\s\S]*?\n\}/);
+  assert.ok(fn, 'setupDevModeTapTrigger sumiu do app.js');
+  assert.match(fn[0], /devTapHint/, 'o countdown não escreve mais no #devTapHint');
+  assert.match(fn[0], /toast\.devCountdown/, 'sumiu a string do countdown');
+  // O toast de conquista PODE ficar: aí já desbloqueou, não há mais toque a receber.
+  const trecho = fn[0].slice(fn[0].indexOf('devCountdown') - 400, fn[0].indexOf('devCountdown'));
+  assert.doesNotMatch(trecho, /showToast/, 'o countdown voltou a ser toast — volta a tapar o próprio alvo');
+});
+
 test('as divisórias do grid continuam vindo do Tailwind (dark herda a cor)', () => {
   // A borda de cima do 2×2 não declara cor: herda o `border-color` que o
   // `divide-slate-*` / `dark:divide-*` já põem. Se alguém trocar por uma cor

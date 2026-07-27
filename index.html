@@ -476,7 +476,7 @@
             <h2 class="sr-only" data-i18n="app.queueHeading">Fila de pedidos de places</h2>
             <div id="cardLiveRegion" class="sr-only" role="status" aria-live="polite"></div>
 
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-4 dark:bg-slate-800/80 dark:border-slate-700">
+            <div id="statsCard" class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-4 dark:bg-slate-800/80 dark:border-slate-700">
                 <!-- 4 colunas só cabem quando o rótulo mais largo cabe. O mais largo não
                      é o português: "RECHAZADOS" (es) mede 82px e a coluna só chega lá num
                      aparelho de 390px — abaixo disso o rótulo invadia o vizinho. Como o
@@ -806,6 +806,26 @@
                         <span data-i18n="common.logout">Sair</span>
                     </button>
                 </div>
+
+                <!-- A versão morava num <footer> fixo. Ele custava 40px de rolagem em
+                     TODA tela e não devolvia um pixel de card (o card é dimensionado
+                     por dvh, não pelo que sobra) — num aparelho de 393×852 esses 40px
+                     eram 65% de toda a rolagem da página, e rolagem compete com o
+                     gesto de "pular". Aqui fica a um toque no ⓘ, que está no header
+                     inclusive DESLOGADO: é justamente a quem não consegue entrar que
+                     se pergunta "qual versão você está vendo?".
+                     O gatilho de 7 toques do dev mode veio junto e ficou onde o
+                     Android o põe (Ajustes → Sobre → tocar no número da versão). -->
+                <p class="text-center pt-1">
+                    <span class="text-[10px] text-slate-400 font-mono dark:text-slate-500" id="appVersionDisplay"></span>
+                    <!-- O countdown dos toques vem AQUI, e não num toast. O toast é
+                         bottom-center em z-[70] e cobria justamente o alvo: a partir do
+                         5º toque quem recebia o clique era o toast, então os 3 últimos
+                         toques nunca chegavam e o dev mode era impossível de desbloquear
+                         em qualquer aparelho. Feedback ao lado do alvo não tem como
+                         tapar o alvo. -->
+                    <span class="hidden text-[10px] text-purple-600 dark:text-purple-300 font-semibold mt-0.5" id="devTapHint" aria-live="polite"></span>
+                </p>
             </div>
         </div>
     </div>
@@ -815,9 +835,6 @@
         <div id="undoContainer" class="w-full max-w-sm empty:hidden pointer-events-auto" role="status" aria-live="polite"></div>
     </div>
 
-    <footer class="text-center pb-4" style="padding-bottom: calc(1rem + env(safe-area-inset-bottom))">
-        <span class="text-[10px] text-slate-500 font-mono dark:text-slate-400" id="appVersionDisplay"></span>
-    </footer>
 
     <script src="js/version.js"></script>
     <script src="js/i18n.js"></script>
