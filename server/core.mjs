@@ -306,6 +306,29 @@ export function isUserAllowed(profile) {
 // Sessões — fábrica que recebe o store (KV/filesystem) e a chave
 // ─────────────────────────────────────────────────────────────────────────
 
+// ── Pareamento (computador → celular) ──────────────────────────────────────
+// Copiar cookies no celular é inviável na prática. A saída é logar UMA vez no
+// computador (onde a extensão resolve num clique) e transferir a sessão pro
+// telefone, tipo WhatsApp Web ao contrário.
+export const PAIR_TTL = 300; // 5 min — janela curta de propósito
+// Alfabeto sem 0/O/1/I: ninguém erra de digitar. 32 símbolos ^ 6 = 1,07 bilhão
+// de combinações, ~1000× mais que 6 dígitos, com o mesmo esforço pra digitar.
+const PAIR_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const PAIR_CODE_LEN = 6;
+
+function randomPairCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(PAIR_CODE_LEN));
+  let out = '';
+  // 256 % 32 === 0, então o módulo NÃO enviesa: cada símbolo é equiprovável.
+  for (const b of bytes) out += PAIR_ALPHABET[b % PAIR_ALPHABET.length];
+  return out;
+}
+
+// Aceita "abc-123", "ABC 123", "abc123" — o usuário digita como quiser.
+export function normalizePairCode(code) {
+  return String(code || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
 export function makeSessions({ store, keyBytes }) {
   return {
     async createSession(cookiesContent) {
@@ -326,6 +349,37 @@ export function makeSessions({ store, keyBytes }) {
       if (!token) return;
       const hash = await sha256hex(token);
       await store.delete(hash);
+    },
+
+    // Guarda os cookies (JÁ criptografados) sob um código curto e efêmero.
+    // A validade vai DENTRO do valor, e não só no TTL do store, porque os dois
+    // adaptadores tratam TTL de formas diferentes: o KV expira sozinho, mas o
+    // store de arquivo da VM ignora o TTL do put (usa mtime + SESSION_TTL, que
+    // são 21 dias). Sem o carimbo interno, um código de pareamento sobreviveria
+    // três semanas na VM. Com ele, o prazo vale igual nos dois.
+    async createPairing(cookiesContent) {
+      const code = randomPairCode();
+      const hash = await sha256hex('pair:' + code);
+      const exp = Math.floor(Date.now() / 1000) + PAIR_TTL;
+      const blob = await encryptCookies(cookiesContent, keyBytes);
+      await store.put(hash, exp + '|' + blob, PAIR_TTL);
+      return { code, expiresIn: PAIR_TTL };
+    },
+
+    // Uso único: apaga ANTES de validar a expiração, pra um código não poder
+    // ser tentado duas vezes nem virar oráculo de "existe mas venceu".
+    async claimPairing(code) {
+      const limpo = normalizePairCode(code);
+      if (limpo.length !== PAIR_CODE_LEN) return null;
+      const hash = await sha256hex('pair:' + limpo);
+      const raw = await store.get(hash);
+      if (!raw) return null;
+      await store.delete(hash);
+      const sep = raw.indexOf('|');
+      if (sep < 0) return null;
+      const exp = parseInt(raw.slice(0, sep), 10);
+      if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
+      return decryptCookies(raw.slice(sep + 1), keyBytes);
     },
   };
 }
@@ -384,6 +438,30 @@ async function handleSessao(data, { sessions }) {
     await sessions.destroySession(data && data.sessionToken);
     return { status: 200, body: { success: true } };
   }
+  apiError('Ação inválida');
+}
+
+// Pareamento: `create` exige sessão válida (só quem já está logado gera código);
+// `claim` troca o código por uma sessão nova pro segundo aparelho.
+// A sessão de origem continua intacta — o computador não é deslogado.
+async function handleParear(data, { sessions }) {
+  const action = (data && data.action) || 'create';
+
+  if (action === 'create') {
+    const cookies = await resolveCookies(data, sessions); // 401 se não autenticado
+    const { code, expiresIn } = await sessions.createPairing(cookies);
+    return { status: 200, body: { success: true, code, expiresIn } };
+  }
+
+  if (action === 'claim') {
+    const cookies = await sessions.claimPairing(data && data.code);
+    // Mensagem ÚNICA pros casos "não existe", "já usado" e "expirou": diferenciar
+    // transformaria o endpoint num oráculo pra quem estivesse chutando códigos.
+    if (!cookies) apiError('Código inválido ou expirado. Gere um novo no computador.', 400);
+    const token = await sessions.createSession(cookies);
+    return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL } };
+  }
+
   apiError('Ação inválida');
 }
 
@@ -888,6 +966,7 @@ async function handleListaEstados(data, { sessions }) {
 
 const ROUTES = {
   sessao: handleSessao,
+  parear: handleParear,
   'testar-cookies': handleTestarCookies,
   'buscar-places': handleBuscarPlaces,
   'marcar-lido': handleMarcarLido,
