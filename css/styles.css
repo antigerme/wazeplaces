@@ -221,6 +221,97 @@ body.dark {
   100% { transform: scale(1); }
 }
 
+/* ── Ordem das opções de entrada, por tipo de aparelho ──────────────────────
+   No celular, "upload do cookies.txt" e "instalar extensão do Chrome" são
+   becos sem saída: copiar cookies num telefone é inviável e a extensão é de
+   desktop. Ainda assim eram os PRIMEIROS da lista, e o único caminho que
+   funciona (entrar com código) ficava por último, na dobra da tela.
+   Aqui a lista é REORDENADA por `order` — nada é escondido. Se a detecção
+   errar, toda opção continua alcançável, só em outra ordem. Esconder por
+   dispositivo é o que tranca gente de fora quando o palpite falha. */
+.auth-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* O <input type=file> é irmão dos botões; sem isto viraria um item flex e
+   abriria um buraco de `gap` no meio da lista. */
+.auth-opt-hidden { display: none; }
+
+.auth-opt-ext    { order: 1; }
+.auth-opt-div    { order: 2; }
+.auth-opt-upload { order: 3; }
+.auth-opt-paste  { order: 4; }
+.auth-opt-pair   { order: 5; }
+
+/* `pointer: coarse` = dedo, não mouse. Melhor sinal que largura de tela:
+   janela estreita no desktop continua sendo desktop. */
+@media (pointer: coarse) {
+  .auth-opt-pair   { order: 0; }
+  .auth-opt-ext    { order: 2; }
+  .auth-opt-div    { order: 3; }
+  .auth-opt-upload { order: 4; }
+  .auth-opt-paste  { order: 5; }
+
+  /* No dedo, o código é o caminho que FUNCIONA — então tem que PARECER o
+     principal. Sem isto ele ficava com cara de opção secundária (contorno
+     cinza) enquanto os becos sem saída ostentavam botão colorido. */
+  .auth-opt-pair {
+    background-image: linear-gradient(to right, #06b6d4, #3b82f6);
+    background-color: transparent;
+    border-color: transparent;
+    color: #fff;
+    box-shadow: 0 10px 15px -3px rgba(6, 182, 212, 0.25);
+  }
+  .auth-opt-pair svg { color: #fff; }
+  /* O gradiente do upload perde o destaque, pra não competir com o de cima. */
+  .auth-opt-upload {
+    background-image: none;
+    background-color: #f8fafc;
+    color: #334155;
+    box-shadow: none;
+    border: 1px solid #e2e8f0;
+  }
+  .dark .auth-opt-upload {
+    background-color: #0f172a;
+    color: #e2e8f0;
+    border-color: #334155;
+  }
+}
+
+/* ── Grid de stats em tela estreita ────────────────────────────────────────
+   Abaixo de 360px nenhum tamanho legível faz "REJEITADOS"/"RECHAZADOS" caber
+   em 1/4 da tela (a 320px a coluna tem 64px e o rótulo em espanhol pede 82px),
+   então vira 2×2. O tamanho do rótulo já foi reduzido via `sm:` no HTML, o que
+   resolve a faixa 360–639px; aqui é só o degrau final.
+
+   As divisórias vêm do `divide-x` do Tailwind = borda ESQUERDA em todo filho a
+   partir do 2º. Em duas colunas isso deixaria um risco solto na borda esquerda
+   da segunda fileira, então o 1º e o 3º perdem a borda e a separação entre as
+   fileiras passa a ser horizontal. A cor continua vindo do `divide-slate-*` /
+   `dark:divide-*` do HTML — `border-color` é herdado pela borda de cima, então
+   o dark mode acompanha sozinho, sem override global (gotcha #23). */
+@media (max-width: 359.98px) {
+  #statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 0.25rem;
+  }
+  #statsGrid > :nth-child(odd)    { border-left-width: 0; }
+  #statsGrid > :nth-child(n + 3)  { border-top-width: 1px; padding-top: 0.375rem; }
+
+  /* A segunda fileira custa altura numa tela que já é a mais curta de todas, e
+     altura aqui vira rolagem — que numa app de swipe disputa com o gesto de
+     "pular". Estes cortes devolvem parte: número um degrau menor e cartão com
+     menos respiro. Não devolvem tudo: uma fileira a mais custa ~53px e isto
+     recupera ~25px. O resto é o preço de não ter rótulo sobreposto. */
+  #statsCard { padding: 0.75rem; }
+  #statsGrid > div > p:first-child {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
+}
+
 /* Confete avulso (conquista do gate do undo). Mesmas peças e cores do
    "Tudo limpo!", mas anima sozinho — sem depender de um `.celebrate` no pai,
    porque este é criado e removido em runtime pelo JS. */

@@ -457,7 +457,7 @@ async function handleParear(data, { sessions }) {
     const cookies = await sessions.claimPairing(data && data.code);
     // Mensagem ÚNICA pros casos "não existe", "já usado" e "expirou": diferenciar
     // transformaria o endpoint num oráculo pra quem estivesse chutando códigos.
-    if (!cookies) apiError('Código inválido ou expirado. Gere um novo no computador.', 400);
+    if (!cookies) apiError('Código inválido ou expirado. Gere um novo no aparelho logado.', 400);
     const token = await sessions.createSession(cookies);
     return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL } };
   }

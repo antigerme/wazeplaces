@@ -2137,17 +2137,36 @@ function setupDevModeTapTrigger(el) {
     el.addEventListener('click', () => {
         if (AppState.devMode.unlocked) return;
         tapCount++;
+        const hint = document.getElementById('devTapHint');
+        const limparHint = () => {
+            if (hint) { hint.textContent = ''; hint.classList.add('hidden'); hint.classList.remove('block'); }
+        };
         if (resetTimer) clearTimeout(resetTimer);
-        resetTimer = setTimeout(() => { tapCount = 0; }, DEVMODE_TAP_TIMEOUT_MS);
+        // Parou de tocar? zera a contagem E some com o countdown, senão ficaria
+        // "faltam 2" pendurado ao lado da versão para sempre.
+        resetTimer = setTimeout(() => { tapCount = 0; limparHint(); }, DEVMODE_TAP_TIMEOUT_MS);
         const remaining = DEVMODE_TAPS_NEEDED - tapCount;
         if (remaining === 0) {
             AppState.devMode.unlocked = true;
             saveDevMode();
             tapCount = 0;
+            limparHint();
+            // O toast de conquista é seguro: já desbloqueou, não há mais toque a
+            // receber. É o do COUNTDOWN que não podia ser toast (ver abaixo).
             if (window.showToast) window.showToast(t('toast.devUnlocked'), 'success');
         } else if (remaining > 0 && remaining <= 3) {
-            if (window.showToast) {
-                window.showToast(t('toast.devCountdown', { n: remaining }), 'info');
+            // Countdown fica ao LADO da versão, nunca num toast. O toast é
+            // bottom-center em z-[70] e cobria o próprio alvo: do 5º toque em
+            // diante quem recebia o clique era ele, os 3 últimos toques não
+            // chegavam e o dev mode era impossível de desbloquear — em todo
+            // aparelho, desde sempre. Overlay transitório não pode ficar por
+            // cima de um alvo que ainda precisa ser tocado.
+            if (hint) {
+                hint.textContent = t('toast.devCountdown', { n: remaining });
+                // `block` e não `inline`: em tela estreita o texto embolava com o
+                // serial da versão em vez de virar uma linha própria.
+                hint.classList.remove('hidden');
+                hint.classList.add('block');
             }
         }
     });
