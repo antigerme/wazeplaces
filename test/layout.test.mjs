@@ -328,3 +328,16 @@ test('espaçamento da tela do card vem de gap, não de space-y', () => {
     'o espaçamento por gap sumiu do #appScreen'
   );
 });
+
+test('o vão entre a barra fixa e o placar é medido até a TINTA, não até a caixa', () => {
+  // O owner insistiu que o vão era grande depois de eu já ter "compactado" —
+  // e estava certo. Eu media a margem CSS (24px); o olho mede a distância até
+  // o primeiro pixel do número, que somava margem + padding do cartão + borda
+  // + entrelinha = 35px. O `<main>` era `py-6` por herança de quando o placar
+  // não tinha borda nem elevação próprias; hoje a separação visual vem do
+  // cartão, não do vão. Com `pt-2`: 19px até a tinta.
+  const main = HTML.split('\n').find((l) => l.includes('<main'));
+  assert.ok(main, 'sumiu o <main>');
+  assert.match(main, /\bpt-2\b/, 'o topo do <main> voltou a ter respiro grande antes do placar');
+  assert.doesNotMatch(main, /\bpy-6\b/, 'py-6 de volta: 24px de margem viram 35px de vão percebido');
+});
