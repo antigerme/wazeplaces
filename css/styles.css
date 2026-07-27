@@ -239,6 +239,12 @@ body.dark {
    abriria um buraco de `gap` no meio da lista. */
 .auth-opt-hidden { display: none; }
 
+/* Navegador de celular não instala extensão da Chrome Web Store. A classe vem
+   do `marcarSuporteAExtensao()` (app.js) e olha o SO, não o ponteiro: notebook
+   com tela sensível ao toque é `pointer: coarse` e instala extensão numa boa —
+   esconder por ponteiro tiraria uma opção que ali funciona. */
+.sem-extensao .auth-opt-ext { display: none; }
+
 .auth-opt-ext    { order: 1; }
 .auth-opt-div    { order: 2; }
 .auth-opt-upload { order: 3; }
@@ -279,6 +285,27 @@ body.dark {
     border-color: #334155;
   }
 }
+
+/* ── Teclado virtual não pode engolir o modal ──────────────────────────────
+   Todo campo de texto é um teclado esperando pra ocupar metade da tela. Um
+   modal centralizado com input vira modal invisível: foi o caso do "Entrar
+   com um código", onde o campo e os botões ficaram atrás do teclado.
+
+   Duas camadas, porque nenhuma sozinha cobre todo mundo:
+   1. `interactive-widget=resizes-content` no <meta viewport> (index.html) faz
+      a viewport de layout encolher — o `inset-0` acompanha e o modal recentra.
+   2. Onde o navegador ignora isso, o `--kb-inset` (medido pelo visualViewport
+      em app.js) empurra o conteúdo pra cima. Com `items-center`, padding
+      embaixo sobe o modal.
+   O teto de altura de cada modal desconta o mesmo `--kb-inset`, mas fica no
+   HTML (`max-h-[calc(...)]`) e não aqui: `.modal-root > *` empataria em
+   especificidade com o `max-h-[85dvh]` do Tailwind, que carrega DEPOIS deste
+   arquivo e venceria o empate (gotcha #22). Perder essa briga é silencioso. */
+/* O padding que sobe o modal mora no HTML (`pb-[calc(1rem+var(--kb-inset,0px))]`)
+   e não aqui: uma regra `.modal-root { padding-bottom }` empata em
+   especificidade com o `p-4` do Tailwind, que carrega DEPOIS deste arquivo e
+   vence o empate — medi, e o padding ficava em 16px com o teclado aberto. Como
+   utility, `pb-*` é emitido depois de `p-*` e vence sem `!important`. */
 
 /* ── Grid de stats em tela estreita ────────────────────────────────────────
    Abaixo de 360px nenhum tamanho legível faz "REJEITADOS"/"RECHAZADOS" caber

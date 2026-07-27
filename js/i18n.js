@@ -73,6 +73,7 @@ const I18N_DICT = {
     'batch.button': 'Marcar todos os pendentes como lidos',
     'batch.hint': 'Marca de uma vez todos os pedidos já carregados na fila. Vai direto pro Waze, sem desfazer.',
     // stats
+    'help.install.label': 'Instalar o aplicativo',
     'stats.read': 'Lidos', 'stats.rejected': 'Rejeitados', 'stats.skipped': 'Pulados', 'stats.pending': 'Restam',
     'stats.pending.ofRegion': 'de {total} na região',
     'stats.pending.ofRegion.title': '{blocked} pedido(s) da região não aparecem na fila porque você não tem permissão de edição neles. Trate-os pelo WME.',
@@ -241,6 +242,7 @@ const I18N_DICT = {
     'filters.sort.oldest': 'Oldest first',
     'batch.button': 'Mark all pending as read',
     'batch.hint': 'Marks every request already loaded in the queue at once. Goes straight to Waze, no undo.',
+    'help.install.label': 'Install the app',
     'stats.read': 'Read', 'stats.rejected': 'Rejected', 'stats.skipped': 'Skipped', 'stats.pending': 'Left',
     'stats.pending.ofRegion': 'of {total} in the region',
     'stats.pending.ofRegion.title': '{blocked} request(s) in the region are not in your queue because you lack edit permission on them. Handle those in WME.',
@@ -398,6 +400,7 @@ const I18N_DICT = {
     'filters.sort.oldest': 'Más antiguas primero',
     'batch.button': 'Marcar todos los pendientes como leídos',
     'batch.hint': 'Marca de una vez todas las solicitudes ya cargadas en la cola. Va directo a Waze, sin deshacer.',
+    'help.install.label': 'Instalar la aplicación',
     'stats.read': 'Leídos', 'stats.rejected': 'Rechazados', 'stats.skipped': 'Saltados', 'stats.pending': 'Quedan',
     'stats.pending.ofRegion': 'de {total} en la región',
     'stats.pending.ofRegion.title': '{blocked} solicitud(es) de la región no aparecen en tu cola porque no tienes permiso de edición. Trátalas en WME.',

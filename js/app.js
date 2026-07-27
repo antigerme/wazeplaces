@@ -111,6 +111,9 @@ function initApp() {
     setupAppListeners();
     setupModalListeners();
     setupLightbox();
+    setupKeyboardInset();
+    marcarSuporteAExtensao();
+    setupInstalarApp();
 
     // Link de pareamento (?pair=CODE): o editor mandou pra si mesmo e abriu no
     // celular — entra direto, sem digitar nada. Tratado ANTES da sessão salva
@@ -2129,6 +2132,98 @@ function loadDevMode() {
             AppState.devMode.active = !!parsed.active && !!parsed.unlocked;
         }
     } catch (e) {}
+}
+
+// ── Teclado virtual ────────────────────────────────────────────────────────
+// Todo campo de texto é um teclado esperando pra ocupar metade da tela. No
+// celular, o modal "Entrar com um código" ficava ATRÁS do teclado: campo e
+// botões invisíveis, sem nada indicando que era só rolar. Aqui a altura coberta
+// vira `--kb-inset`, que os modais usam pra subir e pra encolher (styles.css +
+// `max-h-[calc(...)]` no HTML). É a segunda camada: a primeira é o
+// `interactive-widget=resizes-content` do <meta viewport>, que alguns
+// navegadores ignoram.
+function setupKeyboardInset() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const aplicar = () => {
+        const coberto = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+        // Abaixo de 80px é barra do navegador entrando/saindo, não teclado —
+        // reagir a isso faria o modal pular a cada rolagem.
+        const inset = coberto > 80 ? coberto : 0;
+        document.documentElement.style.setProperty('--kb-inset', inset + 'px');
+    };
+    vv.addEventListener('resize', aplicar);
+    vv.addEventListener('scroll', aplicar);
+    aplicar();
+
+    // Rede de segurança pra navegador sem nenhum dos dois mecanismos: leva o
+    // campo focado pra área visível. O atraso espera o teclado assentar —
+    // medir antes disso mede a tela errada.
+    document.addEventListener('focusin', (e) => {
+        const campo = e.target;
+        if (!campo || typeof campo.matches !== 'function') return;
+        if (!campo.matches('input, textarea, select')) return;
+        if (!campo.closest('.modal-root')) return;
+        setTimeout(() => {
+            try { campo.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (err) {}
+        }, 250);
+    });
+}
+
+// ── Extensão do Chrome: só onde ela existe ─────────────────────────────────
+// Chrome/Edge de Android e qualquer navegador de iOS não instalam extensão da
+// Chrome Web Store. Oferecer isso num celular não é "opção de baixa
+// prioridade": é beco sem saída — e ainda vinha marcado como "RECOMENDADO",
+// mandando o editor justamente pro caminho que não funciona ali. Reordenar
+// resolve o que é inconveniente; o que é impossível sai da frente.
+// Os outros três caminhos (código, upload, colar) seguem visíveis, então
+// errar a detecção não tranca ninguém do lado de fora.
+function podeInstalarExtensao() {
+    const dados = navigator.userAgentData;
+    if (dados && typeof dados.mobile === 'boolean') return !dados.mobile;
+    return !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+}
+
+function marcarSuporteAExtensao() {
+    if (!podeInstalarExtensao()) {
+        document.documentElement.classList.add('sem-extensao');
+    }
+}
+
+// ── Convite de instalação do PWA ───────────────────────────────────────────
+// Sem `preventDefault()`, o Chrome mostra a própria barra de instalação: fica
+// grudada no rodapé, tapa conteúdo (inclusive o meio dos modais) e não sai da
+// frente. Convite persistente que cobre conteúdo é anti-padrão M3/HIG. Então
+// guardamos o evento e oferecemos a instalação num lugar previsível — o menu
+// de Ajuda — onde o editor decide quando.
+let promptInstalacao = null;
+
+function atualizarBotaoInstalar() {
+    const btn = document.getElementById('installAppBtn');
+    if (btn) btn.classList.toggle('hidden', !promptInstalacao);
+}
+
+function setupInstalarApp() {
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        promptInstalacao = e;
+        atualizarBotaoInstalar();
+    });
+    window.addEventListener('appinstalled', () => {
+        promptInstalacao = null;
+        atualizarBotaoInstalar();
+    });
+    const btn = document.getElementById('installAppBtn');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+        if (!promptInstalacao) return;
+        promptInstalacao.prompt();
+        // O evento é de uso único: depois de escolher, some de qualquer jeito.
+        try { await promptInstalacao.userChoice; } catch (err) {}
+        promptInstalacao = null;
+        atualizarBotaoInstalar();
+    });
+    atualizarBotaoInstalar();
 }
 
 function setupDevModeTapTrigger(el) {

@@ -12,6 +12,15 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
 
 **Regra de ouro de produto:** a app **NUNCA aprova** places, **só rejeita ou marca como lido**. Aprovar exige ajuste no mapa via WME oficial (link "↗ abrir no WME" em cada card resolve isso). Se você encontrar referência a "aprovar" no código ou docs, é bug — corrija ou pergunte.
 
+**Regra de ouro de interface: GUI/UX primeiro, com M3 + HIG de régua SEMPRE.** Não é checklist de acabamento pra passar no fim — é o critério que decide **o que aparece na tela e quando**. Na prática, antes de dar qualquer coisa por pronta, olhe a tela no aparelho de verdade e pergunte:
+
+- **Isto é acionável AQUI?** Nunca ofereça ação impossível no aparelho. Extensão de Chrome desktop num celular não é "opção de baixa prioridade" — é beco sem saída, e ainda por cima estava marcada como "RECOMENDADO". Reordenar resolve o que é *inconveniente*; o que é *impossível* tem que sair da frente.
+- **O teclado virtual vai cobrir isto?** Todo campo de texto é um teclado esperando pra ocupar metade da tela. Modal centralizado com input vira modal invisível. Testar SEM abrir o teclado é não testar.
+- **Isto interrompe sem ser chamado?** Banner que o navegador oferece (install prompt do PWA) é interrupção que o site pode e deve controlar — `beforeinstallprompt` + `preventDefault()`, e a ação vai pra um lugar previsível. M3/HIG: convite persistente que tapa conteúdo é anti-padrão.
+- Alvo de toque ≥ 44px, ordem de botões (dismissiva à esquerda, afirmativa à direita), zoom nunca bloqueado, `reduced-motion` respeitado — esses já estão detalhados na seção **Padrões de UI**.
+
+Já falhei nos três primeiros ao mesmo tempo, e o owner teve que apontar com print do celular. Se a única validação foi Playwright em viewport emulada, você não testou teclado nem prompt de instalação — diga isso em vez de dar por validado.
+
 PWA = instala no celular sem precisar de Play Store / App Store. Funciona offline para assets, online para API.
 
 ---

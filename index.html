@@ -2,7 +2,13 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- interactive-widget=resizes-content: quando o teclado virtual abre, a
+         viewport de layout encolhe junto. Sem isso o modal continua centralizado
+         na tela INTEIRA e fica atrás do teclado — foi o que aconteceu no
+         "Entrar com um código". Onde o navegador ignora (Safari), o
+         visualViewport do app.js cobre via --kb-inset. Zoom segue livre
+         (sem maximum-scale / user-scalable — WCAG 1.4.4). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="description" content="Validação de Places do Waze Map Editor - Interface Estilo Tinder">
     <meta name="theme-color" content="#33CCFF">
     <!-- CSP: mantida em sync com o arquivo _headers (Cloudflare) — ver gotcha #14.
@@ -188,8 +194,8 @@
              #loadingCard ambos em z-50 faziam o esqueleto de carregamento tapar
              o meio do modal (quem vem depois no HTML ganha o empate), então
              abrir Filtros durante a busca mostrava um diálogo pela metade. -->
-        <div id="pasteModal" role="dialog" aria-modal="true" aria-labelledby="pasteModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[85dvh] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
+        <div id="pasteModal" role="dialog" aria-modal="true" aria-labelledby="pasteModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="pasteModalTitle" class="text-xl font-bold text-slate-800 mb-4 dark:text-slate-100" data-i18n="modal.paste.title">Cole o Conteúdo dos Cookies</h3>
                 <textarea id="cookiesTextarea" aria-label="Conteúdo do arquivo cookies.txt" data-i18n-aria="modal.paste.textarea.aria" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" class="w-full h-48 p-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt…" data-i18n-ph="modal.paste.textarea.ph"></textarea>
                 <div class="flex space-x-3 mt-4">
@@ -203,8 +209,8 @@
             </div>
         </div>
 
-        <div id="logoutModal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 dark:bg-slate-800 dark:text-slate-200">
+        <div id="logoutModal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.logout.title">Sair?</h3>
                 <p class="text-sm text-slate-500 mb-6 dark:text-slate-400" data-i18n-html="modal.logout.body">Sua sessão será encerrada e <strong>todos os dados locais</strong> (cookies, estatísticas, filtros e preferências) serão apagados deste dispositivo. Esta ação não pode ser desfeita.</p>
                 <div class="flex space-x-3">
@@ -214,8 +220,8 @@
             </div>
         </div>
 
-        <div id="accessDeniedModal" role="dialog" aria-modal="true" aria-labelledby="accessDeniedTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 dark:bg-slate-800 dark:text-slate-200">
+        <div id="accessDeniedModal" role="dialog" aria-modal="true" aria-labelledby="accessDeniedTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
                 <div class="flex items-start gap-3 mb-4">
                     <div class="bg-rose-100 dark:bg-rose-500/20 p-2 rounded-full flex-shrink-0">
                         <svg class="w-6 h-6 text-rose-600 dark:text-rose-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -238,8 +244,8 @@
              Rodapé é CONTEXTUAL: Cancelar/Aplicar só na aba Filtros (formulário);
              Preferências aplicam na hora (padrão M3 pra settings) e Histórico é só
              leitura → ambas usam "Fechar". IDs de todos os campos preservados. -->
-        <div id="filtersModal" role="dialog" aria-modal="true" aria-labelledby="filtersModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full flex flex-col max-h-[85dvh] dark:bg-slate-800 dark:text-slate-200">
+        <div id="filtersModal" role="dialog" aria-modal="true" aria-labelledby="filtersModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full flex flex-col max-h-[calc(85dvh-var(--kb-inset,0px))] dark:bg-slate-800 dark:text-slate-200">
                 <div class="flex justify-between items-center px-6 pt-4 pb-2 flex-shrink-0">
                     <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.filters.title">Filtros e Preferências</h3>
                     <button id="closeFilters" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full dark:text-slate-400">
@@ -424,8 +430,8 @@
              Copiar cookies num celular é inviável. Aqui o editor já logado gera
              um código curto que transfere a sessão pro telefone. O código vale
              5 minutos e serve UMA vez; a sessão do computador não é afetada. -->
-        <div id="pairShowModal" role="dialog" aria-modal="true" aria-labelledby="pairShowTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6">
+        <div id="pairShowModal" role="dialog" aria-modal="true" aria-labelledby="pairShowTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6">
                 <h3 id="pairShowTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.show.title">Conectar outro aparelho</h3>
                 <p class="text-sm text-slate-500 dark:text-slate-400 mb-5" data-i18n="pair.show.body">No outro aparelho, abra a app e toque em "Entrar com um código". Depois digite:</p>
 
@@ -443,8 +449,8 @@
         </div>
 
         <!-- ── Pareamento: recebe o código (usado no CELULAR) ──────────────── -->
-        <div id="pairEnterModal" role="dialog" aria-modal="true" aria-labelledby="pairEnterTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6">
+        <div id="pairEnterModal" role="dialog" aria-modal="true" aria-labelledby="pairEnterTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain">
                 <h3 id="pairEnterTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.enter.title">Entrar com um código</h3>
                 <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.enter.body">No aparelho onde você já está logado, abra a Ajuda e toque em "Conectar outro aparelho". Digite aqui o código de 6 caracteres:</p>
 
@@ -460,8 +466,8 @@
             </div>
         </div>
 
-        <div id="batchReadModal" role="dialog" aria-modal="true" aria-labelledby="batchReadTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 dark:bg-slate-800 dark:text-slate-200">
+        <div id="batchReadModal" role="dialog" aria-modal="true" aria-labelledby="batchReadTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="batchReadTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.batchRead.title">Marcar em lote?</h3>
                 <p id="batchReadMessage" class="text-sm text-slate-500 mb-6 dark:text-slate-400">Marcar como lido os pedidos da fila?</p>
                 <div class="flex space-x-3">
@@ -722,8 +728,8 @@
         <img id="lightboxImage" class="max-w-full max-h-full object-contain will-change-transform" style="touch-action: none" alt="" draggable="false">
     </div>
 
-    <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[85dvh] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
+    <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="helpModalTitle" class="text-2xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.help.title">Ajuda</h3>
                     <button id="pairCreateBtn" type="button" class="w-full min-h-[48px] mb-4 mt-1 bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-cyan-100 dark:border-cyan-400/30">
@@ -800,7 +806,16 @@
                     </ul>
                 </div>
 
-                <div class="pt-3 border-t border-slate-200 dark:border-slate-700">
+                <div class="pt-3 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                    <!-- Aparece só quando o navegador diz que dá pra instalar
+                         (beforeinstallprompt). O Chrome mostraria sozinho uma
+                         barra fixa no rodapé tapando conteúdo; ela é suprimida
+                         em app.js e o convite vem parar aqui, onde o editor
+                         decide a hora. -->
+                    <button id="installAppBtn" type="button" class="hidden w-full min-h-[48px] bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
+                        <span data-i18n="help.install.label">Instalar o aplicativo</span>
+                    </button>
                     <button id="logoutBtn" type="button" class="w-full min-h-[48px] bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                         <span data-i18n="common.logout">Sair</span>
