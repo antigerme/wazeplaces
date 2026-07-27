@@ -2073,11 +2073,20 @@ function enforceDevGatedFilters() {
 // Gate de experiência pro toggle "Permitir desfazer ações".
 // Ideia: novatos não conseguem desligar o undo até pegarem ritmo. Editores de
 // nível mais alto têm cota menor (são mais experientes).
-// Fórmula: ceil(3000 / (rank + 1)). Waze devolve rank 0-indexed:
-//   rank 5 (L6) → 500 PURs, rank 4 (L5) → 600, rank 3 (L4) → 750, rank 2 (L3) → 1000.
+// Fórmula: ceil(UNDO_GATE_BASE / (rank + 1)). Waze devolve rank 0-indexed:
+//   rank 5 (L6) → 50 PURs, rank 4 (L5) → 60, rank 3 (L4) → 75, rank 2 (L3) → 100,
+//   rank 1 (L2) → 150, rank 0 (L1) → 300.
 // "PURs tratados" = read + rejected (skipped não treina o ritmo de ação destrutiva).
 // Staff são isentos. Esta NÃO é proteção de segurança — é UX/educação. localStorage
 // pode ser editado pelo user esperto; o objetivo é proteger quem é genuinamente novato.
+//
+// A base era 3000 (L1 levava ~100 min de swipe contínuo pra desbloquear — exagero
+// que na prática travava todo mundo pra sempre). 300 mantém o gate significativo
+// pro novato (uma sessão de trabalho de verdade) e some do caminho de quem tem
+// ritmo. Baixar mais (30/60) apagaria o gate: L6 passaria em 10 segundos, e a
+// escala por nível viraria ruído (L5=6 vs L6=5 não distingue ninguém).
+const UNDO_GATE_BASE = 300;
+
 function getUndoTreatedCount() {
     return (AppState.stats.read || 0) + (AppState.stats.rejected || 0);
 }
@@ -2086,7 +2095,7 @@ function getUndoUnlockThreshold() {
     if (AppState.profile && AppState.profile.isStaff) return 0;
     const rank = AppState.profile && AppState.profile.rank;
     if (typeof rank !== 'number') return Infinity;
-    return Math.ceil(3000 / (rank + 1));
+    return Math.ceil(UNDO_GATE_BASE / (rank + 1));
 }
 
 function canDisableUndo() {

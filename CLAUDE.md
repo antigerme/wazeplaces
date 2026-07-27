@@ -222,7 +222,7 @@ Estrutura unificada na resposta de erro de `validar-place` e `marcar-lido`:
   filters,                // tipos, residencial, país, estado, área, myArea, unreadOnly, categories[] (filtro B5, server-side), sortOrder ('newest'|'oldest', client-side em sortQueue)
   seenCategories,         // categorias vistas nos places carregados — fonte do select de categoria (B5)
   history,                // acumulado histórico { 'YYYY-MM-DD': {read,rejected} } em localStorage waze_places_history — registrado em handleActionResult (só ações confirmadas), zerado no logout. Ver getHistoryStats/renderHistory
-  preferences,            // undoEnabled — toggle no modal "Filtros e Preferências", persiste em localStorage waze_places_preferences. Sujeito a gate de experiência: novatos não podem desligar até bater cota ceil(3000/(rank+1)) de read+rejected (staff isento). Ver canDisableUndo()
+  preferences,            // undoEnabled — toggle no modal "Filtros e Preferências", persiste em localStorage waze_places_preferences. Sujeito a gate de experiência: novatos não podem desligar até bater cota ceil(UNDO_GATE_BASE/(rank+1)) de read+rejected, UNDO_GATE_BASE=300 → L1 300 · L3 100 · L6 50 (staff isento). Ver canDisableUndo()
   devMode,                // { unlocked, active } — easter egg estilo Android. 7 taps na versão do rodapé desbloqueia; toggle no modal "Avançado" ativa. Quando active=true, canDisableUndo() retorna true (bypassa o gate). NÃO é segurança — qualquer um seta via DevTools; só esconde de usuário comum. handleLogout limpa ambas as flags.
   profile, countries, statesByCountry
 }
