@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.27-13
+
+### Alterado
+- **O espaço entre a barra do topo e o placar diminuiu.** Era 24px de margem, mas o que o olho enxerga é a distância até o número: 35px contando o padding do cartão e a entrelinha. Agora são 19px — e o card ganhou mais 24px. Num notebook 1366×768 o card foi de 577 para **601px**; num iPhone SE a rolagem da página caiu de 58 para **34px**.
+
 ## v2026.07.27-12
 
 ### Alterado
