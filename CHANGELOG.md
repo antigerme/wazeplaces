@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.27-10
+
+### Corrigido
+- **A informação do CRIADOR podia ficar cortada, sem jeito de ver.** Em celular menor (iPhone SE e parecidos), a última linha do card era engolida pela borda e não havia rolagem nenhuma — nem arrastando. Agora o texto rola quando não cabe.
+- **Sobrava um vão branco enorme embaixo dos dados** em pedidos curtos (um "Novo Local" sem mudanças propostas): 113px de nada num Pixel 7, quase um quinto do card.
+
+### Alterado
+- **A foto agora usa o espaço que sobra.** Ela era fixa em 208px de altura enquanto o texto ficava com toda a folga — por isso o vão. Agora é o contrário: a foto cresce quando o pedido tem pouca informação (chega a **298px, +43%**) e cede quando tem muita. Como é a foto que você olha pra decidir, o espaço vai pra onde importa. Os botões continuam exatamente no mesmo lugar em todos os cards.
+
 ## v2026.07.27-09
 
 ### Corrigido

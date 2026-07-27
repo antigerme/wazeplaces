@@ -226,3 +226,38 @@ test('as divisórias do grid continuam vindo do Tailwind (dark herda a cor)', ()
     'a media query fixou cor de borda — deixa o dark herdar'
   );
 });
+
+test('a foto do card absorve a variação de altura, o texto não vira vão', () => {
+  // O card tem altura fixa e o conteúdo varia (um "Novo Local" curto × um
+  // UPDATE com 4 mudanças). Quando a FOTO era fixa em h-52, a sobra ia toda pro
+  // texto e virava um vão morto embaixo — 113px num Pixel 7. E no sentido
+  // contrário, num iPhone SE, faltavam 29px: a linha do CRIADOR ficava cortada
+  // pelo overflow-hidden do card, com `overflow-y: visible` e sem rolagem
+  // possível. Mesma raiz nos dois: quem tem que ceder é a foto.
+  const linhas = HTML.split('\n');
+  const foto = linhas.find((l) => l.includes('card-photo'));
+  assert.ok(foto, 'sumiu o container da foto (.card-photo)');
+  assert.match(foto, /flex-auto/, 'a foto voltou a ter altura fixa — a sobra vira vão de novo');
+  assert.match(foto, /min-h-\[/, 'a foto precisa de um piso, senão some em conteúdo longo');
+  assert.match(foto, /max-h-\[/, 'a foto precisa de um teto, senão engole o texto');
+  assert.doesNotMatch(foto, /\bh-52\b/, 'altura fixa de volta na foto');
+
+  const conteudo = linhas.find((l) => l.includes('card-content dark:'));
+  assert.ok(conteudo, 'sumiu a área de texto do card');
+  assert.match(conteudo, /overflow-y-auto/, 'sem rolagem, o texto que não couber é cortado sem saída');
+  assert.doesNotMatch(conteudo, /\bflex-1\b/, 'flex-1 no texto faz ele receber a sobra e virar vão');
+});
+
+test('rolagem dentro do card não rouba o gesto nem deixa o card preso', () => {
+  const CSS_ = read('css/styles.css');
+  const SWIPE = read('js/swipe.js');
+  const APP_ = read('js/app.js');
+  // `pan-y` só quando o texto REALMENTE não coube: senão o arraste vertical
+  // pararia de "pular" no card inteiro, que é a maioria dos casos.
+  assert.match(CSS_, /\.card-content-rola/, 'sumiu a classe que libera a rolagem só quando precisa');
+  assert.match(APP_, /card-content-rola/, 'ninguém mais liga/desliga a classe por card');
+  // O browser assumir o gesto dispara touchcancel; sem tratar, o card fica
+  // preso torto e os listeners de document vazam.
+  assert.match(SWIPE, /touchcancel/, 'touchcancel sem tratamento deixa o card preso no meio do arraste');
+  assert.match(SWIPE, /function handleDragCancel/, 'sumiu o cancelamento limpo do arraste');
+});
