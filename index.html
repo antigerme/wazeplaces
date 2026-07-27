@@ -477,12 +477,12 @@
             </div>
         </div>
 
-        <div id="appScreen" class="hidden space-y-4">
+        <div id="appScreen" class="hidden">
 
             <h2 class="sr-only" data-i18n="app.queueHeading">Fila de pedidos de places</h2>
             <div id="cardLiveRegion" class="sr-only" role="status" aria-live="polite"></div>
 
-            <div id="statsCard" class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-4 dark:bg-slate-800/80 dark:border-slate-700">
+            <div id="placar" class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-2 dark:bg-slate-800/80 dark:border-slate-700">
                 <!-- 4 colunas só cabem quando o rótulo mais largo cabe. O mais largo não
                      é o português: "RECHAZADOS" (es) mede 82px e a coluna só chega lá num
                      aparelho de 390px — abaixo disso o rótulo invadia o vizinho. Como o
@@ -490,22 +490,22 @@
                      estouro horizontal acusava; só medindo caixa contra caixa aparece.
                      Daí os dois degraus: rótulo menor e sem tracking abaixo de `sm`, e
                      2×2 abaixo de 360px (onde 4 colunas não cabem em nenhum tamanho
-                     legível). Ver `#statsGrid` em css/styles.css. -->
-                <div id="statsGrid" class="grid grid-cols-4 text-center divide-x divide-slate-100 dark:divide-slate-700">
+                     legível). Ver `#placarGrid` em css/styles.css. -->
+                <div id="placarGrid" class="grid grid-cols-4 text-center divide-x divide-slate-100 dark:divide-slate-700">
                     <div>
-                        <p class="text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight tnum" id="readCount">0</p>
+                        <p class="text-xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight tnum" id="readCount">0</p>
                         <p class="text-[0.6875rem] tracking-normal sm:tracking-wider font-medium text-slate-500 uppercase mt-1 dark:text-slate-400" data-i18n="stats.read">Lidos</p>
                     </div>
                     <div>
-                        <p class="text-2xl font-black text-rose-600 dark:text-rose-400 tracking-tight tnum" id="rejectedCount">0</p>
+                        <p class="text-xl font-black text-rose-600 dark:text-rose-400 tracking-tight tnum" id="rejectedCount">0</p>
                         <p class="text-[0.6875rem] tracking-normal sm:tracking-wider font-medium text-slate-500 uppercase mt-1 dark:text-slate-400" data-i18n="stats.rejected">Rejeitados</p>
                     </div>
                     <div>
-                        <p class="text-2xl font-black text-amber-600 dark:text-amber-400 tracking-tight tnum" id="skippedCount">0</p>
+                        <p class="text-xl font-black text-amber-600 dark:text-amber-400 tracking-tight tnum" id="skippedCount">0</p>
                         <p class="text-[0.6875rem] tracking-normal sm:tracking-wider font-medium text-slate-500 uppercase mt-1 dark:text-slate-400" data-i18n="stats.skipped">Pulados</p>
                     </div>
                     <div>
-                        <p class="text-2xl font-black text-cyan-600 dark:text-cyan-400 tracking-tight tnum" id="pendingCount" title="Restam na fila (carregados localmente). Sinal + significa que há mais páginas a buscar" data-i18n-title="stats.pending.title">—</p>
+                        <p class="text-xl font-black text-cyan-600 dark:text-cyan-400 tracking-tight tnum" id="pendingCount" title="Restam na fila (carregados localmente). Sinal + significa que há mais páginas a buscar" data-i18n-title="stats.pending.title">—</p>
                         <p class="text-[0.6875rem] tracking-normal sm:tracking-wider font-medium text-slate-500 uppercase mt-1 dark:text-slate-400" data-i18n="stats.pending">Restam</p>
                         <!-- D13: só aparece quando há pedidos na região que este editor
                              NÃO pode editar (o backend os filtra da fila). Explica por

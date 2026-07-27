@@ -29,11 +29,11 @@ const ROTULOS = ['stats.read', 'stats.rejected', 'stats.skipped', 'stats.pending
 
 // As chaves `stats.*` aparecem DUAS vezes no HTML: no grid do topo e no
 // cabeçalho da aba Histórico. Só o grid do topo tem o problema de largura de
-// coluna, então tudo aqui olha apenas o bloco do #statsGrid.
+// coluna, então tudo aqui olha apenas o bloco do #placarGrid.
 function blocoDoGrid() {
   const linhas = HTML.split('\n');
-  const i = linhas.findIndex((l) => l.includes('id="statsGrid"'));
-  assert.notEqual(i, -1, 'o grid de stats perdeu o id="statsGrid"');
+  const i = linhas.findIndex((l) => l.includes('id="placarGrid"'));
+  assert.notEqual(i, -1, 'o grid de stats perdeu o id="placarGrid"');
   // O grid tem 4 células de ~4 linhas; 30 linhas cobrem com folga e param
   // muito antes de chegar na aba Histórico.
   return linhas.slice(i, i + 30);
@@ -44,7 +44,7 @@ test('os 4 rótulos do grid de stats existem', () => {
   for (const chave of ROTULOS) {
     assert.ok(
       bloco.some((l) => l.includes(`data-i18n="${chave}"`)),
-      `rótulo ${chave} sumiu do #statsGrid`
+      `rótulo ${chave} sumiu do #placarGrid`
     );
   }
 });
@@ -57,7 +57,7 @@ test('rótulo de stats: 11px em rem e tracking só a partir de sm', () => {
   const bloco = blocoDoGrid();
   for (const chave of ROTULOS) {
     const linha = bloco.find((l) => l.includes(`data-i18n="${chave}"`));
-    assert.ok(linha, `linha do rótulo ${chave} não encontrada no #statsGrid`);
+    assert.ok(linha, `linha do rótulo ${chave} não encontrada no #placarGrid`);
     assert.match(linha, /tracking-normal/, `${chave}: falta zerar o tracking em tela pequena`);
     assert.match(linha, /sm:tracking-wider/, `${chave}: falta o degrau sm:tracking-wider`);
     assert.doesNotMatch(
@@ -91,9 +91,9 @@ function mediaQueryEstreita() {
 }
 
 test('grid de stats vira 2 colunas abaixo de 360px', () => {
-  assert.match(HTML, /id="statsGrid"/, 'o grid de stats perdeu o id que a regra de CSS usa');
+  assert.match(HTML, /id="placarGrid"/, 'o grid de stats perdeu o id que a regra de CSS usa');
   const bloco = mediaQueryEstreita();
-  assert.match(bloco, /#statsGrid/, 'a media query não mira mais o #statsGrid');
+  assert.match(bloco, /#placarGrid/, 'a media query não mira mais o #placarGrid');
   assert.match(bloco, /grid-template-columns:\s*repeat\(2,/, 'a media query não põe 2 colunas');
   // `divide-x` põe borda à esquerda de todo filho a partir do 2º; em 2 colunas
   // isso deixa um risco solto na borda esquerda da 2ª fileira.
@@ -217,9 +217,9 @@ test('as divisórias do grid continuam vindo do Tailwind (dark herda a cor)', ()
   // A borda de cima do 2×2 não declara cor: herda o `border-color` que o
   // `divide-slate-*` / `dark:divide-*` já põem. Se alguém trocar por uma cor
   // fixa no CSS, o dark mode passa a mentir (gotcha #23).
-  const linha = HTML.split('\n').find((l) => l.includes('id="statsGrid"'));
-  assert.match(linha, /divide-x/, 'o #statsGrid perdeu o divide-x');
-  assert.match(linha, /dark:divide-/, 'o #statsGrid perdeu a cor de divisória do dark mode');
+  const linha = HTML.split('\n').find((l) => l.includes('id="placarGrid"'));
+  assert.match(linha, /divide-x/, 'o #placarGrid perdeu o divide-x');
+  assert.match(linha, /dark:divide-/, 'o #placarGrid perdeu a cor de divisória do dark mode');
   assert.doesNotMatch(
     mediaQueryEstreita(),
     /border-(top|left)-color/,
@@ -291,4 +291,40 @@ test('a foto cede espaço ANTES do texto', () => {
   const foto = HTML.split('\n').find((l) => l.includes('card-photo'));
   assert.ok(foto, 'sumiu o container da foto');
   assert.match(foto, /shrink-\[\d+\]/, 'a foto voltou a ceder junto com o texto — barra de rolagem à toa');
+});
+
+test('o placar é compacto: o produto da app é o card', () => {
+  // Cada pixel acima do card é pixel a menos de foto — e é a foto que o editor
+  // olha pra decidir. O placar NÃO é alvo de toque, então a régua de 44/48px
+  // não se aplica: o que vale é rótulo ≥ 11px (coberto por outro teste) e
+  // espaçamento na grade de 8dp. Medido: 143 → 99px de custo fixo acima do card.
+  const cartao = HTML.split('\n').find((l) => l.includes('id="placar"'));
+  assert.ok(cartao, 'sumiu o #placar');
+  assert.match(cartao, /\bp-2\b/, 'o placar voltou a ter padding grande');
+  assert.doesNotMatch(cartao, /\bp-4\b/, 'padding de 16px de volta no placar');
+  const bloco = HTML.split('\n').slice(
+    HTML.split('\n').findIndex((l) => l.includes('id="placarGrid"')),
+    HTML.split('\n').findIndex((l) => l.includes('id="placarGrid"')) + 30
+  );
+  const numeros = bloco.filter((l) => /id="(read|rejected|skipped|pending)Count"/.test(l));
+  assert.equal(numeros.length, 4, 'esperava os 4 números do placar');
+  for (const n of numeros) {
+    assert.match(n, /text-xl\b/, 'número do placar voltou pro tamanho grande');
+    assert.doesNotMatch(n, /text-2xl\b/, 'text-2xl de volta — custa 4px por número');
+  }
+});
+
+test('espaçamento da tela do card vem de gap, não de space-y', () => {
+  // `space-y-*` põe margem em todo filho a partir do 2º, e os dois elementos
+  // `sr-only` (absolute, invisíveis) contavam como irmãos: o placar levava 16px
+  // de margem por causa de coisa que ninguém vê. `gap` de flex ignora filho
+  // absolute.
+  const tela = HTML.split('\n').find((l) => l.includes('id="appScreen"'));
+  assert.ok(tela, 'sumiu o #appScreen');
+  assert.doesNotMatch(tela, /space-y-/, 'space-y-* de volta: os sr-only voltam a empurrar o placar');
+  assert.match(
+    CSS,
+    /#appScreen:not\(\.hidden\)\s*\{[^}]*gap:/,
+    'o espaçamento por gap sumiu do #appScreen'
+  );
 });
