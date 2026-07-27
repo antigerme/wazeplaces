@@ -103,31 +103,48 @@ test('grid de stats vira 2 colunas abaixo de 360px', () => {
 
 test('regra que precisa vencer utility do Tailwind tem especificidade pra isso', () => {
   // O styles.css carrega ANTES do tailwind.css. Empate de especificidade →
-  // vence o Tailwind. Isso já mordeu três vezes, sempre em silêncio:
-  //   · `.modal-root { padding-bottom }`  perdeu pro `p-4`
-  //   · `.auth-opt-pair { color: #fff }`  perdeu pro `text-slate-700`
-  //   · `.auth-opt-upload { background }` perdeu pro `bg-gradient-to-r`
-  // Seletor de UMA classe só nunca vence uma utility. Aqui a regra é: quem
-  // sobrescreve utility precisa de pelo menos duas classes no seletor.
-  const i = CSS_SEM_COMENTARIO.indexOf('@media (pointer: coarse)');
-  assert.notEqual(i, -1, 'sumiu o bloco @media (pointer: coarse) da tela de entrada');
-  // Contagem de chaves: regex de "fim do bloco" quebra com indentação.
-  let nivel = 0, fim = i;
-  for (let k = CSS_SEM_COMENTARIO.indexOf('{', i); k < CSS_SEM_COMENTARIO.length; k++) {
-    if (CSS_SEM_COMENTARIO[k] === '{') nivel++;
-    else if (CSS_SEM_COMENTARIO[k] === '}' && --nivel === 0) { fim = k; break; }
+  // vence o Tailwind. Isso já mordeu QUATRO vezes, sempre em silêncio:
+  //   · `.modal-root { padding-bottom }`   perdeu pro `p-4`
+  //   · `.auth-opt-pair { color: #fff }`   perdeu pro `text-slate-700`
+  //   · `.auth-opt-upload { background }`  perdeu pro `bg-gradient-to-r`
+  //   · `.auth-precondicao { display }`    perdeu pro `hidden`
+  //
+  // A regra NÃO é "duas classes": um `#id` vence utility sozinho. O que vale é
+  // a especificidade ficar acima de (0,1,0), que é a de qualquer utility.
+  //
+  // E varre TODOS os blocos `pointer: coarse` — quando eu abri um segundo, a
+  // versão antiga deste teste só olhava o primeiro e deixou o bug passar.
+  const DISPUTADAS = /(^|;)\s*(display|color|background-color|background-image|padding[a-z-]*|margin[a-z-]*|border-color)\s*:/;
+  const blocos = [];
+  let de = 0;
+  for (;;) {
+    const i = CSS_SEM_COMENTARIO.indexOf('@media (pointer: coarse)', de);
+    if (i === -1) break;
+    let nivel = 0, fim = i;
+    for (let k = CSS_SEM_COMENTARIO.indexOf('{', i); k < CSS_SEM_COMENTARIO.length; k++) {
+      if (CSS_SEM_COMENTARIO[k] === '{') nivel++;
+      else if (CSS_SEM_COMENTARIO[k] === '}' && --nivel === 0) { fim = k; break; }
+    }
+    // Corta o invólucro `@media (...) {`: sem isso o regex de regras trata o
+    // próprio media query como seletor, o corpo capturado não casa a lista de
+    // propriedades e o guard pula TUDO em silêncio — foi assim que ele deixou
+    // passar o `.auth-precondicao` que motivou este teste.
+    const cru = CSS_SEM_COMENTARIO.slice(i, fim);
+    blocos.push(cru.slice(cru.indexOf('{') + 1));
+    de = fim;
   }
-  const bloco = CSS_SEM_COMENTARIO.slice(i, fim);
-  // Só as propriedades que uma utility do Tailwind também escreve. `order`, por
-  // exemplo, não é disputado aqui — cobrar duas classes dele seria ruído.
-  const DISPUTADAS = /(^|;)\s*(color|background-color|background-image|padding[a-z-]*|margin[a-z-]*|border-color)\s*:/;
-  for (const m of bloco.matchAll(/([^{};]+)\{([^}]*)\}/g)) {
-    if (!DISPUTADAS.test(';' + m[2])) continue;
-    for (const parte of m[1].split(',').map((x) => x.trim()).filter(Boolean)) {
-      const classes = (parte.match(/\./g) || []).length;
-      assert.ok(classes >= 2,
-        `"${parte}" tem ${classes} classe(s) e escreve propriedade que o Tailwind também escreve: ` +
-        `empata em especificidade e PERDE por ordem de carga`);
+  assert.ok(blocos.length >= 1, 'sumiu o bloco @media (pointer: coarse) da tela de entrada');
+
+  for (const bloco of blocos) {
+    for (const m of bloco.matchAll(/([^{};]+)\{([^}]*)\}/g)) {
+      if (!DISPUTADAS.test(';' + m[2])) continue;
+      for (const parte of m[1].split(',').map((x) => x.trim()).filter(Boolean)) {
+        const ids = (parte.match(/#/g) || []).length;
+        const classes = (parte.match(/\./g) || []).length;
+        assert.ok(ids > 0 || classes >= 2,
+          `"${parte}" tem especificidade (0,${classes},0) e escreve propriedade que o Tailwind ` +
+          `também escreve: empata com a utility e PERDE por ordem de carga`);
+      }
     }
   }
 });
