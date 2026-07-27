@@ -740,6 +740,22 @@
             </div>
 
             <div class="space-y-4 text-slate-600 dark:text-slate-300">
+                <!-- O seletor de idioma ficava SÓ em Filtros → Preferências, e o
+                     botão de Filtros é escondido enquanto não há sessão. Quem caía
+                     num idioma que não lê não tinha como trocar: precisaria entrar
+                     primeiro, lendo instruções que não entende. O ⓘ é o único botão
+                     visível deslogado, então o escape mora aqui também. O globo e os
+                     nomes nativos das opções dispensam ler o rótulo. -->
+                <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5 flex-shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18a15 15 0 010-18z"/></svg>
+                    <label for="langSelectHelp" class="sr-only" data-i18n="filters.language.label">Idioma</label>
+                    <select id="langSelectHelp" class="flex-1 min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700">
+                        <option value="pt">Português</option>
+                        <option value="en">English</option>
+                        <option value="es">Español</option>
+                    </select>
+                </div>
+
                 <button id="pairCreateBtn" type="button" class="w-full min-h-[48px] bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-cyan-100 dark:border-cyan-400/30">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
                     <span data-i18n="pair.createBtn">Conectar outro aparelho</span>

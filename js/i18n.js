@@ -509,12 +509,19 @@ const I18N_DICT = {
 let lang = 'pt';
 
 // Resolve a preferência explícita ou detecta de navigator.language (2 letras).
+//
+// O fallback é INGLÊS, não português. Ele não atende a França: atende TODO
+// idioma fora de pt/en/es — francês, alemão, italiano, japonês, russo, chinês.
+// Quem fala pt/en/es é servido pela detecção e não passa por aqui, então
+// escolher inglês não muda nada pra eles e dá a quem sobra a língua franca da
+// comunidade WME, muito mais provável de ser lida que português.
+const LANG_FALLBACK = 'en';
 function resolveLang(pref) {
   if (pref === 'en' || pref === 'es' || pref === 'pt') return pref;
   try {
-    const n = (navigator.language || 'pt').slice(0, 2).toLowerCase();
-    return I18N_DICT[n] ? n : 'pt';
-  } catch (e) { return 'pt'; }
+    const n = (navigator.language || LANG_FALLBACK).slice(0, 2).toLowerCase();
+    return I18N_DICT[n] ? n : LANG_FALLBACK;
+  } catch (e) { return LANG_FALLBACK; }
 }
 function setLang(pref) { lang = resolveLang(pref); }
 function getLang() { return lang; }
