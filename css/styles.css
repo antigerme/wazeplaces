@@ -221,6 +221,27 @@ body.dark {
   100% { transform: scale(1); }
 }
 
+/* Confete avulso (conquista do gate do undo). Mesmas peças e cores do
+   "Tudo limpo!", mas anima sozinho — sem depender de um `.celebrate` no pai,
+   porque este é criado e removido em runtime pelo JS. */
+.confetti-burst span {
+  animation: confettiFall 1.6s cubic-bezier(0.35, 0.15, 0.6, 1) forwards;
+}
+
+/* Destaque na linha do "Permitir desfazer ações" quando se chega nela pelo
+   toast de conquista — mostra ONDE fica a coisa que acabou de ser liberada,
+   em vez de deixar o editor procurando. */
+.pref-highlight {
+  animation: prefHighlight 1.8s ease-out;
+}
+
+@keyframes prefHighlight {
+  0%   { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+  12%  { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.5); }
+  70%  { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.28); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
 .celebrate .empty-badge {
   animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }

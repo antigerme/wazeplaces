@@ -1881,6 +1881,10 @@ function prefersReducedMotion() {
 }
 
 function updateStats() {
+    // Todo caminho que mexe em Lidos/Rejeitados passa por aqui (swipe, botão,
+    // lote, undo revertendo) — é o único ponto que pega todos sem espalhar
+    // chamadas por seis handlers.
+    checkUndoGateUnlock();
     setCount(document.getElementById('readCount'), AppState.stats.read);
     setCount(document.getElementById('rejectedCount'), AppState.stats.rejected);
     setCount(document.getElementById('skippedCount'), AppState.stats.skipped);
@@ -1981,6 +1985,11 @@ function loadPreferences() {
         if (raw) {
             const parsed = JSON.parse(raw);
             AppState.preferences.undoEnabled = parsed.undoEnabled !== false;
+            // undefined = nunca decidido (user antigo ou primeira visita).
+            // Só copia se for boolean, pra initUndoGateSeen poder decidir depois.
+            if (typeof parsed.undoGateSeen === 'boolean') {
+                AppState.preferences.undoGateSeen = parsed.undoGateSeen;
+            }
         }
     } catch (e) {}
 }
@@ -2098,6 +2107,72 @@ function getUndoUnlockThreshold() {
     return Math.ceil(UNDO_GATE_BASE / (rank + 1));
 }
 
+// ── Aviso de desbloqueio do gate ──────────────────────────────────────────
+// Antes disso o desbloqueio era INVISÍVEL: a pessoa cruzava a cota e nada
+// acontecia — só descobriria abrindo Filtros → Preferências por acaso. Esforço
+// feito e não reconhecido é pior que não ter recompensa.
+//
+// Repare que usa a comparação CRUA (tratados >= cota), e não canDisableUndo():
+// aquele devolve true com o Modo Desenvolvedor ligado, e aí ligar o dev mode
+// dispararia um "parabéns" por conquista nenhuma.
+function undoGateAtingido() {
+    return getUndoTreatedCount() >= getUndoUnlockThreshold();
+}
+
+// Chamado quando perfil E stats já existem. Quem JÁ está acima da cota nasce
+// marcado como "visto": parabenizar por trabalho feito antes de a comemoração
+// existir soaria falso — e apareceria pra toda a base no primeiro deploy.
+function initUndoGateSeen() {
+    if (typeof AppState.preferences.undoGateSeen === 'boolean') return;
+    AppState.preferences.undoGateSeen = undoGateAtingido();
+    savePreferences();
+}
+
+function checkUndoGateUnlock() {
+    if (AppState.preferences.undoGateSeen) return;
+    // Sem perfil a cota é Infinity — não dispara nada até o perfil chegar.
+    if (!undoGateAtingido()) return;
+    AppState.preferences.undoGateSeen = true;
+    savePreferences();
+    dispararConfeteNaFila();
+    showToast(
+        t('toast.undoUnlocked', { n: getUndoUnlockThreshold() }),
+        'achievement',
+        // Mais que os 4s de um toast comum (são 3 linhas e tem ação), mas não
+        // os 8s que eu tinha posto: a captura mostrou o toast tapando os botões
+        // ✕/↑/✓ do card por tempo demais. Toque dispensa; o swipe nunca é
+        // bloqueado, porque o gesto acontece acima da área do toast.
+        6000,
+        abrirPreferenciaDoUndo
+    );
+}
+
+// Confete por cima da fila, reaproveitando o mesmo CSS do "Tudo limpo!".
+// Some sozinho — nada fica pendurado no DOM.
+function dispararConfeteNaFila() {
+    if (prefersReducedMotion()) return;
+    const stack = document.getElementById('cardStack');
+    if (!stack) return;
+    const burst = document.createElement('div');
+    burst.className = 'confetti confetti-burst';
+    burst.setAttribute('aria-hidden', 'true');
+    burst.innerHTML = '<span></span>'.repeat(12);
+    stack.appendChild(burst);
+    setTimeout(() => burst.remove(), 2200);
+}
+
+// Leva direto ao interruptor em vez de mandar procurar em Filtros → Preferências.
+async function abrirPreferenciaDoUndo() {
+    await openFiltersModal();
+    switchFilterTab('filtersTabPrefs');
+    const linha = document.getElementById('prefUndoRow');
+    if (!linha || prefersReducedMotion()) return;
+    linha.classList.remove('pref-highlight');
+    void linha.offsetWidth;   // reflow: sem isso a animação não reinicia
+    linha.classList.add('pref-highlight');
+    linha.addEventListener('animationend', () => linha.classList.remove('pref-highlight'), { once: true });
+}
+
 function canDisableUndo() {
     // Modo Desenvolvedor bypassa o gate de experiência completamente.
     if (AppState.devMode && AppState.devMode.active) return true;
@@ -2105,6 +2180,9 @@ function canDisableUndo() {
 }
 
 function renderUndoGateUI() {
+    // O perfil já existe quando isto roda, então é o momento certo de decidir
+    // se este usuário nasce com o aviso "já visto" (quem já passou da cota).
+    initUndoGateSeen();
     const checkbox = document.getElementById('prefUndoEnabled');
     const gateMsg = document.getElementById('prefUndoGateMsg');
     if (canDisableUndo()) {
@@ -2158,24 +2236,29 @@ function toggleTheme() {
 
 // Snackbar M3: bottom-center (via #notifyStack), desliza de baixo, um clique
 // dispensa. Duração 4s (mínimo M3). aria-live está no container (index.html).
-function showToast(message, type = 'info', durationMs = 4000) {
+// `onClick` opcional: quando presente, o toast vira um atalho (executa a ação
+// E dispensa). Sem ele, o comportamento de sempre — clicar só dispensa.
+function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
     const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
 
     const colors = {
         success: 'bg-emerald-700',
         error: 'bg-rose-600',
-        info: 'bg-slate-800 dark:bg-slate-100 dark:text-slate-900'
+        info: 'bg-slate-800 dark:bg-slate-100 dark:text-slate-900',
+        // Conquista: dourado, pra não se confundir com um "sucesso" qualquer.
+        achievement: 'bg-gradient-to-r from-amber-500 to-amber-600'
     };
 
     const icons = {
         success: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
         error: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>',
-        info: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+        info: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
+        achievement: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 21h8m-4-4v4m6-17v4a6 6 0 11-12 0V4h12zm0 2h2a2 2 0 010 4h-2m-12-4H4a2 2 0 000 4h2"></path></svg>'
     };
 
-    toast.className = `toast ${colors[type]} text-white font-medium text-sm`;
-    toast.innerHTML = `${icons[type]}<span class="flex-1">${escapeHtml(message)}</span>`;
+    toast.className = `toast ${colors[type] || colors.info} text-white font-medium text-sm`;
+    toast.innerHTML = `${(icons[type] || icons.info)}<span class="flex-1">${escapeHtml(message)}</span>`;
     toast.title = t('toast.dismissHint');
 
     let removed = false;
@@ -2187,7 +2270,12 @@ function showToast(message, type = 'info', durationMs = 4000) {
         toast.style.transform = 'translateY(20px)';
         setTimeout(() => toast.remove(), 250);
     };
-    toast.addEventListener('click', dismiss);
+    toast.addEventListener('click', () => {
+        if (onClick) {
+            try { onClick(); } catch (e) { console.error('onClick do toast falhou', e); }
+        }
+        dismiss();
+    });
 
     // Teto de empilhamento: no máx. 3 toasts (remove o mais antigo) pra não cobrir
     // os botões do card numa rajada de erros.
