@@ -12,6 +12,22 @@ const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
 const MAX_CHANGES_DISPLAY = 4;
+
+// Formato canônico do código de pareamento: XXX-XXX. O agrupamento 3+3 existe
+// porque facilita ler em voz alta e digitar — mas quem MOSTRA e quem LÊ têm que
+// concordar. Mostrar "6C4-97S" e pedir "ABC123" convida o editor a errar: ou ele
+// digita o hífen sem saber se pode, ou omite achando que o que viu estava errado.
+// Antes isso só não quebrava por duas coincidências (maxlength dimensionado pro
+// hífen e o servidor limpando o que não é alfanumérico) — nenhuma delas
+// combinada de propósito. Agora é UMA função, usada nos dois lados.
+const PAIR_CODE_LEN = 6;
+const PAIR_CODE_GRUPO = 3;
+function formatarCodigoPareamento(bruto) {
+    const limpo = String(bruto || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, PAIR_CODE_LEN);
+    return limpo.length > PAIR_CODE_GRUPO
+        ? limpo.slice(0, PAIR_CODE_GRUPO) + '-' + limpo.slice(PAIR_CODE_GRUPO)
+        : limpo;
+}
 const PREFETCH_THRESHOLD = 3;
 const MAX_EMPTY_PAGES = 5;
 const TYPES_ALL = ['VENUE', 'IMAGE', 'REQUEST'];
@@ -358,8 +374,8 @@ async function abrirPareamento() {
         showToast(r.error || t('toast.pairCreateError'), 'error');
         return;
     }
-    // Agrupado em 3+3: bem mais fácil de ler em voz alta e de digitar.
-    codeEl.textContent = r.code.slice(0, 3) + '-' + r.code.slice(3);
+    codeEl.textContent = formatarCodigoPareamento(r.code);
+    // O link de "copiar" usa o código CRU — separador é só apresentação.
     codeEl.dataset.raw = r.code;
     document.getElementById('pairCopyLinkBtn').disabled = false;
 
@@ -446,6 +462,23 @@ function setupModalListeners() {
     $('pairEnterConfirm')?.addEventListener('click', () => resgatarPareamento($('pairCodeInput').value));
     $('pairCodeInput')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); resgatarPareamento(e.target.value); }
+    });
+    // O campo assume o MESMO formato da tela que mostra o código: digitou 3
+    // caracteres, o hífen entra sozinho. Assim tanto faz o editor digitar o
+    // separador ou não — o resultado na tela é o mesmo que ele está copiando.
+    $('pairCodeInput')?.addEventListener('input', (e) => {
+        const el = e.target;
+        // Reformatar e jogar o cursor pro fim atrapalha quem corrige no meio;
+        // conta quantos caracteres ÚTEIS havia antes do cursor e recoloca ali.
+        const uteisAntes = el.value.slice(0, el.selectionStart).replace(/[^0-9A-Za-z]/g, '').length;
+        el.value = formatarCodigoPareamento(el.value);
+        let pos = 0, vistos = 0;
+        while (pos < el.value.length && vistos < uteisAntes) {
+            if (el.value[pos] !== '-') vistos++;
+            pos++;
+        }
+        if (el.value[pos] === '-') pos++;   // o cursor pula o separador sozinho
+        el.setSelectionRange(pos, pos);
     });
     setupFilterTabs();
     setupLanguageSwitcher();

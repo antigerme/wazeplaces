@@ -21,6 +21,18 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
 
 Já falhei nos três primeiros ao mesmo tempo, e o owner teve que apontar com print do celular. Se a única validação foi Playwright em viewport emulada, você não testou teclado nem prompt de instalação — diga isso em vez de dar por validado.
 
+**Regra de ouro de consistência: o que a app MOSTRA e o que a app ACEITA são a mesma coisa — sempre, em qualquer dimensão.** Inconsistência não aparece como erro: aparece como o editor hesitando, digitando errado e achando que ele é que errou.
+
+O caso que originou a regra: o pareamento mostrava o código como `6C4-97S` e pedia `ABC123` no campo. Quem copiava da tela não sabia se o hífen entrava. Só não quebrava por **duas coincidências** — o `maxlength` estava em 7 (dimensionado pro hífen, sem ninguém dizer isso) e o servidor limpava não-alfanuméricos. Bastava alguém "corrigir" o maxlength pra 6 e o fluxo travava no 7º caractere.
+
+- **Formato**: quem mostra e quem lê passam pela MESMA função. Se o valor é apresentado agrupado/mascarado, o campo aceita e formata igual — nunca deixe o usuário adivinhar se o separador conta. `formatarCodigoPareamento()` em `app.js` é o modelo.
+- **Termo**: o mesmo conceito tem UM nome em toda a app, e o mesmo nome nas três línguas. Se mudou em uma tela, mudou em todas.
+- **Ordem e posição**: dismissiva à esquerda, afirmativa à direita — em TODOS os diálogos, sem exceção "porque neste aqui fica melhor".
+- **Ícone e cor**: o mesmo conceito usa o mesmo ícone e a mesma cor em toda a app (✕ rejeitar/rosa, ✓ lido/verde, ↑ pular/âmbar).
+- **Unidade e formato de número/data**: sempre via `i18nLocale()`, nunca hardcode.
+
+**Toda vez que você criar um par "isto exibe / aquilo recebe", pergunte: um usuário copiando o que vê consegue colar no que recebe, sem pensar?** Se a resposta depende de o servidor limpar o valor, está errado — limpeza no servidor é defesa, não contrato de interface.
+
 PWA = instala no celular sem precisar de Play Store / App Store. Funciona offline para assets, online para API.
 
 ---
