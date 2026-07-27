@@ -237,22 +237,37 @@ function setupAppListeners() {
     window.addEventListener('keydown', handleKeyDown);
 }
 
-// Seletor de idioma (no modal de filtros). Troca a língua, persiste, reaplica o
-// dicionário e re-renderiza as partes dinâmicas.
+// Seletor de idioma. São DOIS controles: um em Filtros → Preferências (onde se
+// procura por preferência) e outro na Ajuda — porque o botão de Filtros fica
+// escondido sem sessão, e quem caiu num idioma que não lê precisa trocar ANTES
+// de conseguir entrar. Os dois ficam em sincronia.
+const SELETORES_IDIOMA = ['langSelect', 'langSelectHelp'];
+
+function aplicarIdioma(valor) {
+    setLang(valor);
+    safeLS.set(LANG_KEY, valor);
+    applyI18n();
+    // Os dois seletores mostram a mesma escolha, tenha sido feita em qual for.
+    for (const id of SELETORES_IDIOMA) {
+        const s = document.getElementById(id);
+        if (s && s.value !== valor) s.value = valor;
+    }
+    if (AppState.profile) renderProfileHeader(AppState.profile);
+    if (AppState.currentPlace) showCurrentPlace();
+    updateStats();
+    updatePendingCount();
+    if (typeof showToast === 'function') showToast(t('toast.langChanged'), 'success');
+}
+
 function setupLanguageSwitcher() {
-    const sel = document.getElementById('langSelect');
-    if (!sel || typeof setLang !== 'function') return;
-    sel.value = (typeof getLang === 'function') ? getLang() : 'pt';
-    sel.addEventListener('change', () => {
-        setLang(sel.value);
-        safeLS.set(LANG_KEY, sel.value);
-        applyI18n();
-        if (AppState.profile) renderProfileHeader(AppState.profile);
-        if (AppState.currentPlace) showCurrentPlace();
-        updateStats();
-        updatePendingCount();
-        if (typeof showToast === 'function') showToast(t('toast.langChanged'), 'success');
-    });
+    if (typeof setLang !== 'function') return;
+    const atual = (typeof getLang === 'function') ? getLang() : 'pt';
+    for (const id of SELETORES_IDIOMA) {
+        const sel = document.getElementById(id);
+        if (!sel) continue;
+        sel.value = atual;
+        sel.addEventListener('change', () => aplicarIdioma(sel.value));
+    }
 }
 
 // Abas do modal "Filtros e Preferências" (padrão WAI-ARIA Tabs: aria-selected,

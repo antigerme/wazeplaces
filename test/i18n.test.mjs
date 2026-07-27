@@ -95,3 +95,51 @@ test("i18n: renderCurrentCard aplica o dicionário no clone do <template>", () =
     'o card fica sempre em português pra quem usa inglês/espanhol'
   );
 });
+
+// Regressão: o fallback atende TODO idioma fora de pt/en/es — francês, alemão,
+// japonês, russo, chinês. Quem fala pt/en/es vem da detecção e nunca chega
+// aqui, então trocar o fallback pra 'en' não muda nada pra eles e dá a quem
+// sobra a língua franca da comunidade WME. Voltar pra 'pt' é uma escolha de
+// produto, não um detalhe — por isso está travado.
+test('i18n: idioma desconhecido cai em inglês, não em português', () => {
+  const ctx = { navigator: { language: 'fr-FR' }, document: { documentElement: {} } };
+  vm.createContext(ctx);
+  vm.runInContext(read('js/i18n.js'), ctx);
+  // `const` no topo de um script não vira propriedade do global (só `function`
+  // vira), então LANG_FALLBACK não dá pra ler daqui — o que vale é o
+  // comportamento do resolveLang, testado abaixo.
+  assert.match(read('js/i18n.js'), /LANG_FALLBACK\s*=\s*'en'/, "LANG_FALLBACK deixou de ser 'en'");
+  for (const loc of ['fr-FR', 'de-DE', 'ja-JP', 'ru-RU', 'zh-CN', 'nl-NL', '']) {
+    ctx.navigator.language = loc;
+    assert.equal(ctx.resolveLang(), 'en', `locale ${loc || '(vazio)'} devia cair em inglês`);
+  }
+  // E quem É atendido continua vindo da detecção, sem passar pelo fallback.
+  for (const [loc, esperado] of [['pt-BR', 'pt'], ['pt-PT', 'pt'], ['en-GB', 'en'], ['es-AR', 'es']]) {
+    ctx.navigator.language = loc;
+    assert.equal(ctx.resolveLang(), esperado, `locale ${loc} devia dar ${esperado}`);
+  }
+});
+
+// O seletor de idioma vivia só em Filtros → Preferências, e o botão de Filtros
+// fica escondido sem sessão: quem caísse num idioma que não lê teria que entrar
+// primeiro, lendo instruções que não entende. O modal de Ajuda é o único
+// alcançável deslogado — por isso o segundo seletor.
+test('i18n: dá pra trocar o idioma antes de entrar', () => {
+  const html = read('index.html');
+  const app = read('js/app.js');
+  const ids = ['langSelect', 'langSelectHelp'];
+  for (const id of ids) {
+    assert.ok(html.includes(`id="${id}"`), `sumiu o seletor #${id}`);
+  }
+  // O da Ajuda precisa estar DENTRO do #helpModal, senão não é alcançável deslogado.
+  const ajuda = html.slice(html.indexOf('id="helpModal"'));
+  assert.ok(
+    ajuda.indexOf('id="langSelectHelp"') !== -1 &&
+    ajuda.indexOf('id="langSelectHelp"') < ajuda.indexOf('id="helpModal"', 1) + 1e9,
+    'o seletor de idioma saiu do modal de Ajuda'
+  );
+  for (const id of ids) {
+    assert.ok(app.includes(`'${id}'`), `${id} não está em SELETORES_IDIOMA — os dois sairiam de sincronia`);
+  }
+  assert.match(app, /function aplicarIdioma/, 'sumiu o aplicarIdioma() que mantém os seletores em sincronia');
+});
