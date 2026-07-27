@@ -148,6 +148,7 @@ const I18N_DICT = {
     'toast.devUnlocked': 'Modo Desenvolvedor desbloqueado 🛠️', 'toast.devCountdown': 'Faltam {n} para o Modo Desenvolvedor',
     'toast.dismissHint': 'Toque para dispensar', 'toast.unexpectedError': 'Erro inesperado: {msg}',
     'toast.unexpectedError.reload': 'recarregue a página', 'toast.newVersion': 'Nova versão disponível. Atualizando…',
+    'toast.undoUnlocked': '🚗💨 Mandou bem, wazer! {n} pedidos tratados — o Desfazer virou opcional. Toque pra assumir o volante.',
     'toast.langChanged': 'Idioma alterado 🌎',
     // batch confirm body (plural)
     'modal.batchRead.body': 'Marcar como lido o {n} pedido que já está na fila? Vai direto pro Waze e não dá pra desfazer em lote.',
@@ -295,6 +296,7 @@ const I18N_DICT = {
     'toast.devUnlocked': 'Developer Mode unlocked 🛠️', 'toast.devCountdown': '{n} more to unlock Developer Mode',
     'toast.dismissHint': 'Tap to dismiss', 'toast.unexpectedError': 'Unexpected error: {msg}',
     'toast.unexpectedError.reload': 'reload the page', 'toast.newVersion': 'New version available. Updating…',
+    'toast.undoUnlocked': '🚗💨 Nice driving, Wazer! {n} requests handled — Undo is now optional. Tap to take the wheel.',
     'toast.langChanged': 'Language changed 🌎',
     'modal.batchRead.body': 'Mark the {n} request already in the queue as read? It goes straight to Waze and cannot be undone in bulk.',
     'modal.batchRead.bodyPlural': 'Mark the {n} requests already in the queue as read? They go straight to Waze and cannot be undone in bulk.',
@@ -436,6 +438,7 @@ const I18N_DICT = {
     'toast.devUnlocked': 'Modo Desarrollador desbloqueado 🛠️', 'toast.devCountdown': 'Faltan {n} para el Modo Desarrollador',
     'toast.dismissHint': 'Toca para descartar', 'toast.unexpectedError': 'Error inesperado: {msg}',
     'toast.unexpectedError.reload': 'recarga la página', 'toast.newVersion': 'Nueva versión disponible. Actualizando…',
+    'toast.undoUnlocked': '🚗💨 ¡Bien conducido, wazer! {n} solicitudes tratadas — Deshacer ahora es opcional. Toca para tomar el volante.',
     'toast.langChanged': 'Idioma cambiado 🌎',
     'modal.batchRead.body': '¿Marcar como leída la {n} solicitud que ya está en la cola? Va directo a Waze y no se puede deshacer en lote.',
     'modal.batchRead.bodyPlural': '¿Marcar como leídas las {n} solicitudes que ya están en la cola? Van directo a Waze y no se pueden deshacer en lote.',

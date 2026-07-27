@@ -8,6 +8,27 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.27-01
+
+### Alterado
+- **Ficou bem mais fácil liberar o "Permitir desfazer ações".** A cota caiu de 3000 pedidos para **300**, dividida pelo seu nível de editor:
+
+  | Nível | Pedidos |
+  |---|---|
+  | L1 | 300 |
+  | L2 | 150 |
+  | L3 | 100 |
+  | L4 | 75 |
+  | L5 | 60 |
+  | L6 | 50 |
+  | Staff | isento |
+
+  A regra antiga pedia cerca de **100 minutos de swipe contínuo** para um L1 — na prática ninguém chegava lá, e o que deveria ser um degrau virou um muro. Só contam **Lidos e Rejeitados** (pular não conta, porque não treina o cuidado com ação que altera o mapa).
+
+### Adicionado
+- **Aviso quando você desbloqueia.** Antes o desbloqueio era invisível: você cruzava a cota e nada acontecia — só descobriria por acaso, abrindo os filtros. Agora cai confete sobre a fila e aparece um aviso dourado; **tocar nele leva direto ao interruptor**, já com a linha destacada, em vez de mandar você procurar.
+- O aviso toca **uma vez só**. E quem já estava acima da cota antes desta versão não recebe parabéns por trabalho anterior — a comemoração é para quem cruzar daqui em diante.
+
 ## v2026.07.26-01
 
 ### Adicionado
