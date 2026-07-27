@@ -239,6 +239,17 @@ body.dark {
    abriria um buraco de `gap` no meio da lista. */
 .auth-opt-hidden { display: none; }
 
+/* A pré-condição só aparece onde ela morde: no dedo. Quem chega direto no
+   celular não tem caminho nenhum sozinho — as três opções exigem um computador
+   em algum momento —, e a app nunca dizia isso. Num computador a frase seria
+   ruído, porque lá o caminho existe. */
+@media (pointer: coarse) {
+  /* `#authScreen` na frente porque `.auth-precondicao` sozinha EMPATA com o
+     `hidden` do Tailwind e perde por ordem de carga (gotcha #27). Já caí nisso
+     três vezes com cor e fundo; desta vez foi com `display`. */
+  #authScreen .auth-precondicao { display: block; }
+}
+
 /* Navegador de celular não instala extensão da Chrome Web Store. A classe vem
    do `marcarSuporteAExtensao()` (app.js) e olha o SO, não o ponteiro: notebook
    com tela sensível ao toque é `pointer: coarse` e instala extensão numa boa —

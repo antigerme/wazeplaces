@@ -359,6 +359,41 @@ function handleLaunchAction() {
 // traz a sessão pro telefone com um código de 6 caracteres, válido 5 minutos.
 let pairTicker = null;
 
+// Desenha o QR do link de pareamento. É a única forma de conectar que não
+// precisa de instrução nenhuma: aponta a câmera e entra — sem memorizar caminho
+// de menu no outro aparelho, sem trocar de aparelho com um código na cabeça,
+// sem a dúvida de digitar ou não o separador.
+// Escala inteira de propósito: módulo em fração de pixel borra a leitura.
+function desenharQrPareamento(url) {
+    const canvas = document.getElementById('pairQr');
+    if (!canvas || typeof gerarQR !== 'function') return;
+    const qr = gerarQR(url);
+    if (!qr) { canvas.classList.add('hidden'); return; }
+    canvas.classList.remove('hidden');
+    const QUIET = 4;                         // margem exigida pela norma
+    const lado = qr.tamanho + QUIET * 2;
+    const escala = Math.max(2, Math.floor(220 / lado));
+    const px = lado * escala;
+    canvas.width = px * (window.devicePixelRatio || 1);
+    canvas.height = canvas.width;
+    canvas.style.width = px + 'px';
+    canvas.style.height = px + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+    // Fundo claro SEMPRE, inclusive no tema escuro: leitor de QR espera
+    // módulos escuros sobre claro, e inverter derruba a taxa de leitura.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, px, px);
+    ctx.fillStyle = '#0f172a';
+    for (let l = 0; l < qr.tamanho; l++) {
+        for (let c = 0; c < qr.tamanho; c++) {
+            if (qr.modulos[l][c]) {
+                ctx.fillRect((c + QUIET) * escala, (l + QUIET) * escala, escala, escala);
+            }
+        }
+    }
+}
+
 async function abrirPareamento() {
     closeModal('helpModal');
     openModal('pairShowModal');
@@ -375,8 +410,9 @@ async function abrirPareamento() {
         return;
     }
     codeEl.textContent = formatarCodigoPareamento(r.code);
-    // O link de "copiar" usa o código CRU — separador é só apresentação.
+    // O link de "copiar" e o QR usam o código CRU — separador é só apresentação.
     codeEl.dataset.raw = r.code;
+    desenharQrPareamento(location.origin + '/?pair=' + r.code);
     document.getElementById('pairCopyLinkBtn').disabled = false;
 
     // Contagem regressiva: deixa claro que o código morre — e evita o editor

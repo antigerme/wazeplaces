@@ -128,6 +128,8 @@
                     <p class="text-slate-500 text-sm leading-relaxed dark:text-slate-400" data-i18n="auth.welcome.body">Para começar a limpar pedidos de places do Waze, você precisa fornecer seus cookies de autenticação.</p>
                 </div>
 
+                <p class="auth-precondicao hidden text-sm text-slate-600 dark:text-slate-300 bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3 mb-4 leading-relaxed" data-i18n="auth.needsComputer">Primeira vez? A sessão começa num computador.</p>
+
                 <div class="auth-options">
                     <div class="auth-opt-ext bg-gradient-to-r from-purple-50 to-cyan-50 dark:from-purple-500/10 dark:to-cyan-500/10 border border-purple-200 dark:border-purple-500/30 rounded-2xl p-5">
                         <div class="flex items-start gap-3">
@@ -433,10 +435,20 @@
         <div id="pairShowModal" role="dialog" aria-modal="true" aria-labelledby="pairShowTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6">
                 <h3 id="pairShowTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.show.title">Conectar outro aparelho</h3>
-                <p class="text-sm text-slate-500 dark:text-slate-400 mb-5" data-i18n="pair.show.body">No outro aparelho, abra a app e toque em "Entrar com um código". Depois digite:</p>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.show.body">Aponte a câmera do outro aparelho para o código abaixo.</p>
 
-                <div id="pairCodeBox" class="bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-cyan-300 dark:border-cyan-400/40 rounded-2xl py-5 text-center mb-3">
-                    <p id="pairCode" class="text-4xl font-black tracking-[0.2em] text-cyan-700 dark:text-cyan-300 tnum select-all">······</p>
+                <!-- O QR é a ação principal porque é a única que não precisa ser
+                     explicada: aponta a câmera e entra. O código de 6 caracteres
+                     virou alternativa — ele exige memorizar um caminho de menu no
+                     OUTRO aparelho, trocar de aparelho e transcrever. A hierarquia
+                     estava invertida: o caminho difícil era o maior da tela. -->
+                <div class="flex justify-center mb-3">
+                    <canvas id="pairQr" class="rounded-xl bg-white p-3 shadow-sm border border-slate-200 dark:border-slate-700" role="img" aria-label="QR code para entrar no outro aparelho" data-i18n-aria="pair.qr.aria"></canvas>
+                </div>
+
+                <p class="text-xs text-center text-slate-500 dark:text-slate-400 mb-1" data-i18n="pair.show.orType">Sem câmera? Digite este código no outro aparelho:</p>
+                <div id="pairCodeBox" class="bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-cyan-300 dark:border-cyan-400/40 rounded-2xl py-3 text-center mb-2">
+                    <p id="pairCode" class="text-2xl font-black tracking-[0.2em] text-cyan-700 dark:text-cyan-300 tnum select-all">······</p>
                 </div>
                 <p id="pairExpiry" class="text-xs text-center text-slate-500 dark:text-slate-400 mb-5"></p>
 
@@ -871,6 +883,7 @@
 
 
     <script src="js/version.js"></script>
+    <script src="js/qr.js"></script>
     <script src="js/i18n.js"></script>
     <script src="js/api.js"></script>
     <script src="js/swipe.js"></script>
