@@ -193,5 +193,21 @@ const API = {
         });
         this.setSession(null);
         return result;
+    },
+
+    // Pareamento computador → celular. `criarPareamento` roda no aparelho que
+    // JÁ está logado; `resgatarPareamento` no que quer entrar.
+    async criarPareamento() {
+        const sessionToken = this.getSession();
+        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        return this._post('parear', { action: 'create', sessionToken });
+    },
+
+    async resgatarPareamento(code) {
+        const result = await this._post('parear', { action: 'claim', code });
+        // Sucesso = este aparelho passa a ter sessão própria (a do computador
+        // segue viva; não é transferência, é uma segunda sessão).
+        if (result.success && result.sessionToken) this.setSession(result.sessionToken);
+        return result;
     }
 };

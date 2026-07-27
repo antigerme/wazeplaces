@@ -162,6 +162,12 @@
                         <svg class="w-5 h-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
                         <span data-i18n="auth.pasteBtn">Colar Conteúdo dos Cookies</span>
                     </button>
+                    <!-- Terceiro caminho: quem está no celular, onde copiar cookies é
+                         inviável. Loga uma vez no computador e traz a sessão por código. -->
+                    <button id="pairEnterBtn" type="button" class="w-full bg-slate-50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 flex items-center justify-center space-x-2 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700">
+                        <svg class="w-5 h-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                        <span data-i18n="auth.pairBtn">Tenho um código do computador</span>
+                    </button>
                 </div>
 
                 <div class="mt-8 p-4 bg-blue-50/50 border border-blue-100 rounded-2xl flex items-start space-x-3 dark:bg-blue-600/15 dark:border-blue-600/40">
@@ -177,7 +183,12 @@
             </button>
         </div>
 
-        <div id="pasteModal" role="dialog" aria-modal="true" aria-labelledby="pasteModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <!-- CAMADAS (não empatar!): card/esqueleto z-50 · modais z-[60] ·
+             lightbox z-[65] · toasts z-[70]. Já houve bug aqui: modal e
+             #loadingCard ambos em z-50 faziam o esqueleto de carregamento tapar
+             o meio do modal (quem vem depois no HTML ganha o empate), então
+             abrir Filtros durante a busca mostrava um diálogo pela metade. -->
+        <div id="pasteModal" role="dialog" aria-modal="true" aria-labelledby="pasteModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[85dvh] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="pasteModalTitle" class="text-xl font-bold text-slate-800 mb-4 dark:text-slate-100" data-i18n="modal.paste.title">Cole o Conteúdo dos Cookies</h3>
                 <textarea id="cookiesTextarea" aria-label="Conteúdo do arquivo cookies.txt" data-i18n-aria="modal.paste.textarea.aria" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" class="w-full h-48 p-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt…" data-i18n-ph="modal.paste.textarea.ph"></textarea>
@@ -192,7 +203,7 @@
             </div>
         </div>
 
-        <div id="logoutModal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div id="logoutModal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.logout.title">Sair?</h3>
                 <p class="text-sm text-slate-500 mb-6 dark:text-slate-400" data-i18n-html="modal.logout.body">Sua sessão será encerrada e <strong>todos os dados locais</strong> (cookies, estatísticas, filtros e preferências) serão apagados deste dispositivo. Esta ação não pode ser desfeita.</p>
@@ -203,7 +214,7 @@
             </div>
         </div>
 
-        <div id="accessDeniedModal" role="dialog" aria-modal="true" aria-labelledby="accessDeniedTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div id="accessDeniedModal" role="dialog" aria-modal="true" aria-labelledby="accessDeniedTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 dark:bg-slate-800 dark:text-slate-200">
                 <div class="flex items-start gap-3 mb-4">
                     <div class="bg-rose-100 dark:bg-rose-500/20 p-2 rounded-full flex-shrink-0">
@@ -227,7 +238,7 @@
              Rodapé é CONTEXTUAL: Cancelar/Aplicar só na aba Filtros (formulário);
              Preferências aplicam na hora (padrão M3 pra settings) e Histórico é só
              leitura → ambas usam "Fechar". IDs de todos os campos preservados. -->
-        <div id="filtersModal" role="dialog" aria-modal="true" aria-labelledby="filtersModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div id="filtersModal" role="dialog" aria-modal="true" aria-labelledby="filtersModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full flex flex-col max-h-[85dvh] dark:bg-slate-800 dark:text-slate-200">
                 <div class="flex justify-between items-center px-6 pt-4 pb-2 flex-shrink-0">
                     <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.filters.title">Filtros e Preferências</h3>
@@ -409,7 +420,47 @@
             </div>
         </div>
 
-        <div id="batchReadModal" role="dialog" aria-modal="true" aria-labelledby="batchReadTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <!-- ── Pareamento: mostra o código (usado no COMPUTADOR) ────────────
+             Copiar cookies num celular é inviável. Aqui o editor já logado gera
+             um código curto que transfere a sessão pro telefone. O código vale
+             5 minutos e serve UMA vez; a sessão do computador não é afetada. -->
+        <div id="pairShowModal" role="dialog" aria-modal="true" aria-labelledby="pairShowTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6">
+                <h3 id="pairShowTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.show.title">Usar no celular</h3>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mb-5" data-i18n="pair.show.body">No celular, abra a app e toque em "Tenho um código do computador". Depois digite:</p>
+
+                <div id="pairCodeBox" class="bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-cyan-300 dark:border-cyan-400/40 rounded-2xl py-5 text-center mb-3">
+                    <p id="pairCode" class="text-4xl font-black tracking-[0.2em] text-cyan-700 dark:text-cyan-300 tnum select-all">······</p>
+                </div>
+                <p id="pairExpiry" class="text-xs text-center text-slate-500 dark:text-slate-400 mb-5"></p>
+
+                <button id="pairCopyLinkBtn" type="button" class="w-full min-h-[48px] mb-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.328-6.328l1.5-1.5a4 4 0 015.656 5.656l-3 3a4 4 0 01-5.656 0"></path></svg>
+                    <span data-i18n="pair.copyLink">Copiar link (abrir direto no celular)</span>
+                </button>
+                <button id="pairShowClose" type="button" class="w-full min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.close">Fechar</button>
+            </div>
+        </div>
+
+        <!-- ── Pareamento: recebe o código (usado no CELULAR) ──────────────── -->
+        <div id="pairEnterModal" role="dialog" aria-modal="true" aria-labelledby="pairEnterTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6">
+                <h3 id="pairEnterTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.enter.title">Código do computador</h3>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.enter.body">No computador, entre na app e use "Usar no celular" no menu de ajuda. Digite aqui o código de 6 caracteres:</p>
+
+                <label for="pairCodeInput" class="sr-only" data-i18n="pair.enter.title">Código do computador</label>
+                <input id="pairCodeInput" type="text" inputmode="latin" autocapitalize="characters" autocomplete="one-time-code" maxlength="7" placeholder="ABC123" data-i18n-ph="pair.enter.placeholder"
+                       class="w-full min-h-[56px] text-center text-3xl font-black tracking-[0.2em] uppercase bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 mb-3 text-slate-800 dark:text-slate-100">
+                <p id="pairEnterError" class="hidden text-xs text-rose-600 dark:text-rose-400 mb-3" role="alert"></p>
+
+                <div class="flex gap-3">
+                    <button id="pairEnterCancel" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.cancel">Cancelar</button>
+                    <button id="pairEnterConfirm" type="button" class="flex-1 min-h-[48px] bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="pair.enter.confirm">Entrar</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="batchReadModal" role="dialog" aria-modal="true" aria-labelledby="batchReadTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="batchReadTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.batchRead.title">Marcar em lote?</h3>
                 <p id="batchReadMessage" class="text-sm text-slate-500 mb-6 dark:text-slate-400">Marcar como lido os pedidos da fila?</p>
@@ -651,7 +702,7 @@
 
     </main>
 
-    <div id="imageLightbox" role="dialog" aria-modal="true" aria-label="Visualização de foto" data-i18n-aria="lightbox.aria" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[60] flex items-center justify-center select-none overflow-hidden">
+    <div id="imageLightbox" role="dialog" aria-modal="true" aria-label="Visualização de foto" data-i18n-aria="lightbox.aria" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[65] flex items-center justify-center select-none overflow-hidden">
         <button id="lightboxClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -663,7 +714,7 @@
         <img id="lightboxImage" class="max-w-full max-h-full object-contain will-change-transform" style="touch-action: none" alt="" draggable="false">
     </div>
 
-    <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[85dvh] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="helpModalTitle" class="text-2xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.help.title">Ajuda</h3>
@@ -738,6 +789,10 @@
                 </div>
 
                 <div class="pt-3 border-t border-slate-200 dark:border-slate-700">
+                    <button id="pairCreateBtn" type="button" class="w-full min-h-[48px] mb-3 bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-cyan-100 dark:border-cyan-400/30">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                        <span data-i18n="pair.createBtn">Usar no celular</span>
+                    </button>
                     <button id="logoutBtn" type="button" class="w-full min-h-[48px] bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                         <span data-i18n="common.logout">Sair</span>

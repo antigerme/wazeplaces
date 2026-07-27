@@ -112,6 +112,19 @@ function initApp() {
     setupModalListeners();
     setupLightbox();
 
+    // Link de pareamento (?pair=CODE): o editor mandou pra si mesmo e abriu no
+    // celular — entra direto, sem digitar nada. Tratado ANTES da sessão salva
+    // porque um código novo deve vencer uma sessão velha do mesmo aparelho.
+    const codigoNaURL = (() => {
+        try { return new URLSearchParams(window.location.search).get('pair'); } catch (e) { return null; }
+    })();
+    if (codigoNaURL) {
+        try { window.history.replaceState({}, '', window.location.pathname); } catch (e) {}
+        showAuthScreen();
+        resgatarPareamento(codigoNaURL, { silencioso: true });
+        return;
+    }
+
     const savedToken = API.getSession();
     if (savedToken) {
         showMainScreen();
@@ -128,7 +141,7 @@ function initApp() {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal'];
 let lastFocusedBeforeModal = null;
 
 function openModal(id) {
@@ -306,6 +319,91 @@ function handleLaunchAction() {
     }
 }
 
+// ── Pareamento computador → celular ────────────────────────────────────────
+// O problema que isto resolve: copiar cookies num celular é inviável na prática.
+// Aqui o editor loga UMA vez no computador (onde a extensão faz num clique) e
+// traz a sessão pro telefone com um código de 6 caracteres, válido 5 minutos.
+let pairTicker = null;
+
+async function abrirPareamento() {
+    closeModal('helpModal');
+    openModal('pairShowModal');
+    const codeEl = document.getElementById('pairCode');
+    const expEl = document.getElementById('pairExpiry');
+    codeEl.textContent = '······';
+    expEl.textContent = '';
+    document.getElementById('pairCopyLinkBtn').disabled = true;
+
+    const r = await API.criarPareamento();
+    if (!r.success) {
+        closeModal('pairShowModal');
+        showToast(r.error || t('toast.pairCreateError'), 'error');
+        return;
+    }
+    // Agrupado em 3+3: bem mais fácil de ler em voz alta e de digitar.
+    codeEl.textContent = r.code.slice(0, 3) + '-' + r.code.slice(3);
+    codeEl.dataset.raw = r.code;
+    document.getElementById('pairCopyLinkBtn').disabled = false;
+
+    // Contagem regressiva: deixa claro que o código morre — e evita o editor
+    // ficar tentando um código velho achando que a app quebrou.
+    let restante = r.expiresIn;
+    const tick = () => {
+        if (restante <= 0) {
+            expEl.textContent = t('pair.expired');
+            codeEl.classList.add('opacity-40', 'line-through');
+            clearInterval(pairTicker);
+            pairTicker = null;
+            return;
+        }
+        const m = Math.floor(restante / 60);
+        const s = String(restante % 60).padStart(2, '0');
+        expEl.textContent = t('pair.expiresIn', { time: m + ':' + s });
+        restante--;
+    };
+    if (pairTicker) clearInterval(pairTicker);
+    tick();
+    pairTicker = setInterval(tick, 1000);
+}
+
+function pararTickerPareamento() {
+    if (pairTicker) { clearInterval(pairTicker); pairTicker = null; }
+}
+
+async function copiarLinkPareamento() {
+    const raw = document.getElementById('pairCode').dataset.raw;
+    if (!raw) return;
+    const url = location.origin + '/?pair=' + raw;
+    try {
+        await navigator.clipboard.writeText(url);
+        showToast(t('toast.pairLinkCopied'), 'success');
+    } catch (e) {
+        // clipboard exige contexto seguro e permissão; sem ele, mostra o link
+        // pro editor copiar na mão em vez de falhar em silêncio.
+        showToast(url, 'info', 12000);
+    }
+}
+
+async function resgatarPareamento(code, { silencioso = false } = {}) {
+    const err = document.getElementById('pairEnterError');
+    const r = await API.resgatarPareamento(code);
+    if (!r.success) {
+        if (silencioso) {
+            showToast(r.error || t('toast.pairInvalid'), 'error');
+        } else if (err) {
+            err.textContent = r.error || t('toast.pairInvalid');
+            err.classList.remove('hidden');
+        }
+        return false;
+    }
+    closeModal('pairEnterModal');
+    showToast(t('toast.pairSuccess'), 'success');
+    showMainScreen();
+    AppState._profilePromise = loadProfileAndAuxData();
+    startFetching();
+    return true;
+}
+
 function setupModalListeners() {
     const $ = id => document.getElementById(id);
     $('closeFilters').addEventListener('click', () => closeModal('filtersModal'));
@@ -315,6 +413,22 @@ function setupModalListeners() {
     $('batchReadBtn')?.addEventListener('click', openBatchReadConfirm);
     $('confirmBatchRead')?.addEventListener('click', handleBatchMarkRead);
     $('cancelBatchRead')?.addEventListener('click', () => closeModal('batchReadModal'));
+
+    // Pareamento
+    $('pairCreateBtn')?.addEventListener('click', abrirPareamento);
+    $('pairCopyLinkBtn')?.addEventListener('click', copiarLinkPareamento);
+    $('pairShowClose')?.addEventListener('click', () => { pararTickerPareamento(); closeModal('pairShowModal'); });
+    $('pairEnterBtn')?.addEventListener('click', () => {
+        const input = $('pairCodeInput');
+        if (input) input.value = '';
+        $('pairEnterError')?.classList.add('hidden');
+        openModal('pairEnterModal');
+    });
+    $('pairEnterCancel')?.addEventListener('click', () => closeModal('pairEnterModal'));
+    $('pairEnterConfirm')?.addEventListener('click', () => resgatarPareamento($('pairCodeInput').value));
+    $('pairCodeInput')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); resgatarPareamento(e.target.value); }
+    });
     setupFilterTabs();
     setupLanguageSwitcher();
     $('filterCountry').addEventListener('change', (e) => {

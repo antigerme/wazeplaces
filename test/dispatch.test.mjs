@@ -13,7 +13,7 @@ import { webcrypto } from 'node:crypto';
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
-import { dispatch, makeSessions } from '../server/core.mjs';
+import { dispatch, makeSessions, normalizePairCode } from '../server/core.mjs';
 
 const NETSCAPE = (domain, name, value) =>
   `${domain}\tTRUE\t/\tTRUE\t9999999999\t${name}\t${value}`;
@@ -153,4 +153,65 @@ test('dispatch: endpoint desconhecido → 404; sufixo .php tolerado', async () =
     () => ok(wazePayload()),
     () => dispatch('buscar-places.php', { sessionToken: token, region: 'row' }, ctx));
   assert.equal(resultado.status, 200, 'compat de cache antigo com .php');
+});
+
+// ─── Pareamento computador → celular ────────────────────────────────────────
+// Resolve o gargalo real da app: copiar cookies num celular é inviável. O
+// editor loga no computador e traz a sessão por um código curto e efêmero.
+test('dispatch parear: create exige sessão; claim entrega sessão NOVA', async () => {
+  const { ctx, token } = await ctxComSessao();
+
+  const criado = await dispatch('parear', { action: 'create', sessionToken: token }, ctx);
+  assert.equal(criado.status, 200);
+  assert.match(criado.body.code, /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/,
+    'código só com símbolos sem ambiguidade (nada de 0/O/1/I)');
+
+  const resgate = await dispatch('parear', { action: 'claim', code: criado.body.code }, ctx);
+  assert.equal(resgate.status, 200);
+  assert.ok(resgate.body.sessionToken);
+  assert.notEqual(resgate.body.sessionToken, token, 'celular ganha sessão PRÓPRIA, não a mesma');
+
+  // A sessão do computador segue viva — parear não desloga quem gerou.
+  const ainda = await dispatch('perfil', { sessionToken: token, region: 'row' }, ctx);
+  assert.notEqual(ainda.body.error, 'Sessão ou cookies não fornecidos');
+});
+
+test('dispatch parear: código é de USO ÚNICO', async () => {
+  const { ctx, token } = await ctxComSessao();
+  const { body } = await dispatch('parear', { action: 'create', sessionToken: token }, ctx);
+  const primeiro = await dispatch('parear', { action: 'claim', code: body.code }, ctx);
+  assert.equal(primeiro.body.success, true);
+  const segundo = await dispatch('parear', { action: 'claim', code: body.code }, ctx);
+  assert.equal(segundo.body.success, false);
+  assert.equal(segundo.status, 400);
+});
+
+test('dispatch parear: create SEM sessão é 401 (só quem já entrou gera código)', async () => {
+  const { ctx } = await ctxComSessao();
+  const r = await dispatch('parear', { action: 'create', sessionToken: 'inexistente' }, ctx);
+  assert.equal(r.status, 401);
+});
+
+test('dispatch parear: códigos inválidos não viram sessão', async () => {
+  const { ctx } = await ctxComSessao();
+  for (const ruim of ['', 'ABC', 'ZZZZZZZZ', null, 'ABC-12']) {
+    const r = await dispatch('parear', { action: 'claim', code: ruim }, ctx);
+    assert.equal(r.body.success, false, `código ${JSON.stringify(ruim)} não pode ser aceito`);
+  }
+});
+
+test('parear: mesma mensagem pra inexistente e expirado (sem oráculo)', async () => {
+  const { ctx, token } = await ctxComSessao();
+  const { body } = await dispatch('parear', { action: 'create', sessionToken: token }, ctx);
+  await dispatch('parear', { action: 'claim', code: body.code }, ctx); // consome
+  const usado = await dispatch('parear', { action: 'claim', code: body.code }, ctx);
+  const nuncaExistiu = await dispatch('parear', { action: 'claim', code: 'ABCDEF' }, ctx);
+  assert.equal(usado.body.error, nuncaExistiu.body.error,
+    'diferenciar os casos entregaria informação a quem estivesse chutando códigos');
+});
+
+test('normalizePairCode: aceita minúsculo, hífen e espaço', () => {
+  assert.equal(normalizePairCode(' a2c-3d4 '), 'A2C3D4');
+  assert.equal(normalizePairCode('ABC 123'), 'ABC123');
+  assert.equal(normalizePairCode(null), '');
 });
