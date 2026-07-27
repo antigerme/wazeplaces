@@ -122,8 +122,8 @@
                     <p class="text-slate-500 text-sm leading-relaxed dark:text-slate-400" data-i18n="auth.welcome.body">Para começar a limpar pedidos de places do Waze, você precisa fornecer seus cookies de autenticação.</p>
                 </div>
 
-                <div class="space-y-4">
-                    <div class="bg-gradient-to-r from-purple-50 to-cyan-50 dark:from-purple-500/10 dark:to-cyan-500/10 border border-purple-200 dark:border-purple-500/30 rounded-2xl p-5">
+                <div class="auth-options">
+                    <div class="auth-opt-ext bg-gradient-to-r from-purple-50 to-cyan-50 dark:from-purple-500/10 dark:to-cyan-500/10 border border-purple-200 dark:border-purple-500/30 rounded-2xl p-5">
                         <div class="flex items-start gap-3">
                             <span class="text-2xl flex-shrink-0" aria-hidden="true">🚀</span>
                             <div class="flex-1 min-w-0">
@@ -141,7 +141,7 @@
                         </div>
                     </div>
 
-                    <div class="relative py-1">
+                    <div class="auth-opt-div relative py-1">
                         <div class="absolute inset-0 flex items-center">
                             <div class="w-full border-t border-slate-200 dark:border-slate-700"></div>
                         </div>
@@ -150,23 +150,23 @@
                         </div>
                     </div>
 
-                    <button id="uploadBtn" type="button" class="group w-full relative overflow-hidden bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-cyan-500/25">
+                    <button id="uploadBtn" type="button" class="auth-opt-upload group w-full relative overflow-hidden bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-semibold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-cyan-500/25">
                         <span class="relative z-10 flex items-center justify-center space-x-2">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
                             <span data-i18n="auth.uploadBtn">Fazer Upload do cookies.txt</span>
                         </span>
                     </button>
-                    <input type="file" id="fileInput" accept=".txt" class="hidden">
+                    <input type="file" id="fileInput" accept=".txt" class="hidden auth-opt-hidden">
 
-                    <button id="pasteBtn" type="button" class="w-full bg-slate-50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 flex items-center justify-center space-x-2 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700">
+                    <button id="pasteBtn" type="button" class="auth-opt-paste w-full bg-slate-50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 flex items-center justify-center space-x-2 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700">
                         <svg class="w-5 h-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
                         <span data-i18n="auth.pasteBtn">Colar Conteúdo dos Cookies</span>
                     </button>
                     <!-- Terceiro caminho: quem está no celular, onde copiar cookies é
                          inviável. Loga uma vez no computador e traz a sessão por código. -->
-                    <button id="pairEnterBtn" type="button" class="w-full bg-slate-50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 flex items-center justify-center space-x-2 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700">
+                    <button id="pairEnterBtn" type="button" class="auth-opt-pair w-full bg-slate-50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 flex items-center justify-center space-x-2 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700">
                         <svg class="w-5 h-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                        <span data-i18n="auth.pairBtn">Tenho um código do computador</span>
+                        <span data-i18n="auth.pairBtn">Entrar com um código</span>
                     </button>
                 </div>
 
@@ -426,8 +426,8 @@
              5 minutos e serve UMA vez; a sessão do computador não é afetada. -->
         <div id="pairShowModal" role="dialog" aria-modal="true" aria-labelledby="pairShowTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6">
-                <h3 id="pairShowTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.show.title">Usar no celular</h3>
-                <p class="text-sm text-slate-500 dark:text-slate-400 mb-5" data-i18n="pair.show.body">No celular, abra a app e toque em "Tenho um código do computador". Depois digite:</p>
+                <h3 id="pairShowTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.show.title">Conectar outro aparelho</h3>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mb-5" data-i18n="pair.show.body">No outro aparelho, abra a app e toque em "Entrar com um código". Depois digite:</p>
 
                 <div id="pairCodeBox" class="bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-cyan-300 dark:border-cyan-400/40 rounded-2xl py-5 text-center mb-3">
                     <p id="pairCode" class="text-4xl font-black tracking-[0.2em] text-cyan-700 dark:text-cyan-300 tnum select-all">······</p>
@@ -436,7 +436,7 @@
 
                 <button id="pairCopyLinkBtn" type="button" class="w-full min-h-[48px] mb-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.328-6.328l1.5-1.5a4 4 0 015.656 5.656l-3 3a4 4 0 01-5.656 0"></path></svg>
-                    <span data-i18n="pair.copyLink">Copiar link (abrir direto no celular)</span>
+                    <span data-i18n="pair.copyLink">Copiar link (abre direto no outro aparelho)</span>
                 </button>
                 <button id="pairShowClose" type="button" class="w-full min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.close">Fechar</button>
             </div>
@@ -445,10 +445,10 @@
         <!-- ── Pareamento: recebe o código (usado no CELULAR) ──────────────── -->
         <div id="pairEnterModal" role="dialog" aria-modal="true" aria-labelledby="pairEnterTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6">
-                <h3 id="pairEnterTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.enter.title">Código do computador</h3>
-                <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.enter.body">No computador, entre na app e use "Usar no celular" no menu de ajuda. Digite aqui o código de 6 caracteres:</p>
+                <h3 id="pairEnterTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.enter.title">Entrar com um código</h3>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.enter.body">No aparelho onde você já está logado, abra a Ajuda e toque em "Conectar outro aparelho". Digite aqui o código de 6 caracteres:</p>
 
-                <label for="pairCodeInput" class="sr-only" data-i18n="pair.enter.title">Código do computador</label>
+                <label for="pairCodeInput" class="sr-only" data-i18n="pair.enter.title">Entrar com um código</label>
                 <input id="pairCodeInput" type="text" inputmode="latin" autocapitalize="characters" autocomplete="one-time-code" maxlength="7" placeholder="ABC123" data-i18n-ph="pair.enter.placeholder"
                        class="w-full min-h-[56px] text-center text-3xl font-black tracking-[0.2em] uppercase bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 mb-3 text-slate-800 dark:text-slate-100">
                 <p id="pairEnterError" class="hidden text-xs text-rose-600 dark:text-rose-400 mb-3" role="alert"></p>
@@ -718,6 +718,10 @@
         <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[85dvh] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="helpModalTitle" class="text-2xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.help.title">Ajuda</h3>
+                    <button id="pairCreateBtn" type="button" class="w-full min-h-[48px] mb-4 mt-1 bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-cyan-100 dark:border-cyan-400/30">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                        <span data-i18n="pair.createBtn">Conectar outro aparelho</span>
+                    </button>
                 <button id="closeHelp" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full dark:text-slate-400">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -789,10 +793,6 @@
                 </div>
 
                 <div class="pt-3 border-t border-slate-200 dark:border-slate-700">
-                    <button id="pairCreateBtn" type="button" class="w-full min-h-[48px] mb-3 bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-cyan-100 dark:border-cyan-400/30">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                        <span data-i18n="pair.createBtn">Usar no celular</span>
-                    </button>
                     <button id="logoutBtn" type="button" class="w-full min-h-[48px] bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                         <span data-i18n="common.logout">Sair</span>
