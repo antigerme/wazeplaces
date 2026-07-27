@@ -280,6 +280,27 @@ body.dark {
   }
 }
 
+/* ── Grid de stats em tela estreita ────────────────────────────────────────
+   Abaixo de 360px nenhum tamanho legível faz "REJEITADOS"/"RECHAZADOS" caber
+   em 1/4 da tela (a 320px a coluna tem 64px e o rótulo em espanhol pede 82px),
+   então vira 2×2. O tamanho do rótulo já foi reduzido via `sm:` no HTML, o que
+   resolve a faixa 360–639px; aqui é só o degrau final.
+
+   As divisórias vêm do `divide-x` do Tailwind = borda ESQUERDA em todo filho a
+   partir do 2º. Em duas colunas isso deixaria um risco solto na borda esquerda
+   da segunda fileira, então o 1º e o 3º perdem a borda e a separação entre as
+   fileiras passa a ser horizontal. A cor continua vindo do `divide-slate-*` /
+   `dark:divide-*` do HTML — `border-color` é herdado pela borda de cima, então
+   o dark mode acompanha sozinho, sem override global (gotcha #23). */
+@media (max-width: 359.98px) {
+  #statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 0.5rem;
+  }
+  #statsGrid > :nth-child(odd)    { border-left-width: 0; }
+  #statsGrid > :nth-child(n + 3)  { border-top-width: 1px; padding-top: 0.5rem; }
+}
+
 /* Confete avulso (conquista do gate do undo). Mesmas peças e cores do
    "Tudo limpo!", mas anima sozinho — sem depender de um `.celebrate` no pai,
    porque este é criado e removido em runtime pelo JS. */
