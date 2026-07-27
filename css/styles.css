@@ -263,23 +263,26 @@ body.dark {
   /* No dedo, o código é o caminho que FUNCIONA — então tem que PARECER o
      principal. Sem isto ele ficava com cara de opção secundária (contorno
      cinza) enquanto os becos sem saída ostentavam botão colorido. */
-  .auth-opt-pair {
-    background-image: linear-gradient(to right, #06b6d4, #3b82f6);
+  .auth-options .auth-opt-pair {
+    background-image: linear-gradient(to right, #0e7490, #1d4ed8);
     background-color: transparent;
     border-color: transparent;
     color: #fff;
     box-shadow: 0 10px 15px -3px rgba(6, 182, 212, 0.25);
   }
-  .auth-opt-pair svg { color: #fff; }
+  .auth-options .auth-opt-pair svg,
+  .dark .auth-options .auth-opt-pair svg { color: #fff; }
+  /* Precisa vencer o `dark:text-*` do Tailwind, que também é (0,2,0). */
+  .dark .auth-options .auth-opt-pair { color: #fff; }
   /* O gradiente do upload perde o destaque, pra não competir com o de cima. */
-  .auth-opt-upload {
+  .auth-options .auth-opt-upload {
     background-image: none;
     background-color: #f8fafc;
     color: #334155;
     box-shadow: none;
     border: 1px solid #e2e8f0;
   }
-  .dark .auth-opt-upload {
+  .dark .auth-options .auth-opt-upload {
     background-color: #0f172a;
     color: #e2e8f0;
     border-color: #334155;
@@ -482,7 +485,7 @@ input.ui-switch:disabled {
   border-radius: 9px;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #64748b; /* slate-500 */
+  color: #475569; /* slate-600 — slate-500 dava 4.3:1 sobre o trilho */
   transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -497,7 +500,7 @@ input.ui-switch:disabled {
 }
 
 .dark .seg-tab {
-  color: #94a3b8; /* slate-400 */
+  color: #cbd5e1; /* slate-300 */
 }
 
 .dark .seg-tab[aria-selected="true"] {
@@ -613,7 +616,7 @@ button:active {
 }
 
 .diff-to {
-  color: #16a34a;
+  color: #15803d; /* green-700 — o 600 dava 3.2:1 */
   font-weight: 600;
   font-size: 0.75rem;
   word-break: break-word;
@@ -624,7 +627,7 @@ button:active {
   min-width: 0;
 }
 
-.dark .diff-from { color: #f87171; }
+.dark .diff-from { color: #fca5a5; } /* red-300: o 400 dava 4.3:1 no cartão escuro */
 .dark .diff-to { color: #4ade80; }
 
 .card-content {

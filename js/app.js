@@ -2475,7 +2475,7 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
         error: 'bg-rose-600',
         info: 'bg-slate-800 dark:bg-slate-100 dark:text-slate-900',
         // Conquista: dourado, pra não se confundir com um "sucesso" qualquer.
-        achievement: 'bg-gradient-to-r from-amber-500 to-amber-600'
+        achievement: 'bg-gradient-to-r from-amber-700 to-amber-800'
     };
 
     const icons = {

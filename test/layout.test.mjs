@@ -49,23 +49,36 @@ test('os 4 rótulos do grid de stats existem', () => {
   }
 });
 
-test('rótulo de stats encolhe em tela pequena e só cresce a partir de sm', () => {
-  // A string mais larga é "RECHAZADOS" (es), com 82px em 11px+tracking-wider.
-  // Numa tela de 390px a coluna tem 81px — ou seja, 11px só cabe de `sm` pra
-  // cima. Abaixo disso o rótulo precisa ser 10px E sem tracking.
+test('rótulo de stats: 11px em rem e tracking só a partir de sm', () => {
+  // "RECHAZADOS" (es) é a string mais larga e decide o layout. Em
+  // 11px+tracking-wider ela mede 82px, e a coluna só chega lá num aparelho de
+  // 390px — então o tracking fica de `sm` pra cima. Sem ele, medido, sobram
+  // 5px de folga até em 360px.
   const bloco = blocoDoGrid();
   for (const chave of ROTULOS) {
     const linha = bloco.find((l) => l.includes(`data-i18n="${chave}"`));
     assert.ok(linha, `linha do rótulo ${chave} não encontrada no #statsGrid`);
-    assert.match(linha, /text-\[10px\]/, `${chave}: falta o tamanho pequeno (text-[10px])`);
     assert.match(linha, /tracking-normal/, `${chave}: falta zerar o tracking em tela pequena`);
-    assert.match(linha, /sm:text-\[11px\]/, `${chave}: falta o degrau sm:text-[11px]`);
     assert.match(linha, /sm:tracking-wider/, `${chave}: falta o degrau sm:tracking-wider`);
     assert.doesNotMatch(
       linha,
       /(?<!sm:)\btracking-wider\b/,
       `${chave}: tracking-wider sem prefixo sm: volta a colidir abaixo de 390px`
     );
+  }
+});
+
+test('nenhum texto abaixo de 11px, e em rem pra acompanhar a fonte do sistema', () => {
+  // Piso do M3 (label-small 11sp) e do HIG (caption 11pt). E o tamanho vai em
+  // `rem`: em `px` o texto ignora a preferência de fonte do usuário — o
+  // Dynamic Type do HIG simplesmente não funciona.
+  for (const arquivo of ['index.html', 'js/i18n.js', 'js/app.js']) {
+    const px = [...read(arquivo).matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)].map((m) => m[1]);
+    assert.deepEqual(px, [], `${arquivo}: tamanho de texto em px (${px.join(', ')}) — use rem`);
+  }
+  const rems = [...HTML.matchAll(/text-\[([\d.]+)rem\]/g)].map((m) => parseFloat(m[1]));
+  for (const r of rems) {
+    assert.ok(r * 16 >= 11 - 0.01, `text-[${r}rem] = ${r * 16}px, abaixo do piso de 11px`);
   }
 });
 
@@ -86,6 +99,37 @@ test('grid de stats vira 2 colunas abaixo de 360px', () => {
   // isso deixa um risco solto na borda esquerda da 2ª fileira.
   assert.match(bloco, /nth-child\(odd\)/, 'falta tirar a borda esquerda dos ímpares no 2×2');
   assert.match(bloco, /nth-child\(n \+ 3\)/, 'falta a divisória horizontal entre as fileiras');
+});
+
+test('regra que precisa vencer utility do Tailwind tem especificidade pra isso', () => {
+  // O styles.css carrega ANTES do tailwind.css. Empate de especificidade →
+  // vence o Tailwind. Isso já mordeu três vezes, sempre em silêncio:
+  //   · `.modal-root { padding-bottom }`  perdeu pro `p-4`
+  //   · `.auth-opt-pair { color: #fff }`  perdeu pro `text-slate-700`
+  //   · `.auth-opt-upload { background }` perdeu pro `bg-gradient-to-r`
+  // Seletor de UMA classe só nunca vence uma utility. Aqui a regra é: quem
+  // sobrescreve utility precisa de pelo menos duas classes no seletor.
+  const i = CSS_SEM_COMENTARIO.indexOf('@media (pointer: coarse)');
+  assert.notEqual(i, -1, 'sumiu o bloco @media (pointer: coarse) da tela de entrada');
+  // Contagem de chaves: regex de "fim do bloco" quebra com indentação.
+  let nivel = 0, fim = i;
+  for (let k = CSS_SEM_COMENTARIO.indexOf('{', i); k < CSS_SEM_COMENTARIO.length; k++) {
+    if (CSS_SEM_COMENTARIO[k] === '{') nivel++;
+    else if (CSS_SEM_COMENTARIO[k] === '}' && --nivel === 0) { fim = k; break; }
+  }
+  const bloco = CSS_SEM_COMENTARIO.slice(i, fim);
+  // Só as propriedades que uma utility do Tailwind também escreve. `order`, por
+  // exemplo, não é disputado aqui — cobrar duas classes dele seria ruído.
+  const DISPUTADAS = /(^|;)\s*(color|background-color|background-image|padding[a-z-]*|margin[a-z-]*|border-color)\s*:/;
+  for (const m of bloco.matchAll(/([^{};]+)\{([^}]*)\}/g)) {
+    if (!DISPUTADAS.test(';' + m[2])) continue;
+    for (const parte of m[1].split(',').map((x) => x.trim()).filter(Boolean)) {
+      const classes = (parte.match(/\./g) || []).length;
+      assert.ok(classes >= 2,
+        `"${parte}" tem ${classes} classe(s) e escreve propriedade que o Tailwind também escreve: ` +
+        `empata em especificidade e PERDE por ordem de carga`);
+    }
+  }
 });
 
 test('o teclado virtual não pode voltar a engolir os modais', () => {
