@@ -91,7 +91,15 @@ async function gcSessions() {
       const f = join(SESSION_DIR, name);
       try {
         const st = await stat(f);
-        if (now - st.mtimeMs > SESSION_TTL * 1000) await unlink(f).catch(() => {});
+        if (now - st.mtimeMs > SESSION_TTL * 1000) { await unlink(f).catch(() => {}); continue; }
+        // Pareamento vale 5 MINUTOS, não 21 dias — mas mora no mesmo diretório
+        // e com o mesmo prefixo da sessão, então o corte por SESSION_TTL o
+        // deixaria 6000× mais tempo no disco do que ele vale. O valor guardado
+        // começa com o instante de expiração (`<unix>|<blob>`), justamente
+        // porque este adaptador ignora o TTL do `put` — dá pra podar por ele.
+        const conteudo = await readFile(f, 'utf8').catch(() => '');
+        const corte = /^(\d+)\|/.exec(conteudo);
+        if (corte && Number(corte[1]) * 1000 < now) await unlink(f).catch(() => {});
       } catch {
         // arquivo sumiu no meio da varredura — ignora
       }

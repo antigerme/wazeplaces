@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.27-15
+
+### Corrigido
+- **O código e o QR de pareamento sumiam da tela só se você usasse o botão "Fechar".** Fechando com Esc ou clicando fora, eles ficavam desenhados — e o contador seguia rodando em segundo plano pelo resto da sessão. Agora qualquer forma de fechar limpa tudo: código de pareamento é credencial e não tem por que ficar na tela depois de fechado.
+- **O histórico crescia para sempre**, um registro por dia, sem limite — e ele é regravado inteiro a cada pedido tratado. Agora guarda pouco mais de um ano de detalhe; o **Total continua contando tudo desde sempre**, como antes.
+- **Na instalação em servidor próprio**, códigos de pareamento gerados e nunca usados ficavam 21 dias no disco em vez dos 5 minutos que valem.
+
 ## v2026.07.27-14
 
 ### Adicionado
