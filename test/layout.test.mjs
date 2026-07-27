@@ -261,3 +261,34 @@ test('rolagem dentro do card não rouba o gesto nem deixa o card preso', () => {
   assert.match(SWIPE, /touchcancel/, 'touchcancel sem tratamento deixa o card preso no meio do arraste');
   assert.match(SWIPE, /function handleDragCancel/, 'sumiu o cancelamento limpo do arraste');
 });
+
+test('em laptop a app cabe na tela, sem barra de rolagem de página', () => {
+  // Num 1366×768 os custos fixos (header 69 + placar 87 + margens 80) mais o
+  // card davam 850px: 82px de rolagem que não precisava existir — e rolagem
+  // disputa com o gesto de "pular". O card passa a receber a SOBRA por uma
+  // cadeia de flex, em vez de um `dvh` chutado.
+  const bloco = CSS.match(/@media \(min-width: 768px\) and \(min-height: 700px\) \{[\s\S]*?\n\}/);
+  assert.ok(bloco, 'sumiu a media query que faz a app caber em laptop');
+  for (const alvo of ['body', 'body > main', '#appScreen:not(.hidden)', '#cardStack']) {
+    assert.ok(bloco[0].includes(alvo), `a cadeia de flex perdeu o elo "${alvo}"`);
+  }
+  // A ALTURA no media query não é decoração: celular DEITADO tem 852px de
+  // largura com 393px de altura, e só a largura fazia o piso de 26rem ficar
+  // maior que a tela — a rolagem PIORAVA (177 → 259px, medido).
+  assert.match(bloco[0], /min-height:\s*26rem/, 'o card perdeu o piso de altura');
+  assert.doesNotMatch(
+    CSS.replace(/\/\*[\s\S]*?\*\//g, ''),
+    /@media \(min-width: 768px\) \{[\s\S]*?#cardStack/,
+    'media query só por largura pega celular deitado e piora a rolagem'
+  );
+});
+
+test('a foto cede espaço ANTES do texto', () => {
+  // Sem isso, `flex-auto` dá shrink 1 aos dois e o encolhimento é proporcional
+  // ao tamanho base: o texto (maior) cedia primeiro e ganhava barra de rolagem
+  // com a foto folgada em 284px, muito acima do piso de 144px. Medido num
+  // laptop de 768px: o texto estourava por 12px sem necessidade nenhuma.
+  const foto = HTML.split('\n').find((l) => l.includes('card-photo'));
+  assert.ok(foto, 'sumiu o container da foto');
+  assert.match(foto, /shrink-\[\d+\]/, 'a foto voltou a ceder junto com o texto — barra de rolagem à toa');
+});

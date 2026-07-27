@@ -310,6 +310,47 @@ body.dark {
    vence o empate — medi, e o padding ficava em 16px com o teclado aberto. Como
    utility, `pb-*` é emitido depois de `p-*` e vence sem `!important`. */
 
+/* ── A app cabe na tela em laptop ──────────────────────────────────────────
+   Num 1366×768 os custos fixos (header 69 + placar 87 + margens 80) mais o
+   card de 614px davam 850px: 82px de rolagem numa tela que não precisava
+   rolar. E rolagem disputa com o gesto de "pular".
+
+   Em vez de chutar um `dvh` menor, o card passa a receber a SOBRA: cadeia de
+   flex do <main> até o #cardStack. Assim vale qualquer altura de header e de
+   placar — inclusive o 2×2 de duas fileiras.
+
+   Largura E altura: celular DEITADO tem 852px de largura com 393px de altura —
+   só a largura fazia o piso de 26rem virar maior que a tela e a rolagem PIORAR
+   (177 → 259px, medido). E no celular em pé a rolagem da página é o desenho de
+   sempre (card grande, header e placar saem de cena ao rolar); encolher o card
+   ali seria piorar justamente o que o editor mais olha. */
+@media (min-width: 768px) and (min-height: 700px) {
+  body {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+  body > main {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #appScreen:not(.hidden) {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  /* ID vence as utilities de altura do HTML sem disputa de ordem de carga. */
+  #cardStack {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 26rem;
+    max-height: 640px;
+  }
+}
+
 /* ── Grid de stats em tela estreita ────────────────────────────────────────
    Abaixo de 360px nenhum tamanho legível faz "REJEITADOS"/"RECHAZADOS" caber
    em 1/4 da tela (a 320px a coluna tem 64px e o rótulo em espanhol pede 82px),

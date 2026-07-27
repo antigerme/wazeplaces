@@ -8,6 +8,12 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.27-11
+
+### Corrigido
+- **Sumiu a barra de rolagem que aparecia dentro do card.** Em notebook de tela mais baixa, o bloco de texto rolava por apenas 12px enquanto a foto estava folgada — quem devia ceder era a foto. Agora ela cede primeiro, e a barra não aparece.
+- **A página parou de rolar em notebook.** Num 1366×768 sobravam 82px pra fora da tela: dava barra lateral e rolagem que disputava com o gesto de pular. O card agora ocupa exatamente o espaço que sobra. No celular nada muda, nem em pé nem deitado.
+
 ## v2026.07.27-10
 
 ### Corrigido
