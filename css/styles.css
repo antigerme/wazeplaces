@@ -458,6 +458,19 @@ body.dark {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 1.5rem), transparent);
 }
 
+/* Valor que a APP escreveu, não que veio do Waze. Os parênteses no texto já
+   dizem sozinhos (e o leitor de tela os lê); isto é o reforço visual pra quem
+   bate o olho. Cor sozinha não bastaria — WCAG 1.4.1, e a app é usada no sol.
+   Itálico da Inter é sintético (o arquivo variável só traz o peso normal), o
+   que é aceitável num rótulo curto e nunca é o único sinal.
+   Dois seletores porque `.card-name` etc. empatam com utility do Tailwind e
+   perderiam por ordem de carga (gotcha #27). */
+.place-card .valor-ausente {
+  font-style: italic;
+  font-weight: 400;
+  opacity: 0.65;
+}
+
 /* Janela do "Desfazer" correndo: os três botões ficam visivelmente travados.
    Botão que não responde e parece normal lê como app quebrada — o M3 pede que
    estado desabilitado seja visível. A contagem regressiva do próprio banner diz
@@ -728,6 +741,19 @@ button:active {
 .card-content .card-name {
   font-size: 1.35rem;
   line-height: 1.2;
+}
+
+/* Endereço promovido a título (local sem nome). Continua sendo o maior texto do
+   card — só calibrado ao conteúdo: endereço é bem mais longo que nome, e em
+   1.35rem/2 linhas ele truncava justamente o estado ("… - Mato…"). Aqui ele é a
+   IDENTIDADE do local: o começo (rua e número) é o que identifica, então o teto
+   existe pra um endereço patológico não empurrar os botões — não porque cortar
+   seja aceitável. Medido em 3 aparelhos: 4 linhas a 1.1rem cobrem o endereço
+   real da fila (40–60 chars) até num Galaxy Fold de 280px. */
+.card-content .card-name.titulo-endereco {
+  font-size: 1.1rem;
+  line-height: 1.25;
+  -webkit-line-clamp: 4;
 }
 
 /* Degrau denso pra tela baixa (iPhone SE, Fold, janela apertada, paisagem).

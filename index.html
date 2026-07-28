@@ -610,6 +610,11 @@
                                  cima parava de pular: o gesto mudava de sentido conforme o card. -->
                             <div class="flex-initial min-h-0 overflow-y-auto overscroll-contain p-5 pb-2 flex flex-col gap-3 relative z-10 bg-white card-content dark:bg-slate-800 dark:text-slate-200">
                                 <span class="card-delete-banner hidden self-start flex-shrink-0 bg-rose-100 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 text-[0.6875rem] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full" data-i18n="card.deleteBanner">⚠ Pedido de remoção</span>
+                                <!-- Sem nome, o ENDEREÇO vira o título (é a identidade real, como o
+                                     Google Maps faz com ponto sem nome). A ausência não some: vira este
+                                     selo, porque num pedido de place ela é informação de decisão — um
+                                     RESIDENCE_HOME sem nome é forte candidato a rejeitar. -->
+                                <span class="card-no-name-badge hidden self-start flex-shrink-0 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[0.6875rem] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full" data-i18n="card.noName.badge">sem nome</span>
                                 <div class="flex items-start justify-between gap-2 flex-shrink-0">
                                     <h3 class="card-name text-2xl font-bold text-slate-800 leading-tight flex-1 line-clamp-2 break-words min-w-0 dark:text-slate-100"></h3>
                                     <span class="card-starred hidden text-2xl leading-none flex-shrink-0" title="Favoritado no WME" data-i18n-title="card.starred.title">⭐</span>
@@ -630,7 +635,7 @@
                                     </div>
                                 </div>
 
-                                <div class="flex items-start space-x-3 flex-shrink-0">
+                                <div class="card-address-row flex items-start space-x-3 flex-shrink-0">
                                     <div class="bg-blue-50 p-2 rounded-lg text-blue-600 dark:bg-blue-600/20" aria-hidden="true">
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
