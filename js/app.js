@@ -1003,6 +1003,12 @@ function handleKeyDown(e) {
     }
 
     if (!AppState.currentPlace) return;
+    // As setas também respeitam a trava — senão o teclado seria um atalho pra
+    // furar a janela do Desfazer que o dedo respeita.
+    if (acoesTravadas() && ['ArrowLeft', 'ArrowRight', 'ArrowUp'].includes(e.key)) {
+        e.preventDefault();
+        return;
+    }
 
     if (e.key === 'ArrowLeft') {
         e.preventDefault();
@@ -1601,6 +1607,13 @@ function renderCurrentCard() {
     // Traduzir aqui, no clone, é o único ponto que pega todo card novo.
     if (typeof applyI18n === 'function') applyI18n(card);
 
+    // O card novo nasce travado se a janela do Desfazer ainda estiver correndo
+    // (o `undo` devolve o place anterior à fila e re-renderiza).
+    card.classList.toggle('acoes-travadas', acoesTravadas());
+    for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
+        card.querySelector(cls).disabled = acoesTravadas();
+    }
+
     // As duas ÚNICAS áreas que podem rolar (nunca as duas no mesmo card: reporte
     // é FLAG, mudanças é UPDATE). O swipe.js já não pega o gesto dentro delas.
     marcarBordaRolagem(card.querySelector('.card-changes-list'));
@@ -1723,6 +1736,32 @@ function renderCardChanges(card, place) {
             </div>
         `).join('');
     changesBox.classList.remove('hidden');
+}
+
+// Enquanto a janela do "Desfazer" corre, o pedido AINDA NÃO foi pro Waze e dá
+// pra voltar atrás. Tratar o próximo nesse meio-tempo despachava o anterior sem
+// aviso — e, por acidente de layout, em 6 de 8 aparelhos o banner cobria os
+// botões, então o comportamento ainda mudava conforme a tela. Agora é decisão
+// explícita: durante os UNDO_WINDOW_MS ninguém prossegue, em nenhum aparelho e
+// por nenhum caminho (botão, gesto ou tecla).
+//
+// Só vale com o "Desfazer" LIGADO. Desligado (Preferências, depois da cota), a
+// ação vai na hora e não há janela nenhuma — nem espera.
+function acoesTravadas() {
+    return !!AppState.pendingAction;
+}
+
+// Botão travado precisa PARECER travado: botão que não responde e parece normal
+// lê como app quebrada (M3/HIG). O `disabled` também tira da ordem do Tab e faz
+// o leitor de tela anunciar. A contagem regressiva do banner diz por quanto.
+function aplicarTravaDeAcao() {
+    const travado = acoesTravadas();
+    const card = document.querySelector('.place-card');
+    if (card) card.classList.toggle('acoes-travadas', travado);
+    for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
+        const b = card && card.querySelector(cls);
+        if (b) b.disabled = travado;
+    }
 }
 
 // Scroll edge effect (M3): esmaece a borda de baixo enquanto sobra conteúdo.
@@ -1974,6 +2013,7 @@ function handleActionResult(actionType, place, result) {
 
 function handleMarkAsRead() {
     if (!AppState.currentPlace) return;
+    if (acoesTravadas()) return;   // janela do Desfazer correndo
     const place = AppState.currentPlace;
     AppState.stats.read++;
     AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
@@ -1988,6 +2028,7 @@ function handleMarkAsRead() {
 
 function handleReject() {
     if (!AppState.currentPlace) return;
+    if (acoesTravadas()) return;   // janela do Desfazer correndo
     const place = AppState.currentPlace;
     AppState.stats.rejected++;
     AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
@@ -2002,6 +2043,7 @@ function handleReject() {
 
 function handleSkip() {
     if (!AppState.currentPlace) return;
+    if (acoesTravadas()) return;   // janela do Desfazer correndo
     const place = AppState.currentPlace;
     AppState.stats.skipped++;
     updateStats();
@@ -2100,6 +2142,9 @@ function scheduleAction(type, place, executor) {
 
     let executed = false;
     const runExecutor = async () => {
+        // A ação saiu: a janela do Desfazer acabou e os botões voltam.
+        AppState.pendingAction = null;
+        aplicarTravaDeAcao();
         AppState.inFlightActions++;
         updateInFlightIndicator();
         try {
@@ -2170,6 +2215,7 @@ function scheduleAction(type, place, executor) {
 
     const undoMsg = type === 'reject' ? t('undo.reject') : type === 'skip' ? t('undo.skip') : t('undo.read');
     showUndoBanner(undoMsg);
+    aplicarTravaDeAcao();
 }
 
 function showUndoBanner(message) {
@@ -2828,3 +2874,6 @@ window.onSwipeLeft = onSwipeLeft;
 window.onSwipeRight = onSwipeRight;
 window.onSwipeUp = onSwipeUp;
 window.showToast = showToast;
+
+// Usado pelo swipe.js: o arraste não pode furar a janela do Desfazer.
+window.acoesTravadas = acoesTravadas;

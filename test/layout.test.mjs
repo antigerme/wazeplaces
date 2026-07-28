@@ -417,6 +417,49 @@ test('a área que rola avisa que rola', () => {
   assert.match(regra[0], /-webkit-mask-image:\s*linear-gradient/, 'sumiu o -webkit-mask-image: iOS fica sem o aviso');
 });
 
+test('durante a janela do Desfazer ninguém prossegue, por caminho nenhum', () => {
+  // Antes dava pra tratar o próximo pedido enquanto o "Desfazer" corria — e o
+  // anterior era despachado sem aviso. Pior: por acidente de layout, o banner
+  // cobria os botões em 6 de 8 aparelhos medidos (iPhone SE 40px, Galaxy S8+
+  // 63px, laptop 67px), então o comportamento MUDAVA conforme a tela. Agora é
+  // decisão explícita e igual em todo lugar.
+  //
+  // Os três caminhos precisam da trava: bloquear só o botão deixaria o gesto e
+  // a seta do teclado como atalhos pra furar a janela.
+  const APP_ = read('js/app.js');
+  const SWIPE = read('js/swipe.js');
+  assert.match(APP_, /function acoesTravadas/, 'sumiu o estado de trava da janela do Desfazer');
+  for (const fn of ['handleMarkAsRead', 'handleReject', 'handleSkip']) {
+    const corpo = APP_.match(new RegExp(`function ${fn}\\(\\)[\\s\\S]*?\\n\\}`));
+    assert.ok(corpo, `sumiu o ${fn}`);
+    assert.match(corpo[0], /if \(acoesTravadas\(\)\) return;/, `${fn} não respeita a trava`);
+  }
+  // Teclado
+  const teclas = APP_.match(/function handleKeyDown\([\s\S]*?\n\}/);
+  assert.match(teclas[0], /acoesTravadas\(\)[\s\S]{0,120}Arrow/, 'as setas furam a janela do Desfazer');
+  // Gesto: arraste E o disparo por botão/tecla passam pelo swipe.js
+  // Conta os pontos de USO (com parênteses): cada checagem escreve o nome duas
+  // vezes (`x && x()`), então contar o nome cru dava 4 e mascarava a intenção.
+  assert.equal((SWIPE.match(/window\.acoesTravadas\(\)/g) || []).length, 2,
+    'handleDragStart e triggerSwipe precisam OS DOIS respeitar a trava');
+  assert.match(APP_, /window\.acoesTravadas = acoesTravadas;/, 'o swipe.js não enxerga mais a trava');
+
+  // Botão travado tem que PARECER travado: botão morto com cara de vivo lê como
+  // app quebrada (M3/HIG). Medido: disabled=true, opacidade 0.4.
+  assert.match(APP_, /\.disabled = acoesTravadas\(\)/, 'os botões não ficam disabled durante a janela');
+  const CSS_ = read('css/styles.css');
+  const regra = CSS_.match(/\.acoes-travadas[^{]*\{[^}]*\}/);
+  assert.ok(regra, 'sumiu o estilo do botão travado');
+  assert.match(regra[0], /opacity/, 'o botão travado voltou a parecer normal');
+  // Dois seletores: uma classe só empata com utility do Tailwind e perde (#27).
+  assert.match(regra[0], /\.acoes-travadas \.card-btn/, 'seletor de uma classe só perde pra utility');
+
+  // E a trava tem que ACABAR: o executor limpa a pendência e destrava.
+  const agenda = APP_.match(/const runExecutor = async \(\)[\s\S]*?\n    \};/);
+  assert.ok(agenda, 'sumiu o runExecutor');
+  assert.match(agenda[0], /aplicarTravaDeAcao\(\)/, 'a trava não é liberada quando a ação sai');
+});
+
 test('a ação pendente não morre quando a página sai', () => {
   // O stat é incrementado e SALVO no swipe, mas a ação só vai pro Waze
   // UNDO_WINDOW_MS depois. Fechar a aba nessa janela fazia a ação sumir com o

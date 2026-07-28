@@ -458,6 +458,19 @@ body.dark {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 1.5rem), transparent);
 }
 
+/* Janela do "Desfazer" correndo: os três botões ficam visivelmente travados.
+   Botão que não responde e parece normal lê como app quebrada — o M3 pede que
+   estado desabilitado seja visível. A contagem regressiva do próprio banner diz
+   por quanto tempo. Dois seletores porque `.card-btn-*` empata com utility do
+   Tailwind e perderia por ordem de carga (gotcha #27). */
+.acoes-travadas .card-btn-reject,
+.acoes-travadas .card-btn-skip,
+.acoes-travadas .card-btn-read {
+  opacity: 0.4;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+
 /* Snackbar (toast) — bottom-center, estilo M3, entra deslizando de baixo */
 .toast {
   width: 100%;
