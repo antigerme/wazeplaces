@@ -19,7 +19,7 @@
          bloqueado e sobrava só o erro no console. São dois porque o script vem de
          static.cloudflareinsights.com e a telemetria vai pra cloudflareinsights.com
          (/cdn-cgi/rum), ou seja: script-src E connect-src. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://cloudflareinsights.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://cloudflareinsights.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).
@@ -36,23 +36,12 @@
     <link rel="icon" type="image/svg+xml" href="icons/icon-192.svg">
 
 
-    <script>
-      // Aplica o tema ANTES do first paint: evita flash de tela clara + status bar
-      // cyan em quem usa dark (o app.js só roda no DOMContentLoaded, tarde demais).
-      (function () {
-        try {
-          var t = localStorage.getItem('waze_places_theme');
-          if (t !== 'light' && t !== 'dark') {
-            t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          }
-          if (t === 'dark') document.documentElement.classList.add('dark');
-          var m = document.querySelector('meta[name="theme-color"]');
-          if (m) m.setAttribute('content', t === 'dark' ? '#0f172a' : '#f8fafc');
-        } catch (e) {}
-      })();
-    </script>
 
     <link rel="stylesheet" href="css/styles.css">
+    <!-- Depois do CSS de propósito: o paint já espera o stylesheet, então
+         este script viaja em paralelo e não adia o primeiro quadro. Sem
+         defer/async — precisa rodar ANTES de qualquer pintura. -->
+    <script src="js/tema.js"></script>
 
     <!-- Tailwind PRÉ-COMPILADO (npm run css → css/tailwind.css, commitado).
          Antes era o bundle runtime de 407KB, que compilava no browser via
@@ -899,75 +888,6 @@
     <script src="js/swipe.js"></script>
     <script src="js/app.js"></script>
 
-    <script>
-        if ('serviceWorker' in navigator) {
-            let refreshing = false;
-            const hadController = !!navigator.serviceWorker.controller;
-            navigator.serviceWorker.addEventListener('controllerchange', () => {
-                if (refreshing) return;
-                if (!hadController) return;
-                refreshing = true;
-                window.location.reload();
-            });
-
-            const activateWaitingWorker = (worker) => {
-                if (!worker) return;
-                if (window.showToast) {
-                    // Pelo dicionário: `toast.newVersion` já existia nas três línguas
-                    // e ninguém usava — este literal falava português com todo mundo.
-                    // Este <script> é inline, então a auditoria de i18n não o varre;
-                    // por isso passou batido. O fallback cobre o caso de o i18n.js
-                    // não ter carregado (o toast é melhor que silêncio).
-                    window.showToast(
-                        window.t ? window.t('toast.newVersion') : 'Nova versão disponível. Atualizando…',
-                        'info');
-                }
-                worker.postMessage({ type: 'SKIP_WAITING' });
-            };
-
-            window.addEventListener('load', () => {
-                // updateViaCache:'none' — força browser a sempre revalidar service-worker.js
-                // contra a rede, ignorando HTTP cache. Defesa contra CDN/proxy cacheando o SW.
-                navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' })
-                    .then(reg => {
-                        // Cobre o caso de SW novo já estar em "waiting" desde uma sessão anterior
-                        // (instalou mas nunca ativou). Sem isso, updatefound não dispara de novo
-                        // e o user fica preso na versão velha até reload manual.
-                        if (reg.waiting && navigator.serviceWorker.controller) {
-                            activateWaitingWorker(reg.waiting);
-                        }
-                        // Check imediato por nova versão (sem esperar o intervalo de 1h)
-                        reg.update().catch(() => {});
-
-                        reg.addEventListener('updatefound', () => {
-                            const newWorker = reg.installing;
-                            if (!newWorker) return;
-                            newWorker.addEventListener('statechange', () => {
-                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    activateWaitingWorker(newWorker);
-                                }
-                            });
-                        });
-                        setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
-                    })
-                    .catch(err => console.log('Erro ao registrar Service Worker:', err));
-            });
-        }
-
-        const cardObserver = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                mutation.addedNodes.forEach((node) => {
-                    if (node.classList && node.classList.contains('place-card')) {
-                        if (window.enableSwipeOnCard) window.enableSwipeOnCard(node);
-                    }
-                });
-            });
-        });
-
-        cardObserver.observe(document.getElementById('cardStack'), {
-            childList: true,
-            subtree: true
-        });
-    </script>
+    <script src="js/sw-register.js"></script>
 </body>
 </html>

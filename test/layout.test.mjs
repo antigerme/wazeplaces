@@ -441,18 +441,55 @@ test('a ação pendente não morre quando a página sai', () => {
   assert.match(API_, /setSaindo/, 'sumiu o modo "a página está saindo" da API');
 });
 
-test('nenhum texto de UI escapa pelos <script> inline do HTML', () => {
-  // A auditoria de i18n varre atributos data-i18n e chamadas t() nos arquivos
-  // js/. Script inline dentro do index.html não é nenhum dos dois — foi por aí
-  // que "Nova versão disponível. Atualizando..." falou português com todo mundo
-  // por meses, com `toast.newVersion` pronto nas três línguas e sem uso.
+test('o HTML não tem NENHUM script inline', () => {
+  // Duas razões, e a segunda é a que fecha um buraco de segurança:
+  //
+  // 1. A auditoria de i18n varre atributos data-i18n e chamadas t() nos
+  //    arquivos js/. Script dentro do index.html não é nenhum dos dois — foi
+  //    por aí que "Nova versão disponível. Atualizando..." falou português com
+  //    todo mundo, com `toast.newVersion` pronto nas três línguas e sem uso.
+  //
+  // 2. Sem script inline, a CSP pode proibir script inline — e aí um XSS não
+  //    consegue mais ler o sessionToken do localStorage. Medido nos dois
+  //    builds: em produção o script injetado executava e lia o token; aqui é
+  //    bloqueado. Um único <script> inline de volta obriga a reabrir o
+  //    'unsafe-inline' e desfaz isso inteiro.
   const inline = [...HTML.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
-    .map((m) => m[1]).join('\n');
-  assert.ok(inline.length > 100, 'não achei os scripts inline — o regex quebrou?');
-  for (const m of inline.matchAll(/showToast\(\s*(['"])(.*?)\1/g)) {
-    assert.fail(`texto cru num toast de script inline: "${m[2]}" — use window.t('chave')`);
+    .map((m) => m[1].trim()).filter((c) => c !== '');
+  assert.deepEqual(inline, [],
+    `script inline de volta no index.html (${inline.length}) — a CSP vai precisar de 'unsafe-inline' de novo`);
+  // Handler inline (onclick=) também é script inline pra CSP.
+  assert.doesNotMatch(HTML, /\son(?:click|load|error|change|submit|input)\s*=\s*["']/,
+    'handler inline no HTML — bloqueado pela CSP e invisível pra auditoria');
+  // E o aviso de nova versão continua saindo do dicionário.
+  assert.match(read('js/sw-register.js'), /window\.t\('toast\.newVersion'\)/,
+    'o aviso de nova versão saiu do dicionário');
+});
+
+test('as DUAS cópias da CSP dizem a mesma coisa', () => {
+  // O <meta> do index.html e o arquivo _headers (Cloudflare) precisam bater: o
+  // browser aplica a INTERSEÇÃO das CSPs ativas, então divergência não dá erro
+  // — só faz alguma coisa parar de carregar, em produção, sem aviso (gotcha
+  // #14). Nunca houve teste disso; foram mantidas iguais na mão.
+  const norm = (csp) => Object.fromEntries(
+    csp.split(';').map((d) => d.trim()).filter(Boolean)
+      .map((d) => { const [k, ...v] = d.split(/\s+/); return [k, v.sort().join(' ')]; }));
+
+  const meta = HTML.match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/);
+  assert.ok(meta, 'sumiu o <meta> da CSP do index.html');
+  const headers = read('_headers').match(/Content-Security-Policy:\s*([^\n]+)/);
+  assert.ok(headers, 'sumiu a CSP do arquivo _headers');
+
+  const a = norm(meta[1]);
+  const b = norm(headers[1]);
+  assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(), 'as duas CSPs têm diretivas diferentes');
+  for (const k of Object.keys(a)) {
+    assert.equal(a[k], b[k], `diretiva "${k}" diverge:\n  meta:     ${a[k]}\n  _headers: ${b[k]}`);
   }
-  assert.match(inline, /window\.t\('toast\.newVersion'\)/, 'o aviso de nova versão saiu do dicionário');
+  // E script-src não pode voltar a permitir inline.
+  assert.doesNotMatch(a['script-src'] || '', /unsafe-inline/,
+    "script-src voltou a permitir inline — um XSS lê o sessionToken de novo");
+  assert.doesNotMatch(a['script-src'] || '', /unsafe-eval/, 'unsafe-eval de volta no script-src');
 });
 
 test('a área que rola é alcançável por teclado e tem nome', () => {
