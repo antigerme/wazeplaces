@@ -183,6 +183,13 @@ Volta `{ success, places[], hasMore, page, total }`. Cada `place`:
   reqType, reqSubType, createdBy,
   imageUrl, imageUrls[],
   brand, brandKnown,          // brandKnown vem de lookup em categoryBrands da resposta
+  flagType,                   // FLAG: motivo CRU do Waze (INAPPROPRIATE…). Traduzido no
+                              //   frontend via `card.flagType.<ENUM>`; enum não mapeado
+                              //   aparece cru. É a informação PRINCIPAL do reporte —
+                              //   `flagComment` (texto livre) quase sempre vem vazio.
+  flagSubjectType,            // FLAG: IMAGE = denúncia de FOTO, não do local
+  flagEntityID,               // FLAG: id da foto denunciada; casa com venue.images[].id
+                              //   (é assim que o card marca qual das N fotos é)
   changes[],                  // [{ field, label, from, to }] para UPDATE requests.
                               //   `ur.changedVenue` NÃO é um diff: é um venue com os
                               //   valores propostos, então vem com escrituração junto.

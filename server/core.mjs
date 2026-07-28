@@ -729,6 +729,9 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       const changes = [];
       let isDelete = false;
       let flagComment = null;
+      let flagType = null;
+      let flagSubjectType = null;
+      let flagEntityID = null;
 
       if (reqType === 'VENUE') {
         updateTypeStr = 'Novo Local';
@@ -736,7 +739,19 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         updateTypeStr = 'Nova Foto';
       } else if (reqType === 'REQUEST' && reqSubType === 'FLAG') {
         updateTypeStr = 'Reporte (Sinalização)';
+        // O `flagComment` (texto livre) quase sempre vem VAZIO — confirmado no HAR
+        // do "Ponto de Mergulho - Barragem do Lago Paranoá". Quem carrega o motivo
+        // é o `flagType` (enum: INAPPROPRIATE…), que a app ignorava: o card saía
+        // sem dizer nada, enquanto o WME mostrava "Motivo da marcação: Inapropriado".
+        // `flagSubjectType` diz o que foi denunciado (IMAGE = uma foto, não o local)
+        // e `flagEntityID` é o id DELA — bate exatamente com `venue.images[].id`,
+        // que é como o card sabe qual das 4 fotos marcar.
+        // Passamos os enums CRUS: a tradução é do frontend (js/i18n.js é a fonte
+        // única de string de UI) e valor não mapeado aparece cru, nunca some.
         flagComment = String(ur.flagComment || '').trim() || null;
+        flagType = String(ur.flagType || '').trim() || null;
+        flagSubjectType = String(ur.flagSubjectType || '').trim() || null;
+        flagEntityID = String(ur.flagEntityID || '').trim() || null;
       } else if (reqType === 'REQUEST' && reqSubType === 'DELETE') {
         updateTypeStr = 'Pedido de remoção';
         isDelete = true;
@@ -775,6 +790,9 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         reqSubType,
         isDelete,
         flagComment,
+        flagType,
+        flagSubjectType,
+        flagEntityID,
         dateAdded: ur.dateAdded ?? null,
         isStarred: !!ur.isStarred,
         createdBy: creatorName,
