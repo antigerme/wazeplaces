@@ -1483,7 +1483,14 @@ function renderCurrentCard() {
         ? place.categories.join(', ')
         : t('card.categories.empty');
     card.querySelector('.card-address').textContent = place.address || t('card.address.empty');
-    card.querySelector('.card-type').textContent = place.updateType || t('card.type.empty');
+    // Num UPDATE o backend monta o tipo como "Atualização: Id, Nome, Telefone…" —
+    // exatamente os rótulos que a caixa "Mudanças propostas" repete logo abaixo,
+    // COM os valores. Mostrar os dois era a mesma informação duas vezes, e a de
+    // cima truncada. Com a lista na tela, o tipo diz só o que ela não diz.
+    const temMudancas = Array.isArray(place.changes) && place.changes.length > 0;
+    card.querySelector('.card-type').textContent = temMudancas
+        ? t('card.type.update')
+        : (place.updateType || t('card.type.empty'));
     card.querySelector('.card-creator').textContent = place.createdBy || t('card.creator.empty');
 
     if (place.isDelete) {
@@ -1560,10 +1567,17 @@ function renderCurrentCard() {
     // Traduzir aqui, no clone, é o único ponto que pega todo card novo.
     if (typeof applyI18n === 'function') applyI18n(card);
 
-    // Quando o texto não cabe, ele passa a rolar — e aí o arraste vertical
-    // precisa rolar em vez de disparar "pular". Só nesse caso: com conteúdo
-    // curto (a maioria) o gesto de pular continua valendo em todo o card. O
-    // botão ↑ nunca some, então nada fica inacessível de qualquer forma.
+    // As duas ÚNICAS áreas que podem rolar (nunca as duas no mesmo card: reporte
+    // é FLAG, mudanças é UPDATE). O swipe.js já não pega o gesto dentro delas.
+    marcarBordaRolagem(card.querySelector('.card-changes-list'));
+    marcarBordaRolagem(card.querySelector('.card-flag-comment-text'));
+
+    // Rede de segurança: o layout acima é dimensionado pra caber sempre, mas
+    // fonte gigante do sistema, zoom só-de-texto ou uma tela deitada muito baixa
+    // podem estourar mesmo assim — e conteúdo cortado sem jeito de alcançar é
+    // pior que perder o gesto. Quando dispara, o arraste vertical rola em vez de
+    // pular (o botão ↑ nunca some) — e o esmaecido avisa que ainda tem coisa.
+    marcarBordaRolagem(card.querySelector('.card-content'));
     // A medição espera o layout assentar; antes disso scrollHeight mente.
     requestAnimationFrame(() => {
         const conteudo = card.querySelector('.card-content');
@@ -1669,6 +1683,22 @@ function renderCardChanges(card, place) {
     }
     changesList.innerHTML = html;
     changesBox.classList.remove('hidden');
+}
+
+// Scroll edge effect (M3): esmaece a borda de baixo enquanto sobra conteúdo.
+// Área que rola sem dizer que rola é área que ninguém rola — e aqui isso custa
+// caro, porque arrastar o card pra cima PULA: quem não souber que a caixa rola
+// nunca vai ver o resto da lista. Some ao chegar no fim, pra não parecer corte.
+// O ResizeObserver existe porque a caixa é `flex-1`: ela muda de tamanho quando
+// o card entra, quando a foto carrega e quando o aparelho gira.
+function marcarBordaRolagem(el) {
+    if (!el) return;
+    const atualizar = () => {
+        el.classList.toggle('rola-mais', el.scrollHeight - el.scrollTop - el.clientHeight > 1);
+    };
+    el.addEventListener('scroll', atualizar, { passive: true });
+    if (typeof ResizeObserver === 'function') new ResizeObserver(atualizar).observe(el);
+    requestAnimationFrame(atualizar);
 }
 
 // Pré-carrega a imagem do próximo place da fila — mata o flash branco no swipe.

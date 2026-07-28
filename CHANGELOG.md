@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.28-01
+
+### Corrigido
+- **A barra de rolagem sumiu do card — e com ela o conflito com o gesto de "pular".** O card inteiro rolava, escondendo até 423px de texto, e enquanto rolava o arraste pra cima deixava de pular: em vez de tratar o pedido, você rolava a página. Pior: isso acontecia em **25 das 32 combinações** de aparelho × tipo de pedido que medimos, ou seja, era o comportamento normal em pedidos de atualização e reportes, não a exceção. Agora só a caixa da vez rola ("Mudanças propostas" ou "Reporte do usuário"), e ela nunca rouba o gesto — em todo o resto do card, arrastar pra cima pula, sempre.
+- **A caixa que rola agora avisa que rola.** A borda de baixo esmaece enquanto ainda tem coisa embaixo e volta ao normal quando chega no fim. Antes o texto era só cortado, e quem não adivinhasse não via o resto.
+- **"Mudanças propostas" e "Reporte do usuário" ganharam muito mais espaço.** Tinham teto fixo (128px e 96px); agora ocupam toda a sobra do card. Num Pixel 7, o reporte passou de 96 para **~250px** — a maioria dos reportes cabe inteira sem rolar nada.
+
+### Alterado
+- **Tipo e Criador viraram uma linha cada, no mesmo desenho da linha de Marca.** Eram dois cartões que sozinhos comiam 139px — mais que a lista de mudanças inteira — para dizer duas coisas curtas.
+- **O Tipo parou de repetir a lista de mudanças.** Num pedido de atualização ele mostrava "Atualização: Id, Nome, Telefone, EntryExitPoints, UpdatedOn" — os mesmos campos que a caixa logo abaixo já lista, com os valores. Agora diz só "Atualização". Quem usa leitor de tela continua ouvindo o detalhe.
+- **Telas baixas (iPhone SE, Galaxy Fold, janela apertada) ficaram mais compactas** — só respiro, nenhuma informação some e nenhum botão encolhe.
+- **Com o celular deitado, a foto vai para o lado do texto** em vez de ficar em cima. Empilhado, a foto sozinha comia 40% de um card de 334px e não sobrava nada para o texto.
+
 ## v2026.07.27-15
 
 ### Corrigido
