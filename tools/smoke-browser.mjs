@@ -37,11 +37,21 @@ async function carregarPlaywright() {
   ];
   const erros = [];
   for (const t of tentativas) {
+    let mod;
     try {
-      return await import(t());
+      mod = await import(t());
     } catch (e) {
       erros.push(String(e.message || e).split('\n')[0]);
+      continue;
     }
+    // O pacote publicado é CJS (`index.js`): `import()` devolve namespace só com
+    // `default`, e `mod.chromium` vem undefined. O `index.mjs` do global do
+    // sandbox tem exports nomeados — por isso funcionava aqui e quebrou no CI
+    // com "Cannot read properties of undefined (reading 'launch')". Aceitar as
+    // duas formas, e só aceitar candidato que realmente tenha o `chromium`.
+    const pw = mod && mod.chromium ? mod : (mod && mod.default) || {};
+    if (pw.chromium) return pw;
+    erros.push(`${t()}: importou, mas sem export 'chromium' (chaves: ${Object.keys(mod).join(', ')})`);
   }
   console.error('✗ Playwright não encontrado. Tentativas:\n  - ' + erros.join('\n  - '));
   console.error('  No CI: npm i --no-save playwright@1.49.1 (com PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');

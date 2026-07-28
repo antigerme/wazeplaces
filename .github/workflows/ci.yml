@@ -39,13 +39,17 @@ jobs:
         # silêncio; este pega rolagem dupla, alvo de toque encolhido, estouro
         # horizontal e português vazando fora do pt.
         #
-        # O runner do GitHub já traz o Chrome, então PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
-        # evita baixar ~150MB de Chromium a cada run. O --no-save mantém o
-        # package.json com ZERO dependência, que é valor do projeto.
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        # O --no-save mantém o package.json com ZERO dependência, que é valor
+        # do projeto. O postinstall do playwright baixaria chromium+firefox+
+        # webkit (~400MB), então ele é pulado e só o chromium vem depois (~100MB).
+        #
+        # Tentei antes usar o Chrome que o runner já traz (channel: 'chrome') pra
+        # economizar o download — mas isso depende do caminho onde a imagem do
+        # runner instala o Chrome, que não é contrato. Baixar o chromium do
+        # próprio Playwright custa ~30s e não depende de nada.
         run: |
-          npm i --no-save playwright@1.49.1
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i --no-save playwright@1.49.1
+          npx playwright install chromium
           npm run test:browser
 
       - name: Boot smoke do adaptador Node
