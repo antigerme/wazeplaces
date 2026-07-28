@@ -33,6 +33,25 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke de browser (o que guard de texto não pega)
+        # Renderiza o card em 3 aparelhos × 3 idiomas × 3 tipos e MEDE. Os guards
+        # de test/layout.test.mjs conferem o código e já falharam duas vezes em
+        # silêncio; este pega rolagem dupla, alvo de toque encolhido, estouro
+        # horizontal e português vazando fora do pt.
+        #
+        # O --no-save mantém o package.json com ZERO dependência, que é valor
+        # do projeto. O postinstall do playwright baixaria chromium+firefox+
+        # webkit (~400MB), então ele é pulado e só o chromium vem depois (~100MB).
+        #
+        # Tentei antes usar o Chrome que o runner já traz (channel: 'chrome') pra
+        # economizar o download — mas isso depende do caminho onde a imagem do
+        # runner instala o Chrome, que não é contrato. Baixar o chromium do
+        # próprio Playwright custa ~30s e não depende de nada.
+        run: |
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i --no-save playwright@1.49.1
+          npx playwright install chromium
+          npm run test:browser
+
       - name: Boot smoke do adaptador Node
         run: |
           PORT=8099 node server/node.mjs & SRV=$!

@@ -123,6 +123,8 @@ npm run css            # SÓ se mexeu em classe do Tailwind (regenera css/tailwi
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
 ```
 
+**Smoke de browser (`npm run test:browser`, roda no CI):** `tools/smoke-browser.mjs` renderiza o card em 3 aparelhos × 3 idiomas × 3 tipos de pedido e MEDE — rolagem dupla, alvo de toque < 44px, estouro horizontal, área rolável sem nome, caixa longa com teto fixo, português vazando fora do pt. Mora em `tools/` e **não** em `test/` de propósito: o `node --test` varre o diretório `test/` inteiro e o smoke precisa de browser — dentro de `test/` ele entrava no `npm test` e quebrava a promessa de suíte com zero dependência (já aconteceu). No CI o Playwright entra com `npm i --no-save` + `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, usando o Chrome que o runner já traz.
+
 **Testar em BROWSER de verdade (existe Chromium no ambiente!):** o sandbox tem
 Playwright + Chromium (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`,
 `require('/opt/node22/lib/node_modules/playwright')`). Dá pra subir o
@@ -267,7 +269,6 @@ Estrutura unificada na resposta de erro de `validar-place` e `marcar-lido`:
 
 Constantes em `app.js`:
 - `UNDO_WINDOW_MS = 5000` — janela de undo antes de a ação ser enviada ao Waze (só aplica se `AppState.preferences.undoEnabled === true`, padrão; quando desativado em `scheduleAction`, o executor roda na hora). Banner mostra countdown visual (`.undo-progress`)
-- `MAX_CHANGES_DISPLAY = 4` — máximo de mudanças exibidas no card (UPDATE requests)
 - `PREFETCH_THRESHOLD = 3` — quando a fila tem ≤3 cards, dispara próximo `fetchNextPage` em background
 - `MAX_EMPTY_PAGES = 5` — guarda contra loop infinito se Waze retornar páginas vazias com `hasMore: true`
 - `TRANSIENT_RETRY_ATTEMPTS = 2`, `TRANSIENT_RETRY_DELAYS_MS = [1500, 3500]` — política de retry para `transient`
@@ -356,6 +357,7 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 ### i18n (pt/en/es) — REGRA PERMANENTE
 - **TODA string de UI nasce em `js/i18n.js`, nas TRÊS línguas (pt/en/es).** Nunca hardcode texto pt no HTML ou no JS.
+- **Isso vale para o BACKEND também, e é o buraco que a auditoria não enxerga.** `test/i18n.test.mjs` varre HTML e dicionário; string que chega pela REDE passa batido. Ficou assim por muito tempo: rótulos do diff (`Nome`, `Telefone`), valores especiais (`(vazio)`, `Sim/Não`) e tipos de pedido (`Novo Local`) saíam do `core.mjs` em português e apareciam no meio de uma interface em inglês. **O core manda CHAVE ou TIPO, o frontend escolhe a palavra**: `changes[].field` → `card.field.<chave>`; `from`/`to` `null`/boolean/`''` → `card.value.*`; `updateTypeKey` → `card.updateType.<CHAVE>`; `flagType` → `card.flagType.<ENUM>`. Chave não mapeada cai em `humanizarEnum()`/`label` cru — **feio, nunca invisível**. Campo novo no core → adicionar a chave nas três línguas, não o texto no servidor.
 - **HTML**: `data-i18n="chave"` (textContent), `data-i18n-html` (innerHTML — só valores do próprio dicionário, nunca dado da rede), `data-i18n-ph` (placeholder), `data-i18n-aria` (aria-label), `data-i18n-title` (title). O `applyI18n()` preenche em runtime.
 - **JS**: `t('chave', { var: valor })` — interpola `{var}`. String que vai pra innerHTML → `escapeHtml(t(...))`.
 - **Plural**: chaves separadas (`.x` singular / `.xPlural`), escolhidas com `n === 1 ? 'x' : 'xPlural'`. Sem ICU.
