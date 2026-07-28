@@ -177,10 +177,36 @@ function openModal(id) {
     if (focusable) focusable.focus();
 }
 
+// Limpeza específica de cada modal. Fica AQUI e não no botão de fechar porque
+// modal fecha por três caminhos — botão, Esc e clique no scrim — e amarrar a
+// limpeza a um deles deixa os outros dois vazando. Foi o que aconteceu com o
+// ticker do pareamento: fechando por Esc, o setInterval seguia rodando pelo
+// resto da sessão.
+const LIMPEZA_AO_FECHAR = {
+    pairShowModal() {
+        pararTickerPareamento();
+        // O código é credencial e já não vale nada aqui: não fica desenhado
+        // esperando alguém reabrir o modal e escanear um QR morto.
+        const code = document.getElementById('pairCode');
+        if (code) { code.textContent = '······'; delete code.dataset.raw; code.classList.remove('opacity-40', 'line-through'); }
+        const exp = document.getElementById('pairExpiry');
+        if (exp) exp.textContent = '';
+        limparQrPareamento();
+        const copiar = document.getElementById('pairCopyLinkBtn');
+        if (copiar) copiar.disabled = true;
+    },
+    pairEnterModal() {
+        const campo = document.getElementById('pairCodeInput');
+        if (campo) campo.value = '';
+        document.getElementById('pairEnterError')?.classList.add('hidden');
+    },
+};
+
 function closeModal(id) {
     const m = document.getElementById(id);
     if (!m || m.classList.contains('hidden')) return;
     m.classList.add('hidden');
+    try { LIMPEZA_AO_FECHAR[id]?.(); } catch (e) { /* limpeza nunca derruba o fechamento */ }
     if (!topOpenModal() && !Lightbox.isOpen()) document.body.style.overflow = '';
     if (lastFocusedBeforeModal && document.body.contains(lastFocusedBeforeModal)) {
         lastFocusedBeforeModal.focus();
@@ -364,6 +390,15 @@ let pairTicker = null;
 // de menu no outro aparelho, sem trocar de aparelho com um código na cabeça,
 // sem a dúvida de digitar ou não o separador.
 // Escala inteira de propósito: módulo em fração de pixel borra a leitura.
+// Apaga o QR desenhado. Canvas guarda o último desenho pra sempre; sem isto,
+// reabrir o modal mostra o QR do código ANTERIOR até a resposta chegar.
+function limparQrPareamento() {
+    const canvas = document.getElementById('pairQr');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
 function desenharQrPareamento(url) {
     const canvas = document.getElementById('pairQr');
     if (!canvas || typeof gerarQR !== 'function') return;
@@ -400,7 +435,10 @@ async function abrirPareamento() {
     const codeEl = document.getElementById('pairCode');
     const expEl = document.getElementById('pairExpiry');
     codeEl.textContent = '······';
+    delete codeEl.dataset.raw;
+    codeEl.classList.remove('opacity-40', 'line-through');
     expEl.textContent = '';
+    limparQrPareamento();
     document.getElementById('pairCopyLinkBtn').disabled = true;
 
     const r = await API.criarPareamento();
@@ -1445,7 +1483,14 @@ function renderCurrentCard() {
         ? place.categories.join(', ')
         : t('card.categories.empty');
     card.querySelector('.card-address').textContent = place.address || t('card.address.empty');
-    card.querySelector('.card-type').textContent = place.updateType || t('card.type.empty');
+    // Num UPDATE o backend monta o tipo como "Atualização: Id, Nome, Telefone…" —
+    // exatamente os rótulos que a caixa "Mudanças propostas" repete logo abaixo,
+    // COM os valores. Mostrar os dois era a mesma informação duas vezes, e a de
+    // cima truncada. Com a lista na tela, o tipo diz só o que ela não diz.
+    const temMudancas = Array.isArray(place.changes) && place.changes.length > 0;
+    card.querySelector('.card-type').textContent = temMudancas
+        ? t('card.type.update')
+        : (place.updateType || t('card.type.empty'));
     card.querySelector('.card-creator').textContent = place.createdBy || t('card.creator.empty');
 
     if (place.isDelete) {
@@ -1522,10 +1567,17 @@ function renderCurrentCard() {
     // Traduzir aqui, no clone, é o único ponto que pega todo card novo.
     if (typeof applyI18n === 'function') applyI18n(card);
 
-    // Quando o texto não cabe, ele passa a rolar — e aí o arraste vertical
-    // precisa rolar em vez de disparar "pular". Só nesse caso: com conteúdo
-    // curto (a maioria) o gesto de pular continua valendo em todo o card. O
-    // botão ↑ nunca some, então nada fica inacessível de qualquer forma.
+    // As duas ÚNICAS áreas que podem rolar (nunca as duas no mesmo card: reporte
+    // é FLAG, mudanças é UPDATE). O swipe.js já não pega o gesto dentro delas.
+    marcarBordaRolagem(card.querySelector('.card-changes-list'));
+    marcarBordaRolagem(card.querySelector('.card-flag-comment-text'));
+
+    // Rede de segurança: o layout acima é dimensionado pra caber sempre, mas
+    // fonte gigante do sistema, zoom só-de-texto ou uma tela deitada muito baixa
+    // podem estourar mesmo assim — e conteúdo cortado sem jeito de alcançar é
+    // pior que perder o gesto. Quando dispara, o arraste vertical rola em vez de
+    // pular (o botão ↑ nunca some) — e o esmaecido avisa que ainda tem coisa.
+    marcarBordaRolagem(card.querySelector('.card-content'));
     // A medição espera o layout assentar; antes disso scrollHeight mente.
     requestAnimationFrame(() => {
         const conteudo = card.querySelector('.card-content');
@@ -1633,6 +1685,22 @@ function renderCardChanges(card, place) {
     changesBox.classList.remove('hidden');
 }
 
+// Scroll edge effect (M3): esmaece a borda de baixo enquanto sobra conteúdo.
+// Área que rola sem dizer que rola é área que ninguém rola — e aqui isso custa
+// caro, porque arrastar o card pra cima PULA: quem não souber que a caixa rola
+// nunca vai ver o resto da lista. Some ao chegar no fim, pra não parecer corte.
+// O ResizeObserver existe porque a caixa é `flex-1`: ela muda de tamanho quando
+// o card entra, quando a foto carrega e quando o aparelho gira.
+function marcarBordaRolagem(el) {
+    if (!el) return;
+    const atualizar = () => {
+        el.classList.toggle('rola-mais', el.scrollHeight - el.scrollTop - el.clientHeight > 1);
+    };
+    el.addEventListener('scroll', atualizar, { passive: true });
+    if (typeof ResizeObserver === 'function') new ResizeObserver(atualizar).observe(el);
+    requestAnimationFrame(atualizar);
+}
+
 // Pré-carrega a imagem do próximo place da fila — mata o flash branco no swipe.
 function prefetchNextImage() {
     const next = AppState.queue[1];
@@ -1709,12 +1777,47 @@ async function callWithRetry(fn) {
 }
 
 // ── Histórico acumulado (B7): buckets diários em localStorage ────────────────
+// Baldes mais velhos que isto são podados. Cobre com folga os recortes que a
+// UI mostra (hoje/semana/mês) — e o "Total" continua verdadeiro porque vive
+// num acumulador à parte, que sobrevive à poda.
+const HISTORY_MAX_DIAS = 400;
+
 function loadHistory() {
     if (AppState.history) return AppState.history;
     let h = {};
     try { h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}') || {}; } catch (e) { h = {}; }
+    // Migração do formato antigo (só baldes): soma o que já existe pro
+    // acumulador, senão a primeira poda faria o "Total" encolher.
+    if (!h._total) {
+        const t = { read: 0, rejected: 0 };
+        for (const [k, v] of Object.entries(h)) {
+            if (k === '_total' || !v) continue;
+            t.read += v.read || 0;
+            t.rejected += v.rejected || 0;
+        }
+        h._total = t;
+    }
     AppState.history = h;
+    if (podarHistorico(h)) salvarHistorico(h);
     return h;
+}
+
+// Sem isto o objeto cresce um balde por dia PRA SEMPRE — e como o
+// recordHistory serializa o objeto inteiro a cada ação confirmada, o custo de
+// cada swipe cresceria junto, sem nada em troca.
+function podarHistorico(h) {
+    const limite = Date.now() - HISTORY_MAX_DIAS * 86400000;
+    let podou = false;
+    for (const k of Object.keys(h)) {
+        if (k === '_total') continue;
+        const quando = new Date(k + 'T00:00:00').getTime();
+        if (!Number.isFinite(quando) || quando < limite) { delete h[k]; podou = true; }
+    }
+    return podou;
+}
+
+function salvarHistorico(h) {
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); } catch (e) {}
 }
 function historyTodayKey() {
     const d = new Date();
@@ -1729,16 +1832,21 @@ function recordHistory(type, delta) {
     if (!h[k]) h[k] = { read: 0, rejected: 0 };
     const field = type === 'read' ? 'read' : 'rejected';
     h[k][field] = Math.max(0, (h[k][field] || 0) + (delta || 0));
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); } catch (e) {}
+    h._total[field] = Math.max(0, (h._total[field] || 0) + (delta || 0));
+    salvarHistorico(h);
 }
 function getHistoryStats() {
     const h = loadHistory();
     const now = Date.now();
     const tk = historyTodayKey();
     const acc = { today: { read: 0, rejected: 0 }, week: { read: 0, rejected: 0 }, month: { read: 0, rejected: 0 }, total: { read: 0, rejected: 0 } };
+    // "Total" sai do acumulador, não da soma dos baldes: os antigos foram
+    // podados, e somar só o que sobrou faria o número encolher sozinho.
+    acc.total.read = (h._total && h._total.read) || 0;
+    acc.total.rejected = (h._total && h._total.rejected) || 0;
     for (const [k, v] of Object.entries(h)) {
+        if (k === '_total' || !v) continue;
         const r = v.read || 0, j = v.rejected || 0;
-        acc.total.read += r; acc.total.rejected += j;
         if (k === tk) { acc.today.read += r; acc.today.rejected += j; }
         const ageDays = Math.floor((now - new Date(k + 'T00:00:00').getTime()) / 86400000);
         if (ageDays >= 0 && ageDays < 7) { acc.week.read += r; acc.week.rejected += j; }

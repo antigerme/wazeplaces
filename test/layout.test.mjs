@@ -101,6 +101,43 @@ test('grid de stats vira 2 colunas abaixo de 360px', () => {
   assert.match(bloco, /nth-child\(n \+ 3\)/, 'falta a divisória horizontal entre as fileiras');
 });
 
+// (a, b, c) do seletor. `:not()`/`:is()` não somam por si — só o conteúdo.
+function especificidade(sel) {
+  const s = sel.replace(/::?(not|is)\(/g, '(').replace(/::[\w-]+/g, ' ELEM ');
+  const a = (s.match(/#[\w-]+/g) || []).length;
+  const b = (s.match(/\.[\w-]+/g) || []).length +
+            (s.match(/\[[^\]]*\]/g) || []).length +
+            (s.match(/:[\w-]+/g) || []).length;
+  const c = (s.replace(/[#.][\w-]+|\[[^\]]*\]|:[\w-]+/g, ' ').match(/[a-zA-Z][\w-]*/g) || []).length;
+  return [a, b, c];
+}
+// Utility do Tailwind é sempre (0,1,0). Empate PERDE, porque o tailwind.css
+// carrega depois — então precisa ser estritamente maior.
+const venceUtility = ([a, b, c]) => a > 0 || b > 1 || (b === 1 && c > 0);
+
+// Corpo de cada bloco @media cujo prefixo bate, já sem o invólucro `@media (…) {`.
+function corposDeMedia(prefixo) {
+  const blocos = [];
+  let de = 0;
+  for (;;) {
+    const i = CSS_SEM_COMENTARIO.indexOf(prefixo, de);
+    if (i === -1) break;
+    let nivel = 0, fim = i;
+    for (let k = CSS_SEM_COMENTARIO.indexOf('{', i); k < CSS_SEM_COMENTARIO.length; k++) {
+      if (CSS_SEM_COMENTARIO[k] === '{') nivel++;
+      else if (CSS_SEM_COMENTARIO[k] === '}' && --nivel === 0) { fim = k; break; }
+    }
+    // Cortar o invólucro é obrigatório: sem isso o regex de regras trata o
+    // próprio media query como seletor, o corpo capturado não casa a lista de
+    // propriedades e o guard pula TUDO em silêncio — foi assim que ele deixou
+    // passar o `.auth-precondicao` que motivou este teste.
+    const cru = CSS_SEM_COMENTARIO.slice(i, fim);
+    blocos.push(cru.slice(cru.indexOf('{') + 1));
+    de = fim;
+  }
+  return blocos;
+}
+
 test('regra que precisa vencer utility do Tailwind tem especificidade pra isso', () => {
   // O styles.css carrega ANTES do tailwind.css. Empate de especificidade →
   // vence o Tailwind. Isso já mordeu QUATRO vezes, sempre em silêncio:
@@ -109,41 +146,35 @@ test('regra que precisa vencer utility do Tailwind tem especificidade pra isso',
   //   · `.auth-opt-upload { background }`  perdeu pro `bg-gradient-to-r`
   //   · `.auth-precondicao { display }`    perdeu pro `hidden`
   //
-  // A regra NÃO é "duas classes": um `#id` vence utility sozinho. O que vale é
-  // a especificidade ficar acima de (0,1,0), que é a de qualquer utility.
+  // A regra NÃO é "duas classes": um `#id` vence utility sozinho, e
+  // `body > main.container` também (0,1,2). O que vale é passar de (0,1,0).
   //
-  // E varre TODOS os blocos `pointer: coarse` — quando eu abri um segundo, a
-  // versão antiga deste teste só olhava o primeiro e deixou o bug passar.
-  const DISPUTADAS = /(^|;)\s*(display|color|background-color|background-image|padding[a-z-]*|margin[a-z-]*|border-color)\s*:/;
-  const blocos = [];
-  let de = 0;
-  for (;;) {
-    const i = CSS_SEM_COMENTARIO.indexOf('@media (pointer: coarse)', de);
-    if (i === -1) break;
-    let nivel = 0, fim = i;
-    for (let k = CSS_SEM_COMENTARIO.indexOf('{', i); k < CSS_SEM_COMENTARIO.length; k++) {
-      if (CSS_SEM_COMENTARIO[k] === '{') nivel++;
-      else if (CSS_SEM_COMENTARIO[k] === '}' && --nivel === 0) { fim = k; break; }
-    }
-    // Corta o invólucro `@media (...) {`: sem isso o regex de regras trata o
-    // próprio media query como seletor, o corpo capturado não casa a lista de
-    // propriedades e o guard pula TUDO em silêncio — foi assim que ele deixou
-    // passar o `.auth-precondicao` que motivou este teste.
-    const cru = CSS_SEM_COMENTARIO.slice(i, fim);
-    blocos.push(cru.slice(cru.indexOf('{') + 1));
-    de = fim;
-  }
-  assert.ok(blocos.length >= 1, 'sumiu o bloco @media (pointer: coarse) da tela de entrada');
-
-  for (const bloco of blocos) {
-    for (const m of bloco.matchAll(/([^{};]+)\{([^}]*)\}/g)) {
-      if (!DISPUTADAS.test(';' + m[2])) continue;
-      for (const parte of m[1].split(',').map((x) => x.trim()).filter(Boolean)) {
-        const ids = (parte.match(/#/g) || []).length;
-        const classes = (parte.match(/\./g) || []).length;
-        assert.ok(ids > 0 || classes >= 2,
-          `"${parte}" tem especificidade (0,${classes},0) e escreve propriedade que o Tailwind ` +
-          `também escreve: empata com a utility e PERDE por ordem de carga`);
+  // E varre TODOS os blocos de cada prefixo — quando eu abri um segundo bloco
+  // `pointer: coarse`, a versão antiga deste teste só olhava o primeiro e
+  // deixou o bug passar.
+  const DISPUTADAS = new RegExp('(^|;)\\s*(' + [
+    'display', 'color', 'background-color', 'background-image', 'border-color',
+    'padding[a-z-]*', 'margin[a-z-]*', 'gap', 'row-gap', 'column-gap',
+    'min-height', 'max-height', 'min-width', 'max-width', 'height', 'width',
+    'font-size', 'grid-column', 'grid-row', 'grid-template-columns',
+  ].join('|') + ')\\s*:');
+  const PREFIXOS = [
+    '@media (pointer: coarse)',
+    '@media (max-height: 700px)',
+    '@media (max-height: 480px) and (min-width: 600px)',
+  ];
+  for (const prefixo of PREFIXOS) {
+    const blocos = corposDeMedia(prefixo);
+    assert.ok(blocos.length >= 1, `sumiu o bloco ${prefixo} do styles.css`);
+    for (const bloco of blocos) {
+      for (const m of bloco.matchAll(/([^{};]+)\{([^}]*)\}/g)) {
+        if (!DISPUTADAS.test(';' + m[2])) continue;
+        for (const parte of m[1].split(',').map((x) => x.trim()).filter(Boolean)) {
+          const e = especificidade(parte);
+          assert.ok(venceUtility(e),
+            `"${parte}" tem especificidade (${e.join(',')}) e escreve propriedade que o Tailwind ` +
+            `também escreve: não passa de (0,1,0) e PERDE por ordem de carga`);
+        }
       }
     }
   }
@@ -277,6 +308,130 @@ test('rolagem dentro do card não rouba o gesto nem deixa o card preso', () => {
   // preso torto e os listeners de document vazam.
   assert.match(SWIPE, /touchcancel/, 'touchcancel sem tratamento deixa o card preso no meio do arraste');
   assert.match(SWIPE, /function handleDragCancel/, 'sumiu o cancelamento limpo do arraste');
+});
+
+// O <template> do card, isolado — os testes abaixo só falam dele.
+function templateDoCard() {
+  const m = HTML.match(/<template id="cardTemplate">[\s\S]*?<\/template>/);
+  assert.ok(m, 'sumiu o <template id="cardTemplate">');
+  return m[0];
+}
+
+test('toda área rolável do card está fora do alcance do arraste', () => {
+  // Esta é a pergunta que o owner fez e que este arquivo existe pra responder:
+  // "como a pessoa rola, se puxar pra cima PULA o card?". A resposta só se
+  // sustenta enquanto TODA área rolável estiver na lista de exceção do
+  // handleDragStart. Área rolável nova que esqueça a lista volta a criar o
+  // conflito — e em silêncio: o texto simplesmente não rola no celular.
+  const SWIPE = read('js/swipe.js');
+  const ignora = SWIPE.match(/e\.target\.closest\('([^']+)'\)/);
+  assert.ok(ignora, 'sumiu a lista de exceção do handleDragStart');
+
+  const roláveis = new Set();
+  for (const m of templateDoCard().matchAll(/class="([^"]*overflow-y-auto[^"]*)"/g)) {
+    const nome = m[1].split(/\s+/).find((c) => c.startsWith('card-'));
+    assert.ok(nome, `área rolável sem classe card-*: ${m[1].slice(0, 60)}`);
+    roláveis.add(nome);
+  }
+  assert.ok(roláveis.size >= 3, `esperava ao menos 3 áreas roláveis mapeadas, achei ${[...roláveis]}`);
+
+  for (const nome of roláveis) {
+    // `.card-content` é a ÚNICA exceção, e de propósito: ela é a rede de
+    // segurança que só rola quando nada mais coube, e aí quem cede o gesto é o
+    // `touch-action: pan-y` do `.card-content-rola`.
+    if (nome === 'card-content') continue;
+    assert.ok(ignora[1].includes('.' + nome),
+      `.${nome} rola mas não está na exceção do swipe.js — o arraste vai engolir a rolagem`);
+  }
+});
+
+test('o card tem UMA área rolável de verdade, e ela cresce com o espaço', () => {
+  // Antes: o card inteiro rolava (escondendo até 423px, medido em 25 de 32
+  // combinações de aparelho × tipo de pedido) E a lista de mudanças rolava
+  // dentro dele — duas rolagens aninhadas numa superfície de swipe. Pior: o
+  // `touch-action: pan-y` da rolagem de fora matava o gesto de "pular" em
+  // quase todo card de UPDATE e de reporte.
+  //
+  // O desenho que resolve: tudo de altura previsível é `flex-shrink-0` e o
+  // bloco longo (mudanças OU reporte — nunca os dois no mesmo pedido) leva
+  // `flex-1 min-h-0`, absorvendo a sobra e rolando por dentro.
+  const bloco = templateDoCard();
+  const linhas = bloco.split('\n');
+  const linhaDe = (cls) => {
+    const l = linhas.find((x) => new RegExp(`class="[^"]*\\b${cls}\\b`).test(x));
+    assert.ok(l, `sumiu o .${cls} do card`);
+    return l;
+  };
+
+  for (const caixa of ['card-changes', 'card-flag-comment']) {
+    const l = linhaDe(caixa);
+    assert.match(l, /\bflex-1\b/, `.${caixa} precisa de flex-1 pra absorver a sobra`);
+    assert.match(l, /\bmin-h-0\b/, `.${caixa} sem min-h-0 não encolhe — o conteúdo estoura o card`);
+    assert.match(l, /\bflex-col\b/, `.${caixa} precisa ser coluna flex pro corpo dela poder rolar`);
+    assert.doesNotMatch(l, /\bmax-h-/, `.${caixa} com teto fixo volta a empurrar a rolagem pro card inteiro`);
+  }
+  for (const corpo of ['card-changes-list', 'card-flag-comment-text']) {
+    const l = linhaDe(corpo);
+    assert.match(l, /\bflex-1\b/, `.${corpo} precisa de flex-1 pra ocupar a caixa`);
+    assert.match(l, /\bmin-h-0\b/, `.${corpo} sem min-h-0 não rola: ele estica em vez de encolher`);
+    assert.match(l, /\boverflow-y-auto\b/, `.${corpo} parou de rolar`);
+    assert.doesNotMatch(l, /\bmax-h-/, `.${corpo} voltou pro teto fixo (era max-h-32/max-h-24)`);
+  }
+  // As linhas de altura previsível não podem encolher: item com base 0 (o
+  // `flex-1`) tem fator de encolhimento escalado por 0 e NÃO cede — quem
+  // cederia seriam justamente estas, cortando nome e endereço.
+  for (const fixo of ['card-delete-banner', 'card-type-row', 'card-creator-row', 'card-brand-row']) {
+    assert.match(linhaDe(fixo), /\bflex-shrink-0\b/,
+      `.${fixo} sem flex-shrink-0 vira o alvo do encolhimento no lugar da caixa longa`);
+  }
+  // O espaçamento vem de `gap` na coluna, não do antigo wrapper `space-y-3`:
+  // com `space-y-*` a margem some quando um irmão está `hidden`, e a caixa
+  // longa é justamente a que aparece e some por tipo de pedido.
+  const conteudo = linhaDe('card-content');
+  assert.match(conteudo, /\bgap-3\b/, 'o espaçamento da coluna do card saiu do gap');
+  assert.doesNotMatch(bloco, /class="space-y-3"/, 'o wrapper space-y-3 voltou pro meio da cadeia de flex');
+});
+
+test('a área que rola avisa que rola', () => {
+  // Área que rola sem dizer que rola é área que ninguém rola — e aqui isso
+  // custa caro: arrastar o card pra cima PULA, então quem não perceber que a
+  // caixa rola nunca vê o resto da lista. O esmaecido de borda (scroll edge
+  // effect do M3) some ao chegar no fim, pra não parecer corte.
+  const APP_ = read('js/app.js');
+  assert.match(APP_, /function marcarBordaRolagem/, 'sumiu o aviso de borda das áreas roláveis');
+  const fn = APP_.match(/function marcarBordaRolagem\([\s\S]*?\n\}/)[0];
+  assert.match(fn, /scrollHeight - el\.scrollTop - el\.clientHeight/, 'o aviso parou de olhar o que falta rolar');
+  assert.match(fn, /addEventListener\('scroll'/, 'o aviso não some ao chegar no fim');
+  assert.match(fn, /ResizeObserver/, 'a caixa é flex-1: sem observar o tamanho, o aviso mente quando ela cresce');
+  for (const alvo of ['.card-changes-list', '.card-flag-comment-text', '.card-content']) {
+    assert.ok(APP_.includes(`marcarBordaRolagem(card.querySelector('${alvo}'))`),
+      `${alvo} rola sem avisar`);
+  }
+  const regra = CSS_SEM_COMENTARIO.match(/\.rola-mais\s*\{[^}]*\}/);
+  assert.ok(regra, 'sumiu a regra .rola-mais');
+  // Máscara, não gradiente colorido: assim funciona na caixa âmbar, na rosa, no
+  // claro e no escuro sem ninguém manter três cores em sincronia. E as DUAS
+  // grafias — sem o prefixo o Safari simplesmente não mostra o esmaecido, que é
+  // o iPhone inteiro sem o único aviso de que a caixa rola.
+  assert.match(regra[0], /(^|[\s;]) *mask-image:\s*linear-gradient/m, 'sumiu o mask-image sem prefixo');
+  assert.match(regra[0], /-webkit-mask-image:\s*linear-gradient/, 'sumiu o -webkit-mask-image: iOS fica sem o aviso');
+});
+
+test('o tipo do card não repete a lista de mudanças', () => {
+  // O backend monta o tipo de um UPDATE como "Atualização: Id, Nome, Telefone…"
+  // — exatamente os rótulos que a caixa "Mudanças propostas" mostra logo abaixo,
+  // COM os valores. Os dois juntos custavam 139px (mais que a lista inteira) pra
+  // dizer duas vezes a mesma coisa, e a de cima truncada.
+  const APP_ = read('js/app.js');
+  assert.match(APP_, /card\.type\.update/, 'o card voltou a repetir a enumeração de campos no Tipo');
+  for (const lang of ['pt', 'en', 'es']) void lang;
+  const I18N = read('js/i18n.js');
+  assert.equal((I18N.match(/'card\.type\.update':/g) || []).length, 3,
+    'card.type.update precisa existir nas três línguas');
+  // O anúncio pra leitor de tela CONTINUA com a enumeração: lá ela não é
+  // repetição, é a única forma de saber o que mudou sem varrer a lista.
+  const live = APP_.match(/card\.live\.newRequest[\s\S]{0,200}/)[0];
+  assert.match(live, /place\.updateType/, 'o leitor de tela perdeu o detalhe do que mudou');
 });
 
 test('em laptop a app cabe na tela, sem barra de rolagem de página', () => {
