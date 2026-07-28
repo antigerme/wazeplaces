@@ -364,6 +364,62 @@ test('buildPlacesFromSearch: enum de motivo passa CRU (a tradução é do fronte
   assert.equal(places[0].flagType, 'ALGUM_MOTIVO_NOVO', 'o core traduziu ou filtrou o enum');
 });
 
+test('buildPlacesFromSearch: o core não escreve texto de interface', () => {
+  // js/i18n.js é a fonte única de string de UI, nas TRÊS línguas — e a auditoria
+  // test/i18n.test.mjs não alcança string que chega pela REDE. Resultado medido
+  // antes desta correção: um editor em inglês lia "Nome: (vazio) → Novo Nome" e
+  // "Novo Local" no meio de uma interface traduzida.
+  const rd = harEstadio();
+  const ur = rd.venues.objects[0].venueUpdateRequests[0];
+  ur.changedVenue = { name: null, residential: true, categories: ['A'] };
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['REQUEST'], unreadOnly: true });
+  const p = places[0];
+  const porCampo = Object.fromEntries(p.changes.map((c) => [c.field, c]));
+
+  // Valores especiais viram TIPO, não palavra: o frontend decide a língua.
+  // (`from` = valor ATUAL do venue; `to` = o que o usuário propôs.)
+  assert.equal(porCampo.name.to, null, 'valor vazio proposto virou texto de novo');
+  assert.equal(porCampo.residential.from, null, 'campo ausente no venue devia virar null');
+  assert.equal(porCampo.residential.to, true, 'boolean virou "Sim"/"Não" no servidor');
+
+  // O tipo vai por CHAVE; a string pt continua só como último recurso.
+  assert.equal(p.updateTypeKey, 'UPDATE', 'sumiu a chave do tipo de pedido');
+
+  // Nenhum valor do diff pode ser uma palavra de UI em português.
+  const UI_PT = /^\((vazio|sem nome)\)$|^(Sim|Não|Desconhecido|Sem nome)$/;
+  for (const c of p.changes) {
+    for (const v of [c.from, c.to]) {
+      assert.ok(typeof v !== 'string' || !UI_PT.test(v), `valor de UI em português no core: "${v}"`);
+    }
+  }
+});
+
+test('buildPlacesFromSearch: nome ausente também é decisão do frontend', () => {
+  const rd = harEstadio();
+  delete rd.venues.objects[0].name;
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['REQUEST'], unreadOnly: true });
+  assert.equal(places[0].name, null, 'o core voltou a escrever "Sem nome"');
+});
+
+test('buildPlacesFromSearch: cada tipo de pedido tem sua chave', () => {
+  const casos = [
+    [{ type: 'VENUE' }, 'VENUE'],
+    [{ type: 'IMAGE' }, 'IMAGE'],
+    [{ type: 'REQUEST', subType: 'FLAG' }, 'FLAG'],
+    [{ type: 'REQUEST', subType: 'DELETE' }, 'DELETE'],
+    [{ type: 'REQUEST', subType: 'UPDATE' }, 'UPDATE_DETAILS'],
+    [{ type: 'OUTRA_COISA' }, 'UNKNOWN'],
+  ];
+  for (const [forma, esperado] of casos) {
+    const rd = harEstadio();
+    const ur = rd.venues.objects[0].venueUpdateRequests[0];
+    Object.assign(ur, { subType: undefined }, forma);
+    delete ur.changedVenue;
+    const { places } = buildPlacesFromSearch(rd, { filterTypes: null, unreadOnly: true });
+    assert.equal(places[0].updateTypeKey, esperado, `${JSON.stringify(forma)} devia dar ${esperado}`);
+  }
+});
+
 test('buildPlacesFromSearch: venue sem permissão de edição é descartado inteiro', () => {
   const rd = harBatalhao();
   rd.venues.objects[0].permissions = 0;

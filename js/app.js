@@ -11,7 +11,10 @@ const HISTORY_KEY = 'waze_places_history';
 const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
-const MAX_CHANGES_DISPLAY = 4;
+// Sem cap: a caixa de mudanças rola por dentro, cresce com o card e avisa que
+// rola (esmaecido de borda). Com `MAX_CHANGES_DISPLAY = 4` a 5ª mudança era
+// INALCANÇÁVEL — nem rolando — e a linha "+1 mais" gastava exatamente o espaço
+// de uma linha de mudança pra dizer menos.
 
 // Formato canônico do código de pareamento: XXX-XXX. O agrupamento 3+3 existe
 // porque facilita ler em voz alta e digitar — mas quem MOSTRA e quem LÊ têm que
@@ -1482,7 +1485,7 @@ function renderCurrentCard() {
     const clone = template.content.cloneNode(true);
     const card = clone.querySelector('.place-card');
 
-    card.querySelector('.card-name').textContent = place.name;
+    card.querySelector('.card-name').textContent = place.name || t('card.noName');
     card.querySelector('.card-category').textContent = place.categories && place.categories.length > 0
         ? place.categories.join(', ')
         : t('card.categories.empty');
@@ -1497,7 +1500,11 @@ function renderCurrentCard() {
         // "Reporte (Sinalização)" não diz o que foi reportado. Quando é foto, o
         // WME chama de "Foto sinalizada" — e o card marca QUAL das fotos é.
         : (place.flagSubjectType === 'IMAGE' ? t('card.type.flagImage')
-            : (place.updateType || t('card.type.empty')));
+            // `updateTypeKey` é a chave crua (VENUE, IMAGE, FLAG…). O
+            // `updateType` em português continua vindo do core e serve de
+            // último recurso, pra chave nova nunca deixar o campo vazio.
+            : (rotuloDeEnum('card.updateType.', place.updateTypeKey)
+               || place.updateType || t('card.type.empty')));
     card.querySelector('.card-creator').textContent = place.createdBy || t('card.creator.empty');
 
     if (place.isDelete) {
@@ -1526,10 +1533,8 @@ function renderCurrentCard() {
         if (place.flagType) {
             // Enum não mapeado aparece CRU, pela mesma razão do diff de mudanças:
             // esconder o motivo de uma denúncia é pior que mostrá-lo em inglês.
-            const chave = 'card.flagType.' + place.flagType;
-            const rotulo = t(chave);
             card.querySelector('.card-flag-reason-value').textContent =
-                rotulo === chave ? place.flagType : rotulo;
+                rotuloDeEnum('card.flagType.', place.flagType);
             card.querySelector('.card-flag-reason').classList.remove('hidden');
         }
         if (place.flagComment) {
@@ -1709,19 +1714,13 @@ function renderCardChanges(card, place) {
     if (!place.changes || place.changes.length === 0) return;
     const changesBox = card.querySelector('.card-changes');
     const changesList = card.querySelector('.card-changes-list');
-    const visible = place.changes.slice(0, MAX_CHANGES_DISPLAY);
-    const hiddenCount = place.changes.length - visible.length;
-    let html = visible.map(c => `
+    changesList.innerHTML = place.changes.map(c => `
             <div class="diff-row">
-                <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(c.label)}:</span>
-                <span class="diff-from">${escapeHtml(c.from)}</span>
-                <span class="diff-to">${escapeHtml(c.to)}</span>
+                <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(rotuloDoCampo(c))}:</span>
+                <span class="diff-from">${escapeHtml(valorDoDiff(c.from))}</span>
+                <span class="diff-to">${escapeHtml(valorDoDiff(c.to))}</span>
             </div>
         `).join('');
-    if (hiddenCount > 0) {
-        html += `<div class="text-xs text-slate-500 italic pt-1 dark:text-slate-400">${escapeHtml(t(hiddenCount === 1 ? 'card.changes.more' : 'card.changes.morePlural', { n: hiddenCount }))}</div>`;
-    }
-    changesList.innerHTML = html;
     changesBox.classList.remove('hidden');
 }
 
@@ -1739,6 +1738,41 @@ function marcarBordaRolagem(el) {
     el.addEventListener('scroll', atualizar, { passive: true });
     if (typeof ResizeObserver === 'function') new ResizeObserver(atualizar).observe(el);
     requestAnimationFrame(atualizar);
+}
+
+// O core manda TIPO, não palavra: null = vazio, boolean = sim/não, '' = existe
+// sem nome. Ver formatValue em server/core.mjs.
+function valorDoDiff(v) {
+    if (v === null || v === undefined) return t('card.value.empty');
+    if (v === true) return t('card.value.yes');
+    if (v === false) return t('card.value.no');
+    if (v === '') return t('card.value.unnamed');
+    return String(v);
+}
+
+// Rótulo do campo pela CHAVE (`name`, `phone`…). Campo não mapeado cai no `label`
+// que o core ainda manda — feio (nome cru da API) mas nunca invisível.
+function rotuloDoCampo(mudanca) {
+    const chave = 'card.field.' + mudanca.field;
+    const traduzido = t(chave);
+    return traduzido === chave ? (mudanca.label || mudanca.field) : traduzido;
+}
+
+// ENUM_ASSIM_NAO_SE_LE → "Enum assim nao se le". Enum que ainda não mapeamos
+// aparece legível em vez de gritando em caixa alta — mesmo critério do fallback
+// de rótulo de campo no core. Continua em inglês, e é de propósito: esconder o
+// valor seria pior, e traduzir sem confirmar seria chute.
+function humanizarEnum(valor) {
+    const s = String(valor).replace(/_/g, ' ').trim().toLowerCase();
+    return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Traduz enum do Waze por prefixo de chave, humanizando o que não conhecemos.
+function rotuloDeEnum(prefixo, valor) {
+    if (!valor) return '';
+    const chave = prefixo + valor;
+    const traduzido = t(chave);
+    return traduzido === chave ? humanizarEnum(valor) : traduzido;
 }
 
 // Pré-carrega a imagem do próximo place da fila — mata o flash branco no swipe.

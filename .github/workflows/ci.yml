@@ -33,6 +33,21 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke de browser (o que guard de texto não pega)
+        # Renderiza o card em 3 aparelhos × 3 idiomas × 3 tipos e MEDE. Os guards
+        # de test/layout.test.mjs conferem o código e já falharam duas vezes em
+        # silêncio; este pega rolagem dupla, alvo de toque encolhido, estouro
+        # horizontal e português vazando fora do pt.
+        #
+        # O runner do GitHub já traz o Chrome, então PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        # evita baixar ~150MB de Chromium a cada run. O --no-save mantém o
+        # package.json com ZERO dependência, que é valor do projeto.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          npm i --no-save playwright@1.49.1
+          npm run test:browser
+
       - name: Boot smoke do adaptador Node
         run: |
           PORT=8099 node server/node.mjs & SRV=$!

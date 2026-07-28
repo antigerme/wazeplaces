@@ -428,9 +428,17 @@ const CAMPOS_ESCRITURACAO = new Set([
   'id', 'permissions', 'updatedOn', 'updatedBy', 'createdOn', 'createdBy',
 ]);
 
+// O core NÃO escreve texto de interface: `js/i18n.js` é a fonte única, nas três
+// línguas. Aqui os valores especiais viram TIPOS, e o frontend decide a palavra:
+//   null  → campo vazio            ('(vazio)' / '(empty)' / '(vacío)')
+//   true  → sim   · false → não
+//   ''    → existe mas não tem nome ('(sem nome)') — só o resolveIdField produz,
+//           e não colide com dado real porque string vazia já virou null acima.
+// Antes isto saía do servidor em português e um editor em inglês lia
+// "Nome: (vazio) → Novo Nome" no meio de uma interface traduzida.
 const formatValue = (value) => {
-  if (value === null || value === undefined || value === '') return '(vazio)';
-  if (typeof value === 'boolean') return value ? 'Sim' : 'Não';
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'boolean') return value;
   if (Array.isArray(value)) return value.map((v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))).join(', ');
   return String(value);
 };
@@ -646,11 +654,11 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     if (value === null || value === undefined || value === '') return null;
     if (field === 'streetID' && streetsDict[value]) {
       const name = String(streetsDict[value].name || '').trim();
-      return name !== '' ? name : '(sem nome)';
+      return name; // '' = a rua/cidade existe mas não tem nome (frontend traduz)
     }
     if (field === 'cityID' && citiesDict[value]) {
       const name = String(citiesDict[value].name || '').trim();
-      return name !== '' ? name : '(sem nome)';
+      return name; // '' = a rua/cidade existe mas não tem nome (frontend traduz)
     }
     return null;
   };
@@ -726,6 +734,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       if (filterTypes !== null && !filterTypes.includes(reqType)) continue;
 
       let updateTypeStr = 'Desconhecido';
+      let updateTypeKey = 'UNKNOWN';
       const changes = [];
       let isDelete = false;
       let flagComment = null;
@@ -735,10 +744,13 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
 
       if (reqType === 'VENUE') {
         updateTypeStr = 'Novo Local';
+        updateTypeKey = 'VENUE';
       } else if (reqType === 'IMAGE') {
         updateTypeStr = 'Nova Foto';
+        updateTypeKey = 'IMAGE';
       } else if (reqType === 'REQUEST' && reqSubType === 'FLAG') {
         updateTypeStr = 'Reporte (Sinalização)';
+        updateTypeKey = 'FLAG';
         // O `flagComment` (texto livre) quase sempre vem VAZIO — confirmado no HAR
         // do "Ponto de Mergulho - Barragem do Lago Paranoá". Quem carrega o motivo
         // é o `flagType` (enum: INAPPROPRIATE…), que a app ignorava: o card saía
@@ -754,6 +766,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         flagEntityID = String(ur.flagEntityID || '').trim() || null;
       } else if (reqType === 'REQUEST' && reqSubType === 'DELETE') {
         updateTypeStr = 'Pedido de remoção';
+        updateTypeKey = 'DELETE';
         isDelete = true;
       } else if (reqType === 'REQUEST' && reqSubType === 'UPDATE') {
         if (ur.changedVenue && typeof ur.changedVenue === 'object') {
@@ -772,6 +785,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
           }
         }
         updateTypeStr = changes.length > 0 ? 'Atualização: ' + changes.map((c) => c.label).join(', ') : 'Atualização (Detalhes)';
+        updateTypeKey = changes.length > 0 ? 'UPDATE' : 'UPDATE_DETAILS';
       }
 
       let brand = venue.brand ?? null;
@@ -782,10 +796,11 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       places.push({
         venueID: venue.id,
         updateRequestID: ur.id,
-        name: venue.name || 'Sem nome',
+        name: venue.name || null,   // o frontend põe 'Sem nome'/'No name'/'Sin nombre'
         categories: venue.categories || [],
         address: venueAddress,
         updateType: updateTypeStr,
+        updateTypeKey,
         reqType,
         reqSubType,
         isDelete,

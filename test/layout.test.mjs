@@ -417,6 +417,58 @@ test('a área que rola avisa que rola', () => {
   assert.match(regra[0], /-webkit-mask-image:\s*linear-gradient/, 'sumiu o -webkit-mask-image: iOS fica sem o aviso');
 });
 
+test('a área que rola é alcançável por teclado e tem nome', () => {
+  // Medido: o Tab CHEGAVA na lista, mas só porque o Chromium ligou
+  // "keyboard-focusable scrollers" — comportamento de browser, não nosso
+  // markup (o tabIndex era -1). No Safari/iOS não vale, e quem usa leitor de
+  // tela entrava numa região sem nome. Sendo a ÚNICA forma de ver o resto das
+  // mudanças, isso é WCAG 2.1.1 (teclado) + 4.1.2 (nome).
+  const bloco = templateDoCard();
+  for (const [cls, chave] of [['card-changes-list', 'card.changes.aria'],
+                              ['card-flag-comment-text', 'card.flagComment.aria']]) {
+    const linha = bloco.split('\n').find((l) => new RegExp(`class="[^"]*\\b${cls}\\b`).test(l));
+    assert.ok(linha, `sumiu o .${cls}`);
+    assert.match(linha, /tabindex="0"/, `.${cls} fora da ordem do Tab em quem não é Chromium`);
+    assert.match(linha, /role="group"/, `.${cls} sem papel — leitor de tela não anuncia a região`);
+    assert.match(linha, new RegExp(`data-i18n-aria="${chave.replace('.', '\\.')}"`),
+      `.${cls} sem nome traduzido`);
+  }
+});
+
+test('nenhuma mudança proposta fica inalcançável', () => {
+  // `MAX_CHANGES_DISPLAY = 4` fazia sentido com a caixa capada em 128px. Agora
+  // ela rola, cresce com o card e avisa que rola — então capar só esconde: a
+  // 5ª mudança não aparecia nem rolando, e a linha "+1 mais" gastava o espaço
+  // de uma linha de mudança pra dizer menos.
+  const APP_ = read('js/app.js');
+  assert.doesNotMatch(APP_, /const MAX_CHANGES_DISPLAY\s*=/, 'o cap de mudanças voltou');
+  const fn = APP_.match(/function renderCardChanges\([\s\S]*?\n\}/);
+  assert.ok(fn, 'sumiu o renderCardChanges');
+  assert.doesNotMatch(fn[0], /\.slice\(/, 'renderCardChanges voltou a cortar a lista');
+  const I18N = read('js/i18n.js');
+  assert.doesNotMatch(I18N, /card\.changes\.more/, 'sobrou a string do "+N mais"');
+});
+
+test('o frontend traduz o que o servidor manda cru', () => {
+  // O core mandava rótulo, valor especial e tipo já em português — e a
+  // auditoria de i18n não alcança string que chega pela REDE. Medido antes:
+  // um editor em inglês lia "Nome: (vazio) → Novo Nome" e "Novo Local".
+  const APP_ = read('js/app.js');
+  for (const fn of ['valorDoDiff', 'rotuloDoCampo', 'rotuloDeEnum', 'humanizarEnum']) {
+    assert.match(APP_, new RegExp(`function ${fn}\\(`), `sumiu o ${fn}`);
+  }
+  const diff = APP_.match(/function valorDoDiff\([\s\S]*?\n\}/)[0];
+  for (const chave of ['card.value.empty', 'card.value.yes', 'card.value.no', 'card.value.unnamed']) {
+    assert.ok(diff.includes(chave), `valorDoDiff parou de traduzir ${chave}`);
+  }
+  // O nome do local também: o core manda null quando não tem.
+  assert.match(APP_, /card-name'\)\.textContent = place\.name \|\| t\('card\.noName'\)/,
+    'nome ausente voltou a vir escrito do servidor');
+  // E o tipo vai pela CHAVE, com a string pt só como último recurso.
+  assert.match(APP_, /rotuloDeEnum\('card\.updateType\.', place\.updateTypeKey\)/,
+    'o tipo voltou a ser a string em português do core');
+});
+
 test('o tipo do card não repete a lista de mudanças', () => {
   // O backend monta o tipo de um UPDATE como "Atualização: Id, Nome, Telefone…"
   // — exatamente os rótulos que a caixa "Mudanças propostas" mostra logo abaixo,
