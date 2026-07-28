@@ -104,6 +104,15 @@ const CARDS = {
     flagComment: 'Esse lugar fechou faz mais de um ano, hoje é uma oficina mecânica. Passei lá ontem e confirmei com o dono do imóvel, que disse que a loja saiu em 2024. O ponto está errado no mapa e atrapalha quem procura.',
     dateAdded: 1785203731191, lat: -20.8, lon: -49.4,
   },
+  // Sem nome nem criador: exercita a cadeia de identidade e TODOS os
+  // placeholders de uma vez (é o card que mede contraste do esmaecido).
+  SEM_NOME: {
+    venueID: 'v4', updateRequestID: 'u4', name: null, categories: [],
+    address: 'Av. Paraíso, 224, Campo Novo do Parecis - Mato Grosso',
+    updateType: 'Novo Local', updateTypeKey: 'VENUE', reqType: 'VENUE', reqSubType: '',
+    createdBy: null, imageUrls: [foto], brand: null, changes: [],
+    dateAdded: 1785203731191, lat: -14, lon: -57,
+  },
   IMAGE: {
     venueID: 'v3', updateRequestID: 'u3', name: 'Padaria Pão Quente',
     categories: ['BAKERY'], address: 'Rua XV de Novembro, 100 - Centro',
@@ -147,7 +156,10 @@ await esperarServidor();
 const browser = await abrirBrowser(chromium);
 
 for (const [aparelho, viewport] of APARELHOS) {
-  const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
+  // Dois temas: o esmaecido mistura com o fundo, então o contraste é OUTRO em
+  // cada um (medido: 5.74:1 no claro contra 8.15:1 no escuro).
+  const tema = APARELHOS.indexOf(APARELHOS.find(([n]) => n === aparelho)) % 2 ? 'dark' : 'light';
+  const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR', colorScheme: tema });
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(String(e.message || e)));
@@ -199,6 +211,35 @@ for (const [aparelho, viewport] of APARELHOS) {
         const comTetoFixo = [...c.querySelectorAll('.card-changes-list, .card-flag-comment-text')]
           .filter((e) => e.offsetParent && getComputedStyle(e).maxHeight !== 'none')
           .map((e) => `${[...e.classList][0]}=${getComputedStyle(e).maxHeight}`);
+        // Contraste do que a app esmaece. `opacity` MISTURA a cor com o fundo,
+        // e getComputedStyle().color não conta isso — só medindo aparece. Já
+        // reprovou: o esmaecido nasceu em 0.65 e deu 3.79:1 no tema claro.
+        const rgb = (v) => (v.match(/[\d.]+/g) || []).map(Number);
+        const fundoDe = (el) => {
+          for (let n = el; n; n = n.parentElement) {
+            const cor = rgb(getComputedStyle(n).backgroundColor);
+            if (cor.length >= 3 && (cor[3] === undefined || cor[3] > 0.9)) return cor.slice(0, 3);
+          }
+          return [255, 255, 255];
+        };
+        const lum = ([r, g, b]) => {
+          const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+        };
+        const contrasteBaixo = [];
+        for (const e of c.querySelectorAll('.valor-ausente, .card-no-name-badge')) {
+          if (!e.offsetParent || !(e.textContent || '').trim()) continue;
+          const cs = getComputedStyle(e);
+          let o = 1;
+          for (let n = e; n && n !== document.documentElement; n = n.parentElement) o *= parseFloat(getComputedStyle(n).opacity) || 1;
+          const fundo = fundoDe(e);
+          const efetiva = rgb(cs.color).slice(0, 3).map((v, i) => v * o + fundo[i] * (1 - o));
+          const [x, y] = [lum(efetiva), lum(fundo)].sort((m, n) => n - m);
+          const razao = (x + 0.05) / (y + 0.05);
+          const px = parseFloat(cs.fontSize);
+          const minimo = (px >= 24 || (px >= 18.66 && parseInt(cs.fontWeight, 10) >= 700)) ? 3 : 4.5;
+          if (razao < minimo) contrasteBaixo.push(`${[...e.classList][0]} ${razao.toFixed(2)}:1 < ${minimo}`);
+        }
         return {
           areas,
           nome: (c.querySelector('.card-name').textContent || '').trim(),
@@ -206,8 +247,12 @@ for (const [aparelho, viewport] of APARELHOS) {
           temAcoes: !!c.querySelector('.card-btn-reject') && !!c.querySelector('.card-btn-skip') && !!c.querySelector('.card-btn-read'),
           botoesVisiveis: [...c.querySelectorAll('.card-actions button')].every((b) => b.getBoundingClientRect().height >= 44),
           diffs: c.querySelectorAll('.diff-row').length,
-          roláveisSemNome, comTetoFixo,
-          endereco: visivel('.card-address'),
+          roláveisSemNome, comTetoFixo, contrasteBaixo,
+          // O endereço tem que estar EM ALGUM LUGAR: na linha própria, ou como
+          // título quando o local não tem nome (aí a linha some de propósito,
+          // pra não repetir). Checar só a linha reprovava o card sem nome.
+          endereco: visivel('.card-address') || c.querySelector('.card-name.titulo-endereco') !== null,
+          semNome: !!c.querySelector('.card-no-name-badge:not(.hidden)'),
           estouroH: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         };
       });
@@ -225,12 +270,15 @@ for (const [aparelho, viewport] of APARELHOS) {
       // Nada de informação essencial em branco.
       checa(m.nome !== '', `${rot}: card sem nome`);
       checa(m.tipo !== '', `${rot}: card sem tipo`);
-      checa(m.endereco, `${rot}: card sem endereço`);
+      checa(m.endereco, `${rot}: card sem endereço (nem na linha, nem no título)`);
+      // Sem nome → selo visível. Com nome → selo escondido. Nunca os dois errados.
+      checa(m.semNome === (tipo === 'SEM_NOME'), `${rot}: selo de "sem nome" no estado errado`, `selo=${m.semNome}`);
       // A página não pode estourar na horizontal.
       checa(m.estouroH <= 0, `${rot}: estouro horizontal de ${m.estouroH}px`);
       // Área que rola precisa de nome (leitor de tela).
       checa(m.roláveisSemNome === 0, `${rot}: ${m.roláveisSemNome} área(s) rolável(is) sem aria-label`);
       checa(m.comTetoFixo.length === 0, `${rot}: caixa longa com teto fixo em vez de flex`, m.comTetoFixo.join(', '));
+      checa(m.contrasteBaixo.length === 0, `${rot}: texto esmaecido abaixo do contraste do WCAG`, m.contrasteBaixo.join(', '));
       // Mudanças: TODAS aparecem, sem cap.
       if (tipo === 'UPDATE') {
         checa(m.diffs === CARDS.UPDATE.changes.length,

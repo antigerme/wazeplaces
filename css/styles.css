@@ -468,7 +468,14 @@ body.dark {
 .place-card .valor-ausente {
   font-style: italic;
   font-weight: 400;
-  opacity: 0.65;
+  /* MEDIDO, não escolhido a olho: `opacity` em texto mistura a cor com o fundo
+     e derruba o contraste. Sobre branco, o slate-700 do card dá 10.35:1 cheio e:
+        0.65 → 3.79 ✗   0.70 → 4.35 ✗   0.75 → 4.95   0.80 → 5.74
+     O mínimo do WCAG 1.4.3 pra texto normal é 4.5:1. Comecei em 0.65 e reprovei.
+     0.8 mantém o esmaecido perceptível (quase metade do contraste cheio) com
+     margem de verdade. O tema escuro sempre passou (5.89:1 já em 0.65).
+     O smoke de browser mede isso a cada PR — não confie neste número sozinho. */
+  opacity: 0.8;
 }
 
 /* Janela do "Desfazer" correndo: os três botões ficam visivelmente travados.
