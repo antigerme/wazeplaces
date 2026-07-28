@@ -913,7 +913,14 @@
             const activateWaitingWorker = (worker) => {
                 if (!worker) return;
                 if (window.showToast) {
-                    window.showToast('Nova versão disponível. Atualizando...', 'info');
+                    // Pelo dicionário: `toast.newVersion` já existia nas três línguas
+                    // e ninguém usava — este literal falava português com todo mundo.
+                    // Este <script> é inline, então a auditoria de i18n não o varre;
+                    // por isso passou batido. O fallback cobre o caso de o i18n.js
+                    // não ter carregado (o toast é melhor que silêncio).
+                    window.showToast(
+                        window.t ? window.t('toast.newVersion') : 'Nova versão disponível. Atualizando…',
+                        'info');
                 }
                 worker.postMessage({ type: 'SKIP_WAITING' });
             };

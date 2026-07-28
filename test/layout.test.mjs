@@ -417,6 +417,44 @@ test('a área que rola avisa que rola', () => {
   assert.match(regra[0], /-webkit-mask-image:\s*linear-gradient/, 'sumiu o -webkit-mask-image: iOS fica sem o aviso');
 });
 
+test('a ação pendente não morre quando a página sai', () => {
+  // O stat é incrementado e SALVO no swipe, mas a ação só vai pro Waze
+  // UNDO_WINDOW_MS depois. Fechar a aba nessa janela fazia a ação sumir com o
+  // placar dizendo que ela aconteceu — e o número fica errado pra sempre.
+  // Medido nos dois builds: sem isto, 0 requisições chegam ao servidor.
+  const APP_ = read('js/app.js');
+  const API_ = read('js/api.js');
+  assert.match(APP_, /function descarregarAcaoPendente/, 'sumiu o descarregamento da ação pendente');
+  const setup = APP_.match(/function setupDescargaAoSair\([\s\S]*?\n\}/);
+  assert.ok(setup, 'sumiu o setupDescargaAoSair');
+  // `pagehide` cobre fechar/navegar; `visibilitychange` para oculto é o último
+  // callback confiável no celular, quando o sistema mata a aba em segundo plano.
+  // Checar só o NOME do evento é guard decorativo: esvaziar o corpo do listener
+  // passava. O que vale é os DOIS caminhos chamarem o descarregamento.
+  assert.match(setup[0], /'pagehide'/, 'parou de cobrir o fechamento da aba');
+  assert.match(setup[0], /visibilityState === 'hidden'/, 'parou de cobrir a aba indo pra segundo plano');
+  assert.equal((setup[0].match(/descarregarAcaoPendente/g) || []).length, 2,
+    'um dos dois caminhos de saída parou de descarregar a ação');
+  assert.match(APP_, /setupDescargaAoSair\(\);/, 'ninguém mais chama o setup na inicialização');
+  // Fetch normal é CANCELADO no unload — sem keepalive a defesa é decorativa.
+  assert.match(API_, /keepalive:\s*true/, 'sumiu o keepalive: a requisição volta a morrer no unload');
+  assert.match(API_, /setSaindo/, 'sumiu o modo "a página está saindo" da API');
+});
+
+test('nenhum texto de UI escapa pelos <script> inline do HTML', () => {
+  // A auditoria de i18n varre atributos data-i18n e chamadas t() nos arquivos
+  // js/. Script inline dentro do index.html não é nenhum dos dois — foi por aí
+  // que "Nova versão disponível. Atualizando..." falou português com todo mundo
+  // por meses, com `toast.newVersion` pronto nas três línguas e sem uso.
+  const inline = [...HTML.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
+    .map((m) => m[1]).join('\n');
+  assert.ok(inline.length > 100, 'não achei os scripts inline — o regex quebrou?');
+  for (const m of inline.matchAll(/showToast\(\s*(['"])(.*?)\1/g)) {
+    assert.fail(`texto cru num toast de script inline: "${m[2]}" — use window.t('chave')`);
+  }
+  assert.match(inline, /window\.t\('toast\.newVersion'\)/, 'o aviso de nova versão saiu do dicionário');
+});
+
 test('a área que rola é alcançável por teclado e tem nome', () => {
   // Medido: o Tab CHEGAVA na lista, mas só porque o Chromium ligou
   // "keyboard-focusable scrollers" — comportamento de browser, não nosso
