@@ -230,6 +230,69 @@ test('buildPlacesFromSearch: REQUEST/UPDATE não-lido vira card quando o tipo é
   assert.ok(places[0].changes.some((c) => c.field === 'categories'));
 });
 
+// Fixture do caso REAL reportado pelo owner (2026-07-28): "Estádio Gigante do
+// Itiberê", em Paranaguá. O WME oficial mostra UMA mudança — categorias. A app
+// mostrava TRÊS: Id, Categorias e UpdatedOn.
+const harEstadio = () => ({
+  users: { objects: [{ id: 999, userName: 'AsafeCorrea' }] },
+  streets: { objects: [] },
+  cities: { objects: [] },
+  states: { objects: [] },
+  venues: {
+    objects: [
+      {
+        id: '204146185.2041396312.1604788',
+        name: 'Estádio Gigante do Itiberê',
+        permissions: -1,
+        categories: ['STADIUM_ARENA'],
+        venueUpdateRequests: [
+          {
+            id: 'ur-estadio-1',
+            venueID: '204146185.2041396312.1604788',
+            type: 'REQUEST',
+            subType: 'UPDATE',
+            // O `changedVenue` é um objeto de venue, não um diff: vem com a
+            // identidade e o carimbo de modificação junto do que mudou.
+            changedVenue: {
+              id: '204146185.2041396312.1604788',
+              categories: ['STADIUM_ARENA', 'SPORT_COURT'],
+              updatedOn: 1785283200000,
+              updatedBy: 999,
+            },
+            createdBy: 999,
+            isRead: false,
+          },
+        ],
+      },
+    ],
+  },
+});
+
+test('buildPlacesFromSearch: escrituração do venue não vira "mudança proposta"', () => {
+  // `id` é a identidade do local — idêntica antes e depois, ninguém a editou.
+  // `updatedOn`/`updatedBy` mudam porque a edição acontece, não porque alguém
+  // pediu. Mostrá-los custava linha na caixa de mudanças e, com
+  // MAX_CHANGES_DISPLAY, chegava a empurrar mudança de VERDADE pro "+N mais".
+  const { places } = buildPlacesFromSearch(harEstadio(), { filterTypes: ['REQUEST'], unreadOnly: true });
+  assert.equal(places.length, 1);
+  const campos = places[0].changes.map((c) => c.field);
+  assert.deepEqual(campos, ['categories'], `sobrou escrituração no diff: ${campos.join(', ')}`);
+  // O tipo é montado a partir dos MESMOS rótulos — se sobra ruído aqui, sobra lá.
+  assert.equal(places[0].updateType, 'Atualização: Categorias');
+});
+
+test('buildPlacesFromSearch: campo desconhecido continua aparecendo, com o nome cru', () => {
+  // Lista de EXCLUSÃO, não de inclusão. Campo novo que o Waze passe a mandar
+  // aparece feio (nome cru da API), mas aparece — esconder calado uma mudança
+  // de verdade é o oposto do que a app existe pra fazer.
+  const rd = harEstadio();
+  rd.venues.objects[0].venueUpdateRequests[0].changedVenue.campoNovoDoWaze = 'valor';
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['REQUEST'], unreadOnly: true });
+  const novo = places[0].changes.find((c) => c.field === 'campoNovoDoWaze');
+  assert.ok(novo, 'campo desconhecido sumiu — a lista virou de inclusão');
+  assert.equal(novo.label, 'CampoNovoDoWaze');
+});
+
 test('buildPlacesFromSearch: venue sem permissão de edição é descartado inteiro', () => {
   const rd = harBatalhao();
   rd.venues.objects[0].permissions = 0;

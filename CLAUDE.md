@@ -183,7 +183,12 @@ Volta `{ success, places[], hasMore, page, total }`. Cada `place`:
   reqType, reqSubType, createdBy,
   imageUrl, imageUrls[],
   brand, brandKnown,          // brandKnown vem de lookup em categoryBrands da resposta
-  changes[],                  // [{ field, label, from, to }] para UPDATE requests
+  changes[],                  // [{ field, label, from, to }] para UPDATE requests.
+                              //   `ur.changedVenue` NÃO é um diff: é um venue com os
+                              //   valores propostos, então vem com escrituração junto.
+                              //   `CAMPOS_ESCRITURACAO` (core.mjs) tira id/updatedOn/
+                              //   updatedBy/createdOn/createdBy/permissions. É lista de
+                              //   EXCLUSÃO: campo novo aparece com nome cru, nunca some.
   lat, lon
 }
 ```
