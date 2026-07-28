@@ -58,6 +58,13 @@ const API = {
         return this.countryId;
     },
 
+    // Ligado quando a página está saindo (pagehide / aba escondida). Fetch normal
+    // é CANCELADO no unload — a ação sumia e o contador, já salvo, ficava mentindo.
+    // Com `keepalive` o browser entrega a requisição mesmo depois de a página
+    // morrer (limite de 64KB no corpo; os nossos são de ~100 bytes).
+    saindo: false,
+    setSaindo(v) { this.saindo = !!v; },
+
     async _post(endpoint, body) {
         // Timeout no lado browser→backend: sem isso um fetch pendurado deixava
         // AppState.fetching preso e o botão de refresh (com guard) mudo.
@@ -68,7 +75,9 @@ const API = {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
-                signal: controller.signal
+                // AbortController + keepalive não combinam: um sinal que dispara
+                // durante o unload mataria justamente o envio que queremos salvar.
+                ...(this.saindo ? { keepalive: true } : { signal: controller.signal })
             });
             const data = await response.json();
             if (response.status === 401) {

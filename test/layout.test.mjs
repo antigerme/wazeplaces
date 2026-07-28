@@ -417,6 +417,81 @@ test('a área que rola avisa que rola', () => {
   assert.match(regra[0], /-webkit-mask-image:\s*linear-gradient/, 'sumiu o -webkit-mask-image: iOS fica sem o aviso');
 });
 
+test('a ação pendente não morre quando a página sai', () => {
+  // O stat é incrementado e SALVO no swipe, mas a ação só vai pro Waze
+  // UNDO_WINDOW_MS depois. Fechar a aba nessa janela fazia a ação sumir com o
+  // placar dizendo que ela aconteceu — e o número fica errado pra sempre.
+  // Medido nos dois builds: sem isto, 0 requisições chegam ao servidor.
+  const APP_ = read('js/app.js');
+  const API_ = read('js/api.js');
+  assert.match(APP_, /function descarregarAcaoPendente/, 'sumiu o descarregamento da ação pendente');
+  const setup = APP_.match(/function setupDescargaAoSair\([\s\S]*?\n\}/);
+  assert.ok(setup, 'sumiu o setupDescargaAoSair');
+  // `pagehide` cobre fechar/navegar; `visibilitychange` para oculto é o último
+  // callback confiável no celular, quando o sistema mata a aba em segundo plano.
+  // Checar só o NOME do evento é guard decorativo: esvaziar o corpo do listener
+  // passava. O que vale é os DOIS caminhos chamarem o descarregamento.
+  assert.match(setup[0], /'pagehide'/, 'parou de cobrir o fechamento da aba');
+  assert.match(setup[0], /visibilityState === 'hidden'/, 'parou de cobrir a aba indo pra segundo plano');
+  assert.equal((setup[0].match(/descarregarAcaoPendente/g) || []).length, 2,
+    'um dos dois caminhos de saída parou de descarregar a ação');
+  assert.match(APP_, /setupDescargaAoSair\(\);/, 'ninguém mais chama o setup na inicialização');
+  // Fetch normal é CANCELADO no unload — sem keepalive a defesa é decorativa.
+  assert.match(API_, /keepalive:\s*true/, 'sumiu o keepalive: a requisição volta a morrer no unload');
+  assert.match(API_, /setSaindo/, 'sumiu o modo "a página está saindo" da API');
+});
+
+test('o HTML não tem NENHUM script inline', () => {
+  // Duas razões, e a segunda é a que fecha um buraco de segurança:
+  //
+  // 1. A auditoria de i18n varre atributos data-i18n e chamadas t() nos
+  //    arquivos js/. Script dentro do index.html não é nenhum dos dois — foi
+  //    por aí que "Nova versão disponível. Atualizando..." falou português com
+  //    todo mundo, com `toast.newVersion` pronto nas três línguas e sem uso.
+  //
+  // 2. Sem script inline, a CSP pode proibir script inline — e aí um XSS não
+  //    consegue mais ler o sessionToken do localStorage. Medido nos dois
+  //    builds: em produção o script injetado executava e lia o token; aqui é
+  //    bloqueado. Um único <script> inline de volta obriga a reabrir o
+  //    'unsafe-inline' e desfaz isso inteiro.
+  const inline = [...HTML.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
+    .map((m) => m[1].trim()).filter((c) => c !== '');
+  assert.deepEqual(inline, [],
+    `script inline de volta no index.html (${inline.length}) — a CSP vai precisar de 'unsafe-inline' de novo`);
+  // Handler inline (onclick=) também é script inline pra CSP.
+  assert.doesNotMatch(HTML, /\son(?:click|load|error|change|submit|input)\s*=\s*["']/,
+    'handler inline no HTML — bloqueado pela CSP e invisível pra auditoria');
+  // E o aviso de nova versão continua saindo do dicionário.
+  assert.match(read('js/sw-register.js'), /window\.t\('toast\.newVersion'\)/,
+    'o aviso de nova versão saiu do dicionário');
+});
+
+test('as DUAS cópias da CSP dizem a mesma coisa', () => {
+  // O <meta> do index.html e o arquivo _headers (Cloudflare) precisam bater: o
+  // browser aplica a INTERSEÇÃO das CSPs ativas, então divergência não dá erro
+  // — só faz alguma coisa parar de carregar, em produção, sem aviso (gotcha
+  // #14). Nunca houve teste disso; foram mantidas iguais na mão.
+  const norm = (csp) => Object.fromEntries(
+    csp.split(';').map((d) => d.trim()).filter(Boolean)
+      .map((d) => { const [k, ...v] = d.split(/\s+/); return [k, v.sort().join(' ')]; }));
+
+  const meta = HTML.match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/);
+  assert.ok(meta, 'sumiu o <meta> da CSP do index.html');
+  const headers = read('_headers').match(/Content-Security-Policy:\s*([^\n]+)/);
+  assert.ok(headers, 'sumiu a CSP do arquivo _headers');
+
+  const a = norm(meta[1]);
+  const b = norm(headers[1]);
+  assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(), 'as duas CSPs têm diretivas diferentes');
+  for (const k of Object.keys(a)) {
+    assert.equal(a[k], b[k], `diretiva "${k}" diverge:\n  meta:     ${a[k]}\n  _headers: ${b[k]}`);
+  }
+  // E script-src não pode voltar a permitir inline.
+  assert.doesNotMatch(a['script-src'] || '', /unsafe-inline/,
+    "script-src voltou a permitir inline — um XSS lê o sessionToken de novo");
+  assert.doesNotMatch(a['script-src'] || '', /unsafe-eval/, 'unsafe-eval de volta no script-src');
+});
+
 test('a área que rola é alcançável por teclado e tem nome', () => {
   // Medido: o Tab CHEGAVA na lista, mas só porque o Chromium ligou
   // "keyboard-focusable scrollers" — comportamento de browser, não nosso

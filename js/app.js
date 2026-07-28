@@ -131,6 +131,7 @@ function initApp() {
     setupModalListeners();
     setupLightbox();
     setupKeyboardInset();
+    setupDescargaAoSair();
     marcarSuporteAExtensao();
     setupInstalarApp();
 
@@ -2419,6 +2420,35 @@ function loadDevMode() {
 // `max-h-[calc(...)]` no HTML). É a segunda camada: a primeira é o
 // `interactive-widget=resizes-content` do <meta viewport>, que alguns
 // navegadores ignoram.
+// A ação fica UNDO_WINDOW_MS (3s) no buffer do "Desfazer" ANTES de ir pro Waze — mas o contador
+// já foi incrementado e salvo em localStorage na hora do swipe. Fechar a aba
+// nessa janela fazia a ação sumir com o placar dizendo que ela aconteceu: o
+// pedido voltava na próxima busca, mas o número ficava errado pra sempre. E
+// fechar logo depois do último swipe não é caso raro — é como se termina de usar.
+//
+// `pagehide` cobre fechar/navegar. `visibilitychange` para oculto cobre o
+// celular: quando o sistema mata uma aba em segundo plano, esse é o último
+// callback confiável (page lifecycle). O preço é que trocar de app comita na
+// hora, encurtando o "Desfazer" — e é o lado certo de errar: a ação ia comitar
+// em 3s de qualquer jeito, enquanto perdê-la é dano permanente no placar.
+function descarregarAcaoPendente() {
+    if (!AppState.pendingAction) return;
+    // Fetch normal é cancelado no unload; keepalive sobrevive.
+    if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(true);
+    try {
+        AppState.pendingAction.execute();
+    } catch (e) {
+        console.error('Falha ao descarregar a ação pendente:', e);
+    }
+}
+
+function setupDescargaAoSair() {
+    window.addEventListener('pagehide', descarregarAcaoPendente);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') descarregarAcaoPendente();
+    });
+}
+
 function setupKeyboardInset() {
     const vv = window.visualViewport;
     if (!vv) return;

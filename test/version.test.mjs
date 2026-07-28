@@ -66,3 +66,32 @@ test('paridade: version.js e service-worker.js usam o MESMO serial', () => {
     'Serial divergente — bump de versão é mexer em js/version.js E service-worker.js juntos'
   );
 });
+
+// ─── Constantes documentadas × constantes reais ──────────────────────────────
+// O CLAUDE.md é o contexto que o próximo agente lê ANTES de mexer em qualquer
+// coisa. Constante errada ali não quebra nada em produção — desencaminha quem
+// vier depois, em silêncio. Aconteceu: o doc dizia `UNDO_WINDOW_MS = 5000` com
+// o código em 3000, e só apareceu porque o owner reparou.
+test('constantes citadas no CLAUDE.md batem com o código', () => {
+  const DOC = read('CLAUDE.md');
+  const fontes = new Map();
+  for (const arq of ['js/app.js', 'server/core.mjs']) {
+    const src = read(arq);
+    for (const m of src.matchAll(/(?:export )?const\s+([A-Z][A-Z0-9_]{2,})\s*=\s*([0-9_]+|\[[^\]]*\])/g)) {
+      if (!fontes.has(m[1])) fontes.set(m[1], { valor: m[2].replace(/_/g, ''), arq });
+    }
+  }
+  assert.ok(fontes.has('UNDO_WINDOW_MS'), 'não achei as constantes no código — regex quebrada?');
+
+  let conferidas = 0;
+  for (const [nome, { valor, arq }] of fontes) {
+    for (const m of DOC.matchAll(new RegExp(nome + '\\s*=\\s*([0-9_]+|\\[[^\\]]*\\])', 'g'))) {
+      conferidas++;
+      const noDoc = m[1].replace(/_/g, '').replace(/\s+/g, '');
+      assert.equal(noDoc, valor.replace(/\s+/g, ''),
+        `CLAUDE.md diz ${nome} = ${m[1]}, mas ${arq} diz ${valor}`);
+    }
+  }
+  // Se ninguém casou, o guard virou decorativo — provavelmente o formato do doc mudou.
+  assert.ok(conferidas >= 5, `só ${conferidas} constantes conferidas; o guard parou de achar as citações`);
+});

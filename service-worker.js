@@ -1,12 +1,14 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026072804';
+const CACHE_NAME = 'waze-places-2026072806';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/css/tailwind.css',
   '/css/styles.css',
+  '/js/tema.js',
+  '/js/sw-register.js',
   '/js/version.js',
   '/js/qr.js',
   '/js/i18n.js',
