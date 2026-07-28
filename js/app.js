@@ -611,11 +611,12 @@ const Lightbox = {
     isOpen() {
         return !document.getElementById('imageLightbox').classList.contains('hidden');
     },
-    open(urls, startIdx, newImageIdx, placeName) {
+    open(urls, startIdx, newImageIdx, placeName, eDenuncia) {
         if (!urls || urls.length === 0) return;
         this.urls = urls;
         this.idx = Math.max(0, Math.min(startIdx || 0, urls.length - 1));
         this.newIdx = (newImageIdx !== undefined && newImageIdx !== null) ? newImageIdx : -1;
+        this.eDenuncia = !!eDenuncia;
         this.placeName = placeName || '';
         document.getElementById('imageLightbox').classList.remove('hidden');
         document.body.style.overflow = 'hidden';
@@ -696,6 +697,9 @@ const Lightbox = {
         nextBtn.classList.toggle('hidden', !multiple);
         count.classList.toggle('hidden', !multiple);
         if (multiple) count.textContent = `${this.idx + 1} / ${this.urls.length}`;
+        badge.textContent = this.eDenuncia ? '🚩' : '✨';
+        badge.setAttribute('data-i18n-title', this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
+        badge.title = t(this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
         badge.classList.toggle('hidden', this.idx !== this.newIdx);
     }
 };
@@ -802,8 +806,8 @@ function setupLightbox() {
     }, { passive: false });
 }
 
-function openLightbox(urls, startIdx, newImageIdx, placeName) {
-    Lightbox.open(urls, startIdx, newImageIdx, placeName);
+function openLightbox(urls, startIdx, newImageIdx, placeName, eDenuncia) {
+    Lightbox.open(urls, startIdx, newImageIdx, placeName, eDenuncia);
 }
 
 function populateCountrySelect() {
@@ -1490,7 +1494,10 @@ function renderCurrentCard() {
     const temMudancas = Array.isArray(place.changes) && place.changes.length > 0;
     card.querySelector('.card-type').textContent = temMudancas
         ? t('card.type.update')
-        : (place.updateType || t('card.type.empty'));
+        // "Reporte (Sinalização)" não diz o que foi reportado. Quando é foto, o
+        // WME chama de "Foto sinalizada" — e o card marca QUAL das fotos é.
+        : (place.flagSubjectType === 'IMAGE' ? t('card.type.flagImage')
+            : (place.updateType || t('card.type.empty')));
     card.querySelector('.card-creator').textContent = place.createdBy || t('card.creator.empty');
 
     if (place.isDelete) {
@@ -1509,10 +1516,31 @@ function renderCurrentCard() {
         ageEl.classList.remove('hidden');
     }
 
-    if (place.flagComment) {
+    // Reporte: o motivo (`flagType`) é a informação principal e quase sempre a
+    // ÚNICA — o comentário livre vem vazio na maioria dos casos. A app só olhava
+    // o comentário, então o card de reporte saía sem dizer por que o local foi
+    // denunciado, enquanto o WME mostrava "Motivo da marcação: Inapropriado".
+    if (place.flagComment || place.flagType) {
         const box = card.querySelector('.card-flag-comment');
         const text = card.querySelector('.card-flag-comment-text');
-        text.textContent = place.flagComment;
+        if (place.flagType) {
+            // Enum não mapeado aparece CRU, pela mesma razão do diff de mudanças:
+            // esconder o motivo de uma denúncia é pior que mostrá-lo em inglês.
+            const chave = 'card.flagType.' + place.flagType;
+            const rotulo = t(chave);
+            card.querySelector('.card-flag-reason-value').textContent =
+                rotulo === chave ? place.flagType : rotulo;
+            card.querySelector('.card-flag-reason').classList.remove('hidden');
+        }
+        if (place.flagComment) {
+            text.textContent = place.flagComment;
+        } else {
+            // Sem texto livre a caixa não pode reivindicar a sobra do card: viraria
+            // um retângulo rosa vazio ocupando meia tela (gotcha #29).
+            text.classList.add('hidden');
+            box.classList.remove('flex-1', 'min-h-0');
+            box.classList.add('flex-shrink-0');
+        }
         box.classList.remove('hidden');
     }
 
@@ -1620,9 +1648,21 @@ function renderCardImages(card, place) {
         return;
     }
 
-    const newImageIdx = place.updateRequestID
-        ? urls.findIndex(u => u.indexOf(place.updateRequestID) !== -1)
-        : -1;
+    // Um card é UM updateRequest: ou PROPÕE foto nova (✨ âmbar) ou DENUNCIA uma
+    // existente (🚩 rosa) — nunca os dois. Daí um marcador só, com dois estados.
+    // O vínculo com a foto denunciada é o `flagEntityID`, que bate exatamente com
+    // `venue.images[].id` (confirmado no HAR do "Ponto de Mergulho"). Sem ele o
+    // editor via 4 fotos e nenhuma pista de qual tinha sido reportada.
+    const idxPorId = (id) => (id ? urls.findIndex(u => u.indexOf(id) !== -1) : -1);
+    const denunciadaIdx = idxPorId(place.flagEntityID);
+    const eDenuncia = denunciadaIdx >= 0;
+    const newImageIdx = eDenuncia ? denunciadaIdx : idxPorId(place.updateRequestID);
+    newBadge.textContent = eDenuncia ? '🚩' : '✨';
+    // Via atributo, não via .title: o applyI18n() roda DEPOIS deste render e
+    // sobrescreveria um title escrito na mão.
+    newBadge.setAttribute('data-i18n-title', eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
+    newBorder.classList.toggle('ring-amber-400', !eDenuncia);
+    newBorder.classList.toggle('ring-rose-500', eDenuncia);
     let currentImgIdx = newImageIdx >= 0 ? newImageIdx : 0;
 
     const updateImage = () => {
@@ -1644,7 +1684,7 @@ function renderCardImages(card, place) {
     img.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        openLightbox(urls, currentImgIdx, newImageIdx, place.name);
+        openLightbox(urls, currentImgIdx, newImageIdx, place.name, eDenuncia);
     });
 
     if (urls.length > 1) {

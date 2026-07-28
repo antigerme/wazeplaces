@@ -8,6 +8,16 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.28-03
+
+### Corrigido
+- **Reportes vinham em branco.** O card de um reporte mostrava só "Reporte (Sinalização)" e quem reportou — nem o motivo, nem o que foi reportado. O WME, no mesmo pedido, mostra "Foto sinalizada" e "Motivo da marcação: Inapropriado". A app lia apenas o campo de comentário livre, que quase sempre vem vazio; o motivo mora em outro campo, que ninguém lia desde a versão em PHP.
+
+### Adicionado
+- **O card diz o motivo do reporte** — "Inapropriado" e afins — em português, inglês e espanhol. Motivo que ainda não conhecemos aparece com o nome original, nunca é escondido.
+- **🚩 na foto denunciada.** Reporte de foto num local com várias fotos deixava você adivinhando qual era. Agora a foto reportada tem borda rosa, o marcador 🚩 e o carrossel já abre nela. Está na Legenda, dentro da Ajuda, ao lado do ✨ da foto nova.
+- **O Tipo diz "Foto sinalizada"** quando o reporte é de uma foto, em vez do genérico "Reporte (Sinalização)".
+
 ## v2026.07.28-02
 
 ### Corrigido

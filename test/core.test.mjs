@@ -293,6 +293,77 @@ test('buildPlacesFromSearch: campo desconhecido continua aparecendo, com o nome 
   assert.equal(novo.label, 'CampoNovoDoWaze');
 });
 
+// Fixture do HAR REAL do "Ponto de Mergulho - Barragem do Lago Paranoá"
+// (2026-07-28): reporte de FOTO. O card saía em branco — dizia só "Reporte
+// (Sinalização)" e o criador — enquanto o WME mostrava "Foto sinalizada",
+// "Motivo da marcação: Inapropriado" e destacava QUAL das 4 fotos.
+const harMergulho = () => ({
+  users: { objects: [{ id: 2271935404, userName: 'world_6yh76rfm' }] },
+  streets: { objects: [] }, cities: { objects: [] }, states: { objects: [] },
+  venues: {
+    objects: [
+      {
+        id: '204605034.2046181412.2355613',
+        name: 'Ponto de Mergulho - Barragem do Lago Paranoá',
+        permissions: -1,
+        categories: ['BEACH'],
+        images: [
+          { id: '1e60b14e-4afc-469d-ad06-295157ab424f', approved: true },
+          { id: '405416f8-0beb-46da-89dc-17d82ef60a48', approved: true },
+          { id: '47abfef8-e412-47a9-b4e6-34e0ce413da8', approved: true },
+          { id: '5862d6e7-708a-46a9-a7e6-4ffffac4386f', approved: true },
+        ],
+        venueUpdateRequests: [
+          {
+            id: 'fa4413fd-5ea8-4f94-af80-fa36d8fe9103',
+            venueID: '204605034.2046181412.2355613',
+            type: 'REQUEST',
+            subType: 'FLAG',
+            flagType: 'INAPPROPRIATE',
+            flagSubjectType: 'IMAGE',
+            flagComment: '',                 // vazio no HAR real — é o normal
+            flagEntityID: '1e60b14e-4afc-469d-ad06-295157ab424f',
+            source: 'MOBILE_CLIENT',
+            createdBy: 2271935404,
+            dateAdded: 1785203731191,
+            isRead: false,
+          },
+        ],
+      },
+    ],
+  },
+});
+
+test('buildPlacesFromSearch: reporte leva o MOTIVO, não só o comentário vazio', () => {
+  // A app lia só `flagComment` (texto livre), herdado do PHP e nunca conferido
+  // contra um reporte real. Ele vem vazio: quem carrega o motivo é o `flagType`.
+  const { places } = buildPlacesFromSearch(harMergulho(), { filterTypes: null, unreadOnly: true });
+  assert.equal(places.length, 1);
+  const p = places[0];
+  assert.equal(p.flagComment, null, 'comentário vazio continua virando null');
+  assert.equal(p.flagType, 'INAPPROPRIATE', 'sem o motivo o card de reporte fica em branco');
+  assert.equal(p.flagSubjectType, 'IMAGE', 'sem isto não dá pra dizer que o reporte é de FOTO');
+});
+
+test('buildPlacesFromSearch: o reporte aponta QUAL foto foi denunciada', () => {
+  // `flagEntityID` casa com `venue.images[].id` — é o único vínculo. Sem ele o
+  // editor vê 4 fotos e nenhuma pista de qual foi reportada.
+  const { places } = buildPlacesFromSearch(harMergulho(), { filterTypes: null, unreadOnly: true });
+  const p = places[0];
+  assert.equal(p.imageUrls.length, 4);
+  const idx = p.imageUrls.findIndex((u) => u.includes(p.flagEntityID));
+  assert.equal(idx, 0, 'a foto denunciada não é mais localizável pela URL');
+});
+
+test('buildPlacesFromSearch: enum de motivo passa CRU (a tradução é do frontend)', () => {
+  // js/i18n.js é a fonte única de string de UI, e motivo não mapeado tem que
+  // aparecer cru — esconder o motivo de uma denúncia é pior que mostrar em inglês.
+  const rd = harMergulho();
+  rd.venues.objects[0].venueUpdateRequests[0].flagType = 'ALGUM_MOTIVO_NOVO';
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: null, unreadOnly: true });
+  assert.equal(places[0].flagType, 'ALGUM_MOTIVO_NOVO', 'o core traduziu ou filtrou o enum');
+});
+
 test('buildPlacesFromSearch: venue sem permissão de edição é descartado inteiro', () => {
   const rd = harBatalhao();
   rd.venues.objects[0].permissions = 0;
