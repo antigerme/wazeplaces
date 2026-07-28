@@ -25,6 +25,11 @@ function enableSwipeOnCard(card) {
 
 function handleDragStart(e) {
     if (animating) return; // não inicia drag durante a animação de saída
+    // Janela do "Desfazer" correndo: o pedido ainda não foi pro Waze e dá pra
+    // voltar atrás. Deixar arrastar despacharia o anterior sem aviso. Os botões
+    // ficam visivelmente desabilitados no mesmo período, então o card parado é
+    // coerente com o resto da tela — não é travamento sem explicação.
+    if (window.acoesTravadas && window.acoesTravadas()) return;
     // Controles interativos e áreas de scroll interno não iniciam drag —
     // sem a exceção das listas, o touch-action:none do card mataria o
     // scroll de "Mudanças propostas" e do reporte no mobile.
@@ -228,6 +233,7 @@ function updateSwipeIndicator(deltaX, opacity, upOpacity = 0) {
 
 function triggerSwipe(direction, callback) {
     if (animating) return; // ignora enquanto uma animação de saída está em curso
+    if (window.acoesTravadas && window.acoesTravadas()) return;
     const card = document.querySelector('.place-card');
     if (!card) {
         if (callback) callback();
