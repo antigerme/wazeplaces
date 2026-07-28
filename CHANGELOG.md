@@ -19,7 +19,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ### Alterado
 - **Durante os 3 segundos do "Desfazer", o próximo pedido fica travado.** Antes dava para tratar o seguinte enquanto o anterior ainda estava na janela de arrependimento — e isso despachava o anterior sem aviso. Pior: por acidente de layout, o aviso de "Desfazer" cobria os botões em **6 dos 8 aparelhos medidos**, então o comportamento mudava conforme a tela. Agora é regra, igual em todo lugar e por todos os caminhos (botão, gesto e teclado): os três botões ficam visivelmente desabilitados e a barra do aviso mostra quanto falta.
-- **Isso custa tempo, e é bom saber:** com o "Desfazer" ligado, uma fila de 200 pedidos ganha até 10 minutos de espera. Quem já pode desligar o "Desfazer" (Filtros → Preferências) segue na velocidade cheia, sem janela nenhuma.
+- **Isso custa tempo, e o número é medido:** com o "Desfazer" ligado, cada pedido leva no mínimo 2,4 segundos — uma fila de 200 vira **cerca de 8 minutos** só de espera. Com o "Desfazer" desligado (Filtros → Preferências, depois da cota), o mesmo percurso leva segundos.
 
 ## v2026.07.28-06
 
