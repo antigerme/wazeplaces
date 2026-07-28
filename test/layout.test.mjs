@@ -417,6 +417,68 @@ test('a área que rola avisa que rola', () => {
   assert.match(regra[0], /-webkit-mask-image:\s*linear-gradient/, 'sumiu o -webkit-mask-image: iOS fica sem o aviso');
 });
 
+test('sem nome, o endereço vira a identidade — e a ausência não some', () => {
+  // "sem nome" ocupava o slot de 1.35rem enquanto a única coisa que identificava
+  // o local (o endereço) ficava em cinza pequeno logo abaixo. Invertido — e o
+  // owner notou o efeito colateral: como o placeholder tinha a MESMA cara de
+  // dado, não dava pra saber se o local se chamava "sem nome" ou se não tinha
+  // nome. É o padrão do Google Maps (ponto sem nome é titulado pelo endereço).
+  //
+  // A ausência não pode sumir junto: num pedido de place ela é informação de
+  // decisão (RESIDENCE_HOME sem nome é forte candidato a rejeitar). Daí o selo.
+  const APP_ = read('js/app.js');
+  const fn = APP_.match(/function identidadeDoPlace\([\s\S]*?\n\}/);
+  assert.ok(fn, 'sumiu a cadeia de identidade do card');
+  assert.match(fn[0], /place\.address/, 'o endereço parou de virar título quando falta o nome');
+  assert.match(fn[0], /card\.noName/, 'sumiu o título de último recurso (nem nome nem endereço)');
+  assert.match(APP_, /card-no-name-badge/, 'sumiu o selo de "sem nome" — a ausência ficou invisível');
+  assert.match(HTML, /card-no-name-badge/, 'sumiu o selo do template do card');
+  // Endereço promovido a título não se repete embaixo.
+  assert.match(APP_, /card-address-row'\)\.classList\.toggle\('hidden', ident\.tituloEhEndereco\)/,
+    'o endereço voltou a aparecer duas vezes quando é o título');
+  // Leitor de tela e alt da foto usam a MESMA identidade: quem não vê a tela
+  // ouviria "sem nome" enquanto a tela mostra o endereço.
+  assert.equal((APP_.match(/identidadeDoPlace\(place\)\.titulo/g) || []).length, 2,
+    'o anúncio de leitor de tela e o alt da foto precisam da mesma identidade');
+  // O endereço é mais longo que nome: em 1.35rem/2 linhas ele truncava o estado.
+  const regra = CSS.match(/\.card-name\.titulo-endereco\s*\{[^}]*\}/);
+  assert.ok(regra, 'sumiu a calibragem do título quando ele é endereço');
+  assert.match(regra[0], /line-clamp:\s*4/, 'o teto de linhas do endereço voltou a cortar o endereço real');
+});
+
+test('placeholder não se confunde com dado', () => {
+  // Um local pode se chamar "Sem categoria"? Não. Mas pode se chamar "sem nome"
+  // — e era exatamente essa a dúvida do owner. Os parênteses resolvem em vez de
+  // só sinalizar: ninguém batiza um local de "(desconhecido)". E são TEXTO, então
+  // o leitor de tela os lê; o itálico esmaecido é só reforço visual, porque cor
+  // e estilo sozinhos não transmitem informação (WCAG 1.4.1).
+  const I18N = read('js/i18n.js');
+  const CHAVES = ['card.noName', 'card.categories.empty', 'card.address.empty',
+                  'card.type.empty', 'card.creator.empty', 'card.value.empty', 'card.value.unnamed'];
+  for (const chave of CHAVES) {
+    const vals = [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}':\\s*'([^']*)'`, 'g'))].map((m) => m[1]);
+    assert.equal(vals.length, 3, `${chave} precisa existir nas três línguas`);
+    for (const v of vals) {
+      assert.ok(v.startsWith('(') && v.endsWith(')'),
+        `${chave} = "${v}" — placeholder sem parênteses se confunde com dado do Waze`);
+    }
+  }
+  // O selo é rótulo de estado, não valor: esse NÃO leva parênteses.
+  const selo = [...I18N.matchAll(/'card\.noName\.badge':\s*'([^']*)'/g)].map((m) => m[1]);
+  assert.equal(selo.length, 3, 'card.noName.badge precisa existir nas três línguas');
+  for (const v of selo) assert.doesNotMatch(v, /^\(/, 'o selo não é valor — não leva parênteses');
+
+  const APP_ = read('js/app.js');
+  assert.match(APP_, /function escreverValor/, 'sumiu a marcação de valor ausente');
+  const esc = APP_.match(/function escreverValor\([\s\S]*?\n\}/)[0];
+  assert.match(esc, /classList\.toggle\('valor-ausente'/, 'o placeholder parou de ser marcado');
+  const regra = CSS.match(/\.valor-ausente\s*\{[^}]*\}/);
+  assert.ok(regra, 'sumiu o estilo do valor ausente');
+  assert.match(regra[0], /font-style:\s*italic/, 'o placeholder voltou a ter a mesma cara de dado');
+  // Dois seletores: uma classe só empata com utility do Tailwind e perde (#27).
+  assert.match(CSS, /\.place-card \.valor-ausente/, 'seletor de uma classe só perde pra utility');
+});
+
 test('durante a janela do Desfazer ninguém prossegue, por caminho nenhum', () => {
   // Antes dava pra tratar o próximo pedido enquanto o "Desfazer" corria — e o
   // anterior era despachado sem aviso. Pior: por acidente de layout, o banner
@@ -579,9 +641,10 @@ test('o frontend traduz o que o servidor manda cru', () => {
   for (const chave of ['card.value.empty', 'card.value.yes', 'card.value.no', 'card.value.unnamed']) {
     assert.ok(diff.includes(chave), `valorDoDiff parou de traduzir ${chave}`);
   }
-  // O nome do local também: o core manda null quando não tem.
-  assert.match(APP_, /card-name'\)\.textContent = place\.name \|\| t\('card\.noName'\)/,
-    'nome ausente voltou a vir escrito do servidor');
+  // O nome do local também: o core manda null quando não tem, e quem decide o
+  // que aparece é o frontend — hoje pela cadeia de identidade (ver o teste
+  // "sem nome, o endereço vira a identidade").
+  assert.match(APP_, /function identidadeDoPlace/, 'nome ausente voltou a vir escrito do servidor');
   // E o tipo vai pela CHAVE, com a string pt só como último recurso.
   assert.match(APP_, /rotuloDeEnum\('card\.updateType\.', place\.updateTypeKey\)/,
     'o tipo voltou a ser a string em português do core');

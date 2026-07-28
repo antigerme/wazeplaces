@@ -8,11 +8,18 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.28-08
+
+### Alterado
+- **Pedido sem nome agora é identificado pelo endereço.** Antes o card estampava **"sem nome"** no maior texto da tela, e a única coisa que identificava o local — o endereço — ficava em cinza pequeno logo abaixo. Estava invertido. Agora o endereço ocupa o título, e um selo **SEM NOME** ao lado registra a falta, que continua sendo informação útil para decidir. Sem nome e sem endereço, aparece *(local sem nome)*.
+- **O texto esmaecido continua legível.** Ele nasceu apagado demais nesta mesma versão (3.79:1, abaixo do mínimo de acessibilidade) e foi corrigido antes de sair — agora 5.74:1 no tema claro e 8.15:1 no escuro. A verificação automática mede isso a cada mudança, nos dois temas.
+- **Dá para saber o que é dado e o que é a app falando.** Tudo que a app escreve no lugar de um valor ausente agora vem entre parênteses e em itálico esmaecido — *(desconhecido)*, *(sem categoria)*, *(sem endereço)*. Antes um local chamado "sem nome" era indistinguível de um local sem nome.
+
 ## v2026.07.28-07
 
 ### Alterado
 - **Durante os 3 segundos do "Desfazer", o próximo pedido fica travado.** Antes dava para tratar o seguinte enquanto o anterior ainda estava na janela de arrependimento — e isso despachava o anterior sem aviso. Pior: por acidente de layout, o aviso de "Desfazer" cobria os botões em **6 dos 8 aparelhos medidos**, então o comportamento mudava conforme a tela. Agora é regra, igual em todo lugar e por todos os caminhos (botão, gesto e teclado): os três botões ficam visivelmente desabilitados e a barra do aviso mostra quanto falta.
-- **Isso custa tempo, e é bom saber:** com o "Desfazer" ligado, uma fila de 200 pedidos ganha até 10 minutos de espera. Quem já pode desligar o "Desfazer" (Filtros → Preferências) segue na velocidade cheia, sem janela nenhuma.
+- **Isso custa tempo, e o número é medido:** com o "Desfazer" ligado, cada pedido leva no mínimo 2,4 segundos — uma fila de 200 vira **cerca de 8 minutos** só de espera. Com o "Desfazer" desligado (Filtros → Preferências, depois da cota), o mesmo percurso leva segundos.
 
 ## v2026.07.28-06
 

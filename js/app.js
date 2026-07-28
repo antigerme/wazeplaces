@@ -1483,7 +1483,7 @@ function renderCurrentCard() {
     const liveRegion = document.getElementById('cardLiveRegion');
     if (liveRegion) {
         liveRegion.textContent = t('card.live.newRequest', {
-            name: place.name || t('card.noName'),
+            name: identidadeDoPlace(place).titulo,
             type: place.updateType ? ', ' + place.updateType : ''
         });
     }
@@ -1492,11 +1492,19 @@ function renderCurrentCard() {
     const clone = template.content.cloneNode(true);
     const card = clone.querySelector('.place-card');
 
-    card.querySelector('.card-name').textContent = place.name || t('card.noName');
-    card.querySelector('.card-category').textContent = place.categories && place.categories.length > 0
-        ? place.categories.join(', ')
-        : t('card.categories.empty');
-    card.querySelector('.card-address').textContent = place.address || t('card.address.empty');
+    const ident = identidadeDoPlace(place);
+    const elNome = card.querySelector('.card-name');
+    elNome.textContent = ident.titulo;
+    elNome.classList.toggle('valor-ausente', ident.ausente);
+    elNome.classList.toggle('titulo-endereco', ident.tituloEhEndereco);
+    card.querySelector('.card-no-name-badge').classList.toggle('hidden', !ident.semNome);
+    escreverValor(card.querySelector('.card-category'),
+        place.categories && place.categories.length > 0 ? place.categories.join(', ') : '',
+        'card.categories.empty');
+    // Endereço que virou título não se repete embaixo: seria a mesma informação
+    // duas vezes, gastando uma linha que a caixa de mudanças usa melhor.
+    card.querySelector('.card-address-row').classList.toggle('hidden', ident.tituloEhEndereco);
+    escreverValor(card.querySelector('.card-address'), place.address, 'card.address.empty');
     // Num UPDATE o backend monta o tipo como "Atualização: Id, Nome, Telefone…" —
     // exatamente os rótulos que a caixa "Mudanças propostas" repete logo abaixo,
     // COM os valores. Mostrar os dois era a mesma informação duas vezes, e a de
@@ -1511,8 +1519,10 @@ function renderCurrentCard() {
             // `updateType` em português continua vindo do core e serve de
             // último recurso, pra chave nova nunca deixar o campo vazio.
             : (rotuloDeEnum('card.updateType.', place.updateTypeKey)
-               || place.updateType || t('card.type.empty')));
-    card.querySelector('.card-creator').textContent = place.createdBy || t('card.creator.empty');
+               || place.updateType || ''));
+    const elTipo = card.querySelector('.card-type');
+    escreverValor(elTipo, elTipo.textContent, 'card.type.empty');
+    escreverValor(card.querySelector('.card-creator'), place.createdBy, 'card.creator.empty');
 
     if (place.isDelete) {
         card.querySelector('.card-delete-banner').classList.remove('hidden');
@@ -1686,7 +1696,7 @@ function renderCardImages(card, place) {
 
     const updateImage = () => {
         img.src = urls[currentImgIdx];
-        img.alt = t('card.img.alt', { name: place.name || t('card.noName'), i: currentImgIdx + 1, n: urls.length });
+        img.alt = t('card.img.alt', { name: identidadeDoPlace(place).titulo, i: currentImgIdx + 1, n: urls.length });
         imgCount.textContent = `${currentImgIdx + 1} / ${urls.length}`;
         const isNew = currentImgIdx === newImageIdx;
         newBadge.classList.toggle('hidden', !isNew);
@@ -1778,6 +1788,32 @@ function marcarBordaRolagem(el) {
     el.addEventListener('scroll', atualizar, { passive: true });
     if (typeof ResizeObserver === 'function') new ResizeObserver(atualizar).observe(el);
     requestAnimationFrame(atualizar);
+}
+
+// Sem nome, o ENDEREÇO é a identidade — é o que o Google Maps faz com ponto sem
+// nome, e o que faltava aqui: "sem nome" ocupava o slot de 1.35rem enquanto a
+// única coisa que identificava o local ficava em cinza pequeno logo abaixo.
+// Invertido. A ausência não some: vira selo (ver .card-no-name-badge), porque
+// num pedido de place ela é informação de decisão.
+//
+// Cadeia: nome → endereço → "(local sem nome)". Só o último é placeholder — o
+// endereço promovido é DADO, e por isso não leva o esmaecido de ausente.
+function identidadeDoPlace(place) {
+    const nome = String(place.name || '').trim();
+    if (nome) return { titulo: nome, semNome: false, tituloEhEndereco: false, ausente: false };
+    const endereco = String(place.address || '').trim();
+    if (endereco) return { titulo: endereco, semNome: true, tituloEhEndereco: true, ausente: false };
+    return { titulo: t('card.noName'), semNome: true, tituloEhEndereco: false, ausente: true };
+}
+
+// Escreve valor OU placeholder, marcando qual dos dois é. O texto entre
+// parênteses já diz sozinho (e o leitor de tela lê); o esmaecido em itálico é
+// reforço visual. Cor sozinha não serviria — WCAG 1.4.1.
+function escreverValor(el, valor, chaveVazio) {
+    if (!el) return;
+    const v = valor === null || valor === undefined ? '' : String(valor).trim();
+    el.textContent = v || t(chaveVazio);
+    el.classList.toggle('valor-ausente', !v);
 }
 
 // O core manda TIPO, não palavra: null = vazio, boolean = sim/não, '' = existe
