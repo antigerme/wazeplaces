@@ -412,6 +412,22 @@ function prepareAuth(cookiesContent) {
   return { cookieHeader: cookieHeaderFrom(cookiesContent), csrf };
 }
 
+// `changedVenue` NÃO é um diff: é um objeto de venue com os valores propostos.
+// Junto dos campos que o usuário pediu para mudar vêm os de escrituração, que
+// ninguém editou — `id` é a identidade do local (idêntica antes e depois) e
+// `updatedOn`/`updatedBy` são o carimbo de modificação, que muda porque a edição
+// acontece, não porque alguém pediu. O WME oficial só lista campo editável; nós
+// listávamos tudo, e o ruído ainda empurrava mudança de verdade pro "+N mais"
+// (MAX_CHANGES_DISPLAY), escondendo o que o editor precisava ver.
+//
+// É lista de EXCLUSÃO, não de inclusão, de propósito: campo novo que o Waze
+// passe a mandar aparece com o nome cru (o fallback do fieldLabels) — feio, mas
+// visível. Uma lista de inclusão esconderia calado uma mudança de verdade, que
+// é o oposto do que a app existe pra fazer.
+const CAMPOS_ESCRITURACAO = new Set([
+  'id', 'permissions', 'updatedOn', 'updatedBy', 'createdOn', 'createdBy',
+]);
+
 const formatValue = (value) => {
   if (value === null || value === undefined || value === '') return '(vazio)';
   if (typeof value === 'boolean') return value ? 'Sim' : 'Não';
@@ -616,7 +632,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     name: 'Nome', description: 'Descrição', houseNumber: 'Número', phone: 'Telefone',
     geometry: 'Localização', categories: 'Categorias', aliases: 'Nomes Alternativos',
     url: 'Site', openingHours: 'Horário', streetID: 'Rua', cityID: 'Cidade',
-    residential: 'Residencial', brand: 'Marca',
+    residential: 'Residencial', brand: 'Marca', entryExitPoints: 'Ponto de entrada/saída',
   };
 
   // GeoJSON recursivo: Point/Polygon/MultiPolygon → primeiro par [lon,lat] numérico
@@ -727,7 +743,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       } else if (reqType === 'REQUEST' && reqSubType === 'UPDATE') {
         if (ur.changedVenue && typeof ur.changedVenue === 'object') {
           for (const k of Object.keys(ur.changedVenue)) {
-            if (k === 'permissions') continue;
+            if (CAMPOS_ESCRITURACAO.has(k)) continue;
             const newValue = ur.changedVenue[k];
             const label = fieldLabels[k] || (k.charAt(0).toUpperCase() + k.slice(1));
             const resolvedFrom = resolveIdField(k, venue[k] ?? null);
