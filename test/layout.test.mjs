@@ -990,3 +990,92 @@ test('a Ajuda conta que a espera do Desfazer pode ser desligada', () => {
   assert.match(HTML, /data-i18n-html="help\.howToUse\.step6"/,
     'a Ajuda parou de mencionar a preferência (e o markup exige data-i18n-html)');
 });
+
+// ── Contrato do "Sair" ─────────────────────────────────────────────────────
+// Decisão do owner, e o motivo importa: "se pedir para sair, é realmente para
+// sair/limpar de tudo" — privacidade, não conveniência. Só que nada impedia
+// alguém de gravar uma chave nova no localStorage e esquecer de apagá-la; foi
+// exatamente o que aconteceu com o marcador do convite de instalar, que ficou
+// pra trás por descuido. Este guard obriga QUEM CRIA uma chave a decidir o que
+// acontece com ela no logout — apagar ou justificar por que fica.
+test('toda chave gravada no aparelho é resolvida no logout', () => {
+  const app = read('js/app.js');
+  const api = read('js/api.js');
+  const fonte = app + '\n' + api;
+
+  // Apagadas no logout, cada uma pelo seu meio. Sobrescrever com o padrão
+  // (saveStats e cia.) conta: o valor antigo deixa de existir.
+  const APAGADAS = {
+    STATS_KEY: 'saveStats()',
+    FILTERS_KEY: 'saveFilters()',
+    PREFERENCES_KEY: 'savePreferences()',
+    DEVMODE_KEY: 'saveDevMode()',
+    HISTORY_KEY: 'safeLS.remove(HISTORY_KEY)',
+    CHAVE_INSTALL_DISPENSADO: 'safeLS.remove(CHAVE_INSTALL_DISPENSADO)',
+    waze_session_token: 'API.setSession(null)',
+    waze_region: "API.setRegion('row')",
+    waze_country: 'API.setCountry(30)',
+  };
+  // Ficam de propósito: são preferências do APARELHO, não dados de quem entrou.
+  // Apagar o idioma seria hostil — devolveria a pessoa a uma língua que ela
+  // pode não ler, justamente quando está deslogada e sem o botão de Filtros.
+  const MANTIDAS = ['THEME_KEY', 'LANG_KEY'];
+
+  // Nome da constante quando existe; senão a própria chave literal.
+  const porConstante = new Map();
+  for (const m of fonte.matchAll(/const\s+([A-Z_a-z]+)\s*=\s*'(waze[_a-z0-9]*)'/g)) {
+    porConstante.set(m[2], m[1]);
+  }
+  const chaves = new Set();
+  for (const m of fonte.matchAll(/'(waze[_a-z0-9]*)'/g)) chaves.add(m[1]);
+
+  const naoClassificadas = [];
+  for (const chave of chaves) {
+    const nome = porConstante.get(chave) || chave;
+    if (!(nome in APAGADAS) && !MANTIDAS.includes(nome)) naoClassificadas.push(`${chave} (${nome})`);
+  }
+  assert.equal(naoClassificadas.length, 0,
+    'chave nova no armazenamento sem decisão de logout — apague em handleLogout ou\n'
+    + 'declare em MANTIDAS aqui, com o motivo:\n' + naoClassificadas.join('\n'));
+
+  const i = app.indexOf('async function handleLogout');
+  assert.notEqual(i, -1, 'sumiu o handleLogout');
+  const corpo = app.slice(i, app.indexOf('\nfunction resetQueue', i));
+  for (const [nome, chamada] of Object.entries(APAGADAS)) {
+    assert.ok(corpo.includes(chamada), `o logout parou de limpar ${nome} (esperava "${chamada}")`);
+  }
+});
+
+test('o logout não espera a rede pra limpar o aparelho, e não falha calado', () => {
+  const app = read('js/app.js');
+  const i = app.indexOf('async function handleLogout');
+  const corpo = app.slice(i, app.indexOf('\nfunction resetQueue', i));
+  // Ordem: o token sai do armazenamento ANTES de qualquer await de rede. Pedir
+  // pra sair tem que ser instantâneo — a exclusão remota é melhor-esforço.
+  const posLimpeza = corpo.indexOf('API.setSession(null)');
+  const posRede = corpo.indexOf('API.destroySession(');
+  assert.ok(posLimpeza !== -1 && posRede !== -1, 'sumiu a limpeza local ou a exclusão remota');
+  assert.ok(posLimpeza < posRede, 'a limpeza local voltou a esperar a rede');
+  // E a exclusão no servidor não pode falhar em silêncio: o `_post` devolve
+  // erro em vez de lançar, então sem isto ninguém ficava sabendo.
+  assert.match(corpo, /callWithRetry\(\(\) => API\.destroySession\(/,
+    'a exclusão no servidor perdeu a retentativa');
+  assert.match(corpo, /toast\.logoutServerFailed/,
+    'a exclusão no servidor voltou a falhar sem avisar o editor');
+});
+
+test('a Ajuda diz o que a app guarda, por quanto tempo e como apagar', () => {
+  // GDPR Art. 13 / LGPD Art. 9 — mas antes disso é confiança: a app pede os
+  // cookies de sessão do editor, que permitem agir no Waze em nome dele.
+  for (const chave of ['help.privacy.server', 'help.privacy.notStored', 'help.privacy.retention',
+                       'help.privacy.device', 'help.privacy.credentials', 'help.privacy.infra']) {
+    assert.ok(HTML.includes(`data-i18n="${chave}"`), `a Ajuda perdeu "${chave}"`);
+  }
+  // Canal para exercício de direitos (LGPD Art. 18) — com link, então -html.
+  assert.ok(HTML.includes('data-i18n-html="help.privacy.contact"'),
+    'sumiu o contato do responsável pelos dados');
+  // Sair da app não desloga do Waze: sem isto, quem sai preocupado conclui que
+  // cortou o acesso — e não cortou.
+  assert.ok(HTML.includes('data-i18n-html="modal.logout.waze"'),
+    'o diálogo de sair parou de avisar que os cookies seguem válidos no Waze');
+});

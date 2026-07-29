@@ -1227,7 +1227,11 @@ async function handleLogout() {
         AppState.pendingAction.cancel();
         AppState.pendingAction = null;
     }
-    await API.destroySession();
+    // O token sai do armazenamento AGORA e a limpeza local acontece inteira sem
+    // esperar rede nenhuma — pedir pra sair tem que ser instantâneo. A cópia
+    // serve pra exclusão no servidor, que vai depois, com retentativa.
+    const tokenParaApagar = API.getSession();
+    API.setSession(null);
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
     AppState.filters = { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
@@ -1239,6 +1243,9 @@ async function handleLogout() {
     AppState.inFlightActions = 0;
     AppState.history = {};
     safeLS.remove(HISTORY_KEY); // logout = esquecer tudo (inclui histórico)
+    // "Sair limpa tudo" não tem exceção que ninguém decidiu: este marcador (o
+    // "Agora não" do convite de instalar) ficava pra trás só por descuido.
+    safeLS.remove(CHAVE_INSTALL_DISPENSADO);
     saveStats();
     saveFilters();
     savePreferences();
@@ -1252,6 +1259,19 @@ async function handleLogout() {
     removeCurrentCardEl();
     showAuthScreen();
     showToast(t('toast.loggedOut'), 'info');
+
+    // A exclusão no servidor é METADE da promessa do "Sair", e falhava calada
+    // com a rede fora: o `_post` devolve erro em vez de lançar, então ninguém
+    // ficava sabendo. Agora tenta de novo (mesma política de transiente do resto
+    // da app) e, se ainda assim não for, diz o que aconteceu e o que acontece
+    // depois — o blob fica órfão (a chave é o hash do token, que já foi embora)
+    // e expira sozinho em até 21 dias.
+    if (tokenParaApagar) {
+        const saida = await callWithRetry(() => API.destroySession(tokenParaApagar));
+        if (!saida || !saida.success) {
+            showToast(t('toast.logoutServerFailed'), 'error', 9000);
+        }
+    }
 }
 
 function resetQueue() {

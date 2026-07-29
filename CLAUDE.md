@@ -157,6 +157,13 @@ CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump
 5. Cookies originais **nunca mais trafegam** após o login
 6. Sessão expira em 21 dias (`SESSION_TTL` em `core.mjs`). No **KV** expira sozinha (TTL nativo); na **VM** por mtime + `touch` a cada uso. Cookies do Waze duram ~28 dias — TTL menor dá folga de 1 semana. Quando os cookies expiram de verdade, o backend devolve 401 e o frontend invalida a sessão local (`API.setSession(null)` + `showAuthScreen`)
 
+**Contrato do "Sair" (decisão do owner, por PRIVACIDADE — não é conveniência):** *"se pedir para sair, é realmente para sair/limpar de tudo"*. Vale nos dois lados: `store.delete(sha256(token))` no servidor e todas as chaves do aparelho. Três consequências que já morderam:
+- **Chave nova no `localStorage` precisa de decisão de logout.** O marcador do convite de instalar ficou pra trás por descuido. `test/layout.test.mjs` varre os literais `waze*` de `js/*.js` e reprova o que não estiver nem na tabela de apagadas nem em `MANTIDAS` (só tema e idioma ficam — apagar o idioma devolveria a pessoa a uma língua que ela pode não ler, justamente deslogada, sem o botão de Filtros).
+- **A limpeza local NÃO espera rede.** O token é copiado, o armazenamento é limpo na hora (medido: 26ms) e a exclusão remota vai depois. `API.destroySession(token)` aceita o token explícito por isso — sem ele a retentativa sairia pelo `if (!sessionToken)` fingindo sucesso.
+- **A exclusão remota não pode falhar calada.** O `_post` devolve erro em vez de lançar, então a rede fora deixava o blob no servidor sem ninguém saber. Hoje passa por `callWithRetry` e, se ainda falhar, o editor recebe `toast.logoutServerFailed` — o blob fica órfão (a chave é o hash do token, que já foi embora) e expira em até 21 dias.
+
+**E sair da app NÃO invalida os cookies no Waze** — só o WME faz isso. O diálogo de logout diz isso com link, porque quem sai preocupado com privacidade conclui o contrário. O aviso de privacidade da Ajuda (`help.privacy.*`, 7 itens nas três línguas) cobre GDPR Art. 13 / LGPD Art. 9 e nomeia o contato para direitos (LGPD Art. 18). **Ponto em aberto, para jurídico:** os dados de terceiros que aparecem no card (nome de quem enviou, fotos) — o argumento é que a app é cliente de dados que o editor já acessa no WME e que nada disso é retido, mas o servidor busca e repassa.
+
 **Chave de criptografia:** Secret `ENCRYPTION_KEY` (base64, 32 bytes) no Cloudflare; env var ou arquivo `0600` auto-gerado na VM. **Nunca commitada.** O core não sabe de onde vem — o adaptador injeta `keyBytes` em `makeSessions({ store, keyBytes })`.
 
 ---
