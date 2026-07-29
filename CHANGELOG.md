@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.29-02
+
+### Alterado
+- **O aviso de que o "Desfazer" virou opcional passou a ficar 20 segundos na tela**, em vez de 8. São 16 palavras para ler: em 8 segundos a mensagem sumia antes de muita gente terminar. Ficar mais tempo não custa nada desde que ele foi para o topo — medido em 3 aparelhos, os botões do card seguem livres durante os 20 segundos inteiros. Um toque continua abrindo as Preferências e dispensando o aviso.
+
 ## v2026.07.29-01
 
 ### Alterado
