@@ -698,24 +698,45 @@ test('o tipo do card não repete a lista de mudanças', () => {
   assert.match(live, /place\.updateType/, 'o leitor de tela perdeu o detalhe do que mudou');
 });
 
-test('em laptop a app cabe na tela, sem barra de rolagem de página', () => {
+test('a app cabe na tela em QUALQUER aparelho, sem rolagem de página', () => {
   // Num 1366×768 os custos fixos (header 69 + placar 87 + margens 80) mais o
   // card davam 850px: 82px de rolagem que não precisava existir — e rolagem
   // disputa com o gesto de "pular". O card passa a receber a SOBRA por uma
   // cadeia de flex, em vez de um `dvh` chutado.
-  const bloco = CSS.match(/@media \(min-width: 768px\) and \(min-height: 700px\) \{[\s\S]*?\n\}/);
-  assert.ok(bloco, 'sumiu a media query que faz a app caber em laptop');
+  //
+  // Isto valia só de 768px de largura pra cima. No celular, `h-[min(80dvh,640px)]`
+  // vinha de uma fração da JANELA e ignorava os 152px (219 no aparelho estreito,
+  // onde o placar vira 2×2) já gastos acima: a barra ✕/↑/✓ nascia ABAIXO DA DOBRA
+  // em 4 aparelhos (87px no Fold, 92px deitado, 17px no iPhone SE, 3px no S8+).
+  // E não dá pra rolar até ela com o dedo no card — `touch-action: none`, porque
+  // arrastar pra cima é "pular". Ação principal fora da tela, sem gesto que a
+  // traga de volta.
   for (const alvo of ['body', 'body > main', '#appScreen:not(.hidden)', '#cardStack']) {
-    assert.ok(bloco[0].includes(alvo), `a cadeia de flex perdeu o elo "${alvo}"`);
+    const re = new RegExp(alvo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{[^}]*flex');
+    assert.match(CSS_SEM_COMENTARIO, re, `a cadeia de flex perdeu o elo "${alvo}"`);
   }
-  // A ALTURA no media query não é decoração: celular DEITADO tem 852px de
-  // largura com 393px de altura, e só a largura fazia o piso de 26rem ficar
-  // maior que a tela — a rolagem PIORAVA (177 → 259px, medido).
-  assert.match(bloco[0], /min-height:\s*26rem/, 'o card perdeu o piso de altura');
+  // `min-height: 0` é o que faz o elo do meio ceder: sem ele o filho flex não
+  // encolhe abaixo do conteúdo e a cadeia inteira não serve pra nada.
+  for (const alvo of ['body > main', '#appScreen:not\\(\\.hidden\\)']) {
+    assert.match(CSS_SEM_COMENTARIO, new RegExp(alvo + '\\s*\\{[^}]*min-height:\\s*0'),
+      `"${alvo}" perdeu o min-height: 0 e para de ceder`);
+  }
+  // A altura mora num lugar só. Classe de altura no HTML volta a competir com a
+  // cadeia — e, por vencer no lugar errado, foi ela que criou o bug.
+  const stack = HTML.split('\n').find((l) => l.includes('id="cardStack"'));
+  assert.ok(stack, 'sumiu o #cardStack');
+  assert.doesNotMatch(stack, /\bh-\[|\bmin-h-\[|\bmax-h-\[/,
+    'altura de volta no HTML do #cardStack: a fração da janela ignora o que já foi gasto acima');
+  // O piso de conforto continua preso à ALTURA, e não à largura: celular DEITADO
+  // tem 852px de largura com 393px de altura, e um piso de 26rem ali fica maior
+  // que a tela — a rolagem PIORAVA (177 → 259px, medido).
+  const piso = CSS.match(/@media \(min-height: 700px\) \{[\s\S]*?\n\}/);
+  assert.ok(piso && /min-height:\s*26rem/.test(piso[0]),
+    'o piso de 26rem saiu do degrau de altura (ou virou incondicional)');
   assert.doesNotMatch(
-    CSS.replace(/\/\*[\s\S]*?\*\//g, ''),
-    /@media \(min-width: 768px\) \{[\s\S]*?#cardStack/,
-    'media query só por largura pega celular deitado e piora a rolagem'
+    CSS_SEM_COMENTARIO,
+    /@media \(min-width: \d+px\) \{[\s\S]*?#cardStack[^}]*min-height:\s*26rem/,
+    'piso preso à largura pega celular deitado e piora a rolagem'
   );
 });
 
@@ -864,4 +885,48 @@ test('o "Tudo limpo!" não corta o convite quando a tela é curta', () => {
   const i = app.indexOf('function showNoPlaces');
   assert.match(app.slice(i, i + 1400), /marcarBordaRolagem\(noMore\)/,
     'o painel rola sem aviso nenhum de que há mais conteúdo abaixo');
+});
+
+test('deitado, a barra de ações fica sob a FOTO — o texto leva a altura inteira', () => {
+  // Com as ações na coluna do texto, sobravam 193px de 268 pro conteúdo, e um
+  // UPDATE comum pede 253: o card rolava por dentro nos QUATRO tipos de pedido,
+  // e conteúdo que rola desliga o arraste pra cima (gotcha #29). Movendo a barra
+  // pra baixo da foto, o texto recebe as duas fileiras e só o caso extremo rola.
+  const m = CSS.match(/@media \(max-height: 480px\) and \(min-width: 600px\) \{[\s\S]*?\n\}/);
+  assert.ok(m, 'sumiu o degrau de paisagem');
+  const bloco = m[0];
+  const regra = (sel) => {
+    const r = new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}');
+    const achado = bloco.match(r);
+    assert.ok(achado, `sumiu a regra de paisagem pra "${sel}"`);
+    return achado[1];
+  };
+  assert.match(regra('.place-card .card-actions'), /grid-column:\s*1/,
+    'a barra de ações voltou pra coluna do texto e rouba a altura dele');
+  assert.match(regra('.place-card .card-content'), /grid-row:\s*1 \/ 3/,
+    'o texto perdeu a altura inteira do card');
+  assert.match(regra('.place-card .card-photo'), /grid-row:\s*1\s*;/,
+    'a foto voltou a ocupar as duas fileiras e empurra a barra pra coluna do texto');
+});
+
+test('o placar não "compacta" com regra que não compacta nada', () => {
+  // Havia dois cortes inertes no degrau estreito: `font-size: 1.25rem` é
+  // exatamente o `text-xl` do HTML (medido: 20px/28px dos dois lados) e
+  // `padding: 0.75rem` era MAIOR que o `p-2`, custando 8px a mais justamente no
+  // aparelho mais apertado — enquanto o comentário dizia recuperar 25px.
+  // Sem comentário: o texto que EXPLICA a regra proibida contém a regra
+  // proibida, e o guard acusaria a própria documentação.
+  const estreito = CSS_SEM_COMENTARIO.match(/@media \(max-width: 359\.98px\) \{[\s\S]*?\n\}/);
+  assert.ok(estreito, 'sumiu o degrau de placar estreito');
+  assert.doesNotMatch(estreito[0], /#placar\s*\{[^}]*padding:\s*0\.75rem/,
+    'o placar voltou a ganhar padding no aparelho mais apertado');
+  assert.doesNotMatch(estreito[0], /font-size:\s*1\.25rem/,
+    'voltou o "corte" de font-size que é idêntico ao text-xl do HTML');
+  // A compactação de verdade é por ALTURA — é ela que decide se o card rola.
+  const baixo = CSS_SEM_COMENTARIO.match(/@media \(max-height: 700px\) \{[\s\S]*?\n\}/);
+  assert.ok(baixo && /#placar\s*\{[^}]*padding:/.test(baixo[0]),
+    'o placar deixou de compactar em tela baixa');
+  // O rótulo tem piso: 11px é o mínimo legível (M3) e ele já está nele.
+  assert.doesNotMatch(baixo[0], /#placarGrid[^}]*font-size:\s*0\.6[0-4]/,
+    'rótulo do placar abaixo do piso de 11px');
 });
