@@ -52,7 +52,7 @@ const I18N_DICT = {
     'filters.section.location': 'Localização',
     'filters.language.label': 'Idioma',
     'prefs.undo.label': 'Permitir desfazer ações',
-    'prefs.undo.desc': 'Mostra um aviso por 3 segundos pra você desfazer "Lido" ou "Rejeitar" antes do envio.',
+    'prefs.undo.desc': 'Mostra um aviso por {undoSeg} segundos pra você desfazer "Lido" ou "Rejeitar" antes do envio.',
     'prefs.devMode.label': 'Modo Desenvolvedor 🛠️',
     'prefs.devMode.desc': 'Remove restrições da app (ex.: trava do "Permitir desfazer ações"). Use com cuidado — ações vão direto pro Waze sem janela de undo.',
     'filters.unreadOnly.label': 'Apenas pedidos não lidos',
@@ -192,7 +192,7 @@ const I18N_DICT = {
     'toast.dismissHint': 'Toque para dispensar', 'toast.unexpectedError': 'Erro inesperado: {msg}',
     'toast.unexpectedError.reload': 'recarregue a página', 'toast.newVersion': 'Nova versão disponível. Atualizando…',
     'toast.undoUnlocked': '🚗💨 Mandou bem, wazer! {n} pedidos tratados — o Desfazer virou opcional. Toque pra assumir o volante.',
-    'toast.undoHint': 'Você não desfez nenhum dos últimos {n} pedidos. Dá pra desligar a espera de {s}s e ir direto ao próximo — toque pra ajustar.',
+    'toast.undoHint': 'Você não desfez nenhum dos últimos {n} pedidos. Dá pra desligar a espera de {undoSeg}s e ir direto ao próximo — toque pra ajustar.',
     'auth.pairBtn': 'Entrar com um código',
     'pair.createBtn': 'Conectar outro aparelho',
     'pair.show.title': 'Conectar outro aparelho',
@@ -267,7 +267,7 @@ const I18N_DICT = {
     'filters.section.location': 'Location',
     'filters.language.label': 'Language',
     'prefs.undo.label': 'Allow undoing actions',
-    'prefs.undo.desc': 'Shows a 3-second banner so you can undo "Read" or "Reject" before it is sent.',
+    'prefs.undo.desc': 'Shows a {undoSeg}-second banner so you can undo "Read" or "Reject" before it is sent.',
     'prefs.devMode.label': 'Developer Mode 🛠️',
     'prefs.devMode.desc': 'Removes app restrictions (e.g. the "Allow undoing actions" lock). Use carefully — actions go straight to Waze with no undo window.',
     'filters.unreadOnly.label': 'Unread requests only',
@@ -393,7 +393,7 @@ const I18N_DICT = {
     'toast.dismissHint': 'Tap to dismiss', 'toast.unexpectedError': 'Unexpected error: {msg}',
     'toast.unexpectedError.reload': 'reload the page', 'toast.newVersion': 'New version available. Updating…',
     'toast.undoUnlocked': '🚗💨 Nice driving, Wazer! {n} requests handled — Undo is now optional. Tap to take the wheel.',
-    'toast.undoHint': 'You haven’t undone any of your last {n} requests. You can turn off the {s}s wait and go straight to the next one — tap to adjust.',
+    'toast.undoHint': 'You haven’t undone any of your last {n} requests. You can turn off the {undoSeg}s wait and go straight to the next one — tap to adjust.',
     'auth.pairBtn': 'Sign in with a code',
     'pair.createBtn': 'Connect another device',
     'pair.show.title': 'Connect another device',
@@ -462,7 +462,7 @@ const I18N_DICT = {
     'filters.section.location': 'Ubicación',
     'filters.language.label': 'Idioma',
     'prefs.undo.label': 'Permitir deshacer acciones',
-    'prefs.undo.desc': 'Muestra un aviso de 3 segundos para deshacer "Leído" o "Rechazar" antes del envío.',
+    'prefs.undo.desc': 'Muestra un aviso de {undoSeg} segundos para deshacer "Leído" o "Rechazar" antes del envío.',
     'prefs.devMode.label': 'Modo Desarrollador 🛠️',
     'prefs.devMode.desc': 'Elimina restricciones de la app (ej.: el bloqueo de "Permitir deshacer acciones"). Úsalo con cuidado — las acciones van directo a Waze sin ventana de deshacer.',
     'filters.unreadOnly.label': 'Solo solicitudes no leídas',
@@ -588,7 +588,7 @@ const I18N_DICT = {
     'toast.dismissHint': 'Toca para descartar', 'toast.unexpectedError': 'Error inesperado: {msg}',
     'toast.unexpectedError.reload': 'recarga la página', 'toast.newVersion': 'Nueva versión disponible. Actualizando…',
     'toast.undoUnlocked': '🚗💨 ¡Bien conducido, wazer! {n} solicitudes tratadas — Deshacer ahora es opcional. Toca para tomar el volante.',
-    'toast.undoHint': 'No deshiciste ninguna de tus últimas {n} solicitudes. Puedes desactivar la espera de {s}s e ir directo a la siguiente — toca para ajustarlo.',
+    'toast.undoHint': 'No deshiciste ninguna de tus últimas {n} solicitudes. Puedes desactivar la espera de {undoSeg}s e ir directo a la siguiente — toca para ajustarlo.',
     'auth.pairBtn': 'Entrar con un código',
     'pair.createBtn': 'Conectar otro dispositivo',
     'pair.show.title': 'Conectar otro dispositivo',
@@ -648,10 +648,31 @@ function getLang() { return lang; }
 // locale pra Intl/toLocaleString acompanhar o idioma escolhido.
 function i18nLocale() { return lang === 'pt' ? 'pt-BR' : lang === 'es' ? 'es' : 'en'; }
 
+// ── Variáveis SEMPRE disponíveis para interpolação ────────────────────────
+// Existem porque `applyI18n()` chama t(chave) sem parâmetro nenhum: uma chave
+// ligada por data-i18n não tem call site onde passar valores, então qualquer
+// número na frase teria que ser escrito à mão nas três línguas — e mentir quando
+// a constante mudasse. Quem tem o número (app.js) REGISTRA aqui; o dicionário só
+// consome. A dependência aponta nessa direção porque i18n.js carrega ANTES do
+// app.js e não pode ler constante dele.
+//
+// O valor é uma FUNÇÃO, avaliada a cada t(): número formatado depende do locale,
+// e trocar de idioma sem reavaliar deixaria "2,5" no inglês (ou "2.5" no pt).
+const I18N_VARS = {};
+function setI18nVars(vars) { Object.assign(I18N_VARS, vars); }
+
 // t('chave', { name: 'Bia', n: 3 }) — escolhe a língua, cai pro pt e depois pra
-// própria chave se faltar, e interpola {name}/{n}.
+// própria chave se faltar, e interpola {name}/{n}. Os I18N_VARS entram também,
+// e o parâmetro explícito ganha do global em caso de nome repetido.
 function t(key, vars) {
   let s = (I18N_DICT[lang] && I18N_DICT[lang][key]) || I18N_DICT.pt[key] || key;
+  for (const k of Object.keys(I18N_VARS)) {
+    if (vars && k in vars) continue;
+    const marca = '{' + k + '}';
+    if (!s.includes(marca)) continue;   // não paga o custo de resolver o que não é usado
+    const v = I18N_VARS[k];
+    s = s.split(marca).join(String(typeof v === 'function' ? v() : v));
+  }
   if (vars) for (const k of Object.keys(vars)) s = s.split('{' + k + '}').join(String(vars[k]));
   return s;
 }
@@ -672,6 +693,7 @@ function applyI18n(root) {
 // acesso explícito; globalThis.I18N_DICT pra auditoria de paridade em Node.
 if (typeof window !== 'undefined') {
   window.t = t;
+  window.setI18nVars = setI18nVars;
   window.applyI18n = applyI18n;
   window.setLang = setLang;
   window.getLang = getLang;

@@ -11,6 +11,23 @@ const HISTORY_KEY = 'waze_places_history';
 const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
+
+// A duração da janela aparece em DUAS frases (o toggle nas Preferências e a dica
+// "você nunca desfaz"), nas três línguas — seis lugares onde o número estava
+// escrito à mão. Registrado como variável global de i18n, ele vem daqui: mexer
+// no UNDO_WINDOW_MS acima corrige os seis de uma vez.
+//
+// Função, não valor: é reavaliada a cada t(), então trocar de idioma reformata no
+// locale novo. Registrar o resultado formatado congelaria o separador decimal do
+// idioma que estava ativo na carga.
+//
+// Ponto conhecido: valor abaixo de 2000 produziria "1 segundos" no pt/es (o
+// projeto não tem ICU; plural são chaves separadas, ver CLAUDE.md). Nenhum valor
+// realista de janela de desfazer é < 2s, então não construí a maquinaria de
+// plural pra uma hipótese — mas se alguém baixar, é aqui que quebra.
+if (typeof setI18nVars === 'function') {
+    setI18nVars({ undoSeg: () => (UNDO_WINDOW_MS / 1000).toLocaleString(i18nLocale()) });
+}
 // Sem cap: a caixa de mudanças rola por dentro, cresce com o card e avisa que
 // rola (esmaecido de borda). Com `MAX_CHANGES_DISPLAY = 4` a 5ª mudança era
 // INALCANÇÁVEL — nem rolando — e a linha "+1 mais" gastava exatamente o espaço
@@ -2969,12 +2986,10 @@ function checkDicaDesfazer() {
     AppState.preferences.dicaDesfazerVista = true;
     savePreferences();
     showToast(
-        // `s` vem de UNDO_WINDOW_MS em vez de "3" escrito na frase: as três
-        // línguas cravavam o número, e mexer na janela deixaria o texto mentindo.
-        t('toast.undoHint', {
-            n: DICA_SEM_UNDO,
-            s: (UNDO_WINDOW_MS / 1000).toLocaleString(i18nLocale()),
-        }),
+        // {undoSeg} é global (setI18nVars) — não passa aqui de propósito, pra ter
+        // UMA definição servindo esta frase e a de prefs.undo.desc, que é aplicada
+        // por applyI18n() e não tem call site onde passar parâmetro.
+        t('toast.undoHint', { n: DICA_SEM_UNDO }),
         'hint',
         // Mesma régua do aviso de conquista: banner do topo, com ação, uma vez
         // na vida. 20s cobrem leitura tranquila e decisão sem correria.

@@ -167,18 +167,46 @@ test('i18n: dá pra trocar o idioma antes de entrar', () => {
   assert.match(app, /function aplicarIdioma/, 'sumiu o aplicarIdioma() que mantém os seletores em sincronia');
 });
 
-// A duração da janela de Desfazer é UM número (UNDO_WINDOW_MS). Escrevê-la na
-// frase deixa o texto mentindo quando a constante muda — e em TRÊS línguas, então
-// alguém sempre esquece uma. A frase da dica usa {s}, alimentado pela constante.
-// (Continua cravada em prefs.undo.desc, que passa por applyI18n() e não interpola
-// — parametrizar exige plumbing na camada de i18n; está registrado, não esquecido.)
-test('toast.undoHint não crava a duração da janela na frase', () => {
-  for (const lang of LANGS) {
-    const msg = DICT[lang]['toast.undoHint'];
-    assert.ok(msg, `falta toast.undoHint em ${lang}`);
-    assert.ok(msg.includes('{s}'),
-      `toast.undoHint (${lang}) deve usar {s} pra duração da janela, não o número escrito`);
-    assert.ok(!/(^|\D)\d+(\s*)(s\b|segundos|seconds|segons)/i.test(msg.replace('{s}s', '')),
-      `toast.undoHint (${lang}) ainda tem duração escrita à mão: ${msg}`);
+// A duração da janela de Desfazer é UM número (UNDO_WINDOW_MS), e aparece em duas
+// frases × três línguas. Escrevê-la à mão deixa o texto mentindo quando a
+// constante muda, em seis lugares dos quais alguém sempre esquece um. As duas
+// usam {undoSeg}, alimentado por setI18nVars() a partir da constante.
+const CHAVES_COM_DURACAO = ['toast.undoHint', 'prefs.undo.desc'];
+
+test('frases da janela de Desfazer não cravam a duração', () => {
+  for (const chave of CHAVES_COM_DURACAO) {
+    for (const lang of LANGS) {
+      const msg = DICT[lang][chave];
+      assert.ok(msg, `falta ${chave} em ${lang}`);
+      assert.ok(msg.includes('{undoSeg}'),
+        `${chave} (${lang}) deve usar {undoSeg} pra duração, não o número escrito`);
+      // Tira o placeholder antes de procurar dígito: "{undoSeg} segundos" é o certo,
+      // "3 segundos" é o que não pode voltar.
+      const semPlaceholder = msg.split('{undoSeg}').join('§');
+      assert.ok(!/\d+\s*-?\s*(s\b|second|segundo)/i.test(semPlaceholder),
+        `${chave} (${lang}) ainda tem duração escrita à mão: ${msg}`);
+    }
   }
+});
+
+// O mecanismo só funciona se alguém REGISTRAR o valor: sem isto o {undoSeg} vaza
+// cru pra tela, e nenhum teste de dicionário enxergaria (a chave existe, a
+// paridade passa). Guarda as duas pontas — a função em i18n.js e o registro no app.
+test('{undoSeg} é registrado por setI18nVars a partir de UNDO_WINDOW_MS', () => {
+  const i18n = read('js/i18n.js');
+  const app = read('js/app.js');
+
+  assert.match(i18n, /function setI18nVars\(/, 'sumiu o setI18nVars() de js/i18n.js');
+  assert.match(i18n, /const I18N_VARS = \{\}/, 'sumiu o mapa I18N_VARS');
+  assert.match(i18n, /window\.setI18nVars = setI18nVars/,
+    'setI18nVars precisa ir pro escopo global — o app.js é script clássico');
+
+  const registro = app.match(/setI18nVars\(\{[^}]*undoSeg[^}]*\}\)/);
+  assert.ok(registro, 'js/app.js precisa registrar {undoSeg} via setI18nVars()');
+  assert.match(registro[0], /UNDO_WINDOW_MS/,
+    'o valor de {undoSeg} tem que vir de UNDO_WINDOW_MS, não de um número solto');
+  assert.match(registro[0], /=>/,
+    'registre uma FUNÇÃO: valor fixo congela o locale da carga e não reformata na troca de idioma');
+  assert.match(registro[0], /i18nLocale\(\)/,
+    'número em texto passa por toLocaleString(i18nLocale()) — nunca locale cravado');
 });
