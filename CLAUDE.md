@@ -141,7 +141,7 @@ prova — não confie em leitura de código. Use um worktree
 (`git worktree add --detach <dir> origin/main`) pro "antes" em vez de `git stash`.
 CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump de `CACHE_NAME`** (gotcha #17) em todo PR/push. A suite de testes usa só `node:test`/`node:assert` (built-in) e cobre cripto/sessão, `categorizeWazeError`, `isUserAllowed`, parsing de cookies e o filtro de domínio.
 
-**Sandbox/CI:** o ambiente onde este agente roda **tem allowlist de hosts** que bloqueia `*.waze.com` (resposta `403 Host not in allowlist`). Você NÃO consegue testar contra o Waze real — valide com **fixtures de HAR reais** que o usuário envia, ou peça pra ele testar. Mas dá pra testar TUDO que não é o Waze: subir o `node server/node.mjs` e exercitar cripto/sessão/roteamento/erros (o `fetch` ao Waze retorna o 403 do allowlist, que o core categoriza como `unauthorized` — prova que o pipeline funciona).
+**Sandbox/CI:** ~~allowlist bloqueia `*.waze.com`~~ — **não bloqueia mais** (medido em 2026-07-29: as respostas vêm do `Google Frontend` com `errorList` do próprio Waze). Sem `cookies.txt` real você ainda não consegue testar caminho autenticado — valide com **fixtures de HAR reais** que o usuário envia, ou peça pra ele testar. Mas dá pra testar TUDO que não é o Waze: subir o `node server/node.mjs` e exercitar cripto/sessão/roteamento/erros e, com `cookies.txt` real, o caminho autenticado inteiro — foi assim que o idioma dos nomes de país foi medido).
 
 ---
 
@@ -182,8 +182,12 @@ Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sess
 | `marcar-lido` | `/row-Descartes/app/v1/Issues/Read` | Aceita single (`venueID`+`updateRequestID`) ou batch (`items[]`) |
 | `validar-place` | `/row-Descartes/app/Features` (sempre `approve: false`) | Único caminho de "rejeitar" |
 | `perfil` | `/row-Descartes/app/Session?language=pt-BR` | Extrai bbox de `areas[].geometry.coordinates` |
-| `lista-paises` | `/row-Descartes/app/LocationSearch/Countries` | Ordenado alfabeticamente |
-| `lista-estados` | `/row-Descartes/app/LocationSearch/States?countryId=N` | Idem |
+| `lista-paises` | `/row-Descartes/app/LocationSearch/Countries` | Nomes vêm **sempre em inglês** (ver nota abaixo). Ordem base no servidor; o cliente reordena na colação do idioma (`ordenarPorNome`) |
+| `lista-estados` | `/row-Descartes/app/LocationSearch/States?countryId=N` | Nomes vêm no idioma **local** (Amapá, Ceará) — é o nome próprio. Idem ordenação |
+
+**Em que idioma o Waze devolve os nomes — MEDIDO, não suposto** (248 países, cookies reais, `scratchpad/idioma-do-waze.mjs`): **país sempre em inglês** (`France`, `Germany`, `Spain`), e o Waze **ignora** `Accept-Language`, o `Referer` com locale e o `?language=` nesses endpoints — as quatro variantes devolvem byte a byte a mesma coisa. **Estado vem no idioma local** (`Amapá`, `Ceará`), que é o nome próprio: não há tradução a fazer. Consequência prática: **não existe conserto pelo header** — mexer no `Accept-Language` do `callWaze` não mudaria nada, e um editor brasileiro também lê "Germany". Se um dia isso incomodar, o caminho é tabela de tradução de país no dicionário (por `abbr`/ISO), não o header. **O que ERA defeito de verdade** e foi corrigido: o servidor ordenava com `localeCompare(..., 'pt-BR')` cravado, aplicando regra portuguesa à lista de qualquer editor. Ordenar migrou pro cliente (`ordenarPorNome`, via `i18nLocale()`). Note que hoje isso **não muda um pixel**: com só 3 nomes acentuados (`Curaçao`, `Côte d’Ivoire`, `Saint Barthélemy`), pt/en/es/fr dão ordem idêntica — a divergência aparece em colação diferente (medido: sueco difere no índice 52, Å/Ä/Ö no fim do alfabeto). Está no cliente porque a decisão pertence a quem sabe o idioma, não porque resolve algo hoje.
+
+**O sandbox ALCANÇA o `waze.com`** (corrige a nota da seção "Como rodar local", que dizia o contrário): a resposta com credencial falsa é um erro **do Waze** (`server: Google Frontend`, `errorList[0].code: 101`, "not allowed by guest user"), não `403 Host not in allowlist`. O que falta é credencial, não rota — então dá pra testar contra o Waze real assim que o owner mandar um `cookies.txt`. O texto de erro da API **não** é localizado (sempre inglês, testado em pt/fr/es/de/he), então não serve como sonda de idioma.
 
 **Headers críticos no `fetch` ao Waze** (em `callWaze`): `Cookie: <montado dos cookies salvos>`, `Referer: https://www.waze.com/pt-BR/editor?env=<env>&tab=issue_tracker`, `X-CSRF-Token: <extraído dos cookies>`, `Origin`, sec-ch-ua-*, sec-fetch-*. Mudar isso quebra a comunicação. O `env` segue tabela `row → row`, `na → usa`, `il → il`, `world → row` (em `wazeRefererEnv`).
 
@@ -205,6 +209,22 @@ Volta `{ success, places[], hasMore, page, total }`. Cada `place`:
   flagEntityID,               // FLAG: id da foto denunciada; casa com venue.images[].id
                               //   (é assim que o card marca qual das N fotos é)
   changes[],                  // [{ field, label, from, to }] para UPDATE requests.
+                              #   **Valor objeto vira "[object Object]" se ninguém formatar.**
+                              #   `formatValue` tratava null/boolean/array; objeto simples caía no
+                              #   `String(value)`. O `geometry` do Waze é GeoJSON, então TODA mudança
+                              #   de posição aparecia como "[object Object] → [object Object]" — em
+                              #   qualquer idioma, pra todo editor. Medido em fila REAL: 33 de 142
+                              #   pedidos. Nenhuma fixture pegava, porque fixture muda string. Hoje
+                              #   `formatGeometry` dá "lat, lon" (Point) e "lat, lon · N pts"
+                              #   (Polygon/MultiPolygon); `formatValue` cai em `JSON.stringify` pra
+                              #   qualquer outro objeto — feio, nunca invisível. **A contagem de
+                              #   vértices não é enfeite**: sem ela, polígono alterado nos vértices
+                              #   seguintes formata IGUAL ao anterior e a tela afirma que nada mudou
+                              #   — pior que ser feio. Apareceu no 1º teste com dado real (11→12 pts).
+                              #   **Aberto**: `changedVenue` não é diff e a app não filtra linha com
+                              #   `from === to` — 15 de 140 pedidos mostram "X → X" (12 geometria).
+                              #   Filtrar é decisão de produto; se for, compare o valor CRU, porque
+                              #   polígono diferente pode formatar igual.
                               //   `ur.changedVenue` NÃO é um diff: é um venue com os
                               //   valores propostos, então vem com escrituração junto.
                               //   `CAMPOS_ESCRITURACAO` (core.mjs) tira id/updatedOn/
@@ -520,7 +540,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 ### Validar mudanças quando sandbox bloqueia o Waze
 - Sintaxe: `for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done`
 - Lógica pura do core: `import('./server/core.mjs')` e alimentar `categorizeWazeError`/`isUserAllowed`/`makeSessions` com fixtures/valores (ver o smoke test usado na migração v3.0 no histórico de commits)
-- Pipeline completo: subir `node server/node.mjs` e `curl` nos endpoints — sessão fake dá 401 limpo; sessão válida tenta o Waze e o 403 do allowlist vira `errorCategory: unauthorized` (prova que roteamento + cripto + fetch funcionam)
+- Pipeline completo: subir `node server/node.mjs` e `curl` nos endpoints — sessão fake dá 401 limpo. Com `cookies.txt` real do owner o caminho autenticado funciona de ponta a ponta (o sandbox alcança o `waze.com`; ver a nota na seção de endpoints). **Sem cookies válidos**, o Waze responde `403` + `code: 101` "not allowed by guest user", que o core categoriza como `unauthorized` — prova que roteamento + cripto + fetch funcionam
 
 ### Investigar bug reportado pelo usuário
 1. Pedir HAR do Chrome/Firefox DevTools (sempre o owner manda)

@@ -113,6 +113,10 @@ const I18N_DICT = {
     'card.field.openingHours': 'Horário', 'card.field.streetID': 'Rua',
     'card.field.cityID': 'Cidade', 'card.field.residential': 'Residencial',
     'card.field.brand': 'Marca', 'card.field.entryExitPoints': 'Ponto de entrada/saída',
+    // Campos vistos em pedidos REAIS que não tinham chave e apareciam com o nome
+    // cru do Waze ("ExternalProviderIDs"). Achados medindo 142 pedidos de verdade.
+    'card.field.externalProviderIDs': 'Ligação com Google', 'card.field.services': 'Serviços',
+    'card.field.lockRank': 'Nível de trava', 'card.field.categoryAttributes': 'Atributos da categoria',
     // Valores especiais do diff (o core manda tipo, não palavra)
     'card.value.empty': '(vazio)', 'card.value.yes': 'Sim', 'card.value.no': 'Não',
     'card.value.unnamed': '(sem nome)',
@@ -350,6 +354,9 @@ const I18N_DICT = {
     'card.field.openingHours': 'Opening hours', 'card.field.streetID': 'Street',
     'card.field.cityID': 'City', 'card.field.residential': 'Residential',
     'card.field.brand': 'Brand', 'card.field.entryExitPoints': 'Entry/exit point',
+    // Fields seen in REAL requests that had no key and showed the raw Waze name.
+    'card.field.externalProviderIDs': 'Google link', 'card.field.services': 'Services',
+    'card.field.lockRank': 'Lock level', 'card.field.categoryAttributes': 'Category attributes',
     'card.value.empty': '(empty)', 'card.value.yes': 'Yes', 'card.value.no': 'No',
     'card.value.unnamed': '(unnamed)',
     'card.updateType.VENUE': 'New place', 'card.updateType.IMAGE': 'New photo',
@@ -575,6 +582,9 @@ const I18N_DICT = {
     'card.field.openingHours': 'Horario', 'card.field.streetID': 'Calle',
     'card.field.cityID': 'Ciudad', 'card.field.residential': 'Residencial',
     'card.field.brand': 'Marca', 'card.field.entryExitPoints': 'Punto de entrada/salida',
+    // Campos vistos en solicitudes REALES que no tenían clave.
+    'card.field.externalProviderIDs': 'Vínculo con Google', 'card.field.services': 'Servicios',
+    'card.field.lockRank': 'Nivel de bloqueo', 'card.field.categoryAttributes': 'Atributos de la categoría',
     'card.value.empty': '(vacío)', 'card.value.yes': 'Sí', 'card.value.no': 'No',
     'card.value.unnamed': '(sin nombre)',
     'card.updateType.VENUE': 'Lugar nuevo', 'card.updateType.IMAGE': 'Foto nueva',
@@ -800,6 +810,9 @@ const I18N_DICT = {
     'card.field.openingHours': 'Horaires', 'card.field.streetID': 'Rue',
     'card.field.cityID': 'Ville', 'card.field.residential': 'Résidentiel',
     'card.field.brand': 'Marque', 'card.field.entryExitPoints': 'Point d’entrée/sortie',
+    // Champs vus dans des demandes RÉELLES qui n’avaient pas de clé.
+    'card.field.externalProviderIDs': 'Lien avec Google', 'card.field.services': 'Services',
+    'card.field.lockRank': 'Niveau de verrouillage', 'card.field.categoryAttributes': 'Attributs de catégorie',
     'card.value.empty': '(vide)', 'card.value.yes': 'Oui', 'card.value.no': 'Non',
     'card.value.unnamed': '(sans nom)',
     'card.updateType.VENUE': 'Nouveau lieu', 'card.updateType.IMAGE': 'Nouvelle photo',

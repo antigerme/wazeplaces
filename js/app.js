@@ -867,7 +867,7 @@ function populateCountrySelect() {
         }
     }
 
-    select.innerHTML = countries.map(c =>
+    select.innerHTML = ordenarPorNome(countries).map(c =>
         `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
     ).join('');
 
@@ -879,6 +879,28 @@ function populateCountrySelect() {
         // Aplicar (antes, abrir o modal já trocava o país mesmo cancelando).
         select.value = countries[0].id;
     }
+}
+
+// Ordena nomes na colação do idioma ATUAL. Fica no cliente porque é o único
+// lado que conhece o idioma — o servidor ordenava com 'pt-BR' cravado, aplicando
+// regra portuguesa à lista de um editor francês.
+//
+// MEDIDO contra o Waze de verdade (248 países, cookies reais do owner), e o
+// resultado corrige o que eu supunha: os nomes de país vêm SEMPRE EM INGLÊS
+// ("France", "Germany", "Spain"), e o Waze ignora Accept-Language, Referer e
+// ?language= nesses endpoints. Só 3 nomes têm acento (Curaçao, Côte d’Ivoire,
+// Saint Barthélemy) e pt/en/es/fr os ordenam IGUAL — a ordem é idêntica nos
+// quatro. Nomes de estado vêm no idioma local (Amapá, Ceará), que é o nome
+// próprio deles: não há tradução a fazer.
+//
+// Ou seja: hoje isto não muda um pixel. Está aqui porque a decisão pertence a
+// quem sabe o idioma, e porque a ordem DIVERGE em línguas de colação diferente
+// (medido: sueco difere no índice 52, por causa do Å/Ä/Ö no fim do alfabeto).
+// Se entrar sueco/polonês/turco, aí a ordem passa a mudar ao trocar de idioma
+// com o modal aberto — e só então vale reordenar em aplicarIdioma().
+function ordenarPorNome(itens) {
+    const colator = new Intl.Collator(i18nLocale(), { sensitivity: 'base', numeric: true });
+    return [...itens].sort((a, b) => colator.compare(String(a.name || ''), String(b.name || '')));
 }
 
 async function loadStatesIntoSelect(countryId) {
@@ -897,7 +919,7 @@ async function loadStatesIntoSelect(countryId) {
         }
     }
 
-    for (const s of states) {
+    for (const s of ordenarPorNome(states)) {
         const opt = document.createElement('option');
         opt.value = s.id;
         opt.textContent = s.name;

@@ -452,7 +452,59 @@ const formatValue = (value) => {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'boolean') return value;
   if (Array.isArray(value)) return value.map((v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))).join(', ');
+  // Objeto simples caía no String(value) e chegava na tela como "[object Object]"
+  // — visto num pedido REAL de mudança de geometria (AmBev, Manaus), em qualquer
+  // idioma. Array já era tratado; objeto não, e o `geometry` do Waze é GeoJSON.
+  // O caso bonito de geometria é formatado no laço de changes (formatGeometry);
+  // isto é a rede pra QUALQUER campo novo que venha como objeto: JSON feio é
+  // legível e diagnosticável — "[object Object]" não diz nem que campo era.
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value); } catch { return null; }
+  }
   return String(value);
+};
+
+// Geometria do Waze é GeoJSON (Point/Polygon/MultiPolygon). O que o editor quer
+// ler é a coordenada, não a estrutura. Ponto decimal e não vírgula de propósito:
+// coordenada se escreve com ponto em qualquer idioma no contexto de mapas.
+export const formatGeometry = (geom) => {
+  const par = extractLonLatDeep(geom);
+  if (!par) return null;
+  const [lon, lat] = par;
+  const coord = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+  // Point é um ponto só: a coordenada é a geometria inteira, e pronto.
+  const tipo = geom && typeof geom === 'object' ? String(geom.type || '') : '';
+  if (tipo === 'Point' || !tipo) return coord;
+  // Polígono NÃO: mostrar só o primeiro vértice faria um polígono que mudou nos
+  // outros vértices parecer IDÊNTICO ao anterior — pior que o "[object Object]"
+  // de antes, porque afirma uma igualdade falsa em vez de só ser feio. O total
+  // de vértices desempata os casos comuns (mover/redesenhar muda a contagem ou
+  // o primeiro ponto) sem encher a linha de números.
+  return `${coord} · ${contarVertices(geom)} pts`;
+};
+
+const contarVertices = (geom) => {
+  let n = 0;
+  const desce = (c) => {
+    if (!Array.isArray(c)) return;
+    if (typeof c[0] === 'number' && typeof c[1] === 'number') { n++; return; }
+    for (const item of c) desce(item);
+  };
+  desce(geom && geom.coordinates);
+  return n;
+};
+
+// Mesmo desce-recursivo do buildPlacesFromSearch, mas no escopo do módulo pra
+// o formatGeometry poder usar (lá ele é local a uma função).
+const extractLonLatDeep = (coords) => {
+  if (!Array.isArray(coords)) {
+    if (coords && typeof coords === 'object' && coords.coordinates) return extractLonLatDeep(coords.coordinates);
+    return null;
+  }
+  if (coords.length === 0) return null;
+  if (typeof coords[0] === 'number' && typeof coords[1] === 'number') return [coords[0], coords[1]];
+  if (Array.isArray(coords[0]) || (coords[0] && typeof coords[0] === 'object')) return extractLonLatDeep(coords[0]);
+  return null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -790,11 +842,15 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
             const label = fieldLabels[k] || (k.charAt(0).toUpperCase() + k.slice(1));
             const resolvedFrom = resolveIdField(k, venue[k] ?? null);
             const resolvedTo = resolveIdField(k, newValue);
+            // Geometria primeiro: é o campo que chegava como "[object Object]".
+            const fmt = k === 'geometry'
+              ? (v) => (formatGeometry(v) ?? formatValue(v))
+              : formatValue;
             changes.push({
               field: k,
               label,
-              from: resolvedFrom !== null ? resolvedFrom : formatValue(venue[k] ?? null),
-              to: resolvedTo !== null ? resolvedTo : formatValue(newValue),
+              from: resolvedFrom !== null ? resolvedFrom : fmt(venue[k] ?? null),
+              to: resolvedTo !== null ? resolvedTo : fmt(newValue),
             });
           }
         }
@@ -989,7 +1045,12 @@ async function handleListaPaises(data, { sessions }) {
     abbr: c.abbr || '',
     env: String(c.env || 'row').toLowerCase(),
   }));
-  countries.sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'));
+  // Ordem BASE, só pra resposta ser estável (cache, teste, outro consumidor).
+  // O locale aqui é 'en' e não 'pt-BR' porque o servidor NÃO SABE quem está
+  // lendo: qualquer idioma que ele escolhesse estaria errado pra alguém — e
+  // 'pt-BR' ordenava a lista de um editor francês por regra portuguesa. Quem
+  // ordena de verdade é o cliente, que conhece o idioma (ordenarPorNome em app.js).
+  countries.sort((a, b) => String(a.name).localeCompare(String(b.name), 'en'));
   return { status: 200, body: { success: true, countries } };
 }
 
@@ -1019,7 +1080,12 @@ async function handleListaEstados(data, { sessions }) {
     if (Number(s.countryId) !== countryId) continue;
     states.push({ id: s.id ?? null, name: s.name || '', countryId: s.countryId ?? null });
   }
-  states.sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'));
+  // Ordem BASE, só pra resposta ser estável (cache, teste, outro consumidor).
+  // O locale aqui é 'en' e não 'pt-BR' porque o servidor NÃO SABE quem está
+  // lendo: qualquer idioma que ele escolhesse estaria errado pra alguém — e
+  // 'pt-BR' ordenava a lista de um editor francês por regra portuguesa. Quem
+  // ordena de verdade é o cliente, que conhece o idioma (ordenarPorNome em app.js).
+  states.sort((a, b) => String(a.name).localeCompare(String(b.name), 'en'));
   return { status: 200, body: { success: true, states } };
 }
 

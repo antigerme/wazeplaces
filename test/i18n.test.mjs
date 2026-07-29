@@ -285,3 +285,40 @@ test('i18n: mensagem do servidor passa pelo tradutor, não pelo ||', () => {
   assert.equal(cruas.length, 0,
     `${cruas.length} ponto(s) voltaram a mostrar result.error direto — use msgDoServidor()`);
 });
+
+// ── O manifest é servido IGUAL pra todo mundo ──────────────────────────────
+// Não tem como traduzi-lo por leitor: é arquivo estático, e o sistema o lê uma
+// vez, na instalação. Então o texto dele é neutro — o mesmo critério do
+// LANG_FALLBACK, que atende quem a app não consegue detectar. Estava em
+// português: nome, descrição, `lang`, as duas legendas de screenshot e os DOIS
+// atalhos (que aparecem no toque longo do ícone no Android) — 10 strings, e eu
+// só tinha achado 3 na primeira varredura porque parei no topo do arquivo.
+test('manifest: texto neutro e lang igual ao LANG_FALLBACK', () => {
+  const man = JSON.parse(read('manifest.json'));
+  const fallback = (read('js/i18n.js').match(/LANG_FALLBACK\s*=\s*'([a-z]{2})'/) || [])[1];
+  assert.ok(fallback, "não achei o LANG_FALLBACK em js/i18n.js");
+  assert.equal(man.lang, fallback,
+    `manifest.lang (${man.lang}) tem que ser o LANG_FALLBACK (${fallback}): os dois respondem ` +
+    'à mesma pergunta — o que mostrar pra quem a app não sabe identificar');
+
+  // Diacrítico de pt/es/fr em qualquer campo de TEXTO do manifest. Não é prova
+  // de idioma, é farol: acusa a recaída óbvia (voltar a escrever "Validação",
+  // "Atualizar", "Préférences") sem tentar adivinhar língua.
+  const textos = [];
+  const colher = (o, caminho) => {
+    if (typeof o === 'string') { textos.push([caminho, o]); return; }
+    if (Array.isArray(o)) return o.forEach((v, i) => colher(v, `${caminho}[${i}]`));
+    if (o && typeof o === 'object') {
+      for (const [k, v] of Object.entries(o)) {
+        if (['src', 'type', 'sizes', 'purpose', 'url', 'id', 'start_url', 'scope',
+             'display', 'orientation', 'dir', 'lang', 'background_color', 'theme_color'].includes(k)) continue;
+        colher(v, caminho ? `${caminho}.${k}` : k);
+      }
+    }
+  };
+  colher(man, '');
+  const comAcento = textos.filter(([, v]) => /[ãõçáéíóúâêôàèùïüñ]/i.test(v));
+  assert.equal(comAcento.length, 0,
+    'texto acentuado no manifest (ele é servido igual pra todo mundo):\n' +
+    comAcento.map(([c, v]) => `  ${c} → ${v}`).join('\n'));
+});
