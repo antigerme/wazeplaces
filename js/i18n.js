@@ -52,7 +52,7 @@ const I18N_DICT = {
     'filters.section.location': 'Localização',
     'filters.language.label': 'Idioma',
     'prefs.undo.label': 'Permitir desfazer ações',
-    'prefs.undo.desc': 'Mostra um aviso por 3 segundos pra você desfazer "Lido" ou "Rejeitar" antes do envio.',
+    'prefs.undo.desc': 'Mostra um aviso por {undoSeg} segundos pra você desfazer "Lido" ou "Rejeitar" antes do envio.',
     'prefs.devMode.label': 'Modo Desenvolvedor 🛠️',
     'prefs.devMode.desc': 'Remove restrições da app (ex.: trava do "Permitir desfazer ações"). Use com cuidado — ações vão direto pro Waze sem janela de undo.',
     'filters.unreadOnly.label': 'Apenas pedidos não lidos',
@@ -158,10 +158,21 @@ const I18N_DICT = {
     'help.howToUse.step3': 'Exporte seus cookies usando uma extensão de navegador',
     'help.howToUse.step4': 'Faça upload ou cole o conteúdo do <code>cookies.txt</code>',
     'help.howToUse.step5': 'Processe os cards (botões, arraste ou setas do teclado; <code>z</code> desfaz)',
+    'help.howToUse.step6': 'Já pegou o ritmo? Em <strong>Filtros → Preferências</strong> dá pra desligar a espera do Desfazer e tratar sem pausa',
     'help.important.title': 'Importante:',
     'help.important.body': 'Esta aplicação <strong>nunca aprova</strong> places — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs">↗</span> no card.',
     'help.security.title': 'Segurança:',
     'help.security.body': 'Os cookies são criptografados no servidor com chave secreta e descartados após 21 dias sem uso. O cliente só guarda um token de sessão, que pode ser invalidado a qualquer momento pelo botão de "Sair".',
+    'help.privacy.title': 'Privacidade e dados:',
+    'help.privacy.server': 'No servidor fica só uma coisa: os seus cookies do Waze, criptografados (AES-256-GCM). Nada além disso.',
+    'help.privacy.notStored': 'Os pedidos NÃO são guardados. Nome, foto, endereço e coordenada de place não são gravados em lugar nenhum — a fila existe só na memória, enquanto a app está aberta.',
+    'help.privacy.retention': 'Prazo: 21 dias sem uso, ou até você tocar em “Sair” — o que vier primeiro. Código de pareamento dura 5 minutos e é de uso único.',
+    'help.privacy.device': 'Neste aparelho ficam placar, filtros, preferências e histórico. Todos apagados no “Sair”.',
+    'help.privacy.credentials': 'Seus cookies são credenciais: permitem que a app aja no Waze em seu nome. Ela só rejeita ou marca como lido — nunca aprova.',
+    'help.privacy.infra': 'Roda na Cloudflare (hospedagem e medição de acesso sem cookies). Sem anúncios e sem rastreadores.',
+    'help.privacy.contact': 'Dúvidas, acesso aos seus dados ou pedido de exclusão: fale com <a href="https://www.waze.com/user/editor/antigerme" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">@antigerme</a>.',
+    'modal.logout.waze': 'Isto apaga os dados daqui e do servidor, mas <strong>não desconecta você do Waze</strong> — os seus cookies continuam válidos. Para encerrar de verdade, saia também no <a href="https://www.waze.com/editor" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">Waze Map Editor</a>.',
+    'toast.logoutServerFailed': 'Seus dados saíram deste aparelho. A limpeza no servidor não completou (sem conexão) — ela acontece sozinha em até 21 dias.',
     'help.extensions.title': 'Extensões recomendadas:',
     'help.extensions.chrome': '<strong>Chrome/Edge:</strong> "Get cookies.txt LOCALLY"',
     'help.extensions.firefox': '<strong>Firefox:</strong> "cookies.txt"',
@@ -181,6 +192,7 @@ const I18N_DICT = {
     'toast.dismissHint': 'Toque para dispensar', 'toast.unexpectedError': 'Erro inesperado: {msg}',
     'toast.unexpectedError.reload': 'recarregue a página', 'toast.newVersion': 'Nova versão disponível. Atualizando…',
     'toast.undoUnlocked': '🚗💨 Mandou bem, wazer! {n} pedidos tratados — o Desfazer virou opcional. Toque pra assumir o volante.',
+    'toast.undoHint': 'Você não desfez nenhum dos últimos {n} pedidos. Dá pra desligar a espera de {undoSeg}s e ir direto ao próximo — toque pra ajustar.',
     'auth.pairBtn': 'Entrar com um código',
     'pair.createBtn': 'Conectar outro aparelho',
     'pair.show.title': 'Conectar outro aparelho',
@@ -255,7 +267,7 @@ const I18N_DICT = {
     'filters.section.location': 'Location',
     'filters.language.label': 'Language',
     'prefs.undo.label': 'Allow undoing actions',
-    'prefs.undo.desc': 'Shows a 3-second banner so you can undo "Read" or "Reject" before it is sent.',
+    'prefs.undo.desc': 'Shows a {undoSeg}-second banner so you can undo "Read" or "Reject" before it is sent.',
     'prefs.devMode.label': 'Developer Mode 🛠️',
     'prefs.devMode.desc': 'Removes app restrictions (e.g. the "Allow undoing actions" lock). Use carefully — actions go straight to Waze with no undo window.',
     'filters.unreadOnly.label': 'Unread requests only',
@@ -348,10 +360,21 @@ const I18N_DICT = {
     'help.howToUse.step3': 'Export your cookies using a browser extension',
     'help.howToUse.step4': 'Upload or paste the contents of <code>cookies.txt</code>',
     'help.howToUse.step5': 'Process the cards (buttons, drag, or keyboard arrows; <code>z</code> undoes)',
+    'help.howToUse.step6': 'Got the hang of it? In <strong>Filters → Preferences</strong> you can turn off the Undo wait and work without pauses',
     'help.important.title': 'Important:',
     'help.important.body': 'This app <strong>never approves</strong> places — it only rejects or marks as read. To approve, open it in WME via the <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs">↗</span> button on the card.',
     'help.security.title': 'Security:',
     'help.security.body': 'Cookies are encrypted on the server with a secret key and discarded after 21 days of no use. The client only keeps a session token, which can be invalidated anytime via the "Log out" button.',
+    'help.privacy.title': 'Privacy and data:',
+    'help.privacy.server': 'Only one thing lives on the server: your Waze cookies, encrypted (AES-256-GCM). Nothing else.',
+    'help.privacy.notStored': 'Requests are NOT stored. Place names, photos, addresses and coordinates are never written anywhere — the queue only exists in memory, while the app is open.',
+    'help.privacy.retention': 'Retention: 21 days without use, or until you tap “Log out” — whichever comes first. Pairing codes last 5 minutes and are single-use.',
+    'help.privacy.device': 'On this device: score, filters, preferences and history. All erased on “Log out”.',
+    'help.privacy.credentials': 'Your cookies are credentials: they let the app act on Waze on your behalf. It only rejects or marks as read — it never approves.',
+    'help.privacy.infra': 'Runs on Cloudflare (hosting and cookieless traffic measurement). No ads, no trackers.',
+    'help.privacy.contact': 'Questions, access to your data or erasure requests: contact <a href="https://www.waze.com/user/editor/antigerme" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">@antigerme</a>.',
+    'modal.logout.waze': 'This erases data from here and from the server, but <strong>does not log you out of Waze</strong> — your cookies stay valid. To fully disconnect, also log out of the <a href="https://www.waze.com/editor" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">Waze Map Editor</a>.',
+    'toast.logoutServerFailed': 'Your data is gone from this device. Server cleanup did not complete (no connection) — it happens on its own within 21 days.',
     'help.extensions.title': 'Recommended extensions:',
     'help.extensions.chrome': '<strong>Chrome/Edge:</strong> "Get cookies.txt LOCALLY"',
     'help.extensions.firefox': '<strong>Firefox:</strong> "cookies.txt"',
@@ -370,6 +393,7 @@ const I18N_DICT = {
     'toast.dismissHint': 'Tap to dismiss', 'toast.unexpectedError': 'Unexpected error: {msg}',
     'toast.unexpectedError.reload': 'reload the page', 'toast.newVersion': 'New version available. Updating…',
     'toast.undoUnlocked': '🚗💨 Nice driving, Wazer! {n} requests handled — Undo is now optional. Tap to take the wheel.',
+    'toast.undoHint': 'You haven’t undone any of your last {n} requests. You can turn off the {undoSeg}s wait and go straight to the next one — tap to adjust.',
     'auth.pairBtn': 'Sign in with a code',
     'pair.createBtn': 'Connect another device',
     'pair.show.title': 'Connect another device',
@@ -438,7 +462,7 @@ const I18N_DICT = {
     'filters.section.location': 'Ubicación',
     'filters.language.label': 'Idioma',
     'prefs.undo.label': 'Permitir deshacer acciones',
-    'prefs.undo.desc': 'Muestra un aviso de 3 segundos para deshacer "Leído" o "Rechazar" antes del envío.',
+    'prefs.undo.desc': 'Muestra un aviso de {undoSeg} segundos para deshacer "Leído" o "Rechazar" antes del envío.',
     'prefs.devMode.label': 'Modo Desarrollador 🛠️',
     'prefs.devMode.desc': 'Elimina restricciones de la app (ej.: el bloqueo de "Permitir deshacer acciones"). Úsalo con cuidado — las acciones van directo a Waze sin ventana de deshacer.',
     'filters.unreadOnly.label': 'Solo solicitudes no leídas',
@@ -531,10 +555,21 @@ const I18N_DICT = {
     'help.howToUse.step3': 'Exporta tus cookies con una extensión de navegador',
     'help.howToUse.step4': 'Sube o pega el contenido de <code>cookies.txt</code>',
     'help.howToUse.step5': 'Procesa las tarjetas (botones, arrastre o flechas del teclado; <code>z</code> deshace)',
+    'help.howToUse.step6': '¿Ya agarraste el ritmo? En <strong>Filtros → Preferencias</strong> puedes desactivar la espera de Deshacer y trabajar sin pausas',
     'help.important.title': 'Importante:',
     'help.important.body': 'Esta app <strong>nunca aprueba</strong> places — solo rechaza o marca como leído. Para aprobar, ábrelo en WME con el botón <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs">↗</span> de la tarjeta.',
     'help.security.title': 'Seguridad:',
     'help.security.body': 'Las cookies se cifran en el servidor con una clave secreta y se descartan tras 21 días sin uso. El cliente solo guarda un token de sesión, que puede invalidarse en cualquier momento con el botón "Salir".',
+    'help.privacy.title': 'Privacidad y datos:',
+    'help.privacy.server': 'En el servidor hay una sola cosa: tus cookies de Waze, cifradas (AES-256-GCM). Nada más.',
+    'help.privacy.notStored': 'Las solicitudes NO se guardan. Nombre, foto, dirección y coordenada de un lugar no se escriben en ningún sitio — la fila solo existe en memoria, mientras la app está abierta.',
+    'help.privacy.retention': 'Plazo: 21 días sin uso, o hasta que toques “Salir” — lo que ocurra primero. El código de vinculación dura 5 minutos y es de un solo uso.',
+    'help.privacy.device': 'En este dispositivo quedan marcador, filtros, preferencias e historial. Todo se borra al “Salir”.',
+    'help.privacy.credentials': 'Tus cookies son credenciales: permiten que la app actúe en Waze en tu nombre. Solo rechaza o marca como leído — nunca aprueba.',
+    'help.privacy.infra': 'Funciona en Cloudflare (alojamiento y medición de tráfico sin cookies). Sin anuncios ni rastreadores.',
+    'help.privacy.contact': 'Dudas, acceso a tus datos o solicitud de eliminación: contacta a <a href="https://www.waze.com/user/editor/antigerme" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">@antigerme</a>.',
+    'modal.logout.waze': 'Esto borra los datos de aquí y del servidor, pero <strong>no te desconecta de Waze</strong> — tus cookies siguen válidas. Para cerrar de verdad, sal también del <a href="https://www.waze.com/editor" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">Waze Map Editor</a>.',
+    'toast.logoutServerFailed': 'Tus datos salieron de este dispositivo. La limpieza en el servidor no se completó (sin conexión) — ocurre sola en hasta 21 días.',
     'help.extensions.title': 'Extensiones recomendadas:',
     'help.extensions.chrome': '<strong>Chrome/Edge:</strong> "Get cookies.txt LOCALLY"',
     'help.extensions.firefox': '<strong>Firefox:</strong> "cookies.txt"',
@@ -553,6 +588,7 @@ const I18N_DICT = {
     'toast.dismissHint': 'Toca para descartar', 'toast.unexpectedError': 'Error inesperado: {msg}',
     'toast.unexpectedError.reload': 'recarga la página', 'toast.newVersion': 'Nueva versión disponible. Actualizando…',
     'toast.undoUnlocked': '🚗💨 ¡Bien conducido, wazer! {n} solicitudes tratadas — Deshacer ahora es opcional. Toca para tomar el volante.',
+    'toast.undoHint': 'No deshiciste ninguna de tus últimas {n} solicitudes. Puedes desactivar la espera de {undoSeg}s e ir directo a la siguiente — toca para ajustarlo.',
     'auth.pairBtn': 'Entrar con un código',
     'pair.createBtn': 'Conectar otro dispositivo',
     'pair.show.title': 'Conectar otro dispositivo',
@@ -612,10 +648,31 @@ function getLang() { return lang; }
 // locale pra Intl/toLocaleString acompanhar o idioma escolhido.
 function i18nLocale() { return lang === 'pt' ? 'pt-BR' : lang === 'es' ? 'es' : 'en'; }
 
+// ── Variáveis SEMPRE disponíveis para interpolação ────────────────────────
+// Existem porque `applyI18n()` chama t(chave) sem parâmetro nenhum: uma chave
+// ligada por data-i18n não tem call site onde passar valores, então qualquer
+// número na frase teria que ser escrito à mão nas três línguas — e mentir quando
+// a constante mudasse. Quem tem o número (app.js) REGISTRA aqui; o dicionário só
+// consome. A dependência aponta nessa direção porque i18n.js carrega ANTES do
+// app.js e não pode ler constante dele.
+//
+// O valor é uma FUNÇÃO, avaliada a cada t(): número formatado depende do locale,
+// e trocar de idioma sem reavaliar deixaria "2,5" no inglês (ou "2.5" no pt).
+const I18N_VARS = {};
+function setI18nVars(vars) { Object.assign(I18N_VARS, vars); }
+
 // t('chave', { name: 'Bia', n: 3 }) — escolhe a língua, cai pro pt e depois pra
-// própria chave se faltar, e interpola {name}/{n}.
+// própria chave se faltar, e interpola {name}/{n}. Os I18N_VARS entram também,
+// e o parâmetro explícito ganha do global em caso de nome repetido.
 function t(key, vars) {
   let s = (I18N_DICT[lang] && I18N_DICT[lang][key]) || I18N_DICT.pt[key] || key;
+  for (const k of Object.keys(I18N_VARS)) {
+    if (vars && k in vars) continue;
+    const marca = '{' + k + '}';
+    if (!s.includes(marca)) continue;   // não paga o custo de resolver o que não é usado
+    const v = I18N_VARS[k];
+    s = s.split(marca).join(String(typeof v === 'function' ? v() : v));
+  }
   if (vars) for (const k of Object.keys(vars)) s = s.split('{' + k + '}').join(String(vars[k]));
   return s;
 }
@@ -636,6 +693,7 @@ function applyI18n(root) {
 // acesso explícito; globalThis.I18N_DICT pra auditoria de paridade em Node.
 if (typeof window !== 'undefined') {
   window.t = t;
+  window.setI18nVars = setI18nVars;
   window.applyI18n = applyI18n;
   window.setLang = setLang;
   window.getLang = getLang;

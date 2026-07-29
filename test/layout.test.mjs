@@ -530,8 +530,17 @@ test('o aviso de conquista é banner (topo), não snackbar (rodapé)', () => {
   // Preferências, não confirma nada.
   const APP_ = read('js/app.js');
   assert.match(HTML, /id="bannerContainer"/, 'sumiu o container do banner no topo');
-  assert.match(APP_, /'achievement' \? 'bannerContainer' : 'toastContainer'/,
-    'a conquista voltou pro rodapé, onde tapa os botões do card');
+  // Comportamento, não a expressão literal: o que importa é que os avisos
+  // proeminentes (conquista e dica) escolham o container do TOPO. Antes isto
+  // fixava o ternário inteiro e reprovou uma refatoração que preservava a
+  // intenção — guard que trava a forma, e não o efeito, custa mais do que vale.
+  const corpoToast = APP_.match(/function showToast\([\s\S]*?const toast = document\.createElement/);
+  assert.ok(corpoToast, 'sumiu o showToast');
+  assert.match(corpoToast[0], /bannerContainer/, 'o aviso proeminente não vai mais pro topo');
+  for (const tipo of ['achievement', 'hint']) {
+    assert.match(corpoToast[0], new RegExp(`'${tipo}'`),
+      `"${tipo}" deixou de ser banner e voltou pro rodapé, onde tapa os botões do card`);
+  }
 
   // Ancorado abaixo do header — senão só troca de vítima e passa a tapar os
   // botões do próprio header.
@@ -929,4 +938,144 @@ test('o placar não "compacta" com regra que não compacta nada', () => {
   // O rótulo tem piso: 11px é o mínimo legível (M3) e ele já está nele.
   assert.doesNotMatch(baixo[0], /#placarGrid[^}]*font-size:\s*0\.6[0-4]/,
     'rótulo do placar abaixo do piso de 11px');
+});
+
+// ── Dica "você nunca desfaz" ───────────────────────────────────────────────
+// O aviso de desbloqueio dispara na TRANSIÇÃO de cruzar a cota, e por isso não
+// alcança quem já estava acima dela quando a comemoração foi lançada
+// (`initUndoGateSeen` marca essa pessoa como "já viu"). Resultado real,
+// relatado por um editor: os mais ativos são justamente os que nunca ficaram
+// sabendo que a espera de 3s pode ser desligada — e são os que mais perdem com
+// ela. Este gatilho não depende de transição: conta janelas que expiraram sem
+// ninguém desfazer.
+test('a dica do Desfazer nasce de evidência, não de transição', () => {
+  const app = read('js/app.js');
+  // Só a expiração NATURAL conta. `execute()` forçado (sair da página, trocar
+  // filtro) despacha sem dar a janela inteira — não é decisão de não desfazer.
+  const timer = app.match(/const timerId = setTimeout\(\(\) => \{[\s\S]*?\}, UNDO_WINDOW_MS\);/);
+  assert.ok(timer, 'sumiu a janela do Desfazer');
+  assert.match(timer[0], /registrarJanelaSemUndo\(\)/,
+    'a janela expira sem registrar a evidência — a dica nunca dispara');
+  const forcado = app.match(/execute: \(\) => \{[\s\S]*?\n        \}/);
+  assert.ok(forcado && !/registrarJanelaSemUndo/.test(forcado[0]),
+    'despacho forçado conta como "não desfez" e infla a evidência');
+  // Quem desfaz de vez em quando não é o público da dica.
+  const undo = app.match(/undo: \(\) => \{[\s\S]*?\n        \}/);
+  assert.ok(undo, 'sumiu o undo da ação pendente');
+  assert.match(undo[0], /zerarJanelasSemUndo\(\)/, 'desfazer deixou de zerar a evidência');
+});
+
+test('a dica só aparece quando dá pra agir, e uma vez só', () => {
+  const app = read('js/app.js');
+  const i = app.indexOf('function checkDicaDesfazer');
+  assert.notEqual(i, -1, 'sumiu o checkDicaDesfazer()');
+  const corpo = app.slice(i, app.indexOf('\n}', i));
+  // Nunca ofereça o que não dá pra fazer AQUI (regra de ouro de interface):
+  // sem passar a cota o toggle está desabilitado e a dica vira beco sem saída.
+  assert.match(corpo, /if \(!canDisableUndo\(\)\) return/,
+    'a dica passou a oferecer o que o gate ainda bloqueia');
+  assert.match(corpo, /dicaDesfazerVista/, 'a dica perdeu o marcador de "uma vez só"');
+  assert.match(corpo, /undoEnabled === false\) return/,
+    'a dica é oferecida a quem já desligou a espera');
+  // Conquista e dica dizem a mesma coisa: quem recebe uma não recebe a outra.
+  const j = app.indexOf('function checkUndoGateUnlock');
+  const conquista = app.slice(j, app.indexOf('showToast', j));
+  assert.match(conquista, /dicaDesfazerVista = true/,
+    'cruzar a cota não silencia a dica — os dois banners saem quase juntos');
+});
+
+test('a Ajuda conta que a espera do Desfazer pode ser desligada', () => {
+  // A opção existia sem estar escrita em lugar nenhum: quem não recebeu o aviso
+  // só descobriria abrindo Filtros → Preferências por acaso.
+  assert.match(HTML, /data-i18n-html="help\.howToUse\.step6"/,
+    'a Ajuda parou de mencionar a preferência (e o markup exige data-i18n-html)');
+});
+
+// ── Contrato do "Sair" ─────────────────────────────────────────────────────
+// Decisão do owner, e o motivo importa: "se pedir para sair, é realmente para
+// sair/limpar de tudo" — privacidade, não conveniência. Só que nada impedia
+// alguém de gravar uma chave nova no localStorage e esquecer de apagá-la; foi
+// exatamente o que aconteceu com o marcador do convite de instalar, que ficou
+// pra trás por descuido. Este guard obriga QUEM CRIA uma chave a decidir o que
+// acontece com ela no logout — apagar ou justificar por que fica.
+test('toda chave gravada no aparelho é resolvida no logout', () => {
+  const app = read('js/app.js');
+  const api = read('js/api.js');
+  const fonte = app + '\n' + api;
+
+  // Apagadas no logout, cada uma pelo seu meio. Sobrescrever com o padrão
+  // (saveStats e cia.) conta: o valor antigo deixa de existir.
+  const APAGADAS = {
+    STATS_KEY: 'saveStats()',
+    FILTERS_KEY: 'saveFilters()',
+    PREFERENCES_KEY: 'savePreferences()',
+    DEVMODE_KEY: 'saveDevMode()',
+    HISTORY_KEY: 'safeLS.remove(HISTORY_KEY)',
+    CHAVE_INSTALL_DISPENSADO: 'safeLS.remove(CHAVE_INSTALL_DISPENSADO)',
+    waze_session_token: 'API.setSession(null)',
+    waze_region: "API.setRegion('row')",
+    waze_country: 'API.setCountry(30)',
+  };
+  // Ficam de propósito: são preferências do APARELHO, não dados de quem entrou.
+  // Apagar o idioma seria hostil — devolveria a pessoa a uma língua que ela
+  // pode não ler, justamente quando está deslogada e sem o botão de Filtros.
+  const MANTIDAS = ['THEME_KEY', 'LANG_KEY'];
+
+  // Nome da constante quando existe; senão a própria chave literal.
+  const porConstante = new Map();
+  for (const m of fonte.matchAll(/const\s+([A-Z_a-z]+)\s*=\s*'(waze[_a-z0-9]*)'/g)) {
+    porConstante.set(m[2], m[1]);
+  }
+  const chaves = new Set();
+  for (const m of fonte.matchAll(/'(waze[_a-z0-9]*)'/g)) chaves.add(m[1]);
+
+  const naoClassificadas = [];
+  for (const chave of chaves) {
+    const nome = porConstante.get(chave) || chave;
+    if (!(nome in APAGADAS) && !MANTIDAS.includes(nome)) naoClassificadas.push(`${chave} (${nome})`);
+  }
+  assert.equal(naoClassificadas.length, 0,
+    'chave nova no armazenamento sem decisão de logout — apague em handleLogout ou\n'
+    + 'declare em MANTIDAS aqui, com o motivo:\n' + naoClassificadas.join('\n'));
+
+  const i = app.indexOf('async function handleLogout');
+  assert.notEqual(i, -1, 'sumiu o handleLogout');
+  const corpo = app.slice(i, app.indexOf('\nfunction resetQueue', i));
+  for (const [nome, chamada] of Object.entries(APAGADAS)) {
+    assert.ok(corpo.includes(chamada), `o logout parou de limpar ${nome} (esperava "${chamada}")`);
+  }
+});
+
+test('o logout não espera a rede pra limpar o aparelho, e não falha calado', () => {
+  const app = read('js/app.js');
+  const i = app.indexOf('async function handleLogout');
+  const corpo = app.slice(i, app.indexOf('\nfunction resetQueue', i));
+  // Ordem: o token sai do armazenamento ANTES de qualquer await de rede. Pedir
+  // pra sair tem que ser instantâneo — a exclusão remota é melhor-esforço.
+  const posLimpeza = corpo.indexOf('API.setSession(null)');
+  const posRede = corpo.indexOf('API.destroySession(');
+  assert.ok(posLimpeza !== -1 && posRede !== -1, 'sumiu a limpeza local ou a exclusão remota');
+  assert.ok(posLimpeza < posRede, 'a limpeza local voltou a esperar a rede');
+  // E a exclusão no servidor não pode falhar em silêncio: o `_post` devolve
+  // erro em vez de lançar, então sem isto ninguém ficava sabendo.
+  assert.match(corpo, /callWithRetry\(\(\) => API\.destroySession\(/,
+    'a exclusão no servidor perdeu a retentativa');
+  assert.match(corpo, /toast\.logoutServerFailed/,
+    'a exclusão no servidor voltou a falhar sem avisar o editor');
+});
+
+test('a Ajuda diz o que a app guarda, por quanto tempo e como apagar', () => {
+  // GDPR Art. 13 / LGPD Art. 9 — mas antes disso é confiança: a app pede os
+  // cookies de sessão do editor, que permitem agir no Waze em nome dele.
+  for (const chave of ['help.privacy.server', 'help.privacy.notStored', 'help.privacy.retention',
+                       'help.privacy.device', 'help.privacy.credentials', 'help.privacy.infra']) {
+    assert.ok(HTML.includes(`data-i18n="${chave}"`), `a Ajuda perdeu "${chave}"`);
+  }
+  // Canal para exercício de direitos (LGPD Art. 18) — com link, então -html.
+  assert.ok(HTML.includes('data-i18n-html="help.privacy.contact"'),
+    'sumiu o contato do responsável pelos dados');
+  // Sair da app não desloga do Waze: sem isto, quem sai preocupado conclui que
+  // cortou o acesso — e não cortou.
+  assert.ok(HTML.includes('data-i18n-html="modal.logout.waze"'),
+    'o diálogo de sair parou de avisar que os cookies seguem válidos no Waze');
 });

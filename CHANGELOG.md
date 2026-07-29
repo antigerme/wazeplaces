@@ -8,6 +8,23 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.29-06
+
+### Adicionado
+- **A Ajuda agora tem "Privacidade e dados".** Em sete linhas: no servidor fica só o seu cookie do Waze, criptografado; nenhum dado de pedido é gravado em lugar nenhum; o prazo é de 21 dias ou até você sair; o que fica neste aparelho; que os seus cookies são credenciais e que a app nunca aprova nada; onde ela roda; e com quem falar para acessar ou apagar seus dados.
+- **O diálogo de "Sair" avisa que sair da app não desconecta você do Waze.** Os seus cookies continuam válidos lá — quem quiser encerrar de verdade precisa sair também no Waze Map Editor, e agora o link está ali.
+
+### Corrigido
+- **"Sair" com a internet fora não engana mais.** A limpeza do aparelho sempre aconteceu; a do servidor falhava em silêncio. Agora ela é tentada de novo e, se ainda assim não completar, você é avisado do que ficou pendente — e de que expira sozinho em até 21 dias.
+- **Sair ficou instantâneo.** Antes a tela esperava a resposta do servidor para limpar; agora o aparelho é limpo na hora (medido: 26ms) e a parte remota acontece em seguida.
+- **O "Agora não" do convite de instalar também é apagado ao sair.** Era a única marca que ficava para trás.
+
+## v2026.07.29-05
+
+### Adicionado
+- **A app agora avisa quem nunca usa o "Desfazer".** Se você deixou passar 20 pedidos seguidos sem desfazer nenhum, ela conta que dá para desligar a espera de 3 segundos — uma vez só, num aviso no topo que abre a preferência com um toque. Antes, o único aviso aparecia no momento exato em que você cruzava a cota de liberação; quem já estava acima dela quando esse aviso foi criado nunca soube que a opção existia. Eram justamente os editores mais ativos — os que mais perdem tempo com a espera.
+- **A Ajuda passou a dizer que a opção existe.** Era o lugar onde alguém curioso iria procurar, e não estava escrito lá.
+
 ## v2026.07.29-04
 
 ### Corrigido

@@ -193,14 +193,18 @@ const API = {
         });
     },
 
-    async destroySession() {
-        const sessionToken = this.getSession();
+    // Aceita o token explicitamente porque o logout apaga o armazenamento local
+    // ANTES de esperar a rede: a limpeza daqui é instantânea (é o que o editor
+    // sente ao pedir pra sair) e a remota vira melhor-esforço com retentativa.
+    // Sem o parâmetro, usa o token guardado e limpa como antes.
+    async destroySession(tokenExplicito) {
+        const sessionToken = tokenExplicito || this.getSession();
         if (!sessionToken) return { success: true };
         const result = await this._post('sessao', {
             action: 'destroy',
             sessionToken
         });
-        this.setSession(null);
+        if (!tokenExplicito) this.setSession(null);
         return result;
     },
 

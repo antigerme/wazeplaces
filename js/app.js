@@ -11,6 +11,23 @@ const HISTORY_KEY = 'waze_places_history';
 const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
+
+// A duração da janela aparece em DUAS frases (o toggle nas Preferências e a dica
+// "você nunca desfaz"), nas três línguas — seis lugares onde o número estava
+// escrito à mão. Registrado como variável global de i18n, ele vem daqui: mexer
+// no UNDO_WINDOW_MS acima corrige os seis de uma vez.
+//
+// Função, não valor: é reavaliada a cada t(), então trocar de idioma reformata no
+// locale novo. Registrar o resultado formatado congelaria o separador decimal do
+// idioma que estava ativo na carga.
+//
+// Ponto conhecido: valor abaixo de 2000 produziria "1 segundos" no pt/es (o
+// projeto não tem ICU; plural são chaves separadas, ver CLAUDE.md). Nenhum valor
+// realista de janela de desfazer é < 2s, então não construí a maquinaria de
+// plural pra uma hipótese — mas se alguém baixar, é aqui que quebra.
+if (typeof setI18nVars === 'function') {
+    setI18nVars({ undoSeg: () => (UNDO_WINDOW_MS / 1000).toLocaleString(i18nLocale()) });
+}
 // Sem cap: a caixa de mudanças rola por dentro, cresce com o card e avisa que
 // rola (esmaecido de borda). Com `MAX_CHANGES_DISPLAY = 4` a 5ª mudança era
 // INALCANÇÁVEL — nem rolando — e a linha "+1 mais" gastava exatamente o espaço
@@ -56,7 +73,7 @@ const AppState = {
     _profilePromise: null,
     loadError: false,
     filters: { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
-    preferences: { undoEnabled: true },
+    preferences: { undoEnabled: true, semUndoSeguidas: 0 },
     devMode: { unlocked: false, active: false },
     profile: null,
     countries: [],
@@ -1227,7 +1244,11 @@ async function handleLogout() {
         AppState.pendingAction.cancel();
         AppState.pendingAction = null;
     }
-    await API.destroySession();
+    // O token sai do armazenamento AGORA e a limpeza local acontece inteira sem
+    // esperar rede nenhuma — pedir pra sair tem que ser instantâneo. A cópia
+    // serve pra exclusão no servidor, que vai depois, com retentativa.
+    const tokenParaApagar = API.getSession();
+    API.setSession(null);
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
     AppState.filters = { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
@@ -1239,6 +1260,9 @@ async function handleLogout() {
     AppState.inFlightActions = 0;
     AppState.history = {};
     safeLS.remove(HISTORY_KEY); // logout = esquecer tudo (inclui histórico)
+    // "Sair limpa tudo" não tem exceção que ninguém decidiu: este marcador (o
+    // "Agora não" do convite de instalar) ficava pra trás só por descuido.
+    safeLS.remove(CHAVE_INSTALL_DISPENSADO);
     saveStats();
     saveFilters();
     savePreferences();
@@ -1252,6 +1276,19 @@ async function handleLogout() {
     removeCurrentCardEl();
     showAuthScreen();
     showToast(t('toast.loggedOut'), 'info');
+
+    // A exclusão no servidor é METADE da promessa do "Sair", e falhava calada
+    // com a rede fora: o `_post` devolve erro em vez de lançar, então ninguém
+    // ficava sabendo. Agora tenta de novo (mesma política de transiente do resto
+    // da app) e, se ainda assim não for, diz o que aconteceu e o que acontece
+    // depois — o blob fica órfão (a chave é o hash do token, que já foi embora)
+    // e expira sozinho em até 21 dias.
+    if (tokenParaApagar) {
+        const saida = await callWithRetry(() => API.destroySession(tokenParaApagar));
+        if (!saida || !saida.success) {
+            showToast(t('toast.logoutServerFailed'), 'error', 9000);
+        }
+    }
 }
 
 function resetQueue() {
@@ -2216,6 +2253,9 @@ function scheduleAction(type, place, executor) {
             executed = true;
             AppState.pendingAction = null;
             removeUndoBanner();
+            // A janela correu inteira e ninguém desfez: evidência de que, pra
+            // este editor, o Desfazer é só espera (ver DICA_SEM_UNDO).
+            registrarJanelaSemUndo();
             runExecutor();
         }
     }, UNDO_WINDOW_MS);
@@ -2246,6 +2286,9 @@ function scheduleAction(type, place, executor) {
             if (!executed) {
                 executed = true;
                 clearTimeout(timerId);
+                // Usou: a evidência de "nunca desfaz" morre aqui e recomeça do
+                // zero. Quem desfaz de vez em quando não deve receber a dica.
+                zerarJanelasSemUndo();
                 if (type === 'read') AppState.stats.read = Math.max(0, AppState.stats.read - 1);
                 else if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
                 else if (type === 'skip') AppState.stats.skipped = Math.max(0, AppState.stats.skipped - 1);
@@ -2476,6 +2519,12 @@ function loadPreferences() {
             // Só copia se for boolean, pra initUndoGateSeen poder decidir depois.
             if (typeof parsed.undoGateSeen === 'boolean') {
                 AppState.preferences.undoGateSeen = parsed.undoGateSeen;
+            }
+            if (typeof parsed.dicaDesfazerVista === 'boolean') {
+                AppState.preferences.dicaDesfazerVista = parsed.dicaDesfazerVista;
+            }
+            if (typeof parsed.semUndoSeguidas === 'number' && parsed.semUndoSeguidas >= 0) {
+                AppState.preferences.semUndoSeguidas = parsed.semUndoSeguidas;
             }
         }
     } catch (e) {}
@@ -2826,6 +2875,10 @@ function checkUndoGateUnlock() {
     // Sem perfil a cota é Infinity — não dispara nada até o perfil chegar.
     if (!undoGateAtingido()) return;
     AppState.preferences.undoGateSeen = true;
+    // Este aviso já abre a mesma porta. Sem isto, quem cruza a cota com 20
+    // janelas sem desfazer nas costas (o L6 passa em 20 pedidos — dá empate)
+    // levaria os dois banners quase juntos, dizendo a mesma coisa duas vezes.
+    AppState.preferences.dicaDesfazerVista = true;
     savePreferences();
     dispararConfeteNaFila();
     showToast(
@@ -2872,6 +2925,77 @@ async function abrirPreferenciaDoUndo() {
     void linha.offsetWidth;   // reflow: sem isso a animação não reinicia
     linha.classList.add('pref-highlight');
     linha.addEventListener('animationend', () => linha.classList.remove('pref-highlight'), { once: true });
+}
+
+// ── Dica por COMPORTAMENTO: "você nunca desfaz" ───────────────────────────
+// O aviso de desbloqueio dispara na TRANSIÇÃO de cruzar a cota — e por isso
+// nunca alcança quem já estava acima dela quando a comemoração foi lançada
+// (`initUndoGateSeen` marca essa pessoa como "já viu", pra não parabenizar por
+// trabalho anterior ao deploy). O efeito colateral é que os editores MAIS
+// ativos são justamente os que nunca ficam sabendo que a espera pode ser
+// desligada — e são os que mais perdem com ela: 2431ms por pedido contra 33ms.
+//
+// Este gatilho não depende de transição nenhuma: conta janelas do Desfazer que
+// expiraram SEM ninguém desfazer — evidência do próprio editor de que, pra ele,
+// o recurso é só espera. Dispara uma vez.
+//
+// O LIMIAR NÃO É NÚMERO ESCOLHIDO A DEDO: é um orçamento de tempo. Quanto da
+// vida do editor a app deixa evaporar antes de mencionar que existe um
+// interruptor. Um minuto é a régua — dá pra sentir, e ainda é um oitavo do que
+// 200 pedidos custam (~8 min).
+const ESPERA_DESPERDICADA_ANTES_DA_DICA_MS = 60000;
+
+// Só a expiração NATURAL conta (ver registrarJanelaSemUndo), e uma janela que
+// expira sozinha custa exatamente UNDO_WINDOW_MS de tela travada: enquanto ela
+// corre, acoesTravadas() barra botão, gesto e tecla. Então o limiar é o orçamento
+// dividido pelo custo de UMA janela — hoje 60000/3000 = 20, o mesmo valor de
+// antes, agora derivado. Mexer no UNDO_WINDOW_MS reajusta sozinho, porque o que
+// a app promete é o MINUTO, não o vinte.
+//
+// Rank não entra aqui, de propósito: a cota do gate escala por rank porque mede
+// COMPETÊNCIA, e rank é proxy razoável disso. Isto mede PREFERÊNCIA revelada pelo
+// comportamento — existe L6 cauteloso e L1 apressado, e um minuto perdido é um
+// minuto perdido nos dois. Escalar por rank também disparia na hora pra quem a
+// dica existe: `stats` é acumulado (waze_places_stats), então quem já está muito
+// acima da cota satisfaz "cota + N" antes de tocar em nada, sem evidência alguma.
+const DICA_SEM_UNDO = Math.ceil(ESPERA_DESPERDICADA_ANTES_DA_DICA_MS / UNDO_WINDOW_MS);
+
+// Só a expiração natural conta. `execute()` forçado (sair da página, trocar
+// filtro) despacha sem dar a janela inteira — não é a pessoa decidindo não
+// desfazer, e contar isso inflaria a evidência.
+function registrarJanelaSemUndo() {
+    AppState.preferences.semUndoSeguidas = (AppState.preferences.semUndoSeguidas || 0) + 1;
+    savePreferences();
+    checkDicaDesfazer();
+}
+
+function zerarJanelasSemUndo() {
+    if (!AppState.preferences.semUndoSeguidas) return;
+    AppState.preferences.semUndoSeguidas = 0;
+    savePreferences();
+}
+
+function checkDicaDesfazer() {
+    if (AppState.preferences.dicaDesfazerVista) return;
+    if (AppState.preferences.undoEnabled === false) return;   // já desligado: nada a oferecer
+    if ((AppState.preferences.semUndoSeguidas || 0) < DICA_SEM_UNDO) return;
+    // Nunca ofereça o que não dá pra fazer AQUI: sem passar a cota o toggle está
+    // desabilitado, e a dica viraria beco sem saída. O contador continua correndo
+    // — quando a cota cair, a evidência já está pronta.
+    if (!canDisableUndo()) return;
+    AppState.preferences.dicaDesfazerVista = true;
+    savePreferences();
+    showToast(
+        // {undoSeg} é global (setI18nVars) — não passa aqui de propósito, pra ter
+        // UMA definição servindo esta frase e a de prefs.undo.desc, que é aplicada
+        // por applyI18n() e não tem call site onde passar parâmetro.
+        t('toast.undoHint', { n: DICA_SEM_UNDO }),
+        'hint',
+        // Mesma régua do aviso de conquista: banner do topo, com ação, uma vez
+        // na vida. 20s cobrem leitura tranquila e decisão sem correria.
+        20000,
+        abrirPreferenciaDoUndo
+    );
 }
 
 function canDisableUndo() {
@@ -2945,8 +3069,11 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
     // de 3 aparelhos (gotcha #26). Snackbar confirma o que você acabou de fazer;
     // banner é proeminente, tem ação e fica mais tempo. Este convida a abrir as
     // Preferências — não confirma nada.
-    const container = document.getElementById(
-        type === 'achievement' ? 'bannerContainer' : 'toastContainer');
+    // 'hint' segue a mesma régua da conquista: é banner, não snackbar — tem ação
+    // (abre as Preferências), fica mais tempo e não confirma nada que acabou de
+    // acontecer. O que muda é a cor: informar não é comemorar.
+    const ehBanner = type === 'achievement' || type === 'hint';
+    const container = document.getElementById(ehBanner ? 'bannerContainer' : 'toastContainer');
     const toast = document.createElement('div');
 
     const colors = {
@@ -2954,14 +3081,19 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
         error: 'bg-rose-600',
         info: 'bg-slate-800 dark:bg-slate-100 dark:text-slate-900',
         // Conquista: dourado, pra não se confundir com um "sucesso" qualquer.
-        achievement: 'bg-gradient-to-r from-amber-700 to-amber-800'
+        achievement: 'bg-gradient-to-r from-amber-700 to-amber-800',
+        // Dica: cyan da marca. Não é conquista (não houve mérito), não é erro e
+        // não é confirmação — é a app contando algo que ela observou.
+        hint: 'bg-gradient-to-r from-cyan-700 to-cyan-800'
     };
 
     const icons = {
         success: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
         error: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>',
         info: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
-        achievement: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 21h8m-4-4v4m6-17v4a6 6 0 11-12 0V4h12zm0 2h2a2 2 0 010 4h-2m-12-4H4a2 2 0 000 4h2"></path></svg>'
+        achievement: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 21h8m-4-4v4m6-17v4a6 6 0 11-12 0V4h12zm0 2h2a2 2 0 010 4h-2m-12-4H4a2 2 0 000 4h2"></path></svg>',
+        // Cronômetro: a dica é sobre TEMPO, e o ícone diz isso antes do texto.
+        hint: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
     };
 
     toast.className = `toast ${colors[type] || colors.info} text-white font-medium text-sm`;
