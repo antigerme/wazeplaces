@@ -8,6 +8,12 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.29-05
+
+### Adicionado
+- **A app agora avisa quem nunca usa o "Desfazer".** Se você deixou passar 20 pedidos seguidos sem desfazer nenhum, ela conta que dá para desligar a espera de 3 segundos — uma vez só, num aviso no topo que abre a preferência com um toque. Antes, o único aviso aparecia no momento exato em que você cruzava a cota de liberação; quem já estava acima dela quando esse aviso foi criado nunca soube que a opção existia. Eram justamente os editores mais ativos — os que mais perdem tempo com a espera.
+- **A Ajuda passou a dizer que a opção existe.** Era o lugar onde alguém curioso iria procurar, e não estava escrito lá.
+
 ## v2026.07.29-04
 
 ### Corrigido

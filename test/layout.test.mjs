@@ -530,8 +530,17 @@ test('o aviso de conquista é banner (topo), não snackbar (rodapé)', () => {
   // Preferências, não confirma nada.
   const APP_ = read('js/app.js');
   assert.match(HTML, /id="bannerContainer"/, 'sumiu o container do banner no topo');
-  assert.match(APP_, /'achievement' \? 'bannerContainer' : 'toastContainer'/,
-    'a conquista voltou pro rodapé, onde tapa os botões do card');
+  // Comportamento, não a expressão literal: o que importa é que os avisos
+  // proeminentes (conquista e dica) escolham o container do TOPO. Antes isto
+  // fixava o ternário inteiro e reprovou uma refatoração que preservava a
+  // intenção — guard que trava a forma, e não o efeito, custa mais do que vale.
+  const corpoToast = APP_.match(/function showToast\([\s\S]*?const toast = document\.createElement/);
+  assert.ok(corpoToast, 'sumiu o showToast');
+  assert.match(corpoToast[0], /bannerContainer/, 'o aviso proeminente não vai mais pro topo');
+  for (const tipo of ['achievement', 'hint']) {
+    assert.match(corpoToast[0], new RegExp(`'${tipo}'`),
+      `"${tipo}" deixou de ser banner e voltou pro rodapé, onde tapa os botões do card`);
+  }
 
   // Ancorado abaixo do header — senão só troca de vítima e passa a tapar os
   // botões do próprio header.
@@ -929,4 +938,55 @@ test('o placar não "compacta" com regra que não compacta nada', () => {
   // O rótulo tem piso: 11px é o mínimo legível (M3) e ele já está nele.
   assert.doesNotMatch(baixo[0], /#placarGrid[^}]*font-size:\s*0\.6[0-4]/,
     'rótulo do placar abaixo do piso de 11px');
+});
+
+// ── Dica "você nunca desfaz" ───────────────────────────────────────────────
+// O aviso de desbloqueio dispara na TRANSIÇÃO de cruzar a cota, e por isso não
+// alcança quem já estava acima dela quando a comemoração foi lançada
+// (`initUndoGateSeen` marca essa pessoa como "já viu"). Resultado real,
+// relatado por um editor: os mais ativos são justamente os que nunca ficaram
+// sabendo que a espera de 3s pode ser desligada — e são os que mais perdem com
+// ela. Este gatilho não depende de transição: conta janelas que expiraram sem
+// ninguém desfazer.
+test('a dica do Desfazer nasce de evidência, não de transição', () => {
+  const app = read('js/app.js');
+  // Só a expiração NATURAL conta. `execute()` forçado (sair da página, trocar
+  // filtro) despacha sem dar a janela inteira — não é decisão de não desfazer.
+  const timer = app.match(/const timerId = setTimeout\(\(\) => \{[\s\S]*?\}, UNDO_WINDOW_MS\);/);
+  assert.ok(timer, 'sumiu a janela do Desfazer');
+  assert.match(timer[0], /registrarJanelaSemUndo\(\)/,
+    'a janela expira sem registrar a evidência — a dica nunca dispara');
+  const forcado = app.match(/execute: \(\) => \{[\s\S]*?\n        \}/);
+  assert.ok(forcado && !/registrarJanelaSemUndo/.test(forcado[0]),
+    'despacho forçado conta como "não desfez" e infla a evidência');
+  // Quem desfaz de vez em quando não é o público da dica.
+  const undo = app.match(/undo: \(\) => \{[\s\S]*?\n        \}/);
+  assert.ok(undo, 'sumiu o undo da ação pendente');
+  assert.match(undo[0], /zerarJanelasSemUndo\(\)/, 'desfazer deixou de zerar a evidência');
+});
+
+test('a dica só aparece quando dá pra agir, e uma vez só', () => {
+  const app = read('js/app.js');
+  const i = app.indexOf('function checkDicaDesfazer');
+  assert.notEqual(i, -1, 'sumiu o checkDicaDesfazer()');
+  const corpo = app.slice(i, app.indexOf('\n}', i));
+  // Nunca ofereça o que não dá pra fazer AQUI (regra de ouro de interface):
+  // sem passar a cota o toggle está desabilitado e a dica vira beco sem saída.
+  assert.match(corpo, /if \(!canDisableUndo\(\)\) return/,
+    'a dica passou a oferecer o que o gate ainda bloqueia');
+  assert.match(corpo, /dicaDesfazerVista/, 'a dica perdeu o marcador de "uma vez só"');
+  assert.match(corpo, /undoEnabled === false\) return/,
+    'a dica é oferecida a quem já desligou a espera');
+  // Conquista e dica dizem a mesma coisa: quem recebe uma não recebe a outra.
+  const j = app.indexOf('function checkUndoGateUnlock');
+  const conquista = app.slice(j, app.indexOf('showToast', j));
+  assert.match(conquista, /dicaDesfazerVista = true/,
+    'cruzar a cota não silencia a dica — os dois banners saem quase juntos');
+});
+
+test('a Ajuda conta que a espera do Desfazer pode ser desligada', () => {
+  // A opção existia sem estar escrita em lugar nenhum: quem não recebeu o aviso
+  // só descobriria abrindo Filtros → Preferências por acaso.
+  assert.match(HTML, /data-i18n-html="help\.howToUse\.step6"/,
+    'a Ajuda parou de mencionar a preferência (e o markup exige data-i18n-html)');
 });

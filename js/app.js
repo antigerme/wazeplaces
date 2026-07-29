@@ -56,7 +56,7 @@ const AppState = {
     _profilePromise: null,
     loadError: false,
     filters: { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
-    preferences: { undoEnabled: true },
+    preferences: { undoEnabled: true, semUndoSeguidas: 0 },
     devMode: { unlocked: false, active: false },
     profile: null,
     countries: [],
@@ -2216,6 +2216,9 @@ function scheduleAction(type, place, executor) {
             executed = true;
             AppState.pendingAction = null;
             removeUndoBanner();
+            // A janela correu inteira e ninguém desfez: evidência de que, pra
+            // este editor, o Desfazer é só espera (ver DICA_SEM_UNDO).
+            registrarJanelaSemUndo();
             runExecutor();
         }
     }, UNDO_WINDOW_MS);
@@ -2246,6 +2249,9 @@ function scheduleAction(type, place, executor) {
             if (!executed) {
                 executed = true;
                 clearTimeout(timerId);
+                // Usou: a evidência de "nunca desfaz" morre aqui e recomeça do
+                // zero. Quem desfaz de vez em quando não deve receber a dica.
+                zerarJanelasSemUndo();
                 if (type === 'read') AppState.stats.read = Math.max(0, AppState.stats.read - 1);
                 else if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
                 else if (type === 'skip') AppState.stats.skipped = Math.max(0, AppState.stats.skipped - 1);
@@ -2476,6 +2482,12 @@ function loadPreferences() {
             // Só copia se for boolean, pra initUndoGateSeen poder decidir depois.
             if (typeof parsed.undoGateSeen === 'boolean') {
                 AppState.preferences.undoGateSeen = parsed.undoGateSeen;
+            }
+            if (typeof parsed.dicaDesfazerVista === 'boolean') {
+                AppState.preferences.dicaDesfazerVista = parsed.dicaDesfazerVista;
+            }
+            if (typeof parsed.semUndoSeguidas === 'number' && parsed.semUndoSeguidas >= 0) {
+                AppState.preferences.semUndoSeguidas = parsed.semUndoSeguidas;
             }
         }
     } catch (e) {}
@@ -2826,6 +2838,10 @@ function checkUndoGateUnlock() {
     // Sem perfil a cota é Infinity — não dispara nada até o perfil chegar.
     if (!undoGateAtingido()) return;
     AppState.preferences.undoGateSeen = true;
+    // Este aviso já abre a mesma porta. Sem isto, quem cruza a cota com 20
+    // janelas sem desfazer nas costas (o L6 passa em 20 pedidos — dá empate)
+    // levaria os dois banners quase juntos, dizendo a mesma coisa duas vezes.
+    AppState.preferences.dicaDesfazerVista = true;
     savePreferences();
     dispararConfeteNaFila();
     showToast(
@@ -2872,6 +2888,54 @@ async function abrirPreferenciaDoUndo() {
     void linha.offsetWidth;   // reflow: sem isso a animação não reinicia
     linha.classList.add('pref-highlight');
     linha.addEventListener('animationend', () => linha.classList.remove('pref-highlight'), { once: true });
+}
+
+// ── Dica por COMPORTAMENTO: "você nunca desfaz" ───────────────────────────
+// O aviso de desbloqueio dispara na TRANSIÇÃO de cruzar a cota — e por isso
+// nunca alcança quem já estava acima dela quando a comemoração foi lançada
+// (`initUndoGateSeen` marca essa pessoa como "já viu", pra não parabenizar por
+// trabalho anterior ao deploy). O efeito colateral é que os editores MAIS
+// ativos são justamente os que nunca ficam sabendo que a espera pode ser
+// desligada — e são os que mais perdem com ela: 2431ms por pedido contra 33ms.
+//
+// Este gatilho não depende de transição nenhuma: conta janelas do Desfazer que
+// expiraram SEM ninguém desfazer. Vinte seguidas é evidência do próprio editor
+// de que, pra ele, o recurso é só espera — ~48s jogados fora. Dispara uma vez.
+const DICA_SEM_UNDO = 20;
+
+// Só a expiração natural conta. `execute()` forçado (sair da página, trocar
+// filtro) despacha sem dar a janela inteira — não é a pessoa decidindo não
+// desfazer, e contar isso inflaria a evidência.
+function registrarJanelaSemUndo() {
+    AppState.preferences.semUndoSeguidas = (AppState.preferences.semUndoSeguidas || 0) + 1;
+    savePreferences();
+    checkDicaDesfazer();
+}
+
+function zerarJanelasSemUndo() {
+    if (!AppState.preferences.semUndoSeguidas) return;
+    AppState.preferences.semUndoSeguidas = 0;
+    savePreferences();
+}
+
+function checkDicaDesfazer() {
+    if (AppState.preferences.dicaDesfazerVista) return;
+    if (AppState.preferences.undoEnabled === false) return;   // já desligado: nada a oferecer
+    if ((AppState.preferences.semUndoSeguidas || 0) < DICA_SEM_UNDO) return;
+    // Nunca ofereça o que não dá pra fazer AQUI: sem passar a cota o toggle está
+    // desabilitado, e a dica viraria beco sem saída. O contador continua correndo
+    // — quando a cota cair, a evidência já está pronta.
+    if (!canDisableUndo()) return;
+    AppState.preferences.dicaDesfazerVista = true;
+    savePreferences();
+    showToast(
+        t('toast.undoHint', { n: DICA_SEM_UNDO }),
+        'hint',
+        // Mesma régua do aviso de conquista: banner do topo, com ação, uma vez
+        // na vida. 20s cobrem leitura tranquila e decisão sem correria.
+        20000,
+        abrirPreferenciaDoUndo
+    );
 }
 
 function canDisableUndo() {
@@ -2945,8 +3009,11 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
     // de 3 aparelhos (gotcha #26). Snackbar confirma o que você acabou de fazer;
     // banner é proeminente, tem ação e fica mais tempo. Este convida a abrir as
     // Preferências — não confirma nada.
-    const container = document.getElementById(
-        type === 'achievement' ? 'bannerContainer' : 'toastContainer');
+    // 'hint' segue a mesma régua da conquista: é banner, não snackbar — tem ação
+    // (abre as Preferências), fica mais tempo e não confirma nada que acabou de
+    // acontecer. O que muda é a cor: informar não é comemorar.
+    const ehBanner = type === 'achievement' || type === 'hint';
+    const container = document.getElementById(ehBanner ? 'bannerContainer' : 'toastContainer');
     const toast = document.createElement('div');
 
     const colors = {
@@ -2954,14 +3021,19 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
         error: 'bg-rose-600',
         info: 'bg-slate-800 dark:bg-slate-100 dark:text-slate-900',
         // Conquista: dourado, pra não se confundir com um "sucesso" qualquer.
-        achievement: 'bg-gradient-to-r from-amber-700 to-amber-800'
+        achievement: 'bg-gradient-to-r from-amber-700 to-amber-800',
+        // Dica: cyan da marca. Não é conquista (não houve mérito), não é erro e
+        // não é confirmação — é a app contando algo que ela observou.
+        hint: 'bg-gradient-to-r from-cyan-700 to-cyan-800'
     };
 
     const icons = {
         success: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
         error: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>',
         info: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
-        achievement: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 21h8m-4-4v4m6-17v4a6 6 0 11-12 0V4h12zm0 2h2a2 2 0 010 4h-2m-12-4H4a2 2 0 000 4h2"></path></svg>'
+        achievement: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 21h8m-4-4v4m6-17v4a6 6 0 11-12 0V4h12zm0 2h2a2 2 0 010 4h-2m-12-4H4a2 2 0 000 4h2"></path></svg>',
+        // Cronômetro: a dica é sobre TEMPO, e o ícone diz isso antes do texto.
+        hint: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
     };
 
     toast.className = `toast ${colors[type] || colors.info} text-white font-medium text-sm`;
