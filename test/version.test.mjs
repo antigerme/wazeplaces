@@ -95,3 +95,37 @@ test('constantes citadas no CLAUDE.md batem com o código', () => {
   // Se ninguém casou, o guard virou decorativo — provavelmente o formato do doc mudou.
   assert.ok(conferidas >= 5, `só ${conferidas} constantes conferidas; o guard parou de achar as citações`);
 });
+
+// O limiar da dica "você nunca desfaz" é um ORÇAMENTO DE TEMPO, não um número
+// escolhido a dedo: um minuto de tela travada antes de mencionar o interruptor.
+// Uma janela que expira naturalmente custa exatamente UNDO_WINDOW_MS (enquanto
+// ela corre, acoesTravadas() barra botão, gesto e tecla), então o limiar é
+// orçamento / custo-da-janela. Se alguém "simplificar" de volta pro literal 20,
+// mexer no UNDO_WINDOW_MS passa a mentir sobre o minuto sem ninguém notar.
+test('DICA_SEM_UNDO é derivado do tempo, não um literal', () => {
+  const src = read('js/app.js');
+
+  const derivacao = src.match(
+    /const\s+DICA_SEM_UNDO\s*=\s*Math\.ceil\(\s*ESPERA_DESPERDICADA_ANTES_DA_DICA_MS\s*\/\s*UNDO_WINDOW_MS\s*\)/
+  );
+  assert.ok(derivacao,
+    'DICA_SEM_UNDO deve ser Math.ceil(ESPERA_DESPERDICADA_ANTES_DA_DICA_MS / UNDO_WINDOW_MS) — '
+    + 'literal volta a mentir se a janela mudar');
+
+  const orcamento = Number(src.match(/const\s+ESPERA_DESPERDICADA_ANTES_DA_DICA_MS\s*=\s*(\d+)/)?.[1]);
+  const janela = Number(src.match(/const\s+UNDO_WINDOW_MS\s*=\s*(\d+)/)?.[1]);
+  assert.ok(Number.isFinite(orcamento) && Number.isFinite(janela), 'não achei as duas constantes');
+
+  // O que a app promete é o MINUTO — não o 20. Mudar isto é decisão de produto,
+  // e o teste existe pra forçar que seja deliberada.
+  assert.equal(orcamento, 60000, 'o orçamento da dica é um minuto de espera desperdiçada');
+
+  const limiar = Math.ceil(orcamento / janela);
+  assert.ok(Number.isInteger(limiar) && limiar >= 2,
+    `limiar derivado inútil (${limiar}): janela de ${janela}ms com orçamento de ${orcamento}ms`);
+
+  // UNDO_WINDOW_MS é declarado ANTES (TDZ): const no topo do script clássico não
+  // é hoisted com valor, então a ordem no arquivo importa de verdade.
+  assert.ok(src.indexOf('const UNDO_WINDOW_MS') < derivacao.index,
+    'UNDO_WINDOW_MS precisa ser declarado antes de DICA_SEM_UNDO, senão dá ReferenceError na carga');
+});

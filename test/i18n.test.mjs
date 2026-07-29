@@ -166,3 +166,19 @@ test('i18n: dá pra trocar o idioma antes de entrar', () => {
   }
   assert.match(app, /function aplicarIdioma/, 'sumiu o aplicarIdioma() que mantém os seletores em sincronia');
 });
+
+// A duração da janela de Desfazer é UM número (UNDO_WINDOW_MS). Escrevê-la na
+// frase deixa o texto mentindo quando a constante muda — e em TRÊS línguas, então
+// alguém sempre esquece uma. A frase da dica usa {s}, alimentado pela constante.
+// (Continua cravada em prefs.undo.desc, que passa por applyI18n() e não interpola
+// — parametrizar exige plumbing na camada de i18n; está registrado, não esquecido.)
+test('toast.undoHint não crava a duração da janela na frase', () => {
+  for (const lang of LANGS) {
+    const msg = DICT[lang]['toast.undoHint'];
+    assert.ok(msg, `falta toast.undoHint em ${lang}`);
+    assert.ok(msg.includes('{s}'),
+      `toast.undoHint (${lang}) deve usar {s} pra duração da janela, não o número escrito`);
+    assert.ok(!/(^|\D)\d+(\s*)(s\b|segundos|seconds|segons)/i.test(msg.replace('{s}s', '')),
+      `toast.undoHint (${lang}) ainda tem duração escrita à mão: ${msg}`);
+  }
+});

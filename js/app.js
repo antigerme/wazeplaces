@@ -2919,9 +2919,29 @@ async function abrirPreferenciaDoUndo() {
 // desligada — e são os que mais perdem com ela: 2431ms por pedido contra 33ms.
 //
 // Este gatilho não depende de transição nenhuma: conta janelas do Desfazer que
-// expiraram SEM ninguém desfazer. Vinte seguidas é evidência do próprio editor
-// de que, pra ele, o recurso é só espera — ~48s jogados fora. Dispara uma vez.
-const DICA_SEM_UNDO = 20;
+// expiraram SEM ninguém desfazer — evidência do próprio editor de que, pra ele,
+// o recurso é só espera. Dispara uma vez.
+//
+// O LIMIAR NÃO É NÚMERO ESCOLHIDO A DEDO: é um orçamento de tempo. Quanto da
+// vida do editor a app deixa evaporar antes de mencionar que existe um
+// interruptor. Um minuto é a régua — dá pra sentir, e ainda é um oitavo do que
+// 200 pedidos custam (~8 min).
+const ESPERA_DESPERDICADA_ANTES_DA_DICA_MS = 60000;
+
+// Só a expiração NATURAL conta (ver registrarJanelaSemUndo), e uma janela que
+// expira sozinha custa exatamente UNDO_WINDOW_MS de tela travada: enquanto ela
+// corre, acoesTravadas() barra botão, gesto e tecla. Então o limiar é o orçamento
+// dividido pelo custo de UMA janela — hoje 60000/3000 = 20, o mesmo valor de
+// antes, agora derivado. Mexer no UNDO_WINDOW_MS reajusta sozinho, porque o que
+// a app promete é o MINUTO, não o vinte.
+//
+// Rank não entra aqui, de propósito: a cota do gate escala por rank porque mede
+// COMPETÊNCIA, e rank é proxy razoável disso. Isto mede PREFERÊNCIA revelada pelo
+// comportamento — existe L6 cauteloso e L1 apressado, e um minuto perdido é um
+// minuto perdido nos dois. Escalar por rank também disparia na hora pra quem a
+// dica existe: `stats` é acumulado (waze_places_stats), então quem já está muito
+// acima da cota satisfaz "cota + N" antes de tocar em nada, sem evidência alguma.
+const DICA_SEM_UNDO = Math.ceil(ESPERA_DESPERDICADA_ANTES_DA_DICA_MS / UNDO_WINDOW_MS);
 
 // Só a expiração natural conta. `execute()` forçado (sair da página, trocar
 // filtro) despacha sem dar a janela inteira — não é a pessoa decidindo não
@@ -2949,7 +2969,12 @@ function checkDicaDesfazer() {
     AppState.preferences.dicaDesfazerVista = true;
     savePreferences();
     showToast(
-        t('toast.undoHint', { n: DICA_SEM_UNDO }),
+        // `s` vem de UNDO_WINDOW_MS em vez de "3" escrito na frase: as três
+        // línguas cravavam o número, e mexer na janela deixaria o texto mentindo.
+        t('toast.undoHint', {
+            n: DICA_SEM_UNDO,
+            s: (UNDO_WINDOW_MS / 1000).toLocaleString(i18nLocale()),
+        }),
         'hint',
         // Mesma régua do aviso de conquista: banner do topo, com ação, uma vez
         // na vida. 20s cobrem leitura tranquila e decisão sem correria.
