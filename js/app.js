@@ -323,8 +323,29 @@ function aplicarIdioma(valor) {
     if (typeof showToast === 'function') showToast(t('toast.langChanged'), 'success');
 }
 
+// Os <option> vinham escritos DUAS vezes no index.html, um par por seletor —
+// idioma novo exigia lembrar dos dois, e o de baixo (o da Ajuda) já tinha sido
+// esquecido antes. Agora saem de LANG_NOMES, que é a mesma fonte do dicionário.
+function popularSeletoresDeIdioma() {
+    const nomes = (typeof LANG_NOMES === 'object' && LANG_NOMES) || {};
+    const langs = (typeof LANGS_SUPORTADOS !== 'undefined' && LANGS_SUPORTADOS) || Object.keys(nomes);
+    for (const id of SELETORES_IDIOMA) {
+        const sel = document.getElementById(id);
+        if (!sel) continue;
+        sel.textContent = '';
+        for (const l of langs) {
+            const o = document.createElement('option');
+            o.value = l;
+            // Sem entrada em LANG_NOMES o código cru aparece — feio, nunca invisível.
+            o.textContent = nomes[l] || l;
+            sel.appendChild(o);
+        }
+    }
+}
+
 function setupLanguageSwitcher() {
     if (typeof setLang !== 'function') return;
+    popularSeletoresDeIdioma();
     const atual = (typeof getLang === 'function') ? getLang() : 'pt';
     for (const id of SELETORES_IDIOMA) {
         const sel = document.getElementById(id);
@@ -466,7 +487,7 @@ async function abrirPareamento() {
     const r = await API.criarPareamento();
     if (!r.success) {
         closeModal('pairShowModal');
-        showToast(r.error || t('toast.pairCreateError'), 'error');
+        showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
         return;
     }
     codeEl.textContent = formatarCodigoPareamento(r.code);
@@ -519,9 +540,9 @@ async function resgatarPareamento(code, { silencioso = false } = {}) {
     const r = await API.resgatarPareamento(code);
     if (!r.success) {
         if (silencioso) {
-            showToast(r.error || t('toast.pairInvalid'), 'error');
+            showToast(msgDoServidor(r, t('toast.pairInvalid')), 'error');
         } else if (err) {
-            err.textContent = r.error || t('toast.pairInvalid');
+            err.textContent = msgDoServidor(r, t('toast.pairInvalid'));
             err.classList.remove('hidden');
         }
         return false;
@@ -1122,7 +1143,7 @@ async function authenticateWithCookies(cookies) {
         } else if (result.errorCategory === 'access_denied') {
             showAccessDenied(result);
         } else {
-            showToast(result.error || t('toast.invalidCookies'), 'error');
+            showToast(msgDoServidor(result, t('toast.invalidCookies')), 'error');
         }
     } catch (error) {
         showToast(t('toast.authError'), 'error');
@@ -1148,7 +1169,7 @@ function showAccessDenied(result) {
     const modal = document.getElementById('accessDeniedModal');
     const msg = document.getElementById('accessDeniedMessage');
     const profileBox = document.getElementById('accessDeniedProfile');
-    msg.textContent = result.error || t('accessDenied.defaultMsg');
+    msg.textContent = msgDoServidor(result, t('accessDenied.defaultMsg'));
     if (result.profile && result.profile.userName) {
         const p = result.profile;
         const displayRank = (p.rank !== null && p.rank !== undefined) ? ('L' + (p.rank + 1)) : '';
@@ -1383,7 +1404,7 @@ function fetchNextPage() {
                     AppState.hasMore = false;
                     handleUnauthorized();
                 } else {
-                    showToast(result.error || t('toast.loadPlacesError'), 'error');
+                    showToast(msgDoServidor(result, t('toast.loadPlacesError')), 'error');
                     AppState.loadError = true;
                     AppState.hasMore = false;
                 }
@@ -1951,6 +1972,27 @@ function formatRelativeTime(ts) {
     return t('time.years', { n: years });
 }
 
+// ── Mensagem de erro que veio do servidor ─────────────────────────────────
+// O backend manda CHAVE (`errorKey`) + `errorVars`; a frase em `error` é só o
+// último recurso. Antes daqui o padrão era `result.error || t('...')`, e o `||`
+// fazia a string PORTUGUESA do servidor GANHAR da tradução: quem usava a app em
+// inglês, espanhol ou francês lia português em todo erro de sessão, cookie,
+// rede ou race — e a tradução ao lado só entrava se o servidor não dissesse
+// nada. Era o buraco de i18n mais fundo da app, porque nenhuma auditoria de
+// dicionário enxerga string que chega pela rede.
+//
+// A frase crua continua no fim da cadeia de propósito: o service worker é
+// cache-first pra assets, então por alguns dias após um deploy existe cliente
+// com dicionário velho que não conhece a chave nova. Português é ruim; chave
+// crua na tela ("srv.err.cookieFormat") é pior.
+function msgDoServidor(result, textoFallback) {
+    if (result && result.errorKey) {
+        const traduzido = t(result.errorKey, result.errorVars || undefined);
+        if (traduzido !== result.errorKey) return traduzido;
+    }
+    return (result && result.error) || textoFallback;
+}
+
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
     return String(str)
@@ -2091,7 +2133,7 @@ function handleActionResult(actionType, place, result) {
     updateStats();
     saveStats();
     const verb = actionType === 'read' ? t('action.verb.read') : t('action.verb.reject');
-    showToast(result.error || t('toast.actionError', { verb }), 'error');
+    showToast(msgDoServidor(result, t('toast.actionError', { verb })), 'error');
 }
 
 function handleMarkAsRead() {
@@ -2173,7 +2215,7 @@ async function handleBatchMarkRead() {
         } else if (result && result.errorCategory === 'unauthorized') {
             handleUnauthorized();
         } else {
-            showToast((result && result.error) || t('toast.batchError'), 'error');
+            showToast(msgDoServidor(result, t('toast.batchError')), 'error');
         }
     } catch (e) {
         showToast(t('toast.batchError'), 'error');

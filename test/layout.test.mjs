@@ -18,6 +18,12 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+// Quantas línguas o dicionário tem, DERIVADO do arquivo — nunca o literal 3. As
+// contagens cravadas reprovaram todas de uma vez quando o francês entrou, e a
+// mensagem ainda dizia "nas três línguas" com quatro no dicionário. Derivando,
+// a 5ª língua não faz ninguém voltar aqui.
+const N_LINGUAS = (read('js/i18n.js').match(/^  [a-z]{2}: \{$/gm) || []).length;
+
 
 const HTML = read('index.html');
 const CSS = read('css/styles.css');
@@ -457,7 +463,7 @@ test('placeholder não se confunde com dado', () => {
                   'card.type.empty', 'card.creator.empty', 'card.value.empty', 'card.value.unnamed'];
   for (const chave of CHAVES) {
     const vals = [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}':\\s*'([^']*)'`, 'g'))].map((m) => m[1]);
-    assert.equal(vals.length, 3, `${chave} precisa existir nas três línguas`);
+    assert.equal(vals.length, N_LINGUAS, `${chave} precisa existir nas ${N_LINGUAS} línguas`);
     for (const v of vals) {
       assert.ok(v.startsWith('(') && v.endsWith(')'),
         `${chave} = "${v}" — placeholder sem parênteses se confunde com dado do Waze`);
@@ -465,7 +471,7 @@ test('placeholder não se confunde com dado', () => {
   }
   // O selo é rótulo de estado, não valor: esse NÃO leva parênteses.
   const selo = [...I18N.matchAll(/'card\.noName\.badge':\s*'([^']*)'/g)].map((m) => m[1]);
-  assert.equal(selo.length, 3, 'card.noName.badge precisa existir nas três línguas');
+  assert.equal(selo.length, N_LINGUAS, `card.noName.badge precisa existir nas ${N_LINGUAS} línguas`);
   for (const v of selo) assert.doesNotMatch(v, /^\(/, 'o selo não é valor — não leva parênteses');
 
   const APP_ = read('js/app.js');
@@ -697,10 +703,9 @@ test('o tipo do card não repete a lista de mudanças', () => {
   // dizer duas vezes a mesma coisa, e a de cima truncada.
   const APP_ = read('js/app.js');
   assert.match(APP_, /card\.type\.update/, 'o card voltou a repetir a enumeração de campos no Tipo');
-  for (const lang of ['pt', 'en', 'es']) void lang;
   const I18N = read('js/i18n.js');
-  assert.equal((I18N.match(/'card\.type\.update':/g) || []).length, 3,
-    'card.type.update precisa existir nas três línguas');
+  assert.equal((I18N.match(/'card\.type\.update':/g) || []).length, N_LINGUAS,
+    `card.type.update precisa existir nas ${N_LINGUAS} línguas`);
   // O anúncio pra leitor de tela CONTINUA com a enumeração: lá ela não é
   // repetição, é a única forma de saber o que mudou sem varrer a lista.
   const live = APP_.match(/card\.live\.newRequest[\s\S]{0,200}/)[0];

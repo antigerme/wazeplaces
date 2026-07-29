@@ -8,6 +8,18 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.29-09
+
+### Adicionado
+- **A app fala francês.** Todas as 309 mensagens, do card aos diálogos, avisos e mensagens de erro. Quem tem o navegador em francês passa a cair no francês sozinho, e o idioma está nos dois seletores (Filtros → Preferências e a Ajuda, que funciona mesmo sem estar conectado). Editores em `fr-FR` e `fr-CA` são atendidos.
+
+### Corrigido
+- **A app falava português com quem escolheu outro idioma sempre que dava erro.** Este é o mais sério da leva. As mensagens de erro nasciam prontas no servidor, em português, e a tela as mostrava direto — a tradução ao lado só era usada se o servidor não dissesse nada. Resultado: cookie recusado, sessão expirada, falha de conexão, código de pareamento errado ou pedido já tratado por outro editor apareciam **em português para quem usava a app em inglês, espanhol ou francês**. São 26 mensagens. Agora o servidor manda um código e quem escolhe a palavra é a app, no idioma de quem está lendo.
+- **O aviso de acesso restrito também vinha em português** — e justamente para quem foi bloqueado, no momento em que a explicação mais importa. Ele repetia o seu perfil, que a tela já mostrava logo abaixo com os selos traduzidos.
+- **Escolher um idioma no seletor podia ser ignorado.** A app tinha uma lista fixa de idiomas aceitos, separada da lista de traduções: qualquer idioma novo era reconhecido pelo navegador mas descartado quando escolhido à mão, voltando calado para o idioma do sistema. As duas listas agora são a mesma coisa.
+- **Números e datas em francês saíam no formato inglês.** O idioma não tinha formato próprio declarado e caía no padrão do inglês sem avisar.
+- **No celular mais estreito (dobrável de 280px), o card de reporte em francês passava a rolar por dentro** — o que desliga o gesto de "pular". O título da seção quebrava em duas linhas onde as outras línguas cabem em uma.
+
 ## v2026.07.29-06
 
 ### Adicionado

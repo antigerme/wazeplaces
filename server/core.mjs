@@ -62,8 +62,15 @@ class ApiError extends Error {
     this.status = status;
   }
 }
-const apiError = (message, status = 400) => {
-  throw new ApiError({ success: false, error: message }, status);
+// `message` fica em português de propósito: é o último recurso, para cliente
+// antigo em cache que ainda não conhece a chave nova (o SW é cache-first pra
+// assets, então isso acontece de verdade por alguns dias após cada deploy).
+// Quem manda na tela é a CHAVE — o frontend a traduz no idioma do editor.
+const apiError = (message, status = 400, key = null, vars = null) => {
+  const body = { success: false, error: message };
+  if (key) body.errorKey = key;
+  if (vars) body.errorVars = vars;
+  throw new ApiError(body, status);
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -244,8 +251,8 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region) {
 // ─────────────────────────────────────────────────────────────────────────
 
 export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
-  if (fetchError) return { category: 'transient', message: 'Erro de conexão: ' + fetchError };
-  if (httpCode === 401 || httpCode === 403) return { category: 'unauthorized', message: 'Cookies expirados ou inválidos' };
+  if (fetchError) return { category: 'transient', message: 'Erro de conexão: ' + fetchError, messageKey: 'srv.err.connection' };
+  if (httpCode === 401 || httpCode === 403) return { category: 'unauthorized', message: 'Cookies expirados ou inválidos', messageKey: 'srv.err.cookiesExpired' };
 
   let errorCode = null;
   let errorDetails = '';
@@ -259,13 +266,13 @@ export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
   const bodyLower = String(responseBody).toLowerCase();
 
   if (errorCode === 702 || errorDetails.includes('was not found')) {
-    return { category: 'already_processed', message: 'Já tratado por outro editor' };
+    return { category: 'already_processed', message: 'Já tratado por outro editor', messageKey: 'srv.err.alreadyHandled' };
   }
   if (errorCode === 300 && errorDetails.includes('failed to handle')) {
-    return { category: 'already_processed', message: 'Já tratado ou modificado por outro editor' };
+    return { category: 'already_processed', message: 'Já tratado ou modificado por outro editor', messageKey: 'srv.err.alreadyHandledOrModified' };
   }
-  if (httpCode === 409) return { category: 'already_processed', message: 'Já tratado por outro editor' };
-  if (httpCode === 404) return { category: 'not_found', message: 'Place não existe mais (possivelmente já tratado)' };
+  if (httpCode === 409) return { category: 'already_processed', message: 'Já tratado por outro editor', messageKey: 'srv.err.alreadyHandled' };
+  if (httpCode === 404) return { category: 'not_found', message: 'Place não existe mais (possivelmente já tratado)', messageKey: 'srv.err.gone' };
 
   const hasAlreadyHint =
     bodyLower.includes('already') ||
@@ -274,13 +281,13 @@ export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
     bodyLower.includes('no longer') ||
     bodyLower.includes('has been resolved');
   if ((httpCode === 200 || httpCode === 400 || httpCode === 422) && hasAlreadyHint) {
-    return { category: 'already_processed', message: 'Já tratado por outro editor' };
+    return { category: 'already_processed', message: 'Já tratado por outro editor', messageKey: 'srv.err.alreadyHandled' };
   }
 
   if (httpCode >= 500 || httpCode === 408 || httpCode === 429 || httpCode === 0) {
-    return { category: 'transient', message: `Servidor Waze indisponível (HTTP ${httpCode})` };
+    return { category: 'transient', message: `Servidor Waze indisponível (HTTP ${httpCode})`, messageKey: 'srv.err.wazeDown', messageVars: { code: httpCode } };
   }
-  return { category: 'unknown', message: `Erro do Waze (HTTP ${httpCode})` };
+  return { category: 'unknown', message: `Erro do Waze (HTTP ${httpCode})`, messageKey: 'srv.err.wazeUnknown', messageVars: { code: httpCode } };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -288,7 +295,7 @@ export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
 // ─────────────────────────────────────────────────────────────────────────
 
 export function isUserAllowed(profile) {
-  if (!profile || typeof profile !== 'object') return { allowed: false, reason: 'Perfil inválido' };
+  if (!profile || typeof profile !== 'object') return { allowed: false, reason: 'Perfil inválido', reasonKey: 'srv.err.badProfile' };
   if (profile.isStaff) return { allowed: true, reason: null };
   const rank = Number.isInteger(profile.rank) ? profile.rank : (profile.rank != null ? parseInt(profile.rank, 10) : -1);
   const isAM = !!profile.isAreaManager;
@@ -299,6 +306,11 @@ export function isUserAllowed(profile) {
   return {
     allowed: false,
     reason: `Acesso restrito a editores Area Manager com nível ${minDisplay}+ ou Staff. Seu perfil: ${tags.join(' · ')}.`,
+    // A chave NÃO carrega o perfil: o frontend já renderiza nome e selos no
+    // #accessDeniedProfile, com os selos traduzidos (profile.tag.*). Repetir aqui
+    // era justamente o pedaço que chegava em português — e duplicado.
+    reasonKey: 'srv.err.accessDenied',
+    reasonVars: { minLevel: minDisplay },
   };
 }
 
@@ -397,18 +409,18 @@ function requireRegion(data) {
 async function resolveCookies(data, sessions) {
   if (data && data.sessionToken) {
     const cookies = await sessions.loadSession(data.sessionToken);
-    if (!cookies) throw new ApiError({ success: false, error: 'Sessão expirada ou inválida' }, 401);
+    if (!cookies) throw new ApiError({ success: false, error: 'Sessão expirada ou inválida', errorKey: 'srv.err.sessionExpired' }, 401);
     return cookies;
   }
   if (data && data.cookies) return String(data.cookies).trim();
-  throw new ApiError({ success: false, error: 'Sessão ou cookies não fornecidos' }, 401);
+  throw new ApiError({ success: false, error: 'Sessão ou cookies não fornecidos', errorKey: 'srv.err.sessionMissing' }, 401);
 }
 
 // Prepara cookieHeader + csrf a partir do conteúdo, validando formato.
 function prepareAuth(cookiesContent) {
-  if (!validateCookiesFormat(cookiesContent)) apiError('Formato de cookies inválido');
+  if (!validateCookiesFormat(cookiesContent)) apiError('Formato de cookies inválido', 400, 'srv.err.cookieFormat');
   const csrf = extractCSRFToken(cookiesContent);
-  if (!csrf) apiError('Token CSRF não encontrado');
+  if (!csrf) apiError('Token CSRF não encontrado', 400, 'srv.err.csrfMissing');
   return { cookieHeader: cookieHeaderFrom(cookiesContent), csrf };
 }
 
@@ -450,11 +462,11 @@ const formatValue = (value) => {
 async function handleSessao(data, { sessions }) {
   const action = (data && data.action) || 'create';
   if (action === 'create') {
-    if (!data.cookies) apiError('Cookies não fornecidos');
+    if (!data.cookies) apiError('Cookies não fornecidos', 400, 'srv.err.cookiesMissing');
     // Filtra pro domínio do Waze antes de armazenar (ver filterWazeCookies).
     const cookies = filterWazeCookies(String(data.cookies).trim());
-    if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado');
-    if (!extractCSRFToken(cookies)) apiError('Token CSRF não encontrado');
+    if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado', 400, 'srv.err.cookieFormatNoWaze');
+    if (!extractCSRFToken(cookies)) apiError('Token CSRF não encontrado', 400, 'srv.err.csrfMissing');
     const token = await sessions.createSession(cookies);
     return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL } };
   }
@@ -462,7 +474,7 @@ async function handleSessao(data, { sessions }) {
     await sessions.destroySession(data && data.sessionToken);
     return { status: 200, body: { success: true } };
   }
-  apiError('Ação inválida');
+  apiError('Ação inválida', 400, 'srv.err.badAction');
 }
 
 // Pareamento: `create` exige sessão válida (só quem já está logado gera código);
@@ -481,28 +493,28 @@ async function handleParear(data, { sessions }) {
     const cookies = await sessions.claimPairing(data && data.code);
     // Mensagem ÚNICA pros casos "não existe", "já usado" e "expirou": diferenciar
     // transformaria o endpoint num oráculo pra quem estivesse chutando códigos.
-    if (!cookies) apiError('Código inválido ou expirado. Gere um novo no aparelho logado.', 400);
+    if (!cookies) apiError('Código inválido ou expirado. Gere um novo no aparelho logado.', 400, 'srv.err.pairCodeInvalid');
     const token = await sessions.createSession(cookies);
     return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL } };
   }
 
-  apiError('Ação inválida');
+  apiError('Ação inválida', 400, 'srv.err.badAction');
 }
 
 async function handleTestarCookies(data, { sessions }) {
-  if (!data || !data.cookies) apiError('Cookies não fornecidos');
+  if (!data || !data.cookies) apiError('Cookies não fornecidos', 400, 'srv.err.cookiesMissing');
   const region = requireRegion(data);
   // Filtra pro domínio do Waze logo na entrada: o cookies.txt do navegador traz
   // cookies de dezenas de sites — guardar/enviar só os do Waze evita vazar
   // credenciais de terceiros e o HTTP 400 por header gigante. Ver filterWazeCookies.
   const cookies = filterWazeCookies(String(data.cookies).trim());
-  if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado. Exporte os cookies logado no Waze Map Editor (formato Netscape).');
+  if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado. Exporte os cookies logado no Waze Map Editor (formato Netscape).', 400, 'srv.err.cookieFormatExport');
   const csrf = extractCSRFToken(cookies);
-  if (!csrf) apiError('Token CSRF não encontrado nos cookies. Certifique-se de estar logado no Waze Map Editor.');
+  if (!csrf) apiError('Token CSRF não encontrado nos cookies. Certifique-se de estar logado no Waze Map Editor.', 400, 'srv.err.csrfMissingLogin');
 
   const result = await callWaze(wazeSessionEndpoint(region), cookieHeaderFrom(cookies), csrf, null, region);
   if (result.httpCode === 401 || result.httpCode === 403) {
-    apiError('Cookies expirados ou inválidos. Faça login novamente no Waze Map Editor e exporte novos cookies.');
+    apiError('Cookies expirados ou inválidos. Faça login novamente no Waze Map Editor e exporte novos cookies.', 400, 'srv.err.cookiesExpiredRelogin');
   }
   if (result.httpCode !== 200) apiError(`Erro ao validar cookies (HTTP ${result.httpCode})`);
 
@@ -510,9 +522,9 @@ async function handleTestarCookies(data, { sessions }) {
   try {
     profile = JSON.parse(result.response);
   } catch {
-    apiError('Resposta inválida da API do Waze');
+    apiError('Resposta inválida da API do Waze', 400, 'srv.err.badWazeResponse');
   }
-  if (!profile || typeof profile !== 'object' || !profile.userName) apiError('Resposta inválida da API do Waze');
+  if (!profile || typeof profile !== 'object' || !profile.userName) apiError('Resposta inválida da API do Waze', 400, 'srv.err.badWazeResponse');
 
   const check = isUserAllowed(profile);
   if (!check.allowed) {
@@ -521,6 +533,8 @@ async function handleTestarCookies(data, { sessions }) {
       body: {
         success: false,
         error: check.reason,
+        errorKey: check.reasonKey,
+        errorVars: check.reasonVars,
         errorCategory: 'access_denied',
         profile: {
           userName: profile.userName || '',
@@ -582,7 +596,7 @@ async function handleBuscarPlaces(data, { sessions }) {
     const cat = categorizeWazeError(result.httpCode, result.response, result.error);
     return {
       status: cat.category === 'unauthorized' ? 401 : 500,
-      body: { success: false, error: cat.message, errorCategory: cat.category, httpCode: result.httpCode },
+      body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
 
@@ -590,7 +604,7 @@ async function handleBuscarPlaces(data, { sessions }) {
   try {
     rd = JSON.parse(result.response);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500);
+    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
   }
 
   const { places, blocked } = buildPlacesFromSearch(rd, { filterTypes, unreadOnly });
@@ -839,7 +853,7 @@ async function handleMarcarLido(data, { sessions }) {
   } else if (data.venueID !== undefined && data.updateRequestID !== undefined) {
     ids.push({ id: data.updateRequestID, venueId: data.venueID });
   }
-  if (ids.length === 0) apiError('Dados incompletos');
+  if (ids.length === 0) apiError('Dados incompletos', 400, 'srv.err.incompleteData');
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
   const payload = { value: true, venueUpdateRequestIds: ids };
@@ -854,14 +868,14 @@ async function handleMarcarLido(data, { sessions }) {
   }
   return {
     status: cat.category === 'already_processed' || cat.category === 'not_found' ? 200 : 500,
-    body: { success: false, error: cat.message, errorCategory: cat.category, httpCode: result.httpCode },
+    body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
   };
 }
 
 async function handleValidarPlace(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  if (data.venueID === undefined || data.updateRequestID === undefined) apiError('Parâmetros incompletos');
+  if (data.venueID === undefined || data.updateRequestID === undefined) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
   const payload = {
@@ -890,7 +904,7 @@ async function handleValidarPlace(data, { sessions }) {
   }
   return {
     status: cat.category === 'already_processed' || cat.category === 'not_found' ? 200 : 500,
-    body: { success: false, error: cat.message, errorCategory: cat.category, httpCode: result.httpCode },
+    body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
   };
 }
 
@@ -904,14 +918,14 @@ async function handlePerfil(data, { sessions }) {
     const cat = categorizeWazeError(result.httpCode, result.response, result.error);
     return {
       status: cat.category === 'unauthorized' ? 401 : 500,
-      body: { success: false, error: cat.message, errorCategory: cat.category, httpCode: result.httpCode },
+      body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
   let rd;
   try {
     rd = JSON.parse(result.response);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500);
+    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
   }
 
   const areas = [];
@@ -960,14 +974,14 @@ async function handleListaPaises(data, { sessions }) {
     const cat = categorizeWazeError(result.httpCode, result.response, result.error);
     return {
       status: cat.category === 'unauthorized' ? 401 : 500,
-      body: { success: false, error: cat.message, errorCategory: cat.category, httpCode: result.httpCode },
+      body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
   let rd;
   try {
     rd = JSON.parse(result.response);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500);
+    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
   }
   const countries = (rd.countries || []).map((c) => ({
     id: c.id ?? null,
@@ -983,7 +997,7 @@ async function handleListaEstados(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
   const countryId = data.countryId ? parseInt(data.countryId, 10) : 0;
-  if (countryId <= 0) apiError('countryId obrigatório');
+  if (countryId <= 0) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
   const result = await callWaze(wazeStatesEndpoint(region, countryId), cookieHeader, csrf, null, region);
@@ -991,14 +1005,14 @@ async function handleListaEstados(data, { sessions }) {
     const cat = categorizeWazeError(result.httpCode, result.response, result.error);
     return {
       status: cat.category === 'unauthorized' ? 401 : 500,
-      body: { success: false, error: cat.message, errorCategory: cat.category, httpCode: result.httpCode },
+      body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
   let rd;
   try {
     rd = JSON.parse(result.response);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500);
+    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
   }
   const states = [];
   for (const s of rd.states || []) {
@@ -1033,11 +1047,11 @@ const ROUTES = {
 export async function dispatch(name, data, ctx) {
   const clean = String(name || '').replace(/\.php$/, '');
   const handler = ROUTES[clean];
-  if (!handler) return { status: 404, body: { success: false, error: 'Endpoint não encontrado' } };
+  if (!handler) return { status: 404, body: { success: false, error: 'Endpoint não encontrado', errorKey: 'srv.err.endpointNotFound' } };
   try {
     return await handler(data || {}, ctx);
   } catch (e) {
     if (e instanceof ApiError) return { status: e.status, body: e.body };
-    return { status: 500, body: { success: false, error: 'Erro interno' } };
+    return { status: 500, body: { success: false, error: 'Erro interno', errorKey: 'srv.err.internal' } };
   }
 }

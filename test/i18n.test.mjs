@@ -1,12 +1,13 @@
 // Auditoria de i18n — a rede que garante "nunca esquecer os outros idiomas".
 // Roda no CI (node --test). Falha se:
-//   - faltar pt/en/es;
-//   - qualquer chave não existir nas TRÊS línguas (paridade);
+//   - faltar algum idioma declarado no dicionário;
+//   - qualquer chave não existir em TODAS as línguas (paridade);
 //   - algum valor estiver vazio;
 //   - os placeholders {x} divergirem entre as línguas de uma mesma chave;
 //   - alguma chave usada no index.html (data-i18n*) não existir no dicionário.
 //
-// Mesma ideia da auditoria do botequei (tests/audit.mjs cobra a paridade pt/en/es).
+// A lista de línguas é DERIVADA de I18N_DICT — adicionar idioma não exige mexer aqui.
+// Mesma ideia da auditoria do botequei (tests/audit.mjs cobra a paridade das línguas).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,18 +28,45 @@ function loadDict() {
 }
 
 const DICT = loadDict();
-const LANGS = ['pt', 'en', 'es'];
+// Derivado do dicionário, nunca uma lista à parte: idioma adicionado sem entrar
+// aqui passaria por TODAS as auditorias de paridade sem ser conferido — o pior
+// tipo de falha, porque o CI fica verde.
+const LANGS = Object.keys(DICT);
+// Língua de referência da comparação de placeholders. É o pt porque é onde as
+// strings nascem (as outras são tradução dela).
+const LANG_REF = 'pt';
 const placeholders = (s) => (String(s).match(/\{[a-zA-Z0-9_]+\}/g) || []).sort().join(',');
 
-test('i18n: dicionário tem pt, en e es', () => {
-  for (const l of LANGS) assert.ok(DICT[l] && typeof DICT[l] === 'object', `falta o idioma ${l}`);
+test('i18n: dicionário tem os idiomas suportados', () => {
+  // A app declara os suportados em LANGS_SUPORTADOS = Object.keys(I18N_DICT) e
+  // monta os <option> a partir de LANG_NOMES. Idioma no dicionário sem nome no
+  // mapa apareceria como o código cru ("fr") no seletor.
+  assert.ok(LANGS.length >= 3, `só ${LANGS.length} idioma(s) no dicionário`);
+  for (const l of LANGS) {
+    assert.ok(DICT[l] && typeof DICT[l] === 'object', `falta o idioma ${l}`);
+    assert.match(l, /^[a-z]{2}$/, `código de idioma fora do padrão de 2 letras: ${l}`);
+  }
+  const i18n = read('js/i18n.js');
+  assert.match(i18n, /const LANGS_SUPORTADOS = Object\.keys\(I18N_DICT\)/,
+    'os idiomas suportados têm que sair do próprio dicionário, não de uma lista à parte');
+  const mapa = i18n.match(/const LANG_NOMES = \{([^}]*)\}/);
+  assert.ok(mapa, 'sumiu o LANG_NOMES, que alimenta os <option> dos seletores');
+  for (const l of LANGS) {
+    assert.match(mapa[1], new RegExp(`\\b${l}:`), `${l} não tem nome em LANG_NOMES — o seletor mostraria "${l}" cru`);
+  }
+  const locales = i18n.match(/const LOCALE_POR_LANG = \{([^}]*)\}/);
+  assert.ok(locales, 'sumiu o LOCALE_POR_LANG, que dá o locale de toLocaleString');
+  for (const l of LANGS) {
+    assert.match(locales[1], new RegExp(`\\b${l}:`),
+      `${l} não tem locale — número e data sairiam no padrão do fallback sem ninguém notar`);
+  }
 });
 
-test('i18n: paridade — toda chave existe nas TRÊS línguas', () => {
+test('i18n: paridade — toda chave existe em TODAS as línguas', () => {
   const all = new Set(LANGS.flatMap((l) => Object.keys(DICT[l])));
   const missing = [];
   for (const l of LANGS) for (const k of all) if (!(k in DICT[l])) missing.push(`${l} → ${k}`);
-  assert.equal(missing.length, 0, 'Chaves sem tradução (adicione nas 3 línguas):\n' + missing.join('\n'));
+  assert.equal(missing.length, 0, `Chaves sem tradução (adicione nas ${LANGS.length} línguas):\n` + missing.join('\n'));
 });
 
 test('i18n: nenhum valor vazio', () => {
@@ -49,11 +77,11 @@ test('i18n: nenhum valor vazio', () => {
 
 test('i18n: placeholders {x} consistentes entre as línguas', () => {
   const bad = [];
-  for (const k of Object.keys(DICT.pt)) {
-    const ref = placeholders(DICT.pt[k]);
-    for (const l of ['en', 'es']) {
+  for (const k of Object.keys(DICT[LANG_REF])) {
+    const ref = placeholders(DICT[LANG_REF][k]);
+    for (const l of LANGS.filter((x) => x !== LANG_REF)) {
       if (!(k in DICT[l])) continue;
-      if (placeholders(DICT[l][k]) !== ref) bad.push(`${k}: pt[${ref}] vs ${l}[${placeholders(DICT[l][k])}]`);
+      if (placeholders(DICT[l][k]) !== ref) bad.push(`${k}: ${LANG_REF}[${ref}] vs ${l}[${placeholders(DICT[l][k])}]`);
     }
   }
   assert.equal(bad.length, 0, 'Placeholders divergentes:\n' + bad.join('\n'));
@@ -119,25 +147,28 @@ test("i18n: renderCurrentCard aplica o dicionário no clone do <template>", () =
   );
 });
 
-// Regressão: o fallback atende TODO idioma fora de pt/en/es — francês, alemão,
-// japonês, russo, chinês. Quem fala pt/en/es vem da detecção e nunca chega
-// aqui, então trocar o fallback pra 'en' não muda nada pra eles e dá a quem
-// sobra a língua franca da comunidade WME. Voltar pra 'pt' é uma escolha de
-// produto, não um detalhe — por isso está travado.
+// Regressão: o fallback atende TODO idioma sem dicionário próprio — alemão,
+// italiano, japonês, russo, chinês. O francês SAIU desta lista quando ganhou
+// tradução: um idioma suportado nunca deve cair no fallback, e é justamente
+// isso que este teste pega se alguém adicionar o dicionário e esquecer o resto.
+// Quem tem idioma suportado vem da detecção e nunca chega ao fallback, então o
+// fallback só decide o que ver quem NÃO é atendido — e aí inglês é a língua
+// franca da comunidade WME. Voltar pra 'pt' é escolha de produto, não detalhe.
 test('i18n: idioma desconhecido cai em inglês, não em português', () => {
-  const ctx = { navigator: { language: 'fr-FR' }, document: { documentElement: {} } };
+  const ctx = { navigator: { language: 'de-DE' }, document: { documentElement: {} } };
   vm.createContext(ctx);
   vm.runInContext(read('js/i18n.js'), ctx);
   // `const` no topo de um script não vira propriedade do global (só `function`
   // vira), então LANG_FALLBACK não dá pra ler daqui — o que vale é o
   // comportamento do resolveLang, testado abaixo.
   assert.match(read('js/i18n.js'), /LANG_FALLBACK\s*=\s*'en'/, "LANG_FALLBACK deixou de ser 'en'");
-  for (const loc of ['fr-FR', 'de-DE', 'ja-JP', 'ru-RU', 'zh-CN', 'nl-NL', '']) {
+  for (const loc of ['de-DE', 'it-IT', 'ja-JP', 'ru-RU', 'zh-CN', 'nl-NL', '']) {
     ctx.navigator.language = loc;
     assert.equal(ctx.resolveLang(), 'en', `locale ${loc || '(vazio)'} devia cair em inglês`);
   }
   // E quem É atendido continua vindo da detecção, sem passar pelo fallback.
-  for (const [loc, esperado] of [['pt-BR', 'pt'], ['pt-PT', 'pt'], ['en-GB', 'en'], ['es-AR', 'es']]) {
+  for (const [loc, esperado] of [['pt-BR', 'pt'], ['pt-PT', 'pt'], ['en-GB', 'en'], ['es-AR', 'es'],
+                                 ['fr-FR', 'fr'], ['fr-CA', 'fr']]) {
     ctx.navigator.language = loc;
     assert.equal(ctx.resolveLang(), esperado, `locale ${loc} devia dar ${esperado}`);
   }
@@ -209,4 +240,48 @@ test('{undoSeg} é registrado por setI18nVars a partir de UNDO_WINDOW_MS', () =>
     'registre uma FUNÇÃO: valor fixo congela o locale da carga e não reformata na troca de idioma');
   assert.match(registro[0], /i18nLocale\(\)/,
     'número em texto passa por toLocaleString(i18nLocale()) — nunca locale cravado');
+});
+
+// ── A ponte servidor → dicionário ─────────────────────────────────────────
+// O core manda `errorKey`; o frontend traduz e, se a chave não existir, cai na
+// frase crua do servidor — que é PORTUGUÊS. Então chave nova no core sem entrada
+// aqui não quebra nada: só devolve a app pro português para quem escolheu outro
+// idioma, exatamente o bug que a chave existe pra consertar. Nenhuma auditoria
+// de dicionário pega isso, porque a chave chega pela REDE.
+test('i18n: toda errorKey do backend existe no dicionário', () => {
+  const core = read('server/core.mjs');
+  const emitidas = new Set([...core.matchAll(/['"](srv\.err\.[a-zA-Z0-9.]+)['"]/g)].map((m) => m[1]));
+  assert.ok(emitidas.size >= 20,
+    `só ${emitidas.size} chave(s) srv.err.* no core — o regex parou de achar as citações?`);
+  const faltando = [];
+  for (const k of emitidas) {
+    for (const l of LANGS) if (!(k in DICT[l])) faltando.push(`${l} → ${k}`);
+  }
+  assert.equal(faltando.length, 0,
+    'errorKey emitida pelo backend sem tradução (cai em português calado):\n' + faltando.join('\n'));
+});
+
+// E o caminho inverso: chave srv.err.* no dicionário que o core não emite mais
+// é peso morto que finge cobertura. Não reprova (pode ser emitida por um
+// adaptador), mas avisa em quantidade — é sinal de que o core mudou e o
+// dicionário ficou para trás.
+test('i18n: dicionário não acumula srv.err.* órfã', () => {
+  const core = read('server/core.mjs') + read('worker/index.mjs') + read('server/node.mjs');
+  const noDict = Object.keys(DICT[LANG_REF]).filter((k) => k.startsWith('srv.err.'));
+  const orfas = noDict.filter((k) => !core.includes(k));
+  assert.ok(orfas.length <= 2,
+    `${orfas.length} chaves srv.err.* não são mais emitidas por ninguém:\n` + orfas.join('\n'));
+});
+
+// O `||` que fazia o português do servidor GANHAR da tradução. Era o buraco de
+// i18n mais fundo da app: 8 pontos onde `result.error || t('...')` mostrava a
+// frase do backend e só usava o dicionário se o servidor não dissesse nada.
+test('i18n: mensagem do servidor passa pelo tradutor, não pelo ||', () => {
+  const app = read('js/app.js');
+  assert.match(app, /function msgDoServidor\(/,
+    'sumiu o msgDoServidor(), que prefere errorKey traduzida à frase crua do servidor');
+  const semComentarios = app.replace(/^\s*\/\/.*$/gm, '');
+  const cruas = [...semComentarios.matchAll(/\b(?:result|r)\.error\s*\|\|/g)];
+  assert.equal(cruas.length, 0,
+    `${cruas.length} ponto(s) voltaram a mostrar result.error direto — use msgDoServidor()`);
 });

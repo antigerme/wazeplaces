@@ -15,6 +15,13 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+// Quantas línguas o dicionário tem, DERIVADO do arquivo — nunca o literal 3. As
+// contagens cravadas reprovaram todas de uma vez quando o francês entrou, e a
+// mensagem ainda dizia "nas três línguas" com quatro no dicionário. Derivando,
+// a 5ª língua não faz ninguém voltar aqui.
+const LANGS_DO_DICT = [...read('js/i18n.js').matchAll(/^  ([a-z]{2}): \{$/gm)].map((m) => m[1]);
+const N_LINGUAS = LANGS_DO_DICT.length;
+
 
 const HTML = read('index.html');
 const APP = read('js/app.js');
@@ -45,7 +52,7 @@ test('código de pareamento: o placeholder mostra o mesmo formato que a tela', (
   // Se a tela mostra XXX-XXX, o campo tem que sugerir XXX-XXX. Sugerir sem o
   // separador faz quem copia da tela hesitar — ou digitar errado.
   const chaves = [...I18N.matchAll(/'pair\.enter\.placeholder':\s*'([^']*)'/g)].map((m) => m[1]);
-  assert.equal(chaves.length, 3, 'placeholder do código precisa existir nas três línguas');
+  assert.equal(chaves.length, N_LINGUAS, `placeholder do código precisa existir nas ${N_LINGUAS} línguas`);
   for (const v of chaves) {
     assert.match(v, /^[A-Z0-9]{3}-[A-Z0-9]{3}$/, `placeholder "${v}" não segue o formato XXX-XXX mostrado na tela`);
   }
@@ -60,7 +67,7 @@ test('um conceito, um nome: sem sinônimos concorrentes na mesma língua', () =>
   // Deriva de terminologia é a inconsistência mais fácil de introduzir: basta
   // escrever uma tela nova sem reler as antigas.
   const blocos = {};
-  for (const lang of ['pt', 'en', 'es']) {
+  for (const lang of LANGS_DO_DICT) {
     const m = I18N.match(new RegExp(`\\n  ${lang}: \\{([\\s\\S]*?)\\n  \\},?\\n`));
     if (m) blocos[lang] = m[1].toLowerCase();
   }
@@ -69,6 +76,9 @@ test('um conceito, um nome: sem sinônimos concorrentes na mesma língua', () =>
   const PROIBIDOS = {
     pt: [['aparelho', 'dispositivo'], ['celular', 'telefone']],
     es: [['dispositivo', 'aparato']],
+    // "appareil" é o termo da app; "dispositif" em francês soa a dispositivo
+    // médico/jurídico e é o sinônimo que uma tradução nova traria sem pensar.
+    fr: [['appareil', 'dispositif'], ['téléphone', 'portable']],
   };
   for (const [lang, pares] of Object.entries(PROIBIDOS)) {
     const txt = blocos[lang] || '';
@@ -89,6 +99,7 @@ test('botão de confirmar ecoa o verbo do enunciado', () => {
     ['pt', 'marcar como lido', 'marcar como lidos'],
     ['en', 'as read', 'mark as read'],
     ['es', 'marcar como leída', 'marcar como leídos'],
+    ['fr', 'marquer comme lue', 'marquer comme lues'],
   ]) {
     const m = I18N.match(new RegExp(`\\n  ${lang}: \\{([\\s\\S]*?)\\n  \\},?\\n`));
     const txt = (m ? m[1] : '').toLowerCase();
