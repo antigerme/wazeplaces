@@ -8,11 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.29-01
+
+### Alterado
+- **Desligar o "Desfazer" fica disponível mais cedo.** A cota de pedidos tratados caiu quase pela metade em todos os níveis: **L6 passou de 50 para 30**, L3 de 100 para 60, L1 de 300 para 180.
+- **O aviso de que o "Desfazer" virou opcional fica 8 segundos na tela**, em vez de 6 — são três linhas e ele é clicável (abre as Preferências direto na opção).
+
+## v2026.07.28-09
+
+### Corrigido
+- **O texto esmaecido continua legível.** Ele nasceu apagado demais na versão anterior (3,79:1, abaixo do mínimo de acessibilidade) e foi corrigido — agora 5,74:1 no tema claro e 8,15:1 no escuro. A verificação automática mede isso a cada mudança, nos dois temas.
+
 ## v2026.07.28-08
 
 ### Alterado
 - **Pedido sem nome agora é identificado pelo endereço.** Antes o card estampava **"sem nome"** no maior texto da tela, e a única coisa que identificava o local — o endereço — ficava em cinza pequeno logo abaixo. Estava invertido. Agora o endereço ocupa o título, e um selo **SEM NOME** ao lado registra a falta, que continua sendo informação útil para decidir. Sem nome e sem endereço, aparece *(local sem nome)*.
-- **O texto esmaecido continua legível.** Ele nasceu apagado demais nesta mesma versão (3.79:1, abaixo do mínimo de acessibilidade) e foi corrigido antes de sair — agora 5.74:1 no tema claro e 8.15:1 no escuro. A verificação automática mede isso a cada mudança, nos dois temas.
 - **Dá para saber o que é dado e o que é a app falando.** Tudo que a app escreve no lugar de um valor ausente agora vem entre parênteses e em itálico esmaecido — *(desconhecido)*, *(sem categoria)*, *(sem endereço)*. Antes um local chamado "sem nome" era indistinguível de um local sem nome.
 
 ## v2026.07.28-07
