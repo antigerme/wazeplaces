@@ -69,6 +69,29 @@ test('i18n: toda chave usada no index.html (data-i18n*) existe no dicionário', 
   assert.equal(orphans.length, 0, 'data-i18n no HTML sem chave no dicionário:\n' + orphans.join('\n'));
 });
 
+// Regressão: `data-i18n` escreve textContent, então markup no valor do
+// dicionário chega ESCAPADO na tela — o editor lê "Toque em <strong>Compartilhar
+// </strong>" literalmente. Aconteceu com os passos de instalação no iPhone, que
+// é justamente quem não tem outro caminho. Nada quebra: a chave existe, a
+// paridade passa, o texto só fica com as tags à mostra. Quem tem markup usa
+// `data-i18n-html` (innerHTML, valores do próprio dicionário — nunca da rede).
+test('i18n: chave ligada por textContent (data-i18n) não pode ter markup no valor', () => {
+  const html = read('index.html');
+  const textuais = new Set();
+  const re = /\bdata-i18n="([^"]+)"/g;   // sem sufixo: textContent
+  let m;
+  while ((m = re.exec(html)) !== null) textuais.add(m[1]);
+  const comTag = [];
+  for (const k of textuais) {
+    for (const lang of LANGS) {
+      const v = DICT[lang] && DICT[lang][k];
+      if (typeof v === 'string' && /<[a-z][^>]*>/i.test(v)) comTag.push(`${lang} · ${k} → ${v.slice(0, 60)}`);
+    }
+  }
+  assert.equal(comTag.length, 0,
+    'valor com HTML numa chave que vira textContent (use data-i18n-html):\n' + comTag.join('\n'));
+});
+
 test('i18n: toda chave t(\'...\') do app.js/api.js existe no dicionário', () => {
   const src = read('js/app.js') + '\n' + read('js/api.js');
   const keys = new Set();
