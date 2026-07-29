@@ -11,7 +11,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.07.29-01
 
 ### Alterado
-- **Desligar o "Desfazer" fica disponível mais cedo.** A cota de pedidos tratados caiu quase pela metade em todos os níveis: **L6 passou de 50 para 30**, L3 de 100 para 60, L1 de 300 para 180.
+- **Desligar o "Desfazer" fica disponível bem mais cedo.** A cota de pedidos tratados caiu para menos da metade em todos os níveis: **L6 passou de 50 para 20**, L3 de 100 para 40, L1 de 300 para 120.
 - **O aviso de que o "Desfazer" virou opcional fica 8 segundos na tela**, em vez de 6 — são três linhas e ele é clicável (abre as Preferências direto na opção).
 
 ## v2026.07.28-09

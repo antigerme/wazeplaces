@@ -2700,8 +2700,8 @@ function enforceDevGatedFilters() {
 // Ideia: novatos não conseguem desligar o undo até pegarem ritmo. Editores de
 // nível mais alto têm cota menor (são mais experientes).
 // Fórmula: ceil(UNDO_GATE_BASE / (rank + 1)). Waze devolve rank 0-indexed:
-//   rank 5 (L6) → 30 PURs, rank 4 (L5) → 36, rank 3 (L4) → 45, rank 2 (L3) → 60,
-//   rank 1 (L2) → 90, rank 0 (L1) → 180.
+//   rank 5 (L6) → 20 PURs, rank 4 (L5) → 24, rank 3 (L4) → 30, rank 2 (L3) → 40,
+//   rank 1 (L2) → 60, rank 0 (L1) → 120.
 // "PURs tratados" = read + rejected (skipped não treina o ritmo de ação destrutiva).
 // Staff são isentos. Esta NÃO é proteção de segurança — é UX/educação. localStorage
 // pode ser editado pelo user esperto; o objetivo é proteger quem é genuinamente novato.
@@ -2711,7 +2711,7 @@ function enforceDevGatedFilters() {
 // pro novato (uma sessão de trabalho de verdade) e some do caminho de quem tem
 // ritmo. Baixar mais (30/60) apagaria o gate: L6 passaria em 10 segundos, e a
 // escala por nível viraria ruído (L5=6 vs L6=5 não distingue ninguém).
-const UNDO_GATE_BASE = 180;
+const UNDO_GATE_BASE = 120;
 
 function getUndoTreatedCount() {
     return (AppState.stats.read || 0) + (AppState.stats.rejected || 0);
