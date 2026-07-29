@@ -2770,14 +2770,19 @@ function checkUndoGateUnlock() {
     showToast(
         t('toast.undoUnlocked', { n: getUndoUnlockThreshold() }),
         'achievement',
-        // 8s: o dobro de um toast comum, porque são 3 linhas E tem ação (toque
-        // abre as Preferências). Decisão do owner. Já esteve em 8s, caiu pra 6s
-        // porque tapava os botões ✕/↑/✓ por tempo demais, e voltou — hoje o
-        // custo é menor: a janela do Desfazer já desabilita os botões nos
-        // primeiros 3s, então a sobreposição só incomoda nos 5s restantes.
-        // Toque dispensa antes; o swipe nunca é bloqueado (o gesto acontece
-        // acima da área do toast).
-        8000,
+        // 20s. A mensagem tem 16 palavras: a ~200 palavras/min de leitura atenta
+        // são ~4,8s só de leitura, mais notar que apareceu e decidir se toca —
+        // os 8s anteriores ficavam exatamente no limite, e o owner sentiu isso
+        // usando. 20s cobre leitura tranquila com folga.
+        //
+        // Ficar aqui não custa mais nada: desde que virou banner no TOPO, ele
+        // não tapa botão nenhum (medido em 4 aparelhos × 2 temas), e aparece uma
+        // vez na vida (undoGateSeen). Toque dispensa e abre as Preferências.
+        //
+        // O desenho que dispensaria o número — banner persistente com ✕ próprio,
+        // que é o comportamento de banner no M3 — foi oferecido e o owner
+        // preferiu o ajuste simples.
+        20000,
         abrirPreferenciaDoUndo
     );
 }
