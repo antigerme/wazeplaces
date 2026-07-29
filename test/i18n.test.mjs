@@ -60,6 +60,23 @@ test('i18n: dicionário tem os idiomas suportados', () => {
     assert.match(locales[1], new RegExp(`\\b${l}:`),
       `${l} não tem locale — número e data sairiam no padrão do fallback sem ninguém notar`);
   }
+
+  // Decisão do owner: a app tem UM idioma por língua, nunca variante regional
+  // como opção separada. Só se vê pt, en, es, fr — não pt-BR ao lado de pt-PT,
+  // nem fr-FR ao lado de fr-CA. Variante do NAVEGADOR colapsa no idioma (provado
+  // no teste do fallback); variante como CHAVE seria um segundo francês no
+  // seletor, com dicionário próprio pra manter em paridade.
+  //
+  // Regional é legítimo só como VALOR do LOCALE_POR_LANG (pt → 'pt-BR'), que é o
+  // locale de Intl/toLocaleString — coisa diferente da identidade do idioma.
+  const chavesDeMapa = (bloco) => [...bloco.matchAll(/(?:^|[{,\s])'?([A-Za-z][\w-]*)'?\s*:/g)].map((m) => m[1]);
+  for (const [rot, bloco] of [['LANG_NOMES', mapa[1]], ['LOCALE_POR_LANG', locales[1]]]) {
+    for (const k of chavesDeMapa(bloco)) {
+      assert.match(k, /^[a-z]{2}$/,
+        `${rot} tem a chave "${k}": idioma é código de 2 letras, e variante regional ` +
+        'não entra como idioma separado (o navegador em fr-CA já cai em fr)');
+    }
+  }
 });
 
 test('i18n: paridade — toda chave existe em TODAS as línguas', () => {
@@ -166,7 +183,10 @@ test('i18n: idioma desconhecido cai em inglês, não em português', () => {
     ctx.navigator.language = loc;
     assert.equal(ctx.resolveLang(), 'en', `locale ${loc || '(vazio)'} devia cair em inglês`);
   }
-  // E quem É atendido continua vindo da detecção, sem passar pelo fallback.
+  // E quem É atendido vem da detecção, sem passar pelo fallback. Repare que a
+  // lista tem VARIANTES REGIONAIS de propósito: ela prova que todas colapsam num
+  // idioma de 2 letras. A app tem UM francês, como tem UM português — nunca
+  // fr-FR e fr-CA como coisas separadas no seletor.
   for (const [loc, esperado] of [['pt-BR', 'pt'], ['pt-PT', 'pt'], ['en-GB', 'en'], ['es-AR', 'es'],
                                  ['fr-FR', 'fr'], ['fr-CA', 'fr']]) {
     ctx.navigator.language = loc;
