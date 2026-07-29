@@ -522,6 +522,37 @@ test('durante a janela do Desfazer ninguém prossegue, por caminho nenhum', () =
   assert.match(agenda[0], /aplicarTravaDeAcao\(\)/, 'a trava não é liberada quando a ação sai');
 });
 
+test('o aviso de conquista é banner (topo), não snackbar (rodapé)', () => {
+  // No rodapé ele tapava os TRÊS botões do card por 8s em 2 de 3 aparelhos
+  // medidos (iPhone SE e laptop 1366×768) — gotcha #26. A distinção é do M3 e
+  // não é estética: snackbar confirma o que você acabou de fazer e some rápido;
+  // banner é proeminente, tem ação e fica mais tempo. Este convida a abrir as
+  // Preferências, não confirma nada.
+  const APP_ = read('js/app.js');
+  assert.match(HTML, /id="bannerContainer"/, 'sumiu o container do banner no topo');
+  assert.match(APP_, /'achievement' \? 'bannerContainer' : 'toastContainer'/,
+    'a conquista voltou pro rodapé, onde tapa os botões do card');
+
+  // Ancorado abaixo do header — senão só troca de vítima e passa a tapar os
+  // botões do próprio header.
+  const linha = HTML.split('\n').find((l) => l.includes('id="bannerStack"'));
+  assert.ok(linha, 'sumiu o #bannerStack');
+  assert.match(linha, /var\(--header-h/, 'o banner deixou de se ancorar na altura do header');
+  // E essa altura é MEDIDA: o header cresce com a safe-area do iPhone e com a
+  // fonte do sistema, então número fixo erraria em algum aparelho.
+  assert.match(APP_, /function setupAlturaDoHeader/, 'ninguém mais mede a altura do header');
+  const fn = APP_.match(/function setupAlturaDoHeader\([\s\S]*?\n\}/)[0];
+  assert.match(fn, /--header-h/, 'a medida do header não é mais publicada');
+  assert.match(fn, /ResizeObserver/, 'a altura do header virou medida única, não acompanha mudança');
+  assert.match(APP_, /setupAlturaDoHeader\(\);/, 'o setup não é chamado na inicialização');
+
+  // Camada: acima do card (z-50), abaixo dos modais (z-[60]).
+  const z = linha.match(/z-\[(\d+)\]/);
+  assert.ok(z, 'o #bannerStack perdeu a camada explícita');
+  assert.ok(Number(z[1]) > 50 && Number(z[1]) < 60,
+    `#bannerStack em z-[${z[1]}]: precisa ficar entre o card (50) e os modais (60)`);
+});
+
 test('a ação pendente não morre quando a página sai', () => {
   // O stat é incrementado e SALVO no swipe, mas a ação só vai pro Waze
   // UNDO_WINDOW_MS depois. Fechar a aba nessa janela fazia a ação sumir com o

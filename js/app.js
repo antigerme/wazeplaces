@@ -131,6 +131,7 @@ function initApp() {
     setupModalListeners();
     setupLightbox();
     setupKeyboardInset();
+    setupAlturaDoHeader();
     setupDescargaAoSair();
     marcarSuporteAExtensao();
     setupInstalarApp();
@@ -2531,6 +2532,20 @@ function setupDescargaAoSair() {
     });
 }
 
+// O banner do topo se ancora abaixo do header, e o header não tem altura fixa:
+// cresce com a safe-area do iPhone e com a preferência de fonte do sistema.
+// Número chutado no CSS erraria em algum aparelho — daí medir e publicar.
+function setupAlturaDoHeader() {
+    const header = document.querySelector('header');
+    if (!header) return;
+    const medir = () => {
+        document.documentElement.style.setProperty('--header-h', header.getBoundingClientRect().height + 'px');
+    };
+    if (typeof ResizeObserver === 'function') new ResizeObserver(medir).observe(header);
+    window.addEventListener('resize', medir);
+    medir();
+}
+
 function setupKeyboardInset() {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -2859,7 +2874,13 @@ function toggleTheme() {
 // `onClick` opcional: quando presente, o toast vira um atalho (executa a ação
 // E dispensa). Sem ele, o comportamento de sempre — clicar só dispensa.
 function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
-    const container = document.getElementById('toastContainer');
+    // Conquista é BANNER (topo), não snackbar (rodapé) — distinção do M3, e aqui
+    // com motivo medido: no rodapé ela tapava os três botões do card por 8s em 2
+    // de 3 aparelhos (gotcha #26). Snackbar confirma o que você acabou de fazer;
+    // banner é proeminente, tem ação e fica mais tempo. Este convida a abrir as
+    // Preferências — não confirma nada.
+    const container = document.getElementById(
+        type === 'achievement' ? 'bannerContainer' : 'toastContainer');
     const toast = document.createElement('div');
 
     const colors = {
@@ -2887,7 +2908,8 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
         removed = true;
         toast.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
         toast.style.opacity = '0';
-        toast.style.transform = 'translateY(20px)';
+        // Sai por onde entrou: pra cima no topo, pra baixo no rodapé.
+        toast.style.transform = `translateY(${type === 'achievement' ? '-20px' : '20px'})`;
         setTimeout(() => toast.remove(), 250);
     };
     toast.addEventListener('click', () => {

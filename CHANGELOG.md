@@ -12,7 +12,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ### Alterado
 - **Desligar o "Desfazer" fica disponível bem mais cedo.** A cota de pedidos tratados caiu para menos da metade em todos os níveis: **L6 passou de 50 para 20**, L3 de 100 para 40, L1 de 300 para 120.
-- **O aviso de que o "Desfazer" virou opcional fica 8 segundos na tela**, em vez de 6 — são três linhas e ele é clicável (abre as Preferências direto na opção).
+- **O aviso de que o "Desfazer" virou opcional mudou de lugar e de tempo.** Passou para o **topo da tela**, logo abaixo da barra, e agora fica **8 segundos** (era 6). No rodapé ele tapava os três botões do card — medido em iPhone SE e em notebook. Continua clicável: um toque abre as Preferências direto na opção, e dispensa o aviso.
 
 ## v2026.07.28-09
 
