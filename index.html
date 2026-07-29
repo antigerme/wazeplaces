@@ -60,7 +60,7 @@
          Mexeu em classe do Tailwind no HTML/JS? rode `npm run css`. -->
     <link rel="stylesheet" href="css/tailwind.css">
 </head>
-<body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen text-slate-800 antialiased selection:bg-blue-200 dark:text-slate-100 dark:from-slate-900 dark:to-slate-800">
+<body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-[100dvh] text-slate-800 antialiased selection:bg-blue-200 dark:text-slate-100 dark:from-slate-900 dark:to-slate-800">
 
     <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-slate-200/50 dark:bg-slate-800/80 dark:border-slate-700" style="padding-top: env(safe-area-inset-top)">
         <div class="container mx-auto px-4 py-3 flex items-center justify-between gap-2 max-w-md">
@@ -516,7 +516,13 @@
                 </div>
             </div>
 
-            <div id="cardStack" class="relative h-[min(80dvh,640px)] min-h-[min(520px,85dvh)] w-full max-w-[400px] mx-auto">
+            <!-- A ALTURA do card não mora aqui: ela é a sobra da janela, calculada
+                 pela cadeia de flex em css/styles.css ("A app cabe na tela"). Um
+                 `h-[min(80dvh,640px)]` aqui vinha de uma fração da JANELA e
+                 ignorava os 152px (219 no aparelho estreito) já gastos acima —
+                 era o que jogava a barra ✕/↑/✓ pra baixo da dobra. Classe de
+                 altura aqui volta a mentir sobre quem manda. -->
+            <div id="cardStack" class="relative w-full max-w-[400px] mx-auto">
                 <div id="loadingCard" class="absolute inset-0 rounded-3xl z-50 overflow-hidden bg-white shadow-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200" role="status">
                     <div aria-hidden="true" class="h-full flex flex-col">
                         <div class="skeleton h-52 flex-shrink-0"></div>

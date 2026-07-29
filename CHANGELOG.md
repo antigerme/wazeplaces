@@ -8,6 +8,16 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.29-04
+
+### Corrigido
+- **Os botões ✕/↑/✓ agora ficam sempre na tela.** Em quatro aparelhos medidos eles nasciam abaixo da dobra — 87px no Galaxy Fold, 92px com o celular deitado, 17px no iPhone SE, 3px no Galaxy S8+. E não dava para rolar até eles com o dedo no card, porque arrastar para cima é "pular": só rolando pela margem. A altura do card vinha de uma fração da janela e ignorava o que o cabeçalho e o placar já tinham ocupado; agora o card recebe **o espaço que sobra**. Onde já cabia, nada muda (Pixel 7, iPhone 14 Pro, iPad seguem com o card idêntico).
+- **A página não rola mais em nenhum aparelho.** Rolagem de página disputa com o gesto de pular.
+- **Com o celular deitado, os botões passaram para baixo da foto.** Assim o texto recebe a altura inteira do card e para de rolar por dentro nos quatro tipos de pedido.
+
+### Alterado
+- **O placar ficou mais enxuto em telas baixas**, devolvendo até 42px para o card — que é o produto da app. Os rótulos não encolheram: 11px é o piso de legibilidade.
+
 ## v2026.07.29-03
 
 ### Adicionado

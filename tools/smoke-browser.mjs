@@ -126,6 +126,11 @@ const APARELHOS = [
   ['Pixel 7', { width: 412, height: 915 }],
   ['iPhone SE', { width: 375, height: 667 }],
   ['laptop 1280x800', { width: 1280, height: 800 }],
+  // Os dois que mais apertam a conta de altura, e onde a barra ✕/↑/✓ nascia
+  // abaixo da dobra: o estreito (placar vira 2×2 e o custo fixo pula pra 219px)
+  // e o deitado (393px de altura pra app inteira).
+  ['Galaxy Fold', { width: 280, height: 653 }],
+  ['paisagem 852x393', { width: 852, height: 393 }],
 ];
 const LINGUAS = ['pt', 'en', 'es'];
 
@@ -194,6 +199,23 @@ for (const [aparelho, viewport] of APARELHOS) {
           if (!e || !e.offsetParent) return null;
           return e.scrollHeight > e.clientHeight + 1;
         };
+        // A barra ✕/↑/✓ está NA TELA e recebe o toque? É a ação principal da
+        // app: fora da dobra ela é inalcançável, porque o card tem
+        // `touch-action: none` (arrastar pra cima é "pular") e a página só rola
+        // agarrando a margem. Medir contra a VIEWPORT, não contra o contêiner.
+        const acoes = c.querySelector('.card-actions');
+        const ar = acoes ? acoes.getBoundingClientRect() : null;
+        const acoesFora = ar ? Math.max(0, Math.round(ar.bottom - innerHeight), Math.round(-ar.top)) : 0;
+        const botoesBloqueados = [];
+        for (const cls of ['card-btn-reject', 'card-btn-skip', 'card-btn-read']) {
+          const b = c.querySelector('.' + cls);
+          if (!b) continue;
+          const r = b.getBoundingClientRect();
+          const no = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+          if (!no || !no.closest('.' + cls)) botoesBloqueados.push(cls.replace('card-btn-', ''));
+          if (Math.min(r.width, r.height) < 44) botoesBloqueados.push(`${cls.replace('card-btn-', '')} ${Math.round(Math.min(r.width, r.height))}px`);
+        }
+        const paginaRola = document.documentElement.scrollHeight - innerHeight;
         const cont = c.querySelector('.card-content');
         const areas = [];
         if (cont.scrollHeight > cont.clientHeight + 1) areas.push('card-content');
@@ -242,6 +264,7 @@ for (const [aparelho, viewport] of APARELHOS) {
         }
         return {
           areas,
+          acoesFora, botoesBloqueados, paginaRola,
           nome: (c.querySelector('.card-name').textContent || '').trim(),
           tipo: (c.querySelector('.card-type').textContent || '').trim(),
           temAcoes: !!c.querySelector('.card-btn-reject') && !!c.querySelector('.card-btn-skip') && !!c.querySelector('.card-btn-read'),
@@ -279,6 +302,12 @@ for (const [aparelho, viewport] of APARELHOS) {
       checa(m.roláveisSemNome === 0, `${rot}: ${m.roláveisSemNome} área(s) rolável(is) sem aria-label`);
       checa(m.comTetoFixo.length === 0, `${rot}: caixa longa com teto fixo em vez de flex`, m.comTetoFixo.join(', '));
       checa(m.contrasteBaixo.length === 0, `${rot}: texto esmaecido abaixo do contraste do WCAG`, m.contrasteBaixo.join(', '));
+      // A app cabe na tela: card dimensionado pela SOBRA, não por fração da
+      // janela. Sem isso a barra de ações nasce abaixo da dobra (medido: 87px
+      // no Fold, 92px deitado, 17px no iPhone SE).
+      checa(m.acoesFora === 0, `${rot}: barra ✕/↑/✓ fora da tela`, `${m.acoesFora}px`);
+      checa(m.botoesBloqueados.length === 0, `${rot}: botão da barra inalcançável ou pequeno demais`, m.botoesBloqueados.join(', '));
+      checa(m.paginaRola <= 0, `${rot}: a página rola — rolagem disputa com o gesto de "pular"`, `${m.paginaRola}px`);
       // Mudanças: TODAS aparecem, sem cap.
       if (tipo === 'UPDATE') {
         checa(m.diffs === CARDS.UPDATE.changes.length,
