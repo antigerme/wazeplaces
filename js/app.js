@@ -1874,6 +1874,15 @@ function showNoPlaces() {
     } else {
         if (errEl) errEl.classList.add('hidden');
         noMore.classList.remove('hidden');
+        atualizarConviteInstalar();
+        // Com o convite embaixo, o painel pode não caber (Fold, tela deitada,
+        // fonte grande do sistema). Aí ele rola — e área que rola sem dizer que
+        // rola é área que ninguém rola (gotcha #29). Uma vez só por elemento:
+        // o próprio marcarBordaRolagem reavalia via ResizeObserver.
+        if (!noMore.dataset.bordaRolagem) {
+            marcarBordaRolagem(noMore);
+            noMore.dataset.bordaRolagem = '1';
+        }
         // Festa só quando o editor de fato zerou algo NESTA sessão. Abrir a app
         // numa fila já vazia não é conquista — confete ali seria ruído.
         const tratou = (AppState.stats.read || 0) + (AppState.stats.rejected || 0) > 0;
@@ -2602,9 +2611,55 @@ function marcarSuporteAExtensao() {
 // de Ajuda — onde o editor decide quando.
 let promptInstalacao = null;
 
+// Já rodando instalada? Nada de convidar quem já aceitou. `display-mode` cobre
+// Android/desktop; `navigator.standalone` é o jeito do iOS, que não implementa
+// a media query.
+function appJaInstalada() {
+    try {
+        if (window.matchMedia('(display-mode: standalone)').matches) return true;
+        if (window.matchMedia('(display-mode: window-controls-overlay)').matches) return true;
+    } catch (e) { /* matchMedia pode faltar em WebView antiga */ }
+    return navigator.standalone === true;
+}
+
+// iOS não tem `beforeinstallprompt`: no Safari a instalação é manual. Sem
+// detectar isso, o iPhone fica SEM CAMINHO NENHUM — e o pareamento por QR
+// empurra justamente pro celular. iPadOS se identifica como Mac desde o iOS 13,
+// daí o teste extra por toque.
+function ehIOS() {
+    const ua = navigator.userAgent || '';
+    if (/iPad|iPhone|iPod/.test(ua)) return true;
+    return /Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+}
+
+const CHAVE_INSTALL_DISPENSADO = 'waze_places_install_dispensado';
+
+function convitePodeAparecer() {
+    if (appJaInstalada()) return false;
+    if (safeLS && safeLS.get && safeLS.get(CHAVE_INSTALL_DISPENSADO) === '1') return false;
+    // Só há o que oferecer se houver prompt (Chrome/Android/desktop) ou se for
+    // iOS, onde mostramos o passo a passo manual.
+    return !!promptInstalacao || ehIOS();
+}
+
+// O convite vive no "Tudo limpo!" porque é o ÚNICO momento em que o editor
+// terminou algo: não há próxima ação esperando e a tela já é de festa. Em
+// qualquer outro lugar ele disputaria com o gesto.
+function atualizarConviteInstalar() {
+    const box = document.getElementById('installInvite');
+    if (!box) return;
+    const mostra = convitePodeAparecer();
+    box.classList.toggle('hidden', !mostra);
+    if (!mostra) return;
+    // Com prompt: botão. Sem prompt e iOS: passo a passo. Nunca os dois.
+    document.getElementById('installInviteBtn').classList.toggle('hidden', !promptInstalacao);
+    document.getElementById('installIosSteps').classList.toggle('hidden', !!promptInstalacao);
+}
+
 function atualizarBotaoInstalar() {
     const btn = document.getElementById('installAppBtn');
-    if (btn) btn.classList.toggle('hidden', !promptInstalacao);
+    if (btn) btn.classList.toggle('hidden', !promptInstalacao || appJaInstalada());
+    atualizarConviteInstalar();
 }
 
 function setupInstalarApp() {
@@ -2617,15 +2672,21 @@ function setupInstalarApp() {
         promptInstalacao = null;
         atualizarBotaoInstalar();
     });
-    const btn = document.getElementById('installAppBtn');
-    if (!btn) return;
-    btn.addEventListener('click', async () => {
+    const instalar = async () => {
         if (!promptInstalacao) return;
         promptInstalacao.prompt();
         // O evento é de uso único: depois de escolher, some de qualquer jeito.
         try { await promptInstalacao.userChoice; } catch (err) {}
         promptInstalacao = null;
         atualizarBotaoInstalar();
+    };
+    document.getElementById('installAppBtn')?.addEventListener('click', instalar);
+    document.getElementById('installInviteBtn')?.addEventListener('click', instalar);
+    document.getElementById('installDismissBtn')?.addEventListener('click', () => {
+        // "Agora não" é pra valer: sem persistir, a fila zerar de novo traria o
+        // convite de volta, e convite que não aceita não é convite.
+        safeLS.set(CHAVE_INSTALL_DISPENSADO, '1');
+        atualizarConviteInstalar();
     });
     atualizarBotaoInstalar();
 }

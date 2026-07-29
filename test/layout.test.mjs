@@ -777,3 +777,91 @@ test('o vão entre a barra fixa e o placar é medido até a TINTA, não até a c
   assert.match(main, /\bpt-2\b/, 'o topo do <main> voltou a ter respiro grande antes do placar');
   assert.doesNotMatch(main, /\bpy-6\b/, 'py-6 de volta: 24px de margem viram 35px de vão percebido');
 });
+
+// ── Convite de instalar ────────────────────────────────────────────────────
+// Ninguém estava instalando a app, e a medição explicou por quê: o convite só
+// existia dentro do modal de Ajuda, e o iPhone NUNCA dispara
+// `beforeinstallprompt` — no Safari a instalação é manual. Nada no código
+// perguntava por `display-mode: standalone`, então quem já tinha instalado
+// continuaria sendo convidado. O convite agora vive no "Tudo limpo!", que é o
+// único momento em que o editor terminou algo e não há próxima ação esperando.
+
+test('o convite de instalar aparece no "Tudo limpo!", não no meio do trabalho', () => {
+  const linhas = HTML.split('\n');
+  const iPainel = linhas.findIndex((l) => l.includes('id="noMoreCards"'));
+  const iConvite = linhas.findIndex((l) => l.includes('id="installInvite"'));
+  const iErro = linhas.findIndex((l) => l.includes('id="loadErrorState"'));
+  assert.ok(iPainel !== -1 && iConvite !== -1, 'sumiu o #noMoreCards ou o #installInvite');
+  assert.ok(iConvite > iPainel && (iErro === -1 || iConvite < iErro),
+    'o convite saiu de dentro do "Tudo limpo!" — em qualquer outro lugar ele disputa com o gesto');
+  // E quem o atualiza é o próprio showNoPlaces: sem essa chamada ele nunca
+  // reavalia (fica visível pra quem acabou de instalar, some pra quem não).
+  const app = read('js/app.js');
+  const corpo = app.slice(app.indexOf('function showNoPlaces'), app.indexOf('function showNoPlaces') + 1400);
+  assert.match(corpo, /atualizarConviteInstalar\(\)/,
+    'showNoPlaces parou de reavaliar o convite');
+});
+
+test('quem já instalou não é convidado de novo — e o iPhone tem caminho', () => {
+  const app = read('js/app.js');
+  // Os DOIS sinais: `display-mode: standalone` cobre Android/desktop, e
+  // `navigator.standalone` é o único que o iOS dá. Checar só um deixa metade
+  // dos instalados sendo convidados pra instalar de novo.
+  // Dentro do CORPO da função e sem comentários: procurar a string no arquivo
+  // inteiro passava mesmo com a checagem trocada por `false` — sobrava a
+  // menção no comentário. (Verificado desfazendo a correção de propósito.)
+  const iInst = app.indexOf('function appJaInstalada');
+  assert.notEqual(iInst, -1, 'sumiu o appJaInstalada()');
+  const instalada = app.slice(iInst, app.indexOf('\n}', iInst)).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+  assert.match(instalada, /display-mode:\s*standalone/, 'sumiu a checagem de display-mode: standalone');
+  assert.match(instalada, /navigator\.standalone/, 'sumiu a checagem de navigator.standalone (iOS)');
+  // iOS não tem beforeinstallprompt: sem os passos manuais, quem usa iPhone
+  // fica sem NENHUM caminho — e o pareamento por QR empurra justamente pro
+  // celular.
+  assert.match(app, /function ehIOS\(/, 'sumiu a detecção de iOS');
+  assert.match(HTML, /id="installIosSteps"/, 'sumiram os passos manuais do iPhone');
+  for (const chave of ['install.ios.step1', 'install.ios.step2']) {
+    assert.ok(HTML.includes(`data-i18n-html="${chave}"`),
+      `${chave} precisa de data-i18n-html: o texto tem <strong> e data-i18n (textContent) mostraria a tag crua`);
+  }
+});
+
+test('"Agora não" é definitivo: o convite não volta na próxima fila zerada', () => {
+  const app = read('js/app.js');
+  assert.match(app, /waze_places_install_dispensado/, 'sumiu a chave de dispensa do convite');
+  const i = app.indexOf('function convitePodeAparecer');
+  assert.notEqual(i, -1, 'sumiu o convitePodeAparecer()');
+  const corpo = app.slice(i, i + 600);
+  assert.match(corpo, /CHAVE_INSTALL_DISPENSADO/,
+    'o convite parou de consultar a dispensa — volta a aparecer pra quem já disse não');
+});
+
+test('o "Tudo limpo!" não corta o convite quando a tela é curta', () => {
+  // Medido: no Fold (280×653) o painel pedia 456px e só 434 apareciam, e
+  // deitado (852×393) os PASSOS do iPhone ficavam fora — a instrução, no único
+  // aparelho sem botão de instalar. Três defesas, e cada uma cobre um caso.
+  //
+  // 1. `align-items: center` de flex corta dos DOIS lados quando o conteúdo é
+  //    maior que a caixa, e o pedaço de cima fica inalcançável até rolando.
+  //    `margin: auto` centraliza igual e cede quando falta espaço.
+  assert.match(CSS_SEM_COMENTARIO, /#noMoreCards\s*\{[^}]*overflow-y:\s*auto/,
+    'o painel do "Tudo limpo!" parou de rolar quando não cabe');
+  assert.match(CSS_SEM_COMENTARIO, /#noMoreCards\s*\{[^}]*align-items:\s*flex-start/,
+    'voltou a centralizar por align-items: corta os dois lados e o topo some');
+  assert.match(CSS_SEM_COMENTARIO, /#noMoreCards\s+\.empty-inner\s*\{[^}]*margin-top:\s*auto/,
+    'sumiu a centralização por margem (a que não corta)');
+  // 2. Enfeite sai antes de ação: o selo verde repete o ✓ que o título já diz.
+  for (const media of [/@media\s*\(max-height:\s*700px\)\s*and\s*\(max-width:\s*360px\)/,
+                       /@media\s*\(max-height:\s*480px\)\s*and\s*\(min-width:\s*600px\)/]) {
+    const m = CSS.match(media);
+    assert.ok(m, 'sumiu o degrau responsivo do "Tudo limpo!" pra tela curta/estreita');
+    const bloco = CSS.slice(m.index, CSS.indexOf('\n}', m.index));
+    assert.match(bloco, /#noMoreCards\s+\.empty-badge\s*\{[^}]*display:\s*none/,
+      'o selo decorativo voltou a ocupar 64px onde faltava espaço pro botão');
+  }
+  // 3. Área que rola precisa DIZER que rola (gotcha #29) — senão ninguém rola.
+  const app = read('js/app.js');
+  const i = app.indexOf('function showNoPlaces');
+  assert.match(app.slice(i, i + 1400), /marcarBordaRolagem\(noMore\)/,
+    'o painel rola sem aviso nenhum de que há mais conteúdo abaixo');
+});

@@ -436,6 +436,27 @@ body.dark {
   to   { transform: scale(1); opacity: 1; }
 }
 
+/* "Tudo limpo!" ganhou o convite de instalar embaixo do botão, e aí o painel
+   passou a poder não caber: medido, cortava 16px no Fold (280×653) e 48px
+   deitado (852×393) — justamente o botão de instalar e o "Agora não", ou seja,
+   o convite aparecia sem NENHUMA forma de aceitar.
+   `items-center` de flex corta dos DOIS lados quando o conteúdo é maior que o
+   contêiner, e o pedaço de cima fica inalcançável mesmo com rolagem. `margin:
+   auto` não tem esse defeito: centraliza quando cabe e cede quando não cabe.
+   Por isso o alinhamento sai do eixo e vai pra margem do filho.
+   `#noMoreCards` é (1,0,0) e vence as utilities sem disputa de ordem de carga
+   (gotcha #27) — `items-center` e `p-8` estão no HTML. */
+#noMoreCards {
+  overflow-y: auto;
+  align-items: flex-start;
+  overscroll-behavior: contain;
+}
+
+#noMoreCards .empty-inner {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
 /* Áreas de scroll interno do card: sem isso o touch-action:none do
    .place-card engole o gesto e listas longas ficam ilegíveis no mobile */
 .card-changes-list,
@@ -790,6 +811,48 @@ button:active {
   .place-card .card-flag-comment {
     padding: 0.5rem;
   }
+  /* O "Tudo limpo!" segue a mesma dieta: o selo de 48px, o `p-8` e as margens
+     foram desenhados pra uma tela em pé sobrando espaço. Com o convite de
+     instalar embaixo, é o que decide entre caber e cortar o botão. */
+  #noMoreCards .empty-inner {
+    padding: 1.25rem 1.5rem;
+    /* Em tela baixa o #cardStack já nasce mais alto que a janela (o `min-h` do
+       stack garante altura mínima pro card) — medido: 88px abaixo da dobra num
+       Fold 280×653. Centralizar dentro do painel joga o fim do conteúdo pra
+       essa parte invisível. Encostar no topo devolve o botão pra tela sem mexer
+       no layout do card, que é o que dita a altura do stack. */
+    margin-top: 0;
+  }
+  #noMoreCards .empty-badge {
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  #noMoreCards .empty-badge svg {
+    width: 2rem;
+    height: 2rem;
+  }
+  #noMoreCards .empty-inner h3 {
+    font-size: 1.125rem;
+  }
+  #noMoreCards .empty-inner > p {
+    margin-bottom: 1rem;
+  }
+  #noMoreCards #installInvite {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+  }
+}
+
+/* Tela baixa E estreita (Fold 280×653, SE 1ª geração 320×568): estreito faz
+   cada linha virar três, e aí falta mais altura ainda. Medido no Fold: o painel
+   pedia 456px e só 434 apareciam — o "Agora não" ficava fora. O selo verde é
+   decoração (o ✓ diz o que o título já diz) e sozinho resolve os 22px que
+   faltavam, com folga de 42. Quando falta espaço, quem sai é o enfeite, nunca
+   a ação. O iPhone SE (375px) não entra: lá já cabia. */
+@media (max-height: 700px) and (max-width: 360px) {
+  #noMoreCards .empty-badge {
+    display: none;
+  }
 }
 
 /* Paisagem: empilhar foto sobre texto não cabe em 393px de altura por mais que
@@ -809,6 +872,34 @@ button:active {
      meia tela vazia ao lado. */
   #cardStack {
     max-width: 44rem;
+  }
+  /* Deitado sobra largura e falta altura, então o "Tudo limpo!" também muda de
+     planta: o selo verde é decoração pura (o ✓ repete o que o título já diz) e
+     custa 64px — exatamente o que faltava pro botão de instalar caber sem
+     rolagem. Sai a decoração, fica a ação. O confete continua. */
+  #noMoreCards .empty-badge {
+    display: none;
+  }
+  /* Sobram 241px de painel visível deitado e o conteúdo pedia 296. Sem estes
+     cortes quem ficava fora da tela eram os PASSOS do iPhone — a instrução, no
+     único aparelho que não tem botão de instalar. A frase de apoio some porque
+     o "Tudo limpo!" e o confete já dizem o mesmo; o resto é aperto de espaço.
+     Some 55px, que é exatamente o que faltava. */
+  #noMoreCards .empty-inner > p {
+    display: none;
+  }
+  #noMoreCards .empty-inner {
+    padding: 0.75rem 1.5rem 0;
+  }
+  #noMoreCards #installInvite {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+  }
+  /* Só a MARGEM encolhe: o alvo de toque continua nos 44px do `min-h` (M3/HIG).
+     Sem isto o "Agora não" ficava 14px fora da tela — e convite que não dá pra
+     dispensar deixa de ser convite e vira interrupção. */
+  #noMoreCards #installDismissBtn {
+    margin-top: 0.125rem;
   }
   .place-card .card-body {
     display: grid;

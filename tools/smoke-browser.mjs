@@ -295,6 +295,65 @@ for (const [aparelho, viewport] of APARELHOS) {
   await ctx.close();
 }
 
+// ── Convite de instalar: cabe na TELA, não só no painel ───────────────────
+// O #noMoreCards é `absolute inset-0` do #cardStack, que já nasce mais alto que
+// a janela em tela curta. Medir contenção contra o painel aprova o que o
+// screenshot mostra cortado (foi o que aconteceu): o que vale é a viewport.
+// Aparelhos apertados de propósito — Fold (estreito faz cada linha virar três)
+// e deitado, onde sobram ~240px de painel visível. Nas três línguas, porque a
+// string mais larga decide o layout e ela quase nunca é a do idioma em que se
+// desenvolve (gotcha #25).
+const UA_IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+for (const [nome, vp, iOS] of [
+  ['Galaxy Fold', { width: 280, height: 653 }, false],
+  ['iPhone deitado', { width: 852, height: 393 }, true],
+  ['iPhone SE', { width: 375, height: 667 }, true],
+]) {
+  const ctx = await browser.newContext({ viewport: vp, serviceWorkers: 'block', locale: 'pt-BR',
+    isMobile: vp.width < 900, hasTouch: true, userAgent: iOS ? UA_IPHONE : undefined });
+  const page = await ctx.newPage();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(300);
+  for (const lang of LINGUAS) {
+    const m = await page.evaluate(({ lang, iOS }) => {
+      aplicarIdioma(lang);
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.stats = { read: 3, rejected: 1, skipped: 0 };
+      AppState.serverTotal = 0;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+      // O Chromium não dispara `beforeinstallprompt` sozinho; no iOS ele nunca
+      // dispara mesmo — é o caso dos passos manuais.
+      if (!iOS) {
+        window.dispatchEvent(Object.assign(new Event('beforeinstallprompt'),
+          { prompt: () => {}, userChoice: Promise.resolve({ outcome: 'accepted' }) }));
+      }
+      AppState.queue = []; AppState.currentPlace = null;
+      showNoPlaces();
+      const box = document.getElementById('installInvite');
+      if (!box || box.classList.contains('hidden')) return { ausente: true };
+      const fora = [];
+      // O que PRECISA estar na tela: a ação (botão ou passos) e a saída.
+      for (const id of ['installInviteBtn', 'installIosSteps', 'installDismissBtn']) {
+        const e = document.getElementById(id);
+        if (!e || e.classList.contains('hidden')) continue;
+        const r = e.getBoundingClientRect();
+        if (r.bottom > innerHeight + 1 || r.top < 0) fora.push(`${id} ${Math.round(r.bottom - innerHeight)}px`);
+      }
+      const dis = document.getElementById('installDismissBtn').getBoundingClientRect();
+      return { fora, alvoDispensar: Math.round(Math.min(dis.width, dis.height)) };
+    }, { lang, iOS });
+    const rot = `convite · ${nome} · ${lang}`;
+    checa(!m.ausente, `${rot}: convite não apareceu`);
+    if (m.ausente) continue;
+    checa(m.fora.length === 0, `${rot}: parte do convite fora da tela`, m.fora.join(', '));
+    checa(m.alvoDispensar >= 44, `${rot}: "Agora não" abaixo de 44px`, `${m.alvoDispensar}px`);
+  }
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -302,4 +361,4 @@ if (falhas) {
   console.log(`\n✗ smoke de browser: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card`);
+console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`);

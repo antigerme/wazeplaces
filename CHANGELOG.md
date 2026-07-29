@@ -8,6 +8,16 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.29-03
+
+### Adicionado
+- **A app agora convida você a instalá-la na tela inicial — na hora certa.** O convite aparece no **"Tudo limpo!"**, o único momento em que você terminou a fila e não há próximo pedido esperando. Em qualquer outro lugar ele disputaria com o gesto. Um toque em "Agora não" e ele não volta mais.
+- **Quem usa iPhone finalmente tem um caminho.** O Safari nunca oferece o botão de instalar (no iOS a instalação é manual), então o convite mostra os dois passos: **Compartilhar → Adicionar à Tela de Início**. Antes, quem entrava pelo QR do pareamento — que empurra justamente para o celular — não tinha instrução nenhuma.
+- **Quem já instalou não é mais convidado.** A app passou a reconhecer que está rodando instalada, tanto no Android/desktop quanto no iPhone.
+
+### Corrigido
+- **O "Tudo limpo!" não corta mais o convite em tela pequena.** Medido: no Galaxy Fold o botão de instalar ficava fora da tela e, com o celular deitado, os passos do iPhone — a instrução, no aparelho que não tem botão. Onde falta espaço, sai a decoração (o selo verde repete o ✓ que o título já diz) e fica a ação. Em último caso o painel rola, com o aviso de que há mais conteúdo abaixo.
+
 ## v2026.07.29-02
 
 ### Alterado

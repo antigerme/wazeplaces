@@ -96,6 +96,14 @@ const I18N_DICT = {
     'card.brandKnown.title': 'Marca reconhecida pelo Waze', 'card.brandUnknown.title': 'Marca não está na lista oficial do Waze',
     'card.changes': 'Mudanças propostas', 'card.newPhoto.title': 'Foto nova proposta neste pedido',
     'card.flagReason': 'Motivo:', 'card.flagType.INAPPROPRIATE': 'Inapropriado',
+    // Convite pra instalar. A voz é a mesma do resto da app ("Mandou bem, wazer!"),
+    // e o texto diz o GANHO concreto — tela cheia dá mais espaço pra foto, que é o
+    // que o editor olha pra decidir —, não só a graça.
+    'install.invite': '🚗💨 Bota o Waze Places na tela inicial: abre num toque e sobra mais tela pra foto.',
+    'install.action': 'Instalar na tela inicial',
+    'install.ios.step1': 'Toque em <strong>Compartilhar</strong>, na barra do Safari',
+    'install.ios.step2': 'Escolha <strong>Adicionar à Tela de Início</strong>',
+    'install.dismiss': 'Agora não',
     // Rótulos de campo do diff — vinham do SERVIDOR em português (js/i18n.js é a
     // fonte única). Campo não mapeado cai no `label` cru que o core ainda manda.
     'card.field.name': 'Nome', 'card.field.description': 'Descrição',
@@ -288,6 +296,11 @@ const I18N_DICT = {
     'card.brandKnown.title': 'Brand recognized by Waze', 'card.brandUnknown.title': 'Brand not in the official Waze list',
     'card.changes': 'Proposed changes', 'card.newPhoto.title': 'New photo proposed in this request',
     'card.flagReason': 'Reason:', 'card.flagType.INAPPROPRIATE': 'Inappropriate',
+    'install.invite': '🚗💨 Put Waze Places on your home screen: one tap to open, more room for the photo.',
+    'install.action': 'Install on home screen',
+    'install.ios.step1': 'Tap <strong>Share</strong> in the Safari bar',
+    'install.ios.step2': 'Choose <strong>Add to Home Screen</strong>',
+    'install.dismiss': 'Not now',
     'card.field.name': 'Name', 'card.field.description': 'Description',
     'card.field.houseNumber': 'House number', 'card.field.phone': 'Phone',
     'card.field.geometry': 'Location', 'card.field.categories': 'Categories',
@@ -466,6 +479,11 @@ const I18N_DICT = {
     'card.brandKnown.title': 'Marca reconocida por Waze', 'card.brandUnknown.title': 'La marca no está en la lista oficial de Waze',
     'card.changes': 'Cambios propuestos', 'card.newPhoto.title': 'Nueva foto propuesta en esta solicitud',
     'card.flagReason': 'Motivo:', 'card.flagType.INAPPROPRIATE': 'Inapropiado',
+    'install.invite': '🚗💨 Pon Waze Places en tu pantalla de inicio: se abre de un toque y cabe más foto.',
+    'install.action': 'Instalar en la pantalla de inicio',
+    'install.ios.step1': 'Toca <strong>Compartir</strong> en la barra de Safari',
+    'install.ios.step2': 'Elige <strong>Añadir a pantalla de inicio</strong>',
+    'install.dismiss': 'Ahora no',
     'card.field.name': 'Nombre', 'card.field.description': 'Descripción',
     'card.field.houseNumber': 'Número', 'card.field.phone': 'Teléfono',
     'card.field.geometry': 'Ubicación', 'card.field.categories': 'Categorías',
