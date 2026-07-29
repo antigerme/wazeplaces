@@ -880,6 +880,20 @@
         </div>
     </div>
 
+    <!-- Banner (topo) × snackbar (rodapé) — a distinção é do M3 e não é estética:
+         snackbar confirma o que você ACABOU de fazer e some rápido; banner é mais
+         proeminente, tem ação e fica mais tempo. O aviso de conquista é banner:
+         convida a abrir as Preferências, não confirma nada.
+         E, medido, no rodapé ele TAPAVA os três botões do card por 8s em 2 de 3
+         aparelhos (iPhone SE e laptop 1366×768) — gotcha #26 de novo.
+         `top` sai da altura REAL do header (--header-h, mantido por ResizeObserver
+         no app.js): o header é sticky e cresce com a safe-area do iPhone e com a
+         fonte do sistema, então número fixo aqui erraria em algum aparelho. E
+         z-[55] fica acima do card (z-50) e abaixo dos modais (z-[60]). -->
+    <div id="bannerStack" class="fixed inset-x-0 z-[55] flex flex-col items-center gap-2 px-4 pointer-events-none" style="top: calc(var(--header-h, 4rem) + 0.5rem)">
+        <div id="bannerContainer" class="w-full max-w-sm flex flex-col items-stretch gap-2 empty:hidden pointer-events-auto" role="status" aria-live="polite"></div>
+    </div>
+
     <div id="notifyStack" class="fixed inset-x-0 z-[70] flex flex-col items-center gap-2 px-4 pointer-events-none" style="bottom: calc(1rem + env(safe-area-inset-bottom))">
         <div id="toastContainer" class="w-full max-w-sm flex flex-col items-stretch gap-2 empty:hidden pointer-events-auto" role="status" aria-live="polite"></div>
         <div id="undoContainer" class="w-full max-w-sm empty:hidden pointer-events-auto" role="status" aria-live="polite"></div>

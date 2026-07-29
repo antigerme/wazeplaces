@@ -131,6 +131,7 @@ function initApp() {
     setupModalListeners();
     setupLightbox();
     setupKeyboardInset();
+    setupAlturaDoHeader();
     setupDescargaAoSair();
     marcarSuporteAExtensao();
     setupInstalarApp();
@@ -2531,6 +2532,20 @@ function setupDescargaAoSair() {
     });
 }
 
+// O banner do topo se ancora abaixo do header, e o header não tem altura fixa:
+// cresce com a safe-area do iPhone e com a preferência de fonte do sistema.
+// Número chutado no CSS erraria em algum aparelho — daí medir e publicar.
+function setupAlturaDoHeader() {
+    const header = document.querySelector('header');
+    if (!header) return;
+    const medir = () => {
+        document.documentElement.style.setProperty('--header-h', header.getBoundingClientRect().height + 'px');
+    };
+    if (typeof ResizeObserver === 'function') new ResizeObserver(medir).observe(header);
+    window.addEventListener('resize', medir);
+    medir();
+}
+
 function setupKeyboardInset() {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -2700,8 +2715,8 @@ function enforceDevGatedFilters() {
 // Ideia: novatos não conseguem desligar o undo até pegarem ritmo. Editores de
 // nível mais alto têm cota menor (são mais experientes).
 // Fórmula: ceil(UNDO_GATE_BASE / (rank + 1)). Waze devolve rank 0-indexed:
-//   rank 5 (L6) → 50 PURs, rank 4 (L5) → 60, rank 3 (L4) → 75, rank 2 (L3) → 100,
-//   rank 1 (L2) → 150, rank 0 (L1) → 300.
+//   rank 5 (L6) → 20 PURs, rank 4 (L5) → 24, rank 3 (L4) → 30, rank 2 (L3) → 40,
+//   rank 1 (L2) → 60, rank 0 (L1) → 120.
 // "PURs tratados" = read + rejected (skipped não treina o ritmo de ação destrutiva).
 // Staff são isentos. Esta NÃO é proteção de segurança — é UX/educação. localStorage
 // pode ser editado pelo user esperto; o objetivo é proteger quem é genuinamente novato.
@@ -2711,7 +2726,7 @@ function enforceDevGatedFilters() {
 // pro novato (uma sessão de trabalho de verdade) e some do caminho de quem tem
 // ritmo. Baixar mais (30/60) apagaria o gate: L6 passaria em 10 segundos, e a
 // escala por nível viraria ruído (L5=6 vs L6=5 não distingue ninguém).
-const UNDO_GATE_BASE = 300;
+const UNDO_GATE_BASE = 120;
 
 function getUndoTreatedCount() {
     return (AppState.stats.read || 0) + (AppState.stats.rejected || 0);
@@ -2755,11 +2770,14 @@ function checkUndoGateUnlock() {
     showToast(
         t('toast.undoUnlocked', { n: getUndoUnlockThreshold() }),
         'achievement',
-        // Mais que os 4s de um toast comum (são 3 linhas e tem ação), mas não
-        // os 8s que eu tinha posto: a captura mostrou o toast tapando os botões
-        // ✕/↑/✓ do card por tempo demais. Toque dispensa; o swipe nunca é
-        // bloqueado, porque o gesto acontece acima da área do toast.
-        6000,
+        // 8s: o dobro de um toast comum, porque são 3 linhas E tem ação (toque
+        // abre as Preferências). Decisão do owner. Já esteve em 8s, caiu pra 6s
+        // porque tapava os botões ✕/↑/✓ por tempo demais, e voltou — hoje o
+        // custo é menor: a janela do Desfazer já desabilita os botões nos
+        // primeiros 3s, então a sobreposição só incomoda nos 5s restantes.
+        // Toque dispensa antes; o swipe nunca é bloqueado (o gesto acontece
+        // acima da área do toast).
+        8000,
         abrirPreferenciaDoUndo
     );
 }
@@ -2856,7 +2874,13 @@ function toggleTheme() {
 // `onClick` opcional: quando presente, o toast vira um atalho (executa a ação
 // E dispensa). Sem ele, o comportamento de sempre — clicar só dispensa.
 function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
-    const container = document.getElementById('toastContainer');
+    // Conquista é BANNER (topo), não snackbar (rodapé) — distinção do M3, e aqui
+    // com motivo medido: no rodapé ela tapava os três botões do card por 8s em 2
+    // de 3 aparelhos (gotcha #26). Snackbar confirma o que você acabou de fazer;
+    // banner é proeminente, tem ação e fica mais tempo. Este convida a abrir as
+    // Preferências — não confirma nada.
+    const container = document.getElementById(
+        type === 'achievement' ? 'bannerContainer' : 'toastContainer');
     const toast = document.createElement('div');
 
     const colors = {
@@ -2884,7 +2908,8 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
         removed = true;
         toast.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
         toast.style.opacity = '0';
-        toast.style.transform = 'translateY(20px)';
+        // Sai por onde entrou: pra cima no topo, pra baixo no rodapé.
+        toast.style.transform = `translateY(${type === 'achievement' ? '-20px' : '20px'})`;
         setTimeout(() => toast.remove(), 250);
     };
     toast.addEventListener('click', () => {
