@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-13
+
+### Corrigido
+- **A categoria voltava convertida na lista de mudanças.** Ela já aparecia como o Waze a nomeia no topo do card, mas na caixa "Mudanças propostas" ainda saía como `Natural features` — o mesmo `NATURAL_FEATURES` com dois nomes na mesma tela. A conversão saiu de vez: onde o Waze regionaliza, quem manda é o Waze.
+- **Nome alternativo perdia as maiúsculas.** "Escola Estadual Leovegildo de Melo" aparecia como "Escola estadual leovegildo de melo" — a mesma conversão sendo aplicada a um nome próprio, que não é código nenhum.
+- **O identificador do Google deixava de ser o identificador.** `ChIJfYn3umKwnZMRWQElCsPkDJ4` aparecia como `Chijfyn3umkwnzmrwqelcspkdj4`. Quem copiasse da tela colava um valor que não existe.
+
 ## v2026.07.30-11
 
 ### Alterado

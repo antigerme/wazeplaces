@@ -1969,7 +1969,26 @@ function valorDeLista(v) {
         // uma linha que ninguém lia.
         return objetoLegivel(v);
     }
-    return rotuloDeEnum('card.enum.', String(v));
+    // Item de lista sai CRU. Aqui passava por `rotuloDeEnum('card.enum.', …)`,
+    // que nunca teve UMA chave no dicionário — era um mecanismo de tradução
+    // vazio, então TUDO caía no `humanizarEnum`, que faz lowercase. Três danos,
+    // medidos na fila real:
+    //
+    //   · CATEGORIA humanizada, contra a decisão do owner de mostrá-la crua
+    //     (o Waze regionaliza categoria por país). O MESMO card mostrava
+    //     `NATURAL_FEATURES` no topo e `Natural features` no diff — o mesmo
+    //     conceito com dois nomes na mesma tela.
+    //   · `aliases` é NOME PRÓPRIO, não enum: "Escola Estadual Leovegildo de
+    //     Melo" virava "Escola estadual leovegildo de melo".
+    //   · `externalProviderIDs` é ID opaco do Google: `ChIJfYn3umKwnZMRWQEl…`
+    //     virava `Chijfyn3umkwnzmrwqel…` — deixa de ser o ID. Quem copiasse da
+    //     tela colaria um valor que não existe.
+    //
+    // O `rotuloDeEnum` continua onde ele tem dicionário de verdade (updateType,
+    // flagType, source) — lá humanizar é fallback de enum não mapeado, não a
+    // regra. Se um dia houver fonte de regionalização do Waze, o lugar de
+    // traduzir categoria é essa fonte, não uma humanização mecânica.
+    return String(v);
 }
 
 // `{portId: "TYPE2.11", connectorTypes: ["TYPE2"], count: 2}` →
