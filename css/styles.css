@@ -1241,6 +1241,14 @@ button:active {
   min-width: 0;
 }
 
+/* Folha que é LISTA: o caminho fica em cima e o +/− embaixo, porque item de
+   lista é longo (um `chargingPort` legível passa de 60 caracteres) e ao lado do
+   caminho ele espremeria os dois numa coluna de nada. */
+.diff-obj-linha-lista {
+  grid-template-columns: 1fr;
+  gap: 0.125rem 0;
+}
+
 /* O caminho vai cru (`CHARGING_STATION.network`): é o identificador que casa
    com o WME, mesma razão pela qual a categoria também é crua. Monoespaçado e
    menor pra não competir com os valores, que são o que se lê. */

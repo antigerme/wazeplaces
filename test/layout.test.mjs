@@ -1350,3 +1350,29 @@ test('linha "X → X" não chega na tela, e o aviso só afirma o que foi compara
   assert.match(APP, /if \(typeof v === 'object'\) \{[\s\S]{0,120}JSON\.stringify/,
     'valorDoDiff voltou a poder imprimir [object Object]');
 });
+
+test('objeto desconhecido no card não vira JSON nem [object Object]', () => {
+  const APP = read('js/app.js');
+  const CORE = read('server/core.mjs');
+
+  // Objeto que a app não conhece (o Waze acrescenta campo sem avisar) tem que
+  // sair legível: `chave valor · chave valor`, sem chaves nem aspas. A regra
+  // segue sendo "feio, nunca invisível" — nenhuma chave e nenhum valor somem.
+  assert.match(APP, /function objetoLegivel/, 'sumiu o formatador de objeto desconhecido');
+  const fn = APP.match(/function objetoLegivel\(v, prof = 0\)[\s\S]*?\n\}/)[0];
+  assert.match(fn, /prof >= 2/,
+    'sumiu o teto de profundidade — aninhamento fundo vira sopa de palavras');
+  assert.match(fn, /join\(' · '\)/, 'mudou o separador sem passar pela régua de consistência');
+  // O fallback de JSON continua existindo lá no fundo: sumir com informação é
+  // pior que ser feio, e essa ordem de prioridade é decisão registrada.
+  assert.match(fn, /JSON\.stringify/, 'o fallback sumiu — objeto fundo ficaria invisível');
+  // E o valorDeLista precisa CHAMAR o formatador, senão o JSON volta calado.
+  assert.match(APP, /return objetoLegivel\(v\);/,
+    'valorDeLista voltou a serializar objeto desconhecido em JSON');
+
+  // Folha de objeto que é lista usa o MESMO vocabulário do campo de lista de
+  // topo (+ entra, − sai): o card não pode ter duas gramáticas pra mesma ideia.
+  assert.match(CORE, /const delta = diffDeLista\(linha\.de, linha\.para\);/,
+    'folha de objeto que é lista parou de virar delta');
+  assert.match(APP, /diff-obj-linha-lista/, 'sumiu a linha própria da folha-lista');
+});

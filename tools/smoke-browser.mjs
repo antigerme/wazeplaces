@@ -131,9 +131,19 @@ const CARDS = {
         objDelta: [
           { caminho: 'CHARGING_STATION.source', de: 'ECO_MOVEMENT', para: 'WME' },
           { caminho: 'CHARGING_STATION.network', de: 'Porsche Smart Mobility GmbH', para: 'Ponto de Carga' },
+          // Folha que é LISTA: o core manda o delta pronto (o que entrou / o
+          // que saiu), e o card usa o mesmo +/− do campo de lista de topo.
+          // Dois removidos e um adicionado é o caso REAL medido — e é também o
+          // pior de altura, que é o recurso escasso do card.
           { caminho: 'CHARGING_STATION.chargingPorts',
-            de: [{ portId: '1', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 1 }],
-            para: [{ portId: 'TYPE2.11', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 2 }] },
+            de: [{ portId: '1', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 1 },
+                 { portId: '39133723', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 1 }],
+            para: [{ portId: 'TYPE2.11', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 2 }],
+            delta: {
+              add: [{ portId: 'TYPE2.11', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 2 }],
+              del: [{ portId: '1', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 1 },
+                    { portId: '39133723', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 1 }],
+            } },
         ] },
     ],
     dateAdded: 1785203731191, lat: -12.97, lon: -38.45,

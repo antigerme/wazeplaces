@@ -610,3 +610,27 @@ test('diffDeObjeto mostra só a folha que mudou, em vez do JSON inteiro', async 
   for (let i = 0; i < 40; i++) { grande['k' + i] = i; grande2['k' + i] = i + 1; }
   assert.equal(diffDeObjeto(grande, grande2), null, 'objeto grande cai no fallback');
 });
+
+test('folha de objeto que é lista vira delta, não dois blocos de JSON', async () => {
+  const { diffDeObjeto } = await import('../server/core.mjs');
+
+  // `chargingPorts` de um eletroposto: dois blocos de JSON lado a lado, 152
+  // caracteres, e ninguém lia. Vira o mesmo +/− do campo de lista de topo.
+  const a = { CHARGING_STATION: { ports: [{ portId: '1', kw: 11 }, { portId: '2', kw: 11 }] } };
+  const b = { CHARGING_STATION: { ports: [{ portId: 'TYPE2.11', kw: 11 }] } };
+  const d = diffDeObjeto(a, b);
+  assert.equal(d.length, 1);
+  const folha = d[0];
+  assert.equal(folha.caminho, 'CHARGING_STATION.ports');
+  assert.ok(folha.delta, 'folha que é lista precisa vir com delta');
+  assert.deepEqual(folha.delta.add, [{ portId: 'TYPE2.11', kw: 11 }]);
+  assert.equal(folha.delta.del.length, 2);
+  // Os valores CRUS continuam lá: o delta é adicional, não substitui — quem
+  // não souber renderizar delta ainda tem de/para (feio, nunca invisível).
+  assert.ok(Array.isArray(folha.de) && Array.isArray(folha.para));
+
+  // Folha escalar segue sem delta: +/− num par de strings seria ruído.
+  const e = diffDeObjeto({ x: { n: 'a' } }, { x: { n: 'b' } });
+  assert.equal(e[0].delta, undefined);
+  assert.deepEqual([e[0].de, e[0].para], ['a', 'b']);
+});

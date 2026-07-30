@@ -595,7 +595,15 @@ export const diffDeObjeto = (antes, depois) => {
   const linhas = [];
   for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
     if (mesmoValor(a[k] ?? null, b[k] ?? null)) continue;
-    linhas.push({ caminho: k, de: a[k] ?? null, para: b[k] ?? null });
+    const linha = { caminho: k, de: a[k] ?? null, para: b[k] ?? null };
+    // Folha que é LISTA ganha o mesmo tratamento do campo de lista de topo:
+    // o que entrou e o que saiu, não as duas listas inteiras. Sem isto a folha
+    // `chargingPorts` de um eletroposto imprimia dois blocos de JSON lado a
+    // lado — a informação estava lá e ninguém lia. O `diffDeLista` também
+    // resolve o caso de nascer do nada (null → lista).
+    const delta = diffDeLista(linha.de, linha.para);
+    if (delta) linha.delta = delta;
+    linhas.push(linha);
     if (linhas.length > OBJ_DIFF_MAX_LINHAS) return null; // grande demais: melhor o fallback
   }
   return linhas.length ? linhas : null;

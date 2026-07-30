@@ -1961,9 +1961,34 @@ function valorDeLista(v) {
             const dias = v.days.length >= 7 ? t('card.oh.everyday') : v.days.map(nomeDoDia).join(', ');
             return `${dias} · ${v.fromHour}–${v.toHour}`;
         }
-        try { return JSON.stringify(v); } catch { return String(v); }
+        // Objeto que a app não conhece: em vez de JSON cru, `chave valor` com
+        // separador. Nenhuma chave e nenhum valor somem — a regra continua
+        // sendo "feio, nunca invisível" — mas sem chaves, aspas e vírgulas, que
+        // é o que fazia o editor pular a linha inteira. Medido no
+        // `chargingPorts` de um eletroposto: 152 caracteres de JSON viravam
+        // uma linha que ninguém lia.
+        return objetoLegivel(v);
     }
     return rotuloDeEnum('card.enum.', String(v));
+}
+
+// `{portId: "TYPE2.11", connectorTypes: ["TYPE2"], count: 2}` →
+// `portId TYPE2.11 · connectorTypes TYPE2 · count 2`.
+//
+// Sem tabela de campos de propósito: isto atende o objeto DESCONHECIDO, e o
+// Waze adiciona campo sem avisar. Quem tem tratamento próprio (ponto de
+// entrada, horário) é resolvido antes de chegar aqui.
+function objetoLegivel(v, prof = 0) {
+    if (v === null || v === undefined) return t('card.value.empty');
+    if (Array.isArray(v)) return v.map((x) => objetoLegivel(x, prof + 1)).join(', ');
+    if (typeof v !== 'object') return String(v);
+    // Teto de profundidade: aninhamento fundo vira sopa de palavras, e aí o
+    // JSON é mais honesto sobre a estrutura do que uma lista achatada.
+    if (prof >= 2) {
+        try { return JSON.stringify(v); } catch { return String(v); }
+    }
+    const partes = Object.keys(v).map((k) => `${k} ${objetoLegivel(v[k], prof + 1)}`);
+    return partes.length ? partes.join(' · ') : '{}';
 }
 
 // Quem pediu, de onde, e se veio sozinho. Três sinais que o Waze manda e a app
@@ -2101,10 +2126,24 @@ function renderCardChanges(card, place) {
         // porque ela também é objeto simples e o sequestro desta linha desfaz
         // silenciosamente o "moveu 84 m" (aconteceu ao introduzir isto).
         if (c.field !== 'geometry' && c.objDelta && c.objDelta.length) {
-            const linhas = c.objDelta.map((l) =>
-                `<span class="diff-obj-linha"><span class="diff-obj-caminho">${escapeHtml(l.caminho)}</span>`
-                + `<span class="diff-from">${escapeHtml(valorDoDiff(l.de))}</span>`
-                + `<span class="diff-to">${escapeHtml(valorDoDiff(l.para))}</span></span>`).join('');
+            const linhas = c.objDelta.map((l) => {
+                const caminho = `<span class="diff-obj-caminho">${escapeHtml(l.caminho)}</span>`;
+                // Folha que é LISTA usa o mesmo vocabulário do campo de lista de
+                // topo (+ verde entra, − vermelho sai). Dois blocos de JSON lado
+                // a lado era o que estava aqui — medido no `chargingPorts` de um
+                // eletroposto, e ninguém lia.
+                if (l.delta && ((l.delta.add || []).length || (l.delta.del || []).length)) {
+                    const item = (v, cls, sinal) =>
+                        `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${escapeHtml(valorDeLista(v))}</span>`;
+                    const add = (l.delta.add || []).map((v) => item(v, 'diff-add', '+')).join('');
+                    const del = (l.delta.del || []).map((v) => item(v, 'diff-del', '−')).join('');
+                    return `<span class="diff-obj-linha diff-obj-linha-lista">${caminho}`
+                        + `<span class="diff-delta">${add}${del}</span></span>`;
+                }
+                return `<span class="diff-obj-linha">${caminho}`
+                    + `<span class="diff-from">${escapeHtml(valorDoDiff(l.de))}</span>`
+                    + `<span class="diff-to">${escapeHtml(valorDoDiff(l.para))}</span></span>`;
+            }).join('');
             return `<div class="diff-row diff-row-obj">${rotulo}<span class="diff-obj">${linhas}</span></div>`;
         }
 

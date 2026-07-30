@@ -16,6 +16,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ### Corrigido
 - **Campo com estrutura interna aparecia como um bloco de JSON.** Um eletroposto mostrava o objeto inteiro só pra dizer que a rede tinha mudado de nome. Agora aparece só o que mudou lá dentro: `CHARGING_STATION.network: Porsche Smart Mobility GmbH → Ponto de Carga`.
+- **E quando o que mudou lá dentro era uma lista, ela também virava JSON.** No mesmo eletroposto, a troca dos pontos de recarga eram dois blocos de 150 caracteres lado a lado. Agora é o mesmo verde-entra/vermelho-sai que a app já usa nos outros campos de lista, com o conteúdo legível: `+ portId TYPE2.11 · connectorTypes TYPE2 · count 2`.
 
 ## v2026.07.30-10
 
