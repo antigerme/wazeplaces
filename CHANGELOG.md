@@ -8,7 +8,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
-## v2026.07.29-09
+## v2026.07.30-01
 
 ### Adicionado
 - **A app fala francês.** Todas as 309 mensagens, do card aos diálogos, avisos e mensagens de erro. Quem tem o navegador em francês passa a cair no francês sozinho, e o idioma está nos dois seletores (Filtros → Preferências e a Ajuda, que funciona mesmo sem estar conectado). Como nos outros, é **um** francês — quem tem o navegador em qualquer variante cai no mesmo idioma, do mesmo jeito que português do Brasil e de Portugal caem em um só.
