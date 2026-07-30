@@ -8,6 +8,27 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-02
+
+### Corrigido
+- **O botão ↗ do card abria o WME em português para todo mundo.** O endereço tinha o idioma cravado, então quem usa a app em inglês, espanhol ou francês clicava e caía numa interface que não é a dele. Agora abre o endereço oficial (`waze.com/editor`) e o Waze escolhe o idioma pela sua conta — que é quem deve decidir.
+
+## v2026.07.30-01
+
+### Adicionado
+- **A app fala francês.** Todas as 309 mensagens, do card aos diálogos, avisos e mensagens de erro. Quem tem o navegador em francês passa a cair no francês sozinho, e o idioma está nos dois seletores (Filtros → Preferências e a Ajuda, que funciona mesmo sem estar conectado). Como nos outros, é **um** francês — quem tem o navegador em qualquer variante cai no mesmo idioma, do mesmo jeito que português do Brasil e de Portugal caem em um só.
+
+### Corrigido
+- **A app falava português com quem escolheu outro idioma sempre que dava erro.** Este é o mais sério da leva. As mensagens de erro nasciam prontas no servidor, em português, e a tela as mostrava direto — a tradução ao lado só era usada se o servidor não dissesse nada. Resultado: cookie recusado, sessão expirada, falha de conexão, código de pareamento errado ou pedido já tratado por outro editor apareciam **em português para quem usava a app em inglês, espanhol ou francês**. São 26 mensagens. Agora o servidor manda um código e quem escolhe a palavra é a app, no idioma de quem está lendo.
+- **O aviso de acesso restrito também vinha em português** — e justamente para quem foi bloqueado, no momento em que a explicação mais importa. Ele repetia o seu perfil, que a tela já mostrava logo abaixo com os selos traduzidos.
+- **Escolher um idioma no seletor podia ser ignorado.** A app tinha uma lista fixa de idiomas aceitos, separada da lista de traduções: qualquer idioma novo era reconhecido pelo navegador mas descartado quando escolhido à mão, voltando calado para o idioma do sistema. As duas listas agora são a mesma coisa.
+- **Números e datas em francês saíam no formato inglês.** O idioma não tinha formato próprio declarado e caía no padrão do inglês sem avisar.
+- **Mudança de posição no mapa aparecia como `[object Object]`.** Em toda a app, em qualquer idioma, desde sempre. Medido na fila de um editor de verdade: **33 de 142 pedidos** tinham mudança de geometria, e em todos eles a linha "Mudanças propostas" mostrava esse texto no lugar da coordenada. Agora mostra a coordenada (e, quando é uma área e não um ponto, também quantos vértices ela tem — sem isso, uma área que mudou nos outros cantos apareceria como se nada tivesse mudado).
+- **Quatro campos apareciam com o nome técnico do Waze** (`ExternalProviderIDs`, `Services`, `LockRank`, `CategoryAttributes`) porque não tinham tradução. Agora têm, nas quatro línguas.
+- **O nome, a descrição e os atalhos da app instalada estavam em português para todos.** O arquivo que o celular lê na instalação é o mesmo para o mundo inteiro, então não havia como traduzi-lo por pessoa: passou a ser neutro. Quem já instalou continua com o mesmo app (a identidade não mudou); o rótulo no celular acompanha na próxima atualização.
+- **A lista de países era ordenada pela regra do português para todo mundo.** Ordenar agora acontece no idioma de quem está lendo. Medindo, ficou claro que hoje isso não muda nada visível — os nomes de país vêm do Waze **sempre em inglês**, e nenhuma das quatro línguas os ordena diferente. Fica certo para quando entrar um idioma que ordene de outro jeito.
+- **No celular mais estreito (dobrável de 280px), o card de reporte em francês passava a rolar por dentro** — o que desliga o gesto de "pular". O título da seção quebrava em duas linhas onde as outras línguas cabem em uma.
+
 ## v2026.07.29-06
 
 ### Adicionado

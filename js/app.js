@@ -12,6 +12,11 @@ const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
 
+// Endereço oficial do Waze Map Editor. SEM segmento de idioma, sempre: o Waze
+// pode redirecionar conforme o idioma da conta, e essa escolha é de quem abre,
+// não nossa. Cravar `/pt-BR/` mandava todo mundo pro português.
+const WME_EDITOR_URL = 'https://www.waze.com/editor';
+
 // A duração da janela aparece em DUAS frases (o toggle nas Preferências e a dica
 // "você nunca desfaz"), nas três línguas — seis lugares onde o número estava
 // escrito à mão. Registrado como variável global de i18n, ele vem daqui: mexer
@@ -323,8 +328,29 @@ function aplicarIdioma(valor) {
     if (typeof showToast === 'function') showToast(t('toast.langChanged'), 'success');
 }
 
+// Os <option> vinham escritos DUAS vezes no index.html, um par por seletor —
+// idioma novo exigia lembrar dos dois, e o de baixo (o da Ajuda) já tinha sido
+// esquecido antes. Agora saem de LANG_NOMES, que é a mesma fonte do dicionário.
+function popularSeletoresDeIdioma() {
+    const nomes = (typeof LANG_NOMES === 'object' && LANG_NOMES) || {};
+    const langs = (typeof LANGS_SUPORTADOS !== 'undefined' && LANGS_SUPORTADOS) || Object.keys(nomes);
+    for (const id of SELETORES_IDIOMA) {
+        const sel = document.getElementById(id);
+        if (!sel) continue;
+        sel.textContent = '';
+        for (const l of langs) {
+            const o = document.createElement('option');
+            o.value = l;
+            // Sem entrada em LANG_NOMES o código cru aparece — feio, nunca invisível.
+            o.textContent = nomes[l] || l;
+            sel.appendChild(o);
+        }
+    }
+}
+
 function setupLanguageSwitcher() {
     if (typeof setLang !== 'function') return;
+    popularSeletoresDeIdioma();
     const atual = (typeof getLang === 'function') ? getLang() : 'pt';
     for (const id of SELETORES_IDIOMA) {
         const sel = document.getElementById(id);
@@ -466,7 +492,7 @@ async function abrirPareamento() {
     const r = await API.criarPareamento();
     if (!r.success) {
         closeModal('pairShowModal');
-        showToast(r.error || t('toast.pairCreateError'), 'error');
+        showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
         return;
     }
     codeEl.textContent = formatarCodigoPareamento(r.code);
@@ -519,9 +545,9 @@ async function resgatarPareamento(code, { silencioso = false } = {}) {
     const r = await API.resgatarPareamento(code);
     if (!r.success) {
         if (silencioso) {
-            showToast(r.error || t('toast.pairInvalid'), 'error');
+            showToast(msgDoServidor(r, t('toast.pairInvalid')), 'error');
         } else if (err) {
-            err.textContent = r.error || t('toast.pairInvalid');
+            err.textContent = msgDoServidor(r, t('toast.pairInvalid'));
             err.classList.remove('hidden');
         }
         return false;
@@ -846,7 +872,7 @@ function populateCountrySelect() {
         }
     }
 
-    select.innerHTML = countries.map(c =>
+    select.innerHTML = ordenarPorNome(countries).map(c =>
         `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
     ).join('');
 
@@ -858,6 +884,28 @@ function populateCountrySelect() {
         // Aplicar (antes, abrir o modal já trocava o país mesmo cancelando).
         select.value = countries[0].id;
     }
+}
+
+// Ordena nomes na colação do idioma ATUAL. Fica no cliente porque é o único
+// lado que conhece o idioma — o servidor ordenava com 'pt-BR' cravado, aplicando
+// regra portuguesa à lista de um editor francês.
+//
+// MEDIDO contra o Waze de verdade (248 países, cookies reais do owner), e o
+// resultado corrige o que eu supunha: os nomes de país vêm SEMPRE EM INGLÊS
+// ("France", "Germany", "Spain"), e o Waze ignora Accept-Language, Referer e
+// ?language= nesses endpoints. Só 3 nomes têm acento (Curaçao, Côte d’Ivoire,
+// Saint Barthélemy) e pt/en/es/fr os ordenam IGUAL — a ordem é idêntica nos
+// quatro. Nomes de estado vêm no idioma local (Amapá, Ceará), que é o nome
+// próprio deles: não há tradução a fazer.
+//
+// Ou seja: hoje isto não muda um pixel. Está aqui porque a decisão pertence a
+// quem sabe o idioma, e porque a ordem DIVERGE em línguas de colação diferente
+// (medido: sueco difere no índice 52, por causa do Å/Ä/Ö no fim do alfabeto).
+// Se entrar sueco/polonês/turco, aí a ordem passa a mudar ao trocar de idioma
+// com o modal aberto — e só então vale reordenar em aplicarIdioma().
+function ordenarPorNome(itens) {
+    const colator = new Intl.Collator(i18nLocale(), { sensitivity: 'base', numeric: true });
+    return [...itens].sort((a, b) => colator.compare(String(a.name || ''), String(b.name || '')));
 }
 
 async function loadStatesIntoSelect(countryId) {
@@ -876,7 +924,7 @@ async function loadStatesIntoSelect(countryId) {
         }
     }
 
-    for (const s of states) {
+    for (const s of ordenarPorNome(states)) {
         const opt = document.createElement('option');
         opt.value = s.id;
         opt.textContent = s.name;
@@ -1122,7 +1170,7 @@ async function authenticateWithCookies(cookies) {
         } else if (result.errorCategory === 'access_denied') {
             showAccessDenied(result);
         } else {
-            showToast(result.error || t('toast.invalidCookies'), 'error');
+            showToast(msgDoServidor(result, t('toast.invalidCookies')), 'error');
         }
     } catch (error) {
         showToast(t('toast.authError'), 'error');
@@ -1148,7 +1196,7 @@ function showAccessDenied(result) {
     const modal = document.getElementById('accessDeniedModal');
     const msg = document.getElementById('accessDeniedMessage');
     const profileBox = document.getElementById('accessDeniedProfile');
-    msg.textContent = result.error || t('accessDenied.defaultMsg');
+    msg.textContent = msgDoServidor(result, t('accessDenied.defaultMsg'));
     if (result.profile && result.profile.userName) {
         const p = result.profile;
         const displayRank = (p.rank !== null && p.rank !== undefined) ? ('L' + (p.rank + 1)) : '';
@@ -1383,7 +1431,7 @@ function fetchNextPage() {
                     AppState.hasMore = false;
                     handleUnauthorized();
                 } else {
-                    showToast(result.error || t('toast.loadPlacesError'), 'error');
+                    showToast(msgDoServidor(result, t('toast.loadPlacesError')), 'error');
                     AppState.loadError = true;
                     AppState.hasMore = false;
                 }
@@ -1617,7 +1665,12 @@ function renderCurrentCard() {
     if (place.venueID) {
         wmeParams.push(`venueUpdateRequest=${encodeURIComponent(place.venueID)}`);
     }
-    wmeLink.href = `https://www.waze.com/pt-BR/editor?${wmeParams.join('&')}`;
+    // URL CANÔNICA do WME, sem segmento de idioma (decisão do owner). Estava
+    // `/pt-BR/editor`: um editor que usa a app em francês clicava no ↗ e caía
+    // num WME em português. O `/editor` cru responde 200 direto (medido, sem
+    // redirect HTTP) e o Waze resolve o idioma pela conta de quem abriu — que é
+    // exatamente o certo, porque quem decide não somos nós.
+    wmeLink.href = `${WME_EDITOR_URL}?${wmeParams.join('&')}`;
 
     renderCardImages(card, place);
 
@@ -1951,6 +2004,27 @@ function formatRelativeTime(ts) {
     return t('time.years', { n: years });
 }
 
+// ── Mensagem de erro que veio do servidor ─────────────────────────────────
+// O backend manda CHAVE (`errorKey`) + `errorVars`; a frase em `error` é só o
+// último recurso. Antes daqui o padrão era `result.error || t('...')`, e o `||`
+// fazia a string PORTUGUESA do servidor GANHAR da tradução: quem usava a app em
+// inglês, espanhol ou francês lia português em todo erro de sessão, cookie,
+// rede ou race — e a tradução ao lado só entrava se o servidor não dissesse
+// nada. Era o buraco de i18n mais fundo da app, porque nenhuma auditoria de
+// dicionário enxerga string que chega pela rede.
+//
+// A frase crua continua no fim da cadeia de propósito: o service worker é
+// cache-first pra assets, então por alguns dias após um deploy existe cliente
+// com dicionário velho que não conhece a chave nova. Português é ruim; chave
+// crua na tela ("srv.err.cookieFormat") é pior.
+function msgDoServidor(result, textoFallback) {
+    if (result && result.errorKey) {
+        const traduzido = t(result.errorKey, result.errorVars || undefined);
+        if (traduzido !== result.errorKey) return traduzido;
+    }
+    return (result && result.error) || textoFallback;
+}
+
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
     return String(str)
@@ -2091,7 +2165,7 @@ function handleActionResult(actionType, place, result) {
     updateStats();
     saveStats();
     const verb = actionType === 'read' ? t('action.verb.read') : t('action.verb.reject');
-    showToast(result.error || t('toast.actionError', { verb }), 'error');
+    showToast(msgDoServidor(result, t('toast.actionError', { verb })), 'error');
 }
 
 function handleMarkAsRead() {
@@ -2173,7 +2247,7 @@ async function handleBatchMarkRead() {
         } else if (result && result.errorCategory === 'unauthorized') {
             handleUnauthorized();
         } else {
-            showToast((result && result.error) || t('toast.batchError'), 'error');
+            showToast(msgDoServidor(result, t('toast.batchError')), 'error');
         }
     } catch (e) {
         showToast(t('toast.batchError'), 'error');

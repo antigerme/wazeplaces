@@ -1,15 +1,15 @@
 {
   "id": "/",
-  "name": "Waze Places - Validação",
+  "name": "Waze Places",
   "short_name": "Waze Places",
-  "description": "PWA para limpar pedidos de places do Waze Map Editor com interface estilo Tinder",
+  "description": "Review Waze Map Editor place requests by swiping. Rejects or marks as read \u2014 never approves.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#33CCFF",
   "orientation": "portrait",
-  "lang": "pt-BR",
+  "lang": "en",
   "dir": "ltr",
   "icons": [
     {
@@ -44,28 +44,28 @@
       "sizes": "540x960",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Card de pedido com as mudanças propostas e os botões de ação"
+      "label": "Request card with the proposed changes and the action buttons"
     },
     {
       "src": "icons/screenshots/screenshot-wide.png",
       "sizes": "1280x720",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Fila de pedidos no tema escuro"
+      "label": "Request queue in dark theme"
     }
   ],
   "shortcuts": [
     {
-      "name": "Filtros e Preferências",
-      "short_name": "Filtros",
-      "description": "Abre direto os filtros da fila",
+      "name": "Filters & Preferences",
+      "short_name": "Filters",
+      "description": "Opens the queue filters directly",
       "url": "/?action=filters",
       "icons": [{ "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
     },
     {
-      "name": "Buscar novamente",
-      "short_name": "Atualizar",
-      "description": "Recarrega a fila de pedidos",
+      "name": "Fetch again",
+      "short_name": "Refresh",
+      "description": "Reloads the request queue",
       "url": "/?action=refresh",
       "icons": [{ "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
     }

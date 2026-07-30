@@ -113,6 +113,10 @@ const I18N_DICT = {
     'card.field.openingHours': 'Horário', 'card.field.streetID': 'Rua',
     'card.field.cityID': 'Cidade', 'card.field.residential': 'Residencial',
     'card.field.brand': 'Marca', 'card.field.entryExitPoints': 'Ponto de entrada/saída',
+    // Campos vistos em pedidos REAIS que não tinham chave e apareciam com o nome
+    // cru do Waze ("ExternalProviderIDs"). Achados medindo 142 pedidos de verdade.
+    'card.field.externalProviderIDs': 'Ligação com Google', 'card.field.services': 'Serviços',
+    'card.field.lockRank': 'Nível de trava', 'card.field.categoryAttributes': 'Atributos da categoria',
     // Valores especiais do diff (o core manda tipo, não palavra)
     'card.value.empty': '(vazio)', 'card.value.yes': 'Sim', 'card.value.no': 'Não',
     'card.value.unnamed': '(sem nome)',
@@ -232,6 +236,36 @@ const I18N_DICT = {
     'time.months': 'há {n}m', 'time.years': 'há {n}a',
     // api errors
     'api.error.connection': 'Erro de conexão', 'api.error.noSession': 'Sessão expirada',
+    // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
+    // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
+    // servidor mandava a frase pronta em português e o frontend a exibia com
+    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    'srv.err.connection': 'Erro de conexão com o Waze',
+    'srv.err.cookiesExpired': 'Cookies expirados ou inválidos',
+    'srv.err.alreadyHandled': 'Já tratado por outro editor',
+    'srv.err.alreadyHandledOrModified': 'Já tratado ou modificado por outro editor',
+    'srv.err.gone': 'Este pedido não existe mais (possivelmente já tratado)',
+    'srv.err.wazeDown': 'Servidor Waze indisponível (HTTP {code})',
+    'srv.err.wazeUnknown': 'O Waze devolveu um erro inesperado (HTTP {code})',
+    'srv.err.cookieFormat': 'Formato de cookies inválido',
+    'srv.err.cookieFormatNoWaze': 'Formato inválido ou nenhum cookie do Waze encontrado',
+    'srv.err.cookieFormatExport': 'Formato inválido ou nenhum cookie do Waze encontrado. Exporte os cookies logado no Waze Map Editor (formato Netscape).',
+    'srv.err.csrfMissing': 'Token CSRF não encontrado',
+    'srv.err.csrfMissingLogin': 'Token CSRF não encontrado nos cookies. Confirme que você está logado no Waze Map Editor.',
+    'srv.err.cookiesMissing': 'Cookies não fornecidos',
+    'srv.err.cookiesExpiredRelogin': 'Cookies expirados ou inválidos. Entre de novo no Waze Map Editor e exporte cookies novos.',
+    'srv.err.badAction': 'Ação inválida',
+    'srv.err.pairCodeInvalid': 'Código inválido ou expirado. Gere um novo no aparelho já conectado.',
+    'srv.err.badWazeResponse': 'Resposta inesperada do Waze',
+    'srv.err.incompleteData': 'Dados incompletos',
+    'srv.err.incompleteParams': 'Parâmetros incompletos',
+    'srv.err.countryRequired': 'Escolha um país',
+    'srv.err.sessionExpired': 'Sessão expirada ou inválida',
+    'srv.err.sessionMissing': 'Sessão não informada',
+    'srv.err.endpointNotFound': 'Endereço não encontrado no servidor',
+    'srv.err.internal': 'Erro interno do servidor',
+    'srv.err.badProfile': 'Perfil inválido',
+    'srv.err.accessDenied': 'Acesso restrito a editores Area Manager de nível {minLevel}+ ou Staff.',
   },
   en: {
     'common.cancel': 'Cancel', 'common.confirm': 'Confirm', 'common.apply': 'Apply',
@@ -320,6 +354,9 @@ const I18N_DICT = {
     'card.field.openingHours': 'Opening hours', 'card.field.streetID': 'Street',
     'card.field.cityID': 'City', 'card.field.residential': 'Residential',
     'card.field.brand': 'Brand', 'card.field.entryExitPoints': 'Entry/exit point',
+    // Fields seen in REAL requests that had no key and showed the raw Waze name.
+    'card.field.externalProviderIDs': 'Google link', 'card.field.services': 'Services',
+    'card.field.lockRank': 'Lock level', 'card.field.categoryAttributes': 'Category attributes',
     'card.value.empty': '(empty)', 'card.value.yes': 'Yes', 'card.value.no': 'No',
     'card.value.unnamed': '(unnamed)',
     'card.updateType.VENUE': 'New place', 'card.updateType.IMAGE': 'New photo',
@@ -427,6 +464,36 @@ const I18N_DICT = {
     'time.now': 'now', 'time.minutes': '{n}min ago', 'time.hours': '{n}h ago', 'time.days': '{n}d ago',
     'time.months': '{n}mo ago', 'time.years': '{n}y ago',
     'api.error.connection': 'Connection error', 'api.error.noSession': 'Session expired',
+    // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
+    // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
+    // servidor mandava a frase pronta em português e o frontend a exibia com
+    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    'srv.err.connection': 'Connection error reaching Waze',
+    'srv.err.cookiesExpired': 'Cookies expired or invalid',
+    'srv.err.alreadyHandled': 'Already handled by another editor',
+    'srv.err.alreadyHandledOrModified': 'Already handled or modified by another editor',
+    'srv.err.gone': 'This request no longer exists (possibly already handled)',
+    'srv.err.wazeDown': 'Waze server unavailable (HTTP {code})',
+    'srv.err.wazeUnknown': 'Waze returned an unexpected error (HTTP {code})',
+    'srv.err.cookieFormat': 'Invalid cookie format',
+    'srv.err.cookieFormatNoWaze': 'Invalid format, or no Waze cookie found',
+    'srv.err.cookieFormatExport': 'Invalid format, or no Waze cookie found. Export your cookies while signed in to Waze Map Editor (Netscape format).',
+    'srv.err.csrfMissing': 'CSRF token not found',
+    'srv.err.csrfMissingLogin': 'CSRF token not found in the cookies. Make sure you are signed in to Waze Map Editor.',
+    'srv.err.cookiesMissing': 'No cookies provided',
+    'srv.err.cookiesExpiredRelogin': 'Cookies expired or invalid. Sign in to Waze Map Editor again and export fresh cookies.',
+    'srv.err.badAction': 'Invalid action',
+    'srv.err.pairCodeInvalid': 'Invalid or expired code. Generate a new one on the device already connected.',
+    'srv.err.badWazeResponse': 'Unexpected response from Waze',
+    'srv.err.incompleteData': 'Incomplete data',
+    'srv.err.incompleteParams': 'Incomplete parameters',
+    'srv.err.countryRequired': 'Pick a country',
+    'srv.err.sessionExpired': 'Session expired or invalid',
+    'srv.err.sessionMissing': 'No session provided',
+    'srv.err.endpointNotFound': 'Address not found on the server',
+    'srv.err.internal': 'Internal server error',
+    'srv.err.badProfile': 'Invalid profile',
+    'srv.err.accessDenied': 'Restricted to Area Manager editors at level {minLevel}+ or Staff.',
   },
   es: {
     'common.cancel': 'Cancelar', 'common.confirm': 'Confirmar', 'common.apply': 'Aplicar',
@@ -515,6 +582,9 @@ const I18N_DICT = {
     'card.field.openingHours': 'Horario', 'card.field.streetID': 'Calle',
     'card.field.cityID': 'Ciudad', 'card.field.residential': 'Residencial',
     'card.field.brand': 'Marca', 'card.field.entryExitPoints': 'Punto de entrada/salida',
+    // Campos vistos en solicitudes REALES que no tenían clave.
+    'card.field.externalProviderIDs': 'Vínculo con Google', 'card.field.services': 'Servicios',
+    'card.field.lockRank': 'Nivel de bloqueo', 'card.field.categoryAttributes': 'Atributos de la categoría',
     'card.value.empty': '(vacío)', 'card.value.yes': 'Sí', 'card.value.no': 'No',
     'card.value.unnamed': '(sin nombre)',
     'card.updateType.VENUE': 'Lugar nuevo', 'card.updateType.IMAGE': 'Foto nueva',
@@ -622,21 +692,301 @@ const I18N_DICT = {
     'time.now': 'ahora', 'time.minutes': 'hace {n}min', 'time.hours': 'hace {n}h', 'time.days': 'hace {n}d',
     'time.months': 'hace {n}m', 'time.years': 'hace {n}a',
     'api.error.connection': 'Error de conexión', 'api.error.noSession': 'Sesión expirada',
+    // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
+    // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
+    // servidor mandava a frase pronta em português e o frontend a exibia com
+    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    'srv.err.connection': 'Error de conexión con Waze',
+    'srv.err.cookiesExpired': 'Cookies caducadas o inválidas',
+    'srv.err.alreadyHandled': 'Ya tratado por otro editor',
+    'srv.err.alreadyHandledOrModified': 'Ya tratado o modificado por otro editor',
+    'srv.err.gone': 'Esta solicitud ya no existe (posiblemente ya tratada)',
+    'srv.err.wazeDown': 'Servidor de Waze no disponible (HTTP {code})',
+    'srv.err.wazeUnknown': 'Waze devolvió un error inesperado (HTTP {code})',
+    'srv.err.cookieFormat': 'Formato de cookies inválido',
+    'srv.err.cookieFormatNoWaze': 'Formato inválido o ninguna cookie de Waze encontrada',
+    'srv.err.cookieFormatExport': 'Formato inválido o ninguna cookie de Waze encontrada. Exporta las cookies con la sesión abierta en Waze Map Editor (formato Netscape).',
+    'srv.err.csrfMissing': 'Token CSRF no encontrado',
+    'srv.err.csrfMissingLogin': 'Token CSRF no encontrado en las cookies. Comprueba que tienes la sesión abierta en Waze Map Editor.',
+    'srv.err.cookiesMissing': 'No se enviaron cookies',
+    'srv.err.cookiesExpiredRelogin': 'Cookies caducadas o inválidas. Vuelve a entrar en Waze Map Editor y exporta cookies nuevas.',
+    'srv.err.badAction': 'Acción inválida',
+    'srv.err.pairCodeInvalid': 'Código inválido o caducado. Genera uno nuevo en el dispositivo ya conectado.',
+    'srv.err.badWazeResponse': 'Respuesta inesperada de Waze',
+    'srv.err.incompleteData': 'Datos incompletos',
+    'srv.err.incompleteParams': 'Parámetros incompletos',
+    'srv.err.countryRequired': 'Elige un país',
+    'srv.err.sessionExpired': 'Sesión caducada o inválida',
+    'srv.err.sessionMissing': 'No se indicó la sesión',
+    'srv.err.endpointNotFound': 'Dirección no encontrada en el servidor',
+    'srv.err.internal': 'Error interno del servidor',
+    'srv.err.badProfile': 'Perfil inválido',
+    'srv.err.accessDenied': 'Acceso restringido a editores Area Manager de nivel {minLevel}+ o Staff.',
+  },
+  fr: {
+    'common.cancel': 'Annuler', 'common.confirm': 'Confirmer', 'common.apply': 'Appliquer',
+    'common.close': 'Fermer', 'common.logout': 'Se déconnecter',
+    'header.theme.aria': 'Changer de thème', 'header.refresh.aria': 'Rechercher à nouveau',
+    'header.refresh.title': 'Rechercher à nouveau', 'header.filters.aria': 'Filtres',
+    'header.help.aria': 'Aide et réglages', 'header.help.title': 'Aide, raccourcis, déconnexion',
+    'header.devBadge.title': 'Mode développeur actif — restrictions levées',
+    'auth.welcome.title': 'Bienvenue !',
+    'auth.welcome.body': 'Pour commencer à traiter les demandes de lieux Waze, vous devez fournir vos cookies d’authentification.',
+    'auth.autoLogin.title': 'Connexion automatique', 'auth.autoLogin.badge': 'recommandé',
+    'auth.autoLogin.body': 'Installez l’extension WazePlaces Rapid Access sur Chrome. Elle vous connecte directement depuis WME — sans copier de cookies.',
+    'auth.autoLogin.cta': 'Installer depuis le Chrome Web Store',
+    'auth.needsComputer': 'Première fois ? La session démarre sur un ordinateur : connectez-vous là-bas, touchez Aide › Connecter un autre appareil, puis pointez cette caméra vers le QR code.',
+    'auth.manualDivider': 'ou connexion manuelle',
+    'auth.uploadBtn': 'Envoyer cookies.txt', 'auth.pasteBtn': 'Coller le contenu des cookies',
+    'auth.securityNote': 'Vos cookies sont échangés contre un jeton de session chiffré sur le serveur (valable 21 jours) et ne circulent plus jamais après la connexion.',
+    'auth.byAuthor.aria': 'Profil de l’auteur (@antigerme) sur Waze Map Editor',
+    'modal.paste.title': 'Collez le contenu des cookies',
+    'modal.paste.textarea.aria': 'Contenu du fichier cookies.txt',
+    'modal.paste.textarea.ph': 'Collez ici le contenu du fichier cookies.txt…',
+    'modal.logout.title': 'Se déconnecter ?',
+    'modal.logout.body': 'Votre session prendra fin et <strong>toutes les données locales</strong> (cookies, statistiques, filtres et préférences) seront effacées de cet appareil. Cette action est irréversible.',
+    'modal.accessDenied.title': 'Accès restreint',
+    'modal.accessDenied.subtitle': 'Cette app est réservée à certains niveaux d’éditeur',
+    'modal.accessDenied.help': 'Si vous pensez devoir y avoir accès, demandez une vérification de vos droits sur Waze Map Editor (niveau et statut Area Manager).',
+    'modal.accessDenied.dismiss': 'Compris',
+    'modal.filters.title': 'Filtres et préférences',
+    'modal.batchRead.title': 'Marquer en lot ?',
+    'modal.batchRead.confirm': 'Marquer comme lues',
+    'filters.section.preferences': 'Préférences', 'filters.section.advanced': 'Avancé',
+    'filters.section.filters': 'Filtres', 'filters.section.batch': 'Actions en lot',
+    'filters.section.location': 'Localisation',
+    'filters.language.label': 'Langue',
+    'prefs.undo.label': 'Autoriser l’annulation des actions',
+    'prefs.undo.desc': 'Affiche une bannière de {undoSeg} secondes pour annuler « Lu » ou « Rejeter » avant l’envoi.',
+    'prefs.devMode.label': 'Mode développeur 🛠️',
+    'prefs.devMode.desc': 'Lève les restrictions de l’app (par ex. le verrou de « Autoriser l’annulation des actions »). À utiliser avec prudence — les actions partent directement vers Waze, sans délai d’annulation.',
+    'filters.unreadOnly.label': 'Demandes non lues uniquement',
+    'filters.unreadOnly.desc': 'Par défaut. Décochez pour inclure les demandes déjà marquées comme lues.',
+    'filters.types.legend': 'Types de demande', 'filters.types.venue': 'Nouveaux lieux',
+    'filters.types.image': 'Nouvelles photos', 'filters.types.request': 'Signalements/mises à jour',
+    'filters.residential.label': 'Résidentiel', 'filters.residential.any': 'Peu importe',
+    'filters.residential.exclude': 'Exclure le résidentiel', 'filters.residential.only': 'Résidentiel uniquement',
+    'filters.region.label': 'Région', 'filters.country.label': 'Pays',
+    'filters.country.hint': 'Seuls les pays que vous pouvez modifier sont affichés.',
+    'filters.state.label': 'État', 'filters.state.all': 'Tous les états',
+    'filters.managedArea.label': 'Zone gérée', 'filters.managedArea.none': 'Aucune',
+    'filters.myArea.label': 'Filtrer par ma zone d’édition',
+    'filters.myArea.desc': 'Utilise le cadre de votre zone de conduite Waze (ignore pays/état)',
+    'filters.category.label': 'Catégorie', 'filters.category.all': 'Toutes les catégories',
+    'filters.category.hint': 'Catégories vues dans les demandes déjà chargées.',
+    'filters.sort.label': 'Trier par', 'filters.sort.newest': 'Plus récentes d’abord',
+    'filters.sort.oldest': 'Plus anciennes d’abord',
+    'batch.button': 'Marquer toutes les demandes en attente comme lues',
+    'batch.hint': 'Marque d’un coup toutes les demandes déjà chargées dans la file. Part directement vers Waze, sans annulation.',
+    'help.install.label': 'Installer l’app',
+    'stats.read': 'Lues', 'stats.rejected': 'Rejetées', 'stats.skipped': 'Ignorées', 'stats.pending': 'Restantes',
+    'stats.pending.ofRegion': 'sur {total} dans la région',
+    'stats.pending.ofRegion.title': '{blocked} demande(s) de la région ne sont pas dans votre file car vous n’avez pas le droit de les modifier. Traitez-les dans WME.',
+    'stats.pending.title': 'Restantes dans la file (chargées localement). Un signe + indique qu’il y a d’autres pages à récupérer',
+    'stats.history.title': 'Historique', 'stats.history.today': 'Aujourd’hui', 'stats.history.week': 'Semaine',
+    'stats.history.month': 'Mois', 'stats.history.total': 'Total', 'stats.history.empty': 'Pas encore d’historique.',
+    'app.queueHeading': 'File des demandes de lieux',
+    'states.loading.sr': 'Recherche de lieux…',
+    'states.empty.title': 'Tout est réglé !', 'states.empty.body': 'Vous avez traité toutes les demandes en attente de la file actuelle.',
+    'states.empty.retry': 'Vérifier à nouveau',
+    'states.error.title': 'Échec du chargement', 'states.error.body': 'Impossible de récupérer les demandes pour le moment. Vérifiez votre connexion et réessayez.',
+    'states.error.retry': 'Réessayer',
+    'card.noImage': 'Aucune photo', 'card.deleteBanner': '⚠ Demande de suppression',
+    'card.categories': 'Catégories', 'card.address': 'Adresse', 'card.type': 'Type :', 'card.creator': 'Auteur :',
+    'card.flagComment': 'Signalement utilisateur', 'card.brand': 'Marque :',
+    'card.brandKnown': '✓ connue', 'card.brandUnknown': '? non listée',
+    'card.brandKnown.title': 'Marque reconnue par Waze', 'card.brandUnknown.title': 'Marque absente de la liste officielle Waze',
+    'card.changes': 'Modifications proposées', 'card.newPhoto.title': 'Nouvelle photo proposée dans cette demande',
+    'card.flagReason': 'Motif :', 'card.flagType.INAPPROPRIATE': 'Inapproprié',
+    'install.invite': '🚗💨 Mettez Waze Places sur votre écran d’accueil : un seul appui pour ouvrir, plus de place pour la photo.',
+    'install.action': 'Installer sur l’écran d’accueil',
+    'install.ios.step1': 'Touchez <strong>Partager</strong> dans la barre de Safari',
+    'install.ios.step2': 'Choisissez <strong>Sur l’écran d’accueil</strong>',
+    'install.dismiss': 'Pas maintenant',
+    'card.field.name': 'Nom', 'card.field.description': 'Description',
+    'card.field.houseNumber': 'Numéro', 'card.field.phone': 'Téléphone',
+    'card.field.geometry': 'Emplacement', 'card.field.categories': 'Catégories',
+    'card.field.aliases': 'Autres noms', 'card.field.url': 'Site web',
+    'card.field.openingHours': 'Horaires', 'card.field.streetID': 'Rue',
+    'card.field.cityID': 'Ville', 'card.field.residential': 'Résidentiel',
+    'card.field.brand': 'Marque', 'card.field.entryExitPoints': 'Point d’entrée/sortie',
+    // Champs vus dans des demandes RÉELLES qui n’avaient pas de clé.
+    'card.field.externalProviderIDs': 'Lien avec Google', 'card.field.services': 'Services',
+    'card.field.lockRank': 'Niveau de verrouillage', 'card.field.categoryAttributes': 'Attributs de catégorie',
+    'card.value.empty': '(vide)', 'card.value.yes': 'Oui', 'card.value.no': 'Non',
+    'card.value.unnamed': '(sans nom)',
+    'card.updateType.VENUE': 'Nouveau lieu', 'card.updateType.IMAGE': 'Nouvelle photo',
+    'card.updateType.FLAG': 'Signalement', 'card.updateType.DELETE': 'Demande de suppression',
+    'card.updateType.UPDATE_DETAILS': 'Mise à jour (détails)',
+    'card.updateType.UNKNOWN': 'Type inconnu',
+    'card.changes.aria': 'Liste des modifications proposées',
+    'card.flagComment.aria': 'Texte du signalement de l’utilisateur',
+    'card.type.flagImage': 'Photo signalée', 'card.flaggedPhoto.title': 'Photo signalée dans ce rapport',
+    'card.starred.title': 'Favori dans WME', 'card.wmeLink.aria': 'Ouvrir dans WME',
+    'card.image.prev.aria': 'Photo précédente', 'card.image.next.aria': 'Photo suivante',
+    'card.stamp.reject': 'Rejeter', 'card.stamp.read': 'Lu', 'card.stamp.skip': 'Ignorer',
+    'card.btn.reject.aria': 'Rejeter', 'card.btn.reject.title': 'Rejeter (←)',
+    'card.btn.skip.aria': 'Ignorer', 'card.btn.skip.title': 'Ignorer (↑)',
+    'card.btn.read.aria': 'Marquer comme lue', 'card.btn.read.title': 'Marquer comme lue (→)',
+    'card.categories.empty': '(aucune catégorie)', 'card.address.empty': '(aucune adresse)',
+    'card.type.empty': '(type inconnu)', 'card.type.update': 'Mise à jour', 'card.creator.empty': '(inconnu)', 'card.noName': '(lieu sans nom)', 'card.noName.badge': 'sans nom',
+    'card.live.newRequest': 'Nouvelle demande : {name}{type}',
+    'card.img.alt': 'Photo de {name} ({i} sur {n})', 'card.img.altSingle': 'Photo de {name}',
+    'lightbox.aria': 'Visionneuse de photos', 'lightbox.prev.aria': 'Photo précédente', 'lightbox.next.aria': 'Photo suivante',
+    'lightbox.zoomHint': 'Double-appui pour zoomer · balayez sur le côté pour changer de photo',
+    'lightbox.img.alt': 'Photo de {name}', 'lightbox.img.altGeneric': 'Photo du lieu',
+    'modal.help.title': 'Aide', 'help.howToProcess.title': 'Comment traiter',
+    'help.action.reject': 'Rejeter', 'help.action.reject.hint': 'bouton ou glisser vers la gauche',
+    'help.action.skip': 'Ignorer', 'help.action.skip.hint': 'bouton ou glisser vers le haut',
+    'help.action.read': 'Lu', 'help.action.read.hint': 'bouton ou glisser vers la droite',
+    'help.howToProcess.note': 'Utilisez les boutons de la carte, la souris/le doigt, les flèches du clavier, ou faites glisser la carte.',
+    'help.legend.title': 'Légende',
+    'help.legend.newPhoto': '<span aria-hidden="true">✨</span> — <strong>nouvelle</strong> photo proposée dans cette demande (bordure ambre dans le carrousel)',
+    'help.legend.flaggedPhoto': '<span aria-hidden="true">🚩</span> — photo <strong>signalée</strong> dans ce rapport (bordure rose dans le carrousel)',
+    'help.legend.brandKnown': '<span class="inline-block text-[0.6875rem] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-400/20 text-emerald-700 dark:text-emerald-300">✓ connue</span> — la marque figure dans la liste officielle Waze',
+    'help.legend.brandUnknown': '<span class="inline-block text-[0.6875rem] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-400/20 text-amber-700 dark:text-amber-300">? non listée</span> — marque hors de la liste officielle',
+    'help.legend.pendingPlus': '<strong>Restantes</strong> avec <code>+</code> (par ex. 30+) — il y a d’autres pages à récupérer chez Waze',
+    'help.legend.starred': '<span aria-hidden="true">⭐</span> — lieu mis en favori dans WME',
+    'help.howToUse.title': 'Comment utiliser :',
+    'help.howToUse.step1': '<strong>Le plus simple :</strong> installez l’extension <b>WazePlaces Rapid Access</b> (Chrome) et connectez-vous directement depuis WME — sans copier de cookies.',
+    'help.howToUse.step2': 'Ou, manuellement : connectez-vous à Waze Map Editor dans votre navigateur',
+    'help.howToUse.step3': 'Exportez vos cookies avec une extension de navigateur',
+    'help.howToUse.step4': 'Envoyez ou collez le contenu de <code>cookies.txt</code>',
+    'help.howToUse.step5': 'Traitez les cartes (boutons, glisser, ou flèches du clavier ; <code>z</code> annule)',
+    'help.howToUse.step6': 'Vous avez pris le rythme ? Dans <strong>Filtres → Préférences</strong>, vous pouvez désactiver le délai d’annulation et travailler sans pause',
+    'help.important.title': 'Important :',
+    'help.important.body': 'Cette app <strong>n’approuve jamais</strong> de lieux — elle rejette ou marque comme lu, rien de plus. Pour approuver, ouvrez-le dans WME via le bouton <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs">↗</span> de la carte.',
+    'help.security.title': 'Sécurité :',
+    'help.security.body': 'Les cookies sont chiffrés sur le serveur avec une clé secrète et supprimés après 21 jours sans utilisation. Le client ne conserve qu’un jeton de session, révocable à tout moment via le bouton « Se déconnecter ».',
+    'help.privacy.title': 'Confidentialité et données :',
+    'help.privacy.server': 'Une seule chose vit sur le serveur : vos cookies Waze, chiffrés (AES-256-GCM). Rien d’autre.',
+    'help.privacy.notStored': 'Les demandes ne sont PAS conservées. Noms de lieux, photos, adresses et coordonnées ne sont écrits nulle part — la file n’existe qu’en mémoire, le temps que l’app soit ouverte.',
+    'help.privacy.retention': 'Conservation : 21 jours sans utilisation, ou jusqu’à ce que vous touchiez « Se déconnecter » — le premier des deux. Les codes d’association durent 5 minutes et ne servent qu’une fois.',
+    'help.privacy.device': 'Sur cet appareil : score, filtres, préférences et historique. Tout est effacé à la déconnexion.',
+    'help.privacy.credentials': 'Vos cookies sont des identifiants : ils permettent à l’app d’agir sur Waze en votre nom. Elle rejette ou marque comme lu uniquement — elle n’approuve jamais.',
+    'help.privacy.infra': 'Fonctionne sur Cloudflare (hébergement et mesure d’audience sans cookies). Aucune publicité, aucun traqueur.',
+    'help.privacy.contact': 'Questions, accès à vos données ou demande d’effacement : contactez <a href="https://www.waze.com/user/editor/antigerme" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">@antigerme</a>.',
+    'modal.logout.waze': 'Cela efface les données d’ici et du serveur, mais <strong>ne vous déconnecte pas de Waze</strong> — vos cookies restent valides. Pour vous déconnecter complètement, quittez aussi <a href="https://www.waze.com/editor" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">Waze Map Editor</a>.',
+    'toast.logoutServerFailed': 'Vos données ont disparu de cet appareil. Le nettoyage côté serveur n’a pas abouti (pas de connexion) — il se fera tout seul sous 21 jours.',
+    'help.extensions.title': 'Extensions recommandées :',
+    'help.extensions.chrome': '<strong>Chrome/Edge :</strong> « Get cookies.txt LOCALLY »',
+    'help.extensions.firefox': '<strong>Firefox :</strong> « cookies.txt »',
+    'toast.refreshing': 'Actualisation de la file…',
+    'toast.selectAtLeastOneType': 'Sélectionnez au moins un type de demande',
+    'toast.fileReadError': 'Erreur de lecture du fichier', 'toast.pasteEmpty': 'Collez le contenu des cookies',
+    'toast.validatingCookies': 'Validation des cookies…', 'toast.authSuccess': 'Connexion réussie !',
+    'toast.invalidCookies': 'Cookies invalides', 'toast.authError': 'Erreur de validation des cookies',
+    'toast.sessionExpired': 'Session expirée — reconnectez-vous', 'toast.loggedOut': 'Session terminée et données effacées.',
+    'toast.loadPlacesError': 'Erreur de chargement des lieux', 'toast.renderCardError': 'Erreur d’affichage du lieu, on passe…',
+    'toast.alreadyProcessed': 'Déjà traité par un autre éditeur 👍',
+    'toast.actionError': 'Erreur en essayant de {verb} (non comptabilisé)',
+    'toast.batchEmpty': 'Rien à marquer dans la file', 'toast.batchMarking': 'Marquage de {n} comme lues…',
+    'toast.batchError': 'Erreur lors du marquage en lot',
+    'toast.devUnlocked': 'Mode développeur débloqué 🛠️', 'toast.devCountdown': 'Encore {n} pour débloquer le mode développeur',
+    'toast.dismissHint': 'Touchez pour fermer', 'toast.unexpectedError': 'Erreur inattendue : {msg}',
+    'toast.unexpectedError.reload': 'recharger la page', 'toast.newVersion': 'Nouvelle version disponible. Mise à jour…',
+    'toast.undoUnlocked': '🚗💨 Beau pilotage, Wazer ! {n} demandes traitées — l’annulation devient optionnelle. Touchez pour prendre le volant.',
+    'toast.undoHint': 'Vous n’avez annulé aucune de vos {n} dernières demandes. Vous pouvez désactiver le délai de {undoSeg}s et passer directement à la suivante — touchez pour régler.',
+    'auth.pairBtn': 'Se connecter avec un code',
+    'pair.createBtn': 'Connecter un autre appareil',
+    'pair.show.title': 'Connecter un autre appareil',
+    'pair.show.body': 'Pointez la caméra de l’autre appareil vers le code ci-dessous.',
+    'pair.qr.aria': 'QR code pour se connecter sur l’autre appareil',
+    'pair.show.orType': 'Pas de caméra ? Saisissez ce code sur l’autre appareil :',
+    'pair.copyLink': 'Copier le lien (s’ouvre directement sur l’autre appareil)',
+    'pair.expiresIn': 'Valable encore {time}',
+    'pair.expired': 'Code expiré — générez-en un autre.',
+    'pair.enter.title': 'Se connecter avec un code',
+    'pair.enter.body': 'Saisissez le code affiché sur l’autre appareil :',
+    'pair.enter.placeholder': 'ABC-123',
+    'pair.enter.confirm': 'Se connecter',
+    'toast.pairSuccess': '📱 C’est fait ! Session connectée.',
+    'toast.pairInvalid': 'Code invalide ou expiré. Générez-en un nouveau sur l’appareil connecté.',
+    'toast.pairCreateError': 'Impossible de générer le code. Réessayez.',
+    'toast.pairLinkCopied': 'Lien copié — envoyez-le-vous et ouvrez-le sur l’autre appareil.',
+    'toast.langChanged': 'Langue changée 🌎',
+    'modal.batchRead.body': 'Marquer comme lue la {n} demande déjà dans la file ? Elle part directement vers Waze et ne peut pas être annulée en lot.',
+    'modal.batchRead.bodyPlural': 'Marquer comme lues les {n} demandes déjà dans la file ? Elles partent directement vers Waze et ne peuvent pas être annulées en lot.',
+    'toast.batchDone': '{n} demande marquée comme lue 👍', 'toast.batchDonePlural': '{n} demandes marquées comme lues 👍',
+    'undo.reject': 'Lieu rejeté', 'undo.skip': 'Lieu ignoré', 'undo.read': 'Marqué comme lu',
+    'undo.button': 'Annuler',
+    'action.verb.read': 'marquer comme lue', 'action.verb.reject': 'rejeter le lieu',
+    'indicator.sending': 'Envoi de {n}…',
+    'profile.tag.staff': 'Staff', 'profile.tag.am': 'AM', 'profile.tag.notAm': 'non-AM',
+    'profile.points': '{n} points', 'profile.edits': '{n} modifications',
+    'accessDenied.defaultMsg': 'Accès refusé.',
+    'prefs.undo.gate.noProfile': '🔒 Disponible après connexion, quand l’app aura chargé votre profil.',
+    'prefs.undo.gate.countdown': '🔒 Disponible après avoir traité {threshold} PUR (vous en avez {current} — encore {remaining}).',
+    'time.now': 'à l’instant', 'time.minutes': 'il y a {n}min', 'time.hours': 'il y a {n}h', 'time.days': 'il y a {n}j',
+    'time.months': 'il y a {n} mois', 'time.years': 'il y a {n} ans',
+    'api.error.connection': 'Erreur de connexion', 'api.error.noSession': 'Session expirée',
+    // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
+    // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
+    // servidor mandava a frase pronta em português e o frontend a exibia com
+    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    'srv.err.connection': 'Erreur de connexion à Waze',
+    'srv.err.cookiesExpired': 'Cookies expirés ou invalides',
+    'srv.err.alreadyHandled': 'Déjà traité par un autre éditeur',
+    'srv.err.alreadyHandledOrModified': 'Déjà traité ou modifié par un autre éditeur',
+    'srv.err.gone': 'Cette demande n’existe plus (peut-être déjà traitée)',
+    'srv.err.wazeDown': 'Serveur Waze indisponible (HTTP {code})',
+    'srv.err.wazeUnknown': 'Waze a renvoyé une erreur inattendue (HTTP {code})',
+    'srv.err.cookieFormat': 'Format de cookies invalide',
+    'srv.err.cookieFormatNoWaze': 'Format invalide, ou aucun cookie Waze trouvé',
+    'srv.err.cookieFormatExport': 'Format invalide, ou aucun cookie Waze trouvé. Exportez les cookies en étant connecté à Waze Map Editor (format Netscape).',
+    'srv.err.csrfMissing': 'Jeton CSRF introuvable',
+    'srv.err.csrfMissingLogin': 'Jeton CSRF introuvable dans les cookies. Vérifiez que vous êtes connecté à Waze Map Editor.',
+    'srv.err.cookiesMissing': 'Aucun cookie fourni',
+    'srv.err.cookiesExpiredRelogin': 'Cookies expirés ou invalides. Reconnectez-vous à Waze Map Editor et exportez de nouveaux cookies.',
+    'srv.err.badAction': 'Action invalide',
+    'srv.err.pairCodeInvalid': 'Code invalide ou expiré. Générez-en un nouveau sur l’appareil déjà connecté.',
+    'srv.err.badWazeResponse': 'Réponse inattendue de Waze',
+    'srv.err.incompleteData': 'Données incomplètes',
+    'srv.err.incompleteParams': 'Paramètres incomplets',
+    'srv.err.countryRequired': 'Choisissez un pays',
+    'srv.err.sessionExpired': 'Session expirée ou invalide',
+    'srv.err.sessionMissing': 'Aucune session indiquée',
+    'srv.err.endpointNotFound': 'Adresse introuvable sur le serveur',
+    'srv.err.internal': 'Erreur interne du serveur',
+    'srv.err.badProfile': 'Profil invalide',
+    'srv.err.accessDenied': 'Accès réservé aux éditeurs Area Manager de niveau {minLevel}+ ou Staff.',
   },
 };
 
 let lang = 'pt';
 
-// Resolve a preferência explícita ou detecta de navigator.language (2 letras).
-//
-// O fallback é INGLÊS, não português. Ele não atende a França: atende TODO
-// idioma fora de pt/en/es — francês, alemão, italiano, japonês, russo, chinês.
-// Quem fala pt/en/es é servido pela detecção e não passa por aqui, então
-// escolher inglês não muda nada pra eles e dá a quem sobra a língua franca da
-// comunidade WME, muito mais provável de ser lida que português.
+// ── Idiomas suportados = as CHAVES DO DICIONÁRIO ──────────────────────────
+// Nunca uma lista à parte. A whitelist cravada que morava no resolveLang
+// (`pref === 'en' || pref === 'es' || pref === 'pt'`) fazia o idioma novo
+// entrar pela detecção do navegador mas ser IGNORADO quando escolhido no
+// seletor: quem clicasse em Français caía de volta no idioma do sistema, sem
+// erro nenhum. Derivar do dicionário torna o par "existe / pode ser escolhido"
+// impossível de divergir.
+const LANGS_SUPORTADOS = Object.keys(I18N_DICT);
+
+// Nome de cada idioma NA PRÓPRIA LÍNGUA — não se traduz "English" pra
+// "Inglês": quem está perdido num idioma que não lê procura a palavra que
+// reconhece. Também é a fonte dos <option> dos dois seletores (antes eram duas
+// listas de HTML duplicadas, e a segunda já tinha sido esquecida uma vez).
+const LANG_NOMES = { pt: 'Português', en: 'English', es: 'Español', fr: 'Français' };
+
+// locale pra Intl/toLocaleString. MAPA e não ternário aninhado: o ternário
+// mandava todo idioma não-listado pro 'en' calado, então francês formataria
+// número e data em padrão inglês (1,234.5 em vez de 1 234,5) sem ninguém notar.
+const LOCALE_POR_LANG = { pt: 'pt-BR', en: 'en', es: 'es', fr: 'fr' };
+
+// O fallback é INGLÊS, não português. Ele não atende a França — o francês agora
+// tem dicionário próprio. Atende quem sobra: alemão, italiano, japonês, russo,
+// holandês, chinês. Quem fala um idioma suportado vem da detecção e não passa
+// por aqui, então o fallback dá a quem resta a língua franca da comunidade WME.
 const LANG_FALLBACK = 'en';
+
+// Resolve a preferência explícita ou detecta de navigator.language (2 letras).
+// Aceita 'pt' e 'pt-BR' igual: preferência antiga gravada com região não pode
+// virar idioma errado.
 function resolveLang(pref) {
-  if (pref === 'en' || pref === 'es' || pref === 'pt') return pref;
+  const p = String(pref || '').slice(0, 2).toLowerCase();
+  if (I18N_DICT[p]) return p;
   try {
     const n = (navigator.language || LANG_FALLBACK).slice(0, 2).toLowerCase();
     return I18N_DICT[n] ? n : LANG_FALLBACK;
@@ -644,9 +994,7 @@ function resolveLang(pref) {
 }
 function setLang(pref) { lang = resolveLang(pref); }
 function getLang() { return lang; }
-
-// locale pra Intl/toLocaleString acompanhar o idioma escolhido.
-function i18nLocale() { return lang === 'pt' ? 'pt-BR' : lang === 'es' ? 'es' : 'en'; }
+function i18nLocale() { return LOCALE_POR_LANG[lang] || LOCALE_POR_LANG[LANG_FALLBACK] || 'en'; }
 
 // ── Variáveis SEMPRE disponíveis para interpolação ────────────────────────
 // Existem porque `applyI18n()` chama t(chave) sem parâmetro nenhum: uma chave
@@ -699,5 +1047,7 @@ if (typeof window !== 'undefined') {
   window.getLang = getLang;
   window.resolveLang = resolveLang;
   window.i18nLocale = i18nLocale;
+  window.LANGS_SUPORTADOS = LANGS_SUPORTADOS;
+  window.LANG_NOMES = LANG_NOMES;
 }
 if (typeof globalThis !== 'undefined') { globalThis.I18N_DICT = I18N_DICT; }

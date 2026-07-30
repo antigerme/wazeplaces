@@ -132,7 +132,7 @@ const APARELHOS = [
   ['Galaxy Fold', { width: 280, height: 653 }],
   ['paisagem 852x393', { width: 852, height: 393 }],
 ];
-const LINGUAS = ['pt', 'en', 'es'];
+const LINGUAS = ['pt', 'en', 'es', 'fr'];
 
 let falhas = 0;
 const checa = (ok, msg, detalhe) => {

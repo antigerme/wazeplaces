@@ -18,6 +18,12 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+// Quantas línguas o dicionário tem, DERIVADO do arquivo — nunca o literal 3. As
+// contagens cravadas reprovaram todas de uma vez quando o francês entrou, e a
+// mensagem ainda dizia "nas três línguas" com quatro no dicionário. Derivando,
+// a 5ª língua não faz ninguém voltar aqui.
+const N_LINGUAS = (read('js/i18n.js').match(/^  [a-z]{2}: \{$/gm) || []).length;
+
 
 const HTML = read('index.html');
 const CSS = read('css/styles.css');
@@ -457,7 +463,7 @@ test('placeholder não se confunde com dado', () => {
                   'card.type.empty', 'card.creator.empty', 'card.value.empty', 'card.value.unnamed'];
   for (const chave of CHAVES) {
     const vals = [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}':\\s*'([^']*)'`, 'g'))].map((m) => m[1]);
-    assert.equal(vals.length, 3, `${chave} precisa existir nas três línguas`);
+    assert.equal(vals.length, N_LINGUAS, `${chave} precisa existir nas ${N_LINGUAS} línguas`);
     for (const v of vals) {
       assert.ok(v.startsWith('(') && v.endsWith(')'),
         `${chave} = "${v}" — placeholder sem parênteses se confunde com dado do Waze`);
@@ -465,7 +471,7 @@ test('placeholder não se confunde com dado', () => {
   }
   // O selo é rótulo de estado, não valor: esse NÃO leva parênteses.
   const selo = [...I18N.matchAll(/'card\.noName\.badge':\s*'([^']*)'/g)].map((m) => m[1]);
-  assert.equal(selo.length, 3, 'card.noName.badge precisa existir nas três línguas');
+  assert.equal(selo.length, N_LINGUAS, `card.noName.badge precisa existir nas ${N_LINGUAS} línguas`);
   for (const v of selo) assert.doesNotMatch(v, /^\(/, 'o selo não é valor — não leva parênteses');
 
   const APP_ = read('js/app.js');
@@ -697,10 +703,9 @@ test('o tipo do card não repete a lista de mudanças', () => {
   // dizer duas vezes a mesma coisa, e a de cima truncada.
   const APP_ = read('js/app.js');
   assert.match(APP_, /card\.type\.update/, 'o card voltou a repetir a enumeração de campos no Tipo');
-  for (const lang of ['pt', 'en', 'es']) void lang;
   const I18N = read('js/i18n.js');
-  assert.equal((I18N.match(/'card\.type\.update':/g) || []).length, 3,
-    'card.type.update precisa existir nas três línguas');
+  assert.equal((I18N.match(/'card\.type\.update':/g) || []).length, N_LINGUAS,
+    `card.type.update precisa existir nas ${N_LINGUAS} línguas`);
   // O anúncio pra leitor de tela CONTINUA com a enumeração: lá ela não é
   // repetição, é a única forma de saber o que mudou sem varrer a lista.
   const live = APP_.match(/card\.live\.newRequest[\s\S]{0,200}/)[0];
@@ -1078,4 +1083,44 @@ test('a Ajuda diz o que a app guarda, por quanto tempo e como apagar', () => {
   // cortou o acesso — e não cortou.
   assert.ok(HTML.includes('data-i18n-html="modal.logout.waze"'),
     'o diálogo de sair parou de avisar que os cookies seguem válidos no Waze');
+});
+
+// ── Ritmo e endereço das chamadas ao Waze (instruções permanentes do owner) ──
+// Duas regras que protegem a CONTA DELE, não a minha, e que por isso não podem
+// depender de eu lembrar: (1) sempre jitter, de uma fonte única; (2) a URL do
+// WME é sempre a canônica, sem segmento de idioma.
+test('jitter das chamadas ao Waze vem de uma fonte única', () => {
+  const jit = read('tools/waze-jitter.mjs');
+  assert.match(jit, /export async function pausaComJitter/, 'sumiu o pausaComJitter compartilhado');
+  const min = Number(jit.match(/JITTER_MIN_MS = (\d+)/)?.[1]);
+  const max = Number(jit.match(/JITTER_MAX_MS = (\d+)/)?.[1]);
+  assert.ok(min >= 1000, `jitter mínimo caiu pra ${min}ms — o owner pediu "vá devagar"`);
+  assert.ok(max > min, 'faixa de jitter inválida (max <= min): sem faixa não há aleatoriedade');
+  assert.match(jit, /Math\.random\(\)/, 'o jitter virou pausa FIXA — intervalo constante é assinatura de automação');
+
+  // Quem fala com o Waze importa daqui em vez de inventar o seu setTimeout.
+  const probe = read('tools/waze-probe.mjs');
+  assert.match(probe, /from '\.\/waze-jitter\.mjs'/, 'o probe parou de usar a fonte única do jitter');
+  assert.match(probe, /await pausaComJitter\(\)/, 'o probe parou de esperar entre chamadas');
+  assert.doesNotMatch(probe, /setTimeout\([^)]*\d{3,}\)/,
+    'apareceu setTimeout com número no probe — use pausaComJitter(), não pausa própria');
+});
+
+test('a URL do WME é sempre a canônica, sem segmento de idioma', () => {
+  for (const arq of ['js/app.js', 'server/core.mjs']) {
+    const src = read(arq);
+    assert.match(src, /const WME_EDITOR_URL = 'https:\/\/www\.waze\.com\/editor'/,
+      `${arq} precisa declarar WME_EDITOR_URL com a URL canônica`);
+  }
+  // Nenhum lugar do código volta a cravar locale numa URL do waze.com. O probe
+  // é exceção declarada: ele VARIA o Referer de propósito pra medir se importa.
+  const fontes = ['js/app.js', 'js/i18n.js', 'server/core.mjs', 'index.html'];
+  const cravados = [];
+  for (const arq of fontes) {
+    for (const m of read(arq).matchAll(/https:\/\/www\.waze\.com\/([a-z]{2}(?:-[A-Z]{2})?)\//g)) {
+      cravados.push(`${arq} → /${m[1]}/`);
+    }
+  }
+  assert.equal(cravados.length, 0,
+    'URL do waze.com com idioma cravado (o editor cai num WME que não é o dele):\n' + cravados.join('\n'));
 });

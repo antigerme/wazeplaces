@@ -455,3 +455,33 @@ test('buildPlacesFromSearch: venue editável não gera `blocked`', () => {
   assert.equal(places.length, 1);
   assert.equal(blocked, 0);
 });
+
+// Regressão do "[object Object]" — achado num pedido REAL (AmBev, Manaus), não
+// numa fixture: 33 de 142 pedidos da fila do owner tinham mudança de geometria e
+// TODOS apareciam como "[object Object] → [object Object]" na tela, em qualquer
+// idioma. `formatValue` tratava null, boolean e array; objeto simples caía no
+// String(value), e o `geometry` do Waze é GeoJSON — objeto.
+test('geometria vira coordenada legível, e polígono alterado nunca formata igual', async () => {
+  const { formatGeometry } = await import('../server/core.mjs');
+
+  // Point: a coordenada É a geometria inteira. lat, lon (ordem de mapa), 6 casas.
+  assert.equal(formatGeometry({ type: 'Point', coordinates: [-60.0267, -3.0757] }),
+    '-3.075700, -60.026700');
+
+  // Polígono com o MESMO primeiro vértice e um vértice A MAIS: é o caso real que
+  // mostrou por que a contagem precisa aparecer. Sem ela, os dois formatariam
+  // idêntico e a tela afirmaria que nada mudou — pior que ser feio.
+  const antes = { type: 'Polygon', coordinates: [[[-60.0267, -3.0757], [-60.0268, -3.0758], [-60.0269, -3.0759]]] };
+  const depois = { type: 'Polygon', coordinates: [[[-60.0267, -3.0757], [-60.0268, -3.0758], [-60.0269, -3.0759], [-60.027, -3.076]]] };
+  assert.notEqual(formatGeometry(antes), formatGeometry(depois),
+    'polígono que mudou formatou igual ao anterior — a tela mentiria dizendo que nada mudou');
+  assert.match(formatGeometry(antes), /3 pts$/);
+  assert.match(formatGeometry(depois), /4 pts$/);
+
+  // MultiPolygon (o Waze manda) e lixo não derrubam.
+  assert.match(formatGeometry({ type: 'MultiPolygon', coordinates: [[[[-60.1, -3.2], [-60.2, -3.3]]]] }),
+    /^-3\.200000, -60\.100000 · 2 pts$/);
+  for (const ruim of [null, undefined, {}, { type: 'Point' }, { coordinates: [] }, 'texto', 42]) {
+    assert.equal(formatGeometry(ruim), null, `formatGeometry(${JSON.stringify(ruim)}) devia dar null`);
+  }
+});
