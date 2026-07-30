@@ -958,6 +958,21 @@ button:active {
     padding-top: 0.375rem;
     padding-bottom: 0.375rem;
   }
+  /* Aqui o piso do texto SAI, e é troca consciente de um defeito por outro
+     menor. Estreito faz cada linha virar duas, então o min-content do texto
+     cresce justamente onde não há altura pra ele: medido num 320×533, o card de
+     remoção empurrava a barra ✕/↑/✓ 76px PRA FORA da tela nas 4 línguas (a
+     auditoria de 960 renders pegou; a fronteira é 320×600 com 9px, e a partir
+     de 320×610 cabe). Ação principal fora da dobra é o pior defeito do card
+     (gotcha #32) e ganha de última linha apertada — que ainda tem a rede de
+     rolagem como saída. Fora desta faixa o piso vale, inclusive no relato que o
+     originou (445px de largura).
+     Repete a forma do seletor de propósito: o piso é (0,4,0) por causa do
+     `:has()` dentro do `:not()`, então `.place-card .card-content` sozinho
+     (0,2,0) não o venceria (gotcha #27). */
+  .place-card .card-content:not(:has(.card-changes:not(.hidden), .card-flag-comment:not(.hidden))) {
+    min-height: 0;
+  }
 }
 
 /* Paisagem: empilhar foto sobre texto não cabe em 393px de altura por mais que

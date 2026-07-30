@@ -359,6 +359,17 @@ test('a foto do card absorve a variação de altura, o texto não vira vão', ()
     'o :has do piso parou de exigir :not(.hidden) — as caixas longas existem escondidas em todo card');
   assert.match(piso[0], /\.card-flag-comment:not\(\.hidden\)/,
     'o :has do piso parou de exigir :not(.hidden) no reporte');
+
+  // E o piso PRECISA sair em tela estreita-e-baixa. Lá o texto quebra em mais
+  // linhas e o min-content cresce onde não há altura: medido num 320×533, o
+  // card de remoção jogava a barra ✕/↑/✓ 76px FORA da tela nas 4 línguas (a
+  // auditoria de 960 renders pegou). Ação fora da dobra (gotcha #32) é pior que
+  // última linha apertada, que ainda tem a rede de rolagem como saída.
+  const estreitoEBaixo = CSS.match(
+    /@media \(max-height: 700px\) and \(max-width: 360px\) \{[\s\S]*?\n\}/);
+  assert.ok(estreitoEBaixo, 'sumiu o degrau de tela estreita-e-baixa');
+  assert.match(estreitoEBaixo[0], /\.card-content:not\(:has\([^\n]*\)\) \{\s*min-height: 0;/,
+    'o piso do texto deixou de sair em tela estreita-e-baixa — a barra de ações volta pra fora da tela');
 });
 
 test('aviso do browser não vira erro na cara do editor — e o filtro não é guarda-chuva', () => {
