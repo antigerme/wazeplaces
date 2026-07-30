@@ -1618,6 +1618,25 @@ function renderCurrentCard() {
 
     if (place.isDelete) {
         card.querySelector('.card-delete-banner').classList.remove('hidden');
+        // O banner âmbar já diz "⚠ Pedido de remoção", e a linha "TIPO:" dizia a
+        // MESMA frase logo abaixo — era ela que truncava: em francês, a 320px,
+        // "Demande de suppression" pede 171px numa caixa de 162 e vira
+        // "Demande de suppressio…". Mesma lição do UPDATE, que já não repete a
+        // enumeração de campos: espaço não se acha apertando, se acha tirando
+        // repetição.
+        //
+        // Some o RÓTULO e o TEXTO, não a linha: a idade ("há 3d") mora nela e é
+        // informação de decisão num pedido de remoção. Tentei antes mover a
+        // idade pra dentro do banner e não funciona — `applyI18n(card)` roda
+        // depois e o banner tem `data-i18n`, que escreve textContent e apaga
+        // qualquer filho anexado (gotcha #24).
+        const linha = card.querySelector('.card-type-row');
+        if (linha) {
+            const rotulo = linha.querySelector('[data-i18n="card.type"]');
+            if (rotulo) rotulo.classList.add('hidden');
+            const tipo = linha.querySelector('.card-type');
+            if (tipo) tipo.classList.add('hidden');
+        }
     }
 
     if (place.isStarred) {
@@ -1844,12 +1863,30 @@ function formatarDistancia(m) {
 
 // Valor de lista: enum do Waze quando conhecemos, cru quando não. Objeto (um
 // entryExitPoint, por exemplo) vira resumo curto em vez de JSON na cara.
+// Nomes de dia SEM dicionário: o Intl já sabe em toda língua, e uma tabela de
+// 7 dias × 4 idiomas seria 28 strings pra manter em paridade sem ganho nenhum.
+// 2024-01-07 é um domingo, que é o dia 0 do Waze.
+function nomeDoDia(d) {
+    try {
+        return new Date(Date.UTC(2024, 0, 7 + Number(d)))
+            .toLocaleDateString(i18nLocale(), { weekday: 'short', timeZone: 'UTC' });
+    } catch (e) { return String(d); }
+}
+
 function valorDeLista(v) {
     if (v && typeof v === 'object') {
+        // Ponto de entrada/saída: o que importa é qual é e onde fica.
         const p = v.point && v.point.coordinates;
         if (Array.isArray(p) && p.length >= 2) {
             const tipo = v.entry === false ? t('card.eep.exit') : t('card.eep.entry');
-            return `${tipo} ${Number(p[1]).toFixed(5)}, ${Number(p[0]).toFixed(5)}`;
+            const nome = String(v.name || '').trim();
+            return `${nome ? nome + ' · ' : ''}${tipo} ${Number(p[1]).toFixed(5)}, ${Number(p[0]).toFixed(5)}`;
+        }
+        // Horário de funcionamento: vinha como JSON cru na tela (medido na fila
+        // real). 7 dias vira "todos os dias" em vez de enfileirar a semana.
+        if (Array.isArray(v.days) && v.fromHour !== undefined) {
+            const dias = v.days.length >= 7 ? t('card.oh.everyday') : v.days.map(nomeDoDia).join(', ');
+            return `${dias} · ${v.fromHour}–${v.toHour}`;
         }
         try { return JSON.stringify(v); } catch { return String(v); }
     }

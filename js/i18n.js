@@ -107,6 +107,7 @@ const I18N_DICT = {
     'card.change.reshaped': 'forma alterada', 'card.change.samePlace': 'mesma posição',
     'card.change.verts': '{de} → {para} vértices',
     'card.eep.entry': 'entrada', 'card.eep.exit': 'saída',
+    'card.oh.everyday': 'todos os dias',
     'card.source.WEB': 'pelo site', 'card.source.MOBILE_CLIENT': 'pelo app',
     // Categorias do Waze. As 20 mais comuns cobrem 70% das ocorrências medidas
     // na fila real (61 valores distintos); o resto cai em humanizarEnum, então
@@ -384,6 +385,7 @@ const I18N_DICT = {
     'card.change.reshaped': 'shape changed', 'card.change.samePlace': 'same position',
     'card.change.verts': '{de} → {para} vertices',
     'card.eep.entry': 'entry', 'card.eep.exit': 'exit',
+    'card.oh.everyday': 'every day',
     'card.source.WEB': 'from the website', 'card.source.MOBILE_CLIENT': 'from the app',
     // Waze categories: the 20 most common cover 70% of the measured queue.
     'card.cat.GAS_STATION': 'Gas station',
@@ -641,6 +643,7 @@ const I18N_DICT = {
     'card.change.reshaped': 'forma modificada', 'card.change.samePlace': 'misma posición',
     'card.change.verts': '{de} → {para} vértices',
     'card.eep.entry': 'entrada', 'card.eep.exit': 'salida',
+    'card.oh.everyday': 'todos los días',
     'card.source.WEB': 'desde el sitio', 'card.source.MOBILE_CLIENT': 'desde la app',
     // Categorías de Waze: las 20 más comunes cubren el 70% de la cola medida.
     'card.cat.GAS_STATION': 'Gasolinera',
@@ -898,6 +901,7 @@ const I18N_DICT = {
     'card.change.reshaped': 'forme modifiée', 'card.change.samePlace': 'même position',
     'card.change.verts': '{de} → {para} sommets',
     'card.eep.entry': 'entrée', 'card.eep.exit': 'sortie',
+    'card.oh.everyday': 'tous les jours',
     'card.source.WEB': 'depuis le site', 'card.source.MOBILE_CLIENT': 'depuis l’app',
     // Catégories Waze : les 20 plus courantes couvrent 70% de la file mesurée.
     'card.cat.GAS_STATION': 'Station-service',

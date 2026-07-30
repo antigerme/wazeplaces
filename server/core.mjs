@@ -529,6 +529,11 @@ export const distanciaEntreGeometrias = (a, b) => {
 // profissional mostra a diferença, não o antes-e-depois cru.
 // Devolve valores CRUS (enums do Waze); quem traduz é o frontend.
 export const diffDeLista = (antes, depois) => {
+  // Campo que NASCE (null → [...]) também é diff de lista: é tudo adição. Sem
+  // isto o par caía no formatValue e o card mostrava JSON cru — medido na fila
+  // real com `openingHours` e `entryExitPoints`, que costumam vir de nada.
+  if (antes == null && Array.isArray(depois)) antes = [];
+  if (depois == null && Array.isArray(antes)) depois = [];
   if (!Array.isArray(antes) || !Array.isArray(depois)) return null;
   const chave = (v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v));
   const setA = new Map(antes.map((v) => [chave(v), v]));

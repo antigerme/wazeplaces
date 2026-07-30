@@ -527,9 +527,16 @@ test('diffDeLista devolve só a diferença, com valores crus', async () => {
   assert.equal(diffDeLista(['A'], ['A']), null);
   // Ordem não é mudança: reordenar não deve virar +/−.
   assert.equal(diffDeLista(['A', 'B'], ['B', 'A']), null);
-  // Não-array (o campo pode vir null no venue original) → null, sem lançar.
-  assert.equal(diffDeLista(null, ['A']), null);
+  // Campo que NASCE (null → lista) é diff também: tudo adição. Antes devolvia
+  // null aqui, e o par caía no formatValue — que serializa objeto em JSON e
+  // mandava `{"days":[0,1,...],"fromHour":"00:00"}` pra tela. Medido na fila
+  // real: openingHours e entryExitPoints costumam vir de nada.
+  assert.deepEqual(diffDeLista(null, ['A']), { add: ['A'], del: [] });
+  assert.deepEqual(diffDeLista(['A'], null), { add: [], del: ['A'] });
+  // Mas null dos DOIS lados não é mudança, e não-array de verdade segue null.
+  assert.equal(diffDeLista(null, null), null);
   assert.equal(diffDeLista(['A'], 'texto'), null);
+  assert.equal(diffDeLista('texto', ['A']), null);
 
   // Objeto na lista (entryExitPoints) compara por conteúdo, não por referência.
   const pa = { name: '', entry: true };
