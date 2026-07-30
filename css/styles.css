@@ -800,6 +800,38 @@ button:active {
   min-height: 0;
 }
 
+/* Quem cede espaço no card é a FOTO, não o texto.
+   O `min-h-0` do HTML deixa a caixa de texto encolher até zero, e como a foto é
+   `flex-auto shrink-[30]` (cresce e tem piso de 9rem), o resultado medido era
+   perverso: em janela baixa o texto ficava 3px menor que o próprio conteúdo e a
+   última linha aparecia cortada, com a foto INTACTA.
+
+   A tentativa óbvia — compactar o texto num degrau novo de `max-height` — foi
+   escrita, MEDIDA e descartada: devolveu 14px e a sobra não mudou nada, porque
+   a foto reabsorveu na hora (conteúdo 241→227px, caixa 237,7→224,2px). Ficaria
+   como mais uma regra que "compacta" sem compactar (gotcha #33).
+
+   `min-content` só vale nos cards de LINHAS FIXAS (foto, remoção), e o escopo é
+   obrigatório: aplicado a todos, ele leva a barra ✕/↑/✓ pra 152-278px FORA da
+   tela num Fold (medido, 51 falhas no smoke). O motivo é que, no cálculo de
+   min-content, o corpo rolável entra com a altura NATURAL da lista inteira — o
+   `min-h-0` dele não zera essa contribuição pro pai. Card com caixa longa
+   precisa seguir encolhendo, senão o desenho de UMA área rolável (gotcha #29)
+   e a barra de ações dentro da tela (gotcha #32) caem juntos.
+
+   `:has()` é o que sabe distinguir os dois. O `:not(.hidden)` NÃO é detalhe: as
+   duas caixas moram no template e são apenas escondidas por classe, então
+   `:has(.card-changes)` casa em TODO card — inclusive nos de foto, que é
+   exatamente onde a regra precisava valer. Medido: sem ele, a sobra voltava a
+   3-4px no card do relato e a barra reaparecia.
+
+   Onde não houver suporte a `:has()` o seletor inteiro é ignorado e o
+   comportamento volta a ser o de hoje — degradação segura, não quebra. Duas
+   classes porque uma perde pro `min-h-0` do HTML (gotcha #27). */
+.place-card .card-content:not(:has(.card-changes:not(.hidden), .card-flag-comment:not(.hidden))) {
+  min-height: min-content;
+}
+
 .card-content .card-name {
   font-size: 1.35rem;
   line-height: 1.2;

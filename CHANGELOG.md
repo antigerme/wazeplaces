@@ -8,6 +8,12 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-10
+
+### Corrigido
+- **O erro vermelho "ResizeObserver loop…" que aparecia ao abrir a foto.** Nada estava quebrado: era um aviso do navegador que a app mostrava como se fosse defeito, bem em cima do card. A causa era a própria vigia que decide se o card precisa rolar — ela mexia no layout no meio da medição, e no computador (onde a barra de rolagem ocupa espaço) isso se mordia a si mesmo. Agora a vigia mede primeiro e só depois mexe, e avisos do navegador que não pedem ação nenhuma ficam no console em vez de na sua frente.
+- **A última linha do card ficava cortada e aparecia uma barra de rolagem por causa de poucos pixels.** Quem encolhia era o texto, com a foto intacta — e apertar o texto não ajudava, porque a foto reabsorvia o espaço na hora. Agora quem cede é a foto, que é o elemento que mais sobra. Nos cards de mudanças e de reporte nada muda: lá a lista continua sendo a única área que rola.
+
 ## v2026.07.30-09
 
 ### Corrigido

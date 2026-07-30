@@ -93,7 +93,20 @@ document.addEventListener('DOMContentLoaded', () => {
     initApp();
 });
 
+// Aviso do browser, não defeito da app: o navegador emite isto quando um
+// ResizeObserver provoca layout que exige mais uma rodada de entrega no mesmo
+// quadro. Nada quebrou, não há o que o editor fazer, e a app já convergiu no
+// quadro seguinte — mas chegava como toast VERMELHO "Erro inesperado" em cima
+// do card. Fica no console pra não virar invisível; some da cara de quem tria.
+// Filtro estreito de propósito: só esta família de mensagem, nunca "todo erro
+// que eu não quero ver".
+const RUIDO_RESIZE_OBSERVER = /ResizeObserver loop/i;
+
 window.addEventListener('error', (e) => {
+    if (RUIDO_RESIZE_OBSERVER.test(e.message || '')) {
+        console.warn('Ruído de ResizeObserver ignorado:', e.message);
+        return;
+    }
     console.error('Erro JS não-tratado:', e.error || e.message, e.filename, e.lineno);
     if (window.showToast) {
         window.showToast(t('toast.unexpectedError', { msg: e.message || t('toast.unexpectedError.reload') }), 'error');
@@ -2140,16 +2153,60 @@ function aplicarTravaDeAcao() {
 // não um overflow ligado pra sempre.
 //
 // Tolerância de 2px: scrollHeight e clientHeight são INTEIROS arredondados de
-// alturas fracionárias, e cada borda pode errar ~1px. Estouro de verdade passa
-// disso com folga.
+// alturas fracionárias, e cada borda pode errar ~1px. Ela cobre SÓ isso — a
+// falta de espaço de verdade cresce contínua com a janela (medido no card do
+// segundo relato: 0,17 → 1,34 → 2,55 → 3,28px) e quem a resolve é o piso do
+// texto no CSS, não uma tolerância maior aqui.
+const TOLERANCIA_ARREDONDAMENTO_PX = 2;
+
 function vigiarEstouroDoConteudo(el) {
     if (!el) return;
-    const avaliar = () => {
-        el.classList.toggle('card-content-rola', el.scrollHeight > el.clientHeight + 2);
+
+    // O callback do observer NÃO pode mexer no DOM: ligar a classe muda o
+    // `overflow-y`, e onde a barra de rolagem é CLÁSSICA (desktop) ela ocupa
+    // largura — encolhendo justamente o content box que este observer observa.
+    // O browser detecta a re-entrada e emite "ResizeObserver loop completed
+    // with undelivered notifications", que o window.onerror mostrava como toast
+    // vermelho pro editor. Reproduzido no card do owner: só acontece na faixa
+    // marginal (sobra de 3-4px), porque é onde a classe TROCA de estado; com
+    // estouro claro ela já nasce ligada e nada re-dispara.
+    //
+    // Por isso o observer só AGENDA: a escrita acontece no quadro seguinte,
+    // fora do ciclo de entrega. E só escreve se a decisão mudou, então em
+    // regime permanente o custo é zero.
+    //
+    // Converge sempre, e isso é propriedade da geometria, não sorte: barra
+    // VERTICAL não muda a altura da caixa, só estreita o conteúdo. Estreitar
+    // só faz o texto ficar mais alto — então o que estourava sem barra segue
+    // estourando com ela, e o que cabe COM a barra também cabe sem. Os dois
+    // sentidos são estáveis; não há como piscar.
+    let ligado = el.classList.contains('card-content-rola');
+    let agendado = false;
+
+    const escrever = () => {
+        agendado = false;
+        const estoura = el.scrollHeight > el.clientHeight + TOLERANCIA_ARREDONDAMENTO_PX;
+        if (estoura === ligado) return;
+        ligado = estoura;
+        el.classList.toggle('card-content-rola', estoura);
     };
     // O primeiro quadro mente: antes do layout assentar, scrollHeight não vale.
-    requestAnimationFrame(avaliar);
-    if (typeof ResizeObserver === 'function') new ResizeObserver(avaliar).observe(el);
+    const agendar = () => {
+        if (agendado) return;
+        agendado = true;
+        requestAnimationFrame(escrever);
+    };
+
+    agendar();
+    if (typeof ResizeObserver === 'function') {
+        const obs = new ResizeObserver(agendar);
+        // A caixa é `flex-1` dentro de um card de altura fixa: quando o texto
+        // cresce sem a caixa mudar de tamanho — fonte do sistema maior, zoom
+        // só-de-texto — observar SÓ a caixa não dispara nada e a rede nunca
+        // liga. Quem denuncia esse caso são os filhos.
+        obs.observe(el);
+        for (const filho of el.children) obs.observe(filho);
+    }
 }
 
 // Scroll edge effect (M3): esmaece a borda de baixo enquanto sobra conteúdo.
