@@ -21,7 +21,11 @@ test('limpeza de modal vale para TODOS os caminhos de fechamento', () => {
   // deixa os outros dois vazando — foi exatamente o que aconteceu: fechando o
   // pareamento por Esc, o setInterval seguia rodando pelo resto da sessão.
   assert.match(APP, /const LIMPEZA_AO_FECHAR/, 'sumiu o mapa de limpeza por modal');
-  const fechar = APP.match(/function closeModal\(id\)[\s\S]*?\n\}/);
+  // Tolera parâmetros extras na assinatura: o que importa é o closeModal chamar
+  // a limpeza, não quantos argumentos ele recebe. Casar `closeModal(id)` literal
+  // reprovou quando o modal ganhou o fechamento pelo voltar do aparelho — guard
+  // que quebra por detalhe de assinatura treina todo mundo a afrouxá-lo.
+  const fechar = APP.match(/function closeModal\([^)]*\)[\s\S]*?\n\}/);
   assert.ok(fechar, 'sumiu o closeModal');
   assert.match(fechar[0], /LIMPEZA_AO_FECHAR\[id\]/,
     'closeModal parou de chamar a limpeza — Esc e scrim voltam a vazar');

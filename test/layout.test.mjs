@@ -1124,3 +1124,52 @@ test('a URL do WME é sempre a canônica, sem segmento de idioma', () => {
   assert.equal(cravados.length, 0,
     'URL do waze.com com idioma cravado (o editor cai num WME que não é o dele):\n' + cravados.join('\n'));
 });
+
+// ── O voltar do aparelho fecha a camada de cima ───────────────────────────
+// Pedido de uma editora: no ritmo do swipe, ir até o ✕ do lightbox quebra a
+// cadência. O risco desta feature não é ela não funcionar — é ela funcionar
+// PELA METADE: se a camada fecha por outro caminho (✕, Esc, scrim) sem consumir
+// a entrada de histórico, sobra uma entrada MORTA e o próximo voltar não faz
+// nada. A pessoa aperta, vê a tela parada, aperta de novo e SAI DA APP. Pior
+// que o ✕ que motivou o pedido.
+test('voltar fecha camada, e todo fechamento consome a entrada', () => {
+  const app = read('js/app.js');
+  assert.match(app, /const CamadaVoltar = \{/, 'sumiu o CamadaVoltar');
+  assert.match(app, /history\.pushState/, 'ninguém empilha entrada de histórico');
+  assert.match(app, /addEventListener\('popstate'/, 'ninguém escuta o voltar');
+
+  // Os DOIS fechadores consomem quando não vieram do próprio popstate.
+  const lb = app.match(/close\(\{ viaHistorico = false \} = \{\}\) \{[\s\S]*?\n {4}\}/);
+  assert.ok(lb, 'o Lightbox.close perdeu o parâmetro viaHistorico');
+  assert.match(lb[0], /if \(!viaHistorico\) CamadaVoltar\.consumir\(\)/,
+    'fechar o lightbox pelo ✕ não consome a entrada — o próximo voltar fica morto');
+
+  const cm = app.match(/function closeModal\([^)]*\)[\s\S]*?\n\}/);
+  assert.ok(cm, 'sumiu o closeModal');
+  assert.match(cm[0], /if \(!viaHistorico\) CamadaVoltar\.consumir\(\)/,
+    'fechar modal por Esc/scrim não consome a entrada');
+
+  // Trocar de modal NÃO pode empilhar de novo: openModal fecha o anterior antes
+  // de abrir o novo, então duas entradas deixariam um voltar sem efeito.
+  const om = app.match(/function openModal\(id\)[\s\S]*?\n\}/);
+  assert.ok(om, 'sumiu o openModal');
+  assert.match(om[0], /if \(!jaHaviaModal\) CamadaVoltar\.empilhar\(\)/,
+    'openModal empilha mesmo trocando de modal — um voltar passaria a não fechar nada');
+
+  // O popstate precisa distinguir o pop que NÓS causamos do pop do usuário.
+  assert.match(app, /if \(CamadaVoltar\.consumindo\)/,
+    'o popstate não distingue o pop que nós causamos — fecharia duas camadas de uma vez');
+});
+
+// A dica do lightbox precisa citar o arrastar pra baixo: o gesto existe desde
+// sempre e não estava escrito em lugar nenhum, o que é metade da reclamação
+// original (a pessoa ia no ✕ porque não sabia que dava pra arrastar).
+test('a dica do lightbox conta que arrastar pra baixo fecha', () => {
+  const i18n = read('js/i18n.js');
+  const dicas = [...i18n.matchAll(/'lightbox\.zoomHint':\s*'([^']*)'/g)].map((m) => m[1]);
+  assert.ok(dicas.length >= 4, `só ${dicas.length} dicas — faltou língua`);
+  for (const d of dicas) {
+    assert.match(d, /fechar|close|cerrar|fermer/i,
+      `a dica não diz como fechar: "${d}"`);
+  }
+});

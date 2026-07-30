@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-07
+
+### Adicionado
+- **O botão voltar do aparelho agora fecha a foto e os diálogos**, em vez de sair da app. Veio de um retorno de editora: no ritmo do swipe, ir até o ✕ quebra a cadência. Vale para a foto ampliada e para todos os diálogos — fazer só na foto seria pior, porque você aprenderia que voltar fecha, tentaria em Filtros e sairia da app perdendo o que estava montando. No iPhone em modo app não existe voltar; lá o ✕ e o arrastar continuam.
+- **A dica da foto ampliada agora conta que arrastar pra baixo fecha.** Esse gesto sempre existiu e não estava escrito em lugar nenhum.
+- **O card mostra de onde veio o pedido e quem mandou**: o nível de quem enviou (L1…L6), se veio do site ou do app do celular, e quantos outros pedidos daquela mesma pessoa estão na fila. Um pedido de nível 1 feito dirigindo é uma coisa; um de nível 5 feito na mesa é outra — e quando alguém mandou 15, decidir sobre o primeiro costuma decidir sobre os outros.
+
 ## v2026.07.30-06
 
 ### Corrigido
