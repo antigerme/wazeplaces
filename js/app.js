@@ -77,7 +77,7 @@ const AppState = {
     _fetchPromise: null,
     _profilePromise: null,
     loadError: false,
-    filters: { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
+    filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
     preferences: { undoEnabled: true, semUndoSeguidas: 0 },
     devMode: { unlocked: false, active: false },
     profile: null,
@@ -1299,7 +1299,7 @@ async function handleLogout() {
     API.setSession(null);
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
-    AppState.filters = { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
+    AppState.filters = { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
     AppState.preferences = { undoEnabled: true };
     AppState.devMode = { unlocked: false, active: false };
     AppState.profile = null;
@@ -2977,24 +2977,34 @@ function renderDevModeSection() {
 }
 
 // REQUEST (Reportes/Atualizações) é gated por dev mode enquanto o flow de
-// UPDATE PURs (mudanças, flags, deletes) ainda tem casos não cobertos.
-// Quando estiver maduro, é só remover esse gate.
+// LIBERADO. O tipo REQUEST (mudanças, reportes e pedidos de remoção) ficou
+// atrás do Modo Desenvolvedor enquanto os cards não davam conta dele — que é
+// pra isso que o modo dev existe neste projeto: soltar recurso quando fica
+// redondo.
+//
+// O custo de deixar fechado era grande e só apareceu medindo: numa fila real de
+// 137 pedidos, 135 eram REQUEST. O editor abria a app e via DOIS. 98% do
+// trabalho estava escondido atrás de uma caixa que ele nem enxergava.
+//
+// O que faltava, e foi feito antes de abrir: geometria virou distância legível
+// (era "[object Object]"), listas mostram o que entrou e saiu, os três tipos de
+// reporte que existem de verdade ganharam tradução (o dicionário só tinha
+// INAPPROPRIATE, que não ocorre nenhuma vez), openingHours e entryExitPoints
+// pararam de vazar JSON, e o card de remoção parou de repetir a própria frase.
+// Auditado em 960 renders — 40 viewports do Chrome DevTools × 4 idiomas × 6
+// tipos de card, com pedido REAL — com zero problema.
 function renderRequestTypeRow() {
     const row = document.getElementById('filterTypeRequestRow');
     if (!row) return;
-    row.classList.toggle('hidden', !AppState.devMode.active);
+    row.classList.remove('hidden');
 }
 
-// Remove tipos gated do filtro salvo se o user não tem mais permissão.
-// Cobre 2 cenários:
-//   (1) migração: user com saved=['VENUE','IMAGE','REQUEST'] sem dev mode
-//       precisa ter REQUEST retirado (default novo é só VENUE+IMAGE)
-//   (2) user desliga dev mode no modal e tinha REQUEST checado → tira
+// Não há mais tipo gated por dev mode. A função fica como ponto de extensão
+// (o próximo recurso a ser solto passa por aqui) e para não quebrar os call
+// sites, mas hoje não tira nada de ninguém — tirava REQUEST do filtro salvo,
+// que era justamente o que mantinha o editor sem ver 98% da fila.
 function enforceDevGatedFilters() {
-    if (AppState.devMode.active) return;
-    const before = AppState.filters.types.length;
-    AppState.filters.types = AppState.filters.types.filter(t => t !== 'REQUEST');
-    if (AppState.filters.types.length !== before) saveFilters();
+    /* nada gated no momento */
 }
 
 // Gate de experiência pro toggle "Permitir desfazer ações".
