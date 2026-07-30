@@ -1187,3 +1187,26 @@ button:active {
 }
 
 .dark .diff-geo-coord { color: #94a3b8; }
+
+/* Quando a rede de segurança engata, ela vira a ÚNICA área rolável do card.
+   Sem isto ficam DUAS (o conteúdo e a caixa longa), que é exatamente o que o
+   gotcha #29 proíbe: duas rolagens aninhadas numa superfície de swipe deixam o
+   editor sem saber o que o dedo vai fazer.
+
+   Medido na auditoria dos 40 viewports do DevTools: acontecia só no 320×533
+   (Nokia Lumia 520), a tela mais baixa do conjunto — lá o conteúdo precisa de
+   257px e tem 169, e a rede engatava por cima de uma caixa que já rolava.
+   48 dos 48 problemas restantes eram esse caso.
+
+   A caixa longa para de reivindicar a sobra (`flex-1 min-h-0` do HTML) e volta
+   a crescer com o conteúdo; quem rola é o pai. */
+.card-content-rola .card-changes,
+.card-content-rola .card-flag-comment {
+  flex: 0 0 auto;
+}
+
+.card-content-rola .card-changes-list,
+.card-content-rola .card-flag-comment-text {
+  overflow-y: visible;
+  max-height: none;
+}
