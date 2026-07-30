@@ -1201,6 +1201,14 @@ test('foco num autor prioriza sem esconder ninguém', () => {
   const bar = html.match(/<button id="focoAutorBar"[\s\S]*?<\/button>/);
   assert.ok(bar, 'sumiu a barra de foco');
   assert.match(bar[0], /min-h-\[44px\]/, 'a barra perdeu a altura mínima de alvo');
-  assert.match(bar[0], /w-full/, 'a barra deixou de ocupar a largura toda — o alvo encolheu');
+  // Ocupar a largura toda é a PROPRIEDADE; `w-full` era só como ela estava
+  // escrita quando a barra empurrava o layout. Flutuando, quem estica é o par
+  // left/right. Casar a implementação antiga reprovou a correção — foi o que
+  // aconteceu: guard escrito antes da barra virar flutuante.
+  const estica = /w-full/.test(bar[0]) || (/\bleft-\d/.test(bar[0]) && /\bright-\d/.test(bar[0]));
+  assert.ok(estica, 'a barra deixou de ocupar a largura toda — o alvo encolheu');
+  // E flutuar é parte do desenho: empurrando custava 60px e nas telas baixas a
+  // página passava a rolar com os botões de ação fora da tela.
+  assert.match(bar[0], /absolute/, 'a barra voltou a empurrar o layout em vez de flutuar');
   assert.doesNotMatch(bar[0], /<button[\s\S]*<button/, 'apareceu botão DENTRO da barra: o ✕ é ícone, não alvo');
 });
