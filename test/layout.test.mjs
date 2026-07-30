@@ -1173,3 +1173,34 @@ test('a dica do lightbox conta que arrastar pra baixo fecha', () => {
       `a dica não diz como fechar: "${d}"`);
   }
 });
+
+// ── Foco num autor ────────────────────────────────────────────────────────
+// 42% da fila vem de quem enviou 3+ pedidos. Tocar no selo traz os dele pra
+// frente. É PRIORIZAÇÃO, não filtragem, e a diferença não é semântica: esconder
+// os outros faria a fila "esvaziar" e a app mostrar "Tudo limpo!" com mais de
+// cem pendentes. O guard trava as duas propriedades que sustentam isso.
+test('foco num autor prioriza sem esconder ninguém', () => {
+  const app = read('js/app.js');
+  const f = app.match(/function focarAutor\(nome\)[\s\S]*?\n\}/);
+  assert.ok(f, 'sumiu o focarAutor');
+  // Reordena a fila INTEIRA: os do autor na frente, o resto atrás. Trocar por
+  // um filter() que descarta o resto reprova aqui.
+  assert.match(f[0], /\.\.\.daPessoa, \.\.\.AppState\.queue\.filter\(\(x\) => x\.createdBy !== nome\)/,
+    'o foco passou a DESCARTAR os outros pedidos — a fila esvaziaria e a app diria "Tudo limpo!" mentindo');
+
+  // A barra some sozinha quando a série acaba, senão fica anunciando um foco
+  // que não existe mais assim que o card muda de autor.
+  const r = app.match(/function renderFocoAutor\(\)[\s\S]*?\n\}/);
+  assert.ok(r, 'sumiu o renderFocoAutor');
+  assert.match(r[0], /atual\.createdBy !== nome/,
+    'a barra parou de conferir se o card ainda é do autor em foco');
+
+  // O alvo é a barra INTEIRA, não um ✕ dentro dela: no ritmo do swipe, alvo
+  // pequeno é toque errado, e toque errado aqui trata o pedido errado.
+  const html = read('index.html');
+  const bar = html.match(/<button id="focoAutorBar"[\s\S]*?<\/button>/);
+  assert.ok(bar, 'sumiu a barra de foco');
+  assert.match(bar[0], /min-h-\[44px\]/, 'a barra perdeu a altura mínima de alvo');
+  assert.match(bar[0], /w-full/, 'a barra deixou de ocupar a largura toda — o alvo encolheu');
+  assert.doesNotMatch(bar[0], /<button[\s\S]*<button/, 'apareceu botão DENTRO da barra: o ✕ é ícone, não alvo');
+});

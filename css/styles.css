@@ -1249,3 +1249,15 @@ button:active {
 .dark .selo-rank { background: #075985; color: #bae6fd; }
 .dark .selo-src  { background: #334155; color: #cbd5e1; }
 .dark .selo-lote { background: #78350f; color: #fde68a; }
+
+/* O selo do lote é o único que AGE, e precisa parecer tocável — selo que
+   responde ao toque sem se distinguir dos outros dois ensina errado. */
+.selo-acionavel {
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.selo-acionavel:active { transform: scale(0.96); }

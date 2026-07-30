@@ -663,6 +663,7 @@ function setupModalListeners() {
     });
     setupFilterTabs();
     setupLanguageSwitcher();
+    $('focoAutorBar').addEventListener('click', limparFocoAutor);
     $('filterCountry').addEventListener('change', (e) => {
         loadStatesIntoSelect(parseInt(e.target.value, 10));
     });
@@ -1678,6 +1679,7 @@ function renderCurrentCard() {
     escreverValor(elTipo, elTipo.textContent, 'card.type.empty');
     escreverValor(card.querySelector('.card-creator'), place.createdBy, 'card.creator.empty');
     renderSelosDeProcedencia(card, place);
+    renderFocoAutor();
 
     if (place.isDelete) {
         card.querySelector('.card-delete-banner').classList.remove('hidden');
@@ -1964,6 +1966,57 @@ function valorDeLista(v) {
 //   · source  MOBILE_CLIENT é alguém dirigindo; WEB é alguém sentado conferindo
 //   · lote    42% da fila vem de quem enviou 3+ — se os primeiros do autor forem
 //             lixo, os outros provavelmente são, e isso muda o ritmo da triagem
+// ── Foco num autor: os pedidos dele vêm PRIMEIRO ─────────────────────────
+// 42% da fila vem de quem enviou 3+ pedidos. Se os primeiros de um autor são
+// lixo, os outros costumam ser — decidir uma vez e tratar 14 seguidos é o maior
+// ganho de tempo que apareceu medindo a fila real.
+//
+// É PRIORIZAÇÃO, não filtragem, e a diferença importa: esconder os outros 126
+// faria a fila "esvaziar" depois dos 14 e a app mostraria "Tudo limpo!" com 126
+// pendentes — mentira. Aqui os do autor sobem pra frente e o resto continua
+// depois, na mesma ordem relativa. Nada some, nada mente, e o editor recebe
+// exatamente o que queria: a série do autor em sequência.
+function focarAutor(nome) {
+    if (!nome) return;
+    const daPessoa = AppState.queue.filter((x) => x.createdBy === nome);
+    if (daPessoa.length === 0) return;
+    AppState.queue = [...daPessoa, ...AppState.queue.filter((x) => x.createdBy !== nome)];
+    AppState.autorEmFoco = nome;
+    AppState.currentPlace = AppState.queue[0];
+    renderFocoAutor();
+    removeCurrentCardEl();
+    showCurrentPlace();
+    updatePendingCount();
+}
+
+function limparFocoAutor() {
+    if (!AppState.autorEmFoco) return;
+    AppState.autorEmFoco = null;
+    // A ordem NÃO volta atrás: reordenar de novo tiraria da frente o pedido que
+    // o editor está olhando agora. Sair do foco é parar de destacar, não desfazer.
+    renderFocoAutor();
+}
+
+// A barra some sozinha quando a série acaba — sem isso ela ficaria mentindo
+// sobre um foco que não existe mais assim que o card muda de autor.
+function renderFocoAutor() {
+    const bar = document.getElementById('focoAutorBar');
+    if (!bar) return;
+    const nome = AppState.autorEmFoco;
+    const atual = AppState.queue[0];
+    if (!nome || !atual || atual.createdBy !== nome) {
+        if (nome && atual && atual.createdBy !== nome) AppState.autorEmFoco = null;
+        bar.classList.add('hidden');
+        return;
+    }
+    const restam = AppState.queue.filter((x) => x.createdBy === nome).length;
+    document.getElementById('focoAutorTexto').textContent = t('card.focoAutor', { autor: nome });
+    document.getElementById('focoAutorContagem').textContent =
+        t('card.focoAutor.contagem', { n: restam, total: AppState.queue.length });
+    bar.setAttribute('aria-label', t('card.focoAutor.aria', { n: restam, autor: nome }));
+    bar.classList.remove('hidden');
+}
+
 function renderSelosDeProcedencia(card, place) {
     const linha = card.querySelector('.card-creator-row');
     if (!linha) return;
@@ -1981,16 +2034,23 @@ function renderSelosDeProcedencia(card, place) {
         .filter((x) => x !== place && x.createdBy && x.createdBy === place.createdBy).length;
     if (mesmos > 0) {
         selos.push({ cls: 'selo-lote', txt: t('card.sameAuthor', { n: mesmos }),
-                     title: t('card.sameAuthor.title') });
+                     title: t('card.sameAuthor.acao'), acao: place.createdBy });
     }
     if (!selos.length) return;
     const box = document.createElement('span');
     box.className = 'selos-proc';
     for (const s of selos) {
-        const el = document.createElement('span');
+        // O selo do lote é o único que AGE: vira botão de verdade (não span com
+        // onclick), pra receber foco no Tab e ser anunciado como acionável.
+        const el = document.createElement(s.acao ? 'button' : 'span');
         el.className = 'selo-proc ' + s.cls;
         el.textContent = s.txt;
         el.title = s.title;
+        if (s.acao) {
+            el.type = 'button';
+            el.classList.add('selo-acionavel');
+            el.addEventListener('click', (ev) => { ev.stopPropagation(); focarAutor(s.acao); });
+        }
         box.appendChild(el);
     }
     linha.appendChild(box);

@@ -524,6 +524,25 @@
                  era o que jogava a barra ✕/↑/✓ pra baixo da dobra. Classe de
                  altura aqui volta a mentir sobre quem manda. -->
             <div id="cardStack" class="relative w-full max-w-[400px] mx-auto">
+                <!-- Foco num autor. FLUTUA sobre o topo do card em vez de empurrar:
+                     medido, empurrando custava 60px e nas telas baixas (Fold, SE,
+                     Lumia) a página passava a rolar e os botões de ação saíam da
+                     tela. Flutuando o custo é ZERO em qualquer aparelho.
+                     A barra INTEIRA é o alvo de sair — no ritmo do swipe, alvo
+                     pequeno é toque errado, e toque errado aqui trata o pedido
+                     errado. O ✕ é ícone, não botão. z-[52] fica acima do card
+                     (z-50) e abaixo do banner do topo (z-[55]). -->
+            <button id="focoAutorBar" type="button"
+                class="hidden absolute top-2 left-2 right-2 z-[52] flex items-center gap-2 min-h-[44px] px-3 py-2
+                       rounded-full text-xs font-semibold text-left cursor-pointer border-0 shadow-md
+                       bg-amber-100/95 backdrop-blur-sm text-amber-800
+                       dark:bg-amber-900/90 dark:text-amber-200">
+                <span aria-hidden="true">🔎</span>
+                <span id="focoAutorTexto" class="flex-1 min-w-0 truncate"></span>
+                <span id="focoAutorContagem" class="flex-shrink-0 font-bold opacity-75"></span>
+                <span aria-hidden="true" class="font-bold opacity-75">✕</span>
+            </button>
+
                 <div id="loadingCard" class="absolute inset-0 rounded-3xl z-50 overflow-hidden bg-white shadow-xl border border-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200" role="status">
                     <div aria-hidden="true" class="h-full flex flex-col">
                         <div class="skeleton h-52 flex-shrink-0"></div>
