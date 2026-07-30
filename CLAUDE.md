@@ -135,6 +135,7 @@ npm run check          # node --check em js/*.js server/*.mjs worker/*.mjs
 npm test               # node --test — suite pura do core (test/core.test.mjs), ZERO deps
 npm run css            # SÓ se mexeu em classe do Tailwind (regenera css/tailwind.css; CI cobra)
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
+node tools/waze-probe.mjs <cookies.txt>   # OBRIGATÓRIO se mexeu em algo que fala com o Waze (ver 🔑)
 ```
 
 **Smoke de browser (`npm run test:browser`, roda no CI):** `tools/smoke-browser.mjs` renderiza o card em 5 aparelhos × 4 idiomas × 4 tipos de pedido e MEDE — rolagem dupla, alvo de toque < 44px, estouro horizontal, área rolável sem nome, caixa longa com teto fixo, português vazando fora do pt. Mora em `tools/` e **não** em `test/` de propósito: o `node --test` varre o diretório `test/` inteiro e o smoke precisa de browser — dentro de `test/` ele entrava no `npm test` e quebrava a promessa de suíte com zero dependência (já aconteceu). No CI o Playwright entra com `npm i --no-save` + `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, usando o Chrome que o runner já traz.
@@ -150,9 +151,13 @@ prova — não confie em leitura de código. Use um worktree
 (`git worktree add --detach <dir> origin/main`) pro "antes" em vez de `git stash`.
 CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump de `CACHE_NAME`** (gotcha #17). **Gatilhos: `pull_request` e `push` só em `main`** — push em branch de agente NÃO roda CI. Já me enganei com isso: prometi "aviso o resultado do CI" depois de empurrar dois commits numa branch sem PR, e nenhum run existia pra reportar. Se a validação precisa ser do CI e não só local, **abra o PR** (o owner já autoriza isso na seção de workflow abaixo). A suite de testes usa só `node:test`/`node:assert` (built-in) e cobre cripto/sessão, `categorizeWazeError`, `isUserAllowed`, parsing de cookies e o filtro de domínio.
 
-### 🔑 Cookies do owner: PEÇA, não espere HAR (instrução permanente do owner)
+### 🔑 SEMPRE valide contra o WME real, com os cookies do owner (instrução permanente)
 
-**Quando você precisar confrontar algo diretamente com o Waze Map Editor e não tiver cookies válidos, PEÇA o `cookies.txt` ao owner.** Ele autorizou explicitamente e quer que seja o caminho padrão: *"sempre me peça meus cookies... isso pode nos economizar muito tempo entre indas e vindas de HAR pois você mesmo pode checar tudo sem precisar me perguntar."*
+**Isto não é "quando der" nem "se precisar": é etapa obrigatória.** Mexeu em qualquer coisa que fale com o Waze — endpoint, header, payload, parsing de resposta, formatação de campo que vem dele? Então valide contra o **WME real**, com o `cookies.txt` do owner, usando `https://www.waze.com/editor`. Palavras dele: *"quero SEMPRE que valide usando meus cookies e usando o https://www.waze.com/editor"*, e antes disso: *"sempre me peça meus cookies... isso pode nos economizar muito tempo entre indas e vindas de HAR pois você mesmo pode checar tudo sem precisar me perguntar."*
+
+**Não tem cookies válidos? PEÇA.** Não desista, não caia no HAR, não conclua "não dá pra testar aqui" — essa frase esteve ERRADA neste repo por muito tempo (a allowlist não bloqueia mais o `waze.com`) e travou validação de verdade por meses.
+
+**E não fique aconselhando o owner a trocar de cookie.** Ele decidiu o tradeoff, com o risco já explicitado: *"não se preocupe com meus cookies"*. Avisar uma vez é informar; repetir a cada entrega é ignorar a decisão dele. As regras de uso abaixo continuam valendo — elas protegem a conta dele, e disso ele não abriu mão.
 
 Motivo: HAR é uma foto do passado, chega em 5–20MB, e cada dúvida nova custa outra rodada de pedido → export → upload → parse. Com cookies você responde na hora, e responde o que **de fato** acontece. Já se pagou na primeira vez: eu tinha afirmado que os nomes de país vinham em português por causa de `?language=pt-BR`, e estava errado nos dois pontos — o parâmetro não existe nesse endpoint e os nomes vêm **sempre em inglês**. Nenhum HAR teria mostrado isso, porque a pergunta era "o que muda se eu variar o header", e isso só se responde chamando.
 
@@ -165,9 +170,9 @@ Motivo: HAR é uma foto do passado, chega em 5–20MB, e cada dúvida nova custa
 - **Só leitura.** NUNCA `/Features` (rejeitar) nem `/Issues/Read` (marcar lido) — são os dois caminhos que alteram dado real, e alteram no nome dele. O `tools/waze-probe.mjs` recusa esses paths de propósito, pra a regra não depender da minha memória.
 - **Nunca imprima valor de cookie** em log, saída de teste, commit ou mensagem. Nome de cookie pode; valor não.
 - **Nunca copie o arquivo** pra fora do diretório de upload, e nunca commite. Não existe caso de uso pra isso.
-- **Diga ao owner, ao terminar, que a credencial segue válida** e que só sair no WME a invalida (a app não invalida — é o que o aviso do "Sair" explica).
+- **Relate o que foi VALIDADO, não o estado da credencial.** No fim, diga quais endpoints reais você exercitou e o que mediu ("login · perfil L6 · 138 pedidos · card em francês"). O owner já sabe que os cookies seguem válidos e pediu pra não ser lembrado disso.
 
-**Sandbox/CI:** ~~allowlist bloqueia `*.waze.com`~~ — **não bloqueia mais** (medido em 2026-07-29: as respostas vêm do `Google Frontend` com `errorList` do próprio Waze). Sem `cookies.txt` real você ainda não consegue testar caminho autenticado — valide com **fixtures de HAR reais** que o usuário envia, ou peça pra ele testar. Mas dá pra testar TUDO que não é o Waze: subir o `node server/node.mjs` e exercitar cripto/sessão/roteamento/erros e, com `cookies.txt` real, o caminho autenticado inteiro — foi assim que o idioma dos nomes de país foi medido).
+**Sandbox/CI:** ~~allowlist bloqueia `*.waze.com`~~ — **não bloqueia mais** (medido em 2026-07-29: as respostas vêm do `Google Frontend` com `errorList` do próprio Waze). Caminho autenticado exige `cookies.txt` — e a regra é **pedir** (ver 🔑 acima), não contornar com HAR. Mas dá pra testar TUDO que não é o Waze: subir o `node server/node.mjs` e exercitar cripto/sessão/roteamento/erros e, com `cookies.txt` real, o caminho autenticado inteiro — foi assim que o idioma dos nomes de país foi medido).
 
 ---
 
