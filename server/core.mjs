@@ -493,6 +493,52 @@ export const formatGeometry = (geom) => {
   return `${coord} · ${contarVertices(geom)} pts`;
 };
 
+// Quanto o ponto andou, em metros. É ISTO que decide se a mudança importa: no
+// dado real, 12 de 33 movimentos são menores que 1 METRO (mediana 6m). Ler duas
+// coordenadas de 6 casas e subtrair de cabeça não é trabalho de gente.
+// Equiretangular basta: a menos de 1km o erro é irrelevante e não puxa trig cara.
+// Centróide (média dos vértices), não o primeiro ponto. Medido no dado real: o
+// polígono da AmBev ganhou um vértice sem mexer no primeiro, e a distância pelo
+// primeiro vértice deu ZERO — o card dizia "moveu 0 m" sobre uma forma que
+// mudou. Afirmar que nada aconteceu é pior que não dizer nada.
+const centroide = (geom) => {
+  let sx = 0, sy = 0, n = 0;
+  const desce = (c) => {
+    if (!Array.isArray(c)) return;
+    if (typeof c[0] === 'number' && typeof c[1] === 'number') { sx += c[0]; sy += c[1]; n++; return; }
+    for (const item of c) desce(item);
+  };
+  desce(geom && geom.coordinates);
+  return n ? [sx / n, sy / n] : null;
+};
+
+export const distanciaEntreGeometrias = (a, b) => {
+  const pa = centroide(a) || extractLonLatDeep(a);
+  const pb = centroide(b) || extractLonLatDeep(b);
+  if (!pa || !pb) return null;
+  const [lonA, latA] = pa;
+  const [lonB, latB] = pb;
+  const dLat = (latB - latA) * 111320;
+  const dLon = (lonB - lonA) * 111320 * Math.cos((latA * Math.PI) / 180);
+  return Math.sqrt(dLat * dLat + dLon * dLon);
+};
+
+// O que ENTROU e o que SAIU de um campo de lista. Mostrar as duas listas
+// inteiras obriga o editor a fazer o diff com o olho — medido no dado real:
+// `services` troca 1 item entre 5, `categories` ganha 1 entre 2. Um app
+// profissional mostra a diferença, não o antes-e-depois cru.
+// Devolve valores CRUS (enums do Waze); quem traduz é o frontend.
+export const diffDeLista = (antes, depois) => {
+  if (!Array.isArray(antes) || !Array.isArray(depois)) return null;
+  const chave = (v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v));
+  const setA = new Map(antes.map((v) => [chave(v), v]));
+  const setB = new Map(depois.map((v) => [chave(v), v]));
+  const add = [...setB].filter(([k]) => !setA.has(k)).map(([, v]) => v);
+  const del = [...setA].filter(([k]) => !setB.has(k)).map(([, v]) => v);
+  if (!add.length && !del.length) return null;
+  return { add, del };
+};
+
 const contarVertices = (geom) => {
   let n = 0;
   const desce = (c) => {
@@ -856,12 +902,29 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
             const fmt = k === 'geometry'
               ? (v) => (formatGeometry(v) ?? formatValue(v))
               : formatValue;
-            changes.push({
+            const mudanca = {
               field: k,
               label,
               from: resolvedFrom !== null ? resolvedFrom : fmt(venue[k] ?? null),
               to: resolvedTo !== null ? resolvedTo : fmt(newValue),
-            });
+            };
+            // Quanto andou. O frontend formata o número no locale do editor —
+            // aqui vai cru, em metros, porque o core não sabe o idioma dele.
+            if (k === 'geometry') {
+              const d = distanciaEntreGeometrias(venue[k] ?? null, newValue);
+              if (d !== null && Number.isFinite(d)) mudanca.movedM = d;
+              // Vértices como NÚMERO, não sufixo de texto: o card precisa saber
+              // "ganhou um vértice" pra não anunciar "moveu 0 m" numa forma que
+              // mudou. Quem escolhe a frase é o frontend.
+              const vA = contarVertices(venue[k] ?? null);
+              const vB = contarVertices(newValue);
+              if (vA || vB) { mudanca.vertsFrom = vA; mudanca.vertsTo = vB; }
+            }
+            // Campo de lista: o que entrou e o que saiu, em vez de duas listas
+            // inteiras pro editor comparar de olho.
+            const delta = diffDeLista(venue[k] ?? null, newValue);
+            if (delta) mudanca.delta = delta;
+            changes.push(mudanca);
           }
         }
         updateTypeStr = changes.length > 0 ? 'Atualização: ' + changes.map((c) => c.label).join(', ') : 'Atualização (Detalhes)';

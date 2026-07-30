@@ -1584,8 +1584,14 @@ function renderCurrentCard() {
     elNome.classList.toggle('valor-ausente', ident.ausente);
     elNome.classList.toggle('titulo-endereco', ident.tituloEhEndereco);
     card.querySelector('.card-no-name-badge').classList.toggle('hidden', !ident.semNome);
+    // Categoria vinha como enum CRU do Waze ("FACTORY_INDUSTRIAL",
+    // "PET_STORE_VETERINARIAN_SERVICES") na segunda linha de TODO card — 61
+    // valores distintos só nesta fila. rotuloDeEnum traduz o que conhecemos e
+    // humaniza o resto, então SCREAMING_SNAKE nunca chega na tela.
     escreverValor(card.querySelector('.card-category'),
-        place.categories && place.categories.length > 0 ? place.categories.join(', ') : '',
+        place.categories && place.categories.length > 0
+            ? place.categories.map((c) => rotuloDeEnum('card.cat.', c)).join(', ')
+            : '',
         'card.categories.empty');
     // Endereço que virou título não se repete embaixo: seria a mesma informação
     // duas vezes, gastando uma linha que a caixa de mudanças usa melhor.
@@ -1825,17 +1831,76 @@ function renderCardImages(card, place) {
 }
 
 // Renderiza o diff de mudanças propostas (extraído de renderCurrentCard — A1).
+// Distância que o ponto andou, no formato de quem está lendo. Abaixo de 1m o
+// número inteiro esconde a informação ("0 m" não diz nada), então vai com uma
+// casa; acima de 1km metro não importa mais.
+function formatarDistancia(m) {
+    if (!Number.isFinite(m)) return '';
+    const loc = i18nLocale();
+    if (m < 1) return t('card.change.movedM', { d: m.toLocaleString(loc, { maximumFractionDigits: 1 }) });
+    if (m < 1000) return t('card.change.movedM', { d: Math.round(m).toLocaleString(loc) });
+    return t('card.change.movedKm', { d: (m / 1000).toLocaleString(loc, { maximumFractionDigits: 1 }) });
+}
+
+// Valor de lista: enum do Waze quando conhecemos, cru quando não. Objeto (um
+// entryExitPoint, por exemplo) vira resumo curto em vez de JSON na cara.
+function valorDeLista(v) {
+    if (v && typeof v === 'object') {
+        const p = v.point && v.point.coordinates;
+        if (Array.isArray(p) && p.length >= 2) {
+            const tipo = v.entry === false ? t('card.eep.exit') : t('card.eep.entry');
+            return `${tipo} ${Number(p[1]).toFixed(5)}, ${Number(p[0]).toFixed(5)}`;
+        }
+        try { return JSON.stringify(v); } catch { return String(v); }
+    }
+    return rotuloDeEnum('card.enum.', String(v));
+}
+
 function renderCardChanges(card, place) {
     if (!place.changes || place.changes.length === 0) return;
     const changesBox = card.querySelector('.card-changes');
     const changesList = card.querySelector('.card-changes-list');
-    changesList.innerHTML = place.changes.map(c => `
-            <div class="diff-row">
-                <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(rotuloDoCampo(c))}:</span>
-                <span class="diff-from">${escapeHtml(valorDoDiff(c.from))}</span>
-                <span class="diff-to">${escapeHtml(valorDoDiff(c.to))}</span>
-            </div>
-        `).join('');
+    changesList.innerHTML = place.changes.map((c) => {
+        const rotulo = `<span class="text-xs font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(rotuloDoCampo(c))}:</span>`;
+
+        // Campo de LISTA: o que entrou e o que saiu. Mostrar as duas listas
+        // inteiras obrigava o editor a comparar de olho — no dado real
+        // `services` troca 1 item entre 5 e `categories` ganha 1 entre 2.
+        if (c.delta && ((c.delta.add || []).length || (c.delta.del || []).length)) {
+            const item = (v, cls, sinal) =>
+                `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${escapeHtml(valorDeLista(v))}</span>`;
+            const add = (c.delta.add || []).map((v) => item(v, 'diff-add', '+')).join('');
+            const del = (c.delta.del || []).map((v) => item(v, 'diff-del', '−')).join('');
+            return `<div class="diff-row diff-row-lista">${rotulo}<span class="diff-delta">${add}${del}</span></div>`;
+        }
+
+        // GEOMETRIA tem linha própria. Duas coordenadas de 6 casas quase iguais,
+        // uma riscada em vermelho e outra em verde, ocupavam meio card e não
+        // respondiam a pergunta do editor, que é "mudou muito?". Aqui a resposta
+        // vem primeiro; a coordenada nova fica de referência, pequena.
+        if (c.field === 'geometry') {
+            const mudouForma = Number.isFinite(c.vertsFrom) && Number.isFinite(c.vertsTo)
+                && c.vertsFrom !== c.vertsTo;
+            // Abaixo de 5cm é a mesma posição. Dizer "moveu 0 m" numa forma que
+            // ganhou vértice é afirmar que nada aconteceu — pior que ser vago.
+            const parado = !Number.isFinite(c.movedM) || c.movedM < 0.05;
+            let resumo;
+            if (parado && mudouForma) resumo = t('card.change.reshaped');
+            else if (parado) resumo = t('card.change.samePlace');
+            else resumo = formatarDistancia(c.movedM);
+            const verts = mudouForma
+                ? `<span class="diff-hint">${escapeHtml(t('card.change.verts', { de: c.vertsFrom, para: c.vertsTo }))}</span>`
+                : '';
+            return `<div class="diff-row diff-row-geo">${rotulo}`
+                + `<span class="diff-geo-resumo">${escapeHtml(resumo)}</span>`
+                + `${verts}`
+                + `<span class="diff-geo-coord">${escapeHtml(valorDoDiff(c.to))}</span></div>`;
+        }
+
+        return `<div class="diff-row">${rotulo}`
+            + `<span class="diff-from">${escapeHtml(valorDoDiff(c.from))}</span>`
+            + `<span class="diff-to">${escapeHtml(valorDoDiff(c.to))}</span></div>`;
+    }).join('');
     changesBox.classList.remove('hidden');
 }
 
