@@ -101,8 +101,9 @@ wazeplaces/
 │   ├── smoke-browser.mjs    # Smoke de layout (npm run test:browser): aparelhos × idiomas × tipos de card
 │   └── waze-probe.mjs       # Fala com o Waze REAL, só leitura (ver seção 🔑). Valida cookies,
 │                            #   lista países/estados, sonda se Accept-Language é honrado.
-│                            #   RECUSA /Features e /Issues/Read por construção — a regra de
-│                            #   "não escrever na conta do owner" não depende de eu lembrar.
+│                            #   RECUSA /Features e /Issues/Read por construção e tem jitter
+│                            #   aleatório (700–2200ms): as duas regras que protegem a conta do
+│                            #   owner não dependem de eu lembrar delas.
 ├── docs/                    # Referência pra dev (NÃO servido em runtime)
 │   ├── README.md            # Procedência dos docs
 │   ├── wme-sdk-typings.d.ts # Tipagens oficiais do WME SDK (Waze) — referência canônica de schemas
@@ -157,6 +158,7 @@ Motivo: HAR é uma foto do passado, chega em 5–20MB, e cada dúvida nova custa
 
 **Regras de uso, não-negociáveis** — o `cookies.txt` do WME NÃO tem versão "só leitura": vem com `_web_session` + `_csrf_token` e `permissions: -1` (todos os bits). É credencial de **escrita** na conta do owner.
 
+- **SEMPRE jitter entre chamadas** (instrução permanente do owner). Rajada é o padrão que faz um WAF marcar cliente, e **a conta bloqueada seria a dele** — o custo do meu descuido cai no acesso dele ao WME, não no meu. O `waze-probe.mjs` espera **700–2200ms aleatórios** entre requests (medido: a mesma sonda de 5 chamadas levou 8892ms e 7698ms em duas execuções — durações diferentes provam que é aleatório de verdade). **Aleatório, não fixo**: intervalo constante é por si só assinatura de automação; 5 chamadas separadas por 1000ms exatos não parecem ninguém usando navegador. **Não vale pro `callWaze` do `server/core.mjs`** — lá é UMA chamada por ação de um editor real, e atrasar de propósito quem está triando pedidos é pagar o custo no lugar errado. Jitter é pra script que varre, não pra app que atende. Script novo que fale com o Waze → copie o `pausaComJitter`, não invente um `sleep` fixo.
 - **Só leitura.** NUNCA `/Features` (rejeitar) nem `/Issues/Read` (marcar lido) — são os dois caminhos que alteram dado real, e alteram no nome dele. O `tools/waze-probe.mjs` recusa esses paths de propósito, pra a regra não depender da minha memória.
 - **Nunca imprima valor de cookie** em log, saída de teste, commit ou mensagem. Nome de cookie pode; valor não.
 - **Nunca copie o arquivo** pra fora do diretório de upload, e nunca commite. Não existe caso de uso pra isso.

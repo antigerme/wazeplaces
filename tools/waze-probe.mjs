@@ -17,6 +17,10 @@
 //   node tools/waze-probe.mjs <cookies.txt> --get '<path>'     → GET num path arbitrário
 //   ...qualquer um aceita  --regiao row|na|il|world  (padrão: row)
 //
+// RITMO — há jitter aleatório (700–2200ms) entre chamadas, por instrução do
+// owner: rajada é o que faz um WAF marcar o cliente, e a conta bloqueada seria a
+// dele. Pausa fixa não serve — intervalo constante é assinatura de automação.
+//
 // SEGURANÇA — o cookies.txt do WME não tem versão "só leitura": vem com
 // _web_session + _csrf_token e permissions: -1 (todos os bits). É credencial de
 // ESCRITA na conta do owner. Por isso este script:
@@ -73,6 +77,37 @@ const csrf = (pares.find(([k]) => k === '_csrf_token') || [])[1] || '';
 console.log(`cookies: ${pares.length} (${pares.map(([k]) => k).join(', ')})`);
 console.log(`csrf: ${csrf ? 'presente' : 'AUSENTE — chamadas podem dar 403'} · região: ${regiao}\n`);
 
+// ── Jitter entre chamadas (instrução permanente do owner) ─────────────────
+// Rajada de requests é o padrão que faz um WAF marcar cliente — e aqui a conta
+// que levaria o bloqueio é a DO OWNER, não a minha. As sondas deste arquivo
+// chamam o mesmo endpoint 4 vezes seguidas (--idioma), então elas são exatamente
+// o caso.
+//
+// A pausa é ALEATÓRIA, não fixa, de propósito: intervalo constante entre
+// requests é por si só uma assinatura de automação — 4 chamadas separadas por
+// 1000ms exatos não parecem ninguém usando um navegador. Aleatório num intervalo
+// largo parece.
+//
+// Não vale pro `callWaze` do server/core.mjs: lá é UMA chamada por ação de um
+// editor de verdade, e atrasar de propósito o trabalho de quem está triando
+// pedidos seria pagar o custo no lugar errado. Jitter é pra script que varre,
+// não pra app que atende.
+const JITTER_MIN_MS = 700;
+const JITTER_MAX_MS = 2200;
+let primeiraChamada = true;
+
+const pausaComJitter = async () => {
+  if (primeiraChamada) { primeiraChamada = false; return; }   // a 1ª não espera
+  const ms = Math.round(JITTER_MIN_MS + Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS));
+  // Indicador só em terminal: com \r num arquivo ou pipe o contador não é
+  // apagado e vaza pra dentro da linha seguinte ("… 1744ms   ✓ fr-FR ..."),
+  // sujando exatamente a saída que alguém vai colar num relatório.
+  const tty = process.stdout.isTTY;
+  if (tty) process.stdout.write(`  … aguardando ${ms}ms\r`);
+  await new Promise((r) => setTimeout(r, ms));
+  if (tty) process.stdout.write(' '.repeat(24) + '\r');
+};
+
 async function get(path, acceptLanguage = 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', refLocale = 'pt-BR') {
   const url = path.startsWith('http') ? path : base + path;
   if (ESCRITA.some((re) => re.test(url))) {
@@ -80,6 +115,7 @@ async function get(path, acceptLanguage = 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
       + ' (ver o cabeçalho do arquivo e a seção 🔑 do CLAUDE.md).');
     process.exit(3);
   }
+  await pausaComJitter();
   const r = await fetch(url, {
     method: 'GET',
     headers: {
