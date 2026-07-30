@@ -1816,12 +1816,7 @@ function renderCurrentCard() {
     // pior que perder o gesto. Quando dispara, o arraste vertical rola em vez de
     // pular (o botão ↑ nunca some) — e o esmaecido avisa que ainda tem coisa.
     marcarBordaRolagem(card.querySelector('.card-content'));
-    // A medição espera o layout assentar; antes disso scrollHeight mente.
-    requestAnimationFrame(() => {
-        const conteudo = card.querySelector('.card-content');
-        if (!conteudo) return;
-        conteudo.classList.toggle('card-content-rola', conteudo.scrollHeight > conteudo.clientHeight + 1);
-    });
+    vigiarEstouroDoConteudo(card.querySelector('.card-content'));
 
     // Mola na entrada (280ms). Roda enquanto o dedo já vai pro próximo gesto —
     // ninguém espera por ela. A classe sai no fim pra não sobrescrever o
@@ -2128,6 +2123,33 @@ function aplicarTravaDeAcao() {
         const b = card && card.querySelector(cls);
         if (b) b.disabled = travado;
     }
+}
+
+// A rolagem do conteúdo é CONSEQUÊNCIA de estourar, não estado padrão — e a
+// medição precisa ser VIVA, não uma foto do primeiro quadro.
+//
+// Antes, o `overflow-y: auto` estava cravado no HTML e valia sempre. Uma sobra
+// de UM PIXEL — arredondamento de fração do flex, não conteúdo que não cabe —
+// já desenhava barra de rolagem no desktop. Relatado pelo owner e reproduzido
+// com o card dele (conteúdo 284,x px numa caixa de 283,y px).
+//
+// Tirar o auto do HTML sozinho seria pior: se o conteúdo estourar DEPOIS (girar
+// o aparelho, aumentar a fonte do sistema, zoom só-de-texto), o texto ficaria
+// cortado sem saída — que é exatamente o que o guard de layout protege. Por isso
+// aqui tem ResizeObserver: quem garante a saída é a medição continuar rodando,
+// não um overflow ligado pra sempre.
+//
+// Tolerância de 2px: scrollHeight e clientHeight são INTEIROS arredondados de
+// alturas fracionárias, e cada borda pode errar ~1px. Estouro de verdade passa
+// disso com folga.
+function vigiarEstouroDoConteudo(el) {
+    if (!el) return;
+    const avaliar = () => {
+        el.classList.toggle('card-content-rola', el.scrollHeight > el.clientHeight + 2);
+    };
+    // O primeiro quadro mente: antes do layout assentar, scrollHeight não vale.
+    requestAnimationFrame(avaliar);
+    if (typeof ResizeObserver === 'function') new ResizeObserver(avaliar).observe(el);
 }
 
 // Scroll edge effect (M3): esmaece a borda de baixo enquanto sobra conteúdo.

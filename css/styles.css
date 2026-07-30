@@ -481,7 +481,19 @@ body > main {
    mesmo assim (fonte gigante do sistema, zoom só-de-texto, tela deitada muito
    baixa). Enquanto o layout couber — que é o projeto — o card inteiro segue
    arrastável pra cima. */
-.card-content-rola {
+/* DUAS classes no seletor de propósito (gotcha #27): o HTML tem a utility
+   `overflow-y-hidden`, o tailwind.css carrega DEPOIS do styles.css, e regra de
+   uma classe só empata em especificidade e PERDE por ordem de carga. Com uma
+   classe a rede ligava e o conteúdo seguia sem rolar — medido: `rede ON` com
+   `overflow: hidden`. Andei direto na armadilha que este repo já documenta. */
+.card-content.card-content-rola {
+  /* O `overflow-y: auto` mora AQUI, não no HTML. Cravado no elemento ele valia
+     sempre, e uma sobra de 1 PIXEL — arredondamento de fração do flex, não
+     conteúdo que não cabe — já desenhava barra de rolagem no desktop. Relatado
+     pelo owner ("scroll pequeno mas parece que não precisaria") e reproduzido
+     com o card dele: conteúdo 284,x px numa caixa de 283,y px.
+     Agora rolar é CONSEQUÊNCIA da rede engatar, não o estado padrão. */
+  overflow-y: auto;
   touch-action: pan-y;
   overscroll-behavior: contain;
 }

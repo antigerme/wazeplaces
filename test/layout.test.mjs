@@ -298,7 +298,23 @@ test('a foto do card absorve a variação de altura, o texto não vira vão', ()
 
   const conteudo = linhas.find((l) => l.includes('card-content dark:'));
   assert.ok(conteudo, 'sumiu a área de texto do card');
-  assert.match(conteudo, /overflow-y-auto/, 'sem rolagem, o texto que não couber é cortado sem saída');
+  // A saída pro texto que estoura EXISTE, mas não é mais um `overflow-y-auto`
+  // cravado: cravado ele valia sempre, e 1px de arredondamento de fração já
+  // desenhava barra de rolagem no desktop (relatado e reproduzido). Agora quem
+  // garante a saída é a medição CONTINUAR rodando — ResizeObserver — e ligar a
+  // rolagem quando estoura de verdade. Sem o observer, girar o aparelho ou
+  // aumentar a fonte cortaria o texto sem jeito de alcançar.
+  const app = read('js/app.js');
+  assert.match(app, /function vigiarEstouroDoConteudo/, 'sumiu a vigia do estouro do conteúdo');
+  const vigia = app.match(/function vigiarEstouroDoConteudo\(el\)[\s\S]*?\n\}/)[0];
+  assert.match(vigia, /new ResizeObserver\(avaliar\)/,
+    'a vigia virou medição de uma vez só — texto que estoure depois fica cortado sem saída');
+  assert.match(vigia, /card-content-rola/, 'a vigia parou de ligar a rolagem');
+  // DUAS classes no seletor: o HTML tem a utility `overflow-y-hidden` e o
+  // tailwind.css carrega depois — seletor de uma classe empata e perde (gotcha
+  // #27). Com uma só, a rede ligava e o conteúdo NÃO rolava. Medido.
+  assert.match(read('css/styles.css'), /\.card-content\.card-content-rola \{[^}]*overflow-y: auto/,
+    'o seletor da rede perdeu a segunda classe — a utility do Tailwind ganha e nada rola');
   assert.doesNotMatch(conteudo, /\bflex-1\b/, 'flex-1 no texto faz ele receber a sobra e virar vão');
 });
 
@@ -339,7 +355,17 @@ test('toda área rolável do card está fora do alcance do arraste', () => {
     assert.ok(nome, `área rolável sem classe card-*: ${m[1].slice(0, 60)}`);
     roláveis.add(nome);
   }
-  assert.ok(roláveis.size >= 3, `esperava ao menos 3 áreas roláveis mapeadas, achei ${[...roláveis]}`);
+  // O .card-content não aparece mais aqui porque a rolagem dele passou a ser
+  // condicional (classe .card-content-rola, ligada pela vigia). Ele continua
+  // podendo rolar, então a lista de exceção do arraste PRECISA cobri-lo —
+  // é isso que se verifica agora, em vez de contar quantos têm overflow no HTML.
+  assert.ok(roláveis.size >= 2, `esperava ao menos 2 áreas roláveis no template, achei ${[...roláveis]}`);
+  // O .card-content nunca esteve na lista de exceção do closest() — o mecanismo
+  // dele sempre foi outro: a classe da rede liga `touch-action: pan-y`, e é isso
+  // que faz o browser rolar em vez de o handler capturar o arraste. Verifica o
+  // mecanismo que EXISTE, não o que eu supus na primeira escrita deste guard.
+  assert.match(read('css/styles.css'), /\.card-content\.card-content-rola \{[^}]*touch-action: pan-y/,
+    'a rede parou de liberar o arraste vertical — com ela ligada, arrastar pra cima pularia em vez de rolar');
 
   for (const nome of roláveis) {
     // `.card-content` é a ÚNICA exceção, e de propósito: ela é a rede de

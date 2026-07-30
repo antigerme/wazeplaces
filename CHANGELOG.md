@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-09
+
+### Corrigido
+- **A barra de rolagem que aparecia no computador sem ter o que rolar.** Era um pixel a mais que não existia: a altura da foto quase nunca dá um número redondo, e as duas contas que decidem se o conteúdo cabe arredondam pra lados diferentes. Bastava isso pro card ficar com barra o tempo todo, e no celular ninguém via porque lá a barra é sobreposta. Agora o card só passa a rolar quando o conteúdo estoura de verdade — e continua vigiando, então girar o aparelho, aumentar a fonte do sistema ou dar zoom só no texto liga a rolagem na hora em que ela faz falta.
+
 ## v2026.07.30-07
 
 ### Adicionado
