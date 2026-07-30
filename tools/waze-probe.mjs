@@ -17,9 +17,9 @@
 //   node tools/waze-probe.mjs <cookies.txt> --get '<path>'     → GET num path arbitrário
 //   ...qualquer um aceita  --regiao row|na|il|world  (padrão: row)
 //
-// RITMO — há jitter aleatório (700–2200ms) entre chamadas, por instrução do
-// owner: rajada é o que faz um WAF marcar o cliente, e a conta bloqueada seria a
-// dele. Pausa fixa não serve — intervalo constante é assinatura de automação.
+// RITMO — jitter aleatório entre TODAS as chamadas, de tools/waze-jitter.mjs
+// (fonte única, por instrução do owner: "vá devagar, sempre use jitter"). O
+// script é lento de propósito: a conta que levaria um bloqueio é a dele.
 //
 // SEGURANÇA — o cookies.txt do WME não tem versão "só leitura": vem com
 // _web_session + _csrf_token e permissions: -1 (todos os bits). É credencial de
@@ -32,6 +32,7 @@
 // acompanhando, não por aqui.
 
 import { readFileSync } from 'node:fs';
+import { pausaComJitter, JITTER_MIN_MS, JITTER_MAX_MS, estimativaMs } from './waze-jitter.mjs';
 
 const BASES = {
   row: 'https://www.waze.com/row-Descartes/app',
@@ -77,38 +78,10 @@ const csrf = (pares.find(([k]) => k === '_csrf_token') || [])[1] || '';
 console.log(`cookies: ${pares.length} (${pares.map(([k]) => k).join(', ')})`);
 console.log(`csrf: ${csrf ? 'presente' : 'AUSENTE — chamadas podem dar 403'} · região: ${regiao}\n`);
 
-// ── Jitter entre chamadas (instrução permanente do owner) ─────────────────
-// Rajada de requests é o padrão que faz um WAF marcar cliente — e aqui a conta
-// que levaria o bloqueio é a DO OWNER, não a minha. As sondas deste arquivo
-// chamam o mesmo endpoint 4 vezes seguidas (--idioma), então elas são exatamente
-// o caso.
-//
-// A pausa é ALEATÓRIA, não fixa, de propósito: intervalo constante entre
-// requests é por si só uma assinatura de automação — 4 chamadas separadas por
-// 1000ms exatos não parecem ninguém usando um navegador. Aleatório num intervalo
-// largo parece.
-//
-// Não vale pro `callWaze` do server/core.mjs: lá é UMA chamada por ação de um
-// editor de verdade, e atrasar de propósito o trabalho de quem está triando
-// pedidos seria pagar o custo no lugar errado. Jitter é pra script que varre,
-// não pra app que atende.
-const JITTER_MIN_MS = 700;
-const JITTER_MAX_MS = 2200;
-let primeiraChamada = true;
-
-const pausaComJitter = async () => {
-  if (primeiraChamada) { primeiraChamada = false; return; }   // a 1ª não espera
-  const ms = Math.round(JITTER_MIN_MS + Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS));
-  // Indicador só em terminal: com \r num arquivo ou pipe o contador não é
-  // apagado e vaza pra dentro da linha seguinte ("… 1744ms   ✓ fr-FR ..."),
-  // sujando exatamente a saída que alguém vai colar num relatório.
-  const tty = process.stdout.isTTY;
-  if (tty) process.stdout.write(`  … aguardando ${ms}ms\r`);
-  await new Promise((r) => setTimeout(r, ms));
-  if (tty) process.stdout.write(' '.repeat(24) + '\r');
-};
-
-async function get(path, acceptLanguage = 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', refLocale = 'pt-BR') {
+// refBase existe só pra sonda de idioma poder variar o Referer de propósito; o
+// padrão é a URL CANÔNICA, sem locale (ver a regra no CLAUDE.md).
+const WME_EDITOR_URL = 'https://www.waze.com/editor';
+async function get(path, acceptLanguage = 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', refBase = WME_EDITOR_URL) {
   const url = path.startsWith('http') ? path : base + path;
   if (ESCRITA.some((re) => re.test(url))) {
     console.error(`✗ RECUSADO: ${url}\n  Este path ALTERA dado real na conta do owner. O probe é só leitura`
@@ -123,7 +96,7 @@ async function get(path, acceptLanguage = 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
       'Accept-Language': acceptLanguage,
       'Content-Type': 'application/json; charset=utf-8',
       Origin: 'https://www.waze.com',
-      Referer: `https://www.waze.com/${refLocale}/editor?env=${ENV[regiao] || 'row'}&tab=issue_tracker`,
+      Referer: `${refBase}?env=${ENV[regiao] || 'row'}&tab=issue_tracker`,
       'X-CSRF-Token': csrf,
       Cookie: cookieHeader,
       'User-Agent': UA,
@@ -134,6 +107,10 @@ async function get(path, acceptLanguage = 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
   try { json = JSON.parse(txt); } catch { /* nem tudo é JSON */ }
   return { status: r.status, json, txt };
 }
+
+const nSondas = 1 + (flag('paises') ? 1 : 0) + (flag('estados') ? 1 : 0) + (flag('idioma') ? 4 : 0) + (flag('get') ? 1 : 0);
+console.log(`ritmo: jitter de ${JITTER_MIN_MS}–${JITTER_MAX_MS}ms entre ${nSondas} chamada(s)`
+  + ` — ~${Math.round(estimativaMs(nSondas) / 1000)}s de espera. Lento de propósito.\n`);
 
 // ── Sessão: sempre roda, é o que diz se os cookies ainda valem ─────────────
 const ses = await get('/Session?language=pt-BR');
@@ -175,10 +152,10 @@ if (flag('idioma')) {
   // forbidden header name no Fetch, o browser ignora e manda o dele.
   console.log('\nAccept-Language muda os nomes? (variando só o header e o Referer)');
   const vars = [
-    ['pt-BR (o que a app manda)', 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', 'pt-BR'],
-    ['fr-FR', 'fr-FR,fr;q=0.9,en;q=0.8', 'pt-BR'],
-    ['en-US', 'en-US,en;q=0.9', 'pt-BR'],
-    ['fr-FR + Referer /fr/', 'fr-FR,fr;q=0.9,en;q=0.8', 'fr'],
+    ['pt-BR (o que a app manda)', 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', WME_EDITOR_URL],
+    ['fr-FR', 'fr-FR,fr;q=0.9,en;q=0.8', WME_EDITOR_URL],
+    ['en-US', 'en-US,en;q=0.9', WME_EDITOR_URL],
+    ['fr-FR + Referer /fr/', 'fr-FR,fr;q=0.9,en;q=0.8', 'https://www.waze.com/fr/editor'],
   ];
   const assinaturas = new Map();
   for (const [rot, al, ref] of vars) {

@@ -45,6 +45,10 @@ const MIN_RANK_WAZE = 2; // display L3+ (Waze é 0-indexed)
 const wazeIssuesEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Search/List';
 const wazeMarkReadEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Read';
 const wazeFeaturesEndpoint = (r) => WAZE_FEATURES_REGIONS[r] || WAZE_FEATURES_REGIONS.row;
+// Endereço oficial do WME, sem segmento de idioma (decisão do owner: sempre a
+// URL canônica; o Waze redireciona conforme o idioma de quem abre, se quiser).
+const WME_EDITOR_URL = 'https://www.waze.com/editor';
+
 const wazeSessionEndpoint = (r) => (WAZE_BASE_REGIONS[r] || WAZE_BASE_REGIONS.row) + '/Session?language=pt-BR';
 const wazeCountriesEndpoint = (r) => (WAZE_BASE_REGIONS[r] || WAZE_BASE_REGIONS.row) + '/LocationSearch/Countries';
 const wazeStatesEndpoint = (r, countryId) => (WAZE_BASE_REGIONS[r] || WAZE_BASE_REGIONS.row) + '/LocationSearch/States?countryId=' + (parseInt(countryId, 10) || 0);
@@ -214,7 +218,13 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region) {
     'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
     'Content-Type': 'application/json; charset=utf-8',
     Origin: 'https://www.waze.com',
-    Referer: 'https://www.waze.com/pt-BR/editor?env=' + env + '&tab=issue_tracker',
+    // URL canônica do WME, sem locale. MEDIDO antes de mexer, porque este
+    // arquivo avisa que header errado quebra a comunicação: 4 endpoints × 6
+    // variantes de Referer (com locale, sem locale, sem query, outro locale,
+    // SEM o header, e lixo) devolvem resposta byte a byte idêntica. O Waze não
+    // inspeciona o Referer aqui — cravar `/pt-BR/` só documentava errado de
+    // onde a chamada vinha.
+    Referer: WME_EDITOR_URL + '?env=' + env + '&tab=issue_tracker',
     'X-CSRF-Token': csrfToken,
     Cookie: cookieHeader,
     'User-Agent': USER_AGENT,

@@ -12,6 +12,11 @@ const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
 
+// Endereço oficial do Waze Map Editor. SEM segmento de idioma, sempre: o Waze
+// pode redirecionar conforme o idioma da conta, e essa escolha é de quem abre,
+// não nossa. Cravar `/pt-BR/` mandava todo mundo pro português.
+const WME_EDITOR_URL = 'https://www.waze.com/editor';
+
 // A duração da janela aparece em DUAS frases (o toggle nas Preferências e a dica
 // "você nunca desfaz"), nas três línguas — seis lugares onde o número estava
 // escrito à mão. Registrado como variável global de i18n, ele vem daqui: mexer
@@ -1660,7 +1665,12 @@ function renderCurrentCard() {
     if (place.venueID) {
         wmeParams.push(`venueUpdateRequest=${encodeURIComponent(place.venueID)}`);
     }
-    wmeLink.href = `https://www.waze.com/pt-BR/editor?${wmeParams.join('&')}`;
+    // URL CANÔNICA do WME, sem segmento de idioma (decisão do owner). Estava
+    // `/pt-BR/editor`: um editor que usa a app em francês clicava no ↗ e caía
+    // num WME em português. O `/editor` cru responde 200 direto (medido, sem
+    // redirect HTTP) e o Waze resolve o idioma pela conta de quem abriu — que é
+    // exatamente o certo, porque quem decide não somos nós.
+    wmeLink.href = `${WME_EDITOR_URL}?${wmeParams.join('&')}`;
 
     renderCardImages(card, place);
 

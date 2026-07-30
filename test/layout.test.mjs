@@ -1084,3 +1084,43 @@ test('a Ajuda diz o que a app guarda, por quanto tempo e como apagar', () => {
   assert.ok(HTML.includes('data-i18n-html="modal.logout.waze"'),
     'o diálogo de sair parou de avisar que os cookies seguem válidos no Waze');
 });
+
+// ── Ritmo e endereço das chamadas ao Waze (instruções permanentes do owner) ──
+// Duas regras que protegem a CONTA DELE, não a minha, e que por isso não podem
+// depender de eu lembrar: (1) sempre jitter, de uma fonte única; (2) a URL do
+// WME é sempre a canônica, sem segmento de idioma.
+test('jitter das chamadas ao Waze vem de uma fonte única', () => {
+  const jit = read('tools/waze-jitter.mjs');
+  assert.match(jit, /export async function pausaComJitter/, 'sumiu o pausaComJitter compartilhado');
+  const min = Number(jit.match(/JITTER_MIN_MS = (\d+)/)?.[1]);
+  const max = Number(jit.match(/JITTER_MAX_MS = (\d+)/)?.[1]);
+  assert.ok(min >= 1000, `jitter mínimo caiu pra ${min}ms — o owner pediu "vá devagar"`);
+  assert.ok(max > min, 'faixa de jitter inválida (max <= min): sem faixa não há aleatoriedade');
+  assert.match(jit, /Math\.random\(\)/, 'o jitter virou pausa FIXA — intervalo constante é assinatura de automação');
+
+  // Quem fala com o Waze importa daqui em vez de inventar o seu setTimeout.
+  const probe = read('tools/waze-probe.mjs');
+  assert.match(probe, /from '\.\/waze-jitter\.mjs'/, 'o probe parou de usar a fonte única do jitter');
+  assert.match(probe, /await pausaComJitter\(\)/, 'o probe parou de esperar entre chamadas');
+  assert.doesNotMatch(probe, /setTimeout\([^)]*\d{3,}\)/,
+    'apareceu setTimeout com número no probe — use pausaComJitter(), não pausa própria');
+});
+
+test('a URL do WME é sempre a canônica, sem segmento de idioma', () => {
+  for (const arq of ['js/app.js', 'server/core.mjs']) {
+    const src = read(arq);
+    assert.match(src, /const WME_EDITOR_URL = 'https:\/\/www\.waze\.com\/editor'/,
+      `${arq} precisa declarar WME_EDITOR_URL com a URL canônica`);
+  }
+  // Nenhum lugar do código volta a cravar locale numa URL do waze.com. O probe
+  // é exceção declarada: ele VARIA o Referer de propósito pra medir se importa.
+  const fontes = ['js/app.js', 'js/i18n.js', 'server/core.mjs', 'index.html'];
+  const cravados = [];
+  for (const arq of fontes) {
+    for (const m of read(arq).matchAll(/https:\/\/www\.waze\.com\/([a-z]{2}(?:-[A-Z]{2})?)\//g)) {
+      cravados.push(`${arq} → /${m[1]}/`);
+    }
+  }
+  assert.equal(cravados.length, 0,
+    'URL do waze.com com idioma cravado (o editor cai num WME que não é o dele):\n' + cravados.join('\n'));
+});
