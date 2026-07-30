@@ -383,6 +383,74 @@ for (const [nome, vp, iOS] of [
   await ctx.close();
 }
 
+// ── Laço de ResizeObserver com barra de rolagem que OCUPA ESPAÇO ────────────
+// O editor relatou um toast VERMELHO "Erro inesperado: ResizeObserver loop
+// completed with undelivered notifications" ao abrir a foto, no laptop.
+//
+// A causa era a vigia do estouro escrever no DOM de dentro do callback do
+// observer: ligar `.card-content-rola` muda o `overflow-y`, e onde a barra é
+// CLÁSSICA ela ocupa largura — encolhendo o content box que o próprio observer
+// observa. Re-entrada no mesmo quadro → o browser reclama.
+//
+// Este Chromium só tem barra SOBREPOSTA (medido: `overflow-y: scroll` dá 0px de
+// barra), e por isso o bug não aparecia em nenhum teste automatizado. A única
+// propriedade que ocupa largura aqui é `scrollbar-gutter: stable` — é ela que
+// emula fielmente o laptop. Vai numa passada SEPARADA de propósito: injetar
+// isso na matriz principal mudaria as larguras e falsearia as outras medidas.
+{
+  const ctx = await browser.newContext({ viewport: { width: 445, height: 620 },
+    serviceWorkers: 'block', locale: 'pt-BR', deviceScaleFactor: 1 });
+  const page = await ctx.newPage();
+  const laco = [];
+  // O erro chega por window.onerror, NÃO por pageerror — a app o intercepta e
+  // registra no console. Qualquer ocorrência significa que o laço voltou.
+  page.on('console', (m) => { if (/ResizeObserver loop/i.test(m.text())) laco.push(m.text().slice(0, 80)); });
+  page.on('pageerror', (e) => { if (/ResizeObserver loop/i.test(String(e))) laco.push(String(e).slice(0, 80)); });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.addStyleTag({ content: '.card-content.card-content-rola { scrollbar-gutter: stable; }' });
+  await page.waitForTimeout(300);
+
+  for (const [tipo, place] of Object.entries(CARDS)) {
+    await page.evaluate((pl) => {
+      aplicarIdioma('pt');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.stats = { read: 12, rejected: 3, skipped: 1 };
+      AppState.serverTotal = 40;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('noMoreCards').classList.add('hidden');
+      renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+      AppState.queue = [pl]; AppState.currentPlace = pl;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace(); updatePendingCount();
+    }, place);
+    await page.waitForTimeout(500);
+    // O laço só nasce quando a classe TROCA de estado com o observer já ativo —
+    // renderizar num tamanho fixo não basta, porque aí ela já nasce decidida.
+    // (Primeira versão deste teste passava com o defeito reintroduzido de
+    // propósito: guard que não guarda. Encolher a janela é o que força a troca,
+    // e é também o caso real de girar o aparelho.)
+    await page.setViewportSize({ width: 445, height: 470 });
+    await page.waitForTimeout(400);
+    await page.setViewportSize({ width: 445, height: 620 });
+    await page.waitForTimeout(400);
+    // O gesto do relato: abrir a foto. O lightbox trava a rolagem da página, o
+    // que muda a largura e faz o observer disparar.
+    await page.click('.card-image').catch(() => {});
+    await page.waitForTimeout(300);
+    await page.evaluate(() => { try { Lightbox.close(); } catch {} });
+    await page.waitForTimeout(300);
+    // O toast é o que o editor VÊ — e um erro não-acionável do browser não pode
+    // aparecer em cima do card de quem está triando.
+    const toast = await page.evaluate(() => [...document.querySelectorAll('#notifyStack .toast')]
+      .map((t) => t.textContent.trim()).find((t) => /Erro inesperado/.test(t)) || null);
+    checa(!toast, `laço RO · ${tipo}: toast de erro na cara do editor`, toast);
+  }
+  checa(laco.length === 0, 'laço de ResizeObserver voltou (barra que ocupa espaço)', laco[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 

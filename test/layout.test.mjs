@@ -307,15 +307,90 @@ test('a foto do card absorve a variação de altura, o texto não vira vão', ()
   const app = read('js/app.js');
   assert.match(app, /function vigiarEstouroDoConteudo/, 'sumiu a vigia do estouro do conteúdo');
   const vigia = app.match(/function vigiarEstouroDoConteudo\(el\)[\s\S]*?\n\}/)[0];
-  assert.match(vigia, /new ResizeObserver\(avaliar\)/,
-    'a vigia virou medição de uma vez só — texto que estoure depois fica cortado sem saída');
+  // A propriedade, não o NOME da função: este guard já reprovou uma correção
+  // legítima porque exigia o identificador `avaliar` e a correção separou
+  // agendamento de escrita. O que precisa continuar valendo é a vigia ser
+  // CONTÍNUA — um ResizeObserver — e não uma medição de uma vez só.
+  const cb = vigia.match(/new ResizeObserver\(\s*(\w+)\s*\)/);
+  assert.ok(cb, 'a vigia virou medição de uma vez só — texto que estoure depois fica cortado sem saída');
   assert.match(vigia, /card-content-rola/, 'a vigia parou de ligar a rolagem');
+
+  // O callback do observer NÃO pode escrever no DOM. Ligar a classe muda o
+  // `overflow-y`; onde a barra de rolagem ocupa largura (desktop), isso encolhe
+  // o content box que o próprio observer observa e o browser emite
+  // "ResizeObserver loop completed with undelivered notifications" — que
+  // chegava como toast VERMELHO pro editor. Relatado com print.
+  const corpoDoCb = vigia.match(new RegExp(`const ${cb[1]} = \\([^)]*\\) => \\{[\\s\\S]*?\\n    \\};`));
+  assert.ok(corpoDoCb, `não achei o corpo do callback ${cb[1]} do ResizeObserver`);
+  assert.doesNotMatch(corpoDoCb[0], /classList/,
+    'o callback do ResizeObserver voltou a escrever no DOM — é o laço que virava toast vermelho');
+  assert.match(corpoDoCb[0], /requestAnimationFrame/,
+    'o callback do ResizeObserver precisa ADIAR a escrita, não fazê-la no ciclo de entrega');
+  // Só mexe no DOM quando a decisão muda: em regime permanente, custo zero.
+  assert.match(vigia, /if \(estoura === ligado\) return;/,
+    'a vigia voltou a escrever no DOM a cada quadro, mesmo sem mudar de estado');
+  // Os filhos também são observados: a caixa é `flex-1` num card de altura
+  // fixa, então texto que cresce (fonte do sistema, zoom só-de-texto) NÃO muda
+  // a caixa — observar só ela deixaria a rede sem nunca ligar nesse caso.
+  assert.match(vigia, /for \(const filho of el\.children\) obs\.observe\(filho\);/,
+    'a vigia parou de observar os filhos — fonte maior/zoom de texto não dispara nada');
   // DUAS classes no seletor: o HTML tem a utility `overflow-y-hidden` e o
   // tailwind.css carrega depois — seletor de uma classe empata e perde (gotcha
   // #27). Com uma só, a rede ligava e o conteúdo NÃO rolava. Medido.
   assert.match(read('css/styles.css'), /\.card-content\.card-content-rola \{[^}]*overflow-y: auto/,
     'o seletor da rede perdeu a segunda classe — a utility do Tailwind ganha e nada rola');
   assert.doesNotMatch(conteudo, /\bflex-1\b/, 'flex-1 no texto faz ele receber a sobra e virar vão');
+
+  // Quem cede é a FOTO. Sem piso, a caixa de texto (`min-h-0`) encolhe abaixo do
+  // próprio conteúdo e a última linha aparece cortada com a foto intacta —
+  // relatado no laptop do owner. Compactar o texto NÃO resolve: a foto é
+  // `flex-auto` e reabsorve na hora (medido: conteúdo 241→227px, caixa
+  // 237,7→224,2px, sobra igual).
+  const CSS = read('css/styles.css');
+  const piso = CSS.match(/\.place-card \.card-content:not\(:has\([^\n]*\)\) \{\s*min-height: min-content;/);
+  assert.ok(piso, 'sumiu o piso do texto — a caixa volta a encolher abaixo do conteúdo e cortar a última linha');
+  // Escopo obrigatório, nos DOIS sentidos, e cada metade custou uma medição:
+  //  · sem `:not(:has(...))` → min-content conta a lista INTEIRA e leva a barra
+  //    ✕/↑/✓ pra 152-278px fora da tela num Fold (51 falhas no smoke)
+  //  · sem `:not(.hidden)` → as caixas longas moram no template e são só
+  //    escondidas, então o `:has` casa em TODO card e a regra não vale em
+  //    lugar nenhum (a sobra voltava a 3-4px no card do relato)
+  assert.match(piso[0], /\.card-changes:not\(\.hidden\)/,
+    'o :has do piso parou de exigir :not(.hidden) — as caixas longas existem escondidas em todo card');
+  assert.match(piso[0], /\.card-flag-comment:not\(\.hidden\)/,
+    'o :has do piso parou de exigir :not(.hidden) no reporte');
+
+  // E o piso PRECISA sair em tela estreita-e-baixa. Lá o texto quebra em mais
+  // linhas e o min-content cresce onde não há altura: medido num 320×533, o
+  // card de remoção jogava a barra ✕/↑/✓ 76px FORA da tela nas 4 línguas (a
+  // auditoria de 960 renders pegou). Ação fora da dobra (gotcha #32) é pior que
+  // última linha apertada, que ainda tem a rede de rolagem como saída.
+  const estreitoEBaixo = CSS.match(
+    /@media \(max-height: 700px\) and \(max-width: 360px\) \{[\s\S]*?\n\}/);
+  assert.ok(estreitoEBaixo, 'sumiu o degrau de tela estreita-e-baixa');
+  assert.match(estreitoEBaixo[0], /\.card-content:not\(:has\([^\n]*\)\) \{\s*min-height: 0;/,
+    'o piso do texto deixou de sair em tela estreita-e-baixa — a barra de ações volta pra fora da tela');
+});
+
+test('aviso do browser não vira erro na cara do editor — e o filtro não é guarda-chuva', () => {
+  // O owner levou um toast VERMELHO "Erro inesperado: ResizeObserver loop
+  // completed with undelivered notifications" ao abrir a foto. Nada tinha
+  // quebrado: é aviso do navegador quando um observer provoca layout que exige
+  // outra rodada de entrega no mesmo quadro.
+  const app = read('js/app.js');
+  const filtro = app.match(/const (\w+) = \/[^\n]*ResizeObserver[^\n]*\/i?;/);
+  assert.ok(filtro, 'sumiu o filtro do ruído de ResizeObserver — o aviso volta a virar toast vermelho');
+  const handler = app.match(/window\.addEventListener\('error',[\s\S]*?\n\}\);/)[0];
+  assert.match(handler, new RegExp(`${filtro[1]}\\.test\\(`),
+    'o handler de erro parou de consultar o filtro');
+  assert.match(handler, /console\.warn/,
+    'o ruído tem que ficar no console — filtrado da tela não é o mesmo que invisível');
+  // A parte que importa tanto quanto: erro DE VERDADE segue virando toast. Um
+  // filtro largo esconderia defeito real e ninguém descobriria.
+  assert.match(handler, /showToast/, 'o handler parou de avisar o editor de erro real');
+  const antesDoFiltro = handler.slice(0, handler.indexOf('showToast'));
+  assert.ok(/return;/.test(antesDoFiltro) && antesDoFiltro.indexOf('return;') < antesDoFiltro.length,
+    'o return do filtro sumiu — o ruído voltaria a cair no caminho do toast');
 });
 
 test('rolagem dentro do card não rouba o gesto nem deixa o card preso', () => {
