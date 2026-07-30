@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-05
+
+### Alterado
+- **A categoria voltou a aparecer como o Waze a nomeia.** Na versão anterior eu havia traduzido as mais comuns, e estava errado: o Waze regionaliza categoria por país, então uma tabela fixa acerta no lugar onde foi medida e erra fora dele. O identificador original também é o que casa com o que você vê no WME. Quando houver uma fonte de regionalização, tentamos de novo.
+
 ## v2026.07.30-04
 
 ### Adicionado

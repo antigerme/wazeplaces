@@ -1584,14 +1584,14 @@ function renderCurrentCard() {
     elNome.classList.toggle('valor-ausente', ident.ausente);
     elNome.classList.toggle('titulo-endereco', ident.tituloEhEndereco);
     card.querySelector('.card-no-name-badge').classList.toggle('hidden', !ident.semNome);
-    // Categoria vinha como enum CRU do Waze ("FACTORY_INDUSTRIAL",
-    // "PET_STORE_VETERINARIAN_SERVICES") na segunda linha de TODO card — 61
-    // valores distintos só nesta fila. rotuloDeEnum traduz o que conhecemos e
-    // humaniza o resto, então SCREAMING_SNAKE nunca chega na tela.
+    // Categoria vai CRUA, de propósito. Traduzi as mais comuns uma vez e o owner
+    // reverteu com um motivo que eu não tinha: o Waze REGIONALIZA categoria por
+    // país, então uma tabela fixa pt/en/es/fr está errada fora do recorte onde
+    // foi medida — e "errado com cara de certo" é pior que o enum. O identificador
+    // cru também é o que casa com o WME quando o editor vai conferir lá.
+    // Quando aparecer a fonte de regionalização do Waze, dá pra tentar de novo.
     escreverValor(card.querySelector('.card-category'),
-        place.categories && place.categories.length > 0
-            ? place.categories.map((c) => rotuloDeEnum('card.cat.', c)).join(', ')
-            : '',
+        place.categories && place.categories.length > 0 ? place.categories.join(', ') : '',
         'card.categories.empty');
     // Endereço que virou título não se repete embaixo: seria a mesma informação
     // duas vezes, gastando uma linha que a caixa de mudanças usa melhor.
