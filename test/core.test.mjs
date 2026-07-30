@@ -485,3 +485,62 @@ test('geometria vira coordenada legível, e polígono alterado nunca formata igu
     assert.equal(formatGeometry(ruim), null, `formatGeometry(${JSON.stringify(ruim)}) devia dar null`);
   }
 });
+
+// A distância de uma mudança de geometria mede do CENTRÓIDE, não do primeiro
+// vértice. Medido no dado real: o polígono da AmBev ganhou um vértice sem mexer
+// no primeiro, e pelo primeiro vértice a distância dava ZERO — o card dizia
+// "moveu 0 m" sobre uma forma que mudou. Afirmar que nada aconteceu é pior que
+// ser vago. Trocar pelo centróide corrigiu 11 dos 12 falsos zeros da fila.
+test('distância de geometria usa centróide, não o primeiro vértice', async () => {
+  const { distanciaEntreGeometrias } = await import('../server/core.mjs');
+
+  // Mesmo primeiro vértice, vértice extra deslocado: pelo primeiro ponto daria
+  // 0; pelo centróide dá distância real. É o caso AmBev.
+  const antes = { type: 'Polygon', coordinates: [[[-60.02, -3.07], [-60.02, -3.08], [-60.03, -3.08]]] };
+  const depois = { type: 'Polygon', coordinates: [[[-60.02, -3.07], [-60.02, -3.08], [-60.03, -3.08], [-60.05, -3.10]]] };
+  const d = distanciaEntreGeometrias(antes, depois);
+  assert.ok(d > 100, `centróide devia se mover >100m, deu ${d}`);
+
+  // Point simples: a distância é a do ponto, e bate com o esperado por grau.
+  const p1 = { type: 'Point', coordinates: [-60.0, -3.0] };
+  const p2 = { type: 'Point', coordinates: [-60.0, -3.001] };
+  const dp = distanciaEntreGeometrias(p1, p2);
+  assert.ok(dp > 100 && dp < 120, `0,001° de latitude ≈ 111m, deu ${dp}`);
+
+  // Idêntico = zero, e lixo = null (nunca NaN chegando na tela).
+  assert.equal(distanciaEntreGeometrias(p1, p1), 0);
+  for (const ruim of [null, undefined, {}, 'x', 42]) {
+    assert.equal(distanciaEntreGeometrias(ruim, p1), null, `entrada ${JSON.stringify(ruim)} devia dar null`);
+  }
+});
+
+// Campo de lista mostra o que ENTROU e o que SAIU. Mostrar as duas listas
+// inteiras obrigava o editor a comparar de olho — no dado real `services` troca
+// 1 item entre 5 e `categories` ganha 1 entre 2.
+test('diffDeLista devolve só a diferença, com valores crus', async () => {
+  const { diffDeLista } = await import('../server/core.mjs');
+
+  const d = diffDeLista(['A', 'B', 'C'], ['A', 'C', 'D']);
+  assert.deepEqual(d, { add: ['D'], del: ['B'] });
+
+  // Sem diferença → null, pra não render uma linha vazia.
+  assert.equal(diffDeLista(['A'], ['A']), null);
+  // Ordem não é mudança: reordenar não deve virar +/−.
+  assert.equal(diffDeLista(['A', 'B'], ['B', 'A']), null);
+  // Campo que NASCE (null → lista) é diff também: tudo adição. Antes devolvia
+  // null aqui, e o par caía no formatValue — que serializa objeto em JSON e
+  // mandava `{"days":[0,1,...],"fromHour":"00:00"}` pra tela. Medido na fila
+  // real: openingHours e entryExitPoints costumam vir de nada.
+  assert.deepEqual(diffDeLista(null, ['A']), { add: ['A'], del: [] });
+  assert.deepEqual(diffDeLista(['A'], null), { add: [], del: ['A'] });
+  // Mas null dos DOIS lados não é mudança, e não-array de verdade segue null.
+  assert.equal(diffDeLista(null, null), null);
+  assert.equal(diffDeLista(['A'], 'texto'), null);
+  assert.equal(diffDeLista('texto', ['A']), null);
+
+  // Objeto na lista (entryExitPoints) compara por conteúdo, não por referência.
+  const pa = { name: '', entry: true };
+  assert.equal(diffDeLista([pa], [{ name: '', entry: true }]), null);
+  // Os valores voltam CRUS: quem traduz é o frontend (contrato de i18n).
+  assert.deepEqual(diffDeLista([], ['AIR_CONDITIONING']), { add: ['AIR_CONDITIONING'], del: [] });
+});

@@ -77,7 +77,7 @@ const AppState = {
     _fetchPromise: null,
     _profilePromise: null,
     loadError: false,
-    filters: { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
+    filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
     preferences: { undoEnabled: true, semUndoSeguidas: 0 },
     devMode: { unlocked: false, active: false },
     profile: null,
@@ -1299,7 +1299,7 @@ async function handleLogout() {
     API.setSession(null);
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
-    AppState.filters = { types: ['VENUE', 'IMAGE'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
+    AppState.filters = { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
     AppState.preferences = { undoEnabled: true };
     AppState.devMode = { unlocked: false, active: false };
     AppState.profile = null;
@@ -1584,8 +1584,14 @@ function renderCurrentCard() {
     elNome.classList.toggle('valor-ausente', ident.ausente);
     elNome.classList.toggle('titulo-endereco', ident.tituloEhEndereco);
     card.querySelector('.card-no-name-badge').classList.toggle('hidden', !ident.semNome);
+    // Categoria vinha como enum CRU do Waze ("FACTORY_INDUSTRIAL",
+    // "PET_STORE_VETERINARIAN_SERVICES") na segunda linha de TODO card — 61
+    // valores distintos só nesta fila. rotuloDeEnum traduz o que conhecemos e
+    // humaniza o resto, então SCREAMING_SNAKE nunca chega na tela.
     escreverValor(card.querySelector('.card-category'),
-        place.categories && place.categories.length > 0 ? place.categories.join(', ') : '',
+        place.categories && place.categories.length > 0
+            ? place.categories.map((c) => rotuloDeEnum('card.cat.', c)).join(', ')
+            : '',
         'card.categories.empty');
     // Endereço que virou título não se repete embaixo: seria a mesma informação
     // duas vezes, gastando uma linha que a caixa de mudanças usa melhor.
@@ -1612,6 +1618,25 @@ function renderCurrentCard() {
 
     if (place.isDelete) {
         card.querySelector('.card-delete-banner').classList.remove('hidden');
+        // O banner âmbar já diz "⚠ Pedido de remoção", e a linha "TIPO:" dizia a
+        // MESMA frase logo abaixo — era ela que truncava: em francês, a 320px,
+        // "Demande de suppression" pede 171px numa caixa de 162 e vira
+        // "Demande de suppressio…". Mesma lição do UPDATE, que já não repete a
+        // enumeração de campos: espaço não se acha apertando, se acha tirando
+        // repetição.
+        //
+        // Some o RÓTULO e o TEXTO, não a linha: a idade ("há 3d") mora nela e é
+        // informação de decisão num pedido de remoção. Tentei antes mover a
+        // idade pra dentro do banner e não funciona — `applyI18n(card)` roda
+        // depois e o banner tem `data-i18n`, que escreve textContent e apaga
+        // qualquer filho anexado (gotcha #24).
+        const linha = card.querySelector('.card-type-row');
+        if (linha) {
+            const rotulo = linha.querySelector('[data-i18n="card.type"]');
+            if (rotulo) rotulo.classList.add('hidden');
+            const tipo = linha.querySelector('.card-type');
+            if (tipo) tipo.classList.add('hidden');
+        }
     }
 
     if (place.isStarred) {
@@ -1825,17 +1850,94 @@ function renderCardImages(card, place) {
 }
 
 // Renderiza o diff de mudanças propostas (extraído de renderCurrentCard — A1).
+// Distância que o ponto andou, no formato de quem está lendo. Abaixo de 1m o
+// número inteiro esconde a informação ("0 m" não diz nada), então vai com uma
+// casa; acima de 1km metro não importa mais.
+function formatarDistancia(m) {
+    if (!Number.isFinite(m)) return '';
+    const loc = i18nLocale();
+    if (m < 1) return t('card.change.movedM', { d: m.toLocaleString(loc, { maximumFractionDigits: 1 }) });
+    if (m < 1000) return t('card.change.movedM', { d: Math.round(m).toLocaleString(loc) });
+    return t('card.change.movedKm', { d: (m / 1000).toLocaleString(loc, { maximumFractionDigits: 1 }) });
+}
+
+// Valor de lista: enum do Waze quando conhecemos, cru quando não. Objeto (um
+// entryExitPoint, por exemplo) vira resumo curto em vez de JSON na cara.
+// Nomes de dia SEM dicionário: o Intl já sabe em toda língua, e uma tabela de
+// 7 dias × 4 idiomas seria 28 strings pra manter em paridade sem ganho nenhum.
+// 2024-01-07 é um domingo, que é o dia 0 do Waze.
+function nomeDoDia(d) {
+    try {
+        return new Date(Date.UTC(2024, 0, 7 + Number(d)))
+            .toLocaleDateString(i18nLocale(), { weekday: 'short', timeZone: 'UTC' });
+    } catch (e) { return String(d); }
+}
+
+function valorDeLista(v) {
+    if (v && typeof v === 'object') {
+        // Ponto de entrada/saída: o que importa é qual é e onde fica.
+        const p = v.point && v.point.coordinates;
+        if (Array.isArray(p) && p.length >= 2) {
+            const tipo = v.entry === false ? t('card.eep.exit') : t('card.eep.entry');
+            const nome = String(v.name || '').trim();
+            return `${nome ? nome + ' · ' : ''}${tipo} ${Number(p[1]).toFixed(5)}, ${Number(p[0]).toFixed(5)}`;
+        }
+        // Horário de funcionamento: vinha como JSON cru na tela (medido na fila
+        // real). 7 dias vira "todos os dias" em vez de enfileirar a semana.
+        if (Array.isArray(v.days) && v.fromHour !== undefined) {
+            const dias = v.days.length >= 7 ? t('card.oh.everyday') : v.days.map(nomeDoDia).join(', ');
+            return `${dias} · ${v.fromHour}–${v.toHour}`;
+        }
+        try { return JSON.stringify(v); } catch { return String(v); }
+    }
+    return rotuloDeEnum('card.enum.', String(v));
+}
+
 function renderCardChanges(card, place) {
     if (!place.changes || place.changes.length === 0) return;
     const changesBox = card.querySelector('.card-changes');
     const changesList = card.querySelector('.card-changes-list');
-    changesList.innerHTML = place.changes.map(c => `
-            <div class="diff-row">
-                <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(rotuloDoCampo(c))}:</span>
-                <span class="diff-from">${escapeHtml(valorDoDiff(c.from))}</span>
-                <span class="diff-to">${escapeHtml(valorDoDiff(c.to))}</span>
-            </div>
-        `).join('');
+    changesList.innerHTML = place.changes.map((c) => {
+        const rotulo = `<span class="text-xs font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(rotuloDoCampo(c))}:</span>`;
+
+        // Campo de LISTA: o que entrou e o que saiu. Mostrar as duas listas
+        // inteiras obrigava o editor a comparar de olho — no dado real
+        // `services` troca 1 item entre 5 e `categories` ganha 1 entre 2.
+        if (c.delta && ((c.delta.add || []).length || (c.delta.del || []).length)) {
+            const item = (v, cls, sinal) =>
+                `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${escapeHtml(valorDeLista(v))}</span>`;
+            const add = (c.delta.add || []).map((v) => item(v, 'diff-add', '+')).join('');
+            const del = (c.delta.del || []).map((v) => item(v, 'diff-del', '−')).join('');
+            return `<div class="diff-row diff-row-lista">${rotulo}<span class="diff-delta">${add}${del}</span></div>`;
+        }
+
+        // GEOMETRIA tem linha própria. Duas coordenadas de 6 casas quase iguais,
+        // uma riscada em vermelho e outra em verde, ocupavam meio card e não
+        // respondiam a pergunta do editor, que é "mudou muito?". Aqui a resposta
+        // vem primeiro; a coordenada nova fica de referência, pequena.
+        if (c.field === 'geometry') {
+            const mudouForma = Number.isFinite(c.vertsFrom) && Number.isFinite(c.vertsTo)
+                && c.vertsFrom !== c.vertsTo;
+            // Abaixo de 5cm é a mesma posição. Dizer "moveu 0 m" numa forma que
+            // ganhou vértice é afirmar que nada aconteceu — pior que ser vago.
+            const parado = !Number.isFinite(c.movedM) || c.movedM < 0.05;
+            let resumo;
+            if (parado && mudouForma) resumo = t('card.change.reshaped');
+            else if (parado) resumo = t('card.change.samePlace');
+            else resumo = formatarDistancia(c.movedM);
+            const verts = mudouForma
+                ? `<span class="diff-hint">${escapeHtml(t('card.change.verts', { de: c.vertsFrom, para: c.vertsTo }))}</span>`
+                : '';
+            return `<div class="diff-row diff-row-geo">${rotulo}`
+                + `<span class="diff-geo-resumo">${escapeHtml(resumo)}</span>`
+                + `${verts}`
+                + `<span class="diff-geo-coord">${escapeHtml(valorDoDiff(c.to))}</span></div>`;
+        }
+
+        return `<div class="diff-row">${rotulo}`
+            + `<span class="diff-from">${escapeHtml(valorDoDiff(c.from))}</span>`
+            + `<span class="diff-to">${escapeHtml(valorDoDiff(c.to))}</span></div>`;
+    }).join('');
     changesBox.classList.remove('hidden');
 }
 
@@ -2875,24 +2977,34 @@ function renderDevModeSection() {
 }
 
 // REQUEST (Reportes/Atualizações) é gated por dev mode enquanto o flow de
-// UPDATE PURs (mudanças, flags, deletes) ainda tem casos não cobertos.
-// Quando estiver maduro, é só remover esse gate.
+// LIBERADO. O tipo REQUEST (mudanças, reportes e pedidos de remoção) ficou
+// atrás do Modo Desenvolvedor enquanto os cards não davam conta dele — que é
+// pra isso que o modo dev existe neste projeto: soltar recurso quando fica
+// redondo.
+//
+// O custo de deixar fechado era grande e só apareceu medindo: numa fila real de
+// 137 pedidos, 135 eram REQUEST. O editor abria a app e via DOIS. 98% do
+// trabalho estava escondido atrás de uma caixa que ele nem enxergava.
+//
+// O que faltava, e foi feito antes de abrir: geometria virou distância legível
+// (era "[object Object]"), listas mostram o que entrou e saiu, os três tipos de
+// reporte que existem de verdade ganharam tradução (o dicionário só tinha
+// INAPPROPRIATE, que não ocorre nenhuma vez), openingHours e entryExitPoints
+// pararam de vazar JSON, e o card de remoção parou de repetir a própria frase.
+// Auditado em 960 renders — 40 viewports do Chrome DevTools × 4 idiomas × 6
+// tipos de card, com pedido REAL — com zero problema.
 function renderRequestTypeRow() {
     const row = document.getElementById('filterTypeRequestRow');
     if (!row) return;
-    row.classList.toggle('hidden', !AppState.devMode.active);
+    row.classList.remove('hidden');
 }
 
-// Remove tipos gated do filtro salvo se o user não tem mais permissão.
-// Cobre 2 cenários:
-//   (1) migração: user com saved=['VENUE','IMAGE','REQUEST'] sem dev mode
-//       precisa ter REQUEST retirado (default novo é só VENUE+IMAGE)
-//   (2) user desliga dev mode no modal e tinha REQUEST checado → tira
+// Não há mais tipo gated por dev mode. A função fica como ponto de extensão
+// (o próximo recurso a ser solto passa por aqui) e para não quebrar os call
+// sites, mas hoje não tira nada de ninguém — tirava REQUEST do filtro salvo,
+// que era justamente o que mantinha o editor sem ver 98% da fila.
 function enforceDevGatedFilters() {
-    if (AppState.devMode.active) return;
-    const before = AppState.filters.types.length;
-    AppState.filters.types = AppState.filters.types.filter(t => t !== 'REQUEST');
-    if (AppState.filters.types.length !== before) saveFilters();
+    /* nada gated no momento */
 }
 
 // Gate de experiência pro toggle "Permitir desfazer ações".

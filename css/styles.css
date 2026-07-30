@@ -1104,3 +1104,109 @@ button:active {
      fazendo), não enfeite — e a escala acompanha o dedo, que é manipulação
      direta, não animação. Sumir com ele deixaria o arraste sem retorno. */
 }
+
+/* ── Diff de LISTA e dica de distância ────────────────────────────────────
+   Campo de lista (services, categories, aliases…) mostrava as duas listas
+   inteiras, e o editor comparava de olho. Medido no dado real: `services`
+   troca 1 item entre 5, `categories` ganha 1 entre 2. Aqui só o que entrou e
+   o que saiu, que é o que decide.
+
+   A linha vira 2 colunas em vez de 3: sem antes-e-depois, o rótulo e a lista
+   de sinais dividem o espaço. `grid-column: 2 / -1` faria a coluna do meio
+   sobrar vazia e desalinhar do resto da lista. */
+.diff-row-lista {
+  grid-template-columns: auto 1fr;
+}
+
+.diff-delta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+}
+
+.diff-add,
+.diff-del {
+  font-size: 0.75rem;
+  word-break: break-word;
+  min-width: 0;
+}
+
+/* Mesmas cores do diff escalar (vermelho sai, verde entra), pra "entrou" e
+   "saiu" não terem dois vocabulários visuais no mesmo card. O verde é o -700
+   porque o -600 dava 3.2:1 — a mesma medição que o .diff-to já carrega. */
+.diff-add { color: #15803d; font-weight: 600; }
+.diff-del { color: #dc2626; text-decoration: line-through; }
+
+.dark .diff-add { color: #4ade80; }
+.dark .diff-del { color: #fca5a5; }
+
+/* Distância que o ponto andou. É a informação PRINCIPAL de uma mudança de
+   geometria — 12 de 33 movimentos reais são menores que 1 metro —, então ela
+   ganha destaque de selo em vez de virar mais uma coluna de texto. Ocupa a
+   linha inteira abaixo do par de coordenadas, que já é longo. */
+.diff-hint {
+  grid-column: 1 / -1;
+  justify-self: start;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 9999px;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.dark .diff-hint {
+  background: #334155;
+  color: #cbd5e1;
+}
+
+/* Geometria tem linha própria: a pergunta do editor é "mudou muito?", e duas
+   coordenadas de 6 casas quase idênticas (uma riscada em vermelho, outra em
+   verde) ocupavam meio card sem responder. A resposta vem primeiro; a
+   coordenada nova fica de referência, pequena e discreta. */
+.diff-row-geo {
+  grid-template-columns: auto 1fr;
+}
+
+.diff-geo-resumo {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #15803d;   /* mesmo verde do .diff-to: "é isto que passa a valer" */
+  min-width: 0;
+}
+
+.dark .diff-geo-resumo { color: #4ade80; }
+
+.diff-geo-coord {
+  grid-column: 1 / -1;
+  font-size: 0.6875rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.dark .diff-geo-coord { color: #94a3b8; }
+
+/* Quando a rede de segurança engata, ela vira a ÚNICA área rolável do card.
+   Sem isto ficam DUAS (o conteúdo e a caixa longa), que é exatamente o que o
+   gotcha #29 proíbe: duas rolagens aninhadas numa superfície de swipe deixam o
+   editor sem saber o que o dedo vai fazer.
+
+   Medido na auditoria dos 40 viewports do DevTools: acontecia só no 320×533
+   (Nokia Lumia 520), a tela mais baixa do conjunto — lá o conteúdo precisa de
+   257px e tem 169, e a rede engatava por cima de uma caixa que já rolava.
+   48 dos 48 problemas restantes eram esse caso.
+
+   A caixa longa para de reivindicar a sobra (`flex-1 min-h-0` do HTML) e volta
+   a crescer com o conteúdo; quem rola é o pai. */
+.card-content-rola .card-changes,
+.card-content-rola .card-flag-comment {
+  flex: 0 0 auto;
+}
+
+.card-content-rola .card-changes-list,
+.card-content-rola .card-flag-comment-text {
+  overflow-y: visible;
+  max-height: none;
+}

@@ -8,6 +8,20 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-04
+
+### Adicionado
+- **Mudanças, reportes e pedidos de remoção agora aparecem para todo mundo.** Estavam atrás do Modo Desenvolvedor enquanto os cards não davam conta deles. O custo disso só ficou claro medindo uma fila de verdade: de 137 pedidos, **135 eram desses tipos** — o editor abria a app e via dois.
+
+### Corrigido
+- **Mudança de posição no mapa dizia `[object Object]`.** Agora diz quanto o ponto andou ("moveu 36 m") e, quando é uma área, quantos vértices ela ganhou ou perdeu. A distância é medida do centro da forma: medir do primeiro ponto fazia uma área que mudou parecer parada.
+- **Campos de lista mostravam as duas listas inteiras** e você comparava de olho. Agora aparece só o que entrou e o que saiu: "Categorias: + Ao ar livre".
+- **Os três motivos de reporte que existem de verdade não tinham tradução** — apareciam com o nome técnico do Waze. O único que estava traduzido não ocorre nenhuma vez na prática.
+- **Horário de funcionamento e ponto de entrada apareciam como JSON.** Agora: "todos os dias · 00:00–00:00" e "Entrada · entrada -22.89161, -42.03520".
+- **A categoria aparecia em MAIÚSCULAS_COM_UNDERLINE** na segunda linha de todo card. Agora é o nome legível.
+- **O card de remoção repetia a própria frase** — no banner e na linha "Tipo:" logo abaixo — e em francês, em telas de 320px, a segunda ficava cortada.
+- **Na tela mais baixa que existe, o card tinha duas áreas de rolagem**, o que atrapalha o gesto de pular. Agora tem uma só.
+
 ## v2026.07.30-02
 
 ### Corrigido
