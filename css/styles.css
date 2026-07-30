@@ -527,6 +527,19 @@ body > main {
   opacity: 0.8;
 }
 
+/* Dentro do +/− de uma lista o esmaecido SAI, e isto foi medido: o 0.8 acima
+   vale pro slate-700 sobre branco, não pro verde/vermelho do diff. Sobre o
+   verde do `.diff-add` ele dá 3.41:1 — reprova no WCAG 1.4.3, e o smoke pegou
+   nas 12 combinações em que o caso aparece.
+   O itálico FICA: quem carrega a informação é o texto entre parênteses (leitor
+   de tela lê "(vazio)"), então o estilo aqui é reforço, não o canal — que é
+   justamente o que a WCAG 1.4.1 exige. Especificidade (0,2,0) vence a regra de
+   cima, que é (0,2,0) também mas vem antes. */
+.diff-add .valor-ausente,
+.diff-del .valor-ausente {
+  opacity: 1;
+}
+
 /* Janela do "Desfazer" correndo: os três botões ficam visivelmente travados.
    Botão que não responde e parece normal lê como app quebrada — o M3 pede que
    estado desabilitado seja visível. A contagem regressiva do próprio banner diz

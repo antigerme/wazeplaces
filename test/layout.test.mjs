@@ -1376,3 +1376,29 @@ test('objeto desconhecido no card não vira JSON nem [object Object]', () => {
     'folha de objeto que é lista parou de virar delta');
   assert.match(APP, /diff-obj-linha-lista/, 'sumiu a linha própria da folha-lista');
 });
+
+test('item de lista vazio aparece como placeholder, e o esmaecido não derruba o contraste', () => {
+  const APP = read('js/app.js');
+  const CSS = read('css/styles.css');
+
+  // O Waze manda lista com item vazio: medido na fila real, um pedido do
+  // "Posto Equador" propunha `services: [""]`. O card mostrava `Serviços: +` e
+  // mais nada — lê como app quebrada, não como "adicionando um item vazio".
+  assert.match(APP, /function itemDeListaAusente/, 'sumiu a detecção de item de lista vazio');
+  const fn = APP.match(/function valorDeLista\(v\)[\s\S]*?\n\}/)[0];
+  assert.match(fn, /if \(itemDeListaAusente\(v\)\) return t\('card\.value\.empty'\);/,
+    'item de lista vazio voltou a sair como string vazia');
+
+  // UM renderizador só. Eram dois trechos idênticos copiados — é assim que duas
+  // telas do mesmo conceito divergem sem ninguém notar.
+  assert.match(APP, /function itemDeLista\(v, cls, sinal\)/, 'sumiu o renderizador único de item');
+  assert.equal((APP.match(/const item = \(v, cls, sinal\)/g) || []).length, 0,
+    'voltou a existir renderizador de item duplicado');
+
+  // O esmaecido do placeholder SAI dentro do +/−: o 0.8 foi medido pro
+  // slate-700 sobre branco, e sobre o verde do diff dá 3.41:1 — reprova no
+  // WCAG 1.4.3. O itálico fica, porque quem carrega a informação é o texto
+  // entre parênteses; o estilo é reforço (WCAG 1.4.1).
+  assert.match(CSS, /\.diff-add \.valor-ausente,\s*\n\.diff-del \.valor-ausente \{\s*\n\s*opacity: 1;/,
+    'o esmaecido voltou pro item de lista — contraste cai pra 3.41:1 sobre o verde');
+});

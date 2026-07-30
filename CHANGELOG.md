@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-14
+
+### Corrigido
+- **Um item de lista vazio aparecia como um `+` sozinho, sem nada do lado.** Acontece quando o pedido propõe adicionar um serviço em branco — o Waze manda isso mesmo. Lido na tela parecia app quebrada; agora aparece `+ (vazio)`, que é o que de fato está sendo pedido.
+
 ## v2026.07.30-13
 
 ### Corrigido

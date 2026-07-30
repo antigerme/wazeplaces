@@ -1946,7 +1946,30 @@ function nomeDoDia(d) {
     } catch (e) { return String(d); }
 }
 
+// Item de lista sem conteúdo. O Waze manda isso de verdade: medido na fila
+// real, um pedido do "Posto Equador" propunha `services: [""]` — um array com
+// uma string vazia. O card mostrava `Serviços: +` e mais nada, que lê como app
+// quebrada, não como "estão adicionando um item vazio".
+function itemDeListaAusente(v) {
+    return v === null || v === undefined || v === '';
+}
+
+// UM renderizador de item de lista, usado pelo campo de lista de topo E pela
+// folha de objeto que é lista. Eram dois trechos idênticos copiados, que é
+// exatamente como duas telas do mesmo conceito divergem sem ninguém notar.
+// Valor ausente leva `.valor-ausente` como qualquer placeholder do card — e o
+// smoke mede o contraste dele nos dois temas a cada PR.
+function itemDeLista(v, cls, sinal) {
+    const txt = escapeHtml(valorDeLista(v));
+    const corpo = itemDeListaAusente(v) ? `<span class="valor-ausente">${txt}</span>` : txt;
+    return `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${corpo}</span>`;
+}
+
 function valorDeLista(v) {
+    // MESMO placeholder do resto do card (`valorDoDiff` já fazia isto). Os
+    // parênteses não são enfeite: resolvem a ambiguidade de um valor que
+    // poderia se chamar "vazio", e são TEXTO, então leitor de tela lê.
+    if (itemDeListaAusente(v)) return t('card.value.empty');
     if (v && typeof v === 'object') {
         // Ponto de entrada/saída: o que importa é qual é e onde fica.
         const p = v.point && v.point.coordinates;
@@ -2129,10 +2152,8 @@ function renderCardChanges(card, place) {
         // inteiras obrigava o editor a comparar de olho — no dado real
         // `services` troca 1 item entre 5 e `categories` ganha 1 entre 2.
         if (c.delta && ((c.delta.add || []).length || (c.delta.del || []).length)) {
-            const item = (v, cls, sinal) =>
-                `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${escapeHtml(valorDeLista(v))}</span>`;
-            const add = (c.delta.add || []).map((v) => item(v, 'diff-add', '+')).join('');
-            const del = (c.delta.del || []).map((v) => item(v, 'diff-del', '−')).join('');
+            const add = (c.delta.add || []).map((v) => itemDeLista(v, 'diff-add', '+')).join('');
+            const del = (c.delta.del || []).map((v) => itemDeLista(v, 'diff-del', '−')).join('');
             return `<div class="diff-row diff-row-lista">${rotulo}<span class="diff-delta">${add}${del}</span></div>`;
         }
 
@@ -2152,10 +2173,8 @@ function renderCardChanges(card, place) {
                 // a lado era o que estava aqui — medido no `chargingPorts` de um
                 // eletroposto, e ninguém lia.
                 if (l.delta && ((l.delta.add || []).length || (l.delta.del || []).length)) {
-                    const item = (v, cls, sinal) =>
-                        `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${escapeHtml(valorDeLista(v))}</span>`;
-                    const add = (l.delta.add || []).map((v) => item(v, 'diff-add', '+')).join('');
-                    const del = (l.delta.del || []).map((v) => item(v, 'diff-del', '−')).join('');
+                    const add = (l.delta.add || []).map((v) => itemDeLista(v, 'diff-add', '+')).join('');
+                    const del = (l.delta.del || []).map((v) => itemDeLista(v, 'diff-del', '−')).join('');
                     return `<span class="diff-obj-linha diff-obj-linha-lista">${caminho}`
                         + `<span class="diff-delta">${add}${del}</span></span>`;
                 }

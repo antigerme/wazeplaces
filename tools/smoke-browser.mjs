@@ -127,6 +127,14 @@ const CARDS = {
     reqType: 'REQUEST', reqSubType: 'UPDATE',
     createdBy: 'eco_movement', imageUrls: [foto], brand: null, camposSemMudanca: 0,
     changes: [
+      // Item de lista VAZIO. O Waze manda isso: medido na fila real, um pedido
+      // do "Posto Equador" propunha `services: [""]`. O card mostrava `+` e
+      // mais nada, que lê como app quebrada. Vira `(vazio)` com
+      // `.valor-ausente`, e é aqui que o smoke mede o contraste dele DENTRO do
+      // verde do `.diff-add` — o 0.8 de opacidade foi medido sobre branco, não
+      // sobre verde.
+      { field: 'services', label: 'Serviços', from: null, to: [''],
+        delta: { add: [''], del: [] } },
       { field: 'categoryAttributes', label: 'CategoryAttributes', from: '[objeto]', to: '[objeto]',
         objDelta: [
           { caminho: 'CHARGING_STATION.source', de: 'ECO_MOVEMENT', para: 'WME' },
