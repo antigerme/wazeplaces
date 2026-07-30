@@ -544,3 +544,93 @@ test('diffDeLista devolve só a diferença, com valores crus', async () => {
   // Os valores voltam CRUS: quem traduz é o frontend (contrato de i18n).
   assert.deepEqual(diffDeLista([], ['AIR_CONDITIONING']), { add: ['AIR_CONDITIONING'], del: [] });
 });
+
+test('mesmoValor compara valor CRU e é o que decide esconder a linha repetida', async () => {
+  const { mesmoValor } = await import('../server/core.mjs');
+
+  // `ur.changedVenue` não é um diff: é o local inteiro, então campo que ninguém
+  // tocou vem junto com o valor ATUAL e virava linha "mudou: X → X". Medido na
+  // fila real: `BR-060 → BR-060`, `Brickell Avenue → Brickell Avenue`, e um
+  // entryExitPoints que ainda por cima vazava JSON cru.
+  assert.equal(mesmoValor('BR-060', 'BR-060'), true);
+  assert.equal(mesmoValor(null, null), true);
+  assert.equal(mesmoValor(null, undefined), false, 'null e undefined não são o mesmo dado');
+  assert.equal(mesmoValor(0, ''), false, 'nada de coerção: 0 não é string vazia');
+  assert.equal(mesmoValor(1, '1'), false);
+
+  // Ordem de chave NÃO pode decidir: dois objetos iguais montados em ordens
+  // diferentes são o mesmo valor. JSON.stringify erraria aqui e traria a linha
+  // inútil de volta — é por isso que a comparação é profunda de verdade.
+  assert.equal(mesmoValor({ a: 1, b: 2 }, { b: 2, a: 1 }), true);
+  assert.equal(mesmoValor({ a: 1 }, { a: 1, b: undefined }), false, 'chave a mais é diferença');
+
+  // Lista compara por conteúdo E por ordem (reordenar geometria é mudança).
+  assert.equal(mesmoValor([1, 2], [1, 2]), true);
+  assert.equal(mesmoValor([1, 2], [2, 1]), false);
+  assert.equal(mesmoValor([1, 2], [1, 2, 3]), false);
+  assert.equal(mesmoValor({ x: [1, { y: 'z' }] }, { x: [1, { y: 'z' }] }), true);
+
+  // Array × objeto nunca são o mesmo valor, mesmo com as mesmas "chaves".
+  assert.equal(mesmoValor([], {}), false);
+
+  // O caso que PROVA por que a comparação é do valor cru e não do texto: dois
+  // polígonos que o `formatGeometry` imprime IGUAL (mesmo primeiro vértice,
+  // mesma contagem) mas que são formas diferentes — medido na fila real, um
+  // deles andou 84 metros. Comparar o que aparece na tela apagaria a linha.
+  const polyA = { type: 'Polygon', coordinates: [[[-46.1, -23.8], [-46.2, -23.9], [-46.1, -23.8]]] };
+  const polyB = { type: 'Polygon', coordinates: [[[-46.1, -23.8], [-46.7, -23.4], [-46.1, -23.8]]] };
+  assert.equal(mesmoValor(polyA, polyB), false, 'forma diferente NUNCA pode ser tratada como igual');
+  assert.equal(mesmoValor(polyA, JSON.parse(JSON.stringify(polyA))), true);
+});
+
+test('diffDeObjeto mostra só a folha que mudou, em vez do JSON inteiro', async () => {
+  const { diffDeObjeto } = await import('../server/core.mjs');
+
+  // `categoryAttributes` de um eletroposto: o card mostrava o objeto inteiro em
+  // JSON pra dizer que a rede mudou de nome. Medido na fila real.
+  const antes = { PARKING_LOT: null, CHARGING_STATION: { source: 'ECO_MOVEMENT', network: 'Porsche' } };
+  const depois = { PARKING_LOT: null, CHARGING_STATION: { source: 'WME', network: 'Ponto de Carga' } };
+  const d = diffDeObjeto(antes, depois);
+  assert.equal(d.length, 2, 'só as folhas que mudaram');
+  assert.deepEqual(d.map((l) => l.caminho).sort(),
+    ['CHARGING_STATION.network', 'CHARGING_STATION.source']);
+  assert.deepEqual(d.find((l) => l.caminho.endsWith('.source')), 
+    { caminho: 'CHARGING_STATION.source', de: 'ECO_MOVEMENT', para: 'WME' });
+
+  // Sem diferença → null, pra não render linha vazia.
+  assert.equal(diffDeObjeto(antes, JSON.parse(JSON.stringify(antes))), null);
+  // Só vale pra objeto SIMPLES: lista tem o diffDeLista, e escalar tem from/to.
+  assert.equal(diffDeObjeto(['a'], ['b']), null);
+  assert.equal(diffDeObjeto('a', 'b'), null);
+  assert.equal(diffDeObjeto(null, { a: 1 }), null);
+
+  // Objeto grande devolve null de propósito: isto alimenta um card de celular,
+  // e uma lista enorme afogaria o que interessa. Melhor cair no fallback.
+  const grande = {}; const grande2 = {};
+  for (let i = 0; i < 40; i++) { grande['k' + i] = i; grande2['k' + i] = i + 1; }
+  assert.equal(diffDeObjeto(grande, grande2), null, 'objeto grande cai no fallback');
+});
+
+test('folha de objeto que é lista vira delta, não dois blocos de JSON', async () => {
+  const { diffDeObjeto } = await import('../server/core.mjs');
+
+  // `chargingPorts` de um eletroposto: dois blocos de JSON lado a lado, 152
+  // caracteres, e ninguém lia. Vira o mesmo +/− do campo de lista de topo.
+  const a = { CHARGING_STATION: { ports: [{ portId: '1', kw: 11 }, { portId: '2', kw: 11 }] } };
+  const b = { CHARGING_STATION: { ports: [{ portId: 'TYPE2.11', kw: 11 }] } };
+  const d = diffDeObjeto(a, b);
+  assert.equal(d.length, 1);
+  const folha = d[0];
+  assert.equal(folha.caminho, 'CHARGING_STATION.ports');
+  assert.ok(folha.delta, 'folha que é lista precisa vir com delta');
+  assert.deepEqual(folha.delta.add, [{ portId: 'TYPE2.11', kw: 11 }]);
+  assert.equal(folha.delta.del.length, 2);
+  // Os valores CRUS continuam lá: o delta é adicional, não substitui — quem
+  // não souber renderizar delta ainda tem de/para (feio, nunca invisível).
+  assert.ok(Array.isArray(folha.de) && Array.isArray(folha.para));
+
+  // Folha escalar segue sem delta: +/− num par de strings seria ruído.
+  const e = diffDeObjeto({ x: { n: 'a' } }, { x: { n: 'b' } });
+  assert.equal(e[0].delta, undefined);
+  assert.deepEqual([e[0].de, e[0].para], ['a', 'b']);
+});

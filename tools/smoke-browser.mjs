@@ -104,6 +104,50 @@ const CARDS = {
     flagComment: 'Esse lugar fechou faz mais de um ano, hoje é uma oficina mecânica. Passei lá ontem e confirmei com o dono do imóvel, que disse que a loja saiu em 2024. O ponto está errado no mapa e atrapalha quem procura.',
     dateAdded: 1785203731191, lat: -20.8, lon: -49.4,
   },
+  // Pedido de alteração cujos campos vieram TODOS iguais ao valor atual. O
+  // `changedVenue` do Waze não é um diff — é o local inteiro — então isso
+  // acontece de verdade (medido: 2 pedidos numa fila de 98). O card não pode
+  // ficar mudo nem inventar: diz que comparou e não há o que alterar.
+  SEM_DIFERENCA: {
+    venueID: 'v5', updateRequestID: 'u5', name: 'Brickell Avenue',
+    categories: ['OTHER'], address: 'Av. das Nações Unidas, 12901 - São Paulo',
+    updateType: 'Atualização (detalhes)', updateTypeKey: 'UPDATE_DETAILS',
+    reqType: 'REQUEST', reqSubType: 'UPDATE',
+    createdBy: 'usuarioqualquer', imageUrls: [foto], brand: null,
+    changes: [], camposSemMudanca: 1,
+    dateAdded: 1785203731191, lat: -23.6, lon: -46.7,
+  },
+  // Campo que é OBJETO simples (não lista): mostra só as folhas que mudaram, em
+  // vez do JSON inteiro. O caminho vai cru e uma das folhas é ela própria uma
+  // lista — o pior caso de largura da caixa, e é de propósito.
+  OBJ_DIFF: {
+    venueID: 'v6', updateRequestID: 'u6', name: 'Eletroposto Porsche Salvador Shopping',
+    categories: ['CHARGING_STATION'], address: 'R. Prof. Magalhães Neto, 1752 - Salvador',
+    updateType: 'Atualização: Atributos da categoria', updateTypeKey: 'UPDATE',
+    reqType: 'REQUEST', reqSubType: 'UPDATE',
+    createdBy: 'eco_movement', imageUrls: [foto], brand: null, camposSemMudanca: 0,
+    changes: [
+      { field: 'categoryAttributes', label: 'CategoryAttributes', from: '[objeto]', to: '[objeto]',
+        objDelta: [
+          { caminho: 'CHARGING_STATION.source', de: 'ECO_MOVEMENT', para: 'WME' },
+          { caminho: 'CHARGING_STATION.network', de: 'Porsche Smart Mobility GmbH', para: 'Ponto de Carga' },
+          // Folha que é LISTA: o core manda o delta pronto (o que entrou / o
+          // que saiu), e o card usa o mesmo +/− do campo de lista de topo.
+          // Dois removidos e um adicionado é o caso REAL medido — e é também o
+          // pior de altura, que é o recurso escasso do card.
+          { caminho: 'CHARGING_STATION.chargingPorts',
+            de: [{ portId: '1', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 1 },
+                 { portId: '39133723', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 1 }],
+            para: [{ portId: 'TYPE2.11', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 2 }],
+            delta: {
+              add: [{ portId: 'TYPE2.11', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 2 }],
+              del: [{ portId: '1', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 1 },
+                    { portId: '39133723', connectorTypes: ['TYPE2'], maxChargeSpeedKw: 11, count: 1 }],
+            } },
+        ] },
+    ],
+    dateAdded: 1785203731191, lat: -12.97, lon: -38.45,
+  },
   // Sem nome nem criador: exercita a cadeia de identidade e TODOS os
   // placeholders de uma vez (é o card que mede contraste do esmaecido).
   SEM_NOME: {

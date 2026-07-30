@@ -973,6 +973,18 @@ button:active {
   .place-card .card-content:not(:has(.card-changes:not(.hidden), .card-flag-comment:not(.hidden))) {
     min-height: 0;
   }
+  /* O aviso de "nada a alterar" custa 66px aqui: em 280px de largura a frase
+     quebra em 4 linhas, e faltavam 16px pro card caber (medido — o smoke pegou,
+     o card inteiro passava a rolar e isso desliga o gesto de pular, gotcha #29).
+     Sai o ✓, que é `aria-hidden` e só repete o que a frase diz, e aperta o
+     respiro. A frase fica inteira: informação não encolhe, enfeite sim. */
+  .place-card .card-sem-diferenca {
+    padding: 0.375rem 0.5rem;
+    font-size: 0.6875rem;
+  }
+  .place-card .card-sem-diferenca > span[aria-hidden] {
+    display: none;
+  }
 }
 
 /* Paisagem: empilhar foto sobre texto não cabe em 393px de altura por mais que
@@ -1205,6 +1217,50 @@ button:active {
 
 .dark .diff-add { color: #4ade80; }
 .dark .diff-del { color: #fca5a5; }
+
+/* Objeto simples: uma folha por linha, no MESMO vocabulário visual do diff
+   escalar (vermelho sai, verde entra) — o card não pode ter três gramáticas
+   diferentes pra dizer "isto virou aquilo". Cada folha é `caminho: de → para`
+   empilhado, porque lado a lado num celular estreito o caminho não cabe. */
+.diff-row-obj {
+  grid-template-columns: auto 1fr;
+}
+
+.diff-obj {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.diff-obj-linha {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: start;
+  gap: 0 0.375rem;
+  min-width: 0;
+}
+
+/* Folha que é LISTA: o caminho fica em cima e o +/− embaixo, porque item de
+   lista é longo (um `chargingPort` legível passa de 60 caracteres) e ao lado do
+   caminho ele espremeria os dois numa coluna de nada. */
+.diff-obj-linha-lista {
+  grid-template-columns: 1fr;
+  gap: 0.125rem 0;
+}
+
+/* O caminho vai cru (`CHARGING_STATION.network`): é o identificador que casa
+   com o WME, mesma razão pela qual a categoria também é crua. Monoespaçado e
+   menor pra não competir com os valores, que são o que se lê. */
+.diff-obj-caminho {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem;
+  color: #64748b;
+  word-break: break-all;
+  min-width: 0;
+}
+
+.dark .diff-obj-caminho { color: #94a3b8; }
 
 /* Distância que o ponto andou. É a informação PRINCIPAL de uma mudança de
    geometria — 12 de 33 movimentos reais são menores que 1 metro —, então ela

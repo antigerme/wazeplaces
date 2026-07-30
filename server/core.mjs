@@ -523,6 +523,92 @@ export const distanciaEntreGeometrias = (a, b) => {
   return Math.sqrt(dLat * dLat + dLon * dLon);
 };
 
+// Igualdade PROFUNDA de dois valores crus do Waze.
+//
+// Existe porque `ur.changedVenue` não é um diff: é o local inteiro com os
+// valores propostos, então campos que ninguém tocou vêm junto carregando o
+// valor ATUAL. Sem isto o card monta uma linha dizendo "mudou" e mostra a mesma
+// coisa dos dois lados — medido na fila real: `BR-060 → BR-060` (Posto Décio),
+// `Brickell Avenue → Brickell Avenue`, e um `entryExitPoints` que ainda por
+// cima vazava JSON cru, porque duas listas idênticas não produzem delta e a
+// linha caía no `formatValue`.
+//
+// A comparação é do valor CRU, e isso NÃO é preciosismo: por texto formatado
+// ela esconderia mudança de verdade. `formatGeometry` imprime o primeiro
+// vértice + a contagem, e a distância é medida do centroide — medido na mesma
+// fila, um polígono do Condomínio Guaianás andou 84 METROS mantendo o primeiro
+// vértice e a contagem, ou seja, formatando IGUAL nos dois lados. Comparar o
+// que aparece na tela apagaria essa linha.
+//
+// `JSON.stringify` não serve: a ordem das chaves de dois objetos distintos não
+// é garantida, e um falso "diferente" traz a linha inútil de volta.
+export const mesmoValor = (a, b) => {
+  if (a === b) return true;
+  if (a === null || b === null || a === undefined || b === undefined) return false;
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => mesmoValor(v, b[i]));
+  }
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && mesmoValor(a[k], b[k]));
+};
+
+// Diferença entre dois OBJETOS simples, folha a folha.
+//
+// O `formatValue` cai em `JSON.stringify` pra objeto que não é lista, e o
+// CLAUDE.md registra isso como "feio, nunca invisível" — a escolha certa contra
+// sumir com a informação, mas ainda assim JSON cru na cara de quem tria. Medido
+// na fila real: `categoryAttributes` de um eletroposto mostrava o objeto inteiro
+// pra dizer que a rede mudou de "Porsche Smart Mobility GmbH" pra "Ponto de
+// Carga". A informação estava lá, ilegível.
+//
+// Achatando em caminhos de folha dá pra mostrar SÓ o que mudou, que é o mesmo
+// desenho já usado em campo de lista. Continua sem esconder nada: se o achatar
+// falhar ou não houver folha diferente, quem chama mantém o fallback antigo.
+//
+// Profundidade e quantidade têm teto porque isto alimenta um card de celular —
+// um objeto grande viraria uma lista de rolagem infinita, e o editor perderia o
+// que interessa no meio.
+const OBJ_DIFF_PROFUNDIDADE = 4;
+const OBJ_DIFF_MAX_LINHAS = 12;
+
+const achatarObjeto = (o, prefixo = '', prof = 0, saida = {}) => {
+  if (prof >= OBJ_DIFF_PROFUNDIDADE || o === null || typeof o !== 'object' || Array.isArray(o)) {
+    saida[prefixo] = o;
+    return saida;
+  }
+  const chaves = Object.keys(o);
+  if (chaves.length === 0) saida[prefixo] = o;
+  for (const k of chaves) achatarObjeto(o[k], prefixo ? `${prefixo}.${k}` : k, prof + 1, saida);
+  return saida;
+};
+
+export const diffDeObjeto = (antes, depois) => {
+  const simples = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  if (!simples(antes) || !simples(depois)) return null;
+  const a = achatarObjeto(antes);
+  const b = achatarObjeto(depois);
+  const linhas = [];
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (mesmoValor(a[k] ?? null, b[k] ?? null)) continue;
+    const linha = { caminho: k, de: a[k] ?? null, para: b[k] ?? null };
+    // Folha que é LISTA ganha o mesmo tratamento do campo de lista de topo:
+    // o que entrou e o que saiu, não as duas listas inteiras. Sem isto a folha
+    // `chargingPorts` de um eletroposto imprimia dois blocos de JSON lado a
+    // lado — a informação estava lá e ninguém lia. O `diffDeLista` também
+    // resolve o caso de nascer do nada (null → lista).
+    const delta = diffDeLista(linha.de, linha.para);
+    if (delta) linha.delta = delta;
+    linhas.push(linha);
+    if (linhas.length > OBJ_DIFF_MAX_LINHAS) return null; // grande demais: melhor o fallback
+  }
+  return linhas.length ? linhas : null;
+};
+
 // O que ENTROU e o que SAIU de um campo de lista. Mostrar as duas listas
 // inteiras obriga o editor a fazer o diff com o olho — medido no dado real:
 // `services` troca 1 item entre 5, `categories` ganha 1 entre 2. Um app
@@ -872,6 +958,10 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       let updateTypeStr = 'Desconhecido';
       let updateTypeKey = 'UNKNOWN';
       const changes = [];
+      // Quantos campos vieram no pacote iguais ao valor atual. Distingue o
+      // pedido que COMPARAMOS e não altera nada daquele que não trouxe nada
+      // pra comparar — só no primeiro o card pode afirmar "nada a alterar".
+      let camposSemMudanca = 0;
       let isDelete = false;
       let flagComment = null;
       let flagType = null;
@@ -909,6 +999,13 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
           for (const k of Object.keys(ur.changedVenue)) {
             if (CAMPOS_ESCRITURACAO.has(k)) continue;
             const newValue = ur.changedVenue[k];
+            // Campo que veio no pacote mas não mudou não vira linha. Conta,
+            // porém: é a diferença entre "comparamos e nada muda" e "não veio
+            // nada pra comparar", e as duas dizem coisas diferentes pro editor.
+            if (mesmoValor(venue[k] ?? null, newValue ?? null)) {
+              camposSemMudanca++;
+              continue;
+            }
             const label = fieldLabels[k] || (k.charAt(0).toUpperCase() + k.slice(1));
             const resolvedFrom = resolveIdField(k, venue[k] ?? null);
             const resolvedTo = resolveIdField(k, newValue);
@@ -938,6 +1035,17 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
             // inteiras pro editor comparar de olho.
             const delta = diffDeLista(venue[k] ?? null, newValue);
             if (delta) mudanca.delta = delta;
+            // Objeto simples (não lista): mostra as folhas que mudaram em vez do
+            // JSON inteiro. Se não der, o `from`/`to` do fallback continua lá —
+            // feio, nunca invisível.
+            // `geometry` fica DE FORA: ela é objeto simples e cairia aqui,
+            // sequestrando a linha que hoje diz "moveu 84 m · 9 → 10 pts" e
+            // devolvendo o editor às coordenadas cruas que o gotcha do
+            // `[object Object]` já tinha resolvido. Medido ao introduzir isto.
+            else if (k !== 'geometry') {
+              const objDelta = diffDeObjeto(venue[k] ?? null, newValue);
+              if (objDelta) mudanca.objDelta = objDelta;
+            }
             changes.push(mudanca);
           }
         }
@@ -958,6 +1066,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         address: venueAddress,
         updateType: updateTypeStr,
         updateTypeKey,
+        camposSemMudanca,
         reqType,
         reqSubType,
         isDelete,
