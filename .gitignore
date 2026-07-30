@@ -7,3 +7,9 @@ node_modules/
 .wrangler/
 .dev.vars*
 *.har
+
+# Credenciais do WME. O fluxo da seção 🔑 do CLAUDE.md faz cookies.txt circular
+# entre owner e agente; um `git add -A` distraído commitaria a sessão do owner
+# num repo público. Não existe caso de uso pra versionar isto.
+cookies.txt
+*cookies*.txt

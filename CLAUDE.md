@@ -97,6 +97,12 @@ wazeplaces/
 ├── wrangler.jsonc           # Cloudflare: binding do KV SESSIONS + compat date
 ├── .assetsignore            # Exclui server/docs/etc do publish estático dos Workers (static assets)
 ├── package.json             # Scripts: start (node), cf:dev, cf:deploy. Zero dependências.
+├── tools/
+│   ├── smoke-browser.mjs    # Smoke de layout (npm run test:browser): aparelhos × idiomas × tipos de card
+│   └── waze-probe.mjs       # Fala com o Waze REAL, só leitura (ver seção 🔑). Valida cookies,
+│                            #   lista países/estados, sonda se Accept-Language é honrado.
+│                            #   RECUSA /Features e /Issues/Read por construção — a regra de
+│                            #   "não escrever na conta do owner" não depende de eu lembrar.
 ├── docs/                    # Referência pra dev (NÃO servido em runtime)
 │   ├── README.md            # Procedência dos docs
 │   ├── wme-sdk-typings.d.ts # Tipagens oficiais do WME SDK (Waze) — referência canônica de schemas
@@ -140,6 +146,21 @@ comparar **pixel a pixel** (PIL disponível). Para refactor visual, essa é a
 prova — não confie em leitura de código. Use um worktree
 (`git worktree add --detach <dir> origin/main`) pro "antes" em vez de `git stash`.
 CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump de `CACHE_NAME`** (gotcha #17). **Gatilhos: `pull_request` e `push` só em `main`** — push em branch de agente NÃO roda CI. Já me enganei com isso: prometi "aviso o resultado do CI" depois de empurrar dois commits numa branch sem PR, e nenhum run existia pra reportar. Se a validação precisa ser do CI e não só local, **abra o PR** (o owner já autoriza isso na seção de workflow abaixo). A suite de testes usa só `node:test`/`node:assert` (built-in) e cobre cripto/sessão, `categorizeWazeError`, `isUserAllowed`, parsing de cookies e o filtro de domínio.
+
+### 🔑 Cookies do owner: PEÇA, não espere HAR (instrução permanente do owner)
+
+**Quando você precisar confrontar algo diretamente com o Waze Map Editor e não tiver cookies válidos, PEÇA o `cookies.txt` ao owner.** Ele autorizou explicitamente e quer que seja o caminho padrão: *"sempre me peça meus cookies... isso pode nos economizar muito tempo entre indas e vindas de HAR pois você mesmo pode checar tudo sem precisar me perguntar."*
+
+Motivo: HAR é uma foto do passado, chega em 5–20MB, e cada dúvida nova custa outra rodada de pedido → export → upload → parse. Com cookies você responde na hora, e responde o que **de fato** acontece. Já se pagou na primeira vez: eu tinha afirmado que os nomes de país vinham em português por causa de `?language=pt-BR`, e estava errado nos dois pontos — o parâmetro não existe nesse endpoint e os nomes vêm **sempre em inglês**. Nenhum HAR teria mostrado isso, porque a pergunta era "o que muda se eu variar o header", e isso só se responde chamando.
+
+**Como saber que expiraram** (Waze dura ~28 dias, e sair no WME rotaciona antes disso): `node tools/waze-probe.mjs <cookies.txt>` devolve HTTP 200 + perfil se valem (sai 1 se expirado, 3 se você tentar um path de escrita), e 403 `code: 101` "not allowed by guest user" se não. Ao detectar expirado, **peça de novo em vez de desistir e voltar pro HAR**.
+
+**Regras de uso, não-negociáveis** — o `cookies.txt` do WME NÃO tem versão "só leitura": vem com `_web_session` + `_csrf_token` e `permissions: -1` (todos os bits). É credencial de **escrita** na conta do owner.
+
+- **Só leitura.** NUNCA `/Features` (rejeitar) nem `/Issues/Read` (marcar lido) — são os dois caminhos que alteram dado real, e alteram no nome dele. O `tools/waze-probe.mjs` recusa esses paths de propósito, pra a regra não depender da minha memória.
+- **Nunca imprima valor de cookie** em log, saída de teste, commit ou mensagem. Nome de cookie pode; valor não.
+- **Nunca copie o arquivo** pra fora do diretório de upload, e nunca commite. Não existe caso de uso pra isso.
+- **Diga ao owner, ao terminar, que a credencial segue válida** e que só sair no WME a invalida (a app não invalida — é o que o aviso do "Sair" explica).
 
 **Sandbox/CI:** ~~allowlist bloqueia `*.waze.com`~~ — **não bloqueia mais** (medido em 2026-07-29: as respostas vêm do `Google Frontend` com `errorList` do próprio Waze). Sem `cookies.txt` real você ainda não consegue testar caminho autenticado — valide com **fixtures de HAR reais** que o usuário envia, ou peça pra ele testar. Mas dá pra testar TUDO que não é o Waze: subir o `node server/node.mjs` e exercitar cripto/sessão/roteamento/erros e, com `cookies.txt` real, o caminho autenticado inteiro — foi assim que o idioma dos nomes de país foi medido).
 
@@ -544,11 +565,12 @@ Bugs já encontrados e corrigidos — **não repita**:
 - Pipeline completo: subir `node server/node.mjs` e `curl` nos endpoints — sessão fake dá 401 limpo. Com `cookies.txt` real do owner o caminho autenticado funciona de ponta a ponta (o sandbox alcança o `waze.com`; ver a nota na seção de endpoints). **Sem cookies válidos**, o Waze responde `403` + `code: 101` "not allowed by guest user", que o core categoriza como `unauthorized` — prova que roteamento + cripto + fetch funcionam
 
 ### Investigar bug reportado pelo usuário
-1. Pedir HAR do Chrome/Firefox DevTools (sempre o owner manda)
-2. Parsear com `jq` ou Python (cuidado, HARs costumam ter 5-20MB)
+1. **Peça o `cookies.txt`** (ver a seção 🔑 acima — o owner quer que seja o padrão) e reproduza contra o Waze de verdade: `node tools/waze-probe.mjs` pra conferir validade, depois suba `node server/node.mjs` e exercite o fluxo pela app. Isso responde "o que o Waze devolve HOJE", que é a pergunta na maioria dos casos.
+2. **HAR é o plano B**, não o A: use quando o bug depende do que a app ENVIOU num momento específico que já passou, ou quando o owner não pode mandar cookies. Parseie com `jq`/Python (5–20MB é normal).
 3. Olhar request payloads (o que **a app** enviou) e response bodies (o que **o Waze** devolveu)
 4. Confirmar se é bug do app, do Waze, ou expectativa errada
 5. Se for bug do app, reproduzir mentalmente o fluxo, adicionar defesa + try-catch onde fizer sentido, bump o serial (`js/version.js` + `service-worker.js`)
+6. **Rode o fluxo com dado real antes de dar por pronto.** Fixture mede o que você imaginou; dado real mede o que existe. Dois bugs visíveis a todo editor passaram por N auditorias de fixture e caíram na primeira fila de verdade: `[object Object]` em toda mudança de geometria (33 de 142 pedidos) e 4 campos sem tradução.
 
 ---
 
