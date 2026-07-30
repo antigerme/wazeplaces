@@ -1124,3 +1124,91 @@ test('a URL do WME é sempre a canônica, sem segmento de idioma', () => {
   assert.equal(cravados.length, 0,
     'URL do waze.com com idioma cravado (o editor cai num WME que não é o dele):\n' + cravados.join('\n'));
 });
+
+// ── O voltar do aparelho fecha a camada de cima ───────────────────────────
+// Pedido de uma editora: no ritmo do swipe, ir até o ✕ do lightbox quebra a
+// cadência. O risco desta feature não é ela não funcionar — é ela funcionar
+// PELA METADE: se a camada fecha por outro caminho (✕, Esc, scrim) sem consumir
+// a entrada de histórico, sobra uma entrada MORTA e o próximo voltar não faz
+// nada. A pessoa aperta, vê a tela parada, aperta de novo e SAI DA APP. Pior
+// que o ✕ que motivou o pedido.
+test('voltar fecha camada, e todo fechamento consome a entrada', () => {
+  const app = read('js/app.js');
+  assert.match(app, /const CamadaVoltar = \{/, 'sumiu o CamadaVoltar');
+  assert.match(app, /history\.pushState/, 'ninguém empilha entrada de histórico');
+  assert.match(app, /addEventListener\('popstate'/, 'ninguém escuta o voltar');
+
+  // Os DOIS fechadores consomem quando não vieram do próprio popstate.
+  const lb = app.match(/close\(\{ viaHistorico = false \} = \{\}\) \{[\s\S]*?\n {4}\}/);
+  assert.ok(lb, 'o Lightbox.close perdeu o parâmetro viaHistorico');
+  assert.match(lb[0], /if \(!viaHistorico\) CamadaVoltar\.consumir\(\)/,
+    'fechar o lightbox pelo ✕ não consome a entrada — o próximo voltar fica morto');
+
+  const cm = app.match(/function closeModal\([^)]*\)[\s\S]*?\n\}/);
+  assert.ok(cm, 'sumiu o closeModal');
+  assert.match(cm[0], /if \(!viaHistorico\) CamadaVoltar\.consumir\(\)/,
+    'fechar modal por Esc/scrim não consome a entrada');
+
+  // Trocar de modal NÃO pode empilhar de novo: openModal fecha o anterior antes
+  // de abrir o novo, então duas entradas deixariam um voltar sem efeito.
+  const om = app.match(/function openModal\(id\)[\s\S]*?\n\}/);
+  assert.ok(om, 'sumiu o openModal');
+  assert.match(om[0], /if \(!jaHaviaModal\) CamadaVoltar\.empilhar\(\)/,
+    'openModal empilha mesmo trocando de modal — um voltar passaria a não fechar nada');
+
+  // O popstate precisa distinguir o pop que NÓS causamos do pop do usuário.
+  assert.match(app, /if \(CamadaVoltar\.consumindo\)/,
+    'o popstate não distingue o pop que nós causamos — fecharia duas camadas de uma vez');
+});
+
+// A dica do lightbox precisa citar o arrastar pra baixo: o gesto existe desde
+// sempre e não estava escrito em lugar nenhum, o que é metade da reclamação
+// original (a pessoa ia no ✕ porque não sabia que dava pra arrastar).
+test('a dica do lightbox conta que arrastar pra baixo fecha', () => {
+  const i18n = read('js/i18n.js');
+  const dicas = [...i18n.matchAll(/'lightbox\.zoomHint':\s*'([^']*)'/g)].map((m) => m[1]);
+  assert.ok(dicas.length >= 4, `só ${dicas.length} dicas — faltou língua`);
+  for (const d of dicas) {
+    assert.match(d, /fechar|close|cerrar|fermer/i,
+      `a dica não diz como fechar: "${d}"`);
+  }
+});
+
+// ── Foco num autor ────────────────────────────────────────────────────────
+// 42% da fila vem de quem enviou 3+ pedidos. Tocar no selo traz os dele pra
+// frente. É PRIORIZAÇÃO, não filtragem, e a diferença não é semântica: esconder
+// os outros faria a fila "esvaziar" e a app mostrar "Tudo limpo!" com mais de
+// cem pendentes. O guard trava as duas propriedades que sustentam isso.
+test('foco num autor prioriza sem esconder ninguém', () => {
+  const app = read('js/app.js');
+  const f = app.match(/function focarAutor\(nome\)[\s\S]*?\n\}/);
+  assert.ok(f, 'sumiu o focarAutor');
+  // Reordena a fila INTEIRA: os do autor na frente, o resto atrás. Trocar por
+  // um filter() que descarta o resto reprova aqui.
+  assert.match(f[0], /\.\.\.daPessoa, \.\.\.AppState\.queue\.filter\(\(x\) => x\.createdBy !== nome\)/,
+    'o foco passou a DESCARTAR os outros pedidos — a fila esvaziaria e a app diria "Tudo limpo!" mentindo');
+
+  // A barra some sozinha quando a série acaba, senão fica anunciando um foco
+  // que não existe mais assim que o card muda de autor.
+  const r = app.match(/function renderFocoAutor\(\)[\s\S]*?\n\}/);
+  assert.ok(r, 'sumiu o renderFocoAutor');
+  assert.match(r[0], /atual\.createdBy !== nome/,
+    'a barra parou de conferir se o card ainda é do autor em foco');
+
+  // O alvo é a barra INTEIRA, não um ✕ dentro dela: no ritmo do swipe, alvo
+  // pequeno é toque errado, e toque errado aqui trata o pedido errado.
+  const html = read('index.html');
+  const bar = html.match(/<button id="focoAutorBar"[\s\S]*?<\/button>/);
+  assert.ok(bar, 'sumiu a barra de foco');
+  assert.match(bar[0], /min-h-\[44px\]/, 'a barra perdeu a altura mínima de alvo');
+  // Ocupar a largura toda é a PROPRIEDADE; `w-full` era só como ela estava
+  // escrita quando a barra empurrava o layout. Flutuando, quem estica é o par
+  // left/right. Casar a implementação antiga reprovou a correção — foi o que
+  // aconteceu: guard escrito antes da barra virar flutuante.
+  const estica = /w-full/.test(bar[0]) || (/\bleft-\d/.test(bar[0]) && /\bright-\d/.test(bar[0]));
+  assert.ok(estica, 'a barra deixou de ocupar a largura toda — o alvo encolheu');
+  // E flutuar é parte do desenho: empurrando custava 60px e nas telas baixas a
+  // página passava a rolar com os botões de ação fora da tela.
+  assert.match(bar[0], /absolute/, 'a barra voltou a empurrar o layout em vez de flutuar');
+  assert.doesNotMatch(bar[0], /<button[\s\S]*<button/, 'apareceu botão DENTRO da barra: o ✕ é ícone, não alvo');
+});

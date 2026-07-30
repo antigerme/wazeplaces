@@ -190,13 +190,71 @@ function initApp() {
 const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal'];
 let lastFocusedBeforeModal = null;
 
+// ── O VOLTAR do aparelho fecha o que está por cima ────────────────────────
+// Pedido de uma editora: no ritmo do swipe, ir até o ✕ do lightbox quebra a
+// cadência. No Android o reflexo é o botão/gesto de voltar, que em toda app
+// nativa significa "fecha a camada de cima".
+//
+// Vale pra lightbox E pra modais de propósito. Fazer só na foto seria PIOR que
+// não fazer: a pessoa aprenderia que voltar fecha, tentaria em Filtros e SAIRIA
+// DA APP — e ainda perderia os filtros que estava montando.
+//
+// O detalhe que decide se isto ajuda ou atrapalha é CONSUMIR a entrada quando a
+// camada fecha por outro caminho (✕, Esc, scrim, arrastar). Sem isso sobra uma
+// entrada morta no histórico e o próximo voltar não faz nada — o usuário aperta,
+// olha pra tela parada e aperta de novo, aí sai da app. Pior que o ✕.
+//
+// iOS em modo standalone não tem voltar; lá o ✕ e o arrastar pra baixo seguem
+// sendo o caminho. Isto ADICIONA um jeito, não substitui nenhum.
+const CamadaVoltar = {
+    profundidade: 0,
+    // Ligado só durante o history.back() que nós mesmos disparamos, pra o
+    // popstate resultante não fechar uma segunda camada por engano.
+    consumindo: false,
+
+    empilhar() {
+        try {
+            this.profundidade++;
+            history.pushState({ wpCamada: this.profundidade }, '');
+        } catch (e) { /* histórico indisponível: o ✕ continua funcionando */ }
+    },
+
+    consumir() {
+        if (this.profundidade <= 0) return;
+        this.profundidade--;
+        this.consumindo = true;
+        try { history.back(); } catch (e) { this.consumindo = false; }
+    },
+};
+
+window.addEventListener('popstate', () => {
+    if (CamadaVoltar.consumindo) { CamadaVoltar.consumindo = false; return; }
+    // Veio do usuário. Fecha a camada de cima — o lightbox está acima dos modais
+    // (z-[65] contra z-[60]), então ele tem prioridade.
+    if (Lightbox.isOpen()) {
+        CamadaVoltar.profundidade = Math.max(0, CamadaVoltar.profundidade - 1);
+        Lightbox.close({ viaHistorico: true });
+        return;
+    }
+    const m = topOpenModal();
+    if (m) {
+        CamadaVoltar.profundidade = Math.max(0, CamadaVoltar.profundidade - 1);
+        closeModal(m.id, { viaHistorico: true });
+    }
+});
+
 function openModal(id) {
     const m = document.getElementById(id);
     if (!m) return;
+    const jaHaviaModal = !!topOpenModal();
     // Modais não empilham: fecha qualquer outro aberto (ex.: Sair a partir da Ajuda)
     MODAL_IDS.forEach(other => {
         if (other !== id) document.getElementById(other)?.classList.add('hidden');
     });
+    // Empilha uma entrada só por CAMADA, não por modal: openModal fecha o modal
+    // anterior antes de abrir o novo (eles não empilham), então trocar de modal
+    // não pode empilhar histórico — senão um voltar fecharia nada.
+    if (!jaHaviaModal) CamadaVoltar.empilhar();
     lastFocusedBeforeModal = document.activeElement;
     m.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
@@ -229,10 +287,11 @@ const LIMPEZA_AO_FECHAR = {
     },
 };
 
-function closeModal(id) {
+function closeModal(id, { viaHistorico = false } = {}) {
     const m = document.getElementById(id);
     if (!m || m.classList.contains('hidden')) return;
     m.classList.add('hidden');
+    if (!viaHistorico) CamadaVoltar.consumir();
     try { LIMPEZA_AO_FECHAR[id]?.(); } catch (e) { /* limpeza nunca derruba o fechamento */ }
     if (!topOpenModal() && !Lightbox.isOpen()) document.body.style.overflow = '';
     if (lastFocusedBeforeModal && document.body.contains(lastFocusedBeforeModal)) {
@@ -604,6 +663,7 @@ function setupModalListeners() {
     });
     setupFilterTabs();
     setupLanguageSwitcher();
+    $('focoAutorBar').addEventListener('click', limparFocoAutor);
     $('filterCountry').addEventListener('change', (e) => {
         loadStatesIntoSelect(parseInt(e.target.value, 10));
     });
@@ -666,6 +726,7 @@ const Lightbox = {
         this.newIdx = (newImageIdx !== undefined && newImageIdx !== null) ? newImageIdx : -1;
         this.eDenuncia = !!eDenuncia;
         this.placeName = placeName || '';
+        CamadaVoltar.empilhar();
         document.getElementById('imageLightbox').classList.remove('hidden');
         document.body.style.overflow = 'hidden';
         const closeBtn = document.getElementById('lightboxClose');
@@ -678,7 +739,9 @@ const Lightbox = {
         }
         this._render();
     },
-    close() {
+    close({ viaHistorico = false } = {}) {
+        if (!this.isOpen()) return;
+        if (!viaHistorico) CamadaVoltar.consumir();
         document.getElementById('imageLightbox').classList.add('hidden');
         if (!topOpenModal()) document.body.style.overflow = '';
         document.getElementById('lightboxImage').removeAttribute('src');
@@ -1584,14 +1647,14 @@ function renderCurrentCard() {
     elNome.classList.toggle('valor-ausente', ident.ausente);
     elNome.classList.toggle('titulo-endereco', ident.tituloEhEndereco);
     card.querySelector('.card-no-name-badge').classList.toggle('hidden', !ident.semNome);
-    // Categoria vinha como enum CRU do Waze ("FACTORY_INDUSTRIAL",
-    // "PET_STORE_VETERINARIAN_SERVICES") na segunda linha de TODO card — 61
-    // valores distintos só nesta fila. rotuloDeEnum traduz o que conhecemos e
-    // humaniza o resto, então SCREAMING_SNAKE nunca chega na tela.
+    // Categoria vai CRUA, de propósito. Traduzi as mais comuns uma vez e o owner
+    // reverteu com um motivo que eu não tinha: o Waze REGIONALIZA categoria por
+    // país, então uma tabela fixa pt/en/es/fr está errada fora do recorte onde
+    // foi medida — e "errado com cara de certo" é pior que o enum. O identificador
+    // cru também é o que casa com o WME quando o editor vai conferir lá.
+    // Quando aparecer a fonte de regionalização do Waze, dá pra tentar de novo.
     escreverValor(card.querySelector('.card-category'),
-        place.categories && place.categories.length > 0
-            ? place.categories.map((c) => rotuloDeEnum('card.cat.', c)).join(', ')
-            : '',
+        place.categories && place.categories.length > 0 ? place.categories.join(', ') : '',
         'card.categories.empty');
     // Endereço que virou título não se repete embaixo: seria a mesma informação
     // duas vezes, gastando uma linha que a caixa de mudanças usa melhor.
@@ -1615,6 +1678,8 @@ function renderCurrentCard() {
     const elTipo = card.querySelector('.card-type');
     escreverValor(elTipo, elTipo.textContent, 'card.type.empty');
     escreverValor(card.querySelector('.card-creator'), place.createdBy, 'card.creator.empty');
+    renderSelosDeProcedencia(card, place);
+    renderFocoAutor();
 
     if (place.isDelete) {
         card.querySelector('.card-delete-banner').classList.remove('hidden');
@@ -1891,6 +1956,104 @@ function valorDeLista(v) {
         try { return JSON.stringify(v); } catch { return String(v); }
     }
     return rotuloDeEnum('card.enum.', String(v));
+}
+
+// Quem pediu, de onde, e se veio sozinho. Três sinais que o Waze manda e a app
+// descartava — todos cabem na linha do criador, sem custar altura de card.
+//
+// Por que cada um decide algo:
+//   · rank    L1 anônimo pedindo mudança num local travado é outra coisa que L5
+//   · source  MOBILE_CLIENT é alguém dirigindo; WEB é alguém sentado conferindo
+//   · lote    42% da fila vem de quem enviou 3+ — se os primeiros do autor forem
+//             lixo, os outros provavelmente são, e isso muda o ritmo da triagem
+// ── Foco num autor: os pedidos dele vêm PRIMEIRO ─────────────────────────
+// 42% da fila vem de quem enviou 3+ pedidos. Se os primeiros de um autor são
+// lixo, os outros costumam ser — decidir uma vez e tratar 14 seguidos é o maior
+// ganho de tempo que apareceu medindo a fila real.
+//
+// É PRIORIZAÇÃO, não filtragem, e a diferença importa: esconder os outros 126
+// faria a fila "esvaziar" depois dos 14 e a app mostraria "Tudo limpo!" com 126
+// pendentes — mentira. Aqui os do autor sobem pra frente e o resto continua
+// depois, na mesma ordem relativa. Nada some, nada mente, e o editor recebe
+// exatamente o que queria: a série do autor em sequência.
+function focarAutor(nome) {
+    if (!nome) return;
+    const daPessoa = AppState.queue.filter((x) => x.createdBy === nome);
+    if (daPessoa.length === 0) return;
+    AppState.queue = [...daPessoa, ...AppState.queue.filter((x) => x.createdBy !== nome)];
+    AppState.autorEmFoco = nome;
+    AppState.currentPlace = AppState.queue[0];
+    renderFocoAutor();
+    removeCurrentCardEl();
+    showCurrentPlace();
+    updatePendingCount();
+}
+
+function limparFocoAutor() {
+    if (!AppState.autorEmFoco) return;
+    AppState.autorEmFoco = null;
+    // A ordem NÃO volta atrás: reordenar de novo tiraria da frente o pedido que
+    // o editor está olhando agora. Sair do foco é parar de destacar, não desfazer.
+    renderFocoAutor();
+}
+
+// A barra some sozinha quando a série acaba — sem isso ela ficaria mentindo
+// sobre um foco que não existe mais assim que o card muda de autor.
+function renderFocoAutor() {
+    const bar = document.getElementById('focoAutorBar');
+    if (!bar) return;
+    const nome = AppState.autorEmFoco;
+    const atual = AppState.queue[0];
+    if (!nome || !atual || atual.createdBy !== nome) {
+        if (nome && atual && atual.createdBy !== nome) AppState.autorEmFoco = null;
+        bar.classList.add('hidden');
+        return;
+    }
+    const restam = AppState.queue.filter((x) => x.createdBy === nome).length;
+    document.getElementById('focoAutorTexto').textContent = t('card.focoAutor', { autor: nome });
+    document.getElementById('focoAutorContagem').textContent =
+        t('card.focoAutor.contagem', { n: restam, total: AppState.queue.length });
+    bar.setAttribute('aria-label', t('card.focoAutor.aria', { n: restam, autor: nome }));
+    bar.classList.remove('hidden');
+}
+
+function renderSelosDeProcedencia(card, place) {
+    const linha = card.querySelector('.card-creator-row');
+    if (!linha) return;
+    const selos = [];
+    if (Number.isInteger(place.creatorRank)) {
+        // +1 porque o Waze é 0-indexed e humano conta de 1 (gotcha #15).
+        selos.push({ cls: 'selo-rank', txt: 'L' + (place.creatorRank + 1),
+                     title: t('card.creatorRank.title') });
+    }
+    if (place.source) {
+        const rot = rotuloDeEnum('card.source.', place.source);
+        if (rot) selos.push({ cls: 'selo-src', txt: rot, title: t('card.source.title') });
+    }
+    const mesmos = (AppState.queue || [])
+        .filter((x) => x !== place && x.createdBy && x.createdBy === place.createdBy).length;
+    if (mesmos > 0) {
+        selos.push({ cls: 'selo-lote', txt: t('card.sameAuthor', { n: mesmos }),
+                     title: t('card.sameAuthor.acao'), acao: place.createdBy });
+    }
+    if (!selos.length) return;
+    const box = document.createElement('span');
+    box.className = 'selos-proc';
+    for (const s of selos) {
+        // O selo do lote é o único que AGE: vira botão de verdade (não span com
+        // onclick), pra receber foco no Tab e ser anunciado como acionável.
+        const el = document.createElement(s.acao ? 'button' : 'span');
+        el.className = 'selo-proc ' + s.cls;
+        el.textContent = s.txt;
+        el.title = s.title;
+        if (s.acao) {
+            el.type = 'button';
+            el.classList.add('selo-acionavel');
+            el.addEventListener('click', (ev) => { ev.stopPropagation(); focarAutor(s.acao); });
+        }
+        box.appendChild(el);
+    }
+    linha.appendChild(box);
 }
 
 function renderCardChanges(card, place) {

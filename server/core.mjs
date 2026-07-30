@@ -746,7 +746,9 @@ async function handleBuscarPlaces(data, { sessions }) {
 // Exportada pra suite testar com fixtures de HAR real, sem rede.
 export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = true } = {}) {
   const usersDict = {};
-  for (const u of rd?.users?.objects || []) usersDict[u.id] = u.userName;
+  // Guarda o objeto inteiro, não só o nome: o rank de quem PEDIU é sinal de
+  // triagem (L1 anônimo × L5 editor) e vinha sendo jogado fora aqui.
+  for (const u of rd?.users?.objects || []) usersDict[u.id] = u;
   const streetsDict = {};
   for (const s of rd?.streets?.objects || []) streetsDict[s.id] = s;
   const citiesDict = {};
@@ -847,7 +849,14 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
 
     for (const ur of venue.venueUpdateRequests) {
       const creatorId = ur.createdBy ?? null;
-      const creatorName = creatorId && usersDict[creatorId] ? usersDict[creatorId] : creatorId;
+      const creatorObj = creatorId ? usersDict[creatorId] : null;
+      const creatorName = creatorObj ? creatorObj.userName : creatorId;
+      // Rank CRU do Waze (0-indexed). Quem soma 1 pra exibir é o frontend —
+      // regra sagrada do projeto, ver gotcha #15.
+      const creatorRank = creatorObj && Number.isInteger(creatorObj.rank) ? creatorObj.rank : null;
+      // De onde veio: WEB (na mesa) × MOBILE_CLIENT (dirigindo). Enum CRU,
+      // traduzido no frontend por card.source.<ENUM>.
+      const source = String(ur.source || '').trim() || null;
 
       const reqType = ur.type || '';
       const reqSubType = ur.subType || '';
@@ -959,6 +968,8 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         dateAdded: ur.dateAdded ?? null,
         isStarred: !!ur.isStarred,
         createdBy: creatorName,
+        creatorRank,
+        source,
         imageUrl: allImageUrls.length ? allImageUrls[0] : null,
         imageUrls: allImageUrls,
         changes,

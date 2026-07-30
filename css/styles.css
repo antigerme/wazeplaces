@@ -738,7 +738,13 @@ button:active {
   display: grid;
   grid-template-columns: auto 1fr 1fr;
   gap: 0.5rem;
-  align-items: center;
+  /* `start`, não `center`. Com valor de várias linhas o centro da linha sai da
+     caixa: medido num pedido real com 2 pontos de entrada, a linha ficou com
+     476px dentro de uma caixa de 106px e o rótulo foi parar 320px ABAIXO do
+     topo visível — o editor rolava até lá e via um bloco de texto sem rótulo
+     nenhum. Alinhado no topo, o rótulo fica sempre colado na primeira linha do
+     seu valor. Em linha de uma linha só, start e center dão o mesmo resultado. */
+  align-items: start;
   padding: 0.5rem 0;
   border-bottom: 1px solid #f1f5f9;
 }
@@ -1210,3 +1216,48 @@ button:active {
   overflow-y: visible;
   max-height: none;
 }
+
+/* ── Selos de procedência (quem pediu, de onde, e se veio em lote) ────────
+   Cabem na linha do criador, que já existe: três sinais de triagem sem custar
+   uma linha de altura. Ficam depois do nome, empurrados pra direita, e quebram
+   em 2ª linha quando não cabem em vez de espremer o nome do autor. */
+.selos-proc {
+  display: inline-flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.selo-proc {
+  font-size: 0.625rem;
+  font-weight: 700;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 9999px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Cores MEDIDAS sobre o fundo do card (branco no claro, slate-800 no escuro):
+   rank 6.8:1 · origem 7.4:1 · lote 6.2:1 no claro. O âmbar do lote é o mesmo
+   do banner de remoção — mesma família de "olhe isto", sem inventar cor nova. */
+.selo-rank { background: #e0f2fe; color: #075985; }
+.selo-src  { background: #f1f5f9; color: #475569; }
+.selo-lote { background: #fef3c7; color: #92400e; }
+
+.dark .selo-rank { background: #075985; color: #bae6fd; }
+.dark .selo-src  { background: #334155; color: #cbd5e1; }
+.dark .selo-lote { background: #78350f; color: #fde68a; }
+
+/* O selo do lote é o único que AGE, e precisa parecer tocável — selo que
+   responde ao toque sem se distinguir dos outros dois ensina errado. */
+.selo-acionavel {
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.selo-acionavel:active { transform: scale(0.96); }
