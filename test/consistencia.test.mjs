@@ -108,3 +108,42 @@ test('botão de confirmar ecoa o verbo do enunciado', () => {
     assert.equal(conf[1], botao, `${lang}: o botão de confirmar não ecoa mais o enunciado ("${corpo}")`);
   }
 });
+
+test('o mesmo conceito não pode ter dois nomes no MESMO card', () => {
+  const APP = read('js/app.js');
+  const DICT = read('js/i18n.js');
+
+  // O owner reverteu a tradução de categoria porque o Waze REGIONALIZA
+  // categoria por país. O revert pegou o topo do card e ESQUECEU o diff: o
+  // mesmo `NATURAL_FEATURES` aparecia cru em cima e "Natural features" na
+  // lista de mudanças, na mesma tela. Ele viu num print antes de qualquer
+  // teste — segunda vez que isso acontece com categoria.
+  assert.match(APP, /place\.categories\.join\(', '\)/,
+    'a categoria do topo do card deixou de sair crua');
+
+  // Tira os comentários antes de olhar: a primeira versão deste guard reprovou
+  // a correção porque o comentário que EXPLICA a remoção cita o nome da função
+  // removida. Guard tem que ler código, não prosa.
+  const semComentario = (s) => s.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const fn = semComentario(APP.match(/function valorDeLista\(v\)[\s\S]*?\n\}/)[0]);
+  assert.doesNotMatch(fn, /rotuloDeEnum\s*\(/,
+    'item de lista voltou a passar por rotuloDeEnum — humaniza a categoria de novo');
+  assert.match(fn, /return String\(v\);/, 'item de lista deixou de sair cru');
+
+  // `card.enum.` era um mecanismo de tradução com dicionário VAZIO: nunca teve
+  // uma chave, então tudo caía no humanizarEnum (lowercase). Isso não só
+  // humanizava a categoria como CORROMPIA valor que não é enum — `aliases` é
+  // nome próprio ("Escola Estadual…" → "Escola estadual…") e
+  // `externalProviderIDs` é ID opaco do Google (`ChIJfYn3…` → `Chijfyn3…`,
+  // deixa de ser o ID). Se alguém repovoar esse prefixo, é sinal de que a
+  // decisão mudou e este teste tem que ser revisitado junto.
+  assert.equal((DICT.match(/'card\.enum\./g) || []).length, 0,
+    'voltaram chaves card.enum.* — a tradução de categoria foi revertida de propósito');
+
+  // O humanizarEnum continua válido onde há dicionário DE VERDADE: lá ele é
+  // fallback de enum não mapeado, não a regra.
+  for (const [prefixo, minimo] of [['card.updateType.', 4], ['card.flagType.', 4], ['card.field.', 4]]) {
+    const n = (DICT.match(new RegExp("'" + prefixo.replace(/\./g, '\\.'), 'g')) || []).length;
+    assert.ok(n >= minimo, `${prefixo} ficou sem tradução (${n} chaves) — aí humanizar vira a regra`);
+  }
+});
