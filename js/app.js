@@ -2065,7 +2065,17 @@ function renderSelosDeProcedencia(card, place) {
 }
 
 function renderCardChanges(card, place) {
-    if (!place.changes || place.changes.length === 0) return;
+    if (!place.changes || place.changes.length === 0) {
+        // Nenhuma linha, mas por dois motivos MUITO diferentes, e só um deles
+        // pode virar afirmação: ou o core comparou campo a campo e todos vieram
+        // iguais ao valor atual (`camposSemMudanca > 0`), ou não veio nada pra
+        // comparar. Dizer "nada a alterar" no segundo caso seria inventar.
+        if (place.camposSemMudanca > 0) {
+            const aviso = card.querySelector('.card-sem-diferenca');
+            if (aviso) { aviso.classList.remove('hidden'); aviso.classList.add('flex'); }
+        }
+        return;
+    }
     const changesBox = card.querySelector('.card-changes');
     const changesList = card.querySelector('.card-changes-list');
     changesList.innerHTML = place.changes.map((c) => {
@@ -2080,6 +2090,22 @@ function renderCardChanges(card, place) {
             const add = (c.delta.add || []).map((v) => item(v, 'diff-add', '+')).join('');
             const del = (c.delta.del || []).map((v) => item(v, 'diff-del', '−')).join('');
             return `<div class="diff-row diff-row-lista">${rotulo}<span class="diff-delta">${add}${del}</span></div>`;
+        }
+
+        // Objeto simples: só as folhas que mudaram. Antes o card mostrava o
+        // objeto inteiro em JSON pra dizer que um campo virou outro — medido na
+        // fila real com `categoryAttributes` de um eletroposto. O caminho da
+        // folha vai cru (`CHARGING_STATION.network`) porque é o identificador
+        // que casa com o WME, mesma razão da categoria.
+        // `geometry` NUNCA entra aqui: o core já a exclui, e a guarda dupla é
+        // porque ela também é objeto simples e o sequestro desta linha desfaz
+        // silenciosamente o "moveu 84 m" (aconteceu ao introduzir isto).
+        if (c.field !== 'geometry' && c.objDelta && c.objDelta.length) {
+            const linhas = c.objDelta.map((l) =>
+                `<span class="diff-obj-linha"><span class="diff-obj-caminho">${escapeHtml(l.caminho)}</span>`
+                + `<span class="diff-from">${escapeHtml(valorDoDiff(l.de))}</span>`
+                + `<span class="diff-to">${escapeHtml(valorDoDiff(l.para))}</span></span>`).join('');
+            return `<div class="diff-row diff-row-obj">${rotulo}<span class="diff-obj">${linhas}</span></div>`;
         }
 
         // GEOMETRIA tem linha própria. Duas coordenadas de 6 casas quase iguais,
@@ -2258,6 +2284,13 @@ function valorDoDiff(v) {
     if (v === true) return t('card.value.yes');
     if (v === false) return t('card.value.no');
     if (v === '') return t('card.value.unnamed');
+    // Objeto/array chegando aqui vira "[object Object]" no `String()` — o
+    // defeito que já apareceu em 33 de 142 pedidos com geometria. O diff de
+    // objeto pode ter folha que é lista (`chargingPorts` de um eletroposto,
+    // medido), e ela precisa de saída. JSON é feio; invisível é pior.
+    if (typeof v === 'object') {
+        try { return JSON.stringify(v); } catch { return String(v); }
+    }
     return String(v);
 }
 

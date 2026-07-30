@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-11
+
+### Alterado
+- **Sumiram as linhas que diziam "mudou" e mostravam a mesma coisa dos dois lados.** O Waze não manda um "o que mudou": manda o local inteiro com os valores propostos, então campos que ninguém tocou vinham junto carregando o valor atual e viravam linha (`BR-060 → BR-060`). Agora só entra na lista o que realmente mudou. A comparação é feita antes de qualquer formatação, de propósito: uma área pode mudar de forma e ser escrita igual na tela — na sua fila havia uma que andou 84 metros assim.
+- **Quando o pedido não altera nada, o card agora diz isso** em vez de ficar mudo: *"Nada a alterar — os valores enviados são iguais aos atuais."* Só aparece quando de fato houve o que comparar; se o pedido não trouxe nenhum campo, nada é afirmado.
+
+### Corrigido
+- **Campo com estrutura interna aparecia como um bloco de JSON.** Um eletroposto mostrava o objeto inteiro só pra dizer que a rede tinha mudado de nome. Agora aparece só o que mudou lá dentro: `CHARGING_STATION.network: Porsche Smart Mobility GmbH → Ponto de Carga`.
+
 ## v2026.07.30-10
 
 ### Corrigido

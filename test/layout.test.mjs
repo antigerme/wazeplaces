@@ -1313,3 +1313,40 @@ test('foco num autor prioriza sem esconder ninguém', () => {
   assert.match(bar[0], /absolute/, 'a barra voltou a empurrar o layout em vez de flutuar');
   assert.doesNotMatch(bar[0], /<button[\s\S]*<button/, 'apareceu botão DENTRO da barra: o ✕ é ícone, não alvo');
 });
+
+test('linha "X → X" não chega na tela, e o aviso só afirma o que foi comparado', () => {
+  const CORE = read('server/core.mjs');
+  const APP = read('js/app.js');
+  const HTML_ = read('index.html');
+
+  // O filtro mora no CORE porque só lá existe o valor CRU. No frontend já é
+  // tarde: a geometria chega formatada, e dois polígonos diferentes podem
+  // imprimir IGUAL — medido, um deles andou 84 metros. Filtrar por texto
+  // esconderia mudança de verdade.
+  assert.match(CORE, /export const mesmoValor/, 'sumiu o comparador de valor cru');
+  assert.match(CORE, /if \(mesmoValor\(venue\[k\] \?\? null, newValue \?\? null\)\) \{/,
+    'o laço de changes parou de pular campo que não mudou — volta a linha "X → X"');
+  assert.match(CORE, /camposSemMudanca\+\+/, 'ninguém mais conta os campos filtrados');
+  assert.match(CORE, /camposSemMudanca,/, 'o place parou de expor camposSemMudanca pro card');
+
+  // Duas causas MUITO diferentes de "nenhuma linha", e só uma pode virar
+  // afirmação: comparamos e nada muda × não veio nada pra comparar.
+  assert.match(APP, /if \(place\.camposSemMudanca > 0\)/,
+    'o card afirma "nada a alterar" sem saber se houve o que comparar');
+  const aviso = HTML_.split('\n').find((l) => l.includes('card-sem-diferenca hidden'));
+  assert.ok(aviso, 'sumiu o aviso de "nada a alterar" do template');
+  assert.match(aviso, /flex-shrink-0/,
+    'o aviso virou o elemento que encolhe no lugar da caixa longa (gotcha #29)');
+  assert.match(aviso, /\bhidden\b/, 'o aviso deixou de nascer escondido');
+
+  // Geometria NUNCA pode cair no diff de objeto: ela é objeto simples e o
+  // sequestro desta linha desfaz em silêncio o "moveu 84 m" (aconteceu).
+  assert.match(CORE, /else if \(k !== 'geometry'\)/,
+    'geometria voltou a entrar no diff de objeto — o "moveu N m" vira coordenada crua');
+  assert.match(APP, /c\.field !== 'geometry' && c\.objDelta/,
+    'sumiu a guarda dupla que mantém a linha de geometria fora do diff de objeto');
+
+  // Objeto/array chegando no valor do diff vira "[object Object]" no String().
+  assert.match(APP, /if \(typeof v === 'object'\) \{[\s\S]{0,120}JSON\.stringify/,
+    'valorDoDiff voltou a poder imprimir [object Object]');
+});
