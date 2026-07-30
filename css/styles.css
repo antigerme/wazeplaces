@@ -738,7 +738,13 @@ button:active {
   display: grid;
   grid-template-columns: auto 1fr 1fr;
   gap: 0.5rem;
-  align-items: center;
+  /* `start`, não `center`. Com valor de várias linhas o centro da linha sai da
+     caixa: medido num pedido real com 2 pontos de entrada, a linha ficou com
+     476px dentro de uma caixa de 106px e o rótulo foi parar 320px ABAIXO do
+     topo visível — o editor rolava até lá e via um bloco de texto sem rótulo
+     nenhum. Alinhado no topo, o rótulo fica sempre colado na primeira linha do
+     seu valor. Em linha de uma linha só, start e center dão o mesmo resultado. */
+  align-items: start;
   padding: 0.5rem 0;
   border-bottom: 1px solid #f1f5f9;
 }

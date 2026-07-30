@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.07.30-06
+
+### Corrigido
+- **Numa mudança com muitas linhas, o nome do campo sumia da vista.** O rótulo ficava centralizado na altura inteira do bloco: com dois pontos de entrada, a linha passava de 470px dentro de uma caixa de 106px, e o rótulo ia parar bem abaixo do que dá pra ver. Você rolava até lá e encontrava um bloco de texto sem saber de que campo era. Agora o rótulo fica sempre colado na primeira linha do seu valor.
+
 ## v2026.07.30-05
 
 ### Alterado
