@@ -40,6 +40,11 @@ const WAZE_IMAGE_BASE = 'https://venue-image.waze.com/thumbs/thumb700_';
 const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
 
 export const SESSION_TTL = 1814400; // 21 dias (cookies do Waze duram ~28d)
+// De quanto em quanto tempo o prazo é reescrito no store. Não é o prazo: é a
+// granularidade da renovação. Um dia limita a ~1 escrita por sessão por dia
+// (o KV do Cloudflare aceita 1 escrita/s por chave, e a app faz 3 chamadas só
+// ao abrir), e ainda deixa 20 dias de folga sobre o TTL de 21.
+export const SESSION_REFRESH_AFTER = 86400; // 1 dia
 const MIN_RANK_WAZE = 2; // display L3+ (Waze é 0-indexed)
 
 const wazeIssuesEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Search/List';
@@ -357,15 +362,58 @@ export function makeSessions({ store, keyBytes }) {
       const token = randomToken();
       const hash = await sha256hex(token);
       const blob = await encryptCookies(cookiesContent, keyBytes);
-      await store.put(hash, blob, SESSION_TTL);
+      // Já nasce com carimbo: sem ele a PRIMEIRA leitura de toda sessão nova
+      // dispararia uma renovação imediata — uma escrita a mais no KV por login,
+      // à toa.
+      await store.put(hash, Math.floor(Date.now() / 1000) + '|' + blob, SESSION_TTL);
       return token;
     },
+    // Renova o prazo A CADA USO — janela deslizante, não prazo fixo.
+    //
+    // O adaptador de arquivo da VM sempre fez isso (mtime + touch). O KV do
+    // Cloudflare NÃO: `expirationTtl` conta do `put`, e o `get` não estende
+    // nada. Resultado medido com o core de verdade e um KV simulado: editor
+    // usando a app TODO DIA era deslogado no dia 21, com ZERO escritas no KV
+    // no período. A validade contava do login, não do último uso — e o
+    // CLAUDE.md descrevia os dois adaptadores como se fossem equivalentes.
+    //
+    // O carimbo vai no VALOR, no mesmo formato que `createPairing` já usa
+    // (`ts|blob`), porque o KV não sabe dizer quanto falta do TTL. `|` é seguro
+    // como separador: base64 não o produz.
+    //
+    // Só reescreve depois de SESSION_REFRESH_AFTER, e isso não é economia à
+    // toa: o KV limita 1 escrita por segundo por chave, e renovar a cada
+    // chamada (são 3 só ao abrir a app) esbarraria nesse teto — trocaria um
+    // logout por outro.
     async loadSession(token) {
       if (!token) return null;
       const hash = await sha256hex(token);
-      const blob = await store.get(hash);
-      if (!blob) return null;
-      return decryptCookies(blob, keyBytes);
+      const raw = await store.get(hash);
+      if (!raw) return null;
+
+      const sep = raw.indexOf('|');
+      // Sessão criada ANTES desta mudança não tem carimbo. Ela precisa seguir
+      // valendo — o objetivo aqui é justamente parar de derrubar gente — então
+      // entra como "carimbo desconhecido" e é renovada na primeira leitura.
+      const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
+      const blob = sep > 0 && Number.isFinite(carimbo) ? raw.slice(sep + 1) : raw;
+
+      const cookies = await decryptCookies(blob, keyBytes);
+      if (!cookies) return null;
+
+      const agora = Math.floor(Date.now() / 1000);
+      if (!Number.isFinite(carimbo) || agora - carimbo >= SESSION_REFRESH_AFTER) {
+        // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
+        // a sessão segue valendo com o prazo antigo. Deixar isto lançar
+        // transformaria uma falha de renovação em 401 — exatamente o defeito
+        // que esta função existe pra corrigir.
+        try {
+          await store.put(hash, agora + '|' + blob, SESSION_TTL);
+        } catch (e) {
+          // silêncio proposital: nada aqui deve derrubar a sessão
+        }
+      }
+      return cookies;
     },
     async destroySession(token) {
       if (!token) return;

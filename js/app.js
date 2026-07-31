@@ -57,6 +57,10 @@ const PREFETCH_THRESHOLD = 3;
 const MAX_EMPTY_PAGES = 5;
 const TYPES_ALL = ['VENUE', 'IMAGE', 'REQUEST'];
 const UNAUTHORIZED_REDIRECT_MS = 800;
+// Espera antes de confirmar se a sessão morreu mesmo. Curto o bastante pra não
+// atrasar quem precisa relogar de verdade, e longo o bastante pra a rajada que
+// provocou o 403 do WAF já ter passado.
+const VERIFICA_SESSAO_MS = 1200;
 const STATE_RECOVERY_MS = 200;
 
 const AppState = {
@@ -1308,7 +1312,50 @@ async function loadProfileAndAuxData() {
     }
 }
 
-function handleUnauthorized() {
+// UM 401 não é prova de que a sessão morreu — e tratar como se fosse era o
+// caminho mais curto pro editor cair na tela de login sem ter pedido pra sair.
+//
+// Três coisas chegam aqui como 401 e só UMA delas exige entrar de novo:
+//   · o Waze recusou os cookies de verdade (expiraram)           → é pra sair
+//   · o Waze devolveu 403 por rajada/WAF                          → passageiro
+//   · o KV devolveu vazio num blip de propagação                  → passageiro
+// O core já manda chaves diferentes (`srv.err.cookiesExpired` × `sessionExpired`),
+// mas nenhuma delas distingue passageiro de definitivo — só uma segunda
+// chamada distingue.
+//
+// Então confirma antes de derrubar: espera um pouco e pergunta o perfil. Se
+// responder, a sessão está viva e nada é apagado. Custa ~1s no caso em que os
+// cookies morreram MESMO, e evita o logout falso no caso em que não morreram.
+let verificandoSessao = false;
+
+async function handleUnauthorized() {
+    // Concorrência é o normal aqui, não a exceção: ao abrir a app saem TRÊS
+    // chamadas ao Waze quase juntas (perfil, países, busca). Sem esta trava,
+    // cada uma que voltasse 401 fazia sua própria verificação e seu próprio
+    // toast — foi assim que o owner recebeu DOIS "Sessão expirou" empilhados.
+    if (verificandoSessao || !AppState.authenticated) return;
+    verificandoSessao = true;
+    try {
+        await new Promise((r) => setTimeout(r, VERIFICA_SESSAO_MS));
+        const r = await API.getProfile();
+        if (r && r.errorCategory !== 'unauthorized') {
+            // Alarme falso. O pedido que falhou já foi revertido por quem o
+            // chamou; aqui só recompomos o que o 401 tinha interrompido.
+            if (r.success && r.profile) {
+                AppState.profile = r.profile;
+                renderProfileHeader();
+            }
+            showToast(t('toast.sessionKeptAlive'), 'info');
+            if (AppState.queue.length === 0 && !AppState.fetching) startFetching();
+            return;
+        }
+        derrubarSessao();
+    } finally {
+        verificandoSessao = false;
+    }
+}
+
+function derrubarSessao() {
     // Cancela ação pendente: a sessão já morreu no Waze, o executor falharia e
     // mostraria "erro ao marcar" na tela de login. Cancelar reverte o stat otimista.
     if (AppState.pendingAction) {

@@ -634,3 +634,86 @@ test('folha de objeto que é lista vira delta, não dois blocos de JSON', async 
   assert.equal(e[0].delta, undefined);
   assert.deepEqual([e[0].de, e[0].para], ['a', 'b']);
 });
+
+test('a sessão é janela DESLIZANTE: usar a app renova o prazo', async () => {
+  const { makeSessions, SESSION_TTL, SESSION_REFRESH_AFTER } = await import('../server/core.mjs');
+
+  // O adaptador de arquivo da VM sempre renovou (mtime + touch). O KV do
+  // Cloudflare NÃO: `expirationTtl` conta do `put` e o `get` não estende nada.
+  // Medido com este mesmo simulador antes da correção: editor usando a app
+  // TODO DIA era deslogado no dia 21, com ZERO escritas no KV no período.
+  const DIA = 86400;
+  const T0 = 1785000000;
+  let agora = T0;
+  const relogio = Date.now;
+  Date.now = () => agora * 1000;
+
+  try {
+    const kv = new Map();
+    let escritas = 0;
+    const store = {
+      get: (h) => {
+        const e = kv.get(h);
+        if (!e) return null;
+        if (agora >= e.gravadoEm + e.ttl) { kv.delete(h); return null; }  // KV expira sozinho
+        return e.blob;
+      },
+      put: (h, blob, ttl) => { escritas++; kv.set(h, { blob, gravadoEm: agora, ttl: ttl || SESSION_TTL }); },
+      delete: (h) => kv.delete(h),
+    };
+    const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+    const token = await sessions.createSession('_web_session=a; _csrf_token=b');
+
+    // Uso diário por muito mais que o TTL: tem que continuar viva.
+    for (let dia = 1; dia <= 90; dia++) {
+      agora = T0 + dia * DIA;
+      assert.ok(await sessions.loadSession(token), `sessão morreu no dia ${dia} com uso diário`);
+    }
+
+    // Rajada no MESMO dia não pode virar uma escrita por leitura: o KV aceita
+    // 1 escrita/s por chave, e a app faz 3 chamadas só ao abrir. Trocar o
+    // logout por estouro de limite de escrita seria trocar de defeito.
+    const antes = escritas;
+    for (let i = 0; i < 30; i++) { agora += 1; await sessions.loadSession(token); }
+    assert.equal(escritas, antes, 'rajada no mesmo dia gerou escrita a cada leitura');
+    assert.ok(SESSION_REFRESH_AFTER >= 3600, 'granularidade de renovação curta demais pro limite do KV');
+
+    // Sumir por MAIS que o TTL ainda expira — a janela desliza, não é eterna.
+    agora += SESSION_TTL + DIA;
+    assert.equal(await sessions.loadSession(token), null, 'sessão sobreviveu além do TTL sem uso');
+  } finally {
+    Date.now = relogio;
+  }
+});
+
+test('sessão gravada ANTES do carimbo continua valendo', async () => {
+  const { makeSessions } = await import('../server/core.mjs');
+
+  // Compatibilidade não é detalhe aqui: o objetivo da mudança é PARAR de
+  // derrubar gente. Se o formato novo invalidasse as sessões já gravadas no KV
+  // de produção, o deploy deslogaria todo mundo de uma vez — exatamente o
+  // defeito que estamos corrigindo, só que pior.
+  const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+  const kv = new Map();
+  const store = {
+    get: (h) => kv.get(h) ?? null,
+    put: (h, blob) => kv.set(h, blob),
+    delete: (h) => kv.delete(h),
+  };
+  const sessions = makeSessions({ store, keyBytes });
+
+  const cookies = '_web_session=antigo; _csrf_token=x';
+  const token = await sessions.createSession(cookies);
+  const [hash] = [...kv.keys()];
+
+  // Rebaixa pro formato ANTIGO (blob puro, sem `ts|`) usando o blob que o
+  // próprio core gerou — assim o teste não depende de reimplementar a cripto.
+  const comCarimbo = kv.get(hash);
+  const sep = comCarimbo.indexOf('|');
+  assert.ok(sep > 0, 'createSession parou de gravar o carimbo');
+  kv.set(hash, comCarimbo.slice(sep + 1));
+
+  assert.equal(await sessions.loadSession(token), cookies, 'sessão no formato antigo parou de funcionar');
+  assert.match(kv.get(hash), /^\d+\|/, 'a sessão antiga não foi migrada pro formato com carimbo');
+  assert.equal(await sessions.loadSession(token), cookies, 'depois de migrada parou de funcionar');
+});

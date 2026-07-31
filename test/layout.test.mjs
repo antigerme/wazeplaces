@@ -1402,3 +1402,33 @@ test('item de lista vazio aparece como placeholder, e o esmaecido não derruba o
   assert.match(CSS, /\.diff-add \.valor-ausente,\s*\n\.diff-del \.valor-ausente \{\s*\n\s*opacity: 1;/,
     'o esmaecido voltou pro item de lista — contraste cai pra 3.41:1 sobre o verde');
 });
+
+test('um 401 sozinho não derruba o editor da sessão', () => {
+  const APP = read('js/app.js');
+  const API_ = read('js/api.js');
+
+  // Relato do owner: mandado pra tela de login sem ter pedido pra sair, com
+  // DOIS toasts de "Sessão expirou" empilhados. Três coisas chegam como 401 e
+  // só UMA exige relogar: cookies mortos de verdade, 403 do Waze por
+  // rajada/WAF, e blip do KV. Só uma segunda chamada distingue.
+  assert.match(APP, /async function handleUnauthorized\(\)/,
+    'handleUnauthorized voltou a ser síncrono — não dá pra confirmar antes de derrubar');
+  assert.match(APP, /const r = await API\.getProfile\(\);/,
+    'sumiu a chamada que confirma se a sessão morreu mesmo');
+  assert.match(APP, /if \(r && r\.errorCategory !== 'unauthorized'\)/,
+    'a verificação parou de poupar a sessão quando ela está viva');
+  assert.match(APP, /function derrubarSessao\(\)/, 'sumiu a derrubada explícita');
+
+  // Trava de concorrência: ao abrir a app saem TRÊS chamadas ao Waze quase
+  // juntas (perfil, países, busca). Sem ela, cada 401 fazia sua verificação e
+  // seu toast — foi o que produziu os dois toasts do print.
+  assert.match(APP, /if \(verificandoSessao \|\| !AppState\.authenticated\) return;/,
+    'sumiu a trava — 401 concorrentes voltam a derrubar e a avisar N vezes');
+
+  // A camada de TRANSPORTE não decide logout. Apagar ali tomava a decisão
+  // antes de qualquer verificação e sem chance de retry.
+  const post = API_.match(/async _post\(endpoint, body\)[\s\S]*?\n    \},/)[0];
+  assert.doesNotMatch(post.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n'),
+    /setSession\(null\)/,
+    'o _post voltou a apagar a sessão — decide logout antes de qualquer verificação');
+});
