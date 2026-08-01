@@ -1385,13 +1385,14 @@ test('item de lista vazio aparece como placeholder, e o esmaecido não derruba o
   // "Posto Equador" propunha `services: [""]`. O card mostrava `Serviços: +` e
   // mais nada — lê como app quebrada, não como "adicionando um item vazio".
   assert.match(APP, /function itemDeListaAusente/, 'sumiu a detecção de item de lista vazio');
-  const fn = APP.match(/function valorDeLista\(v\)[\s\S]*?\n\}/)[0];
+  const fn = APP.match(/function valorDeLista\([^)]*\)[\s\S]*?\n\}/)[0];
   assert.match(fn, /if \(itemDeListaAusente\(v\)\) return t\('card\.value\.empty'\);/,
     'item de lista vazio voltou a sair como string vazia');
 
   // UM renderizador só. Eram dois trechos idênticos copiados — é assim que duas
   // telas do mesmo conceito divergem sem ninguém notar.
-  assert.match(APP, /function itemDeLista\(v, cls, sinal\)/, 'sumiu o renderizador único de item');
+  assert.match(APP, /function itemDeLista\(v, cls, sinal, campo\)/,
+    'o renderizador de item perdeu o campo — sem ele a tradução de serviço não tem como ser escopada');
   assert.equal((APP.match(/const item = \(v, cls, sinal\)/g) || []).length, 0,
     'voltou a existir renderizador de item duplicado');
 

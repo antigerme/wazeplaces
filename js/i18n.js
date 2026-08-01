@@ -95,33 +95,67 @@ const I18N_DICT = {
     'card.brandKnown': '✓ conhecida', 'card.brandUnknown': '? não listada',
     'card.brandKnown.title': 'Marca reconhecida pelo Waze', 'card.brandUnknown.title': 'Marca não está na lista oficial do Waze',
     'card.changes': 'Mudanças propostas', 'card.newPhoto.title': 'Foto nova proposta neste pedido',
-    'card.flagReason': 'Motivo:', 'card.flagType.INAPPROPRIATE': 'Inapropriado',
-    // Reportes: a lista COMPLETA e a redação vêm do próprio WME — extraídas de
-    // um HAR do editor em pt-BR (`update_requests.flags`). É a melhor fonte
-    // possível: mesma palavra que o editor vê ao conferir pelo ↗ do card, e as
-    // tipagens do SDK não trazem esses valores.
+    // Reportes: a lista COMPLETA e a redação vêm do Transifex do Waze (recurso
+    // `waze-map-editor-dexter-integrated`, seção `venues.update_requests.flags`),
+    // nos 4 idiomas. É a melhor fonte possível: a mesma palavra que o editor vê
+    // ao conferir pelo ↗ do card, sem vão de tradução.
     //
-    // Duas correções que a fonte revelou, e a primeira invertia o sentido:
-    //   · DOES_NOT_MATCH_SEARCH era "Não aparece na busca" — o oposto. O local
-    //     APARECEU numa busca a que não corresponde. (E é o único jeito de o
+    // Isto já me pegou duas vezes traduzindo por intuição:
+    //   · DOES_NOT_MATCH_SEARCH era "Não aparece na busca" — o OPOSTO. O local
+    //     apareceu numa busca à qual não corresponde. (E é o único jeito de o
     //     reporte existir: pra reportar, a pessoa precisa ter achado o local.)
-    //   · CLOSED era "Fechado permanentemente"; o Waze não diz "permanentemente".
+    //   · MOVED eu pus como "mudança de endereço" em en/es/fr; o oficial é
+    //     "Place moved" / "Lugar movido" / "Lieu déplacé" — o LOCAL se mudou.
+    //     Repare que o oficial em pt é "Mudança de endereço" mesmo: as
+    //     traduções do Waze não são literais entre si, então cada idioma usa a
+    //     SUA, nunca a tradução da minha.
     //
-    // O DOES_NOT_MATCH_SEARCH NÃO usa a frase literal do WME ("Não corresponde
-    // aos resultados da pesquisa"): ela ocupa 3 linhas num Fold e faz o card
-    // inteiro rolar, o que desliga o gesto de pular (gotcha #29) — o smoke
-    // reprovou nas 4 línguas. O que precisava ser corrigido era o SENTIDO, e
-    // "Não corresponde à busca" o preserva inteiro em 1-2 linhas.
-    'card.flagType.WRONG_DETAILS': 'Informações erradas',
-    'card.flagType.CLOSED': 'Local fechado',
+    // Duas exceções deliberadas ao oficial, e só duas:
+    //   · DUPLICATE: o WME escreve "Duplicado DE <local>"; sem o alvo, o "de"
+    //     fica pendurado. Usamos a forma isolada.
+    //   · DOES_NOT_MATCH_SEARCH em pt: o oficial ("Não corresponde aos
+    //     resultados da pesquisa") ocupa 3 linhas num Fold e faz o card inteiro
+    //     rolar, o que desliga o gesto de pular (gotcha #45). Nas outras
+    //     línguas o oficial é mais CURTO que o que eu tinha escrito.
+    'card.flagReason': 'Motivo:', 'card.flagType.CLOSED': 'Local fechado',
     'card.flagType.DOES_NOT_MATCH_SEARCH': 'Não corresponde à busca',
-    // O WME escreve "Duplicado de <local>"; sem o alvo, "Duplicado" sozinho.
     'card.flagType.DUPLICATE': 'Duplicado',
+    'card.flagType.INAPPROPRIATE': 'Inapropriado',
     'card.flagType.LOW_QUALITY': 'Baixa qualidade',
     'card.flagType.MOVED': 'Mudança de endereço',
     'card.flagType.OTHER': 'Outro',
     'card.flagType.RESIDENTIAL': 'Residencial (casa)',
     'card.flagType.UNRELATED': 'Sem relação',
+    'card.flagType.WRONG_DETAILS': 'Informações erradas',
+    // Serviços do local (`services`), do Transifex do Waze — mesma fonte dos
+    // reportes. Traduzir AQUI é seguro, ao contrário de categoria: serviço é
+    // comodidade genérica ("ar-condicionado" é ar-condicionado em qualquer
+    // país), enquanto categoria o Waze regionaliza POR PAÍS e o mesmo idioma
+    // diverge entre eles (ônibus no pt-BR × autocarro no pt-PT).
+    // Só o campo `services` usa estas chaves — ver `valorDeLista`.
+    'card.service.AIRPORT_SHUTTLE': 'Transfer para o aeroporto',
+    'card.service.AIR_CONDITIONING': 'Ambiente climatizado',
+    'card.service.CARPOOL_PARKING': 'Estacionamento para caronas',
+    'card.service.CAR_WASH': 'Lava a jato',
+    'card.service.COVERED': 'Vagas cobertas',
+    'card.service.CREDIT_CARDS': 'Aceita cartão de crédito',
+    'card.service.CURBSIDE_PICKUP': 'Retirada na calçada',
+    'card.service.DELIVERIES': 'Entregas',
+    'card.service.DISABILITY_PARKING': 'Vagas PCD',
+    'card.service.DRIVETHROUGH': 'Drive-thru',
+    'card.service.EV_CHARGING_STATION': 'Eletroposto',
+    'card.service.ON_SITE_ATTENDANT': 'Atendente no local',
+    'card.service.OUTSIDE_SEATING': 'Lugares ao ar livre',
+    'card.service.PARKING_FOR_CUSTOMERS': 'Estacionamento para clientes',
+    'card.service.PARK_AND_RIDE': 'Estacione e Embarque',
+    'card.service.RESERVATIONS': 'Reservas',
+    'card.service.RESTROOMS': 'Banheiros',
+    'card.service.SECURITY': 'Segurança',
+    'card.service.TAKE_AWAY': 'Balcão para viagem',
+    'card.service.VALET': 'Manobrista ',
+    'card.service.VALLET_SERVICE': 'Serviço de manobrista',
+    'card.service.WHEELCHAIR_ACCESSIBLE': 'Acessível para cadeirantes',
+    'card.service.WI_FI': 'Wi-Fi',
     'card.change.movedM': 'moveu {d} m', 'card.change.movedKm': 'moveu {d} km',
     'card.change.reshaped': 'forma alterada', 'card.change.samePlace': 'mesma posição',
     'card.change.verts': '{de} → {para} vértices',
@@ -385,16 +419,39 @@ const I18N_DICT = {
     'card.brandKnown': '✓ known', 'card.brandUnknown': '? not listed',
     'card.brandKnown.title': 'Brand recognized by Waze', 'card.brandUnknown.title': 'Brand not in the official Waze list',
     'card.changes': 'Proposed changes', 'card.newPhoto.title': 'New photo proposed in this request',
-    'card.flagReason': 'Reason:', 'card.flagType.INAPPROPRIATE': 'Inappropriate',
-    'card.flagType.WRONG_DETAILS': 'Wrong details',
-    'card.flagType.CLOSED': 'Place closed',
-    'card.flagType.DOES_NOT_MATCH_SEARCH': 'Doesn’t match the search',
+    'card.flagReason': 'Reason:', 'card.flagType.CLOSED': 'Place closed',
+    'card.flagType.DOES_NOT_MATCH_SEARCH': 'Doesn’t match search',
     'card.flagType.DUPLICATE': 'Duplicate',
+    'card.flagType.INAPPROPRIATE': 'Inappropriate',
     'card.flagType.LOW_QUALITY': 'Low quality',
-    'card.flagType.MOVED': 'Address changed',
+    'card.flagType.MOVED': 'Place moved',
     'card.flagType.OTHER': 'Other',
-    'card.flagType.RESIDENTIAL': 'Residential (home)',
+    'card.flagType.RESIDENTIAL': 'Residential',
     'card.flagType.UNRELATED': 'Unrelated',
+    'card.flagType.WRONG_DETAILS': 'Wrong details',
+    'card.service.AIRPORT_SHUTTLE': 'Airport shuttle',
+    'card.service.AIR_CONDITIONING': 'Air conditioning',
+    'card.service.CARPOOL_PARKING': 'Park and Ride',
+    'card.service.CAR_WASH': 'Car wash',
+    'card.service.COVERED': 'Covered',
+    'card.service.CREDIT_CARDS': 'Accepts credit cards',
+    'card.service.CURBSIDE_PICKUP': 'Curbside pickup',
+    'card.service.DELIVERIES': 'Delivery',
+    'card.service.DISABILITY_PARKING': 'Accessible parking',
+    'card.service.DRIVETHROUGH': 'Drive-thru',
+    'card.service.EV_CHARGING_STATION': 'Electric vehicle charging',
+    'card.service.ON_SITE_ATTENDANT': 'On site attendant',
+    'card.service.OUTSIDE_SEATING': 'Outdoor seating',
+    'card.service.PARKING_FOR_CUSTOMERS': 'Customer parking',
+    'card.service.PARK_AND_RIDE': 'Park and Ride',
+    'card.service.RESERVATIONS': 'Reservations',
+    'card.service.RESTROOMS': 'Restrooms',
+    'card.service.SECURITY': 'Security ',
+    'card.service.TAKE_AWAY': 'Take-out',
+    'card.service.VALET': 'Valet',
+    'card.service.VALLET_SERVICE': 'Valet service',
+    'card.service.WHEELCHAIR_ACCESSIBLE': 'Wheelchair accessible',
+    'card.service.WI_FI': 'Wi-Fi',
     'card.change.movedM': 'moved {d} m', 'card.change.movedKm': 'moved {d} km',
     'card.change.reshaped': 'shape changed', 'card.change.samePlace': 'same position',
     'card.change.verts': '{de} → {para} vertices',
@@ -640,16 +697,39 @@ const I18N_DICT = {
     'card.brandKnown': '✓ conocida', 'card.brandUnknown': '? no listada',
     'card.brandKnown.title': 'Marca reconocida por Waze', 'card.brandUnknown.title': 'La marca no está en la lista oficial de Waze',
     'card.changes': 'Cambios propuestos', 'card.newPhoto.title': 'Nueva foto propuesta en esta solicitud',
-    'card.flagReason': 'Motivo:', 'card.flagType.INAPPROPRIATE': 'Inapropiado',
-    'card.flagType.WRONG_DETAILS': 'Datos incorrectos',
-    'card.flagType.CLOSED': 'Lugar cerrado',
-    'card.flagType.DOES_NOT_MATCH_SEARCH': 'No corresponde a la búsqueda',
+    'card.flagReason': 'Motivo:', 'card.flagType.CLOSED': 'Lugar cerrado',
+    'card.flagType.DOES_NOT_MATCH_SEARCH': 'No coincide con la búsqueda',
     'card.flagType.DUPLICATE': 'Duplicado',
+    'card.flagType.INAPPROPRIATE': 'Inapropiado',
     'card.flagType.LOW_QUALITY': 'Baja calidad',
-    'card.flagType.MOVED': 'Cambio de dirección',
+    'card.flagType.MOVED': 'Lugar movido',
     'card.flagType.OTHER': 'Otro',
-    'card.flagType.RESIDENTIAL': 'Residencial (casa)',
-    'card.flagType.UNRELATED': 'Sin relación',
+    'card.flagType.RESIDENTIAL': 'Residencial',
+    'card.flagType.UNRELATED': 'No relacionado',
+    'card.flagType.WRONG_DETAILS': 'Detalles incorrectos',
+    'card.service.AIRPORT_SHUTTLE': 'Traslado al aeropuerto',
+    'card.service.AIR_CONDITIONING': 'Aire acondicionado',
+    'card.service.CARPOOL_PARKING': 'Estacionamiento Carpool',
+    'card.service.CAR_WASH': 'Lavado de coches',
+    'card.service.COVERED': 'Cubierto',
+    'card.service.CREDIT_CARDS': 'Se aceptan tarjetas de crédito',
+    'card.service.CURBSIDE_PICKUP': 'Recogida en la acera',
+    'card.service.DELIVERIES': 'Entregas',
+    'card.service.DISABILITY_PARKING': 'Estacionamiento minusválidos',
+    'card.service.DRIVETHROUGH': 'Drive-thru',
+    'card.service.EV_CHARGING_STATION': 'Cargador Vehículos Eléctricos.',
+    'card.service.ON_SITE_ATTENDANT': 'Asistente en el lugar',
+    'card.service.OUTSIDE_SEATING': 'Asientos en el exterior',
+    'card.service.PARKING_FOR_CUSTOMERS': 'Estacionamiento para clientes',
+    'card.service.PARK_AND_RIDE': 'Estacionamiento disuasorio',
+    'card.service.RESERVATIONS': 'Reservas',
+    'card.service.RESTROOMS': 'Aseos',
+    'card.service.SECURITY': 'Seguridad',
+    'card.service.TAKE_AWAY': 'Para llevar',
+    'card.service.VALET': 'Aparcacoches',
+    'card.service.VALLET_SERVICE': 'Servicio de aparcacoches',
+    'card.service.WHEELCHAIR_ACCESSIBLE': 'Acceso para sillas de ruedas',
+    'card.service.WI_FI': 'Wi-Fi',
     'card.change.movedM': 'se movió {d} m', 'card.change.movedKm': 'se movió {d} km',
     'card.change.reshaped': 'forma modificada', 'card.change.samePlace': 'misma posición',
     'card.change.verts': '{de} → {para} vértices',
@@ -895,16 +975,39 @@ const I18N_DICT = {
     'card.brandKnown': '✓ connue', 'card.brandUnknown': '? non listée',
     'card.brandKnown.title': 'Marque reconnue par Waze', 'card.brandUnknown.title': 'Marque absente de la liste officielle Waze',
     'card.changes': 'Modifications proposées', 'card.newPhoto.title': 'Nouvelle photo proposée dans cette demande',
-    'card.flagReason': 'Motif :', 'card.flagType.INAPPROPRIATE': 'Inapproprié',
-    'card.flagType.WRONG_DETAILS': 'Informations erronées',
-    'card.flagType.CLOSED': 'Lieu fermé',
+    'card.flagReason': 'Motif :', 'card.flagType.CLOSED': 'Lieu fermé',
     'card.flagType.DOES_NOT_MATCH_SEARCH': 'Ne correspond pas à la recherche',
     'card.flagType.DUPLICATE': 'Doublon',
+    'card.flagType.INAPPROPRIATE': 'Inapproprié(e)',
     'card.flagType.LOW_QUALITY': 'Faible qualité',
-    'card.flagType.MOVED': 'Changement d’adresse',
+    'card.flagType.MOVED': 'Lieu déplacé',
     'card.flagType.OTHER': 'Autre',
-    'card.flagType.RESIDENTIAL': 'Résidentiel (domicile)',
+    'card.flagType.RESIDENTIAL': 'Résidentiel',
     'card.flagType.UNRELATED': 'Sans rapport',
+    'card.flagType.WRONG_DETAILS': 'Détails erronés',
+    'card.service.AIRPORT_SHUTTLE': 'Navette aéroport',
+    'card.service.AIR_CONDITIONING': 'Climatisation',
+    'card.service.CARPOOL_PARKING': 'Places covoiturage',
+    'card.service.CAR_WASH': 'Lavage auto',
+    'card.service.COVERED': 'Couvert',
+    'card.service.CREDIT_CARDS': 'Accepte les cartes de crédit',
+    'card.service.CURBSIDE_PICKUP': 'Click & Collect',
+    'card.service.DELIVERIES': 'Livraisons',
+    'card.service.DISABILITY_PARKING': 'Places PMR',
+    'card.service.DRIVETHROUGH': 'Drive',
+    'card.service.EV_CHARGING_STATION': 'Bornes de charge',
+    'card.service.ON_SITE_ATTENDANT': 'Agent d\'accueil',
+    'card.service.OUTSIDE_SEATING': 'Terrasse extérieure',
+    'card.service.PARKING_FOR_CUSTOMERS': 'Parking client',
+    'card.service.PARK_AND_RIDE': 'P+R',
+    'card.service.RESERVATIONS': 'Réservations',
+    'card.service.RESTROOMS': 'Toilettes',
+    'card.service.SECURITY': 'Surveillance',
+    'card.service.TAKE_AWAY': 'À emporter',
+    'card.service.VALET': 'Voiturier',
+    'card.service.VALLET_SERVICE': 'Service de voiturier',
+    'card.service.WHEELCHAIR_ACCESSIBLE': 'Accessible en fauteuil roulant',
+    'card.service.WI_FI': 'Wi-Fi',
     'card.change.movedM': 'déplacé de {d} m', 'card.change.movedKm': 'déplacé de {d} km',
     'card.change.reshaped': 'forme modifiée', 'card.change.samePlace': 'même position',
     'card.change.verts': '{de} → {para} sommets',
