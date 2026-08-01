@@ -2558,17 +2558,9 @@ function loadHistory() {
     if (AppState.history) return AppState.history;
     let h = {};
     try { h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}') || {}; } catch (e) { h = {}; }
-    // Migração do formato antigo (só baldes): soma o que já existe pro
-    // acumulador, senão a primeira poda faria o "Total" encolher.
-    if (!h._total) {
-        const t = { read: 0, rejected: 0 };
-        for (const [k, v] of Object.entries(h)) {
-            if (k === '_total' || !v) continue;
-            t.read += v.read || 0;
-            t.rejected += v.rejected || 0;
-        }
-        h._total = t;
-    }
+    // Acumulador que sobrevive à poda dos baldes diários. Só inicializa — a
+    // soma retroativa do formato antigo saiu junto com os outros resíduos.
+    if (!h._total) h._total = { read: 0, rejected: 0 };
     AppState.history = h;
     if (podarHistorico(h)) salvarHistorico(h);
     return h;
