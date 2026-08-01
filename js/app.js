@@ -1349,13 +1349,28 @@ async function handleUnauthorized() {
             if (AppState.queue.length === 0 && !AppState.fetching) startFetching();
             return;
         }
-        derrubarSessao();
+        // A confirmação também diz de QUAL lado falhou, e isso vira a mensagem:
+        // o core já mandava chaves diferentes (`srv.err.cookiesExpired` quando o
+        // Waze recusou; `srv.err.sessionExpired` quando a nossa sessão sumiu) e
+        // o frontend juntava as duas numa frase só. Separar transforma a próxima
+        // ocorrência em EVIDÊNCIA — dá pra saber de onde veio sem HAR nem
+        // exportar cookie de novo — e ainda diz ao editor algo que ele pode
+        // usar: "o Waze recusou" e "você ficou fora tempo demais" pedem cuidados
+        // diferentes, mesmo que a ação seja a mesma.
+        derrubarSessao(r && r.errorKey);
     } finally {
         verificandoSessao = false;
     }
 }
 
-function derrubarSessao() {
+// Chave do core → frase que o editor lê. Chave desconhecida cai na frase
+// genérica de sempre: mensagem vaga é ruim, mensagem errada é pior.
+const MOTIVO_DA_QUEDA = {
+    'srv.err.cookiesExpired': 'toast.sessionExpired.waze',
+    'srv.err.sessionExpired': 'toast.sessionExpired.local',
+};
+
+function derrubarSessao(errorKey) {
     // Cancela ação pendente: a sessão já morreu no Waze, o executor falharia e
     // mostraria "erro ao marcar" na tela de login. Cancelar reverte o stat otimista.
     if (AppState.pendingAction) {
@@ -1363,7 +1378,7 @@ function derrubarSessao() {
         AppState.pendingAction = null;
     }
     removeUndoBanner();
-    showToast(t('toast.sessionExpired'), 'error');
+    showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
     API.setSession(null);
     AppState.profile = null;
     AppState.authenticated = false;

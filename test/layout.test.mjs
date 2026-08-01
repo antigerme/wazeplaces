@@ -1417,7 +1417,20 @@ test('um 401 sozinho não derruba o editor da sessão', () => {
     'sumiu a chamada que confirma se a sessão morreu mesmo');
   assert.match(APP, /if \(r && r\.errorCategory !== 'unauthorized'\)/,
     'a verificação parou de poupar a sessão quando ela está viva');
-  assert.match(APP, /function derrubarSessao\(\)/, 'sumiu a derrubada explícita');
+  assert.match(APP, /function derrubarSessao\(/, 'sumiu a derrubada explícita');
+
+  // A confirmação também diz de QUAL lado falhou. O core já mandava chaves
+  // diferentes e o frontend juntava numa frase só — separar transforma a
+  // próxima ocorrência em evidência, sem precisar de HAR nem de novo cookie.
+  assert.match(APP, /'srv\.err\.cookiesExpired': 'toast\.sessionExpired\.waze'/,
+    'sumiu a distinção "o Waze recusou" × "nossa sessão venceu"');
+  assert.match(APP, /'srv\.err\.sessionExpired': 'toast\.sessionExpired\.local'/,
+    'sumiu a distinção da sessão local');
+  assert.match(APP, /derrubarSessao\(r && r\.errorKey\)/,
+    'a derrubada parou de receber o motivo — volta a frase única');
+  // Chave desconhecida cai na frase genérica: vaga é ruim, errada é pior.
+  assert.match(APP, /MOTIVO_DA_QUEDA\[errorKey\] \|\| 'toast\.sessionExpired'/,
+    'sumiu o fallback pra chave que não conhecemos');
 
   // Trava de concorrência: ao abrir a app saem TRÊS chamadas ao Waze quase
   // juntas (perfil, países, busca). Sem ela, cada 401 fazia sua verificação e
