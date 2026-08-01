@@ -100,7 +100,18 @@ const CARDS = {
     categories: ['SHOPPING_AND_SERVICES'], address: 'Rua Bernardino de Campos, 3000 - Centro',
     updateType: 'Reporte (Sinalização)', updateTypeKey: 'FLAG', reqType: 'REQUEST', reqSubType: 'FLAG',
     createdBy: 'mariazinha', imageUrls: [foto, foto], brand: null, changes: [],
-    flagType: 'INAPPROPRIATE', flagSubjectType: 'IMAGE', flagEntityID: null,
+    // CLOSED: 7 ocorrências na fila real, e a redação vem do próprio WME. Era
+    // INAPPROPRIATE, que não ocorre NENHUMA vez.
+    //
+    // RESÍDUO MEDIDO, na linha do que o gotcha #29 já registra: num Fold
+    // (280×653), motivo de DUAS linhas + comentário longo estoura e cai na rede
+    // de segurança (conteúdo salta de 289 pra 476px, porque a rede troca a caixa
+    // longa de `flex: 1 1 0%` pra `flex: 0 0 auto`). Só o
+    // `DOES_NOT_MATCH_SEARCH` chega a duas linhas ali — e, medido na fila real,
+    // os 3 casos dele vieram SEM comentário, então a combinação que estoura não
+    // apareceu na prática. O degrau de tela estreita já recuperou o caso do
+    // francês (`Résidentiel (domicile)` ia a duas linhas e agora cabe em uma).
+    flagType: 'CLOSED', flagSubjectType: 'IMAGE', flagEntityID: null,
     flagComment: 'Esse lugar fechou faz mais de um ano, hoje é uma oficina mecânica. Passei lá ontem e confirmei com o dono do imóvel, que disse que a loja saiu em 2024. O ponto está errado no mapa e atrapalha quem procura.',
     dateAdded: 1785203731191, lat: -20.8, lon: -49.4,
   },

@@ -8,6 +8,16 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.01-04
+
+### Corrigido
+- **Um motivo de reporte estava com o sentido invertido.** `DOES_NOT_MATCH_SEARCH` aparecia como "Não aparece na busca", quando o Waze quer dizer o contrário: o local **apareceu** numa busca à qual ele não corresponde. A diferença muda o que o editor faz — na leitura errada a saída seria *adicionar* nome alternativo; na certa, é revisar um nome ou apelido genérico demais. Agora: **"Não corresponde à busca"**.
+- **"Fechado permanentemente" virou "Local fechado".** O Waze não diz "permanentemente", e um local pode estar fechado temporariamente.
+
+### Adicionado
+- **Mais seis motivos de reporte ganharam tradução**: duplicado, baixa qualidade, mudança de endereço, outro, residencial (casa) e sem relação. Antes apareciam com o nome técnico em inglês. A lista completa e a redação vieram do próprio editor de mapas do Waze, então é a mesma palavra que você vê ao conferir pelo ↗ do card.
+- **Em telas estreitas, o motivo do reporte ficou mais compacto** para caber numa linha. Em francês, "Résidentiel (domicile)" quebrava em duas e fazia o card inteiro rolar — o que atrapalha o gesto de pular.
+
 ## v2026.08.01-01
 
 ### Alterado

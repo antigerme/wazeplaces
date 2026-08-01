@@ -96,13 +96,32 @@ const I18N_DICT = {
     'card.brandKnown.title': 'Marca reconhecida pelo Waze', 'card.brandUnknown.title': 'Marca não está na lista oficial do Waze',
     'card.changes': 'Mudanças propostas', 'card.newPhoto.title': 'Foto nova proposta neste pedido',
     'card.flagReason': 'Motivo:', 'card.flagType.INAPPROPRIATE': 'Inapropriado',
-    // Reportes: os 3 tipos MEDIDOS na fila real (WRONG_DETAILS 13, CLOSED 7,
-    // DOES_NOT_MATCH_SEARCH 3). O dicionário só tinha INAPPROPRIATE, então 100%
-    // dos cards de reporte mostravam o enum cru. As tipagens do SDK não listam
-    // estes valores — o owner avisa que a doc do Waze fica pra trás; vale o dado.
+    // Reportes: a lista COMPLETA e a redação vêm do próprio WME — extraídas de
+    // um HAR do editor em pt-BR (`update_requests.flags`). É a melhor fonte
+    // possível: mesma palavra que o editor vê ao conferir pelo ↗ do card, e as
+    // tipagens do SDK não trazem esses valores.
+    //
+    // Duas correções que a fonte revelou, e a primeira invertia o sentido:
+    //   · DOES_NOT_MATCH_SEARCH era "Não aparece na busca" — o oposto. O local
+    //     APARECEU numa busca a que não corresponde. (E é o único jeito de o
+    //     reporte existir: pra reportar, a pessoa precisa ter achado o local.)
+    //   · CLOSED era "Fechado permanentemente"; o Waze não diz "permanentemente".
+    //
+    // O DOES_NOT_MATCH_SEARCH NÃO usa a frase literal do WME ("Não corresponde
+    // aos resultados da pesquisa"): ela ocupa 3 linhas num Fold e faz o card
+    // inteiro rolar, o que desliga o gesto de pular (gotcha #29) — o smoke
+    // reprovou nas 4 línguas. O que precisava ser corrigido era o SENTIDO, e
+    // "Não corresponde à busca" o preserva inteiro em 1-2 linhas.
     'card.flagType.WRONG_DETAILS': 'Informações erradas',
-    'card.flagType.CLOSED': 'Fechado permanentemente',
-    'card.flagType.DOES_NOT_MATCH_SEARCH': 'Não aparece na busca',
+    'card.flagType.CLOSED': 'Local fechado',
+    'card.flagType.DOES_NOT_MATCH_SEARCH': 'Não corresponde à busca',
+    // O WME escreve "Duplicado de <local>"; sem o alvo, "Duplicado" sozinho.
+    'card.flagType.DUPLICATE': 'Duplicado',
+    'card.flagType.LOW_QUALITY': 'Baixa qualidade',
+    'card.flagType.MOVED': 'Mudança de endereço',
+    'card.flagType.OTHER': 'Outro',
+    'card.flagType.RESIDENTIAL': 'Residencial (casa)',
+    'card.flagType.UNRELATED': 'Sem relação',
     'card.change.movedM': 'moveu {d} m', 'card.change.movedKm': 'moveu {d} km',
     'card.change.reshaped': 'forma alterada', 'card.change.samePlace': 'mesma posição',
     'card.change.verts': '{de} → {para} vértices',
@@ -368,8 +387,14 @@ const I18N_DICT = {
     'card.changes': 'Proposed changes', 'card.newPhoto.title': 'New photo proposed in this request',
     'card.flagReason': 'Reason:', 'card.flagType.INAPPROPRIATE': 'Inappropriate',
     'card.flagType.WRONG_DETAILS': 'Wrong details',
-    'card.flagType.CLOSED': 'Permanently closed',
-    'card.flagType.DOES_NOT_MATCH_SEARCH': 'Does not show in search',
+    'card.flagType.CLOSED': 'Place closed',
+    'card.flagType.DOES_NOT_MATCH_SEARCH': 'Doesn’t match the search',
+    'card.flagType.DUPLICATE': 'Duplicate',
+    'card.flagType.LOW_QUALITY': 'Low quality',
+    'card.flagType.MOVED': 'Address changed',
+    'card.flagType.OTHER': 'Other',
+    'card.flagType.RESIDENTIAL': 'Residential (home)',
+    'card.flagType.UNRELATED': 'Unrelated',
     'card.change.movedM': 'moved {d} m', 'card.change.movedKm': 'moved {d} km',
     'card.change.reshaped': 'shape changed', 'card.change.samePlace': 'same position',
     'card.change.verts': '{de} → {para} vertices',
@@ -617,8 +642,14 @@ const I18N_DICT = {
     'card.changes': 'Cambios propuestos', 'card.newPhoto.title': 'Nueva foto propuesta en esta solicitud',
     'card.flagReason': 'Motivo:', 'card.flagType.INAPPROPRIATE': 'Inapropiado',
     'card.flagType.WRONG_DETAILS': 'Datos incorrectos',
-    'card.flagType.CLOSED': 'Cerrado permanentemente',
-    'card.flagType.DOES_NOT_MATCH_SEARCH': 'No aparece en la búsqueda',
+    'card.flagType.CLOSED': 'Lugar cerrado',
+    'card.flagType.DOES_NOT_MATCH_SEARCH': 'No corresponde a la búsqueda',
+    'card.flagType.DUPLICATE': 'Duplicado',
+    'card.flagType.LOW_QUALITY': 'Baja calidad',
+    'card.flagType.MOVED': 'Cambio de dirección',
+    'card.flagType.OTHER': 'Otro',
+    'card.flagType.RESIDENTIAL': 'Residencial (casa)',
+    'card.flagType.UNRELATED': 'Sin relación',
     'card.change.movedM': 'se movió {d} m', 'card.change.movedKm': 'se movió {d} km',
     'card.change.reshaped': 'forma modificada', 'card.change.samePlace': 'misma posición',
     'card.change.verts': '{de} → {para} vértices',
@@ -866,8 +897,14 @@ const I18N_DICT = {
     'card.changes': 'Modifications proposées', 'card.newPhoto.title': 'Nouvelle photo proposée dans cette demande',
     'card.flagReason': 'Motif :', 'card.flagType.INAPPROPRIATE': 'Inapproprié',
     'card.flagType.WRONG_DETAILS': 'Informations erronées',
-    'card.flagType.CLOSED': 'Définitivement fermé',
-    'card.flagType.DOES_NOT_MATCH_SEARCH': 'N’apparaît pas dans la recherche',
+    'card.flagType.CLOSED': 'Lieu fermé',
+    'card.flagType.DOES_NOT_MATCH_SEARCH': 'Ne correspond pas à la recherche',
+    'card.flagType.DUPLICATE': 'Doublon',
+    'card.flagType.LOW_QUALITY': 'Faible qualité',
+    'card.flagType.MOVED': 'Changement d’adresse',
+    'card.flagType.OTHER': 'Autre',
+    'card.flagType.RESIDENTIAL': 'Résidentiel (domicile)',
+    'card.flagType.UNRELATED': 'Sans rapport',
     'card.change.movedM': 'déplacé de {d} m', 'card.change.movedKm': 'déplacé de {d} km',
     'card.change.reshaped': 'forme modifiée', 'card.change.samePlace': 'même position',
     'card.change.verts': '{de} → {para} sommets',
