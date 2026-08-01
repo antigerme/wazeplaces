@@ -998,6 +998,21 @@ button:active {
   .place-card .card-sem-diferenca > span[aria-hidden] {
     display: none;
   }
+  /* O MOTIVO do reporte é a informação principal do card de FLAG, e não pode
+     encolher de conteúdo — mas pode encolher de corpo. Em 280px ele passava de
+     1 pra 2 linhas com frase curta (o `Résidentiel (domicile)` do francês já
+     bastava), e aí o card inteiro rolava: a rede de segurança liga, a caixa
+     longa vira `flex: 0 0 auto` e assume a altura natural (medido: conteúdo
+     salta de 289 pra 476px). O gesto de pular morre junto (gotcha #29).
+     Empilhar rótulo e valor devolve a largura inteira ao motivo, que é o que
+     decide quantas linhas ele ocupa. 0.8125rem segue acima do piso de
+     legibilidade de 11px. */
+  .place-card .card-flag-reason {
+    display: block;
+  }
+  .place-card .card-flag-reason .card-flag-reason-value {
+    font-size: 0.8125rem;
+  }
 }
 
 /* Paisagem: empilhar foto sobre texto não cabe em 393px de altura por mais que
