@@ -19,20 +19,7 @@ const API = {
     },
 
     getSession() {
-        if (!this.sessionToken) {
-            this.sessionToken = safeLS.get('waze_session_token');
-            // Migração de versões anteriores que usavam sessionStorage (some ao fechar aba).
-            if (!this.sessionToken) {
-                try {
-                    const legacy = sessionStorage.getItem('waze_session_token');
-                    if (legacy) {
-                        safeLS.set('waze_session_token', legacy);
-                        sessionStorage.removeItem('waze_session_token');
-                        this.sessionToken = legacy;
-                    }
-                } catch (e) {}
-            }
-        }
+        if (!this.sessionToken) this.sessionToken = safeLS.get('waze_session_token');
         return this.sessionToken;
     },
 

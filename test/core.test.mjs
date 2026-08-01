@@ -686,34 +686,119 @@ test('a sessão é janela DESLIZANTE: usar a app renova o prazo', async () => {
   }
 });
 
-test('sessão gravada ANTES do carimbo continua valendo', async () => {
+test('valor de sessão SEM carimbo é rejeitado, não adivinhado', async () => {
   const { makeSessions } = await import('../server/core.mjs');
 
-  // Compatibilidade não é detalhe aqui: o objetivo da mudança é PARAR de
-  // derrubar gente. Se o formato novo invalidasse as sessões já gravadas no KV
-  // de produção, o deploy deslogaria todo mundo de uma vez — exatamente o
-  // defeito que estamos corrigindo, só que pior.
-  const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+  // Formato único: `carimbo|blob`. Havia compatibilidade pro formato antigo
+  // (blob puro) enquanto se supunha sessão em produção pra preservar — o owner
+  // confirmou que a app está em dev/testes, então saiu. Aceitar as duas formas
+  // faria a renovação de prazo depender de adivinhação: sem carimbo não dá pra
+  // saber quando a sessão foi escrita.
   const kv = new Map();
-  const store = {
-    get: (h) => kv.get(h) ?? null,
-    put: (h, blob) => kv.set(h, blob),
-    delete: (h) => kv.delete(h),
-  };
-  const sessions = makeSessions({ store, keyBytes });
+  const store = { get: (h) => kv.get(h) ?? null, put: (h, v) => kv.set(h, v), delete: (h) => kv.delete(h) };
+  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
 
-  const cookies = '_web_session=antigo; _csrf_token=x';
+  const cookies = '_web_session=x; _csrf_token=y';
   const token = await sessions.createSession(cookies);
   const [hash] = [...kv.keys()];
-
-  // Rebaixa pro formato ANTIGO (blob puro, sem `ts|`) usando o blob que o
-  // próprio core gerou — assim o teste não depende de reimplementar a cripto.
   const comCarimbo = kv.get(hash);
   const sep = comCarimbo.indexOf('|');
   assert.ok(sep > 0, 'createSession parou de gravar o carimbo');
-  kv.set(hash, comCarimbo.slice(sep + 1));
+  assert.equal(await sessions.loadSession(token), cookies);
 
-  assert.equal(await sessions.loadSession(token), cookies, 'sessão no formato antigo parou de funcionar');
-  assert.match(kv.get(hash), /^\d+\|/, 'a sessão antiga não foi migrada pro formato com carimbo');
-  assert.equal(await sessions.loadSession(token), cookies, 'depois de migrada parou de funcionar');
+  // Rebaixado pro formato antigo → some, em vez de valer com prazo inventado.
+  kv.set(hash, comCarimbo.slice(sep + 1));
+  assert.equal(await sessions.loadSession(token), null, 'valor sem carimbo foi aceito');
+
+  // Carimbo que não é número também não passa.
+  kv.set(hash, 'abc|' + comCarimbo.slice(sep + 1));
+  assert.equal(await sessions.loadSession(token), null, 'carimbo não-numérico foi aceito');
+});
+
+test('cookie rotacionado pelo Waze é aplicado por cima do guardado', async () => {
+  const { aplicarCookiesRotacionados } = await import('../server/core.mjs');
+
+  // MEDIDO com cookies reais: o Waze devolve `Set-Cookie: _web_session=…` em
+  // TODA resposta, com valor novo a cada vez (3 chamadas → 3 valores). O
+  // `_csrf_token` volta igual. Guardar o retrato do login e nunca atualizá-lo
+  // fazia o retrato azedar sozinho — o "expira sem eu ter pedido pra sair".
+  const netscape = [
+    '# Netscape HTTP Cookie File',
+    '.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tVALOR_ANTIGO',
+    '.waze.com\tTRUE\t/\tTRUE\t0\t_csrf_token\tCSRF1',
+  ].join('\n');
+
+  const novo = aplicarCookiesRotacionados(netscape, [
+    '_web_session=VALOR_NOVO; path=/; HttpOnly; Expires=Wed, 01 Jan 2027 00:00:00 GMT',
+    '_csrf_token=CSRF1; path=/',
+  ]);
+  assert.ok(novo, 'não detectou a rotação');
+  assert.match(novo, /_web_session\tVALOR_NOVO/, 'não aplicou o valor novo');
+  assert.match(novo, /_csrf_token\tCSRF1/, 'perdeu o csrf');
+  assert.doesNotMatch(novo, /VALOR_ANTIGO/, 'ficou com o valor velho');
+
+  // Nada mudou → null, pra não reescrever a sessão à toa (o KV aceita 1
+  // escrita/s por chave e há uma chamada ao Waze por swipe).
+  assert.equal(aplicarCookiesRotacionados(netscape, ['_csrf_token=CSRF1; path=/']), null);
+  assert.equal(aplicarCookiesRotacionados(netscape, []), null);
+  assert.equal(aplicarCookiesRotacionados(netscape, null), null);
+
+  // Cookie que NÃO estava guardado não entra: o Waze manda Set-Cookie de coisa
+  // que não interessa, e engordar o header a cada chamada levaria ao HTTP 400
+  // por header gigante que o filterWazeCookies já evita.
+  const comIntruso = aplicarCookiesRotacionados(netscape, ['_web_session=X', 'analytics_bobagem=Y']);
+  assert.doesNotMatch(comIntruso, /analytics_bobagem/, 'cookie de terceiro entrou na sessão');
+
+  // Valor com vírgula (Expires) não pode ser cortado no meio.
+  const comVirgula = aplicarCookiesRotacionados(netscape, ['_web_session=a,b,c; Expires=Wed, 01 Jan 2027 00:00:00 GMT']);
+  assert.match(comVirgula, /_web_session\ta,b,c/, 'o valor foi cortado na vírgula');
+});
+
+test('regravar a sessão com o cookie novo é estrangulado no tempo', async () => {
+  const { makeSessions, SESSION_COOKIE_REFRESH } = await import('../server/core.mjs');
+
+  // Há uma chamada ao Waze por swipe e o KV aceita 1 escrita/s por chave.
+  // Regravar a cada resposta trocaria o logout por estouro de limite de
+  // escrita — outro logout, com outro nome.
+  assert.ok(SESSION_COOKIE_REFRESH >= 600, 'teto de regravação curto demais pro limite do KV');
+
+  const T0 = 1785000000;
+  let agora = T0;
+  const relogio = Date.now;
+  Date.now = () => agora * 1000;
+  try {
+    const kv = new Map();
+    let escritas = 0;
+    const store = {
+      get: (h) => kv.get(h) ?? null,
+      put: (h, v) => { escritas++; kv.set(h, v); },
+      delete: (h) => kv.delete(h),
+    };
+    const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+    const token = await sessions.createSession('c1');
+    const naCriacao = escritas;
+
+    // Rajada logo depois do login: nada é regravado.
+    for (let i = 0; i < 20; i++) { agora += 1; await sessions.refreshCookies(token, 'c2'); }
+    assert.equal(escritas, naCriacao, 'regravou dentro da janela de estrangulamento');
+
+    // Passada a janela, regrava UMA vez — e a próxima rajada volta a esperar.
+    agora = T0 + SESSION_COOKIE_REFRESH + 1;
+    assert.equal(await sessions.refreshCookies(token, 'c3'), true, 'não regravou depois da janela');
+    assert.equal(escritas, naCriacao + 1);
+    for (let i = 0; i < 10; i++) { agora += 1; await sessions.refreshCookies(token, 'c4'); }
+    assert.equal(escritas, naCriacao + 1, 'a janela não reiniciou depois de regravar');
+
+    // E o conteúdo novo é o que passa a valer.
+    agora = T0 + 2 * SESSION_COOKIE_REFRESH + 2;
+    await sessions.refreshCookies(token, 'c5');
+    assert.equal(await sessions.loadSession(token), 'c5', 'a sessão não ficou com o cookie novo');
+
+    // Token inexistente não cria sessão do nada nem lança.
+    assert.equal(await sessions.refreshCookies('nao-existe', 'x'), false);
+    assert.equal(await sessions.refreshCookies(null, 'x'), false);
+    assert.equal(await sessions.refreshCookies(token, null), false);
+  } finally {
+    Date.now = relogio;
+  }
 });

@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.01-01
+
+### Corrigido
+- **A causa raiz da sessão que expirava sozinha: o Waze troca o cookie a cada resposta e a app jogava fora.** Medido com cookies reais — três chamadas devolveram três valores diferentes. A app guardava o retrato do login e nunca mais o atualizava, então o retrato azedava sozinho, por mais válido que o seu acesso ao Waze estivesse. Agora a app acompanha a troca: enquanto o seu acesso ao Waze valer, a sessão vale junto.
+
+### Removido
+- Resíduos de versões antigas que não têm mais quem atender: a migração de token do armazenamento de sessão, a tolerância a endereços terminados em `.php` (herança do backend anterior) e o formato de sessão sem carimbo de data.
+
 ## v2026.07.31-01
 
 ### Corrigido

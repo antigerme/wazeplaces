@@ -45,6 +45,11 @@ export const SESSION_TTL = 1814400; // 21 dias (cookies do Waze duram ~28d)
 // (o KV do Cloudflare aceita 1 escrita/s por chave, e a app faz 3 chamadas só
 // ao abrir), e ainda deixa 20 dias de folga sobre o TTL de 21.
 export const SESSION_REFRESH_AFTER = 86400; // 1 dia
+// De quanto em quanto tempo os cookies rotacionados pelo Waze são regravados.
+// Mais curto que o de cima porque aqui o atraso custa a validade da credencial,
+// não só o prazo da nossa sessão. Ainda assim tem teto: uma chamada por swipe
+// contra 1 escrita/s por chave no KV.
+export const SESSION_COOKIE_REFRESH = 3600; // 1 hora
 const MIN_RANK_WAZE = 2; // display L3+ (Waze é 0-indexed)
 
 const wazeIssuesEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Search/List';
@@ -216,7 +221,12 @@ export function cookieHeaderFrom(cookiesContent) {
 // Chamada ao Waze via fetch (substitui makeCurlRequest/cURL)
 // ─────────────────────────────────────────────────────────────────────────
 
-async function callWaze(url, cookieHeader, csrfToken, postData, region) {
+// `ctx` (opcional) = { data, sessions, cookies } — o que permite regravar a
+// sessão com os cookies que o Waze rotacionou. Fica AQUI, e não em cada
+// handler, porque o modo de falha deste repo é "o próximo handler nasce sem":
+// são 7 pontos de chamada hoje e o esquecimento seria silencioso — a sessão
+// só azedaria semanas depois, longe de quem escreveu o código.
+async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = null) {
   const env = wazeRefererEnv(region);
   const headers = {
     Accept: '*/*',
@@ -255,10 +265,74 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region) {
     } finally {
       clearTimeout(timer);
     }
-    return { httpCode: res.status, response, error: '' };
+    // O Waze ROTACIONA o cookie de sessão a cada resposta — MEDIDO com cookies
+    // reais: 3 chamadas ao `Session` devolveram 3 valores distintos de
+    // `_web_session` (o `_csrf_token` não muda). A app guardava o retrato do
+    // login e nunca mais o atualizava, então o retrato azedava sozinho e o
+    // editor era deslogado "sem ter pedido pra sair" — o relato do owner.
+    //
+    // Devolver os cookies novos aqui é o que permite reescrever a sessão. Quem
+    // decide se vale a escrita é o chamador (ver `atualizarCookiesDaSessao`):
+    // o KV aceita 1 escrita/s por chave e há uma chamada por swipe.
+    const setCookie = lerSetCookie(res);
+    // Melhor-esforço e sem `await` no caminho crítico do editor? NÃO: em
+    // Workers, promessa solta depois do return é cancelada quando a requisição
+    // termina. Custa uma leitura e (no máximo 1x/h) uma escrita no KV.
+    if (ctx && ctx.sessions && ctx.data && ctx.data.sessionToken && setCookie.length) {
+      const atualizado = aplicarCookiesRotacionados(ctx.cookies, setCookie);
+      if (atualizado) await ctx.sessions.refreshCookies(ctx.data.sessionToken, atualizado);
+    }
+    return { httpCode: res.status, response, error: '', setCookie };
   } catch (e) {
     return { httpCode: 0, response: '', error: e && e.message ? e.message : 'fetch failed' };
   }
+}
+
+// `headers.get('set-cookie')` JUNTA todos num string só, separados por vírgula —
+// e valor de cookie pode conter vírgula (Expires=Wed, 01 Jan...), então o split
+// corrompe. `getSetCookie()` é o único jeito correto; onde não existir, melhor
+// devolver nada do que devolver lixo.
+function lerSetCookie(res) {
+  try {
+    if (res && res.headers && typeof res.headers.getSetCookie === 'function') {
+      return res.headers.getSetCookie();
+    }
+  } catch {}
+  return [];
+}
+
+// Aplica os cookies rotacionados por cima dos guardados e devolve o conteúdo
+// novo — ou null se nada mudou (aí não há por que reescrever a sessão).
+//
+// Só troca o VALOR de cookie que já existia: o Waze manda `Set-Cookie` de
+// coisas que não interessam (analytics), e engordar o header a cada chamada
+// levaria ao HTTP 400 por header gigante que o `filterWazeCookies` já evita.
+export function aplicarCookiesRotacionados(conteudoAtual, setCookie) {
+  if (!setCookie || !setCookie.length) return null;
+  const novos = new Map();
+  for (const linha of setCookie) {
+    const igual = linha.indexOf('=');
+    if (igual <= 0) continue;
+    const nome = linha.slice(0, igual).trim();
+    const valor = linha.slice(igual + 1).split(';')[0].trim();
+    if (nome && valor) novos.set(nome, valor);
+  }
+  if (!novos.size) return null;
+
+  let mudou = false;
+  const linhas = String(conteudoAtual).split('\n').map((linha) => {
+    if (!linha.trim() || linha.startsWith('#')) return linha;
+    const p = linha.split('\t');
+    if (p.length < 7) return linha;
+    const nome = p[5];
+    if (!novos.has(nome)) return linha;
+    const valor = novos.get(nome);
+    if (p[6].trim() === valor) return linha;
+    p[6] = valor;
+    mudou = true;
+    return p.join('\t');
+  });
+  return mudou ? linhas.join('\n') : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -391,18 +465,19 @@ export function makeSessions({ store, keyBytes }) {
       const raw = await store.get(hash);
       if (!raw) return null;
 
+      // Formato único: `carimbo|blob`. Valor sem carimbo é lixo (formato de
+      // antes desta versão) e não vale a pena carregar compatibilidade — a app
+      // ainda está em dev/testes, não há sessão de produção pra preservar.
       const sep = raw.indexOf('|');
-      // Sessão criada ANTES desta mudança não tem carimbo. Ela precisa seguir
-      // valendo — o objetivo aqui é justamente parar de derrubar gente — então
-      // entra como "carimbo desconhecido" e é renovada na primeira leitura.
       const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
-      const blob = sep > 0 && Number.isFinite(carimbo) ? raw.slice(sep + 1) : raw;
+      if (!Number.isFinite(carimbo)) return null;
+      const blob = raw.slice(sep + 1);
 
       const cookies = await decryptCookies(blob, keyBytes);
       if (!cookies) return null;
 
       const agora = Math.floor(Date.now() / 1000);
-      if (!Number.isFinite(carimbo) || agora - carimbo >= SESSION_REFRESH_AFTER) {
+      if (agora - carimbo >= SESSION_REFRESH_AFTER) {
         // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
         // a sessão segue valendo com o prazo antigo. Deixar isto lançar
         // transformaria uma falha de renovação em 401 — exatamente o defeito
@@ -419,6 +494,38 @@ export function makeSessions({ store, keyBytes }) {
       if (!token) return;
       const hash = await sha256hex(token);
       await store.delete(hash);
+    },
+
+    // Reescreve a sessão com os cookies que o Waze rotacionou.
+    //
+    // MEDIDO com cookies reais: o Waze devolve `Set-Cookie: _web_session=…` em
+    // TODA resposta, com valor novo a cada vez (3 chamadas → 3 valores; o
+    // `_csrf_token` não muda). Guardar o retrato do login e nunca atualizá-lo
+    // faz o retrato azedar sozinho — é o "expira sem eu ter pedido pra sair".
+    //
+    // Estrangulado no tempo de propósito: há uma chamada ao Waze por swipe, e o
+    // KV aceita 1 escrita/s por chave. Sem o teto, um editor em ritmo trocaria
+    // o logout por estouro de limite de escrita — outro logout, com outro nome.
+    // Uma hora é folgado pra qualquer janela de tolerância plausível e mantém a
+    // escrita em no máximo 1/h por sessão ativa.
+    //
+    // Nunca lança: falha em renovar não pode derrubar a requisição do editor.
+    async refreshCookies(token, conteudoNovo) {
+      if (!token || !conteudoNovo) return false;
+      try {
+        const hash = await sha256hex(token);
+        const raw = await store.get(hash);
+        if (!raw) return false;
+        const sep = raw.indexOf('|');
+        const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
+        const agora = Math.floor(Date.now() / 1000);
+        if (Number.isFinite(carimbo) && agora - carimbo < SESSION_COOKIE_REFRESH) return false;
+        const blob = await encryptCookies(conteudoNovo, keyBytes);
+        await store.put(hash, agora + '|' + blob, SESSION_TTL);
+        return true;
+      } catch {
+        return false;
+      }
     },
 
     // Guarda os cookies (JÁ criptografados) sob um código curto e efêmero.
@@ -759,7 +866,7 @@ async function handleTestarCookies(data, { sessions }) {
   const csrf = extractCSRFToken(cookies);
   if (!csrf) apiError('Token CSRF não encontrado nos cookies. Certifique-se de estar logado no Waze Map Editor.', 400, 'srv.err.csrfMissingLogin');
 
-  const result = await callWaze(wazeSessionEndpoint(region), cookieHeaderFrom(cookies), csrf, null, region);
+  const result = await callWaze(wazeSessionEndpoint(region), cookieHeaderFrom(cookies), csrf, null, region, { data, sessions, cookies });
   if (result.httpCode === 401 || result.httpCode === 403) {
     apiError('Cookies expirados ou inválidos. Faça login novamente no Waze Map Editor e exporte novos cookies.', 400, 'srv.err.cookiesExpiredRelogin');
   }
@@ -838,7 +945,7 @@ async function handleBuscarPlaces(data, { sessions }) {
     },
   };
 
-  const result = await callWaze(wazeIssuesEndpoint(region), cookieHeader, csrf, payload, region);
+  const result = await callWaze(wazeIssuesEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
   if (result.httpCode !== 200) {
     const cat = categorizeWazeError(result.httpCode, result.response, result.error);
     return {
@@ -1159,7 +1266,7 @@ async function handleMarcarLido(data, { sessions }) {
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
   const payload = { value: true, venueUpdateRequestIds: ids };
-  const result = await callWaze(wazeMarkReadEndpoint(region), cookieHeader, csrf, payload, region);
+  const result = await callWaze(wazeMarkReadEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
 
   if (result.httpCode === 200 && cat.category !== 'already_processed') {
@@ -1198,7 +1305,7 @@ async function handleValidarPlace(data, { sessions }) {
       ],
     },
   };
-  const result = await callWaze(wazeFeaturesEndpoint(region), cookieHeader, csrf, payload, region);
+  const result = await callWaze(wazeFeaturesEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
 
   if (result.httpCode === 200 && cat.category !== 'already_processed') {
@@ -1215,7 +1322,7 @@ async function handlePerfil(data, { sessions }) {
   const region = requireRegion(data);
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
-  const result = await callWaze(wazeSessionEndpoint(region), cookieHeader, csrf, null, region);
+  const result = await callWaze(wazeSessionEndpoint(region), cookieHeader, csrf, null, region, { data, sessions, cookies });
   if (result.httpCode !== 200) {
     const cat = categorizeWazeError(result.httpCode, result.response, result.error);
     return {
@@ -1271,7 +1378,7 @@ async function handleListaPaises(data, { sessions }) {
   const region = requireRegion(data);
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
-  const result = await callWaze(wazeCountriesEndpoint(region), cookieHeader, csrf, null, region);
+  const result = await callWaze(wazeCountriesEndpoint(region), cookieHeader, csrf, null, region, { data, sessions, cookies });
   if (result.httpCode !== 200) {
     const cat = categorizeWazeError(result.httpCode, result.response, result.error);
     return {
@@ -1307,7 +1414,7 @@ async function handleListaEstados(data, { sessions }) {
   if (countryId <= 0) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
-  const result = await callWaze(wazeStatesEndpoint(region, countryId), cookieHeader, csrf, null, region);
+  const result = await callWaze(wazeStatesEndpoint(region, countryId), cookieHeader, csrf, null, region, { data, sessions, cookies });
   if (result.httpCode !== 200) {
     const cat = categorizeWazeError(result.httpCode, result.response, result.error);
     return {
@@ -1352,13 +1459,12 @@ const ROUTES = {
 };
 
 /**
- * Executa um endpoint. `name` sem `.php` (tolera sufixo por compat de cache).
+ * Executa um endpoint, pelo nome exato da rota.
  * ctx = { sessions }. Sempre resolve — nunca lança (ApiError vira resposta;
  * erro inesperado vira 500 genérico, sem vazar detalhe interno).
  */
 export async function dispatch(name, data, ctx) {
-  const clean = String(name || '').replace(/\.php$/, '');
-  const handler = ROUTES[clean];
+  const handler = ROUTES[String(name || '')];
   if (!handler) return { status: 404, body: { success: false, error: 'Endpoint não encontrado', errorKey: 'srv.err.endpointNotFound' } };
   try {
     return await handler(data || {}, ctx);

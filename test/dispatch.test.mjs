@@ -144,15 +144,17 @@ test('dispatch validar-place: SEMPRE approve:false (a app nunca aprova)', async 
   assert.ok(!/"approve"\s*:\s*true/.test(json), `pedido não pode conter approve:true — ${json.slice(0, 300)}`);
 });
 
-test('dispatch: endpoint desconhecido → 404; sufixo .php tolerado', async () => {
+test('dispatch: rota é o nome EXATO — nada de sufixo tolerado', async () => {
   const { ctx, token } = await ctxComSessao();
-  const r404 = await dispatch('nao-existe', {}, { sessions: null });
-  assert.equal(r404.status, 404);
+  assert.equal((await dispatch('nao-existe', {}, { sessions: null })).status, 404);
 
+  // O `.php` era resíduo da v2.x (backend PHP) e vivia como tolerância no
+  // dispatch, pra cache antigo. Removido: a app está em dev/testes, não há
+  // cliente velho pra atender, e tolerância silenciosa esconde erro de rota.
   const { resultado } = await comFetchMockado(
     () => ok(wazePayload()),
     () => dispatch('buscar-places.php', { sessionToken: token, region: 'row' }, ctx));
-  assert.equal(resultado.status, 200, 'compat de cache antigo com .php');
+  assert.equal(resultado.status, 404, 'sufixo .php voltou a ser tolerado');
 });
 
 // ─── Pareamento computador → celular ────────────────────────────────────────
