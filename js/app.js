@@ -57,6 +57,10 @@ const PREFETCH_THRESHOLD = 3;
 const MAX_EMPTY_PAGES = 5;
 const TYPES_ALL = ['VENUE', 'IMAGE', 'REQUEST'];
 const UNAUTHORIZED_REDIRECT_MS = 800;
+// Espera antes de confirmar se a sessão morreu mesmo. Curto o bastante pra não
+// atrasar quem precisa relogar de verdade, e longo o bastante pra a rajada que
+// provocou o 403 do WAF já ter passado.
+const VERIFICA_SESSAO_MS = 1200;
 const STATE_RECOVERY_MS = 200;
 
 const AppState = {
@@ -1308,7 +1312,65 @@ async function loadProfileAndAuxData() {
     }
 }
 
-function handleUnauthorized() {
+// UM 401 não é prova de que a sessão morreu — e tratar como se fosse era o
+// caminho mais curto pro editor cair na tela de login sem ter pedido pra sair.
+//
+// Três coisas chegam aqui como 401 e só UMA delas exige entrar de novo:
+//   · o Waze recusou os cookies de verdade (expiraram)           → é pra sair
+//   · o Waze devolveu 403 por rajada/WAF                          → passageiro
+//   · o KV devolveu vazio num blip de propagação                  → passageiro
+// O core já manda chaves diferentes (`srv.err.cookiesExpired` × `sessionExpired`),
+// mas nenhuma delas distingue passageiro de definitivo — só uma segunda
+// chamada distingue.
+//
+// Então confirma antes de derrubar: espera um pouco e pergunta o perfil. Se
+// responder, a sessão está viva e nada é apagado. Custa ~1s no caso em que os
+// cookies morreram MESMO, e evita o logout falso no caso em que não morreram.
+let verificandoSessao = false;
+
+async function handleUnauthorized() {
+    // Concorrência é o normal aqui, não a exceção: ao abrir a app saem TRÊS
+    // chamadas ao Waze quase juntas (perfil, países, busca). Sem esta trava,
+    // cada uma que voltasse 401 fazia sua própria verificação e seu próprio
+    // toast — foi assim que o owner recebeu DOIS "Sessão expirou" empilhados.
+    if (verificandoSessao || !AppState.authenticated) return;
+    verificandoSessao = true;
+    try {
+        await new Promise((r) => setTimeout(r, VERIFICA_SESSAO_MS));
+        const r = await API.getProfile();
+        if (r && r.errorCategory !== 'unauthorized') {
+            // Alarme falso. O pedido que falhou já foi revertido por quem o
+            // chamou; aqui só recompomos o que o 401 tinha interrompido.
+            if (r.success && r.profile) {
+                AppState.profile = r.profile;
+                renderProfileHeader();
+            }
+            showToast(t('toast.sessionKeptAlive'), 'info');
+            if (AppState.queue.length === 0 && !AppState.fetching) startFetching();
+            return;
+        }
+        // A confirmação também diz de QUAL lado falhou, e isso vira a mensagem:
+        // o core já mandava chaves diferentes (`srv.err.cookiesExpired` quando o
+        // Waze recusou; `srv.err.sessionExpired` quando a nossa sessão sumiu) e
+        // o frontend juntava as duas numa frase só. Separar transforma a próxima
+        // ocorrência em EVIDÊNCIA — dá pra saber de onde veio sem HAR nem
+        // exportar cookie de novo — e ainda diz ao editor algo que ele pode
+        // usar: "o Waze recusou" e "você ficou fora tempo demais" pedem cuidados
+        // diferentes, mesmo que a ação seja a mesma.
+        derrubarSessao(r && r.errorKey);
+    } finally {
+        verificandoSessao = false;
+    }
+}
+
+// Chave do core → frase que o editor lê. Chave desconhecida cai na frase
+// genérica de sempre: mensagem vaga é ruim, mensagem errada é pior.
+const MOTIVO_DA_QUEDA = {
+    'srv.err.cookiesExpired': 'toast.sessionExpired.waze',
+    'srv.err.sessionExpired': 'toast.sessionExpired.local',
+};
+
+function derrubarSessao(errorKey) {
     // Cancela ação pendente: a sessão já morreu no Waze, o executor falharia e
     // mostraria "erro ao marcar" na tela de login. Cancelar reverte o stat otimista.
     if (AppState.pendingAction) {
@@ -1316,7 +1378,7 @@ function handleUnauthorized() {
         AppState.pendingAction = null;
     }
     removeUndoBanner();
-    showToast(t('toast.sessionExpired'), 'error');
+    showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
     API.setSession(null);
     AppState.profile = null;
     AppState.authenticated = false;
@@ -2511,17 +2573,9 @@ function loadHistory() {
     if (AppState.history) return AppState.history;
     let h = {};
     try { h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}') || {}; } catch (e) { h = {}; }
-    // Migração do formato antigo (só baldes): soma o que já existe pro
-    // acumulador, senão a primeira poda faria o "Total" encolher.
-    if (!h._total) {
-        const t = { read: 0, rejected: 0 };
-        for (const [k, v] of Object.entries(h)) {
-            if (k === '_total' || !v) continue;
-            t.read += v.read || 0;
-            t.rejected += v.rejected || 0;
-        }
-        h._total = t;
-    }
+    // Acumulador que sobrevive à poda dos baldes diários. Só inicializa — a
+    // soma retroativa do formato antigo saiu junto com os outros resíduos.
+    if (!h._total) h._total = { read: 0, rejected: 0 };
     AppState.history = h;
     if (podarHistorico(h)) salvarHistorico(h);
     return h;

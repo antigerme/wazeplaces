@@ -19,20 +19,7 @@ const API = {
     },
 
     getSession() {
-        if (!this.sessionToken) {
-            this.sessionToken = safeLS.get('waze_session_token');
-            // Migração de versões anteriores que usavam sessionStorage (some ao fechar aba).
-            if (!this.sessionToken) {
-                try {
-                    const legacy = sessionStorage.getItem('waze_session_token');
-                    if (legacy) {
-                        safeLS.set('waze_session_token', legacy);
-                        sessionStorage.removeItem('waze_session_token');
-                        this.sessionToken = legacy;
-                    }
-                } catch (e) {}
-            }
-        }
+        if (!this.sessionToken) this.sessionToken = safeLS.get('waze_session_token');
         return this.sessionToken;
     },
 
@@ -80,9 +67,13 @@ const API = {
                 ...(this.saindo ? { keepalive: true } : { signal: controller.signal })
             });
             const data = await response.json();
-            if (response.status === 401) {
-                this.setSession(null);
-            }
+            // NÃO apagar a sessão aqui. Um 401 chega por motivos que não são
+            // "o editor precisa entrar de novo": o Waze devolve 403 em rajada
+            // (WAF/limite) e o KV pode devolver vazio num blip. Apagar dentro
+            // do transporte tomava a decisão ANTES de qualquer verificação e
+            // sem chance de retry — era o caminho mais curto pro editor cair na
+            // tela de login sem ter pedido pra sair. Quem decide é o
+            // `handleUnauthorized`, que confirma antes de derrubar.
             return data;
         } catch (error) {
             console.error(`Erro em ${endpoint}:`, error);

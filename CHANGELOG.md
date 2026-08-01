@@ -8,6 +8,25 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.01-01
+
+### Alterado
+- **Quando a sessão cair de verdade, a app agora diz de qual lado falhou.** Antes era sempre a mesma frase. Agora: *"O Waze recusou o acesso: seus cookies mudaram ou expiraram"* quando o problema veio de lá, e *"Sua sessão no app venceu por inatividade"* quando foi daqui. A ação é a mesma — entrar de novo — mas na próxima vez que acontecer dá pra saber a origem sem investigação.
+
+### Corrigido
+- **A causa raiz da sessão que expirava sozinha: o Waze troca o cookie a cada resposta e a app jogava fora.** Medido com cookies reais — três chamadas devolveram três valores diferentes. A app guardava o retrato do login e nunca mais o atualizava, então o retrato azedava sozinho, por mais válido que o seu acesso ao Waze estivesse. Agora a app acompanha a troca: enquanto o seu acesso ao Waze valer, a sessão vale junto.
+
+### Removido
+- **Todo o código de compatibilidade com versões antigas.** A app está em testes e o owner avisou a turma que vai precisar reinstalar. Saíram: a migração de token do armazenamento de sessão, a tolerância a endereços terminados em `.php` (herança do backend anterior), o formato de sessão sem carimbo de data e a soma retroativa do histórico. **Quem já usava precisa entrar de novo.**
+
+## v2026.07.31-01
+
+### Corrigido
+- **A sessão expirava sozinha, sem você ter pedido pra sair.** Eram dois problemas somados.
+  - **O prazo contava do login, não do último uso.** Na hospedagem atual o prazo de 21 dias era gravado uma vez e nunca renovado: quem usava a app todo dia era deslogado no dia 21 do mesmo jeito. Agora cada uso renova — enquanto você aparecer pelo menos uma vez a cada 21 dias, a sessão não vence. Quem some por mais que isso continua precisando entrar de novo, como sempre.
+  - **Uma única resposta de recusa derrubava a sessão na hora.** E "recusa" não quer dizer só "seus cookies venceram": o Waze também responde assim quando recebe várias chamadas juntas, e a app faz três ao abrir. Agora, antes de derrubar, ela confirma com uma segunda chamada — se a sessão estiver viva, nada é apagado e você só vê um aviso discreto de conexão instável.
+- **Dois avisos de "Sessão expirou" apareciam empilhados.** Cada chamada que falhava avisava por conta própria. Agora é uma verificação só, e um aviso só.
+
 ## v2026.07.30-14
 
 ### Corrigido
