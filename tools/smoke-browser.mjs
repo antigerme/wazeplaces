@@ -146,6 +146,12 @@ const CARDS = {
       // sobre verde.
       { field: 'services', label: 'Serviços', from: null, to: [''],
         delta: { add: [''], del: [] } },
+      // Serviços TRADUZIDOS (dicionário do Transifex do Waze), com os três mais
+      // longos do pt: se a linha estourar, é aqui que aparece. Categoria fica de
+      // fora de propósito — ela sai crua por decisão do owner.
+      { field: 'services', label: 'Serviços', from: null,
+        to: ['RESTROOMS', 'PARKING_FOR_CUSTOMERS', 'WHEELCHAIR_ACCESSIBLE'],
+        delta: { add: ['PARKING_FOR_CUSTOMERS', 'WHEELCHAIR_ACCESSIBLE'], del: ['RESTROOMS'] } },
       { field: 'categoryAttributes', label: 'CategoryAttributes', from: '[objeto]', to: '[objeto]',
         objDelta: [
           { caminho: 'CHARGING_STATION.source', de: 'ECO_MOVEMENT', para: 'WME' },

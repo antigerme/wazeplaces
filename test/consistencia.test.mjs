@@ -125,10 +125,21 @@ test('o mesmo conceito não pode ter dois nomes no MESMO card', () => {
   // a correção porque o comentário que EXPLICA a remoção cita o nome da função
   // removida. Guard tem que ler código, não prosa.
   const semComentario = (s) => s.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  const fn = semComentario(APP.match(/function valorDeLista\(v\)[\s\S]*?\n\}/)[0]);
+  const fn = semComentario(APP.match(/function valorDeLista\([^)]*\)[\s\S]*?\n\}/)[0]);
   assert.doesNotMatch(fn, /rotuloDeEnum\s*\(/,
     'item de lista voltou a passar por rotuloDeEnum — humaniza a categoria de novo');
   assert.match(fn, /return String\(v\);/, 'item de lista deixou de sair cru');
+
+  // UMA exceção, e ela é por CAMPO — nunca genérica. Traduzir tudo foi
+  // exatamente o que corrompeu apelido (nome próprio) e ID do Google. Serviço
+  // é comodidade genérica e tem dicionário oficial do Waze; categoria NÃO
+  // entra, porque o Waze a regionaliza por país.
+  assert.match(fn, /if \(campo === 'services'\)/,
+    'a tradução de serviço deixou de ser escopada por campo');
+  assert.doesNotMatch(fn, /campo === 'categories'/,
+    'categoria voltou a ser traduzida — o Waze regionaliza por país (gotcha #39)');
+  assert.doesNotMatch(fn, /campo === 'aliases'|campo === 'externalProviderIDs'/,
+    'apelido ou ID do Google entraram na tradução — não são enum');
 
   // `card.enum.` era um mecanismo de tradução com dicionário VAZIO: nunca teve
   // uma chave, então tudo caía no humanizarEnum (lowercase). Isso não só

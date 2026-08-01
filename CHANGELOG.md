@@ -8,6 +8,16 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.01-05
+
+### Adicionado
+- **Os serviços do local agora aparecem no seu idioma.** Antes saíam com o nome técnico: `AIR_CONDITIONING`, `PARKING_FOR_CUSTOMERS`. Agora: "Ambiente climatizado", "Estacionamento para clientes". São 23 serviços, nos 4 idiomas, com a redação do próprio Waze.
+
+### Alterado
+- **Os motivos de reporte passaram a usar a redação oficial do Waze nos 4 idiomas.** Eu havia traduzido alguns por conta e errei o sentido de um: `MOVED` era "mudança de endereço" em inglês, espanhol e francês, quando o Waze diz "o local se mudou" — coisas diferentes. Curiosamente, em português o Waze usa "Mudança de endereço" mesmo: as traduções dele não são literais entre si, então cada idioma agora usa a sua.
+
+**A categoria continua saindo como o Waze a nomeia** — a decisão anterior não mudou. Serviço é comodidade genérica (ar-condicionado é ar-condicionado em qualquer lugar); categoria o Waze regionaliza por país, e o mesmo idioma diverge entre eles.
+
 ## v2026.08.01-04
 
 ### Corrigido

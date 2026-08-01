@@ -2021,13 +2021,13 @@ function itemDeListaAusente(v) {
 // exatamente como duas telas do mesmo conceito divergem sem ninguém notar.
 // Valor ausente leva `.valor-ausente` como qualquer placeholder do card — e o
 // smoke mede o contraste dele nos dois temas a cada PR.
-function itemDeLista(v, cls, sinal) {
-    const txt = escapeHtml(valorDeLista(v));
+function itemDeLista(v, cls, sinal, campo) {
+    const txt = escapeHtml(valorDeLista(v, campo));
     const corpo = itemDeListaAusente(v) ? `<span class="valor-ausente">${txt}</span>` : txt;
     return `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${corpo}</span>`;
 }
 
-function valorDeLista(v) {
+function valorDeLista(v, campo) {
     // MESMO placeholder do resto do card (`valorDoDiff` já fazia isto). Os
     // parênteses não são enfeite: resolvem a ambiguidade de um valor que
     // poderia se chamar "vazio", e são TEXTO, então leitor de tela lê.
@@ -2073,6 +2073,18 @@ function valorDeLista(v) {
     // flagType, source) — lá humanizar é fallback de enum não mapeado, não a
     // regra. Se um dia houver fonte de regionalização do Waze, o lugar de
     // traduzir categoria é essa fonte, não uma humanização mecânica.
+    //
+    // ÚNICA exceção: `services`, e ela é por CAMPO, nunca genérica. O
+    // dicionário veio do Transifex do Waze e serviço é comodidade genérica —
+    // "ar-condicionado" é ar-condicionado em qualquer país. Categoria não entra
+    // aqui porque o Waze a regionaliza POR PAÍS; apelido e ID do Google também
+    // não, porque não são enum coisa nenhuma. Chave que faltar cai no valor
+    // cru, como todo o resto: feio, nunca invisível.
+    if (campo === 'services') {
+        const chave = 'card.service.' + String(v);
+        const traduzido = t(chave);
+        if (traduzido !== chave) return traduzido;
+    }
     return String(v);
 }
 
@@ -2214,8 +2226,8 @@ function renderCardChanges(card, place) {
         // inteiras obrigava o editor a comparar de olho — no dado real
         // `services` troca 1 item entre 5 e `categories` ganha 1 entre 2.
         if (c.delta && ((c.delta.add || []).length || (c.delta.del || []).length)) {
-            const add = (c.delta.add || []).map((v) => itemDeLista(v, 'diff-add', '+')).join('');
-            const del = (c.delta.del || []).map((v) => itemDeLista(v, 'diff-del', '−')).join('');
+            const add = (c.delta.add || []).map((v) => itemDeLista(v, 'diff-add', '+', c.field)).join('');
+            const del = (c.delta.del || []).map((v) => itemDeLista(v, 'diff-del', '−', c.field)).join('');
             return `<div class="diff-row diff-row-lista">${rotulo}<span class="diff-delta">${add}${del}</span></div>`;
         }
 
