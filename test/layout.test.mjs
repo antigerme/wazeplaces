@@ -1446,3 +1446,35 @@ test('um 401 sozinho não derruba o editor da sessão', () => {
     /setSession\(null\)/,
     'o _post voltou a apagar a sessão — decide logout antes de qualquer verificação');
 });
+
+test('a foto ampliada fecha pelos caminhos das DUAS plataformas', () => {
+  const APP = read('js/app.js');
+  // Ancora no handleKeyDown: há DOIS `if (Lightbox.isOpen())` no arquivo — o
+  // outro é do popstate (botão voltar do aparelho), e a primeira versão deste
+  // guard pegou o errado e reprovou o estado correto.
+  const bloco = APP.match(/function handleKeyDown\(e\) \{\s*\n\s*if \(Lightbox\.isOpen\(\)\) \{[\s\S]*?\n    \}/);
+  assert.ok(bloco, 'sumiu o tratamento de teclado da foto ampliada');
+  const teclas = bloco[0];
+
+  // Esc é a convenção de desktop e continua sendo o caminho principal.
+  assert.match(teclas, /e\.key === 'Escape'[\s\S]{0,60}Lightbox\.close\(\)/,
+    'Esc deixou de fechar a foto');
+
+  // ↓ espelha o arraste pra baixo do toque. Relato do owner: aprendeu o gesto
+  // no celular, sentou no laptop e a mão foi pro ↓.
+  assert.match(teclas, /e\.key === 'ArrowDown'[\s\S]{0,60}Lightbox\.close\(\)/,
+    'a tecla ↓ parou de fechar a foto');
+
+  // Só BAIXO: o toque fecha com `dy > 80`, e só. Inventar ↑ criaria um gesto
+  // que o celular não tem — a app ficaria ensinando duas coisas diferentes.
+  assert.doesNotMatch(teclas, /e\.key === 'ArrowUp'/,
+    '↑ ganhou função na foto — o toque não fecha pra cima');
+
+  // E as horizontais seguem TROCANDO de foto, não fechando.
+  assert.match(teclas, /e\.key === 'ArrowLeft'[\s\S]{0,60}Lightbox\.prev\(\)/, '← deixou de trocar de foto');
+  assert.match(teclas, /e\.key === 'ArrowRight'[\s\S]{0,60}Lightbox\.next\(\)/, '→ deixou de trocar de foto');
+
+  // O arraste do toque é só pra baixo — é daqui que a tecla ↓ tira a razão.
+  assert.match(APP, /dy > 80 && Math\.abs\(dy\) > Math\.abs\(dx\)/,
+    'mudou o gesto de arraste da foto sem revisitar a tecla que o espelha');
+});

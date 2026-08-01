@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.01-06
+
+### Adicionado
+- **No computador, a seta para baixo fecha a foto ampliada.** No celular você já fechava arrastando pra baixo; quem aprendeu o gesto ali e sentou no laptop ia direto no ↓ e não acontecia nada. O Esc continua funcionando e continua sendo o caminho principal — a seta é atalho a mais, não substituto. Só para baixo, que é o único sentido que o arraste do toque tem.
+
 ## v2026.08.01-05
 
 ### Adicionado

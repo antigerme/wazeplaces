@@ -1121,6 +1121,16 @@ function handleKeyDown(e) {
         if (e.key === 'Escape') { e.preventDefault(); Lightbox.close(); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); Lightbox.prev(); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); Lightbox.next(); }
+        // ↓ fecha, espelhando o arraste pra baixo do toque. Relato do owner:
+        // aprendeu o gesto no celular, sentou no laptop e a mão foi pro ↓ —
+        // o modelo mental funcionando e a app não correspondendo.
+        //
+        // Só BAIXO, porque é só o que o toque faz (`dy > 80`); inventar ↑ aqui
+        // criaria um gesto que o celular não tem. E é caminho ADICIONAL: o Esc
+        // continua sendo o principal, que é a convenção de desktop — por isso
+        // a dica não muda de texto (decisão do owner: um texto só, não um
+        // catatau por plataforma).
+        else if (e.key === 'ArrowDown') { e.preventDefault(); Lightbox.close(); }
         return;
     }
 
