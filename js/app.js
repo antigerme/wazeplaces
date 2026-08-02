@@ -2187,7 +2187,12 @@ function renderSelosDeProcedencia(card, place) {
     }
     if (place.source) {
         const rot = rotuloDeEnum('card.source.', place.source);
-        if (rot) selos.push({ cls: 'selo-src', txt: rot, title: t('card.source.title') });
+        // Cada origem tem a redação oficial do WME no title; o genérico atende
+        // valor que o Waze inventar depois — o selo cru já diz QUAL é, e a dica
+        // ao menos diz o que aquilo significa.
+        const dica = t('card.source.' + place.source + '.title');
+        if (rot) selos.push({ cls: 'selo-src', txt: rot,
+                              title: dica.startsWith('card.source.') ? t('card.source.title') : dica });
     }
     const mesmos = (AppState.queue || [])
         .filter((x) => x !== place && x.createdBy && x.createdBy === place.createdBy).length;

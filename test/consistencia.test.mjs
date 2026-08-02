@@ -158,3 +158,33 @@ test('o mesmo conceito não pode ter dois nomes no MESMO card', () => {
     assert.ok(n >= minimo, `${prefixo} ficou sem tradução (${n} chaves) — aí humanizar vira a regra`);
   }
 });
+
+test('origem do pedido: os 4 valores do Waze traduzidos, e o 5º descartado', () => {
+  const DICT = read('js/i18n.js');
+  const CORE = read('server/core.mjs');
+
+  // Os valores saíram do bundle do WME (v2.361, HAR do owner), não de palpite:
+  //   J = { SOURCE_UNSPECIFIED: Symbol("UNMAPPED_UPDATE_REQUEST_SOURCE"),
+  //         MOBILE_CLIENT: REPORT_MENU, WEB: LIVE_MAP,
+  //         MOBILE_WEB: HELP_AND_FEEDBACK, REPORTING_AGENT: REPORTING_AGENT }
+  // A app conhecia só os DOIS que aparecem na fila do owner hoje (medido: 369
+  // URs, MOBILE_CLIENT e WEB apenas). Os outros dois existem — e o featureFlag
+  // URSourceReportingAgent está LIGADO no ambiente dele —, então cairiam no
+  // humanizarEnum e sairiam como "Mobile web" / "Reporting agent" em inglês no
+  // meio de uma interface em português. É a regra de i18n do projeto sendo
+  // furada por um enum que ninguém tinha visto ainda.
+  for (const enumv of ['MOBILE_CLIENT', 'WEB', 'MOBILE_WEB', 'REPORTING_AGENT']) {
+    const selo = (DICT.match(new RegExp(`'card\\.source\\.${enumv}':`, 'g')) || []).length;
+    assert.equal(selo, N_LINGUAS,
+      `card.source.${enumv} está em ${selo} línguas de ${N_LINGUAS} — sai em inglês nas que faltam`);
+    const dica = (DICT.match(new RegExp(`'card\\.source\\.${enumv}\\.title':`, 'g')) || []).length;
+    assert.equal(dica, N_LINGUAS,
+      `card.source.${enumv}.title está em ${dica} línguas de ${N_LINGUAS}`);
+  }
+
+  // SOURCE_UNSPECIFIED não vira selo: o próprio WME não o exibe, e "Source
+  // unspecified" não informa nada. Quem descarta é o core, pra o frontend não
+  // precisar saber do caso.
+  assert.match(CORE, /sourceCru !== 'SOURCE_UNSPECIFIED'/,
+    'o core voltou a emitir SOURCE_UNSPECIFIED — vira selo dizendo nada, em inglês');
+});
