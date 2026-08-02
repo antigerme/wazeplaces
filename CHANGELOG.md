@@ -8,6 +8,22 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.02-01
+
+### Adicionado
+- **O selo de origem passou a cobrir as quatro formas de enviar um pedido**, não só duas. Além de "pelo app" e "pelo site", agora existem **"pela ajuda"** (o pedido veio pelo formulário de Ajuda e comentários) e **"por voz"** (Assistente do Mapa, o alerta falado dentro do app). Antes esses dois apareciam em inglês, com o nome técnico do Waze. Passar o mouse (ou tocar e segurar) mostra a explicação completa, com a mesma redação que você lê no WME.
+
+### Corrigido
+- **Pedido com origem "não especificada" não desenha mais um selo vazio de sentido.** O próprio WME não mostra nada nesse caso; agora a app faz igual.
+
+### Sobre "sumiu o selo de origem"
+Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **não é defeito**: o Waze só informa a origem nos pedidos de **alteração** de um local que já existe. Local novo e foto nova nunca vêm com essa informação — e a proporção de cada tipo na sua fila muda sozinha conforme o que os usuários enviam.
+
+## v2026.08.01-06
+
+### Adicionado
+- **No computador, a seta para baixo fecha a foto ampliada.** No celular você já fechava arrastando pra baixo; quem aprendeu o gesto ali e sentou no laptop ia direto no ↓ e não acontecia nada. O Esc continua funcionando e continua sendo o caminho principal — a seta é atalho a mais, não substituto. Só para baixo, que é o único sentido que o arraste do toque tem.
+
 ## v2026.08.01-05
 
 ### Adicionado

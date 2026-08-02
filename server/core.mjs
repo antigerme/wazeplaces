@@ -1095,9 +1095,17 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       // Rank CRU do Waze (0-indexed). Quem soma 1 pra exibir é o frontend —
       // regra sagrada do projeto, ver gotcha #15.
       const creatorRank = creatorObj && Number.isInteger(creatorObj.rank) ? creatorObj.rank : null;
-      // De onde veio: WEB (na mesa) × MOBILE_CLIENT (dirigindo). Enum CRU,
-      // traduzido no frontend por card.source.<ENUM>.
-      const source = String(ur.source || '').trim() || null;
+      // De onde veio. Enum CRU, traduzido no frontend por card.source.<ENUM>.
+      // O Waze tem 5 valores (lidos do bundle do WME v2.361): MOBILE_CLIENT,
+      // WEB, MOBILE_WEB, REPORTING_AGENT e SOURCE_UNSPECIFIED — e este último
+      // o próprio WME NÃO exibe (cai num Symbol("UNMAPPED_UPDATE_REQUEST_SOURCE")).
+      // Descartar aqui é o que evita um selo dizendo "Source unspecified", que
+      // não informa nada e ainda sai em inglês. Só o tipo REQUEST traz o campo:
+      // VENUE (local novo) e IMAGE (foto nova) nunca têm — medido em 369 URs da
+      // fila real e nos 3 endpoints que o WME usa (Search/List, Search/Map,
+      // Features), 358 URs, zero ocorrências fora de REQUEST.
+      const sourceCru = String(ur.source || '').trim();
+      const source = sourceCru && sourceCru !== 'SOURCE_UNSPECIFIED' ? sourceCru : null;
 
       const reqType = ur.type || '';
       const reqSubType = ur.subType || '';
