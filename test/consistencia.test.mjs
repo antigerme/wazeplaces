@@ -188,3 +188,36 @@ test('origem do pedido: os 4 valores do Waze traduzidos, e o 5º descartado', ()
   assert.match(CORE, /sourceCru !== 'SOURCE_UNSPECIFIED'/,
     'o core voltou a emitir SOURCE_UNSPECIFIED — vira selo dizendo nada, em inglês');
 });
+
+test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => {
+  const HTMLs = read('index.html');
+  const APP = read('js/app.js');
+  const DICT = read('js/i18n.js');
+
+  // A ordem importa e é a mesma nos dois lugares de propósito: duas listas com
+  // a mesma ideia em ordens diferentes é como o editor descobre que a app se
+  // contradiz. Aqui não é estética — o `TYPES_ALL` é o padrão marcado, e o HTML
+  // é o que ele vê; divergir faz "todos marcados" parecer uma seleção parcial.
+  const noHtml = [...HTMLs.matchAll(/class="filter-type[^"]*"\s+value="([A-Z_]+)"/g)].map((m) => m[1]);
+  const noCodigo = APP.match(/const TYPES_ALL = \[([\s\S]*?)\];/)[1]
+    .match(/'([A-Z_]+)'/g).map((s) => s.replace(/'/g, ''));
+
+  assert.equal(noHtml.length, 7, `o filtro tem ${noHtml.length} caixas — o WME tem 7 tipos`);
+  assert.deepEqual(noHtml, noCodigo,
+    'a lista de tipos do HTML e a do TYPES_ALL divergiram (valor ou ORDEM)');
+
+  // Toda caixa tem rótulo em TODAS as línguas. Sem isto, o tipo aparece com a
+  // chave crua no lugar do nome — e só na língua que ninguém testou.
+  for (const t of noHtml) {
+    const n = (DICT.match(new RegExp(`'filters\\.types\\.${t}':`, 'g')) || []).length;
+    assert.equal(n, N_LINGUAS,
+      `filters.types.${t} está em ${n} línguas de ${N_LINGUAS}`);
+  }
+
+  // O vocabulário ANTIGO (3 tipos grossos) não pode voltar por descuido: um
+  // `value="REQUEST"` sobrando casaria com zero pedidos e viraria caixa morta.
+  for (const velho of ['VENUE', 'IMAGE', 'REQUEST']) {
+    assert.ok(!noHtml.includes(velho),
+      `o tipo antigo ${velho} voltou ao filtro — ele não classifica mais nada`);
+  }
+});

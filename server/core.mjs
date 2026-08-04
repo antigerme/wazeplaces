@@ -939,7 +939,16 @@ async function handleBuscarPlaces(data, { sessions }) {
       lockRanks: [0, 1, 2, 3, 4, 5],
       page,
       residential,
-      // types SEMPRE null pro Waze (array parcial => HTTP 406). Filtramos por reqType abaixo.
+      // types SEMPRE null pro Waze, e o corte fino é nosso (`purFiltrado`).
+      //
+      // O comentário antigo culpava o "array parcial" pelo HTTP 406 e estava
+      // errado: medido contra o Waze real, `[1,5]` devolve 200 com 151 pedidos
+      // e `['VENUE','IMAGE']` devolve 406 — o que ele recusa é o TIPO do valor,
+      // porque a lista é de NÚMEROS (ver PUR_TIPOS). Mandar server-side é,
+      // portanto, possível; não fazemos porque o filtro do Waze seleciona o
+      // VENUE e devolve todos os pedidos dele, então o corte por PUR
+      // continuaria aqui de qualquer jeito — e um filtro que não filtra tudo
+      // sozinho é o tipo de meia-verdade que faz o contador mentir.
       types: null,
       orderBy: 'SORTING_UPDATE_TIME_DESC',
     },
@@ -979,6 +988,57 @@ async function handleBuscarPlaces(data, { sessions }) {
       blocked,
     },
   };
+}
+
+// Os 7 tipos de PUR que o WME oferece no filtro "Tipos de Atualização", com o
+// número que o Waze usa no fio (`venueUpdateRequestsFilter.types`). Os números
+// saíram do bundle do WME v2.361; a classificação foi MEDIDA contra o Waze real
+// — uma chamada de leitura por número, e o que voltou em cada uma.
+//
+// Cuidado com a leitura desses números: **o filtro do Waze é por VENUE, não por
+// PUR** — a mesma armadilha do `isRead` (gotcha #21). Pedir só DETAILS_UPDATE
+// devolve o LOCAL que tem uma atualização, e com ele TODOS os pedidos dele,
+// inclusive marcados e fotos. Medido três vezes. Por isso o corte fino é nosso,
+// aqui embaixo, e não do servidor.
+export const PUR_TIPOS = Object.freeze({
+  NEW_PLACE: 1, DETAILS_UPDATE: 2, DELETE_PLACE: 3, FLAGGED_PLACE: 4,
+  NEW_PHOTO: 5, DELETE_PHOTO: 6, FLAGGED_PHOTO: 7,
+});
+
+// De que tipo é este pedido, na régua do WME. FONTE ÚNICA da classificação:
+// o filtro usa isto, e nada mais deve reimplementar a mesma decisão.
+//
+// Não confundir com `updateTypeKey`, que é o RÓTULO DO CARD e responde outra
+// pergunta: ele separa UPDATE de UPDATE_DETAILS (há ou não diff pra mostrar) e
+// não separa reporte de local do de foto, porque quem faz isso no card é o
+// `flagSubjectType`. Granularidades diferentes, propósitos diferentes.
+//
+// DELETE_PHOTO nunca foi observado: zero em 9 países e zero no teste que o
+// owner criou de propósito com uma conta separada. Fica no mapa mesmo assim —
+// se um dia aparecer, cai num tipo nomeado em vez de sumir calado do filtro.
+export function purTypeDoUR(ur) {
+  const tipo = ur?.type || '';
+  if (tipo === 'VENUE') return 'NEW_PLACE';
+  if (tipo === 'IMAGE') return 'NEW_PHOTO';
+  const foto = ur?.flagSubjectType === 'IMAGE';
+  switch (ur?.subType) {
+    case 'UPDATE': return 'DETAILS_UPDATE';
+    case 'DELETE': return foto ? 'DELETE_PHOTO' : 'DELETE_PLACE';
+    case 'FLAG': return foto ? 'FLAGGED_PHOTO' : 'FLAGGED_PLACE';
+    default: return 'UNKNOWN';
+  }
+}
+
+// Este PUR deve ser DESCARTADO pelo filtro de tipos? (true = descarta)
+//
+// Tipo que a app não sabe nomear (`UNKNOWN`) NUNCA é descartado: o filtro é uma
+// lista de PERMITIDOS, então um tipo novo que o Waze inventasse sumiria calado
+// de toda fila — e "sumiu" é o defeito mais caro deste projeto, porque ninguém
+// reporta o que não vê. Melhor aparecer com rótulo feio do que não aparecer.
+function purFiltrado(ur, filterTypes) {
+  if (filterTypes === null) return false;
+  const t = purTypeDoUR(ur);
+  return t !== 'UNKNOWN' && !filterTypes.includes(t);
 }
 
 // Expansão pura da resposta do Issues/Search/List em cards (um por PUR).
@@ -1048,7 +1108,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       // imagens, diff de mudanças) que nunca vai virar card.
       for (const ur of venue.venueUpdateRequests) {
         if (unreadOnly && ur.isRead === true) continue;
-        if (filterTypes !== null && !filterTypes.includes(ur.type || '')) continue;
+        if (purFiltrado(ur, filterTypes)) continue;
         blocked++;
       }
       continue;
@@ -1116,7 +1176,8 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       // "volta" sem o user ter como sair do loop. Confirmado via HAR (Batalhão
       // PMDF: IMAGE isRead:true + REQUEST isRead:false → venue retornava sempre).
       if (unreadOnly && ur.isRead === true) continue;
-      if (filterTypes !== null && !filterTypes.includes(reqType)) continue;
+      if (purFiltrado(ur, filterTypes)) continue;
+      const purType = purTypeDoUR(ur);
 
       let updateTypeStr = 'Desconhecido';
       let updateTypeKey = 'UNKNOWN';
@@ -1229,6 +1290,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         address: venueAddress,
         updateType: updateTypeStr,
         updateTypeKey,
+        purType,
         camposSemMudanca,
         reqType,
         reqSubType,

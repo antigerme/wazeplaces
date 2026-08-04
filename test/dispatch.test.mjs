@@ -82,7 +82,7 @@ test('dispatch buscar-places: contrato da resposta + totalAll/blocked (D13)', as
     () => ok(wazePayload()),
     () => dispatch('buscar-places', {
       sessionToken: token, region: 'row', countryId: 30, page: 1,
-      unreadOnly: true, types: ['VENUE', 'IMAGE'],
+      unreadOnly: true, types: ['NEW_PLACE', 'NEW_PHOTO'],
     }, ctx));
 
   assert.equal(resultado.status, 200);
