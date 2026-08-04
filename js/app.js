@@ -2092,6 +2092,18 @@ function renderCardImages(card, place) {
 
     // Um card é UM updateRequest: ou PROPÕE foto nova (✨ âmbar) ou DENUNCIA uma
     // existente (🚩 rosa) — nunca os dois. Daí um marcador só, com dois estados.
+    //
+    // NUM LOCAL NOVO O SELO NÃO APARECE, e isso é deliberado. O owner reparou e
+    // perguntou: se o local é novo, a foto também é — não deveria vir marcada?
+    // Tecnicamente sim, e a ausência do selo chega a ser uma meia-mentira. Mas
+    // medido na fila real: dos 86 fotos em locais novos, 86 estão NÃO aprovadas
+    // e ZERO aprovadas — é impossível um local novo ter foto que já esteja no
+    // mapa. O selo apareceria em 100% desses cards, e selo que nunca varia não
+    // é selo: é decoração. Pior, local novo é o tipo mais comum da fila (140 de
+    // 295), então o editor veria ✨ o tempo todo e ele pararia de significar
+    // algo justamente onde discrimina — no pedido de FOTO, em que uma entre
+    // quatro é a nova. E o contexto já desambigua: a linha `Tipo: Novo local`
+    // diz que tudo ali é novo. Decisão do owner depois da medição.
     // O vínculo com a foto denunciada é o `flagEntityID`, que bate exatamente com
     // `venue.images[].id` (confirmado no HAR do "Ponto de Mergulho"). Sem ele o
     // editor via 4 fotos e nenhuma pista de qual tinha sido reportada.
