@@ -1,0 +1,3149 @@
+[
+ {
+  "_pais": "Brasil",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Rodoviária Sul",
+  "categories": [
+   "BUS_STATION",
+   "SHOPPING_CENTER"
+  ],
+  "address": "Av. Manoel Carneiro de Menezes, Nova Friburgo - Rio de Janeiro",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor1",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "DOES_NOT_MATCH_SEARCH",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    -22.308050637490144,
+    -42.52232225465944
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      -22.308615,
+      -42.522351
+     ],
+     "estado": "atual",
+     "nome": "Entrada Principal",
+     "distM": 62.89454689263437
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": -22.3080943720344,
+  "lon": -42.52279700565511,
+  "isStarred": false
+ },
+ {
+  "_pais": "Brasil",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Posto Tex Market",
+  "categories": [
+   "GAS_STATION",
+   "CONVENIENCE_STORE"
+  ],
+  "address": "R. Paulo Gorski, 464, Curitiba - Paraná",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor2",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": "Ipiranga",
+  "brandKnown": false,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    -25.44945461406241,
+    -49.318624817849006
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      -25.449438,
+      -49.318637
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 2.218114137038894
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": -25.449761210689374,
+  "lon": -49.318710502398126,
+  "isStarred": false
+ },
+ {
+  "_pais": "Brasil",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "R. Aylton Vasconcellos, 61, Rio de Janeiro - Rio de Janeiro",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor3",
+  "creatorRank": null,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    -22.809532165527344,
+    -43.212310791015625
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": -22.809532165527344,
+  "lon": -43.212310791015625,
+  "isStarred": false
+ },
+ {
+  "_pais": "França",
+  "_sobra": 4,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "Rue du Général Giraud, 18, Toulouse - Haute-Garonne",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PHOTO",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor4",
+  "creatorRank": null,
+  "source": "MOBILE_CLIENT",
+  "flagType": "LOW_QUALITY",
+  "flagSubjectType": "IMAGE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    43.64113009,
+    1.460835694
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 43.64113009,
+  "lon": 1.460835694,
+  "isStarred": false
+ },
+ {
+  "_pais": "França",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "Rue de Fontenay, 95, Nogent-sur-Marne - Val-de-Marne",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor5",
+  "creatorRank": null,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    48.841304779052734,
+    2.4722180366516113
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 48.841304779052734,
+  "lon": 2.4722180366516113,
+  "isStarred": false
+ },
+ {
+  "_pais": "França",
+  "_sobra": 4,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Station-service Access TotalEnergies",
+  "categories": [
+   "GAS_STATION"
+  ],
+  "address": "Boulevard de Plombières, 83, Marseille - Bouches-du-Rhône",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor6",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "DOES_NOT_MATCH_SEARCH",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": "TOTAL Access",
+  "brandKnown": false,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    43.31624479251681,
+    5.38293290138252
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 43.31636032233063,
+  "lon": 5.382889986038274,
+  "isStarred": false
+ },
+ {
+  "_pais": "França",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "Rue de la République, 32, Bouleurs - Seine-et-Marne",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor7",
+  "creatorRank": null,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    48.874451165,
+    2.902800559
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 48.874451165,
+  "lon": 2.902800559,
+  "isStarred": false
+ },
+ {
+  "_pais": "Reino Unido",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "EG Windmill",
+  "categories": [
+   "GAS_STATION",
+   "CONVENIENCE_STORE",
+   "ATM",
+   "CAR_WASH"
+  ],
+  "address": "A677 - Preston New Rd, Mellor Brook - Lancashire",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor8",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": "Shell",
+  "brandKnown": false,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    53.77024575264957,
+    -2.5501979258312732
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 53.77016479525472,
+  "lon": -2.550469993016357,
+  "isStarred": false
+ },
+ {
+  "_pais": "Reino Unido",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "St. Peters Way, 39, Cogenhoe - Northamptonshire",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor9",
+  "creatorRank": null,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    52.239341735839844,
+    -0.7883999943733215
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 52.239341735839844,
+  "lon": -0.7883999943733215,
+  "isStarred": false
+ },
+ {
+  "_pais": "México",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Centro Tolzú",
+  "categories": [
+   "CULTURE_AND_ENTERTAINEMENT"
+  ],
+  "address": "Av. Miguel Hidalgo, 201, Toluca - Estado de México",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor10",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "DOES_NOT_MATCH_SEARCH",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    19.290405676241598,
+    -99.6525824044448
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      19.290156,
+      -99.652377
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 35.18921604407364
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 19.290188766078,
+  "lon": -99.65286375275,
+  "isStarred": false
+ },
+ {
+  "_pais": "México",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "Primavera, 19, Naucalpan de Juárez - Estado de México",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor11",
+  "creatorRank": null,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    19.45513343811035,
+    -99.23605346679688
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 19.45513343811035,
+  "lon": -99.23605346679688,
+  "isStarred": false
+ },
+ {
+  "_pais": "México",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Salud Digna",
+  "categories": [
+   "SHOPPING_AND_SERVICES"
+  ],
+  "address": "Eje 1 Pte. - Av. Cuauhtémoc, 747, Benito Juárez - Ciudad de México",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PHOTO",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor12",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "UNRELATED",
+  "flagSubjectType": "IMAGE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    19.391702900197,
+    -99.156550769948
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 19.391702900197,
+  "lon": -99.156550769948,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "Avenida de Isla Cristina, 3, La Antilla - Andalucía",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor13",
+  "creatorRank": null,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    37.207420349121094,
+    -7.218689918518066
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 37.207420349121094,
+  "lon": -7.218689918518066,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 4,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "E.S. Cepsa",
+  "categories": [
+   "GAS_STATION",
+   "CAR_WASH",
+   "CONVENIENCE_STORE"
+  ],
+  "address": "Salida 648 > Almendralejo Norte",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor14",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "INAPPROPRIATE",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": "Cepsa",
+  "brandKnown": false,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    38.709493579469374,
+    -6.398581931271752
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 38.709700189563826,
+  "lon": -6.397805623348337,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Primor Perfumeria",
+  "categories": [
+   "SHOPPING_AND_SERVICES"
+  ],
+  "address": "Avinguda de Pau Casals, la Jonquera - Cataluña/Catalunya",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PHOTO",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor15",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "UNRELATED",
+  "flagSubjectType": "IMAGE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    42.42714309692383,
+    2.868696928024292
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 42.42714309692383,
+  "lon": 2.868696928024292,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Galp Ayamonte",
+  "categories": [
+   "GAS_STATION",
+   "CAR_WASH"
+  ],
+  "address": "Avenida Alcalde Juan Antonio González, Ayamonte - Andalucía",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor16",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": "Galp",
+  "brandKnown": false,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    37.21412617872929,
+    -7.40121718438916
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      37.213946,
+      -7.401528
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 34.08179280992598
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 37.21402168945281,
+  "lon": -7.40157900883606,
+  "isStarred": false
+ },
+ {
+  "_pais": "Portugal",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "R. 1º de Maio, 55a, St.ª Catarina da Fonte do Bispo - Faro",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor17",
+  "creatorRank": null,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    37.15364456176758,
+    -7.790073871612549
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 37.15364456176758,
+  "lon": -7.790073871612549,
+  "isStarred": false
+ },
+ {
+  "_pais": "Portugal",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "IKEA - Alfragide",
+  "categories": [
+   "FURNITURE_HOME_STORE",
+   "RESTAURANT"
+  ],
+  "address": "Estr. do Zambujal, Alfragide - Lisboa",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PHOTO",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor18",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "LOW_QUALITY",
+  "flagSubjectType": "IMAGE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    38.7289282963578,
+    -9.215536826406758
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      38.72794,
+      -9.215783
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 112.07499698573922
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 38.728615286271,
+  "lon": -9.216793658874,
+  "isStarred": false
+ },
+ {
+  "_pais": "Brasil",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Mirante da Serra dos Três Picos",
+  "categories": [
+   "OUTDOORS"
+  ],
+  "address": "RJ-116 Rod. Pres. João Goulart, Cachoeiras de Macacu - Rio de Janeiro",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor19",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    -22.380298549903124,
+    -42.5655405151512
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": -22.380220955785827,
+  "lon": -42.565580365113405,
+  "isStarred": false
+ },
+ {
+  "_pais": "Brasil",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Congregação Cristã No Brasil",
+  "categories": [
+   "CONVENTIONS_EVENT_CENTER",
+   "OTHER"
+  ],
+  "address": "Av. M 17, 1085, Rio Claro - São Paulo",
+  "updateType": "Atualização: Localização, Categorias, Services, Horário, Ponto de entrada/saída, Site, Nomes Alternativos",
+  "updateTypeKey": "UPDATE",
+  "purType": "DETAILS_UPDATE",
+  "reqType": "REQUEST",
+  "reqSubType": "UPDATE",
+  "isDelete": false,
+  "createdBy": "editor20",
+  "creatorRank": 0,
+  "source": "WEB",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [
+   {
+    "field": "geometry",
+    "label": "Localização",
+    "from": "-22.386103, -47.568729 · 5 pts",
+    "to": "-22.386172, -47.568732 · 5 pts",
+    "movedM": 6.769289720422109,
+    "vertsFrom": 5,
+    "vertsTo": 5,
+    "pontos": {
+     "de": [
+      -22.386206465189773,
+      -47.56880194926677
+     ],
+     "para": [
+      -22.386267267949602,
+      -47.5688009857778
+     ]
+    }
+   },
+   {
+    "field": "categories",
+    "label": "Categorias",
+    "from": "CONVENTIONS_EVENT_CENTER, OTHER",
+    "to": "RELIGIOUS_CENTER",
+    "delta": {
+     "add": [
+      "RELIGIOUS_CENTER"
+     ],
+     "del": [
+      "CONVENTIONS_EVENT_CENTER",
+      "OTHER"
+     ]
+    }
+   },
+   {
+    "field": "services",
+    "label": "Services",
+    "from": null,
+    "to": "RESTROOMS, WHEELCHAIR_ACCESSIBLE",
+    "delta": {
+     "add": [
+      "RESTROOMS",
+      "WHEELCHAIR_ACCESSIBLE"
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "openingHours",
+    "label": "Horário",
+    "from": null,
+    "to": "{\"days\":[0],\"fromHour\":\"18:30\",\"toHour\":\"20:00\"}, {\"days\":[2,6],\"fromHour\":\"19:30\",\"toHour\":\"21:00\"}",
+    "delta": {
+     "add": [
+      {
+       "days": [
+        0
+       ],
+       "fromHour": "18:30",
+       "toHour": "20:00"
+      },
+      {
+       "days": [
+        2,
+        6
+       ],
+       "fromHour": "19:30",
+       "toHour": "21:00"
+      }
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "entryExitPoints",
+    "label": "Ponto de entrada/saída",
+    "from": "{\"name\":\"\",\"point\":{\"type\":\"Point\",\"coordinates\":[-47.568819,-22.386257]},\"entry\":true,\"primary\":false}",
+    "to": "{\"name\":\"Acesso ao templo\",\"point\":{\"type\":\"Point\",\"coordinates\":[-47.568822,-22.386155]},\"entry\":true,\"primary\":true}",
+    "delta": {
+     "add": [
+      {
+       "name": "Acesso ao templo",
+       "point": {
+        "type": "Point",
+        "coordinates": [
+         -47.568822,
+         -22.386155
+        ]
+       },
+       "entry": true,
+       "primary": true
+      }
+     ],
+     "del": [
+      {
+       "name": "",
+       "point": {
+        "type": "Point",
+        "coordinates": [
+         -47.568819,
+         -22.386257
+        ]
+       },
+       "entry": true,
+       "primary": false
+      }
+     ]
+    }
+   },
+   {
+    "field": "url",
+    "label": "Site",
+    "from": null,
+    "to": "https://congregacaocristanobrasil.org.br/"
+   },
+   {
+    "field": "aliases",
+    "label": "Nomes Alternativos",
+    "from": null,
+    "to": "Congregação Cristã no Brasil | Jd. Cherveson - Rio Claro",
+    "delta": {
+     "add": [
+      "Congregação Cristã no Brasil | Jd. Cherveson - Rio Claro"
+     ],
+     "del": []
+    }
+   }
+  ],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    -22.386206465189773,
+    -47.56880194926677
+   ],
+   "proposto": [
+    -22.386267267949602,
+    -47.5688009857778
+   ],
+   "movidoM": 6.769289720422109,
+   "entradas": [
+    {
+     "ll": [
+      -22.386257,
+      -47.568819
+     ],
+     "estado": "saindo",
+     "nome": null,
+     "distM": 5.892946837615919
+    },
+    {
+     "ll": [
+      -22.386155,
+      -47.568822
+     ],
+     "estado": "nova",
+     "nome": "Acesso ao templo",
+     "distM": 6.089504097679647
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": -22.386102972099277,
+  "lon": -47.56872855605561,
+  "isStarred": false
+ },
+ {
+  "_pais": "Brasil",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Igreja Universal do Reino de Deus",
+  "categories": [
+   "RELIGIOUS_CENTER"
+  ],
+  "address": "R. Feitiço da Vl., 64, São Paulo - São Paulo",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor21",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "WRONG_DETAILS",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "O endereço está aparecendo em Sp Capital, e não em Valinhos/campinas. A foto também está errada. Quando coloca o endereço que está até certo, porém, vai para em SP.",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    -23.685834884,
+    -46.800014495
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": -23.685834884,
+  "lon": -46.800014495,
+  "isStarred": false
+ },
+ {
+  "_pais": "Brasil",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Auto Posto Avenida",
+  "categories": [
+   "GAS_STATION"
+  ],
+  "address": "Av. Mato Grosso, 809, Campo Grande - Mato Grosso do Sul",
+  "updateType": "Pedido de remoção",
+  "updateTypeKey": "DELETE",
+  "purType": "DELETE_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "DELETE",
+  "isDelete": true,
+  "createdBy": "editor22",
+  "creatorRank": 0,
+  "source": "WEB",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": "Vibra",
+  "brandKnown": false,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    -20.454829321466,
+    -54.6124936024636
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": -20.454972068291,
+  "lon": -54.612538940919,
+  "isStarred": false
+ },
+ {
+  "_pais": "Brasil",
+  "_sobra": 1,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Centro Socioeducativo do Adolescente Nossa Senhora da Aparecida",
+  "categories": [
+   "PRISON_CORRECTIONAL_FACILITY"
+  ],
+  "address": "R. Agente Danniel Silva Marinho, Montes Claros - Minas Gerais",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor23",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    -16.672886471761878,
+    -43.854923274141065
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      -16.673414,
+      -43.855771
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 107.80063784419403
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": -16.67248683494493,
+  "lon": -43.854347239043626,
+  "isStarred": false
+ },
+ {
+  "_pais": "França",
+  "_sobra": 1,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Centre bordelais d imagerie du sein",
+  "categories": [
+   "SHOPPING_AND_SERVICES"
+  ],
+  "address": "Avenue de la Libération Charles de Gaulle, Le Bouscat - Gironde",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor24",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    44.8625602722168,
+    -0.6024379730224609
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 44.8625602722168,
+  "lon": -0.6024379730224609,
+  "isStarred": false
+ },
+ {
+  "_pais": "França",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Restaurant Le Mazot",
+  "categories": [
+   "RESTAURANT",
+   "DESSERT",
+   "CAFE",
+   "BAR"
+  ],
+  "address": "Route des Moulins, Le Cernix (Cohennoz) - Savoie",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor25",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "WRONG_DETAILS",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "The details are wrong because the restaurant is open (not permanently closed) l, it has just been renamed le P'tit Mazot.",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    45.78459425,
+    6.500665074
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 45.78459425,
+  "lon": 6.500665074,
+  "isStarred": false
+ },
+ {
+  "_pais": "França",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Ag Motorsport 26",
+  "categories": [
+   "GARAGE_AUTOMOTIVE_SHOP"
+  ],
+  "address": "Impasse Georges Carpentier, Livron-sur-Drôme - Drôme",
+  "updateType": "Atualização: Localização, Descrição, Telefone, Rua, Número, Services, Horário, Ponto de entrada/saída, ExternalProviderIDs, Site",
+  "updateTypeKey": "UPDATE",
+  "purType": "DETAILS_UPDATE",
+  "reqType": "REQUEST",
+  "reqSubType": "UPDATE",
+  "isDelete": false,
+  "createdBy": "editor26",
+  "creatorRank": 0,
+  "source": "WEB",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [
+   {
+    "field": "geometry",
+    "label": "Localização",
+    "from": "44.776867, 4.846759",
+    "to": "44.776863, 4.846759",
+    "movedM": 0.39969115732378335,
+    "vertsFrom": 1,
+    "vertsTo": 1,
+    "pontos": {
+     "de": [
+      44.7768669128418,
+      4.846758842468262
+     ],
+     "para": [
+      44.7768633223715,
+      4.8467588417935
+     ]
+    }
+   },
+   {
+    "field": "description",
+    "label": "Descrição",
+    "from": null,
+    "to": "AG MOTORSPORTS:\nExpert en reprogrammation moteur ( VL- MOTO- TP- ENGIN AGRICOLE) Solutions FAP EGR AdBlue, Conversion E85 et boîtiers EFlexFuel homologués"
+   },
+   {
+    "field": "phone",
+    "label": "Telefone",
+    "from": null,
+    "to": "0970701589"
+   },
+   {
+    "field": "streetID",
+    "label": "Rua",
+    "from": "Impasse Georges Carpentier",
+    "to": "Avenue Léon Aubin"
+   },
+   {
+    "field": "houseNumber",
+    "label": "Número",
+    "from": null,
+    "to": "103"
+   },
+   {
+    "field": "services",
+    "label": "Services",
+    "from": null,
+    "to": "PARKING_FOR_CUSTOMERS, RESTROOMS, AIR_CONDITIONING, CREDIT_CARDS, WHEELCHAIR_ACCESSIBLE, WI_FI",
+    "delta": {
+     "add": [
+      "PARKING_FOR_CUSTOMERS",
+      "RESTROOMS",
+      "AIR_CONDITIONING",
+      "CREDIT_CARDS",
+      "WHEELCHAIR_ACCESSIBLE",
+      "WI_FI"
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "openingHours",
+    "label": "Horário",
+    "from": null,
+    "to": "{\"days\":[1,2,3,4,5],\"fromHour\":\"09:00\",\"toHour\":\"18:00\"}",
+    "delta": {
+     "add": [
+      {
+       "days": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ],
+       "fromHour": "09:00",
+       "toHour": "18:00"
+      }
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "entryExitPoints",
+    "label": "Ponto de entrada/saída",
+    "from": null,
+    "to": "{\"name\":\"\",\"point\":{\"type\":\"Point\",\"coordinates\":[4.847599,44.776522]},\"entry\":true,\"primary\":true}",
+    "delta": {
+     "add": [
+      {
+       "name": "",
+       "point": {
+        "type": "Point",
+        "coordinates": [
+         4.847599,
+         44.776522
+        ]
+       },
+       "entry": true,
+       "primary": true
+      }
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "externalProviderIDs",
+    "label": "ExternalProviderIDs",
+    "from": null,
+    "to": "ChIJSzjl_fpHtRIR7TT4HnhQPxo",
+    "delta": {
+     "add": [
+      "ChIJSzjl_fpHtRIR7TT4HnhQPxo"
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "url",
+    "label": "Site",
+    "from": null,
+    "to": "www.agmotorsports.fr"
+   }
+  ],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    44.7768669128418,
+    4.846758842468262
+   ],
+   "proposto": [
+    44.7768633223715,
+    4.8467588417935
+   ],
+   "movidoM": 0.39969115732378335,
+   "entradas": [
+    {
+     "ll": [
+      44.776522,
+      4.847599
+     ],
+     "estado": "nova",
+     "nome": null,
+     "distM": 76.69342938871239
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 44.7768669128418,
+  "lon": 4.846758842468262,
+  "isStarred": false
+ },
+ {
+  "_pais": "França",
+  "_sobra": 1,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Crédit Agricole Pyrénées Gascogne - Saint-Étienne de Baïgorry",
+  "categories": [
+   "BANK_FINANCIAL",
+   "ATM",
+   "SHOPPING_AND_SERVICES"
+  ],
+  "address": "Behereko Karrika, 8, Saint-Étienne-de-Baïgorry - Pyrénées-Atlantiques",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor27",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    43.179490527,
+    -1.340049914
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 43.179490527,
+  "lon": -1.340049914,
+  "isStarred": false
+ },
+ {
+  "_pais": "França",
+  "_sobra": 4,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "Rue du Village, 500, Yville-sur-Seine - Seine-Maritime",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PHOTO",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor28",
+  "creatorRank": null,
+  "source": "MOBILE_CLIENT",
+  "flagType": "INAPPROPRIATE",
+  "flagSubjectType": "IMAGE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    49.399612426,
+    0.880244016
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 49.399612426,
+  "lon": 0.880244016,
+  "isStarred": false
+ },
+ {
+  "_pais": "Reino Unido",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Glenfield Off-Licence & Post Office",
+  "categories": [
+   "SHOPPING_AND_SERVICES",
+   "POST_OFFICE",
+   "CONVENIENCE_STORE"
+  ],
+  "address": "Dominion Rd, Glenfield - Leicestershire",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor29",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    52.646125114414,
+    -1.200794222292
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": 52.646125114414,
+  "lon": -1.200794222292,
+  "isStarred": false
+ },
+ {
+  "_pais": "Reino Unido",
+  "_sobra": 2,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Bwlch Nant yr Arian Forest Visitor Centre",
+  "categories": [
+   "PARKING_LOT"
+  ],
+  "address": "A44, 44",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PHOTO",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor30",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "LOW_QUALITY",
+  "flagSubjectType": "IMAGE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": "Forestry Commission",
+  "brandKnown": false,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    52.4152865019704,
+    -3.886706808002164
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      52.415312,
+      -3.886456
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 17.26425268790938
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 52.41534274030845,
+  "lon": -3.886354151872107,
+  "isStarred": false
+ },
+ {
+  "_pais": "Reino Unido",
+  "_sobra": 3,
+  "_rede": true,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "MFG Cricklewood",
+  "categories": [
+   "GAS_STATION",
+   "ATM",
+   "CONVENIENCE_STORE",
+   "CAR_WASH"
+  ],
+  "address": "Edgware Rd, 374, Dollis Hill - Greater London",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor31",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": "Esso",
+  "brandKnown": false,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    51.563955916203305,
+    -0.22277089664136301
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      51.564062,
+      -0.223101
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 25.71543565449305
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 51.56408580586484,
+  "lon": -0.2231419934866963,
+  "isStarred": false
+ },
+ {
+  "_pais": "Reino Unido",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Kiddi Caru Day Nursery and Preschool in Crews Hole",
+  "categories": [
+   "KINDERGARDEN"
+  ],
+  "address": null,
+  "updateType": "Pedido de remoção",
+  "updateTypeKey": "DELETE",
+  "purType": "DELETE_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "DELETE",
+  "isDelete": true,
+  "createdBy": "editor32",
+  "creatorRank": 0,
+  "source": "WEB",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    51.45444435041232,
+    -2.535816271364237
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": 51.45444435041232,
+  "lon": -2.535816271364237,
+  "isStarred": false
+ },
+ {
+  "_pais": "Reino Unido",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Halo Photography",
+  "categories": [
+   "PHOTOGRAPHY"
+  ],
+  "address": "Orion Way, Unit 21, Chirton - North Tyneside",
+  "updateType": "Atualização: Localização, Telefone, Rua, Services, Horário, Ponto de entrada/saída, Site",
+  "updateTypeKey": "UPDATE",
+  "purType": "DETAILS_UPDATE",
+  "reqType": "REQUEST",
+  "reqSubType": "UPDATE",
+  "isDelete": false,
+  "createdBy": "editor33",
+  "creatorRank": 0,
+  "source": "WEB",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [
+   {
+    "field": "geometry",
+    "label": "Localização",
+    "from": "55.009727, -1.492404",
+    "to": "55.009521, -1.492912",
+    "movedM": 39.787903995798736,
+    "vertsFrom": 1,
+    "vertsTo": 1,
+    "pontos": {
+     "de": [
+      55.009727478027344,
+      -1.4924039840698242
+     ],
+     "para": [
+      55.00952060589,
+      -1.492912262678
+     ]
+    }
+   },
+   {
+    "field": "phone",
+    "label": "Telefone",
+    "from": null,
+    "to": "01670820081"
+   },
+   {
+    "field": "streetID",
+    "label": "Rua",
+    "from": "Orion Way",
+    "to": "Orion Business Park"
+   },
+   {
+    "field": "services",
+    "label": "Services",
+    "from": null,
+    "to": "PARKING_FOR_CUSTOMERS, RESTROOMS, CREDIT_CARDS, WHEELCHAIR_ACCESSIBLE",
+    "delta": {
+     "add": [
+      "PARKING_FOR_CUSTOMERS",
+      "RESTROOMS",
+      "CREDIT_CARDS",
+      "WHEELCHAIR_ACCESSIBLE"
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "openingHours",
+    "label": "Horário",
+    "from": null,
+    "to": "{\"days\":[2,3,4,5,6],\"fromHour\":\"10:00\",\"toHour\":\"18:00\"}",
+    "delta": {
+     "add": [
+      {
+       "days": [
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "fromHour": "10:00",
+       "toHour": "18:00"
+      }
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "entryExitPoints",
+    "label": "Ponto de entrada/saída",
+    "from": null,
+    "to": "{\"name\":\"Front Door\",\"point\":{\"type\":\"Point\",\"coordinates\":[-1.49288,55.009542]},\"entry\":true,\"primary\":true}",
+    "delta": {
+     "add": [
+      {
+       "name": "Front Door",
+       "point": {
+        "type": "Point",
+        "coordinates": [
+         -1.49288,
+         55.009542
+        ]
+       },
+       "entry": true,
+       "primary": true
+      }
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "url",
+    "label": "Site",
+    "from": null,
+    "to": "https://halophotographystudio.com/"
+   }
+  ],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    55.009727478027344,
+    -1.4924039840698242
+   ],
+   "proposto": [
+    55.00952060589,
+    -1.492912262678
+   ],
+   "movidoM": 39.787903995798736,
+   "entradas": [
+    {
+     "ll": [
+      55.009542,
+      -1.49288
+     ],
+     "estado": "nova",
+     "nome": "Front Door",
+     "distM": 36.73765133583356
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 55.009727478027344,
+  "lon": -1.4924039840698242,
+  "isStarred": false
+ },
+ {
+  "_pais": "Reino Unido",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Vudu Restaurant",
+  "categories": [
+   "RESTAURANT"
+  ],
+  "address": "Firth St, 1, Huddersfield - Kirklees",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor34",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "WRONG_DETAILS",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "The restaurant has relocated to Wilton Street, Bradford",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    53.639756843573146,
+    -1.7816845778752248
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      53.639766,
+      -1.781853
+     ],
+     "estado": "atual",
+     "nome": "Firth St",
+     "distM": 11.16202626218548
+    }
+   ]
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": 53.639756843573146,
+  "lon": -1.7816845778752248,
+  "isStarred": false
+ },
+ {
+  "_pais": "México",
+  "_sobra": 1,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "No esta pavimentada la calle no esta fea pero no esta tan bonita",
+  "categories": [
+   "CONSTRUCTION_SITE"
+  ],
+  "address": "Manuel Doblado, Morelia - Michoacán de Ocampo",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor35",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    19.72891616821289,
+    -101.21050262451172
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 19.72891616821289,
+  "lon": -101.21050262451172,
+  "isStarred": false
+ },
+ {
+  "_pais": "México",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Notaria 11 de Tlaquepaque",
+  "categories": [
+   "PROFESSIONAL_AND_PUBLIC"
+  ],
+  "address": "José Guadalupe Zuno Hernández, 2272, Guadalajara - Jalisco",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor36",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "CLOSED",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "La notaría dejó este domicilio hace más de 3 años , de hecho si la buscan en mismo Waze aparece el otro",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    20.670454025,
+    -103.374252319
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 20.670454025,
+  "lon": -103.374252319,
+  "isStarred": false
+ },
+ {
+  "_pais": "México",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Harley Davidson",
+  "categories": [
+   "GARAGE_AUTOMOTIVE_SHOP",
+   "CAR_DEALERSHIP"
+  ],
+  "address": "Carretera San Luis Potosí-Querétaro, Km 14, Juriquilla - Querétaro",
+  "updateType": "Atualização: Nome, Descrição, Horário, Ponto de entrada/saída",
+  "updateTypeKey": "UPDATE",
+  "purType": "DETAILS_UPDATE",
+  "reqType": "REQUEST",
+  "reqSubType": "UPDATE",
+  "isDelete": false,
+  "createdBy": "editor37",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [
+   {
+    "field": "name",
+    "label": "Nome",
+    "from": "Harley Davidson",
+    "to": "Triumph Querétaro, AfterCycles, Impormotos"
+   },
+   {
+    "field": "description",
+    "label": "Descrição",
+    "from": null,
+    "to": "Agencia y distribuidor autorizado Triumph Motorcycles en Querétaro"
+   },
+   {
+    "field": "openingHours",
+    "label": "Horário",
+    "from": null,
+    "to": "{\"days\":[6],\"fromHour\":\"9:00\",\"toHour\":\"15:00\"}, {\"days\":[1,2,3,4,5],\"fromHour\":\"09:00\",\"toHour\":\"19:00\"}",
+    "delta": {
+     "add": [
+      {
+       "days": [
+        6
+       ],
+       "fromHour": "9:00",
+       "toHour": "15:00"
+      },
+      {
+       "days": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ],
+       "fromHour": "09:00",
+       "toHour": "19:00"
+      }
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "entryExitPoints",
+    "label": "Ponto de entrada/saída",
+    "from": "{\"name\":\"\",\"point\":{\"type\":\"Point\",\"coordinates\":[-100.436056,20.689124]},\"entry\":true,\"primary\":false}",
+    "to": "{\"name\":\"\",\"point\":{\"type\":\"Point\",\"coordinates\":[-100.436401,20.689323]},\"entry\":true,\"primary\":false}",
+    "delta": {
+     "add": [
+      {
+       "name": "",
+       "point": {
+        "type": "Point",
+        "coordinates": [
+         -100.436401,
+         20.689323
+        ]
+       },
+       "entry": true,
+       "primary": false
+      }
+     ],
+     "del": [
+      {
+       "name": "",
+       "point": {
+        "type": "Point",
+        "coordinates": [
+         -100.436056,
+         20.689124
+        ]
+       },
+       "entry": true,
+       "primary": false
+      }
+     ]
+    }
+   }
+  ],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    20.68932874739285,
+    -100.43658641906158
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      20.689124,
+      -100.436056
+     ],
+     "estado": "saindo",
+     "nome": null,
+     "distM": 59.755939138736885
+    },
+    {
+     "ll": [
+      20.689323,
+      -100.436401
+     ],
+     "estado": "nova",
+     "nome": null,
+     "distM": 19.320314916643493
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 20.689455463714893,
+  "lon": -100.43690157862034,
+  "isStarred": false
+ },
+ {
+  "_pais": "México",
+  "_sobra": 1,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Organización Nacional Tigres Dorados Lima Lama Defensa Personal",
+  "categories": [
+   "SPORTS_COURT",
+   "GYM_FITNESS",
+   "OTHER",
+   "CULTURE_AND_ENTERTAINEMENT"
+  ],
+  "address": "Av. Gral. Emiliano Zapata, 52, Naucalpan de Juárez - Estado de México",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor38",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    19.44438701141,
+    -99.279081321856
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 19.44438701141,
+  "lon": -99.279081321856,
+  "isStarred": false
+ },
+ {
+  "_pais": "México",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "CFEMatico Motul",
+  "categories": [
+   "ATM"
+  ],
+  "address": null,
+  "updateType": "Pedido de remoção",
+  "updateTypeKey": "DELETE",
+  "purType": "DELETE_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "DELETE",
+  "isDelete": true,
+  "createdBy": "editor39",
+  "creatorRank": 0,
+  "source": "WEB",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    21.09183,
+    -89.28397
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": 21.09183,
+  "lon": -89.28397,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 1,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Agencia Generali Seguros - Eugeni Lamelas Guillem",
+  "categories": [
+   "OTHER",
+   "BANK_FINANCIAL",
+   "SHOPPING_AND_SERVICES",
+   "CAR_SERVICES"
+  ],
+  "address": "Carrer de Sant Josep, 63, Lloret de Mar - Cataluña/Catalunya",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor40",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    41.7006,
+    2.8398
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 41.7006,
+  "lon": 2.8398,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Pumptrack de Formentera del Segura",
+  "categories": [
+   "SPORTS_COURT"
+  ],
+  "address": "Avenida de la Comunidad Valenciana, 1, Formentera del Segura - Comunitat Valenciana",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor41",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    38.089818799571006,
+    -0.7418784575692
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      38.089663,
+      -0.741466
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 40.08343837366921
+    }
+   ]
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": 38.089975542121,
+  "lon": -0.742174707534,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "E.G. GNC/GNL HAM Hospitalet de l'Infant",
+  "categories": [
+   "GAS_STATION"
+  ],
+  "address": "Àrea de Servei Hospitalet de l'Infant Sur, AP-7  P.K. 283 Creciente, L'Hospitalet de l'Infant - Cataluña/Catalunya",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor42",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "WRONG_DETAILS",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "Els preus de gasolina son incorrectes. El litre de 95 estaba a 1.83",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    40.985982040977,
+    0.893948795017
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": 40.985982040977,
+  "lon": 0.893948795017,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Pinsapizza",
+  "categories": [
+   "RESTAURANT"
+  ],
+  "address": "Calle de Santiago de Compostela, 36, Madrid - Comunidad de Madrid",
+  "updateType": "Atualização: Nome, Descrição, Telefone, Categorias, Services, Horário, ExternalProviderIDs, Site",
+  "updateTypeKey": "UPDATE",
+  "purType": "DETAILS_UPDATE",
+  "reqType": "REQUEST",
+  "reqSubType": "UPDATE",
+  "isDelete": false,
+  "createdBy": "editor43",
+  "creatorRank": 0,
+  "source": "WEB",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [
+   {
+    "field": "name",
+    "label": "Nome",
+    "from": "Pinsapizza",
+    "to": "UKIYO"
+   },
+   {
+    "field": "description",
+    "label": "Descrição",
+    "from": null,
+    "to": "Mochis & coffee"
+   },
+   {
+    "field": "phone",
+    "label": "Telefone",
+    "from": "915 02 20 91",
+    "to": "605438663"
+   },
+   {
+    "field": "categories",
+    "label": "Categorias",
+    "from": "RESTAURANT",
+    "to": "FOOD_AND_DRINK, CAFE",
+    "delta": {
+     "add": [
+      "FOOD_AND_DRINK",
+      "CAFE"
+     ],
+     "del": [
+      "RESTAURANT"
+     ]
+    }
+   },
+   {
+    "field": "services",
+    "label": "Services",
+    "from": null,
+    "to": "CREDIT_CARDS, OUTSIDE_SEATING, TAKE_AWAY",
+    "delta": {
+     "add": [
+      "CREDIT_CARDS",
+      "OUTSIDE_SEATING",
+      "TAKE_AWAY"
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "openingHours",
+    "label": "Horário",
+    "from": "{\"days\":[4,5,6,0],\"fromHour\":\"13:00\",\"toHour\":\"16:00\"}, {\"days\":[1,2,3,4,5,6,0],\"fromHour\":\"20:00\",\"toHour\":\"23:59\"}",
+    "to": "{\"days\":[0,1,2,3,4,5,6],\"fromHour\":\"08:30\",\"toHour\":\"14:00\"}, {\"days\":[0,1,2,3,4,5,6],\"fromHour\":\"17:30\",\"toHour\":\"22:00\"}",
+    "delta": {
+     "add": [
+      {
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "fromHour": "08:30",
+       "toHour": "14:00"
+      },
+      {
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "fromHour": "17:30",
+       "toHour": "22:00"
+      }
+     ],
+     "del": [
+      {
+       "days": [
+        4,
+        5,
+        6,
+        0
+       ],
+       "fromHour": "13:00",
+       "toHour": "16:00"
+      },
+      {
+       "days": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0
+       ],
+       "fromHour": "20:00",
+       "toHour": "23:59"
+      }
+     ]
+    }
+   },
+   {
+    "field": "externalProviderIDs",
+    "label": "ExternalProviderIDs",
+    "from": null,
+    "to": "ChIJuQ3VPF4pQg0RxL0ufDWYnxw",
+    "delta": {
+     "add": [
+      "ChIJuQ3VPF4pQg0RxL0ufDWYnxw"
+     ],
+     "del": []
+    }
+   },
+   {
+    "field": "url",
+    "label": "Site",
+    "from": "https://www.pinsapizza.es/",
+    "to": "https://www.mochisukiyo.com/"
+   }
+  ],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    40.483343063,
+    -3.702323861
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 40.483343063,
+  "lon": -3.702323861,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Chinees/Consum Supermarkt",
+  "categories": [
+   "SUPERMARKET_GROCERY",
+   "FOOD_AND_DRINK",
+   "PHARMACY",
+   "SHOPPING_AND_SERVICES",
+   "BAKERY",
+   "PET_STORE_VETERINARIAN_SERVICES",
+   "CHARGING_STATION"
+  ],
+  "address": "Calle del Malecón Diputación de Alicante, Rojales - Comunitat Valenciana",
+  "updateType": "Pedido de remoção",
+  "updateTypeKey": "DELETE",
+  "purType": "DELETE_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "DELETE",
+  "isDelete": true,
+  "createdBy": "editor44",
+  "creatorRank": 0,
+  "source": "WEB",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    38.084699,
+    -0.733499
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": 38.084699,
+  "lon": -0.733499,
+  "isStarred": false
+ },
+ {
+  "_pais": "Espanha",
+  "_sobra": 2,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Hospital Universitario Infanta Sofía",
+  "categories": [
+   "HOSPITAL_URGENT_CARE",
+   "DOCTOR_CLINIC"
+  ],
+  "address": "Paseo de Europa, 34, San Sebastián de los Reyes - Comunidad de Madrid",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PHOTO",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor45",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "UNRELATED",
+  "flagSubjectType": "IMAGE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    40.55828697427795,
+    -3.610348444400984
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 40.559318419390735,
+  "lon": -3.610293520075451,
+  "isStarred": false
+ },
+ {
+  "_pais": "Portugal",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Mar Shopping Algarve",
+  "categories": [
+   "SHOPPING_CENTER",
+   "PHARMACY",
+   "CAFE",
+   "FAST_FOOD",
+   "ATM",
+   "MOVIE_THEATER",
+   "PLAYGROUND",
+   "FOOD_COURT",
+   "TAXI_STATION",
+   "SPORTING_GOODS",
+   "FASHION_AND_CLOTHING",
+   "FURNITURE_HOME_STORE",
+   "ELECTRONICS",
+   "SHOPPING_AND_SERVICES",
+   "TRAVEL_AGENCY",
+   "CURRENCY_EXCHANGE",
+   "RESTAURANT"
+  ],
+  "address": "Loulé, Cabeço do Monte - Faro",
+  "updateType": "Atualização: Nome",
+  "updateTypeKey": "UPDATE",
+  "purType": "DETAILS_UPDATE",
+  "reqType": "REQUEST",
+  "reqSubType": "UPDATE",
+  "isDelete": false,
+  "createdBy": "editor46",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [
+   {
+    "field": "name",
+    "label": "Nome",
+    "from": "Mar Shopping Algarve",
+    "to": "Mar Shopping Leça Palmeira"
+   }
+  ],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    37.098751090722544,
+    -7.997474449057724
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      37.09862,
+      -7.998787
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 117.44955013652282
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 37.099183485873475,
+  "lon": -7.998625695057143,
+  "isStarred": false
+ },
+ {
+  "_pais": "Portugal",
+  "_sobra": 2,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "RioSul Shopping",
+  "categories": [
+   "SHOPPING_CENTER",
+   "MOVIE_THEATER",
+   "GARAGE_AUTOMOTIVE_SHOP"
+  ],
+  "address": "Av. Libertadores de Timor-Loro Sae, Fogueteiro - Setúbal",
+  "updateType": "Nova Foto",
+  "updateTypeKey": "IMAGE",
+  "purType": "NEW_PHOTO",
+  "reqType": "IMAGE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor47",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    38.61309859880053,
+    -9.104219581079931
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      38.61164,
+      -9.104414
+     ],
+     "estado": "atual",
+     "nome": "Entrada Superior",
+     "distM": 163.24949966618374
+    },
+    {
+     "ll": [
+      38.611713,
+      -9.104559
+     ],
+     "estado": "atual",
+     "nome": "Entrada -1",
+     "distM": 157.04497252037456
+    },
+    {
+     "ll": [
+      38.612546,
+      -9.105365
+     ],
+     "estado": "atual",
+     "nome": "Entrada -2",
+     "distM": 117.09251675660373
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 38.614108077600015,
+  "lon": -9.104230112581302,
+  "isStarred": false
+ },
+ {
+  "_pais": "Portugal",
+  "_sobra": 1,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Largo Dr Frederico Laranjo 5 7300-099 Portalegre Portugal",
+  "categories": [
+   "FOOD_AND_DRINK"
+  ],
+  "address": "Lg. Dr. Frederico Laranjo, Portalegre - Portalegre",
+  "updateType": "Novo Local",
+  "updateTypeKey": "VENUE",
+  "purType": "NEW_PLACE",
+  "reqType": "VENUE",
+  "reqSubType": "",
+  "isDelete": false,
+  "createdBy": "editor48",
+  "creatorRank": 0,
+  "source": null,
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    39.292625427246094,
+    -7.432117938995361
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 39.292625427246094,
+  "lon": -7.432117938995361,
+  "isStarred": false
+ },
+ {
+  "_pais": "Portugal",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": null,
+  "categories": [
+   "RESIDENCE_HOME"
+  ],
+  "address": "Praceta Augosto Ferreira Geirinhas, 7, Sacavém - Lisboa",
+  "updateType": "Pedido de remoção",
+  "updateTypeKey": "DELETE",
+  "purType": "DELETE_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "DELETE",
+  "isDelete": true,
+  "createdBy": "editor49",
+  "creatorRank": null,
+  "source": "WEB",
+  "flagType": null,
+  "flagSubjectType": null,
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    38.79300867259451,
+    -9.11104014262314
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": []
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": 38.79300867259451,
+  "lon": -9.11104014262314,
+  "isStarred": false
+ },
+ {
+  "_pais": "Portugal",
+  "_sobra": 0,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Carsiste",
+  "categories": [
+   "GARAGE_AUTOMOTIVE_SHOP"
+  ],
+  "address": "Av. Prof. Dr. Adelino da Palma Carlos, Faro - Faro",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PLACE",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor50",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "WRONG_DETAILS",
+  "flagSubjectType": "VENUE",
+  "flagEntityID": null,
+  "flagComment": "ao pedir direções da Padock na rua das laranjeiras , ao clicar no trajeto aparece Carsiste com a trajetória de outra morada",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    37.0229010974286,
+    -7.941849493941
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      37.023086,
+      -7.941985
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 23.847815981342833
+    }
+   ]
+  },
+  "imageUrls": [],
+  "dateAdded": 1785203731191,
+  "lat": 37.023016736469,
+  "lon": -7.9420351028048,
+  "isStarred": false
+ },
+ {
+  "_pais": "Portugal",
+  "_sobra": 2,
+  "_rede": false,
+  "venueID": "fx",
+  "updateRequestID": "fx",
+  "name": "Câmara Municipal do Porto",
+  "categories": [
+   "CITY_HALL"
+  ],
+  "address": "Pç. do Gen. Humberto Delgado, PORTO - Porto",
+  "updateType": "Reporte (Sinalização)",
+  "updateTypeKey": "FLAG",
+  "purType": "FLAGGED_PHOTO",
+  "reqType": "REQUEST",
+  "reqSubType": "FLAG",
+  "isDelete": false,
+  "createdBy": "editor51",
+  "creatorRank": 0,
+  "source": "MOBILE_CLIENT",
+  "flagType": "LOW_QUALITY",
+  "flagSubjectType": "IMAGE",
+  "flagEntityID": null,
+  "flagComment": "",
+  "brand": null,
+  "brandKnown": null,
+  "changes": [],
+  "camposSemMudanca": 0,
+  "mapa": {
+   "centro": [
+    41.149976995937294,
+    -8.61074607570972
+   ],
+   "proposto": null,
+   "movidoM": null,
+   "entradas": [
+    {
+     "ll": [
+      41.149839,
+      -8.610744
+     ],
+     "estado": "atual",
+     "nome": null,
+     "distM": 15.362693052733038
+    }
+   ]
+  },
+  "imageUrls": [
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__",
+   "__FOTO__"
+  ],
+  "dateAdded": 1785203731191,
+  "lat": 41.149926656492994,
+  "lon": -8.611107558012,
+  "isStarred": false
+ }
+]

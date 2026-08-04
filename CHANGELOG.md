@@ -8,6 +8,39 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-09
+
+### Alterado
+- **A foto de um local novo agora se identifica como proposta.** Quem usa leitor de tela ouve "Foto proposta junto com o local novo…", e quem passa o mouse lê a mesma coisa. Antes ela era descrita como uma foto qualquer.
+
+  **Sem selo ✨ de propósito**: num local novo *todas* as fotos são novas — não existe local novo com foto que já esteja no mapa. O selo apareceria em todos esses cards e deixaria de significar algo justamente onde ele decide: no pedido de foto, onde aponta *uma* entre várias.
+
+## v2026.08.04-07
+
+### Corrigido
+- **O mapa gasta menos dados no celular deitado.** Em tela deitada a área do mapa é mais larga que um bloco do mapa do Waze, e a app acabava baixando até **6 blocos** por card em vez de 2. Agora são **2,27 em média** (era 3,24), com o mesmo enquadramento. Em pé a economia também apareceu: 1,29 por card, contra 1,94.
+
+### Interno
+- Mais medição saiu da bancada e entrou no teste automático: o mapa agora é verificado contra os **51 pedidos reais de 6 países** (enquadramento, orçamento de blocos, zoom coerente, região), os **três formatos de foto** (paisagem, quadrada e retrato) e o **contraste do texto do mapa** nos 4 idiomas. Foi esse teste que achou o gasto extra em tela deitada.
+
+## v2026.08.04-06
+
+### Corrigido
+- **A proporção da foto não decide mais o layout do card.** Foto de retrato — que é como celular fotografa — espremia o texto e fazia o card rolar por dentro, e quando isso acontece **arrastar pra cima rola em vez de pular**: o gesto morre.
+
+  Medido com 51 pedidos reais de 6 países num celular dobrável:
+
+  | foto | cards que não cabiam |
+  |---|---|
+  | paisagem 800×400 | 0 de 51 |
+  | quadrada 512×512 | 20 de 51 |
+  | retrato 1080×1920 | **31 de 51** |
+
+  Valia para todo tipo de pedido e todo país. Passava despercebido porque o teste automático usava uma foto 800×400 — o único formato que nunca falha.
+
+### Alterado
+- **O teste automático passou a usar pedidos reais de seis países** (Brasil, França, Reino Unido, México, Espanha e Portugal) em vez de sete cards escritos à mão, todos brasileiros. Agora todo envio de código renderiza endereço britânico, nome francês e tipos de pedido que a fila brasileira não tem.
+
 ## v2026.08.04-05
 
 ### Adicionado

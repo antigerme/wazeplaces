@@ -291,10 +291,28 @@ test('a foto do card absorve a variação de altura, o texto não vira vão', ()
   const linhas = HTML.split('\n');
   const foto = linhas.find((l) => l.includes('card-photo'));
   assert.ok(foto, 'sumiu o container da foto (.card-photo)');
-  assert.match(foto, /flex-auto/, 'a foto voltou a ter altura fixa — a sobra vira vão de novo');
+  // A PROPRIEDADE, não a forma: este guard exigia o literal `flex-auto` e
+  // reprovou uma correção legítima que trocou a base do flex mantendo tudo o
+  // que importa. O que precisa continuar valendo é a foto CRESCER e ENCOLHER.
+  assert.match(foto, /\b(flex-auto|flex-1|grow)\b/,
+    'a foto voltou a ter altura fixa — a sobra vira vão de novo');
+  assert.match(foto, /\bshrink-\[/, 'a foto parou de ceder espaço antes do texto');
   assert.match(foto, /min-h-\[/, 'a foto precisa de um piso, senão some em conteúdo longo');
   assert.match(foto, /max-h-\[/, 'a foto precisa de um teto, senão engole o texto');
   assert.doesNotMatch(foto, /\bh-52\b/, 'altura fixa de volta na foto');
+
+  // E a base do flex tem que ser ZERO. Com `flex-basis: auto` ela é resolvida
+  // pelo tamanho INTRÍNSECO da <img>, ou seja: a proporção da foto que o
+  // usuário tirou decide quanto de altura sobra pro texto. Medido com 51
+  // pedidos reais de 6 países num Galaxy Fold — 800×400: 0 estouram; 512×512:
+  // 20; 1080×1920 (retrato, que é como celular fotografa): 31. O bug valia pra
+  // todo tipo e todo país, e só não aparecia porque a fixture do smoke era
+  // 800×400, o ÚNICO formato que nunca falha.
+  assert.ok(/\bbasis-0\b/.test(foto) || /\bflex-1\b/.test(foto),
+    'a foto voltou a ter base de flex automática — a proporção da imagem passa a decidir o layout');
+  const CSS_ = read('css/styles.css');
+  assert.match(CSS_, /\.place-card \.card-photo\s*\{[^}]*flex-basis:\s*0/,
+    'sumiu o reforço de flex-basis: 0 no styles.css');
 
   const conteudo = linhas.find((l) => l.includes('card-content dark:'));
   assert.ok(conteudo, 'sumiu a área de texto do card');

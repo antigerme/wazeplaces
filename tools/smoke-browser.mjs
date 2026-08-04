@@ -20,6 +20,7 @@
 // teste que se auto-pula vira teste que ninguém percebe que morreu.
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -73,9 +74,20 @@ async function abrirBrowser(chromium) {
   throw new Error('nenhum browser abriu:\n  - ' + erros.join('\n  - '));
 }
 
-const foto = 'data:image/svg+xml;base64,' + Buffer.from(
-  "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='400'><rect width='800' height='400' fill='#334155'/></svg>",
-).toString('base64');
+// RETRATO, não paisagem — e a diferença não é estética.
+//
+// A base do flex da foto era `auto`, resolvida pelo tamanho INTRÍNSECO da
+// <img>: a proporção da imagem decidia quanto de altura sobrava pro texto.
+// Medido com 51 pedidos reais de 6 países num Galaxy Fold: 800×400 → 0 cards
+// estouram; 512×512 → 20; 1080×1920 → 31. Esta fixture era 800×400, ou seja,
+// **o único formato que nunca falha** — a fixture escondia exatamente o
+// defeito que ela existe pra encontrar, em todo tipo de card e todo país.
+//
+// Foto de pedido é tirada de CELULAR, então retrato é o caso comum, não o
+// extremo. A base do flex virou 0 (o layout não depende mais da imagem), e a
+// fixture ficou retrato pra o smoke medir o caso real se alguém reverter.
+const SVG_CINZA = "<svg xmlns='http://www.w3.org/2000/svg' width='1080' height='1920'><rect width='1080' height='1920' fill='#334155'/></svg>";
+const foto = 'data:image/svg+xml;base64,' + Buffer.from(SVG_CINZA).toString('base64');
 
 // Um card de cada forma: o de atualização (caixa de mudanças), o de reporte
 // (caixa de texto) e o de foto nova (sem caixa longa).
@@ -556,6 +568,213 @@ for (const [nome, vp, iOS] of [
   await ctx.close();
 }
 
+// ── Pedidos REAIS dos seis países obrigatórios ────────────────────────────
+//
+// Instrução permanente do owner (seção 🌍 do CLAUDE.md): toda medição usa o
+// máximo de países, sempre incluindo Brasil, França, Reino Unido, México,
+// Espanha e Portugal. A lista mora em `tools/paises-validacao.mjs`.
+//
+// Por que isto está no SMOKE e não só num script de bancada: até aqui as 7
+// fixtures acima eram todas escritas à mão, com nome e endereço brasileiros —
+// então o CI, que é quem cobra de todo mundo, nunca via um endereço britânico
+// nem um `FLAGGED_PHOTO` (tipo do qual a fila do Brasil não tem NENHUM).
+// A auditoria só-Brasil dava zero problema em 1872 renders enquanto 26 cards
+// de outros países não cabiam no Fold. Guardar a lista num arquivo protege a
+// LISTA de ser esquecida; só a fixture no CI protege a MEDIÇÃO.
+//
+// São pedidos reais, o mais pesado de cada país × tipo — é o pesado que quebra
+// primeiro. Só `createdBy` é anonimizado: nome de local, endereço, categoria e
+// geometria são dado público de mapa, e são justamente eles que decidem layout.
+const FIXTURES_PAISES = JSON.parse(
+  readFileSync(new URL('./fixtures-paises.json', import.meta.url), 'utf8'))
+  .map((f) => ({ ...f, imageUrls: (f.imageUrls || []).map(() => foto) }));
+
+// Os dois aparelhos em que TODAS as 104 falhas da auditoria de 12 países
+// apareceram. iPhone SE e Pixel 7 zeraram — medir neles aqui seria pagar tempo
+// de CI por informação que já se tem.
+const APARELHOS_PAISES = [
+  ['Galaxy Fold', { width: 280, height: 653 }],
+  ['paisagem 852x393', { width: 852, height: 393 }],
+];
+
+for (const [aparelho, viewport] of APARELHOS_PAISES) {
+  const ctx = await browser.newContext({ viewport, serviceWorkers: 'block' });
+  // Os tiles do mapa não são alcançáveis do CI; o que se mede aqui é layout.
+  await ctx.route('**/*-tiles/**', (r) =>
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  const page = await ctx.newPage();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(300);
+  for (const lang of LINGUAS) {
+    for (const place of FIXTURES_PAISES) {
+      const m = await page.evaluate(async ({ pl, lang: l }) => {
+        setLang(l); applyI18n();
+        AppState.authenticated = true;
+        AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+        AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+        AppState.serverTotal = 1;
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        document.getElementById('noMoreCards').classList.add('hidden');
+        showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+        AppState.queue = [pl]; AppState.currentPlace = pl;
+        document.querySelectorAll('.place-card').forEach((e) => e.remove());
+        showCurrentPlace();
+        // Dois quadros + folga: medir no mesmo tick MENTE, o layout ainda não
+        // assentou e o scrollHeight vem errado (gotcha #32).
+        await new Promise((k) => requestAnimationFrame(() => requestAnimationFrame(k)));
+        await new Promise((k) => setTimeout(k, 180));
+        const card = document.querySelector('.place-card');
+        if (!card) return { semCard: true };
+        const cc = card.querySelector('.card-content');
+        const barra = card.querySelector('.card-btn-read');
+        const rb = barra ? barra.getBoundingClientRect() : null;
+        return {
+          // Card rolando por dentro DESLIGA o gesto de pular (gotcha #29):
+          // arrastar pra cima passa a rolar. É a falha mais cara do card.
+          rede: cc.classList.contains('card-content-rola'),
+          acoesFora: rb ? Math.max(0, Math.round(rb.bottom - innerHeight)) : 0,
+          estouroH: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      }, { pl: place, lang });
+      const rot = `${aparelho} · ${lang} · ${place._pais} · ${place.purType}`;
+      checa(!m.semCard, `${rot}: não renderizou`);
+      checa(!m.rede, `${rot}: card rola por dentro — mata o gesto de pular`);
+      checa(m.acoesFora === 0, `${rot}: barra ✕/↑/✓ fora da tela`, `${m.acoesFora}px`);
+      checa(m.estouroH <= 0, `${rot}: estouro horizontal`, `${m.estouroH}px`);
+    }
+  }
+  await ctx.close();
+}
+
+// ── A proporção da FOTO não pode decidir o layout ─────────────────────────
+//
+// `.card-photo` já teve `flex-basis: auto`, que resolve a base pelo tamanho
+// INTRÍNSECO da <img> — a foto que o usuário tirou decidia quanto de altura
+// sobrava pro texto. Medido: 800×400 → 0 estouram; 512×512 → 20; 1080×1920 →
+// 31 (de 51 pedidos reais). Foto de pedido vem de celular, ou seja, retrato.
+//
+// As fixtures acima já usam retrato (o pior caso). Aqui os TRÊS formatos, pra
+// pegar uma regressão que quebre especificamente paisagem ou quadrada — que é
+// o que a fixture única não vê. Um idioma só: formato mexe em ALTURA, idioma
+// mexe em largura, e cruzar os dois seria pagar 4× por nada.
+const FORMATOS_FOTO = [
+  ['paisagem 800x400', 800, 400],
+  ['quadrada 512x512', 512, 512],
+  ['retrato 1080x1920', 1080, 1920],
+];
+for (const [nomeF, fw, fh] of FORMATOS_FOTO) {
+  const uri = 'data:image/svg+xml;base64,' + Buffer.from(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='${fw}' height='${fh}'><rect width='${fw}' height='${fh}' fill='#334155'/></svg>`,
+  ).toString('base64');
+  for (const [aparelho, viewport] of APARELHOS_PAISES) {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block' });
+    await ctx.route('**/*-tiles/**', (r) =>
+      r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    const page = await ctx.newPage();
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(250);
+    for (const place of FIXTURES_PAISES) {
+      const m = await page.evaluate(async ({ pl, u }) => {
+        setLang('pt'); applyI18n();
+        AppState.authenticated = true;
+        AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        document.getElementById('noMoreCards').classList.add('hidden');
+        showLoading(false);
+        const q = { ...pl, imageUrls: (pl.imageUrls || []).map(() => u) };
+        AppState.queue = [q]; AppState.currentPlace = q;
+        document.querySelectorAll('.place-card').forEach((e) => e.remove());
+        showCurrentPlace();
+        await new Promise((k) => requestAnimationFrame(() => requestAnimationFrame(k)));
+        await new Promise((k) => setTimeout(k, 170));
+        const cc = document.querySelector('.card-content');
+        return cc ? { rede: cc.classList.contains('card-content-rola') } : { semCard: true };
+      }, { pl: place, u: uri });
+      checa(!m.semCard, `foto ${nomeF} · ${aparelho} · ${place._pais}: não renderizou`);
+      checa(!m.rede,
+        `foto ${nomeF} · ${aparelho} · ${place._pais} · ${place.purType}: card rola — a proporção da foto voltou a mandar no layout`);
+    }
+    await ctx.close();
+  }
+}
+
+// ── O mapa é legível? (contraste e alvo de toque) ─────────────────────────
+//
+// O mapa entrou por cima de tiles que mudam de cor conforme a região — parque
+// verde, água azul, malha clara. Texto sobre isso não pode virar aposta: a
+// legenda e a escala têm fundo próprio, e é ELE que precisa passar no WCAG.
+// Medir é barato e presumir já custou caro aqui (o `.valor-ausente` foi medido
+// sobre branco e reprovou sobre verde).
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/**', (r) =>
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  const page = await ctx.newPage();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const comMapa = FIXTURES_PAISES.filter((f) => f.mapa && f.mapa.centro).slice(0, 6);
+  for (const lang of LINGUAS) {
+    for (const place of comMapa) {
+      const m = await page.evaluate(async ({ pl, lang: l }) => {
+        setLang(l); applyI18n();
+        AppState.authenticated = true;
+        AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        document.getElementById('noMoreCards').classList.add('hidden');
+        showLoading(false);
+        AppState.queue = [pl]; AppState.currentPlace = pl;
+        document.querySelectorAll('.place-card').forEach((e) => e.remove());
+        showCurrentPlace();
+        await new Promise((k) => setTimeout(k, 320));
+        // Chega até o slide do mapa (ele pode ser o último, quando há foto).
+        const prox = document.querySelector('.card-image-next');
+        for (let i = 0; i < 8 && document.querySelector('.card-map.hidden'); i++) {
+          if (!prox) break;
+          prox.click();
+          await new Promise((k) => setTimeout(k, 90));
+        }
+        const bx = document.querySelector('.card-map');
+        if (!bx || bx.classList.contains('hidden')) return { semMapa: true };
+        const lum = (c) => {
+          const v = (String(c).match(/[\d.]+/g) || [0, 0, 0]).slice(0, 3).map(Number).map((x) => {
+            x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+          });
+          return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+        };
+        const contraste = (el) => {
+          const st = getComputedStyle(el);
+          let n = el, bg = st.backgroundColor;
+          while (n && /rgba\(0, 0, 0, 0\)|transparent/.test(bg)) { n = n.parentElement; if (n) bg = getComputedStyle(n).backgroundColor; }
+          const a = lum(st.color), b = lum(bg || 'rgb(255,255,255)');
+          return +((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toFixed(2);
+        };
+        const baixos = [];
+        for (const sel of ['.card-map-scale', '.mapa-leg', '.mapa-fora']) {
+          for (const el of bx.querySelectorAll(sel)) {
+            if (!el.textContent.trim()) continue;
+            const c = contraste(el);
+            if (c < 4.5) baixos.push(`${sel} ${c}:1`);
+          }
+        }
+        // A navegação do carrossel continua alcançável com o mapa na tela.
+        const alvos = [...document.querySelectorAll('.card-image-prev, .card-image-next')]
+          .filter((b) => b.offsetParent !== null)
+          .map((b) => b.getBoundingClientRect())
+          .filter((r) => r.width < 44 || r.height < 44).length;
+        return { baixos, alvos };
+      }, { pl: place, lang });
+      if (m.semMapa) continue;
+      const rot = `mapa · ${lang} · ${place._pais}`;
+      checa(m.baixos.length === 0, `${rot}: texto do mapa abaixo do contraste do WCAG`, m.baixos.join(', '));
+      checa(m.alvos === 0, `${rot}: seta do carrossel menor que 44px com o mapa aberto`);
+    }
+  }
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -563,4 +782,8 @@ if (falhas) {
   console.log(`\n✗ smoke de browser: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`);
+console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card`
+  + `, + ${FIXTURES_PAISES.length} pedidos REAIS de ${new Set(FIXTURES_PAISES.map((f) => f._pais)).size} países × ${APARELHOS_PAISES.length} aparelhos × ${LINGUAS.length} idiomas`
+  + `, + ${FORMATOS_FOTO.length} formatos de foto × ${APARELHOS_PAISES.length} aparelhos`
+  + `, + legibilidade do mapa × ${LINGUAS.length} idiomas`
+  + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`);

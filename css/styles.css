@@ -1518,3 +1518,27 @@ button:active {
   border-radius: 0.5rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
+
+/* ── A ALTURA DO CARD NÃO PODE DEPENDER DA PROPORÇÃO DA FOTO ───────────────
+   `.card-photo` era `flex-auto`, e `flex: 1 1 auto` resolve a base pelo
+   tamanho INTRÍNSECO do conteúdo — que aqui é uma <img>. Ou seja: a foto que
+   o usuário tirou decidia quanto de altura sobrava pro texto.
+
+   Medido com 51 pedidos REAIS de 6 países, num Galaxy Fold:
+
+     foto 800×400 (paisagem)  →  0 de 51 estouram
+     foto 512×512 (quadrada)  → 20 de 51
+     foto 1080×1920 (retrato) → 31 de 51
+
+   E foto de pedido é tirada de CELULAR, ou seja, quase sempre retrato. O bug
+   valia pra todo tipo de card e todo país — só não aparecia porque a fixture
+   do smoke era 800×400, o ÚNICO formato que nunca falha. A fixture escondia
+   o defeito que ela existia pra encontrar.
+
+   Com base 0 a foto passa a receber uma FRAÇÃO do espaço livre em vez de
+   partir do próprio tamanho, e o layout fica igual para qualquer imagem. O
+   `shrink-[30]` continua: quem cede espaço é a foto, não o texto. O piso de
+   9rem e o teto de 55% também. Medido depois: 0 nos três formatos. */
+.place-card .card-photo {
+  flex-basis: 0%;
+}
