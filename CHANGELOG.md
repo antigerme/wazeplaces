@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-03
+
+### Corrigido
+- **Os cards de "Atualização de detalhes" e "Local marcado" voltaram a caber na tela**, e por isso voltam a vir **marcados** no filtro. Em celular dobrável e em tela deitada eles passavam a rolar por dentro — e quando isso acontece, arrastar pra cima *rola* em vez de *pular*, ou seja, o gesto morre. Medido em 117 pedidos reais desses dois tipos, em 4 aparelhos × 4 idiomas: **156 casos com problema viraram zero.**
+
+### Alterado
+- **Categoria e Endereço agora seguem o mesmo desenho de Tipo, Criador e Marca**: `RÓTULO: valor` numa linha. Eram as únicas duas linhas com ícone e rótulo empilhado — duas maneiras de mostrar a mesma coisa no mesmo card. Além de ficar mais consistente, **sobra mais espaço pra foto**: até +95px em celular comum, +47px no dobrável.
+- **O motivo do reporte saiu de dentro da caixa rosa.** Em 15 de cada 17 reportes o usuário não escreve comentário nenhum — e a caixa existe pra segurar esse texto. Sem ele, sobrava só a moldura ocupando espaço. O motivo continua em destaque; a caixa agora só aparece quando há de fato o que ler.
+
 ## v2026.08.04-02
 
 ### Alterado

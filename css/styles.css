@@ -1004,12 +1004,15 @@ button:active {
      bastava), e aí o card inteiro rolava: a rede de segurança liga, a caixa
      longa vira `flex: 0 0 auto` e assume a altura natural (medido: conteúdo
      salta de 289 pra 476px). O gesto de pular morre junto (gotcha #29).
-     Empilhar rótulo e valor devolve a largura inteira ao motivo, que é o que
-     decide quantas linhas ele ocupa. 0.8125rem segue acima do piso de
-     legibilidade de 11px. */
-  .place-card .card-flag-reason {
-    display: block;
-  }
+     0.8125rem segue acima do piso de legibilidade de 11px.
+
+     O `display: block` que empilhava rótulo e valor SAIU: ele existia porque o
+     motivo morava DENTRO da caixa rosa e disputava a largura dela menos o
+     padding. Fora da caixa ele tem a largura inteira do card, e empilhar o
+     deixaria como a ÚNICA linha fora do padrão "RÓTULO: valor" num card que
+     agora é todo assim — inconsistência que o editor lê como defeito. Medido
+     antes de tirar: 136 renders de reporte (34 pedidos reais × 4 idiomas) em
+     Fold e paisagem, zero estouro com ou sem a regra. */
   .place-card .card-flag-reason .card-flag-reason-value {
     font-size: 0.8125rem;
   }
