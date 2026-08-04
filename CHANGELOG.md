@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-11
+
+### Interno
+- **O mapa passou a ser testado contra a queda do servidor de blocos do Waze.** Eles vêm de fora e não estão sob nosso controle; se um dia mudarem de endereço ou bloquearem, o card continua mostrando os marcadores, a linha do movimento e a escala — você perde o desenho das ruas, mas não a informação que o texto sozinho não dá.
+
 ## v2026.08.04-10
 
 ### Corrigido
