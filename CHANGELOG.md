@@ -8,6 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-01
+
+### Alterado
+- **O filtro de tipos agora tem as mesmas 7 opções do WME.** Antes eram 3, e a terceira — "Reportes/Atualizações" — juntava coisas bem diferentes num balaio só. Agora dá pra separar:
+
+  | antes | agora |
+  |---|---|
+  | Novos Locais | **Novo local** |
+  | Novas Fotos | **Nova foto** |
+  | Reportes/Atualizações | **Atualização de detalhes** · **Local marcado** · **Excluir local** · **Foto sinalizada** · **Excluir foto** |
+
+  Na fila de teste isso separou 48 atualizações de detalhes, 17 locais marcados e 3 pedidos de exclusão que antes vinham misturados. Quem quer passar só nos reportes de local fechado/duplicado agora consegue.
+
+  Os nomes são os **mesmos do WME**, nos 4 idiomas — se você conferir pelo ↗, vai ler a mesma palavra nos dois lugares. A ordem na tela é por assunto (local primeiro, foto depois), que é diferente da do WME: lá é alfabética pelo nome técnico, o que em português coloca "Excluir foto" antes de "Novo local".
+
 ## v2026.08.02-01
 
 ### Adicionado

@@ -22,6 +22,8 @@ import {
   cookieHeaderFrom,
   isWazeCookieDomain,
   buildPlacesFromSearch,
+  purTypeDoUR,
+  PUR_TIPOS,
   SESSION_TTL,
   WAZE_REGIONS,
 } from '../server/core.mjs';
@@ -196,12 +198,12 @@ const harBatalhao = () => ({
 test('buildPlacesFromSearch: PUR já lido NÃO vira card com unreadOnly (bug do "place volta")', () => {
   // Cenário exato do HAR: user marcou a foto como lida, venue volta na busca
   // por causa do REQUEST irmão. Antes do fix: 1 card (a foto lida, de novo).
-  const { places } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['NEW_PLACE', 'NEW_PHOTO'], unreadOnly: true });
   assert.equal(places.length, 0, 'foto já lida não pode voltar como card');
 });
 
 test('buildPlacesFromSearch: unreadOnly=false inclui PURs lidos (modo "incluir lidos")', () => {
-  const { places } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: false });
+  const { places } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['NEW_PLACE', 'NEW_PHOTO'], unreadOnly: false });
   assert.equal(places.length, 1);
   assert.equal(places[0].updateRequestID, '5dd54258-1bfe-4739-8b72-db4c418b1e79');
   assert.equal(places[0].reqType, 'IMAGE');
@@ -210,7 +212,7 @@ test('buildPlacesFromSearch: unreadOnly=false inclui PURs lidos (modo "incluir l
 test('buildPlacesFromSearch: PUR não-lido vira card normalmente', () => {
   const rd = harBatalhao();
   rd.venues.objects[0].venueUpdateRequests[1].isRead = false;
-  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['NEW_PLACE', 'NEW_PHOTO'], unreadOnly: true });
   assert.equal(places.length, 1);
   assert.equal(places[0].updateRequestID, '5dd54258-1bfe-4739-8b72-db4c418b1e79');
 });
@@ -218,12 +220,12 @@ test('buildPlacesFromSearch: PUR não-lido vira card normalmente', () => {
 test('buildPlacesFromSearch: isRead ausente entra na fila (defensivo, como permissions)', () => {
   const rd = harBatalhao();
   delete rd.venues.objects[0].venueUpdateRequests[1].isRead;
-  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['VENUE', 'IMAGE'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['NEW_PLACE', 'NEW_PHOTO'], unreadOnly: true });
   assert.equal(places.length, 1);
 });
 
 test('buildPlacesFromSearch: REQUEST/UPDATE não-lido vira card quando o tipo é pedido (dev mode)', () => {
-  const { places } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['REQUEST'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE', 'FLAGGED_PHOTO', 'DELETE_PHOTO'], unreadOnly: true });
   assert.equal(places.length, 1);
   assert.equal(places[0].reqType, 'REQUEST');
   assert.equal(places[0].createdBy, 'AoInfinito');
@@ -273,7 +275,7 @@ test('buildPlacesFromSearch: escrituração do venue não vira "mudança propost
   // `updatedOn`/`updatedBy` mudam porque a edição acontece, não porque alguém
   // pediu. Mostrá-los custava linha na caixa de mudanças e, com
   // MAX_CHANGES_DISPLAY, chegava a empurrar mudança de VERDADE pro "+N mais".
-  const { places } = buildPlacesFromSearch(harEstadio(), { filterTypes: ['REQUEST'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(harEstadio(), { filterTypes: ['DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE', 'FLAGGED_PHOTO', 'DELETE_PHOTO'], unreadOnly: true });
   assert.equal(places.length, 1);
   const campos = places[0].changes.map((c) => c.field);
   assert.deepEqual(campos, ['categories'], `sobrou escrituração no diff: ${campos.join(', ')}`);
@@ -287,7 +289,7 @@ test('buildPlacesFromSearch: campo desconhecido continua aparecendo, com o nome 
   // de verdade é o oposto do que a app existe pra fazer.
   const rd = harEstadio();
   rd.venues.objects[0].venueUpdateRequests[0].changedVenue.campoNovoDoWaze = 'valor';
-  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['REQUEST'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE', 'FLAGGED_PHOTO', 'DELETE_PHOTO'], unreadOnly: true });
   const novo = places[0].changes.find((c) => c.field === 'campoNovoDoWaze');
   assert.ok(novo, 'campo desconhecido sumiu — a lista virou de inclusão');
   assert.equal(novo.label, 'CampoNovoDoWaze');
@@ -372,7 +374,7 @@ test('buildPlacesFromSearch: o core não escreve texto de interface', () => {
   const rd = harEstadio();
   const ur = rd.venues.objects[0].venueUpdateRequests[0];
   ur.changedVenue = { name: null, residential: true, categories: ['A'] };
-  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['REQUEST'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE', 'FLAGGED_PHOTO', 'DELETE_PHOTO'], unreadOnly: true });
   const p = places[0];
   const porCampo = Object.fromEntries(p.changes.map((c) => [c.field, c]));
 
@@ -397,7 +399,7 @@ test('buildPlacesFromSearch: o core não escreve texto de interface', () => {
 test('buildPlacesFromSearch: nome ausente também é decisão do frontend', () => {
   const rd = harEstadio();
   delete rd.venues.objects[0].name;
-  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['REQUEST'], unreadOnly: true });
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE', 'FLAGGED_PHOTO', 'DELETE_PHOTO'], unreadOnly: true });
   assert.equal(places[0].name, null, 'o core voltou a escrever "Sem nome"');
 });
 
@@ -442,16 +444,16 @@ test('buildPlacesFromSearch: `blocked` respeita os MESMOS filtros de tipo e leit
   const rd = harBatalhao();
   rd.venues.objects[0].permissions = 0;
   // 1 IMAGE já lida + 1 REQUEST não-lido (estado original da fixture)
-  const soImagem = buildPlacesFromSearch(rd, { filterTypes: ['IMAGE'], unreadOnly: true });
+  const soImagem = buildPlacesFromSearch(rd, { filterTypes: ['NEW_PHOTO'], unreadOnly: true });
   assert.equal(soImagem.blocked, 0, 'a única IMAGE está lida → não conta');
-  const incluindoLidos = buildPlacesFromSearch(rd, { filterTypes: ['IMAGE'], unreadOnly: false });
+  const incluindoLidos = buildPlacesFromSearch(rd, { filterTypes: ['NEW_PHOTO'], unreadOnly: false });
   assert.equal(incluindoLidos.blocked, 1, 'com lidos incluídos, a IMAGE entra na conta');
-  const soRequest = buildPlacesFromSearch(rd, { filterTypes: ['REQUEST'], unreadOnly: true });
+  const soRequest = buildPlacesFromSearch(rd, { filterTypes: ['DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE', 'FLAGGED_PHOTO', 'DELETE_PHOTO'], unreadOnly: true });
   assert.equal(soRequest.blocked, 1, 'o REQUEST não-lido conta');
 });
 
 test('buildPlacesFromSearch: venue editável não gera `blocked`', () => {
-  const { places, blocked } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['REQUEST'], unreadOnly: true });
+  const { places, blocked } = buildPlacesFromSearch(harBatalhao(), { filterTypes: ['DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE', 'FLAGGED_PHOTO', 'DELETE_PHOTO'], unreadOnly: true });
   assert.equal(places.length, 1);
   assert.equal(blocked, 0);
 });
@@ -801,4 +803,77 @@ test('regravar a sessão com o cookie novo é estrangulado no tempo', async () =
   } finally {
     Date.now = relogio;
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Os 7 tipos de PUR do WME
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// As formas abaixo NÃO são inventadas: saíram do Waze real. Cinco vieram de
+// pedidos que o owner criou de propósito com uma conta de teste (o local casou
+// EXATAMENTE com os tipos dos pedidos dele e com nenhum outro, que é o que
+// fecha o mapeamento), e o FLAGGED_PHOTO de um pedido real encontrado no
+// México — no Brasil não havia nenhum.
+const PUR_REAIS = [
+  // { type: VENUE } — local novo proposto por um usuário
+  [{ type: 'VENUE' }, 'NEW_PLACE'],
+  // { type: IMAGE } — foto nova enviada pra um local existente
+  [{ type: 'IMAGE' }, 'NEW_PHOTO'],
+  // editar detalhes pelo app → o pedido carrega changedVenue
+  [{ type: 'REQUEST', subType: 'UPDATE' }, 'DETAILS_UPDATE'],
+  // marcar impróprio / fechado / duplicado → 3 motivos, MESMO tipo
+  [{ type: 'REQUEST', subType: 'FLAG', flagType: 'INAPPROPRIATE', flagSubjectType: 'VENUE' }, 'FLAGGED_PLACE'],
+  [{ type: 'REQUEST', subType: 'FLAG', flagType: 'CLOSED', flagSubjectType: 'VENUE' }, 'FLAGGED_PLACE'],
+  [{ type: 'REQUEST', subType: 'FLAG', flagType: 'DUPLICATE', flagSubjectType: 'VENUE' }, 'FLAGGED_PLACE'],
+  // denúncia de FOTO: mesmo subType FLAG, o que muda é o flagSubjectType
+  [{ type: 'REQUEST', subType: 'FLAG', flagType: 'UNRELATED', flagSubjectType: 'IMAGE' }, 'FLAGGED_PHOTO'],
+  [{ type: 'REQUEST', subType: 'DELETE' }, 'DELETE_PLACE'],
+];
+
+test('purTypeDoUR: classifica cada forma REAL no tipo do WME', () => {
+  for (const [ur, esperado] of PUR_REAIS) {
+    assert.equal(purTypeDoUR(ur), esperado,
+      `${JSON.stringify(ur)} deveria ser ${esperado}`);
+  }
+  // O par que distingue local de foto é `flagSubjectType`, e é o ÚNICO sinal:
+  // trocá-lo tem que trocar o tipo, senão a app junta duas coisas diferentes.
+  assert.notEqual(
+    purTypeDoUR({ type: 'REQUEST', subType: 'FLAG', flagSubjectType: 'VENUE' }),
+    purTypeDoUR({ type: 'REQUEST', subType: 'FLAG', flagSubjectType: 'IMAGE' }),
+    'reporte de local e de foto colapsaram no mesmo tipo');
+  assert.equal(purTypeDoUR({ type: 'REQUEST', subType: 'DELETE', flagSubjectType: 'IMAGE' }),
+    'DELETE_PHOTO', 'a exclusão de foto perdeu o tipo próprio');
+});
+
+test('PUR_TIPOS: os 7 números do WME, sem buraco nem repetição', () => {
+  const nums = Object.values(PUR_TIPOS);
+  assert.equal(nums.length, 7, 'o WME tem 7 tipos no filtro de PUR');
+  assert.deepEqual([...nums].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7],
+    'os números são 1..7 (lidos do bundle do WME v2.361) — sem pular nem repetir');
+  // Todo tipo classificável tem número, e todo número tem classificação.
+  const classificaveis = new Set(PUR_REAIS.map(([, t]) => t));
+  classificaveis.add('DELETE_PHOTO');
+  for (const t of classificaveis) {
+    assert.ok(PUR_TIPOS[t], `${t} é classificado mas não tem número no PUR_TIPOS`);
+  }
+});
+
+test('tipo desconhecido NUNCA some da fila por causa do filtro', () => {
+  // O filtro é lista de PERMITIDOS. Se o Waze inventar um subType amanhã, ele
+  // não estaria na lista e sumiria calado de TODA fila — e some sem erro, que é
+  // o defeito que ninguém reporta porque ninguém vê. Melhor rótulo feio.
+  const inventado = { type: 'REQUEST', subType: 'ALGO_QUE_O_WAZE_INVENTOU' };
+  assert.equal(purTypeDoUR(inventado), 'UNKNOWN');
+
+  const rd = {
+    users: { objects: [] }, streets: { objects: [] }, cities: { objects: [] },
+    venues: { objects: [{
+      id: 'v1', name: 'Local', permissions: -1, categories: [], images: [],
+      venueUpdateRequests: [{ id: 'u1', ...inventado, isRead: false }],
+    }] },
+  };
+  // Filtro que NÃO inclui o tipo novo: ele tem que passar assim mesmo.
+  const { places } = buildPlacesFromSearch(rd, { filterTypes: ['NEW_PLACE'], unreadOnly: true });
+  assert.equal(places.length, 1, 'PUR de tipo desconhecido sumiu da fila');
+  assert.equal(places[0].purType, 'UNKNOWN', 'o tipo cru deixou de ser exposto');
 });

@@ -55,7 +55,21 @@ function formatarCodigoPareamento(bruto) {
 }
 const PREFETCH_THRESHOLD = 3;
 const MAX_EMPTY_PAGES = 5;
-const TYPES_ALL = ['VENUE', 'IMAGE', 'REQUEST'];
+// Os 7 tipos do WME, na ordem em que aparecem no filtro (local → foto). É a
+// MESMA ordem do index.html de propósito: duas listas com a mesma ideia em
+// ordens diferentes é como o editor descobre que a app se contradiz.
+const TYPES_ALL = ['NEW_PLACE', 'DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE',
+                   'NEW_PHOTO', 'FLAGGED_PHOTO', 'DELETE_PHOTO'];
+// O filtro salvo pode trazer lixo: storage de uma versão que não existe mais,
+// chave editada à mão, JSON meio gravado. Fica só o que a app conhece — e se
+// não sobrar NADA, volta ao padrão em vez de virar filtro vazio, que abriria a
+// app numa fila sem um card e sem um erro na tela. "Parece que acabou o
+// trabalho" é o defeito mais caro possível, porque ninguém reporta.
+function sanearTiposSalvos(lista) {
+    if (!Array.isArray(lista)) return TYPES_ALL.slice();
+    const validos = TYPES_ALL.filter((t) => lista.includes(t));
+    return validos.length ? validos : TYPES_ALL.slice();
+}
 const UNAUTHORIZED_REDIRECT_MS = 800;
 // Espera antes de confirmar se a sessão morreu mesmo. Curto o bastante pra não
 // atrasar quem precisa relogar de verdade, e longo o bastante pra a rajada que
@@ -81,7 +95,7 @@ const AppState = {
     _fetchPromise: null,
     _profilePromise: null,
     loadError: false,
-    filters: { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
+    filters: { types: TYPES_ALL.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
     preferences: { undoEnabled: true, semUndoSeguidas: 0 },
     devMode: { unlocked: false, active: false },
     profile: null,
@@ -706,12 +720,7 @@ function setupModalListeners() {
         AppState.devMode.active = e.target.checked;
         saveDevMode();
         updateDevBadge();
-        renderRequestTypeRow(); // linha REQUEST aparece/some ao vivo na aba Filtros
         if (!e.target.checked) {
-            // Dev off: desmarca REQUEST no DOM (a linha some, mas um checked
-            // fantasma iria junto no próximo Aplicar) e tira do filtro salvo.
-            const reqCb = document.querySelector('.filter-type[value="REQUEST"]');
-            if (reqCb) reqCb.checked = false;
             enforceDevGatedFilters();
             // Dev off pode re-travar o gate do undo → força ligado de novo.
             if (!canDisableUndo() && AppState.preferences.undoEnabled === false) {
@@ -1042,7 +1051,6 @@ async function openFiltersModal() {
     // abas ficam a um toque, sem "lembrar" estado velho de forma surpreendente.
     switchFilterTab('filtersTabFilters');
     renderDevModeSection();
-    renderRequestTypeRow();
     renderUndoGateUI();
     $('filterUnreadOnly').checked = AppState.filters.unreadOnly !== false;
     document.querySelectorAll('.filter-type').forEach(cb => {
@@ -1094,7 +1102,7 @@ function applyFiltersFromModal() {
     enforceDevGatedFilters();
     // Segurança: se o gate esvaziou os tipos (edge: só REQUEST + dev desligado),
     // volta ao default em vez de virar "todos os tipos".
-    if (AppState.filters.types.length === 0) AppState.filters.types = ['VENUE', 'IMAGE'];
+    if (AppState.filters.types.length === 0) AppState.filters.types = TYPES_ALL.slice();
     AppState.filters.residential = $('filterResidential').value;
     AppState.filters.stateId = $('filterState').value;
     AppState.filters.managedAreaId = $('filterManagedArea').value;
@@ -1447,7 +1455,7 @@ async function handleLogout() {
     API.setSession(null);
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
-    AppState.filters = { types: ['VENUE', 'IMAGE', 'REQUEST'], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
+    AppState.filters = { types: TYPES_ALL.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
     AppState.preferences = { undoEnabled: true };
     AppState.devMode = { unlocked: false, active: false };
     AppState.profile = null;
@@ -3100,7 +3108,7 @@ function loadFilters() {
         const raw = localStorage.getItem(FILTERS_KEY);
         if (raw) {
             const parsed = JSON.parse(raw);
-            AppState.filters.types = parsed.types || ['VENUE', 'IMAGE'];
+            AppState.filters.types = sanearTiposSalvos(parsed.types);
             AppState.filters.residential = parsed.residential || '';
             AppState.filters.stateId = parsed.stateId || '';
             AppState.filters.managedAreaId = parsed.managedAreaId || '';
@@ -3409,29 +3417,13 @@ function renderDevModeSection() {
     }
 }
 
-// REQUEST (Reportes/Atualizações) é gated por dev mode enquanto o flow de
-// LIBERADO. O tipo REQUEST (mudanças, reportes e pedidos de remoção) ficou
-// atrás do Modo Desenvolvedor enquanto os cards não davam conta dele — que é
-// pra isso que o modo dev existe neste projeto: soltar recurso quando fica
-// redondo.
+// A linha REQUEST do filtro (e a função que a mostrava) MORREU: ela virou as
+// quatro do WME — atualização de detalhes, local marcado, excluir local e foto
+// sinalizada. Fica o registro do que ela custou enquanto esteve fechada atrás
+// do modo dev, porque a lição vale pro próximo gate: numa fila real de 137
+// pedidos, 135 eram REQUEST — o editor abria a app e via DOIS. Meça quanto da
+// fila um gate esconde antes de deixá-lo fechado mais um mês.
 //
-// O custo de deixar fechado era grande e só apareceu medindo: numa fila real de
-// 137 pedidos, 135 eram REQUEST. O editor abria a app e via DOIS. 98% do
-// trabalho estava escondido atrás de uma caixa que ele nem enxergava.
-//
-// O que faltava, e foi feito antes de abrir: geometria virou distância legível
-// (era "[object Object]"), listas mostram o que entrou e saiu, os três tipos de
-// reporte que existem de verdade ganharam tradução (o dicionário só tinha
-// INAPPROPRIATE, que não ocorre nenhuma vez), openingHours e entryExitPoints
-// pararam de vazar JSON, e o card de remoção parou de repetir a própria frase.
-// Auditado em 960 renders — 40 viewports do Chrome DevTools × 4 idiomas × 6
-// tipos de card, com pedido REAL — com zero problema.
-function renderRequestTypeRow() {
-    const row = document.getElementById('filterTypeRequestRow');
-    if (!row) return;
-    row.classList.remove('hidden');
-}
-
 // Não há mais tipo gated por dev mode. A função fica como ponto de extensão
 // (o próximo recurso a ser solto passa por aqui) e para não quebrar os call
 // sites, mas hoje não tira nada de ninguém — tirava REQUEST do filtro salvo,
