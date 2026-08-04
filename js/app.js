@@ -2078,8 +2078,7 @@ function renderCardImages(card, place) {
     // principal (o pedido mexe em posição, ou não há foto nenhuma pra olhar) e
     // por último quando a foto é que responde a pergunta.
     const temMapa = !!place.mapa;
-    const eEspacial = (place.changes || []).some((c) => c.field === 'geometry' || c.field === 'entryExitPoints');
-    const mapaPrimeiro = temMapa && (urls.length === 0 || eEspacial);
+    const mapaPrimeiro = mapaVemPrimeiro(place);
     const slides = urls.map((u) => ({ foto: u }));
     if (temMapa) slides.splice(mapaPrimeiro ? 0 : slides.length, 0, { mapa: true });
     const idxMapa = temMapa ? (mapaPrimeiro ? 0 : slides.length - 1) : -1;
@@ -2707,9 +2706,51 @@ function rotuloDeEnum(prefixo, valor) {
 }
 
 // Pré-carrega a imagem do próximo place da fila — mata o flash branco no swipe.
+// O que este card mostra PRIMEIRO: o mapa ou a foto?
+//
+// FONTE ÚNICA da decisão. Ela vale em dois lugares — o carrossel, que monta os
+// slides, e o prefetch, que aquece o próximo. Duplicada, elas divergem e o
+// prefetch passa a aquecer o ativo errado sem ninguém notar, que é exatamente
+// o defeito que esta função veio consertar.
+//
+// O mapa vem primeiro quando é a evidência principal: não há foto pra olhar, ou
+// o pedido mexe em POSIÇÃO (e aí a coordenada crua não se julga — foi por isso
+// que o mapa existe).
+function mapaVemPrimeiro(place) {
+    if (!place || !place.mapa) return false;
+    const nFotos = (place.imageUrls && place.imageUrls.length)
+        || (place.imageUrl ? 1 : 0);
+    const eEspacial = (place.changes || [])
+        .some((c) => c.field === 'geometry' || c.field === 'entryExitPoints');
+    return nFotos === 0 || eEspacial;
+}
+
+// Aquece o que o PRÓXIMO card vai mostrar primeiro — não "a foto dele".
+//
+// Antes isto era `imageUrls[0]`, sempre. Medido em 4188 cards reais de 12
+// países: em 23% o primeiro slide é o MAPA, e em 20% não há foto nenhuma —
+// nesses o prefetch não aquecia NADA e o editor via a caixa cinza esperando o
+// tile. Nos outros ~3%, ele baixava 56 KB de uma foto que não aparece primeiro.
+//
+// Não é gastar mais rede: é gastar no que a pessoa vai ver. Os tiles do próximo
+// card seriam baixados de qualquer forma quando ele chegasse — a fila é
+// sequencial, então o "próximo" é literalmente o próximo que ela vê.
 function prefetchNextImage() {
     const next = AppState.queue[1];
     if (!next) return;
+    if (mapaVemPrimeiro(next) && window.mapaMontar) {
+        // A caixa do slide do card ATUAL: o próximo ainda não existe, e o
+        // layout é o mesmo. Errar por alguns pixels só muda o zoom escolhido em
+        // casos de fronteira, e mesmo aí o tile aquecido é vizinho do certo.
+        const cx = document.querySelector('.place-card .card-photo');
+        const w = (cx && cx.clientWidth) || 400;
+        const h = (cx && cx.clientHeight) || 240;
+        const pts = [next.mapa.centro, next.mapa.proposto,
+                     ...(next.mapa.entradas || []).map((e) => e.ll)].filter(Boolean);
+        const r = mapaMontar(pts, w, h, API.getRegion());
+        if (r) for (const t of r.tiles) { const im = new Image(); im.src = t.url; }
+        return;
+    }
     const url = (next.imageUrls && next.imageUrls[0]) || next.imageUrl;
     if (url) { const im = new Image(); im.src = url; }
 }

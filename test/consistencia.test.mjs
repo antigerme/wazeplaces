@@ -372,3 +372,28 @@ test('local novo: a foto diz que é proposta, sem gastar selo', () => {
     assert.equal(n, N_LINGUAS, `${chave} está em ${n} línguas de ${N_LINGUAS}`);
   }
 });
+
+test('prefetch aquece o que o próximo card mostra PRIMEIRO', () => {
+  const APP_ = read('js/app.js');
+
+  // A decisão "mapa ou foto primeiro" vale em DOIS lugares: o carrossel, que
+  // monta os slides, e o prefetch, que aquece o próximo. Duplicada, elas
+  // divergem e o prefetch passa a aquecer o ativo errado — que é exatamente o
+  // defeito que a função veio consertar (medido em 4188 cards de 12 países: em
+  // 23% o primeiro slide é o mapa, e em 20% não havia foto, então o prefetch
+  // não aquecia NADA e o editor via a caixa cinza esperando o tile).
+  assert.match(APP_, /function mapaVemPrimeiro\(place\)/, 'sumiu a fonte única da ordem dos slides');
+  const usos = (APP_.match(/mapaVemPrimeiro\(/g) || []).length;
+  assert.ok(usos >= 3, `mapaVemPrimeiro usada ${usos}× — o carrossel e o prefetch precisam dos dois`);
+
+  // O carrossel não pode voltar a decidir sozinho.
+  const render = APP_.match(/function renderCardImages\([\s\S]*?\n\}/)[0];
+  assert.match(render, /mapaVemPrimeiro\(place\)/, 'o carrossel voltou a decidir a ordem por conta própria');
+  assert.doesNotMatch(render, /const eEspacial =/,
+    'a regra de "pedido espacial" foi recopiada dentro do carrossel');
+
+  // E o prefetch não pode voltar a aquecer a foto sempre.
+  const pf = APP_.match(/function prefetchNextImage\(\)[\s\S]*?\n\}/)[0];
+  assert.match(pf, /mapaVemPrimeiro\(next\)/, 'o prefetch voltou a aquecer a foto sem olhar o que vem primeiro');
+  assert.match(pf, /mapaMontar\(/, 'o prefetch parou de aquecer os tiles do mapa');
+});
