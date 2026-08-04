@@ -1407,3 +1407,114 @@ button:active {
 }
 
 .selo-acionavel:active { transform: scale(0.96); }
+
+/* ── Mini-mapa de evidência ────────────────────────────────────────────────
+   Vive dentro do slot da foto, como mais um slide do carrossel: custo de
+   altura ZERO num card que acabou de ser espremido até caber.
+
+   As cores repetem a gramática do diff (verde entra, vermelho sai) de
+   propósito — o card já ensina isso na caixa de mudanças, e uma segunda
+   gramática pro mesmo conceito é o que a regra de ouro de consistência
+   proíbe. A legenda existe porque cor não pode ser o ÚNICO canal de
+   informação (WCAG 1.4.1): quem não distingue verde de vermelho lê o rótulo. */
+.card-map-tiles img {
+  /* O tile é cartografia com texto: suavizar borra o nome das ruas. */
+  image-rendering: -webkit-optimize-contrast;
+  max-width: none;
+}
+
+.mapa-marca {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 9999px;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  background: #475569;
+  z-index: 10;
+}
+.mapa-marca.mapa-proposto { background: #16a34a; }
+.mapa-marca.mapa-atual { background: #475569; }
+.mapa-marca.mapa-entrada {
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border-radius: 3px;
+}
+.mapa-marca.mapa-e-nova { background: #16a34a; }
+.mapa-marca.mapa-e-saindo { background: #e11d48; }
+.mapa-marca.mapa-e-atual { background: #0891b2; }
+
+/* Linha do movimento: sem ela, dois pontos próximos leem como dois locais
+   diferentes em vez de um que andou. Tracejada porque é trajeto proposto, não
+   uma feição do mapa. */
+.mapa-linha {
+  position: absolute;
+  height: 0;
+  transform-origin: 0 0;
+  border-top: 2px dashed #16a34a;
+  z-index: 9;
+}
+
+/* A escala fica ACIMA da fileira de navegação (44px + respiro), senão o botão
+   ‹ passa por cima dela — visto no primeiro render. Feedback coberto pelo
+   controle é o gotcha #26 outra vez, só que ao contrário.
+
+   O `bottom` mora AQUI e não numa utility no HTML: a primeira tentativa deixou
+   `bottom-2` no elemento, e esta regra (uma classe, 0-1-0) perdeu por ordem de
+   carga — o tailwind.css vem depois do styles.css. Gotcha #27, terceira vez. */
+.card-map-scale {
+  bottom: 3.25rem;
+  border-bottom: 3px solid currentColor;
+  box-sizing: content-box;
+  text-align: center;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.mapa-leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+/* O ponto da legenda é o MESMO elemento do marcador (mesma classe, mesma cor):
+   se a cor mudar num lugar e não no outro, a legenda passa a mentir.
+   Aqui ele volta a ser INLINE — absoluto, ele caía por cima da primeira letra
+   ("antes" virava "ntes"), porque o marcador nasce centrado no próprio ponto. */
+.mapa-leg .mapa-marca {
+  position: relative;
+  left: auto;
+  top: auto;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+/* Aviso de que a posição proposta não cabe em zoom nenhum. Fica no meio do
+   mapa e não num canto: é a informação mais importante daquele card, não uma
+   nota de rodapé. Existe porque há pedidos propondo mover um local dezenas de
+   quilômetros — sem isto o mapa desenhava um ponto só e calava sobre o outro. */
+.mapa-fora {
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 15;
+  background: rgba(190, 18, 60, 0.94);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}

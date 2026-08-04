@@ -8,6 +8,20 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-05
+
+### Adicionado
+- **Mini-mapa em todos os cards.** Ele entra como mais um slide do carrossel da foto — dá pra ir e voltar entre a foto e o mapa nas setas ‹ ›. Não ocupa espaço a mais: quando o pedido não tem foto, o mapa toma o lugar do "Sem Imagem".
+
+  Ele mostra **onde o pedido acontece**, com o mapa do próprio Waze: parques em verde, água em azul, prédios e os pontos conhecidos da vizinhança. Quando o pedido move o local, aparecem os dois pontos — **antes** em cinza e **depois** em verde — ligados por uma linha, com barra de escala. Pontos de entrada aparecem como quadradinhos: verde o que entra, vermelho o que sai.
+
+  Isso resolve o que era impossível decidir olhando: `moveu 36 m` é exato e não diz nada — 36 metros pode ser acertar a porta ou jogar o local dentro do rio.
+
+- **Aviso quando a posição proposta não cabe no mapa.** Existe de verdade: na fila de teste há pedidos propondo mover um local **82 km**. Antes o mapa mostraria um ponto só, calado. Agora avisa em vermelho, e a decisão é imediata.
+
+### Alterado
+- **Ponto de entrada agora mostra a DISTÂNCIA, não a coordenada.** Era `+ entrada -23.50382, -46.84458`; agora é `+ Entrada Av. José Salomé · entrada a 4 m do local`. A mediana real é 29 m — mas apareceram pedidos propondo entrada a **16 e 82 km** do próprio local, que em coordenada passavam batido.
+
 ## v2026.08.04-04
 
 ### Alterado

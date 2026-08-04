@@ -1942,6 +1942,123 @@ function renderCurrentCard() {
     prefetchNextImage();
 }
 
+// Desenha o mini-mapa de evidência dentro do slide.
+//
+// Preguiçoso de propósito: só monta quando o slide aparece. Medido na fila
+// real, são 2,13 tiles por card a 29–147 KB cada; baixar isso pra card que o
+// editor nem chega a ver seria cobrar dele por evidência que não pediu.
+//
+// As cores são as MESMAS do diff — verde entra, vermelho sai. O card já ensina
+// essa gramática na caixa de mudanças; inventar outra aqui obrigaria o editor a
+// aprender duas.
+function renderMapa(card, place) {
+    const box = card.querySelector('.card-map');
+    if (!box || !place.mapa || box.dataset.pronto === '1') return !!(box && place.mapa);
+    const m = place.mapa;
+
+    // Ordem estável: é ela que casa cada pixel devolvido com o seu marcador.
+    const pontos = [];
+    if (m.centro) pontos.push({ ll: m.centro, cls: 'mapa-atual', rot: m.proposto ? 'card.map.antes' : 'card.map.aqui' });
+    if (m.proposto) pontos.push({ ll: m.proposto, cls: 'mapa-proposto', rot: 'card.map.depois' });
+    for (const e of m.entradas || []) {
+        pontos.push({
+            ll: e.ll, nome: e.nome,
+            cls: 'mapa-entrada mapa-e-' + e.estado,
+            rot: 'card.map.entrada.' + e.estado,
+        });
+    }
+    const r = window.mapaMontar
+        ? mapaMontar(pontos.map((p) => p.ll), box.clientWidth || 400, box.clientHeight || 240, API.getRegion())
+        : null;
+    if (!r) return false;
+
+    const tiles = box.querySelector('.card-map-tiles');
+    const marks = box.querySelector('.card-map-marks');
+    tiles.textContent = '';
+    marks.textContent = '';
+    for (const t of r.tiles) {
+        const im = new Image();
+        im.src = t.url;
+        im.alt = '';
+        im.decoding = 'async';
+        im.className = 'absolute';
+        im.style.cssText = `left:${t.left}px;top:${t.top}px;width:${r.tamanho}px;height:${r.tamanho}px`;
+        // Tile que não vem não pode deixar um alt quebrado no meio do mapa.
+        im.onerror = () => im.remove();
+        tiles.appendChild(im);
+    }
+    // Linha do movimento: sem ela, dois pontos próximos parecem dois locais
+    // diferentes em vez de um que andou.
+    if (m.proposto && m.centro && r.pixels.length >= 2) {
+        const [a, b] = r.pixels;
+        const linha = document.createElement('div');
+        linha.className = 'mapa-linha';
+        const dx = b.left - a.left, dy = b.top - a.top;
+        linha.style.cssText = `left:${a.left}px;top:${a.top}px;width:${Math.hypot(dx, dy)}px;`
+            + `transform:rotate(${Math.atan2(dy, dx)}rad)`;
+        marks.appendChild(linha);
+    }
+    r.pixels.forEach((px, i) => {
+        const p = pontos[i];
+        const el = document.createElement('span');
+        el.className = 'mapa-marca ' + p.cls;
+        el.style.cssText = `left:${px.left}px;top:${px.top}px`;
+        el.title = p.nome ? `${t(p.rot)} — ${p.nome}` : t(p.rot);
+        marks.appendChild(el);
+    });
+    // O que não coube em zoom NENHUM vira frase, não marcador escondido.
+    // Acontece de verdade: há pedidos propondo mover um local dezenas de
+    // quilômetros, e é justamente o card em que a evidência decide sozinha.
+    // Sem isto o mapa mostrava um ponto só e calava sobre o outro — o editor
+    // concluiria que nada mudou de lugar.
+    if (r.foraDoMapa && r.foraDoMapa.length) {
+        const aviso = document.createElement('span');
+        aviso.className = 'mapa-fora';
+        // Duas frases, não uma com buraco: quando o que ficou de fora é um
+        // PONTO DE ENTRADA (e não a geometria), não há distância medida pra
+        // pôr, e "está a muito longe" é agramatical em português.
+        aviso.textContent = m.movidoM
+            ? t('card.map.foraDoMapa', { d: formatarMetros(m.movidoM) })
+            : t('card.map.foraDoMapa.semDist');
+        marks.appendChild(aviso);
+    }
+
+    // Escala: sem ela o mapa mente sobre distância, porque o zoom muda de card
+    // pra card conforme o que precisa caber.
+    const alvo = 64;
+    const metros = alvo * r.metrosPorPixel;
+    const bonito = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000].reduce(
+        (a, b) => (Math.abs(b - metros) < Math.abs(a - metros) ? b : a));
+    const esc = box.querySelector('.card-map-scale');
+    esc.style.width = Math.round(bonito / r.metrosPorPixel) + 'px';
+    esc.textContent = bonito >= 1000
+        ? t('card.map.km', { n: (bonito / 1000).toLocaleString(i18nLocale()) })
+        : t('card.map.m', { n: bonito });
+
+    // Legenda: o marcador sozinho não diz qual é qual, e cor não pode ser o
+    // único canal de informação (WCAG 1.4.1).
+    const leg = box.querySelector('.card-map-legend');
+    leg.textContent = '';
+    const jaPos = new Set();
+    // Só o que foi DESENHADO entra na legenda: prometer um marcador que não
+    // está na tela faz o editor procurar o que não existe.
+    const fora = new Set(r.foraDoMapa || []);
+    for (const [i, p] of pontos.entries()) {
+        if (fora.has(i)) continue;
+        if (jaPos.has(p.rot)) continue;
+        jaPos.add(p.rot);
+        const s = document.createElement('span');
+        s.className = 'mapa-leg';
+        const pt = document.createElement('span');
+        pt.className = 'mapa-marca ' + p.cls;
+        s.appendChild(pt);
+        s.appendChild(document.createTextNode(t(p.rot)));
+        leg.appendChild(s);
+    }
+    box.dataset.pronto = '1';
+    return true;
+}
+
 // Renderiza a imagem/carrossel do card (extraído de renderCurrentCard — A1).
 function renderCardImages(card, place) {
     const img = card.querySelector('.card-image');
@@ -1956,7 +2073,18 @@ function renderCardImages(card, place) {
         ? place.imageUrls
         : (place.imageUrl ? [place.imageUrl] : []);
 
-    if (urls.length === 0) {
+    // O mapa é mais um SLIDE do carrossel — nunca uma linha nova no card, que
+    // acabou de ser espremido até caber. Ele vem PRIMEIRO quando é a evidência
+    // principal (o pedido mexe em posição, ou não há foto nenhuma pra olhar) e
+    // por último quando a foto é que responde a pergunta.
+    const temMapa = !!place.mapa;
+    const eEspacial = (place.changes || []).some((c) => c.field === 'geometry' || c.field === 'entryExitPoints');
+    const mapaPrimeiro = temMapa && (urls.length === 0 || eEspacial);
+    const slides = urls.map((u) => ({ foto: u }));
+    if (temMapa) slides.splice(mapaPrimeiro ? 0 : slides.length, 0, { mapa: true });
+    const idxMapa = temMapa ? (mapaPrimeiro ? 0 : slides.length - 1) : -1;
+
+    if (slides.length === 0) {
         img.classList.add('hidden');
         noImg.classList.remove('hidden');
         return;
@@ -1979,17 +2107,36 @@ function renderCardImages(card, place) {
     newBorder.classList.toggle('ring-rose-500', eDenuncia);
     let currentImgIdx = newImageIdx >= 0 ? newImageIdx : 0;
 
+    // O índice do carrossel agora anda pelos SLIDES; a foto tem o seu próprio,
+    // porque `newImageIdx` e o lightbox falam em posição na lista de FOTOS.
+    let slideIdx = 0;
+    const mapaBox = card.querySelector('.card-map');
     const updateImage = () => {
-        img.src = urls[currentImgIdx];
+        const s = slides[slideIdx];
+        imgCount.textContent = `${slideIdx + 1} / ${slides.length}`;
+        if (s.mapa) {
+            img.classList.add('hidden');
+            noImg.classList.add('hidden');
+            newBadge.classList.add('hidden');
+            newBorder.classList.add('hidden');
+            mapaBox.classList.remove('hidden');
+            // Só aqui o tile é pedido: slide que ninguém abriu não custa rede.
+            if (!renderMapa(card, place)) mapaBox.classList.add('hidden');
+            return;
+        }
+        if (mapaBox) mapaBox.classList.add('hidden');
+        currentImgIdx = urls.indexOf(s.foto);
+        img.src = s.foto;
         img.alt = t('card.img.alt', { name: identidadeDoPlace(place).titulo, i: currentImgIdx + 1, n: urls.length });
-        imgCount.textContent = `${currentImgIdx + 1} / ${urls.length}`;
+        img.classList.remove('hidden');
+        noImg.classList.add('hidden');
         const isNew = currentImgIdx === newImageIdx;
         newBadge.classList.toggle('hidden', !isNew);
         newBorder.classList.toggle('hidden', !isNew);
     };
-    img.classList.remove('hidden');
+    slideIdx = idxMapa === 0 ? 0 : slides.findIndex((s) => s.foto === urls[currentImgIdx]);
+    if (slideIdx < 0) slideIdx = 0;
     img.classList.add('cursor-zoom-in');
-    noImg.classList.add('hidden');
     img.decoding = 'async';
     // Foto quebrada (404 do Waze) → cai pro placeholder "Sem Imagem".
     img.onerror = () => { img.classList.add('hidden'); noImg.classList.remove('hidden'); };
@@ -2001,20 +2148,16 @@ function renderCardImages(card, place) {
         openLightbox(urls, currentImgIdx, newImageIdx, place.name, eDenuncia);
     });
 
-    if (urls.length > 1) {
+    if (slides.length > 1) {
         imgNav.classList.remove('hidden');
-        imgPrev.addEventListener('click', (e) => {
+        const anda = (d) => (e) => {
             e.stopPropagation();
             e.preventDefault();
-            currentImgIdx = (currentImgIdx - 1 + urls.length) % urls.length;
+            slideIdx = (slideIdx + d + slides.length) % slides.length;
             updateImage();
-        });
-        imgNext.addEventListener('click', (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            currentImgIdx = (currentImgIdx + 1) % urls.length;
-            updateImage();
-        });
+        };
+        imgPrev.addEventListener('click', anda(-1));
+        imgNext.addEventListener('click', anda(1));
     }
 }
 
@@ -2028,6 +2171,20 @@ function formatarDistancia(m) {
     if (m < 1) return t('card.change.movedM', { d: m.toLocaleString(loc, { maximumFractionDigits: 1 }) });
     if (m < 1000) return t('card.change.movedM', { d: Math.round(m).toLocaleString(loc) });
     return t('card.change.movedKm', { d: (m / 1000).toLocaleString(loc, { maximumFractionDigits: 1 }) });
+}
+
+// A mesma distância SEM o verbo. `formatarDistancia` diz "moveu 36 m", que é a
+// frase certa pra geometria e errada pra qualquer outra coisa — reusá-la no
+// ponto de entrada produziu "a MOVEU 16,3 km do local". Número e frase são
+// coisas separadas; quem monta a frase escolhe o verbo.
+function formatarMetros(m) {
+    if (!Number.isFinite(m)) return '';
+    const loc = i18nLocale();
+    if (m < 1000) {
+        return t('card.map.m', { n: (m < 1 ? m.toLocaleString(loc, { maximumFractionDigits: 1 })
+                                          : Math.round(m).toLocaleString(loc)) });
+    }
+    return t('card.map.km', { n: (m / 1000).toLocaleString(loc, { maximumFractionDigits: 1 }) });
 }
 
 // Valor de lista: enum do Waze quando conhecemos, cru quando não. Objeto (um
@@ -2067,11 +2224,29 @@ function valorDeLista(v, campo) {
     // poderia se chamar "vazio", e são TEXTO, então leitor de tela lê.
     if (itemDeListaAusente(v)) return t('card.value.empty');
     if (v && typeof v === 'object') {
-        // Ponto de entrada/saída: o que importa é qual é e onde fica.
+        // Ponto de entrada/saída: DISTÂNCIA até o local, não coordenada.
+        //
+        // `+ entrada -23.50382, -46.84458` é exato e injulgável — o editor não
+        // tem como saber se aquilo fica na calçada ou na cidade vizinha. Medido
+        // na fila de 12 países: a mediana é 29 m (plausível), mas há pedidos
+        // propondo entrada a 16 e a 82 QUILÔMETROS do próprio local, e em
+        // coordenada isso passava batido. Mesma lição do `geometry`, que já
+        // virou "moveu 36 m". O nome fica quando existe: é por ele que o editor
+        // reconhece o ponto ao abrir o WME.
         const p = v.point && v.point.coordinates;
         if (Array.isArray(p) && p.length >= 2) {
             const tipo = v.entry === false ? t('card.eep.exit') : t('card.eep.entry');
             const nome = String(v.name || '').trim();
+            const centro = AppState.currentPlace && AppState.currentPlace.mapa
+                && AppState.currentPlace.mapa.centro;
+            if (centro) {
+                const dLat = (p[1] - centro[0]) * 111320;
+                const dLon = (p[0] - centro[1]) * 111320 * Math.cos(centro[0] * Math.PI / 180);
+                const d = Math.sqrt(dLat * dLat + dLon * dLon);
+                return `${nome ? nome + ' · ' : ''}${tipo} ${t('card.eep.aDistancia', { d: formatarMetros(d) })}`;
+            }
+            // Sem posição do local não há distância a calcular — aí a
+            // coordenada volta, porque sumir com o dado é pior que ser cru.
             return `${nome ? nome + ' · ' : ''}${tipo} ${Number(p[1]).toFixed(5)}, ${Number(p[0]).toFixed(5)}`;
         }
         // Horário de funcionamento: vinha como JSON cru na tela (medido na fila
