@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-04
+
+### Alterado
+- **"Atualização de detalhes" e "Local marcado" seguem desmarcados por padrão** — agora por escolha de produto, não por limitação. A app é estilo Tinder: o ritmo do swipe funciona quando há o que **olhar**, e esses dois tipos costumam ser texto. Na fila de teste, os 5 tipos do padrão somam 178 cards com **66% de foto**; os dois de fora, 117 cards com **44%**.
+
+  Eles continuam no filtro, com o mesmo nome do WME, a um toque de distância — e agora **cabem na tela**, o que antes não acontecia. Se você trabalha bastante esses pedidos, é só marcar uma vez: sua escolha fica salva.
+
 ## v2026.08.04-03
 
 ### Corrigido
