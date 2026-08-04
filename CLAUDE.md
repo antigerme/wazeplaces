@@ -101,6 +101,10 @@ wazeplaces/
 ├── .assetsignore            # Exclui server/docs/etc do publish estático dos Workers (static assets)
 ├── package.json             # Scripts: start (node), cf:dev, cf:deploy. Zero dependências.
 ├── tools/
+│   ├── fixtures-paises.json # 51 pedidos REAIS dos 6 países obrigatórios, usados pelo smoke E pelo
+│   │                        #   test/mapa-fixtures.test.mjs. Gerados medindo (não por heurística de
+│   │                        #   volume — gotcha #52). `createdBy` anonimizado; o resto é dado público
+│   │                        #   de mapa, e é ele que decide layout.
 │   ├── paises-validacao.mjs # FONTE ÚNICA dos países de validação (ver seção 🌍). Script que MEÇA
 │   │                        #   qualquer coisa importa daqui — copiar a lista é como ela volta a ser
 │   │                        #   só o Brasil. Travado em test/consistencia.test.mjs.
@@ -647,6 +651,13 @@ Bugs já encontrados e corrigidos — **não repita**:
     **E a fixture do smoke era 800×400 — o único formato que nunca falha.** O defeito valia pra todo tipo de card e todo país, inclusive o Brasil, e nenhuma das auditorias anteriores (1872 renders, 5728 renders) o viu, porque todas usavam essa mesma imagem. Fixture não é só "dado de entrada": ela define o que o teste é CAPAZ de enxergar. Hoje ela é 1080×1920.
     **Conserto**: `flex-basis: 0` na foto — ela passa a receber uma fração do espaço livre em vez de partir do próprio tamanho, e o layout fica igual pra qualquer imagem. `shrink-[30]`, piso e teto continuam. Verificado desfazendo: o smoke sai de 0 pra **140 falhas**.
     **O guard reprovou a correção certa**, de novo: exigia o literal `flex-auto`. Acoplado à FORMA, não à propriedade — quinta vez neste repo. Hoje exige que a foto CRESÇA e ENCOLHA (qualquer forma) e que a base seja 0.
+
+53. **Levar a medição pra dentro do CI achou um gasto que eu nunca tinha medido** (v2026.08.04-07). O owner perguntou se o máximo de teste já estava no CI. Não estava — e mover três coisas pra lá pagou na hora.
+    **`test/mapa-fixtures.test.mjs` é o padrão que vale repetir**: dado REAL (as 51 fixtures de país, que já estavam no repo pro smoke) verificado por função PURA, então roda no `npm test` de zero dependência, sem browser e sem rede. Cobre enquadramento, orçamento de tiles, coerência do zoom e região. Custo: milissegundos.
+    **Ele achou na primeira execução**: em PAISAGEM a caixa do mapa tem 852px e o tile 512, então "caber num tile" era impossível — e o meu encaixe DESISTIA quando não cabia, deixando a caixa centrada e atravessando até TRÊS colunas. Média de 3,24 tiles por card, com casos de SEIS, a 29–147 KB cada. Eu só tinha medido a caixa retrato (412×250) e concluí que estava resolvido. Generalizado pra minimizar tiles ATRAVESSADOS (o caso de um tile vira o caso particular), foi pra 1,29 · 2,27 · 1,29.
+    **Lição de forma**: "encaixar em um" é caso particular de "minimizar" — e a versão particular falha silenciosamente fora do seu caso. Quando um otimizador tem cláusula de desistência, meça o ramo em que ele desiste.
+    **As outras duas que entraram**: os TRÊS formatos de foto (a fixture única, mesmo sendo o pior caso, não pega regressão que quebre só paisagem) e o contraste do texto do mapa nos 4 idiomas (o mapa desenha sobre tile colorido, e o `.valor-ausente` já ensinou que contraste medido num fundo não vale em outro — gotcha #40). Custo total no smoke: **2m35s → 3m50s**.
+    **O que NÃO foi**, por decisão de custo e não de esquecimento: os outros 2 aparelhos nas fixtures de país (dobraria o smoke por aparelhos onde 100% das falhas nunca apareceram) e a auditoria de 12 países (5728 renders, ~25 min). E o `waze-probe.mjs` nunca vai — precisa dos cookies do owner.
 
 22. **`css/tailwind.css` é GERADO e commitado — nunca edite à mão** (v2026.07.24-02). O Tailwind deixou de compilar no browser: mexeu em classe no `index.html`/`js/*`? rode **`npm run css`** e commite o CSS junto. O CI regenera e falha no diff se esquecer. Some com o estilo em produção sem nenhum erro no console — é silencioso.
     **A ORDEM dos `<link>` importa**: `styles.css` vem ANTES de `tailwind.css`. O bundle runtime antigo injetava o CSS gerado no fim do `<head>`, então as utilities venciam empates de especificidade contra o `styles.css`. Inverter a ordem muda anéis de foco/cantos de leve. Se precisar mexer, valide com o harness de screenshot (Playwright) — foi assim que isso apareceu.

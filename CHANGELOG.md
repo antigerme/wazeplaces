@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-07
+
+### Corrigido
+- **O mapa gasta menos dados no celular deitado.** Em tela deitada a área do mapa é mais larga que um bloco do mapa do Waze, e a app acabava baixando até **6 blocos** por card em vez de 2. Agora são **2,27 em média** (era 3,24), com o mesmo enquadramento. Em pé a economia também apareceu: 1,29 por card, contra 1,94.
+
+### Interno
+- Mais medição saiu da bancada e entrou no teste automático: o mapa agora é verificado contra os **51 pedidos reais de 6 países** (enquadramento, orçamento de blocos, zoom coerente, região), os **três formatos de foto** (paisagem, quadrada e retrato) e o **contraste do texto do mapa** nos 4 idiomas. Foi esse teste que achou o gasto extra em tela deitada.
+
 ## v2026.08.04-06
 
 ### Corrigido

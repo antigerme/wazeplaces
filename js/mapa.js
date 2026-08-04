@@ -131,11 +131,36 @@ function mapaMontar(pontos, larguraPx, alturaPx, região) {
     const hi = min - M;
     if (lo > hi) return o;                       // não cabe nem centrado: mantém
     const alvo = Math.min(hi, Math.max(lo, o));  // preferência pelo centro
-    // O tile onde o conteúdo já está; se a caixa couber nele, desliza pra lá.
-    const t = Math.floor((min + max) / 2 / MAPA_TILE);
-    const dentroLo = Math.max(lo, t * MAPA_TILE);
-    const dentroHi = Math.min(hi, (t + 1) * MAPA_TILE - tam);
-    return dentroLo <= dentroHi ? Math.min(dentroHi, Math.max(dentroLo, o)) : alvo;
+
+    // Minimiza QUANTOS tiles a caixa atravessa, não "cabe num tile só".
+    //
+    // A primeira versão tentava encaixar a caixa dentro de UM tile e desistia
+    // quando não dava. Em paisagem a caixa tem 852px e o tile 512, então nunca
+    // dava — e ela desistia sempre, ficando centrada e atravessando até TRÊS
+    // colunas. Medido nas fixtures reais: 3,24 tiles por card em paisagem,
+    // contra 1,63 no Fold, com casos de SEIS. A 29–147 KB cada, é a conta de
+    // dados do editor que paga.
+    //
+    // O caso de um tile é só o caso particular disto. Os candidatos são os
+    // extremos da faixa e as bordas de tile dentro dela — o ótimo está sempre
+    // num deles, porque a contagem só muda ao cruzar borda.
+    const nTiles = (x) => Math.floor((x + tam) / MAPA_TILE) - Math.floor(x / MAPA_TILE) + 1;
+    const cands = [alvo, lo, hi];
+    for (let t = Math.floor(lo / MAPA_TILE); t <= Math.floor((hi + tam) / MAPA_TILE) + 1; t++) {
+      for (const c of [t * MAPA_TILE, t * MAPA_TILE - tam]) {
+        if (c >= lo && c <= hi) cands.push(c);
+      }
+    }
+    let melhor = alvo, melhorN = nTiles(alvo);
+    for (const c of cands) {
+      const n = nTiles(c);
+      // Empate vai pro mais perto do enquadramento centrado: economizar rede
+      // não pode custar o mapa ficar com o conteúdo espremido num canto.
+      if (n < melhorN || (n === melhorN && Math.abs(c - alvo) < Math.abs(melhor - alvo))) {
+        melhor = c; melhorN = n;
+      }
+    }
+    return melhor;
   };
   const xs = proj.map((p) => p.x), ys = proj.map((p) => p.y);
   orig.x = encaixar(orig.x, Math.min(...xs), Math.max(...xs), larguraPx);
