@@ -220,4 +220,40 @@ test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => 
     assert.ok(!noHtml.includes(velho),
       `o tipo antigo ${velho} voltou ao filtro — ele não classifica mais nada`);
   }
+
+  // ── quais nascem MARCADOS ──────────────────────────────────────────────
+  // A instalação nova é decidida em DOIS lugares: o `checked` do HTML (o que a
+  // pessoa VÊ ao abrir Filtros) e o TYPES_PADRAO (o que a app USA na primeira
+  // busca). Divergir é silencioso e cruel nos dois sentidos: caixa marcada com
+  // tipo que não vem faz parecer que a fila acabou; caixa desmarcada com tipo
+  // que vem faz o filtro parecer quebrado. Nenhum dos dois dá erro na tela.
+  const marcadosHtml = [...HTMLs.matchAll(/class="filter-type[^"]*"\s+value="([A-Z_]+)"\s+checked/g)]
+    .map((m) => m[1]);
+  // AVALIA as duas constantes em vez de parsear a expressão. A primeira versão
+  // deste guard casava `TYPES_ALL.filter((t) => …)` com regex e, quando troquei
+  // a forma pra `TYPES_ALL.slice()` de propósito pra testar, ele reprovou com
+  // "Cannot read properties of null" — pegava a regressão, mas dizia nada.
+  // Guard acoplado à FORMA do código é o erro que já mordeu este projeto em
+  // `valorDeLista`, `derrubarSessao` e `avaliar`. Avaliando, qualquer forma
+  // válida passa e o que se compara é o VALOR, que é o que importa.
+  const decl = (nome) => {
+    const m = APP.match(new RegExp(`const ${nome} = ([\\s\\S]*?);\\n`));
+    assert.ok(m, `${nome} sumiu de js/app.js`);
+    return m[1];
+  };
+  const padraoCodigo = new Function(
+    `const TYPES_ALL = ${decl('TYPES_ALL')}; return ${decl('TYPES_PADRAO')};`)();
+  assert.deepEqual(marcadosHtml, padraoCodigo,
+    'o que nasce marcado no HTML e o TYPES_PADRAO divergiram');
+
+  // Os dois tipos que o owner pediu pra deixar DESMARCADOS enquanto o card
+  // deles não couber na tela em pedido carregado de informação. Se alguém
+  // remarcar, que seja de propósito — e revisitando este teste junto.
+  for (const t of ['DETAILS_UPDATE', 'FLAGGED_PLACE']) {
+    assert.ok(!marcadosHtml.includes(t),
+      `${t} voltou a nascer marcado — o card dele ainda estoura em tela pequena`);
+    assert.ok(noHtml.includes(t),
+      `${t} sumiu do filtro — era pra estar DESMARCADO, não escondido`);
+  }
+  assert.ok(marcadosHtml.length > 0, 'nenhum tipo nasce marcado — a app abriria vazia');
 });
