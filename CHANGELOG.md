@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-02
+
+### Alterado
+- **"Atualização de detalhes" e "Local marcado" agora vêm DESMARCADOS.** Esses dois pedidos às vezes chegam carregados de informação — diff longo, lista grande, comentário comprido — e o card deles ainda não cabe em tela pequena nesses casos. Enquanto isso não for acertado com calma, eles ficam de fora por padrão.
+
+  **Continuam no filtro**, com o mesmo nome do WME e a um toque de distância: é só marcar em *Filtros* para vê-los. Quem já tinha marcado alguma coisa mantém a própria escolha — o padrão só vale para quem está começando.
+
 ## v2026.08.04-01
 
 ### Alterado

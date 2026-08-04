@@ -60,15 +60,27 @@ const MAX_EMPTY_PAGES = 5;
 // ordens diferentes é como o editor descobre que a app se contradiz.
 const TYPES_ALL = ['NEW_PLACE', 'DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE',
                    'NEW_PHOTO', 'FLAGGED_PHOTO', 'DELETE_PHOTO'];
+// Quais vêm MARCADOS numa instalação nova. Não é o mesmo conjunto de cima, e a
+// diferença é deliberada: `DETAILS_UPDATE` e `FLAGGED_PLACE` são os dois tipos
+// cujo card ainda não cabe na tela quando o pedido vem carregado de informação
+// (diff longo, lista grande, comentário comprido) — o próprio owner pediu pra
+// deixá-los desmarcados enquanto o layout deles não for acertado com calma.
+//
+// **Desmarcado ≠ escondido**, e a distinção importa: a caixa continua ali, com
+// o mesmo nome do WME, a um toque de distância. Esconder o tipo faria o editor
+// achar que a fila acabou; deixá-lo desmarcado diz "existe, e você decide".
+// Quando o card estiver redondo, o conserto é mover as duas linhas pra cá e
+// pôr `checked` no HTML — o guard de consistência cobra as duas pontas juntas.
+const TYPES_PADRAO = TYPES_ALL.filter((t) => t !== 'DETAILS_UPDATE' && t !== 'FLAGGED_PLACE');
 // O filtro salvo pode trazer lixo: storage de uma versão que não existe mais,
 // chave editada à mão, JSON meio gravado. Fica só o que a app conhece — e se
 // não sobrar NADA, volta ao padrão em vez de virar filtro vazio, que abriria a
 // app numa fila sem um card e sem um erro na tela. "Parece que acabou o
 // trabalho" é o defeito mais caro possível, porque ninguém reporta.
 function sanearTiposSalvos(lista) {
-    if (!Array.isArray(lista)) return TYPES_ALL.slice();
+    if (!Array.isArray(lista)) return TYPES_PADRAO.slice();
     const validos = TYPES_ALL.filter((t) => lista.includes(t));
-    return validos.length ? validos : TYPES_ALL.slice();
+    return validos.length ? validos : TYPES_PADRAO.slice();
 }
 const UNAUTHORIZED_REDIRECT_MS = 800;
 // Espera antes de confirmar se a sessão morreu mesmo. Curto o bastante pra não
@@ -95,7 +107,7 @@ const AppState = {
     _fetchPromise: null,
     _profilePromise: null,
     loadError: false,
-    filters: { types: TYPES_ALL.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
+    filters: { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
     preferences: { undoEnabled: true, semUndoSeguidas: 0 },
     devMode: { unlocked: false, active: false },
     profile: null,
@@ -1102,7 +1114,7 @@ function applyFiltersFromModal() {
     enforceDevGatedFilters();
     // Segurança: se o gate esvaziou os tipos (edge: só REQUEST + dev desligado),
     // volta ao default em vez de virar "todos os tipos".
-    if (AppState.filters.types.length === 0) AppState.filters.types = TYPES_ALL.slice();
+    if (AppState.filters.types.length === 0) AppState.filters.types = TYPES_PADRAO.slice();
     AppState.filters.residential = $('filterResidential').value;
     AppState.filters.stateId = $('filterState').value;
     AppState.filters.managedAreaId = $('filterManagedArea').value;
@@ -1455,7 +1467,7 @@ async function handleLogout() {
     API.setSession(null);
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
-    AppState.filters = { types: TYPES_ALL.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
+    AppState.filters = { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
     AppState.preferences = { undoEnabled: true };
     AppState.devMode = { unlocked: false, active: false };
     AppState.profile = null;
