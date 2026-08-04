@@ -300,3 +300,33 @@ test('países de validação: a lista é fonte única e o CLAUDE.md conta a mesm
       `${p.nome} (id ${p.id}) não está na tabela do CLAUDE.md`);
   }
 });
+
+test('fixtures do smoke: pedidos reais dos 6 países, e nenhum nome de pessoa', () => {
+  const P_ = JSON.parse(read('tools/fixtures-paises.json'));
+  const OBRIG = ['Brasil', 'França', 'Reino Unido', 'México', 'Espanha', 'Portugal'];
+
+  // Guardar a LISTA de países num arquivo protege a lista de ser esquecida;
+  // só a fixture no CI protege a MEDIÇÃO. Sem isto, o smoke volta a rodar só
+  // com cards escritos à mão, todos brasileiros — que foi como 26 pedidos de
+  // outros países passaram despercebidos.
+  const paises = new Set(P_.map((f) => f._pais));
+  for (const p of OBRIG) {
+    assert.ok(paises.has(p), `o smoke perdeu as fixtures de ${p}`);
+  }
+  // Todo tipo de pedido tem que estar representado — inclusive `FLAGGED_PHOTO`,
+  // que a fila do Brasil não tem NENHUM e que respondia por boa parte das
+  // falhas encontradas.
+  const tipos = new Set(P_.map((f) => f.purType));
+  for (const t of ['NEW_PLACE', 'DETAILS_UPDATE', 'FLAGGED_PLACE', 'NEW_PHOTO', 'FLAGGED_PHOTO', 'DELETE_PLACE']) {
+    assert.ok(tipos.has(t), `nenhuma fixture do tipo ${t}`);
+  }
+
+  // Dado PÚBLICO de mapa fica (nome de local, endereço, categoria, geometria —
+  // são eles que decidem layout). Quem enviou o pedido, não: é o único campo
+  // pessoal e não muda um pixel. Commitar nome de editor real seria distribuir
+  // dado de terceiro sem necessidade nenhuma.
+  for (const f of P_) {
+    assert.match(String(f.createdBy || ''), /^editor\d+$/,
+      `fixture com nome de usuário real: ${f.createdBy}`);
+  }
+});

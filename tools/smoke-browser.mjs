@@ -20,6 +20,7 @@
 // teste que se auto-pula vira teste que ninguém percebe que morreu.
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -73,9 +74,20 @@ async function abrirBrowser(chromium) {
   throw new Error('nenhum browser abriu:\n  - ' + erros.join('\n  - '));
 }
 
-const foto = 'data:image/svg+xml;base64,' + Buffer.from(
-  "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='400'><rect width='800' height='400' fill='#334155'/></svg>",
-).toString('base64');
+// RETRATO, não paisagem — e a diferença não é estética.
+//
+// A base do flex da foto era `auto`, resolvida pelo tamanho INTRÍNSECO da
+// <img>: a proporção da imagem decidia quanto de altura sobrava pro texto.
+// Medido com 51 pedidos reais de 6 países num Galaxy Fold: 800×400 → 0 cards
+// estouram; 512×512 → 20; 1080×1920 → 31. Esta fixture era 800×400, ou seja,
+// **o único formato que nunca falha** — a fixture escondia exatamente o
+// defeito que ela existe pra encontrar, em todo tipo de card e todo país.
+//
+// Foto de pedido é tirada de CELULAR, então retrato é o caso comum, não o
+// extremo. A base do flex virou 0 (o layout não depende mais da imagem), e a
+// fixture ficou retrato pra o smoke medir o caso real se alguém reverter.
+const SVG_CINZA = "<svg xmlns='http://www.w3.org/2000/svg' width='1080' height='1920'><rect width='1080' height='1920' fill='#334155'/></svg>";
+const foto = 'data:image/svg+xml;base64,' + Buffer.from(SVG_CINZA).toString('base64');
 
 // Um card de cada forma: o de atualização (caixa de mudanças), o de reporte
 // (caixa de texto) e o de foto nova (sem caixa longa).
@@ -556,6 +568,85 @@ for (const [nome, vp, iOS] of [
   await ctx.close();
 }
 
+// ── Pedidos REAIS dos seis países obrigatórios ────────────────────────────
+//
+// Instrução permanente do owner (seção 🌍 do CLAUDE.md): toda medição usa o
+// máximo de países, sempre incluindo Brasil, França, Reino Unido, México,
+// Espanha e Portugal. A lista mora em `tools/paises-validacao.mjs`.
+//
+// Por que isto está no SMOKE e não só num script de bancada: até aqui as 7
+// fixtures acima eram todas escritas à mão, com nome e endereço brasileiros —
+// então o CI, que é quem cobra de todo mundo, nunca via um endereço britânico
+// nem um `FLAGGED_PHOTO` (tipo do qual a fila do Brasil não tem NENHUM).
+// A auditoria só-Brasil dava zero problema em 1872 renders enquanto 26 cards
+// de outros países não cabiam no Fold. Guardar a lista num arquivo protege a
+// LISTA de ser esquecida; só a fixture no CI protege a MEDIÇÃO.
+//
+// São pedidos reais, o mais pesado de cada país × tipo — é o pesado que quebra
+// primeiro. Só `createdBy` é anonimizado: nome de local, endereço, categoria e
+// geometria são dado público de mapa, e são justamente eles que decidem layout.
+const FIXTURES_PAISES = JSON.parse(
+  readFileSync(new URL('./fixtures-paises.json', import.meta.url), 'utf8'))
+  .map((f) => ({ ...f, imageUrls: (f.imageUrls || []).map(() => foto) }));
+
+// Os dois aparelhos em que TODAS as 104 falhas da auditoria de 12 países
+// apareceram. iPhone SE e Pixel 7 zeraram — medir neles aqui seria pagar tempo
+// de CI por informação que já se tem.
+const APARELHOS_PAISES = [
+  ['Galaxy Fold', { width: 280, height: 653 }],
+  ['paisagem 852x393', { width: 852, height: 393 }],
+];
+
+for (const [aparelho, viewport] of APARELHOS_PAISES) {
+  const ctx = await browser.newContext({ viewport, serviceWorkers: 'block' });
+  // Os tiles do mapa não são alcançáveis do CI; o que se mede aqui é layout.
+  await ctx.route('**/*-tiles/**', (r) =>
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  const page = await ctx.newPage();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(300);
+  for (const lang of LINGUAS) {
+    for (const place of FIXTURES_PAISES) {
+      const m = await page.evaluate(async ({ pl, lang: l }) => {
+        setLang(l); applyI18n();
+        AppState.authenticated = true;
+        AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+        AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+        AppState.serverTotal = 1;
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        document.getElementById('noMoreCards').classList.add('hidden');
+        showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+        AppState.queue = [pl]; AppState.currentPlace = pl;
+        document.querySelectorAll('.place-card').forEach((e) => e.remove());
+        showCurrentPlace();
+        // Dois quadros + folga: medir no mesmo tick MENTE, o layout ainda não
+        // assentou e o scrollHeight vem errado (gotcha #32).
+        await new Promise((k) => requestAnimationFrame(() => requestAnimationFrame(k)));
+        await new Promise((k) => setTimeout(k, 180));
+        const card = document.querySelector('.place-card');
+        if (!card) return { semCard: true };
+        const cc = card.querySelector('.card-content');
+        const barra = card.querySelector('.card-btn-read');
+        const rb = barra ? barra.getBoundingClientRect() : null;
+        return {
+          // Card rolando por dentro DESLIGA o gesto de pular (gotcha #29):
+          // arrastar pra cima passa a rolar. É a falha mais cara do card.
+          rede: cc.classList.contains('card-content-rola'),
+          acoesFora: rb ? Math.max(0, Math.round(rb.bottom - innerHeight)) : 0,
+          estouroH: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      }, { pl: place, lang });
+      const rot = `${aparelho} · ${lang} · ${place._pais} · ${place.purType}`;
+      checa(!m.semCard, `${rot}: não renderizou`);
+      checa(!m.rede, `${rot}: card rola por dentro — mata o gesto de pular`);
+      checa(m.acoesFora === 0, `${rot}: barra ✕/↑/✓ fora da tela`, `${m.acoesFora}px`);
+      checa(m.estouroH <= 0, `${rot}: estouro horizontal`, `${m.estouroH}px`);
+    }
+  }
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -563,4 +654,6 @@ if (falhas) {
   console.log(`\n✗ smoke de browser: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`);
+console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card`
+  + `, + ${FIXTURES_PAISES.length} pedidos REAIS de ${new Set(FIXTURES_PAISES.map((f) => f._pais)).size} países × ${APARELHOS_PAISES.length} aparelhos × ${LINGUAS.length} idiomas`
+  + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`);

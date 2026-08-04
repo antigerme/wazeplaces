@@ -8,6 +8,24 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-06
+
+### Corrigido
+- **A proporção da foto não decide mais o layout do card.** Foto de retrato — que é como celular fotografa — espremia o texto e fazia o card rolar por dentro, e quando isso acontece **arrastar pra cima rola em vez de pular**: o gesto morre.
+
+  Medido com 51 pedidos reais de 6 países num celular dobrável:
+
+  | foto | cards que não cabiam |
+  |---|---|
+  | paisagem 800×400 | 0 de 51 |
+  | quadrada 512×512 | 20 de 51 |
+  | retrato 1080×1920 | **31 de 51** |
+
+  Valia para todo tipo de pedido e todo país. Passava despercebido porque o teste automático usava uma foto 800×400 — o único formato que nunca falha.
+
+### Alterado
+- **O teste automático passou a usar pedidos reais de seis países** (Brasil, França, Reino Unido, México, Espanha e Portugal) em vez de sete cards escritos à mão, todos brasileiros. Agora todo envio de código renderiza endereço britânico, nome francês e tipos de pedido que a fila brasileira não tem.
+
 ## v2026.08.04-05
 
 ### Adicionado
