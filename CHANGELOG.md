@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-09
+
+### Alterado
+- **A foto de um local novo agora se identifica como proposta.** Quem usa leitor de tela ouve "Foto proposta junto com o local novo…", e quem passa o mouse lê a mesma coisa. Antes ela era descrita como uma foto qualquer.
+
+  **Sem selo ✨ de propósito**: num local novo *todas* as fotos são novas — não existe local novo com foto que já esteja no mapa. O selo apareceria em todos esses cards e deixaria de significar algo justamente onde ele decide: no pedido de foto, onde aponta *uma* entre várias.
+
 ## v2026.08.04-07
 
 ### Corrigido

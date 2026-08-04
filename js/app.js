@@ -2139,7 +2139,17 @@ function renderCardImages(card, place) {
         if (mapaBox) mapaBox.classList.add('hidden');
         currentImgIdx = urls.indexOf(s.foto);
         img.src = s.foto;
-        img.alt = t('card.img.alt', { name: identidadeDoPlace(place).titulo, i: currentImgIdx + 1, n: urls.length });
+        // Num LOCAL NOVO toda foto está sendo proposta junto com o local — e o
+        // card não põe o ✨ nelas de propósito (ver a nota longa acima: o selo
+        // ficaria sempre ligado e perderia sentido onde ele decide algo). Mas a
+        // informação não pode simplesmente sumir: quem usa leitor de tela ou
+        // passa o mouse ouve/lê aqui, sem custar um pixel na tela nem competir
+        // com o selo real. Foi a saída que o owner escolheu depois de a medição
+        // mostrar que o selo visível não pagava.
+        const propostaComOLocal = place.purType === 'NEW_PLACE' || place.reqType === 'VENUE';
+        img.alt = t(propostaComOLocal ? 'card.img.altNovoLocal' : 'card.img.alt',
+            { name: identidadeDoPlace(place).titulo, i: currentImgIdx + 1, n: urls.length });
+        img.title = propostaComOLocal ? t('card.img.novoLocal.title') : '';
         img.classList.remove('hidden');
         noImg.classList.add('hidden');
         const isNew = currentImgIdx === newImageIdx;

@@ -330,3 +330,45 @@ test('fixtures do smoke: pedidos reais dos 6 países, e nenhum nome de pessoa', 
       `fixture com nome de usuário real: ${f.createdBy}`);
   }
 });
+
+test('local novo: a foto diz que é proposta, sem gastar selo', () => {
+  const APP_ = read('js/app.js');
+  const DICT = read('js/i18n.js');
+
+  // O owner reparou que a foto de um LOCAL NOVO não vem marcada com ✨ e
+  // perguntou se não deveria. Medido: dos 86 fotos em locais novos da fila
+  // real, 86 estão NÃO aprovadas e ZERO aprovadas — é impossível um local novo
+  // ter foto que já esteja no mapa. O selo apareceria em 100% desses cards, e
+  // selo que nunca varia não é selo. Pior, local novo é o tipo mais comum
+  // (140 de 295): o ✨ perderia sentido justamente no card de FOTO, onde ele
+  // aponta UMA entre várias.
+  //
+  // A informação não some, muda de canal: vai pro texto alternativo e pro
+  // title, onde leitor de tela ouve e o mouse lê, sem custar um pixel nem
+  // competir com o selo real. É a saída que o owner escolheu.
+  assert.match(APP_, /card\.img\.altNovoLocal/,
+    'o local novo voltou a usar o alt genérico — a foto proposta perdeu a única pista que tinha');
+  assert.match(APP_, /purType === 'NEW_PLACE' \|\| place\.reqType === 'VENUE'/,
+    'sumiu a condição de local novo do alt da foto');
+  // E o selo continua sendo decidido SÓ pelo casamento de índice.
+  //
+  // A primeira versão deste guard procurava um `newBadge.classList.remove`
+  // numa janela DEPOIS da declaração — e não pegou quando injetei a linha
+  // ANTES dela. Guard que não pega o que promete é pior que não ter guard:
+  // dá alvará. Agora ele fixa o MECANISMO: a visibilidade do selo sai de
+  // `isNew`, e `isNew` sai do índice da foto proposta. Qualquer outra coisa
+  // ligando o selo quebra uma destas duas linhas.
+  assert.match(APP_, /const isNew = currentImgIdx === newImageIdx;/,
+    'o selo deixou de ser decidido pelo índice da foto proposta');
+  assert.match(APP_, /newBadge\.classList\.toggle\('hidden', !isNew\)/,
+    'a visibilidade do selo ✨ deixou de sair só do isNew');
+  // E nenhum `remove('hidden')` solto no selo em lugar nenhum do arquivo — é
+  // assim que se ligaria o selo à força.
+  assert.doesNotMatch(APP_, /newBadge\.classList\.remove\('hidden'\)/,
+    'alguém liga o selo ✨ à força — no local novo ele ficaria sempre aceso');
+
+  for (const chave of ['card.img.altNovoLocal', 'card.img.novoLocal.title']) {
+    const n = (DICT.match(new RegExp(`'${chave.replace(/\./g, '\\.')}':`, 'g')) || []).length;
+    assert.equal(n, N_LINGUAS, `${chave} está em ${n} línguas de ${N_LINGUAS}`);
+  }
+});
