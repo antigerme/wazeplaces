@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.04-10
+
+### Corrigido
+- **O card seguinte agora chega pronto quando ele abre no mapa.** A app já adiantava a foto do próximo pedido, mas em **1 de cada 4** o primeiro slide é o mapa — e em **1 de cada 5** não há foto nenhuma, então não adiantava nada e você via a caixa cinza esperando. Agora ela adianta o que o próximo card vai mostrar de fato.
+
+  Não gasta mais dados: os blocos do mapa seriam baixados de qualquer jeito quando o card chegasse. A fila é sequencial, então o "próximo" é literalmente o próximo que você vê.
+
 ## v2026.08.04-09
 
 ### Alterado
