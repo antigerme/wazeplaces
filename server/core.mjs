@@ -667,6 +667,91 @@ const centroide = (geom) => {
   return n ? [sx / n, sy / n] : null;
 };
 
+// A coordenada que REPRESENTA uma geometria, como [lat, lon].
+//
+// Mesma fonte da distância — o centróide — e isso é obrigatório, não estético:
+// se o marcador do mapa usasse o primeiro vértice e a frase usasse o centróide,
+// o card diria "moveu 84 m" com dois marcadores no mesmo lugar. Duas contas pra
+// mesma pergunta é como a tela passa a se contradizer sem ninguém notar.
+export const pontoDeGeometria = (geom) => {
+  const par = centroide(geom) || extractLonLatDeep(geom);
+  return par ? [par[1], par[0]] : null;   // GeoJSON é [lon, lat]; aqui sai [lat, lon]
+};
+
+// O que o mini-mapa do card precisa saber, num objeto só.
+//
+// Existe porque a evidência que falta pro editor decidir é ESPACIAL: "moveu
+// 36 m" e "entrada -15.88749, -52.26094" são exatos e injulgáveis. Com as
+// posições em mãos, o card desenha — e desenhar é o que transforma o pedido
+// em algo que se decide num olhar, que é a promessa do gesto.
+//
+// Vem null quando não há coordenada nenhuma: o card então não monta o slide,
+// em vez de desenhar um mapa do oceano no ponto (0, 0).
+export const montarMapa = (venue, changes) => {
+  const pontoDoEEP = (item) => {
+    const c = item && item.point && item.point.coordinates;
+    return Array.isArray(c) && typeof c[0] === 'number' ? [c[1], c[0]] : null;
+  };
+  const centro = pontoDeGeometria(venue && venue.geometry);
+  const geo = (changes || []).find((c) => c.field === 'geometry');
+  const eep = (changes || []).find((c) => c.field === 'entryExitPoints');
+
+  const entradas = [];
+  const vistos = new Set();
+  const pushEntrada = (item, estado) => {
+    const ll = pontoDoEEP(item);
+    if (!ll) return;
+    // Ponto que entra E sai é o MESMO ponto renomeado/reposicionado; a chave
+    // inclui o estado pra não colapsar os dois lados de um movimento.
+    const chave = `${estado}|${ll[0].toFixed(6)},${ll[1].toFixed(6)}`;
+    if (vistos.has(chave)) return;
+    vistos.add(chave);
+    // Distância até o local. É ELA que se julga — a coordenada é exata e não
+    // diz nada. Medido na fila de 12 países: há pedidos propondo entrada a
+    // dezenas de quilômetros do próprio local, e em coordenada crua isso passa
+    // batido. Mesma lição do `geometry`, que já virou "moveu 36 m".
+    const d = centro ? distanciaEntrePontos(centro, ll) : null;
+    entradas.push({ ll, estado, nome: (item && item.name) || null,
+                    distM: Number.isFinite(d) ? d : null });
+  };
+  // Os que já existem no mapa hoje. Se o pedido mexe neles, o delta abaixo
+  // repõe os mesmos como "saindo" — e é justamente o par que conta a história.
+  if (!eep) for (const it of (venue && venue.entryExitPoints) || []) pushEntrada(it, 'atual');
+  else {
+    for (const it of (venue && venue.entryExitPoints) || []) pushEntrada(it, 'saindo');
+    for (const it of (eep.delta && eep.delta.add) || []) pushEntrada(it, 'nova');
+  }
+
+  // Ponto que sai e entra na MESMA coordenada não se moveu: foi renomeado. Dois
+  // marcadores no mesmo pixel viram um borrão que sugere movimento onde não
+  // houve — evidência errada é pior que evidência nenhuma. Fica só o proposto.
+  // Medido: acontece de verdade (o "Entrada Av. José Salomé Rodrigues" da fila
+  // real ganhou nome sem sair do lugar).
+  const chaveLL = (e) => `${e.ll[0].toFixed(6)},${e.ll[1].toFixed(6)}`;
+  const novas = new Set(entradas.filter((e) => e.estado === 'nova').map(chaveLL));
+  const limpas = entradas.filter((e) => !(e.estado === 'saindo' && novas.has(chaveLL(e))));
+
+  const proposto = geo && geo.pontos ? geo.pontos.para : null;
+  if (!centro && !proposto && limpas.length === 0) return null;
+  return {
+    centro,
+    proposto: proposto && centro && proposto[0] === centro[0] && proposto[1] === centro[1] ? null : proposto,
+    movidoM: geo && Number.isFinite(geo.movedM) ? geo.movedM : null,
+    entradas: limpas,
+  };
+};
+
+// Distância entre dois [lat, lon], em metros. Equiretangular: a menos de 1 km
+// o erro é irrelevante e não puxa trigonometria cara — a mesma conta que
+// `distanciaEntreGeometrias` já usa, agora com nome próprio porque passou a ter
+// dois usuários.
+export const distanciaEntrePontos = (a, b) => {
+  if (!a || !b) return null;
+  const dLat = (b[0] - a[0]) * 111320;
+  const dLon = (b[1] - a[1]) * 111320 * Math.cos((a[0] * Math.PI) / 180);
+  return Math.sqrt(dLat * dLat + dLon * dLon);
+};
+
 export const distanciaEntreGeometrias = (a, b) => {
   const pa = centroide(a) || extractLonLatDeep(a);
   const pb = centroide(b) || extractLonLatDeep(b);
@@ -1254,6 +1339,16 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
               const vA = contarVertices(venue[k] ?? null);
               const vB = contarVertices(newValue);
               if (vA || vB) { mudanca.vertsFrom = vA; mudanca.vertsTo = vB; }
+              // As duas posições, pro card poder DESENHAR em vez de só narrar.
+              // "Moveu 36 m" é honesto e injulgável: 36 metros pode ser acertar
+              // a porta ou jogar o local dentro do rio, e o editor não tem como
+              // saber qual. Medido na fila real, geometria é o campo mais
+              // pedido (27 de 83) e o segundo é ponto de entrada (21) — juntos,
+              // a maioria do que a caixa de mudanças mostra hoje em coordenada
+              // crua. O texto FICA: é o que sobra quando o mapa não carrega.
+              const pDe = pontoDeGeometria(venue[k] ?? null);
+              const pPara = pontoDeGeometria(newValue);
+              if (pDe || pPara) mudanca.pontos = { de: pDe, para: pPara };
             }
             // Campo de lista: o que entrou e o que saiu, em vez de duas listas
             // inteiras pro editor comparar de olho.
@@ -1291,6 +1386,11 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         updateType: updateTypeStr,
         updateTypeKey,
         purType,
+        // Evidência espacial pro mini-mapa. Vai em TODO tipo de pedido, não só
+        // nos que mexem em geometria: "onde fica isto" é pergunta de todos —
+        // um local novo no meio do rio e uma foto de um lugar que não existe se
+        // reconhecem no mapa antes de qualquer texto.
+        mapa: montarMapa(venue, changes),
         camposSemMudanca,
         reqType,
         reqSubType,

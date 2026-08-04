@@ -73,6 +73,9 @@ wazeplaces/
 ├── tailwind.config.js       # Config do build de CSS (darkMode: 'class', content)
 ├── CHANGELOG.md             # Histórico de mudanças voltado ao editor (não é git log)
 ├── js/
+│   ├── mapa.js              # Mini-mapa de evidência (JS puro, zero dep): Mercator, escolha de zoom,
+│   │                        #   encaixe em tile e posição dos marcadores. Tiles do PRÓPRIO Waze, camada
+│   │                        #   `live/base` (não `editor/roads`). Testado em test/mapa.test.mjs sem browser.
 │   ├── qr.js                # Gerador de QR (JS puro, zero dep): modo byte, correção M, versões 1–6.
 │   │                        #   Só o pareamento usa. Verificado módulo a módulo contra o pacote `qrcode`
 │   │                        #   em 106 entradas; vetores dourados em test/qr.test.mjs. Carregado antes do app.js
@@ -98,6 +101,9 @@ wazeplaces/
 ├── .assetsignore            # Exclui server/docs/etc do publish estático dos Workers (static assets)
 ├── package.json             # Scripts: start (node), cf:dev, cf:deploy. Zero dependências.
 ├── tools/
+│   ├── paises-validacao.mjs # FONTE ÚNICA dos países de validação (ver seção 🌍). Script que MEÇA
+│   │                        #   qualquer coisa importa daqui — copiar a lista é como ela volta a ser
+│   │                        #   só o Brasil. Travado em test/consistencia.test.mjs.
 │   ├── smoke-browser.mjs    # Smoke de layout (npm run test:browser): aparelhos × idiomas × tipos de card
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
@@ -154,6 +160,27 @@ comparar **pixel a pixel** (PIL disponível). Para refactor visual, essa é a
 prova — não confie em leitura de código. Use um worktree
 (`git worktree add --detach <dir> origin/main`) pro "antes" em vez de `git stash`.
 CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump de `CACHE_NAME`** (gotcha #17). **Gatilhos: `pull_request` e `push` só em `main`** — push em branch de agente NÃO roda CI. Já me enganei com isso: prometi "aviso o resultado do CI" depois de empurrar dois commits numa branch sem PR, e nenhum run existia pra reportar. Se a validação precisa ser do CI e não só local, **abra o PR** (o owner já autoriza isso na seção de workflow abaixo). A suite de testes usa só `node:test`/`node:assert` (built-in) e cobre cripto/sessão, `categorizeWazeError`, `isUserAllowed`, parsing de cookies e o filtro de domínio.
+
+### 🌍 SEMPRE valide com estes PAÍSES (instrução permanente)
+
+Toda medição de dado ou de layout usa o **máximo de países possível**, e estes **seis nunca faltam** — lista fechada pelo owner:
+
+| país | `countryId` | por quê está aqui |
+|---|---|---|
+| **Brasil** | 30 | é o país do owner e a fila que ele tria |
+| **França** | 73 | acento, nome longo, e o idioma que mais estoura layout (gotcha #25) |
+| **Reino Unido** | 234 | endereço em formato completamente diferente |
+| **México** | 145 | fila grande, espanhol |
+| **Espanha** | 203 | espanhol europeu, muita foto |
+| **Portugal** | 181 | português NÃO-brasileiro — o caso que derruba tabela de tradução |
+
+**A lista mora em `tools/paises-validacao.mjs`, que é a FONTE ÚNICA** — script que meça qualquer coisa importa de lá, nunca copia (mesmo padrão do `waze-jitter.mjs`: instrução que depende da minha memória volta a ser esquecida). `test/consistencia.test.mjs` reprova se a lista mudar sem o teste ser revisitado, se um país entrar sem o motivo escrito, ou se esta seção sumir daqui.
+
+Todos na região `row`. O owner **vê** os PURs de fora mesmo sem poder editar lá; como `buildPlacesFromSearch` (com razão) descarta venue sem permissão, a fixture de teste força `permissions: -1` — maquiagem de FIXTURE, nunca da app.
+
+**Isto não é preciosismo, e o custo de ignorar já foi medido.** A auditoria de layout rodava só com a fila brasileira e dava zero problema. Com 12 países ela achou **26 pedidos que não cabem no Galaxy Fold, 17 deles `FLAGGED_PHOTO`** — tipo do qual a fila do Brasil **não tem NENHUM**. Um recurso inteiro passou por 1872 renders "sem problema" porque o dado que o quebra não existe no país onde eu media. Mesma família do gotcha #25 (a string mais larga quase nunca está no idioma em que você desenvolve), agora valendo pro DADO e não só pra tradução.
+
+**E quando achar falha, meça os dois lados antes de culpar o recurso novo.** Os 26 acima apareceram junto com o mini-mapa e não foram causados por ele: medido contra `origin/main` com os MESMOS cards, 26 de 26 já estavam quebrados. Sem essa comparação eu teria desfeito o recurso errado.
 
 ### 🔑 SEMPRE valide contra o WME real, com os cookies do owner (instrução permanente)
 
@@ -280,6 +307,11 @@ Volta `{ success, places[], hasMore, page, total }`. Cada `place`:
                               //   `CAMPOS_ESCRITURACAO` (core.mjs) tira id/updatedOn/
                               //   updatedBy/createdOn/createdBy/permissions. É lista de
                               //   EXCLUSÃO: campo novo aparece com nome cru, nunca some.
+  mapa,                       // Evidência ESPACIAL pro mini-mapa: { centro, proposto, movidoM,
+                              //   entradas[{ll, estado, nome, distM}] }. Vai em TODO tipo de
+                              //   pedido — "onde fica isto" é pergunta de todos. `null` só quando
+                              //   não há coordenada nenhuma (o card então não monta o slide, em
+                              //   vez de desenhar um mapa do oceano no ponto (0,0)).
   lat, lon
 }
 ```
@@ -510,7 +542,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 13. ~~**mod_pagespeed do Apache**~~ **(OBSOLETO na v3.0 — histórico)**: no deploy Apache/RHEL, `mod_pagespeed` reordenava/minificava scripts e quebrava a ordem `api.js → app.js`; o `.htaccess` desabilitava. Não se aplica ao Cloudflare/Node. Registrado só pra contexto.
 
-14. **CSP precisa permitir os domínios externos usados** — e o browser aplica a **INTERSEÇÃO** de todas as CSPs ativas (vence a mais restritiva). `img-src` precisa de `venue-image.waze.com` (fotos) e `social-row.waze.com` (avatar). `script-src`/`connect-src` precisam de **`static.cloudflareinsights.com`** e **`cloudflareinsights.com`**: o Cloudflare INJETA o beacon do Web Analytics no HTML quando o request vem de navegador (com `curl` sem UA de browser ele não aparece — não confie nisso pra testar). São dois hosts porque o script vem de um e a telemetria vai pro outro (`/cdn-cgi/rum`). **Fontes e Tailwind NÃO precisam mais de host externo** (Inter auto-hospedada em `fonts/`, Tailwind pré-compilado) — por isso `font-src` é só `'self' data:` e não há `unsafe-eval`. **Duas cópias da CSP em sync**: o `<meta>` do `index.html` E o arquivo **`_headers`** (Cloudflare). Ao mexer, atualize as duas — e confira com um User-Agent de navegador de verdade. Desde v2026.07.28-06 `test/layout.test.mjs` **compara as duas diretiva a diretiva** e falha se divergirem. **`script-src` NÃO tem `'unsafe-inline'`** e o HTML não tem NENHUM `<script>` inline nem handler `onclick=` — é isso que impede um XSS de ler o `sessionToken` do localStorage (provado: no build anterior o script injetado executava e lia o token). Script novo → arquivo em `js/`, nunca inline. `style-src` **continua** com `'unsafe-inline'` de propósito: o swipe escreve `el.style.transform` a cada frame, e trocar por `style-src-attr` quebraria no Safari, que não o implementa — CSS injetado também não lê localStorage, então o ganho não paga o risco.
+14. **CSP precisa permitir os domínios externos usados** — e o browser aplica a **INTERSEÇÃO** de todas as CSPs ativas (vence a mais restritiva). `img-src` precisa de `venue-image.waze.com` (fotos), `social-row.waze.com` (avatar) e **`www.waze.com`** (tiles do mini-mapa). `script-src`/`connect-src` precisam de **`static.cloudflareinsights.com`** e **`cloudflareinsights.com`**: o Cloudflare INJETA o beacon do Web Analytics no HTML quando o request vem de navegador (com `curl` sem UA de browser ele não aparece — não confie nisso pra testar). São dois hosts porque o script vem de um e a telemetria vai pro outro (`/cdn-cgi/rum`). **Fontes e Tailwind NÃO precisam mais de host externo** (Inter auto-hospedada em `fonts/`, Tailwind pré-compilado) — por isso `font-src` é só `'self' data:` e não há `unsafe-eval`. **Duas cópias da CSP em sync**: o `<meta>` do `index.html` E o arquivo **`_headers`** (Cloudflare). Ao mexer, atualize as duas — e confira com um User-Agent de navegador de verdade. Desde v2026.07.28-06 `test/layout.test.mjs` **compara as duas diretiva a diretiva** e falha se divergirem. **`script-src` NÃO tem `'unsafe-inline'`** e o HTML não tem NENHUM `<script>` inline nem handler `onclick=` — é isso que impede um XSS de ler o `sessionToken` do localStorage (provado: no build anterior o script injetado executava e lia o token). Script novo → arquivo em `js/`, nunca inline. `style-src` **continua** com `'unsafe-inline'` de propósito: o swipe escreve `el.style.transform` a cada frame, e trocar por `style-src-attr` quebraria no Safari, que não o implementa — CSS injetado também não lê localStorage, então o ganho não paga o risco.
 
 15. **Rank do editor é 0-indexed no Waze, +1 na UI** (regra de convenção sagrada deste projeto). O `/Session` do Waze retorna `rank: 0..5` mas humanos contam `1..6`:
     - **Toda exibição pro user** usa `rank + 1` (já implementado em `renderProfileHeader` como `'L' + (p.rank + 1)`)
@@ -601,6 +633,13 @@ Bugs já encontrados e corrigidos — **não repita**:
     **Medi CADA candidato por DOM antes de escrever uma linha de código, e foi o que salvou.** Dois dos quatro primeiros **pioravam** (26 → 70px de sobra). `C2+C5` deu **0 falhas e 0px**; `C1` (tirar o cabeçalho da caixa) não somava nada em cima, então ficou de fora — mudança que não paga não entra. Resultado final: **1872 renders, zero estouro.**
     **Três armadilhas de instrumento numa tarefa só**, todas minhas: (a) `new Function(string)` no `page.evaluate` bate na CSP — a mudança tem que ir INLINE no callback (já estava escrito aqui, e mesmo assim bati); (b) comparei contraste de `span:first` antes × depois e "vi" queda de 10.35 pra 4.76 — eram ELEMENTOS diferentes (o markup mudou de posição), medir por CLASSE mostrou rótulo 4.76 e valor 10.35 dos dois lados, idênticos ao que já existia; (c) `git worktree add` DENTRO do repo fez o `node --test` varrer os dois e a suíte "passou" 288 testes — o worktree do "antes" vai pra fora da árvore.
     **O smoke reprovou o card certo, e o guard é que estava errado.** Ele acusava "tipo em português" ao ver `Reporte` em espanhol — que é a tradução CORRETA de FLAG lá, idêntica ao português por coincidência de língua irmã. Só teve sorte de não morder antes porque a única fixture de FLAG era de FOTO. Hoje o guard só acusa se a palavra for do português **e** o dicionário do idioma atual disser outra coisa; verificado forçando um vazamento real. Lista de palavras não distingue vazamento de homógrafo — o dicionário distingue.
+
+51. **Coordenada é exata e injulgável — o mini-mapa nasceu disso** (v2026.08.04-05). O owner, que é L6, olhou o próprio card de "Atualização de detalhes" e disse: *"não sei o que fazer com isso"*. Medido, ele tinha razão e o motivo é estrutural: os dois campos mais pedidos nesse tipo são ESPACIAIS — `geometry` (27 de 83) e `entryExitPoints` (21) —, e o card os mostrava como `moveu 36 m` e `entrada -15.88749, -52.26094`. **Exato e inútil**: 36 metros pode ser acertar a porta ou jogar o local dentro do rio, e não há como saber de cabeça. O swipe pressupõe decisão num olhar; essa não era.
+    **Tiles do próprio Waze, camada `live/base` e não `editor/roads`.** Respondem sem credencial (medido: 200, PNG 512×512, nas três regiões) e não entra terceiro no projeto. A camada importa: a do editor traz setas de mão única e marcas de edição — o que se precisa pra EDITAR. Aqui a pergunta é "isto faz sentido neste lugar?", e quem responde é a base cartográfica (parque, água, prédios, pontos nomeados). O fluxo do owner é julgar rápido no card e abrir o WME pelo ↗ depois. **A camada saiu de um HAR do livemap que ele levantou** — eu tinha achado só a do editor.
+    **O mapa é um SLIDE do carrossel que já existia**, nunca uma linha nova: o card tinha acabado de ser espremido até caber (gotcha #50) e não havia um pixel sobrando. Quando não há foto — 58% dos DETAILS_UPDATE — ele toma o lugar do "Sem Imagem", que era espaço morto. Custo de altura: **zero**, medido.
+    **Rede é o custo real, e a alavanca não era o zoom.** 2,79 tiles por card a 29–147 KB dá ~357 KB — inaceitável no celular. Baixar o zoom quase não muda a contagem (2,79 → 2,59) porque o problema é a caixa (412×250) atravessar a borda do tile (512×512) mesmo sendo MENOR que ele. Centrar nos pontos não é requisito: o requisito é caber com folga, o que deixa liberdade pro canto. Deslizar até um tile só levou a **2,13** sem perder um pixel de evidência. O resto vem do carregamento preguiçoso: slide que ninguém abriu não pede tile.
+    **O que não cabe em zoom nenhum é DITO, não empurrado pra fora da tela.** A primeira versão devolvia o zoom mínimo assim mesmo e o marcador caía fora da caixa, calado — o mapa mostrava um ponto só e o editor concluiria que nada mudou de lugar. Meu PRÓPRIO teste pegou. Hoje `mapaMontar` devolve `foraDoMapa` e o card avisa em vermelho. Não é canto raro: **33 casos em 4188**, incluindo pedidos propondo mover um local 82 km.
+    **Instrução permanente que saiu daqui: validar com o MÁXIMO de países, sempre incluindo França, México, Espanha e Brasil.** O owner vê PURs de fora mesmo sem poder editar lá (a fixture força `permissions: -1`; o filtro segue valendo em produção). A auditoria de 12 países achou **26 pedidos que não cabem no Fold, 17 deles `FLAGGED_PHOTO`** — tipo que a fila brasileira **não tem nenhum**. Medido nos dois lados contra `origin/main`: **26 de 26 já estavam quebrados antes do mapa, 0 causados por ele**. Ou seja, a instrução dos países achou um bug real que a validação só-Brasil nunca acharia, e a comparação antes/depois evitou que eu culpasse o recurso errado.
 
 22. **`css/tailwind.css` é GERADO e commitado — nunca edite à mão** (v2026.07.24-02). O Tailwind deixou de compilar no browser: mexeu em classe no `index.html`/`js/*`? rode **`npm run css`** e commite o CSS junto. O CI regenera e falha no diff se esquecer. Some com o estilo em produção sem nenhum erro no console — é silencioso.
     **A ORDEM dos `<link>` importa**: `styles.css` vem ANTES de `tailwind.css`. O bundle runtime antigo injetava o CSS gerado no fim do `<head>`, então as utilities venciam empates de especificidade contra o `styles.css`. Inverter a ordem muda anéis de foco/cantos de leve. Se precisar mexer, valide com o harness de screenshot (Playwright) — foi assim que isso apareceu.

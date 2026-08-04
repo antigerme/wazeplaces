@@ -19,7 +19,7 @@
          bloqueado e sobrava só o erro no console. São dois porque o script vem de
          static.cloudflareinsights.com e a telemetria vai pra cloudflareinsights.com
          (/cdn-cgi/rum), ou seja: script-src E connect-src. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com; connect-src 'self' https://cloudflareinsights.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://cloudflareinsights.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).
@@ -645,6 +645,18 @@
                                 <img class="card-image w-full h-full object-cover hidden" alt="">
                                 <div class="card-image-new-border hidden absolute inset-0 ring-4 ring-amber-400 ring-inset pointer-events-none z-20"></div>
                                 <div class="card-image-new-badge hidden absolute top-1 left-2 z-30 text-3xl leading-none select-none pointer-events-none" style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido" data-i18n-title="card.newPhoto.title">✨</div>
+                                <!-- Mini-mapa: mais um slide do MESMO carrossel da foto, então
+                                     custa zero de altura num card que acabou de ser espremido
+                                     até caber. Existe porque a evidência que falta pro editor
+                                     decidir é espacial — "moveu 36 m" é exato e injulgável.
+                                     Os tiles são os do próprio Waze (a mesma camada de vias do
+                                     WME), sem biblioteca e sem terceiro. -->
+                                <div class="card-map hidden absolute inset-0 bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                                    <div class="card-map-tiles absolute inset-0"></div>
+                                    <div class="card-map-marks absolute inset-0 pointer-events-none"></div>
+                                    <span class="card-map-scale absolute left-2 z-20 bg-black/60 text-white text-[0.6875rem] font-medium px-2 py-0.5 rounded tnum"></span>
+                                    <span class="card-map-legend absolute top-2 left-2 right-2 z-20 flex flex-wrap gap-1"></span>
+                                </div>
                                 <div class="card-no-image absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700">
                                     <svg class="w-16 h-16 text-slate-300 mb-2" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
@@ -992,6 +1004,9 @@
     <script src="js/qr.js"></script>
     <script src="js/i18n.js"></script>
     <script src="js/api.js"></script>
+    <!-- Mini-mapa de evidência. Matemática de Mercator pura, zero dependência,
+         como o js/qr.js. Antes do app.js, que o usa no render do card. -->
+    <script src="js/mapa.js"></script>
     <script src="js/swipe.js"></script>
     <script src="js/app.js"></script>
 
