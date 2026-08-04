@@ -60,19 +60,27 @@ const MAX_EMPTY_PAGES = 5;
 // ordens diferentes é como o editor descobre que a app se contradiz.
 const TYPES_ALL = ['NEW_PLACE', 'DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE',
                    'NEW_PHOTO', 'FLAGGED_PHOTO', 'DELETE_PHOTO'];
-// Quais vêm MARCADOS numa instalação nova. Hoje são TODOS, e voltou a ser assim
-// porque a medição autorizou: `DETAILS_UPDATE` e `FLAGGED_PLACE` ficaram de fora
-// por um tempo, enquanto o card deles não cabia na tela em pedido carregado de
-// informação. Com o motivo do reporte fora da caixa e as linhas de categoria e
-// endereço no padrão compacto, os 117 pedidos reais desses dois tipos passaram
-// em 1872 renders (4 aparelhos × 4 idiomas) sem um estouro — eram 156.
+// Quais vêm MARCADOS numa instalação nova. `DETAILS_UPDATE` e `FLAGGED_PLACE`
+// ficam de fora, e o motivo é de PRODUTO, não de layout: a app é estilo Tinder,
+// e o gesto rápido funciona quando há o que OLHAR. Decisão do owner.
 //
-// A constante FICA separada do TYPES_ALL de propósito, mesmo agora que os dois
-// conjuntos coincidem: "todos os tipos que existem" e "os que vêm marcados" são
-// perguntas diferentes, e a primeira ainda decide se vale mandar o filtro ao
-// Waze (subconjunto estrito). Colapsar as duas devolveria o dia em que a rede de
-// segurança do Aplicar virou "marca tudo".
-const TYPES_PADRAO = TYPES_ALL.slice();
+// Os dois já estiveram desmarcados por um motivo diferente — o card deles não
+// cabia na tela — e isso foi corrigido (1872 renders, zero estouro). A troca de
+// motivo importa pro próximo que vier aqui: não adianta mexer no layout de novo
+// pra tentar remarcá-los, porque não é o layout que os mantém fora.
+//
+// Medido na fila real, o argumento se sustenta em número: os 5 tipos do padrão
+// somam 178 cards com 66% de foto (e `NEW_PHOTO` tem 2,27 fotos por card),
+// contra 117 cards e 44% nos dois de fora.
+//
+// **Desmarcado ≠ escondido**: a caixa continua no filtro, com o nome do WME, a
+// um toque. Esconder faria o editor achar que a fila acabou; desmarcar diz
+// "existe, e você decide".
+//
+// A constante fica separada do TYPES_ALL mesmo quando os conjuntos coincidem:
+// "todos os tipos que existem" e "os que vêm marcados" são perguntas
+// diferentes, e só a primeira decide se vale mandar o filtro ao Waze.
+const TYPES_PADRAO = TYPES_ALL.filter((t) => t !== 'DETAILS_UPDATE' && t !== 'FLAGGED_PLACE');
 // O filtro salvo pode trazer lixo: storage de uma versão que não existe mais,
 // chave editada à mão, JSON meio gravado. Fica só o que a app conhece — e se
 // não sobrar NADA, volta ao padrão em vez de virar filtro vazio, que abriria a

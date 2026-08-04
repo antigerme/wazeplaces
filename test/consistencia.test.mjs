@@ -246,12 +246,19 @@ test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => 
   assert.deepEqual(marcadosHtml, padraoCodigo,
     'o que nasce marcado no HTML e o TYPES_PADRAO divergiram');
 
-  // `DETAILS_UPDATE` e `FLAGGED_PLACE` ficaram DESMARCADOS por um tempo, porque
-  // o card deles não cabia na tela em pedido carregado de informação. Voltaram
-  // a nascer marcados quando a medição autorizou — 117 pedidos reais desses dois
-  // tipos em 1872 renders (4 aparelhos × 4 idiomas) sem um estouro, contra 156
-  // antes. O que este teste trava não é a decisão, que muda com a evidência: é a
-  // PARIDADE acima, entre o que a tela mostra marcado e o que a app vai buscar.
+  // `DETAILS_UPDATE` e `FLAGGED_PLACE` nascem DESMARCADOS, e o motivo é de
+  // PRODUTO: a app é estilo Tinder, e o gesto rápido funciona quando há o que
+  // olhar. Medido na fila real: os 5 tipos do padrão somam 178 cards com 66% de
+  // foto, contra 117 cards e 44% nos dois de fora.
+  //
+  // Eles JÁ estiveram desmarcados por outro motivo — o card não cabia na tela —
+  // e isso foi corrigido (1872 renders, zero estouro). Registro a troca porque
+  // ela muda o que o próximo deve fazer: mexer no layout não os traz de volta,
+  // porque não é o layout que os mantém fora.
+  //
+  // O que este teste trava não é a decisão, que é do owner e muda quando ele
+  // quiser: é a PARIDADE acima, entre o que a tela mostra marcado e o que a app
+  // de fato vai buscar.
   //
   // Nenhum tipo pode sumir do filtro. Esconder é diferente de desmarcar: o
   // editor não procura o que não vê, e conclui que a fila acabou.
