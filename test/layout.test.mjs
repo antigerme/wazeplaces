@@ -1478,3 +1478,49 @@ test('a foto ampliada fecha pelos caminhos das DUAS plataformas', () => {
   assert.match(APP, /dy > 80 && Math\.abs\(dy\) > Math\.abs\(dx\)/,
     'mudou o gesto de arraste da foto sem revisitar a tecla que o espelha');
 });
+
+test('card: UMA gramática de rótulo, e a caixa do reporte só existe com texto', () => {
+  const HTML_ = read('index.html');
+  const APP_ = read('js/app.js');
+
+  // ── uma gramática só ──────────────────────────────────────────────────
+  // Categorias e Endereço eram as ÚNICAS linhas com caixinha de ícone +
+  // rótulo empilhado, enquanto Tipo/Criador/Marca/Motivo eram "RÓTULO: valor"
+  // numa linha. Duas gramáticas pra dizer a mesma coisa é o que a regra de
+  // ouro de consistência proíbe — e custava caro: o ícone sozinho tem 36px de
+  // piso (p-2 + svg de 20px), então cada uma dessas linhas ia a 43-63px onde
+  // as compactas ficam em 20. Medido: 156 dos 1872 renders da fila real
+  // estouravam, e junto com o motivo fora da caixa isso zerou.
+  for (const linha of ['card-category-row', 'card-address-row']) {
+    const l = HTML_.split('\n').find((x) => x.includes(`class="${linha} `));
+    assert.ok(l, `sumiu a linha .${linha}`);
+    assert.match(l, /\bflex items-baseline\b/,
+      `.${linha} saiu do padrão "RÓTULO: valor" — volta a custar 43-63px`);
+    assert.doesNotMatch(l, /items-start/,
+      `.${linha} voltou ao desenho empilhado com ícone`);
+  }
+  // O rótulo delas termina em dois-pontos como os irmãos. Sem isso a tela mostra
+  // "CATEGORIAS Padaria" ao lado de "TIPO: Reporte" — o editor lê como defeito.
+  const DICT = read('js/i18n.js');
+  for (const chave of ['card.categories', 'card.address', 'card.type', 'card.creator']) {
+    for (const m of DICT.matchAll(new RegExp(`'${chave.replace('.', '\\.')}': '([^']*)'`, 'g'))) {
+      assert.match(m[1], /:$/,
+        `${chave} = "${m[1]}" não termina em dois-pontos, e as linhas vizinhas terminam`);
+    }
+  }
+
+  // ── a caixa do reporte segura o COMENTÁRIO, não o motivo ───────────────
+  // O motivo é a informação principal e quase sempre a única (comentário vazio
+  // em 15 de 17 reportes da fila real). Dentro da caixa, ele carregava junto
+  // ~40px de moldura — borda + padding + cabeçalho — pra exibir uma linha.
+  const iMotivo = HTML_.indexOf('card-flag-reason');
+  const iCaixa = HTML_.indexOf('card-flag-comment ');
+  assert.ok(iMotivo > 0 && iCaixa > 0, 'sumiu o motivo ou a caixa do reporte');
+  assert.ok(iMotivo < iCaixa,
+    'o motivo voltou pra dentro da caixa — com comentário vazio sobra moldura sem conteúdo');
+  // E o JS não pode mais abrir a caixa sem texto.
+  assert.match(APP_, /if \(place\.flagComment\) \{[\s\S]{0,220}card-flag-comment'\)\.classList\.remove\('hidden'\)/,
+    'a caixa do reporte voltou a aparecer sem comentário');
+  assert.doesNotMatch(APP_, /box\.classList\.add\('flex-shrink-0'\)/,
+    'voltou o malabarismo de flex que existia só porque a caixa aparecia vazia');
+});

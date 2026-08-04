@@ -100,17 +100,14 @@ const CARDS = {
     categories: ['SHOPPING_AND_SERVICES'], address: 'Rua Bernardino de Campos, 3000 - Centro',
     updateType: 'Reporte (Sinalização)', updateTypeKey: 'FLAG', reqType: 'REQUEST', reqSubType: 'FLAG',
     createdBy: 'mariazinha', imageUrls: [foto, foto], brand: null, changes: [],
-    // CLOSED: 7 ocorrências na fila real, e a redação vem do próprio WME. Era
-    // INAPPROPRIATE, que não ocorre NENHUMA vez.
+    // CLOSED: 13 ocorrências na fila real, e a redação vem do próprio WME. Era
+    // INAPPROPRIATE, que ocorre 1 vez.
     //
-    // RESÍDUO MEDIDO, na linha do que o gotcha #29 já registra: num Fold
-    // (280×653), motivo de DUAS linhas + comentário longo estoura e cai na rede
-    // de segurança (conteúdo salta de 289 pra 476px, porque a rede troca a caixa
-    // longa de `flex: 1 1 0%` pra `flex: 0 0 auto`). Só o
-    // `DOES_NOT_MATCH_SEARCH` chega a duas linhas ali — e, medido na fila real,
-    // os 3 casos dele vieram SEM comentário, então a combinação que estoura não
-    // apareceu na prática. O degrau de tela estreita já recuperou o caso do
-    // francês (`Résidentiel (domicile)` ia a duas linhas e agora cabe em uma).
+    // O resíduo que este comentário registrava — motivo de duas linhas +
+    // comentário longo estourando no Fold — MORREU: o motivo saiu de dentro da
+    // caixa rosa e as linhas de categoria/endereço adotaram o padrão compacto.
+    // Medido depois: 117 pedidos reais × 4 aparelhos × 4 idiomas = 1872 renders,
+    // zero estouro (eram 156). O caso seco virou a fixture FLAG_SECO.
     flagType: 'CLOSED', flagSubjectType: 'IMAGE', flagEntityID: null,
     flagComment: 'Esse lugar fechou faz mais de um ano, hoje é uma oficina mecânica. Passei lá ontem e confirmei com o dono do imóvel, que disse que a loja saiu em 2024. O ponto está errado no mapa e atrapalha quem procura.',
     dateAdded: 1785203731191, lat: -20.8, lon: -49.4,
@@ -188,6 +185,28 @@ const CARDS = {
     updateType: 'Nova Foto', updateTypeKey: 'IMAGE', reqType: 'IMAGE', reqSubType: '',
     createdBy: 'joaozinho', imageUrls: [foto, foto], brand: null, changes: [],
     dateAdded: 1785203731191, lat: -20.8, lon: -49.4,
+  },
+  // Reporte SEM comentário — que é a maioria: 15 de 17 na fila real do owner.
+  // Este era o pior caso medido e falhava em 8 de 8 ocorrências: motivo de duas
+  // linhas (`DOES_NOT_MATCH_SEARCH`), endereço de três, duas categorias e linha
+  // de marca. Antes, o motivo morava dentro da caixa rosa, então com o
+  // comentário vazio sobrava ~40px de moldura (borda + padding + cabeçalho)
+  // pra exibir uma linha — e o card inteiro passava a rolar, o que desliga o
+  // gesto de pular (gotcha #29).
+  //
+  // Os valores vieram de pedidos REAIS (fila de 2026-08-04). Fixture inventada
+  // mede o que eu imaginei; foi dado real que achou este caso, depois de a
+  // auditoria de fixture ter passado.
+  FLAG_SECO: {
+    venueID: 'v6', updateRequestID: 'u6', name: 'Velório São Vicente de Paulo',
+    categories: ['BUS_STATION', 'SHOPPING_CENTER'],
+    address: 'Av. Manoel Carneiro de Menezes, Nova Friburgo - Rio de Janeiro',
+    updateType: 'Reporte (Sinalização)', updateTypeKey: 'FLAG', reqType: 'REQUEST', reqSubType: 'FLAG',
+    createdBy: 'world_iel6nyr4', creatorRank: 0, source: 'MOBILE_CLIENT',
+    imageUrls: [foto], brand: 'Ipiranga', brandKnown: true, changes: [],
+    flagType: 'DOES_NOT_MATCH_SEARCH', flagSubjectType: 'VENUE', flagEntityID: null,
+    flagComment: '',
+    dateAdded: 1785203731191, lat: -22.28, lon: -42.53,
   },
 };
 
@@ -383,9 +402,26 @@ for (const [aparelho, viewport] of APARELHOS) {
           `${rot}: mostrou ${m.diffs} de ${CARDS.UPDATE.changes.length} mudanças`);
       }
       // Nada de português vazando fora do pt.
+      //
+      // A lista de palavras SOZINHA dá falso positivo, e deu: `Reporte` é a
+      // tradução correta de FLAG em espanhol — idêntica ao português por
+      // coincidência de língua irmã. O guard reprovava um card certo, e teria
+      // reprovado 17 dos 34 reportes da fila real em es.
+      //
+      // Só é vazamento se a palavra for do português E o dicionário do idioma
+      // atual disser OUTRA coisa. Quando os dois dicionários concordam, não há
+      // o que detectar — a palavra é daquela língua também.
       if (lang !== 'pt') {
-        const pt = /\b(Atualização|Novo Local|Nova Foto|Reporte|Pedido de remoção|Tipo desconhecido)\b/;
-        checa(!pt.test(m.tipo), `${rot}: tipo em português`, m.tipo);
+        const vazou = await page.evaluate(([txt, lg]) => {
+          const PT = /\b(Atualização|Novo Local|Nova Foto|Reporte|Pedido de remoção|Tipo desconhecido)\b/;
+          if (!PT.test(txt)) return null;
+          // O texto casa com português. Ele também é o que ESTE idioma produz?
+          const dele = Object.entries(I18N_DICT[lg] || {})
+            .filter(([k]) => k.startsWith('card.updateType.') || k.startsWith('card.type.'))
+            .map(([, v]) => v);
+          return dele.some((v) => v && txt.includes(v)) ? null : txt;
+        }, [m.tipo, lang]);
+        checa(!vazou, `${rot}: tipo em português`, vazou || m.tipo);
       }
     }
   }

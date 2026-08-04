@@ -275,8 +275,8 @@
                             <legend class="text-sm font-semibold text-slate-700 block mb-2 dark:text-slate-200" data-i18n="filters.types.legend">Tipos de Pedido</legend>
                             <div class="space-y-1">
                                 <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="NEW_PLACE" checked> <span data-i18n="filters.types.NEW_PLACE">Novo local</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DETAILS_UPDATE"> <span data-i18n="filters.types.DETAILS_UPDATE">Atualização de detalhes</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="FLAGGED_PLACE"> <span data-i18n="filters.types.FLAGGED_PLACE">Local marcado</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DETAILS_UPDATE" checked> <span data-i18n="filters.types.DETAILS_UPDATE">Atualização de detalhes</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="FLAGGED_PLACE" checked> <span data-i18n="filters.types.FLAGGED_PLACE">Local marcado</span></label>
                                 <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DELETE_PLACE" checked> <span data-i18n="filters.types.DELETE_PLACE">Excluir local</span></label>
                                 <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="NEW_PHOTO" checked> <span data-i18n="filters.types.NEW_PHOTO">Nova foto</span></label>
                                 <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="FLAGGED_PHOTO" checked> <span data-i18n="filters.types.FLAGGED_PHOTO">Foto sinalizada</span></label>
@@ -679,29 +679,22 @@
                                     </a>
                                 </div>
 
-                                <div class="flex items-start space-x-3 flex-shrink-0">
-                                    <div class="bg-cyan-50 p-2 rounded-lg text-cyan-600 dark:bg-cyan-600/20" aria-hidden="true">
-                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
-                                        </svg>
-                                    </div>
-                                    <div class="flex-1 pt-1">
-                                        <p class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider mb-0.5 dark:text-slate-400" data-i18n="card.categories">Categorias</p>
-                                        <span class="card-category text-sm text-slate-700 font-medium line-clamp-2 break-words dark:text-slate-200"></span>
-                                    </div>
+                                <!-- Categorias e Endereço no MESMO desenho de Tipo/Criador/Marca:
+                                     "RÓTULO: valor" numa linha. Antes eram os únicos com caixinha
+                                     de ícone + rótulo empilhado, e o card ficava com DUAS gramáticas
+                                     pra dizer a mesma coisa (rótulo + valor). O ícone sozinho tinha
+                                     36px de piso (p-2 + svg de 20px), então cada uma dessas linhas
+                                     custava 43-63px onde as compactas custam 20. Medido na fila real:
+                                     junto com o motivo fora da caixa, é o que zera o estouro nos 23
+                                     pedidos que não cabiam. `line-clamp-2` continua no valor. -->
+                                <div class="card-category-row flex items-baseline gap-2 min-w-0 flex-shrink-0">
+                                    <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.categories">Categorias:</span>
+                                    <span class="card-category text-sm text-slate-700 font-medium line-clamp-2 break-words min-w-0 flex-1 dark:text-slate-200"></span>
                                 </div>
 
-                                <div class="card-address-row flex items-start space-x-3 flex-shrink-0">
-                                    <div class="bg-blue-50 p-2 rounded-lg text-blue-600 dark:bg-blue-600/20" aria-hidden="true">
-                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                        </svg>
-                                    </div>
-                                    <div class="flex-1 pt-1">
-                                        <p class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider mb-0.5 dark:text-slate-400" data-i18n="card.address">Endereço</p>
-                                        <span class="card-address text-sm text-slate-700 font-medium line-clamp-2 break-words dark:text-slate-200"></span>
-                                    </div>
+                                <div class="card-address-row flex items-baseline gap-2 min-w-0 flex-shrink-0">
+                                    <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.address">Endereço:</span>
+                                    <span class="card-address text-sm text-slate-700 font-medium line-clamp-2 break-words min-w-0 flex-1 dark:text-slate-200"></span>
                                 </div>
 
                                 <!-- Tipo/Criador/idade em linha, no MESMO desenho da linha de marca
@@ -719,14 +712,20 @@
                                     <span class="card-creator text-sm text-slate-700 font-medium truncate min-w-0 flex-1 dark:text-slate-200"></span>
                                 </div>
 
+                                <!-- O motivo (`flagType`) é a informação principal do reporte e quase
+                                     sempre a ÚNICA: o comentário livre vem vazio em 15 de 17 reportes
+                                     medidos na fila real. Por isso ele mora FORA da caixa, em linha
+                                     própria — a caixa existe pra segurar o texto livre, e com o
+                                     comentário vazio ela virava ~40px de moldura (borda + padding +
+                                     cabeçalho) pra exibir uma linha. Segue em rosa: perdeu a caixa,
+                                     não o destaque. -->
+                                <p class="card-flag-reason hidden flex items-baseline gap-2 min-w-0 flex-shrink-0">
+                                    <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.flagReason">Motivo:</span>
+                                    <span class="card-flag-reason-value text-sm font-semibold text-rose-700 break-words min-w-0 flex-1 dark:text-rose-300"></span>
+                                </p>
+
                                 <div class="card-flag-comment hidden flex-1 min-h-0 flex flex-col bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/30 rounded-xl p-3">
                                     <p class="text-[0.6875rem] font-semibold text-rose-700 dark:text-rose-300 uppercase tracking-wider mb-1 flex-shrink-0" data-i18n="card.flagComment">Reporte do usuário</p>
-                                    <!-- O motivo (`flagType`) é a informação principal do reporte e quase
-                                         sempre a ÚNICA: o comentário livre costuma vir vazio. -->
-                                    <p class="card-flag-reason hidden flex items-baseline gap-2 min-w-0 flex-shrink-0 mb-1">
-                                        <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.flagReason">Motivo:</span>
-                                        <span class="card-flag-reason-value text-sm font-semibold text-rose-700 break-words min-w-0 dark:text-rose-300"></span>
-                                    </p>
                                     <p class="card-flag-comment-text flex-1 min-h-0 text-sm text-slate-700 leading-snug whitespace-pre-wrap break-words overflow-y-auto overscroll-contain dark:text-slate-200" tabindex="0" role="group" aria-label="Texto do reporte do usuário" data-i18n-aria="card.flagComment.aria"></p>
                                 </div>
 

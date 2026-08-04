@@ -60,18 +60,19 @@ const MAX_EMPTY_PAGES = 5;
 // ordens diferentes é como o editor descobre que a app se contradiz.
 const TYPES_ALL = ['NEW_PLACE', 'DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE',
                    'NEW_PHOTO', 'FLAGGED_PHOTO', 'DELETE_PHOTO'];
-// Quais vêm MARCADOS numa instalação nova. Não é o mesmo conjunto de cima, e a
-// diferença é deliberada: `DETAILS_UPDATE` e `FLAGGED_PLACE` são os dois tipos
-// cujo card ainda não cabe na tela quando o pedido vem carregado de informação
-// (diff longo, lista grande, comentário comprido) — o próprio owner pediu pra
-// deixá-los desmarcados enquanto o layout deles não for acertado com calma.
+// Quais vêm MARCADOS numa instalação nova. Hoje são TODOS, e voltou a ser assim
+// porque a medição autorizou: `DETAILS_UPDATE` e `FLAGGED_PLACE` ficaram de fora
+// por um tempo, enquanto o card deles não cabia na tela em pedido carregado de
+// informação. Com o motivo do reporte fora da caixa e as linhas de categoria e
+// endereço no padrão compacto, os 117 pedidos reais desses dois tipos passaram
+// em 1872 renders (4 aparelhos × 4 idiomas) sem um estouro — eram 156.
 //
-// **Desmarcado ≠ escondido**, e a distinção importa: a caixa continua ali, com
-// o mesmo nome do WME, a um toque de distância. Esconder o tipo faria o editor
-// achar que a fila acabou; deixá-lo desmarcado diz "existe, e você decide".
-// Quando o card estiver redondo, o conserto é mover as duas linhas pra cá e
-// pôr `checked` no HTML — o guard de consistência cobra as duas pontas juntas.
-const TYPES_PADRAO = TYPES_ALL.filter((t) => t !== 'DETAILS_UPDATE' && t !== 'FLAGGED_PLACE');
+// A constante FICA separada do TYPES_ALL de propósito, mesmo agora que os dois
+// conjuntos coincidem: "todos os tipos que existem" e "os que vêm marcados" são
+// perguntas diferentes, e a primeira ainda decide se vale mandar o filtro ao
+// Waze (subconjunto estrito). Colapsar as duas devolveria o dia em que a rede de
+// segurança do Aplicar virou "marca tudo".
+const TYPES_PADRAO = TYPES_ALL.slice();
 // O filtro salvo pode trazer lixo: storage de uma versão que não existe mais,
 // chave editada à mão, JSON meio gravado. Fica só o que a app conhece — e se
 // não sobrar NADA, volta ao padrão em vez de virar filtro vazio, que abriria a
@@ -1825,26 +1826,21 @@ function renderCurrentCard() {
     // ÚNICA — o comentário livre vem vazio na maioria dos casos. A app só olhava
     // o comentário, então o card de reporte saía sem dizer por que o local foi
     // denunciado, enquanto o WME mostrava "Motivo da marcação: Inapropriado".
-    if (place.flagComment || place.flagType) {
-        const box = card.querySelector('.card-flag-comment');
-        const text = card.querySelector('.card-flag-comment-text');
-        if (place.flagType) {
-            // Enum não mapeado aparece CRU, pela mesma razão do diff de mudanças:
-            // esconder o motivo de uma denúncia é pior que mostrá-lo em inglês.
-            card.querySelector('.card-flag-reason-value').textContent =
-                rotuloDeEnum('card.flagType.', place.flagType);
-            card.querySelector('.card-flag-reason').classList.remove('hidden');
-        }
-        if (place.flagComment) {
-            text.textContent = place.flagComment;
-        } else {
-            // Sem texto livre a caixa não pode reivindicar a sobra do card: viraria
-            // um retângulo rosa vazio ocupando meia tela (gotcha #29).
-            text.classList.add('hidden');
-            box.classList.remove('flex-1', 'min-h-0');
-            box.classList.add('flex-shrink-0');
-        }
-        box.classList.remove('hidden');
+    if (place.flagType) {
+        // Enum não mapeado aparece CRU, pela mesma razão do diff de mudanças:
+        // esconder o motivo de uma denúncia é pior que mostrá-lo em inglês.
+        card.querySelector('.card-flag-reason-value').textContent =
+            rotuloDeEnum('card.flagType.', place.flagType);
+        card.querySelector('.card-flag-reason').classList.remove('hidden');
+    }
+    // A caixa aparece só quando HÁ texto livre — ela existe pra segurá-lo. Antes
+    // ela vinha junto com o motivo e, com o comentário vazio (15 de 17 reportes
+    // na fila real), sobrava um retângulo rosa gastando ~40px de moldura numa
+    // linha de texto. O malabarismo de flex que existia aqui pra ela não
+    // reivindicar a sobra saiu junto: sem conteúdo, ela simplesmente não existe.
+    if (place.flagComment) {
+        card.querySelector('.card-flag-comment-text').textContent = place.flagComment;
+        card.querySelector('.card-flag-comment').classList.remove('hidden');
     }
 
     const wmeLink = card.querySelector('.card-wme-link');

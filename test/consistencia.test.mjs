@@ -246,14 +246,17 @@ test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => 
   assert.deepEqual(marcadosHtml, padraoCodigo,
     'o que nasce marcado no HTML e o TYPES_PADRAO divergiram');
 
-  // Os dois tipos que o owner pediu pra deixar DESMARCADOS enquanto o card
-  // deles não couber na tela em pedido carregado de informação. Se alguém
-  // remarcar, que seja de propósito — e revisitando este teste junto.
-  for (const t of ['DETAILS_UPDATE', 'FLAGGED_PLACE']) {
-    assert.ok(!marcadosHtml.includes(t),
-      `${t} voltou a nascer marcado — o card dele ainda estoura em tela pequena`);
-    assert.ok(noHtml.includes(t),
-      `${t} sumiu do filtro — era pra estar DESMARCADO, não escondido`);
+  // `DETAILS_UPDATE` e `FLAGGED_PLACE` ficaram DESMARCADOS por um tempo, porque
+  // o card deles não cabia na tela em pedido carregado de informação. Voltaram
+  // a nascer marcados quando a medição autorizou — 117 pedidos reais desses dois
+  // tipos em 1872 renders (4 aparelhos × 4 idiomas) sem um estouro, contra 156
+  // antes. O que este teste trava não é a decisão, que muda com a evidência: é a
+  // PARIDADE acima, entre o que a tela mostra marcado e o que a app vai buscar.
+  //
+  // Nenhum tipo pode sumir do filtro. Esconder é diferente de desmarcar: o
+  // editor não procura o que não vê, e conclui que a fila acabou.
+  for (const t of noCodigo) {
+    assert.ok(noHtml.includes(t), `${t} sumiu do filtro — desmarcar é uma coisa, esconder é outra`);
   }
   assert.ok(marcadosHtml.length > 0, 'nenhum tipo nasce marcado — a app abriria vazia');
 });
