@@ -775,6 +775,68 @@ for (const [nomeF, fw, fh] of FORMATOS_FOTO) {
   await ctx.close();
 }
 
+// ── O mapa é dependência de TERCEIRO: como ele cai? ──────────────────────
+//
+// Os tiles vêm de `www.waze.com` (infra do Google — `server: nginx`,
+// `via: 1.1 google`, sem nada de Cloudflare) e são abertos de propósito:
+// `access-control-allow-origin: *`. Não passam pela nossa Cloudflare, então
+// não custam tráfego nosso — mas TAMBÉM não estão sob nosso controle.
+//
+// Se o Waze mudar o caminho (404) ou bloquear (403), o card não pode quebrar
+// nem ficar mudo. A evidência que o texto NÃO dá — posição relativa de antes e
+// depois, linha do movimento, pontos de entrada, escala — é desenhada por nós
+// e tem que sobreviver ao tile sumir. Verificado: 8 marcadores e a escala
+// continuam, sem erro de JS.
+for (const status of [404, 403]) {
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  // Uma fixture em que o mapa é o PRIMEIRO slide — sem foto, ou com mudança de
+  // posição. A primeira versão pegava "a primeira com mapa", que tinha foto e
+  // nenhuma mudança espacial: ali o mapa é o ÚLTIMO slide e nasce escondido,
+  // então o teste contava zero marcador e acusava a app de perder a evidência.
+  // Instrumento errando antes do código, de novo — a mesma regra do carrossel
+  // (`mapaVemPrimeiro`) tem que valer aqui.
+  const alvo = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro
+    && (!(f.imageUrls || []).length
+        || (f.changes || []).some((c) => c.field === 'geometry' || c.field === 'entryExitPoints')));
+  const m = await page.evaluate(async (pl) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true;
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false);
+    AppState.queue = [pl]; AppState.currentPlace = pl;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 650));
+    const bx = document.querySelector('.card-map');
+    return {
+      visivel: !!bx && !bx.classList.contains('hidden'),
+      marcadores: bx ? bx.querySelectorAll('.card-map-marks .mapa-marca').length : 0,
+      escala: bx ? (bx.querySelector('.card-map-scale')?.textContent || '').trim() : '',
+      // Imagem quebrada não pode ficar no DOM: vira ícone de foto rasgada.
+      tilesOrfaos: bx ? bx.querySelectorAll('.card-map-tiles img').length : 0,
+      toast: [...document.querySelectorAll('#notifyStack .toast')]
+        .map((t) => t.textContent.trim()).find((t) => /Erro/i.test(t)) || null,
+    };
+  }, alvo);
+  const rot = `tile HTTP ${status}`;
+  checa(m.visivel, `${rot}: o mapa sumiu inteiro — a evidência que desenhamos não depende do tile`);
+  checa(m.marcadores > 0, `${rot}: os marcadores sumiram junto com o tile`);
+  checa(!!m.escala, `${rot}: a barra de escala sumiu`);
+  checa(m.tilesOrfaos === 0, `${rot}: ${m.tilesOrfaos} <img> quebrada ficou no DOM`);
+  checa(!m.toast, `${rot}: erro na cara do editor por causa de um tile`, m.toast);
+  checa(erros.length === 0, `${rot}: erro de JS na página`, erros[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -785,5 +847,5 @@ if (falhas) {
 console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card`
   + `, + ${FIXTURES_PAISES.length} pedidos REAIS de ${new Set(FIXTURES_PAISES.map((f) => f._pais)).size} países × ${APARELHOS_PAISES.length} aparelhos × ${LINGUAS.length} idiomas`
   + `, + ${FORMATOS_FOTO.length} formatos de foto × ${APARELHOS_PAISES.length} aparelhos`
-  + `, + legibilidade do mapa × ${LINGUAS.length} idiomas`
+  + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`);
