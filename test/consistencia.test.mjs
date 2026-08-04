@@ -267,3 +267,36 @@ test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => 
   }
   assert.ok(marcadosHtml.length > 0, 'nenhum tipo nasce marcado — a app abriria vazia');
 });
+
+test('países de validação: a lista é fonte única e o CLAUDE.md conta a mesma história', async () => {
+  const P = await import('../tools/paises-validacao.mjs');
+  const DOC = read('CLAUDE.md');
+
+  // Os SEIS fechados pelo owner. O teste não escolhe a lista — ele impede que
+  // ela seja esquecida, que é coisa diferente. Se o owner tirar ou puser país,
+  // este teste é revisitado JUNTO, de propósito: assim a mudança é deliberada
+  // e não o resultado de alguém "limpando" o arquivo.
+  const esperados = ['Brasil', 'França', 'Reino Unido', 'México', 'Espanha', 'Portugal'];
+  assert.deepEqual(P.PAISES_OBRIGATORIOS.map((p) => p.nome), esperados,
+    'a lista de países obrigatórios mudou — se foi decisão do owner, atualize este teste junto');
+
+  // Cada um precisa de id numérico: sem ele o script não consegue chamar o Waze.
+  for (const p of P.PAISES_OBRIGATORIOS) {
+    assert.ok(Number.isInteger(p.id) && p.id > 0, `${p.nome} sem countryId`);
+    assert.ok(p.porque, `${p.nome} sem o motivo de estar na lista — o próximo vai querer saber`);
+  }
+  // Ids repetidos significam que alguém copiou uma linha e esqueceu de trocar
+  // o número: a medição rodaria duas vezes no mesmo país achando que variou.
+  const ids = P.PAISES_VALIDACAO.map((p) => p.id);
+  assert.equal(new Set(ids).size, ids.length, 'dois países com o mesmo countryId');
+
+  // O CLAUDE.md é onde o próximo agente lê antes de medir qualquer coisa. Se a
+  // seção sumir, a instrução volta a depender de alguém lembrar dela — que é
+  // exatamente o que este arquivo existe pra impedir.
+  assert.match(DOC, /SEMPRE valide com estes PAÍSES/,
+    'sumiu a seção de países do CLAUDE.md');
+  for (const p of P.PAISES_OBRIGATORIOS) {
+    assert.ok(DOC.includes(p.nome) && DOC.includes(`| ${p.id} |`),
+      `${p.nome} (id ${p.id}) não está na tabela do CLAUDE.md`);
+  }
+});

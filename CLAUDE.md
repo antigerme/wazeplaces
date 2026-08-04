@@ -101,6 +101,9 @@ wazeplaces/
 ├── .assetsignore            # Exclui server/docs/etc do publish estático dos Workers (static assets)
 ├── package.json             # Scripts: start (node), cf:dev, cf:deploy. Zero dependências.
 ├── tools/
+│   ├── paises-validacao.mjs # FONTE ÚNICA dos países de validação (ver seção 🌍). Script que MEÇA
+│   │                        #   qualquer coisa importa daqui — copiar a lista é como ela volta a ser
+│   │                        #   só o Brasil. Travado em test/consistencia.test.mjs.
 │   ├── smoke-browser.mjs    # Smoke de layout (npm run test:browser): aparelhos × idiomas × tipos de card
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
@@ -157,6 +160,27 @@ comparar **pixel a pixel** (PIL disponível). Para refactor visual, essa é a
 prova — não confie em leitura de código. Use um worktree
 (`git worktree add --detach <dir> origin/main`) pro "antes" em vez de `git stash`.
 CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump de `CACHE_NAME`** (gotcha #17). **Gatilhos: `pull_request` e `push` só em `main`** — push em branch de agente NÃO roda CI. Já me enganei com isso: prometi "aviso o resultado do CI" depois de empurrar dois commits numa branch sem PR, e nenhum run existia pra reportar. Se a validação precisa ser do CI e não só local, **abra o PR** (o owner já autoriza isso na seção de workflow abaixo). A suite de testes usa só `node:test`/`node:assert` (built-in) e cobre cripto/sessão, `categorizeWazeError`, `isUserAllowed`, parsing de cookies e o filtro de domínio.
+
+### 🌍 SEMPRE valide com estes PAÍSES (instrução permanente)
+
+Toda medição de dado ou de layout usa o **máximo de países possível**, e estes **seis nunca faltam** — lista fechada pelo owner:
+
+| país | `countryId` | por quê está aqui |
+|---|---|---|
+| **Brasil** | 30 | é o país do owner e a fila que ele tria |
+| **França** | 73 | acento, nome longo, e o idioma que mais estoura layout (gotcha #25) |
+| **Reino Unido** | 234 | endereço em formato completamente diferente |
+| **México** | 145 | fila grande, espanhol |
+| **Espanha** | 203 | espanhol europeu, muita foto |
+| **Portugal** | 181 | português NÃO-brasileiro — o caso que derruba tabela de tradução |
+
+**A lista mora em `tools/paises-validacao.mjs`, que é a FONTE ÚNICA** — script que meça qualquer coisa importa de lá, nunca copia (mesmo padrão do `waze-jitter.mjs`: instrução que depende da minha memória volta a ser esquecida). `test/consistencia.test.mjs` reprova se a lista mudar sem o teste ser revisitado, se um país entrar sem o motivo escrito, ou se esta seção sumir daqui.
+
+Todos na região `row`. O owner **vê** os PURs de fora mesmo sem poder editar lá; como `buildPlacesFromSearch` (com razão) descarta venue sem permissão, a fixture de teste força `permissions: -1` — maquiagem de FIXTURE, nunca da app.
+
+**Isto não é preciosismo, e o custo de ignorar já foi medido.** A auditoria de layout rodava só com a fila brasileira e dava zero problema. Com 12 países ela achou **26 pedidos que não cabem no Galaxy Fold, 17 deles `FLAGGED_PHOTO`** — tipo do qual a fila do Brasil **não tem NENHUM**. Um recurso inteiro passou por 1872 renders "sem problema" porque o dado que o quebra não existe no país onde eu media. Mesma família do gotcha #25 (a string mais larga quase nunca está no idioma em que você desenvolve), agora valendo pro DADO e não só pra tradução.
+
+**E quando achar falha, meça os dois lados antes de culpar o recurso novo.** Os 26 acima apareceram junto com o mini-mapa e não foram causados por ele: medido contra `origin/main` com os MESMOS cards, 26 de 26 já estavam quebrados. Sem essa comparação eu teria desfeito o recurso errado.
 
 ### 🔑 SEMPRE valide contra o WME real, com os cookies do owner (instrução permanente)
 
