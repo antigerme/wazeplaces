@@ -22,7 +22,9 @@ import {
   cookieHeaderFrom,
   isWazeCookieDomain,
   buildPlacesFromSearch,
+  dispatch,
   purTypeDoUR,
+  podeExcluirFoto,
   PUR_TIPOS,
   SESSION_TTL,
   WAZE_REGIONS,
@@ -876,4 +878,144 @@ test('tipo desconhecido NUNCA some da fila por causa do filtro', () => {
   const { places } = buildPlacesFromSearch(rd, { filterTypes: ['NEW_PLACE'], unreadOnly: true });
   assert.equal(places.length, 1, 'PUR de tipo desconhecido sumiu da fila');
   assert.equal(places[0].purType, 'UNKNOWN', 'o tipo cru deixou de ser exposto');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Excluir foto (a lixeira do lightbox)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('podeExcluirFoto: portão é L6 + AM, mais restrito que o gate de login', () => {
+  // Rank CRU do Waze (0-indexed): 5 = o L6 que o editor vê.
+  assert.equal(podeExcluirFoto({ rank: 5, isAreaManager: true }), true);
+  assert.equal(podeExcluirFoto({ isStaff: true, rank: 0 }), true);
+  // Quem ENTRA na app mas não pode excluir — é justamente o que separa os dois
+  // portões. L3 AM passa no login (MIN_RANK_WAZE=2) e não pode excluir.
+  assert.equal(podeExcluirFoto({ rank: 2, isAreaManager: true }), false);
+  assert.equal(podeExcluirFoto({ rank: 4, isAreaManager: true }), false);
+  // L6 sem ser Area Manager também não: são as DUAS condições, não uma.
+  assert.equal(podeExcluirFoto({ rank: 5, isAreaManager: false }), false);
+  assert.equal(podeExcluirFoto(null), false);
+  assert.equal(podeExcluirFoto({}), false);
+});
+
+test('approvedImageIds: só a foto aprovada é excluível', () => {
+  // Dado com a forma REAL medida no Waze: a foto pendente do pedido tem
+  // `approved: false`, as antigas têm `true`. Excluir a pendente pelo venue
+  // apagaria a imagem e deixaria o pedido órfão — por isso ela fica de fora.
+  const rd = {
+    users: { objects: [{ id: 7, userName: 'quemquer', rank: 1 }] },
+    venues: {
+      objects: [{
+        id: 'v1',
+        name: 'Vista Chinesa',
+        permissions: -1,
+        images: [
+          { id: 'nova-pendente', approved: false, creatorUserId: 7, date: 1 },
+          { id: 'velha-aprovada', approved: true, creatorUserId: 7, date: 2 },
+          { id: 'sem-o-campo', creatorUserId: 7, date: 3 },
+        ],
+        venueUpdateRequests: [{ id: 'nova-pendente', type: 'IMAGE', isRead: false }],
+      }],
+    },
+  };
+  const { places } = buildPlacesFromSearch(rd, { unreadOnly: true });
+  assert.equal(places.length, 1);
+  const p = places[0];
+  assert.equal(p.imageUrls.length, 3, 'o carrossel continua mostrando TODAS as fotos');
+  assert.deepEqual(p.approvedImageIds, ['velha-aprovada'],
+    'só entra quem é approved===true; pendente e campo ausente ficam de fora');
+  // O id excluível tem que casar por substring com a URL — é assim que o
+  // frontend liga uma coisa na outra, sem um segundo campo pra desalinhar.
+  const url = p.imageUrls.find((u) => u.indexOf('velha-aprovada') !== -1);
+  assert.ok(url, 'o id aprovado não aparece em nenhuma URL do carrossel');
+});
+
+test('excluir-foto: relê o local e monta a escrita como o WME (URLs medidas contra o Waze real)', async () => {
+  // Este teste nasceu de um bug que só o Waze de verdade acusou: HTTP 406.
+  // `wazeFeaturesEndpoint` JÁ vem com `?ignoreWarnings=false&language=pt-BR`
+  // grudado, então acrescentar `?bbox=...` gerava um SEGUNDO `?` e o
+  // `language` virava `pt-BR?bbox=...`. Sondei 5 variantes de header e de
+  // parâmetro antes de olhar a URL — daí o teste travar a URL, que é onde o
+  // defeito estava, e não os headers, que nunca tiveram culpa.
+  const store = memStore();
+  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const token = await sessions.createSession([
+    NETSCAPE('.waze.com', '_csrf_token', 'abc123'),
+    NETSCAPE('.waze.com', '_web_session', 'xyz'),
+  ].join('\n'));
+
+  const VID = 'v-1';
+  const FOTOS = [
+    { id: 'alvo', approved: true, creatorUserId: 1, date: 10, scanned: true, street: false, location: { type: 'Point', coordinates: [1, 2] } },
+    { id: 'fica', approved: true, creatorUserId: 2, date: 20, scanned: true, street: false, location: { type: 'Point', coordinates: [3, 4] } },
+  ];
+  const chamadas = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    chamadas.push({ url: u, metodo: init?.method || 'GET' });
+    const j = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (/\/Session/.test(u)) return j({ userName: 'a', rank: 5, isAreaManager: true, isStaff: false });
+    if (init?.method === 'POST') {
+      const enviadas = JSON.parse(init.body).actions._subActions[0].attributes.images;
+      return j({ venues: { [VID]: { id: VID, images: enviadas } }, status: 0, synced: true });
+    }
+    return j({ venues: { objects: [{ id: VID, images: FOTOS, permissions: -1 }] }, users: { objects: [] } });
+  };
+  try {
+    const r = await dispatch('excluir-foto', { sessionToken: token, region: 'row', venueID: VID, imageID: 'alvo', lat: -12.8, lon: -38.3 }, { sessions });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.restantes, ['fica']);
+
+    const get = chamadas.find((c) => c.metodo === 'GET' && /Features/.test(c.url));
+    const post = chamadas.find((c) => c.metodo === 'POST' && /Features/.test(c.url));
+    assert.ok(get, 'não releu o local antes de gravar');
+    assert.equal((get.url.match(/\?/g) || []).length, 1, 'a URL da releitura tem mais de um "?" — foi assim que veio o 406');
+    assert.ok(/[?&]bbox=/.test(get.url), 'a releitura não mandou bbox');
+    // Sem `language` cravado: medido contra o Waze real, ele não muda um byte
+    // da resposta, e pt-BR na URL de um editor francês documenta errado de
+    // onde a chamada veio (o mesmo defeito do antigo Referer com /pt-BR/).
+    assert.ok(!/[?&]language=/.test(get.url), 'voltou o language cravado na releitura — ele não muda nada e mente sobre o idioma de quem chamou');
+    // Ordem importa: reler DEPOIS de gravar não protegeria nada.
+    assert.ok(chamadas.indexOf(get) < chamadas.indexOf(post), 'gravou antes de reler');
+    assert.equal(post.url, 'https://www.waze.com/row-Descartes/app/Features?ignoreWarnings=false&language=pt-BR');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('excluir-foto: escreve a lista que veio da RELEITURA, não a que o celular tinha', async () => {
+  // O caso que a releitura existe pra evitar: entre abrir a foto e tocar na
+  // lixeira, outro editor subiu uma foto. Mandar a lista do celular a apagaria
+  // em silêncio — o Waze não faz merge, ele SUBSTITUI o array inteiro.
+  const store = memStore();
+  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const token = await sessions.createSession([
+    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
+  ].join('\n'));
+  const VID = 'v-2';
+  const original = globalThis.fetch;
+  let enviadas = null;
+  globalThis.fetch = async (url, init) => {
+    const j = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (/\/Session/.test(String(url))) return j({ rank: 5, isAreaManager: true });
+    if (init?.method === 'POST') {
+      enviadas = JSON.parse(init.body).actions._subActions[0].attributes.images;
+      return j({ venues: { [VID]: { id: VID, images: enviadas } }, status: 0, synced: true });
+    }
+    // O Waze AGORA tem uma foto a mais do que o celular viu.
+    return j({ venues: { objects: [{ id: VID, permissions: -1, images: [
+      { id: 'alvo', approved: true }, { id: 'antiga', approved: true }, { id: 'recem-chegada', approved: true },
+    ] }] }, users: { objects: [] } });
+  };
+  try {
+    const r = await dispatch('excluir-foto', { sessionToken: token, region: 'row', venueID: VID, imageID: 'alvo', lat: 0, lon: 0 }, { sessions });
+    assert.equal(r.status, 200);
+    const ids = enviadas.map((i) => i.id);
+    assert.ok(ids.includes('recem-chegada'), 'a foto que chegou no meio do caminho foi apagada junto');
+    assert.ok(!ids.includes('alvo'), 'a foto alvo continuou na lista');
+    assert.deepEqual(ids, ['antiga', 'recem-chegada']);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

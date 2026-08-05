@@ -240,7 +240,18 @@ function initApp() {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'deletePhotoModal'];
+
+// Modal que abre DE DENTRO do lightbox de foto, e portanto fica acima dele.
+// Voltar e Esc precisam saber disso: a ordem padrão fecha o lightbox primeiro
+// (ele é z-[65] contra z-[60] dos modais normais) e deixaria o diálogo órfão.
+const MODAIS_ACIMA_DO_LIGHTBOX = ['deletePhotoModal'];
+function modalAcimaDoLightboxAberto() {
+    return MODAIS_ACIMA_DO_LIGHTBOX.find(id => {
+        const m = document.getElementById(id);
+        return m && !m.classList.contains('hidden');
+    }) || null;
+}
 let lastFocusedBeforeModal = null;
 
 // ── O VOLTAR do aparelho fecha o que está por cima ────────────────────────
@@ -287,6 +298,15 @@ window.addEventListener('popstate', () => {
     if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) {
         CamadaVoltar.profundidade = Math.max(0, CamadaVoltar.profundidade - 1);
         MapaLightbox.close(true);
+        return;
+    }
+    // ...e a confirmação de excluir foto está acima do PRÓPRIO lightbox: ela é
+    // aberta de dentro dele. Sem esta checagem o voltar fecharia a foto por
+    // baixo e deixaria a pergunta na tela sem a foto que ela cita.
+    const acima = modalAcimaDoLightboxAberto();
+    if (acima) {
+        CamadaVoltar.profundidade = Math.max(0, CamadaVoltar.profundidade - 1);
+        closeModal(acima, { viaHistorico: true });
         return;
     }
     // Veio do usuário. Fecha a camada de cima — o lightbox está acima dos modais
@@ -344,6 +364,12 @@ const LIMPEZA_AO_FECHAR = {
         const campo = document.getElementById('pairCodeInput');
         if (campo) campo.value = '';
         document.getElementById('pairEnterError')?.classList.add('hidden');
+    },
+    deletePhotoModal() {
+        // Alvo é dado de uma decisão em curso: cancelar por Esc ou pelo scrim
+        // tem que apagá-lo igual ao botão Cancelar, senão ele sobrevive e o
+        // próximo "Excluir" agiria sobre a foto errada.
+        fotoParaExcluir = null;
     },
 };
 
@@ -688,6 +714,9 @@ function setupModalListeners() {
     $('batchReadBtn')?.addEventListener('click', openBatchReadConfirm);
     $('confirmBatchRead')?.addEventListener('click', handleBatchMarkRead);
     $('cancelBatchRead')?.addEventListener('click', () => closeModal('batchReadModal'));
+    $('lightboxDelete')?.addEventListener('click', pedirExclusaoDaFoto);
+    $('confirmDeletePhoto')?.addEventListener('click', confirmarExclusaoDaFoto);
+    $('cancelDeletePhoto')?.addEventListener('click', () => closeModal('deletePhotoModal'));
 
     // Pareamento
     $('pairCreateBtn')?.addEventListener('click', abrirPareamento);
@@ -774,8 +803,12 @@ const Lightbox = {
     isOpen() {
         return !document.getElementById('imageLightbox').classList.contains('hidden');
     },
-    open(urls, startIdx, newImageIdx, placeName, eDenuncia) {
+    open(urls, startIdx, newImageIdx, placeName, eDenuncia, place) {
         if (!urls || urls.length === 0) return;
+        // O place vem EXPLÍCITO em vez de sair do AppState: a lixeira grava no
+        // Waze, e ler o alvo de uma variável global é como se apaga a foto do
+        // card errado quando a fila anda embaixo de um lightbox aberto.
+        this.place = place || null;
         this.urls = urls;
         this.idx = Math.max(0, Math.min(startIdx || 0, urls.length - 1));
         this.newIdx = (newImageIdx !== undefined && newImageIdx !== null) ? newImageIdx : -1;
@@ -867,8 +900,58 @@ const Lightbox = {
         badge.setAttribute('data-i18n-title', this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
         badge.title = t(this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
         badge.classList.toggle('hidden', this.idx !== this.newIdx);
+        const del = document.getElementById('lightboxDelete');
+        if (del) del.classList.toggle('hidden', !this.idFotoAtual());
+    },
+    // Devolve o id da foto aberta SÓ se ela puder ser excluída — as duas
+    // perguntas numa função só, de propósito: separadas, uma delas acaba
+    // esquecida em algum caminho novo e a lixeira aparece onde não deve.
+    //
+    // Excluível é a foto JÁ APROVADA (o core manda `approvedImageIds`). A
+    // pendente — a do ✨ — ainda não está no mapa: tirá-la por aqui apagaria a
+    // imagem e deixaria o pedido órfão, sem ninguém tratar. O caminho dela é o
+    // ✕/✓ do card.
+    idFotoAtual() {
+        const p = this.place;
+        if (!p || !p.venueID || !Number.isFinite(Number(p.lat)) || !Number.isFinite(Number(p.lon))) return null;
+        if (!podeExcluirFotoAqui()) return null;
+        const url = this.urls[this.idx] || '';
+        const ids = Array.isArray(p.approvedImageIds) ? p.approvedImageIds : [];
+        return ids.find(id => id && url.indexOf(id) !== -1) || null;
+    },
+    // Tira a foto da lista aberta depois que o Waze confirmou. Sem fila e sem
+    // recarregar: quem está olhando quer ver a foto sumir.
+    removerFoto(id) {
+        const p = this.place;
+        const fora = (u) => u.indexOf(id) === -1;
+        if (p) {
+            if (Array.isArray(p.imageUrls)) p.imageUrls = p.imageUrls.filter(fora);
+            if (Array.isArray(p.approvedImageIds)) p.approvedImageIds = p.approvedImageIds.filter(x => x !== id);
+            p.imageUrl = (p.imageUrls && p.imageUrls[0]) || null;
+        }
+        const antes = this.idx;
+        this.urls = this.urls.filter(fora);
+        if (!this.urls.length) { this.close(); return; }
+        // O ✨ é apontado por ÍNDICE; tirar uma foto antes dele desloca tudo.
+        if (this.newIdx > antes) this.newIdx -= 1;
+        else if (this.newIdx === antes) this.newIdx = -1;
+        this.idx = Math.min(antes, this.urls.length - 1);
+        this._render();
     }
 };
+
+// Portão de PRODUTO no aparelho: L6 + Area Manager (ou staff). É espelho do
+// `podeExcluirFoto` do core — e é o core que MANDA, este aqui só decide se
+// desenha o botão. Gate só no cliente seria enfeite: quem abrisse o DevTools
+// chamaria o endpoint direto (gotcha #16).
+function podeExcluirFotoAqui() {
+    const p = AppState.profile;
+    if (!p) return false;
+    if (p.isStaff) return true;
+    // Rank CRU do Waze, 0-indexed: 5 aqui é o L6 que o editor vê (gotcha #15).
+    const rank = Number.isInteger(p.rank) ? p.rank : parseInt(p.rank, 10);
+    return rank >= 5 && !!p.isAreaManager;
+}
 
 // Gestos do mapa ampliado. Ponteiros unificados (mouse e dedo pelo mesmo
 // caminho) porque o mapa é o mesmo nos dois; o que muda é só quantos pontos
@@ -1071,8 +1154,46 @@ function setupLightbox() {
     }, { passive: false });
 }
 
-function openLightbox(urls, startIdx, newImageIdx, placeName, eDenuncia) {
-    Lightbox.open(urls, startIdx, newImageIdx, placeName, eDenuncia);
+function openLightbox(urls, startIdx, newImageIdx, placeName, eDenuncia, place) {
+    Lightbox.open(urls, startIdx, newImageIdx, placeName, eDenuncia, place);
+}
+
+// ── Excluir a foto aberta ─────────────────────────────────────────────────
+// Guardo o alvo aqui, e não no dataset do botão, porque o modal fecha por três
+// caminhos (botão, Esc, scrim) e a limpeza mora num lugar só (LIMPEZA_AO_FECHAR).
+let fotoParaExcluir = null;
+
+function pedirExclusaoDaFoto() {
+    const id = Lightbox.idFotoAtual();
+    if (!id) return;
+    fotoParaExcluir = { id, place: Lightbox.place };
+    openModal('deletePhotoModal');
+}
+
+async function confirmarExclusaoDaFoto() {
+    const alvo = fotoParaExcluir;
+    closeModal('deletePhotoModal');
+    if (!alvo) return;
+    const btn = document.getElementById('lightboxDelete');
+    if (btn) btn.disabled = true;
+    try {
+        const r = await API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon);
+        if (r && r.success) {
+            Lightbox.removerFoto(alvo.id);
+            // O card por baixo mostra as mesmas fotos: sem re-render ele ficaria
+            // com o carrossel contando uma foto que já não existe.
+            if (AppState.currentPlace === alvo.place) showCurrentPlace();
+            showToast(t(r.jaExcluida ? 'toast.photoAlreadyGone' : 'toast.photoDeleted'), r.jaExcluida ? 'info' : 'success');
+        } else if (r && r.errorCategory === 'unauthorized') {
+            handleUnauthorized();
+        } else {
+            showToast(msgDoServidor(r) || t('toast.photoDeleteFailed'), 'error');
+        }
+    } catch (e) {
+        showToast(t('toast.photoDeleteFailed'), 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 function populateCountrySelect() {
@@ -1262,6 +1383,13 @@ function handleKeyDown(e) {
         else if (e.key === 'ArrowLeft') { e.preventDefault(); MapaLightbox.arrastar(80, 0); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); MapaLightbox.arrastar(-80, 0); }
         else if (e.key === 'ArrowUp') { e.preventDefault(); MapaLightbox.arrastar(0, 80); }
+        return;
+    }
+    // A confirmação de excluir foto abre DE DENTRO do lightbox, então está
+    // acima dele — e precisa ser tratada antes, senão o Esc fecharia a foto e
+    // deixaria o diálogo órfão perguntando sobre uma foto que já não se vê.
+    if (modalAcimaDoLightboxAberto()) {
+        if (e.key === 'Escape') { e.preventDefault(); closeModal(modalAcimaDoLightboxAberto()); }
         return;
     }
     if (Lightbox.isOpen()) {
@@ -2069,9 +2197,37 @@ function renderCurrentCard() {
 // As cores são as MESMAS do diff — verde entra, vermelho sai. O card já ensina
 // essa gramática na caixa de mudanças; inventar outra aqui obrigaria o editor a
 // aprender duas.
-function renderMapa(card, place) {
+// A caixa do mapa cresceu depois do enquadramento? Refaz.
+//
+// Não é caso raro: o card é flex e assenta depois do primeiro render, então a
+// medida do momento do render quase sempre subestima. Girar o aparelho e mudar
+// a fonte do sistema fazem o mesmo.
+//
+// Duas regras que vêm do gotcha #35 e não são opcionais: o callback do
+// ResizeObserver só AGENDA (a escrita vai no quadro seguinte, fora do ciclo de
+// entrega), e só refaz quando a caixa CRESCEU além do que o enquadramento
+// cobre — encolher não abre buraco, e refazer à toa é custo por quadro pra
+// sempre. Sem essas duas, isto vira o "ResizeObserver loop completed with
+// undelivered notifications" na cara do editor.
+function vigiarCaixaDoMapa(box, card, place) {
+    if (box._roMapa) return;
+    let agendado = 0;
+    box._roMapa = new ResizeObserver(() => {
+        if (agendado) return;
+        agendado = requestAnimationFrame(() => {
+            agendado = 0;
+            const w = box.clientWidth, h = box.clientHeight;
+            if (!w || !h) return;
+            if (w <= (+box.dataset.mapaW || 0) + 0.5 && h <= (+box.dataset.mapaH || 0) + 0.5) return;
+            try { renderMapa(card, place, true); } catch (e) { /* mapa nunca derruba o card */ }
+        });
+    });
+    box._roMapa.observe(box);
+}
+
+function renderMapa(card, place, refazendo) {
     const box = card.querySelector('.card-map');
-    if (!box || !place.mapa || box.dataset.pronto === '1') return !!(box && place.mapa);
+    if (!box || !place.mapa || (box.dataset.pronto === '1' && !refazendo)) return !!(box && place.mapa);
     const m = place.mapa;
 
     // Ordem estável: é ela que casa cada pixel devolvido com o seu marcador.
@@ -2085,10 +2241,22 @@ function renderMapa(card, place) {
             rot: 'card.map.entrada.' + e.estado,
         });
     }
+    // A caixa é medida AGORA, e o enquadramento vale só pra este tamanho: os
+    // tiles são enumerados pra cobrir exatamente `larguraPx × alturaPx`. Se a
+    // caixa crescer depois — e ela cresce, porque o card é flex e assenta
+    // depois do primeiro render —, a faixa nova fica SEM tile. Medido: caixa
+    // de 359×329 recebendo o enquadramento de uma caixa mais baixa, um tile só
+    // em `top:-248px` cobrindo até y=264, e 65px de nada embaixo. Guardar as
+    // dimensões usadas é o que deixa o observer lá embaixo decidir se refaz.
+    const larguraCaixa = box.clientWidth || 400;
+    const alturaCaixa = box.clientHeight || 240;
     const r = window.mapaMontar
-        ? mapaMontar(pontos.map((p) => p.ll), box.clientWidth || 400, box.clientHeight || 240, API.getRegion())
+        ? mapaMontar(pontos.map((p) => p.ll), larguraCaixa, alturaCaixa, API.getRegion())
         : null;
     if (!r) return false;
+    box.dataset.mapaW = String(larguraCaixa);
+    box.dataset.mapaH = String(alturaCaixa);
+    vigiarCaixaDoMapa(box, card, place);
 
     const tiles = box.querySelector('.card-map-tiles');
     const marks = box.querySelector('.card-map-marks');
@@ -2099,7 +2267,7 @@ function renderMapa(card, place) {
         im.src = t.url;
         im.alt = '';
         im.decoding = 'async';
-        im.className = 'absolute';
+        im.className = 'absolute mapa-tile';
         im.style.cssText = `left:${t.left}px;top:${t.top}px;width:${r.tamanho}px;height:${r.tamanho}px`;
         // Tile que não vem não pode deixar um alt quebrado no meio do mapa.
         im.onerror = () => im.remove();
@@ -2258,7 +2426,7 @@ const MapaLightbox = {
             if (!im) {
                 im = new Image();
                 im.src = t.url; im.alt = ''; im.decoding = 'async';
-                im.className = 'absolute';
+                im.className = 'absolute mapa-tile';
                 im.style.width = im.style.height = g.tamanho + 'px';
                 im.onerror = () => { im.remove(); this._tiles.delete(t.chave); };
                 this._tiles.set(t.chave, im);
@@ -2467,7 +2635,7 @@ function renderCardImages(card, place) {
     img.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        openLightbox(urls, currentImgIdx, newImageIdx, place.name, eDenuncia);
+        openLightbox(urls, currentImgIdx, newImageIdx, place.name, eDenuncia, place);
     });
 
     if (slides.length > 1) {

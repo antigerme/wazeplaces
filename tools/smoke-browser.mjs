@@ -941,6 +941,166 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── Lixeira do lightbox: portão, alvo e a camada da confirmação ──────────
+//
+// É o único caminho da app que ESCREVE no mapa em si, então a rede fica aqui e
+// não só no `node --test`: quem some é o botão, e botão que aparece pra quem
+// não devia só se vê renderizando. As três coisas que já mordem em app assim:
+// portão furado, alvo de toque abaixo de 44px, e o diálogo que abre DE DENTRO
+// do lightbox sendo fechado por baixo pelo Esc.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  await ctx.route('**/api/excluir-foto', (r) => r.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }),
+  }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+
+  const IDS = ['pendente-01', 'aprovada-02'];
+  const PLACE = {
+    venueID: 'v-smoke', updateRequestID: 'pendente-01', name: 'Local com foto lixo',
+    categories: ['PARK'], address: 'Rua X, 1', updateTypeKey: 'IMAGE', purType: 'NEW_PHOTO',
+    createdBy: 'fulano', creatorRank: 0, lat: -12.9, lon: -38.3, changes: [], mapa: null,
+    imageUrls: IDS.map((id) => `${foto}#${id}`),
+    approvedImageIds: ['aprovada-02'],
+  };
+  const montar = (perfil) => page.evaluate(async ({ pl, perfil }) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true;
+    API.setSession('token-smoke');   // sem token o API._post sai antes da rede
+    AppState.profile = perfil;
+    AppState.stats = { read: 0, rejected: 0, skipped: 0 }; AppState.serverTotal = 1;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+    AppState.queue = [JSON.parse(JSON.stringify(pl))];
+    AppState.currentPlace = AppState.queue[0];
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 350));
+  }, { pl: PLACE, perfil });
+  // Abrir o lightbox é PRÉ-CONDIÇÃO: sem ele tudo está escondido e todo teste
+  // de "não aparece" passa pelo motivo errado. Já aconteceu com este harness.
+  const abrir = async () => {
+    await page.evaluate(() => document.querySelector('.card-image')?.click());
+    await page.waitForTimeout(300);
+    return page.evaluate(() => !document.getElementById('imageLightbox').classList.contains('hidden'));
+  };
+  const escondido = (id) => page.evaluate((i) => document.getElementById(i).classList.contains('hidden'), id);
+
+  await montar({ userName: 'a', rank: 5, isAreaManager: true, isStaff: false });
+  checa(await abrir(), 'lixeira: o lightbox não abriu — o resto mediria o nada');
+  checa(await escondido('lightboxDelete'), 'lixeira: apareceu na foto PENDENTE, que sai pelo ✕/✓ do card');
+  await page.click('#lightboxNext'); await page.waitForTimeout(250);
+  checa(!(await escondido('lightboxDelete')), 'lixeira: não apareceu na foto aprovada');
+  const caixa = await page.evaluate(() => {
+    const r = document.getElementById('lightboxDelete').getBoundingClientRect();
+    const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { w: Math.round(r.width), h: Math.round(r.height), recebe: !!(el && el.closest('#lightboxDelete')) };
+  });
+  checa(caixa.w >= 44 && caixa.h >= 44, `lixeira: alvo de ${caixa.w}×${caixa.h}px, abaixo de 44`);
+  checa(caixa.recebe, 'lixeira: o toque no centro dela chega em outro elemento');
+  await page.click('#lightboxDelete'); await page.waitForTimeout(300);
+  checa(!(await escondido('deletePhotoModal')), 'lixeira: a confirmação não abriu');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+  checa(await escondido('deletePhotoModal'), 'lixeira: Esc não fechou a confirmação');
+  checa(!(await escondido('imageLightbox')), 'lixeira: o Esc fechou a FOTO por baixo e deixou a pergunta órfã');
+
+  for (const [nome, perfil] of [
+    ['L3 AM', { userName: 'b', rank: 2, isAreaManager: true, isStaff: false }],
+    ['L6 sem AM', { userName: 'c', rank: 5, isAreaManager: false, isStaff: false }],
+  ]) {
+    await page.evaluate(() => Lightbox.close());
+    await montar(perfil);
+    checa(await abrir(), `lixeira/${nome}: o lightbox não abriu`);
+    await page.click('#lightboxNext'); await page.waitForTimeout(250);
+    checa(await escondido('lightboxDelete'), `lixeira: ${nome} enxerga a lixeira e não devia`);
+  }
+  checa(erros.length === 0, 'lixeira: erro de JS', erros[0]);
+  await ctx.close();
+}
+
+// ── O tile é DESENHADO no tamanho que o código pede? ─────────────────────
+//
+// A faixa vertical vazia que o owner viu no celular (gotcha #58): o preflight
+// do Tailwind (`img,video{max-width:100%}`) cortava o tile de 512px pra
+// largura da caixa, e como as posições continuam de 512 em 512 sobrava 119px
+// de vão por coluna. Três instrumentos meus não viram, e o motivo de cada um
+// está no gotcha — aqui ficam as duas defesas que faltavam:
+//
+//   · o stub é DIFERENTE por x/y (o antigo era o mesmo cinza pra todos, e com
+//     isso tile cortado fica idêntico a tile certo);
+//   · mede-se `getBoundingClientRect()` (o que a TELA deu), não `style.width`
+//     (o que eu PEDI). Era essa troca que deixava a auditoria cega.
+{
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/**', (r) => {
+    const m = r.request().url().match(/live\/base\/(\d+)\/(\d+)\/(\d+)\//) || [];
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body:
+      `<svg xmlns='http://www.w3.org/2000/svg' width='512' height='512'>`
+      + `<rect width='512' height='512' fill='${((+m[2] + +m[3]) % 2) ? '#dbeafe' : '#fef3c7'}'/>`
+      + `<text x='256' y='270' font-size='40' text-anchor='middle'>${m[2]}/${m[3]}</text></svg>` });
+  });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const alvo = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro
+    && (!(f.imageUrls || []).length
+        || (f.changes || []).some((c) => c.field === 'geometry' || c.field === 'entryExitPoints')));
+  await page.evaluate(async (pl) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true;
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+    AppState.queue = [pl]; AppState.currentPlace = pl;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 500));
+  }, alvo);
+
+  const medir = (sel) => page.evaluate((s) => [...document.querySelectorAll(s + ' img')].map((im) => {
+    const r = im.getBoundingClientRect();
+    return { pedido: parseFloat(im.style.width), renW: +r.width.toFixed(1), renH: +r.height.toFixed(1),
+             left: parseFloat(im.style.left), top: parseFloat(im.style.top), nat: im.naturalWidth };
+  }), sel);
+  const conferir = (nome, T, cx) => {
+    if (!T.length) return checa(false, `${nome}: nenhum tile no DOM`);
+    for (const t of T) {
+      if (Math.abs(t.renW - t.pedido) > 0.5 || Math.abs(t.renH - t.pedido) > 0.5) {
+        return checa(false, `${nome}: tile desenhado ${t.renW}×${t.renH} onde o código pede ${t.pedido} — vão entre colunas`);
+      }
+    }
+    checa(T.every((t) => t.nat > 0), `${nome}: tile no DOM que não renderizou`);
+    // Cobertura: nenhum ponto da caixa pode ficar sem tile por baixo.
+    let buraco = null;
+    for (let X = 4; X < cx.w && !buraco; X += 12) for (let Y = 4; Y < cx.h; Y += 12) {
+      if (!T.some((t) => X >= t.left && X < t.left + t.pedido && Y >= t.top && Y < t.top + t.pedido)) { buraco = `${Math.round(X)},${Math.round(Y)}`; break; }
+    }
+    checa(!buraco, `${nome}: buraco sem mapa em (${buraco})`);
+  };
+  const caixaDe = (sel) => page.evaluate((s) => { const e = document.querySelector(s); const r = e.getBoundingClientRect(); return { w: r.width, h: r.height }; }, sel);
+
+  conferir('mapa do card', await medir('.card-map'), await caixaDe('.card-map'));
+  await page.click('.card-map'); await page.waitForTimeout(700);
+  conferir('mapa ampliado', await medir('#mapaLbTiles'), await caixaDe('#mapaLbTiles'));
+  await page.mouse.move(200, 500); await page.mouse.down(); await page.mouse.move(60, 260, { steps: 10 }); await page.mouse.up();
+  await page.waitForTimeout(600);
+  conferir('ampliado após arrastar', await medir('#mapaLbTiles'), await caixaDe('#mapaLbTiles'));
+  await page.click('#mapaLbMenos'); await page.waitForTimeout(600);
+  conferir('ampliado após zoom −', await medir('#mapaLbTiles'), await caixaDe('#mapaLbTiles'));
+  checa(erros.length === 0, 'tamanho do tile: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -953,4 +1113,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + ${FORMATOS_FOTO.length} formatos de foto × ${APARELHOS_PAISES.length} aparelhos`
   + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403)`
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, Esc e ✕)`
-  + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`);
+  + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
+  + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e camada da confirmação)`
+  + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`);

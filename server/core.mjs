@@ -55,6 +55,13 @@ const MIN_RANK_WAZE = 2; // display L3+ (Waze é 0-indexed)
 const wazeIssuesEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Search/List';
 const wazeMarkReadEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Read';
 const wazeFeaturesEndpoint = (r) => WAZE_FEATURES_REGIONS[r] || WAZE_FEATURES_REGIONS.row;
+// A constante acima JÁ vem com `?ignoreWarnings=false&language=pt-BR` grudado.
+// Quem precisa acrescentar parâmetro (a releitura por bbox) tem que partir da
+// base SEM query — concatenar outro `?` faz o `language` virar
+// `pt-BR?bbox=...` e o Waze responde 406. Medido: a mesma consulta com a URL
+// certa devolve 200 e 11 locais, e nenhum header ou parâmetro extra tinha a
+// ver com o erro (sondei 5 variantes antes de olhar a URL).
+const wazeFeaturesBase = (r) => wazeFeaturesEndpoint(r).split('?')[0];
 // Endereço oficial do WME, sem segmento de idioma (decisão do owner: sempre a
 // URL canônica; o Waze redireciona conforme o idioma de quem abre, se quiser).
 const WME_EDITOR_URL = 'https://www.waze.com/editor';
@@ -1229,8 +1236,16 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     const venueAddress = addressParts.length ? addressParts.join(', ') : null;
 
     const allImageUrls = [];
+    // Só a foto JÁ APROVADA pode ser excluída pela lixeira do lightbox. A
+    // pendente (a do ✨) ainda não está no mapa e o caminho dela é o ✕/✓ do
+    // card — excluí-la pelo venue tiraria a imagem e deixaria o pedido órfão.
+    // A lista vai por ID e não por índice: o carrossel reordena, o índice não
+    // identifica nada, e apagar por posição é como se apaga a foto errada.
+    const approvedImageIds = [];
     for (const img of venue.images || []) {
-      if (img && img.id) allImageUrls.push(WAZE_IMAGE_BASE + img.id);
+      if (!img || !img.id) continue;
+      allImageUrls.push(WAZE_IMAGE_BASE + img.id);
+      if (img.approved === true) approvedImageIds.push(img.id);
     }
 
     for (const ur of venue.venueUpdateRequests) {
@@ -1406,6 +1421,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         source,
         imageUrl: allImageUrls.length ? allImageUrls[0] : null,
         imageUrls: allImageUrls,
+        approvedImageIds,
         changes,
         brand,
         brandKnown,
@@ -1485,6 +1501,165 @@ async function handleValidarPlace(data, { sessions }) {
     status: cat.category === 'already_processed' || cat.category === 'not_found' ? 200 : 500,
     body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Excluir uma foto do local (a lixeira do lightbox)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// É a PRIMEIRA escrita da app no mapa em si. Todas as outras (rejeitar, marcar
+// lido) mexem no PEDIDO; esta mexe no LOCAL. Daí o cuidado extra.
+//
+// O contrato do Waze não tem "apague a foto X" — só "a lista de fotos agora é
+// esta" (UPDATE_OBJECT com o array `images` inteiro), sem campo de revisão nem
+// If-Match. Medido no HAR do owner: ele tinha 3 fotos, o POST mandou 2, e a
+// terceira sumiu por AUSÊNCIA. Quem escreve por último ganha.
+//
+// Consequência: mandar a lista que o CELULAR tinha apagaria em silêncio a foto
+// que outro editor subiu enquanto a pessoa decidia. Por isso RELEMOS o local
+// (instrução do owner) e montamos a lista a partir do que o Waze diz AGORA,
+// tirando só o id alvo. Isso é seguro nos três casos:
+//   · outro somou uma foto  → ela vem na releitura e é preservada;
+//   · outro tirou outra foto → ela já não vem, e continua fora;
+//   · outro tirou ESTA foto  → o id não está lá, e devolvemos "já tratado".
+// Como a exclusão é por ID e não por índice, o carrossel ter reordenado também
+// não engana ninguém.
+
+// Caixa mínima em volta do local pra reler. O WME usa bbox (não há leitura por
+// id), e a dele mede ~0,0007° — este 0,0009° é a mesma ordem de grandeza, com
+// folga pro centroide de um polígono não cair fora da própria caixa.
+const RELEITURA_BBOX_GRAUS = 0.0009;
+// Portão de PRODUTO pedido pelo owner: excluir foto é só pra L6 + Area
+// Manager. É mais restrito que o gate de login (L3+ AM, MIN_RANK_WAZE) porque
+// aqui não se trata pedido: apaga-se conteúdo que já está no mapa. Rank CRU do
+// Waze, 0-indexed — 5 aqui é o L6 que o editor vê (gotcha #15).
+const MIN_RANK_EXCLUIR_FOTO = 5;
+
+export function podeExcluirFoto(profile) {
+  if (!profile || typeof profile !== 'object') return false;
+  if (profile.isStaff) return true;
+  const rank = Number.isInteger(profile.rank) ? profile.rank : parseInt(profile.rank, 10);
+  return rank >= MIN_RANK_EXCLUIR_FOTO && !!profile.isAreaManager;
+}
+
+async function handleExcluirFoto(data, { sessions }) {
+  const cookies = await resolveCookies(data, sessions);
+  const region = requireRegion(data);
+  const venueID = data.venueID;
+  const imageID = data.imageID;
+  if (!venueID || !imageID) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  const lat = Number(data.lat);
+  const lon = Number(data.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  }
+
+  const { cookieHeader, csrf } = prepareAuth(cookies);
+
+  // 1) Portão no SERVIDOR. No cliente ele seria só cosmético — quem abrisse o
+  //    DevTools chamaria o endpoint direto (mesmo raciocínio do gotcha #16).
+  const ses = await callWaze(wazeSessionEndpoint(region), cookieHeader, csrf, null, region, { data, sessions, cookies });
+  if (ses.httpCode !== 200) {
+    const c = categorizeWazeError(ses.httpCode, ses.response, ses.error);
+    return {
+      status: c.category === 'unauthorized' ? 401 : 500,
+      body: { success: false, error: c.message, errorKey: c.messageKey, errorVars: c.messageVars, errorCategory: c.category, httpCode: ses.httpCode },
+    };
+  }
+  let perfil;
+  try { perfil = JSON.parse(ses.response); } catch { apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse'); }
+  if (!podeExcluirFoto(perfil)) {
+    apiError('Sem permissão para excluir fotos', 403, 'srv.err.photoDeleteRank');
+  }
+
+  // 2) RELEITURA. É o passo que impede de apagar junto a foto de outro editor.
+  const d = RELEITURA_BBOX_GRAUS;
+  // SEM `language`: MEDIDO contra o Waze real, a resposta é byte a byte a
+  // mesma com pt-BR, com en, com fr e sem o parâmetro. O controle é o que
+  // fecha a questão — duas chamadas IDÊNTICAS também diferem entre si, porque
+  // o Waze devolve alguns arrays em ordem não-determinística
+  // (`supportedPermanentHazardTypes`, tipos de câmera, `lotType`); sem esse
+  // controle eu teria lido ruído como efeito do idioma. Cravar `pt-BR` aqui
+  // não mudaria um byte e ainda diria que a chamada veio de um editor em
+  // português, o que é falso pra 3 das 4 línguas da app — o mesmo defeito que
+  // o `Referer` com `/pt-BR/` tinha.
+  const q = new URLSearchParams({
+    bbox: [lon - d, lat - d, lon + d, lat + d].join(','),
+    v: '2',
+    apiV2: 'true',
+    venueLevel: '4',
+    venueFilter: '1,1,1,1',
+    zoomLevel: '22',
+  });
+  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions, cookies });
+  if (lida.httpCode !== 200) {
+    const c = categorizeWazeError(lida.httpCode, lida.response, lida.error);
+    return {
+      status: c.category === 'unauthorized' ? 401 : 500,
+      body: { success: false, error: c.message, errorKey: c.messageKey, errorVars: c.messageVars, errorCategory: c.category, httpCode: lida.httpCode },
+    };
+  }
+  let atual;
+  try { atual = JSON.parse(lida.response); } catch { apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse'); }
+  const venue = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === venueID);
+  if (!venue) apiError('Local não encontrado', 404, 'srv.err.venueGone');
+
+  const imagensAgora = (venue.images || []).filter((i) => i && i.id);
+  // Foto já não existe: outro editor chegou primeiro. Isso NÃO é erro — o
+  // objetivo de quem tocou na lixeira foi cumprido (mesma lógica que o
+  // `already_processed` de rejeitar/marcar lido).
+  if (!imagensAgora.some((i) => i.id === imageID)) {
+    return { status: 200, body: { success: true, jaExcluida: true, restantes: imagensAgora.map((i) => i.id) } };
+  }
+  const restantes = imagensAgora.filter((i) => i.id !== imageID);
+
+  // 3) Escrita. Mesma forma do HAR do WME, byte a byte na estrutura.
+  const payload = {
+    actions: {
+      name: 'DESCARTES_SERIALIZATION',
+      _subActions: [
+        {
+          name: 'UPDATE_OBJECT',
+          _objectType: 'venue',
+          action: 'UPDATE',
+          attributes: { id: venueID, images: restantes },
+        },
+      ],
+    },
+  };
+  const result = await callWaze(wazeFeaturesEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
+  const cat = categorizeWazeError(result.httpCode, result.response, result.error);
+  if (result.httpCode !== 200 || cat.category === 'already_processed') {
+    return {
+      status: cat.category === 'already_processed' || cat.category === 'not_found' ? 200 : 500,
+      body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
+    };
+  }
+
+  // 4) Conferência pelo que o Waze DEVOLVEU — e o eco NÃO É PROVA, então isto
+  //    é uma rede a mais, não a garantia.
+  //
+  //    Medido escrevendo de verdade no local de teste do owner: ao mandar de
+  //    volta uma foto que tinha acabado de ser excluída, o Waze respondeu
+  //    HTTP 200 com `status: 0, synced: true` e ECOOU as 5 fotos, inclusive a
+  //    re-adicionada (com `date` novo e `scanned: false`) — e persistiu 4.
+  //    Três leituras seguidas, mesmo `updatedOn`: a foto não voltou.
+  //
+  //    Pro nosso caso o eco e a realidade concordam (a exclusão persiste, e
+  //    isso foi verificado por leitura independente: 5 → 4). Mas ele só
+  //    detecta o Waze dizendo "continua aí"; não detecta o Waze dizendo "saiu"
+  //    e guardando outra coisa. Vale como sinal barato, não como contrato.
+  let confirmado = null;
+  try {
+    const eco = JSON.parse(result.response);
+    const v = eco && eco.venues && eco.venues[venueID];
+    if (v && Array.isArray(v.images)) confirmado = !v.images.some((i) => i && i.id === imageID);
+  } catch { /* sem eco legível: seguimos com o 200, que já é a resposta do Waze */ }
+  if (confirmado === false) {
+    apiError('O Waze aceitou a chamada mas a foto continua no local', 500, 'srv.err.photoStillThere');
+  }
+
+  return { status: 200, body: { success: true, restantes: restantes.map((i) => i.id) } };
 }
 
 async function handlePerfil(data, { sessions }) {
@@ -1623,6 +1798,7 @@ const ROUTES = {
   'buscar-places': handleBuscarPlaces,
   'marcar-lido': handleMarcarLido,
   'validar-place': handleValidarPlace,
+  'excluir-foto': handleExcluirFoto,
   perfil: handlePerfil,
   'lista-paises': handleListaPaises,
   'lista-estados': handleListaEstados,
