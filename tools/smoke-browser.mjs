@@ -1129,22 +1129,20 @@ for (const status of [404, 403]) {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(250);
 
-  // Mapas DIFERENTES por card: com o mesmo `mapa` em todos, os tiles saem na
-  // mesma URL e a asserção "os tiles do card sem foto foram aquecidos" passa
-  // com o tile de qualquer outro card — mede nada.
-  const comMapa = FIXTURES_PAISES.filter((f) => f.mapa && f.mapa.centro);
-  const mapaDe = (i) => comMapa[i % comMapa.length].mapa;
+  // Só o card SEGUINTE tem mapa: assim qualquer requisição de tile é dele, e
+  // a asserção distingue de verdade. Com o mesmo `mapa` em todos os cards os
+  // tiles saem na MESMA URL e "os tiles do próximo foram aquecidos" passaria
+  // com o tile de qualquer outro — verde sem medir nada.
+  const comMapa = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro);
   // Nome do arquivo = o que o teste procura. Na primeira versão eu gerava
-  // `thumb700_FA1.png` e procurava `A1.png`: as três asserções de foto
-  // reprovaram por desencontro MEU, não do app.
+  // `thumb700_FA1.png` e procurava `A1.png`: reprovou por desencontro MEU.
   const foto = (n) => `https://venue-image.waze.com/thumbs/thumb700_${n}.png`;
-  const base = { ...comMapa[0], imageUrl: null, approvedImageIds: [], changes: [] };
+  const base = { ...comMapa, imageUrl: null, approvedImageIds: [], changes: [], mapa: null };
   const FILA = [
-    { ...base, venueID: 'A', updateRequestID: 'A', mapa: mapaDe(0), imageUrls: [foto('A1'), foto('A2')] },
-    { ...base, venueID: 'B', updateRequestID: 'B', mapa: mapaDe(1), imageUrls: [foto('B1'), foto('B2'), foto('B3')] },
-    { ...base, venueID: 'C', updateRequestID: 'C', mapa: mapaDe(2), imageUrls: [foto('C1')] },
-    { ...base, venueID: 'D', updateRequestID: 'D', mapa: mapaDe(3), imageUrls: [] },
-    { ...base, venueID: 'E', updateRequestID: 'E', mapa: mapaDe(4), imageUrls: [foto('E1')] },
+    { ...base, venueID: 'A', updateRequestID: 'A', imageUrls: [foto('A1'), foto('A2')] },
+    { ...base, venueID: 'B', updateRequestID: 'B', imageUrls: [foto('B1'), foto('B2'), foto('B3')], mapa: comMapa.mapa },
+    { ...base, venueID: 'C', updateRequestID: 'C', imageUrls: [foto('C1')] },
+    { ...base, venueID: 'D', updateRequestID: 'D', imageUrls: [foto('D1')] },
   ];
   await page.evaluate(async (fila) => {
     setLang('pt'); applyI18n();
@@ -1163,15 +1161,22 @@ for (const status of [404, 403]) {
   }, FILA);
 
   const pediu = (q) => pedidos.some((x) => x.qual === q);
-  // PROFUNDIDADE: com o card A na tela, o 1º slide de B, C e D já tem que ter
-  // saído — é o que dá tolerância a quem passa rápido.
-  checa(pediu('B1.png'), 'prefetch: 1º slide do card +1 não foi aquecido');
-  checa(pediu('C1.png'), 'prefetch: 1º slide do card +2 não foi aquecido (profundidade)');
-  // O card D não tem foto: o que vem primeiro nele é o MAPA.
-  checa(pedidos.some((x) => x.tipo === 'tile'), 'prefetch: card sem foto não teve os tiles aquecidos');
-  // LARGURA: só o card SEGUINTE ganha as outras fotos.
-  checa(pediu('B2.png'), 'prefetch: as outras fotos do card seguinte não foram aquecidas');
-  checa(!pediu('E1.png'), 'prefetch: aqueceu o card +4, fora da profundidade — vira desperdício');
+  // A regra que o owner definiu: o PRÓXIMO card fica pronto por INTEIRO.
+  checa(pediu('B1.png'), 'aquecimento: a 1ª foto do próximo card não foi pedida');
+  checa(pediu('B2.png') && pediu('B3.png'), 'aquecimento: o próximo card não veio COMPLETO (faltaram fotos)');
+  checa(pedidos.some((x) => x.tipo === 'tile'), 'aquecimento: os tiles do mapa do próximo card não foram pedidos');
+  // E SÓ ele: aquecer mais fundo é gasto que o owner decidiu não ter.
+  checa(!pediu('C1.png'), 'aquecimento: o card +2 foi aquecido — a profundidade voltou a passar de 1');
+
+  // Não é de uma vez só: ao avançar, o card seguinte tem que ser aquecido.
+  await page.evaluate(() => {
+    AppState.queue.shift();
+    AppState.currentPlace = AppState.queue[0];
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+  });
+  await page.waitForTimeout(700);
+  checa(pediu('C1.png'), 'aquecimento: depois de avançar, o novo "próximo" não foi aquecido');
 
   // PRIORIDADE: nada aquecido pode competir com o card na tela.
   const prio = await page.evaluate(() => {

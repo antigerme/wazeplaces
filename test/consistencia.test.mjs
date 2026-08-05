@@ -429,8 +429,12 @@ test('prefetch aquece o que o próximo card mostra PRIMEIRO', () => {
   assert.match(pf, /saveData/, 'o aquecimento parou de respeitar a economia de dados');
   const teto = APP_.match(/const PREFETCH_TETO_FOTOS = (\d+)/);
   const fundo = APP_.match(/const PREFETCH_PROFUNDIDADE = (\d+)/);
-  assert.ok(teto && Number(teto[1]) >= 1 && Number(teto[1]) <= 8,
-    'PREFETCH_TETO_FOTOS fora da faixa sã — sem teto, um card de 12 fotos puxa 1MB');
+  // Faixa larga de propósito: o guard existe pra garantir que EXISTE teto e
+  // que ele não é absurdo, não pra congelar o valor — quem escolhe é o owner.
+  // Medido na fila real: 8,3% dos cards passam de 4 fotos, 3% passam de 8, e o
+  // pior tem TRINTA, que sozinho puxaria 2,3MB de dados móveis.
+  assert.ok(teto && Number(teto[1]) >= 1 && Number(teto[1]) <= 16,
+    'PREFETCH_TETO_FOTOS fora da faixa sã — sem teto, um card de 30 fotos puxa 2,3MB');
   assert.ok(fundo && Number(fundo[1]) >= 1,
     'sumiu a profundidade do aquecimento (quantos cards à frente têm o 1º slide pronto)');
 });

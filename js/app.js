@@ -55,24 +55,26 @@ function formatarCodigoPareamento(bruto) {
 }
 const PREFETCH_THRESHOLD = 3;
 
-// ── Aquecimento dos próximos cards ────────────────────────────────────────
-// Duas grandezas diferentes, e confundi-las é o que faz prefetch virar
-// desperdício:
+// ── Aquecimento do próximo card ───────────────────────────────────────────
+// Decisão do owner, e ela é simples de enunciar: **o próximo card sempre
+// pronto, e pronto por inteiro** — foto, as outras fotos e os tiles do mapa.
 //
-// PROFUNDIDADE (quantos cards à frente) aquece só o PRIMEIRO SLIDE, e é de
-// graça em total de bytes: esses cards vão aparecer de qualquer jeito, a fila
-// é sequencial. Só move byte no tempo. Quem passa rápido vê exatamente isso —
-// o primeiro slide de cada card — então é aqui que mora a tolerância a rede
-// ruim: ~2s por card × 3 ≈ 6s de rede fora sem sentir.
+// PROFUNDIDADE 1 é escolha dele. Eu tinha proposto 3, com o argumento de que
+// aquecer o primeiro slide de mais cards é de graça em total de bytes (a fila
+// é sequencial, eles apareceriam de qualquer jeito) e compra tolerância a
+// quem passa rápido. Ele preferiu concentrar tudo no seguinte. O laço abaixo
+// continua genérico: mudar esta constante é a única coisa necessária pra
+// voltar atrás.
 //
-// LARGURA (todas as fotos de um card) é gasto NOVO: as fotos 2..n só importam
-// pra quem parou pra explorar, e quem parou tem tempo. Medido na fila real de
-// 12 países (4188 cards, ativos pesados no CDN): 1,97 fotos e 1,35 tiles por
-// card, foto 80KB, tile 47KB. Aquecer tudo de todo mundo levaria a sessão de
-// 200 cards de 15,1MB pra 43,2MB. Por isso a largura vai só pro card SEGUINTE.
-const PREFETCH_PROFUNDIDADE = 3;
-// Teto de fotos por card: um card de 12 fotos sozinho puxa 1MB (p98 medido).
-const PREFETCH_TETO_FOTOS = 4;
+// O que a profundidade 1 NÃO cobre, pra ficar registrado: quem passa mais
+// rápido do que a rede aquece. O card seguinte só fica pronto se a pessoa
+// ficar no atual o tempo de baixar ~180KB.
+const PREFETCH_PROFUNDIDADE = 1;
+// Teto de fotos por card. "Tudo carregado" vale pra 97% dos cards — medido na
+// fila real de 12 países: 8,3% passam de 4 fotos, 3% passam de 8, e o pior tem
+// TRINTA fotos, que sozinho puxaria 2,3MB de dados móveis. O teto existe só
+// pra esse rabo; abaixo dele nada é cortado.
+const PREFETCH_TETO_FOTOS = 10;
 
 const MAX_EMPTY_PAGES = 5;
 // Os 7 tipos do WME, na ordem em que aparecem no filtro (local → foto). É a
@@ -3289,8 +3291,7 @@ function prefetchNextImage() {
     const h = (cx && cx.clientHeight) || 240;
     const economica = redeEconomica();
 
-    // PROFUNDIDADE: o 1º slide dos próximos N. Em rede econômica, só o
-    // seguinte — o mínimo que ainda evita a caixa cinza no swipe.
+    // PROFUNDIDADE: o 1º slide dos próximos N (hoje 1, ver a constante).
     const fundo = economica ? 1 : PREFETCH_PROFUNDIDADE;
     for (let i = 1; i <= fundo; i++) {
         if (!AppState.queue[i]) break;
