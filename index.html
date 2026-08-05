@@ -37,28 +37,39 @@
 
 
 
-    <link rel="stylesheet" href="css/styles.css">
-    <!-- Depois do CSS de propósito: o paint já espera o stylesheet, então
-         este script viaja em paralelo e não adia o primeiro quadro. Sem
-         defer/async — precisa rodar ANTES de qualquer pintura. -->
-    <script src="js/tema.js"></script>
-
     <!-- Tailwind PRÉ-COMPILADO (npm run css → css/tailwind.css, commitado).
          Antes era o bundle runtime de 407KB, que compilava no browser via
          `new Function` — por isso a CSP precisava liberar 'unsafe-eval'.
          Agora: 32KB de CSS estático, CSP sem unsafe-eval, e nada de compilar
          no celular do editor.
 
-         ORDEM IMPORTA — e é por isso que este <link> vem DEPOIS do styles.css:
-         o bundle runtime injetava o CSS gerado no fim do <head>, então as
-         utilities do Tailwind venciam os empates de especificidade contra o
-         styles.css (é exatamente por isso que os overrides de dark mode de lá
-         precisam de !important). Carregar antes inverteria esses empates e
-         mudaria a UI de leve (anéis de foco, cantos). Validado por diff de
-         estilos computados: 27.436 propriedades, 0 divergências.
+         ORDEM IMPORTA, e este <link> vem ANTES do styles.css de propósito:
+         assim o NOSSO CSS vence o empate de especificidade contra as utilities
+         do Tailwind, que é o modelo normal de autoria (framework primeiro,
+         customização depois).
+
+         Já foi o contrário, herdado do bundle runtime que injetava o CSS no
+         fim do <head>. Isso fazia seletor de UMA classe do styles.css perder
+         calado pra utility — o gotcha #27, que mordeu SEIS vezes (`.modal-root`
+         perdendo pro `p-4`, `.auth-opt-pair` pro `text-slate-700`,
+         `.card-content` pro `overflow-y-hidden`, e mais). Trocar a ordem
+         elimina a classe de bug em vez de vigiá-la.
+
+         Custo MEDIDO antes de trocar: diff pixel a pixel de 92 cenários
+         (23 telas × 2 temas × celular e desktop, incluindo toasts, banners,
+         modais, foco por teclado e hover) → ZERO pixels de diferença. O único
+         ponto que mudava era o `border-radius` do `:focus-visible`, que
+         sobrescrevia o raio do elemento focado — defeito que já existia e saiu
+         junto.
 
          Mexeu em classe do Tailwind no HTML/JS? rode `npm run css`. -->
     <link rel="stylesheet" href="css/tailwind.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <!-- Depois do CSS de propósito: o paint já espera o stylesheet, então
+         este script viaja em paralelo e não adia o primeiro quadro. Sem
+         defer/async — precisa rodar ANTES de qualquer pintura. -->
+    <script src="js/tema.js"></script>
+
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-[100dvh] text-slate-800 antialiased selection:bg-blue-200 dark:text-slate-100 dark:from-slate-900 dark:to-slate-800">
 
