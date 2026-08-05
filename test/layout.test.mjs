@@ -144,46 +144,53 @@ function corposDeMedia(prefixo) {
   return blocos;
 }
 
-test('regra que precisa vencer utility do Tailwind tem especificidade pra isso', () => {
-  // O styles.css carrega ANTES do tailwind.css. Empate de especificidade →
-  // vence o Tailwind. Isso já mordeu QUATRO vezes, sempre em silêncio:
+test('a ordem dos <link> mantém o NOSSO CSS vencendo o empate', () => {
+  // Este teste substituiu o guard de especificidade, e a troca é a história
+  // toda: o `styles.css` carregava DEPOIS do `tailwind.css`, então seletor de
+  // UMA classe nosso perdia calado pra utility. Mordeu SEIS vezes:
   //   · `.modal-root { padding-bottom }`   perdeu pro `p-4`
   //   · `.auth-opt-pair { color: #fff }`   perdeu pro `text-slate-700`
   //   · `.auth-opt-upload { background }`  perdeu pro `bg-gradient-to-r`
   //   · `.auth-precondicao { display }`    perdeu pro `hidden`
+  //   · `.card-content { overflow-y }`     perdeu pro `overflow-y-hidden`
+  //   · `.card-map-scale { bottom }`       só funcionou POR perder (acidente)
   //
-  // A regra NÃO é "duas classes": um `#id` vence utility sozinho, e
-  // `body > main.container` também (0,1,2). O que vale é passar de (0,1,0).
+  // O guard antigo vigiava isso exigindo especificidade > (0,1,0) — mas só em
+  // TRÊS blocos de media query e 17 propriedades enumeradas, ou seja, uma
+  // fatia estreita do arquivo. Lista de permissões não cobre o que ninguém
+  // lembrou de listar, e foi por aí que os casos 5 e 6 passaram.
   //
-  // E varre TODOS os blocos de cada prefixo — quando eu abri um segundo bloco
-  // `pointer: coarse`, a versão antiga deste teste só olhava o primeiro e
-  // deixou o bug passar.
-  const DISPUTADAS = new RegExp('(^|;)\\s*(' + [
-    'display', 'color', 'background-color', 'background-image', 'border-color',
-    'padding[a-z-]*', 'margin[a-z-]*', 'gap', 'row-gap', 'column-gap',
-    'min-height', 'max-height', 'min-width', 'max-width', 'height', 'width',
-    'font-size', 'grid-column', 'grid-row', 'grid-template-columns',
-  ].join('|') + ')\\s*:');
-  const PREFIXOS = [
-    '@media (pointer: coarse)',
-    '@media (max-height: 700px)',
-    '@media (max-height: 480px) and (min-width: 600px)',
-  ];
-  for (const prefixo of PREFIXOS) {
-    const blocos = corposDeMedia(prefixo);
-    assert.ok(blocos.length >= 1, `sumiu o bloco ${prefixo} do styles.css`);
-    for (const bloco of blocos) {
-      for (const m of bloco.matchAll(/([^{};]+)\{([^}]*)\}/g)) {
-        if (!DISPUTADAS.test(';' + m[2])) continue;
-        for (const parte of m[1].split(',').map((x) => x.trim()).filter(Boolean)) {
-          const e = especificidade(parte);
-          assert.ok(venceUtility(e),
-            `"${parte}" tem especificidade (${e.join(',')}) e escreve propriedade que o Tailwind ` +
-            `também escreve: não passa de (0,1,0) e PERDE por ordem de carga`);
-        }
-      }
-    }
+  // Inverter a ordem mata a classe de bug em vez de vigiá-la. Custo MEDIDO
+  // antes de trocar: diff pixel a pixel de 92 cenários (23 telas × 2 temas ×
+  // celular e desktop) → ZERO pixels. O que este teste protege agora é a
+  // ordem em si: desfazê-la ressuscita as seis de uma vez, e em silêncio.
+  const iTw = HTML.indexOf('href="css/tailwind.css"');
+  const iSt = HTML.indexOf('href="css/styles.css"');
+  assert.ok(iTw > 0 && iSt > 0, 'sumiu um dos dois <link> de CSS do index.html');
+  assert.ok(iTw < iSt,
+    'o tailwind.css tem que carregar ANTES do styles.css — invertido, o nosso CSS '
+    + 'volta a perder o empate de especificidade pra utility, calado (gotcha #27)');
+});
+
+test(':focus-visible não pode escrever border-radius', () => {
+  // Escrever raio na regra de foco sobrescreve o raio do PRÓPRIO elemento: o
+  // ✕ redondo dos modais e do lightbox virava quadrado enquanto focado — e ele
+  // está focado, porque `openModal` foca o primeiro botão ao abrir. Ficou anos
+  // escondido porque o `rounded-full` do Tailwind vencia por ordem de carga;
+  // ao inverter a ordem, apareceu. Foi o ÚNICO ponto em que a inversão mudou
+  // pixel nos 92 cenários medidos.
+  //
+  // Casa o BLOCO de `:focus-visible` e olha o corpo dele — não o arquivo
+  // inteiro, senão qualquer `border-radius` de qualquer regra reprovaria.
+  const CSS_ = read('css/styles.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  let achou = 0;
+  for (const m of CSS_.matchAll(/([^{}]*:focus-visible[^{}]*)\{([^}]*)\}/g)) {
+    achou++;
+    assert.ok(!/(^|;)\s*border-radius\s*:/.test(';' + m[2]),
+      `"${m[1].trim()}" escreve border-radius e sobrescreve o raio do elemento focado `
+      + '— o outline já acompanha o raio do próprio elemento nos browsers atuais');
   }
+  assert.ok(achou >= 1, 'sumiu a regra de :focus-visible do styles.css (WCAG 2.4.7)');
 });
 
 test('o teclado virtual não pode voltar a engolir os modais', () => {

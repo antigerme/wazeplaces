@@ -49,11 +49,22 @@ body.dark {
   color: #e2e8f0;
 }
 
-/* Anel de foco visível pra navegação por teclado (WCAG 2.4.7) */
+/* Anel de foco visível pra navegação por teclado (WCAG 2.4.7)
+ *
+ * SEM `border-radius` aqui, e isso é regra e não esquecimento: pôr raio nesta
+ * regra sobrescreve o raio do PRÓPRIO elemento focado. O botão ✕ redondo dos
+ * modais e do lightbox virava um quadrado de cantos arredondados enquanto
+ * estivesse com foco — e ele está, porque `openModal` foca o primeiro botão ao
+ * abrir. O `outline` já acompanha o `border-radius` do elemento nos browsers
+ * atuais, então a linha não era só nociva: era desnecessária.
+ *
+ * O defeito ficou escondido por anos porque o `rounded-full` do Tailwind
+ * vencia por ordem de carga. Ao inverter a ordem (o nosso CSS passou a vencer
+ * o empate), ele apareceu — foi o ÚNICO ponto em que a inversão mudou pixel,
+ * medido em 92 cenários. */
 :focus-visible {
   outline: 2px solid #0891b2;
   outline-offset: 2px;
-  border-radius: 4px;
 }
 
 .dark :focus-visible {
