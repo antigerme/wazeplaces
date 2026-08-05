@@ -70,11 +70,13 @@ const PREFETCH_THRESHOLD = 3;
 // rápido do que a rede aquece. O card seguinte só fica pronto se a pessoa
 // ficar no atual o tempo de baixar ~180KB.
 const PREFETCH_PROFUNDIDADE = 1;
-// Teto de fotos por card. "Tudo carregado" vale pra 97% dos cards — medido na
-// fila real de 12 países: 8,3% passam de 4 fotos, 3% passam de 8, e o pior tem
-// TRINTA fotos, que sozinho puxaria 2,3MB de dados móveis. O teto existe só
-// pra esse rabo; abaixo dele nada é cortado.
-const PREFETCH_TETO_FOTOS = 10;
+// Teto de fotos por card, escolhido pelo owner. Medido na fila real de 12
+// países: 91,7% dos cards têm 4 fotos ou menos e são aquecidos por INTEIRO;
+// nos 8,3% restantes as fotos além da 4ª carregam quando a pessoa chegar nelas
+// no carrossel — e quem está navegando o carrossel não está passando rápido.
+// O teto também segura o rabo: o pior card da fila tem TRINTA fotos, 2,3MB de
+// dados móveis sozinho.
+const PREFETCH_TETO_FOTOS = 4;
 
 const MAX_EMPTY_PAGES = 5;
 // Os 7 tipos do WME, na ordem em que aparecem no filtro (local → foto). É a

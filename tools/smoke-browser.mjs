@@ -235,6 +235,25 @@ const APARELHOS = [
 const LINGUAS = ['pt', 'en', 'es', 'fr'];
 
 let falhas = 0;
+// Espera o card ASSENTAR — animação terminada, não um relógio.
+//
+// O `.card-enter` anima `opacity` de 0 a 1 em 0,28s, e a verificação de
+// contraste multiplica a opacidade de TODOS os ancestrais: medir no meio da
+// animação dá uma cor mais misturada com o fundo e um contraste menor do que
+// o real. Com 350ms fixos isso passava aqui e reprovava no CI, onde o runner
+// é mais lento e a animação começa tarde — `valor-ausente 4.08:1` contra os
+// 4.84:1 medidos na mesma tela localmente.
+//
+// Falha intermitente é pior que falha estável: ela ensina todo mundo a
+// ignorar o CI. Esperar as animações TERMINAREM não depende da velocidade da
+// máquina. É o gotcha #28 ("esperar ~200ms" pro anel de foco) generalizado:
+// relógio fixo é palpite, `getAnimations()` é a pergunta certa.
+const assentar = async (page, extra = 60) => {
+  await page.evaluate(() => Promise.all(
+    document.getAnimations().map((a) => a.finished.catch(() => {}))));
+  await page.waitForTimeout(extra);
+};
+
 const checa = (ok, msg, detalhe) => {
   if (!ok) { falhas++; console.log(`  ✗ ${msg}${detalhe ? ' — ' + detalhe : ''}`); }
 };
@@ -289,7 +308,7 @@ for (const [aparelho, viewport] of APARELHOS) {
         AppState.currentPlace = pl;
         showCurrentPlace();
       }, { pl: place, lang });
-      await page.waitForTimeout(350);
+      await assentar(page);
 
       const m = await page.evaluate(() => {
         const c = document.querySelector('.place-card');
