@@ -200,13 +200,76 @@ function mapaMontar(pontos, larguraPx, alturaPx, região) {
   };
 }
 
+// ── Mapa NAVEGÁVEL: grade de tiles em torno de um centro ─────────────────
+//
+// O `mapaMontar` acima resolve o mapinha do card: enquadramento fixo, escolhido
+// pra caber. Aqui é a outra pergunta — o editor arrastou e deu zoom, e quer ver
+// o que tem em volta. Não há enquadramento a calcular: o centro e o zoom são
+// dele, e o que se calcula é quais tiles cobrem a tela.
+//
+// Zoom vai mais fundo que o do card (`MAPA_Z_MAX` é 17 lá, pra economizar rede
+// num slide que ninguém pediu). Aqui a pessoa PEDIU o mapa, então vale abrir
+// até onde o Waze tem tile — e o mínimo desce até a cidade inteira, porque
+// "onde é isso no estado?" é pergunta legítima quando o pedido move 82 km.
+const MAPA_Z_NAV_MAX = 19;
+const MAPA_Z_NAV_MIN = 4;
+
+// Quais tiles cobrem uma caixa centrada em (lat, lon), e onde encostar cada um.
+// Devolve também a função de projeção da caixa, pra quem desenha marcador não
+// precisar repetir a conta — e não errar por repetir diferente.
+function mapaGrade(centroLL, z, larguraPx, alturaPx, região) {
+  const zz = Math.max(MAPA_Z_NAV_MIN, Math.min(MAPA_Z_NAV_MAX, Math.round(z)));
+  const c = mapaProjetar(centroLL[0], centroLL[1], zz);
+  const orig = { x: c.x - larguraPx / 2, y: c.y - alturaPx / 2 };
+  const nMax = Math.pow(2, zz);
+  const tiles = [];
+  // Uma fileira extra de cada lado: o tile chega ANTES de entrar na tela, então
+  // arrastar não revela buraco branco. É o mesmo princípio do prefetch do card.
+  for (let tx = Math.floor(orig.x / MAPA_TILE) - 1; tx <= Math.floor((orig.x + larguraPx) / MAPA_TILE) + 1; tx++) {
+    for (let ty = Math.floor(orig.y / MAPA_TILE) - 1; ty <= Math.floor((orig.y + alturaPx) / MAPA_TILE) + 1; ty++) {
+      if (ty < 0 || ty >= nMax) continue;
+      const txw = ((tx % nMax) + nMax) % nMax;
+      tiles.push({
+        chave: `${zz}/${txw}/${ty}`,
+        url: `https://www.waze.com/${região || 'row'}-tiles/live/base/${zz}/${txw}/${ty}/tile.png`,
+        left: tx * MAPA_TILE - orig.x,
+        top: ty * MAPA_TILE - orig.y,
+      });
+    }
+  }
+  return {
+    z: zz,
+    tiles,
+    tamanho: MAPA_TILE,
+    metrosPorPixel: mapaMetrosPorPixel(centroLL[0], zz),
+    // [lat, lon] → pixel dentro da caixa.
+    projetar: (ll) => {
+      const p = mapaProjetar(ll[0], ll[1], zz);
+      return { left: p.x - orig.x, top: p.y - orig.y };
+    },
+    // pixel dentro da caixa → [lat, lon]. É o que traduz "arrastei 40px" em
+    // "o centro virou esta coordenada".
+    desprojetar: (px, py) => {
+      const escala = MAPA_TILE * Math.pow(2, zz);
+      const lon = (orig.x + px) / escala * 360 - 180;
+      const n = Math.PI - 2 * Math.PI * (orig.y + py) / escala;
+      const lat = 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+      return [lat, lon];
+    },
+  };
+}
+
 if (typeof window !== 'undefined') {
   window.mapaMontar = mapaMontar;
   window.mapaProjetar = mapaProjetar;
   window.mapaZoomQueCabe = mapaZoomQueCabe;
   window.mapaCabe = mapaCabe;
+  window.mapaGrade = mapaGrade;
+  window.MAPA_Z_NAV_MAX = MAPA_Z_NAV_MAX;
+  window.MAPA_Z_NAV_MIN = MAPA_Z_NAV_MIN;
   window.mapaMetrosPorPixel = mapaMetrosPorPixel;
 }
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { mapaMontar, mapaProjetar, mapaZoomQueCabe, mapaCabe, mapaMetrosPorPixel, MAPA_TILE, MAPA_Z_MAX, MAPA_Z_MIN };
+  module.exports = { mapaMontar, mapaGrade, mapaProjetar, mapaZoomQueCabe, mapaCabe, mapaMetrosPorPixel,
+  MAPA_Z_NAV_MAX, MAPA_Z_NAV_MIN, MAPA_TILE, MAPA_Z_MAX, MAPA_Z_MIN };
 }

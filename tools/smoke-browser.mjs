@@ -837,6 +837,110 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── Mapa AMPLIADO: abre, navega, e fecha pelos três caminhos ─────────────
+//
+// Pedido dos testadores: clicar no mapa do card pra ver o entorno. A diferença
+// que importa e que este teste prova: arrastar tem que BUSCAR tile novo. Se
+// fosse só esticar o que o card já baixou, o gesto existiria e não revelaria
+// nada — pior que não ter, porque promete.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const pedidos = new Set();
+  await ctx.route('**/*-tiles/**', (r) => {
+    pedidos.add(r.request().url());
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA });
+  });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  // Um pedido em que o mapa é o PRIMEIRO slide (a mesma regra do carrossel):
+  // com foto na frente, ele nasce escondido e não há o que clicar.
+  const alvo = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro
+    && (!(f.imageUrls || []).length
+        || (f.changes || []).some((c) => c.field === 'geometry' || c.field === 'entryExitPoints')));
+  await page.evaluate(async (pl) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true;
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false);
+    AppState.queue = [pl]; AppState.currentPlace = pl;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 400));
+  }, alvo);
+
+  await page.click('.card-map');
+  await page.waitForTimeout(600);
+  const aberto = await page.evaluate(() => {
+    const lb = document.getElementById('mapaLightbox');
+    return {
+      visivel: !lb.classList.contains('hidden'),
+      tiles: lb.querySelectorAll('#mapaLbTiles img').length,
+      marcas: lb.querySelectorAll('#mapaLbMarks .mapa-marca').length,
+      escala: (lb.querySelector('#mapaLbEscala').textContent || '').trim(),
+      // Os controles são alvo de toque: a régua de 44px vale aqui como no card.
+      pequenos: [...lb.querySelectorAll('button')].map((b) => b.getBoundingClientRect())
+        .filter((r) => r.width < 44 || r.height < 44).length,
+    };
+  });
+  checa(aberto.visivel, 'mapa ampliado: clicar no mapa do card não abriu');
+  checa(aberto.tiles > 0, 'mapa ampliado: abriu sem tile nenhum');
+  checa(aberto.marcas > 0, 'mapa ampliado: abriu sem marcador — perdeu a evidência do card');
+  checa(!!aberto.escala, 'mapa ampliado: sem barra de escala, a distância vira aposta');
+  checa(aberto.pequenos === 0, `mapa ampliado: ${aberto.pequenos} botão menor que 44px`);
+
+  // Arrastar longe TEM que trazer tile novo — é o que separa "mapa" de "imagem".
+  const antes = pedidos.size;
+  const centro0 = await page.evaluate(() => MapaLightbox.centro.slice());
+  for (let i = 0; i < 4; i++) {
+    await page.mouse.move(350, 700);
+    await page.mouse.down();
+    await page.mouse.move(60, 200, { steps: 16 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+  }
+  const centro1 = await page.evaluate(() => MapaLightbox.centro.slice());
+  checa(JSON.stringify(centro0) !== JSON.stringify(centro1), 'mapa ampliado: arrastar não moveu o mapa');
+  checa(pedidos.size > antes,
+    'mapa ampliado: arrastar não buscou tile novo — virou imagem esticada, não mapa');
+
+  // A grade não pode acumular <img> conforme se navega.
+  const nDom = await page.evaluate(() => document.querySelectorAll('#mapaLbTiles img').length);
+  checa(nDom <= 24, `mapa ampliado: ${nDom} tiles no DOM depois de navegar — a limpeza parou`);
+
+  // Zoom muda a escala; recentrar volta ao pedido.
+  const escala0 = await page.evaluate(() => document.getElementById('mapaLbEscala').textContent.trim());
+  await page.click('#mapaLbMais');
+  await page.waitForTimeout(400);
+  const escala1 = await page.evaluate(() => document.getElementById('mapaLbEscala').textContent.trim());
+  checa(escala0 !== escala1, 'mapa ampliado: aproximar não mudou a escala');
+  await page.click('#mapaLbCentrar');
+  await page.waitForTimeout(400);
+  const voltou = await page.evaluate(([c]) => JSON.stringify(MapaLightbox.centro.map((n) => +n.toFixed(4)))
+    === JSON.stringify(c.map((n) => +n.toFixed(4))), [centro0]);
+  checa(voltou, 'mapa ampliado: "voltar ao pedido" não recentrou');
+
+  // Fecha por Esc (desktop) e por ✕ (toque). O voltar do aparelho é coberto
+  // pelo guard de código — aqui não há histórico de navegação real.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  checa(await page.evaluate(() => document.getElementById('mapaLightbox').classList.contains('hidden')),
+    'mapa ampliado: Esc não fechou');
+  await page.click('.card-map');
+  await page.waitForTimeout(400);
+  await page.click('#mapaLbClose');
+  await page.waitForTimeout(300);
+  checa(await page.evaluate(() => document.getElementById('mapaLightbox').classList.contains('hidden')),
+    'mapa ampliado: o ✕ não fechou');
+  checa(erros.length === 0, 'mapa ampliado: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -848,4 +952,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + ${FIXTURES_PAISES.length} pedidos REAIS de ${new Set(FIXTURES_PAISES.map((f) => f._pais)).size} países × ${APARELHOS_PAISES.length} aparelhos × ${LINGUAS.length} idiomas`
   + `, + ${FORMATOS_FOTO.length} formatos de foto × ${APARELHOS_PAISES.length} aparelhos`
   + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403)`
+  + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, Esc e ✕)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`);

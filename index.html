@@ -651,7 +651,7 @@
                                      decidir é espacial — "moveu 36 m" é exato e injulgável.
                                      Os tiles são os do próprio Waze (a mesma camada de vias do
                                      WME), sem biblioteca e sem terceiro. -->
-                                <div class="card-map hidden absolute inset-0 bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                                <div class="card-map hidden absolute inset-0 bg-slate-100 dark:bg-slate-800 overflow-hidden" role="button" tabindex="0" title="Tocar para ampliar o mapa" data-i18n-title="card.map.ampliar" aria-label="Tocar para ampliar o mapa" data-i18n-aria="card.map.ampliar">
                                     <div class="card-map-tiles absolute inset-0"></div>
                                     <div class="card-map-marks absolute inset-0 pointer-events-none"></div>
                                     <span class="card-map-scale absolute left-2 z-20 bg-black/60 text-white text-[0.6875rem] font-medium px-2 py-0.5 rounded tnum"></span>
@@ -808,6 +808,30 @@
         </div>
 
     </main>
+
+    <!-- Mapa AMPLIADO. Camada própria e não o lightbox de foto, porque a
+         natureza é outra: ampliar foto é esticar uma imagem que já está em
+         mãos; aqui arrastar e dar zoom BUSCA tiles novos. Segue as mesmas
+         convenções (z-[65], CamadaVoltar, ✕/Esc/voltar do aparelho) pra o
+         editor não ter que aprender duas gramáticas de "fechar". -->
+    <div id="mapaLightbox" role="dialog" aria-modal="true" aria-label="Mapa do local" data-i18n-aria="card.map.slide" class="hidden fixed inset-0 bg-slate-200 dark:bg-slate-800 z-[65] select-none overflow-hidden touch-none">
+        <div id="mapaLbTiles" class="absolute inset-0"></div>
+        <div id="mapaLbMarks" class="absolute inset-0 pointer-events-none"></div>
+        <button id="mapaLbClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+        <!-- Botões de zoom além do gesto: pinch não existe em desktop com mouse
+             sem roda, e alvo de 44px é a régua do projeto pra qualquer toque. -->
+        <div class="absolute z-20 flex flex-col gap-2" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem">
+            <button id="mapaLbMais" type="button" aria-label="Aproximar" data-i18n-aria="card.map.zoomIn" class="text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-2xl leading-none transition-colors">+</button>
+            <button id="mapaLbMenos" type="button" aria-label="Afastar" data-i18n-aria="card.map.zoomOut" class="text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-2xl leading-none transition-colors">−</button>
+            <button id="mapaLbCentrar" type="button" aria-label="Voltar ao pedido" data-i18n-aria="card.map.recentrar" class="text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v8m4-4H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </button>
+        </div>
+        <span id="mapaLbEscala" class="absolute bottom-4 left-4 z-20 bg-black/60 text-white text-xs font-medium px-2 py-0.5 rounded tnum mapa-escala"></span>
+        <span id="mapaLbLegenda" class="absolute z-20 flex flex-wrap gap-1 left-4 right-16" style="bottom: calc(2.75rem + env(safe-area-inset-bottom))"></span>
+    </div>
 
     <div id="imageLightbox" role="dialog" aria-modal="true" aria-label="Visualização de foto" data-i18n-aria="lightbox.aria" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[65] flex items-center justify-center select-none overflow-hidden">
         <button id="lightboxClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem">

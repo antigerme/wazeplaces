@@ -73,9 +73,11 @@ wazeplaces/
 ├── tailwind.config.js       # Config do build de CSS (darkMode: 'class', content)
 ├── CHANGELOG.md             # Histórico de mudanças voltado ao editor (não é git log)
 ├── js/
-│   ├── mapa.js              # Mini-mapa de evidência (JS puro, zero dep): Mercator, escolha de zoom,
-│   │                        #   encaixe em tile e posição dos marcadores. Tiles do PRÓPRIO Waze, camada
-│   │                        #   `live/base` (não `editor/roads`). Testado em test/mapa.test.mjs sem browser.
+│   ├── mapa.js              # Mapa de evidência (JS puro, zero dep). DUAS funções, duas perguntas:
+│   │                        #   `mapaMontar` = mapinha do card (enquadramento fixo, escolhido pra caber,
+│   │                        #   minimiza tiles); `mapaGrade` = mapa AMPLIADO (centro e zoom são do
+│   │                        #   editor, com projetar/desprojetar pro arrasto). Tiles do PRÓPRIO Waze,
+│   │                        #   camada `live/base` (não `editor/roads`). Testado sem browser.
 │   ├── qr.js                # Gerador de QR (JS puro, zero dep): modo byte, correção M, versões 1–6.
 │   │                        #   Só o pareamento usa. Verificado módulo a módulo contra o pacote `qrcode`
 │   │                        #   em 106 entradas; vetores dourados em test/qr.test.mjs. Carregado antes do app.js
@@ -668,6 +670,12 @@ Bugs já encontrados e corrigidos — **não repita**:
     **Consequência boa**: o navegador busca direto de `www.waze.com`, então o mapa **não gera um byte na Cloudflare do owner** — foi por isso que a CSP precisou do host em `img-src` em vez de o servidor fazer proxy.
     **Consequência a vigiar**: é dependência que não controlamos. Se o Waze mudar o caminho ou bloquear, o card não pode quebrar. Medido em 404 e 403: o mapa continua visível, **os 8 marcadores e a barra de escala ficam**, a `<img>` quebrada sai do DOM (`onerror` → `remove()`), e não há erro de JS nem toast. O editor perde o contexto de ruas mas mantém a evidência que o TEXTO não dá — posição relativa de antes/depois, linha do movimento, pontos de entrada. Travado no smoke.
     **E o instrumento errou primeiro, sexta vez na sessão**: o teste escolheu "a primeira fixture com mapa", que tinha foto e nenhuma mudança espacial — ali o mapa é o ÚLTIMO slide e nasce escondido, então ele contou zero marcador e acusou a app de perder a evidência. A seleção tem que usar a MESMA regra do carrossel (`mapaVemPrimeiro`).
+
+56. **Mapa ampliado: "ampliar" no mapa é outra coisa que ampliar na foto** (v2026.08.04-12). Os testadores pediram pra clicar no mapa do card e ver o entorno com gesto de zoom. A tentação é reusar o lightbox da foto — e seria errado: ampliar foto ESTICA uma imagem que já está em mãos, enquanto no mapa arrastar e dar zoom precisa BUSCAR tile novo. O barato (esticar o que o card baixou) daria zoom borrado e arrasto que não revela nada — entregaria o gesto e frustraria a expectativa, que é pior que não ter. Daí `mapaGrade` ao lado de `mapaMontar`: enquadramento fixo é uma pergunta, navegação é outra.
+    **O arrasto sumia, e a culpa era do redesenho.** A primeira versão usou `setPointerCapture` no próprio mapa. Medido: de 14 movimentos só **2** chegavam e o `pointerup` **nunca** vinha. O motivo é que `desenhar()` remove e recria os `<img>` dos tiles no meio do gesto, e a captura não sobrevive a isso. A correção é escutar `pointermove`/`pointerup` na JANELA — não depende de nenhum elemento continuar existindo. **Regra**: gesto contínuo sobre conteúdo que se redesenha não usa captura de ponteiro.
+    **E o desenho é AGENDADO por quadro** (`requestAnimationFrame`), não por evento: mover o dedo dispara dezenas de eventos por segundo e reposicionar 20 tiles em cada um trava a mão. É o gotcha #35 outra vez — o handler decide, o quadro seguinte escreve.
+    **A grade busca uma fileira EXTRA em volta da tela**, então arrastar pouco não abre buraco branco (medido: arrasto curto pede 0 tile novo; 5 arrastos grandes andam 1,6 km e pedem 29). E tile que sai de vista sai do DOM — sem isso, navegar bastante troca custo de rede por custo de memória (medido: DOM estável em 15 imagens).
+    **Reusar CSS por classe arrasta junto o que não é aparência**: pus `.card-map-scale` na escala do ampliado e vim junto um `bottom` que só faz sentido no card. Só não quebrou porque a utility do HTML vencia por ordem de carga — acidente, não contrato. Hoje `.mapa-escala` é a aparência e `.card-map-scale` a posição.
 
 22. **`css/tailwind.css` é GERADO e commitado — nunca edite à mão** (v2026.07.24-02). O Tailwind deixou de compilar no browser: mexeu em classe no `index.html`/`js/*`? rode **`npm run css`** e commite o CSS junto. O CI regenera e falha no diff se esquecer. Some com o estilo em produção sem nenhum erro no console — é silencioso.
     **A ORDEM dos `<link>` importa**: `styles.css` vem ANTES de `tailwind.css`. O bundle runtime antigo injetava o CSS gerado no fim do `<head>`, então as utilities venciam empates de especificidade contra o `styles.css`. Inverter a ordem muda anéis de foco/cantos de leve. Se precisar mexer, valide com o harness de screenshot (Playwright) — foi assim que isso apareceu.

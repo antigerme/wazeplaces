@@ -1470,9 +1470,25 @@ test('a foto ampliada fecha pelos caminhos das DUAS plataformas', () => {
   // Ancora no handleKeyDown: há DOIS `if (Lightbox.isOpen())` no arquivo — o
   // outro é do popstate (botão voltar do aparelho), e a primeira versão deste
   // guard pegou o errado e reprovou o estado correto.
-  const bloco = APP.match(/function handleKeyDown\(e\) \{\s*\n\s*if \(Lightbox\.isOpen\(\)\) \{[\s\S]*?\n    \}/);
+  // Âncora em DUAS etapas: primeiro o corpo do handleKeyDown, depois o bloco
+  // da foto dentro dele. A primeira versão exigia que o bloco da foto fosse a
+  // PRIMEIRA instrução da função — acoplado à posição, não à intenção — e
+  // reprovou quando o mapa ampliado entrou acima dela, que é o lugar certo
+  // dele. Guard preso à posição já mordeu neste repo; o que precisa continuar
+  // valendo é o bloco da foto existir e tratar as teclas certas.
+  const corpo = APP.match(/function handleKeyDown\(e\) \{[\s\S]*?\n\}/);
+  assert.ok(corpo, 'sumiu o handleKeyDown');
+  const bloco = corpo[0].match(/if \(Lightbox\.isOpen\(\)\) \{[\s\S]*?\n    \}/);
   assert.ok(bloco, 'sumiu o tratamento de teclado da foto ampliada');
   const teclas = bloco[0];
+
+  // O mapa ampliado é a camada de CIMA: quando ele está aberto, Esc tem que
+  // fechar ELE e não a foto. Ordem no código é o que decide isso — o bloco do
+  // mapa precisa vir antes, e sair com `return` pra não cair no da foto.
+  const iMapa = corpo[0].indexOf('MapaLightbox.isOpen()');
+  const iFoto = corpo[0].indexOf('Lightbox.isOpen()', corpo[0].indexOf('MapaLightbox.isOpen()') + 21);
+  assert.ok(iMapa >= 0, 'o mapa ampliado não trata teclado — Esc não fecharia ele');
+  assert.ok(iMapa < iFoto, 'o bloco da foto vem antes do mapa: Esc fecharia a camada errada');
 
   // Esc é a convenção de desktop e continua sendo o caminho principal.
   assert.match(teclas, /e\.key === 'Escape'[\s\S]{0,60}Lightbox\.close\(\)/,

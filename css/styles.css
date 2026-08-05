@@ -1464,6 +1464,20 @@ button:active {
    O `bottom` mora AQUI e não numa utility no HTML: a primeira tentativa deixou
    `bottom-2` no elemento, e esta regra (uma classe, 0-1-0) perdeu por ordem de
    carga — o tailwind.css vem depois do styles.css. Gotcha #27, terceira vez. */
+/* A APARÊNCIA da barra de escala é comum ao mapinha do card e ao ampliado; a
+   POSIÇÃO é de cada um. Reusar `.card-map-scale` nos dois arrastava junto um
+   `bottom` que só faz sentido no card (acima da fileira de navegação), e só
+   não quebrou o ampliado por acidente — a utility `bottom-4` do HTML vencia
+   por ordem de carga (gotcha #27). Acidente não é contrato. */
+.mapa-escala,
+.card-map-scale {
+  border-bottom: 3px solid currentColor;
+  box-sizing: content-box;
+  text-align: center;
+  overflow: visible;
+  white-space: nowrap;
+}
+
 .card-map-scale {
   bottom: 3.25rem;
   border-bottom: 3px solid currentColor;
