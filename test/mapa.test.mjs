@@ -152,3 +152,55 @@ test('caixa minúscula não quebra a conta', () => {
     assert.ok(r.pixels.every((p) => Number.isFinite(p.left) && Number.isFinite(p.top)));
   }
 });
+
+// ── Mapa NAVEGÁVEL (o ampliado) ──────────────────────────────────────────
+
+test('grade: cobre a caixa e sobra uma fileira, pra arrastar não abrir buraco', () => {
+  const c = [-15.7942, -47.8822];
+  for (const [w, h] of [[412, 915], [852, 393], [280, 653]]) {
+    const g = M.mapaGrade(c, 16, w, h, 'row');
+    // Todo pixel da caixa tem tile por baixo.
+    const cobre = (x, y) => g.tiles.some((t) => x >= t.left && x < t.left + g.tamanho
+      && y >= t.top && y < t.top + g.tamanho);
+    for (const [x, y] of [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1], [w / 2, h / 2]]) {
+      assert.ok(cobre(x, y), `${w}×${h}: canto (${x},${y}) sem tile`);
+    }
+    // E a fileira extra: existe tile começando ANTES do canto e depois do fim.
+    assert.ok(g.tiles.some((t) => t.left < 0), `${w}×${h}: sem fileira extra à esquerda`);
+    assert.ok(g.tiles.some((t) => t.left + g.tamanho > w), `${w}×${h}: sem fileira extra à direita`);
+  }
+});
+
+test('projetar e desprojetar são inversas — é o que faz o arrasto ser fiel', () => {
+  // Se elas divergirem, arrastar 100px anda uma distância errada e o mapa
+  // "escorrega" debaixo do dedo. Erro tem que ser de arredondamento, não mais.
+  for (const z of [4, 10, 16, 19]) {
+    for (const c of [[-15.79, -47.88], [48.85, 2.35], [-33.86, 151.2], [64.1, -21.9]]) {
+      const g = M.mapaGrade(c, z, 412, 915, 'row');
+      for (const [px, py] of [[0, 0], [206, 457], [411, 914]]) {
+        const ll = g.desprojetar(px, py);
+        const de = g.projetar(ll);
+        assert.ok(Math.abs(de.left - px) < 0.01 && Math.abs(de.top - py) < 0.01,
+          `z${z} ${c}: (${px},${py}) → ${ll} → (${de.left},${de.top})`);
+      }
+    }
+  }
+});
+
+test('o zoom do mapa navegável vai mais fundo que o do card, e trava nos limites', () => {
+  // O card economiza rede num slide que ninguém pediu; aqui a pessoa PEDIU.
+  assert.ok(M.MAPA_Z_NAV_MAX > M.MAPA_Z_MAX, 'o ampliado deixou de aproximar mais que o card');
+  assert.ok(M.MAPA_Z_NAV_MIN < M.MAPA_Z_MIN, 'o ampliado deixou de afastar mais que o card');
+  for (const [pedido, esperado] of [[99, M.MAPA_Z_NAV_MAX], [-5, M.MAPA_Z_NAV_MIN], [16.4, 16]]) {
+    assert.equal(M.mapaGrade([-15.79, -47.88], pedido, 412, 915, 'row').z, esperado,
+      `zoom ${pedido} devia virar ${esperado}`);
+  }
+});
+
+test('a grade não explode em tiles, nem no zoom mais aberto', () => {
+  // Cada tile é rede. Uma caixa de celular não pode pedir dezenas.
+  for (const z of [4, 8, 12, 16, 19]) {
+    const g = M.mapaGrade([-15.79, -47.88], z, 412, 915, 'row');
+    assert.ok(g.tiles.length <= 24, `z${z}: ${g.tiles.length} tiles numa tela só`);
+  }
+});

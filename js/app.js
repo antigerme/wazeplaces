@@ -204,6 +204,7 @@ function initApp() {
     setupAppListeners();
     setupModalListeners();
     setupLightbox();
+    setupMapaLightbox();
     setupKeyboardInset();
     setupAlturaDoHeader();
     setupDescargaAoSair();
@@ -281,6 +282,13 @@ const CamadaVoltar = {
 
 window.addEventListener('popstate', () => {
     if (CamadaVoltar.consumindo) { CamadaVoltar.consumindo = false; return; }
+    // O mapa ampliado é a camada de cima: o voltar do aparelho fecha ELE
+    // primeiro, como faz com o lightbox de foto.
+    if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) {
+        CamadaVoltar.profundidade = Math.max(0, CamadaVoltar.profundidade - 1);
+        MapaLightbox.close(true);
+        return;
+    }
     // Veio do usuário. Fecha a camada de cima — o lightbox está acima dos modais
     // (z-[65] contra z-[60]), então ele tem prioridade.
     if (Lightbox.isOpen()) {
@@ -862,6 +870,105 @@ const Lightbox = {
     }
 };
 
+// Gestos do mapa ampliado. Ponteiros unificados (mouse e dedo pelo mesmo
+// caminho) porque o mapa é o mesmo nos dois; o que muda é só quantos pontos
+// tocam a tela.
+function setupMapaLightbox() {
+    const lb = document.getElementById('mapaLightbox');
+    if (!lb) return;
+    document.getElementById('mapaLbClose').addEventListener('click', () => MapaLightbox.close());
+    document.getElementById('mapaLbMais').addEventListener('click', () => MapaLightbox.zoom(1));
+    document.getElementById('mapaLbMenos').addEventListener('click', () => MapaLightbox.zoom(-1));
+    document.getElementById('mapaLbCentrar').addEventListener('click', () => MapaLightbox.recentrar());
+
+    // Os listeners de mover/soltar vão na JANELA, não no elemento.
+    //
+    // A primeira versão usava `setPointerCapture` no próprio mapa e PERDIA o
+    // arrasto: medido, só 2 de 14 movimentos chegavam e o `pointerup` nunca
+    // vinha. O motivo é o próprio redesenho — `desenhar()` remove e recria os
+    // <img> dos tiles no meio do gesto, e a captura não sobrevive a isso.
+    // Escutar na janela não depende de nenhum elemento continuar existindo.
+    //
+    // E o desenho é AGENDADO por quadro em vez de rodar a cada evento: mover o
+    // dedo dispara dezenas de eventos por segundo, e reposicionar 20 tiles em
+    // cada um trava a mão. Mesma lição do gotcha #35 — o handler decide, o
+    // quadro seguinte escreve.
+    const ativos = new Map();
+    let acumX = 0, acumY = 0, quadro = 0, arrastou = false, ultimo = null, distPinch = 0;
+    const aplicar = () => {
+        quadro = 0;
+        const dx = acumX, dy = acumY;
+        acumX = acumY = 0;
+        if (dx || dy) MapaLightbox.arrastar(dx, dy);
+    };
+    const agendar = () => { if (!quadro) quadro = requestAnimationFrame(aplicar); };
+    const doisDedos = () => {
+        const [a, b] = [...ativos.values()];
+        return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
+    };
+    const mover = (e) => {
+        if (!ativos.has(e.pointerId)) return;
+        ativos.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (ativos.size >= 2) {
+            const c = doisDedos();
+            // Um degrau por DOBRO de distância: é a relação natural do pinch e
+            // não dispara com tremor de dedo.
+            if (distPinch > 0 && (c.d / distPinch > 1.6 || distPinch / c.d > 1.6)) {
+                MapaLightbox.zoom(c.d > distPinch ? 1 : -1, c.x, c.y);
+                distPinch = c.d;
+            }
+            arrastou = true;
+            return;
+        }
+        if (!ultimo) return;
+        const dx = e.clientX - ultimo.x, dy = e.clientY - ultimo.y;
+        if (!dx && !dy) return;
+        arrastou = true;
+        ultimo = { x: e.clientX, y: e.clientY };
+        acumX += dx; acumY += dy;
+        agendar();
+    };
+    const soltar = (e) => {
+        ativos.delete(e.pointerId);
+        if (ativos.size === 0) {
+            ultimo = null;
+            removeEventListener('pointermove', mover);
+            removeEventListener('pointerup', soltar);
+            removeEventListener('pointercancel', soltar);
+            if (quadro) { cancelAnimationFrame(quadro); aplicar(); }
+        } else {
+            const p0 = [...ativos.values()][0];
+            ultimo = { x: p0.x, y: p0.y };
+        }
+    };
+    lb.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) return;   // botão é botão
+        e.preventDefault();
+        ativos.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        arrastou = false;
+        if (ativos.size === 2) distPinch = doisDedos().d;
+        else ultimo = { x: e.clientX, y: e.clientY };
+        addEventListener('pointermove', mover);
+        addEventListener('pointerup', soltar);
+        addEventListener('pointercancel', soltar);
+    });
+    // Roda do mouse: o desktop não tem pinch.
+    lb.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        MapaLightbox.zoom(e.deltaY < 0 ? 1 : -1, e.clientX, e.clientY);
+    }, { passive: false });
+    // Duplo toque aproxima, como em qualquer mapa.
+    let ultimoToque = 0;
+    lb.addEventListener('click', (e) => {
+        if (e.target.closest('button') || arrastou) return;
+        const agora = Date.now();
+        if (agora - ultimoToque < 300) MapaLightbox.zoom(1, e.clientX, e.clientY);
+        ultimoToque = agora;
+    });
+    // Girar o aparelho muda a caixa: sem redesenhar, sobra faixa sem tile.
+    addEventListener('resize', () => { if (MapaLightbox.isOpen()) MapaLightbox.desenhar(); });
+}
+
 function setupLightbox() {
     const lb = document.getElementById('imageLightbox');
     const img = document.getElementById('lightboxImage');
@@ -1146,6 +1253,17 @@ function applyFiltersFromModal() {
 }
 
 function handleKeyDown(e) {
+    // O mapa ampliado é a camada MAIS alta quando aberto: Esc e ↓ fecham ele
+    // antes de qualquer outra coisa, como o lightbox de foto faz.
+    if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) {
+        if (e.key === 'Escape' || e.key === 'ArrowDown') { e.preventDefault(); MapaLightbox.close(); }
+        else if (e.key === '+' || e.key === '=') { e.preventDefault(); MapaLightbox.zoom(1); }
+        else if (e.key === '-' || e.key === '_') { e.preventDefault(); MapaLightbox.zoom(-1); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); MapaLightbox.arrastar(80, 0); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); MapaLightbox.arrastar(-80, 0); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); MapaLightbox.arrastar(0, 80); }
+        return;
+    }
     if (Lightbox.isOpen()) {
         if (e.key === 'Escape') { e.preventDefault(); Lightbox.close(); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); Lightbox.prev(); }
@@ -2055,9 +2173,192 @@ function renderMapa(card, place) {
         s.appendChild(document.createTextNode(t(p.rot)));
         leg.appendChild(s);
     }
+    // Clicar amplia — o mesmo gesto da foto, que é o que os testadores
+    // pediram. `once` porque `renderMapa` só monta uma vez por card.
+    box.style.cursor = 'zoom-in';
+    box.addEventListener('click', (ev) => {
+        if (ev.target.closest('button')) return;   // as setas do carrossel não
+        ev.stopPropagation(); ev.preventDefault();
+        MapaLightbox.open(place);
+    }, { once: false });
     box.dataset.pronto = '1';
     return true;
 }
+
+// ── Mapa AMPLIADO: arrastar, zoom, e tiles buscados conforme navega ──────
+//
+// O mapinha do card responde "onde é isto"; este responde "e o que tem em
+// volta?" — pedido dos testadores. A diferença não é de tamanho: ampliar foto
+// estica uma imagem que já está em mãos, enquanto aqui arrastar e dar zoom
+// BUSCA tiles novos. Fazer o barato (esticar o que o card já baixou) daria
+// zoom borrado e arrasto que não revela nada: entregaria o gesto e frustraria
+// a expectativa, que é pior que não ter.
+//
+// Sem biblioteca, como o resto. A matemática mora em `js/mapa.js` (`mapaGrade`,
+// com `projetar`/`desprojetar`), e aqui fica só gesto e DOM.
+const MapaLightbox = {
+    centro: null, z: 16, pontos: [], _tiles: new Map(), _inicial: null,
+    isOpen() { return !document.getElementById('mapaLightbox').classList.contains('hidden'); },
+
+    open(place) {
+        if (!place || !place.mapa || !window.mapaGrade) return;
+        const m = place.mapa;
+        this.pontos = [];
+        if (m.centro) this.pontos.push({ ll: m.centro, cls: 'mapa-atual', rot: m.proposto ? 'card.map.antes' : 'card.map.aqui' });
+        if (m.proposto) this.pontos.push({ ll: m.proposto, cls: 'mapa-proposto', rot: 'card.map.depois' });
+        for (const e of m.entradas || []) {
+            this.pontos.push({ ll: e.ll, nome: e.nome, cls: 'mapa-entrada mapa-e-' + e.estado,
+                               rot: 'card.map.entrada.' + e.estado });
+        }
+        if (!this.pontos.length) return;
+
+        const el = document.getElementById('mapaLightbox');
+        // Abre no MESMO enquadramento do card: a pessoa clicou no que estava
+        // vendo, e o mapa saltar pra outro lugar quebraria a continuidade.
+        const r = mapaMontar(this.pontos.map((p) => p.ll), innerWidth, innerHeight, API.getRegion());
+        this.z = r ? r.z : 16;
+        const lls = this.pontos.map((p) => p.ll);
+        this.centro = [ (Math.min(...lls.map((l) => l[0])) + Math.max(...lls.map((l) => l[0]))) / 2,
+                        (Math.min(...lls.map((l) => l[1])) + Math.max(...lls.map((l) => l[1]))) / 2 ];
+        this._inicial = { centro: this.centro.slice(), z: this.z };
+        this._tiles.clear();
+        document.getElementById('mapaLbTiles').textContent = '';
+        CamadaVoltar.empilhar();
+        el.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        const fechar = document.getElementById('mapaLbClose');
+        if (fechar) fechar.focus();
+        this.desenhar();
+    },
+
+    close(viaHistorico) {
+        const el = document.getElementById('mapaLightbox');
+        if (el.classList.contains('hidden')) return;
+        el.classList.add('hidden');
+        document.body.style.overflow = '';
+        // Consome a entrada de histórico quando NÃO foi o voltar que fechou —
+        // sem isso sobra entrada morta e o próximo voltar não faz nada, a
+        // pessoa aperta de novo e sai da app (a mesma regra do lightbox).
+        if (!viaHistorico) CamadaVoltar.consumir();
+    },
+
+    // Redesenha a grade. Tiles já baixados são REAPROVEITADOS (mapa por chave
+    // z/x/y): sem isso, arrastar 10px refazia o DOM e piscava a tela inteira.
+    desenhar() {
+        const el = document.getElementById('mapaLightbox');
+        const w = el.clientWidth || innerWidth;
+        const h = el.clientHeight || innerHeight;
+        const g = mapaGrade(this.centro, this.z, w, h, API.getRegion());
+        this.z = g.z;
+        const caixa = document.getElementById('mapaLbTiles');
+        const vivos = new Set();
+        for (const t of g.tiles) {
+            vivos.add(t.chave);
+            let im = this._tiles.get(t.chave);
+            if (!im) {
+                im = new Image();
+                im.src = t.url; im.alt = ''; im.decoding = 'async';
+                im.className = 'absolute';
+                im.style.width = im.style.height = g.tamanho + 'px';
+                im.onerror = () => { im.remove(); this._tiles.delete(t.chave); };
+                this._tiles.set(t.chave, im);
+                caixa.appendChild(im);
+            }
+            im.style.left = t.left + 'px';
+            im.style.top = t.top + 'px';
+        }
+        // Tile que saiu de vista sai do DOM: navegar bastante encheria a página
+        // de <img> invisível, e aí o custo vira memória em vez de rede.
+        for (const [k, im] of this._tiles) {
+            if (!vivos.has(k)) { im.remove(); this._tiles.delete(k); }
+        }
+        this.desenharMarcas(g);
+    },
+
+    desenharMarcas(g) {
+        const marks = document.getElementById('mapaLbMarks');
+        marks.textContent = '';
+        const px = this.pontos.map((p) => g.projetar(p.ll));
+        // Linha do movimento: mesma gramática do card (verde entra, tracejada
+        // porque é trajeto proposto e não feição do mapa).
+        if (this.pontos.length >= 2 && this.pontos[1].cls === 'mapa-proposto') {
+            const [a, b] = px;
+            const linha = document.createElement('div');
+            linha.className = 'mapa-linha';
+            const dx = b.left - a.left, dy = b.top - a.top;
+            linha.style.cssText = `left:${a.left}px;top:${a.top}px;width:${Math.hypot(dx, dy)}px;`
+                + `transform:rotate(${Math.atan2(dy, dx)}rad)`;
+            marks.appendChild(linha);
+        }
+        this.pontos.forEach((p, i) => {
+            const e = document.createElement('span');
+            e.className = 'mapa-marca ' + p.cls;
+            e.style.cssText = `left:${px[i].left}px;top:${px[i].top}px`;
+            e.title = p.nome ? `${t(p.rot)} — ${p.nome}` : t(p.rot);
+            marks.appendChild(e);
+        });
+        const alvo = 96;
+        const metros = alvo * g.metrosPorPixel;
+        const bonito = [5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000]
+            .reduce((a, b) => (Math.abs(b - metros) < Math.abs(a - metros) ? b : a));
+        const esc = document.getElementById('mapaLbEscala');
+        esc.style.width = Math.round(bonito / g.metrosPorPixel) + 'px';
+        esc.textContent = bonito >= 1000
+            ? t('card.map.km', { n: (bonito / 1000).toLocaleString(i18nLocale()) })
+            : t('card.map.m', { n: bonito });
+        const leg = document.getElementById('mapaLbLegenda');
+        leg.textContent = '';
+        const ja = new Set();
+        for (const p of this.pontos) {
+            if (ja.has(p.rot)) continue;
+            ja.add(p.rot);
+            const sp = document.createElement('span');
+            sp.className = 'mapa-leg';
+            const pt = document.createElement('span');
+            pt.className = 'mapa-marca ' + p.cls;
+            sp.appendChild(pt);
+            sp.appendChild(document.createTextNode(t(p.rot)));
+            leg.appendChild(sp);
+        }
+    },
+
+    // Arrastar: converte o deslocamento em pixels para uma coordenada nova, via
+    // `desprojetar`. Ir pelo pixel e não por "graus por pixel" mantém a conta
+    // correta em qualquer latitude e qualquer zoom.
+    arrastar(dxPx, dyPx) {
+        const el = document.getElementById('mapaLightbox');
+        const w = el.clientWidth || innerWidth, h = el.clientHeight || innerHeight;
+        const g = mapaGrade(this.centro, this.z, w, h, API.getRegion());
+        this.centro = g.desprojetar(w / 2 - dxPx, h / 2 - dyPx);
+        this.desenhar();
+    },
+
+    // Zoom mantendo FIXO o ponto sob o dedo (ou o centro, se não houver foco).
+    // Sem isso, dar zoom no que interessa manda o alvo pra fora da tela.
+    zoom(delta, focoX, focoY) {
+        const el = document.getElementById('mapaLightbox');
+        const w = el.clientWidth || innerWidth, h = el.clientHeight || innerHeight;
+        const fx = focoX === undefined ? w / 2 : focoX;
+        const fy = focoY === undefined ? h / 2 : focoY;
+        const g0 = mapaGrade(this.centro, this.z, w, h, API.getRegion());
+        const alvoLL = g0.desprojetar(fx, fy);
+        const zNovo = Math.max(MAPA_Z_NAV_MIN, Math.min(MAPA_Z_NAV_MAX, Math.round(this.z + delta)));
+        if (zNovo === this.z) return;
+        this.z = zNovo;
+        const g1 = mapaGrade(alvoLL, this.z, w, h, API.getRegion());
+        // Onde o alvo caiu com o centro provisório? Corrige o centro pela sobra.
+        const p = g1.projetar(alvoLL);
+        this.centro = g1.desprojetar(p.left + (w / 2 - fx), p.top + (h / 2 - fy));
+        this.desenhar();
+    },
+
+    recentrar() {
+        if (!this._inicial) return;
+        this.centro = this._inicial.centro.slice();
+        this.z = this._inicial.z;
+        this.desenhar();
+    },
+};
 
 // Renderiza a imagem/carrossel do card (extraído de renderCurrentCard — A1).
 function renderCardImages(card, place) {

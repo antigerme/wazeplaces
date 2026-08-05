@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.05-01
+
+### Adicionado
+- **Toque no mapa para ampliar.** Pedido dos testadores: agora dá para tocar no mapa do card e abrir em tela cheia, arrastando e dando zoom para ver o entorno — pinça, roda do mouse, duplo toque, e botões de + / − para quem prefere. Um botão volta ao enquadramento do pedido quando você se perder.
+
+  **É mapa de verdade, não a mesma imagem esticada**: arrastar busca as áreas novas conforme você navega. Fecha pelo ✕, pelo Esc e pelo voltar do aparelho, como a foto ampliada.
+
 ## v2026.08.04-11
 
 ### Interno
