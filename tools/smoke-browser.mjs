@@ -1129,14 +1129,22 @@ for (const status of [404, 403]) {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(250);
 
-  const comMapa = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro) || FIXTURES_PAISES[0];
-  const foto = (n) => `https://venue-image.waze.com/thumbs/thumb700_F${n}.png`;
+  // Mapas DIFERENTES por card: com o mesmo `mapa` em todos, os tiles saem na
+  // mesma URL e a asserção "os tiles do card sem foto foram aquecidos" passa
+  // com o tile de qualquer outro card — mede nada.
+  const comMapa = FIXTURES_PAISES.filter((f) => f.mapa && f.mapa.centro);
+  const mapaDe = (i) => comMapa[i % comMapa.length].mapa;
+  // Nome do arquivo = o que o teste procura. Na primeira versão eu gerava
+  // `thumb700_FA1.png` e procurava `A1.png`: as três asserções de foto
+  // reprovaram por desencontro MEU, não do app.
+  const foto = (n) => `https://venue-image.waze.com/thumbs/thumb700_${n}.png`;
+  const base = { ...comMapa[0], imageUrl: null, approvedImageIds: [], changes: [] };
   const FILA = [
-    { ...comMapa, venueID: 'A', updateRequestID: 'A', imageUrls: [foto('A1'), foto('A2')], imageUrl: null, approvedImageIds: [], changes: [] },
-    { ...comMapa, venueID: 'B', updateRequestID: 'B', imageUrls: [foto('B1'), foto('B2'), foto('B3')], imageUrl: null, approvedImageIds: [], changes: [] },
-    { ...comMapa, venueID: 'C', updateRequestID: 'C', imageUrls: [foto('C1')], imageUrl: null, approvedImageIds: [], changes: [] },
-    { ...comMapa, venueID: 'D', updateRequestID: 'D', imageUrls: [], imageUrl: null, approvedImageIds: [], changes: [] },
-    { ...comMapa, venueID: 'E', updateRequestID: 'E', imageUrls: [foto('E1')], imageUrl: null, approvedImageIds: [], changes: [] },
+    { ...base, venueID: 'A', updateRequestID: 'A', mapa: mapaDe(0), imageUrls: [foto('A1'), foto('A2')] },
+    { ...base, venueID: 'B', updateRequestID: 'B', mapa: mapaDe(1), imageUrls: [foto('B1'), foto('B2'), foto('B3')] },
+    { ...base, venueID: 'C', updateRequestID: 'C', mapa: mapaDe(2), imageUrls: [foto('C1')] },
+    { ...base, venueID: 'D', updateRequestID: 'D', mapa: mapaDe(3), imageUrls: [] },
+    { ...base, venueID: 'E', updateRequestID: 'E', mapa: mapaDe(4), imageUrls: [foto('E1')] },
   ];
   await page.evaluate(async (fila) => {
     setLang('pt'); applyI18n();
