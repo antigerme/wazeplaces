@@ -520,9 +520,13 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 Bugs já encontrados e corrigidos — **não repita**:
 
-> **REGRA PERMANENTE (instrução do owner, dita duas vezes): TODA falha minha vira anotação aqui, na hora.** *"se é falha sua, anote para isso nunca mais acontecer"* / *"Toda falha sua - sempre anote para nunca mais esquecer"*. Não é só bug de produção: **falha de INSTRUMENTO conta igual**, e é a mais cara, porque ela me faz declarar "validado" sobre coisa quebrada — foi assim que o mapa foi pro celular do owner com uma faixa vazia atravessando a tela depois de eu ter dito que estava medido. Vale para: fixture que esconde o defeito, verificação que mede o lado errado, pré-condição não checada, e conclusão tirada sem controle. Se a falha não couber num gotcha novo, ela entra como parágrafo no gotcha existente do mesmo tema — mas ela ENTRA.
+> **REGRA PERMANENTE (instrução do owner): a falha NÃO PODE SE REPETIR — e se repetir, ela vira anotação aqui.** *"Quero que não se repita. A ideia é se a falha repetir, anotar."*
 >
-> **As três perguntas que teriam pego quase todas as minhas falhas de instrumento até hoje**, e que valem antes de escrever "validado":
+> O critério de entrada neste arquivo é **reincidência, não ocorrência**. Errar uma vez, corrigir e seguir não vira parágrafo — vira ruído, e o arquivo já pede pra ser curto. Errar a MESMA coisa de novo é o sinal de que a lição não pegou sozinha e precisa estar escrita. Antes de anotar, então: *isto já aconteceu antes?* Se sim, procure o gotcha do mesmo tema e some o caso novo lá, em vez de abrir um irmão — a repetição é mais informativa junta do que espalhada.
+>
+> **Falha de INSTRUMENTO conta igual à de produção**, e reincide mais: é ela que me faz declarar "validado" sobre coisa quebrada, e foi assim que o mapa chegou no celular do owner com uma faixa vazia atravessando a tela depois de eu ter dito que estava medido.
+>
+> **As três perguntas abaixo estão aqui porque JÁ reincidiram** — fixture que esconde o defeito (#52 e #58), instrumento errado antes do código (#28, #50, #55), medida do lado errado (#33, #34, #58). Valem antes de escrever "validado":
 > 1. **Se o defeito existisse, este teste FALHARIA?** Prove desfazendo a correção de propósito. Teste que nunca foi visto reprovando não é teste, é decoração.
 > 2. **A fixture DISTINGUE os casos?** Conteúdo idêntico para recursos distintos não detecta erro de posição, de ordem nem de ausência. Foto 800×400 só-paisagem escondeu o bug de proporção (gotcha #52); tile cinza igual para todo x/y escondeu a faixa vazia (gotcha #58).
 > 3. **Estou medindo a coisa ou a intenção dela?** `style.width` é o que pedi; `getBoundingClientRect().width` é o que a tela deu. Contar FALHAS de rede não é contar SUCESSOS — zero requisição lê como "zero problema".
