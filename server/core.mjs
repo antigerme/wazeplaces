@@ -1636,9 +1636,19 @@ async function handleExcluirFoto(data, { sessions }) {
     };
   }
 
-  // 4) Conferência pelo que o Waze DEVOLVEU. A resposta do POST traz o venue
-  //    inteiro já atualizado (medido: `status: 0, synced: true`), então dá pra
-  //    afirmar que saiu em vez de supor que saiu — sem gastar outra chamada.
+  // 4) Conferência pelo que o Waze DEVOLVEU — e o eco NÃO É PROVA, então isto
+  //    é uma rede a mais, não a garantia.
+  //
+  //    Medido escrevendo de verdade no local de teste do owner: ao mandar de
+  //    volta uma foto que tinha acabado de ser excluída, o Waze respondeu
+  //    HTTP 200 com `status: 0, synced: true` e ECOOU as 5 fotos, inclusive a
+  //    re-adicionada (com `date` novo e `scanned: false`) — e persistiu 4.
+  //    Três leituras seguidas, mesmo `updatedOn`: a foto não voltou.
+  //
+  //    Pro nosso caso o eco e a realidade concordam (a exclusão persiste, e
+  //    isso foi verificado por leitura independente: 5 → 4). Mas ele só
+  //    detecta o Waze dizendo "continua aí"; não detecta o Waze dizendo "saiu"
+  //    e guardando outra coisa. Vale como sinal barato, não como contrato.
   let confirmado = null;
   try {
     const eco = JSON.parse(result.response);
