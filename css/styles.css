@@ -1469,6 +1469,21 @@ button:active {
    `bottom` que só faz sentido no card (acima da fileira de navegação), e só
    não quebrou o ampliado por acidente — a utility `bottom-4` do HTML vencia
    por ordem de carga (gotcha #27). Acidente não é contrato. */
+/* ── O tile tem o tamanho que o CÓDIGO pede, não o que a caixa permite ──────
+   O preflight do Tailwind traz `img,video{max-width:100%;height:auto}`. Um
+   tile de 512px dentro de uma caixa de 393px era CORTADO pra 393 — e como as
+   posições continuam de 512 em 512, sobrava um VÃO de 119px entre cada coluna:
+   a faixa vertical vazia que o owner viu no celular. O `height` inline já
+   vencia o `height:auto`; o `max-width` não tinha ninguém pra vencer.
+
+   Classe (0,1,0) ganha do seletor de tipo (0,0,1) em qualquer ordem de carga,
+   então aqui uma classe basta — diferente do gotcha #27, que é sobre disputar
+   com UTILITY (também 0,1,0), onde a ordem decide. */
+.mapa-tile {
+  max-width: none;
+  max-height: none;
+}
+
 .mapa-escala,
 .card-map-scale {
   border-bottom: 3px solid currentColor;

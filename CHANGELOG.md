@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.05-03
+
+### Corrigido
+- **Faixa vazia atravessando o mapa.** No celular, o mapa aparecia cortado por uma tira em branco, com o mapa continuando do outro lado — como se os pedaços não se encaixassem. Encaixam agora, no mapa do card e no ampliado. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme) com print do aparelho.
+
 ## v2026.08.05-02
 
 ### Adicionado

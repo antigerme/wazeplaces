@@ -2197,9 +2197,37 @@ function renderCurrentCard() {
 // As cores são as MESMAS do diff — verde entra, vermelho sai. O card já ensina
 // essa gramática na caixa de mudanças; inventar outra aqui obrigaria o editor a
 // aprender duas.
-function renderMapa(card, place) {
+// A caixa do mapa cresceu depois do enquadramento? Refaz.
+//
+// Não é caso raro: o card é flex e assenta depois do primeiro render, então a
+// medida do momento do render quase sempre subestima. Girar o aparelho e mudar
+// a fonte do sistema fazem o mesmo.
+//
+// Duas regras que vêm do gotcha #35 e não são opcionais: o callback do
+// ResizeObserver só AGENDA (a escrita vai no quadro seguinte, fora do ciclo de
+// entrega), e só refaz quando a caixa CRESCEU além do que o enquadramento
+// cobre — encolher não abre buraco, e refazer à toa é custo por quadro pra
+// sempre. Sem essas duas, isto vira o "ResizeObserver loop completed with
+// undelivered notifications" na cara do editor.
+function vigiarCaixaDoMapa(box, card, place) {
+    if (box._roMapa) return;
+    let agendado = 0;
+    box._roMapa = new ResizeObserver(() => {
+        if (agendado) return;
+        agendado = requestAnimationFrame(() => {
+            agendado = 0;
+            const w = box.clientWidth, h = box.clientHeight;
+            if (!w || !h) return;
+            if (w <= (+box.dataset.mapaW || 0) + 0.5 && h <= (+box.dataset.mapaH || 0) + 0.5) return;
+            try { renderMapa(card, place, true); } catch (e) { /* mapa nunca derruba o card */ }
+        });
+    });
+    box._roMapa.observe(box);
+}
+
+function renderMapa(card, place, refazendo) {
     const box = card.querySelector('.card-map');
-    if (!box || !place.mapa || box.dataset.pronto === '1') return !!(box && place.mapa);
+    if (!box || !place.mapa || (box.dataset.pronto === '1' && !refazendo)) return !!(box && place.mapa);
     const m = place.mapa;
 
     // Ordem estável: é ela que casa cada pixel devolvido com o seu marcador.
@@ -2213,10 +2241,22 @@ function renderMapa(card, place) {
             rot: 'card.map.entrada.' + e.estado,
         });
     }
+    // A caixa é medida AGORA, e o enquadramento vale só pra este tamanho: os
+    // tiles são enumerados pra cobrir exatamente `larguraPx × alturaPx`. Se a
+    // caixa crescer depois — e ela cresce, porque o card é flex e assenta
+    // depois do primeiro render —, a faixa nova fica SEM tile. Medido: caixa
+    // de 359×329 recebendo o enquadramento de uma caixa mais baixa, um tile só
+    // em `top:-248px` cobrindo até y=264, e 65px de nada embaixo. Guardar as
+    // dimensões usadas é o que deixa o observer lá embaixo decidir se refaz.
+    const larguraCaixa = box.clientWidth || 400;
+    const alturaCaixa = box.clientHeight || 240;
     const r = window.mapaMontar
-        ? mapaMontar(pontos.map((p) => p.ll), box.clientWidth || 400, box.clientHeight || 240, API.getRegion())
+        ? mapaMontar(pontos.map((p) => p.ll), larguraCaixa, alturaCaixa, API.getRegion())
         : null;
     if (!r) return false;
+    box.dataset.mapaW = String(larguraCaixa);
+    box.dataset.mapaH = String(alturaCaixa);
+    vigiarCaixaDoMapa(box, card, place);
 
     const tiles = box.querySelector('.card-map-tiles');
     const marks = box.querySelector('.card-map-marks');
@@ -2227,7 +2267,7 @@ function renderMapa(card, place) {
         im.src = t.url;
         im.alt = '';
         im.decoding = 'async';
-        im.className = 'absolute';
+        im.className = 'absolute mapa-tile';
         im.style.cssText = `left:${t.left}px;top:${t.top}px;width:${r.tamanho}px;height:${r.tamanho}px`;
         // Tile que não vem não pode deixar um alt quebrado no meio do mapa.
         im.onerror = () => im.remove();
@@ -2386,7 +2426,7 @@ const MapaLightbox = {
             if (!im) {
                 im = new Image();
                 im.src = t.url; im.alt = ''; im.decoding = 'async';
-                im.className = 'absolute';
+                im.className = 'absolute mapa-tile';
                 im.style.width = im.style.height = g.tamanho + 'px';
                 im.onerror = () => { im.remove(); this._tiles.delete(t.chave); };
                 this._tiles.set(t.chave, im);
