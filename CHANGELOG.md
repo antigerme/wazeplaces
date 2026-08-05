@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.05-04
+
+### Interno
+- **Ordem de carregamento do CSS invertida.** Mudança de bastidor, sem efeito visível: medido pixel a pixel em 150 telas (25 estados × 3 aparelhos × claro e escuro), **zero diferença**. Serve pra que ajustes de estilo da app parem de ser silenciosamente ignorados pelo framework — uma fonte recorrente de "arrumei e não pegou".
+
+### Corrigido
+- **Botão ✕ ficava quadrado ao receber foco.** O anel de foco sobrescrevia o formato do próprio botão. Aparecia ao abrir Filtros, Ajuda, a foto ampliada e o mapa ampliado pelo teclado.
+
 ## v2026.08.05-03
 
 ### Corrigido
