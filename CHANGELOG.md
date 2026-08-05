@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.05-05
+
+### Melhorado
+- **Passar os cards ficou mais fluido.** A app agora deixa pronta a primeira imagem dos **três** próximos pedidos, em vez de só do seguinte — quem passa rápido não vê mais a caixa cinza esperando carregar. O pedido seguinte vem completo (todas as fotos e o mapa), para quem parar e quiser olhar com calma.
+
+  **Sem pesar nos seus dados**: o carregamento antecipado usa prioridade baixa, então nunca atrasa o que está na sua tela agora; respeita o modo de economia de dados do aparelho; e não baixa mais de 4 fotos por pedido.
+
 ## v2026.08.05-04
 
 ### Interno

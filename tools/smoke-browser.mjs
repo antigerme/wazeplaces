@@ -1101,6 +1101,84 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── O aquecimento pede o ativo certo, do card certo, antes da hora? ──────
+//
+// Guard ESTÁTICO não resolve isto: quando o prefetch foi refatorado em funções
+// auxiliares, o teste que exigia os literais dentro de `prefetchNextImage`
+// reprovou a refatoração correta — e a versão que segue a cadeia de chamadas
+// deixa passar o defeito original, porque o identificador continua na cadeia
+// por outro caminho. O que decide é a REDE: qual URL foi pedida, quando, e
+// para qual card.
+{
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block' });
+  const pedidos = [];
+  const t0 = Date.now();
+  // Host REAL: `img-src` da CSP não libera domínio inventado, e aí o navegador
+  // nem chega a pedir — zero requisição lê como "prefetch quebrado".
+  await ctx.route('https://venue-image.waze.com/**', (r) => {
+    pedidos.push({ t: Date.now() - t0, tipo: 'foto', qual: r.request().url().split('thumb700_').pop() });
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA });
+  });
+  await ctx.route('**/*-tiles/**', (r) => {
+    pedidos.push({ t: Date.now() - t0, tipo: 'tile', qual: 't' });
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA });
+  });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+
+  const comMapa = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro) || FIXTURES_PAISES[0];
+  const foto = (n) => `https://venue-image.waze.com/thumbs/thumb700_F${n}.png`;
+  const FILA = [
+    { ...comMapa, venueID: 'A', updateRequestID: 'A', imageUrls: [foto('A1'), foto('A2')], imageUrl: null, approvedImageIds: [], changes: [] },
+    { ...comMapa, venueID: 'B', updateRequestID: 'B', imageUrls: [foto('B1'), foto('B2'), foto('B3')], imageUrl: null, approvedImageIds: [], changes: [] },
+    { ...comMapa, venueID: 'C', updateRequestID: 'C', imageUrls: [foto('C1')], imageUrl: null, approvedImageIds: [], changes: [] },
+    { ...comMapa, venueID: 'D', updateRequestID: 'D', imageUrls: [], imageUrl: null, approvedImageIds: [], changes: [] },
+    { ...comMapa, venueID: 'E', updateRequestID: 'E', imageUrls: [foto('E1')], imageUrl: null, approvedImageIds: [], changes: [] },
+  ];
+  await page.evaluate(async (fila) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true; API.setSession('t');
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false, profileImageUrl: '' };
+    AppState.stats = { read: 0, rejected: 0, skipped: 0 }; AppState.serverTotal = fila.length;
+    AppState.hasMore = false;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+    AppState.queue = fila; AppState.currentPlace = fila[0];
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 900));
+  }, FILA);
+
+  const pediu = (q) => pedidos.some((x) => x.qual === q);
+  // PROFUNDIDADE: com o card A na tela, o 1º slide de B, C e D já tem que ter
+  // saído — é o que dá tolerância a quem passa rápido.
+  checa(pediu('B1.png'), 'prefetch: 1º slide do card +1 não foi aquecido');
+  checa(pediu('C1.png'), 'prefetch: 1º slide do card +2 não foi aquecido (profundidade)');
+  // O card D não tem foto: o que vem primeiro nele é o MAPA.
+  checa(pedidos.some((x) => x.tipo === 'tile'), 'prefetch: card sem foto não teve os tiles aquecidos');
+  // LARGURA: só o card SEGUINTE ganha as outras fotos.
+  checa(pediu('B2.png'), 'prefetch: as outras fotos do card seguinte não foram aquecidas');
+  checa(!pediu('E1.png'), 'prefetch: aqueceu o card +4, fora da profundidade — vira desperdício');
+
+  // PRIORIDADE: nada aquecido pode competir com o card na tela.
+  const prio = await page.evaluate(() => {
+    const im = new Image();
+    return 'fetchPriority' in im ? 'suportado' : 'sem suporte no browser';
+  });
+  if (prio === 'suportado') {
+    // O <img> do card atual NÃO pode nascer com prioridade baixa.
+    const doCard = await page.evaluate(() => (document.querySelector('.card-image') || {}).fetchPriority || '');
+    checa(doCard !== 'low', `prefetch: a foto do card na tela ficou com fetchPriority=${doCard}`);
+  }
+  checa(erros.length === 0, 'prefetch: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -1115,4 +1193,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, Esc e ✕)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e camada da confirmação)`
-  + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`);
+  + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
+  + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`);
