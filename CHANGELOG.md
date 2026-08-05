@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.05-02
+
+### Adicionado
+- **Lixeira na foto ampliada.** Abriu a foto e é lixo? Toca na lixeira, no canto de baixo, e ela sai do local. Pergunta uma vez antes — é a única ação da app que muda o mapa em si, e não tem desfazer.
+
+  Aparece só para **editores nível 6 que são gerentes de área**, e só na foto que já está no mapa: a foto **proposta no pedido** (a do ✨) continua saindo pelo ✕ ou ✓ do card, que é o caminho dela.
+
+  Antes de excluir, a app **relê as fotos do local no Waze**. O motivo é que o Waze não aceita "apague esta foto" — só "a lista de fotos agora é esta". Sem reler, excluir uma foto lixo apagaria junto qualquer foto que outro editor tivesse subido nesse meio-tempo, sem aviso nenhum.
+
 ## v2026.08.05-01
 
 ### Adicionado

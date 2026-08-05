@@ -1558,3 +1558,50 @@ test('card: UMA gramática de rótulo, e a caixa do reporte só existe com texto
   assert.doesNotMatch(APP_, /box\.classList\.add\('flex-shrink-0'\)/,
     'voltou o malabarismo de flex que existia só porque a caixa aparecia vazia');
 });
+
+test('lixeira do lightbox: alvo de toque, camada e registro nos três lugares', () => {
+  const APP = read('js/app.js');
+
+  // 1) Alvo de toque. A régua é 44px (HIG) / 48dp (M3) e vale pra botão NOVO
+  //    também — não só pros que já estavam aqui.
+  const botao = HTML.match(/<button[^>]*id="lightboxDelete"[^>]*>/);
+  assert.ok(botao, 'o botão da lixeira sumiu do lightbox');
+  const wh = botao[0].match(/\bw-(\d+)\b[^>]*\bh-(\d+)\b/);
+  assert.ok(wh, 'a lixeira perdeu as classes de tamanho — mede-se o alvo, não se confia nele');
+  assert.ok(Number(wh[1]) * 4 >= 44 && Number(wh[2]) * 4 >= 44,
+    `alvo de ${Number(wh[1]) * 4}×${Number(wh[2]) * 4}px, abaixo dos 44 exigidos`);
+
+  // 2) Nasce ESCONDIDA. Sem `hidden` no markup, ela pisca pra todo mundo entre
+  //    o primeiro paint e o primeiro _render() — inclusive pra quem não é L6.
+  assert.ok(/class="[^"]*\bhidden\b/.test(botao[0]), 'a lixeira não nasce escondida');
+
+  // 3) A confirmação é aberta DE DENTRO do lightbox, então tem que estar acima
+  //    dele. Compara os z-index de verdade em vez de exigir um literal: forma
+  //    diferente com valor certo passa, valor errado reprova (a lição do
+  //    guard acoplado à FORMA, que já reprovou correção certa cinco vezes).
+  const z = (id) => {
+    const m = HTML.match(new RegExp(`<div[^>]*id="${id}"[^>]*>`));
+    assert.ok(m, `sumiu o #${id}`);
+    const v = m[0].match(/\bz-\[(\d+)\]/) || m[0].match(/\bz-(\d+)\b/);
+    assert.ok(v, `#${id} está sem z-index declarado`);
+    return Number(v[1]);
+  };
+  assert.ok(z('deletePhotoModal') >= z('imageLightbox'),
+    `a confirmação (z=${z('deletePhotoModal')}) ficou ABAIXO do lightbox (z=${z('imageLightbox')}) — o diálogo some atrás da foto`);
+
+  // 4) Registrada nos três lugares que a fazem funcionar. Faltar qualquer um é
+  //    silencioso: sem MODAL_IDS o Esc/scrim não fecham; sem
+  //    MODAIS_ACIMA_DO_LIGHTBOX o voltar fecha a FOTO e deixa a pergunta
+  //    órfã; sem LIMPEZA_AO_FECHAR o alvo sobrevive ao cancelamento e a
+  //    próxima exclusão age sobre a foto errada.
+  const semComentario = APP.replace(/^\s*\/\/.*$/gm, '');
+  const idsDe = (nome) => {
+    const m = semComentario.match(new RegExp(`const ${nome} = (\\[[^\\]]*\\])`));
+    assert.ok(m, `sumiu a lista ${nome}`);
+    return new Function(`return ${m[1]}`)();
+  };
+  assert.ok(idsDe('MODAL_IDS').includes('deletePhotoModal'), 'deletePhotoModal fora de MODAL_IDS');
+  assert.ok(idsDe('MODAIS_ACIMA_DO_LIGHTBOX').includes('deletePhotoModal'), 'deletePhotoModal fora de MODAIS_ACIMA_DO_LIGHTBOX');
+  assert.ok(/LIMPEZA_AO_FECHAR[\s\S]{0,2000}deletePhotoModal\(\)/.test(semComentario),
+    'deletePhotoModal sem limpeza — o alvo sobrevive ao Esc e ao scrim');
+});

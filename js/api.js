@@ -150,6 +150,24 @@ const API = {
         });
     },
 
+    // Exclui UMA foto do local. `lat`/`lon` não são enfeite: o servidor relê o
+    // local antes de gravar e o Waze só lê por bbox — sem as coordenadas ele
+    // não tem como buscar o venue de novo.
+    async excluirFoto(venueID, imageID, lat, lon) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: t('api.error.noSession') };
+        }
+        return this._post('excluir-foto', {
+            sessionToken,
+            region: this.getRegion(),
+            venueID,
+            imageID,
+            lat,
+            lon
+        });
+    },
+
     async getProfile() {
         const sessionToken = this.getSession();
         if (!sessionToken) {
