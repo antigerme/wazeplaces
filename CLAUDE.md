@@ -10,7 +10,11 @@ Contexto pra agentes Claude que trabalham neste repo. Diferente do `README.md` (
 
 PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidamente os pedidos de places enviados por usuários comuns — fotos lixo, nomes ruins, endereços errados, categorias absurdas. Cards aparecem um por vez e o editor faz swipe.
 
-**Regra de ouro de produto:** a app **NUNCA aprova** places, **só rejeita ou marca como lido**. Aprovar exige ajuste no mapa via WME oficial (link "↗ abrir no WME" em cada card resolve isso). Se você encontrar referência a "aprovar" no código ou docs, é bug — corrija ou pergunte.
+**Regra de ouro de produto:** a app **nunca aprova dado de LOCAL** — nome, categoria, endereço, posição, horário. Nesses, aprovar é escolher entre um valor e outro, e o WME é que tem campo pra corrigir: o card só **rejeita** ou **marca como lido**, e quem quiser aprovar abre o ↗.
+
+**A única exceção é FOTO NOVA, e o que a justifica é a natureza da decisão, não a conveniência** (v2026.08.06-05, a pedido de um global champ, decidida pelo owner). Foto não tem campo pra ajustar: ou serve ou não serve. A decisão está **inteira na tela** — a foto ampliada no lightbox é o dado completo, não um resumo dele —, é **binária**, e é **reversível** pelo mesmo caminho (a lixeira que já existe tira do mapa a foto que entrou). Aprovar dado de local não tem nenhuma das três. A ação mora no **lightbox**, nunca no card: pra aprovar é preciso ter ABERTO a foto, e é isso que garante que ela foi vista em tamanho de decisão — o swipe do card decide o pedido, não o pixel.
+**Portão:** o mesmo do excluir (`podeExcluirFotoAqui()`: `isStaff || (rank >= 5 && isAreaManager)`, ou seja **L6+AM ou staff**), e ele é só do CLIENTE — o Waze já recusa quem não pode, e portão no servidor seria segunda regra pra manter em sincronia (ver gotcha #59).
+**Continua valendo:** aprovar QUALQUER outro tipo de pedido é bug. `handleValidarPlace` só manda `approve: true` quando `data.approve === true` — booleano estrito, sem coerção, travado em `test/dispatch.test.mjs` com valores truthy que precisam ser recusados.
 
 **Regra de ouro de interface: GUI/UX primeiro, com M3 + HIG de régua SEMPRE.** Não é checklist de acabamento pra passar no fim — é o critério que decide **o que aparece na tela e quando**. Na prática, antes de dar qualquer coisa por pronta, olhe a tela no aparelho de verdade e pergunte:
 
@@ -248,7 +252,8 @@ Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sess
 | `testar-cookies` | `Session` (smoke test + gate) | Valida, checa `isUserAllowed`, cria sessão e devolve token |
 | `buscar-places` | `/row-Descartes/app/v1/Issues/Search/List` | Aceita `page`, `countryId`, `stateId`, `managedAreaId`, `bbox`, `types[]` (os 7 tipos do WME — ver `PUR_TIPOS`/`purTypeDoUR`; o corte é NOSSO, ver gotcha #49), `categories[]`, `residential`, `unreadOnly`. Envia `orderBy: SORTING_UPDATE_TIME_DESC`. |
 | `marcar-lido` | `/row-Descartes/app/v1/Issues/Read` | Aceita single (`venueID`+`updateRequestID`) ou batch (`items[]`) |
-| `validar-place` | `/row-Descartes/app/Features` (sempre `approve: false`) | Único caminho de "rejeitar" |
+| `validar-place` | `/row-Descartes/app/Features` | `approve: false` (rejeitar) é o padrão — **só manda `true` com `data.approve === true`**, booleano estrito. Aprovar é caminho exclusivo de FOTO NOVA (ver a regra de ouro de produto) |
+| `excluir-foto` | `/row-Descartes/app/Features` (`UPDATE_OBJECT`/`venue`) | O Waze **não apaga: SUBSTITUI a lista `images` inteira** — daí o `relerLocal` por bbox antes de escrever (gotcha #57). `action: 'preparar'` só aquece o cache de releitura |
 | `perfil` | `/row-Descartes/app/Session?language=pt-BR` | Extrai bbox de `areas[].geometry.coordinates` |
 | `lista-paises` | `/row-Descartes/app/LocationSearch/Countries` | Nomes vêm **sempre em inglês** (ver nota abaixo). Ordem base no servidor; o cliente reordena na colação do idioma (`ordenarPorNome`) |
 | `lista-estados` | `/row-Descartes/app/LocationSearch/States?countryId=N` | Nomes vêm no idioma **local** (Amapá, Ceará) — é o nome próprio. Idem ordenação |
@@ -604,6 +609,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 57. **Excluir foto: o Waze não apaga, SUBSTITUI a lista** — sem revisão nem If-Match, quem escreve por último ganha. Relê o local e monta a lista do que o Waze diz AGORA. Não existe leitura por ID (5 formas, todas 406).
 57.1. **A grade de gerenciar fotos foi decidida como NÃO** — e o 42% que parece pedi-la é armadilha: medi fotos que EXISTEM, não que são EXCLUÍDAS.
 58. **O tile era desenhado com 393px onde o código pedia 512** — `img{max-width:100%}` do preflight. Meça `getBoundingClientRect()` (o que a tela deu), não `style.width` (o que você pediu). Stub idêntico pra todo recurso não detecta erro de posição.
+59. **Regra de produto que muda não some: vira contrato mais estreito** — a app passou a aprovar FOTO, e o que guarda a regra antiga é `data.approve === true`, booleano estrito. Coerção é o risco real (`'false'` é truthy). O portão é só do CLIENTE de propósito, e caminho de ESCRITA se valida comparando o payload com o do WME no HAR — `/Features` não se chama com os cookies do owner.
 18. **Version skew: três camadas precisam estar alinhadas** — estratégia do SW, opção `cache` do `fetch` (`{ cache: 'reload' }`) e Cache-Control do servidor. Mexer numa só rompe a cadeia, e no celular não há `Ctrl+Shift+R`.
 
 

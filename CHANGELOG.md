@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.06-05
+
+### Adicionado
+- **Dá para aprovar uma foto nova sem sair da app.** Abra a foto do pedido e, se ela ainda não está no mapa, aparece **"Aprovar"** embaixo. Tocou, ela entra — o ✨ some na hora e o botão vira lixeira, porque a partir dali a foto está no mapa como qualquer outra. Pedido de um global champ, trazido pelo [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+  Vale **só para foto**, e o motivo é o que a decisão exige de você: uma foto ou serve ou não serve, e ela está inteira na sua tela. Nome, categoria, endereço e posição continuam sem "aprovar" na app — ali aprovar é escolher um valor, e quem tem campo para isso é o WME (o botão ↗ do card).
+
+  Aparece para quem já podia excluir foto: **nível 6 com Area Manager**, ou staff do Waze. E é preciso ter **ampliado** a foto — não há atalho pelo card, justamente porque aprovar sem olhar não é aprovar.
+
+  O **Desfazer** funciona igual ao do swipe: a foto só é enviada ao Waze quando a janela fecha sozinha, então dá tempo de voltar atrás. Quem desligou o Desfazer nas Preferências continua sem banner, e o envio sai na hora com o botão virando indicador de progresso. Aprovar **não conta no placar** — o placar é do que você triou, e a foto é uma decisão dentro do pedido.
+
 ## v2026.08.06-04
 
 ### Melhorado

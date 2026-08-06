@@ -1470,10 +1470,22 @@ async function handleMarcarLido(data, { sessions }) {
   };
 }
 
+// Rejeita OU aprova um pedido. Os dois caminhos são a MESMA chamada com a flag
+// invertida — confirmado num HAR do owner aprovando uma foto no WME: mesma
+// estrutura byte a byte, `approve: true`. A resposta ecoa o venue com a imagem
+// já em `approved: true`, e o id da foto é o mesmo do updateRequest.
+//
+// Aprovar existe SÓ pra foto, e essa restrição vive no cliente — como a da
+// lixeira, e pelo mesmo motivo do owner: quem quiser aprovar outra coisa já
+// consegue pelo WME. O que a app promete é não OFERECER, não impedir.
 async function handleValidarPlace(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
   if (data.venueID === undefined || data.updateRequestID === undefined) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+
+  // `=== true` e não coerção: sem isso, qualquer valor truthy que escapasse
+  // (uma string "false", por exemplo) viraria uma aprovação.
+  const aprovar = data.approve === true;
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
   const payload = {
@@ -1487,7 +1499,7 @@ async function handleValidarPlace(data, { sessions }) {
               name: 'UPDATE_PLACE_UPDATE',
               _objectType: 'venueUpdateRequest',
               action: 'UPDATE',
-              attributes: { approve: false, id: data.updateRequestID, venueID: data.venueID },
+              attributes: { approve: aprovar, id: data.updateRequestID, venueID: data.venueID },
             },
           ],
         },
@@ -1498,7 +1510,14 @@ async function handleValidarPlace(data, { sessions }) {
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
 
   if (result.httpCode === 200 && cat.category !== 'already_processed') {
-    return { status: 200, body: { success: true, message: 'Place rejeitado com sucesso', action: 'rejected' } };
+    return {
+      status: 200,
+      body: {
+        success: true,
+        message: aprovar ? 'Pedido aprovado com sucesso' : 'Place rejeitado com sucesso',
+        action: aprovar ? 'approved' : 'rejected',
+      },
+    };
   }
   return {
     status: cat.category === 'already_processed' || cat.category === 'not_found' ? 200 : 500,

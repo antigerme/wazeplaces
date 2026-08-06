@@ -150,6 +150,25 @@ const API = {
         });
     },
 
+    // Aprova o pedido — a foto pendente passa a valer no mapa. É a MESMA chamada
+    // do rejeitar com a flag invertida (confirmado num HAR do owner aprovando
+    // no WME). Só é oferecido pra pedido de FOTO: ali não há campo pra ajustar,
+    // então a decisão cabe inteira na tela, que é o que a regra de "nunca
+    // aprova" existia pra proteger.
+    async aprovarPedido(venueID, updateRequestID) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: t('api.error.noSession') };
+        }
+        return this._post('validar-place', {
+            sessionToken,
+            region: this.getRegion(),
+            venueID,
+            updateRequestID,
+            approve: true,
+        });
+    },
+
     // Exclui UMA foto do local. `lat`/`lon` não são enfeite: o servidor relê o
     // local antes de gravar e o Waze só lê por bbox — sem as coordenadas ele
     // não tem como buscar o venue de novo.

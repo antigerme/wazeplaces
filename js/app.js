@@ -721,6 +721,7 @@ function setupModalListeners() {
     $('confirmBatchRead')?.addEventListener('click', handleBatchMarkRead);
     $('cancelBatchRead')?.addEventListener('click', () => closeModal('batchReadModal'));
     $('lightboxDelete')?.addEventListener('click', pedirExclusaoDaFoto);
+    $('lightboxApprove')?.addEventListener('click', aprovarFotoAtual);
 
     // Pareamento
     $('pairCreateBtn')?.addEventListener('click', abrirPareamento);
@@ -835,6 +836,11 @@ const Lightbox = {
         if (!this.isOpen()) return;
         if (!viaHistorico) CamadaVoltar.consumir();
         document.getElementById('imageLightbox').classList.add('hidden');
+        // Aprovou aqui dentro? O pedido está resolvido no Waze, então o card sai
+        // agora — decisão do owner: ficar visível enquanto se olham as outras
+        // fotos, e avançar ao fechar. Fica DEPOIS de esconder o lightbox pra o
+        // card novo não aparecer por baixo de uma camada que ainda está aberta.
+        avancarSeAprovado();
         if (!topOpenModal()) document.body.style.overflow = '';
         document.getElementById('lightboxImage').removeAttribute('src');
         this.resetZoom();
@@ -906,6 +912,37 @@ const Lightbox = {
         badge.classList.toggle('hidden', this.idx !== this.newIdx);
         const del = document.getElementById('lightboxDelete');
         if (del) del.classList.toggle('hidden', !this.idFotoAtual());
+        // Mutuamente exclusivos: pendente se APROVA, aprovada se EXCLUI. Sem
+        // isso os dois botões brigariam pelo mesmo canto, e o editor teria que
+        // adivinhar qual vale pra foto que está vendo.
+        const apr = document.getElementById('lightboxApproveBar');
+        if (apr) apr.classList.toggle('hidden', !this.podeAprovarAtual());
+    },
+    // A foto aberta é a PENDENTE deste pedido e este editor pode aprovar?
+    //
+    // `newIdx` é o índice do ✨, derivado do `updateRequestID` — então "a foto
+    // pendente" é exatamente a que este card propõe. Denúncia (🚩) fica de
+    // fora: ali a foto JÁ está no mapa e o que se decide é outra coisa.
+    podeAprovarAtual() {
+        const p = this.place;
+        if (!p || this.eDenuncia) return false;
+        if (this.idx !== this.newIdx || this.newIdx < 0) return false;
+        if (!p.venueID || !p.updateRequestID) return false;
+        return podeExcluirFotoAqui();   // mesmo portão, decisão do owner
+    },
+    // Depois de aprovada, a foto passa a estar no mapa: o ✨ some e ela entra
+    // na lista de excluíveis — o botão vira lixeira sozinho.
+    marcarComoAprovada(id) {
+        const p = this.place;
+        if (p && Array.isArray(p.approvedImageIds) && !p.approvedImageIds.includes(id)) p.approvedImageIds.push(id);
+        if (this.newIdx === this.idx) this.newIdx = -1;
+        if (this.isOpen()) this._render();
+    },
+    desmarcarAprovada(id, idxDoNovo) {
+        const p = this.place;
+        if (p && Array.isArray(p.approvedImageIds)) p.approvedImageIds = p.approvedImageIds.filter((x) => x !== id);
+        this.newIdx = idxDoNovo;
+        if (this.isOpen()) this._render();
     },
     // Devolve o id da foto aberta SÓ se ela puder ser excluída — as duas
     // perguntas numa função só, de propósito: separadas, uma delas acaba
@@ -1292,27 +1329,132 @@ function pedirExclusaoDaFoto() {
     };
     const timer = setTimeout(enviar, UNDO_WINDOW_MS);
     exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer };
-    mostrarDesfazerExclusao();
+    mostrarDesfazer(t('undo.photoDeleted'), () => exclusaoPendente && exclusaoPendente.desfazer());
+}
+
+// ── Aprovar a foto pendente ───────────────────────────────────────────────
+//
+// Espelho da lixeira, e de propósito: mesmo portão (L6+AM ou staff), mesma
+// janela de Desfazer, mesma regra de que o envio só sai quando a janela fecha
+// SOZINHA. O que muda é o sentido — aqui a foto passa a valer no mapa.
+//
+// Por que aprovar foto não fere a regra de ouro ("a app nunca aprova"): a regra
+// existe porque aprovar dado de LOCAL exige ajuste no WME — nome, categoria,
+// posição têm campo pra corrigir. Foto não tem: ou serve ou não serve, e a
+// decisão está inteira na tela. Decisão do owner, a pedido de um global champ.
+let aprovacaoPendente = null;
+
+// O card fica na tela depois de aprovar (decisão do owner) e só avança quando o
+// lightbox fechar. Sem isto, o pedido ficaria resolvido no Waze e pendurado na
+// fila — e o ✓ seguinte devolveria "já tratado por outro editor", que é um
+// toast confuso pra quem acabou de tratar ele mesmo.
+let placeResolvidoPorAprovacao = null;
+
+function estadoAprovando(ligado) {
+    const btn = document.getElementById('lightboxApprove');
+    const spin = document.getElementById('lightboxApproveSpinner');
+    const ico = document.getElementById('lightboxApproveIcon');
+    if (btn) btn.disabled = ligado;
+    if (spin) spin.classList.toggle('hidden', !ligado);
+    if (ico) ico.classList.toggle('hidden', ligado);
+}
+
+async function enviarAprovacao(alvo) {
+    try {
+        const r = await API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID);
+        if (r && r.success) {
+            // Sem toast de sucesso: o ✨ sumindo e o botão virando lixeira JÁ
+            // dizem que valeu — mesma razão do excluir.
+            placeResolvidoPorAprovacao = alvo.place;
+            AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+            updateStats();
+            return;
+        }
+        if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return; }
+        // `already_processed` conta como sucesso: outro editor aprovou antes, e
+        // o objetivo de quem tocou foi cumprido (mesma lógica do resto da app).
+        if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
+            placeResolvidoPorAprovacao = alvo.place;
+            AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+            updateStats();
+            return;
+        }
+        Lightbox.desmarcarAprovada(alvo.id, alvo.idx);
+        showToast(msgDoServidor(r) || t('toast.photoApproveFailed'), 'error');
+    } catch (e) {
+        Lightbox.desmarcarAprovada(alvo.id, alvo.idx);
+        showToast(t('toast.photoApproveFailed'), 'error');
+    }
+}
+
+// Avança o card cujo pedido foi aprovado — chamado ao fechar o lightbox.
+// A aprovação em voo (janela do Desfazer aberta) é despachada antes: fechar o
+// lightbox é sinal de que a pessoa terminou, e deixar a janela correndo com o
+// card já fora da tela é pedir pra ela desfazer algo que não vê mais.
+function avancarSeAprovado() {
+    if (aprovacaoPendente) aprovacaoPendente.enviar();
+    const alvo = placeResolvidoPorAprovacao;
+    if (!alvo) return;
+    placeResolvidoPorAprovacao = null;
+    if (AppState.currentPlace !== alvo) return;   // a fila já andou por outro caminho
+    advanceQueue();
+}
+
+function aprovarFotoAtual() {
+    if (!Lightbox.podeAprovarAtual()) return;
+    const place = Lightbox.place;
+    const alvo = { id: place.updateRequestID, place, idx: Lightbox.idx };
+    if (aprovacaoPendente) aprovacaoPendente.enviar();
+
+    const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
+    if (semJanela) {
+        estadoAprovando(true);
+        enviarAprovacao(alvo).finally(() => {
+            estadoAprovando(false);
+            Lightbox.marcarComoAprovada(alvo.id);
+        });
+        return;
+    }
+
+    // Com janela: o ✨ some JÁ (é o retorno imediato) e o envio espera.
+    Lightbox.marcarComoAprovada(alvo.id);
+    let saiu = false;
+    const enviar = () => {
+        if (saiu) return;
+        saiu = true;
+        clearTimeout(aprovacaoPendente && aprovacaoPendente.timer);
+        aprovacaoPendente = null;
+        removeUndoBanner();
+        enviarAprovacao(alvo);
+    };
+    const desfazer = () => {
+        if (saiu) return;
+        saiu = true;
+        clearTimeout(aprovacaoPendente && aprovacaoPendente.timer);
+        aprovacaoPendente = null;
+        removeUndoBanner();
+        Lightbox.desmarcarAprovada(alvo.id, alvo.idx);
+    };
+    aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer };
+    mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer());
 }
 
 // Banner próprio, com a MESMA aparência e o mesmo tempo do Desfazer do card —
 // é a mesma ideia, e duas gramáticas pro mesmo conceito é como o editor
 // descobre que a app se contradiz.
-function mostrarDesfazerExclusao() {
+function mostrarDesfazer(mensagem, aoDesfazer) {
     removeUndoBanner();
     const container = document.getElementById('undoContainer');
     if (!container) return;
     const banner = document.createElement('div');
     banner.className = 'undo-banner';
     banner.innerHTML = `
-        <span>${escapeHtml(t('undo.photoDeleted'))}</span>
+        <span>${escapeHtml(mensagem)}</span>
         <button type="button" id="undoBtn">${escapeHtml(t('undo.button'))}</button>
         <span class="undo-progress" style="animation-duration: ${UNDO_WINDOW_MS}ms" aria-hidden="true"></span>
     `;
     container.appendChild(banner);
-    document.getElementById('undoBtn').addEventListener('click', () => {
-        if (exclusaoPendente) exclusaoPendente.desfazer();
-    });
+    document.getElementById('undoBtn').addEventListener('click', () => aoDesfazer());
 }
 
 function populateCountrySelect() {

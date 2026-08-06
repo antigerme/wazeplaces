@@ -1052,6 +1052,132 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── Aprovar foto nova: o único "aprovar" que a app tem ───────────────────
+//
+// A regra de ouro de produto é que a app não aprova, e a foto é a exceção
+// medida — então o CI guarda exatamente as três coisas que a tornariam de novo
+// uma violação: aparecer onde não é foto pendente, aparecer pra quem não passa
+// no portão, e ENVIAR antes de a janela de Desfazer fechar sozinha. O terceiro
+// é o que não se vê lendo código: `undoEnabled` liga um `setTimeout`, e um
+// caminho que dispare o envio por fora (fechar o lightbox, trocar de foto)
+// aprovaria sem a pessoa poder voltar atrás.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const enviados = [];
+  await ctx.route('**/api/validar-place', async (r) => {
+    enviados.push(JSON.parse(r.request().postData() || '{}'));
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, action: 'approved' }) });
+  });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+
+  const IDS = ['pendente-01', 'aprovada-02'];
+  const PLACE = {
+    venueID: 'v-aprovar', updateRequestID: 'pendente-01', name: 'Local com foto nova',
+    categories: ['PARK'], address: 'Rua X, 1', updateTypeKey: 'IMAGE', purType: 'NEW_PHOTO',
+    createdBy: 'fulano', creatorRank: 0, lat: -12.9, lon: -38.3, changes: [], mapa: null,
+    imageUrls: IDS.map((id) => `${foto}#${id}`),
+    approvedImageIds: ['aprovada-02'],
+  };
+  const montar = (perfil) => page.evaluate(async ({ pl, perfil }) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true;
+    API.setSession('token-smoke');
+    AppState.profile = perfil;
+    AppState.stats = { read: 0, rejected: 0, skipped: 0 }; AppState.serverTotal = 2;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+    // DOIS cards: sem o segundo não dá pra ver se o primeiro sai da fila ao
+    // fechar o lightbox — a tela iria pro "Tudo limpo!" de qualquer jeito.
+    AppState.queue = [JSON.parse(JSON.stringify(pl)),
+      { ...JSON.parse(JSON.stringify(pl)), venueID: 'v2', updateRequestID: 'p2', name: 'Segundo' }];
+    AppState.currentPlace = AppState.queue[0];
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 350));
+  }, { pl: PLACE, perfil });
+  const abrir = async () => {
+    await page.evaluate(() => document.querySelector('.card-image')?.click());
+    await page.waitForTimeout(300);
+    return page.evaluate(() => !document.getElementById('imageLightbox').classList.contains('hidden'));
+  };
+  const escondido = (id) => page.evaluate((i) => document.getElementById(i).classList.contains('hidden'), id);
+
+  await montar({ userName: 'a', rank: 5, isAreaManager: true, isStaff: false });
+  checa(await abrir(), 'aprovar: o lightbox não abriu — o resto mediria o nada');
+  checa(!(await escondido('lightboxApproveBar')), 'aprovar: não apareceu na foto PENDENTE, que é o caso dele');
+  checa(await escondido('lightboxDelete'), 'aprovar: a lixeira apareceu junto — os dois são mutuamente exclusivos');
+  const caixaAp = await page.evaluate(() => {
+    const r = document.getElementById('lightboxApprove').getBoundingClientRect();
+    const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { w: Math.round(r.width), h: Math.round(r.height), recebe: !!(el && el.closest('#lightboxApprove')) };
+  });
+  checa(caixaAp.h >= 44, `aprovar: alvo de ${caixaAp.w}×${caixaAp.h}px, abaixo de 44`);
+  checa(caixaAp.recebe, 'aprovar: o toque no centro dele chega em outro elemento');
+  // Na foto que JÁ está no mapa é o contrário: lixeira sim, aprovar não.
+  await page.click('#lightboxNext'); await page.waitForTimeout(250);
+  checa(await escondido('lightboxApproveBar'), 'aprovar: apareceu na foto que já está no mapa');
+  checa(!(await escondido('lightboxDelete')), 'aprovar: a lixeira sumiu na foto já aprovada');
+  await page.click('#lightboxPrev'); await page.waitForTimeout(250);
+
+  // A resposta visual é imediata; o ENVIO espera a janela fechar sozinha.
+  enviados.length = 0;
+  await page.click('#lightboxApprove'); await page.waitForTimeout(400);
+  checa(await page.evaluate(() => document.querySelectorAll('#undoContainer .undo-banner').length === 1),
+    'aprovar: o banner de Desfazer não apareceu');
+  checa(await escondido('lightboxApproveBar') && !(await escondido('lightboxDelete')),
+    'aprovar: o botão não virou lixeira — a foto passou a estar no mapa e o card tem que dizer isso');
+  checa(enviados.length === 0, `aprovar: enviou DURANTE a janela de Desfazer (${enviados.length} chamada(s))`);
+  checa(await page.evaluate(() => AppState.queue.length === 2),
+    'aprovar: o card saiu da fila antes de o lightbox fechar');
+  // Fecha sozinha → envia, e com `approve: true` (o backend só aprova com o
+  // booleano estrito; mandar outra coisa vira uma REJEIÇÃO silenciosa).
+  await page.waitForTimeout(3200);
+  checa(enviados.length === 1, `aprovar: esperava 1 envio ao fim da janela, veio ${enviados.length}`);
+  checa(enviados[0] && enviados[0].approve === true,
+    `aprovar: mandou approve=${JSON.stringify((enviados[0] || {}).approve)}, e só o booleano true aprova`);
+  checa(await page.evaluate(() => AppState.stats.read === 0 && AppState.stats.rejected === 0 && AppState.stats.skipped === 0),
+    'aprovar: mexeu no placar — aprovar foto não conta em coluna nenhuma (decisão do owner)');
+  // O card só avança quando o lightbox fecha.
+  await page.evaluate(() => Lightbox.close()); await page.waitForTimeout(400);
+  checa(await page.evaluate(() => AppState.queue.length === 1 && AppState.currentPlace.venueID === 'v2'),
+    'aprovar: ao fechar o lightbox o card não avançou, e ele já está resolvido no Waze');
+
+  // Desfazer cancela de verdade: nada sai pela rede.
+  await montar({ userName: 'a', rank: 5, isAreaManager: true, isStaff: false });
+  await abrir();
+  enviados.length = 0;
+  await page.click('#lightboxApprove'); await page.waitForTimeout(300);
+  // Sem `count()` antes do clique, uma falha ANTERIOR (o banner não aparecer)
+  // vira timeout de 30s aqui e derruba o processo: o CI passa a mostrar um
+  // TimeoutError no lugar da falha que realmente aconteceu.
+  if (await page.locator('#undoBtn').count()) await page.click('#undoBtn');
+  else checa(false, 'aprovar: sem banner de Desfazer pra cancelar — o envio já saiu');
+  await page.waitForTimeout(3400);
+  checa(enviados.length === 0, `aprovar: o Desfazer não cancelou — ${enviados.length} envio(s) saíram`);
+  checa(!(await escondido('lightboxApproveBar')), 'aprovar: o Desfazer não devolveu o botão');
+
+  // Portão: o MESMO da lixeira, e o staff entra por fora do rank.
+  for (const [nome, perfil, deveVer] of [
+    ['L3 AM', { userName: 'b', rank: 2, isAreaManager: true, isStaff: false }, false],
+    ['L6 sem AM', { userName: 'c', rank: 5, isAreaManager: false, isStaff: false }, false],
+    ['staff L1', { userName: 'd', rank: 0, isAreaManager: false, isStaff: true }, true],
+  ]) {
+    await page.evaluate(() => Lightbox.close());
+    await montar(perfil);
+    checa(await abrir(), `aprovar/${nome}: o lightbox não abriu`);
+    checa((await escondido('lightboxApproveBar')) !== deveVer,
+      `aprovar: ${nome} ${deveVer ? 'não vê o aprovar e devia' : 'enxerga o aprovar e não devia'}`);
+  }
+  checa(erros.length === 0, 'aprovar: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 // ── O tile é DESENHADO no tamanho que o código pede? ─────────────────────
 //
 // A faixa vertical vazia que o owner viu no celular (gotcha #58): o preflight
@@ -1247,5 +1373,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, Esc e ✕)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
+  + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true)`
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`);

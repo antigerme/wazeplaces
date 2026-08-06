@@ -131,17 +131,36 @@ test('dispatch marcar-lido: race do Waze (500 + code 300) vira already_processed
   assert.equal(resultado.body.errorCategory, 'already_processed');
 });
 
-test('dispatch validar-place: SEMPRE approve:false (a app nunca aprova)', async () => {
+test('dispatch validar-place: aprovar só quando pedido EXPLICITAMENTE', async () => {
+  // Este teste guardava a regra "a app NUNCA aprova". A regra mudou por decisão
+  // do owner — foto é o caso em que aprovar não exige ajuste no mapa, porque
+  // não há campo pra corrigir: ou serve ou não serve, e está tudo na tela.
+  //
+  // O que ele guarda agora é mais estrito do que antes: o padrão continua
+  // sendo NÃO aprovar, e só o booleano `true` aprova. A coerção é o risco
+  // real aqui — uma string "false" vinda de um form, um `1`, um objeto: todos
+  // são truthy, e qualquer um deles viraria uma aprovação silenciosa de um
+  // pedido que ninguém revisou.
   const { ctx, token } = await ctxComSessao();
-  const { chamadas } = await comFetchMockado(
-    () => ok('{}'),
-    () => dispatch('validar-place', {
-      sessionToken: token, region: 'row', venueID: 'v1', updateRequestID: 'ur1', approve: true,
-    }, ctx));
-  assert.equal(chamadas.length, 1);
-  const enviado = JSON.parse(chamadas[0].opts.body);
-  const json = JSON.stringify(enviado);
-  assert.ok(!/"approve"\s*:\s*true/.test(json), `pedido não pode conter approve:true — ${json.slice(0, 300)}`);
+  const flag = async (approve) => {
+    const { chamadas } = await comFetchMockado(
+      () => ok('{}'),
+      () => dispatch('validar-place', {
+        sessionToken: token, region: 'row', venueID: 'v1', updateRequestID: 'ur1',
+        ...(approve === undefined ? {} : { approve }),
+      }, ctx));
+    assert.equal(chamadas.length, 1);
+    return JSON.parse(chamadas[0].opts.body)
+      .actions._subActions[0]._subActions[0].attributes.approve;
+  };
+
+  assert.equal(await flag(undefined), false, 'sem pedir, o padrão tem que ser NÃO aprovar');
+  assert.equal(await flag(false), false);
+  assert.equal(await flag(true), true, 'aprovar explícito precisa chegar como true');
+  for (const truthy of ['true', 1, 'sim', {}, []]) {
+    assert.equal(await flag(truthy), false,
+      `${JSON.stringify(truthy)} é truthy e NÃO pode aprovar — só o booleano true aprova`);
+  }
 });
 
 test('dispatch: rota é o nome EXATO — nada de sufixo tolerado', async () => {
