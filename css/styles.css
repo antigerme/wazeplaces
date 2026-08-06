@@ -1480,6 +1480,30 @@ button:active {
    `bottom` que só faz sentido no card (acima da fileira de navegação), e só
    não quebrou o ampliado por acidente — a utility `bottom-4` do HTML vencia
    por ordem de carga (gotcha #27). Acidente não é contrato. */
+/* Lixeira enviando: o ícone dá lugar a um anel girando, no MESMO lugar do
+   toque. Só acontece no caminho SEM Desfazer — com a janela, a foto some na
+   hora e nada foi enviado ainda, então spinner ali seria mentira sobre uma
+   espera que não existe (e bloquearia excluir a próxima foto, que passou a
+   ocupar o botão).
+   Duas classes porque `.lixeira-ocupada` sozinha empataria com utility do
+   Tailwind — desde v2026.08.05-04 o styles.css ganha o empate, mas empatar por
+   ordem é acidente e não contrato (gotcha #27). */
+#lightboxDelete.lixeira-ocupada svg {
+  display: none;
+}
+#lightboxDelete.lixeira-ocupada::after {
+  content: '';
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 9999px;
+  animation: girar 0.7s linear infinite;
+}
+@keyframes girar { to { transform: rotate(360deg); } }
+/* `reduced-motion` já é zerado pela media query global do arquivo; aqui o anel
+   parado ainda comunica "ocupado" porque o ícone sai de cena. */
+
 /* ── O tile tem o tamanho que o CÓDIGO pede, não o que a caixa permite ──────
    O preflight do Tailwind traz `img,video{max-width:100%;height:auto}`. Um
    tile de 512px dentro de uma caixa de 393px era CORTADO pra 393 — e como as

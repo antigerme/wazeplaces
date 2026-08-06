@@ -271,18 +271,8 @@ function initApp() {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'deletePhotoModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal'];
 
-// Modal que abre DE DENTRO do lightbox de foto, e portanto fica acima dele.
-// Voltar e Esc precisam saber disso: a ordem padrão fecha o lightbox primeiro
-// (ele é z-[65] contra z-[60] dos modais normais) e deixaria o diálogo órfão.
-const MODAIS_ACIMA_DO_LIGHTBOX = ['deletePhotoModal'];
-function modalAcimaDoLightboxAberto() {
-    return MODAIS_ACIMA_DO_LIGHTBOX.find(id => {
-        const m = document.getElementById(id);
-        return m && !m.classList.contains('hidden');
-    }) || null;
-}
 let lastFocusedBeforeModal = null;
 
 // ── O VOLTAR do aparelho fecha o que está por cima ────────────────────────
@@ -329,15 +319,6 @@ window.addEventListener('popstate', () => {
     if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) {
         CamadaVoltar.profundidade = Math.max(0, CamadaVoltar.profundidade - 1);
         MapaLightbox.close(true);
-        return;
-    }
-    // ...e a confirmação de excluir foto está acima do PRÓPRIO lightbox: ela é
-    // aberta de dentro dele. Sem esta checagem o voltar fecharia a foto por
-    // baixo e deixaria a pergunta na tela sem a foto que ela cita.
-    const acima = modalAcimaDoLightboxAberto();
-    if (acima) {
-        CamadaVoltar.profundidade = Math.max(0, CamadaVoltar.profundidade - 1);
-        closeModal(acima, { viaHistorico: true });
         return;
     }
     // Veio do usuário. Fecha a camada de cima — o lightbox está acima dos modais
@@ -395,15 +376,6 @@ const LIMPEZA_AO_FECHAR = {
         const campo = document.getElementById('pairCodeInput');
         if (campo) campo.value = '';
         document.getElementById('pairEnterError')?.classList.add('hidden');
-    },
-    deletePhotoModal() {
-        // Alvo é dado de uma decisão em curso: cancelar por Esc ou pelo scrim
-        // tem que apagá-lo igual ao botão Cancelar, senão ele sobrevive e o
-        // próximo "Excluir" agiria sobre a foto errada.
-        fotoParaExcluir = null;
-        // E o botão volta ao normal: sem isto, reabrir o diálogo depois de uma
-        // exclusão mostraria "Excluindo…" com spinner girando sobre nada.
-        estadoExcluindo(false);
     },
 };
 
@@ -749,8 +721,6 @@ function setupModalListeners() {
     $('confirmBatchRead')?.addEventListener('click', handleBatchMarkRead);
     $('cancelBatchRead')?.addEventListener('click', () => closeModal('batchReadModal'));
     $('lightboxDelete')?.addEventListener('click', pedirExclusaoDaFoto);
-    $('confirmDeletePhoto')?.addEventListener('click', confirmarExclusaoDaFoto);
-    $('cancelDeletePhoto')?.addEventListener('click', () => closeModal('deletePhotoModal'));
 
     // Pareamento
     $('pairCreateBtn')?.addEventListener('click', abrirPareamento);
@@ -952,6 +922,18 @@ const Lightbox = {
         const url = this.urls[this.idx] || '';
         const ids = Array.isArray(p.approvedImageIds) ? p.approvedImageIds : [];
         return ids.find(id => id && url.indexOf(id) !== -1) || null;
+    },
+    // Recoloca a foto na posição em que estava — usado pelo Desfazer e quando o
+    // envio falha. Sem isto, desfazer devolveria a foto pro fim da lista e a
+    // pessoa veria a ordem mudar sozinha.
+    recolocarFoto(url, idx) {
+        if (!url || this.urls.some((u) => u === url)) return;
+        const pos = Math.max(0, Math.min(idx, this.urls.length));
+        this.urls.splice(pos, 0, url);
+        if (this.newIdx >= pos) this.newIdx += 1;
+        this.idx = pos;
+        if (!this.isOpen()) return;
+        this._render();
     },
     // Tira a foto da lista aberta depois que o Waze confirmou. Sem fila e sem
     // recarregar: quem está olhando quer ver a foto sumir.
@@ -1198,71 +1180,139 @@ function openLightbox(urls, startIdx, newImageIdx, placeName, eDenuncia, place) 
 }
 
 // ── Excluir a foto aberta ─────────────────────────────────────────────────
-// Guardo o alvo aqui, e não no dataset do botão, porque o modal fecha por três
-// caminhos (botão, Esc, scrim) e a limpeza mora num lugar só (LIMPEZA_AO_FECHAR).
-let fotoParaExcluir = null;
+//
+// SEM diálogo de confirmação, por decisão do owner: a pessoa já fez três gestos
+// deliberados pra chegar aqui (abrir a foto, navegar até ela, mirar num alvo
+// pequeno), e perguntar de novo é desconfiar dela. No lugar entra a JANELA DE
+// DESFAZER que a app já usa no swipe — que não desfaz depois, ADIA o envio.
+//
+// A janela respeita a preferência do editor, igual ao swipe. Quem a desligou
+// paga o preço da própria escolha: a exclusão vai na hora, e não há volta —
+// medimos que re-adicionar a foto não persiste (o Waze responde 200 com
+// `synced: true` e ignora).
+//
+// A janela daqui NÃO usa o `AppState.pendingAction` do card, e isso é
+// deliberado: lá a trava existe porque a próxima ação despacharia a anterior,
+// mas prender ✕/↑/✓ por 3s porque alguém apagou uma foto no lightbox seria
+// efeito colateral sem motivo.
+let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
+
+// A lixeira vira spinner SÓ quando há espera de verdade — ou seja, no caminho
+// SEM Desfazer. Com Desfazer a foto some na hora e nada foi enviado ainda:
+// spinner ali seria mentira sobre uma espera que não existe, e ainda
+// bloquearia excluir a PRÓXIMA foto, que passou a ocupar aquele botão.
+function lixeiraOcupada(ligado) {
+    const btn = document.getElementById('lightboxDelete');
+    if (!btn) return;
+    btn.disabled = ligado;
+    btn.classList.toggle('lixeira-ocupada', ligado);
+}
+
+// Manda pro Waze de verdade. Se falhar, a foto VOLTA — mesma gramática do
+// swipe, que reverte o placar quando o Waze recusa.
+async function enviarExclusao(alvo) {
+    try {
+        const r = await API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon);
+        if (r && r.success) {
+            // Sem toast de sucesso: a foto sumindo JÁ é a confirmação, e
+            // anunciar o que a pessoa está vendo acontecer é ruído. O aviso
+            // fica só pro caso em que nada muda na tela por causa dela.
+            if (r.jaExcluida) showToast(t('toast.photoAlreadyGone'), 'info');
+            return;
+        }
+        if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return; }
+        devolverFoto(alvo);
+        showToast(msgDoServidor(r) || t('toast.photoDeleteFailed'), 'error');
+    } catch (e) {
+        devolverFoto(alvo);
+        showToast(t('toast.photoDeleteFailed'), 'error');
+    }
+}
+
+// Recoloca a foto onde estava — no desfazer e na falha do envio.
+function devolverFoto(alvo) {
+    const p = alvo.place;
+    if (p && Array.isArray(p.imageUrls) && !p.imageUrls.some((u) => u.indexOf(alvo.id) !== -1)) {
+        p.imageUrls.splice(Math.min(alvo.idx, p.imageUrls.length), 0, alvo.url);
+        if (Array.isArray(p.approvedImageIds) && !p.approvedImageIds.includes(alvo.id)) p.approvedImageIds.push(alvo.id);
+        p.imageUrl = p.imageUrls[0] || null;
+    }
+    if (Lightbox.place === p) Lightbox.recolocarFoto(alvo.url, alvo.idx);
+    if (AppState.currentPlace === p) showCurrentPlace();
+}
 
 function pedirExclusaoDaFoto() {
     const id = Lightbox.idFotoAtual();
     if (!id) return;
-    fotoParaExcluir = { id, place: Lightbox.place };
-    // Aquece a releitura do local ANTES de o editor decidir. O servidor precisa
-    // dela pra montar a lista sem esta foto, e ela custa ~700ms medidos — que
-    // cabem inteiros no tempo de ler a pergunta. Sem isto, esse tempo aparecia
-    // todo DEPOIS do "Excluir", que é onde ele incomoda.
-    API.prepararExclusao(Lightbox.place.venueID, Lightbox.place.lat, Lightbox.place.lon);
-    openModal('deletePhotoModal');
-}
+    const place = Lightbox.place;
+    const alvo = { id, place, idx: Lightbox.idx, url: Lightbox.urls[Lightbox.idx] };
 
-// O diálogo FICA ABERTO enquanto o Waze responde, e o botão vira "Excluindo…".
-//
-// Relato do owner: "parece que fica meio preso, engasgado quando manda apagar".
-// Estava: o modal fechava na hora, a foto continuava na tela e por 1,4–4s NADA
-// indicava que a app trabalhava — a lixeira ficava `disabled`, mas ela é
-// pequena e some visualmente. Espera sem sinal lê como travado, mesmo curta.
-//
-// Aqui a espera passa a ser LEGÍVEL. Não é fingir velocidade: a operação
-// continua levando o que leva; o que muda é a pessoa saber o que está
-// acontecendo. Remoção otimista foi descartada de propósito — é escrita
-// irreversível, e ver a foto sumir e voltar é pior que esperar.
-function estadoExcluindo(ligado) {
-    const btn = document.getElementById('confirmDeletePhoto');
-    const spin = document.getElementById('confirmDeletePhotoSpinner');
-    const rot = document.getElementById('confirmDeletePhotoLabel');
-    const cancelar = document.getElementById('cancelDeletePhoto');
-    if (btn) btn.disabled = ligado;
-    // Cancelar sai junto: a chamada já foi, e cancelar depois disso não
-    // cancelaria nada — botão que promete o que não cumpre é pior que ausente.
-    if (cancelar) cancelar.disabled = ligado;
-    if (spin) spin.classList.toggle('hidden', !ligado);
-    if (rot) rot.textContent = t(ligado ? 'modal.deletePhoto.working' : 'modal.deletePhoto.confirm');
-}
+    // Uma exclusão por vez: tocar na lixeira de novo despacha a anterior, como
+    // o swipe faz. Sem isto, duas janelas correndo escreveriam listas que se
+    // ignoram — a segunda apagaria só a dela, ressuscitando a primeira.
+    if (exclusaoPendente) exclusaoPendente.enviar();
 
-async function confirmarExclusaoDaFoto() {
-    const alvo = fotoParaExcluir;
-    if (!alvo) { closeModal('deletePhotoModal'); return; }
-    estadoExcluindo(true);
-    try {
-        const r = await API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon);
-        // Só fecha DEPOIS da resposta — é o fechamento que sinaliza "terminou".
-        estadoExcluindo(false);
-        closeModal('deletePhotoModal');
-        if (r && r.success) {
+    // Gate de experiência igual ao do swipe: a preferência salva como false só
+    // vale se o editor qualifica (senão um legado de versão sem gate liberaria).
+    const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
+    if (semJanela) {
+        // Espera REAL: a chamada sai agora. Spinner no lugar da lixeira e a
+        // foto só sai da tela quando o Waze confirmar.
+        lixeiraOcupada(true);
+        enviarExclusao(alvo).finally(() => {
+            lixeiraOcupada(false);
             Lightbox.removerFoto(alvo.id);
-            // O card por baixo mostra as mesmas fotos: sem re-render ele ficaria
-            // com o carrossel contando uma foto que já não existe.
-            if (AppState.currentPlace === alvo.place) showCurrentPlace();
-            showToast(t(r.jaExcluida ? 'toast.photoAlreadyGone' : 'toast.photoDeleted'), r.jaExcluida ? 'info' : 'success');
-        } else if (r && r.errorCategory === 'unauthorized') {
-            handleUnauthorized();
-        } else {
-            showToast(msgDoServidor(r) || t('toast.photoDeleteFailed'), 'error');
-        }
-    } catch (e) {
-        estadoExcluindo(false);
-        closeModal('deletePhotoModal');
-        showToast(t('toast.photoDeleteFailed'), 'error');
+            if (AppState.currentPlace === place) showCurrentPlace();
+        });
+        return;
     }
+
+    // Com janela: a foto some JÁ (é o retorno imediato) e o envio espera.
+    // A releitura é aquecida agora — os ~557ms dela cabem dentro da janela.
+    API.prepararExclusao(place.venueID, place.lat, place.lon);
+    Lightbox.removerFoto(alvo.id);
+    if (AppState.currentPlace === place) showCurrentPlace();
+
+    let saiu = false;
+    const enviar = () => {
+        if (saiu) return;
+        saiu = true;
+        clearTimeout(exclusaoPendente && exclusaoPendente.timer);
+        if (exclusaoPendente && exclusaoPendente.id === alvo.id) exclusaoPendente = null;
+        removeUndoBanner();
+        enviarExclusao(alvo);
+    };
+    const desfazer = () => {
+        if (saiu) return;
+        saiu = true;
+        clearTimeout(exclusaoPendente && exclusaoPendente.timer);
+        if (exclusaoPendente && exclusaoPendente.id === alvo.id) exclusaoPendente = null;
+        removeUndoBanner();
+        devolverFoto(alvo);
+    };
+    const timer = setTimeout(enviar, UNDO_WINDOW_MS);
+    exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer };
+    mostrarDesfazerExclusao();
+}
+
+// Banner próprio, com a MESMA aparência e o mesmo tempo do Desfazer do card —
+// é a mesma ideia, e duas gramáticas pro mesmo conceito é como o editor
+// descobre que a app se contradiz.
+function mostrarDesfazerExclusao() {
+    removeUndoBanner();
+    const container = document.getElementById('undoContainer');
+    if (!container) return;
+    const banner = document.createElement('div');
+    banner.className = 'undo-banner';
+    banner.innerHTML = `
+        <span>${escapeHtml(t('undo.photoDeleted'))}</span>
+        <button type="button" id="undoBtn">${escapeHtml(t('undo.button'))}</button>
+        <span class="undo-progress" style="animation-duration: ${UNDO_WINDOW_MS}ms" aria-hidden="true"></span>
+    `;
+    container.appendChild(banner);
+    document.getElementById('undoBtn').addEventListener('click', () => {
+        if (exclusaoPendente) exclusaoPendente.desfazer();
+    });
 }
 
 function populateCountrySelect() {
@@ -1452,13 +1502,6 @@ function handleKeyDown(e) {
         else if (e.key === 'ArrowLeft') { e.preventDefault(); MapaLightbox.arrastar(80, 0); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); MapaLightbox.arrastar(-80, 0); }
         else if (e.key === 'ArrowUp') { e.preventDefault(); MapaLightbox.arrastar(0, 80); }
-        return;
-    }
-    // A confirmação de excluir foto abre DE DENTRO do lightbox, então está
-    // acima dele — e precisa ser tratada antes, senão o Esc fecharia a foto e
-    // deixaria o diálogo órfão perguntando sobre uma foto que já não se vê.
-    if (modalAcimaDoLightboxAberto()) {
-        if (e.key === 'Escape') { e.preventDefault(); closeModal(modalAcimaDoLightboxAberto()); }
         return;
     }
     if (Lightbox.isOpen()) {
