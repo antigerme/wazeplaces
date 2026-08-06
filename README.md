@@ -2,7 +2,9 @@
 
 PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidamente os pedidos de places enviados por usuários — fotos lixo, nomes ruins, endereços errados, categorias absurdas. Arraste para rejeitar (lixo) ou marcar como lido (você decide depois no WME).
 
-> ⚠️ **Esta aplicação NUNCA aprova places.** Aprovação exige ajuste no mapa e precisa ser feita no WME oficial. Aqui você só **rejeita** ou **marca como lido**, eliminando o lixo antes que outro editor novato aprove besteira.
+> ⚠️ **Esta aplicação NUNCA aprova dados de local** — nome, categoria, endereço, posição. Isso exige ajuste no mapa e é feito no WME oficial (o botão ↗ do card abre lá). Aqui você **rejeita** ou **marca como lido**, eliminando o lixo antes que outro editor novato aprove besteira.
+>
+> A única exceção é **foto nova**: ampliando a foto no card dá pra **aprovar** ou **excluir** ali mesmo, porque essa decisão está inteira na tela — ou a foto serve, ou não serve. Só aparece para quem é **L6 + Area Manager** ou **staff** do Waze.
 
 ---
 
