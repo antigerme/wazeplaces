@@ -401,6 +401,9 @@ const LIMPEZA_AO_FECHAR = {
         // tem que apagá-lo igual ao botão Cancelar, senão ele sobrevive e o
         // próximo "Excluir" agiria sobre a foto errada.
         fotoParaExcluir = null;
+        // E o botão volta ao normal: sem isto, reabrir o diálogo depois de uma
+        // exclusão mostraria "Excluindo…" com spinner girando sobre nada.
+        estadoExcluindo(false);
     },
 };
 
@@ -971,10 +974,15 @@ const Lightbox = {
     }
 };
 
-// Portão de PRODUTO no aparelho: L6 + Area Manager (ou staff). É espelho do
-// `podeExcluirFoto` do core — e é o core que MANDA, este aqui só decide se
-// desenha o botão. Gate só no cliente seria enfeite: quem abrisse o DevTools
-// chamaria o endpoint direto (gotcha #16).
+// Portão de PRODUTO: L6 + Area Manager (ou staff). Vive SÓ aqui, e é decisão
+// do owner — *"a pessoa já pode apagar a foto se abrir o WME"*. O Waze valida
+// `permissions` e `lockRank` na gravação, então quem não pode apagar por aqui
+// também não consegue por lá: isto nunca foi fronteira de segurança, é trava
+// de produto pra o recurso não aparecer pra qualquer editor na NOSSA app.
+//
+// Houve um espelho disto no servidor, com cache de perfil pra não custar caro.
+// Saiu: a chamada que ele exigia era a mais lenta das três (977ms medidos) e
+// existia pra reconfirmar o que o Waze reconfirma de novo ao gravar.
 function podeExcluirFotoAqui() {
     const p = AppState.profile;
     if (!p) return false;
@@ -1198,17 +1206,47 @@ function pedirExclusaoDaFoto() {
     const id = Lightbox.idFotoAtual();
     if (!id) return;
     fotoParaExcluir = { id, place: Lightbox.place };
+    // Aquece a releitura do local ANTES de o editor decidir. O servidor precisa
+    // dela pra montar a lista sem esta foto, e ela custa ~700ms medidos — que
+    // cabem inteiros no tempo de ler a pergunta. Sem isto, esse tempo aparecia
+    // todo DEPOIS do "Excluir", que é onde ele incomoda.
+    API.prepararExclusao(Lightbox.place.venueID, Lightbox.place.lat, Lightbox.place.lon);
     openModal('deletePhotoModal');
+}
+
+// O diálogo FICA ABERTO enquanto o Waze responde, e o botão vira "Excluindo…".
+//
+// Relato do owner: "parece que fica meio preso, engasgado quando manda apagar".
+// Estava: o modal fechava na hora, a foto continuava na tela e por 1,4–4s NADA
+// indicava que a app trabalhava — a lixeira ficava `disabled`, mas ela é
+// pequena e some visualmente. Espera sem sinal lê como travado, mesmo curta.
+//
+// Aqui a espera passa a ser LEGÍVEL. Não é fingir velocidade: a operação
+// continua levando o que leva; o que muda é a pessoa saber o que está
+// acontecendo. Remoção otimista foi descartada de propósito — é escrita
+// irreversível, e ver a foto sumir e voltar é pior que esperar.
+function estadoExcluindo(ligado) {
+    const btn = document.getElementById('confirmDeletePhoto');
+    const spin = document.getElementById('confirmDeletePhotoSpinner');
+    const rot = document.getElementById('confirmDeletePhotoLabel');
+    const cancelar = document.getElementById('cancelDeletePhoto');
+    if (btn) btn.disabled = ligado;
+    // Cancelar sai junto: a chamada já foi, e cancelar depois disso não
+    // cancelaria nada — botão que promete o que não cumpre é pior que ausente.
+    if (cancelar) cancelar.disabled = ligado;
+    if (spin) spin.classList.toggle('hidden', !ligado);
+    if (rot) rot.textContent = t(ligado ? 'modal.deletePhoto.working' : 'modal.deletePhoto.confirm');
 }
 
 async function confirmarExclusaoDaFoto() {
     const alvo = fotoParaExcluir;
-    closeModal('deletePhotoModal');
-    if (!alvo) return;
-    const btn = document.getElementById('lightboxDelete');
-    if (btn) btn.disabled = true;
+    if (!alvo) { closeModal('deletePhotoModal'); return; }
+    estadoExcluindo(true);
     try {
         const r = await API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon);
+        // Só fecha DEPOIS da resposta — é o fechamento que sinaliza "terminou".
+        estadoExcluindo(false);
+        closeModal('deletePhotoModal');
         if (r && r.success) {
             Lightbox.removerFoto(alvo.id);
             // O card por baixo mostra as mesmas fotos: sem re-render ele ficaria
@@ -1221,9 +1259,9 @@ async function confirmarExclusaoDaFoto() {
             showToast(msgDoServidor(r) || t('toast.photoDeleteFailed'), 'error');
         }
     } catch (e) {
+        estadoExcluindo(false);
+        closeModal('deletePhotoModal');
         showToast(t('toast.photoDeleteFailed'), 'error');
-    } finally {
-        if (btn) btn.disabled = false;
     }
 }
 

@@ -439,6 +439,9 @@ export function normalizePairCode(code) {
 
 export function makeSessions({ store, keyBytes }) {
   return {
+    // Exposto pra quem precisa de cache curto próprio (a releitura do local
+    // antes de excluir foto). Quem usar isto escolhe prefixo próprio na chave.
+    store,
     async createSession(cookiesContent) {
       const token = randomToken();
       const hash = await sha256hex(token);
@@ -1525,21 +1528,69 @@ async function handleValidarPlace(data, { sessions }) {
 // Como a exclusão é por ID e não por índice, o carrossel ter reordenado também
 // não engana ninguém.
 
-// Caixa mínima em volta do local pra reler. O WME usa bbox (não há leitura por
-// id), e a dele mede ~0,0007° — este 0,0009° é a mesma ordem de grandeza, com
-// folga pro centroide de um polígono não cair fora da própria caixa.
-const RELEITURA_BBOX_GRAUS = 0.0009;
-// Portão de PRODUTO pedido pelo owner: excluir foto é só pra L6 + Area
-// Manager. É mais restrito que o gate de login (L3+ AM, MIN_RANK_WAZE) porque
-// aqui não se trata pedido: apaga-se conteúdo que já está no mapa. Rank CRU do
-// Waze, 0-indexed — 5 aqui é o L6 que o editor vê (gotcha #15).
-const MIN_RANK_EXCLUIR_FOTO = 5;
+// Caixa mínima em volta do local pra reler. Não há leitura por ID: sondei
+// `objects=venue.<id>`, `venues=`, `venueIds=`, `ids=` e `objects=` contra o
+// Waze real e as CINCO devolvem 406; as variações que encolhem a resposta
+// (`venueLevel=1`, sem `venueFilter`) trazem 200 mas SEM o local. Então bbox é
+// o único caminho, e o que dá pra ajustar é o tamanho dela.
+//
+// O risco de apertar não é lentidão, é o local NÃO VIR — e aí a exclusão fica
+// impossível com "local não encontrado". Por isso o valor é MEDIDO em locais
+// reais de países diferentes, não deduzido: ver scratchpad/bbox-segura.mjs.
+const RELEITURA_BBOX_GRAUS = 0.0002;
 
-export function podeExcluirFoto(profile) {
-  if (!profile || typeof profile !== 'object') return false;
-  if (profile.isStaff) return true;
-  const rank = Number.isInteger(profile.rank) ? profile.rank : parseInt(profile.rank, 10);
-  return rank >= MIN_RANK_EXCLUIR_FOTO && !!profile.isAreaManager;
+// Quanto tempo a releitura vale antes de a app ter que fazê-la de novo.
+//
+// A releitura é disparada quando o editor TOCA na lixeira, e usada quando ele
+// CONFIRMA — assim os ~700ms dela cabem dentro do tempo em que ele lê o
+// diálogo, e a espera depois do "Excluir" passa a ser só a escrita.
+//
+// Este número é o TAMANHO DA JANELA DA CORRIDA, e é por isso que ele é curto:
+// se outro editor subir uma foto dentro dela, a nossa escrita a apaga em
+// silêncio. Antes da releitura essa janela era a idade da fila — horas. Com 15s
+// ela cobre a hesitação normal e nada além; quem parar pra pensar mais que isso
+// paga a releitura de novo, que é o certo.
+const RELEITURA_TTL = 15;
+// Relê o local no Waze e guarda o resultado por RELEITURA_TTL.
+//
+// O cache fica no SERVIDOR de propósito. A alternativa óbvia — o cliente ler,
+// guardar e mandar a lista na hora de excluir — entregaria a lista de fotos a
+// quem está sendo verificado: bastaria mandar uma lista curta pra apagar tudo.
+// Hoje o cliente só diz QUAL foto quer excluir; quem monta a lista é o
+// servidor, a partir do que o Waze respondeu.
+async function relerLocal(data, sessions, cookieHeader, csrf, region) {
+  const venueID = data.venueID;
+  const chave = 'reler_' + (await sha256hex(String(data.sessionToken) + '|' + venueID));
+  try {
+    const bruto = await sessions.store.get(chave);
+    if (bruto) {
+      const corte = bruto.indexOf('|');
+      const ts = parseInt(bruto.slice(0, corte), 10);
+      if (Number.isFinite(ts) && Math.floor(Date.now() / 1000) - ts <= RELEITURA_TTL) {
+        return { venue: JSON.parse(bruto.slice(corte + 1)), doCache: true };
+      }
+    }
+  } catch (e) { /* cache ilegível é cache ausente */ }
+
+  const d = RELEITURA_BBOX_GRAUS;
+  const lat = Number(data.lat), lon = Number(data.lon);
+  const q = new URLSearchParams({
+    bbox: [lon - d, lat - d, lon + d, lat + d].join(','),
+    v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
+  });
+  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions });
+  if (lida.httpCode !== 200) return { erro: categorizeWazeError(lida.httpCode, lida.response, lida.error), httpCode: lida.httpCode };
+  let atual;
+  try { atual = JSON.parse(lida.response); } catch { return { erroParse: true }; }
+  const venue = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === venueID);
+  if (!venue) return { semLocal: true };
+  // Só o que a escrita precisa. Guardar o venue inteiro seria guardar geometria
+  // e escrituração à toa.
+  const enxuto = { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) };
+  try {
+    await sessions.store.put(chave, Math.floor(Date.now() / 1000) + '|' + JSON.stringify(enxuto), RELEITURA_TTL);
+  } catch (e) { /* sem cache a app só fica mais lenta */ }
+  return { venue: enxuto, doCache: false };
 }
 
 async function handleExcluirFoto(data, { sessions }) {
@@ -1556,53 +1607,43 @@ async function handleExcluirFoto(data, { sessions }) {
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
-  // 1) Portão no SERVIDOR. No cliente ele seria só cosmético — quem abrisse o
-  //    DevTools chamaria o endpoint direto (mesmo raciocínio do gotcha #16).
-  const ses = await callWaze(wazeSessionEndpoint(region), cookieHeader, csrf, null, region, { data, sessions, cookies });
-  if (ses.httpCode !== 200) {
-    const c = categorizeWazeError(ses.httpCode, ses.response, ses.error);
-    return {
-      status: c.category === 'unauthorized' ? 401 : 500,
-      body: { success: false, error: c.message, errorKey: c.messageKey, errorVars: c.messageVars, errorCategory: c.category, httpCode: ses.httpCode },
-    };
-  }
-  let perfil;
-  try { perfil = JSON.parse(ses.response); } catch { apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse'); }
-  if (!podeExcluirFoto(perfil)) {
-    apiError('Sem permissão para excluir fotos', 403, 'srv.err.photoDeleteRank');
+  // SEM portão no servidor, e a razão é do owner: *"a pessoa já pode apagar a
+  // foto se abrir o WME"*. O Waze valida `permissions` e `lockRank` na
+  // gravação — quem não pode apagar por aqui também não consegue por lá. Então
+  // isto nunca foi fronteira de segurança: era trava de PRODUTO, pra o recurso
+  // não aparecer pra qualquer editor na NOSSA app. Trava de produto vive no
+  // cliente (`podeExcluirFotoAqui`), onde já estava desde o começo.
+  //
+  // Eu tinha feito o contrário — portão no servidor com cache de perfil pra
+  // deixá-lo rápido. Isto é melhor: em vez de acelerar uma chamada de 977ms
+  // (medida, a mais lenta das três), ela SOME. Menos código, nada guardado a
+  // mais, e mais rápido. Vale como lição: antes de otimizar uma etapa, vale
+  // perguntar se ela precisa existir.
+
+  // MODO PREPARAR: só aquece a releitura e volta. É o que o cliente dispara
+  // quando o editor TOCA na lixeira, pra os ~700ms dela correrem enquanto ele
+  // lê a pergunta do diálogo. Não escreve nada e não devolve a lista — quem
+  // decide o que gravar continua sendo o servidor.
+  if (data.action === 'preparar') {
+    const prep = await relerLocal(data, sessions, cookieHeader, csrf, region);
+    // Falha aqui é silenciosa de propósito: preparar é otimização. Se der
+    // errado, o `excluir` faz a releitura na hora e a pessoa só espera mais.
+    return { status: 200, body: { success: true, preparado: !prep.erro && !prep.semLocal && !prep.erroParse } };
   }
 
   // 2) RELEITURA. É o passo que impede de apagar junto a foto de outro editor.
-  const d = RELEITURA_BBOX_GRAUS;
-  // SEM `language`: MEDIDO contra o Waze real, a resposta é byte a byte a
-  // mesma com pt-BR, com en, com fr e sem o parâmetro. O controle é o que
-  // fecha a questão — duas chamadas IDÊNTICAS também diferem entre si, porque
-  // o Waze devolve alguns arrays em ordem não-determinística
-  // (`supportedPermanentHazardTypes`, tipos de câmera, `lotType`); sem esse
-  // controle eu teria lido ruído como efeito do idioma. Cravar `pt-BR` aqui
-  // não mudaria um byte e ainda diria que a chamada veio de um editor em
-  // português, o que é falso pra 3 das 4 línguas da app — o mesmo defeito que
-  // o `Referer` com `/pt-BR/` tinha.
-  const q = new URLSearchParams({
-    bbox: [lon - d, lat - d, lon + d, lat + d].join(','),
-    v: '2',
-    apiV2: 'true',
-    venueLevel: '4',
-    venueFilter: '1,1,1,1',
-    zoomLevel: '22',
-  });
-  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions, cookies });
-  if (lida.httpCode !== 200) {
-    const c = categorizeWazeError(lida.httpCode, lida.response, lida.error);
+  //    Vem do cache quando o cliente já pediu `preparar` ao abrir o diálogo —
+  //    aí os ~700ms dela couberam no tempo de leitura da pergunta.
+  const rel = await relerLocal(data, sessions, cookieHeader, csrf, region);
+  if (rel.erro) {
     return {
-      status: c.category === 'unauthorized' ? 401 : 500,
-      body: { success: false, error: c.message, errorKey: c.messageKey, errorVars: c.messageVars, errorCategory: c.category, httpCode: lida.httpCode },
+      status: rel.erro.category === 'unauthorized' ? 401 : 500,
+      body: { success: false, error: rel.erro.message, errorKey: rel.erro.messageKey, errorVars: rel.erro.messageVars, errorCategory: rel.erro.category, httpCode: rel.httpCode },
     };
   }
-  let atual;
-  try { atual = JSON.parse(lida.response); } catch { apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse'); }
-  const venue = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === venueID);
-  if (!venue) apiError('Local não encontrado', 404, 'srv.err.venueGone');
+  if (rel.erroParse) apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  if (rel.semLocal) apiError('Local não encontrado', 404, 'srv.err.venueGone');
+  const venue = rel.venue;
 
   const imagensAgora = (venue.images || []).filter((i) => i && i.id);
   // Foto já não existe: outro editor chegou primeiro. Isso NÃO é erro — o

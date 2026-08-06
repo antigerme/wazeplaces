@@ -24,7 +24,6 @@ import {
   buildPlacesFromSearch,
   dispatch,
   purTypeDoUR,
-  podeExcluirFoto,
   PUR_TIPOS,
   SESSION_TTL,
   WAZE_REGIONS,
@@ -883,20 +882,6 @@ test('tipo desconhecido NUNCA some da fila por causa do filtro', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 //  Excluir foto (a lixeira do lightbox)
 // ═══════════════════════════════════════════════════════════════════════════
-
-test('podeExcluirFoto: portão é L6 + AM, mais restrito que o gate de login', () => {
-  // Rank CRU do Waze (0-indexed): 5 = o L6 que o editor vê.
-  assert.equal(podeExcluirFoto({ rank: 5, isAreaManager: true }), true);
-  assert.equal(podeExcluirFoto({ isStaff: true, rank: 0 }), true);
-  // Quem ENTRA na app mas não pode excluir — é justamente o que separa os dois
-  // portões. L3 AM passa no login (MIN_RANK_WAZE=2) e não pode excluir.
-  assert.equal(podeExcluirFoto({ rank: 2, isAreaManager: true }), false);
-  assert.equal(podeExcluirFoto({ rank: 4, isAreaManager: true }), false);
-  // L6 sem ser Area Manager também não: são as DUAS condições, não uma.
-  assert.equal(podeExcluirFoto({ rank: 5, isAreaManager: false }), false);
-  assert.equal(podeExcluirFoto(null), false);
-  assert.equal(podeExcluirFoto({}), false);
-});
 
 test('approvedImageIds: só a foto aprovada é excluível', () => {
   // Dado com a forma REAL medida no Waze: a foto pendente do pedido tem

@@ -153,6 +153,21 @@ const API = {
     // Exclui UMA foto do local. `lat`/`lon` não são enfeite: o servidor relê o
     // local antes de gravar e o Waze só lê por bbox — sem as coordenadas ele
     // não tem como buscar o venue de novo.
+    // Aquece a releitura do local no servidor, pra ela não custar tempo depois
+    // do "Excluir". Disparada quando o editor TOCA na lixeira: os ~700ms dela
+    // correm enquanto ele lê a pergunta do diálogo.
+    //
+    // Melhor-esforço de propósito — se falhar, o `excluirFoto` relê na hora e a
+    // pessoa só espera mais. Por isso nem espera resposta nem trata erro.
+    prepararExclusao(venueID, lat, lon) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) return;
+        this._post('excluir-foto', {
+            sessionToken, region: this.getRegion(), action: 'preparar',
+            venueID, imageID: 'preparar', lat, lon,
+        }).catch(() => {});
+    },
+
     async excluirFoto(venueID, imageID, lat, lon) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
