@@ -1023,11 +1023,20 @@ for (const status of [404, 403]) {
   });
   checa(caixa.w >= 44 && caixa.h >= 44, `lixeira: alvo de ${caixa.w}×${caixa.h}px, abaixo de 44`);
   checa(caixa.recebe, 'lixeira: o toque no centro dela chega em outro elemento');
-  await page.click('#lightboxDelete'); await page.waitForTimeout(300);
-  checa(!(await escondido('deletePhotoModal')), 'lixeira: a confirmação não abriu');
-  await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-  checa(await escondido('deletePhotoModal'), 'lixeira: Esc não fechou a confirmação');
-  checa(!(await escondido('imageLightbox')), 'lixeira: o Esc fechou a FOTO por baixo e deixou a pergunta órfã');
+  // SEM diálogo: tocar já age. Com o Desfazer ligado (padrão), a foto some na
+  // hora e o banner aparece — nada foi enviado ainda.
+  const nFotosAntes = await page.evaluate(() => Lightbox.urls.length);
+  await page.click('#lightboxDelete'); await page.waitForTimeout(400);
+  checa(await page.evaluate(() => document.querySelectorAll('#undoContainer .undo-banner').length === 1),
+    'lixeira: o banner de Desfazer não apareceu');
+  checa(await page.evaluate((n) => Lightbox.urls.length === n - 1, nFotosAntes),
+    'lixeira: a foto não sumiu na hora (o Desfazer adia o ENVIO, não a resposta visual)');
+  // Desfazer devolve a foto.
+  await page.click('#undoBtn'); await page.waitForTimeout(400);
+  checa(await page.evaluate((n) => Lightbox.urls.length === n, nFotosAntes),
+    'lixeira: Desfazer não devolveu a foto');
+  checa(await page.evaluate(() => document.querySelectorAll('#undoContainer .undo-banner').length === 0),
+    'lixeira: o banner ficou na tela depois do Desfazer');
 
   for (const [nome, perfil] of [
     ['L3 AM', { userName: 'b', rank: 2, isAreaManager: true, isStaff: false }],
@@ -1237,6 +1246,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403)`
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, Esc e ✕)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
-  + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e camada da confirmação)`
+  + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`);

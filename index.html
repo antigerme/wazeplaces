@@ -864,22 +864,6 @@
         <img id="lightboxImage" class="max-w-full max-h-full object-contain will-change-transform" style="touch-action: none" alt="" draggable="false">
     </div>
 
-    <!-- Confirmação da exclusão. Modal e não desfazer-em-3s como o resto da
-         app: a janela de desfazer trava a tela e o dano aqui cai no dado de
-         OUTRA pessoa — perguntar antes lê a intenção, desfazer conserta depois
-         e "depois" pode ser tarde. z-[65] pra ficar ACIMA do lightbox, que é a
-         camada de onde ele é chamado (os modais normais são z-[60]). -->
-    <div id="deletePhotoModal" role="dialog" aria-modal="true" aria-labelledby="deletePhotoTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[65] flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
-            <h3 id="deletePhotoTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.deletePhoto.title">Excluir esta foto?</h3>
-            <p class="text-sm text-slate-500 mb-4 dark:text-slate-400" data-i18n="modal.deletePhoto.body">A foto sai do local no Waze, para todo mundo. Não é o mesmo que rejeitar um pedido, e não dá pra desfazer aqui.</p>
-            <div class="flex space-x-3">
-                <button id="cancelDeletePhoto" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">Cancelar</button>
-                <button id="confirmDeletePhoto" type="button" class="flex-1 min-h-[48px] bg-red-600 hover:bg-red-700 disabled:opacity-70 text-white font-semibold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2"><span id="confirmDeletePhotoSpinner" class="hidden w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden="true"></span><span id="confirmDeletePhotoLabel" data-i18n="modal.deletePhoto.confirm">Excluir</span></button>
-            </div>
-        </div>
-    </div>
-
     <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
             <div class="flex justify-between items-center mb-4">

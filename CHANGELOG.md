@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.06-04
+
+### Melhorado
+- **Excluir foto agora é um toque só.** Acabou a pergunta "excluir esta foto?": tocou na lixeira, a foto sai. Você já abriu a foto, navegou até ela e mirou num alvo pequeno — perguntar de novo era desconfiar de você.
+
+  No lugar entra o **Desfazer** que a app já usa no swipe: a foto some na hora e você tem alguns segundos para se arrepender. Ele **respeita a sua preferência** — quem desligou o Desfazer nas Preferências não vê banner nenhum e a exclusão vai direto, com a lixeira virando um indicador de progresso enquanto o Waze responde.
+
+  E some o aviso "Foto excluída": a foto sumindo já é a confirmação. Ficam só os avisos que a tela não mostra sozinha — "outro editor já tinha excluído" e os erros.
+
 ## v2026.08.06-03
 
 ### Melhorado
