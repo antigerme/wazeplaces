@@ -393,7 +393,48 @@ test('prefetch aquece o que o próximo card mostra PRIMEIRO', () => {
     'a regra de "pedido espacial" foi recopiada dentro do carrossel');
 
   // E o prefetch não pode voltar a aquecer a foto sempre.
-  const pf = APP_.match(/function prefetchNextImage\(\)[\s\S]*?\n\}/)[0];
-  assert.match(pf, /mapaVemPrimeiro\(next\)/, 'o prefetch voltou a aquecer a foto sem olhar o que vem primeiro');
+  //
+  // Segue a CADEIA DE CHAMADAS em vez de exigir os literais dentro de
+  // `prefetchNextImage`: a versão anterior deste guard reprovou uma refatoração
+  // CORRETA só porque a decisão passou a morar em funções auxiliares. Guard
+  // acoplado à FORMA já mordeu seis vezes neste repo — o que vale é a
+  // propriedade (o prefetch decide pelo mapaVemPrimeiro e aquece tile), não
+  // onde as linhas estão escritas.
+  const corpoDe = (nome) => {
+    const m = APP_.match(new RegExp('function ' + nome + '\\([^)]*\\)[\\s\\S]*?\\n\\}'));
+    return m ? m[0] : '';
+  };
+  const alcance = (raiz, profundidade = 3) => {
+    const vistos = new Set([raiz]);
+    let corpo = corpoDe(raiz);
+    for (let i = 0; i < profundidade; i++) {
+      for (const c of corpo.matchAll(/\b([a-zA-Z_$][\w$]*)\s*\(/g)) {
+        if (vistos.has(c[1])) continue;
+        const b2 = corpoDe(c[1]);
+        if (b2) { vistos.add(c[1]); corpo += '\n' + b2; }
+      }
+    }
+    return corpo;
+  };
+  const pf = alcance('prefetchNextImage');
+  assert.match(pf, /mapaVemPrimeiro\(/, 'o prefetch voltou a aquecer a foto sem olhar o que vem primeiro');
   assert.match(pf, /mapaMontar\(/, 'o prefetch parou de aquecer os tiles do mapa');
+
+  // As três defesas que o aquecimento profundo exige, e cada uma protege algo
+  // diferente: prioridade baixa pra não competir com o card na tela, respeito
+  // ao modo de economia de dados, e teto de fotos por card (um card de 12
+  // fotos sozinho puxa 1MB — p98 medido na fila real).
+  assert.match(pf, /fetchPriority\s*=\s*'low'/,
+    'o aquecimento perdeu a prioridade baixa e volta a competir com o card na tela');
+  assert.match(pf, /saveData/, 'o aquecimento parou de respeitar a economia de dados');
+  const teto = APP_.match(/const PREFETCH_TETO_FOTOS = (\d+)/);
+  const fundo = APP_.match(/const PREFETCH_PROFUNDIDADE = (\d+)/);
+  // Faixa larga de propósito: o guard existe pra garantir que EXISTE teto e
+  // que ele não é absurdo, não pra congelar o valor — quem escolhe é o owner.
+  // Medido na fila real: 8,3% dos cards passam de 4 fotos, 3% passam de 8, e o
+  // pior tem TRINTA, que sozinho puxaria 2,3MB de dados móveis.
+  assert.ok(teto && Number(teto[1]) >= 1 && Number(teto[1]) <= 16,
+    'PREFETCH_TETO_FOTOS fora da faixa sã — sem teto, um card de 30 fotos puxa 2,3MB');
+  assert.ok(fundo && Number(fundo[1]) >= 1,
+    'sumiu a profundidade do aquecimento (quantos cards à frente têm o 1º slide pronto)');
 });

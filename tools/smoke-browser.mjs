@@ -235,6 +235,25 @@ const APARELHOS = [
 const LINGUAS = ['pt', 'en', 'es', 'fr'];
 
 let falhas = 0;
+// Espera o card ASSENTAR — animação terminada, não um relógio.
+//
+// O `.card-enter` anima `opacity` de 0 a 1 em 0,28s, e a verificação de
+// contraste multiplica a opacidade de TODOS os ancestrais: medir no meio da
+// animação dá uma cor mais misturada com o fundo e um contraste menor do que
+// o real. Com 350ms fixos isso passava aqui e reprovava no CI, onde o runner
+// é mais lento e a animação começa tarde — `valor-ausente 4.08:1` contra os
+// 4.84:1 medidos na mesma tela localmente.
+//
+// Falha intermitente é pior que falha estável: ela ensina todo mundo a
+// ignorar o CI. Esperar as animações TERMINAREM não depende da velocidade da
+// máquina. É o gotcha #28 ("esperar ~200ms" pro anel de foco) generalizado:
+// relógio fixo é palpite, `getAnimations()` é a pergunta certa.
+const assentar = async (page, extra = 60) => {
+  await page.evaluate(() => Promise.all(
+    document.getAnimations().map((a) => a.finished.catch(() => {}))));
+  await page.waitForTimeout(extra);
+};
+
 const checa = (ok, msg, detalhe) => {
   if (!ok) { falhas++; console.log(`  ✗ ${msg}${detalhe ? ' — ' + detalhe : ''}`); }
 };
@@ -289,7 +308,7 @@ for (const [aparelho, viewport] of APARELHOS) {
         AppState.currentPlace = pl;
         showCurrentPlace();
       }, { pl: place, lang });
-      await page.waitForTimeout(350);
+      await assentar(page);
 
       const m = await page.evaluate(() => {
         const c = document.querySelector('.place-card');
@@ -1101,6 +1120,110 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── O aquecimento pede o ativo certo, do card certo, antes da hora? ──────
+//
+// Guard ESTÁTICO não resolve isto: quando o prefetch foi refatorado em funções
+// auxiliares, o teste que exigia os literais dentro de `prefetchNextImage`
+// reprovou a refatoração correta — e a versão que segue a cadeia de chamadas
+// deixa passar o defeito original, porque o identificador continua na cadeia
+// por outro caminho. O que decide é a REDE: qual URL foi pedida, quando, e
+// para qual card.
+{
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block' });
+  const pedidos = [];
+  const t0 = Date.now();
+  // Host REAL: `img-src` da CSP não libera domínio inventado, e aí o navegador
+  // nem chega a pedir — zero requisição lê como "prefetch quebrado".
+  await ctx.route('https://venue-image.waze.com/**', (r) => {
+    pedidos.push({ t: Date.now() - t0, tipo: 'foto', qual: r.request().url().split('thumb700_').pop() });
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA });
+  });
+  await ctx.route('**/*-tiles/**', (r) => {
+    pedidos.push({ t: Date.now() - t0, tipo: 'tile', qual: 't' });
+    r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA });
+  });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+
+  // Só o card SEGUINTE tem mapa: assim qualquer requisição de tile é dele, e
+  // a asserção distingue de verdade. Com o mesmo `mapa` em todos os cards os
+  // tiles saem na MESMA URL e "os tiles do próximo foram aquecidos" passaria
+  // com o tile de qualquer outro — verde sem medir nada.
+  const comMapa = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro);
+  // Nome do arquivo = o que o teste procura. Na primeira versão eu gerava
+  // `thumb700_FA1.png` e procurava `A1.png`: reprovou por desencontro MEU.
+  const foto = (n) => `https://venue-image.waze.com/thumbs/thumb700_${n}.png`;
+  const base = { ...comMapa, imageUrl: null, approvedImageIds: [], changes: [], mapa: null };
+  const FILA = [
+    { ...base, venueID: 'A', updateRequestID: 'A', imageUrls: [foto('A1'), foto('A2')] },
+    { ...base, venueID: 'B', updateRequestID: 'B', imageUrls: [foto('B1'), foto('B2'), foto('B3')], mapa: comMapa.mapa },
+    { ...base, venueID: 'C', updateRequestID: 'C', imageUrls: [foto('C1'), foto('C2')] },
+    { ...base, venueID: 'D', updateRequestID: 'D', imageUrls: [foto('D1'), foto('D2')] },
+    { ...base, venueID: 'E', updateRequestID: 'E', imageUrls: [foto('E1')] },
+  ];
+  await page.evaluate(async (fila) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true; API.setSession('t');
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false, profileImageUrl: '' };
+    AppState.stats = { read: 0, rejected: 0, skipped: 0 }; AppState.serverTotal = fila.length;
+    AppState.hasMore = false;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+    AppState.queue = fila; AppState.currentPlace = fila[0];
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 900));
+  }, FILA);
+
+  const pediu = (q) => pedidos.some((x) => x.qual === q);
+  // LARGURA — o próximo card fica pronto por INTEIRO (todos os slides).
+  checa(pediu('B1.png'), 'aquecimento: a 1ª foto do próximo card não foi pedida');
+  checa(pediu('B2.png') && pediu('B3.png'), 'aquecimento: o próximo card não veio COMPLETO (faltaram fotos)');
+  checa(pedidos.some((x) => x.tipo === 'tile'), 'aquecimento: os tiles do mapa do próximo card não foram pedidos');
+
+  // PROFUNDIDADE — o 1º slide dos cards +2 e +3 também. É o que converte a
+  // pausa de quem lê um diff em reserva pra três swipes rápidos.
+  checa(pediu('C1.png'), 'aquecimento: o card +2 não teve o 1º slide aquecido (profundidade caiu)');
+  checa(pediu('D1.png'), 'aquecimento: o card +3 não teve o 1º slide aquecido (profundidade caiu)');
+
+  // A LARGURA não acompanha a profundidade: os cards +2 e +3 recebem SÓ o
+  // primeiro slide. Se `C2` aparecer, o segundo laço deixou de ser preso ao
+  // queue[1] e a app passou a baixar foto que ninguém pediu.
+  checa(!pediu('C2.png'), 'aquecimento: o card +2 recebeu as fotos EXTRAS — a largura vazou pra profundidade');
+  checa(!pediu('D2.png'), 'aquecimento: o card +3 recebeu as fotos EXTRAS — a largura vazou pra profundidade');
+  // E há um fim: o card +4 fica de fora.
+  checa(!pediu('E1.png'), 'aquecimento: o card +4 foi aquecido — a profundidade passou de 3');
+
+  // Não é de uma vez só: ao avançar, a janela anda junto.
+  await page.evaluate(() => {
+    AppState.queue.shift();
+    AppState.currentPlace = AppState.queue[0];
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+  });
+  await page.waitForTimeout(700);
+  checa(pediu('E1.png'), 'aquecimento: depois de avançar, a janela não andou (o novo +3 ficou de fora)');
+  checa(pediu('C2.png'), 'aquecimento: depois de avançar, o novo "próximo" não veio COMPLETO');
+
+  // PRIORIDADE: nada aquecido pode competir com o card na tela.
+  const prio = await page.evaluate(() => {
+    const im = new Image();
+    return 'fetchPriority' in im ? 'suportado' : 'sem suporte no browser';
+  });
+  if (prio === 'suportado') {
+    // O <img> do card atual NÃO pode nascer com prioridade baixa.
+    const doCard = await page.evaluate(() => (document.querySelector('.card-image') || {}).fetchPriority || '');
+    checa(doCard !== 'low', `prefetch: a foto do card na tela ficou com fetchPriority=${doCard}`);
+  }
+  checa(erros.length === 0, 'prefetch: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -1115,4 +1238,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, Esc e ✕)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e camada da confirmação)`
-  + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`);
+  + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
+  + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`);

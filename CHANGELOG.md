@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.06-01
+
+### Melhorado
+- **O próximo pedido já vem pronto.** A app carrega o pedido seguinte **por inteiro** enquanto você olha o atual — foto, as outras fotos e o mapinha. Quando você passa o card, ele já está lá: sem caixa cinza esperando carregar.
+
+  E dos **dois pedidos depois desse** ela adianta a primeira imagem. Assim, se você parar um pouco num pedido e depois passar três rápido, os três já têm imagem. **Isso não consome dados a mais** — eles seriam baixados de qualquer jeito quando chegassem na sua vez; a app só aproveita o tempo em que a conexão estaria parada.
+
+  **Sem pesar nos seus dados**: esse carregamento antecipado tem prioridade baixa, então nunca atrasa o que está na sua tela agora; respeita o modo de economia de dados do aparelho; e para nas 4 primeiras fotos de cada pedido — as demais chegam quando você navegar até elas.
+
 ## v2026.08.05-04
 
 ### Interno

@@ -54,6 +54,37 @@ function formatarCodigoPareamento(bruto) {
         : limpo;
 }
 const PREFETCH_THRESHOLD = 3;
+
+// ── Aquecimento dos próximos cards ────────────────────────────────────────
+// A regra do owner: **o próximo card sempre pronto, e pronto por inteiro** —
+// foto, as outras fotos e os tiles do mapa. Isso é a LARGURA, e ela vale só
+// pro card seguinte (segundo laço do prefetchNextImage).
+//
+// PROFUNDIDADE é outra grandeza: quantos cards à frente têm o PRIMEIRO SLIDE
+// pronto — a imagem que aparece quando o card entra na tela, antes de tocar
+// nas setas do carrossel. Ela é **de graça em total de bytes**: a fila é
+// sequencial, esses cards vão aparecer de qualquer jeito, então só se move
+// byte no tempo. Medido: sessão de 200 cards fica em ~35MB com profundidade
+// 1 ou 3.
+//
+// O que ela compra é converter TEMPO OCIOSO em reserva. Com profundidade 1 o
+// aquecimento só começa quando um card aparece: quem para 10s lendo um diff
+// gasta 0,4s baixando o seguinte e deixa o link parado o resto. Triagem real
+// é pausa, pausa, três swipes rápidos — a profundidade guarda a pausa. Numa
+// rede boa 1 e 3 são indistinguíveis; a diferença aparece em rede sofrível
+// com swipe rápido, que é justamente o caso que dói.
+//
+// O laço é genérico: esta constante é a única coisa a mexer pra mudar de
+// ideia, e ela NUNCA afeta a largura.
+const PREFETCH_PROFUNDIDADE = 3;
+// Teto de fotos por card, escolhido pelo owner. Medido na fila real de 12
+// países: 91,7% dos cards têm 4 fotos ou menos e são aquecidos por INTEIRO;
+// nos 8,3% restantes as fotos além da 4ª carregam quando a pessoa chegar nelas
+// no carrossel — e quem está navegando o carrossel não está passando rápido.
+// O teto também segura o rabo: o pior card da fila tem TRINTA fotos, 2,3MB de
+// dados móveis sozinho.
+const PREFETCH_TETO_FOTOS = 4;
+
 const MAX_EMPTY_PAGES = 5;
 // Os 7 tipos do WME, na ordem em que aparecem no filtro (local → foto). É a
 // MESMA ordem do index.html de propósito: duas listas com a mesma ideia em
@@ -3204,24 +3235,79 @@ function mapaVemPrimeiro(place) {
 // Não é gastar mais rede: é gastar no que a pessoa vai ver. Os tiles do próximo
 // card seriam baixados de qualquer forma quando ele chegasse — a fila é
 // sequencial, então o "próximo" é literalmente o próximo que ela vê.
+
+// Rede em que aquecer mais ATRAPALHA. Prefetch disputa banda com o card que
+// está na tela: numa 2G ou com economia de dados ligada, encher o cano com o
+// que talvez nem seja visto deixa mais lento justamente o que a pessoa está
+// olhando agora. `navigator.connection` não existe no Safari — sem ele a
+// resposta é "não é econômica", que é o comportamento de antes.
+function redeEconomica() {
+    const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (!c) return false;
+    if (c.saveData) return true;
+    return /(^|-)2g$/i.test(c.effectiveType || '');
+}
+
+// Uma imagem aquecida NUNCA compete com o card na tela: `fetchPriority: low`
+// põe o pedido atrás do que está sendo pintado. Onde o navegador não suporta,
+// atribuir a propriedade é inócuo — degrada pro comportamento de antes.
+function aquecer(url) {
+    if (!url) return;
+    const im = new Image();
+    im.fetchPriority = 'low';
+    im.decoding = 'async';
+    im.src = url;
+}
+
+// Os tiles que o mini-mapa DESTE card vai pedir. Usa a caixa do card atual: o
+// próximo ainda não existe e o layout é o mesmo. Errar por alguns pixels só
+// muda o zoom em casos de fronteira, e aí o tile aquecido é vizinho do certo.
+function tilesDoCard(place, w, h) {
+    if (!place || !place.mapa || !window.mapaMontar) return [];
+    const pts = [place.mapa.centro, place.mapa.proposto,
+                 ...(place.mapa.entradas || []).map((e) => e.ll)].filter(Boolean);
+    const r = mapaMontar(pts, w, h, API.getRegion());
+    return r ? r.tiles.map((t) => t.url) : [];
+}
+
+// Aquece o que o próximo card mostra PRIMEIRO — não "a foto dele".
+//
+// Antes isto era `imageUrls[0]`, sempre. Medido em 4188 cards reais de 12
+// países: em 23% o primeiro slide é o MAPA, e em 20% não há foto nenhuma —
+// nesses o prefetch não aquecia NADA e o editor via a caixa cinza esperando o
+// tile. Nos outros ~3%, baixava uma foto que não aparece primeiro.
+function aquecerPrimeiroSlide(place, w, h) {
+    if (!place) return;
+    if (mapaVemPrimeiro(place)) { for (const u of tilesDoCard(place, w, h)) aquecer(u); return; }
+    aquecer((place.imageUrls && place.imageUrls[0]) || place.imageUrl);
+}
+
+// O RESTO do card: as outras fotos e, se o mapa não era o primeiro slide, os
+// tiles dele. Serve quem PAROU e começou a explorar o carrossel — por isso vai
+// só pro card seguinte, e com teto.
+function aquecerRestoDoCard(place, w, h) {
+    if (!place) return;
+    const fotos = (place.imageUrls && place.imageUrls.length ? place.imageUrls : [place.imageUrl]).filter(Boolean);
+    const inicio = mapaVemPrimeiro(place) ? 0 : 1;   // a [0] já foi no primeiro slide
+    for (const u of fotos.slice(inicio, PREFETCH_TETO_FOTOS)) aquecer(u);
+    if (!mapaVemPrimeiro(place)) for (const u of tilesDoCard(place, w, h)) aquecer(u);
+}
+
 function prefetchNextImage() {
-    const next = AppState.queue[1];
-    if (!next) return;
-    if (mapaVemPrimeiro(next) && window.mapaMontar) {
-        // A caixa do slide do card ATUAL: o próximo ainda não existe, e o
-        // layout é o mesmo. Errar por alguns pixels só muda o zoom escolhido em
-        // casos de fronteira, e mesmo aí o tile aquecido é vizinho do certo.
-        const cx = document.querySelector('.place-card .card-photo');
-        const w = (cx && cx.clientWidth) || 400;
-        const h = (cx && cx.clientHeight) || 240;
-        const pts = [next.mapa.centro, next.mapa.proposto,
-                     ...(next.mapa.entradas || []).map((e) => e.ll)].filter(Boolean);
-        const r = mapaMontar(pts, w, h, API.getRegion());
-        if (r) for (const t of r.tiles) { const im = new Image(); im.src = t.url; }
-        return;
+    if (!AppState.queue[1]) return;
+    const cx = document.querySelector('.place-card .card-photo');
+    const w = (cx && cx.clientWidth) || 400;
+    const h = (cx && cx.clientHeight) || 240;
+    const economica = redeEconomica();
+
+    // PROFUNDIDADE: o 1º slide dos próximos N (hoje 1, ver a constante).
+    const fundo = economica ? 1 : PREFETCH_PROFUNDIDADE;
+    for (let i = 1; i <= fundo; i++) {
+        if (!AppState.queue[i]) break;
+        aquecerPrimeiroSlide(AppState.queue[i], w, h);
     }
-    const url = (next.imageUrls && next.imageUrls[0]) || next.imageUrl;
-    if (url) { const im = new Image(); im.src = url; }
+    // LARGURA: só o card seguinte, e nunca em rede econômica.
+    if (!economica) aquecerRestoDoCard(AppState.queue[1], w, h);
 }
 
 function showNoPlaces() {
