@@ -8,12 +8,12 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
-## v2026.08.06-02
+## v2026.08.06-03
 
 ### Melhorado
-- **Excluir foto ficou mais rápido e deixou de parecer travado.** Antes, ao confirmar, o diálogo fechava na hora e por alguns segundos nada indicava que a app estava trabalhando — parecia que tinha engasgado. Agora o diálogo fica com **"Excluindo…"** até o Waze responder, e só então fecha.
+- **Excluir foto ficou bem mais rápido e deixou de parecer travado.** Antes, ao confirmar, o diálogo fechava na hora e por alguns segundos nada indicava que a app estava trabalhando — parecia que tinha engasgado. Agora o diálogo fica com **"Excluindo…"** até o Waze responder, e só então fecha.
 
-  E a espera encolheu: a app não pergunta mais ao Waze quem é você a cada exclusão — isso sozinho levava quase um segundo e ela já sabia a resposta desde que você entrou. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+  E a espera encolheu de verdade: a app deixou de perguntar ao Waze quem é você a cada exclusão, e passou a **adiantar** a consulta ao local no instante em que você toca na lixeira — enquanto você lê a pergunta. Medido: o tempo depois do "Excluir" caiu de **727 ms para 3 ms**. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme).
 
 ## v2026.08.06-01
 

@@ -974,10 +974,15 @@ const Lightbox = {
     }
 };
 
-// Portão de PRODUTO no aparelho: L6 + Area Manager (ou staff). É espelho do
-// `podeExcluirFoto` do core — e é o core que MANDA, este aqui só decide se
-// desenha o botão. Gate só no cliente seria enfeite: quem abrisse o DevTools
-// chamaria o endpoint direto (gotcha #16).
+// Portão de PRODUTO: L6 + Area Manager (ou staff). Vive SÓ aqui, e é decisão
+// do owner — *"a pessoa já pode apagar a foto se abrir o WME"*. O Waze valida
+// `permissions` e `lockRank` na gravação, então quem não pode apagar por aqui
+// também não consegue por lá: isto nunca foi fronteira de segurança, é trava
+// de produto pra o recurso não aparecer pra qualquer editor na NOSSA app.
+//
+// Houve um espelho disto no servidor, com cache de perfil pra não custar caro.
+// Saiu: a chamada que ele exigia era a mais lenta das três (977ms medidos) e
+// existia pra reconfirmar o que o Waze reconfirma de novo ao gravar.
 function podeExcluirFotoAqui() {
     const p = AppState.profile;
     if (!p) return false;
@@ -1201,6 +1206,11 @@ function pedirExclusaoDaFoto() {
     const id = Lightbox.idFotoAtual();
     if (!id) return;
     fotoParaExcluir = { id, place: Lightbox.place };
+    // Aquece a releitura do local ANTES de o editor decidir. O servidor precisa
+    // dela pra montar a lista sem esta foto, e ela custa ~700ms medidos — que
+    // cabem inteiros no tempo de ler a pergunta. Sem isto, esse tempo aparecia
+    // todo DEPOIS do "Excluir", que é onde ele incomoda.
+    API.prepararExclusao(Lightbox.place.venueID, Lightbox.place.lat, Lightbox.place.lon);
     openModal('deletePhotoModal');
 }
 
