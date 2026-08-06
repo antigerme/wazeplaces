@@ -915,7 +915,7 @@ const Lightbox = {
         // Mutuamente exclusivos: pendente se APROVA, aprovada se EXCLUI. Sem
         // isso os dois botões brigariam pelo mesmo canto, e o editor teria que
         // adivinhar qual vale pra foto que está vendo.
-        const apr = document.getElementById('lightboxApproveBar');
+        const apr = document.getElementById('lightboxApprove');
         if (apr) apr.classList.toggle('hidden', !this.podeAprovarAtual());
     },
     // A foto aberta é a PENDENTE deste pedido e este editor pode aprovar?
@@ -1288,6 +1288,14 @@ function pedirExclusaoDaFoto() {
     // o swipe faz. Sem isto, duas janelas correndo escreveriam listas que se
     // ignoram — a segunda apagaria só a dela, ressuscitando a primeira.
     if (exclusaoPendente) exclusaoPendente.enviar();
+    // E a APROVAÇÃO pendente também: a foto recém-aprovada vira alvo da lixeira
+    // no mesmo canto, e sem despachar antes as duas escritas cruzam — a
+    // exclusão relê um local onde a foto ainda está pendente, monta a lista sem
+    // ela, e aí a aprovação chega depois e a devolve. O editor mandou excluir e
+    // a foto fica. Hoje o banner do Desfazer TAPA a lixeira (medido:
+    // elementFromPoint devolve #undoBtn), mas isso é acidente de sobreposição —
+    // se o banner mudar de lugar a proteção some sem ninguém notar.
+    if (aprovacaoPendente) aprovacaoPendente.enviar();
 
     // Gate de experiência igual ao do swipe: a preferência salva como false só
     // vale se o editor qualifica (senão um legado de versão sem gate liberaria).
@@ -1405,6 +1413,9 @@ function aprovarFotoAtual() {
     const place = Lightbox.place;
     const alvo = { id: place.updateRequestID, place, idx: Lightbox.idx };
     if (aprovacaoPendente) aprovacaoPendente.enviar();
+    // Mesma razão do lado de lá: as duas escritas mexem no mesmo local, então
+    // quem chega depois tem que ver o resultado de quem chegou antes.
+    if (exclusaoPendente) exclusaoPendente.enviar();
 
     const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
     if (semJanela) {

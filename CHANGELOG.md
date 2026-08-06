@@ -8,6 +8,18 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.06-06
+
+### Melhorado
+- **Aprovar virou um botão só, do tamanho da lixeira, e os dois ganharam cor.** Saiu a barra preta com o texto "esta foto ainda não está no mapa": o ✨ em cima da foto já dizia isso, e a barra custava 78px de foto — numa app cujo produto é a foto, é o troco errado. No lugar, um **✓ verde** no mesmo canto onde mora a **🗑 vermelha**, do mesmo tamanho. Nunca aparecem juntos: foto pendente se aprova, foto que já está no mapa se exclui.
+
+  A cor não é só enfeite — **conserta um problema de leitura que já estava no ar**. Os botões eram um preto transparente, então a foto atravessava e num fundo claro o ícone branco quase sumia (2,85:1, abaixo do mínimo de 3:1 das normas de acessibilidade). Com a cor cheia o número não depende mais da foto: 4,83:1 no vermelho e 5,48:1 no verde. Cada botão ganhou também uma borda de dois tons, clara por dentro e escura por fora, pra não desaparecer sobre uma foto da mesma cor dele.
+
+  E a dica "toque duplo amplia…" parou de ficar **cortada** pelo botão em tela estreita. Sugerido por [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+### Corrigido
+- **Excluir logo depois de aprovar podia deixar a foto no mapa.** Se você aprovasse uma foto e mandasse excluí-la antes de a janela do Desfazer fechar, as duas ordens cruzavam e a foto acabava ficando — o contrário do que você pediu. Agora a aprovação é sempre enviada antes da exclusão.
+
 ## v2026.08.06-05
 
 ### Adicionado

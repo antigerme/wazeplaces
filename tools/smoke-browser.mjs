@@ -1064,9 +1064,16 @@ for (const status of [404, 403]) {
 {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
   const enviados = [];
+  const ordem = [];
   await ctx.route('**/api/validar-place', async (r) => {
     enviados.push(JSON.parse(r.request().postData() || '{}'));
+    ordem.push('aprovar');
     await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, action: 'approved' }) });
+  });
+  await ctx.route('**/api/excluir-foto', async (r) => {
+    const c = JSON.parse(r.request().postData() || '{}');
+    if (c.action !== 'preparar') ordem.push('excluir');
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
   });
   const page = await ctx.newPage();
   const erros = [];
@@ -1110,18 +1117,50 @@ for (const status of [404, 403]) {
 
   await montar({ userName: 'a', rank: 5, isAreaManager: true, isStaff: false });
   checa(await abrir(), 'aprovar: o lightbox não abriu — o resto mediria o nada');
-  checa(!(await escondido('lightboxApproveBar')), 'aprovar: não apareceu na foto PENDENTE, que é o caso dele');
+  checa(!(await escondido('lightboxApprove')), 'aprovar: não apareceu na foto PENDENTE, que é o caso dele');
   checa(await escondido('lightboxDelete'), 'aprovar: a lixeira apareceu junto — os dois são mutuamente exclusivos');
   const caixaAp = await page.evaluate(() => {
     const r = document.getElementById('lightboxApprove').getBoundingClientRect();
     const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return { w: Math.round(r.width), h: Math.round(r.height), recebe: !!(el && el.closest('#lightboxApprove')) };
   });
-  checa(caixaAp.h >= 44, `aprovar: alvo de ${caixaAp.w}×${caixaAp.h}px, abaixo de 44`);
+  checa(caixaAp.w >= 44 && caixaAp.h >= 44, `aprovar: alvo de ${caixaAp.w}×${caixaAp.h}px, abaixo de 44`);
   checa(caixaAp.recebe, 'aprovar: o toque no centro dele chega em outro elemento');
+
+  // Contraste do ícone contra o PREENCHIMENTO — e é por isso que ele é sólido.
+  // Com `bg-black/40` a foto atravessava e o número virava função dela: sobre
+  // foto clara dava 2,85:1, abaixo do mínimo 3:1 do WCAG 1.4.11. Sólido fixa.
+  // A conta lê a cor COMPUTADA, não a classe: trocar a classe por uma que não
+  // existe no CSS compilado deixaria o botão transparente e ninguém veria
+  // (foi exatamente o que aconteceu comigo medindo isto pela primeira vez).
+  const contrasteBotao = (id) => page.evaluate((i) => {
+    const el = document.getElementById(i);
+    const cs = getComputedStyle(el);
+    const rgb = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+    const canal = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    const lum = (c) => 0.2126 * canal(c[0]) + 0.7152 * canal(c[1]) + 0.0722 * canal(c[2]);
+    const fundo = rgb(cs.backgroundColor);
+    const alfa = Number((cs.backgroundColor.match(/[\d.]+/g) || [])[3] ?? 1);
+    const [x, y] = [lum(rgb(cs.color)), lum(fundo)].sort((m, n) => n - m);
+    return { c: (x + 0.05) / (y + 0.05), alfa, fundo: cs.backgroundColor };
+  }, id);
+  for (const [id, nome] of [['lightboxApprove', 'aprovar'], ['lightboxDelete', 'lixeira']]) {
+    const m = await contrasteBotao(id);
+    checa(m.alfa === 1, `${nome}: preenchimento translúcido (${m.fundo}) — a foto atravessa e o contraste vira função dela`);
+    checa(m.c >= 3, `${nome}: ícone em ${m.c.toFixed(2)}:1 sobre ${m.fundo}, abaixo do mínimo 3:1`);
+    // Borda de DOIS tons (`.lb-acao`). Um tom só não delimita: pra qualquer
+    // preenchimento sólido existe uma foto da mesma luminância, e aí a borda
+    // some. O par claro/escuro é 21:1 sempre — mas só se os DOIS estiverem lá.
+    const anéis = await page.evaluate((i) => {
+      const s = getComputedStyle(document.getElementById(i)).boxShadow;
+      return { s, n: s === 'none' ? 0 : s.split(/,(?![^(]*\))/).length };
+    }, id);
+    checa(anéis.n >= 2, `${nome}: borda de ${anéis.n} tom(ns) — precisa de dois pra não sumir sobre foto da mesma cor`);
+  }
+
   // Na foto que JÁ está no mapa é o contrário: lixeira sim, aprovar não.
   await page.click('#lightboxNext'); await page.waitForTimeout(250);
-  checa(await escondido('lightboxApproveBar'), 'aprovar: apareceu na foto que já está no mapa');
+  checa(await escondido('lightboxApprove'), 'aprovar: apareceu na foto que já está no mapa');
   checa(!(await escondido('lightboxDelete')), 'aprovar: a lixeira sumiu na foto já aprovada');
   await page.click('#lightboxPrev'); await page.waitForTimeout(250);
 
@@ -1130,7 +1169,7 @@ for (const status of [404, 403]) {
   await page.click('#lightboxApprove'); await page.waitForTimeout(400);
   checa(await page.evaluate(() => document.querySelectorAll('#undoContainer .undo-banner').length === 1),
     'aprovar: o banner de Desfazer não apareceu');
-  checa(await escondido('lightboxApproveBar') && !(await escondido('lightboxDelete')),
+  checa(await escondido('lightboxApprove') && !(await escondido('lightboxDelete')),
     'aprovar: o botão não virou lixeira — a foto passou a estar no mapa e o card tem que dizer isso');
   checa(enviados.length === 0, `aprovar: enviou DURANTE a janela de Desfazer (${enviados.length} chamada(s))`);
   checa(await page.evaluate(() => AppState.queue.length === 2),
@@ -1160,7 +1199,23 @@ for (const status of [404, 403]) {
   else checa(false, 'aprovar: sem banner de Desfazer pra cancelar — o envio já saiu');
   await page.waitForTimeout(3400);
   checa(enviados.length === 0, `aprovar: o Desfazer não cancelou — ${enviados.length} envio(s) saíram`);
-  checa(!(await escondido('lightboxApproveBar')), 'aprovar: o Desfazer não devolveu o botão');
+  checa(!(await escondido('lightboxApprove')), 'aprovar: o Desfazer não devolveu o botão');
+
+  // As duas escritas mexem no MESMO local, então quem chega depois tem que ver
+  // o resultado de quem chegou antes. Excluir com aprovação ainda na janela
+  // releria um local onde a foto está pendente, montaria a lista sem ela, e a
+  // aprovação chegaria depois devolvendo a foto: o editor mandou excluir e a
+  // foto fica. Hoje o banner do Desfazer TAPA a lixeira (medido: o
+  // elementFromPoint devolve #undoBtn), mas isso é acidente de sobreposição —
+  // por isso o teste chama a função direto, pelo caminho que o banner esconde.
+  await montar({ userName: 'a', rank: 5, isAreaManager: true, isStaff: false });
+  await abrir();
+  ordem.length = 0;
+  await page.click('#lightboxApprove'); await page.waitForTimeout(300);
+  await page.evaluate(() => pedirExclusaoDaFoto());
+  await page.waitForTimeout(3600);
+  checa(ordem.join('→') === 'aprovar→excluir',
+    `aprovar: as escritas saíram como "${ordem.join('→') || '(nada)'}" — a aprovação tem que sair ANTES da exclusão`);
 
   // Portão: o MESMO da lixeira, e o staff entra por fora do rank.
   for (const [nome, perfil, deveVer] of [
@@ -1171,7 +1226,7 @@ for (const status of [404, 403]) {
     await page.evaluate(() => Lightbox.close());
     await montar(perfil);
     checa(await abrir(), `aprovar/${nome}: o lightbox não abriu`);
-    checa((await escondido('lightboxApproveBar')) !== deveVer,
+    checa((await escondido('lightboxApprove')) !== deveVer,
       `aprovar: ${nome} ${deveVer ? 'não vê o aprovar e devia' : 'enxerga o aprovar e não devia'}`);
   }
   checa(erros.length === 0, 'aprovar: erro de JS', erros[0]);
