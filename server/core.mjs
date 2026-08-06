@@ -602,9 +602,15 @@ export function makeSessions({ store, keyBytes }) {
     // sempre a cópia de 30 bits ao lado da de 100, e a força do QR seria
     // decorativa. É por isso que o botão "não tenho câmera" cria um registro
     // novo em vez de revelar um que já estava lá.
+    // A chave leva o prefixo `pair_` de propósito: sessão e pareamento moram no
+    // MESMO store, e sem um sinal no NOME eles são indistinguíveis pra quem
+    // varre. A varredura da VM chutava pelo carimbo do valor e apagava toda
+    // sessão válida — o carimbo do pareamento é a EXPIRAÇÃO (futuro), o da
+    // sessão é o ÚLTIMO USO (sempre passado), então o mesmo teste dava
+    // "vencido" pra tudo. Medido: 1 arquivo antes, 0 depois do boot.
     async createPairing(cookiesContent, { comCodigo = false } = {}) {
       const segredo = randomPairCode(comCodigo ? PAIR_CODE_LEN : PAIR_SECRET_LEN);
-      const hash = await sha256hex('pair:' + segredo);
+      const hash = 'pair_' + await sha256hex('pair:' + segredo);
       const exp = Math.floor(Date.now() / 1000) + PAIR_TTL;
       const blob = await encryptCookies(cookiesContent, await derivarChave(keyBytes, segredo));
       await store.put(hash, exp + '|' + blob, PAIR_TTL);
@@ -618,7 +624,7 @@ export function makeSessions({ store, keyBytes }) {
       // Os dois tamanhos são válidos: 6 é o código digitado, 20 é o do QR.
       // Qualquer outro comprimento sai aqui sem tocar no store.
       if (limpo.length !== PAIR_CODE_LEN && limpo.length !== PAIR_SECRET_LEN) return null;
-      const hash = await sha256hex('pair:' + limpo);
+      const hash = 'pair_' + await sha256hex('pair:' + limpo);
       const raw = await store.get(hash);
       if (!raw) return null;
       await store.delete(hash);

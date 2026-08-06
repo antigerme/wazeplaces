@@ -91,15 +91,21 @@ async function gcSessions() {
       const f = join(SESSION_DIR, name);
       try {
         const st = await stat(f);
-        if (now - st.mtimeMs > SESSION_TTL * 1000) { await unlink(f).catch(() => {}); continue; }
-        // Pareamento vale 5 MINUTOS, não 21 dias — mas mora no mesmo diretório
-        // e com o mesmo prefixo da sessão, então o corte por SESSION_TTL o
-        // deixaria 6000× mais tempo no disco do que ele vale. O valor guardado
-        // começa com o instante de expiração (`<unix>|<blob>`), justamente
-        // porque este adaptador ignora o TTL do `put` — dá pra podar por ele.
-        const conteudo = await readFile(f, 'utf8').catch(() => '');
-        const corte = /^(\d+)\|/.exec(conteudo);
-        if (corte && Number(corte[1]) * 1000 < now) await unlink(f).catch(() => {});
+
+        // Pareamento vale 5 MINUTOS, não 21 dias, e é reconhecível pelo NOME
+        // (`sess_pair_…`). Antes a varredura tentava distinguir pelo carimbo do
+        // VALOR, e isso apagava toda sessão válida: no pareamento o carimbo é a
+        // EXPIRAÇÃO (futuro), na sessão é o ÚLTIMO USO (sempre passado), então
+        // "carimbo < agora" dava vencido pra tudo. Medido antes do conserto: a
+        // sessão sumia no primeiro boot.
+        if (name.startsWith('sess_pair_')) {
+          const corte = /^(\d+)\|/.exec(await readFile(f, 'utf8').catch(() => ''));
+          if (!corte || Number(corte[1]) * 1000 < now) await unlink(f).catch(() => {});
+          continue;
+        }
+
+        // Sessão: quem manda é o mtime, que o `.get` renova a cada uso.
+        if (now - st.mtimeMs > SESSION_TTL * 1000) await unlink(f).catch(() => {});
       } catch {
         // arquivo sumiu no meio da varredura — ignora
       }
