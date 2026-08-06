@@ -239,6 +239,11 @@ Motivo: HAR é uma foto do passado, chega em 5–20MB, e cada dúvida nova custa
 
 **Chave de criptografia:** Secret `ENCRYPTION_KEY` (base64, 32 bytes) no Cloudflare; env var ou arquivo `0600` auto-gerado na VM. **Nunca commitada.** O core não sabe de onde vem — o adaptador injeta `keyBytes` em `makeSessions({ store, keyBytes })`.
 
+**A chave que cifra NÃO é o Secret: é `HKDF(Secret, segredoDoCliente)`** (`derivarChave` em `core.mjs`, v2026.08.06-07). O Secret sozinho não abre nada — falta o token, que vive no aparelho do editor e chega a cada requisição. **Dump do KV + `ENCRYPTION_KEY` = zero**, e isso vale pra vazamento, token de leitura roubado e pedido judicial. Travado em `test/core.test.mjs` ("Secret + dump do KV, SEM o token, não abre nada"), que **é** a frase publicada na Ajuda (`help.privacy.zeroKnowledge`, 4 línguas) — se o teste cair, a app está mentindo.
+**O que isto NÃO protege**, e não adianta escrever bonito: quem publica código no Worker registra o segredo quando ele chega. A diferença é o alcance — de "todos os editores, inclusive os de ontem" pra "quem usar a app enquanto o código estiver no ar", com rastro em `wrangler deployments`.
+**Depende de DUAS coisas, e mexer em qualquer uma derruba a garantia:** (a) o token viaja só no CORPO do POST — nunca URL, query ou header — e o core não tem `console`; (b) o QR do pareamento usa **fragmento** (`/#pair=`), que o navegador não manda pro servidor. Com `?pair=` o segredo caía no log de acesso ao lado do dado que protege.
+**Pareamento tem DOIS tamanhos de segredo**: 20 símbolos (QR, 100 bits, padrão) e 6 (digitável, ~30 bits, **só sob demanda** pelo botão "sem câmera"). O curto é fraco por construção; existir só quando pedido é o que impede que ele enfraqueça o QR de todo mundo — se estivesse sempre lá, o dump traria a cópia fraca ao lado da forte. Depois do `claim` os dois convergem: o aparelho ganha uma sessão nova, com a derivação cheia.
+
 ---
 
 ## 🌐 Endpoints proxy → Waze
@@ -610,6 +615,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 57.1. **A grade de gerenciar fotos foi decidida como NÃO** — e o 42% que parece pedi-la é armadilha: medi fotos que EXISTEM, não que são EXCLUÍDAS.
 58. **O tile era desenhado com 393px onde o código pedia 512** — `img{max-width:100%}` do preflight. Meça `getBoundingClientRect()` (o que a tela deu), não `style.width` (o que você pediu). Stub idêntico pra todo recurso não detecta erro de posição.
 59. **Regra de produto que muda não some: vira contrato mais estreito** — a app passou a aprovar FOTO, e o que guarda a regra antiga é `data.approve === true`, booleano estrito. Coerção é o risco real (`'false'` é truthy). O portão é só do CLIENTE de propósito, e caminho de ESCRITA se valida comparando o payload com o do WME no HAR — `/Features` não se chama com os cookies do owner.
+60. **Criptografia em repouso só vale se a chave não estiver do lado do dado** — `HKDF(Secret, token)`, e o token nunca em URL/query/header/log. O QR do pareamento vazava o segredo na query. Segredo digitável é fraco por tamanho: crie-o sob demanda, senão ele rebaixa o caminho forte.
 18. **Version skew: três camadas precisam estar alinhadas** — estratégia do SW, opção `cache` do `fetch` (`{ cache: 'reload' }`) e Cache-Control do servidor. Mexer numa só rompe a cadeia, e no celular não há `Ctrl+Shift+R`.
 
 

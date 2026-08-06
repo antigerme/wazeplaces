@@ -448,11 +448,28 @@
                     <canvas id="pairQr" class="rounded-xl bg-white p-3 shadow-sm border border-slate-200 dark:border-slate-700" role="img" aria-label="QR code para entrar no outro aparelho" data-i18n-aria="pair.qr.aria"></canvas>
                 </div>
 
-                <p class="text-xs text-center text-slate-500 dark:text-slate-400 mb-1" data-i18n="pair.show.orType">Sem câmera? Digite este código no outro aparelho:</p>
-                <div id="pairCodeBox" class="bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-cyan-300 dark:border-cyan-400/40 rounded-2xl py-3 text-center mb-2">
-                    <p id="pairCode" class="text-2xl font-black tracking-[0.2em] text-cyan-700 dark:text-cyan-300 tnum select-all">······</p>
+                <p id="pairExpiry" class="text-xs text-center text-slate-500 dark:text-slate-400 mb-4"></p>
+
+                <!-- O código digitável NÃO nasce junto com o QR: ele é criado
+                     só quando alguém toca aqui, e o motivo é criptográfico, não
+                     de layout. A chave do registro de pareamento sai do próprio
+                     segredo; o do QR tem 20 símbolos (100 bits) e o digitável
+                     tem 6 (~30 bits, quebráveis offline em segundos). Se o
+                     curto existisse sempre, um vazamento do banco traria a
+                     cópia fraca ao lado da forte e a força do QR seria
+                     decorativa. Sob demanda, ele existe só pra quem precisa
+                     dele, e por 5 minutos. -->
+                <button id="pairShowCodeBtn" type="button" class="w-full min-h-[48px] mb-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/><path stroke-linecap="round" stroke-width="2" d="M3 3l18 18"/></svg>
+                    <span data-i18n="pair.show.noCamera">Sem câmera? Mostrar um código</span>
+                </button>
+                <div id="pairCodeReveal" class="hidden">
+                    <p class="text-xs text-center text-slate-500 dark:text-slate-400 mb-1" data-i18n="pair.show.orType">Digite este código no outro aparelho:</p>
+                    <div id="pairCodeBox" class="bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-cyan-300 dark:border-cyan-400/40 rounded-2xl py-3 text-center mb-2">
+                        <p id="pairCode" class="text-2xl font-black tracking-[0.2em] text-cyan-700 dark:text-cyan-300 tnum select-all">······</p>
+                    </div>
+                    <p id="pairCodeExpiry" class="text-xs text-center text-slate-500 dark:text-slate-400 mb-5"></p>
                 </div>
-                <p id="pairExpiry" class="text-xs text-center text-slate-500 dark:text-slate-400 mb-5"></p>
 
                 <button id="pairCopyLinkBtn" type="button" class="w-full min-h-[48px] mb-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.328-6.328l1.5-1.5a4 4 0 015.656 5.656l-3 3a4 4 0 01-5.656 0"></path></svg>
@@ -982,6 +999,7 @@
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.privacy.title">Privacidade e dados:</h4>
                     <ul class="list-disc list-inside space-y-1.5 text-sm">
                         <li data-i18n="help.privacy.server">No servidor fica só uma coisa: os seus cookies do Waze, criptografados (AES-256-GCM). Nada além disso.</li>
+                        <li data-i18n-html="help.privacy.zeroKnowledge">E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera a app. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.</li>
                         <li data-i18n="help.privacy.notStored">Os pedidos NÃO são guardados. Nome, foto, endereço e coordenada de place não são gravados em lugar nenhum — a fila existe só na memória, enquanto a app está aberta.</li>
                         <li data-i18n="help.privacy.retention">Prazo: 21 dias sem uso, ou até você tocar em “Sair” — o que vier primeiro. Código de pareamento dura 5 minutos e é de uso único.</li>
                         <li data-i18n="help.privacy.device">Neste aparelho ficam placar, filtros, preferências e histórico. Todos apagados no “Sair”.</li>

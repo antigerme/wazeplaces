@@ -1004,3 +1004,79 @@ test('excluir-foto: escreve a lista que veio da RELEITURA, não a que o celular 
     globalThis.fetch = original;
   }
 });
+
+// ── O que está guardado no servidor não presta sem o aparelho do editor ─────
+//
+// Este teste É a frase pública. Se ele passar a falhar, a app deixou de poder
+// dizer que "nem quem opera consegue abrir o que está guardado" — e a frase
+// está na Ajuda, em quatro idiomas.
+//
+// Cenário: o atacante tem TUDO do lado do servidor — o `ENCRYPTION_KEY` e um
+// dump completo do KV. Falta só o token, que vive no aparelho da pessoa. É o
+// cenário do vazamento, do token de leitura roubado e do pedido judicial.
+test('sessão: Secret + dump do KV, SEM o token, não abre nada', async () => {
+  const { makeSessions } = await import('../server/core.mjs');
+  const COOKIES = ['_web_session', '_csrf_token']
+    .map((n) => `.waze.com\tTRUE\t/\tTRUE\t9999999999\t${n}\tvalor-de-teste`).join('\n');
+  const SECRET = crypto.getRandomValues(new Uint8Array(32));
+
+  const kv = new Map();
+  const store = {
+    get: async (h) => kv.get(h) ?? null,
+    put: async (h, b) => { kv.set(h, b); },
+    delete: async (h) => { kv.delete(h); },
+  };
+  const sessions = makeSessions({ store, keyBytes: SECRET });
+  const token = await sessions.createSession(COOKIES);
+
+  // 1. O dump não tem cookie em claro, nem diz de quem é a sessão.
+  const dump = [...kv.entries()];
+  assert.equal(dump.length, 1);
+  const [chave, valor] = dump[0];
+  assert.ok(!/_web_session|valor-de-teste/.test(valor), 'o valor guardado não pode conter o cookie');
+  assert.ok(!/_web_session|valor-de-teste/.test(chave), 'nem a chave');
+
+  // 2. Com o Secret CRU — o jeito que abriria antes desta versão — não abre.
+  //    É este `assert` que morde se alguém remover a derivação.
+  const blob = valor.slice(valor.indexOf('|') + 1);
+  const [ivB, ctB] = blob.split('::');
+  const b64 = (x) => Uint8Array.from(Buffer.from(x, 'base64'));
+  const cruas = await crypto.subtle.importKey('raw', SECRET, { name: 'AES-GCM' }, false, ['decrypt']);
+  await assert.rejects(
+    () => crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(ivB) }, cruas, b64(ctB)),
+    'o Secret sozinho NÃO pode decifrar — se decifrou, a derivação sumiu');
+
+  // 3. Com o token (a requisição normal), abre — senão a app não funcionaria.
+  assert.equal(await sessions.loadSession(token), COOKIES);
+
+  // 4. E o token de outra pessoa não abre esta sessão.
+  const outro = await sessions.createSession('nada');
+  assert.equal(await sessions.loadSession(outro + 'x'), null);
+});
+
+// Mesma propriedade no pareamento — mas só o registro do QR a tem. O código
+// digitado é 30 bits e a garantia dele é OUTRA (5 minutos + uso único); este
+// teste existe pra ninguém "melhorar" o padrão de volta pro curto sem perceber.
+test('pareamento: o registro padrão é o forte, o curto só sob demanda', async () => {
+  const { makeSessions } = await import('../server/core.mjs');
+  const SECRET = crypto.getRandomValues(new Uint8Array(32));
+  const kv = new Map();
+  const store = {
+    get: async (h) => kv.get(h) ?? null,
+    put: async (h, b) => { kv.set(h, b); },
+    delete: async (h) => { kv.delete(h); },
+  };
+  const sessions = makeSessions({ store, keyBytes: SECRET });
+
+  const padrao = await sessions.createPairing('cookies-x');
+  assert.equal(padrao.code.length, 20, 'sem pedir, o segredo é o longo (do QR)');
+  assert.equal(padrao.curto, false);
+
+  const sobDemanda = await sessions.createPairing('cookies-x', { comCodigo: true });
+  assert.equal(sobDemanda.code.length, 6, 'o digitável só quando pedido');
+  assert.equal(sobDemanda.curto, true);
+
+  // Os dois resgatam — o curto continua servindo a quem não tem câmera.
+  assert.equal(await sessions.claimPairing(padrao.code), 'cookies-x');
+  assert.equal(await sessions.claimPairing(sobDemanda.code), 'cookies-x');
+});

@@ -253,10 +253,13 @@ const API = {
 
     // Pareamento computador → celular. `criarPareamento` roda no aparelho que
     // JÁ está logado; `resgatarPareamento` no que quer entrar.
-    async criarPareamento() {
+    // `comCodigo` pede o registro CURTO (6 chars, digitável) em vez do longo do
+    // QR. São registros diferentes no servidor, com forças diferentes — ver
+    // `derivarChave` no core. O padrão é o forte, de propósito.
+    async criarPareamento({ comCodigo = false } = {}) {
         const sessionToken = this.getSession();
         if (!sessionToken) return { success: false, error: t('api.error.noSession') };
-        return this._post('parear', { action: 'create', sessionToken });
+        return this._post('parear', { action: 'create', sessionToken, comCodigo });
     },
 
     async resgatarPareamento(code) {
