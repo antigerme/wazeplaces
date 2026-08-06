@@ -7,9 +7,22 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # v7 nas duas: a v4 roda em Node 20, que o runner já força pra Node 24 e
+      # avisa como obsoleto. Todas as majors de v5 pra cima declaram `node24`,
+      # então v5 já calaria o aviso — v7 é pra não voltar a ficar duas majors
+      # atrás e receber o mesmo recado daqui a pouco.
+      #
+      # A única mudança quebrante documentada é a do checkout v7: ele recusa
+      # fazer checkout de PR de fork em `pull_request_target` e `workflow_run`.
+      # Não nos alcança — este workflow dispara em `pull_request` e em `push`
+      # na main, e nenhum dos dois está na lista.
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
+      # `node-version: 20` NÃO é o que o aviso reclama (aquilo é o runtime das
+      # actions, não o nosso). Fica em 20 de propósito: o projeto promete Node
+      # 18+, e testar no PISO é o que pega uso acidental de API nova. Subir isto
+      # não conserta aviso nenhum e ainda afrouxa o que o CI verifica.
+      - uses: actions/setup-node@v7
         with: { node-version: 20 }
       - name: Sintaxe (node --check)
         run: for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done
