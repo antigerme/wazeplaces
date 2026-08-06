@@ -515,13 +515,28 @@ export function makeSessions({ store, keyBytes }) {
       // Formato único: `carimbo|blob`. Valor sem carimbo é lixo (formato de
       // antes desta versão) e não vale a pena carregar compatibilidade — a app
       // ainda está em dev/testes, não há sessão de produção pra preservar.
+      // Registro que não abre é LIXO, e lixo se apaga em vez de esperar vencer.
+      //
+      // Não é arrumação: é a garantia. Uma sessão gravada no formato anterior
+      // (cifrada com o Secret CRU) continua decifrável com o Secret sozinho —
+      // exatamente o que esta versão existe pra impedir — e ficaria assim por
+      // até SESSION_TTL. Medido antes de escrever isto: o editor era deslogado,
+      // mas o blob permanecia aberto pra quem tivesse o Secret.
+      //
+      // Apagar aqui é seguro porque a falha é DETERMINÍSTICA: AES-GCM autentica,
+      // e a chave vem do token que o próprio cliente mandou. Não existe "falhou
+      // por um instante" que apagasse sessão boa. Cobre só quem volta — quem
+      // não voltar, o TTL leva. Pra fechar a janela no dia do deploy, o caminho
+      // é ROTACIONAR o `ENCRYPTION_KEY`: aí todo blob antigo morre de uma vez.
+      const descartar = async () => { try { await store.delete(hash); } catch (e) { /* nunca derruba a resposta */ } };
+
       const sep = raw.indexOf('|');
       const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
-      if (!Number.isFinite(carimbo)) return null;
+      if (!Number.isFinite(carimbo)) { await descartar(); return null; }
       const blob = raw.slice(sep + 1);
 
       const cookies = await decryptCookies(blob, await derivarChave(keyBytes, token));
-      if (!cookies) return null;
+      if (!cookies) { await descartar(); return null; }
 
       const agora = Math.floor(Date.now() / 1000);
       if (agora - carimbo >= SESSION_REFRESH_AFTER) {

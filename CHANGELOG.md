@@ -15,6 +15,8 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
   Isso **não** protege contra quem publica código novo no servidor: essa pessoa pode registrar o seu token quando ele chega. A diferença é o alcance — deixa de ser "todos os editores, inclusive os de ontem" e passa a ser "quem usar a app enquanto esse código estiver no ar". A Ajuda foi atualizada para dizer exatamente isso, sem promessa a mais.
 
+- **Sessão que não abre mais é apagada na hora.** As sessões criadas antes desta mudança não funcionam mais (você entra de novo, uma vez). Antes elas ficavam guardadas até vencer, ainda legíveis pelo servidor — o oposto do que a mudança acima promete. Agora, na primeira tentativa de uso, o registro é removido.
+
 - **O QR do pareamento parou de vazar o segredo no endereço.** O link virava `.../?pair=CÓDIGO`, e endereço fica registrado no servidor — ou seja, a chave ia parar no log ao lado do dado que ela protege. Agora vai depois do `#`, que o navegador **não** envia. Links antigos continuam funcionando.
 
 - **O código de 6 caracteres agora aparece só quando você pede.** No "Conectar outro aparelho" existe um botão **"Sem câmera? Mostrar um código"**. O motivo não é de tela: o segredo do QR tem 20 caracteres e o digitado tem 6, e é dele que sai a chave do pareamento. Se o curto existisse sempre, um vazamento traria a versão fraca ao lado da forte. Criado só sob demanda, ele existe por 5 minutos, para quem realmente não tem câmera.

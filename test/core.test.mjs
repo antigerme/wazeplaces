@@ -1080,3 +1080,40 @@ test('pareamento: o registro padrão é o forte, o curto só sob demanda', async
   assert.equal(await sessions.claimPairing(padrao.code), 'cookies-x');
   assert.equal(await sessions.claimPairing(sobDemanda.code), 'cookies-x');
 });
+
+// Sessão que não abre é APAGADA, não deixada vencendo.
+//
+// O caso real é o deploy da derivação: registros do formato anterior seguem
+// decifráveis com o Secret sozinho — justamente o que a versão nova impede — e
+// ficariam assim por até SESSION_TTL. O editor já era deslogado; o blob é que
+// ficava. Verificado desfazendo o `descartar()`: este teste reprova.
+test('sessão ilegível é apagada do store, não deixada expirar', async () => {
+  const { makeSessions } = await import('../server/core.mjs');
+  const SECRET = crypto.getRandomValues(new Uint8Array(32));
+  const kv = new Map();
+  const store = {
+    get: async (h) => kv.get(h) ?? null,
+    put: async (h, b) => { kv.set(h, b); },
+    delete: async (h) => { kv.delete(h); },
+  };
+  const sessions = makeSessions({ store, keyBytes: SECRET });
+  const token = await sessions.createSession('cookies-x');
+  const [chave, valor] = [...kv.entries()][0];
+
+  // Formato ANTIGO: cifrado com o Secret cru, sem derivação.
+  const b64 = (u8) => Buffer.from(u8).toString('base64');
+  const k = await crypto.subtle.importKey('raw', SECRET, { name: 'AES-GCM' }, false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, new TextEncoder().encode('cookies-x'));
+  kv.set(chave, valor.slice(0, valor.indexOf('|') + 1) + b64(iv) + '::' + b64(new Uint8Array(ct)));
+
+  assert.equal(await sessions.loadSession(token), null, 'formato antigo não pode abrir');
+  assert.equal(kv.has(chave), false, 'o blob antigo tem que SUMIR — com o Secret ele ainda abriria');
+
+  // E valor corrompido (sem carimbo) também sai.
+  const t2 = await sessions.createSession('cookies-y');
+  const c2 = [...kv.keys()][0];
+  kv.set(c2, 'lixo-sem-carimbo');
+  assert.equal(await sessions.loadSession(t2), null);
+  assert.equal(kv.has(c2), false, 'valor corrompido também é descartado');
+});
