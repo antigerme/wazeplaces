@@ -438,3 +438,34 @@ test('prefetch aquece o que o próximo card mostra PRIMEIRO', () => {
   assert.ok(fundo && Number(fundo[1]) >= 1,
     'sumiu a profundidade do aquecimento (quantos cards à frente têm o 1º slide pronto)');
 });
+
+test('as duas camadas dos gotchas não podem divergir', () => {
+  // O CLAUDE.md guarda a REGRA de cada gotcha (uma ou duas linhas) e o
+  // docs/gotchas.md guarda a HISTÓRIA. A divisão existe porque o CLAUDE.md
+  // tinha 163KB — ~44 mil tokens reenviados a cada mensagem — com 51% disso
+  // nos gotchas.
+  //
+  // O modo de falha deste desenho é DERIVA: alguém anota um gotcha novo só num
+  // dos lados. Aí o índice promete um detalhe que não existe, ou existe uma
+  // história que ninguém encontra porque não está no arquivo que sempre carrega.
+  const DOC = read('CLAUDE.md');
+  const HIST = read('docs/gotchas.md');
+  const i = DOC.indexOf('## 🪤 Gotchas');
+  const j = DOC.indexOf('\n## 🛠 Workflows', i);
+  assert.ok(i > 0 && j > i, 'sumiu a seção de gotchas do CLAUDE.md');
+
+  const noIndice = new Set([...DOC.slice(i, j).matchAll(/^(\d+(?:\.\d+)?)\. \*\*/gm)].map((m) => m[1]));
+  const naHistoria = new Set([...HIST.matchAll(/^## (\d+(?:\.\d+)?)\. /gm)].map((m) => m[1]));
+  assert.ok(noIndice.size >= 50, `só ${noIndice.size} regras no índice — a seção encolheu demais`);
+
+  const semHistoria = [...noIndice].filter((n) => !naHistoria.has(n));
+  assert.deepEqual(semHistoria, [],
+    `gotcha no índice sem história em docs/gotchas.md: ${semHistoria.join(', ')}`);
+  const semRegra = [...naHistoria].filter((n) => !noIndice.has(n));
+  assert.deepEqual(semRegra, [],
+    `história sem regra no CLAUDE.md (ninguém vai achar): ${semRegra.join(', ')}`);
+
+  // O ponteiro precisa estar lá, senão a segunda camada é invisível.
+  assert.match(DOC.slice(i, j), /docs\/gotchas\.md/,
+    'o índice não aponta pro docs/gotchas.md — a história vira inalcançável');
+});
