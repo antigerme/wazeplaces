@@ -55,21 +55,28 @@ function formatarCodigoPareamento(bruto) {
 }
 const PREFETCH_THRESHOLD = 3;
 
-// ── Aquecimento do próximo card ───────────────────────────────────────────
-// Decisão do owner, e ela é simples de enunciar: **o próximo card sempre
-// pronto, e pronto por inteiro** — foto, as outras fotos e os tiles do mapa.
+// ── Aquecimento dos próximos cards ────────────────────────────────────────
+// A regra do owner: **o próximo card sempre pronto, e pronto por inteiro** —
+// foto, as outras fotos e os tiles do mapa. Isso é a LARGURA, e ela vale só
+// pro card seguinte (segundo laço do prefetchNextImage).
 //
-// PROFUNDIDADE 1 é escolha dele. Eu tinha proposto 3, com o argumento de que
-// aquecer o primeiro slide de mais cards é de graça em total de bytes (a fila
-// é sequencial, eles apareceriam de qualquer jeito) e compra tolerância a
-// quem passa rápido. Ele preferiu concentrar tudo no seguinte. O laço abaixo
-// continua genérico: mudar esta constante é a única coisa necessária pra
-// voltar atrás.
+// PROFUNDIDADE é outra grandeza: quantos cards à frente têm o PRIMEIRO SLIDE
+// pronto — a imagem que aparece quando o card entra na tela, antes de tocar
+// nas setas do carrossel. Ela é **de graça em total de bytes**: a fila é
+// sequencial, esses cards vão aparecer de qualquer jeito, então só se move
+// byte no tempo. Medido: sessão de 200 cards fica em ~35MB com profundidade
+// 1 ou 3.
 //
-// O que a profundidade 1 NÃO cobre, pra ficar registrado: quem passa mais
-// rápido do que a rede aquece. O card seguinte só fica pronto se a pessoa
-// ficar no atual o tempo de baixar ~180KB.
-const PREFETCH_PROFUNDIDADE = 1;
+// O que ela compra é converter TEMPO OCIOSO em reserva. Com profundidade 1 o
+// aquecimento só começa quando um card aparece: quem para 10s lendo um diff
+// gasta 0,4s baixando o seguinte e deixa o link parado o resto. Triagem real
+// é pausa, pausa, três swipes rápidos — a profundidade guarda a pausa. Numa
+// rede boa 1 e 3 são indistinguíveis; a diferença aparece em rede sofrível
+// com swipe rápido, que é justamente o caso que dói.
+//
+// O laço é genérico: esta constante é a única coisa a mexer pra mudar de
+// ideia, e ela NUNCA afeta a largura.
+const PREFETCH_PROFUNDIDADE = 3;
 // Teto de fotos por card, escolhido pelo owner. Medido na fila real de 12
 // países: 91,7% dos cards têm 4 fotos ou menos e são aquecidos por INTEIRO;
 // nos 8,3% restantes as fotos além da 4ª carregam quando a pessoa chegar nelas

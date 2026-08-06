@@ -1160,8 +1160,9 @@ for (const status of [404, 403]) {
   const FILA = [
     { ...base, venueID: 'A', updateRequestID: 'A', imageUrls: [foto('A1'), foto('A2')] },
     { ...base, venueID: 'B', updateRequestID: 'B', imageUrls: [foto('B1'), foto('B2'), foto('B3')], mapa: comMapa.mapa },
-    { ...base, venueID: 'C', updateRequestID: 'C', imageUrls: [foto('C1')] },
-    { ...base, venueID: 'D', updateRequestID: 'D', imageUrls: [foto('D1')] },
+    { ...base, venueID: 'C', updateRequestID: 'C', imageUrls: [foto('C1'), foto('C2')] },
+    { ...base, venueID: 'D', updateRequestID: 'D', imageUrls: [foto('D1'), foto('D2')] },
+    { ...base, venueID: 'E', updateRequestID: 'E', imageUrls: [foto('E1')] },
   ];
   await page.evaluate(async (fila) => {
     setLang('pt'); applyI18n();
@@ -1180,14 +1181,25 @@ for (const status of [404, 403]) {
   }, FILA);
 
   const pediu = (q) => pedidos.some((x) => x.qual === q);
-  // A regra que o owner definiu: o PRÓXIMO card fica pronto por INTEIRO.
+  // LARGURA — o próximo card fica pronto por INTEIRO (todos os slides).
   checa(pediu('B1.png'), 'aquecimento: a 1ª foto do próximo card não foi pedida');
   checa(pediu('B2.png') && pediu('B3.png'), 'aquecimento: o próximo card não veio COMPLETO (faltaram fotos)');
   checa(pedidos.some((x) => x.tipo === 'tile'), 'aquecimento: os tiles do mapa do próximo card não foram pedidos');
-  // E SÓ ele: aquecer mais fundo é gasto que o owner decidiu não ter.
-  checa(!pediu('C1.png'), 'aquecimento: o card +2 foi aquecido — a profundidade voltou a passar de 1');
 
-  // Não é de uma vez só: ao avançar, o card seguinte tem que ser aquecido.
+  // PROFUNDIDADE — o 1º slide dos cards +2 e +3 também. É o que converte a
+  // pausa de quem lê um diff em reserva pra três swipes rápidos.
+  checa(pediu('C1.png'), 'aquecimento: o card +2 não teve o 1º slide aquecido (profundidade caiu)');
+  checa(pediu('D1.png'), 'aquecimento: o card +3 não teve o 1º slide aquecido (profundidade caiu)');
+
+  // A LARGURA não acompanha a profundidade: os cards +2 e +3 recebem SÓ o
+  // primeiro slide. Se `C2` aparecer, o segundo laço deixou de ser preso ao
+  // queue[1] e a app passou a baixar foto que ninguém pediu.
+  checa(!pediu('C2.png'), 'aquecimento: o card +2 recebeu as fotos EXTRAS — a largura vazou pra profundidade');
+  checa(!pediu('D2.png'), 'aquecimento: o card +3 recebeu as fotos EXTRAS — a largura vazou pra profundidade');
+  // E há um fim: o card +4 fica de fora.
+  checa(!pediu('E1.png'), 'aquecimento: o card +4 foi aquecido — a profundidade passou de 3');
+
+  // Não é de uma vez só: ao avançar, a janela anda junto.
   await page.evaluate(() => {
     AppState.queue.shift();
     AppState.currentPlace = AppState.queue[0];
@@ -1195,7 +1207,8 @@ for (const status of [404, 403]) {
     showCurrentPlace();
   });
   await page.waitForTimeout(700);
-  checa(pediu('C1.png'), 'aquecimento: depois de avançar, o novo "próximo" não foi aquecido');
+  checa(pediu('E1.png'), 'aquecimento: depois de avançar, a janela não andou (o novo +3 ficou de fora)');
+  checa(pediu('C2.png'), 'aquecimento: depois de avançar, o novo "próximo" não veio COMPLETO');
 
   // PRIORIDADE: nada aquecido pode competir com o card na tela.
   const prio = await page.evaluate(() => {
