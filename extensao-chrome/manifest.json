@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "Waze Places Rapid Access",
+  "version": "0.1.0",
+  "description": "Login automático entre o Waze Map Editor e o Waze Places — sem copiar cookies, sem clicar em nada.",
+  "permissions": [
+    "cookies",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.waze.com/*",
+    "*://places.wazebrasil.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "content.js"
+      ],
+      "matches": [
+        "*://www.waze.com/*/editor*",
+        "*://www.waze.com/editor*"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "js": [
+        "ponte.js"
+      ],
+      "matches": [
+        "*://places.wazebrasil.com/*"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "*://www.waze.com/*"
+      ],
+      "resources": [
+        "icone48.png",
+        "filtro.png",
+        "null.png",
+        "inject.js"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

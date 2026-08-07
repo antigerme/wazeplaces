@@ -273,8 +273,106 @@ function initApp() {
         startFetching();
         handleLaunchAction();
     } else {
-        showAuthScreen();
+        // Sem sessão: antes de mostrar a tela de login, PERGUNTA à extensão.
+        // Quem tem a extensão instalada e está logado no WME entra sem tocar em
+        // nada; quem não tem cai na tela de sempre depois de EXT_ESPERA_MS.
+        entrarPelaExtensao().then((entrou) => {
+            if (entrou) return;
+            // Escrita ATRASADA não pode atropelar estado novo. Entre o pedido e
+            // esta linha passam centenas de ms, e nesse meio alguém pode ter
+            // entrado por outro caminho (colar cookies, código de pareamento,
+            // token injetado). Sem esta guarda o `showAuthScreen` derrubava a
+            // sessão recém-criada e escondia a app JÁ montada — apareceu como
+            // "card sem endereço / botões 0px" no smoke, mudando de aparelho a
+            // cada rodada porque atinge sempre o PRIMEIRO card medido.
+            if (API.getSession() || AppState.authenticated) return;
+            showAuthScreen();
+        });
     }
+}
+
+// ── Handshake com a extensão WazePlaces Rapid Access (@daflash) ───────────
+//
+// A extensão já sabia fazer login sozinha, mas só reagia ao botão dela dentro
+// do WME: abrir a app direto não acionava nada, e sessão vencida obrigava a
+// voltar ao WME e clicar de novo. O handshake inverte quem começa a conversa —
+// a APP pede, a extensão responde —, e com isso o login vira invisível nos dois
+// momentos que importam: ao abrir, e quando a sessão morre no meio do uso.
+//
+// O protocolo é `postMessage` na própria janela porque a extensão já injeta um
+// content script na app (`auto-login.js`): é o canal que existe sem pedir
+// permissão nova no manifesto dela.
+//
+// SEGURANÇA: aceitar um token por postMessage NÃO abre superfície nova —
+// qualquer script na página já pode escrever `localStorage.waze_session_token`
+// direto. Mesmo assim exigimos `event.source === window` e origem própria, pra
+// não aceitar nada vindo de iframe ou de outra janela.
+// Dois prazos, e a diferença entre eles é o desenho todo.
+//
+// A extensão leva ~1,8s pra responder — ela faz ida e volta ao Waze de verdade
+// (medido com a extensão carregada). Esperar isso calado penalizaria QUEM NÃO
+// TEM a extensão com 2 segundos de tela vazia; e mostrar o login na hora faria
+// quem TEM ver a tela piscar antes de entrar.
+//
+// Por isso a ponte responde `aguarde` IMEDIATAMENTE (é mensagem local, sem
+// rede) e só depois manda o token. Quem não tem extensão não recebe `aguarde`
+// nenhum e cai no login em EXT_PRESENTE_MS — tempo que ninguém percebe.
+const EXT_PRESENTE_MS = 350;    // "tem extensão aí?" — só espera local
+const EXT_ESPERA_MS = 8000;     // depois do `aguarde`, o prazo da ida ao Waze
+let extPerguntando = false;
+
+function entrarPelaExtensao({ silencioso = false } = {}) {
+    if (extPerguntando) return Promise.resolve(false);
+    extPerguntando = true;
+
+    return new Promise((resolve) => {
+        let terminou = false;
+        let prazo = setTimeout(() => fim(false), EXT_PRESENTE_MS);
+        function fim(ok) {
+            if (terminou) return;
+            terminou = true;
+            window.removeEventListener('message', ouvir);
+            clearTimeout(prazo);
+            extPerguntando = false;
+            mostrarEntrandoPelaExtensao(false);
+            resolve(ok);
+        }
+        function ouvir(ev) {
+            if (ev.source !== window || ev.origin !== window.location.origin) return;
+            const d = ev.data;
+            if (!d || d.source !== 'wazeplaces-ext') return;
+            // "estou aqui, trabalhando" — só agora vale mostrar o spinner e
+            // esperar de verdade. Sem isto, quem não tem a extensão pagaria a
+            // espera dela.
+            if (d.action === 'aguarde') {
+                clearTimeout(prazo);
+                prazo = setTimeout(() => fim(false), EXT_ESPERA_MS);
+                if (!silencioso) mostrarEntrandoPelaExtensao(true);
+                return;
+            }
+            if (d.action === 'sem-sessao') return fim(false);   // instalada, mas sem login no WME
+            if (d.action !== 'sessao' || !d.token) return;
+            API.setSession(String(d.token));
+            showMainScreen();
+            AppState._profilePromise = loadProfileAndAuxData();
+            startFetching();
+            fim(true);
+        }
+        window.addEventListener('message', ouvir);
+        try {
+            window.postMessage({ source: 'wazeplaces', action: 'precisa-de-sessao' }, window.location.origin);
+        } catch (e) { fim(false); }
+    });
+}
+
+// Ao LIGAR esconde a tela de login e mostra o spinner. Ao desligar, esconde só
+// o spinner — quem decide se a tela de login volta é o CHAMADOR, que sabe se o
+// handshake deu certo. A primeira versão fazia o `toggle` nos dois no mesmo
+// lugar e, ao terminar com sucesso, re-exibia o "Bem-vindo!" por cima da app já
+// logada. Só apareceu com a extensão carregada de verdade.
+function mostrarEntrandoPelaExtensao(ligado) {
+    document.getElementById('extLoginState')?.classList.toggle('hidden', !ligado);
+    if (ligado) document.getElementById('authScreen')?.classList.add('hidden');
 }
 
 // ── Gerenciador de modais ─────────────────────────────────────────────────
@@ -2020,11 +2118,26 @@ function derrubarSessao(errorKey) {
         AppState.pendingAction = null;
     }
     removeUndoBanner();
-    showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
     API.setSession(null);
     AppState.profile = null;
     AppState.authenticated = false;
-    setTimeout(() => showAuthScreen(), UNAUTHORIZED_REDIRECT_MS);
+
+    // Antes de mandar pra tela de login, PERGUNTA à extensão — em silêncio.
+    //
+    // A sessão da app venceu, mas o login do editor no WME quase sempre não:
+    // são prazos diferentes. Quem tem a extensão renova sem sair do lugar, e a
+    // fila continua na tela. Só quem não tem (ou está deslogado do WME) vê o
+    // toast e cai no login — por isso o aviso é ADIADO até a extensão falhar:
+    // avisar antes seria assustar quem nem ia ser interrompido.
+    entrarPelaExtensao({ silencioso: true }).then((renovou) => {
+        if (renovou) {
+            showToast(t('toast.sessionRenewed'), 'info');
+            if (AppState.queue.length === 0 && !AppState.fetching) startFetching();
+            return;
+        }
+        showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
+        setTimeout(() => showAuthScreen(), UNAUTHORIZED_REDIRECT_MS);
+    });
 }
 
 function renderProfileHeader() {

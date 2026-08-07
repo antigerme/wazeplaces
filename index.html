@@ -121,6 +121,15 @@
 
     <main class="container mx-auto px-4 pt-2 pb-4 max-w-md">
 
+        <!-- Enquanto a extensão responde. Fica no lugar da tela de login pra não
+             piscar duas telas: quem tem a extensão nunca chega a ver o "Bem-vindo",
+             e quem não tem vê só ela, depois de EXT_ESPERA_MS. -->
+        <div id="extLoginState" class="hidden text-center py-16 px-6">
+            <div class="w-14 h-14 rounded-full border-4 border-cyan-200 border-t-cyan-600 animate-spin mb-5 dark:border-cyan-900 dark:border-t-cyan-400" aria-hidden="true"></div>
+            <h2 class="text-xl font-bold text-slate-800 dark:text-slate-100" data-i18n="ext.entrando">Entrando pelo WME…</h2>
+            <p class="text-sm text-slate-500 mt-1 dark:text-slate-400" data-i18n="ext.entrando.desc">A extensão está usando o seu login do Waze Map Editor.</p>
+        </div>
+
         <div id="authScreen" class="space-y-4">
             <div class="bg-white/90 backdrop-blur-xl rounded-3xl shadow-xl border border-white/20 p-8 transform transition-all dark:bg-slate-800/90">
                 <div class="text-center mb-8">

@@ -1151,6 +1151,15 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
   // Apagar o idioma seria hostil — devolveria a pessoa a uma língua que ela
   // pode não ler, justamente quando está deslogada e sem o botão de Filtros.
   const MANTIDAS = ['THEME_KEY', 'LANG_KEY'];
+  // Literais `waze*` que NÃO são chave de armazenamento. Categoria própria de
+  // propósito: pôr em MANTIDAS diria "fica no logout", e não há nada gravado
+  // pra ficar — seria documentar errado. O guard varre por prefixo (é o que o
+  // torna difícil de burlar), então todo `waze*` que não for chave precisa ser
+  // declarado aqui, com o motivo.
+  const NAO_SAO_CHAVES = {
+    wazeplaces: 'marca do protocolo de postMessage com a extensão (source do pedido)',
+    'wazeplaces-ext': 'idem, a marca das respostas DELA',
+  };
 
   // Nome da constante quando existe; senão a própria chave literal.
   const porConstante = new Map();
@@ -1158,11 +1167,14 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     porConstante.set(m[2], m[1]);
   }
   const chaves = new Set();
-  for (const m of fonte.matchAll(/'(waze[_a-z0-9]*)'/g)) chaves.add(m[1]);
+  // Aceita o hífen no padrão pra que `wazeplaces-ext` seja CAPTURADO e tenha
+  // que ser classificado, em vez de escapar da varredura por causa do traço.
+  for (const m of fonte.matchAll(/'(waze[-_a-z0-9]*)'/g)) chaves.add(m[1]);
 
   const naoClassificadas = [];
   for (const chave of chaves) {
     const nome = porConstante.get(chave) || chave;
+    if (chave in NAO_SAO_CHAVES) continue;
     if (!(nome in APAGADAS) && !MANTIDAS.includes(nome)) naoClassificadas.push(`${chave} (${nome})`);
   }
   assert.equal(naoClassificadas.length, 0,
@@ -1596,4 +1608,29 @@ test('lixeira do lightbox: alvo de toque e estado inicial', () => {
   //    alguém revisitar isto, o teste avisa.
   assert.ok(!/id="deletePhotoModal"/.test(HTML),
     'voltou o diálogo de confirmação da exclusão — a decisão foi trocá-lo pelo Desfazer');
+});
+
+test('o pedido à extensão não atropela um login que aconteceu no meio', () => {
+  const app = read('js/app.js');
+
+  // O `showAuthScreen` deixou de ser síncrono no boot: agora ele espera a
+  // extensão responder. Entre o pedido e a resposta passam centenas de ms, e
+  // nesse meio alguém pode ter entrado por outro caminho (colar cookies, código
+  // de pareamento, token injetado). Sem guarda, a escrita atrasada derrubava a
+  // sessão nova e escondia a app JÁ montada.
+  //
+  // Apareceu no smoke como "card sem endereço / botões 0px", mudando de
+  // aparelho a cada rodada porque atinge sempre o PRIMEIRO card medido — que é
+  // o sintoma clássico de escrita atrasada, não de layout.
+  const bloco = app.match(/entrarPelaExtensao\(\)\.then\([\s\S]{0,700}?\}\);/);
+  assert.ok(bloco, 'sumiu o handshake do boot');
+  assert.match(bloco[0], /API\.getSession\(\)\s*\|\|\s*AppState\.authenticated/,
+    'a guarda contra login-no-meio sumiu — showAuthScreen volta a atropelar sessão nova');
+
+  // E o prazo curto existe pra não punir quem NÃO tem a extensão: sem resposta
+  // de `aguarde`, a tela de login aparece em EXT_PRESENTE_MS.
+  assert.match(app, /const EXT_PRESENTE_MS = (\d+)/, 'sumiu o prazo curto do handshake');
+  const curto = Number(app.match(/const EXT_PRESENTE_MS = (\d+)/)[1]);
+  assert.ok(curto <= 600, `EXT_PRESENTE_MS=${curto}ms: quem não tem a extensão espera isso olhando pro nada`);
+  assert.match(app, /d\.action === 'aguarde'/, 'sumiu o "aguarde" — sem ele o prazo curto derruba quem TEM a extensão');
 });

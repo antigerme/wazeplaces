@@ -1528,6 +1528,19 @@ button:active {
   max-height: none;
 }
 
+/* O estado "entrando pelo WME" é flex — mas o `flex` NÃO pode ir na classe do
+   HTML ao lado do `hidden`: as duas são utilities de `display` com a mesma
+   especificidade, e a ordem de carga decide. Medido: `display: flex` valendo
+   COM a classe `hidden` presente, e o elemento roubando 276px do card (ele é
+   filho do <main>, que é elo da cadeia de flex do gotcha #32).
+   O `:not(.hidden)` é o mesmo remédio que a app já usa no #appScreen. */
+#extLoginState:not(.hidden) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Botões de ação do lightbox (aprovar / excluir): borda de DOIS TONS.
    Um tom só não delimita — pra qualquer preenchimento sólido existe uma foto
    da mesma luminância, e aí a borda desaparece (medido: anel branco sobre foto
