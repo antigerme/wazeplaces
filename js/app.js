@@ -1393,6 +1393,7 @@ function pedirExclusaoDaFoto() {
         saiu = true;
         clearTimeout(exclusaoPendente && exclusaoPendente.timer);
         if (exclusaoPendente && exclusaoPendente.id === alvo.id) exclusaoPendente = null;
+        aplicarTravaDeAcao();
         removeUndoBanner();
         enviarExclusao(alvo);
     };
@@ -1401,11 +1402,13 @@ function pedirExclusaoDaFoto() {
         saiu = true;
         clearTimeout(exclusaoPendente && exclusaoPendente.timer);
         if (exclusaoPendente && exclusaoPendente.id === alvo.id) exclusaoPendente = null;
+        aplicarTravaDeAcao();
         removeUndoBanner();
         devolverFoto(alvo);
     };
     const timer = setTimeout(enviar, UNDO_WINDOW_MS);
     exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer };
+    aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.photoDeleted'), () => exclusaoPendente && exclusaoPendente.desfazer());
 }
 
@@ -1504,6 +1507,7 @@ function aprovarFotoAtual() {
         saiu = true;
         clearTimeout(aprovacaoPendente && aprovacaoPendente.timer);
         aprovacaoPendente = null;
+        aplicarTravaDeAcao();
         removeUndoBanner();
         enviarAprovacao(alvo);
     };
@@ -1512,10 +1516,12 @@ function aprovarFotoAtual() {
         saiu = true;
         clearTimeout(aprovacaoPendente && aprovacaoPendente.timer);
         aprovacaoPendente = null;
+        aplicarTravaDeAcao();
         removeUndoBanner();
         Lightbox.desmarcarAprovada(alvo.id, alvo.idx);
     };
     aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer };
+    aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer());
 }
 
@@ -3354,7 +3360,11 @@ function renderCardChanges(card, place) {
 // Só vale com o "Desfazer" LIGADO. Desligado (Preferências, depois da cota), a
 // ação vai na hora e não há janela nenhuma — nem espera.
 function acoesTravadas() {
-    return !!AppState.pendingAction;
+    // Inclui as ações de FOTO (aprovar/excluir), não só o swipe. Elas abrem a
+    // mesma janela de Desfazer e escrevem no mesmo local — deixar os botões do
+    // lightbox vivos durante ela era o defeito que o owner viu: "não estão
+    // sendo desativados que nem é feito nos cards".
+    return !!(AppState.pendingAction || aprovacaoPendente || exclusaoPendente);
 }
 
 // Botão travado precisa PARECER travado: botão que não responde e parece normal
@@ -3366,6 +3376,13 @@ function aplicarTravaDeAcao() {
     if (card) card.classList.toggle('acoes-travadas', travado);
     for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
         const b = card && card.querySelector(cls);
+        if (b) b.disabled = travado;
+    }
+    // Os do lightbox seguem a MESMA regra e a mesma função. Regra duplicada é
+    // como as duas telas divergem sem ninguém notar; o esmaecido vem do
+    // `:disabled` no CSS, então basta o atributo.
+    for (const id of ['lightboxApprove', 'lightboxDelete']) {
+        const b = document.getElementById(id);
         if (b) b.disabled = travado;
     }
 }

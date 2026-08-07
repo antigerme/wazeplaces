@@ -1180,6 +1180,27 @@ for (const status of [404, 403]) {
   checa(await escondido('lightboxApprove') && !(await escondido('lightboxDelete')),
     'aprovar: o botão não virou lixeira — a foto passou a estar no mapa e o card tem que dizer isso');
   checa(enviados.length === 0, `aprovar: enviou DURANTE a janela de Desfazer (${enviados.length} chamada(s))`);
+  // Botão travado precisa PARECER travado — a mesma regra dos ✕/↑/✓ do card.
+  // O owner viu a divergência: "não estão sendo desativados que nem é feito nos
+  // cards". Mede o ATRIBUTO e o PIXEL, porque `disabled` sem esmaecer continua
+  // lendo como app quebrada (M3/HIG), e esmaecer sem `disabled` engana o Tab e
+  // o leitor de tela.
+  const trava = await page.evaluate(() => {
+    const alvo = ['lightboxDelete', 'lightboxApprove']
+      .map((i) => document.getElementById(i))
+      .find((e) => e && !e.classList.contains('hidden'));
+    const card = document.querySelector('.card-btn-read');
+    const cs = alvo && getComputedStyle(alvo);
+    return {
+      id: alvo && alvo.id, disabled: !!(alvo && alvo.disabled),
+      opacity: cs ? parseFloat(cs.opacity) : 1, filtro: cs ? cs.filter : 'none',
+      cardTravado: !!(card && card.disabled),
+    };
+  });
+  checa(trava.disabled, `aprovar: ${trava.id} continuou clicável durante o Desfazer`);
+  checa(trava.opacity < 1 && /grayscale/.test(trava.filtro),
+    `aprovar: ${trava.id} está disabled mas PARECE ativo (opacity ${trava.opacity}, filter ${trava.filtro})`);
+  checa(trava.cardTravado, 'aprovar: o botão do card não travou — a regra tem que ser a MESMA nos dois');
   checa(await page.evaluate(() => AppState.queue.length === 2),
     'aprovar: o card saiu da fila antes de o lightbox fechar');
   // Fecha sozinha → envia, e com `approve: true` (o backend só aprova com o
