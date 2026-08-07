@@ -3,6 +3,16 @@ on:
   pull_request: {}
   push:
     branches: [main]
+  # Gatilho manual (aba Actions → CI → "Run workflow"). Entrou depois da queda
+  # de 2026-08-06, em que o GitHub descartou ~85% dos webhooks: dois pushes não
+  # geraram run nenhum, e o próprio GitHub avisou que esses eventos "cannot be
+  # automatically replayed". Sem `workflow_dispatch` a única saída era empurrar
+  # commit vazio ou fechar/reabrir a PR — mexer no histórico pra contornar um
+  # problema que não é do código.
+  #
+  # Só fica disponível depois de estar na branch padrão (é como o GitHub
+  # funciona), então ele não salva a rodada de HOJE — salva a próxima.
+  workflow_dispatch: {}
 jobs:
   check:
     runs-on: ubuntu-latest
