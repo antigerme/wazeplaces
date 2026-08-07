@@ -8,7 +8,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
-## v2026.08.06-08
+## v2026.08.07-01
 
 ### Corrigido
 - **Na VM, a limpeza automática apagava as sessões boas.** Quem rodasse a app fora da Cloudflare via todo mundo ser deslogado a cada boot do servidor e a cada hora. A rotina que remove sessões abandonadas usava o mesmo critério para dois tipos de registro que guardam datas com significados opostos — a do pareamento é "vence em", a da sessão é "usada pela última vez em" —, e por isso julgava tudo como vencido. Não afetava quem usa a versão hospedada.

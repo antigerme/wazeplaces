@@ -6,7 +6,7 @@
 // esteve errado de um jeito que nenhum teste do core pegaria — ela é do
 // ADAPTADOR, e o `node --test` só exercitava o core.
 //
-// O defeito medido (v2026.08.06-08): o corte lia `<unix>|` do valor e apagava
+// O defeito medido (v2026.08.07-01): o corte lia `<unix>|` do valor e apagava
 // se aquele instante já tinha passado. Isso valia quando só o PAREAMENTO tinha
 // carimbo, porque lá o número é a expiração (futuro). A sessão ganhou carimbo
 // depois (janela deslizante) e nela o número é o ÚLTIMO USO — sempre passado.
