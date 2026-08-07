@@ -3,34 +3,54 @@
   "name": "Waze Places Rapid Access",
   "version": "0.1.0",
   "description": "Login automático entre o Waze Map Editor e o Waze Places — sem copiar cookies, sem clicar em nada.",
-
-  "permissions": ["cookies", "storage"],
-  "host_permissions": ["*://*.waze.com/*", "*://places.wazebrasil.com/*"],
-
-  "background": { "service_worker": "background.js" },
-
+  "permissions": [
+    "cookies",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.waze.com/*",
+    "*://places.wazebrasil.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
-      "js": ["content.js"],
-      "matches": ["*://www.waze.com/*/editor*", "*://www.waze.com/editor*"],
+      "js": [
+        "content.js"
+      ],
+      "matches": [
+        "*://www.waze.com/*/editor*",
+        "*://www.waze.com/editor*"
+      ],
       "run_at": "document_idle"
     },
     {
-      "js": ["ponte.js"],
-      "matches": ["*://places.wazebrasil.com/*"],
+      "js": [
+        "ponte.js"
+      ],
+      "matches": [
+        "*://places.wazebrasil.com/*"
+      ],
       "run_at": "document_start"
     }
   ],
-
   "web_accessible_resources": [
     {
-      "matches": ["*://www.waze.com/*"],
-      "resources": ["icone48.png", "filtro.png", "null.png", "inject.js"]
+      "matches": [
+        "*://www.waze.com/*"
+      ],
+      "resources": [
+        "icone48.png",
+        "filtro.png",
+        "null.png",
+        "inject.js"
+      ]
     }
   ],
-
-  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
-
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtbY5mYDDpwQuD2VSIkkZiQT8diEY7N55KI1QNSRdcFzOdwhPNBagJ4T9HkLGJE6TFLvDq5GeYjkJ5N3qFUv1WIMJwMuGu0v9TSY9+ZOrCo1tU4aGghO17p/h5Ws3Vyz3VBbSt6Bfu0J6pRXMchF1sq7RabTjdc3mZUQANLmvHUq6jZ6EByZFJg/kEc5/xVCt3DMGspoLA2+c1wTv/qwOZtqc+Nbt00joP6r8JaoVLb8T6AHtHU6wc/3vj8ccJZYvPcAy3Cqy+r0vP0q6DfJCgW/R30lydpTf7Y3DdE2BiQY7nQ9qAVrRaFTrWjrcFt5lHleLE6aovGoaHV4tGYqslwIDAQAB",
-  "update_url": "https://clients2.google.com/service/update2/crx"
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
 }

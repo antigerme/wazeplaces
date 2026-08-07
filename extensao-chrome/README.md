@@ -63,6 +63,17 @@ script na página já pode escrever `localStorage.waze_session_token` direto. Me
 lados exigem `event.source === window` e `event.origin === location.origin`, para não aceitar
 nada vindo de iframe ou de outra janela, e a resposta é postada na origem exata (nunca `'*'`).
 
+## Antes de publicar: `key` e `update_url`
+
+Este manifesto **não** traz `"key"` nem `"update_url"`. Eles existiam na v0.0.3 e servem só pra
+publicação — a `key` fixa o ID `dpinfpcoggnilplfgkpnkhbmfokhnhnn` (o mesmo da Web Store) e o
+`update_url` aponta pro canal de atualização.
+
+Num build carregado sem compactação eles não ajudam e só criam dúvida: a cópia local passa a ter
+a mesma identidade da versão publicada, e o `update_url` faz o Chrome considerar atualizar por
+cima do que você está testando. **@daflash: adicione os dois de volta ao publicar** (ou deixe a
+Web Store atribuir), copiando da v0.0.3.
+
 ## Como testar sem publicar
 
 1. `chrome://extensions` → ativar **Modo do desenvolvedor**
