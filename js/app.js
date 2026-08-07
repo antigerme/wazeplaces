@@ -242,11 +242,22 @@ function initApp() {
     marcarSuporteAExtensao();
     setupInstalarApp();
 
-    // Link de pareamento (?pair=CODE): o editor mandou pra si mesmo e abriu no
-    // celular — entra direto, sem digitar nada. Tratado ANTES da sessão salva
-    // porque um código novo deve vencer uma sessão velha do mesmo aparelho.
+    // Link de pareamento (/#pair=SEGREDO): o editor apontou a câmera ou mandou o
+    // link pra si mesmo — entra direto, sem digitar nada. Tratado ANTES da
+    // sessão salva porque um código novo deve vencer uma sessão velha do mesmo
+    // aparelho.
+    //
+    // FRAGMENTO, não query. O navegador não envia o fragmento ao servidor, então
+    // o segredo não entra no log de acesso — e ele é justamente a chave que
+    // decifra o registro de pareamento (ver `derivarChave` no core). Com
+    // `?pair=` o segredo ia parar no log ao lado do dado que ele protege, o que
+    // anulava a proteção inteira. A query segue sendo LIDA por tolerância (link
+    // antigo ainda no histórico de alguém), mas nunca mais é GERADA.
     const codigoNaURL = (() => {
-        try { return new URLSearchParams(window.location.search).get('pair'); } catch (e) { return null; }
+        try {
+            const frag = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''));
+            return frag.get('pair') || new URLSearchParams(window.location.search).get('pair');
+        } catch (e) { return null; }
     })();
     if (codigoNaURL) {
         try { window.history.replaceState({}, '', window.location.pathname); } catch (e) {}
@@ -365,9 +376,22 @@ const LIMPEZA_AO_FECHAR = {
         // O código é credencial e já não vale nada aqui: não fica desenhado
         // esperando alguém reabrir o modal e escanear um QR morto.
         const code = document.getElementById('pairCode');
-        if (code) { code.textContent = '······'; delete code.dataset.raw; code.classList.remove('opacity-40', 'line-through'); }
-        const exp = document.getElementById('pairExpiry');
-        if (exp) exp.textContent = '';
+        if (code) {
+            code.textContent = '······';
+            delete code.dataset.raw;
+            delete code.dataset.curto;
+            code.classList.remove('opacity-40', 'line-through');
+        }
+        for (const id of ['pairExpiry', 'pairCodeExpiry']) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '';
+        }
+        // O código revelado volta a ficar escondido: revelar é um pedido, e cada
+        // pedido cria um registro fraco novo no servidor. Herdar o estado da vez
+        // passada faria a próxima abertura já nascer com a cópia fraca à mostra.
+        document.getElementById('pairCodeReveal')?.classList.add('hidden');
+        const btnCodigo = document.getElementById('pairShowCodeBtn');
+        if (btnCodigo) { btnCodigo.classList.remove('hidden'); btnCodigo.disabled = false; }
         limparQrPareamento();
         const copiar = document.getElementById('pairCopyLinkBtn');
         if (copiar) copiar.disabled = true;
@@ -582,7 +606,7 @@ function handleLaunchAction() {
 // O problema que isto resolve: copiar cookies num celular é inviável na prática.
 // Aqui o editor loga UMA vez no computador (onde a extensão faz num clique) e
 // traz a sessão pro telefone com um código de 6 caracteres, válido 5 minutos.
-let pairTicker = null;
+const pairTickers = new Map();
 
 // Desenha o QR do link de pareamento. É a única forma de conectar que não
 // precisa de instrução nenhuma: aponta a câmera e entra — sem memorizar caminho
@@ -637,6 +661,13 @@ async function abrirPareamento() {
     delete codeEl.dataset.raw;
     codeEl.classList.remove('opacity-40', 'line-through');
     expEl.textContent = '';
+    // O código volta a ficar escondido a cada abertura: revelar é um pedido, e
+    // pedido não se herda da vez passada — cada revelação cria um registro
+    // fraco novo no servidor.
+    document.getElementById('pairCodeReveal').classList.add('hidden');
+    document.getElementById('pairShowCodeBtn').classList.remove('hidden');
+    document.getElementById('pairShowCodeBtn').disabled = false;
+    document.getElementById('pairCodeExpiry').textContent = '';
     limparQrPareamento();
     document.getElementById('pairCopyLinkBtn').disabled = true;
 
@@ -646,41 +677,78 @@ async function abrirPareamento() {
         showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
         return;
     }
-    codeEl.textContent = formatarCodigoPareamento(r.code);
-    // O link de "copiar" e o QR usam o código CRU — separador é só apresentação.
+    // O segredo do QR NÃO é exibido: ele tem 20 símbolos e ninguém vai digitar
+    // isso. Quem não tem câmera pede um código curto no botão, e aí sim.
     codeEl.dataset.raw = r.code;
-    desenharQrPareamento(location.origin + '/?pair=' + r.code);
+    desenharQrPareamento(location.origin + '/#pair=' + r.code);
     document.getElementById('pairCopyLinkBtn').disabled = false;
 
-    // Contagem regressiva: deixa claro que o código morre — e evita o editor
-    // ficar tentando um código velho achando que a app quebrou.
-    let restante = r.expiresIn;
+    iniciarTickerPareamento(expEl, r.expiresIn, () => limparQrPareamento());
+}
+
+// Contagem regressiva: deixa claro que o segredo morre — e evita o editor ficar
+// tentando um código velho achando que a app quebrou. Vale pro QR e pro código
+// digitado, que são registros SEPARADOS e vencem cada um no seu tempo.
+function iniciarTickerPareamento(elemento, segundos, aoVencer) {
+    let restante = segundos;
     const tick = () => {
         if (restante <= 0) {
-            expEl.textContent = t('pair.expired');
-            codeEl.classList.add('opacity-40', 'line-through');
-            clearInterval(pairTicker);
-            pairTicker = null;
+            elemento.textContent = t('pair.expired');
+            if (aoVencer) aoVencer();
+            pararTickerPareamento(elemento);
             return;
         }
         const m = Math.floor(restante / 60);
-        const s = String(restante % 60).padStart(2, '0');
-        expEl.textContent = t('pair.expiresIn', { time: m + ':' + s });
+        const seg = String(restante % 60).padStart(2, '0');
+        elemento.textContent = t('pair.expiresIn', { time: m + ':' + seg });
         restante--;
     };
-    if (pairTicker) clearInterval(pairTicker);
+    pararTickerPareamento(elemento);
     tick();
-    pairTicker = setInterval(tick, 1000);
+    pairTickers.set(elemento, setInterval(tick, 1000));
 }
 
-function pararTickerPareamento() {
-    if (pairTicker) { clearInterval(pairTicker); pairTicker = null; }
+// Um ticker por elemento: o QR e o código correm juntos, e um `clearInterval`
+// só derrubaria o outro em silêncio. Sem argumento, para todos — é o que a
+// LIMPEZA_AO_FECHAR precisa, e é o caminho que já mordeu antes (o ticker seguia
+// rodando pelo resto da sessão porque a limpeza morava no handler do botão).
+function pararTickerPareamento(elemento) {
+    if (elemento) {
+        clearInterval(pairTickers.get(elemento));
+        pairTickers.delete(elemento);
+        return;
+    }
+    for (const id of pairTickers.values()) clearInterval(id);
+    pairTickers.clear();
+}
+
+// Cria um registro de pareamento CURTO (6 chars, digitável) — só quando pedido.
+// Ver o comentário no index.html: o curto é fraco por construção, e existir só
+// sob demanda é o que impede que ele enfraqueça o QR de todo mundo.
+async function revelarCodigoPareamento() {
+    const btn = document.getElementById('pairShowCodeBtn');
+    const codeEl = document.getElementById('pairCode');
+    const expEl = document.getElementById('pairCodeExpiry');
+    btn.disabled = true;
+    const r = await API.criarPareamento({ comCodigo: true });
+    if (!r.success) {
+        btn.disabled = false;
+        showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
+        return;
+    }
+    btn.classList.add('hidden');
+    document.getElementById('pairCodeReveal').classList.remove('hidden');
+    codeEl.textContent = formatarCodigoPareamento(r.code);
+    // O CRU é o que vale pro resgate — o separador é só apresentação.
+    codeEl.dataset.curto = r.code;
+    codeEl.classList.remove('opacity-40', 'line-through');
+    iniciarTickerPareamento(expEl, r.expiresIn, () => codeEl.classList.add('opacity-40', 'line-through'));
 }
 
 async function copiarLinkPareamento() {
     const raw = document.getElementById('pairCode').dataset.raw;
     if (!raw) return;
-    const url = location.origin + '/?pair=' + raw;
+    const url = location.origin + '/#pair=' + raw;
     try {
         await navigator.clipboard.writeText(url);
         showToast(t('toast.pairLinkCopied'), 'success');
@@ -726,6 +794,7 @@ function setupModalListeners() {
     // Pareamento
     $('pairCreateBtn')?.addEventListener('click', abrirPareamento);
     $('pairCopyLinkBtn')?.addEventListener('click', copiarLinkPareamento);
+    $('pairShowCodeBtn')?.addEventListener('click', revelarCodigoPareamento);
     $('pairShowClose')?.addEventListener('click', () => { pararTickerPareamento(); closeModal('pairShowModal'); });
     $('pairEnterBtn')?.addEventListener('click', () => {
         const input = $('pairCodeInput');
@@ -915,7 +984,7 @@ const Lightbox = {
         // Mutuamente exclusivos: pendente se APROVA, aprovada se EXCLUI. Sem
         // isso os dois botões brigariam pelo mesmo canto, e o editor teria que
         // adivinhar qual vale pra foto que está vendo.
-        const apr = document.getElementById('lightboxApproveBar');
+        const apr = document.getElementById('lightboxApprove');
         if (apr) apr.classList.toggle('hidden', !this.podeAprovarAtual());
     },
     // A foto aberta é a PENDENTE deste pedido e este editor pode aprovar?
@@ -1288,6 +1357,14 @@ function pedirExclusaoDaFoto() {
     // o swipe faz. Sem isto, duas janelas correndo escreveriam listas que se
     // ignoram — a segunda apagaria só a dela, ressuscitando a primeira.
     if (exclusaoPendente) exclusaoPendente.enviar();
+    // E a APROVAÇÃO pendente também: a foto recém-aprovada vira alvo da lixeira
+    // no mesmo canto, e sem despachar antes as duas escritas cruzam — a
+    // exclusão relê um local onde a foto ainda está pendente, monta a lista sem
+    // ela, e aí a aprovação chega depois e a devolve. O editor mandou excluir e
+    // a foto fica. Hoje o banner do Desfazer TAPA a lixeira (medido:
+    // elementFromPoint devolve #undoBtn), mas isso é acidente de sobreposição —
+    // se o banner mudar de lugar a proteção some sem ninguém notar.
+    if (aprovacaoPendente) aprovacaoPendente.enviar();
 
     // Gate de experiência igual ao do swipe: a preferência salva como false só
     // vale se o editor qualifica (senão um legado de versão sem gate liberaria).
@@ -1405,6 +1482,9 @@ function aprovarFotoAtual() {
     const place = Lightbox.place;
     const alvo = { id: place.updateRequestID, place, idx: Lightbox.idx };
     if (aprovacaoPendente) aprovacaoPendente.enviar();
+    // Mesma razão do lado de lá: as duas escritas mexem no mesmo local, então
+    // quem chega depois tem que ver o resultado de quem chegou antes.
+    if (exclusaoPendente) exclusaoPendente.enviar();
 
     const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
     if (semJanela) {

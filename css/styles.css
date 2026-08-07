@@ -1519,6 +1519,17 @@ button:active {
   max-height: none;
 }
 
+/* Botões de ação do lightbox (aprovar / excluir): borda de DOIS TONS.
+   Um tom só não delimita — pra qualquer preenchimento sólido existe uma foto
+   da mesma luminância, e aí a borda desaparece (medido: anel branco sobre foto
+   branca dá 1,00:1). O par branco/escuro é 21:1 independente da foto, então é
+   ele que garante a borda; é o mesmo princípio do drop-shadow duplo do ✨.
+   `box-shadow` e não `border` de propósito: borda mudaria a caixa e comeria
+   4px do alvo de toque, que precisa ficar em 48px. */
+.lb-acao {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 0 4px rgba(0, 0, 0, 0.45);
+}
+
 .mapa-escala,
 .card-map-scale {
   border-bottom: 3px solid currentColor;

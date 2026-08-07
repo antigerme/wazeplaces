@@ -182,10 +182,24 @@ test('dispatch: rota é o nome EXATO — nada de sufixo tolerado', async () => {
 test('dispatch parear: create exige sessão; claim entrega sessão NOVA', async () => {
   const { ctx, token } = await ctxComSessao();
 
+  // Padrão = segredo LONGO, o do QR. Ele não é digitado, então pode ser longo
+  // de graça — e precisa ser, porque a chave do blob sai dele: 6 caracteres
+  // seriam ~30 bits, quebráveis offline em segundos.
   const criado = await dispatch('parear', { action: 'create', sessionToken: token }, ctx);
   assert.equal(criado.status, 200);
-  assert.match(criado.body.code, /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/,
-    'código só com símbolos sem ambiguidade (nada de 0/O/1/I)');
+  assert.match(criado.body.code, /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{20}$/,
+    'segredo do QR: 20 símbolos sem ambiguidade (nada de 0/O/1/I)');
+  assert.equal(criado.body.curto, false, 'sem pedir, o registro criado é o FORTE');
+
+  // O código digitável só nasce sob demanda. Se ele existisse sempre, um dump
+  // do KV traria a cópia de 30 bits ao lado da de 100 e a força do QR seria
+  // decorativa — é essa a razão do `comCodigo`, não conveniência de API.
+  const curto = await dispatch('parear', { action: 'create', sessionToken: token, comCodigo: true }, ctx);
+  assert.match(curto.body.code, /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/,
+    'código digitado: 6 símbolos, o mesmo alfabeto');
+  assert.equal(curto.body.curto, true);
+  const resgateCurto = await dispatch('parear', { action: 'claim', code: curto.body.code }, ctx);
+  assert.equal(resgateCurto.body.success, true, 'o código curto também tem que resgatar');
 
   const resgate = await dispatch('parear', { action: 'claim', code: criado.body.code }, ctx);
   assert.equal(resgate.status, 200);

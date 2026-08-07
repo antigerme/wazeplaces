@@ -96,8 +96,12 @@ test('qr: quem desenha usa o código CRU, não o formatado com separador', () =>
   // DEFINIÇÃO — e aí o teste avalia a assinatura em vez da chamada.
   const chamada = [...app.matchAll(/(?<!function )desenharQrPareamento\(([^)]*)\)/g)]
     .map((m) => m[0])
-    .find((x) => x.includes('/?pair='));
+    .find((x) => x.includes('#pair='));
   assert.ok(chamada, 'ninguém mais desenha o QR do pareamento com o link');
+  // FRAGMENTO, não query: o navegador não manda `#` pro servidor, e o segredo
+  // do QR é a chave que decifra o registro de pareamento. Com `?pair=` ele caía
+  // no log de acesso ao lado do dado que protege.
+  assert.doesNotMatch(chamada, /\?pair=/, 'o segredo do QR não pode ir na query — vai no fragmento');
   assert.match(chamada, /r\.code/, 'o QR precisa usar o código cru da resposta');
   assert.doesNotMatch(chamada, /formatarCodigoPareamento/, 'o QR não pode levar o separador');
 });

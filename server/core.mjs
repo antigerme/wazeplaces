@@ -126,6 +126,35 @@ function randomToken() {
 // Formato do blob: base64(iv) + '::' + base64(ciphertext+tag)
 // ─────────────────────────────────────────────────────────────────────────
 
+// A chave que cifra de verdade NÃO é o Secret: é HKDF(Secret, segredoDoCliente).
+//
+// O Secret sozinho não abre nada, porque falta o segredo — que vive no aparelho
+// do editor (o `sessionToken`) e chega a cada requisição. Consequência prática,
+// e é ela que justifica o custo: um dump do KV mais o `ENCRYPTION_KEY` não
+// devolve cookie nenhum. Vale pra vazamento, pra token de leitura roubado e pra
+// pedido judicial — o que está guardado não presta sem o lado do cliente.
+//
+// O que isto NÃO protege, e não adianta fingir: quem publica código no Worker
+// pode registrar o segredo quando ele chega. A diferença é o alcance — deixa de
+// ser "todos os editores, inclusive os de ontem" e vira "quem usar a app
+// enquanto esse código estiver no ar", com rastro em `wrangler deployments`.
+//
+// Depende de UMA coisa: o segredo nunca pode entrar em log. Hoje o token viaja
+// só no CORPO do POST (nunca em URL, query ou header) e o core não tem nenhum
+// `console`. O QR do pareamento usa FRAGMENTO (`/#pair=`), que o navegador não
+// manda pro servidor — antes usava query, e aí o segredo caía no log de acesso.
+// Mexeu em qualquer um desses dois pontos? A garantia caiu junto.
+async function derivarChave(keyBytes, segredo) {
+  const ikm = await crypto.subtle.importKey('raw', keyBytes, 'HKDF', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({
+    name: 'HKDF',
+    hash: 'SHA-256',
+    salt: new TextEncoder().encode(String(segredo)),
+    info: new TextEncoder().encode('wazeplaces/v1'),
+  }, ikm, 256);
+  return new Uint8Array(bits);
+}
+
 async function encryptCookies(plaintext, keyBytes) {
   const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt']);
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -423,9 +452,17 @@ export const PAIR_TTL = 300; // 5 min — janela curta de propósito
 // de combinações, ~1000× mais que 6 dígitos, com o mesmo esforço pra digitar.
 const PAIR_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const PAIR_CODE_LEN = 6;
+// O QR não é digitado, então o segredo dele pode ser longo de graça — e precisa
+// ser: a chave do blob sai DELE (ver `derivarChave`), e 6 caracteres são ~30
+// bits, que se quebra offline em segundos. 20 símbolos do mesmo alfabeto dão
+// 100 bits, o que põe a força bruta fora de alcance.
+//
+// MESMO alfabeto de propósito: assim `normalizePairCode` e a validação servem
+// aos dois, e não existe um segundo formato pra manter em sincronia.
+const PAIR_SECRET_LEN = 20;
 
-function randomPairCode() {
-  const bytes = crypto.getRandomValues(new Uint8Array(PAIR_CODE_LEN));
+function randomPairCode(len = PAIR_CODE_LEN) {
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
   let out = '';
   // 256 % 32 === 0, então o módulo NÃO enviesa: cada símbolo é equiprovável.
   for (const b of bytes) out += PAIR_ALPHABET[b % PAIR_ALPHABET.length];
@@ -445,7 +482,7 @@ export function makeSessions({ store, keyBytes }) {
     async createSession(cookiesContent) {
       const token = randomToken();
       const hash = await sha256hex(token);
-      const blob = await encryptCookies(cookiesContent, keyBytes);
+      const blob = await encryptCookies(cookiesContent, await derivarChave(keyBytes, token));
       // Já nasce com carimbo: sem ele a PRIMEIRA leitura de toda sessão nova
       // dispararia uma renovação imediata — uma escrita a mais no KV por login,
       // à toa.
@@ -478,13 +515,28 @@ export function makeSessions({ store, keyBytes }) {
       // Formato único: `carimbo|blob`. Valor sem carimbo é lixo (formato de
       // antes desta versão) e não vale a pena carregar compatibilidade — a app
       // ainda está em dev/testes, não há sessão de produção pra preservar.
+      // Registro que não abre é LIXO, e lixo se apaga em vez de esperar vencer.
+      //
+      // Não é arrumação: é a garantia. Uma sessão gravada no formato anterior
+      // (cifrada com o Secret CRU) continua decifrável com o Secret sozinho —
+      // exatamente o que esta versão existe pra impedir — e ficaria assim por
+      // até SESSION_TTL. Medido antes de escrever isto: o editor era deslogado,
+      // mas o blob permanecia aberto pra quem tivesse o Secret.
+      //
+      // Apagar aqui é seguro porque a falha é DETERMINÍSTICA: AES-GCM autentica,
+      // e a chave vem do token que o próprio cliente mandou. Não existe "falhou
+      // por um instante" que apagasse sessão boa. Cobre só quem volta — quem
+      // não voltar, o TTL leva. Pra fechar a janela no dia do deploy, o caminho
+      // é ROTACIONAR o `ENCRYPTION_KEY`: aí todo blob antigo morre de uma vez.
+      const descartar = async () => { try { await store.delete(hash); } catch (e) { /* nunca derruba a resposta */ } };
+
       const sep = raw.indexOf('|');
       const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
-      if (!Number.isFinite(carimbo)) return null;
+      if (!Number.isFinite(carimbo)) { await descartar(); return null; }
       const blob = raw.slice(sep + 1);
 
-      const cookies = await decryptCookies(blob, keyBytes);
-      if (!cookies) return null;
+      const cookies = await decryptCookies(blob, await derivarChave(keyBytes, token));
+      if (!cookies) { await descartar(); return null; }
 
       const agora = Math.floor(Date.now() / 1000);
       if (agora - carimbo >= SESSION_REFRESH_AFTER) {
@@ -530,7 +582,7 @@ export function makeSessions({ store, keyBytes }) {
         const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
         const agora = Math.floor(Date.now() / 1000);
         if (Number.isFinite(carimbo) && agora - carimbo < SESSION_COOKIE_REFRESH) return false;
-        const blob = await encryptCookies(conteudoNovo, keyBytes);
+        const blob = await encryptCookies(conteudoNovo, await derivarChave(keyBytes, token));
         await store.put(hash, agora + '|' + blob, SESSION_TTL);
         return true;
       } catch {
@@ -544,21 +596,35 @@ export function makeSessions({ store, keyBytes }) {
     // store de arquivo da VM ignora o TTL do put (usa mtime + SESSION_TTL, que
     // são 21 dias). Sem o carimbo interno, um código de pareamento sobreviveria
     // três semanas na VM. Com ele, o prazo vale igual nos dois.
-    async createPairing(cookiesContent) {
-      const code = randomPairCode();
-      const hash = await sha256hex('pair:' + code);
+    //
+    // DOIS tamanhos de segredo, e o padrão é o longo. O curto (digitável) só
+    // nasce quando alguém pede — se ele existisse SEMPRE, um dump do KV teria
+    // sempre a cópia de 30 bits ao lado da de 100, e a força do QR seria
+    // decorativa. É por isso que o botão "não tenho câmera" cria um registro
+    // novo em vez de revelar um que já estava lá.
+    // A chave leva o prefixo `pair_` de propósito: sessão e pareamento moram no
+    // MESMO store, e sem um sinal no NOME eles são indistinguíveis pra quem
+    // varre. A varredura da VM chutava pelo carimbo do valor e apagava toda
+    // sessão válida — o carimbo do pareamento é a EXPIRAÇÃO (futuro), o da
+    // sessão é o ÚLTIMO USO (sempre passado), então o mesmo teste dava
+    // "vencido" pra tudo. Medido: 1 arquivo antes, 0 depois do boot.
+    async createPairing(cookiesContent, { comCodigo = false } = {}) {
+      const segredo = randomPairCode(comCodigo ? PAIR_CODE_LEN : PAIR_SECRET_LEN);
+      const hash = 'pair_' + await sha256hex('pair:' + segredo);
       const exp = Math.floor(Date.now() / 1000) + PAIR_TTL;
-      const blob = await encryptCookies(cookiesContent, keyBytes);
+      const blob = await encryptCookies(cookiesContent, await derivarChave(keyBytes, segredo));
       await store.put(hash, exp + '|' + blob, PAIR_TTL);
-      return { code, expiresIn: PAIR_TTL };
+      return { code: segredo, curto: comCodigo, expiresIn: PAIR_TTL };
     },
 
     // Uso único: apaga ANTES de validar a expiração, pra um código não poder
     // ser tentado duas vezes nem virar oráculo de "existe mas venceu".
     async claimPairing(code) {
       const limpo = normalizePairCode(code);
-      if (limpo.length !== PAIR_CODE_LEN) return null;
-      const hash = await sha256hex('pair:' + limpo);
+      // Os dois tamanhos são válidos: 6 é o código digitado, 20 é o do QR.
+      // Qualquer outro comprimento sai aqui sem tocar no store.
+      if (limpo.length !== PAIR_CODE_LEN && limpo.length !== PAIR_SECRET_LEN) return null;
+      const hash = 'pair_' + await sha256hex('pair:' + limpo);
       const raw = await store.get(hash);
       if (!raw) return null;
       await store.delete(hash);
@@ -566,7 +632,7 @@ export function makeSessions({ store, keyBytes }) {
       if (sep < 0) return null;
       const exp = parseInt(raw.slice(0, sep), 10);
       if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
-      return decryptCookies(raw.slice(sep + 1), keyBytes);
+      return decryptCookies(raw.slice(sep + 1), await derivarChave(keyBytes, limpo));
     },
   };
 }
@@ -934,8 +1000,8 @@ async function handleParear(data, { sessions }) {
 
   if (action === 'create') {
     const cookies = await resolveCookies(data, sessions); // 401 se não autenticado
-    const { code, expiresIn } = await sessions.createPairing(cookies);
-    return { status: 200, body: { success: true, code, expiresIn } };
+    const { code, curto, expiresIn } = await sessions.createPairing(cookies, { comCodigo: !!(data && data.comCodigo) });
+    return { status: 200, body: { success: true, code, curto, expiresIn } };
   }
 
   if (action === 'claim') {

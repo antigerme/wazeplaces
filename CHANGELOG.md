@@ -8,6 +8,38 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.07-01
+
+### Corrigido
+- **Na VM, a limpeza automática apagava as sessões boas.** Quem rodasse a app fora da Cloudflare via todo mundo ser deslogado a cada boot do servidor e a cada hora. A rotina que remove sessões abandonadas usava o mesmo critério para dois tipos de registro que guardam datas com significados opostos — a do pareamento é "vence em", a da sessão é "usada pela última vez em" —, e por isso julgava tudo como vencido. Não afetava quem usa a versão hospedada.
+
+## v2026.08.06-07
+
+### Melhorado
+- **O que está guardado no servidor não abre sem o seu aparelho.** Antes, a chave que decifra os seus cookies era um segredo do servidor: quem tivesse esse segredo e uma cópia do banco lia tudo. Agora a chave é derivada do **token de sessão que fica no seu aparelho** — o servidor sozinho não decifra nada. Um vazamento do banco, um acesso indevido ou um pedido judicial devolvem blocos embaralhados que não servem para nada.
+
+  Isso **não** protege contra quem publica código novo no servidor: essa pessoa pode registrar o seu token quando ele chega. A diferença é o alcance — deixa de ser "todos os editores, inclusive os de ontem" e passa a ser "quem usar a app enquanto esse código estiver no ar". A Ajuda foi atualizada para dizer exatamente isso, sem promessa a mais.
+
+- **Sessão que não abre mais é apagada na hora.** As sessões criadas antes desta mudança não funcionam mais (você entra de novo, uma vez). Antes elas ficavam guardadas até vencer, ainda legíveis pelo servidor — o oposto do que a mudança acima promete. Agora, na primeira tentativa de uso, o registro é removido.
+
+- **O QR do pareamento parou de vazar o segredo no endereço.** O link virava `.../?pair=CÓDIGO`, e endereço fica registrado no servidor — ou seja, a chave ia parar no log ao lado do dado que ela protege. Agora vai depois do `#`, que o navegador **não** envia. Links antigos continuam funcionando.
+
+- **O código de 6 caracteres agora aparece só quando você pede.** No "Conectar outro aparelho" existe um botão **"Sem câmera? Mostrar um código"**. O motivo não é de tela: o segredo do QR tem 20 caracteres e o digitado tem 6, e é dele que sai a chave do pareamento. Se o curto existisse sempre, um vazamento traria a versão fraca ao lado da forte. Criado só sob demanda, ele existe por 5 minutos, para quem realmente não tem câmera.
+
+  Quem entra pelo código **não fica com nada mais fraco**: no fim do pareamento os dois caminhos criam a mesma sessão, com a mesma proteção.
+
+## v2026.08.06-06
+
+### Melhorado
+- **Aprovar virou um botão só, do tamanho da lixeira, e os dois ganharam cor.** Saiu a barra preta com o texto "esta foto ainda não está no mapa": o ✨ em cima da foto já dizia isso, e a barra custava 78px de foto — numa app cujo produto é a foto, é o troco errado. No lugar, um **✓ verde** no mesmo canto onde mora a **🗑 vermelha**, do mesmo tamanho. Nunca aparecem juntos: foto pendente se aprova, foto que já está no mapa se exclui.
+
+  A cor não é só enfeite — **conserta um problema de leitura que já estava no ar**. Os botões eram um preto transparente, então a foto atravessava e num fundo claro o ícone branco quase sumia (2,85:1, abaixo do mínimo de 3:1 das normas de acessibilidade). Com a cor cheia o número não depende mais da foto: 4,83:1 no vermelho e 5,48:1 no verde. Cada botão ganhou também uma borda de dois tons, clara por dentro e escura por fora, pra não desaparecer sobre uma foto da mesma cor dele.
+
+  E a dica "toque duplo amplia…" parou de ficar **cortada** pelo botão em tela estreita. Sugerido por [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+### Corrigido
+- **Excluir logo depois de aprovar podia deixar a foto no mapa.** Se você aprovasse uma foto e mandasse excluí-la antes de a janela do Desfazer fechar, as duas ordens cruzavam e a foto acabava ficando — o contrário do que você pediu. Agora a aprovação é sempre enviada antes da exclusão.
+
 ## v2026.08.06-05
 
 ### Adicionado

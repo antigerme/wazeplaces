@@ -239,6 +239,12 @@ Motivo: HAR é uma foto do passado, chega em 5–20MB, e cada dúvida nova custa
 
 **Chave de criptografia:** Secret `ENCRYPTION_KEY` (base64, 32 bytes) no Cloudflare; env var ou arquivo `0600` auto-gerado na VM. **Nunca commitada.** O core não sabe de onde vem — o adaptador injeta `keyBytes` em `makeSessions({ store, keyBytes })`.
 
+**A chave que cifra NÃO é o Secret: é `HKDF(Secret, segredoDoCliente)`** (`derivarChave` em `core.mjs`, v2026.08.06-07). O Secret sozinho não abre nada — falta o token, que vive no aparelho do editor e chega a cada requisição. **Dump do KV + `ENCRYPTION_KEY` = zero**, e isso vale pra vazamento, token de leitura roubado e pedido judicial. Travado em `test/core.test.mjs` ("Secret + dump do KV, SEM o token, não abre nada"), que **é** a frase publicada na Ajuda (`help.privacy.zeroKnowledge`, 4 línguas) — se o teste cair, a app está mentindo.
+**O que isto NÃO protege**, e não adianta escrever bonito: quem publica código no Worker registra o segredo quando ele chega. A diferença é o alcance — de "todos os editores, inclusive os de ontem" pra "quem usar a app enquanto o código estiver no ar", com rastro em `wrangler deployments`.
+**Depende de DUAS coisas, e mexer em qualquer uma derruba a garantia:** (a) o token viaja só no CORPO do POST — nunca URL, query ou header — e o core não tem `console`; (b) o QR do pareamento usa **fragmento** (`/#pair=`), que o navegador não manda pro servidor. Com `?pair=` o segredo caía no log de acesso ao lado do dado que protege.
+**Sessão que não decifra é APAGADA, não deixada vencer** (`descartar()` no `loadSession`). Não é arrumação: registro do formato anterior segue decifrável com o Secret sozinho, e ficaria assim por até `SESSION_TTL`. Apagar é seguro porque a falha do AES-GCM é determinística. Isso cobre quem VOLTA; **pra fechar a janela no dia do deploy, rotacione o `ENCRYPTION_KEY`** — aí todo blob antigo morre de uma vez (e todo mundo é deslogado, o que aconteceria de qualquer jeito).
+**Pareamento tem DOIS tamanhos de segredo**: 20 símbolos (QR, 100 bits, padrão) e 6 (digitável, ~30 bits, **só sob demanda** pelo botão "sem câmera"). O curto é fraco por construção; existir só quando pedido é o que impede que ele enfraqueça o QR de todo mundo — se estivesse sempre lá, o dump traria a cópia fraca ao lado da forte. Depois do `claim` os dois convergem: o aparelho ganha uma sessão nova, com a derivação cheia.
+
 ---
 
 ## 🌐 Endpoints proxy → Waze
@@ -589,7 +595,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 37. **Linha "X → X" no diff se filtra pelo valor CRU** (deep-equal), nunca pelo texto formatado — polígono que andou 84m formata igual.
 38. **Diff de objeto: `geometry` fica de FORA** (ela vira "moveu N m"), e folha que é lista passa pelo mesmo verde-entra/vermelho-sai do resto. `JSON.stringify` fica no fundo, atrás de um teto de profundidade 2.
 39. **Revert de apresentação se persegue pelo CONCEITO, não pelo lugar** — `grep` do valor em todos os caminhos de render. Item de lista sai CRU: `humanizarEnum` corrompia apelido e ID do Google.
-40. **Constante de contraste tem ESCOPO — o fundo em que foi medida.** `opacity: 0.8` vale pro slate sobre branco (5,74:1); sobre o verde do diff dá 3,41:1 e reprova.
+40. **Constante de contraste tem ESCOPO — o fundo em que foi medida.** `opacity: 0.8` vale pro slate sobre branco (5,74:1); sobre o verde do diff dá 3,41:1 e reprova. **Pior quando o fundo é VARIÁVEL**: botão translúcido sobre a foto ampliada dava 2,85:1 em foto clara e 8,45:1 em foto média — some com o problema pondo preenchimento SÓLIDO, e a borda precisa de DOIS tons porque toda cor sólida encontra uma foto igual a ela. Guard lê a cor COMPUTADA e recusa alfa < 1: classe que não existe no CSS compilado é indistinguível de classe certa se você olhar só o HTML.
 41. **A sessão do KV precisa de janela DESLIZANTE** — `expirationTtl` conta do `put` e o `get` não estende nada. Carimbo no VALOR (`ts|blob`) + `SESSION_REFRESH_AFTER`; formato antigo tem que seguir valendo, senão o deploy desloga todo mundo.
 42. **Um 401 NÃO é prova de sessão morta** — três coisas chegam como 401 e só uma exige relogar. `handleUnauthorized` confirma com uma segunda chamada, e o transporte não decide nada.
 43. **O Waze ROTACIONA `_web_session` a cada resposta** — `callWaze` regrava a sessão. Use `getSetCookie()` (o `.get()` junta com vírgula e valor de cookie tem vírgula), `await` de verdade, e estrangule em 1h.
@@ -610,6 +616,8 @@ Bugs já encontrados e corrigidos — **não repita**:
 57.1. **A grade de gerenciar fotos foi decidida como NÃO** — e o 42% que parece pedi-la é armadilha: medi fotos que EXISTEM, não que são EXCLUÍDAS.
 58. **O tile era desenhado com 393px onde o código pedia 512** — `img{max-width:100%}` do preflight. Meça `getBoundingClientRect()` (o que a tela deu), não `style.width` (o que você pediu). Stub idêntico pra todo recurso não detecta erro de posição.
 59. **Regra de produto que muda não some: vira contrato mais estreito** — a app passou a aprovar FOTO, e o que guarda a regra antiga é `data.approve === true`, booleano estrito. Coerção é o risco real (`'false'` é truthy). O portão é só do CLIENTE de propósito, e caminho de ESCRITA se valida comparando o payload com o do WME no HAR — `/Features` não se chama com os cookies do owner.
+61. **Registro de tipos diferentes no MESMO store precisa de sinal no NOME** — a varredura da VM podava pelo carimbo do valor, mas ele é "vence em" no pareamento e "último uso" na sessão: apagava toda sessão válida a cada boot. Hoje o pareamento é `sess_pair_`. Teste de ADAPTADOR não sai de graça com teste de core.
+60. **Criptografia em repouso só vale se a chave não estiver do lado do dado** — `HKDF(Secret, token)`, e o token nunca em URL/query/header/log. O QR do pareamento vazava o segredo na query. Segredo digitável é fraco por tamanho: crie-o sob demanda, senão ele rebaixa o caminho forte.
 18. **Version skew: três camadas precisam estar alinhadas** — estratégia do SW, opção `cache` do `fetch` (`{ cache: 'reload' }`) e Cache-Control do servidor. Mexer numa só rompe a cadeia, e no celular não há `Ctrl+Shift+R`.
 
 

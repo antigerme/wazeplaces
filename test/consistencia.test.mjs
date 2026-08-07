@@ -30,15 +30,23 @@ const I18N = read('js/i18n.js');
 test('código de pareamento: quem mostra e quem lê usam a MESMA formatação', () => {
   assert.match(APP, /function formatarCodigoPareamento/, 'sumiu a fonte única de formato do código');
 
-  // Exibição: o modal que mostra o código não pode formatar por conta própria.
+  // Exibição: quem mostra o código não pode formatar por conta própria.
+  // Mora em `revelarCodigoPareamento` desde que o código passou a nascer sob
+  // demanda (o `abrirPareamento` só desenha o QR, cujo segredo ninguém digita).
+  const revelar = APP.match(/async function revelarCodigoPareamento\(\)[\s\S]*?\n\}/);
+  assert.ok(revelar, 'sumiu o revelarCodigoPareamento()');
+  assert.match(revelar[0], /formatarCodigoPareamento\(/, 'a tela que MOSTRA o código voltou a formatar sozinha');
+  assert.doesNotMatch(
+    revelar[0],
+    /\.slice\(0,\s*3\)\s*\+\s*'-'/,
+    'formatação do código duplicada — use formatarCodigoPareamento()'
+  );
+  // E o segredo do QR NÃO passa por lá: ele tem 20 símbolos, e agrupar de 3 em
+  // 3 sugeriria que alguém deveria digitá-lo.
   const abrir = APP.match(/async function abrirPareamento\(\)[\s\S]*?\n\}/);
   assert.ok(abrir, 'sumiu o abrirPareamento()');
-  assert.match(abrir[0], /formatarCodigoPareamento\(/, 'a tela que MOSTRA o código voltou a formatar sozinha');
-  assert.doesNotMatch(
-    abrir[0],
-    /\.slice\(0,\s*3\)\s*\+\s*'-'/,
-    'formatação do código duplicada no abrirPareamento — use formatarCodigoPareamento()'
-  );
+  assert.doesNotMatch(abrir[0], /formatarCodigoPareamento\(/,
+    'o segredo do QR não é pra ser digitado — formatá-lo convida a isso');
 
   // Entrada: o campo aplica a mesma função enquanto se digita.
   assert.match(
