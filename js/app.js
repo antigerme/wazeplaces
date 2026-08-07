@@ -1957,7 +1957,24 @@ async function handleUnauthorized() {
     try {
         await new Promise((r) => setTimeout(r, VERIFICA_SESSAO_MS));
         const r = await API.getProfile();
-        if (r && r.errorCategory !== 'unauthorized') {
+        // Teste POSITIVO de vida, não ausência de marcador.
+        //
+        // Antes era `r.errorCategory !== 'unauthorized'`, o que infere "viva" de
+        // NÃO encontrar um carimbo — e um 401 sem carimbo (o do nosso próprio
+        // store, que não passa pelo `categorizeWazeError`) caía aqui como alarme
+        // falso. A sessão morta era MANTIDA, o toast de "conexão instável"
+        // aparecia a cada tentativa, e o único jeito de sair era o logout manual.
+        // Foi o que aconteceu com todos os testadores no deploy da derivação de
+        // chave, que invalidou as sessões existentes de uma vez.
+        //
+        // As três saídas agora são explícitas: respondeu → viva; disse que não
+        // autoriza → morta; qualquer outra coisa (rede, 5xx, timeout) → não dá
+        // pra saber, e aí NÃO se derruba ninguém, que é o que o gotcha #42 pede.
+        const morta = r && (r.errorCategory === 'unauthorized'
+            || r.errorKey === 'srv.err.sessionExpired'
+            || r.errorKey === 'srv.err.sessionMissing'
+            || r.errorKey === 'srv.err.cookiesExpired');
+        if (r && !morta) {
             // Alarme falso. O pedido que falhou já foi revertido por quem o
             // chamou; aqui só recompomos o que o 401 tinha interrompido.
             if (r.success && r.profile) {

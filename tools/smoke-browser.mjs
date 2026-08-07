@@ -1075,6 +1075,14 @@ for (const status of [404, 403]) {
     if (c.action !== 'preparar') ordem.push('excluir');
     await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
   });
+  // O token daqui é FALSO, então toda chamada de fundo volta 401 — e agora o
+  // 401 vem carimbado e DERRUBA a sessão de verdade (era o conserto de
+  // "Conexão instável" eterna). Sem este stub o bloco passava a medir a tela de
+  // login em vez do lightbox. A fixture estava apoiada no defeito.
+  await ctx.route('**/api/perfil', (r) => r.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ success: true, profile: { userName: 'a', rank: 5, isAreaManager: true, isStaff: false } }) }));
+  await ctx.route('**/api/buscar-places', (r) => r.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ success: true, places: [], hasMore: false, total: 0 }) }));
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
@@ -1230,6 +1238,77 @@ for (const status of [404, 403]) {
       `aprovar: ${nome} ${deveVer ? 'não vê o aprovar e devia' : 'enxerga o aprovar e não devia'}`);
   }
   checa(erros.length === 0, 'aprovar: erro de JS', erros[0]);
+  await ctx.close();
+}
+
+// ── Sessão morta leva pra tela de entrar; oscilação NÃO ──────────────────
+//
+// O incidente que originou esta passada: depois de um deploy que invalidou as
+// sessões, todo testador via "Conexão instável" a cada tentativa e só saía com
+// logout manual. A causa era o cliente inferir "sessão viva" da AUSÊNCIA de um
+// carimbo no 401. Guard de texto não pega isto — é comportamento, e depende do
+// que o SERVIDOR manda no corpo do 401.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+
+  const cenario = async (respostaDoPerfil) => page.evaluate(async (resp) => {
+    setLang('pt'); applyI18n();
+    window.__toasts = [];
+    if (!window.__origToast) window.__origToast = window.showToast;
+    window.showToast = (m, t, d) => { window.__toasts.push(String(m)); return window.__origToast(m, t, d); };
+    if (!window.__origPerfil) window.__origPerfil = API.getProfile.bind(API);
+    API.getProfile = async () => JSON.parse(resp);
+    API.setSession('token-de-teste');
+    AppState.authenticated = true;
+    AppState.profile = { userName: 'x', rank: 5, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    verificandoSessao = false;
+    await handleUnauthorized();
+    // A troca de tela é ADIADA de propósito (`UNAUTHORIZED_REDIRECT_MS`, pra dar
+    // tempo de ler o toast), então ler na hora mede o estado anterior. Espera
+    // pelo EVENTO em vez de dormir um número mágico: assim o teste segue certo
+    // se alguém ajustar o atraso.
+    await new Promise((k) => {
+      const limite = Date.now() + 5000;
+      const olha = () => {
+        const naTela = !document.getElementById('authScreen').classList.contains('hidden');
+        if (naTela || Date.now() > limite) k();
+        else setTimeout(olha, 50);
+      };
+      olha();
+    });
+    return { toasts: window.__toasts, temToken: !!API.getSession(),
+      naTelaDeLogin: !document.getElementById('authScreen').classList.contains('hidden') };
+  }, JSON.stringify(respostaDoPerfil));
+
+  // 1. Sessão morta de verdade — é o que o core manda hoje.
+  const morta = await cenario({ success: false, error: 'Sessão expirada ou inválida',
+    errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' });
+  checa(!morta.toasts.some((m) => /instável|inestable|unstable|instable/i.test(m)),
+    'sessão: mostrou "conexão instável" pra sessão que morreu de verdade', morta.toasts.join(' | ').slice(0, 60));
+  checa(!morta.temToken, 'sessão: o token morto continuou no aparelho — a pessoa fica presa');
+  checa(morta.naTelaDeLogin, 'sessão: não levou pra tela de entrar');
+
+  // 2. O MESMO corpo sem o carimbo: era assim que o core respondia, e é o caso
+  //    que prendia todo mundo. O cliente tem que decidir igual.
+  const semCarimbo = await cenario({ success: false, error: 'Sessão expirada ou inválida',
+    errorKey: 'srv.err.sessionExpired' });
+  checa(!semCarimbo.temToken,
+    'sessão: 401 SEM errorCategory voltou a ser lido como alarme falso — foi este o bug');
+
+  // 3. Oscilação de rede NÃO pode derrubar (gotcha #42, que continua valendo).
+  const oscilou = await cenario({ success: false, error: 'rede', errorCategory: 'transient' });
+  checa(oscilou.temToken, 'sessão: falha passageira derrubou o editor — é o defeito oposto');
+  checa(oscilou.toasts.some((m) => /instável|inestable|unstable|instable/i.test(m)),
+    'sessão: falha passageira parou de avisar que foi só instabilidade');
+
+  checa(erros.length === 0, 'sessão: erro de JS', erros[0]);
   await ctx.close();
 }
 
@@ -1429,5 +1508,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
   + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true)`
+  + `, + sessão morta leva pra tela de entrar e oscilação de rede NÃO derruba`
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`);

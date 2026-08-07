@@ -1441,8 +1441,18 @@ test('um 401 sozinho não derruba o editor da sessão', () => {
     'handleUnauthorized voltou a ser síncrono — não dá pra confirmar antes de derrubar');
   assert.match(APP, /const r = await API\.getProfile\(\);/,
     'sumiu a chamada que confirma se a sessão morreu mesmo');
-  assert.match(APP, /if \(r && r\.errorCategory !== 'unauthorized'\)/,
-    'a verificação parou de poupar a sessão quando ela está viva');
+  // Este guard já exigiu o literal `r.errorCategory !== 'unauthorized'` — e
+  // ESSE literal era o bug: inferir "viva" da AUSÊNCIA do carimbo fazia um 401
+  // sem categoria (o do nosso próprio store) passar por alarme falso, mantendo
+  // a sessão morta e mostrando "conexão instável" pra sempre. Guard acoplado à
+  // FORMA atesta a forma, não a intenção. O que precisa ser verdade é que a
+  // morte seja decidida por sinais POSITIVOS e nomeados.
+  assert.match(APP, /errorCategory === 'unauthorized'/,
+    'a morte da sessão precisa ser decidida por um sinal POSITIVO, não pela ausência de um');
+  for (const chave of ['srv.err.sessionExpired', 'srv.err.sessionMissing', 'srv.err.cookiesExpired']) {
+    assert.ok(new RegExp(`errorKey === '${chave.replace(/\./g, '\\.')}'`).test(APP),
+      `${chave} precisa contar como sessão morta — sem isso ela vira "conexão instável" eterna`);
+  }
   assert.match(APP, /function derrubarSessao\(/, 'sumiu a derrubada explícita');
 
   // A confirmação também diz de QUAL lado falhou. O core já mandava chaves
