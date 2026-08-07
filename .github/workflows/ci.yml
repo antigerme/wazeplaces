@@ -79,7 +79,19 @@ jobs:
         run: |
           PORT=8099 node server/node.mjs & SRV=$!
           sleep 1.5
-          curl -fsS localhost:8099/ | grep -qi '<title'
+          # Grava e DEPOIS procura, em vez de `curl | grep -q`.
+          #
+          # No pipe é uma corrida: o `<title` está no byte 1903 e o grep -q sai
+          # assim que o acha, mas o index.html tem ~114KB e o buffer do pipe
+          # segura 64KB — o curl enche, tenta escrever o resto e leva cano
+          # fechado, imprimindo "curl: (23) Failure writing output". Medido: 2
+          # em 30 execuções. Não quebrava (o status do pipeline é o do grep),
+          # mas ruído vermelho num passo que passou treina a ignorar o log — e
+          # viraria flake de verdade no dia em que alguém puser `pipefail`.
+          # Assim também fica melhor de diagnosticar: falha do curl aparece
+          # como falha do curl, não disfarçada de "grep não achou".
+          curl -fsS localhost:8099/ -o /tmp/boot-index.html
+          grep -qi '<title' /tmp/boot-index.html
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8099/api/perfil -H 'Content-Type: application/json' -d '{}')" = "401"
           kill $SRV
       - name: A data do serial bate com a do commit que bumpou
