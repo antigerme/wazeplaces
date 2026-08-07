@@ -650,11 +650,18 @@ function requireRegion(data) {
 async function resolveCookies(data, sessions) {
   if (data && data.sessionToken) {
     const cookies = await sessions.loadSession(data.sessionToken);
-    if (!cookies) throw new ApiError({ success: false, error: 'Sessão expirada ou inválida', errorKey: 'srv.err.sessionExpired' }, 401);
+    // `errorCategory` é OBRIGATÓRIO aqui, e a falta dele já custou caro: o
+    // cliente decide se derruba a sessão lendo este campo, e sem ele a
+    // verificação de `handleUnauthorized` lia "não é unauthorized" e concluía
+    // ALARME FALSO — mantinha a sessão morta e mostrava "conexão instável" pra
+    // sempre. Só saía com logout manual. O `categorizeWazeError` carimba as
+    // respostas do WAZE; este 401 é NOSSO (o store não achou a sessão) e não
+    // passa por lá, então o carimbo tem que vir aqui.
+    if (!cookies) throw new ApiError({ success: false, error: 'Sessão expirada ou inválida', errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' }, 401);
     return cookies;
   }
   if (data && data.cookies) return String(data.cookies).trim();
-  throw new ApiError({ success: false, error: 'Sessão ou cookies não fornecidos', errorKey: 'srv.err.sessionMissing' }, 401);
+  throw new ApiError({ success: false, error: 'Sessão ou cookies não fornecidos', errorKey: 'srv.err.sessionMissing', errorCategory: 'unauthorized' }, 401);
 }
 
 // Prepara cookieHeader + csrf a partir do conteúdo, validando formato.

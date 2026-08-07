@@ -250,3 +250,29 @@ test('normalizePairCode: aceita minúsculo, hífen e espaço', () => {
   assert.equal(normalizePairCode('ABC 123'), 'ABC123');
   assert.equal(normalizePairCode(null), '');
 });
+
+// O 401 de sessão precisa vir CARIMBADO com `errorCategory: 'unauthorized'`.
+//
+// Este é o teste do incidente: sem o carimbo, o `handleUnauthorized` lia "não é
+// unauthorized" e concluía ALARME FALSO — mantinha a sessão morta e mostrava
+// "Conexão instável" a cada tentativa, pra sempre. Só saía com logout manual.
+// Atingiu todos os testadores no deploy da derivação de chave, que invalidou as
+// sessões existentes de uma vez.
+//
+// O `categorizeWazeError` carimba as respostas do WAZE; ESTE 401 é nosso (o
+// store não achou a sessão) e não passa por lá. Sem carimbo aqui, o cliente
+// não tem como distinguir "precisa entrar de novo" de "a rede oscilou".
+test('401 de sessão vem com errorCategory: unauthorized', async () => {
+  const { ctx } = await ctxComSessao();
+
+  const semSessao = await dispatch('perfil', { sessionToken: 'nao-existe', region: 'row' }, ctx);
+  assert.equal(semSessao.status, 401);
+  assert.equal(semSessao.body.errorCategory, 'unauthorized',
+    'sessão inexistente sem carimbo faz o cliente achar que foi só instabilidade');
+  assert.equal(semSessao.body.errorKey, 'srv.err.sessionExpired');
+
+  const semNada = await dispatch('perfil', { region: 'row' }, ctx);
+  assert.equal(semNada.status, 401);
+  assert.equal(semNada.body.errorCategory, 'unauthorized',
+    'requisição sem token nenhum também precisa do carimbo');
+});

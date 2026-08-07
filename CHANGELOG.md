@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.07-03
+
+### Corrigido
+- **Os botões de aprovar e excluir foto ficavam ativos durante o Desfazer.** No card, os ✕/↑/✓ ficam apagados e sem resposta enquanto a janela corre; no lightbox eles continuavam com cara de clicáveis. Agora seguem a mesma regra — e é a **mesma função** que trava os dois, para não voltarem a divergir. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+- **"Conexão instável" que não passava, e só o "Sair" resolvia.** Depois do deploy anterior — que invalidou as sessões existentes de propósito —, quem tinha sessão antiga via esse aviso a cada tentativa e ficava preso: a app achava que a sessão continuava válida e nunca oferecia a tela de entrar. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+  A causa não era a criptografia: a app decidia "sessão viva" pela **ausência** de um sinal de erro, e a resposta que diz "sua sessão não existe mais" não trazia esse sinal. Agora ela traz, e a app só considera a sessão viva quando a verificação **responde de verdade**. Oscilação de rede continua não derrubando ninguém — que era o defeito oposto, corrigido antes.
+
 ## v2026.08.07-01
 
 ### Corrigido

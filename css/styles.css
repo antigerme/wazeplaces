@@ -564,6 +564,15 @@ body > main {
   cursor: not-allowed;
 }
 
+/* Mesmo estado, mesmo visual, para os botões do lightbox. `.lb-acao:disabled`
+   é (0,2,0) e vence a utility de cor do Tailwind sem `!important` — com uma
+   classe só empataria e perderia por ordem de carga (gotcha #27). */
+.lb-acao:disabled {
+  opacity: 0.4;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+
 /* Snackbar (toast) — bottom-center, estilo M3, entra deslizando de baixo */
 .toast {
   width: 100%;
