@@ -508,11 +508,12 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 - Branches do agente: `claude/<descrição-curta-kebab>`
 - Commit messages: descritivos, em português, body explica **por que** não só o **o quê**
 - Squash merge é o padrão do owner — não precisa rebase manual
-- Owner faz merge + delete da branch no GitHub UI; agente espera próxima task
+- O repo tem **Automatically delete head branches** ligado: a branch some do GitHub sozinha no merge. O agente sincroniza a main e apaga a local; ninguém apaga nada à mão.
 
 ### Workflow PR ↔ owner (regras fixadas pelo owner)
 - **Agente pode abrir PR sempre que sentir que a branch tá madura** — não precisa pedir permissão pra abrir
-- **Owner sempre faz squash merge + apaga a branch ao aprovar** — agente sincroniza main e deleta local sem perguntar
+- **Owner faz squash merge ao aprovar, e a branch é apagada AUTOMATICAMENTE** pelo GitHub (*Automatically delete head branches*). O agente sincroniza a main e apaga a local, sem perguntar.
+- **Sincronize com `git fetch --prune`.** Sem o prune sobram refs `origin/claude/…` mortos, apontando pra commits que não existem mais no remoto. Num ambiente onde o container pode voltar a um estado antigo, ref velho é exatamente como se acredita que a árvore está em dia quando não está — **confira `git log --oneline -1` contra o GitHub antes de acreditar no estado local**. Em 2026-08-07 o container voltou CINCO vezes pra uma main de três PRs atrás; das cinco, duas só foram percebidas porque a contagem de testes não bateu (168 onde eram 180), e uma delas quase virou um push que reverteria três PRs.
 - **Sempre que abrir PR, agente subscreve no `subscribe_pr_activity`** e acompanha CI/review comments até a branch ser mergeada. Bugs apontados no review devem ser corrigidos no mesmo PR (push direto na branch). CI vermelho deve ser corrigido (não ignorado).
 
 ### Perfis de editor do Waze (referência rápida)
