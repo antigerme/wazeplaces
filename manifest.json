@@ -2,12 +2,12 @@
   "id": "/",
   "name": "Waze Places",
   "short_name": "Waze Places",
-  "description": "Review Waze Map Editor place requests by swiping. Rejects or marks as read \u2014 never approves.",
+  "description": "Review Waze Map Editor place requests by swiping. Rejects or marks as read — never approves.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#33CCFF",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
   "orientation": "portrait",
   "lang": "en",
   "dir": "ltr",
@@ -37,7 +37,10 @@
       "purpose": "maskable"
     }
   ],
-  "categories": ["productivity", "utilities"],
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
   "screenshots": [
     {
       "src": "icons/screenshots/screenshot-narrow.png",
@@ -60,14 +63,26 @@
       "short_name": "Filters",
       "description": "Opens the queue filters directly",
       "url": "/?action=filters",
-      "icons": [{ "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [
+        {
+          "src": "icons/icon-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
     },
     {
       "name": "Fetch again",
       "short_name": "Refresh",
       "description": "Reloads the request queue",
       "url": "/?action=refresh",
-      "icons": [{ "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [
+        {
+          "src": "icons/icon-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
     }
   ]
 }

@@ -10,7 +10,16 @@
          (sem maximum-scale / user-scalable — WCAG 1.4.4). -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="description" content="Validação de Places do Waze Map Editor - Interface Estilo Tinder">
-    <meta name="theme-color" content="#33CCFF">
+    <!-- DUAS metas com media query: a moldura do navegador (barra de status)
+         segue o esquema do sistema ANTES de qualquer JS. Uma meta só, fixa, era
+         o que punha uma faixa cyan acesa em cima do splash claro.
+         O `tema.js` sobrepõe DEPOIS, e só quando a pessoa ESCOLHEU um tema
+         diferente do sistema — senão estas duas já acertam sozinhas.
+         Isto NÃO alcança o fundo do splash: aquilo é o `background_color` do
+         manifest, que é JSON estático e não aceita variante por esquema
+         (issue aberta no WICG). Ver o comentário no manifest.json. -->
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
     <!-- CSP: mantida em sync com o arquivo _headers (Cloudflare) — ver gotcha #14.
          Sem 'unsafe-eval' (Tailwind é pré-compilado) e sem fonts.googleapis/gstatic
          (a Inter é auto-hospedada em fonts/).

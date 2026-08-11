@@ -49,6 +49,27 @@ body.dark {
   color: #e2e8f0;
 }
 
+/* Declara o fundo escuro TAMBÉM por media query, e não só pela classe `.dark`.
+   Motivo: a MDN diz que o navegador PODE derivar o fundo do splash do PWA de um
+   `prefers-color-scheme` presente no CSS — o `background_color` do manifest é
+   JSON estático e não aceita variante (issue aberta no WICG). Sem esta regra o
+   navegador não tem de onde derivar nada: todo o nosso escuro vem de uma classe
+   que só existe depois do `tema.js`, e o splash acontece antes disso.
+
+   É APOSTA, não contrato ("may"). Se o Chrome honrar, o splash segue a
+   preferência; se não, sobra o `background_color` do manifest.
+
+   O escopo `:not(.tema-claro)` é obrigatório: quem ESCOLHEU claro num celular
+   em modo escuro não pode receber fundo escuro por baixo de uma app clara —
+   seria trocar o incômodo do owner por um pior. O `tema.js` põe essa classe
+   antes do primeiro paint, então nunca há um quadro com a decisão errada. */
+@media (prefers-color-scheme: dark) {
+  html:not(.tema-claro),
+  html:not(.tema-claro) body {
+    background-color: #0f172a;
+  }
+}
+
 /* Anel de foco visível pra navegação por teclado (WCAG 2.4.7)
  *
  * SEM `border-radius` aqui, e isso é regra e não esquecimento: pôr raio nesta

@@ -1634,3 +1634,52 @@ test('o pedido à extensão não atropela um login que aconteceu no meio', () =>
   assert.ok(curto <= 600, `EXT_PRESENTE_MS=${curto}ms: quem não tem a extensão espera isso olhando pro nada`);
   assert.match(app, /d\.action === 'aguarde'/, 'sumiu o "aguarde" — sem ele o prazo curto derruba quem TEM a extensão');
 });
+
+test('splash do PWA: manifest, metas e CSS não podem divergir', () => {
+  // O owner viu o splash branco num Android em modo escuro, e provou com vídeo
+  // e print. A causa era `background_color: #f8fafc` no manifest — ele é JSON
+  // estático, pintado ANTES de qualquer CSS/JS, então nem o tema.js alcança.
+  //
+  // O manifest NÃO aceita variante por esquema (issue aberta no WICG), então a
+  // única defesa é as cores não divergirem: o fundo do splash tem que ser o
+  // mesmo `body.dark` da app, senão volta a haver troca de cor na abertura.
+  const man = JSON.parse(read('manifest.json'));
+  const css = read('css/styles.css');
+  const html = read('index.html');
+
+  const escuroDoCss = (css.match(/body\.dark\s*\{[^}]*background-color:\s*(#[0-9a-fA-F]{6})/) || [])[1];
+  assert.ok(escuroDoCss, 'sumiu o background-color do body.dark');
+  assert.equal(man.background_color.toLowerCase(), escuroDoCss.toLowerCase(),
+    'background_color do manifest divergiu do body.dark — volta o clarão na abertura');
+  assert.equal(man.theme_color.toLowerCase(), escuroDoCss.toLowerCase(),
+    'theme_color do manifest divergiu — volta a faixa acesa em cima do splash');
+
+  // As duas metas por esquema são o que faz a barra de status seguir a
+  // preferência ANTES do JS. Uma meta só, fixa, era metade do problema.
+  const metas = [...html.matchAll(/<meta name="theme-color"[^>]*>/g)].map((m) => m[0]);
+  assert.ok(metas.some((m) => /prefers-color-scheme:\s*dark/.test(m)),
+    'sumiu a meta theme-color do esquema ESCURO');
+  assert.ok(metas.some((m) => /prefers-color-scheme:\s*light/.test(m)),
+    'sumiu a meta theme-color do esquema CLARO');
+
+  // A media query é a aposta na brecha do MDN ("browsers MAY override
+  // background_color from a prefers-color-scheme in your CSS"). Só vale
+  // escopada: sem o :not(.tema-claro), quem escolheu claro num sistema escuro
+  // recebe fundo escuro por baixo de uma app clara.
+  assert.match(css, /@media \(prefers-color-scheme: dark\)/,
+    'sumiu o gancho de prefers-color-scheme — o navegador fica sem de onde derivar');
+  // Confere CADA seletor do bloco, não "a string aparece em algum lugar".
+  // A primeira versão deste guard passava com metade do escopo removido: o
+  // segundo seletor ainda continha o `:not`, e isso bastava pra ele. Guard que
+  // aceita meia correção afirma uma proteção que não existe.
+  const abre = css.indexOf('@media (prefers-color-scheme: dark)');
+  const corpo = css.slice(css.indexOf('{', abre) + 1, css.indexOf('\n}', abre));
+  const seletores = corpo.split('{')[0].split(',').map((x) => x.trim()).filter(Boolean);
+  assert.ok(seletores.length > 0, 'bloco @media vazio');
+  for (const sel of seletores) {
+    assert.match(sel, /:not\(\.tema-claro\)/,
+      `seletor "${sel}" sem escopo — vai pintar escuro quem ESCOLHEU claro`);
+  }
+  assert.match(read('js/tema.js'), /tema-claro/,
+    'o tema.js parou de marcar o claro explicitamente, e o escopo acima deixa de funcionar');
+});
