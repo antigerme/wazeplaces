@@ -68,7 +68,9 @@ wazeplaces/
 ├── service-worker.js        # Cache + auto-update (controllerchange + SKIP_WAITING)
 ├── icons/
 │   ├── icon-192.svg
-│   └── icon-512.svg
+│   ├── icon-512.svg
+│   ├── splash/              # GERADO por `node tools/gerar-splash.mjs` — 17 tamanhos × claro/escuro
+│   └── screenshots/         # Capturas do prompt de instalação (ver **PWA: splash e capturas**)
 ├── css/
 │   ├── styles.css           # Estilos custom (@font-face da Inter, componentes)
 │   ├── tailwind.css         # GERADO por `npm run css` — commitado, NÃO editar à mão
@@ -114,6 +116,10 @@ wazeplaces/
 │   ├── paises-validacao.mjs # FONTE ÚNICA dos países de validação (ver seção 🌍). Script que MEÇA
 │   │                        #   qualquer coisa importa daqui — copiar a lista é como ela volta a ser
 │   │                        #   só o Brasil. Travado em test/consistencia.test.mjs.
+│   ├── gerar-splash.mjs     # Gera icons/splash/. Lê as DUAS metas theme-color do index.html e o
+│   │                        #   icon-512.svg — a cor NÃO se digita aqui. `--links` imprime as <link>.
+│   ├── png-palette.mjs      # PNG truecolor → paleta 8 bits, zero dep (só node:zlib). Splash chapada
+│   │                        #   em RGBA custava 946KB; em paleta, 335KB. k-center, não frequência.
 │   ├── smoke-browser.mjs    # Smoke de layout (npm run test:browser): aparelhos × idiomas × tipos de card
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
@@ -449,6 +455,18 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 - **Animação NUNCA entra entre o swipe e o próximo card.** O valor da app é ritmo: 200 pedidos × 300ms de cerimônia = 1 minuto de espera pura. Animar só onde o tempo já ia ser gasto — durante o arraste (selos), na entrada do card (paralela ao próximo gesto), ou no "Tudo limpo!" (não há próxima ação esperando). Os selos (`.swipe-stamp`) ficam na **borda oposta** ao gesto de propósito: ancorados na borda que se move, saem da tela junto com o card (já apareceu "EITAR" cortado). Idem o gradiente — a cor vive no lado que fica.
 - **Contador que muda de 1 não conta, PULA.** Entre 12 e 13 não existe inteiro pra mostrar: contar é invisível. `setCount` pula (`.count-pop`) sempre que o número muda e só conta quando |Δ| ≥ 2 (ex.: fila carregando 0 → 191).
 - **Versão visível**: fim do modal de Ajuda, `v{verLabel(APP_VERSION)}` (ex.: `v2026.07.18-01`) — sempre bump o serial em mudança visual (formato `YYYYMMDDnn`, ver seção do Service Worker). Morava num `<footer>` fixo até v2026.07.27-05; saiu porque custava 40px de rolagem em toda tela e **não devolvia um pixel de card** (o card é `dvh`, não sobra de layout) — num 393×852 esses 40px eram 65% de toda a rolagem, e rolagem disputa com o gesto de "pular". O botão ⓘ está no header **inclusive deslogado**, que é exatamente quando se pergunta "qual versão você está vendo?"
+
+### PWA: splash e capturas de instalação
+
+**A splash NÃO segue a preferência no Android, e isso não é bug nosso — é a plataforma.** O `background_color` do manifest é UM valor, lido uma vez, pintado antes de qualquer CSS/JS. Não existe variante por esquema de cor: a [issue do W3C](https://github.com/w3c/manifest/issues/1045) segue aberta e o origin trial do Chrome pra isso (109–114) era **desktop** e nunca virou recurso. Antes de "consertar" isso de novo, saiba que já foi medido na produção real (v2026.08.11-01): a app troca de tema, o manifest não muda nada. As três defesas que EXISTEM, e por quê:
+
+1. **Duas metas `theme-color` com `media`** — a barra de status segue o esquema antes do JS. Isto é padrão e funciona.
+2. **`@media (prefers-color-scheme: dark)` no `styles.css`, escopado em `:not(.tema-claro)`** — aposta na brecha do MDN ("o navegador *pode* derivar o fundo do splash de um `prefers-color-scheme` no seu CSS"). Sem o escopo, quem **escolheu** claro num sistema escuro recebe fundo escuro sob app clara.
+3. **`background_color`/`theme_color` = o mesmo `body.dark`** — fallback de quem não honrar o item 2.
+
+**No iOS existe o caminho de verdade**: `apple-touch-startup-image` aceita `prefers-color-scheme` no `media`, então há uma imagem clara e uma escura por tamanho. O iOS **não redimensiona** — casa exato (device-width × device-height × dpr × orientação) ou descarta e volta a splash branca. Tamanho novo entra em `APARELHOS_IOS` (`tools/gerar-splash.mjs`) e sai com o par completo; `test/layout.test.mjs` reprova par incompleto, arquivo ausente, dimensão que não bate com a media query, e PNG que não seja de paleta.
+
+**As capturas do manifest são em INGLÊS e não há como variar por idioma.** `screenshots` **não** é localizável: a localização de manifest do Chrome/Edge 148 (sufixo `_localized`) cobre `name`, `short_name`, `description`, `icons` e `shortcuts`, e para aí. Três regras que o Chrome aplica **em silêncio** antes de montar o diálogo rico — se falhar, ele volta pro diálogo velho sem avisar: dimensão entre 320 e 3840, lado maior ≤ 2,3× o menor, e **mesma proporção entre capturas do mesmo `form_factor`**. Travado no guard. E capturas são públicas: o nome de quem enviou o pedido sai (vira `wazer`) — foto e endereço são dado público de mapa, nome de pessoa não.
 
 ### Gestos (swipe.js)
 
