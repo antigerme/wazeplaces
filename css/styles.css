@@ -294,9 +294,25 @@ body.dark {
 .auth-opt-paste  { order: 4; }
 .auth-opt-pair   { order: 5; }
 
+/* No computador: requisito em cima (é lá que tentar sem poder entrar custa
+   caro — instalar extensão, exportar cookies). A prévia fecha a sequência. */
+.auth-fluxo .auth-requisito  { order: 1; }
+.auth-fluxo .auth-precondicao { order: 2; }
+.auth-fluxo .auth-options     { order: 3; }
+.auth-fluxo .auth-previa      { order: 4; }
+
 /* `pointer: coarse` = dedo, não mouse. Melhor sinal que largura de tela:
    janela estreita no desktop continua sendo desktop. */
 @media (pointer: coarse) {
+  /* No dedo o requisito desce: ali o custo de tentar é baixo (o caminho é
+     código/QR, não instalar nada) e a faixa empurrava o botão principal pra
+     fora da primeira tela nos aparelhos apertados. A instrução do que FAZER
+     (pré-condição) continua em cima — essa é acionável aqui. */
+  .auth-fluxo .auth-precondicao { order: 1; }
+  .auth-fluxo .auth-options     { order: 2; }
+  .auth-fluxo .auth-requisito   { order: 3; margin-top: 1rem; margin-bottom: 0; }
+  .auth-fluxo .auth-previa      { order: 4; }
+
   .auth-opt-pair   { order: 0; }
   .auth-opt-ext    { order: 2; }
   .auth-opt-div    { order: 3; }

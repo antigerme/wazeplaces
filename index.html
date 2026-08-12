@@ -188,8 +188,23 @@
             <div class="bg-white/90 backdrop-blur-xl rounded-3xl shadow-xl border border-white/20 p-8 transform transition-all dark:bg-slate-800/90">
                 <div class="text-center mb-8">
                     <h2 class="text-3xl font-extrabold text-slate-800 mb-2 dark:text-slate-100" data-i18n="auth.welcome.title">Bem-vindo!</h2>
-                    <p class="text-slate-500 text-sm leading-relaxed dark:text-slate-400" data-i18n="auth.welcome.body">Para começar a limpar pedidos de places do Waze, você precisa fornecer seus cookies de autenticação.</p>
+                    <p class="text-slate-500 text-sm leading-relaxed dark:text-slate-400" data-i18n="auth.welcome.body">Triagem rápida dos pedidos de places que chegam no Waze: você vê um por vez e decide com um toque.</p>
+
                 </div>
+
+                <!-- Requisito, pré-condição, opções e prévia num flex column
+                     porque a ORDEM deles muda com o ponteiro. No dedo, a faixa de
+                     requisito desce pra depois dos botões: ela custa ~100px e
+                     empurrava a ação principal pra fora da primeira tela no Galaxy
+                     Fold e no iPhone SE (medido: 602 → 702px numa dobra de 653).
+                     No computador ela fica em cima, que é onde o custo de tentar
+                     sem poder entrar é alto — instalar extensão, exportar cookies. -->
+                <div class="auth-fluxo flex flex-col">
+                <!-- O portão é do SERVIDOR (isUserAllowed), e até agora só se
+                     descobria depois de instalar a extensão, entrar no WME e voltar:
+                     o pior momento possível pra saber que não dá. O número sai de
+                     `NIVEL_MINIMO_EXIBIDO` via setI18nVars, nunca escrito na frase. -->
+                <p class="auth-requisito text-xs text-slate-700 dark:text-slate-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-400/30 rounded-xl p-3 mb-4 leading-relaxed" data-i18n-html="auth.requisito">Quem pode entrar: editor nível 3+ que seja Area Manager, ou staff do Waze.</p>
 
                 <p class="auth-precondicao hidden text-sm text-slate-600 dark:text-slate-300 bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3 mb-4 leading-relaxed" data-i18n="auth.needsComputer">Primeira vez? A sessão começa num computador.</p>
 
@@ -239,6 +254,29 @@
                         <svg class="w-5 h-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
                         <span data-i18n="auth.pairBtn">Entrar com um código</span>
                     </button>
+                </div>
+
+                <!-- A app se mostra sem exigir login. Quem chega aqui está
+                     sendo convidado a instalar uma extensão ou exportar cookies
+                     sem nunca ter visto a tela — e a única prova do que a app é
+                     está atrás do login. Fica DEPOIS das opções, não antes: em cima ela
+                     empurrava o botão principal pra fora da primeira tela no
+                     iPhone (medido: a ação principal ia de 441 pra 735px numa
+                     dobra de 664). As imagens são as MESMAS do prompt de
+                     instalação do PWA (icons/screenshots/), em versão pequena:
+                     as originais somam 432 KB e estas 63 KB, e isto aqui carrega
+                     na tela de entrada, muitas vezes em dado móvel. -->
+                <div class="auth-previa mt-6 flex justify-center gap-2" role="group" aria-label="Prévia da aplicação" data-i18n-aria="auth.previa.aria">
+                    <img src="icons/screenshots/previa-card.jpg" width="240" height="519" decoding="async"
+                         class="w-[4.5rem] h-auto rounded-lg border border-slate-200/70 shadow-sm dark:border-slate-600/60"
+                         alt="Um pedido com foto, categoria e endereço" data-i18n-alt="auth.previa.card">
+                    <img src="icons/screenshots/previa-map.jpg" width="240" height="519" decoding="async"
+                         class="w-[4.5rem] h-auto rounded-lg border border-slate-200/70 shadow-sm dark:border-slate-600/60"
+                         alt="Mapa mostrando onde o local fica" data-i18n-alt="auth.previa.map">
+                    <img src="icons/screenshots/previa-changes.jpg" width="240" height="519" decoding="async"
+                         class="w-[4.5rem] h-auto rounded-lg border border-slate-200/70 shadow-sm dark:border-slate-600/60"
+                         alt="Mudanças propostas em antes e depois" data-i18n-alt="auth.previa.changes">
+                </div>
                 </div>
 
                 <div class="mt-8 p-4 bg-blue-50/50 border border-blue-100 rounded-2xl flex items-start space-x-3 dark:bg-blue-600/15 dark:border-blue-600/40">
