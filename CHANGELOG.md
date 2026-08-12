@@ -8,6 +8,18 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.12-02
+
+### Adicionado
+- **A tela de entrada agora diz quem pode entrar, antes de você tentar.** Até aqui só se descobria depois de instalar a extensão, entrar no WME e voltar — e a recusa dizia apenas "certos níveis de editor". Agora o critério está escrito logo de cara: **editor nível 3 ou acima que seja Area Manager, ou staff do Waze**. O modal de recusa passou a dizer o mesmo, em vez da frase vaga.
+
+- **A app se mostra antes de pedir qualquer coisa.** Três telas de exemplo — um pedido com foto, o mapa e as mudanças propostas — logo abaixo das opções de entrada. Quem chega novo estava sendo convidado a instalar uma extensão sem nunca ter visto do que se trata.
+
+### Alterado
+- **A frase de boas-vindas parou de pedir a coisa errada.** Ela dizia *"você precisa fornecer seus cookies de autenticação"* — que não é verdade em dois dos três caminhos (pela extensão e pelo código você não fornece cookie nenhum), e que assusta quem não é técnico. Agora diz o que a app faz: *"Triagem rápida dos pedidos de places que chegam no Waze: você vê um por vez e decide com um toque."*
+
+  No celular, a faixa de "quem pode entrar" fica **abaixo** dos botões, e no computador acima. Não é capricho: em cima, ela empurrava o botão principal para fora da primeira tela no Galaxy Fold e no iPhone SE. Medido antes e depois, em seis aparelhos — o botão principal continua exatamente onde estava.
+
 ## v2026.08.12-01
 
 ### Adicionado

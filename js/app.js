@@ -33,6 +33,22 @@ const WME_EDITOR_URL = 'https://www.waze.com/editor';
 if (typeof setI18nVars === 'function') {
     setI18nVars({ undoSeg: () => (UNDO_WINDOW_MS / 1000).toLocaleString(i18nLocale()) });
 }
+
+// Nível mínimo pra entrar, COMO O EDITOR VÊ (o Waze conta rank de 0; a UI conta
+// de 1 — gotcha #15). A verdade mora no `MIN_RANK_WAZE` do `server/core.mjs`,
+// que é quem barra de fato; aqui é só o número que a tela de entrada mostra
+// ANTES de existir qualquer resposta do servidor pra citar. `test/consistencia`
+// reprova se os dois divergirem — divergir aqui é a app prometer um critério e
+// aplicar outro, que é pior do que não avisar nada.
+//
+// Vai por `setI18nVars` e não escrito na frase porque `applyI18n()` chama
+// `t(chave)` SEM parâmetro: sem o registro, o número seria digitado à mão em
+// quatro línguas e alguém esqueceria uma na próxima mudança (já aconteceu com
+// o "3s" da janela de desfazer).
+const NIVEL_MINIMO_EXIBIDO = 3;
+if (typeof setI18nVars === 'function') {
+    setI18nVars({ nivelMinimo: () => NIVEL_MINIMO_EXIBIDO });
+}
 // Sem cap: a caixa de mudanças rola por dentro, cresce com o card e avisa que
 // rola (esmaecido de borda). Com `MAX_CHANGES_DISPLAY = 4` a 5ª mudança era
 // INALCANÇÁVEL — nem rolando — e a linha "+1 mais" gastava exatamente o espaço

@@ -1,7 +1,8 @@
 // i18n leve (sem lib) — dicionário pt/en/es + t(key, vars) + applyI18n().
 // [data-i18n]→textContent, [data-i18n-html]→innerHTML (SÓ valores do próprio
 // dicionário, nunca dado da rede), [data-i18n-ph]→placeholder,
-// [data-i18n-aria]→aria-label, [data-i18n-title]→title. Idioma detectado de
+// [data-i18n-aria]→aria-label, [data-i18n-title]→title, [data-i18n-alt]→alt.
+// Idioma detectado de
 // navigator.language e persistido em localStorage (waze_places_lang).
 //
 // ⚠️ REGRA PERMANENTE (não esquecer): TODA string de UI nasce AQUI, nas TRÊS
@@ -24,11 +25,16 @@ const I18N_DICT = {
     'header.devBadge.title': 'Modo Desenvolvedor ativo — restrições removidas',
     // auth screen
     'auth.welcome.title': 'Bem-vindo!',
-    'auth.welcome.body': 'Para começar a limpar pedidos de places do Waze, você precisa fornecer seus cookies de autenticação.',
+    'auth.welcome.body': 'Triagem rápida dos pedidos de places que chegam no Waze: você vê um por vez e decide com um toque.',
     'auth.autoLogin.title': 'Login automático', 'auth.autoLogin.badge': 'recomendado',
     'auth.autoLogin.body': 'Instale a extensão WazePlaces Rapid Access no Chrome. Faz login direto a partir do WME — sem precisar copiar cookies.',
     'auth.autoLogin.cta': 'Instalar na Chrome Web Store',
     'auth.needsComputer': 'Primeira vez? A sessão começa num computador: entre lá, toque em Ajuda › Conectar outro aparelho e aponte a câmera daqui para o QR.',
+    'auth.requisito': '<b>Quem pode entrar:</b> editor <b>nível {nivelMinimo}+</b> que seja <b>Area Manager</b>, ou staff do Waze.',
+    'auth.previa.aria': 'Prévia da aplicação',
+    'auth.previa.card': 'Um pedido com foto, categoria e endereço',
+    'auth.previa.map': 'Mapa mostrando onde o local fica',
+    'auth.previa.changes': 'Mudanças propostas em antes e depois',
     'auth.manualDivider': 'ou login manual',
     'auth.uploadBtn': 'Fazer upload do cookies.txt', 'auth.pasteBtn': 'Colar conteúdo dos cookies',
     'auth.securityNote': 'Os cookies são trocados por um token de sessão criptografado no servidor (validade de 21 dias) e nunca trafegam novamente após o login.',
@@ -40,7 +46,7 @@ const I18N_DICT = {
     'modal.logout.title': 'Sair?',
     'modal.logout.body': 'Sua sessão será encerrada e <strong>todos os dados locais</strong> (cookies, estatísticas, filtros e preferências) serão apagados deste aparelho. Esta ação não pode ser desfeita.',
     'modal.accessDenied.title': 'Acesso restrito',
-    'modal.accessDenied.subtitle': 'Esta aplicação é exclusiva para certos níveis de editor',
+    'modal.accessDenied.subtitle': 'Exclusiva para editor nível {nivelMinimo}+ que seja Area Manager, ou staff do Waze',
     'modal.accessDenied.help': 'Se você acredita que deveria ter acesso, peça para verificar suas permissões no Waze Map Editor (rank e status de Area Manager).',
     'modal.accessDenied.dismiss': 'Entendi',
     'modal.filters.title': 'Filtros e Preferências',
@@ -401,11 +407,16 @@ const I18N_DICT = {
     'header.help.aria': 'Help and settings', 'header.help.title': 'Help, shortcuts, log out',
     'header.devBadge.title': 'Developer Mode active — restrictions removed',
     'auth.welcome.title': 'Welcome!',
-    'auth.welcome.body': 'To start cleaning up Waze place requests, you need to provide your authentication cookies.',
+    'auth.welcome.body': 'Fast triage of the place requests that reach Waze: you see one at a time and decide with a tap.',
     'auth.autoLogin.title': 'Automatic login', 'auth.autoLogin.badge': 'recommended',
     'auth.autoLogin.body': 'Install the WazePlaces Rapid Access extension on Chrome. It logs in straight from WME — no need to copy cookies.',
     'auth.autoLogin.cta': 'Install on the Chrome Web Store',
     'auth.needsComputer': 'First time? The session starts on a computer: sign in there, tap Help \u203a Connect another device, and point this camera at the QR code.',
+    'auth.requisito': '<b>Who can get in:</b> <b>level {nivelMinimo}+</b> editors who are <b>Area Managers</b>, or Waze staff.',
+    'auth.previa.aria': 'App preview',
+    'auth.previa.card': 'A request with photo, category and address',
+    'auth.previa.map': 'Map showing where the place is',
+    'auth.previa.changes': 'Proposed changes as before and after',
     'auth.manualDivider': 'or manual login',
     'auth.uploadBtn': 'Upload cookies.txt', 'auth.pasteBtn': 'Paste cookie contents',
     'auth.securityNote': 'Your cookies are exchanged for an encrypted session token on the server (valid for 21 days) and never travel again after login.',
@@ -416,7 +427,7 @@ const I18N_DICT = {
     'modal.logout.title': 'Log out?',
     'modal.logout.body': 'Your session will end and <strong>all local data</strong> (cookies, stats, filters and preferences) will be erased from this device. This action cannot be undone.',
     'modal.accessDenied.title': 'Restricted access',
-    'modal.accessDenied.subtitle': 'This app is exclusive to certain editor levels',
+    'modal.accessDenied.subtitle': 'Only for level {nivelMinimo}+ editors who are Area Managers, or Waze staff',
     'modal.accessDenied.help': 'If you believe you should have access, ask to verify your permissions on the Waze Map Editor (rank and Area Manager status).',
     'modal.accessDenied.dismiss': 'Got it',
     'modal.filters.title': 'Filters & Preferences',
@@ -714,11 +725,16 @@ const I18N_DICT = {
     'header.help.aria': 'Ayuda y ajustes', 'header.help.title': 'Ayuda, atajos, salir',
     'header.devBadge.title': 'Modo Desarrollador activo — restricciones eliminadas',
     'auth.welcome.title': '¡Bienvenido!',
-    'auth.welcome.body': 'Para empezar a limpiar solicitudes de places de Waze, necesitas proporcionar tus cookies de autenticación.',
+    'auth.welcome.body': 'Revisión rápida de las solicitudes de places que llegan a Waze: ves una a la vez y decides con un toque.',
     'auth.autoLogin.title': 'Inicio automático', 'auth.autoLogin.badge': 'recomendado',
     'auth.autoLogin.body': 'Instala la extensión WazePlaces Rapid Access en Chrome. Inicia sesión directo desde el WME — sin copiar cookies.',
     'auth.autoLogin.cta': 'Instalar en la Chrome Web Store',
     'auth.needsComputer': '¿Primera vez? La sesión empieza en una computadora: entra allí, toca Ayuda \u203a Conectar otro dispositivo y apunta esta cámara al código QR.',
+    'auth.requisito': '<b>Quién puede entrar:</b> editor de <b>nivel {nivelMinimo}+</b> que sea <b>Area Manager</b>, o staff de Waze.',
+    'auth.previa.aria': 'Vista previa de la aplicación',
+    'auth.previa.card': 'Una solicitud con foto, categoría y dirección',
+    'auth.previa.map': 'Mapa que muestra dónde está el lugar',
+    'auth.previa.changes': 'Cambios propuestos en antes y después',
     'auth.manualDivider': 'o inicio manual',
     'auth.uploadBtn': 'Subir cookies.txt', 'auth.pasteBtn': 'Pegar contenido de las cookies',
     'auth.securityNote': 'Las cookies se cambian por un token de sesión cifrado en el servidor (válido por 21 días) y nunca vuelven a viajar tras el inicio de sesión.',
@@ -729,7 +745,7 @@ const I18N_DICT = {
     'modal.logout.title': '¿Salir?',
     'modal.logout.body': 'Tu sesión se cerrará y <strong>todos los datos locales</strong> (cookies, estadísticas, filtros y preferencias) se borrarán de este dispositivo. Esta acción no se puede deshacer.',
     'modal.accessDenied.title': 'Acceso restringido',
-    'modal.accessDenied.subtitle': 'Esta app es exclusiva para ciertos niveles de editor',
+    'modal.accessDenied.subtitle': 'Exclusiva para editores de nivel {nivelMinimo}+ que sean Area Manager, o staff de Waze',
     'modal.accessDenied.help': 'Si crees que deberías tener acceso, pide que verifiquen tus permisos en el Waze Map Editor (rango y estado de Area Manager).',
     'modal.accessDenied.dismiss': 'Entendido',
     'modal.filters.title': 'Filtros y Preferencias',
@@ -1027,11 +1043,16 @@ const I18N_DICT = {
     'header.help.aria': 'Aide et réglages', 'header.help.title': 'Aide, raccourcis, déconnexion',
     'header.devBadge.title': 'Mode développeur actif — restrictions levées',
     'auth.welcome.title': 'Bienvenue !',
-    'auth.welcome.body': 'Pour commencer à traiter les demandes de lieux Waze, vous devez fournir vos cookies d’authentification.',
+    'auth.welcome.body': 'Tri rapide des demandes de lieux qui arrivent sur Waze : vous en voyez une à la fois et décidez d’un geste.',
     'auth.autoLogin.title': 'Connexion automatique', 'auth.autoLogin.badge': 'recommandé',
     'auth.autoLogin.body': 'Installez l’extension WazePlaces Rapid Access sur Chrome. Elle vous connecte directement depuis WME — sans copier de cookies.',
     'auth.autoLogin.cta': 'Installer depuis le Chrome Web Store',
     'auth.needsComputer': 'Première fois ? La session démarre sur un ordinateur : connectez-vous là-bas, touchez Aide › Connecter un autre appareil, puis pointez cette caméra vers le QR code.',
+    'auth.requisito': '<b>Qui peut entrer :</b> éditeur <b>niveau {nivelMinimo}+</b> qui soit <b>Area Manager</b>, ou staff Waze.',
+    'auth.previa.aria': 'Aperçu de l’application',
+    'auth.previa.card': 'Une demande avec photo, catégorie et adresse',
+    'auth.previa.map': 'Carte montrant où se trouve le lieu',
+    'auth.previa.changes': 'Modifications proposées en avant/après',
     'auth.manualDivider': 'ou connexion manuelle',
     'auth.uploadBtn': 'Envoyer cookies.txt', 'auth.pasteBtn': 'Coller le contenu des cookies',
     'auth.securityNote': 'Vos cookies sont échangés contre un jeton de session chiffré sur le serveur (valable 21 jours) et ne circulent plus jamais après la connexion.',
@@ -1042,7 +1063,7 @@ const I18N_DICT = {
     'modal.logout.title': 'Se déconnecter ?',
     'modal.logout.body': 'Votre session prendra fin et <strong>toutes les données locales</strong> (cookies, statistiques, filtres et préférences) seront effacées de cet appareil. Cette action est irréversible.',
     'modal.accessDenied.title': 'Accès restreint',
-    'modal.accessDenied.subtitle': 'Cette app est réservée à certains niveaux d’éditeur',
+    'modal.accessDenied.subtitle': 'Réservée aux éditeurs de niveau {nivelMinimo}+ qui sont Area Manager, ou au staff Waze',
     'modal.accessDenied.help': 'Si vous pensez devoir y avoir accès, demandez une vérification de vos droits sur Waze Map Editor (niveau et statut Area Manager).',
     'modal.accessDenied.dismiss': 'Compris',
     'modal.filters.title': 'Filtres et préférences',
@@ -1415,6 +1436,7 @@ function applyI18n(root) {
   root.querySelectorAll('[data-i18n-ph]').forEach((n) => { n.setAttribute('placeholder', t(n.getAttribute('data-i18n-ph'))); });
   root.querySelectorAll('[data-i18n-aria]').forEach((n) => { n.setAttribute('aria-label', t(n.getAttribute('data-i18n-aria'))); });
   root.querySelectorAll('[data-i18n-title]').forEach((n) => { n.setAttribute('title', t(n.getAttribute('data-i18n-title'))); });
+  root.querySelectorAll('[data-i18n-alt]').forEach((n) => { n.setAttribute('alt', t(n.getAttribute('data-i18n-alt'))); });
   try { document.documentElement.lang = i18nLocale(); } catch (e) { /* ignore */ }
 }
 

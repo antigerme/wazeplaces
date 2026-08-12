@@ -477,3 +477,64 @@ test('as duas camadas dos gotchas não podem divergir', () => {
   assert.match(DOC.slice(i, j), /docs\/gotchas\.md/,
     'o índice não aponta pro docs/gotchas.md — a história vira inalcançável');
 });
+
+// A tela de entrada AFIRMA um critério de acesso antes de qualquer resposta do
+// servidor — e quem barra de fato é o `isUserAllowed` do core. Se os dois
+// divergirem, a app promete uma coisa e aplica outra: o editor faz o trabalho
+// todo (instalar extensão, entrar no WME, voltar) pra descobrir que a frase
+// estava errada. Pior do que não avisar nada.
+//
+// O guard avalia a CONSTANTE, não casa a expressão por regex: forma diferente
+// com valor certo tem que passar. Acoplar guard à forma já reprovou correção
+// certa cinco vezes neste repo (`valorDeLista`, `derrubarSessao`, `avaliar`,
+// `TYPES_PADRAO`, `flex-auto` da foto).
+test('nível mínimo anunciado na entrada == portão do servidor', () => {
+  const valorDe = (src, nome) => {
+    const m = new RegExp(`const ${nome}\\s*=\\s*([^;]+);`).exec(src);
+    assert.ok(m, `sumiu a constante ${nome}`);
+    return Function(`"use strict"; return (${m[1]});`)();
+  };
+  const doServidor = valorDe(read('server/core.mjs'), 'MIN_RANK_WAZE');
+  const daTela = valorDe(read('js/app.js'), 'NIVEL_MINIMO_EXIBIDO');
+
+  // Rank do Waze é 0-indexed e a UI conta de 1 (gotcha #15). Confundir os dois
+  // aqui produz uma frase off-by-one — o erro mais caro possível numa frase que
+  // existe justamente pra a pessoa saber se vale a pena tentar.
+  assert.equal(daTela, doServidor + 1,
+    `a entrada anuncia nível ${daTela} e o servidor exige rank ${doServidor} (= nível ${doServidor + 1})`);
+
+  // O número nunca é digitado na frase: `applyI18n()` chama t(chave) SEM
+  // parâmetro, então quem não passar por setI18nVars vira número escrito à mão
+  // em quatro línguas — e alguém esquece uma na próxima mudança.
+  assert.match(read('js/app.js'), /setI18nVars\(\{\s*nivelMinimo:/,
+    'NIVEL_MINIMO_EXIBIDO não está registrado em setI18nVars — o número volta a ser digitado por língua');
+  const dict = read('js/i18n.js');
+  for (const chave of ['auth.requisito', 'modal.accessDenied.subtitle']) {
+    const ocorrencias = [...dict.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}': '((?:[^'\\\\]|\\\\.)*)'`, 'g'))];
+    assert.equal(ocorrencias.length, 4, `${chave} não está nas 4 línguas`);
+    for (const [, valor] of ocorrencias) {
+      assert.match(valor, /\{nivelMinimo\}/, `${chave} tem o nível escrito à mão: ${valor}`);
+    }
+  }
+});
+
+// As três miniaturas da prévia existem e são as PEQUENAS. Apontar pras capturas
+// originais funciona igual na tela e custa 432 KB em vez de 63 KB — na tela de
+// entrada, muitas vezes em dado móvel. É o tipo de regressão que ninguém vê.
+test('prévia da tela de entrada: miniaturas existem e são leves', () => {
+  const html = read('index.html');
+  // CADA <img>, não "a string aparece em algum lugar": a primeira versão deste
+  // guard passou com o alt removido de uma das três, porque as outras duas
+  // bastavam pra ele. Guard que aceita meia correção afirma proteção que não
+  // existe — foi assim no guard da splash também.
+  const imgs = [...html.matchAll(/<img[^>]+src="icons\/screenshots\/[^"]+"[^>]*>/g)].map((m) => m[0]);
+  assert.ok(imgs.length >= 3, 'a tela de entrada perdeu a prévia da app');
+  for (const img of imgs) {
+    const src = /src="([^"]+)"/.exec(img)[1];
+    assert.match(src, /previa-/, `${src} não é miniatura — usar a captura original custa ~7x mais`);
+    const bytes = readFileSync(join(ROOT, src));
+    assert.ok(bytes.length < 40 * 1024, `${src} tem ${Math.round(bytes.length / 1024)} KB — engordou`);
+    assert.match(img, /data-i18n-alt="auth\.previa\.[a-z]+"/,
+      `${src} sem alt traduzido — leitor de tela fica sem nada, e alt é conteúdo, não enfeite`);
+  }
+});
