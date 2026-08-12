@@ -43,18 +43,46 @@
   ],
   "screenshots": [
     {
-      "src": "icons/screenshots/screenshot-narrow.png",
-      "sizes": "540x960",
-      "type": "image/png",
+      "src": "icons/screenshots/card.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
       "form_factor": "narrow",
-      "label": "Request card with the proposed changes and the action buttons"
+      "label": "A place request with its photo, category and address, and the reject, skip and mark-as-read buttons"
     },
     {
-      "src": "icons/screenshots/screenshot-wide.png",
+      "src": "icons/screenshots/photos.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "New photo request: the pending photo is highlighted next to the photos the place already has"
+    },
+    {
+      "src": "icons/screenshots/map.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Evidence map: where the place is today and where the request wants to move it"
+    },
+    {
+      "src": "icons/screenshots/changes.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Proposed changes shown as a before and after diff"
+    },
+    {
+      "src": "icons/screenshots/filters.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Filters for the seven Waze request types, with preferences and history"
+    },
+    {
+      "src": "icons/screenshots/desktop.jpg",
       "sizes": "1280x720",
-      "type": "image/png",
+      "type": "image/jpeg",
       "form_factor": "wide",
-      "label": "Request queue in dark theme"
+      "label": "The same queue in a desktop browser"
     }
   ],
   "shortcuts": [

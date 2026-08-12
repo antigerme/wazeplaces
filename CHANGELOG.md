@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.12-01
+
+### Adicionado
+- **No iPhone e no iPad, a tela de abertura agora tem versão clara e versão escura**, e o aparelho escolhe pela sua preferência. É o que faltava do relato de [@antigerme](https://www.waze.com/user/editor/antigerme) sobre o clarão branco na abertura.
+
+  No Android a limitação continua: o fundo da abertura vem de um arquivo que o navegador lê uma vez e que **não** aceita duas cores. No iPhone existe um caminho diferente, que aceita — e é ele que está sendo usado agora, em 17 tamanhos de tela, do iPhone SE ao 16 Pro Max, mais os iPads.
+
+- **As imagens que aparecem na hora de instalar o app foram refeitas.** Eram duas, antigas. Agora são seis, tiradas da fila de verdade: o card com foto, um pedido de foto nova com as fotos que o local já tem, o mapa de evidência, as mudanças propostas em antes/depois, a tela de filtros e a app no computador.
+
+  Estão em inglês porque os testadores são de vários países e essas imagens **não** podem variar por idioma — quem escolhe a língua do resto do manifesto (nome, descrição, atalhos) não cobre as imagens. O nome de quem enviou cada pedido foi trocado por um genérico: são imagens públicas.
+
 ## v2026.08.11-01
 
 ### Corrigido
