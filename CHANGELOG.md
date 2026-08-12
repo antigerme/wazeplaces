@@ -8,6 +8,26 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.12-01
+
+### Adicionado
+- **No iPhone e no iPad, a tela de abertura agora tem versão clara e versão escura**, e o aparelho escolhe pela sua preferência. É o que faltava do relato de [@antigerme](https://www.waze.com/user/editor/antigerme) sobre o clarão branco na abertura.
+
+  No Android a limitação continua: o fundo da abertura vem de um arquivo que o navegador lê uma vez e que **não** aceita duas cores. No iPhone existe um caminho diferente, que aceita — e é ele que está sendo usado agora, em 17 tamanhos de tela, do iPhone SE ao 16 Pro Max, mais os iPads.
+
+- **As imagens que aparecem na hora de instalar o app foram refeitas.** Eram duas, antigas. Agora são seis, tiradas da fila de verdade: o card com foto, um pedido de foto nova com as fotos que o local já tem, o mapa de evidência, as mudanças propostas em antes/depois, a tela de filtros e a app no computador.
+
+  Estão em inglês porque os testadores são de vários países e essas imagens **não** podem variar por idioma — quem escolhe a língua do resto do manifesto (nome, descrição, atalhos) não cobre as imagens. O nome de quem enviou cada pedido foi trocado por um genérico: são imagens públicas.
+
+## v2026.08.11-01
+
+### Corrigido
+- **A tela de abertura não seguia mais o seu tema.** Quem usa o app instalado no celular em modo escuro via um clarão branco por meio segundo antes da app aparecer. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme), com vídeo e print do aparelho.
+
+  A **barra de status** agora acompanha a sua preferência desde o primeiro instante — antes ela vinha num azul aceso fixo, que era metade do clarão. E o fundo da abertura passou a ser o mesmo do tema escuro do app, em vez de branco.
+
+  Uma ressalva honesta: o fundo dessa tela é definido num arquivo que o navegador lê **uma vez**, e ele **não aceita** duas cores por preferência — é limitação da plataforma, não escolha nossa. Enquanto isso não mudar, ele é único. Quem usa o tema claro pode ver a abertura escura por um instante; é o inverso do problema relatado, e menor.
+
 ## v2026.08.07-03
 
 ### Corrigido

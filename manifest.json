@@ -2,12 +2,12 @@
   "id": "/",
   "name": "Waze Places",
   "short_name": "Waze Places",
-  "description": "Review Waze Map Editor place requests by swiping. Rejects or marks as read \u2014 never approves.",
+  "description": "Review Waze Map Editor place requests by swiping. Rejects or marks as read — never approves.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#33CCFF",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
   "orientation": "portrait",
   "lang": "en",
   "dir": "ltr",
@@ -37,21 +37,52 @@
       "purpose": "maskable"
     }
   ],
-  "categories": ["productivity", "utilities"],
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
   "screenshots": [
     {
-      "src": "icons/screenshots/screenshot-narrow.png",
-      "sizes": "540x960",
-      "type": "image/png",
+      "src": "icons/screenshots/card.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
       "form_factor": "narrow",
-      "label": "Request card with the proposed changes and the action buttons"
+      "label": "A place request with its photo, category and address, and the reject, skip and mark-as-read buttons"
     },
     {
-      "src": "icons/screenshots/screenshot-wide.png",
+      "src": "icons/screenshots/photos.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "New photo request: the pending photo is highlighted next to the photos the place already has"
+    },
+    {
+      "src": "icons/screenshots/map.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Evidence map: where the place is today and where the request wants to move it"
+    },
+    {
+      "src": "icons/screenshots/changes.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Proposed changes shown as a before and after diff"
+    },
+    {
+      "src": "icons/screenshots/filters.jpg",
+      "sizes": "780x1688",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Filters for the seven Waze request types, with preferences and history"
+    },
+    {
+      "src": "icons/screenshots/desktop.jpg",
       "sizes": "1280x720",
-      "type": "image/png",
+      "type": "image/jpeg",
       "form_factor": "wide",
-      "label": "Request queue in dark theme"
+      "label": "The same queue in a desktop browser"
     }
   ],
   "shortcuts": [
@@ -60,14 +91,26 @@
       "short_name": "Filters",
       "description": "Opens the queue filters directly",
       "url": "/?action=filters",
-      "icons": [{ "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [
+        {
+          "src": "icons/icon-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
     },
     {
       "name": "Fetch again",
       "short_name": "Refresh",
       "description": "Reloads the request queue",
       "url": "/?action=refresh",
-      "icons": [{ "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+      "icons": [
+        {
+          "src": "icons/icon-192.svg",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
     }
   ]
 }

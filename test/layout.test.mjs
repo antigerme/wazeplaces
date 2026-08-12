@@ -1634,3 +1634,162 @@ test('o pedido à extensão não atropela um login que aconteceu no meio', () =>
   assert.ok(curto <= 600, `EXT_PRESENTE_MS=${curto}ms: quem não tem a extensão espera isso olhando pro nada`);
   assert.match(app, /d\.action === 'aguarde'/, 'sumiu o "aguarde" — sem ele o prazo curto derruba quem TEM a extensão');
 });
+
+test('splash do PWA: manifest, metas e CSS não podem divergir', () => {
+  // O owner viu o splash branco num Android em modo escuro, e provou com vídeo
+  // e print. A causa era `background_color: #f8fafc` no manifest — ele é JSON
+  // estático, pintado ANTES de qualquer CSS/JS, então nem o tema.js alcança.
+  //
+  // O manifest NÃO aceita variante por esquema (issue aberta no WICG), então a
+  // única defesa é as cores não divergirem: o fundo do splash tem que ser o
+  // mesmo `body.dark` da app, senão volta a haver troca de cor na abertura.
+  const man = JSON.parse(read('manifest.json'));
+  const css = read('css/styles.css');
+  const html = read('index.html');
+
+  const escuroDoCss = (css.match(/body\.dark\s*\{[^}]*background-color:\s*(#[0-9a-fA-F]{6})/) || [])[1];
+  assert.ok(escuroDoCss, 'sumiu o background-color do body.dark');
+  assert.equal(man.background_color.toLowerCase(), escuroDoCss.toLowerCase(),
+    'background_color do manifest divergiu do body.dark — volta o clarão na abertura');
+  assert.equal(man.theme_color.toLowerCase(), escuroDoCss.toLowerCase(),
+    'theme_color do manifest divergiu — volta a faixa acesa em cima do splash');
+
+  // As duas metas por esquema são o que faz a barra de status seguir a
+  // preferência ANTES do JS. Uma meta só, fixa, era metade do problema.
+  const metas = [...html.matchAll(/<meta name="theme-color"[^>]*>/g)].map((m) => m[0]);
+  assert.ok(metas.some((m) => /prefers-color-scheme:\s*dark/.test(m)),
+    'sumiu a meta theme-color do esquema ESCURO');
+  assert.ok(metas.some((m) => /prefers-color-scheme:\s*light/.test(m)),
+    'sumiu a meta theme-color do esquema CLARO');
+
+  // A media query é a aposta na brecha do MDN ("browsers MAY override
+  // background_color from a prefers-color-scheme in your CSS"). Só vale
+  // escopada: sem o :not(.tema-claro), quem escolheu claro num sistema escuro
+  // recebe fundo escuro por baixo de uma app clara.
+  assert.match(css, /@media \(prefers-color-scheme: dark\)/,
+    'sumiu o gancho de prefers-color-scheme — o navegador fica sem de onde derivar');
+  // Confere CADA seletor do bloco, não "a string aparece em algum lugar".
+  // A primeira versão deste guard passava com metade do escopo removido: o
+  // segundo seletor ainda continha o `:not`, e isso bastava pra ele. Guard que
+  // aceita meia correção afirma uma proteção que não existe.
+  const abre = css.indexOf('@media (prefers-color-scheme: dark)');
+  const corpo = css.slice(css.indexOf('{', abre) + 1, css.indexOf('\n}', abre));
+  const seletores = corpo.split('{')[0].split(',').map((x) => x.trim()).filter(Boolean);
+  assert.ok(seletores.length > 0, 'bloco @media vazio');
+  for (const sel of seletores) {
+    assert.match(sel, /:not\(\.tema-claro\)/,
+      `seletor "${sel}" sem escopo — vai pintar escuro quem ESCOLHEU claro`);
+  }
+  assert.match(read('js/tema.js'), /tema-claro/,
+    'o tema.js parou de marcar o claro explicitamente, e o escopo acima deixa de funcionar');
+});
+
+// Dimensões de PNG e JPEG sem dependência nenhuma — o `npm test` é `node --test`
+// puro e vai continuar sendo. PNG: IHDR é sempre o primeiro chunk. JPEG: varre
+// os marcadores até um SOF (0xC0–0xCF, tirando 0xC4/0xC8/0xCC, que não são SOF).
+function dimensoesDaImagem(buf) {
+  if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) {
+    return { largura: buf.readUInt32BE(16), altura: buf.readUInt32BE(20) };
+  }
+  if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < buf.length) {
+      if (buf[i] !== 0xff) { i++; continue; }
+      const marca = buf[i + 1];
+      if (marca >= 0xc0 && marca <= 0xcf && marca !== 0xc4 && marca !== 0xc8 && marca !== 0xcc) {
+        return { altura: buf.readUInt16BE(i + 5), largura: buf.readUInt16BE(i + 7) };
+      }
+      i += 2 + buf.readUInt16BE(i + 2);
+    }
+  }
+  return null;
+}
+
+test('splash do iOS: todo tamanho tem o par claro+escuro, e o arquivo existe', () => {
+  // O `background_color` do manifest é UM valor, então no Android a splash é
+  // uma cor fixa. O iOS é o único lugar onde ela segue a PREFERÊNCIA da pessoa,
+  // porque o `media` do apple-touch-startup-image aceita prefers-color-scheme.
+  // Isso só funciona se as duas variantes existirem: com uma só, metade dos
+  // aparelhos casa nada e volta a splash branca — e ninguém percebe, porque a
+  // falha aparece por 300ms na abertura de um iPhone que o dev não tem.
+  const html = read('index.html');
+  const links = [...html.matchAll(/<link rel="apple-touch-startup-image"[^>]*>/g)].map((m) => m[0]);
+  assert.ok(links.length >= 2, 'sumiram os apple-touch-startup-image');
+
+  const porTamanho = new Map();
+  for (const link of links) {
+    const href = (/href="([^"]+)"/.exec(link) || [])[1];
+    const media = (/media="([^"]+)"/.exec(link) || [])[1];
+    assert.ok(href && media, `link sem href ou media: ${link}`);
+
+    const esquema = (/prefers-color-scheme:\s*(light|dark)/.exec(media) || [])[1];
+    assert.ok(esquema, `link sem prefers-color-scheme — não escolhe nada: ${link}`);
+    assert.match(media, /\(orientation: portrait\)/,
+      `link sem orientação: o iOS casa por orientação e este vale pra qualquer uma: ${link}`);
+
+    const w = Number((/device-width:\s*(\d+)px/.exec(media) || [])[1]);
+    const h = Number((/device-height:\s*(\d+)px/.exec(media) || [])[1]);
+    const dpr = Number((/-webkit-device-pixel-ratio:\s*(\d+)/.exec(media) || [])[1]);
+    assert.ok(w && h && dpr, `media incompleta (precisa de device-width/height/dpr): ${media}`);
+
+    // O arquivo precisa ter EXATAMENTE o tamanho que a media query promete —
+    // o iOS não redimensiona, ele descarta.
+    const bytes = readFileSync(join(ROOT, href));
+    const dim = dimensoesDaImagem(bytes);
+    assert.ok(dim, `não consegui ler as dimensões de ${href}`);
+    assert.deepEqual(dim, { largura: w * dpr, altura: h * dpr },
+      `${href} não bate com a media query (${w}×${h} @${dpr}x = ${w * dpr}×${h * dpr})`);
+    // Paleta, não RGBA: em truecolor os 34 arquivos passam de 900 KB pra
+    // desenhar um retângulo com um alfinete. Se alguém regerar sem paletizar,
+    // nada quebra — só engorda o repositório em silêncio.
+    assert.equal(bytes[25], 3, `${href} não é PNG de paleta (tipo de cor ${bytes[25]})`);
+    assert.ok(bytes.includes(Buffer.from('PLTE', 'ascii')), `${href} sem chunk PLTE`);
+    assert.match(href, new RegExp(`-${esquema}\\.png$`),
+      `${href} está no link do esquema ${esquema} — nome e media divergindo é o erro que ninguém vê`);
+
+    const chave = `${w}x${h}@${dpr}`;
+    if (!porTamanho.has(chave)) porTamanho.set(chave, new Set());
+    porTamanho.get(chave).add(esquema);
+  }
+
+  for (const [chave, esquemas] of porTamanho) {
+    assert.deepEqual([...esquemas].sort(), ['dark', 'light'],
+      `o tamanho ${chave} não tem os DOIS esquemas — ${[...esquemas]} só`);
+  }
+});
+
+test('capturas do manifest: arquivo existe, tamanho declarado é o real, proporção uniforme', () => {
+  // O Chrome só monta o diálogo rico de instalação se as capturas conferirem, e
+  // quando não conferem ele desiste em SILÊNCIO — volta o diálogo velho de uma
+  // linha e ninguém liga o efeito à causa. As três regras que ele aplica:
+  // dimensão entre 320 e 3840, lado maior no máximo 2,3× o menor, e mesma
+  // proporção entre capturas do mesmo form_factor.
+  const man = JSON.parse(read('manifest.json'));
+  assert.ok(Array.isArray(man.screenshots) && man.screenshots.length >= 3,
+    'o manifest precisa de pelo menos 3 capturas');
+
+  const proporcaoPorFormato = new Map();
+  for (const s of man.screenshots) {
+    const bytes = readFileSync(join(ROOT, s.src));
+    const dim = dimensoesDaImagem(bytes);
+    assert.ok(dim, `não consegui ler as dimensões de ${s.src}`);
+    assert.equal(`${dim.largura}x${dim.altura}`, s.sizes,
+      `${s.src}: o manifest declara ${s.sizes} e o arquivo é ${dim.largura}x${dim.altura}`);
+
+    const tipoEsperado = s.src.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    assert.equal(s.type, tipoEsperado, `${s.src}: type declarado não bate com a extensão`);
+    assert.ok(s.label && s.label.length > 10, `${s.src}: sem label — é o que o leitor de tela lê`);
+
+    const menor = Math.min(dim.largura, dim.altura), maior = Math.max(dim.largura, dim.altura);
+    assert.ok(menor >= 320 && maior <= 3840, `${s.src}: fora da faixa 320–3840 do Chrome`);
+    assert.ok(maior <= menor * 2.3, `${s.src}: lado maior passa de 2,3× o menor, o Chrome descarta`);
+
+    const p = dim.largura / dim.altura;
+    if (!proporcaoPorFormato.has(s.form_factor)) proporcaoPorFormato.set(s.form_factor, p);
+    assert.ok(Math.abs(proporcaoPorFormato.get(s.form_factor) - p) < 0.01,
+      `${s.src}: proporção diferente das outras capturas "${s.form_factor}" — o Chrome exige uniforme`);
+  }
+
+  assert.ok(man.screenshots.some((s) => s.form_factor === 'narrow'), 'sem captura narrow (celular)');
+  assert.ok(man.screenshots.some((s) => s.form_factor === 'wide'), 'sem captura wide (desktop)');
+});

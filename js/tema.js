@@ -14,7 +14,23 @@
       t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
     if (t === 'dark') document.documentElement.classList.add('dark');
-    var m = document.querySelector('meta[name="theme-color"]');
-    if (m) m.setAttribute('content', t === 'dark' ? '#0f172a' : '#f8fafc');
+    // Marca o claro EXPLICITAMENTE pra a media query do styles.css saber que
+    // não deve pintar escuro (ver o comentário lá). Sem isto, quem escolheu
+    // claro num sistema escuro veria fundo escuro por baixo de uma app clara.
+    else document.documentElement.classList.add('tema-claro');
+    // As duas metas com `media` já acertam quando o tema SEGUE o sistema.
+    // Só há o que corrigir quando a pessoa ESCOLHEU o contrário do sistema —
+    // e aí as metas por esquema têm que sair, senão a do sistema volta a valer
+    // (o navegador escolhe pela media query, não pela ordem).
+    var escolheu = (t === 'light' || t === 'dark') && localStorage.getItem('waze_places_theme') === t;
+    var sistema = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    if (escolheu && t !== sistema) {
+      var metas = document.querySelectorAll('meta[name="theme-color"]');
+      for (var i = 0; i < metas.length; i++) metas[i].parentNode.removeChild(metas[i]);
+      var nova = document.createElement('meta');
+      nova.setAttribute('name', 'theme-color');
+      nova.setAttribute('content', t === 'dark' ? '#0f172a' : '#f8fafc');
+      document.head.appendChild(nova);
+    }
   } catch (e) {}
 })();
