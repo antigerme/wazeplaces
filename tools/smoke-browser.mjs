@@ -239,6 +239,12 @@ const LINGUAS = ['pt', 'en', 'es', 'fr'];
 // "nunca". Foi assim que a sabotagem passou verde na primeira tentativa.
 const UNDO_ESPERA_MS = 4000;
 
+// Aparelhos do treino: os mesmos apertados que já derrubaram layout aqui — o
+// Fold e o SE são quem revela corte de altura, e o deitado revela o resto.
+const APARELHOS_TREINO = [['Pixel 7', { width: 412, height: 915 }], ['iPhone 14', { width: 390, height: 844 }],
+  ['iPhone SE', { width: 375, height: 667 }], ['Galaxy Fold', { width: 280, height: 653 }],
+  ['SE 2016', { width: 320, height: 568 }], ['deitado', { width: 852, height: 393 }]];
+
 let falhas = 0;
 // Espera o card ASSENTAR — animação terminada, não um relógio.
 //
@@ -1695,7 +1701,22 @@ for (const lg of LINGUAS) {
   await page.waitForTimeout(500);
   await page.keyboard.press('ArrowUp');
   await page.waitForTimeout(900);
-  await page.waitForTimeout(UNDO_ESPERA_MS);  // a janela do Desfazer TEM que vencer (e cobre o atraso do modal final)
+  // O fim do treino tem que aparecer NA HORA. Ele já esperou 2,2s pra dar tempo
+  // de ler um aviso flutuante — e nesses 2,2s a área do card ficava VAZIA, porque
+  // a animação do swipe já tinha tirado o card. Tela em branco lê como app
+  // quebrada; hoje o efeito da última ação vai DENTRO do modal.
+  const abriuEm = await (async () => {
+    const t0 = Date.now();
+    for (let i = 0; i < 30; i++) {
+      const aberto = await page.evaluate(() => !document.getElementById('treinoFimModal').classList.contains('hidden'));
+      if (aberto) return Date.now() - t0;
+      await page.waitForTimeout(100);
+    }
+    return Infinity;
+  })();
+  checa(abriuEm < 1200, `treino ${lg}: o fim do treino demorou ${abriuEm}ms — deixa a área do card em branco`);
+
+  await page.waitForTimeout(UNDO_ESPERA_MS);  // a janela do Desfazer TEM que vencer
   checa(escritas.length === 0, `treino ${lg}: VAZOU escrita ao Waze`, escritas.join(', '));
   checa(await page.evaluate(() => !document.getElementById('treinoFimModal').classList.contains('hidden')),
     `treino ${lg}: o fim do treino não apareceu`);
@@ -1722,6 +1743,88 @@ for (const lg of LINGUAS) {
   await ctx.close();
 }
 
+// ── Treino: a tela dele NÃO pode se sobrepor nem cortar os botões ────────
+// A faixa "nada é enviado" nasceu dentro do #bannerStack, que é `fixed` e existe
+// pra aviso TRANSITÓRIO. Faixa PERMANENTE ali flutua por cima do conteúdo pra
+// sempre: ela cobria o placar em 8 de 8 aparelhos × temas, com 66px de
+// sobreposição, e o owner viu no celular dele os dois textos escritos um em cima
+// do outro. Passou por mim porque no tema claro a faixa é opaca — ela ESCONDEU o
+// placar e eu li a captura como "faixa acima do card".
+//
+// Mover pra o fluxo consertou a sobreposição e criou o risco oposto (gotcha #32):
+// ~50px a menos de altura pro card podem jogar os três botões abaixo da dobra.
+// Por isso este bloco mede as DUAS coisas, e mais o alvo de toque.
+for (const [aparelho, viewport] of APARELHOS_TREINO) {
+  for (const lg of LINGUAS) {
+    const ctx = await browser.newContext({ viewport, locale: lg === 'en' ? 'en-US' : lg, serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    await page.addInitScript((l) => {
+      localStorage.setItem('waze_places_lang', l);
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+    }, lg);
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(450);
+    await page.evaluate(() => {
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = 99; AppState.hasMore = false;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      Treino.entrar();
+    });
+    await page.waitForTimeout(700);
+    const m = await page.evaluate(() => {
+      const vis = (e) => e && e.offsetParent !== null && getComputedStyle(e).display !== 'none';
+      // Sondas DENTRO do círculo inscrito: os botões do card são redondos, e
+      // sondar os cantos da CAIXA cai fora do alvo — acusa "inalcançável" em
+      // todas as combinações, que é assinatura de instrumento errado.
+      const alcanca = (el) => {
+        const r = el.getBoundingClientRect();
+        const cx = r.x + r.width / 2, cy = r.y + r.height / 2, dx = r.width * 0.25, dy = r.height * 0.25;
+        return [[cx, cy], [cx - dx, cy], [cx + dx, cy], [cx, cy - dy], [cx, cy + dy]]
+          .every(([x, y]) => {
+            const t = document.elementFromPoint(x, y);
+            return t === el || el.contains(t)
+              || (t && t.closest && t.closest('.card-btn-reject,.card-btn-skip,.card-btn-read,#treinoSairBtn') === el);
+          });
+      };
+      const botoes = ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].map((s) => document.querySelector(s));
+      const caixas = ['treinoBanner', 'placar'].map((i) => document.getElementById(i)).filter(vis)
+        .concat([document.querySelector('.place-card')].filter(vis));
+      let sobre = 0;
+      for (let i = 0; i < caixas.length; i++) {
+        for (let j = i + 1; j < caixas.length; j++) {
+          const A = caixas[i].getBoundingClientRect(), B = caixas[j].getBoundingClientRect();
+          sobre += Math.max(0, Math.min(A.right, B.right) - Math.max(A.left, B.left))
+                 * Math.max(0, Math.min(A.bottom, B.bottom) - Math.max(A.top, B.top));
+        }
+      }
+      const sair = document.getElementById('treinoSairBtn');
+      const doc = document.documentElement;
+      return {
+        semBotao: botoes.some((b) => !vis(b)),
+        foraDaDobra: botoes.filter((b) => vis(b) && b.getBoundingClientRect().bottom > innerHeight).length,
+        inalcancavel: botoes.filter((b) => vis(b) && !alcanca(b)).length,
+        alvoPequeno: botoes.filter((b) => vis(b) && b.getBoundingClientRect().height < 44).length,
+        sairOk: vis(sair) && sair.getBoundingClientRect().height >= 44 && alcanca(sair),
+        sobre: Math.round(sobre),
+        estouroX: Math.max(0, doc.scrollWidth - doc.clientWidth),
+      };
+    });
+    const onde = `treino ${aparelho} ${lg}`;
+    checa(m.sobre === 0, `${onde}: faixa/placar/card se sobrepõem (${m.sobre}px²)`);
+    checa(!m.semBotao, `${onde}: sumiu um dos três botões do card`);
+    checa(m.foraDaDobra === 0, `${onde}: ${m.foraDaDobra} botão(ões) abaixo da dobra`);
+    checa(m.inalcancavel === 0, `${onde}: ${m.inalcancavel} botão(ões) cobertos por outro elemento`);
+    checa(m.alvoPequeno === 0, `${onde}: alvo de toque abaixo de 44px`);
+    checa(m.sairOk, `${onde}: o "Sair" do treino não está utilizável`);
+    checa(m.estouroX === 0, `${onde}: estouro horizontal de ${m.estouroX}px`);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -1741,4 +1844,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair da app, e o "Já instalei" que recarrega)`
-  + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida)`);
+  + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida)`
+  + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`);

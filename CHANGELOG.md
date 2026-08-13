@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.13-03
+
+### Corrigido
+- **A faixa do modo treino ficava escrita por cima do placar.** Os dois textos ocupavam o mesmo espaço e se sobrepunham. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme), com print do celular. Agora a faixa fica acima do placar, ocupando espaço próprio.
+
+- **O placar contava de trás pra frente ao entrar no treino.** Ele animava dos seus números reais até os do treino, o que dá a impressão de que o seu trabalho mudou — mudou só o placar que você está olhando. Agora ele troca na hora.
+
+- **A tela ficava vazia por dois segundos ao terminar o treino.** O último aviso aparecia flutuando sobre uma área em branco. Agora ele vem dentro da própria tela de "Treino concluído", que abre na hora.
+
 ## v2026.08.13-02
 
 ### Adicionado

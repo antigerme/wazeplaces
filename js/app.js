@@ -2302,7 +2302,7 @@ function resetQueue() {
     AppState.serverBlocked = 0;
     AppState.blockedPartial = false;
     AppState.loadError = false;
-    updatePendingCount();
+    updatePendingCount(semAnimar);
 }
 
 function showLoading(visible) {
@@ -4150,11 +4150,11 @@ const Treino = {
         AppState.serverTotal = 3;
         AppState.queue = this.cards();
         AppState.currentPlace = AppState.queue[0];
-        document.getElementById('treinoBanner')?.classList.remove('hidden');
+        document.getElementById('treinoBanner')?.classList.replace('hidden', 'flex');
         document.getElementById('noMoreCards')?.classList.add('hidden');
         showLoading(false);
-        updateStats();
-        updatePendingCount();
+        updateStats(true);   // troca de contexto: pula, não conta
+        updatePendingCount(true);
         showCurrentPlace();
     },
 
@@ -4169,10 +4169,10 @@ const Treino = {
         AppState.hasMore = !!s.hasMore;
         AppState.fetching = !!s.fetching;
         this._salvo = null;
-        document.getElementById('treinoBanner')?.classList.add('hidden');
+        document.getElementById('treinoBanner')?.classList.replace('flex', 'hidden');
         removeCurrentCardEl();
-        updateStats();
-        updatePendingCount();
+        updateStats(true);
+        updatePendingCount(true);
         if (AppState.queue.length) { AppState.currentPlace = AppState.queue[0]; showCurrentPlace(); }
         else if (AppState.hasMore) startFetching();
         else showNoPlaces();
@@ -4195,8 +4195,12 @@ const Treino = {
 
     agir(tipo) {
         if (!this.ativo) return;
+        const ultimo = AppState.queue.length <= 1;
         this.limparAvisos();
-        showToast(t('treino.efeito.' + tipo), tipo === 'reject' ? 'error' : 'info', 5000);
+        // No último, o efeito vai DENTRO do modal final: fora dele viraria um
+        // aviso flutuante sobre a área do card já vazia (o swipe animou o card
+        // pra fora), e esperar pra ler deixava 2,2s de tela em branco.
+        if (!ultimo) showToast(t('treino.efeito.' + tipo), tipo === 'reject' ? 'error' : 'info', 5000);
         AppState.stats[tipo === 'reject' ? 'rejected' : tipo === 'read' ? 'read' : 'skipped']++;
         AppState.serverTotal = Math.max(0, AppState.serverTotal - (tipo === 'skip' ? 0 : 1));
         updateStats();
@@ -4204,16 +4208,16 @@ const Treino = {
         AppState.currentPlace = AppState.queue[0] || null;
         this.passo++;
         updatePendingCount();
-        removeCurrentCardEl();
-        if (AppState.currentPlace) { showCurrentPlace(); return; }
-        // Espera o último aviso ser LIDO antes de trocar de assunto. É cerimônia
-        // — mas aqui é o único lugar da app onde ela se paga: acontece uma vez,
-        // a pedido, e o que se está ensinando é a consequência da ação.
-        setTimeout(() => {
-            if (!this.ativo) return;
-            this.limparAvisos();
-            openModal('treinoFimModal');
-        }, 2200);
+        // No ÚLTIMO, o card fica na tela enquanto o aviso é lido: tirá-lo deixava
+        // 2,2s de área em branco antes do modal final, o que lê como app quebrada.
+        // Quem limpa é o `sair()`.
+        if (AppState.currentPlace) { removeCurrentCardEl(); showCurrentPlace(); return; }
+        const efeito = document.getElementById('treinoFimEfeito');
+        if (efeito) {
+            efeito.textContent = t('treino.efeito.' + tipo);
+            efeito.classList.remove('hidden');
+        }
+        openModal('treinoFimModal');
     },
 };
 window.Treino = Treino;
@@ -4493,8 +4497,18 @@ function updateInFlightIndicator() {
 const COUNT_ANIM_MIN_MS = 220;
 const COUNT_ANIM_MAX_MS = 650;
 
-function setCount(el, valor, sufixo = '') {
+// `semAnimar` existe pra UMA situação: a troca de CONTEXTO do placar (entrar e
+// sair do treino). Contar de 7 pra 0 sugere que o trabalho da pessoa mudou —
+// quando o que mudou foi o placar que ela está olhando. É o mesmo raciocínio do
+// "contador que muda de 1 PULA, não conta", visto do outro lado: animação aqui
+// conta uma história falsa. Medido: 7/2/1/99 contando até 0/0/0/3 levava ~1s.
+function setCount(el, valor, sufixo = '', semAnimar = false) {
     if (!el) return;
+    if (semAnimar) {
+        if (el._countRaf) cancelAnimationFrame(el._countRaf);
+        el.textContent = String(valor) + sufixo;
+        return;
+    }
     const anterior = parseInt(String(el.textContent).replace(/\D/g, ''), 10);
     const alvo = Number(valor);
     const mudou = !Number.isFinite(anterior) || anterior !== alvo;
@@ -4540,18 +4554,18 @@ function prefersReducedMotion() {
     try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
 }
 
-function updateStats() {
+function updateStats(semAnimar = false) {
     // Todo caminho que mexe em Lidos/Rejeitados passa por aqui (swipe, botão,
     // lote, undo revertendo) — é o único ponto que pega todos sem espalhar
     // chamadas por seis handlers.
     checkUndoGateUnlock();
-    setCount(document.getElementById('readCount'), AppState.stats.read);
-    setCount(document.getElementById('rejectedCount'), AppState.stats.rejected);
-    setCount(document.getElementById('skippedCount'), AppState.stats.skipped);
+    setCount(document.getElementById('readCount'), AppState.stats.read, '', semAnimar);
+    setCount(document.getElementById('rejectedCount'), AppState.stats.rejected, '', semAnimar);
+    setCount(document.getElementById('skippedCount'), AppState.stats.skipped, '', semAnimar);
     updatePendingCount();
 }
 
-function updatePendingCount() {
+function updatePendingCount(semAnimar = false) {
     const el = document.getElementById('pendingCount');
     if (!el) return;
     if (!AppState.authenticated) {
@@ -4562,7 +4576,7 @@ function updatePendingCount() {
         el.textContent = '…';
         return;
     }
-    setCount(el, AppState.serverTotal, AppState.hasMore ? '+' : '');
+    setCount(el, AppState.serverTotal, AppState.hasMore ? '+' : '', semAnimar);
     updatePendingTotalHint();
 }
 
