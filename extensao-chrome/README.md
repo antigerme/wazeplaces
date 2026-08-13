@@ -1,4 +1,4 @@
-# Waze Places Rapid Access — proposta de v0.1.0
+# Waze Places Rapid Access — proposta de v0.2.0
 
 Reescrita da extensão do [@daflash](https://www.waze.com/user/editor/daflash) para que o login
 entre o **Waze Map Editor** e o **Waze Places** seja totalmente automático.
@@ -100,3 +100,57 @@ perfil e mede os dois fluxos. Duas rodadas seguidas:
 ✓ abrir a app sem sessão → NÃO parou no login · entrou · token gravado · card na tela (fila=77)
 ✓ sessão morre no meio → NÃO caiu no login · token RENOVADO · fila continuou (77 → 77)
 ```
+
+
+---
+
+## v0.2.0 — quem instala com a aba do Places já aberta
+
+Dois buracos, os dois medidos antes de escrever qualquer linha.
+
+### 1. Instalar com a aba aberta não fazia nada
+
+A app pergunta à ponte **uma vez**, no carregamento, com 350ms de janela — e o Chrome **não
+injeta content script numa aba que já estava aberta**. Quem instalava olhando pra tela de entrada
+ficava ali pra sempre. (A app ganhou um "Já instalei — entrar" pra esse caso; isto aqui torna o
+botão desnecessário.)
+
+`chrome.runtime.onInstalled` agora recarrega as abas do Places. **Sem permissão nova** — e isso
+foi medido, não suposto:
+
+```
+sonda com as permissões da 0.1.0 → {"query":"ok","abas":1,"reload":"ok"}
+```
+
+`chrome.tabs.query({url})` é autorizado pelo `host_permissions` que já existe, e
+`chrome.tabs.reload` não exige a permissão `tabs` (o `chrome.tabs.create` da 0.1.0 já provava).
+Isso importa: permissão que gera aviso faz o Chrome **desativar a extensão de todo mundo** até
+cada pessoa reaprovar — o custo do recurso novo cairia em quem já está trabalhando.
+
+Só no `reason === 'install'`. No `update` a aba aberta também precisaria, mas recarregar
+atropelaria quem está triando no meio da fila — pra esse caso a defesa é a de baixo.
+
+### 2. Contexto órfão pendurava a app por 8 segundos
+
+Quando a extensão se atualiza sozinha, o content script antigo continua vivo na página mas o
+`chrome.runtime` dele morre, e `sendMessage` **lança**. O `aguarde` já tinha sido enviado, então
+a app esperava o prazo inteiro dela:
+
+```
+antes:  tela de entrada utilizável após 8450ms
+depois: tela de entrada utilizável após  233ms
+```
+
+Agora a ponte responde `sem-sessao` na hora, e a aba volta a funcionar sozinha no próximo
+carregamento.
+
+### Compatibilidade
+
+| app | extensão | resultado |
+|---|---|---|
+| atual | 0.1.0 | funciona (é o que roda hoje) |
+| atual | 0.2.0 | funciona, e instalar com a aba aberta passa a resolver sozinho |
+| anterior | 0.2.0 | funciona — o reload leva a app a perguntar no carregamento, como sempre |
+
+Nenhuma mudança de protocolo entre app e extensão: as mensagens (`precisa-de-sessao`, `aguarde`,
+`sessao`, `sem-sessao`) são as mesmas.

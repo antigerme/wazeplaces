@@ -32,14 +32,24 @@ window.addEventListener('message', (ev) => {
   // ele, espera a ida ao Waze (~1,8s medidos) mostrando "Entrando pelo WME…".
   responder({ action: 'aguarde' });
 
-  chrome.runtime.sendMessage({ action: 'autenticar' }, (r) => {
-    // `lastError` acontece quando o service worker foi descarregado e não
-    // respondeu. Silenciar sem responder deixaria a app esperando até o prazo
-    // dela — melhor dizer "não consegui" e ela cai no login na hora.
-    if (chrome.runtime.lastError || !r) return responder({ action: 'sem-sessao' });
-    if (r.success && r.sessionToken) return responder({ action: 'sessao', token: r.sessionToken });
-    responder({ action: 'sem-sessao', motivo: r.semLogin ? 'sem-login-wme' : 'erro' });
-  });
+  // Contexto ÓRFÃO: quando a extensão se atualiza sozinha, o content script
+  // antigo continua vivo na página mas o `chrome.runtime` dele morre, e
+  // `sendMessage` LANÇA. Sem este try, o `aguarde` já tinha sido enviado e a app
+  // esperava o prazo inteiro dela — medido: 8,45s de spinner antes da tela de
+  // entrada ficar utilizável. Dizer "não consegui" na hora custa 0s, e a aba
+  // volta a funcionar sozinha no próximo carregamento.
+  try {
+    chrome.runtime.sendMessage({ action: 'autenticar' }, (r) => {
+      // `lastError` acontece quando o service worker foi descarregado e não
+      // respondeu. Silenciar sem responder deixaria a app esperando até o prazo
+      // dela — melhor dizer "não consegui" e ela cai no login na hora.
+      if (chrome.runtime.lastError || !r) return responder({ action: 'sem-sessao' });
+      if (r.success && r.sessionToken) return responder({ action: 'sessao', token: r.sessionToken });
+      responder({ action: 'sem-sessao', motivo: r.semLogin ? 'sem-login-wme' : 'erro' });
+    });
+  } catch (e) {
+    responder({ action: 'sem-sessao', motivo: 'contexto-invalido' });
+  }
 });
 
 // 2) Token deixado pelo botão do WME (a aba acabou de ser aberta por ele).

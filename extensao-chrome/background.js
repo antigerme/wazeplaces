@@ -123,3 +123,35 @@ chrome.runtime.onMessage.addListener((req, sender, responder) => {
     return true;
   }
 });
+
+// ── Quem instala com a aba do Places já aberta ───────────────────────────
+// O beco sem saída que o owner mediu: a app pergunta à ponte UMA vez, no
+// carregamento, com 350ms de janela — e o Chrome NÃO injeta content script numa
+// aba que já estava aberta. Resultado: quem instala olhando pra tela de entrada
+// ficava ali pra sempre. Recarregar a aba resolve os dois lados de uma vez: a
+// ponte entra e a app pergunta de novo.
+//
+// NÃO PRECISA DE PERMISSÃO NOVA, e isso foi medido antes de escrever a linha:
+// `chrome.tabs.query({url})` é autorizado pelo `host_permissions` que já
+// existe, e `chrome.tabs.reload` não exige a permissão `tabs` (o
+// `chrome.tabs.create` acima já provava isso). Permissão nova seria um
+// impedimento REAL: o Chrome desativa a extensão de todo mundo até cada um
+// reaprovar — o custo cairia em quem já usa, pra ajudar quem está chegando.
+//
+// Só no `install`. No `update` a aba aberta tem a ponte ÓRFÃ (o content script
+// antigo continua na página com o `chrome.runtime` morto) e recarregar
+// consertaria — mas atropelaria quem está triando no meio da fila. Pra esse
+// caso a defesa é a de baixo, no ponte.js: falhar rápido em vez de pendurar.
+const ALVO_PLACES = 'https://places.wazebrasil.com/*';
+
+chrome.runtime.onInstalled.addListener((detalhes) => {
+  if (!detalhes || detalhes.reason !== 'install') return;
+  try {
+    chrome.tabs.query({ url: [ALVO_PLACES] }, (abas) => {
+      if (chrome.runtime.lastError) return;   // sem acesso: silêncio, não quebra
+      (abas || []).forEach((aba) => {
+        try { chrome.tabs.reload(aba.id); } catch (e) { /* aba morta no meio */ }
+      });
+    });
+  } catch (e) { /* nunca derruba a instalação */ }
+});

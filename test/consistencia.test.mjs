@@ -538,3 +538,42 @@ test('prévia da tela de entrada: miniaturas existem e são leves', () => {
       `${src} sem alt traduzido — leitor de tela fica sem nada, e alt é conteúdo, não enfeite`);
   }
 });
+
+// A extensão é do @daflash e roda no navegador de todos os editores. O que a
+// trava aqui não é estilo — é a única coisa que pode QUEBRAR quem já usa:
+// permissão nova. Quando um update pede permissão com aviso, o Chrome DESATIVA
+// a extensão até cada pessoa reaprovar — o custo do recurso novo cairia em quem
+// já está trabalhando, pra ajudar quem está chegando.
+//
+// Medido antes de escrever a linha que motivou este guard: `tabs.query({url})`
+// é autorizado pelo `host_permissions` existente e `tabs.reload` não exige a
+// permissão `tabs` (a sonda devolveu {"query":"ok","abas":1,"reload":"ok"} com
+// exatamente estas permissões).
+test('extensão: nenhuma permissão nova, e o reload só no install', () => {
+    const man = JSON.parse(read('extensao-chrome/manifest.json'));
+    assert.deepEqual([...man.permissions].sort(), ['cookies', 'storage'],
+        'permissão nova no manifest — o Chrome desativa a extensão de todos até reaprovarem');
+    assert.deepEqual([...man.host_permissions].sort(),
+        ['*://*.waze.com/*', '*://places.wazebrasil.com/*'],
+        'host_permissions mudaram — isso também gera aviso e desativa a extensão');
+
+    // `key` e `update_url` são adicionados pela Web Store ao empacotar. Commitá-los
+    // faz a extensão carregada localmente assumir o ID publicado — já mordeu antes.
+    assert.ok(!('key' in man), 'o manifest voltou a ter `key` (vem da Web Store, não do repo)');
+    assert.ok(!('update_url' in man), 'o manifest voltou a ter `update_url`');
+
+    const bg = read('extensao-chrome/background.js');
+    assert.match(bg, /onInstalled/, 'sumiu o onInstalled — quem instala com a aba aberta volta a ficar preso');
+    // Só `install`. No `update` a aba aberta tem a ponte órfã, e recarregar
+    // atropelaria quem está triando no meio da fila — lá a defesa é falhar rápido.
+    assert.match(bg, /reason !== 'install'/,
+        'o onInstalled deixou de filtrar por reason — vai recarregar a aba de quem está triando');
+
+    // Contexto órfão (extensão se atualiza com a aba aberta): sem o try, o
+    // `aguarde` já foi enviado e a app espera o prazo INTEIRO dela. Medido:
+    // 8450ms de spinner contra 233ms com a defesa.
+    const ponte = read('extensao-chrome/ponte.js');
+    assert.match(ponte, /try\s*\{[\s\S]*chrome\.runtime\.sendMessage/,
+        'o sendMessage da ponte saiu do try — contexto órfão volta a pendurar a app por 8s');
+    assert.match(ponte, /contexto-invalido/, 'sumiu a resposta imediata do contexto órfão');
+});
