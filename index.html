@@ -358,7 +358,21 @@
 
                 <p class="text-xs text-slate-500 mb-5 leading-relaxed dark:text-slate-400" data-i18n="modal.comoFunciona.wme">Para corrigir o local de verdade, use o ↗ do card e abra no Waze Map Editor.</p>
 
-                <button id="comoFuncionaOk" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.gotIt">Entendi</button>
+                <!-- Dismissiva à esquerda, afirmativa à direita (M3/HIG). "Treinar"
+                     é a dismissiva aqui: quem clica NÃO está seguindo pro trabalho. -->
+                <div class="flex gap-3">
+                    <button id="comoFuncionaTreinar" type="button" class="flex-1 min-h-[48px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-100 font-semibold py-2 px-3 rounded-lg transition text-sm" data-i18n="treino.experimentar">Quero treinar antes</button>
+                    <button id="comoFuncionaOk" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.gotIt">Entendi</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="treinoFimModal" role="dialog" aria-modal="true" aria-labelledby="treinoFimTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800">
+                <div class="text-4xl mb-3" aria-hidden="true">🎓</div>
+                <h3 id="treinoFimTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="treino.fim.title">Treino concluído</h3>
+                <p class="text-sm text-slate-600 mb-6 leading-relaxed dark:text-slate-300" data-i18n="treino.fim.body">Nada disso foi enviado ao Waze. Agora vale de verdade — e o Desfazer te dá alguns segundos em cada ação.</p>
+                <button id="treinoFimOk" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="treino.fim.cta">Ir para a fila</button>
             </div>
         </div>
 
@@ -1100,6 +1114,7 @@
                     <p class="text-[0.6875rem] text-slate-500 mt-2 dark:text-slate-400" data-i18n="help.howToProcess.note">Use os botões do card, mouse/dedo, setas do teclado, ou arraste o card.</p>
                     <!-- Reabre o aviso de primeira vez. Quem fechou sem ler não fica
                          sem caminho de volta, e isso não custa espaço no card. -->
+                    <button id="abrirTreino" type="button" class="mt-3 min-h-[44px] w-full text-sm font-semibold text-amber-700 hover:text-amber-800 hover:underline dark:text-amber-300" data-i18n="treino.abrir">Praticar sem enviar nada (modo treino)</button>
                     <button id="reverComoFunciona" type="button" class="mt-3 min-h-[44px] w-full text-sm font-semibold text-cyan-700 hover:text-cyan-800 hover:underline dark:text-cyan-300" data-i18n="help.howToProcess.rever">Ver de novo &#8220;Como funciona&#8221;</button>
                 </div>
 
@@ -1222,6 +1237,15 @@
          z-[55] fica acima do card (z-50) e abaixo dos modais (z-[60]). -->
     <div id="bannerStack" class="fixed inset-x-0 z-[55] flex flex-col items-center gap-2 px-4 pointer-events-none" style="top: calc(var(--header-h, 4rem) + 0.5rem)">
         <div id="bannerContainer" class="w-full max-w-sm flex flex-col items-stretch gap-2 empty:hidden pointer-events-auto" role="status" aria-live="polite"></div>
+        <!-- Faixa do treino: banner (topo) e não snackbar (rodapé), porque é
+             M3 de manual — proeminente, com ação, e fica enquanto o estado
+             durar. No rodapé taparia os três botões do card, que é exatamente
+             o que a pessoa está aprendendo a usar. -->
+        <div id="treinoBanner" class="hidden w-full max-w-sm pointer-events-auto flex items-center gap-3 rounded-xl px-3 py-2.5 bg-amber-100 border border-amber-300 text-amber-900 shadow-lg dark:bg-amber-500/20 dark:border-amber-400/40 dark:text-amber-100" role="status">
+            <span class="text-lg leading-none flex-shrink-0" aria-hidden="true">🎓</span>
+            <p class="text-xs font-semibold leading-snug flex-1" data-i18n="treino.banner">Modo treino — nada é enviado ao Waze</p>
+            <button id="treinoSairBtn" type="button" class="flex-shrink-0 min-h-[44px] px-3 text-xs font-bold underline" data-i18n="treino.sair">Sair</button>
+        </div>
     </div>
 
     <div id="notifyStack" class="fixed inset-x-0 z-[70] flex flex-col items-center gap-2 px-4 pointer-events-none" style="bottom: calc(1rem + env(safe-area-inset-bottom))">

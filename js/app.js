@@ -396,7 +396,7 @@ function mostrarEntrandoPelaExtensao(ligado) {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal'];
 
 let lastFocusedBeforeModal = null;
 
@@ -585,6 +585,10 @@ function setupAppListeners() {
     $('closeHelp').addEventListener('click', () => closeModal('helpModal'));
     $('reverComoFunciona')?.addEventListener('click', abrirComoFunciona);
     $('comoFuncionaOk')?.addEventListener('click', () => closeModal('comoFuncionaModal'));
+    $('comoFuncionaTreinar')?.addEventListener('click', () => { closeModal('comoFuncionaModal'); Treino.entrar(); });
+    $('abrirTreino')?.addEventListener('click', () => { closeModal('helpModal'); Treino.entrar(); });
+    $('treinoSairBtn')?.addEventListener('click', () => Treino.sair());
+    $('treinoFimOk')?.addEventListener('click', () => { closeModal('treinoFimModal'); Treino.sair(); });
 
     // "Instalei… e agora?" — o beco sem saída medido: a app pergunta à extensão
     // UMA vez, no carregamento, com 350ms de janela, e o `ponte.js` não é
@@ -4029,9 +4033,31 @@ function renderHistory() {
     ).join('');
 }
 
+// Na PRIMEIRA vez que cada ação é confirmada pelo Waze, diz o que ela fez lá —
+// não o que ela quis dizer aqui. A app explicava a INTENÇÃO ("o pedido não deve
+// entrar no mapa") e nunca a CONSEQUÊNCIA, e as duas divergem no caso que mais
+// importa: marcar como lido NÃO aprova nada, mas o ✓ verde diz o contrário pra
+// quem chegou agora.
+//
+// Dispara na CONFIRMAÇÃO, não no gesto: durante a janela de Desfazer nada foi
+// enviado ainda, e "rejeição enviada" ali seria mentira — além de disputar a
+// tela com o banner do Desfazer.
+function avisarConsequencia(actionType) {
+    if (!CONSEQUENCIA_AVISADA[actionType]) return;
+    const vistas = AppState.preferences.consequenciaVista || {};
+    if (vistas[actionType]) return;
+    vistas[actionType] = true;
+    AppState.preferences.consequenciaVista = vistas;
+    savePreferences();
+    showToast(t('consequencia.' + actionType), 'hint', 7000);
+}
+// Só as que ESCREVEM no Waze. Pular é local — o pedido volta na próxima busca,
+// e isso o treino e o "Como funciona" já dizem.
+const CONSEQUENCIA_AVISADA = { reject: true, read: true };
+
 function handleActionResult(actionType, place, result) {
     if (!result) return;
-    if (result.success) { recordHistory(actionType, 1); return; }
+    if (result.success) { recordHistory(actionType, 1); avisarConsequencia(actionType); return; }
 
     const cat = result.errorCategory || 'unknown';
 
@@ -4055,9 +4081,148 @@ function handleActionResult(actionType, place, result) {
     showToast(msgDoServidor(result, t('toast.actionError', { verb })), 'error');
 }
 
+
+// ── Modo treino: errar sem consequência ───────────────────────────────────
+// Duas das três ações ESCREVEM no Waze em nome da pessoa, e a rejeição não tem
+// volta depois dos 3s. Numa app assim, poder errar de mentira vale mais que
+// qualquer texto explicativo — e é a única forma de "pegar na mão" que não cobra
+// nada de quem já sabe, porque só entra quem pede.
+//
+// O owner apontou o que decide o desenho: "os testadores atuais não enxergam
+// problemas de UX/UI pois já estão acostumados, só os novos que ficam
+// perguntando". Ajuda que interrompe todo mundo pra atender o novato cobra o
+// preço da fila inteira — daí sob demanda, e não automático.
+//
+// A TRAVA É ESTRUTURAL, não uma promessa: o guard está no TOPO de
+// handleReject/handleMarkAsRead/handleSkip, antes de mexer em stat, em fila ou
+// em `scheduleAction`. Não existe caminho em que um card de treino chegue ao
+// `API.rejectPlace`. O smoke mede isso pela REDE, não lendo o código.
+const Treino = {
+    ativo: false,
+    _salvo: null,
+    passo: 0,
+
+    // Exemplos sintéticos: sem foto de propósito (não dependem de rede, e
+    // "pedido sem foto" é caso real — 20% da fila medida). Os três cobrem os
+    // três desfechos que a pessoa vai encontrar de verdade.
+    cards() {
+        const base = {
+            updateRequestID: 'treino', reqSubType: '', isDelete: false,
+            createdBy: t('treino.autor'), creatorRank: 0, source: null,
+            flagType: null, flagSubjectType: null, flagEntityID: null, flagComment: '',
+            brand: null, brandKnown: null, camposSemMudanca: 0, imageUrls: [],
+            mapa: null, isStarred: false, lat: null, lon: null,
+            dateAdded: Date.now() - 3600000,
+        };
+        return [
+            { ...base, venueID: 'treino1', name: t('treino.c1.nome'),
+              categories: ['RESTAURANT'], address: t('treino.c1.endereco'),
+              updateType: 'Novo Local', updateTypeKey: 'VENUE', purType: 'NEW_PLACE',
+              reqType: 'VENUE', changes: [] },
+            { ...base, venueID: 'treino2', name: t('treino.c2.nome'),
+              categories: ['PHARMACY'], address: t('treino.c2.endereco'),
+              updateType: 'Atualização', updateTypeKey: 'UPDATE_DETAILS', purType: 'DETAILS_UPDATE',
+              reqType: 'REQUEST',
+              changes: [{ field: 'phone', label: 'phone', from: '(11) 3333-0000', to: '(11) 4444-1111' }] },
+            { ...base, venueID: 'treino3', name: t('treino.c3.nome'),
+              categories: ['GAS_STATION'], address: t('treino.c3.endereco'),
+              updateType: 'Novo Local', updateTypeKey: 'VENUE', purType: 'NEW_PLACE',
+              reqType: 'VENUE', changes: [] },
+        ];
+    },
+
+    entrar() {
+        if (this.ativo) return;
+        // Uma janela de Desfazer pendente é de um pedido REAL: despacha antes de
+        // trocar a fila debaixo dela, senão ela executaria sobre outro estado.
+        if (AppState.pendingAction) { AppState.pendingAction.execute(); AppState.pendingAction = null; }
+        removeUndoBanner();
+        this._salvo = {
+            queue: AppState.queue, currentPlace: AppState.currentPlace,
+            stats: AppState.stats, serverTotal: AppState.serverTotal,
+            hasMore: AppState.hasMore, fetching: AppState.fetching,
+        };
+        this.ativo = true;
+        this.passo = 0;
+        AppState.fetching = false;
+        AppState.hasMore = false;
+        AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+        AppState.serverTotal = 3;
+        AppState.queue = this.cards();
+        AppState.currentPlace = AppState.queue[0];
+        document.getElementById('treinoBanner')?.classList.remove('hidden');
+        document.getElementById('noMoreCards')?.classList.add('hidden');
+        showLoading(false);
+        updateStats();
+        updatePendingCount();
+        showCurrentPlace();
+    },
+
+    sair() {
+        if (!this.ativo) return;
+        this.ativo = false;
+        const s = this._salvo || {};
+        AppState.queue = s.queue || [];
+        AppState.currentPlace = s.currentPlace || null;
+        AppState.stats = s.stats || { read: 0, rejected: 0, skipped: 0 };
+        AppState.serverTotal = s.serverTotal || 0;
+        AppState.hasMore = !!s.hasMore;
+        AppState.fetching = !!s.fetching;
+        this._salvo = null;
+        document.getElementById('treinoBanner')?.classList.add('hidden');
+        removeCurrentCardEl();
+        updateStats();
+        updatePendingCount();
+        if (AppState.queue.length) { AppState.currentPlace = AppState.queue[0]; showCurrentPlace(); }
+        else if (AppState.hasMore) startFetching();
+        else showNoPlaces();
+    },
+
+    // Chamado do TOPO dos handlers reais. Explica o que TERIA acontecido e
+    // avança — sem stat, sem fila real, sem rede.
+    // Um aviso por vez, e o modal final só entra depois que o último foi lido.
+    // Sem isso os três se empilham e TAPAM o "Ir para a fila": medido, o botão
+    // ficava inalcançável no Galaxy Fold, no iPhone SE e no celular deitado —
+    // 3 de 4 aparelhos. É o gotcha #26 de novo (feedback transitório cobrindo o
+    // alvo que ainda precisa ser tocado), agora numa tela de aprender a usar.
+    limparAvisos() {
+        // , não : o segundo é o POSICIONADOR fixo, e
+        // limpá-lo apagaria o container. Errei nisso e o throw abortava a ação
+        // inteira — o card nem avançava.
+        const pilha = document.getElementById('toastContainer');
+        if (pilha) [...pilha.children].forEach((n) => n.remove());
+    },
+
+    agir(tipo) {
+        if (!this.ativo) return;
+        this.limparAvisos();
+        showToast(t('treino.efeito.' + tipo), tipo === 'reject' ? 'error' : 'info', 5000);
+        AppState.stats[tipo === 'reject' ? 'rejected' : tipo === 'read' ? 'read' : 'skipped']++;
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - (tipo === 'skip' ? 0 : 1));
+        updateStats();
+        AppState.queue.shift();
+        AppState.currentPlace = AppState.queue[0] || null;
+        this.passo++;
+        updatePendingCount();
+        removeCurrentCardEl();
+        if (AppState.currentPlace) { showCurrentPlace(); return; }
+        // Espera o último aviso ser LIDO antes de trocar de assunto. É cerimônia
+        // — mas aqui é o único lugar da app onde ela se paga: acontece uma vez,
+        // a pedido, e o que se está ensinando é a consequência da ação.
+        setTimeout(() => {
+            if (!this.ativo) return;
+            this.limparAvisos();
+            openModal('treinoFimModal');
+        }, 2200);
+    },
+};
+window.Treino = Treino;
+
 function handleMarkAsRead() {
     if (!AppState.currentPlace) return;
     if (acoesTravadas()) return;   // janela do Desfazer correndo
+    // Treino ANTES de tudo: nem stat, nem fila, nem rede.
+    if (Treino.ativo) return Treino.agir('read');
     const place = AppState.currentPlace;
     AppState.stats.read++;
     AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
@@ -4073,6 +4238,8 @@ function handleMarkAsRead() {
 function handleReject() {
     if (!AppState.currentPlace) return;
     if (acoesTravadas()) return;   // janela do Desfazer correndo
+    // Treino ANTES de tudo: nem stat, nem fila, nem rede.
+    if (Treino.ativo) return Treino.agir('reject');
     const place = AppState.currentPlace;
     AppState.stats.rejected++;
     AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
@@ -4088,6 +4255,8 @@ function handleReject() {
 function handleSkip() {
     if (!AppState.currentPlace) return;
     if (acoesTravadas()) return;   // janela do Desfazer correndo
+    // Treino ANTES de tudo: nem stat, nem fila, nem rede.
+    if (Treino.ativo) return Treino.agir('skip');
     const place = AppState.currentPlace;
     AppState.stats.skipped++;
     updateStats();
@@ -4486,6 +4655,9 @@ function loadPreferences() {
             }
             if (typeof parsed.comoFuncionaVisto === 'boolean') {
                 AppState.preferences.comoFuncionaVisto = parsed.comoFuncionaVisto;
+            }
+            if (parsed.consequenciaVista && typeof parsed.consequenciaVista === 'object') {
+                AppState.preferences.consequenciaVista = parsed.consequenciaVista;
             }
             if (typeof parsed.semUndoSeguidas === 'number' && parsed.semUndoSeguidas >= 0) {
                 AppState.preferences.semUndoSeguidas = parsed.semUndoSeguidas;

@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.13-02
+
+### Adicionado
+- **Modo treino: dá pra praticar sem enviar nada ao Waze.** Três pedidos de exemplo onde você rejeita, pula e marca como lido à vontade — e a cada ação a app diz o que *teria* acontecido de verdade. Nada sai daqui. Entra pela **Ajuda › "Praticar sem enviar nada"** ou pelo botão "Quero treinar antes" no aviso de primeira vez, e a sua fila real volta intacta ao sair.
+
+  Ele existe porque duas das três ações escrevem no Waze **em seu nome**, e a rejeição não tem volta depois dos segundos do Desfazer. Poder errar de mentira vale mais que qualquer texto explicativo.
+
+- **A app passou a dizer o que cada ação FAZ, não só o que ela quer dizer.** Na primeira vez que você rejeita e na primeira vez que marca como lido, aparece uma linha explicando o efeito real. A diferença importa mais no ✓: **marcar como lido não aprova nada** — o pedido continua existindo, só sai da sua fila. O ✓ verde sugere o contrário para quem chegou agora.
+
 ## v2026.08.13-01
 
 ### Adicionado
