@@ -234,6 +234,11 @@ const APARELHOS = [
 ];
 const LINGUAS = ['pt', 'en', 'es', 'fr'];
 
+// Maior que o UNDO_WINDOW_MS do app.js: antes de a janela vencer, nada foi
+// despachado, e medir ali faz "zero requisição" significar "ainda não", não
+// "nunca". Foi assim que a sabotagem passou verde na primeira tentativa.
+const UNDO_ESPERA_MS = 4000;
+
 let falhas = 0;
 // Espera o card ASSENTAR — animação terminada, não um relógio.
 //
@@ -1636,6 +1641,87 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+
+// ── Modo treino: a trava é medida pela REDE, não pela leitura do código ──
+// Duas das três ações escrevem no Waze em nome da pessoa, e a rejeição não tem
+// volta. O treino só vale se for IMPOSSÍVEL vazar — e "zero requisição" é o
+// sinal mais fraco que existe, então este bloco foi construído contra três
+// jeitos de ele mentir, todos descobertos na marra:
+//   1. sem esperar a janela do Desfazer, nada foi despachado AINDA;
+//   2. sem sessionToken, o `API.rejectPlace` sai antes do fetch;
+//   3. sem exercitar os TRÊS caminhos (botão, tecla, gesto), sobra porta.
+// Com o guard removido de propósito, ele acusa `POST validar-place`.
+for (const lg of LINGUAS) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
+    locale: lg === 'en' ? 'en-US' : lg, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const escritas = [];
+  page.on('request', (r) => {
+    if (/\/api\/(validar-place|marcar-lido|excluir-foto)/.test(r.url())) {
+      escritas.push(r.url().split('/api/')[1]);
+    }
+  });
+  await page.addInitScript((l) => localStorage.setItem('waze_places_lang', l), lg);
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    API.setSession('token-de-teste');   // sem isto o POST nem é tentado
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.stats = { read: 7, rejected: 2, skipped: 1 };
+    AppState.serverTotal = 99; AppState.hasMore = false;
+    AppState.queue = [{ venueID: 'real1', updateRequestID: 'r1', name: 'Local Real',
+      categories: ['OTHER'], address: 'Rua Real, 1', updateType: 'Novo Local',
+      updateTypeKey: 'VENUE', purType: 'NEW_PLACE', reqType: 'VENUE', createdBy: 'x',
+      changes: [], imageUrls: [], mapa: null, dateAdded: Date.now() }];
+    AppState.currentPlace = AppState.queue[0];
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    renderProfileHeader(); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showCurrentPlace();
+  });
+  await page.waitForTimeout(500);
+  await page.evaluate(() => Treino.entrar());
+  await page.waitForTimeout(600);
+  checa(await page.evaluate(() => !document.getElementById('treinoBanner').classList.contains('hidden')),
+    `treino ${lg}: a faixa "nada é enviado" não apareceu`);
+  checa(await page.evaluate(() => AppState.serverTotal === 3 && AppState.stats.read === 0),
+    `treino ${lg}: o placar do treino não é separado do real`);
+
+  await page.click('.card-btn-reject');       // botão
+  await page.waitForTimeout(500);
+  await page.keyboard.press('ArrowRight');    // tecla
+  await page.waitForTimeout(500);
+  await page.keyboard.press('ArrowUp');
+  await page.waitForTimeout(900);
+  await page.waitForTimeout(UNDO_ESPERA_MS);  // a janela do Desfazer TEM que vencer (e cobre o atraso do modal final)
+  checa(escritas.length === 0, `treino ${lg}: VAZOU escrita ao Waze`, escritas.join(', '));
+  checa(await page.evaluate(() => !document.getElementById('treinoFimModal').classList.contains('hidden')),
+    `treino ${lg}: o fim do treino não apareceu`);
+
+  // Gotcha #26 outra vez: os três avisos empilhados TAPAVAM o "Ir para a fila"
+  // no Fold, no SE e no celular deitado — 3 de 4 aparelhos. Diagnóstico por
+  // elementFromPoint nos cantos e no centro, não no olho.
+  checa(await page.evaluate(() => {
+    const btn = document.getElementById('treinoFimOk');
+    const r = btn.getBoundingClientRect();
+    return [[r.x + r.width / 2, r.y + r.height / 2], [r.x + 8, r.y + 4], [r.right - 8, r.bottom - 4]]
+      .every(([x, y]) => { const el = document.elementFromPoint(x, y); return el === btn || btn.contains(el); });
+  }), `treino ${lg}: o botão de sair do treino ficou coberto por aviso`);
+
+  await page.click('#treinoFimOk');
+  await page.waitForTimeout(700);
+  const dep = await page.evaluate(() => ({
+    banner: document.getElementById('treinoBanner').classList.contains('hidden'),
+    fila: AppState.queue.length, atual: (AppState.currentPlace || {}).venueID,
+    total: AppState.serverTotal, read: AppState.stats.read,
+  }));
+  checa(dep.banner && dep.fila === 1 && dep.atual === 'real1' && dep.total === 99 && dep.read === 7,
+    `treino ${lg}: a fila real não voltou intacta`, JSON.stringify(dep));
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -1654,4 +1740,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + sessão morta leva pra tela de entrar e oscilação de rede NÃO derruba`
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`
-  + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair da app, e o "Já instalei" que recarrega)`);
+  + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair da app, e o "Já instalei" que recarrega)`
+  + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida)`);
