@@ -8,6 +8,18 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.13-05
+
+### Alterado
+- **O modo treino agora usa os seus pedidos de verdade.** Antes eram três exemplos inventados, que ensinavam o gesto mas não o que é difícil: olhar uma foto borrada, um nome ruim, um endereço errado e **decidir**. Agora vem um exemplo controlado primeiro — pro primeiro toque não ter surpresa — e depois os seus próprios pedidos, com foto, mapa e mudanças propostas.
+
+  Nada continua sendo enviado, e agora dá pra **ver** isso: os pedidos que você tratou no treino continuam na fila quando você sai. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+### Corrigido
+- **As ações de foto não eram bloqueadas no modo treino.** Aprovar e excluir foto ficavam de fora da trava — o que não fazia diferença enquanto os exemplos não tinham foto, mas passaria a apagar foto do mapa de verdade agora que o treino usa pedidos reais. Bloqueadas, e os dois botões somem no treino. Marcar em lote também.
+
+---
+
 ## v2026.08.13-04
 
 ### Corrigido

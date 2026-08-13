@@ -1825,6 +1825,122 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
   }
 }
 
+
+// ── Treino com fila REAL: as escritas de FOTO também têm que estar mortas ──
+// O treino passou a usar os pedidos reais da pessoa (clonados, com o
+// `updateRequestID` inerte). Isso apagou uma proteção que existia por ACIDENTE:
+// os cards sintéticos não tinham foto, então o lightbox nem abria e a lixeira
+// era inalcançável. Com pedido real ela abre, e o `venueID` é REAL — sem guard,
+// a lixeira apaga uma foto DO MAPA enquanto a faixa promete que nada é enviado.
+//
+// Três armadilhas que já fizeram este teste mentir, todas cobertas aqui:
+//   1. sem esperar a janela do Desfazer, nada foi despachado AINDA;
+//   2. sem sessionToken, a API sai antes do fetch;
+//   3. sem `approvedImageIds` + foto que CARREGA, a lixeira nem existe — e o
+//      "zero escrita" dela não prova nada. Daí a CONTRAPROVA: fora do treino,
+//      no mesmo card, a lixeira precisa APARECER.
+{
+  const PIXEL = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
+  const reais = FIXTURES_PAISES.filter((p) => (p.imageUrls || []).length).slice(0, 3).map((p, i) => ({
+    ...p, lat: -23.55 + i * 0.01, lon: -46.63 + i * 0.01,
+    imageUrls: ['https://venue-image.waze.com/thumbs/thumb700_foto' + i],
+    approvedImageIds: ['foto' + i],
+  }));
+  for (const lg of LINGUAS) {
+    const ctx = await browser.newContext({ viewport: { width: 412, height: 915 },
+      locale: lg === 'en' ? 'en-US' : lg, serviceWorkers: 'block' });
+    await ctx.route('https://venue-image.waze.com/**', (r) => r.fulfill({ body: PIXEL, contentType: 'image/jpeg' }));
+    const page = await ctx.newPage();
+    const escritas = [];
+    page.on('request', (r) => {
+      if (/\/api\/(validar-place|marcar-lido|excluir-foto)/.test(r.url())) escritas.push(r.url().split('/api/')[1]);
+    });
+    await page.addInitScript((l) => {
+      localStorage.setItem('waze_places_lang', l);
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+    }, lg);
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(450);
+    const est = await page.evaluate((fila) => {
+      API.setSession('token-de-teste');   // sem isto o POST nem é tentado
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.stats = { read: 7, rejected: 2, skipped: 1 };
+      AppState.serverTotal = 99; AppState.hasMore = false;
+      AppState.queue = JSON.parse(JSON.stringify(fila));
+      AppState.currentPlace = AppState.queue[0];
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showCurrentPlace();
+      const idsAntes = AppState.queue.map((p) => p.updateRequestID);
+      Treino.entrar();
+      return { idsAntes, cards: AppState.queue.map((p) => ({ v: p.venueID, ur: p.updateRequestID })) };
+    }, reais);
+    const onde = `treino real ${lg}`;
+    checa(est.cards.length === 4, `${onde}: esperava 1 sintético + 3 reais, veio ${est.cards.length}`);
+    checa(est.cards[0].v === 'treino1', `${onde}: o primeiro card não é o sintético`);
+    checa(est.cards.slice(1).every((c) => c.ur === 'treino-inerte'),
+      `${onde}: pedido real entrou no treino com o updateRequestID VIVO`);
+    checa(est.cards.slice(1).every((c) => c.v && c.v !== 'treino-inerte'),
+      `${onde}: o venueID foi neutralizado — o ↗ do card deixa de abrir o lugar certo`);
+
+    // avança pro primeiro card REAL (o sintético não tem foto)
+    await page.evaluate(() => {
+      AppState.queue.shift(); AppState.currentPlace = AppState.queue[0];
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+    });
+    await page.waitForTimeout(800);
+    const lb = await page.evaluate(() => {
+      const img = document.querySelector('.card-image');
+      if (!img) return { semFoto: true };
+      img.click();
+      const vis = (i) => { const e = document.getElementById(i); return !!e && !e.classList.contains('hidden'); };
+      return { aberto: Lightbox.isOpen(), del: vis('lightboxDelete'), apr: vis('lightboxApprove') };
+    });
+    checa(lb.semFoto !== true && lb.aberto, `${onde}: o lightbox não abriu — o resto do bloco não provaria nada`);
+    checa(!lb.del && !lb.apr, `${onde}: lixeira/aprovar visíveis no treino`);
+    const contra = await page.evaluate(() => {
+      Lightbox.close();
+      const era = Treino.ativo; Treino.ativo = false;
+      document.querySelector('.card-image').click();
+      const v = !document.getElementById('lightboxDelete').classList.contains('hidden');
+      const id = Lightbox.idFotoAtual();
+      Lightbox.close(); Treino.ativo = era;
+      document.querySelector('.card-image').click();
+      return { visivel: v, id };
+    });
+    checa(contra.visivel && !!contra.id,
+      `${onde}: CONTRAPROVA falhou — a lixeira não aparece nem FORA do treino, então "sumiu" não prova bloqueio`);
+
+    // força os caminhos de escrita mesmo assim
+    await page.evaluate(() => {
+      try { pedirExclusaoDaFoto(); } catch (e) { /* o guard é quem barra */ }
+      try { aprovarFotoAtual(); } catch (e) { /* idem */ }
+      try { Lightbox.close(); } catch (e) { /* idem */ }
+      try { openBatchReadConfirm(); } catch (e) { /* idem */ }
+    });
+    await page.waitForTimeout(300);
+    checa(await page.evaluate(() => document.getElementById('batchReadModal').classList.contains('hidden')),
+      `${onde}: o lote abriu no treino`);
+    await page.click('.card-btn-reject');    await page.waitForTimeout(500);
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(500);
+    await page.keyboard.press('ArrowUp');    await page.waitForTimeout(900);
+    await page.waitForTimeout(UNDO_ESPERA_MS);
+    checa(escritas.length === 0, `${onde}: VAZOU escrita ao Waze`, escritas.join(', '));
+
+    await page.evaluate(() => { try { closeModal('treinoFimModal'); } catch (e) { /* pode não estar aberto */ } Treino.sair(); });
+    await page.waitForTimeout(500);
+    const dep = await page.evaluate(() => ({ ids: AppState.queue.map((p) => p.updateRequestID),
+      total: AppState.serverTotal, read: AppState.stats.read }));
+    checa(JSON.stringify(dep.ids) === JSON.stringify(est.idsAntes) && dep.total === 99 && dep.read === 7,
+      `${onde}: a fila real não voltou com os ids ORIGINAIS`, JSON.stringify(dep));
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -1845,4 +1961,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair da app, e o "Já instalei" que recarrega)`
   + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida)`
-  + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`);
+  + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
+  + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`);
