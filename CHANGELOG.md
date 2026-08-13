@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.13-04
+
+### Corrigido
+- **No Galaxy Fold, a faixa do modo treino empurrava os botões do card para fora da tela.** Ela ficou mais baixa em aparelhos de tela curta, e os três botões voltaram a caber.
+
+  Fica registrado o que **não** foi resolvido: no celular deitado e no iPhone SE de 2016, os dois botões maiores passam da borda por 2 a 4 pixels — e isso **já acontecia antes do modo treino existir**, também na fila normal. É pré-existente e continua na lista.
+
+---
+
 ## v2026.08.13-03
 
 ### Corrigido

@@ -1063,8 +1063,14 @@ test('o placar não "compacta" com regra que não compacta nada', () => {
   assert.doesNotMatch(estreito[0], /font-size:\s*1\.25rem/,
     'voltou o "corte" de font-size que é idêntico ao text-xl do HTML');
   // A compactação de verdade é por ALTURA — é ela que decide se o card rola.
-  const baixo = CSS_SEM_COMENTARIO.match(/@media \(max-height: 700px\) \{[\s\S]*?\n\}/);
-  assert.ok(baixo && /#placar\s*\{[^}]*padding:/.test(baixo[0]),
+  // TODOS os degraus de altura, não o primeiro: assim que um segundo bloco
+  // `max-height: 700px` entrou no arquivo (a faixa do treino), o `match` simples
+  // passou a auditar o bloco ERRADO e reprovou uma regra intacta. Guard preso à
+  // posição no arquivo mede outra coisa a cada edição.
+  const baixos = [...CSS_SEM_COMENTARIO.matchAll(/@media \(max-height: 700px\) \{[\s\S]*?\n\}/g)].map((m) => m[0]);
+  assert.ok(baixos.length, 'sumiu o degrau de tela baixa');
+  const baixo = [baixos.join('\n')];
+  assert.ok(/#placar\s*\{[^}]*padding:/.test(baixo[0]),
     'o placar deixou de compactar em tela baixa');
   // O rótulo tem piso: 11px é o mínimo legível (M3) e ele já está nele.
   assert.doesNotMatch(baixo[0], /#placarGrid[^}]*font-size:\s*0\.6[0-4]/,

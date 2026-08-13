@@ -928,6 +928,7 @@ button:active {
    Prefixo `.place-card` porque regra de UMA classe PERDE pra utility (gotcha
    #27): `.card-content{padding}` empata com `p-5` e o tailwind.css carrega
    depois. Todos os seletores daqui passam de (0,1,0). */
+
 @media (max-height: 700px) {
   /* Cada pixel acima do card é pixel a menos de foto — e em tela baixa isso
      decide se o CONTEÚDO do card passa a rolar, o que desliga o arraste pra
@@ -1000,6 +1001,26 @@ button:active {
     margin-top: 1rem;
     padding-top: 0.75rem;
   }
+}
+
+/* A faixa do treino encolhe em tela baixa. Ela passou a ocupar espaço no fluxo
+   (antes flutuava e cobria o placar), e nos dois aparelhos mais apertados isso
+   consumia os últimos pixels: medido em produção, no Galaxy Fold os botões do
+   card iam de 651 pra 653px numa dobra de 653. Aqui a faixa devolve ~10px, que
+   é mais do que ela tirou.
+
+   O degrau é o mesmo `max-height: 700px` que o resto da tela já usa — tela
+   baixa é o critério, não largura: celular deitado tem 393px de altura e 852 de
+   largura. */
+@media (max-height: 700px) {
+  #treinoBanner {
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+    border-radius: 0.75rem;
+  }
+  #treinoBanner p { font-size: 0.6875rem; }
+  #treinoBanner span { font-size: 1rem; }
+  #treinoBanner button { min-height: 44px; padding-left: 0.5rem; padding-right: 0.5rem; }
 }
 
 /* Tela baixa E estreita (Fold 280×653, SE 1ª geração 320×568): estreito faz
