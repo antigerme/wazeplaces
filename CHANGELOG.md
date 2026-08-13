@@ -8,6 +8,27 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.13-05
+
+### Alterado
+- **O modo treino agora usa os seus pedidos de verdade.** Antes eram três exemplos inventados, que ensinavam o gesto mas não o que é difícil: olhar uma foto borrada, um nome ruim, um endereço errado e **decidir**. Agora vem um exemplo controlado primeiro — pro primeiro toque não ter surpresa — e depois os seus próprios pedidos, com foto, mapa e mudanças propostas.
+
+  Nada continua sendo enviado, e agora dá pra **ver** isso: os pedidos que você tratou no treino continuam na fila quando você sai. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+### Corrigido
+- **As ações de foto não eram bloqueadas no modo treino.** Aprovar e excluir foto ficavam de fora da trava — o que não fazia diferença enquanto os exemplos não tinham foto, mas passaria a apagar foto do mapa de verdade agora que o treino usa pedidos reais. Bloqueadas, e os dois botões somem no treino. Marcar em lote também.
+
+---
+
+## v2026.08.13-04
+
+### Corrigido
+- **No Galaxy Fold, a faixa do modo treino empurrava os botões do card para fora da tela.** Ela ficou mais baixa em aparelhos de tela curta, e os três botões voltaram a caber.
+
+  Fica registrado o que **não** foi resolvido: no celular deitado e no iPhone SE de 2016, os dois botões maiores passam da borda por 2 a 4 pixels — e isso **já acontecia antes do modo treino existir**, também na fila normal. É pré-existente e continua na lista.
+
+---
+
 ## v2026.08.13-03
 
 ### Corrigido

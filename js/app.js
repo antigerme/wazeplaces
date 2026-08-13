@@ -1127,13 +1127,18 @@ const Lightbox = {
         badge.setAttribute('data-i18n-title', this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
         badge.title = t(this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
         badge.classList.toggle('hidden', this.idx !== this.newIdx);
+        // No treino as duas ações de foto NÃO existem: elas escrevem no mapa e
+        // não têm ensaio possível. Some em vez de desabilitar — botão morto com
+        // cara de vivo lê como app quebrada, e "desabilitado" convida à pergunta
+        // "por que não posso?", que num treino não tem resposta boa.
+        const noTreino = Treino.ativo;
         const del = document.getElementById('lightboxDelete');
-        if (del) del.classList.toggle('hidden', !this.idFotoAtual());
+        if (del) del.classList.toggle('hidden', noTreino || !this.idFotoAtual());
         // Mutuamente exclusivos: pendente se APROVA, aprovada se EXCLUI. Sem
         // isso os dois botões brigariam pelo mesmo canto, e o editor teria que
         // adivinhar qual vale pra foto que está vendo.
         const apr = document.getElementById('lightboxApprove');
-        if (apr) apr.classList.toggle('hidden', !this.podeAprovarAtual());
+        if (apr) apr.classList.toggle('hidden', noTreino || !this.podeAprovarAtual());
     },
     // A foto aberta é a PENDENTE deste pedido e este editor pode aprovar?
     //
@@ -1496,6 +1501,12 @@ function devolverFoto(alvo) {
 }
 
 function pedirExclusaoDaFoto() {
+    // Treino não escreve. Antes isto era garantido pelo DADO — os cards de
+    // treino não tinham foto, então o lightbox nem abria. Com pedido real na
+    // fila de treino essa proteção acidental some, e o `venueID` é REAL: sem
+    // este guard, a lixeira apagaria uma foto do mapa enquanto a faixa promete
+    // que nada é enviado. Proteção não pode depender de a fixture ser pobre.
+    if (Treino.ativo) return;
     const id = Lightbox.idFotoAtual();
     if (!id) return;
     const place = Lightbox.place;
@@ -1629,6 +1640,12 @@ function avancarSeAprovado() {
 }
 
 function aprovarFotoAtual() {
+    // Treino não escreve. Antes isto era garantido pelo DADO — os cards de
+    // treino não tinham foto, então o lightbox nem abria. Com pedido real na
+    // fila de treino essa proteção acidental some, e o `venueID` é REAL: sem
+    // este guard, a lixeira apagaria uma foto do mapa enquanto a faixa promete
+    // que nada é enviado. Proteção não pode depender de a fixture ser pobre.
+    if (Treino.ativo) return;
     if (!Lightbox.podeAprovarAtual()) return;
     const place = Lightbox.place;
     const alvo = { id: place.updateRequestID, place, idx: Lightbox.idx };
@@ -4102,10 +4119,46 @@ const Treino = {
     _salvo: null,
     passo: 0,
 
+    // O `updateRequestID` que substitui o real. As duas escritas do card
+    // (`validar-place` e `marcar-lido`) precisam de venueID E updateRequestID,
+    // então um pedido de treino não endereça pedido nenhum: se algum dia
+    // vazasse, o Waze responderia 702 "not found on venue" — que a app já trata
+    // como "já tratado por outro editor". É a segunda camada; a primeira é o
+    // guard no topo dos handlers.
+    //
+    // O `venueID` fica REAL de propósito: é ele que o ↗ usa pra abrir o lugar
+    // certo no WME, e um treino que leva a um editor vazio ensinaria errado.
+    // Quem protege as escritas que usam só o venueID (foto) é o guard delas.
+    UR_INERTE: 'treino-inerte',
+
+    // Clona fundo: o objeto real continua intocado na fila salva, e nada do que
+    // acontecer no treino pode alcançá-lo por referência.
+    neutralizar(p) {
+        const c = JSON.parse(JSON.stringify(p));
+        c.updateRequestID = this.UR_INERTE;
+        c._treino = true;
+        return c;
+    },
+
+    // Sintético PRIMEIRO, reais depois (decisão do owner): o primeiro gesto é
+    // sobre algo previsível, logo depois do "Como funciona"; o julgamento — foto
+    // borrada, nome ruim, endereço errado — vem nos pedidos de verdade, que é o
+    // que o treino de exemplo sozinho não ensinava.
+    //
+    // Fila vazia ou curta: completa com os sintéticos. Ninguém fica sem treino
+    // por estar com a fila limpa.
+    cards() {
+        const reais = (this._salvo && this._salvo.queue ? this._salvo.queue : [])
+            .slice(0, 3).map((p) => this.neutralizar(p));
+        const sinteticos = this.sinteticos();
+        if (!reais.length) return sinteticos;
+        return [sinteticos[0], ...reais];
+    },
+
     // Exemplos sintéticos: sem foto de propósito (não dependem de rede, e
     // "pedido sem foto" é caso real — 20% da fila medida). Os três cobrem os
     // três desfechos que a pessoa vai encontrar de verdade.
-    cards() {
+    sinteticos() {
         const base = {
             updateRequestID: 'treino', reqSubType: '', isDelete: false,
             createdBy: t('treino.autor'), creatorRank: 0, source: null,
@@ -4275,6 +4328,10 @@ function handleSkip() {
 // Marca como lido TODOS os places atualmente na fila local. Como o Waze devolve
 // tudo de uma vez (hasMore geralmente false), a fila local ≈ tudo que resta.
 function openBatchReadConfirm() {
+    // Marcar o LOTE também escreve. No treino a fila é de exemplos: deixar o
+    // botão vivo mandaria um lote de ids inertes ao Waze — sem efeito, mas é
+    // requisição que ninguém pediu, e o aviso mente sobre o que aconteceu.
+    if (Treino.ativo) { showToast(t('treino.semLote'), 'info'); return; }
     const n = AppState.queue.length;
     if (n === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
     const msgEl = document.getElementById('batchReadMessage');
