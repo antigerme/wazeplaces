@@ -371,6 +371,12 @@
             <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800">
                 <div class="text-4xl mb-3" aria-hidden="true">🎓</div>
                 <h3 id="treinoFimTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="treino.fim.title">Treino concluído</h3>
+                <!-- O efeito da ÚLTIMA ação entra aqui, no modal, em vez de sair num
+                     aviso flutuante. Antes ele era um toast e o modal só abria 2,2s
+                     depois pra dar tempo de ler — e nesses 2,2s a área do card ficava
+                     VAZIA, porque a animação do swipe já tinha tirado o card da tela.
+                     Tela em branco lê como app quebrada. -->
+                <p id="treinoFimEfeito" class="hidden text-sm text-slate-700 bg-slate-100 border border-slate-200 rounded-xl p-3 mb-4 leading-relaxed text-left dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200"></p>
                 <p class="text-sm text-slate-600 mb-6 leading-relaxed dark:text-slate-300" data-i18n="treino.fim.body">Nada disso foi enviado ao Waze. Agora vale de verdade — e o Desfazer te dá alguns segundos em cada ação.</p>
                 <button id="treinoFimOk" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="treino.fim.cta">Ir para a fila</button>
             </div>
@@ -677,6 +683,26 @@
 
             <h2 class="sr-only" data-i18n="app.queueHeading">Fila de pedidos de places</h2>
             <div id="cardLiveRegion" class="sr-only" role="status" aria-live="polite"></div>
+
+            <!-- Estado PERMANENTE fica no fluxo, não no #bannerStack. O stack é
+                 `fixed` e existe pra aviso TRANSITÓRIO (Desfazer, conquista) — o que
+                 passa por lá flutua por cima do conteúdo. Uma faixa que dura a
+                 sessão inteira ali tapa o que está embaixo pra sempre: medido, ela
+                 cobria o placar em 8 de 8 combinações de aparelho × tema, com 66px
+                 de sobreposição, e o owner viu no celular dele os dois textos
+                 escritos um em cima do outro.
+                 O que continua valendo é a régua do M3 que motivou o topo: banner
+                 (proeminente, com ação, dura enquanto o estado durar), nunca
+                 snackbar de rodapé — lá ele taparia os três botões do card. -->
+        <!-- Faixa do treino: banner (topo) e não snackbar (rodapé), porque é
+             M3 de manual — proeminente, com ação, e fica enquanto o estado
+             durar. No rodapé taparia os três botões do card, que é exatamente
+             o que a pessoa está aprendendo a usar. -->
+            <div id="treinoBanner" class="hidden w-full items-center gap-3 rounded-2xl px-3 py-2.5 bg-amber-100 border border-amber-300 text-amber-900 shadow-sm dark:bg-amber-500/20 dark:border-amber-400/40 dark:text-amber-100" role="status">
+                <span class="text-lg leading-none flex-shrink-0" aria-hidden="true">🎓</span>
+                <p class="text-xs font-semibold leading-snug flex-1" data-i18n="treino.banner">Modo treino — nada é enviado ao Waze</p>
+                <button id="treinoSairBtn" type="button" class="flex-shrink-0 min-h-[44px] px-3 text-xs font-bold underline" data-i18n="treino.sair">Sair</button>
+            </div>
 
             <div id="placar" class="bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-2 dark:bg-slate-800/80 dark:border-slate-700">
                 <!-- 4 colunas só cabem quando o rótulo mais largo cabe. O mais largo não
@@ -1237,15 +1263,6 @@
          z-[55] fica acima do card (z-50) e abaixo dos modais (z-[60]). -->
     <div id="bannerStack" class="fixed inset-x-0 z-[55] flex flex-col items-center gap-2 px-4 pointer-events-none" style="top: calc(var(--header-h, 4rem) + 0.5rem)">
         <div id="bannerContainer" class="w-full max-w-sm flex flex-col items-stretch gap-2 empty:hidden pointer-events-auto" role="status" aria-live="polite"></div>
-        <!-- Faixa do treino: banner (topo) e não snackbar (rodapé), porque é
-             M3 de manual — proeminente, com ação, e fica enquanto o estado
-             durar. No rodapé taparia os três botões do card, que é exatamente
-             o que a pessoa está aprendendo a usar. -->
-        <div id="treinoBanner" class="hidden w-full max-w-sm pointer-events-auto flex items-center gap-3 rounded-xl px-3 py-2.5 bg-amber-100 border border-amber-300 text-amber-900 shadow-lg dark:bg-amber-500/20 dark:border-amber-400/40 dark:text-amber-100" role="status">
-            <span class="text-lg leading-none flex-shrink-0" aria-hidden="true">🎓</span>
-            <p class="text-xs font-semibold leading-snug flex-1" data-i18n="treino.banner">Modo treino — nada é enviado ao Waze</p>
-            <button id="treinoSairBtn" type="button" class="flex-shrink-0 min-h-[44px] px-3 text-xs font-bold underline" data-i18n="treino.sair">Sair</button>
-        </div>
     </div>
 
     <div id="notifyStack" class="fixed inset-x-0 z-[70] flex flex-col items-center gap-2 px-4 pointer-events-none" style="bottom: calc(1rem + env(safe-area-inset-bottom))">
