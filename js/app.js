@@ -396,7 +396,7 @@ function mostrarEntrandoPelaExtensao(ligado) {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal'];
 
 let lastFocusedBeforeModal = null;
 
@@ -583,6 +583,36 @@ function setupAppListeners() {
     });
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
     $('closeHelp').addEventListener('click', () => closeModal('helpModal'));
+    $('reverComoFunciona')?.addEventListener('click', abrirComoFunciona);
+    $('comoFuncionaOk')?.addEventListener('click', () => closeModal('comoFuncionaModal'));
+
+    // "Instalei… e agora?" — o beco sem saída medido: a app pergunta à extensão
+    // UMA vez, no carregamento, com 350ms de janela, e o `ponte.js` não é
+    // injetado numa aba que já estava aberta. Quem instala olhando pra esta tela
+    // fica aqui pra sempre. Aparece só DEPOIS do clique em instalar, pra não ser
+    // ruído pra quem nem foi à loja.
+    $('extInstallLink')?.addEventListener('click', () => {
+        const b = $('extJaInstalei');
+        if (!b) return;
+        b.hidden = false;
+        b.classList.replace('hidden', 'flex');
+    });
+    $('extJaInstalei')?.addEventListener('click', () => window.location.reload());
+
+    // E ao voltar pra esta aba, pergunta de novo — em silêncio. Hoje isso cobre
+    // quem recarregou noutro lugar ou reabriu o WME; quando a extensão passar a
+    // se injetar nas abas abertas (onInstalled + scripting, versão futura dela),
+    // este mesmo caminho resolve a instalação sem toque nenhum e o botão acima
+    // deixa de ser necessário. Só onde extensão existe: no celular seria uma
+    // espera de 350ms por nada, repetida a cada troca de aba.
+    if (podeInstalarExtensao()) {
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            if (AppState.authenticated || API.getSession()) return;
+            if (document.getElementById('authScreen')?.classList.contains('hidden')) return;
+            entrarPelaExtensao({ silencioso: true });
+        });
+    }
     $('themeBtn').addEventListener('click', toggleTheme);
     $('filtersBtn').addEventListener('click', openFiltersModal);
 
@@ -2435,6 +2465,40 @@ function removeCurrentCardEl() {
     if (existingCard) existingCard.remove();
 }
 
+// ── "Como funciona": uma vez, no primeiro card ────────────────────────────
+// Os três botões do card só têm `aria-label` e `title` — e `title` NÃO existe no
+// toque. No celular, quem nunca usou vê três círculos coloridos e adivinha. Não
+// havia nada explicando em lugar nenhum da app.
+//
+// A alternativa era rótulo fixo sob cada botão, e ela foi medida e recusada:
+// custa 20px de FOTO em todo card, pra sempre (329 → 309px no iPhone; 181 → 160
+// no Fold), pra ensinar o que se aprende uma vez. Este aviso custa zero pixel
+// permanente.
+//
+// Mora no `preferences` (que já é persistido e já é apagado no logout) de
+// propósito: chave nova no localStorage exigiria decisão de logout própria e
+// entraria na varredura do test/layout — e não há nada aqui que justifique uma.
+function mostrarComoFuncionaSePrimeiraVez() {
+    if (AppState.preferences.comoFuncionaVisto) return;
+    // Só quando existe card na tela: o aviso fala dos botões DELE, e aparecer
+    // sobre "Tudo limpo!" ou sobre o esqueleto de carregamento explicaria algo
+    // que a pessoa não está vendo.
+    if (!AppState.currentPlace || !document.querySelector('.place-card')) return;
+    AppState.preferences.comoFuncionaVisto = true;
+    savePreferences();
+    abrirComoFunciona();
+}
+
+// Direto no `openModal`, mesmo vindo da Ajuda: ele JÁ esconde o modal anterior
+// sem passar pelo `closeModal`, e só empilha histórico quando não havia nenhum
+// aberto. Minha primeira versão fechava a Ajuda antes "para não empilhar" — e
+// era exatamente isso que quebrava: `closeModal` CONSOME a entrada do histórico
+// e o `openModal` seguinte, vendo nenhum modal aberto, empilhava outra. Medido,
+// o Esc depois disso levava a `about:blank` — a pessoa saía da app inteira.
+function abrirComoFunciona() {
+    openModal('comoFuncionaModal');
+}
+
 function showCurrentPlace() {
     try {
         renderCurrentCard();
@@ -2456,7 +2520,12 @@ function showCurrentPlace() {
         } else {
             showNoPlaces();
         }
+        return;
     }
+    // FORA do try de propósito: uma falha aqui não pode fazer o card ser tratado
+    // como quebrado e o pedido ser DESCARTADO (o catch acima faz `queue.shift()`
+    // e decrementa o total). O aviso é acessório; o pedido é o produto.
+    try { mostrarComoFuncionaSePrimeiraVez(); } catch (e) { console.error(e); }
 }
 
 function renderCurrentCard() {
@@ -4414,6 +4483,9 @@ function loadPreferences() {
             }
             if (typeof parsed.dicaDesfazerVista === 'boolean') {
                 AppState.preferences.dicaDesfazerVista = parsed.dicaDesfazerVista;
+            }
+            if (typeof parsed.comoFuncionaVisto === 'boolean') {
+                AppState.preferences.comoFuncionaVisto = parsed.comoFuncionaVisto;
             }
             if (typeof parsed.semUndoSeguidas === 'number' && parsed.semUndoSeguidas >= 0) {
                 AppState.preferences.semUndoSeguidas = parsed.semUndoSeguidas;
