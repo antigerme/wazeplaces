@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.13-01
+
+### Adicionado
+- **Um aviso "Como funciona" no primeiro card.** Os três botões (✕ ↑ ✓) só tinham nome para leitor de tela e para quem passa o mouse — e passar o mouse não existe no celular. Quem nunca usou via três círculos coloridos e adivinhava. Agora, no primeiro pedido da primeira vez, aparece uma explicação curta do que cada um faz. Uma vez só; depois disso, ela fica na **Ajuda › "Ver de novo Como funciona"**.
+
+  A alternativa era escrever o nome embaixo de cada botão — e ela foi medida e recusada: custaria 20px de **foto** em todo card, para sempre, para ensinar algo que se aprende uma vez.
+
+- **"Já instalei — entrar", na opção de login automático.** Quem instalava a extensão com a página aberta ficava esperando para sempre: a app pergunta à extensão uma única vez, no carregamento, e a extensão não entra numa aba que já estava aberta. O botão aparece depois que você clica em instalar e recarrega a página, que é o que faz a ligação funcionar. A app também volta a perguntar sozinha quando você retorna para a aba.
+
 ## v2026.08.12-02
 
 ### Adicionado

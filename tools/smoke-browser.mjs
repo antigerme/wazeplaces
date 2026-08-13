@@ -279,6 +279,31 @@ const { chromium } = await carregarPlaywright();
 await esperarServidor();
 const browser = await abrirBrowser(chromium);
 
+// O aviso "Como funciona" abre sozinho no PRIMEIRO card — que é exatamente o
+// que todo bloco daqui renderiza. Sem suprimir, ele cobre o card com um scrim e
+// os cliques dos outros testes batem nele (foi o que aconteceu: timeout no bloco
+// do mapa ampliado). Suprimir aqui é o certo, não maquiagem: o assunto DELES é
+// outro, e quem mede o aviso é o bloco próprio, que desliga esta supressão.
+//
+// Mora no `newContext` e não em cada chamada porque são ~20 contextos espalhados
+// pelo arquivo: um esquecido daria falha intermitente e difícil de ligar à causa.
+const _newContext = browser.newContext.bind(browser);
+browser.newContext = async (opts = {}) => {
+  const { primeiraVez = false, ...resto } = opts;
+  const ctx = await _newContext(resto);
+  if (!primeiraVez) {
+    await ctx.addInitScript(() => {
+      try {
+        const k = 'waze_places_preferences';
+        const p = JSON.parse(localStorage.getItem(k) || '{}');
+        p.comoFuncionaVisto = true;
+        localStorage.setItem(k, JSON.stringify(p));
+      } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+    });
+  }
+  return ctx;
+};
+
 for (const [aparelho, viewport] of APARELHOS) {
   // Dois temas: o esmaecido mistura com o fundo, então o contraste é OUTRO em
   // cada um (medido: 5.74:1 no claro contra 8.15:1 no escuro).
@@ -1514,6 +1539,103 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+
+// ── Primeira execução: o aviso "Como funciona" e o "Já instalei" ─────────
+// Os três botões do card só têm `aria-label` e `title`, e `title` NÃO existe no
+// toque: quem nunca usou vê três círculos e adivinha. O aviso resolve isso uma
+// vez só — e "uma vez só" é justamente o que quebra em silêncio quando alguém
+// mexe no marcador. O outro é o beco sem saída de quem instala a extensão com a
+// tela de entrada aberta: a app pergunta à extensão UMA vez, no carregamento.
+{
+  const cru = FIXTURES_PAISES.find((p) => (p.imageUrls || []).length && p.name) || FIXTURES_PAISES[0];
+  // `primeiraVez` desliga a supressão do aviso — este bloco é justamente quem
+  // o mede, então aqui ele PRECISA abrir.
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block', primeiraVez: true });
+  const page = await ctx.newPage();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(400);
+  const montar = (pl) => page.evaluate((p) => {
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.serverTotal = 5; AppState.hasMore = false;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    renderProfileHeader(); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    AppState.queue = [p, { ...p, venueID: 'v2', updateRequestID: 'u2' }];
+    AppState.currentPlace = p;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+  }, pl);
+  const abertoComoFunciona = () => page.evaluate(
+    () => !document.getElementById('comoFuncionaModal').classList.contains('hidden'));
+
+  await montar(cru);
+  await page.waitForTimeout(600);
+  checa(await abertoComoFunciona(), 'como funciona: não apareceu no primeiro card');
+  // O scrim precisa COBRIR o card: senão dá pra arrastar por baixo do aviso e
+  // tratar um pedido sem ler o que os botões fazem.
+  checa(await page.evaluate(() => {
+    const r = document.querySelector('.place-card').getBoundingClientRect();
+    const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return !!(el && el.closest('#comoFuncionaModal'));
+  }), 'como funciona: o card ficou alcançável por baixo do aviso');
+
+  await page.click('#comoFuncionaOk');
+  await page.waitForTimeout(300);
+  checa(!(await abertoComoFunciona()), 'como funciona: o "Entendi" não fechou');
+  await page.evaluate(() => { AppState.queue.shift(); AppState.currentPlace = null; showCurrentPlace(); });
+  await page.waitForTimeout(600);
+  checa(!(await abertoComoFunciona()), 'como funciona: VOLTOU no card seguinte (o marcador não pegou)');
+
+  // Reabrir pela Ajuda não pode deixar o histórico torto. A primeira versão
+  // fechava a Ajuda antes de abrir e o Esc seguinte levava a `about:blank` —
+  // a pessoa saía da app inteira. Por isso o teste mede a URL, não o modal.
+  await page.evaluate(() => openModal('helpModal'));
+  await page.waitForTimeout(250);
+  await page.click('#reverComoFunciona');
+  await page.waitForTimeout(400);
+  checa(await abertoComoFunciona(), 'como funciona: a Ajuda não reabriu o aviso');
+  checa(await page.evaluate(() => document.getElementById('helpModal').classList.contains('hidden')),
+    'como funciona: a Ajuda ficou aberta por baixo (dois modais empilhados)');
+  const antes = page.url();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  checa(page.url() === antes, `como funciona: o Esc NAVEGOU pra fora da app (${page.url()})`);
+  checa(!(await abertoComoFunciona()), 'como funciona: o Esc não fechou');
+  await ctx.close();
+}
+
+{
+  // "Já instalei — entrar": nasce escondido, aparece depois do clique em
+  // instalar, e recarrega (é o reload que faz a ponte da extensão ser injetada).
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(500);
+  const visivel = (id) => page.evaluate((i) => {
+    const e = document.getElementById(i);
+    return !!e && e.offsetParent !== null;
+  }, id);
+  checa(!(await visivel('extJaInstalei')), 'já instalei: nasceu visível (é ruído pra quem não foi à loja)');
+  await page.evaluate(() => {
+    const a = document.getElementById('extInstallLink');
+    a.removeAttribute('target');
+    a.addEventListener('click', (e) => e.preventDefault(), true);
+  });
+  await page.click('#extInstallLink');
+  await page.waitForTimeout(250);
+  checa(await visivel('extJaInstalei'), 'já instalei: não apareceu depois do clique em instalar');
+  checa(await page.evaluate(() => document.getElementById('extJaInstalei').getBoundingClientRect().height >= 44),
+    'já instalei: alvo de toque abaixo de 44px');
+  let recarregou = false;
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) recarregou = true; });
+  await page.click('#extJaInstalei');
+  await page.waitForTimeout(1000);
+  checa(recarregou, 'já instalei: não recarregou — sem reload a ponte da extensão não entra na aba');
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -1531,4 +1653,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true)`
   + `, + sessão morta leva pra tela de entrar e oscilação de rede NÃO derruba`
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
-  + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`);
+  + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`
+  + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair da app, e o "Já instalei" que recarrega)`);
