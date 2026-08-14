@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.14-01
+
+### Corrigido
+- **O botão de atualizar quebrava com "Erro inesperado".** Clicar em atualizar — ou aplicar um filtro — falhava com `semAnimar is not defined` e a fila não recarregava. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme), com print. Entrou na versão anterior e ficou algumas horas no ar. Corrigido.
+
+---
+
 ## v2026.08.13-05
 
 ### Alterado
