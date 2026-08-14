@@ -2319,7 +2319,7 @@ function resetQueue() {
     AppState.serverBlocked = 0;
     AppState.blockedPartial = false;
     AppState.loadError = false;
-    updatePendingCount(semAnimar);
+    updatePendingCount();
 }
 
 function showLoading(visible) {
@@ -4619,7 +4619,7 @@ function updateStats(semAnimar = false) {
     setCount(document.getElementById('readCount'), AppState.stats.read, '', semAnimar);
     setCount(document.getElementById('rejectedCount'), AppState.stats.rejected, '', semAnimar);
     setCount(document.getElementById('skippedCount'), AppState.stats.skipped, '', semAnimar);
-    updatePendingCount();
+    updatePendingCount(semAnimar);
 }
 
 function updatePendingCount(semAnimar = false) {

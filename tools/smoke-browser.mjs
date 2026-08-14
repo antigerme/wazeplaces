@@ -1941,6 +1941,67 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
   }
 }
 
+
+// ── Os controles do cabeçalho, CLICADOS ─────────────────────────────────
+// `semAnimar is not defined` foi pra produção e quebrou o botão de ATUALIZAR.
+// A causa foi um replace que pegou a primeira ocorrência do arquivo (dentro do
+// `resetQueue`) em vez da pretendida. Mas o motivo de ter CHEGADO lá é outro, e
+// é o que este bloco fecha: nenhum teste jamais clicou em atualizar. Toda
+// validação injetava estado direto no AppState e pulava o `resetQueue()`.
+//
+// Duas coisas importam aqui, e as duas já me morderam:
+//   1. entrar por `showMainScreen()`, não montando o DOM à mão — é ele que
+//      REVELA os controles do cabeçalho; sem isso o clique nem acontece;
+//   2. medir `pageerror`, não o resultado visível: um ReferenceError aborta a
+//      função no meio e a tela pode não mudar nada.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+  await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+  await page.route('**/api/buscar-places', (r) => r.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ success: true, places: [], hasMore: false, page: 1, total: 0 }) }));
+  await page.route('**/api/perfil', (r) => r.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ success: true, profile: { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false, areas: [] } }) }));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(600);
+  await page.evaluate((fila) => {
+    API.setSession('token-de-teste');
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.stats = { read: 22, rejected: 41, skipped: 0 };
+    AppState.serverTotal = 118; AppState.hasMore = false;
+    AppState.queue = JSON.parse(JSON.stringify(fila));
+    AppState.currentPlace = AppState.queue[0];
+    showMainScreen();
+    renderProfileHeader(); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showCurrentPlace();
+  }, FIXTURES_PAISES.slice(0, 3));
+  await page.waitForTimeout(600);
+
+  const passos = [
+    ['refreshBtn', 1500, 'ATUALIZAR'],
+    ['filtersBtn', 600, 'abrir Filtros'],
+    ['applyFilters', 1500, 'aplicar Filtros'],
+    ['themeBtn', 400, 'trocar tema'],
+    ['themeBtn', 400, 'trocar tema de volta'],
+    ['helpBtn', 600, 'abrir Ajuda'],
+    ['closeHelp', 400, 'fechar Ajuda'],
+  ];
+  for (const [id, espera, nome] of passos) {
+    const antes = erros.length;
+    const el = await page.$('#' + id);
+    if (!el) { checa(false, `controles: #${id} não existe`); continue; }
+    await el.click().catch(() => {});
+    await page.waitForTimeout(espera);
+    checa(erros.length === antes, `controles: "${nome}" lançou erro de JS`, erros[antes]);
+  }
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -1962,4 +2023,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair da app, e o "Já instalei" que recarrega)`
   + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida)`
   + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
-  + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`);
+  + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
+  + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`);
