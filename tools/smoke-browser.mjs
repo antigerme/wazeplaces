@@ -2002,6 +2002,76 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
   await ctx.close();
 }
 
+
+// ── Ponto no ícone da app instalada ─────────────────────────────────────
+// Espiona `setAppBadge`/`clearAppBadge` em vez de depender do sistema: o badge
+// de verdade só existe com a app INSTALADA, e o que este projeto controla é
+// QUANDO chama e COM O QUÊ. Três coisas que quebram calado se alguém mexer:
+//   1. mandar NÚMERO em vez de ponto — o badge só é escrito quando a app roda,
+//      então um número fica velho no instante em que ela fecha;
+//   2. PEDIR permissão de notificação — prompt não solicitado é a interrupção
+//      que a régua do projeto proíbe, e no iOS é o que o badge exigiria;
+//   3. deixar a promessa REJEITADA escapar — no iOS sem permissão ela rejeita,
+//      e um "unhandled rejection" por sessão é ruído que mascara erro real.
+for (const suporte of [true, false]) {
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+  await page.addInitScript((sup) => {
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
+    window.__badge = []; window.__permPedida = false;
+    if (sup) {
+      navigator.setAppBadge = (...a) => { window.__badge.push(['set', a.length ? a[0] : 'ponto']); return Promise.resolve(); };
+      navigator.clearAppBadge = () => { window.__badge.push(['clear']); return Promise.resolve(); };
+    } else { delete navigator.setAppBadge; delete navigator.clearAppBadge; }
+    if (window.Notification) Notification.requestPermission = () => { window.__permPedida = true; return Promise.resolve('denied'); };
+  }, suporte);
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(600);
+  await page.evaluate((fila) => {
+    API.setSession('token-de-teste');
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.serverTotal = 118; AppState.hasMore = false;
+    AppState.queue = JSON.parse(JSON.stringify(fila)); AppState.currentPlace = AppState.queue[0];
+    showMainScreen(); renderProfileHeader(); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden'); showCurrentPlace();
+  }, FIXTURES_PAISES.slice(0, 3));
+  await page.waitForTimeout(600);
+  const onde = suporte ? 'badge (com suporte)' : 'badge (sem suporte)';
+  if (suporte) {
+    const r1 = await page.evaluate(() => window.__badge);
+    checa(r1.some((x) => x[0] === 'set' && x[1] === 'ponto'), `${onde}: não pediu o PONTO`, JSON.stringify(r1));
+    checa(!r1.some((x) => x[0] === 'set' && typeof x[1] === 'number'),
+      `${onde}: mandou NÚMERO — ele fica velho assim que a app fecha`, JSON.stringify(r1));
+    await page.evaluate(() => { window.__badge = []; AppState.serverTotal = 0; updatePendingCount(); });
+    const r2 = await page.evaluate(() => window.__badge);
+    checa(r2.length && r2[r2.length - 1][0] === 'clear', `${onde}: fila zerada não limpou o ponto`, JSON.stringify(r2));
+    // A fila VOLTA a ter itens antes de testar o logout. Sem isto o teste passava
+    // pelo motivo errado: com `serverTotal` ainda em 0 do passo anterior, o
+    // `clear` acontecia por não haver trabalho, e não por estar deslogado —
+    // medido, a sabotagem que tira o `authenticated` da condição passou VERDE.
+    await page.evaluate(() => {
+      window.__badge = []; AppState.serverTotal = 42; AppState.authenticated = false; updatePendingCount();
+    });
+    const r3 = await page.evaluate(() => window.__badge);
+    checa(r3.length && r3[r3.length - 1][0] === 'clear',
+      `${onde}: deslogado com fila cheia não limpou o ponto`, JSON.stringify(r3));
+    // rejeição (iOS sem permissão) não pode virar unhandled rejection
+    await page.evaluate(() => { navigator.setAppBadge = () => Promise.reject(new Error('NotAllowedError')); AppState.authenticated = true; AppState.serverTotal = 5; updatePendingCount(); });
+    await page.waitForTimeout(400);
+  } else {
+    await page.click('#refreshBtn').catch(() => {});
+    await page.waitForTimeout(1000);
+    checa(!!(await page.evaluate(() => document.getElementById('pendingCount').textContent)),
+      `${onde}: o placar parou de funcionar sem a API de badge`);
+  }
+  checa(!(await page.evaluate(() => window.__permPedida)), `${onde}: PEDIU permissão de notificação`);
+  checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2024,4 +2094,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida)`
   + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
-  + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`);
+  + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
+  + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`);

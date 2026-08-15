@@ -4622,8 +4622,30 @@ function updateStats(semAnimar = false) {
     updatePendingCount(semAnimar);
 }
 
+// ── Ponto no ícone da app instalada ──────────────────────────────────────
+// PONTO, não número, e a razão é honestidade: o badge só é escrito quando a app
+// RODA, então um número fica velho no instante em que a pessoa fecha. "118" no
+// ícone dois dias depois é uma afirmação falsa; o ponto diz "há trabalho", que
+// continua verdadeiro enquanto a fila não zera — e a fila medida do owner nunca
+// zerou (211, 196, 108 em três dias).
+//
+// Nunca PEDE permissão. No iOS o badge exige notificação autorizada, e um
+// prompt não solicitado é exatamente a interrupção que a régua do projeto
+// proíbe. Sem autorização a promessa rejeita, e aqui isso é silêncio: o recurso
+// simplesmente não existe naquele aparelho.
+function atualizarPontoNoIcone() {
+    try {
+        if (!('setAppBadge' in navigator)) return;
+        const temTrabalho = AppState.authenticated && AppState.serverTotal > 0;
+        // `setAppBadge()` sem argumento é o PONTO; com número seria a contagem.
+        const p = temTrabalho ? navigator.setAppBadge() : navigator.clearAppBadge();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (e) { /* aparelho sem suporte não pode derrubar o placar */ }
+}
+
 function updatePendingCount(semAnimar = false) {
     const el = document.getElementById('pendingCount');
+    atualizarPontoNoIcone();
     if (!el) return;
     if (!AppState.authenticated) {
         el.textContent = '—';
