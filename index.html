@@ -735,6 +735,19 @@
                         <p id="pendingTotalHint" class="hidden text-[0.6875rem] text-slate-400 dark:text-slate-500 tnum leading-tight mt-0.5"></p>
                     </div>
                 </div>
+                <!-- Aviso de sessão vencendo. Mora DENTRO do #placar (aproveita o
+                     padding do cartão, em vez de um bloco novo com margem própria) e
+                     no FLUXO, não no #bannerStack: aquele é `fixed` e serve a avisos
+                     que PASSAM — indicador de estado permanente ali cobriria o card
+                     (gotcha #26).
+                     NÃO é clicável de propósito. A frase já diz o que fazer, e um
+                     link nesta altura de texto daria um alvo de ~20px logo acima da
+                     área de swipe — abaixo da régua de 44px e vizinho de um gesto
+                     que trata pedido de verdade. O ⓘ do cabeçalho continua sendo o
+                     alvo grande de "como faço isso". -->
+                <p id="avisoSessao" role="status"
+                   class="hidden text-[0.6875rem] leading-tight text-center font-medium pt-1.5
+                          text-amber-800 dark:text-amber-300"></p>
             </div>
 
             <!-- A ALTURA do card não mora aqui: ela é a sobra da janela, calculada

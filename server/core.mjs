@@ -337,6 +337,47 @@ function lerSetCookie(res) {
   return [];
 }
 
+// Quando a sessão do WAZE vence, em segundos-epoch — ou null se não deu pra
+// saber. É o prazo que de fato desloga o editor, e não se confunde com o
+// `SESSION_TTL` da app: aquele é DESLIZANTE (`loadSession` renova a cada uso),
+// este é FIXO.
+//
+// MEDIDO com os cookies do owner, 3 chamadas de leitura seguidas ao `/Session`
+// (gotcha #43 avisa que o Waze rotaciona o cookie a cada resposta): o VALOR do
+// `_web_session` mudou nas três, e o `Expires` ficou parado em
+// `Tue, 15-Sep-2026 02:04:14 GMT`, com o `Max-Age` só DECRESCENDO — 2622757 →
+// 2622754 → 2622751, exatamente os segundos passados. Rotação não empurra o
+// prazo. É isso, e só isso, que permite uma contagem regressiva honesta na
+// tela; se um dia o Waze passar a deslizar, o aviso vira mentira e tem que
+// sair (o `Max-Age` crescendo entre duas chamadas é o sinal).
+//
+// `Max-Age` ganha do `Expires` por ser relativo: chega imune a relógio torto do
+// servidor e a fuso. O `Expires` fica de reserva — vem no formato com hífen
+// (`15-Sep-2026`), que o `Date.parse` aceita.
+export function prazoDaSessaoWaze(setCookie, agoraMs = Date.now()) {
+  if (!Array.isArray(setCookie)) return null;
+  for (const linha of setCookie) {
+    if (!/^_web_session=/.test(String(linha).trim())) continue;
+    const attrs = String(linha).split(';').slice(1);
+    let expires = null;
+    for (const a of attrs) {
+      const igual = a.indexOf('=');
+      if (igual <= 0) continue;
+      const nome = a.slice(0, igual).trim().toLowerCase();
+      const valor = a.slice(igual + 1).trim();
+      if (nome === 'max-age') {
+        const seg = Number(valor);
+        if (Number.isFinite(seg) && seg > 0) return Math.floor(agoraMs / 1000) + Math.floor(seg);
+      } else if (nome === 'expires') {
+        const ms = Date.parse(valor);
+        if (Number.isFinite(ms)) expires = Math.floor(ms / 1000);
+      }
+    }
+    if (expires && expires > Math.floor(agoraMs / 1000)) return expires;
+  }
+  return null;
+}
+
 // Aplica os cookies rotacionados por cima dos guardados e devolve o conteúdo
 // novo — ou null se nada mudou (aí não há por que reescrever a sessão).
 //
@@ -1071,7 +1112,14 @@ async function handleTestarCookies(data, { sessions }) {
   const token = await sessions.createSession(cookies);
   return {
     status: 200,
-    body: { success: true, message: 'Cookies válidos! Você está autenticado.', sessionToken: token, expiresIn: SESSION_TTL },
+    body: {
+      success: true,
+      message: 'Cookies válidos! Você está autenticado.',
+      sessionToken: token,
+      expiresIn: SESSION_TTL,
+      // Prazo do WAZE (fixo), não o da app (deslizante). Ver `prazoDaSessaoWaze`.
+      sessaoExpiraEm: prazoDaSessaoWaze(result.setCookie),
+    },
   };
 }
 
@@ -1154,6 +1202,9 @@ async function handleBuscarPlaces(data, { sessions }) {
       // editáveis; o extra vira a dica "de N na região" no contador (D13).
       totalAll: places.length + blocked,
       blocked,
+      // Vai aqui porque esta é a chamada que se repete: o prazo se auto-corrige
+      // sozinho se o editor relogar no WME, sem a app ter que perguntar.
+      sessaoExpiraEm: prazoDaSessaoWaze(result.setCookie),
     },
   };
 }
@@ -1847,6 +1898,9 @@ async function handlePerfil(data, { sessions }) {
         areas,
         managedAreas,
       },
+      // O perfil é buscado na abertura da app, então o prazo já chega no primeiro
+      // render — antes mesmo da primeira busca de pedidos.
+      sessaoExpiraEm: prazoDaSessaoWaze(result.setCookie),
     },
   };
 }

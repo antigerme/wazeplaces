@@ -2072,6 +2072,146 @@ for (const suporte of [true, false]) {
   await ctx.close();
 }
 
+// ── Aviso de sessão vencendo ────────────────────────────────────────────
+// Indicador de ESTADO, então mora no fluxo (dentro do #placar) e não no
+// #bannerStack, que é `fixed` e serve a avisos que passam — permanente ali
+// cobriria o card (gotcha #26). Quatro coisas que quebram calado:
+//   1. o limiar errar pro lado da folga — aparecer com muito prazo vira ruído,
+//      e o número na tela nunca pode ser MAIOR do que o prazo real;
+//   2. sobreviver ao logout ou ao prazo já vencido — a frase passaria a falar
+//      de uma sessão que não existe mais;
+//   3. estourar a caixa em francês, que é a língua mais larga (gotcha #25), no
+//      aparelho mais estreito;
+//   4. virar alvo de toque pequeno logo acima da área de swipe.
+const DIAS = (d) => Math.floor(Date.now() / 1000) + Math.round(d * 86400);
+for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['Pixel 7', { width: 412, height: 915 }]]) {
+  for (const lang of LINGUAS) {
+    const ctx = await browser.newContext({ viewport, locale: lang === 'en' ? 'en-US' : lang, serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(e.message));
+    await page.addInitScript((lg) => {
+      localStorage.setItem('waze_places_lang', lg);
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
+    }, lang);
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(500);
+    await page.evaluate((fila) => {
+      API.setSession('token-de-teste');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = 118; AppState.hasMore = false;
+      AppState.queue = JSON.parse(JSON.stringify(fila)); AppState.currentPlace = AppState.queue[0];
+      showMainScreen(); renderProfileHeader(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden'); showCurrentPlace();
+    }, FIXTURES_PAISES.slice(0, 3));
+    await assentar(page);
+    const onde = `aviso de sessão · ${aparelho} · ${lang}`;
+
+    // Quando aparece e quando NÃO aparece. O `10 dias` é o caso que mais
+    // importa: prazo folgado com aviso na tela é o que ensina a ignorar avisos.
+    const estados = await page.evaluate((prazos) => {
+      const el = () => document.getElementById('avisoSessao');
+      const ver = () => !el().classList.contains('hidden');
+      const out = {};
+      for (const [rot, quando] of Object.entries(prazos)) {
+        AppState.authenticated = rot !== 'deslogado';
+        AppState.sessaoExpiraEm = quando;
+        updatePendingCount();
+        out[rot] = { visivel: ver(), txt: el().textContent };
+      }
+      AppState.authenticated = true;
+      return out;
+    }, {
+      '10 dias': DIAS(10), '5 dias': DIAS(5.4), '1 dia': DIAS(1.4),
+      hoje: DIAS(0.3), vencido: DIAS(-0.5), deslogado: DIAS(2), 'sem prazo': null,
+    });
+    for (const rot of ['10 dias', 'vencido', 'deslogado', 'sem prazo']) {
+      checa(!estados[rot].visivel, `${onde}: apareceu com "${rot}"`, estados[rot].txt);
+    }
+    for (const rot of ['5 dias', '1 dia', 'hoje']) {
+      checa(estados[rot].visivel, `${onde}: NÃO apareceu com "${rot}"`);
+      checa(!/[{}]|undefined|NaN/.test(estados[rot].txt),
+        `${onde}: placeholder cru na frase de "${rot}"`, estados[rot].txt);
+    }
+    // Nunca prometer mais prazo do que existe: com 1,4 dia o certo é "1", não "2".
+    checa(/(^|\D)1(\D|$)/.test(estados['1 dia'].txt) && !/(^|\D)2(\D|$)/.test(estados['1 dia'].txt),
+      `${onde}: arredondou o prazo pra cima`, estados['1 dia'].txt);
+
+    // Cabe na caixa, não é alvo de toque, e não tapa nada.
+    //
+    // O `visivel` não é zelo: o laço acima termina em "sem prazo", que ESCONDE o
+    // aviso, e medir elemento escondido dá caixa 0×0 em (0,0) — que "estoura"
+    // o pai pela esquerda e cai fora do `elementFromPoint`. Reprovou 16 de 16,
+    // em aparelho e idioma onde a medição manual dava limpo: achado que acusa
+    // tudo é o instrumento, não a app (gotcha #28).
+    const m = await page.evaluate((quando) => {
+      const el = document.getElementById('avisoSessao');
+      AppState.sessaoExpiraEm = quando;
+      updatePendingCount();
+      const visivel = !el.classList.contains('hidden');
+      const r = el.getBoundingClientRect();
+      const pai = el.parentElement.getBoundingClientRect();
+      const pts = [[r.x + r.width / 2, r.y + r.height / 2], [r.x + 4, r.y + 2], [r.right - 4, r.bottom - 2]];
+      // Fundo COMPOSTO: o #placar é `bg-white/80`, então pegar o primeiro fundo
+      // não-transparente e ignorar o alfa mede outra coisa (gotcha #40). Aqui as
+      // camadas são misturadas de trás pra frente. Conferido contra o PIXEL de
+      // um recorte real: 7,02:1 no claro e 10,55:1 no escuro.
+      const nums = (c) => (String(c).match(/[\d.]+/g) || []).map(Number);
+      const camadas = [];
+      for (let n = el; n; n = n.parentElement) {
+        const v = nums(getComputedStyle(n).backgroundColor);
+        if (v.length < 3) continue;
+        const a = v.length > 3 ? v[3] : 1;
+        if (a <= 0) continue;
+        camadas.push([v[0], v[1], v[2], a]);
+        if (a >= 1) break;
+      }
+      let base = nums(getComputedStyle(document.documentElement).backgroundColor);
+      if (base.length < 3 || (base.length > 3 && base[3] === 0)) base = [255, 255, 255];
+      for (let i = camadas.length - 1; i >= 0; i--) {
+        const [cr, cg, cb, a] = camadas[i];
+        base = [cr * a + base[0] * (1 - a), cg * a + base[1] * (1 - a), cb * a + base[2] * (1 - a)];
+      }
+      const lum = (c) => {
+        const v = c.slice(0, 3).map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+        return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+      };
+      const a = lum(nums(getComputedStyle(el).color)), b = lum(base);
+      return {
+        visivel,
+        estoura: r.right > pai.right + 0.5 || r.left < pai.left - 0.5,
+        rolaX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        tapado: pts.some(([x, y]) => { const e = document.elementFromPoint(x, y); return !(e === el || el.contains(e)); }),
+        clicavel: el.tagName !== 'P' || getComputedStyle(el).cursor === 'pointer' || !!el.closest('a,button'),
+        contraste: +((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toFixed(2),
+      };
+    }, DIAS(3));
+    checa(m.visivel, `${onde}: medindo o aviso ESCONDIDO — a caixa 0×0 faz todo o resto mentir`);
+    checa(!m.estoura && !m.rolaX, `${onde}: o texto estourou a caixa`);
+    checa(!m.tapado, `${onde}: alguma coisa cobre o aviso`);
+    checa(!m.clicavel, `${onde}: virou alvo de toque — aqui é logo acima do swipe, e a régua é 44px`);
+    checa(m.contraste >= 4.5, `${onde}: contraste abaixo do WCAG 1.4.3`, `${m.contraste}:1`);
+
+    // O prazo é do APARELHO e some no "Sair" (contrato do logout).
+    const guarda = await page.evaluate((quando) => {
+      guardarPrazoDaSessao({ sessaoExpiraEm: quando });
+      const gravado = localStorage.getItem('waze_places_sessao_expira');
+      // Resposta SEM o campo não pode apagar o que já se sabia: o Waze só manda
+      // `Set-Cookie` quando rotaciona, e ausência não desmente a última medida.
+      guardarPrazoDaSessao({ success: true });
+      const apos = localStorage.getItem('waze_places_sessao_expira');
+      esquecerPrazoDaSessao();
+      return { gravado, apos, aposSair: localStorage.getItem('waze_places_sessao_expira') };
+    }, DIAS(3));
+    checa(guarda.gravado === String(DIAS(3)), `${onde}: não guardou o prazo no aparelho`, String(guarda.gravado));
+    checa(guarda.apos === guarda.gravado, `${onde}: resposta sem o campo APAGOU o prazo já conhecido`);
+    checa(guarda.aposSair === null, `${onde}: o prazo sobreviveu ao "Sair"`);
+    checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2095,4 +2235,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
-  + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`);
+  + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`
+  + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (7 prazos, contraste composto, não vira alvo de toque e some no "Sair")`);

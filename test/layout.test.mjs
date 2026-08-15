@@ -1149,6 +1149,7 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     DEVMODE_KEY: 'saveDevMode()',
     HISTORY_KEY: 'safeLS.remove(HISTORY_KEY)',
     CHAVE_INSTALL_DISPENSADO: 'safeLS.remove(CHAVE_INSTALL_DISPENSADO)',
+    SESSAO_KEY: 'esquecerPrazoDaSessao()',
     waze_session_token: 'API.setSession(null)',
     waze_region: "API.setRegion('row')",
     waze_country: 'API.setCountry(30)',
