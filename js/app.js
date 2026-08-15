@@ -8,6 +8,7 @@ const DEVMODE_KEY = 'waze_places_devmode';
 const THEME_KEY = 'waze_places_theme';
 const LANG_KEY = 'waze_places_lang';
 const HISTORY_KEY = 'waze_places_history';
+const SESSAO_KEY = 'waze_places_sessao_expira';
 const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
@@ -170,7 +171,8 @@ const AppState = {
     countries: [],
     statesByCountry: {},
     seenCategories: [],      // categorias vistas nos places carregados (fonte do filtro de categoria)
-    history: null            // acumulado histórico { 'YYYY-MM-DD': { read, rejected } } (carregado lazy)
+    history: null,           // acumulado histórico { 'YYYY-MM-DD': { read, rejected } } (carregado lazy)
+    sessaoExpiraEm: null     // quando a sessão do WAZE vence (epoch em segundos). Prazo FIXO, ver AVISO_SESSAO_DIAS
 };
 
 window.AppState = AppState;
@@ -231,6 +233,7 @@ function initApp() {
     loadStats();
     loadFilters();
     loadPreferences();
+    carregarPrazoDaSessao();
     loadDevMode();
     enforceDevGatedFilters();
     // Tema: segue o sistema até o user escolher manualmente (M3/HIG).
@@ -2032,6 +2035,7 @@ async function authenticateWithCookies(cookies) {
     try {
         const result = await API.testCookies(cookies);
         if (result.success) {
+            guardarPrazoDaSessao(result);
             showMainScreen();
             resetQueue();
             AppState._profilePromise = loadProfileAndAuxData();
@@ -2095,6 +2099,7 @@ async function loadProfileAndAuxData() {
     }
     if (profileRes.success) {
         AppState.profile = profileRes.profile;
+        guardarPrazoDaSessao(profileRes);
         renderProfileHeader();
     }
     if (countriesRes.success) {
@@ -2188,6 +2193,10 @@ function derrubarSessao(errorKey) {
     API.setSession(null);
     AppState.profile = null;
     AppState.authenticated = false;
+    // O prazo era desta sessão, que acabou de morrer. Deixá-lo guardado faria a
+    // próxima entrada nascer com a contagem da sessão ANTERIOR na tela, até a
+    // primeira resposta do Waze corrigir.
+    esquecerPrazoDaSessao();
 
     // Antes de mandar pra tela de login, PERGUNTA à extensão — em silêncio.
     //
@@ -2271,6 +2280,7 @@ async function handleLogout() {
     // "Sair limpa tudo" não tem exceção que ninguém decidiu: este marcador (o
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
+    esquecerPrazoDaSessao(); // prazo da sessão do Waze: some com o resto
     saveStats();
     saveFilters();
     savePreferences();
@@ -2400,6 +2410,10 @@ function fetchNextPage() {
 
             AppState.hasMore = !!result.hasMore;
             AppState.nextPage++;
+            // Esta é a chamada que se repete, então é ela que mantém o prazo em
+            // dia: se o editor relogar no WME, o Waze passa a mandar um `Expires`
+            // novo e o aviso some sozinho, sem a app precisar perguntar nada.
+            guardarPrazoDaSessao(result);
 
             // D13: acumula igual ao serverTotal (uma busca pode vir em páginas).
             // Backend antigo não manda o campo → 0, e a dica simplesmente não aparece.
@@ -4622,8 +4636,93 @@ function updateStats(semAnimar = false) {
     updatePendingCount(semAnimar);
 }
 
+// ── Ponto no ícone da app instalada ──────────────────────────────────────
+// PONTO, não número, e a razão é honestidade: o badge só é escrito quando a app
+// RODA, então um número fica velho no instante em que a pessoa fecha. "118" no
+// ícone dois dias depois é uma afirmação falsa; o ponto diz "há trabalho", que
+// continua verdadeiro enquanto a fila não zera — e a fila medida do owner nunca
+// zerou (211, 196, 108 em três dias).
+//
+// Nunca PEDE permissão. No iOS o badge exige notificação autorizada, e um
+// prompt não solicitado é exatamente a interrupção que a régua do projeto
+// proíbe. Sem autorização a promessa rejeita, e aqui isso é silêncio: o recurso
+// simplesmente não existe naquele aparelho.
+function atualizarPontoNoIcone() {
+    try {
+        if (!('setAppBadge' in navigator)) return;
+        const temTrabalho = AppState.authenticated && AppState.serverTotal > 0;
+        // `setAppBadge()` sem argumento é o PONTO; com número seria a contagem.
+        const p = temTrabalho ? navigator.setAppBadge() : navigator.clearAppBadge();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (e) { /* aparelho sem suporte não pode derrubar o placar */ }
+}
+
+// ── Aviso de sessão vencendo ─────────────────────────────────────────────
+// Existe porque o fim da sessão chega como surpresa no pior lugar possível: no
+// celular, onde não há como renovar. Quem entrou pelo QR precisa de um
+// computador, e descobrir isso no meio da fila custa a sessão inteira de
+// triagem.
+//
+// O prazo é o do WAZE, não o da app, e a diferença é o que torna a conta
+// honesta. O `SESSION_TTL` da app (21 dias) é DESLIZANTE — o `loadSession`
+// renova a cada uso, então quem usa nunca chega perto dele e contar a partir
+// dali seria inventar um prazo que não vence. Já o cookie do Waze tem prazo
+// FIXO: MEDIDO com 3 chamadas de leitura seguidas, o valor do `_web_session`
+// mudou nas três (o Waze rotaciona a cada resposta, gotcha #43) e o `Expires`
+// ficou parado, com o `Max-Age` só decrescendo. O servidor lê esse prazo do
+// `Set-Cookie` que já recebe e manda junto (`sessaoExpiraEm`).
+//
+// Não guarda nada a mais no servidor e não encosta na criptografia: o prazo
+// vem de um cabeçalho que a resposta já trazia, e mora no aparelho.
+const AVISO_SESSAO_DIAS = 5;
+
+function carregarPrazoDaSessao() {
+    const bruto = Number(safeLS.get(SESSAO_KEY));
+    AppState.sessaoExpiraEm = Number.isFinite(bruto) && bruto > 0 ? bruto : null;
+}
+
+// Ausente NÃO é "não vence": o Waze só manda `Set-Cookie` quando rotaciona, e
+// uma resposta sem ele não desmente a anterior. Por isso só grava valor válido
+// — apagar aqui faria o aviso piscar a cada chamada que não trouxe o cabeçalho.
+function guardarPrazoDaSessao(body) {
+    if (!body || typeof body !== 'object') return;
+    const prazo = Number(body.sessaoExpiraEm);
+    if (!Number.isFinite(prazo) || prazo <= 0) return;
+    AppState.sessaoExpiraEm = prazo;
+    safeLS.set(SESSAO_KEY, String(prazo));
+    atualizarAvisoDeSessao();
+}
+
+function esquecerPrazoDaSessao() {
+    AppState.sessaoExpiraEm = null;
+    safeLS.remove(SESSAO_KEY);
+    atualizarAvisoDeSessao();
+}
+
+function atualizarAvisoDeSessao() {
+    const el = document.getElementById('avisoSessao');
+    if (!el) return;
+    const prazo = AppState.sessaoExpiraEm;
+    const esconder = () => { el.classList.add('hidden'); el.textContent = ''; };
+    if (!AppState.authenticated || !prazo) return esconder();
+    const faltaMs = prazo * 1000 - Date.now();
+    // Já venceu: quem avisa é o 401, que leva pra tela de entrar. Repetir aqui
+    // seria dizer "vence em -1 dia" atrás de uma tela que nem está mais visível.
+    if (faltaMs <= 0) return esconder();
+    // `floor`, nunca `round`: com 4,9 dias o certo é dizer 4. Arredondar pra cima
+    // daria mais prazo do que existe, que é o único erro que custa caro aqui.
+    const dias = Math.floor(faltaMs / 86400000);
+    if (dias > AVISO_SESSAO_DIAS) return esconder();
+    el.textContent = dias === 0
+        ? t('sessao.vence.hoje')
+        : t(dias === 1 ? 'sessao.vence.dias' : 'sessao.vence.diasPlural', { n: dias });
+    el.classList.remove('hidden');
+}
+
 function updatePendingCount(semAnimar = false) {
     const el = document.getElementById('pendingCount');
+    atualizarPontoNoIcone();
+    atualizarAvisoDeSessao();
     if (!el) return;
     if (!AppState.authenticated) {
         el.textContent = '—';

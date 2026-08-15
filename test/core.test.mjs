@@ -757,6 +757,44 @@ test('cookie rotacionado pelo Waze é aplicado por cima do guardado', async () =
   assert.match(comVirgula, /_web_session\ta,b,c/, 'o valor foi cortado na vírgula');
 });
 
+test('o prazo da sessão do Waze é FIXO, e é ele que a app conta', async () => {
+  const { prazoDaSessaoWaze } = await import('../server/core.mjs');
+
+  // Cabeçalho REAL, copiado das 3 chamadas de leitura que mediram a questão que
+  // decide se a contagem regressiva pode existir: o VALOR do `_web_session`
+  // mudou nas três (o Waze rotaciona a cada resposta, gotcha #43) e o `Expires`
+  // ficou PARADO, com o `Max-Age` só decrescendo — 2622757 → 2622754 → 2622751,
+  // exatamente os segundos passados. Prazo fixo, então contar é dizer a verdade.
+  //
+  // Se um dia o Waze passar a DESLIZAR o prazo, este teste é onde se percebe:
+  // as três chamadas passariam a devolver o mesmo `Max-Age` e um `Expires`
+  // andando pra frente — e aí o aviso da app vira mentira e tem que sair.
+  const ROTACOES = [2622757, 2622754, 2622751].map((maxAge) => ([
+    `_web_session=VALOR${maxAge}; Path=/; Expires=Tue, 15-Sep-2026 02:04:14 GMT; Max-Age=${maxAge}; Secure; HttpOnly`,
+    `_csrf_token=CSRF; Path=/; Expires=Tue, 15-Sep-2026 02:04:14 GMT; Max-Age=${maxAge}; Secure`,
+  ]));
+  const T0 = Date.parse('2026-08-15T17:30:00Z');
+  const prazos = ROTACOES.map((sc, i) => prazoDaSessaoWaze(sc, T0 + i * 3000));
+  assert.deepEqual(prazos, [prazos[0], prazos[0], prazos[0]],
+    'o prazo ANDOU entre rotações — se o Waze passou a deslizar, a contagem na tela virou mentira');
+
+  // `Expires` sozinho (sem Max-Age) também serve, e vem no formato com hífen.
+  const soExpires = prazoDaSessaoWaze(['_web_session=X; Expires=Tue, 15-Sep-2026 02:04:14 GMT'], T0);
+  assert.equal(soExpires, Math.floor(Date.parse('2026-09-15T02:04:14Z') / 1000));
+  assert.equal(prazoDaSessaoWaze(['_web_session=X; Expires=Tue, 15 Sep 2026 02:04:14 GMT'], T0), soExpires,
+    'o formato com espaços deixou de ser aceito');
+
+  // Não saber é `null`, nunca um número inventado: a app trata ausente como
+  // "mantém o que já sabia", e um 0 ou NaN aqui viraria "vence hoje" na tela.
+  assert.equal(prazoDaSessaoWaze([], T0), null);
+  assert.equal(prazoDaSessaoWaze(null, T0), null);
+  assert.equal(prazoDaSessaoWaze(['_csrf_token=Y; Max-Age=99'], T0), null, 'leu o prazo do cookie errado');
+  assert.equal(prazoDaSessaoWaze(['x_web_session=X; Max-Age=99'], T0), null, 'casou com nome que só termina igual');
+  assert.equal(prazoDaSessaoWaze(['_web_session=X; Expires=banana; Max-Age=abc'], T0), null);
+  assert.equal(prazoDaSessaoWaze(['_web_session=X; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT'], T0), null,
+    'aceitou um prazo já vencido');
+});
+
 test('regravar a sessão com o cookie novo é estrangulado no tempo', async () => {
   const { makeSessions, SESSION_COOKIE_REFRESH } = await import('../server/core.mjs');
 

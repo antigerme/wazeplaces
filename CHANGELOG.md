@@ -8,6 +8,26 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.15-02
+
+### Adicionado
+- **A app avisa quando a sua sessão está para vencer.** Uma linha discreta embaixo do placar, nos últimos dias: *"Sua sessão vence em 3 dias · renove num computador"*. Ela existe porque o fim da sessão sempre chegava de surpresa, e chegava no pior lugar — no celular, onde não há como renovar: quem entrou pelo QR precisa de um computador, e descobrir isso no meio da fila custa a triagem inteira.
+
+  **O prazo é real, medido, não estimado.** O Waze troca o seu cookie de sessão a cada resposta, mas o vencimento não muda junto: em três consultas seguidas o cookie veio diferente nas três e a data de validade ficou parada. É essa data que a app mostra. Se você entrar de novo no editor do Waze, o prazo novo chega na próxima busca e o aviso some sozinho.
+
+  Não é botão nem link, de propósito: nesse tamanho de texto o alvo ficaria menor que o mínimo tocável, logo acima da área onde você desliza o card. E some no "Sair", como todo o resto. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+---
+
+## v2026.08.15-01
+
+### Adicionado
+- **O ícone da app instalada ganha um pontinho quando há pedidos esperando.** Sem número, de propósito: o ponto só pode ser escrito enquanto a app está aberta, então um "118" ficaria congelado no ícone e mentiria a partir do instante em que você fecha. O ponto diz apenas *"tem trabalho"*, e isso continua verdade. Some sozinho quando a fila zera e quando você sai.
+
+  **Não pede permissão de notificação nenhuma.** No iPhone o pontinho depende de notificações autorizadas; se não estiverem, ele simplesmente não aparece — e a app não te interrompe pra pedir. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+---
+
 ## v2026.08.14-01
 
 ### Corrigido
