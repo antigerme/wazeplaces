@@ -8,6 +8,22 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.15-03
+
+### Alterado
+- **O modo treino agora usa 30 pedidos seus de verdade, escolhidos para serem diferentes entre si.** Antes eram um exemplo inventado e três pedidos reais — os três primeiros da fila. O problema é que a fila vem ordenada por data, não por variedade: na fila do [@antigerme](https://www.waze.com/user/editor/antigerme) os três primeiros são **do mesmo tipo**, então o treino mostrava um tipo de pedido só, de dez que existiam.
+
+  Agora o treino monta a lista em rodízio — um de cada tipo, depois o segundo de cada, e assim por diante. Medido nas filas reais de Brasil, França, Reino Unido, México, Espanha e Portugal: pegando 30 na ordem da fila, você veria de 5 a 8 dos tipos existentes; **por variedade, você vê todos, nos seis países**. E como a variedade fica na frente, quem sai no quinto card já viu cinco tipos diferentes.
+
+  O 30 é o tamanho de uma página do WME, para ser a mesma unidade que você já conhece.
+
+  **Os exemplos inventados continuam existindo, mas só como piso.** Se a sua fila estiver vazia ou muito curta — o que é comum no primeiro minuto, antes de ela terminar de carregar —, o treino completa com eles. Ninguém fica sem treino por estar com a fila limpa. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+### Corrigido
+- **No treino, o "Restam" mostrava um número menor que a quantidade de cards.** Ele estava fixo em 3 enquanto o treino montava 4 cards, então o contador chegava a zero com um card ainda na tela. Agora sai da própria lista do treino.
+
+---
+
 ## v2026.08.15-02
 
 ### Adicionado
