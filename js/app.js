@@ -4154,19 +4154,54 @@ const Treino = {
         return c;
     },
 
-    // Sintético PRIMEIRO, reais depois (decisão do owner): o primeiro gesto é
-    // sobre algo previsível, logo depois do "Como funciona"; o julgamento — foto
-    // borrada, nome ruim, endereço errado — vem nos pedidos de verdade, que é o
-    // que o treino de exemplo sozinho não ensinava.
+    // Quantos pedidos reais o treino usa. 30 é o tamanho de UMA PÁGINA do WME
+    // (ele pagina a lista em blocos de 30), então é a unidade mental que o
+    // editor já tem — pedido do owner.
+    MAX_REAIS: 30,
+    // Piso: abaixo disto o treino completa com sintéticos. Fila vazia não pode
+    // deixar ninguém sem treino, e é justamente no primeiro minuto — logo depois
+    // do "Como funciona" — que a fila tem menos chance de já ter carregado.
+    MIN_CARDS: 3,
+
+    // O que faz um card ENSINAR algo que o anterior não ensinou. `updateTypeKey`
+    // é o rótulo do card (separa UPDATE com e sem diff), e ter foto muda a tela
+    // inteira: é o carrossel, o lightbox, a lixeira e o aprovar.
+    chaveDeVariedade(p) {
+        return (p.updateTypeKey || '—') + '|' + ((p.imageUrls || []).length ? 'foto' : 'sem');
+    },
+
+    // Reais em ordem de VARIEDADE, não a ordem da fila — e a diferença é enorme,
+    // não cosmética. MEDIDO na fila real do owner (170 pedidos, 10 tipos
+    // distintos): os 3 PRIMEIROS da fila são todos do MESMO tipo, então o treino
+    // que pegava `slice(0, 3)` mostrava UM tipo de pedido e chamava isso de
+    // treino. Pegando 30 em ordem, ainda seriam 7 dos 10.
     //
-    // Fila vazia ou curta: completa com os sintéticos. Ninguém fica sem treino
-    // por estar com a fila limpa.
+    // Rodízio (um de cada tipo, depois o segundo de cada…) porque a pessoa PODE
+    // sair no meio: assim quem parar no 5º card viu 5 tipos diferentes, e não 5
+    // vezes o mesmo. Com 10 grupos, os 10 primeiros cobrem os 10 tipos.
+    porVariedade(fila) {
+        const grupos = new Map();
+        for (const p of fila) {
+            const k = this.chaveDeVariedade(p);
+            if (!grupos.has(k)) grupos.set(k, []);
+            grupos.get(k).push(p);
+        }
+        const baldes = [...grupos.values()];
+        const out = [];
+        for (let i = 0; baldes.some((b) => i < b.length); i++) {
+            for (const b of baldes) if (i < b.length) out.push(b[i]);
+        }
+        return out;
+    },
+
+    // Reais quando existem, sintéticos só como piso. O exemplo inventado ensina
+    // o gesto; o julgamento — foto borrada, nome ruim, endereço errado — só vem
+    // no pedido de verdade, e é ele que o treino precisa treinar.
     cards() {
-        const reais = (this._salvo && this._salvo.queue ? this._salvo.queue : [])
-            .slice(0, 3).map((p) => this.neutralizar(p));
-        const sinteticos = this.sinteticos();
-        if (!reais.length) return sinteticos;
-        return [sinteticos[0], ...reais];
+        const fila = (this._salvo && this._salvo.queue) ? this._salvo.queue : [];
+        const reais = this.porVariedade(fila).slice(0, this.MAX_REAIS).map((p) => this.neutralizar(p));
+        if (reais.length >= this.MIN_CARDS) return reais;
+        return [...reais, ...this.sinteticos()].slice(0, this.MIN_CARDS);
     },
 
     // Exemplos sintéticos: sem foto de propósito (não dependem de rede, e
@@ -4214,8 +4249,12 @@ const Treino = {
         AppState.fetching = false;
         AppState.hasMore = false;
         AppState.stats = { read: 0, rejected: 0, skipped: 0 };
-        AppState.serverTotal = 3;
         AppState.queue = this.cards();
+        // Do TAMANHO da fila de treino, nunca de um número cravado. Estava em 3
+        // enquanto o treino montava 4 cards (1 sintético + 3 reais): o "Restam"
+        // zerava com um card ainda na tela — o que a app MOSTRA divergindo do
+        // que ela ACEITA, que é a regra de ouro de consistência do projeto.
+        AppState.serverTotal = AppState.queue.length;
         AppState.currentPlace = AppState.queue[0];
         document.getElementById('treinoBanner')?.classList.replace('hidden', 'flex');
         document.getElementById('noMoreCards')?.classList.add('hidden');

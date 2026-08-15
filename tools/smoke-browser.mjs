@@ -1879,16 +1879,20 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
       return { idsAntes, cards: AppState.queue.map((p) => ({ v: p.venueID, ur: p.updateRequestID })) };
     }, reais);
     const onde = `treino real ${lg}`;
-    checa(est.cards.length === 4, `${onde}: esperava 1 sintético + 3 reais, veio ${est.cards.length}`);
-    checa(est.cards[0].v === 'treino1', `${onde}: o primeiro card não é o sintético`);
-    checa(est.cards.slice(1).every((c) => c.ur === 'treino-inerte'),
+    // Fila suficiente → treino 100% REAL. O sintético é PISO (fila vazia/curta),
+    // não conteúdo: quem tem pedido de verdade treina no pedido de verdade.
+    checa(est.cards.length === reais.length,
+      `${onde}: esperava os ${reais.length} reais, veio ${est.cards.length}`);
+    checa(est.cards.every((c) => !String(c.v).startsWith('treino')),
+      `${onde}: sintético entrou com a fila cheia`, est.cards.map((c) => c.v).join(','));
+    checa(est.cards.every((c) => c.ur === 'treino-inerte'),
       `${onde}: pedido real entrou no treino com o updateRequestID VIVO`);
-    checa(est.cards.slice(1).every((c) => c.v && c.v !== 'treino-inerte'),
+    checa(est.cards.every((c) => c.v && c.v !== 'treino-inerte'),
       `${onde}: o venueID foi neutralizado — o ↗ do card deixa de abrir o lugar certo`);
 
-    // avança pro primeiro card REAL (o sintético não tem foto)
+    // primeiro card já é real (todos são); só garante o render assentado
     await page.evaluate(() => {
-      AppState.queue.shift(); AppState.currentPlace = AppState.queue[0];
+      AppState.currentPlace = AppState.queue[0];
       document.querySelectorAll('.place-card').forEach((e) => e.remove());
       showCurrentPlace();
     });
@@ -2212,6 +2216,88 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Treino: quantos cards, quais, e o contador ──────────────────────────
+// Três coisas que quebram calado:
+//   1. o "Restam" divergir do número de cards — estava assim (cravado em 3
+//      enquanto o treino montava 4), e o contador zerava com card na tela;
+//   2. o piso sumir — fila vazia tem que dar treino do mesmo jeito, e é no
+//      primeiro minuto (logo depois do "Como funciona") que ela ainda não
+//      carregou;
+//   3. a ordem voltar a ser a da fila. MEDIDO nos 6 países obrigatórios: 30
+//      cards em ordem de fila cobrem 5 a 8 dos 7 a 11 tipos que existem; por
+//      variedade, cobrem TODOS nos seis. Na fila do Brasil os 3 primeiros são
+//      do MESMO tipo — o treino antigo mostrava 1 tipo de 10 e chamava de treino.
+{
+  const chave = (p) => `${p.updateTypeKey || '—'}|${(p.imageUrls || []).length ? 'foto' : 'sem'}`;
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+  await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true })));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(500);
+
+  for (const n of [0, 1, 3, 10, FIXTURES_PAISES.length]) {
+    const m = await page.evaluate(([fila, k]) => {
+      if (Treino.ativo) Treino.sair();
+      API.setSession('token-de-teste');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = fila.length; AppState.hasMore = false;
+      AppState.queue = JSON.parse(JSON.stringify(fila));
+      AppState.currentPlace = AppState.queue[0] || null;
+      showMainScreen(); renderProfileHeader(); updateStats(); showLoading(false);
+      Treino.entrar();
+      const q = AppState.queue;
+      const chaveDe = (p) => `${p.updateTypeKey || '—'}|${(p.imageUrls || []).length ? 'foto' : 'sem'}`;
+      return {
+        cards: q.length,
+        restam: document.getElementById('pendingCount').textContent,
+        // Nenhum card pode carregar `updateRequestID` real: é a 2ª camada de
+        // proteção das escritas (a 1ª é o guard no topo dos handlers).
+        naoInertes: q.filter((p) => p.updateRequestID !== Treino.UR_INERTE && p.updateRequestID !== 'treino').length,
+        sinteticos: q.filter((p) => String(p.venueID).startsWith('treino')).length,
+        distintos5: new Set(q.slice(0, 5).map(chaveDe)).size,
+        max: Treino.MAX_REAIS, min: Treino.MIN_CARDS,
+        // Só pra MENSAGEM. A conta abaixo usa os números literais: ler a
+        // constante do app faz o teste se ajustar à mudança em vez de reprová-la
+        // — medido, a sabotagem "teto 30 → 3" passou por este caminho e só caiu
+        // por tabela, na checagem de variedade, com a mensagem errada.
+      };
+    }, [FIXTURES_PAISES.slice(0, n), null]);
+    const onde = `treino · fila de ${n}`;
+    checa(String(m.cards) === String(m.restam),
+      `${onde}: "Restam" (${m.restam}) diverge dos cards (${m.cards}) — o contador zera com card na tela`);
+    // EXATO e com os números ESCRITOS AQUI (30 e 3), não lidos do app: `<= teto`
+    // passaria com um teto de 3 — a regressão pro desenho antigo que este bloco
+    // existe pra pegar — e ler `Treino.MAX_REAIS` faz o esperado mudar junto com
+    // a sabotagem. Mexer no teto passa a exigir mexer aqui, que é o ponto.
+    const TETO = 30, PISO = 3;
+    checa(m.max === TETO && m.min === PISO,
+      `${onde}: as constantes do treino mudaram (teto ${m.max}, piso ${m.min}) — decida aqui também`);
+    const esperadoCards = n <= PISO ? PISO : Math.min(n, TETO);
+    checa(m.cards === esperadoCards,
+      `${onde}: esperava ${esperadoCards} cards (piso ${PISO}, teto ${TETO}), veio ${m.cards}`);
+    checa(m.naoInertes === 0, `${onde}: card com updateRequestID REAL dentro do treino`, String(m.naoInertes));
+    // Sintético é PISO, não conteúdo: com fila suficiente não entra nenhum.
+    checa(n >= m.min ? m.sinteticos === 0 : m.cards === m.min,
+      `${onde}: sintético apareceu com fila suficiente (ou o piso não completou)`, `sint=${m.sinteticos} cards=${m.cards}`);
+    // Variedade na FRENTE: quem sair no 5º card viu 5 tipos, não 5 vezes o mesmo.
+    // O esperado sai do RECORTE, não do arquivo inteiro: o rodízio não inventa
+    // tipo que não existe na entrada. Comparar com os 7 tipos das 51 fixtures
+    // reprovava a fila de 10 (que só tem 3) — instrumento errado, não app.
+    const gruposNoRecorte = new Set(FIXTURES_PAISES.slice(0, n).map(chave)).size;
+    if (n >= 5) {
+      const esperado = Math.min(5, gruposNoRecorte);
+      checa(m.distintos5 >= esperado,
+        `${onde}: os 5 primeiros repetem tipo — a ordem voltou a ser a da fila`, `${m.distintos5} de ${esperado}`);
+    }
+  }
+  checa(erros.length === 0, 'treino (contagem e variedade): erro de JS', erros[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2236,4 +2322,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
   + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`
-  + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (7 prazos, contraste composto, não vira alvo de toque e some no "Sair")`);
+  + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (7 prazos, contraste composto, não vira alvo de toque e some no "Sair")`
+  + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`);
