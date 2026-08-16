@@ -2198,6 +2198,14 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(m.contraste >= 4.5, `${onde}: contraste abaixo do WCAG 1.4.3`, `${m.contraste}:1`);
 
     // O prazo é do APARELHO e some no "Sair" (contrato do logout).
+    //
+    // UM valor, calculado UMA vez. Chamar `DIAS(3)` de novo na comparação lê o
+    // relógio outra vez: se o segundo virar entre as duas leituras, o esperado
+    // difere do gravado por 1 e o teste reprova sem defeito nenhum. Foi o que
+    // aconteceu — CI vermelho num PR só de documentação, com 1787137727 contra
+    // 1787137728. Falha intermitente é pior que falha estável: ensina todo mundo
+    // a ignorar o CI.
+    const prazoDeTeste = DIAS(3);
     const guarda = await page.evaluate((quando) => {
       guardarPrazoDaSessao({ sessaoExpiraEm: quando });
       const gravado = localStorage.getItem('waze_places_sessao_expira');
@@ -2207,8 +2215,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       const apos = localStorage.getItem('waze_places_sessao_expira');
       esquecerPrazoDaSessao();
       return { gravado, apos, aposSair: localStorage.getItem('waze_places_sessao_expira') };
-    }, DIAS(3));
-    checa(guarda.gravado === String(DIAS(3)), `${onde}: não guardou o prazo no aparelho`, String(guarda.gravado));
+    }, prazoDeTeste);
+    checa(guarda.gravado === String(prazoDeTeste), `${onde}: não guardou o prazo no aparelho`, String(guarda.gravado));
     checa(guarda.apos === guarda.gravado, `${onde}: resposta sem o campo APAGOU o prazo já conhecido`);
     checa(guarda.aposSair === null, `${onde}: o prazo sobreviveu ao "Sair"`);
     checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
