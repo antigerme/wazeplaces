@@ -28,7 +28,7 @@
          bloqueado e sobrava só o erro no console. São dois porque o script vem de
          static.cloudflareinsights.com e a telemetria vai pra cloudflareinsights.com
          (/cdn-cgi/rum), ou seja: script-src E connect-src. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://cloudflareinsights.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://cloudflareinsights.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).
@@ -122,7 +122,45 @@
     <!-- Depois do CSS de propósito: o paint já espera o stylesheet, então
          este script viaja em paralelo e não adia o primeiro quadro. Sem
          defer/async — precisa rodar ANTES de qualquer pintura. -->
-    <script src="js/tema.js"></script>
+    <!-- Tema aplicado ANTES do primeiro paint. INLINE, e o que autoriza isso é
+         um HASH na CSP — não `unsafe-inline`, que continua proibido (gotcha #14).
+         Hash funciona aqui porque o conteúdo é NOSSO e estável; foi justamente
+         por não ser estável (carrega cf-ray e timestamp) que o script da
+         Cloudflare não pôde ser liberado assim.
+         Era um arquivo, e era a última requisição bloqueando o render junto do
+         CSS. Inline ele custa zero requisição e roda antes de tudo.
+         MEXEU AQUI? o hash muda. `test/layout.test.mjs` recalcula e reprova se
+         as duas cópias da CSP (esta meta e o _headers) não tiverem o novo —
+         sem isso o tema seria BLOQUEADO e a app abriria no esquema errado. -->
+    <script>
+        (function () {
+          try {
+            var t = localStorage.getItem('waze_places_theme');
+            if (t !== 'light' && t !== 'dark') {
+              t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            if (t === 'dark') document.documentElement.classList.add('dark');
+            // Marca o claro EXPLICITAMENTE pra a media query do styles.css saber que
+            // não deve pintar escuro (ver o comentário lá). Sem isto, quem escolheu
+            // claro num sistema escuro veria fundo escuro por baixo de uma app clara.
+            else document.documentElement.classList.add('tema-claro');
+            // As duas metas com `media` já acertam quando o tema SEGUE o sistema.
+            // Só há o que corrigir quando a pessoa ESCOLHEU o contrário do sistema —
+            // e aí as metas por esquema têm que sair, senão a do sistema volta a valer
+            // (o navegador escolhe pela media query, não pela ordem).
+            var escolheu = (t === 'light' || t === 'dark') && localStorage.getItem('waze_places_theme') === t;
+            var sistema = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            if (escolheu && t !== sistema) {
+              var metas = document.querySelectorAll('meta[name="theme-color"]');
+              for (var i = 0; i < metas.length; i++) metas[i].parentNode.removeChild(metas[i]);
+              var nova = document.createElement('meta');
+              nova.setAttribute('name', 'theme-color');
+              nova.setAttribute('content', t === 'dark' ? '#0f172a' : '#f8fafc');
+              document.head.appendChild(nova);
+            }
+          } catch (e) {}
+        })();
+    </script>
 
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-[100dvh] text-slate-800 antialiased selection:bg-blue-200 dark:text-slate-100 dark:from-slate-900 dark:to-slate-800">

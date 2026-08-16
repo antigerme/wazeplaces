@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.16-03
+
+### Alterado
+- **O carregamento do próximo pedido parou de atrapalhar o atual.** A app adianta as fotos do pedido seguinte enquanto você olha o de agora — bom recurso, mas ele começava no mesmo instante que a foto que você precisa ver. Num pedido com quatro fotos isso eram 189 KB do que ainda não interessa disputando banda com os 12 KB que interessam. Agora ele espera a foto atual terminar.
+- **Menos uma coisa segurando o desenho da tela.** O trecho que aplica o tema antes de tudo virou parte da própria página em vez de um arquivo separado — uma requisição a menos, sem afrouxar nenhuma regra de segurança.
+
+---
+
 ## v2026.08.16-02
 
 ### Alterado

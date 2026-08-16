@@ -2368,6 +2368,28 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── A CSP não pode bloquear nada nosso ──────────────────────────────────
+// O tema é um <script> INLINE autorizado por HASH. Hash defasado BLOQUEIA o
+// script, e o sintoma é sutil: a app abre no esquema errado por um instante e
+// nada "quebra". Medido com o hash sabotado — o `tema-claro` some e o console
+// registra "Refused to execute inline script".
+//
+// Vale como rede geral: qualquer violação de CSP nossa aparece aqui.
+for (const tema of ['dark', 'light']) {
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const violacoes = [];
+  page.on('console', (m) => { if (/Content Security Policy|Refused to (execute|load)/i.test(m.text())) violacoes.push(m.text().slice(0, 120)); });
+  await page.addInitScript((t) => localStorage.setItem('waze_places_theme', t), tema);
+  await page.goto(BASE, { waitUntil: 'load' });
+  await page.waitForTimeout(400);
+  const classes = await page.evaluate(() => [...document.documentElement.classList]);
+  checa(violacoes.length === 0, `CSP · ${tema}: violação de CSP na carga`, violacoes[0]);
+  checa(classes.includes(tema === 'dark' ? 'dark' : 'tema-claro'),
+    `CSP · ${tema}: o script de tema não marcou a raiz ANTES do paint — hash defasado?`, JSON.stringify(classes));
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2394,4 +2416,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`
   + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (7 prazos, contraste composto, não vira alvo de toque e some no "Sair")`
   + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`
-  + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`);
+  + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
+  + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`);
