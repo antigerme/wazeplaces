@@ -38,9 +38,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.15-01
 
 ### Adicionado
-- **O ícone da app instalada ganha um pontinho quando há pedidos esperando.** Sem número, de propósito: o ponto só pode ser escrito enquanto a app está aberta, então um "118" ficaria congelado no ícone e mentiria a partir do instante em que você fecha. O ponto diz apenas *"tem trabalho"*, e isso continua verdade. Some sozinho quando a fila zera e quando você sai.
+- **O ícone da app instalada ganha um pontinho quando há pedidos esperando — no computador.** Sem número, de propósito: o ponto só pode ser escrito enquanto a app está aberta, então um "118" ficaria congelado no ícone e mentiria a partir do instante em que você fecha. O ponto diz apenas *"tem trabalho"*, e isso continua verdade. Some sozinho quando a fila zera e quando você sai.
 
-  **Não pede permissão de notificação nenhuma.** No iPhone o pontinho depende de notificações autorizadas; se não estiverem, ele simplesmente não aparece — e a app não te interrompe pra pedir. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
+  **Onde ele aparece de verdade** (esta parte foi corrigida depois da entrega, quando [@antigerme](https://www.waze.com/user/editor/antigerme) testou no aparelho dele e não viu ponto nenhum):
+
+  | onde | aparece? |
+  |---|---|
+  | Windows, macOS e ChromeOS, app instalada pelo Chrome ou Edge | sim |
+  | **Android** | **não, e não é possível** |
+  | iPhone e iPad, app na tela de início | só com notificações autorizadas |
+
+  **No Android o pontinho nunca vai aparecer**, e não é falta da app nem instalação errada: o Chrome do Android não tem essa função. O badge do Android é derivado de notificação e o sistema só deixa *esconder* um, nunca acender — por isso a função nunca foi portada para lá. Trocar o ponto por um número também não resolveria: o número é justamente a parte que o Android não sabe fazer.
+
+  **Não pede permissão de notificação nenhuma.** No iPhone o pontinho depende de notificações autorizadas; se não estiverem, ele simplesmente não aparece — e a app não te interrompe pra pedir. Onde a função não existe, a app não faz nada e não reclama: o "Restam" na tela continua sendo o indicador que funciona em todo aparelho. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
 
 ---
 
