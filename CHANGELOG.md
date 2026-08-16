@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.16-08
+
+### Adicionado
+- **Ao ampliar uma foto, você vê de quando ela é.** A etiqueta do canto, que antes só dizia qual foto era (`3 / 7`), agora diz também a idade: `3 / 7 · há 2 meses`, ou o ano quando é antiga. A data exata aparece ao passar o mouse.
+
+  Isso importa por causa da lixeira: a pergunta que vem antes de excluir uma foto é *"isto ainda é este lugar?"*. Medindo as filas dos seis países, **39% das fotos têm mais de três anos** — a mais antiga tinha quase doze — e até agora nada na tela dizia isso. Quase metade tem menos de um mês, então a idade separa na hora o que é proposta nova do que é acervo antigo do local.
+
+  Não custa nenhuma consulta a mais: o dado já vinha junto com as fotos. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+---
+
 ## v2026.08.16-05
 
 ### Adicionado

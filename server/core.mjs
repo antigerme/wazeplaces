@@ -1369,10 +1369,21 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     // A lista vai por ID e não por índice: o carrossel reordena, o índice não
     // identifica nada, e apagar por posição é como se apaga a foto errada.
     const approvedImageIds = [];
+    // Quando cada foto foi tirada, por id. MEDIDO nos 6 países obrigatórios:
+    // 3176 de 3176 fotos trazem o campo, e ele se chama `date` — o SDK declara
+    // `creationDate`, mas a resposta do Search/List não usa esse nome. Fosse
+    // pela tipagem, sairia `undefined` em tudo. (Já era assim com
+    // `isApproved` × `approved`, logo abaixo: os dois shapes divergem.)
+    //
+    // Por ID e não por índice, pela mesma razão do `approvedImageIds`: o
+    // carrossel reordena e o frontend remove foto excluída da lista, então
+    // posição não identifica nada.
+    const imageDates = {};
     for (const img of venue.images || []) {
       if (!img || !img.id) continue;
       allImageUrls.push(WAZE_IMAGE_BASE + img.id);
       if (img.approved === true) approvedImageIds.push(img.id);
+      if (Number.isFinite(img.date) && img.date > 0) imageDates[img.id] = img.date;
     }
 
     for (const ur of venue.venueUpdateRequests) {
@@ -1549,6 +1560,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         imageUrl: allImageUrls.length ? allImageUrls[0] : null,
         imageUrls: allImageUrls,
         approvedImageIds,
+        imageDates,
         changes,
         brand,
         brandKnown,
