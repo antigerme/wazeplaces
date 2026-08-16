@@ -12,6 +12,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -188,6 +189,44 @@ test('a ordem dos <link> mantém o NOSSO CSS vencendo o empate', () => {
   // A saída é gerada: editar à mão volta na próxima `npm run css`.
   assert.match(APP, /^\/\* GERADO por tools\/gerar-css\.mjs/,
     'o css/app.css perdeu o cabeçalho de "não edite"');
+});
+
+test('o hash do script de tema bate com as DUAS cópias da CSP', () => {
+  // O tema é aplicado por um script INLINE (para não custar requisição antes do
+  // primeiro paint), e o que autoriza isso é um hash na CSP — nunca
+  // `unsafe-inline`, que continua proibido.
+  //
+  // O risco é silencioso e caro: mexer no script sem atualizar o hash faz o
+  // navegador BLOQUEAR o tema. A app abre no esquema errado (fundo claro em
+  // quem usa escuro), e nada quebra a ponto de alguém notar em teste de layout.
+  // Por isso o hash é RECALCULADO aqui, não conferido contra um literal.
+  const HTML_ = read('index.html');
+  const m = /<script>([\s\S]*?)<\/script>/.exec(HTML_);
+  assert.ok(m, 'sumiu o script inline do tema');
+  assert.match(m[1], /waze_places_theme/, 'o primeiro <script> inline não é o do tema');
+  const hash = 'sha256-' + createHash('sha256').update(m[1], 'utf8').digest('base64');
+
+  // As DUAS cópias: o browser aplica a INTERSEÇÃO delas (gotcha #14), então
+  // faltar em uma bloqueia igual a faltar nas duas.
+  const headers = read('_headers');
+  assert.ok(HTML_.includes("'" + hash + "'"),
+    `a meta CSP do index.html não tem o hash do script de tema (${hash}) — o tema seria bloqueado`);
+  assert.ok(headers.includes("'" + hash + "'"),
+    `o _headers não tem o hash do script de tema (${hash}) — o tema seria bloqueado em produção`);
+
+  // E o `unsafe-inline` NÃO pode ter voltado junto: o hash existe pra evitá-lo.
+  for (const [nome, txt] of [['index.html', HTML_], ['_headers', headers]]) {
+    const sp = /script-src([^;]*);/.exec(txt);
+    assert.ok(sp, `${nome}: sumiu o script-src da CSP`);
+    assert.ok(!sp[1].includes("unsafe-inline"),
+      `${nome}: 'unsafe-inline' voltou pro script-src — o hash existe justamente pra não precisar dele`);
+    assert.ok(!sp[1].includes("unsafe-eval"), `${nome}: 'unsafe-eval' voltou pro script-src`);
+  }
+
+  // Um só: cada inline novo precisa do seu hash, e passar despercebido aqui
+  // significaria um script bloqueado em silêncio.
+  assert.equal((HTML_.match(/<script>/g) || []).length, 1,
+    'apareceu outro <script> inline — ou ele ganha hash próprio na CSP, ou vira arquivo em js/');
 });
 
 test(':focus-visible não pode escrever border-radius', () => {
@@ -749,10 +788,23 @@ test('o HTML não tem NENHUM script inline', () => {
   //    builds: em produção o script injetado executava e lia o token; aqui é
   //    bloqueado. Um único <script> inline de volta obriga a reabrir o
   //    'unsafe-inline' e desfaz isso inteiro.
+  // A premissa MUDOU, e a mudança é estreita: existe UM script inline, o do
+  // tema, e o que o autoriza é um HASH na CSP — não `unsafe-inline`. A
+  // propriedade de segurança continua inteira, porque hash libera exatamente
+  // aquele texto: um script injetado por XSS tem outro conteúdo, outro hash, e
+  // segue bloqueado. Quem trava o hash é o teste
+  // 'o hash do script de tema bate com as DUAS cópias da CSP'.
+  //
+  // Aqui o que se guarda é o RESTO: nenhum inline além dele, e nenhuma string
+  // de interface dentro do que é inline (razão 1 acima, que não depende de CSP).
   const inline = [...HTML.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
     .map((m) => m[1].trim()).filter((c) => c !== '');
-  assert.deepEqual(inline, [],
-    `script inline de volta no index.html (${inline.length}) — a CSP vai precisar de 'unsafe-inline' de novo`);
+  assert.equal(inline.length, 1,
+    `esperava só o script do tema inline, achei ${inline.length} — cada inline novo precisa do seu hash na CSP`);
+  assert.match(inline[0], /waze_places_theme/, 'o script inline do index.html não é o do tema');
+  // Sem texto de interface: o que estiver aqui escapa da auditoria de i18n.
+  assert.doesNotMatch(inline[0], /textContent|innerHTML|\.title\s*=|alert\(/,
+    'o script inline do tema passou a escrever texto na tela — isso escapa da auditoria de i18n');
   // Handler inline (onclick=) também é script inline pra CSP.
   assert.doesNotMatch(HTML, /\son(?:click|load|error|change|submit|input)\s*=\s*["']/,
     'handler inline no HTML — bloqueado pela CSP e invisível pra auditoria');
@@ -1705,8 +1757,12 @@ test('splash do PWA: manifest, metas e CSS não podem divergir', () => {
     assert.match(sel, /:not\(\.tema-claro\)/,
       `seletor "${sel}" sem escopo — vai pintar escuro quem ESCOLHEU claro`);
   }
-  assert.match(read('js/tema.js'), /tema-claro/,
-    'o tema.js parou de marcar o claro explicitamente, e o escopo acima deixa de funcionar');
+  // O tema virou script INLINE no index.html (ver o teste do hash da CSP), então
+  // é lá que se confere — ler `js/tema.js` passou a quebrar com ENOENT.
+  const inlineTema = /<script>([\s\S]*?)<\/script>/.exec(read('index.html'));
+  assert.ok(inlineTema, 'sumiu o script inline do tema');
+  assert.match(inlineTema[1], /tema-claro/,
+    'o script do tema parou de marcar o claro explicitamente, e o escopo acima deixa de funcionar');
 });
 
 // Dimensões de PNG e JPEG sem dependência nenhuma — o `npm test` é `node --test`

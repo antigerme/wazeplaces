@@ -2825,7 +2825,45 @@ function renderCurrentCard() {
     // zerar de novo (a classe ficaria pendurada do "Tudo limpo!" anterior).
     document.getElementById('noMoreCards').classList.remove('celebrate');
     document.getElementById('noMoreCards').classList.add('hidden');
-    prefetchNextImage();
+    agendarAquecimento(card);
+}
+
+// Tempo máximo que o aquecimento espera a foto do card. Rede de segurança: foto
+// que trava não pode cancelar o aquecimento do próximo pedido, senão o recurso
+// desaparece exatamente na rede ruim, que é onde ele mais serve.
+const AQUECIMENTO_ESPERA_MAX_MS = 2500;
+
+// O aquecimento do PRÓXIMO pedido esperava zero: `prefetchNextImage()` era
+// chamado na linha seguinte ao card entrar no DOM, então as fotos do próximo
+// começavam no mesmo instante que a do atual.
+//
+// MEDIDO no relatório de produção, num pedido com 4 fotos:
+//
+//   2715ms   12KB  ← a foto do card (é ela o LCP)
+//   2715ms   54KB  ┐
+//   2715ms   79KB  ├ fotos do PRÓXIMO pedido, aquecendo junto
+//   2716ms   44KB  ┘
+//
+// 189 KB do que ainda não é preciso disputando banda com os 12 KB que o editor
+// precisa ver AGORA. Elas já iam com `fetchPriority: low`, mas prioridade
+// ordena a fila, não cria banda: num link estrangulado o LCP paga na mesma.
+//
+// Agora o aquecimento começa quando a foto atual termina. Card sem foto (20% da
+// fila medida) ou com o mapa no primeiro slide não tem o que esperar — dispara
+// na hora.
+function agendarAquecimento(card) {
+    let disparado = false;
+    const disparar = () => {
+        if (disparado) return;
+        disparado = true;
+        prefetchNextImage();
+    };
+    setTimeout(disparar, AQUECIMENTO_ESPERA_MAX_MS);
+    const img = card.querySelector('.card-image');
+    // `complete` é true também pra <img> sem src — a checagem do src vem antes.
+    if (!img || img.classList.contains('hidden') || !img.getAttribute('src') || img.complete) return disparar();
+    img.addEventListener('load', disparar, { once: true });
+    img.addEventListener('error', disparar, { once: true });
 }
 
 // Desenha o mini-mapa de evidência dentro do slide.

@@ -1,5 +1,6 @@
 // Registro e auto-atualização do service worker. Era um <script> inline; saiu
-// daqui pelo mesmo motivo do js/tema.js — CSP sem 'unsafe-inline' em script-src.
+// daqui porque a CSP não tem 'unsafe-inline' em script-src. (O tema é a exceção:
+// virou inline autorizado por HASH — ver o gotcha #14.)
 // De quebra, agora a auditoria de i18n enxerga este arquivo: foi aqui que o
 // aviso de nova versão ficou hardcoded em português sem ninguém ver.
     if ('serviceWorker' in navigator) {

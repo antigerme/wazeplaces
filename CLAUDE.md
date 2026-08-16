@@ -96,9 +96,10 @@ wazeplaces/
 │   ├── api.js               # Wrapper fetch() dos endpoints /api/* (única fonte de chamadas HTTP; SEM .php)
 │   ├── app.js               # AppState, render, handlers, fila, prefetch, error handling
 │   ├── swipe.js             # Gestos drag/swipe (esquerda, direita, cima)
-│   ├── tema.js              # Aplica o tema ANTES do first paint. Externo (não inline) pra CSP
-│   │                        #   poder proibir script inline. Vai DEPOIS do CSS: o paint já espera
-│   │                        #   o stylesheet, então não custa nada (medido: 996 → 992ms de FCP)
+│   │                        # (o tema virou <script> INLINE no index.html, autorizado por HASH
+│   │                        #  na CSP — nunca unsafe-inline. Era a última requisição bloqueando
+│   │                        #  o render junto do CSS. test/layout.test.mjs recalcula o hash e
+│   │                        #  reprova se as DUAS cópias da CSP não tiverem o novo.)
 │   ├── sw-register.js       # Registro/auto-update do service worker. Externo pelo mesmo motivo
 │   └── (sem vendor: Tailwind é pré-compilado em css/app.css)
 ├── server/
@@ -603,7 +604,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 10. **NUNCA exponha valor de cookie** em log, toast, commit ou mensagem. Nome pode; valor não.
 11. **O SW não pode usar fallback de HTML pra asset que falha** — devolvia HTML no lugar do `api.js` e a app morria com "API is not defined". E ignore cross-origin (`url.origin !== self.location.origin → return`).
 12. **Atrás de Cloudflare: desabilite Rocket Loader, Auto Minify e Script Monitor** — reescrevem HTML/JS.
-14. **A CSP tem DUAS cópias em sincronia** (`<meta>` do index.html e `_headers`), e o browser aplica a INTERSEÇÃO. Sem `unsafe-eval` e sem `'unsafe-inline'` em `script-src` — script novo vai pra arquivo em `js/`, nunca inline. `style-src` mantém `unsafe-inline` de propósito (o swipe escreve `style.transform` por quadro).
+14. **A CSP tem DUAS cópias em sincronia** (`<meta>` do index.html e `_headers`), e o browser aplica a INTERSEÇÃO. Sem `unsafe-eval` e sem `'unsafe-inline'` em `script-src`. **Script inline é permitido SÓ com HASH**, e hoje há exatamente um: o do tema, que precisa rodar antes do primeiro paint e não vale uma requisição bloqueante. Hash libera aquele texto e mais nada — XSS tem outro conteúdo, outro hash, segue bloqueado. **Só serve pra conteúdo NOSSO e estável**: o script da Cloudflare (Bot Management) carrega `cf-ray` e timestamp, então muda a cada resposta e não pode ser liberado assim (medido: 3 cargas, 3 hashes). Inline novo → hash próprio nas duas cópias, e `test/layout.test.mjs` recalcula e reprova quem esquecer — hash defasado BLOQUEIA o script em silêncio. Fora isso, script vai pra arquivo em `js/`. `style-src` mantém `unsafe-inline` de propósito (o swipe escreve `style.transform` por quadro).
 15. **Rank do Waze é 0-indexed; a UI mostra `rank + 1`** — exibição soma 1, comparação usa o valor cru. Confundir dá bug silencioso em qualquer direção.
 16. **O gate de login é `isStaff || (rank >= MIN_RANK_WAZE && isAreaManager)`**, no BACKEND — não dá pra burlar editando JS.
 17. **Bumpe `js/version.js` E o `CACHE_NAME` do SW no MESMO commit** ao tocar em `index.html`, `js/`, `css/` ou `icons/`. É o bug mais ranzinza do projeto: users ficam dias na versão velha.
