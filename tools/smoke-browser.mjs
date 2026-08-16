@@ -2306,6 +2306,68 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── A foto de perfil não pode competir com a foto do PEDIDO ─────────────
+// Ela é a imagem mais pesada da app (214 KB, medido na produção) e aparece com
+// 32px. A regra: nem começa a ser buscada antes de a tela estar pronta.
+//
+// Medido pela REDE, não por flag interna — o que importa é o que sai do
+// aparelho. E com PROVA POSITIVA nos dois sentidos: "não pediu ainda" sozinho
+// passaria também se o avatar nunca carregasse, que seria um defeito pior.
+{
+  const AVATAR = 'https://social-row.waze.com/SocialMediaServer/images/profile/teste-abc';
+  const PX = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
+  for (const cenario of ['com fila', 'fila vazia']) {
+    const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+    const pedidos = [];
+    await ctx.route('https://social-row.waze.com/**', (r) => { pedidos.push('avatar'); return r.fulfill({ body: PX, contentType: 'image/jpeg' }); });
+    await ctx.route('https://venue-image.waze.com/**', (r) => { pedidos.push('foto-do-card'); return r.fulfill({ body: PX, contentType: 'image/jpeg' }); });
+    await ctx.route('https://www.waze.com/**', (r) => r.fulfill({ body: PX, contentType: 'image/png' }));
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(e.message));
+    await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+      JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true })));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(500);
+    const onde = `avatar · ${cenario}`;
+
+    // Perfil chega ANTES da tela ficar pronta — é a ordem real: o `perfil` e o
+    // `buscar-places` saem quase juntos, e o perfil costuma voltar primeiro.
+    await page.evaluate(([av, fila]) => {
+      API.setSession('token-de-teste');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false, profileImageUrl: av };
+      AppState.serverTotal = fila.length; AppState.hasMore = false;
+      AppState.queue = JSON.parse(JSON.stringify(fila));
+      AppState.currentPlace = AppState.queue[0] || null;
+      showMainScreen(); renderProfileHeader(); updateStats(); showLoading(false);
+    }, [AVATAR, cenario === 'com fila' ? FIXTURES_PAISES.filter((p) => (p.imageUrls || []).length).slice(0, 2) : []]);
+    await page.waitForTimeout(900);
+    checa(!pedidos.includes('avatar'),
+      `${onde}: a foto de perfil foi buscada ANTES da tela ficar pronta`, pedidos.join(' → '));
+    // A caixa tem que estar reservada desde já, senão a foto chegando empurra o cabeçalho.
+    const cx = await page.evaluate(() => {
+      const el = document.getElementById('userAvatar');
+      const r = el.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height), visivel: getComputedStyle(el).display !== 'none' };
+    });
+    checa(cx.visivel && cx.w >= 24 && cx.h >= 24,
+      `${onde}: a caixa do avatar não está reservada — a foto vai empurrar o cabeçalho quando chegar`, JSON.stringify(cx));
+
+    // Agora a tela fica pronta. PROVA POSITIVA: o avatar TEM que chegar.
+    await page.evaluate((temFila) => { if (temFila) showCurrentPlace(); else showNoPlaces(); }, cenario === 'com fila');
+    await page.waitForTimeout(2600);   // idle + o timeout de 2s do requestIdleCallback
+    checa(pedidos.includes('avatar'),
+      `${onde}: a foto de perfil NUNCA chegou — o editor fica com o cinza pra sempre`, pedidos.join(' → '));
+    if (cenario === 'com fila') {
+      checa(pedidos.indexOf('foto-do-card') < pedidos.indexOf('avatar'),
+        `${onde}: a foto de perfil passou na frente da foto do pedido`, pedidos.join(' → '));
+    }
+    checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2331,4 +2393,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
   + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`
   + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (7 prazos, contraste composto, não vira alvo de toque e some no "Sair")`
-  + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`);
+  + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`
+  + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`);
