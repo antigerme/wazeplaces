@@ -1715,6 +1715,11 @@ button:active {
 #imageLightbox.com-tira .lb-baixo { bottom: calc(1rem + var(--lb-tira) + env(safe-area-inset-bottom)); }
 
 #lightboxStrip {
+  /* `safe center` e não `center`: centraliza quando cabe (tela larga com poucas
+     fotos ficava com tudo grudado à esquerda) e cai pra início quando a tira
+     ROLA — `center` puro corta as primeiras miniaturas, que ficam fora do
+     alcance da rolagem. */
+  justify-content: safe center;
   height: calc(var(--lb-tira) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   scrollbar-width: none;
