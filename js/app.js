@@ -1015,6 +1015,31 @@ function setupModalListeners() {
     });
 }
 
+// SOBRE O `thumb100_` DO WAZE, E POR QUE ELE NÃO É USADO AQUI
+//
+// O Waze serve `thumb100_` (100x75, 3,2 KB) além do `thumb700_` (700x525,
+// 80,8 KB) — 25x menos bytes. A tira de miniaturas chegou usando ele, e estava
+// ERRADO. O owner apontou: o aquecimento JÁ baixou os `thumb700` deste card.
+//
+// Medido: renderizar um card dispara o aquecimento das 4 fotos do SEGUINTE em
+// `thumb700` (`PREFETCH_TETO_FOTOS = 4`, cobrindo 91,7% dos cards por inteiro),
+// e o `venue-image.waze.com` responde com `max-age=3600`. Quando o lightbox
+// abre, essas fotos estão em cache e custam ZERO.
+//
+// O `thumb100` é outra URL, então nunca aproveita esse cache: seriam 4
+// requisições novas e ~12,8 KB por local, por fotos que o aparelho já tem. Numa
+// sessão de triagem com dezenas de locais de várias fotos, isso vira centenas
+// de KB de duplicata — na conta de dados do editor.
+//
+// E tem o outro lado: reusar o `thumb700` na tira PRÉ-AQUECE o carrossel (é a
+// mesma imagem que aparece ao tocar em ›), enquanto o `thumb100` baixa algo que
+// nunca mais é usado. O preço é decodificar 700x525 pra desenhar em 59x44 —
+// pago em memória, não em rede, e limitado pelo `loading="lazy"` (só as
+// miniaturas visíveis decodificam).
+//
+// Resumo pro próximo que achar o `thumb100`: ele é ótimo em abstrato e inútil
+// aqui, porque a app já tem a foto grande antes de precisar da pequena.
+
 const Lightbox = {
     urls: [],
     idx: 0,
@@ -1142,6 +1167,62 @@ const Lightbox = {
         // adivinhar qual vale pra foto que está vendo.
         const apr = document.getElementById('lightboxApprove');
         if (apr) apr.classList.toggle('hidden', noTreino || !this.podeAprovarAtual());
+        this._renderTira();
+    },
+    // Todas as fotos do local de uma vez, tocáveis pra pular direto.
+    //
+    // O problema que resolve: 32% dos pedidos da fila real têm 2+ fotos (até 7),
+    // e hoje só dá pra tatear no `‹ ›` sem saber quantas faltam nem o que vem.
+    // Em `FLAGGED_PHOTO` e `NEW_PHOTO` isso é a própria decisão — "esta, entre
+    // estas" e "a proposta ao lado das que o local já tem".
+    _renderTira() {
+        const tira = document.getElementById('lightboxStrip');
+        const lb = document.getElementById('imageLightbox');
+        if (!tira || !lb) return;
+        const varias = this.urls.length > 1;
+        lb.classList.toggle('com-tira', varias);
+        tira.classList.toggle('hidden', !varias);
+        if (!varias) { tira.innerHTML = ''; tira.dataset.chave = ''; return; }
+        // Reconstrói só quando a LISTA muda. Excluir uma foto muda; trocar de
+        // foto não — e recriar a cada troca perderia a rolagem da tira e
+        // rebaixaria as miniaturas já carregadas.
+        const chave = this.urls.join('|');
+        if (tira.dataset.chave !== chave) {
+            tira.innerHTML = '';
+            this.urls.forEach((u, i) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'lb-mini';
+                const im = document.createElement('img');
+                im.src = u;   // a MESMA URL da foto grande: já está em cache (ver a nota acima)
+                im.alt = '';
+                im.decoding = 'async';
+                im.loading = 'lazy';
+                b.appendChild(im);
+                b.addEventListener('click', () => { this.idx = i; this._render(); });
+                tira.appendChild(b);
+            });
+            tira.dataset.chave = chave;
+        }
+        [...tira.children].forEach((b, i) => {
+            const atual = i === this.idx;
+            b.classList.toggle('atual', atual);
+            b.setAttribute('aria-current', atual ? 'true' : 'false');
+            b.setAttribute('aria-label', t('lightbox.strip.item', { i: i + 1, n: this.urls.length }));
+            // O selo vai junto: sem ele a tira mostra N fotos iguais e esconde
+            // qual delas É o pedido — que é a única coisa que importa aqui.
+            const velho = b.querySelector('.lb-mini-selo');
+            if (velho) velho.remove();
+            if (i === this.newIdx && this.newIdx >= 0) {
+                const selo = document.createElement('span');
+                selo.className = 'lb-mini-selo';
+                selo.setAttribute('aria-hidden', 'true');
+                selo.textContent = this.eDenuncia ? '🚩' : '✨';
+                b.appendChild(selo);
+            }
+        });
+        const atual = tira.children[this.idx];
+        if (atual && atual.scrollIntoView) atual.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     },
     // A foto aberta é a PENDENTE deste pedido e este editor pode aprovar?
     //

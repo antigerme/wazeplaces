@@ -20,15 +20,26 @@
          (issue aberta no WICG). Ver o comentário no manifest.json. -->
     <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-    <!-- CSP: mantida em sync com o arquivo _headers (Cloudflare) — ver gotcha #14.
+    <!-- CSP: mantida em sync com o `_headers` (Cloudflare) E com o `CSP` do
+         server/node.mjs (VM) — são TRÊS cópias, ver gotcha #14. O browser aplica a
+         INTERSEÇÃO, então divergência não dá erro: só faz algo parar de carregar,
+         em produção, calado.
          Sem 'unsafe-eval' (Tailwind é pré-compilado) e sem fonts.googleapis/gstatic
-         (a Inter é auto-hospedada em fonts/).
-         cloudflareinsights: o Cloudflare INJETA o beacon do Web Analytics no HTML
-         quando o request vem de um navegador — sem estes dois hosts ele era
-         bloqueado e sobrava só o erro no console. São dois porque o script vem de
-         static.cloudflareinsights.com e a telemetria vai pra cloudflareinsights.com
-         (/cdn-cgi/rum), ou seja: script-src E connect-src. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://cloudflareinsights.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+         (a Inter é auto-hospedada em fonts/). O 'sha256-…' autoriza UM script
+         inline, o do tema — nunca 'unsafe-inline'.
+         `cloudflareinsights` SAIU: o comentário antigo dizia que o Cloudflare
+         injeta o beacon do Web Analytics, e isso foi MEDIDO como falso — não há
+         tag nenhuma dele no HTML de produção. Eram dois hosts liberados para algo
+         que nunca carrega, e permissão morta é permissão que alguém reaproveita
+         sem pensar. Se o Web Analytics for ligado um dia, voltam os dois
+         (script-src para static.cloudflareinsights.com, connect-src para
+         cloudflareinsights.com) — e aí eles voltam a ter uso.
+         O que a CSP ainda bloqueia de propósito é o bootstrap INLINE do Bot
+         Fight Mode. Não há como liberá-lo: hash é impossível (carrega cf-ray e
+         timestamp, muda a cada resposta) e nonce não chega — MEDIDO, o Cloudflare
+         injeta o script ANTES da fase de cabeçalho onde a Transform Rule geraria
+         o nonce, então ele nunca é copiado para a tag. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).
@@ -1122,7 +1133,7 @@
         <!-- A dica reserva o canto direito (`right-20`): o botão de ação mora
              lá, e centralizada de ponta a ponta ela ficava CORTADA por ele em
              tela estreita — já era assim com a lixeira sozinha. -->
-        <p id="lightboxZoomHint" class="absolute left-4 right-20 z-10 text-white/70 text-xs text-center bg-black/40 px-3 py-1.5 rounded-full pointer-events-none truncate" style="bottom: calc(1rem + env(safe-area-inset-bottom))" data-i18n="lightbox.zoomHint">Toque duplo pra dar zoom · arraste pro lado pra trocar de foto</p>
+        <p id="lightboxZoomHint" class="lb-baixo absolute left-4 right-20 z-10 text-white/70 text-xs text-center bg-black/40 px-3 py-1.5 rounded-full pointer-events-none truncate"  data-i18n="lightbox.zoomHint">Toque duplo pra dar zoom · arraste pro lado pra trocar de foto</p>
         <!-- UM slot de ação, no canto de BAIXO, do lado oposto ao ✕ do topo.
              Os dois botões abaixo são mutuamente exclusivos e ocupam o MESMO
              lugar: foto pendente se aprova, foto já no mapa se exclui.
@@ -1136,13 +1147,27 @@
              `.lb-acao` põe a borda de DOIS TONS (anel branco + sombra escura).
              Um tom só não basta: pra toda cor sólida existe uma foto da mesma
              luminância, e aí a borda some. O par branco/escuro é 21:1 sempre. -->
-        <button id="lightboxDelete" type="button" aria-label="Excluir foto" data-i18n-aria="lightbox.delete.aria" title="Excluir foto" data-i18n-title="lightbox.delete.aria" class="lb-acao hidden absolute z-10 text-white bg-red-600 hover:bg-red-500 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="bottom: calc(1rem + env(safe-area-inset-bottom)); right: 0.75rem">
+        <button id="lightboxDelete" type="button" aria-label="Excluir foto" data-i18n-aria="lightbox.delete.aria" title="Excluir foto" data-i18n-title="lightbox.delete.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-red-600 hover:bg-red-500 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>
-        <button id="lightboxApprove" type="button" aria-label="Aprovar foto" data-i18n-aria="lightbox.approve.aria" title="Aprovar foto" data-i18n-title="lightbox.approve.aria" class="lb-acao hidden absolute z-10 text-white bg-emerald-700 hover:bg-emerald-600 disabled:opacity-70 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="bottom: calc(1rem + env(safe-area-inset-bottom)); right: 0.75rem">
+        <button id="lightboxApprove" type="button" aria-label="Aprovar foto" data-i18n-aria="lightbox.approve.aria" title="Aprovar foto" data-i18n-title="lightbox.approve.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-emerald-700 hover:bg-emerald-600 disabled:opacity-70 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem">
             <span id="lightboxApproveSpinner" class="hidden w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden="true"></span>
             <svg id="lightboxApproveIcon" class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
         </button>
+        <!-- Tira de miniaturas. Só existe com 2+ fotos (32% dos pedidos, medido na
+             fila real) e ENTRA NO LAYOUT em vez de flutuar sobre a foto: medida a
+             tarja livre do `object-contain`, ela some no iPhone SE com foto retrato
+             (27px) e no celular deitado (0px) — flutuar cobriria justamente o que
+             se veio olhar. O `.com-tira` no contêiner dá o padding e empurra os
+             controles de baixo (`.lb-baixo`).
+             As miniaturas reusam a MESMA URL da foto grande, que o aquecimento já
+             trouxe (`PREFETCH_TETO_FOTOS = 4`, `max-age=3600` no CDN do Waze): custo
+             de rede ZERO. O `thumb100_` de 3,2 KB existe, mas seria URL nova — 4
+             requisições por local por fotos que o aparelho já tem. Ver a nota longa
+             em js/app.js, acima do Lightbox. -->
+        <div id="lightboxStrip" role="group" aria-label="Todas as fotos deste local"
+             data-i18n-aria="lightbox.strip.aria"
+             class="hidden absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 overflow-x-auto px-3 bg-black/70"></div>
         <img id="lightboxImage" class="max-w-full max-h-full object-contain will-change-transform" style="touch-action: none" alt="" draggable="false">
     </div>
 

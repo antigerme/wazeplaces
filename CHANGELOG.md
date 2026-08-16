@@ -8,6 +8,29 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.16-05
+
+### Adicionado
+- **Ao ampliar uma foto, você vê todas as fotos do local de uma vez.** Uma tira de miniaturas embaixo, tocáveis para pular direto — antes só dava para ir tateando no `‹ ›`, sem saber quantas faltavam nem o que vinha. A foto do pedido continua marcada com o mesmo selo (✨ nova, 🚩 denunciada) também na tira, senão seriam N fotos iguais.
+
+  Ajuda mais em dois casos que são exatamente onde a decisão mora: **foto denunciada** (o pedido é sobre uma foto entre várias) e **foto nova** (a proposta ao lado das que o local já tem).
+
+  Aparece só quando o local tem duas ou mais fotos — cerca de um terço dos pedidos. E **não custa dados nenhum**: a app já adianta as fotos do pedido seguinte enquanto você olha o atual, então quando você amplia elas já estão no aparelho, e a tira reaproveita exatamente as mesmas. Observação de [@antigerme](https://www.waze.com/user/editor/antigerme), que percebeu o desperdício na primeira versão.
+
+  **A tira nunca cobre a foto.** Medi o espaço livre em cinco aparelhos: na maioria sobra bastante, mas no iPhone SE com foto em pé sobram 27 pixels e no celular deitado, nenhum. Então ela ocupa espaço de verdade em vez de flutuar por cima — a foto encolhe um pouco, mas continua inteira à vista.
+
+---
+
+## v2026.08.16-04
+
+### Corrigido
+- **Rodando fora do Cloudflare, a app estava com uma camada de segurança a menos.** A política que restringe quais scripts podem rodar na página existia em dois lugares: dentro do próprio HTML e num arquivo que só o Cloudflare lê. Quem subisse a app num servidor próprio ficava só com a primeira — e nada avisava. Agora o servidor próprio manda a política junto, igual ao Cloudflare, e um teste sobe o servidor de verdade para conferir que ela sai na resposta.
+
+### Alterado
+- **Uma permissão que não servia para nada saiu da política de segurança.** Ela liberava o domínio da análise de tráfego do Cloudflare, que não é carregado nesta app. Permissão que não é usada é permissão que alguém reaproveita sem pensar.
+
+---
+
 ## v2026.08.16-03
 
 ### Alterado

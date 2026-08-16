@@ -2390,6 +2390,85 @@ for (const tema of ['dark', 'light']) {
   await ctx.close();
 }
 
+// ── Tira de miniaturas do lightbox ─────────────────────────────────────
+// Ela ENTRA no layout em vez de flutuar, e o motivo é medido: a tarja livre do
+// `object-contain` some no iPhone SE com foto retrato (27px) e no celular
+// deitado (0px). Flutuar cobriria justamente a foto que decide o pedido.
+//
+// Quatro coisas que quebram calado:
+//   1. voltar a flutuar — cobre a foto, e no aparelho onde ninguém testa;
+//   2. cobrir a dica de zoom ou os botões de excluir/aprovar;
+//   3. miniatura menor que 44px de alvo;
+//   4. a tira pedir URL NOVA. Ela tem que reusar a mesma do carrossel, que o
+//      aquecimento já trouxe — o `thumb100_` do Waze é 25x menor, mas é outra
+//      URL, então seriam 4 requisições e ~12,8 KB por local por fotos que o
+//      aparelho já tem. Achado do owner; ver a nota em js/app.js.
+const PX_TIRA = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
+for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }],
+                                    ['deitado', { width: 852, height: 393 }],
+                                    ['iPhone SE 2016', { width: 320, height: 568 }]]) {
+  const ctx = await browser.newContext({ viewport, locale: 'pt-BR', serviceWorkers: 'block' });
+  await ctx.route('https://venue-image.waze.com/**', (r) => r.fulfill({ body: PX_TIRA, contentType: 'image/jpeg' }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+  await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true })));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(500);
+
+  for (const nFotos of [1, 4]) {
+    const m = await page.evaluate(([fila, n]) => {
+      const p = JSON.parse(JSON.stringify(fila[0]));
+      p.imageUrls = Array.from({ length: n }, (_, i) => `https://venue-image.waze.com/thumbs/thumb700_f${i}`);
+      API.setSession('token-de-teste'); AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = 9; AppState.hasMore = false;
+      AppState.queue = [p]; AppState.currentPlace = p;
+      showMainScreen(); renderProfileHeader(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden'); showCurrentPlace();
+      if (Lightbox.isOpen()) Lightbox.close();
+      Lightbox.open(p.imageUrls, 0, 0, 'teste', false, p);
+      const tira = document.getElementById('lightboxStrip');
+      const lb = document.getElementById('imageLightbox');
+      const visivel = !tira.classList.contains('hidden');
+      const tr = tira.getBoundingClientRect();
+      const im = document.getElementById('lightboxImage').getBoundingClientRect();
+      const minis = [...tira.querySelectorAll('.lb-mini')].map((b) => b.getBoundingClientRect());
+      const baixos = ['lightboxZoomHint', 'lightboxDelete', 'lightboxApprove']
+        .map((id) => document.getElementById(id)).filter((e) => e && !e.classList.contains('hidden'))
+        .map((e) => e.getBoundingClientRect());
+      const src = (tira.querySelector('.lb-mini img') || {}).src || '';
+      return {
+        visivel, comTira: lb.classList.contains('com-tira'), nMinis: minis.length,
+        cobreFoto: visivel && tr.top < im.bottom - 0.5,
+        cobreControle: visivel && baixos.some((b) => b.bottom > tr.top + 0.5),
+        alvoPequeno: minis.filter((x) => x.height < 44 || x.width < 44).length,
+        // Comparar com as URLs do próprio lightbox é o que prova o reuso —
+        // medir "requisições novas" não serve, porque `route` do Playwright
+        // desliga o cache HTTP e TODA imagem aparece como pedido novo.
+        reusa: [...tira.querySelectorAll('.lb-mini img')].every((x) => Lightbox.urls.includes(x.getAttribute('src'))),
+        selos: tira.querySelectorAll('.lb-mini-selo').length,
+      };
+    }, [FIXTURES_PAISES.filter((p) => (p.imageUrls || []).length), nFotos]);
+    const onde = `tira · ${aparelho} · ${nFotos} foto(s)`;
+    if (nFotos === 1) {
+      // Com uma foto só a tira é ruído: some, e o padding do contêiner some junto.
+      checa(!m.visivel && !m.comTira, `${onde}: a tira apareceu com uma foto só`);
+      continue;
+    }
+    checa(m.visivel && m.comTira, `${onde}: a tira NÃO apareceu`);
+    checa(m.nMinis === nFotos, `${onde}: esperava ${nFotos} miniaturas, veio ${m.nMinis}`);
+    checa(!m.cobreFoto, `${onde}: a tira cobre a FOTO — ela tem que entrar no layout, não flutuar`);
+    checa(!m.cobreControle, `${onde}: a tira cobre a dica de zoom ou os botões de foto`);
+    checa(m.alvoPequeno === 0, `${onde}: ${m.alvoPequeno} miniatura(s) com alvo < 44px`);
+    checa(m.reusa, `${onde}: a tira pediu URL diferente da foto grande — perde o cache do aquecimento e baixa de novo o que já está no aparelho`);
+    checa(m.selos === 1, `${onde}: o selo da foto do pedido sumiu da tira — sem ele são N fotos iguais`, String(m.selos));
+  }
+  checa(erros.length === 0, `tira · ${aparelho}: erro de JS`, erros[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2417,4 +2496,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (7 prazos, contraste composto, não vira alvo de toque e some no "Sair")`
   + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
-  + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`);
+  + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
+  + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`);

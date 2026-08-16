@@ -813,11 +813,15 @@ test('o HTML não tem NENHUM script inline', () => {
     'o aviso de nova versão saiu do dicionário');
 });
 
-test('as DUAS cópias da CSP dizem a mesma coisa', () => {
-  // O <meta> do index.html e o arquivo _headers (Cloudflare) precisam bater: o
-  // browser aplica a INTERSEÇÃO das CSPs ativas, então divergência não dá erro
-  // — só faz alguma coisa parar de carregar, em produção, sem aviso (gotcha
-  // #14). Nunca houve teste disso; foram mantidas iguais na mão.
+test('as TRÊS cópias da CSP dizem a mesma coisa', () => {
+  // O <meta> do index.html, o _headers (Cloudflare) e o SECURITY_HEADERS do
+  // server/node.mjs (VM) precisam bater: o browser aplica a INTERSEÇÃO das CSPs
+  // ativas, então divergência não dá erro — só faz alguma coisa parar de
+  // carregar, em produção, sem aviso (gotcha #14).
+  //
+  // A do node.mjs entrou depois: o `_headers` é arquivo de Cloudflare e o Node
+  // nunca o leu, então rodar na VM era rodar só com o <meta>, uma camada a
+  // menos. A app tem que ser a MESMA nos dois destinos.
   const norm = (csp) => Object.fromEntries(
     csp.split(';').map((d) => d.trim()).filter(Boolean)
       .map((d) => { const [k, ...v] = d.split(/\s+/); return [k, v.sort().join(' ')]; }));
@@ -827,11 +831,28 @@ test('as DUAS cópias da CSP dizem a mesma coisa', () => {
   const headers = read('_headers').match(/Content-Security-Policy:\s*([^\n]+)/);
   assert.ok(headers, 'sumiu a CSP do arquivo _headers');
 
-  const a = norm(meta[1]);
-  const b = norm(headers[1]);
-  assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(), 'as duas CSPs têm diretivas diferentes');
+  const vm = read('server/node.mjs').match(/const CSP = "([^"]+)"/);
+  assert.ok(vm, 'o server/node.mjs parou de definir a CSP — a VM volta a rodar só com o <meta>');
+
+  const copias = { meta: norm(meta[1]), _headers: norm(headers[1]), 'node.mjs': norm(vm[1]) };
+  const nomes = Object.keys(copias);
+  for (const n of nomes.slice(1)) {
+    assert.deepEqual(Object.keys(copias[n]).sort(), Object.keys(copias.meta).sort(),
+      `as CSPs de "meta" e "${n}" têm diretivas diferentes`);
+  }
+  const a = copias.meta;
   for (const k of Object.keys(a)) {
-    assert.equal(a[k], b[k], `diretiva "${k}" diverge:\n  meta:     ${a[k]}\n  _headers: ${b[k]}`);
+    for (const n of nomes.slice(1)) {
+      assert.equal(copias[n][k], a[k],
+        `diretiva "${k}" diverge:\n  meta:     ${a[k]}\n  ${n}: ${copias[n][k]}`);
+    }
+  }
+  // Permissão morta é permissão que alguém vai reaproveitar sem pensar: o beacon
+  // do Web Analytics NÃO é injetado no HTML (conferido na produção), então o
+  // domínio dele não tem por que estar liberado.
+  for (const n of nomes) {
+    assert.doesNotMatch(JSON.stringify(copias[n]), /cloudflareinsights/,
+      `${n}: liberação de cloudflareinsights de volta — o beacon não é carregado, é permissão morta`);
   }
   // E script-src não pode voltar a permitir inline.
   assert.doesNotMatch(a['script-src'] || '', /unsafe-inline/,
