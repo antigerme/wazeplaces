@@ -2216,6 +2216,48 @@ function derrubarSessao(errorKey) {
     });
 }
 
+// ── A foto de perfil espera o primeiro card ──────────────────────────────
+// Ela é a imagem MAIS PESADA da app e a MENOS importante: 214 KB vindos do
+// Waze para aparecer com 32px no cabeçalho, e não existe variante menor
+// (sondadas 5 formas de URL, todas devolvem os mesmos 218 KB). O
+// `fetchpriority="low"` já a tirou da frente na fila de prioridades, mas os
+// bytes continuavam disputando a banda — em 1,6 Mbps são mais de um segundo de
+// cano, no exato momento em que o editor espera VER o pedido. Medido no
+// relatório de produção: 213 dos 249 KB de economia de imagem eram só ela.
+//
+// Então ela nem começa a ser buscada antes do primeiro card estar na tela.
+// Depois disso ainda espera a thread ficar ociosa — com `timeout`, porque
+// página ocupada pode nunca ficar ociosa e aí o avatar nunca chegaria.
+//
+// A CAIXA fica reservada desde o começo (o `w-8 h-8` com fundo cinza do
+// index.html), então quando a foto chega nada se move: trocar peso por
+// deslocamento de layout seria péssimo negócio.
+let avatarPendente = null;
+let telaPronta = false;
+
+function liberarAvatar() {
+    if (!avatarPendente || !telaPronta) return;
+    const url = avatarPendente;
+    avatarPendente = null;
+    const carregar = () => {
+        const el = document.getElementById('userAvatar');
+        // `authenticated` de novo aqui: entre o agendamento e o disparo cabe um
+        // logout, e aí a busca sairia já na tela de entrada.
+        if (el && AppState.authenticated) el.src = url;
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(carregar, { timeout: 2000 });
+    else setTimeout(carregar, 800);
+}
+
+// Chamado de onde a tela DEIXA de depender da rede. Fila vazia e erro de carga
+// contam: sem eles, quem abre com tudo tratado ficaria no cinza para sempre.
+// Idempotente de propósito — roda a cada swipe.
+function marcarTelaPronta() {
+    if (telaPronta) return;
+    telaPronta = true;
+    liberarAvatar();
+}
+
 function renderProfileHeader() {
     const p = AppState.profile;
     if (!p) return;
@@ -2224,8 +2266,13 @@ function renderProfileHeader() {
     const nameEl = document.getElementById('userName');
     const rankEl = document.getElementById('userRank');
     if (p.profileImageUrl) {
-        avatar.src = p.profileImageUrl;
         avatar.style.display = '';
+        // Já é esta a foto? Não mexe. Esta função roda de novo a cada troca de
+        // idioma, e reatribuir o `src` faz o navegador re-decodificar à toa.
+        if (avatar.getAttribute('src') !== p.profileImageUrl) {
+            avatarPendente = p.profileImageUrl;
+            liberarAvatar();
+        }
     } else {
         avatar.style.display = 'none';
     }
@@ -2281,6 +2328,8 @@ async function handleLogout() {
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
     esquecerPrazoDaSessao(); // prazo da sessão do Waze: some com o resto
+    avatarPendente = null;   // a próxima entrada volta a esperar o primeiro card
+    telaPronta = false;
     saveStats();
     saveFilters();
     savePreferences();
@@ -2535,6 +2584,7 @@ function abrirComoFunciona() {
 }
 
 function showCurrentPlace() {
+    marcarTelaPronta();   // libera a foto de perfil (ver `liberarAvatar`)
     try {
         renderCurrentCard();
     } catch (err) {
@@ -3888,6 +3938,7 @@ function prefetchNextImage() {
 }
 
 function showNoPlaces() {
+    marcarTelaPronta();   // fila vazia ou erro: não vem card, mas a tela está pronta
     AppState.currentPlace = null;
     removeCurrentCardEl();
     showLoading(false);

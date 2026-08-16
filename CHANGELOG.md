@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.16-02
+
+### Alterado
+- **A sua foto de perfil deixou de atrasar o primeiro pedido.** Ela vem do Waze com 214 KB para aparecer com 32 pixels no cabeçalho — é a imagem mais pesada da app e a menos importante, e não existe versão menor no Waze. Agora ela só começa a ser buscada **depois que o primeiro card está na tela**, e ainda espera o aparelho ficar ocioso.
+
+  Em rede móvel esses 214 KB eram mais de um segundo de banda ocupada bem na hora em que você está esperando **ver** o pedido. O espaço dela no cabeçalho fica reservado desde o começo, então quando a foto chega nada se move.
+
+  Se a sua fila estiver vazia, ela carrega assim mesmo — ninguém fica com o círculo cinza para sempre.
+
+---
+
 ## v2026.08.16-01
 
 ### Alterado
