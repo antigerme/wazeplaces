@@ -1040,6 +1040,39 @@ function setupModalListeners() {
 // Resumo pro próximo que achar o `thumb100`: ele é ótimo em abstrato e inútil
 // aqui, porque a app já tem a foto grande antes de precisar da pequena.
 
+// Quando a foto foi tirada, na forma que o editor usa pra decidir.
+//
+// POR QUE ISTO IMPORTA: no lightbox mora a lixeira, e a pergunta que antecede
+// excluir é "isto ainda é este lugar?". MEDIDO nos 6 países obrigatórios (3176
+// fotos): a distribuição é BIMODAL — 48,5% têm menos de um mês (são as
+// propostas) e 39,2% têm MAIS DE TRÊS ANOS, chegando a 12. Quase nada no meio.
+// Ou seja, a data separa na hora "esta é a proposta" de "este é o acervo
+// antigo", e hoje 39% das fotos chegam sem nenhum sinal disso na tela.
+//
+// FORMATO guiado pelos próprios dados: relativo pras recentes (metade dos
+// casos, e "há 3 dias" lê melhor que uma data) e ANO pras antigas ("2019" lê
+// melhor que "há 2350 dias"). O corte é 1 ano.
+//
+// `Intl.RelativeTimeFormat` em vez de chaves no dicionário: ele resolve plural
+// por idioma sozinho, e o projeto não tem ICU — chave manual é exatamente onde
+// nasce o "1 dias" (ver a nota do {undoSeg} no CLAUDE.md). Aqui não há string
+// nossa pra traduzir: é dado formatado no locale, como o resto dos números.
+function idadeDaFoto(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return null;
+    const dias = Math.floor((Date.now() - ms) / 86400000);
+    if (dias < 0) return null;   // relógio torto ou data no futuro: não inventa
+    const loc = i18nLocale();
+    try {
+        if (dias >= 365) return new Date(ms).toLocaleDateString(loc, { year: 'numeric' });
+        const rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto' });
+        if (dias < 1) return rtf.format(0, 'day');
+        if (dias < 30) return rtf.format(-dias, 'day');
+        return rtf.format(-Math.round(dias / 30), 'month');
+    } catch (e) {
+        return new Date(ms).toLocaleDateString(loc);
+    }
+}
+
 const Lightbox = {
     urls: [],
     idx: 0,
@@ -1149,8 +1182,22 @@ const Lightbox = {
         const multiple = this.urls.length > 1;
         prevBtn.classList.toggle('hidden', !multiple);
         nextBtn.classList.toggle('hidden', !multiple);
-        count.classList.toggle('hidden', !multiple);
-        if (multiple) count.textContent = `${this.idx + 1} / ${this.urls.length}`;
+        // A pílula do canto passa a dizer DUAS coisas: qual foto e de quando.
+        // Vai junto porque é o mesmo assunto ("a foto que estou vendo") e
+        // porque espaço no lightbox é disputado — elemento novo brigaria com
+        // fechar, selo, dica de zoom, ações e a tira. Com uma foto só, o
+        // "1 / 1" seria ruído: fica só a idade.
+        const ms = this.dataDaFotoAtual();
+        const idade = idadeDaFoto(ms);
+        const partes = [];
+        if (multiple) partes.push(`${this.idx + 1} / ${this.urls.length}`);
+        if (idade) partes.push(idade);
+        count.classList.toggle('hidden', partes.length === 0);
+        count.textContent = partes.join(' · ');
+        // A data exata fica no title: a forma curta responde "é velha?", que é
+        // a pergunta de decisão; quem precisar do dia tem onde olhar.
+        if (ms) count.title = new Date(ms).toLocaleString(i18nLocale());
+        else count.removeAttribute('title');
         badge.textContent = this.eDenuncia ? '🚩' : '✨';
         badge.setAttribute('data-i18n-title', this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
         badge.title = t(this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
@@ -1258,6 +1305,15 @@ const Lightbox = {
     // pendente — a do ✨ — ainda não está no mapa: tirá-la por aqui apagaria a
     // imagem e deixaria o pedido órfão, sem ninguém tratar. O caminho dela é o
     // ✕/✓ do card.
+    // A data da foto ABERTA. Busca pelo id contido na URL, mesmo padrão do
+    // `idFotoAtual` — o índice não identifica foto (o carrossel reordena).
+    dataDaFotoAtual() {
+        const mapa = this.place && this.place.imageDates;
+        if (!mapa) return null;
+        const url = this.urls[this.idx] || '';
+        const id = Object.keys(mapa).find((k) => k && url.indexOf(k) !== -1);
+        return id ? mapa[id] : null;
+    },
     idFotoAtual() {
         const p = this.place;
         if (!p || !p.venueID || !Number.isFinite(Number(p.lat)) || !Number.isFinite(Number(p.lon))) return null;

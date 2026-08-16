@@ -196,6 +196,34 @@ const harBatalhao = () => ({
   },
 });
 
+test('buildPlacesFromSearch: a data de cada foto sai por ID, e o campo é `date`', () => {
+  // O campo se chama `date` na resposta do Search/List — o SDK do Waze declara
+  // `creationDate` em VenueImage, e ir pela tipagem daria `undefined` em tudo.
+  // Não é caso isolado: o SDK também diz `isApproved` onde a resposta usa
+  // `approved` (o `approvedImageIds` já dependia disso). MEDIDO nos 6 países
+  // obrigatórios: 3176 de 3176 fotos trazem `date`.
+  //
+  // Por ID e não por índice porque o carrossel reordena e o frontend remove a
+  // foto excluída da lista — posição não identifica foto nenhuma.
+  const har = harBatalhao();
+  har.venues.objects[0].images = [
+    { id: 'img-velha', approved: true, date: 1400000000000 },
+    { id: 'img-nova', approved: true, date: 1780000000000 },
+    { id: 'img-sem-data', approved: true },
+    { id: 'img-data-zero', approved: true, date: 0 },
+    { id: 'img-data-lixo', approved: true, date: 'ontem' },
+  ];
+  const { places } = buildPlacesFromSearch(har, { unreadOnly: false });
+  const p = places[0];
+  assert.ok(p, 'sumiu o card');
+  assert.deepEqual(p.imageDates, { 'img-velha': 1400000000000, 'img-nova': 1780000000000 },
+    'só as fotos com data válida entram, e a chave é o ID');
+  // A URL carrega o id, que é como o frontend acha a data da foto aberta.
+  const url = p.imageUrls.find((u) => u.includes('img-velha'));
+  assert.ok(url, 'a URL da foto não carrega o id — o frontend não acha a data');
+  assert.equal(p.imageDates[Object.keys(p.imageDates).find((k) => url.includes(k))], 1400000000000);
+});
+
 test('buildPlacesFromSearch: PUR já lido NÃO vira card com unreadOnly (bug do "place volta")', () => {
   // Cenário exato do HAR: user marcou a foto como lida, venue volta na busca
   // por causa do REQUEST irmão. Antes do fix: 1 card (a foto lida, de novo).

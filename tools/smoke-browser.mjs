@@ -2469,6 +2469,81 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── Idade da foto na pílula do lightbox ────────────────────────────────
+// A pergunta que antecede a lixeira é "isto ainda é este lugar?", e MEDIDO nos
+// 6 países obrigatórios (3176 fotos) 39,2% têm mais de 3 anos — hoje sem sinal
+// nenhum na tela. A idade entra na pílula que já existe, sem custar espaço.
+//
+// Três coisas que quebram calado:
+//   1. o campo mudar de nome no core (`date`, não `creationDate` — pela
+//      tipagem do SDK sairia `undefined` em tudo e a pílula só sumiria);
+//   2. a pílula sumir quando há UMA foto — aí a idade some junto, e é
+//      justamente onde ela é a única informação;
+//   3. plural errado: o projeto não tem ICU, e "há 1 dias" é o defeito clássico.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  await ctx.route('https://venue-image.waze.com/**', (r) => r.fulfill({ body: PX_TIRA, contentType: 'image/jpeg' }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+  await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true })));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(500);
+
+  // Idades tiradas da distribuição REAL: mediana 62 dias, p75 2350, máxima 4370.
+  const casos = await page.evaluate(([fila]) => {
+    const p = JSON.parse(JSON.stringify(fila[0]));
+    const dia = 86400000, agora = Date.now();
+    const idades = { f0: 0, f1: 1, f2: 62, f3: 2350 };
+    p.imageUrls = Object.keys(idades).map((k) => `https://venue-image.waze.com/thumbs/thumb700_${k}`);
+    p.imageDates = Object.fromEntries(Object.entries(idades).map(([k, d]) => [k, agora - d * dia]));
+    p.venueID = 'v1'; p.updateRequestID = 'u1';
+    API.setSession('token-de-teste'); AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.serverTotal = 9; AppState.hasMore = false;
+    AppState.queue = [p]; AppState.currentPlace = p;
+    showMainScreen(); renderProfileHeader(); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden'); showCurrentPlace();
+    const pilula = document.getElementById('lightboxCount');
+    const out = { varias: [], uma: null, semData: null };
+    Lightbox.open(p.imageUrls, 0, -1, 'teste', false, p);
+    for (let i = 0; i < 4; i++) {
+      Lightbox.idx = i; Lightbox._render();
+      out.varias.push({ txt: pilula.textContent, escondida: pilula.classList.contains('hidden'), title: pilula.title });
+    }
+    // uma foto só: some o "1 / 1", fica a idade
+    const um = JSON.parse(JSON.stringify(p));
+    um.imageUrls = [p.imageUrls[3]];
+    Lightbox.close(); Lightbox.open(um.imageUrls, 0, -1, 'teste', false, um);
+    out.uma = { txt: pilula.textContent, escondida: pilula.classList.contains('hidden') };
+    // sem data nenhuma: a pílula volta a ser só o contador
+    const sem = JSON.parse(JSON.stringify(p)); delete sem.imageDates;
+    Lightbox.close(); Lightbox.open(sem.imageUrls, 0, -1, 'teste', false, sem);
+    out.semData = { txt: pilula.textContent, escondida: pilula.classList.contains('hidden') };
+    Lightbox.close();
+    return out;
+  }, [FIXTURES_PAISES.filter((x) => (x.imageUrls || []).length)]);
+
+  const onde = 'idade da foto';
+  casos.varias.forEach((c, i) => {
+    checa(!c.escondida, `${onde}: a pílula sumiu na foto ${i + 1}`);
+    checa(/\d+ \/ 4/.test(c.txt), `${onde}: sumiu o contador da pílula`, c.txt);
+    checa(c.txt.includes('·'), `${onde}: a foto ${i + 1} está sem idade na pílula`, c.txt);
+    checa(!/\bundefined\b|NaN|Invalid/.test(c.txt), `${onde}: idade inválida na tela`, c.txt);
+    checa(!!c.title, `${onde}: sumiu a data exata do title`);
+  });
+  // 2350 dias tem que virar ANO, não "há 2350 dias" — foi por isso que o corte existe
+  checa(/\b20\d\d\b/.test(casos.varias[3].txt), `${onde}: foto de 2350 dias não virou ano`, casos.varias[3].txt);
+  // e 1 dia não pode sair "há 1 dias" (sem ICU no projeto)
+  checa(!/\b1 dias\b/.test(casos.varias[1].txt), `${onde}: plural errado — "1 dias"`, casos.varias[1].txt);
+  checa(!casos.uma.escondida && !/\//.test(casos.uma.txt), `${onde}: com UMA foto a pílula devia mostrar só a idade`, casos.uma.txt);
+  checa(casos.semData.txt.includes('/') && !casos.semData.txt.includes('·'),
+    `${onde}: sem data a pílula devia ser só o contador`, casos.semData.txt);
+  checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2497,4 +2572,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
-  + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`);
+  + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
+  + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`);
