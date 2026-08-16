@@ -1160,9 +1160,11 @@
              (27px) e no celular deitado (0px) — flutuar cobriria justamente o que
              se veio olhar. O `.com-tira` no contêiner dá o padding e empurra os
              controles de baixo (`.lb-baixo`).
-             As miniaturas são `thumb100_` do próprio Waze: 100x75 e 3,2 KB, contra
-             700x525 e 80,8 KB do `thumb700_` — 4 fotos custam 12,8 KB, um sexto de
-             UMA foto grande. -->
+             As miniaturas reusam a MESMA URL da foto grande, que o aquecimento já
+             trouxe (`PREFETCH_TETO_FOTOS = 4`, `max-age=3600` no CDN do Waze): custo
+             de rede ZERO. O `thumb100_` de 3,2 KB existe, mas seria URL nova — 4
+             requisições por local por fotos que o aparelho já tem. Ver a nota longa
+             em js/app.js, acima do Lightbox. -->
         <div id="lightboxStrip" role="group" aria-label="Todas as fotos deste local"
              data-i18n-aria="lightbox.strip.aria"
              class="hidden absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 overflow-x-auto px-3 bg-black/70"></div>

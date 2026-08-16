@@ -2399,7 +2399,10 @@ for (const tema of ['dark', 'light']) {
 //   1. voltar a flutuar — cobre a foto, e no aparelho onde ninguém testa;
 //   2. cobrir a dica de zoom ou os botões de excluir/aprovar;
 //   3. miniatura menor que 44px de alvo;
-//   4. usar `thumb700_` na tira — 80,8 KB por miniatura em vez de 3,2 KB.
+//   4. a tira pedir URL NOVA. Ela tem que reusar a mesma do carrossel, que o
+//      aquecimento já trouxe — o `thumb100_` do Waze é 25x menor, mas é outra
+//      URL, então seriam 4 requisições e ~12,8 KB por local por fotos que o
+//      aparelho já tem. Achado do owner; ver a nota em js/app.js.
 const PX_TIRA = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
 for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }],
                                     ['deitado', { width: 852, height: 393 }],
@@ -2441,7 +2444,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         cobreFoto: visivel && tr.top < im.bottom - 0.5,
         cobreControle: visivel && baixos.some((b) => b.bottom > tr.top + 0.5),
         alvoPequeno: minis.filter((x) => x.height < 44 || x.width < 44).length,
-        thumb100: src.includes('thumb100_'), thumb700: src.includes('thumb700_'),
+        // Comparar com as URLs do próprio lightbox é o que prova o reuso —
+        // medir "requisições novas" não serve, porque `route` do Playwright
+        // desliga o cache HTTP e TODA imagem aparece como pedido novo.
+        reusa: [...tira.querySelectorAll('.lb-mini img')].every((x) => Lightbox.urls.includes(x.getAttribute('src'))),
         selos: tira.querySelectorAll('.lb-mini-selo').length,
       };
     }, [FIXTURES_PAISES.filter((p) => (p.imageUrls || []).length), nFotos]);
@@ -2456,7 +2462,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(!m.cobreFoto, `${onde}: a tira cobre a FOTO — ela tem que entrar no layout, não flutuar`);
     checa(!m.cobreControle, `${onde}: a tira cobre a dica de zoom ou os botões de foto`);
     checa(m.alvoPequeno === 0, `${onde}: ${m.alvoPequeno} miniatura(s) com alvo < 44px`);
-    checa(m.thumb100 && !m.thumb700, `${onde}: a tira não usa thumb100_ (80,8 KB por miniatura em vez de 3,2)`);
+    checa(m.reusa, `${onde}: a tira pediu URL diferente da foto grande — perde o cache do aquecimento e baixa de novo o que já está no aparelho`);
     checa(m.selos === 1, `${onde}: o selo da foto do pedido sumiu da tira — sem ele são N fotos iguais`, String(m.selos));
   }
   checa(erros.length === 0, `tira · ${aparelho}: erro de JS`, erros[0]);
@@ -2491,4 +2497,4 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
-  + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, thumb100)`);
+  + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`);

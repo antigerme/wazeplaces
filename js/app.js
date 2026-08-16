@@ -1015,21 +1015,30 @@ function setupModalListeners() {
     });
 }
 
-// `thumb700_` → `thumb100_`. Medido no CDN do Waze com a mesma foto:
-// 700x525 e 80,8 KB contra 100x75 e 3,2 KB — 25× menos bytes.
+// SOBRE O `thumb100_` DO WAZE, E POR QUE ELE NÃO É USADO AQUI
 //
-// Só serve pra MINIATURA. O card exibe a ~378px e o lightbox em tela cheia, e
-// nos dois o `thumb100` sairia borrado — o que é grave nesta app, porque
-// "está borrada" é motivo legítimo de rejeição e o editor julgaria o arquivo
-// errado. Daí não haver uso disto em nenhum caminho de exibição grande.
+// O Waze serve `thumb100_` (100x75, 3,2 KB) além do `thumb700_` (700x525,
+// 80,8 KB) — 25x menos bytes. A tira de miniaturas chegou usando ele, e estava
+// ERRADO. O owner apontou: o aquecimento JÁ baixou os `thumb700` deste card.
 //
-// URL que não bate com o padrão volta INTEIRA: miniatura grande é desperdício,
-// miniatura quebrada é defeito.
-function miniaturaDe(url) {
-    return (typeof url === 'string' && url.includes('/thumbs/thumb700_'))
-        ? url.replace('/thumbs/thumb700_', '/thumbs/thumb100_')
-        : url;
-}
+// Medido: renderizar um card dispara o aquecimento das 4 fotos do SEGUINTE em
+// `thumb700` (`PREFETCH_TETO_FOTOS = 4`, cobrindo 91,7% dos cards por inteiro),
+// e o `venue-image.waze.com` responde com `max-age=3600`. Quando o lightbox
+// abre, essas fotos estão em cache e custam ZERO.
+//
+// O `thumb100` é outra URL, então nunca aproveita esse cache: seriam 4
+// requisições novas e ~12,8 KB por local, por fotos que o aparelho já tem. Numa
+// sessão de triagem com dezenas de locais de várias fotos, isso vira centenas
+// de KB de duplicata — na conta de dados do editor.
+//
+// E tem o outro lado: reusar o `thumb700` na tira PRÉ-AQUECE o carrossel (é a
+// mesma imagem que aparece ao tocar em ›), enquanto o `thumb100` baixa algo que
+// nunca mais é usado. O preço é decodificar 700x525 pra desenhar em 59x44 —
+// pago em memória, não em rede, e limitado pelo `loading="lazy"` (só as
+// miniaturas visíveis decodificam).
+//
+// Resumo pro próximo que achar o `thumb100`: ele é ótimo em abstrato e inútil
+// aqui, porque a app já tem a foto grande antes de precisar da pequena.
 
 const Lightbox = {
     urls: [],
@@ -1185,7 +1194,7 @@ const Lightbox = {
                 b.type = 'button';
                 b.className = 'lb-mini';
                 const im = document.createElement('img');
-                im.src = miniaturaDe(u);
+                im.src = u;   // a MESMA URL da foto grande: já está em cache (ver a nota acima)
                 im.alt = '';
                 im.decoding = 'async';
                 im.loading = 'lazy';
