@@ -28,7 +28,7 @@
          bloqueado e sobrava só o erro no console. São dois porque o script vem de
          static.cloudflareinsights.com e a telemetria vai pra cloudflareinsights.com
          (/cdn-cgi/rum), ou seja: script-src E connect-src. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://cloudflareinsights.com https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).

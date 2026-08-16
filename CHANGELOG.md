@@ -8,6 +8,16 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.16-04
+
+### Corrigido
+- **Rodando fora do Cloudflare, a app estava com uma camada de segurança a menos.** A política que restringe quais scripts podem rodar na página existia em dois lugares: dentro do próprio HTML e num arquivo que só o Cloudflare lê. Quem subisse a app num servidor próprio ficava só com a primeira — e nada avisava. Agora o servidor próprio manda a política junto, igual ao Cloudflare, e um teste sobe o servidor de verdade para conferir que ela sai na resposta.
+
+### Alterado
+- **Uma permissão que não servia para nada saiu da política de segurança.** Ela liberava o domínio da análise de tráfego do Cloudflare, que não é carregado nesta app. Permissão que não é usada é permissão que alguém reaproveita sem pensar.
+
+---
+
 ## v2026.08.16-03
 
 ### Alterado

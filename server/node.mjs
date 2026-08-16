@@ -134,13 +134,28 @@ const MIME = {
 // no-cache pra código (SW controla versão); cache longo pra imagens/fontes
 const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest']);
 
-// Headers de segurança (paridade com o _headers do Cloudflare). A CSP NÃO entra
-// aqui — vive no <meta> do index.html + no _headers, gerida à parte.
+// Headers de segurança, em PARIDADE com o _headers do Cloudflare.
+//
+// A CSP entra aqui, e não entrava. O `_headers` é arquivo de Cloudflare — o
+// Node nunca o leu —, então na VM a única política ativa era o `<meta>` do
+// index.html. Rodar na VM era rodar com uma camada a menos, sem nada avisando.
+//
+// Isso importa além do detalhe de segurança: a app precisa ser a MESMA nos dois
+// destinos, senão "levar pra uma VM" deixa de ser uma decisão de infraestrutura
+// e vira uma mudança de comportamento. `test/layout.test.mjs` compara as TRÊS
+// cópias (meta, _headers e esta) diretiva por diretiva, e `test/csp-vm.test.mjs`
+// sobe o servidor e confere que o cabeçalho SAI de verdade — string igual num
+// arquivo não prova resposta HTTP.
+//
+// Divergência de CSP não dá erro: o browser aplica a INTERSEÇÃO, então o efeito
+// é alguma coisa parar de carregar em produção, calada (gotcha #14).
+const CSP = "default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';";
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  'Content-Security-Policy': CSP,
 };
 
 // ALLOWLIST de estáticos: só o frontend conhecido é servido do disco. Qualquer
