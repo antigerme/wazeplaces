@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.16-05
+
+### Adicionado
+- **Ao ampliar uma foto, você vê todas as fotos do local de uma vez.** Uma tira de miniaturas embaixo, tocáveis para pular direto — antes só dava para ir tateando no `‹ ›`, sem saber quantas faltavam nem o que vinha. A foto do pedido continua marcada com o mesmo selo (✨ nova, 🚩 denunciada) também na tira, senão seriam N fotos iguais.
+
+  Ajuda mais em dois casos que são exatamente onde a decisão mora: **foto denunciada** (o pedido é sobre uma foto entre várias) e **foto nova** (a proposta ao lado das que o local já tem).
+
+  Aparece só quando o local tem duas ou mais fotos — cerca de um terço dos pedidos. Custa pouquíssimo: as miniaturas são a versão de 3 KB que o próprio Waze serve, então um local com quatro fotos gasta menos que um sexto de uma foto grande.
+
+  **A tira nunca cobre a foto.** Medi o espaço livre em cinco aparelhos: na maioria sobra bastante, mas no iPhone SE com foto em pé sobram 27 pixels e no celular deitado, nenhum. Então ela ocupa espaço de verdade em vez de flutuar por cima — a foto encolhe um pouco, mas continua inteira à vista.
+
+---
+
 ## v2026.08.16-04
 
 ### Corrigido

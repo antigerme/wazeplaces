@@ -1015,6 +1015,22 @@ function setupModalListeners() {
     });
 }
 
+// `thumb700_` → `thumb100_`. Medido no CDN do Waze com a mesma foto:
+// 700x525 e 80,8 KB contra 100x75 e 3,2 KB — 25× menos bytes.
+//
+// Só serve pra MINIATURA. O card exibe a ~378px e o lightbox em tela cheia, e
+// nos dois o `thumb100` sairia borrado — o que é grave nesta app, porque
+// "está borrada" é motivo legítimo de rejeição e o editor julgaria o arquivo
+// errado. Daí não haver uso disto em nenhum caminho de exibição grande.
+//
+// URL que não bate com o padrão volta INTEIRA: miniatura grande é desperdício,
+// miniatura quebrada é defeito.
+function miniaturaDe(url) {
+    return (typeof url === 'string' && url.includes('/thumbs/thumb700_'))
+        ? url.replace('/thumbs/thumb700_', '/thumbs/thumb100_')
+        : url;
+}
+
 const Lightbox = {
     urls: [],
     idx: 0,
@@ -1142,6 +1158,62 @@ const Lightbox = {
         // adivinhar qual vale pra foto que está vendo.
         const apr = document.getElementById('lightboxApprove');
         if (apr) apr.classList.toggle('hidden', noTreino || !this.podeAprovarAtual());
+        this._renderTira();
+    },
+    // Todas as fotos do local de uma vez, tocáveis pra pular direto.
+    //
+    // O problema que resolve: 32% dos pedidos da fila real têm 2+ fotos (até 7),
+    // e hoje só dá pra tatear no `‹ ›` sem saber quantas faltam nem o que vem.
+    // Em `FLAGGED_PHOTO` e `NEW_PHOTO` isso é a própria decisão — "esta, entre
+    // estas" e "a proposta ao lado das que o local já tem".
+    _renderTira() {
+        const tira = document.getElementById('lightboxStrip');
+        const lb = document.getElementById('imageLightbox');
+        if (!tira || !lb) return;
+        const varias = this.urls.length > 1;
+        lb.classList.toggle('com-tira', varias);
+        tira.classList.toggle('hidden', !varias);
+        if (!varias) { tira.innerHTML = ''; tira.dataset.chave = ''; return; }
+        // Reconstrói só quando a LISTA muda. Excluir uma foto muda; trocar de
+        // foto não — e recriar a cada troca perderia a rolagem da tira e
+        // rebaixaria as miniaturas já carregadas.
+        const chave = this.urls.join('|');
+        if (tira.dataset.chave !== chave) {
+            tira.innerHTML = '';
+            this.urls.forEach((u, i) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'lb-mini';
+                const im = document.createElement('img');
+                im.src = miniaturaDe(u);
+                im.alt = '';
+                im.decoding = 'async';
+                im.loading = 'lazy';
+                b.appendChild(im);
+                b.addEventListener('click', () => { this.idx = i; this._render(); });
+                tira.appendChild(b);
+            });
+            tira.dataset.chave = chave;
+        }
+        [...tira.children].forEach((b, i) => {
+            const atual = i === this.idx;
+            b.classList.toggle('atual', atual);
+            b.setAttribute('aria-current', atual ? 'true' : 'false');
+            b.setAttribute('aria-label', t('lightbox.strip.item', { i: i + 1, n: this.urls.length }));
+            // O selo vai junto: sem ele a tira mostra N fotos iguais e esconde
+            // qual delas É o pedido — que é a única coisa que importa aqui.
+            const velho = b.querySelector('.lb-mini-selo');
+            if (velho) velho.remove();
+            if (i === this.newIdx && this.newIdx >= 0) {
+                const selo = document.createElement('span');
+                selo.className = 'lb-mini-selo';
+                selo.setAttribute('aria-hidden', 'true');
+                selo.textContent = this.eDenuncia ? '🚩' : '✨';
+                b.appendChild(selo);
+            }
+        });
+        const atual = tira.children[this.idx];
+        if (atual && atual.scrollIntoView) atual.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     },
     // A foto aberta é a PENDENTE deste pedido e este editor pode aprovar?
     //
