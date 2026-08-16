@@ -1,4 +1,4 @@
-/** Config do Tailwind usada SÓ na geração do css/tailwind.css (npm run css).
+/** Config do Tailwind usada SÓ na geração do css/app.css (npm run css).
  *  Não é carregada em runtime — a app serve o CSS já compilado.
  *
  *  IMPORTANTE: o vendor bundle antigo (js/tailwindcss_*.js) NÃO pode entrar no

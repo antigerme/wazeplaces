@@ -91,34 +91,34 @@
 
 
 
-    <!-- Tailwind PRÉ-COMPILADO (npm run css → css/tailwind.css, commitado).
-         Antes era o bundle runtime de 407KB, que compilava no browser via
-         `new Function` — por isso a CSP precisava liberar 'unsafe-eval'.
-         Agora: 32KB de CSS estático, CSP sem unsafe-eval, e nada de compilar
-         no celular do editor.
+    <!-- UM CSS só, PRÉ-COMPILADO e commitado: `npm run css` (tools/gerar-css.mjs)
+         gera o css/app.css. Antes era o bundle runtime de 407KB, que compilava no
+         browser via `new Function` — por isso a CSP precisava liberar 'unsafe-eval'.
+         Depois virou dois arquivos estáticos; agora é um só, minificado.
 
-         ORDEM IMPORTA, e este <link> vem ANTES do styles.css de propósito:
-         assim o NOSSO CSS vence o empate de especificidade contra as utilities
-         do Tailwind, que é o modelo normal de autoria (framework primeiro,
+         ORDEM IMPORTA, e agora ela é a da CONCATENAÇÃO, não a dos <link>: Tailwind
+         primeiro, o nosso CSS depois. Assim o NOSSO vence o empate de especificidade
+         contra as utilities, que é o modelo normal de autoria (framework primeiro,
          customização depois).
 
          Já foi o contrário, herdado do bundle runtime que injetava o CSS no
          fim do <head>. Isso fazia seletor de UMA classe do styles.css perder
          calado pra utility — o gotcha #27, que mordeu SEIS vezes (`.modal-root`
          perdendo pro `p-4`, `.auth-opt-pair` pro `text-slate-700`,
-         `.card-content` pro `overflow-y-hidden`, e mais). Trocar a ordem
-         elimina a classe de bug em vez de vigiá-la.
+         `.card-content` pro `overflow-y-hidden`, e mais). A ordem elimina a
+         classe de bug em vez de vigiá-la, e o test/layout.test.mjs a trava.
 
-         Custo MEDIDO antes de trocar: diff pixel a pixel de 92 cenários
+         Custo MEDIDO quando a ordem foi trocada: diff pixel a pixel de 92 cenários
          (23 telas × 2 temas × celular e desktop, incluindo toasts, banners,
-         modais, foco por teclado e hover) → ZERO pixels de diferença. O único
-         ponto que mudava era o `border-radius` do `:focus-visible`, que
-         sobrescrevia o raio do elemento focado — defeito que já existia e saiu
-         junto.
+         modais, foco por teclado e hover) → ZERO pixels de diferença.
 
-         Mexeu em classe do Tailwind no HTML/JS? rode `npm run css`. -->
-    <link rel="stylesheet" href="css/tailwind.css">
-    <link rel="stylesheet" href="css/styles.css">
+         Por que UM arquivo minificado: eram dois <link> bloqueando o render, e o
+         styles.css ia cru. Ele é fortemente comentado de propósito, e comentário
+         comprime mas não some — 23,4 KB comprimidos viraram 5,3 KB. Os comentários
+         seguem todos no css/styles.css, que continua sendo o arquivo que se edita.
+
+         Mexeu em classe do Tailwind, ou no css/styles.css? rode `npm run css`. -->
+    <link rel="stylesheet" href="css/app.css">
     <!-- Depois do CSS de propósito: o paint já espera o stylesheet, então
          este script viaja em paralelo e não adia o primeiro quadro. Sem
          defer/async — precisa rodar ANTES de qualquer pintura. -->
@@ -143,7 +143,15 @@
                     <p id="userName" class="text-xs font-bold text-slate-700 truncate dark:text-slate-200"></p>
                     <p id="userRank" class="text-[0.6875rem] text-slate-500 uppercase tracking-wider truncate dark:text-slate-400"></p>
                 </div>
-                <img id="userAvatar" class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100 flex-shrink-0 dark:bg-slate-800" alt="">
+                <!-- `fetchpriority="low"` porque esta é a imagem MAIS PESADA da app e a
+                     menos importante: a foto de perfil vem do Waze com 214 KB (medido) e
+                     é exibida a 32px. Não há variante menor — sondei cinco formas de URL,
+                     todas devolvem os mesmos 218 KB. Não dá pra cortar os bytes, mas dá
+                     pra tirá-la da frente: em 1,6 Mbps ela ocupa mais de um segundo de
+                     banda que o LCP (a foto do card) estava disputando. `width`/`height`
+                     explícitos porque o `w-8 h-8` só vale depois do CSS. -->
+                <img id="userAvatar" width="32" height="32" fetchpriority="low" decoding="async"
+                     class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100 flex-shrink-0 dark:bg-slate-800" alt="">
             </div>
             <div class="flex items-center gap-2">
                 <button id="themeBtn" type="button" aria-label="Alternar tema" data-i18n-aria="header.theme.aria" aria-pressed="false" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 rounded-full transition-all dark:text-slate-400">
@@ -275,16 +283,16 @@
                      iPhone (medido: a ação principal ia de 441 pra 735px numa
                      dobra de 664). As imagens são as MESMAS do prompt de
                      instalação do PWA (icons/screenshots/), em versão pequena:
-                     as originais somam 432 KB e estas 63 KB, e isto aqui carrega
+                     as originais somam 432 KB e estas 30 KB, e isto aqui carrega
                      na tela de entrada, muitas vezes em dado móvel. -->
                 <div class="auth-previa mt-6 flex justify-center gap-2" role="group" aria-label="Prévia da aplicação" data-i18n-aria="auth.previa.aria">
-                    <img src="icons/screenshots/previa-card.jpg" width="240" height="519" decoding="async"
+                    <img src="icons/screenshots/previa-card.jpg" width="144" height="311" decoding="async"
                          class="w-[4.5rem] h-auto rounded-lg border border-slate-200/70 shadow-sm dark:border-slate-600/60"
                          alt="Um pedido com foto, categoria e endereço" data-i18n-alt="auth.previa.card">
-                    <img src="icons/screenshots/previa-map.jpg" width="240" height="519" decoding="async"
+                    <img src="icons/screenshots/previa-map.jpg" width="144" height="311" decoding="async"
                          class="w-[4.5rem] h-auto rounded-lg border border-slate-200/70 shadow-sm dark:border-slate-600/60"
                          alt="Mapa mostrando onde o local fica" data-i18n-alt="auth.previa.map">
-                    <img src="icons/screenshots/previa-changes.jpg" width="240" height="519" decoding="async"
+                    <img src="icons/screenshots/previa-changes.jpg" width="144" height="311" decoding="async"
                          class="w-[4.5rem] h-auto rounded-lg border border-slate-200/70 shadow-sm dark:border-slate-600/60"
                          alt="Mudanças propostas em antes e depois" data-i18n-alt="auth.previa.changes">
                 </div>
@@ -1284,16 +1292,16 @@
     </div>
 
 
-    <script src="js/version.js"></script>
-    <script src="js/qr.js"></script>
-    <script src="js/i18n.js"></script>
-    <script src="js/api.js"></script>
+    <script defer src="js/version.js"></script>
+    <script defer src="js/qr.js"></script>
+    <script defer src="js/i18n.js"></script>
+    <script defer src="js/api.js"></script>
     <!-- Mini-mapa de evidência. Matemática de Mercator pura, zero dependência,
          como o js/qr.js. Antes do app.js, que o usa no render do card. -->
-    <script src="js/mapa.js"></script>
-    <script src="js/swipe.js"></script>
-    <script src="js/app.js"></script>
+    <script defer src="js/mapa.js"></script>
+    <script defer src="js/swipe.js"></script>
+    <script defer src="js/app.js"></script>
 
-    <script src="js/sw-register.js"></script>
+    <script defer src="js/sw-register.js"></script>
 </body>
 </html>
