@@ -20,14 +20,25 @@
          (issue aberta no WICG). Ver o comentário no manifest.json. -->
     <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-    <!-- CSP: mantida em sync com o arquivo _headers (Cloudflare) — ver gotcha #14.
+    <!-- CSP: mantida em sync com o `_headers` (Cloudflare) E com o `CSP` do
+         server/node.mjs (VM) — são TRÊS cópias, ver gotcha #14. O browser aplica a
+         INTERSEÇÃO, então divergência não dá erro: só faz algo parar de carregar,
+         em produção, calado.
          Sem 'unsafe-eval' (Tailwind é pré-compilado) e sem fonts.googleapis/gstatic
-         (a Inter é auto-hospedada em fonts/).
-         cloudflareinsights: o Cloudflare INJETA o beacon do Web Analytics no HTML
-         quando o request vem de um navegador — sem estes dois hosts ele era
-         bloqueado e sobrava só o erro no console. São dois porque o script vem de
-         static.cloudflareinsights.com e a telemetria vai pra cloudflareinsights.com
-         (/cdn-cgi/rum), ou seja: script-src E connect-src. -->
+         (a Inter é auto-hospedada em fonts/). O 'sha256-…' autoriza UM script
+         inline, o do tema — nunca 'unsafe-inline'.
+         `cloudflareinsights` SAIU: o comentário antigo dizia que o Cloudflare
+         injeta o beacon do Web Analytics, e isso foi MEDIDO como falso — não há
+         tag nenhuma dele no HTML de produção. Eram dois hosts liberados para algo
+         que nunca carrega, e permissão morta é permissão que alguém reaproveita
+         sem pensar. Se o Web Analytics for ligado um dia, voltam os dois
+         (script-src para static.cloudflareinsights.com, connect-src para
+         cloudflareinsights.com) — e aí eles voltam a ter uso.
+         O que a CSP ainda bloqueia de propósito é o bootstrap INLINE do Bot
+         Fight Mode. Não há como liberá-lo: hash é impossível (carrega cf-ray e
+         timestamp, muda a cada resposta) e nonce não chega — MEDIDO, o Cloudflare
+         injeta o script ANTES da fase de cabeçalho onde a Transform Rule geraria
+         o nonce, então ele nunca é copiado para a tag. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
