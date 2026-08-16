@@ -43,16 +43,22 @@ jobs:
           else
             echo "Sem diretório test/ ainda — pulando testes."
           fi
-      - name: CSS do Tailwind está em dia (npm run css)
+      - name: CSS está em dia (npm run css)
         run: |
-          # O css/tailwind.css é COMMITADO (projeto sem build obrigatório). Se
-          # alguém mexe em classe no HTML/JS e esquece de regenerar, o estilo
-          # some silenciosamente em produção. Aqui regeneramos e comparamos.
-          cp css/tailwind.css /tmp/tailwind.committed.css
+          # O css/app.css é GERADO (tools/gerar-css.mjs) e COMMITADO — projeto sem
+          # build obrigatório. Ele junta o Tailwind e o css/styles.css, os dois
+          # minificados. Se alguém mexe em classe no HTML/JS, ou edita o
+          # styles.css, e esquece de regenerar, o estilo some silenciosamente em
+          # produção. Aqui regeneramos e comparamos.
+          #
+          # O styles.css entrou nesta conta junto com a minificação: antes ele ia
+          # cru pro browser e editar era suficiente. Agora não é — e é justamente
+          # por isso que o guard precisa cobri-lo.
+          cp css/app.css /tmp/app.committed.css
           npm run css
-          if ! diff -q /tmp/tailwind.committed.css css/tailwind.css >/dev/null; then
-            echo "::error::css/tailwind.css está desatualizado. Rode 'npm run css' e commite o resultado."
-            diff /tmp/tailwind.committed.css css/tailwind.css | head -40
+          if ! diff -q /tmp/app.committed.css css/app.css >/dev/null; then
+            echo "::error::css/app.css está desatualizado. Rode 'npm run css' e commite o resultado."
+            diff /tmp/app.committed.css css/app.css | head -40
             exit 1
           fi
 

@@ -3196,6 +3196,13 @@ function renderCardImages(card, place) {
         }
         if (mapaBox) mapaBox.classList.add('hidden');
         currentImgIdx = urls.indexOf(s.foto);
+        // A foto do card é o LCP da app, e o Lighthouse aponta que ela chega sem
+        // dica de prioridade (`priorityHinted: false`). Pré-carregar não dá — a
+        // URL só existe depois da resposta da API —, mas dizer que ela é a mais
+        // importante da página, dá. Faz par com o `fetchpriority="low"` do
+        // avatar: os dois juntos é que tiram os 214 KB da foto de perfil da
+        // frente dos ~50 KB que o editor precisa VER pra decidir.
+        img.fetchPriority = 'high';
         img.src = s.foto;
         // Num LOCAL NOVO toda foto está sendo proposta junto com o local — e o
         // card não põe o ✨ nelas de propósito (ver a nota longa acima: o selo

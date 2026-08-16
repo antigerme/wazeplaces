@@ -1,12 +1,11 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026081503';
+const CACHE_NAME = 'waze-places-2026081601';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/css/tailwind.css',
-  '/css/styles.css',
+  '/css/app.css',
   '/js/tema.js',
   '/js/sw-register.js',
   '/js/version.js',
@@ -70,7 +69,7 @@ self.addEventListener('fetch', event => {
   const isHTML = event.request.mode === 'navigate' ||
     (event.request.headers.get('accept') || '').includes('text/html');
   // Todo JS/CSS/JSON é código nosso agora (o vendor Tailwind de 407KB saiu na
-  // pré-compilação) → network-first, sem exceção. O css/tailwind.css gerado muda
+  // pré-compilação) → network-first, sem exceção. O css/app.css gerado muda
   // junto com o HTML, então precisa da mesma garantia anti-skew (gotcha #18).
   // Fontes (.woff2) caem no ramo cache-first abaixo — imutáveis por natureza.
   const isCode = /\.(js|css|json)$/i.test(url.pathname);

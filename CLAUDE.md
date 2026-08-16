@@ -46,7 +46,7 @@ PWA = instala no celular sem precisar de Play Store / App Store. Funciona offlin
 | Camada | Escolha | Por quê |
 |---|---|---|
 | **Frontend** | HTML + JavaScript **vanilla** + Tailwind CSS | Zero build. Editor leigo baixa, roda, funciona. |
-| **Tailwind** | **Pré-compilado** em `css/tailwind.css` (~34KB, COMMITADO) via `npm run css` | Zero build pra quem só roda a app (o CSS já está no repo). Tirou 407KB e o `unsafe-eval` da CSP. Mexeu em classe? `npm run css` (o CI cobra com diff). |
+| **Tailwind** | **Pré-compilado** com o `styles.css` num `css/app.css` só (COMMITADO) via `npm run css` → `tools/gerar-css.mjs` | Zero build pra quem só roda a app (o CSS já está no repo). Tirou 407KB e o `unsafe-eval` da CSP. **Um `<link>` em vez de dois, e o `styles.css` agora sai MINIFICADO** — ele é fortemente comentado e comentário comprime mas não some: 23,4 → 5,3 KB comprimidos, num recurso que bloqueia o render. Mexeu em classe do Tailwind **ou no styles.css**? `npm run css` (o CI cobra com diff). |
 | **Backend** | JavaScript ESM (**sem build, sem npm install**) no padrão **core compartilhado + adaptadores** | `server/core.mjs` = lógica; `worker/index.mjs` = adaptador Cloudflare Workers; `server/node.mjs` = adaptador VM. Só usa `fetch` + Web Crypto → roda igual em Workers e Node 18+. |
 | **Auth** | Cookies do WME do usuário → session token, cookies criptografados **AES-256-GCM** server-side | Cookies não trafegam mais que uma vez. Token opaco no client. |
 | **Sessão** | Store abstrato: **Workers KV** (Cloudflare) ou **filesystem** (VM) | KV tem TTL nativo; VM espelha o modelo `/tmp` antigo. Injetado no core pelo adaptador. |
@@ -75,7 +75,8 @@ wazeplaces/
 │   └── screenshots/         # Capturas do prompt de instalação (ver **PWA: splash e capturas**)
 ├── css/
 │   ├── styles.css           # Estilos custom (@font-face da Inter, componentes)
-│   ├── tailwind.css         # GERADO por `npm run css` — commitado, NÃO editar à mão
+│   ├── app.css              # GERADO por `npm run css` (tools/gerar-css.mjs) — commitado, NÃO editar
+│   │                        #   à mão. É tailwind + styles.css, nessa ordem, os dois minificados.
 │   └── tailwind.src.css     # Entrada (@tailwind base/components/utilities)
 ├── fonts/                   # Inter auto-hospedada (woff2 variável) + licença OFL
 ├── tailwind.config.js       # Config do build de CSS (darkMode: 'class', content)
@@ -99,7 +100,7 @@ wazeplaces/
 │   │                        #   poder proibir script inline. Vai DEPOIS do CSS: o paint já espera
 │   │                        #   o stylesheet, então não custa nada (medido: 996 → 992ms de FCP)
 │   ├── sw-register.js       # Registro/auto-update do service worker. Externo pelo mesmo motivo
-│   └── (sem vendor: Tailwind é pré-compilado em css/tailwind.css)
+│   └── (sem vendor: Tailwind é pré-compilado em css/app.css)
 ├── server/
 │   ├── core.mjs             # Lógica compartilhada: sessões, cripto (AES-GCM), callWaze (fetch),
 │   │                        #   categorizeWazeError, isUserAllowed, 8 handlers, dispatch(). ÚNICO lugar de lógica.
@@ -157,7 +158,7 @@ Pra simular o ambiente Cloudflare (Worker + KV): `npx wrangler dev`.
 ```bash
 npm run check          # node --check em js/*.js server/*.mjs worker/*.mjs
 npm test               # node --test — suite pura do core (test/core.test.mjs), ZERO deps
-npm run css            # SÓ se mexeu em classe do Tailwind (regenera css/tailwind.css; CI cobra)
+npm run css            # SÓ se mexeu em classe do Tailwind OU no css/styles.css (regenera css/app.css; CI cobra)
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
 node tools/waze-probe.mjs <cookies.txt>   # OBRIGATÓRIO se mexeu em algo que fala com o Waze (ver 🔑)
 ```
@@ -609,8 +610,8 @@ Bugs já encontrados e corrigidos — **não repita**:
 19. **Nunca `while (cond) await fn()` onde `fn` pode retornar síncrono sem progredir** — vira cascata de microtasks e congela a aba. Garanta que o await ceda o event loop.
 20. **Todo reset de fila passa por `resetQueue`** — ele faz `fetchEpoch++` e descarrega o `pendingAction` (execute no refresh, cancel no logout).
 21. **O filtro `isRead` do Waze é por VENUE, não por PUR** — a expansão pula `ur.isRead === true`, senão a foto já lida re-vira card eternamente.
-22. **`css/tailwind.css` é GERADO — nunca edite à mão.** Mexeu em classe? `npm run css`, e commite. O CI cobra no diff, e some com o estilo em produção sem erro no console.
-    **A ORDEM dos `<link>` é `tailwind.css` ANTES de `styles.css`** desde v2026.08.05-04 — o nosso CSS vence o empate de especificidade. Travado em `test/layout.test.mjs`.
+22. **`css/app.css` é GERADO — nunca edite à mão.** Mexeu em classe do Tailwind **ou no `css/styles.css`**? `npm run css`, e commite. O CI cobra no diff, e some com o estilo em produção sem erro no console. **A pegadinha nova é o `styles.css`**: antes ele ia cru pro browser e editar bastava; agora ele é minificado pra dentro do `app.css`, então editar sem regerar não muda nada na tela.
+    **A ORDEM é `tailwind` ANTES de `styles`** desde v2026.08.05-04 — o nosso CSS vence o empate de especificidade. Era a ordem dos `<link>`; com um arquivo só, virou a ordem da CONCATENAÇÃO em `tools/gerar-css.mjs`. Travado em `test/layout.test.mjs`, que confere dentro do arquivo gerado.
 23. **Dark mode é 100% `dark:` no HTML/JS** — não crie override global. Se um `dark:` "não pega", é empate de especificidade: use `dark:hover:` explícito.
 24. **`applyI18n()` não entra em `<template>`** — chame `applyI18n(card)` no clone, senão o card volta pro português a cada swipe.
 25. **Auditoria de layout roda em TODAS as línguas** — a string mais larga decide o layout e quase nunca está no idioma em que você desenvolve. E texto que vaza da própria célula não aparece em teste de `scrollWidth`: meça caixa contra caixa.

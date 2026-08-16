@@ -14,7 +14,7 @@
     "check": "for f in js/*.js server/*.mjs worker/*.mjs; do node --check \"$f\"; done",
     "test": "node --test",
     "test:browser": "node tools/smoke-browser.mjs",
-    "css": "npx --yes tailwindcss@3.4.17 -c tailwind.config.js -i css/tailwind.src.css -o css/tailwind.css --minify",
+    "css": "node tools/gerar-css.mjs",
     "cf:dev": "wrangler dev",
     "cf:deploy": "wrangler deploy"
   },

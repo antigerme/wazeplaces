@@ -533,7 +533,30 @@ test('prévia da tela de entrada: miniaturas existem e são leves', () => {
     const src = /src="([^"]+)"/.exec(img)[1];
     assert.match(src, /previa-/, `${src} não é miniatura — usar a captura original custa ~7x mais`);
     const bytes = readFileSync(join(ROOT, src));
-    assert.ok(bytes.length < 40 * 1024, `${src} tem ${Math.round(bytes.length / 1024)} KB — engordou`);
+    assert.ok(bytes.length < 15 * 1024, `${src} tem ${Math.round(bytes.length / 1024)} KB — engordou`);
+    // O `width`/`height` do HTML tem que ser o tamanho REAL do arquivo. Se
+    // alguém reexportar as capturas noutro tamanho e esquecer os atributos, o
+    // navegador reserva a caixa errada e o conteúdo pula depois que a imagem
+    // chega — deslocamento que nenhum teste de layout pega, porque no fim tudo
+    // está no lugar certo. Lê o SOF do JPEG, sem dependência.
+    const decl = { w: +/width="(\d+)"/.exec(img)[1], h: +/height="(\d+)"/.exec(img)[1] };
+    let real = null;
+    for (let i = 2; i < bytes.length - 9;) {
+      if (bytes[i] !== 0xFF) { i++; continue; }
+      const marca = bytes[i + 1];
+      if (marca >= 0xC0 && marca <= 0xCF && ![0xC4, 0xC8, 0xCC].includes(marca)) {
+        real = { h: bytes.readUInt16BE(i + 5), w: bytes.readUInt16BE(i + 7) };
+        break;
+      }
+      i += 2 + bytes.readUInt16BE(i + 2);
+    }
+    assert.ok(real, `${src}: não achei as dimensões no JPEG`);
+    assert.deepEqual(decl, real,
+      `${src}: o HTML declara ${decl.w}x${decl.h} mas o arquivo é ${real.w}x${real.h} — `
+      + 'a caixa reservada fica errada e o conteúdo pula quando a imagem chega');
+    // Exibidas a 72px (`w-[4.5rem]`); 144 cobre tela 2×. Mais que isso é dado
+    // móvel jogado fora, e JPEG não encolhe na compressão do servidor.
+    assert.ok(real.w <= 160, `${src} tem ${real.w}px de largura para exibir 72px — reduza`);
     assert.match(img, /data-i18n-alt="auth\.previa\.[a-z]+"/,
       `${src} sem alt traduzido — leitor de tela fica sem nada, e alt é conteúdo, não enfeite`);
   }

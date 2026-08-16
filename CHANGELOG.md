@@ -8,6 +8,20 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.16-01
+
+### Alterado
+- **A app abre mais rápido, principalmente no celular.** Quatro mudanças, todas medidas contra o relatório do Lighthouse que [@antigerme](https://www.waze.com/user/editor/antigerme) rodou na produção:
+
+  - **Um arquivo de estilo em vez de dois, e agora minificado.** O nosso CSS ia para o navegador com todos os comentários — e comentário comprime, mas não some: eram 23,4 KB que viraram 5,3 KB. Como ele bloqueia o desenho da tela, essa é a maior economia da lista.
+  - **As três miniaturas da tela de entrada emagreceram de 65 KB para 30 KB.** Elas tinham 240 pixels de largura e são exibidas com 72 — foram para 144, que já sobra até em tela de alta densidade. Foto não encolhe na compressão, então esses 35 KB eram desperdício puro em dado móvel.
+  - **A sua foto de perfil deixou de atrapalhar.** Ela vem do Waze com 214 KB e aparece com 32 pixels no cabeçalho; não existe versão menor (testei). Agora ela é buscada com prioridade baixa e a **foto do pedido** com prioridade alta — o que você precisa ver para decidir passa na frente.
+  - **Os scripts não seguram mais o desenho da página.**
+
+  Nada disso muda o que a app faz, nem adiciona qualquer consulta ao servidor.
+
+---
+
 ## v2026.08.15-03
 
 ### Alterado

@@ -164,12 +164,30 @@ test('a ordem dos <link> mantém o NOSSO CSS vencendo o empate', () => {
   // antes de trocar: diff pixel a pixel de 92 cenários (23 telas × 2 temas ×
   // celular e desktop) → ZERO pixels. O que este teste protege agora é a
   // ordem em si: desfazê-la ressuscita as seis de uma vez, e em silêncio.
-  const iTw = HTML.indexOf('href="css/tailwind.css"');
-  const iSt = HTML.indexOf('href="css/styles.css"');
-  assert.ok(iTw > 0 && iSt > 0, 'sumiu um dos dois <link> de CSS do index.html');
+  // Os dois <link> viraram UM (`css/app.css`, gerado por tools/gerar-css.mjs),
+  // então a ordem que importa deixou de ser a dos <link> e passou a ser a da
+  // CONCATENAÇÃO. O teste segue a mudança: verifica dentro do arquivo GERADO
+  // que o Tailwind vem antes do nosso CSS. Testar o HTML aqui seria testar o
+  // lugar errado — o empate se decide no arquivo, não na tag.
+  assert.match(HTML, /<link rel="stylesheet" href="css\/app\.css">/,
+    'o index.html tem que carregar o css/app.css gerado');
+  assert.equal((HTML.match(/rel="stylesheet"/g) || []).length, 1,
+    'voltou a ter mais de um <link> de CSS bloqueando o render');
+
+  const APP = read('css/app.css');
+  // Marcador do Tailwind (o reset do preflight) contra um seletor que só existe
+  // no nosso styles.css. Se o nosso vier primeiro, ele perde o empate calado.
+  const iTw = APP.indexOf('--tw-border-spacing-x');
+  const iSt = APP.indexOf('.valor-ausente');
+  assert.ok(iTw >= 0, 'o css/app.css não tem a saída do Tailwind — rode `npm run css`');
+  assert.ok(iSt >= 0, 'o css/app.css não tem o nosso styles.css — rode `npm run css`');
   assert.ok(iTw < iSt,
-    'o tailwind.css tem que carregar ANTES do styles.css — invertido, o nosso CSS '
+    'no css/app.css o Tailwind tem que vir ANTES do styles.css — invertido, o nosso CSS '
     + 'volta a perder o empate de especificidade pra utility, calado (gotcha #27)');
+
+  // A saída é gerada: editar à mão volta na próxima `npm run css`.
+  assert.match(APP, /^\/\* GERADO por tools\/gerar-css\.mjs/,
+    'o css/app.css perdeu o cabeçalho de "não edite"');
 });
 
 test(':focus-visible não pode escrever border-radius', () => {
