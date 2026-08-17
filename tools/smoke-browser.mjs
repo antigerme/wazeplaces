@@ -231,6 +231,14 @@ const APARELHOS = [
   // e o deitado (393px de altura pra app inteira).
   ['Galaxy Fold', { width: 280, height: 653 }],
   ['paisagem 852x393', { width: 852, height: 393 }],
+  // POR QUE o iPhone SE 2016 (320x568) NÃO está aqui, apesar de o CHANGELOG já
+  // ter registrado o defeito da dobra nele: MEDIDO em 2026-08-16, a margem
+  // entre a barra ✕/↑/✓ e o fim da tela é praticamente constante — 17px no
+  // deitado e no SE 375x667, 15px no Fold, 15px no SE 2016 —, com ou sem foto e
+  // com ou sem a faixa do treino. O Fold já testa exatamente a mesma margem de
+  // 15px, então o aparelho a mais custaria +20% no trecho mais longo do smoke
+  // pra medir o que já é medido. Se a margem deixar de ser constante (mudança
+  // na cadeia de altura do card), esta conta muda e vale reavaliar.
 ];
 const LINGUAS = ['pt', 'en', 'es', 'fr'];
 
