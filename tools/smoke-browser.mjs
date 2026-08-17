@@ -2552,6 +2552,128 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── DUPLICATE: o card diz DE QUEM e mostra ONDE ────────────────────────────
+//
+// "Duplicado" sozinho é meia frase — o WME escreve "Duplicado DE <local>", e o
+// alvo é justamente o que decide. O nome vem do core (`resolverDuplicados`,
+// uma releitura por bbox), e aqui se mede o que a TELA faz com ele.
+//
+// Três casos, e o terceiro é o que costuma quebrar: nome longo no aparelho
+// mais estreito, em francês — a frase francesa ainda soma « » por cima, e a
+// linha do motivo é `flex-shrink-0`, então tudo o que ela crescer sai da
+// barra ✕/↑/✓ (gotcha #45).
+{
+  const ALVO_ID = '205391388.2053651740.12920425';
+  const CENTRO = [-23.5, -46.6], ALVO_LL = [-23.49914, -46.6];   // 96 m: a distância REAL do pedido
+  const DUP_BASE = {
+    venueID: '205391388.2053651740.4527272', updateRequestID: 'ur-dup',
+    name: 'Estacionamento Times Park', categories: ['PARKING_LOT'],
+    address: 'Rua Ministro Gabriel de Rezende Passos, 100 - Moema, São Paulo - São Paulo',
+    updateTypeKey: 'FLAG', reqType: 'REQUEST', reqSubType: 'FLAG',
+    createdBy: 'wazer', source: 'MOBILE_CLIENT', imageUrls: [], changes: [],
+    flagType: 'DUPLICATE', flagSubjectType: 'VENUE', flagEntityID: ALVO_ID, flagComment: null,
+    dateAdded: 1786982736809, lat: CENTRO[0], lon: CENTRO[1],
+    mapa: { centro: CENTRO, proposto: null, movidoM: null, entradas: [] },
+  };
+  const DUP_CASOS = {
+    comNome: { ...DUP_BASE, duplicado: { id: ALVO_ID, nome: 'Natan Estacionamento', ll: ALVO_LL, distM: 96 } },
+    semNome: { ...DUP_BASE, duplicado: { id: ALVO_ID, nome: null, ll: ALVO_LL, distM: 96 } },
+    nomeLongo: { ...DUP_BASE, duplicado: { id: ALVO_ID, ll: ALVO_LL, distM: 96,
+      nome: 'Estacionamento Rotativo Municipal do Centro Histórico de São José do Rio Preto' } },
+    naoResolvido: { ...DUP_BASE },
+  };
+  // Os MESMOS dois de `APARELHOS` que apertam a conta de altura — inventar
+  // dimensão aqui é medir outro aparelho e achar que se mediu o do projeto.
+  const APARELHOS_DUP = [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone SE', { width: 375, height: 667 }]];
+  // Margem da dobra por aparelho/caso: é ela que responde "quanto o recurso
+  // custou", e é a pergunta que me impediria de culpar o recurso novo por um
+  // defeito que já existia (gotcha #28).
+  const margens = {};
+  for (const [aparelho, viewport] of APARELHOS_DUP) {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(200);
+    for (const lang of LINGUAS) {
+      for (const [nome, place] of Object.entries(DUP_CASOS)) {
+        const onde = `duplicado ${aparelho}/${lang}/${nome}`;
+        await page.evaluate(({ pl, l }) => {
+          setLang(l);
+          AppState.preferences.comoFuncionaVisto = true;
+          try { closeModal('comoFuncionaModal'); } catch {}
+          AppState.authenticated = true;
+          AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+          AppState.serverTotal = 40;
+          document.getElementById('authScreen').classList.add('hidden');
+          document.getElementById('appScreen').classList.remove('hidden');
+          renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+          document.getElementById('noMoreCards').classList.add('hidden');
+          AppState.queue = [pl]; AppState.currentPlace = pl;
+          showCurrentPlace();
+        }, { pl: place, l: lang });
+        // Medir DEPOIS de assentar, e não no mesmo `evaluate` do render: o
+        // `.card-enter` ainda anima e o observer do mapa refaz o enquadramento,
+        // então a caixa medida no mesmo quadro é a de antes de o card assentar.
+        // Medido: 1,29px de sobra "abaixo da dobra" no SE que somem depois —
+        // eu ia registrar como defeito da app o que era pressa do instrumento.
+        await assentar(page);
+        const m = await page.evaluate(() => {
+          const c = document.querySelector('.place-card');
+          if (!c) return null;
+          const val = c.querySelector('.card-flag-reason-value');
+          const barra = c.querySelector('.card-btn-reject')?.parentElement;
+          const rb = barra ? barra.getBoundingClientRect() : null;
+          return {
+            motivo: val ? val.textContent : '',
+            legenda: [...c.querySelectorAll('.card-map-legend .mapa-leg')].map((x) => x.textContent.trim()),
+            marcaDup: !!c.querySelector('.card-map-marks .mapa-duplicado'),
+            // Alvo do gesto: a barra tem que estar INTEIRA na tela.
+            foraDaDobraCru: rb ? rb.bottom - innerHeight : null,
+            foraDaDobra: rb ? Math.round(rb.bottom - innerHeight) : null,
+            estouroH: Math.round(document.documentElement.scrollWidth - innerWidth),
+          };
+        });
+        if (!m) { checa(false, `${onde}: sem card`); continue; }
+        checa(m.estouroH <= 0, `${onde}: estouro horizontal`, `${m.estouroH}px`);
+        checa(m.foraDaDobra <= 0, `${onde}: barra ✕/↑/✓ abaixo da dobra`, `${m.foraDaDobraCru}px`);
+        checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+        if (nome === 'naoResolvido') {
+          // Alvo que não resolve não pode deixar "de" pendurado nem marcador órfão.
+          checa(!/[«“"]/.test(m.motivo), `${onde}: frase com aspas sem alvo`, m.motivo);
+          checa(!m.marcaDup, `${onde}: marcador de duplicado sem alvo`);
+        } else {
+          checa(m.marcaDup, `${onde}: sem o marcador do duplicado no mapa`);
+          checa(m.legenda.length >= 2, `${onde}: legenda não nomeia o marcador novo`, m.legenda.join('|'));
+        }
+        // Nome conhecido → a frase TEM que dizê-lo; sem nome → volta à forma
+        // isolada, porque `de “(local sem nome)”` empilha aspas e parênteses.
+        const temNome = DUP_CASOS[nome].duplicado && DUP_CASOS[nome].duplicado.nome;
+        if (temNome) checa(m.motivo.includes(DUP_CASOS[nome].duplicado.nome), `${onde}: o motivo não nomeia o alvo`, m.motivo);
+        else checa(!/[«“"]/.test(m.motivo), `${onde}: forma completa sem nome pra pôr`, m.motivo);
+        checa(!/\{alvo\}/.test(m.motivo), `${onde}: {alvo} vazou cru pra tela`, m.motivo);
+        margens[`${aparelho}/${lang}/${nome}`] = m.foraDaDobraCru;
+      }
+    }
+    await ctx.close();
+  }
+  // CONTROLE: `naoResolvido` é o card de HOJE, sem nada do recurso. Se a margem
+  // dele for igual à dos outros, o recurso custou zero pixel de dobra — e se um
+  // dia der diferença, a diferença é do recurso, não da app. Sem esta conta eu
+  // ia registrar como defeito da app um 1,29px que era o instrumento medindo
+  // antes de o card assentar.
+  for (const [aparelho] of APARELHOS_DUP) {
+    for (const lang of LINGUAS) {
+      const base = margens[`${aparelho}/${lang}/naoResolvido`];
+      for (const nome of ['comNome', 'semNome', 'nomeLongo']) {
+        const dif = margens[`${aparelho}/${lang}/${nome}`] - base;
+        checa(Math.abs(dif) < 1, `duplicado ${aparelho}/${lang}/${nome}: custou ${dif.toFixed(2)}px de dobra sobre o card sem o recurso`);
+      }
+    }
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2581,4 +2703,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
   + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
-  + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`);
+  + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
+  + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`);

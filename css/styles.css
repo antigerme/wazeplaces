@@ -1523,6 +1523,20 @@ button:active {
 .mapa-marca.mapa-e-nova { background: #16a34a; }
 .mapa-marca.mapa-e-saindo { background: #e11d48; }
 .mapa-marca.mapa-e-atual { background: #0891b2; }
+/* Duplicado: o OUTRO local, o que o pedido diz ser o mesmo. Losango — círculo
+   (posição do local) e quadrado (ponto de entrada) já estão tomados, e forma é
+   o canal que sobra quando a cor não pode ser o único (WCAG 1.4.1). Violeta
+   porque as quatro cores de marcador em uso já significam outra coisa, e as
+   três de AÇÃO (✕ rosa, ✓ verde, ↑ âmbar) não podem ser emprestadas: cor de
+   ação num marcador leria como "faça isto aqui". */
+.mapa-marca.mapa-duplicado {
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 2px;
+  background: #7c3aed;
+  transform: rotate(45deg);
+}
 
 /* Linha do movimento: sem ela, dois pontos próximos leem como dois locais
    diferentes em vez de um que andou. Tracejada porque é trajeto proposto, não

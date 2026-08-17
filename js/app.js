@@ -2860,8 +2860,29 @@ function renderCurrentCard() {
     if (place.flagType) {
         // Enum não mapeado aparece CRU, pela mesma razão do diff de mudanças:
         // esconder o motivo de uma denúncia é pior que mostrá-lo em inglês.
-        card.querySelector('.card-flag-reason-value').textContent =
-            rotuloDeEnum('card.flagType.', place.flagType);
+        let motivo = rotuloDeEnum('card.flagType.', place.flagType);
+        // "Duplicado" sozinho não é um motivo: é meia frase. O WME escreve
+        // "Duplicado DE <local>", e o alvo é justamente a informação que decide
+        // — sem ela o editor tem que abrir o WME só pra saber de quem. O core
+        // resolve o nome quando consegue (ver `resolverDuplicados`); quando não
+        // consegue, fica a forma isolada, que é o que a app já mostrava.
+        // Só com NOME. Alvo achado e sem nome existe, e aí a frase completa
+        // sairia `Duplicado de “(local sem nome)”` — aspas em volta de
+        // parênteses, que é a marca de placeholder da app: duas convenções
+        // empilhadas dizendo a mesma ausência. Nesse caso o texto volta a ser o
+        // de hoje e quem responde "onde" é o marcador no mapa, que continua lá.
+        if (place.flagType === 'DUPLICATE' && place.duplicado && place.duplicado.nome) {
+            motivo = t('card.flagDuplicateOf', { alvo: place.duplicado.nome });
+        }
+        // A distância vai no TEXTO e não só no mapa porque o mapa nem sempre é
+        // o primeiro slide (`mapaVemPrimeiro()`): num pedido com foto o editor
+        // pode decidir sem nunca deslizar até ele, e aí "onde" ficaria sem
+        // resposta. É também o que separa na hora o duplicado plausível do
+        // vizinho parecido — medido na fila real: 94 · 96 · 101 · 110 · 146 m.
+        if (place.duplicado && Number.isFinite(place.duplicado.distM)) {
+            motivo += ' · ' + formatarMetros(place.duplicado.distM);
+        }
+        card.querySelector('.card-flag-reason-value').textContent = motivo;
         card.querySelector('.card-flag-reason').classList.remove('hidden');
     }
     // A caixa aparece só quando HÁ texto livre — ela existe pra segurá-lo. Antes
@@ -3040,12 +3061,17 @@ function vigiarCaixaDoMapa(box, card, place) {
     box._roMapa.observe(box);
 }
 
-function renderMapa(card, place, refazendo) {
-    const box = card.querySelector('.card-map');
-    if (!box || !place.mapa || (box.dataset.pronto === '1' && !refazendo)) return !!(box && place.mapa);
-    const m = place.mapa;
-
-    // Ordem estável: é ela que casa cada pixel devolvido com o seu marcador.
+// Os marcadores do mapa deste pedido, em ordem ESTÁVEL — é ela que casa cada
+// pixel devolvido pelo `mapaMontar` com o seu marcador.
+//
+// FONTE ÚNICA de propósito: a mesma lista decide o enquadramento do mapinha do
+// card, o do mapa ampliado e os tiles que o prefetch aquece. Ela morava
+// copiada nos três, e ponto a mais num só deles não é "um marcador faltando":
+// é ZOOM diferente, ou seja, o ampliado abrindo noutro enquadramento e o
+// prefetch aquecendo tile que ninguém vai pedir. Mesma lição do gotcha #63.
+function pontosDoMapa(place) {
+    const m = place && place.mapa;
+    if (!m) return [];
     const pontos = [];
     if (m.centro) pontos.push({ ll: m.centro, cls: 'mapa-atual', rot: m.proposto ? 'card.map.antes' : 'card.map.aqui' });
     if (m.proposto) pontos.push({ ll: m.proposto, cls: 'mapa-proposto', rot: 'card.map.depois' });
@@ -3056,6 +3082,27 @@ function renderMapa(card, place, refazendo) {
             rot: 'card.map.entrada.' + e.estado,
         });
     }
+    // O "onde" do duplicado. O nome responde DE QUEM; o marcador responde ONDE
+    // — e ONDE é o que decide se são de fato o mesmo lugar. Medido na fila
+    // real: 94 · 96 · 101 · 110 · 146 m. Nessa faixa o `mapaMontar` já escolhe
+    // sozinho o zoom que cabe, sem caso especial aqui.
+    if (place.duplicado && place.duplicado.ll) {
+        pontos.push({
+            ll: place.duplicado.ll,
+            nome: place.duplicado.nome,
+            cls: 'mapa-duplicado',
+            rot: 'card.map.duplicado',
+        });
+    }
+    return pontos;
+}
+
+function renderMapa(card, place, refazendo) {
+    const box = card.querySelector('.card-map');
+    if (!box || !place.mapa || (box.dataset.pronto === '1' && !refazendo)) return !!(box && place.mapa);
+    const m = place.mapa;
+
+    const pontos = pontosDoMapa(place);
     // A caixa é medida AGORA, e o enquadramento vale só pra este tamanho: os
     // tiles são enumerados pra cobrir exatamente `larguraPx × alturaPx`. Se a
     // caixa crescer depois — e ela cresce, porque o card é flex e assenta
@@ -3185,14 +3232,7 @@ const MapaLightbox = {
 
     open(place) {
         if (!place || !place.mapa || !window.mapaGrade) return;
-        const m = place.mapa;
-        this.pontos = [];
-        if (m.centro) this.pontos.push({ ll: m.centro, cls: 'mapa-atual', rot: m.proposto ? 'card.map.antes' : 'card.map.aqui' });
-        if (m.proposto) this.pontos.push({ ll: m.proposto, cls: 'mapa-proposto', rot: 'card.map.depois' });
-        for (const e of m.entradas || []) {
-            this.pontos.push({ ll: e.ll, nome: e.nome, cls: 'mapa-entrada mapa-e-' + e.estado,
-                               rot: 'card.map.entrada.' + e.estado });
-        }
+        this.pontos = pontosDoMapa(place);
         if (!this.pontos.length) return;
 
         const el = document.getElementById('mapaLightbox');
@@ -4066,9 +4106,7 @@ function aquecer(url) {
 // muda o zoom em casos de fronteira, e aí o tile aquecido é vizinho do certo.
 function tilesDoCard(place, w, h) {
     if (!place || !place.mapa || !window.mapaMontar) return [];
-    const pts = [place.mapa.centro, place.mapa.proposto,
-                 ...(place.mapa.entradas || []).map((e) => e.ll)].filter(Boolean);
-    const r = mapaMontar(pts, w, h, API.getRegion());
+    const r = mapaMontar(pontosDoMapa(place).map((p) => p.ll), w, h, API.getRegion());
     return r ? r.tiles.map((t) => t.url) : [];
 }
 

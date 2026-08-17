@@ -1183,3 +1183,121 @@ test('sessão ilegível é apagada do store, não deixada expirar', async () => 
   assert.equal(await sessions.loadSession(t2), null);
   assert.equal(kv.has(c2), false, 'valor corrompido também é descartado');
 });
+
+// ── DUPLICATE: de QUEM o local é duplicado ──────────────────────────────────
+//
+// Os dados abaixo são de um pedido REAL da fila brasileira (medido nos 6 países
+// obrigatórios). O `flagEntityID` do DUPLICATE carrega o id do OUTRO local, e o
+// `Issues/Search/List` não devolve esse outro local — ele só devolve quem tem
+// pedido pendente. Medido: o alvo aparece na própria resposta em 0 de 6 casos
+// genuínos. Quem resolve é a releitura por bbox.
+const DUP_ORIGEM = '205391388.2053651740.4527272';
+const DUP_ALVO = '205391388.2053651740.12920425';
+const DUP_LON = -46.6, DUP_LAT = -23.5;
+
+const buscaComFlag = (ur) => ({
+  users: { objects: [] },
+  venues: { objects: [{
+    id: DUP_ORIGEM, name: 'Estacionamento Times Park', permissions: -1,
+    geometry: { type: 'Point', coordinates: [DUP_LON, DUP_LAT] },
+    images: [],
+    venueUpdateRequests: [Object.assign({
+      id: 'ur-dup', venueID: DUP_ORIGEM, type: 'REQUEST', subType: 'FLAG',
+      isRead: false, dateAdded: 1786982736809,
+    }, ur)],
+  }] },
+  mapIssues: { venueUpdateRequests: { hasMore: false } },
+});
+
+// O alvo, ~96 m ao norte — a distância REAL deste pedido.
+const RESPOSTA_BBOX = { venues: { objects: [{
+  id: DUP_ALVO, name: 'Natan Estacionamento', permissions: -1,
+  geometry: { type: 'Point', coordinates: [DUP_LON, DUP_LAT + 0.00086] },
+}] } };
+
+async function buscarComStub(ur, { bbox = RESPOSTA_BBOX, bboxStatus = 200 } = {}) {
+  const store = memStore();
+  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const token = await sessions.createSession([
+    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
+  ].join('\n'));
+  const chamadas = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    chamadas.push({ url: u, metodo: init?.method || 'GET' });
+    const j = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json' } });
+    if (/Issues\/Search\/List/.test(u)) return j(buscaComFlag(ur));
+    if (/\/Features/.test(u)) return j(bbox, bboxStatus);
+    return j({});
+  };
+  try {
+    const r = await dispatch('buscar-places', { sessionToken: token, region: 'row' }, { sessions });
+    return { r, chamadas };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test('DUPLICATE: o card recebe DE QUEM é duplicado, resolvido por releitura de bbox', async () => {
+  const { r, chamadas } = await buscarComStub({
+    flagType: 'DUPLICATE', flagSubjectType: 'VENUE', flagEntityID: DUP_ALVO,
+  });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const p = r.body.places[0];
+  assert.ok(p.duplicado, 'o alvo do duplicado não foi resolvido — o card volta a dizer só "Duplicado"');
+  assert.equal(p.duplicado.id, DUP_ALVO);
+  assert.equal(p.duplicado.nome, 'Natan Estacionamento');
+  // O "onde": sem coordenada não há marcador no mapa, e o card responde
+  // metade da pergunta ("de quem", nunca "onde").
+  assert.ok(Array.isArray(p.duplicado.ll), 'o alvo veio sem coordenada');
+  assert.ok(p.duplicado.distM >= 90 && p.duplicado.distM <= 100,
+    `distância fora do esperado: ${p.duplicado.distM} m`);
+
+  const leitura = chamadas.find((c) => c.metodo === 'GET' && /\/Features/.test(c.url));
+  assert.ok(leitura, 'não releu por bbox');
+  // O raio é medido, não escolhido: com o raio do excluir-foto (0,0002°) o alvo
+  // não é achado em NENHUM dos 6 casos reais. Se alguém "unificar" as duas
+  // constantes, este número cai e o recurso para de funcionar em silêncio.
+  const bboxQ = new URL(leitura.url).searchParams.get('bbox').split(',').map(Number);
+  assert.ok(Math.abs((bboxQ[2] - bboxQ[0]) / 2 - 0.004) < 1e-9,
+    `raio da releitura mudou: ${(bboxQ[2] - bboxQ[0]) / 2}`);
+  assert.equal((leitura.url.match(/\?/g) || []).length, 1, 'URL com dois "?" — foi assim que veio o 406 no excluir-foto');
+  assert.equal(chamadas.filter((c) => /\/Features/.test(c.url)).length, 1, 'mais de uma leitura pro mesmo duplicado');
+});
+
+test('DUPLICATE que aponta o PRÓPRIO local não gasta leitura', async () => {
+  // 1 dos 7 casos reais. Ou o pedido é lixo, ou o app do celular preencheu o
+  // campo por não ter outro valor — em nenhuma das duas há nome pra mostrar,
+  // então o certo é não chamar o Waze à toa.
+  const { r, chamadas } = await buscarComStub({
+    flagType: 'DUPLICATE', flagSubjectType: 'VENUE', flagEntityID: DUP_ORIGEM,
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.places[0].duplicado, undefined);
+  assert.equal(chamadas.filter((c) => /\/Features/.test(c.url)).length, 0,
+    'releu o bbox pra um alvo que é o próprio local');
+});
+
+test('FLAG de FOTO não dispara releitura — o mesmo campo carrega id de foto', async () => {
+  // `flagEntityID` é id de VENUE quando o subject é VENUE e UUID de FOTO quando
+  // é IMAGE. Sem distinguir, todo reporte de foto (UNRELATED, LOW_QUALITY —
+  // 24 dos 264 FLAG medidos) viraria uma leitura extra contra o Waze.
+  const { r, chamadas } = await buscarComStub({
+    flagType: 'LOW_QUALITY', flagSubjectType: 'IMAGE',
+    flagEntityID: '89abe179-43a6-4d44-b4cd-d9ef2fd4ab70',
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.places[0].duplicado, undefined);
+  assert.equal(chamadas.filter((c) => /\/Features/.test(c.url)).length, 0);
+});
+
+test('releitura do duplicado que falha não derruba a busca', async () => {
+  // Melhor-esforço: sem o nome o card volta a ser o que era, e é só isso.
+  const { r } = await buscarComStub(
+    { flagType: 'DUPLICATE', flagSubjectType: 'VENUE', flagEntityID: DUP_ALVO },
+    { bbox: { erro: 1 }, bboxStatus: 500 });
+  assert.equal(r.status, 200, 'a busca inteira caiu por causa de uma leitura acessória');
+  assert.equal(r.body.places.length, 1);
+  assert.equal(r.body.places[0].duplicado, undefined);
+});
