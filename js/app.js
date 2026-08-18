@@ -1887,9 +1887,16 @@ function abrirEdicaoNome() {
     const cx = document.getElementById('lightboxNome');
     const nome = Lightbox.place.name;
     cx.classList.add('editando');
-    document.getElementById('lightboxNomeBtn').classList.add('hidden');
+    // A pílula CONTINUA na tela, mostrando o nome antigo — é ela a referência
+    // enquanto se digita. Vira RÓTULO: `disabled` tira do Tab e mata o clique,
+    // e o lápis sai porque prometer ação onde não há é o que faz botão morto
+    // parecer vivo. Isto substitui a linha "Antes:" que eu tinha posto embaixo:
+    // o owner viu o nome DUAS vezes na tela e preferiu, com razão, ficar só com
+    // a pílula — ela flutua sobre a foto e não custa altura de layout.
+    const btn = document.getElementById('lightboxNomeBtn');
+    btn.disabled = true;
+    btn.querySelector('.lb-nome-lapis')?.classList.add('hidden');
     document.getElementById('lightboxNomeEdit').classList.remove('hidden');
-    document.getElementById('lightboxNomeAntes').textContent = nome;
     const inp = document.getElementById('lightboxNomeInput');
     inp.value = nome;
     // O botão de ação da foto some enquanto edita: ele fica no mesmo canto, e
@@ -1912,7 +1919,10 @@ function fecharEdicaoNome() {
     cx.classList.remove('editando');
     const btn = document.getElementById('lightboxNomeBtn');
     const ed = document.getElementById('lightboxNomeEdit');
-    if (btn) btn.classList.remove('hidden');
+    if (btn) {
+        btn.disabled = false;
+        btn.querySelector('.lb-nome-lapis')?.classList.remove('hidden');
+    }
     if (ed) ed.classList.add('hidden');
     document.getElementById('imageLightbox').classList.remove('editando-nome');
     for (const id of ['lightboxDelete', 'lightboxApprove']) {

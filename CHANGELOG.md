@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.18-03
+
+### Corrigido
+- **O nome do local aparecia duas vezes ao corrigi-lo.** A etiqueta sobre a foto e a linha "Antes:" mostravam a mesma coisa. Ficou só a etiqueta — ela flutua sobre a foto e não ocupa espaço, então a foto ganhou **30 pixels** de volta em todo aparelho. Reparado por [@antigerme](https://www.waze.com/user/editor/antigerme) na primeira vez que usou de verdade.
+
+  A etiqueta devia sumir enquanto você digita, e não sumia: uma regra de estilo nossa vencia a que esconde elementos. Agora ela fica de propósito, como referência do nome antigo — e virou rótulo, não botão.
+
+---
+
 ## v2026.08.18-02
 
 ### Adicionado

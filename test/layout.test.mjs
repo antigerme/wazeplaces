@@ -2033,3 +2033,54 @@ test('realce do miolo: dispara na agulha e cala no óbvio', () => {
   assert.equal(emoji.de[1], '🍕');
   assert.equal(emoji.para[1], '🍔');
 });
+
+// ── `.hidden` não esconde o que styles.css declara `display` ────────────────
+//
+// O Tailwind dá `.hidden { display: none }`, e desde v2026.08.05-04 o NOSSO CSS
+// carrega DEPOIS (gotcha #22/#27) — de propósito, pra vencer o empate de
+// especificidade nos estilos. O efeito colateral: qualquer `.foo { display: x }`
+// em styles.css também vence o `.hidden`, e aí `classList.add('hidden')` não
+// esconde COISA NENHUMA. Falha silenciosa: o JS diz que escondeu, o DOM
+// concorda (a classe está lá), e só a tela mostra a verdade.
+//
+// Aconteceu com a pílula do nome no lightbox: `.lb-nome-btn { display: flex }`
+// mora na posição 61526 do CSS compilado e o `.hidden` na 7164, então o nome do
+// local apareceu DUAS vezes durante a edição — na tela do owner, não aqui.
+test('.hidden vence: nada que o JS esconde pode ter display fixado em styles.css', () => {
+  const css = readFileSync(join(ROOT, 'css', 'styles.css'), 'utf8');
+  const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+  const app = readFileSync(join(ROOT, 'js', 'app.js'), 'utf8');
+
+  // classes que styles.css fixa `display` (fora de @media/@supports não importa:
+  // se pega em ALGUM contexto, já quebra ali)
+  const comDisplay = new Set();
+  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    if (!/(^|[^-\w])display\s*:/.test(m[2])) continue;
+    // `:not(.x)` é CONDIÇÃO, não estilo: `#appScreen:not(.hidden){display:flex}`
+    // não fixa display na `.hidden` — pelo contrário, existe justamente pra
+    // ceder a ela. Sem tirar isso, o guard acusa meia app.
+    const seletor = m[1].replace(/:not\([^)]*\)/g, '');
+    for (const cls of seletor.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
+      if (cls[1] !== 'hidden') comDisplay.add(cls[1]);
+    }
+  }
+
+  // ids que o app.js esconde por `.hidden`
+  const escondidos = new Set();
+  for (const re of [/getElementById\('([\w-]+)'\)[^;\n]*classList\.add\('hidden'\)/g,
+                    /getElementById\('([\w-]+)'\)[^;\n]*classList\.toggle\('hidden'/g,
+                    /\$\('([\w-]+)'\)[^;\n]*classList\.add\('hidden'\)/g]) {
+    for (const m of app.matchAll(re)) escondidos.add(m[1]);
+  }
+  assert.ok(escondidos.size >= 5, `o varredor achou só ${escondidos.size} ids — a regex parou de casar`);
+
+  const presos = [];
+  for (const id of escondidos) {
+    const el = html.match(new RegExp(`<[^>]*\\sid="${id}"[^>]*>`));
+    if (!el) continue;                                   // criado em runtime
+    const cls = (el[0].match(/\sclass="([^"]*)"/) || [, ''])[1].split(/\s+/);
+    for (const c of cls) if (c && comDisplay.has(c)) presos.push(`#${id} tem .${c}, que fixa display em styles.css`);
+  }
+  assert.deepEqual(presos, [],
+    'estes elementos NÃO somem com .hidden — o styles.css carrega depois e ganha:\n  ' + presos.join('\n  '));
+});

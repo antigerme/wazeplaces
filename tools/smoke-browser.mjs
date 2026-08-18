@@ -2848,9 +2848,28 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(visivel === esperado, `${onde}: portão errado para ${rot}`, `visível=${visivel}`);
     }
 
-    // ── TECLADO: três alturas, porque ele é do sistema e varia ──────────────
+    // ── O nome antigo aparece UMA VEZ, não duas ────────────────────────────
+    // O owner viu duas: a pílula (que eu mandava esconder e o `.hidden` não
+    // escondia — gotcha #27) e a linha "Antes:" que eu tinha posto embaixo. A
+    // linha saiu; a pílula ficou, virando rótulo. Contar OCORRÊNCIAS na tela é
+    // o que pega isso — checar `classList.contains('hidden')` diria que sumiu.
     await page.locator('#lightboxNomeBtn').click();
     await assentar(page);
+    const rep = await page.evaluate((antigo) => {
+      const vis = (e) => { const r = e.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(e).display !== 'none'; };
+      let n = 0;
+      for (const e of document.querySelectorAll('#lightboxNome *')) {
+        if (!e.children.length && vis(e) && (e.textContent || '').trim().includes(antigo)) n++;
+      }
+      const btn = document.getElementById('lightboxNomeBtn');
+      return { n, botaoMorto: btn.disabled, semLapis: btn.querySelector('.lb-nome-lapis').classList.contains('hidden') };
+    }, 'Odontodente Consultório');
+    checa(rep.n === 1, `${onde}: o nome antigo aparece ${rep.n}× na tela durante a edição`);
+    checa(rep.botaoMorto, `${onde}: a pílula virou rótulo mas continua clicável`);
+    checa(rep.semLapis, `${onde}: o lápis ficou num rótulo que não é mais botão`);
+
+    // ── TECLADO: três alturas, porque ele é do sistema e varia ──────────────
     // Alturas PROPORCIONAIS, não absolutas: teclado real ocupa ~40–50% da tela,
     // então 400px fixos são plausíveis num Pixel 7 e absurdos num SE 2016 (70%
     // da tela). Testar o absurdo mede o layout contra um caso que não existe.
