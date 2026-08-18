@@ -941,6 +941,17 @@ function setupModalListeners() {
     $('cancelBatchRead')?.addEventListener('click', () => closeModal('batchReadModal'));
     $('lightboxDelete')?.addEventListener('click', pedirExclusaoDaFoto);
     $('lightboxApprove')?.addEventListener('click', aprovarFotoAtual);
+    $('lightboxNomeBtn')?.addEventListener('click', abrirEdicaoNome);
+    $('lightboxNomeOk')?.addEventListener('click', confirmarRenomear);
+    $('lightboxNomeCancel')?.addEventListener('click', fecharEdicaoNome);
+    $('lightboxNomeInput')?.addEventListener('input', atualizarBotaoSalvarNome);
+    $('lightboxNomeInput')?.addEventListener('keydown', (ev) => {
+        // Enter confirma, Esc cancela — e o Esc PARA aqui (`stopPropagation`),
+        // senão ele fecha o lightbox inteiro e a pessoa perde a foto que estava
+        // usando de prova só por desistir de um caractere.
+        if (ev.key === 'Enter') { ev.preventDefault(); confirmarRenomear(); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); fecharEdicaoNome(); }
+    });
 
     // Pareamento
     $('pairCreateBtn')?.addEventListener('click', abrirPareamento);
@@ -1109,8 +1120,10 @@ const Lightbox = {
             this._hintTimer = setTimeout(() => hint.classList.add('hidden'), 4000);
         }
         this._render();
+        mostrarNomeNoLightbox();
     },
     close({ viaHistorico = false } = {}) {
+        fecharEdicaoNome();
         if (!this.isOpen()) return;
         if (!viaHistorico) CamadaVoltar.consumir();
         document.getElementById('imageLightbox').classList.add('hidden');
@@ -1828,6 +1841,174 @@ function aprovarFotoAtual() {
     aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer());
+}
+
+// ── Renomear o local, do lightbox ──────────────────────────────────────────
+//
+// A ÚNICA escrita de dado de LOCAL da app, e o que a justifica é a natureza da
+// decisão, não a conveniência: o editor está com a FACHADA ampliada na tela, que
+// é prova primária do nome. E a alternativa não é decidir melhor no WME — é a
+// MESMA gravação com uma ida e volta no meio. Medido no HAR do owner renomeando
+// lá: o WME não busca duplicado, não valida convenção, não confere nada. Manda
+// `{id, name}`.
+//
+// Portão: o mesmo da lixeira (`podeExcluirFotoAqui`), decisão do owner, e só do
+// CLIENTE — o Waze valida `permissions`/`lockRank` na gravação, então quem não
+// pode por aqui também não consegue por lá.
+let renomeacaoPendente = null;   // { timer, enviar, desfazer }
+
+function podeRenomearAqui() {
+    // Mesmo portão da foto. Função própria (em vez de chamar a outra direto)
+    // porque são DUAS decisões de produto que hoje coincidem: se um dia o owner
+    // separar, o call site não muda.
+    if (!podeExcluirFotoAqui()) return false;
+    const p = Lightbox.place;
+    // v1 só CORRIGE nome existente. Batizar local sem nome é outra decisão (e
+    // outra conversa) — sem isto, um toque acidental nomearia um lugar anônimo.
+    return !!(p && p.venueID && String(p.name || '').trim());
+}
+
+function mostrarNomeNoLightbox() {
+    const cx = document.getElementById('lightboxNome');
+    if (!cx) return;
+    const pode = podeRenomearAqui() && !Treino.ativo;
+    cx.classList.toggle('hidden', !pode);
+    // A dica de zoom mora no mesmo canto. Some pra quem tem a pílula — é editor
+    // L6+AM, que já sabe dar zoom; pro resto ela continua lá.
+    const dica = document.getElementById('lightboxZoomHint');
+    if (dica) dica.classList.toggle('hidden', pode);
+    if (!pode) { fecharEdicaoNome(); return; }
+    const txt = document.getElementById('lightboxNomeTxt');
+    if (txt) txt.textContent = Lightbox.place.name;
+}
+
+function abrirEdicaoNome() {
+    if (!podeRenomearAqui() || Treino.ativo || acoesTravadas()) return;
+    const cx = document.getElementById('lightboxNome');
+    const nome = Lightbox.place.name;
+    cx.classList.add('editando');
+    document.getElementById('lightboxNomeBtn').classList.add('hidden');
+    document.getElementById('lightboxNomeEdit').classList.remove('hidden');
+    document.getElementById('lightboxNomeAntes').textContent = nome;
+    const inp = document.getElementById('lightboxNomeInput');
+    inp.value = nome;
+    // O botão de ação da foto some enquanto edita: ele fica no mesmo canto, e
+    // aprovar/excluir foto no meio de uma renomeação é toque acidental caro.
+    document.getElementById('imageLightbox').classList.add('editando-nome');
+    for (const id of ['lightboxDelete', 'lightboxApprove']) {
+        const b = document.getElementById(id);
+        if (b) b.dataset.escondidoPelaEdicao = b.classList.contains('hidden') ? '0' : '1', b.classList.add('hidden');
+    }
+    inp.focus();
+    // Cursor no FIM, não seleção: quem vem corrigir grafia quer ajustar, e
+    // selecionar tudo faz a primeira tecla apagar o nome inteiro.
+    try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) { /* tipo sem seleção */ }
+    atualizarBotaoSalvarNome();
+}
+
+function fecharEdicaoNome() {
+    const cx = document.getElementById('lightboxNome');
+    if (!cx) return;
+    cx.classList.remove('editando');
+    const btn = document.getElementById('lightboxNomeBtn');
+    const ed = document.getElementById('lightboxNomeEdit');
+    if (btn) btn.classList.remove('hidden');
+    if (ed) ed.classList.add('hidden');
+    document.getElementById('imageLightbox').classList.remove('editando-nome');
+    for (const id of ['lightboxDelete', 'lightboxApprove']) {
+        const b = document.getElementById(id);
+        if (b && b.dataset.escondidoPelaEdicao === '1') b.classList.remove('hidden');
+        if (b) delete b.dataset.escondidoPelaEdicao;
+    }
+}
+
+function editandoNome() {
+    const cx = document.getElementById('lightboxNome');
+    return !!(cx && cx.classList.contains('editando'));
+}
+
+function atualizarBotaoSalvarNome() {
+    const inp = document.getElementById('lightboxNomeInput');
+    const ok = document.getElementById('lightboxNomeOk');
+    if (!inp || !ok) return;
+    const v = inp.value.trim();
+    // Vazio ou igual ao atual não é renomeação. Botão morto com cara de vivo lê
+    // como app quebrada, então ele fica `disabled` E esmaecido.
+    ok.disabled = !v || v === String(Lightbox.place && Lightbox.place.name || '').trim();
+}
+
+function confirmarRenomear() {
+    if (Treino.ativo || !podeRenomearAqui()) return;
+    const inp = document.getElementById('lightboxNomeInput');
+    const novo = inp ? inp.value.trim() : '';
+    const place = Lightbox.place;
+    const antigo = String(place.name || '').trim();
+    if (!novo || novo === antigo) { fecharEdicaoNome(); return; }
+
+    // As três escritas mexem no mesmo local: quem chega depois tem que ver o
+    // resultado de quem chegou antes.
+    if (renomeacaoPendente) renomeacaoPendente.enviar();
+    if (aprovacaoPendente) aprovacaoPendente.enviar();
+    if (exclusaoPendente) exclusaoPendente.enviar();
+
+    fecharEdicaoNome();
+    aplicarNomeNaTela(place, novo);      // retorno imediato; o envio espera
+
+    const alvo = { place, antigo, novo };
+    const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
+    if (semJanela) { enviarRenomeacao(alvo); return; }
+
+    let saiu = false;
+    const enviar = () => {
+        if (saiu) return;
+        saiu = true;
+        clearTimeout(renomeacaoPendente && renomeacaoPendente.timer);
+        renomeacaoPendente = null;
+        aplicarTravaDeAcao();
+        removeUndoBanner();
+        enviarRenomeacao(alvo);
+    };
+    const desfazer = () => {
+        if (saiu) return;
+        saiu = true;
+        clearTimeout(renomeacaoPendente && renomeacaoPendente.timer);
+        renomeacaoPendente = null;
+        aplicarTravaDeAcao();
+        removeUndoBanner();
+        aplicarNomeNaTela(place, antigo);
+    };
+    renomeacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer };
+    aplicarTravaDeAcao();
+    mostrarDesfazer(t('undo.renamed', { nome: novo }), () => renomeacaoPendente && renomeacaoPendente.desfazer());
+}
+
+// O nome vive em três lugares e os três têm que andar juntos, senão o card diz
+// uma coisa e o lightbox outra.
+function aplicarNomeNaTela(place, nome) {
+    place.name = nome;
+    if (Lightbox.place === place) Lightbox.placeName = nome;
+    const txt = document.getElementById('lightboxNomeTxt');
+    if (txt && Lightbox.place === place) txt.textContent = nome;
+    const card = document.querySelector('.place-card');
+    if (card && AppState.currentPlace === place) {
+        const el = card.querySelector('.card-name');
+        if (el) el.textContent = nome;
+    }
+}
+
+async function enviarRenomeacao(alvo) {
+    try {
+        const r = await callWithRetry(() => API.renomearLocal(alvo.place.venueID, alvo.novo));
+        if (r && r.success) return;             // sem toast de sucesso: o nome na tela já diz
+        if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return; }
+        // Falhou: o nome na tela precisa VOLTAR, senão a app afirma uma gravação
+        // que não houve — e o editor segue triando achando que corrigiu.
+        aplicarNomeNaTela(alvo.place, alvo.antigo);
+        showToast(msgDoServidor(r) || t('toast.renameFailed'), 'error');
+    } catch (e) {
+        aplicarNomeNaTela(alvo.place, alvo.antigo);
+        showToast(t('toast.renameFailed'), 'error');
+    }
 }
 
 // Banner próprio, com a MESMA aparência e o mesmo tempo do Desfazer do card —
@@ -3880,7 +4061,7 @@ function acoesTravadas() {
     // mesma janela de Desfazer e escrevem no mesmo local — deixar os botões do
     // lightbox vivos durante ela era o defeito que o owner viu: "não estão
     // sendo desativados que nem é feito nos cards".
-    return !!(AppState.pendingAction || aprovacaoPendente || exclusaoPendente);
+    return !!(AppState.pendingAction || aprovacaoPendente || exclusaoPendente || renomeacaoPendente);
 }
 
 // Botão travado precisa PARECER travado: botão que não responde e parece normal
@@ -5297,6 +5478,13 @@ function loadDevMode() {
 // hora, encurtando o "Desfazer" — e é o lado certo de errar: a ação ia comitar
 // em 3s de qualquer jeito, enquanto perdê-la é dano permanente no placar.
 function descarregarAcaoPendente() {
+    // As três escritas do lightbox têm a mesma janela e o mesmo risco: sair da
+    // página com uma pendente a faria sumir depois de a tela já ter mudado.
+    for (const p of [renomeacaoPendente, aprovacaoPendente, exclusaoPendente]) {
+        if (!p) continue;
+        if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(true);
+        try { p.enviar(); } catch (e) { console.error('Falha ao descarregar:', e); }
+    }
     if (!AppState.pendingAction) return;
     // Fetch normal é cancelado no unload; keepalive sobrevive.
     if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(true);

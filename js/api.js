@@ -187,6 +187,19 @@ const API = {
         }).catch(() => {});
     },
 
+    // Renomear o local. Escrita de dado de LOCAL — a única da app — e por isso
+    // o `nome` vai CRU: quem apara é o servidor (`trim`, teto) e quem recusa de
+    // verdade é o Waze, que valida permissão e lockRank na gravação.
+    async renomearLocal(venueID, nome) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: t('api.error.noSession') };
+        }
+        return this._post('renomear-local', {
+            sessionToken, region: this.getRegion(), venueID, nome,
+        });
+    },
+
     async excluirFoto(venueID, imageID, lat, lon) {
         const sessionToken = this.getSession();
         if (!sessionToken) {

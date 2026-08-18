@@ -2777,6 +2777,153 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Renomear o local pelo lightbox ─────────────────────────────────────────
+//
+// A única escrita de dado de LOCAL da app. Três coisas só o browser responde:
+// o portão, a janela do Desfazer medida pela REDE, e se o campo sobrevive ao
+// teclado — que é DO SISTEMA e varia muito de altura, então aqui vão três.
+//
+// A altura do teclado é simulada pelo `--kb-inset`, o mesmo valor que o
+// `setupKeyboardInset()` publica a partir da `visualViewport` em produção.
+{
+  const FOTO_FACHADA = 'data:image/svg+xml;base64,' + Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200">'
+    + '<rect width="900" height="1200" fill="#93c5fd"/>'
+    + '<rect x="60" y="700" width="780" height="150" rx="10" fill="#0f766e"/>'
+    + '<text x="450" y="790" font-family="DejaVu Sans" font-size="56" fill="#fff" text-anchor="middle">ODONTODENTE SORRISO</text>'
+    + '</svg>').toString('base64');
+  const PLACE_REN = {
+    venueID: 'v-ren', updateRequestID: 'u-ren', name: 'Odontodente Consultório',
+    categories: ['DOCTOR_CLINIC'], address: 'Rua das Flores, 250 - Salvador, Bahia',
+    updateTypeKey: 'IMAGE', reqType: 'IMAGE', reqSubType: '', createdBy: 'wazer',
+    imageUrls: [FOTO_FACHADA], approvedImageIds: [], imageDates: {},
+    dateAdded: 1786982736809, lat: -12.892, lon: -38.32,
+    mapa: { centro: [-12.892, -38.32], proposto: null, movidoM: null, entradas: [] }, changes: [],
+  };
+  const montarRen = (pl, rank, am, treino) => {
+    API.setSession('tok-smoke');
+    AppState.preferences.comoFuncionaVisto = true;
+    AppState.preferences.undoGateSeen = true;
+    try { closeModal('comoFuncionaModal'); } catch {}
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'editor', rank, isAreaManager: am, isStaff: false };
+    AppState.serverTotal = 9;
+    Treino.ativo = !!treino;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    AppState.queue = [pl]; AppState.currentPlace = pl; showCurrentPlace();
+    Lightbox.open(pl.imageUrls, 0, 0, pl.name, false, pl);
+  };
+
+  for (const [aparelho, viewport] of [['Pixel 7', { width: 412, height: 915 }],
+                                      ['Galaxy Fold', { width: 280, height: 653 }],
+                                      ['SE 2016', { width: 320, height: 568 }]]) {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    const posts = [];
+    await page.route('**/api/**', async (route) => {
+      const r = route.request();
+      if (r.method() === 'POST') { try { posts.push(JSON.parse(r.postData() || '{}')); } catch { posts.push({}); } }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+    });
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(250);
+    const onde = `renomear ${aparelho}`;
+
+    // ── PORTÃO: os três casos, e os dois negativos importam mais ────────────
+    for (const [rot, rank, am, treino, esperado] of [
+      ['L3+AM', 2, true, false, false],
+      ['L6 sem área', 5, false, false, false],
+      ['L6+AM no TREINO', 5, true, true, false],   // treino não escreve, nunca
+      ['L6+AM', 5, true, false, true],
+    ]) {
+      await page.evaluate(new Function('a', '(' + montarRen.toString() + ')(a[0],a[1],a[2],a[3])'),
+        [JSON.parse(JSON.stringify(PLACE_REN)), rank, am, treino]);
+      await assentar(page);
+      const visivel = await page.locator('#lightboxNome').isVisible();
+      checa(visivel === esperado, `${onde}: portão errado para ${rot}`, `visível=${visivel}`);
+    }
+
+    // ── TECLADO: três alturas, porque ele é do sistema e varia ──────────────
+    await page.locator('#lightboxNomeBtn').click();
+    await assentar(page);
+    // Alturas PROPORCIONAIS, não absolutas: teclado real ocupa ~40–50% da tela,
+    // então 400px fixos são plausíveis num Pixel 7 e absurdos num SE 2016 (70%
+    // da tela). Testar o absurdo mede o layout contra um caso que não existe.
+    // 60% é o exagero deliberado — aí a foto encolhe até o piso e o que se cobra
+    // é só o campo continuar alcançável.
+    for (const pct of [0, 0.45, 0.6]) {
+      const kb = Math.round(viewport.height * pct);
+      const m = await page.evaluate((px) => {
+        document.documentElement.style.setProperty('--kb-inset', px + 'px');
+        const r = (el) => el.getBoundingClientRect();
+        const inp = document.getElementById('lightboxNomeInput');
+        const ok = document.getElementById('lightboxNomeOk');
+        const foto = document.getElementById('lightboxImage');
+        const livre = innerHeight - px;                 // o que o teclado deixa
+        const limite = Math.min(r(inp).top, livre);
+        // A FOTO RENDERIZADA, não a caixa da <img>: com `object-contain` a caixa
+        // é a do contêiner e sobra tarja. Medir a caixa diria "a placa está
+        // visível" com ela dentro da tarja — o mesmo erro de instrumento que já
+        // apareceu no tile do mapa (gotcha #58) e no realce do miolo.
+        const el = r(foto);
+        const escala = Math.min(el.width / foto.naturalWidth, el.height / foto.naturalHeight);
+        const alt = foto.naturalHeight * escala;
+        const topo = el.top + (el.height - alt) / 2;
+        return {
+          campo: r(inp).bottom <= livre + 0.5 && r(inp).top >= 0,
+          okAlvo: Math.round(r(ok).height),
+          // a PLACA da fachada fica a 58%–71% da altura da FOTO: é ela a prova
+          placa: topo + alt * 0.71 <= limite && topo + alt * 0.58 >= 0,
+          _placaDbg: `foto ${Math.round(topo)}..${Math.round(topo + alt)} placa ${Math.round(topo + alt * 0.58)}..${Math.round(topo + alt * 0.71)} limite ${Math.round(limite)}`,
+          estouroH: document.documentElement.scrollWidth - innerWidth,
+          _dbg: `viewport=${innerHeight} livre=${livre} campo.top=${Math.round(r(inp).top)} campo.bottom=${Math.round(r(inp).bottom)}`,
+        };
+      }, kb);
+      checa(m.campo, `${onde}: campo atrás do teclado de ${kb}px`, m._dbg);
+      checa(m.okAlvo >= 44, `${onde}: alvo do Salvar com teclado ${kb}px`, `${m.okAlvo}px`);
+      // Com teclado de 60% não sobra tela pra foto em aparelho nenhum — ali o
+      // que se cobra é o campo, e a pessoa fecha o teclado pra rever a fachada.
+      if (pct <= 0.45) checa(m.placa, `${onde}: a placa da fachada — a PROVA do nome — sumiu com teclado ${kb}px`, m._placaDbg);
+      checa(m.estouroH <= 0, `${onde}: estouro horizontal com teclado ${kb}px`, `${m.estouroH}px`);
+    }
+    await page.evaluate(() => document.documentElement.style.setProperty('--kb-inset', '0px'));
+
+    // ── ENVIO: medido pela REDE, não pelo DOM ───────────────────────────────
+    await page.locator('#lightboxNomeInput').fill('Odontodente Sorriso');
+    posts.length = 0;
+    await page.locator('#lightboxNomeOk').click();
+    await page.waitForTimeout(400);
+    checa(posts.length === 0, `${onde}: gravou ANTES de a janela do Desfazer vencer`);
+    await page.waitForTimeout(UNDO_ESPERA_MS);
+    const env = posts.find((p) => p && p.venueID);
+    checa(!!env, `${onde}: o POST não saiu depois da janela`);
+    checa(!!env && env.nome === 'Odontodente Sorriso' && env.venueID === 'v-ren',
+      `${onde}: payload errado`, JSON.stringify(env && { v: env.venueID, n: env.nome }));
+
+    // ── DESFAZER: nada chega ao Waze e o nome volta ─────────────────────────
+    await page.evaluate(new Function('a', '(' + montarRen.toString() + ')(a[0],a[1],a[2],a[3])'),
+      [JSON.parse(JSON.stringify(PLACE_REN)), 5, true, false]);
+    await assentar(page);
+    await page.locator('#lightboxNomeBtn').click();
+    await page.locator('#lightboxNomeInput').fill('Nome Desfeito');
+    posts.length = 0;
+    await page.locator('#lightboxNomeOk').click();
+    await page.waitForTimeout(300);
+    await page.locator('#undoContainer button').first().click();
+    await page.waitForTimeout(UNDO_ESPERA_MS);
+    checa(posts.filter((p) => p && p.venueID).length === 0, `${onde}: Desfazer não impediu a gravação`);
+    const voltou = await page.locator('#lightboxNomeTxt').textContent();
+    checa(voltou === 'Odontodente Consultório', `${onde}: o nome não voltou ao original`, voltou);
+    checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2808,4 +2955,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
   + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`
-  + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`);
+  + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`
+  + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`);

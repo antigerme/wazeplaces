@@ -1793,3 +1793,103 @@ button:active {
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
 }
 .lb-mini { position: relative; }
+
+/* ── Nome do local no lightbox: mostrar e editar no MESMO lugar ─────────────
+   Uma linha, não uma folha. MEDIDO com teclado simulado: a folha de baixo
+   deixava 7px de foto no Galaxy Fold (e 0px com aviso), cobrindo justamente a
+   faixa onde fica a placa da fachada — que é a prova do nome, e a justificativa
+   inteira do recurso. A pílula deixa 301px no Fold e 513px no Pixel 7.
+
+   `--kb-inset` é publicado pelo `setupKeyboardInset()` a partir da
+   `visualViewport`: é o teclado DO SISTEMA (Gboard, iOS…), que a app não
+   desenha — ela só cede o espaço. No desktop o inset é 0 e nada se move. */
+.lb-nome {
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom) + var(--kb-inset, 0px));
+}
+/* Em modo LEITURA a pílula para antes do botão de ação (lixeira/aprovar), que
+   mora no mesmo canto. Em EDIÇÃO aquele botão some e a linha usa tudo. */
+.lb-nome:not(.editando) .lb-nome-btn { max-width: calc(100% - 4.25rem); }
+.lb-nome-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 44px;
+  padding: 0.5rem 0.9rem;
+  border-radius: 9999px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.58);
+  color: #fff;
+  text-align: left;
+}
+.lb-nome-lapis { width: 18px; height: 18px; flex: none; }
+.lb-nome-txt {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-nome-antes {
+  display: inline-block;
+  font-size: 0.6875rem;
+  color: #e2e8f0;
+  background: rgba(0, 0, 0, 0.58);
+  border-radius: 9999px;
+  padding: 0.25rem 0.7rem;
+  margin-bottom: 0.4rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-nome-linha { display: flex; gap: 0.5rem; align-items: center; }
+.lb-nome-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  font-size: 1rem;               /* 16px: abaixo disso o iOS dá zoom sozinho no foco */
+  padding: 0.55rem 0.9rem;
+  border-radius: 9999px;
+  border: 2px solid #22d3ee;
+  background: rgba(255, 255, 255, 0.97);
+  color: #0f172a;
+}
+.lb-nome-acao {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  border: 0;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lb-nome-ok { background: #0e7490; }
+.lb-nome-ok:disabled { opacity: 0.55; }
+.lb-nome-cancel { background: rgba(0, 0, 0, 0.58); }
+/* Enquanto edita, a foto reencaixa no espaço que sobrou. Padding no CONTÊINER,
+   não `transform` na imagem: o transform é do zoom/pan do lightbox
+   (`_applyTransform`), e disputar por ele quebraria o pinch. Com padding o
+   `object-contain` reajusta sozinho e o zoom segue funcionando. */
+/* Enquanto edita, a foto reencaixa no espaço que sobrou.
+   `max-height` na IMAGEM, não `padding` no contêiner, e as duas tentativas
+   anteriores explicam por quê. Padding cru: com teclado alto ele passa da
+   altura do elemento (medido: 536px numa tela de 568), o bloco de contenção
+   cresce e a pílula — `absolute` aqui dentro — desce 24px, indo parar atrás do
+   teclado. Padding com teto: a pílula fica no lugar, mas aí ele para de
+   encolher a foto e ela corre por baixo do campo (medido no Fold: foto até
+   429px com o campo em 195px).
+   Com `max-height` quem encolhe é a própria imagem, o `object-contain`
+   reajusta, e nada mexe no bloco de contenção. E o `transform` continua livre
+   pro zoom/pan do lightbox (`_applyTransform`) — disputar por ele quebraria o
+   pinch. */
+#imageLightbox.editando-nome {
+  align-items: flex-start;
+  padding-top: 3.5rem;
+}
+#imageLightbox.editando-nome #lightboxImage {
+  max-height: max(4rem, calc(100dvh - var(--kb-inset, 0px) - 9.5rem - env(safe-area-inset-bottom)));
+}
