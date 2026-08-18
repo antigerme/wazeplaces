@@ -2674,6 +2674,109 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Realce do miolo: o que a tela ESCONDE ──────────────────────────────────
+//
+// A regra de quando realçar está travada em `test/layout.test.mjs` (função
+// pura, com casos reais). Aqui se mede o que só o browser responde: o realce
+// SOBREVIVE ao `-webkit-line-clamp: 3` e tem contraste no pixel.
+//
+// As duas coisas já falharam de verdade nesta ordem: na primeira versão os
+// marcadores saíam com `visivel=false` em TODOS os aparelhos estreitos, porque
+// o clamp cortava o nome de 49 caracteres antes da diferença — o recurso ficava
+// invisível justamente na tela onde ele mais serve. Daí a janela.
+{
+  const DIFF_LONGO = 'Aeroport Josep Tarradellas Barcelona - El Prat T';
+  const CARD_REALCE = {
+    venueID: 'r1', updateRequestID: 'ur1', name: 'Aeroport Josep Tarradellas Barcelona',
+    categories: ['AIRPORT'], address: 'El Prat de Llobregat, Barcelona',
+    updateTypeKey: 'UPDATE', reqType: 'REQUEST', reqSubType: 'UPDATE',
+    createdBy: 'wazer', imageUrls: [], dateAdded: 1786982736809,
+    lat: 41.29, lon: 2.07, mapa: { centro: [41.29, 2.07], proposto: null, movidoM: null, entradas: [] },
+    changes: [
+      // agulha em texto LONGO: é o caso que o clamp comia
+      { field: 'name', label: 'Nome', from: DIFF_LONGO + '1', to: DIFF_LONGO + '2' },
+      // agulha em texto CURTO: tem que passar inteiro, sem reticência
+      { field: 'description', label: 'Descrição', from: 'CDG Terminal 2F', to: 'CDG Terminal 2C' },
+      // ÓBVIO: nome trocado inteiro — não pode acender realce nenhum
+      { field: 'phone', label: 'Telefone', from: 'Bom Atacarejo', to: 'Strapasson' },
+    ],
+  };
+  for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }],
+                                      ['Pixel 7', { width: 412, height: 915 }]]) {
+    for (const tema of ['light', 'dark']) {
+      const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR', colorScheme: tema });
+      const page = await ctx.newPage();
+      const erros = [];
+      page.on('pageerror', (e) => erros.push(String(e.message || e)));
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(200);
+      await page.evaluate((pl) => {
+        AppState.preferences.comoFuncionaVisto = true;
+        AppState.preferences.undoGateSeen = true;
+        try { closeModal('comoFuncionaModal'); } catch {}
+        AppState.authenticated = true;
+        AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+        AppState.serverTotal = 9;
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+        document.getElementById('noMoreCards').classList.add('hidden');
+        AppState.queue = [pl]; AppState.currentPlace = pl; showCurrentPlace();
+      }, CARD_REALCE);
+      await assentar(page);
+      const m = await page.evaluate(() => {
+        const rgb = (s) => (s.match(/[\d.]+/g) || []).map(Number);
+        // COMPÕE a cadeia de alfa até o primeiro fundo opaco. O `fundoDe` do
+        // resto do smoke PARA no primeiro opaco, e no tema escuro o realce tem
+        // alfa 0,3 — mediria contra o fundo errado (gotcha #40: constante de
+        // contraste tem escopo, e o escopo é o pixel real).
+        const fundoComposto = (el) => {
+          const pilha = [];
+          for (let n = el; n; n = n.parentElement) {
+            const c = rgb(getComputedStyle(n).backgroundColor);
+            if (c.length < 3) continue;
+            const a = c[3] === undefined ? 1 : c[3];
+            if (a > 0) pilha.push([c.slice(0, 3), a]);
+            if (a >= 0.999) break;
+          }
+          let out = [255, 255, 255];
+          for (let i = pilha.length - 1; i >= 0; i--) { const [c, a] = pilha[i]; out = out.map((v, k) => c[k] * a + v * (1 - a)); }
+          return out;
+        };
+        const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+        const marks = [...document.querySelectorAll('.diff-mark')].map((e) => {
+          const cs = getComputedStyle(e), fundo = fundoComposto(e);
+          const [x, y] = [lum(rgb(cs.color).slice(0, 3)), lum(fundo)].sort((a, b) => b - a);
+          const pai = e.parentElement.getBoundingClientRect(), r = e.getBoundingClientRect();
+          return { txt: e.textContent, razao: (x + 0.05) / (y + 0.05),
+                   visivel: r.width > 0 && r.height > 0 && r.bottom <= pai.bottom + 0.5 && r.top >= pai.top - 0.5 };
+        });
+        const linhas = [...document.querySelectorAll('.diff-row')];
+        return { marks,
+          // a linha do telefone (`Bom Atacarejo` → `Strapasson`) é a de controle
+          semRealceNoObvio: !linhas[2] || !linhas[2].querySelector('.diff-mark'),
+          temTitle: linhas.filter((l) => l.querySelector('.diff-mark'))
+                          .every((l) => l.querySelector('.diff-from').title.length > 0),
+          curtoInteiro: !!(linhas[1] && !/…/.test(linhas[1].textContent)),
+          estouroH: document.documentElement.scrollWidth - innerWidth };
+      });
+      const onde = `realce ${aparelho}/${tema}`;
+      checa(m.marks.length === 4, `${onde}: esperava 4 realces (2 linhas × 2 lados)`, String(m.marks.length));
+      for (const k of m.marks) {
+        checa(k.visivel, `${onde}: realce "${k.txt}" cortado pelo line-clamp — invisível justo onde serve`);
+        checa(k.razao >= 4.5, `${onde}: contraste do realce "${k.txt}"`, `${k.razao.toFixed(2)}:1 < 4.5`);
+      }
+      checa(m.semRealceNoObvio, `${onde}: realçou o que se vê num relance`);
+      checa(m.temTitle, `${onde}: valor completo sumiu do title da linha realçada`);
+      checa(m.curtoInteiro, `${onde}: encurtou um valor que já cabia`);
+      checa(m.estouroH <= 0, `${onde}: estouro horizontal`, `${m.estouroH}px`);
+      checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+      await ctx.close();
+    }
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -2704,4 +2807,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
   + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
-  + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`);
+  + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`
+  + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`);

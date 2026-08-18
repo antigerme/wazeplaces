@@ -8,6 +8,26 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.18-01
+
+### Adicionado
+- **Quando duas versões de um texto parecem iguais, a app marca o que mudou.** Nos pedidos de alteração, o card mostra o valor antigo riscado e o novo ao lado — e pra quase tudo isso basta: `Bom Atacarejo` → `Strapasson` se lê num piscar. Mas há um caso em que o olho não tem onde se agarrar:
+
+  ```
+  Aeroport Josep Tarradellas Barcelona - El Prat T1
+  Aeroport Josep Tarradellas Barcelona - El Prat T2
+  ```
+
+  Duas linhas do mesmo tamanho, um caractere de diferença. Agora esse caractere aparece destacado dos dois lados, e o resto do texto continua como sempre.
+
+  Só acende quando a diferença **não muda o tamanho** do texto — foi isso que a medição em 453 alterações de 13 países mostrou separar o difícil do óbvio. `Car Park` → `Car Parkuuuu` cresce e você vê; `Terminal 2F` → `Terminal 2C` não cresce e passa batido. Dispara em cerca de 1 em 10 alterações de texto; nas outras 9 a linha sai exatamente como antes.
+
+  Em texto longo, a app mostra a vizinhança da diferença em vez do começo da frase (`…Barcelona - El Prat T1`). Isso conserta de quebra um problema que já existia: em tela estreita o card cortava o nome **antes** da parte que decide, então `T1` e `T2` apareciam idênticos. O valor completo fica no toque longo / passar o mouse.
+
+  Ideia discutida com [@antigerme](https://www.waze.com/user/editor/antigerme), que recusou duas propostas anteriores (selos que explicavam o que o editor já lia) e apontou o caminho certo: *"os editores de mapas não são assim tão burros para precisar dessa muleta"*.
+
+---
+
 ## v2026.08.17-01
 
 ### Adicionado
