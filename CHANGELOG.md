@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.18-02
+
+### Adicionado
+- **Dá para corrigir o nome do local sem sair da app.** Ao ampliar a foto de um pedido, o nome do local aparece embaixo. Toque nele, corrija e pronto — a gravação vai para o Waze depois dos 3 segundos de "Desfazer", como qualquer outra ação.
+
+  Nasceu de um relato de um editor nível 6: às vezes chega uma foto boa de fachada e, olhando para ela, dá para ver que o nome cadastrado está errado — `Odontodente Consultório` onde a placa diz `Odontodente Sorriso`. Até agora o único caminho era abrir o Waze Map Editor no meio da triagem.
+
+  **A foto continua na tela enquanto você digita**, e isso não é detalhe: ela é a prova do nome. A primeira versão usava uma folha deslizando de baixo e, medindo com o teclado aberto, sobravam 7 pixels de foto num Galaxy Fold — a placa ficava coberta justamente enquanto você a copiava. Por isso a edição acontece na própria linha do nome, e a foto encolhe para o espaço que sobra: 301 pixels no Fold, 513 num Pixel 7.
+
+  Só aparece para **nível 6 com área gerenciada, ou staff** — o mesmo grupo que já pode excluir foto por aqui. No modo treino não aparece, porque treino não escreve. E vale só para corrigir nome que já existe: batizar local sem nome continua sendo assunto do WME.
+
+---
+
 ## v2026.08.18-01
 
 ### Adicionado

@@ -1154,6 +1154,32 @@
             <span id="lightboxApproveSpinner" class="hidden w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden="true"></span>
             <svg id="lightboxApproveIcon" class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
         </button>
+        <!-- Nome do local: MOSTRA e EDITA no mesmo lugar, no rodapé.
+             Sem folha de baixo, e a razão é medida: com folha sobravam 7px de
+             foto no Galaxy Fold e a placa da fachada — que é a prova do nome —
+             ficava coberta. Aqui sobram 301px e a placa continua à vista.
+             Sobe com o teclado pelo `--kb-inset` que o app.js já publica.
+             Só aparece pra L6+AM ou staff, o mesmo portão da lixeira. -->
+        <div id="lightboxNome" class="lb-nome hidden absolute z-10">
+            <button id="lightboxNomeBtn" type="button" class="lb-nome-btn" aria-label="Corrigir o nome do local" data-i18n-aria="lightbox.rename.aria" title="Corrigir o nome do local" data-i18n-title="lightbox.rename.aria">
+                <svg class="lb-nome-lapis" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                <span id="lightboxNomeTxt" class="lb-nome-txt"></span>
+            </button>
+            <div id="lightboxNomeEdit" class="hidden">
+                <p class="lb-nome-antes"><span data-i18n="lightbox.rename.before">Antes:</span> <b id="lightboxNomeAntes"></b></p>
+                <div class="lb-nome-linha">
+                    <input id="lightboxNomeInput" type="text" class="lb-nome-input" maxlength="255"
+                           enterkeyhint="done" autocomplete="off" autocapitalize="words" spellcheck="false"
+                           aria-label="Novo nome do local" data-i18n-aria="lightbox.rename.field">
+                    <button id="lightboxNomeOk" type="button" class="lb-nome-acao lb-nome-ok" aria-label="Salvar nome" data-i18n-aria="lightbox.rename.save">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                    </button>
+                    <button id="lightboxNomeCancel" type="button" class="lb-nome-acao lb-nome-cancel" aria-label="Cancelar" data-i18n-aria="common.cancel">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
         <!-- Tira de miniaturas. Só existe com 2+ fotos (32% dos pedidos, medido na
              fila real) e ENTRA NO LAYOUT em vez de flutuar sobre a foto: medida a
              tarja livre do `object-contain`, ela some no iPhone SE com foto retrato

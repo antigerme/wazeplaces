@@ -1965,6 +1965,75 @@ async function handleExcluirFoto(data, { sessions }) {
   return { status: 200, body: { success: true, restantes: restantes.map((i) => i.id) } };
 }
 
+// Renomear um local, do lightbox. É a PRIMEIRA escrita de dado de LOCAL da app,
+// e a regra de ouro do projeto pede que isso esteja justificado, não tolerado:
+//
+// O que libera é a natureza da decisão, igual à exceção da foto. O editor está
+// olhando a FACHADA ampliada, que é prova primária do nome — o card não mostra
+// uma alegação, mostra a evidência. E a alternativa não é "decidir melhor no
+// WME": é a MESMA gravação, com uma ida e volta no meio. MEDIDO no HAR do owner
+// renomeando no WME: o editor não faz busca por duplicado, não valida convenção,
+// não confere nada — ele manda `{id, name}` e pronto. Não existe rede de
+// segurança lá que a app estaria pulando.
+//
+// O payload é o do WME byte a byte, e ele é PATCH, não substituição. Isso
+// contraria o que eu supus a partir do gotcha #57 (nas fotos o Waze troca a
+// lista inteira): pra atributo escalar ele altera só o que veio. Sem risco de
+// atropelar outros campos.
+//
+// Sem portão no servidor, mesma razão do excluir-foto: o Waze valida
+// `permissions` e `lockRank` na gravação, então quem não pode por aqui também
+// não consegue por lá. A trava de PRODUTO (L6+AM ou staff) vive no cliente.
+const NOME_MAX = 255;   // teto NOSSO, defensivo. O maior nome medido na fila
+                        // real tinha 49 caracteres; quem recusa de verdade é o Waze.
+
+async function handleRenomearLocal(data, { sessions }) {
+  const cookies = await resolveCookies(data, sessions);
+  const region = requireRegion(data);
+  const venueID = data.venueID;
+  const nome = typeof data.nome === 'string' ? data.nome.trim() : '';
+  if (!venueID || !nome) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  if (nome.length > NOME_MAX) apiError('Nome longo demais', 400, 'srv.err.nameTooLong');
+
+  const { cookieHeader, csrf } = prepareAuth(cookies);
+
+  const payload = {
+    actions: {
+      name: 'DESCARTES_SERIALIZATION',
+      _subActions: [
+        { name: 'UPDATE_OBJECT', _objectType: 'venue', action: 'UPDATE',
+          attributes: { id: venueID, name: nome } },
+      ],
+    },
+  };
+  const result = await callWaze(wazeFeaturesEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
+  const cat = categorizeWazeError(result.httpCode, result.response, result.error);
+  if (result.httpCode !== 200 || cat.category === 'already_processed') {
+    return {
+      status: cat.category === 'already_processed' || cat.category === 'not_found' ? 200 : 500,
+      body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
+    };
+  }
+
+  // Conferência pelo eco. Vale como sinal barato, NÃO como contrato — a mesma
+  // ressalva do excluir-foto: o eco detecta o Waze dizendo "não mudou", não
+  // detecta ele dizer "mudou" e guardar outra coisa. Validado escrevendo de
+  // verdade no local de teste do owner: renomear devolveu `status: 0`,
+  // `synced: true` e o nome novo; releitura independente confirmou, e o nome
+  // original foi restaurado por um segundo POST.
+  let confirmado = null;
+  try {
+    const eco = JSON.parse(result.response);
+    const v = eco && eco.venues && eco.venues[venueID];
+    if (v && typeof v.name === 'string') confirmado = v.name === nome;
+  } catch { /* sem eco legível: seguimos com o 200 do Waze */ }
+  if (confirmado === false) {
+    apiError('O Waze aceitou a chamada mas o nome continua o mesmo', 500, 'srv.err.nameUnchanged');
+  }
+
+  return { status: 200, body: { success: true, nome } };
+}
+
 async function handlePerfil(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
@@ -2105,6 +2174,7 @@ const ROUTES = {
   'marcar-lido': handleMarcarLido,
   'validar-place': handleValidarPlace,
   'excluir-foto': handleExcluirFoto,
+  'renomear-local': handleRenomearLocal,
   perfil: handlePerfil,
   'lista-paises': handleListaPaises,
   'lista-estados': handleListaEstados,

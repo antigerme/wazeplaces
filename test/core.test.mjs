@@ -1382,3 +1382,88 @@ test('duplicado: a caixa se centra no centróide, não no primeiro vértice', as
     globalThis.fetch = original;
   }
 });
+
+// ── Renomear o local ────────────────────────────────────────────────────────
+//
+// A ÚNICA escrita de dado de LOCAL da app. O payload abaixo é o do WME byte a
+// byte, tirado de um HAR do owner renomeando "Teste AG" → "Teste AGE": só `id` e
+// `name`. É PATCH, não substituição — o oposto do que as fotos fazem (gotcha
+// #57), e supor o contrário teria feito a app mandar o venue inteiro.
+//
+// O caminho foi exercitado contra o Waze REAL no local de testes do owner, com
+// autorização explícita dele: renomear → releitura independente confirmando →
+// devolver ao nome original. `status: 0`, `synced: true` nas duas gravações.
+async function renomearComStub(data, resposta, status = 200) {
+  const store = memStore();
+  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const token = await sessions.createSession([
+    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
+  ].join('\n'));
+  const enviados = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (init && init.method === 'POST') { try { enviados.push(JSON.parse(init.body)); } catch { enviados.push(null); } }
+    return new Response(JSON.stringify(resposta), { status, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const r = await dispatch('renomear-local', { sessionToken: token, region: 'row', ...data }, { sessions });
+    return { r, enviados };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test('renomear-local: manda o payload do WME, byte a byte na estrutura', async () => {
+  const VID = '210830983.2108178759.43076799';
+  const { r, enviados } = await renomearComStub(
+    { venueID: VID, nome: '  Odontodente Sorriso  ' },       // com espaço de sobra de propósito
+    { venues: { [VID]: { id: VID, name: 'Odontodente Sorriso' } }, status: 0, synced: true });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.success, true);
+  assert.equal(r.body.nome, 'Odontodente Sorriso', 'o nome não foi aparado');
+  assert.equal(enviados.length, 1, 'mais de uma gravação para uma renomeação');
+  assert.deepEqual(enviados[0], {
+    actions: {
+      name: 'DESCARTES_SERIALIZATION',
+      _subActions: [{
+        name: 'UPDATE_OBJECT', _objectType: 'venue', action: 'UPDATE',
+        attributes: { id: VID, name: 'Odontodente Sorriso' },
+      }],
+    },
+  }, 'o payload divergiu do que o WME manda');
+  // PATCH, não substituição: mandar mais atributos apagaria o que não veio.
+  const attrs = Object.keys(enviados[0].actions._subActions[0].attributes);
+  assert.deepEqual(attrs.sort(), ['id', 'name'], `foram junto atributos a mais: ${attrs}`);
+});
+
+test('renomear-local: recusa nome vazio e venueID ausente, sem tocar no Waze', async () => {
+  for (const data of [{ venueID: 'v1', nome: '' }, { venueID: 'v1', nome: '   ' },
+                      { venueID: '', nome: 'X' }, { nome: 'X' }, { venueID: 'v1' }]) {
+    const { r, enviados } = await renomearComStub(data, {});
+    assert.equal(r.status, 400, `deixou passar ${JSON.stringify(data)}`);
+    assert.equal(enviados.length, 0, 'chamou o Waze com parâmetro inválido');
+  }
+  // Teto de tamanho: nosso, defensivo. Quem recusa de verdade é o Waze.
+  const { r, enviados } = await renomearComStub({ venueID: 'v1', nome: 'x'.repeat(256) }, {});
+  assert.equal(r.status, 400);
+  assert.equal(enviados.length, 0);
+});
+
+test('renomear-local: o Waze dizer 200 e NÃO ter mudado vira erro, não sucesso', async () => {
+  // O eco não é prova (mesma ressalva do excluir-foto), mas quando ele CONTRADIZ
+  // o pedido, afirmar sucesso seria a app mentir na cara do editor.
+  const VID = 'v-1';
+  const { r } = await renomearComStub(
+    { venueID: VID, nome: 'Nome Novo' },
+    { venues: { [VID]: { id: VID, name: 'Nome Velho' } }, status: 0, synced: true });
+  assert.equal(r.status, 500);
+  assert.equal(r.body.success, false);
+  assert.equal(r.body.errorKey, 'srv.err.nameUnchanged');
+});
+
+test('renomear-local: 403 do Waze vira unauthorized, não erro genérico', async () => {
+  const { r } = await renomearComStub({ venueID: 'v1', nome: 'X' },
+    { errorList: [{ code: 101, message: 'not allowed' }] }, 403);
+  assert.equal(r.body.success, false);
+  assert.equal(r.body.errorCategory, 'unauthorized');
+});
