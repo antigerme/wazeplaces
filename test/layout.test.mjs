@@ -1895,3 +1895,141 @@ test('capturas do manifest: arquivo existe, tamanho declarado é o real, propor�
   assert.ok(man.screenshots.some((s) => s.form_factor === 'narrow'), 'sem captura narrow (celular)');
   assert.ok(man.screenshots.some((s) => s.form_factor === 'wide'), 'sem captura wide (desktop)');
 });
+
+// ── Realce do miolo: onde a tela ESCONDE a diferença ────────────────────────
+//
+// O card já mostra o valor antigo e o novo lado a lado, e pra quase toda
+// mudança isso basta. O realce existe só pro caso em que o olho não tem pista:
+// a diferença NÃO muda o tamanho da string, então as duas linhas parecem a
+// mesma linha, e passar batido significa aprovar `T1 → T4` achando que nada
+// mudou.
+//
+// Todos os casos abaixo são REAIS, colhidos em 453 mudanças de texto de 13
+// países. Os negativos importam tanto quanto os positivos — em especial os que
+// ficam LOGO ABAIXO de cada limiar: sem eles, afrouxar uma constante passa
+// verde, e um realce que dispara em tudo vira ruído que o editor aprende a
+// ignorar.
+test('realce do miolo: dispara na agulha e cala no óbvio', () => {
+  const app = readFileSync(join(ROOT, 'js', 'app.js'), 'utf8');
+  const de = app.indexOf('const REALCE_DELTA_MAX');
+  const ate = app.indexOf('function valorDoDiff');
+  assert.ok(de > 0 && ate > de, 'realceDoMiolo/ladoRealcado sumiram de js/app.js');
+  const escopo = new Function(
+    'escapeHtml',
+    app.slice(de, ate) + '; return { realceDoMiolo, ladoRealcado };'
+  )((x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
+  const { realceDoMiolo, ladoRealcado } = escopo;
+
+  // Mesmo tamanho ou quase: o olho não tem onde se agarrar.
+  const AGULHA = [
+    ['Aeroport Josep Tarradellas Barcelona - El Prat T1',
+     'Aeroport Josep Tarradellas Barcelona - El Prat T2', '1', '2'],
+    ['CDG Terminal 2F', 'CDG Terminal 2C', 'F', 'C'],          // contexto 14: a v1 perdia
+    ['The Radmore Restaurant', 'The Radmoor Restaurant', 're', 'or'],
+    ['Inglesia Ni Cristo - Lokal ng Santo Tomas',
+     'Iglesia Ni Cristo - Lokal ng Santo Tomas', 'n', ''],      // letra REMOVIDA
+    ['Ayuntamiento Rincón del Soto', 'Ayuntamiento Rincón de Soto', 'l', ''],
+    ['Ajuntament de Balenya', 'Ajuntament de Balenyà', 'a', 'à'],   // acento
+    ['Hostal Hermanos Sánchez', 'Hostal Hermanos Sanchez', 'á', 'a'],
+    ['Sé Catedral de Faro', 'Sé QCatedral de Faro', '', 'Q'],   // letra ENFIADA no meio
+    ['Gate 7 - HPA (Philippine Army Headquarters)',
+     'Gate 8 - HPA (Philippine Army Headquarters)', '7', '8'],
+    ['Praia da Falésia', 'Praia da Falésiau', '', 'u'],
+    // Miolo EXATAMENTE 3, o teto. Sem este caso, apertar REALCE_MIOLO_MAX pra 2
+    // passa verde — e apertar custa perder agulha, que é o erro caro.
+    ['CDG Terminal 2F', 'CDG Terminal T2d', '2F', 'T2d'],
+    // Também miolo 3, e este é a CONCESSÃO assumida: `ALDI`→`Aldi` se vê, sim.
+    // O teto ficou em 3 porque o empate é desequilibrado — realçar de mais custa
+    // um destaque à toa; realçar de menos custa aprovar `2F` achando que é `2F`.
+    // Se um dia isto incomodar, é aqui que se mede de novo.
+    ['ALDI Marbella', 'Aldi Marbella', 'LDI', 'ldi'],
+  ];
+  for (const [a, b, mDe, mPara] of AGULHA) {
+    const r = realceDoMiolo(a, b);
+    assert.ok(r, `não realçou uma agulha: ${JSON.stringify(a)} → ${JSON.stringify(b)}`);
+    assert.equal(r.de[1], mDe, `miolo errado do lado antigo em ${JSON.stringify(a)}`);
+    assert.equal(r.para[1], mPara, `miolo errado do lado novo em ${JSON.stringify(b)}`);
+    // O realce não pode ALTERAR o texto — só pode encurtá-lo pelas pontas. As
+    // três partes remontam o original quando não houve corte, e um pedaço
+    // contíguo dele quando houve.
+    assert.ok(a.includes(r.de.join('')), 'o lado antigo deixou de ser um trecho do original');
+    assert.ok(b.includes(r.para.join('')), 'o lado novo deixou de ser um trecho do original');
+    if (!r.cortaIni && !r.cortaFim) {
+      assert.equal(r.de.join(''), a, 'sem corte, o lado antigo tem que remontar inteiro');
+      assert.equal(r.para.join(''), b, 'sem corte, o lado novo tem que remontar inteiro');
+    }
+  }
+
+  // Muda o tamanho, ou muda demais: o editor vê sem ajuda nenhuma.
+  const OBVIO = [
+    ['AXION Energy', 'axion energy'],
+    ['111', '83'],
+    ['Bom Atacarejo', 'Strapasson'],
+    ['Nation Peugeot', 'Discautol Peugeot Cuiabá'],
+    ['igual', 'igual'],
+    // Δ de comprimento — TODOS reais, e todos logo acima do limiar. Se
+    // REALCE_DELTA_MAX subir pra 2, estes começam a acender.
+    ['Goose Street Car Park', 'Goose Street Car Parkuuuu'],          // Δ4
+    ['Manchester Airport', 'Manchester Airport T2'],                 // Δ3
+    ['Termas Prexigueiro', 'Termas de Prexigueiro'],                 // Δ3
+    ['Anchor Grandsuites', 'Anchor Grandsuites/天汇'],                // Δ3
+    ['Holy Cross Steel Corporation', 'Holy Cross Steel Corporationhhdh'], // Δ4
+    ['Boulangerie Pâtisserie Émile Parisse', 'W Boulangerie Pâtisserie Émile Parisse'], // Δ2
+    ['Praça Teófilo Braga', 'Praça Teófilo Braga 9'],                // Δ2
+    // Δ0/Δ1 mas miolo GRANDE: se REALCE_MIOLO_MAX subir pra 4, acendem.
+    ["Vap'Pause Roissy-en-Brie", 'Vapostore Roissy-en-Brie'],        // Δ0, miolo 5
+    ['Airbnb - ChaMiLukie Lodging', 'Airbnb - ChaMiLuLiLi Lodging'], // Δ1, miolo 4
+    // contexto curto: se REALCE_CONTEXTO_MIN cair, acende.
+    ['Rua 71', 'Rua 20'],
+  ];
+  for (const [a, b] of OBVIO) {
+    assert.equal(realceDoMiolo(a, b), null,
+      `realçou o que se vê num relance: ${JSON.stringify(a)} → ${JSON.stringify(b)}`);
+  }
+  // Tipo errado não pode explodir no meio do render do card.
+  for (const v of [null, undefined, 42, {}, []]) {
+    assert.equal(realceDoMiolo(v, 'x'), null);
+    assert.equal(realceDoMiolo('x', v), null);
+  }
+
+  // Miolo VAZIO não vira <mark> vazio: elemento invisível no DOM engana quem
+  // for medir depois (foi assim que a tira de miniaturas passou verde medindo
+  // uma caixa de imagem quebrada).
+  const ins = realceDoMiolo('Praia da Falésia', 'Praia da Falésiau');
+  assert.ok(!ladoRealcado(ins, 'de', 'x').includes('<mark'), '<mark> vazio no lado sem miolo');
+  assert.ok(ladoRealcado(ins, 'para', 'x').includes('<mark class="x">u</mark>'));
+  // XSS: o valor vem do Waze e entra por innerHTML.
+  const xss = realceDoMiolo('Loja do Bairro Central 1', 'Loja do Bairro Central <');
+  assert.ok(xss && !ladoRealcado(xss, 'para', 'x').includes('< '), 'markup do Waze escapou cru');
+  assert.ok(ladoRealcado(xss, 'para', 'x').includes('&lt;'));
+
+  // ── JANELA: o realce tem que SOBREVIVER ao line-clamp de 3 linhas ─────────
+  // MEDIDO: num Galaxy Fold a coluna do diff cabe ~15 caracteres por linha, e um
+  // nome de 49 é cortado ANTES da diferença — o realce ficava invisível na tela
+  // mais apertada, que é onde ele mais serve.
+  const longo = realceDoMiolo(
+    'Aeroport Josep Tarradellas Barcelona - El Prat T1',
+    'Aeroport Josep Tarradellas Barcelona - El Prat T2');
+  assert.ok(longo.cortaIni, 'não encurtou o prefixo de um valor longo');
+  assert.ok(longo.de[0].length <= 16, `janela grande demais: ${longo.de[0].length}`);
+  assert.ok(ladoRealcado(longo, 'de', 'x').startsWith('…'), 'faltou a reticência do corte');
+  // A janela é a MESMA nos dois lados, senão as duas linhas param de se alinhar.
+  assert.equal(longo.de[0], longo.para[0]);
+  // Valor CURTO passa inteiro: encurtar o que já cabe seria perder à toa.
+  const curto = realceDoMiolo('CDG Terminal 2F', 'CDG Terminal 2C');
+  assert.ok(!curto.cortaIni && !curto.cortaFim, 'encurtou um valor que já cabia');
+  assert.equal(ladoRealcado(curto, 'de', 'x'), 'CDG Terminal 2<mark class="x">F</mark>');
+  // Corte no FIM também: diferença no começo de um texto longo.
+  const fim = realceDoMiolo(
+    'Inglesia Ni Cristo - Lokal ng Santo Tomas',
+    'Iglesia Ni Cristo - Lokal ng Santo Tomas');
+  assert.ok(fim.cortaFim && !fim.cortaIni, 'corte do fim não aconteceu');
+  assert.ok(ladoRealcado(fim, 'para', 'x').endsWith('…'));
+
+  // Unicode por CARACTERE, não por índice UTF-16: com s[i] um emoji se parte no
+  // meio e o realce corta o próprio caractere.
+  const emoji = realceDoMiolo('Restaurante do Porto 🍕', 'Restaurante do Porto 🍔');
+  assert.ok(emoji, 'não realçou diferença de emoji');
+  assert.equal(emoji.de[1], '🍕');
+  assert.equal(emoji.para[1], '🍔');
+});

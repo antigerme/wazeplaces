@@ -3848,6 +3848,17 @@ function renderCardChanges(card, place) {
                 + `<span class="diff-geo-coord">${escapeHtml(valorDoDiff(c.to))}</span></div>`;
         }
 
+        // Realce só quando a diferença é agulha em palheiro (ver `realceDoMiolo`).
+        // Nos outros casos a linha sai exatamente como sempre saiu.
+        const realce = realceDoMiolo(c.from, c.to);
+        if (realce) {
+            // O valor inteiro fica no `title`: a janela mostra o que decide, e
+            // quem quiser o resto tem onde ver sem abrir o WME.
+            const tDe = escapeHtml(String(c.from)), tPara = escapeHtml(String(c.to));
+            return `<div class="diff-row">${rotulo}`
+                + `<span class="diff-from" title="${tDe}">${ladoRealcado(realce, 'de', 'diff-mark diff-mark-del')}</span>`
+                + `<span class="diff-to" title="${tPara}">${ladoRealcado(realce, 'para', 'diff-mark diff-mark-add')}</span></div>`;
+        }
         return `<div class="diff-row">${rotulo}`
             + `<span class="diff-from">${escapeHtml(valorDoDiff(c.from))}</span>`
             + `<span class="diff-to">${escapeHtml(valorDoDiff(c.to))}</span></div>`;
@@ -4007,6 +4018,103 @@ function escreverValor(el, valor, chaveVazio) {
 
 // O core manda TIPO, não palavra: null = vazio, boolean = sim/não, '' = existe
 // sem nome. Ver formatValue em server/core.mjs.
+// Onde exatamente dois textos diferem, quando isso NÃO se vê num relance.
+//
+// O card já mostra o valor antigo riscado em vermelho e o novo em verde, lado a
+// lado — e pra quase toda mudança isso basta: `Bom Atacarejo` → `Strapasson` se
+// lê num piscar. O owner recusou (com razão) selo que explica o óbvio: editor de
+// mapa não precisa de muleta pra comparar dois nomes.
+//
+// O que engana o olho é OUTRA coisa, e ela se descobriu medindo: a diferença
+// que NÃO muda o tamanho da string. Sem mudança de tamanho não há pista de
+// forma, e as duas linhas parecem a mesma linha:
+//
+//   Aeroport Josep Tarradellas Barcelona - El Prat T1     CDG Terminal 2F
+//   Aeroport Josep Tarradellas Barcelona - El Prat T2     CDG Terminal 2C
+//                                                  ^                   ^
+//
+// Compare com o que CRESCE, e que ninguém deixa passar:
+//   Goose Street Car Park  →  Goose Street Car Parkuuuu
+//   Termas Prexigueiro     →  Termas de Prexigueiro
+//
+// MEDIDO em 453 mudanças de texto de 13 países. Os três limiares saem daí:
+//
+//   `REALCE_DELTA_MAX` é O QUE DECIDE. Δ≤1 separa limpo: de um lado ficam
+//   `Radmore`→`Radmoor`, `Sánchez`→`Sanchez`, `Inglesia`→`Iglesia`,
+//   `Rincón del`→`Rincón de`, `Falésia`→`Falésiau`, `Sé Catedral`→`Sé QCatedral`,
+//   `Gate 7`→`Gate 8`, e as 12 variantes de `CDG Terminal 2F`. Do outro, tudo
+//   que ganha ou perde pedaço visível (`…Barajas T2`, `W Boulangerie`,
+//   `Corporationhhdh`, `/天汇`).
+//
+//   `REALCE_MIOLO_MAX` = 3. Em 2 perderia `CDG Terminal 2F`→`T2d`; em 4 entraria
+//   `ChaMiLukie`→`ChaMiLuLiLi`, que já se vê. O empate é DESEQUILIBRADO e por
+//   isso resolvido pra cima: realçar de mais custa um destaque que ninguém
+//   pediu; realçar de menos custa aprovar `T1` achando que é `T1`.
+//
+//   `REALCE_CONTEXTO_MIN` = 10 é piso, não fronteira — de 8 a 10 dá o mesmo
+//   número. Existe pra `"71"`→`"20"` solto nunca virar realce.
+//
+// Resultado: 49 de 453 (10,8%). Uma primeira versão usava "contexto ≥ 18 e
+// miolo ≤ 6" e estava errada nas duas pontas — deixava de fora TODOS os
+// `CDG Terminal 2F` (contexto 14) e marcava os apensos visíveis.
+const REALCE_DELTA_MAX = 1;      // diferença de comprimento entre os dois textos
+const REALCE_MIOLO_MAX = 3;      // caracteres que de fato mudam, no maior dos dois
+const REALCE_CONTEXTO_MIN = 10;  // caracteres idênticos somando início e fim
+// Quanto do texto IDÊNTICO fica em volta do realce. Existe porque `.diff-from` e
+// `.diff-to` são `-webkit-line-clamp: 3`, e MEDIDO no Galaxy Fold a coluna cabe
+// ~15 caracteres por linha: um nome de 49 é cortado ANTES da diferença. Sem
+// isto o recurso ficaria invisível justamente na tela mais apertada — e, pior,
+// o card de hoje já esconde ali a informação que decide (`…El Prat T1` e
+// `…El Prat T2` saem idênticos num Fold).
+//
+// 16 é folgado de propósito: os valores curtos, que são a maioria dos casos
+// (`CDG Terminal 2F` tem 13 de contexto), passam INTEIROS e nada se perde. Só
+// encurta o que seria cortado de qualquer jeito — e aí mostrar a vizinhança da
+// diferença é estritamente melhor que mostrar um prefixo que termina antes
+// dela. O valor completo continua no `title`.
+const REALCE_JANELA = 16;
+
+// Prefixo e sufixo comuns, por CARACTERE Unicode (`[...s]`, não `s[i]`): com
+// índice de UTF-16 um emoji ou um acento composto se parte no meio e o realce
+// sairia cortando o próprio caractere.
+//
+// Prefixo/sufixo em vez de distância de edição completa porque é isso que o
+// olho faz — e nos casos reais dá a mesma resposta com uma fração do custo.
+// Devolve `null` quando a regra não se aplica: quem chama não decide nada.
+function realceDoMiolo(de, para) {
+    if (typeof de !== 'string' || typeof para !== 'string' || de === para) return null;
+    const A = [...de], B = [...para];
+    if (Math.abs(A.length - B.length) > REALCE_DELTA_MAX) return null;
+    let p = 0;
+    while (p < A.length && p < B.length && A[p] === B[p]) p++;
+    let s = 0;
+    while (s < A.length - p && s < B.length - p && A[A.length - 1 - s] === B[B.length - 1 - s]) s++;
+    const mA = A.length - p - s, mB = B.length - p - s;
+    if (p + s < REALCE_CONTEXTO_MIN) return null;
+    if (Math.max(mA, mB) > REALCE_MIOLO_MAX) return null;
+    // Janela: o prefixo e o sufixo comuns entram no máximo `REALCE_JANELA`
+    // caracteres. O que sobrar vira reticência — e ela é do mesmo lado nos dois
+    // valores, senão as duas linhas deixariam de se alinhar na leitura.
+    const cortaIni = p > REALCE_JANELA, cortaFim = s > REALCE_JANELA;
+    const ini = cortaIni ? p - REALCE_JANELA : 0;
+    const fimA = cortaFim ? p + mA + REALCE_JANELA : A.length;
+    const fimB = cortaFim ? p + mB + REALCE_JANELA : B.length;
+    return {
+      de: [A.slice(ini, p), A.slice(p, p + mA), A.slice(p + mA, fimA)].map((x) => x.join('')),
+      para: [B.slice(ini, p), B.slice(p, p + mB), B.slice(p + mB, fimB)].map((x) => x.join('')),
+      cortaIni, cortaFim,
+    };
+}
+
+function ladoRealcado(realce, lado, classe) {
+    const [antes, meio, depois] = realce[lado];
+    return (realce.cortaIni ? '…' : '')
+        + escapeHtml(antes)
+        + (meio ? `<mark class="${classe}">${escapeHtml(meio)}</mark>` : '')
+        + escapeHtml(depois)
+        + (realce.cortaFim ? '…' : '');
+}
+
 function valorDoDiff(v) {
     if (v === null || v === undefined) return t('card.value.empty');
     if (v === true) return t('card.value.yes');

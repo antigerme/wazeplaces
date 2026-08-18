@@ -866,6 +866,32 @@ button:active {
 .dark .diff-from { color: #fca5a5; } /* red-300: o 400 dava 4.3:1 no cartão escuro */
 .dark .diff-to { color: #4ade80; }
 
+/* Miolo realçado: os poucos caracteres que de fato mudam, quando há muito texto
+   idêntico em volta (ver `realceDoMiolo` no app.js — a regra é medida, não
+   estética). Só aparece em 8,6% das mudanças de texto; nas outras a linha sai
+   como sempre.
+
+   `mark` tem fundo amarelo do próprio navegador — sem estas regras o realce
+   sairia num amarelo que briga com a caixa âmbar de mudanças.
+
+   A cor NÃO é o único canal (WCAG 1.4.1): o miolo ganha caixa (fundo + cantos
+   + respiro) e peso 800, então ele se distingue por FORMA mesmo em tela
+   monocromática ou pra quem não separa vermelho de verde. E o riscado do lado
+   antigo é herdado de propósito — o caractere removido continua riscado.
+
+   Os pares de cor são medidos SOBRE A CAIXA ÂMBAR, não sobre branco: é o
+   fundo em que eles de fato vivem (gotcha #40 — constante de contraste tem
+   escopo, e o escopo é o fundo onde ela foi medida). */
+.diff-mark {
+  border-radius: 0.1875rem;
+  padding: 0 0.125rem;
+  font-weight: 800;
+}
+.diff-mark-del { background: #fecaca; color: #7f1d1d; }
+.diff-mark-add { background: #bbf7d0; color: #14532d; }
+.dark .diff-mark-del { background: rgba(248, 113, 113, 0.3); color: #fecaca; }
+.dark .diff-mark-add { background: rgba(74, 222, 128, 0.3); color: #bbf7d0; }
+
 .card-content {
   min-height: 0;
 }
