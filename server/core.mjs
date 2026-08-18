@@ -1123,6 +1123,86 @@ async function handleTestarCookies(data, { sessions }) {
   };
 }
 
+// Um pedido DUPLICATE diz DE QUEM o local é duplicado: o `flagEntityID` carrega
+// o id do OUTRO local. MEDIDO nos 6 países obrigatórios (2881 URs varridos):
+// os 7 DUPLICATE trazem o campo, e os 7 no formato de id de venue — inclusive
+// com componente negativo (`234095067.-1954278766.39091371`), que uma regex
+// ingênua de `\d+\.\d+\.\d+` recusaria.
+//
+// O que NÃO vem é o NOME. O `Issues/Search/List` só devolve local que TEM
+// pedido pendente, e o alvo de um duplicado normalmente não tem — medido, o
+// alvo aparece na própria resposta em 0 de 6 casos genuínos. (O 7º "resolvia"
+// porque apontava o próprio local; ver `resolverDuplicados`.) Não é o bbox da
+// busca: é o que o endpoint devolve por construção.
+//
+// Sem o nome, o card dizia só "Duplicado" enquanto o WME diz "Duplicado de
+// <local>", e o editor tinha que abrir o WME só pra saber de quem.
+//
+// O raio é MEDIDO, não escolhido: nos 6 casos genuínos, a releitura por bbox
+// em volta da origem achou o alvo em
+//   0,0002° (~22 m):  0/6   ← o raio do excluir-foto, pequeno demais
+//   0,001°  (~111 m): 4/6
+//   0,004°  (~444 m): 6/6   ← distâncias reais: 94 · 96 · 101 · 110 · 146 m
+// Por isso a constante é própria: `RELEITURA_BBOX_GRAUS` existe pra reler o
+// MESMO local e reusá-la aqui acharia zero. A caixa maior devolveu 19–22
+// locais nos piores casos, então não é leitura cara.
+const DUPLICADO_BBOX_GRAUS = 0.004;
+// Teto de leituras por busca. DUPLICATE é 7 em 2881 URs (0,24%) — na fila real
+// isso é zero ou um por página —, então o teto nunca é atingido em uso normal:
+// ele existe pra uma página anômala não virar rajada contra o Waze.
+const MAX_DUPLICADOS_POR_BUSCA = 4;
+// Id de local do Waze: três inteiros separados por ponto, o do meio podendo ser
+// negativo (medido). Serve pra não sair fazendo leitura por causa de um
+// `flagEntityID` que na verdade é UUID de foto — o mesmo campo carrega as duas
+// coisas, e quem distingue é o `flagSubjectType`.
+const ID_DE_VENUE = /^-?\d+\.-?\d+\.-?\d+$/;
+
+// Preenche `place.duplicado` com o local apontado por cada pedido DUPLICATE.
+// Melhor-esforço: falha aqui deixa o card exatamente como era antes ("Duplicado"
+// sem complemento), nunca derruba a busca.
+async function resolverDuplicados(places, cookieHeader, csrf, region, ctx) {
+  const alvos = [];
+  for (const p of places) {
+    if (p.flagType !== 'DUPLICATE' || p.flagSubjectType !== 'VENUE') continue;
+    if (!p.flagEntityID || !ID_DE_VENUE.test(p.flagEntityID)) continue;
+    // Apontar o PRÓPRIO local não é alvo. Duas leituras cabem no que medi (1
+    // caso em 7): ou o pedido é lixo, ou o app do celular preencheu o campo com
+    // o local marcado por não ter outro. Nenhuma das duas dá nome pra mostrar,
+    // e não dá pra distinguir uma da outra com uma amostra — então o card fica
+    // como está hoje, em vez de afirmar algo que eu não medi.
+    if (p.flagEntityID === p.venueID) continue;
+    if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
+    alvos.push(p);
+    if (alvos.length >= MAX_DUPLICADOS_POR_BUSCA) break;
+  }
+  if (alvos.length === 0) return;
+
+  const d = DUPLICADO_BBOX_GRAUS;
+  await Promise.all(alvos.map(async (p) => {
+    const q = new URLSearchParams({
+      bbox: [p.lon - d, p.lat - d, p.lon + d, p.lat + d].join(','),
+      v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
+    });
+    const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, ctx);
+    if (lida.httpCode !== 200) return;
+    let atual;
+    try { atual = JSON.parse(lida.response); } catch { return; }
+    const alvo = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === p.flagEntityID);
+    if (!alvo) return;
+    const ll = pontoDeGeometria(alvo.geometry);
+    const centro = p.mapa && p.mapa.centro;
+    const dist = ll && centro ? distanciaEntrePontos(centro, ll) : null;
+    p.duplicado = {
+      id: alvo.id,
+      // Nome CRU do Waze. `null` = existe e não tem nome — quem escreve
+      // "(local sem nome)" é o frontend, que é a fonte única de string de UI.
+      nome: String(alvo.name || '').trim() || null,
+      ll,
+      distM: Number.isFinite(dist) ? dist : null,
+    };
+  }));
+}
+
 async function handleBuscarPlaces(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
@@ -1187,6 +1267,14 @@ async function handleBuscarPlaces(data, { sessions }) {
   }
 
   const { places, blocked } = buildPlacesFromSearch(rd, { filterTypes, unreadOnly });
+
+  // Uma leitura a mais, e só quando há duplicado na página. Vale a pena porque
+  // é RARO (0,24% dos pedidos) e porque a alternativa — resolver no cliente,
+  // quando o card aparece — custaria uma requisição ao NOSSO servidor por card
+  // visto, e o nome apareceria depois da foto, piscando.
+  // `ctx` sem `cookies`, igual ao `relerLocal`: quem grava o cookie rotacionado
+  // é a chamada principal ali em cima, e não estas, que correm em paralelo.
+  await resolverDuplicados(places, cookieHeader, csrf, region, { data, sessions });
 
   const hasMore = !!(rd?.mapIssues?.venueUpdateRequests?.hasMore);
   return {

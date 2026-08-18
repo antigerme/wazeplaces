@@ -161,13 +161,18 @@ const I18N_DICT = {
     //     SUA, nunca a tradução da minha.
     //
     // Duas exceções deliberadas ao oficial, e só duas:
-    //   · DUPLICATE: o WME escreve "Duplicado DE <local>"; sem o alvo, o "de"
-    //     fica pendurado. Usamos a forma isolada.
+    //   · DUPLICATE: o WME escreve "Duplicado DE <local>". Quando o core
+    //     consegue resolver o alvo (`place.duplicado`, ver `resolverDuplicados`
+    //     no core.mjs), o card usa a forma COMPLETA — `card.flagDuplicateOf`,
+    //     que é esta aqui. `card.flagType.DUPLICATE` ficou como a forma
+    //     isolada, pro caso em que o alvo não resolve: melhor meia informação
+    //     que um "de" pendurado.
     //   · DOES_NOT_MATCH_SEARCH em pt: o oficial ("Não corresponde aos
     //     resultados da pesquisa") ocupa 3 linhas num Fold e faz o card inteiro
     //     rolar, o que desliga o gesto de pular (gotcha #45). Nas outras
     //     línguas o oficial é mais CURTO que o que eu tinha escrito.
-    'card.flagReason': 'Motivo:', 'card.flagType.CLOSED': 'Local fechado',
+    'card.flagReason': 'Motivo:', 'card.flagDuplicateOf': 'Duplicado de “{alvo}”',
+    'card.flagType.CLOSED': 'Local fechado',
     'card.flagType.DOES_NOT_MATCH_SEARCH': 'Não corresponde à busca',
     'card.flagType.DUPLICATE': 'Duplicado',
     'card.flagType.INAPPROPRIATE': 'Inapropriado',
@@ -221,7 +226,7 @@ const I18N_DICT = {
     // uma MUDANÇA, e é a ordem temporal que ele lê num relance.
     'card.map.aqui': 'aqui', 'card.map.antes': 'antes', 'card.map.depois': 'depois',
     'card.map.entrada.atual': 'entrada', 'card.map.entrada.nova': 'entrada nova',
-    'card.map.entrada.saindo': 'entrada removida',
+    'card.map.entrada.saindo': 'entrada removida', 'card.map.duplicado': 'duplicado',
     'card.map.m': '{n} m', 'card.map.km': '{n} km',
     'card.map.slide': 'Mapa do local',
     'card.map.zoomIn': 'Aproximar', 'card.map.zoomOut': 'Afastar',
@@ -553,7 +558,8 @@ const I18N_DICT = {
     'card.brandKnown': '✓ known', 'card.brandUnknown': '? not listed',
     'card.brandKnown.title': 'Brand recognized by Waze', 'card.brandUnknown.title': 'Brand not in the official Waze list',
     'card.changes': 'Proposed changes', 'card.newPhoto.title': 'New photo proposed in this request',
-    'card.flagReason': 'Reason:', 'card.flagType.CLOSED': 'Place closed',
+    'card.flagReason': 'Reason:', 'card.flagDuplicateOf': 'Duplicate of “{alvo}”',
+    'card.flagType.CLOSED': 'Place closed',
     'card.flagType.DOES_NOT_MATCH_SEARCH': 'Doesn’t match search',
     'card.flagType.DUPLICATE': 'Duplicate',
     'card.flagType.INAPPROPRIATE': 'Inappropriate',
@@ -594,7 +600,7 @@ const I18N_DICT = {
     'card.oh.everyday': 'every day',
     'card.map.aqui': 'here', 'card.map.antes': 'before', 'card.map.depois': 'after',
     'card.map.entrada.atual': 'entrance', 'card.map.entrada.nova': 'new entrance',
-    'card.map.entrada.saindo': 'entrance removed',
+    'card.map.entrada.saindo': 'entrance removed', 'card.map.duplicado': 'duplicate',
     'card.map.m': '{n} m', 'card.map.km': '{n} km',
     'card.map.slide': 'Place map',
     'card.map.zoomIn': 'Zoom in', 'card.map.zoomOut': 'Zoom out',
@@ -908,7 +914,8 @@ const I18N_DICT = {
     'card.brandKnown': '✓ conocida', 'card.brandUnknown': '? no listada',
     'card.brandKnown.title': 'Marca reconocida por Waze', 'card.brandUnknown.title': 'La marca no está en la lista oficial de Waze',
     'card.changes': 'Cambios propuestos', 'card.newPhoto.title': 'Nueva foto propuesta en esta solicitud',
-    'card.flagReason': 'Motivo:', 'card.flagType.CLOSED': 'Lugar cerrado',
+    'card.flagReason': 'Motivo:', 'card.flagDuplicateOf': 'Duplicado de “{alvo}”',
+    'card.flagType.CLOSED': 'Lugar cerrado',
     'card.flagType.DOES_NOT_MATCH_SEARCH': 'No coincide con la búsqueda',
     'card.flagType.DUPLICATE': 'Duplicado',
     'card.flagType.INAPPROPRIATE': 'Inapropiado',
@@ -949,7 +956,7 @@ const I18N_DICT = {
     'card.oh.everyday': 'todos los días',
     'card.map.aqui': 'aquí', 'card.map.antes': 'antes', 'card.map.depois': 'después',
     'card.map.entrada.atual': 'entrada', 'card.map.entrada.nova': 'entrada nueva',
-    'card.map.entrada.saindo': 'entrada eliminada',
+    'card.map.entrada.saindo': 'entrada eliminada', 'card.map.duplicado': 'duplicado',
     'card.map.m': '{n} m', 'card.map.km': '{n} km',
     'card.map.slide': 'Mapa del lugar',
     'card.map.zoomIn': 'Acercar', 'card.map.zoomOut': 'Alejar',
@@ -1263,7 +1270,8 @@ const I18N_DICT = {
     'card.brandKnown': '✓ connue', 'card.brandUnknown': '? non listée',
     'card.brandKnown.title': 'Marque reconnue par Waze', 'card.brandUnknown.title': 'Marque absente de la liste officielle Waze',
     'card.changes': 'Modifications proposées', 'card.newPhoto.title': 'Nouvelle photo proposée dans cette demande',
-    'card.flagReason': 'Motif :', 'card.flagType.CLOSED': 'Lieu fermé',
+    'card.flagReason': 'Motif :', 'card.flagDuplicateOf': 'Doublon de « {alvo} »',
+    'card.flagType.CLOSED': 'Lieu fermé',
     'card.flagType.DOES_NOT_MATCH_SEARCH': 'Ne correspond pas à la recherche',
     'card.flagType.DUPLICATE': 'Doublon',
     'card.flagType.INAPPROPRIATE': 'Inapproprié(e)',
@@ -1304,7 +1312,7 @@ const I18N_DICT = {
     'card.oh.everyday': 'tous les jours',
     'card.map.aqui': 'ici', 'card.map.antes': 'avant', 'card.map.depois': 'après',
     'card.map.entrada.atual': 'entrée', 'card.map.entrada.nova': 'nouvelle entrée',
-    'card.map.entrada.saindo': 'entrée supprimée',
+    'card.map.entrada.saindo': 'entrée supprimée', 'card.map.duplicado': 'doublon',
     'card.map.m': '{n} m', 'card.map.km': '{n} km',
     'card.map.slide': 'Carte du lieu',
     'card.map.zoomIn': 'Zoom avant', 'card.map.zoomOut': 'Zoom arrière',

@@ -266,7 +266,7 @@ Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sess
 | `sessao` | — (apenas local) | `action: create\|destroy` |
 | `parear` | — (apenas local) | **QR é o caminho principal** (`js/qr.js` desenha o link `?pair=` num canvas): aponta a câmera e entra, sem instrução nenhuma. O código de 6 chars ficou como alternativa pra quem não tem câmera. Cada tela explicando o OUTRO aparelho era o sintoma de que a interface não se explicava sozinha. `action: create\|claim`. Pareamento computador→celular: `create` exige sessão e devolve código de 6 chars (alfabeto sem 0/O/1/I, TTL 5min, uso único); `claim` troca o código por uma sessão NOVA. Existe porque copiar cookies no celular é inviável. Validade vai DENTRO do valor guardado, não só no TTL do store — o adaptador de arquivo da VM ignora o TTL do `put`. |
 | `testar-cookies` | `Session` (smoke test + gate) | Valida, checa `isUserAllowed`, cria sessão e devolve token |
-| `buscar-places` | `/row-Descartes/app/v1/Issues/Search/List` | Aceita `page`, `countryId`, `stateId`, `managedAreaId`, `bbox`, `types[]` (os 7 tipos do WME — ver `PUR_TIPOS`/`purTypeDoUR`; o corte é NOSSO, ver gotcha #49), `categories[]`, `residential`, `unreadOnly`. Envia `orderBy: SORTING_UPDATE_TIME_DESC`. |
+| `buscar-places` | `/row-Descartes/app/v1/Issues/Search/List` | Aceita `page`, `countryId`, `stateId`, `managedAreaId`, `bbox`, `types[]` (os 7 tipos do WME — ver `PUR_TIPOS`/`purTypeDoUR`; o corte é NOSSO, ver gotcha #49), `categories[]`, `residential`, `unreadOnly`. Envia `orderBy: SORTING_UPDATE_TIME_DESC`. **Pode fazer UMA leitura a mais por pedido DUPLICATE** (`resolverDuplicados`, GET em `/Features` por bbox), pra descobrir o NOME do local duplicado — o `Search/List` só devolve quem tem pedido pendente, e o alvo do duplicado normalmente não tem. Raio 0,004° (~444 m), MEDIDO: com o raio do excluir-foto (0,0002°) o alvo não é achado em nenhum dos 6 casos reais. Teto de 4 leituras por página; frequência real 0,24% dos pedidos, então na prática é 0 ou 1. |
 | `marcar-lido` | `/row-Descartes/app/v1/Issues/Read` | Aceita single (`venueID`+`updateRequestID`) ou batch (`items[]`) |
 | `validar-place` | `/row-Descartes/app/Features` | `approve: false` (rejeitar) é o padrão — **só manda `true` com `data.approve === true`**, booleano estrito. Aprovar é caminho exclusivo de FOTO NOVA (ver a regra de ouro de produto) |
 | `excluir-foto` | `/row-Descartes/app/Features` (`UPDATE_OBJECT`/`venue`) | O Waze **não apaga: SUBSTITUI a lista `images` inteira** — daí o `relerLocal` por bbox antes de escrever (gotcha #57). `action: 'preparar'` só aquece o cache de releitura |
@@ -310,8 +310,18 @@ Volta `{ success, places[], hasMore, page, total }`. Cada `place`:
                               //   aparece cru. É a informação PRINCIPAL do reporte —
                               //   `flagComment` (texto livre) quase sempre vem vazio.
   flagSubjectType,            // FLAG: IMAGE = denúncia de FOTO, não do local
-  flagEntityID,               // FLAG: id da foto denunciada; casa com venue.images[].id
-                              //   (é assim que o card marca qual das N fotos é)
+  flagEntityID,               // FLAG: o id do ALVO da denúncia, e o que ele identifica
+                              //   depende do `flagSubjectType`. IMAGE → id da foto, casa
+                              //   com venue.images[].id (é assim que o card marca qual das
+                              //   N fotos é). VENUE → id de OUTRO LOCAL, que hoje só o
+                              //   DUPLICATE usa: é o local do qual este é duplicado.
+                              //   MEDIDO nos 6 países (2881 URs): os 7 DUPLICATE trazem o
+                              //   campo, todos no formato de id de venue — com componente
+                              //   do meio podendo ser NEGATIVO, que regex ingênua recusa.
+  duplicado,                  // DUPLICATE: o local apontado, resolvido pelo core →
+                              //   { id, nome, ll, distM }. `nome: null` = existe e não tem
+                              //   nome. Ausente = não deu pra resolver, e aí o card volta
+                              //   à forma isolada ("Duplicado"), sem "de" pendurado.
   changes[],                  // [{ field, label, from, to }] para UPDATE requests.
                               #   **Valor objeto vira "[object Object]" se ninguém formatar.**
                               #   `formatValue` tratava null/boolean/array; objeto simples caía no
@@ -618,7 +628,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 25. **Auditoria de layout roda em TODAS as línguas** — a string mais larga decide o layout e quase nunca está no idioma em que você desenvolve. E texto que vaza da própria célula não aparece em teste de `scrollWidth`: meça caixa contra caixa.
 26. **Feedback transitório não pode cobrir o alvo que ainda precisa ser tocado** — o countdown do dev mode tornava o próprio dev mode impossível de desbloquear. Diagnóstico: `document.elementFromPoint` no centro do alvo.
 27. **RESOLVIDO em v2026.08.05-04 invertendo a ordem do CSS.** Era: seletor de uma classe do `styles.css` perdia pra utility por ordem de carga — mordeu 6 vezes em silêncio.
-28. **Achado que acusa a app inteira é suspeito do INSTRUMENTO antes de ser bug** — contraste "1:1" por fundo em gradiente, alvo de 20px por ler `<label>` errado, "sem anel de foco" por medir no meio da animação.
+28. **Achado que acusa a app inteira é suspeito do INSTRUMENTO antes de ser bug** — contraste "1:1" por fundo em gradiente, alvo de 20px por ler `<label>` errado, "sem anel de foco" por medir no meio da animação, "1px abaixo da dobra" por medir no mesmo `evaluate` do render (e com viewport inventada). **Todo laço de medição de layout leva um caso de CONTROLE — a app de hoje, sem a mudança**: defeito que aparece igual com e sem o recurso não é do recurso.
 29. **O card tem UMA área rolável, e ela é uma das duas que o `handleDragStart` ignora** — barra de rolagem em superfície de swipe desliga o gesto de pular. Linha de altura previsível → `flex-shrink-0`; caixa longa → `flex-1 min-h-0`. Área rolável nova → entra na exceção do arraste E ganha `marcarBordaRolagem`.
 30. **`data-i18n` escreve textContent** — valor com markup chega escapado na tela. Use `data-i18n-html`, só com valor do próprio dicionário.
 31. **Caixa que pode transbordar centraliza por MARGEM, não por `align-items`** — centralizado por eixo, o pedaço de cima fica inalcançável mesmo com `overflow:auto`. E meça contra a VIEWPORT, não contra o contêiner.

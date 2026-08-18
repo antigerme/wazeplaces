@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.17-01
+
+### Adicionado
+- **O pedido de "duplicado" agora diz duplicado DE QUEM — e mostra onde.** Antes o card dizia só `Motivo: Duplicado`, que é meia frase: o que decide é qual é o outro local. Agora ele diz `Duplicado de “Natan Estacionamento”` e o mini-mapa ganha um marcador (losango roxo) na posição desse outro local, ao lado do marcador do local do pedido — dá pra ver num olhar se são de fato o mesmo lugar ou dois vizinhos parecidos.
+
+  O Waze sempre mandou o dado (medindo as filas dos seis países, **os 7 pedidos de duplicado trazem o id do outro local**), mas não manda o nome dele: a busca só devolve locais que têm pedido pendente, e o local duplicado normalmente não tem. Medido: em 6 de 6 casos reais o alvo **não** estava na resposta. A app agora vai buscar o nome, e acha em 6 de 6.
+
+  Quando não dá pra resolver — local apagado, ou fora do alcance da busca —, o card volta a dizer só `Duplicado`, sem "de" pendurado. Achado por [@antigerme](https://www.waze.com/user/editor/antigerme), que reparou que o WME mostrava o nome e a app não.
+
+---
+
 ## v2026.08.16-08
 
 ### Adicionado
