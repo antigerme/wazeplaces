@@ -1807,6 +1807,27 @@ button:active {
   left: 0.75rem;
   right: 0.75rem;
   bottom: calc(0.75rem + env(safe-area-inset-bottom) + var(--kb-inset, 0px));
+  /* O CONTÊINER é largura cheia e mora DEPOIS do botão de ação no DOM, então
+     ele pintava por cima e ENGOLIA o toque — `elementFromPoint` no centro do
+     ✓ devolvia `lightboxNome` nos três aparelhos medidos, e o owner ficou sem
+     conseguir aprovar uma foto que queria aprovar. Limitar o `max-width` do
+     BOTÃO de dentro não resolvia nada: quem intercepta é a caixa de fora, que
+     é invisível mas não é transparente ao dedo.
+     `none` aqui e `auto` nos controles: a caixa deixa passar, os controles
+     recebem. Sobrevive a qualquer mudança de largura futura, ao contrário de
+     acertar a conta do `right`. */
+  pointer-events: none;
+}
+.lb-nome-btn,
+.lb-nome-input,
+.lb-nome-acao { pointer-events: auto; }
+/* A tira de miniaturas ENTRA no layout e empurra os controles de baixo. A
+   pílula precisa subir junto, senão ela cobre as miniaturas — medido: com 3
+   fotos ela ficava por cima da tira nos três aparelhos. O `.lb-baixo` já faz
+   isso; a pílula não é `.lb-baixo` (ela tem o próprio `bottom`, com o teclado),
+   então a regra vale pra ela também, somando as duas coisas. */
+#imageLightbox.com-tira .lb-nome {
+  bottom: calc(0.75rem + var(--lb-tira) + env(safe-area-inset-bottom) + var(--kb-inset, 0px));
 }
 /* Em modo LEITURA a pílula para antes do botão de ação (lixeira/aprovar), que
    mora no mesmo canto. Em EDIÇÃO aquele botão some e a linha usa tudo.

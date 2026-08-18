@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.18-04
+
+### Corrigido
+- **O botão de aprovar foto não respondia ao toque.** A etiqueta com o nome do local, que entrou hoje, ficava por cima dele — invisivelmente: a caixa da etiqueta ocupa a largura toda, mesmo com o texto curto, e engolia o dedo. Valia para aprovar e para excluir. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme) com print de um pedido que ele queria aprovar e não conseguia.
+- **A etiqueta também cobria a tira de miniaturas** em locais com duas ou mais fotos. Agora ela sobe junto com a tira, como os outros controles de baixo já faziam.
+
+---
+
 ## v2026.08.18-03
 
 ### Corrigido

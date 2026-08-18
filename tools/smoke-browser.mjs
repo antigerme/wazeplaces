@@ -2800,6 +2800,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     dateAdded: 1786982736809, lat: -12.892, lon: -38.32,
     mapa: { centro: [-12.892, -38.32], proposto: null, movidoM: null, entradas: [] }, changes: [],
   };
+  const CARD_REALCE_PLACE = PLACE_REN;
   const montarRen = (pl, rank, am, treino) => {
     API.setSession('tok-smoke');
     AppState.preferences.comoFuncionaVisto = true;
@@ -2848,6 +2849,45 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(visivel === esperado, `${onde}: portão errado para ${rot}`, `visível=${visivel}`);
     }
 
+    // ── TODO controle do lightbox RECEBE o toque ───────────────────────────
+    //
+    // Guard de gotcha #26 ("feedback não pode cobrir o alvo que ainda precisa
+    // ser tocado"), agora valendo pro lightbox inteiro. Nasceu de um defeito
+    // que fui eu quem pôs: o contêiner da pílula do nome é largura cheia e mora
+    // DEPOIS do botão de ação no DOM, então engolia o toque — `elementFromPoint`
+    // no centro do ✓ devolvia `lightboxNome`, e o owner ficou sem conseguir
+    // aprovar uma foto. Limitar o `max-width` do BOTÃO de dentro não adianta:
+    // quem intercepta é a caixa de fora, invisível mas não transparente.
+    //
+    // Medir `getBoundingClientRect` não pega isso: os dois retângulos existem e
+    // estão onde deviam. Só `elementFromPoint` responde QUEM recebe o dedo.
+    {
+      const alvos = await page.evaluate(() => {
+        const out = [];
+        for (const id of ['lightboxClose', 'lightboxApprove', 'lightboxDelete', 'lightboxNomeBtn']) {
+          const e = document.getElementById(id);
+          if (!e || e.classList.contains('hidden')) continue;
+          const r = e.getBoundingClientRect();
+          if (r.width < 1 || r.height < 1) continue;
+          const q = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+          out.push({ id, ok: !!(q && q.closest && q.closest('#' + id)),
+                     ladrao: q ? (q.id || (typeof q.className === 'string' ? q.className : q.tagName)) : 'nada' });
+        }
+        return out;
+      });
+      // EXIGIR o botão de ação no cenário. Sem isto o guard passa por AUSÊNCIA:
+      // se o ✓/lixeira não estiver na tela, não há o que colidir e o teste dá
+      // verde sem ter medido nada — foi exatamente o que aconteceu na primeira
+      // versão dele.
+      checa(alvos.some((a) => a.id === 'lightboxApprove' || a.id === 'lightboxDelete'),
+        `${onde}: o cenário não tem botão de ação na tela — o guard de toque não mede nada assim`);
+      checa(alvos.some((a) => a.id === 'lightboxNomeBtn'),
+        `${onde}: a pílula do nome não está na tela — sem ela não há sobreposição pra detectar`);
+      for (const a of alvos) {
+        checa(a.ok, `${onde}: quem recebe o toque no centro de #${a.id} é "${a.ladrao}", não ele`);
+      }
+    }
+
     // ── O nome antigo aparece UMA VEZ, não duas ────────────────────────────
     // O owner viu duas: a pílula (que eu mandava esconder e o `.hidden` não
     // escondia — gotcha #27) e a linha "Antes:" que eu tinha posto embaixo. A
@@ -2868,6 +2908,27 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(rep.n === 1, `${onde}: o nome antigo aparece ${rep.n}× na tela durante a edição`);
     checa(rep.botaoMorto, `${onde}: a pílula virou rótulo mas continua clicável`);
     checa(rep.semLapis, `${onde}: o lápis ficou num rótulo que não é mais botão`);
+    // Com 2+ fotos a tira ENTRA no layout e empurra os controles de baixo. A
+    // pílula tem `bottom` próprio (por causa do teclado), então precisa da
+    // regra dela — sem isso ela cobria as miniaturas nos três aparelhos.
+    await page.evaluate(() => { try { fecharEdicaoNome(); } catch {} });
+    const tira = await page.evaluate((pl) => {
+      const p = { ...pl, imageUrls: [pl.imageUrls[0], pl.imageUrls[0], pl.imageUrls[0]] };
+      AppState.queue = [p]; AppState.currentPlace = p; showCurrentPlace();
+      Lightbox.close(); Lightbox.open(p.imageUrls, 0, 0, p.name, false, p);
+      const t = document.getElementById('lightboxStrip');
+      const n = document.getElementById('lightboxNome');
+      if (t.classList.contains('hidden')) return { pulou: true };
+      const rt = t.getBoundingClientRect(), rn = n.getBoundingClientRect();
+      return { cobre: !(rn.right < rt.left || rn.left > rt.right || rn.bottom < rt.top || rn.top > rt.bottom) };
+    }, CARD_REALCE_PLACE);
+    checa(tira.pulou || !tira.cobre, `${onde}: a pílula do nome cobre a tira de miniaturas`);
+    // volta ao pedido de uma foto só pro resto do bloco
+    await page.evaluate(new Function('a', '(' + montarRen.toString() + ')(a[0],a[1],a[2],a[3])'),
+      [JSON.parse(JSON.stringify(PLACE_REN)), 5, true, false]);
+    await assentar(page);
+    await page.locator('#lightboxNomeBtn').click();
+    await assentar(page);
 
     // ── TECLADO: três alturas, porque ele é do sistema e varia ──────────────
     // Alturas PROPORCIONAIS, não absolutas: teclado real ocupa ~40–50% da tela,
