@@ -1301,3 +1301,84 @@ test('releitura do duplicado que falha não derruba a busca', async () => {
   assert.equal(r.body.places.length, 1);
   assert.equal(r.body.places[0].duplicado, undefined);
 });
+
+// ── A caixa do duplicado se centra no CENTRÓIDE, não no primeiro vértice ────
+//
+// Reproduz o caso REAL que o owner trouxe (SolPark Av. Octávio Mangabeira,
+// Salvador): local em polígono cujo PRIMEIRO VÉRTICE fica 272 m do próprio
+// centro. Como `place.lat/lon` saem do `extractLonLat` — o primeiro vértice —,
+// a caixa nascia deslocada e o alvo caía fora pela borda, com o raio inteiro
+// disponível do outro lado. Medido: 12/14 pelo vértice contra 13/14 pelo
+// centróide, e na chamada real ao Waze o mesmo raio de 0,004 acha ou não acha
+// o alvo só conforme o centro.
+//
+// Aqui o polígono é construído pra isso: os 4 vértices somam (0,0), então o
+// centróide é (0,0) e o primeiro vértice está em lon −0,003. O alvo fica em
+// lon +0,0035 — DENTRO do raio contado do centro, FORA se contado do vértice.
+const DUP_POLI_ALVO = '9.9.222';
+const buscaPoligono = () => ({
+  users: { objects: [] },
+  venues: { objects: [{
+    id: '9.9.111', name: 'SolPark', permissions: -1, images: [],
+    geometry: { type: 'Polygon', coordinates: [[[-0.003, 0], [0.001, 0.001], [0.001, -0.001], [0.001, 0]]] },
+    venueUpdateRequests: [{
+      id: 'ur-poli', venueID: '9.9.111', type: 'REQUEST', subType: 'FLAG',
+      flagType: 'DUPLICATE', flagSubjectType: 'VENUE', flagEntityID: DUP_POLI_ALVO,
+      isRead: false, dateAdded: 1786982736809,
+    }],
+  }] },
+  mapIssues: { venueUpdateRequests: { hasMore: false } },
+});
+// O alvo, a lon +0,0035 do CENTRO do polígono.
+const DUP_POLI_LL = [0.0035, 0];   // [lon, lat]
+
+test('duplicado: a caixa se centra no centróide, não no primeiro vértice', async () => {
+  const store = memStore();
+  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const token = await sessions.createSession([
+    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
+  ].join('\n'));
+  let caixa = null;
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    const j = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (/Issues\/Search\/List/.test(u)) return j(buscaPoligono());
+    if (/\/Features/.test(u)) {
+      // O Waze só devolve o que está DENTRO da caixa. Simular isso é o que faz
+      // este teste medir o CENTRO e não só a existência da chamada — com um
+      // stub que devolvesse o alvo sempre, o defeito passaria verde.
+      const [w, s, e, n] = new URL(u).searchParams.get('bbox').split(',').map(Number);
+      caixa = { w, s, e, n };
+      const dentro = DUP_POLI_LL[0] >= w && DUP_POLI_LL[0] <= e && DUP_POLI_LL[1] >= s && DUP_POLI_LL[1] <= n;
+      return j({ venues: { objects: dentro
+        ? [{ id: DUP_POLI_ALVO, name: 'Condomínio Sol e Maré', permissions: -1,
+             geometry: { type: 'Point', coordinates: DUP_POLI_LL } }]
+        : [] } });
+    }
+    return j({});
+  };
+  try {
+    const r = await dispatch('buscar-places', { sessionToken: token, region: 'row' }, { sessions });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const p = r.body.places[0];
+    // O que a app expõe como posição do local É o primeiro vértice — é daqui
+    // que vinha o erro, e deixar isso explícito impede de "consertar" o
+    // extractLonLat, que está certo pro que ele serve.
+    assert.equal(p.lon, -0.003, 'place.lon deixou de ser o primeiro vértice — o teste perdeu o sentido');
+    assert.deepEqual(p.mapa.centro, [0, 0], 'o centróide do polígono mudou; refaça a fixture');
+
+    assert.ok(caixa, 'não releu por bbox');
+    const cLon = (caixa.w + caixa.e) / 2, cLat = (caixa.s + caixa.n) / 2;
+    assert.ok(Math.abs(cLon - 0) < 1e-9 && Math.abs(cLat - 0) < 1e-9,
+      `a caixa foi centrada em (${cLat}, ${cLon}), não no centróide (0, 0)`);
+    assert.ok(p.duplicado, 'o alvo cabia no raio a partir do centro e mesmo assim não foi achado');
+    assert.equal(p.duplicado.nome, 'Condomínio Sol e Maré');
+    // A distância exibida sai do MESMO centro que enquadrou a caixa: se
+    // saísse do vértice, o card diria ~720 m onde o certo é ~390 m.
+    assert.ok(p.duplicado.distM > 340 && p.duplicado.distM < 440,
+      `distância medida de outro ponto: ${p.duplicado.distM} m`);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

@@ -17,6 +17,8 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
   Quando não dá pra resolver — local apagado, ou fora do alcance da busca —, o card volta a dizer só `Duplicado`, sem "de" pendurado. Achado por [@antigerme](https://www.waze.com/user/editor/antigerme), que reparou que o WME mostrava o nome e a app não.
 
+  **Correção de servidor, sem número de versão novo** (o rodapé continua `v2026.08.17-01`): na primeira versão a busca pelo outro local partia do primeiro canto do local em vez do centro dele. Em local desenhado como área isso desloca a busca — num estacionamento em Salvador, **272 metros** —, e o duplicado ficava de fora por pouco, com espaço de sobra do outro lado. Achado por [@antigerme](https://www.waze.com/user/editor/antigerme) no primeiro caso real depois do lançamento.
+
 ---
 
 ## v2026.08.16-08

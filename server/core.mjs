@@ -1171,16 +1171,34 @@ async function resolverDuplicados(places, cookieHeader, csrf, region, ctx) {
     // e não dá pra distinguir uma da outra com uma amostra — então o card fica
     // como está hoje, em vez de afirmar algo que eu não medi.
     if (p.flagEntityID === p.venueID) continue;
-    if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
-    alvos.push(p);
+    // A caixa se centra no CENTRÓIDE, e isto não é detalhe: `p.lat/p.lon` vêm
+    // do `extractLonLat`, que é o PRIMEIRO VÉRTICE da geometria. Num local que
+    // é polígono os dois são coisas diferentes — medido em 14 duplicados de 13
+    // países, o desvio chega a 272 m (um estacionamento em Salvador), e é ele,
+    // não o raio, que fazia o alvo cair fora da borda. Prova, mesma chamada e
+    // mesmo raio de 0,004, só trocando o centro:
+    //     centrado no centróide     → alvo encontrado (48 locais na caixa)
+    //     centrado no 1º vértice    → alvo NÃO encontrado (51 locais)
+    // Cobertura no conjunto inteiro: 12/14 pelo vértice, 13/14 pelo centróide.
+    //
+    // O `pontoDeGeometria` já avisa disso — "duas contas pra mesma pergunta é
+    // como a tela passa a se contradizer sem ninguém notar" —, e eu tinha caído
+    // exatamente nisso: o marcador do mapa usava o centróide e a busca do
+    // duplicado usava o vértice. `p.mapa.centro` é o MESMO centróide que o
+    // marcador usa, então agora é uma conta só.
+    const centro = (p.mapa && p.mapa.centro) ||
+      (Number.isFinite(p.lat) && Number.isFinite(p.lon) ? [p.lat, p.lon] : null);
+    if (!centro) continue;
+    alvos.push({ p, centro });
     if (alvos.length >= MAX_DUPLICADOS_POR_BUSCA) break;
   }
   if (alvos.length === 0) return;
 
   const d = DUPLICADO_BBOX_GRAUS;
-  await Promise.all(alvos.map(async (p) => {
+  await Promise.all(alvos.map(async ({ p, centro }) => {
+    const [cLat, cLon] = centro;
     const q = new URLSearchParams({
-      bbox: [p.lon - d, p.lat - d, p.lon + d, p.lat + d].join(','),
+      bbox: [cLon - d, cLat - d, cLon + d, cLat + d].join(','),
       v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
     });
     const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, ctx);
@@ -1190,8 +1208,9 @@ async function resolverDuplicados(places, cookieHeader, csrf, region, ctx) {
     const alvo = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === p.flagEntityID);
     if (!alvo) return;
     const ll = pontoDeGeometria(alvo.geometry);
-    const centro = p.mapa && p.mapa.centro;
-    const dist = ll && centro ? distanciaEntrePontos(centro, ll) : null;
+    // Mesma origem do enquadramento: a distância que o card mostra e o centro
+    // da caixa que achou o alvo são a MESMA conta.
+    const dist = ll ? distanciaEntrePontos(centro, ll) : null;
     p.duplicado = {
       id: alvo.id,
       // Nome CRU do Waze. `null` = existe e não tem nome — quem escreve
