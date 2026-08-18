@@ -1809,8 +1809,21 @@ button:active {
   bottom: calc(0.75rem + env(safe-area-inset-bottom) + var(--kb-inset, 0px));
 }
 /* Em modo LEITURA a pílula para antes do botão de ação (lixeira/aprovar), que
-   mora no mesmo canto. Em EDIÇÃO aquele botão some e a linha usa tudo. */
+   mora no mesmo canto. Em EDIÇÃO aquele botão some e a linha usa tudo.
+
+   Em edição a pílula CONTINUA, mostrando o nome antigo — decisão do owner, e
+   ela é melhor que a linha "Antes:" que eu tinha posto: a pílula flutua SOBRE a
+   foto e não custa altura de layout, enquanto a linha empurrava o campo pra
+   cima e comia foto. Ela vira rótulo, não botão: `disabled`, sem o lápis.
+
+   `.hidden` do Tailwind NÃO a esconderia (gotcha #27): `.lb-nome-btn` define
+   `display:flex` e mora DEPOIS do `.hidden` no CSS compilado — mesmo peso,
+   ordem decide, e o flex ganha. Foi assim que o nome apareceu DUAS vezes na
+   tela do owner. Aqui a pílula não precisa sumir, mas quem for esconder algo
+   com `.hidden` neste arquivo precisa saber disso. */
 .lb-nome:not(.editando) .lb-nome-btn { max-width: calc(100% - 4.25rem); }
+.lb-nome.editando .lb-nome-btn { margin-bottom: 0.4rem; }
+.lb-nome-btn:disabled { opacity: 1; }   /* rótulo, não botão apagado */
 .lb-nome-btn {
   display: flex;
   align-items: center;
@@ -1827,19 +1840,6 @@ button:active {
 .lb-nome-txt {
   font-size: 0.8125rem;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lb-nome-antes {
-  display: inline-block;
-  font-size: 0.6875rem;
-  color: #e2e8f0;
-  background: rgba(0, 0, 0, 0.58);
-  border-radius: 9999px;
-  padding: 0.25rem 0.7rem;
-  margin-bottom: 0.4rem;
-  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
