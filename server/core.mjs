@@ -1546,13 +1546,30 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       } else if (reqType === 'REQUEST' && reqSubType === 'FLAG') {
         updateTypeStr = 'Reporte (Sinalização)';
         updateTypeKey = 'FLAG';
-        // O `flagComment` (texto livre) quase sempre vem VAZIO — confirmado no HAR
-        // do "Ponto de Mergulho - Barragem do Lago Paranoá". Quem carrega o motivo
-        // é o `flagType` (enum: INAPPROPRIATE…), que a app ignorava: o card saía
-        // sem dizer nada, enquanto o WME mostrava "Motivo da marcação: Inapropriado".
-        // `flagSubjectType` diz o que foi denunciado (IMAGE = uma foto, não o local)
-        // e `flagEntityID` é o id DELA — bate exatamente com `venue.images[].id`,
-        // que é como o card sabe qual das 4 fotos marcar.
+        // O `flagComment` (texto livre) NÃO é raro, ao contrário do que este
+        // comentário afirmou por muito tempo. A frase antiga ("quase sempre vem
+        // VAZIO", "15 de 17 reportes") saiu de uma amostra de 17 pedidos da fila
+        // brasileira. MEDIDO depois em 438 reportes de 13 países:
+        //
+        //   WRONG_DETAILS          141    133 com texto  (94%)
+        //   CLOSED                 139    119            (86%)
+        //   INAPPROPRIATE           29     12            (41%)
+        //   RESIDENTIAL, DUPLICATE, UNRELATED,
+        //   LOW_QUALITY, DOES_NOT_MATCH_SEARCH   116      0
+        //   ── total: 264 de 438 (60%)
+        //
+        // Nos dois tipos mais comuns o texto é a informação PRINCIPAL, não um
+        // extra: "esse endereço pertence à NASCAR AUTO SPORT", "Nome correto
+        // Hotel Canto do Atlântico". Quem cai num sem texto (o owner caiu) vê
+        // só o motivo — e aí não há o que mostrar mesmo: o campo vem `""`.
+        //
+        // O `flagType` continua sendo o rótulo em destaque, e isso segue certo:
+        // ele existe em 100% e classifica; o texto detalha. Mas quem for mexer
+        // no card de reporte não deve tratar o comentário como caso raro.
+        //
+        // `flagSubjectType` diz o que foi denunciado (IMAGE = uma foto, não o
+        // local) e `flagEntityID` é o id DELA — ou, quando o subject é VENUE e o
+        // tipo é DUPLICATE, o id do OUTRO local (ver `resolverDuplicados`).
         // Passamos os enums CRUS: a tradução é do frontend (js/i18n.js é a fonte
         // única de string de UI) e valor não mapeado aparece cru, nunca some.
         flagComment = String(ur.flagComment || '').trim() || null;

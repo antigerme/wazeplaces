@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.19-01
+
+### Sem mudança visível
+- Correção de documentação e de teste. Nada muda na tela — a versão sobe só porque qualquer alteração em arquivo do site obriga a trocar o cache, mesmo quando é comentário.
+
+  O que foi corrigido: o projeto afirmava que o texto livre dos reportes "quase sempre vem vazio", com base em 17 pedidos. Medido em **438 reportes de 13 países**, 60% trazem texto — e nos dois tipos mais comuns é a informação principal: **"Informações erradas" 94%**, **"Local fechado" 86%**. Quem cair num sem texto continua vendo só o motivo, porque aí realmente não há o que mostrar.
+
+  A fixture de teste do card de reporte passou de 213 para **717 caracteres** — o maior comentário real medido, com quebra de linha —, então as verificações de layout que já existiam passam a rodar contra o pior caso de verdade.
+
+---
+
 ## v2026.08.18-04
 
 ### Corrigido

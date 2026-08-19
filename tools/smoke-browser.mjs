@@ -121,7 +121,14 @@ const CARDS = {
     // Medido depois: 117 pedidos reais × 4 aparelhos × 4 idiomas = 1872 renders,
     // zero estouro (eram 156). O caso seco virou a fixture FLAG_SECO.
     flagType: 'CLOSED', flagSubjectType: 'IMAGE', flagEntityID: null,
-    flagComment: 'Esse lugar fechou faz mais de um ano, hoje é uma oficina mecânica. Passei lá ontem e confirmei com o dono do imóvel, que disse que a loja saiu em 2024. O ponto está errado no mapa e atrapalha quem procura.',
+    // 717 caracteres COM quebra de linha: é o MÁXIMO real medido em 438
+    // reportes de 13 países (mediana 30, p90 90, p99 467), e 10 dos 264 com
+    // texto trazem quebra. A fixture antiga tinha 213 — passava por todos os
+    // checks e nunca chegou perto do pior caso. O texto é sintético mas do
+    // mesmo tamanho e formato: o que decide o layout aqui é comprimento e
+    // quebra, não as palavras (e copiar o texto de um usuário real não
+    // acrescentaria nada além de conteúdo de terceiro numa fixture).
+    flagComment: 'Esse lugar fechou faz mais de um ano, hoje é uma oficina mecânica. Passei lá ontem e confirmei com o dono do imóvel, que disse que a loja saiu em 2024 e que o ponto no mapa nunca foi corrigido desde então.\nO endereço certo da loja nova é na avenida principal, quase esquina com a rua do mercado, do lado do posto de gasolina que fica aberto de madrugada. Quem procura pelo nome antigo acaba parando na rua errada e tendo que perguntar, porque a fachada atual não tem placa nenhuma e o portão fica fechado durante o dia inteiro. Já reportei isso antes e não mudou nada, então estou mandando de novo com mais detalhes pra ajudar quem for corrigir.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
     dateAdded: 1785203731191, lat: -20.8, lon: -49.4,
   },
   // Pedido de alteração cujos campos vieram TODOS iguais ao valor atual. O
@@ -237,8 +244,19 @@ const APARELHOS = [
   // deitado e no SE 375x667, 15px no Fold, 15px no SE 2016 —, com ou sem foto e
   // com ou sem a faixa do treino. O Fold já testa exatamente a mesma margem de
   // 15px, então o aparelho a mais custaria +20% no trecho mais longo do smoke
-  // pra medir o que já é medido. Se a margem deixar de ser constante (mudança
-  // na cadeia de altura do card), esta conta muda e vale reavaliar.
+  // pra medir o que já é medido.
+  //
+  // RESSALVA, medida em 2026-08-18 e que a conta acima não enxergava: aquela
+  // medição olhou a MARGEM DA BARRA, e ela de fato continua boa (-9px). O que
+  // o SE 2016 tem e os outros não é ESTOURO DE CONTEÚDO: num card de reporte
+  // ele passa 30px mesmo SEM comentário nenhum (com 302 caracteres, 286px).
+  // A rede de segurança absorve — o card vira rolável e a barra segue
+  // alcançável —, mas o preço é o gesto de PULAR virar rolagem naquele
+  // aparelho, e isso vale pra TODO card de reporte, não só pros longos.
+  // O Fold (280x653) não estoura: card não rola, a caixa do comentário rola
+  // por dentro, que é o desenho. Não está consertado, e é decisão de produto:
+  // 320x568 é aparelho de 2016. Se for consertar, o alvo é a cadeia de altura
+  // do card de reporte, não a caixa do comentário — ela está certa.
 ];
 const LINGUAS = ['pt', 'en', 'es', 'fr'];
 
