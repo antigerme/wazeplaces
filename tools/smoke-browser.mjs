@@ -375,9 +375,16 @@ for (const [aparelho, viewport] of APARELHOS) {
       const m = await page.evaluate(() => {
         const c = document.querySelector('.place-card');
         if (!c) return null;
+        // ROLAR e CORTAR não são a mesma coisa, e este helper confundia as duas:
+        // `scrollHeight > clientHeight` é TRUE tanto num `overflow-y:auto` que
+        // rola quanto num `overflow:hidden` que corta. Desde que o comentário
+        // passou a cortar em N linhas, medir só isso acusava rolagem onde não
+        // há. O que interessa aqui é o que DISPUTA COM O GESTO — e conteúdo
+        // cortado não disputa com nada.
         const rola = (sel) => {
           const e = c.querySelector(sel);
           if (!e || !e.offsetParent) return null;
+          if (!/auto|scroll/.test(getComputedStyle(e).overflowY)) return false;
           return e.scrollHeight > e.clientHeight + 1;
         };
         // A barra ✕/↑/✓ está NA TELA e recebe o toque? É a ação principal da
@@ -402,6 +409,15 @@ for (const [aparelho, viewport] of APARELHOS) {
         if (cont.scrollHeight > cont.clientHeight + 1) areas.push('card-content');
         if (rola('.card-changes-list')) areas.push('card-changes-list');
         if (rola('.card-flag-comment-text')) areas.push('card-flag-comment-text');
+        // O comentário CORTA em vez de rolar (v2026.08.19-02). Se cortou, o
+        // "ver tudo" TEM que estar lá — senão o texto fica inalcançável, que é
+        // pior que rolar. E medir `scrollHeight > clientHeight` num elemento com
+        // `overflow:hidden` diz "cortado", não "rolando": são coisas
+        // diferentes, e confundi-las foi o que me fez achar que a caixa antiga
+        // funcionava no Fold quando ela mostrava meia linha.
+        const cmt = c.querySelector('.card-flag-comment-text');
+        const btnMais = c.querySelector('.card-flag-comment-mais');
+        const cortou = !!(cmt && cmt.offsetParent && cmt.scrollHeight > cmt.clientHeight + 1);
         const visivel = (sel) => {
           const e = c.querySelector(sel);
           return !!e && !!e.offsetParent && (e.textContent || '').trim() !== '';
@@ -445,6 +461,10 @@ for (const [aparelho, viewport] of APARELHOS) {
         }
         return {
           areas,
+          comentario: cmt && cmt.offsetParent
+            ? { cortou, temBotao: !!(btnMais && !btnMais.classList.contains('hidden')),
+                linhas: +(cmt.clientHeight / (parseFloat(getComputedStyle(cmt).lineHeight) || 19)).toFixed(1) }
+            : null,
           acoesFora, botoesBloqueados, paginaRola,
           nome: (c.querySelector('.card-name').textContent || '').trim(),
           tipo: (c.querySelector('.card-type').textContent || '').trim(),
@@ -468,6 +488,19 @@ for (const [aparelho, viewport] of APARELHOS) {
       checa(!m.areas.includes('card-content'), `${rot}: o card inteiro voltou a rolar`, m.areas.join('+'));
       // E só UMA área pode rolar por vez.
       checa(m.areas.length <= 1, `${rot}: mais de uma área rolando`, m.areas.join('+'));
+      if (m.comentario) {
+        // A promessa desta versão: com o MAIOR comentário real (717 caracteres,
+        // que é a fixture), NADA rola em NENHUM aparelho. Se voltar a rolar, o
+        // gesto de pular morre naquela tela.
+        checa(!m.areas.includes('card-flag-comment-text'),
+          `${rot}: o comentário voltou a ROLAR em vez de cortar`);
+        checa(!m.areas.includes('card-content'),
+          `${rot}: o comentário fez o CARD rolar`, m.areas.join('+'));
+        checa(m.comentario.linhas >= 1,
+          `${rot}: a caixa do comentário colapsou`, `${m.comentario.linhas} linha(s) visível(is)`);
+        checa(!m.comentario.cortou || m.comentario.temBotao,
+          `${rot}: o texto foi cortado e não há "ver tudo" — fica inalcançável`);
+      }
       // Os três botões de ação existem e respeitam o alvo de toque.
       checa(m.temAcoes, `${rot}: sumiu botão de ação`);
       checa(m.botoesVisiveis, `${rot}: botão de ação abaixo de 44px`);

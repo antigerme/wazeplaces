@@ -1914,3 +1914,74 @@ button:active {
 #imageLightbox.editando-nome #lightboxImage {
   max-height: max(4rem, calc(100dvh - var(--kb-inset, 0px) - 9.5rem - env(safe-area-inset-bottom)));
 }
+
+/* ── Comentário do reporte: CORTA, não rola ────────────────────────────────
+   O texto para em 3 linhas e o resto vira "ver tudo". Rolagem dentro do card
+   disputa com o gesto de pular — e o `overflow-y:auto` que estava aqui não
+   funcionava mesmo: MEDIDO no Galaxy Fold, a caixa ficava com 10px pro texto
+   numa linha de 19px, então a pessoa rolava MEIA LINHA por vez, com 10
+   caracteres ou com 200.
+
+   3 linhas não é número escolhido: em 264 comentários reais (13 países) a
+   mediana é 30 caracteres e cabem sem cortar 97% no Pixel 7 e no iPhone 14,
+   94% no iPhone SE. O deitado (852x393) é o caso hostil, 78%. */
+.card-flag-comment-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* O "ver tudo" NÃO ocupa linha: ele custava ~20px, e MEDIDO isso era o que
+   fazia o comentário estourar o card no Galaxy Fold e limitar o iPhone SE a
+   120 caracteres. Flutuando no canto de baixo, o custo vira zero.
+   O véu atrás dele existe porque ele pousa sobre a última linha de texto: sem
+   fundo, letra e rótulo se sobrepõem e nenhum dos dois se lê. */
+.card-flag-comment-mais {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.5rem;
+  padding-left: 1.5rem;
+  background: linear-gradient(to right, transparent, #fff1f2 35%, #fff1f2);
+}
+.dark .card-flag-comment-mais {
+  background: linear-gradient(to right, transparent, #2c1216 35%, #2c1216);
+}
+.card-flag-comment.expandido .card-flag-comment-mais {
+  position: static;
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  padding-left: 0;
+  background: none;
+}
+
+/* Expandido: aí SIM pode rolar, porque foi um toque explícito que pediu. */
+.card-flag-comment.expandido .card-flag-comment-text {
+  -webkit-line-clamp: unset;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: 40vh;
+}
+
+/* Tela CURTA E ESTREITA (o Galaxy Fold é o caso): o rótulo da caixa sai e o
+   corte cai pra 2 linhas. MEDIDO ali: o `#cardStack` fica travado em 460px numa
+   janela de 653 — 193px que o card não pode usar, porque o placar vira 2x2 —, e
+   a caixa gastava 39px de moldura pra 19px de texto. Tirar o rótulo devolve
+   21px, e é o que faz um comentário de uma linha caber com ZERO estouro.
+   O rótulo não faz falta ali: a caixa é rosa, vem logo abaixo do "Motivo:" e
+   não há outra caixa com que confundir. O `aria-label` do texto continua
+   dizendo o que é, então leitor de tela não perde nada. */
+@media (max-height: 700px) and (max-width: 360px) {
+  .card-flag-comment > p:first-of-type { display: none; }
+  /* UMA linha, não duas. MEDIDO no Fold: com 2 linhas sobra 8px de estouro a
+     partir de ~40 caracteres, e 8px bastam pra ligar a rede de segurança — o
+     card vira rolável e o arraste pra cima deixa de PULAR. Perder o gesto por
+     8px é o pior dos dois lados. Com 1 linha não estoura em comprimento
+     nenhum, e quem quiser o resto toca em "ver tudo". */
+  .card-flag-comment-text { -webkit-line-clamp: 1; }
+}
+/* Deitado: 393px de altura pra app inteira, e o card já usa 268. Mesmo
+   raciocínio, mesmo remédio. */
+@media (max-height: 480px) and (min-width: 600px) {
+  .card-flag-comment > p:first-of-type { display: none; }
+  .card-flag-comment-text { -webkit-line-clamp: 1; }
+}
