@@ -516,7 +516,21 @@ test('toda área rolável do card está fora do alcance do arraste', () => {
   // condicional (classe .card-content-rola, ligada pela vigia). Ele continua
   // podendo rolar, então a lista de exceção do arraste PRECISA cobri-lo —
   // é isso que se verifica agora, em vez de contar quantos têm overflow no HTML.
-  assert.ok(roláveis.size >= 2, `esperava ao menos 2 áreas roláveis no template, achei ${[...roláveis]}`);
+  // O comentário do reporte SAIU desta contagem em v2026.08.19-02: ele deixou
+  // de rolar por padrão (corta em 3 linhas e oferece "ver tudo"), e só volta a
+  // rolar DEPOIS de um toque explícito. Como ele PODE rolar, continua obrigado
+  // a estar na lista de exceção — é o que o laço abaixo cobra, e é a proteção
+  // que importa. Contar quantos elementos têm `overflow-y-auto` no HTML era
+  // medir a implementação; o que vale é "tudo que pode rolar está na lista".
+  assert.ok(roláveis.size >= 1, `esperava ao menos 1 área rolável no template, achei ${[...roláveis]}`);
+  // Roláveis CONDICIONAIS (só depois de uma classe): não aparecem com
+  // `overflow-y-auto` no HTML, mas engolem o gesto igual se ficarem de fora.
+  for (const cond of ['card-flag-comment-text']) {
+    assert.ok(ignora[1].includes('.' + cond),
+      `.${cond} pode rolar quando expandido e não está na exceção do swipe.js`);
+    assert.match(read('css/styles.css'), new RegExp(`\\.${cond}[^}]*overflow-y: auto`),
+      `.${cond} deixou de poder rolar — se foi de propósito, tire-o desta lista`);
+  }
   // O .card-content nunca esteve na lista de exceção do closest() — o mecanismo
   // dele sempre foi outro: a classe da rede liga `touch-action: pan-y`, e é isso
   // que faz o browser rolar em vez de o handler capturar o arraste. Verifica o
@@ -552,14 +566,23 @@ test('o card tem UMA área rolável de verdade, e ela cresce com o espaço', () 
     return l;
   };
 
-  for (const caixa of ['card-changes', 'card-flag-comment']) {
+  // Só o DIFF ainda absorve a sobra. O comentário do reporte saiu daqui em
+  // v2026.08.19-02, e a razão é medida: como `flex-1 min-h-0` ele ENCOLHIA
+  // abaixo do conteúdo — no Galaxy Fold sobravam 10px pro texto numa linha de
+  // 19px, meia linha visível, rolando, com 10 caracteres ou com 200. Não era
+  // falta de espaço (o card ocupava 460px numa janela de 653): era a caixa
+  // cedendo tudo. Agora ela é `flex-shrink-0`, cresce com o conteúdo até 3
+  // linhas e corta — 94% a 97% dos comentários reais cabem inteiros.
+  for (const caixa of ['card-changes']) {
     const l = linhaDe(caixa);
     assert.match(l, /\bflex-1\b/, `.${caixa} precisa de flex-1 pra absorver a sobra`);
     assert.match(l, /\bmin-h-0\b/, `.${caixa} sem min-h-0 não encolhe — o conteúdo estoura o card`);
     assert.match(l, /\bflex-col\b/, `.${caixa} precisa ser coluna flex pro corpo dela poder rolar`);
     assert.doesNotMatch(l, /\bmax-h-/, `.${caixa} com teto fixo volta a empurrar a rolagem pro card inteiro`);
   }
-  for (const corpo of ['card-changes-list', 'card-flag-comment-text']) {
+  // O `.card-flag-comment-text` saiu daqui junto com a caixa dele: ele não
+  // ocupa mais a sobra, ele CORTA em 3 linhas (ver o teste do corte abaixo).
+  for (const corpo of ['card-changes-list']) {
     const l = linhaDe(corpo);
     assert.match(l, /\bflex-1\b/, `.${corpo} precisa de flex-1 pra ocupar a caixa`);
     assert.match(l, /\bmin-h-0\b/, `.${corpo} sem min-h-0 não rola: ele estica em vez de encolher`);
@@ -1671,17 +1694,42 @@ test('card: UMA gramática de rótulo, e a caixa do reporte só existe com texto
   }
 
   // ── a caixa do reporte segura o COMENTÁRIO, não o motivo ───────────────
-  // O motivo é a informação principal e quase sempre a única (comentário vazio
-  // em 15 de 17 reportes da fila real). Dentro da caixa, ele carregava junto
-  // ~40px de moldura — borda + padding + cabeçalho — pra exibir uma linha.
+  // O motivo é a informação principal, e em 40% dos reportes é a ÚNICA (medido
+  // em 438 de 13 países — o número antigo aqui, "15 de 17", vinha de uma
+  // amostra pequena e brasileira). Dentro da caixa, ele carregava junto ~40px
+  // de moldura — borda + padding + cabeçalho — pra exibir uma linha.
   const iMotivo = HTML_.indexOf('card-flag-reason');
   const iCaixa = HTML_.indexOf('card-flag-comment ');
   assert.ok(iMotivo > 0 && iCaixa > 0, 'sumiu o motivo ou a caixa do reporte');
   assert.ok(iMotivo < iCaixa,
     'o motivo voltou pra dentro da caixa — com comentário vazio sobra moldura sem conteúdo');
   // E o JS não pode mais abrir a caixa sem texto.
-  assert.match(APP_, /if \(place\.flagComment\) \{[\s\S]{0,220}card-flag-comment'\)\.classList\.remove\('hidden'\)/,
+  // Contar caracteres entre duas âncoras é frágil — o bloco cresceu e a
+  // asserção quebrou sem nada de errado ter acontecido. Aqui se RECORTA o
+  // bloco do `if` e se pergunta o que importa: ele mostra a caixa, e a
+  // mostrada é a do comentário.
+  const iIf = APP_.indexOf('if (place.flagComment) {');
+  assert.ok(iIf > 0, 'sumiu o guard `if (place.flagComment)` do render');
+  const blocoIf = APP_.slice(iIf, APP_.indexOf('\n    }', iIf));
+  assert.match(blocoIf, /card-flag-comment'\)/, 'o bloco não seleciona mais a caixa do comentário');
+  assert.match(blocoIf, /classList\.remove\('hidden'\)/,
     'a caixa do reporte voltou a aparecer sem comentário');
+
+  // ── o comentário CORTA, não rola ───────────────────────────────────────
+  // Rolagem dentro do card disputa com o gesto de pular. MEDIDO em 264
+  // comentários reais: mediana 30 caracteres, e 3 linhas cobrem 94% a 97% dos
+  // aparelhos. O que passa vira "ver tudo" — um toque explícito, e SÓ aí pode
+  // rolar. A regra que isto substitui (`flex-1 min-h-0` + `overflow-y-auto`)
+  // fazia a caixa encolher até 10px de texto no Galaxy Fold: meia linha.
+  const CSS_COMENT = read('css/styles.css');
+  assert.match(CSS_COMENT, /\.card-flag-comment-text \{[^}]*-webkit-line-clamp: 3/,
+    'o comentário voltou a rolar por padrão em vez de cortar em 3 linhas');
+  assert.match(CSS_COMENT, /\.card-flag-comment\.expandido[\s\S]{0,200}overflow-y: auto/,
+    'expandido precisa poder rolar — senão texto longo fica inalcançável');
+  assert.match(HTML_, /card-flag-comment-mais/,
+    'sumiu o "ver tudo" — sem ele o texto cortado não tem como ser lido');
+  assert.match(APP_, /scrollHeight > txt\.clientHeight/,
+    'o "ver tudo" precisa perguntar ao DOM se cortou, não adivinhar por contagem de caracteres');
   assert.doesNotMatch(APP_, /box\.classList\.add\('flex-shrink-0'\)/,
     'voltou o malabarismo de flex que existia só porque a caixa aparecia vazia');
 });

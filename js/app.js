@@ -3085,8 +3085,26 @@ function renderCurrentCard() {
     // estava errado era chamar o conteúdo de raro.) O malabarismo de flex que existia aqui pra ela não
     // reivindicar a sobra saiu junto: sem conteúdo, ela simplesmente não existe.
     if (place.flagComment) {
-        card.querySelector('.card-flag-comment-text').textContent = place.flagComment;
-        card.querySelector('.card-flag-comment').classList.remove('hidden');
+        const cx = card.querySelector('.card-flag-comment');
+        const txt = card.querySelector('.card-flag-comment-text');
+        txt.textContent = place.flagComment;
+        cx.classList.remove('hidden');
+        // O "ver tudo" só existe quando há o que ver: perguntar ao DOM se o
+        // texto foi CORTADO, não adivinhar por contagem de caracteres — a
+        // largura da tela e o idioma mudam onde a 3ª linha termina.
+        // Depois do próximo quadro, senão a medida sai antes do layout.
+        const mais = card.querySelector('.card-flag-comment-mais');
+        requestAnimationFrame(() => {
+            const cortado = txt.scrollHeight > txt.clientHeight + 1;
+            mais.classList.toggle('hidden', !cortado);
+        });
+        mais.onclick = () => {
+            const aberto = cx.classList.toggle('expandido');
+            mais.textContent = t(aberto ? 'card.flagComment.less' : 'card.flagComment.more');
+            // Expandido pode rolar — e aí o arraste precisa saber, senão o
+            // gesto engole a rolagem (gotcha #29).
+            marcarBordaRolagem(txt);
+        };
     }
 
     const wmeLink = card.querySelector('.card-wme-link');

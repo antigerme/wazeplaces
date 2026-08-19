@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.19-02
+
+### Melhorado
+- **O comentário do reporte não rola mais — ele corta, e você toca para ver o resto.** Rolagem dentro do card disputa com o arrastar para cima (que é "pular"), e agora **nenhum aparelho rola nada**, com comentário de qualquer tamanho.
+
+  Antes, num Galaxy Fold a caixa encolhia até sobrar **10 pixels de altura para uma linha de 19** — você via meia linha e rolava de meia em meia, com 10 caracteres ou com 200. Não era falta de espaço: o card ocupava 460px numa janela de 653.
+
+  Agora o texto para em 3 linhas (2 nas telas mais apertadas, 1 no Fold e no celular deitado) e ganha um **"ver tudo"**. Medido em 264 comentários reais de 13 países: a mediana tem 30 caracteres, e nos cinco aparelhos testados **nada rola nem com o maior comentário que existe na base** (717 caracteres).
+
+  Pedido de [@antigerme](https://www.waze.com/user/editor/antigerme): *"quero evitar ao máximo ter rolagem no card, realmente quero a aplicação ao máximo possível funcional"*.
+
+---
+
 ## v2026.08.19-01
 
 ### Sem mudança visível
