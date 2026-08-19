@@ -202,6 +202,8 @@ Todos na região `row`. O owner **vê** os PURs de fora mesmo sem poder editar l
 
 **Isto não é preciosismo, e o custo de ignorar já foi medido.** A auditoria de layout rodava só com a fila brasileira e dava zero problema. Com 12 países ela achou **26 pedidos que não cabem no Galaxy Fold, 17 deles `FLAGGED_PHOTO`** — tipo do qual a fila do Brasil **não tem NENHUM**. Um recurso inteiro passou por 1872 renders "sem problema" porque o dado que o quebra não existe no país onde eu media. Mesma família do gotcha #25 (a string mais larga quase nunca está no idioma em que você desenvolve), agora valendo pro DADO e não só pra tradução.
 
+**A amostra pequena não erra só o LAYOUT — ela erra o DADO, e vira frase no arquivo.** Por muito tempo este projeto afirmou que o texto livre do reporte "quase sempre vem vazio", com base em 17 pedidos da fila brasileira (15 vinham vazios). Medido em **438 reportes de 13 países**: 60% TÊM texto, e nos dois tipos mais comuns é a informação principal (`WRONG_DETAILS` 94%, `CLOSED` 86%). A frase errada não quebrou nada sozinha — mas ela orienta decisão, e a próxima pessoa que fosse mexer no card de reporte partiria de uma premissa falsa. Antes de escrever "quase sempre" ou "quase nunca" num comentário, pergunte de quantos países veio o número.
+
 **E quando achar falha, meça os dois lados antes de culpar o recurso novo.** Os 26 acima apareceram junto com o mini-mapa e não foram causados por ele: medido contra `origin/main` com os MESMOS cards, 26 de 26 já estavam quebrados. Sem essa comparação eu teria desfeito o recurso errado.
 
 ### 🔑 SEMPRE valide contra o WME real, com os cookies do owner (instrução permanente)
@@ -311,7 +313,11 @@ Volta `{ success, places[], hasMore, page, total }`. Cada `place`:
   flagType,                   // FLAG: motivo CRU do Waze (INAPPROPRIATE…). Traduzido no
                               //   frontend via `card.flagType.<ENUM>`; enum não mapeado
                               //   aparece cru. É a informação PRINCIPAL do reporte —
-                              //   `flagComment` (texto livre) quase sempre vem vazio.
+                              //   `flagComment` (texto livre) NÃO é raro: 60% dos reportes
+                              //   trazem, e nos dois tipos mais comuns é a informação
+                              //   PRINCIPAL — WRONG_DETAILS 94%, CLOSED 86% (medido em
+                              //   438 reportes de 13 países). A frase antiga dizia "quase
+                              //   sempre vazio", de uma amostra de 17 pedidos do Brasil.
   flagSubjectType,            // FLAG: IMAGE = denúncia de FOTO, não do local
   flagEntityID,               // FLAG: o id do ALVO da denúncia, e o que ele identifica
                               //   depende do `flagSubjectType`. IMAGE → id da foto, casa

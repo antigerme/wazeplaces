@@ -3077,9 +3077,12 @@ function renderCurrentCard() {
         card.querySelector('.card-flag-reason').classList.remove('hidden');
     }
     // A caixa aparece só quando HÁ texto livre — ela existe pra segurá-lo. Antes
-    // ela vinha junto com o motivo e, com o comentário vazio (15 de 17 reportes
-    // na fila real), sobrava um retângulo rosa gastando ~40px de moldura numa
-    // linha de texto. O malabarismo de flex que existia aqui pra ela não
+    // ela vinha junto com o motivo e, sem texto, sobrava um retângulo rosa
+    // gastando ~40px de moldura numa linha vazia. (O número que estava aqui —
+    // "15 de 17 reportes" — vinha de uma amostra pequena e brasileira; medido
+    // em 438 reportes de 13 países, 60% TÊM texto, e nos dois tipos mais comuns
+    // passa de 86%. A caixa aparecer só com conteúdo continua certo; o que
+    // estava errado era chamar o conteúdo de raro.) O malabarismo de flex que existia aqui pra ela não
     // reivindicar a sobra saiu junto: sem conteúdo, ela simplesmente não existe.
     if (place.flagComment) {
         card.querySelector('.card-flag-comment-text').textContent = place.flagComment;
