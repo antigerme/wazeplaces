@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -54,6 +55,82 @@ test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
       // CSP entrou no lugar de alguma coisa.
       assert.equal(r.headers.get('x-frame-options'), 'DENY', `${caminho}: sumiu o X-Frame-Options`);
       assert.equal(r.headers.get('x-content-type-options'), 'nosniff', `${caminho}: sumiu o nosniff`);
+    }
+  });
+});
+
+// A CSP não é o único cabeçalho que o `_headers` declara e o Node precisa
+// repetir. HSTS ficou pra trás quando a CSP foi portada — mesma família, mesmo
+// arquivo, correção incompleta — e passou despercebido porque o teste olhava um
+// cabeçalho só. Este compara o CONJUNTO: tudo que o `_headers` promete no `/*`
+// tem que sair também na VM.
+//
+// Vale como rede pro próximo: cabeçalho novo no `_headers` que ninguém copiar
+// pro adaptador reprova aqui, em vez de sumir calado numa migração.
+test('os cabeçalhos de segurança da VM batem com os que o _headers promete', async () => {
+  const headers = readFileSync(join(RAIZ, '_headers'), 'utf8');
+  const bloco = headers.slice(headers.indexOf('/*'), headers.indexOf('\n#', headers.indexOf('/*')));
+  const prometidos = Object.fromEntries(
+    [...bloco.matchAll(/^\s+([A-Za-z-]+):\s*(.+)$/gm)].map((m) => [m[1].toLowerCase(), m[2].trim()]));
+  assert.ok(Object.keys(prometidos).length >= 5,
+    `só ${Object.keys(prometidos).length} cabeçalhos lidos do _headers — o parser quebrou`);
+
+  await comServidor(8472, async () => {
+    const r = await fetch('http://127.0.0.1:8472/');
+    const faltando = [];
+    for (const nome of Object.keys(prometidos)) {
+      if (!r.headers.get(nome)) faltando.push(nome);
+    }
+    assert.deepEqual(faltando, [],
+      `a VM não manda ${faltando.join(', ')} — o _headers promete e o Node não cumpre`);
+    // A CSP tem teste próprio (é longa e tem regra de comparação por diretiva);
+    // aqui o valor exato dos OUTROS é cobrado, porque valor diferente é tão
+    // divergência quanto ausência.
+    for (const [nome, valor] of Object.entries(prometidos)) {
+      if (nome === 'content-security-policy') continue;
+      assert.equal(r.headers.get(nome), valor,
+        `${nome} diverge:\n  _headers: ${valor}\n  VM:       ${r.headers.get(nome)}`);
+    }
+  });
+});
+
+// O `_headers` corta o Cache-Control por CAMINHO, e o adaptador cortava por
+// EXTENSÃO — divergiam nos ícones, que caíam no `immutable` de um ano por
+// `.svg` não estar na lista de no-cache. Nome de ícone é fixo (`icon-512.svg`),
+// então um ano de immutable significa trocar o ícone e ninguém ver.
+//
+// Enquanto o Cloudflare serve os estáticos isso é inerte (quem manda é o
+// `_headers`). Vira real no dia em que a origem for a VM e o Cloudflare ficar
+// só de WAF na frente — cenário do owner —, porque aí o `_headers` deixa de
+// ser aplicado e TUDO passa a vir do adaptador.
+test('o Cache-Control por caminho da VM bate com o do _headers', async () => {
+  const headers = readFileSync(join(RAIZ, '_headers'), 'utf8');
+  const regras = {};
+  let atual = null;
+  for (const linha of headers.split('\n')) {
+    if (linha.startsWith('/')) atual = linha.trim();
+    else if (atual && /Cache-Control:/i.test(linha)) regras[atual] = linha.split(':').slice(1).join(':').trim();
+  }
+  // Um exemplo REAL por regra: padrão do `_headers` não se testa, testa-se o
+  // arquivo que ele governa.
+  const EXEMPLOS = {
+    '/service-worker.js': '/service-worker.js',
+    '/js/*': '/js/app.js',
+    '/css/*': '/css/app.css',
+    '/manifest.json': '/manifest.json',
+    '/icons/*': '/icons/icon-512.svg',
+    '/fonts/*': '/fonts/inter-latin-wght-normal.woff2',
+  };
+  const semExemplo = Object.keys(regras).filter((r) => r !== '/*' && !EXEMPLOS[r]);
+  assert.deepEqual(semExemplo, [],
+    `regra nova no _headers sem exemplo aqui: ${semExemplo.join(', ')} — acrescente e confira`);
+
+  await comServidor(8474, async () => {
+    for (const [regra, caminho] of Object.entries(EXEMPLOS)) {
+      if (!regras[regra]) continue;
+      const r = await fetch(`http://127.0.0.1:8474${caminho}`);
+      assert.equal(r.headers.get('cache-control'), regras[regra],
+        `${caminho} diverge:\n  _headers (${regra}): ${regras[regra]}\n  VM:${' '.repeat(regra.length - 1)} ${r.headers.get('cache-control')}`);
     }
   });
 });

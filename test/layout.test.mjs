@@ -877,12 +877,27 @@ test('as TRÊS cópias da CSP dizem a mesma coisa', () => {
         `diretiva "${k}" diverge:\n  meta:     ${a[k]}\n  ${n}: ${copias[n][k]}`);
     }
   }
-  // Permissão morta é permissão que alguém vai reaproveitar sem pensar: o beacon
-  // do Web Analytics NÃO é injetado no HTML (conferido na produção), então o
-  // domínio dele não tem por que estar liberado.
+  // O beacon do Web Analytics É injetado, e a CSP precisa dos DOIS hosts.
+  //
+  // Este guard já exigiu o CONTRÁRIO — que `cloudflareinsights` NÃO aparecesse,
+  // por "permissão morta" —, e a premissa vinha de uma medição feita com um
+  // `grep` sem o `<` do `<script`, que casava com o próprio COMENTÁRIO do
+  // index.html (ele cita o host). O comentário virou a evidência de que o host
+  // não era usado. Medido de novo com padrão ancorado e os dois controles
+  // (comentário → 0, tag real → 1): 10 de 10 respostas trazem a tag. Bloqueado,
+  // o beacon dava 1 erro de CSP por carregamento e o Web Analytics coletava
+  // ZERO — enquanto o aviso de privacidade da Ajuda já prometia "medição de
+  // acesso sem cookies". `tools/cf-injecao.mjs` mede isso do jeito certo.
+  //
+  // São dois hosts porque são dois papéis, e isso saiu de LER o beacon, não de
+  // supor: o script vem de `static.cloudflareinsights.com` e a telemetria vai
+  // pra `https://cloudflareinsights.com/cdn-cgi/rum` (único endpoint externo
+  // dentro dos 31612 bytes dele).
   for (const n of nomes) {
-    assert.doesNotMatch(JSON.stringify(copias[n]), /cloudflareinsights/,
-      `${n}: liberação de cloudflareinsights de volta — o beacon não é carregado, é permissão morta`);
+    assert.match(copias[n]['script-src'] || '', /https:\/\/static\.cloudflareinsights\.com/,
+      `${n}: sem static.cloudflareinsights.com em script-src o beacon injetado é bloqueado a cada carregamento`);
+    assert.match(copias[n]['connect-src'] || '', /https:\/\/cloudflareinsights\.com/,
+      `${n}: sem cloudflareinsights.com em connect-src o beacon carrega mas não consegue reportar`);
   }
   // E script-src não pode voltar a permitir inline.
   assert.doesNotMatch(a['script-src'] || '', /unsafe-inline/,

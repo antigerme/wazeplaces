@@ -27,19 +27,41 @@
          Sem 'unsafe-eval' (Tailwind é pré-compilado) e sem fonts.googleapis/gstatic
          (a Inter é auto-hospedada em fonts/). O 'sha256-…' autoriza UM script
          inline, o do tema — nunca 'unsafe-inline'.
-         `cloudflareinsights` SAIU: o comentário antigo dizia que o Cloudflare
-         injeta o beacon do Web Analytics, e isso foi MEDIDO como falso — não há
-         tag nenhuma dele no HTML de produção. Eram dois hosts liberados para algo
-         que nunca carrega, e permissão morta é permissão que alguém reaproveita
-         sem pensar. Se o Web Analytics for ligado um dia, voltam os dois
-         (script-src para static.cloudflareinsights.com, connect-src para
-         cloudflareinsights.com) — e aí eles voltam a ter uso.
-         O que a CSP ainda bloqueia de propósito é o bootstrap INLINE do Bot
-         Fight Mode. Não há como liberá-lo: hash é impossível (carrega cf-ray e
-         timestamp, muda a cada resposta) e nonce não chega — MEDIDO, o Cloudflare
-         injeta o script ANTES da fase de cabeçalho onde a Transform Rule geraria
-         o nonce, então ele nunca é copiado para a tag. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+         `cloudflareinsights` VOLTOU (v2026.08.20-03), e o motivo de ter saído é
+         a lição: o comentário anterior afirmava, como MEDIDO, que o beacon do
+         Web Analytics não é injetado. Era falso, e a culpa é do instrumento —
+         um `grep 'script[^>]*cloudflareinsights'` SEM o `<` do `<script`, que
+         casava com ESTE PRÓPRIO COMENTÁRIO, que cita o host. O comentário virou
+         a prova de que o host não era usado. Remedido com padrão ancorado e
+         dois controles (menção em texto → 0, tag real → 1): 10 de 10 respostas
+         trazem a tag. Bloqueado, o beacon dava erro de CSP a cada carregamento
+         e o Web Analytics coletava ZERO — enquanto a Ajuda já prometia
+         "medição de acesso sem cookies". `tools/cf-injecao.mjs` mede do jeito
+         certo e roda o controle antes de reportar.
+         São dois hosts porque são dois papéis, e isso saiu de LER o beacon:
+         o script vem de static.cloudflareinsights.com e a telemetria vai pra
+         https://cloudflareinsights.com/cdn-cgi/rum (único endpoint externo nos
+         31612 bytes dele).
+         O que a CSP ainda bloqueia é o bootstrap INLINE do Bot Fight Mode, e
+         liberar DOMÍNIO não resolve — o que está bloqueado não é um domínio.
+         Diretiva de host em script-src só vale pra URL em src=; código inline
+         precisa de 'unsafe-inline', hash ou nonce. E o único recurso remoto que
+         ele quer, /cdn-cgi/challenge-platform/scripts/jsd/main.js, é da MESMA
+         ORIGEM: já está liberado pelo 'self'. Não há host a acrescentar.
+         Hash é impossível — MEDIDO em 3 respostas, 3 hashes: o corpo carrega
+         t:'<base64 do unix time em SEGUNDOS>', então muda sozinho.
+         Nonce é o único caminho que existe, e é caro: o Cloudflare DOCUMENTA
+         que lê e propaga nonce das tags (developers.cloudflare.com/bots/
+         additional-configurations/javascript-detections), mas a medição deste
+         projeto com Transform Rule mostrou a tag chegando SEM nonce=, e a
+         comunidade relata o mesmo. Pra tentar de verdade, o worker teria que
+         gerar um nonce POR RESPOSTA e injetá-lo no cabeçalho e no nosso inline
+         do tema — ou seja, HTML dinâmico onde hoje é estático. O prêmio é UM
+         erro inerte de console. Não paga.
+         E "desligar" também não é opção: no Bot Fight Mode (plano grátis) o
+         JavaScript Detections NÃO pode ser desativado — só é opcional no Super
+         Bot Fight Mode e no Bot Management Enterprise. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).

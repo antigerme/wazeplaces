@@ -149,12 +149,23 @@ const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest'
 //
 // Divergência de CSP não dá erro: o browser aplica a INTERSEÇÃO, então o efeito
 // é alguma coisa parar de carregar em produção, calada (gotcha #14).
-const CSP = "default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';";
+const CSP = "default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';";
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  // HSTS estava SÓ no `_headers`, ou seja só no Cloudflare — mesma lacuna que a
+  // CSP tinha (gotcha #14) e que foi fechada, só que esta ficou pra trás. Numa
+  // VM o cabeçalho sumia e ninguém via: a app deixava de ser a MESMA nos dois
+  // destinos, e "levar pra uma VM" virava mudança de comportamento em vez de
+  // decisão de infraestrutura.
+  // Mandar sempre é seguro: o navegador IGNORA HSTS em conexão não-HTTPS, então
+  // em `localhost` ele não faz nada; atrás de TLS (proxy reverso ou certificado
+  // no próprio Node) ele vale. O contrário — só mandar sob HTTPS — daria um
+  // cabeçalho que depende de como o servidor foi posto no ar, que é justamente
+  // o tipo de divergência que este bloco existe pra impedir.
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'Content-Security-Policy': CSP,
 };
 
@@ -205,8 +216,17 @@ async function serveStatic(req, res, urlPath) {
     const buf = await readFile(file);
     const ext = extname(file).toLowerCase();
     const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', ...SECURITY_HEADERS };
+    // O corte é por CAMINHO onde o `_headers` corta por caminho, não só por
+    // extensão. Os ícones são o caso que divergia: `.svg` não está no `noCache`,
+    // então caíam no `immutable` de um ANO — mas o NOME deles é fixo
+    // (`icon-512.svg`), diferente da fonte, cujo nome mudaria junto com o
+    // conteúdo. Trocar um ícone deixaria todo mundo com o antigo por um ano.
+    // Isso passa despercebido enquanto o Cloudflare serve os estáticos (o
+    // `_headers` manda), e passa a valer no dia em que a origem vira a VM —
+    // que é exatamente quando ninguém está olhando pra isso.
     if (file.endsWith('service-worker.js')) headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
     else if (noCache.has(ext)) headers['Cache-Control'] = 'no-cache, must-revalidate';
+    else if (safe.startsWith('/icons/')) headers['Cache-Control'] = 'public, max-age=86400';
     else headers['Cache-Control'] = 'public, max-age=31536000, immutable';
     // ETag + 304. `no-cache` manda REVALIDAR, não rebaixar: sem ETag o
     // navegador não tem o que perguntar e a revalidação vira download inteiro.

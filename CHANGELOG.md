@@ -8,6 +8,22 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.20-03
+
+### Corrigido
+- **A medição de acesso voltou a funcionar — ela estava bloqueada pela própria app.** O Cloudflare injeta um script de medição em toda página, e a política de segurança da app (CSP) não o permitia. Resultado: um erro no console a cada carregamento e **nenhum dado coletado** — enquanto a tela de Ajuda já prometia *"medição de acesso sem cookies"*. A app afirmava sobre si mesma algo que ela mesma impedia.
+
+  Continua **sem cookies, sem anúncios e sem rastreadores**, como a Ajuda diz. O que mudou é que a frase virou verdade.
+
+- **A permissão tinha sido removida por engano, e a causa foi o instrumento.** A verificação que concluiu *"esse script não é injetado"* usava uma busca frouxa demais, que encontrava o **próprio comentário** do código explicando a política — o comentário virou a prova de que a permissão não servia. Remedido com busca precisa e dois controles: **10 de 10 respostas trazem o script**.
+
+  Agora existe `tools/cf-injecao.mjs`, que mede o que o Cloudflare injeta e **se recusa a reportar** se o próprio controle falhar.
+
+- **Os ícones não ficam mais um ano presos em cache quem roda em VM.** O servidor Node classificava cache por extensão, e `.svg` caía na regra de "conteúdo imutável" — um ano. Só que o nome do ícone é fixo: trocar o desenho e ninguém veria. No Cloudflare isso é inofensivo (quem manda é o arquivo de configuração dele); passa a valer no dia em que a aplicação rodar em servidor próprio. Agora as duas pontas dizem a mesma coisa, e um teste compara regra por regra.
+- **Quem rodar fora do Cloudflare não perde mais o HSTS.** O cabeçalho que instrui o navegador a nunca voltar para HTTP estava declarado só no arquivo do Cloudflare — numa VM ele simplesmente não saía, e nada avisava. Agora o servidor Node manda os mesmos seis cabeçalhos de segurança, e um teste sobe o servidor de verdade e compara o conjunto inteiro com o que está prometido.
+
+---
+
 ## v2026.08.20-02
 
 ### Melhorado
