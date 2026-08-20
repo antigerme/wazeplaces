@@ -25,20 +25,57 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
 
 // Cada padrão exige `<script`, então texto solto (comentário, documentação)
 // não conta. O controle abaixo prova isso a cada execução.
+// `exige` é o que a CSP precisa ter pra aquilo NÃO ser bloqueado:
+//   - host  → uma entrada de host em script-src
+//   - self  → mesma origem, já coberto por 'self' (nada a fazer)
+//   - inline→ código inline: host NENHUM resolve (só 'unsafe-inline'/hash/nonce)
 const PADROES = {
-  'beacon do Web Analytics': /<script[^>]*src="https:\/\/static\.cloudflareinsights\.com/,
-  'bootstrap do Bot Fight Mode': /<script>\(function\(\)\{function c\(\)/,
-  'challenge-platform (jsd)': /<script[^>]*\/cdn-cgi\/challenge-platform\//,
-  'Rocket Loader': /<script[^>]*\/cdn-cgi\/scripts\/[^"]*rocket-loader/,
-  'ofuscador de e-mail': /<script[^>]*\/cdn-cgi\/scripts\/[^"]*email-decode/,
+  'beacon do Web Analytics': {
+    re: /<script[^>]*src="https:\/\/static\.cloudflareinsights\.com/,
+    exige: { tipo: 'host', host: 'https://static.cloudflareinsights.com', tambem: { diretiva: 'connect-src', host: 'https://cloudflareinsights.com' } },
+  },
+  'bootstrap do Bot Fight Mode': {
+    re: /<script>\(function\(\)\{function c\(\)/,
+    exige: { tipo: 'inline' },
+  },
+  'challenge-platform (jsd)': { re: /<script[^>]*\/cdn-cgi\/challenge-platform\//, exige: { tipo: 'self' } },
+  'Rocket Loader': { re: /<script[^>]*\/cdn-cgi\/scripts\/[^"]*rocket-loader/, exige: { tipo: 'self' } },
+  'ofuscador de e-mail': { re: /<script[^>]*\/cdn-cgi\/scripts\/[^"]*email-decode/, exige: { tipo: 'self' } },
 };
+
+// A CSP que a app publica, lida do arquivo — a pergunta é "o que está injetado
+// está coberto por ela?", e responder isso à mão é como a permissão sumiu.
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
+const CSP = Object.fromEntries(
+  readFileSync(join(RAIZ, '_headers'), 'utf8')
+    .match(/^\s*Content-Security-Policy:\s*(.+)$/m)[1]
+    .split(';').map((d) => d.trim()).filter(Boolean)
+    .map((d) => { const [k, ...v] = d.split(/\s+/); return [k, v.join(' ')]; }));
+
+function cobertura(exige) {
+  if (exige.tipo === 'self') return ['coberto', "mesma origem ('self')"];
+  if (exige.tipo === 'inline') {
+    const s = CSP['script-src'] || '';
+    if (s.includes("'unsafe-inline'")) return ['coberto', "'unsafe-inline' (e isso é problema à parte)"];
+    return ['inline', 'host NENHUM resolve — só hash, nonce ou unsafe-inline'];
+  }
+  const faltando = [];
+  if (!(CSP['script-src'] || '').includes(exige.host)) faltando.push(`script-src ${exige.host}`);
+  if (exige.tambem && !(CSP[exige.tambem.diretiva] || '').includes(exige.tambem.host)) {
+    faltando.push(`${exige.tambem.diretiva} ${exige.tambem.host}`);
+  }
+  return faltando.length ? ['FALTA', faltando.join(' + ')] : ['coberto', exige.host];
+}
 
 // CONTROLE: o instrumento distingue uma TAG de uma MENÇÃO em texto? Sem isto
 // o relatório inteiro pode estar medindo comentário. Roda antes de tudo, e
 // aborta se falhar — instrumento que não distingue não mede nada.
 const MENCAO = '(script-src para static.cloudflareinsights.com e connect-src para cloudflareinsights.com)';
 const TAG = '<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v1"></script>';
-const re = PADROES['beacon do Web Analytics'];
+const re = PADROES['beacon do Web Analytics'].re;
 if (re.test(MENCAO) || !re.test(TAG)) {
   console.error('✗ controle do instrumento FALHOU: o padrão não distingue menção de tag.');
   process.exit(2);
@@ -60,14 +97,23 @@ for (let i = 0; i < N; i++) {
     continue;
   }
   ok++;
-  for (const [nome, padrao] of Object.entries(PADROES)) if (padrao.test(html)) achados[nome]++;
+  for (const [nome, p] of Object.entries(PADROES)) if (p.re.test(html)) achados[nome]++;
   await new Promise((r) => setTimeout(r, 300));
 }
 
 console.log(`${URL_BASE} — ${ok} de ${N} respostas lidas\n`);
+let descoberto = 0;
 for (const [nome, n] of Object.entries(achados)) {
   const marca = n === 0 ? '—' : n === ok ? '■' : '▨';
-  console.log(`  ${marca} ${String(n).padStart(3)}/${ok}  ${nome}`);
+  const [estado, razao] = n === 0 ? ['—', ''] : cobertura(PADROES[nome].exige);
+  if (estado === 'FALTA') descoberto++;
+  const selo = { coberto: 'coberto  ', FALTA: 'NÃO COBERTO', inline: 'inline   ', '—': '         ' }[estado];
+  console.log(`  ${marca} ${String(n).padStart(3)}/${ok}  ${nome.padEnd(30)} ${selo}${razao ? '  ' + razao : ''}`);
 }
 console.log('\n  ■ = em toda resposta · ▨ = em algumas (a CSP precisa cobrir mesmo assim) · — = nenhuma');
-console.log('  Injeção que aparece aqui e não está na CSP vira erro de console a cada carregamento.');
+if (descoberto) {
+  console.log(`\n  ✗ ${descoberto} injeção(ões) NÃO COBERTA(S): erro de CSP a cada carregamento, e o recurso não funciona.`);
+  console.log('    Libere o host EXATO nas três cópias da CSP (index.html, _headers, server/node.mjs).');
+  process.exit(1);
+}
+console.log('\n  ✓ tudo que é injetado está coberto pela CSP (ou é inline, que host nenhum resolve).');
