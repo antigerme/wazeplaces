@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -54,6 +55,41 @@ test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
       // CSP entrou no lugar de alguma coisa.
       assert.equal(r.headers.get('x-frame-options'), 'DENY', `${caminho}: sumiu o X-Frame-Options`);
       assert.equal(r.headers.get('x-content-type-options'), 'nosniff', `${caminho}: sumiu o nosniff`);
+    }
+  });
+});
+
+// A CSP não é o único cabeçalho que o `_headers` declara e o Node precisa
+// repetir. HSTS ficou pra trás quando a CSP foi portada — mesma família, mesmo
+// arquivo, correção incompleta — e passou despercebido porque o teste olhava um
+// cabeçalho só. Este compara o CONJUNTO: tudo que o `_headers` promete no `/*`
+// tem que sair também na VM.
+//
+// Vale como rede pro próximo: cabeçalho novo no `_headers` que ninguém copiar
+// pro adaptador reprova aqui, em vez de sumir calado numa migração.
+test('os cabeçalhos de segurança da VM batem com os que o _headers promete', async () => {
+  const headers = readFileSync(join(RAIZ, '_headers'), 'utf8');
+  const bloco = headers.slice(headers.indexOf('/*'), headers.indexOf('\n#', headers.indexOf('/*')));
+  const prometidos = Object.fromEntries(
+    [...bloco.matchAll(/^\s+([A-Za-z-]+):\s*(.+)$/gm)].map((m) => [m[1].toLowerCase(), m[2].trim()]));
+  assert.ok(Object.keys(prometidos).length >= 5,
+    `só ${Object.keys(prometidos).length} cabeçalhos lidos do _headers — o parser quebrou`);
+
+  await comServidor(8472, async () => {
+    const r = await fetch('http://127.0.0.1:8472/');
+    const faltando = [];
+    for (const nome of Object.keys(prometidos)) {
+      if (!r.headers.get(nome)) faltando.push(nome);
+    }
+    assert.deepEqual(faltando, [],
+      `a VM não manda ${faltando.join(', ')} — o _headers promete e o Node não cumpre`);
+    // A CSP tem teste próprio (é longa e tem regra de comparação por diretiva);
+    // aqui o valor exato dos OUTROS é cobrado, porque valor diferente é tão
+    // divergência quanto ausência.
+    for (const [nome, valor] of Object.entries(prometidos)) {
+      if (nome === 'content-security-policy') continue;
+      assert.equal(r.headers.get(nome), valor,
+        `${nome} diverge:\n  _headers: ${valor}\n  VM:       ${r.headers.get(nome)}`);
     }
   });
 });

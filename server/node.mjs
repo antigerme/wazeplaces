@@ -155,6 +155,17 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  // HSTS estava SÓ no `_headers`, ou seja só no Cloudflare — mesma lacuna que a
+  // CSP tinha (gotcha #14) e que foi fechada, só que esta ficou pra trás. Numa
+  // VM o cabeçalho sumia e ninguém via: a app deixava de ser a MESMA nos dois
+  // destinos, e "levar pra uma VM" virava mudança de comportamento em vez de
+  // decisão de infraestrutura.
+  // Mandar sempre é seguro: o navegador IGNORA HSTS em conexão não-HTTPS, então
+  // em `localhost` ele não faz nada; atrás de TLS (proxy reverso ou certificado
+  // no próprio Node) ele vale. O contrário — só mandar sob HTTPS — daria um
+  // cabeçalho que depende de como o servidor foi posto no ar, que é justamente
+  // o tipo de divergência que este bloco existe pra impedir.
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'Content-Security-Policy': CSP,
 };
 

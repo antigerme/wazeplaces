@@ -19,6 +19,8 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
   Agora existe `tools/cf-injecao.mjs`, que mede o que o Cloudflare injeta e **se recusa a reportar** se o próprio controle falhar.
 
+- **Quem rodar fora do Cloudflare não perde mais o HSTS.** O cabeçalho que instrui o navegador a nunca voltar para HTTP estava declarado só no arquivo do Cloudflare — numa VM ele simplesmente não saía, e nada avisava. Agora o servidor Node manda os mesmos seis cabeçalhos de segurança, e um teste sobe o servidor de verdade e compara o conjunto inteiro com o que está prometido.
+
 ---
 
 ## v2026.08.20-02
