@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.20-03
+
+### Corrigido
+- **A medição de acesso voltou a funcionar — ela estava bloqueada pela própria app.** O Cloudflare injeta um script de medição em toda página, e a política de segurança da app (CSP) não o permitia. Resultado: um erro no console a cada carregamento e **nenhum dado coletado** — enquanto a tela de Ajuda já prometia *"medição de acesso sem cookies"*. A app afirmava sobre si mesma algo que ela mesma impedia.
+
+  Continua **sem cookies, sem anúncios e sem rastreadores**, como a Ajuda diz. O que mudou é que a frase virou verdade.
+
+- **A permissão tinha sido removida por engano, e a causa foi o instrumento.** A verificação que concluiu *"esse script não é injetado"* usava uma busca frouxa demais, que encontrava o **próprio comentário** do código explicando a política — o comentário virou a prova de que a permissão não servia. Remedido com busca precisa e dois controles: **10 de 10 respostas trazem o script**.
+
+  Agora existe `tools/cf-injecao.mjs`, que mede o que o Cloudflare injeta e **se recusa a reportar** se o próprio controle falhar.
+
+---
+
 ## v2026.08.20-02
 
 ### Melhorado
