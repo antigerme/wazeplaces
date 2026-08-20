@@ -1,7 +1,7 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026082001';
+const CACHE_NAME = 'waze-places-2026082002';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -74,13 +74,28 @@ self.addEventListener('fetch', event => {
   const isCode = /\.(js|css|json)$/i.test(url.pathname);
 
   if (isHTML || isCode) {
-    // cache: 'reload' força o SW a bypassar o HTTP cache do navegador. Sem isso,
-    // um Cache-Control longo pra JS/CSS faria o browser servir versões velhas do
-    // HTTP cache local, mesmo com SW network-first — F5 não pegava versão nova,
-    // só Ctrl+Shift+R (que mobile não tem). Defesa adicional no servidor via
-    // Cache-Control: no-cache (arquivo _headers no Cloudflare / adaptador Node).
+    // SEM `cache: 'reload'`, e a diferença é grande. Ele existia pra impedir que
+    // um `Cache-Control` LONGO em JS/CSS fizesse o navegador servir versão velha
+    // do cache HTTP local, com F5 não pegando o novo e só o Ctrl+Shift+R
+    // resolvendo (que celular não tem). Só que o servidor hoje manda
+    // `no-cache, must-revalidate` nesses arquivos — e `no-cache` já OBRIGA a
+    // perguntar ao servidor antes de reusar. A garantia virou do cabeçalho; o
+    // `reload` só sobrava, e sobrava caro: ele pula o cache e NÃO manda
+    // `If-None-Match`, então todo carregamento rebaixava a app inteira.
+    //
+    // MEDIDO no fio, com o SW no controle, num F5:
+    //   cache: 'reload'   → 0 requisições condicionais, 0 × 304, 680 KB
+    //   cache: 'no-cache' → 0 requisições condicionais, 0 × 304, 680 KB (igual!)
+    //   sem opção         → 10 condicionais, 10 × 304, 4,2 KB
+    // E com um deploy no meio, os dois pegam a versão nova — o arquivo que
+    // mudou vem 200 com bytes novos, os que não mudaram vêm 304 (13,7 KB
+    // contra 1369 KB). O anti-skew (gotcha #18) continua de pé.
+    //
+    // ISTO DEPENDE DE DUAS COISAS, e `test/vm-estaticos.test.mjs` cobra as duas:
+    // o servidor mandar `no-cache` nesses tipos, e mandar ETag. Sem ETag não há
+    // o que revalidar e a revalidação vira download inteiro — era o caso da VM.
     event.respondWith(
-      fetch(event.request, { cache: 'reload' })
+      fetch(event.request)
         .then(response => {
           if (response && response.status === 200 && response.type === 'basic') {
             const responseClone = response.clone();
