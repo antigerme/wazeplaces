@@ -93,3 +93,44 @@ test('os cabeçalhos de segurança da VM batem com os que o _headers promete', a
     }
   });
 });
+
+// O `_headers` corta o Cache-Control por CAMINHO, e o adaptador cortava por
+// EXTENSÃO — divergiam nos ícones, que caíam no `immutable` de um ano por
+// `.svg` não estar na lista de no-cache. Nome de ícone é fixo (`icon-512.svg`),
+// então um ano de immutable significa trocar o ícone e ninguém ver.
+//
+// Enquanto o Cloudflare serve os estáticos isso é inerte (quem manda é o
+// `_headers`). Vira real no dia em que a origem for a VM e o Cloudflare ficar
+// só de WAF na frente — cenário do owner —, porque aí o `_headers` deixa de
+// ser aplicado e TUDO passa a vir do adaptador.
+test('o Cache-Control por caminho da VM bate com o do _headers', async () => {
+  const headers = readFileSync(join(RAIZ, '_headers'), 'utf8');
+  const regras = {};
+  let atual = null;
+  for (const linha of headers.split('\n')) {
+    if (linha.startsWith('/')) atual = linha.trim();
+    else if (atual && /Cache-Control:/i.test(linha)) regras[atual] = linha.split(':').slice(1).join(':').trim();
+  }
+  // Um exemplo REAL por regra: padrão do `_headers` não se testa, testa-se o
+  // arquivo que ele governa.
+  const EXEMPLOS = {
+    '/service-worker.js': '/service-worker.js',
+    '/js/*': '/js/app.js',
+    '/css/*': '/css/app.css',
+    '/manifest.json': '/manifest.json',
+    '/icons/*': '/icons/icon-512.svg',
+    '/fonts/*': '/fonts/inter-latin-wght-normal.woff2',
+  };
+  const semExemplo = Object.keys(regras).filter((r) => r !== '/*' && !EXEMPLOS[r]);
+  assert.deepEqual(semExemplo, [],
+    `regra nova no _headers sem exemplo aqui: ${semExemplo.join(', ')} — acrescente e confira`);
+
+  await comServidor(8474, async () => {
+    for (const [regra, caminho] of Object.entries(EXEMPLOS)) {
+      if (!regras[regra]) continue;
+      const r = await fetch(`http://127.0.0.1:8474${caminho}`);
+      assert.equal(r.headers.get('cache-control'), regras[regra],
+        `${caminho} diverge:\n  _headers (${regra}): ${regras[regra]}\n  VM:${' '.repeat(regra.length - 1)} ${r.headers.get('cache-control')}`);
+    }
+  });
+});

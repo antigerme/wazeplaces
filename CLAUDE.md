@@ -61,6 +61,27 @@ PWA = instala no celular sem precisar de Play Store / App Store. Funciona offlin
 
 **A app roda no FREE TIER do Cloudflare, e isso é restrição de projeto, não detalhe de infra** (dito pelo owner: *"quero evitar ao máximo consultas ao servidor pois uso o free tier que tem um certo limite"*). Requisição ao nosso `/api/*` é recurso escasso e contado. Consequências pra qualquer recurso novo: **nada de polling**, nada de "atualiza a cada N minutos", nada de background sync periódico, e retentativa só onde já existe política (`callWithRetry`, 2 tentativas). Quando a escolha for entre uma chamada a mais e uma conveniência, a conveniência perde. Foi por isso que o `Periodic Background Sync` — único caminho técnico pro pontinho funcionar no Android — foi **recusado pelo owner** mesmo sendo viável e sem mexer na criptografia.
 
+
+> **O destino da migração NÃO é "sair do Cloudflare"** (decisão do owner, e eu já
+> errei a premissa uma vez): hoje o **Workers & Pages** roda a app; quando o free
+> tier não comportar, a app sobe numa **VM que vira a ORIGEM**, e o Cloudflare
+> **continua na frente como WAF/frontend**. Três consequências que mudam de sinal
+> nesse modelo, e é fácil raciocinar com o modelo errado:
+> - **`_headers` deixa de ser aplicado.** Ele é recurso de Workers/Pages servindo
+>   estático; com origem própria, quem manda TODO cabeçalho é o `server/node.mjs`.
+>   Por isso `test/csp-vm.test.mjs` cobra o CONJUNTO de segurança e o
+>   Cache-Control por CAMINHO — divergência que hoje é inerte vira real no dia 1.
+> - **Os hosts da Cloudflare na CSP CONTINUAM necessários**, não viram permissão
+>   morta: o WAF na frente segue injetando o beacon e o Bot Fight Mode.
+> - **TLS e compressão seguem sendo do Cloudflare** (ele termina TLS e comprime
+>   na borda), então o `node.mjs` não comprimir custa banda origem→borda, não o
+>   carregamento do editor. Priorizar compressão no adaptador seria otimizar o
+>   lado errado.
+>
+> O que a VM ganha de verdade: sai do teto de requisições do Workers. O que ela
+> exige: certificado de origem (Full strict), `ENCRYPTION_KEY` própria — e trocar
+> a chave **desloga todo mundo uma vez**, o que é esperado, não defeito.
+
 ---
 
 ## 📁 Estrutura

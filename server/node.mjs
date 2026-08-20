@@ -216,8 +216,17 @@ async function serveStatic(req, res, urlPath) {
     const buf = await readFile(file);
     const ext = extname(file).toLowerCase();
     const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', ...SECURITY_HEADERS };
+    // O corte é por CAMINHO onde o `_headers` corta por caminho, não só por
+    // extensão. Os ícones são o caso que divergia: `.svg` não está no `noCache`,
+    // então caíam no `immutable` de um ANO — mas o NOME deles é fixo
+    // (`icon-512.svg`), diferente da fonte, cujo nome mudaria junto com o
+    // conteúdo. Trocar um ícone deixaria todo mundo com o antigo por um ano.
+    // Isso passa despercebido enquanto o Cloudflare serve os estáticos (o
+    // `_headers` manda), e passa a valer no dia em que a origem vira a VM —
+    // que é exatamente quando ninguém está olhando pra isso.
     if (file.endsWith('service-worker.js')) headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
     else if (noCache.has(ext)) headers['Cache-Control'] = 'no-cache, must-revalidate';
+    else if (safe.startsWith('/icons/')) headers['Cache-Control'] = 'public, max-age=86400';
     else headers['Cache-Control'] = 'public, max-age=31536000, immutable';
     // ETag + 304. `no-cache` manda REVALIDAR, não rebaixar: sem ETag o
     // navegador não tem o que perguntar e a revalidação vira download inteiro.

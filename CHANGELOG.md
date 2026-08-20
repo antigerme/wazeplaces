@@ -19,6 +19,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
   Agora existe `tools/cf-injecao.mjs`, que mede o que o Cloudflare injeta e **se recusa a reportar** se o próprio controle falhar.
 
+- **Os ícones não ficam mais um ano presos em cache quem roda em VM.** O servidor Node classificava cache por extensão, e `.svg` caía na regra de "conteúdo imutável" — um ano. Só que o nome do ícone é fixo: trocar o desenho e ninguém veria. No Cloudflare isso é inofensivo (quem manda é o arquivo de configuração dele); passa a valer no dia em que a aplicação rodar em servidor próprio. Agora as duas pontas dizem a mesma coisa, e um teste compara regra por regra.
 - **Quem rodar fora do Cloudflare não perde mais o HSTS.** O cabeçalho que instrui o navegador a nunca voltar para HTTP estava declarado só no arquivo do Cloudflare — numa VM ele simplesmente não saía, e nada avisava. Agora o servidor Node manda os mesmos seis cabeçalhos de segurança, e um teste sobe o servidor de verdade e compara o conjunto inteiro com o que está prometido.
 
 ---
