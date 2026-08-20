@@ -409,25 +409,24 @@ for (const [aparelho, viewport] of APARELHOS) {
         if (cont.scrollHeight > cont.clientHeight + 1) areas.push('card-content');
         if (rola('.card-changes-list')) areas.push('card-changes-list');
         if (rola('.card-flag-comment-text')) areas.push('card-flag-comment-text');
-        // O comentário CORTA em vez de rolar (v2026.08.19-02). Se cortou, o
-        // "ver tudo" TEM que estar lá — senão o texto fica inalcançável, que é
-        // pior que rolar. E medir `scrollHeight > clientHeight` num elemento com
-        // `overflow:hidden` diz "cortado", não "rolando": são coisas
-        // diferentes, e confundi-las foi o que me fez achar que a caixa antiga
-        // funcionava no Fold quando ela mostrava meia linha.
-        const cmt = c.querySelector('.card-flag-comment-text');
-        const btnMais = c.querySelector('.card-flag-comment-mais');
-        const cortou = !!(cmt && cmt.offsetParent && cmt.scrollHeight > cmt.clientHeight + 1);
+        // O comentário ROLA dentro da própria caixa, numa janela de N linhas
+        // INTEIRAS. Duas medidas diferentes, e confundi-las já me fez dar por
+        // boa uma caixa que mostrava meia linha no Fold: `scrollHeight >
+        // clientHeight` diz que SOBRA conteúdo, e só o `overflow-y` diz se ele
+        // é alcançável rolando ou se está apenas cortado fora.
         const visivel = (sel) => {
           const e = c.querySelector(sel);
           return !!e && !!e.offsetParent && (e.textContent || '').trim() !== '';
         };
         const roláveisSemNome = [...c.querySelectorAll('.card-changes-list, .card-flag-comment-text')]
           .filter((e) => !e.getAttribute('aria-label')).length;
-        // Teto FIXO na caixa longa é a volta do bug antigo — e ele não estoura
+        // Teto FIXO na caixa do DIFF é a volta do bug antigo — e ele não estoura
         // nada (capar deixa o conteúdo MENOR), então só se pega olhando o
-        // estilo computado: a caixa tem que ser dimensionada pelo flex.
-        const comTetoFixo = [...c.querySelectorAll('.card-changes-list, .card-flag-comment-text')]
+        // estilo computado: aquela caixa tem que ser dimensionada pelo flex.
+        // O comentário ficou de FORA desta lista de propósito: nele o teto é o
+        // projeto (janela de N linhas), e quem cobra que ele seja múltiplo
+        // inteiro da linha é a checagem `sobraDaLinha`, logo abaixo.
+        const comTetoFixo = [...c.querySelectorAll('.card-changes-list')]
           .filter((e) => e.offsetParent && getComputedStyle(e).maxHeight !== 'none')
           .map((e) => `${[...e.classList][0]}=${getComputedStyle(e).maxHeight}`);
         // Contraste do que a app esmaece. `opacity` MISTURA a cor com o fundo,
@@ -459,11 +458,24 @@ for (const [aparelho, viewport] of APARELHOS) {
           const minimo = (px >= 24 || (px >= 18.66 && parseInt(cs.fontWeight, 10) >= 700)) ? 3 : 4.5;
           if (razao < minimo) contrasteBaixo.push(`${[...e.classList][0]} ${razao.toFixed(2)}:1 < ${minimo}`);
         }
+        const cmt = c.querySelector('.card-flag-comment-text');
+        const cmtCS = cmt ? getComputedStyle(cmt) : null;
+        const cmtLinha = cmtCS ? (parseFloat(cmtCS.lineHeight) || 19) : 19;
         return {
           areas,
           comentario: cmt && cmt.offsetParent
-            ? { cortou, temBotao: !!(btnMais && !btnMais.classList.contains('hidden')),
-                linhas: +(cmt.clientHeight / (parseFloat(getComputedStyle(cmt).lineHeight) || 19)).toFixed(1) }
+            ? { sobra: cmt.scrollHeight > cmt.clientHeight + 1,
+                alcancavel: /auto|scroll/.test(cmtCS.overflowY),
+                // `clientHeight` é INTEIRO arredondado (gotcha #34), então a
+                // janela de 3 linhas pode medir 57 onde a conta dá 57.75.
+                // Meia linha é o defeito; 0.2 de linha é arredondamento.
+                linhas: +(cmt.clientHeight / cmtLinha).toFixed(2),
+                // Em PIXELS, com 1px de folga: `clientHeight` arredonda pra
+                // inteiro (gotcha #34), então a janela de uma linha de 19.25px
+                // mede 19 e a divisão dá 0.99. Meia linha (10px de 19) reprova
+                // por uma margem enorme — não é aqui que a folga engana.
+                cabeUmaLinha: cmt.clientHeight >= cmtLinha - 1,
+                sobraDaLinha: +Math.abs(Math.round(cmt.clientHeight / cmtLinha) - cmt.clientHeight / cmtLinha).toFixed(2) }
             : null,
           acoesFora, botoesBloqueados, paginaRola,
           nome: (c.querySelector('.card-name').textContent || '').trim(),
@@ -489,17 +501,22 @@ for (const [aparelho, viewport] of APARELHOS) {
       // E só UMA área pode rolar por vez.
       checa(m.areas.length <= 1, `${rot}: mais de uma área rolando`, m.areas.join('+'));
       if (m.comentario) {
-        // A promessa desta versão: com o MAIOR comentário real (717 caracteres,
-        // que é a fixture), NADA rola em NENHUM aparelho. Se voltar a rolar, o
-        // gesto de pular morre naquela tela.
-        checa(!m.areas.includes('card-flag-comment-text'),
-          `${rot}: o comentário voltou a ROLAR em vez de cortar`);
+        // A promessa desta versão, com o MAIOR comentário real (717 caracteres,
+        // que é a fixture): quem rola é a CAIXA, nunca o card. Card rolando
+        // desliga o arraste pra cima, e o arraste pra cima é o "pular".
         checa(!m.areas.includes('card-content'),
           `${rot}: o comentário fez o CARD rolar`, m.areas.join('+'));
-        checa(m.comentario.linhas >= 1,
+        // Sobrou texto → tem que dar pra alcançar rolando. Cortar sem rolar
+        // deixa o resto inacessível, que é pior que rolar.
+        checa(!m.comentario.sobra || m.comentario.alcancavel,
+          `${rot}: sobrou texto no comentário e a caixa não rola — fica inalcançável`);
+        // Janela de linhas INTEIRAS. Meia linha visível foi o bug original, e
+        // ele não estoura nada: nenhuma medida de estouro o pegaria.
+        checa(m.comentario.cabeUmaLinha,
           `${rot}: a caixa do comentário colapsou`, `${m.comentario.linhas} linha(s) visível(is)`);
-        checa(!m.comentario.cortou || m.comentario.temBotao,
-          `${rot}: o texto foi cortado e não há "ver tudo" — fica inalcançável`);
+        checa(m.comentario.sobraDaLinha <= 0.25,
+          `${rot}: a janela do comentário não é múltipla da linha`,
+          `${m.comentario.linhas} linha(s) — sobra ${m.comentario.sobraDaLinha}`);
       }
       // Os três botões de ação existem e respeitam o alvo de toque.
       checa(m.temAcoes, `${rot}: sumiu botão de ação`);

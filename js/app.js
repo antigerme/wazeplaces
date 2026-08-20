@@ -3089,22 +3089,10 @@ function renderCurrentCard() {
         const txt = card.querySelector('.card-flag-comment-text');
         txt.textContent = place.flagComment;
         cx.classList.remove('hidden');
-        // O "ver tudo" só existe quando há o que ver: perguntar ao DOM se o
-        // texto foi CORTADO, não adivinhar por contagem de caracteres — a
-        // largura da tela e o idioma mudam onde a 3ª linha termina.
-        // Depois do próximo quadro, senão a medida sai antes do layout.
-        const mais = card.querySelector('.card-flag-comment-mais');
-        requestAnimationFrame(() => {
-            const cortado = txt.scrollHeight > txt.clientHeight + 1;
-            mais.classList.toggle('hidden', !cortado);
-        });
-        mais.onclick = () => {
-            const aberto = cx.classList.toggle('expandido');
-            mais.textContent = t(aberto ? 'card.flagComment.less' : 'card.flagComment.more');
-            // Expandido pode rolar — e aí o arraste precisa saber, senão o
-            // gesto engole a rolagem (gotcha #29).
-            marcarBordaRolagem(txt);
-        };
+        // O que sobra da janela se alcança ROLANDO dentro da própria caixa —
+        // não há botão. O aviso de que sobra texto é a borda esmaecida, e ela
+        // é armada logo abaixo por `marcarBordaRolagem`, junto com as outras
+        // áreas roláveis do card.
     }
 
     const wmeLink = card.querySelector('.card-wme-link');

@@ -550,9 +550,14 @@ body > main {
    volta ao normal ao chegar no fim. Máscara em vez de gradiente colorido de
    propósito — funciona sobre a caixa âmbar, a rosa, no claro e no escuro, sem
    ninguém precisar manter três cores em sincronia. */
+/* A rampa é 1.5rem OU 40% da caixa, o que for MENOR. Os 24px fixos foram
+   desenhados pensando na lista de mudanças, que é alta; numa janela de 2
+   linhas (38px) eles apagariam quase tudo, e numa de 1 linha apagavam a única
+   linha inteira — o aviso de "tem mais" comendo o que se veio ler. Proporcional
+   ele encolhe junto com a caixa e nunca vira o assunto. */
 .rola-mais {
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.5rem), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.5rem), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - min(1.5rem, 40%)), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - min(1.5rem, 40%)), transparent);
 }
 
 /* Valor que a APP escreveu, não que veio do Waze. Os parênteses no texto já
@@ -1915,55 +1920,42 @@ button:active {
   max-height: max(4rem, calc(100dvh - var(--kb-inset, 0px) - 9.5rem - env(safe-area-inset-bottom)));
 }
 
-/* ── Comentário do reporte: CORTA, não rola ────────────────────────────────
-   O texto para em 3 linhas e o resto vira "ver tudo". Rolagem dentro do card
-   disputa com o gesto de pular — e o `overflow-y:auto` que estava aqui não
-   funcionava mesmo: MEDIDO no Galaxy Fold, a caixa ficava com 10px pro texto
-   numa linha de 19px, então a pessoa rolava MEIA LINHA por vez, com 10
-   caracteres ou com 200.
+/* ── Comentário do reporte: ROLA dentro da própria caixa ───────────────────
+   A caixa é uma JANELA de N linhas inteiras, e o resto rola DENTRO dela. Não
+   há botão: a borda esmaecida (`.rola-mais`, o scroll edge effect do M3) é o
+   aviso de que sobra texto, e ela some ao chegar no fim.
+
+   POR QUE O BOTÃO SAIU, e é defeito medido, não gosto: ao expandir, a caixa ia
+   a `40vh`, o conteúdo do card estourava, a rede de segurança ligava e o CARD
+   inteiro passava a rolar — o que desliga o arraste pra cima, que é o "pular"
+   (gotcha #29). E o "ver menos" caía abaixo da dobra, então não havia caminho
+   de volta. Relatado com print pelo owner num iPhone, na primeira fila real em
+   que alguém tocou no botão. Fechado o `expandido`, fechada essa porta.
+
+   POR QUE NÃO É A VOLTA DO BUG QUE O BOTÃO TENTAVA CONSERTAR: aquele era
+   `flex-1 min-h-0` — a caixa reivindicava a sobra e ABSORVIA todo o déficit,
+   chegando a 10px de altura numa linha de 19px no Galaxy Fold (meia linha, com
+   10 caracteres ou com 200). Aqui a caixa continua `flex-shrink-0` e o teto é
+   fixo em LINHAS INTEIRAS: a geometria do card é, pixel a pixel, a mesma de
+   antes — muda só o que acontece com o que não coube.
 
    3 linhas não é número escolhido: em 264 comentários reais (13 países) a
-   mediana é 30 caracteres e cabem sem cortar 97% no Pixel 7 e no iPhone 14,
-   94% no iPhone SE. O deitado (852x393) é o caso hostil, 78%. */
+   mediana é 30 caracteres e cabem sem rolar 97% no Pixel 7 e no iPhone 14,
+   94% no iPhone SE. */
 .card-flag-comment-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-/* O "ver tudo" NÃO ocupa linha: ele custava ~20px, e MEDIDO isso era o que
-   fazia o comentário estourar o card no Galaxy Fold e limitar o iPhone SE a
-   120 caracteres. Flutuando no canto de baixo, o custo vira zero.
-   O véu atrás dele existe porque ele pousa sobre a última linha de texto: sem
-   fundo, letra e rótulo se sobrepõem e nenhum dos dois se lê. */
-.card-flag-comment-mais {
-  position: absolute;
-  right: 0.75rem;
-  bottom: 0.5rem;
-  padding-left: 1.5rem;
-  background: linear-gradient(to right, transparent, #fff1f2 35%, #fff1f2);
-}
-.dark .card-flag-comment-mais {
-  background: linear-gradient(to right, transparent, #2c1216 35%, #2c1216);
-}
-.card-flag-comment.expandido .card-flag-comment-mais {
-  position: static;
-  align-self: flex-start;
-  margin-top: 0.25rem;
-  padding-left: 0;
-  background: none;
-}
-
-/* Expandido: aí SIM pode rolar, porque foi um toque explícito que pediu. */
-.card-flag-comment.expandido .card-flag-comment-text {
-  -webkit-line-clamp: unset;
+  /* A janela se mede em LINHAS INTEIRAS, e a linha sai da FONTE, não de um
+     pixel escrito à mão: `text-sm` (0.875rem) × `leading-snug` (1.375). Meia
+     linha visível foi exatamente o defeito da versão antiga que rolava, então
+     o teto tem que ser múltiplo desta variável — sempre, e em toda media
+     query que mexer no número de linhas. */
+  --linha-comentario: calc(0.875rem * 1.375);
   overflow-y: auto;
   overscroll-behavior: contain;
-  max-height: 40vh;
+  max-height: calc(3 * var(--linha-comentario));
 }
 
-/* Tela CURTA E ESTREITA (o Galaxy Fold é o caso): o rótulo da caixa sai e o
-   corte cai pra 2 linhas. MEDIDO ali: o `#cardStack` fica travado em 460px numa
+/* Tela CURTA E ESTREITA (o Galaxy Fold é o caso): o rótulo da caixa sai e a
+   janela cai pra UMA linha. MEDIDO ali: o `#cardStack` fica travado em 460px numa
    janela de 653 — 193px que o card não pode usar, porque o placar vira 2x2 —, e
    a caixa gastava 39px de moldura pra 19px de texto. Tirar o rótulo devolve
    21px, e é o que faz um comentário de uma linha caber com ZERO estouro.
@@ -1972,16 +1964,42 @@ button:active {
    dizendo o que é, então leitor de tela não perde nada. */
 @media (max-height: 700px) and (max-width: 360px) {
   .card-flag-comment > p:first-of-type { display: none; }
-  /* UMA linha, não duas. MEDIDO no Fold: com 2 linhas sobra 8px de estouro a
-     partir de ~40 caracteres, e 8px bastam pra ligar a rede de segurança — o
-     card vira rolável e o arraste pra cima deixa de PULAR. Perder o gesto por
-     8px é o pior dos dois lados. Com 1 linha não estoura em comprimento
-     nenhum, e quem quiser o resto toca em "ver tudo". */
-  .card-flag-comment-text { -webkit-line-clamp: 1; }
+  /* Quem paga a 2ª linha é a FOTO, e só no card que tem a caixa — no resto ela
+     segue no piso normal. É o gotcha #36 aplicado: no card, quem cede espaço é
+     a foto; apertar o texto não devolve pixel nenhum. Escopo por `:has()`
+     porque um piso menor pra TODO card encolheria a evidência de quem não tem
+     comentário nenhum pra ler. */
+  .place-card:has(.card-flag-comment:not(.hidden)) .card-photo { min-height: 5.5rem; }
+  /* DUAS linhas, e a foto paga por elas. Uma linha só era o que cabia enquanto
+     a foto não cedia — e ali a janela de UMA linha não funciona, por um motivo
+     que só aparece olhando a tela: o esmaecido de borda tem 24px de rampa e a
+     linha tem 19px, então a única linha visível saía inteira dentro do
+     degradê, meio apagada. O aviso de "tem mais" comia justamente o que se
+     veio ler. Com 2 linhas a primeira fica limpa e o degradê pousa na segunda,
+     que é como ele deve parecer.
+     MEDIDO: 2 linhas custam 19px, a foto tinha só 12px acima do piso e o
+     estouro voltava (8px com 40 caracteres, 510px com 717 — e 8px já bastam
+     pra ligar a rede e matar o arraste pra cima). Baixando o piso da foto pra
+     5.5rem NAQUELE card, o estouro é ZERO em todos os comprimentos. */
+  .card-flag-comment-text { max-height: calc(2 * var(--linha-comentario)); }
 }
 /* Deitado: 393px de altura pra app inteira, e o card já usa 268. Mesmo
    raciocínio, mesmo remédio. */
 @media (max-height: 480px) and (min-width: 600px) {
   .card-flag-comment > p:first-of-type { display: none; }
-  .card-flag-comment-text { -webkit-line-clamp: 1; }
+  /* UMA linha aqui, e não 2 como nas outras telas — a diferença é ESTRUTURAL,
+     não de gosto: deitado o card vira GRADE e a foto fica na coluna 1, ao lado
+     do texto, não acima dele. Ela não tem como ceder altura pra coluna 2, que
+     é onde a caixa mora. Cheguei a medir "estouro zero" com a fixture escrita
+     à mão e estava errado: com os 51 pedidos REAIS dos 6 países, a 2ª linha
+     estourou em 15 combinações (México, Espanha e França, FLAGGED_PLACE), e
+     card estourado liga a rede e mata o arraste pra cima.
+     Como a janela é de uma linha só, o esmaecido de borda sairia por cima da
+     única linha visível — por isso ele é desligado logo abaixo. Quem quiser o
+     resto rola dentro da caixa do mesmo jeito; o que muda é só o aviso. */
+  .card-flag-comment-text { max-height: calc(1 * var(--linha-comentario)); }
+  .card-flag-comment-text.rola-mais {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
 }

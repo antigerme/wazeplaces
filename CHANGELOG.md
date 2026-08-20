@@ -8,6 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.20-01
+
+### Corrigido
+- **O "ver tudo" do comentário saiu, e a caixa voltou a rolar por dentro.** Ao tocar em "ver tudo", a caixa crescia até 40% da altura da tela — e isso não cabe num card que já ocupa a tela inteira. O resultado, relatado por [@antigerme](https://www.waze.com/user/editor/antigerme) com print: *"acaba aparecendo uma rolagem no card e o 'VER MENOS' acaba não aparecendo"*. Pior que o incômodo: **card que rola perde o arrastar para cima**, que é o "pular".
+
+  Agora o comentário é uma **janela de linhas inteiras** (3 na maioria dos aparelhos, 2 nos estreitos, 1 no celular deitado) e o resto se lê **rolando dentro da própria caixa**. A altura do card não muda mais com o tamanho do texto, e o "ver tudo" — que ainda por cima pousava em cima da 3ª linha, tapando palavra — deixou de existir.
+
+  Medido nos 5 aparelhos × 4 idiomas × 7 tipos de card e nos 51 pedidos reais dos 6 países: **nenhum card rola**, com comentário de qualquer tamanho, incluindo o maior que existe na base (717 caracteres).
+
+### Melhorado
+- **Nas telas estreitas o comentário passou de 1 para 2 linhas, e quem paga é a foto.** No Galaxy Fold a caixa mostrava uma linha só — e o esmaecido que avisa "tem mais texto" tem 24 pixels de degradê, mais que a própria linha de 19: a única linha visível saía meio apagada, o aviso comendo o que você foi ler. Com 2 linhas a primeira fica limpa e o degradê pousa na segunda, que é como ele deve parecer. O espaço vem do piso da foto, e só no card que tem comentário.
+- **O esmaecido de borda agora encolhe junto com a caixa** (40% dela, no máximo 24px). No celular deitado, onde só cabe uma linha, ele simplesmente não aparece — ali a foto fica ao lado do texto, em outra coluna, e não tem como ceder altura.
+
+---
+
 ## v2026.08.19-02
 
 ### Melhorado
