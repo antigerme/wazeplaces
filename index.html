@@ -42,11 +42,25 @@
          o script vem de static.cloudflareinsights.com e a telemetria vai pra
          https://cloudflareinsights.com/cdn-cgi/rum (único endpoint externo nos
          31612 bytes dele).
-         O que a CSP ainda bloqueia de propósito é o bootstrap INLINE do Bot
-         Fight Mode. Não há como liberá-lo: hash é impossível (carrega cf-ray e
-         timestamp, muda a cada resposta) e nonce não chega — MEDIDO, o Cloudflare
-         injeta o script ANTES da fase de cabeçalho onde a Transform Rule geraria
-         o nonce, então ele nunca é copiado para a tag. -->
+         O que a CSP ainda bloqueia é o bootstrap INLINE do Bot Fight Mode, e
+         liberar DOMÍNIO não resolve — o que está bloqueado não é um domínio.
+         Diretiva de host em script-src só vale pra URL em src=; código inline
+         precisa de 'unsafe-inline', hash ou nonce. E o único recurso remoto que
+         ele quer, /cdn-cgi/challenge-platform/scripts/jsd/main.js, é da MESMA
+         ORIGEM: já está liberado pelo 'self'. Não há host a acrescentar.
+         Hash é impossível — MEDIDO em 3 respostas, 3 hashes: o corpo carrega
+         t:'<base64 do unix time em SEGUNDOS>', então muda sozinho.
+         Nonce é o único caminho que existe, e é caro: o Cloudflare DOCUMENTA
+         que lê e propaga nonce das tags (developers.cloudflare.com/bots/
+         additional-configurations/javascript-detections), mas a medição deste
+         projeto com Transform Rule mostrou a tag chegando SEM nonce=, e a
+         comunidade relata o mesmo. Pra tentar de verdade, o worker teria que
+         gerar um nonce POR RESPOSTA e injetá-lo no cabeçalho e no nosso inline
+         do tema — ou seja, HTML dinâmico onde hoje é estático. O prêmio é UM
+         erro inerte de console. Não paga.
+         E "desligar" também não é opção: no Bot Fight Mode (plano grátis) o
+         JavaScript Detections NÃO pode ser desativado — só é opcional no Super
+         Bot Fight Mode e no Bot Management Enterprise. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
