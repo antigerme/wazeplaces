@@ -8,6 +8,22 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.20-02
+
+### Melhorado
+- **A app abre baixando 5 KB no lugar de 680.** Todo carregamento — abrir o atalho, dar F5, voltar pro app — rebaixava o site inteiro: HTML, todos os JS, o CSS. Não era por release; era toda vez.
+
+  A causa era uma defesa velha no service worker que mandava ignorar o cache do navegador. Ela existia porque, no servidor antigo, o JS ficava um mês em cache e o F5 não pegava versão nova (e celular não tem Ctrl+Shift+R). Só que o servidor de hoje já manda "pergunte antes de reusar" em todo arquivo de código — a defesa virou redundante e ficou cobrando o preço.
+
+  Agora o navegador pergunta, e o servidor responde "não mudou" nos arquivos iguais. **Medido no fio, com o app instalado: 680 KB → 5,2 KB por carregamento.** Quando há versão nova, o arquivo que mudou vem inteiro e o resto vem vazio: 1369 KB → 18,6 KB.
+
+  **A atualização continua funcionando igual** — foi verificado publicando uma versão nova no meio da sessão: o app pega a nova, como antes.
+
+### Corrigido
+- **Quem roda na VM ganhou o mesmo benefício.** O servidor Node não mandava ETag, então o navegador não tinha como perguntar "mudou?" e a resposta era sempre o arquivo inteiro. Agora manda, calculado pelo conteúdo — trocar de branch ou reinstalar não faz ninguém rebaixar nada à toa. No Cloudflare isso já vinha de graça.
+
+---
+
 ## v2026.08.20-01
 
 ### Corrigido

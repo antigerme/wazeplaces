@@ -13,7 +13,7 @@
 import { createServer } from 'node:http';
 import { readFile, writeFile, unlink, stat, mkdir, utimes, readdir } from 'node:fs/promises';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -208,6 +208,19 @@ async function serveStatic(req, res, urlPath) {
     if (file.endsWith('service-worker.js')) headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
     else if (noCache.has(ext)) headers['Cache-Control'] = 'no-cache, must-revalidate';
     else headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    // ETag + 304. `no-cache` manda REVALIDAR, não rebaixar: sem ETag o
+    // navegador não tem o que perguntar e a revalidação vira download inteiro.
+    // O Cloudflare já fazia isto sozinho (medido em produção); a VM não fazia,
+    // então lá cada carregamento custava a app inteira. Hash do conteúdo, não
+    // mtime: `git checkout` mexe no mtime sem mudar um byte, e aí o editor
+    // rebaixaria tudo por causa de um deploy que não mudou nada.
+    const etag = '"' + createHash('sha256').update(buf).digest('base64url').slice(0, 22) + '"';
+    headers.ETag = etag;
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, headers);
+      res.end();
+      return;
+    }
     res.writeHead(200, headers);
     res.end(buf);
   } catch {
