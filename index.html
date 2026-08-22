@@ -629,6 +629,24 @@
 
                     <!-- ══ ABA PREFERÊNCIAS (aplicam na hora, sem "Aplicar") ══ -->
                     <div id="filtersPanelPrefs" role="tabpanel" aria-labelledby="filtersTabPrefs" class="hidden space-y-4">
+                        <!-- PRIMEIRO de propósito: o modo dev MODIFICA as opções abaixo dele
+                             (ele fura a trava do "Permitir desfazer ações"). Ver o que sobrepõe
+                             antes do que é sobreposto — ler "Desfazer: ligado" e só depois
+                             descobrir que o dev mode o ignora é a ordem errada de causa e efeito.
+                             Fica escondido até os 7 toques na versão, então pra quase todo editor
+                             a aba começa no Idioma; quem destravou, destravou de propósito e quer
+                             o interruptor à mão. -->
+                        <div id="devModeSection" class="hidden">
+                            <h4 class="text-xs font-bold text-purple-500 dark:text-purple-300 uppercase tracking-wider mb-2" data-i18n="filters.section.advanced">Avançado</h4>
+                            <div class="bg-purple-50 dark:bg-purple-400/10 border border-purple-100 dark:border-purple-400/30 rounded-xl p-3">
+                                <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
+                                    <span>
+                                        <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.devMode.label">Modo Desenvolvedor 🛠️</span>
+                                    </span>
+                                    <input id="prefDevModeActive" type="checkbox" class="ui-switch">
+                                </label>
+                            </div>
+                        </div>
                         <div>
                             <label for="langSelect" class="text-sm font-semibold text-slate-700 block mb-1 dark:text-slate-200" data-i18n="filters.language.label">Idioma</label>
                             <select id="langSelect" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700"></select>
@@ -645,18 +663,6 @@
                             <p id="prefUndoGateMsg" class="hidden mt-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-100/60 dark:bg-amber-400/10 border border-amber-200 dark:border-amber-400/30 rounded-lg px-2 py-1.5 leading-snug"></p>
                         </div>
 
-                        <div id="devModeSection" class="hidden">
-                            <h4 class="text-xs font-bold text-purple-500 dark:text-purple-300 uppercase tracking-wider mb-2" data-i18n="filters.section.advanced">Avançado</h4>
-                            <div class="bg-purple-50 dark:bg-purple-400/10 border border-purple-100 dark:border-purple-400/30 rounded-xl p-3">
-                                <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                    <span>
-                                        <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.devMode.label">Modo Desenvolvedor 🛠️</span>
-                                        <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="prefs.devMode.desc">Remove restrições da app (ex: trava do "Permitir desfazer ações"). Use com cuidado — ações vão direto pro Waze sem janela de undo.</span>
-                                    </span>
-                                    <input id="prefDevModeActive" type="checkbox" class="ui-switch">
-                                </label>
-                            </div>
-                        </div>
                     </div>
 
                     <!-- ══ ABA HISTÓRICO (só leitura) ══ -->

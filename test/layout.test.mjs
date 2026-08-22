@@ -604,6 +604,27 @@ test('o card tem UMA área rolável de verdade, e ela cresce com o espaço', () 
   assert.doesNotMatch(bloco, /class="space-y-3"/, 'o wrapper space-y-3 voltou pro meio da cadeia de flex');
 });
 
+// O modo dev é a PRIMEIRA opção das Preferências, e não é arrumação.
+//
+// Ele MODIFICA as opções abaixo: `canDisableUndo()` devolve true com dev mode
+// ligado, ou seja, ele fura a trava do "Permitir desfazer ações". Ler
+// "Desfazer: ligado" e só depois descobrir, mais abaixo, que existe um
+// interruptor que o ignora é a ordem errada de causa e efeito — quem sobrepõe
+// vem antes do que é sobreposto.
+//
+// Não custa nada pra quase todo editor: a seção nasce `hidden` e só aparece
+// depois dos 7 toques na versão, então a aba continua começando no Idioma.
+test('modo dev é a primeira opção das Preferências', () => {
+  const HTML_ = read('index.html');
+  const ini = HTML_.indexOf('id="filtersPanelPrefs"');
+  const fim = HTML_.indexOf('id="filtersPanelHistory"', ini);
+  assert.ok(ini > 0 && fim > ini, 'sumiu a aba de Preferências');
+  const painel = HTML_.slice(ini, fim);
+  const ordem = [...painel.matchAll(/id="(devModeSection|langSelect|prefUndoRow)"/g)].map((m) => m[1]);
+  assert.deepEqual(ordem, ['devModeSection', 'langSelect', 'prefUndoRow'],
+    `ordem das Preferências mudou: ${ordem.join(' → ')} — o modo dev tem que vir primeiro, porque ele fura a trava do Desfazer`);
+});
+
 test('a área que rola avisa que rola', () => {
   // Área que rola sem dizer que rola é área que ninguém rola — e aqui isso
   // custa caro: arrastar o card pra cima PULA, então quem não perceber que a
