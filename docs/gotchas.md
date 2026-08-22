@@ -300,3 +300,67 @@ ocorrência** — errar uma vez e corrigir não vira parágrafo.
     **O conserto não é "travar também no lightbox", é ter UMA regra**: `acoesTravadas()` passou a incluir `aprovacaoPendente`/`exclusaoPendente`, e `aplicarTravaDeAcao()` aplica nos dois conjuntos de botões. Duas funções paralelas seriam duas chances de divergir na próxima mudança — é assim que esta divergência nasceu.
     **Meça os DOIS canais**: `disabled` sem esmaecer é o "botão morto com cara de vivo" que o M3/HIG chamam de app quebrada; esmaecer sem `disabled` engana o Tab e o leitor de tela. O guard novo confere atributo, `opacity` e `filter`, e foi verificado desfazendo cada metade em separado — sem a trava acusa os dois; com a trava mas sem o CSS acusa só o visual.
     **E a reaplicação tem 6 pontos** (criar e limpar, para as duas pendências). Esquecer um é silencioso, exatamente como o `updatePendingCount` da fila — por isso a chamada vai colada a cada atribuição.
+
+---
+
+## 64. **Dois objetos com o MESMO nome, e o `const` global ganhando de `window`** (v2026.08.22-06). O owner mandou print: testando de si para si mesmo, tocar no ✕ da conversa mostrava **"Erro inesperado: `Presenca.fecharConversa is not a function`"** e a janela não fechava.
+
+`js/presenca.js` tinha dois objetos chamados igual:
+
+```js
+const Presenca  = { peer, ws, conversas, ... }          // estado  → binding LÉXICO global
+window.Presenca = { sincronizar, fecharConversa, ... }  // métodos → propriedade de window
+```
+
+Em script clássico, **binding léxico global ganha de propriedade de `window`**. Então `Presenca.fecharConversa()` escrito no `app.js` resolvia pro objeto de ESTADO, que não tem método nenhum.
+
+Só o ✕ quebrava porque os outros seis pontos do `app.js` escrevem `window.Presenca?.…` explícito — o único que não escrevia era esse. Uma linha diferente das outras seis.
+
+**O conserto** é um objeto só: `Object.assign(Presenca, {métodos})` e `window.Presenca = Presenca`. Aí tanto faz como se escreve, e a classe some em vez de ficar dependendo de todo mundo lembrar do prefixo.
+
+**E eu tinha escrito a causa AO CONTRÁRIO** num comentário anterior: dizia que o `Presenca` visível no app.js era "o objeto exportado". É o oposto. A correção da época funcionou por acidente de forma, com a explicação invertida — comentário errado ensina errado pro próximo.
+
+**Por que o smoke não pegou:** ele fechava a conversa só com Esc, e o Esc passa pelo `LIMPEZA_AO_FECHAR`, que usa `window.Presenca?.…` — ou seja, exercitava justamente o caminho que funcionava. Teste que cobre um de dois caminhos dá verde sobre metade do recurso.
+
+---
+
+## 65. **Fechar um modal e abrir outro no mesmo quadro expulsa o editor da app** (v2026.08.22-06). Encontrado medindo outra coisa, e mais grave que o bug que eu investigava.
+
+Caminho real: **Ajuda → "Conectar outro aparelho" → fechar** levava o navegador PRA FORA da página. O editor voltava pro site anterior e perdia a fila carregada.
+
+O mecanismo, e ele é traiçoeiro porque o contador não denuncia:
+
+```
+closeModal('helpModal')      → profundidade 1→0, AGENDA history.back()
+openModal('pairShowModal')   → não havia modal aberto naquele instante (o
+                               closeModal já escondeu), então EMPILHA: prof 0→1
+o back pendente chega        → come a entrada recém-empilhada, consumido em
+                               silêncio (consumindo = true), prof segue 1
+```
+
+Sobra `profundidade: 1` sem entrada real por trás. O próximo fechamento manda o `back()` pra fora da app. Medi `history.length` e `profundidade` a cada passo: **os dois parecem normais o tempo todo**. Só a navegação mostra.
+
+`CamadaVoltar.consumir()` já se protege com `if (this.profundidade <= 0) return` — o que falha não é a guarda, é o contador ficar dessincronizado do histórico REAL, porque `history.back()` é assíncrono e o `pushState` seguinte chega antes do `popstate`.
+
+**Conserto:** `openModal` sozinho. Ele já esconde os outros modais, e trocar de modal é a MESMA camada — por isso ele só empilha quando não havia modal aberto.
+
+**A segunda armadilha do mesmo tema**, que eu introduzi DEPOIS, removendo a seção "Bloqueados": comi um `</div>` junto e a folha da conversa virou **filha** da folha da lista. Modal aninhado some junto com o pai — o ✕ estava no DOM e não era clicável, sem nada no console e nada no CSS. `test/layout.test.mjs` agora percorre a árvore de cada modal do `MODAL_IDS` e reprova se um contiver o outro ou se as `<div>` não fecharem.
+
+**Como isso apareceu:** meus próprios scripts de teste caíram no (a) **três vezes** — no logout, na troca de folhas e na abertura da conversa. Nas duas primeiras eu tratei como falha de instrumento e segui em frente. Na terceira fui atrás da causa e ela estava no código do produto. **Falha de instrumento que se repete merece ser investigada, não contornada.**
+
+---
+
+## 66. **Contador que não zera e ação que esconde o próprio caminho de volta** (v2026.08.22-07/08). Dois relatos do owner na mesma tela.
+
+**O contador.** A pílula dizia **4** e a lista mostrava **2**. A soma de não lidas varria TODAS as conversas, inclusive as de peers que já não estão na sala — e essas não aparecem na folha, então não há como abri-las e o número **nunca zerava**. Não é caso raro: o `peer` é sorteado a cada carga da página, então quem recarrega volta como outro peer e deixa a conversa anterior órfã, com as não lidas presas dentro dela.
+
+Regra: **contador conta o que é ALCANÇÁVEL**. Número que a pessoa não consegue agir sobre não é informação, é ruído permanente.
+
+**O beco sem saída.** Bloquear a única pessoa da fila esvaziava a lista → a pílula sumia (o que é certo: "0 editores" não é notícia) → e a pílula era o ÚNICO caminho até a folha onde morava o desbloquear. Sem volta. O owner ficou exatamente assim e perguntou como desfazer.
+
+Regra: **ação que se auto-esconde precisa de outro caminho de volta** — ou não deve existir.
+
+**O terceiro, que foi o que fez ele desistir de procurar:** a folha dizia *"Ninguém mais por aqui"* com os bloqueados listados logo abaixo. A frase contradiz a própria tela, e o olho para nela em vez de seguir até a seção que resolve.
+
+**O desfecho** foi remover o bloqueio inteiro, por decisão do owner: a app só admite editor L3+ Area Manager, e abuso se resolve no Waze. O saldo é o argumento — o recurso custou três defeitos em dois dias, num público que não precisava dele. Quando um recurso só gera defeito, considere que o conserto certo pode ser a remoção.
+
