@@ -1865,7 +1865,16 @@ function podeRenomearAqui() {
     const p = Lightbox.place;
     // v1 só CORRIGE nome existente. Batizar local sem nome é outra decisão (e
     // outra conversa) — sem isto, um toque acidental nomearia um lugar anônimo.
-    return !!(p && p.venueID && String(p.name || '').trim());
+    if (!(p && p.venueID && String(p.name || '').trim())) return false;
+    // O Waze RECUSA escrever atributo em local que ainda não existe no mapa —
+    // MEDIDO com controle: mesmo payload, mesma sessão, `approved:false` → 406,
+    // `approved:true` → 200. Oferecer aqui é beco sem saída: o editor abre a
+    // foto, digita o nome certo, confirma e leva "Erro do Waze (HTTP 406)" —
+    // que ainda por cima cai em `errorCategory: unknown`, o balde que reverte o
+    // placar e mostra erro genérico.
+    // Não é caso de canto: 711 de 2420 cards com nome (29%) estão em local não
+    // aprovado nos 6 países obrigatórios, e 40% da fila do owner no Brasil.
+    return p.localAprovado !== false;
 }
 
 function mostrarNomeNoLightbox() {

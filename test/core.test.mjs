@@ -1467,3 +1467,28 @@ test('renomear-local: 403 do Waze vira unauthorized, não erro genérico', async
   assert.equal(r.body.success, false);
   assert.equal(r.body.errorCategory, 'unauthorized');
 });
+
+// O local JÁ EXISTE no mapa, ou ele próprio ainda é um pedido pendente?
+//
+// É o único sinal que prevê se o Waze aceita escrita de atributo — MEDIDO com
+// controle contra o WME real: renomear com o MESMO payload, na MESMA sessão,
+// devolve 406 em local `approved:false` e 200 em `approved:true`. Sem o campo,
+// o portão do renomear teria que adivinhar pelo tipo do card, e `NEW_PLACE`
+// erra por pouco mas erra (9 de 711 locais não aprovados aparecem com card de
+// outro tipo, medido em 2420 cards com nome dos 6 países obrigatórios).
+test('buildPlacesFromSearch: o place diz se o LOCAL já foi aprovado', () => {
+  const monta = (approved) => {
+    const venue = { id: 'v1', name: 'Local', permissions: -1, categories: [], images: [],
+      venueUpdateRequests: [{ id: 'u1', type: 'VENUE', isRead: false }] };
+    if (approved !== undefined) venue.approved = approved;
+    return buildPlacesFromSearch({ users: { objects: [] }, streets: { objects: [] },
+      cities: { objects: [] }, venues: { objects: [venue] } }, { unreadOnly: true }).places[0];
+  };
+  assert.equal(monta(false).localAprovado, false, 'local pendente passou por aprovado — o renomear vira 406');
+  assert.equal(monta(true).localAprovado, true, 'local aprovado passou por pendente — o renomear some sem motivo');
+  // Ausente cai no lado PERMISSIVO: se o Waze parar de mandar o campo, o
+  // comportamento volta a ser o de hoje em vez de esconder o renomear de todo
+  // mundo em silêncio. Errar pro lado que o editor VÊ é recuperável; errar pro
+  // lado que some não avisa ninguém.
+  assert.equal(monta(undefined).localAprovado, true, 'campo ausente passou a esconder o renomear, e isso falha calado');
+});

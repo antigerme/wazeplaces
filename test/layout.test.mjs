@@ -1823,6 +1823,33 @@ test('card: UMA gramática de rótulo, e a caixa do reporte só existe com texto
     'voltou o malabarismo de flex que existia só porque a caixa aparecia vazia');
 });
 
+// O renomear não pode ser oferecido onde o Waze recusa.
+//
+// O portão exigia L6+AM e nome, e NÃO olhava se o local existe no mapa. Medido
+// contra o WME real com controle (mesmo payload, mesma sessão): local
+// `approved:false` → HTTP 406, `approved:true` → 200. E não é caso de canto —
+// 711 de 2420 cards com nome nos 6 países obrigatórios (29%), 40% da fila do
+// owner no Brasil. O editor abria a foto, digitava o nome certo, confirmava e
+// levava "Erro do Waze (HTTP 406)" em `errorCategory: unknown`: o balde que
+// reverte o placar e mostra erro genérico. É o beco sem saída que a regra de
+// interface do projeto proíbe antes de qualquer outra coisa.
+test('renomear: o portão exclui local que ainda não existe no mapa', () => {
+  const APP_ = read('js/app.js');
+  const fn = APP_.match(/function podeRenomearAqui\([\s\S]*?\n\}/);
+  assert.ok(fn, 'sumiu o portão do renomear');
+  assert.match(fn[0], /localAprovado/,
+    'o portão voltou a ignorar se o local existe — oferece renomear onde o Waze devolve 406');
+  // `!== false` e não `=== true`: campo ausente cai no lado permissivo, que é o
+  // comportamento de hoje. O contrário esconderia o renomear de todo mundo se o
+  // Waze parasse de mandar o campo — e falharia calado.
+  assert.match(fn[0], /localAprovado !== false/,
+    'o portão passou a exigir o campo presente — sem ele o renomear some em silêncio');
+  // E o campo tem que CHEGAR: portão que lê algo que o core não manda é portão
+  // fechado pra todo mundo.
+  assert.match(read('server/core.mjs'), /localAprovado: venue\.approved !== false/,
+    'o core parou de mandar localAprovado — o portão fecha pra todos');
+});
+
 test('lixeira do lightbox: alvo de toque e estado inicial', () => {
   // 1) Alvo de toque. A régua é 44px (HIG) / 48dp (M3) e vale pra botão NOVO
   //    também — não só pros que já estavam aqui.

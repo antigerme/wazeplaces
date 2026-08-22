@@ -2872,6 +2872,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     venueID: 'v-ren', updateRequestID: 'u-ren', name: 'Odontodente Consultório',
     categories: ['DOCTOR_CLINIC'], address: 'Rua das Flores, 250 - Salvador, Bahia',
     updateTypeKey: 'IMAGE', reqType: 'IMAGE', reqSubType: '', createdBy: 'wazer',
+    // Card de FOTO num local que já existe no mapa — que é o caso real: pedido
+    // de foto em local aprovado. O bloco do portão logo abaixo varia este campo
+    // pros três estados, inclusive o ausente.
+    localAprovado: true,
     imageUrls: [FOTO_FACHADA], approvedImageIds: [], imageDates: {},
     dateAdded: 1786982736809, lat: -12.892, lon: -38.32,
     mapa: { centro: [-12.892, -38.32], proposto: null, movidoM: null, entradas: [] }, changes: [],
@@ -2923,6 +2927,31 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       await assentar(page);
       const visivel = await page.locator('#lightboxNome').isVisible();
       checa(visivel === esperado, `${onde}: portão errado para ${rot}`, `visível=${visivel}`);
+    }
+
+    // ── LOCAL QUE AINDA NÃO EXISTE NO MAPA: o renomear não pode aparecer ────
+    //
+    // O Waze RECUSA escrita de atributo em local não aprovado — medido com
+    // controle contra o WME real: mesmo payload, mesma sessão, `approved:false`
+    // → HTTP 406, `approved:true` → 200. E são 29% dos cards com nome nos 6
+    // países obrigatórios (40% da fila do owner no Brasil), então oferecer ali
+    // é o beco sem saída que a regra de interface proíbe: digitar o nome certo
+    // e levar "Erro do Waze (HTTP 406)" em `errorCategory: unknown`.
+    //
+    // O caso POSITIVO vai junto de propósito: guard que só testa o negativo
+    // passa igual se a pílula sumir de todo mundo.
+    for (const [rot, localAprovado, esperado] of [
+      ['local aprovado', true, true],
+      ['local NÃO aprovado (pedido pendente)', false, false],
+      ['campo AUSENTE (Waze mudou)', undefined, true],   // lado permissivo
+    ]) {
+      const pl = JSON.parse(JSON.stringify(PLACE_REN));
+      if (localAprovado === undefined) delete pl.localAprovado; else pl.localAprovado = localAprovado;
+      await page.evaluate(new Function('a', '(' + montarRen.toString() + ')(a[0],a[1],a[2],a[3])'),
+        [pl, 5, true, false]);
+      await assentar(page);
+      const visivel = await page.locator('#lightboxNome').isVisible();
+      checa(visivel === esperado, `${onde}: ${rot} — pílula ${visivel ? 'apareceu' : 'sumiu'} e deveria ${esperado ? 'aparecer' : 'sumir'}`);
     }
 
     // ── TODO controle do lightbox RECEBE o toque ───────────────────────────

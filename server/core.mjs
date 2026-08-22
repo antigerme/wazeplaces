@@ -1663,6 +1663,25 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         updateType: updateTypeStr,
         updateTypeKey,
         purType,
+        // O LOCAL já existe no mapa, ou ele próprio ainda é um pedido pendente?
+        //
+        // Isto NÃO é o `approved` das fotos (`approvedImageIds`, logo abaixo):
+        // aquele é por imagem, este é do venue. E é o único sinal que prevê se
+        // o Waze aceita uma escrita de atributo aqui — MEDIDO com um controle:
+        // renomear (mesmo payload, mesma sessão, mesmo minuto) devolve 406 num
+        // local `approved:false` e 200 num `approved:true`.
+        //
+        // Sem este campo o portão do renomear teria que adivinhar pelo tipo do
+        // card, e `purType === 'NEW_PLACE'` erra por pouco mas erra: medido em
+        // 2420 cards com nome dos 6 países obrigatórios, 711 estão em local não
+        // aprovado e 9 deles aparecem com card de OUTRO tipo (NEW_PHOTO 5,
+        // DETAILS_UPDATE 3, DELETE_PLACE 1) — local pendente que também juntou
+        // pedido de foto, por exemplo.
+        //
+        // `!== false` e não `=== true` de propósito: campo ausente numa resposta
+        // futura do Waze cai no lado PERMISSIVO, que é o comportamento de hoje.
+        // O contrário esconderia o renomear de todo mundo em silêncio.
+        localAprovado: venue.approved !== false,
         // Evidência espacial pro mini-mapa. Vai em TODO tipo de pedido, não só
         // nos que mexem em geometria: "onde fica isto" é pergunta de todos —
         // um local novo no meio do rio e uma foto de um lugar que não existe se

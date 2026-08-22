@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.22-02
+
+### Corrigido
+- **Renomear não aparece mais em local que ainda não existe no mapa.** O Waze recusa qualquer alteração de atributo em um local que ainda é um pedido pendente — e a aplicação oferecia a opção assim mesmo. O editor abria a foto, digitava o nome certo, confirmava e levava um "Erro do Waze" genérico.
+
+  Não era caso raro: **29% dos cards com nome** estão nessa situação (40% da fila brasileira). Medido contra o Waze real com controle — mesma operação, mesmo instante: em local pendente volta erro 406, em local já existente volta sucesso.
+
+  Agora a plaquinha de renomear simplesmente não aparece nesses cards. Nada mais muda.
+
+  Reportado por [@antigerme](https://www.waze.com/user/editor/antigerme): *"O Waze não permite alterar o nome do local para solicitações do tipo novo local."*
+
+---
+
 ## v2026.08.22-01
 
 ### Corrigido
