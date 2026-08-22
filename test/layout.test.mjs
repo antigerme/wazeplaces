@@ -310,6 +310,33 @@ test('o teclado virtual não pode voltar a engolir os modais', () => {
   }
 });
 
+test('nenhum modal FECHA e outro ABRE no mesmo quadro', () => {
+  // Isso expulsa o editor da app, e o contador não denuncia.
+  //
+  // `closeModal` AGENDA um `history.back()`; o `openModal` seguinte empilha uma
+  // entrada nova; o back pendente come justamente essa. Sobra `profundidade: 1`
+  // sem entrada real por trás — e o PRÓXIMO fechamento manda o back pra fora da
+  // página. MEDIDO no caminho real: Ajuda → "Conectar outro aparelho" → fechar
+  // tirava a pessoa da app, com `history.length` e `profundidade` parecendo
+  // normais o tempo todo.
+  //
+  // Não é preciso fechar antes: `openModal` já esconde os outros modais, e
+  // trocar de modal é a MESMA camada — por isso ele só empilha quando não havia
+  // modal aberto.
+  for (const arq of ['js/app.js', 'js/presenca.js']) {
+    const linhas = read(arq).split('\n');
+    for (let i = 0; i < linhas.length; i++) {
+      if (!/closeModal\(/.test(linhas[i]) || /function closeModal/.test(linhas[i])) continue;
+      // Só o que está GRUDADO conta: as próximas duas linhas de código.
+      const perto = linhas.slice(i + 1, i + 3).filter((l) => l.trim() && !l.trim().startsWith('//'));
+      const abre = perto.find((l) => /openModal\(/.test(l));
+      assert.ok(!abre,
+        `${arq}:${i + 1} fecha um modal e abre outro logo em seguida — isso dessincroniza o voltar e joga o editor pra fora:\n`
+        + `  ${linhas[i].trim()}\n  ${abre && abre.trim()}`);
+    }
+  }
+});
+
 test('não oferecemos ação impossível no aparelho', () => {
   const JS = read('js/app.js');
   // Extensão da Chrome Web Store não instala em navegador de celular.

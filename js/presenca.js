@@ -645,7 +645,20 @@ function presencaMontar() {
     window.addEventListener('pagehide', () => presencaDesligar());
 }
 
-window.Presenca = {
+// Os métodos vão NO PRÓPRIO objeto de estado, e `window.Presenca` aponta pra
+// ele. Não é estilo: é o conserto de um bug que chegou na tela do owner.
+//
+// `const Presenca` aqui em cima é um binding LÉXICO global — e binding léxico
+// GANHA de propriedade de `window` em qualquer script clássico. Então um
+// `Presenca.fecharConversa()` escrito no app.js não achava o objeto exportado:
+// achava o de ESTADO, que não tem métodos. Resultado: "Presenca.fecharConversa
+// is not a function" ao tocar no ✕ da conversa.
+//
+// O erro só aparecia no ✕ porque todos os outros pontos do app.js escrevem
+// `window.Presenca?.…` explícito. Um objeto só acaba com a classe inteira:
+// `Presenca` e `window.Presenca` passam a ser a MESMA coisa, e tanto faz como
+// se escreve.
+Object.assign(Presenca, {
     sincronizar: presencaSincronizar,
     desligar: presencaDesligar,
     esquecer: presencaEsquecer,
@@ -653,4 +666,5 @@ window.Presenca = {
     fecharConversa: presencaFecharConversa,
     esquecerAberta: presencaEsquecerAberta,
     renderPilula: presencaRenderPilula,
-};
+});
+window.Presenca = Presenca;
