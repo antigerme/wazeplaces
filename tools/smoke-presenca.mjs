@@ -94,7 +94,11 @@ async function editor(nome, peer, rank, am, lang) {
   page.on('pageerror', (e) => anota(`[${nome}] erro de página: ${e.message}`));
   await page.addInitScript((l) => { try { localStorage.setItem('waze_places_lang', l); } catch (e) {} }, lang || 'pt');
   await page.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => window.Presenca && window.AppState, null, { timeout: 15000 });
+  // Mesmo motivo do `esperar` abaixo: nada de `waitForFunction` neste arquivo.
+  for (let i = 0; i < 150; i++) {
+    if (await page.evaluate(() => !!(window.Presenca && window.AppState)).catch(() => false)) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
   const cracha = await crachas.assinar({ peer, nome, rank, am, sala: 'row:30' });
   await page.evaluate(({ cracha, peer }) => {
     AppState.authenticated = true;
@@ -109,24 +113,49 @@ async function editor(nome, peer, rank, am, lang) {
   return { nome, page, ctx };
 }
 
-// `polling: 'interval'` e não o padrão `'raf'`: só UMA aba fica em primeiro
-// plano, e o Chromium ESTRANGULA o requestAnimationFrame das outras. Com duas
-// páginas abertas — que é o cenário inteiro deste teste — a espera da página de
-// trás pode estourar o prazo sem a condição nunca ter sido consultada. Passou
-// aqui e reprovou no CI com o mesmo código.
-const esperar = (e, fn, oq) => e.page.waitForFunction(fn, null, { timeout: 15000, polling: 200 })
-  .then(() => true)
-  .catch(async () => {
-    // Espera que estoura sem dizer o que ESTAVA no lugar é a pior falha de CI:
-    // dá pra reproduzir por horas sem saber o que olhar. O estado vai junto.
-    const estado = await e.page.evaluate(() => ({
-      peers: Presenca.peers.map((p) => p.nome),
-      conversas: [...Presenca.conversas].map(([k, c]) => `${k}:${c.estado}/${c.canal && c.canal.readyState}`),
-      socket: Presenca.ws && Presenca.ws.readyState,
-    })).catch((err) => `(não deu pra ler: ${String(err.message).split('\n')[0]})`);
-    anota(`${oq} — estado: ${JSON.stringify(estado)}`);
-    return false;
-  });
+// A espera é um laço de `page.evaluate` daqui, e NÃO `page.waitForFunction`.
+//
+// Não é preferência: o `waitForFunction` reprovou no CI com a condição JÁ
+// VERDADEIRA, e reprovou na hora — não por prazo. A prova veio do próprio
+// diagnóstico impresso ao lado do ✗:
+//
+//   ✗ ana não viu bia — estado: {"peers":["bia"], ...}
+//   ✗ o DataChannel da ana não abriu — estado: {"conversas":["pb:aberta/open"]}
+//
+// Ou seja: no instante da "falha", `peers` tinha bia e o canal estava aberto —
+// e o `page.evaluate` que imprimiu isso rodou normalmente, na mesma página, em
+// milissegundos. Trocar o `polling` de 'raf' pra intervalo não mudou nada, e o
+// mesmo código passa 20 vezes seguidas aqui. Não consegui reproduzir a causa
+// no runner, então o conserto é tirar a incógnita do caminho: `page.evaluate`
+// é o primitivo que comprovadamente funciona nos DOIS ambientes.
+//
+// A hipótese que sobrou, e que o conserto torna irrelevante: `Presenca` é um
+// `const` de escopo de script, não uma propriedade de `window`. O
+// `page.evaluate` do diagnóstico enxergou; o `waitForFunction` não — o que casa
+// com o predicado ter sido avaliado num escopo que não vê binding léxico
+// global, e com a rejeição ser INSTANTÂNEA (exceção) em vez de por prazo.
+// Descartado como causa: o binário do browser. Rodei a versão anterior com o
+// MESMO `chromium_headless_shell` build 1148 que o CI baixa, e ela passou aqui.
+const esperar = async (e, fn, oq, ms = 15000) => {
+  const ate = Date.now() + ms;
+  for (;;) {
+    let valor = false;
+    try { valor = await e.page.evaluate(fn); } catch (err) { valor = false; }
+    if (valor) return true;
+    if (Date.now() >= ate) {
+      // Espera que estoura sem dizer o que ESTAVA no lugar é a pior falha de
+      // CI: dá pra reproduzir por horas sem saber o que olhar.
+      const estado = await e.page.evaluate(() => ({
+        peers: Presenca.peers.map((p) => p.nome),
+        conversas: [...Presenca.conversas].map(([k, c]) => `${k}:${c.estado}/${c.canal && c.canal.readyState}`),
+        socket: Presenca.ws && Presenca.ws.readyState,
+      })).catch((err) => `(não deu pra ler: ${String(err.message).split('\n')[0]})`);
+      anota(`${oq} — estado: ${JSON.stringify(estado)}`);
+      return false;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+};
 
 try {
   const ana = await editor('ana_am', 'pa', 5, true);
