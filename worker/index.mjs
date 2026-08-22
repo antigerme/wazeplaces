@@ -19,10 +19,16 @@ import { limpar } from '../server/presenca.mjs';
 
 export { SalaDO } from './sala-do.mjs';
 
+// `no-store` em TODA resposta de /api. Hoje nada é cacheado ali — é POST, e
+// POST não entra em cache por padrão —, mas "por padrão" é a palavra que
+// preocupa: o painel do Cloudflare tem um interruptor de cache padrão pras
+// respostas de fetch handler, e o modo de falha aqui não é lentidão, é a
+// resposta de um editor sendo servida pra outro. Depender de um default
+// implícito pra impedir isso é caro demais pra economizar um header.
 const json = (body, status) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
   });
 
 export default {

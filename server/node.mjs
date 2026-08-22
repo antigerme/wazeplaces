@@ -290,7 +290,7 @@ function readBody(req, res) {
         tooLarge = true;
         // Responde 413 limpo antes de cortar a conexão (em vez de só req.destroy()).
         if (!res.headersSent) {
-          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
           res.end(JSON.stringify({ success: false, error: 'Corpo da requisição muito grande' }));
         }
         req.destroy();
@@ -307,7 +307,7 @@ const server = createServer(async (req, res) => {
   try {
     if (url.startsWith('/api/')) {
       if (req.method !== 'POST') {
-        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         res.end(JSON.stringify({ success: false, error: 'Método não permitido' }));
         return;
       }
@@ -321,7 +321,7 @@ const server = createServer(async (req, res) => {
         data = {};
       }
       const { status, body } = await dispatch(route, data, { sessions, crachas, turn });
-      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(body));
       return;
     }
@@ -341,7 +341,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (url.startsWith('/api/')) {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ success: false, error: 'Erro interno' }));
     } else {
       res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
