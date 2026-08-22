@@ -211,6 +211,8 @@ Variáveis de ambiente (todas opcionais):
 | `ENCRYPTION_KEY` | auto-gera | Chave AES base64 (32 bytes). Sem ela, gera uma em `SESSION_KEY_FILE` |
 | `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
 | `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
+| `TURN_URLS` | *(vazio)* | Servidores TURN da presença, separados por vírgula. Vazio = só STUN |
+| `TURN_SECRET` | *(vazio)* | O `static-auth-secret` do coturn. Sem ele o TURN não é oferecido |
 
 Para simular o ambiente Cloudflare localmente (Worker + KV): `npx wrangler dev` (precisa do `wrangler`).
 
@@ -229,6 +231,19 @@ npx wrangler kv namespace create SESSIONS
 # 2. Chave de criptografia como Secret
 openssl rand -base64 32 | npx wrangler secret put ENCRYPTION_KEY
 ```
+
+**Durable Object da presença: nada a criar à mão.** O binding `SALA` e a migração já estão no `wrangler.jsonc`, e o `wrangler deploy` aplica os dois sozinho — não há botão no dashboard pra clicar.
+
+O que importa saber: a migração é `new_sqlite_classes` (e **não** `new_classes`), porque é o backend SQLite que libera Durable Objects no **plano gratuito**. Se um dia isso mudar, o sintoma é explícito: o `wrangler deploy` falha citando o plano, em vez de subir quebrado. A sala não grava nada — o SQLite está ali só como forma de migração aceita no free tier.
+
+**TURN (opcional).** Sem ele a conversa entre editores usa só STUN, que resolve a maioria das redes; ele entra pra quem está atrás de NAT simétrico. Se você subir um [coturn](https://github.com/coturn/coturn), passe o mesmo `static-auth-secret` dele:
+
+```bash
+npx wrangler secret put TURN_SECRET     # = static-auth-secret do coturn
+npx wrangler secret put TURN_URLS       # ex: turn:turn.seudominio.com:3478,turns:turn.seudominio.com:5349
+```
+
+**WebSocket atravessa o Cloudflare sem configuração** — vale em todos os planos, inclusive no gratuito.
 
 **Deploy manual (CLI):**
 
@@ -292,6 +307,15 @@ sudo systemctl enable --now wazeplaces
     ServerName places.seudominio.com
 
     ProxyPreserveHost On
+
+    # A sala de presença é WebSocket, e ela precisa vir ANTES da regra genérica
+    # — a primeira ProxyPass que casa é a que vale. Sem estas duas linhas o
+    # estático responde 200 normalmente e SÓ a presença quebra, o que faz o
+    # problema parecer da aplicação. Medido: com o vhost sem elas o handshake
+    # falha; com elas, o editor entra na sala.
+    ProxyPass        /sala ws://127.0.0.1:8080/sala
+    ProxyPassReverse /sala ws://127.0.0.1:8080/sala
+
     ProxyPass        / http://127.0.0.1:8080/
     ProxyPassReverse / http://127.0.0.1:8080/
 
@@ -302,6 +326,10 @@ sudo systemctl enable --now wazeplaces
 ```bash
 # módulos de proxy (no RHEL geralmente já vêm; garanta que estão carregados)
 sudo dnf install -y httpd mod_ssl
+# mod_proxy_wstunnel é o que faz o `ws://` acima funcionar. Sem ele o Apache
+# sobe normalmente e devolve 500/400 só no /sala.
+sudo bash -c 'grep -q proxy_wstunnel /etc/httpd/conf.modules.d/00-proxy.conf || \
+  echo "LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so" >> /etc/httpd/conf.modules.d/00-proxy.conf'
 # SELinux: libera o Apache a conectar no Node local (senão o proxy dá 503)
 sudo setsebool -P httpd_can_network_connect 1
 sudo systemctl enable --now httpd
@@ -319,6 +347,29 @@ O `certbot --apache` cria o `<VirtualHost *:443>` com TLS e o redirect 80→443
 sozinho. Depois disso, ajuste o `RequestHeader set X-Forwarded-Proto "https"` no
 vhost 443 (o certbot costuma duplicar o bloco).
 
+**4. TURN próprio (opcional, e só pra presença).** A conversa entre editores é ponta a ponta; o STUN público já resolve a maioria das redes, e o TURN entra só pra quem está atrás de NAT simétrico. Se quiser cobrir esse caso sem depender de terceiro, o coturn roda na mesma VM:
+
+```bash
+sudo dnf install -y coturn
+sudo tee -a /etc/coturn/turnserver.conf >/dev/null <<'EOF'
+use-auth-secret
+static-auth-secret=<gere com: openssl rand -hex 32>
+realm=places.seudominio.com
+listening-port=3478
+tls-listening-port=5349
+EOF
+sudo systemctl enable --now coturn
+```
+
+Depois some ao serviço do Node as duas variáveis, com o **mesmo** segredo:
+
+```ini
+Environment=TURN_SECRET=<o mesmo static-auth-secret>
+Environment=TURN_URLS=turn:places.seudominio.com:3478,turns:places.seudominio.com:5349
+```
+
+A aplicação emite credenciais efêmeras (usuário = expiração unix, senha = `HMAC-SHA1` do segredo) no padrão `use-auth-secret` do coturn — não há lista de usuários pra manter.
+
 > **Por que Apache só como proxy e não roda a app direto?** Na v2.x o Apache
 > servia PHP via mod_php. Na v3.0 o backend é Node — Apache não executa JS, então
 > o papel dele é encaminhar pro `server/node.mjs`. Um processo Node só, sem
@@ -329,6 +380,20 @@ vhost 443 (o certbot costuma duplicar o bloco).
 <summary>Alternativa: nginx no lugar do Apache</summary>
 
 ```nginx
+# No bloco http (fora do server): traduz o Upgrade do cliente pro Connection
+map $http_upgrade $conexao_upgrade { default upgrade; '' close; }
+
+# A sala de presença. Vem antes do `location /` de propósito, e precisa do
+# HTTP/1.1 — o padrão do proxy_pass é 1.0, que não tem Upgrade.
+location /sala {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $conexao_upgrade;
+    proxy_set_header Host $host;
+    proxy_read_timeout 3600s;   # sem isto o socket cai a cada 60s ocioso
+}
+
 location / {
     proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;
