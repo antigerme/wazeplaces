@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.22-01
+
+### Corrigido
+- **O selo "SEM NOME" parou de aparecer em local residencial.** Casa não tem nome — e a aplicação marcava isso como se fosse falta. Medido nos 13 países de validação, em 4.692 pedidos: **100% dos residenciais vêm sem nome** (325 de 325). Um aviso que aparece em toda a categoria não avisa nada ali; só repete o que a linha de categoria já diz, e em destaque no topo do card ele lê como alerta — convidando a rejeitar um pedido que está normal. São 15% da fila.
+
+  Onde a falta de nome é exceção, o selo continua: estacionamento (8%), praça (8%), eletroposto (4%) — e em posto, restaurante e supermercado, onde nenhum dos 700 pedidos vem sem nome, um sem-nome segue sendo estranho de verdade.
+
+  O endereço continua virando o título nesses casos, como antes. O que mudou é só quem recebe o alerta.
+
+  Apontado por [@antigerme](https://www.waze.com/user/editor/antigerme): *"para a categoria Residencial isso não é candidato forte a rejeitar, é normal pois realmente não tem nome"*.
+
+---
+
 ## v2026.08.20-03
 
 ### Corrigido
