@@ -473,11 +473,26 @@ function presencaRenderPilula() {
     const ligado = presencaLigada() && AppState.authenticated;
     // Sem ninguém, a pílula SOME. Ela não é um botão de recurso: é a notícia de
     // que tem gente, e "0 editores" não é notícia — é ruído ocupando o header.
-    btn.classList.toggle('hidden', !ligado || n === 0);
-    if (!ligado || n === 0) return;
+    //
+    // MAS ela FICA enquanto houver alguém bloqueado, mesmo com a lista vazia:
+    // o desbloquear mora dentro da folha, e a pílula é o único caminho até lá.
+    // Sumindo, quem bloqueasse a única pessoa da fila ficaria preso com o
+    // bloqueio pra sempre — beco sem saída, medido no aparelho do owner.
+    const temBloqueado = Presenca.bloqueados.size > 0;
+    btn.classList.toggle('hidden', !ligado || (n === 0 && !temBloqueado));
+    if (!ligado || (n === 0 && !temBloqueado)) return;
 
+    // Conta só as não lidas de quem está NA LISTA agora. Conversa cujo peer já
+    // saiu não é abrível — a folha não a mostra —, então contá-la põe na pílula
+    // um número que a pessoa não consegue zerar de jeito nenhum. E isso não é
+    // caso raro: o `peer` é sorteado a cada carga da página, então quem
+    // recarrega volta como outro peer e deixa a conversa anterior órfã, com as
+    // não lidas presas. MEDIDO no aparelho do owner: pílula 4, lista 2.
+    const vivos = new Set(presencaVisiveis().map((p) => p.peer));
     let naoLidas = 0;
-    for (const c of Presenca.conversas.values()) if (!Presenca.bloqueados.has(c.nome)) naoLidas += c.naoLidas;
+    for (const [peer, c] of Presenca.conversas) {
+        if (vivos.has(peer) && !Presenca.bloqueados.has(c.nome)) naoLidas += c.naoLidas;
+    }
 
     // Mensagem nova troca o ÍCONE (gente → balão), não só a cor: cor sozinha
     // não transmite informação (WCAG 1.4.1).
@@ -487,12 +502,20 @@ function presencaRenderPilula() {
     const selo = document.getElementById('presencaCount');
     const total = Math.max(n, Presenca.total - Presenca.bloqueados.size);
     const valor = naoLidas > 0 ? naoLidas : total;
+    // Zero não é notícia: com a pílula ali só por causa de um bloqueio, o selo
+    // sai de cena e sobra o ícone. "0" num selo lê como contador quebrado.
+    selo.classList.toggle('hidden', valor === 0);
     selo.textContent = valor > 99 ? '99+' : String(valor);
     selo.classList.toggle('tem-msg', naoLidas > 0);
 
+    // Com a pílula ali só por causa de um bloqueio, "0 editores na sua fila" é
+    // o que o leitor de tela anunciaria — número certo, frase inútil. O rótulo
+    // diz o que o toque FAZ, que é o que importa pra quem não vê o ícone.
     const rotulo = naoLidas > 0
         ? t(naoLidas === 1 ? 'presenca.pill.msg' : 'presenca.pill.msgPlural', { n: naoLidas })
-        : t(total === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n: total });
+        : total === 0
+            ? t('presenca.pill.soBloqueados')
+            : t(total === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n: total });
     btn.setAttribute('aria-label', rotulo);
     btn.setAttribute('title', rotulo);
 }
@@ -501,7 +524,12 @@ function presencaRenderLista() {
     const lista = document.getElementById('presencaLista');
     if (!lista) return;
     const gente = presencaVisiveis();
-    document.getElementById('presencaVazio').classList.toggle('hidden', gente.length > 0);
+    // "Ninguém mais por aqui" só quando NÃO HÁ MESMO nada — com bloqueados
+    // logo abaixo, a frase contradiz a própria tela, e o olho para nela em vez
+    // de continuar até a seção que resolve. Foi o que aconteceu: a pessoa leu
+    // "ninguém aqui" e concluiu que não havia o que fazer.
+    document.getElementById('presencaVazio')
+        .classList.toggle('hidden', gente.length > 0 || Presenca.bloqueados.size > 0);
 
     lista.innerHTML = gente.map((p) => {
         const c = Presenca.conversas.get(p.peer);

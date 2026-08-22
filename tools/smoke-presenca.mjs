@@ -250,6 +250,63 @@ try {
   // que já tinha sido decidido, e os dois casos deixavam de ser distinguíveis.
   if (depois.estado === 'saiu') ok('a conversa diz que a pessoa saiu');
   else anota(`a conversa não avisou a saída (estado: ${depois.estado})`);
+
+  // 6) BLOQUEAR não pode virar beco sem saída, e a pílula não pode contar o que
+  //    a pessoa não consegue abrir. Os dois chegaram na tela do owner: pílula
+  //    dizendo 4 com 2 na lista, e o desbloquear inalcançável depois de
+  //    bloquear a única pessoa da fila — a pílula sumia, e ela é o caminho.
+  //
+  //    Vai por ÚLTIMO de propósito: bloquear apaga a conversa da pessoa, e no
+  //    meio do roteiro isso destruiria o estado que os passos acima conferem.
+  await ana.page.evaluate(() => {
+    Presenca.peers = [{ peer: 'p-vivo', nome: 'carla_am', rank: 5, am: true, staff: false }];
+    Presenca.total = 1;
+    const conv = (nome, n) => ({ pc: null, canal: null, msgs: [], naoLidas: n, nome, estado: 'parado', pendentes: [], iceEspera: [], fila: null });
+    Presenca.conversas.set('p-vivo', conv('carla_am', 2));
+    // Conversa ÓRFÃ: peer que já saiu. Acontece sozinho — o `peer` é sorteado a
+    // cada carga, então quem recarrega deixa a anterior pra trás com as não
+    // lidas presas.
+    Presenca.conversas.set('p-fantasma', conv('carla_am', 3));
+    window.presencaRenderPilula();
+  });
+  const contagem = await ana.page.evaluate(() => {
+    openModal('presencaModal'); window.presencaRenderLista();
+    return {
+      pilula: document.getElementById('presencaCount').textContent,
+      naLista: [...document.querySelectorAll('.presenca-badge')].reduce((a, e) => a + Number(e.textContent), 0),
+    };
+  });
+  if (Number(contagem.pilula) === contagem.naLista && contagem.naLista === 2) ok(`a pílula conta só o que dá pra abrir (${contagem.pilula}, não 5)`);
+  else anota(`pílula ${contagem.pilula} × ${contagem.naLista} na lista — conversa órfã inflando o selo`);
+
+  await ana.page.evaluate(() => { window.presencaBloquear('carla_am'); closeModal('presencaModal'); window.presencaRenderPilula(); });
+  await ana.page.waitForTimeout(200);
+  const preso = await ana.page.evaluate(() => ({
+    pilula: document.getElementById('presencaPill').classList.contains('hidden'),
+    bloqueados: [...Presenca.bloqueados],
+    selo: document.getElementById('presencaCount').classList.contains('hidden'),
+  }));
+  if (!preso.pilula && preso.bloqueados.length) ok('com todo mundo bloqueado a pílula FICA — o desbloquear continua alcançável');
+  else anota(`beco sem saída: pílula escondida=${preso.pilula} com ${JSON.stringify(preso.bloqueados)} bloqueado(s)`);
+  if (preso.selo) ok('e o selo some em vez de mostrar "0"');
+  else anota('o selo ficou mostrando zero');
+
+  const folha = await ana.page.evaluate(() => {
+    openModal('presencaModal'); window.presencaRenderLista();
+    return {
+      vazio: !document.getElementById('presencaVazio').classList.contains('hidden'),
+      desbloquear: !!document.querySelector('[data-desbloquear]'),
+    };
+  });
+  if (!folha.vazio && folha.desbloquear) ok('a folha mostra o desbloquear, sem dizer "ninguém aqui" por cima');
+  else anota(`folha contraditória: vazio=${folha.vazio} desbloquear=${folha.desbloquear}`);
+
+  const voltou = await ana.page.evaluate(() => {
+    document.querySelector('[data-desbloquear]').click();
+    return { bloqueados: [...Presenca.bloqueados], linhas: document.querySelectorAll('.presenca-linha').length };
+  });
+  if (!voltou.bloqueados.length && voltou.linhas === 1) ok('o botão de desbloquear devolve a pessoa pra lista');
+  else anota(`desbloquear não funcionou: ${JSON.stringify(voltou)}`);
 } finally {
   await browser.close();
   srv.kill('SIGKILL');

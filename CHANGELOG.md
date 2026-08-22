@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.22-07
+
+### Corrigido
+- **Bloquear alguém podia deixar você preso com o bloqueio.** Se a pessoa bloqueada era a única na sua fila, a pílula 👥 sumia do topo — e ela é o único caminho até a lista onde fica o "Desbloquear". Não havia como desfazer. Agora a pílula fica enquanto houver alguém bloqueado.
+- **O contador de mensagens novas mostrava mais do que dava para abrir.** A pílula dizia "4" e a lista mostrava 2, porque conversas de quem já saiu da fila continuavam somando — e essas não aparecem na lista, então o número nunca zerava. Reportado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+- **A lista dizia "Ninguém mais por aqui" com pessoas bloqueadas logo abaixo.** A frase contradizia a própria tela e fazia o olho parar antes da seção que resolvia.
+
+---
+
 ## v2026.08.22-06
 
 ### Corrigido
