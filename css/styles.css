@@ -2101,20 +2101,6 @@ button:active {
   text-align: center;
 }
 
-.presenca-bloquear {
-  flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  color: rgb(148 163 184);
-}
-.presenca-bloquear svg { width: 1.125rem; height: 1.125rem; }
-.presenca-bloquear:hover { color: rgb(225 29 72); background: rgb(255 241 242); }
-.dark .presenca-bloquear:hover { color: rgb(253 164 175); background: rgb(244 63 94 / 0.12); }
-
 .presenca-desbloquear {
   flex-shrink: 0;
   min-height: 44px;

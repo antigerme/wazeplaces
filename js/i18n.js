@@ -471,7 +471,7 @@ const I18N_DICT = {
     'help.presenca.oQue': 'A pílula 👥 no topo mostra quantos editores estão triando a MESMA fila que você. Toque nela pra ver quem é e puxar conversa.',
     'help.presenca.p2p': 'A mensagem vai cifrada direto de um aparelho pro outro, sem passar pelo nosso servidor e sem ficar guardada em lugar nenhum — fechou a conversa, acabou.',
     'help.presenca.privacidade': 'Enquanto você está conectado, o servidor sabe seu nome do WME, seu nível, se você é AM e a fila escolhida. Nada disso vai pra disco, e some assim que você sai.',
-    'help.presenca.bloquear': 'Dá pra bloquear alguém pelo ✕ ao lado do nome. O bloqueio fica só no seu aparelho.',
+    'help.presenca.bloquear': 'Se precisar, dá pra bloquear alguém de dentro da conversa com essa pessoa. O bloqueio fica só no seu aparelho, e você desfaz na mesma lista.',
 
   },
   en: {
@@ -860,7 +860,7 @@ const I18N_DICT = {
     'help.presenca.oQue': 'The 👥 pill at the top shows how many editors are working the SAME queue as you. Tap it to see who they are and start a chat.',
     'help.presenca.p2p': 'Messages travel encrypted straight from one device to the other — they never pass through our server and are never stored anywhere. Close the chat and it is gone.',
     'help.presenca.privacidade': 'While you are connected, the server knows your WME name, your level, whether you are an AM, and the queue you picked. None of it is written to disk, and it is gone the moment you leave.',
-    'help.presenca.bloquear': 'You can block someone with the ✕ next to their name. The block stays on your device only.',
+    'help.presenca.bloquear': 'If you need to, you can block someone from inside the conversation with them. The block stays on your device only, and you undo it in the same list.',
 
   },
   es: {
@@ -1249,7 +1249,7 @@ const I18N_DICT = {
     'help.presenca.oQue': 'La píldora 👥 de arriba muestra cuántos editores están revisando la MISMA cola que tú. Tócala para ver quiénes son y empezar a conversar.',
     'help.presenca.p2p': 'El mensaje va cifrado directamente de un dispositivo al otro, sin pasar por nuestro servidor y sin guardarse en ningún lado: cerraste la conversación, se acabó.',
     'help.presenca.privacidade': 'Mientras estás conectado, el servidor sabe tu nombre del WME, tu nivel, si eres AM y la cola elegida. Nada de eso va al disco, y desaparece en cuanto sales.',
-    'help.presenca.bloquear': 'Puedes bloquear a alguien con la ✕ al lado del nombre. El bloqueo queda solo en tu dispositivo.',
+    'help.presenca.bloquear': 'Si lo necesitas, puedes bloquear a alguien desde dentro de la conversación con esa persona. El bloqueo queda solo en tu dispositivo, y lo deshaces en la misma lista.',
 
   },
   fr: {
@@ -1638,7 +1638,7 @@ const I18N_DICT = {
     'help.presenca.oQue': 'La pastille 👥 en haut indique combien d’éditeurs traitent la MÊME file que vous. Touchez-la pour voir qui c’est et engager la conversation.',
     'help.presenca.p2p': 'Le message part chiffré directement d’un appareil à l’autre, sans passer par notre serveur et sans être stocké nulle part — la conversation fermée, tout disparaît.',
     'help.presenca.privacidade': 'Tant que vous êtes connecté, le serveur connaît votre nom WME, votre niveau, si vous êtes AM et la file choisie. Rien de tout cela n’est écrit sur disque, et tout disparaît dès que vous partez.',
-    'help.presenca.bloquear': 'Vous pouvez bloquer quelqu’un via la ✕ à côté du nom. Le blocage ne quitte pas votre appareil.',
+    'help.presenca.bloquear': 'Si besoin, vous pouvez bloquer quelqu’un depuis la conversation avec cette personne. Le blocage ne quitte pas votre appareil, et vous l’annulez dans la même liste.',
 
   },
 };

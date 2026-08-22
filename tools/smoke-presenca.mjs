@@ -279,7 +279,28 @@ try {
   if (Number(contagem.pilula) === contagem.naLista && contagem.naLista === 2) ok(`a pílula conta só o que dá pra abrir (${contagem.pilula}, não 5)`);
   else anota(`pílula ${contagem.pilula} × ${contagem.naLista} na lista — conversa órfã inflando o selo`);
 
-  await ana.page.evaluate(() => { window.presencaBloquear('carla_am'); closeModal('presencaModal'); window.presencaRenderPilula(); });
+  // Bloquear pelo caminho REAL agora: abrir a conversa e tocar no botão de lá.
+  // Não existe mais ✕ na linha da lista — e o guard abaixo cobra isso.
+  const semXnaLinha = await ana.page.evaluate(() => !document.querySelector('.presenca-linha ~ [data-bloquear], [data-bloquear]'));
+  if (semXnaLinha) ok('a lista de quem está online NÃO tem botão de bloquear');
+  else anota('voltou o ✕ de bloquear na linha da lista');
+
+  // Sem `closeModal` antes: `openModal` já esconde a lista, e fechar-e-abrir no
+  // mesmo quadro dessincroniza o voltar e joga a página pra fora (é o bug que o
+  // `abrirPareamento` tinha). Terceira vez que este teste cai nele.
+  await ana.page.evaluate(() => window.presencaAbrirConversa('p-vivo'));
+  await ana.page.waitForTimeout(200);
+  const temBotao = await ana.page.evaluate(() => {
+    const b = document.getElementById('conversaBloquear');
+    const r = b && b.getBoundingClientRect();
+    return { existe: !!b, alvo: r && Math.round(Math.min(r.width, r.height)), rotulo: b && b.getAttribute('aria-label') };
+  });
+  if (temBotao.existe && temBotao.alvo >= 44) ok(`bloquear mora na conversa (alvo ${temBotao.alvo}px, "${temBotao.rotulo}")`);
+  else anota(`botão de bloquear na conversa: ${JSON.stringify(temBotao)}`);
+
+  await ana.page.click('#conversaBloquear');
+  await ana.page.waitForTimeout(250);
+  await ana.page.evaluate(() => { closeModal('conversaModal'); window.presencaRenderPilula(); });
   await ana.page.waitForTimeout(200);
   const preso = await ana.page.evaluate(() => ({
     pilula: document.getElementById('presencaPill').classList.contains('hidden'),

@@ -538,18 +538,16 @@ function presencaRenderLista() {
         const badge = c && c.naoLidas
             ? `<span class="presenca-badge">${c.naoLidas > 9 ? '9+' : c.naoLidas}</span>`
             : '';
+        // SEM botão de bloquear na linha. O recurso existe pra APROXIMAR, e um ✕
+        // ao lado de cada nome põe a ação de afastar em destaque permanente —
+        // é o oposto do objetivo. Bloquear virou último recurso e mora DENTRO
+        // da conversa: só bloqueia quem já interagiu, que é quando a decisão
+        // faz sentido de tomar.
         return `<li>
             <button type="button" class="presenca-linha" data-peer="${escapeHtml(p.peer)}" data-nome="${escapeHtml(p.nome)}">
                 <span class="presenca-nome">${escapeHtml(p.nome || t('presenca.anon'))}</span>
                 <span class="presenca-selos">${escapeHtml(nivel)}${selo ? ' · ' + escapeHtml(selo) : ''}</span>
                 ${badge}
-            </button>
-            <button type="button" class="presenca-bloquear" data-bloquear="${escapeHtml(p.nome)}"
-                    aria-label="${escapeHtml(t('presenca.bloquear', { nome: p.nome }))}"
-                    title="${escapeHtml(t('presenca.bloquear', { nome: p.nome }))}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>
-                </svg>
             </button>
         </li>`;
     }).join('');
@@ -611,6 +609,12 @@ function presencaRenderConversa() {
     if (!c) return;
     const titulo = document.getElementById('conversaTitle');
     if (titulo) titulo.textContent = c.nome || t('presenca.anon');
+    const bloq = document.getElementById('conversaBloquear');
+    if (bloq) {
+        const rot = t('presenca.bloquear', { nome: c.nome || t('presenca.anon') });
+        bloq.setAttribute('aria-label', rot);
+        bloq.setAttribute('title', rot);
+    }
 
     const estado = document.getElementById('conversaEstado');
     if (estado) {
@@ -651,10 +655,14 @@ function presencaMontar() {
     if (lista) lista.addEventListener('click', (ev) => {
         const linha = ev.target.closest('.presenca-linha');
         if (linha) return presencaAbrirConversa(linha.dataset.peer);
-        const bloquear = ev.target.closest('[data-bloquear]');
-        if (bloquear) return presencaBloquear(bloquear.dataset.bloquear);
         const desbloquear = ev.target.closest('[data-desbloquear]');
         if (desbloquear) return presencaDesbloquear(desbloquear.dataset.desbloquear);
+    });
+
+    const bloquearAqui = document.getElementById('conversaBloquear');
+    if (bloquearAqui) bloquearAqui.addEventListener('click', () => {
+        const c = Presenca.aberta && Presenca.conversas.get(Presenca.aberta);
+        if (c && c.nome) presencaBloquear(c.nome);
     });
 
     const form = document.getElementById('conversaForm');

@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.22-08
+
+### Mudado
+- **Bloquear saiu da lista de quem está online e virou último recurso.** O ✕ ao lado de cada nome punha a ação de afastar em destaque permanente, numa tela que existe pra aproximar. Agora bloquear mora dentro da conversa com a pessoa — só alcança quem você já falou, que é quando a decisão faz sentido. Desbloquear continua na mesma lista, na seção "Bloqueados".
+
+  Pedido de [@antigerme](https://www.waze.com/user/editor/antigerme): *"nosso objetivo é interação/pertencimento e isso de bloquear deve estar como última opção"*.
+
+---
+
 ## v2026.08.22-07
 
 ### Corrigido
