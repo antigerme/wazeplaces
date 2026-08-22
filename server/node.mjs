@@ -82,7 +82,12 @@ const crachas = makeCrachas({ keyBytes });
 // TURN é opcional: sem ele a conversa fica só com STUN, que resolve a maioria
 // das redes. Com coturn na própria VM, `TURN_SECRET` é o mesmo
 // `static-auth-secret` do coturn.
-const turn = { urls: process.env.TURN_URLS || '', segredo: process.env.TURN_SECRET || '' };
+const turn = {
+  keyId: process.env.TURN_KEY_ID || '',
+  apiToken: process.env.TURN_API_TOKEN || '',
+  urls: process.env.TURN_URLS || '',
+  segredo: process.env.TURN_SECRET || '',
+};
 
 // ── GC de sessões órfãs ─────────────────────────────────────────────────────
 // O fsStore só apaga uma sessão quando ela é reacessada (mtime no .get). Quem

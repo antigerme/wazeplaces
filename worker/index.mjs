@@ -8,7 +8,9 @@
 //   - SESSIONS → namespace KV pras sessões
 //   - ENCRYPTION_KEY → Secret (base64, 32 bytes): openssl rand -base64 32
 //   - SALA     → Durable Object da presença (worker/sala-do.mjs)
-//   - TURN_URLS / TURN_SECRET → opcionais; sem eles a conversa fica só com STUN
+//   - TURN_KEY_ID / TURN_API_TOKEN → opcionais: Cloudflare Realtime TURN
+//   - TURN_URLS / TURN_SECRET      → opcionais: coturn próprio (alternativa)
+//     Sem nenhum dos dois pares, a conversa fica só com STUN
 //
 // Toda a lógica vive em server/core.mjs (compartilhada com a VM Node).
 
@@ -64,7 +66,14 @@ export default {
         };
         const sessions = makeSessions({ store, keyBytes });
         const crachas = makeCrachas({ keyBytes });
-        const turn = { urls: env.TURN_URLS || '', segredo: env.TURN_SECRET || '' };
+        const turn = {
+          // Cloudflare Realtime TURN (o painel dá os dois valores juntos)
+          keyId: env.TURN_KEY_ID || '',
+          apiToken: env.TURN_API_TOKEN || '',
+          // coturn próprio, caso a instalação prefira
+          urls: env.TURN_URLS || '',
+          segredo: env.TURN_SECRET || '',
+        };
 
         const { status, body } = await dispatch(route, data, { sessions, crachas, turn });
         return json(body, status);

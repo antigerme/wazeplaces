@@ -10,6 +10,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## v2026.08.22-05
 
+### Adicionado
+- **Suporte ao TURN da Cloudflare (Realtime).** A conversa entre editores já funcionava com STUN na maioria das redes; o TURN cobre quem está atrás de NAT simétrico ou de firewall que bloqueia UDP. Basta configurar o app TURN no painel — o servidor pede uma credencial de curta duração por sessão e repassa ao navegador, sem que o token de API saia do servidor. Se o TURN estiver fora do ar, a presença continua funcionando com STUN.
+
 ### Corrigido
 - **A conversa podia ficar dizendo "Conectando…" com as mensagens já indo e voltando.** Quem *recebe* o pedido de conversa às vezes recebe o canal já aberto — e aí o aviso de abertura, que é o que muda o estado na tela, nunca chega. O texto funcionava; o rótulo mentia, e o que tivesse sido digitado antes ficava preso sem sair.
 

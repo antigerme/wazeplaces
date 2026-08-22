@@ -192,6 +192,80 @@ test('o TURN do servidor é assinado com SHA-1 — o coturn não valida outra co
   assert.match(chamada[0], /'SHA-1'/, 'o TURN deixou de ser assinado com SHA-1');
 });
 
+// ── TURN da Cloudflare ──────────────────────────────────────────────────────
+// Mecanismo DIFERENTE do coturn: a credencial não é calculada, é pedida por
+// HTTP. Testado com `fetch` injetado, e a resposta é a que foi MEDIDA na conta
+// real — não uma que eu imaginei.
+
+test('turnDaCloudflare devolve os iceServers no formato do RTCPeerConnection', async () => {
+  const { turnDaCloudflare } = await import('../server/core.mjs');
+  // Resposta REAL de /credentials/generate-ice-servers (usuário e senha
+  // trocados). As portas 53/80/443 são o motivo de usarmos ESTE endpoint e não
+  // o irmão: 3478 é bloqueado em muita rede corporativa.
+  const respostaReal = {
+    iceServers: [
+      { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53'] },
+      {
+        urls: [
+          'turn:turn.cloudflare.com:3478?transport=udp',
+          'turn:turn.cloudflare.com:3478?transport=tcp',
+          'turns:turn.cloudflare.com:5349?transport=tcp',
+          'turn:turn.cloudflare.com:53?transport=udp',
+          'turn:turn.cloudflare.com:80?transport=tcp',
+          'turns:turn.cloudflare.com:443?transport=tcp',
+        ],
+        username: 'u', credential: 'c',
+      },
+    ],
+  };
+  let visto = null;
+  const falso = async (url, opts) => { visto = { url, opts }; return { status: 201, json: async () => respostaReal }; };
+
+  const lista = await turnDaCloudflare('chave-123', 'token-abc', 900, falso);
+  assert.deepEqual(lista, respostaReal.iceServers);
+  assert.match(visto.url, /\/v1\/turn\/keys\/chave-123\/credentials\/generate-ice-servers$/);
+  assert.equal(visto.opts.method, 'POST');
+  assert.equal(visto.opts.headers.Authorization, 'Bearer token-abc');
+  assert.deepEqual(JSON.parse(visto.opts.body), { ttl: 900 });
+  // Porta que atravessa firewall corporativo — o que este endpoint tem a mais.
+  assert.ok(lista[1].urls.some((u) => u.includes(':443')), 'sumiu a porta 443 do TURN');
+});
+
+test('turnDaCloudflare aceita a forma de OBJETO do endpoint irmão', async () => {
+  // `/credentials/generate` devolve `iceServers` como objeto único, não array.
+  // Trocar a URL sem tratar isso entregaria `iceServers` inválido pro browser.
+  const { turnDaCloudflare } = await import('../server/core.mjs');
+  const falso = async () => ({ status: 201, json: async () => ({ iceServers: { urls: ['turn:x:3478'], username: 'u', credential: 'c' } }) });
+  assert.deepEqual(await turnDaCloudflare('k', 't', 900, falso), [{ urls: ['turn:x:3478'], username: 'u', credential: 'c' }]);
+});
+
+test('TURN fora do ar NÃO derruba a presença — devolve null e o STUN assume', async () => {
+  // Trocar "a conversa não conecta em NAT simétrico" por "ninguém aparece na
+  // lista" seria piorar o problema. Qualquer falha vira `null`.
+  const { turnDaCloudflare } = await import('../server/core.mjs');
+  const casos = [
+    ['HTTP 401', async () => ({ status: 401, json: async () => ({}) })],
+    ['HTTP 500', async () => ({ status: 500, json: async () => ({}) })],
+    ['corpo sem iceServers', async () => ({ status: 201, json: async () => ({}) })],
+    ['lista vazia', async () => ({ status: 201, json: async () => ({ iceServers: [] }) })],
+    ['json quebrado', async () => ({ status: 201, json: async () => { throw new Error('json'); } })],
+    ['rede fora', async () => { throw new Error('ECONNREFUSED'); }],
+  ];
+  for (const [nome, falso] of casos) {
+    assert.equal(await turnDaCloudflare('k', 't', 900, falso), null, `${nome} devia virar null`);
+  }
+});
+
+test('o token do TURN não vaza no core', () => {
+  // Ele é credencial de conta, não de sessão. O core não tem `console`, mas o
+  // guard existe porque a tentação de "só um log pra depurar" é exatamente aqui.
+  const CORE = read('server/core.mjs');
+  const bloco = CORE.slice(CORE.indexOf('export async function turnDaCloudflare'));
+  const fim = bloco.indexOf('\n}');
+  assert.equal(/console\.|apiToken\s*\+|\$\{apiToken\}[^`]*`\s*\)/.test(bloco.slice(0, fim)), false,
+    'o token do TURN entrou em log ou em concatenação fora do header');
+});
+
 // ── O QUE O SERVIDOR NÃO SABE ───────────────────────────────────────────────
 
 test('o núcleo da sala não fala com plataforma nenhuma', () => {

@@ -211,8 +211,10 @@ Variáveis de ambiente (todas opcionais):
 | `ENCRYPTION_KEY` | auto-gera | Chave AES base64 (32 bytes). Sem ela, gera uma em `SESSION_KEY_FILE` |
 | `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
 | `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
-| `TURN_URLS` | *(vazio)* | Servidores TURN da presença, separados por vírgula. Vazio = só STUN |
-| `TURN_SECRET` | *(vazio)* | O `static-auth-secret` do coturn. Sem ele o TURN não é oferecido |
+| `TURN_KEY_ID` | *(vazio)* | ID de token do Cloudflare Realtime TURN |
+| `TURN_API_TOKEN` | *(vazio)* | Token de API do mesmo app TURN. Com este par, o Realtime é usado |
+| `TURN_URLS` | *(vazio)* | coturn próprio: servidores separados por vírgula. Vazio = só STUN |
+| `TURN_SECRET` | *(vazio)* | coturn próprio: o `static-auth-secret`. Sem ele o TURN não é oferecido |
 
 Para simular o ambiente Cloudflare localmente (Worker + KV): `npx wrangler dev` (precisa do `wrangler`).
 
@@ -236,12 +238,20 @@ openssl rand -base64 32 | npx wrangler secret put ENCRYPTION_KEY
 
 O que importa saber: a migração é `new_sqlite_classes` (e **não** `new_classes`), porque é o backend SQLite que libera Durable Objects no **plano gratuito**. Se um dia isso mudar, o sintoma é explícito: o `wrangler deploy` falha citando o plano, em vez de subir quebrado. A sala não grava nada — o SQLite está ali só como forma de migração aceita no free tier.
 
-**TURN (opcional).** Sem ele a conversa entre editores usa só STUN, que resolve a maioria das redes; ele entra pra quem está atrás de NAT simétrico. Se você subir um [coturn](https://github.com/coturn/coturn), passe o mesmo `static-auth-secret` dele:
+**TURN (opcional).** Sem ele a conversa entre editores usa só STUN, que resolve a maioria das redes; o TURN entra pra quem está atrás de NAT simétrico ou de firewall que bloqueia UDP.
+
+O caminho mais curto no Cloudflare é o **Realtime → TURN**: crie um app TURN no painel (ele devolve um **ID de token** e um **token de API**) e grave os dois como Secret:
 
 ```bash
-npx wrangler secret put TURN_SECRET     # = static-auth-secret do coturn
-npx wrangler secret put TURN_URLS       # ex: turn:turn.seudominio.com:3478,turns:turn.seudominio.com:5349
+npx wrangler secret put TURN_KEY_ID      # o "ID de token Turn" do painel
+npx wrangler secret put TURN_API_TOKEN   # o "Token de API" (só aparece uma vez)
 ```
+
+O servidor pede uma credencial efêmera por emissão de crachá e repassa ao navegador; o token de API nunca sai do servidor. Usamos o endpoint `credentials/generate-ice-servers`, e a escolha é medida: o endpoint irmão (`credentials/generate`) devolve só as portas 3478/5349, enquanto este traz **também 53, 80 e 443** — que são as que atravessam rede corporativa, ou seja exatamente os casos em que o TURN existe pra salvar.
+
+Se o TURN estiver fora do ar ou o token errado, a presença **não cai**: o STUN assume e a lista continua funcionando.
+
+**Alternativa: coturn próprio.** Se preferir não depender do Realtime, use `TURN_URLS` + `TURN_SECRET` com o mesmo `static-auth-secret` do [coturn](https://github.com/coturn/coturn) (a receita está na Opção B, mais abaixo). Configurando os dois pares, o do Realtime vence.
 
 **WebSocket atravessa o Cloudflare sem configuração** — vale em todos os planos, inclusive no gratuito.
 
