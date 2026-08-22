@@ -8,6 +8,26 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.22-08
+
+### Removido
+- **Bloquear pessoas saiu da aplicação.** Não existe mais botão de bloquear, lista de bloqueados nem nada do tipo — e o registro de quem já tinha bloqueado alguém é apagado do aparelho na primeira abertura.
+
+  O motivo é que o recurso não tinha por que existir aqui: só entra na app editor **nível 3+ que seja Area Manager**, ou seja gente madura da comunidade. Se alguém fizer spam ou criar problema, isso se resolve no Waze, que é onde a conta existe de verdade — não numa lista local que só vale no seu celular.
+
+  Decisão de [@antigerme](https://www.waze.com/user/editor/antigerme): *"nosso objetivo é interação/pertencimento"*.
+
+---
+
+## v2026.08.22-07
+
+### Corrigido
+- **Bloquear alguém podia deixar você preso com o bloqueio.** Se a pessoa bloqueada era a única na sua fila, a pílula 👥 sumia do topo — e ela é o único caminho até a lista onde fica o "Desbloquear". Não havia como desfazer. Agora a pílula fica enquanto houver alguém bloqueado.
+- **O contador de mensagens novas mostrava mais do que dava para abrir.** A pílula dizia "4" e a lista mostrava 2, porque conversas de quem já saiu da fila continuavam somando — e essas não aparecem na lista, então o número nunca zerava. Reportado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+- **A lista dizia "Ninguém mais por aqui" com pessoas bloqueadas logo abaixo.** A frase contradizia a própria tela e fazia o olho parar antes da seção que resolvia.
+
+---
+
 ## v2026.08.22-06
 
 ### Corrigido
