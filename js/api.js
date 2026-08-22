@@ -226,6 +226,22 @@ const API = {
         });
     },
 
+    // Porta de entrada da presença: devolve o CRACHÁ assinado (nome/rank/AM do
+    // /Session do Waze, mais a sala já resolvida) e os servidores de rede.
+    // O nome não vai daqui pro servidor — vem de lá, assinado, justamente pra
+    // ninguém poder se apresentar como outra pessoa na lista.
+    async presenca(peer, stateId) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        return this._post('presenca', {
+            sessionToken,
+            region: this.getRegion(),
+            countryId: this.getCountry(),
+            stateId: stateId || null,
+            peer
+        });
+    },
+
     async listCountries() {
         const sessionToken = this.getSession();
         if (!sessionToken) {

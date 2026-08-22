@@ -17,7 +17,9 @@ import { randomBytes, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dispatch, makeSessions, base64ToBytes, SESSION_TTL } from './core.mjs';
+import { dispatch, makeSessions, makeCrachas, base64ToBytes, SESSION_TTL } from './core.mjs';
+import { listaDePares, limpar, MAX_BODY } from './presenca.mjs';
+import { aceitarWebSocket } from './ws.mjs';
 
 // Rede de segurança pra VM: um erro não capturado não pode derrubar o processo.
 process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
@@ -76,6 +78,16 @@ const fsStore = {
   },
 };
 const sessions = makeSessions({ store: fsStore, keyBytes });
+const crachas = makeCrachas({ keyBytes });
+// TURN é opcional: sem ele a conversa fica só com STUN, que resolve a maioria
+// das redes. Com coturn na própria VM, `TURN_SECRET` é o mesmo
+// `static-auth-secret` do coturn.
+const turn = {
+  keyId: process.env.TURN_KEY_ID || '',
+  apiToken: process.env.TURN_API_TOKEN || '',
+  urls: process.env.TURN_URLS || '',
+  segredo: process.env.TURN_SECRET || '',
+};
 
 // ── GC de sessões órfãs ─────────────────────────────────────────────────────
 // O fsStore só apaga uma sessão quando ela é reacessada (mtime no .get). Quem
@@ -278,7 +290,7 @@ function readBody(req, res) {
         tooLarge = true;
         // Responde 413 limpo antes de cortar a conexão (em vez de só req.destroy()).
         if (!res.headersSent) {
-          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
           res.end(JSON.stringify({ success: false, error: 'Corpo da requisição muito grande' }));
         }
         req.destroy();
@@ -295,7 +307,7 @@ const server = createServer(async (req, res) => {
   try {
     if (url.startsWith('/api/')) {
       if (req.method !== 'POST') {
-        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         res.end(JSON.stringify({ success: false, error: 'Método não permitido' }));
         return;
       }
@@ -308,8 +320,8 @@ const server = createServer(async (req, res) => {
       } catch {
         data = {};
       }
-      const { status, body } = await dispatch(route, data, { sessions });
-      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+      const { status, body } = await dispatch(route, data, { sessions, crachas, turn });
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(body));
       return;
     }
@@ -329,13 +341,120 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (url.startsWith('/api/')) {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ success: false, error: 'Erro interno' }));
     } else {
       res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Erro interno');
     }
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sala de presença — a paridade com o Durable Object da Cloudflare
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Lá cada fila é um Durable Object (um objeto por sala, distribuído). Aqui é
+// UM processo: as salas são um Map em memória. O que os dois têm que fazer
+// IGUAL — conferir o crachá, montar a lista, repassar o sinal opaco — mora em
+// `server/presenca.mjs`, e é o que o teste cobra dos dois arquivos.
+//
+// A presença é a CONEXÃO: nada em disco, nada com prazo. Socket fechou, saiu.
+const salas = new Map();   // nome da sala -> Set de conexões
+
+const TETO_SINAIS = 120;
+const JANELA_MS = 60_000;
+
+function difundirLista(sala) {
+  const conjunto = salas.get(sala);
+  if (!conjunto) return;
+  const presentes = [...conjunto].filter((c) => c.ident);
+  for (const c of presentes) {
+    const lista = listaDePares(presentes.map((p) => p.ident), c.ident.peer);
+    c.ws.enviar(JSON.stringify({ t: 'lista', ...lista }));
+  }
+}
+
+function sairDaSala(conn) {
+  const conjunto = salas.get(conn.sala);
+  if (!conjunto) return;
+  conjunto.delete(conn);
+  if (!conjunto.size) salas.delete(conn.sala);
+  else difundirLista(conn.sala);
+}
+
+async function tratarMensagemDaSala(conn, texto) {
+  // Keepalive. Na Cloudflare quem responde é o RUNTIME
+  // (`setWebSocketAutoResponse`), sem acordar o Durable Object; aqui responde
+  // o processo, que já está de pé. Os dois falam o mesmo par 'ping'/'pong'
+  // porque é o cliente que precisa não saber em qual servidor está.
+  if (texto === 'ping') return conn.ws.enviar('pong');
+
+  // Frame gigante já foi barrado pelo codec (`MAX_BODY`); aqui só o parse.
+  let m;
+  try { m = JSON.parse(texto); } catch { return; }
+  if (!m || typeof m !== 'object') return;
+
+  if (m.t === 'entrar') {
+    const cracha = await crachas.conferir(m.cracha);
+    if (!cracha) return conn.ws.fechar(4003, 'cracha invalido');
+    // Crachá é assinado PARA uma sala: sem esta linha um crachá legítimo do
+    // Brasil entraria na sala de Portugal, com assinatura válida.
+    if (cracha.sala !== conn.sala) return conn.ws.fechar(4004, 'outra sala');
+    conn.ident = {
+      peer: cracha.peer, nome: cracha.nome, rank: cracha.rank,
+      am: !!cracha.am, staff: !!cracha.staff,
+    };
+    conn.ws.enviar(JSON.stringify({ t: 'eu', peer: conn.ident.peer }));
+    difundirLista(conn.sala);
+    return;
+  }
+
+  // Socket anônimo não vê a lista nem fala com ninguém.
+  if (!conn.ident) return conn.ws.fechar(4001, 'sem cracha');
+
+  if (m.t === 'sair') return conn.ws.fechar(1000, 'saiu');
+  if (m.t !== 'sinal') return;
+
+  const agora = Date.now();
+  if (agora - conn.desde > JANELA_MS) { conn.desde = agora; conn.n = 0; }
+  if (++conn.n > TETO_SINAIS) return;
+
+  const para = limpar(m.para);
+  if (!para || para === conn.ident.peer) return;
+  const destinos = [...(salas.get(conn.sala) || [])].filter((c) => c.ident && c.ident.peer === para);
+  if (!destinos.length) {
+    conn.ws.enviar(JSON.stringify({ t: 'ausente', peer: para }));
+    return;
+  }
+  // `tipo` e `payload` passam OPACOS: são SDP e candidato ICE. O texto da
+  // conversa nem chega aqui — vai cifrado pelo DataChannel.
+  const fora = JSON.stringify({
+    t: 'sinal', de: conn.ident.peer, nome: conn.ident.nome,
+    tipo: String(m.tipo || '').slice(0, 24), payload: m.payload ?? null,
+  });
+  for (const d of destinos) d.ws.enviar(fora);
+}
+
+server.on('upgrade', (req, socket) => {
+  let url;
+  try { url = new URL(req.url, 'http://local'); } catch { socket.destroy(); return; }
+  if (url.pathname !== '/sala') { socket.end('HTTP/1.1 404 Not Found\r\n\r\n'); return; }
+
+  const sala = limpar(url.searchParams.get('s'));
+  if (!sala) { socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); return; }
+
+  const ws = aceitarWebSocket(req, socket, MAX_BODY);
+  if (!ws) return;
+
+  const conn = { ws, sala, ident: null, desde: Date.now(), n: 0 };
+  if (!salas.has(sala)) salas.set(sala, new Set());
+  salas.get(sala).add(conn);
+
+  ws.on('mensagem', (texto) => {
+    tratarMensagemDaSala(conn, texto).catch(() => ws.fechar(1011, 'erro'));
+  });
+  ws.on('fim', () => sairDaSala(conn));
 });
 
 server.listen(PORT, HOST, () => {

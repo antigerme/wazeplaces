@@ -94,6 +94,44 @@ test('os cabeçalhos de segurança da VM batem com os que o _headers promete', a
   });
 });
 
+// Resposta de /api NUNCA pode ser cacheada, e nos DOIS destinos.
+//
+// Hoje nada ali é cacheado — é POST, e POST não entra em cache por padrão. Mas
+// "por padrão" é a palavra: o painel do Cloudflare tem um interruptor de cache
+// padrão pras respostas de fetch handler, e um proxy na frente da VM pode ter
+// política própria. O modo de falha não é lentidão: é a resposta de um editor
+// (perfil, fila, sessão) sendo servida pra outro.
+test('toda resposta de /api sai com no-store, no Node e no Worker', async () => {
+  const porta = 8218;
+  await comServidor(porta, async () => {
+    // Caminhos que respondem coisas diferentes: 401 sem sessão, 404 de rota
+    // inexistente e 405 de método errado. Todos são resposta de API.
+    const casos = [
+      ['POST', 'perfil', 401],
+      ['POST', 'rota-que-nao-existe', 404],
+      ['GET', 'perfil', 405],
+    ];
+    for (const [metodo, rota, esperado] of casos) {
+      const r = await fetch(`http://127.0.0.1:${porta}/api/${rota}`, {
+        method: metodo,
+        headers: { 'Content-Type': 'application/json' },
+        body: metodo === 'POST' ? '{}' : undefined,
+      });
+      assert.equal(r.status, esperado, `${metodo} /api/${rota}`);
+      assert.match(r.headers.get('cache-control') || '', /no-store/,
+        `${metodo} /api/${rota} saiu sem no-store`);
+    }
+  });
+
+  // E o adaptador do Cloudflare tem que carimbar igual — os dois destinos
+  // precisam ser a MESMA app (gotcha #14).
+  const worker = readFileSync(join(RAIZ, 'worker', 'index.mjs'), 'utf8');
+  const fn = worker.match(/const json = [\s\S]*?\}\);/);
+  assert.ok(fn, 'sumiu o helper json() do worker');
+  assert.match(fn[0], /'Cache-Control':\s*'no-store'/,
+    'o Worker parou de carimbar no-store nas respostas de /api');
+});
+
 // O `_headers` corta o Cache-Control por CAMINHO, e o adaptador cortava por
 // EXTENSÃO — divergiam nos ícones, que caíam no `immutable` de um ano por
 // `.svg` não estar na lista de no-cache. Nome de ícone é fixo (`icon-512.svg`),

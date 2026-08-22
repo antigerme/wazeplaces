@@ -283,6 +283,28 @@ test('o teclado virtual não pode voltar a engolir os modais', () => {
     // O scrim (raiz) sobe com o teclado; o teto de altura fica no CARD, que é
     // o filho — checar tudo na mesma linha deixaria o teto passar batido.
     assert.match(linhas[i], /modal-root/, `modal ${id} sem .modal-root — fica fora da defesa do teclado`);
+
+    // DUAS construções valem, e a diferença não é gosto: é onde a conta é
+    // feita. Diálogo CENTRALIZADO empurra o conteúdo pra cima com padding e
+    // desconta o mesmo valor do teto de altura. FOLHA ancorada embaixo sobe a
+    // própria raiz (`bottom`), e o teto dela é 100% da raiz já encolhida —
+    // aplicar a conta do centralizado numa folha desconta o teclado DUAS vezes
+    // (`max-height` já inclui o `padding-bottom`), e o campo continua coberto.
+    if (linhas[i].includes('folha-modal')) {
+      assert.match(CSS_SEM_COMENTARIO, /\.folha-modal\s*\{[^}]*bottom:\s*var\(--kb-inset/,
+        `a folha ${id} não sobe com o teclado: falta o bottom: var(--kb-inset) em styles.css`);
+      // Membro exato da lista de classes, não `\b` na string inteira: `\bfolha\b`
+      // casa DENTRO de `conversa-folha` (o hífen é fronteira de palavra), então
+      // a conversa era conferida contra a regra da OUTRA folha — e a sabotagem
+      // de propósito passava limpa.
+      const folha = ((linhas[i + 1].match(/class="([^"]*)"/) || [])[1] || '').split(/\s+/);
+      const classe = ['folha', 'conversa-folha'].find((c) => folha.includes(c));
+      assert.ok(classe, `a folha ${id} não usa .folha nem .conversa-folha — fica sem teto de altura`);
+      const regra = CSS_SEM_COMENTARIO.match(new RegExp(`\\.${classe}\\s*\\{[^}]*\\}`));
+      assert.ok(regra && /max-height:[^;]*100%/.test(regra[0]),
+        `.${classe} precisa de teto em 100% da raiz (que já desconta o teclado)`);
+      continue;
+    }
     assert.match(linhas[i], /pb-\[calc\(1rem\+var\(--kb-inset,0px\)\)\]/, `modal ${id} não sobe com o teclado`);
     assert.match(linhas[i + 1], /max-h-\[calc\([^\]]*--kb-inset/, `modal ${id} sem teto de altura que desconte o teclado`);
   }
@@ -602,6 +624,27 @@ test('o card tem UMA área rolável de verdade, e ela cresce com o espaço', () 
   const conteudo = linhaDe('card-content');
   assert.match(conteudo, /\bgap-3\b/, 'o espaçamento da coluna do card saiu do gap');
   assert.doesNotMatch(bloco, /class="space-y-3"/, 'o wrapper space-y-3 voltou pro meio da cadeia de flex');
+});
+
+// O modo dev é a PRIMEIRA opção das Preferências, e não é arrumação.
+//
+// Ele MODIFICA as opções abaixo: `canDisableUndo()` devolve true com dev mode
+// ligado, ou seja, ele fura a trava do "Permitir desfazer ações". Ler
+// "Desfazer: ligado" e só depois descobrir, mais abaixo, que existe um
+// interruptor que o ignora é a ordem errada de causa e efeito — quem sobrepõe
+// vem antes do que é sobreposto.
+//
+// Não custa nada pra quase todo editor: a seção nasce `hidden` e só aparece
+// depois dos 7 toques na versão, então a aba continua começando no Idioma.
+test('modo dev é a primeira opção das Preferências', () => {
+  const HTML_ = read('index.html');
+  const ini = HTML_.indexOf('id="filtersPanelPrefs"');
+  const fim = HTML_.indexOf('id="filtersPanelHistory"', ini);
+  assert.ok(ini > 0 && fim > ini, 'sumiu a aba de Preferências');
+  const painel = HTML_.slice(ini, fim);
+  const ordem = [...painel.matchAll(/id="(devModeSection|langSelect|prefUndoRow)"/g)].map((m) => m[1]);
+  assert.deepEqual(ordem, ['devModeSection', 'langSelect', 'prefUndoRow'],
+    `ordem das Preferências mudou: ${ordem.join(' → ')} — o modo dev tem que vir primeiro, porque ele fura a trava do Desfazer`);
 });
 
 test('a área que rola avisa que rola', () => {

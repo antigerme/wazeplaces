@@ -15,6 +15,7 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
   - [Como usar (a forma mais fácil)](#como-usar-a-forma-mais-fácil)
   - [Como exportar seus cookies do Waze](#como-exportar-seus-cookies-do-waze)
   - [Usando a aplicação](#usando-a-aplicação)
+  - [Quem mais está na sua fila](#quem-mais-está-na-sua-fila)
   - [Instalar como app no celular](#instalar-como-app-no-celular)
   - [Quem pode usar](#quem-pode-usar)
   - [Problemas comuns](#problemas-comuns)
@@ -90,6 +91,16 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 - **Link ↗** para abrir o local direto no WME
 
 **Caixa de estatísticas:** **Lidos** · **Rejeitados** · **Pulados** · **Restam**. "Restam" mostra quantos pedidos ainda estão pendentes no Waze; diminui a cada `Lido`/`Rejeitado` (pular não diminui). Sinal `+` (ex: `215+`) = ainda há mais páginas a buscar.
+
+### Quem mais está na sua fila
+
+Quando outro editor está triando a **mesma fila** que você (mesma região, país e estado), aparece uma pílula 👥 no topo com quantos são. Toque nela pra ver quem é — nome, nível e se é Area Manager — e toque num nome pra conversar.
+
+- **A mensagem vai direto de um aparelho pro outro**, cifrada, sem passar pelo servidor da aplicação e sem ficar guardada em lugar nenhum. Fechou a conversa, acabou.
+- **Enquanto você está conectado**, o servidor sabe o seu nome do WME, o seu nível, se você é AM e a fila escolhida. Nada disso é gravado, e some assim que você sai.
+- **O nome vem do Waze**, conferido e assinado pelo servidor — ninguém consegue se apresentar na lista como um editor que não é.
+- Dá pra **bloquear** alguém no ✕ ao lado do nome (fica só no seu aparelho).
+- Vem ligado. Pra desligar: **Filtros e preferências → Preferências → "Ver quem está na fila"**.
 
 ### Instalar como app no celular
 
@@ -200,6 +211,10 @@ Variáveis de ambiente (todas opcionais):
 | `ENCRYPTION_KEY` | auto-gera | Chave AES base64 (32 bytes). Sem ela, gera uma em `SESSION_KEY_FILE` |
 | `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
 | `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
+| `TURN_KEY_ID` | *(vazio)* | ID de token do Cloudflare Realtime TURN |
+| `TURN_API_TOKEN` | *(vazio)* | Token de API do mesmo app TURN. Com este par, o Realtime é usado |
+| `TURN_URLS` | *(vazio)* | coturn próprio: servidores separados por vírgula. Vazio = só STUN |
+| `TURN_SECRET` | *(vazio)* | coturn próprio: o `static-auth-secret`. Sem ele o TURN não é oferecido |
 
 Para simular o ambiente Cloudflare localmente (Worker + KV): `npx wrangler dev` (precisa do `wrangler`).
 
@@ -219,6 +234,44 @@ npx wrangler kv namespace create SESSIONS
 openssl rand -base64 32 | npx wrangler secret put ENCRYPTION_KEY
 ```
 
+**Durable Object da presença: nada a criar à mão.** O binding `SALA` e a migração já estão no `wrangler.jsonc`, e o `wrangler deploy` aplica os dois sozinho — não há botão no dashboard pra clicar.
+
+O que importa saber: a migração é `new_sqlite_classes` (e **não** `new_classes`), porque é o backend SQLite que libera Durable Objects no **plano gratuito**. Se um dia isso mudar, o sintoma é explícito: o `wrangler deploy` falha citando o plano, em vez de subir quebrado. A sala não grava nada — o SQLite está ali só como forma de migração aceita no free tier.
+
+**TURN (opcional).** Sem ele a conversa entre editores usa só STUN, que resolve a maioria das redes; o TURN entra pra quem está atrás de NAT simétrico ou de firewall que bloqueia UDP.
+
+O caminho mais curto no Cloudflare é o TURN do **Realtime**, em dois passos.
+
+**1. Criar o app TURN.** No painel: **Realtime → Servidor TURN → criar um app**, dê um nome (ex.: `wazeplaces`) e o painel devolve dois valores:
+
+| O painel chama de | Vira o Secret |
+|---|---|
+| **ID de token Turn** | `TURN_KEY_ID` |
+| **Token de API** | `TURN_API_TOKEN` |
+
+> ⚠️ O **Token de API aparece UMA vez só**. Copie antes de sair da tela — se perder, o caminho é criar outro app.
+
+**2. Gravar os dois no Worker.** Pelo painel: **Workers & Pages → wazeplaces → Configurações → Variáveis e segredos → Adicionar variável**, com o tipo **Segredo** marcado nos dois (não "Texto"). Ou por linha de comando:
+
+```bash
+npx wrangler secret put TURN_KEY_ID      # o "ID de token Turn" do painel
+npx wrangler secret put TURN_API_TOKEN   # o "Token de API" (só aparece uma vez)
+```
+
+Só o `TURN_API_TOKEN` é credencial de fato — o `TURN_KEY_ID` é identificador, e marcá-lo como Segredo é conservador mas custa poder conferir o valor depois pelo painel.
+
+**Gravar o Secret não publica código novo.** Ele fica guardado, mas o Worker no ar continua o mesmo até o próximo deploy.
+
+O servidor pede uma credencial efêmera por emissão de crachá e repassa ao navegador; o token de API nunca sai do servidor. Usamos o endpoint `credentials/generate-ice-servers`, e a escolha é medida: o endpoint irmão (`credentials/generate`) devolve só as portas 3478/5349, enquanto este traz **também 53, 80 e 443** — que são as que atravessam rede corporativa, ou seja exatamente os casos em que o TURN existe pra salvar.
+
+Se o TURN estiver fora do ar ou o token errado, a presença **não cai**: o STUN assume e a lista continua funcionando.
+
+**Alternativa: coturn próprio.** Se preferir não depender do Realtime, use `TURN_URLS` + `TURN_SECRET` com o mesmo `static-auth-secret` do [coturn](https://github.com/coturn/coturn) (a receita está na Opção B, mais abaixo). Configurando os dois pares, o do Realtime vence.
+
+**WebSocket atravessa o Cloudflare sem configuração** — vale em todos os planos, inclusive no gratuito.
+
+**O interruptor "Cache" das configurações de runtime fica DESABILITADO.** Ele define o cache padrão das respostas devolvidas pelo fetch handler, e aqui ele não tem o que ganhar e tem o que quebrar. Medido na produção: o estático — a única coisa que se beneficiaria — **já vem cacheado da borda** (`cf-cache-status: HIT`) pelo `_headers`, porque quem o serve é o binding de assets e não o nosso handler. Do outro lado, resposta de `/api` cacheada seria o perfil ou a fila de um editor servidos a outro. Os dois adaptadores carimbam `Cache-Control: no-store` em toda resposta de API justamente pra que isso não dependa de um padrão de painel (travado em `test/csp-vm.test.mjs`).
+
 **Deploy manual (CLI):**
 
 ```bash
@@ -235,6 +288,21 @@ npx wrangler deploy
 | Compilações para ramificações de não produção | deixe marcado (gera preview de cada PR) |
 
 Clique **Implantar**. O binding `SESSIONS` vem do `wrangler.jsonc` (por isso o `id` precisa estar preenchido — passo 1). O Secret `ENCRYPTION_KEY` você já criou no passo 2 (ou configure no dashboard: projeto → **Settings → Variables and Secrets → Add → tipo Secret**). Detalhes em [`docs/cloudflare-migration.md`](docs/cloudflare-migration.md).
+
+**Conferir que a presença subiu (uma linha):**
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' 'https://places.seudominio.com/sala?s=row:30'
+```
+
+| Resposta | O que significa |
+|---|---|
+| **426** | Deu certo. É o "esperava WebSocket" do Durable Object — a rota existe, o binding `SALA` respondeu e o `ENCRYPTION_KEY` está no lugar |
+| **404** | O deploy ainda não saiu (ou o Worker publicado é anterior à presença) |
+| **500** | O binding `SALA` não foi aplicado — olhe o log do build |
+| **400** | Chegou no Worker mas sem o parâmetro `s` — confira a URL do comando |
+
+O TURN não dá pra conferir por fora (a credencial só sai junto do crachá, que exige sessão). O teste dele é a app: com dois editores na mesma fila, a conversa conecta.
 
 > **Fork / instância própria:** o `wrangler.jsonc` fixa `routes` com o Custom Domain `places.wazebrasil.com` (domínio da instância oficial). Em outra conta esse `wrangler deploy` falha — ajuste o `pattern` pro seu próprio domínio ou remova o bloco `routes` inteiro (aí o Worker fica no subdomínio `*.workers.dev`).
 
@@ -281,6 +349,15 @@ sudo systemctl enable --now wazeplaces
     ServerName places.seudominio.com
 
     ProxyPreserveHost On
+
+    # A sala de presença é WebSocket, e ela precisa vir ANTES da regra genérica
+    # — a primeira ProxyPass que casa é a que vale. Sem estas duas linhas o
+    # estático responde 200 normalmente e SÓ a presença quebra, o que faz o
+    # problema parecer da aplicação. Medido: com o vhost sem elas o handshake
+    # falha; com elas, o editor entra na sala.
+    ProxyPass        /sala ws://127.0.0.1:8080/sala
+    ProxyPassReverse /sala ws://127.0.0.1:8080/sala
+
     ProxyPass        / http://127.0.0.1:8080/
     ProxyPassReverse / http://127.0.0.1:8080/
 
@@ -291,6 +368,10 @@ sudo systemctl enable --now wazeplaces
 ```bash
 # módulos de proxy (no RHEL geralmente já vêm; garanta que estão carregados)
 sudo dnf install -y httpd mod_ssl
+# mod_proxy_wstunnel é o que faz o `ws://` acima funcionar. Sem ele o Apache
+# sobe normalmente e devolve 500/400 só no /sala.
+sudo bash -c 'grep -q proxy_wstunnel /etc/httpd/conf.modules.d/00-proxy.conf || \
+  echo "LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so" >> /etc/httpd/conf.modules.d/00-proxy.conf'
 # SELinux: libera o Apache a conectar no Node local (senão o proxy dá 503)
 sudo setsebool -P httpd_can_network_connect 1
 sudo systemctl enable --now httpd
@@ -308,6 +389,29 @@ O `certbot --apache` cria o `<VirtualHost *:443>` com TLS e o redirect 80→443
 sozinho. Depois disso, ajuste o `RequestHeader set X-Forwarded-Proto "https"` no
 vhost 443 (o certbot costuma duplicar o bloco).
 
+**4. TURN próprio (opcional, e só pra presença).** A conversa entre editores é ponta a ponta; o STUN público já resolve a maioria das redes, e o TURN entra só pra quem está atrás de NAT simétrico. Se quiser cobrir esse caso sem depender de terceiro, o coturn roda na mesma VM:
+
+```bash
+sudo dnf install -y coturn
+sudo tee -a /etc/coturn/turnserver.conf >/dev/null <<'EOF'
+use-auth-secret
+static-auth-secret=<gere com: openssl rand -hex 32>
+realm=places.seudominio.com
+listening-port=3478
+tls-listening-port=5349
+EOF
+sudo systemctl enable --now coturn
+```
+
+Depois some ao serviço do Node as duas variáveis, com o **mesmo** segredo:
+
+```ini
+Environment=TURN_SECRET=<o mesmo static-auth-secret>
+Environment=TURN_URLS=turn:places.seudominio.com:3478,turns:places.seudominio.com:5349
+```
+
+A aplicação emite credenciais efêmeras (usuário = expiração unix, senha = `HMAC-SHA1` do segredo) no padrão `use-auth-secret` do coturn — não há lista de usuários pra manter.
+
 > **Por que Apache só como proxy e não roda a app direto?** Na v2.x o Apache
 > servia PHP via mod_php. Na v3.0 o backend é Node — Apache não executa JS, então
 > o papel dele é encaminhar pro `server/node.mjs`. Um processo Node só, sem
@@ -318,6 +422,20 @@ vhost 443 (o certbot costuma duplicar o bloco).
 <summary>Alternativa: nginx no lugar do Apache</summary>
 
 ```nginx
+# No bloco http (fora do server): traduz o Upgrade do cliente pro Connection
+map $http_upgrade $conexao_upgrade { default upgrade; '' close; }
+
+# A sala de presença. Vem antes do `location /` de propósito, e precisa do
+# HTTP/1.1 — o padrão do proxy_pass é 1.0, que não tem Upgrade.
+location /sala {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $conexao_upgrade;
+    proxy_set_header Host $host;
+    proxy_read_timeout 3600s;   # sem isto o socket cai a cada 60s ocioso
+}
+
 location / {
     proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;
