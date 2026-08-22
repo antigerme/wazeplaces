@@ -643,13 +643,41 @@ test('sem nome, o endereço vira a identidade — e a ausência não some', () =
   // dado, não dava pra saber se o local se chamava "sem nome" ou se não tinha
   // nome. É o padrão do Google Maps (ponto sem nome é titulado pelo endereço).
   //
-  // A ausência não pode sumir junto: num pedido de place ela é informação de
-  // decisão (RESIDENCE_HOME sem nome é forte candidato a rejeitar). Daí o selo.
+  // A ausência não pode sumir junto — mas o selo marca ausência INESPERADA, não
+  // ausência. A justificativa que estava aqui ("RESIDENCE_HOME sem nome é forte
+  // candidato a rejeitar") era raciocínio de escrivaninha sobre uma amostra
+  // brasileira pequena, e o dado nega: MEDIDO em 4692 pedidos dos 13 países de
+  // validação, RESIDENCE_HOME é 100% sem nome (325 de 325). Sinal que dispara
+  // em toda uma classe não distingue nada dentro dela — e, em destaque no topo
+  // do card, lê como alerta, convidando a rejeitar o que está normal.
+  // O owner apontou: "para a categoria Residencial isso não é candidato forte a
+  // rejeitar, é normal pois realmente não tem nome."
+  // Onde ela É exceção o selo fica: PARKING_LOT 8,1%, PARK 8,3%,
+  // CHARGING_STATION 4,0% — e ZERO em GAS_STATION (427), RESTAURANT (149) e
+  // SUPERMARKET_GROCERY (125), onde um sem-nome seria genuinamente estranho.
   const APP_ = read('js/app.js');
   const fn = APP_.match(/function identidadeDoPlace\([\s\S]*?\n\}/);
   assert.ok(fn, 'sumiu a cadeia de identidade do card');
   assert.match(fn[0], /place\.address/, 'o endereço parou de virar título quando falta o nome');
   assert.match(fn[0], /card\.noName/, 'sumiu o título de último recurso (nem nome nem endereço)');
+
+  // ── o selo marca ausência INESPERADA ──────────────────────────────────
+  // Sem isto o selo volta a disparar em 100% dos residenciais, que é ruído com
+  // cara de alerta. E a supressão precisa valer no CALL SITE: deixar a regra só
+  // declarada numa constante que ninguém consulta é o modo silencioso de falhar.
+  assert.match(APP_, /const CATEGORIAS_SEM_NOME_ESPERADO = Object\.freeze\(\[[^\]]*'RESIDENCE_HOME'/,
+    'sumiu a lista de categorias em que a ausência de nome é esperada');
+  const usoSelo = APP_.match(/card-no-name-badge'\)[\s\S]{0,160}?;/);
+  assert.ok(usoSelo, 'sumiu o ponto onde o selo é mostrado/escondido');
+  assert.match(usoSelo[0], /ausenciaDeNomeEsperada/,
+    'o selo voltou a depender só de `semNome` — dispara em 100% dos residenciais');
+  // A lista é de EXCEÇÃO medida, não de palpite: categoria só entra com taxa de
+  // ausência perto de 100%. Hoje é uma só, e crescer sem medir é o que trouxe a
+  // premissa errada da primeira vez.
+  const lista = APP_.match(/const CATEGORIAS_SEM_NOME_ESPERADO = Object\.freeze\(\[([^\]]*)\]/)[1];
+  const quantas = lista.split(',').filter((x) => x.trim()).length;
+  assert.ok(quantas <= 2,
+    `${quantas} categorias na lista — cada uma precisa de taxa medida perto de 100%, revisite este guard ao crescer`);
   assert.match(APP_, /card-no-name-badge/, 'sumiu o selo de "sem nome" — a ausência ficou invisível');
   assert.match(HTML, /card-no-name-badge/, 'sumiu o selo do template do card');
   // Endereço promovido a título não se repete embaixo.

@@ -2974,7 +2974,10 @@ function renderCurrentCard() {
     elNome.textContent = ident.titulo;
     elNome.classList.toggle('valor-ausente', ident.ausente);
     elNome.classList.toggle('titulo-endereco', ident.tituloEhEndereco);
-    card.querySelector('.card-no-name-badge').classList.toggle('hidden', !ident.semNome);
+    // `semNome` segue verdadeiro (o local É sem nome, e outros pontos podem
+    // querer saber); o que muda é MOSTRAR — ver ausenciaDeNomeEsperada.
+    card.querySelector('.card-no-name-badge')
+        .classList.toggle('hidden', !ident.semNome || ausenciaDeNomeEsperada(place));
     // Categoria vai CRUA, de propósito. Traduzi as mais comuns uma vez e o owner
     // reverteu com um motivo que eu não tinha: o Waze REGIONALIZA categoria por
     // país, então uma tabela fixa pt/en/es/fr está errada fora do recorte onde
@@ -4194,7 +4197,8 @@ function marcarBordaRolagem(el) {
 // nome, e o que faltava aqui: "sem nome" ocupava o slot de 1.35rem enquanto a
 // única coisa que identificava o local ficava em cinza pequeno logo abaixo.
 // Invertido. A ausência não some: vira selo (ver .card-no-name-badge), porque
-// num pedido de place ela é informação de decisão.
+// num pedido de place ela PODE ser informação de decisão — mas só onde ela é
+// INESPERADA, e é isso que `ausenciaEsperada` decide.
 //
 // Cadeia: nome → endereço → "(local sem nome)". Só o último é placeholder — o
 // endereço promovido é DADO, e por isso não leva o esmaecido de ausente.
@@ -4204,6 +4208,34 @@ function identidadeDoPlace(place) {
     const endereco = String(place.address || '').trim();
     if (endereco) return { titulo: endereco, semNome: true, tituloEhEndereco: true, ausente: false };
     return { titulo: t('card.noName'), semNome: true, tituloEhEndereco: false, ausente: true };
+}
+
+// Categorias em que NÃO ter nome é o normal — o selo não aparece nelas.
+//
+// MEDIDO em 4692 pedidos dos 13 países de validação (o dado CRU do Waze, não a
+// fila filtrada por permissão, que fora do Brasil devolve zero): a ausência de
+// nome é 100% em RESIDENCE_HOME (325 de 325) e exceção em todo o resto —
+// PARKING_LOT 8,1%, PARK 8,3%, CHARGING_STATION 4,0%, e ZERO em GAS_STATION
+// (427), RESTAURANT (149) e SUPERMARKET_GROCERY (125).
+//
+// Sinal que dispara em 100% de uma classe não distingue nada dentro dela: ele
+// não diz "olhe isto", diz "isto é RESIDENCE_HOME" — que a linha de categoria
+// logo abaixo já diz. Pior: selo em destaque no topo lê como alerta, e para
+// casa a ausência é normal, então ele convidava a rejeitar o que está certo.
+// São 8% da fila global e 15% da do owner — não é caso de canto.
+//
+// A regra que fica: o selo marca ausência INESPERADA, não ausência. Categoria
+// nova entra aqui só com a taxa medida perto de 100%; abaixo disso, o selo
+// informa e deve aparecer.
+//
+// Isto substitui a justificativa antiga ("RESIDENCE_HOME sem nome é forte
+// candidato a rejeitar"), que era raciocínio de escrivaninha sobre uma amostra
+// brasileira pequena — e que o dado nega.
+const CATEGORIAS_SEM_NOME_ESPERADO = Object.freeze(['RESIDENCE_HOME']);
+
+function ausenciaDeNomeEsperada(place) {
+    const cats = Array.isArray(place && place.categories) ? place.categories : [];
+    return cats.some((c) => CATEGORIAS_SEM_NOME_ESPERADO.includes(c));
 }
 
 // Escreve valor OU placeholder, marcando qual dos dois é. O texto entre
