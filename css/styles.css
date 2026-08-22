@@ -2003,3 +2003,182 @@ button:active {
     mask-image: none;
   }
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRESENÇA E CONVERSA
+   Lista de quem está na mesma fila, e a conversa 1:1.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* O quadradinho da marca sai do cabeçalho em tela estreita DEPOIS do login: o
+   <h1> já vira sr-only quando o perfil aparece (js/app.js), então o que sobra
+   ali é decoração — e ela custava 40px num cabeçalho onde o nome do editor já
+   chegava a ZERO (medido no Galaxy Fold, em origin/main, antes desta PR).
+   Deslogado ele fica: é a tela em que a marca ainda se apresenta. */
+@media (max-width: 400px) {
+  header:has(#userProfileBadge:not(.hidden)) #brandLogo { display: none; }
+}
+
+/* Selo SOBRE o ícone (M3 "badged icon button"): o número não pode custar
+   largura própria num cabeçalho que já não tinha folga. `min-width` igual à
+   altura mantém o círculo redondo em 1 dígito e vira cápsula em 2. */
+.presenca-selo {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: rgb(100 116 139);
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.05rem;
+  text-align: center;
+  box-shadow: 0 0 0 2px rgb(255 255 255);
+}
+.dark .presenca-selo { box-shadow: 0 0 0 2px rgb(30 41 59); }
+/* Estado "tem mensagem sua": o ícone já trocou de gente pra balão; a cor é
+   reforço, nunca o único sinal. */
+.presenca-selo.tem-msg { background: rgb(14 116 144); }
+
+.presenca-lista { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.presenca-lista li {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Linha inteira é o alvo: o nome sozinho seria um alvo de 60px numa linha de
+   340px, e a régua M3/HIG é sobre o que o dedo alcança, não sobre o que o
+   texto ocupa. */
+.presenca-linha {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+.presenca-linha:hover { background: rgb(236 254 255); }
+.dark .presenca-linha:hover { background: rgb(6 182 212 / 0.1); }
+
+.presenca-nome {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: rgb(51 65 85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dark .presenca-nome { color: rgb(226 232 240); }
+
+.presenca-selos {
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgb(100 116 139);
+}
+.dark .presenca-selos { color: rgb(148 163 184); }
+
+.presenca-badge {
+  flex-shrink: 0;
+  min-width: 1.25rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: rgb(14 116 144);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+.presenca-bloquear {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: rgb(148 163 184);
+}
+.presenca-bloquear svg { width: 1.125rem; height: 1.125rem; }
+.presenca-bloquear:hover { color: rgb(225 29 72); background: rgb(255 241 242); }
+.dark .presenca-bloquear:hover { color: rgb(253 164 175); background: rgb(244 63 94 / 0.12); }
+
+.presenca-desbloquear {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgb(8 145 178);
+}
+.dark .presenca-desbloquear { color: rgb(103 232 249); }
+
+/* A folha respeita a área segura de baixo: sem isto, o último item fica sob a
+   barra de gestos do iPhone. O teto é `100%` da raiz (que já desconta o
+   teclado), e não `70dvh` sozinho — `dvh` é a viewport, e a viewport encolhida
+   pelo teclado ainda pode ser menor que 70% dela mesma antes de encolher. */
+.folha { max-height: min(70dvh, 100%); padding-bottom: calc(1.25rem + env(safe-area-inset-bottom)); }
+
+/* ── A CONVERSA E O TECLADO ─────────────────────────────────────────────────
+   O campo de texto é o item mais baixo de uma folha ancorada embaixo — ou
+   seja, exatamente onde o teclado virtual aparece. A conta certa é subir a
+   RAIZ do modal (`bottom`), e só ela. É a construção alternativa à do diálogo
+   centralizado (`pb-[calc(1rem+var(--kb-inset))]` + teto que desconta o mesmo
+   valor): numa folha ancorada embaixo, aquela conta é feita duas vezes.
+   Descontar o `--kb-inset` TAMBÉM do `max-height` da folha conta duas vezes:
+   `max-height` já inclui o `padding-bottom`, e o resultado medido foi o campo
+   continuar coberto (−20,5px, depois −9px) até a conta ser feita num lugar só
+   (+12px de folga). */
+.folha-modal { bottom: var(--kb-inset, 0px); }
+
+.conversa-folha {
+  max-height: 100%;
+  height: min(70dvh, 100%);
+}
+
+.conversa-msgs { font-size: 0.875rem; }
+
+.conversa-bolha {
+  max-width: 85%;
+  width: fit-content;
+  padding: 0.5rem 0.75rem;
+  border-radius: 1rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+/* cyan-700, não cyan-600: branco sobre o 600 dá 3,68:1 e reprova no WCAG
+   1.4.3 (mín. 4,5 pra texto normal). Medido nos dois temas — a bolha é a mesma
+   cor nos dois, então errar aqui erra em todo lugar. */
+.conversa-bolha.minha {
+  margin-left: auto;
+  background: rgb(14 116 144);
+  color: #fff;
+  border-bottom-right-radius: 0.25rem;
+}
+.conversa-bolha.dela {
+  background: rgb(241 245 249);
+  color: rgb(30 41 59);
+  border-bottom-left-radius: 0.25rem;
+}
+.dark .conversa-bolha.dela { background: rgb(51 65 85); color: rgb(226 232 240); }
+
+.conversa-vazio {
+  text-align: center;
+  color: rgb(100 116 139);
+  padding: 2rem 0;
+}
+.dark .conversa-vazio { color: rgb(148 163 184); }
+
+#conversaForm { padding-bottom: calc(0.5rem + env(safe-area-inset-bottom)); }

@@ -8,6 +8,35 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.22-04
+
+### Adicionado
+- **Você consegue ver quem mais está na sua fila — e falar com essa pessoa.** Uma pílula 👥 aparece no topo quando há outros editores triando a MESMA fila que você (mesma região, mesmo país, mesmo estado). Toque nela e a lista mostra quem é, o nível e se é Area Manager. Toque num nome e abre uma conversa.
+
+  A companhia já existia: dá pra notar pedidos sumindo da fila enquanto você trabalha. O que faltava era **ver**. Triar 200 pedidos sozinho e triar 200 sabendo que tem mais três pessoas do outro lado são coisas diferentes.
+
+  **A mensagem não passa pelo nosso servidor.** Ela vai cifrada direto de um aparelho pro outro (WebRTC); o servidor só apresenta os dois. Não fica guardada em lugar nenhum — fechou a conversa, acabou, e não há histórico pra buscar depois.
+
+  **O que o servidor sabe, e por quanto tempo:** enquanto você está conectado, o seu nome do WME, o seu nível, se você é AM e a fila escolhida. Nada disso vai pra disco, e some assim que você sai — a presença é a própria conexão aberta, não um registro com prazo.
+
+  **O nome não sai do seu aparelho:** ele vem do Waze, conferido pelo servidor e assinado. É o que impede alguém de se apresentar na lista como um editor que não é.
+
+  Vem **ligado**, e sai pelo interruptor "Ver quem está na fila" em *Filtros e preferências → Preferências*. Dá pra bloquear alguém pelo ✕ ao lado do nome (o bloqueio fica só no seu aparelho).
+
+  Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme): *"traz sentimento de pertencimento pois mostra que a pessoa não está sozinha"*.
+
+### Mudado
+- **O quadradinho da marca some do topo em telas estreitas depois que você entra**, devolvendo espaço ao seu nome. Antes, no Galaxy Fold, o nome do editor não cabia de jeito nenhum.
+
+---
+
+## v2026.08.22-03
+
+### Mudado
+- **Modo Desenvolvedor virou a primeira opção das Preferências**, e perdeu o parágrafo explicativo. Ele modifica as opções abaixo dele (fura a trava do "Permitir desfazer ações"), então precisa ser lido antes — e quem destravou o modo dev já sabe o que ele faz. Invisível pra quem nunca deu os 7 toques na versão.
+
+---
+
 ## v2026.08.22-02
 
 ### Corrigido

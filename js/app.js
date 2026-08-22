@@ -165,7 +165,7 @@ const AppState = {
     _profilePromise: null,
     loadError: false,
     filters: { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
-    preferences: { undoEnabled: true, semUndoSeguidas: 0 },
+    preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true },
     devMode: { unlocked: false, active: false },
     profile: null,
     countries: [],
@@ -399,7 +399,7 @@ function mostrarEntrandoPelaExtensao(ligado) {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal'];
 
 let lastFocusedBeforeModal = null;
 
@@ -513,6 +513,12 @@ const LIMPEZA_AO_FECHAR = {
         const copiar = document.getElementById('pairCopyLinkBtn');
         if (copiar) copiar.disabled = true;
     },
+    conversaModal() {
+        // Fechar a conversa por QUALQUER caminho (✕, Esc, scrim, voltar) tem
+        // que soltar o `aberta` — senão a próxima mensagem daquela pessoa
+        // continua chegando como "conversa aberta" e nunca vira aviso.
+        window.Presenca?.esquecerAberta?.();
+    },
     pairEnterModal() {
         const campo = document.getElementById('pairCodeInput');
         if (campo) campo.value = '';
@@ -585,6 +591,11 @@ function setupAppListeners() {
         startFetching();
     });
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
+    $('presencaClose').addEventListener('click', () => closeModal('presencaModal'));
+    $('conversaClose').addEventListener('click', () => Presenca.fecharConversa());
+    // O resto da presença (pílula, lista, envio) se liga sozinho: `montar` é do
+    // js/presenca.js, que carrega depois deste arquivo.
+    window.Presenca?.montar?.();
     $('closeHelp').addEventListener('click', () => closeModal('helpModal'));
     $('reverComoFunciona')?.addEventListener('click', abrirComoFunciona);
     $('comoFuncionaOk')?.addEventListener('click', () => closeModal('comoFuncionaModal'));
@@ -1008,6 +1019,11 @@ function setupModalListeners() {
         // canDisableUndo aqui é cinto de segurança contra DOM editado à mão.
         AppState.preferences.undoEnabled = canDisableUndo() ? e.target.checked : true;
         savePreferences();
+    });
+    $('prefPresenca').addEventListener('change', (e) => {
+        AppState.preferences.presenca = e.target.checked;
+        savePreferences();
+        window.Presenca?.sincronizar?.();
     });
     $('prefDevModeActive').addEventListener('change', (e) => {
         if (!AppState.devMode.unlocked) return;
@@ -2153,6 +2169,7 @@ async function openFiltersModal() {
     switchFilterTab('filtersTabFilters');
     renderDevModeSection();
     renderUndoGateUI();
+    renderPresencaPref();
     $('filterUnreadOnly').checked = AppState.filters.unreadOnly !== false;
     document.querySelectorAll('.filter-type').forEach(cb => {
         cb.checked = AppState.filters.types.includes(cb.value);
@@ -2221,6 +2238,8 @@ function applyFiltersFromModal() {
     AppState.filters.sortOrder = ($('filterSort') && $('filterSort').value === 'oldest') ? 'oldest' : 'newest';
     saveFilters();
     closeModal('filtersModal');
+    // A sala É a fila: mudou país ou estado, a companhia é outra.
+    window.Presenca?.sincronizar?.();
     resetQueue();
     startFetching();
 }
@@ -2328,6 +2347,9 @@ function showAuthScreen() {
     if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
     AppState.profile = null;
+    // Deslogado não tem crachá, então não tem sala. Fecha o socket na hora em
+    // vez de deixar a conexão viva com uma sessão que já não vale.
+    window.Presenca?.desligar?.();
 }
 
 function showMainScreen() {
@@ -2337,6 +2359,8 @@ function showMainScreen() {
     document.getElementById('refreshBtn').classList.remove('hidden');
     AppState.authenticated = true;
     updateDevBadge();
+    // A sala só faz sentido logado: é o crachá do WME que abre a porta.
+    window.Presenca?.sincronizar?.();
 }
 
 async function handleFileUpload(e) {
@@ -2653,7 +2677,7 @@ async function handleLogout() {
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
     AppState.filters = { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
-    AppState.preferences = { undoEnabled: true };
+    AppState.preferences = { undoEnabled: true, presenca: true };
     AppState.devMode = { unlocked: false, active: false };
     AppState.profile = null;
     AppState.authenticated = false;
@@ -2664,6 +2688,9 @@ async function handleLogout() {
     // "Sair limpa tudo" não tem exceção que ninguém decidiu: este marcador (o
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
+    // Fecha a conexão da sala e apaga os bloqueios: são escolhas de quem
+    // entrou, não preferência do aparelho.
+    window.Presenca?.esquecer?.();
     esquecerPrazoDaSessao(); // prazo da sessão do Waze: some com o resto
     avatarPendente = null;   // a próxima entrada volta a esperar o primeiro card
     telaPronta = false;
@@ -5474,6 +5501,9 @@ function loadPreferences() {
         if (raw) {
             const parsed = JSON.parse(raw);
             AppState.preferences.undoEnabled = parsed.undoEnabled !== false;
+            // Opt-out: só desliga quem DISSE que quer desligado. `undefined`
+            // (quem nunca abriu as Preferências) fica ligado, que é o padrão.
+            if (typeof parsed.presenca === 'boolean') AppState.preferences.presenca = parsed.presenca;
             // undefined = nunca decidido (user antigo ou primeira visita).
             // Só copia se for boolean, pra initUndoGateSeen poder decidir depois.
             if (typeof parsed.undoGateSeen === 'boolean') {
@@ -5968,6 +5998,11 @@ function canDisableUndo() {
     // Modo Desenvolvedor bypassa o gate de experiência completamente.
     if (AppState.devMode && AppState.devMode.active) return true;
     return getUndoTreatedCount() >= getUndoUnlockThreshold();
+}
+
+function renderPresencaPref() {
+    const cb = document.getElementById('prefPresenca');
+    if (cb) cb.checked = AppState.preferences.presenca !== false;
 }
 
 function renderUndoGateUI() {

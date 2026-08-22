@@ -14,6 +14,19 @@
     "directory": ".",
     "binding": "ASSETS"
   },
+  // Presença: um Durable Object por FILA. `new_sqlite_classes` (e não
+  // `new_classes`) porque é o backend SQLite que libera Durable Objects no
+  // plano gratuito — a app roda no free tier, e classe migrada como
+  // `new_classes` é recusada no deploy sem plano pago.
+  //
+  // A sala não GRAVA nada (a presença é a conexão aberta); o backend SQLite
+  // está aqui só como forma de migração aceita no free tier.
+  "durable_objects": {
+    "bindings": [{ "name": "SALA", "class_name": "SalaDO" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SalaDO"] }
+  ],
   "kv_namespaces": [
     {
       "binding": "SESSIONS",

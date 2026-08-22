@@ -7,10 +7,15 @@
 //   - ASSETS   → assets estáticos (configurado em wrangler.jsonc: assets.binding)
 //   - SESSIONS → namespace KV pras sessões
 //   - ENCRYPTION_KEY → Secret (base64, 32 bytes): openssl rand -base64 32
+//   - SALA     → Durable Object da presença (worker/sala-do.mjs)
+//   - TURN_URLS / TURN_SECRET → opcionais; sem eles a conversa fica só com STUN
 //
 // Toda a lógica vive em server/core.mjs (compartilhada com a VM Node).
 
-import { dispatch, makeSessions, base64ToBytes, SESSION_TTL } from '../server/core.mjs';
+import { dispatch, makeSessions, makeCrachas, base64ToBytes, SESSION_TTL } from '../server/core.mjs';
+import { limpar } from '../server/presenca.mjs';
+
+export { SalaDO } from './sala-do.mjs';
 
 const json = (body, status) =>
   new Response(JSON.stringify(body), {
@@ -21,6 +26,16 @@ const json = (body, status) =>
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // Sala de presença: WebSocket direto pro Durable Object daquela FILA. O
+    // nome da sala escolhe o objeto; quem decide se o socket entra é o crachá
+    // assinado, conferido lá dentro.
+    if (url.pathname === '/sala') {
+      if (!env.SALA) return json({ success: false, error: 'Presença não configurada' }, 500);
+      const sala = limpar(url.searchParams.get('s'));
+      if (!sala) return json({ success: false, error: 'Sala ausente' }, 400);
+      return env.SALA.get(env.SALA.idFromName(sala)).fetch(request);
+    }
 
     if (url.pathname.startsWith('/api/')) {
       if (request.method !== 'POST') {
@@ -48,8 +63,10 @@ export default {
           delete: (h) => env.SESSIONS.delete('sess_' + h),
         };
         const sessions = makeSessions({ store, keyBytes });
+        const crachas = makeCrachas({ keyBytes });
+        const turn = { urls: env.TURN_URLS || '', segredo: env.TURN_SECRET || '' };
 
-        const { status, body } = await dispatch(route, data, { sessions });
+        const { status, body } = await dispatch(route, data, { sessions, crachas, turn });
         return json(body, status);
       } catch (err) {
         console.error('Erro no handler /api:', err);

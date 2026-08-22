@@ -117,6 +117,9 @@ wazeplaces/
 │   ├── i18n.js              # i18n pt/en/es/fr (sem lib): I18N_DICT + t()/applyI18n()/setLang() + setI18nVars(). FONTE ÚNICA de strings de UI.
 │   │                        #   LANGS_SUPORTADOS = Object.keys(I18N_DICT) — a lista de idiomas é o próprio dicionário. Carregado antes do app.js
 │   ├── api.js               # Wrapper fetch() dos endpoints /api/* (única fonte de chamadas HTTP; SEM .php)
+│   ├── presenca.js          # Presença + conversa 1:1. WebSocket pra sala (só sinalização) e
+│   │                        #   WebRTC DataChannel pro texto. Carrega DEPOIS do app.js — usa
+│   │                        #   AppState/openModal/showToast dele
 │   ├── app.js               # AppState, render, handlers, fila, prefetch, error handling
 │   ├── swipe.js             # Gestos drag/swipe (esquerda, direita, cima)
 │   │                        # (o tema virou <script> INLINE no index.html, autorizado por HASH
@@ -126,11 +129,16 @@ wazeplaces/
 │   ├── sw-register.js       # Registro/auto-update do service worker. Externo pelo mesmo motivo
 │   └── (sem vendor: Tailwind é pré-compilado em css/app.css)
 ├── server/
+│   ├── presenca.mjs         # Núcleo PURO da sala (crachá assinado, nome da sala, lista, TURN).
+│   │                        #   Sem plataforma, sem I/O, sem relógio: os DOIS servidores importam daqui
+│   ├── ws.mjs               # WebSocket RFC 6455 do lado servidor, só o que a sala usa. Node puro,
+│   │                        #   zero dependência (o runtime da Cloudflare traz o dele)
 │   ├── core.mjs             # Lógica compartilhada: sessões, cripto (AES-GCM), callWaze (fetch),
 │   │                        #   categorizeWazeError, isUserAllowed, 8 handlers, dispatch(). ÚNICO lugar de lógica.
 │   └── node.mjs             # Adaptador VM/Node: http server + estáticos + fs sessions + key auto-gen
 ├── worker/
-│   └── index.mjs            # Adaptador Cloudflare Workers: roteia /api/* (store=KV, key=Secret) e delega estáticos pro ASSETS
+│   ├── sala-do.mjs          # Durable Object da sala: um por FILA, WebSocket com hibernação
+│   └── index.mjs            # Adaptador Cloudflare Workers: roteia /api/* (store=KV, key=Secret), /sala (DO) e delega estáticos pro ASSETS
 ├── _headers                 # Cloudflare: headers/CSP/cache (substitui o antigo .htaccess)
 ├── wrangler.jsonc           # Cloudflare: binding do KV SESSIONS + compat date
 ├── .assetsignore            # Exclui server/docs/etc do publish estático dos Workers (static assets)
@@ -148,6 +156,8 @@ wazeplaces/
 │   ├── png-palette.mjs      # PNG truecolor → paleta 8 bits, zero dep (só node:zlib). Splash chapada
 │   │                        #   em RGBA custava 946KB; em paleta, 335KB. k-center, não frequência.
 │   ├── smoke-browser.mjs    # Smoke de layout (npm run test:browser): aparelhos × idiomas × tipos de card
+│   ├── smoke-presenca.mjs   # Smoke da presença (npm run test:presenca): DOIS navegadores, uma sala,
+│   │                        #   uma conversa de verdade. É o único teste que exercita WebRTC
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
 │   └── waze-probe.mjs       # Fala com o Waze REAL, só leitura (ver seção 🔑). Valida cookies,
@@ -183,6 +193,7 @@ Pra simular o ambiente Cloudflare (Worker + KV): `npx wrangler dev`.
 npm run check          # node --check em js/*.js server/*.mjs worker/*.mjs
 npm test               # node --test — suite pura do core (test/core.test.mjs), ZERO deps
 npm run css            # SÓ se mexeu em classe do Tailwind OU no css/styles.css (regenera css/app.css; CI cobra)
+npm run test:presenca  # SÓ se mexeu em presença/sala: 2 navegadores, WebSocket e WebRTC de verdade
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
 node tools/waze-probe.mjs <cookies.txt>   # OBRIGATÓRIO se mexeu em algo que fala com o Waze (ver 🔑)
 ```
@@ -282,6 +293,27 @@ Motivo: HAR é uma foto do passado, chega em 5–20MB, e cada dúvida nova custa
 
 ---
 
+## 👥 Presença e conversa entre editores
+
+Triar pedido era trabalho solitário: a companhia já existia (dá pra ver pedidos sumindo da própria fila), mas não era **visível**. A pílula do cabeçalho mostra quem mais está na MESMA fila, e dali sai uma conversa 1:1.
+
+**A sala É a fila** (`salaDaFila` em `server/presenca.mjs` → `row:30:5`). Ninguém combina nada, ninguém cria sala: dois editores triando o Brasil já estão no mesmo lugar por definição. **O nome da sala nasce só no servidor** — o cliente manda região/país/estado e recebe a sala DENTRO do crachá; montar a string dos dois lados é como eles deixam de casar sem ninguém perceber, e o sintoma ("não vejo ninguém") não se depura.
+
+**A presença É a conexão aberta.** Nada em disco, nada com prazo: socket fechou, saiu da lista. Isso some com um problema inteiro — não há TTL pra acertar nem número na Ajuda pra divergir do código. A Ajuda diz "some assim que você sai" nas 4 línguas porque é literalmente o que acontece. Se alguém puser presença com prazo, a Ajuda vira mentira (travado em `test/presenca.test.mjs`).
+
+**A identidade vem de um CRACHÁ assinado pelo servidor**, nunca do cliente: aqui o nome carrega REPUTAÇÃO (rank, Area Manager), e quem pudesse se dizer `carla_am` estaria convidando todo mundo a se passar por autoridade. `/api/presenca` chama o `/Session` do Waze com os cookies daquela sessão, aplica o MESMO gate do login e assina `peer|nome|rank|am|staff|sala|exp` com `HKDF(ENCRYPTION_KEY)` — chave DERIVADA e não Secret novo, porque Secret novo é mais uma coisa pra faltar num ambiente e "resolver" aceitando crachá sem assinatura. **O `sessionToken` não entra nisso**: ele é metade da chave dos cookies (gotcha #60) e o upgrade de WebSocket leva a URL pro log de acesso — o crachá existe justamente pra ser o que PODE aparecer numa query.
+
+**A mensagem não passa pelo servidor.** A sala transporta só o aperto de mão (offer/answer/ICE); o texto vai por DataChannel cifrado com DTLS, direto entre os aparelhos, e não fica guardado em lugar nenhum.
+
+**WebSocket, não polling, e o motivo é custo**: polling de 30s são ~2.880 requisições/dia POR EDITOR, e dez editores comem um terço do free tier sem ninguém ter conversado. Um WebSocket é UMA requisição. Na Cloudflare é um Durable Object por fila com a **Hibernation API** (`state.acceptWebSocket`, não `accept()`) e `setWebSocketAutoResponse('ping','pong')` — o keepalive é respondido pelo RUNTIME e nem acorda o objeto. A migração é `new_sqlite_classes` (e não `new_classes`): é o backend SQLite que libera Durable Object no plano gratuito. Na VM, `server/ws.mjs` implementa o RFC 6455 à mão (~150 linhas, zero dependência) e as salas são um `Map` em memória.
+
+**Gotchas que já custaram tempo aqui:**
+- **Socket de upgrade fica MEIO-ABERTO**: quando o outro lado some, o Node emite `end`, e o `close` fica esperando NÓS fecharmos a escrita. Ouvindo só `close`, quem fechava a app continuava na lista dos outros para sempre. Ouça os dois.
+- **Fechar o DataChannel dispara `onclose`**, que escrevia `estado: 'fechada'` por cima do motivo já decidido ("saiu"). Solte os ouvintes ANTES de fechar.
+- **Cor sozinha não avisa nada**: mensagem nova troca o ÍCONE da pílula (gente → balão) e o rótulo, não só o tom do selo (WCAG 1.4.1).
+- **O número vai como SELO SOBRE o ícone** (M3 "badged icon button"), não ao lado: ao lado a pílula custava 56px e, medido, estourava o cabeçalho no Galaxy Fold (289 > 280) e zerava o nome do perfil no iPhone SE. Como selo custa os mesmos 44px de todo botão de lá — e o vão de 8px entre os botões saiu junto (alvo de 44px pode encostar; o vão era espaçamento puro).
+- **`connect-src 'self'` cobre o WebSocket** de mesma origem — medido, não suposto: o smoke roda com a CSP da app e conecta.
+
 ## 🌐 Endpoints proxy → Waze
 
 Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sessionToken`, carregam os cookies criptografados do store, fazem `fetch` ao Waze (via `callWaze`), normalizam a resposta. Roteados por `dispatch(name, data, { sessions })`. O nome do endpoint é **sem `.php`** (o dispatch tolera sufixo `.php` por compat de cache antigo). Multi-região (`row`/`na`/`il`/`world`) via helpers em `core.mjs` (`wazeIssuesEndpoint`, etc).
@@ -298,6 +330,7 @@ Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sess
 | `renomear-local` | `/row-Descartes/app/Features` (`UPDATE_OBJECT`/`venue`) | Corrige nome existente. **O Waze RECUSA escrita de atributo em local não aprovado** — medido com controle (mesmo payload, mesma sessão): `approved:false` → **HTTP 406**, `approved:true` → 200. Por isso o place carrega `localAprovado` e o portão do lightbox o consulta: são **29%** dos cards com nome (40% da fila do owner), e oferecer ali seria digitar o nome certo pra levar erro genérico |
 | `excluir-foto` | `/row-Descartes/app/Features` (`UPDATE_OBJECT`/`venue`) | O Waze **não apaga: SUBSTITUI a lista `images` inteira** — daí o `relerLocal` por bbox antes de escrever (gotcha #57). `action: 'preparar'` só aquece o cache de releitura |
 | `perfil` | `/row-Descartes/app/Session?language=pt-BR` | Extrai bbox de `areas[].geometry.coordinates` |
+| `presenca` | `/row-Descartes/app/Session` (só pra emitir o crachá) | Devolve `cracha` (nome/rank/AM assinados + a sala já resolvida) e `ice` (STUN sempre; TURN se `TURN_URLS`/`TURN_SECRET` existirem). Aplica o MESMO gate do login |
 | `lista-paises` | `/row-Descartes/app/LocationSearch/Countries` | Nomes vêm **sempre em inglês** (ver nota abaixo). Ordem base no servidor; o cliente reordena na colação do idioma (`ordenarPorNome`) |
 | `lista-estados` | `/row-Descartes/app/LocationSearch/States?countryId=N` | Nomes vêm no idioma **local** (Amapá, Ceará) — é o nome próprio. Idem ordenação |
 

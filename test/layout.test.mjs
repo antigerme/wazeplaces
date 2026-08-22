@@ -283,6 +283,28 @@ test('o teclado virtual não pode voltar a engolir os modais', () => {
     // O scrim (raiz) sobe com o teclado; o teto de altura fica no CARD, que é
     // o filho — checar tudo na mesma linha deixaria o teto passar batido.
     assert.match(linhas[i], /modal-root/, `modal ${id} sem .modal-root — fica fora da defesa do teclado`);
+
+    // DUAS construções valem, e a diferença não é gosto: é onde a conta é
+    // feita. Diálogo CENTRALIZADO empurra o conteúdo pra cima com padding e
+    // desconta o mesmo valor do teto de altura. FOLHA ancorada embaixo sobe a
+    // própria raiz (`bottom`), e o teto dela é 100% da raiz já encolhida —
+    // aplicar a conta do centralizado numa folha desconta o teclado DUAS vezes
+    // (`max-height` já inclui o `padding-bottom`), e o campo continua coberto.
+    if (linhas[i].includes('folha-modal')) {
+      assert.match(CSS_SEM_COMENTARIO, /\.folha-modal\s*\{[^}]*bottom:\s*var\(--kb-inset/,
+        `a folha ${id} não sobe com o teclado: falta o bottom: var(--kb-inset) em styles.css`);
+      // Membro exato da lista de classes, não `\b` na string inteira: `\bfolha\b`
+      // casa DENTRO de `conversa-folha` (o hífen é fronteira de palavra), então
+      // a conversa era conferida contra a regra da OUTRA folha — e a sabotagem
+      // de propósito passava limpa.
+      const folha = ((linhas[i + 1].match(/class="([^"]*)"/) || [])[1] || '').split(/\s+/);
+      const classe = ['folha', 'conversa-folha'].find((c) => folha.includes(c));
+      assert.ok(classe, `a folha ${id} não usa .folha nem .conversa-folha — fica sem teto de altura`);
+      const regra = CSS_SEM_COMENTARIO.match(new RegExp(`\\.${classe}\\s*\\{[^}]*\\}`));
+      assert.ok(regra && /max-height:[^;]*100%/.test(regra[0]),
+        `.${classe} precisa de teto em 100% da raiz (que já desconta o teclado)`);
+      continue;
+    }
     assert.match(linhas[i], /pb-\[calc\(1rem\+var\(--kb-inset,0px\)\)\]/, `modal ${id} não sobe com o teclado`);
     assert.match(linhas[i + 1], /max-h-\[calc\([^\]]*--kb-inset/, `modal ${id} sem teto de altura que desconte o teclado`);
   }

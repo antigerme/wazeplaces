@@ -16,7 +16,8 @@
     "test:browser": "node tools/smoke-browser.mjs",
     "css": "node tools/gerar-css.mjs",
     "cf:dev": "wrangler dev",
-    "cf:deploy": "wrangler deploy"
+    "cf:deploy": "wrangler deploy",
+    "test:presenca": "node tools/smoke-presenca.mjs"
   },
   "engines": {
     "node": ">=18"

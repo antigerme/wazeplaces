@@ -11,6 +11,10 @@
 //   - cURL + arquivo de cookie temporário → fetch com header Cookie
 //   - erro 500 nunca vaza detalhe interno (dispatch devolve mensagem genérica)
 
+import {
+  salaDaFila, assinarCracha, conferirCracha, credenciaisTurn, CRACHA_TTL,
+} from './presenca.mjs';
+
 // ─────────────────────────────────────────────────────────────────────────
 // Constantes
 // ─────────────────────────────────────────────────────────────────────────
@@ -2202,6 +2206,126 @@ async function handleListaEstados(data, { sessions }) {
 // Roteamento
 // ─────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────
+// Presença — crachá assinado e credenciais de rede
+// ─────────────────────────────────────────────────────────────────────────
+//
+// A sala (`server/presenca.mjs`) não fala com o Waze e não conhece sessão: ela
+// só confere um CRACHÁ. Quem emite crachá é este handler, que já tem o que a
+// sala não tem — os cookies daquela sessão e, com eles, o `/Session` do Waze.
+//
+// A chave que assina NÃO é um Secret novo: é HKDF do `ENCRYPTION_KEY` com um
+// `info` próprio. Secret novo é mais uma coisa pra configurar em dois ambientes
+// e esquecer num — e o dia em que ele falta é o dia em que alguém "resolve"
+// aceitando crachá sem assinatura. Derivar torna impossível estar ausente.
+//
+// `info` diferente do das sessões de propósito: mesmo material, chaves
+// independentes. Um oráculo de assinatura de crachá não vira material pra
+// decifrar cookie.
+async function segredoDeCracha(keyBytes) {
+  const ikm = await crypto.subtle.importKey('raw', keyBytes, 'HKDF', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({
+    name: 'HKDF',
+    hash: 'SHA-256',
+    salt: new TextEncoder().encode('cracha'),
+    info: new TextEncoder().encode('wazeplaces/cracha/v1'),
+  }, ikm, 256);
+  return new Uint8Array(bits);
+}
+
+async function hmacBase64(chaveBytes, msg, hash = 'SHA-256') {
+  const k = await crypto.subtle.importKey('raw', chaveBytes, { name: 'HMAC', hash }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(msg));
+  return bytesToBase64(new Uint8Array(sig));
+}
+
+/**
+ * Assina e confere crachá. Os DOIS adaptadores montam isto com o mesmo
+ * `keyBytes` — o que emite (o handler) e o que confere (a sala) precisam
+ * derivar igual, e derivar é a única forma de garantir que derivam igual.
+ */
+export function makeCrachas({ keyBytes }) {
+  let cache = null;
+  const chave = async () => (cache || (cache = await segredoDeCracha(keyBytes)));
+  return {
+    async assinar(dados, agora = Date.now()) {
+      return assinarCracha(dados, await chave(), agora, hmacBase64);
+    },
+    async conferir(cracha, agora = Date.now()) {
+      return conferirCracha(cracha, await chave(), agora, hmacBase64);
+    },
+  };
+}
+
+// STUN público do Google: só descobre o próprio IP:porta, não transporta nada.
+// Sem ele, dois editores atrás de NAT não se acham — e o par direto é o ponto.
+const STUN_PADRAO = ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'];
+
+/**
+ * `presenca` — porta de entrada da sala. Devolve:
+ *   - `cracha`: nome/rank/AM assinados pelo servidor, mais a SALA resolvida
+ *   - `ice`:    STUN sempre; TURN só se a instalação tiver `turn` configurado
+ *
+ * O nome NÃO vem do cliente. Vem do `/Session` do Waze, com os cookies desta
+ * sessão — porque aqui o nome carrega reputação (rank, Area Manager) e alguém
+ * se dizendo `carla_am` na lista seria um convite a se passar por autoridade.
+ */
+async function handlePresenca(data, { sessions, crachas, turn }) {
+  if (!crachas) apiError('Presença não configurada', 500, 'srv.err.internal');
+
+  const sala = salaDaFila(data && data.region, data && data.countryId, data && data.stateId);
+  // Sem país não há sala: "todo mundo do mundo" não é a fila de ninguém, e a
+  // lista deixaria de dizer o que promete — quem está triando O MESMO lugar.
+  if (!sala) apiError('Sem fila selecionada', 400, 'srv.err.semSala');
+
+  const cookies = await resolveCookies(data, sessions);
+  const region = requireRegion(data);
+  const { cookieHeader, csrf } = prepareAuth(cookies);
+
+  const result = await callWaze(wazeSessionEndpoint(region), cookieHeader, csrf, null, region, { data, sessions, cookies });
+  if (result.httpCode !== 200) {
+    const cat = categorizeWazeError(result.httpCode, result.response, result.error);
+    return {
+      status: cat.category === 'unauthorized' ? 401 : 500,
+      body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
+    };
+  }
+  let rd;
+  try {
+    rd = JSON.parse(result.response);
+  } catch {
+    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  }
+
+  // O MESMO gate do login. Sem isto, quem perdeu o AM depois de logar seguiria
+  // aparecendo na lista — e a lista é justamente onde alguém se apresenta.
+  const check = isUserAllowed(rd);
+  if (!check.allowed) {
+    apiError(check.reason, 403, check.reasonKey, check.reasonVars);
+  }
+
+  const agora = Date.now();
+  const cracha = await crachas.assinar({
+    peer: data && data.peer,
+    nome: rd.userName || '',
+    rank: Number.isInteger(rd.rank) ? rd.rank : 0,
+    am: !!rd.isAreaManager,
+    staff: !!rd.isStaff,
+    sala,
+  }, agora);
+
+  const ice = { iceServers: [{ urls: STUN_PADRAO }] };
+  if (turn && turn.urls && turn.segredo) {
+    // TTL do TURN = o do crachá: a credencial não deve sobreviver ao passe que
+    // a acompanha, senão vira credencial de relay solta na mão do cliente.
+    const t = await credenciaisTurn(turn.urls, turn.segredo, CRACHA_TTL, agora,
+      (seg, msg) => hmacBase64(new TextEncoder().encode(seg), msg, 'SHA-1'));
+    ice.iceServers.push(...t.iceServers);
+  }
+
+  return { status: 200, body: { success: true, cracha, ice } };
+}
+
 const ROUTES = {
   sessao: handleSessao,
   parear: handleParear,
@@ -2212,6 +2336,7 @@ const ROUTES = {
   'excluir-foto': handleExcluirFoto,
   'renomear-local': handleRenomearLocal,
   perfil: handlePerfil,
+  presenca: handlePresenca,
   'lista-paises': handleListaPaises,
   'lista-estados': handleListaEstados,
 };

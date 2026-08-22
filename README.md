@@ -15,6 +15,7 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
   - [Como usar (a forma mais fácil)](#como-usar-a-forma-mais-fácil)
   - [Como exportar seus cookies do Waze](#como-exportar-seus-cookies-do-waze)
   - [Usando a aplicação](#usando-a-aplicação)
+  - [Quem mais está na sua fila](#quem-mais-está-na-sua-fila)
   - [Instalar como app no celular](#instalar-como-app-no-celular)
   - [Quem pode usar](#quem-pode-usar)
   - [Problemas comuns](#problemas-comuns)
@@ -90,6 +91,16 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 - **Link ↗** para abrir o local direto no WME
 
 **Caixa de estatísticas:** **Lidos** · **Rejeitados** · **Pulados** · **Restam**. "Restam" mostra quantos pedidos ainda estão pendentes no Waze; diminui a cada `Lido`/`Rejeitado` (pular não diminui). Sinal `+` (ex: `215+`) = ainda há mais páginas a buscar.
+
+### Quem mais está na sua fila
+
+Quando outro editor está triando a **mesma fila** que você (mesma região, país e estado), aparece uma pílula 👥 no topo com quantos são. Toque nela pra ver quem é — nome, nível e se é Area Manager — e toque num nome pra conversar.
+
+- **A mensagem vai direto de um aparelho pro outro**, cifrada, sem passar pelo servidor da aplicação e sem ficar guardada em lugar nenhum. Fechou a conversa, acabou.
+- **Enquanto você está conectado**, o servidor sabe o seu nome do WME, o seu nível, se você é AM e a fila escolhida. Nada disso é gravado, e some assim que você sai.
+- **O nome vem do Waze**, conferido e assinado pelo servidor — ninguém consegue se apresentar na lista como um editor que não é.
+- Dá pra **bloquear** alguém no ✕ ao lado do nome (fica só no seu aparelho).
+- Vem ligado. Pra desligar: **Filtros e preferências → Preferências → "Ver quem está na fila"**.
 
 ### Instalar como app no celular
 

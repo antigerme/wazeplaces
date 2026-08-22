@@ -201,7 +201,7 @@
     <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-slate-200/50 dark:bg-slate-800/80 dark:border-slate-700" style="padding-top: env(safe-area-inset-top)">
         <div class="container mx-auto px-4 py-3 flex items-center justify-between gap-2 max-w-md">
             <div id="brandBlock" class="flex items-center space-x-2 min-w-0">
-                <div class="bg-gradient-to-tr from-cyan-500 to-blue-500 p-1.5 rounded-lg shadow-sm flex-shrink-0">
+                <div id="brandLogo" class="bg-gradient-to-tr from-cyan-500 to-blue-500 p-1.5 rounded-lg shadow-sm flex-shrink-0">
                     <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
                     </svg>
@@ -224,7 +224,34 @@
                 <img id="userAvatar" width="32" height="32" fetchpriority="low" decoding="async"
                      class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100 flex-shrink-0 dark:bg-slate-800" alt="">
             </div>
-            <div class="flex items-center gap-2">
+            <!-- `gap-0`: os alvos de 44px podem encostar (é o que a barra de ações
+                 do Android faz). O vão de 8px × 4 era espaçamento puro, e eram esses
+                 32px que faltavam pro cabeçalho caber no Galaxy Fold com a pílula. -->
+            <div class="flex items-center">
+                <!-- Vai no GRUPO DE BOTÕES, e não ao lado do perfil. Como irmã do
+                     bloco do perfil ela espremia o nome de 104px pra 49px no Galaxy
+                     Fold — sem estourar nada, então a medição de overflow passava
+                     limpa enquanto o nome virava "andre…". O que se mede aqui é a
+                     largura do #userName, não se a linha transbordou.
+
+                     E o número vai como SELO SOBRE o ícone (padrão M3 "badged icon
+                     button"), não ao lado dele: ao lado, a pílula custava 56px num
+                     cabeçalho que já não tinha folga, e medido no Fold ela estourava
+                     a linha (289 > 280) e zerava o nome do perfil no iPhone SE.
+                     Como selo, ela custa os mesmos 44px de todo botão daqui.
+
+                     Mensagem nova NÃO é só cor: o ícone TROCA (gente → balão) e o
+                     rótulo muda junto. Cor sozinha não transmite informação
+                     (WCAG 1.4.1), e "o número ficou ciano" ninguém percebe. -->
+                <button id="presencaPill" type="button" class="hidden relative min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 rounded-full transition-all dark:text-slate-400">
+                    <svg id="presencaIconGente" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                    </svg>
+                    <svg id="presencaIconMsg" class="hidden w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                    </svg>
+                    <span id="presencaCount" class="presenca-selo tnum">0</span>
+                </button>
                 <button id="themeBtn" type="button" aria-label="Alternar tema" data-i18n-aria="header.theme.aria" aria-pressed="false" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 rounded-full transition-all dark:text-slate-400">
                     <svg id="themeIconLight" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
@@ -663,6 +690,17 @@
                             <p id="prefUndoGateMsg" class="hidden mt-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-100/60 dark:bg-amber-400/10 border border-amber-200 dark:border-amber-400/30 rounded-lg px-2 py-1.5 leading-snug"></p>
                         </div>
 
+                        <!-- ÚLTIMA da aba, e só o NOME: o recurso vem ligado, e
+                             explicar em três linhas como desligá-lo é estimular a
+                             desligar. Quem procura o interruptor acha; quem não
+                             procurava não é convidado a pensar no assunto. -->
+                        <div>
+                            <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
+                                <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.presenca.label">Ver quem está na fila</span>
+                                <input id="prefPresenca" type="checkbox" class="ui-switch" checked>
+                            </label>
+                        </div>
+
                     </div>
 
                     <!-- ══ ABA HISTÓRICO (só leitura) ══ -->
@@ -761,6 +799,50 @@
                     <button id="cancelBatchRead" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">Cancelar</button>
                     <button id="confirmBatchRead" type="button" class="flex-1 min-h-[48px] bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="modal.batchRead.confirm">Marcar lidos</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Lista de quem está na fila. Folha de baixo (bottom sheet, M3): o
+             conteúdo é uma lista curta e o polegar alcança. -->
+        <div id="presencaModal" role="dialog" aria-modal="true" aria-labelledby="presencaTitle" class="hidden fixed inset-0 modal-root folha-modal bg-black bg-opacity-50 z-[60] flex items-end sm:items-center justify-center">
+            <div class="folha bg-white dark:bg-slate-800 w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl shadow-2xl p-5 overflow-y-auto overscroll-contain">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 id="presencaTitle" class="text-lg font-bold text-slate-800 dark:text-slate-100" data-i18n="presenca.sheet.title">Na sua fila agora</h3>
+                    <button id="presencaClose" type="button" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full" aria-label="Fechar" data-i18n-aria="common.close">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <p id="presencaVazio" class="hidden text-sm text-slate-500 dark:text-slate-400 py-6 text-center" data-i18n="presenca.sheet.vazio">Ninguém mais por aqui neste momento.</p>
+                <ul id="presencaLista" class="presenca-lista"></ul>
+                <div id="presencaBloqueados" class="hidden mt-4 pt-3 border-t border-slate-200 dark:border-slate-700">
+                    <h4 class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2" data-i18n="presenca.bloqueados.title">Bloqueados</h4>
+                    <ul id="presencaBloqueadosLista" class="presenca-lista"></ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Conversa. `bottom: var(--kb-inset)` no CSS, e não desconto no
+             max-height: `max-height` JÁ inclui o `padding-bottom`, então descontar
+             o teclado nos dois lugares conta duas vezes e o campo continua embaixo
+             dele — foi o que aconteceu duas vezes antes de a conta fechar. -->
+        <div id="conversaModal" role="dialog" aria-modal="true" aria-labelledby="conversaTitle" class="hidden fixed inset-0 modal-root folha-modal bg-black bg-opacity-50 z-[60] flex items-end sm:items-center justify-center">
+            <div class="conversa-folha bg-white dark:bg-slate-800 w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col">
+                <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+                    <h3 id="conversaTitle" class="text-base font-bold text-slate-800 dark:text-slate-100 truncate"></h3>
+                    <button id="conversaClose" type="button" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full flex-shrink-0" aria-label="Fechar" data-i18n-aria="common.close">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <p id="conversaEstado" class="hidden text-xs text-slate-500 dark:text-slate-400 px-4 py-2 flex-shrink-0" role="status" aria-live="polite"></p>
+                <div id="conversaMsgs" class="conversa-msgs flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3 space-y-2"></div>
+                <form id="conversaForm" class="flex items-end gap-2 px-3 py-2 border-t border-slate-200 dark:border-slate-700 flex-shrink-0">
+                    <label for="conversaInput" class="sr-only" data-i18n="presenca.conversa.ph">Mensagem</label>
+                    <input id="conversaInput" type="text" maxlength="2000" autocomplete="off" placeholder="Mensagem" data-i18n-ph="presenca.conversa.ph"
+                           class="flex-1 min-h-[44px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full px-4 text-sm text-slate-800 dark:text-slate-100">
+                    <button id="conversaEnviar" type="submit" class="min-w-[44px] min-h-[44px] flex items-center justify-center bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 rounded-full transition disabled:opacity-40" aria-label="Enviar" data-i18n-aria="presenca.conversa.enviar">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg>
+                    </button>
+                </form>
             </div>
         </div>
 
@@ -1359,6 +1441,16 @@
                     </ul>
                 </div>
 
+                <div>
+                    <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.presenca.title">Quem está na fila</h4>
+                    <ul class="list-disc list-inside space-y-1 text-slate-600 dark:text-slate-300">
+                        <li data-i18n="help.presenca.oQue">A pílula 👥 no topo mostra quantos editores estão triando a MESMA fila que você. Toque nela pra ver quem é e puxar conversa.</li>
+                        <li data-i18n="help.presenca.p2p">A mensagem vai cifrada direto de um aparelho pro outro, sem passar pelo nosso servidor e sem ficar guardada em lugar nenhum — fechou a conversa, acabou.</li>
+                        <li data-i18n="help.presenca.privacidade">Enquanto você está conectado, o servidor sabe seu nome do WME, seu nível, se você é AM e a fila escolhida. Nada disso vai pra disco, e some assim que você sai.</li>
+                        <li data-i18n="help.presenca.bloquear">Dá pra bloquear alguém pelo ✕ ao lado do nome. O bloqueio fica só no seu aparelho.</li>
+                    </ul>
+                </div>
+
                 <div class="pt-3 border-t border-slate-200 dark:border-slate-700 space-y-2">
                     <!-- Aparece só quando o navegador diz que dá pra instalar
                          (beforeinstallprompt). O Chrome mostraria sozinho uma
@@ -1427,6 +1519,8 @@
     <script defer src="js/mapa.js"></script>
     <script defer src="js/swipe.js"></script>
     <script defer src="js/app.js"></script>
+    <!-- Depois do app.js: usa AppState/openModal/showToast, que são dele. -->
+    <script defer src="js/presenca.js"></script>
 
     <script defer src="js/sw-register.js"></script>
 </body>
