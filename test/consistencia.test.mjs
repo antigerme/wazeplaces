@@ -165,6 +165,27 @@ test('o mesmo conceito não pode ter dois nomes no MESMO card', () => {
     const n = (DICT.match(new RegExp("'" + prefixo.replace(/\./g, '\\.'), 'g')) || []).length;
     assert.ok(n >= minimo, `${prefixo} ficou sem tradução (${n} chaves) — aí humanizar vira a regra`);
   }
+
+  // ── os motivos de reporte, NOMEADOS ────────────────────────────────────
+  // Contar chaves era guard fraco: passava com 4 enums quaisquer, mesmo que os
+  // que a fila realmente traz ficassem de fora. E foi exatamente aqui que a
+  // documentação errou — afirmava "3 tipos de reporte existem de verdade" e
+  // "INAPPROPRIATE não ocorre nenhuma vez", as duas coisas falsas.
+  //
+  // MEDIDO em 386 reportes de 13 países (2026-08-22), em ordem de frequência.
+  // A app passou no teste real: os 8 já tinham tradução nos 4 idiomas, então
+  // o defeito era só do texto. Nomeá-los aqui é o que impede o contrário —
+  // um motivo comum perder tradução e ninguém notar até o enum cru na tela.
+  //
+  // Motivo novo na fila → some aqui COM a contagem medida, não de palpite.
+  const MOTIVOS_MEDIDOS = ['WRONG_DETAILS', 'CLOSED', 'RESIDENTIAL', 'DOES_NOT_MATCH_SEARCH',
+                           'INAPPROPRIATE', 'UNRELATED', 'LOW_QUALITY', 'DUPLICATE'];
+  const semTraducao = MOTIVOS_MEDIDOS.filter((m) => {
+    const n = (DICT.match(new RegExp("'card\\.flagType\\." + m + "'", 'g')) || []).length;
+    return n < 4;   // um por idioma
+  });
+  assert.deepEqual(semTraducao, [],
+    `motivo de reporte sem tradução nos 4 idiomas: ${semTraducao.join(', ')} — o card mostra o enum cru`);
 });
 
 test('origem do pedido: os 4 valores do Waze traduzidos, e o 5º descartado', () => {
