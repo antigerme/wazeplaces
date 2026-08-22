@@ -11,6 +11,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.22-06
 
 ### Corrigido
+- **"Conectar outro aparelho" tirava você da aplicação.** Abrir a Ajuda, tocar em "Conectar outro aparelho" e depois fechar a janela do código levava o navegador para fora da app — de volta para a página anterior, perdendo a fila carregada. Encontrado medindo, enquanto se investigava outro problema.
 - **O ✕ da conversa dava erro em vez de fechar.** Tocar no ✕ mostrava "Erro inesperado" na tela e a janela ficava aberta — só o Esc, o toque fora e o voltar do aparelho funcionavam. Reportado por [@antigerme](https://www.waze.com/user/editor/antigerme).
 
 ---

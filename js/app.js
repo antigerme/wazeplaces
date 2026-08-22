@@ -815,7 +815,18 @@ function desenharQrPareamento(url) {
 }
 
 async function abrirPareamento() {
-    closeModal('helpModal');
+    // `openModal` sozinho: ele JÁ esconde os outros modais, e trocar de modal
+    // é a MESMA camada — não empilha histórico.
+    //
+    // Fechar antes, no mesmo quadro, dessincronizava o contador do voltar do
+    // jeito mais traiçoeiro possível: o `closeModal` agenda um `history.back()`,
+    // o `openModal` seguinte empilha uma entrada NOVA, e o back que estava
+    // pendente come justamente essa. Sobra `profundidade: 1` sem entrada real
+    // por trás — e o próximo fechamento manda o `back()` pra fora da app.
+    //
+    // MEDIDO: Ajuda → Conectar outro aparelho → fechar tirava o editor da
+    // página. O contador não denuncia (fica em 1, com history.length 3): só
+    // a navegação mostra.
     openModal('pairShowModal');
     const codeEl = document.getElementById('pairCode');
     const expEl = document.getElementById('pairExpiry');
