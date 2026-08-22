@@ -211,6 +211,21 @@ try {
   //    app.js é o objeto EXPORTADO — escrever de lá criava um campo num objeto
   //    que ninguém lê, e a conversa ficava "aberta" pra sempre. Mensagem nova
   //    nunca mais viraria aviso, sem erro nenhum na tela.
+  // Os DOIS caminhos de fechar, e o ✕ vem primeiro porque foi ele que quebrou
+  // em produção: só ele resolvia `Presenca` sem o `window.`, e o smoke antigo
+  // fechava a conversa apenas com Esc. Teste que exercita um caminho de dois
+  // dá verde sobre metade do recurso.
+  await ana.page.click('#conversaClose');
+  await ana.page.waitForTimeout(150);
+  const porX = await ana.page.evaluate(() => ({
+    modal: document.getElementById('conversaModal').classList.contains('hidden'),
+    aberta: Presenca.aberta,
+  }));
+  if (porX.modal && porX.aberta === null) ok('o ✕ fecha a conversa E solta o estado');
+  else anota(`o ✕ não fechou direito: ${JSON.stringify(porX)}`);
+  await ana.page.evaluate(() => window.presencaAbrirConversa('pb'));
+  await esperar(ana, () => Presenca.aberta === 'pb', 'a conversa não reabriu depois do ✕');
+
   await ana.page.keyboard.press('Escape');
   await ana.page.waitForTimeout(120);
   const fechou = await ana.page.evaluate(() => ({

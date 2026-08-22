@@ -266,6 +266,44 @@ test('o token do TURN não vaza no core', () => {
     'o token do TURN entrou em log ou em concatenação fora do header');
 });
 
+// ── O CLIENTE ───────────────────────────────────────────────────────────────
+
+test('todo método que o app.js chama existe mesmo no objeto Presenca', () => {
+  // O bug que isto trava chegou na tela do owner: `Presenca.fecharConversa is
+  // not a function` ao tocar no ✕ da conversa. Havia DOIS `Presenca` — o
+  // `const` do estado e o `window.Presenca` dos métodos — e binding léxico
+  // global GANHA de propriedade de window em script clássico, então o app.js
+  // achava o objeto errado. Só o ✕ quebrava, porque todo o resto escreve
+  // `window.Presenca?.…` explícito.
+  const APP = read('js/app.js');
+  const CLI = read('js/presenca.js');
+
+  const expostos = new Set();
+  const bloco = CLI.match(/Object\.assign\(Presenca, \{([\s\S]*?)\}\);/);
+  assert.ok(bloco, 'sumiu o Object.assign que pendura os métodos no estado');
+  for (const m of bloco[1].matchAll(/(\w+)\s*:/g)) expostos.add(m[1]);
+  // Campos do próprio estado também são alcançáveis por quem escreve `Presenca.x`.
+  const estado = CLI.match(/^const Presenca = \{([\s\S]*?)^\};/m);
+  assert.ok(estado, 'sumiu o objeto de estado');
+  for (const m of estado[1].matchAll(/^\s{4}(\w+):/gm)) expostos.add(m[1]);
+
+  const usados = [...APP.matchAll(/(?:window\.)?Presenca\??\.(\w+)/g)].map((m) => m[1]);
+  assert.ok(usados.length, 'o app.js parou de falar com a presença');
+  const faltando = [...new Set(usados)].filter((u) => !expostos.has(u));
+  assert.deepEqual(faltando, [],
+    `o app.js chama Presenca.${faltando.join('/')} que não existe no objeto`);
+});
+
+test('o estado e o objeto exportado são o MESMO — nada de dois Presenca', () => {
+  // Enquanto forem dois objetos, `Presenca.x` e `window.Presenca.x` podem
+  // divergir, e a diferença só aparece em runtime, num clique específico.
+  const CLI = read('js/presenca.js');
+  assert.match(CLI, /window\.Presenca = Presenca;/,
+    'window.Presenca precisa APONTAR pro objeto de estado, não ser outro objeto');
+  assert.equal(/window\.Presenca = \{/.test(CLI), false,
+    'voltou a existir um segundo objeto Presenca — é o bug do ✕ de novo');
+});
+
 // ── O QUE O SERVIDOR NÃO SABE ───────────────────────────────────────────────
 
 test('o núcleo da sala não fala com plataforma nenhuma', () => {
