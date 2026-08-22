@@ -112,8 +112,16 @@ const CARDS = {
     categories: ['SHOPPING_AND_SERVICES'], address: 'Rua Bernardino de Campos, 3000 - Centro',
     updateType: 'Reporte (Sinalização)', updateTypeKey: 'FLAG', reqType: 'REQUEST', reqSubType: 'FLAG',
     createdBy: 'mariazinha', imageUrls: [foto, foto], brand: null, changes: [],
-    // CLOSED: 13 ocorrências na fila real, e a redação vem do próprio WME. Era
-    // INAPPROPRIATE, que ocorre 1 vez.
+    // CLOSED é o 2º motivo mais comum e a redação vem do próprio WME.
+    //
+    // O comentário que estava aqui dizia que INAPPROPRIATE "não ocorre nenhuma
+    // vez" e que só existiam 3 tipos de reporte. As duas coisas eram falsas, e
+    // vinham da mesma amostra pequena e brasileira: MEDIDO em 386 reportes de
+    // 13 países, existem OITO motivos e INAPPROPRIATE aparece 21 vezes —
+    // WRONG_DETAILS 125 · CLOSED 113 · RESIDENTIAL 50 · DOES_NOT_MATCH_SEARCH
+    // 35 · INAPPROPRIATE 21 · UNRELATED 18 · LOW_QUALITY 14 · DUPLICATE 10.
+    // O dicionário cobre os 8 nos 4 idiomas (travado em consistencia.test.mjs),
+    // então nenhum editor viu enum cru — o defeito era só da documentação.
     //
     // O resíduo que este comentário registrava — motivo de duas linhas +
     // comentário longo estourando no Fold — MORREU: o motivo saiu de dentro da
