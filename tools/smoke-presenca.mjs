@@ -251,22 +251,16 @@ try {
   if (depois.estado === 'saiu') ok('a conversa diz que a pessoa saiu');
   else anota(`a conversa não avisou a saída (estado: ${depois.estado})`);
 
-  // 6) BLOQUEAR não pode virar beco sem saída, e a pílula não pode contar o que
-  //    a pessoa não consegue abrir. Os dois chegaram na tela do owner: pílula
-  //    dizendo 4 com 2 na lista, e o desbloquear inalcançável depois de
-  //    bloquear a única pessoa da fila — a pílula sumia, e ela é o caminho.
-  //
-  //    Vai por ÚLTIMO de propósito: bloquear apaga a conversa da pessoa, e no
-  //    meio do roteiro isso destruiria o estado que os passos acima conferem.
+  // 6) A pílula não pode contar o que a pessoa não consegue abrir. Chegou na
+  //    tela do owner: pílula dizendo 4 com 2 na lista. A causa é estrutural —
+  //    o `peer` é sorteado a cada carga, então quem recarrega deixa a conversa
+  //    anterior órfã, com as não lidas presas dentro dela.
   await ana.page.evaluate(() => {
     Presenca.peers = [{ peer: 'p-vivo', nome: 'carla_am', rank: 5, am: true, staff: false }];
     Presenca.total = 1;
     const conv = (nome, n) => ({ pc: null, canal: null, msgs: [], naoLidas: n, nome, estado: 'parado', pendentes: [], iceEspera: [], fila: null });
     Presenca.conversas.set('p-vivo', conv('carla_am', 2));
-    // Conversa ÓRFÃ: peer que já saiu. Acontece sozinho — o `peer` é sorteado a
-    // cada carga, então quem recarrega deixa a anterior pra trás com as não
-    // lidas presas.
-    Presenca.conversas.set('p-fantasma', conv('carla_am', 3));
+    Presenca.conversas.set('p-fantasma', conv('carla_am', 3));   // peer que já saiu
     window.presencaRenderPilula();
   });
   const contagem = await ana.page.evaluate(() => {
@@ -279,55 +273,34 @@ try {
   if (Number(contagem.pilula) === contagem.naLista && contagem.naLista === 2) ok(`a pílula conta só o que dá pra abrir (${contagem.pilula}, não 5)`);
   else anota(`pílula ${contagem.pilula} × ${contagem.naLista} na lista — conversa órfã inflando o selo`);
 
-  // Bloquear pelo caminho REAL agora: abrir a conversa e tocar no botão de lá.
-  // Não existe mais ✕ na linha da lista — e o guard abaixo cobra isso.
-  const semXnaLinha = await ana.page.evaluate(() => !document.querySelector('.presenca-linha ~ [data-bloquear], [data-bloquear]'));
-  if (semXnaLinha) ok('a lista de quem está online NÃO tem botão de bloquear');
-  else anota('voltou o ✕ de bloquear na linha da lista');
-
-  // Sem `closeModal` antes: `openModal` já esconde a lista, e fechar-e-abrir no
-  // mesmo quadro dessincroniza o voltar e joga a página pra fora (é o bug que o
-  // `abrirPareamento` tinha). Terceira vez que este teste cai nele.
-  await ana.page.evaluate(() => window.presencaAbrirConversa('p-vivo'));
-  await ana.page.waitForTimeout(200);
-  const temBotao = await ana.page.evaluate(() => {
-    const b = document.getElementById('conversaBloquear');
-    const r = b && b.getBoundingClientRect();
-    return { existe: !!b, alvo: r && Math.round(Math.min(r.width, r.height)), rotulo: b && b.getAttribute('aria-label') };
-  });
-  if (temBotao.existe && temBotao.alvo >= 44) ok(`bloquear mora na conversa (alvo ${temBotao.alvo}px, "${temBotao.rotulo}")`);
-  else anota(`botão de bloquear na conversa: ${JSON.stringify(temBotao)}`);
-
-  await ana.page.click('#conversaBloquear');
-  await ana.page.waitForTimeout(250);
-  await ana.page.evaluate(() => { closeModal('conversaModal'); window.presencaRenderPilula(); });
-  await ana.page.waitForTimeout(200);
-  const preso = await ana.page.evaluate(() => ({
-    pilula: document.getElementById('presencaPill').classList.contains('hidden'),
-    bloqueados: [...Presenca.bloqueados],
-    selo: document.getElementById('presencaCount').classList.contains('hidden'),
-  }));
-  if (!preso.pilula && preso.bloqueados.length) ok('com todo mundo bloqueado a pílula FICA — o desbloquear continua alcançável');
-  else anota(`beco sem saída: pílula escondida=${preso.pilula} com ${JSON.stringify(preso.bloqueados)} bloqueado(s)`);
-  if (preso.selo) ok('e o selo some em vez de mostrar "0"');
-  else anota('o selo ficou mostrando zero');
-
-  const folha = await ana.page.evaluate(() => {
-    openModal('presencaModal'); window.presencaRenderLista();
+  // 7) NÃO existe bloqueio de pessoa, em lugar nenhum da tela.
+  //
+  //    O recurso foi removido por decisão de produto: a app só admite editor
+  //    L3+ Area Manager, e abuso se resolve no Waze, não aqui. Enquanto ele
+  //    existiu custou três defeitos — beco sem saída, contagem inflada e uma
+  //    folha que se contradizia. Isto aqui é pra ele não voltar de fininho.
+  const semBloqueio = await ana.page.evaluate(() => {
+    const seletores = ['[data-bloquear]', '[data-desbloquear]', '#conversaBloquear', '#presencaBloqueados', '.presenca-bloquear', '.presenca-desbloquear'];
     return {
-      vazio: !document.getElementById('presencaVazio').classList.contains('hidden'),
-      desbloquear: !!document.querySelector('[data-desbloquear]'),
+      naTela: seletores.filter((s) => document.querySelector(s)),
+      noObjeto: ['bloqueados', 'bloquear', 'desbloquear'].filter((k) => k in Presenca),
+      noArmazenamento: localStorage.getItem('waze_places_bloqueados'),
     };
   });
-  if (!folha.vazio && folha.desbloquear) ok('a folha mostra o desbloquear, sem dizer "ninguém aqui" por cima');
-  else anota(`folha contraditória: vazio=${folha.vazio} desbloquear=${folha.desbloquear}`);
+  if (!semBloqueio.naTela.length && !semBloqueio.noObjeto.length) ok('não há bloqueio de pessoa em lugar nenhum');
+  else anota(`sobrou bloqueio: tela=${JSON.stringify(semBloqueio.naTela)} objeto=${JSON.stringify(semBloqueio.noObjeto)}`);
 
-  const voltou = await ana.page.evaluate(() => {
-    document.querySelector('[data-desbloquear]').click();
-    return { bloqueados: [...Presenca.bloqueados], linhas: document.querySelectorAll('.presenca-linha').length };
+  // 8) E a chave que ficou no aparelho de quem usou a versão anterior é
+  //    apagada na carga — dado órfão de recurso removido não envelhece calado.
+  const limpou = await ana.page.evaluate(async () => {
+    localStorage.setItem('waze_places_bloqueados', '["alguem"]');
+    window.presencaMontar();
+    return localStorage.getItem('waze_places_bloqueados');
   });
-  if (!voltou.bloqueados.length && voltou.linhas === 1) ok('o botão de desbloquear devolve a pessoa pra lista');
-  else anota(`desbloquear não funcionou: ${JSON.stringify(voltou)}`);
+  if (limpou === null) ok('a chave antiga de bloqueio é apagada do aparelho');
+  else anota(`a chave antiga sobreviveu: ${limpou}`);
+  await ana.page.evaluate(() => closeModal('presencaModal'));
+
 } finally {
   await browser.close();
   srv.kill('SIGKILL');

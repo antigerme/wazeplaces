@@ -310,6 +310,40 @@ test('o teclado virtual não pode voltar a engolir os modais', () => {
   }
 });
 
+test('modal não pode estar DENTRO de outro modal', () => {
+  // Modal aninhado some junto com o pai, em silêncio: `classList.add('hidden')`
+  // no de fora leva o de dentro, e o sintoma é "o botão existe mas não é
+  // clicável" — nada no console, nada no CSS.
+  //
+  // Introduzi isso removendo uma seção e comendo um `</div>` junto: a folha da
+  // conversa virou filha da folha da lista, e o ✕ dela ficou inalcançável. Um
+  // guard de texto pega porque a estrutura é rasa e previsível.
+  const JS = read('js/app.js');
+  const ids = (JS.match(/MODAL_IDS\s*=\s*\[([^\]]*)\]/) || [])[1] || '';
+  const modais = [...ids.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  assert.ok(modais.length >= 8, `esperava >= 8 modais, achei ${modais.length}`);
+
+  for (const id of modais) {
+    const i = HTML.indexOf(`id="${id}"`);
+    assert.notEqual(i, -1, `modal ${id} não achado no HTML`);
+    const abre = HTML.lastIndexOf('<div', i);
+    // Anda pelo HTML contando <div>/</div> até fechar o do modal. Se topar em
+    // outro modal antes de fechar, este contém aquele.
+    let nivel = 0;
+    let pos = abre;
+    const marcas = [...HTML.slice(abre).matchAll(/<div\b|<\/div>|id="([A-Za-z]+Modal)"/g)];
+    for (const m of marcas) {
+      if (m[0] === '<div') nivel++;
+      else if (m[0] === '</div>') { nivel--; if (nivel === 0) break; }
+      else if (m[1] && m[1] !== id) {
+        assert.fail(`o modal ${id} CONTÉM o modal ${m[1]} — quando ${id} fecha, ${m[1]} some junto`);
+      }
+      pos = abre + m.index;
+    }
+    assert.equal(nivel, 0, `as <div> do modal ${id} não fecham (falta ou sobra um </div>)`);
+  }
+});
+
 test('nenhum modal FECHA e outro ABRE no mesmo quadro', () => {
   // Isso expulsa o editor da app, e o contador não denuncia.
   //

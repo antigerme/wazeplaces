@@ -99,7 +99,6 @@ Quando outro editor está triando a **mesma fila** que você (mesma região, pa�
 - **A mensagem vai direto de um aparelho pro outro**, cifrada, sem passar pelo servidor da aplicação e sem ficar guardada em lugar nenhum. Fechou a conversa, acabou.
 - **Enquanto você está conectado**, o servidor sabe o seu nome do WME, o seu nível, se você é AM e a fila escolhida. Nada disso é gravado, e some assim que você sai.
 - **O nome vem do Waze**, conferido e assinado pelo servidor — ninguém consegue se apresentar na lista como um editor que não é.
-- Se precisar, dá pra **bloquear** alguém de dentro da conversa com essa pessoa (fica só no seu aparelho). Pra desfazer, a lista tem uma seção "Bloqueados" no fim.
 - Vem ligado. Pra desligar: **Filtros e preferências → Preferências → "Ver quem está na fila"**.
 
 ### Instalar como app no celular

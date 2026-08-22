@@ -10,10 +10,12 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## v2026.08.22-08
 
-### Mudado
-- **Bloquear saiu da lista de quem está online e virou último recurso.** O ✕ ao lado de cada nome punha a ação de afastar em destaque permanente, numa tela que existe pra aproximar. Agora bloquear mora dentro da conversa com a pessoa — só alcança quem você já falou, que é quando a decisão faz sentido. Desbloquear continua na mesma lista, na seção "Bloqueados".
+### Removido
+- **Bloquear pessoas saiu da aplicação.** Não existe mais botão de bloquear, lista de bloqueados nem nada do tipo — e o registro de quem já tinha bloqueado alguém é apagado do aparelho na primeira abertura.
 
-  Pedido de [@antigerme](https://www.waze.com/user/editor/antigerme): *"nosso objetivo é interação/pertencimento e isso de bloquear deve estar como última opção"*.
+  O motivo é que o recurso não tinha por que existir aqui: só entra na app editor **nível 3+ que seja Area Manager**, ou seja gente madura da comunidade. Se alguém fizer spam ou criar problema, isso se resolve no Waze, que é onde a conta existe de verdade — não numa lista local que só vale no seu celular.
+
+  Decisão de [@antigerme](https://www.waze.com/user/editor/antigerme): *"nosso objetivo é interação/pertencimento"*.
 
 ---
 

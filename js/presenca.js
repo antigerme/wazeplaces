@@ -29,9 +29,11 @@
 // pro log de acesso, então o que vai na URL é o nome da sala, e o crachá vai
 // na primeira MENSAGEM.
 
-// Bloqueio é por pessoa e fica no aparelho: é decisão de quem bloqueia, não
-// dado que o servidor precise saber. Sai no logout como todo o resto.
-const PRESENCA_BLOQUEADOS_KEY = 'waze_places_bloqueados';
+// Chave de uma versão anterior, que teve bloqueio de pessoa. O recurso saiu (a
+// app só admite editor L3+ AM, e abuso se resolve no Waze, não aqui), mas quem
+// já tinha bloqueado alguém ficou com o registro no aparelho. Apagamos uma vez,
+// na carga — dado órfão de recurso removido não deve envelhecer em silêncio.
+const PRESENCA_CHAVE_ANTIGA_BLOQUEIO = 'waze_places_bloqueados';
 
 // Keepalive. Na Cloudflare quem responde é o RUNTIME (auto-response), sem
 // acordar o Durable Object; na VM responde o processo. O cliente manda o mesmo
@@ -59,7 +61,6 @@ const Presenca = {
     peers: [],
     total: 0,
     conversas: new Map(),   // peer -> { pc, canal, msgs, naoLidas, nome, estado }
-    bloqueados: new Set(),
     aberta: null,           // peer da conversa aberta agora
     filtro: null,
     tentativa: 0,
@@ -189,13 +190,11 @@ function presencaLimparLista() {
     presencaRenderLista();
 }
 
-// Logout: "se pedir para sair, é realmente para sair". A lista de bloqueados é
-// do aparelho, mas é escolha de QUEM ENTROU — sai junto.
+// Logout: "se pedir para sair, é realmente para sair".
 function presencaEsquecer() {
     presencaDesligar();
     Presenca.peer = null;
-    Presenca.bloqueados = new Set();
-    safeLS.remove(PRESENCA_BLOQUEADOS_KEY);
+    presencaEsquecerBloqueioAntigo();
 }
 
 function presencaReceber(bruto) {
@@ -311,11 +310,7 @@ async function presencaChamar(peer, nome) {
 // maioria das vezes e falha de vez em quando, sem erro nenhum.
 function presencaSinalRecebido(m) {
     const peer = m.de;
-    // Bloqueio é por NOME do WME, então a conferência também: o `peer` é
-    // sorteado a cada carga da página, e checar por ele deixava quem foi
-    // bloqueado voltar a chamar bastando recarregar — que é exatamente o que
-    // essa pessoa faria.
-    if (!peer || Presenca.bloqueados.has(m.nome)) return;
+    if (!peer) return;
     const c = presencaConversa(peer, m.nome);
     c.fila = (c.fila || Promise.resolve())
         .then(() => presencaTratarSinal(peer, c, m))
@@ -406,7 +401,7 @@ function presencaEncerrarConversa(peer, manterMsgs) {
     c.pc = null;
     c.iceEspera = [];
     c.fila = null;
-    // `manterMsgs` marca "quem chamou já decidiu o estado" (saiu, bloqueado):
+    // `manterMsgs` marca "quem chamou já decidiu o estado" (ex.: saiu):
     // sobrescrever aqui apagaria o motivo.
     if (!manterMsgs) { c.estado = 'parado'; Presenca.conversas.delete(peer); }
 }
@@ -433,54 +428,22 @@ function presencaMarcarAusente(peer) {
     presencaRenderConversa();
 }
 
-// ── bloqueio ────────────────────────────────────────────────────────────────
-
-function presencaCarregarBloqueados() {
-    try {
-        const bruto = JSON.parse(safeLS.get(PRESENCA_BLOQUEADOS_KEY) || '[]');
-        Presenca.bloqueados = new Set(Array.isArray(bruto) ? bruto.filter((x) => typeof x === 'string') : []);
-    } catch (e) { Presenca.bloqueados = new Set(); }
+function presencaEsquecerBloqueioAntigo() {
+    safeLS.remove(PRESENCA_CHAVE_ANTIGA_BLOQUEIO);
 }
-
-// Bloqueia pelo NOME do WME, não pelo `peer`: o peer é sorteado a cada carga da
-// página, então bloquear por ele duraria até a pessoa recarregar — que é
-// exatamente o que ela faria.
-function presencaBloquear(nome) {
-    if (!nome) return;
-    Presenca.bloqueados.add(nome);
-    safeLS.set(PRESENCA_BLOQUEADOS_KEY, JSON.stringify([...Presenca.bloqueados]));
-    for (const [peer, c] of Presenca.conversas) if (c.nome === nome) presencaEncerrarConversa(peer);
-    if (Presenca.aberta && !Presenca.conversas.has(Presenca.aberta)) presencaFecharConversa();
-    presencaRenderLista();
-    presencaRenderPilula();
-}
-
-function presencaDesbloquear(nome) {
-    Presenca.bloqueados.delete(nome);
-    safeLS.set(PRESENCA_BLOQUEADOS_KEY, JSON.stringify([...Presenca.bloqueados]));
-    presencaRenderLista();
-    presencaRenderPilula();
-}
-
-const presencaVisiveis = () => Presenca.peers.filter((p) => !Presenca.bloqueados.has(p.nome));
 
 // ── interface ───────────────────────────────────────────────────────────────
 
 function presencaRenderPilula() {
     const btn = document.getElementById('presencaPill');
     if (!btn) return;
-    const n = presencaVisiveis().length;
+    const n = Presenca.peers.length;
     const ligado = presencaLigada() && AppState.authenticated;
     // Sem ninguém, a pílula SOME. Ela não é um botão de recurso: é a notícia de
     // que tem gente, e "0 editores" não é notícia — é ruído ocupando o header.
     //
-    // MAS ela FICA enquanto houver alguém bloqueado, mesmo com a lista vazia:
-    // o desbloquear mora dentro da folha, e a pílula é o único caminho até lá.
-    // Sumindo, quem bloqueasse a única pessoa da fila ficaria preso com o
-    // bloqueio pra sempre — beco sem saída, medido no aparelho do owner.
-    const temBloqueado = Presenca.bloqueados.size > 0;
-    btn.classList.toggle('hidden', !ligado || (n === 0 && !temBloqueado));
-    if (!ligado || (n === 0 && !temBloqueado)) return;
+    btn.classList.toggle('hidden', !ligado || n === 0);
+    if (!ligado || n === 0) return;
 
     // Conta só as não lidas de quem está NA LISTA agora. Conversa cujo peer já
     // saiu não é abrível — a folha não a mostra —, então contá-la põe na pílula
@@ -488,10 +451,10 @@ function presencaRenderPilula() {
     // caso raro: o `peer` é sorteado a cada carga da página, então quem
     // recarrega volta como outro peer e deixa a conversa anterior órfã, com as
     // não lidas presas. MEDIDO no aparelho do owner: pílula 4, lista 2.
-    const vivos = new Set(presencaVisiveis().map((p) => p.peer));
+    const vivos = new Set(Presenca.peers.map((p) => p.peer));
     let naoLidas = 0;
     for (const [peer, c] of Presenca.conversas) {
-        if (vivos.has(peer) && !Presenca.bloqueados.has(c.nome)) naoLidas += c.naoLidas;
+        if (vivos.has(peer)) naoLidas += c.naoLidas;
     }
 
     // Mensagem nova troca o ÍCONE (gente → balão), não só a cor: cor sozinha
@@ -500,22 +463,16 @@ function presencaRenderPilula() {
     document.getElementById('presencaIconMsg').classList.toggle('hidden', naoLidas === 0);
 
     const selo = document.getElementById('presencaCount');
-    const total = Math.max(n, Presenca.total - Presenca.bloqueados.size);
+    const total = Math.max(n, Presenca.total);
     const valor = naoLidas > 0 ? naoLidas : total;
-    // Zero não é notícia: com a pílula ali só por causa de um bloqueio, o selo
-    // sai de cena e sobra o ícone. "0" num selo lê como contador quebrado.
+    // Zero não é notícia: "0" num selo lê como contador quebrado.
     selo.classList.toggle('hidden', valor === 0);
     selo.textContent = valor > 99 ? '99+' : String(valor);
     selo.classList.toggle('tem-msg', naoLidas > 0);
 
-    // Com a pílula ali só por causa de um bloqueio, "0 editores na sua fila" é
-    // o que o leitor de tela anunciaria — número certo, frase inútil. O rótulo
-    // diz o que o toque FAZ, que é o que importa pra quem não vê o ícone.
     const rotulo = naoLidas > 0
         ? t(naoLidas === 1 ? 'presenca.pill.msg' : 'presenca.pill.msgPlural', { n: naoLidas })
-        : total === 0
-            ? t('presenca.pill.soBloqueados')
-            : t(total === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n: total });
+        : t(total === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n: total });
     btn.setAttribute('aria-label', rotulo);
     btn.setAttribute('title', rotulo);
 }
@@ -523,13 +480,8 @@ function presencaRenderPilula() {
 function presencaRenderLista() {
     const lista = document.getElementById('presencaLista');
     if (!lista) return;
-    const gente = presencaVisiveis();
-    // "Ninguém mais por aqui" só quando NÃO HÁ MESMO nada — com bloqueados
-    // logo abaixo, a frase contradiz a própria tela, e o olho para nela em vez
-    // de continuar até a seção que resolve. Foi o que aconteceu: a pessoa leu
-    // "ninguém aqui" e concluiu que não havia o que fazer.
-    document.getElementById('presencaVazio')
-        .classList.toggle('hidden', gente.length > 0 || Presenca.bloqueados.size > 0);
+    const gente = Presenca.peers;
+    document.getElementById('presencaVazio').classList.toggle('hidden', gente.length > 0);
 
     lista.innerHTML = gente.map((p) => {
         const c = Presenca.conversas.get(p.peer);
@@ -538,11 +490,6 @@ function presencaRenderLista() {
         const badge = c && c.naoLidas
             ? `<span class="presenca-badge">${c.naoLidas > 9 ? '9+' : c.naoLidas}</span>`
             : '';
-        // SEM botão de bloquear na linha. O recurso existe pra APROXIMAR, e um ✕
-        // ao lado de cada nome põe a ação de afastar em destaque permanente —
-        // é o oposto do objetivo. Bloquear virou último recurso e mora DENTRO
-        // da conversa: só bloqueia quem já interagiu, que é quando a decisão
-        // faz sentido de tomar.
         return `<li>
             <button type="button" class="presenca-linha" data-peer="${escapeHtml(p.peer)}" data-nome="${escapeHtml(p.nome)}">
                 <span class="presenca-nome">${escapeHtml(p.nome || t('presenca.anon'))}</span>
@@ -552,19 +499,6 @@ function presencaRenderLista() {
         </li>`;
     }).join('');
 
-    const bloq = document.getElementById('presencaBloqueados');
-    if (bloq) {
-        const nomes = [...Presenca.bloqueados];
-        bloq.classList.toggle('hidden', nomes.length === 0);
-        const ul = document.getElementById('presencaBloqueadosLista');
-        if (ul) {
-            ul.innerHTML = nomes.map((nome) => `<li>
-                <span class="presenca-nome">${escapeHtml(nome)}</span>
-                <button type="button" class="presenca-desbloquear" data-desbloquear="${escapeHtml(nome)}"
-                        >${escapeHtml(t('presenca.desbloquear'))}</button>
-            </li>`).join('');
-        }
-    }
 }
 
 function presencaAbrirConversa(peer) {
@@ -609,12 +543,6 @@ function presencaRenderConversa() {
     if (!c) return;
     const titulo = document.getElementById('conversaTitle');
     if (titulo) titulo.textContent = c.nome || t('presenca.anon');
-    const bloq = document.getElementById('conversaBloquear');
-    if (bloq) {
-        const rot = t('presenca.bloquear', { nome: c.nome || t('presenca.anon') });
-        bloq.setAttribute('aria-label', rot);
-        bloq.setAttribute('title', rot);
-    }
 
     const estado = document.getElementById('conversaEstado');
     if (estado) {
@@ -646,7 +574,7 @@ function presencaRenderConversa() {
 // ── ligações com a app ──────────────────────────────────────────────────────
 
 function presencaMontar() {
-    presencaCarregarBloqueados();
+    presencaEsquecerBloqueioAntigo();
 
     const pill = document.getElementById('presencaPill');
     if (pill) pill.addEventListener('click', () => { openModal('presencaModal'); presencaRenderLista(); });
@@ -655,14 +583,6 @@ function presencaMontar() {
     if (lista) lista.addEventListener('click', (ev) => {
         const linha = ev.target.closest('.presenca-linha');
         if (linha) return presencaAbrirConversa(linha.dataset.peer);
-        const desbloquear = ev.target.closest('[data-desbloquear]');
-        if (desbloquear) return presencaDesbloquear(desbloquear.dataset.desbloquear);
-    });
-
-    const bloquearAqui = document.getElementById('conversaBloquear');
-    if (bloquearAqui) bloquearAqui.addEventListener('click', () => {
-        const c = Presenca.aberta && Presenca.conversas.get(Presenca.aberta);
-        if (c && c.nome) presencaBloquear(c.nome);
     });
 
     const form = document.getElementById('conversaForm');

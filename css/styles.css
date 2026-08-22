@@ -2101,15 +2101,6 @@ button:active {
   text-align: center;
 }
 
-.presenca-desbloquear {
-  flex-shrink: 0;
-  min-height: 44px;
-  padding: 0 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: rgb(8 145 178);
-}
-.dark .presenca-desbloquear { color: rgb(103 232 249); }
 
 /* A folha respeita a área segura de baixo: sem isto, o último item fica sob a
    barra de gestos do iPhone. O teto é `100%` da raiz (que já desconta o
