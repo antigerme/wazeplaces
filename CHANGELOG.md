@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.22-05
+
+### Corrigido
+- **A conversa podia ficar dizendo "Conectando…" com as mensagens já indo e voltando.** Quem *recebe* o pedido de conversa às vezes recebe o canal já aberto — e aí o aviso de abertura, que é o que muda o estado na tela, nunca chega. O texto funcionava; o rótulo mentia, e o que tivesse sido digitado antes ficava preso sem sair.
+
+---
+
 ## v2026.08.22-04
 
 ### Adicionado

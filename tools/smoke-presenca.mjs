@@ -109,8 +109,24 @@ async function editor(nome, peer, rank, am, lang) {
   return { nome, page, ctx };
 }
 
-const esperar = (e, fn, oq) => e.page.waitForFunction(fn, null, { timeout: 15000 })
-  .then(() => true).catch(() => { anota(oq); return false; });
+// `polling: 'interval'` e não o padrão `'raf'`: só UMA aba fica em primeiro
+// plano, e o Chromium ESTRANGULA o requestAnimationFrame das outras. Com duas
+// páginas abertas — que é o cenário inteiro deste teste — a espera da página de
+// trás pode estourar o prazo sem a condição nunca ter sido consultada. Passou
+// aqui e reprovou no CI com o mesmo código.
+const esperar = (e, fn, oq) => e.page.waitForFunction(fn, null, { timeout: 15000, polling: 200 })
+  .then(() => true)
+  .catch(async () => {
+    // Espera que estoura sem dizer o que ESTAVA no lugar é a pior falha de CI:
+    // dá pra reproduzir por horas sem saber o que olhar. O estado vai junto.
+    const estado = await e.page.evaluate(() => ({
+      peers: Presenca.peers.map((p) => p.nome),
+      conversas: [...Presenca.conversas].map(([k, c]) => `${k}:${c.estado}/${c.canal && c.canal.readyState}`),
+      socket: Presenca.ws && Presenca.ws.readyState,
+    })).catch((err) => `(não deu pra ler: ${String(err.message).split('\n')[0]})`);
+    anota(`${oq} — estado: ${JSON.stringify(estado)}`);
+    return false;
+  });
 
 try {
   const ana = await editor('ana_am', 'pa', 5, true);

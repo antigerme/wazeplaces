@@ -254,7 +254,7 @@ function presencaCriarPC(peer) {
 function presencaLigarCanal(peer, canal) {
     const c = presencaConversa(peer);
     c.canal = canal;
-    canal.onopen = () => {
+    const abriu = () => {
         c.estado = 'aberta';
         // O que foi digitado enquanto conectava não se perde: a pessoa apertou
         // enviar, e "some sem avisar" é pior que demorar.
@@ -262,6 +262,14 @@ function presencaLigarCanal(peer, canal) {
         presencaRenderConversa();
         presencaRenderLista();
     };
+    canal.onopen = abriu;
+    // Quem RECEBE o canal (`ondatachannel`) pode recebê-lo JÁ ABERTO: aí o
+    // `onopen` nunca dispara, porque o evento já passou. O estado ficava em
+    // "Conectando…" pra sempre enquanto as mensagens iam e vinham normalmente —
+    // e o que estava digitado antes ficava preso em `pendentes`, porque só o
+    // `onopen` esvazia a fila. Conferir o `readyState` na hora de ligar é o
+    // conserto; foi o CI que pegou, com o mesmo código passando aqui.
+    if (canal.readyState === 'open') abriu();
     canal.onclose = () => { c.estado = 'fechada'; presencaRenderConversa(); };
     canal.onmessage = (ev) => {
         let m;
