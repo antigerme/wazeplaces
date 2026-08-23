@@ -125,17 +125,46 @@ export function igualEmTempoConstante(a, b) {
 // Recebe os presentes (um por conexão aberta) e devolve o que o cliente vê.
 // Compartilhada porque os dois adaptadores desenham a MESMA lista, e "quase
 // igual" aqui é a pílula contando 3 num servidor e 4 no outro.
+//
+// QUEM É "A MESMA PESSOA" É O NOME, NUNCA O `peer`.
+//
+// O `peer` é sorteado A CADA CARGA DA PÁGINA — ele endereça uma CONEXÃO, não um
+// editor. Comparar por ele foi o defeito que o owner viu: recarregar a página
+// sorteia um peer novo, o socket antigo demora a fechar, e por essa janela os
+// dois estão na sala com nomes iguais e peers diferentes. Resultado medido:
+// ele aparecia 2× na PRÓPRIA lista e a pílula contava 3 onde havia 1 colega.
+// Recarregando de novo, acumulava — e os colegas o viam repetido também.
+//
+// O nome vem do CRACHÁ ASSINADO pelo servidor (o username do WME), então é
+// único por conta e não dá pra forjar. Sem nome, o peer serve de identidade —
+// é o melhor disponível e não junta gente diferente.
+const identidadeDe = (p) => String(p && p.nome || '').trim().toLowerCase() || (p && p.peer) || '';
+
 export function listaDePares(presentes, me) {
-  const vistos = new Set();
-  const out = [];
+  // `me` aceita o ident inteiro OU um peer solto (os adaptadores antigos
+  // passavam o peer). Com o ident, a comparação é por IDENTIDADE.
+  const euId = typeof me === 'string' ? String(me).trim().toLowerCase() : identidadeDe(me);
+  const euPeer = typeof me === 'string' ? me : (me && me.peer) || '';
+  const porId = new Map();
   for (const p of presentes || []) {
+    if (!p || !p.peer) continue;
+    const id = identidadeDe(p);
     // SEM o próprio: quem pergunta já sabe que está aqui, e devolver faria a
     // contagem da pílula incluir você — "1 editor online" sozinho na sala.
-    if (!p || !p.peer || p.peer === me || vistos.has(p.peer)) continue;
-    vistos.add(p.peer);
-    out.push({ peer: p.peer, nome: p.nome || '', rank: p.rank || 0, am: !!p.am, staff: !!p.staff });
+    if (id === euId || p.peer === euPeer) continue;
+    // Mesma pessoa em duas conexões aparece UMA vez, e vale a MAIS RECENTE:
+    // o `peer` da lista é o endereço para onde a conversa é chamada, e o antigo
+    // é justamente o socket que está morrendo.
+    const atual = porId.get(id);
+    if (atual && (atual.desde || 0) >= (p.desde || 0)) continue;
+    porId.set(id, p);
   }
+  const out = [...porId.values()].map((p) => ({
+    peer: p.peer, nome: p.nome || '', rank: p.rank || 0, am: !!p.am, staff: !!p.staff,
+  }));
   // Ordem estável: sem isso a lista embaralha a cada mudança e a folha pisca.
   out.sort((a, b) => (a.nome || '').localeCompare(b.nome || '') || a.peer.localeCompare(b.peer));
   return { total: out.length, peers: out.slice(0, LIMITE_LISTA) };
 }
+
+

@@ -92,10 +92,40 @@ export class SalaDO {
     const ident = {
       peer: cracha.peer, nome: cracha.nome, rank: cracha.rank,
       am: !!cracha.am, staff: !!cracha.staff,
+      // Quando esta conexão entrou. Serve pra desempatar duas conexões da MESMA
+      // pessoa: a lista mostra a mais recente, que é a viva.
+      desde: Date.now(),
     };
     ws.serializeAttachment({ sala: anexo.sala, ident });
+    // UMA presença por pessoa: quem reentra DESPEJA a própria conexão anterior.
+    //
+    // Recarregar a página sorteia um `peer` novo, e o socket antigo pode demorar
+    // a fechar (o navegador nem sempre manda o quadro de fechamento, e o DO só
+    // é avisado quando o runtime percebe). Nessa janela a pessoa ficava DUAS
+    // vezes na sala — e recarregando de novo, três. Foi o que o owner viu.
+    //
+    // Despejar na ORIGEM é melhor que só esconder na lista: some com o
+    // duplicado pra todo mundo, e garante que a conversa é chamada no socket
+    // que está vivo. Duas abas da mesma pessoa continuam sendo uma presença —
+    // que é o que "quem está triando esta fila" quer dizer.
+    this.despejarOutrasConexoes(ws, ident);
     ws.send(JSON.stringify({ t: 'eu', peer: ident.peer }));
     this.difundirLista();
+  }
+
+  // Fecha as conexões que já estavam na sala com a MESMA identidade.
+  despejarOutrasConexoes(novo, ident) {
+    const eu = String(ident.nome || '').trim().toLowerCase() || ident.peer;
+    for (const outro of this.state.getWebSockets()) {
+      if (outro === novo) continue;
+      const a = outro.deserializeAttachment();
+      if (!a || !a.ident) continue;
+      const dele = String(a.ident.nome || '').trim().toLowerCase() || a.ident.peer;
+      if (dele !== eu) continue;
+      // 1000 = fechamento normal: não é erro, é a conexão anterior da mesma
+      // pessoa saindo de cena.
+      try { outro.close(1000, 'reentrou'); } catch { /* já morrendo */ }
+    }
   }
 
   sinal(ws, anexo, m) {
@@ -140,7 +170,8 @@ export class SalaDO {
   difundirLista(saindo) {
     const presentes = this.sockets(saindo);
     for (const { ws, ident } of presentes) {
-      const lista = listaDePares(presentes.map((p) => p.ident), ident.peer);
+      // O ident INTEIRO, não só o peer: quem é "a mesma pessoa" é o NOME.
+      const lista = listaDePares(presentes.map((p) => p.ident), ident);
       try { ws.send(JSON.stringify({ t: 'lista', ...lista })); } catch { /* socket morrendo */ }
     }
   }

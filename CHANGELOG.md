@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.23-06
+
+### Corrigido
+- **Recarregar a página duplicava você na lista de quem está online — e você aparecia na sua própria lista.** Recarregando de novo, triplicava; seus colegas também viam você repetido, e a pílula contava errado.
+
+  A causa: o identificador da conexão é sorteado a cada carga da página. Ele endereça uma *conexão*, não um *editor* — e enquanto a conexão anterior não fechava (o navegador nem sempre avisa que fechou), você estava na sala duas vezes, com identificadores diferentes.
+
+  Agora quem é "a mesma pessoa" é o **nome do editor**, que vem assinado pelo servidor: entrar de novo derruba a sua conexão anterior, a lista mostra cada pessoa uma vez, e ela aponta sempre para a conexão viva — então uma conversa iniciada dali não cai num canal morto. Duas abas suas continuam sendo uma presença só, que é o que "estou triando esta fila" quer dizer.
+
+  Reportado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+---
+
 ## v2026.08.23-05
 
 ### Corrigido
