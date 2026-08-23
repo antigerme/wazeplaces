@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.23-02
+
+### Corrigido
+- **Problema de conexão fazia o "Permitir desfazer ações" voltar a ficar ligado.** E não era só a caixinha marcada: a janela de 3 segundos voltava de verdade, para quem já tinha desligado. Acontecia porque a cota que libera o desligamento dependia do seu perfil ter acabado de carregar — com a rede ruim, o app não conseguia confirmar seu nível e tratava você como se ainda não tivesse experiência, dizendo *"disponível depois que o app carregar seu perfil"*.
+
+  Agora o app lembra o seu nível da última vez que o perfil carregou. Sair da conta apaga essa memória, como todo o resto.
+
+- **E, no mesmo cenário, a preferência podia ser apagada de vez.** Num carregamento com a rede falhando, o app chegava a gravar as preferências antes de tê-las lido — e o seu "desligado" virava "ligado" no armazenamento, permanentemente. Agora ele não grava nada antes de ler.
+
+  Reportado por [@antigerme](https://www.waze.com/user/editor/antigerme): *"quando o App fica com problema de conexão o desfazer volta a ficar marcado"*.
+
+---
+
 ## v2026.08.23-01
 
 ### Corrigido
