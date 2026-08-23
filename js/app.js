@@ -1128,6 +1128,36 @@ function idadeDaFoto(ms) {
     }
 }
 
+// As duas ações de foto (excluir / aprovar) aparecem por REGRA DE ESTADO,
+// avaliada a cada render — nunca por um esconder de disparo único.
+//
+// Foi exatamente isso que quebrou, relatado pelo owner: `abrirEdicaoNome()`
+// escondia os botões UMA vez, e o render da foto seguinte os reacendia sem
+// saber que havia renomeação em curso. Reapareciam logo ABAIXO do
+// confirmar/cancelar do nome — o canto pra onde o dedo já estava indo, com
+// duas ações que gravam no mapa.
+//
+// Mesma lição do `acoesTravadas()` (gotcha #63): regra que vale em dois
+// momentos mora em UMA função, senão os dois momentos divergem sem ninguém ver.
+function atualizarAcoesDeFoto() {
+    // No treino as duas ações NÃO existem: escrevem no mapa e não têm ensaio
+    // possível. Some em vez de desabilitar — botão morto com cara de vivo lê
+    // como app quebrada, e "desabilitado" convida à pergunta "por que não
+    // posso?", que num treino não tem resposta boa.
+    //
+    // Renomeando, mesma coisa: elas ficam no mesmo canto do confirmar/cancelar.
+    // Trocar de foto DURANTE a renomeação continua valendo (é legítimo conferir
+    // a grafia noutra fachada) — o que não pode é a ação destrutiva voltar.
+    const some = Treino.ativo || editandoNome();
+    const del = document.getElementById('lightboxDelete');
+    if (del) del.classList.toggle('hidden', some || !Lightbox.idFotoAtual());
+    // Mutuamente exclusivos: pendente se APROVA, aprovada se EXCLUI. Sem isso
+    // os dois brigariam pelo mesmo canto, e o editor teria que adivinhar qual
+    // vale pra foto que está vendo.
+    const apr = document.getElementById('lightboxApprove');
+    if (apr) apr.classList.toggle('hidden', some || !Lightbox.podeAprovarAtual());
+}
+
 const Lightbox = {
     urls: [],
     idx: 0,
@@ -1263,14 +1293,7 @@ const Lightbox = {
         // não têm ensaio possível. Some em vez de desabilitar — botão morto com
         // cara de vivo lê como app quebrada, e "desabilitado" convida à pergunta
         // "por que não posso?", que num treino não tem resposta boa.
-        const noTreino = Treino.ativo;
-        const del = document.getElementById('lightboxDelete');
-        if (del) del.classList.toggle('hidden', noTreino || !this.idFotoAtual());
-        // Mutuamente exclusivos: pendente se APROVA, aprovada se EXCLUI. Sem
-        // isso os dois botões brigariam pelo mesmo canto, e o editor teria que
-        // adivinhar qual vale pra foto que está vendo.
-        const apr = document.getElementById('lightboxApprove');
-        if (apr) apr.classList.toggle('hidden', noTreino || !this.podeAprovarAtual());
+        atualizarAcoesDeFoto();
         this._renderTira();
     },
     // Todas as fotos do local de uma vez, tocáveis pra pular direto.
@@ -1952,13 +1975,11 @@ function abrirEdicaoNome() {
     document.getElementById('lightboxNomeEdit').classList.remove('hidden');
     const inp = document.getElementById('lightboxNomeInput');
     inp.value = nome;
-    // O botão de ação da foto some enquanto edita: ele fica no mesmo canto, e
-    // aprovar/excluir foto no meio de uma renomeação é toque acidental caro.
+    // As ações de foto somem enquanto edita — mas quem decide é
+    // `atualizarAcoesDeFoto()`, e não um esconder aqui: esconder aqui era um
+    // disparo único, e a próxima troca de foto o desfazia.
     document.getElementById('imageLightbox').classList.add('editando-nome');
-    for (const id of ['lightboxDelete', 'lightboxApprove']) {
-        const b = document.getElementById(id);
-        if (b) b.dataset.escondidoPelaEdicao = b.classList.contains('hidden') ? '0' : '1', b.classList.add('hidden');
-    }
+    atualizarAcoesDeFoto();
     inp.focus();
     // Cursor no FIM, não seleção: quem vem corrigir grafia quer ajustar, e
     // selecionar tudo faz a primeira tecla apagar o nome inteiro.
@@ -1978,11 +1999,9 @@ function fecharEdicaoNome() {
     }
     if (ed) ed.classList.add('hidden');
     document.getElementById('imageLightbox').classList.remove('editando-nome');
-    for (const id of ['lightboxDelete', 'lightboxApprove']) {
-        const b = document.getElementById(id);
-        if (b && b.dataset.escondidoPelaEdicao === '1') b.classList.remove('hidden');
-        if (b) delete b.dataset.escondidoPelaEdicao;
-    }
+    // Recalcula em vez de restaurar o que foi guardado: a foto pode ter mudado
+    // durante a edição, e restaurar devolveria o estado da foto ERRADA.
+    atualizarAcoesDeFoto();
 }
 
 function editandoNome() {
@@ -2272,7 +2291,36 @@ function applyFiltersFromModal() {
     startFetching();
 }
 
+// Teclas que pertencem ao CURSOR quando o foco está num campo de texto.
+const TECLAS_DE_CURSOR = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
+
+function focoEmCampoDeTexto() {
+    const el = document.activeElement;
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    const tag = el.tagName;
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (tag !== 'INPUT') return false;
+    // Checkbox e botão não consomem seta; campo de texto (e range) consomem.
+    return !['checkbox', 'radio', 'button', 'submit', 'reset', 'file'].includes(
+        String(el.type || 'text').toLowerCase());
+}
+
 function handleKeyDown(e) {
+    // Foco num campo de texto: as setas são do CURSOR, não da app.
+    //
+    // Relatado pelo owner renomeando um local: usar ← → pra corrigir uma letra
+    // TROCAVA A FOTO, e o `preventDefault()` do lightbox ainda matava o
+    // movimento do cursor — as duas coisas erradas de uma vez.
+    //
+    // A guarda já existia, mas lá embaixo, DEPOIS do bloco do lightbox — que
+    // retorna antes de chegar nela. Ela nasceu pro card e o lightbox foi
+    // acrescentado por cima; o buraco é a ordem, não a falta.
+    //
+    // Só as teclas de cursor: Esc e Tab seguem passando, porque têm significado
+    // de CAMADA (fechar, navegar) e o campo do nome já trata o Esc dele.
+    if (focoEmCampoDeTexto() && TECLAS_DE_CURSOR.includes(e.key)) return;
+
     // O mapa ampliado é a camada MAIS alta quando aberto: Esc e ↓ fecham ele
     // antes de qualquer outra coisa, como o lightbox de foto faz.
     if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) {

@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.23-04
+
+### Corrigido
+- **Renomeando um local, trocar de foto trazia de volta os botões de apagar e aprovar foto** — e eles aparecem logo abaixo do confirmar/cancelar do nome, que é exatamente para onde o dedo está indo. São duas ações que gravam no mapa, no canto errado, na hora errada. Agora elas somem enquanto você renomeia e só voltam quando você confirma ou cancela. Trocar de foto durante a renomeação continua valendo — conferir a grafia noutra fachada é legítimo.
+
+- **As setas do teclado trocavam a foto em vez de mover o cursor do texto.** Digitando o nome novo, usar ← → para voltar e corrigir uma letra mudava a foto do carrossel — e o cursor nem se mexia. Agora, com o foco num campo de texto, as setas são do cursor. Esc e Tab continuam fazendo o que faziam.
+
+  Os dois reportados por [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+---
+
 ## v2026.08.23-03
 
 ### Corrigido
