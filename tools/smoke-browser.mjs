@@ -763,7 +763,7 @@ for (const [aparelho, viewport] of APARELHOS_PAISES) {
         // Dois quadros + folga: medir no mesmo tick MENTE, o layout ainda não
         // assentou e o scrollHeight vem errado (gotcha #32).
         await new Promise((k) => requestAnimationFrame(() => requestAnimationFrame(k)));
-        await dormir(180);
+        await new Promise((k) => setTimeout(k, 180));
         const card = document.querySelector('.place-card');
         if (!card) return { semCard: true };
         const cc = card.querySelector('.card-content');
@@ -828,7 +828,7 @@ for (const [nomeF, fw, fh] of FORMATOS_FOTO) {
         document.querySelectorAll('.place-card').forEach((e) => e.remove());
         showCurrentPlace();
         await new Promise((k) => requestAnimationFrame(() => requestAnimationFrame(k)));
-        await dormir(170);
+        await new Promise((k) => setTimeout(k, 170));
         const cc = document.querySelector('.card-content');
         return cc ? { rede: cc.classList.contains('card-content-rola') } : { semCard: true };
       }, { pl: place, u: uri });
@@ -868,13 +868,13 @@ for (const [nomeF, fw, fh] of FORMATOS_FOTO) {
         AppState.queue = [pl]; AppState.currentPlace = pl;
         document.querySelectorAll('.place-card').forEach((e) => e.remove());
         showCurrentPlace();
-        await dormir(320);
+        await new Promise((k) => setTimeout(k, 320));
         // Chega até o slide do mapa (ele pode ser o último, quando há foto).
         const prox = document.querySelector('.card-image-next');
         for (let i = 0; i < 8 && document.querySelector('.card-map.hidden'); i++) {
           if (!prox) break;
           prox.click();
-          await dormir(90);
+          await new Promise((k) => setTimeout(k, 90));
         }
         const bx = document.querySelector('.card-map');
         if (!bx || bx.classList.contains('hidden')) return { semMapa: true };
@@ -955,7 +955,7 @@ for (const status of [404, 403]) {
     AppState.queue = [pl]; AppState.currentPlace = pl;
     document.querySelectorAll('.place-card').forEach((e) => e.remove());
     showCurrentPlace();
-    await dormir(650);
+    await new Promise((k) => setTimeout(k, 650));
     const bx = document.querySelector('.card-map');
     return {
       visivel: !!bx && !bx.classList.contains('hidden'),
@@ -1011,7 +1011,7 @@ for (const status of [404, 403]) {
     AppState.queue = [pl]; AppState.currentPlace = pl;
     document.querySelectorAll('.place-card').forEach((e) => e.remove());
     showCurrentPlace();
-    await dormir(400);
+    await new Promise((k) => setTimeout(k, 400));
   }, alvo);
 
   await page.click('.card-map');
@@ -1121,7 +1121,7 @@ for (const status of [404, 403]) {
     AppState.currentPlace = AppState.queue[0];
     document.querySelectorAll('.place-card').forEach((e) => e.remove());
     showCurrentPlace();
-    await dormir(350);
+    await new Promise((k) => setTimeout(k, 350));
   }, { pl: PLACE, perfil });
   // Abrir o lightbox é PRÉ-CONDIÇÃO: sem ele tudo está escondido e todo teste
   // de "não aparece" passa pelo motivo errado. Já aconteceu com este harness.
@@ -1235,7 +1235,7 @@ for (const status of [404, 403]) {
     AppState.currentPlace = AppState.queue[0];
     document.querySelectorAll('.place-card').forEach((e) => e.remove());
     showCurrentPlace();
-    await dormir(350);
+    await new Promise((k) => setTimeout(k, 350));
   }, { pl: PLACE, perfil });
   const abrir = async () => {
     await page.evaluate(() => document.querySelector('.card-image')?.click());
@@ -1494,7 +1494,7 @@ for (const status of [404, 403]) {
     AppState.queue = [pl]; AppState.currentPlace = pl;
     document.querySelectorAll('.place-card').forEach((e) => e.remove());
     showCurrentPlace();
-    await dormir(500);
+    await new Promise((k) => setTimeout(k, 500));
   }, alvo);
 
   const medir = (sel) => page.evaluate((s) => [...document.querySelectorAll(s + ' img')].map((im) => {
@@ -1588,7 +1588,7 @@ for (const status of [404, 403]) {
     AppState.queue = fila; AppState.currentPlace = fila[0];
     document.querySelectorAll('.place-card').forEach((e) => e.remove());
     showCurrentPlace();
-    await dormir(900);
+    await new Promise((k) => setTimeout(k, 900));
   }, FILA);
 
   const pediu = (q) => pedidos.some((x) => x.qual === q);
@@ -3143,7 +3143,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       for (let i = 0; i < 8 && document.querySelector('.card-map.hidden'); i++) {
         if (!prox) break;
         prox.click();
-        await dormir(90);
+        await new Promise((k) => setTimeout(k, 90));
       }
       const m = document.querySelector('.card-map');
       if (!m || m.classList.contains('hidden')) return { semMapa: true };

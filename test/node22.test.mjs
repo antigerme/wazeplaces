@@ -90,15 +90,60 @@ test('o servidor WebSocket continua sendo nosso — o Node não tem um', () => {
   assert.match(ws, /class|export/, 'server/ws.mjs sumiu — a sala não sobe na VM sem ele');
 });
 
+test('cada lado usa a forma de dormir do SEU lado', () => {
+  // Estes arquivos misturam DOIS mundos com a MESMA sintaxe: o que está solto
+  // roda no Node, o que está dentro de `page.evaluate` roda no NAVEGADOR. A
+  // diferença é só ONDE a função é avaliada, e nada no texto avisa.
+  //
+  // Foi assim que o CI reprovou: uma troca em massa de `new Promise(k =>
+  // setTimeout(k, n))` por `dormir(n)` pegou 11 sleeps do lado do navegador, e o
+  // sintoma chegou como `ReferenceError: dormir is not defined` — no meio de um
+  // `page.evaluate`, longe da linha editada.
+  //
+  // E a primeira versão DESTE teste exigia `dormir` em todo lugar, o que
+  // contradizia o conserto: os dois guards brigavam entre si. A regra é UMA — a
+  // forma certa pro lado certo:
+  //
+  //   Node     -> `dormir(n)`  (setTimeout de node:timers/promises)
+  //   navegador-> `new Promise((k) => setTimeout(k, n))`
+  //
+  // O critério é VIZINHANÇA, não análise de escopo: grosseiro de propósito, o
+  // que importa é não passar calado.
+  const SO_NO_BROWSER = /\b(showCurrentPlace|requestAnimationFrame|document\.|localStorage|getComputedStyle|Lightbox\.|AppState\.)/;
+  const ARTESANAL = /new Promise\(\((?:k|r|res|resolve)\) => setTimeout\(/;
+  let node = 0, browser = 0;
+  for (const arquivo of ['tools/smoke-browser.mjs', 'tools/smoke-presenca.mjs', 'tools/smoke-fluxo.mjs']) {
+    const linhas = ler(arquivo).split('\n');
+    for (let i = 0; i < linhas.length; i++) {
+      const temDormir = linhas[i].includes('dormir(');
+      const temArtesanal = ARTESANAL.test(linhas[i]);
+      if (!temDormir && !temArtesanal) continue;
+      const perto = linhas.slice(Math.max(0, i - 2), i + 3).join('\n');
+      const ladoBrowser = SO_NO_BROWSER.test(perto);
+      if (ladoBrowser) {
+        browser++;
+        assert.equal(temDormir, false,
+          `${arquivo}:${i + 1} usa \`dormir(\` (import de Node) cercado de API de navegador — `
+          + 'dentro de `page.evaluate` use `new Promise((k) => setTimeout(k, n))`');
+      } else {
+        node++;
+        assert.equal(temArtesanal, false,
+          `${arquivo}:${i + 1} escreve sleep à mão do lado do Node — use \`dormir\` `
+          + '(`setTimeout` de `node:timers/promises`)');
+      }
+    }
+  }
+  // Sem os dois lados presentes, o teste não distingue nada: seria verdade num
+  // arquivo que não tem sleep nenhum.
+  assert.ok(node > 0 && browser > 0,
+    `o teste precisa ver os DOIS lados pra valer (node=${node}, browser=${browser})`);
+});
+
 test('nada de reinventar o que a plataforma já dá', () => {
-  // O pedido do owner, virado teste: se voltar a aparecer, é porque alguém
-  // reimplementou algo que o piso já entrega.
-  const arquivos = ['tools/smoke-fluxo.mjs', 'tools/smoke-presenca.mjs', 'tools/smoke-browser.mjs'];
-  for (const a of arquivos) {
-    const s = ler(a);
-    assert.equal(/Sec-WebSocket-Accept|258EAFA5-E914-47DA-95CA-C5AB0DC85B11/.test(s), false,
+  // O pedido do owner, virado teste: se voltar, é porque alguém reimplementou
+  // algo que o piso já entrega.
+  for (const a of ['tools/smoke-fluxo.mjs', 'tools/smoke-presenca.mjs', 'tools/smoke-browser.mjs']) {
+    assert.equal(/Sec-WebSocket-Accept|258EAFA5-E914-47DA-95CA-C5AB0DC85B11/.test(ler(a)), false,
       `${a} voltou a implementar o aperto de mão do WebSocket à mão — use o \`WebSocket\` global`);
-    assert.equal(/new Promise\(\((?:k|r|res|resolve)\) => setTimeout\(/.test(s), false,
-      `${a} voltou a escrever sleep à mão — use \`setTimeout\` de \`node:timers/promises\``);
   }
 });
