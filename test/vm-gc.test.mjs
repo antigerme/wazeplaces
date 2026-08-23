@@ -68,9 +68,18 @@ test('varredura da VM: preserva sessão viva e apaga pareamento vencido', async 
 
   // Um segundo processo no MESMO diretório: a varredura roda no boot dele.
   await comServidor(dir, 8352, async (api) => {
-    const depois = await readdir(dir);
+    // A varredura roda no boot SEM `await` (de propósito: não se atrasa o boot
+    // por causa de faxina), então o servidor já atende enquanto ela trabalha.
+    // Ler o diretório na hora é uma corrida — aqui ela nunca se perde, e no
+    // runner do CI se perdeu. Espera o efeito acontecer, com prazo e mensagem.
+    const ate = Date.now() + 10000;
+    let depois = await readdir(dir);
+    while (depois.some((n) => n.startsWith('sess_pair_')) && Date.now() < ate) {
+      await new Promise((r) => setTimeout(r, 100));
+      depois = await readdir(dir);
+    }
     assert.equal(depois.filter((n) => n.startsWith('sess_pair_')).length, 0,
-      'pareamento vencido tinha que sair — ele vale 5 min, não 21 dias');
+      'pareamento vencido tinha que sair em até 10s — ele vale 5 min, não 21 dias');
     assert.equal(depois.filter((n) => n.startsWith('sess_') && !n.startsWith('sess_pair_')).length, 1,
       'a SESSÃO não pode ser apagada pela varredura');
 

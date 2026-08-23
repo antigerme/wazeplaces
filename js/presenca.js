@@ -141,7 +141,13 @@ function presencaAbrirSocket() {
     Presenca.ws = ws;
 
     ws.onopen = () => {
-        Presenca.tentativa = 0;
+        // O contador de tentativas NÃO zera aqui. Abrir o socket não é ter
+        // conectado: a recusa do crachá, o fechamento pelo servidor e a queda
+        // de rede vêm todos DEPOIS do `onopen`. Zerando aqui, o recuo nunca
+        // cresce — MEDIDO: 16 tentativas em 31s, todas a 2s, pra sempre. Cada
+        // uma custa DUAS requisições ao Worker (crachá + upgrade) e uma
+        // chamada ao Waze. Quem zera é o `eu`, que só chega se o servidor
+        // aceitou o crachá.
         ws.send(JSON.stringify({ t: 'entrar', cracha: Presenca.cracha }));
         clearInterval(Presenca.timers.keepalive);
         Presenca.timers.keepalive = setInterval(() => {
@@ -162,7 +168,12 @@ function presencaAbrirSocket() {
 function presencaReagendar() {
     if (!presencaPodeConectar()) return;
     clearTimeout(Presenca.timers.religar);
-    const espera = PRESENCA_ESPERAS_MS[Math.min(Presenca.tentativa, PRESENCA_ESPERAS_MS.length - 1)];
+    const base = PRESENCA_ESPERAS_MS[Math.min(Presenca.tentativa, PRESENCA_ESPERAS_MS.length - 1)];
+    // Jitter de ±25%: se o servidor cair, TODO mundo é desconectado no mesmo
+    // instante e volta no mesmo instante. Espera igual pra todos transforma
+    // uma queda em rajada sincronizada — o mesmo motivo do jitter das chamadas
+    // ao Waze, agora do lado de cá.
+    const espera = Math.round(base * (0.75 + Math.random() * 0.5));
     Presenca.tentativa += 1;
     Presenca.timers.religar = setTimeout(() => presencaConectar(Presenca.filtro), espera);
 }
@@ -202,6 +213,10 @@ function presencaReceber(bruto) {
     let m;
     try { m = JSON.parse(bruto); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
+
+    // Entrou de verdade: só agora a conexão provou que serve, e só agora o
+    // recuo pode ser zerado.
+    if (m.t === 'eu') { Presenca.tentativa = 0; return; }
 
     if (m.t === 'lista') {
         Presenca.peers = Array.isArray(m.peers) ? m.peers : [];
