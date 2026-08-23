@@ -23,12 +23,11 @@
 // `test/` quebraria a promessa de suíte com zero dependência.
 
 import { spawn } from 'node:child_process';
-import { request as httpRequest } from 'node:http';
-import { randomBytes, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -94,7 +93,7 @@ let vivo = false;
 for (let i = 0; i < 60; i++) {
   if (morreuCedo !== null) break;
   try { const r = await fetch(BASE + '/'); if (r.ok) { vivo = true; break; } } catch (e) { /* subindo */ }
-  await new Promise((k) => setTimeout(k, 250));
+  await dormir(250);
 }
 if (morreuCedo !== null) {
   console.error(`\n✗ o servidor do teste morreu ao subir (código ${morreuCedo}).`);
@@ -723,103 +722,41 @@ for (const est of ESTADOS.filter((e) => !['deslogado', 'filaVazia', 'desfazerCor
   const BR = 'row:30';
   const PT = 'row:181';
 
-  // ── Cliente WebSocket escrito À MÃO, e o motivo importa ─────────────────
+  // Cliente da sala. O `WebSocket` é o GLOBAL do Node — o projeto exige Node 22
+  // (ver `engines` no package.json), e essa régua existe em boa parte por causa
+  // daqui: a primeira versão escreveu um cliente RFC 6455 à mão, ~90 linhas, só
+  // pra atender um piso que ninguém mais roda. O owner recusou, com razão — o
+  // conserto certo era subir a régua, não reimplementar o que a plataforma dá.
   //
-  // O `WebSocket` global do Node só existe do 22 pra cima. O CI roda no 20 DE
-  // PROPÓSITO — o projeto promete Node 18+, e testar no PISO é o que pega uso
-  // acidental de API nova. Foi o que aconteceu: escrevi no 22, passou aqui, e o
-  // CI reprovou com `WebSocket is not defined`. O CI fez exatamente o trabalho
-  // dele.
-  //
-  // As três saídas erradas: dependência nova (o projeto tem ZERO), navegador
-  // (perde o controle do protocolo, que é o ponto desta seção), ou pular o
-  // teste no 20 — que seria decoração, verde sem medir nada.
-  //
-  // Então: cliente próprio, ~60 linhas, do mesmo jeito que `server/ws.mjs` faz
-  // o lado servidor. Só o que a sala usa: texto, mascaramento (o RFC exige do
-  // CLIENTE) e fechamento.
-  function conectar(caminho) {
-    return new Promise((k, x) => {
-      const chave = randomBytes(16).toString('base64');
-      const req = httpRequest({
-        hostname: '127.0.0.1', port: PORTA, path: caminho,
-        headers: {
-          Connection: 'Upgrade', Upgrade: 'websocket',
-          'Sec-WebSocket-Key': chave, 'Sec-WebSocket-Version': '13',
-        },
-      });
-      const prazo = setTimeout(() => { req.destroy(); x(new Error('handshake > 5s')); }, 5000);
-      req.on('upgrade', (res, socket) => {
-        clearTimeout(prazo);
-        // Confere o aperto de mão: aceitar qualquer resposta esconderia um
-        // servidor que nem é o nosso.
-        const esperado = createHash('sha1')
-          .update(chave + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
-        if (res.headers['sec-websocket-accept'] !== esperado) {
-          socket.destroy(); x(new Error('Sec-WebSocket-Accept errado')); return;
-        }
-        socket.setNoDelay(true);
-        k(socket);
-      });
-      req.on('response', (res) => { clearTimeout(prazo); x(new Error('sem upgrade: HTTP ' + res.statusCode)); });
-      req.on('error', (e) => { clearTimeout(prazo); x(e); });
-      req.end();
-    });
-  }
-
-  // Quadro de TEXTO do cliente: FIN + opcode 1, e SEMPRE mascarado — o RFC
-  // 6455 exige do cliente, e `server/ws.mjs` recusa quadro sem máscara.
-  function quadroTexto(txt) {
-    const dados = Buffer.from(txt, 'utf8');
-    const mascara = randomBytes(4);
-    const curto = dados.length < 126;
-    const cab = Buffer.alloc(curto ? 2 : 4);
-    cab[0] = 0x81;
-    if (curto) cab[1] = 0x80 | dados.length;
-    else { cab[1] = 0x80 | 126; cab.writeUInt16BE(dados.length, 2); }
-    const corpo = Buffer.from(dados);
-    for (let i = 0; i < corpo.length; i++) corpo[i] ^= mascara[i & 3];
-    return Buffer.concat([cab, mascara, corpo]);
-  }
-
-  // Um cliente da sala: conecta, guarda tudo que chega, e sabe esperar.
+  // Segue sem navegador de propósito: falo o protocolo direto e mando o que um
+  // cliente honesto nunca mandaria (crachá de outra sala, crachá vencido,
+  // socket que nunca se identifica) — é o que permite cobrar as invariantes de
+  // PRIVACIDADE, que são as que a Ajuda promete ao editor.
   async function cliente({ nome, peer, sala = BR, salaDoCracha = sala, entrar = true, idade = 0 }) {
-    const socket = await conectar(`/sala?s=${encodeURIComponent(sala)}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${PORTA}/sala?s=${encodeURIComponent(sala)}`);
     const recebidas = [];
     let fechado = null;
-    let buf = Buffer.alloc(0);
-    socket.on('data', (pedaco) => {
-      buf = Buffer.concat([buf, pedaco]);
-      // LAÇO, e não um `if`: várias mensagens chegam no MESMO segmento TCP, e
-      // tratar só a primeira (ou só a última) já custou tempo neste projeto.
-      for (;;) {
-        if (buf.length < 2) return;
-        const op = buf[0] & 0x0f;
-        let tam = buf[1] & 0x7f;
-        let off = 2;
-        if (tam === 126) { if (buf.length < 4) return; tam = buf.readUInt16BE(2); off = 4; }
-        else if (tam === 127) { if (buf.length < 10) return; tam = Number(buf.readBigUInt64BE(2)); off = 10; }
-        if (buf.length < off + tam) return;             // quadro incompleto
-        const carga = buf.subarray(off, off + tam);
-        buf = buf.subarray(off + tam);
-        if (op === 0x8) {                                // fechamento
-          fechado = { code: tam >= 2 ? carga.readUInt16BE(0) : 1005,
-                      reason: tam > 2 ? carga.subarray(2).toString('utf8') : '' };
-          try { socket.end(); } catch { /* já foi */ }
-          return;
-        }
-        if (op === 0x1) { try { recebidas.push(JSON.parse(carga.toString('utf8'))); } catch { /* ruído */ } }
-      }
+    ws.addEventListener('message', (ev) => {
+      try { recebidas.push(JSON.parse(ev.data)); } catch { /* ruído */ }
     });
-    socket.on('close', () => { if (!fechado) fechado = { code: 1006, reason: '' }; });
-    socket.on('error', () => { /* o `close` cobre */ });
+    ws.addEventListener('close', (ev) => { fechado = { code: ev.code, reason: ev.reason }; });
+
+    // `Promise.withResolvers` (Node 22): o resolve/reject escapam do construtor,
+    // então o prazo e os ouvintes ficam lado a lado em vez de aninhados.
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const prazo = setTimeout(() => reject(new Error('handshake > 5s')), 5000);
+    ws.addEventListener('open', () => { clearTimeout(prazo); resolve(); }, { once: true });
+    ws.addEventListener('error', () => { clearTimeout(prazo); reject(new Error('não abriu')); }, { once: true });
+    await promise;
+
     const c = {
       nome, peer, recebidas,
       get fechado() { return fechado; },
-      lista: () => [...recebidas].reverse().find((m) => m.t === 'lista') || null,
+      // `findLast` (Node 20+): a última lista recebida, sem copiar e inverter.
+      lista: () => recebidas.findLast((m) => m.t === 'lista') || null,
       sinais: () => recebidas.filter((m) => m.t === 'sinal'),
-      manda: (o) => { try { socket.write(quadroTexto(JSON.stringify(o))); } catch { /* morrendo */ } },
-      fecha: () => { try { socket.end(); } catch { /* já foi */ } },
+      manda: (o) => { try { ws.send(JSON.stringify(o)); } catch { /* morrendo */ } },
+      fecha: () => { try { ws.close(); } catch { /* já foi */ } },
     };
     if (entrar) {
       // `idade` em ms permite assinar um crachá VENCIDO sem esperar 15 minutos.
@@ -830,11 +767,11 @@ for (const est of ESTADOS.filter((e) => !['deslogado', 'filaVazia', 'desfazerCor
     return c;
   }
 
-  const assentar = (ms = 350) => new Promise((k) => setTimeout(k, ms));
+  const assentar = (ms = 350) => dormir(ms);
   const nomesNaLista = (c) => ((c.lista() || {}).peers || []).map((p) => p.nome);
   const peersNaLista = (c) => ((c.lista() || {}).peers || []).map((p) => p.peer);
 
-  console.log('\n=== 7. A SALA (cliente WebSocket próprio, sem navegador)');
+  console.log('\n=== 7. A SALA (WebSocket do Node, sem navegador)');
 
   // ── 7a. CONTROLE: dois editores distintos se veem ───────────────────────
   // Sem isto, TODA invariante abaixo passaria por vácuo: "não vejo ninguém
@@ -1013,5 +950,5 @@ console.log(`\n✓ smoke de fluxo: ${ESTADOS.length} estados, ${ESCRITA.length} 
   + `, ${pares} pares medidos × ${ACOES_NEUTRAS.length} ações neutras depois de entrar`
   + `, + rede (clique E tecla, com controle dos dois lados)`
   + `, + teclado em ${2} campos com controle, + volta por Esc em toda camada`
-  + `, + A SALA em cliente WebSocket próprio (RFC 6455, roda no piso Node 18): 2-4 conexões da mesma pessoa, isolamento entre salas,`
+  + `, + A SALA no WebSocket do Node: 2-4 conexões da mesma pessoa, isolamento entre salas,`
   + ` crachá de outra sala/vencido/ausente, sinal 1:1 sem vazar, saída sem prazo, e o servidor sem repassar texto`);

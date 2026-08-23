@@ -9,7 +9,7 @@
 //
 // Zero dependência, como o resto do backend: `node:zlib` faz o deflate e o CRC
 // é tabela própria (o `zlib.crc32` só existe no Node 20.15+, e o projeto promete
-// Node 18+).
+// Node).
 //
 // A paleta é escolhida por FARTHEST-POINT (k-center), não por frequência. A
 // primeira versão pegava as 256 cores mais frequentes e mapeava o resto na mais

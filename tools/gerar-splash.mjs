@@ -27,6 +27,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { paletizar } from './png-palette.mjs';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SPLASH_PORT || 8127);
@@ -135,7 +136,7 @@ const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
 process.on('exit', () => servidor.kill());
 for (let i = 0; i < 60; i++) {
   try { if ((await fetch(BASE)).ok) break; } catch { /* subindo */ }
-  await new Promise((r) => setTimeout(r, 250));
+  await dormir(250);
 }
 
 // A marca fica em texto (é o mesmo `name` do manifest), e "Waze Places" não se

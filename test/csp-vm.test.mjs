@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -27,7 +28,7 @@ async function comServidor(porta, fn) {
   try {
     for (let i = 0; i < 80; i++) {
       try { const r = await fetch(`http://127.0.0.1:${porta}/`); if (r.ok) break; } catch {}
-      await new Promise((r) => setTimeout(r, 100));
+      await dormir(100);
     }
     await fn();
   } finally { p.kill(); }

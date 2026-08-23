@@ -28,12 +28,19 @@ jobs:
       # na main, e nenhum dos dois está na lista.
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      # `node-version: 20` NÃO é o que o aviso reclama (aquilo é o runtime das
-      # actions, não o nosso). Fica em 20 de propósito: o projeto promete Node
-      # 18+, e testar no PISO é o que pega uso acidental de API nova. Subir isto
-      # não conserta aviso nenhum e ainda afrouxa o que o CI verifica.
+      # O CI roda no PISO do projeto, que é o que pega uso acidental de API mais
+      # nova — e pegou: uma seção de teste usou o `WebSocket` global (Node 22+)
+      # e o CI reprovou no antigo piso 20.
+      #
+      # O piso subiu para 22 (ver `engines` no package.json). O que ele compra,
+      # e é o motivo da mudança: `WebSocket` cliente nativo, que apagou ~90
+      # linhas de RFC 6455 escritas à mão só para atender um piso que ninguém
+      # mais roda. Também `Promise.withResolvers` e `Array.findLast`.
+      #
+      # Manter isto igual ao `engines` é obrigatório — `test/node22.test.mjs`
+      # cobra a coerência entre package.json, este arquivo e a documentação.
       - uses: actions/setup-node@v7
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - name: Sintaxe (node --check)
         run: for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done
       - name: Testes (node --test)

@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## Sem versão nova (nada muda no app)
+
+### Melhorado
+- **O projeto agora exige Node 22 ou mais novo.** Isso não muda nada para quem usa a app — é o piso de quem *roda o servidor* (VM própria) ou trabalha no código. O motivo: uma parte dos testes precisava do WebSocket que o Node já traz de fábrica, e o piso antigo obrigava a reescrever à mão o que a plataforma dá pronta. Saíram cerca de 90 linhas escritas só por causa disso, e mais 27 esperas artesanais espalhadas pelos testes.
+
+  Quem sobe a app numa VM: se o `node -v` mostrar menos que 22, o servidor agora recusa a subir com uma mensagem clara, em vez de falhar com um erro obscuro no meio de um pedido. O README traz a instrução de instalação atualizada.
+
+---
+
 ## v2026.08.23-06
 
 ### Corrigido

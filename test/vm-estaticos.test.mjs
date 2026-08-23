@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = 8473;
@@ -39,7 +40,7 @@ async function comServidor(fn) {
   try {
     for (let i = 0; i < 80; i++) {
       try { const r = await fetch(URL_('/')); if (r.ok) break; } catch { /* subindo */ }
-      await new Promise((r) => setTimeout(r, 100));
+      await dormir(100);
     }
     await fn();
   } finally { p.kill(); }

@@ -19,6 +19,7 @@ import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const COOKIES = ['_web_session', '_csrf_token']
@@ -36,7 +37,7 @@ async function comServidor(dir, porta, fn) {
     // Espera o boot em vez de dormir um número fixo: sleep curto demais mede o
     // servidor que ainda não subiu, e longo demais é imposto no CI inteiro.
     for (let i = 0; i < 60; i++) {
-      try { await fetch(`http://127.0.0.1:${porta}/`); break; } catch { await new Promise((k) => setTimeout(k, 100)); }
+      try { await fetch(`http://127.0.0.1:${porta}/`); break; } catch { await dormir(100); }
     }
     return await fn(async (nome, corpo) => (await fetch(`http://127.0.0.1:${porta}/api/${nome}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo),
@@ -75,7 +76,7 @@ test('varredura da VM: preserva sessão viva e apaga pareamento vencido', async 
     const ate = Date.now() + 10000;
     let depois = await readdir(dir);
     while (depois.some((n) => n.startsWith('sess_pair_')) && Date.now() < ate) {
-      await new Promise((r) => setTimeout(r, 100));
+      await dormir(100);
       depois = await readdir(dir);
     }
     assert.equal(depois.filter((n) => n.startsWith('sess_pair_')).length, 0,

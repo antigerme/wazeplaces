@@ -1,7 +1,7 @@
 // core.mjs — lógica compartilhada do backend do Waze Places.
 //
 // Não depende de plataforma: usa só `fetch` e `crypto.subtle` (Web Crypto),
-// que existem tanto no Cloudflare Workers quanto no Node 18+. Toda I/O de
+// que existem tanto no Cloudflare Workers quanto no Node. Toda I/O de
 // plataforma (armazenamento de sessão, chave de criptografia) é injetada pelos
 // adaptadores (functions/api/[[route]].js no Cloudflare, server/node.mjs na VM).
 //

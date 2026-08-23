@@ -29,6 +29,8 @@
 // pedir "vá devagar" pela segunda vez — na dúvida entre rápido e seguro, o
 // projeto escolhe seguro, porque o custo do excesso é meu tempo e o custo da
 // falta é o acesso dele ao WME.
+import { setTimeout as dormir } from 'node:timers/promises';
+
 export const JITTER_MIN_MS = 1500;
 export const JITTER_MAX_MS = 4000;
 
@@ -45,7 +47,7 @@ export async function pausaComJitter({ silencioso = false } = {}) {
   // alguém vai colar num relatório. Já aconteceu.
   const tty = process.stdout.isTTY && !silencioso;
   if (tty) process.stdout.write(`  … aguardando ${ms}ms\r`);
-  await new Promise((r) => setTimeout(r, ms));
+  await dormir(ms);
   if (tty) process.stdout.write(' '.repeat(26) + '\r');
   return ms;
 }

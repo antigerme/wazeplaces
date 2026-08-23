@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { makeCrachas, base64ToBytes } from '../server/core.mjs';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8134);
@@ -75,7 +76,7 @@ const srv = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
   stdio: 'ignore',
 });
 for (let i = 0; i < 100; i++) {
-  try { await fetch(`http://127.0.0.1:${PORTA}/`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+  try { await fetch(`http://127.0.0.1:${PORTA}/`); break; } catch { await dormir(100); }
 }
 
 const { chromium } = await carregarPlaywright();
@@ -97,7 +98,7 @@ async function editor(nome, peer, rank, am, lang) {
   // Mesmo motivo do `esperar` abaixo: nada de `waitForFunction` neste arquivo.
   for (let i = 0; i < 150; i++) {
     if (await page.evaluate(() => !!(window.Presenca && window.AppState)).catch(() => false)) break;
-    await new Promise((r) => setTimeout(r, 100));
+    await dormir(100);
   }
   const cracha = await crachas.assinar({ peer, nome, rank, am, sala: 'row:30' });
   await page.evaluate(({ cracha, peer }) => {
@@ -153,7 +154,7 @@ const esperar = async (e, fn, oq, ms = 15000) => {
       anota(`${oq} — estado: ${JSON.stringify(estado)}`);
       return false;
     }
-    await new Promise((r) => setTimeout(r, 100));
+    await dormir(100);
   }
 };
 
@@ -327,7 +328,7 @@ try {
       await pg.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'domcontentloaded' });
       for (let i = 0; i < 150; i++) {
         if (await pg.evaluate(() => !!(window.Presenca && window.AppState)).catch(() => false)) break;
-        await new Promise((r) => setTimeout(r, 100));
+        await dormir(100);
       }
       const cr = await crachas.assinar({ peer, nome, rank: 5, am: true, sala: 'row:30' });
       await pg.evaluate(({ cracha, peer: pr }) => {
@@ -355,7 +356,7 @@ try {
     const nova = await ligar('duda', 'duda-recarregada');
     await esperar(obs, () => (Presenca.peers || []).some((p) => p.peer === 'duda-recarregada'),
       'carla não viu a duda recarregada');
-    await new Promise((r) => setTimeout(r, 600));   // deixa a lista assentar
+    await dormir(600);   // deixa a lista assentar
 
     const visto = await obs.page.evaluate(() => ({
       dudas: (Presenca.peers || []).filter((p) => p.nome === 'duda').length,
