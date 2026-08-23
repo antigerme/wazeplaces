@@ -80,6 +80,11 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i --no-save playwright@1.49.1
           npx playwright install chromium
           npm run test:browser
+          # Smoke de FLUXO: a app como máquina de estados. O de cima mede TELAS
+          # (960 renders) e passou verde nos dois defeitos que o owner relatou
+          # em 2026-08-23 — os dois só existem quando dois estados coexistem e
+          # a app se redesenha. Cobertura de tela não é cobertura de fluxo.
+          npm run test:fluxo
           # Dois navegadores, uma sala, uma conversa de verdade. É o único teste
           # que exercita o WebRTC — e WebRTC não tem versão sem browser. Reusa o
           # chromium já instalado no passo acima.
