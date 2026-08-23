@@ -304,6 +304,41 @@ test('o estado e o objeto exportado são o MESMO — nada de dois Presenca', () 
     'voltou a existir um segundo objeto Presenca — é o bug do ✕ de novo');
 });
 
+// ── O CUSTO DE RECONECTAR ───────────────────────────────────────────────────
+
+test('o recuo só zera quando o servidor ACEITA, não quando o socket abre', () => {
+  // O bug mais caro do recurso, e ele não aparece em teste de layout nem de
+  // protocolo: `onopen` zerava o contador de tentativas. Mas abrir o socket
+  // NÃO é ter conectado — a recusa do crachá, o fechamento pelo servidor e a
+  // queda de rede vêm todos DEPOIS do `onopen`. Zerando ali, o recuo nunca
+  // cresce e cada falha vira uma tentativa nova a cada 2 segundos, pra sempre.
+  //
+  // MEDIDO com o servidor fechando logo após o upgrade: 16 tentativas em 31s,
+  // todas espaçadas 2s. Cada uma custa DUAS requisições ao Worker (o crachá e
+  // o upgrade) e uma chamada ao Waze — ~3.600 requisições/hora por aparelho
+  // preso. Depois do conserto, ~120.
+  const CLI = read('js/presenca.js');
+
+  const onopen = CLI.match(/ws\.onopen = \(\) => \{[\s\S]*?\n    \};/);
+  assert.ok(onopen, 'sumiu o onopen do socket');
+  assert.equal(/tentativa\s*=\s*0/.test(onopen[0]), false,
+    'o `onopen` voltou a zerar o recuo — abrir o socket não é ter conectado');
+
+  // Quem zera é a confirmação do servidor.
+  assert.match(CLI, /m\.t === 'eu'\s*\)\s*\{\s*Presenca\.tentativa = 0/,
+    'só a mensagem `eu` (servidor aceitou o crachá) pode zerar o recuo');
+});
+
+test('a espera de reconexão tem jitter', () => {
+  // Servidor que cai desconecta TODO mundo no mesmo instante. Espera igual pra
+  // todos transforma uma queda numa rajada sincronizada de volta — o mesmo
+  // motivo do jitter das chamadas ao Waze, agora do lado do cliente.
+  const CLI = read('js/presenca.js');
+  const fn = CLI.match(/function presencaReagendar\(\)[\s\S]*?\n\}/);
+  assert.ok(fn, 'sumiu o presencaReagendar');
+  assert.match(fn[0], /Math\.random\(\)/, 'a espera de reconexão voltou a ser fixa');
+});
+
 // ── O QUE O SERVIDOR NÃO SABE ───────────────────────────────────────────────
 
 test('o núcleo da sala não fala com plataforma nenhuma', () => {

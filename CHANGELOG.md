@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.23-01
+
+### Corrigido
+- **A aplicação insistia demais quando a conexão da presença falhava.** Se o servidor recusasse a conexão ou a rede caísse no momento errado, o aparelho tentava de novo a cada 2 segundos — sem parar, e sem nunca esperar mais entre as tentativas. Isso consumia dados do editor à toa e inflava as chamadas ao servidor. Agora a espera cresce (2s → 5s → 15s → 30s → 1min) e varia um pouco entre aparelhos, pra que uma queda não vire uma avalanche de reconexões simultâneas.
+
+---
+
 ## v2026.08.22-08
 
 ### Removido
