@@ -8,6 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.23-03
+
+### Corrigido
+- **O aviso "Mandou bem!" voltou a aparecer a cada vez que a página era recarregada.** Ele é pra aparecer uma vez na vida, quando você conquista o direito de desligar o Desfazer. O que acontecia: o app avaliava a conquista *antes* de ler as suas preferências, comemorava, e a marca de "já vi este aviso" era descartada logo em seguida — então tudo se repetia na recarga seguinte, para sempre. Agora ele não comemora enquanto não souber se aquele trabalho é de antes ou de agora.
+
+  Regressão introduzida na v2026.08.23-02 e reportada por [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+- **No celular dobrável, tocar o meio do mini-mapa não o ampliava.** A faixa com as setas do carrossel ocupa a largura toda e 44px de altura; numa tela estreita o mapa fica com cerca de 100px, e essa faixa atravessava justamente o meio dele — o vão vazio entre as setas engolia o toque. Em telas maiores nunca apareceu, porque lá o mapa é mais alto e o centro escapa da faixa.
+
+- **A aba "Filtros" ficava menor que o alvo mínimo de toque em francês.** As três abas dividem a largura, mas a de rótulo mais longo empurrava as vizinhas: com *"Préférences"* no meio, *"Filtres"* encolhia para 41px num Galaxy Fold. Em português o problema não aparecia.
+
+- **Quem usa leitor de tela ouvia o tipo do pedido sempre em português**, mesmo com o app em inglês, espanhol ou francês. O texto que o leitor anuncia a cada card novo não passava pela tradução — e como ele não aparece na tela, nenhuma revisão visual pegaria isso.
+
+---
+
 ## v2026.08.23-02
 
 ### Corrigido

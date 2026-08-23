@@ -384,6 +384,93 @@ test('preferência não se grava antes de ter sido lida', () => {
     'o loadPreferences precisa marcar a invariante — inclusive quando não há nada guardado');
 });
 
+test('a conquista do Desfazer não celebra antes de ter linha de base', () => {
+  // Relatado pelo owner: "Mandou bem" aparecendo a CADA recarga da página.
+  // Regressão da correção anterior, e nasceu do encontro de duas mudanças:
+  //
+  //   1. a cota passou a cair num perfil em CACHE, então virou finita já no
+  //      `initApp` — antes era Infinity ali e o aviso saía cedo por acidente;
+  //   2. `loadStats()` chama `updateStats()` -> `checkUndoGateUnlock()`, e
+  //      estava DUAS LINHAS ANTES de `loadPreferences()`.
+  //
+  // Resultado medido em navegador, com controle no commit anterior: o aviso
+  // disparava, marcava `undoGateSeen` na memória, e a marca era descartada por
+  // `savePreferences()` (que corretamente recusa gravar antes de ler). Toda
+  // recarga, para sempre, inclusive DESLOGADO.
+  //
+  // O conserto é por invariante: sem linha de base estabelecida, não se celebra.
+  const APP = read('js/app.js');
+
+  // (a) ORDEM: quem lê preferência vem antes de quem avalia o portão.
+  const init = APP.match(/function initApp\(\)[\s\S]*?\n\}/);
+  assert.ok(init, 'sumiu o initApp');
+  // Sem tirar os comentários, o indexOf casa com a MENÇÃO a loadStats() dentro
+  // do comentário que explica a ordem — e o guard reprova o código certo.
+  // Mesma família do gotcha #14, em que um grep frouxo leu o comentário como
+  // prova do que ele descrevia.
+  const initCode = init[0].replace(/\/\/[^\n]*/g, '');
+  const iPrefs = initCode.indexOf('loadPreferences()');
+  const iStats = initCode.indexOf('loadStats()');
+  assert.ok(iPrefs >= 0 && iStats >= 0, 'initApp não chama mais loadPreferences/loadStats');
+  assert.ok(iPrefs < iStats,
+    'loadStats() voltou a rodar antes de loadPreferences() — ele avalia o portão da '
+    + 'conquista, e avaliá-lo sem preferência lida faz o aviso sair a cada recarga');
+
+  // (b) INVARIANTE: `undefined` (linha de base não decidida) não celebra.
+  const check = APP.match(/function checkUndoGateUnlock\(\)[\s\S]*?\n\}/);
+  assert.ok(check, 'sumiu o checkUndoGateUnlock');
+  assert.match(check[0], /typeof AppState\.preferences\.undoGateSeen !== 'boolean'\) return/,
+    'o checkUndoGateUnlock voltou a celebrar com a linha de base indefinida');
+
+  // (c) Sem cota CONHECIDA não há decisão a tomar — Infinity diria "não atingiu"
+  //     pra quem tem 200 tratados, e o pedido seguinte viraria falsa conquista.
+  const seen = APP.match(/function initUndoGateSeen\(\)[\s\S]*?\n\}/);
+  assert.ok(seen, 'sumiu o initUndoGateSeen');
+  assert.match(seen[0], /!preferenciasCarregadas\) return/,
+    'o initUndoGateSeen decide sem ter lido a preferência');
+  assert.match(seen[0], /isFinite\(getUndoUnlockThreshold\(\)\)\) return/,
+    'o initUndoGateSeen decide sem cota conhecida — isso vira falsa conquista');
+
+  // (d) E alguém precisa ESTABELECER a linha de base nos dois caminhos: perfil
+  //     em cache (initApp) e perfil que chega depois (guardarPerfilDoPortao).
+  assert.ok(initCode.includes('initUndoGateSeen()'),
+    'o initApp não estabelece a linha de base — quem tem perfil em cache fica '
+    + 'sem comemoração até o /api/perfil responder');
+  const guardar = APP.match(/function guardarPerfilDoPortao\([\s\S]*?\n\}/);
+  assert.ok(guardar && guardar[0].includes('initUndoGateSeen()'),
+    'o perfil chegando não estabelece mais a linha de base');
+});
+
+test('o leitor de tela ouve o tipo do pedido no MESMO idioma da tela', () => {
+  // A regiao viva (`cardLiveRegion`) anuncia cada card novo a quem usa leitor
+  // de tela. Ela usava `place.updateType` CRU -- o portugues que o core manda
+  // como ultimo recurso --, entao em en/es/fr a pessoa ouvia portugues em TODO
+  // card. Nao dava pra ver numa auditoria visual: regiao viva nao aparece na
+  // tela, e por isso passou por todas.
+  //
+  // O rotulo visivel ja fazia certo. Duas copias da mesma regra e como elas
+  // divergem (gotcha #63): agora ha UMA funcao, e as duas pontas a chamam.
+  const APP = read('js/app.js');
+  assert.match(APP, /function rotuloDoTipo\(place\)/,
+    'sumiu o rotuloDoTipo — o rotulo do tipo voltou a ter duas implementacoes');
+
+  const live = APP.match(/cardLiveRegion[\s\S]{0,900}?\n    \}/);
+  assert.ok(live, 'sumiu o bloco da regiao viva');
+  assert.match(live[0], /rotuloDoTipo\(place\)/,
+    'a regiao viva nao passa mais pelo rotuloDoTipo — volta a anunciar portugues em qualquer idioma');
+  assert.equal(/type: place\.updateType/.test(live[0]), false,
+    'a regiao viva voltou a ler place.updateType cru');
+
+  // E o rotulo VISIVEL tem que sair da mesma funcao, senao as duas divergem.
+  assert.match(APP, /querySelector\('\.card-type'\)\.textContent = rotuloDoTipo\(place\)/,
+    'o rotulo visivel do tipo nao usa mais a funcao compartilhada');
+
+  // A funcao tem que tentar a CHAVE antes do portugues cru.
+  const fn = APP.match(/function rotuloDoTipo\(place\)[\s\S]*?\n\}/);
+  assert.match(fn[0], /rotuloDeEnum\('card\.updateType\.', place\.updateTypeKey\)/,
+    'o rotuloDoTipo nao consulta mais o dicionario pela chave');
+});
+
 test('nenhum modal FECHA e outro ABRE no mesmo quadro', () => {
   // Isso expulsa o editor da app, e o contador não denuncia.
   //
