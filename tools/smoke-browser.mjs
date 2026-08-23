@@ -3109,6 +3109,109 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+
+// ── A faixa do carrossel não pode roubar o toque do slide atrás ─────────────
+// Terceira reincidência do gotcha #26. A faixa `.card-image-nav` tem largura
+// cheia e 44px de altura; num aparelho ESTREITO o mini-mapa fica com ~100px, a
+// faixa atravessa o meio dele e o VAZIO entre as setas comia o toque — o mapa
+// ampliado não abria pelo centro. No Pixel 7 (mapa de 144px) o centro escapa,
+// e é por isso que só se vê na tela estreita: medir num aparelho só não pega.
+{
+  const APS = [['Galaxy Fold', { width: 280, height: 653 }], ['Pixel 7', { width: 412, height: 915 }]];
+  for (const [ap, viewport] of APS) {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
+    const page = await ctx.newPage();
+    await page.addInitScript(() =>
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(450);
+    await page.evaluate((pl) => {
+      AppState.authenticated = true;
+      AppState.profile = { username: 'ed', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      AppState.queue = [pl]; AppState.currentPlace = pl; AppState.serverTotal = 1;
+      showLoading(false); showCurrentPlace(); updatePendingCount();
+    }, FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro && (f.imageUrls || []).length > 1)
+        || FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro));
+    await assentar(page, 400);
+    const r = await page.evaluate(async () => {
+      // O slide do mapa fica escondido ate se chegar nele pelo carrossel --
+      // e a navegacao usa a MESMA seta que o guard vai testar.
+      const prox = document.querySelector('.card-image-next');
+      for (let i = 0; i < 8 && document.querySelector('.card-map.hidden'); i++) {
+        if (!prox) break;
+        prox.click();
+        await new Promise((k) => setTimeout(k, 90));
+      }
+      const m = document.querySelector('.card-map');
+      if (!m || m.classList.contains('hidden')) return { semMapa: true };
+      const q = m.getBoundingClientRect();
+      if (q.height < 1) return { semMapa: true };
+      // O CENTRO do mapa, que é onde o dedo cai pra ampliar.
+      const t = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2);
+      const nav = document.querySelector('.card-image-nav');
+      return {
+        semMapa: false,
+        recebe: !!(t && (t === m || m.contains(t))),
+        ladrao: t ? (t.className || t.tagName).toString().slice(0, 40) : null,
+        alturaMapa: Math.round(q.height),
+        navPassa: nav ? getComputedStyle(nav).pointerEvents === 'none' : null,
+        setasAtivas: [...document.querySelectorAll('.card-image-prev, .card-image-next')]
+          .every((b) => getComputedStyle(b).pointerEvents !== 'none'),
+      };
+    });
+    const onde = `faixa do carrossel/${ap}`;
+    // Guard que passa por AUSÊNCIA não é guard: exija o mapa na tela.
+    checa(!r.semMapa, `${onde}: o mapa não renderizou — o guard passaria por ausência`);
+    if (r.semMapa) { await ctx.close(); continue; }
+    checa(r.recebe, `${onde}: o centro do mapa (${r.alturaMapa}px de altura) não recebe o toque`, r.ladrao);
+    checa(r.navPassa === true, `${onde}: .card-image-nav voltou a interceptar o toque`);
+    checa(r.setasAtivas, `${onde}: as setas do carrossel ficaram inertes`);
+    await ctx.close();
+  }
+}
+
+// ── As abas de Filtros cabem em 44px nos QUATRO idiomas ────────────────────
+// `1fr` é `minmax(auto, 1fr)`: a aba de rótulo mais longo empurra as vizinhas.
+// Em francês "Préférences" espremia "Filtres" para 41px no Galaxy Fold — e em
+// português não aparecia (gotcha #25). O conserto é corpo menor abaixo de
+// 320px; a saída óbvia (minmax(0,1fr)) foi testada e é PIOR, porque iguala em
+// 61px e CORTA o rótulo. Por isso o guard cobra as DUAS coisas: alvo ≥ 44 e
+// texto que não transborda.
+{
+  for (const [ap, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone SE', { width: 375, height: 667 }]]) {
+    for (const lang of LINGUAS) {
+      const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: lang === 'en' ? 'en-US' : lang });
+      const page = await ctx.newPage();
+      await page.addInitScript((l) => {
+        localStorage.setItem('waze_places_lang', l);
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+      }, lang);
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(450);
+      await page.evaluate(() => { AppState.authenticated = true; openModal('filtersModal'); });
+      await assentar(page, 200);
+      const abas = await page.evaluate(() => [...document.querySelectorAll('.seg-tab')].map((e) => {
+        const q = e.getBoundingClientRect();
+        return {
+          txt: (e.textContent || '').trim(),
+          w: Math.round(q.width), h: Math.round(q.height),
+          // O que a TELA deu não basta: rótulo cortado não se lê.
+          vaza: e.scrollWidth > e.clientWidth + 1,
+        };
+      }));
+      const onde = `abas de Filtros/${ap}/${lang}`;
+      checa(abas.length === 3, `${onde}: esperava 3 abas`, String(abas.length));
+      for (const a of abas) {
+        checa(a.w >= 44 && a.h >= 44, `${onde}: "${a.txt}" com alvo ${a.w}x${a.h} (mín. 44)`);
+        checa(!a.vaza, `${onde}: "${a.txt}" com o rótulo cortado`);
+      }
+      await ctx.close();
+    }
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -3141,4 +3244,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
   + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`
   + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`
+  + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
+  + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`);

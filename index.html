@@ -1058,10 +1058,18 @@
                                     </svg>
                                     <span class="text-sm font-medium text-slate-600 dark:text-slate-300" data-i18n="card.noImage">Sem Imagem</span>
                                 </div>
-                                <div class="card-image-nav hidden absolute bottom-2 inset-x-2 flex items-center justify-between z-30">
-                                    <button type="button" aria-label="Foto anterior" data-i18n-aria="card.image.prev.aria" class="card-image-prev bg-black/60 hover:bg-black/80 text-white w-11 h-11 rounded-full flex items-center justify-center text-xl font-bold">‹</button>
+                                <!-- `pointer-events-none` no CONTEINER e `auto` so nos controles: esta faixa
+                                     tem largura cheia e 44px de altura, e o VAZIO entre as setas
+                                     engolia o toque do slide atras. MEDIDO no Galaxy Fold: o mapa
+                                     fica com 100px, a faixa atravessa o meio dele (234-278) e o
+                                     centro do mapa (y=236) nao abria o mapa ampliado. No Pixel 7,
+                                     com 144px, o centro escapa e funciona -- por isso so aparece na
+                                     tela estreita. Terceira reincidencia do gotcha #26: quem
+                                     intercepta e a caixa de fora, invisivel mas nao transparente. -->
+                                <div class="card-image-nav hidden absolute bottom-2 inset-x-2 flex items-center justify-between z-30 pointer-events-none">
+                                    <button type="button" aria-label="Foto anterior" data-i18n-aria="card.image.prev.aria" class="card-image-prev pointer-events-auto bg-black/60 hover:bg-black/80 text-white w-11 h-11 rounded-full flex items-center justify-center text-xl font-bold">‹</button>
                                     <span class="card-image-count bg-black/60 text-white text-xs font-medium px-3 py-1 rounded-full tnum"></span>
-                                    <button type="button" aria-label="Próxima foto" data-i18n-aria="card.image.next.aria" class="card-image-next bg-black/60 hover:bg-black/80 text-white w-11 h-11 rounded-full flex items-center justify-center text-xl font-bold">›</button>
+                                    <button type="button" aria-label="Próxima foto" data-i18n-aria="card.image.next.aria" class="card-image-next pointer-events-auto bg-black/60 hover:bg-black/80 text-white w-11 h-11 rounded-full flex items-center justify-center text-xl font-bold">›</button>
                                 </div>
                             </div>
 

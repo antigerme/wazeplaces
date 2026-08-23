@@ -237,9 +237,19 @@ function initApp() {
         applyI18n();
     }
 
-    loadStats();
-    loadFilters();
+    // Preferências ANTES das stats, e não é arrumação: `loadStats()` chama
+    // `updateStats()`, que avalia o portão da conquista. Avaliar o portão sem
+    // ter lido as preferências fazia o aviso "Mandou bem" sair a CADA recarga —
+    // ele disparava, marcava na memória e a marca era descartada por
+    // `savePreferences()` (que corretamente recusa gravar antes de ler).
     loadPreferences();
+    loadStats();
+    // Com o perfil em CACHE a cota já é conhecida aqui, então a linha de base se
+    // decide na hora; sem ele, `guardarPerfilDoPortao` decide quando o perfil
+    // chegar. Sem esta chamada existe uma janela — entre abrir e o /api/perfil
+    // responder — em que cruzar a cota não seria comemorado.
+    initUndoGateSeen();
+    loadFilters();
     carregarPrazoDaSessao();
     loadDevMode();
     enforceDevGatedFilters();
@@ -2968,6 +2978,22 @@ function abrirComoFunciona() {
     openModal('comoFuncionaModal');
 }
 
+// O tipo do pedido, em UMA função: o rótulo visível e o que o leitor de tela
+// ANUNCIA têm que dizer a mesma coisa, no mesmo idioma. Eram duas cópias, e a
+// da região viva nunca foi traduzida (ver o comentário no call site).
+//
+// "Reporte (Sinalização)" não diz o que foi reportado; quando é foto, o WME
+// chama de "Foto sinalizada", e o card marca QUAL das fotos é.
+// `updateTypeKey` é a chave crua (VENUE, IMAGE, FLAG…); o `updateType` em
+// português segue vindo do core e serve de último recurso, pra chave nova
+// nunca deixar o campo vazio — feio, nunca invisível.
+function rotuloDoTipo(place) {
+    if (!place) return '';
+    if (Array.isArray(place.changes) && place.changes.length > 0) return t('card.type.update');
+    if (place.flagSubjectType === 'IMAGE') return t('card.type.flagImage');
+    return rotuloDeEnum('card.updateType.', place.updateTypeKey) || place.updateType || '';
+}
+
 function showCurrentPlace() {
     marcarTelaPronta();   // libera a foto de perfil (ver `liberarAvatar`)
     try {
@@ -3018,7 +3044,12 @@ function renderCurrentCard() {
     if (liveRegion) {
         liveRegion.textContent = t('card.live.newRequest', {
             name: identidadeDoPlace(place).titulo,
-            type: place.updateType ? ', ' + place.updateType : ''
+            // A MESMA função do rótulo visível. Aqui estava `place.updateType`
+            // cru — o português que o core manda como último recurso —, então
+            // quem usa leitor de tela em en/es/fr ouvia português em TODO card.
+            // Não dava pra ver: região viva não aparece na tela, e por isso
+            // passou por auditoria visual nenhuma.
+            type: rotuloDoTipo(place) ? ', ' + rotuloDoTipo(place) : ''
         });
     }
 
@@ -3052,17 +3083,7 @@ function renderCurrentCard() {
     // exatamente os rótulos que a caixa "Mudanças propostas" repete logo abaixo,
     // COM os valores. Mostrar os dois era a mesma informação duas vezes, e a de
     // cima truncada. Com a lista na tela, o tipo diz só o que ela não diz.
-    const temMudancas = Array.isArray(place.changes) && place.changes.length > 0;
-    card.querySelector('.card-type').textContent = temMudancas
-        ? t('card.type.update')
-        // "Reporte (Sinalização)" não diz o que foi reportado. Quando é foto, o
-        // WME chama de "Foto sinalizada" — e o card marca QUAL das fotos é.
-        : (place.flagSubjectType === 'IMAGE' ? t('card.type.flagImage')
-            // `updateTypeKey` é a chave crua (VENUE, IMAGE, FLAG…). O
-            // `updateType` em português continua vindo do core e serve de
-            // último recurso, pra chave nova nunca deixar o campo vazio.
-            : (rotuloDeEnum('card.updateType.', place.updateTypeKey)
-               || place.updateType || ''));
+    card.querySelector('.card-type').textContent = rotuloDoTipo(place);
     const elTipo = card.querySelector('.card-type');
     escreverValor(elTipo, elTipo.textContent, 'card.type.empty');
     escreverValor(card.querySelector('.card-creator'), place.createdBy, 'card.creator.empty');
@@ -5874,6 +5895,11 @@ function getUndoTreatedCount() {
 function guardarPerfilDoPortao(p) {
     if (!p || typeof p.rank !== 'number') return;
     safeLS.set(PERFIL_GATE_KEY, JSON.stringify({ rank: p.rank, isStaff: !!p.isStaff }));
+    // O perfil ACABOU de ficar conhecido, e era a única peça que faltava pra
+    // estabelecer a linha de base da conquista. Aqui e não no `initApp` porque
+    // é este o momento em que a cota deixa de ser Infinity — nas DUAS entradas
+    // de perfil, sem depender de quem lembra de chamar.
+    initUndoGateSeen();
 }
 
 // O perfil que a COTA usa: o vivo, se houver; senão o último que carregou.
@@ -5910,14 +5936,24 @@ function undoGateAtingido() {
 // marcado como "visto": parabenizar por trabalho feito antes de a comemoração
 // existir soaria falso — e apareceria pra toda a base no primeiro deploy.
 function initUndoGateSeen() {
+    // Mesma invariante do savePreferences: sem ter lido, não se decide.
+    if (!preferenciasCarregadas) return;
     if (typeof AppState.preferences.undoGateSeen === 'boolean') return;
+    // Sem cota conhecida NÃO HÁ decisão a tomar — adiar é o certo. Cota Infinity
+    // responderia "não atingiu" pra quem tem 200 tratados, e o pedido seguinte
+    // viraria uma falsa conquista pelo acumulado de meses.
+    if (!isFinite(getUndoUnlockThreshold())) return;
     AppState.preferences.undoGateSeen = undoGateAtingido();
     savePreferences();
 }
 
 function checkUndoGateUnlock() {
+    // `undefined` = a LINHA DE BASE ainda não foi estabelecida: `initUndoGateSeen`
+    // não pôde decidir se este acumulado é trabalho de ANTES. Celebrar aqui
+    // parabeniza pelo histórico, e é o que fazia o aviso sair a cada recarga.
+    // Só `false` — decisão tomada, ainda não atingiu — libera a comemoração.
+    if (typeof AppState.preferences.undoGateSeen !== 'boolean') return;
     if (AppState.preferences.undoGateSeen) return;
-    // Sem perfil a cota é Infinity — não dispara nada até o perfil chegar.
     if (!undoGateAtingido()) return;
     AppState.preferences.undoGateSeen = true;
     // Este aviso já abre a mesma porta. Sem isto, quem cruza a cota com 20

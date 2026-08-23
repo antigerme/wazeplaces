@@ -724,6 +724,20 @@ input.ui-switch:disabled {
   transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
+/* Tela muito estreita (Galaxy Fold fechado, 280px): as tres abas nao cabem em
+   44px cada com o corpo de 13px -- em frances "Preferences" empurrava "Filtres"
+   para 41px (gotcha #25: a string mais larga nao esta no idioma em que voce
+   desenvolve). MEDIDO: com 12px os tres rotulos couberam E o menor cruzou os
+   44px. A saida obvia -- colunas iguais com minmax(0,1fr) -- foi TESTADA e e
+   PIOR: da 61px a todas e corta o rotulo, trocando legibilidade por 3px de
+   alvo. Alvo de 41x44 ainda se acerta; rotulo cortado nao se le. */
+@media (max-width: 320px) {
+  .seg-tab {
+    font-size: 0.75rem;
+    letter-spacing: -0.01em;
+  }
+}
+
 .seg-tab[aria-selected="true"] {
   background: #ffffff;
   color: #0e7490; /* cyan-700 */
