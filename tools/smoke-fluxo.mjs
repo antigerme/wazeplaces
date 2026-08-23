@@ -51,15 +51,57 @@ if (!chromium) {
 }
 
 // ── servidor ───────────────────────────────────────────────────────────────
+// Chave FIXA: a seção da sala precisa assinar crachás iguais aos do servidor.
+// Só de teste, e por isso é constante e óbvia.
+const CHAVE_TESTE = Buffer.alloc(32, 7).toString('base64');
+// A porta tem que estar LIVRE antes de eu subir. Checar depois é uma corrida
+// que eu perco: o processo esquecido responde na hora, a sonda de saúde passa,
+// e só então o meu `spawn` morre com EADDRINUSE — tarde demais, com o teste já
+// medindo o servidor errado (foi assim que a seção da sala reprovou por vácuo,
+// com TODO crachá voltando "inválido" porque a chave era de outro processo).
+try {
+  const r = await fetch(BASE + '/', { signal: AbortSignal.timeout(1500) });
+  if (r.ok) {
+    console.error(`\n✗ a porta ${PORTA} já está ocupada por outro processo.`);
+    console.error('  O teste mediria o servidor ERRADO — com outra chave, todo crachá seria recusado.');
+    console.error('  Confira com: ps -eo pid,args | grep "[s]erver/node.mjs"');
+    console.error(`  Ou rode noutra porta: PORTA_FLUXO=8190 npm run test:fluxo`);
+    process.exit(1);
+  }
+} catch (e) { /* ninguém atendeu: a porta está livre, que é o que eu quero */ }
+
 const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
-  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1' },
+  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1', ENCRYPTION_KEY: CHAVE_TESTE },
   stdio: ['ignore', 'ignore', 'inherit'],
 });
 process.on('exit', () => servidor.kill());
+
+// O servidor que responde tem que ser O QUE EU SUBI.
+//
+// Sem esta checagem, um processo esquecido na mesma porta sequestra o teste em
+// silêncio: o `spawn` morre com EADDRINUSE, a sonda de saúde passa (porque o
+// processo VELHO responde), e o smoke mede um servidor com OUTRA chave. Foi o
+// que aconteceu aqui — todo crachá voltava "inválido" e as invariantes da sala
+// passavam por vácuo, porque ninguém conseguia entrar.
+//
+// É a mesma família dos outros erros de instrumento deste arquivo: o teste
+// respondia sobre uma coisa diferente da que eu pensava estar medindo.
+let morreuCedo = null;
+servidor.on('exit', (code) => { morreuCedo = code; });
+let vivo = false;
 for (let i = 0; i < 60; i++) {
-  try { const r = await fetch(BASE + '/'); if (r.ok) break; } catch (e) { /* subindo */ }
+  if (morreuCedo !== null) break;
+  try { const r = await fetch(BASE + '/'); if (r.ok) { vivo = true; break; } } catch (e) { /* subindo */ }
   await new Promise((k) => setTimeout(k, 250));
 }
+if (morreuCedo !== null) {
+  console.error(`\n✗ o servidor do teste morreu ao subir (código ${morreuCedo}).`);
+  console.error(`  Quase sempre é a porta ${PORTA} ocupada por um processo esquecido.`);
+  console.error('  Confira com: ps -eo pid,args | grep "[s]erver/node.mjs"');
+  console.error('  Ou rode noutra porta: PORTA_FLUXO=8190 npm run test:fluxo');
+  process.exit(1);
+}
+if (!vivo) { console.error(`\n✗ o servidor não respondeu em ${BASE} depois de 15s.`); process.exit(1); }
 
 // ── o pedido usado em tudo ─────────────────────────────────────────────────
 // Precisa de NOME (renomear só corrige nome existente), local APROVADO (o Waze
@@ -657,6 +699,229 @@ for (const est of ESTADOS.filter((e) => !['deslogado', 'filaVazia', 'desfazerCor
   await ctx.close();
 }
 
+
+// ═══ 7. A SALA: presença como máquina de estados, do lado do SERVIDOR ══════
+//
+// Presença é uma máquina de estados PRÓPRIA, e as seções acima não a tocam:
+// elas exploram a tela de triagem, num navegador só. A sala vive no servidor e
+// só existe com VÁRIAS conexões ao mesmo tempo — nenhum defeito dela cabe numa
+// página.
+//
+// E não é hipotético: o owner relatou que recarregar a página o duplicava na
+// lista (e que ele aparecia na PRÓPRIA lista). Nenhuma seção acima veria isso.
+//
+// Aqui o cliente é o `WebSocket` NATIVO do Node, não um navegador: falo o
+// protocolo direto, controlo o tempo, e mando o que um cliente honesto nunca
+// mandaria (crachá de outra sala, crachá vencido, socket que nunca se
+// identifica). É o que permite cobrar as invariantes de PRIVACIDADE, que são as
+// que a Ajuda promete ao editor.
+{
+  const { makeCrachas } = await import(new URL('../server/core.mjs', import.meta.url));
+  const crachas = makeCrachas({ keyBytes: new Uint8Array(Buffer.from(CHAVE_TESTE, 'base64')) });
+  const BR = 'row:30';
+  const PT = 'row:181';
+
+  // Um cliente da sala: conecta, guarda tudo que chega, e sabe esperar.
+  async function cliente({ nome, peer, sala = BR, salaDoCracha = sala, entrar = true, idade = 0 }) {
+    const ws = new WebSocket(`ws://127.0.0.1:${PORTA}/sala?s=${encodeURIComponent(sala)}`);
+    const recebidas = [];
+    let fechado = null;
+    ws.addEventListener('message', (ev) => { try { recebidas.push(JSON.parse(ev.data)); } catch { /* ruído */ } });
+    ws.addEventListener('close', (ev) => { fechado = { code: ev.code, reason: ev.reason }; });
+    await new Promise((k, x) => {
+      ws.addEventListener('open', k, { once: true });
+      ws.addEventListener('error', () => x(new Error('não abriu')), { once: true });
+      setTimeout(() => x(new Error('handshake > 5s')), 5000);
+    });
+    const c = {
+      nome, peer, ws, recebidas,
+      get fechado() { return fechado; },
+      lista: () => [...recebidas].reverse().find((m) => m.t === 'lista') || null,
+      sinais: () => recebidas.filter((m) => m.t === 'sinal'),
+      manda: (o) => { try { ws.send(JSON.stringify(o)); } catch { /* morrendo */ } },
+      fecha: () => { try { ws.close(); } catch { /* já foi */ } },
+    };
+    if (entrar) {
+      // `idade` em ms permite assinar um crachá VENCIDO sem esperar 15 minutos.
+      const cracha = await crachas.assinar({ peer, nome, rank: 5, am: true, staff: false, sala: salaDoCracha },
+        Date.now() - idade);
+      c.manda({ t: 'entrar', cracha });
+    }
+    return c;
+  }
+
+  const assentar = (ms = 350) => new Promise((k) => setTimeout(k, ms));
+  const nomesNaLista = (c) => ((c.lista() || {}).peers || []).map((p) => p.nome);
+  const peersNaLista = (c) => ((c.lista() || {}).peers || []).map((p) => p.peer);
+
+  console.log('\n=== 7. A SALA (WebSocket nativo, sem navegador)');
+
+  // ── 7a. CONTROLE: dois editores distintos se veem ───────────────────────
+  // Sem isto, TODA invariante abaixo passaria por vácuo: "não vejo ninguém
+  // indevido" é trivialmente verdade numa sala que nunca mostra ninguém.
+  {
+    const ana = await cliente({ nome: 'ana', peer: 'ana1' });
+    const bia = await cliente({ nome: 'bia', peer: 'bia1' });
+    await assentar();
+    if (nomesNaLista(ana).includes('bia') && nomesNaLista(bia).includes('ana')) {
+      console.log('  ok controle: dois editores distintos se veem');
+    } else {
+      dizer('controle da sala: dois editores não se veem — o resto passaria por vácuo',
+        `ana vê ${JSON.stringify(nomesNaLista(ana))}, bia vê ${JSON.stringify(nomesNaLista(bia))}`);
+    }
+    // E ninguém se vê.
+    if (nomesNaLista(ana).includes('ana')) dizer('sala: a ana aparece na PRÓPRIA lista');
+    if (nomesNaLista(bia).includes('bia')) dizer('sala: a bia aparece na PRÓPRIA lista');
+    ana.fecha(); bia.fecha();
+    await assentar(250);
+  }
+
+  // ── 7b. A MESMA PESSOA EM N CONEXÕES aparece UMA vez ────────────────────
+  // O relato do owner. As conexões antigas ficam VIVAS de propósito: depender
+  // de elas morrerem sozinhas seria depender de sorte de timing.
+  for (const n of [2, 3, 4]) {
+    const obs = await cliente({ nome: 'obs', peer: 'obs' + n });
+    const abas = [];
+    for (let i = 0; i < n; i++) {
+      abas.push(await cliente({ nome: 'duda', peer: `duda-aba${i}` }));
+      await assentar(150);
+    }
+    await assentar();
+    const vistas = nomesNaLista(obs).filter((x) => x === 'duda').length;
+    if (vistas === 1) console.log(`  ok ${n} conexões da mesma pessoa aparecem como 1`);
+    else dizer(`sala: ${n} conexões da duda aparecem ${vistas}× pra quem observa`, JSON.stringify(peersNaLista(obs)));
+    // A lista tem que apontar pra conexão VIVA — a última. Senão a conversa
+    // é chamada num socket morto e o editor fica esperando resposta.
+    const ultima = `duda-aba${n - 1}`;
+    if (vistas === 1 && !peersNaLista(obs).includes(ultima)) {
+      dizer(`sala: a lista aponta pra conexão velha da duda`, JSON.stringify(peersNaLista(obs)));
+    }
+    // E a própria duda não se vê.
+    const ela = abas[abas.length - 1];
+    if (nomesNaLista(ela).includes('duda')) dizer('sala: a duda se vê na própria lista');
+    // O `total` não pode mentir: é o que a pílula mostra.
+    const l = obs.lista();
+    if (l && l.total !== l.peers.length) dizer(`sala: o total (${l.total}) não bate com a lista (${l.peers.length})`);
+    for (const a of abas) a.fecha();
+    obs.fecha();
+    await assentar(250);
+  }
+
+  // ── 7c. ISOLAMENTO ENTRE SALAS ──────────────────────────────────────────
+  // Duas filas são dois lugares. Vazar aqui é mostrar a um editor do Brasil
+  // quem está triando Portugal — e, pior, deixar um falar com o outro.
+  {
+    const br = await cliente({ nome: 'brasileiro', peer: 'br1', sala: BR });
+    const pt = await cliente({ nome: 'portugues', peer: 'pt1', sala: PT });
+    const br2 = await cliente({ nome: 'brasileiro2', peer: 'br2', sala: BR });
+    await assentar();
+    // CONTROLE: dentro da MESMA sala eles se veem (senão isto passa por vácuo).
+    if (!nomesNaLista(br).includes('brasileiro2')) {
+      dizer('controle do isolamento: dois da mesma sala não se veem');
+    } else if (nomesNaLista(br).includes('portugues') || nomesNaLista(pt).includes('brasileiro')) {
+      dizer('sala: VAZOU entre salas', `br vê ${JSON.stringify(nomesNaLista(br))}, pt vê ${JSON.stringify(nomesNaLista(pt))}`);
+    } else {
+      console.log('  ok salas isoladas (e o controle prova que a lista funciona)');
+    }
+    // E a SINALIZAÇÃO não atravessa: mandar pro peer do outro lado não chega.
+    br.manda({ t: 'sinal', para: 'pt1', tipo: 'offer', payload: { sdp: 'x' } });
+    await assentar(300);
+    if (pt.sinais().length) dizer('sala: a sinalização ATRAVESSOU pra outra sala');
+    else console.log('  ok a sinalização não atravessa salas');
+    br.fecha(); br2.fecha(); pt.fecha();
+    await assentar(250);
+  }
+
+  // ── 7d. CRACHÁ: de outra sala, vencido, e ausente ───────────────────────
+  {
+    // Crachá LEGÍTIMO, assinado pra Portugal, usado no socket do Brasil.
+    const intruso = await cliente({ nome: 'intruso', peer: 'int1', sala: BR, salaDoCracha: PT });
+    await assentar(400);
+    if (!intruso.fechado) dizer('sala: crachá de OUTRA sala não foi recusado');
+    else console.log(`  ok crachá de outra sala recusado (code ${intruso.fechado.code})`);
+
+    // Crachá VENCIDO (assinado 1h atrás; o TTL é 15min).
+    const velho = await cliente({ nome: 'velho', peer: 'vel1', idade: 3600_000 });
+    await assentar(400);
+    if (!velho.fechado) dizer('sala: crachá VENCIDO não foi recusado');
+    else console.log(`  ok crachá vencido recusado (code ${velho.fechado.code})`);
+
+    // Socket ANÔNIMO: conecta e nunca se identifica.
+    const anon = await cliente({ nome: 'anon', peer: 'anon1', entrar: false });
+    const dono = await cliente({ nome: 'dono', peer: 'dono1' });
+    await assentar(400);
+    if (anon.lista()) dizer('sala: socket anônimo RECEBEU a lista');
+    else console.log('  ok socket anônimo não vê a lista');
+    if (nomesNaLista(dono).length) dizer('sala: o anônimo apareceu na lista dos outros', JSON.stringify(nomesNaLista(dono)));
+    else console.log('  ok o anônimo não aparece na lista de ninguém');
+    // E ele não consegue falar com quem está lá.
+    anon.manda({ t: 'sinal', para: 'dono1', tipo: 'offer', payload: { sdp: 'x' } });
+    await assentar(300);
+    if (dono.sinais().length) dizer('sala: o anônimo conseguiu SINALIZAR');
+    else console.log('  ok o anônimo não consegue sinalizar');
+    intruso.fecha(); velho.fecha(); anon.fecha(); dono.fecha();
+    await assentar(250);
+  }
+
+  // ── 7e. A SINALIZAÇÃO É 1:1, nunca difusão ──────────────────────────────
+  // O aperto de mão do WebRTC carrega o endereço de rede dos dois lados. Se
+  // ele fosse difundido, entrar numa sala revelaria o IP de todo mundo.
+  {
+    const a = await cliente({ nome: 'a', peer: 'pa' });
+    const b = await cliente({ nome: 'b', peer: 'pb' });
+    const c = await cliente({ nome: 'c', peer: 'pc' });
+    await assentar();
+    a.manda({ t: 'sinal', para: 'pb', tipo: 'offer', payload: { sdp: 'segredo' } });
+    await assentar(400);
+    if (b.sinais().length !== 1) dizer(`sala: o destinatário recebeu ${b.sinais().length} sinais (esperava 1)`);
+    else console.log('  ok o sinal chega ao destinatário');
+    if (c.sinais().length) dizer('sala: o sinal VAZOU pra quem não era destinatário', JSON.stringify(c.sinais()));
+    else console.log('  ok o sinal NÃO vaza pra terceiros');
+    if (a.sinais().length) dizer('sala: o remetente recebeu o próprio sinal de volta');
+    a.fecha(); b.fecha(); c.fecha();
+    await assentar(250);
+  }
+
+  // ── 7f. SAIR REMOVE DA LISTA DE TODOS, sem prazo ────────────────────────
+  // A Ajuda promete "some assim que você sai", nas 4 línguas. Se isto falhar,
+  // a app mente — e ninguém consegue depurar uma promessa de texto.
+  {
+    const fica = await cliente({ nome: 'fica', peer: 'f1' });
+    const vai = await cliente({ nome: 'vai', peer: 'v1' });
+    await assentar();
+    if (!nomesNaLista(fica).includes('vai')) dizer('controle da saída: os dois não se viram antes');
+    vai.fecha();
+    await assentar(600);
+    if (nomesNaLista(fica).includes('vai')) dizer('sala: quem saiu continua na lista');
+    else console.log('  ok quem sai some da lista de todos, sem prazo');
+    fica.fecha();
+    await assentar(250);
+  }
+
+  // ── 7g. O TEXTO DA CONVERSA NUNCA PASSA PELO SERVIDOR ────────────────────
+  // A Ajuda promete que a mensagem vai direto entre os aparelhos. O servidor
+  // só transporta o APERTO DE MÃO, e nada mais: se um `tipo` desconhecido
+  // fosse repassado, ele viraria um canal de texto pelo servidor sem ninguém
+  // ter decidido isso.
+  {
+    const a = await cliente({ nome: 'a', peer: 'ta' });
+    const b = await cliente({ nome: 'b', peer: 'tb' });
+    await assentar();
+    a.manda({ t: 'sinal', para: 'tb', tipo: 'offer', payload: { sdp: 'ok' } });
+    await assentar(300);
+    const antes = b.sinais().length;
+    // Uma "mensagem" disfarçada de sinal.
+    a.manda({ t: 'mensagem', para: 'tb', texto: 'isto não pode chegar pelo servidor' });
+    a.manda({ t: 'texto', para: 'tb', texto: 'nem isto' });
+    await assentar(400);
+    const tudo = JSON.stringify(b.recebidas);
+    if (/isto não pode chegar|nem isto/.test(tudo)) dizer('sala: o servidor repassou TEXTO de conversa');
+    else console.log(`  ok o servidor não repassa texto (só o aperto de mão: ${antes} sinal)`);
+    a.fecha(); b.fecha();
+    await assentar(250);
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -667,4 +932,6 @@ if (falhas) {
 console.log(`\n✓ smoke de fluxo: ${ESTADOS.length} estados, ${ESCRITA.length} ações de escrita`
   + `, ${pares} pares medidos × ${ACOES_NEUTRAS.length} ações neutras depois de entrar`
   + `, + rede (clique E tecla, com controle dos dois lados)`
-  + `, + teclado em ${2} campos com controle, + volta por Esc em toda camada`);
+  + `, + teclado em ${2} campos com controle, + volta por Esc em toda camada`
+  + `, + A SALA no WebSocket nativo: 2-4 conexões da mesma pessoa, isolamento entre salas,`
+  + ` crachá de outra sala/vencido/ausente, sinal 1:1 sem vazar, saída sem prazo, e o servidor sem repassar texto`);

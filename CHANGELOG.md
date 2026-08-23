@@ -11,6 +11,10 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.23-06
 
 ### Corrigido
+### Melhorado
+- **A bateria de fluxo agora cobre a sala de presença.** Ela testava a app como máquina de estados, mas só a tela de triagem — presença vive no servidor e só existe com várias conexões ao mesmo tempo, então nenhum problema dela cabia num navegador só. Agora o teste abre conexões de verdade e cobra o que a Ajuda promete ao editor: cada pessoa aparece uma vez, ninguém aparece na própria lista, duas filas são dois lugares que não se enxergam nem conseguem se falar, crachá vencido ou de outra fila não entra, o aperto de mão da conversa chega só a quem é destinatário, quem sai some na hora, e o servidor nunca repassa o texto da conversa.
+
+### Corrigido
 - **Recarregar a página duplicava você na lista de quem está online — e você aparecia na sua própria lista.** Recarregando de novo, triplicava; seus colegas também viam você repetido, e a pílula contava errado.
 
   A causa: o identificador da conexão é sorteado a cada carga da página. Ele endereça uma *conexão*, não um *editor* — e enquanto a conexão anterior não fechava (o navegador nem sempre avisa que fechou), você estava na sala duas vezes, com identificadores diferentes.
