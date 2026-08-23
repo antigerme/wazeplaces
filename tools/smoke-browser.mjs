@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8123);
@@ -315,7 +316,7 @@ async function esperarServidor() {
       const r = await fetch(BASE);
       if (r.ok) return;
     } catch { /* ainda subindo */ }
-    await new Promise((r) => setTimeout(r, 250));
+    await dormir(250);
   }
   throw new Error(`servidor não subiu em ${BASE}`);
 }

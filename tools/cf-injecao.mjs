@@ -48,6 +48,7 @@ const PADROES = {
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as dormir } from 'node:timers/promises';
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CSP = Object.fromEntries(
   readFileSync(join(RAIZ, '_headers'), 'utf8')
@@ -98,7 +99,7 @@ for (let i = 0; i < N; i++) {
   }
   ok++;
   for (const [nome, p] of Object.entries(PADROES)) if (p.re.test(html)) achados[nome]++;
-  await new Promise((r) => setTimeout(r, 300));
+  await dormir(300);
 }
 
 console.log(`${URL_BASE} — ${ok} de ${N} respostas lidas\n`);

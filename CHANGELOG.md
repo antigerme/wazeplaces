@@ -8,6 +8,32 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## Sem versão nova (nada muda no app)
+
+### Melhorado
+- **O projeto agora exige Node 22 ou mais novo.** Isso não muda nada para quem usa a app — é o piso de quem *roda o servidor* (VM própria) ou trabalha no código. O motivo: uma parte dos testes precisava do WebSocket que o Node já traz de fábrica, e o piso antigo obrigava a reescrever à mão o que a plataforma dá pronta. Saíram cerca de 90 linhas escritas só por causa disso, e mais 27 esperas artesanais espalhadas pelos testes.
+
+  Quem sobe a app numa VM: se o `node -v` mostrar menos que 22, o servidor agora recusa a subir com uma mensagem clara, em vez de falhar com um erro obscuro no meio de um pedido. O README traz a instrução de instalação atualizada.
+
+---
+
+## v2026.08.23-06
+
+### Corrigido
+### Melhorado
+- **A bateria de fluxo agora cobre a sala de presença.** Ela testava a app como máquina de estados, mas só a tela de triagem — presença vive no servidor e só existe com várias conexões ao mesmo tempo, então nenhum problema dela cabia num navegador só. Agora o teste abre conexões de verdade e cobra o que a Ajuda promete ao editor: cada pessoa aparece uma vez, ninguém aparece na própria lista, duas filas são dois lugares que não se enxergam nem conseguem se falar, crachá vencido ou de outra fila não entra, o aperto de mão da conversa chega só a quem é destinatário, quem sai some na hora, e o servidor nunca repassa o texto da conversa.
+
+### Corrigido
+- **Recarregar a página duplicava você na lista de quem está online — e você aparecia na sua própria lista.** Recarregando de novo, triplicava; seus colegas também viam você repetido, e a pílula contava errado.
+
+  A causa: o identificador da conexão é sorteado a cada carga da página. Ele endereça uma *conexão*, não um *editor* — e enquanto a conexão anterior não fechava (o navegador nem sempre avisa que fechou), você estava na sala duas vezes, com identificadores diferentes.
+
+  Agora quem é "a mesma pessoa" é o **nome do editor**, que vem assinado pelo servidor: entrar de novo derruba a sua conexão anterior, a lista mostra cada pessoa uma vez, e ela aponta sempre para a conexão viva — então uma conversa iniciada dali não cai num canal morto. Duas abas suas continuam sendo uma presença só, que é o que "estou triando esta fila" quer dizer.
+
+  Reportado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+---
+
 ## v2026.08.23-05
 
 ### Corrigido

@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { makeCrachas, base64ToBytes } from '../server/core.mjs';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8134);
@@ -75,7 +76,7 @@ const srv = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
   stdio: 'ignore',
 });
 for (let i = 0; i < 100; i++) {
-  try { await fetch(`http://127.0.0.1:${PORTA}/`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+  try { await fetch(`http://127.0.0.1:${PORTA}/`); break; } catch { await dormir(100); }
 }
 
 const { chromium } = await carregarPlaywright();
@@ -97,7 +98,7 @@ async function editor(nome, peer, rank, am, lang) {
   // Mesmo motivo do `esperar` abaixo: nada de `waitForFunction` neste arquivo.
   for (let i = 0; i < 150; i++) {
     if (await page.evaluate(() => !!(window.Presenca && window.AppState)).catch(() => false)) break;
-    await new Promise((r) => setTimeout(r, 100));
+    await dormir(100);
   }
   const cracha = await crachas.assinar({ peer, nome, rank, am, sala: 'row:30' });
   await page.evaluate(({ cracha, peer }) => {
@@ -153,7 +154,7 @@ const esperar = async (e, fn, oq, ms = 15000) => {
       anota(`${oq} — estado: ${JSON.stringify(estado)}`);
       return false;
     }
-    await new Promise((r) => setTimeout(r, 100));
+    await dormir(100);
   }
 };
 
@@ -300,6 +301,83 @@ try {
   if (limpou === null) ok('a chave antiga de bloqueio é apagada do aparelho');
   else anota(`a chave antiga sobreviveu: ${limpou}`);
   await ana.page.evaluate(() => closeModal('presencaModal'));
+
+
+  // ── 9) RECARREGAR A PÁGINA NÃO DUPLICA NINGUÉM ────────────────────────────
+  //
+  // Relatado pelo owner com print: a cada recarga ele aparecia mais uma vez na
+  // lista — e aparecia na PRÓPRIA lista, com a pílula contando 3 onde havia 1
+  // colega. Os colegas o viam repetido também.
+  //
+  // A causa: o `peer` é sorteado a CADA CARGA DA PÁGINA — endereça uma CONEXÃO,
+  // não um editor. Enquanto o socket antigo não fecha, a mesma pessoa está na
+  // sala com dois peers, e comparar por peer não os junta.
+  //
+  // ESTE BLOCO É AUTOSSUFICIENTE, e não é preciosismo: a primeira versão
+  // reaproveitava os editores dos passos anteriores e passou VERDE COM A
+  // SABOTAGEM — porque a conexão velha já tinha sido fechada lá atrás, e sem
+  // conexão velha não há o que duplicar. Passou por AUSÊNCIA.
+  //
+  // A conexão anterior fica VIVA de propósito: é o pior caso, e é o que
+  // acontece quando o navegador não manda o quadro de fechamento. Depender de
+  // o socket velho morrer sozinho seria depender de sorte de timing.
+  {
+    const ligar = async (nome, peer) => {
+      const c = await browser.newContext({ viewport: { width: 393, height: 851 }, serviceWorkers: 'block' });
+      const pg = await c.newPage();
+      await pg.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'domcontentloaded' });
+      for (let i = 0; i < 150; i++) {
+        if (await pg.evaluate(() => !!(window.Presenca && window.AppState)).catch(() => false)) break;
+        await dormir(100);
+      }
+      const cr = await crachas.assinar({ peer, nome, rank: 5, am: true, sala: 'row:30' });
+      await pg.evaluate(({ cracha, peer: pr }) => {
+        AppState.authenticated = true;
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        Presenca.peer = pr; Presenca.cracha = cracha; Presenca.ice = { iceServers: [] };
+        window.presencaAbrirSocket();
+      }, { cracha: cr, peer });
+      return { nome, page: pg, ctx: c };
+    };
+
+    const obs = await ligar('carla', 'carla-1');
+    const antiga = await ligar('duda', 'duda-aba-velha');
+    await esperar(obs, () => (Presenca.peers || []).some((p) => p.nome === 'duda'),
+      'controle do reload: carla não viu a duda na 1ª carga');
+
+    // CONTROLE: antes da 2ª carga tem que haver EXATAMENTE uma duda. Sem isto,
+    // "não duplicou" seria verdade por não haver ninguém.
+    const antes = await obs.page.evaluate(() => (Presenca.peers || []).filter((p) => p.nome === 'duda').length);
+    if (antes === 1) ok('controle: uma conexão da duda antes de recarregar');
+    else anota(`controle do reload falhou: ${antes} dudas antes de recarregar`);
+
+    // A duda "recarrega": peer NOVO, mesmo nome — e a aba velha NÃO fecha.
+    const nova = await ligar('duda', 'duda-recarregada');
+    await esperar(obs, () => (Presenca.peers || []).some((p) => p.peer === 'duda-recarregada'),
+      'carla não viu a duda recarregada');
+    await dormir(600);   // deixa a lista assentar
+
+    const visto = await obs.page.evaluate(() => ({
+      dudas: (Presenca.peers || []).filter((p) => p.nome === 'duda').length,
+      peers: (Presenca.peers || []).map((p) => p.peer),
+    }));
+    if (visto.dudas === 1) ok('recarregar não duplica: a carla vê UMA duda');
+    else anota(`recarregar duplicou: carla vê ${visto.dudas} dudas — ${JSON.stringify(visto.peers)}`);
+    if (visto.peers.includes('duda-recarregada') && !visto.peers.includes('duda-aba-velha')) {
+      ok('a lista aponta pra conexão NOVA (a conversa não cai num socket morto)');
+    } else {
+      anota(`a lista não convergiu pra conexão nova: ${JSON.stringify(visto.peers)}`);
+    }
+
+    const seVe = await nova.page.evaluate(() => (Presenca.peers || []).filter((p) => p.nome === 'duda').length);
+    if (seVe === 0) ok('ninguém aparece na própria lista');
+    else anota(`a duda aparece ${seVe}× na própria lista`);
+
+    await antiga.ctx.close();
+    await nova.ctx.close();
+    await obs.ctx.close();
+  }
 
 } finally {
   await browser.close();

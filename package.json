@@ -21,6 +21,6 @@
     "test:fluxo": "node tools/smoke-fluxo.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   }
 }

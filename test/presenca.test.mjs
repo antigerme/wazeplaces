@@ -151,6 +151,40 @@ test('a lista NÃO inclui quem perguntou, e sai em ordem estável', () => {
   assert.deepEqual(listaDePares([], 'eu'), { total: 0, peers: [] });
 });
 
+test('quem é "a mesma pessoa" é o NOME, nunca o peer', () => {
+  // Relatado pelo owner com print: recarregar a página o duplicava na lista —
+  // e ele aparecia na PRÓPRIA lista, com a pílula contando 3 onde havia 1
+  // colega. Recarregando de novo, acumulava; os colegas o viam repetido também.
+  //
+  // A causa: o `peer` é sorteado A CADA CARGA DA PÁGINA. Ele endereça uma
+  // CONEXÃO, não um editor. Enquanto o socket antigo não fecha, a mesma pessoa
+  // está na sala com dois peers, e a comparação por peer não os junta.
+  //
+  // O nome vem do crachá ASSINADO pelo servidor (username do WME): único por
+  // conta, e não dá pra forjar.
+  const sala = [
+    { peer: 'p1', nome: 'antigerme', rank: 5, am: true, staff: false, desde: 1 },
+    { peer: 'p2', nome: 'antigerme', rank: 5, am: true, staff: false, desde: 2 },
+    { peer: 'p3', nome: 'antigerme', rank: 5, am: true, staff: false, desde: 3 },
+    { peer: 'p9', nome: 'PatrickBLopes', rank: 5, am: true, staff: false, desde: 1 },
+  ];
+
+  // Eu, no socket mais novo: NÃO me vejo, e a pílula conta só o colega.
+  const meu = listaDePares(sala, { peer: 'p3', nome: 'antigerme' });
+  assert.equal(meu.total, 1, 'a pílula voltou a contar as minhas próprias conexões');
+  assert.deepEqual(meu.peers.map((p) => p.nome), ['PatrickBLopes']);
+
+  // O colega vê UM antigerme — e o do socket MAIS RECENTE, porque é pra esse
+  // peer que a conversa é chamada; o antigo é o que está morrendo.
+  const dele = listaDePares(sala, { peer: 'p9', nome: 'PatrickBLopes' });
+  assert.equal(dele.total, 1, 'o colega voltou a ver a mesma pessoa repetida');
+  assert.equal(dele.peers[0].peer, 'p3', 'a lista aponta pra conexão velha, e a conversa cairia num socket morto');
+
+  // Sem nome (não deveria acontecer, mas não pode juntar gente diferente).
+  const anon = listaDePares([{ peer: 'x' }, { peer: 'y' }], { peer: 'z' });
+  assert.equal(anon.total, 2, 'sem nome, peers distintos viraram a mesma pessoa');
+});
+
 test('a lista tem teto, mas o total continua verdadeiro', () => {
   // Fila grande (o Brasil inteiro) pode ter muita gente. Cortar a lista sem
   // mandar o total faria a pílula mentir justamente onde há mais companhia.

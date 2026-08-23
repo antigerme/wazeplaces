@@ -49,7 +49,7 @@ PWA = instala no celular sem precisar de Play Store / App Store. Funciona offlin
 |---|---|---|
 | **Frontend** | HTML + JavaScript **vanilla** + Tailwind CSS | Zero build. Editor leigo baixa, roda, funciona. |
 | **Tailwind** | **Pré-compilado** com o `styles.css` num `css/app.css` só (COMMITADO) via `npm run css` → `tools/gerar-css.mjs` | Zero build pra quem só roda a app (o CSS já está no repo). Tirou 407KB e o `unsafe-eval` da CSP. **Um `<link>` em vez de dois, e o `styles.css` agora sai MINIFICADO** — ele é fortemente comentado e comentário comprime mas não some: 23,4 → 5,3 KB comprimidos, num recurso que bloqueia o render. Mexeu em classe do Tailwind **ou no styles.css**? `npm run css` (o CI cobra com diff). |
-| **Backend** | JavaScript ESM (**sem build, sem npm install**) no padrão **core compartilhado + adaptadores** | `server/core.mjs` = lógica; `worker/index.mjs` = adaptador Cloudflare Workers; `server/node.mjs` = adaptador VM. Só usa `fetch` + Web Crypto → roda igual em Workers e Node 18+. |
+| **Backend** | JavaScript ESM (**sem build, sem npm install**) no padrão **core compartilhado + adaptadores** | `server/core.mjs` = lógica; `worker/index.mjs` = adaptador Cloudflare Workers; `server/node.mjs` = adaptador VM. Só usa `fetch` + Web Crypto → roda igual em Workers e Node. **Piso do projeto: Node 22** (ver `engines`). |
 | **Auth** | Cookies do WME do usuário → session token, cookies criptografados **AES-256-GCM** server-side | Cookies não trafegam mais que uma vez. Token opaco no client. |
 | **Sessão** | Store abstrato: **Workers KV** (Cloudflare) ou **filesystem** (VM) | KV tem TTL nativo; VM espelha o modelo `/tmp` antigo. Injetado no core pelo adaptador. |
 | **PWA** | manifest + service worker network-first pra HTML/JS/CSS, cache-first pra imagens | HTML/código sempre fresco (fim do version skew), imagens rápidas. Auto-update via `controllerchange`. |
@@ -184,7 +184,7 @@ wazeplaces/
 
 ## 🚀 Como rodar local (CRÍTICO)
 
-**`node server/node.mjs`** (precisa Node 18+). Sobe em `http://localhost:8080`, serve os estáticos e roteia `/api/*`. Zero `npm install` — o backend não tem dependências. Env vars opcionais: `PORT`, `HOST`, `ENCRYPTION_KEY` (auto-gera se ausente), `SESSION_DIR`, `SESSION_KEY_FILE`.
+**`node server/node.mjs`** (precisa **Node 22+** — o adaptador recusa versão menor com mensagem clara). Sobe em `http://localhost:8080`, serve os estáticos e roteia `/api/*`. Zero `npm install` — o backend não tem dependências. Env vars opcionais: `PORT`, `HOST`, `ENCRYPTION_KEY` (auto-gera se ausente), `SESSION_DIR`, `SESSION_KEY_FILE`.
 
 Pra simular o ambiente Cloudflare (Worker + KV): `npx wrangler dev`.
 
@@ -600,7 +600,9 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 ## 📐 Convenções
 
 ### Backend (server/core.mjs)
-- ESM puro, zero dependência. Só `fetch` + Web Crypto (roda em Workers e Node 18+). **Nada de API específica de Node no core** (`node:fs`, `process`, etc) — isso vive só nos adaptadores.
+- ESM puro, zero dependência. Só `fetch` + Web Crypto (roda em Workers e Node). **Nada de API específica de Node no core** (`node:fs`, `process`, etc) — isso vive só nos adaptadores.
+- **O piso do projeto é Node 22, e ele NÃO vale pro core.** `core.mjs` e `presenca.mjs` são importados pelo `worker/`, que roda no Cloudflare Workers — não é Node, e subir o piso do Node não libera nada ali. O piso vale pra `server/node.mjs`, `server/ws.mjs`, `tools/` e `test/`. Confundir isso quebra a produção sem erro local.
+- **O que o piso 22 comprou**: `WebSocket` cliente nativo (apagou ~90 linhas de RFC 6455 escritas à mão no smoke de fluxo), `Promise.withResolvers` e `Array.findLast`. **O que ele NÃO comprou**: servidor WebSocket — o Node não tem, e por isso `server/ws.mjs` continua sendo nosso. Medido, não suposto.
 - `resolveCookies(data, sessions)` resolve `sessionToken` → cookies decriptados (em qualquer handler que precise). Lança `ApiError` 401 se inválido.
 - Handlers retornam `{ status, body }` — nunca escrevem resposta direto. Erro → `apiError(msg, status)` (lança `ApiError`, capturado pelo `dispatch`).
 - Erros do Waze sempre passam por `categorizeWazeError` (já é padrão).

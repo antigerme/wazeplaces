@@ -26,6 +26,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeCrachas, base64ToBytes } from '../server/core.mjs';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CHAVE_B64 = Buffer.alloc(32, 9).toString('base64');
@@ -301,7 +302,7 @@ async function comServidor(fn) {
   });
   try {
     for (let i = 0; i < 80; i++) {
-      try { await fetch(`http://127.0.0.1:${porta}/`); break; } catch { await new Promise((k) => setTimeout(k, 100)); }
+      try { await fetch(`http://127.0.0.1:${porta}/`); break; } catch { await dormir(100); }
     }
     await fn(porta, makeCrachas({ keyBytes: base64ToBytes(CHAVE_B64) }));
   } finally {

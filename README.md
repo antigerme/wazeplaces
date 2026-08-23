@@ -137,7 +137,7 @@ Editores nível 1-2, ou sem badge de Area Manager, recebem a mensagem **"Acesso 
 
 - **Frontend:** HTML + JavaScript vanilla + Tailwind CSS (pré-compilado em `css/app.css`) + PWA (manifest + service worker)
 - **Backend:** JavaScript (ESM), **sem build**, no padrão **core compartilhado + adaptadores**:
-  - `server/core.mjs` — toda a lógica (proxy pro Waze, sessões, cripto, gate). Só usa `fetch` e Web Crypto → roda **igual** em Cloudflare Workers e Node 18+.
+  - `server/core.mjs` — toda a lógica (proxy pro Waze, sessões, cripto, gate). Só usa `fetch` e Web Crypto → roda **igual** em Cloudflare Workers e Node.
   - `worker/index.mjs` — adaptador **Cloudflare Workers** (roteia /api/*, serve estáticos via ASSETS; sessões em KV, chave em Secret).
   - `server/node.mjs` — adaptador **VM/Node** (sessões em filesystem, chave em env/arquivo).
 - **Auth:** cookies do WME → sessão criptografada server-side (**AES-256-GCM**). O client só guarda um `sessionToken` opaco.
@@ -193,7 +193,7 @@ wazeplaces/
 
 ### Rodar local
 
-Precisa de **Node 18+** (nada de npm install — zero dependências):
+Precisa de **Node 22 ou mais novo** (nada de npm install — zero dependências):
 
 ```bash
 git clone https://github.com/antigerme/wazeplaces.git
@@ -317,7 +317,10 @@ proxy** na frente do processo Node — quem serve tudo (estáticos + `/api/*`) �
 **1. Node + serviço systemd:**
 
 ```bash
-sudo dnf install -y nodejs git
+# O `nodejs` da distro costuma ser mais antigo que o piso do projeto (22).
+# Confira com `node -v`; se vier abaixo de 22, use o módulo com a versão certa:
+sudo dnf module install -y nodejs:22/common
+sudo dnf install -y git
 sudo git clone https://github.com/antigerme/wazeplaces /opt/wazeplaces
 sudo mkdir -p /var/lib/wazeplaces/sessions
 ```

@@ -4,11 +4,25 @@
 // usando o filesystem pra sessões (espelha o modelo /tmp do PHP antigo).
 // Mesma server/core.mjs que roda no Cloudflare — zero divergência de lógica.
 //
-// Rodar:   node server/node.mjs
+// Rodar:   node server/node.mjs   (Node 22 ou mais novo)
 // Env:     PORT (8080), HOST (0.0.0.0), ENCRYPTION_KEY (base64; auto-gera se
 //          ausente), SESSION_DIR, SESSION_KEY_FILE
 //
 // Deploy RedHat: ver README (systemd + Apache/nginx pra HTTPS).
+
+// ── PISO: Node 22 ───────────────────────────────────────────────────────────
+// Recusa AQUI, e não lá na frente com um erro críptico. Numa VM o `nodejs` da
+// distro costuma vir mais antigo, e o sintoma de rodar abaixo do piso seria um
+// `ReferenceError` no meio de um pedido — difícil de ligar à causa por quem só
+// quer subir a app. O `engines` do package.json avisa quem usa npm; isto avisa
+// quem roda `node server/node.mjs` direto, que é como o README manda.
+const MIN_NODE = 22;
+const versaoAtual = Number(process.versions.node.split('.')[0]);
+if (!Number.isFinite(versaoAtual) || versaoAtual < MIN_NODE) {
+  console.error(`Waze Places precisa de Node ${MIN_NODE} ou mais novo — este é o ${process.versions.node}.`);
+  console.error('Veja a seção de instalação no README.');
+  process.exit(1);
+}
 
 import { createServer } from 'node:http';
 import { readFile, writeFile, unlink, stat, mkdir, utimes, readdir } from 'node:fs/promises';
@@ -365,12 +379,25 @@ const salas = new Map();   // nome da sala -> Set de conexões
 const TETO_SINAIS = 120;
 const JANELA_MS = 60_000;
 
+// Fecha as conexões que já estavam na sala com a MESMA identidade.
+function despejarOutrasConexoes(conn) {
+  const eu = String(conn.ident.nome || '').trim().toLowerCase() || conn.ident.peer;
+  for (const outro of salas.get(conn.sala) || []) {
+    if (outro === conn || !outro.ident) continue;
+    const dele = String(outro.ident.nome || '').trim().toLowerCase() || outro.ident.peer;
+    if (dele !== eu) continue;
+    // 1000 = fechamento normal: é a conexão anterior da mesma pessoa saindo.
+    try { outro.ws.fechar(1000, 'reentrou'); } catch { /* já morrendo */ }
+  }
+}
+
 function difundirLista(sala) {
   const conjunto = salas.get(sala);
   if (!conjunto) return;
   const presentes = [...conjunto].filter((c) => c.ident);
   for (const c of presentes) {
-    const lista = listaDePares(presentes.map((p) => p.ident), c.ident.peer);
+    // O ident INTEIRO, não só o peer: quem é "a mesma pessoa" é o NOME.
+    const lista = listaDePares(presentes.map((p) => p.ident), c.ident);
     c.ws.enviar(JSON.stringify({ t: 'lista', ...lista }));
   }
 }
@@ -404,7 +431,18 @@ async function tratarMensagemDaSala(conn, texto) {
     conn.ident = {
       peer: cracha.peer, nome: cracha.nome, rank: cracha.rank,
       am: !!cracha.am, staff: !!cracha.staff,
+      // Desempata duas conexões da MESMA pessoa: a lista mostra a mais recente.
+      desde: Date.now(),
     };
+    // UMA presença por pessoa — mesma regra do adaptador da Cloudflare, e pelo
+    // mesmo motivo: recarregar sorteia um `peer` novo e o socket antigo demora
+    // a fechar, então a pessoa ficava repetida na sala. Ver o comentário longo
+    // em worker/sala-do.mjs.
+    // UMA presença por pessoa — mesma regra do adaptador da Cloudflare, e pelo
+    // mesmo motivo: recarregar sorteia um `peer` novo e o socket antigo demora
+    // a fechar, então a pessoa ficava repetida na sala. Ver o comentário longo
+    // em worker/sala-do.mjs.
+    despejarOutrasConexoes(conn);
     conn.ws.enviar(JSON.stringify({ t: 'eu', peer: conn.ident.peer }));
     difundirLista(conn.sala);
     return;
