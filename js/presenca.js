@@ -224,6 +224,40 @@ function presencaAbrirSocket() {
     ws.onerror = () => { /* o `close` vem logo atrás e cuida do religamento */ };
 }
 
+// A tela voltou (destravou o celular, trocou de app de volta, bfcache).
+//
+// É o momento mais provável de a conexão estar quebrada E o mais provável de a
+// pessoa estar OLHANDO — ela voltou pra usar a app. Os três estados possíveis:
+//
+//   ABERTO      — pode estar vivo ou morto em silêncio. Sonda com prazo curto
+//                 e pede a lista, porque ela pode ter envelhecido enquanto a
+//                 tela estava apagada (a difusão de quem entrou se perdeu).
+//   A MEIO      — CONNECTING ou CLOSING. Não dá pra saber HÁ QUANTO TEMPO: os
+//                 timers ficam congelados com a tela apagada, então um
+//                 handshake pendurado pode estar assim há uma hora. Descarta e
+//                 recomeça limpo — era o buraco desta função: nenhum ramo
+//                 tratava isso e a pessoa esperava o prazo de 12s pra nada.
+//   SEM SOCKET  — tenta agora, sem esperar o recuo (que pode estar em 60s).
+//
+// O recuo NÃO zera aqui, pelo mesmo motivo do `online`: voltar pra tela não diz
+// nada sobre a rede. Quem zera é o `eu`. O que impede rajada é o `ligando`.
+function presencaAoVoltar() {
+    if (!presencaPodeConectar()) return;
+    const ws = Presenca.ws;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        presencaSondar(ws, PRESENCA_PONG_VOLTA_MS);
+        presencaPedirLista();
+        return;
+    }
+    if (ws) {
+        // A meio caminho, e sem saber desde quando: descarta.
+        presencaDeclararMorto(ws);
+    }
+    if (Presenca.ligando) return;
+    clearTimeout(Presenca.timers.religar);
+    presencaConectar(Presenca.filtro);
+}
+
 // Pede a lista de novo. Usada quando ela provavelmente está velha: ao voltar
 // pra tela, quando a rede volta, ao abrir a lista, e num intervalo de segurança.
 function presencaPedirLista() {
@@ -711,19 +745,15 @@ function presencaMontar() {
     // A sonda é BARATA: um `ping` de 4 bytes. Ela não reconecta por conta
     // própria — só faz a pergunta; quem declara a morte é o vigia do prazo.
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState !== 'visible') return;
-        if (Presenca.ws && Presenca.ws.readyState === WebSocket.OPEN) {
-            presencaSondar(Presenca.ws, PRESENCA_PONG_VOLTA_MS);
-            // O socket pode estar vivo E a lista velha: enquanto a tela estava
-            // escondida, alguém pode ter entrado e a difusão ter se perdido.
-            presencaPedirLista();
-        } else if (presencaPodeConectar() && !Presenca.ws && !Presenca.ligando) {
-            // Nem socket havia: tenta AGORA em vez de esperar o recuo, que pode
-            // estar no degrau de 60s.
-            clearTimeout(Presenca.timers.religar);
-            presencaConectar(Presenca.filtro);
-        }
+        if (document.visibilityState === 'visible') presencaAoVoltar();
     });
+
+    // `pageshow` com `persisted` é o retorno pelo CACHE DE NAVEGAÇÃO (bfcache):
+    // a página inteira volta congelada, com os timers e o socket do estado de
+    // antes. No iOS é assim que um PWA costuma voltar, e nem sempre acompanha
+    // um `visibilitychange`. Sem isto, justamente o aparelho mais comum entre
+    // editores voltaria com a lista velha.
+    window.addEventListener('pageshow', (ev) => { if (ev.persisted) presencaAoVoltar(); });
 
     // ── A REDE VOLTOU: tentar na hora, mas SEM zerar o recuo ────────────────
     //

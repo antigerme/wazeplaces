@@ -478,6 +478,59 @@ try {
     if (depois.peers.includes('fran')) ok('voltar pra tela ressincroniza a lista');
     else anota(`voltar pra tela NÃO ressincronizou: ${JSON.stringify(depois)}`);
 
+    // ── A TELA APAGADA POR MUITO TEMPO ──────────────────────────────────
+    //
+    // Pergunta do owner: "se eu deixar a tela apagada por muito tempo e voltar,
+    // a lista funciona?". Ela expôs um buraco que a versão anterior tinha.
+    //
+    // Quando a tela apaga, os timers do navegador CONGELAM. Um socket que
+    // estava a meio caminho — CONNECTING ou CLOSING — fica assim, e ao voltar
+    // não há como saber HÁ QUANTO TEMPO. A versão anterior de `presencaAoVoltar`
+    // só tratava dois estados (ABERTO e SEM SOCKET): com o socket a meio, os
+    // dois ramos falhavam e a pessoa ficava esperando o prazo de 12s pra nada.
+    {
+      const esconder = (v) => pgx.evaluate((valor) => {
+        Object.defineProperty(document, 'visibilityState', { value: valor, configurable: true });
+        Object.defineProperty(document, 'hidden', { value: valor === 'hidden', configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+      }, v);
+
+      // Tela apaga, a conexão morre em silêncio, e a turma muda nesse meio-tempo.
+      await esconder('hidden');
+      engolir = true;
+      const gil = await editor('gil', 'gil1', 5, true, 'pt');
+      await dormir(3000);
+
+      // O caso do buraco: um socket a MEIO CAMINHO quando a tela volta.
+      await pgx.evaluate(() => {
+        // Um socket que nunca vai completar — é o que sobra de uma tentativa
+        // iniciada pouco antes de a tela apagar.
+        Presenca.ws = new WebSocket('ws://127.0.0.1:9/sala?s=row%3A30');
+      });
+      await dormir(300);
+      // O buraco NÃO era um readyState específico: era `Presenca.ws` PREENCHIDO
+      // e diferente de OPEN. Os dois ramos da versão anterior exigiam
+      // `readyState === OPEN` ou `!Presenca.ws` — qualquer outro estado
+      // (CONNECTING, CLOSING, CLOSED) escapava dos dois.
+      //
+      // Aceito 0, 2 ou 3 de propósito: qual deles aparece depende de o destino
+      // recusar ou engolir, e isso é do AMBIENTE, não do defeito. Cravar um
+      // número faria o controle falhar por motivo errado — foi o que aconteceu
+      // na primeira tentativa (esperava 0, veio 3, porque a porta recusa).
+      const meio = await pgx.evaluate(() => (Presenca.ws ? Presenca.ws.readyState : -1));
+      if (meio !== -1 && meio !== 1) ok(`controle: socket preenchido e não-OPEN antes de voltar (readyState=${meio})`);
+      else anota(`controle falhou: esperava socket não-OPEN, veio ${meio === -1 ? 'nenhum socket' : 'OPEN'}`);
+
+      engolir = false;
+      await esconder('visible');
+      await dormir(4000);
+
+      const volta = await veEva();
+      if (volta.peers.includes('gil')) ok('tela apagada por muito tempo: ao voltar a lista se corrige sozinha');
+      else anota(`tela apagada: NÃO recuperou — ${JSON.stringify(volta)}`);
+      await gil.ctx.close();
+    }
+
     await fran.ctx.close();
     await eva.ctx.close();
     proxy.close();
