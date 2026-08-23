@@ -40,6 +40,59 @@ const PRESENCA_CHAVE_ANTIGA_BLOQUEIO = 'waze_places_bloqueados';
 // `ping` nos dois — ele não precisa saber em qual servidor está.
 const PRESENCA_KEEPALIVE_MS = 45_000;
 
+// Prazo pro `pong` voltar depois de um `ping`. É o que transforma o keepalive
+// em DETECÇÃO — antes ele só falava sozinho.
+//
+// O defeito que isto conserta, relatado pelo owner ("muitas vezes o App só
+// mostra que tem alguém online quando atualizo a página"): quando a conexão
+// morre EM SILÊNCIO — sem quadro de fechamento, que é o caso comum em rede
+// móvel, NAT e proxy —, o `readyState` fica OPEN pra sempre e o `onclose`
+// NUNCA dispara. O cliente segue achando que está conectado, mandando ping pro
+// vazio, com a lista vazia. Só recarregar resolvia.
+//
+// MEDIDO com um proxy que para de repassar nos dois sentidos sem fechar nada:
+// 70 segundos depois, `readyState=1`, zero tentativas de religar, e a lista
+// vazia enquanto havia gente na sala. E do outro lado é pior: os colegas
+// continuam VENDO quem já não está lá, porque pro servidor o socket também
+// parece vivo.
+//
+// 10s é folgado pro pong: quem responde é o runtime da Cloudflare (sem nem
+// acordar o Durable Object) ou o processo na VM — nenhum dos dois pensa.
+const PRESENCA_PONG_MS = 10_000;
+
+// Ao voltar pra tela, o prazo é mais curto: o aparelho provavelmente dormiu e
+// o socket provavelmente morreu. Esperar os 45s do keepalive aqui seria deixar
+// a pessoa olhando uma lista mentirosa justo no momento em que ela voltou pra
+// usar a app.
+const PRESENCA_PONG_VOLTA_MS = 4000;
+
+// Rede de segurança pra lista velha.
+//
+// A sala só DIFUNDE em entrada e saída. Se a conexão piscar exatamente nesse
+// instante, a mensagem se perde e ninguém reenvia — MEDIDO: com os pacotes
+// engolidos por 20s e a rede voltando, o socket segue vivo e a lista fica vazia
+// pra sempre. Era este o relato do owner.
+//
+// O pedido é BARATO no servidor mas NÃO é de graça na Cloudflare: ele acorda o
+// Durable Object, ao contrário do `ping`, que o runtime responde sozinho. Por
+// isso 2 minutos, e não os 45s do keepalive: 30 acordadas por hora por editor
+// em vez de 80. Os momentos que realmente importam são cobertos por evento
+// (voltar pra tela, rede voltar, abrir a lista) e não pagam esta conta.
+const PRESENCA_RESSINC_MS = 2 * 60 * 1000;
+
+// Prazo pra conexão DAR CERTO — do `new WebSocket` até o `eu` do servidor.
+//
+// Sem isto o cliente pendura pra sempre: um socket que nunca completa o
+// handshake não dispara `onopen`, nem `onerror`, nem `onclose`. MEDIDO, e foi
+// assim que apareceu: o religamento saiu no meio de uma interrupção de rede, o
+// `readyState` ficou em 0 (CONNECTING) e ali permaneceu — 35 segundos depois de
+// a rede ter voltado, nada. Como o recuo só é reagendado a partir de um desses
+// eventos, uma única tentativa infeliz encerrava as tentativas pra sempre.
+//
+// O marco é o `eu`, e não o `onopen`: abrir o socket não prova nada (a recusa
+// do crachá vem depois). É o mesmo motivo que faz o recuo zerar só no `eu`.
+const PRESENCA_ABRIR_MS = 12_000;
+
 // O crachá vale 15 min (CRACHA_TTL no servidor). Renovar aos 13 dá margem pra
 // uma tentativa falhar sem derrubar quem está conversando.
 const PRESENCA_RENOVAR_MS = 13 * 60 * 1000;
@@ -64,7 +117,7 @@ const Presenca = {
     aberta: null,           // peer da conversa aberta agora
     filtro: null,
     tentativa: 0,
-    timers: { keepalive: null, renovar: null, religar: null },
+    timers: { keepalive: null, renovar: null, religar: null, vigia: null, ressinc: null, abrir: null },
     ligando: false,
 };
 
@@ -140,6 +193,11 @@ function presencaAbrirSocket() {
     try { ws = new WebSocket(url.toString()); } catch (e) { presencaReagendar(); return; }
     Presenca.ws = ws;
 
+    // Prazo pra conexão vingar. Sem ele, um handshake que nunca responde deixa
+    // o cliente pendurado em CONNECTING e as tentativas param de acontecer.
+    clearTimeout(Presenca.timers.abrir);
+    Presenca.timers.abrir = setTimeout(() => presencaDeclararMorto(ws), PRESENCA_ABRIR_MS);
+
     ws.onopen = () => {
         // O contador de tentativas NÃO zera aqui. Abrir o socket não é ter
         // conectado: a recusa do crachá, o fechamento pelo servidor e a queda
@@ -150,9 +208,10 @@ function presencaAbrirSocket() {
         // aceitou o crachá.
         ws.send(JSON.stringify({ t: 'entrar', cracha: Presenca.cracha }));
         clearInterval(Presenca.timers.keepalive);
-        Presenca.timers.keepalive = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) ws.send('ping');
-        }, PRESENCA_KEEPALIVE_MS);
+        Presenca.timers.keepalive = setInterval(
+            () => presencaSondar(ws, PRESENCA_PONG_MS), PRESENCA_KEEPALIVE_MS);
+        clearInterval(Presenca.timers.ressinc);
+        Presenca.timers.ressinc = setInterval(presencaPedirLista, PRESENCA_RESSINC_MS);
         clearTimeout(Presenca.timers.renovar);
         // Renovar o crachá é reconectar: a sala confere o crachá na ENTRADA, e
         // trocar o passe de quem já está dentro não faria diferença nenhuma.
@@ -163,6 +222,77 @@ function presencaAbrirSocket() {
         if (Presenca.ws === ws) { Presenca.ws = null; presencaLimparLista(); presencaReagendar(); }
     };
     ws.onerror = () => { /* o `close` vem logo atrás e cuida do religamento */ };
+}
+
+// A tela voltou (destravou o celular, trocou de app de volta, bfcache).
+//
+// É o momento mais provável de a conexão estar quebrada E o mais provável de a
+// pessoa estar OLHANDO — ela voltou pra usar a app. Os três estados possíveis:
+//
+//   ABERTO      — pode estar vivo ou morto em silêncio. Sonda com prazo curto
+//                 e pede a lista, porque ela pode ter envelhecido enquanto a
+//                 tela estava apagada (a difusão de quem entrou se perdeu).
+//   A MEIO      — CONNECTING ou CLOSING. Não dá pra saber HÁ QUANTO TEMPO: os
+//                 timers ficam congelados com a tela apagada, então um
+//                 handshake pendurado pode estar assim há uma hora. Descarta e
+//                 recomeça limpo — era o buraco desta função: nenhum ramo
+//                 tratava isso e a pessoa esperava o prazo de 12s pra nada.
+//   SEM SOCKET  — tenta agora, sem esperar o recuo (que pode estar em 60s).
+//
+// O recuo NÃO zera aqui, pelo mesmo motivo do `online`: voltar pra tela não diz
+// nada sobre a rede. Quem zera é o `eu`. O que impede rajada é o `ligando`.
+function presencaAoVoltar() {
+    if (!presencaPodeConectar()) return;
+    const ws = Presenca.ws;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        presencaSondar(ws, PRESENCA_PONG_VOLTA_MS);
+        presencaPedirLista();
+        return;
+    }
+    if (ws) {
+        // A meio caminho, e sem saber desde quando: descarta.
+        presencaDeclararMorto(ws);
+    }
+    if (Presenca.ligando) return;
+    clearTimeout(Presenca.timers.religar);
+    presencaConectar(Presenca.filtro);
+}
+
+// Pede a lista de novo. Usada quando ela provavelmente está velha: ao voltar
+// pra tela, quando a rede volta, ao abrir a lista, e num intervalo de segurança.
+function presencaPedirLista() {
+    const ws = Presenca.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !Presenca.cracha) return;
+    try { ws.send(JSON.stringify({ t: 'lista' })); } catch (e) { /* morrendo */ }
+}
+
+// Manda `ping` e cobra o `pong` dentro do prazo. Sem cobrar, o keepalive é só
+// ruído: ele mantém o NAT aberto mas não descobre nada.
+function presencaSondar(ws, prazo) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send('ping'); } catch (e) { presencaDeclararMorto(ws); return; }
+    clearTimeout(Presenca.timers.vigia);
+    Presenca.timers.vigia = setTimeout(() => presencaDeclararMorto(ws), prazo);
+}
+
+// O socket não respondeu: está morto, ainda que o navegador diga OPEN.
+//
+// NÃO confio no `onclose` pra religar aqui. Num socket em buraco negro, o
+// `close()` manda um quadro de fechamento que nunca chega, e o navegador só
+// dispara o `close` quando o prazo INTERNO dele vence — que pode ser longo, e
+// não é meu. Então eu solto os ouvintes, fecho por educação e religo na mão.
+function presencaDeclararMorto(ws) {
+    clearTimeout(Presenca.timers.vigia);
+    clearTimeout(Presenca.timers.abrir);
+    if (Presenca.ws !== ws) return;           // já trocou de socket: nada a fazer
+    Presenca.ws = null;
+    clearInterval(Presenca.timers.keepalive);
+    clearInterval(Presenca.timers.ressinc);
+    clearTimeout(Presenca.timers.renovar);
+    try { ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; } catch (e) {}
+    try { ws.close(); } catch (e) {}
+    presencaLimparLista();
+    presencaReagendar();
 }
 
 function presencaReagendar() {
@@ -180,6 +310,9 @@ function presencaReagendar() {
 
 function presencaDesligar() {
     clearInterval(Presenca.timers.keepalive);
+    clearInterval(Presenca.timers.ressinc);
+    clearTimeout(Presenca.timers.vigia);
+    clearTimeout(Presenca.timers.abrir);
     clearTimeout(Presenca.timers.renovar);
     clearTimeout(Presenca.timers.religar);
     if (Presenca.ws) {
@@ -209,6 +342,10 @@ function presencaEsquecer() {
 }
 
 function presencaReceber(bruto) {
+    // QUALQUER byte que chega prova que o socket está vivo — não só o `pong`.
+    // Cobrar só o pong deixaria o vigia matando uma conexão movimentada que
+    // por acaso não respondeu no prazo.
+    clearTimeout(Presenca.timers.vigia);
     if (bruto === 'pong') return;
     let m;
     try { m = JSON.parse(bruto); } catch (e) { return; }
@@ -216,7 +353,13 @@ function presencaReceber(bruto) {
 
     // Entrou de verdade: só agora a conexão provou que serve, e só agora o
     // recuo pode ser zerado.
-    if (m.t === 'eu') { Presenca.tentativa = 0; return; }
+    if (m.t === 'eu') {
+        // Chegou o `eu`: a conexão provou que serve. Só agora o prazo de abrir
+        // é desarmado e o recuo zera.
+        clearTimeout(Presenca.timers.abrir);
+        Presenca.tentativa = 0;
+        return;
+    }
 
     if (m.t === 'lista') {
         Presenca.peers = Array.isArray(m.peers) ? m.peers : [];
@@ -591,8 +734,53 @@ function presencaRenderConversa() {
 function presencaMontar() {
     presencaEsquecerBloqueioAntigo();
 
+    // ── VOLTAR PRA TELA é o momento mais provável de o socket estar morto ────
+    //
+    // O caso real do editor: ele tria pedidos, troca de app ou trava o celular,
+    // e volta minutos depois. O sistema operacional já matou a conexão — sem
+    // avisar ninguém. Sem esta sonda, ele olharia uma lista vazia por até 45
+    // segundos (o intervalo do keepalive) justo no instante em que voltou pra
+    // usar a app, e concluiria que não há ninguém online.
+    //
+    // A sonda é BARATA: um `ping` de 4 bytes. Ela não reconecta por conta
+    // própria — só faz a pergunta; quem declara a morte é o vigia do prazo.
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') presencaAoVoltar();
+    });
+
+    // `pageshow` com `persisted` é o retorno pelo CACHE DE NAVEGAÇÃO (bfcache):
+    // a página inteira volta congelada, com os timers e o socket do estado de
+    // antes. No iOS é assim que um PWA costuma voltar, e nem sempre acompanha
+    // um `visibilitychange`. Sem isto, justamente o aparelho mais comum entre
+    // editores voltaria com a lista velha.
+    window.addEventListener('pageshow', (ev) => { if (ev.persisted) presencaAoVoltar(); });
+
+    // ── A REDE VOLTOU: tentar na hora, mas SEM zerar o recuo ────────────────
+    //
+    // Esperar o degrau de 60s aqui desperdiça o único sinal que o navegador
+    // oferece. Mas o recuo NÃO zera, e a diferença importa: `online` quer dizer
+    // "existe interface de rede", não "a internet funciona" — num wi-fi
+    // instável ele dispara repetidamente sem que nada tenha melhorado. Zerar
+    // ali seria o mesmo defeito que já custou caro neste recurso (o recuo que
+    // nunca crescia), só que em outra roupa. Quem zera é o `eu`, e só ele.
+    //
+    // O que impede rajada é o `ligando`: enquanto uma tentativa está em voo, o
+    // evento não inicia outra.
+    window.addEventListener('online', () => {
+        if (!presencaPodeConectar()) return;
+        clearTimeout(Presenca.timers.religar);
+        if (Presenca.ws) { presencaSondar(Presenca.ws, PRESENCA_PONG_VOLTA_MS); presencaPedirLista(); }
+        else if (!Presenca.ligando) presencaConectar(Presenca.filtro);
+    });
+
     const pill = document.getElementById('presencaPill');
-    if (pill) pill.addEventListener('click', () => { openModal('presencaModal'); presencaRenderLista(); });
+    if (pill) pill.addEventListener('click', () => {
+        openModal('presencaModal');
+        presencaRenderLista();
+        // Pedir aqui é de graça (só quando a pessoa toca) e garante que a lista
+        // esteja certa exatamente no momento em que ela é OLHADA.
+        presencaPedirLista();
+    });
 
     const lista = document.getElementById('presencaModal');
     if (lista) lista.addEventListener('click', (ev) => {
