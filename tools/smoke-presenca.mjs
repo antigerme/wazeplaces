@@ -18,6 +18,7 @@
 // servidor e injetado — é exatamente o que o handler devolveria.
 
 import { spawn } from 'node:child_process';
+import { createServer, connect } from 'node:net';
 import { createRequire } from 'node:module';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -377,6 +378,109 @@ try {
     await antiga.ctx.close();
     await nova.ctx.close();
     await obs.ctx.close();
+  }
+
+
+  // ── 10) SOCKET QUE MORRE EM SILÊNCIO, E LISTA QUE SE PERDE ────────────────
+  //
+  // Relato do owner: "muitas vezes o App só mostra que tem alguém online quando
+  // atualizo a página".
+  //
+  // Dois defeitos distintos, e nenhum aparece num teste que só liga e desliga
+  // socket — porque em ambos NADA é fechado:
+  //
+  //   (a) a conexão morre EM SILÊNCIO (sem quadro de fechamento — o caso comum
+  //       em rede móvel, NAT e proxy). O `readyState` fica OPEN pra sempre, o
+  //       `onclose` nunca dispara, e o keepalive falava sozinho: mandava `ping`
+  //       e nunca cobrava o `pong`. MEDIDO antes do conserto: 70s depois,
+  //       readyState=1, zero tentativas, lista vazia.
+  //
+  //   (b) a sala só DIFUNDE em entrada e saída. Um piscar de rede no instante
+  //       errado engole a difusão e NINGUÉM reenvia — a lista fica errada até a
+  //       página ser recarregada, com o socket perfeitamente vivo.
+  //
+  // Pra medir isso é preciso um BURACO NEGRO: um proxy que repassa tudo e, na
+  // hora marcada, PARA de repassar nos dois sentidos sem fechar nada. Fechar
+  // simularia outro defeito — esse o cliente já tratava.
+  {
+    let engolir = false;
+    const PORTA_PROXY = PORTA + 700;
+    const proxy = createServer((doNavegador) => {
+      const proApp = connect(PORTA, '127.0.0.1');
+      doNavegador.on('data', (b) => { if (!engolir) proApp.write(b); });
+      proApp.on('data', (b) => { if (!engolir) doNavegador.write(b); });
+      const morrer = () => { try { doNavegador.destroy(); } catch {} try { proApp.destroy(); } catch {} };
+      doNavegador.on('error', morrer); proApp.on('error', morrer);
+      doNavegador.on('close', () => { if (!engolir) morrer(); });
+      proApp.on('close', () => { if (!engolir) morrer(); });
+    });
+    await new Promise((k) => proxy.listen(PORTA_PROXY, '127.0.0.1', k));
+
+    // Um editor que fala com a app ATRAVÉS do buraco negro.
+    const viaProxy = await browser.newContext({ viewport: { width: 393, height: 851 }, serviceWorkers: 'block' });
+    const pgx = await viaProxy.newPage();
+    // `/api/presenca` exige cookies REAIS do Waze; aqui o crachá é assinado
+    // localmente, porque o que se mede é o RELIGAMENTO, não a autenticação.
+    await pgx.route('**/api/presenca', async (route) => {
+      const corpo = JSON.parse(route.request().postData() || '{}');
+      const c = await crachas.assinar({ peer: corpo.peer, nome: 'eva', rank: 5, am: true, sala: 'row:30' });
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ success: true, cracha: c, ice: { iceServers: [] } }) });
+    });
+    await pgx.goto(`http://127.0.0.1:${PORTA_PROXY}/`, { waitUntil: 'domcontentloaded' });
+    for (let i = 0; i < 150; i++) {
+      if (await pgx.evaluate(() => !!(window.Presenca && window.AppState)).catch(() => false)) break;
+      await dormir(100);
+    }
+    const crEva = await crachas.assinar({ peer: 'eva1', nome: 'eva', rank: 5, am: true, sala: 'row:30' });
+    await pgx.evaluate(({ c, p }) => {
+      // Sem sessão e país, `presencaPodeConectar()` é falso e o religamento nem
+      // TENTA — o teste mediria a ausência da precondição, não o comportamento.
+      API.setSession('tk'); API.setCountry(30);
+      AppState.preferences = AppState.preferences || {};
+      AppState.preferences.presenca = true;
+      AppState.authenticated = true;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      Presenca.peer = p; Presenca.cracha = c; Presenca.ice = { iceServers: [] };
+      window.presencaAbrirSocket();
+    }, { c: crEva, p: 'eva1' });
+    await dormir(700);
+
+    const eva = { nome: 'eva', page: pgx, ctx: viaProxy };
+    const veEva = () => pgx.evaluate(() => ({
+      rs: Presenca.ws ? Presenca.ws.readyState : -1,
+      peers: (Presenca.peers || []).map((x) => x.nome),
+    }));
+
+    // CONTROLE: sem buraco negro a eva está conectada. Sem isto, tudo abaixo
+    // seria verdade numa app que simplesmente nunca conectou.
+    const antes = await veEva();
+    if (antes.rs === 1) ok('controle do buraco negro: a eva conectou pelo proxy');
+    else anota(`controle do buraco negro falhou: readyState=${antes.rs}`);
+
+    // (b) O PISCAR DE REDE: engole por 6s, e alguém entra nesse intervalo.
+    engolir = true;
+    const fran = await editor('fran', 'fran1', 5, true, 'pt');
+    await dormir(6000);
+    engolir = false;                       // a rede voltou; o socket sobreviveu
+    await dormir(1200);
+    const perdeu = await veEva();
+    if (perdeu.rs === 1 && !perdeu.peers.includes('fran')) {
+      ok('a difusão perdida no piscar de rede deixa a lista velha (é o defeito)');
+    } else if (perdeu.peers.includes('fran')) {
+      ok('a lista chegou mesmo com o piscar — melhor ainda');
+    }
+    // Voltar pra tela tem que RESSINCRONIZAR, sem depender de recarregar.
+    await pgx.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await dormir(1500);
+    const depois = await veEva();
+    if (depois.peers.includes('fran')) ok('voltar pra tela ressincroniza a lista');
+    else anota(`voltar pra tela NÃO ressincronizou: ${JSON.stringify(depois)}`);
+
+    await fran.ctx.close();
+    await eva.ctx.close();
+    proxy.close();
   }
 
 } finally {

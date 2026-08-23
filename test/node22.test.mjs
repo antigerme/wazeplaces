@@ -109,27 +109,52 @@ test('cada lado usa a forma de dormir do SEU lado', () => {
   //
   // O critério é VIZINHANÇA, não análise de escopo: grosseiro de propósito, o
   // que importa é não passar calado.
-  const SO_NO_BROWSER = /\b(showCurrentPlace|requestAnimationFrame|document\.|localStorage|getComputedStyle|Lightbox\.|AppState\.)/;
+  // COMO SE SABE DE QUE LADO ESTÁ CADA LINHA.
+  //
+  // A primeira versão olhava a VIZINHANÇA — "tem API de navegador a duas
+  // linhas?" — e produziu um falso positivo no meu próprio código novo:
+  //
+  //     await pgx.evaluate(() => document.dispatchEvent(new Event(...)));
+  //     await dormir(1500);            // <- acusada, e está CERTA
+  //
+  // A linha de cima abre E FECHA o callback na mesma linha, então ela não
+  // coloca a linha seguinte no navegador. Vizinhança não distingue isso.
+  //
+  // Agora o critério é o BLOCO: ao encontrar um `.evaluate(` (e parentes),
+  // conta parênteses a partir dali; enquanto não fecharem, estamos no
+  // navegador. Callback de uma linha fecha na hora e não contamina nada.
+  const ABRE_BROWSER = /\.(evaluate|evaluateHandle|addInitScript|waitForFunction)\s*\(/;
   const ARTESANAL = /new Promise\(\((?:k|r|res|resolve)\) => setTimeout\(/;
   let node = 0, browser = 0;
   for (const arquivo of ['tools/smoke-browser.mjs', 'tools/smoke-presenca.mjs', 'tools/smoke-fluxo.mjs']) {
     const linhas = ler(arquivo).split('\n');
+    let profundidade = 0;
     for (let i = 0; i < linhas.length; i++) {
-      const temDormir = linhas[i].includes('dormir(');
-      const temArtesanal = ARTESANAL.test(linhas[i]);
-      if (!temDormir && !temArtesanal) continue;
-      const perto = linhas.slice(Math.max(0, i - 2), i + 3).join('\n');
-      const ladoBrowser = SO_NO_BROWSER.test(perto);
-      if (ladoBrowser) {
-        browser++;
-        assert.equal(temDormir, false,
-          `${arquivo}:${i + 1} usa \`dormir(\` (import de Node) cercado de API de navegador — `
-          + 'dentro de `page.evaluate` use `new Promise((k) => setTimeout(k, n))`');
-      } else {
-        node++;
-        assert.equal(temArtesanal, false,
-          `${arquivo}:${i + 1} escreve sleep à mão do lado do Node — use \`dormir\` `
-          + '(`setTimeout` de `node:timers/promises`)');
+      const linha = linhas[i];
+      // Um `dormir(`/sleep nesta linha é avaliado ANTES de a linha entrar na
+      // conta: quem abre o bloco na própria linha não está dentro dele ainda.
+      const ladoBrowser = profundidade > 0;
+      const temDormir = linha.includes('dormir(');
+      const temArtesanal = ARTESANAL.test(linha);
+      if (temDormir || temArtesanal) {
+        if (ladoBrowser) {
+          browser++;
+          assert.equal(temDormir, false,
+            `${arquivo}:${i + 1} usa \`dormir(\` (import de Node) dentro de um bloco que roda no `
+            + 'NAVEGADOR — use `new Promise((k) => setTimeout(k, n))`');
+        } else {
+          node++;
+          assert.equal(temArtesanal, false,
+            `${arquivo}:${i + 1} escreve sleep à mão do lado do Node — use \`dormir\` `
+            + '(`setTimeout` de `node:timers/promises`)');
+        }
+      }
+      if (profundidade > 0) {
+        profundidade += (linha.match(/\(/g) || []).length - (linha.match(/\)/g) || []).length;
+        if (profundidade < 0) profundidade = 0;
+      } else if (ABRE_BROWSER.test(linha)) {
+        const saldo = (linha.match(/\(/g) || []).length - (linha.match(/\)/g) || []).length;
+        profundidade = saldo > 0 ? saldo : 0;   // fechou na mesma linha: não contamina
       }
     }
   }

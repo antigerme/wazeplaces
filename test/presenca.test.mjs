@@ -358,9 +358,19 @@ test('o recuo só zera quando o servidor ACEITA, não quando o socket abre', () 
   assert.equal(/tentativa\s*=\s*0/.test(onopen[0]), false,
     'o `onopen` voltou a zerar o recuo — abrir o socket não é ter conectado');
 
-  // Quem zera é a confirmação do servidor.
-  assert.match(CLI, /m\.t === 'eu'\s*\)\s*\{\s*Presenca\.tentativa = 0/,
-    'só a mensagem `eu` (servidor aceitou o crachá) pode zerar o recuo');
+  // Quem zera é a confirmação do servidor — e SÓ ela. A verificação é sobre
+  // TODAS as ocorrências, não sobre uma linha específica: já tentei pôr um
+  // `tentativa = 0` no evento `online` do navegador, e este teste me barrou com
+  // razão. `online` quer dizer "existe interface de rede", não "a internet
+  // funciona": num wi-fi instável ele dispara repetidamente e o recuo nunca
+  // cresceria — o mesmo defeito, noutra roupa.
+  const bloco = CLI.match(/if \(m\.t === 'eu'\)[\s\S]*?\n    \}/);
+  assert.ok(bloco, 'sumiu o tratamento da mensagem `eu`');
+  assert.match(bloco[0], /Presenca\.tentativa = 0/,
+    'a mensagem `eu` deixou de zerar o recuo');
+  const zeragens = (CLI.match(/Presenca\.tentativa\s*=\s*0/g) || []).length;
+  assert.equal(zeragens, 1,
+    `o recuo é zerado em ${zeragens} lugares — só a mensagem \`eu\` pode fazer isso`);
 });
 
 test('a espera de reconexão tem jitter', () => {

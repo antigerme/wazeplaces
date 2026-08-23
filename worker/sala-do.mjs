@@ -79,6 +79,20 @@ export class SalaDO {
     if (!anexo.ident) return this.fechar(ws, 4001, 'sem cracha');
     if (m.t === 'sinal') return this.sinal(ws, anexo, m);
     if (m.t === 'sair') return this.fechar(ws, 1000, 'saiu');
+
+    // "Me manda a lista de novo." Ver o comentário longo em server/node.mjs:
+    // a sala só DIFUNDE em entrada e saída, então um piscar de rede no instante
+    // errado apaga a lista do editor até ele recarregar a página.
+    //
+    // Custa uma ACORDADA do Durable Object, ao contrário do `ping` (que o
+    // runtime responde sozinho, sem acordar ninguém). Por isso o cliente pede
+    // com parcimônia — nos momentos em que a lista provavelmente está velha —
+    // e não a cada keepalive. E conta no mesmo teto de vazão do sinal, pra que
+    // pedir lista em rajada não seja um jeito de manter o DO acordado de graça.
+    if (m.t === 'lista') {
+      if (!this.temVazao(anexo.ident.peer)) return;
+      return this.enviarListaPara(ws, anexo.ident);
+    }
   }
 
   async entrar(ws, anexo, m) {
@@ -165,6 +179,13 @@ export class SalaDO {
       if (a && a.ident) out.push({ ws, ident: a.ident });
     }
     return out;
+  }
+
+  // A lista atual, só pra UM socket — quem pediu ressincronia.
+  enviarListaPara(ws, ident) {
+    const presentes = this.sockets(null);
+    const lista = listaDePares(presentes.map((p) => p.ident), ident);
+    try { ws.send(JSON.stringify({ t: 'lista', ...lista })); } catch { /* socket morrendo */ }
   }
 
   difundirLista(saindo) {

@@ -8,6 +8,23 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.23-07
+
+### Corrigido
+- **A lista de quem está online só atualizava quando você recarregava a página.** Eram três causas, todas com a mesma assinatura: nada quebrava de forma visível, então o app achava que estava tudo bem.
+
+  1. **A conexão morria em silêncio e o app não percebia.** Em rede móvel, atrás de NAT ou de proxy, uma conexão pode simplesmente parar de transmitir sem que ninguém avise. O app mandava um "está aí?" a cada 45 segundos mas nunca conferia se a resposta voltava — então seguia achando que estava conectado, com a lista vazia, indefinidamente. Agora ele cobra a resposta e, se ela não vem, reconecta.
+
+  2. **Um piscar de rede apagava a lista para sempre.** A lista só é enviada quando alguém entra ou sai. Se a sua conexão engasgasse exatamente nesse instante, a mensagem se perdia e ninguém reenviava — mesmo com a conexão perfeitamente viva. Agora o app pede a lista de novo ao voltar para a tela, quando a rede volta, ao abrir a lista, e periodicamente.
+
+  3. **Uma tentativa de reconexão infeliz encerrava todas as outras.** Se a reconexão saísse no meio da instabilidade, ela ficava pendurada esperando para sempre — e como as novas tentativas só são agendadas quando uma falha, nunca mais havia tentativa. Agora existe prazo para a conexão vingar.
+
+  Na prática: se você trocou de app, travou o celular ou passou por um túnel, a lista se corrige sozinha ao voltar — sem recarregar.
+
+  Reportado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+
+---
+
 ## Sem versão nova (nada muda no app)
 
 ### Melhorado

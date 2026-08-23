@@ -391,6 +391,16 @@ function despejarOutrasConexoes(conn) {
   }
 }
 
+// A lista atual, só pra UMA conexão. O `difundirLista` manda pra todos; este
+// atende quem pediu ressincronia.
+function enviarListaPara(conn) {
+  const conjunto = salas.get(conn.sala);
+  if (!conjunto || !conn.ident) return;
+  const presentes = [...conjunto].filter((c) => c.ident);
+  const lista = listaDePares(presentes.map((p) => p.ident), conn.ident);
+  try { conn.ws.enviar(JSON.stringify({ t: 'lista', ...lista })); } catch { /* socket morrendo */ }
+}
+
 function difundirLista(sala) {
   const conjunto = salas.get(sala);
   if (!conjunto) return;
@@ -438,10 +448,6 @@ async function tratarMensagemDaSala(conn, texto) {
     // mesmo motivo: recarregar sorteia um `peer` novo e o socket antigo demora
     // a fechar, então a pessoa ficava repetida na sala. Ver o comentário longo
     // em worker/sala-do.mjs.
-    // UMA presença por pessoa — mesma regra do adaptador da Cloudflare, e pelo
-    // mesmo motivo: recarregar sorteia um `peer` novo e o socket antigo demora
-    // a fechar, então a pessoa ficava repetida na sala. Ver o comentário longo
-    // em worker/sala-do.mjs.
     despejarOutrasConexoes(conn);
     conn.ws.enviar(JSON.stringify({ t: 'eu', peer: conn.ident.peer }));
     difundirLista(conn.sala);
@@ -452,6 +458,20 @@ async function tratarMensagemDaSala(conn, texto) {
   if (!conn.ident) return conn.ws.fechar(4001, 'sem cracha');
 
   if (m.t === 'sair') return conn.ws.fechar(1000, 'saiu');
+
+  // "Me manda a lista de novo."
+  //
+  // A sala só DIFUNDE quando alguém entra ou sai. Se a conexão do editor piscar
+  // exatamente nesse instante, a mensagem se perde e NINGUÉM reenvia — a lista
+  // dele fica errada até a página ser recarregada. Era isto que o owner via:
+  // "muitas vezes o App só mostra que tem alguém online quando atualizo".
+  //
+  // MEDIDO: com a rede engolindo os pacotes por 20s e voltando, o socket
+  // continua vivo (nada quebrou) e a lista fica vazia pra sempre.
+  //
+  // Só pra quem pediu: reenviar pra sala inteira faria o pedido de um custar
+  // uma mensagem por editor presente.
+  if (m.t === 'lista') return enviarListaPara(conn);
   if (m.t !== 'sinal') return;
 
   const agora = Date.now();
