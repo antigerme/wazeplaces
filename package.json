@@ -17,7 +17,8 @@
     "css": "node tools/gerar-css.mjs",
     "cf:dev": "wrangler dev",
     "cf:deploy": "wrangler deploy",
-    "test:presenca": "node tools/smoke-presenca.mjs"
+    "test:presenca": "node tools/smoke-presenca.mjs",
+    "test:fluxo": "node tools/smoke-fluxo.mjs"
   },
   "engines": {
     "node": ">=18"

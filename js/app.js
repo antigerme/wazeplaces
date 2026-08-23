@@ -4865,6 +4865,15 @@ function handleActionResult(actionType, place, result) {
 // handleReject/handleMarkAsRead/handleSkip, antes de mexer em stat, em fila ou
 // em `scheduleAction`. Não existe caminho em que um card de treino chegue ao
 // `API.rejectPlace`. O smoke mede isso pela REDE, não lendo o código.
+// Fecha as camadas presas ao pedido atual. Usada nas duas pontas da troca de
+// modo (entrar/sair do treino): o que está aberto pertence ao pedido do outro
+// lado, e reaproveitar a camada exigiria manter cada controle dela coerente com
+// o modo novo — uma regra por controle, todas dependentes de ordem.
+function fecharCamadasDeFoto() {
+    if (typeof Lightbox !== 'undefined' && Lightbox.isOpen()) Lightbox.close();
+    if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) MapaLightbox.close();
+}
+
 const Treino = {
     ativo: false,
     _salvo: null,
@@ -4999,6 +5008,14 @@ const Treino = {
         updateStats(true);   // troca de contexto: pula, não conta
         updatePendingCount(true);
         showCurrentPlace();
+        // Trocar de modo ZERA as camadas: o lightbox (e a renomeação dentro
+        // dele) pertencem ao pedido do OUTRO lado, e mantê-los abertos deixaria
+        // na tela o confirmar/cancelar de um nome que este modo não vai gravar.
+        //
+        // Fechar é melhor do que manter cada controle coerente com o modo novo:
+        // uma linha em vez de uma regra por controle, e sem depender de ORDEM —
+        // que é a forma exata dos dois defeitos que o owner relatou hoje.
+        fecharCamadasDeFoto();
     },
 
     sair() {
@@ -5034,6 +5051,9 @@ const Treino = {
         // inteira — o card nem avançava.
         const pilha = document.getElementById('toastContainer');
         if (pilha) [...pilha.children].forEach((n) => n.remove());
+        // Simétrico ao entrar(): sair com uma foto de TREINO aberta deixaria o
+        // lightbox do modo real em cima de um pedido inerte.
+        fecharCamadasDeFoto();
     },
 
     agir(tipo) {

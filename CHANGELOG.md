@@ -8,6 +8,18 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.23-05
+
+### Corrigido
+- **Entrar ou sair do modo treino agora fecha a foto ampliada.** Antes, uma foto aberta ao trocar de modo continuava na tela — junto com controles que pertenciam ao pedido do outro lado. Não havia como chegar nesse estado usando a app normalmente, mas era a mesma armadilha que causou os dois problemas da versão anterior, então foi fechada de vez.
+
+### Melhorado
+- **Nova bateria de testes automáticos que verifica a app como um todo, e não tela por tela.** Os dois problemas reportados na v2026.08.23-04 (a ação de foto reaparecendo ao trocar de foto durante a renomeação, e as setas do teclado mexendo na foto em vez do texto) passaram por todos os testes que existiam, porque cada um deles olhava uma tela de cada vez. Os dois só aparecem quando duas coisas acontecem ao mesmo tempo.
+
+  A bateria nova combina os estados da app dois a dois — treino, foto ampliada, renomeação, mapa, janela do Desfazer, fila vazia, cada janela de diálogo — e depois **sacode**: troca de foto, redesenha, muda de idioma, muda de tema. Em cada combinação ela cobra que nada que grave no Waze fique alcançável onde não deve, medindo inclusive **o que sai pela rede**, e não só se o botão parece desligado. Foram 67 combinações × 6 ações. Conferida contra os dois problemas da versão anterior: reintroduzindo cada um, ela reprova.
+
+---
+
 ## v2026.08.23-04
 
 ### Corrigido
