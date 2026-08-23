@@ -344,6 +344,46 @@ test('modal não pode estar DENTRO de outro modal', () => {
   }
 });
 
+test('a cota do Desfazer não depende do perfil estar carregado AGORA', () => {
+  // Relatado pelo owner: "quando o App fica com problema de conexão o desfazer
+  // volta a ficar marcado". Estava certo, e era pior que visual — a JANELA de
+  // 3s voltava junto.
+  //
+  // A causa: a cota lia `AppState.profile`, que só é preenchido quando o
+  // `/api/perfil` DÁ CERTO. Rede ruim → perfil nulo → cota Infinity → portão
+  // travado → o editor que já tinha conquistado o direito de desligar levava a
+  // janela de volta, com a tela dizendo "disponível depois que o app carregar
+  // seu perfil", como se fosse culpa dele.
+  //
+  // A cota mede EXPERIÊNCIA, que não muda porque a rede caiu.
+  const APP = read('js/app.js');
+  const fn = APP.match(/function getUndoUnlockThreshold\(\)[\s\S]*?\n\}/);
+  assert.ok(fn, 'sumiu o getUndoUnlockThreshold');
+  assert.equal(/AppState\.profile/.test(fn[0]), false,
+    'a cota voltou a ler AppState.profile direto — uma falha de rede re-trava o portão');
+  assert.match(fn[0], /perfilDoPortao\(\)/, 'a cota precisa passar pelo perfil com memória');
+  assert.match(APP, /function perfilDoPortao[\s\S]*?PERFIL_GATE_KEY/,
+    'o perfil do portão precisa cair no último rank conhecido quando não há perfil vivo');
+  assert.match(APP, /guardarPerfilDoPortao\(/, 'ninguém está GRAVANDO o rank quando o perfil carrega');
+});
+
+test('preferência não se grava antes de ter sido lida', () => {
+  // Gravar antes de ler apaga a escolha da pessoa com o padrão, PERMANENTEMENTE.
+  // Medido: com o `/api/perfil` falhando, o `checkUndoGateUnlock` alcançava
+  // `savePreferences()` num momento em que a memória ainda era o literal de
+  // origem, e o `undoEnabled: false` do editor virava `true` no armazenamento.
+  //
+  // A ordem certa vira invariante, em vez de depender de quem chama antes.
+  const APP = read('js/app.js');
+  const fn = APP.match(/function savePreferences\(\)[\s\S]*?\n\}/);
+  assert.ok(fn, 'sumiu o savePreferences');
+  assert.match(fn[0], /if \(!preferenciasCarregadas\) return;/,
+    'o savePreferences voltou a gravar sem checar se já leu — isso apaga a preferência do editor');
+  const load = APP.match(/function loadPreferences\(\)[\s\S]*?\n\}/);
+  assert.ok(load && /preferenciasCarregadas = true/.test(load[0]),
+    'o loadPreferences precisa marcar a invariante — inclusive quando não há nada guardado');
+});
+
 test('nenhum modal FECHA e outro ABRE no mesmo quadro', () => {
   // Isso expulsa o editor da app, e o contador não denuncia.
   //
@@ -1417,6 +1457,10 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     DEVMODE_KEY: 'saveDevMode()',
     HISTORY_KEY: 'safeLS.remove(HISTORY_KEY)',
     CHAVE_INSTALL_DISPENSADO: 'safeLS.remove(CHAVE_INSTALL_DISPENSADO)',
+    // Rank/staff do último perfil que carregou. Não é preferência, é memória do
+    // que o Waze respondeu — e existe pra que uma falha de rede não re-trave a
+    // cota do Desfazer. Sai no logout como todo o resto: é dado de quem entrou.
+    PERFIL_GATE_KEY: 'safeLS.remove(PERFIL_GATE_KEY)',
     SESSAO_KEY: 'esquecerPrazoDaSessao()',
     waze_session_token: 'API.setSession(null)',
     waze_region: "API.setRegion('row')",

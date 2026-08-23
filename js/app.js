@@ -9,6 +9,13 @@ const THEME_KEY = 'waze_places_theme';
 const LANG_KEY = 'waze_places_lang';
 const HISTORY_KEY = 'waze_places_history';
 const SESSAO_KEY = 'waze_places_sessao_expira';
+// Rank e staff do último perfil que CARREGOU. Não é preferência — é memória do
+// que o Waze já respondeu, e existe por um motivo medido: sem ela, abrir a app
+// com a conexão ruim faz o `/api/perfil` falhar, o perfil fica nulo, e a cota
+// do Desfazer volta a travar. O editor que já tinha conquistado o direito de
+// desligar leva a janela de 3s de volta — e a tela ainda diz "disponível
+// depois que o app carregar seu perfil", como se fosse culpa dele.
+const PERFIL_GATE_KEY = 'waze_places_perfil_gate';
 const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
@@ -2471,6 +2478,7 @@ async function loadProfileAndAuxData() {
     }
     if (profileRes.success) {
         AppState.profile = profileRes.profile;
+        guardarPerfilDoPortao(profileRes.profile);
         guardarPrazoDaSessao(profileRes);
         renderProfileHeader();
     }
@@ -2527,6 +2535,7 @@ async function handleUnauthorized() {
             // chamou; aqui só recompomos o que o 401 tinha interrompido.
             if (r.success && r.profile) {
                 AppState.profile = r.profile;
+                guardarPerfilDoPortao(r.profile);
                 renderProfileHeader();
             }
             showToast(t('toast.sessionKeptAlive'), 'info');
@@ -2699,6 +2708,7 @@ async function handleLogout() {
     // "Sair limpa tudo" não tem exceção que ninguém decidiu: este marcador (o
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
+    safeLS.remove(PERFIL_GATE_KEY);   // rank do último perfil: some com o resto
     // Fecha a conexão da sala e apaga os bloqueios: são escolhas de quem
     // entrou, não preferência do aparelho.
     window.Presenca?.esquecer?.();
@@ -5500,7 +5510,18 @@ function loadFilters() {
     } catch (e) {}
 }
 
+// Gravar preferência ANTES de tê-las lido apaga a escolha da pessoa com o
+// padrão. E não é hipotético: com o `/api/perfil` falhando, o
+// `checkUndoGateUnlock` chega a `savePreferences()` num momento em que a
+// memória ainda é o literal de origem — medido, com o `undoEnabled: false` do
+// editor virando `true` no armazenamento, de forma PERMANENTE.
+//
+// A ordem certa é garantida por invariante, não por sorte de quem chama antes:
+// enquanto não se leu, não se escreve.
+let preferenciasCarregadas = false;
+
 function savePreferences() {
+    if (!preferenciasCarregadas) return;
     try {
         localStorage.setItem(PREFERENCES_KEY, JSON.stringify(AppState.preferences));
     } catch (e) {}
@@ -5534,6 +5555,7 @@ function loadPreferences() {
             }
         }
     } catch (e) {}
+    preferenciasCarregadas = true;
 }
 
 // Modo Desenvolvedor: easter egg estilo Android. User toca 7 vezes na versão
@@ -5849,9 +5871,25 @@ function getUndoTreatedCount() {
     return (AppState.stats.read || 0) + (AppState.stats.rejected || 0);
 }
 
+function guardarPerfilDoPortao(p) {
+    if (!p || typeof p.rank !== 'number') return;
+    safeLS.set(PERFIL_GATE_KEY, JSON.stringify({ rank: p.rank, isStaff: !!p.isStaff }));
+}
+
+// O perfil que a COTA usa: o vivo, se houver; senão o último que carregou.
+// A cota mede a EXPERIÊNCIA da pessoa, que não muda porque a rede caiu.
+function perfilDoPortao() {
+    if (AppState.profile && typeof AppState.profile.rank === 'number') return AppState.profile;
+    try {
+        const c = JSON.parse(safeLS.get(PERFIL_GATE_KEY) || 'null');
+        return c && typeof c.rank === 'number' ? c : null;
+    } catch (e) { return null; }
+}
+
 function getUndoUnlockThreshold() {
-    if (AppState.profile && AppState.profile.isStaff) return 0;
-    const rank = AppState.profile && AppState.profile.rank;
+    const p = perfilDoPortao();
+    if (p && p.isStaff) return 0;
+    const rank = p && p.rank;
     if (typeof rank !== 'number') return Infinity;
     return Math.ceil(UNDO_GATE_BASE / (rank + 1));
 }
