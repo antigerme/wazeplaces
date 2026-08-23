@@ -3212,6 +3212,119 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+
+// ── Renomeando: as acoes de foto SOMEM, e as setas sao do CURSOR ───────────
+// DOIS relatos do owner, mesma tela e mesma familia de falha (regra de estado
+// escrita em dois lugares, o segundo desfazendo o primeiro):
+//
+//   1. abrir a renomeacao escondia excluir/aprovar UMA vez; a proxima troca de
+//      foto os reacendia, logo ABAIXO do confirmar/cancelar do nome -- o canto
+//      pra onde o dedo ja estava indo, com duas acoes que gravam no mapa.
+//   2. com o foco no campo, as setas TROCAVAM A FOTO e o preventDefault ainda
+//      matava o movimento do cursor. A guarda de campo de texto existia, mas
+//      DEPOIS do bloco do lightbox, que retorna antes de chegar nela.
+//
+// O guard cobre os dois E o CONTROLE de cada um: sem o controle, "some" passaria
+// por um botao que nunca apareceu e "nao troca" por um carrossel de uma foto so.
+{
+  const pl = (() => {
+    // Precisa de NOME (so corrige nome existente), local APROVADO (o Waze recusa
+    // escrita em nao-aprovado) e a foto NOVA no indice 0, que e a que da acao.
+    const b = FIXTURES_PAISES.find((f) => f.name) || {};
+    return { ...b, name: b.name || 'Padaria do Ze', localAprovado: true,
+             imageUrl: foto, imageUrls: [foto, foto, foto],
+             approvedImageIds: [], imageDates: {} };
+  })();
+
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  const page = await ctx.newPage();
+  const errosR = [];
+  page.on('pageerror', (e) => errosR.push(String(e).slice(0, 120)));
+  await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true })));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(450);
+  await page.evaluate((x) => {
+    AppState.authenticated = true;
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    AppState.queue = [x]; AppState.currentPlace = x; AppState.serverTotal = 1;
+    showLoading(false); showCurrentPlace(); updatePendingCount();
+  }, pl);
+  await assentar(page, 300);
+  await page.evaluate((x) => Lightbox.open(x.imageUrls, 0, 0, x.name, false, x), pl);
+  await assentar(page, 250);
+
+  const ler = () => page.evaluate(() => ({
+    editando: !!document.getElementById('lightboxNome')?.classList.contains('editando'),
+    del: !document.getElementById('lightboxDelete')?.classList.contains('hidden'),
+    apr: !document.getElementById('lightboxApprove')?.classList.contains('hidden'),
+    idx: Lightbox.idx,
+    cursor: document.getElementById('lightboxNomeInput')?.selectionStart ?? null,
+  }));
+
+  const onde = 'renomear no lightbox';
+  const a0 = await ler();
+  // CONTROLE do relato 1: o botao TEM que estar visivel antes, senao "some"
+  // passaria por ausencia -- guard que nunca viu o alvo nao guarda nada.
+  checa(a0.apr, `${onde}: controle falhou — aprovar nao aparece nem ANTES de renomear`);
+
+  await page.evaluate(() => abrirEdicaoNome());
+  await assentar(page, 200);
+  const a1 = await ler();
+  checa(a1.editando, `${onde}: a renomeacao nao abriu`);
+  checa(!a1.del && !a1.apr, `${onde}: acao de foto visivel ao ABRIR a renomeacao`);
+
+  // O caso do relato: trocar de foto e VOLTAR pra que tem acao.
+  await page.evaluate(() => Lightbox.next());
+  await assentar(page, 150);
+  await page.evaluate(() => Lightbox.prev());
+  await assentar(page, 150);
+  const a2 = await ler();
+  checa(a2.idx === 0, `${onde}: controle falhou — a foto nao voltou pro indice 0`, String(a2.idx));
+  checa(!a2.del && !a2.apr,
+    `${onde}: acao de foto REAPARECEU ao trocar de foto durante a renomeacao`);
+
+  // Relato 2: com o foco no campo, a seta e do cursor.
+  await page.evaluate(() => {
+    const i = document.getElementById('lightboxNomeInput');
+    i.focus(); i.setSelectionRange(5, 5);
+  });
+  const b0 = await ler();
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(120);
+  const b1 = await ler();
+  checa(b1.idx === b0.idx, `${onde}: ArrowLeft com o foco no campo TROCOU a foto`, `${b0.idx} -> ${b1.idx}`);
+  checa(b1.cursor === b0.cursor - 1, `${onde}: ArrowLeft nao andou o cursor`, `${b0.cursor} -> ${b1.cursor}`);
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(120);
+  const b2 = await ler();
+  checa(b2.idx === b0.idx, `${onde}: ArrowRight com o foco no campo TROCOU a foto`, `${b1.idx} -> ${b2.idx}`);
+  checa(b2.cursor === b0.cursor, `${onde}: ArrowRight nao andou o cursor`, `${b1.cursor} -> ${b2.cursor}`);
+
+  // CONTROLE do relato 2: SEM campo focado, a seta tem que trocar a foto.
+  // Sem isto o guard passaria com o teclado morto no lightbox inteiro.
+  await page.evaluate(() => fecharEdicaoNome());
+  await assentar(page, 200);
+  await page.evaluate(() => document.getElementById('lightboxClose').focus());
+  const c0 = await ler();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(150);
+  const c1 = await ler();
+  checa(c1.idx === c0.idx + 1,
+    `${onde}: controle falhou — sem campo focado a seta deixou de trocar a foto`, `${c0.idx} -> ${c1.idx}`);
+
+  // E ao fechar a renomeacao as acoes VOLTAM (some != some pra sempre).
+  await page.evaluate(() => Lightbox.prev());
+  await assentar(page, 200);
+  const d0 = await ler();
+  checa(d0.apr, `${onde}: a acao de foto nao voltou depois de fechar a renomeacao`);
+
+  checa(errosR.length === 0, `${onde}: erro de JS`, errosR[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -3244,6 +3357,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
   + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`
   + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`
+  + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`);
