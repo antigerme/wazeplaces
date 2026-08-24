@@ -1363,7 +1363,7 @@ const Lightbox = {
         if (!p || this.eDenuncia) return false;
         if (this.idx !== this.newIdx || this.newIdx < 0) return false;
         if (!p.venueID || !p.updateRequestID) return false;
-        return podeExcluirFotoAqui();   // mesmo portão, decisão do owner
+        return podeAgirComoL6Aqui();   // mesmo portão, decisão do owner
     },
     // Depois de aprovada, a foto passa a estar no mapa: o ✨ some e ela entra
     // na lista de excluíveis — o botão vira lixeira sozinho.
@@ -1437,22 +1437,48 @@ const Lightbox = {
     }
 };
 
-// Portão de PRODUTO: L6 + Area Manager (ou staff). Vive SÓ aqui, e é decisão
-// do owner — *"a pessoa já pode apagar a foto se abrir o WME"*. O Waze valida
-// `permissions` e `lockRank` na gravação, então quem não pode apagar por aqui
-// também não consegue por lá: isto nunca foi fronteira de segurança, é trava
-// de produto pra o recurso não aparecer pra qualquer editor na NOSSA app.
+// ═══════════════════════════════════════════════════════════════════════════
+//  O portão dos recursos destrutivos: L6 + Area Manager, ou staff
+// ═══════════════════════════════════════════════════════════════════════════
 //
-// Houve um espelho disto no servidor, com cache de perfil pra não custar caro.
-// Saiu: a chamada que ele exigia era a mais lenta das três (977ms medidos) e
-// existia pra reconfirmar o que o Waze reconfirma de novo ao gravar.
-function podeExcluirFotoAqui() {
+// A app tem DOIS níveis, e o par é deliberado:
+//   · ENTRAR é L3+AM (`isUserAllowed`, no core) — é o portão de verdade, no
+//     SERVIDOR, e é ele que impede que qualquer um com cookies do Waze use a app.
+//   · AGIR de forma destrutiva é L6+AM — este aqui, só do CLIENTE.
+//
+// Só do cliente é decisão, não esquecimento: o Waze valida `permissions` e
+// `lockRank` na gravação, então quem não pode por aqui também não consegue por
+// lá. Isto nunca foi fronteira de segurança — é trava de produto pra o recurso
+// não aparecer pra qualquer editor na NOSSA app. Houve um espelho no servidor,
+// com cache de perfil pra não custar caro, e SAIU: a chamada que ele exigia era
+// a mais lenta das três (977ms medidos) e existia pra reconfirmar o que o Waze
+// reconfirma de novo ao gravar (gotcha #59).
+//
+// O nome NÃO fala de foto de propósito. Ele já guardava três recursos — excluir
+// foto, aprovar foto e renomear local — e chamá-lo de "excluir foto" fazia cada
+// novo call site parecer estranho, o que empurra a próxima pessoa a
+// re-implementar `rank >= 5` em vez de delegar. `test/gates.test.mjs` reprova
+// quem re-implementar.
+//
+// Recurso novo entra por uma função PRÓPRIA que delega (ver `podeRenomearAqui`),
+// nunca chamando esta direto: são decisões de produto que hoje COINCIDEM, e se
+// um dia o owner separar uma delas, o call site não muda.
+function podeAgirComoL6Aqui() {
     const p = AppState.profile;
     if (!p) return false;
     if (p.isStaff) return true;
     // Rank CRU do Waze, 0-indexed: 5 aqui é o L6 que o editor vê (gotcha #15).
     const rank = Number.isInteger(p.rank) ? p.rank : parseInt(p.rank, 10);
     return rank >= 5 && !!p.isAreaManager;
+}
+
+// Excluir foto: o primeiro recurso a usar o portão, e agora um delegador como
+// os outros dois. Existir como função própria — em vez de o call site chamar a
+// base — é o que mantém a invariante que o teste cobra: NENHUM recurso fala
+// direto com `podeAgirComoL6Aqui`, cada um tem o seu nome. Assim, separar um
+// deles um dia é editar uma função, não caçar call sites.
+function podeExcluirFotoAqui() {
+    return podeAgirComoL6Aqui();
 }
 
 // Gestos do mapa ampliado. Ponteiros unificados (mouse e dedo pelo mesmo
@@ -1921,7 +1947,7 @@ function aprovarFotoAtual() {
 // lá: o WME não busca duplicado, não valida convenção, não confere nada. Manda
 // `{id, name}`.
 //
-// Portão: o mesmo da lixeira (`podeExcluirFotoAqui`), decisão do owner, e só do
+// Portão: o mesmo dos outros destrutivos (`podeAgirComoL6Aqui`), e só do
 // CLIENTE — o Waze valida `permissions`/`lockRank` na gravação, então quem não
 // pode por aqui também não consegue por lá.
 let renomeacaoPendente = null;   // { timer, enviar, desfazer }
@@ -1930,7 +1956,7 @@ function podeRenomearAqui() {
     // Mesmo portão da foto. Função própria (em vez de chamar a outra direto)
     // porque são DUAS decisões de produto que hoje coincidem: se um dia o owner
     // separar, o call site não muda.
-    if (!podeExcluirFotoAqui()) return false;
+    if (!podeAgirComoL6Aqui()) return false;
     const p = Lightbox.place;
     // v1 só CORRIGE nome existente. Batizar local sem nome é outra decisão (e
     // outra conversa) — sem isto, um toque acidental nomearia um lugar anônimo.

@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.24-03
+
+### Alterado
+- **Nada muda para quem usa o app.** É arrumação de casa, feita antes de pendurar mais um recurso no mesmo lugar: o portão que libera excluir foto, aprovar foto e renomear local passou a se chamar pelo que ele decide (nível L6 + Area Manager, ou staff) em vez de pelo primeiro recurso que o usou. Cada um dos três continua com o seu próprio nome, todos apontando para a mesma regra — assim, se um dia um deles precisar de um nível diferente, muda só ele.
+
+  Junto, o app ganhou um teste que faltava: até agora nada reprovava quem afrouxasse esse portão sem querer.
+
+---
+
 ## v2026.08.24-02
 
 ### Adicionado
