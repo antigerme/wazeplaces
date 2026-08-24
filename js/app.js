@@ -179,6 +179,7 @@ const AppState = {
     statesByCountry: {},
     seenCategories: [],      // categorias vistas nos places carregados (fonte do filtro de categoria)
     history: null,           // acumulado histórico { 'YYYY-MM-DD': { read, rejected } } (carregado lazy)
+    autoPendente: null,      // janela da recusa automática (slot PRÓPRIO: não trava o card)
     autores: null,           // reincidência por autor: { v: [ids vistos 1x], r: { id: [n, nome, dia] } }
     sessaoExpiraEm: null     // quando a sessão do WAZE vence (epoch em segundos). Prazo FIXO, ver AVISO_SESSAO_DIAS
 };
@@ -2793,6 +2794,7 @@ async function handleLogout() {
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
     safeLS.remove(PERFIL_GATE_KEY);   // rank do último perfil: some com o resto
+    if (AppState.autoPendente) AppState.autoPendente.cancelar();  // nada é enviado no logout
     esquecerAutores();  // contagem por autor: é dado de TERCEIRO, sai primeiro
     // Fecha a conexão da sala e apaga os bloqueios: são escolhas de quem
     // entrou, não preferência do aparelho.
@@ -2956,6 +2958,7 @@ function fetchNextPage() {
                 AppState.serverTotal += newPlaces.length;
                 trackSeenCategories(newPlaces);
                 sortQueue();
+                aplicarRecusaAutomatica();
             }
         } catch (error) {
             console.error('fetchNextPage error', error);
@@ -4831,6 +4834,123 @@ function getHistoryStats() {
     return acc;
 }
 // ═══════════════════════════════════════════════════════════════════════════
+//  Recusa automática: os pedidos que AINDA VÃO CHEGAR de um autor marcado
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// É o único recurso da app que decide sobre pedido que ainda não existia quando
+// o editor escolheu. Por isso três coisas foram desenhadas contra o instinto:
+//
+// 1. PORTÃO. Só L6+AM ou staff — champs e staff do Waze, não qualquer editor.
+//    Foi a condição do owner pra o recurso existir, e é ela que sustenta o
+//    resto: quem marca alguém aqui está fazendo julgamento informado sobre um
+//    spammer persistente, não um toque apressado.
+//
+// 2. A JANELA NÃO TRAVA O CARD. O `acoesTravadas()` congela os três botões
+//    quando VOCÊ age e a app espera confirmação. Aqui você não pediu nada — ser
+//    congelado por uma decisão que a app tomou sozinha seria pior que o
+//    problema. Daí o slot próprio (`autoPendente`), fora do `pendingAction`.
+//
+// 3. A PALAVRA SEGUE O TEMPO VERBAL. Enquanto nada saiu, o banner diz "serão
+//    rejeitados" e oferece CANCELAR — "desfazer" pressupõe que foi você quem
+//    fez, e não foi. Depois que saiu não há o que cancelar, e a única ação
+//    verdadeira que sobra é DESLIGAR: não desfaz nada, para de acontecer de novo.
+//
+// A janela é de 20s pelo mesmo motivo MEDIDO do banner de conquista: 8s ficaram
+// "exatamente no limite" pra o owner notar e ler um banner que ele não estava
+// esperando. Aqui ele está ainda menos esperando.
+const AUTO_CANCELAR_MS = 20000;
+
+function podeRecusarAutomaticoAqui() {
+    // Função própria que delega, como os outros destrutivos: são decisões de
+    // produto que hoje coincidem, e se o owner separar uma o call site não muda.
+    return podeAgirComoL6Aqui();
+}
+
+// O interruptor mora no MESMO registro da contagem: a poda de 30 dias vale pros
+// dois, e isso é o certo — autor que parou de mandar por um mês não precisa
+// seguir com recusa automática armada.
+function autoLigado(chave) {
+    const e = loadAutores().r[String(chave)];
+    return Array.isArray(e) && e[3] === 1;
+}
+
+function alternarAutoDoAutor(chave) {
+    if (!podeRecusarAutomaticoAqui()) return;
+    const a = loadAutores();
+    const e = a.r[String(chave)];
+    if (!Array.isArray(e)) return;
+    e[3] = e[3] === 1 ? 0 : 1;
+    salvarAutores(a);
+    renderHistory();
+}
+
+// Chamado depois de a fila crescer. Tira da frente os pedidos dos autores
+// marcados e agenda a recusa — nada é enviado antes da janela vencer.
+function aplicarRecusaAutomatica() {
+    if (!podeRecusarAutomaticoAqui()) return;
+    if (Treino.ativo) return;               // no treino a fila é de exemplos
+    if (AppState.autoPendente) return;      // uma janela por vez
+    const alvos = (AppState.queue || []).filter(
+        (x) => x && x.creatorId !== undefined && x.creatorId !== null && autoLigado(x.creatorId));
+    if (alvos.length === 0) return;
+
+    const n = alvos.length;
+    const autor = alvos[0].createdBy || String(alvos[0].creatorId);
+    const chave = String(alvos[0].creatorId);
+    // Otimista, como todo o resto: o placar anda agora e volta no Cancelar.
+    AppState.stats.rejected += n;
+    AppState.serverTotal = Math.max(0, AppState.serverTotal - n);
+    updateStats();
+    saveStats();
+    const fora = new Set(alvos);
+    const eraOAtual = AppState.currentPlace && fora.has(AppState.currentPlace);
+    AppState.queue = AppState.queue.filter((x) => !fora.has(x));
+    updatePendingCount();
+    if (eraOAtual) {
+        AppState.currentPlace = null;
+        removeCurrentCardEl();
+        if (AppState.queue.length > 0) showCurrentPlace();
+        else if (AppState.hasMore) startFetching();
+        else showNoPlaces();
+    }
+
+    let resolvido = false;
+    const cancelar = () => {
+        if (resolvido) return;
+        resolvido = true;
+        clearTimeout(AppState.autoPendente.timer);
+        AppState.autoPendente = null;
+        AppState.stats.rejected = Math.max(0, AppState.stats.rejected - n);
+        AppState.serverTotal += n;
+        updateStats();
+        saveStats();
+        AppState.queue.unshift(...alvos);
+        updatePendingCount();
+        showCurrentPlace();
+        showToast(t('auto.cancelado', { n, autor }), 'info');
+    };
+    const enviar = async () => {
+        if (resolvido) return;
+        resolvido = true;
+        AppState.autoPendente = null;
+        await enviarLote(alvos, { silencioso: true });
+        // Passado agora é verdade, e a única ação real que sobra é DESLIGAR.
+        showToast(t('auto.feito', { n, autor }), 'hint', AUTO_CANCELAR_MS,
+            () => { alternarAutoDoAutor(chave); showToast(t('auto.desligado', { autor }), 'info'); });
+    };
+    AppState.autoPendente = { places: alvos, cancelar, enviar,
+        timer: setTimeout(enviar, AUTO_CANCELAR_MS) };
+    showToast(t('auto.futuro', { n, autor }), 'hint', AUTO_CANCELAR_MS, cancelar);
+}
+
+// Sair da página no meio da janela CANCELA — mesma regra do lote (#162): N
+// requisições disparadas no `pagehide` completam parcialmente, e meio-lote
+// enviado é a única falha aqui sem sintoma nenhum.
+function descarregarRecusaAutomatica() {
+    if (AppState.autoPendente) AppState.autoPendente.cancelar();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  A série de um autor: ver primeiro, ou rejeitar os que estão na fila
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -4918,7 +5038,10 @@ function rejeitarLoteDoAutor(place) {
 // Um a um, e o resultado NÃO é um número só: cada pedido tem destino próprio.
 // "Já tratado por outro editor" conta como cumprido — é a mesma regra que a app
 // usa no card único, e chamá-lo de falha aqui daria dois nomes à mesma coisa.
-async function enviarLote(places) {
+// `silencioso` existe pra recusa automática: lá quem presta contas é o banner
+// (que já diz o número e oferece desligar), e abrir a folha por cima do card
+// seria a app interrompendo por algo que o editor não pediu.
+async function enviarLote(places, opts = {}) {
     const conta = { ok: 0, ja: 0, erro: 0 };
     AppState.inFlightActions++;
     updateInFlightIndicator();
@@ -4950,7 +5073,7 @@ async function enviarLote(places) {
         saveStats();
         updatePendingCount();
     }
-    mostrarResultadoDoLote(conta);
+    if (!opts.silencioso) mostrarResultadoDoLote(conta);
 }
 
 function mostrarResultadoDoLote(conta) {
@@ -5129,12 +5252,29 @@ function renderAutores() {
     el.innerHTML =
         `<p class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">${escapeHtml(t('stats.autores.title'))}</p>`
         + `<p class="text-xs text-slate-500 dark:text-slate-400 mb-2 leading-snug">`
-        + `${escapeHtml(t('stats.autores.desc', { dias: AUTORES_MAX_DIAS }))}</p>`
+        + `${escapeHtml(t('stats.autores.desc', { dias: AUTORES_MAX_DIAS }))}`
+        + (podeRecusarAutomaticoAqui() ? ' ' + escapeHtml(t('stats.autores.autoDesc')) : '')
+        + `</p>`
         + linhas.map((a) =>
             `<div class="flex items-center gap-2 min-h-[44px] border-b border-slate-100 dark:border-slate-700 last:border-0">`
             + `<span class="flex-1 min-w-0 text-sm font-medium text-slate-700 truncate dark:text-slate-200">${escapeHtml(a.nome)}</span>`
             + `<span class="selo-proc ${a.n >= AUTOR_LIMIAR_DESTAQUE ? 'selo-reinc' : 'selo-src'} flex-shrink-0">`
             + `✕ ${a.n}</span>`
+            // O interruptor da recusa automática só EXISTE pra quem passa no
+            // portão: mostrá-lo desabilitado anunciaria um recurso que a pessoa
+            // não pode usar, e a app não faz isso em nenhum outro lugar.
+            + (podeRecusarAutomaticoAqui()
+                // O <label> de 44px é o ALVO; o interruptor em si tem 26px de
+                // altura (componente padrão da app). Nas Preferências o alvo vem
+                // da linha inteira ser um label — aqui não dá, porque a linha
+                // também tem a lixeira, e um toque perto dela alternaria o
+                // automático sem querer.
+                ? `<label class="flex items-center min-h-[44px] flex-shrink-0 cursor-pointer">`
+                  + `<input type="checkbox" class="ui-switch autor-auto"`
+                  + ` data-autor="${escapeHtml(a.id)}"${autoLigado(a.id) ? ' checked' : ''}`
+                  + ` title="${escapeHtml(t('stats.autores.auto'))}"`
+                  + ` aria-label="${escapeHtml(t('stats.autores.auto'))}"></label>`
+                : '')
             + `<button type="button" class="autor-esquecer min-w-[44px] min-h-[44px] flex items-center justify-center`
             + ` text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 rounded-full flex-shrink-0"`
             + ` data-autor="${escapeHtml(a.id)}" title="${escapeHtml(t('stats.autores.esquecer'))}"`
@@ -5143,6 +5283,9 @@ function renderAutores() {
     // esquecimento — o listener por linha morre junto com a linha.
     for (const b of el.querySelectorAll('.autor-esquecer')) {
         b.addEventListener('click', () => esquecerAutor(b.dataset.autor));
+    }
+    for (const c of el.querySelectorAll('.autor-auto')) {
+        c.addEventListener('change', () => alternarAutoDoAutor(c.dataset.autor));
     }
 }
 
@@ -6131,8 +6274,9 @@ function descarregarAcaoPendente() {
 
 function setupDescargaAoSair() {
     window.addEventListener('pagehide', descarregarAcaoPendente);
+    window.addEventListener('pagehide', descarregarRecusaAutomatica);
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') descarregarAcaoPendente();
+        if (document.visibilityState === 'hidden') { descarregarAcaoPendente(); descarregarRecusaAutomatica(); }
     });
 }
 
