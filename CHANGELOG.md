@@ -8,6 +8,22 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.24-01
+
+### Adicionado
+- **O card agora diz quantos pedidos daquela pessoa você já rejeitou.** Um selo `✕ 14` na linha do criador, ao lado do nível e da origem. Ele existe porque há um tipo de pedido que só se reconhece com memória: o mesmo autor mandando lixo semana após semana — no caso que originou isto, fotos do pacote de entrega, muitas delas com nome, endereço e telefone do destinatário no rótulo.
+
+  A app não consegue distinguir esse autor do melhor contribuinte da fila pelos dados do pedido: medido, os dois são 100% foto, uma foto por local, e o ritmo se sobrepõe. O único sinal que separa é a **sua** rejeição repetida — e ela era jogada fora a cada dia.
+
+  Abaixo de 10 rejeições o selo é **cinza**: a app conta, não acusa. A partir daí fica rosa, a mesma cor do ✕.
+
+- **A aba Histórico ganhou a lista desses autores**, abaixo do seu placar, com uma lixeira para esquecer quem você quiser. A contagem entra na **segunda** rejeição, sai depois de **30 dias** sem rejeição nova, e fica **só neste aparelho** — sair da app apaga tudo.
+
+### Alterado
+- **Os selos do criador ficaram mais curtos**: `pelo app` virou `app`, `pelo site` virou `site`, e `+2 deste autor` virou `ver +2`. Não é enxugar por estética — é espaço medido. Com os rótulos antigos, o nome do criador aparecia pela metade no iPhone e sumia inteiro em telas estreitas; com os curtos, **quatro** selos cabem melhor do que três cabiam antes (81% do nome no Pixel 7 contra 62%, 66% no iPhone 14 contra 47%). A explicação completa de cada selo continua no toque longo.
+
+---
+
 ## v2026.08.23-07
 
 ### Corrigido

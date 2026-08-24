@@ -1514,10 +1514,16 @@ button:active {
 .selo-rank { background: #e0f2fe; color: #075985; }
 .selo-src  { background: #f1f5f9; color: #475569; }
 .selo-lote { background: #fef3c7; color: #92400e; }
+/* Reincidência é REJEIÇÃO ACUMULADA, então herda o ROSA do ✕ — a app já fixa
+   "✕ rejeitar/rosa, ✓ lido/verde, ↑ pular/âmbar", e o âmbar já é do lote: duas
+   coisas âmbar na MESMA linha seriam duas gramáticas pro mesmo lugar.
+   Contraste MEDIDO: 6.68:1 no claro, 6.78:1 no escuro (WCAG 1.4.3 pede 4.5). */
+.selo-reinc { background: #ffe4e6; color: #9f1239; }
 
 .dark .selo-rank { background: #075985; color: #bae6fd; }
 .dark .selo-src  { background: #334155; color: #cbd5e1; }
 .dark .selo-lote { background: #78350f; color: #fde68a; }
+.dark .selo-reinc { background: #881337; color: #fecdd3; }
 
 /* O selo do lote é o único que AGE, e precisa parecer tocável — selo que
    responde ao toque sem se distinguir dos outros dois ensina errado. */
