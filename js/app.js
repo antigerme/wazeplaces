@@ -179,6 +179,7 @@ const AppState = {
     statesByCountry: {},
     seenCategories: [],      // categorias vistas nos places carregados (fonte do filtro de categoria)
     history: null,           // acumulado histórico { 'YYYY-MM-DD': { read, rejected } } (carregado lazy)
+    autores: null,           // reincidência por autor: { v: [ids vistos 1x], r: { id: [n, nome, dia] } }
     sessaoExpiraEm: null     // quando a sessão do WAZE vence (epoch em segundos). Prazo FIXO, ver AVISO_SESSAO_DIAS
 };
 
@@ -2767,6 +2768,7 @@ async function handleLogout() {
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
     safeLS.remove(PERFIL_GATE_KEY);   // rank do último perfil: some com o resto
+    esquecerAutores();  // contagem por autor: é dado de TERCEIRO, sai primeiro
     // Fecha a conexão da sala e apaga os bloqueios: são escolhas de quem
     // entrou, não preferência do aparelho.
     window.Presenca?.esquecer?.();
@@ -4080,6 +4082,17 @@ function renderSelosDeProcedencia(card, place) {
         selos.push({ cls: 'selo-lote', txt: t('card.sameAuthor', { n: mesmos }),
                      title: t('card.sameAuthor.acao'), acao: place.createdBy });
     }
+    // Reincidência: quantos pedidos DESTE autor você já rejeitou. Rosa é a cor
+    // do ✕ em toda a app — reincidência é rejeição acumulada, então herda dele.
+    // Abaixo do limiar sai em cinza: a app CONTA, não acusa.
+    const reincidente = contagemDoAutor(place);
+    if (reincidente >= 2) {
+        selos.push({
+            cls: reincidente >= AUTOR_LIMIAR_DESTAQUE ? 'selo-reinc' : 'selo-src',
+            txt: '✕ ' + reincidente,
+            title: t('card.reincidencia.title', { n: reincidente }),
+        });
+    }
     if (!selos.length) return;
     const box = document.createElement('span');
     box.className = 'selos-proc';
@@ -4784,10 +4797,180 @@ function getHistoryStats() {
     }
     return acc;
 }
+// ═══════════════════════════════════════════════════════════════════════════
+//  Reincidência de autor — quantos pedidos DESTA pessoa você já rejeitou
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// O caso que originou: um entregador fotografa o PACOTE em cada parada, e o
+// rótulo costuma trazer nome, endereço e telefone do destinatário. Não é foto
+// ruim — é dado pessoal de terceiro indo pro mapa público, e o mesmo autor
+// repete por semanas.
+//
+// O que a app NÃO consegue: distinguir esse autor do melhor contribuinte da
+// fila pelos metadados. Medido — os dois são 100% foto, 1 foto por local, e o
+// ritmo se sobrepõe. O único sinal que separa é a SUA rejeição repetida, e
+// esse a app jogava fora: o histórico só guardava números por dia.
+//
+// ── POR QUE DUAS LISTAS, e não um mapa só ────────────────────────────────
+// Medido na fila real (4.008 pedidos, 12 países, varredura só-leitura):
+// 87% dos autores mandam UM pedido só (81–91% conforme o país), e a fila do
+// owner recebe ~360 autores distintos por dia. Guardar todo autor rejeitado
+// num mapa com nome e datas estouraria 2.000 registros em menos de uma semana
+// e chegaria a 88 ms de gravação POR SWIPE — atacando exatamente o ritmo que
+// o recurso existe pra devolver.
+//
+// Então quem foi rejeitado UMA vez mora num anel de ids (sem nome, sem data) e
+// só é promovido ao mapa caro na SEGUNDA rejeição. Medido: 41 KB e 0,87 ms.
+const AUTORES_KEY = 'waze_places_autores';
+// Teto do mapa dos que repetiram. Ao encher, sai quem tem a rejeição mais
+// antiga — é o que torna o custo CONSTANTE, não importa quantos anos de uso.
+const AUTORES_MAX_REINCIDENTES = 500;
+// Teto do anel dos vistos-uma-vez. Só ids: 2.000 deles custam 20,6 KB.
+const AUTORES_MAX_VISTOS = 2000;
+// A contagem existe pra dizer "isto está acontecendo AGORA". Quem parou há
+// meses não é o alvo, e mantê-lo só engorda o arquivo e a lista.
+const AUTORES_MAX_DIAS = 30;
+// Acima disto o selo passa de cinza (a app CONTA) a rosa (a app DESTACA).
+// Não é número escolhido a dedo: na fila real, o maior lote de um mesmo autor
+// num único instantâneo foi 7. Exigir 10 é exigir repetição ENTRE buscas —
+// que é justamente o que "reincidência" quer dizer, e o que um pico de uma
+// tarde não produz.
+const AUTOR_LIMIAR_DESTAQUE = 10;
+
+const diaDeHoje = () => Math.floor(Date.now() / 86400000);
+
+function loadAutores() {
+    if (AppState.autores) return AppState.autores;
+    let a = null;
+    try { a = JSON.parse(localStorage.getItem(AUTORES_KEY) || 'null'); } catch (e) { a = null; }
+    if (!a || typeof a !== 'object') a = {};
+    if (!Array.isArray(a.v)) a.v = [];
+    if (!a.r || typeof a.r !== 'object') a.r = {};
+    AppState.autores = a;
+    if (podarAutores(a)) salvarAutores(a);
+    return a;
+}
+
+function salvarAutores(a) {
+    try { localStorage.setItem(AUTORES_KEY, JSON.stringify(a)); } catch (e) {}
+}
+
+// Poda por TEMPO e por TETO, nessa ordem: o tempo tira o que não informa mais,
+// o teto garante que o custo pare de crescer mesmo se o tempo não bastar.
+function podarAutores(a) {
+    let mudou = false;
+    const limite = diaDeHoje() - AUTORES_MAX_DIAS;
+    for (const id of Object.keys(a.r)) {
+        const e = a.r[id];
+        if (!Array.isArray(e) || !Number.isFinite(e[2]) || e[2] < limite) { delete a.r[id]; mudou = true; }
+    }
+    const ids = Object.keys(a.r);
+    if (ids.length > AUTORES_MAX_REINCIDENTES) {
+        // Sai quem tem a rejeição mais ANTIGA — não quem tem a menor contagem:
+        // contagem alta e parada há um mês informa menos que contagem 2 de hoje.
+        ids.sort((x, y) => (a.r[x][2] || 0) - (a.r[y][2] || 0));
+        for (const id of ids.slice(0, ids.length - AUTORES_MAX_REINCIDENTES)) delete a.r[id];
+        mudou = true;
+    }
+    if (a.v.length > AUTORES_MAX_VISTOS) { a.v = a.v.slice(-AUTORES_MAX_VISTOS); mudou = true; }
+    return mudou;
+}
+
+// Chaveado pelo ID, nunca pelo nome. 69% dos autores da fila real são anônimos
+// `world_xxxxx` — nome GERADO pra quem nunca escolheu um, e que muda no dia em
+// que a pessoa escolhe. Pelo nome, o histórico sumiria justamente aí.
+function registrarRejeicaoDeAutor(place) {
+    const id = place && place.creatorId;
+    if (id === null || id === undefined || id === '') return;
+    const chave = String(id);
+    const a = loadAutores();
+    const nome = (place.createdBy && String(place.createdBy)) || chave;
+    const hoje = diaDeHoje();
+    if (a.r[chave]) {
+        const e = a.r[chave];
+        e[0] = (e[0] || 1) + 1;
+        e[1] = nome;   // o nome de EXIBIÇÃO acompanha: se a pessoa escolheu um, mostra o novo
+        e[2] = hoje;
+    } else {
+        const i = a.v.indexOf(chave);
+        if (i === -1) {
+            a.v.push(chave);
+            if (a.v.length > AUTORES_MAX_VISTOS) a.v.shift();
+        } else {
+            a.v.splice(i, 1);
+            a.r[chave] = [2, nome, hoje];
+            podarAutores(a);
+        }
+    }
+    salvarAutores(a);
+}
+
+// Quantas rejeições SUAS este autor acumulou. 0 ou 1 devolve 0: o anel não
+// guarda contagem, e "1" não é reincidência — é uma rejeição.
+function contagemDoAutor(place) {
+    const id = place && place.creatorId;
+    if (id === null || id === undefined || id === '') return 0;
+    const e = loadAutores().r[String(id)];
+    return Array.isArray(e) ? (e[0] || 0) : 0;
+}
+
+function esquecerAutor(chave) {
+    const a = loadAutores();
+    if (!a.r[chave]) return;
+    delete a.r[chave];
+    salvarAutores(a);
+    renderHistory();
+}
+
+// Ordena por contagem, depois pelo mais recente — quem mais repetiu primeiro.
+function listaDeAutores() {
+    const a = loadAutores();
+    return Object.entries(a.r)
+        .map(([id, e]) => ({ id, n: e[0] || 0, nome: e[1] || id, dia: e[2] || 0 }))
+        .sort((x, y) => (y.n - x.n) || (y.dia - x.dia));
+}
+
+function esquecerAutores() {
+    AppState.autores = null;
+    safeLS.remove(AUTORES_KEY);
+}
+
+// A lista fica ABAIXO do placar do editor, nunca no lugar dele. E some inteira
+// quando ninguém repetiu — seção vazia num painel curto é ruído, não informação.
+function renderAutores() {
+    const el = document.getElementById('autoresBody');
+    if (!el) return;
+    const linhas = listaDeAutores();
+    if (linhas.length === 0) { el.innerHTML = ''; return; }
+    const lixo = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
+        + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"'
+        + ' d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0'
+        + ' 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>';
+    el.innerHTML =
+        `<p class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">${escapeHtml(t('stats.autores.title'))}</p>`
+        + `<p class="text-xs text-slate-500 dark:text-slate-400 mb-2 leading-snug">`
+        + `${escapeHtml(t('stats.autores.desc', { dias: AUTORES_MAX_DIAS }))}</p>`
+        + linhas.map((a) =>
+            `<div class="flex items-center gap-2 min-h-[44px] border-b border-slate-100 dark:border-slate-700 last:border-0">`
+            + `<span class="flex-1 min-w-0 text-sm font-medium text-slate-700 truncate dark:text-slate-200">${escapeHtml(a.nome)}</span>`
+            + `<span class="selo-proc ${a.n >= AUTOR_LIMIAR_DESTAQUE ? 'selo-reinc' : 'selo-src'} flex-shrink-0">`
+            + `✕ ${a.n}</span>`
+            + `<button type="button" class="autor-esquecer min-w-[44px] min-h-[44px] flex items-center justify-center`
+            + ` text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 rounded-full flex-shrink-0"`
+            + ` data-autor="${escapeHtml(a.id)}" title="${escapeHtml(t('stats.autores.esquecer'))}"`
+            + ` aria-label="${escapeHtml(t('stats.autores.esquecer'))}">${lixo}</button></div>`).join('');
+    // Delegação seria mais curta, mas o painel é re-renderizado inteiro a cada
+    // esquecimento — o listener por linha morre junto com a linha.
+    for (const b of el.querySelectorAll('.autor-esquecer')) {
+        b.addEventListener('click', () => esquecerAutor(b.dataset.autor));
+    }
+}
+
 function renderHistory() {
     const el = document.getElementById('historyBody');
     if (!el) return;
     const s = getHistoryStats();
+    renderAutores();
     if (s.total.read + s.total.rejected === 0) {
         el.innerHTML = `<p class="text-xs text-slate-500 dark:text-slate-400">${escapeHtml(t('stats.history.empty'))}</p>`;
         return;
@@ -4825,7 +5008,15 @@ const CONSEQUENCIA_AVISADA = { reject: true, read: true };
 
 function handleActionResult(actionType, place, result) {
     if (!result) return;
-    if (result.success) { recordHistory(actionType, 1); avisarConsequencia(actionType); return; }
+    if (result.success) {
+        recordHistory(actionType, 1);
+        // Só REJEIÇÃO conta reincidência. Marcar como lido não é juízo
+        // sobre o pedido — é "eu vi" —, e contá-lo transformaria quem
+        // manda muita coisa BOA em reincidente.
+        if (actionType === 'reject') registrarRejeicaoDeAutor(place);
+        avisarConsequencia(actionType);
+        return;
+    }
 
     const cat = result.errorCategory || 'unknown';
 
