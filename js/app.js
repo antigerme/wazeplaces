@@ -417,7 +417,7 @@ function mostrarEntrandoPelaExtensao(ligado) {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal', 'autorModal'];
 
 let lastFocusedBeforeModal = null;
 
@@ -610,6 +610,7 @@ function setupAppListeners() {
     });
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
     $('presencaClose').addEventListener('click', () => closeModal('presencaModal'));
+    $('autorClose').addEventListener('click', () => closeModal('autorModal'));
     $('conversaClose').addEventListener('click', () => Presenca.fecharConversa());
     // O resto da presença (pílula, lista, envio) se liga sozinho: `montar` é do
     // js/presenca.js, que carrega depois deste arquivo.
@@ -2368,9 +2369,7 @@ function handleKeyDown(e) {
     // Desfazer via teclado (power-user opera por teclas): z (ou Ctrl/Cmd+Z).
     if ((e.key === 'z' || e.key === 'Z') && AppState.pendingAction) {
         e.preventDefault();
-        AppState.pendingAction.undo();
-        AppState.pendingAction = null;
-        removeUndoBanner();
+        desfazerAcaoPendente();
         return;
     }
 
@@ -4091,6 +4090,10 @@ function renderSelosDeProcedencia(card, place) {
             cls: reincidente >= AUTOR_LIMIAR_DESTAQUE ? 'selo-reinc' : 'selo-src',
             txt: '✕ ' + reincidente,
             title: t('card.reincidencia.title', { n: reincidente }),
+            // Vira BOTÃO: abre a folha com o que dá pra fazer com a série dele.
+            // Só quando há de fato o que fazer — selo que abre folha vazia
+            // ensina que o toque não serve pra nada.
+            folha: pedidosDoAutorNaFila(place).length > 0 ? place : null,
         });
     }
     if (!selos.length) return;
@@ -4099,7 +4102,7 @@ function renderSelosDeProcedencia(card, place) {
     for (const s of selos) {
         // O selo do lote é o único que AGE: vira botão de verdade (não span com
         // onclick), pra receber foco no Tab e ser anunciado como acionável.
-        const el = document.createElement(s.acao ? 'button' : 'span');
+        const el = document.createElement(s.acao || s.folha ? 'button' : 'span');
         el.className = 'selo-proc ' + s.cls;
         el.textContent = s.txt;
         el.title = s.title;
@@ -4107,6 +4110,10 @@ function renderSelosDeProcedencia(card, place) {
             el.type = 'button';
             el.classList.add('selo-acionavel');
             el.addEventListener('click', (ev) => { ev.stopPropagation(); focarAutor(s.acao); });
+        } else if (s.folha) {
+            el.type = 'button';
+            el.classList.add('selo-acionavel');
+            el.addEventListener('click', (ev) => { ev.stopPropagation(); abrirFolhaDoAutor(s.folha); });
         }
         box.appendChild(el);
     }
@@ -4798,6 +4805,153 @@ function getHistoryStats() {
     return acc;
 }
 // ═══════════════════════════════════════════════════════════════════════════
+//  A série de um autor: ver primeiro, ou rejeitar os que estão na fila
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Abre pelo selo `✕ N`. NÃO há tela de confirmação depois: o número vai no
+// próprio botão e o aviso diz que começa ao tocar — que é exatamente o que uma
+// segunda pergunta carregaria. Confirmação que só repete o número treina todo
+// mundo a tocar sem ler.
+//
+// O lote vai UM A UM, e isso não é preguiça: o lote atômico do WME falha
+// INTEIRO quando outro editor já tratou um dos itens (o mesmo caso que a app
+// já sabe tratar como `already_processed`). N requisições que sempre terminam
+// valem mais que uma que às vezes morre inteira.
+const ICONE_OLHO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
+    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>'
+    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5'
+    + 'c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>';
+const ICONE_X = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
+    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>';
+
+// Os pedidos DESTE autor que estão na fila carregada agora.
+function pedidosDoAutorNaFila(place) {
+    const id = place && place.creatorId;
+    if (id === null || id === undefined || id === '') return [];
+    return (AppState.queue || []).filter((x) => x && x.creatorId === id);
+}
+
+function abrirFolhaDoAutor(place) {
+    if (!place) return;
+    const corpo = document.getElementById('autorCorpo');
+    const titulo = document.getElementById('autorTitle');
+    if (!corpo || !titulo) return;
+    const naFila = pedidosDoAutorNaFila(place);
+    const nome = place.createdBy || String(place.creatorId);
+    titulo.textContent = nome;
+    const linha = (ic, cor, t1, t2, id) =>
+        `<button type="button" id="${id}" class="flex items-center gap-3 w-full min-h-[56px] py-2 text-left`
+        + ` border-b border-slate-100 dark:border-slate-700 last:border-0">`
+        + `<span class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${cor}">${ic}</span>`
+        + `<span class="flex-1 min-w-0"><span class="block text-[0.9375rem] font-semibold text-slate-800 dark:text-slate-100 leading-tight">`
+        + `${escapeHtml(t1)}</span><span class="block text-xs text-slate-500 dark:text-slate-400 leading-snug mt-0.5">`
+        + `${escapeHtml(t2)}</span></span></button>`;
+    corpo.innerHTML =
+        `<p class="text-[0.8125rem] text-slate-500 dark:text-slate-400 mb-4 leading-snug">`
+        + `${escapeHtml(t('autor.sheet.sub', { n: contagemDoAutor(place), fila: naFila.length }))}</p>`
+        + linha(ICONE_OLHO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
+                t('autor.sheet.ver', { n: naFila.length }), t('autor.sheet.ver.desc'), 'autorVer')
+        + linha(ICONE_X, 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300',
+                t('autor.sheet.rejeitar', { n: naFila.length }), t('autor.sheet.rejeitar.desc'), 'autorRejeitar')
+        + `<p class="mt-4 text-xs leading-relaxed text-rose-800 dark:text-rose-200 bg-rose-50 dark:bg-rose-500/10`
+        + ` border border-rose-100 dark:border-rose-500/30 rounded-xl px-3 py-2.5">${t('autor.sheet.aviso')}</p>`;
+    document.getElementById('autorVer').addEventListener('click', () => {
+        closeModal('autorModal');
+        focarAutor(place.createdBy);
+    });
+    document.getElementById('autorRejeitar').addEventListener('click', () => {
+        closeModal('autorModal');
+        rejeitarLoteDoAutor(place);
+    });
+    openModal('autorModal');
+}
+
+// O lote, com a MESMA janela de Desfazer de um card só — a trava dos botões, o
+// banner com a contagem, o `resetQueue`. A diferença é `aoSair: 'cancel'`.
+function rejeitarLoteDoAutor(place) {
+    if (acoesTravadas()) return;
+    if (Treino.ativo) { showToast(t('treino.semLote'), 'info'); return; }
+    const places = pedidosDoAutorNaFila(place);
+    if (places.length === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
+    const n = places.length;
+    // Otimista, como o card único: o placar anda agora e volta no Desfazer.
+    AppState.stats.rejected += n;
+    AppState.serverTotal = Math.max(0, AppState.serverTotal - n);
+    updateStats();
+    saveStats();
+    const ids = new Set(places);
+    AppState.queue = (AppState.queue || []).filter((x) => !ids.has(x));
+    AppState.currentPlace = null;
+    updatePendingCount();
+    if (AppState.queue.length > 0) { removeCurrentCardEl(); showCurrentPlace(); maybePrefetch(); }
+    else if (AppState.hasMore) { removeCurrentCardEl(); startFetching(); }
+    else { removeCurrentCardEl(); showNoPlaces(); }
+    scheduleAction('reject', places, () => enviarLote(places), { aoSair: 'cancel' });
+}
+
+// Um a um, e o resultado NÃO é um número só: cada pedido tem destino próprio.
+// "Já tratado por outro editor" conta como cumprido — é a mesma regra que a app
+// usa no card único, e chamá-lo de falha aqui daria dois nomes à mesma coisa.
+async function enviarLote(places) {
+    const conta = { ok: 0, ja: 0, erro: 0 };
+    AppState.inFlightActions++;
+    updateInFlightIndicator();
+    try {
+        for (const p of places) {
+            const r = await callWithRetry(() => API.rejectPlace(p.venueID, p.updateRequestID));
+            if (r && r.success) {
+                conta.ok++;
+                recordHistory('reject', 1);
+                registrarRejeicaoDeAutor(p);
+            } else if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
+                conta.ja++;
+            } else if (r && r.errorCategory === 'unauthorized') {
+                handleUnauthorized();
+                return;
+            } else {
+                conta.erro++;
+                // O que não saiu volta pra fila: o placar já contou, então
+                // devolver o pedido sem devolver o número mentiria nos dois.
+                AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
+                AppState.serverTotal++;
+                AppState.queue.push(p);
+            }
+        }
+    } finally {
+        AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
+        updateInFlightIndicator();
+        updateStats();
+        saveStats();
+        updatePendingCount();
+    }
+    mostrarResultadoDoLote(conta);
+}
+
+function mostrarResultadoDoLote(conta) {
+    const corpo = document.getElementById('autorCorpo');
+    const titulo = document.getElementById('autorTitle');
+    if (!corpo || !titulo) return;
+    const total = conta.ok + conta.ja + conta.erro;
+    titulo.textContent = t('autor.lote.titulo', { n: total });
+    const linha = (emoji, cor, t1, t2) =>
+        `<div class="flex items-start gap-3 py-2.5 border-b border-slate-100 dark:border-slate-700 last:border-0">`
+        + `<span class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-base font-extrabold ${cor}"`
+        + ` aria-hidden="true">${emoji}</span>`
+        + `<span class="flex-1 min-w-0"><span class="block text-[0.9375rem] font-semibold text-slate-800 dark:text-slate-100 leading-tight">`
+        + `${escapeHtml(t1)}</span><span class="block text-xs text-slate-500 dark:text-slate-400 leading-snug mt-0.5">`
+        + `${escapeHtml(t2)}</span></span></div>`;
+    let html = '';
+    if (conta.ok) html += linha('✓', 'bg-emerald-100 text-emerald-800 dark:bg-emerald-400/20 dark:text-emerald-300',
+        t('autor.lote.rejeitados', { n: conta.ok }), t('autor.lote.rejeitados.desc'));
+    if (conta.ja) html += linha('👍', 'bg-sky-100 text-sky-800 dark:bg-sky-400/20 dark:text-sky-200',
+        t('autor.lote.jaTratados', { n: conta.ja }), t('autor.lote.jaTratados.desc'));
+    if (conta.erro) html += linha('!', 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300',
+        t('autor.lote.falharam', { n: conta.erro }), t('autor.lote.falharam.desc'));
+    corpo.innerHTML = html;
+    openModal('autorModal');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  Reincidência de autor — quantos pedidos DESTA pessoa você já rejeitou
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -5408,7 +5562,32 @@ function advanceQueue() {
     }, 200);
 }
 
-function scheduleAction(type, place, executor) {
+// `place` aceita UM place ou um ARRAY deles (o lote). Um mecanismo só, de
+// propósito: o Desfazer do lote tem que seguir exatamente as mesmas regras do
+// Desfazer de um card — a trava dos botões, o banner com a contagem regressiva,
+// o descarregamento ao sair, o `resetQueue`. Dois mecanismos seriam duas
+// listas de regras pra manter em sincronia, e a segunda envelheceria.
+//
+// `opts.aoSair` diz o que fazer quando a página morre no meio da janela:
+//   'execute' (padrão) — despacha com keepalive. Uma requisição: ou vai ou não.
+//   'cancel'           — descarta sem enviar. É o certo pro LOTE, e o motivo é
+//                        que N requisições disparadas no `pagehide` completam
+//                        PARCIALMENTE: sete vão, sete não, e o placar já contou
+//                        as catorze. Meio-lote enviado é a única falha aqui sem
+//                        sintoma nenhum — perder o lote se refaz em dois toques.
+function scheduleAction(type, place, executor, opts = {}) {
+    const places = Array.isArray(place) ? place : [place];
+    const n = places.length;
+    const aoSair = opts.aoSair === 'cancel' ? 'cancel' : 'execute';
+    // Reverte o placar otimista. `salvar` existe porque o `cancel` do logout
+    // não precisa gravar (tudo é apagado depois) mas o do `pagehide` precisa:
+    // o número inflado JÁ foi pro armazenamento quando a ação foi agendada.
+    const reverterPlacar = (salvar) => {
+        if (type === 'read') AppState.stats.read = Math.max(0, AppState.stats.read - n);
+        else if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - n);
+        else if (type === 'skip') AppState.stats.skipped = Math.max(0, AppState.stats.skipped - n);
+        if (salvar) { updateStats(); saveStats(); }
+    };
     if (AppState.pendingAction) {
         AppState.pendingAction.execute();
         AppState.pendingAction = null;
@@ -5465,15 +5644,16 @@ function scheduleAction(type, place, executor) {
         // Descarta a ação sem enviar e reverte o stat otimista. Usado no logout e
         // na sessão expirada (não há sessão válida pra enviar). Não re-enfileira
         // nem re-renderiza — o chamador reseta/zera a fila.
-        cancel: () => {
+        cancel: (salvarPlacar) => {
             if (!executed) {
                 executed = true;
                 clearTimeout(timerId);
-                if (type === 'read') AppState.stats.read = Math.max(0, AppState.stats.read - 1);
-                else if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
-                else if (type === 'skip') AppState.stats.skipped = Math.max(0, AppState.stats.skipped - 1);
+                reverterPlacar(!!salvarPlacar);
             }
         },
+        // O que fazer quando a página está morrendo. Ver o comentário da
+        // assinatura: o lote CANCELA porque meio-lote enviado não tem sintoma.
+        aoSair,
         undo: () => {
             if (!executed) {
                 executed = true;
@@ -5481,20 +5661,26 @@ function scheduleAction(type, place, executor) {
                 // Usou: a evidência de "nunca desfaz" morre aqui e recomeça do
                 // zero. Quem desfaz de vez em quando não deve receber a dica.
                 zerarJanelasSemUndo();
-                if (type === 'read') AppState.stats.read = Math.max(0, AppState.stats.read - 1);
-                else if (type === 'reject') AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
-                else if (type === 'skip') AppState.stats.skipped = Math.max(0, AppState.stats.skipped - 1);
-                if (type !== 'skip') AppState.serverTotal++; // skip nunca decrementou o total
+                reverterPlacar(false);
+                if (type !== 'skip') AppState.serverTotal += n; // skip nunca decrementou o total
                 updateStats();
                 saveStats();
-                AppState.queue.unshift(place);
+                // `unshift(...places)` e NÃO um laço: um laço de unshift inverte
+                // a ordem, e a fila voltaria embaralhada — sem erro visível, só
+                // discordando do WME na hora de conferir.
+                AppState.queue.unshift(...places);
                 updatePendingCount();
+                // Volta pro PRIMEIRO dos restaurados. Sem isto, desfazer um lote
+                // mostraria o card de outro autor, e leria como se o Desfazer
+                // tivesse feito outra coisa.
                 showCurrentPlace();
             }
         }
     };
 
-    const undoMsg = type === 'reject' ? t('undo.reject') : type === 'skip' ? t('undo.skip') : t('undo.read');
+    const undoMsg = n > 1
+        ? t('undo.lote', { n })
+        : type === 'reject' ? t('undo.reject') : type === 'skip' ? t('undo.skip') : t('undo.read');
     showUndoBanner(undoMsg);
     aplicarTravaDeAcao();
 }
@@ -5510,13 +5696,27 @@ function showUndoBanner(message) {
         <span class="undo-progress" style="animation-duration: ${UNDO_WINDOW_MS}ms" aria-hidden="true"></span>
     `;
     container.appendChild(banner);
-    document.getElementById('undoBtn').addEventListener('click', () => {
-        if (AppState.pendingAction) {
-            AppState.pendingAction.undo();
-            AppState.pendingAction = null;
-        }
-        removeUndoBanner();
-    });
+    document.getElementById('undoBtn').addEventListener('click', desfazerAcaoPendente);
+}
+
+// Desfazer, pelos DOIS caminhos (o botão do banner e a tecla z).
+//
+// O `aplicarTravaDeAcao()` no fim é o que conserta um defeito que existia desde
+// antes do lote e que ninguém tinha visto: os dois caminhos limpavam o
+// `pendingAction` e o banner, mas nunca reabilitavam os botões do card. E não
+// dava pra perceber pela ordem certa — o `undo()` chama `showCurrentPlace()`
+// ANTES de o chamador zerar o `pendingAction`, então o card novo nascia travado
+// e nada voltava a olhar pra ele. O gesto seguia funcionando (o `acoesTravadas`
+// já era falso), o que escondia o problema: só o caminho canônico e acessível,
+// os três botões, é que ficava morto — inclusive pra quem usa leitor de tela,
+// porque `disabled` também tira da ordem do Tab.
+function desfazerAcaoPendente() {
+    if (AppState.pendingAction) {
+        AppState.pendingAction.undo();
+        AppState.pendingAction = null;
+    }
+    removeUndoBanner();
+    aplicarTravaDeAcao();
 }
 
 function removeUndoBanner() {
@@ -5892,7 +6092,12 @@ function descarregarAcaoPendente() {
     // Fetch normal é cancelado no unload; keepalive sobrevive.
     if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(true);
     try {
-        AppState.pendingAction.execute();
+        // O LOTE cancela em vez de despachar (ver `aoSair` no scheduleAction).
+        // `true` grava o placar revertido: o número inflado já foi pro
+        // armazenamento quando o lote foi agendado, e sem isto ele sobreviveria
+        // ao recarregamento contando pedidos que nunca saíram.
+        if (AppState.pendingAction.aoSair === 'cancel') AppState.pendingAction.cancel(true);
+        else AppState.pendingAction.execute();
     } catch (e) {
         console.error('Falha ao descarregar a ação pendente:', e);
     }
