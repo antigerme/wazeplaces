@@ -246,3 +246,90 @@ test('desfazer: os dois caminhos passam pela MESMA função, e ela destrava os b
   assert.equal(soltos.length, 1,
     'undo() chamado fora de desfazerAcaoPendente: seria um caminho que esquece de destravar');
 });
+
+// ── RECUSA AUTOMÁTICA ────────────────────────────────────────────────────
+// O único recurso que decide sobre pedido que ainda não existia quando o
+// editor escolheu. Três desenhos foram feitos contra o instinto, e é isso
+// que estas guardas seguram.
+
+test('auto: a janela NÃO trava o card', () => {
+  // O acoesTravadas() congela os três botões quando VOCÊ age e a app espera
+  // confirmação. Aqui você não pediu nada — congelar seria pior que o problema.
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function acoesTravadas');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
+  assert.doesNotMatch(bloco, /autoPendente/,
+    'a recusa automática entrou na trava: o editor seria congelado por algo que não pediu');
+  // e o slot é PRÓPRIO, não o pendingAction
+  assert.match(fonte, /AppState\.autoPendente = \{/, 'o slot próprio sumiu');
+});
+
+test('auto: a palavra segue o tempo verbal', () => {
+  // "desfazer" pressupõe que foi você quem fez, e não foi. Antes de sair é
+  // CANCELAR; depois de sair não há o que cancelar e a única ação verdadeira
+  // que sobra é DESLIGAR.
+  const dict = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const i = dict.indexOf("'auto.futuro': '");
+  const futuro = dict.slice(i, dict.indexOf("',", i));
+  assert.match(futuro, /serão rejeitados/, 'o banner de antes precisa estar no FUTURO');
+  assert.match(futuro, /cancelar/i, 'e oferecer cancelar, não desfazer');
+  const j = dict.indexOf("'auto.feito': '");
+  const feito = dict.slice(j, dict.indexOf("',", j));
+  assert.match(feito, /rejeitados/, 'o banner de depois está no passado, que aí é verdade');
+  assert.doesNotMatch(feito, /desfaz|cancelar/i,
+    'depois de enviado, oferecer desfazer ou cancelar é mentira — a ação real é desligar');
+  // e em NENHUMA língua a palavra "desfazer" aparece nas chaves da recusa automática
+  for (const chave of ['auto.futuro', 'auto.feito', 'auto.cancelado', 'auto.desligado']) {
+    const re = new RegExp("'" + chave.replace('.', '\\.') + "': '([^']*)'", 'g');
+    for (const m of dict.matchAll(re)) {
+      assert.doesNotMatch(m[1], /desfaz|undo|deshac|annuler l|défaire/i,
+        `${chave} usa uma palavra de desfazer: "${m[1]}"`);
+    }
+  }
+});
+
+test('auto: sair no meio da janela CANCELA, e o logout também', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function descarregarRecusaAutomatica');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
+  assert.match(bloco, /autoPendente\.cancelar\(\)/,
+    'N requisições no pagehide completam parcialmente — meio-lote sem sintoma nenhum');
+  assert.match(semComentarios, /pagehide', descarregarRecusaAutomatica/, 'o pagehide não está ligado');
+  const j = semComentarios.indexOf('async function handleLogout');
+  assert.match(semComentarios.slice(j, j + 2500), /autoPendente\.cancelar\(\)/,
+    'no logout nada pode ser enviado');
+});
+
+test('auto: nada acontece sem o portão, nem no treino', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function aplicarRecusaAutomatica');
+  const bloco = semComentarios.slice(i, i + 400);
+  assert.match(bloco, /if \(!podeRecusarAutomaticoAqui\(\)\) return;/, 'o portão saiu da recusa automática');
+  assert.match(bloco, /if \(Treino\.ativo\) return;/, 'no treino a fila é de exemplos');
+  assert.match(bloco, /if \(AppState\.autoPendente\) return;/, 'duas janelas ao mesmo tempo perderiam uma');
+});
+
+test('auto: o interruptor só aparece pra quem passa no portão', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function renderAutores');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
+  // Amarrado na ESTRUTURA, não na proximidade. `renderAutores` chama
+  // `podeRecusarAutomaticoAqui()` duas vezes — a outra decide a descrição —, e
+  // as duas tentativas por distância falharam nos dois sentidos: 60 caracteres
+  // reprovavam o código certo quando o markup cresceu, e 300 alcançavam a
+  // chamada errada e deixavam passar o portão arrancado. O que não tem esse
+  // problema é exigir a condição COLADA no que ela guarda.
+  assert.match(bloco, /\+ \(podeRecusarAutomaticoAqui\(\)\s*\?\s*`<label/,
+    'o interruptor precisa estar atrás do portão: mostrá-lo desabilitado anunciaria'
+    + ' um recurso que a pessoa não pode usar');
+});
+
+test('auto: a janela é mais longa que a do Desfazer, e o motivo é medido', () => {
+  // 8s ficaram "exatamente no limite" pra o owner notar e ler um banner que não
+  // esperava (ver o banner de conquista). Aqui ele espera ainda menos.
+  const m = fonte.match(/const AUTO_CANCELAR_MS = (\d+);/);
+  assert.ok(m, 'AUTO_CANCELAR_MS sumiu');
+  const u = fonte.match(/const UNDO_WINDOW_MS = (\d+);/);
+  assert.ok(parseInt(m[1], 10) > parseInt(u[1], 10) * 2,
+    'a janela do automático precisa ser bem maior que a do Desfazer: o editor não está olhando');
+});

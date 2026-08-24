@@ -8,6 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.24-04
+
+### Adicionado
+- **Dá pra deixar o app rejeitando sozinho os próximos pedidos de um autor.** O interruptor fica na lista de autores, na aba Histórico, e é **restrito a L6 + Area Manager ou staff** — o mesmo nível que já libera excluir e aprovar foto.
+
+  Quando chegam pedidos de alguém marcado, eles saem da fila e um aviso aparece no topo: **“2 pedidos de fulano serão rejeitados — toque para cancelar”**. Nada é enviado ao Waze durante esses **20 segundos**. Se você tocar, tudo volta para a fila como estava.
+
+  Passado esse tempo, o aviso muda para **“2 pedidos de fulano rejeitados — toque para desligar isto”**. Aí não há mais o que cancelar, e a única coisa verdadeira que a app pode oferecer é parar de fazer isso de novo.
+
+  **O card não trava durante a espera.** Quando você rejeita um pedido, os três botões ficam desabilitados até a janela vencer — é você que agiu e o app espera confirmação. Aqui você não pediu nada, então continuar trabalhando no card atual não custa nada.
+
+  Fechar a app no meio da espera **cancela**: nada é enviado pela metade, e os pedidos voltam na próxima busca.
+
+---
+
 ## v2026.08.24-03
 
 ### Alterado
