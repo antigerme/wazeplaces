@@ -8,6 +8,22 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.24-02
+
+### Adicionado
+- **Dá pra tratar a série inteira de um autor de uma vez.** Toque no selo `✕ N` do card e a app abre uma folha com duas saídas: **ver os pedidos dele primeiro** (que só reordena a fila, sem escrever nada) ou **rejeitar os que estão na fila agora**.
+
+  Não há tela de confirmação depois — o número vai no próprio botão e o aviso diz que começa ao tocar. Uma segunda pergunta que só repetisse o número treinaria todo mundo a tocar sem ler.
+
+  O lote respeita **a mesma janela de Desfazer** de um card só: os três botões travam, o banner mostra a contagem regressiva, e nada é enviado antes de ela vencer. Desfazer devolve os pedidos **na ordem original** e volta para o primeiro deles.
+
+- **No fim, a app diz o que de fato aconteceu com cada pedido** — "12 rejeitados · 2 já tratados por outro editor". Os pedidos vão um a um, e quem outro editor já tratou conta como cumprido, não como falha: é a mesma regra que a app usa quando você trata um card e alguém chegou primeiro. O que não deu certo volta para a fila.
+
+### Corrigido
+- **Depois de desfazer, os três botões do card ficavam mortos.** Valia para qualquer Desfazer, não só o do lote, e escapava porque o gesto continuava funcionando — só o caminho canônico (e o de quem usa leitor de tela, já que `disabled` também tira da ordem do Tab) é que parava de responder até o próximo card.
+
+---
+
 ## v2026.08.24-01
 
 ### Adicionado

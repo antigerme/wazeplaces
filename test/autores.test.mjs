@@ -163,3 +163,86 @@ test('autores: o core manda o id numérico junto com o nome', () => {
   assert.match(core.slice(i, i + 700), /\n\s*creatorId,/,
     'sem o creatorId a contagem cai de volta no nome, que muda sozinho');
 });
+
+// ── O LOTE ───────────────────────────────────────────────────────────────
+// Guardas estáticas: o lote é uma ação SÓ, com as mesmas regras do Desfazer de
+// um card. O que muda é a restauração de N e a interrupção.
+
+test('lote: o Desfazer devolve os N na ORDEM, num unshift só', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function scheduleAction');
+  const bloco = semComentarios.slice(i, i + 4200);
+  assert.match(bloco, /AppState\.queue\.unshift\(\.\.\.places\)/,
+    'um laço de unshift INVERTE a ordem: a fila voltaria embaralhada, sem erro visível');
+  assert.doesNotMatch(bloco, /for\s*\([^)]*\)\s*AppState\.queue\.unshift/,
+    'unshift dentro de laço é exatamente o jeito errado');
+});
+
+test('lote: o placar volta de N em N, não de 1 em 1', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function scheduleAction');
+  const bloco = semComentarios.slice(i, i + 4200);
+  assert.match(bloco, /AppState\.stats\.rejected - n\b/, 'o reverter precisa usar n, não 1');
+  assert.match(bloco, /AppState\.serverTotal \+= n\b/, 'o serverTotal precisa voltar de N');
+});
+
+test('lote: interrompido ao sair, CANCELA em vez de despachar pela metade', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function descarregarAcaoPendente');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
+  assert.match(bloco, /aoSair === 'cancel'/,
+    'N requisições no pagehide completam PARCIALMENTE — meio-lote enviado não tem sintoma');
+  assert.match(bloco, /cancel\(true\)/,
+    'o cancel do pagehide precisa GRAVAR o placar revertido: o número inflado já foi pro armazenamento');
+});
+
+test('lote: quem agenda o lote pede o cancelamento ao sair', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function rejeitarLoteDoAutor');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\nasync function', i));
+  assert.match(bloco, /scheduleAction\('reject', places, [^,]+, \{ aoSair: 'cancel' \}\)/,
+    'sem o aoSair o lote herda o despacho do card único');
+});
+
+test('lote: "já tratado por outro editor" NÃO conta como falha', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('async function enviarLote');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('function mostrarResultadoDoLote'));
+  assert.match(bloco, /already_processed[\s\S]{0,80}conta\.ja\+\+/,
+    'a app já trata isso como objetivo cumprido no card único — chamar de falha aqui daria dois nomes à mesma coisa');
+  assert.match(bloco, /conta\.erro\+\+[\s\S]{0,220}AppState\.queue\.push\(p\)/,
+    'o que NÃO saiu tem que voltar pra fila, senão o pedido some sem ter sido tratado');
+});
+
+test('lote: o lote respeita a trava e o treino', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function rejeitarLoteDoAutor');
+  const bloco = semComentarios.slice(i, i + 400);
+  assert.match(bloco, /if \(acoesTravadas\(\)\) return;/, 'o lote tem que respeitar a janela em curso');
+  assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
+});
+
+test('lote: o selo só abre a folha quando há pedido dele na fila', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function renderSelosDeProcedencia');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
+  assert.match(bloco, /folha: pedidosDoAutorNaFila\(place\)\.length > 0 \? place : null/,
+    'selo que abre folha vazia ensina que o toque não serve pra nada');
+});
+
+test('desfazer: os dois caminhos passam pela MESMA função, e ela destrava os botões', () => {
+  // Defeito que existia desde antes do lote: botão e tecla limpavam o
+  // `pendingAction` e o banner, mas nunca reabilitavam os três botões do card.
+  // O gesto seguia funcionando, o que escondia o problema — só o caminho
+  // canônico e acessível ficava morto.
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('function desfazerAcaoPendente');
+  assert.ok(i > 0, 'desfazerAcaoPendente sumiu');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
+  assert.match(bloco, /aplicarTravaDeAcao\(\)/,
+    'sem isto o card volta do Desfazer com os três botões disabled — e disabled também tira do Tab');
+  // e ninguém pode desfazer POR FORA dela
+  const soltos = [...semComentarios.matchAll(/pendingAction\.undo\(\)/g)];
+  assert.equal(soltos.length, 1,
+    'undo() chamado fora de desfazerAcaoPendente: seria um caminho que esquece de destravar');
+});
