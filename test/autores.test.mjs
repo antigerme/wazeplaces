@@ -292,9 +292,9 @@ test('auto: o aviso CONTA enquanto acontece', () => {
 
 test('auto: a palavra nunca promete desfazer nem cancelar', () => {
   // "desfazer" pressupõe que foi VOCÊ quem fez, e não foi. E depois de enviado
-  // não há o que cancelar: a única ação verdadeira que sobra é DESLIGAR.
+  // não há o que cancelar. O aviso é só acompanhamento: conta e some.
   const dict = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
-  for (const chave of ['auto.andando', 'auto.andandoPlural', 'auto.feito', 'auto.feitoPlural', 'auto.desligado']) {
+  for (const chave of ['auto.andando', 'auto.andandoPlural']) {
     const re = new RegExp("'" + chave.replace('.', '\\.') + "': '([^']*)'", 'g');
     const achadas = [...dict.matchAll(re)];
     assert.equal(achadas.length, 4, `${chave} não está nas 4 línguas`);
@@ -303,16 +303,31 @@ test('auto: a palavra nunca promete desfazer nem cancelar', () => {
         `${chave} promete desfazer ou cancelar, e não há nem um nem outro: "${m[1]}"`);
     }
   }
-  // Passado no fim (aí é verdade), e o par singular/plural existe — o projeto
-  // não tem ICU, então "1 pedidos" só não acontece se as duas chaves existirem.
-  const feito = dict.slice(dict.indexOf("'auto.feito': '"));
-  assert.match(feito.slice(0, 90), /rejeitad[oa]/, 'o aviso do fim precisa estar no passado');
-  for (const base of ['auto.andando', 'auto.feito']) {
-    assert.ok(dict.includes("'" + base + "Plural': '"), `${base} sem par plural: "1 pedidos" volta`);
-  }
+  assert.ok(dict.includes("'auto.andandoPlural': '"), 'sem par plural: "1 pedidos" volta');
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   assert.match(semComentarios, /q === 1 \? 'auto\.andando' : 'auto\.andandoPlural'/,
     'a escolha de plural precisa ser explícita (o projeto não usa ICU)');
+});
+
+test('auto: o aviso SOME quando acaba — nenhum banner sobra depois', () => {
+  // Decisão do owner: "a ideia do toast é só informar". Havia um banner de fim
+  // de 20s com "toque para desligar isto"; ele dizia "N rejeitados" com o N
+  // ORIGINAL, então mentia justamente quando algo falhava. Quem falha volta
+  // pra fila e reaparece como card — é esse o retorno de erro.
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\n}\n', i));
+  assert.match(bloco, /finally \{[^}]*aviso\.dispensar\(\);/,
+    'o aviso tem que ser dispensado no finally — inclusive quando o laço estoura');
+  assert.doesNotMatch(bloco, /auto\.feito/, 'o banner de fim voltou');
+  assert.doesNotMatch(bloco, /auto\.desligado/, 'a ação de desligar voltou pro banner');
+  // showToast só uma vez em todo o fluxo: o acompanhamento, e nada depois.
+  const chamadas = [...bloco.matchAll(/showToast\(/g)].length;
+  assert.equal(chamadas, 1, `showToast chamado ${chamadas}x; esperado 1 (só o acompanhamento)`);
+  const dict = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  for (const morta of ['auto.feito', 'auto.feitoPlural', 'auto.desligado']) {
+    assert.ok(!dict.includes("'" + morta + "'"), `${morta} ficou no dicionário sem ninguém usar`);
+  }
 });
 
 test('auto: nada acontece sem o portão, nem no treino, nem duas vezes ao mesmo tempo', () => {

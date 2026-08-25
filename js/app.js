@@ -4902,7 +4902,6 @@ async function aplicarRecusaAutomatica() {
     recusaAutomaticaRodando = true;
     const n = alvos.length;
     const autor = alvos[0].createdBy || String(alvos[0].creatorId);
-    const chave = String(alvos[0].creatorId);
     // Saem da fila ANTES de enviar: senão o editor veria como card o pedido que
     // a app já está rejeitando, e poderia agir nele — dois envios pro mesmo.
     const fora = new Set(alvos);
@@ -4917,9 +4916,18 @@ async function aplicarRecusaAutomatica() {
         else showNoPlaces();
     }
 
-    // O aviso conta enquanto acontece: o número cai a cada pedido que sai. É a
-    // única coisa que o editor pode acompanhar aqui, já que não há o que cancelar.
-    // Duração longa porque quem o dispensa é o próprio fim do laço.
+    // O aviso é só ACOMPANHAMENTO: conta enquanto acontece e some quando acaba.
+    // Decisão do owner — "a ideia do toast é só informar". Não sobra banner
+    // depois, porque depois não há nada a informar: o trabalho terminou.
+    //
+    // O prazo é folgado (10 min) de propósito: quem dispensa é o `finally`, não
+    // o relógio. Ele existe só pra que uma falha exótica no laço não deixe o
+    // aviso preso na tela pra sempre.
+    //
+    // Quem falhou VOLTA PRA FILA (ver `enviarLote`) e reaparece como card —
+    // é esse o retorno em caso de erro. O aviso de fim que existia aqui dizia
+    // "N rejeitados" com o N ORIGINAL, então mentia justamente quando algo
+    // dava errado.
     const andando = (q) => t(q === 1 ? 'auto.andando' : 'auto.andandoPlural', { n: q, autor });
     const aviso = showToast(andando(n), 'hint', 600000);
     try {
@@ -4932,12 +4940,10 @@ async function aplicarRecusaAutomatica() {
         });
     } finally {
         recusaAutomaticaRodando = false;
+        // Acabou: o aviso sai. Desligar o automático de alguém continua onde
+        // sempre esteve — o interruptor da lista, na aba Histórico.
         aviso.dispensar();
     }
-    // Acabou. A única ação verdadeira que sobra é DESLIGAR: não desfaz nada,
-    // para de acontecer de novo.
-    showToast(t(n === 1 ? 'auto.feito' : 'auto.feitoPlural', { n, autor }), 'hint', 20000,
-        () => { alternarAutoDoAutor(chave); showToast(t('auto.desligado', { autor }), 'info'); });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
