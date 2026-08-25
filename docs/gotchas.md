@@ -364,3 +364,37 @@ Regra: **ação que se auto-esconde precisa de outro caminho de volta** — ou n
 
 **O desfecho** foi remover o bloqueio inteiro, por decisão do owner: a app só admite editor L3+ Area Manager, e abuso se resolve no Waze. O saldo é o argumento — o recurso custou três defeitos em dois dias, num público que não precisava dele. Quando um recurso só gera defeito, considere que o conserto certo pode ser a remoção.
 
+
+---
+
+## 67. **Guard que lê o código-fonte se amarra na estrutura, nunca na distância** (v2026.08.24-04). Duas vezes na mesma PR, e as duas em sentidos opostos.
+
+O portão da recusa automática precisava de uma guarda: o interruptor **não pode** aparecer pra quem não passa em `podeRecusarAutomaticoAqui()`. Como o teste lê a fonte do `app.js` (não há DOM ali), escrevi a asserção por **proximidade**: o nome do portão tem que aparecer perto do markup do interruptor.
+
+**Primeira versão, 60 caracteres.** Passou, e a sabotagem (`podeRecusarAutomaticoAqui()` → `true`) reprovou. Parecia resolvido.
+
+Aí o interruptor ganhou um `<label>` de 44px em volta — correção legítima de alvo de toque —, o markup cresceu, e **o teste reprovou o código CERTO**. Nada tinha quebrado; a distância é que passou de 60.
+
+**Segunda versão, 300 caracteres.** Passou. E a sabotagem **também** passou. O motivo é que `renderAutores` chama o portão **duas vezes**, por razões diferentes: uma decide o interruptor, outra decide a frase da descrição. Com a janela larga, o regex alcançava a segunda e dava por cumprido o que a primeira já não fazia.
+
+Ou seja: **os dois erros possíveis, os dois cometidos, no mesmo teste, em quinze minutos.** Apertado demais reprova código certo; largo demais aprova código sabotado. E nenhum dos dois se anuncia — o primeiro parece regressão, o segundo parece teste verde.
+
+O que não tem esse problema é exigir a condição **colada** no que ela guarda:
+
+```js
+assert.match(bloco, /\+ \(podeRecusarAutomaticoAqui\(\)\s*\?\s*`<label/, ...)
+```
+
+Isso descreve a ESTRUTURA (a condição é o teste do ternário que produz o markup), não a vizinhança. Cresça o markup à vontade: continua valendo. Arranque o portão: reprova.
+
+### O irmão: asserção que não distingue as duas versões é decoração
+
+Na mesma sequência de PRs, escrevi um teste chamado *"rank em texto não vira passe livre"*, pra travar a normalização (`Number.isInteger(p.rank) ? p.rank : parseInt(p.rank, 10)`) contra alguém simplificar pra `p.rank >= 5`.
+
+Sabotei. **Não reprovou.** As duas formas concordam em tudo que o teste checava: `'5' >= 5` coage pra `true`, `'abc' >= 5` dá `false`. O único valor que as separa é `'5abc'` — que a versão atual **aceita** como L6.
+
+Havia como fazer a sabotagem falhar: bastava afirmar que `'5abc'` passa. Mas isso travaria no CI a ideia de que `"5abc"` é um rank válido — pior que não testar.
+
+**O teste foi REMOVIDO, com o motivo escrito no lugar dele.** Remendar uma asserção até ela reprovar a sabotagem é como se acerta o alvo depois de atirar; o que se pergunta é se a coisa que ela guarda existe.
+
+**A regra que fecha os dois:** toda guarda que lê fonte precisa passar por duas perguntas — *ela reprova a sabotagem?* e *ela continua passando se o código certo mudar de forma?* Uma só das duas não basta, e é sempre a outra que morde.
