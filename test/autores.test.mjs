@@ -210,7 +210,7 @@ test('lote: "já tratado por outro editor" NÃO conta como falha', () => {
   const bloco = semComentarios.slice(i, semComentarios.indexOf('function mostrarResultadoDoLote'));
   assert.match(bloco, /already_processed[\s\S]{0,80}conta\.ja\+\+/,
     'a app já trata isso como objetivo cumprido no card único — chamar de falha aqui daria dois nomes à mesma coisa');
-  assert.match(bloco, /conta\.erro\+\+[\s\S]{0,220}AppState\.queue\.push\(p\)/,
+  assert.match(bloco, /conta\.erro\+\+[\s\S]{0,420}AppState\.queue\.push\(p\)/,
     'o que NÃO saiu tem que voltar pra fila, senão o pedido some sem ter sido tratado');
 });
 
@@ -252,61 +252,88 @@ test('desfazer: os dois caminhos passam pela MESMA função, e ela destrava os b
 // editor escolheu. Três desenhos foram feitos contra o instinto, e é isso
 // que estas guardas seguram.
 
-test('auto: a janela NÃO trava o card', () => {
-  // O acoesTravadas() congela os três botões quando VOCÊ age e a app espera
-  // confirmação. Aqui você não pediu nada — congelar seria pior que o problema.
+test('auto: não existe ESPERA entre decidir e enviar', () => {
+  // Houve uma janela de 20s aqui, com oferta de cancelar. Saiu por decisão do
+  // owner: ela começava quando o APP BUSCA a fila — sempre no meio de outro
+  // card —, então eram 20s parados sobre algo que ninguém estava olhando.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
-  const i = semComentarios.indexOf('function acoesTravadas');
-  const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
-  assert.doesNotMatch(bloco, /autoPendente/,
-    'a recusa automática entrou na trava: o editor seria congelado por algo que não pediu');
-  // e o slot é PRÓPRIO, não o pendingAction
-  assert.match(fonte, /AppState\.autoPendente = \{/, 'o slot próprio sumiu');
+  const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\nfunction ', i));
+  assert.doesNotMatch(bloco, /setTimeout|AUTO_CANCELAR_MS/,
+    'voltou a esperar antes de enviar: a janela foi removida de propósito');
+  assert.match(bloco, /await enviarLote\(/, 'o envio precisa ser direto');
 });
 
-test('auto: a palavra segue o tempo verbal', () => {
-  // "desfazer" pressupõe que foi você quem fez, e não foi. Antes de sair é
-  // CANCELAR; depois de sair não há o que cancelar e a única ação verdadeira
-  // que sobra é DESLIGAR.
+test('auto: o placar conta AO LANDAR, nunca antes', () => {
+  // É isto que substitui o cancelamento. Sem janela, um placar otimista deixaria
+  // números que nunca saíram se a página morresse no meio do laço — e não haveria
+  // quando reconciliar. Contando ao landar, o que está na tela é o que foi enviado.
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\nfunction ', i));
+  assert.match(bloco, /contarAoLandar: true/, 'a recusa automática precisa contar ao landar');
+  assert.doesNotMatch(bloco, /AppState\.stats\.rejected \+=/,
+    'somar o placar antes de enviar é exatamente o que não pode acontecer sem janela');
+  // e do outro lado: o lote MANUAL segue otimista, porque tem Desfazer que devolve
+  const k = semComentarios.indexOf('function rejeitarLoteDoAutor');
+  const manual = semComentarios.slice(k, semComentarios.indexOf('\nasync function', k));
+  assert.match(manual, /AppState\.stats\.rejected \+= n/,
+    'o lote manual tem janela de Desfazer: ali o otimista é o certo');
+});
+
+test('auto: o aviso CONTA enquanto acontece', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\nfunction ', i));
+  assert.match(bloco, /aoProgredir:/, 'sem progresso o aviso vira um número parado');
+  assert.match(bloco, /aviso\.texto\(/, 'o texto precisa mudar NO LUGAR, não empilhar um toast por pedido');
+  assert.match(bloco, /aviso\.dispensar\(\)/, 'o aviso de progresso precisa sair quando o laço acaba');
+});
+
+test('auto: a palavra nunca promete desfazer nem cancelar', () => {
+  // "desfazer" pressupõe que foi VOCÊ quem fez, e não foi. E depois de enviado
+  // não há o que cancelar: a única ação verdadeira que sobra é DESLIGAR.
   const dict = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
-  const i = dict.indexOf("'auto.futuro': '");
-  const futuro = dict.slice(i, dict.indexOf("',", i));
-  assert.match(futuro, /serão rejeitados/, 'o banner de antes precisa estar no FUTURO');
-  assert.match(futuro, /cancelar/i, 'e oferecer cancelar, não desfazer');
-  const j = dict.indexOf("'auto.feito': '");
-  const feito = dict.slice(j, dict.indexOf("',", j));
-  assert.match(feito, /rejeitados/, 'o banner de depois está no passado, que aí é verdade');
-  assert.doesNotMatch(feito, /desfaz|cancelar/i,
-    'depois de enviado, oferecer desfazer ou cancelar é mentira — a ação real é desligar');
-  // e em NENHUMA língua a palavra "desfazer" aparece nas chaves da recusa automática
-  for (const chave of ['auto.futuro', 'auto.feito', 'auto.cancelado', 'auto.desligado']) {
+  for (const chave of ['auto.andando', 'auto.andandoPlural', 'auto.feito', 'auto.feitoPlural', 'auto.desligado']) {
     const re = new RegExp("'" + chave.replace('.', '\\.') + "': '([^']*)'", 'g');
-    for (const m of dict.matchAll(re)) {
-      assert.doesNotMatch(m[1], /desfaz|undo|deshac|annuler l|défaire/i,
-        `${chave} usa uma palavra de desfazer: "${m[1]}"`);
+    const achadas = [...dict.matchAll(re)];
+    assert.equal(achadas.length, 4, `${chave} não está nas 4 línguas`);
+    for (const m of achadas) {
+      assert.doesNotMatch(m[1], /desfaz|undo|deshac|défaire|cancel|annul/i,
+        `${chave} promete desfazer ou cancelar, e não há nem um nem outro: "${m[1]}"`);
     }
   }
+  // Passado no fim (aí é verdade), e o par singular/plural existe — o projeto
+  // não tem ICU, então "1 pedidos" só não acontece se as duas chaves existirem.
+  const feito = dict.slice(dict.indexOf("'auto.feito': '"));
+  assert.match(feito.slice(0, 90), /rejeitad[oa]/, 'o aviso do fim precisa estar no passado');
+  for (const base of ['auto.andando', 'auto.feito']) {
+    assert.ok(dict.includes("'" + base + "Plural': '"), `${base} sem par plural: "1 pedidos" volta`);
+  }
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  assert.match(semComentarios, /q === 1 \? 'auto\.andando' : 'auto\.andandoPlural'/,
+    'a escolha de plural precisa ser explícita (o projeto não usa ICU)');
 });
 
-test('auto: sair no meio da janela CANCELA, e o logout também', () => {
+test('auto: nada acontece sem o portão, nem no treino, nem duas vezes ao mesmo tempo', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
-  const i = semComentarios.indexOf('function descarregarRecusaAutomatica');
-  const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
-  assert.match(bloco, /autoPendente\.cancelar\(\)/,
-    'N requisições no pagehide completam parcialmente — meio-lote sem sintoma nenhum');
-  assert.match(semComentarios, /pagehide', descarregarRecusaAutomatica/, 'o pagehide não está ligado');
-  const j = semComentarios.indexOf('async function handleLogout');
-  assert.match(semComentarios.slice(j, j + 2500), /autoPendente\.cancelar\(\)/,
-    'no logout nada pode ser enviado');
-});
-
-test('auto: nada acontece sem o portão, nem no treino', () => {
-  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
-  const i = semComentarios.indexOf('function aplicarRecusaAutomatica');
+  const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
   const bloco = semComentarios.slice(i, i + 400);
   assert.match(bloco, /if \(!podeRecusarAutomaticoAqui\(\)\) return;/, 'o portão saiu da recusa automática');
   assert.match(bloco, /if \(Treino\.ativo\) return;/, 'no treino a fila é de exemplos');
-  assert.match(bloco, /if \(AppState\.autoPendente\) return;/, 'duas janelas ao mesmo tempo perderiam uma');
+  assert.match(bloco, /if \(recusaAutomaticaRodando\) return;/,
+    'a fila pode crescer durante o laço: duas passagens mandariam o mesmo pedido duas vezes');
+});
+
+test('auto: os pedidos saem da fila ANTES de serem enviados', () => {
+  // Senão o editor veria como card um pedido que a app já está rejeitando, e
+  // poderia agir nele — dois envios pro mesmo pedido.
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\nfunction ', i));
+  const iFila = bloco.indexOf('AppState.queue = AppState.queue.filter');
+  const iEnvio = bloco.indexOf('await enviarLote(');
+  assert.ok(iFila > 0 && iEnvio > iFila, 'a fila tem que ser limpa antes do envio começar');
 });
 
 test('auto: o interruptor só aparece pra quem passa no portão', () => {
@@ -324,12 +351,3 @@ test('auto: o interruptor só aparece pra quem passa no portão', () => {
     + ' um recurso que a pessoa não pode usar');
 });
 
-test('auto: a janela é mais longa que a do Desfazer, e o motivo é medido', () => {
-  // 8s ficaram "exatamente no limite" pra o owner notar e ler um banner que não
-  // esperava (ver o banner de conquista). Aqui ele espera ainda menos.
-  const m = fonte.match(/const AUTO_CANCELAR_MS = (\d+);/);
-  assert.ok(m, 'AUTO_CANCELAR_MS sumiu');
-  const u = fonte.match(/const UNDO_WINDOW_MS = (\d+);/);
-  assert.ok(parseInt(m[1], 10) > parseInt(u[1], 10) * 2,
-    'a janela do automático precisa ser bem maior que a do Desfazer: o editor não está olhando');
-});
