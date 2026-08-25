@@ -8,14 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.25-03
+
+### Alterado
+- **A data na lista de autores agora é a da última rejeição** — *“rejeitado há 22 dias”*, *“rejeitado hoje”* — e aparece para **todos** os autores da lista, não só para quem está no automático.
+
+  Na versão anterior ela era a data em que você tinha ligado o interruptor, e isso não servia para nada: o que decide se o autor sai da lista é a **última rejeição**. É esse o relógio, e agora é ele que está na tela — 30 dias depois do que a linha mostra, o autor some da lista.
+
+  Quem continua mandando pedido tem a data renovada a cada rejeição (inclusive as automáticas), então **os 30 dias só correm para quem de fato parou**.
+
+---
+
 ## v2026.08.25-02
 
 ### Adicionado
-- **A lista de autores agora diz há quanto tempo cada um está marcado.** Embaixo do nome de quem tem a recusa automática ligada aparece *“marcado há 22 dias”* — ou *“marcado hoje”*, no dia em que você liga.
-
-  Serve pra uma coisa só: a marca **caduca sozinha em 30 dias sem pedido nenhum**. Isso é de propósito, pra tirar a pessoa do castigo caso você esqueça de desmarcar ou passe um tempo sem abrir o app. Sem a data na tela não dava pra saber se um autor estava perto disso ou se tinha acabado de ser marcado.
-
-  Quem continua mandando pedido tem o prazo renovado a cada rejeição, então **os 30 dias só correm pra quem de fato parou**. Desligar o interruptor apaga a data junto.
+- **A lista de autores passou a mostrar uma data debaixo de cada nome.** Corrigida logo em seguida na v2026.08.25-03, que é a versão que vale — nesta aqui a data era a da marcagem, e não a da última rejeição.
 
 ---
 

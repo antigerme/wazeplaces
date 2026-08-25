@@ -352,86 +352,86 @@ test('auto: o interruptor só aparece pra quem passa no portão', () => {
 });
 
 
-test('marca: o dia de MARCAR é campo próprio, separado da última rejeição', () => {
-  // O 3º campo (última rejeição) anda sozinho a cada pedido dela — inclusive
-  // pelas rejeições automáticas, que são justamente o que um marcado gera. Se a
-  // frase "marcado há N dias" saísse dele, ela diria "marcado hoje" para alguém
-  // marcado há meses, e a anistia dos 30 dias ficaria invisível na tela.
+test('data: a linha mostra a ÚLTIMA REJEIÇÃO, e o registro tem só os 4 campos', () => {
+  // Não há campo novo pra isto: o 3º campo já é o dia da última rejeição, e é
+  // ELE que a poda usa. Ou seja, a linha é o relógio da anistia à vista —
+  // 30 dias depois do que ela mostra, o autor sai da lista.
   const m = montar();
-  // Entrada marcada HÁ 22 DIAS (o `alternarAutoDoAutor` mora fora do corte, então
-  // o carimbo entra direto no armazenamento — é o estado que ele produz).
-  m.guardado.set(m.AUTORES_KEY, JSON.stringify({
-    v: [], r: { '111': [9, 'entregas', m.dia - 22, 1, m.dia - 22] },
-  }));
-  m.registrarRejeicaoDeAutor(place(111, 'entregas'));   // chega mais um pedido HOJE
+  m.registrarRejeicaoDeAutor(place(111, 'entregas'));
+  m.registrarRejeicaoDeAutor(place(111, 'entregas'));
   const e = m.loadAutores().r['111'];
-  assert.equal(e[2], m.dia, 'a última rejeição tem que andar');
-  assert.equal(e[4], m.dia - 22, 'o dia da MARCA não pode andar junto');
-  assert.equal(m.listaDeAutores()[0].marcadoEm, m.dia - 22,
-    'a lista precisa expor o dia da marca, não o da última rejeição');
+  assert.equal(e.length, 3, 'quantas vezes, nome, dia — e o 4º só ao ligar o automático');
+  assert.equal(e[2], m.dia, 'o 3º campo é o dia da última rejeição');
+  assert.equal(m.listaDeAutores()[0].dia, m.dia, 'é ele que a lista expõe');
 });
 
-test('marca: quem não é marcado não carrega o campo', () => {
+test('data: a última rejeição ANDA a cada pedido novo, inclusive automático', () => {
+  // Isto é o comportamento, não um efeito colateral: a recusa automática passa
+  // pelo mesmo `registrarRejeicaoDeAutor`, então quem continua mandando tem a
+  // data (e a anistia) renovada. A linha na tela é o que torna isso visível.
   const m = montar();
-  m.registrarRejeicaoDeAutor(place(111, 'a'));
-  m.registrarRejeicaoDeAutor(place(111, 'a'));
-  assert.equal(m.loadAutores().r['111'].length, 3, 'campo a mais em 500 registros é peso à toa');
-  assert.equal(m.listaDeAutores()[0].marcadoEm, null, 'sem marca, sem frase');
+  m.guardado.set(m.AUTORES_KEY, JSON.stringify({
+    v: [], r: { '111': [9, 'entregas', m.dia - 22, 1] },
+  }));
+  assert.equal(m.listaDeAutores()[0].dia, m.dia - 22, 'antes: parada há 22 dias');
+  m.registrarRejeicaoDeAutor(place(111, 'entregas'));
+  assert.equal(m.listaDeAutores()[0].dia, m.dia, 'depois: a data andou pra hoje');
 });
 
-test('marca: desligar apaga o campo, e não deixa lixo', () => {
+test('data: ligar e desligar o automático NÃO mexe na data nem cria campo', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function alternarAutoDoAutor');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('\nlet ', i));
-  assert.match(bloco, /if \(e\[3\] === 1\) e\[4\] = diaDeHoje\(\);/, 'ligar precisa carimbar o dia');
-  assert.match(bloco, /else e\.length = 4;/, 'desligar precisa apagar o carimbo');
+  assert.match(bloco, /e\[3\] = e\[3\] === 1 \? 0 : 1;/, 'o interruptor é o 4º campo, e só');
+  assert.doesNotMatch(bloco, /e\[4\]/, 'não existe 5º campo — a data já mora no 3º');
+  assert.doesNotMatch(bloco, /e\[2\]/, 'ligar o automático não é uma rejeição, não pode mexer na data');
 });
 
-test('marca: a frase é em DIAS, não no formatador de horas do app', () => {
-  // A marca guarda o dia. Usar o formatRelativeTime (que desce a horas) fazia
-  // algo marcado de manhã aparecer como "marcado há 12h".
+test('data: a frase é em DIAS, não no formatador de horas do app', () => {
+  // O dado é o dia. O formatRelativeTime desce a horas e fazia algo rejeitado
+  // de manhã virar "há 12h" — precisão que o dado não tem.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
-  const i = semComentarios.indexOf('function marcadoQuando');
-  assert.ok(i > 0, 'marcadoQuando sumiu');
+  const i = semComentarios.indexOf('function rejeitadoQuando');
+  assert.ok(i > 0, 'rejeitadoQuando sumiu');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('\nfunction ', i));
   assert.doesNotMatch(bloco, /formatRelativeTime/,
     'o formatador de horas promete precisão que o dado não tem');
-  assert.match(bloco, /n === 1 \? 'stats\.autores\.marcadoDias' : 'stats\.autores\.marcadoDiasPlural'/,
+  assert.match(bloco, /n === 1 \? 'stats\.autores\.rejeitadoDias' : 'stats\.autores\.rejeitadoDiasPlural'/,
     'plural explícito (o projeto não usa ICU)');
-  assert.match(bloco, /n <= 0\) return t\('stats\.autores\.marcadoHoje'\)/, 'faltou o caso de hoje');
+  assert.match(bloco, /n <= 0\) return t\('stats\.autores\.rejeitadoHoje'\)/, 'faltou o caso de hoje');
   const dict = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
-  for (const k of ['marcadoHoje', 'marcadoDias', 'marcadoDiasPlural']) {
+  for (const k of ['rejeitadoHoje', 'rejeitadoDias', 'rejeitadoDiasPlural']) {
     const n = [...dict.matchAll(new RegExp("'stats\\.autores\\." + k + "':", 'g'))].length;
     assert.equal(n, 4, `stats.autores.${k} não está nas 4 línguas`);
   }
 });
 
-test('marca: a linha só aparece para quem ESTÁ marcado', () => {
+test('data: a linha aparece pra TODO autor da lista, marcado ou não', () => {
+  // Todo autor da lista tem última rejeição — é o que o põe lá. Esconder de
+  // quem não está no automático seria esconder o relógio da anistia justamente
+  // de quem só tem esse relógio.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
-  const i = semComentarios.indexOf('function listaDeAutores');
-  const bloco = semComentarios.slice(i, semComentarios.indexOf('\nfunction ', i));
-  assert.match(bloco, /marcadoEm: e\[3\] === 1 && Number\.isFinite\(e\[4\]\) \? e\[4\] : null/,
-    'sem o teste do flag, um registro antigo com lixo no 4º campo viraria uma data');
   const j = semComentarios.indexOf('function renderAutores');
   const render = semComentarios.slice(j, semComentarios.indexOf('\nfunction ', j + 10));
-  assert.match(render, /a\.marcadoEm\s*\n?\s*\?/, 'a frase precisa estar atrás do campo');
+  assert.match(render, /rejeitadoQuando\(a\.dia\)/, 'a linha tem que ler o dia da última rejeição');
+  assert.doesNotMatch(render, /marcadoEm/, 'o campo do dia da marca não existe mais');
+  const trecho = render.slice(render.indexOf('rejeitadoQuando') - 400, render.indexOf('rejeitadoQuando'));
+  assert.doesNotMatch(trecho, /podeRecusarAutomaticoAqui\(\)\s*\n?\s*\?[^`]*`<span class="basis-full/,
+    'a linha não pode ficar atrás do portão do automático');
 });
 
-test('marca: a frase ocupa a linha INTEIRA, não a coluna do nome', () => {
+test('data: a frase ocupa a linha INTEIRA, não a coluna do nome', () => {
   // Medido: o selo, o interruptor e a lixeira apertam a coluna do nome a ~55px
-  // num Fold de 280px. Lá dentro, "marqué il y a 22 jours" quebrava em três
-  // pedaços ("marqué il / y a 22 / jours"). Como item de largura cheia ela cabe
-  // em UMA linha nos quatro idiomas, e a largura do nome não muda (medido nos
-  // dois arranjos: 51/55/58/58px em ambos).
+  // num Fold de 280px. Lá dentro, "rejeté il y a 22 jours" quebrava em três
+  // pedaços. Como item de largura cheia ela cabe em UMA linha nos 4 idiomas, e
+  // a largura do nome não muda (medido nos dois arranjos: 51/55/58/58px).
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const j = semComentarios.indexOf('function renderAutores');
   const render = semComentarios.slice(j, semComentarios.indexOf('\nfunction ', j + 10));
   const linha = render.match(/`<div class="autor-lin ([^"]*)"/);
   assert.ok(linha, 'a linha do autor perdeu a classe autor-lin');
   assert.match(linha[1], /\bflex-wrap\b/, 'sem flex-wrap o basis-full não manda a data pra outra linha');
-  // A data precisa ser IRMÃ dos controles, não filha da coluna do nome — é o
-  // que `basis-full` só consegue fazer estando no mesmo flex container.
-  const data = render.match(/a\.marcadoEm\s*\n?\s*\?\s*`<span class="([^"]*)"/);
+  const data = render.match(/`<span class="([^"]*)">`\s*\n\s*\+ `\$\{escapeHtml\(rejeitadoQuando/);
   assert.ok(data, 'o <span> da data mudou de forma');
   assert.match(data[1], /\bbasis-full\b/,
     'sem basis-full a data volta a dividir a coluna apertada com o nome');

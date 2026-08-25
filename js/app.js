@@ -4877,12 +4877,6 @@ function alternarAutoDoAutor(chave) {
     const e = a.r[String(chave)];
     if (!Array.isArray(e)) return;
     e[3] = e[3] === 1 ? 0 : 1;
-    // O 5º campo é o dia em que a marca foi LIGADA — coisa diferente do 3º, que
-    // é a última rejeição e anda sozinho a cada pedido dela. Sem ele não dá pra
-    // dizer "marcado há N dias", que é o que informa se a anistia está perto.
-    // Só quem é marcado carrega o campo; desligar o apaga.
-    if (e[3] === 1) e[4] = diaDeHoje();
-    else e.length = 4;
     salvarAutores(a);
     renderHistory();
 }
@@ -5245,8 +5239,7 @@ function esquecerAutor(chave) {
 function listaDeAutores() {
     const a = loadAutores();
     return Object.entries(a.r)
-        .map(([id, e]) => ({ id, n: e[0] || 0, nome: e[1] || id, dia: e[2] || 0,
-                             marcadoEm: e[3] === 1 && Number.isFinite(e[4]) ? e[4] : null }))
+        .map(([id, e]) => ({ id, n: e[0] || 0, nome: e[1] || id, dia: e[2] || 0 }))
         .sort((x, y) => (y.n - x.n) || (y.dia - x.dia));
 }
 
@@ -5255,13 +5248,16 @@ function esquecerAutores() {
     safeLS.remove(AUTORES_KEY);
 }
 
-// A marca guarda o DIA, não o instante — então a frase é em dias. Usar o
-// `formatRelativeTime` do app (que desce a horas e minutos) fazia algo marcado
-// de manhã aparecer como "marcado há 12h": precisão que o dado não tem.
-function marcadoQuando(dia) {
+// O registro guarda o DIA, não o instante — então a frase é em dias. Usar o
+// `formatRelativeTime` do app (que desce a horas e minutos) fazia algo de hoje
+// de manhã aparecer como "há 12h": precisão que o dado não tem.
+//
+// É o MESMO dia que a poda usa (`e[2]`), então esta linha é o relógio da
+// anistia à vista: 30 dias depois do que ela mostra, o autor sai da lista.
+function rejeitadoQuando(dia) {
     const n = diaDeHoje() - dia;
-    if (!Number.isFinite(n) || n <= 0) return t('stats.autores.marcadoHoje');
-    return t(n === 1 ? 'stats.autores.marcadoDias' : 'stats.autores.marcadoDiasPlural', { n });
+    if (!Number.isFinite(n) || n <= 0) return t('stats.autores.rejeitadoHoje');
+    return t(n === 1 ? 'stats.autores.rejeitadoDias' : 'stats.autores.rejeitadoDiasPlural', { n });
 }
 
 // A lista fica ABAIXO do placar do editor, nunca no lugar dele. E some inteira
@@ -5285,9 +5281,9 @@ function renderAutores() {
             // `flex-wrap` + `basis-full` na data: ela vai pra uma SEGUNDA linha,
             // com a largura inteira da lista. Dentro da coluna do nome ela não
             // cabia — o selo, o interruptor e a lixeira apertam essa coluna a
-            // ~55px num Fold, e "marqué il y a 22 jours" quebrava em TRÊS
-            // pedaços ("marqué il / y a 22 / jours"). Medido: a largura do nome
-            // é a MESMA nos dois arranjos, então isto não tira nada dele.
+            // ~55px num Fold, e "rejeté il y a 22 jours" quebrava em TRÊS
+            // pedaços. Medido: a largura do nome é a MESMA nos dois arranjos,
+            // então isto não tira nada dele.
             `<div class="autor-lin flex flex-wrap items-center gap-x-2 min-h-[44px] border-b border-slate-100 dark:border-slate-700 last:border-0">`
             + `<span class="flex-1 min-w-0 text-sm font-medium text-slate-700 truncate dark:text-slate-200">${escapeHtml(a.nome)}</span>`
             + `<span class="selo-proc ${a.n >= AUTOR_LIMIAR_DESTAQUE ? 'selo-reinc' : 'selo-src'} flex-shrink-0">`
@@ -5313,10 +5309,8 @@ function renderAutores() {
             + ` aria-label="${escapeHtml(t('stats.autores.esquecer'))}">${lixo}</button>`
             // `-mt-1.5` recolhe a folga que o min-h-[44px] da linha de cima já
             // deixou: sem isso a data flutua longe do nome que ela descreve.
-            + (a.marcadoEm
-                ? `<span class="basis-full text-[0.6875rem] text-slate-500 dark:text-slate-400 leading-tight -mt-1.5 pb-1.5">`
-                  + `${escapeHtml(marcadoQuando(a.marcadoEm))}</span>`
-                : '')
+            + `<span class="basis-full text-[0.6875rem] text-slate-500 dark:text-slate-400 leading-tight -mt-1.5 pb-1.5">`
+            + `${escapeHtml(rejeitadoQuando(a.dia))}</span>`
             + `</div>`).join('');
     // Delegação seria mais curta, mas o painel é re-renderizado inteiro a cada
     // esquecimento — o listener por linha morre junto com a linha.
