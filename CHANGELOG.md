@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.25-05
+
+### Alterado
+- **O aviso da recusa automática agora some sozinho quando termina.** Ele conta os pedidos saindo — *“Rejeitando 2 pedidos de fulano…”*, depois 1 — e **fecha no instante em que acaba**. O aviso serve só para informar enquanto acontece.
+
+  Antes ficava mais **20 segundos** na tela depois de pronto, com *“2 pedidos rejeitados — toque para desligar isto”*. Ele dizia o número **original**, então quando algum pedido falhava a frase mentia. O que falha continua voltando para a fila e reaparecendo como card — é esse o retorno real.
+
+  Para desligar a recusa automática de alguém, o caminho é o de sempre: **o interruptor na lista de autores**, na aba Histórico.
+
+---
+
 ## v2026.08.25-04
 
 ### Adicionado
