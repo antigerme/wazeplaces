@@ -53,7 +53,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.24-04
 
 ### Adicionado
-- **Dá pra deixar o app rejeitando sozinho os próximos pedidos de um autor.** O interruptor fica na lista de autores, na aba Histórico, e é **restrito a L6 + Area Manager ou staff** — o mesmo nível que já libera excluir e aprovar foto.
+- **Dá pra deixar o app rejeitando sozinho os próximos pedidos de um autor.** O interruptor fica na lista de autores, na aba Histórico.
+
+  **É só o interruptor que é restrito** — a **L6 + Area Manager ou staff**, o mesmo nível que já libera excluir e aprovar foto. Todo o resto do tratamento de autor continua para **qualquer editor que usa a app**: o selo `✕ N` no card, a lista de autores com a lixeira, a folha do autor e o rejeitar em lote.
 
   Quando chegam pedidos de alguém marcado, eles saem da fila e um aviso aparece no topo: **“2 pedidos de fulano serão rejeitados — toque para cancelar”**. Nada é enviado ao Waze durante esses **20 segundos**. Se você tocar, tudo volta para a fila como estava.
 
