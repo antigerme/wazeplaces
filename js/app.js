@@ -506,6 +506,10 @@ function openModal(id) {
 // ticker do pareamento: fechando por Esc, o setInterval seguia rodando pelo
 // resto da sessão.
 const LIMPEZA_AO_FECHAR = {
+    // O padrão da lista de autores é a forma CURTA. Amarrar isto ao botão de
+    // fechar deixaria os outros dois caminhos (Esc e scrim) vazando o estado
+    // expandido pra próxima abertura — o gotcha dos modais deste projeto.
+    filtersModal() { autoresExpandido = false; },
     pairShowModal() {
         pararTickerPareamento();
         // O código é credencial e já não vale nada aqui: não fica desenhado
@@ -5143,6 +5147,17 @@ const AUTORES_MAX_VISTOS = 2000;
 // data renovada a cada rejeição (inclusive as automáticas), então o prazo só
 // corre pra quem de fato parou.
 const AUTORES_MAX_DIAS = 30;
+// Quantas linhas a lista mostra antes do "Ver mais N". NÃO é gosto: medido na
+// fila real do owner, 232 pedidos deram 174 autores distintos e 23 com 2+
+// rejeições — e os 10 primeiros são os que repetem de verdade (o resto tem
+// contagem 2–3). Cortar em 5 esconderia 8 de 13 num caso comum, o que faz do
+// botão parada obrigatória em vez de atalho; cortar em 15 quase não cortaria.
+//
+// O ganho é a altura ficar CONSTANTE: medido a 390×844, a lista inteira custa
+// 2,4 telas com 23 autores, 7,1 com 100 e 34,9 com 500 (59px por linha, sempre);
+// com o teto são 1,2 tela em qualquer tamanho. Render nunca foi o problema
+// (22ms com 500) — o custo é o polegar.
+const AUTORES_VISIVEIS = 10;
 // Acima disto o selo passa de cinza (a app CONTA) a rosa (a app DESTACA).
 // Não é número escolhido a dedo: na fila real, o maior lote de um mesmo autor
 // num único instantâneo foi 7. Exigir 10 é exigir repetição ENTRE buscas —
@@ -5260,13 +5275,25 @@ function rejeitadoQuando(dia) {
     return t(n === 1 ? 'stats.autores.rejeitadoDias' : 'stats.autores.rejeitadoDiasPlural', { n });
 }
 
+// Expandido é estado de SESSÃO da lista, não preferência: o padrão é a lista
+// curta, e reabrir o painel volta a ele (limpo em LIMPEZA_AO_FECHAR). Precisa
+// sobreviver ao re-render, porém — o painel é redesenhado inteiro a cada
+// esquecimento e a cada troca de interruptor, e perder a expansão ali jogaria
+// o editor de volta pro topo no meio de uma faxina.
+let autoresExpandido = false;
+
 // A lista fica ABAIXO do placar do editor, nunca no lugar dele. E some inteira
 // quando ninguém repetiu — seção vazia num painel curto é ruído, não informação.
 function renderAutores() {
     const el = document.getElementById('autoresBody');
     if (!el) return;
-    const linhas = listaDeAutores();
-    if (linhas.length === 0) { el.innerHTML = ''; return; }
+    const todas = listaDeAutores();
+    if (todas.length === 0) { el.innerHTML = ''; return; }
+    // Só corta se SOBRA alguém: com 10 autores exatos nada é escondido e o botão
+    // não existe. Botão dizendo "ver mais 0" — ou sumindo sem explicação — é pior
+    // que não ter teto nenhum.
+    const escondidas = autoresExpandido ? 0 : Math.max(0, todas.length - AUTORES_VISIVEIS);
+    const linhas = escondidas > 0 ? todas.slice(0, AUTORES_VISIVEIS) : todas;
     const lixo = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
         + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"'
         + ' d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0'
@@ -5311,7 +5338,29 @@ function renderAutores() {
             // deixou: sem isso a data flutua longe do nome que ela descreve.
             + `<span class="basis-full text-[0.6875rem] text-slate-500 dark:text-slate-400 leading-tight -mt-1.5 pb-1.5">`
             + `${escapeHtml(rejeitadoQuando(a.dia))}</span>`
-            + `</div>`).join('');
+            + `</div>`).join('')
+        // Largura cheia e 44px de alvo, como todo botão da app. O número vai NO
+        // rótulo porque "Ver mais" sozinho não diz se são 3 ou 300 — e é isso que
+        // decide se vale o toque. O "Ver menos" existe porque sem ele expandir é
+        // irreversível sem fechar o modal.
+        + (escondidas > 0 || autoresExpandido
+            ? `<button type="button" id="autoresVerMais" class="w-full min-h-[44px] mt-2 mb-4`
+              + ` border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-semibold`
+              + ` text-cyan-700 dark:text-cyan-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition">`
+              + `${escapeHtml(autoresExpandido
+                    ? t('stats.autores.verMenos')
+                    : t(escondidas === 1 ? 'stats.autores.verMais' : 'stats.autores.verMaisPlural',
+                        { n: escondidas }))}</button>`
+            : '');
+    const verMais = document.getElementById('autoresVerMais');
+    if (verMais) verMais.addEventListener('click', () => {
+        autoresExpandido = !autoresExpandido;
+        renderAutores();
+        // Ao recolher, o botão sobe junto com a lista e o dedo fica sobre outra
+        // coisa. Devolver a lista ao campo de visão é o mínimo pra não parecer
+        // que a app pulou pra outro lugar.
+        if (!autoresExpandido) el.scrollIntoView({ block: 'nearest' });
+    });
     // Delegação seria mais curta, mas o painel é re-renderizado inteiro a cada
     // esquecimento — o listener por linha morre junto com a linha.
     for (const b of el.querySelectorAll('.autor-esquecer')) {
