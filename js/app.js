@@ -179,7 +179,6 @@ const AppState = {
     statesByCountry: {},
     seenCategories: [],      // categorias vistas nos places carregados (fonte do filtro de categoria)
     history: null,           // acumulado histórico { 'YYYY-MM-DD': { read, rejected } } (carregado lazy)
-    autoPendente: null,      // janela da recusa automática (slot PRÓPRIO: não trava o card)
     autores: null,           // reincidência por autor: { v: [ids vistos 1x], r: { id: [n, nome, dia] } }
     sessaoExpiraEm: null     // quando a sessão do WAZE vence (epoch em segundos). Prazo FIXO, ver AVISO_SESSAO_DIAS
 };
@@ -2794,7 +2793,6 @@ async function handleLogout() {
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
     safeLS.remove(PERFIL_GATE_KEY);   // rank do último perfil: some com o resto
-    if (AppState.autoPendente) AppState.autoPendente.cancelar();  // nada é enviado no logout
     esquecerAutores();  // contagem por autor: é dado de TERCEIRO, sai primeiro
     // Fecha a conexão da sala e apaga os bloqueios: são escolhas de quem
     // entrou, não preferência do aparelho.
@@ -4834,31 +4832,30 @@ function getHistoryStats() {
     return acc;
 }
 // ═══════════════════════════════════════════════════════════════════════════
-//  Recusa automática: os pedidos que AINDA VÃO CHEGAR de um autor marcado
+//  Recusa automática: os pedidos que chegam de um autor marcado
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // É o único recurso da app que decide sobre pedido que ainda não existia quando
-// o editor escolheu. Por isso três coisas foram desenhadas contra o instinto:
+// o editor escolheu. Duas coisas foram desenhadas contra o instinto:
 //
 // 1. PORTÃO. Só L6+AM ou staff — champs e staff do Waze, não qualquer editor.
 //    Foi a condição do owner pra o recurso existir, e é ela que sustenta o
 //    resto: quem marca alguém aqui está fazendo julgamento informado sobre um
 //    spammer persistente, não um toque apressado.
 //
-// 2. A JANELA NÃO TRAVA O CARD. O `acoesTravadas()` congela os três botões
-//    quando VOCÊ age e a app espera confirmação. Aqui você não pediu nada — ser
-//    congelado por uma decisão que a app tomou sozinha seria pior que o
-//    problema. Daí o slot próprio (`autoPendente`), fora do `pendingAction`.
+// 2. O PLACAR ANDA COM O ENVIO, não antes dele (`contarAoLandar`). Em todo o
+//    resto da app o placar é otimista, porque existe uma janela de Desfazer que
+//    devolve o número. Aqui não há janela: os pedidos vão direto, um a um. Se
+//    a página morresse no meio de um laço já contado, o placar ficaria com
+//    números que nunca saíram — e não haveria quando reconciliar. Contando ao
+//    landar, o número na tela é sempre o que de fato foi enviado.
 //
-// 3. A PALAVRA SEGUE O TEMPO VERBAL. Enquanto nada saiu, o banner diz "serão
-//    rejeitados" e oferece CANCELAR — "desfazer" pressupõe que foi você quem
-//    fez, e não foi. Depois que saiu não há o que cancelar, e a única ação
-//    verdadeira que sobra é DESLIGAR: não desfaz nada, para de acontecer de novo.
-//
-// A janela é de 20s pelo mesmo motivo MEDIDO do banner de conquista: 8s ficaram
-// "exatamente no limite" pra o owner notar e ler um banner que ele não estava
-// esperando. Aqui ele está ainda menos esperando.
-const AUTO_CANCELAR_MS = 20000;
+// Houve uma janela de 20s aqui, com aviso no futuro ("serão rejeitados") e
+// oferta de cancelar. Saiu por decisão do owner, e o motivo é o que a linha do
+// tempo mostrou: a janela começa quando o APP BUSCA a fila, não quando o editor
+// escolhe — ou seja, sempre no meio de outro card. Vinte segundos parados sobre
+// algo que ninguém está olhando não protegem; só atrasam. O que ficou no lugar
+// é honesto sobre o mesmo fato: o aviso conta enquanto acontece.
 
 function podeRecusarAutomaticoAqui() {
     // Função própria que delega, como os outros destrutivos: são decisões de
@@ -4884,24 +4881,26 @@ function alternarAutoDoAutor(chave) {
     renderHistory();
 }
 
-// Chamado depois de a fila crescer. Tira da frente os pedidos dos autores
-// marcados e agenda a recusa — nada é enviado antes da janela vencer.
-function aplicarRecusaAutomatica() {
+// Uma execução por vez: a fila pode crescer de novo enquanto o laço corre, e
+// duas passagens simultâneas mandariam o mesmo pedido duas vezes.
+let recusaAutomaticaRodando = false;
+
+// Chamado depois de a fila crescer. Tira os pedidos dos autores marcados e
+// rejeita na hora, um a um, com o aviso contando quantos faltam.
+async function aplicarRecusaAutomatica() {
     if (!podeRecusarAutomaticoAqui()) return;
     if (Treino.ativo) return;               // no treino a fila é de exemplos
-    if (AppState.autoPendente) return;      // uma janela por vez
+    if (recusaAutomaticaRodando) return;
     const alvos = (AppState.queue || []).filter(
         (x) => x && x.creatorId !== undefined && x.creatorId !== null && autoLigado(x.creatorId));
     if (alvos.length === 0) return;
 
+    recusaAutomaticaRodando = true;
     const n = alvos.length;
     const autor = alvos[0].createdBy || String(alvos[0].creatorId);
     const chave = String(alvos[0].creatorId);
-    // Otimista, como todo o resto: o placar anda agora e volta no Cancelar.
-    AppState.stats.rejected += n;
-    AppState.serverTotal = Math.max(0, AppState.serverTotal - n);
-    updateStats();
-    saveStats();
+    // Saem da fila ANTES de enviar: senão o editor veria como card o pedido que
+    // a app já está rejeitando, e poderia agir nele — dois envios pro mesmo.
     const fora = new Set(alvos);
     const eraOAtual = AppState.currentPlace && fora.has(AppState.currentPlace);
     AppState.queue = AppState.queue.filter((x) => !fora.has(x));
@@ -4914,40 +4913,27 @@ function aplicarRecusaAutomatica() {
         else showNoPlaces();
     }
 
-    let resolvido = false;
-    const cancelar = () => {
-        if (resolvido) return;
-        resolvido = true;
-        clearTimeout(AppState.autoPendente.timer);
-        AppState.autoPendente = null;
-        AppState.stats.rejected = Math.max(0, AppState.stats.rejected - n);
-        AppState.serverTotal += n;
-        updateStats();
-        saveStats();
-        AppState.queue.unshift(...alvos);
-        updatePendingCount();
-        showCurrentPlace();
-        showToast(t('auto.cancelado', { n, autor }), 'info');
-    };
-    const enviar = async () => {
-        if (resolvido) return;
-        resolvido = true;
-        AppState.autoPendente = null;
-        await enviarLote(alvos, { silencioso: true });
-        // Passado agora é verdade, e a única ação real que sobra é DESLIGAR.
-        showToast(t('auto.feito', { n, autor }), 'hint', AUTO_CANCELAR_MS,
-            () => { alternarAutoDoAutor(chave); showToast(t('auto.desligado', { autor }), 'info'); });
-    };
-    AppState.autoPendente = { places: alvos, cancelar, enviar,
-        timer: setTimeout(enviar, AUTO_CANCELAR_MS) };
-    showToast(t('auto.futuro', { n, autor }), 'hint', AUTO_CANCELAR_MS, cancelar);
-}
-
-// Sair da página no meio da janela CANCELA — mesma regra do lote (#162): N
-// requisições disparadas no `pagehide` completam parcialmente, e meio-lote
-// enviado é a única falha aqui sem sintoma nenhum.
-function descarregarRecusaAutomatica() {
-    if (AppState.autoPendente) AppState.autoPendente.cancelar();
+    // O aviso conta enquanto acontece: o número cai a cada pedido que sai. É a
+    // única coisa que o editor pode acompanhar aqui, já que não há o que cancelar.
+    // Duração longa porque quem o dispensa é o próprio fim do laço.
+    const andando = (q) => t(q === 1 ? 'auto.andando' : 'auto.andandoPlural', { n: q, autor });
+    const aviso = showToast(andando(n), 'hint', 600000);
+    try {
+        await enviarLote(alvos, {
+            silencioso: true,
+            contarAoLandar: true,
+            aoProgredir: (faltam) => {
+                if (faltam > 0) aviso.texto(andando(faltam));
+            },
+        });
+    } finally {
+        recusaAutomaticaRodando = false;
+        aviso.dispensar();
+    }
+    // Acabou. A única ação verdadeira que sobra é DESLIGAR: não desfaz nada,
+    // para de acontecer de novo.
+    showToast(t(n === 1 ? 'auto.feito' : 'auto.feitoPlural', { n, autor }), 'hint', 20000,
+        () => { alternarAutoDoAutor(chave); showToast(t('auto.desligado', { autor }), 'info'); });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5041,8 +5027,19 @@ function rejeitarLoteDoAutor(place) {
 // `silencioso` existe pra recusa automática: lá quem presta contas é o banner
 // (que já diz o número e oferece desligar), e abrir a folha por cima do card
 // seria a app interrompendo por algo que o editor não pediu.
+// `contarAoLandar` troca o placar OTIMISTA pelo placar que anda junto com o
+// envio. O lote manual (que tem janela de Desfazer) precisa do otimista: ele
+// mostra o resultado antes de mandar, e o Desfazer devolve. A recusa automática
+// não tem janela nenhuma — contar antes ali criaria uma divergência que ninguém
+// pode reconciliar se a página morrer no meio do laço.
+// `aoProgredir` recebe quantos AINDA FALTAM, pra quem quiser mostrar.
 async function enviarLote(places, opts = {}) {
     const conta = { ok: 0, ja: 0, erro: 0 };
+    const aoLandar = !!opts.contarAoLandar;
+    const progresso = () => {
+        if (aoLandar) { updateStats(); saveStats(); updatePendingCount(); }
+        if (opts.aoProgredir) opts.aoProgredir(places.length - conta.ok - conta.ja - conta.erro, conta);
+    };
     AppState.inFlightActions++;
     updateInFlightIndicator();
     try {
@@ -5052,19 +5049,28 @@ async function enviarLote(places, opts = {}) {
                 conta.ok++;
                 recordHistory('reject', 1);
                 registrarRejeicaoDeAutor(p);
+                if (aoLandar) {
+                    AppState.stats.rejected++;
+                    AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+                }
             } else if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
                 conta.ja++;
+                if (aoLandar) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
             } else if (r && r.errorCategory === 'unauthorized') {
                 handleUnauthorized();
                 return;
             } else {
                 conta.erro++;
-                // O que não saiu volta pra fila: o placar já contou, então
-                // devolver o pedido sem devolver o número mentiria nos dois.
-                AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
-                AppState.serverTotal++;
+                // O que não saiu volta pra fila. Com o placar otimista é preciso
+                // devolver o número junto; contando ao landar não há o que devolver,
+                // porque o número nunca foi somado.
+                if (!aoLandar) {
+                    AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
+                    AppState.serverTotal++;
+                }
                 AppState.queue.push(p);
             }
+            progresso();
         }
     } finally {
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
@@ -6274,9 +6280,8 @@ function descarregarAcaoPendente() {
 
 function setupDescargaAoSair() {
     window.addEventListener('pagehide', descarregarAcaoPendente);
-    window.addEventListener('pagehide', descarregarRecusaAutomatica);
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') { descarregarAcaoPendente(); descarregarRecusaAutomatica(); }
+        if (document.visibilityState === 'hidden') descarregarAcaoPendente();
     });
 }
 
@@ -6843,7 +6848,16 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
         container.removeChild(container.firstElementChild);
     }
     container.appendChild(toast);
-    setTimeout(dismiss, durationMs);
+    const relogio = setTimeout(dismiss, durationMs);
+    // Punho pra quem precisa ACOMPANHAR algo: trocar o texto no lugar em vez de
+    // empilhar um toast por passo. Call site que não precisa simplesmente ignora.
+    return {
+        texto(novo) {
+            const alvo = toast.querySelector('span.flex-1');
+            if (alvo) alvo.textContent = novo;
+        },
+        dispensar() { clearTimeout(relogio); dismiss(); },
+    };
 }
 
 function onSwipeLeft() { handleReject(); }

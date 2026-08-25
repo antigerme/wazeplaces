@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.25-01
+
+### Alterado
+- **A recusa automática não espera mais 20 segundos.** Os pedidos do autor marcado são rejeitados assim que a fila chega, e o aviso no topo **conta enquanto acontece**: *“Rejeitando 3 pedidos de fulano…”*, depois 2, depois 1. No fim ele vira *“3 pedidos rejeitados — toque para desligar isto”*.
+
+  A espera existia pra dar chance de cancelar, mas ela começava quando **o app buscava a fila** — ou seja, sempre no meio de outro card. Vinte segundos parados sobre algo que ninguém está olhando não protegem: só atrasam.
+
+  Uma consequência boa: **o placar agora anda junto com o envio**, em vez de contar tudo na frente. O número que você vê é sempre o que de fato foi para o Waze — antes, fechar o app no meio podia deixar o placar contando pedidos que nunca saíram.
+
+---
+
 ## v2026.08.24-04
 
 ### Adicionado
