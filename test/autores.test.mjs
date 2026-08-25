@@ -32,7 +32,7 @@ function montar(agoraMs = Date.UTC(2026, 7, 24, 12)) {
   };
   const nomes = Object.keys(escopo);
   const corpo = trecho + '\nreturn { registrarRejeicaoDeAutor, contagemDoAutor, listaDeAutores,'
-    + ' esquecerAutor, esquecerAutores, loadAutores, podarAutores, AUTORES_KEY,'
+    + ' esquecerAutor, esquecerAutores, loadAutores, podarAutores, AUTORES_KEY, AUTORES_VISIVEIS,'
     + ' AUTORES_MAX_REINCIDENTES, AUTORES_MAX_VISTOS, AUTORES_MAX_DIAS, AUTOR_LIMIAR_DESTAQUE };';
   const api = new Function(...nomes, corpo)(...nomes.map((n) => escopo[n]));
   return { ...api, guardado, escopo, dia: Math.floor(agoraMs / 86400000) };
@@ -435,4 +435,61 @@ test('data: a frase ocupa a linha INTEIRA, não a coluna do nome', () => {
   assert.ok(data, 'o <span> da data mudou de forma');
   assert.match(data[1], /\bbasis-full\b/,
     'sem basis-full a data volta a dividir a coluna apertada com o nome');
+});
+
+
+test('teto: o botão só existe quando SOBRA alguém — 10 exatos não geram botão', () => {
+  // A borda que é fácil errar. Com a lista igual ao teto nada é escondido, então
+  // um botão ali diria "Ver mais 0" ou sumiria sem explicação — pior que não ter
+  // teto. MEDIDO no browser: 0,1,7,9,10 autores → nenhum botão; 11 → "Ver mais 1".
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const j = semComentarios.indexOf('function renderAutores');
+  const render = semComentarios.slice(j, semComentarios.indexOf('\nfunction ', j + 10));
+  assert.match(render, /Math\.max\(0,\s*todas\.length - AUTORES_VISIVEIS\)/,
+    'o número escondido é o que SOBRA, e nunca negativo');
+  assert.match(render, /escondidas > 0 \? todas\.slice\(0, AUTORES_VISIVEIS\) : todas/,
+    'sem sobra a lista sai inteira — fatiar sempre esconderia nada e mesmo assim cortaria');
+  assert.match(render, /escondidas > 0 \|\| autoresExpandido\s*\n?\s*\?/,
+    'o botão precisa exigir sobra (ou já estar expandido, pra oferecer a volta)');
+});
+
+test('teto: o número vai NO rótulo, com plural, nas 4 línguas', () => {
+  // "Ver mais" sozinho não diz se são 3 ou 300 — e é isso que decide o toque.
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const j = semComentarios.indexOf('function renderAutores');
+  const render = semComentarios.slice(j, semComentarios.indexOf('\nfunction ', j + 10));
+  assert.match(render, /escondidas === 1 \? 'stats\.autores\.verMais' : 'stats\.autores\.verMaisPlural'/,
+    'plural explícito (o projeto não usa ICU)');
+  assert.match(render, /\{ n: escondidas \}/, 'o número tem que ser interpolado');
+  const dict = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  for (const k of ['verMais', 'verMaisPlural', 'verMenos']) {
+    const n = [...dict.matchAll(new RegExp("'stats\\.autores\\." + k + "':", 'g'))].length;
+    assert.equal(n, 4, `stats.autores.${k} não está nas 4 línguas`);
+  }
+  for (const k of ['verMais', 'verMaisPlural']) {
+    for (const m of dict.matchAll(new RegExp("'stats\\.autores\\." + k + "': '([^']*)'", 'g'))) {
+      assert.match(m[1], /\{n\}/, `${k} sem {n}: "${m[1]}" viraria "Ver mais" sem número`);
+    }
+  }
+});
+
+test('teto: expandido volta ao padrão pelos TRÊS caminhos de fechar', () => {
+  // Modal fecha por botão, Esc e scrim. Amarrar a limpeza ao botão deixa os
+  // outros dois vazando o estado — o gotcha dos modais deste projeto.
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('const LIMPEZA_AO_FECHAR');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\n};', i));
+  assert.match(bloco, /filtersModal\(\)\s*\{[^}]*autoresExpandido = false/,
+    'a volta ao padrão precisa estar em LIMPEZA_AO_FECHAR, não no handler de um botão');
+});
+
+test('teto: o corte é 10, e o número tem a medição atrás', () => {
+  const m = montar();
+  assert.equal(m.AUTORES_VISIVEIS, 10);
+  const i = fonte.indexOf('const AUTORES_VISIVEIS');
+  const antes = fonte.slice(Math.max(0, i - 900), i);
+  assert.match(antes, /medido|MEDIDO/,
+    'teto sem medição atrás vira número escolhido a dedo, e o próximo a mexer não sabe o que reabrir');
+  assert.ok(m.AUTORES_VISIVEIS < m.AUTORES_MAX_REINCIDENTES,
+    'mostrar mais do que cabe na memória não faria sentido');
 });

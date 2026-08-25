@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.25-04
+
+### Adicionado
+- **A lista de autores mostra 10 e oferece o resto num toque.** Quando há mais de 10, aparece um botão *“Ver mais 13”* — com o número, para você saber se vale o toque antes de dar. Tocando, abre tudo de uma vez e o botão vira *“Ver menos”*.
+
+  Com **10 ou menos, o botão não existe** — nada está escondido, então não há o que oferecer.
+
+  O ganho é a altura ficar **constante**: antes a lista crescia 59px por autor (2,4 telas com 23 autores, 7 telas com 100, 35 telas com 500). Agora é sempre a mesma altura, tenha ela 11 ou 500.
+
+  Fechar o painel devolve à lista curta — por qualquer caminho, inclusive Esc e toque fora.
+
+---
+
 ## v2026.08.25-03
 
 ### Alterado

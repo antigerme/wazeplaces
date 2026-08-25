@@ -3326,6 +3326,79 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── Teto da lista de autores: o botão só existe quando SOBRA alguém ────────
+// A borda é 10 EXATOS: nada escondido, nenhum botão. Um "Ver mais 0" — ou um
+// botão que some sem explicação — é pior que não ter teto. E a altura tem que
+// ficar CONSTANTE: é o ganho inteiro do recurso (medido: 2,4 telas com 23
+// autores sem teto, 7,1 com 100, 34,9 com 500; com teto, sempre a mesma).
+{
+  const onde = 'teto de autores';
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const errosT = [];
+  page.on('pageerror', (e) => errosT.push(String(e)));
+  await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(450);
+
+  const alturas = [];
+  for (const n of [0, 9, 10, 11, 23, 100]) {
+    const m = await page.evaluate((qtd) => {
+      const dia = Math.floor(Date.now() / 86400000);
+      const r = {};
+      for (let i = 0; i < qtd; i++) r[String(100000 + i)] = [30 - (i % 28), `autor_${i}`, dia - (i % 30)];
+      localStorage.setItem('waze_places_autores', JSON.stringify({ v: [], r }));
+      AppState.autores = null;
+      AppState.profile = { rank: 5, isAreaManager: true, userName: 'x' };
+      AppState.authenticated = true;
+      openModal('filtersModal'); switchFilterTab('filtersTabHistory'); renderHistory();
+      const btn = document.getElementById('autoresVerMais');
+      return {
+        linhas: document.querySelectorAll('.autor-lin').length,
+        rotulo: btn ? (btn.textContent || '').trim() : null,
+        alvo: btn ? Math.round(btn.getBoundingClientRect().height) : null,
+        largura: btn ? Math.round(btn.getBoundingClientRect().width) : null,
+        altura: Math.round(document.getElementById('autoresBody').getBoundingClientRect().height),
+      };
+    }, n);
+    if (n <= 10) {
+      checa(m.rotulo === null, `${onde}: ${n} autores geraram botão`, m.rotulo);
+      checa(m.linhas === n, `${onde}: ${n} autores mostraram ${m.linhas} linhas`);
+    } else {
+      checa(m.linhas === 10, `${onde}: ${n} autores mostraram ${m.linhas} linhas (esperado 10)`);
+      checa(!!m.rotulo && m.rotulo.includes(String(n - 10)),
+        `${onde}: o rótulo não traz quantos faltam`, `${m.rotulo} (esperava conter ${n - 10})`);
+      checa(m.alvo >= 44, `${onde}: alvo de ${m.alvo}px < 44`);
+      checa(m.largura > 300, `${onde}: botão estreito demais`, `${m.largura}px`);
+      alturas.push(m.altura);
+    }
+  }
+  // O ganho: 11, 23 e 100 autores custam a MESMA altura.
+  checa(new Set(alturas).size === 1,
+    `${onde}: a altura não ficou constante — é o ganho inteiro do teto`, JSON.stringify(alturas));
+
+  // Ida e volta, e a volta ao padrão ao fechar por Esc (não pelo botão).
+  const ida = await page.evaluate(async () => {
+    document.getElementById('autoresVerMais').click();
+    await new Promise((r) => setTimeout(r, 80));
+    return { linhas: document.querySelectorAll('.autor-lin').length,
+             rotulo: (document.getElementById('autoresVerMais').textContent || '').trim() };
+  });
+  checa(ida.linhas === 100, `${onde}: tocar não expandiu`, String(ida.linhas));
+  checa(ida.rotulo && !/100|90/.test(ida.rotulo),
+    `${onde}: expandido continua prometendo "ver mais"`, ida.rotulo);
+  await page.keyboard.press('Escape');
+  await assentar(page, 200);
+  const reab = await page.evaluate(() => {
+    openModal('filtersModal'); switchFilterTab('filtersTabHistory'); renderHistory();
+    return document.querySelectorAll('.autor-lin').length;
+  });
+  checa(reab === 10, `${onde}: reabrir depois do Esc não voltou à lista curta`, String(reab));
+  checa(errosT.length === 0, `${onde}: erro de JS`, errosT[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -3361,4 +3434,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
-  + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`);
+  + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
+  + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`);
