@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.25-02
+
+### Adicionado
+- **A lista de autores agora diz há quanto tempo cada um está marcado.** Embaixo do nome de quem tem a recusa automática ligada aparece *“marcado há 22 dias”* — ou *“marcado hoje”*, no dia em que você liga.
+
+  Serve pra uma coisa só: a marca **caduca sozinha em 30 dias sem pedido nenhum**. Isso é de propósito, pra tirar a pessoa do castigo caso você esqueça de desmarcar ou passe um tempo sem abrir o app. Sem a data na tela não dava pra saber se um autor estava perto disso ou se tinha acabado de ser marcado.
+
+  Quem continua mandando pedido tem o prazo renovado a cada rejeição, então **os 30 dias só correm pra quem de fato parou**. Desligar o interruptor apaga a data junto.
+
+---
+
 ## v2026.08.25-01
 
 ### Alterado
