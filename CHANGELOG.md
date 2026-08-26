@@ -8,6 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.26-02
+
+### Alterado
+- **“Filtros e Preferências” abre na hora.** Antes ele esperava o Waze responder duas vezes (a lista de países e a de estados) para só então aparecer — e como essas listas ficam guardadas depois da primeira vez, a demora era **intermitente**: acontecia uma vez por sessão e sumia depois, o que a tornava difícil até de descrever.
+
+  Medido: o modal aparecia em **480 ms** com rede boa e em **1,3 s** com rede ruim. Agora aparece em **92 ms** nas duas. País e estado se preenchem sozinhos, mostrando *“Carregando…”* enquanto chegam. Se a rede falhar, o modal abre do mesmo jeito.
+
+- **A app ficou 58% mais leve para carregar.** O JavaScript passou a ser minificado, como já era o CSS: de **187 KB para 78 KB** comprimidos. Num celular em rede ruim isso são vários segundos a menos para abrir.
+
+  O gerador de QR do pareamento (12 KB) saiu do carregamento inicial — ele só é buscado quando você abre o pareamento, que a maioria dos editores nunca usa.
+
+  Nada muda no que a app faz. É o mesmo código, entregue menor.
+
+---
+
 ## v2026.08.26-01
 
 ### Alterado

@@ -807,9 +807,28 @@ function limparQrPareamento() {
     if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
-function desenharQrPareamento(url) {
+// O gerador de QR (12KB) só serve ao pareamento, que a maioria dos editores
+// nunca abre — e era baixado em TODA abertura da app. Aqui ele vem sob demanda,
+// uma vez por sessão. É `self` na CSP, então injetar a tag é permitido.
+let _qrCarregando = null;
+function carregarQr() {
+    if (typeof gerarQR === 'function') return Promise.resolve(true);
+    if (_qrCarregando) return _qrCarregando;
+    _qrCarregando = new Promise((resolve) => {
+        const s = document.createElement('script');
+        s.src = 'js/min/qr.js';
+        s.onload = () => resolve(typeof gerarQR === 'function');
+        // Falhar não pode travar o pareamento: o código digitável continua lá.
+        s.onerror = () => { _qrCarregando = null; resolve(false); };
+        document.head.appendChild(s);
+    });
+    return _qrCarregando;
+}
+
+async function desenharQrPareamento(url) {
     const canvas = document.getElementById('pairQr');
-    if (!canvas || typeof gerarQR !== 'function') return;
+    if (!canvas) return;
+    if (!(await carregarQr())) { canvas.classList.add('hidden'); return; }
     const qr = gerarQR(url);
     if (!qr) { canvas.classList.add('hidden'); return; }
     canvas.classList.remove('hidden');
@@ -2256,14 +2275,7 @@ async function openFiltersModal() {
     $('filterResidential').value = AppState.filters.residential;
     $('filterRegion').value = API.getRegion();
 
-    if (AppState.countries.length === 0) {
-        const r = await API.listCountries();
-        if (r.success) AppState.countries = r.countries;
-    }
-    populateCountrySelect();
     populateManagedAreaSelect();
-    await loadStatesIntoSelect(API.getCountry());
-
     $('filterMyArea').checked = AppState.filters.myArea;
     const disabled = AppState.filters.myArea;
     $('filterCountry').disabled = disabled;
@@ -2275,7 +2287,44 @@ async function openFiltersModal() {
     if (sortSel) sortSel.value = AppState.filters.sortOrder || 'newest';
     renderHistory();
 
+    // O modal ABRE AQUI, antes de qualquer rede. País e estado vêm do Waze e,
+    // na PRIMEIRA abertura da sessão, são duas idas — MEDIDO com a app de pé:
+    // o modal só aparecia aos 480ms em rede boa e aos 1337ms em rede ruim,
+    // porque o `openModal` era a última linha de uma função `async`. O editor
+    // tocava em Filtros e não acontecia NADA até o Waze responder duas vezes.
+    // Da segunda abertura em diante era 80ms, porque as duas listas ficam em
+    // cache de memória — daí a lentidão ser intermitente e difícil de nomear.
+    //
+    // Tudo que é síncrono já está pronto acima; só as duas listas chegam depois
+    // e se preenchem sozinhas. Quem abre pra mexer em tipo, categoria, ordem ou
+    // preferência não espera rede nenhuma.
     openModal('filtersModal');
+    await popularPaisEstado();
+}
+
+// As duas listas que vêm do Waze. Fora do `openFiltersModal` porque ele agora
+// só as AGENDA — e porque um erro aqui não pode impedir o modal de abrir.
+async function popularPaisEstado() {
+    const select = document.getElementById('filterCountry');
+    // Enquanto não chega, o seletor diz o que está havendo em vez de ficar
+    // vazio: seletor vazio parece defeito, e o editor toca de novo.
+    const carregando = AppState.countries.length === 0;
+    if (carregando && select) {
+        select.innerHTML = `<option value="">${escapeHtml(t('filters.carregando'))}</option>`;
+        select.disabled = true;
+    }
+    try {
+        if (AppState.countries.length === 0) {
+            const r = await API.listCountries();
+            if (r.success) AppState.countries = r.countries;
+        }
+        populateCountrySelect();
+        await loadStatesIntoSelect(API.getCountry());
+    } finally {
+        // O `myArea` marcado desabilita os três de propósito (regra de cima);
+        // fora isso, devolve o seletor ao editor mesmo se a rede falhou.
+        if (select) select.disabled = !!AppState.filters.myArea;
+    }
 }
 
 function applyFiltersFromModal() {

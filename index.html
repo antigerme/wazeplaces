@@ -1536,18 +1536,22 @@
     </div>
 
 
-    <script defer src="js/version.js"></script>
-    <script defer src="js/qr.js"></script>
-    <script defer src="js/i18n.js"></script>
-    <script defer src="js/api.js"></script>
-    <!-- Mini-mapa de evidência. Matemática de Mercator pura, zero dependência,
-         como o js/qr.js. Antes do app.js, que o usa no render do card. -->
-    <script defer src="js/mapa.js"></script>
-    <script defer src="js/swipe.js"></script>
-    <script defer src="js/app.js"></script>
-    <!-- Depois do app.js: usa AppState/openModal/showToast, que são dele. -->
-    <script defer src="js/presenca.js"></script>
+    <script defer src="js/min/version.js"></script>
+    <script defer src="js/min/i18n.js"></script>
+    <script defer src="js/min/api.js"></script>
+    <!-- Mini-mapa de evidência. Matemática de Mercator pura, zero dependência.
+         Antes do app.js, que o usa no render do card.
 
-    <script defer src="js/sw-register.js"></script>
+         O js/qr.js NÃO está aqui de propósito: 12KB que só o pareamento usa, e
+         a maioria dos editores nunca abre. Ele vem sob demanda pelo
+         `carregarQr()` do app.js, e segue no precache do service worker pra
+         que essa vinda seja instantânea. -->
+    <script defer src="js/min/mapa.js"></script>
+    <script defer src="js/min/swipe.js"></script>
+    <script defer src="js/min/app.js"></script>
+    <!-- Depois do app.js: usa AppState/openModal/showToast, que são dele. -->
+    <script defer src="js/min/presenca.js"></script>
+
+    <script defer src="js/min/sw-register.js"></script>
 </body>
 </html>
