@@ -61,7 +61,7 @@
          E "desligar" também não é opção: no Bot Fight Mode (plano grátis) o
          JavaScript Detections NÃO pode ser desativado — só é opcional no Super
          Bot Fight Mode e no Bot Management Enterprise. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).
@@ -190,6 +190,26 @@
               nova.setAttribute('name', 'theme-color');
               nova.setAttribute('content', t === 'dark' ? '#0f172a' : '#f8fafc');
               document.head.appendChild(nova);
+            }
+            // ── Qual tela pintar: login ou cards ────────────────────────
+            // O #authScreen nasce VISÍVEL no HTML e o #appScreen `hidden`; quem
+            // troca é o initApp, quando o app.js executa. Isso é uma CORRIDA com
+            // o primeiro paint do navegador, e o aparelho decide quem ganha.
+            // MEDIDO, mesma rede, variando só a CPU: 1x e 4x sem flash; 8x mostra
+            // a tela de login por 573ms; 12x por 949ms; 20x por 2131ms. No
+            // desktop o JS ganha por 2ms — foi por isso que nunca apareceu aqui,
+            // e aparece "quase toda vez" no celular do owner, que abre a app
+            // várias vezes por dia com sessão válida de 21 dias.
+            //
+            // A decisão não depende de rede nem de nada assíncrono: o token está
+            // no localStorage, aqui do lado. Decidir AQUI a tira da corrida, pelo
+            // mesmo caminho que o tema já usa logo acima e pelo mesmo motivo.
+            //
+            // O initApp continua mandando: se o token estiver vencido, ele chama
+            // showAuthScreen e a tela de login volta. Isto é uma APOSTA otimista
+            // no caso comum, não uma segunda fonte de verdade.
+            if (localStorage.getItem('waze_session_token')) {
+              document.documentElement.classList.add('tem-sessao');
             }
           } catch (e) {}
         })();

@@ -175,7 +175,7 @@ const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest'
 //
 // Divergência de CSP não dá erro: o browser aplica a INTERSEÇÃO, então o efeito
 // é alguma coisa parar de carregar em produção, calada (gotcha #14).
-const CSP = "default-src 'self'; script-src 'self' 'sha256-pheT8R9zuy7UG1vwGSFJUN70Be6pv23ool5Rw4ohJWg=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';";
+const CSP = "default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';";
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',

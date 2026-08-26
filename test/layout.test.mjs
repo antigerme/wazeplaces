@@ -2533,3 +2533,57 @@ test('filtros: o modal abre antes de qualquer await de rede', () => {
   // Falha de rede não pode deixar o seletor travado pra sempre.
   assert.match(pop, /finally\s*\{/, 'sem finally, uma falha deixa o seletor desabilitado');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Sem piscada da tela de login em quem já está logado
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// O #authScreen nasce VISÍVEL no HTML e o #appScreen `hidden`; quem troca é o
+// initApp, quando o app.js executa. Isso é uma CORRIDA com o primeiro paint, e
+// o APARELHO decide quem ganha. MEDIDO lendo o display computado DENTRO do
+// observador de paint, com sessão válida e o SW ativo — o cenário de quem abre
+// a app várias vezes por dia:
+//
+//     CPU     antes            depois
+//      1x     cards            cards
+//      8x     LOGIN no pixel   cards
+//     12x     LOGIN no pixel   cards
+//     20x     LOGIN no pixel   cards
+//     30x     LOGIN no pixel   cards
+//
+// No desktop o JS ganhava a corrida por 2ms, e foi por isso que isto nunca
+// apareceu em teste nenhum daqui — só no celular do owner.
+//
+// O conserto é o MESMO caminho que o tema já usa: decidir no script inline do
+// <head>, antes do primeiro paint, lendo o localStorage que está ali do lado.
+// Não é segunda fonte de verdade — o initApp continua mandando, e derruba a
+// aposta chamando showAuthScreen se o token estiver vencido.
+test('entrada: quem tem sessão não vê a tela de login piscar', () => {
+  const html = read('index.html');
+  const m = /<script>([\s\S]*?)<\/script>/.exec(html);
+  assert.ok(m, 'sumiu o script inline do <head>');
+  const inline = m[1];
+  assert.match(inline, /waze_session_token/,
+    'a decisão de tela saiu do script inline — volta a ser corrida com o paint');
+  assert.match(inline, /classList\.add\('tem-sessao'\)/, 'a marca da sessão mudou de nome');
+  // A decisão TEM que ser síncrona: qualquer await/then no script INTEIRO
+  // devolve a corrida. Fatiar a partir da chave deixava passar um `.then(`
+  // colocado ANTES dela — pego na sabotagem, guard frouxo meu.
+  assert.doesNotMatch(inline, /await\s|\.then\(|fetch\(|setTimeout\(/,
+    'o script inline do <head> virou assíncrono — ele perde do primeiro paint');
+
+  // E o CSS que a aplica precisa existir, senão a classe não faz nada.
+  const css = read('css/styles.css');
+  assert.match(css, /html\.tem-sessao\s+#authScreen\s*\{[^}]*display:\s*none/,
+    'sem a regra, a tela de login volta a ser pintada');
+  assert.match(css, /html\.tem-sessao\s+#appScreen\s*\{[^}]*display:\s*flex/,
+    'sem a regra, os cards não aparecem antes do JS');
+  // O CSS GERADO é o que a app carrega — editar o fonte e não regerar não vale.
+  // Confere a REGRA no gerado, não só o nome da classe: `.tem-sessao-XX`
+  // contém `.tem-sessao` e passava batido (pego na sabotagem).
+  const gerado = read('css/app.css');
+  assert.match(gerado, /\.tem-sessao\s+#authScreen\s*\{\s*display:\s*none/,
+    'a regra do #authScreen não chegou no css/app.css — rode `npm run css`');
+  assert.match(gerado, /\.tem-sessao\s+#appScreen\s*\{\s*display:\s*flex/,
+    'a regra do #appScreen não chegou no css/app.css — rode `npm run css`');
+});

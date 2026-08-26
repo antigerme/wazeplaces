@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.26-03
+
+### Corrigido
+- **A tela de login não pisca mais para quem já está logado.** Se você abre o app várias vezes por dia com a sessão válida, via a tela de “entrar com cookies” aparecer por um instante antes dos cards. Agora ela não aparece.
+
+  A causa era uma corrida: o app decidia qual tela mostrar só quando o JavaScript terminava de carregar, e o navegador já tinha pintado a tela de login antes disso. Quem ganhava a corrida dependia da **velocidade do aparelho** — em computador o JavaScript ganhava por 2 milésimos de segundo, e por isso o problema nunca aparecia nos testes daqui; no celular, perdia.
+
+  Medido com sessão válida, variando só a velocidade do aparelho: em aparelhos 8× mais lentos que um computador, a tela de login era o que ia para o primeiro pixel, todas as vezes. Agora, de 1× a 30×, os cards aparecem direto.
+
+  A decisão passou para o mesmo lugar onde o app já decide o tema — antes do primeiro pixel, lendo o que está guardado no aparelho. **Quem não tem sessão continua vendo a tela de login normalmente**, e se a sessão estiver vencida o app volta para ela como sempre fez.
+
+---
+
 ## v2026.08.26-02
 
 ### Alterado
