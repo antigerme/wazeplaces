@@ -375,7 +375,15 @@ body.dark {
    irmãos — o placar levava 16px de margem por causa de coisa que ninguém vê.
    `gap` de flex ignora filho absolute. E `:not(.hidden)` porque `display:flex`
    como utility disputaria com o `hidden` no mesmo grupo. */
-#appScreen:not(.hidden) {
+/* O segundo seletor é o estado ANTES do JS: com sessão no aparelho, o script
+   inline do <head> marca o <html> e a tela dos cards já é pintada. Ele PRECISA
+   estar aqui junto, e não numa regra própria com `display:flex` — a cadeia de
+   flex inteira é que dá a altura ao card (ver "A app cabe na tela"). Sem ela o
+   #appScreen nascia com 416px em vez de 730, o placar ocupava a tela toda e
+   tudo se reacomodava quando o JS chegava: MEDIDO, CLS de 0,0053 pra 0,19 num
+   3G. Regra separada = duas fontes pro mesmo layout, e elas divergiram. */
+#appScreen:not(.hidden),
+html.tem-sessao #appScreen {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -2190,4 +2198,3 @@ button:active {
    sendo quem manda depois (token vencido → showAuthScreen, e a regra some junto
    porque o JS tira a classe). */
 html.tem-sessao #authScreen { display: none; }
-html.tem-sessao #appScreen { display: flex; }
