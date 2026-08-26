@@ -132,6 +132,11 @@ wazeplaces/
 │   │                        #  o render junto do CSS. test/layout.test.mjs recalcula o hash e
 │   │                        #  reprova se as DUAS cópias da CSP não tiverem o novo.)
 │   ├── sw-register.js       # Registro/auto-update do service worker. Externo pelo mesmo motivo
+│   ├── min/                 # GERADO por `npm run js` (tools/gerar-js.mjs) — commitado, NÃO editar.
+│   │                        #   **É ISTO que o index.html e o service-worker.js carregam.** O fonte
+│   │                        #   comentado segue sendo o que se edita e o que os testes FATIAM;
+│   │                        #   os comentários somem só da saída. Medido: 187 KB gzip na abertura
+│   │                        #   → 78 KB (-58%); o app.js sozinho, 109 → 35 KB.
 │   └── (sem vendor: Tailwind é pré-compilado em css/app.css)
 ├── server/
 │   ├── presenca.mjs         # Núcleo PURO da sala (crachá assinado, nome da sala, lista, TURN).
@@ -198,6 +203,7 @@ Pra simular o ambiente Cloudflare (Worker + KV): `npx wrangler dev`.
 npm run check          # node --check em js/*.js server/*.mjs worker/*.mjs
 npm test               # node --test — suite pura do core (test/core.test.mjs), ZERO deps
 npm run css            # SÓ se mexeu em classe do Tailwind OU no css/styles.css (regenera css/app.css; CI cobra)
+npm run js             # SEMPRE que mexer em js/*.js — regenera js/min/, que é o que a app CARREGA (CI cobra)
 npm run test:presenca  # SÓ se mexeu em presença/sala: 2 navegadores, WebSocket e WebRTC de verdade
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
 node tools/waze-probe.mjs <cookies.txt>   # OBRIGATÓRIO se mexeu em algo que fala com o Waze (ver 🔑)
@@ -757,7 +763,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 19. **Nunca `while (cond) await fn()` onde `fn` pode retornar síncrono sem progredir** — vira cascata de microtasks e congela a aba. Garanta que o await ceda o event loop.
 20. **Todo reset de fila passa por `resetQueue`** — ele faz `fetchEpoch++` e descarrega o `pendingAction` (execute no refresh, cancel no logout).
 21. **O filtro `isRead` do Waze é por VENUE, não por PUR** — a expansão pula `ur.isRead === true`, senão a foto já lida re-vira card eternamente.
-22. **`css/app.css` é GERADO — nunca edite à mão.** Mexeu em classe do Tailwind **ou no `css/styles.css`**? `npm run css`, e commite. O CI cobra no diff, e some com o estilo em produção sem erro no console. **A pegadinha nova é o `styles.css`**: antes ele ia cru pro browser e editar bastava; agora ele é minificado pra dentro do `app.css`, então editar sem regerar não muda nada na tela.
+22. **`css/app.css` é GERADO — nunca edite à mão.** Mexeu em classe do Tailwind **ou no `css/styles.css`**? `npm run css`, e commite. O CI cobra no diff, e some com o estilo em produção sem erro no console. **A pegadinha nova é o `styles.css`**: antes ele ia cru pro browser e editar bastava; agora ele é minificado pra dentro do `app.css`, então editar sem regerar não muda nada na tela. **E o mesmo vale agora pro JS**: `js/min/` é gerado por `npm run js` e é ELE que o `index.html` e o service worker carregam. Editar `js/app.js` sem regerar não quebra teste nenhum — os testes fatiam o FONTE — e manda a versão velha pra produção. O `js/qr.js` é o único que não entra na abertura: vem sob demanda pelo `carregarQr()`.
     **A ORDEM é `tailwind` ANTES de `styles`** desde v2026.08.05-04 — o nosso CSS vence o empate de especificidade. Era a ordem dos `<link>`; com um arquivo só, virou a ordem da CONCATENAÇÃO em `tools/gerar-css.mjs`. Travado em `test/layout.test.mjs`, que confere dentro do arquivo gerado.
 23. **Dark mode é 100% `dark:` no HTML/JS** — não crie override global. Se um `dark:` "não pega", é empate de especificidade: use `dark:hover:` explícito.
 24. **`applyI18n()` não entra em `<template>`** — chame `applyI18n(card)` no clone, senão o card volta pro português a cada swipe.

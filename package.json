@@ -11,14 +11,15 @@
   "scripts": {
     "start": "node server/node.mjs",
     "dev": "node server/node.mjs",
-    "check": "for f in js/*.js server/*.mjs worker/*.mjs; do node --check \"$f\"; done",
+    "check": "for f in js/*.js js/min/*.js server/*.mjs worker/*.mjs; do node --check \"$f\"; done",
     "test": "node --test",
     "test:browser": "node tools/smoke-browser.mjs",
     "css": "node tools/gerar-css.mjs",
     "cf:dev": "wrangler dev",
     "cf:deploy": "wrangler deploy",
     "test:presenca": "node tools/smoke-presenca.mjs",
-    "test:fluxo": "node tools/smoke-fluxo.mjs"
+    "test:fluxo": "node tools/smoke-fluxo.mjs",
+    "js": "node tools/gerar-js.mjs"
   },
   "engines": {
     "node": ">=22"

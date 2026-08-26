@@ -69,6 +69,22 @@ jobs:
             exit 1
           fi
 
+      - name: JS está em dia (npm run js)
+        run: |
+          # Mesmo contrato do CSS: js/min/ é GERADO (tools/gerar-js.mjs) e
+          # COMMITADO, porque quem só roda a app não faz `npm install`. O
+          # index.html e o service-worker.js apontam pra ELE, não pro fonte —
+          # então editar js/app.js e esquecer de regenerar não quebra nada
+          # visível aqui e manda a versão VELHA pra produção. É o pior tipo de
+          # falha: silenciosa e só no aparelho do editor.
+          cp -r js/min /tmp/js-min-committed
+          npm run js
+          if ! diff -rq /tmp/js-min-committed js/min >/dev/null; then
+            echo "::error::js/min/ está desatualizado. Rode 'npm run js' e commite o resultado."
+            diff -rq /tmp/js-min-committed js/min | head -20
+            exit 1
+          fi
+
       - name: Smoke de browser (o que guard de texto não pega)
         # Renderiza o card em 3 aparelhos × 3 idiomas × 3 tipos e MEDE. Os guards
         # de test/layout.test.mjs conferem o código e já falharam duas vezes em

@@ -2487,3 +2487,49 @@ test('.hidden vence: nada que o JS esconde pode ter display fixado em styles.css
   assert.deepEqual(presos, [],
     'estes elementos NÃO somem com .hidden — o styles.css carrega depois e ganha:\n  ' + presos.join('\n  '));
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  O modal de Filtros abre ANTES da rede
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `openFiltersModal` é `async` e busca país e estado no Waze. Enquanto o
+// `openModal` era a ÚLTIMA linha, tocar em Filtros não fazia nada visível até
+// as duas chamadas voltarem. MEDIDO com a app de pé: o modal aparecia aos
+// 480ms em rede boa e aos 1337ms em rede ruim na PRIMEIRA abertura da sessão,
+// e aos 80ms depois — as listas ficam em cache de memória, e é por isso que a
+// lentidão era intermitente e difícil de nomear. Depois do conserto: 92ms nas
+// duas redes.
+//
+// O que este guard protege é a ORDEM: tudo que é síncrono, depois `openModal`,
+// e só então a rede.
+test('filtros: o modal abre antes de qualquer await de rede', () => {
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const i = src.indexOf('async function openFiltersModal');
+  assert.ok(i > 0, 'openFiltersModal sumiu');
+  const corpo = src.slice(i, src.indexOf('\n}\n', i));
+  const semComentarios = corpo.replace(/\/\/[^\n]*/g, '');
+
+  const abre = semComentarios.indexOf("openModal('filtersModal')");
+  assert.ok(abre > 0, 'openFiltersModal não abre o modal');
+
+  // Nenhum `await` pode vir ANTES do openModal — é isso que fazia o editor
+  // esperar a rede olhando pra tela parada.
+  const antes = semComentarios.slice(0, abre);
+  assert.doesNotMatch(antes, /\bawait\b/,
+    'há um await ANTES do openModal: o modal volta a esperar a rede pra aparecer');
+
+  // E as duas buscas continuam existindo, depois — senão "rápido" seria só
+  // ter deixado de carregar país e estado.
+  const depois = semComentarios.slice(abre);
+  assert.match(depois, /await popularPaisEstado\(\)/,
+    'as listas de país/estado precisam continuar sendo carregadas, só que depois');
+  const jp = src.indexOf('async function popularPaisEstado');
+  assert.ok(jp > 0, 'popularPaisEstado sumiu');
+  // Fatia SÓ o corpo da função: sem isto o `finally` de qualquer função
+  // lá adiante no arquivo satisfazia o guard (pego na sabotagem).
+  const pop = src.slice(jp, src.indexOf('\n}\n', jp));
+  assert.match(pop, /API\.listCountries\(\)/, 'a busca de países sumiu');
+  assert.match(pop, /loadStatesIntoSelect\(/, 'a busca de estados sumiu');
+  // Falha de rede não pode deixar o seletor travado pra sempre.
+  assert.match(pop, /finally\s*\{/, 'sem finally, uma falha deixa o seletor desabilitado');
+});
