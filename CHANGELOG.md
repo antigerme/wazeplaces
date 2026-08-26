@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.26-01
+
+### Alterado
+- **Os selos do criador começam com maiúscula.** A linha passou de `L1 · app · ver +2` para **`L1 · App · Ver +2`**. Pedido de quem usa: a 10px, tudo em minúscula é difícil de varrer com o olho — a maiúscula dá onde começar.
+
+  Vale para **todos** os selos que são palavra, não só `App` e `Site`: `Ajuda` e `Voz` entraram junto, nas quatro línguas. Capitalizar dois e deixar dois seria pior que não mexer. `L1` e `✕ 46` ficam como estão — não são palavra, são nível e contagem.
+
+  **Não custou espaço do nome de quem enviou**, que disputa a mesma linha: medido antes de mexer, 1px no iPhone SE e zero no Pixel 7.
+
+---
+
 ## v2026.08.25-05
 
 ### Alterado

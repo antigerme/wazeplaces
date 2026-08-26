@@ -342,3 +342,44 @@ test('manifest: texto neutro e lang igual ao LANG_FALLBACK', () => {
     'texto acentuado no manifest (ele é servido igual pra todo mundo):\n' +
     comAcento.map(([c, v]) => `  ${c} → ${v}`).join('\n'));
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Os selos de texto do card seguem UMA regra de caixa
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// A linha do criador é `L1 · App · Ver +2 · ✕ 46`. Os selos que são PALAVRA
+// começam com maiúscula; `L1` e `✕ 46` ficam de fora porque não são palavra —
+// são identificador e contagem.
+//
+// A regra vale para o GRUPO, não para um selo: capitalizar `App` e deixar
+// `ajuda` em minúscula é a inconsistência que este projeto proíbe (mesmo
+// conceito, mesmo tratamento). Pedido do owner, que leu `app`/`site` em
+// minúscula a 10px e achou difícil de varrer. MEDIDO antes de aceitar: o custo
+// de largura é ≤1px, e o nome do criador (que disputa a mesma linha) não perde
+// nada — 80% no Pixel 7 antes e depois.
+//
+// Selo de texto NOVO entra nesta lista junto com a sua chave.
+test('selos do card: todo selo que é PALAVRA começa com maiúscula, nas 4 línguas', () => {
+  const dict = read('js/i18n.js');
+  const SELOS_DE_TEXTO = [
+    'card.source.WEB', 'card.source.MOBILE_CLIENT',
+    'card.source.MOBILE_WEB', 'card.source.REPORTING_AGENT',
+    'card.sameAuthor',
+  ];
+  for (const chave of SELOS_DE_TEXTO) {
+    const re = new RegExp("'" + chave.replace(/\./g, '\\.') + "': '([^']*)'", 'g');
+    const vals = [...dict.matchAll(re)].map((m) => m[1]);
+    assert.equal(vals.length, 4, `${chave} não está nas 4 línguas`);
+    for (const v of vals) {
+      const primeira = v.replace(/^[^\p{L}]+/u, '')[0];
+      assert.ok(primeira && primeira === primeira.toUpperCase(),
+        `${chave} = "${v}" começa em minúscula; os selos de texto do card seguem uma regra só`);
+    }
+  }
+  // Contraprova de ESCOPO: as dicas do toque longo são FRASES, com a redação
+  // oficial do WME, e não entram nesta regra — se um dia virarem rótulo curto,
+  // que seja decisão e não arrasto.
+  const dica = dict.match(/'card\.source\.MOBILE_CLIENT\.title': '([^']*)'/);
+  assert.ok(dica && dica[1].length > 15, 'a dica virou rótulo curto — foi decisão?');
+});
