@@ -19,7 +19,8 @@
     "cf:deploy": "wrangler deploy",
     "test:presenca": "node tools/smoke-presenca.mjs",
     "test:fluxo": "node tools/smoke-fluxo.mjs",
-    "js": "node tools/gerar-js.mjs"
+    "js": "node tools/gerar-js.mjs",
+    "html": "node tools/gerar-html.mjs"
   },
   "engines": {
     "node": ">=22"

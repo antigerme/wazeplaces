@@ -19,6 +19,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as dormir } from 'node:timers/promises';
@@ -99,4 +101,51 @@ test('o service worker não volta a pular o cache HTTP', async () => {
     assert.doesNotMatch(c, /cache:\s*'(reload|no-cache)'/,
       `${c} rebaixa a app inteira a cada carregamento — a garantia anti-skew é do no-cache do servidor`);
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  A raiz serve o HTML MINIFICADO, e os dois adaptadores concordam
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `index.min.html` é GERADO por `npm run html` e commitado; o `index.html` é o
+// fonte comentado, que é o que se edita, o que os testes leem e o que o
+// Tailwind varre. MEDIDO num 3G com CPU 4x lenta: 36 → 20 KB gzip, FCP de
+// 2036 para 1648ms, load de 4543 para 3540ms.
+//
+// Os DOIS adaptadores precisam remapear igual. Divergência aqui é a família do
+// gotcha #14: a app deixaria de ser a mesma nos dois destinos, e "levar pra uma
+// VM" viraria mudança de comportamento em vez de decisão de infraestrutura.
+test('raiz: os dois adaptadores servem o HTML minificado, não o fonte', async () => {
+  const node = readFileSync(new URL('../server/node.mjs', import.meta.url), 'utf8');
+  const worker = readFileSync(new URL('../worker/index.mjs', import.meta.url), 'utf8');
+
+  // Cada um remapeia a raiz E o /index.html — senão são duas URLs com conteúdos
+  // diferentes, e o service worker precacheia as duas.
+  assert.match(node, /isRoot \|\| rel === '\/index\.html'\)\s*rel = '\/index\.min\.html'/,
+    'o adaptador da VM parou de remapear a raiz pro minificado');
+  assert.match(worker, /pathname === '\/' \|\| url\.pathname === '\/index\.html'/,
+    'o adaptador do Cloudflare parou de remapear a raiz');
+  assert.match(worker, /pathname = '\/index\.min\.html'/,
+    'o adaptador do Cloudflare não aponta pro minificado');
+
+  // O FONTE não pode ser alcançável: listá-lo na allowlist abriria um segundo
+  // caminho pro arquivo comentado.
+  const bloco = node.slice(node.indexOf('ALLOWED_ROOT_FILES'), node.indexOf('function isAllowedAsset'));
+  assert.ok(bloco.includes("'/index.min.html'"), 'o minificado saiu da allowlist da VM');
+  assert.ok(!/'\/index\.html',/.test(bloco), 'o fonte voltou pra allowlist — duas URLs, dois conteúdos');
+
+  // E o gerado precisa estar EM DIA com o fonte: editar o index.html sem rodar
+  // `npm run html` manda a versão velha pro navegador, sem quebrar teste nenhum.
+  const fonte = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const min = readFileSync(new URL('../index.min.html', import.meta.url), 'utf8');
+  assert.ok(min.length < fonte.length, 'o index.min.html não está minificado');
+  assert.ok(!min.includes('<!--'), 'sobrou comentário no index.min.html');
+  // O hash do inline é o que a CSP autoriza: um byte a mais e o tema é
+  // bloqueado EM SILÊNCIO.
+  const h = (s) => {
+    const m = /<script>([\s\S]*?)<\/script>/.exec(s);
+    return m ? createHash('sha256').update(m[1], 'utf8').digest('base64') : null;
+  };
+  assert.equal(h(min), h(fonte),
+    'a minificação mudou o script inline — a CSP bloquearia o tema sem avisar');
 });

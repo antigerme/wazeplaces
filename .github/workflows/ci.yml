@@ -85,6 +85,20 @@ jobs:
             exit 1
           fi
 
+      - name: HTML está em dia (npm run html)
+        run: |
+          # Terceiro irmão do CSS e do JS. O index.min.html é GERADO e
+          # COMMITADO, e é ELE que a raiz serve — editar o index.html e esquecer
+          # de regerar manda a versão velha pro navegador sem quebrar teste
+          # nenhum (os testes leem o FONTE).
+          cp index.min.html /tmp/index.min.committed.html
+          npm run html
+          if ! diff -q /tmp/index.min.committed.html index.min.html >/dev/null; then
+            echo "::error::index.min.html está desatualizado. Rode 'npm run html' e commite."
+            diff /tmp/index.min.committed.html index.min.html | head -20
+            exit 1
+          fi
+
       - name: Smoke de browser (o que guard de texto não pega)
         # Renderiza o card em 3 aparelhos × 3 idiomas × 3 tipos e MEDE. Os guards
         # de test/layout.test.mjs conferem o código e já falharam duas vezes em
