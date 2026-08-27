@@ -93,6 +93,36 @@ const PRESENCA_RESSINC_MS = 2 * 60 * 1000;
 // do crachá vem depois). É o mesmo motivo que faz o recuo zerar só no `eu`.
 const PRESENCA_ABRIR_MS = 12_000;
 
+// Prazo pra confirmação de ENTREGA de uma mensagem voltar.
+//
+// Aqui isto vale mais que num app de mensagem comum, e a diferença é a
+// arquitetura: o WhatsApp tem servidor guardando, então "um tique" significa
+// "está a caminho, chega quando ela abrir". NÓS não temos — o texto vai direto
+// de um aparelho pro outro. Se o outro lado não está lá, a mensagem não fica
+// esperando em lugar nenhum: ela simplesmente não chega, e ninguém é avisado.
+//
+// E o caso que isto conserta é real: o `presencaMandarTexto` mostrava a
+// mensagem na tela assim que o `send()` não lançava exceção. Só que o
+// `readyState` diz `open` numa conexão que já morreu em silêncio — é a MESMA
+// doença que o `PRESENCA_PONG_MS` trata no WebSocket. A mensagem aparecia
+// bonitinha na tela e nunca tinha saído do aparelho.
+//
+// 8s por simetria com aquele prazo (10s): é o tempo que este projeto já usa
+// pra transformar silêncio em informação. Quem confirma é o `onmessage` do
+// outro lado, que não pensa — só responde.
+const PRESENCA_RECIBO_MS = 8000;
+
+// Versão do protocolo da CONVERSA (não do sinal). O `oi` é trocado na abertura
+// do canal e é o que autoriza mostrar recibo.
+//
+// Sem ele o recurso mentiria por dias a cada deploy: o service worker é
+// cache-first pra asset, então sobra por aí aparelho rodando o `presenca.js`
+// antigo — que manda `{txt}` sem id e não sabe confirmar nada. Um cliente novo
+// falando com um velho mostraria UM TIQUE PRA SEMPRE, indistinguível de
+// mensagem perdida. Sem o `oi`, nenhum recibo aparece e a conversa volta a se
+// comportar como antes. Degradar é honesto; tique errado não.
+const PRESENCA_CONVERSA_V = 2;
+
 // O crachá vale 15 min (CRACHA_TTL no servidor). Renovar aos 13 dá margem pra
 // uma tentativa falhar sem derrubar quem está conversando.
 const PRESENCA_RENOVAR_MS = 13 * 60 * 1000;
@@ -383,7 +413,18 @@ function presencaEnviarSinal(para, tipo, payload) {
 function presencaConversa(peer, nome) {
     let c = Presenca.conversas.get(peer);
     if (!c) {
-        c = { pc: null, canal: null, msgs: [], naoLidas: 0, nome: nome || '', estado: 'parado', pendentes: [], iceEspera: [], fila: null };
+        c = {
+            pc: null, canal: null, msgs: [], naoLidas: 0, nome: nome || '', estado: 'parado',
+            pendentes: [], iceEspera: [], fila: null,
+            // Numeração das MINHAS mensagens. Cada lado numera as suas, então
+            // não há colisão: eu só confirmo as SUAS e você só as MINHAS.
+            seq: 0,
+            // Maior id que RECEBI — é o que vai no `lido`, que confirma até um
+            // ponto em vez de uma por uma (ler é abrir a conversa e ver tudo).
+            ultimaRecebida: 0,
+            // Só vira true quando o outro lado se anuncia (ver PRESENCA_CONVERSA_V).
+            recibos: false,
+        };
         Presenca.conversas.set(peer, c);
     }
     if (nome) c.nome = nome;
@@ -401,6 +442,7 @@ function presencaCriarPC(peer) {
     pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
             c.estado = 'falhou';
+            presencaMarcarNaoChegou(c);   // depois do estado: o motivo sai dele
             presencaRenderConversa();
         }
     };
@@ -413,9 +455,13 @@ function presencaLigarCanal(peer, canal) {
     c.canal = canal;
     const abriu = () => {
         c.estado = 'aberta';
+        // Anuncia que este lado sabe confirmar recebimento. Vai ANTES da fila
+        // de pendentes: assim o outro lado já sabe confirmar o que chegar logo
+        // atrás, em vez de a primeira mensagem ficar sem recibo por corrida.
+        try { canal.send(JSON.stringify({ t: 'oi', v: PRESENCA_CONVERSA_V })); } catch (e) {}
         // O que foi digitado enquanto conectava não se perde: a pessoa apertou
         // enviar, e "some sem avisar" é pior que demorar.
-        for (const txt of c.pendentes.splice(0)) presencaMandarTexto(peer, txt);
+        for (const m of c.pendentes.splice(0)) presencaEntregarMsg(peer, c, m);
         presencaRenderConversa();
         presencaRenderLista();
     };
@@ -427,14 +473,39 @@ function presencaLigarCanal(peer, canal) {
     // `onopen` esvazia a fila. Conferir o `readyState` na hora de ligar é o
     // conserto; foi o CI que pegou, com o mesmo código passando aqui.
     if (canal.readyState === 'open') abriu();
-    canal.onclose = () => { c.estado = 'fechada'; presencaRenderConversa(); };
+    canal.onclose = () => {
+        c.estado = 'fechada';
+        presencaMarcarNaoChegou(c);
+        presencaRenderConversa();
+    };
     canal.onmessage = (ev) => {
         let m;
         try { m = JSON.parse(ev.data); } catch (e) { return; }
-        const txt = String(m && m.txt || '').slice(0, 2000);
+        if (!m || typeof m !== 'object') return;
+
+        // ── recados de protocolo ────────────────────────────────────────────
+        // Cliente ANTIGO ignora todos estes em silêncio: ele lê `m.txt`, acha
+        // vazio e sai pelo `if (!txt) return`. É o que torna a troca segura nos
+        // dias em que as duas versões convivem.
+        if (m.t === 'oi') { c.recibos = true; presencaRenderConversa(); return; }
+        if (m.t === 'ack') { presencaConfirmar(c, m.id, 'entregue'); return; }
+        if (m.t === 'lido') { presencaConfirmar(c, m.ate, 'lida'); return; }
+
+        const txt = String(m.txt || '').slice(0, 2000);
         if (!txt) return;
-        c.msgs.push({ meu: false, txt, ts: Date.now() });
-        if (Presenca.aberta !== peer) {
+        const id = Number.isFinite(m.id) ? m.id : 0;
+        if (id > c.ultimaRecebida) c.ultimaRecebida = id;
+        c.msgs.push({ meu: false, txt, ts: Date.now(), id, estado: null, motivo: null });
+
+        // Confirma a ENTREGA na hora — é um fato do aparelho, não da pessoa.
+        // Mensagem de cliente antigo vem sem id: não há o que confirmar.
+        if (id) { try { canal.send(JSON.stringify({ t: 'ack', id })); } catch (e) {} }
+
+        // Ler é outra coisa: só conta se a conversa estiver ABERTA e a app na
+        // TELA. Modal aberto com o celular no bolso não é leitura, e um recibo
+        // que mente é pior que recibo nenhum.
+        if (presencaOlhando(peer)) presencaMarcarLidas(peer);
+        else {
             c.naoLidas += 1;
             presencaRenderPilula();
             presencaRenderLista();
@@ -531,15 +602,95 @@ function presencaAvisarConvite(peer, c) {
 
 function presencaMandarTexto(peer, txt) {
     const c = presencaConversa(peer);
-    if (!c.canal || c.canal.readyState !== 'open') { c.pendentes.push(txt); return; }
+    // A mensagem entra na lista JÁ — inclusive com o canal fechado. Antes ela
+    // ficava invisível na fila de `pendentes` e só aparecia ao ser enviada; com
+    // recibo, "enviando" é um estado que a pessoa PODE ver, e ver é melhor que
+    // um vão em branco enquanto a conexão levanta.
+    const m = { meu: true, txt, ts: Date.now(), id: ++c.seq, estado: 'enviando', motivo: null };
+    c.msgs.push(m);
+    presencaEntregarMsg(peer, c, m);
+    presencaRenderConversa();
+}
+
+function presencaEntregarMsg(peer, c, m) {
+    if (!c.canal || c.canal.readyState !== 'open') { c.pendentes.push(m); return; }
     try {
-        c.canal.send(JSON.stringify({ txt }));
-        c.msgs.push({ meu: true, txt, ts: Date.now() });
-        presencaRenderConversa();
+        c.canal.send(JSON.stringify({ txt: m.txt, id: m.id }));
+        m.estado = 'enviada';
+        // O prazo não se cancela: quando o `ack` chega, o estado deixa de ser
+        // 'enviada' e este callback não faz nada. Guardar id de timer por
+        // mensagem seria mais uma coisa pra limpar em cada caminho de saída.
+        setTimeout(() => {
+            if (m.estado !== 'enviada') return;
+            m.estado = 'falhou';
+            m.motivo = presencaMotivoDaFalha(c);
+            presencaRenderConversa();
+        }, PRESENCA_RECIBO_MS);
     } catch (e) {
         c.estado = 'falhou';
-        presencaRenderConversa();
+        m.estado = 'falhou';
+        m.motivo = presencaMotivoDaFalha(c);
     }
+}
+
+// Marca as MINHAS mensagens até `ate` (inclusive) — o `ack` confirma uma, o
+// `lido` confirma um trecho. Nunca REBAIXA: um `ack` que chegue depois do
+// `lido` (a rede reordena mais do que se imagina) não pode desfazer a leitura.
+const PRESENCA_PESO = { enviando: 0, enviada: 1, entregue: 2, lida: 3 };
+function presencaConfirmar(c, ate, estado) {
+    const teto = Number.isFinite(ate) ? ate : 0;
+    if (!teto) return;
+    let mudou = false;
+    for (const m of c.msgs) {
+        if (!m.meu || m.id > teto) continue;
+        if ((PRESENCA_PESO[m.estado] || 0) >= PRESENCA_PESO[estado]) continue;
+        m.estado = estado;
+        m.motivo = null;   // chegou depois de eu ter desistido: a verdade é que chegou
+        mudou = true;
+    }
+    if (mudou) presencaRenderConversa();
+}
+
+// Por que a mensagem não chegou. A app SABE distinguir os casos, e dizer qual
+// é vale mais que um "não chegou" seco: quem lê decide se espera, se tenta de
+// novo mais tarde, ou se procura a pessoa por outro caminho.
+function presencaMotivoDaFalha(c) {
+    if (c.estado === 'saiu') return 'saiu';
+    if (c.estado === 'falhou' || c.estado === 'fechada') return 'conexao';
+    // Canal ainda "aberto" e sem resposta: é o silêncio de sempre. Não invento
+    // um motivo que não medi.
+    return null;
+}
+
+// Tudo que estava a caminho vira "não chegou" no instante em que se descobre o
+// motivo — sem esperar os 8s. Quando a pessoa saiu da fila, esperar o prazo é
+// deixar a tela mentir por 8 segundos com a resposta já na mão.
+function presencaMarcarNaoChegou(c) {
+    let mudou = false;
+    for (const m of c.msgs) {
+        if (!m.meu || (m.estado !== 'enviando' && m.estado !== 'enviada')) continue;
+        m.estado = 'falhou';
+        m.motivo = presencaMotivoDaFalha(c);
+        mudou = true;
+    }
+    return mudou;
+}
+
+// "Lida" só é verdade com a conversa ABERTA e a app NA TELA.
+function presencaOlhando(peer) {
+    return Presenca.aberta === peer && document.visibilityState === 'visible';
+}
+
+// Zera as não lidas E avisa o outro lado. As duas coisas juntas de propósito:
+// enquanto eram separadas, a app zerava o contador em caminhos que não mandavam
+// recibo nenhum, e o outro lado ficava esperando pra sempre.
+function presencaMarcarLidas(peer) {
+    const c = Presenca.conversas.get(peer);
+    if (!c) return;
+    c.naoLidas = 0;
+    if (!c.ultimaRecebida) return;
+    if (!c.canal || c.canal.readyState !== 'open') return;
+    try { c.canal.send(JSON.stringify({ t: 'lido', ate: c.ultimaRecebida })); } catch (e) {}
 }
 
 function presencaEncerrarConversa(peer, manterMsgs) {
@@ -572,6 +723,7 @@ function presencaConferirSumicos() {
         if (vivos.has(peer) || c.estado === 'saiu') continue;
         if (c.estado === 'aberta' || c.estado === 'chamando') {
             c.estado = 'saiu';
+            presencaMarcarNaoChegou(c);
             presencaEncerrarConversa(peer, true);
         }
     }
@@ -582,6 +734,7 @@ function presencaMarcarAusente(peer) {
     const c = Presenca.conversas.get(peer);
     if (!c) return;
     c.estado = 'saiu';
+    presencaMarcarNaoChegou(c);
     presencaEncerrarConversa(peer, true);
     presencaRenderConversa();
 }
@@ -663,7 +816,10 @@ function presencaAbrirConversa(peer) {
     const p = Presenca.peers.find((x) => x.peer === peer);
     const c = presencaConversa(peer, p && p.nome);
     Presenca.aberta = peer;
-    c.naoLidas = 0;
+    // `presencaMarcarLidas` e não `c.naoLidas = 0`: zerar aqui e avisar o outro
+    // lado é a MESMA decisão, e separá-las é como um lado fica esperando um
+    // recibo que o outro já considerou entregue.
+    presencaMarcarLidas(peer);
     // `openModal` sozinho: ele JÁ esconde os outros modais, e trocar de camada
     // não empilha histórico. Fechar a lista antes empilhava um `history.back()`
     // e o `openModal` seguinte empurrava outra entrada no mesmo quadro — o
@@ -695,6 +851,70 @@ function presencaEsquecerAberta() {
     presencaRenderLista();
 }
 
+// ── DESENHO DO RECIBO ───────────────────────────────────────────────────────
+//
+// A distinção principal é de FORMA — um tique, dois tiques, relógio, alerta —
+// e não de cor: cor sozinha não transmite informação (WCAG 1.4.1, a mesma régua
+// que faz a pílula trocar de ícone em vez de só de tom).
+//
+// E é por isso que "Lida" ganha uma LINHA DE TEXTO embaixo da última lida: dois
+// tiques brancos contra dois tiques cyan é diferença só de cor, e ninguém
+// deveria precisar comparar dois tons pra saber se foi lida. O branco virou
+// reforço; quem carrega o estado é a palavra — que o leitor de tela também lê.
+const PRESENCA_GLIFO = {
+    enviando: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 1.8"/>',
+    enviada: '<path d="M4 12.5l5 5L20 6.5"/>',
+    entregue: '<path d="M1 12.5l4 4L13 8"/><path d="M9.5 14.5l2 2L21 7"/>',
+    lida: '<path d="M1 12.5l4 4L13 8"/><path d="M9.5 14.5l2 2L21 7"/>',
+    falhou: '<path d="M12 3.8L22 20H2z"/><path d="M12 9.5v4.2"/><path d="M12 16.6h.01"/>',
+};
+
+function presencaRecibo(estado) {
+    const glifo = PRESENCA_GLIFO[estado];
+    if (!glifo) return '';
+    const rotulo = t('presenca.recibo.' + (estado === 'falhou' ? 'naoChegou' : estado));
+    return `<span class="presenca-recibo ${estado}" role="img" aria-label="${escapeHtml(rotulo)}">`
+        + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${estado === 'enviando' || estado === 'falhou' ? '2.2' : '2.5'}"`
+        + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glifo}</svg></span>`;
+}
+
+// A frase do "não chegou" DIZ O MOTIVO quando a app sabe qual é — e ela sabe,
+// porque já distingue "saiu da fila" de "conexão caiu" pra decidir o texto do
+// cabeçalho. Sem motivo conhecido fica o "Não chegou" seco: inventar uma causa
+// que não foi medida é pior que não dizer.
+function presencaFraseDaFalha(c, m) {
+    if (m.motivo === 'saiu') return t('presenca.recibo.naoChegouSaiu', { nome: c.nome || t('presenca.anon') });
+    if (m.motivo === 'conexao') return t('presenca.recibo.naoChegouConexao');
+    return t('presenca.recibo.naoChegou');
+}
+
+function presencaHtmlDasMsgs(c) {
+    // Entrega é ORDENADA e confiável (SCTP), então falha é sempre um sufixo:
+    // existe no máximo UMA corrida de "não chegou", no fim. Uma linha por
+    // mensagem falha repetiria a mesma frase N vezes sem dizer nada novo.
+    let ultimaLida = -1, ultimaFalha = -1;
+    for (let i = 0; i < c.msgs.length; i++) {
+        const m = c.msgs[i];
+        if (!m.meu) continue;
+        if (m.estado === 'lida') ultimaLida = i;
+        if (m.estado === 'falhou') ultimaFalha = i;
+    }
+    // Peer sem recibo (versão antiga) não ganha glifo nenhum — nem o de falha,
+    // que ali seria adivinhação: ele nunca ia confirmar coisa alguma.
+    const mostrar = c.recibos;
+    return c.msgs.map((m, i) => {
+        const recibo = mostrar && m.meu && m.estado ? presencaRecibo(m.estado) : '';
+        let linha = '';
+        if (mostrar && i === ultimaFalha) {
+            linha = `<p class="conversa-falhou">${escapeHtml(presencaFraseDaFalha(c, m))}</p>`;
+        } else if (mostrar && i === ultimaLida) {
+            linha = `<p class="conversa-lida">${escapeHtml(t('presenca.recibo.lida'))}</p>`;
+        }
+        return `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">`
+            + `${escapeHtml(m.txt)}${recibo}</div>${linha}`;
+    }).join('');
+}
+
 function presencaRenderConversa() {
     if (!Presenca.aberta) return;
     const c = Presenca.conversas.get(Presenca.aberta);
@@ -717,7 +937,7 @@ function presencaRenderConversa() {
     const corpo = document.getElementById('conversaMsgs');
     if (corpo) {
         corpo.innerHTML = c.msgs.length
-            ? c.msgs.map((m) => `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}">${escapeHtml(m.txt)}</div>`).join('')
+            ? presencaHtmlDasMsgs(c)
             : `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.vazio'))}</p>`;
         corpo.scrollTop = corpo.scrollHeight;
     }
@@ -745,7 +965,17 @@ function presencaMontar() {
     // A sonda é BARATA: um `ping` de 4 bytes. Ela não reconecta por conta
     // própria — só faz a pergunta; quem declara a morte é o vigia do prazo.
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') presencaAoVoltar();
+        if (document.visibilityState !== 'visible') return;
+        presencaAoVoltar();
+        // Voltar pra tela com a conversa aberta É ler. Sem isto, quem deixou o
+        // modal aberto e trocou de app voltava, lia tudo, e o outro lado seguia
+        // com "Entregue" — o recibo ficaria certo só pra quem abre a conversa
+        // do zero, que é o caminho menos comum de quem já está conversando.
+        if (Presenca.aberta) {
+            presencaMarcarLidas(Presenca.aberta);
+            presencaRenderPilula();
+            presencaRenderLista();
+        }
     });
 
     // `pageshow` com `persisted` é o retorno pelo CACHE DE NAVEGAÇÃO (bfcache):

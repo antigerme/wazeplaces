@@ -2179,6 +2179,42 @@ button:active {
 }
 .dark .conversa-bolha.dela { background: rgb(51 65 85); color: rgb(226 232 240); }
 
+/* ── RECIBO DE MENSAGEM ─────────────────────────────────────────────────────
+   O glifo mora DENTRO da bolha, canto inferior direito. O `padding-right` extra
+   vale só pra quem tem recibo (`.com-recibo`): peer de versão antiga não
+   confirma nada, não ganha glifo, e não deve ganhar o vão dele. */
+.conversa-bolha.com-recibo { position: relative; padding-right: 2.9rem; }
+.presenca-recibo { position: absolute; right: 0.6rem; bottom: 0.45rem; display: flex; align-items: center; }
+.presenca-recibo svg { width: 16px; height: 16px; display: block; }
+
+/* Cor SÓLIDA, nunca `opacity`: transparência mistura com o fundo e derruba o
+   contraste sem aparecer no valor computado (gotcha #40).
+   Medido contra a bolha cyan-700 — que é a mesma nos DOIS temas, então errar
+   aqui erraria nos dois de uma vez:
+     cyan-300 sobre cyan-700 = 3,70:1  ✓ (mín. 3:1, WCAG 1.4.11, objeto gráfico)
+     branco   sobre cyan-700 = 5,36:1  ✓
+     rose-200 sobre cyan-700 = 3,80:1  ✓ */
+.presenca-recibo.enviando,
+.presenca-recibo.enviada,
+.presenca-recibo.entregue { color: rgb(103 232 249); }
+.presenca-recibo.lida { color: #fff; }
+.presenca-recibo.falhou { color: rgb(254 205 211); }
+
+/* As duas linhas de estado. São TEXTO de 11px, então a régua é 4,5:1 (WCAG
+   1.4.3) e não os 3:1 do glifo. Medido: "Lida" 4,76 claro / 5,71 escuro;
+   "Não chegou" 6,29 claro / 7,74 escuro. */
+.conversa-lida,
+.conversa-falhou {
+  font-size: 0.6875rem;
+  text-align: right;
+  margin-top: -2px;
+  padding-right: 0.25rem;
+}
+.conversa-lida { color: rgb(100 116 139); }
+.dark .conversa-lida { color: rgb(148 163 184); }
+.conversa-falhou { color: rgb(190 18 60); }
+.dark .conversa-falhou { color: rgb(253 164 175); }
+
 .conversa-vazio {
   text-align: center;
   color: rgb(100 116 139);

@@ -205,7 +205,35 @@ try {
   if (aviso.naoLidas === 1 && aviso.msg && !aviso.gente) ok('a pílula troca pro ícone de mensagem');
   else anota(`aviso de mensagem errado: ${JSON.stringify(aviso)}`);
 
+  // ── RECIBO ────────────────────────────────────────────────────────────────
+  // O momento é perfeito e é natural do roteiro: a bia RECEBEU mas ainda não
+  // ABRIU a conversa. Então a mensagem da ana tem que estar em ENTREGUE — e é
+  // erro grave se estiver em 'lida', porque aí o recibo estaria afirmando que
+  // alguém leu algo que ninguém abriu.
+  if (await esperar(ana, () => Presenca.conversas.get('pb')?.recibos === true,
+    'o `oi` do protocolo não chegou — sem ele nenhum recibo aparece')) ok('os dois lados se anunciam (oi)');
+
+  if (await esperar(ana, () => Presenca.conversas.get('pb')?.msgs.find((m) => m.meu)?.estado === 'entregue',
+    'a mensagem da ana não chegou a ENTREGUE')) ok('o recibo chega a "entregue" pelo DataChannel');
+
+  const antesDeAbrir = await ana.page.evaluate(() => Presenca.conversas.get('pb')?.msgs.find((m) => m.meu)?.estado);
+  if (antesDeAbrir !== 'lida') ok('não diz "lida" antes de a pessoa abrir a conversa');
+  else anota('a mensagem apareceu como LIDA com a conversa fechada do outro lado');
+
   await bia.page.evaluate(() => { window.presencaAbrirConversa('pa'); window.presencaMandarTexto('pa', 'vi sim, foto de cardápio'); });
+
+  // Abrir a conversa é o ato que vira leitura — e o `lido` volta pelo mesmo
+  // canal, sem tocar no servidor.
+  if (await esperar(ana, () => Presenca.conversas.get('pb')?.msgs.find((m) => m.meu)?.estado === 'lida',
+    'a mensagem da ana não virou LIDA depois de a bia abrir a conversa')) ok('abrir a conversa devolve o recibo de leitura');
+
+  // A linha "Lida" é TEXTO na tela, não só um tique de cor (WCAG 1.4.1).
+  const linhaLida = await ana.page.evaluate(() => {
+    const el = document.querySelector('#conversaMsgs .conversa-lida');
+    return el ? el.textContent.trim() : null;
+  });
+  if (linhaLida) ok(`a linha "${linhaLida}" aparece na tela`);
+  else anota('o estado "lida" não virou texto — sobraria só a cor do tique');
   if (await esperar(ana, () => (Presenca.conversas.get('pb')?.msgs || []).some((m) => !m.meu && m.txt.includes('cardápio')), 'a ana não recebeu a resposta')) ok('a resposta volta');
 
   // 4) Fechar a conversa por Esc solta o estado. Não é detalhe: o `aberta`
