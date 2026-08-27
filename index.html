@@ -874,14 +874,72 @@
                 </div>
                 <p id="conversaEstado" class="hidden text-xs text-slate-500 dark:text-slate-400 px-4 py-2 flex-shrink-0" role="status" aria-live="polite"></p>
                 <div id="conversaMsgs" class="conversa-msgs flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3 space-y-2"></div>
+                <!-- A tirinha do pedido anexado. Só existe ENTRE o toque no botão e o
+                     envio — não é moldura permanente. Ela responde "o que exatamente
+                     vai sair daqui?", que com a conversa aberta não dá pra ver de outro
+                     jeito: o card está atrás deste modal. -->
+                <div id="conversaAnexo" class="conversa-anexo hidden flex-shrink-0" role="status" aria-live="polite">
+                    <span class="conversa-anexo-foto"><img id="conversaAnexoFoto" alt="" width="40" height="40"></span>
+                    <span class="conversa-anexo-txt">
+                        <span id="conversaAnexoNome" class="conversa-anexo-nome"></span>
+                        <span id="conversaAnexoMeta" class="conversa-anexo-meta"></span>
+                    </span>
+                    <button id="conversaAnexoTirar" type="button" class="conversa-anexo-x" aria-label="Não mandar este pedido" data-i18n-aria="presenca.anexo.tirar">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
                 <form id="conversaForm" class="flex items-end gap-2 px-3 py-2 border-t border-slate-200 dark:border-slate-700 flex-shrink-0">
                     <label for="conversaInput" class="sr-only" data-i18n="presenca.conversa.ph">Mensagem</label>
                     <input id="conversaInput" type="text" maxlength="2000" autocomplete="off" placeholder="Mensagem" data-i18n-ph="presenca.conversa.ph"
-                           class="flex-1 min-h-[44px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full px-4 text-sm text-slate-800 dark:text-slate-100">
+                           class="flex-1 min-w-0 min-h-[44px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full px-4 text-sm text-slate-800 dark:text-slate-100">
+                    <!-- NÃO é clipe de anexo: clipe promete escolher um arquivo, e aqui
+                         existe exatamente UMA coisa pra mandar — o pedido aberto. Some
+                         quando não há card aberto (fila vazia, "Tudo limpo!"), pela mesma
+                         régua que faz a pílula sumir com a sala vazia. -->
+                    <button id="conversaCardBtn" type="button" class="conversa-card-btn hidden" aria-label="Mandar o pedido aberto" data-i18n-aria="presenca.anexo.botao">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16l4.2-4.2a2 2 0 012.8 0L15 16.8"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.5 9h.01"/></svg>
+                    </button>
                     <button id="conversaEnviar" type="submit" class="min-w-[44px] min-h-[44px] flex items-center justify-center bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 rounded-full transition disabled:opacity-40" aria-label="Enviar" data-i18n-aria="presenca.conversa.enviar">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg>
                     </button>
                 </form>
+            </div>
+        </div>
+
+        <!-- O pedido que CHEGOU pela conversa. SÓ LEITURA, e isso é decisão:
+             ele não está na fila de quem recebe, então ✕ ↑ ✓ aqui abririam um
+             caminho de ação novo, com corridas próprias, sobre um pedido que a
+             pessoa não tem. Quem quiser agir abre o ↗ — que é o que a app já
+             manda fazer pra tudo que ela não decide. -->
+        <div id="pedidoModal" role="dialog" aria-modal="true" aria-labelledby="pedidoNome" class="hidden fixed inset-0 modal-root folha-modal bg-black bg-opacity-50 z-[60] flex items-end sm:items-center justify-center">
+            <div class="folha bg-white dark:bg-slate-800 w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col overflow-y-auto overscroll-contain">
+                <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+                    <span id="pedidoDe" class="text-[0.6875rem] font-bold uppercase tracking-wider bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1 rounded-full truncate"></span>
+                    <button id="pedidoClose" type="button" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full flex-shrink-0" aria-label="Fechar" data-i18n-aria="common.close">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div id="pedidoFoto" class="pedido-foto hidden flex-shrink-0"><img id="pedidoFotoImg" alt="" class="w-full h-full object-cover"></div>
+                <div class="p-5 pb-4 flex flex-col gap-3">
+                    <div class="flex items-start justify-between gap-2">
+                        <h3 id="pedidoNome" class="text-2xl font-bold text-slate-800 leading-tight flex-1 line-clamp-2 break-words min-w-0 dark:text-slate-100"></h3>
+                        <a id="pedidoWme" class="min-w-[44px] min-h-[44px] flex items-center justify-center bg-cyan-50 text-cyan-600 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-600/[0.28] transition-colors flex-shrink-0 dark:bg-cyan-600/20" target="_blank" rel="noopener noreferrer" title="Abrir no WME" data-i18n-title="card.wmeLink.aria" aria-label="Abrir no WME" data-i18n-aria="card.wmeLink.aria">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                        </a>
+                    </div>
+                    <div id="pedidoTipoRow" class="hidden flex items-baseline gap-2 min-w-0">
+                        <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.type">Tipo:</span>
+                        <span id="pedidoTipo" class="text-sm text-slate-700 break-words min-w-0 dark:text-slate-200"></span>
+                    </div>
+                    <div id="pedidoCatRow" class="hidden flex items-baseline gap-2 min-w-0">
+                        <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.categories">Categorias:</span>
+                        <span id="pedidoCat" class="text-sm text-slate-700 break-words min-w-0 dark:text-slate-200"></span>
+                    </div>
+                    <div id="pedidoEndRow" class="hidden flex items-baseline gap-2 min-w-0">
+                        <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.address">Endereço:</span>
+                        <span id="pedidoEnd" class="text-sm text-slate-700 break-words min-w-0 dark:text-slate-200"></span>
+                    </div>
+                </div>
             </div>
         </div>
 

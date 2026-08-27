@@ -8,6 +8,26 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.27-04
+
+### Adicionado
+- **Dá pra mandar o pedido que está aberto pela conversa.** Você está olhando uma foto e não sabe se é a fachada ou a sala da casa: abre a conversa com quem está na mesma fila, toca no botão do pedido ao lado do campo, escreve a pergunta, e **o pedido vai junto com ela** — uma mensagem só.
+
+  Antes o único jeito era descrever o local em palavras, ou sair do app e procurar no WME.
+
+  Uma tirinha aparece acima do campo mostrando **exatamente qual pedido vai sair**, porque com a conversa aberta o card fica atrás dela. Dá pra tirar antes de mandar.
+
+  Quem recebe toca no cartão e vê o pedido **em modo leitura** — sem ✕ ↑ ✓, porque ele não está na fila dessa pessoa. Quem quiser agir abre o ↗ pro WME, como já acontece com tudo que o app não decide.
+
+  Nada disso passa pelo nosso servidor: o pedido vai pelo mesmo caminho direto que a mensagem usa. E o botão só aparece quando há pedido aberto pra mandar.
+
+### Alterado
+- **"Ver quem está na fila" volta sozinha depois de 9 dias desligada.** Quem experimentou desligar e esqueceu ficava invisível para sempre — e sem jeito de descobrir que o recurso existe, já que a pílula, que é a única coisa que o anuncia, é justamente o que foi desligado.
+
+  A volta é silenciosa, sem aviso. Quem quiser desligar de novo desliga, e ganha outros 9 dias.
+
+---
+
 ## v2026.08.27-03
 
 ### Adicionado

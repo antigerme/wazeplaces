@@ -236,6 +236,95 @@ try {
   else anota('o estado "lida" não virou texto — sobraria só a cor do tique');
   if (await esperar(ana, () => (Presenca.conversas.get('pb')?.msgs || []).some((m) => !m.meu && m.txt.includes('cardápio')), 'a ana não recebeu a resposta')) ok('a resposta volta');
 
+  // ── MANDAR O PEDIDO ABERTO ────────────────────────────────────────────────
+  // O caminho inteiro num WebRTC de verdade: prender à barra, mandar junto com
+  // a pergunta, e o outro lado receber UM cartão com legenda.
+  const anexou = await ana.page.evaluate(() => {
+    // `cardParaConversa` lê o AppState; sem fila não há pedido aberto, então o
+    // smoke põe um — é dado nosso, não do Waze.
+    window.AppState.currentPlace = {
+      venueID: '205522459.2055159053.3242788', updateRequestID: 'ur-smoke',
+      name: 'Padaria Estrela do Norte', address: 'R. Aurora, 412 — São Paulo',
+      categories: ['BAKERY'], updateTypeKey: 'IMAGE', imageUrls: [],
+      lat: -23.55, lon: -46.63,
+    };
+    window.presencaRenderAnexo();
+    const botaoVisivel = !document.getElementById('conversaCardBtn').classList.contains('hidden');
+    document.getElementById('conversaCardBtn').click();
+    return {
+      botaoVisivel,
+      tirinha: !document.getElementById('conversaAnexo').classList.contains('hidden'),
+      nome: document.getElementById('conversaAnexoNome').textContent,
+      // Com pedido preso, o botão SAI: já tem um esperando.
+      botaoSaiu: document.getElementById('conversaCardBtn').classList.contains('hidden'),
+    };
+  });
+  if (anexou.botaoVisivel && anexou.tirinha && anexou.botaoSaiu
+      && anexou.nome.includes('Padaria')) ok('a tirinha mostra o pedido antes de mandar');
+  else anota(`tirinha errada: ${JSON.stringify(anexou)}`);
+
+  // A tela também tem que concordar — classe no DOM não é o mesmo que sumir
+  // (gotcha #27: styles.css carrega depois e um `display` cru vence o .hidden).
+  const sumiuMesmo = await ana.page.evaluate(() =>
+    getComputedStyle(document.getElementById('conversaCardBtn')).display);
+  if (sumiuMesmo === 'none') ok('o botão some de verdade, não só no DOM');
+  else anota(`o botão do card continua com display:${sumiuMesmo} apesar do .hidden`);
+
+  await ana.page.evaluate(() => {
+    document.getElementById('conversaInput').value = 'isso é fachada ou é a sala?';
+    document.getElementById('conversaForm').requestSubmit();
+  });
+
+  if (await esperar(bia, () => (Presenca.conversas.get('pa')?.msgs || []).some((m) => m.card && m.card.venueID),
+    'a bia não recebeu o pedido')) ok('o pedido chega inteiro pelo DataChannel');
+
+  const recebido = await bia.page.evaluate(() => {
+    const m = (Presenca.conversas.get('pa')?.msgs || []).find((x) => x.card);
+    return m ? { nome: m.card.name, tipo: m.card.updateTypeKey, cat: m.card.categories,
+                 txt: m.txt, foto: m.card.imageUrl, regiao: m.card.region } : null;
+  });
+  if (recebido && recebido.nome === 'Padaria Estrela do Norte' && recebido.tipo === 'IMAGE'
+      && recebido.txt.includes('fachada')) ok('card e pergunta chegam como UMA mensagem');
+  else anota(`o que chegou está errado: ${JSON.stringify(recebido)}`);
+
+  // Mandou: a tirinha tem que sumir, senão o pedido apareceria em dois lugares.
+  const depoisDeMandar = await ana.page.evaluate(() => ({
+    tirinha: !document.getElementById('conversaAnexo').classList.contains('hidden'),
+    anexo: !!Presenca.anexo,
+    cartoes: document.querySelectorAll('#conversaMsgs .conversa-pedido').length,
+  }));
+  if (!depoisDeMandar.tirinha && !depoisDeMandar.anexo && depoisDeMandar.cartoes === 1) {
+    ok('a tirinha some ao mandar e o cartão fica na conversa');
+  } else anota(`estado errado depois de mandar: ${JSON.stringify(depoisDeMandar)}`);
+
+  // O cartão é um <button> com rótulo: sem isso teclado e leitor de tela não
+  // chegam nele, e ele é a única coisa abrível da conversa.
+  const cartao = await bia.page.evaluate(() => {
+    const el = document.querySelector('#conversaMsgs .conversa-pedido');
+    return el ? { tag: el.tagName, rotulo: !!el.getAttribute('aria-label') } : null;
+  });
+  if (cartao && cartao.tag === 'BUTTON' && cartao.rotulo) ok('o cartão é alcançável por teclado');
+  else anota(`cartão não é botão rotulado: ${JSON.stringify(cartao)}`);
+
+  // Abrir o pedido recebido: SÓ LEITURA, e sem ✕ ↑ ✓ em lugar nenhum.
+  await bia.page.evaluate(() => document.querySelector('#conversaMsgs .conversa-pedido').click());
+  const folha = await bia.page.evaluate(() => {
+    const mo = document.getElementById('pedidoModal');
+    return {
+      aberto: !mo.classList.contains('hidden'),
+      nome: document.getElementById('pedidoNome').textContent,
+      de: document.getElementById('pedidoDe').textContent,
+      wme: document.getElementById('pedidoWme').getAttribute('href') || '',
+      // Nenhum botão de decisão pode existir aqui dentro.
+      acoes: mo.querySelectorAll('.card-btn-reject, .card-btn-skip, .card-btn-read').length,
+    };
+  });
+  if (folha.aberto && folha.nome.includes('Padaria') && folha.acoes === 0
+      && folha.wme.includes('venueUpdateRequest=') && !folha.wme.includes('/pt-BR/')) {
+    ok('a folha do pedido abre em só leitura, com o ↗ pro WME');
+  } else anota(`folha do pedido errada: ${JSON.stringify(folha)}`);
+  await bia.page.keyboard.press('Escape');
+
   // 4) Fechar a conversa por Esc solta o estado. Não é detalhe: o `aberta`
   //    mora no `const Presenca` do js/presenca.js, e o `Presenca` visível no
   //    app.js é o objeto EXPORTADO — escrever de lá criava um campo num objeto

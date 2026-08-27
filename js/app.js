@@ -417,7 +417,7 @@ function mostrarEntrandoPelaExtensao(ligado) {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal', 'autorModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal', 'pedidoModal', 'autorModal'];
 
 let lastFocusedBeforeModal = null;
 
@@ -614,6 +614,7 @@ function setupAppListeners() {
     });
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
     $('presencaClose').addEventListener('click', () => closeModal('presencaModal'));
+    $('pedidoClose').addEventListener('click', () => closeModal('pedidoModal'));
     $('autorClose').addEventListener('click', () => closeModal('autorModal'));
     $('conversaClose').addEventListener('click', () => Presenca.fecharConversa());
     // O resto da presença (pílula, lista, envio) se liga sozinho: `montar` é do
@@ -1075,6 +1076,10 @@ function setupModalListeners() {
     });
     $('prefPresenca').addEventListener('change', (e) => {
         AppState.preferences.presenca = e.target.checked;
+        // O carimbo é do DESLIGAR. Religar à mão zera: quem voltou por vontade
+        // própria não está no meio de nenhuma contagem.
+        if (e.target.checked) delete AppState.preferences.presencaOffEm;
+        else AppState.preferences.presencaOffEm = Date.now();
         savePreferences();
         window.Presenca?.sincronizar?.();
     });
@@ -3310,25 +3315,20 @@ function renderCurrentCard() {
         // áreas roláveis do card.
     }
 
-    const wmeLink = card.querySelector('.card-wme-link');
-    const region = API.getRegion();
-    const envParam = region === 'na' ? 'usa' : region;
-    const wmeParams = [`env=${envParam}`];
-    if (place.lat && place.lon) {
-        wmeParams.push(`lat=${place.lat}`, `lon=${place.lon}`, 'zoomLevel=22');
-    }
+    // O ↗ do card e o ↗ da folha de leitura saem da MESMA função
+    // (`linkWmeDoPedido`): eram duas montagens iguais em lugares diferentes, e
+    // é assim que uma ganha um parâmetro e a outra não.
+    //
     // O parâmetro venueUpdateRequest do WME espera o venueID (formato dotted
     // tipo "205522459.2055159053.3242788"), NÃO o id do venueUpdateRequest
     // (que é um UUID). Confirmado via HAR comparando URL do WME nativo.
-    if (place.venueID) {
-        wmeParams.push(`venueUpdateRequest=${encodeURIComponent(place.venueID)}`);
-    }
-    // URL CANÔNICA do WME, sem segmento de idioma (decisão do owner). Estava
+    //
+    // A URL é CANÔNICA, sem segmento de idioma (decisão do owner). Estava
     // `/pt-BR/editor`: um editor que usa a app em francês clicava no ↗ e caía
     // num WME em português. O `/editor` cru responde 200 direto (medido, sem
     // redirect HTTP) e o Waze resolve o idioma pela conta de quem abriu — que é
     // exatamente o certo, porque quem decide não somos nós.
-    wmeLink.href = `${WME_EDITOR_URL}?${wmeParams.join('&')}`;
+    card.querySelector('.card-wme-link').href = linkWmeDoPedido(place, API.getRegion());
 
     renderCardImages(card, place);
 
@@ -4439,6 +4439,89 @@ function identidadeDoPlace(place) {
     const endereco = String(place.address || '').trim();
     if (endereco) return { titulo: endereco, semNome: true, tituloEhEndereco: true, ausente: false };
     return { titulo: t('card.noName'), semNome: true, tituloEhEndereco: false, ausente: true };
+}
+
+// ── MANDAR O PEDIDO ABERTO PELA CONVERSA ────────────────────────────────────
+//
+// Vai um RESUMO, não o place inteiro: o `changes[]`, o `mapa` e a escrituração
+// do venue não cabem numa pergunta ("isso é fachada ou é a sala?") e só
+// engordariam o que trafega. O que vai é o que a folha de leitura mostra.
+//
+// E vai CHAVE, nunca texto renderizado (`updateTypeKey`, categorias cruas):
+// quem manda pode estar em português e quem recebe em francês. É a mesma regra
+// que o servidor já segue com o card — o remetente não escolhe a palavra que
+// aparece na tela do outro.
+//
+// Devolve `null` quando não há pedido aberto (fila vazia, "Tudo limpo!", modo
+// treino), e é isso que faz o botão sumir em vez de virar botão morto.
+function cardParaConversa() {
+    const place = AppState.currentPlace;
+    if (!place || !place.venueID) return null;
+    if (place._treino) return null;   // pedido inerte não existe pra mais ninguém
+    const fotos = Array.isArray(place.imageUrls) ? place.imageUrls : [];
+    return {
+        venueID: place.venueID,
+        updateRequestID: place.updateRequestID || null,
+        name: place.name || '',
+        address: place.address || '',
+        categories: Array.isArray(place.categories) ? place.categories.slice(0, 4) : [],
+        updateTypeKey: place.updateTypeKey || null,
+        imageUrl: place.imageUrl || fotos[0] || null,
+        lat: place.lat ?? null,
+        lon: place.lon ?? null,
+        // A região vai junto porque o link do WME depende dela e quem recebe
+        // pode estar filtrando outra. Sem isto o ↗ levaria pro ambiente errado.
+        region: API.getRegion(),
+    };
+}
+
+// Monta a URL do WME pro pedido — a MESMA regra do ↗ do card (env por região,
+// lat/lon com zoom 22, venueUpdateRequest com o venueID). Fonte única: o card e
+// a folha de leitura chamam daqui, senão os dois links divergem sem ninguém ver.
+function linkWmeDoPedido(dados, region) {
+    const envParam = region === 'na' ? 'usa' : region;
+    const params = [`env=${envParam}`];
+    if (dados.lat && dados.lon) params.push(`lat=${dados.lat}`, `lon=${dados.lon}`, 'zoomLevel=22');
+    if (dados.venueID) params.push(`venueUpdateRequest=${encodeURIComponent(dados.venueID)}`);
+    return `${WME_EDITOR_URL}?${params.join('&')}`;
+}
+
+// Abre o pedido que CHEGOU pela conversa. Só leitura: sem ✕ ↑ ✓, porque ele não
+// está na fila de quem recebe.
+function abrirPedidoRecebido(dados, deQuem) {
+    if (!dados) return;
+    // O `$` deste arquivo é LOCAL de cada função que o declara, não global —
+    // três funções já fazem exatamente isto. Assumi que era global porque o vi
+    // sendo usado no setup, e o smoke devolveu `$ is not defined` na cara.
+    const $ = (id) => document.getElementById(id);
+    const ident = identidadeDoPlace(dados);
+    $('pedidoNome').textContent = ident.titulo;
+    $('pedidoDe').textContent = t('presenca.pedido.de', { nome: deQuem || t('presenca.anon') });
+
+    const foto = $('pedidoFoto');
+    if (dados.imageUrl) {
+        $('pedidoFotoImg').src = dados.imageUrl;
+        foto.classList.remove('hidden');
+    } else {
+        $('pedidoFotoImg').removeAttribute('src');
+        foto.classList.add('hidden');
+    }
+
+    const linha = (idRow, idVal, valor) => {
+        $(idRow).classList.toggle('hidden', !valor);
+        if (valor) $(idVal).textContent = valor;
+    };
+    linha('pedidoTipoRow', 'pedidoTipo', dados.updateTypeKey
+        ? t('card.updateType.' + dados.updateTypeKey) : '');
+    // Categoria sai CRUA de propósito: o Waze regionaliza por PAÍS, não por
+    // idioma, então traduzir erraria em metade dos países (ver gotcha #39).
+    linha('pedidoCatRow', 'pedidoCat', (dados.categories || []).join(', '));
+    // Sem nome o endereço já virou o TÍTULO — repeti-lo aqui seria dizer a
+    // mesma coisa duas vezes, que é o que o card também evita.
+    linha('pedidoEndRow', 'pedidoEnd', ident.tituloEhEndereco ? '' : (dados.address || ''));
+
+    $('pedidoWme').href = linkWmeDoPedido(dados, dados.region || API.getRegion());
+    openModal('pedidoModal');
 }
 
 // Categorias em que NÃO ter nome é o normal — o selo não aparece nelas.
@@ -6307,6 +6390,22 @@ function loadFilters() {
 // memória ainda é o literal de origem — medido, com o `undoEnabled: false` do
 // editor virando `true` no armazenamento, de forma PERMANENTE.
 //
+// ── ANISTIA DA PRESENÇA ─────────────────────────────────────────────────────
+// Desligar "Ver quem está na fila" é decisão de um dia; ficar invisível pra
+// sempre por causa dela raramente é a intenção. Quem experimentou o desligar
+// no primeiro contato e esqueceu nunca mais vê o recurso — e não tem como
+// descobrir que ele existe, porque a pílula (que é a única coisa que o anuncia)
+// é justamente o que ele desligou.
+//
+// Depois de 9 dias desligado, volta sozinho e EM SILÊNCIO: sem toast, sem
+// banner. Anunciar seria transformar uma reativação discreta numa interrupção,
+// que é o oposto do que ela existe pra consertar.
+//
+// Quem quiser desligar de novo desliga, e ganha outros 9 dias. Quem religa à
+// mão zera o carimbo — a contagem é do DESLIGAR, não do calendário.
+const PRESENCA_ANISTIA_DIAS = 9;
+const PRESENCA_ANISTIA_MS = PRESENCA_ANISTIA_DIAS * 24 * 60 * 60 * 1000;
+
 // A ordem certa é garantida por invariante, não por sorte de quem chama antes:
 // enquanto não se leu, não se escreve.
 let preferenciasCarregadas = false;
@@ -6344,9 +6443,46 @@ function loadPreferences() {
             if (typeof parsed.semUndoSeguidas === 'number' && parsed.semUndoSeguidas >= 0) {
                 AppState.preferences.semUndoSeguidas = parsed.semUndoSeguidas;
             }
+            if (Number.isFinite(parsed.presencaOffEm) && parsed.presencaOffEm > 0) {
+                AppState.preferences.presencaOffEm = parsed.presencaOffEm;
+            }
         }
     } catch (e) {}
     preferenciasCarregadas = true;
+    if (aplicarAnistiaDaPresenca()) savePreferences();
+}
+
+// Devolve true quando MUDOU alguma coisa (pra quem chama saber se grava).
+//
+// Roda depois do `preferenciasCarregadas = true` de propósito: o
+// `savePreferences` sai calado antes disso, e a anistia precisa PERSISTIR —
+// senão ela reavalia a cada carga e o carimbo velho fica pra sempre no
+// aparelho.
+function aplicarAnistiaDaPresenca() {
+    const p = AppState.preferences;
+    if (p.presenca !== false) {
+        // Ligado não tem contagem correndo. Carimbo sobrando é resíduo de uma
+        // versão anterior ou de armazenamento editado à mão.
+        if (p.presencaOffEm === undefined) return false;
+        delete p.presencaOffEm;
+        return true;
+    }
+    // Desligado ANTES desta versão existir: não há de quando contar. Carimba
+    // agora, e a anistia cai daqui a 9 dias.
+    //
+    // Carimbar em vez de anistiar na hora é deliberado: religar de uma vez todo
+    // mundo que já estava desligado transforma um deploy numa mudança em massa
+    // que ninguém pediu — e some com o significado dos 9 dias.
+    if (!Number.isFinite(p.presencaOffEm) || p.presencaOffEm <= 0) {
+        p.presencaOffEm = Date.now();
+        return true;
+    }
+    // Relógio que andou pra trás dá diferença negativa: isso não é 9 dias.
+    const decorrido = Date.now() - p.presencaOffEm;
+    if (decorrido < PRESENCA_ANISTIA_MS) return false;
+    p.presenca = true;
+    delete p.presencaOffEm;
+    return true;
 }
 
 // Modo Desenvolvedor: easter egg estilo Android. User toca 7 vezes na versão
@@ -7006,3 +7142,7 @@ window.showToast = showToast;
 
 // Usado pelo swipe.js: o arraste não pode furar a janela do Desfazer.
 window.acoesTravadas = acoesTravadas;
+
+// Usados pelo presenca.js, que carrega DEPOIS deste arquivo.
+window.cardParaConversa = cardParaConversa;
+window.abrirPedidoRecebido = abrirPedidoRecebido;
