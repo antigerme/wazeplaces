@@ -145,6 +145,11 @@ const Presenca = {
     total: 0,
     conversas: new Map(),   // peer -> { pc, canal, msgs, naoLidas, nome, estado }
     aberta: null,           // peer da conversa aberta agora
+    // Pedido preso à barra, esperando ser mandado junto com a pergunta. Só
+    // existe entre o toque no botão e o envio — some ao mandar e ao fechar a
+    // conversa. Um por vez: a barra tem lugar pra um, e "qual dos dois?" é
+    // pergunta que ninguém precisa responder.
+    anexo: null,
     filtro: null,
     tentativa: 0,
     timers: { keepalive: null, renovar: null, religar: null, vigia: null, ressinc: null, abrir: null },
@@ -492,10 +497,13 @@ function presencaLigarCanal(peer, canal) {
         if (m.t === 'lido') { presencaConfirmar(c, m.ate, 'lida'); return; }
 
         const txt = String(m.txt || '').slice(0, 2000);
-        if (!txt) return;
+        const card = presencaCardSeguro(m.card);
+        // Mensagem sem texto E sem pedido não é mensagem. Com pedido e sem
+        // texto é: mandar o card pelado é legítimo (variante A do desenho).
+        if (!txt && !card) return;
         const id = Number.isFinite(m.id) ? m.id : 0;
         if (id > c.ultimaRecebida) c.ultimaRecebida = id;
-        c.msgs.push({ meu: false, txt, ts: Date.now(), id, estado: null, motivo: null });
+        c.msgs.push({ meu: false, txt, ts: Date.now(), id, estado: null, motivo: null, card });
 
         // Confirma a ENTREGA na hora — é um fato do aparelho, não da pessoa.
         // Mensagem de cliente antigo vem sem id: não há o que confirmar.
@@ -600,22 +608,83 @@ function presencaAvisarConvite(peer, c) {
     presencaRenderLista();
 }
 
-function presencaMandarTexto(peer, txt) {
+function presencaMandarTexto(peer, txt, card) {
     const c = presencaConversa(peer);
     // A mensagem entra na lista JÁ — inclusive com o canal fechado. Antes ela
     // ficava invisível na fila de `pendentes` e só aparecia ao ser enviada; com
     // recibo, "enviando" é um estado que a pessoa PODE ver, e ver é melhor que
     // um vão em branco enquanto a conexão levanta.
-    const m = { meu: true, txt, ts: Date.now(), id: ++c.seq, estado: 'enviando', motivo: null };
+    const m = {
+        meu: true, txt, ts: Date.now(), id: ++c.seq, estado: 'enviando', motivo: null,
+        card: card || null,
+    };
     c.msgs.push(m);
     presencaEntregarMsg(peer, c, m);
     presencaRenderConversa();
 }
 
+// Prende o pedido ABERTO à barra. Não manda ainda: a tirinha existe justamente
+// pra você conferir o que vai sair, porque com a conversa aberta o card está
+// atrás do modal e não dá pra ver de outro jeito.
+function presencaAnexarCard() {
+    if (!Presenca.aberta) return;
+    const card = window.cardParaConversa ? window.cardParaConversa() : null;
+    if (!card) return;   // sem pedido aberto não há o que prender
+    Presenca.anexo = card;
+    presencaRenderAnexo();
+    const campo = document.getElementById('conversaInput');
+    if (campo) campo.focus();
+}
+
+function presencaSoltarAnexo() {
+    Presenca.anexo = null;
+    presencaRenderAnexo();
+}
+
+// Desenha a tirinha e decide se o BOTÃO existe. As duas coisas na mesma função
+// porque são o mesmo estado visto de dois lugares: com anexo preso, a tirinha
+// aparece e o botão sai (já tem um pedido esperando); sem anexo, o botão só
+// existe se houver pedido aberto pra mandar.
+function presencaRenderAnexo() {
+    const tira = document.getElementById('conversaAnexo');
+    const botao = document.getElementById('conversaCardBtn');
+    if (!tira || !botao) return;
+    const a = Presenca.anexo;
+    tira.classList.toggle('hidden', !a);
+    if (a) {
+        const nome = (a.name || '').trim() || (a.address || '').trim() || t('card.noName');
+        document.getElementById('conversaAnexoNome').textContent = nome;
+        document.getElementById('conversaAnexoMeta').textContent = presencaResumoDoCard(a);
+        // Quem some é a CAIXA, não o <img>: escondendo só a imagem sobravam
+        // 40px de vão vazio com o `gap` do lado, que lê como foto que não
+        // carregou. Mesma decisão do cartão, que não desenha caixa sem foto.
+        const img = document.getElementById('conversaAnexoFoto');
+        const caixa = img.parentElement;
+        if (a.imageUrl) { img.src = a.imageUrl; caixa.classList.remove('hidden'); }
+        else { img.removeAttribute('src'); caixa.classList.add('hidden'); }
+    }
+    // Ação impossível sai da frente em vez de virar botão morto — mesma régua
+    // que faz a pílula sumir quando a sala esvazia.
+    const temPedido = !!(window.cardParaConversa && window.cardParaConversa());
+    botao.classList.toggle('hidden', !!a || !temPedido);
+}
+
+// "Foto nova · Padaria". Tipo e categoria são CHAVE e enum crus no que trafega;
+// a palavra é escolhida aqui, na língua de quem lê.
+function presencaResumoDoCard(card) {
+    const partes = [];
+    if (card.updateTypeKey) partes.push(t('card.updateType.' + card.updateTypeKey));
+    // Categoria sai CRUA: o Waze regionaliza por PAÍS, não por idioma (gotcha #39).
+    if (card.categories && card.categories.length) partes.push(card.categories[0]);
+    return partes.join(' · ');
+}
+
 function presencaEntregarMsg(peer, c, m) {
     if (!c.canal || c.canal.readyState !== 'open') { c.pendentes.push(m); return; }
     try {
-        c.canal.send(JSON.stringify({ txt: m.txt, id: m.id }));
+        c.canal.send(JSON.stringify(m.card
+            ? { txt: m.txt, id: m.id, card: m.card }
+            : { txt: m.txt, id: m.id }));
         m.estado = 'enviada';
         // O prazo não se cancela: quando o `ack` chega, o estado deixa de ser
         // 'enviada' e este callback não faz nada. Guardar id de timer por
@@ -631,6 +700,37 @@ function presencaEntregarMsg(peer, c, m) {
         m.estado = 'falhou';
         m.motivo = presencaMotivoDaFalha(c);
     }
+}
+
+// O que chega pela rede é DADO DE OUTRO APARELHO, e o outro aparelho pode estar
+// rodando qualquer coisa. Aqui se copia campo a campo, com tipo e teto — nada de
+// espalhar o objeto recebido, que aceitaria qualquer chave que ele inventasse.
+//
+// A `imageUrl` é o campo perigoso: ela vira `src` de uma <img>, então só passa
+// URL https do domínio de imagem do Waze. Sem isto, quem manda escolheria pra
+// onde o aparelho de quem recebe faz requisição — e um `javascript:` viraria
+// execução. A CSP já barraria a maior parte disso; esta é a segunda camada.
+const PRESENCA_FOTO_OK = /^https:\/\/[a-z0-9-]+\.waze\.com\//i;
+function presencaCardSeguro(c) {
+    if (!c || typeof c !== 'object') return null;
+    const txt = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+    const num = (v) => (Number.isFinite(v) ? v : null);
+    const venueID = txt(c.venueID, 128);
+    if (!venueID) return null;   // sem alvo não há pedido
+    const foto = txt(c.imageUrl, 500);
+    return {
+        venueID,
+        updateRequestID: txt(c.updateRequestID, 128) || null,
+        name: txt(c.name, 200),
+        address: txt(c.address, 300),
+        categories: Array.isArray(c.categories)
+            ? c.categories.filter((x) => typeof x === 'string').slice(0, 4).map((x) => x.slice(0, 60))
+            : [],
+        updateTypeKey: txt(c.updateTypeKey, 40) || null,
+        imageUrl: PRESENCA_FOTO_OK.test(foto) ? foto : null,
+        lat: num(c.lat), lon: num(c.lon),
+        region: ['row', 'na', 'il', 'world'].includes(c.region) ? c.region : 'row',
+    };
 }
 
 // Marca as MINHAS mensagens até `ate` (inclusive) — o `ack` confirma uma, o
@@ -827,6 +927,7 @@ function presencaAbrirConversa(peer) {
     // conversa. Medido no smoke: a página ia pra `about:blank`.
     openModal('conversaModal');
     presencaRenderConversa();
+    presencaRenderAnexo();
     presencaRenderPilula();
     presencaRenderLista();
     if (c.estado !== 'aberta') presencaChamar(peer, c.nome);
@@ -847,6 +948,13 @@ function presencaFecharConversa() {
 // nunca mais viraria aviso.
 function presencaEsquecerAberta() {
     Presenca.aberta = null;
+    // O anexo é da conversa, não do aparelho: fechar sem mandar descarta. Vai
+    // AQUI e não no ✕ porque a conversa fecha por quatro caminhos (✕, Esc,
+    // scrim, voltar do aparelho) e amarrar num deles deixa os outros três
+    // vazando — o pedido reapareceria preso na próxima conversa, de outra
+    // pessoa. Mesma lição do ticker do pareamento.
+    Presenca.anexo = null;
+    presencaRenderAnexo();
     presencaRenderPilula();
     presencaRenderLista();
 }
@@ -910,9 +1018,38 @@ function presencaHtmlDasMsgs(c) {
         } else if (mostrar && i === ultimaLida) {
             linha = `<p class="conversa-lida">${escapeHtml(t('presenca.recibo.lida'))}</p>`;
         }
-        return `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">`
-            + `${escapeHtml(m.txt)}${recibo}</div>${linha}`;
+        const corpo = m.card
+            ? presencaHtmlDoPedido(m, i, recibo)
+            : `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">`
+                + `${escapeHtml(m.txt)}${recibo}</div>`;
+        return corpo + linha;
     }).join('');
+}
+
+// O pedido dentro da conversa. É um CARTÃO, não uma bolha de texto — e é um
+// <button> porque se abre: sem isso o teclado e o leitor de tela não chegam
+// nele, e ele seria a única coisa clicável da conversa fora do alcance dos dois.
+//
+// Card e pergunta saem como UMA mensagem quando há texto: é como a pergunta
+// realmente é feita, e dá UM recibo em vez de dois — o "Lida" cobre o conjunto.
+function presencaHtmlDoPedido(m, i, recibo) {
+    const card = m.card;
+    const nome = (card.name || '').trim() || (card.address || '').trim() || t('card.noName');
+    const meta = presencaResumoDoCard(card);
+    const foto = card.imageUrl
+        ? `<span class="cp-foto"><img src="${escapeHtml(card.imageUrl)}" alt="" width="62" height="62"></span>`
+        : '';
+    const topo = `<span class="cp-topo">${foto}<span class="cp-txt">`
+        + `<span class="cp-nome">${escapeHtml(nome)}</span>`
+        + (meta ? `<span class="cp-meta">${escapeHtml(meta)}</span>` : '')
+        + '</span></span>';
+    const legenda = m.txt
+        ? `<span class="cp-legenda">${escapeHtml(m.txt)}${recibo}</span>`
+        : '';
+    return `<button type="button" class="conversa-pedido ${m.meu ? 'minha' : 'dela'}`
+        + `${legenda ? ' com-legenda' : ''}" data-msg="${i}"`
+        + ` aria-label="${escapeHtml(t('presenca.pedido.abrir', { nome }))}">`
+        + topo + legenda + (legenda ? '' : recibo) + '</button>';
 }
 
 function presencaRenderConversa() {
@@ -1023,9 +1160,53 @@ function presencaMontar() {
         ev.preventDefault();
         const campo = document.getElementById('conversaInput');
         const txt = (campo.value || '').trim().slice(0, 2000);
-        if (!txt || !Presenca.aberta) return;
+        // Com pedido preso, mandar SÓ o card é legítimo — perguntar é opcional.
+        if ((!txt && !Presenca.anexo) || !Presenca.aberta) return;
+        const card = Presenca.anexo;
         campo.value = '';
-        presencaMandarTexto(Presenca.aberta, txt);
+        // Solta o anexo ANTES de mandar: o `presencaMandarTexto` redesenha a
+        // conversa, e redesenhar com a tirinha ainda presa mostraria o pedido
+        // em dois lugares no mesmo quadro.
+        if (card) presencaSoltarAnexo();
+        presencaMandarTexto(Presenca.aberta, txt, card);
+    });
+
+    // Prender o pedido aberto à barra.
+    const btnCard = document.getElementById('conversaCardBtn');
+    if (btnCard) btnCard.addEventListener('click', () => presencaAnexarCard());
+    const tirar = document.getElementById('conversaAnexoTirar');
+    if (tirar) tirar.addEventListener('click', () => presencaSoltarAnexo());
+
+    // Abrir um pedido que chegou. Delegado: as bolhas são redesenhadas a cada
+    // mensagem, e ouvinte por bolha vazaria a cada render.
+    const msgs = document.getElementById('conversaMsgs');
+    if (msgs) {
+        msgs.addEventListener('click', (ev) => {
+            const alvo = ev.target.closest('.conversa-pedido');
+            if (!alvo || !Presenca.aberta) return;
+            const c = Presenca.conversas.get(Presenca.aberta);
+            const m = c && c.msgs[Number(alvo.dataset.msg)];
+            if (!m || !m.card) return;
+            // Meu nome sai do CRACHÁ (é o do WME, assinado pelo servidor);
+            // o dela, da conversa. A folha diz "de quem" porque o pedido
+            // aberto ali não é da fila de ninguém: é o que alguém mostrou.
+            const de = m.meu ? (Presenca.cracha && Presenca.cracha.nome) : c.nome;
+            window.abrirPedidoRecebido?.(m.card, de);
+        });
+        // Foto de terceiro que não carrega (apagada no Waze, rede caída) não
+        // pode virar ícone quebrado no meio da conversa. `error` NÃO borbulha:
+        // só se pega na fase de CAPTURA.
+        msgs.addEventListener('error', (ev) => {
+            const img = ev.target;
+            if (img && img.tagName === 'IMG') img.closest('.cp-foto')?.remove();
+        }, true);
+    }
+    // A tirinha mostra a MESMA foto e merece o mesmo tratamento: sem isto, a
+    // única foto quebrada visível da app ficaria justamente na hora de decidir
+    // se manda ou não.
+    const anexoFoto = document.getElementById('conversaAnexoFoto');
+    if (anexoFoto) anexoFoto.addEventListener('error', () => {
+        anexoFoto.parentElement.classList.add('hidden');
     });
 
     // Sair da página fecha o socket na hora. Sem isto o outro lado continua

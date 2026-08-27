@@ -2456,19 +2456,40 @@ test('realce do miolo: dispara na agulha e cala no óbvio', () => {
 test('.hidden vence: nada que o JS esconde pode ter display fixado em styles.css', () => {
   const css = readFileSync(join(ROOT, 'css', 'styles.css'), 'utf8');
   const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
-  const app = readFileSync(join(ROOT, 'js', 'app.js'), 'utf8');
+  // O `presenca.js` entrou aqui DEPOIS, e a razão é o defeito que ele trouxe:
+  // ele esconde os seus próprios elementos e o guard só varria o app.js, então
+  // o botão do card e a tirinha do anexo nasceram com `display: flex` fixo e
+  // NÃO sumiam — 44px e 390px seguindo na tela com a `.hidden` no DOM. Arquivo
+  // que esconde elemento entra nesta lista, senão o guard cobre só metade dos
+  // lugares onde o erro cabe.
+  const app = readFileSync(join(ROOT, 'js', 'app.js'), 'utf8')
+    + '\n' + readFileSync(join(ROOT, 'js', 'presenca.js'), 'utf8');
 
   // classes que styles.css fixa `display` (fora de @media/@supports não importa:
   // se pega em ALGUM contexto, já quebra ali)
   const comDisplay = new Set();
   for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
-    if (!/(^|[^-\w])display\s*:/.test(m[2])) continue;
-    // `:not(.x)` é CONDIÇÃO, não estilo: `#appScreen:not(.hidden){display:flex}`
-    // não fixa display na `.hidden` — pelo contrário, existe justamente pra
-    // ceder a ela. Sem tirar isso, o guard acusa meia app.
-    const seletor = m[1].replace(/:not\([^)]*\)/g, '');
-    for (const cls of seletor.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
-      if (cls[1] !== 'hidden') comDisplay.add(cls[1]);
+    const decl = m[2].match(/(?:^|[^-\w])display\s*:\s*([^;!}]+)/);
+    if (!decl) continue;
+    // `display: none` NÃO derrota o `.hidden` — é a mesma coisa que ele quer.
+    // Sem esta linha o guard acusa `.auth-opt-hidden`, que existe justamente
+    // pra esconder, e o falso positivo treina todo mundo a ignorar o guard.
+    if (decl[1].trim().toLowerCase() === 'none') continue;
+    // Vírgula a vírgula, porque `.a, .b:not(.hidden){display:flex}` tem uma
+    // parte que derrota o `.hidden` e outra que não.
+    //
+    // A parte que traz `:not(....hidden...)` CEDE ao `.hidden` por construção —
+    // é a forma canônica de escrever isto aqui (`#appScreen:not(.hidden)`), e
+    // acusá-la seria falso positivo. Antes o guard só APAGAVA o `:not(...)` do
+    // seletor, o que funcionava por acidente quando a classe morava só dentro
+    // dele: `.conversa-anexo:not(.hidden)` continuava acusado depois de já
+    // estar certo. Falso positivo treina todo mundo a ignorar o guard.
+    for (const parte of m[1].split(',')) {
+      if (/:not\([^)]*\.hidden[^)]*\)/.test(parte)) continue;
+      const seletor = parte.replace(/:not\([^)]*\)/g, '');
+      for (const cls of seletor.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
+        if (cls[1] !== 'hidden') comDisplay.add(cls[1]);
+      }
     }
   }
 
@@ -2479,6 +2500,28 @@ test('.hidden vence: nada que o JS esconde pode ter display fixado em styles.css
                     /\$\('([\w-]+)'\)[^;\n]*classList\.add\('hidden'\)/g]) {
     for (const m of app.matchAll(re)) escondidos.add(m[1]);
   }
+
+  // O elemento guardado numa VARIÁVEL primeiro escapava de tudo acima, que
+  // exige o getElementById e o classList na MESMA instrução. É a forma mais
+  // natural de escrever — `const btn = ...` e depois `btn.classList.toggle(…)`
+  // — e foi exatamente assim que o botão do card passou batido enquanto NÃO
+  // sumia na tela. Amarrar na estrutura (a atribuição) e não na distância.
+  const porVariavel = new Map();
+  for (const m of app.matchAll(/(?:const|let|var)\s+([\w$]+)\s*=\s*(?:document\.getElementById|\$)\(\s*'([\w-]+)'\s*\)/g)) {
+    porVariavel.set(m[1], m[2]);
+  }
+  for (const [nomeVar, id] of porVariavel) {
+    const usa = new RegExp(`\\b${nomeVar}\\.classList\\.(?:add|toggle)\\(\\s*'hidden'`);
+    if (usa.test(app)) escondidos.add(id);
+  }
+
+  // E o caso que nem precisa de JS: o elemento que JÁ NASCE com `hidden` no
+  // markup. Se ele também carrega classe com display fixo, ele está visível
+  // desde o primeiro paint — sem ninguém ter chamado nada.
+  for (const m of html.matchAll(/<[^>]*\sid="([\w-]+)"[^>]*\sclass="([^"]*)"[^>]*>/g)) {
+    if (m[2].split(/\s+/).includes('hidden')) escondidos.add(m[1]);
+  }
+
   assert.ok(escondidos.size >= 5, `o varredor achou só ${escondidos.size} ids — a regex parou de casar`);
 
   const presos = [];
