@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.27-01
+
+### Alterado
+- **A app abre mais rápido: o HTML encolheu 45%.** O arquivo principal tinha 36 KB comprimidos, e **42% disso era comentário** — o projeto documenta as decisões junto do código, e isso vinha junto pela rede em toda abertura.
+
+  Agora o navegador recebe uma versão sem comentários (20 KB), enquanto o arquivo comentado continua no repositório, que é onde ele serve. Medido num 3G com aparelho lento: o **primeiro pixel aparece 388 ms antes**, e a app fica pronta **1 segundo antes**.
+
+  É o mesmo tratamento que o CSS e o JavaScript já recebiam.
+
+---
+
 ## v2026.08.26-04
 
 ### Corrigido

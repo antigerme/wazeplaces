@@ -201,7 +201,10 @@ const SECURITY_HEADERS = {
 // antiga, que servia com 200 os arquivos da raiz não listados.
 const ALLOWED_DIRS = ['/css/', '/js/', '/icons/', '/fonts/'];
 const ALLOWED_ROOT_FILES = new Set([
-  '/index.html',
+  // O FONTE `/index.html` NÃO está aqui de propósito: a raiz e `/index.html`
+  // são remapeados pro minificado antes desta checagem, então listá-lo seria
+  // abrir um segundo caminho pro arquivo comentado — duas URLs, dois conteúdos.
+  '/index.min.html',
   '/manifest.json',
   '/service-worker.js',
   '/favicon.ico',
@@ -228,7 +231,13 @@ async function serveStatic(req, res, urlPath) {
   const isRoot = rel === '/' || rel === '';
   // Navegação = raiz ou request que aceita HTML → serve o shell da SPA no miss.
   const isNavigation = isRoot || accept.includes('text/html');
-  if (isRoot) rel = '/index.html';
+  // A raiz serve o HTML MINIFICADO (`npm run html`), não o fonte comentado:
+  // 36 KB gzip contra 20, e -388ms de FCP num 3G. O fonte segue no repo porque
+  // é o que se edita, o que os testes leem e o que o Tailwind varre.
+  //
+  // `/index.html` cai aqui TAMBÉM, senão haveria duas URLs servindo conteúdos
+  // diferentes — e o service worker precacheia as duas.
+  if (isRoot || rel === '/index.html') rel = '/index.min.html';
 
   const safe = normalize(rel).replace(/^(\.\.[/\\])+/, '');
 
@@ -283,7 +292,7 @@ function notFound(res, isNavigation) {
 
 async function serveIndexFallback(res) {
   try {
-    const buf = await readFile(join(ROOT, 'index.html'));
+    const buf = await readFile(join(ROOT, 'index.min.html'));
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
     res.end(buf);
   } catch {

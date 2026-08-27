@@ -89,7 +89,20 @@ export default {
       }
     }
 
-    // Tudo que não é /api/ → arquivos estáticos (index.html, css, js, icons…)
+    // Tudo que não é /api/ → arquivos estáticos (HTML, css, js, icons…)
+    //
+    // A raiz serve o HTML MINIFICADO (`npm run html`), não o fonte comentado:
+    // 36 KB gzip contra 20, e -388ms de FCP num 3G. Mesmo remapeamento do
+    // `server/node.mjs` — os dois adaptadores TÊM que concordar, senão "levar
+    // pra uma VM" vira mudança de comportamento (gotcha #14).
+    //
+    // `/index.html` entra junto: sem isso seriam duas URLs com conteúdos
+    // diferentes, e o service worker precacheia as duas.
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      const alvo = new URL(request.url);
+      alvo.pathname = '/index.min.html';
+      return env.ASSETS.fetch(new Request(alvo, request));
+    }
     return env.ASSETS.fetch(request);
   },
 };

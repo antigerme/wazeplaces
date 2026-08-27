@@ -93,7 +93,13 @@ PWA = instala no celular sem precisar de Play Store / App Store. Funciona offlin
 
 ```
 wazeplaces/
-├── index.html               # SPA: header + authScreen + appScreen + modais + template do card
+├── index.html               # SPA: header + authScreen + appScreen + modais + template do card.
+│                            #   É o FONTE: comentado, é o que se edita, o que os TESTES leem
+│                            #   (5 arquivos, vários casando linha a linha) e o que o Tailwind varre.
+├── index.min.html           # GERADO por `npm run html` — commitado, NÃO editar. **É ISTO que a
+│                            #   RAIZ serve**, nos DOIS adaptadores. Medido: 36 → 20 KB gzip,
+│                            #   FCP -388ms e load -1s num 3G. O `<script>` inline do tema sai
+│                            #   INTOCADO (o gerador confere o hash da CSP antes de escrever).
 ├── manifest.json            # PWA manifest (ícones SVG em icons/)
 ├── service-worker.js        # Cache + auto-update (controllerchange + SKIP_WAITING)
 ├── icons/
@@ -204,6 +210,7 @@ npm run check          # node --check em js/*.js server/*.mjs worker/*.mjs
 npm test               # node --test — suite pura do core (test/core.test.mjs), ZERO deps
 npm run css            # SÓ se mexeu em classe do Tailwind OU no css/styles.css (regenera css/app.css; CI cobra)
 npm run js             # SEMPRE que mexer em js/*.js — regenera js/min/, que é o que a app CARREGA (CI cobra)
+npm run html           # SEMPRE que mexer no index.html — regenera index.min.html, que é o que a RAIZ serve (CI cobra)
 npm run test:presenca  # SÓ se mexeu em presença/sala: 2 navegadores, WebSocket e WebRTC de verdade
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
 node tools/waze-probe.mjs <cookies.txt>   # OBRIGATÓRIO se mexeu em algo que fala com o Waze (ver 🔑)
