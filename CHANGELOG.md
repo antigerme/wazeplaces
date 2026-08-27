@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.27-02
+
+### Corrigido
+- **As ilustrações da tela de entrada não são mais baixadas por quem já está logado.** São três imagens que explicam o app para quem chega pela primeira vez — e vinham pela rede em toda abertura, mesmo com a tela escondida.
+
+  Eram 32 KB em 3 requisições, e o pior não era o tamanho: elas chegavam **antes** do primeiro pixel, disputando banda com o que a tela precisa para aparecer. Medido num 3G, três rodadas de cada lado: o primeiro pixel agora vem **192 ms antes** (1640 → 1448 ms).
+
+  Quem abre o app pela primeira vez continua vendo as três normalmente.
+
+---
+
 ## v2026.08.27-01
 
 ### Alterado

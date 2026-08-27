@@ -2611,3 +2611,39 @@ test('entrada: quem tem sessão não vê a tela de login piscar', () => {
   assert.match(gerado, /\.tem-sessao\s+#appScreen\s*\{\s*display:\s*flex/,
     'a regra do #appScreen não chegou no css/app.css — rode `npm run css`');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  As prévias da tela de entrada não baixam para quem já está logado
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Elas ilustram a tela de ENTRADA, que é `display:none` para quem tem sessão —
+// mas `display:none` NÃO impede o download: o navegador busca toda `<img src>`
+// do documento. MEDIDO no relatório de produção do owner (logado): as três
+// baixaram, 32 KB em 3 requisições, terminando aos 313–343ms — ou seja ANTES
+// do FCP (1712ms), disputando banda com o CSS e o JS no momento crítico.
+//
+// `loading="lazy"` resolve porque adia até o elemento entrar no viewport, o que
+// nunca acontece enquanto a tela está escondida. MEDIDO num 3G, 3 rodadas de
+// cada lado: FCP de 1640 para 1448ms, sem sobreposição entre as amostras.
+//
+// A CONTRAPROVA importa mais que o ganho: sem sessão elas precisam continuar
+// baixando E aparecendo, senão a tela de entrada fica sem as ilustrações.
+// Medido: com sessão 0 downloads, sem sessão 3 e visíveis.
+test('prévias: a tela de entrada não custa banda de quem já entrou', () => {
+  const html = read('index.html');
+  const tags = [...html.matchAll(/<img[^>]*previa-[a-z]+\.jpg[^>]*>/g)].map((m) => m[0]);
+  assert.equal(tags.length, 3, 'o número de prévias mudou — a regra vale para todas');
+  for (const t of tags) {
+    assert.match(t, /loading="lazy"/,
+      `prévia sem loading="lazy" volta a baixar para quem está logado: ${t.slice(0, 70)}`);
+    // `width`/`height` continuam obrigatórios: sem eles a imagem não reserva
+    // espaço e a tela de entrada volta a deslocar quando ela chega.
+    assert.match(t, /width="\d+"/, 'prévia sem width: o layout volta a pular');
+    assert.match(t, /height="\d+"/, 'prévia sem height: o layout volta a pular');
+  }
+  // E o gerado tem que carregar a mesma coisa — é ele que o navegador recebe.
+  const min = read('index.min.html');
+  assert.equal((min.match(/previa-[a-z]+\.jpg/g) || []).length, 3, 'as prévias sumiram do gerado');
+  assert.equal((min.match(/loading="lazy"/g) || []).length >= 3, true,
+    'o gerado não tem os loading="lazy" — rode `npm run html`');
+});
