@@ -8,6 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.27-03
+
+### Adicionado
+- **A conversa mostra se a mensagem chegou e se foi lida.** Como em qualquer app de mensagem: um tique quando ela sai, dois quando chega no aparelho da outra pessoa, e a palavra **Lida** quando ela abre a conversa.
+
+  Aqui isso vale mais que no WhatsApp, e o motivo é como o app funciona: **não existe servidor guardando a sua mensagem**. O texto vai cifrado direto de um aparelho pro outro, então se a outra pessoa não estiver lá, a mensagem não fica esperando em lugar nenhum. Antes disso, ela aparecia na sua tela como se tivesse saído — e você não tinha como saber.
+
+  Por isso existe um quinto estado que os outros apps não têm: **não chegou** — e ele diz o porquê quando o app sabe, como *"não chegou — carla_am saiu da fila"*.
+
+  "Lida" só aparece quando a pessoa realmente abriu a conversa **com o app na tela**: conversa aberta com o celular no bolso não conta.
+
+  Nada disso passa pelo nosso servidor — a confirmação volta pelo mesmo caminho direto que a mensagem usou.
+
+---
+
 ## v2026.08.27-02
 
 ### Corrigido
