@@ -2493,6 +2493,11 @@ function trapTabInModal(e, modal) {
 }
 
 function showAuthScreen() {
+    // A aposta do script inline do <head> era otimista (havia token no
+    // aparelho). Se chegamos aqui, ela estava errada — token vencido, logout,
+    // pareamento. Tirar a marca devolve o comando às classes `hidden`, que a
+    // partir do JS são a única fonte de verdade.
+    document.documentElement.classList.remove('tem-sessao');
     document.getElementById('authScreen').classList.remove('hidden');
     document.getElementById('appScreen').classList.add('hidden');
     document.getElementById('filtersBtn').classList.add('hidden');

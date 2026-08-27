@@ -1247,13 +1247,17 @@ test('a app cabe na tela em QUALQUER aparelho, sem rolagem de página', () => {
   // arrastar pra cima é "pular". Ação principal fora da tela, sem gesto que a
   // traga de volta.
   for (const alvo of ['body', 'body > main', '#appScreen:not(.hidden)', '#cardStack']) {
-    const re = new RegExp(alvo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{[^}]*flex');
+    // `[^{]*` tolera o seletor IRMÃO no mesmo bloco (`, html.tem-sessao
+    // #appScreen`), que existe pra a cadeia valer também ANTES do JS. O que o
+    // guard cobra é o ELO, não a forma do seletor.
+    const re = new RegExp(alvo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^{]*\\{[^}]*flex');
     assert.match(CSS_SEM_COMENTARIO, re, `a cadeia de flex perdeu o elo "${alvo}"`);
   }
   // `min-height: 0` é o que faz o elo do meio ceder: sem ele o filho flex não
   // encolhe abaixo do conteúdo e a cadeia inteira não serve pra nada.
   for (const alvo of ['body > main', '#appScreen:not\\(\\.hidden\\)']) {
-    assert.match(CSS_SEM_COMENTARIO, new RegExp(alvo + '\\s*\\{[^}]*min-height:\\s*0'),
+    // `[^{]*` tolera o seletor irmão no mesmo bloco — ver a nota do elo acima.
+    assert.match(CSS_SEM_COMENTARIO, new RegExp(alvo + '[^{]*\\{[^}]*min-height:\\s*0'),
       `"${alvo}" perdeu o min-height: 0 e para de ceder`);
   }
   // A altura mora num lugar só. Classe de altura no HTML volta a competir com a
@@ -1316,7 +1320,7 @@ test('espaçamento da tela do card vem de gap, não de space-y', () => {
   assert.doesNotMatch(tela, /space-y-/, 'space-y-* de volta: os sr-only voltam a empurrar o placar');
   assert.match(
     CSS,
-    /#appScreen:not\(\.hidden\)\s*\{[^}]*gap:/,
+    /#appScreen:not\(\.hidden\)[^{]*\{[^}]*gap:/,
     'o espaçamento por gap sumiu do #appScreen'
   );
 });
@@ -2576,8 +2580,28 @@ test('entrada: quem tem sessão não vê a tela de login piscar', () => {
   const css = read('css/styles.css');
   assert.match(css, /html\.tem-sessao\s+#authScreen\s*\{[^}]*display:\s*none/,
     'sem a regra, a tela de login volta a ser pintada');
-  assert.match(css, /html\.tem-sessao\s+#appScreen\s*\{[^}]*display:\s*flex/,
-    'sem a regra, os cards não aparecem antes do JS');
+
+  // A tela dos cards tem que nascer com a CADEIA DE FLEX INTEIRA, não só com
+  // `display:flex`. A regra de layout do projeto é `#appScreen:not(.hidden)`, e
+  // ANTES do JS o elemento ainda TEM `.hidden` — então uma regra própria só com
+  // display deixava o #appScreen com 416px em vez de 730, o placar ocupando a
+  // tela toda, e tudo se reacomodando quando o JS chegava. MEDIDO num 3G com
+  // sessão: CLS foi de 0,0053 para 0,19, e voltou a 0,0053 com o seletor junto.
+  //
+  // Por isso os dois seletores dividem UM bloco: separados, são duas fontes
+  // para o mesmo layout — e elas divergiram exatamente assim.
+  const bloco = css.match(/#appScreen:not\(\.hidden\),\s*\n\s*html\.tem-sessao\s+#appScreen\s*\{([^}]*)\}/);
+  assert.ok(bloco, 'o #appScreen antes do JS saiu do bloco de layout — a cadeia de flex se perde');
+  for (const prop of ['display: flex', 'flex-direction: column', 'flex: 1 1 auto', 'min-height: 0']) {
+    assert.ok(bloco[1].includes(prop), `o bloco do #appScreen perdeu \`${prop}\``);
+  }
+
+  // E o JS precisa poder DERRUBAR a aposta: token vencido → tela de login.
+  const app = read('js/app.js');
+  const i = app.indexOf('function showAuthScreen');
+  const corpo = app.slice(i, app.indexOf('\n}\n', i));
+  assert.match(corpo, /classList\.remove\('tem-sessao'\)/,
+    'showAuthScreen não tira a marca — a aposta otimista vira segunda fonte de verdade');
   // O CSS GERADO é o que a app carrega — editar o fonte e não regerar não vale.
   // Confere a REGRA no gerado, não só o nome da classe: `.tem-sessao-XX`
   // contém `.tem-sessao` e passava batido (pego na sabotagem).

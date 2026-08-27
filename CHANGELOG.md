@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.26-04
+
+### Corrigido
+- **A tela dos cards não se reacomoda mais ao abrir.** Na versão anterior, ao acabar com a piscada da tela de login, ela passou a ser desenhada antes de estar pronta: o esqueleto do card nascia menor, e tudo pulava de lugar quando o app terminava de carregar. Em rede lenta isso era bem visível.
+
+  A causa: a regra de layout que dá altura ao card não valia nesse instante, então a tela nascia com 416px em vez de 730. Agora vale desde o primeiro pixel, e nada se move — medido, o deslocamento caiu de **0,19 para 0,005** num 3G, que é o mesmo nível de antes de tudo isso.
+
+  A correção da piscada continua valendo, e quem não tem sessão continua vendo a tela de login normalmente.
+
+---
+
 ## v2026.08.26-03
 
 ### Corrigido
