@@ -104,6 +104,25 @@ test('autores: no teto, sai quem tem a rejeição mais ANTIGA (não a menor cont
   assert.ok(!a.r['velho'], 'devia sair o mais antigo, mesmo com a maior contagem');
 });
 
+// O anel expira por CAPACIDADE e o mapa por IDADE — então o teto do anel tem
+// que COBRIR a janela do mapa, senão a app para de promover quem foi rejeitado
+// no dia 1 e no dia 25 (o id do dia 1 já saiu por lotação) e a promessa do card
+// quebra em SILÊNCIO. Foi o defeito real: com 2.000, a fila do owner dava 19
+// dias contra os 30 prometidos.
+//
+// Este teste é o que impede baixar o anel ou subir os dias sem refazer a conta.
+test('autores: o anel cobre a janela de dias que o card promete', () => {
+  const m = montar();
+  // Rejeições que ENTRAM no anel por dia, medido na fila real do owner: 856
+  // numa semana (~120/dia), das quais ~100 são autores de primeira viagem.
+  const POR_DIA = 100;
+  const diasCobertos = m.AUTORES_MAX_VISTOS / POR_DIA;
+  assert.ok(diasCobertos >= m.AUTORES_MAX_DIAS,
+    `o anel guarda ${diasCobertos} dias de rejeições mas o card promete `
+    + `${m.AUTORES_MAX_DIAS}: quem for rejeitado depois disso não é promovido, `
+    + 'e nada avisa. Suba AUTORES_MAX_VISTOS ou refaça a conta de POR_DIA.');
+});
+
 test('autores: o anel também tem teto, e descarta o mais antigo', () => {
   const m = montar();
   for (let i = 0; i < m.AUTORES_MAX_VISTOS + 10; i++) m.registrarRejeicaoDeAutor(place(i, 'a' + i));

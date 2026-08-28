@@ -5281,8 +5281,33 @@ const AUTORES_KEY = 'waze_places_autores';
 // Teto do mapa dos que repetiram. Ao encher, sai quem tem a rejeição mais
 // antiga — é o que torna o custo CONSTANTE, não importa quantos anos de uso.
 const AUTORES_MAX_REINCIDENTES = 500;
-// Teto do anel dos vistos-uma-vez. Só ids: 2.000 deles custam 20,6 KB.
-const AUTORES_MAX_VISTOS = 2000;
+// Teto do anel dos vistos-uma-vez. Só ids, sem nome e sem data.
+//
+// O número sai dos 30 DIAS logo abaixo, não de performance — e essa é a parte
+// que engana. O mapa expira por IDADE; o anel expira por CAPACIDADE. Se ele não
+// segurar 30 dias de rejeições, a app deixa de promover quem foi rejeitado no
+// dia 1 e no dia 25, porque o id do dia 1 já saiu por lotação. A promessa que o
+// próprio card faz ("entra quem você rejeitou 2 vezes") quebra EM SILÊNCIO, e o
+// editor não tem como perceber.
+//
+// Era 2.000, e a fila real do owner mostrou o buraco: 856 rejeições numa semana
+// (~120/dia, ~100 delas entrando no anel) davam **19 dias** de memória contra os
+// 30 prometidos. 4.000 dá ~38.
+//
+// Performance NÃO é o limite aqui, e a tabela do mapa (mais acima, no
+// CLAUDE.md) não vale pra este anel: ela mede `nome → [contagem, datas]`, que é
+// muito mais pesado por entrada. MEDIDO no ciclo completo de uma rejeição
+// (ler + procurar + gravar), num Chromium com a CPU 6× lenta:
+//   anel 2.000 → 4,04 ms · 4.000 → 4,32 ms · 8.000 → 4,72 ms
+// Um quadro a 60fps são 8,3 ms, então dobrar custou 0,28 ms — ruído. Tamanho no
+// aparelho: 39,6 KB → 63,0 KB.
+//
+// O que tornaria este número errado: um editor que rejeite MUITO mais que ~130
+// por dia volta a não cobrir os 30 dias. O conserto definitivo seria guardar o
+// DIA junto do id e podar por idade, como o mapa faz — aí o teto deixa de ser
+// palpite sobre o ritmo de quem usa. Fica como decisão separada: muda o formato
+// gravado e exige migração.
+const AUTORES_MAX_VISTOS = 4000;
 // ANISTIA, e não só arrumação — a razão é do owner: "30 dias é para tirar a
 // pessoa do castigo caso o editor esqueça de desmarcar do automático e/ou o
 // editor use muito pouco o app". Ou seja, o prazo protege o AUTOR de um
