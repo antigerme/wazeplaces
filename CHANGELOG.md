@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.08.28-01
+
+### Corrigido
+- **A lista de autores reincidentes estava perdendo memória antes dos 30 dias que ela promete.** O card diz *"entra quem você rejeitou 2 vezes, sai com 30 dias sem rejeição nova"* — mas quem foi rejeitado só uma vez ficava numa lista com limite de tamanho, não de tempo.
+
+  Na prática: em quem tria bastante, a primeira rejeição era esquecida por volta do **19º dia**. Aí a pessoa voltava no dia 25, era rejeitada de novo, e **não entrava na lista** — porque para o app aquela era a primeira vez. Sem erro, sem aviso.
+
+  O limite dobrou (de 2.000 para 4.000 autores lembrados), o que cobre cerca de 38 dias de triagem intensa. Medido num celular modesto, a mudança custa **0,28 ms por rejeição** — sobre um orçamento de 8,3 ms. O espaço usado vai de 40 KB para 63 KB.
+
+---
+
 ## v2026.08.27-04
 
 ### Adicionado
