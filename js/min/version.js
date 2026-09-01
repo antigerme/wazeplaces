@@ -1,1 +1,1 @@
-const APP_VERSION="2026090101";function verLabel(i){const e=String(i);return`${e.slice(0,4)}.${e.slice(4,6)}.${e.slice(6,8)}-${e.slice(8,10)}`}typeof window<"u"&&(window.APP_VERSION=APP_VERSION,window.verLabel=verLabel);
+const APP_VERSION="2026090102";function verLabel(i){const e=String(i);return`${e.slice(0,4)}.${e.slice(4,6)}.${e.slice(6,8)}-${e.slice(8,10)}`}typeof window<"u"&&(window.APP_VERSION=APP_VERSION,window.verLabel=verLabel);

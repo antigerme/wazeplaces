@@ -5418,11 +5418,22 @@ const AUTORES_MAX_DIAS = 30;
 // (22ms com 500) — o custo é o polegar.
 const AUTORES_VISIVEIS = 10;
 // Acima disto o selo passa de cinza (a app CONTA) a rosa (a app DESTACA).
-// Não é número escolhido a dedo: na fila real, o maior lote de um mesmo autor
-// num único instantâneo foi 7. Exigir 10 é exigir repetição ENTRE buscas —
-// que é justamente o que "reincidência" quer dizer, e o que um pico de uma
-// tarde não produz.
-const AUTOR_LIMIAR_DESTAQUE = 10;
+//
+// Era 10, e a justificativa escrita aqui dizia que "o maior lote de um mesmo
+// autor num único instantâneo foi 7", logo 10 exigiria repetição ENTRE buscas.
+// REMEDIDO em 2026-09-01 nos 6 países obrigatórios, 1.967 autores: essa frase
+// não vale mais. O maior lote num instantâneo é 30 (Espanha), com 25 em
+// Portugal, 24 na França e 17 no Brasil — o 10 já era ultrapassado por uma
+// única busca, então ele não garantia mais o que prometia.
+//
+// Baixar pra 6 é decisão do owner. O efeito medido: num instantâneo dos 6
+// países, o rosa passaria de 6 para 17 autores — de 1.967, ou seja menos de 1%
+// nos dois casos. Não é a diferença entre "discreto" e "gritante".
+//
+// Se um dia alguém quiser um limiar que signifique de novo "voltou em outro
+// dia", o caminho não é o número: é comparar a DATA da primeira rejeição com a
+// da última, que o registro já guarda.
+const AUTOR_LIMIAR_DESTAQUE = 6;
 
 const diaDeHoje = () => Math.floor(Date.now() / 86400000);
 
