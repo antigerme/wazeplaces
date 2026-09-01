@@ -203,3 +203,24 @@ test('atributo: a classe do rótulo desliga o break-all no CSS', () => {
   assert.match(read('css/app.css'), /\.diff-obj-caminho\.diff-obj-rotulo/,
     'faltou rodar `npm run css`');
 });
+
+test('atributo: a linha de objeto EMPILHA — senão o conteúdo fica com 40px', () => {
+  // MEDIDO num Galaxy Fold (280px) com o pedido real do estacionamento: com
+  // `grid-template-columns: auto 1fr`, o rótulo da linha ("Atributos da
+  // categoria:") comia a largura e o conteúdo ficava com 40px de 184. A grade
+  // interna colapsava pra `15.5px 15.5px 0px` e a linha aparecia como "PA  P".
+  //
+  // Conferido contra a main ANTES desta mudança: o defeito é IDÊNTICO, então
+  // não veio da tradução — ela só o tornou visível, porque agora há texto que
+  // vale a pena ler ali. E nada estoura nesse estado, então checagem de
+  // transbordo não o encontra: o que denuncia é a largura da coluna.
+  const css = read('css/styles.css');
+  const regra = css.match(/\.diff-row-obj\s*\{[^}]*\}/);
+  assert.ok(regra, 'a regra .diff-row-obj sumiu');
+  assert.match(regra[0], /grid-template-columns:\s*1fr\s*;/,
+    'a linha voltou a duas colunas — o conteúdo colapsa em tela estreita');
+  assert.ok(!/grid-template-columns:\s*auto/.test(regra[0]),
+    'coluna `auto` pro rótulo é o que espremia o conteúdo');
+  assert.match(read('css/app.css'), /\.diff-row-obj\{[^}]*grid-template-columns:1fr/,
+    'faltou rodar `npm run css`');
+});
