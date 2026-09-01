@@ -4753,8 +4753,25 @@ function rotuloDeAtributo(caminho) {
 // tabela e NÃO têm valores, então o `t()` devolve a chave e o valor sai cru —
 // que é o certo. Humanizar ali corromperia marca própria, exatamente como já
 // corrompeu apelido e ID do Google (gotcha #39).
+// Campos cujo VALOR é texto livre, e que por isso nunca passam pela tabela nem
+// pelo `humanizarEnum`. A lista é por CAMPO, não pela forma do valor — e essa
+// é a lição, porque a forma engana: `network` traz marca em CAIXA ALTA
+// (`DRIVECO`, `ESB`, `JOINON`, `ZSE`, `ETECNIC`, medidos em 13 países), que
+// passa por qualquer regex de enum e sai humanizada como "Driveco", "Esb",
+// "Zse". `ESB` e `ZSE` são siglas: humanizar não é feio, é ERRADO.
+//
+// Terceira vez que este projeto tropeça no mesmo lugar (gotcha #39): já
+// corrompeu apelido e ID do Google. A regra que sobrevive é "o campo diz se o
+// valor é enumerável", nunca "o valor parece um enum".
+const ATTR_TEXTO_LIVRE = new Set([
+    'CHARGING_STATION.network',
+    'CHARGING_STATION.locationInVenue',
+    'CHARGING_STATION.chargingPorts',
+]);
+
 function valorDeAtributo(caminho, valor) {
     if (valor === null || valor === undefined || typeof valor === 'object') return null;
+    if (ATTR_TEXTO_LIVRE.has(caminho)) return null;
     const bruto = String(valor);
     // SÓ CAIXA ALTA passa. Isto faz dois trabalhos: barra o texto livre e barra
     // o booleano (`"true"` é minúsculo), que já sai como Sim/Não pelo

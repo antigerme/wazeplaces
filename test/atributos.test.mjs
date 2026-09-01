@@ -90,6 +90,21 @@ test('atributo: texto livre sai CRU — nome de rede não é enum', () => {
     assert.equal(m.valorDeAtributo('CHARGING_STATION.network', v), null,
       `traduziu texto livre: ${v}`);
   }
+  // MARCA EM CAIXA ALTA é o caso que escapou: a primeira versão barrava texto
+  // livre pela FORMA do valor (regex de caixa alta), e estes passam por
+  // qualquer regex de enum. Medidos na fila real de 13 países, saíam como
+  // "Driveco", "Esb", "Zse" — e `ESB`/`ZSE` são SIGLAS, então humanizar não é
+  // feio, é errado. Terceira vez do gotcha #39 neste projeto.
+  for (const v of ['DRIVECO', 'ESB', 'ZSE', 'JOINON', 'ETECNIC']) {
+    assert.equal(m.valorDeAtributo('CHARGING_STATION.network', v), null,
+      `corrompeu marca em caixa alta: ${v}`);
+  }
+  // E os outros dois campos de texto livre.
+  assert.equal(m.valorDeAtributo('CHARGING_STATION.locationInVenue', 'PARKING'), null);
+  assert.equal(m.valorDeAtributo('CHARGING_STATION.chargingPorts', 'CCS_TYPE2'), null);
+  // CONTRAPROVA: campo enumerável com valor desconhecido AINDA humaniza.
+  assert.equal(m.valorDeAtributo('CHARGING_STATION.paymentMethods', 'MEMBERSHIP_CARD'),
+    'Membership card', 'a exclusão é por CAMPO, não pode calar o fallback dos outros');
   // O RÓTULO desse campo é traduzido — o que não se traduz é o valor.
   assert.equal(m.rotuloDeAtributo('CHARGING_STATION.network'), 'Rede');
 });
