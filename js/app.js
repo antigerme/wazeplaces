@@ -4240,21 +4240,44 @@ function renderCardChanges(card, place) {
         // porque ela também é objeto simples e o sequestro desta linha desfaz
         // silenciosamente o "moveu 84 m" (aconteceu ao introduzir isto).
         if (c.field !== 'geometry' && c.objDelta && c.objDelta.length) {
+            // Só `categoryAttributes` traduz. Diff de objeto é genérico e serve
+            // qualquer campo — aplicar a tabela fora dali seria traduzir o que
+            // não é enum de atributo.
+            const attr = c.field === 'categoryAttributes';
+            // Valor de item de lista: traduzido em atributo, intocado no resto.
+            const vItem = (l, v) => (attr ? (valorDeAtributo(l.caminho, v) ?? v) : v);
             const linhas = c.objDelta.map((l) => {
-                const caminho = `<span class="diff-obj-caminho">${escapeHtml(l.caminho)}</span>`;
+                // Traduzido é PROSA ("Elevação do estacionamento"); cru é
+                // IDENTIFICADOR (`PARKING_LOT.lotType`). O identificador precisa
+                // de monoespaçado e `break-all` — sem isso um nome longo sem
+                // espaço não quebra em lugar nenhum. A prosa com a mesma régua
+                // parte no meio da palavra: apareceu "Número de vaga / s" na
+                // primeira captura desta mudança.
+                const rot = attr ? rotuloDeAtributo(l.caminho) : null;
+                const caminho = `<span class="diff-obj-caminho${rot ? ' diff-obj-rotulo' : ''}">`
+                    + `${escapeHtml(rot ?? l.caminho)}</span>`;
+                const val = (v) => (attr ? (valorDeAtributo(l.caminho, v) ?? valorDoDiff(v)) : valorDoDiff(v));
                 // Folha que é LISTA usa o mesmo vocabulário do campo de lista de
                 // topo (+ verde entra, − vermelho sai). Dois blocos de JSON lado
                 // a lado era o que estava aqui — medido no `chargingPorts` de um
                 // eletroposto, e ninguém lia.
                 if (l.delta && ((l.delta.add || []).length || (l.delta.del || []).length)) {
-                    const add = (l.delta.add || []).map((v) => itemDeLista(v, 'diff-add', '+')).join('');
-                    const del = (l.delta.del || []).map((v) => itemDeLista(v, 'diff-del', '−')).join('');
+                    // `lotType`, `paymentType` e `paymentMethods` são LISTAS de enum,
+                    // e é onde o código mais aparecia — o caso do owner tinha
+                    // `− UNDERGROUND + MULTI_LEVEL`.
+                    //
+                    // Traduz o VALOR e entrega ao renderizador ÚNICO. Envolver o
+                    // `itemDeLista` num segundo renderizador é o que o guard de
+                    // layout proíbe, e com razão: eram dois trechos idênticos
+                    // copiados, que é como duas telas do mesmo conceito divergem.
+                    const add = (l.delta.add || []).map((v) => itemDeLista(vItem(l, v), 'diff-add', '+')).join('');
+                    const del = (l.delta.del || []).map((v) => itemDeLista(vItem(l, v), 'diff-del', '−')).join('');
                     return `<span class="diff-obj-linha diff-obj-linha-lista">${caminho}`
                         + `<span class="diff-delta">${add}${del}</span></span>`;
                 }
                 return `<span class="diff-obj-linha">${caminho}`
-                    + `<span class="diff-from">${escapeHtml(valorDoDiff(l.de))}</span>`
-                    + `<span class="diff-to">${escapeHtml(valorDoDiff(l.para))}</span></span>`;
+                    + `<span class="diff-from">${escapeHtml(val(l.de))}</span>`
+                    + `<span class="diff-to">${escapeHtml(val(l.para))}</span></span>`;
             }).join('');
             return `<div class="diff-row diff-row-obj">${rotulo}<span class="diff-obj">${linhas}</span></div>`;
         }
@@ -4691,6 +4714,57 @@ function rotuloDoCampo(mudanca) {
 function humanizarEnum(valor) {
     const s = String(valor).replace(/_/g, ' ').trim().toLowerCase();
     return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ── ATRIBUTOS DE CATEGORIA (estacionamento, eletroposto) ────────────────────
+//
+// O diff de `categoryAttributes` mostrava CÓDIGO: `PARKING_LOT.parkingType`
+// com `PUBLIC → PRIVATE`, `R_61_TO_100 → R_1_TO_10`. Não era regressão — o
+// caminho da folha nunca traduziu —, só ficou visível quando apareceu um
+// pedido que altera atributo, que é raro: 22 de 4.898 pedidos (0,45%) medidos
+// nos 13 países de validação.
+//
+// As strings são as OFICIAIS do WME, colhidas da página do editor em cada
+// idioma (gotcha #47: nunca a tradução da minha língua). Só existem duas
+// categorias com atributo — `PARKING_LOT` e `CHARGING_STATION` —, e isso se
+// manteve nos 13 países.
+//
+// A chave é `categoria.campo[.VALOR]`, nunca `campo.VALOR`: `costType` existe
+// nas duas com conjuntos DIFERENTES, e `PUBLIC`/`RESTRICTED` aparecem tanto em
+// `parkingType` quanto em `accessType`. Achatar por campo traduziria errado.
+const ATTR_PREFIXO = 'card.attr.';
+
+// `PARKING_LOT.parkingType` → "Tipo principal". Sem string oficial, devolve o
+// caminho CRU — que é o identificador que casa com o WME, como antes.
+function rotuloDeAtributo(caminho) {
+    const chave = ATTR_PREFIXO + caminho;
+    const s = t(chave);
+    return s === chave ? null : s;   // null = sem string oficial, usa o caminho cru
+}
+
+// `PARKING_LOT.parkingType` + `PUBLIC` → "Público".
+//
+// Valor sem string oficial cai no `humanizarEnum` — "Membership card" em vez
+// de `MEMBERSHIP_CARD`. São 7 dos 46 valores observados, e eles existem no dado
+// mas não na tabela do WME.
+//
+// **Texto livre não passa por aqui**: `network` traz nome de rede (`Belib'`,
+// `ChargeGuru`) e `locationInVenue` traz frase inteira. Eles têm rótulo na
+// tabela e NÃO têm valores, então o `t()` devolve a chave e o valor sai cru —
+// que é o certo. Humanizar ali corromperia marca própria, exatamente como já
+// corrompeu apelido e ID do Google (gotcha #39).
+function valorDeAtributo(caminho, valor) {
+    if (valor === null || valor === undefined || typeof valor === 'object') return null;
+    const bruto = String(valor);
+    // SÓ CAIXA ALTA passa. Isto faz dois trabalhos: barra o texto livre e barra
+    // o booleano (`"true"` é minúsculo), que já sai como Sim/Não pelo
+    // `valorDoDiff`. Havia um `typeof valor === 'boolean'` explícito aqui e ele
+    // era código morto — a sabotagem que o removia passava limpa, porque a
+    // regex já cobria o caso.
+    if (!/^[A-Z][A-Z0-9_]*$/.test(bruto)) return null;
+    const chave = ATTR_PREFIXO + caminho + '.' + bruto;
+    const s = t(chave);
+    return s === chave ? humanizarEnum(bruto) : s;
 }
 
 // Traduz enum do Waze por prefixo de chave, humanizando o que não conhecemos.

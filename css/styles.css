@@ -1424,6 +1424,16 @@ button:active {
 
 .dark .diff-obj-caminho { color: #94a3b8; }
 
+/* Quando o WME tem nome para o atributo, o rótulo é PROSA e não identificador:
+   sai do monoespaçado e para de quebrar dentro da palavra. Com a régua do
+   identificador, "Número de vagas" virava "Número de vaga / s" — visto na
+   primeira captura desta mudança, não deduzido. */
+.diff-obj-caminho.diff-obj-rotulo {
+  font-family: inherit;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
 /* Distância que o ponto andou. É a informação PRINCIPAL de uma mudança de
    geometria — 12 de 33 movimentos reais são menores que 1 metro —, então ela
    ganha destaque de selo em vez de virar mais uma coluna de texto. Ocupa a
