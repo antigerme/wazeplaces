@@ -1384,8 +1384,17 @@ button:active {
    escalar (vermelho sai, verde entra) — o card não pode ter três gramáticas
    diferentes pra dizer "isto virou aquilo". Cada folha é `caminho: de → para`
    empilhado, porque lado a lado num celular estreito o caminho não cabe. */
+/* EMPILHA rótulo e conteúdo, em vez de `auto 1fr` lado a lado.
+   MEDIDO num Galaxy Fold (280px) com o pedido real do estacionamento: com as
+   duas colunas, o rótulo ("Atributos da categoria:") come a largura e o
+   conteúdo fica com 40px de 184 — a grade interna colapsa pra `15.5px 15.5px
+   0px` e a linha inteira aparece como "PA  P". Conferido contra a main ANTES
+   desta mudança: o defeito é o mesmo, então não veio da tradução; ele só
+   passou a doer porque agora há texto que vale a pena ler ali.
+   Nada estoura nesse estado — por isso checagem de transbordo não o encontra. */
 .diff-row-obj {
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 1fr;
+  gap: 0.25rem 0;
 }
 
 .diff-obj {
@@ -1423,6 +1432,23 @@ button:active {
 }
 
 .dark .diff-obj-caminho { color: #94a3b8; }
+
+/* Quando o WME tem nome para o atributo, o rótulo é PROSA e não identificador:
+   sai do monoespaçado e para de quebrar dentro da palavra. Com a régua do
+   identificador, "Número de vagas" virava "Número de vaga / s" — visto na
+   primeira captura desta mudança, não deduzido. */
+.diff-obj-caminho.diff-obj-rotulo {
+  font-family: inherit;
+  word-break: normal;
+  /* `break-word`, NUNCA `anywhere`. A coluna é `auto` na grade, então o
+     navegador a dimensiona pelo min-content — e com `anywhere` o min-content
+     de um texto é UM CARACTERE. Medido no Galaxy Fold com o rótulo mais longo
+     (o `hasTBR` do espanhol, que no WME é uma pergunta de 64 caracteres): a
+     coluna virava 15px de largura por 465px de altura, o `line-clamp` cortava
+     em 3 linhas, e a linha inteira aparecia como "¿C  N". Nada estourava —
+     por isso a checagem de transbordo não via. */
+  overflow-wrap: break-word;
+}
 
 /* Distância que o ponto andou. É a informação PRINCIPAL de uma mudança de
    geometria — 12 de 33 movimentos reais são menores que 1 metro —, então ela

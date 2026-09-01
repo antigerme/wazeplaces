@@ -8,6 +8,30 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.01-02
+
+### Alterado
+- **O selo rosa de autor reincidente aparece a partir de 6 rejeições, não 10.** Abaixo disso o app continua mostrando a contagem em cinza — o que muda é a partir de quando ele destaca.
+
+  A justificativa antiga do número 10 estava desatualizada: ela dizia que uma única busca nunca trazia mais de 7 pedidos do mesmo autor, então 10 exigiria que a pessoa voltasse em outro dia. Medindo de novo nos seis países de referência, o maior lote numa única busca hoje é **30** (Espanha), com 25 em Portugal, 24 na França e 17 no Brasil — ou seja, o 10 já não garantia mais isso.
+
+  Efeito medido em 1.967 autores: o destaque passa de 6 para 17 pessoas. Menos de 1% nos dois casos.
+
+---
+
+## v2026.09.01-01
+
+### Corrigido
+- **Mudanças em atributos de estacionamento e eletroposto apareciam como código.** Um pedido que altera o estacionamento mostrava `PARKING_LOT.parkingType` com `PUBLIC → PRIVATE` e `R_61_TO_100 → R_1_TO_10`, em vez de *"Tipo principal: Público → Privado"* e *"Número de vagas: 61-100 → 1-10"*.
+
+  Os textos são **os mesmos que o Waze Map Editor usa**, em cada idioma — não são tradução nossa. Foram colhidos do próprio editor nas quatro línguas.
+
+  Só existem dois tipos de local com atributos assim (estacionamento e eletroposto), o que foi confirmado varrendo 4.275 locais em 13 países. Nesses países, 22 de 4.898 pedidos mexem em atributo — é raro, mas quando acontece a tela ficava ilegível.
+
+  O que o Waze não nomeia continua aparecendo de forma legível (*"Membership card"* em vez de `MEMBERSHIP_CARD`), e o que é texto livre — nome da rede de recarga, por exemplo — segue intocado.
+
+---
+
 ## v2026.08.28-01
 
 ### Corrigido
