@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.02-01
+
+### Alterado
+- **O selo de reincidência (✕ N) só abre a folha do autor quando ele tem outro pedido na fila.** Antes ele era sempre tocável, e num caso comum abria uma folha oferecendo *"Ver o 1"* e *"Rejeitar o 1"* — que era o próprio card na frente de você, com os três botões ✕ ↑ ✓ logo abaixo.
+
+  A contagem continua aparecendo: o que muda é que ela vira texto simples em vez de botão, e o sublinhado pontilhado — que é o que indica "dá pra tocar" — some junto.
+
+---
+
 ## v2026.09.01-02
 
 ### Alterado

@@ -4178,7 +4178,18 @@ function renderSelosDeProcedencia(card, place) {
             // Vira BOTÃO: abre a folha com o que dá pra fazer com a série dele.
             // Só quando há de fato o que fazer — selo que abre folha vazia
             // ensina que o toque não serve pra nada.
-            folha: pedidosDoAutorNaFila(place).length > 0 ? place : null,
+            // `> 1`, não `> 0`: o card ATUAL é `queue[0]` durante o render, então
+            // ele sempre entra nessa contagem. Com `> 0` o selo virava botão até
+            // quando o autor não tinha mais nada na fila, e a folha abria
+            // oferecendo "Ver o 1" e "Rejeitar o 1" — que é o card na frente do
+            // editor, com os três botões ✕ ↑ ✓ logo abaixo. Uma folha inteira
+            // pra repetir o que a tela já faz.
+            //
+            // Sem outro pedido, o selo continua aparecendo (a contagem é a
+            // informação) — só deixa de ser botão. Contar por `creatorId` e não
+            // pelo nome é a mesma razão do resto do módulo: 69% dos autores têm
+            // nome GERADO, que muda no dia em que a pessoa escolhe um.
+            folha: pedidosDoAutorNaFila(place).length > 1 ? place : null,
         });
     }
     if (!selos.length) return;

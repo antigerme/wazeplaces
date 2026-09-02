@@ -241,12 +241,18 @@ test('lote: o lote respeita a trava e o treino', () => {
   assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
 });
 
-test('lote: o selo só abre a folha quando há pedido dele na fila', () => {
+test('lote: o selo só abre a folha quando há OUTRO pedido dele na fila', () => {
+  // Era `> 0`, e isso incluía o próprio card: durante o render o place atual é
+  // `queue[0]`, então a contagem nunca dava zero. O selo virava botão sempre, e
+  // a folha abria oferecendo "Ver o 1" e "Rejeitar o 1" — o card na frente do
+  // editor, com os três botões ✕ ↑ ✓ logo abaixo. Uma folha inteira pra repetir
+  // o que a tela já faz é a mesma inutilidade que este guard sempre quis
+  // impedir; só que `> 0` não a alcançava.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function renderSelosDeProcedencia');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
-  assert.match(bloco, /folha: pedidosDoAutorNaFila\(place\)\.length > 0 \? place : null/,
-    'selo que abre folha vazia ensina que o toque não serve pra nada');
+  assert.match(bloco, /folha: pedidosDoAutorNaFila\(place\)\.length > 1 \? place : null/,
+    'com `> 0` o selo abre folha pro próprio card, que os botões já resolvem');
 });
 
 test('desfazer: os dois caminhos passam pela MESMA função, e ela destrava os botões', () => {
