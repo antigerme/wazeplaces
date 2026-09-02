@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.02-02
+
+### Corrigido
+- **O "Ver +N" e o "✕ N" passaram a falar da mesma pessoa.** Um identificava o autor pelo **nome de usuário** e o outro pelo **número da conta** — dois jeitos diferentes de dizer "é a mesma pessoa", na mesma linha do card.
+
+  Na prática ninguém tinha visto isso quebrar: medindo 2.035 autores em seis países, não houve um caso sequer de dois números com o mesmo nome. O problema é o que vem depois: **69% dos autores têm nome gerado pelo Waze** (`world_xxxxx`), e esse nome muda no dia em que a pessoa escolhe um de verdade. Quem tivesse ficha no app sumiria justamente aí, sem erro nenhum na tela.
+
+  O número da conta não muda nunca — agora as duas coisas usam ele. O nome continua sendo o que aparece escrito.
+
+---
+
 ## v2026.09.02-01
 
 ### Alterado

@@ -1733,18 +1733,24 @@ test('a dica do lightbox conta que arrastar pra baixo fecha', () => {
 // cem pendentes. O guard trava as duas propriedades que sustentam isso.
 test('foco num autor prioriza sem esconder ninguém', () => {
   const app = read('js/app.js');
-  const f = app.match(/function focarAutor\(nome\)[\s\S]*?\n\}/);
+  const f = app.match(/function focarAutor\(id\)[\s\S]*?\n\}/);
   assert.ok(f, 'sumiu o focarAutor');
   // Reordena a fila INTEIRA: os do autor na frente, o resto atrás. Trocar por
   // um filter() que descarta o resto reprova aqui.
-  assert.match(f[0], /\.\.\.daPessoa, \.\.\.AppState\.queue\.filter\(\(x\) => x\.createdBy !== nome\)/,
+  assert.match(f[0], /\.\.\.daPessoa, \.\.\.AppState\.queue\.filter\(\(x\) => x\.creatorId !== id\)/,
     'o foco passou a DESCARTAR os outros pedidos — a fila esvaziaria e a app diria "Tudo limpo!" mentindo');
+  // Chaveado por ID, nunca por nome: 69% dos autores têm nome GERADO, que muda
+  // no dia em que a pessoa escolhe um. Medido: zero colisões nome→id numa fila,
+  // então isto é robustez, não conserto de defeito vivo — mas evita que o
+  // próximo cruzamento entre foco e histórico herde a chave fraca.
+  assert.ok(!/x\.createdBy === /.test(f[0]),
+    'o foco voltou a chavear por nome — o histórico usa id, e os dois divergem');
 
   // A barra some sozinha quando a série acaba, senão fica anunciando um foco
   // que não existe mais assim que o card muda de autor.
   const r = app.match(/function renderFocoAutor\(\)[\s\S]*?\n\}/);
   assert.ok(r, 'sumiu o renderFocoAutor');
-  assert.match(r[0], /atual\.createdBy !== nome/,
+  assert.match(r[0], /atual\.creatorId !== id/,
     'a barra parou de conferir se o card ainda é do autor em foco');
 
   // O alvo é a barra INTEIRA, não um ✕ dentro dela: no ritmo do swipe, alvo
