@@ -4178,18 +4178,33 @@ function renderSelosDeProcedencia(card, place) {
             // Vira BOTÃO: abre a folha com o que dá pra fazer com a série dele.
             // Só quando há de fato o que fazer — selo que abre folha vazia
             // ensina que o toque não serve pra nada.
-            // `> 1`, não `> 0`: o card ATUAL é `queue[0]` durante o render, então
-            // ele sempre entra nessa contagem. Com `> 0` o selo virava botão até
-            // quando o autor não tinha mais nada na fila, e a folha abria
-            // oferecendo "Ver o 1" e "Rejeitar o 1" — que é o card na frente do
-            // editor, com os três botões ✕ ↑ ✓ logo abaixo. Uma folha inteira
-            // pra repetir o que a tela já faz.
+            // DUAS condições, e cada uma responde uma pergunta diferente.
             //
-            // Sem outro pedido, o selo continua aparecendo (a contagem é a
-            // informação) — só deixa de ser botão. Contar por `creatorId` e não
-            // pelo nome é a mesma razão do resto do módulo: 69% dos autores têm
+            // (a) `reincidente >= AUTOR_LIMIAR_DESTAQUE` — **a app já acusa esta
+            //     pessoa?** Atrás deste selo mora a rejeição EM LOTE, que é
+            //     destrutiva e não tem Desfazer depois de enviada. Abaixo do
+            //     limiar o selo é cinza justamente porque a app CONTA sem
+            //     acusar; oferecer ali um atalho pra rejeitar tudo contradiz a
+            //     própria distinção que a cor faz. Quem quiser agir sem o
+            //     limiar ainda tem o `Ver +N`, que foca a fila e não decide
+            //     nada — a capacidade não some, só o atalho destrutivo.
+            //
+            // (b) `pedidosDoAutorNaFila(place).length > 1` — **há o que fazer?**
+            //     O card ATUAL é `queue[0]` durante o render, então ele sempre
+            //     entra nessa contagem: com `> 0` o selo virava botão mesmo
+            //     sozinho, e a folha abria oferecendo "Ver o 1" e "Rejeitar o 1"
+            //     — o card na frente do editor, com os três botões ✕ ↑ ✓ logo
+            //     abaixo. Uma folha inteira pra repetir o que a tela já faz.
+            //
+            // Só (a) regrediria (b), e vice-versa. Contar por `creatorId` e não
+            // pelo nome é a razão de sempre neste módulo: 69% dos autores têm
             // nome GERADO, que muda no dia em que a pessoa escolhe um.
-            folha: pedidosDoAutorNaFila(place).length > 1 ? place : null,
+            //
+            // Frequência MEDIDA nos 6 países obrigatórios (2.785 cards): 27,3%
+            // têm outro pedido do mesmo autor na fila. Esse é o TETO de quantas
+            // vezes o selo pode virar botão; o limiar histórico corta mais.
+            folha: (reincidente >= AUTOR_LIMIAR_DESTAQUE
+                && pedidosDoAutorNaFila(place).length > 1) ? place : null,
         });
     }
     if (!selos.length) return;

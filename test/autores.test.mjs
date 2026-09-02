@@ -241,18 +241,25 @@ test('lote: o lote respeita a trava e o treino', () => {
   assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
 });
 
-test('lote: o selo só abre a folha quando há OUTRO pedido dele na fila', () => {
-  // Era `> 0`, e isso incluía o próprio card: durante o render o place atual é
-  // `queue[0]`, então a contagem nunca dava zero. O selo virava botão sempre, e
-  // a folha abria oferecendo "Ver o 1" e "Rejeitar o 1" — o card na frente do
-  // editor, com os três botões ✕ ↑ ✓ logo abaixo. Uma folha inteira pra repetir
-  // o que a tela já faz é a mesma inutilidade que este guard sempre quis
-  // impedir; só que `> 0` não a alcançava.
+test('lote: a folha exige o limiar E outro pedido na fila', () => {
+  // DUAS condições, cada uma respondendo uma pergunta diferente, e nenhuma
+  // sozinha basta:
+  //
+  // (a) o limiar — atrás do selo mora a rejeição EM LOTE, destrutiva e sem
+  //     Desfazer depois de enviada. Abaixo dele o selo é cinza porque a app
+  //     CONTA sem acusar; um atalho de rejeitar tudo ali contradiria a cor.
+  // (b) outro pedido na fila — o card atual é `queue[0]` durante o render, e
+  //     com `> 0` a folha abria oferecendo "Ver o 1 / Rejeitar o 1", que é o
+  //     card na frente do editor com os três botões logo abaixo.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function renderSelosDeProcedencia');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
-  assert.match(bloco, /folha: pedidosDoAutorNaFila\(place\)\.length > 1 \? place : null/,
-    'com `> 0` o selo abre folha pro próprio card, que os botões já resolvem');
+  assert.match(bloco, /reincidente >= AUTOR_LIMIAR_DESTAQUE\s*\n?\s*&&\s*pedidosDoAutorNaFila\(place\)\.length > 1/,
+    'as duas condições precisam estar coladas: só uma delas regride a outra');
+  assert.ok(!/folha: pedidosDoAutorNaFila\(place\)\.length > 1 \? place/.test(bloco),
+    'sem o limiar, a app oferece rejeição em lote pra quem ela nem acusa');
+  assert.ok(!/folha: reincidente >= AUTOR_LIMIAR_DESTAQUE \? place/.test(bloco),
+    'sem a contagem da fila, a folha volta a abrir pro próprio card');
 });
 
 test('desfazer: os dois caminhos passam pela MESMA função, e ela destrava os botões', () => {

@@ -11,9 +11,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.09.02-01
 
 ### Alterado
-- **O selo de reincidência (✕ N) só abre a folha do autor quando ele tem outro pedido na fila.** Antes ele era sempre tocável, e num caso comum abria uma folha oferecendo *"Ver o 1"* e *"Rejeitar o 1"* — que era o próprio card na frente de você, com os três botões ✕ ↑ ✓ logo abaixo.
+- **O selo de reincidência (✕ N) só abre a folha do autor quando ele está em vermelho E tem outro pedido na fila.**
 
-  A contagem continua aparecendo: o que muda é que ela vira texto simples em vez de botão, e o sublinhado pontilhado — que é o que indica "dá pra tocar" — some junto.
+  Atrás desse selo mora a rejeição **em lote**, que é destrutiva e não tem como desfazer depois de enviada. Enquanto o selo está cinza, o app está apenas *contando* — não acusando ninguém. Oferecer ali um atalho para rejeitar tudo de uma vez contradizia a própria diferença que a cor faz.
+
+  A segunda condição existe porque o card que você está vendo também conta: sem ela, a folha abria oferecendo *"Ver o 1"* e *"Rejeitar o 1"* — o próprio card na sua frente, com os três botões ✕ ↑ ✓ logo abaixo.
+
+  **Nada se perde:** a contagem continua visível, e quem quiser juntar os pedidos de alguém sem passar do limiar continua com o **Ver +N**, que só traz os pedidos para a frente da fila e não decide nada. O sublinhado pontilhado, que indica "dá pra tocar", acompanha sozinho.
 
 ---
 
