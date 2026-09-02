@@ -540,3 +540,33 @@ test('teto: o corte é 10, e o número tem a medição atrás', () => {
   assert.ok(m.AUTORES_VISIVEIS < m.AUTORES_MAX_REINCIDENTES,
     'mostrar mais do que cabe na memória não faria sentido');
 });
+
+// ── nada volta a chavear por NOME ───────────────────────────────────────────
+//
+// O `createdBy` serve pra EXIBIR e nada mais. Comparar por ele é a armadilha
+// que já existiu neste módulo: o `Ver +N` contava por nome e o `✕ N` decidia o
+// botão por id, e dava pra ver os dois discordando no mesmo card.
+//
+// A justificativa NÃO é "medimos e não colide": colisão de nome é impossível
+// por construção (usuário do Waze é único), então medir isso não prova nada. O
+// que importa é que o nome MUDA — 69% dos autores têm nome gerado
+// (`world_xxxxx`) que troca no dia em que a pessoa escolhe um. Um instantâneo
+// da fila nunca mostra essa troca, então nenhuma medição de uma coleta só
+// poderia autorizar a chave fraca. A regra vale por construção.
+test('autores: nada compara por createdBy — nome é pra exibir, id é pra chavear', () => {
+  const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8')
+    .replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const proibidos = [
+    ...app.matchAll(/\S*\.createdBy\s*(?:===|!==|==(?!=)|!=(?!=))[^\n]{0,40}/g),
+    ...app.matchAll(/(?:===|!==|==(?!=)|!=(?!=))\s*\S*\.createdBy/g),
+    ...app.matchAll(/\[\s*\w+\.createdBy\s*\]/g),
+  ].map((m) => m[0].trim());
+  assert.deepEqual(proibidos, [],
+    'voltou a chavear por nome:\n  ' + proibidos.join('\n  '));
+  // CONTRAPROVA: o guard enxerga alguma coisa? O `creatorId` TEM que aparecer
+  // em comparação — se não aparecer, o padrão parou de casar e o teste virou
+  // decoração silenciosa.
+  const porId = app.match(/\S*\.creatorId\s*(?:===|!==)/g) || [];
+  assert.ok(porId.length >= 3,
+    `só ${porId.length} comparações por creatorId — o varredor parou de casar`);
+});

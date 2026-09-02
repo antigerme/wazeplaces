@@ -4107,11 +4107,15 @@ function objetoLegivel(v, prof = 0) {
 // e o mesmo card podia mostrar `Ver +2` (por nome) ao lado de um `✕ 6` que não
 // virava botão (por id) — dois sistemas de identidade na mesma linha.
 //
-// MEDIDO em 2.035 autores dos 6 países obrigatórios: zero colisões nome→id, ou
-// seja dentro de UMA fila os dois selecionam o mesmo conjunto. Não era defeito
-// vivo. O que se conserta é a armadilha: 69% dos autores têm nome GERADO
-// (`world_xxxxx`), que muda no dia em que a pessoa escolhe um — e a próxima
-// coisa que cruzar foco com histórico herdaria a chave fraca.
+// Eu quase justifiquei isto com a medição ERRADA, e vale registrar: medi
+// COLISÕES (dois ids com o mesmo nome) em 2.035 autores e deu zero — mas nome
+// de usuário do Waze é único por construção, então zero era resultado
+// garantido, não evidência. O modo de falha real é o MESMO id trocar de nome
+// ENTRE sessões, e um instantâneo único nunca consegue ver isso.
+//
+// E a troca não é hipótese: 69% dos autores da fila real têm nome GERADO
+// (`world_xxxxx`), que muda no dia em que a pessoa escolhe um. É o ciclo de
+// vida normal da maioria, não um caso de borda.
 //
 // `id` pode ser 0 em teoria, então as comparações são contra `null`/`undefined`
 // explicitamente. `!id` mandaria o foco embora num id 0 sem ninguém ver.
