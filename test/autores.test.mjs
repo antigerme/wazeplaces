@@ -241,12 +241,25 @@ test('lote: o lote respeita a trava e o treino', () => {
   assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
 });
 
-test('lote: o selo só abre a folha quando há pedido dele na fila', () => {
+test('lote: a folha exige o limiar E outro pedido na fila', () => {
+  // DUAS condições, cada uma respondendo uma pergunta diferente, e nenhuma
+  // sozinha basta:
+  //
+  // (a) o limiar — atrás do selo mora a rejeição EM LOTE, destrutiva e sem
+  //     Desfazer depois de enviada. Abaixo dele o selo é cinza porque a app
+  //     CONTA sem acusar; um atalho de rejeitar tudo ali contradiria a cor.
+  // (b) outro pedido na fila — o card atual é `queue[0]` durante o render, e
+  //     com `> 0` a folha abria oferecendo "Ver o 1 / Rejeitar o 1", que é o
+  //     card na frente do editor com os três botões logo abaixo.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function renderSelosDeProcedencia');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
-  assert.match(bloco, /folha: pedidosDoAutorNaFila\(place\)\.length > 0 \? place : null/,
-    'selo que abre folha vazia ensina que o toque não serve pra nada');
+  assert.match(bloco, /reincidente >= AUTOR_LIMIAR_DESTAQUE\s*\n?\s*&&\s*pedidosDoAutorNaFila\(place\)\.length > 1/,
+    'as duas condições precisam estar coladas: só uma delas regride a outra');
+  assert.ok(!/folha: pedidosDoAutorNaFila\(place\)\.length > 1 \? place/.test(bloco),
+    'sem o limiar, a app oferece rejeição em lote pra quem ela nem acusa');
+  assert.ok(!/folha: reincidente >= AUTOR_LIMIAR_DESTAQUE \? place/.test(bloco),
+    'sem a contagem da fila, a folha volta a abrir pro próprio card');
 });
 
 test('desfazer: os dois caminhos passam pela MESMA função, e ela destrava os botões', () => {
@@ -526,4 +539,34 @@ test('teto: o corte é 10, e o número tem a medição atrás', () => {
     'teto sem medição atrás vira número escolhido a dedo, e o próximo a mexer não sabe o que reabrir');
   assert.ok(m.AUTORES_VISIVEIS < m.AUTORES_MAX_REINCIDENTES,
     'mostrar mais do que cabe na memória não faria sentido');
+});
+
+// ── nada volta a chavear por NOME ───────────────────────────────────────────
+//
+// O `createdBy` serve pra EXIBIR e nada mais. Comparar por ele é a armadilha
+// que já existiu neste módulo: o `Ver +N` contava por nome e o `✕ N` decidia o
+// botão por id, e dava pra ver os dois discordando no mesmo card.
+//
+// A justificativa NÃO é "medimos e não colide": colisão de nome é impossível
+// por construção (usuário do Waze é único), então medir isso não prova nada. O
+// que importa é que o nome MUDA — 69% dos autores têm nome gerado
+// (`world_xxxxx`) que troca no dia em que a pessoa escolhe um. Um instantâneo
+// da fila nunca mostra essa troca, então nenhuma medição de uma coleta só
+// poderia autorizar a chave fraca. A regra vale por construção.
+test('autores: nada compara por createdBy — nome é pra exibir, id é pra chavear', () => {
+  const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8')
+    .replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const proibidos = [
+    ...app.matchAll(/\S*\.createdBy\s*(?:===|!==|==(?!=)|!=(?!=))[^\n]{0,40}/g),
+    ...app.matchAll(/(?:===|!==|==(?!=)|!=(?!=))\s*\S*\.createdBy/g),
+    ...app.matchAll(/\[\s*\w+\.createdBy\s*\]/g),
+  ].map((m) => m[0].trim());
+  assert.deepEqual(proibidos, [],
+    'voltou a chavear por nome:\n  ' + proibidos.join('\n  '));
+  // CONTRAPROVA: o guard enxerga alguma coisa? O `creatorId` TEM que aparecer
+  // em comparação — se não aparecer, o padrão parou de casar e o teste virou
+  // decoração silenciosa.
+  const porId = app.match(/\S*\.creatorId\s*(?:===|!==)/g) || [];
+  assert.ok(porId.length >= 3,
+    `só ${porId.length} comparações por creatorId — o varredor parou de casar`);
 });

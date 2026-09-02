@@ -4101,12 +4101,30 @@ function objetoLegivel(v, prof = 0) {
 // pendentes — mentira. Aqui os do autor sobem pra frente e o resto continua
 // depois, na mesma ordem relativa. Nada some, nada mente, e o editor recebe
 // exatamente o que queria: a série do autor em sequência.
-function focarAutor(nome) {
-    if (!nome) return;
-    const daPessoa = AppState.queue.filter((x) => x.createdBy === nome);
+// Chaveado pelo ID, exibido pelo NOME.
+//
+// O módulo de reincidência já era por `creatorId`; o foco era por `createdBy`,
+// e o mesmo card podia mostrar `Ver +2` (por nome) ao lado de um `✕ 6` que não
+// virava botão (por id) — dois sistemas de identidade na mesma linha.
+//
+// Eu quase justifiquei isto com a medição ERRADA, e vale registrar: medi
+// COLISÕES (dois ids com o mesmo nome) em 2.035 autores e deu zero — mas nome
+// de usuário do Waze é único por construção, então zero era resultado
+// garantido, não evidência. O modo de falha real é o MESMO id trocar de nome
+// ENTRE sessões, e um instantâneo único nunca consegue ver isso.
+//
+// E a troca não é hipótese: 69% dos autores da fila real têm nome GERADO
+// (`world_xxxxx`), que muda no dia em que a pessoa escolhe um. É o ciclo de
+// vida normal da maioria, não um caso de borda.
+//
+// `id` pode ser 0 em teoria, então as comparações são contra `null`/`undefined`
+// explicitamente. `!id` mandaria o foco embora num id 0 sem ninguém ver.
+function focarAutor(id) {
+    if (id === null || id === undefined || id === '') return;
+    const daPessoa = AppState.queue.filter((x) => x.creatorId === id);
     if (daPessoa.length === 0) return;
-    AppState.queue = [...daPessoa, ...AppState.queue.filter((x) => x.createdBy !== nome)];
-    AppState.autorEmFoco = nome;
+    AppState.queue = [...daPessoa, ...AppState.queue.filter((x) => x.creatorId !== id)];
+    AppState.autorEmFoco = id;
     AppState.currentPlace = AppState.queue[0];
     renderFocoAutor();
     removeCurrentCardEl();
@@ -4115,7 +4133,7 @@ function focarAutor(nome) {
 }
 
 function limparFocoAutor() {
-    if (!AppState.autorEmFoco) return;
+    if (AppState.autorEmFoco === null || AppState.autorEmFoco === undefined) return;
     AppState.autorEmFoco = null;
     // A ordem NÃO volta atrás: reordenar de novo tiraria da frente o pedido que
     // o editor está olhando agora. Sair do foco é parar de destacar, não desfazer.
@@ -4127,14 +4145,18 @@ function limparFocoAutor() {
 function renderFocoAutor() {
     const bar = document.getElementById('focoAutorBar');
     if (!bar) return;
-    const nome = AppState.autorEmFoco;
+    const id = AppState.autorEmFoco;
     const atual = AppState.queue[0];
-    if (!nome || !atual || atual.createdBy !== nome) {
-        if (nome && atual && atual.createdBy !== nome) AppState.autorEmFoco = null;
+    const semFoco = id === null || id === undefined;
+    if (semFoco || !atual || atual.creatorId !== id) {
+        if (!semFoco && atual && atual.creatorId !== id) AppState.autorEmFoco = null;
         bar.classList.add('hidden');
         return;
     }
-    const restam = AppState.queue.filter((x) => x.createdBy === nome).length;
+    // O nome é só rótulo. Sem ele o id vira o texto — feio, nunca invisível,
+    // como o resto do card faz com valor que o Waze não nomeia.
+    const nome = atual.createdBy || String(id);
+    const restam = AppState.queue.filter((x) => x.creatorId === id).length;
     document.getElementById('focoAutorTexto').textContent = t('card.focoAutor', { autor: nome });
     document.getElementById('focoAutorContagem').textContent =
         t('card.focoAutor.contagem', { n: restam, total: AppState.queue.length });
@@ -4160,11 +4182,14 @@ function renderSelosDeProcedencia(card, place) {
         if (rot) selos.push({ cls: 'selo-src', txt: rot,
                               title: dica.startsWith('card.source.') ? t('card.source.title') : dica });
     }
+    // Por `creatorId`, igual ao `pedidosDoAutorNaFila` logo abaixo: eram dois
+    // sistemas de identidade na mesma linha, e um card podia mostrar `Ver +2`
+    // ao lado de um `✕ 6` que não virava botão.
     const mesmos = (AppState.queue || [])
-        .filter((x) => x !== place && x.createdBy && x.createdBy === place.createdBy).length;
+        .filter((x) => x !== place && x.creatorId != null && x.creatorId === place.creatorId).length;
     if (mesmos > 0) {
         selos.push({ cls: 'selo-lote', txt: t('card.sameAuthor', { n: mesmos }),
-                     title: t('card.sameAuthor.acao'), acao: place.createdBy });
+                     title: t('card.sameAuthor.acao'), acao: place.creatorId });
     }
     // Reincidência: quantos pedidos DESTE autor você já rejeitou. Rosa é a cor
     // do ✕ em toda a app — reincidência é rejeição acumulada, então herda dele.
@@ -4178,7 +4203,33 @@ function renderSelosDeProcedencia(card, place) {
             // Vira BOTÃO: abre a folha com o que dá pra fazer com a série dele.
             // Só quando há de fato o que fazer — selo que abre folha vazia
             // ensina que o toque não serve pra nada.
-            folha: pedidosDoAutorNaFila(place).length > 0 ? place : null,
+            // DUAS condições, e cada uma responde uma pergunta diferente.
+            //
+            // (a) `reincidente >= AUTOR_LIMIAR_DESTAQUE` — **a app já acusa esta
+            //     pessoa?** Atrás deste selo mora a rejeição EM LOTE, que é
+            //     destrutiva e não tem Desfazer depois de enviada. Abaixo do
+            //     limiar o selo é cinza justamente porque a app CONTA sem
+            //     acusar; oferecer ali um atalho pra rejeitar tudo contradiz a
+            //     própria distinção que a cor faz. Quem quiser agir sem o
+            //     limiar ainda tem o `Ver +N`, que foca a fila e não decide
+            //     nada — a capacidade não some, só o atalho destrutivo.
+            //
+            // (b) `pedidosDoAutorNaFila(place).length > 1` — **há o que fazer?**
+            //     O card ATUAL é `queue[0]` durante o render, então ele sempre
+            //     entra nessa contagem: com `> 0` o selo virava botão mesmo
+            //     sozinho, e a folha abria oferecendo "Ver o 1" e "Rejeitar o 1"
+            //     — o card na frente do editor, com os três botões ✕ ↑ ✓ logo
+            //     abaixo. Uma folha inteira pra repetir o que a tela já faz.
+            //
+            // Só (a) regrediria (b), e vice-versa. Contar por `creatorId` e não
+            // pelo nome é a razão de sempre neste módulo: 69% dos autores têm
+            // nome GERADO, que muda no dia em que a pessoa escolhe um.
+            //
+            // Frequência MEDIDA nos 6 países obrigatórios (2.785 cards): 27,3%
+            // têm outro pedido do mesmo autor na fila. Esse é o TETO de quantas
+            // vezes o selo pode virar botão; o limiar histórico corta mais.
+            folha: (reincidente >= AUTOR_LIMIAR_DESTAQUE
+                && pedidosDoAutorNaFila(place).length > 1) ? place : null,
         });
     }
     if (!selos.length) return;
@@ -4187,11 +4238,13 @@ function renderSelosDeProcedencia(card, place) {
     for (const s of selos) {
         // O selo do lote é o único que AGE: vira botão de verdade (não span com
         // onclick), pra receber foco no Tab e ser anunciado como acionável.
-        const el = document.createElement(s.acao || s.folha ? 'button' : 'span');
+        // `s.acao != null` e não `s.acao`: a ação virou o `creatorId`, e um id 0
+        // seria falsy — o selo perderia o botão sem nada avisar.
+        const el = document.createElement(s.acao != null || s.folha ? 'button' : 'span');
         el.className = 'selo-proc ' + s.cls;
         el.textContent = s.txt;
         el.title = s.title;
-        if (s.acao) {
+        if (s.acao != null) {
             el.type = 'button';
             el.classList.add('selo-acionavel');
             el.addEventListener('click', (ev) => { ev.stopPropagation(); focarAutor(s.acao); });
@@ -5227,7 +5280,7 @@ function abrirFolhaDoAutor(place) {
         + ` border border-rose-100 dark:border-rose-500/30 rounded-xl px-3 py-2.5">${t('autor.sheet.aviso')}</p>`;
     document.getElementById('autorVer').addEventListener('click', () => {
         closeModal('autorModal');
-        focarAutor(place.createdBy);
+        focarAutor(place.creatorId);
     });
     document.getElementById('autorRejeitar').addEventListener('click', () => {
         closeModal('autorModal');

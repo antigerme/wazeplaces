@@ -8,6 +8,30 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.02-02
+
+### Corrigido
+- **O "Ver +N" e o "✕ N" passaram a falar da mesma pessoa.** Um identificava o autor pelo **nome de usuário** e o outro pelo **número da conta** — dois jeitos diferentes de dizer "é a mesma pessoa", na mesma linha do card.
+
+  Na prática ninguém tinha visto isso quebrar: medindo 2.035 autores em seis países, não houve um caso sequer de dois números com o mesmo nome. O problema é o que vem depois: **69% dos autores têm nome gerado pelo Waze** (`world_xxxxx`), e esse nome muda no dia em que a pessoa escolhe um de verdade. Quem tivesse ficha no app sumiria justamente aí, sem erro nenhum na tela.
+
+  O número da conta não muda nunca — agora as duas coisas usam ele. O nome continua sendo o que aparece escrito.
+
+---
+
+## v2026.09.02-01
+
+### Alterado
+- **O selo de reincidência (✕ N) só abre a folha do autor quando ele está em vermelho E tem outro pedido na fila.**
+
+  Atrás desse selo mora a rejeição **em lote**, que é destrutiva e não tem como desfazer depois de enviada. Enquanto o selo está cinza, o app está apenas *contando* — não acusando ninguém. Oferecer ali um atalho para rejeitar tudo de uma vez contradizia a própria diferença que a cor faz.
+
+  A segunda condição existe porque o card que você está vendo também conta: sem ela, a folha abria oferecendo *"Ver o 1"* e *"Rejeitar o 1"* — o próprio card na sua frente, com os três botões ✕ ↑ ✓ logo abaixo.
+
+  **Nada se perde:** a contagem continua visível, e quem quiser juntar os pedidos de alguém sem passar do limiar continua com o **Ver +N**, que só traz os pedidos para a frente da fila e não decide nada. O sublinhado pontilhado, que indica "dá pra tocar", acompanha sozinho.
+
+---
+
 ## v2026.09.01-02
 
 ### Alterado

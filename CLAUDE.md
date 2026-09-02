@@ -550,6 +550,18 @@ Estrutura unificada na resposta de erro de `validar-place` e `marcar-lido`:
   filters,                // tipos, residencial, país, estado, área, myArea, unreadOnly, categories[] (filtro B5, server-side), sortOrder ('newest'|'oldest', client-side em sortQueue)
   seenCategories,         // categorias vistas nos places carregados — fonte do select de categoria (B5)
   history,                // acumulado histórico { 'YYYY-MM-DD': {read,rejected} } em localStorage waze_places_history — registrado em handleActionResult (só ações confirmadas), zerado no logout. Ver getHistoryStats/renderHistory
+  autorEmFoco,            // o autor priorizado na fila, pelo `creatorId` — NUNCA pelo nome.
+                          //   Eram dois sistemas de identidade na mesma linha do card: o `Ver +N`
+                          //   contava por `createdBy` e o `✕ N` decidia o botão por `creatorId`,
+                          //   e dava pra ver os dois discordando. **A medição que eu quase usei pra
+                          //   justificar era a errada**: medi COLISÕES (2 ids, 1 nome) e deu zero —
+                          //   mas nome do Waze é único por construção, então zero era garantido, e
+                          //   um instantâneo NUNCA vê o modo de falha real, que é o mesmo id trocar
+                          //   de nome ENTRE sessões. E trocar é o ciclo normal de 69% dos autores
+                          //   (`world_xxxxx` até escolherem um). Chaveia por id, EXIBE por nome —
+                          //   travado em `test/autores.test.mjs`, que reprova QUALQUER comparação
+                          //   por `createdBy` e carrega contraprova de que o varredor enxerga.
+                          //   Cuidado com `!id`: id 0 é falsy e mandaria o foco embora calado.
   autores,                // reincidência por autor: { v: [ids vistos 1x], r: { id: [n, nome, dia] } } em
                           //   waze_places_autores. DUAS listas, e a razão é o custo de GRAVAÇÃO — ver abaixo.
                           //   Chaveado pelo ID NUMÉRICO (`place.creatorId`), nunca pelo nome: 69% dos autores da
