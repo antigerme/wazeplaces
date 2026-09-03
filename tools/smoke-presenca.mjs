@@ -228,12 +228,18 @@ try {
     'a mensagem da ana não virou LIDA depois de a bia abrir a conversa')) ok('abrir a conversa devolve o recibo de leitura');
 
   // A linha "Lida" é TEXTO na tela, não só um tique de cor (WCAG 1.4.1).
-  const linhaLida = await ana.page.evaluate(() => {
-    const el = document.querySelector('#conversaMsgs .conversa-lida');
-    return el ? el.textContent.trim() : null;
-  });
-  if (linhaLida) ok(`a linha "${linhaLida}" aparece na tela`);
-  else anota('o estado "lida" não virou texto — sobraria só a cor do tique');
+  //
+  // Com `esperar` e não com um `evaluate` cru: a asserção de cima é sobre o
+  // ESTADO, e o desenho vem depois dele. Ler o DOM na linha seguinte é apostar
+  // que o render coube no mesmo instante — aposta que o CI perdeu em 2026-09-03,
+  // reprovando aqui com o estado já em 'lida'. Esperar pelo elemento afirma a
+  // mesma coisa sem depender de quem chega primeiro.
+  if (await esperar(ana, () => !!document.querySelector('#conversaMsgs .conversa-lida'),
+    'o estado "lida" não virou texto — sobraria só a cor do tique')) {
+    const linhaLida = await ana.page.evaluate(() =>
+      document.querySelector('#conversaMsgs .conversa-lida').textContent.trim());
+    ok(`a linha "${linhaLida}" aparece na tela`);
+  }
   if (await esperar(ana, () => (Presenca.conversas.get('pb')?.msgs || []).some((m) => !m.meu && m.txt.includes('cardápio')), 'a ana não recebeu a resposta')) ok('a resposta volta');
 
   // ── MANDAR O PEDIDO ABERTO ────────────────────────────────────────────────
