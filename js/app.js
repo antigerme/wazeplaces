@@ -2650,6 +2650,40 @@ async function loadProfileAndAuxData() {
 // cookies morreram MESMO, e evita o logout falso no caso em que não morreram.
 let verificandoSessao = false;
 
+// Recompõe a fila depois de uma falha que NÃO era sessão morta.
+//
+// Existe porque `startFetching()` sozinho NÃO recompõe nada, e é isso que
+// produziu a tela do owner ("Tudo limpo!" sobre 217 pedidos pendentes): a busca
+// que falhou deixa `hasMore: false`, e o laço do `startFetching` é GUARDADO por
+// `hasMore` — ou seja a "retentativa" não busca coisa nenhuma, só zera o
+// `loadError` e desenha o painel de fila vazia. Os dois caminhos de
+// recomposição (alarme falso do 401, e renovação pela extensão) chamavam
+// `startFetching()` cru. O botão "Tentar novamente" nunca caiu nisto porque ele
+// passa antes pelo `resetQueue`, que repõe `hasMore` — foi o que escondeu o
+// defeito: testar pelo botão dava certo.
+//
+// `loadError` é o que distingue "a fila esvaziou por FALHA" de "a fila acabou
+// de verdade". Sem essa distinção, forçar `hasMore` gastaria uma requisição a
+// mais toda vez que o backlog tivesse realmente zerado — e a app roda no free
+// tier, onde requisição é recurso contado.
+const MAX_REBUSCAS_AUTO = 2;
+let rebuscasAuto = 0;
+
+function rebuscarDepoisDeFalha() {
+    if (AppState.queue.length > 0 || AppState.fetching) return;
+    // Fila vazia SEM falha: não há o que repor, e o `startFetching` vai só
+    // pintar o "Tudo limpo!" — que aí é verdade.
+    if (!AppState.loadError) { startFetching(); return; }
+    // TETO, e ele não é preciosismo: sem isto o desenho é um laço de requisição
+    // (falha → confere → alarme falso → rebusca → falha…). Estourado o teto, o
+    // erro FICA na tela com o botão de tentar de novo — honesto, e quem decide
+    // gastar a próxima requisição é a pessoa.
+    if (rebuscasAuto >= MAX_REBUSCAS_AUTO) return;
+    rebuscasAuto++;
+    AppState.hasMore = true;
+    startFetching();
+}
+
 async function handleUnauthorized() {
     // Concorrência é o normal aqui, não a exceção: ao abrir a app saem TRÊS
     // chamadas ao Waze quase juntas (perfil, países, busca). Sem esta trava,
@@ -2686,7 +2720,7 @@ async function handleUnauthorized() {
                 renderProfileHeader();
             }
             showToast(t('toast.sessionKeptAlive'), 'info');
-            if (AppState.queue.length === 0 && !AppState.fetching) startFetching();
+            rebuscarDepoisDeFalha();
             return;
         }
         // A confirmação também diz de QUAL lado falhou, e isso vira a mensagem:
@@ -2736,7 +2770,7 @@ function derrubarSessao(errorKey) {
     entrarPelaExtensao({ silencioso: true }).then((renovou) => {
         if (renovou) {
             showToast(t('toast.sessionRenewed'), 'info');
-            if (AppState.queue.length === 0 && !AppState.fetching) startFetching();
+            rebuscarDepoisDeFalha();
             return;
         }
         showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
@@ -2906,6 +2940,8 @@ function resetQueue() {
     AppState.nextPage = 1;
     AppState.hasMore = true;
     AppState.emptyPagesInRow = 0;
+    // Gesto explícito (atualizar, filtro, tentar de novo) recomeça a conta.
+    rebuscasAuto = 0;
     AppState.currentPlace = null;
     AppState.serverTotal = 0;
     AppState.serverBlocked = 0;
@@ -2981,6 +3017,32 @@ function fetchNextPage() {
                 if (result.errorCategory === 'unauthorized' ||
                     (result.error && result.error.toLowerCase().includes('sess'))) {
                     AppState.hasMore = false;
+                    // `loadError` TAMBÉM aqui, e a falta dele foi o defeito que o
+                    // owner viu: "Tudo limpo!" sobre 217 pedidos pendentes.
+                    //
+                    // Este ramo confia no `handleUnauthorized` pra recompor — ou
+                    // ele derruba pra tela de entrar (sessão morta), ou ele
+                    // rebusca (alarme falso). Só que ele tem uma TRAVA de
+                    // concorrência (`verificandoSessao`): ao abrir a app saem
+                    // três chamadas quase juntas, e a segunda que chega encontra
+                    // a trava fechada e volta NA HORA, sem derrubar e sem
+                    // rebuscar. A rebusca do alarme falso também reentra aqui e
+                    // encontra a própria trava. Em qualquer desses caminhos
+                    // sobrava fila vazia + `hasMore: false` + `loadError: false`,
+                    // que o `showNoPlaces` desenha como "Tudo limpo!".
+                    //
+                    // Marcar aqui é seguro porque quem REBUSCA limpa: o
+                    // `startFetching` zera `loadError` antes de tentar. Ou seja,
+                    // a flag só sobrevive quando de fato ninguém recompôs — que é
+                    // exatamente quando a tela precisa dizer "Falha ao carregar"
+                    // com o botão de tentar de novo.
+                    //
+                    // O comentário do `showNoPlaces` já dizia a intenção desde
+                    // sempre ("o editor acharia que zerou o backlog"); faltava
+                    // este ramo. E é o pior defeito possível pela régua do
+                    // próprio projeto: "parece que acabou o trabalho" ninguém
+                    // reporta — o editor fecha a app achando que terminou.
+                    AppState.loadError = true;
                     handleUnauthorized();
                 } else {
                     showToast(msgDoServidor(result, t('toast.loadPlacesError')), 'error');
@@ -2992,6 +3054,9 @@ function fetchNextPage() {
 
             AppState.hasMore = !!result.hasMore;
             AppState.nextPage++;
+            // Busca que deu certo encerra a cadeia: o teto é de tentativas
+            // SEGUIDAS sem sucesso, não da vida da sessão.
+            rebuscasAuto = 0;
             // Esta é a chamada que se repete, então é ela que mantém o prazo em
             // dia: se o editor relogar no WME, o Waze passa a mandar um `Expires`
             // novo e o aviso some sozinho, sem a app precisar perguntar nada.
