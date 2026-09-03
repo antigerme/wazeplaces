@@ -492,9 +492,25 @@ function presencaLigarCanal(peer, canal) {
         // Cliente ANTIGO ignora todos estes em silêncio: ele lê `m.txt`, acha
         // vazio e sai pelo `if (!txt) return`. É o que torna a troca segura nos
         // dias em que as duas versões convivem.
+        //
+        // Os TRÊS acendem `recibos`, e não só o `oi`. A capacidade do outro lado
+        // não pode depender de UM quadro que pode se perder: o `oi` sai de dentro
+        // de um `try/catch` vazio no `abriu()`, então um `send` que falhe some sem
+        // rastro e desliga TODOS os recibos daquela conversa PARA SEMPRE — e o
+        // sintoma é indistinguível do caso legítimo que o `PRESENCA_CONVERSA_V`
+        // existe pra cobrir (o outro lado numa versão velha). Pego pelo CI em
+        // 2026-09-03: `recibos` false com o `ack` do MESMO canal já processado.
+        //
+        // O canal é ORDENADO e confiável por padrão (`createDataChannel` sem
+        // opções), e o `oi` sai antes de qualquer `ack` poder existir. Então ack
+        // recebido com `recibos` false só acontece se o `oi` nunca saiu — não se
+        // ele atrasou. Daí a inferência, que é exata nos dois sentidos: `ack` e
+        // `lido` NÃO EXISTEM antes do v2, então cliente antigo não os manda e não
+        // pode acender isto por engano; e quem os manda sabe confirmar por
+        // definição. É a mesma pergunta respondida por evidência que não se perde.
         if (m.t === 'oi') { c.recibos = true; presencaRenderConversa(); return; }
-        if (m.t === 'ack') { presencaConfirmar(c, m.id, 'entregue'); return; }
-        if (m.t === 'lido') { presencaConfirmar(c, m.ate, 'lida'); return; }
+        if (m.t === 'ack') { c.recibos = true; presencaConfirmar(c, m.id, 'entregue'); return; }
+        if (m.t === 'lido') { c.recibos = true; presencaConfirmar(c, m.ate, 'lida'); return; }
 
         const txt = String(m.txt || '').slice(0, 2000);
         const card = presencaCardSeguro(m.card);

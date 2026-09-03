@@ -212,6 +212,41 @@ test('recibo: UMA linha de falha, na última — entrega é ordenada, falha é s
     'repetir a mesma frase por mensagem não diz nada novo');
 });
 
+// ═══ de onde vem a CAPACIDADE do outro lado ═════════════════════════════════
+// O `oi` sai UMA vez, de dentro de um `try/catch` vazio. Se aquele `send` falha,
+// ele some sem rastro e os recibos daquela conversa ficam desligados PARA SEMPRE
+// — indistinguível do cliente antigo. Foi o que o CI pegou em 2026-09-03:
+// `recibos` false com o `ack` do MESMO canal já processado.
+test('recibo: `ack` e `lido` também acendem a capacidade — o `oi` pode se perder', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  for (const tipo of ['oi', 'ack', 'lido']) {
+    const re = new RegExp(`m\\.t === '${tipo}'\\s*\\)\\s*\\{\\s*c\\.recibos = true;`);
+    assert.match(semComentarios, re,
+      `o recado '${tipo}' precisa acender \`recibos\` — capacidade não pode depender de UM quadro`);
+  }
+  // A inferência só é exata porque `ack`/`lido` NÃO EXISTEM antes do v2: cliente
+  // antigo não os manda, então não pode acender isto por engano. Se algum dia um
+  // recado passar a ser mandado por cliente de qualquer versão, esta conta muda.
+  assert.match(fonte, /const PRESENCA_CONVERSA_V = 2;/,
+    'a versão do protocolo é o que garante que só cliente v2 manda ack/lido');
+});
+
+test('recibo: o `oi` continua saindo, e ANTES da fila de pendentes', () => {
+  // O `oi` segue sendo o caminho normal — o `ack` é a rede de segurança, não o
+  // substituto. Sem o `oi`, a primeira mensagem de uma conversa em que ninguém
+  // respondeu ainda ficaria sem recibo até alguém escrever de volta.
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf('const abriu = () =>');
+  assert.ok(i !== -1, 'o `abriu` sumiu do presenca.js');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('canal.onopen', i));
+  const envio = bloco.indexOf("t: 'oi'");
+  const fila = bloco.indexOf('c.pendentes.splice(0)');
+  assert.ok(envio !== -1, 'o `oi` não é mais enviado ao abrir o canal');
+  assert.ok(fila !== -1, 'a fila de pendentes sumiu do `abriu`');
+  assert.ok(envio < fila,
+    'o `oi` tem que sair ANTES dos pendentes, senão a primeira mensagem sai sem recibo');
+});
+
 test('recibo: peer de versão ANTIGA não ganha recibo nenhum', () => {
   // O service worker é cache-first pra asset, então depois de cada deploy
   // sobra por dias aparelho rodando o presenca.js velho — que não confirma
