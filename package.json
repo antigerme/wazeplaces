@@ -20,7 +20,8 @@
     "test:presenca": "node tools/smoke-presenca.mjs",
     "test:fluxo": "node tools/smoke-fluxo.mjs",
     "js": "node tools/gerar-js.mjs",
-    "html": "node tools/gerar-html.mjs"
+    "html": "node tools/gerar-html.mjs",
+    "test:diag-tela": "node tools/smoke-diag-tela.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -24,11 +24,19 @@
 // A página é montada SEM JAVASCRIPT e SEM REDE de propósito: o DOM capturado já
 // é o resultado; re-executar scripts mudaria o instante que se quer olhar.
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
-const arquivo = process.argv[2];
-const saida = process.argv[3] || '/tmp/diag-tela';
+// `--cru` tira as MARCAS da ferramenta (hachura na imagem que faltou, moldura no
+// canvas e no FAB). Elas existem porque espaço vazio se confunde com "estava
+// vazio pra ele" — mas são anotação do instrumento, não desenho da app. O
+// `tools/smoke-diag-tela.mjs` compara a remontagem com a tela ao vivo pixel a
+// pixel, e com as marcas ligadas ele mediria a anotação: medido, elas sozinhas
+// respondem por ~6 pontos percentuais num card com foto.
+const cru = process.argv.includes('--cru');
+const args = process.argv.slice(2).filter((a) => a !== '--cru');
+const arquivo = args[0];
+const saida = args[1] || '/tmp/diag-tela';
 if (!arquivo) {
   console.error('uso: node tools/diag-tela.mjs <arquivo.json> [pasta-de-saida]');
   process.exit(2);
@@ -53,6 +61,26 @@ const css = Object.entries(codigo)
   .map(([, v]) => v.corpo).join('\n');
 if (!css) console.warn('aviso: nenhum CSS no arquivo — a tela sai sem estilo');
 
+// A FONTE vem do repositório, não do diagnóstico. O diagnóstico lê todo recurso
+// como TEXTO (é o que serve pro HTML/JS/CSS), e um `.woff2` lido assim chega
+// corrompido — a remontagem caía na fonte do sistema e o texto media diferente,
+// o que arruína qualquer comparação com a tela de verdade. A fonte é ARQUIVO DO
+// PROJETO: casar pelo nome e embutir em base64 devolve a métrica exata.
+//
+// Só casa por NOME DE ARQUIVO dentro de `fonts/` deste repositório: nada é
+// buscado na rede, e diagnóstico de outra app simplesmente não encontra par.
+const fontes = [];
+for (const u of Object.keys(codigo)) {
+  const m = /\/fonts\/([\w.-]+\.woff2?)$/.exec(u);
+  if (!m) continue;
+  const local = new URL('../fonts/' + m[1], import.meta.url);
+  if (!existsSync(local)) continue;
+  const b64 = readFileSync(local).toString('base64');
+  fontes.push({ nome: m[1], url: u, b64Bytes: b64.length,
+                css: `@font-face{font-family:"Inter var";font-style:normal;font-weight:100 900;`
+                   + `font-display:swap;src:url(data:font/woff2;base64,${b64}) format("woff2");}` });
+}
+
 const janela = (d.ambiente && d.ambiente.tela && d.ambiente.tela.janela) || '390x844';
 const [W, H] = janela.split('x').map((n) => parseInt(n, 10) || 0);
 const dpr = (d.ambiente && d.ambiente.tela && d.ambiente.tela.dpr) || 2;
@@ -74,7 +102,7 @@ function preparar(m) {
   html = html.replace(/<script\b[\s\S]*?<\/script>/gi, '');
   html = html.replace(/<link\b[^>]*rel=["']?stylesheet["']?[^>]*>/gi, '');
   const quebradas = new Set((m.imagens || []).filter((i) => i.quebrada).map((i) => i.src));
-  const marca = `
+  const marca = cru ? '' : `
     /* Substitutos: o que NÃO pôde ser remontado fica VISÍVEL, nunca em branco —
        espaço vazio se confunde com "estava vazio pra ele". */
     img { background: repeating-linear-gradient(45deg,#33415533,#33415533 6px,#1e293b33 6px,#1e293b33 12px);
@@ -82,7 +110,23 @@ function preparar(m) {
     img[data-diag-quebrada] { outline-color: #fb7185; }
     #devFab { outline: 2px dashed #a855f7; }
   `;
-  html = html.replace(/<\/head>/i, `<style>${css}</style><style>${marca}</style></head>`);
+  // ANIMAÇÃO VAI PRO FIM. O DOM capturado não guarda progresso de animação: ao
+  // recarregar, toda `animation`/`transition` recomeça do quadro ZERO. MEDIDO
+  // comparando com a tela ao vivo: o toast, que já tinha terminado de entrar,
+  // remontava mais baixo e semitransparente — 69% de diferença na faixa de
+  // baixo da imagem, só por isso. Vale pra tudo que anima: selo do swipe, barra
+  // do Desfazer, confete do "Tudo limpo!".
+  //
+  // `duration: 0s` + `fill-mode: forwards` salta pro ÚLTIMO quadro, que é o
+  // estado assentado — o mais próximo da verdade que um instantâneo permite.
+  const semAnimacao = `*, *::before, *::after {
+    animation-duration: 0s !important; animation-delay: 0s !important;
+    animation-fill-mode: forwards !important; animation-iteration-count: 1 !important;
+    transition-duration: 0s !important; transition-delay: 0s !important;
+  }`;
+  const fonteCss = fontes.map((f) => f.css).join('\n');
+  html = html.replace(/<\/head>/i,
+    `<style>${fonteCss}</style><style>${css}</style><style>${semAnimacao}</style><style>${marca}</style></head>`);
   for (const src of quebradas) {
     html = html.split(src).join(src + '" data-diag-quebrada="1');
   }
@@ -97,7 +141,7 @@ function preparar(m) {
     const cv = (m.canvas || [])[iCanvas++] || {};
     const cls = (tag.match(/class="([^"]*)"/) || [])[1] || '';
     if (cv.url) return `<img class="${cls}" src="${cv.url}" alt="canvas">`;
-    return `<div class="${cls}" style="outline:2px dashed #fbbf24;min-height:80px"`
+    return `<div class="${cls}" style="${cru ? '' : 'outline:2px dashed #fbbf24;'}min-height:80px"`
          + ` title="canvas não capturado: ${cv.erro || '?'}"></div>`;
   });
   return html;
@@ -139,6 +183,10 @@ for (let i = 0; i < momentos.length; i++) {
     console.error(`momento ${i + 1}: o CSS não chegou a um ponto renderizável`
       + ` (style em ${ate}, comentários ${abertos} abertos × ${fechados} fechados).`
       + ' A imagem sairia sem estilo — abortando em vez de entregar tela errada.');
+    // Fecha o navegador antes de sair: `process.exit` no meio do laço deixava um
+    // Chromium órfão por execução, e ninguém repara até a máquina ficar cheia.
+    await ctx.close();
+    await browser.close();
     process.exit(1);
   }
   writeFileSync(tmp, pronto);
@@ -161,6 +209,7 @@ const resumo = {
   versaoDaApp: (d.app && d.app.rotulo) || null,
   janela, dpr, tema: (d.ambiente && d.ambiente.escuro) ? 'escuro' : 'claro',
   cssBytes: css.length,
+  fontesEmbutidas: fontes.map((f) => f.nome),
   momentos: linhas,
   // O que a remontagem NÃO consegue — dito aqui pra ninguém ler a imagem como
   // se fosse foto.
