@@ -692,6 +692,16 @@
                                     </span>
                                     <input id="prefDevModeActive" type="checkbox" class="ui-switch">
                                 </label>
+                                <!-- Um botão, um arquivo. Vive atrás do modo dev
+                                     porque o arquivo carrega o `waze_session_token`,
+                                     que é credencial viva — e o aviso fica colado
+                                     no botão, não escondido no arquivo. -->
+                                <button id="diagBtn" type="button" class="w-full min-h-[48px] mt-3 rounded-xl bg-purple-100 dark:bg-purple-400/15 border border-purple-200 dark:border-purple-400/40 text-purple-800 dark:text-purple-200 font-semibold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-60" data-i18n="filters.diag.btn">
+                                    Baixar diagnóstico
+                                </button>
+                                <p class="text-xs text-purple-700/80 dark:text-purple-200/70 mt-2 leading-snug" data-i18n-html="filters.diag.aviso">
+                                    Traz <b>tudo</b> que está neste aparelho, inclusive o <b>token da sessão</b>. Trate como senha.
+                                </p>
                             </div>
                         </div>
                         <div>

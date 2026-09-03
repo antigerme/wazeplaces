@@ -225,6 +225,9 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 function initApp() {
+    // Armado ANTES de tudo: erro que acontece na carga é justamente o que não
+    // aparece em lugar nenhum depois, e é o que mais interessa num socorro.
+    diagCapturarErros();
     const versionEl = document.getElementById('appVersionDisplay');
     if (versionEl) {
         versionEl.textContent = 'v' + (typeof verLabel === 'function' ? verLabel(APP_VERSION) : APP_VERSION);
@@ -612,6 +615,7 @@ function setupAppListeners() {
         resetQueue();
         startFetching();
     });
+    $('diagBtn')?.addEventListener('click', baixarDiagnostico);
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
     $('presencaClose').addEventListener('click', () => closeModal('presencaModal'));
     $('pedidoClose').addEventListener('click', () => closeModal('pedidoModal'));
@@ -2684,6 +2688,257 @@ function rebuscarDepoisDeFalha() {
     startFetching();
 }
 
+// ── Diagnóstico: baixa TUDO que existe do lado do cliente ──────────────────
+//
+// Pedido do owner, depois de horas em que eu adivinhei o defeito do aparelho
+// dele em vez de olhar. O botão vive atrás do modo dev e gera UM arquivo.
+//
+// DUAS COISAS QUE ELE **NÃO** CONSEGUE TRAZER, e é honesto dizer no próprio
+// arquivo em vez de deixar a pessoa procurar:
+//
+//  1. Os cookies do WAZE. Eles são de `waze.com`, outra origem — o JavaScript
+//     desta página não os enxerga, por regra do navegador, e nem existem aqui:
+//     depois do login eles vivem CIFRADOS no servidor e nunca mais voltam ao
+//     aparelho. O que dá pra trazer é `document.cookie` desta origem.
+//  2. O corpo do que o Service Worker guardou de OUTRA origem (tiles do Waze):
+//     a resposta é opaca. As URLs vêm; o conteúdo, não.
+//
+// O QUE ELE TRAZ, e o peso disso: o `waze_session_token` vai INTEIRO. Ele é
+// credencial viva — quem tiver o arquivo pode agir na conta do Waze do dono até
+// a sessão vencer, e é METADE da chave que decifra os cookies no servidor (ver
+// `derivarChave`). Foi pedido assim de propósito, porque é ele que permite
+// REPRODUZIR a falha em vez de teorizar. O arquivo diz isso na primeira linha,
+// e o caminho de anular é sair da app, que destrói a sessão no servidor.
+const DIAG_VERSAO = 1;
+
+// JSON de coisa viva: `AppState` tem Promise, função e referência circular
+// (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
+// e o arquivo sai vazio — falha silenciosa no instrumento de socorro.
+function diagSeguro(v, prof = 0, vistos = new WeakSet()) {
+    if (v === null || typeof v !== 'object') {
+        return typeof v === 'function' ? '[função]' : v;
+    }
+    if (vistos.has(v)) return '[circular]';
+    if (prof > 8) return '[fundo]';
+    if (v instanceof Promise) return '[promise]';
+    if (typeof Element !== 'undefined' && v instanceof Element) return '[elemento ' + v.tagName + ']';
+    if (v instanceof Map) return { '[Map]': [...v.keys()].map(String) };
+    if (v instanceof Set) return { '[Set]': [...v].map(String) };
+    vistos.add(v);
+    if (Array.isArray(v)) return v.map((x) => diagSeguro(x, prof + 1, vistos));
+    const o = {};
+    for (const k of Object.keys(v)) {
+        try { o[k] = diagSeguro(v[k], prof + 1, vistos); } catch (e) { o[k] = '[erro: ' + e.message + ']'; }
+    }
+    return o;
+}
+
+// Erros de JS acumulados desde a carga. Armado cedo, no `initApp`.
+const diagErros = [];
+function diagCapturarErros() {
+    addEventListener('error', (e) => {
+        diagErros.push({ t: new Date().toISOString(), tipo: 'error',
+            msg: String(e.message || ''), fonte: String(e.filename || ''), linha: e.lineno });
+        if (diagErros.length > 50) diagErros.shift();
+    });
+    addEventListener('unhandledrejection', (e) => {
+        diagErros.push({ t: new Date().toISOString(), tipo: 'rejeicao',
+            msg: String((e.reason && e.reason.message) || e.reason || '').slice(0, 300) });
+        if (diagErros.length > 50) diagErros.shift();
+    });
+}
+
+async function diagCorpo() {
+    const meu = location.origin;
+    // Só recurso da NOSSA origem: de terceiro a resposta é opaca e a leitura
+    // ainda gastaria rede. `cache: 'force-cache'` pra pegar o que o aparelho
+    // REALMENTE tem — que é a pergunta quando se suspeita de PWA com código
+    // velho; buscar da rede mediria o servidor, não o aparelho.
+    const texto = async (url) => {
+        try {
+            const r = await fetch(url, { cache: 'force-cache' });
+            return { http: r.status, tipo: r.headers.get('content-type'),
+                     etag: r.headers.get('etag'), corpo: await r.text() };
+        } catch (e) { return { erro: String((e && e.message) || e) }; }
+    };
+
+    const ls = {}, ss = {};
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); } }
+    catch (e) { ls._erro = String(e); }
+    try { for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); ss[k] = sessionStorage.getItem(k); } }
+    catch (e) { ss._erro = String(e); }
+
+    const sw = { suportado: 'serviceWorker' in navigator,
+                 controlando: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
+                 registros: [] };
+    try {
+        for (const r of await navigator.serviceWorker.getRegistrations()) {
+            sw.registros.push({ escopo: r.scope,
+                ativo: r.active && r.active.scriptURL, estadoAtivo: r.active && r.active.state,
+                esperando: r.waiting && r.waiting.scriptURL,
+                instalando: r.installing && r.installing.scriptURL });
+        }
+    } catch (e) { sw.erro = String(e); }
+
+    const cachesDoAparelho = {};
+    try {
+        for (const nome of await caches.keys()) {
+            const c = await caches.open(nome);
+            cachesDoAparelho[nome] = (await c.keys()).map((r) => r.url);
+        }
+    } catch (e) { cachesDoAparelho._erro = String(e); }
+
+    // O CÓDIGO que está rodando, com o corpo. É isto que responde "o PWA está
+    // com a versão velha?" — pergunta que o serial sozinho não responde, porque
+    // ele só diz o que o `version.js` carregado afirma, não o que o resto é.
+    const recursos = performance.getEntriesByType('resource')
+        .map((r) => ({ url: r.name, tipo: r.initiatorType, ms: Math.round(r.duration),
+                       bytes: r.transferSize,
+                       doCache: r.transferSize === 0 && r.decodedBodySize > 0 }));
+    const codigo = {};
+    // O `service-worker.js` NÃO aparece em `performance.getEntriesByType` — ele
+    // não é recurso DESTA página, é o processo que a serve. Sem pedir por nome,
+    // o arquivo traz o conteúdo dos caches e a URL do SW, mas não o script que
+    // está no comando: dava pra concluir "está atualizado" pelo `version.js` com
+    // um SW de três versões atrás decidindo o que servir.
+    const nossos = [...new Set([location.href, meu + '/service-worker.js',
+        ...recursos.map((r) => r.url).filter((u) => u.startsWith(meu))])];
+    for (const u of nossos) codigo[u] = await texto(u);
+
+    // ── O que o aparelho tem × o que o servidor tem AGORA ──────────────────
+    // Responde de vez a pergunta que sozinha custou horas: "o PWA está rodando
+    // código velho?". O `codigo` acima é o lado do APARELHO (`force-cache`);
+    // aqui o mesmo arquivo vem da REDE (`reload`) e os dois são comparados por
+    // hash. Deduzir isso do serial não serve — o serial só diz o que o
+    // `version.js` carregado afirma, não o que o resto dos arquivos é.
+    //
+    // Custa uma requisição por arquivo, e SÓ quando alguém aperta o botão.
+    const hash = async (txt) => {
+        try {
+            const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
+            return [...new Uint8Array(b)].slice(0, 8).map((x) => x.toString(16).padStart(2, '0')).join('');
+        } catch (e) { return 'sem-hash:' + txt.length; }
+    };
+    const cacheVsRede = {};
+    for (const u of nossos) {
+        const local = codigo[u] && codigo[u].corpo;
+        if (typeof local !== 'string') { cacheVsRede[u] = { erro: 'sem corpo local' }; continue; }
+        try {
+            const r = await fetch(u, { cache: 'reload' });
+            const remoto = await r.text();
+            const [ha, hb] = [await hash(local), await hash(remoto)];
+            cacheVsRede[u] = { aparelho: ha, servidor: hb, igual: ha === hb,
+                               bytesAparelho: local.length, bytesServidor: remoto.length,
+                               http: r.status };
+        } catch (e) { cacheVsRede[u] = { erro: String((e && e.message) || e) }; }
+    }
+
+    // ── O armazenamento local funciona mesmo? ──────────────────────────────
+    // O `safeLS` engole exceção DE PROPÓSITO, então armazenamento cheio ou
+    // navegação privada falham em SILÊNCIO: filtro não persiste, sessão não
+    // grava, e a app parece boa. É uma classe inteira de defeito que nenhum
+    // outro campo deste arquivo revelaria — só a sonda escreve-lê-apaga.
+    const armazenamento = { quota: null, uso: null, escreve: null, erroEscrita: null };
+    try {
+        const e = await navigator.storage.estimate();
+        armazenamento.quota = e.quota; armazenamento.uso = e.usage;
+        armazenamento.sobraPct = e.quota ? +(100 - (e.usage / e.quota) * 100).toFixed(2) : null;
+    } catch (e) { armazenamento.erroQuota = String(e); }
+    try {
+        const k = '__diag_probe__', v = String(Date.now());
+        localStorage.setItem(k, v);
+        armazenamento.escreve = localStorage.getItem(k) === v;
+        localStorage.removeItem(k);
+    } catch (e) { armazenamento.escreve = false; armazenamento.erroEscrita = String((e && e.message) || e); }
+    try { armazenamento.persistente = await navigator.storage.persisted(); } catch (e) {}
+
+    // ── Relógio do aparelho × do servidor ──────────────────────────────────
+    // Data errada no celular faz o aviso de sessão vencendo mentir e toda
+    // comparação de prazo sair torta — e o sintoma nunca aponta pro relógio.
+    const relogio = { aparelho: new Date().toISOString(), servidor: null, desvioSeg: null };
+    try {
+        const r = await fetch(meu + '/manifest.json', { cache: 'no-store', method: 'HEAD' });
+        const d = r.headers.get('date');
+        if (d) {
+            relogio.servidor = new Date(d).toISOString();
+            relogio.desvioSeg = Math.round((Date.now() - new Date(d).getTime()) / 1000);
+        }
+    } catch (e) { relogio.erro = String((e && e.message) || e); }
+
+    const idb = {};
+    try { for (const d of await indexedDB.databases()) idb[d.name] = d.version; }
+    catch (e) { idb._erro = String(e); }
+
+    const c = navigator.connection || {};
+    return {
+        _leia_isto: 'Este arquivo contém o waze_session_token, que é CREDENCIAL VIVA da conta do Waze '
+            + 'de quem gerou. Trate como senha. Pra anular: sair da app, o que destrói a sessão no '
+            + 'servidor. NÃO contém os cookies do Waze — eles são de outra origem e não ficam neste aparelho.',
+        _versaoDoDiag: DIAG_VERSAO,
+        _gerado: new Date().toISOString(),
+        app: { versao: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
+               rotulo: typeof verLabel === 'function' ? verLabel(APP_VERSION) : null,
+               url: location.href,
+               idioma: typeof getLang === 'function' ? getLang() : null },
+        ambiente: {
+            ua: navigator.userAgent, plataforma: navigator.platform, idiomas: navigator.languages,
+            online: navigator.onLine,
+            conexao: { tipo: c.effectiveType, downlink: c.downlink, rtt: c.rtt, economia: c.saveData },
+            standalone: matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
+            tela: { w: screen.width, h: screen.height, dpr: devicePixelRatio,
+                    janela: innerWidth + 'x' + innerHeight },
+            fuso: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            escuro: matchMedia('(prefers-color-scheme: dark)').matches,
+            memoria: navigator.deviceMemory, nucleos: navigator.hardwareConcurrency,
+        },
+        // Cookies DESTA origem. Os do Waze não estão aqui — ver o cabeçalho.
+        cookiesDestaOrigem: document.cookie || '(vazio)',
+        localStorage: ls,
+        sessionStorage: ss,
+        indexedDB: idb,
+        serviceWorker: sw,
+        caches: cachesDoAparelho,
+        chamadas: (typeof API !== 'undefined' && API.chamadas) || [],
+        recursos,
+        erros: diagErros,
+        appState: diagSeguro(typeof AppState !== 'undefined' ? AppState : null),
+        // O HTML como está AGORA, com as classes que decidem o que aparece na
+        // tela. É o que mostra qual painel estava visível no momento da queixa.
+        dom: document.documentElement.outerHTML,
+        codigo,
+        cacheVsRede,
+        armazenamento,
+        relogio,
+    };
+}
+
+async function baixarDiagnostico() {
+    const btn = document.getElementById('diagBtn');
+    if (btn) { btn.disabled = true; btn.textContent = t('filters.diag.gerando'); }
+    try {
+        const corpo = await diagCorpo();
+        const blob = new Blob([JSON.stringify(corpo, null, 1)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        // Começa com `diag-` e NÃO com `waze`: o guard do logout varre os
+        // literais `waze*` do js/ procurando chave nova de armazenamento, e um
+        // nome de arquivo com esse prefixo é indistinguível de uma chave pra
+        // ele. Afrouxar o guard pra caber um nome bonito é o caminho errado.
+        a.download = 'diag-wazeplaces-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+        showToast(t('toast.diagPronto'), 'success');
+    } catch (e) {
+        // O instrumento de socorro NÃO pode falhar calado: se ele quebrar,
+        // ninguém descobre por que o socorro não veio.
+        showToast(t('toast.diagFalhou', { erro: String((e && e.message) || e).slice(0, 80) }), 'error', 9000);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = t('filters.diag.btn'); }
+    }
+}
+
 async function handleUnauthorized() {
     // Concorrência é o normal aqui, não a exceção: ao abrir a app saem TRÊS
     // chamadas ao Waze quase juntas (perfil, países, busca). Sem esta trava,
@@ -4615,6 +4870,26 @@ function cardParaConversa() {
 // Monta a URL do WME pro pedido — a MESMA regra do ↗ do card (env por região,
 // lat/lon com zoom 22, venueUpdateRequest com o venueID). Fonte única: o card e
 // a folha de leitura chamam daqui, senão os dois links divergem sem ninguém ver.
+// Casas decimais da coordenada no permalink. O número é do PRÓPRIO WME, lido no
+// bundle dele (v2.367): `units: { lonLatPrecision: 5 }`, e é esse valor que o
+// construtor de permalink aplica (`n.lat.toFixed(Config.units.lonLatPrecision)`).
+// As duas URLs que o owner colou vêm com 5 casas porque saíram de lá.
+//
+// Cinco casas são ~1,1 m. No zoom 22 isso são ~30 px de deslocamento no CENTRO
+// do mapa — e é aceitável porque quem marca o local é o `venues=`, não a
+// coordenada: ela só enquadra. Precisão maior alongaria a URL sem mudar o que a
+// pessoa vê selecionado.
+const COORD_CASAS = 5;
+
+// `Number(...)` por fora do `toFixed` corta zero à direita (`-23.40000` vira
+// `-23.4`), que é o objetivo aqui: encurtar. O próprio WME usa esta MESMA forma
+// no "copiar coordenadas" (`Number(e.toFixed(s))`); o permalink dele usa o
+// `toFixed` cru, e os dois valem o mesmo NÚMERO — a diferença é só o texto.
+//
+// Não vira notação exponencial: depois do `toFixed(5)` o menor valor não-nulo é
+// 0.00001, e o JS só troca pra exponencial abaixo de 1e-6.
+const coordDoLink = (n) => Number(n.toFixed(COORD_CASAS));
+
 // A URL do ↗ é um PERMALINK do WME, e a gramática dele é `tipoDeFeature=ids`.
 // MEDIDO no bundle do WME (v2.367, `app-f7541f99…js`): o construtor de permalink
 // espalha o `getMapSelection()` — um mapa `{tipo: ids}` — direto na query, e
@@ -4644,7 +4919,7 @@ function linkWmeDoPedido(dados, region) {
     // países de validação. Com `dados.lat && dados.lon` o zero cai fora e o
     // editor abre no último lugar que a pessoa estava, sem sintoma nenhum.
     if (Number.isFinite(dados.lat) && Number.isFinite(dados.lon)) {
-        params.push(`lat=${dados.lat}`, `lon=${dados.lon}`, 'zoomLevel=22');
+        params.push(`lat=${coordDoLink(dados.lat)}`, `lon=${coordDoLink(dados.lon)}`, 'zoomLevel=22');
     }
     if (dados.venueID) {
         const id = encodeURIComponent(dados.venueID);

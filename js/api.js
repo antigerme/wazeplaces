@@ -52,7 +52,109 @@ const API = {
     saindo: false,
     setSaindo(v) { this.saindo = !!v; },
 
+    // Registro das últimas chamadas, SÓ NA MEMÓRIA. Existe porque a pergunta que
+    // mais custou tempo neste projeto foi "o que exatamente falhou no aparelho
+    // dele?", e ela não tinha resposta: o toast conta o desfecho, não a
+    // sequência. Sem isto, "conexão instável" e "falha ao carregar" na mesma
+    // tela são dois fatos soltos, e eu passei horas encaixando hipótese.
+    //
+    // Guarda SEMPRE, não só com o modo dev ligado: o defeito acontece ANTES de
+    // alguém abrir o diagnóstico, e anel que começa a gravar na hora do socorro
+    // nasce vazio justo quando importa. Custo: 60 objetos pequenos em memória,
+    // zero requisição, zero gravação no aparelho, e some ao fechar a app.
+    //
+    // NUNCA guarda o corpo enviado nem o recebido: o corpo leva o sessionToken
+    // em toda chamada, e o recebido leva dado de terceiro (nome de quem mandou
+    // o pedido). O que interessa pra depurar é a FORMA da falha.
+    chamadas: [],
+
+    // Cabeçalhos que interessam pra depurar, e SÓ eles. `cf-ray` diz qual
+    // datacenter e qual execução respondeu; `cf-cache-status` diz se a BORDA
+    // serviu cache (o modo de falha que atinge um aparelho e não o outro, e que
+    // é invisível de qualquer outro jeito); `date` do servidor contra o relógio
+    // do aparelho revela desvio de hora, que faz prazo e comparação de data
+    // mentirem; `etag`/`age` fecham a conta de frescor.
+    _CABECALHOS: ['cf-ray', 'cf-cache-status', 'date', 'age', 'etag', 'content-type', 'server'],
+
+    // Teto do que os CORPOS ocupam no anel, somados. Sem ele, uma resposta de
+    // `buscar-places` (326 KB medidos na produção) × várias chamadas vira
+    // dezenas de MB na memória de um celular e um arquivo que ninguém manda.
+    // Estoura → os corpos MAIS ANTIGOS saem; o registro deles fica.
+    _TETO_CORPOS: 3 * 1024 * 1024,
+
+    // O token vai no corpo de TODA chamada. Ele já está no arquivo uma vez (no
+    // localStorage) e é lá que ele deve estar: repetir 60 vezes não acrescenta
+    // segredo, só multiplica a chance de escapar num recorte de tela ou num
+    // trecho colado. Redigido, o corpo continua 100% útil pra depurar (é ele que
+    // diz QUAIS filtros foram enviados naquela chamada, e não no momento do
+    // diagnóstico).
+    _semSegredo(body) {
+        try {
+            const c = JSON.parse(JSON.stringify(body || {}));
+            if (c.sessionToken) c.sessionToken = '[token — ver localStorage]';
+            if (c.cookies) c.cookies = '[cookies do login — nunca guardados]';
+            if (c.code) c.code = '[código de pareamento]';
+            return c;
+        } catch (e) { return '[não serializável]'; }
+    },
+
+    // Corpo de resposta só entra com o modo dev ATIVO — que é exatamente quem
+    // está com problema e ligou pra reproduzir. Guardar sempre poria a fila
+    // inteira (300 lugares, com o nome de quem enviou cada pedido) na memória de
+    // todo mundo, o tempo todo, por um benefício que só o socorro usa.
+    _guardaCorpo() {
+        // `typeof AppState` e NÃO `window.AppState`: o `AppState` é `const` no
+        // escopo global de um script clássico, o que cria binding LÉXICO e não
+        // propriedade de `window` (gotcha #64, que já custou um "is not a
+        // function" na cara do editor). Com `window.` isto devolvia `false`
+        // SEMPRE, e o corpo nunca era guardado — falha silenciosa, encontrada
+        // porque o teste exigia o corpo presente, não só ausente.
+        try { return typeof AppState !== 'undefined' && !!(AppState.devMode && AppState.devMode.active); }
+        catch (e) { return false; }
+    },
+
+    _registrar(endpoint, inicio, http, data, extra) {
+        try {
+            const reg = {
+                t: new Date().toISOString(),
+                rota: endpoint,
+                ms: Math.round(performance.now() - inicio),
+                http: http,
+                ok: !!(data && data.success),
+                errorKey: (data && data.errorKey) || null,
+                errorCategory: (data && data.errorCategory) || null,
+                // Quantos itens vieram, quando vierem: distingue "respondeu
+                // vazio" de "respondeu com fila", que é a diferença entre
+                // "Tudo limpo!" legítimo e falha.
+                n: data && Array.isArray(data.places) ? data.places.length : undefined,
+                ...(extra || {}),
+            };
+            this.chamadas.push(reg);
+            if (this.chamadas.length > 60) this.chamadas.shift();
+            this._podarCorpos();
+        } catch (e) {}
+    },
+
+    // Solta os corpos mais antigos até caber no teto. Tira SÓ o corpo: o
+    // registro (rota, http, erro, tempo) é barato e é o que conta a sequência —
+    // perder a sequência pra caber o conteúdo seria trocar o essencial pelo
+    // detalhe.
+    _podarCorpos() {
+        let total = 0;
+        for (let i = this.chamadas.length - 1; i >= 0; i--) {
+            const c = this.chamadas[i];
+            if (c._bytes === undefined) continue;
+            total += c._bytes;
+            if (total > this._TETO_CORPOS) {
+                delete c.corpoResposta;
+                delete c._bytes;
+                c.corpoPodado = true;
+            }
+        }
+    },
+
     async _post(endpoint, body) {
+        const _t0 = performance.now();
         // Timeout no lado browser→backend: sem isso um fetch pendurado deixava
         // AppState.fetching preso e o botão de refresh (com guard) mudo.
         const controller = new AbortController();
@@ -66,7 +168,42 @@ const API = {
                 // durante o unload mataria justamente o envio que queremos salvar.
                 ...(this.saindo ? { keepalive: true } : { signal: controller.signal })
             });
-            const data = await response.json();
+            // O STATUS e os CABEÇALHOS são lidos ANTES do `.json()`, e essa
+            // ordem é o conserto de um buraco que custaria horas: corpo que não
+            // é JSON (desafio do WAF da Cloudflare, 502 da borda, página de erro
+            // do gateway) faz o `.json()` LANÇAR, e no `catch` a única coisa que
+            // sobrava era `http: 0` — indistinguível de "o celular ficou sem
+            // rede". A app roda atrás do Bot Fight Mode, então esse caso não é
+            // hipotético: "a Cloudflare barrou o aparelho" e "o wifi piscou"
+            // ficavam idênticos no diagnóstico.
+            const http = response.status;
+            const cab = {};
+            for (const h of this._CABECALHOS) {
+                const v = response.headers.get(h);
+                if (v) cab[h] = v;
+            }
+            const bruto = await response.text();
+            let data, naoEraJson = null;
+            try {
+                data = JSON.parse(bruto);
+            } catch (e) {
+                // Guarda o COMEÇO do corpo: é o que identifica um desafio do
+                // WAF ou uma página de erro, e o que faria a diferença entre
+                // investigar a infraestrutura e investigar o código.
+                naoEraJson = bruto.slice(0, 600);
+                throw new Error('resposta não é JSON (HTTP ' + http + ')');
+            } finally {
+                const guarda = this._guardaCorpo();
+                const corpo = guarda ? bruto : null;
+                this._registrar(endpoint, _t0, http, data, {
+                    cab,
+                    naoEraJson,
+                    corpoReq: this._semSegredo(body),
+                    ...(corpo !== null
+                        ? { corpoResposta: corpo, _bytes: corpo.length }
+                        : { corpoResposta: undefined }),
+                });
+            }
             // NÃO apagar a sessão aqui. Um 401 chega por motivos que não são
             // "o editor precisa entrar de novo": o Waze devolve 403 em rajada
             // (WAF/limite) e o KV pode devolver vazio num blip. Apagar dentro
@@ -80,7 +217,19 @@ const API = {
             // Rede caiu / abortou por timeout / 5xx sem JSON → transient, pra a
             // política de retry (callWithRetry) atuar. Era o caso mais comum e
             // ficava sem categoria, então nunca era retentado.
-            return { success: false, error: t('api.error.connection'), errorCategory: 'transient' };
+            // `http: 0` é a marca de "nem chegou a responder" — aborto por
+            // timeout, rede caída, DNS. Sem distinguir isso de um 500, todo
+            // problema de rede vira "erro do servidor" na análise.
+            const falha = { success: false, error: t('api.error.connection'), errorCategory: 'transient',
+                            _motivo: String((error && error.name) || error).slice(0, 60) };
+            // Só registra aqui o que NÃO passou pelo `finally` do try — ou seja,
+            // falha antes da resposta existir (rede, DNS, timeout). Corpo não
+            // JSON já foi registrado lá com o status REAL; registrar de novo
+            // sobrescreveria o status por 0 e desfaria o conserto.
+            if (!/resposta não é JSON/.test(String(error && error.message))) {
+                this._registrar(endpoint, _t0, 0, falha, { corpoReq: this._semSegredo(body) });
+            }
+            return falha;
         } finally {
             clearTimeout(timer);
         }
