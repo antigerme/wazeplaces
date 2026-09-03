@@ -193,6 +193,44 @@ test('sessão já gravada NUNCA é recusada por FORMATO — o filtro recua, não
   }
 });
 
+// ── O par CSRF + sessão nunca se separa ────────────────────────────────────
+// Encontrado no diagnóstico do owner, com a sessão dele: `perfil` (GET, sem
+// CSRF) devolvia 200 com o perfil completo, e `buscar-places` (POST, com CSRF)
+// devolvia 403 do Waze — seis vezes seguidas, com o cliente impecável (20
+// arquivos idênticos entre cache e rede, SW ativo, zero erro de JS).
+//
+// A causa era o recuo pela METADE: o filtrado ficava sem `_csrf_token`, o
+// `prepareAuth` recuava pro conteúdo original pra achar o CSRF, e o
+// `cookieHeaderFrom` peneirava por host DE NOVO — sobrava o CSRF de um ambiente
+// com o cookie de sessão do outro. GET passa, POST morre, para sempre.
+test('o CSRF e o cookie de sessão saem SEMPRE do mesmo conjunto', () => {
+  const N = (d, n, v) => [d, 'TRUE', '/', 'TRUE', '1799999999', n, v].join('\t');
+  const ambiente = (x) => (/BETA/.test(x) ? 'beta' : (/WWW/.test(x) ? 'www' : '?'));
+  const casos = {
+    // O caso do owner: CSRF só existe no beta, sessão existe nos dois.
+    'csrf só no beta': [N('beta.waze.com', '_csrf_token', 'CSRF-BETA'),
+                        N('beta.waze.com', '_web_session', 'SESS-BETA'),
+                        N('www.waze.com', '_web_session', 'SESS-WWW')],
+    'os dois completos': [N('beta.waze.com', '_csrf_token', 'CSRF-BETA'),
+                          N('beta.waze.com', '_web_session', 'SESS-BETA'),
+                          N('www.waze.com', '_csrf_token', 'CSRF-WWW'),
+                          N('www.waze.com', '_web_session', 'SESS-WWW')],
+    'só www': [N('www.waze.com', '_csrf_token', 'CSRF-WWW'),
+               N('www.waze.com', '_web_session', 'SESS-WWW')],
+  };
+  for (const [nome, linhas] of Object.entries(casos)) {
+    const a = prepareAuth(linhas.join('\n'));
+    const sessoes = (a.cookieHeader.match(/_web_session=([^;]+)/g) || []).map(ambiente);
+    assert.ok(sessoes.includes(ambiente(a.csrf)),
+      `${nome}: CSRF do "${ambiente(a.csrf)}" viajou sem o cookie de sessão dele (header tem ${sessoes.join(',') || 'nenhuma'})`);
+  }
+  // Com o filtro servindo, o beta continua FORA — o recuo não pode desfazer o
+  // conserto que separou os ambientes.
+  const bom = prepareAuth(casos['os dois completos'].join('\n'));
+  assert.ok(!bom.cookieHeader.includes('BETA') && !/BETA/.test(bom.csrf),
+    'com CSRF do www disponível, nada do beta pode entrar');
+});
+
 test('o recuo do header é pra régua LARGA, e ela ainda é só waze.com', () => {
   const N = (d, n, v) => [d, 'TRUE', '/', 'TRUE', '1799999999', n, v].join('\t');
   // Sem nenhum cookie que sirva ao www, recua pro que é da waze — e NUNCA pro

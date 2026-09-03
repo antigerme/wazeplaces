@@ -274,7 +274,14 @@ export function filterWazeCookies(cookiesContent) {
 
 // Constrói o valor do header `Cookie:` a partir do conteúdo salvo.
 // Aceita formato Netscape (cookies.txt, com tabs) ou header ("a=b; c=d").
-export function cookieHeaderFrom(cookiesContent) {
+// `porHost` decide se o conjunto ainda é peneirado pelo host aqui dentro.
+// Existe por causa de um defeito MEDIDO na sessão do owner: quando o
+// `prepareAuth` recua pro conteúdo original (porque o filtrado ficou sem CSRF),
+// esta função continuava peneirando por host — e o resultado era o pior
+// arranjo possível, o CSRF de UM ambiente com o cookie de sessão de OUTRO.
+// Par trocado falha em todo POST e passa em todo GET, que é exatamente o
+// sintoma: `perfil` 200 e `buscar-places` 403, para sempre.
+export function cookieHeaderFrom(cookiesContent, porHost = true) {
   const s = String(cookiesContent).trim();
   // Normaliza conteúdo que já é `a=b; c=d` (a extensão manda assim).
   const comoHeader = (txt) => String(txt)
@@ -296,7 +303,7 @@ export function cookieHeaderFrom(cookiesContent) {
     // de defesa mais larga que a principal não defende de nada. Aqui isso não é
     // teoria: o que chega neste ponto costuma vir do STORE, ou seja de sessão
     // criada ANTES do conserto, com os cookies do beta ainda dentro.
-    if (cookieValePraHost(parts[0])) pairs.push(parts[5] + '=' + parts[6]);
+    if (!porHost || cookieValePraHost(parts[0])) pairs.push(parts[5] + '=' + parts[6]);
     // Rede da rede, pelo mesmo motivo do `prepareAuth`: header VAZIO é o filtro
     // virando apagão, e ele sai daqui sem erro nenhum — o Waze é que responde
     // 403 e a culpa parece ser dos cookies da pessoa. O recuo é pra régua LARGA,
@@ -798,12 +805,26 @@ export function prepareAuth(cookiesContent) {
   // mas 403 a app sabe tratar (derruba a sessão e leva pra tela de entrar). Uma
   // recusa de FORMATO culpa quem não errou e não tem saída nenhuma.
   const filtrado = filterWazeCookies(cookiesContent);
-  const cookies = (validateCookiesFormat(filtrado) && extractCSRFToken(filtrado))
-    ? filtrado : cookiesContent;
+  // O CSRF e o COOKIE DE SESSÃO têm que sair do MESMO conjunto, sempre. Foi a
+  // falta disto que prendeu o owner: o filtrado ficava sem `_csrf_token` (o dele
+  // só existia em `beta.waze.com`), o recuo trazia o conteúdo original — e o
+  // `cookieHeaderFrom` PENEIRAVA de novo por host, deixando só a sessão do
+  // `www`. Ia embora o CSRF de um ambiente com o cookie do outro.
+  //
+  // MEDIDO com a sessão real dele, do lado de cá: `perfil` (GET, sem CSRF) →
+  // 200 com o perfil completo; `buscar-places` (POST, com CSRF) → **403 do
+  // Waze**, seis vezes seguidas. E o cliente estava impecável no diagnóstico:
+  // 20 arquivos idênticos entre cache e rede, SW ativo, zero erro de JS,
+  // relógio a 4s, armazenamento gravando.
+  //
+  // O recuo continua existindo (sessão gravada não se recusa por formato — ver
+  // acima), mas agora ele é INTEIRO: recuou o CSRF, recua o header junto.
+  const filtroServe = validateCookiesFormat(filtrado) && !!extractCSRFToken(filtrado);
+  const cookies = filtroServe ? filtrado : cookiesContent;
   if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido', 400, 'srv.err.cookieFormat');
   const csrf = extractCSRFToken(cookies);
   if (!csrf) apiError('Token CSRF não encontrado', 400, 'srv.err.csrfMissing');
-  return { cookieHeader: cookieHeaderFrom(cookies), csrf };
+  return { cookieHeader: cookieHeaderFrom(cookies, filtroServe), csrf };
 }
 
 // `changedVenue` NÃO é um diff: é um objeto de venue com os valores propostos.

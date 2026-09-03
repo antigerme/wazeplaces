@@ -1422,7 +1422,10 @@ test('o "Tudo limpo!" não corta o convite quando a tela é curta', () => {
   // 3. Área que rola precisa DIZER que rola (gotcha #29) — senão ninguém rola.
   const app = read('js/app.js');
   const i = app.indexOf('function showNoPlaces');
-  assert.match(app.slice(i, i + 1400), /marcarBordaRolagem\(noMore\)/,
+  // Fatia até o FIM da função, não 1400 caracteres: janela por distância
+  // reprova código certo assim que a função cresce (gotcha #67) — foi o que
+  // aconteceu quando o funil do diário entrou aqui.
+  assert.match(app.slice(i, app.indexOf('\nfunction ', i + 10)), /marcarBordaRolagem\(noMore\)/,
     'o painel rola sem aviso nenhum de que há mais conteúdo abaixo');
 });
 
