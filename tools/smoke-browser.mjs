@@ -1490,6 +1490,90 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── Falha NUNCA pode virar "Tudo limpo!" ────────────────────────────────
+//
+// A tela que o owner mandou: "Tudo limpo!", 0 RESTAM, e o toast "Conexão
+// instável — sua sessão continua válida" no rodapé. MEDIDO na produção no mesmo
+// minuto: a fila dele tinha 217 pedidos. A app afirmou que o trabalho acabou.
+//
+// É o defeito mais caro do projeto pela régua dele mesmo — "parece que acabou o
+// trabalho" ninguém reporta, porque a pessoa fecha a app satisfeita.
+//
+// Guard de texto não pega: `showNoPlaces` já lia `loadError` e o comentário dele
+// já dizia a intenção. O que faltava era o ramo de 401 do `fetchNextPage`
+// MARCAR a flag. Só reproduzindo a rede aparece.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+
+  let buscas = 0;
+  await ctx.route('**/api/buscar-places', (r) => {
+    buscas++;
+    r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({
+      success: false, error: 'Sessão expirada ou inválida',
+      errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' }) });
+  });
+  // O perfil RESPONDE — é o que faz o `handleUnauthorized` concluir alarme falso
+  // e mostrar "conexão instável" em vez de derrubar. Exatamente o par da tela.
+  await ctx.route('**/api/perfil', (r) => r.fulfill({ status: 200,
+    contentType: 'application/json', body: JSON.stringify({ success: true,
+      profile: { userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [] } }) }));
+
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+
+  const r = await page.evaluate(async () => {
+    setLang('pt'); applyI18n();
+    window.__toasts = [];
+    if (!window.__origToast) window.__origToast = window.showToast;
+    window.showToast = (m, t, d) => { window.__toasts.push(String(m)); return window.__origToast(m, t, d); };
+    API.setSession('token-de-teste');
+    AppState.authenticated = true;
+    AppState.preferences.comoFuncionaVisto = true;
+    AppState.profile = { userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    verificandoSessao = false;
+    AppState.queue = []; AppState.serverTotal = 0; AppState.loadError = false;
+    await startFetching();
+    // Espera a poeira baixar: o `handleUnauthorized` dorme antes de conferir, e
+    // a rebusca do alarme falso vem depois dele. Esperar por TEMPO fixo mediria
+    // o meio do caminho — espera até a tela parar de mudar.
+    await new Promise((k) => {
+      const limite = Date.now() + 8000;
+      let anterior = '';
+      const olha = () => {
+        const agora = [document.getElementById('noMoreCards').classList.contains('hidden'),
+                       document.getElementById('loadErrorState').classList.contains('hidden'),
+                       AppState.fetching].join('|');
+        if ((agora === anterior && !AppState.fetching) || Date.now() > limite) k();
+        else { anterior = agora; setTimeout(olha, 250); }
+      };
+      setTimeout(olha, 1500);
+    });
+    const vis = (id) => { const e = document.getElementById(id);
+      return !!e && !e.classList.contains('hidden') && !!e.offsetParent; };
+    return { tudoLimpo: vis('noMoreCards'), falhaAoCarregar: vis('loadErrorState'),
+             loadError: AppState.loadError, fila: AppState.queue.length,
+             toasts: window.__toasts };
+  });
+
+  // A asserção que importa, e ela tem as DUAS metades: sem a segunda, um
+  // "esconde tudo" passaria; sem a primeira, mostrar os dois passaria.
+  checa(!r.tudoLimpo, 'falha virou "Tudo limpo!" — a app afirmou que o backlog zerou (é a tela do owner)');
+  checa(r.falhaAoCarregar, 'falha não mostrou "Falha ao carregar" com o botão de tentar de novo');
+  checa(r.fila === 0, 'controle: a fila tinha que estar vazia neste cenário', String(r.fila));
+  // E o toast do alarme falso continua aparecendo: o conserto não pode
+  // transformar oscilação em "sua sessão morreu" (gotcha #42).
+  checa(r.toasts.some((m) => /instável/i.test(m)),
+    'o aviso de "conexão instável" sumiu — oscilação virou silêncio', r.toasts.join(' | ').slice(0, 70));
+  checa(buscas >= 1, 'controle: nenhuma busca saiu — o cenário não exercitou nada');
+  checa(erros.length === 0, 'tudo-limpo: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 // ── O tile é DESENHADO no tamanho que o código pede? ─────────────────────
 //
 // A faixa vertical vazia que o owner viu no celular (gotcha #58): o preflight
@@ -3451,6 +3535,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
   + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true)`
   + `, + sessão morta leva pra tela de entrar e oscilação de rede NÃO derruba`
+  + `, + falha de busca NUNCA vira "Tudo limpo!" (401 com alarme falso, medido pela REDE)`
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair da app, e o "Já instalei" que recarrega)`
