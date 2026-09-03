@@ -21,6 +21,7 @@ import {
   filterWazeCookies,
   cookieHeaderFrom,
   isWazeCookieDomain,
+  cookieValePraHost,
   buildPlacesFromSearch,
   dispatch,
   purTypeDoUR,
@@ -120,6 +121,57 @@ test('filterWazeCookies: descarta outros domínios (Netscape), preserva Waze', (
   assert.ok(!filtered.includes('redhat'));
   assert.ok(!filtered.includes('SEGREDO-RH'));
   assert.ok(!filtered.includes('SEGREDO-GH'));
+});
+
+// ── beta.waze.com é OUTRO AMBIENTE ─────────────────────────────────────────
+// Achado com os cookies do owner, que tinha as duas sessões no mesmo export.
+// MEDIDO contra `Issues/Search/List` (só leitura): tudo → 403 · só beta → 403 ·
+// só www → 200 com 500 pedidos. E o login PASSAVA, porque `/Session` é tolerante
+// — então a app dizia "Cookies válidos!" e tudo depois morria com "expirados".
+test('cookie de beta.waze.com NUNCA entra: é outro ambiente, com sessão própria', () => {
+  const raw = [
+    NETSCAPE('beta.waze.com', '_csrf_token', 'CSRF-DO-BETA'),
+    NETSCAPE('beta.waze.com', '_web_session', 'SESSAO-DO-BETA'),
+    NETSCAPE('www.waze.com', '_csrf_token', 'CSRF-DO-WWW'),
+    NETSCAPE('www.waze.com', '_web_session', 'SESSAO-DO-WWW'),
+  ].join('\n');
+  const f = filterWazeCookies(raw);
+  assert.ok(!f.includes('BETA'), 'cookie do beta vazou pro conjunto que vai ao www');
+  assert.ok(f.includes('CSRF-DO-WWW') && f.includes('SESSAO-DO-WWW'), 'o do www tem que ficar');
+  // O `extractCSRFToken` pega o PRIMEIRO que acha, e no export do owner o do
+  // beta vinha ANTES. É por isso que o conserto mora no filtro, e não nele.
+  assert.equal(extractCSRFToken(f), 'CSRF-DO-WWW');
+  assert.ok(!cookieHeaderFrom(raw).includes('BETA'), 'a defesa em profundidade tem que ter a MESMA régua');
+});
+
+test('cookieValePraHost: é a regra do RFC 6265 contra www.waze.com, não "contém waze"', () => {
+  for (const d of ['waze.com', '.waze.com', 'www.waze.com', '.www.waze.com']) {
+    assert.equal(cookieValePraHost(d), true, `${d} deveria valer pro www`);
+  }
+  for (const d of ['beta.waze.com', 'editor.waze.com', '.beta.waze.com', 'waze.com.br', 'evilwaze.com',
+    // Estes dois separam a regra do RFC de um `endsWith` cru, e sem eles a
+    // asserção é decoração: `'www.waze.com'.endsWith('aze.com')` é TRUE, e um
+    // `aze.com` registrável mandaria o cookie dele junto pro Waze. A regra real
+    // exige a fronteira de ponto (`.aze.com`), que não casa.
+    'aze.com', 'w.waze.com']) {
+    assert.equal(cookieValePraHost(d), false, `${d} NÃO deveria valer pro www`);
+  }
+  // `isWazeCookieDomain` segue existindo e segue LARGO — são perguntas
+  // diferentes ("é da waze?" × "o navegador mandaria isto pro www?").
+  assert.equal(isWazeCookieDomain('beta.waze.com'), true);
+});
+
+test('filterWazeCookies: export duplicado não dobra o header', () => {
+  // O arquivo do owner trazia cada cookie 2×. Dedup por (domínio, nome).
+  const uma = NETSCAPE('www.waze.com', '_web_session', 'v1');
+  assert.equal(filterWazeCookies([uma, uma].join('\n')).split('\n').length, 1);
+  // Mas nomes iguais em domínios DIFERENTES são dois cookies de verdade, e o
+  // navegador manda os dois — dedup por nome só apagaria um deles.
+  const dois = filterWazeCookies([
+    NETSCAPE('.waze.com', '_t', 'do-ponto'),
+    NETSCAPE('www.waze.com', '_t', 'do-www'),
+  ].join('\n'));
+  assert.equal(dois.split('\n').length, 2);
 });
 
 test('filterWazeCookies: formato header (sem tabs) passa direto', () => {

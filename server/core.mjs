@@ -211,6 +211,40 @@ export function isWazeCookieDomain(domain) {
   return d === 'waze.com' || d.endsWith('.waze.com');
 }
 
+// O ÚNICO host que a app chama. Todos os endpoints acima (Descartes, Features,
+// Session, LocationSearch) saem daqui, e o WME_EDITOR_URL também.
+export const WAZE_API_HOST = 'www.waze.com';
+
+// Regra de domínio de cookie do RFC 6265, aplicada ao host que NÓS chamamos:
+// um cookie com Domain=D é enviado ao host H se `H === D` ou `H` termina em
+// `"." + D`. Não é heurística — é o que o navegador faz.
+//
+// Existe porque `isWazeCookieDomain` sozinho é largo demais: ele aceita
+// QUALQUER subdomínio, e `beta.waze.com` é outro AMBIENTE, com `_web_session` e
+// `_csrf_token` PRÓPRIOS. Um navegador jamais mandaria os do beta pro www.
+//
+// MEDIDO com os cookies do owner, que tinha as duas sessões no arquivo, contra
+// `buscar-places` no Brasil (`Issues/Search/List`, só leitura):
+//
+//   tudo (o que fazíamos)  → HTTP 403
+//   só beta.waze.com       → HTTP 403
+//   só www.waze.com        → 200, 500 pedidos
+//
+// E o modo de falha era o pior possível: `/Session` (o login) é TOLERANTE e
+// respondia 200, então a app dizia "Cookies válidos! Você está autenticado." e
+// TODA chamada seguinte morria com "cookies expirados". Quem passa por isso
+// conclui que exportou errado — e reexportar não resolve, porque o beta segue lá.
+//
+// A causa fina é o `extractCSRFToken` pegar o PRIMEIRO `_csrf_token`: no export
+// do owner o do beta vinha na linha 1893 e o do www na 2179. Mandávamos o CSRF
+// de um ambiente com a sessão do outro. Filtrar por host conserta os dois lados
+// de uma vez, e é por isso que o conserto mora AQUI e não no extrator.
+export function cookieValePraHost(domain, host = WAZE_API_HOST) {
+  const d = String(domain).replace(/^\./, '').toLowerCase();
+  const h = String(host).toLowerCase();
+  return h === d || h.endsWith('.' + d);
+}
+
 // Mantém apenas as linhas de cookies de waze.com (formato Netscape). O cookies.txt
 // exportado do navegador traz cookies de TODOS os sites logados (redhat, microsoft,
 // github, ifood…) — dezenas deles. Enviá-los/guardá-los seria (a) VAZAR credenciais
@@ -221,14 +255,21 @@ export function isWazeCookieDomain(domain) {
 export function filterWazeCookies(cookiesContent) {
   const s = String(cookiesContent).trim();
   if (!s.includes('\t')) return s;
-  const kept = [];
+  const kept = new Map();
   for (const line of s.split('\n')) {
     const t = line.trim();
     if (!t || t[0] === '#') continue;
     const parts = t.split(/\s+/);
-    if (parts.length >= 7 && isWazeCookieDomain(parts[0])) kept.push(t);
+    if (parts.length < 7 || !cookieValePraHost(parts[0])) continue;
+    // Dedup por (domínio, nome): export de navegador costuma trazer o arquivo
+    // DUPLICADO (o do owner tinha cada cookie 2×), e mandar `_web_session` duas
+    // vezes é header inchado por nada. Deduplica por domínio JUNTO com o nome, e
+    // não só pelo nome: `.waze.com` e `www.waze.com` podem legitimamente ter o
+    // mesmo nome com valores diferentes, e o navegador manda os DOIS. Vence a
+    // ÚLTIMA linha — num export, a mais recente.
+    kept.set(`${parts[0].toLowerCase()}|${parts[5]}`, t);
   }
-  return kept.join('\n');
+  return [...kept.values()].join('\n');
 }
 
 // Constrói o valor do header `Cookie:` a partir do conteúdo salvo.
@@ -250,9 +291,11 @@ export function cookieHeaderFrom(cookiesContent) {
     const t = line.trim();
     if (!t || t[0] === '#') continue;
     const parts = t.split(/\s+/);
-    // Defesa em profundidade: só cookies de waze.com viram header (mesmo que algo
-    // não-filtrado tenha sido armazenado). Ver filterWazeCookies acima.
-    if (parts.length >= 7 && isWazeCookieDomain(parts[0])) pairs.push(parts[5] + '=' + parts[6]);
+    // Defesa em profundidade, com a MESMA régua do `filterWazeCookies` — camada
+    // de defesa mais larga que a principal não defende de nada. Aqui isso não é
+    // teoria: o que chega neste ponto costuma vir do STORE, ou seja de sessão
+    // criada ANTES do conserto, com os cookies do beta ainda dentro.
+    if (parts.length >= 7 && cookieValePraHost(parts[0])) pairs.push(parts[5] + '=' + parts[6]);
   }
   return pairs.join('; ');
 }
@@ -711,10 +754,20 @@ async function resolveCookies(data, sessions) {
 
 // Prepara cookieHeader + csrf a partir do conteúdo, validando formato.
 function prepareAuth(cookiesContent) {
-  if (!validateCookiesFormat(cookiesContent)) apiError('Formato de cookies inválido', 400, 'srv.err.cookieFormat');
-  const csrf = extractCSRFToken(cookiesContent);
+  // Filtra por HOST antes de qualquer coisa, e o "antes" é o ponto: o
+  // `extractCSRFToken` pega o PRIMEIRO `_csrf_token` que encontra, então sem
+  // este filtro ele escolhe o de `beta.waze.com` quando o export traz os dois —
+  // e aí a app manda o CSRF de um ambiente com a sessão do outro (HTTP 403 em
+  // tudo, com o login passando).
+  //
+  // Aqui e não só no `handleTestarCookies` porque este é o caminho que roda com
+  // o que veio do STORE: sessão criada ANTES do conserto seguiria quebrada até a
+  // pessoa deslogar e entrar de novo, o que ninguém faz por conta própria.
+  const cookies = filterWazeCookies(cookiesContent);
+  if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido', 400, 'srv.err.cookieFormat');
+  const csrf = extractCSRFToken(cookies);
   if (!csrf) apiError('Token CSRF não encontrado', 400, 'srv.err.csrfMissing');
-  return { cookieHeader: cookieHeaderFrom(cookiesContent), csrf };
+  return { cookieHeader: cookieHeaderFrom(cookies), csrf };
 }
 
 // `changedVenue` NÃO é um diff: é um objeto de venue com os valores propostos.

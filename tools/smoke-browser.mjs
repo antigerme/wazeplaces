@@ -106,6 +106,16 @@ const CARDS = {
       { field: 'streetID', label: 'Rua', from: '', to: 'Av. Alberto Andaló' },
       { field: 'campoNovoDoWaze', label: 'CampoNovoDoWaze', from: 'a', to: 'b' },
     ],
+    // ⭐ AQUI, e não num card novo: o selo divide a linha do nome com o ↗ de
+    // 44px, então o pior caso é o nome MAIS LONGO — que é este. Card à parte
+    // custaria +17% no trecho mais lento do CI pra medir um caso mais folgado.
+    //
+    // A incidência real é baixa (MEDIDO com os cookies do owner: 2 em 500 na
+    // fila do Brasil, 0,4%), e é justamente por isso que a fixture existe: o
+    // caminho `place.isStarred → .card-starred` nunca tinha sido renderizado
+    // por teste nenhum, e as 51 fixtures dos 6 países têm `isStarred: false`
+    // em 51. Gotcha #52 — a fixture define o que o teste é capaz de enxergar.
+    isStarred: true,
     dateAdded: 1785203731191, lat: -20.8, lon: -49.4,
   },
   FLAG: {
@@ -498,6 +508,23 @@ for (const [aparelho, viewport] of APARELHOS) {
           // pra não repetir). Checar só a linha reprovava o card sem nome.
           endereco: visivel('.card-address') || c.querySelector('.card-name.titulo-endereco') !== null,
           semNome: !!c.querySelector('.card-no-name-badge:not(.hidden)'),
+          // O ⭐ do favoritado: existe, está VISÍVEL e cabe na linha do nome.
+          // `offsetParent` e não `.hidden`, porque classe no DOM não prova
+          // pixel na tela (gotcha #27: o styles.css pode vencer o `.hidden`).
+          estrela: (() => {
+            const e = c.querySelector('.card-starred');
+            if (!e || !e.offsetParent) return null;
+            const r = e.getBoundingClientRect();
+            const linha = e.parentElement.getBoundingClientRect();
+            const no = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+            return { largura: Math.round(r.width),
+                     // Estourou a linha em que vive? Meia estrela cortada é o
+                     // modo de falha esperado num Fold de 280px.
+                     fora: Math.max(0, Math.round(r.right - linha.right), Math.round(linha.left - r.left)),
+                     // Ele é decorativo e NÃO é alvo de toque, mas não pode
+                     // ficar POR CIMA do ↗, que é (gotcha #26).
+                     tapaOLink: !!(no && no.closest('.card-wme-link')) };
+          })(),
           estouroH: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         };
       });
@@ -534,6 +561,15 @@ for (const [aparelho, viewport] of APARELHOS) {
       checa(m.nome !== '', `${rot}: card sem nome`);
       checa(m.tipo !== '', `${rot}: card sem tipo`);
       checa(m.endereco, `${rot}: card sem endereço (nem na linha, nem no título)`);
+      // O ⭐ aparece EXATAMENTE nos cards favoritados, e em nenhum outro. Sem as
+      // duas metades a asserção é decoração: só a primeira passaria com o selo
+      // preso em visível, só a segunda passaria com ele nunca aparecendo.
+      checa(!!m.estrela === !!CARDS[tipo].isStarred,
+        `${rot}: ⭐ no estado errado`, `visível=${!!m.estrela}, esperado=${!!CARDS[tipo].isStarred}`);
+      if (m.estrela) {
+        checa(m.estrela.fora === 0, `${rot}: ⭐ estourou a linha do nome`, `${m.estrela.fora}px`);
+        checa(!m.estrela.tapaOLink, `${rot}: ⭐ está por cima do ↗ do WME`);
+      }
       // Sem nome → selo visível. Com nome → selo escondido. Nunca os dois errados.
       checa(m.semNome === (tipo === 'SEM_NOME'), `${rot}: selo de "sem nome" no estado errado`, `selo=${m.semNome}`);
       // A página não pode estourar na horizontal.
