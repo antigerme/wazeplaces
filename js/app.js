@@ -4200,36 +4200,32 @@ function renderSelosDeProcedencia(card, place) {
             cls: reincidente >= AUTOR_LIMIAR_DESTAQUE ? 'selo-reinc' : 'selo-src',
             txt: '✕ ' + reincidente,
             title: t('card.reincidencia.title', { n: reincidente }),
-            // Vira BOTÃO: abre a folha com o que dá pra fazer com a série dele.
-            // Só quando há de fato o que fazer — selo que abre folha vazia
-            // ensina que o toque não serve pra nada.
-            // DUAS condições, e cada uma responde uma pergunta diferente.
+            // Vira BOTÃO sempre que o selo está VERMELHO — a cor é a promessa,
+            // e selo vermelho sem toque é promessa quebrada. Vermelho quer dizer
+            // "a app está acusando esta pessoa"; se acusa, tem que haver pra onde
+            // ir. Abaixo do limiar o selo é cinza (a app CONTA sem acusar) e
+            // segue sendo span: não há decisão a tomar sobre quem ela não acusa.
             //
-            // (a) `reincidente >= AUTOR_LIMIAR_DESTAQUE` — **a app já acusa esta
-            //     pessoa?** Atrás deste selo mora a rejeição EM LOTE, que é
-            //     destrutiva e não tem Desfazer depois de enviada. Abaixo do
-            //     limiar o selo é cinza justamente porque a app CONTA sem
-            //     acusar; oferecer ali um atalho pra rejeitar tudo contradiz a
-            //     própria distinção que a cor faz. Quem quiser agir sem o
-            //     limiar ainda tem o `Ver +N`, que foca a fila e não decide
-            //     nada — a capacidade não some, só o atalho destrutivo.
+            // Já esteve amarrado TAMBÉM a `pedidosDoAutorNaFila(place).length > 1`,
+            // e essa segunda condição estava errada — mas não pelo motivo óbvio.
+            // O raciocínio original ("com um só na fila a folha oferece 'Ver o 1'
+            // e 'Rejeitar o 1', que é o card na tela com os três botões abaixo")
+            // continua verdadeiro; o que estava errado foi a metade que eu cortei.
+            // Diante de uma folha redundante eu tirei o BOTÃO, quando o certo era
+            // tirar as duas linhas redundantes e pôr no lugar o que o card não
+            // consegue mostrar: o que "✕ N" significa (o `title` não existe no
+            // toque), o interruptor da recusa automática e o esquecer. Ver
+            // `abrirFolhaDoAutor`, que agora se adapta ao tamanho da fila.
             //
-            // (b) `pedidosDoAutorNaFila(place).length > 1` — **há o que fazer?**
-            //     O card ATUAL é `queue[0]` durante o render, então ele sempre
-            //     entra nessa contagem: com `> 0` o selo virava botão mesmo
-            //     sozinho, e a folha abria oferecendo "Ver o 1" e "Rejeitar o 1"
-            //     — o card na frente do editor, com os três botões ✕ ↑ ✓ logo
-            //     abaixo. Uma folha inteira pra repetir o que a tela já faz.
+            // Reportado pelo owner com um `✕ 8` vermelho e morto na tela — o caso
+            // MAIS comum, porque só 27,3% dos cards têm outro pedido do mesmo
+            // autor na fila (medido nos 6 países obrigatórios, 2.785 cards). Ou
+            // seja: em ~3 de cada 4 vezes o selo vermelho não fazia nada.
             //
-            // Só (a) regrediria (b), e vice-versa. Contar por `creatorId` e não
-            // pelo nome é a razão de sempre neste módulo: 69% dos autores têm
-            // nome GERADO, que muda no dia em que a pessoa escolhe um.
-            //
-            // Frequência MEDIDA nos 6 países obrigatórios (2.785 cards): 27,3%
-            // têm outro pedido do mesmo autor na fila. Esse é o TETO de quantas
-            // vezes o selo pode virar botão; o limiar histórico corta mais.
-            folha: (reincidente >= AUTOR_LIMIAR_DESTAQUE
-                && pedidosDoAutorNaFila(place).length > 1) ? place : null,
+            // Contar por `creatorId` e não pelo nome é a razão de sempre neste
+            // módulo: 69% dos autores têm nome GERADO, que muda no dia em que a
+            // pessoa escolhe um.
+            folha: reincidente >= AUTOR_LIMIAR_DESTAQUE ? place : null,
         });
     }
     if (!selos.length) return;
@@ -5246,6 +5242,16 @@ const ICONE_OLHO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewB
     + 'c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>';
 const ICONE_X = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
     + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>';
+// A lixeira é a MESMA da lista do Histórico — mesmo conceito, mesmo ícone em
+// toda a app. Era um `const lixo` local do `renderAutores`; virou módulo quando
+// a folha do autor passou a oferecer o mesmo esquecer.
+const ICONE_LIXO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
+    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"'
+    + ' d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0'
+    + ' 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>';
+// Raio = "acontece sozinho", que é exatamente o que a recusa automática faz.
+const ICONE_RAIO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
+    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>';
 
 // Os pedidos DESTE autor que estão na fila carregada agora.
 function pedidosDoAutorNaFila(place) {
@@ -5254,13 +5260,31 @@ function pedidosDoAutorNaFila(place) {
     return (AppState.queue || []).filter((x) => x && x.creatorId === id);
 }
 
+// A folha se adapta ao TAMANHO da fila, e é essa adaptação que justifica o selo
+// vermelho ser sempre tocável.
+//
+// Com MAIS DE UM pedido na fila há trabalho em lote de verdade: ver todos na
+// frente, rejeitar todos de uma vez (destrutivo, sem Desfazer depois de enviado).
+//
+// Com UM SÓ — o caso de ~3 em cada 4 cards — essas duas linhas seriam o card que
+// já está na tela, com os três botões logo abaixo, e a de rejeitar seria ESTRITAMENTE
+// PIOR que o ✕: o lote não tem a janela de Desfazer que o card único tem. Então
+// elas somem, e o que fica é o que o card NÃO consegue mostrar:
+//   · o que "✕ N" quer dizer — o `title` do selo não existe no toque, e este é o
+//     único jeito de descobrir num celular o que aquele número conta;
+//   · a recusa automática deste autor, que hoje só se alcança por Filtros →
+//     Histórico, rolando até achar a pessoa;
+//   · o esquecer, pra quando você discorda da contagem.
+// Esses três valem nos DOIS tamanhos, então ficam sempre.
 function abrirFolhaDoAutor(place) {
     if (!place) return;
     const corpo = document.getElementById('autorCorpo');
     const titulo = document.getElementById('autorTitle');
     if (!corpo || !titulo) return;
     const naFila = pedidosDoAutorNaFila(place);
-    const nome = place.createdBy || String(place.creatorId);
+    const emLote = naFila.length > 1;
+    const chave = String(place.creatorId);
+    const nome = place.createdBy || chave;
     titulo.textContent = nome;
     const linha = (ic, cor, t1, t2, id) =>
         `<button type="button" id="${id}" class="flex items-center gap-3 w-full min-h-[56px] py-2 text-left`
@@ -5269,22 +5293,65 @@ function abrirFolhaDoAutor(place) {
         + `<span class="flex-1 min-w-0"><span class="block text-[0.9375rem] font-semibold text-slate-800 dark:text-slate-100 leading-tight">`
         + `${escapeHtml(t1)}</span><span class="block text-xs text-slate-500 dark:text-slate-400 leading-snug mt-0.5">`
         + `${escapeHtml(t2)}</span></span></button>`;
+    // O interruptor é uma LINHA-label, não um botão: o alvo de 44px é a linha
+    // inteira (aqui dá, ao contrário da lista do Histórico, que também tem a
+    // lixeira na mesma linha e um toque perto dela alternaria sem querer).
+    const linhaAuto = () =>
+        `<label class="flex items-center gap-3 w-full min-h-[56px] py-2 text-left cursor-pointer`
+        + ` border-b border-slate-100 dark:border-slate-700 last:border-0">`
+        + `<span class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0`
+        + ` bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300">${ICONE_RAIO}</span>`
+        + `<span class="flex-1 min-w-0"><span class="block text-[0.9375rem] font-semibold text-slate-800 dark:text-slate-100 leading-tight">`
+        + `${escapeHtml(t('stats.autores.auto'))}</span><span class="block text-xs text-slate-500 dark:text-slate-400 leading-snug mt-0.5">`
+        + `${escapeHtml(t('stats.autores.autoDesc'))}</span></span>`
+        + `<input type="checkbox" id="autorAuto" class="ui-switch flex-shrink-0"${autoLigado(chave) ? ' checked' : ''}></label>`;
     corpo.innerHTML =
         `<p class="text-[0.8125rem] text-slate-500 dark:text-slate-400 mb-4 leading-snug">`
-        + `${escapeHtml(t('autor.sheet.sub', { n: contagemDoAutor(place), fila: naFila.length }))}</p>`
-        + linha(ICONE_OLHO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
-                t('autor.sheet.ver', { n: naFila.length }), t('autor.sheet.ver.desc'), 'autorVer')
-        + linha(ICONE_X, 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300',
-                t('autor.sheet.rejeitar', { n: naFila.length }), t('autor.sheet.rejeitar.desc'), 'autorRejeitar')
-        + `<p class="mt-4 text-xs leading-relaxed text-rose-800 dark:text-rose-200 bg-rose-50 dark:bg-rose-500/10`
-        + ` border border-rose-100 dark:border-rose-500/30 rounded-xl px-3 py-2.5">${t('autor.sheet.aviso')}</p>`;
-    document.getElementById('autorVer').addEventListener('click', () => {
-        closeModal('autorModal');
-        focarAutor(place.creatorId);
+        + `${escapeHtml(t(emLote ? 'autor.sheet.sub' : 'autor.sheet.subUm',
+                          { n: contagemDoAutor(place), fila: naFila.length, dias: AUTORES_MAX_DIAS }))}</p>`
+        + (emLote
+            ? linha(ICONE_OLHO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
+                    t('autor.sheet.ver', { n: naFila.length }), t('autor.sheet.ver.desc'), 'autorVer')
+              + linha(ICONE_X, 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300',
+                      t('autor.sheet.rejeitar', { n: naFila.length }), t('autor.sheet.rejeitar.desc'), 'autorRejeitar')
+            : '')
+        // Mesmo portão da lista do Histórico: mostrar o interruptor desabilitado
+        // anunciaria um recurso que a pessoa não pode usar, e a app não faz isso.
+        + (podeRecusarAutomaticoAqui() ? linhaAuto() : '')
+        + linha(ICONE_LIXO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
+                t('stats.autores.esquecer'), t('autor.sheet.esquecer.desc'), 'autorEsquecer')
+        // O aviso é da rejeição em LOTE, então acompanha a linha que ele descreve.
+        // Sem ela na tela, um aviso vermelho sobre "não há segunda pergunta"
+        // descreveria o interruptor errado — e o interruptor tem a própria frase.
+        + (emLote
+            ? `<p class="mt-4 text-xs leading-relaxed text-rose-800 dark:text-rose-200 bg-rose-50 dark:bg-rose-500/10`
+              + ` border border-rose-100 dark:border-rose-500/30 rounded-xl px-3 py-2.5">${t('autor.sheet.aviso')}</p>`
+            : '');
+    if (emLote) {
+        document.getElementById('autorVer').addEventListener('click', () => {
+            closeModal('autorModal');
+            focarAutor(place.creatorId);
+        });
+        document.getElementById('autorRejeitar').addEventListener('click', () => {
+            closeModal('autorModal');
+            rejeitarLoteDoAutor(place);
+        });
+    }
+    const auto = document.getElementById('autorAuto');
+    // Relê o estado depois de alternar em vez de confiar no `.checked`: se o
+    // `alternarAutoDoAutor` recusar (registro sumiu por poda entre o render e o
+    // toque), o interruptor volta sozinho em vez de mentir que ligou.
+    if (auto) auto.addEventListener('change', () => {
+        alternarAutoDoAutor(chave);
+        auto.checked = autoLigado(chave);
     });
-    document.getElementById('autorRejeitar').addEventListener('click', () => {
+    document.getElementById('autorEsquecer').addEventListener('click', () => {
         closeModal('autorModal');
-        rejeitarLoteDoAutor(place);
+        esquecerAutor(chave);
+        // O selo que abriu esta folha some agora: fechar deixando o `✕ N` na tela
+        // faria a app afirmar uma contagem que ela acabou de apagar.
+        removeCurrentCardEl();
+        showCurrentPlace();
     });
     openModal('autorModal');
 }
@@ -5617,10 +5684,7 @@ function renderAutores() {
     // que não ter teto nenhum.
     const escondidas = autoresExpandido ? 0 : Math.max(0, todas.length - AUTORES_VISIVEIS);
     const linhas = escondidas > 0 ? todas.slice(0, AUTORES_VISIVEIS) : todas;
-    const lixo = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
-        + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"'
-        + ' d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0'
-        + ' 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>';
+    const lixo = ICONE_LIXO;
     el.innerHTML =
         `<p class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">${escapeHtml(t('stats.autores.title'))}</p>`
         + `<p class="text-xs text-slate-500 dark:text-slate-400 mb-2 leading-snug">`

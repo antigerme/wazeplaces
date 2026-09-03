@@ -241,25 +241,58 @@ test('lote: o lote respeita a trava e o treino', () => {
   assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
 });
 
-test('lote: a folha exige o limiar E outro pedido na fila', () => {
-  // DUAS condições, cada uma respondendo uma pergunta diferente, e nenhuma
-  // sozinha basta:
+test('selo vermelho é SEMPRE tocável, e a folha é que se adapta ao tamanho da fila', () => {
+  // O selo vermelho já esteve amarrado TAMBÉM a `pedidosDoAutorNaFila > 1`, e o
+  // owner reportou o sintoma: `✕ 8` vermelho e morto na tela. Em ~3 de cada 4
+  // cards o autor é o único dele na fila (27,3% têm outro, medido em 2.785
+  // cards dos 6 países), então a condição extra matava o caso COMUM.
   //
-  // (a) o limiar — atrás do selo mora a rejeição EM LOTE, destrutiva e sem
-  //     Desfazer depois de enviada. Abaixo dele o selo é cinza porque a app
-  //     CONTA sem acusar; um atalho de rejeitar tudo ali contradiria a cor.
-  // (b) outro pedido na fila — o card atual é `queue[0]` durante o render, e
-  //     com `> 0` a folha abria oferecendo "Ver o 1 / Rejeitar o 1", que é o
-  //     card na frente do editor com os três botões logo abaixo.
+  // O raciocínio que a produziu continua certo — com um só na fila, "Ver o 1" e
+  // "Rejeitar o 1" são o card que já está na tela, e a segunda é PIOR que o ✕
+  // (o lote não tem a janela de Desfazer). O erro foi cortar o botão em vez de
+  // cortar as duas linhas. Este teste trava as DUAS metades do conserto.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
-  const i = semComentarios.indexOf('function renderSelosDeProcedencia');
-  const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
-  assert.match(bloco, /reincidente >= AUTOR_LIMIAR_DESTAQUE\s*\n?\s*&&\s*pedidosDoAutorNaFila\(place\)\.length > 1/,
-    'as duas condições precisam estar coladas: só uma delas regride a outra');
-  assert.ok(!/folha: pedidosDoAutorNaFila\(place\)\.length > 1 \? place/.test(bloco),
+
+  const iSelo = semComentarios.indexOf('function renderSelosDeProcedencia');
+  const selo = semComentarios.slice(iSelo, semComentarios.indexOf('function ', iSelo + 10));
+  assert.match(selo, /folha: reincidente >= AUTOR_LIMIAR_DESTAQUE \? place : null/,
+    'a cor é a promessa: selo vermelho sem toque é promessa quebrada');
+  assert.ok(!/folha:[^,]*pedidosDoAutorNaFila/.test(selo),
+    'a contagem da fila decide o CONTEÚDO da folha, nunca se ela abre');
+  assert.ok(!/folha: pedidosDoAutorNaFila\(place\)\.length > 1 \? place/.test(selo),
     'sem o limiar, a app oferece rejeição em lote pra quem ela nem acusa');
-  assert.ok(!/folha: reincidente >= AUTOR_LIMIAR_DESTAQUE \? place/.test(bloco),
-    'sem a contagem da fila, a folha volta a abrir pro próprio card');
+
+  const iFolha = semComentarios.indexOf('function abrirFolhaDoAutor');
+  const folha = semComentarios.slice(iFolha, semComentarios.indexOf('\nfunction ', iFolha + 10));
+  assert.match(folha, /const emLote = naFila\.length > 1;/,
+    'é aqui que o tamanho da fila decide, e não no selo');
+  // As duas linhas de lote e o aviso vermelho ficam DENTRO do ternário do
+  // `emLote` — exigido COLADO nos dois extremos (`(emLote ?` … `: '')`), e não
+  // por distância: guard por distância erra nos dois sentidos (gotcha #67).
+  assert.match(folha,
+    /\(emLote\s*\?\s*linha\(ICONE_OLHO[\s\S]{0,400}?autor\.sheet\.rejeitar[\s\S]{0,140}?:\s*''\)/,
+    'ver/rejeitar precisam morrer juntos quando há um só na fila — a de rejeitar é PIOR que o ✕ (sem Desfazer)');
+  assert.match(folha,
+    /\(emLote\s*\?\s*`<p class="mt-4[\s\S]{0,400}?autor\.sheet\.aviso[\s\S]{0,60}?:\s*''\)/,
+    'o aviso descreve a rejeição em lote: sem ela na tela ele passa a descrever o interruptor errado');
+
+  // O que substitui as linhas removidas, e por isso não pode ser condicional ao
+  // lote: sem isso a folha do caso comum abre vazia.
+  assert.match(folha, /t\('stats\.autores\.esquecer'\)/, 'o esquecer vale nos dois tamanhos');
+  assert.match(folha, /podeRecusarAutomaticoAqui\(\) \? linhaAuto\(\) : ''/,
+    'o interruptor da recusa automática usa o MESMO portão da lista do Histórico');
+  assert.ok(!/emLote[\s\S]{0,200}linhaAuto\(\)/.test(folha),
+    'o interruptor não pode depender do tamanho da fila');
+});
+
+test('folha do autor: esquecer refaz o card, senão o selo apagado fica na tela', () => {
+  const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
+  const i = semComentarios.indexOf("getElementById('autorEsquecer')");
+  assert.ok(i !== -1, 'a linha de esquecer sumiu da folha');
+  const bloco = semComentarios.slice(i, i + 320);
+  assert.match(bloco, /esquecerAutor\(chave\)/, 'esquece pela CHAVE (creatorId), nunca pelo nome');
+  assert.match(bloco, /removeCurrentCardEl\(\);\s*\n?\s*showCurrentPlace\(\);/,
+    'sem refazer o card, o `✕ N` segue na tela afirmando a contagem que acabou de ser apagada');
 });
 
 test('desfazer: os dois caminhos passam pela MESMA função, e ela destrava os botões', () => {
