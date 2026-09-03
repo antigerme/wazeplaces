@@ -276,28 +276,45 @@ export function filterWazeCookies(cookiesContent) {
 // Aceita formato Netscape (cookies.txt, com tabs) ou header ("a=b; c=d").
 export function cookieHeaderFrom(cookiesContent) {
   const s = String(cookiesContent).trim();
-  if (!s.includes('\t')) {
-    // já é formato header (ou uma linha só) — normaliza
-    return s
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l && l[0] !== '#')
-      .join('; ')
-      .replace(/;\s*;/g, ';')
-      .replace(/;\s*$/, '');
-  }
+  // Normaliza conteúdo que já é `a=b; c=d` (a extensão manda assim).
+  const comoHeader = (txt) => String(txt)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && l[0] !== '#')
+    .join('; ')
+    .replace(/;\s*;/g, ';')
+    .replace(/;\s*$/, '');
+  if (!s.includes('\t')) return comoHeader(s);
   const pairs = [];
+  const largos = [];
   for (const line of s.split('\n')) {
     const t = line.trim();
     if (!t || t[0] === '#') continue;
     const parts = t.split(/\s+/);
+    if (parts.length < 7) continue;
     // Defesa em profundidade, com a MESMA régua do `filterWazeCookies` — camada
     // de defesa mais larga que a principal não defende de nada. Aqui isso não é
     // teoria: o que chega neste ponto costuma vir do STORE, ou seja de sessão
     // criada ANTES do conserto, com os cookies do beta ainda dentro.
-    if (parts.length >= 7 && cookieValePraHost(parts[0])) pairs.push(parts[5] + '=' + parts[6]);
+    if (cookieValePraHost(parts[0])) pairs.push(parts[5] + '=' + parts[6]);
+    // Rede da rede, pelo mesmo motivo do `prepareAuth`: header VAZIO é o filtro
+    // virando apagão, e ele sai daqui sem erro nenhum — o Waze é que responde
+    // 403 e a culpa parece ser dos cookies da pessoa. O recuo é pra régua LARGA,
+    // que ainda é só waze.com: cookie de terceiro nunca vaza pro Waze, que é a
+    // razão de este filtro existir.
+    else if (isWazeCookieDomain(parts[0])) largos.push(parts[5] + '=' + parts[6]);
   }
-  return pairs.join('; ');
+  // Header VAZIO é o pior desfecho possível e sai daqui sem erro nenhum: a
+  // chamada vai ao Waze sem credencial, ele responde 403, e a app diz pra pessoa
+  // que a sessão dela morreu — quando quem desistiu foi o nosso parser.
+  //
+  // Acontece quando o `includes('\t')` acerta o formato ERRADO: um header
+  // `a=b; c=d` com um tab no meio cai no ramo Netscape, nenhuma linha tem 7
+  // campos, e o resultado é ''. Pego por teste (o diferencial pelo servidor NÃO
+  // pegou: header vazio também dá 403, então lá os dois casos são iguais).
+  if (pairs.length) return pairs.join('; ');
+  if (largos.length) return largos.join('; ');
+  return comoHeader(s);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -753,7 +770,9 @@ async function resolveCookies(data, sessions) {
 }
 
 // Prepara cookieHeader + csrf a partir do conteúdo, validando formato.
-function prepareAuth(cookiesContent) {
+// Exportado pro teste: o recuo abaixo já passou verde numa asserção que
+// REPLICAVA a lógica em vez de chamá-la — sabotagem passou limpa.
+export function prepareAuth(cookiesContent) {
   // Filtra por HOST antes de qualquer coisa, e o "antes" é o ponto: o
   // `extractCSRFToken` pega o PRIMEIRO `_csrf_token` que encontra, então sem
   // este filtro ele escolhe o de `beta.waze.com` quando o export traz os dois —
@@ -763,7 +782,24 @@ function prepareAuth(cookiesContent) {
   // Aqui e não só no `handleTestarCookies` porque este é o caminho que roda com
   // o que veio do STORE: sessão criada ANTES do conserto seguiria quebrada até a
   // pessoa deslogar e entrar de novo, o que ninguém faz por conta própria.
-  const cookies = filterWazeCookies(cookiesContent);
+  //
+  // MAS o filtro é ENDURECIMENTO, NUNCA PORTÃO — e a diferença virou defeito em
+  // produção no mesmo dia. Ele nasceu no `handleTestarCookies`, onde recusar
+  // entrada ruim é o certo porque a pessoa está ali, colando o arquivo, e pode
+  // corrigir. Aqui ele roda sobre SESSÃO JÁ GRAVADA: dado que já existe no
+  // mundo, em formatos que eu não escolhi e não posso re-pedir. MEDIDO por
+  // teste diferencial (antes × depois), três formas passavam e pararam de
+  // passar: sessão só com cookie de `beta.waze.com`, header com um tab no meio,
+  // e domínio `editor.waze.com`. O owner recebeu "Formato de cookies inválido"
+  // no meio do trabalho, com 0 RESTAM na tela e nada que pudesse fazer.
+  //
+  // Então: filtra, e só ADOTA o resultado se ele continuar válido. Na pior das
+  // hipóteses volta-se ao comportamento anterior ao filtro — que pode dar 403,
+  // mas 403 a app sabe tratar (derruba a sessão e leva pra tela de entrar). Uma
+  // recusa de FORMATO culpa quem não errou e não tem saída nenhuma.
+  const filtrado = filterWazeCookies(cookiesContent);
+  const cookies = (validateCookiesFormat(filtrado) && extractCSRFToken(filtrado))
+    ? filtrado : cookiesContent;
   if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido', 400, 'srv.err.cookieFormat');
   const csrf = extractCSRFToken(cookies);
   if (!csrf) apiError('Token CSRF não encontrado', 400, 'srv.err.csrfMissing');

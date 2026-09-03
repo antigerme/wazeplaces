@@ -22,6 +22,7 @@ import {
   cookieHeaderFrom,
   isWazeCookieDomain,
   cookieValePraHost,
+  prepareAuth,
   buildPlacesFromSearch,
   dispatch,
   purTypeDoUR,
@@ -159,6 +160,60 @@ test('cookieValePraHost: é a regra do RFC 6265 contra www.waze.com, não "cont�
   // `isWazeCookieDomain` segue existindo e segue LARGO — são perguntas
   // diferentes ("é da waze?" × "o navegador mandaria isto pro www?").
   assert.equal(isWazeCookieDomain('beta.waze.com'), true);
+});
+
+// O filtro por host é ENDURECIMENTO, nunca PORTÃO — e a diferença virou defeito
+// em produção no MESMO dia em que ele entrou. O owner recebeu "Formato de
+// cookies inválido" no meio do trabalho, com 0 RESTAM na tela.
+//
+// A causa: o filtro nasceu no `handleTestarCookies`, onde recusar entrada ruim é
+// certo (a pessoa está ali colando o arquivo e pode corrigir). Ao ir pro
+// `prepareAuth` ele passou a rodar sobre SESSÃO JÁ GRAVADA — dado que já existe
+// no mundo, em formato que ninguém pode re-pedir.
+test('sessão já gravada NUNCA é recusada por FORMATO — o filtro recua, não barra', () => {
+  const N = (d, n, v) => [d, 'TRUE', '/', 'TRUE', '1799999999', n, v].join('\t');
+  // As três formas que o teste diferencial (antes × depois) pegou regredindo.
+  const casos = {
+    'só beta.waze.com': [N('beta.waze.com', '_csrf_token', 'a'), N('beta.waze.com', '_web_session', 'b')].join('\n'),
+    'header com tab no meio': '_csrf_token=a;\t_web_session=b',
+    'domínio editor.waze.com': [N('editor.waze.com', '_csrf_token', 'a'), N('editor.waze.com', '_web_session', 'b')].join('\n'),
+  };
+  for (const [nome, cru] of Object.entries(casos)) {
+    // Chama o `prepareAuth` DE VERDADE. A primeira versão desta asserção
+    // replicava o recuo aqui dentro, e a sabotagem que devolvia o filtro a
+    // PORTÃO passou limpa — asserção que não distingue as duas versões é
+    // decoração, não teste.
+    let r;
+    assert.doesNotThrow(() => { r = prepareAuth(cru); },
+      `${nome}: sessão já gravada foi recusada por FORMATO`);
+    assert.ok(r.csrf, `${nome}: CSRF sumiu`);
+    // E o header não pode sair VAZIO: header vazio não dá erro nenhum, o Waze é
+    // que responde 403 e a culpa parece ser dos cookies da pessoa.
+    assert.notEqual(r.cookieHeader, '', `${nome}: header saiu vazio`);
+  }
+});
+
+test('o recuo do header é pra régua LARGA, e ela ainda é só waze.com', () => {
+  const N = (d, n, v) => [d, 'TRUE', '/', 'TRUE', '1799999999', n, v].join('\t');
+  // Sem nenhum cookie que sirva ao www, recua pro que é da waze — e NUNCA pro
+  // que é de terceiro, que é a razão de o filtro existir (não vazar credencial
+  // alheia pro servidor do Waze).
+  const h = cookieHeaderFrom([
+    N('beta.waze.com', '_csrf_token', 'DA-WAZE'),
+    N('.redhat.com', 'sso', 'SEGREDO-RH'),
+    N('.github.com', 'gh', 'SEGREDO-GH'),
+  ].join('\n'));
+  assert.ok(h.includes('DA-WAZE'), 'o recuo tem que devolver o cookie da waze');
+  assert.ok(!h.includes('SEGREDO-RH') && !h.includes('SEGREDO-GH'),
+    'o recuo NÃO pode afrouxar pra cookie de terceiro');
+
+  // E com cookie do www presente, o recuo não acontece: o beta fica de fora.
+  const misto = cookieHeaderFrom([
+    N('beta.waze.com', '_csrf_token', 'CSRF-BETA'),
+    N('www.waze.com', '_csrf_token', 'CSRF-WWW'),
+  ].join('\n'));
+  assert.ok(misto.includes('CSRF-WWW') && !misto.includes('BETA'),
+    'com o www presente o beta não pode entrar — é o conserto que este recuo não pode desfazer');
 });
 
 test('filterWazeCookies: export duplicado não dobra o header', () => {
