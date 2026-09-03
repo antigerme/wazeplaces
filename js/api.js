@@ -52,7 +52,42 @@ const API = {
     saindo: false,
     setSaindo(v) { this.saindo = !!v; },
 
+    // Registro das últimas chamadas, SÓ NA MEMÓRIA. Existe porque a pergunta que
+    // mais custou tempo neste projeto foi "o que exatamente falhou no aparelho
+    // dele?", e ela não tinha resposta: o toast conta o desfecho, não a
+    // sequência. Sem isto, "conexão instável" e "falha ao carregar" na mesma
+    // tela são dois fatos soltos, e eu passei horas encaixando hipótese.
+    //
+    // Guarda SEMPRE, não só com o modo dev ligado: o defeito acontece ANTES de
+    // alguém abrir o diagnóstico, e anel que começa a gravar na hora do socorro
+    // nasce vazio justo quando importa. Custo: 60 objetos pequenos em memória,
+    // zero requisição, zero gravação no aparelho, e some ao fechar a app.
+    //
+    // NUNCA guarda o corpo enviado nem o recebido: o corpo leva o sessionToken
+    // em toda chamada, e o recebido leva dado de terceiro (nome de quem mandou
+    // o pedido). O que interessa pra depurar é a FORMA da falha.
+    chamadas: [],
+    _registrar(endpoint, inicio, http, data) {
+        try {
+            this.chamadas.push({
+                t: new Date().toISOString(),
+                rota: endpoint,
+                ms: Math.round(performance.now() - inicio),
+                http: http,
+                ok: !!(data && data.success),
+                errorKey: (data && data.errorKey) || null,
+                errorCategory: (data && data.errorCategory) || null,
+                // Quantos itens vieram, quando vierem: distingue "respondeu
+                // vazio" de "respondeu com fila", que é a diferença entre
+                // "Tudo limpo!" legítimo e falha.
+                n: data && Array.isArray(data.places) ? data.places.length : undefined,
+            });
+            if (this.chamadas.length > 60) this.chamadas.shift();
+        } catch (e) {}
+    },
+
     async _post(endpoint, body) {
+        const _t0 = performance.now();
         // Timeout no lado browser→backend: sem isso um fetch pendurado deixava
         // AppState.fetching preso e o botão de refresh (com guard) mudo.
         const controller = new AbortController();
@@ -67,6 +102,7 @@ const API = {
                 ...(this.saindo ? { keepalive: true } : { signal: controller.signal })
             });
             const data = await response.json();
+            this._registrar(endpoint, _t0, response.status, data);
             // NÃO apagar a sessão aqui. Um 401 chega por motivos que não são
             // "o editor precisa entrar de novo": o Waze devolve 403 em rajada
             // (WAF/limite) e o KV pode devolver vazio num blip. Apagar dentro
@@ -80,7 +116,13 @@ const API = {
             // Rede caiu / abortou por timeout / 5xx sem JSON → transient, pra a
             // política de retry (callWithRetry) atuar. Era o caso mais comum e
             // ficava sem categoria, então nunca era retentado.
-            return { success: false, error: t('api.error.connection'), errorCategory: 'transient' };
+            // `http: 0` é a marca de "nem chegou a responder" — aborto por
+            // timeout, rede caída, DNS. Sem distinguir isso de um 500, todo
+            // problema de rede vira "erro do servidor" na análise.
+            const falha = { success: false, error: t('api.error.connection'), errorCategory: 'transient',
+                            _motivo: String((error && error.name) || error).slice(0, 60) };
+            this._registrar(endpoint, _t0, 0, falha);
+            return falha;
         } finally {
             clearTimeout(timer);
         }

@@ -225,6 +225,9 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 function initApp() {
+    // Armado ANTES de tudo: erro que acontece na carga é justamente o que não
+    // aparece em lugar nenhum depois, e é o que mais interessa num socorro.
+    diagCapturarErros();
     const versionEl = document.getElementById('appVersionDisplay');
     if (versionEl) {
         versionEl.textContent = 'v' + (typeof verLabel === 'function' ? verLabel(APP_VERSION) : APP_VERSION);
@@ -612,6 +615,7 @@ function setupAppListeners() {
         resetQueue();
         startFetching();
     });
+    $('diagBtn')?.addEventListener('click', baixarDiagnostico);
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
     $('presencaClose').addEventListener('click', () => closeModal('presencaModal'));
     $('pedidoClose').addEventListener('click', () => closeModal('pedidoModal'));
@@ -2682,6 +2686,189 @@ function rebuscarDepoisDeFalha() {
     rebuscasAuto++;
     AppState.hasMore = true;
     startFetching();
+}
+
+// ── Diagnóstico: baixa TUDO que existe do lado do cliente ──────────────────
+//
+// Pedido do owner, depois de horas em que eu adivinhei o defeito do aparelho
+// dele em vez de olhar. O botão vive atrás do modo dev e gera UM arquivo.
+//
+// DUAS COISAS QUE ELE **NÃO** CONSEGUE TRAZER, e é honesto dizer no próprio
+// arquivo em vez de deixar a pessoa procurar:
+//
+//  1. Os cookies do WAZE. Eles são de `waze.com`, outra origem — o JavaScript
+//     desta página não os enxerga, por regra do navegador, e nem existem aqui:
+//     depois do login eles vivem CIFRADOS no servidor e nunca mais voltam ao
+//     aparelho. O que dá pra trazer é `document.cookie` desta origem.
+//  2. O corpo do que o Service Worker guardou de OUTRA origem (tiles do Waze):
+//     a resposta é opaca. As URLs vêm; o conteúdo, não.
+//
+// O QUE ELE TRAZ, e o peso disso: o `waze_session_token` vai INTEIRO. Ele é
+// credencial viva — quem tiver o arquivo pode agir na conta do Waze do dono até
+// a sessão vencer, e é METADE da chave que decifra os cookies no servidor (ver
+// `derivarChave`). Foi pedido assim de propósito, porque é ele que permite
+// REPRODUZIR a falha em vez de teorizar. O arquivo diz isso na primeira linha,
+// e o caminho de anular é sair da app, que destrói a sessão no servidor.
+const DIAG_VERSAO = 1;
+
+// JSON de coisa viva: `AppState` tem Promise, função e referência circular
+// (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
+// e o arquivo sai vazio — falha silenciosa no instrumento de socorro.
+function diagSeguro(v, prof = 0, vistos = new WeakSet()) {
+    if (v === null || typeof v !== 'object') {
+        return typeof v === 'function' ? '[função]' : v;
+    }
+    if (vistos.has(v)) return '[circular]';
+    if (prof > 8) return '[fundo]';
+    if (v instanceof Promise) return '[promise]';
+    if (typeof Element !== 'undefined' && v instanceof Element) return '[elemento ' + v.tagName + ']';
+    if (v instanceof Map) return { '[Map]': [...v.keys()].map(String) };
+    if (v instanceof Set) return { '[Set]': [...v].map(String) };
+    vistos.add(v);
+    if (Array.isArray(v)) return v.map((x) => diagSeguro(x, prof + 1, vistos));
+    const o = {};
+    for (const k of Object.keys(v)) {
+        try { o[k] = diagSeguro(v[k], prof + 1, vistos); } catch (e) { o[k] = '[erro: ' + e.message + ']'; }
+    }
+    return o;
+}
+
+// Erros de JS acumulados desde a carga. Armado cedo, no `initApp`.
+const diagErros = [];
+function diagCapturarErros() {
+    addEventListener('error', (e) => {
+        diagErros.push({ t: new Date().toISOString(), tipo: 'error',
+            msg: String(e.message || ''), fonte: String(e.filename || ''), linha: e.lineno });
+        if (diagErros.length > 50) diagErros.shift();
+    });
+    addEventListener('unhandledrejection', (e) => {
+        diagErros.push({ t: new Date().toISOString(), tipo: 'rejeicao',
+            msg: String((e.reason && e.reason.message) || e.reason || '').slice(0, 300) });
+        if (diagErros.length > 50) diagErros.shift();
+    });
+}
+
+async function diagCorpo() {
+    const meu = location.origin;
+    // Só recurso da NOSSA origem: de terceiro a resposta é opaca e a leitura
+    // ainda gastaria rede. `cache: 'force-cache'` pra pegar o que o aparelho
+    // REALMENTE tem — que é a pergunta quando se suspeita de PWA com código
+    // velho; buscar da rede mediria o servidor, não o aparelho.
+    const texto = async (url) => {
+        try {
+            const r = await fetch(url, { cache: 'force-cache' });
+            return { http: r.status, tipo: r.headers.get('content-type'),
+                     etag: r.headers.get('etag'), corpo: await r.text() };
+        } catch (e) { return { erro: String((e && e.message) || e) }; }
+    };
+
+    const ls = {}, ss = {};
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); } }
+    catch (e) { ls._erro = String(e); }
+    try { for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); ss[k] = sessionStorage.getItem(k); } }
+    catch (e) { ss._erro = String(e); }
+
+    const sw = { suportado: 'serviceWorker' in navigator,
+                 controlando: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
+                 registros: [] };
+    try {
+        for (const r of await navigator.serviceWorker.getRegistrations()) {
+            sw.registros.push({ escopo: r.scope,
+                ativo: r.active && r.active.scriptURL, estadoAtivo: r.active && r.active.state,
+                esperando: r.waiting && r.waiting.scriptURL,
+                instalando: r.installing && r.installing.scriptURL });
+        }
+    } catch (e) { sw.erro = String(e); }
+
+    const cachesDoAparelho = {};
+    try {
+        for (const nome of await caches.keys()) {
+            const c = await caches.open(nome);
+            cachesDoAparelho[nome] = (await c.keys()).map((r) => r.url);
+        }
+    } catch (e) { cachesDoAparelho._erro = String(e); }
+
+    // O CÓDIGO que está rodando, com o corpo. É isto que responde "o PWA está
+    // com a versão velha?" — pergunta que o serial sozinho não responde, porque
+    // ele só diz o que o `version.js` carregado afirma, não o que o resto é.
+    const recursos = performance.getEntriesByType('resource')
+        .map((r) => ({ url: r.name, tipo: r.initiatorType, ms: Math.round(r.duration),
+                       bytes: r.transferSize,
+                       doCache: r.transferSize === 0 && r.decodedBodySize > 0 }));
+    const codigo = {};
+    const nossos = [...new Set([location.href,
+        ...recursos.map((r) => r.url).filter((u) => u.startsWith(meu))])];
+    for (const u of nossos) codigo[u] = await texto(u);
+
+    const idb = {};
+    try { for (const d of await indexedDB.databases()) idb[d.name] = d.version; }
+    catch (e) { idb._erro = String(e); }
+
+    const c = navigator.connection || {};
+    return {
+        _leia_isto: 'Este arquivo contém o waze_session_token, que é CREDENCIAL VIVA da conta do Waze '
+            + 'de quem gerou. Trate como senha. Pra anular: sair da app, o que destrói a sessão no '
+            + 'servidor. NÃO contém os cookies do Waze — eles são de outra origem e não ficam neste aparelho.',
+        _versaoDoDiag: DIAG_VERSAO,
+        _gerado: new Date().toISOString(),
+        app: { versao: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
+               rotulo: typeof verLabel === 'function' ? verLabel(APP_VERSION) : null,
+               url: location.href,
+               idioma: typeof getLang === 'function' ? getLang() : null },
+        ambiente: {
+            ua: navigator.userAgent, plataforma: navigator.platform, idiomas: navigator.languages,
+            online: navigator.onLine,
+            conexao: { tipo: c.effectiveType, downlink: c.downlink, rtt: c.rtt, economia: c.saveData },
+            standalone: matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
+            tela: { w: screen.width, h: screen.height, dpr: devicePixelRatio,
+                    janela: innerWidth + 'x' + innerHeight },
+            fuso: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            escuro: matchMedia('(prefers-color-scheme: dark)').matches,
+            memoria: navigator.deviceMemory, nucleos: navigator.hardwareConcurrency,
+        },
+        // Cookies DESTA origem. Os do Waze não estão aqui — ver o cabeçalho.
+        cookiesDestaOrigem: document.cookie || '(vazio)',
+        localStorage: ls,
+        sessionStorage: ss,
+        indexedDB: idb,
+        serviceWorker: sw,
+        caches: cachesDoAparelho,
+        chamadas: (typeof API !== 'undefined' && API.chamadas) || [],
+        recursos,
+        erros: diagErros,
+        appState: diagSeguro(typeof AppState !== 'undefined' ? AppState : null),
+        // O HTML como está AGORA, com as classes que decidem o que aparece na
+        // tela. É o que mostra qual painel estava visível no momento da queixa.
+        dom: document.documentElement.outerHTML,
+        codigo,
+    };
+}
+
+async function baixarDiagnostico() {
+    const btn = document.getElementById('diagBtn');
+    if (btn) { btn.disabled = true; btn.textContent = t('filters.diag.gerando'); }
+    try {
+        const corpo = await diagCorpo();
+        const blob = new Blob([JSON.stringify(corpo, null, 1)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        // Começa com `diag-` e NÃO com `waze`: o guard do logout varre os
+        // literais `waze*` do js/ procurando chave nova de armazenamento, e um
+        // nome de arquivo com esse prefixo é indistinguível de uma chave pra
+        // ele. Afrouxar o guard pra caber um nome bonito é o caminho errado.
+        a.download = 'diag-wazeplaces-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+        showToast(t('toast.diagPronto'), 'success');
+    } catch (e) {
+        // O instrumento de socorro NÃO pode falhar calado: se ele quebrar,
+        // ninguém descobre por que o socorro não veio.
+        showToast(t('toast.diagFalhou', { erro: String((e && e.message) || e).slice(0, 80) }), 'error', 9000);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = t('filters.diag.btn'); }
+    }
 }
 
 async function handleUnauthorized() {
