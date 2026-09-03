@@ -132,3 +132,100 @@ test('a leitura do modo dev NÃO passa por `window.` (gotcha #64)', () => {
     'voltou a ler `window.AppState` — em script clássico isso é sempre undefined');
   assert.match(bloco, /typeof AppState/, 'a leitura precisa ser pelo binding global, com guarda de existência');
 });
+
+// ═══ o diário e o FAB ════════════════════════════════════════════════════════
+import { readFileSync as _rf } from 'node:fs';
+const APP = _rf(new URL('../js/app.js', import.meta.url), 'utf8');
+const HTML = _rf(new URL('../index.html', import.meta.url), 'utf8');
+const semCom = APP.replace(/\/\/[^\n]*/g, '');
+
+test('o diário sai na PRIMEIRA linha quando o dev está desligado', () => {
+  // Custo zero desligado não é detalhe: são 200 swipes por sessão e o valor da
+  // app é o ritmo. Nada de closure, objeto ou stringify antes da checagem.
+  const i = semCom.indexOf('function dlog(');
+  const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
+  const primeira = corpo.split('\n').filter((l) => l.trim())[1] || '';
+  assert.match(primeira, /if \(!dlogLigado\(\)\) return;/,
+    'a saída antecipada saiu da primeira linha — o diário passou a custar com o dev desligado');
+});
+
+test('o diário chaveia pedido por creatorId, NUNCA pelo nome', () => {
+  // Mesma regra da reincidência: o nome é de terceiro e muda; o id resolve a
+  // mesma pergunta e não muda.
+  const i = semCom.indexOf('function dlogPlace(');
+  const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
+  assert.ok(!/createdBy/.test(corpo), 'o nome de quem enviou o pedido entrou no diário');
+  assert.match(corpo, /creatorId/, 'o id sumiu — sem ele o diário não identifica autor nenhum');
+});
+
+test('os FUNIS existem — cobertura por estrangulamento, não remendo', () => {
+  // Instrumentar call site a call site envelhece: o próximo recurso nasce sem
+  // log e ninguém percebe. Cada linha abaixo é um funil por onde TUDO passa.
+  const funis = [
+    [/function showToast[\s\S]{0,600}?dlog\('toast'/, 'toast — é o "print textual", e foi o que faltou no diagnóstico do owner'],
+    [/function openModal\(id\) \{\s*dlog\('tela\.modal'/, 'abertura de modal'],
+    [/function closeModal\([^)]*\) \{\s*dlog\('tela\.modal'/, 'fechamento de modal'],
+    [/function showNoPlaces\(\) \{[\s\S]{0,400}?dlog\('tela\.vazia'/, 'painel de fila vazia'],
+    [/function scheduleAction\([^)]*\) \{\s*dlog\('acao'/, 'ação do editor'],
+    [/function handleActionResult\([^)]*\) \{\s*dlog\('acao\.fim'/, 'resultado da ação'],
+    [/dlog\('sessao\.confere'/, 'decisão de vida/morte da sessão'],
+    [/dlog\('busca\.ok'/, 'busca que deu certo'],
+    [/dlog\('busca\.falhou'/, 'busca que falhou'],
+    [/dlogVigiar\('buscar'\)/, 'watchdog da busca — fila congelada não grita'],
+  ];
+  for (const [re, oq] of funis) assert.match(semCom, re, `funil sumiu: ${oq}`);
+});
+
+test('desligar o dev APAGA o que ele gravou', () => {
+  // Senão "desligado" é mentira: o dado (DOM com nome e endereço de terceiro)
+  // continua no aparelho.
+  const i = semCom.indexOf('function dlogApagar(');
+  const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
+  assert.match(corpo, /dlogAnel = \[\]/, 'o diário sobreviveu ao desligar');
+  assert.match(corpo, /dlogMomentos = \[\]/, 'os momentos sobreviveram — é onde mora o DOM com dado de terceiro');
+  assert.match(corpo, /delete c\.corpoResposta/, 'os corpos de resposta guardados sobreviveram');
+  // O anel de METADADOS fica: não tem dado pessoal e é a espinha do diagnóstico.
+  assert.ok(!/API\.chamadas = \[\]/.test(corpo), 'apagou os metadados junto — perdeu a sequência sem precisar');
+  // E o desligar avisa antes de levar captura não baixada embora.
+  assert.match(semCom, /dlogNaoBaixados\(\) > 0[\s\S]{0,200}?toast\.devPerdeCaptura/,
+    'desligar pode perder captura não baixada sem avisar');
+});
+
+test('o FAB fica acima dos modais e abaixo do toast', () => {
+  // Acima dos modais porque o ponto é capturar EM CONTEXTO — o botão antigo,
+  // dentro de Filtros, só conseguia capturar a tela de Filtros. Abaixo do toast
+  // (70) porque tapar o aviso que se quer registrar é o mesmo erro ao contrário
+  // — e MEDIDO, o toast em cima dele engolia o toque seguinte.
+  const i = HTML.indexOf('id="devFab"');
+  const bloco = HTML.slice(i - 200, i + 300);
+  assert.match(bloco, /z-\[68\]/, 'o FAB saiu da faixa entre os modais (60) e o toast (70)');
+  assert.match(bloco, /pointer-events-none/, 'o contêiner do FAB recebe toque e engole o gesto do card (gotcha #26)');
+  assert.match(HTML, /id="devFabBtn"[^>]*pointer-events-auto/, 'o botão parou de receber toque');
+  assert.match(HTML, /id="devFabBtn"[^>]*min-w-\[44px\][^>]*min-h-\[44px\]/, 'o alvo caiu abaixo de 44px');
+});
+
+test('a captura NÃO dispara toast — o instrumento não pode medir a si mesmo', () => {
+  // MEDIDO: o toast vive acima do FAB e engolia o toque seguinte (dois toques
+  // registravam um momento só), além de entrar na captura seguinte.
+  // Ancorado DENTRO do `ligarFabDev`: existe outro `const soltar` no lightbox, e
+  // um `indexOf` solto pegava o dele (gotcha #67 — âncora que alcança outra
+  // ocorrência do mesmo nome deixa a sabotagem passar).
+  const iF = semCom.indexOf('function ligarFabDev(');
+  assert.ok(iF !== -1, 'ligarFabDev sumiu');
+  const fab = semCom.slice(iF, semCom.indexOf('\nfunction ', iF + 10));
+  const i = fab.indexOf('const soltar = ');
+  const corpo = fab.slice(i, fab.indexOf('};', i));
+  assert.match(corpo, /dlogCapturar\('manual'\)/, 'o toque parou de registrar');
+  assert.ok(!/showToast/.test(corpo), 'voltou o toast na captura — ele bloqueia o toque seguinte');
+});
+
+test('a tela é lida pelo que decide o PIXEL, não por offsetParent', () => {
+  // `offsetParent` é null para `position: fixed`, e TODO modal desta app é
+  // fixed — com ele, `modais` vinha sempre vazio e o FAB não capturava o
+  // contexto, em silêncio.
+  const i = semCom.indexOf('function dlogTelaAtual(');
+  const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
+  assert.ok(!/offsetParent/.test(corpo),
+    'voltou o offsetParent — modal fixed volta a ser invisível pro diário');
+  assert.match(corpo, /getComputedStyle/, 'a leitura precisa olhar o display computado');
+});

@@ -228,6 +228,7 @@ function initApp() {
     // Armado ANTES de tudo: erro que acontece na carga é justamente o que não
     // aparece em lugar nenhum depois, e é o que mais interessa num socorro.
     diagCapturarErros();
+    ligarFabDev();
     const versionEl = document.getElementById('appVersionDisplay');
     if (versionEl) {
         versionEl.textContent = 'v' + (typeof verLabel === 'function' ? verLabel(APP_VERSION) : APP_VERSION);
@@ -485,6 +486,7 @@ window.addEventListener('popstate', () => {
 });
 
 function openModal(id) {
+    dlog('tela.modal', { abre: id });
     const m = document.getElementById(id);
     if (!m) return;
     const jaHaviaModal = !!topOpenModal();
@@ -552,6 +554,7 @@ const LIMPEZA_AO_FECHAR = {
 };
 
 function closeModal(id, { viaHistorico = false } = {}) {
+    dlog('tela.modal', { fecha: id, viaHistorico });
     const m = document.getElementById(id);
     if (!m || m.classList.contains('hidden')) return;
     m.classList.add('hidden');
@@ -1089,10 +1092,19 @@ function setupModalListeners() {
     });
     $('prefDevModeActive').addEventListener('change', (e) => {
         if (!AppState.devMode.unlocked) return;
+        // Desligar APAGA o que o dev gravou — senão "desligado" é mentira: o
+        // dado continua no aparelho. Mas nunca em silêncio: captura que ainda
+        // não foi baixada é trabalho, e perder trabalho sem avisar é o pior
+        // desfecho possível pra um instrumento de socorro.
+        if (!e.target.checked && dlogNaoBaixados() > 0) {
+            showToast(t('toast.devPerdeCaptura', { n: dlogNaoBaixados() }), 'error', 9000);
+        }
         AppState.devMode.active = e.target.checked;
         saveDevMode();
         updateDevBadge();
+        atualizarFabDev();
         if (!e.target.checked) {
+            dlogApagar();
             enforceDevGatedFilters();
             // Dev off pode re-travar o gate do undo → força ligado de novo.
             if (!canDisableUndo() && AppState.preferences.undoEnabled === false) {
@@ -2688,6 +2700,285 @@ function rebuscarDepoisDeFalha() {
     startFetching();
 }
 
+// ── Diário técnico do modo dev ────────────────────────────────────────────
+//
+// Modelo trazido do botequei (projeto do owner), onde ele já tinha resolvido o
+// problema que eu ia apresentar como novidade. Duas ideias vieram de lá e são o
+// que fazem isto funcionar:
+//
+//  1. COBERTURA POR FUNIS, não remendo em 200 lugares. Instrumentar cada call
+//     site envelhece: o próximo recurso nasce sem log e ninguém percebe. Em vez
+//     disso a instrumentação mora nos ESTRANGULAMENTOS por onde tudo passa —
+//     `showToast`, `openModal`, a barra de ações, o `fetchNextPage`, o
+//     `handleUnauthorized`. Recurso novo já nasce coberto.
+//
+//  2. O DIÁRIO DE TELA É O "PRINT TEXTUAL". Página web não tira foto dos
+//     próprios pixels no Android (o `getDisplayMedia` não existe lá, e o resto
+//     exige biblioteca e quebra na CSP). A jornada de telas + os toasts contam
+//     o que a pessoa viu, e valem mais que uma imagem quase certa.
+//
+// O QUE ISTO CONSERTA, com evidência do dia em que nasceu: o botão de baixar
+// ficava dentro de Filtros → Preferências. Pra apertá-lo era preciso abrir dois
+// modais POR CIMA da tela com defeito — e o toast, que dura 4s, já tinha
+// sumido. O diagnóstico do owner chegou com `loadErrorState` visível e ZERO
+// toast no DOM, justamente perdendo a evidência ("Conexão instável") que
+// derrubou a hipótese errada. Instrumento que não alcança o momento do defeito
+// não é instrumento.
+//
+// CUSTO ZERO DESLIGADO: `dlog` sai na primeira linha. Nada de closure, nada de
+// objeto criado, nada de `JSON.stringify` — a app tem 200 swipes por sessão e o
+// valor dela é o ritmo.
+const DLOG_TETO = 800;
+const DIAG_FORMATO = 2;
+let dlogAnel = [];
+
+function dlogLigado() {
+    return typeof AppState !== 'undefined' && !!(AppState.devMode && AppState.devMode.active);
+}
+
+// `k` é a CHAVE do evento (curta, estável, greppável). `d` é o que importa
+// daquele evento — nunca o objeto inteiro de onde ele saiu.
+function dlog(k, d) {
+    if (!dlogLigado()) return;
+    try {
+        dlogAnel.push({ t: Date.now(), k, ...(d || {}) });
+        if (dlogAnel.length > DLOG_TETO) dlogAnel.shift();
+    } catch (e) {}
+}
+
+// Identidade de pedido no diário: `creatorId` (número) e NUNCA `createdBy`.
+// O nome é dado de terceiro e o id resolve a mesma pergunta — é a mesma regra
+// que a reincidência já segue (o nome muda, o id não).
+function dlogPlace(p) {
+    if (!p) return null;
+    return { v: p.venueID, ur: p.updateRequestID, tipo: p.purType, autor: p.creatorId ?? null };
+}
+
+// ── Watchdog: o que NÃO volta no prazo ────────────────────────────────────
+// Ideia do botequei, onde flagrou o `getCurrentPosition` preso no prompt. Aqui
+// o alvo é a fila congelada: `fetching` que fica true, ação pendente que nunca
+// executa, promessa de busca que não resolve. Nenhum desses grita — a tela só
+// para, e "parece que acabou o trabalho" ninguém reporta.
+const dlogPendencias = new Map();
+function dlogVigiar(o, ms = 20000) {
+    if (!dlogLigado()) return;
+    if (dlogPendencias.has(o)) clearTimeout(dlogPendencias.get(o));
+    dlogPendencias.set(o, setTimeout(() => {
+        dlogPendencias.delete(o);
+        dlog('pendurada', { o, ms });
+    }, ms));
+}
+function dlogVoltou(o) {
+    const h = dlogPendencias.get(o);
+    if (h) { clearTimeout(h); dlogPendencias.delete(o); }
+}
+
+// ── Momentos: o que a pessoa via ──────────────────────────────────────────
+// Cada toque no FAB congela UM momento. O código, os caches e o ambiente NÃO
+// entram aqui — eles são iguais em todos e vão uma vez só no relatório. Sem
+// isso, cada captura repetiria ~600 KB e o arquivo viraria intransportável.
+let dlogMomentos = [];
+const DLOG_MAX_MOMENTOS = 12;
+
+function dlogTelaAtual() {
+    // `offsetParent` NÃO serve aqui: ele é `null` para elemento `position:
+    // fixed`, e TODO modal desta app é fixed. Com ele, `modais` vinha sempre
+    // vazio — ou seja a capacidade central do FAB (registrar EM CONTEXTO, com o
+    // modal por cima) não capturava o contexto, em silêncio. Pego pelo teste
+    // ponta a ponta, que abria a Ajuda antes de tocar e cobrava o modal na
+    // lista. Aqui vale o que decide o pixel: a classe, o `display` computado e
+    // uma caixa com tamanho.
+    const visivel = (id) => {
+        const e = document.getElementById(id);
+        if (!e || e.classList.contains('hidden')) return false;
+        if (getComputedStyle(e).display === 'none') return false;
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+    };
+    const modais = (typeof MODAL_IDS !== 'undefined' ? MODAL_IDS : []).filter(visivel);
+    return {
+        tela: visivel('authScreen') ? 'entrar' : (visivel('appScreen') ? 'app' : '?'),
+        painel: visivel('loadErrorState') ? 'falhaAoCarregar'
+              : visivel('noMoreCards') ? 'tudoLimpo'
+              : visivel('loadingCard') ? 'carregando'
+              : document.querySelector('.place-card') ? 'card' : 'nada',
+        modais,
+        lightbox: visivel('lightbox'),
+    };
+}
+
+function dlogCapturar(motivo) {
+    try {
+        const m = {
+            t: new Date().toISOString(),
+            motivo,
+            ...dlogTelaAtual(),
+            // Os toasts NA TELA agora. O anel do diário guarda os que já
+            // sumiram; este campo diz quais estavam visíveis no instante.
+            toastsNaTela: [...document.querySelectorAll('#toastContainer > *, #bannerContainer > *')]
+                .map((e) => (e.textContent || '').trim().slice(0, 120)),
+            estado: {
+                fila: (AppState.queue || []).length,
+                serverTotal: AppState.serverTotal,
+                hasMore: AppState.hasMore,
+                loadError: AppState.loadError,
+                fetching: AppState.fetching,
+                nextPage: AppState.nextPage,
+                pendingAction: AppState.pendingAction ? AppState.pendingAction.type : null,
+                filtros: AppState.filters,
+                autorEmFoco: AppState.autorEmFoco,
+                atual: dlogPlace(AppState.currentPlace),
+            },
+            // Imagem quebrada é indistinguível de "meu sandbox não baixou" quando
+            // eu reconstruo a tela — então quem sabe é o aparelho, e ele diz.
+            imagens: [...document.images].map((i) => ({
+                src: (i.currentSrc || i.src || '').slice(0, 160),
+                quebrada: !!(i.complete && i.naturalWidth === 0),
+            })).filter((x) => x.src),
+            // Pixel de canvas não vai no outerHTML. `toDataURL` LANÇA quando o
+            // canvas tem tile de outra origem (fica "tainted") — falhar dizendo
+            // por quê é melhor que a imagem sair branca sem explicação.
+            canvas: [...document.querySelectorAll('canvas')].map((c) => {
+                try { return { classe: c.className, url: c.toDataURL('image/webp', 0.5).slice(0, 400000) }; }
+                catch (e) { return { classe: c.className, erro: 'origem cruzada (tainted)' }; }
+            }),
+            rolagem: [...document.querySelectorAll('.card-changes-list, .card-flag-comment-text, #noMoreCards')]
+                .map((e) => ({ classe: [...e.classList][0], top: e.scrollTop, altura: e.scrollHeight })),
+            dom: document.documentElement.outerHTML,
+        };
+        dlogMomentos.push(m);
+        if (dlogMomentos.length > DLOG_MAX_MOMENTOS) dlogMomentos.shift();
+        dlog('momento', { motivo, painel: m.painel });
+        return m;
+    } catch (e) {
+        dlog('momento.falhou', { erro: String((e && e.message) || e).slice(0, 120) });
+        return null;
+    }
+}
+
+// Captura AUTOMÁTICA. Vale mais que o botão: o defeito não espera a pessoa ser
+// rápida. Um por motivo a cada 30s, senão um erro em laço enche o anel e empurra
+// pra fora justamente o começo, que é onde a causa costuma estar.
+const dlogUltimaAuto = {};
+function dlogCapturarAuto(motivo) {
+    if (!dlogLigado()) return;
+    const agora = Date.now();
+    if (dlogUltimaAuto[motivo] && agora - dlogUltimaAuto[motivo] < 30000) return;
+    dlogUltimaAuto[motivo] = agora;
+    dlogCapturar('auto:' + motivo);
+}
+
+// Desligar o dev APAGA o que ele gravou — senão "desligado" é mentira: o dado
+// continua no aparelho. Some o diário, os momentos (o DOM deles carrega nome e
+// endereço de terceiros) e os corpos de resposta guardados no anel da API.
+// Fica o anel de METADADOS das chamadas: ele não tem dado pessoal e é a espinha
+// de qualquer diagnóstico posterior.
+function dlogApagar() {
+    dlogAnel = [];
+    dlogMomentos = [];
+    for (const h of dlogPendencias.values()) clearTimeout(h);
+    dlogPendencias.clear();
+    try { for (const c of (API.chamadas || [])) { delete c.corpoResposta; delete c._bytes; } } catch (e) {}
+    atualizarFabDev();
+}
+
+// Quantos momentos ainda não foram baixados. É o que o FAB mostra no selo, e é
+// o que impede o desligar de levar trabalho embora em silêncio.
+let dlogBaixados = 0;
+function dlogNaoBaixados() { return Math.max(0, dlogMomentos.length - dlogBaixados); }
+
+// ── O FAB ─────────────────────────────────────────────────────────────────
+// Toque = registra um momento. Segurar = baixa tudo. Dois gestos, um botão,
+// nenhum menu — o instrumento de socorro não pode ter caminho longo.
+//
+// Registrar VÁRIOS momentos importa porque defeito raramente é um instante: o
+// que explica costuma ser "antes → ação → depois". Cada momento é leve (DOM +
+// estado); o código, os caches e o ambiente entram UMA vez no relatório.
+const DEV_FAB_SEGURAR_MS = 550;
+
+function atualizarFabDev() {
+    const fab = document.getElementById('devFab');
+    if (!fab) return;
+    const ligado = typeof AppState !== 'undefined' && !!(AppState.devMode && AppState.devMode.active);
+    fab.classList.toggle('hidden', !ligado);
+    const selo = document.getElementById('devFabBadge');
+    if (selo) {
+        const n = dlogMomentos.length;
+        selo.textContent = String(n);
+        selo.classList.toggle('hidden', n === 0);
+    }
+}
+
+function ligarFabDev() {
+    const btn = document.getElementById('devFabBtn');
+    if (!btn) return;
+    let seguro = null, foiSegurar = false;
+    const comecar = () => {
+        foiSegurar = false;
+        seguro = setTimeout(() => { foiSegurar = true; baixarDiagnostico(); }, DEV_FAB_SEGURAR_MS);
+    };
+    const soltar = () => {
+        if (seguro) { clearTimeout(seguro); seguro = null; }
+        if (foiSegurar) return;
+        const m = dlogCapturar('manual');
+        atualizarFabDev();
+        // SEM toast, e o motivo é o próprio instrumento: o toast vive em z-70,
+        // acima do FAB, e MEDIDO ele engolia o toque seguinte — dois toques
+        // registravam um momento só. Pior: ele entrava na captura seguinte, ou
+        // seja o instrumento passava a medir a si mesmo. O selo do botão já diz
+        // quantos há, e o pulso dá o retorno sem cobrir nada.
+        if (m) {
+            btn.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.25)' }, { transform: 'scale(1)' }],
+                        { duration: 220, easing: 'ease-out' });
+        }
+    };
+    // `pointerdown/up` e não `click`: o clique só chega DEPOIS do soltar, e aí
+    // não dá pra distinguir toque de segurar sem inventar timer por cima.
+    btn.addEventListener('pointerdown', comecar);
+    btn.addEventListener('pointerup', soltar);
+    btn.addEventListener('pointercancel', () => { if (seguro) { clearTimeout(seguro); seguro = null; } });
+    // O botão flutua sobre a app inteira, então em ALGUMA tela ele vai tapar
+    // algo. Arrastar resolve sem a app ter que adivinhar o lugar bom — e a
+    // posição fica no `sessionStorage`, que morre com a aba: chave nova no
+    // localStorage exigiria decisão de logout (o guard cobra isso).
+    let arrastando = false, dx = 0, dy = 0;
+    btn.addEventListener('pointerdown', (e) => {
+        const fab = document.getElementById('devFab');
+        const r = fab.getBoundingClientRect();
+        dx = e.clientX - r.left; dy = e.clientY - r.top;
+        const mover = (ev) => {
+            if (!arrastando && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 8) return;
+            arrastando = true;
+            if (seguro) { clearTimeout(seguro); seguro = null; }
+            const x = Math.min(innerWidth - r.width - 4, Math.max(4, ev.clientX - dx));
+            const y = Math.min(innerHeight - r.height - 4, Math.max(4, ev.clientY - dy));
+            fab.style.left = x + 'px'; fab.style.top = y + 'px';
+            fab.style.right = 'auto'; fab.style.bottom = 'auto';
+        };
+        const fim = () => {
+            removeEventListener('pointermove', mover);
+            removeEventListener('pointerup', fim);
+            if (arrastando) {
+                try { sessionStorage.setItem('__devFabPos', fab.style.left + '|' + fab.style.top); } catch (er) {}
+                // Arrastou não é tocar: sem isto, mover o botão registrava um
+                // momento sem ninguém pedir.
+                foiSegurar = true;
+                setTimeout(() => { arrastando = false; }, 0);
+            }
+        };
+        addEventListener('pointermove', mover);
+        addEventListener('pointerup', fim);
+    });
+    try {
+        const pos = sessionStorage.getItem('__devFabPos');
+        if (pos) {
+            const [x, y] = pos.split('|');
+            const fab = document.getElementById('devFab');
+            fab.style.left = x; fab.style.top = y; fab.style.right = 'auto'; fab.style.bottom = 'auto';
+        }
+    } catch (e) {}
+}
+
 // ── Diagnóstico: baixa TUDO que existe do lado do cliente ──────────────────
 //
 // Pedido do owner, depois de horas em que eu adivinhei o defeito do aparelho
@@ -2737,10 +3028,36 @@ function diagSeguro(v, prof = 0, vistos = new WeakSet()) {
 const diagErros = [];
 function diagCapturarErros() {
     addEventListener('error', (e) => {
+        // Com CONTEXTO DE TELA: erro sem saber ONDE aconteceu manda procurar no
+        // arquivo inteiro. É a diferença entre pista e ruído.
         diagErros.push({ t: new Date().toISOString(), tipo: 'error',
-            msg: String(e.message || ''), fonte: String(e.filename || ''), linha: e.lineno });
+            msg: String(e.message || ''), fonte: String(e.filename || ''), linha: e.lineno,
+            ...(typeof dlogTelaAtual === 'function' ? { onde: dlogTelaAtual() } : {}) });
         if (diagErros.length > 50) diagErros.shift();
+        dlogCapturarAuto('erroDeJs');
     });
+
+    // O `console.error/warn` some com a aba fechada, e é onde o navegador conta
+    // coisa que a app não vê: falha de WebRTC, storage recusando, recurso
+    // bloqueado. Embrulhar aqui é um funil só, em vez de trocar 200 chamadas.
+    for (const nivel of ['error', 'warn']) {
+        const orig = console[nivel].bind(console);
+        console[nivel] = (...a) => {
+            dlog('console.' + nivel, { msg: a.map((x) => {
+                try { return typeof x === 'string' ? x : (x && x.message) || JSON.stringify(x); }
+                catch (e) { return String(x); }
+            }).join(' ').slice(0, 200) });
+            orig(...a);
+        };
+    }
+
+    // Travada de quadro é defeito de PRODUTO aqui: o valor da app é o ritmo do
+    // swipe, e 200ms de thread presa são ~24 quadros perdidos.
+    try {
+        new PerformanceObserver((l) => {
+            for (const e of l.getEntries()) if (e.duration > 200) dlog('lenta', { ms: Math.round(e.duration) });
+        }).observe({ type: 'longtask', buffered: true });
+    } catch (e) {}
     addEventListener('unhandledrejection', (e) => {
         diagErros.push({ t: new Date().toISOString(), tipo: 'rejeicao',
             msg: String((e.reason && e.reason.message) || e.reason || '').slice(0, 300) });
@@ -2875,6 +3192,22 @@ async function diagCorpo() {
             + 'de quem gerou. Trate como senha. Pra anular: sair da app, o que destrói a sessão no '
             + 'servidor. NÃO contém os cookies do Waze — eles são de outra origem e não ficam neste aparelho.',
         _versaoDoDiag: DIAG_VERSAO,
+        _formato: DIAG_FORMATO,
+        // RESUMO NO TOPO: o arquivo tem 1,7 MB e ninguém lê 1,7 MB procurando o
+        // que está errado. Isto é o que eu olho primeiro.
+        resumo: {
+            momentos: dlogMomentos.length,
+            chamadas: (API.chamadas || []).length,
+            falhas: (API.chamadas || []).filter((c) => !c.ok).length,
+            naoAutorizado: (API.chamadas || []).filter((c) => c.errorCategory === 'unauthorized').length,
+            rotasQueFalharam: [...new Set((API.chamadas || []).filter((c) => !c.ok).map((c) => c.rota))],
+            errosDeJs: diagErros.length,
+            penduradas: dlogAnel.filter((l) => l.k === 'pendurada').map((l) => l.o),
+            lentas: dlogAnel.filter((l) => l.k === 'lenta').length,
+            telaAgora: dlogTelaAtual(),
+        },
+        diario: dlogAnel,
+        momentos: dlogMomentos,
         _gerado: new Date().toISOString(),
         app: { versao: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
                rotulo: typeof verLabel === 'function' ? verLabel(APP_VERSION) : null,
@@ -2929,6 +3262,8 @@ async function baixarDiagnostico() {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+        dlogBaixados = dlogMomentos.length;
+        atualizarFabDev();
         showToast(t('toast.diagPronto'), 'success');
     } catch (e) {
         // O instrumento de socorro NÃO pode falhar calado: se ele quebrar,
@@ -2944,6 +3279,13 @@ async function handleUnauthorized() {
     // chamadas ao Waze quase juntas (perfil, países, busca). Sem esta trava,
     // cada uma que voltasse 401 fazia sua própria verificação e seu próprio
     // toast — foi assim que o owner recebeu DOIS "Sessão expirou" empilhados.
+    // A decisão mais cara da app: derrubar ou não a sessão. Registrar as duas
+    // pontas (o que motivou e o que a sonda respondeu) é o que transforma
+    // "conexão instável pra sempre" em evidência.
+    // O log vem ANTES da trava, e não dentro dela: assim a linha da trava fica
+    // intacta pro guard que a protege (ele cobra o retorno COLADO na condição),
+    // e o registro fica melhor — diz a tentativa E se ela seguiu adiante.
+    dlog('sessao.confere', { seguiu: !verificandoSessao && !!AppState.authenticated });
     if (verificandoSessao || !AppState.authenticated) return;
     verificandoSessao = true;
     try {
@@ -2974,6 +3316,8 @@ async function handleUnauthorized() {
                 guardarPerfilDoPortao(r.profile);
                 renderProfileHeader();
             }
+            dlog('sessao.alarmeFalso', { sondaOk: !!(r && r.success) });
+            dlogCapturarAuto('alarmeFalso');
             showToast(t('toast.sessionKeptAlive'), 'info');
             rebuscarDepoisDeFalha();
             return;
@@ -3264,11 +3608,19 @@ function fetchNextPage() {
         filters.categories = AppState.filters.categories; // backend filtra server-side (core.mjs já aceita)
     }
 
+    // VIGIA a busca: fila congelada não grita, a tela só para — e "parece que
+    // acabou o trabalho" ninguém reporta. Ideia do botequei, onde o watchdog
+    // flagrou o GPS preso no prompt comendo check-ins.
+    dlogVigiar('buscar');
     AppState._fetchPromise = (async () => {
         try {
             const result = await API.fetchPlaces(pageToFetch, filters);
             if (epoch !== AppState.fetchEpoch) return; // reset durante o fetch → descarta
             if (!result.success) {
+                dlogVoltou('buscar');
+                dlog('busca.falhou', { key: result.errorKey || null,
+                                       cat: result.errorCategory || null });
+                dlogCapturarAuto('buscaFalhou');
                 if (result.errorCategory === 'unauthorized' ||
                     (result.error && result.error.toLowerCase().includes('sess'))) {
                     AppState.hasMore = false;
@@ -3307,6 +3659,9 @@ function fetchNextPage() {
                 return;
             }
 
+            dlogVoltou('buscar');
+            dlog('busca.ok', { n: (result.places || []).length, hasMore: !!result.hasMore,
+                               page: pageToFetch, total: result.total });
             AppState.hasMore = !!result.hasMore;
             AppState.nextPage++;
             // Busca que deu certo encerra a cadeia: o teto é de tentativas
@@ -3342,6 +3697,8 @@ function fetchNextPage() {
                 aplicarRecusaAutomatica();
             }
         } catch (error) {
+            dlogVoltou('buscar');
+            dlog('busca.erro', { erro: String((error && error.message) || error).slice(0, 120) });
             console.error('fetchNextPage error', error);
             if (epoch === AppState.fetchEpoch) {
                 showToast(t('toast.loadPlacesError'), 'error');
@@ -5318,6 +5675,11 @@ function prefetchNextImage() {
 }
 
 function showNoPlaces() {
+    // O painel de fila vazia tem DOIS significados e a distinção é a flag —
+    // foi ela que faltou e fez a app dizer "Tudo limpo!" sobre 217 pedidos.
+    dlog('tela.vazia', { loadError: AppState.loadError, hasMore: AppState.hasMore,
+                         serverTotal: AppState.serverTotal });
+    if (AppState.loadError) dlogCapturarAuto('falhaAoCarregar');
     marcarTelaPronta();   // fila vazia ou erro: não vem card, mas a tela está pronta
     AppState.currentPlace = null;
     removeCurrentCardEl();
@@ -6172,6 +6534,9 @@ function avisarConsequencia(actionType) {
 const CONSEQUENCIA_AVISADA = { reject: true, read: true };
 
 function handleActionResult(actionType, place, result) {
+    dlog('acao.fim', { tipo: actionType, ok: !!(result && result.success),
+                       cat: (result && result.errorCategory) || null,
+                       key: (result && result.errorKey) || null });
     if (!result) return;
     if (result.success) {
         recordHistory(actionType, 1);
@@ -6587,6 +6952,8 @@ function advanceQueue() {
 //                        as catorze. Meio-lote enviado é a única falha aqui sem
 //                        sintoma nenhum — perder o lote se refaz em dois toques.
 function scheduleAction(type, place, executor, opts = {}) {
+    dlog('acao', { tipo: type, place: dlogPlace(place),
+                   undo: AppState.preferences.undoEnabled !== false });
     const places = Array.isArray(place) ? place : [place];
     const n = places.length;
     const aoSair = opts.aoSair === 'cancel' ? 'cancel' : 'execute';
@@ -7121,6 +7488,9 @@ function loadDevMode() {
             const parsed = JSON.parse(raw);
             AppState.devMode.unlocked = !!parsed.unlocked;
             AppState.devMode.active = !!parsed.active && !!parsed.unlocked;
+            // O boot também precisa mostrar o FAB: quem já estava com o dev
+            // ligado não vai desligar e religar só pra ele aparecer.
+            setTimeout(atualizarFabDev, 0);
         }
     } catch (e) {}
 }
@@ -7686,6 +8056,11 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
     // 'hint' segue a mesma régua da conquista: é banner, não snackbar — tem ação
     // (abre as Preferências), fica mais tempo e não confirma nada que acabou de
     // acontecer. O que muda é a cor: informar não é comemorar.
+    // FUNIL do diário: todo aviso que a pessoa vê passa por aqui, e é isto que
+    // reconstrói "o que estava na tela". O toast dura 4s — sem registrar, ele
+    // some antes de qualquer captura, que foi exatamente o que aconteceu no
+    // diagnóstico do owner (tela com erro, zero toast no DOM).
+    dlog('toast', { tipo: type, txt: String(message).replace(/<[^>]+>/g, '').slice(0, 140) });
     const ehBanner = type === 'achievement' || type === 'hint';
     const container = document.getElementById(ehBanner ? 'bannerContainer' : 'toastContainer');
     const toast = document.createElement('div');
