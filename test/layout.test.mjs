@@ -1677,6 +1677,59 @@ test('a URL do WME é sempre a canônica, sem segmento de idioma', () => {
     'URL do waze.com com idioma cravado (o editor cai num WME que não é o dele):\n' + cravados.join('\n'));
 });
 
+test('o ↗ leva o LOCAL selecionado, o pedido aberto e a aba do editor', () => {
+  // Executa a função de verdade em vez de afirmar sobre o texto dela: guard de
+  // fonte atesta a forma, e o que interessa aqui é a URL que sai.
+  const src = read('js/app.js');
+  const i = src.indexOf('function linkWmeDoPedido');
+  assert.ok(i !== -1, 'linkWmeDoPedido sumiu do app.js');
+  const corpo = src.slice(i, src.indexOf('\n}', i) + 2);
+  const fn = new Function('WME_EDITOR_URL', corpo + '\nreturn linkWmeDoPedido;')('https://www.waze.com/editor');
+
+  // Caso 1: NEW_PLACE — `venueID === updateRequestID` (213 de 503 na fila real).
+  const u1 = new URL(fn({ venueID: '206439966.2064334125.43319751',
+    updateRequestID: '206439966.2064334125.43319751', lat: -23.39363, lon: -45.00826 }, 'row'));
+  // Caso 2: NEW_PHOTO — o pedido é UUID e DIFERE do venue (290 de 503). Este é
+  // o caso que quebraria se alguém "consertasse" o venueUpdateRequest.
+  const u2 = new URL(fn({ venueID: '207554084.2075278696.37501496',
+    updateRequestID: 'ab3f9d27-60dd-4f0f-8300-0a8eba1df63f', lat: -22.79526, lon: -43.33829 }, 'row'));
+
+  for (const [nome, u, venue] of [['NEW_PLACE', u1, '206439966.2064334125.43319751'],
+                                  ['NEW_PHOTO', u2, '207554084.2075278696.37501496']]) {
+    const q = u.searchParams;
+    assert.equal(u.origin + u.pathname, 'https://www.waze.com/editor', `${nome}: URL não canônica`);
+    assert.equal(q.get('env'), 'row', `${nome}: env errado`);
+    // Sem `venues` o WME abre a solicitação mas NÃO seleciona o local, e quem
+    // clicou pra corrigir ainda tem que caçar o lugar no mapa.
+    assert.equal(q.get('venues'), venue, `${nome}: o local não vai selecionado`);
+    // Os DOIS levam o venueID — `venueUpdateRequest` NÃO leva o id do pedido.
+    // Confirmado por HAR e reconfirmado com as URLs reais do owner, uma delas
+    // justamente com pedido UUID.
+    assert.equal(q.get('venueUpdateRequest'), venue,
+      `${nome}: venueUpdateRequest tem que levar o venueID, nunca o updateRequestID`);
+    assert.equal(q.get('tab'), 'feature_editor', `${nome}: sem a aba, não cai no editor do local`);
+    assert.equal(q.get('zoomLevel'), '22', `${nome}: zoom perdido`);
+  }
+  // O UUID do pedido NÃO pode aparecer em lugar nenhum da URL.
+  assert.ok(!u2.href.includes('ab3f9d27'), 'o updateRequestID vazou pra URL — quebra em 58% dos cards');
+
+  // `na` vira `usa` no env (tabela do wazeRefererEnv).
+  assert.equal(new URL(fn({ venueID: 'v', lat: 1, lon: 2 }, 'na')).searchParams.get('env'), 'usa');
+
+  // Coordenada ZERO é válida: latitude 0 corta o Brasil (Macapá) e longitude 0
+  // corta o Reino Unido — dois dos seis países de validação. Com a checagem por
+  // verdade o zero sumia e o editor abria no último lugar visitado.
+  const z = new URL(fn({ venueID: 'v', lat: 0, lon: 0 }, 'row')).searchParams;
+  assert.equal(z.get('lat'), '0', 'latitude 0 caiu fora da URL');
+  assert.equal(z.get('lon'), '0', 'longitude 0 caiu fora da URL');
+
+  // Sem local não há o que selecionar: a aba do editor abriria um painel vazio,
+  // que é pior que deixar o WME escolher.
+  const semVenue = new URL(fn({ lat: 1, lon: 2 }, 'row')).searchParams;
+  assert.equal(semVenue.get('tab'), null, 'aba do editor sem local selecionado abre painel vazio');
+  assert.equal(semVenue.get('venues'), null);
+});
+
 // ── O voltar do aparelho fecha a camada de cima ───────────────────────────
 // Pedido de uma editora: no ritmo do swipe, ir até o ✕ do lightbox quebra a
 // cadência. O risco desta feature não é ela não funcionar — é ela funcionar
