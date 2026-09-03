@@ -2796,9 +2796,74 @@ async function diagCorpo() {
                        bytes: r.transferSize,
                        doCache: r.transferSize === 0 && r.decodedBodySize > 0 }));
     const codigo = {};
-    const nossos = [...new Set([location.href,
+    // O `service-worker.js` NÃO aparece em `performance.getEntriesByType` — ele
+    // não é recurso DESTA página, é o processo que a serve. Sem pedir por nome,
+    // o arquivo traz o conteúdo dos caches e a URL do SW, mas não o script que
+    // está no comando: dava pra concluir "está atualizado" pelo `version.js` com
+    // um SW de três versões atrás decidindo o que servir.
+    const nossos = [...new Set([location.href, meu + '/service-worker.js',
         ...recursos.map((r) => r.url).filter((u) => u.startsWith(meu))])];
     for (const u of nossos) codigo[u] = await texto(u);
+
+    // ── O que o aparelho tem × o que o servidor tem AGORA ──────────────────
+    // Responde de vez a pergunta que sozinha custou horas: "o PWA está rodando
+    // código velho?". O `codigo` acima é o lado do APARELHO (`force-cache`);
+    // aqui o mesmo arquivo vem da REDE (`reload`) e os dois são comparados por
+    // hash. Deduzir isso do serial não serve — o serial só diz o que o
+    // `version.js` carregado afirma, não o que o resto dos arquivos é.
+    //
+    // Custa uma requisição por arquivo, e SÓ quando alguém aperta o botão.
+    const hash = async (txt) => {
+        try {
+            const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
+            return [...new Uint8Array(b)].slice(0, 8).map((x) => x.toString(16).padStart(2, '0')).join('');
+        } catch (e) { return 'sem-hash:' + txt.length; }
+    };
+    const cacheVsRede = {};
+    for (const u of nossos) {
+        const local = codigo[u] && codigo[u].corpo;
+        if (typeof local !== 'string') { cacheVsRede[u] = { erro: 'sem corpo local' }; continue; }
+        try {
+            const r = await fetch(u, { cache: 'reload' });
+            const remoto = await r.text();
+            const [ha, hb] = [await hash(local), await hash(remoto)];
+            cacheVsRede[u] = { aparelho: ha, servidor: hb, igual: ha === hb,
+                               bytesAparelho: local.length, bytesServidor: remoto.length,
+                               http: r.status };
+        } catch (e) { cacheVsRede[u] = { erro: String((e && e.message) || e) }; }
+    }
+
+    // ── O armazenamento local funciona mesmo? ──────────────────────────────
+    // O `safeLS` engole exceção DE PROPÓSITO, então armazenamento cheio ou
+    // navegação privada falham em SILÊNCIO: filtro não persiste, sessão não
+    // grava, e a app parece boa. É uma classe inteira de defeito que nenhum
+    // outro campo deste arquivo revelaria — só a sonda escreve-lê-apaga.
+    const armazenamento = { quota: null, uso: null, escreve: null, erroEscrita: null };
+    try {
+        const e = await navigator.storage.estimate();
+        armazenamento.quota = e.quota; armazenamento.uso = e.usage;
+        armazenamento.sobraPct = e.quota ? +(100 - (e.usage / e.quota) * 100).toFixed(2) : null;
+    } catch (e) { armazenamento.erroQuota = String(e); }
+    try {
+        const k = '__diag_probe__', v = String(Date.now());
+        localStorage.setItem(k, v);
+        armazenamento.escreve = localStorage.getItem(k) === v;
+        localStorage.removeItem(k);
+    } catch (e) { armazenamento.escreve = false; armazenamento.erroEscrita = String((e && e.message) || e); }
+    try { armazenamento.persistente = await navigator.storage.persisted(); } catch (e) {}
+
+    // ── Relógio do aparelho × do servidor ──────────────────────────────────
+    // Data errada no celular faz o aviso de sessão vencendo mentir e toda
+    // comparação de prazo sair torta — e o sintoma nunca aponta pro relógio.
+    const relogio = { aparelho: new Date().toISOString(), servidor: null, desvioSeg: null };
+    try {
+        const r = await fetch(meu + '/manifest.json', { cache: 'no-store', method: 'HEAD' });
+        const d = r.headers.get('date');
+        if (d) {
+            relogio.servidor = new Date(d).toISOString();
+            relogio.desvioSeg = Math.round((Date.now() - new Date(d).getTime()) / 1000);
+        }
+    } catch (e) { relogio.erro = String((e && e.message) || e); }
 
     const idb = {};
     try { for (const d of await indexedDB.databases()) idb[d.name] = d.version; }
@@ -2841,6 +2906,9 @@ async function diagCorpo() {
         // tela. É o que mostra qual painel estava visível no momento da queixa.
         dom: document.documentElement.outerHTML,
         codigo,
+        cacheVsRede,
+        armazenamento,
+        relogio,
     };
 }
 
