@@ -295,6 +295,29 @@ ocorrência** — errar uma vez e corrigir não vira parágrafo.
     **E o smoke passava POR CAUSA do bug**: o bloco do aprovar usa token falso, e as chamadas de fundo voltavam 401. Com o 401 agora carimbado, elas passaram a derrubar a sessão de verdade e o bloco media a tela de login em vez do lightbox. A fixture estava apoiada no defeito — precisou de stub de `perfil` e `buscar-places`. **Quando você conserta um erro que era tolerado, todo teste que dependia da tolerância muda de significado.**
     **Regra que fica**: ausência de evidência não é evidência de vida. Se um estado importante é decidido lendo um campo, garanta que quem cria a resposta SEMPRE preencha esse campo — e escreva a condição na forma afirmativa, pra que o caso não previsto caia no lado seguro em vez do lado destrutivo.
 
+    ### 62.1 — reincidência: CAPACIDADE inferida de um quadro que pode se perder (v2026.09.03-02)
+
+    Mesma forma, outro assunto: agora não era "está vivo", era "o outro lado sabe confirmar recebimento".
+
+    O `oi` (`PRESENCA_CONVERSA_V`) é o ÚNICO jeito de a conversa saber que o par fala v2. Sai **uma vez**, no `abriu()`, dentro de `try { canal.send(...) } catch (e) {}` — catch **vazio**. Se aquele send falha, o quadro some sem rastro e os recibos daquela conversa ficam desligados **para sempre**. E o sintoma é indistinguível do caso LEGÍTIMO que o `PRESENCA_CONVERSA_V` existe pra cobrir: o outro lado numa versão velha. Nem o editor nem o CI conseguem separar os dois.
+
+    **Como foi diagnosticado, e é isso que generaliza.** O log do CI trazia o intervalo:
+
+    ```
+    11:16:54.2595  ✗ o `oi` não chegou            ← 15,09s = o timeout inteiro
+    11:16:54.2603  ✓ o recibo chega a "entregue"  ← 0,8ms depois
+    ```
+
+    `entregue` JÁ era verdade quando a espera desistiu, e as três asserções seguintes passaram na hora — o canal reverso funcionava. E `createDataChannel` sem opções é **ordenado e confiável**, com o `oi` saindo antes de qualquer `ack` poder existir. Logo: ack recebido com `recibos` false só acontece se o `oi` **nunca saiu**. Não se ele atrasou. **O intervalo entre duas asserções vizinhas distingue "perdido" de "lento", e era a única coisa no log que fazia isso.**
+
+    **O conserto** é aceitar QUALQUER evidência que implique a capacidade, não só o anúncio dela: `ack` e `lido` também acendem `recibos`. A inferência é exata nos dois sentidos — os dois recados **não existem** antes do v2, então cliente antigo não os manda (não acende por engano) e quem os manda sabe confirmar por definição. O `oi` segue sendo o caminho normal e segue saindo ANTES da fila de pendentes: sem ele, a primeira mensagem de uma conversa em que ninguém respondeu ainda ficaria sem recibo até alguém escrever de volta. O `ack` é rede de segurança, não substituto.
+
+    **Eu quase arquivei isto como flake**, e as duas coisas que me impediram: (a) a duração do passo era **idêntica** à da última main verde (11m43s × 11m29s), então "runner lento" estava descartado por medição, não por opinião; (b) reproduzi de propósito, derrubando o `oi` no `RTCDataChannel.prototype.send` — **sem** o conserto sai a falha do CI EXATA (mesmas duas asserções, mesma ordem, mesmo `estado` JSON, mesmo `✓ entregue` no meio), **com** o conserto passa inteiro. Antes disso eu tinha 4 rodadas locais verdes, 3 delas com os núcleos saturados: **"não reproduz sob carga" não é evidência de flake quando o modo de falha é perda, não lentidão** — carga atrasa, não descarta quadro.
+
+    **A segunda falha do mesmo CI era do TESTE**, e é a família do #34/#35: `linhaLida` lia `.conversa-lida` com um `page.evaluate` cru logo depois de um `esperar()` de ESTADO. Estado muda, desenho vem depois — ler na linha seguinte é apostar que o render coube no mesmo instante. Asserção sobre DOM espera pelo DOM.
+
+    **Regra que fica**: capacidade do outro lado não pode depender de um único quadro que pode se perder — e `catch` vazio em `send` é o que transforma a perda em algo indepurável. Se o protocolo tem um anúncio, aceite também as mensagens que só existem depois dele.
+
 ## 63. **Regra de estado que vale em duas telas mora em UMA função** (v2026.08.07-02). O owner: *"os botões de aprovar/apagar fotos não estão sendo desativados que nem é feito nos cards quando o Desfazer tá na tela."* Estava certo — e o CLAUDE.md já tinha a regra escrita, só que aplicada a um lugar só.
     **O que existia**: `acoesTravadas()` olhava apenas `AppState.pendingAction` (o swipe), e `aplicarTravaDeAcao()` mexia apenas nos `.card-btn-*`. As ações de FOTO abrem a mesma janela de Desfazer e escrevem no mesmo local, mas seus botões ficavam vivos. Havia até uma proteção acidental — o banner do Desfazer cobre o canto do botão —, e proteção acidental é a pior espécie: some quando o layout muda, sem aviso.
     **O conserto não é "travar também no lightbox", é ter UMA regra**: `acoesTravadas()` passou a incluir `aprovacaoPendente`/`exclusaoPendente`, e `aplicarTravaDeAcao()` aplica nos dois conjuntos de botões. Duas funções paralelas seriam duas chances de divergir na próxima mudança — é assim que esta divergência nasceu.
