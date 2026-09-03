@@ -1683,7 +1683,10 @@ test('o ↗ leva o LOCAL selecionado, o pedido aberto e a aba do editor', () => 
   const src = read('js/app.js');
   const i = src.indexOf('function linkWmeDoPedido');
   assert.ok(i !== -1, 'linkWmeDoPedido sumiu do app.js');
-  const corpo = src.slice(i, src.indexOf('\n}', i) + 2);
+  // Fatia a partir do `COORD_CASAS`: o arredondamento é parte do contrato da URL.
+  const iC = src.indexOf('const COORD_CASAS');
+  assert.ok(iC !== -1 && iC < i, 'COORD_CASAS sumiu ou saiu de antes da função');
+  const corpo = src.slice(iC, src.indexOf('\n}', i) + 2);
   const fn = new Function('WME_EDITOR_URL', corpo + '\nreturn linkWmeDoPedido;')('https://www.waze.com/editor');
 
   // Caso 1: NEW_PLACE — `venueID === updateRequestID` (213 de 503 na fila real).
@@ -1712,6 +1715,26 @@ test('o ↗ leva o LOCAL selecionado, o pedido aberto e a aba do editor', () => 
   }
   // O UUID do pedido NÃO pode aparecer em lugar nenhum da URL.
   assert.ok(!u2.href.includes('ab3f9d27'), 'o updateRequestID vazou pra URL — quebra em 58% dos cards');
+
+  // Coordenada vai com 5 casas, que é o `lonLatPrecision` do PRÓPRIO WME (lido no
+  // bundle v2.367: `units: { lonLatPrecision: 5 }`). Precisão cheia fazia a URL
+  // carregar 18 dígitos por eixo sem mudar um pixel do que a pessoa vê.
+  const arred = new URL(fn({ venueID: 'v',
+    lat: -23.393627149632096, lon: -45.00825664247903 }, 'row')).searchParams;
+  assert.equal(arred.get('lat'), '-23.39363', 'latitude não foi arredondada pras 5 casas do WME');
+  assert.equal(arred.get('lon'), '-45.00826', 'longitude não foi arredondada pras 5 casas do WME');
+  // Zero à direita CORTA — é o ponto do arredondamento (encurtar). O WME usa a
+  // mesma forma no "copiar coordenadas" (`Number(e.toFixed(s))`).
+  const curto = new URL(fn({ venueID: 'v', lat: -23.4, lon: -45 }, 'row')).searchParams;
+  assert.equal(curto.get('lat'), '-23.4', 'sobrou zero à direita na latitude');
+  assert.equal(curto.get('lon'), '-45', 'sobrou zero à direita na longitude');
+  // E nunca notação exponencial: o `toFixed(5)` já barra, mas se alguém trocar a
+  // constante por algo maior que 6 o `Number()` volta a poder produzir `1e-7`,
+  // que o WME leria como zero.
+  for (const v of [0.0000001, -0.0000001, 1e-9]) {
+    const u = new URL(fn({ venueID: 'v', lat: v, lon: v }, 'row')).searchParams;
+    assert.ok(!/e/i.test(u.get('lat')), `latitude saiu em exponencial: ${u.get('lat')}`);
+  }
 
   // `na` vira `usa` no env (tabela do wazeRefererEnv).
   assert.equal(new URL(fn({ venueID: 'v', lat: 1, lon: 2 }, 'na')).searchParams.get('env'), 'usa');

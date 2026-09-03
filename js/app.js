@@ -4615,6 +4615,26 @@ function cardParaConversa() {
 // Monta a URL do WME pro pedido — a MESMA regra do ↗ do card (env por região,
 // lat/lon com zoom 22, venueUpdateRequest com o venueID). Fonte única: o card e
 // a folha de leitura chamam daqui, senão os dois links divergem sem ninguém ver.
+// Casas decimais da coordenada no permalink. O número é do PRÓPRIO WME, lido no
+// bundle dele (v2.367): `units: { lonLatPrecision: 5 }`, e é esse valor que o
+// construtor de permalink aplica (`n.lat.toFixed(Config.units.lonLatPrecision)`).
+// As duas URLs que o owner colou vêm com 5 casas porque saíram de lá.
+//
+// Cinco casas são ~1,1 m. No zoom 22 isso são ~30 px de deslocamento no CENTRO
+// do mapa — e é aceitável porque quem marca o local é o `venues=`, não a
+// coordenada: ela só enquadra. Precisão maior alongaria a URL sem mudar o que a
+// pessoa vê selecionado.
+const COORD_CASAS = 5;
+
+// `Number(...)` por fora do `toFixed` corta zero à direita (`-23.40000` vira
+// `-23.4`), que é o objetivo aqui: encurtar. O próprio WME usa esta MESMA forma
+// no "copiar coordenadas" (`Number(e.toFixed(s))`); o permalink dele usa o
+// `toFixed` cru, e os dois valem o mesmo NÚMERO — a diferença é só o texto.
+//
+// Não vira notação exponencial: depois do `toFixed(5)` o menor valor não-nulo é
+// 0.00001, e o JS só troca pra exponencial abaixo de 1e-6.
+const coordDoLink = (n) => Number(n.toFixed(COORD_CASAS));
+
 // A URL do ↗ é um PERMALINK do WME, e a gramática dele é `tipoDeFeature=ids`.
 // MEDIDO no bundle do WME (v2.367, `app-f7541f99…js`): o construtor de permalink
 // espalha o `getMapSelection()` — um mapa `{tipo: ids}` — direto na query, e
@@ -4644,7 +4664,7 @@ function linkWmeDoPedido(dados, region) {
     // países de validação. Com `dados.lat && dados.lon` o zero cai fora e o
     // editor abre no último lugar que a pessoa estava, sem sintoma nenhum.
     if (Number.isFinite(dados.lat) && Number.isFinite(dados.lon)) {
-        params.push(`lat=${dados.lat}`, `lon=${dados.lon}`, 'zoomLevel=22');
+        params.push(`lat=${coordDoLink(dados.lat)}`, `lon=${coordDoLink(dados.lon)}`, 'zoomLevel=22');
     }
     if (dados.venueID) {
         const id = encodeURIComponent(dados.venueID);
