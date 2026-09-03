@@ -4550,11 +4550,44 @@ function cardParaConversa() {
 // Monta a URL do WME pro pedido — a MESMA regra do ↗ do card (env por região,
 // lat/lon com zoom 22, venueUpdateRequest com o venueID). Fonte única: o card e
 // a folha de leitura chamam daqui, senão os dois links divergem sem ninguém ver.
+// A URL do ↗ é um PERMALINK do WME, e a gramática dele é `tipoDeFeature=ids`.
+// MEDIDO no bundle do WME (v2.367, `app-f7541f99…js`): o construtor de permalink
+// espalha o `getMapSelection()` — um mapa `{tipo: ids}` — direto na query, e
+// `venues`/`venueUpdateRequest` são dois desses tipos. `feature_editor` é um
+// nome de aba (ao lado de `issue_tracker`, `areas`, `prefs`…). Ou seja: não é
+// truque, é o link que o próprio WME gera quando você seleciona os dois e copia.
+//
+// `venues=` e `tab=feature_editor` entraram a pedido do owner (2026-09-03): sem
+// eles o WME abria a SOLICITAÇÃO mas não selecionava o local, então quem clicava
+// pra corrigir ainda tinha que achar o lugar no mapa. Com eles, cai no editor do
+// local com a solicitação aberta — que é exatamente o que o ↗ promete, já que a
+// app não edita dado de local por princípio.
+//
+// Os DOIS levam o `venueID`, e é contraintuitivo: `venueUpdateRequest` NÃO leva
+// o id do pedido. Já estava assim (confirmado por HAR do WME nativo) e foi
+// reconfirmado agora com dado real — nas duas URLs que o owner colou, uma é
+// `NEW_PHOTO` cujo `updateRequestID` é um UUID (`ab3f9d27-…`) e mesmo assim o
+// permalink que FUNCIONA traz o venueID. Medido na fila do Brasil (503 pedidos):
+// `venueID === updateRequestID` só em `NEW_PLACE` (213); nos outros 290 o pedido
+// é UUID. Se algum dia alguém "consertar" isto passando o UUID, quebra em 58%
+// dos cards — travado em `test/layout.test.mjs`.
 function linkWmeDoPedido(dados, region) {
     const envParam = region === 'na' ? 'usa' : region;
     const params = [`env=${envParam}`];
-    if (dados.lat && dados.lon) params.push(`lat=${dados.lat}`, `lon=${dados.lon}`, 'zoomLevel=22');
-    if (dados.venueID) params.push(`venueUpdateRequest=${encodeURIComponent(dados.venueID)}`);
+    // `Number.isFinite` e não a checagem por verdade: latitude 0 corta o Brasil
+    // (Macapá) e longitude 0 corta o Reino Unido (Greenwich) — dois dos seis
+    // países de validação. Com `dados.lat && dados.lon` o zero cai fora e o
+    // editor abre no último lugar que a pessoa estava, sem sintoma nenhum.
+    if (Number.isFinite(dados.lat) && Number.isFinite(dados.lon)) {
+        params.push(`lat=${dados.lat}`, `lon=${dados.lon}`, 'zoomLevel=22');
+    }
+    if (dados.venueID) {
+        const id = encodeURIComponent(dados.venueID);
+        params.push(`venues=${id}`, `venueUpdateRequest=${id}`);
+        // A aba só entra COM seleção: `feature_editor` sem nada selecionado abre
+        // um painel vazio, que é pior que deixar o WME escolher a aba dele.
+        params.push('tab=feature_editor');
+    }
     return `${WME_EDITOR_URL}?${params.join('&')}`;
 }
 
