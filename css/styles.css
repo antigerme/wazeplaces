@@ -2346,3 +2346,11 @@ button:active {
    sendo quem manda depois (token vencido → showAuthScreen, e a regra some junto
    porque o JS tira a classe). */
 html.tem-sessao #authScreen { display: none; }
+
+/* O FAB do modo dev muda de canto sozinho quando a camada troca (abrir um modal
+   tapava o ✕ dele). Sem o deslize ele TELEPORTA, e some-e-aparece lê como
+   defeito. Durante o arrasto o JS zera isto inline — transição e dedo brigando
+   dá botão que "escorrega" atrás da mão. O reduced-motion global já cobre. */
+#devFab {
+  transition: left 0.16s ease, top 0.16s ease;
+}

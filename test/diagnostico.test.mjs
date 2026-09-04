@@ -229,3 +229,85 @@ test('a tela é lida pelo que decide o PIXEL, não por offsetParent', () => {
     'voltou o offsetParent — modal fixed volta a ser invisível pro diário');
   assert.match(corpo, /getComputedStyle/, 'a leitura precisa olhar o display computado');
 });
+
+// ── Onde o FAB nasce, e se dá pra tirá-lo de lá ───────────────────────────
+//
+// Os dois defeitos vieram do aparelho do owner. `tools/smoke-browser.mjs` os
+// mede no PIXEL, com toque de verdade — é lá que a geometria se prova. Aqui
+// ficam só as condições que dá pra travar sem browser, e que, se caírem,
+// derrubam o smoke inteiro sem ele saber por quê.
+
+test('o botão do FAB tem touch-action: none — sem isso o arrasto morre em 15px', () => {
+    // MEDIDO em 3 celulares antes do conserto: dos 20 movimentos de dedo
+    // despachados chegava UM, seguido de `pointercancel`. Com `touch-action`
+    // em `auto` o navegador reivindica o gesto como rolagem e cancela o
+    // ponteiro; o botão andava 10–17px e morria. É o `touch-none` que faz o
+    // arrasto existir — nenhuma linha de JS substitui.
+    assert.match(HTML, /id="devFabBtn"[^>]*\btouch-none\b/,
+        'sumiu o touch-none do #devFabBtn: o navegador volta a cancelar o arrasto');
+});
+
+test('o FAB é excluído da PRÓPRIA medição de canto', () => {
+    // `pointer-events: none` no contêiner NÃO tira o botão do hit-test, porque
+    // ele traz `pointer-events-auto`. Sem esta exclusão o FAB media a si mesmo,
+    // achava ocupado o canto onde já estava e FUGIA dele a cada troca de
+    // camada — o botão ficava saltando entre os dois cantos de cima.
+    const i = semCom.indexOf('function devFabVitimas(');
+    assert.ok(i !== -1, 'devFabVitimas sumiu');
+    const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
+    assert.match(corpo, /!fab\.contains\(alvo\)/,
+        'o FAB voltou a contar como obstáculo de si mesmo');
+    const j = semCom.indexOf('function posicionarFabDev(');
+    const pos = semCom.slice(j, semCom.indexOf('\n}\n', j));
+    assert.match(pos, /devFabBtn[\s\S]*?pointerEvents = 'none'/,
+        'o BOTÃO precisa sair do hit-test junto com o contêiner');
+    assert.match(pos, /if \(!fab \|\| devFabFixado/,
+        'a posição escolhida pelo editor tem que ganhar da automática');
+});
+
+test('arrastar fixa a posição no COMEÇO do gesto, não no fim', () => {
+    // Com toque o navegador dá captura implícita ao elemento do `pointerdown`,
+    // então o `pointerup` volta pro BOTÃO mesmo com o dedo do outro lado da
+    // tela — e o ouvinte do botão corre ANTES do da window. Marcando só no
+    // `fim`, arrastar registrava um momento que ninguém pediu, e o
+    // `atualizarFabDev` desse momento devolvia o botão pro canto automático:
+    // ele voltava sozinho pro lugar de onde tinha acabado de sair.
+    const iF = semCom.indexOf('function ligarFabDev(');
+    const fab = semCom.slice(iF, semCom.indexOf('\nfunction ', iF + 10));
+    const i = fab.indexOf('const mover = ');
+    assert.ok(i !== -1, 'o `mover` do arrasto sumiu');
+    const mover = fab.slice(i, fab.indexOf('};', i));
+    assert.match(mover, /arrastando = true; devFabFixado = true; foiSegurar = true;/,
+        'as três marcas do arrasto precisam cair juntas no início do gesto');
+    // e o cancelamento desmonta igual ao soltar, senão sobra ouvinte na window
+    assert.match(fab, /removeEventListener\('pointercancel', fim\)/,
+        'o `fim` não solta o pointercancel — gesto cancelado deixa ouvinte pra sempre');
+    assert.match(fab, /addEventListener\('pointercancel', fim\)/,
+        'o pointercancel não desmonta o arrasto');
+});
+
+test('todo id de camada vigiada pelo FAB existe no index.html', () => {
+    // `filter(Boolean)` come id errado SEM DIZER NADA, e comeu: eu tinha
+    // escrito `lightbox` e o elemento se chama `imageLightbox`, então o
+    // lightbox de foto simplesmente não era vigiado — o FAB não reavaliava o
+    // canto ao abrir a foto, e nada acusava.
+    const i = semCom.indexOf('const DEV_FAB_CAMADAS = [');
+    assert.ok(i !== -1, 'DEV_FAB_CAMADAS sumiu');
+    const lista = semCom.slice(i, semCom.indexOf(']', i));
+    const ids = [...lista.matchAll(/'([A-Za-z][\w-]*)'/g)].map((m) => m[1]);
+    assert.ok(ids.length >= 4, 'a lista de camadas ficou curta demais: ' + ids.join(','));
+    for (const id of ids) {
+        assert.ok(HTML.includes(`id="${id}"`), `#${id} é vigiado mas não existe no index.html`);
+    }
+    assert.ok(lista.includes('...MODAL_IDS'), 'os modais saíram da lista de camadas vigiadas');
+});
+
+test('desligar o modo dev apaga também a posição fixada do FAB', () => {
+    // "Apagar tudo do modo dev" inclui onde o editor deixou o botão — e é o
+    // único caminho de volta pra quem arrastou pra um lugar ruim e quer o
+    // automático de novo.
+    const i = semCom.indexOf('function dlogApagar(');
+    const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
+    assert.match(corpo, /devFabFixado = false/, 'a fixação sobrevive ao desligar');
+    assert.match(corpo, /removeItem\('__devFabPos'\)/, 'a posição fica gravada depois do desligar');
+});

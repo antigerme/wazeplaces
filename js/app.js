@@ -2879,6 +2879,12 @@ function dlogApagar() {
     for (const h of dlogPendencias.values()) clearTimeout(h);
     dlogPendencias.clear();
     try { for (const c of (API.chamadas || [])) { delete c.corpoResposta; delete c._bytes; } } catch (e) {}
+    // A posição em que o editor fixou o FAB é dado do modo dev como qualquer
+    // outro: desligar apaga, e ligar de novo devolve a escolha automática do
+    // canto. É também o único caminho de volta pra quem arrastou pra um lugar
+    // ruim e quer o automático de novo.
+    devFabFixado = false;
+    try { sessionStorage.removeItem('__devFabPos'); } catch (e) {}
     atualizarFabDev();
 }
 
@@ -2896,6 +2902,97 @@ function dlogNaoBaixados() { return Math.max(0, dlogMomentos.length - dlogBaixad
 // estado); o código, os caches e o ambiente entram UMA vez no relatório.
 const DEV_FAB_SEGURAR_MS = 550;
 
+// ── ONDE O FAB NASCE ──────────────────────────────────────────────────────
+//
+// O owner pediu "que ele nasça no melhor lugar possível, em todos os casos".
+// MEDIDO: esse lugar não existe como escolha fixa. O canto que está livre no
+// card é exatamente o que tapa o ✕ do modal — em 3 de 3 celulares o FAB em
+// cima à direita cobria `closeFilters` e `closeHelp` (no tablet, nenhum dos
+// dois). Trocar de canto só muda de vítima.
+//
+// Então o canto não se escolhe: ele se MEDE, com a régua que este projeto já
+// usa pra sobreposição (gotcha #26 — `elementFromPoint`, nunca retângulo, que
+// os dois retângulos existem e só o hit-test diz quem recebe o dedo). A cada
+// troca de camada o FAB testa os cantos na ordem de preferência e fica no
+// primeiro em que nada acionável passa por baixo dele.
+//
+// Duas escolhas que não são gosto:
+//  · **A posição do editor SEMPRE ganha.** Arrastou, fixou: a partir daí a app
+//    não mexe mais. Instrumento que foge da mão é pior que instrumento no
+//    lugar errado.
+//  · **Nada de canto embaixo no centro.** Ali moram os toasts, em z-70 — ACIMA
+//    do FAB. Não é o FAB que taparia o toast: é o toast que engoliria o toque
+//    no FAB, que é justamente o defeito que já custou o "dois toques
+//    registravam um momento só".
+const DEV_FAB_MARGEM = 12;
+// Faixa de baixo reservada aos toasts/Desfazer. Não é chute: o `#notifyStack`
+// se ancora em `bottom: 1rem + safe-area` e empilha caixas de ~56px.
+const DEV_FAB_RESERVA_TOAST = 96;
+const DEV_FAB_CANTOS = ['cima-dir', 'cima-esq', 'meio-dir', 'meio-esq', 'baixo-dir', 'baixo-esq'];
+// Quem, por baixo, desqualifica um canto. Só o que se TOCA — texto e foto o FAB
+// pode cobrir (e o editor arrasta se incomodar); botão, não.
+const DEV_FAB_ACIONAVEL = 'button, a[href], input, select, textarea, label[for], [role="button"], [tabindex]:not([tabindex="-1"])';
+
+let devFabFixado = false;   // o editor arrastou → a app não escolhe mais
+
+function devFabCoords(canto, w, h) {
+    const cab = document.querySelector('header');
+    const topo = (cab ? cab.getBoundingClientRect().bottom : 0) + 8;
+    const x = canto.endsWith('dir') ? innerWidth - w - DEV_FAB_MARGEM : DEV_FAB_MARGEM;
+    const y = canto.startsWith('cima') ? topo
+            : canto.startsWith('meio') ? Math.round((innerHeight - h) / 2)
+            : innerHeight - h - DEV_FAB_RESERVA_TOAST;
+    return { x, y: Math.max(topo, Math.min(innerHeight - h - DEV_FAB_MARGEM, y)) };
+}
+
+// Quantos controles acionáveis passariam por baixo do FAB neste canto.
+// Cinco pontos (centro + 4 cantos recuados) porque um ponto só no centro deixa
+// passar o alvo que encosta pela beirada — e alvo de 44px encostando é o caso
+// comum, não o raro.
+function devFabVitimas(canto, w, h, fab) {
+    const { x, y } = devFabCoords(canto, w, h);
+    const vitimas = new Set();
+    for (const [fx, fy] of [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]) {
+        const sob = document.elementFromPoint(x + w * fx, y + h * fy);
+        const alvo = sob && sob.closest(DEV_FAB_ACIONAVEL);
+        // O próprio FAB nunca conta como vítima. A segunda condição não é
+        // paranoia: `pointer-events: none` no contêiner NÃO tira o botão do
+        // hit-test, porque ele traz `pointer-events-auto` — e sem esta linha o
+        // FAB media a si mesmo, achava o canto onde já estava sempre ocupado e
+        // fugia dele a cada troca de camada.
+        if (alvo && !fab.contains(alvo)) vitimas.add(alvo);
+    }
+    return vitimas.size;
+}
+
+function posicionarFabDev() {
+    const fab = document.getElementById('devFab');
+    if (!fab || devFabFixado || fab.classList.contains('hidden')) return;
+    const r = fab.getBoundingClientRect();
+    const w = r.width || 44, h = r.height || 44;
+    // O FAB inteiro sai do hit-test durante a medição — contêiner E botão —
+    // senão ele não enxerga o que está POR BAIXO de si mesmo.
+    const btn = document.getElementById('devFabBtn');
+    const antes = fab.style.pointerEvents, antesBtn = btn ? btn.style.pointerEvents : '';
+    fab.style.pointerEvents = 'none';
+    if (btn) btn.style.pointerEvents = 'none';
+    let melhor = DEV_FAB_CANTOS[0], menos = Infinity;
+    try {
+        for (const canto of DEV_FAB_CANTOS) {
+            const n = devFabVitimas(canto, w, h, fab);
+            if (n < menos) { melhor = canto; menos = n; }
+            if (n === 0) break;   // ordem = preferência: o primeiro livre ganha
+        }
+    } finally {
+        fab.style.pointerEvents = antes;
+        if (btn) btn.style.pointerEvents = antesBtn;
+    }
+    const { x, y } = devFabCoords(melhor, w, h);
+    fab.style.left = x + 'px'; fab.style.top = y + 'px';
+    fab.style.right = 'auto'; fab.style.bottom = 'auto';
+    fab.dataset.canto = melhor;
+}
+
 function atualizarFabDev() {
     const fab = document.getElementById('devFab');
     if (!fab) return;
@@ -2907,11 +3004,13 @@ function atualizarFabDev() {
         selo.textContent = String(n);
         selo.classList.toggle('hidden', n === 0);
     }
+    if (ligado) posicionarFabDev();
 }
 
 function ligarFabDev() {
     const btn = document.getElementById('devFabBtn');
     if (!btn) return;
+    const fab = document.getElementById('devFab');
     let seguro = null, foiSegurar = false;
     const comecar = () => {
         foiSegurar = false;
@@ -2936,45 +3035,108 @@ function ligarFabDev() {
     // não dá pra distinguir toque de segurar sem inventar timer por cima.
     btn.addEventListener('pointerdown', comecar);
     btn.addEventListener('pointerup', soltar);
-    btn.addEventListener('pointercancel', () => { if (seguro) { clearTimeout(seguro); seguro = null; } });
-    // O botão flutua sobre a app inteira, então em ALGUMA tela ele vai tapar
-    // algo. Arrastar resolve sem a app ter que adivinhar o lugar bom — e a
-    // posição fica no `sessionStorage`, que morre com a aba: chave nova no
-    // localStorage exigiria decisão de logout (o guard cobra isso).
-    let arrastando = false, dx = 0, dy = 0;
+
+    // ── ARRASTAR ──────────────────────────────────────────────────────────
+    //
+    // Estava quebrado no aparelho do owner, e o meu teste não pegava porque
+    // rodava com MOUSE. Com TOQUE de verdade, MEDIDO em 3 celulares: dos 20
+    // movimentos de dedo despachados chegava **UM**, seguido de
+    // `pointercancel` — o botão andava 10 a 17px e morria. A causa é o
+    // `touch-action` do botão: em `auto` o navegador reivindica o gesto como
+    // rolagem assim que passa do próprio limiar dele e CANCELA o ponteiro. O
+    // conserto é `touch-none` no botão (index.html), e é ele que faz o arrasto
+    // existir — o resto aqui é o que impede o cancelamento de deixar lixo.
+    //
+    // Ouvir na `window` e não capturar o ponteiro é a regra do gotcha #56.
+    // Desenhar por QUADRO também: `pointermove` chega a 120Hz e escrever
+    // `left/top` a cada um é layout jogado fora.
+    let arrastando = false, dx = 0, dy = 0, quadro = 0, alvo = null;
+    const desenhar = () => {
+        quadro = 0;
+        if (!alvo) return;
+        fab.style.left = alvo.x + 'px'; fab.style.top = alvo.y + 'px';
+        fab.style.right = 'auto'; fab.style.bottom = 'auto';
+    };
     btn.addEventListener('pointerdown', (e) => {
-        const fab = document.getElementById('devFab');
         const r = fab.getBoundingClientRect();
         dx = e.clientX - r.left; dy = e.clientY - r.top;
+        fab.style.transition = 'none';   // dedo e transição brigando = botão escorregando
         const mover = (ev) => {
             if (!arrastando && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 8) return;
-            arrastando = true;
+            // Estas duas linhas moram AQUI, no COMEÇO do arrasto, e não no fim —
+            // e a diferença é visível. Com toque, o navegador dá captura
+            // implícita ao elemento do `pointerdown`, então o `pointerup` volta
+            // pro BOTÃO mesmo com o dedo do outro lado da tela; e o ouvinte do
+            // botão corre ANTES do da window. Marcando só no `fim`, arrastar
+            // registrava um momento que ninguém pediu e o `atualizarFabDev`
+            // dele recolocava o botão no canto automático — o FAB voltava
+            // sozinho pro lugar de onde tinha acabado de sair.
+            arrastando = true; devFabFixado = true; foiSegurar = true;
             if (seguro) { clearTimeout(seguro); seguro = null; }
-            const x = Math.min(innerWidth - r.width - 4, Math.max(4, ev.clientX - dx));
-            const y = Math.min(innerHeight - r.height - 4, Math.max(4, ev.clientY - dy));
-            fab.style.left = x + 'px'; fab.style.top = y + 'px';
-            fab.style.right = 'auto'; fab.style.bottom = 'auto';
+            alvo = {
+                x: Math.min(innerWidth - r.width - 4, Math.max(4, ev.clientX - dx)),
+                y: Math.min(innerHeight - r.height - 4, Math.max(4, ev.clientY - dy)),
+            };
+            if (!quadro) quadro = requestAnimationFrame(desenhar);
         };
+        // `pointercancel` tem que desmontar igual ao `pointerup`. Sem isto o
+        // gesto cancelado deixava `mover` e `fim` pendurados na window PRA
+        // SEMPRE — a cada toque sobrava mais um par, todos escrevendo a mesma
+        // posição a partir de coordenadas velhas.
         const fim = () => {
             removeEventListener('pointermove', mover);
             removeEventListener('pointerup', fim);
+            removeEventListener('pointercancel', fim);
+            if (quadro) { cancelAnimationFrame(quadro); quadro = 0; desenhar(); }
+            fab.style.transition = '';
             if (arrastando) {
                 try { sessionStorage.setItem('__devFabPos', fab.style.left + '|' + fab.style.top); } catch (er) {}
-                // Arrastou não é tocar: sem isto, mover o botão registrava um
-                // momento sem ninguém pedir.
-                foiSegurar = true;
                 setTimeout(() => { arrastando = false; }, 0);
             }
+            alvo = null;
         };
         addEventListener('pointermove', mover);
         addEventListener('pointerup', fim);
+        addEventListener('pointercancel', fim);
     });
+
+    // ── Quando reavaliar o canto ──────────────────────────────────────────
+    //
+    // Observador nos ELEMENTOS de camada, e não chamada espalhada em cada
+    // abrir/fechar: modal fecha por três caminhos (botão, Esc, scrim) e o
+    // lightbox por mais alguns — amarrar a um deles deixa os outros vazando, o
+    // gotcha dos modais deste projeto. Aqui o gatilho é o próprio `hidden`
+    // mudando, então nenhum caminho novo precisa lembrar de avisar.
+    // `filter(Boolean)` some com id errado SEM DIZER NADA, e foi o que
+    // aconteceu: escrevi `lightbox` e o elemento se chama `imageLightbox`, então
+    // o lightbox de foto simplesmente não era vigiado. `test/diagnostico.test.mjs`
+    // cobra que todo id desta lista exista no index.html.
+    const DEV_FAB_CAMADAS = [...MODAL_IDS, 'imageLightbox', 'mapaLightbox', 'appScreen', 'authScreen'];
+    const camadas = DEV_FAB_CAMADAS.map((id) => document.getElementById(id)).filter(Boolean);
+    let pendente = 0;
+    const reavaliar = () => {
+        if (pendente) return;
+        pendente = requestAnimationFrame(() => { pendente = 0; posicionarFabDev(); });
+    };
+    if (camadas.length) {
+        const obs = new MutationObserver(reavaliar);
+        for (const el of camadas) obs.observe(el, { attributes: true, attributeFilter: ['class'] });
+    }
+    addEventListener('resize', () => {
+        // Fixado, o FAB não se remove do lugar — mas precisa continuar DENTRO
+        // da tela quando ela gira ou encolhe, senão some pra fora sem volta.
+        if (!devFabFixado) return reavaliar();
+        const r = fab.getBoundingClientRect();
+        fab.style.left = Math.min(innerWidth - r.width - 4, Math.max(4, r.left)) + 'px';
+        fab.style.top = Math.min(innerHeight - r.height - 4, Math.max(4, r.top)) + 'px';
+    });
+
     try {
         const pos = sessionStorage.getItem('__devFabPos');
         if (pos) {
             const [x, y] = pos.split('|');
-            const fab = document.getElementById('devFab');
             fab.style.left = x; fab.style.top = y; fab.style.right = 'auto'; fab.style.bottom = 'auto';
+            devFabFixado = true;
         }
     } catch (e) {}
 }
