@@ -3519,6 +3519,186 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── FAB do modo dev: onde ele NASCE, e se dá pra mover ──────────────────
+//
+// Os dois defeitos vieram do aparelho do owner, e os dois passariam verde em
+// qualquer teste de mouse:
+//
+//  1. **Tapava o ✕ dos modais.** É o gotcha #26 outra vez (sobreposição só se
+//     mede por `elementFromPoint`; os dois retângulos existem e só o hit-test
+//     diz quem recebe o dedo). Medido antes do conserto: em 3 de 3 celulares o
+//     FAB cobria `closeFilters` e `closeHelp` — e no tablet, nenhum dos dois,
+//     que é justamente por que "escolher um canto bom" não resolve.
+//  2. **O arrasto morria em ~15px.** `touch-action: auto` faz o navegador
+//     reivindicar o gesto como rolagem e mandar `pointercancel`. Medido: dos
+//     20 movimentos de dedo despachados chegava UM.
+//
+// Por isso este bloco roda com TOQUE de verdade (`hasTouch`) e eventos de
+// toque por CDP — `mouse.move` nunca teria reproduzido nenhum dos dois.
+{
+  const ALVO_PROIBIDO = 'button, a[href], input, select, textarea, label[for], [role="button"], [tabindex]:not([tabindex="-1"])';
+  const APARELHOS_FAB = [['iPhone SE', { width: 375, height: 667 }],
+                         ['Pixel 7', { width: 412, height: 915 }],
+                         ['Galaxy Fold', { width: 280, height: 653 }]];
+  for (const [nomeAp, vp] of APARELHOS_FAB) {
+    const ctx = await browser.newContext({ viewport: vp, locale: 'pt-BR',
+      hasTouch: true, isMobile: true, serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    const errosF = [];
+    page.on('pageerror', (e) => errosF.push(e.message));
+    await page.goto(BASE, { waitUntil: 'load' });
+    // `assentar` entra por `page.evaluate`, e evaluate durante navegação morre
+    // com "Execution context was destroyed" — espera crua primeiro.
+    await page.waitForTimeout(600);
+    await page.waitForFunction(() => typeof AppState !== 'undefined');
+    await assentar(page, 200);
+    await page.evaluate((fila) => {
+      AppState.devMode = { unlocked: true, active: true };
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.queue = JSON.parse(JSON.stringify(fila));
+      AppState.currentPlace = AppState.queue[0];
+      AppState.serverTotal = fila.length; AppState.hasMore = false;
+      showMainScreen(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showCurrentPlace();
+      atualizarFabDev();
+    }, FIXTURES_PAISES.slice(0, 3));
+    await assentar(page, 400);
+
+    // ── nasce livre em toda camada ──────────────────────────────────────
+    const camadas = [
+      ['card', null],
+      ['Filtros', 'filtersModal'],
+      ['Ajuda', 'helpModal'],
+      ['lightbox', '__lightbox'],
+      ['de volta ao card', null],
+    ];
+    for (const [nome, id] of camadas) {
+      // Fechar e abrir no MESMO quadro é o gotcha #65: o `closeModal` AGENDA um
+      // `history.back()` e o `openModal` seguinte empilha, o back pendente come
+      // a entrada nova, e umas voltas depois a aba sai da app — que aqui
+      // aparecia como "Execution context was destroyed". Fecha num quadro, abre
+      // no outro. E fecha só o que está aberto: `closeModal` de modal fechado
+      // sai cedo, mas o do lightbox não tem essa guarda.
+      await page.evaluate(() => {
+        try { if (Lightbox.isOpen()) Lightbox.close(); } catch (e) {}
+        const aberto = MODAL_IDS.find((m) => !document.getElementById(m).classList.contains('hidden'));
+        if (aberto) closeModal(aberto);
+      });
+      await assentar(page, 250);
+      await page.evaluate((alvo) => {
+        if (alvo === '__lightbox') {
+          Lightbox.open(['data:image/gif;base64,R0lGODlhAQABAAAAACw='], 0, -1, 'x', false, AppState.currentPlace);
+        } else if (alvo) openModal(alvo);
+      }, id);
+      await assentar(page, 250);
+      const r = await page.evaluate((sel) => {
+        const fab = document.getElementById('devFab');
+        const btn = document.getElementById('devFabBtn');
+        // CONTROLE: a camada tem que estar mesmo na tela, senão a linha mede
+        // o card com outro nome e passa verde por engano.
+        const lb = document.getElementById('imageLightbox');
+        const viva = !lb.classList.contains('hidden') ? 'lightbox'
+          : (MODAL_IDS.find((i) => !document.getElementById(i).classList.contains('hidden')) || 'card');
+        const b = btn.getBoundingClientRect();
+        const pe = fab.style.pointerEvents, peB = btn.style.pointerEvents;
+        fab.style.pointerEvents = 'none'; btn.style.pointerEvents = 'none';
+        const tapa = new Set();
+        for (const [fx, fy] of [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]) {
+          const sob = document.elementFromPoint(b.left + b.width * fx, b.top + b.height * fy);
+          const a = sob && sob.closest(sel);
+          if (a && !fab.contains(a)) tapa.add(a.id || a.getAttribute('aria-label') || a.className.split(' ')[0]);
+        }
+        fab.style.pointerEvents = pe; btn.style.pointerEvents = peB;
+        // e o FAB precisa continuar RECEBENDO o dedo: canto livre com o botão
+        // enterrado sob outra camada seria "livre" e inútil.
+        const meu = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return { tapa: [...tapa], viva, alcancavel: !!meu && fab.contains(meu),
+                 visivel: b.width >= 44 && b.height >= 44 };
+      }, ALVO_PROIBIDO);
+      const esperada = id === '__lightbox' ? 'lightbox' : (id || 'card');
+      checa(r.viva === esperada, `FAB/${nomeAp}: "${nome}" não montou a camada`, r.viva);
+      checa(r.tapa.length === 0, `FAB/${nomeAp}: em "${nome}" o botão tapa controle`, r.tapa.join(', '));
+      checa(r.alcancavel, `FAB/${nomeAp}: em "${nome}" o próprio FAB não recebe o toque`);
+      checa(r.visivel, `FAB/${nomeAp}: em "${nome}" o alvo ficou menor que 44px`);
+    }
+
+    // ── arrastar de verdade, com o dedo ─────────────────────────────────
+    const antes = await page.evaluate(() => {
+      const b = document.getElementById('devFab').getBoundingClientRect();
+      return { x: b.left, y: b.top, w: b.width, h: b.height,
+               ta: getComputedStyle(document.getElementById('devFabBtn')).touchAction,
+               momentos: dlogMomentos.length };
+    });
+    checa(antes.ta === 'none',
+      `FAB/${nomeAp}: sem touch-action:none o navegador cancela o arrasto`, antes.ta);
+    const cdp = await ctx.newCDPSession(page);
+    const cx = antes.x + antes.w / 2, cy = antes.y + antes.h / 2;
+    const destinoX = 16 + antes.w / 2, destinoY = vp.height - 140;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy }] });
+    for (let i = 1; i <= 16; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove',
+        touchPoints: [{ x: cx + (destinoX - cx) * i / 16, y: cy + (destinoY - cy) * i / 16 }] });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await assentar(page, 400);
+    const dep = await page.evaluate(() => {
+      const b = document.getElementById('devFab').getBoundingClientRect();
+      return { x: b.left, y: b.top, momentos: dlogMomentos.length,
+               fixado: (() => { try { return !!sessionStorage.getItem('__devFabPos'); } catch (e) { return false; } })() };
+    });
+    const erroX = Math.abs(dep.x - (destinoX - antes.w / 2));
+    const erroY = Math.abs(dep.y - (destinoY - antes.h / 2));
+    checa(erroX <= 2 && erroY <= 2,
+      `FAB/${nomeAp}: o botão não parou onde o dedo largou`,
+      `pediu ${Math.round(destinoX - antes.w / 2)},${Math.round(destinoY - antes.h / 2)} · ficou ${Math.round(dep.x)},${Math.round(dep.y)}`);
+    checa(dep.fixado, `FAB/${nomeAp}: arrastar não fixou a posição`);
+    // Arrastar não é tocar. Com toque o `pointerup` volta pro BOTÃO (captura
+    // implícita) e o ouvinte dele corre ANTES do da window — marcar só no fim
+    // registrava um momento que ninguém pediu, e o `atualizarFabDev` desse
+    // momento devolvia o botão pro canto automático.
+    checa(dep.momentos === antes.momentos,
+      `FAB/${nomeAp}: arrastar registrou um momento sem ninguém pedir`,
+      `${antes.momentos} → ${dep.momentos}`);
+
+    // ── fixado, a app não mexe mais ─────────────────────────────────────
+    const depoisDeAbrirModal = await page.evaluate(() => {
+      openModal('filtersModal');
+      const b = document.getElementById('devFab').getBoundingClientRect();
+      return { x: b.left, y: b.top };
+    });
+    await assentar(page, 300);
+    const aindaLa = await page.evaluate(() => {
+      const b = document.getElementById('devFab').getBoundingClientRect();
+      return { x: b.left, y: b.top };
+    });
+    await page.evaluate(() => closeModal('filtersModal'));
+    await assentar(page, 200);
+    checa(Math.abs(aindaLa.x - depoisDeAbrirModal.x) <= 1 && Math.abs(aindaLa.y - depoisDeAbrirModal.y) <= 1,
+      `FAB/${nomeAp}: fixado pelo editor, mas a app o moveu sozinha`,
+      `${Math.round(depoisDeAbrirModal.x)},${Math.round(depoisDeAbrirModal.y)} → ${Math.round(aindaLa.x)},${Math.round(aindaLa.y)}`);
+
+    // ── desligar o modo dev devolve o automático ────────────────────────
+    const zerou = await page.evaluate(() => {
+      dlogApagar();
+      let sobrou = true;
+      try { sobrou = !!sessionStorage.getItem('__devFabPos'); } catch (e) {}
+      AppState.devMode.active = true; atualizarFabDev();
+      const b = document.getElementById('devFab').getBoundingClientRect();
+      return { sobrou, x: b.left, y: b.top };
+    });
+    checa(!zerou.sobrou, `FAB/${nomeAp}: desligar o modo dev deixou a posição fixada pra trás`);
+    checa(Math.abs(zerou.x - (vp.width - antes.w - 12)) <= 1,
+      `FAB/${nomeAp}: depois de apagar não voltou ao canto automático`,
+      `${Math.round(zerou.x)} ≠ ${vp.width - antes.w - 12}`);
+
+    checa(errosF.length === 0, `FAB/${nomeAp}: erro de JS`, errosF[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -3556,4 +3736,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
-  + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`);
+  + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
+  + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test, arrasta os 16 movimentos sem cancelar, fixa e a app respeita)`);
