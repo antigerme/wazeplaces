@@ -2353,4 +2353,21 @@ html.tem-sessao #authScreen { display: none; }
    dá botão que "escorrega" atrás da mão. O reduced-motion global já cobre. */
 #devFab {
   transition: left 0.16s ease, top 0.16s ease;
+  /* O balão "abrir/copiar" do toque longo rouba o gesto no Android e no iOS, e
+     não existe utility do Tailwind pra ele. As outras três defesas do arrasto
+     (`touch-none`, `select-none` e o `contextmenu` barrado) estão no HTML e no
+     app.js — as quatro juntas, como no `.place-card`, que é o gesto deste
+     projeto que comprovadamente funciona no aparelho do owner. */
+  -webkit-touch-callout: none;
+}
+
+/* O botão PEGO: cresce e ganha sombra. É o retorno que faltava por inteiro —
+   sem ele não dá pra saber se a app agarrou o botão ou se o toque se perdeu, e
+   "parece que tem algo segurando" é a descrição de um gesto sem resposta.
+   Vence o `active:scale-95` do Tailwind por especificidade (dois ids) E por
+   ordem (o styles.css entra depois no app.css, gotcha #27) — de propósito:
+   enquanto o dedo está em cima, quem manda é o "peguei", não o "apertei". */
+#devFab.fab-pego #devFabBtn {
+  transform: scale(1.18);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
 }

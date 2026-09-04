@@ -2894,13 +2894,19 @@ let dlogBaixados = 0;
 function dlogNaoBaixados() { return Math.max(0, dlogMomentos.length - dlogBaixados); }
 
 // ── O FAB ─────────────────────────────────────────────────────────────────
-// Toque = registra um momento. Segurar = baixa tudo. Dois gestos, um botão,
-// nenhum menu — o instrumento de socorro não pode ter caminho longo.
+// UM gesto de toque e UM de arrasto, e nada mais. Toque = registra um momento;
+// arrastar = move o botão. **Segurar NÃO faz mais nada**, e a remoção foi
+// pedida pelo defeito: pressionar-e-segurar É como se pega um botão flutuante,
+// então "segurar = baixar tudo" disputava com arrastar o mesmo começo de
+// gesto. O owner descreveu exatamente isso — "seguro nele e parece que tem
+// algo segurando" — e o diagnóstico que ele mandou tinha `momentos: 0`: ele
+// nunca chegou a TOCAR, só segurava, e o que saía era o download.
+// O baixar tudo continua inteiro no botão de Filtros → Avançado (`#diagBtn`),
+// que é onde ele já morava antes de eu duplicá-lo aqui.
 //
 // Registrar VÁRIOS momentos importa porque defeito raramente é um instante: o
 // que explica costuma ser "antes → ação → depois". Cada momento é leve (DOM +
 // estado); o código, os caches e o ambiente entram UMA vez no relatório.
-const DEV_FAB_SEGURAR_MS = 550;
 
 // ── ONDE O FAB NASCE ──────────────────────────────────────────────────────
 //
@@ -2916,6 +2922,11 @@ const DEV_FAB_SEGURAR_MS = 550;
 // troca de camada o FAB testa os cantos na ordem de preferência e fica no
 // primeiro em que nada acionável passa por baixo dele.
 //
+// A ordem de preferência também foi medida, não escolhida: pelo desvio-padrão
+// dos pixels em 20 telas (4 aparelhos × 5 tipos de card, pedidos reais), os
+// dois cantos de cima são ~3x mais vazios que qualquer outro (12,3 e 13,2
+// contra 30,9 a 46,0) E são os únicos sem controle por baixo em tela nenhuma.
+//
 // Duas escolhas que não são gosto:
 //  · **A posição do editor SEMPRE ganha.** Arrastou, fixou: a partir daí a app
 //    não mexe mais. Instrumento que foge da mão é pior que instrumento no
@@ -2924,6 +2935,11 @@ const DEV_FAB_SEGURAR_MS = 550;
 //    do FAB. Não é o FAB que taparia o toast: é o toast que engoliria o toque
 //    no FAB, que é justamente o defeito que já custou o "dois toques
 //    registravam um momento só".
+// Quanto tempo de dedo parado até o botão se dar por PEGO. 200ms é o toque
+// longo curto: rápido o bastante pra não parecer travado, longo o bastante pra
+// não pegar num toque comum. Toque devagar NÃO vira arrasto — quem decide é
+// ter andado ou não, não o relógio.
+const DEV_FAB_PEGAR_MS = 200;
 const DEV_FAB_MARGEM = 12;
 // Faixa de baixo reservada aos toasts/Desfazer. Não é chute: o `#notifyStack`
 // se ancora em `bottom: 1rem + safe-area` e empilha caixas de ~56px.
@@ -3011,68 +3027,79 @@ function ligarFabDev() {
     const btn = document.getElementById('devFabBtn');
     if (!btn) return;
     const fab = document.getElementById('devFab');
-    let seguro = null, foiSegurar = false;
-    const comecar = () => {
-        foiSegurar = false;
-        seguro = setTimeout(() => { foiSegurar = true; baixarDiagnostico(); }, DEV_FAB_SEGURAR_MS);
-    };
-    const soltar = () => {
-        if (seguro) { clearTimeout(seguro); seguro = null; }
-        if (foiSegurar) return;
-        const m = dlogCapturar('manual');
-        atualizarFabDev();
-        // SEM toast, e o motivo é o próprio instrumento: o toast vive em z-70,
-        // acima do FAB, e MEDIDO ele engolia o toque seguinte — dois toques
-        // registravam um momento só. Pior: ele entrava na captura seguinte, ou
-        // seja o instrumento passava a medir a si mesmo. O selo do botão já diz
-        // quantos há, e o pulso dá o retorno sem cobrir nada.
-        if (m) {
-            btn.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.25)' }, { transform: 'scale(1)' }],
-                        { duration: 220, easing: 'ease-out' });
-        }
-    };
-    // `pointerdown/up` e não `click`: o clique só chega DEPOIS do soltar, e aí
-    // não dá pra distinguir toque de segurar sem inventar timer por cima.
-    btn.addEventListener('pointerdown', comecar);
-    btn.addEventListener('pointerup', soltar);
 
-    // ── ARRASTAR ──────────────────────────────────────────────────────────
+    // ── PEGAR E ARRASTAR ──────────────────────────────────────────────────
     //
-    // Estava quebrado no aparelho do owner, e o meu teste não pegava porque
-    // rodava com MOUSE. Com TOQUE de verdade, MEDIDO em 3 celulares: dos 20
-    // movimentos de dedo despachados chegava **UM**, seguido de
-    // `pointercancel` — o botão andava 10 a 17px e morria. A causa é o
-    // `touch-action` do botão: em `auto` o navegador reivindica o gesto como
-    // rolagem assim que passa do próprio limiar dele e CANCELA o ponteiro. O
-    // conserto é `touch-none` no botão (index.html), e é ele que faz o arrasto
-    // existir — o resto aqui é o que impede o cancelamento de deixar lixo.
+    // Como o arrastar em mobile TEM que ser, e eu tinha errado o modelo antes
+    // de errar o código: **segurar É o jeito de pegar**. Ícone da tela
+    // inicial, bolha do Android, AssistiveTouch do iOS — em todos você
+    // pressiona, o elemento AVISA que foi pego, e a partir dali ele acompanha
+    // o dedo. O que existia aqui era o contrário: segurar disparava OUTRA
+    // coisa (baixar tudo) e arrastar só valia se o dedo saísse na hora. O
+    // owner descreveu o resultado exato — "seguro nele e parece que tem algo
+    // segurando" — e o diagnóstico dele veio com `momentos: 0`: ele nunca
+    // chegou a tocar, só segurava.
+    //
+    // Agora:
+    //   · segurou `DEV_FAB_PEGAR_MS` → PEGOU (o botão cresce e vibra), e daí
+    //     acompanha o dedo;
+    //   · saiu andando antes disso → pega na hora, sem esperar;
+    //   · soltou sem ter andado → é toque, registra um momento (não importa
+    //     quanto tempo segurou — toque devagar continua sendo toque).
+    //
+    // E o gesto precisa de QUATRO defesas, nenhuma opcional. A prova de que é
+    // assim está no próprio projeto: o swipe do card, que comprovadamente
+    // funciona no aparelho dele, tem `touch-action: none` **e**
+    // `user-select: none` juntos em `.place-card`. Eu tinha dado só o primeiro.
+    //   1. `touch-none` (index.html) — sem ele o navegador reivindica o gesto
+    //      como rolagem ao passar do próprio limiar e CANCELA o ponteiro.
+    //      MEDIDO: dos 20 movimentos de dedo despachados chegava UM.
+    //   2. `select-none` (index.html) — o selo do botão é TEXTO, e segurar em
+    //      texto no Android começa uma seleção, que também cancela o ponteiro.
+    //   3. `-webkit-touch-callout: none` (styles.css) — mata o balão de
+    //      "abrir/copiar" do toque longo, que não tem utility no Tailwind.
+    //   4. `contextmenu` barrado aqui — o toque longo do Android dispara esse
+    //      evento, e o menu que ele abre leva o gesto embora.
     //
     // Ouvir na `window` e não capturar o ponteiro é a regra do gotcha #56.
     // Desenhar por QUADRO também: `pointermove` chega a 120Hz e escrever
     // `left/top` a cada um é layout jogado fora.
-    let arrastando = false, dx = 0, dy = 0, quadro = 0, alvo = null;
+    let pego = false, arrastou = false, dx = 0, dy = 0, quadro = 0, alvo = null, relogio = null;
     const desenhar = () => {
         quadro = 0;
         if (!alvo) return;
         fab.style.left = alvo.x + 'px'; fab.style.top = alvo.y + 'px';
         fab.style.right = 'auto'; fab.style.bottom = 'auto';
     };
+    // O AVISO de que pegou é o que faltava por inteiro: sem ele não há como
+    // saber se a app agarrou o botão ou se o toque se perdeu — e "parece que
+    // tem algo segurando" é exatamente a descrição de um gesto sem retorno.
+    // São dois canais de propósito (WCAG 1.4.1 — sinal não pode viver só num):
+    // o botão CRESCE e o aparelho VIBRA.
+    const pegar = () => {
+        if (pego) return;
+        pego = true;
+        devFabFixado = true;
+        fab.classList.add('fab-pego');
+        try { navigator.vibrate && navigator.vibrate(12); } catch (e) {}
+    };
+    const soltarPega = () => {
+        pego = false;
+        fab.classList.remove('fab-pego');
+    };
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
     btn.addEventListener('pointerdown', (e) => {
+        arrastou = false;
         const r = fab.getBoundingClientRect();
         dx = e.clientX - r.left; dy = e.clientY - r.top;
         fab.style.transition = 'none';   // dedo e transição brigando = botão escorregando
+        relogio = setTimeout(pegar, DEV_FAB_PEGAR_MS);
         const mover = (ev) => {
-            if (!arrastando && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 8) return;
-            // Estas duas linhas moram AQUI, no COMEÇO do arrasto, e não no fim —
-            // e a diferença é visível. Com toque, o navegador dá captura
-            // implícita ao elemento do `pointerdown`, então o `pointerup` volta
-            // pro BOTÃO mesmo com o dedo do outro lado da tela; e o ouvinte do
-            // botão corre ANTES do da window. Marcando só no `fim`, arrastar
-            // registrava um momento que ninguém pediu e o `atualizarFabDev`
-            // dele recolocava o botão no canto automático — o FAB voltava
-            // sozinho pro lugar de onde tinha acabado de sair.
-            arrastando = true; devFabFixado = true; foiSegurar = true;
-            if (seguro) { clearTimeout(seguro); seguro = null; }
+            if (!pego && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 8) return;
+            if (relogio) { clearTimeout(relogio); relogio = null; }
+            pegar();
+            arrastou = true;
+            if (ev.cancelable) ev.preventDefault();
             alvo = {
                 x: Math.min(innerWidth - r.width - 4, Math.max(4, ev.clientX - dx)),
                 y: Math.min(innerHeight - r.height - 4, Math.max(4, ev.clientY - dy)),
@@ -3087,18 +3114,40 @@ function ligarFabDev() {
             removeEventListener('pointermove', mover);
             removeEventListener('pointerup', fim);
             removeEventListener('pointercancel', fim);
+            if (relogio) { clearTimeout(relogio); relogio = null; }
             if (quadro) { cancelAnimationFrame(quadro); quadro = 0; desenhar(); }
             fab.style.transition = '';
-            if (arrastando) {
+            soltarPega();
+            if (arrastou) {
                 try { sessionStorage.setItem('__devFabPos', fab.style.left + '|' + fab.style.top); } catch (er) {}
-                setTimeout(() => { arrastando = false; }, 0);
             }
             alvo = null;
         };
-        addEventListener('pointermove', mover);
+        addEventListener('pointermove', mover, { passive: false });
         addEventListener('pointerup', fim);
         addEventListener('pointercancel', fim);
     });
+
+    // ── TOCAR: registra um momento ────────────────────────────────────────
+    // A distinção é ANDOU ou não andou, nunca o tempo: toque devagar continua
+    // sendo toque, e é o que impede que segurar sem querer vire um beco.
+    // `pointerup` e não `click` porque, com captura implícita, o clique nem
+    // sempre chega quando o dedo saiu do botão.
+    const soltar = () => {
+        if (arrastou) return;   // arrastar não é tocar
+        const m = dlogCapturar('manual');
+        atualizarFabDev();
+        // SEM toast, e o motivo é o próprio instrumento: o toast vive em z-70,
+        // acima do FAB, e MEDIDO ele engolia o toque seguinte — dois toques
+        // registravam um momento só. Pior: ele entrava na captura seguinte, ou
+        // seja o instrumento passava a medir a si mesmo. O selo do botão já diz
+        // quantos há, e o pulso dá o retorno sem cobrir nada.
+        if (m) {
+            btn.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.25)' }, { transform: 'scale(1)' }],
+                        { duration: 220, easing: 'ease-out' });
+        }
+    };
+    btn.addEventListener('pointerup', soltar);
 
     // ── Quando reavaliar o canto ──────────────────────────────────────────
     //
@@ -3107,6 +3156,7 @@ function ligarFabDev() {
     // lightbox por mais alguns — amarrar a um deles deixa os outros vazando, o
     // gotcha dos modais deste projeto. Aqui o gatilho é o próprio `hidden`
     // mudando, então nenhum caminho novo precisa lembrar de avisar.
+    //
     // `filter(Boolean)` some com id errado SEM DIZER NADA, e foi o que
     // aconteceu: escrevi `lightbox` e o elemento se chama `imageLightbox`, então
     // o lightbox de foto simplesmente não era vigiado. `test/diagnostico.test.mjs`

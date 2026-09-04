@@ -17,7 +17,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { connect } from 'node:net';
+import { connect, createServer } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -293,17 +293,58 @@ async function entrar(porta, crachas, dados) {
   return ws;
 }
 
+// A porta se PERGUNTA ao sistema, nunca se sorteia. Sortear em [8100,8899] sem
+// conferir se está livre deixou o CI vermelho de vez em quando, e o sintoma não
+// se depurava: `test/csp-vm` (8218), `test/vm-gc` (8351 e 8352) e
+// `test/vm-estaticos` (8473) sobem `server/node.mjs` em porta FIXA dentro dessa
+// faixa, e o `node --test` roda os arquivos em PARALELO. Na colisão, o servidor
+// desta suíte não conseguia escutar e morria calado (`stdio: 'ignore'`) — mas o
+// laço de prontidão via o servidor DO OUTRO teste responder, o upgrade de
+// WebSocket funcionava (é o mesmo `server/node.mjs`) e só o crachá é que não
+// valia, porque a chave era outra. Resultado: "esperei 'eu' e não veio" depois
+// de 4s, num arquivo que passa sozinho 100% das vezes.
+// Com 5 servidores por execução e 4 portas fixas em 800, dá ~2,5% por rodada —
+// o padrão "quase sempre verde, às vezes vermelho" que ensina todo mundo a
+// ignorar o CI.
+function portaLivre() {
+  return new Promise((ok, falha) => {
+    const s = createServer();
+    s.on('error', falha);
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => ok(port));
+    });
+  });
+}
+
 async function comServidor(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'wp-sala-'));
-  const porta = 8100 + Math.floor(Math.random() * 800);
+  const porta = await portaLivre();
+  // `stdio: 'ignore'` era metade do problema: o filho que não conseguia escutar
+  // morria sem deixar rastro. Agora esperamos o ANÚNCIO dele — sinal POSITIVO,
+  // e não a ausência de um marcador (gotcha #62). Um `fetch` que responde não
+  // prova nada: na colisão quem respondia era o servidor do OUTRO arquivo de
+  // teste, e o nosso filho ainda nem tinha tentado escutar, então `exitCode`
+  // seguia `null` e qualquer checagem de "morreu?" passava batido.
   const p = spawn(process.execPath, [join(RAIZ, 'server', 'node.mjs')], {
     env: { ...process.env, PORT: String(porta), HOST: '127.0.0.1', SESSION_DIR: dir, ENCRYPTION_KEY: CHAVE_B64 },
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   try {
-    for (let i = 0; i < 80; i++) {
-      try { await fetch(`http://127.0.0.1:${porta}/`); break; } catch { await dormir(100); }
-    }
+    const subiu = new Promise((ok, falha) => {
+      let saida = '';
+      const prazo = setTimeout(() => falha(new Error(
+        `o servidor da sala não anunciou a porta ${porta} em 8s. Saída: ${saida.slice(0, 300)}`)), 8000);
+      p.stdout.on('data', (d) => {
+        saida += d;
+        if (saida.includes(`:${porta}`)) { clearTimeout(prazo); ok(); }
+      });
+      p.stderr.on('data', (d) => { saida += d; });
+      p.on('exit', (c, sig) => falha(new Error(
+        `o servidor da sala morreu ao subir na porta ${porta} (saída ${c ?? sig}) `
+        + `— porta tomada por outro teste? Saída: ${saida.slice(0, 300)}`)));
+    });
+    await subiu;
     await fn(porta, makeCrachas({ keyBytes: base64ToBytes(CHAVE_B64) }));
   } finally {
     p.kill('SIGKILL');
