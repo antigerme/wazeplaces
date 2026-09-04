@@ -3545,7 +3545,14 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       hasTouch: true, isMobile: true, serviceWorkers: 'block' });
     const page = await ctx.newPage();
     const errosF = [];
+    let baixouF = 0;
     page.on('pageerror', (e) => errosF.push(e.message));
+    page.on('download', () => { baixouF++; });
+    await page.addInitScript(() => {
+      window.__vib = [];
+      Object.defineProperty(navigator, 'vibrate',
+        { value: (n) => { window.__vib.push(n); return true; }, configurable: true });
+    });
     await page.goto(BASE, { waitUntil: 'load' });
     // `assentar` entra por `page.evaluate`, e evaluate durante navegação morre
     // com "Execution context was destroyed" — espera crua primeiro.
@@ -3624,19 +3631,46 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(r.visivel, `FAB/${nomeAp}: em "${nome}" o alvo ficou menor que 44px`);
     }
 
-    // ── arrastar de verdade, com o dedo ─────────────────────────────────
+    // ── o gesto DO OWNER: pressiona, SEGURA, e só então arrasta ─────────
+    //
+    // O teste antigo pressionava e já movia — e por isso deu verde num FAB que
+    // no aparelho dele não andava. O gesto natural pra pegar um botão
+    // flutuante é segurar primeiro (ícone da tela inicial, bolha do Android,
+    // AssistiveTouch), e era justamente esse que estava quebrado: segurar
+    // disparava OUTRA coisa e o `touch-action: auto` cancelava o ponteiro.
     const antes = await page.evaluate(() => {
       const b = document.getElementById('devFab').getBoundingClientRect();
+      const cs = getComputedStyle(document.getElementById('devFabBtn'));
       return { x: b.left, y: b.top, w: b.width, h: b.height,
-               ta: getComputedStyle(document.getElementById('devFabBtn')).touchAction,
+               ta: cs.touchAction, sel: cs.userSelect || cs.webkitUserSelect,
+               calo: getComputedStyle(document.getElementById('devFab')).webkitTouchCallout,
                momentos: dlogMomentos.length };
     });
     checa(antes.ta === 'none',
       `FAB/${nomeAp}: sem touch-action:none o navegador cancela o arrasto`, antes.ta);
+    checa(antes.sel === 'none',
+      `FAB/${nomeAp}: sem user-select:none segurar no selo começa uma seleção e cancela o toque`, antes.sel);
+    checa(!antes.calo || antes.calo === 'none',
+      `FAB/${nomeAp}: sem -webkit-touch-callout:none o balão do toque longo rouba o gesto`, antes.calo);
+
     const cdp = await ctx.newCDPSession(page);
     const cx = antes.x + antes.w / 2, cy = antes.y + antes.h / 2;
     const destinoX = 16 + antes.w / 2, destinoY = vp.height - 140;
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy }] });
+    await page.waitForTimeout(700);
+    // PEGOU? O aviso vive em dois canais de propósito (WCAG 1.4.1): sem ele
+    // não há como distinguir "a app agarrou" de "o toque se perdeu", que é a
+    // descrição literal que o owner deu — "parece que tem algo segurando".
+    const pego = await page.evaluate(() => ({
+      classe: document.getElementById('devFab').classList.contains('fab-pego'),
+      escala: getComputedStyle(document.getElementById('devFabBtn')).transform,
+      vib: window.__vib.length,
+    }));
+    checa(pego.classe, `FAB/${nomeAp}: segurar não pegou o botão`);
+    checa(/matrix\(1\.1/.test(pego.escala),
+      `FAB/${nomeAp}: pegou mas não cresceu — o aviso visual não chega`, pego.escala);
+    checa(pego.vib === 1, `FAB/${nomeAp}: pegou sem vibrar`, String(pego.vib));
+
     for (let i = 1; i <= 16; i++) {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove',
         touchPoints: [{ x: cx + (destinoX - cx) * i / 16, y: cy + (destinoY - cy) * i / 16 }] });
@@ -3647,14 +3681,14 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const dep = await page.evaluate(() => {
       const b = document.getElementById('devFab').getBoundingClientRect();
       return { x: b.left, y: b.top, momentos: dlogMomentos.length,
+               aindaPego: document.getElementById('devFab').classList.contains('fab-pego'),
                fixado: (() => { try { return !!sessionStorage.getItem('__devFabPos'); } catch (e) { return false; } })() };
     });
-    const erroX = Math.abs(dep.x - (destinoX - antes.w / 2));
-    const erroY = Math.abs(dep.y - (destinoY - antes.h / 2));
-    checa(erroX <= 2 && erroY <= 2,
+    checa(Math.abs(dep.x - (destinoX - antes.w / 2)) <= 2 && Math.abs(dep.y - (destinoY - antes.h / 2)) <= 2,
       `FAB/${nomeAp}: o botão não parou onde o dedo largou`,
       `pediu ${Math.round(destinoX - antes.w / 2)},${Math.round(destinoY - antes.h / 2)} · ficou ${Math.round(dep.x)},${Math.round(dep.y)}`);
     checa(dep.fixado, `FAB/${nomeAp}: arrastar não fixou a posição`);
+    checa(!dep.aindaPego, `FAB/${nomeAp}: soltou o dedo e o botão continuou "pego"`);
     // Arrastar não é tocar. Com toque o `pointerup` volta pro BOTÃO (captura
     // implícita) e o ouvinte dele corre ANTES do da window — marcar só no fim
     // registrava um momento que ninguém pediu, e o `atualizarFabDev` desse
@@ -3662,6 +3696,50 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(dep.momentos === antes.momentos,
       `FAB/${nomeAp}: arrastar registrou um momento sem ninguém pedir`,
       `${antes.momentos} → ${dep.momentos}`);
+    checa(baixouF === 0,
+      `FAB/${nomeAp}: o gesto baixou um arquivo — download no meio do arrasto leva o toque embora`,
+      String(baixouF));
+
+    // ── o botão fica SOB o dedo o trajeto inteiro ───────────────────────
+    // Parar no lugar certo não prova acompanhar: um botão que teleporta no
+    // fim passaria igual. Aqui o centro dele é conferido a cada perna.
+    let cxz = dep.x + antes.w / 2, cyz = dep.y + antes.h / 2, pior = 0;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cxz, y: cyz }] });
+    await page.waitForTimeout(250);
+    for (const [tx, ty] of [[vp.width - 40, 200], [40, vp.height - 200], [vp.width / 2, 140]]) {
+      for (let i = 1; i <= 8; i++) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove',
+          touchPoints: [{ x: cxz + (tx - cxz) * i / 8, y: cyz + (ty - cyz) * i / 8 }] });
+        await page.waitForTimeout(16);
+      }
+      cxz = tx; cyz = ty;
+      await page.waitForTimeout(40);
+      const c = await page.evaluate(() => {
+        const b = document.getElementById('devFab').getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      pior = Math.max(pior, Math.hypot(c.x - cxz, c.y - cyz));
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await assentar(page, 300);
+    checa(pior <= 3, `FAB/${nomeAp}: o botão se descolou do dedo no trajeto`, `${pior.toFixed(1)}px`);
+
+    // ── toque DEVAGAR continua sendo toque ──────────────────────────────
+    // Quem decide toque × arrasto é ter ANDADO, nunca o relógio: com o tempo
+    // decidindo, segurar sem querer viraria um beco sem ação nenhuma.
+    const antesLento = await page.evaluate(() => dlogMomentos.length);
+    const p2 = await page.evaluate(() => {
+      const b = document.getElementById('devFab').getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p2.x, y: p2.y }] });
+    await page.waitForTimeout(600);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await assentar(page, 300);
+    const depoisLento = await page.evaluate(() => dlogMomentos.length);
+    checa(depoisLento === antesLento + 1,
+      `FAB/${nomeAp}: toque devagar deixou de registrar momento`, `${antesLento} → ${depoisLento}`);
+    checa(baixouF === 0, `FAB/${nomeAp}: segurar voltou a baixar arquivo`, String(baixouF));
 
     // ── fixado, a app não mexe mais ─────────────────────────────────────
     // O #devFab tem transição de 0,16s e a reposição é adiada por rAF: ler o
@@ -3747,4 +3825,4 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
-  + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test, arrasta os 16 movimentos sem cancelar, fixa e a app respeita)`);
+  + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`);

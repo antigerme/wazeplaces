@@ -137,6 +137,7 @@ test('a leitura do modo dev NÃO passa por `window.` (gotcha #64)', () => {
 import { readFileSync as _rf } from 'node:fs';
 const APP = _rf(new URL('../js/app.js', import.meta.url), 'utf8');
 const HTML = _rf(new URL('../index.html', import.meta.url), 'utf8');
+const CSS = _rf(new URL('../css/app.css', import.meta.url), 'utf8');
 const semCom = APP.replace(/\/\/[^\n]*/g, '');
 
 test('o diário sai na PRIMEIRA linha quando o dev está desligado', () => {
@@ -265,27 +266,59 @@ test('o FAB é excluído da PRÓPRIA medição de canto', () => {
         'a posição escolhida pelo editor tem que ganhar da automática');
 });
 
-test('arrastar fixa a posição no COMEÇO do gesto, não no fim', () => {
-    // Com toque o navegador dá captura implícita ao elemento do `pointerdown`,
-    // então o `pointerup` volta pro BOTÃO mesmo com o dedo do outro lado da
-    // tela — e o ouvinte do botão corre ANTES do da window. Marcando só no
-    // `fim`, arrastar registrava um momento que ninguém pediu, e o
-    // `atualizarFabDev` desse momento devolvia o botão pro canto automático:
-    // ele voltava sozinho pro lugar de onde tinha acabado de sair.
+test('segurar PEGA o botão, com aviso, e arrastar não vira toque', () => {
+    // O modelo errado que gerou o defeito: segurar era um gesto CONCORRENTE
+    // (baixava tudo) e arrastar só valia se o dedo saísse na hora. Em mobile
+    // segurar É o jeito de pegar — ícone da tela inicial, bolha do Android,
+    // AssistiveTouch. E pegar sem AVISAR é indistinguível de toque perdido.
     const iF = semCom.indexOf('function ligarFabDev(');
     const fab = semCom.slice(iF, semCom.indexOf('\nfunction ', iF + 10));
-    const i = fab.indexOf('const mover = ');
-    assert.ok(i !== -1, 'o `mover` do arrasto sumiu');
-    const mover = fab.slice(i, fab.indexOf('};', i));
-    assert.match(mover, /arrastando = true; devFabFixado = true; foiSegurar = true;/,
-        'as três marcas do arrasto precisam cair juntas no início do gesto');
-    // e o cancelamento desmonta igual ao soltar, senão sobra ouvinte na window
-    assert.match(fab, /removeEventListener\('pointercancel', fim\)/,
-        'o `fim` não solta o pointercancel — gesto cancelado deixa ouvinte pra sempre');
-    assert.match(fab, /addEventListener\('pointercancel', fim\)/,
-        'o pointercancel não desmonta o arrasto');
+    assert.ok(!/baixarDiagnostico/.test(fab),
+        'o segurar voltou a baixar: isso disputa o mesmo começo de gesto do arrastar');
+    assert.match(fab, /setTimeout\(pegar, DEV_FAB_PEGAR_MS\)/,
+        'segurar parado não pega mais o botão');
+    // o aviso, nos DOIS canais (WCAG 1.4.1: sinal não pode viver só num)
+    const iP = fab.indexOf('const pegar = ');
+    const pegar = fab.slice(iP, fab.indexOf('};', iP));
+    assert.match(pegar, /classList\.add\('fab-pego'\)/, 'sumiu o aviso visual de pegou');
+    assert.match(pegar, /navigator\.vibrate/, 'sumiu o aviso tátil de pegou');
+    assert.match(pegar, /devFabFixado = true/, 'pegar precisa fixar: a app não pode mover o que está na mão');
+    // e o CSS do aviso existe de verdade no arquivo COMPILADO — classe que só
+    // existe no JS é indistinguível de classe certa se olhar só o JS
+    assert.match(CSS, /#devFab\.fab-pego #devFabBtn\{[^}]*transform:scale/,
+        'a classe fab-pego não tem estilo no css/app.css: o aviso visual não aparece');
+    // andou = arrasto, e arrasto NÃO registra momento
+    const iM = fab.indexOf('const mover = ');
+    const mover = fab.slice(iM, fab.indexOf('};', iM));
+    assert.match(mover, /pegar\(\);/, 'sair andando antes do relógio precisa pegar na hora');
+    assert.match(mover, /arrastou = true/, 'o arrasto não se marca, e vira toque ao soltar');
+    const iS = fab.indexOf('const soltar = ');
+    const soltar = fab.slice(iS, fab.indexOf('};', iS));
+    assert.match(soltar, /if \(arrastou\) return;/, 'arrastar voltou a registrar um momento');
+    assert.ok(!/Date\.now|performance\.now/.test(soltar),
+        'o toque voltou a depender do TEMPO: toque devagar tem que continuar sendo toque');
 });
 
+test('as QUATRO defesas do gesto de arrastar estão todas no lugar', () => {
+    // O swipe do card — o gesto que comprovadamente funciona no aparelho do
+    // owner — usa `touch-action: none` E `user-select: none` juntos. Dar só a
+    // primeira ao FAB foi o que deixou o arrasto morrendo em 15px.
+    assert.match(HTML, /id="devFabBtn"[^>]*\btouch-none\b/,
+        '1/4: sumiu o touch-none — o navegador volta a cancelar o arrasto');
+    assert.match(HTML, /id="devFabBtn"[^>]*\bselect-none\b/,
+        '2/4: sumiu o select-none — segurar no selo começa uma seleção e cancela o toque');
+    assert.match(CSS, /#devFab\{[^}]*-webkit-touch-callout:none/,
+        '3/4: sumiu o -webkit-touch-callout — o balão do toque longo rouba o gesto');
+    const iF2 = semCom.indexOf('function ligarFabDev(');
+    const fab2 = semCom.slice(iF2, semCom.indexOf('\nfunction ', iF2 + 10));
+    assert.match(fab2, /addEventListener\('contextmenu', \(e\) => e\.preventDefault\(\)\)/,
+        '4/4: o contextmenu do toque longo do Android voltou a abrir menu e levar o gesto');
+    // e o pointercancel desmonta igual ao pointerup
+    assert.match(fab2, /removeEventListener\('pointercancel', fim\)/,
+        'gesto cancelado deixa ouvinte pendurado na window pra sempre');
+    assert.match(fab2, /addEventListener\('pointercancel', fim\)/,
+        'o pointercancel não desmonta o arrasto');
+});
 test('todo id de camada vigiada pelo FAB existe no index.html', () => {
     // `filter(Boolean)` come id errado SEM DIZER NADA, e comeu: eu tinha
     // escrito `lightbox` e o elemento se chama `imageLightbox`, então o
