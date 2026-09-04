@@ -3664,31 +3664,41 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       `${antes.momentos} → ${dep.momentos}`);
 
     // ── fixado, a app não mexe mais ─────────────────────────────────────
-    const depoisDeAbrirModal = await page.evaluate(() => {
-      openModal('filtersModal');
+    // O #devFab tem transição de 0,16s e a reposição é adiada por rAF: ler o
+    // rect no MESMO quadro devolve a posição VELHA. É o gotcha #58 no eixo do
+    // TEMPO — medir o que a tela deu, sim, mas DEPOIS de ela ter dado. Aqui
+    // isso daria falso POSITIVO: a app poderia estar movendo o botão fixado e
+    // a leitura imediata diria que não.
+    const antesDoModal = await page.evaluate(() => {
       const b = document.getElementById('devFab').getBoundingClientRect();
       return { x: b.left, y: b.top };
     });
-    await assentar(page, 300);
+    await page.evaluate(() => openModal('filtersModal'));
+    await assentar(page, 400);
     const aindaLa = await page.evaluate(() => {
       const b = document.getElementById('devFab').getBoundingClientRect();
       return { x: b.left, y: b.top };
     });
     await page.evaluate(() => closeModal('filtersModal'));
-    await assentar(page, 200);
-    checa(Math.abs(aindaLa.x - depoisDeAbrirModal.x) <= 1 && Math.abs(aindaLa.y - depoisDeAbrirModal.y) <= 1,
+    await assentar(page, 300);
+    checa(Math.abs(aindaLa.x - antesDoModal.x) <= 1 && Math.abs(aindaLa.y - antesDoModal.y) <= 1,
       `FAB/${nomeAp}: fixado pelo editor, mas a app o moveu sozinha`,
-      `${Math.round(depoisDeAbrirModal.x)},${Math.round(depoisDeAbrirModal.y)} → ${Math.round(aindaLa.x)},${Math.round(aindaLa.y)}`);
+      `${Math.round(antesDoModal.x)},${Math.round(antesDoModal.y)} → ${Math.round(aindaLa.x)},${Math.round(aindaLa.y)}`);
 
     // ── desligar o modo dev devolve o automático ────────────────────────
-    const zerou = await page.evaluate(() => {
+    const sobrou = await page.evaluate(() => {
       dlogApagar();
-      let sobrou = true;
-      try { sobrou = !!sessionStorage.getItem('__devFabPos'); } catch (e) {}
+      let ficou = true;
+      try { ficou = !!sessionStorage.getItem('__devFabPos'); } catch (e) {}
       AppState.devMode.active = true; atualizarFabDev();
-      const b = document.getElementById('devFab').getBoundingClientRect();
-      return { sobrou, x: b.left, y: b.top };
+      return ficou;
     });
+    await assentar(page, 400);
+    const zerou = await page.evaluate(() => {
+      const b = document.getElementById('devFab').getBoundingClientRect();
+      return { sobrou: false, x: b.left, y: b.top };
+    });
+    zerou.sobrou = sobrou;
     checa(!zerou.sobrou, `FAB/${nomeAp}: desligar o modo dev deixou a posição fixada pra trás`);
     checa(Math.abs(zerou.x - (vp.width - antes.w - 12)) <= 1,
       `FAB/${nomeAp}: depois de apagar não voltou ao canto automático`,
