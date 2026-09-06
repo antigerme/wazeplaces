@@ -400,28 +400,25 @@ test('a pílula é contador · autor · idade, e só o NOME encolhe', () => {
     assert.ok(!/innerHTML/.test(bloco), 'nome de usuário é dado de terceiro: nunca innerHTML');
 });
 
-test('a pílula tem fundo SÓLIDO, anel de dois tons e teto de largura', () => {
-    // MEDIDO no pixel composto: o `bg-black/40` anterior dava 2,85:1 sobre foto
-    // clara (WCAG 1.4.3 pede 4,5:1), e a proporção que encosta na pílula é
-    // justamente 9:16 — o retrato da câmera de celular. Sólido fixa 17,85:1.
-    assert.ok(!/id="lightboxCount"[^>]*bg-black\//.test(HTML),
-        'voltou o fundo translúcido: o contraste passa a depender da foto');
+test('a pílula continua com o visual de sempre — sem crachá', () => {
+    // Eu troquei o fundo translúcido por chapado + anel branco "por contraste",
+    // e o resultado foi um CRACHÁ no canto da foto. O owner recusou na hora, e
+    // a lição não é sobre cor: eu tinha MEDIDO que em 4 das 6 proporções a
+    // pílula nem encosta na foto (cai na tarja preta do lightbox), e blindei as
+    // seis assim mesmo. Blindagem que resolve o caso raro e piora o comum é
+    // troca ruim. Este guard trava o visual de volta.
+    assert.match(HTML, /id="lightboxCount"[^>]*bg-black\/40/,
+        'sumiu o fundo translúcido de sempre');
     const m = CSS.match(/#lightboxCount\{([^}]*)\}/);
     assert.ok(m, 'o estilo da pílula sumiu do css/app.css');
-    assert.match(m[1], /background:#0f172a/, 'o fundo deixou de ser sólido');
-    // Dois tons, porque toda cor sólida encontra um fundo igual a ela (gotcha
-    // #40). A asserção olha a ESTRUTURA (um anel claro e um escuro) e não a
-    // grafia: o minificador reescreve `rgba(255,255,255,.35)` como
-    // `hsla(0,0%,100%,.35)`, e guard preso à forma reprova código certo assim
-    // que a ferramenta muda de ideia (gotcha #67).
-    const anelClaro = /border:1px solid (rgba\(255, ?255, ?255|hsla\(0, ?0%, ?100%)/;
-    const anelEscuro = /box-shadow:0 0 0 1px (rgba\(0, ?0, ?0|hsla\(0, ?0%, ?0%)/;
-    assert.match(m[1], anelClaro, 'sumiu o tom CLARO do anel — a pílula some contra foto escura');
-    assert.match(m[1], anelEscuro, 'sumiu o tom ESCURO do anel — a pílula some contra foto clara');
+    assert.ok(!/border:/.test(m[1]), 'voltou a borda: isso é o crachá que o owner recusou');
+    assert.ok(!/box-shadow:/.test(m[1]), 'voltou o anel: isso é o crachá que o owner recusou');
+    assert.ok(!/background:/.test(m[1]), 'voltou o fundo chapado: quem manda na cor é o utilitário');
+    // o que fica é só o que NÃO se vê e existe por causa do nome comprido
     assert.match(m[1], /max-width:calc\(100vw/, 'sem teto a pílula volta a cobrir o ✕');
-    // e o display fica escopado, senão o id derrota o .hidden (gotcha #27)
     assert.match(CSS, /#lightboxCount:not\(\.hidden\)\{[^}]*display:inline-flex/,
         'o display precisa do :not(.hidden) — id derrota o .hidden do Tailwind');
     assert.match(CSS, /\.lb-pill-nome\{[^}]*text-overflow:ellipsis/, 'o nome parou de truncar');
     assert.match(CSS, /\.lb-pill-fixo\{[^}]*flex:none/, 'contador e idade voltaram a poder encolher');
 });
+
