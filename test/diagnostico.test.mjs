@@ -420,5 +420,11 @@ test('a pílula continua com o visual de sempre — sem crachá', () => {
         'o display precisa do :not(.hidden) — id derrota o .hidden do Tailwind');
     assert.match(CSS, /\.lb-pill-nome\{[^}]*text-overflow:ellipsis/, 'o nome parou de truncar');
     assert.match(CSS, /\.lb-pill-fixo\{[^}]*flex:none/, 'contador e idade voltaram a poder encolher');
+    // `pre`, nunca `nowrap`: dentro de um flex, espaço no começo/fim de um ITEM
+    // é descartado, e os espaços em volta do "·" somem — a pílula cola tudo.
+    // MEDIDO: 206px contra 222px. O `textContent` continua com os espaços, então
+    // asserção sobre o TEXTO passa limpa; só o pixel denuncia (gotcha #58).
+    assert.match(CSS, /\.lb-pill-fixo\{[^}]*white-space:pre[;}]/,
+        'voltou o nowrap: os espaços em volta do "·" somem e a pílula cola tudo');
 });
 

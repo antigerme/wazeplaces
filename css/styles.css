@@ -2401,6 +2401,13 @@ html.tem-sessao #authScreen { display: none; }
 
 /* Contador e idade nunca encolhem: eram a informação que já estava lá, e cortar
    o que existia pra caber o que chegou depois é troca ruim. Quem cede é o NOME,
-   que é o único de comprimento imprevisível. */
-.lb-pill-fixo { flex: none; white-space: nowrap; }
+   que é o único de comprimento imprevisível.
+
+   `pre` e não `nowrap`, e a diferença é visível: dentro de um flex, cada pedaço
+   é um ITEM, e espaço no começo e no fim de um item é descartado na formatação
+   da linha. Com `nowrap` os espaços em volta do "·" sumiam e a pílula colava
+   tudo — MEDIDO: 206px contra os 222px de antes, que são exatamente os 4
+   espaços. E o `textContent` continuava com eles, então teste que olha o TEXTO
+   passa: só o pixel denuncia (gotcha #58). */
+.lb-pill-fixo { flex: none; white-space: pre; }
 .lb-pill-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 2.5rem; }
