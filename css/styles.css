@@ -2371,3 +2371,42 @@ html.tem-sessao #authScreen { display: none; }
   transform: scale(1.18);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
 }
+
+/* ── A pílula do canto do lightbox ────────────────────────────────────────
+   Ela diz três coisas da foto ABERTA: qual das N · de quem · de quando.
+
+   FUNDO SÓLIDO, e não é precaução — é caso medido. Com o `bg-black/40` que
+   havia aqui, o texto branco dava **2,85:1** sobre foto clara (WCAG 1.4.3 pede
+   4,5:1). E não é caso raro: a pílula só encosta na foto quando a proporção é
+   alta, e a que encosta é justamente **9:16**, o retrato da câmera de celular —
+   nas outras (3:4, 1:1, 4:3, 16:9) ela cai na tarja preta do lightbox. Sólido
+   fixa o contraste em 17,85:1 seja qual for a foto.
+
+   ANEL DE DOIS TONS pelo mesmo motivo do gotcha #40: toda cor sólida encontra
+   um fundo igual a ela. Sozinho, o `#0f172a` some contra a tarja preta (1,10:1)
+   e a borda branca sozinha não salva (2,70:1). Com os dois tons, 3,49:1 — um
+   deles sempre contrasta.
+
+   O `:not(.hidden)` NÃO é enfeite: `display` num seletor de ID derrota o
+   `.hidden` do Tailwind (o styles.css entra depois no app.css), e a pílula
+   nunca mais esconderia — gotcha #27, que já mordeu 6 vezes neste projeto. */
+#lightboxCount:not(.hidden) {
+  display: inline-flex;
+  align-items: center;
+}
+
+#lightboxCount {
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  /* Teto: o ✕ mora em `right: 0.75rem` e tem 2.75rem. Sem isto a pílula cresce
+     até cobri-lo — MEDIDO no Galaxy Fold: 260px com `world_onm8fgfi`, que é a
+     forma de 69% dos nomes, e o dedo deixava de alcançar o fechar. */
+  max-width: calc(100vw - 4.75rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+}
+
+/* Contador e idade nunca encolhem: eram a informação que já estava lá, e cortar
+   o que existia pra caber o que chegou depois é troca ruim. Quem cede é o NOME,
+   que é o único de comprimento imprevisível. */
+.lb-pill-fixo { flex: none; white-space: nowrap; }
+.lb-pill-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 2.5rem; }
