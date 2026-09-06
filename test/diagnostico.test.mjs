@@ -344,3 +344,84 @@ test('desligar o modo dev apaga também a posição fixada do FAB', () => {
     assert.match(corpo, /devFabFixado = false/, 'a fixação sobrevive ao desligar');
     assert.match(corpo, /removeItem\('__devFabPos'\)/, 'a posição fica gravada depois do desligar');
 });
+
+// ── Autor da foto na pílula do lightbox ──────────────────────────────────
+//
+// O owner viu no WME ("Enviado 01/11/2014 por Coskobeu") e perguntou se dava
+// pra ter. Dá — e a MEDIÇÃO é a parte que quase me fez responder errado: com o
+// filtro `residential: true` a cobertura é 0,4%, e eu cheguei a concluir que o
+// dado não existia. Com o filtro que a app REALMENTE manda (`residential:
+// null`), são 1579 de 1595 fotos já no mapa (99,0%), e 23,7% dos locais têm
+// fotos de PESSOAS DIFERENTES no mesmo carrossel.
+
+const CORE_SRC = _rf(new URL('../server/core.mjs', import.meta.url), 'utf8');
+
+test('o core manda o autor POR FOTO, com o nome já resolvido', () => {
+    // O dicionário `users` chega na mesma resposta; o frontend não teria como
+    // resolver o id depois. E id sem nome vira o número — feio, nunca invisível.
+    const i = CORE_SRC.indexOf('const imageAuthors = {}');
+    assert.ok(i !== -1, 'imageAuthors sumiu do core');
+    const bloco = CORE_SRC.slice(i, CORE_SRC.indexOf('\n    }', i));
+    assert.match(bloco, /img\.creatorUserId != null/,
+        'a leitura do autor da foto mudou de campo');
+    assert.match(bloco, /usersDict\[img\.creatorUserId\]/, 'o nome parou de ser resolvido');
+    assert.match(bloco, /String\(img\.creatorUserId\)/,
+        'id sem nome no dicionário precisa aparecer como número, nunca sumir');
+    assert.match(CORE_SRC, /\n        imageAuthors,/, 'imageAuthors não é mais devolvido no place');
+});
+
+test('a atribuição é POR FOTO; o autor do pedido só vale para a foto NOVA', () => {
+    // 23,7% dos carrosséis misturam pessoas: herdar o autor do pedido para
+    // todas estaria errado em um de cada quatro locais — e esta é a tela onde
+    // se APROVA e se EXCLUI, o pior lugar para uma atribuição errada.
+    const i = semCom.indexOf('    autorDaFotoAtual() {');
+    assert.ok(i !== -1, 'autorDaFotoAtual sumiu');
+    const corpo = semCom.slice(i, semCom.indexOf('\n    },', i));
+    const iMapa = corpo.indexOf('p.imageAuthors');
+    const iPedido = corpo.indexOf('p.createdBy');
+    assert.ok(iMapa !== -1 && iPedido !== -1, 'sumiu uma das duas fontes de autoria');
+    assert.ok(iMapa < iPedido, 'o autor da PRÓPRIA foto tem que ser consultado primeiro');
+    // e o createdBy só entra colado na condição do ✨
+    assert.match(corpo, /this\.idx === this\.newIdx && p\.createdBy/,
+        'o autor do pedido deixou de estar preso à foto do ✨: ele vazaria para as outras');
+});
+
+test('a pílula é contador · autor · idade, e só o NOME encolhe', () => {
+    const i = semCom.indexOf('const autor = this.autorDaFotoAtual();');
+    assert.ok(i !== -1, 'a pílula parou de perguntar o autor');
+    const bloco = semCom.slice(i, semCom.indexOf('badge.textContent', i));
+    const pos = ['this.urls.length}`, fixo: true', 'txt: autor', 'txt: idade']
+        .map((t) => bloco.indexOf(t));
+    assert.ok(pos.every((p) => p !== -1), 'sumiu uma das partes da pílula');
+    assert.ok(pos[0] < pos[1] && pos[1] < pos[2],
+        'a ordem mudou: tem que ser contador · autor · idade');
+    assert.match(bloco, /n\.className = parte\.fixo \? 'lb-pill-fixo' : 'lb-pill-nome'/,
+        'só o nome pode encolher — cortar a idade seria perder o que já existia');
+    assert.ok(!/innerHTML/.test(bloco), 'nome de usuário é dado de terceiro: nunca innerHTML');
+});
+
+test('a pílula tem fundo SÓLIDO, anel de dois tons e teto de largura', () => {
+    // MEDIDO no pixel composto: o `bg-black/40` anterior dava 2,85:1 sobre foto
+    // clara (WCAG 1.4.3 pede 4,5:1), e a proporção que encosta na pílula é
+    // justamente 9:16 — o retrato da câmera de celular. Sólido fixa 17,85:1.
+    assert.ok(!/id="lightboxCount"[^>]*bg-black\//.test(HTML),
+        'voltou o fundo translúcido: o contraste passa a depender da foto');
+    const m = CSS.match(/#lightboxCount\{([^}]*)\}/);
+    assert.ok(m, 'o estilo da pílula sumiu do css/app.css');
+    assert.match(m[1], /background:#0f172a/, 'o fundo deixou de ser sólido');
+    // Dois tons, porque toda cor sólida encontra um fundo igual a ela (gotcha
+    // #40). A asserção olha a ESTRUTURA (um anel claro e um escuro) e não a
+    // grafia: o minificador reescreve `rgba(255,255,255,.35)` como
+    // `hsla(0,0%,100%,.35)`, e guard preso à forma reprova código certo assim
+    // que a ferramenta muda de ideia (gotcha #67).
+    const anelClaro = /border:1px solid (rgba\(255, ?255, ?255|hsla\(0, ?0%, ?100%)/;
+    const anelEscuro = /box-shadow:0 0 0 1px (rgba\(0, ?0, ?0|hsla\(0, ?0%, ?0%)/;
+    assert.match(m[1], anelClaro, 'sumiu o tom CLARO do anel — a pílula some contra foto escura');
+    assert.match(m[1], anelEscuro, 'sumiu o tom ESCURO do anel — a pílula some contra foto clara');
+    assert.match(m[1], /max-width:calc\(100vw/, 'sem teto a pílula volta a cobrir o ✕');
+    // e o display fica escopado, senão o id derrota o .hidden (gotcha #27)
+    assert.match(CSS, /#lightboxCount:not\(\.hidden\)\{[^}]*display:inline-flex/,
+        'o display precisa do :not(.hidden) — id derrota o .hidden do Tailwind');
+    assert.match(CSS, /\.lb-pill-nome\{[^}]*text-overflow:ellipsis/, 'o nome parou de truncar');
+    assert.match(CSS, /\.lb-pill-fixo\{[^}]*flex:none/, 'contador e idade voltaram a poder encolher');
+});

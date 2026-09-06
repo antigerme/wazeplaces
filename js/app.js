@@ -1322,11 +1322,37 @@ const Lightbox = {
         // "1 / 1" seria ruído: fica só a idade.
         const ms = this.dataDaFotoAtual();
         const idade = idadeDaFoto(ms);
+        const autor = this.autorDaFotoAtual();
+        // Ordem: QUAL foto · DE QUEM · DE QUANDO. Posição, identidade, tempo —
+        // é a que se lê sem tropeçar, e foi a escolhida pelo owner nos mockups.
+        //
+        // Montado com nós, não com `textContent` de uma string só, porque o
+        // NOME vem da rede e precisa encolher sozinho: no Galaxy Fold a pílula
+        // com `world_onm8fgfi` media 260px e ATROPELAVA o ✕ (medido por
+        // hit-test). Só o nome tem `text-overflow`; contador e idade são
+        // `flex:none` e sobrevivem sempre — cortar a idade seria perder a
+        // informação que já existia pra caber a que chegou depois.
+        //
+        // `textContent` em cada nó, nunca innerHTML: nome de usuário é dado de
+        // terceiro.
         const partes = [];
-        if (multiple) partes.push(`${this.idx + 1} / ${this.urls.length}`);
-        if (idade) partes.push(idade);
+        if (multiple) partes.push({ txt: `${this.idx + 1} / ${this.urls.length}`, fixo: true });
+        if (autor) partes.push({ txt: autor, fixo: false });
+        if (idade) partes.push({ txt: idade, fixo: true });
         count.classList.toggle('hidden', partes.length === 0);
-        count.textContent = partes.join(' · ');
+        count.textContent = '';
+        partes.forEach((parte, i) => {
+            if (i) {
+                const sep = document.createElement('span');
+                sep.className = 'lb-pill-fixo';
+                sep.textContent = ' · ';
+                count.appendChild(sep);
+            }
+            const n = document.createElement('span');
+            n.className = parte.fixo ? 'lb-pill-fixo' : 'lb-pill-nome';
+            n.textContent = parte.txt;
+            count.appendChild(n);
+        });
         // A data exata fica no title: a forma curta responde "é velha?", que é
         // a pergunta de decisão; quem precisar do dia tem onde olhar.
         if (ms) count.title = new Date(ms).toLocaleString(i18nLocale());
@@ -1439,6 +1465,32 @@ const Lightbox = {
         const url = this.urls[this.idx] || '';
         const id = Object.keys(mapa).find((k) => k && url.indexOf(k) !== -1);
         return id ? mapa[id] : null;
+    },
+    // QUEM mandou a foto aberta. Duas fontes, e a ordem importa:
+    //
+    //  1. `imageAuthors` (o `creatorUserId` da própria foto). É a única
+    //     atribuição que vale pro carrossel inteiro — MEDIDO: 23,7% dos locais
+    //     têm fotos de pessoas DIFERENTES, então herdar o autor do pedido
+    //     estaria errado num de cada quatro. E aqui se APROVA e se EXCLUI: uma
+    //     atribuição errada numa tela dessas é o pior lugar possível.
+    //  2. Só a foto do ✨ — a proposta NESTE pedido, que ainda não está no mapa
+    //     e por isso não tem `creatorUserId` — cai no `createdBy` do pedido.
+    //     Aí não há ambiguidade: o card é de UM pedido, e quem o enviou enviou
+    //     essa foto. É o mesmo par que o WME mostra.
+    //
+    // Sem nenhuma das duas, devolve null e a pílula simplesmente não fala do
+    // assunto — mesmo comportamento do contador quando há uma foto só.
+    autorDaFotoAtual() {
+        const p = this.place;
+        if (!p) return null;
+        const url = this.urls[this.idx] || '';
+        const mapa = p.imageAuthors;
+        if (mapa) {
+            const id = Object.keys(mapa).find((k) => k && url.indexOf(k) !== -1);
+            if (id && mapa[id]) return String(mapa[id]);
+        }
+        if (this.newIdx >= 0 && this.idx === this.newIdx && p.createdBy) return String(p.createdBy);
+        return null;
     },
     idFotoAtual() {
         const p = this.place;

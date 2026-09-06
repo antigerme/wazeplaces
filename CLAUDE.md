@@ -481,6 +481,18 @@ Volta `{ success, places[], hasMore, page, total }`. Cada `place`:
 
 A regra NÃO é "residencial não tem autor" — é mais fina: **quem CRIA conteúdo numa casa é anônimo; pedido SOBRE uma casa que já existe às vezes tem autor.** E não é registro pobre: os mesmos pedidos trazem `flagComment`, `flagType`, `source` e `changedVenue` normalmente. O que sai é a superfície identificável inteira — comparado ao não-residencial, o venue perde `createdBy`, `updatedBy`, `name`, `phone`, `url`, `description`, `aliases`, `brand`, `lockRank`, `services`, `openingHours`. Morador e denunciante juntos. **Isso não vai ser "corrigido" pelo Waze: é a proteção funcionando.**
 
+**A EXCEÇÃO que sobra é RESÍDUO, e a app MOSTRA — decisão do owner, e ela vale
+como princípio geral: "vamos sempre trabalhar com dados que o Waze fornece; se
+o Waze realmente quisesse suprimir, eles mesmos teriam feito isso."** Quando um
+local residencial vem com autor, normalmente ele **não era** residencial quando
+o conteúdo entrou: foi convertido depois, e o campo ficou pra trás. A medição
+corrobora — numa varredura restrita a residenciais, as 7 fotos de 1596 que
+trazem `creatorUserId` têm idade mediana de **2020**, contra **2026** nas 1589
+sem. Antes de propor suprimir isso de novo (eu propus uma vez, e o owner
+recusou): a app é cliente de dado que o editor já vê no WME, decidir o que o
+Waze "deveria" ter escondido é assumir uma política que não é nossa, e o
+resíduo não muda decisão nenhuma — some sozinho conforme o acervo gira.
+
 **Não existe caminho alternativo — cinco tentados, todos mortos:** (a) `venue.createdBy`/`updatedBy`, ausentes (presentes em 100% dos não-residenciais); (b) `mapIssueId` resolve em `mapIssues.venueUpdateRequests.objects`, mas o objeto só traz `countryId/stateId/cityId/updateTime/isRead/isStarred` — geografia, nenhuma pessoa; (c) dicionário `users`, 76 órfãos contra 6 residenciais, sem correspondência; (d) componentes do id do venue, 6 valores distintos em cada uma das 3 posições; (e) heurística de rajada — as 8 fotos anônimas da França estão em 8 ruas, 8 locais e 7 dias distintos, espalhadas da Normandia a Lyon.
 
 **Consequência que importa pro recurso de spammer:** foto em local comercial traz autor em **397 de 397**; foto em CASA, em **0 de 8**. Pacote é entregue em casa, então o entregador que fotografa pacote pode ser invisível pro contador de reincidência — não por bug, mas porque o dado não existe. Hoje o volume é ínfimo (0 no Brasil), então **a decisão foi não fazer nada**; reavaliar só se o padrão aparecer na fila.

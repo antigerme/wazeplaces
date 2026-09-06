@@ -1600,11 +1600,35 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     // carrossel reordena e o frontend remove foto excluída da lista, então
     // posição não identifica nada.
     const imageDates = {};
+    // QUEM mandou cada foto, por id. O campo é `creatorUserId` no objeto de
+    // imagem, e o WME mostra exatamente isso ("Enviado 01/11/2014 por
+    // Coskobeu") — foi o owner que apontou, com um local em que aparece.
+    //
+    // MEDIDO na fila real dos 13 países de validação, com o MESMO filtro que a
+    // app manda (`residential: null`): das 1595 fotos JÁ NO MAPA, 1579 (99,0%)
+    // trazem o campo. E 23,7% dos locais têm fotos de PESSOAS DIFERENTES no
+    // mesmo carrossel — é por isso que a atribuição tem que ser POR FOTO e
+    // nunca herdada de quem mandou o pedido, que é o que o card já diz.
+    //
+    // Cuidado com a medição: com `residential: true` a conta dá 0,4%, porque o
+    // Waze anonimiza local residencial de propósito (ver a seção de endpoints).
+    // Medir a fila errada aqui derruba o recurso inteiro por engano.
+    //
+    // Guarda o NOME já resolvido, não o id: o dicionário `users` chega na mesma
+    // resposta e o frontend não tem como resolvê-lo depois. Id sem nome no
+    // dicionário vira o próprio número — feio, nunca invisível (mesma regra do
+    // `creatorName`). Conta apagada vem do Waze como "Inactive User", e sai
+    // assim mesmo: é o que o WME mostra, e traduzir seria inventar identidade.
+    const imageAuthors = {};
     for (const img of venue.images || []) {
       if (!img || !img.id) continue;
       allImageUrls.push(WAZE_IMAGE_BASE + img.id);
       if (img.approved === true) approvedImageIds.push(img.id);
       if (Number.isFinite(img.date) && img.date > 0) imageDates[img.id] = img.date;
+      if (img.creatorUserId != null) {
+        const dono = usersDict[img.creatorUserId];
+        imageAuthors[img.id] = dono && dono.userName ? dono.userName : String(img.creatorUserId);
+      }
     }
 
     for (const ur of venue.venueUpdateRequests) {
@@ -1825,6 +1849,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         imageUrls: allImageUrls,
         approvedImageIds,
         imageDates,
+        imageAuthors,
         changes,
         brand,
         brandKnown,
