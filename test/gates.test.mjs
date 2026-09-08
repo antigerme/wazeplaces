@@ -76,6 +76,17 @@ test('portão L6: cada recurso tem o SEU nome, e todos delegam', () => {
   assert.ok(chamadas <= DELEGADORES.length + 1,
     `a base é chamada ${chamadas} vezes; esperado no máximo ${DELEGADORES.length + 1}`
     + ' (um por delegador + a própria definição). Recurso novo precisa da sua função.');
+
+  // E o CLAUDE.md nomeia os MESMOS. Este guard existe porque a lista JÁ
+  // divergiu: `podeRecusarAutomaticoAqui` entrou aqui e nunca chegou ao doc,
+  // então o arquivo que descreve os portões listava três de quatro — e o
+  // esquecido é o único que rejeita SOZINHO, em lote. Sem isto, a divergência é
+  // invisível: o teste passa, o doc mente, e quem lê o doc é o próximo agente.
+  const doc = readFileSync(new URL('../CLAUDE.md', import.meta.url), 'utf8');
+  for (const nome of DELEGADORES) {
+    assert.ok(doc.includes(nome),
+      `${nome} é um recurso destrutivo mas não está nomeado no CLAUDE.md (gotcha #16)`);
+  }
 });
 
 test('portões: ENTRAR (L3, servidor) e AGIR (L6, cliente) são níveis diferentes de propósito', () => {
