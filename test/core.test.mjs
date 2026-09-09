@@ -88,12 +88,16 @@ test('categorizeWazeError: casos reais do HAR e fallbacks', () => {
   assert.equal(c(418, 'teapot'), 'unknown');
 });
 
-test('isUserAllowed: matriz do gate (Staff OU rank>=2 & AM)', () => {
+test('isUserAllowed: matriz do gate (Staff OU rank>=1 & AM)', () => {
+  // A fronteira mudou de L3+AM pra L2+AM em 2026-09-09 (decisão do owner). Os
+  // dois casos que a cercam ficam explícitos: L2+AM entra, L1+AM não. Sem o par
+  // colado na fronteira, afrouxar o portão de novo passa verde.
   assert.equal(isUserAllowed({ isStaff: true, rank: 0 }).allowed, true);
-  assert.equal(isUserAllowed({ rank: 2, isAreaManager: true }).allowed, true);   // display L3 AM
+  assert.equal(isUserAllowed({ rank: 1, isAreaManager: true }).allowed, true);   // display L2 AM — a fronteira
+  assert.equal(isUserAllowed({ rank: 2, isAreaManager: true }).allowed, true);   // L3 AM
   assert.equal(isUserAllowed({ rank: 5, isAreaManager: true }).allowed, true);
-  assert.equal(isUserAllowed({ rank: 1, isAreaManager: true }).allowed, false);  // L2 AM
-  assert.equal(isUserAllowed({ rank: 4, isAreaManager: false }).allowed, false); // L5 não-AM
+  assert.equal(isUserAllowed({ rank: 0, isAreaManager: true }).allowed, false);  // L1 AM — logo abaixo
+  assert.equal(isUserAllowed({ rank: 4, isAreaManager: false }).allowed, false); // L5 não-AM: AM é exigido em QUALQUER nível
   assert.equal(isUserAllowed(null).allowed, false);
 });
 

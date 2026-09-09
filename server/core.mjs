@@ -54,7 +54,7 @@ export const SESSION_REFRESH_AFTER = 86400; // 1 dia
 // não só o prazo da nossa sessão. Ainda assim tem teto: uma chamada por swipe
 // contra 1 escrita/s por chave no KV.
 export const SESSION_COOKIE_REFRESH = 3600; // 1 hora
-const MIN_RANK_WAZE = 2; // display L3+ (Waze é 0-indexed)
+const MIN_RANK_WAZE = 1; // display L2+ (Waze é 0-indexed)
 
 const wazeIssuesEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Search/List';
 const wazeMarkReadEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Read';
