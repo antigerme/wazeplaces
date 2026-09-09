@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.09-02
+
+### Corrigido
+- **Os menus abriam achatados no app instalado do iPhone.** Um editor relatou: abria *Filtros e Preferências* e sobrava uma faixa fina de conteúdo entre o título e os botões, rolando por dentro. Valia para todas as janelas do app, não só essa.
+
+  O app reserva espaço quando o teclado do celular sobe, para o campo em que você está digitando não ficar atrás dele. A conta de "quanto o teclado está cobrindo" era feita a partir do tamanho da área visível — e no app instalado do iPhone essa medida chegava errada, **sem teclado nenhum na tela**, dizendo que quase metade da tela estava coberta. Como ela só era refeita quando o teclado se mexia, e o teclado nunca aparecia, o erro durava a sessão inteira: só fechar e abrir o app resolvia.
+
+  Agora o app só reserva esse espaço quando há de fato um campo de texto em uso, e refaz a conta assim que o campo perde o foco. Digitar continua funcionando igual — o campo segue subindo acima do teclado.
+
+---
+
 ## v2026.09.02-02
 
 ### Corrigido

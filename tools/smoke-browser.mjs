@@ -3787,6 +3787,112 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── O teclado virtual não pode achatar os modais sem teclado ──────────────
+//
+// Veio do PWA instalado de um editor L2+AM: `--kb-inset` cravado em 388px com
+// NADA focado. Ele desconta do teto dos 11 modais e do padding que os
+// centraliza, então o de Filtros ficou com 302pt onde deviam ser 690 — medido
+// no vídeo dele: 305pt. E como só era recalculado em `resize`/`scroll` do
+// visualViewport, que o scroll-lock do modal (`body{overflow:hidden}`) impede
+// de disparar, o estrago durava a sessão inteira.
+//
+// O `visualViewport` aqui é FALSO de propósito: é a única forma de mandar o
+// navegador mentir a altura sob demanda. As duas linhas que importam são B (o
+// bug) e C (o CONTROLE) — sem C, "inset zero em tudo" leria como conserto
+// sendo remoção do recurso.
+{
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, locale: 'pt-BR',
+    hasTouch: true, isMobile: true, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const errosK = [];
+  page.on('pageerror', (e) => errosK.push(e.message));
+  await page.addInitScript(() => {
+    const alvo = new EventTarget();
+    window.__vvh = 812;
+    for (const [k, v] of [['height', () => window.__vvh], ['offsetTop', () => 0],
+                          ['width', () => 375], ['scale', () => 1]]) {
+      Object.defineProperty(alvo, k, { get: v });
+    }
+    Object.defineProperty(window, 'visualViewport', { get: () => alvo, configurable: true });
+    window.__cobrir = (px) => { window.__vvh = 812 - px; alvo.dispatchEvent(new Event('resize')); };
+  });
+  await page.goto(BASE, { waitUntil: 'load' });
+  await page.waitForTimeout(600);
+  await page.waitForFunction(() => typeof AppState !== 'undefined');
+  await page.evaluate(() => {
+    document.getElementById('authScreen')?.classList.add('hidden');
+    document.getElementById('appScreen')?.classList.remove('hidden');
+    // O esqueleto de carregamento TEM que sair antes de qualquer `assentar`: o
+    // `shimmer` dele é `infinite`, e `assentar` espera o `finished` de TODAS as
+    // animações. Com ele na tela o helper nunca resolve — pendura o bloco e, no
+    // CI, o job inteiro. Os outros blocos escapam por acidente, porque já
+    // renderizaram um card quando chamam o helper.
+    document.getElementById('loadingCard')?.classList.add('hidden');
+  });
+
+  const kb = () => page.evaluate(() =>
+    parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--kb-inset')) || 0);
+  const alturaDe = (id) => page.evaluate((i) =>
+    Math.round(document.querySelector('#' + i + ' > div').getBoundingClientRect().height), id);
+  const caixaDe = (id) => page.evaluate((i) => {
+    const r = document.querySelector('#' + i + ' > div').getBoundingClientRect();
+    return { alt: Math.round(r.height), centro: Math.round((r.top + r.bottom) / 2) };
+  }, id);
+
+  // A. sem nada acontecendo: o modal ocupa os 85dvh cheios
+  await page.evaluate(() => openModal('filtersModal'));
+  await assentar(page, 80);
+  const insetA = await kb();
+  const altA = await alturaDe('filtersModal');
+  checa(insetA === 0, 'teclado: --kb-inset nasce diferente de zero', `${insetA}px`);
+  checa(altA > 600, 'teclado: o modal já abre achatado sem teclado nenhum', `${altA}pt`);
+
+  // B. o BUG: viewport mente 388px cobertos, sem campo nenhum focado
+  await page.evaluate(() => window.__cobrir(388));
+  await assentar(page, 120);
+  const insetB = await kb();
+  const altB = await alturaDe('filtersModal');
+  checa(insetB === 0,
+    'teclado: viewport mentiu com NADA focado e virou inset — os modais achatam',
+    `${insetB}px`);
+  checa(altB === altA,
+    'teclado: o modal encolheu sem teclado (o bug do PWA do iOS)', `${altA} → ${altB}pt`);
+
+  // C. CONTROLE: com um campo de texto focado o inset TEM que valer, senão o
+  //    campo volta pra trás do teclado — que é o defeito que ele resolvia.
+  //    `openModal` sozinho: ele já esconde o anterior, e fechar+abrir no mesmo
+  //    quadro dessincroniza o voltar (gotcha #65).
+  await page.evaluate(() => { window.__cobrir(0); openModal('pairEnterModal'); });
+  await assentar(page, 80);
+  const antesC = await caixaDe('pairEnterModal');
+  await page.evaluate(() => document.querySelector('#pairEnterModal input[type=text]').focus());
+  await page.evaluate(() => window.__cobrir(336));
+  await assentar(page, 120);
+  const insetC = await kb();
+  const depoisC = await caixaDe('pairEnterModal');
+  checa(insetC === 336,
+    'teclado: campo de texto focado e o inset NÃO valeu — o campo fica atrás do teclado',
+    `${insetC}px`);
+  // O que se mede é a POSIÇÃO, não a altura: este modal é mais baixo que o teto
+  // mesmo com o teclado aberto, então a altura não muda e uma asserção sobre ela
+  // reprovaria com o código CERTO. Quem sobe o modal é o
+  // `pb-[calc(1rem+var(--kb-inset))]`, e ele move o centro em exatamente kb/2.
+  checa(depoisC.centro === antesC.centro - 336 / 2,
+    'teclado: o modal não subiu na medida do teclado — o campo fica atrás dele',
+    `centro ${antesC.centro} → ${depoisC.centro}pt`);
+
+  // D. e ele SAI quando o campo perde o foco — sem isto o valor fica preso
+  //    igual, só que uma etapa depois.
+  await page.evaluate(() => document.activeElement.blur());
+  await assentar(page, 120);
+  const insetD = await kb();
+  checa(insetD === 0, 'teclado: o inset ficou preso depois de o campo perder o foco',
+    `${insetD}px`);
+
+  checa(errosK.length === 0, 'teclado: erro de JS no caminho do inset', errosK[0]);
+  await ctx.close();
+}
+
 await browser.close();
 servidor.kill();
 
@@ -3825,4 +3931,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
-  + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`);
+  + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
+  + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`);

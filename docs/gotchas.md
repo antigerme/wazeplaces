@@ -318,6 +318,35 @@ ocorrência** — errar uma vez e corrigir não vira parágrafo.
 
     **Regra que fica**: capacidade do outro lado não pode depender de um único quadro que pode se perder — e `catch` vazio em `send` é o que transforma a perda em algo indepurável. Se o protocolo tem um anúncio, aceite também as mensagens que só existem depois dele.
 
+    ### 62.2 — reincidência: "há teclado" inferido de uma SUBTRAÇÃO (v2026.09.09-02)
+
+    Terceira vez da mesma forma, agora fora da rede. Um editor L2+AM abriu o PWA instalado no iPhone e **todos os modais nasceram achatados**: o de Filtros com uma faixa de conteúdo entre o cabeçalho e os botões, rolando por dentro. Ele mandou vídeo e diagnóstico.
+
+    O `--kb-inset` estava cravado em **388px**, com nada focado e nenhum teclado na tela. Ele desconta do teto de altura dos 11 modais (`max-h-[calc(85dvh-var(--kb-inset))]`) e do padding que os centraliza — então o modal ia de 690pt pra 302pt.
+
+    **A confirmação veio da geometria, com controle.** Reproduzindo no Chromium a 375×812:
+
+    | `--kb-inset` | altura do modal | centro |
+    |---|---|---|
+    | 0 | 690 pt | 406 pt |
+    | 300 | 390 pt | 256 pt |
+    | **388** | **302 pt** | **212 pt** |
+    | **medido no vídeo dele** | **305 pt** | **212 pt** |
+
+    O ajuste é específico, não frouxo: 0 e 300 não chegam perto.
+
+    **Duas hipóteses minhas morreram na medição, e é por isso que ela veio antes do conserto.** (a) *Zoom* — 7 toques rápidos na versão pra destravar o modo dev pareciam duplo-toque do iOS; medi a LARGURA do modal no vídeo, 344,7pt contra 343 esperados: sem zoom. (b) *Modo dev* — o próprio owner ligou os dois; o modal já está achatado no **primeiro quadro** do vídeo, antes de ele tocar em qualquer coisa. O que de fato discrimina é **PWA instalado × Safari**: os prints dele mostram os dois casos lado a lado, e só o instalado quebra.
+
+    **A causa é a forma, não o iOS.** `coberto = innerHeight - vv.height - vv.offsetTop` é uma subtração de três leituras, tratada como se fosse o fato "existe um teclado". Nenhuma delas é o teclado. E o fato positivo estava a uma linha de distância o tempo todo: **não há teclado sem campo focado**.
+
+    **O que transformou um valor errado em defeito permanente** foi o segundo pedaço, e ele é o mais fácil de repetir em qualquer recurso: o inset só era recalculado em `resize`/`scroll` do `visualViewport` — e o scroll-lock do próprio modal (`body{overflow:hidden}`) impede os dois de disparar. **Estado derivado cujos únicos gatilhos são suprimidos por outra funcionalidade não tem caminho de volta**, e o valor durava a sessão inteira.
+
+    **O conserto** é o portão no sinal positivo (`campoDeTextoFocado()`), mais um teto de 75% da janela (limite do estrago quando a leitura mentir COM campo focado — folgado de propósito, teto apertado devolveria o defeito original) e recálculo em `focusin`/`focusout`. O portão é ALLOWLIST de tipos que abrem teclado, nunca `input` genérico: a app tem 12 checkboxes e 70 botões, e `openModal` foca o primeiro focável do modal — seletor frouxo diria "campo focado" em quase toda abertura, que é exatamente o estado em que o bug apareceu.
+
+    **O teste que fecha é o CONTROLE, não o caso do bug.** Com um campo focado o inset TEM que continuar valendo (336px, modal cedendo altura); sem essa linha, "inset zero em tudo" leria como conserto sendo remoção do recurso. A prova antes/depois rodou com um `visualViewport` FALSO nos dois lados, contra um worktree em `HEAD`. E ela achou um caso que eu não estava caçando: **antes, o inset também ficava preso depois de o campo perder o foco** — o mesmo defeito, uma etapa depois.
+
+    **Regra que fica**: quando existir o fato POSITIVO (um campo focado, uma mensagem que só a v2 manda), decida por ele e use a medição indireta só pra dimensionar. E todo estado derivado precisa de um gatilho que sobreviva ao resto da app — se os únicos são eventos que outra funcionalidade suprime, o valor errado é permanente.
+
 ## 63. **Regra de estado que vale em duas telas mora em UMA função** (v2026.08.07-02). O owner: *"os botões de aprovar/apagar fotos não estão sendo desativados que nem é feito nos cards quando o Desfazer tá na tela."* Estava certo — e o CLAUDE.md já tinha a regra escrita, só que aplicada a um lugar só.
     **O que existia**: `acoesTravadas()` olhava apenas `AppState.pendingAction` (o swipe), e `aplicarTravaDeAcao()` mexia apenas nos `.card-btn-*`. As ações de FOTO abrem a mesma janela de Desfazer e escrevem no mesmo local, mas seus botões ficavam vivos. Havia até uma proteção acidental — o banner do Desfazer cobre o canto do botão —, e proteção acidental é a pior espécie: some quando o layout muda, sem aviso.
     **O conserto não é "travar também no lightbox", é ter UMA regra**: `acoesTravadas()` passou a incluir `aprovacaoPendente`/`exclusaoPendente`, e `aplicarTravaDeAcao()` aplica nos dois conjuntos de botões. Duas funções paralelas seriam duas chances de divergir na próxima mudança — é assim que esta divergência nasceu.

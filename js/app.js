@@ -7822,18 +7822,63 @@ function setupAlturaDoHeader() {
     medir();
 }
 
+// Só estes abrem teclado ou seletor do sistema. É ALLOWLIST, não denylist, e a
+// direção importa: errar pra menos deixa um campo novo atrás do teclado (chato);
+// errar pra mais devolve o bug que motivou esta função — a app tem 12 checkboxes
+// e 70 botões, e `openModal` foca o primeiro focável do modal, então um seletor
+// frouxo daria "campo focado" em quase toda abertura.
+const CAMPOS_COM_TECLADO = 'textarea, select, [contenteditable=""], [contenteditable="true"], '
+    + 'input[type="text"], input[type="search"], input[type="url"], input[type="tel"], '
+    + 'input[type="email"], input[type="password"], input[type="number"], input[type="date"], '
+    + 'input[type="time"], input[type="datetime-local"], input[type="month"], input[type="week"]';
+
+function campoDeTextoFocado() {
+    const a = document.activeElement;
+    if (!a || typeof a.matches !== 'function') return false;
+    try { return a.matches(CAMPOS_COM_TECLADO); } catch (e) { return false; }
+}
+
+// Quanto o teclado está cobrindo, em px — a decisão isolada pra poder ser testada.
+// Três defesas, uma por modo de falha, e só a primeira conserta o bug relatado:
+//
+// 1. PORTÃO NO FOCO. O inset existe pra sair da frente do TECLADO, e não há
+//    teclado sem campo focado. Sem o portão a app acreditava em qualquer leitura
+//    do `visualViewport`: no PWA do iOS de um editor ela ficou cravada em 388px
+//    com nada focado, e como o valor só é recalculado em `resize`/`scroll` do
+//    visualViewport — que o scroll-lock do modal (`body{overflow:hidden}`)
+//    impede de disparar — durou a sessão inteira. Medido no vídeo dele: o modal
+//    de Filtros com 305pt de altura onde deviam ser 690pt.
+// 2. TETO. Teclado nenhum ocupa 75% da janela (medido: iPhone SE 53%, paisagem
+//    ~55%). Não é o conserto — é o limite do estrago se a leitura mentir COM um
+//    campo focado. Folgado de propósito: teto apertado devolveria o defeito
+//    original, com o campo atrás do teclado.
+// 3. PISO de 80px: barra do navegador entrando/saindo não é teclado — reagir a
+//    isso faria o modal pular a cada rolagem.
+function insetDoTeclado(coberto, alturaJanela, temCampoFocado) {
+    if (!temCampoFocado) return 0;
+    if (!(coberto > 80)) return 0;
+    const teto = Math.round((Number(alturaJanela) || 0) * 0.75);
+    return Math.max(0, Math.min(coberto, teto));
+}
+
 function setupKeyboardInset() {
     const vv = window.visualViewport;
     if (!vv) return;
     const aplicar = () => {
         const coberto = Math.round(window.innerHeight - vv.height - vv.offsetTop);
-        // Abaixo de 80px é barra do navegador entrando/saindo, não teclado —
-        // reagir a isso faria o modal pular a cada rolagem.
-        const inset = coberto > 80 ? coberto : 0;
+        const inset = insetDoTeclado(coberto, window.innerHeight, campoDeTextoFocado());
         document.documentElement.style.setProperty('--kb-inset', inset + 'px');
     };
     vv.addEventListener('resize', aplicar);
     vv.addEventListener('scroll', aplicar);
+    // O foco entra e sai sem que o visualViewport mexa (trocar de campo pra
+    // botão, fechar o modal pelo scrim). Sem estes dois o portão acima só
+    // valeria até a próxima vez que o teclado se mexesse — e era justamente
+    // "nunca mais" que criava o bug. Adiados um tick porque no `focusout` o
+    // `activeElement` ainda é o campo que está SAINDO.
+    const aplicarDepois = () => setTimeout(aplicar, 0);
+    document.addEventListener('focusin', aplicarDepois);
+    document.addEventListener('focusout', aplicarDepois);
     aplicar();
 
     // Rede de segurança pra navegador sem nenhum dos dois mecanismos: leva o
