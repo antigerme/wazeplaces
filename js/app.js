@@ -53,7 +53,7 @@ if (typeof setI18nVars === 'function') {
 // `t(chave)` SEM parâmetro: sem o registro, o número seria digitado à mão em
 // quatro línguas e alguém esqueceria uma na próxima mudança (já aconteceu com
 // o "3s" da janela de desfazer).
-const NIVEL_MINIMO_EXIBIDO = 3;
+const NIVEL_MINIMO_EXIBIDO = 2;
 if (typeof setI18nVars === 'function') {
     setI18nVars({ nivelMinimo: () => NIVEL_MINIMO_EXIBIDO });
 }
@@ -8037,18 +8037,29 @@ function enforceDevGatedFilters() {
 // Ideia: novatos não conseguem desligar o undo até pegarem ritmo. Editores de
 // nível mais alto têm cota menor (são mais experientes).
 // Fórmula: ceil(UNDO_GATE_BASE / (rank + 1)). Waze devolve rank 0-indexed:
-//   rank 5 (L6) → 20 PURs, rank 4 (L5) → 24, rank 3 (L4) → 30, rank 2 (L3) → 40,
-//   rank 1 (L2) → 60, rank 0 (L1) → 120.
+//   rank 5 (L6) → 10 PURs, rank 4 (L5) → 12, rank 3 (L4) → 15, rank 2 (L3) → 20,
+//   rank 1 (L2) → 30, rank 0 (L1) → 60.
+// A linha do L1 é inalcançável desde que a entrada virou L2+AM — fica na tabela
+// porque a fórmula a produz, não porque alguém a atinge.
 // "PURs tratados" = read + rejected (skipped não treina o ritmo de ação destrutiva).
 // Staff são isentos. Esta NÃO é proteção de segurança — é UX/educação. localStorage
 // pode ser editado pelo user esperto; o objetivo é proteger quem é genuinamente novato.
 //
-// A base era 3000 (L1 levava ~100 min de swipe contínuo pra desbloquear — exagero
-// que na prática travava todo mundo pra sempre). 300 mantém o gate significativo
-// pro novato (uma sessão de trabalho de verdade) e some do caminho de quem tem
-// ritmo. Baixar mais (30/60) apagaria o gate: L6 passaria em 10 segundos, e a
-// escala por nível viraria ruído (L5=6 vs L6=5 não distingue ninguém).
-const UNDO_GATE_BASE = 120;
+// Histórico da base, porque o parágrafo que estava aqui ficou MENTINDO: ele
+// argumentava contra "baixar mais (30/60)" com os números `L5=6 vs L6=5`, que
+// são de base 30 — e foi escrito quando a base era 300. A base já era 120 e o
+// texto seguia decidindo por uma tabela que não existia mais. 3000 → 300 → 120
+// → 60; quem for mexer de novo, refaça a conta em vez de herdar a frase.
+//
+// 60 é decisão do owner (2026-09-09), tomada junto com baixar a entrada pra
+// L2+AM, e com o custo na mesa: o gate inteiro vale ~2,4s de espera por pedido
+// tratado (2431ms travado contra 33ms sem trava), então ele custa 1 a 2 minutos
+// UMA vez na vida — a 120 eram ~144s pro L2 e ~48s pro L6; a 60 são ~72s e
+// ~24s. O que se perde no topo: o L6 desbloqueia em 10 pedidos, ~25 segundos de
+// trabalho, o que é quase nenhum gate. Se um dia isso incomodar, o caminho não
+// é mexer na base (ela move todo mundo junto) — é achatar a curva por baixo,
+// tipo um piso, que baixa as cotas altas sem isentar quem tem rank.
+const UNDO_GATE_BASE = 60;
 
 function getUndoTreatedCount() {
     return (AppState.stats.read || 0) + (AppState.stats.rejected || 0);

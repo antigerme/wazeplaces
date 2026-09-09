@@ -89,7 +89,7 @@ test('portão L6: cada recurso tem o SEU nome, e todos delegam', () => {
   }
 });
 
-test('portões: ENTRAR (L3, servidor) e AGIR (L6, cliente) são níveis diferentes de propósito', () => {
+test('portões: ENTRAR (L2, servidor) e AGIR (L6, cliente) são níveis diferentes de propósito', () => {
   // Não é inconsistência: entrar é amplo, agir destrutivamente é estreito. O
   // teste existe pra que mexer num não arraste o outro sem alguém decidir.
   const m = core.match(/const MIN_RANK_WAZE = (\d+);/);
