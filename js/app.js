@@ -2781,7 +2781,10 @@ function rebuscarDepoisDeFalha() {
 // objeto criado, nada de `JSON.stringify` — a app tem 200 swipes por sessão e o
 // valor dela é o ritmo.
 const DLOG_TETO = 800;
-const DIAG_FORMATO = 2;
+// 3: entraram `resumo.alertas` (sentinelas) e a seção `computado` — a camada
+// que o navegador decidiu, que o `dom` não mostra. Aditivo: leitor de formato 2
+// só ignora as chaves novas.
+const DIAG_FORMATO = 3;
 let dlogAnel = [];
 
 function dlogLigado() {
@@ -2857,6 +2860,207 @@ function dlogTelaAtual() {
         modais,
         lightbox: visivel('lightbox'),
     };
+}
+
+// ── A camada COMPUTADA: o que o NAVEGADOR decidiu ─────────────────────────
+// O diagnóstico já trazia o que a página É (`dom`) e o que a app ACHA
+// (`AppState`). Faltava a terceira: o que o navegador decidiu. Bug de layout
+// mora inteiro aí, e ela não se lê do `outerHTML`.
+//
+// Custou uma investigação inteira: o `--kb-inset` cravado em 388px no PWA do
+// iOS (v2026.09.09-02). O valor que decidia era `visualViewport.height`, que
+// NÃO era capturado — cheguei nele por sorte, porque o `--kb-inset` estava num
+// `style=` inline do `<html>` e veio de carona no `dom`. E o segundo fato
+// decisivo, que NADA estava focado, não estava no arquivo de jeito nenhum.
+// A geometria do modal eu tive que reconstruir extraindo quadros do vídeo do
+// editor com ffmpeg e medindo pixel a pixel — sendo que é um
+// `getBoundingClientRect()`, 40 bytes de JSON.
+//
+// Nada aqui é dado de terceiro: são números da janela e do layout.
+function diagComputado() {
+    const fora = {};
+    try {
+        const vv = window.visualViewport;
+        fora.janela = { innerW: window.innerWidth, innerH: window.innerHeight,
+                        outerW: window.outerWidth, outerH: window.outerHeight };
+        fora.visualViewport = vv ? {
+            w: Math.round(vv.width), h: Math.round(vv.height),
+            offsetTop: Math.round(vv.offsetTop) || 0, offsetLeft: Math.round(vv.offsetLeft) || 0,
+            escala: Number(vv.scale.toFixed(3)),
+            // A subtração JÁ FEITA — é ela que vira `--kb-inset`, e é ela que
+            // mentiu. Deixar pra quem lê refazer a conta é deixar o erro passar.
+            coberto: Math.round(window.innerHeight - vv.height - vv.offsetTop),
+        } : null;
+
+        const a = document.activeElement;
+        fora.foco = a ? {
+            tag: a.tagName, id: a.id || null, tipo: a.getAttribute && a.getAttribute('type'),
+            emModal: !!(a.closest && a.closest('.modal-root')),
+            abreTeclado: (typeof campoDeTextoFocado === 'function') ? campoDeTextoFocado() : null,
+        } : null;
+
+        // Lidas do COMPUTADO, nunca do atributo inline: o atributo é o que
+        // alguém escreveu, o computado é o que vale.
+        const cs = getComputedStyle(document.documentElement);
+        fora.varsCss = {};
+        for (const v of ['--kb-inset', '--header-h', '--linha-comentario', '--lb-tira']) {
+            const t = cs.getPropertyValue(v).trim();
+            if (t) fora.varsCss[v] = t;
+        }
+        // As safe-areas do iPhone RESOLVIDAS. `env()` não se lê direto — só
+        // medindo um elemento que as use. Sem isto, a altura do header no iOS
+        // só se adivinha.
+        fora.safeArea = medirSafeArea();
+
+        fora.media = {};
+        for (const q of ['(pointer: coarse)', '(prefers-reduced-motion: reduce)',
+                         '(orientation: portrait)', '(display-mode: standalone)',
+                         '(prefers-color-scheme: dark)']) {
+            fora.media[q] = matchMedia(q).matches;
+        }
+
+        fora.tema = {
+            htmlClasse: document.documentElement.className,
+            guardado: safeLS.get(THEME_KEY),
+        };
+
+        fora.geometria = diagGeometria();
+    } catch (e) {
+        fora._erro = String((e && e.message) || e).slice(0, 160);
+    }
+    return fora;
+}
+
+// `env(safe-area-inset-*)` não é legível por API. O jeito é pedir ao próprio
+// navegador: um elemento fora da tela cujo padding SÃO os env(), e então
+// `getComputedStyle` devolve os px resolvidos.
+function medirSafeArea() {
+    let d = null;
+    try {
+        d = document.createElement('div');
+        d.style.cssText = 'position:fixed;left:-9999px;top:0;width:0;height:0;'
+            + 'padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right);'
+            + 'padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left);';
+        document.body.appendChild(d);
+        const c = getComputedStyle(d);
+        return { top: parseFloat(c.paddingTop) || 0, right: parseFloat(c.paddingRight) || 0,
+                 bottom: parseFloat(c.paddingBottom) || 0, left: parseFloat(c.paddingLeft) || 0 };
+    } catch (e) {
+        return null;
+    } finally {
+        if (d && d.parentNode) d.parentNode.removeChild(d);
+    }
+}
+
+// A tabela que eu meço À MÃO em toda investigação de layout. `rect` diz onde a
+// coisa FICOU (o que a tela deu), e `scrollHeight/clientHeight` + o `overflow-y`
+// COMPUTADO dizem se ela rola ou se está cortada — que são coisas diferentes e
+// `scrollHeight > clientHeight` é verdadeiro nas DUAS (gotcha #29).
+const DIAG_ALVOS = ['.place-card', '.card-content', '.card-changes', '.card-flag-comment',
+                    '#cardStack', '#placar', 'header', '.modal-root:not(.hidden) > div',
+                    '#imageLightbox:not(.hidden)', '#devFab:not(.hidden)',
+                    '.card-btn-reject', '.card-btn-skip', '.card-btn-read'];
+function diagGeometria() {
+    const fora = [];
+    for (const sel of DIAG_ALVOS) {
+        let els = [];
+        try { els = [...document.querySelectorAll(sel)]; } catch (e) { continue; }
+        for (const e of els.slice(0, 3)) {
+            const r = e.getBoundingClientRect();
+            if (r.width === 0 && r.height === 0) continue;
+            const cs = getComputedStyle(e);
+            fora.push({
+                sel,
+                x: Math.round(r.left), y: Math.round(r.top),
+                w: Math.round(r.width), h: Math.round(r.height),
+                scrollH: e.scrollHeight, clientH: e.clientHeight,
+                overflowY: cs.overflowY,
+                display: cs.display,
+                // Quem RECEBE o dedo no centro. É o gotcha #26 — os dois
+                // retângulos existem e só o hit-test diz quem intercepta —, e
+                // ele já reincidiu três vezes neste projeto.
+                noCentro: diagQuemEstaNoCentro(e, r),
+            });
+        }
+    }
+    return fora;
+}
+
+function diagQuemEstaNoCentro(el, r) {
+    try {
+        const alvo = document.elementFromPoint(Math.round(r.left + r.width / 2),
+                                               Math.round(r.top + r.height / 2));
+        if (!alvo) return 'nada';
+        if (alvo === el || el.contains(alvo)) return 'ele mesmo';
+        return (alvo.id ? '#' + alvo.id : alvo.tagName + '.' + String(alvo.className).split(' ')[0]).slice(0, 60);
+    } catch (e) { return null; }
+}
+
+// ── SENTINELAS: o arquivo não me dá material, ele DIZ o que está errado ────
+// Cada uma nasce de um defeito que já chegou na tela de um editor. Elas rodam
+// no APARELHO dele, onde eu não chego — e uma linha no topo do relatório vale
+// mais que 1 MB pra vasculhar.
+//
+// Regra pra entrar aqui: só invariante que a app garante e que, quebrada,
+// significa defeito — nunca "achei estranho". Falso positivo aqui treina a
+// ignorar a seção inteira, que é como ela deixa de servir.
+function diagSentinelas(comp) {
+    const alertas = [];
+    const diga = (chave, msg, dado) => alertas.push({ chave, msg, ...(dado || {}) });
+    try {
+        // 1. O bug de v2026.09.09-02, em uma linha.
+        // UMA condição, e o `!== true` é deliberado: cobre nada focado, focado
+        // em algo que não abre teclado, e DESCONHECIDO. A primeira versão pedia
+        // `=== false` e ficava MUDA num build onde `campoDeTextoFocado` não
+        // existe — que é exatamente o build antigo em que o defeito vive. A
+        // sentinela não pode depender de o conserto já estar presente.
+        const kb = parseFloat((comp.varsCss || {})['--kb-inset']) || 0;
+        if (kb > 0 && !(comp.foco && comp.foco.abreTeclado === true)) {
+            diga('kbInsetSemFoco',
+                'há inset de teclado sem campo de texto focado — os modais achatam',
+                { kbInset: kb, foco: (comp.foco && comp.foco.tag) || 'nada' });
+        }
+        // 2. `applyTheme` não remove `tema-claro`, então trocar pra escuro deixa
+        //    as duas classes. Só alerta quando isso TEM consequência: a única
+        //    regra que lê `.tema-claro` vive dentro de
+        //    `@media (prefers-color-scheme: dark)`, então num sistema CLARO a
+        //    contradição é inerte. Sem esse escopo a sentinela dispararia em
+        //    todo diagnóstico de quem trocou de tema — e sentinela que dispara
+        //    sempre é a que se aprende a ignorar, que é como esta seção morre.
+        const cl = (comp.tema && comp.tema.htmlClasse) || '';
+        const sistemaEscuro = !!(comp.media && comp.media['(prefers-color-scheme: dark)']);
+        if (sistemaEscuro && cl.includes('tema-claro') && /\bdark\b/.test(cl)) {
+            diga('temaContraditorio',
+                '<html> tem `tema-claro` e `dark` juntos num sistema escuro — o fundo '
+                + 'sob a app não acompanha', { classe: cl });
+        }
+        // 3. Gotcha #26, três reincidências: quem recebe o dedo não é o alvo.
+        for (const g of comp.geometria || []) {
+            if (g.noCentro && g.noCentro !== 'ele mesmo' && g.noCentro !== 'nada'
+                && /card-btn|devFab/.test(g.sel)) {
+                diga('toqueInterceptado',
+                    'algo está por cima de um controle: o dedo não chega nele',
+                    { alvo: g.sel, recebe: g.noCentro });
+            }
+            // 4. Alvo de toque abaixo da régua M3/HIG.
+            if (/card-btn|devFab/.test(g.sel) && (g.w < 44 || g.h < 44)) {
+                diga('alvoPequeno', 'alvo de toque abaixo de 44px',
+                    { alvo: g.sel, w: g.w, h: g.h });
+            }
+        }
+        // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é
+        // deliberada. Eu escrevi uma (< 25% da janela) e ela não disparou no
+        // caso real que a motivou: o modal de Filtros achatado tinha 302px de
+        // 812 (37%), enquanto o `pairEnterModal` LEGÍTIMO tem 236px (29%) — ou
+        // seja o normal é mais BAIXO que o defeito, e nenhum limiar separa os
+        // dois. Afrouxar pra pegar 37% faria o modal certo alertar toda vez que
+        // abrisse. Quem pega o achatamento é `kbInsetSemFoco`, que olha a CAUSA.
+        // (Mesmo desfecho do gotcha #67: asserção que não distingue as duas
+        // versões sai, com o motivo no lugar, em vez de ser remendada.)
+    } catch (e) {
+        alertas.push({ chave: '_erro', msg: String((e && e.message) || e).slice(0, 160) });
+    }
+    return alertas;
 }
 
 function dlogCapturar(motivo) {
@@ -3451,6 +3655,11 @@ async function diagCorpo() {
     catch (e) { idb._erro = String(e); }
 
     const c = navigator.connection || {};
+    // Computado UMA vez: as sentinelas leem dele, e medir duas vezes daria duas
+    // fotos de instantes diferentes — que é como um alerta some do relatório
+    // onde ele acabou de aparecer.
+    const computado = diagComputado();
+    const alertas = diagSentinelas(computado);
     return {
         _leia_isto: 'Este arquivo contém o waze_session_token, que é CREDENCIAL VIVA da conta do Waze '
             + 'de quem gerou. Trate como senha. Pra anular: sair da app, o que destrói a sessão no '
@@ -3469,7 +3678,12 @@ async function diagCorpo() {
             penduradas: dlogAnel.filter((l) => l.k === 'pendurada').map((l) => l.o),
             lentas: dlogAnel.filter((l) => l.k === 'lenta').length,
             telaAgora: dlogTelaAtual(),
+            // PRIMEIRA coisa a olhar. Vazio = nenhuma invariante conhecida
+            // quebrada; não significa "está tudo bem", significa "não é nenhum
+            // dos defeitos que já vimos".
+            alertas,
         },
+        computado,
         diario: dlogAnel,
         momentos: dlogMomentos,
         _gerado: new Date().toISOString(),

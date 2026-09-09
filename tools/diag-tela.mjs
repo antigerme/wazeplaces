@@ -204,9 +204,15 @@ for (let i = 0; i < momentos.length; i++) {
 }
 await browser.close();
 
+// As SENTINELAS vêm antes de tudo. Quem roda esta ferramenta está procurando o
+// que está errado; se a app já sabe, ela diz aqui, e não numa linha perdida de
+// 1 MB de JSON.
+const alertas = (d.resumo && d.resumo.alertas) || [];
+
 const resumo = {
   de: basename(arquivo),
   versaoDaApp: (d.app && d.app.rotulo) || null,
+  alertas,
   janela, dpr, tema: (d.ambiente && d.ambiente.escuro) ? 'escuro' : 'claro',
   cssBytes: css.length,
   fontesEmbutidas: fontes.map((f) => f.nome),
@@ -221,6 +227,15 @@ const resumo = {
   ],
 };
 writeFileSync(join(saida, 'resumo.json'), JSON.stringify(resumo, null, 1));
+if (alertas.length) {
+  console.log(`\n⚠ ${alertas.length} alerta(s) da app — invariante conhecida quebrada NO APARELHO:`);
+  for (const al of alertas) {
+    const extra = Object.entries(al).filter(([k]) => k !== 'chave' && k !== 'msg')
+      .map(([k, v]) => `${k}=${v}`).join(' ');
+    console.log(`  · [${al.chave}] ${al.msg}${extra ? '  (' + extra + ')' : ''}`);
+  }
+  console.log('');
+}
 console.log(`${linhas.length} momento(s) remontado(s) em ${saida}`);
 for (const l of linhas) {
   console.log(`  ${l.arquivo}  ${l.motivo}  painel=${l.painel}  modais=${l.modais}`
