@@ -659,6 +659,55 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 ---
 
+## 🔬 Diagnóstico do modo dev — o que ele captura, e por quê
+
+O FAB do modo dev gera um JSON (~1 MB) que o editor manda. Ele tem TRÊS camadas, e
+a terceira entrou depois de custar uma investigação inteira:
+
+1. **O que a página É** — `dom` (o `outerHTML`), `caches`, `localStorage`, código servido.
+2. **O que a app ACHA** — `AppState`, `chamadas` (anel de 60, sempre ligado), `diario`
+   e `momentos` (só com o dev mode ATIVO — ver a armadilha abaixo).
+3. **O que o NAVEGADOR DECIDIU** — a seção `computado` (v2026.09.09-03). É a camada
+   que não se lê do `outerHTML`, e bug de layout mora inteira nela:
+   `visualViewport` (com o `coberto` já subtraído), `document.activeElement` e se ele
+   abre teclado, as variáveis CSS lidas do COMPUTADO (nunca do atributo inline), as
+   `env(safe-area-inset-*)` **resolvidas** (medidas por um elemento fora da tela — não
+   há API), o `matchMedia` do que a app ramifica, e uma tabela de geometria com
+   `rect` + `scrollH/clientH` + `overflow-y` + **quem recebe o dedo no centro**
+   (`elementFromPoint`, gotcha #26). Custa **1,2 KB** medidos, 0,12% do arquivo, e
+   zero dado de terceiro.
+
+**`resumo.alertas` — as SENTINELAS, e é isto que muda o jogo.** Em vez de me dar mais
+bytes pra vasculhar, o diagnóstico **checa invariantes conhecidas e diz o que está
+errado**, no aparelho do editor, onde eu não chego. Provado contra o build de antes do
+conserto, com o estado real do relato: os dois alertas saíram sozinhos. Regra de entrada,
+e ela é dura: **só invariante que a app GARANTE**, nunca "achei estranho" — falso positivo
+treina a ignorar a seção, que é como ela morre. Duas consequências já aplicadas:
+
+- A sentinela de "modal achatado por ALTURA" foi escrita e **removida**: ela não disparou
+  no caso real (302px de 812) e o modal legítimo é mais baixo ainda (236px) — nenhum
+  limiar separa os dois. Mesmo desfecho do gotcha #67, com o motivo no lugar.
+- A do tema (`tema-claro` + `dark`) só dispara em **sistema escuro**, porque a única
+  regra que lê `.tema-claro` vive dentro de `@media (prefers-color-scheme: dark)`. Sem
+  esse escopo ela alertaria em todo diagnóstico de quem trocou de tema.
+
+`tools/diag-tela.mjs` imprime os alertas ANTES de tudo e os põe no `resumo.json`.
+
+**Armadilha estrutural, ainda aberta: o diário nasce VAZIO no primeiro relato.** `dlog()`
+sai na primeira linha se o dev mode estiver desligado, e a pessoa só o liga DEPOIS de o
+problema acontecer. No arquivo do editor L2+AM: `chamadas: 60`, `diario: []`, `momentos: 0`.
+O conserto seria um anel pequeno sempre ligado, só de fatos de layout sem PII
+(`--kb-inset` mudou, girou a tela, modal abriu) — o `API.chamadas` já é o precedente.
+Não feito ainda; decisão de produto.
+
+**O que NÃO fazer, e por quê:** screenshot da tela real. `getDisplayMedia` abre prompt e
+captura o aparelho inteiro (dado de terceiro à vontade); `html2canvas` é dependência (o
+projeto não tem) e **re-renderiza**, mostrando o que ele acha que a página é e não o que a
+tela deu — o gotcha #58 assado dentro do instrumento. A tabela de geometria responde a
+mesma pergunta em 40 bytes por elemento.
+
+---
+
 ## 🎨 Padrões de UI
 
 - **Header**: logo + perfil (avatar/nome/rank) + refresh + filtros + tema + ajuda. Alvos de toque mínimos 44px (`min-w-[44px] min-h-[44px]`) — régua M3 (48dp) / HIG (44pt); manter em botões novos
