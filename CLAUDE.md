@@ -192,6 +192,9 @@ wazeplaces/
 │   │                        #   uma conversa de verdade. É o único teste que exercita WebRTC
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
+│   ├── diag-ler.mjs         # FONTE ÚNICA de abrir um diagnóstico. Fareja os BYTES MÁGICOS (não a
+│   │                        #   extensão) e aceita .zip (o formato de hoje), .gz e .json cru — este
+│   │                        #   porque relato ANTIGO é o que se usa pra comparar antes/depois.
 │   ├── diag-replay.mjs      # Reconstrói a TELA do editor a partir do diagnóstico, VIVA: sobe a
 │   │                        #   app, injeta fila/filtros/perfil/tema/idioma no viewport dele e
 │   │                        #   para pra você medir. NÃO fala com a rede. `--tela` salva PNG.
@@ -668,8 +671,30 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 ## 🔬 Diagnóstico do modo dev — o que ele captura, e por quê
 
-O FAB do modo dev gera um JSON (~1 MB) que o editor manda. Ele tem TRÊS camadas, e
+O FAB do modo dev gera um **`.zip`** que o editor manda. Ele tem TRÊS camadas, e
 a terceira entrou depois de custar uma investigação inteira:
+
+**Sai EMPACOTADO desde v2026.09.10-04** (`zipar()` em `app.js`). MEDIDO no arquivo real do
+owner: 2,61 MB → **532 KB**, 4,9×, em **529 ms com CPU 6× mais lenta** — a compressão é do
+próprio navegador (`CompressionStream('deflate-raw')`), então **não entrou dependência**.
+**ZIP e não `.gz`** por dois motivos: abre no PRÓPRIO celular sem instalar nada (`.gz` é opaco
+no Android e no iOS, e arquivo que o dono não consegue abrir é arquivo que ele manda sem poder
+conferir), e aceita MAIS DE UMA entrada — o `LEIA-ME.txt` mantém visível, na listagem de
+qualquer visualizador, o aviso de que ali dentro vai **credencial viva**, que comprimido
+sumiria de vista. Sem `CompressionStream` (iOS < 16.4) cai pro `.json` de sempre: instrumento
+de socorro não pode ter pré-requisito. Ler é pela FONTE ÚNICA `tools/diag-ler.mjs`, que fareja
+os **bytes mágicos** (não a extensão — o arquivo passa por WhatsApp e e-mail, que renomeiam) e
+aceita `.zip`, `.gz` e `.json` cru, este último porque os relatos ANTIGOS são justamente os que
+se usa pra comparar antes/depois. `test/diag-zip.test.mjs` trava as duas pontas com **oráculos
+de FORA** — o `zlib.crc32` do Node e o `unzip` do sistema —, porque escritor e leitor são meus
+e um erro combinado nos dois passa num teste de ida e volta sem piscar.
+
+**A seção `codigo` não carrega mais o que não é código.** Ela existe pra detectar PWA rodando
+versão velha (o SW é cache-first), e guarda os bytes que o aparelho REALMENTE recebeu de cada
+recurso nosso. Entravam junto duas coisas inúteis: a **fonte `.woff2`**, binária lida com
+`r.text()` — chega corrompida, e fonte não causa defeito que este arquivo investiga (MEDIDO:
+111 KB crus, **42 KB comprimidos, 8% do arquivo**); e **6 entradas `/api/*`** com `405 Método
+não permitido`, porque o coletor faz GET e a API só aceita POST.
 
 1. **O que a página É** — `dom` (o `outerHTML`), `caches`, `localStorage`, código servido.
 2. **O que a app ACHA** — `AppState`, `chamadas` (anel de 60, sempre ligado), `diario`
@@ -730,12 +755,19 @@ NOSSA API não expõe — outro payload, outro endpoint, um campo que o `handleB
 manda. Foi essa classe que respondeu "os filtros de data são do venue" e "foto em casa não tem
 autor". Ela é real, e é bem menor do que eu vinha tratando.
 
-**Armadilha estrutural, ainda aberta: o diário nasce VAZIO no primeiro relato.** `dlog()`
-sai na primeira linha se o dev mode estiver desligado, e a pessoa só o liga DEPOIS de o
-problema acontecer. No arquivo do editor L2+AM: `chamadas: 60`, `diario: []`, `momentos: 0`.
-O conserto seria um anel pequeno sempre ligado, só de fatos de layout sem PII
-(`--kb-inset` mudou, girou a tela, modal abriu) — o `API.chamadas` já é o precedente.
-Não feito ainda; decisão de produto.
+**O diário nascia VAZIO no primeiro relato — CONSERTADO em v2026.09.10-04.** `dlog()` saía
+na primeira linha com o dev mode desligado, e a pessoa só o liga DEPOIS do problema. MEDIDO
+nos 7 diagnósticos reais: **4 chegaram com `diario: []`**, o pior deles o dos modais achatados
+(`chamadas: 60` — anel CHEIO — e diário vazio). Havia até uma ironia: o `diagCapturarErros()`
+roda incondicionalmente e registra um observador de long task que chamava `dlog('lenta')` — a
+captura sempre-ligada alimentava um anel com portão. Hoje existe `dfato()`, anel de 120 SEM
+portão, e o critério de entrada é **duplo**: (a) RARO — nada por swipe, senão volta o custo que
+justificava o portão (`dlog` continua gated pelo mesmo motivo: ~200 swipes por sessão e o valor
+da app é o ritmo); (b) SEM DADO DE TERCEIRO — nome de local, de autor e texto livre seguem só
+no `dlog`. Hoje: `kb` (o inset APLICADO ao lado do `coberto` CRU — o par que teria respondido o
+caso do iOS em minutos), `janela`, `sw.assumiu`, `tela.modal`, `tela.vazia`, `busca.falhou`,
+`lenta`, `sessao.alarmeFalso`. O `diario` do arquivo é a fusão dos dois anéis ordenada por
+tempo. Medido com o dev DESLIGADO: 0 → **9 entradas** num uso de meio minuto.
 
 **O que NÃO fazer, e por quê:** screenshot da tela real. `getDisplayMedia` abre prompt e
 captura o aparelho inteiro (dado de terceiro à vontade); `html2canvas` é dependência (o

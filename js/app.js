@@ -486,7 +486,7 @@ window.addEventListener('popstate', () => {
 });
 
 function openModal(id) {
-    dlog('tela.modal', { abre: id });
+    dfato('tela.modal', { abre: id });
     const m = document.getElementById(id);
     if (!m) return;
     const jaHaviaModal = !!topOpenModal();
@@ -554,7 +554,7 @@ const LIMPEZA_AO_FECHAR = {
 };
 
 function closeModal(id, { viaHistorico = false } = {}) {
-    dlog('tela.modal', { fecha: id, viaHistorico });
+    dfato('tela.modal', { fecha: id, viaHistorico });
     const m = document.getElementById(id);
     if (!m || m.classList.contains('hidden')) return;
     m.classList.add('hidden');
@@ -2801,6 +2801,41 @@ function dlog(k, d) {
     } catch (e) {}
 }
 
+// ── O anel que NÃO tem portão ─────────────────────────────────────────────
+//
+// MEDIDO nos 7 diagnósticos reais recebidos até 2026-09-10: **4 chegaram com o
+// diário VAZIO**, e o pior é justamente o dos modais achatados no iOS — anel de
+// chamadas CHEIO (60, ou seja muita atividade) e `diario: []`. O motivo é
+// estrutural, não descuido: o `dlog` sai na primeira linha com o modo dev
+// desligado, e a pessoa só liga o modo dev DEPOIS de o problema acontecer. O
+// instrumento apagava exatamente o trecho que interessa.
+//
+// Tem uma ironia que fecha o argumento: o `diagCapturarErros()` roda
+// incondicionalmente no `initApp`, e lá dentro registra um observador de long
+// task que chama `dlog('lenta', …)`. Ou seja, a captura sempre-ligada alimentava
+// um anel com portão — o dado de travada era jogado fora exatamente quando
+// ninguém estava gravando.
+//
+// **O portão do `dlog` continua valendo, e por CUSTO**: a app tem ~200 swipes
+// por sessão e o valor dela é o ritmo. Por isso este anel é só o subconjunto que
+// sai de graça, e o critério de entrada é duplo:
+//   1. **RARO** — nada que aconteça uma vez por swipe. Modal abre, tela gira,
+//      teclado sobe, busca falha: acontecem unidades de vezes por sessão.
+//   2. **SEM DADO DE TERCEIRO** — nome de local, nome de autor e texto livre não
+//      entram aqui nem com o modo dev ligado. Só id de elemento nosso, número e
+//      chave de erro. O `dlog` segue sendo o lugar do que identifica pedido.
+// Teto de 120 × ~40 bytes ≈ 5 KB. `API.chamadas` é o precedente: nunca teve
+// portão, e é por isso que é a única coisa que sobrevive num relato de 1ª hora.
+const DFATO_TETO = 120;
+let dfatoAnel = [];
+
+function dfato(k, d) {
+    try {
+        dfatoAnel.push({ t: Date.now(), k, ...(d || {}) });
+        if (dfatoAnel.length > DFATO_TETO) dfatoAnel.shift();
+    } catch (e) {}
+}
+
 // Identidade de pedido no diário: `creatorId` (número) e NUNCA `createdBy`.
 // O nome é dado de terceiro e o id resolve a mesma pergunta — é a mesma regra
 // que a reincidência já segue (o nome muda, o id não).
@@ -3590,7 +3625,7 @@ function diagCapturarErros() {
     // swipe, e 200ms de thread presa são ~24 quadros perdidos.
     try {
         new PerformanceObserver((l) => {
-            for (const e of l.getEntries()) if (e.duration > 200) dlog('lenta', { ms: Math.round(e.duration) });
+            for (const e of l.getEntries()) if (e.duration > 200) dfato('lenta', { ms: Math.round(e.duration) });
         }).observe({ type: 'longtask', buffered: true });
     } catch (e) {}
     addEventListener('unhandledrejection', (e) => {
@@ -3598,6 +3633,33 @@ function diagCapturarErros() {
             msg: String((e.reason && e.reason.message) || e.reason || '').slice(0, 300) });
         if (diagErros.length > 50) diagErros.shift();
     });
+
+    // A TELA MUDOU DE TAMANHO. Girar o aparelho, a barra do navegador sumir, a
+    // janela do PWA reabrir — tudo isso remonta o layout, e num relato de "ficou
+    // torto" a primeira pergunta é se aconteceu antes ou depois. Só quando o
+    // tamanho MUDA de verdade: `resize` dispara em rajada durante o giro, e um
+    // anel de 120 não sobrevive a isso.
+    let ultimaJanela = '';
+    const anotarJanela = () => {
+        const j = innerWidth + 'x' + innerHeight;
+        if (j === ultimaJanela) return;
+        ultimaJanela = j;
+        dfato('janela', { j, dpr: Math.round((devicePixelRatio || 1) * 100) / 100,
+                          orient: innerWidth > innerHeight ? 'deitado' : 'em pé' });
+    };
+    addEventListener('resize', anotarJanela);
+    anotarJanela();
+
+    // O SW ASSUMIU. É o momento exato em que o código servido pode trocar
+    // debaixo da página, e é a causa mais chata de "funcionava e parou": o
+    // aparelho fica dias com asset velho porque o SW é cache-first. Sem esta
+    // linha o arquivo diz QUAL código está rodando, mas não QUANDO ele entrou.
+    try {
+        if (navigator.serviceWorker) {
+            navigator.serviceWorker.addEventListener('controllerchange',
+                () => dfato('sw.assumiu', { v: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null }));
+        }
+    } catch (e) {}
 }
 
 async function diagCorpo() {
@@ -3655,7 +3717,21 @@ async function diagCorpo() {
     // um SW de três versões atrás decidindo o que servir.
     const nossos = [...new Set([location.href, meu + '/service-worker.js',
         ...recursos.map((r) => r.url).filter((u) => u.startsWith(meu))])];
-    for (const u of nossos) codigo[u] = await texto(u);
+    for (const u of nossos) {
+        // Nem tudo que vem da nossa origem é CÓDIGO, e duas coisas entravam aqui
+        // sem servir pra nada. **A fonte**: `.woff2` é binário lido com
+        // `r.text()`, então chega corrompido (byte inválido vira U+FFFD) — e
+        // ainda que chegasse inteiro, fonte não causa defeito que este arquivo
+        // investiga. MEDIDO no diagnóstico do owner: 111 KB crus, **42 KB
+        // comprimidos, 8% do arquivo inteiro**. **E `/api/*`**: o coletor faz
+        // GET e a API só aceita POST, então eram 6 entradas de `405 Método não
+        // permitido` — um erro que a app nunca vê. O que fica é o que responde
+        // "qual código este aparelho está rodando": o HTML, o SW, o CSS, os
+        // `js/min/*` e o manifest.
+        if (/\.(woff2?|ttf|otf|eot|png|jpe?g|gif|webp|avif|ico|mp4|webm)(\?|$)/i.test(u)) continue;
+        if (u.startsWith(meu + '/api/')) continue;
+        codigo[u] = await texto(u);
+    }
 
     // ── O que o aparelho tem × o que o servidor tem AGORA ──────────────────
     // Responde de vez a pergunta que sozinha custou horas: "o PWA está rodando
@@ -3751,7 +3827,11 @@ async function diagCorpo() {
             alertas,
         },
         computado,
-        diario: dlogAnel,
+        // Os DOIS anéis numa linha do tempo só: o sempre-ligado (`dfato`) e o do
+        // modo dev (`dlog`). Cada call site escolhe UM dos dois, então não há
+        // duplicata — e o `diario` deixa de nascer vazio, que era o buraco que
+        // custou a investigação dos modais achatados.
+        diario: [...dfatoAnel, ...dlogAnel].sort((a, b) => a.t - b.t),
         momentos: dlogMomentos,
         _gerado: new Date().toISOString(),
         app: { versao: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
@@ -3805,19 +3885,122 @@ async function diagCorpo() {
     };
 }
 
+// ── Empacotar o diagnóstico ───────────────────────────────────────────────
+//
+// O arquivo é grande por natureza — ele carrega o código servido, a fila e o
+// DOM — e MEDIDO no diagnóstico real do owner: 2,61 MB que viram **532 KB**,
+// 4,9×. A compressão é do próprio navegador (`CompressionStream`), então isto
+// não traz dependência nenhuma: custa ~65 linhas de container e **529 ms com
+// CPU 6× mais lenta**, ao lado do segundo que a coleta já leva.
+//
+// ZIP e não `.gz` por duas razões práticas, nessa ordem:
+//  1. O ZIP abre no PRÓPRIO celular, sem instalar nada. `.gz` é opaco no
+//     Android e no iOS, e arquivo que o dono não consegue abrir é arquivo que
+//     ele manda sem poder conferir o que está mandando.
+//  2. O ZIP aceita MAIS DE UMA entrada — e isso resolve um problema que a
+//     compressão criaria: hoje a primeira coisa dentro do JSON é o aviso de que
+//     ele contém CREDENCIAL VIVA. Comprimido, esse aviso sumiria de vista. O
+//     `LEIA-ME.txt` aparece na listagem de qualquer visualizador de ZIP, sem
+//     extrair nada.
+//
+// `deflate-raw` é exatamente o que o ZIP quer no método 8 — a mesma compressão
+// do gzip, sem o envelope dele.
+const CRC_TAB = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+        t[n] = c >>> 0;
+    }
+    return t;
+})();
+
+function crc32(u8) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < u8.length; i++) c = CRC_TAB[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ZIP "store or deflate", sem data/hora (campos zerados: o nome do arquivo já
+// carrega o instante, e hora local dentro do pacote é um dado a mais sobre quem
+// gerou). Um `DataView` little-endian, que é o que a especificação manda.
+async function zipar(entradas) {
+    const enc = new TextEncoder();
+    const partes = [];
+    for (const [nome, texto] of entradas) {
+        const cru = enc.encode(texto);
+        let corpo = cru, metodo = 0;
+        try {
+            corpo = new Uint8Array(await new Response(new Blob([cru]).stream()
+                .pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+            metodo = 8;
+        } catch (e) { /* sem CompressionStream: guarda cru, o ZIP segue válido */ }
+        partes.push({ nome: enc.encode(nome), cru, corpo, metodo, crc: crc32(cru) });
+    }
+    let tam = 22;
+    for (const e of partes) tam += 30 + e.nome.length + e.corpo.length + 46 + e.nome.length;
+    const out = new Uint8Array(tam), dv = new DataView(out.buffer);
+    const põe = (o, vals) => {
+        let q = o;
+        for (const [n, v] of vals) { if (n === 2) dv.setUint16(q, v, true); else dv.setUint32(q, v, true); q += n; }
+        return q;
+    };
+    let o = 0;
+    for (const e of partes) {
+        e.off = o;
+        o = põe(o, [[4, 0x04034b50], [2, 20], [2, 0], [2, e.metodo], [2, 0], [2, 0],
+                    [4, e.crc], [4, e.corpo.length], [4, e.cru.length], [2, e.nome.length], [2, 0]]);
+        out.set(e.nome, o); o += e.nome.length;
+        out.set(e.corpo, o); o += e.corpo.length;
+    }
+    const inicioCd = o;
+    for (const e of partes) {
+        o = põe(o, [[4, 0x02014b50], [2, 20], [2, 20], [2, 0], [2, e.metodo], [2, 0], [2, 0],
+                    [4, e.crc], [4, e.corpo.length], [4, e.cru.length],
+                    [2, e.nome.length], [2, 0], [2, 0], [2, 0], [2, 0], [4, 0], [4, e.off]]);
+        out.set(e.nome, o); o += e.nome.length;
+    }
+    põe(o, [[4, 0x06054b50], [2, 0], [2, 0], [2, partes.length], [2, partes.length],
+            [4, o - inicioCd], [4, inicioCd], [2, 0]]);
+    return out;
+}
+
 async function baixarDiagnostico() {
     const btn = document.getElementById('diagBtn');
     if (btn) { btn.disabled = true; btn.textContent = t('filters.diag.gerando'); }
     try {
         const corpo = await diagCorpo();
-        const blob = new Blob([JSON.stringify(corpo, null, 1)], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
+        // Sem indentação quando vai comprimido: o `null, 1` existia pra o
+        // arquivo ser legível a olho, e dentro do ZIP quem abre já usa um
+        // visualizador. Cru continua indentado, que é o caso em que alguém vai
+        // mesmo abrir no bloco de notas.
+        const podeZipar = typeof CompressionStream === 'function';
+        const json = JSON.stringify(corpo, null, podeZipar ? 0 : 1);
         // Começa com `diag-` e NÃO com `waze`: o guard do logout varre os
         // literais `waze*` do js/ procurando chave nova de armazenamento, e um
         // nome de arquivo com esse prefixo é indistinguível de uma chave pra
         // ele. Afrouxar o guard pra caber um nome bonito é o caminho errado.
-        a.download = 'diag-wazeplaces-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+        const base = 'diag-wazeplaces-' + new Date().toISOString().replace(/[:.]/g, '-');
+        let blob, nome;
+        if (podeZipar) {
+            const zip = await zipar([
+                ['diagnostico.json', json],
+                // Visível na listagem do ZIP sem extrair nada — que é o motivo de
+                // o aviso não poder ficar só dentro do JSON comprimido.
+                ['LEIA-ME.txt', t('diag.leiame', { v: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?' })],
+            ]);
+            blob = new Blob([zip], { type: 'application/zip' });
+            nome = base + '.zip';
+        } else {
+            // Navegador sem `CompressionStream` (iOS < 16.4). Cai pro JSON de
+            // sempre em vez de falhar: o instrumento de socorro não pode ter
+            // pré-requisito, senão ele falta justamente no aparelho estranho.
+            blob = new Blob([json], { type: 'application/json' });
+            nome = base + '.json';
+        }
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = nome;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -3876,7 +4059,7 @@ async function handleUnauthorized() {
                 guardarPerfilDoPortao(r.profile);
                 renderProfileHeader();
             }
-            dlog('sessao.alarmeFalso', { sondaOk: !!(r && r.success) });
+            dfato('sessao.alarmeFalso', { sondaOk: !!(r && r.success) });
             dlogCapturarAuto('alarmeFalso');
             showToast(t('toast.sessionKeptAlive'), 'info');
             rebuscarDepoisDeFalha();
@@ -4178,8 +4361,8 @@ function fetchNextPage() {
             if (epoch !== AppState.fetchEpoch) return; // reset durante o fetch → descarta
             if (!result.success) {
                 dlogVoltou('buscar');
-                dlog('busca.falhou', { key: result.errorKey || null,
-                                       cat: result.errorCategory || null });
+                dfato('busca.falhou', { key: result.errorKey || null,
+                                        cat: result.errorCategory || null });
                 dlogCapturarAuto('buscaFalhou');
                 if (result.errorCategory === 'unauthorized' ||
                     (result.error && result.error.toLowerCase().includes('sess'))) {
@@ -6246,8 +6429,8 @@ function prefetchNextImage() {
 function showNoPlaces() {
     // O painel de fila vazia tem DOIS significados e a distinção é a flag —
     // foi ela que faltou e fez a app dizer "Tudo limpo!" sobre 217 pedidos.
-    dlog('tela.vazia', { loadError: AppState.loadError, hasMore: AppState.hasMore,
-                         serverTotal: AppState.serverTotal });
+    dfato('tela.vazia', { loadError: AppState.loadError, hasMore: AppState.hasMore,
+                          serverTotal: AppState.serverTotal });
     if (AppState.loadError) dlogCapturarAuto('falhaAoCarregar');
     marcarTelaPronta();   // fila vazia ou erro: não vem card, mas a tela está pronta
     AppState.currentPlace = null;
@@ -8169,10 +8352,22 @@ function insetDoTeclado(coberto, alturaJanela, temCampoFocado) {
 function setupKeyboardInset() {
     const vv = window.visualViewport;
     if (!vv) return;
+    let ultimoInset = null;
     const aplicar = () => {
         const coberto = Math.round(window.innerHeight - vv.height - vv.offsetTop);
-        const inset = insetDoTeclado(coberto, window.innerHeight, campoDeTextoFocado());
+        const foco = campoDeTextoFocado();
+        const inset = insetDoTeclado(coberto, window.innerHeight, foco);
         document.documentElement.style.setProperty('--kb-inset', inset + 'px');
+        // Só quando MUDA: `resize`/`scroll` do visualViewport disparam em rajada
+        // enquanto o teclado sobe, e anel de 120 não sobrevive a isso. Este é o
+        // fato que teria respondido em minutos o caso dos 11 modais achatados no
+        // iOS — lá o inset ficou cravado em 388px SEM campo focado, e o arquivo
+        // não trouxe uma linha do que levou até ali. Vai o `coberto` cru junto
+        // do que foi APLICADO: a diferença entre os dois é a resposta.
+        if (inset !== ultimoInset) {
+            dfato('kb', { inset, coberto, foco, jan: window.innerHeight });
+            ultimoInset = inset;
+        }
     };
     vv.addEventListener('resize', aplicar);
     vv.addEventListener('scroll', aplicar);

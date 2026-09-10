@@ -31,6 +31,7 @@
 // Nota de campo: um POST cru leva 403 do Bot Fight Mode. Precisa de
 // `User-Agent` de navegador — medido, não suposto.
 import { readFileSync } from 'node:fs';
+import { lerDiagnostico } from './diag-ler.mjs';
 import { pausaComJitter } from './waze-jitter.mjs';
 
 const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'sessao', 'parear']);
@@ -50,7 +51,9 @@ if (ESCRITA.has(ROTA)) {
   process.exit(3);
 }
 
-const d = JSON.parse(readFileSync(ARQ, 'utf8'));
+// Aceita `.zip` (o formato de hoje) e `.json` cru (relato antigo, ou
+// navegador sem CompressionStream). Farejado pelos bytes, não pela extensão.
+const { dados: d, origem: _origemDoDiag } = lerDiagnostico(ARQ);
 const token = (d.localStorage || {}).waze_session_token;
 if (!token) { console.error('o diagnóstico não traz waze_session_token'); process.exit(1); }
 const base = String((d.app && d.app.url) || '').replace(/\/+$/, '');
@@ -58,6 +61,7 @@ if (!/^https:\/\//.test(base)) { console.error('URL da app ausente ou não-https
 
 const corpo = { sessionToken: token, region: 'row', ...(EXTRA ? JSON.parse(EXTRA) : {}) };
 const semSegredo = { ...corpo, sessionToken: '<TOKEN>' };
+console.log(`de:    ${ARQ.split('/').pop()}   (${_origemDoDiag})`);
 console.log(`POST ${base}/api/${ROTA}`);
 console.log(`corpo: ${JSON.stringify(semSegredo)}`);
 

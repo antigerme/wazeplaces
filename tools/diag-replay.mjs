@@ -19,6 +19,7 @@
 // pronto do arquivo. Quem quiser perguntar algo NOVO ao Waze usa o
 // `tools/diag-api.mjs`, que é outra ferramenta e tem outras regras.
 import { readFileSync } from 'node:fs';
+import { lerDiagnostico } from './diag-ler.mjs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -37,7 +38,9 @@ if (!ARQ) {
   process.exit(2);
 }
 
-const d = JSON.parse(readFileSync(ARQ, 'utf8'));
+// Aceita `.zip` (o formato de hoje) e `.json` cru (relato antigo, ou
+// navegador sem CompressionStream). Farejado pelos bytes, não pela extensão.
+const { dados: d, origem: _origemDoDiag } = lerDiagnostico(ARQ);
 const st = d.appState || {};
 // `currentPlace` virou ÍNDICE no formato 3+. Nos formatos antigos ele é um
 // objeto e o `queue[0]` pode ter saído como a string "[circular]" — o mesmo
@@ -54,7 +57,7 @@ const escuro = /"?dark"?/.test(String((d.localStorage || {}).waze_places_theme |
 const lang = (d.app && d.app.idioma) || 'pt';
 const PORTA = parseInt(opt('porta', '8123'), 10);
 
-console.log(`de:      ${ARQ.split('/').pop()}`);
+console.log(`de:      ${ARQ.split('/').pop()}   (${_origemDoDiag})`);
 console.log(`app:     ${(d.app && d.app.rotulo) || '?'}   formato ${d._formato || '?'}`);
 console.log(`tela:    ${W}x${H} @${dpr}x · tema ${escuro ? 'escuro' : 'claro'} · idioma ${lang}`);
 console.log(`fila:    ${fila.length} pedido(s), injetando ${recorte.length} a partir do índice ${idx}`);

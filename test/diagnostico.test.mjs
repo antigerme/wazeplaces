@@ -164,17 +164,50 @@ test('os FUNIS existem — cobertura por estrangulamento, não remendo', () => {
   // log e ninguém percebe. Cada linha abaixo é um funil por onde TUDO passa.
   const funis = [
     [/function showToast[\s\S]{0,600}?dlog\('toast'/, 'toast — é o "print textual", e foi o que faltou no diagnóstico do owner'],
-    [/function openModal\(id\) \{\s*dlog\('tela\.modal'/, 'abertura de modal'],
-    [/function closeModal\([^)]*\) \{\s*dlog\('tela\.modal'/, 'fechamento de modal'],
-    [/function showNoPlaces\(\) \{[\s\S]{0,400}?dlog\('tela\.vazia'/, 'painel de fila vazia'],
+    [/function openModal\(id\) \{\s*dfato\('tela\.modal'/, 'abertura de modal'],
+    [/function closeModal\([^)]*\) \{\s*dfato\('tela\.modal'/, 'fechamento de modal'],
+    [/function showNoPlaces\(\) \{[\s\S]{0,400}?dfato\('tela\.vazia'/, 'painel de fila vazia'],
     [/function scheduleAction\([^)]*\) \{\s*dlog\('acao'/, 'ação do editor'],
     [/function handleActionResult\([^)]*\) \{\s*dlog\('acao\.fim'/, 'resultado da ação'],
     [/dlog\('sessao\.confere'/, 'decisão de vida/morte da sessão'],
     [/dlog\('busca\.ok'/, 'busca que deu certo'],
-    [/dlog\('busca\.falhou'/, 'busca que falhou'],
+    [/dfato\('busca\.falhou'/, 'busca que falhou'],
+    [/dfato\('kb', \{ inset, coberto, foco/, 'teclado — o inset APLICADO ao lado do coberto CRU'],
+    [/dfato\('janela'/, 'a tela mudou de tamanho'],
+    [/dfato\('sw\.assumiu'/, 'o service worker assumiu — quando o código trocou'],
     [/dlogVigiar\('buscar'\)/, 'watchdog da busca — fila congelada não grita'],
   ];
   for (const [re, oq] of funis) assert.match(semCom, re, `funil sumiu: ${oq}`);
+});
+
+test('o anel SEM PORTÃO existe, e só leva o que é raro e sem dado de terceiro', () => {
+  // MEDIDO nos 7 diagnósticos reais até 2026-09-10: 4 chegaram com `diario: []`,
+  // e o pior é o dos modais achatados — anel de chamadas CHEIO (60) e diário
+  // vazio. O `dlog` sai na primeira linha com o dev desligado, e a pessoa liga o
+  // dev DEPOIS do problema: o instrumento apagava justamente o trecho que
+  // interessa.
+  const i = semCom.indexOf('function dfato(');
+  assert.ok(i !== -1, 'dfato sumiu — o diário volta a nascer vazio');
+  const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
+  assert.ok(!/dlogLigado\(\)/.test(corpo),
+    'puseram portão no anel sem portão — é exatamente o defeito que ele conserta');
+  assert.match(corpo, /dfatoAnel\.length > DFATO_TETO/, 'sumiu o teto: anel sem teto vira vazamento');
+
+  // O critério de entrada é DUPLO, e a metade que protege terceiro é esta: o
+  // que identifica pedido (venueID, autor) continua no `dlog`, que tem portão.
+  const iP = semCom.indexOf('function dlogPlace(');
+  const chamadasDfato = [...semCom.matchAll(/dfato\('[^']+',\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  assert.ok(chamadasDfato.length >= 6, 'poucos fatos sempre-ligados — o diário volta a ser pobre');
+  for (const args of chamadasDfato)
+    assert.ok(!/dlogPlace|createdBy|\bnome\b|texto|msg/.test(args),
+      `dado de terceiro entrou no anel sem portão: ${args.slice(0, 60)}`);
+  assert.ok(iP !== -1 && /creatorId/.test(semCom.slice(iP, iP + 300)),
+    'dlogPlace precisa continuar sendo o lugar de quem identifica pedido');
+
+  // E os dois anéis saem numa linha do tempo só, senão ler o arquivo vira
+  // intercalar dois arrays à mão.
+  assert.match(semCom, /diario: \[\.\.\.dfatoAnel, \.\.\.dlogAnel\]\.sort/,
+    'o diário parou de juntar os dois anéis');
 });
 
 test('desligar o dev APAGA o que ele gravou', () => {
