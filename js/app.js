@@ -3735,7 +3735,22 @@ async function diagCorpo() {
         chamadas: (typeof API !== 'undefined' && API.chamadas) || [],
         recursos,
         erros: diagErros,
-        appState: diagSeguro(typeof AppState !== 'undefined' ? AppState : null),
+        // `currentPlace` É `queue[0]` — o MESMO objeto —, então o `diagSeguro`
+        // marcava um dos dois como `[circular]`, e quem perdia era sempre o card
+        // que a pessoa estava VENDO. Já custou um remendo do meu lado ao ler um
+        // arquivo real ("[circular]" no item 0 de 395). Aqui o `currentPlace` sai
+        // como ÍNDICE, e a fila fica inteira e legível.
+        appState: (() => {
+            const st = typeof AppState !== 'undefined' ? AppState : null;
+            if (!st) return null;
+            const idx = st.currentPlace && Array.isArray(st.queue)
+                ? st.queue.indexOf(st.currentPlace) : -1;
+            const copia = { ...st };
+            if (idx >= 0) delete copia.currentPlace;
+            const fora = diagSeguro(copia);
+            if (fora) fora.currentPlaceIdx = idx;
+            return fora;
+        })(),
         // O HTML como está AGORA, com as classes que decidem o que aparece na
         // tela. É o que mostra qual painel estava visível no momento da queixa.
         dom: document.documentElement.outerHTML,

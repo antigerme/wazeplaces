@@ -192,6 +192,11 @@ wazeplaces/
 │   │                        #   uma conversa de verdade. É o único teste que exercita WebRTC
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
+│   ├── diag-replay.mjs      # Reconstrói a TELA do editor a partir do diagnóstico, VIVA: sobe a
+│   │                        #   app, injeta fila/filtros/perfil/tema/idioma no viewport dele e
+│   │                        #   para pra você medir. NÃO fala com a rede. `--tela` salva PNG.
+│   ├── diag-api.mjs         # Pergunta à API de PRODUÇÃO com o token que o diagnóstico já traz.
+│   │                        #   RECUSA por construção toda rota que escreve ou desloga.
 │   └── waze-probe.mjs       # Fala com o Waze REAL, só leitura (ver seção 🔑). Valida cookies,
 │                            #   lista países/estados, sonda se Accept-Language é honrado.
 │                            #   RECUSA /Features e /Issues/Read por construção e tem jitter
@@ -694,6 +699,36 @@ treina a ignorar a seção, que é como ela morre. Duas consequências já aplic
   esse escopo ela alertaria em todo diagnóstico de quem trocou de tema.
 
 `tools/diag-tela.mjs` imprime os alertas ANTES de tudo e os põe no `resumo.json`.
+
+**O ARQUIVO É UMA GRAVAÇÃO, e daí saem duas ferramentas com papéis diferentes.** Ele responde
+tudo que a app perguntou e nada do que ela não perguntou — e confundir isso me fez pedir
+`cookies.txt` pra coisa que já estava no arquivo. Medido em 2026-09-10: nas QUATRO investigações
+do dia (modais achatados, "marquei como lido e voltou", L2+AM vendo 1 de 311, e a ordenação) os
+cookies **não mudaram nenhuma conclusão** — na última eles só confirmaram.
+
+- **`tools/diag-replay.mjs <arquivo.json>`** — reconstrói a tela DELE localmente e **viva**:
+  sobe o `server/node.mjs`, injeta fila/filtros/perfil/tema/idioma no viewport e dpr do
+  aparelho, e para pra você abrir modal, arrastar card, medir geometria ou rodar as sentinelas.
+  Não fala com a rede. É o que eu fazia À MÃO a cada investigação — três vezes só no dia 10,
+  e numa delas extraindo quadros de vídeo com ffmpeg pra medir o que era um
+  `getBoundingClientRect()`. `--tela` salva PNG e sai.
+- **`tools/diag-api.mjs <arquivo.json> <rota> [json]`** — pergunta à API de **produção** usando
+  o `waze_session_token` que o arquivo já carrega (**ideia do owner**). O token é a chave da
+  NOSSA API, que tem os cookies do Waze cifrados no servidor: dá pra perguntar sem nunca segurar
+  a credencial do WME. Fecha a classe "e se pedisse a página 2? e com outro filtro?" — que era o
+  único motivo real de pedir cookies. **Só leitura, por CONSTRUÇÃO**: as rotas que escrevem
+  (`validar-place`, `marcar-lido`, `excluir-foto`, `renomear-local`) e as que deslogam (`sessao`,
+  `parear`) saem com erro antes de qualquer rede, como o `waze-probe` faz com `/Features`.
+  `test/diag-ferramentas.test.mjs` deriva essa lista do `ROUTES` do core, então **rota nova
+  aparece lá em vez de passar despercebida**. Jitter da fonte única, e o token nunca é impresso
+  nem vai por query. **Cada chamada é requisição REAL no free tier** — medição pontual, nunca
+  varredura. Nota de campo: POST cru leva **403** do Bot Fight Mode; precisa de `User-Agent` de
+  navegador (medido).
+
+**O que NENHUMA das duas fecha, e cookies seguem sendo o caminho:** perguntar ao Waze algo que a
+NOSSA API não expõe — outro payload, outro endpoint, um campo que o `handleBuscarPlaces` não
+manda. Foi essa classe que respondeu "os filtros de data são do venue" e "foto em casa não tem
+autor". Ela é real, e é bem menor do que eu vinha tratando.
 
 **Armadilha estrutural, ainda aberta: o diário nasce VAZIO no primeiro relato.** `dlog()`
 sai na primeira linha se o dev mode estiver desligado, e a pessoa só o liga DEPOIS de o
