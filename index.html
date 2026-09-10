@@ -1289,6 +1289,19 @@
                                 </div>
                             </div>
 
+                            <!-- SÓ existe quando o filtro está incluindo lidos. Com "Apenas
+                                 pedidos não lidos" MARCADO — o padrão, e o modo em que a fila
+                                 se tria — o Waze nem devolve pedido lido, então esta faixa custa
+                                 zero no fluxo normal: os pixels que ela tira da foto só são
+                                 cobrados no estado raro em que ela é necessária.
+                                 Ela diz a CAUSA, não só o estado, porque o estado sozinho não
+                                 responde a pergunta que um editor fez de verdade — "marquei como
+                                 lido e ele voltou". Verde e ✓ porque é o MESMO conceito do botão
+                                 de marcar como lido (regra de consistência de ícone e cor).
+                                 `flex-shrink-0`: ela é linha de altura previsível, e quem cede
+                                 espaço no card é a FOTO (gotcha #36). -->
+                            <div class="card-read-banner hidden flex-shrink-0" data-i18n="card.read.banner">Já marcado como lido — o filtro inclui lidos</div>
+
                             <div class="card-actions flex items-center justify-center gap-5 px-5 py-3 flex-shrink-0 bg-white border-t border-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
                                 <button type="button" aria-label="Rejeitar" data-i18n-aria="card.btn.reject.aria" title="Rejeitar (←)" data-i18n-title="card.btn.reject.title" class="card-btn-reject w-14 h-14 rounded-full bg-white border-2 border-rose-500 text-rose-600 dark:text-rose-400 shadow-md flex items-center justify-center hover:bg-rose-50 dark:hover:bg-rose-500/[0.14] transition-colors dark:bg-slate-800">
                                     <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>

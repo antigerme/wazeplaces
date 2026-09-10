@@ -2924,6 +2924,7 @@ function diagComputado() {
             guardado: safeLS.get(THEME_KEY),
         };
 
+        fora.camadasAbertas = diagCamadasAbertas().map((e) => e.id || e.className.slice(0, 40));
         fora.geometria = diagGeometria();
     } catch (e) {
         fora._erro = String((e && e.message) || e).slice(0, 160);
@@ -2960,8 +2961,17 @@ const DIAG_ALVOS = ['.place-card', '.card-content', '.card-changes', '.card-flag
                     '#cardStack', '#placar', 'header', '.modal-root:not(.hidden) > div',
                     '#imageLightbox:not(.hidden)', '#devFab:not(.hidden)',
                     '.card-btn-reject', '.card-btn-skip', '.card-btn-read'];
+// Modal e lightbox ABERTOS. Camada aberta cobre o que está atrás — é a função
+// dela —, e sem saber disso o hit-test acusa o normal como defeito.
+function diagCamadasAbertas() {
+    const ids = [...(typeof MODAL_IDS !== 'undefined' ? MODAL_IDS : []), 'imageLightbox', 'mapaLightbox'];
+    return ids.map((id) => document.getElementById(id))
+        .filter((e) => e && !e.classList.contains('hidden') && getComputedStyle(e).display !== 'none');
+}
+
 function diagGeometria() {
     const fora = [];
+    const camadas = diagCamadasAbertas();
     for (const sel of DIAG_ALVOS) {
         let els = [];
         try { els = [...document.querySelectorAll(sel)]; } catch (e) { continue; }
@@ -2980,6 +2990,10 @@ function diagGeometria() {
                 // retângulos existem e só o hit-test diz quem intercepta —, e
                 // ele já reincidiu três vezes neste projeto.
                 noCentro: diagQuemEstaNoCentro(e, r),
+                // DENTRO de uma camada aberta, ou atrás dela? Quem está atrás é
+                // coberto por construção, e alertar nisso é ruído.
+                naCamada: camadas.some((c) => c.contains(e)),
+                camadaAberta: camadas.length > 0,
             });
         }
     }
@@ -3035,9 +3049,18 @@ function diagSentinelas(comp) {
                 + 'sob a app não acompanha', { classe: cl });
         }
         // 3. Gotcha #26, três reincidências: quem recebe o dedo não é o alvo.
+        //    **Só vale pro controle que NÃO está atrás de camada aberta.** Modal
+        //    cobrir o card é a função do modal, e sem esta condição a sentinela
+        //    acusa os três botões toda vez que alguém abre os Filtros — foi o
+        //    que ela fez no PRIMEIRO diagnóstico real que chegou (3 alertas, os
+        //    3 falsos). O `#devFab` NÃO precisa de exceção: ele é `z-[68]`,
+        //    acima dos modais, e o mesmo diagnóstico mostra `noCentro: "ele
+        //    mesmo"` com o modal aberto — se um dia ele for coberto, é defeito
+        //    de verdade e o smoke do FAB mede isso em 5 camadas por hit-test.
         for (const g of comp.geometria || []) {
             if (g.noCentro && g.noCentro !== 'ele mesmo' && g.noCentro !== 'nada'
-                && /card-btn|devFab/.test(g.sel)) {
+                && /card-btn|devFab/.test(g.sel)
+                && !(g.camadaAberta && !g.naCamada)) {
                 diga('toqueInterceptado',
                     'algo está por cima de um controle: o dedo não chega nele',
                     { alvo: g.sel, recebe: g.noCentro });
@@ -4418,6 +4441,15 @@ function renderCurrentCard() {
         ageEl.title = new Date(place.dateAdded).toLocaleString(i18nLocale());
         ageEl.classList.remove('hidden');
     }
+
+    // A faixa "já lido". Só aparece quando o Waze diz que ESTE pedido já foi
+    // lido — o que, com o filtro no padrão ("Apenas pedidos não lidos"), nunca
+    // acontece, porque o pedido lido nem é devolvido. Ou seja: custo zero de
+    // foto no fluxo em que a fila é triada, e a resposta pronta pra quem
+    // desmarcou o filtro e estranha o pedido voltar depois de marcá-lo. Foi um
+    // relato real, com a MESMA marcação feita duas vezes no mesmo pedido antes
+    // de o editor desconfiar.
+    card.querySelector('.card-read-banner')?.classList.toggle('hidden', place.isRead !== true);
 
     // Reporte: o motivo (`flagType`) é a informação principal e quase sempre a
     // ÚNICA — o comentário livre vem vazio na maioria dos casos. A app só olhava

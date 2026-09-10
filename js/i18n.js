@@ -151,6 +151,7 @@ const I18N_DICT = {
     // card
     'card.noImage': 'Sem Imagem', 'card.deleteBanner': '⚠ Pedido de remoção',
     'card.categories': 'Categorias:', 'card.address': 'Endereço:', 'card.type': 'Tipo:', 'card.creator': 'Criador:',
+    'card.read.banner': 'Já marcado como lido — o filtro inclui lidos',
     'card.flagComment': 'Reporte do usuário', 'card.brand': 'Marca:',
     'card.brandKnown': '✓ conhecida', 'card.brandUnknown': '? não listada',
     'card.brandKnown.title': 'Marca reconhecida pelo Waze', 'card.brandUnknown.title': 'Marca não está na lista oficial do Waze',
@@ -714,6 +715,7 @@ const I18N_DICT = {
     'states.error.retry': 'Try again',
     'card.noImage': 'No Image', 'card.deleteBanner': '⚠ Removal request',
     'card.categories': 'Categories:', 'card.address': 'Address:', 'card.type': 'Type:', 'card.creator': 'Creator:',
+    'card.read.banner': 'Already marked as read — the filter includes read ones',
     'card.flagComment': 'User report', 'card.brand': 'Brand:',
     'card.brandKnown': '✓ known', 'card.brandUnknown': '? not listed',
     'card.brandKnown.title': 'Brand recognized by Waze', 'card.brandUnknown.title': 'Brand not in the official Waze list',
@@ -1220,6 +1222,8 @@ const I18N_DICT = {
     'states.error.retry': 'Reintentar',
     'card.noImage': 'Sin Imagen', 'card.deleteBanner': '⚠ Solicitud de eliminación',
     'card.categories': 'Categorías:', 'card.address': 'Dirección:', 'card.type': 'Tipo:', 'card.creator': 'Creador:',
+    'card.read.banner': 'Ya marcado como leído — el filtro incluye leídos',
+    
     'card.flagComment': 'Reporte del usuario', 'card.brand': 'Marca:',
     'card.brandKnown': '✓ conocida', 'card.brandUnknown': '? no listada',
     'card.brandKnown.title': 'Marca reconocida por Waze', 'card.brandUnknown.title': 'La marca no está en la lista oficial de Waze',
@@ -1726,6 +1730,7 @@ const I18N_DICT = {
     'states.error.retry': 'Réessayer',
     'card.noImage': 'Aucune photo', 'card.deleteBanner': '⚠ Demande de suppression',
     'card.categories': 'Catégories :', 'card.address': 'Adresse :', 'card.type': 'Type :', 'card.creator': 'Auteur :',
+    'card.read.banner': 'Déjà marqué comme lu — le filtre inclut les lus',
     'card.flagComment': 'Signalement utilisateur', 'card.brand': 'Marque :',
     'card.brandKnown': '✓ connue', 'card.brandUnknown': '? non listée',
     'card.brandKnown.title': 'Marque reconnue par Waze', 'card.brandUnknown.title': 'Marque absente de la liste officielle Waze',

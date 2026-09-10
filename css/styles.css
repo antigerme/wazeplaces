@@ -70,6 +70,48 @@ body.dark {
   }
 }
 
+/* Faixa "já lido", logo acima da barra ✕ ↑ ✓.
+ *
+ * Nasceu de um relato: o editor marcava como lido, atualizava, e o pedido
+ * voltava. NÃO era bug — o filtro dele estava com "Apenas pedidos não lidos"
+ * desmarcado, e aí a app pede ao Waze TUDO, inclusive lido. O que faltava era o
+ * card dizer isso; ele não podia, porque o `isRead` era lido só pra filtrar no
+ * core e descartado antes de chegar aqui.
+ *
+ * POR QUE ELA PODE CUSTAR FOTO, sendo que neste projeto a foto é o produto:
+ * porque ela só existe no estado RARO. Com o filtro no padrão (marcado) o Waze
+ * nem devolve pedido lido, então no fluxo em que a fila é triada esta regra
+ * nunca casa e o card fica idêntico ao de hoje. Medido: 0px de foto no fluxo
+ * normal, e o custo aparece só quando alguém desmarcou o filtro.
+ *
+ * Ela diz a CAUSA e não só o estado. "Lido" sozinho não responde "então por que
+ * ele voltou?", que é a pergunta que foi feita.
+ *
+ * VERDE e ✓ porque é o MESMO conceito do botão de marcar como lido — regra de
+ * consistência do projeto (mesmo conceito, mesmo ícone, mesma cor).
+ *
+ * NÃO leva `title`: title não se alcança no celular, que é onde a app roda —
+ * é o defeito que a linha "de N na região" já tem. */
+.card-read-banner:not(.hidden) {
+  display: block;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  text-align: center;
+  background: #ecfdf5;
+  color: #065f46;
+  border-top: 1px solid #d1fae5;
+}
+.card-read-banner::before {
+  content: '\2713\00a0';
+  font-weight: 700;
+}
+.dark .card-read-banner:not(.hidden) {
+  background: rgba(16, 185, 129, 0.14);
+  color: #6ee7b7;
+  border-top-color: rgba(16, 185, 129, 0.28);
+}
+
 /* Anel de foco visível pra navegação por teclado (WCAG 2.4.7)
  *
  * SEM `border-radius` aqui, e isso é regra e não esquecimento: pôr raio nesta
