@@ -1835,6 +1835,12 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
         flagEntityID,
         dateAdded: ur.dateAdded ?? null,
         isStarred: !!ur.isStarred,
+        // O `isRead` era lido só pra FILTRAR (`userPropertiesFilter`) e jogado
+        // fora antes de chegar ao card. Com "Apenas pedidos não lidos"
+        // desmarcado o pedido lido volta na fila — correto — e o card não tinha
+        // como dizer por quê. Um editor gastou duas marcações no MESMO pedido
+        // até relatar. Custa um booleano.
+        isRead: !!ur.isRead,
         createdBy: creatorName,
         // O ID NUMÉRICO, ao lado do nome. Os dois servem a coisas diferentes: o
         // nome é o que o editor lê, o id é o que IDENTIFICA. Medido na fila real

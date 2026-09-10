@@ -4442,6 +4442,15 @@ function renderCurrentCard() {
         ageEl.classList.remove('hidden');
     }
 
+    // A faixa "já lido". Só aparece quando o Waze diz que ESTE pedido já foi
+    // lido — o que, com o filtro no padrão ("Apenas pedidos não lidos"), nunca
+    // acontece, porque o pedido lido nem é devolvido. Ou seja: custo zero de
+    // foto no fluxo em que a fila é triada, e a resposta pronta pra quem
+    // desmarcou o filtro e estranha o pedido voltar depois de marcá-lo. Foi um
+    // relato real, com a MESMA marcação feita duas vezes no mesmo pedido antes
+    // de o editor desconfiar.
+    card.querySelector('.card-read-banner')?.classList.toggle('hidden', place.isRead !== true);
+
     // Reporte: o motivo (`flagType`) é a informação principal e quase sempre a
     // ÚNICA — o comentário livre vem vazio na maioria dos casos. A app só olhava
     // o comentário, então o card de reporte saía sem dizer por que o local foi
