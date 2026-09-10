@@ -8203,18 +8203,20 @@ function aplicarAnistiaDaPresenca() {
         delete p.presencaOffEm;
         return true;
     }
-    // Desligado ANTES desta versão existir: não há de quando contar. Carimba
-    // agora, e a anistia cai daqui a 9 dias.
+    // Desligado SEM carimbo: não há de quando contar, então NÃO se conta.
     //
-    // Carimbar em vez de anistiar na hora é deliberado: religar de uma vez todo
-    // mundo que já estava desligado transforma um deploy numa mudança em massa
-    // que ninguém pediu — e some com o significado dos 9 dias.
-    // MIGRACAO: presenca-anistia-carimbo — ver tools/migracoes.mjs. É um RAMO,
-    // não a função: os outros dois são permanentes.
-    if (!Number.isFinite(p.presencaOffEm) || p.presencaOffEm <= 0) {
-        p.presencaOffEm = Date.now();
-        return true;
-    }
+    // Isto já foi migração (carimbava a hora, pra quem desligou antes de a
+    // anistia existir) e virou DEFESA quando o legado saiu, em 2026-09-10.
+    // A diferença importa: a migração ESCREVIA, esta linha não faz nada.
+    //
+    // E ela não é opcional. Sem este `return`, `Date.now() - undefined` dá NaN,
+    // `NaN < PRESENCA_ANISTIA_MS` é **false**, e o fluxo cai direto no religar
+    // lá embaixo — ou seja, todo mundo que estava com a presença desligada
+    // seria RELIGADO de uma vez, que é exatamente a mudança em massa que a
+    // anistia de 9 dias existe pra evitar. MEDIDO antes de remover o ramo.
+    // Vale pra qualquer origem do estado torto: armazenamento editado à mão,
+    // gravação truncada, relógio maluco — não só pro legado que saiu.
+    if (!Number.isFinite(p.presencaOffEm) || p.presencaOffEm <= 0) return false;
     // Relógio que andou pra trás dá diferença negativa: isso não é 9 dias.
     const decorrido = Date.now() - p.presencaOffEm;
     if (decorrido < PRESENCA_ANISTIA_MS) return false;

@@ -409,21 +409,21 @@ try {
     return {
       naTela: seletores.filter((s) => document.querySelector(s)),
       noObjeto: ['bloqueados', 'bloquear', 'desbloquear'].filter((k) => k in Presenca),
-      noArmazenamento: localStorage.getItem('waze_places_bloqueados'),
     };
   });
   if (!semBloqueio.naTela.length && !semBloqueio.noObjeto.length) ok('não há bloqueio de pessoa em lugar nenhum');
   else anota(`sobrou bloqueio: tela=${JSON.stringify(semBloqueio.naTela)} objeto=${JSON.stringify(semBloqueio.noObjeto)}`);
 
-  // 8) E a chave que ficou no aparelho de quem usou a versão anterior é
-  //    apagada na carga — dado órfão de recurso removido não envelhece calado.
-  const limpou = await ana.page.evaluate(async () => {
-    localStorage.setItem('waze_places_bloqueados', '["alguem"]');
-    window.presencaMontar();
-    return localStorage.getItem('waze_places_bloqueados');
-  });
-  if (limpou === null) ok('a chave antiga de bloqueio é apagada do aparelho');
-  else anota(`a chave antiga sobreviveu: ${limpou}`);
+  // 8) A limpeza da chave antiga SAIU em 2026-09-10, e este bloco saiu junto.
+  //
+  //    Ela era migração: apagava `waze_places_bloqueados` do aparelho de quem
+  //    usou a versão com bloqueio. Removida a pedido do owner, com o argumento
+  //    de que a app não está em produção — todos são testadores e podem zerar o
+  //    app. Consequência assumida: num aparelho que teve o recurso a chave
+  //    permanece até alguém limpar à mão, e ela guardava ids de PEER.
+  //
+  //    O que continua cobrado é o bloco 7 acima — que o RECURSO não volte. O
+  //    que sumiu é só a faxina do resíduo dele.
   await ana.page.evaluate(() => closeModal('presencaModal'));
 
 

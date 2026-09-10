@@ -32,49 +32,35 @@
 // antes de virar regra: o `loadSession` DESCARTA sessão no formato anterior em
 // vez de carregar compatibilidade, com esta mesma justificativa escrita.
 // Quando houver base de verdade, esta nota some e os prazos sobem.
+//
+// EXERCIDA em 2026-09-10, a pedido do owner ("limpe todo o legado agora"),
+// com as duas entradas de família `aparelho` — que tinham 14 e 15 dias, bem
+// abaixo dos 30. Saíram: a limpeza de `waze_places_bloqueados` e o carimbo
+// legado da anistia. A de família `arquivo` FICOU, e a razão é a que separa
+// as famílias: aparelho se zera, arquivo enviado não.
 
 export const PRAZO_PADRAO_DIAS = 30;
 
 export const MIGRACOES = [
-  {
-    id: 'presenca-chave-bloqueio',
-    desde: '2026-08-26',
-    revisarEm: '2026-09-25',
-    familia: 'aparelho',
-    onde: 'js/presenca.js',
-    oque: 'Apaga `waze_places_bloqueados` do aparelho na carga. O bloqueio de '
-        + 'pessoa foi removido inteiro (v2026.08.22-08) e a chave guardava ids '
-        + 'de PEERS — dado de terceiro, não sobra de configuração.',
-    removerQuando: 'Nenhum aparelho puder mais ter a chave. Como o dado é de '
-        + 'terceiro, isto NÃO é arrumação: enquanto houver dúvida, fica. O '
-        + '`tools/smoke-presenca.mjs` cobra a ausência da chave, então remover '
-        + 'esta linha exige mexer nele também — de propósito.',
-  },
-  {
-    id: 'presenca-anistia-carimbo',
-    desde: '2026-08-27',
-    revisarEm: '2026-09-26',
-    familia: 'aparelho',
-    onde: 'js/app.js',
-    oque: 'Carimba `presencaOffEm` em quem desligou a presença ANTES de a '
-        + 'anistia de 9 dias existir. Sem o carimbo não há de quando contar.',
-    removerQuando: 'Ninguém puder mais ter `presenca: false` sem '
-        + '`presencaOffEm`. Cuidado: é um RAMO de `aplicarAnistiaDaPresenca`, '
-        + 'não a função — os outros dois ramos são comportamento permanente e '
-        + 'apagar a função mataria o recurso.',
-  },
   {
     id: 'diag-formato-2',
     desde: '2026-09-10',
     revisarEm: '2026-12-10',
     familia: 'arquivo',
     onde: 'tools/diag-replay.mjs',
-    oque: 'Remenda o `queue[0]` que saía como a string "[circular]" nos '
-        + 'diagnósticos de formato < 3 — era sempre o card que a pessoa estava '
-        + 'vendo.',
-    removerQuando: 'Os diagnósticos antigos deixarem de interessar. **Não** '
-        + 'expira por uso da app: arquivo recebido é ARQUIVO MORTO, fica no '
-        + 'disco e no WhatsApp para sempre, e é justamente o que se usa pra '
-        + 'comparar antes/depois. Prazo longo por isso, não por descuido.',
+    oque: 'Remenda o `queue[0]` que saía como a string "[circular]" — era '
+        + 'sempre o card que a pessoa estava vendo. **A entrada nasceu ERRADA '
+        + 'dizendo "formato < 3"**: o `currentPlaceIdx` que consertou isso '
+        + 'entrou em v2026.09.10-02 SEM bumpar o `DIAG_FORMATO`, então há '
+        + 'arquivo de formato 3 que precisa do remendo do mesmo jeito. MEDIDO '
+        + 'nos 7 diagnósticos guardados: 3 precisam, e DOIS deles são formato '
+        + '3 — inclusive o mais recente do owner, com 395 pedidos.',
+    removerQuando: 'Os diagnósticos guardados deixarem de interessar. **Não** '
+        + 'expira por uso da app, e é por isso que ele sobreviveu à limpeza de '
+        + '2026-09-10: "todos são testadores e podem zerar o app" vale pra '
+        + 'APARELHO, e um arquivo já enviado não se zera — ele está no disco e '
+        + 'no WhatsApp, e é justamente o que se usa pra comparar antes/depois. '
+        + 'Tirar isto hoje quebraria o replay do arquivo que o owner mandou '
+        + 'hoje de manhã.',
   },
 ];

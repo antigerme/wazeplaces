@@ -73,15 +73,22 @@ test('anistia: aos 9 dias volta a ligar e o carimbo some', () => {
   assert.equal('presencaOffEm' in m.prefs, false, 'carimbo cumprido tem que sair');
 });
 
-test('anistia: quem desligou ANTES desta versão é carimbado, não anistiado na hora', () => {
-  // Religar de uma vez todo mundo que já estava desligado transforma um deploy
-  // numa mudança em massa que ninguém pediu — e some com o significado dos 9
-  // dias. Carimbar dá a eles a mesma contagem que todo mundo.
+test('anistia: desligado SEM carimbo não religa — e este é o teste que importa', () => {
+  // Este teste cobria a MIGRAÇÃO (carimbar quem desligou antes de a anistia
+  // existir), removida em 2026-09-10 junto com o resto do legado. Ele tinha
+  // DUAS asserções e só uma era da migração; a outra guarda um bug de verdade,
+  // então o teste fica — com a metade que sobrevive à remoção.
+  //
+  // O bug: sem o `return false` da defesa, `Date.now() - undefined` dá NaN,
+  // `NaN < PRESENCA_ANISTIA_MS` é FALSE, e o fluxo cai no religar. Todo mundo
+  // que estivesse com a presença desligada seria RELIGADO de uma vez — a
+  // mudança em massa que os 9 dias existem pra evitar, chegando por acidente.
+  // MEDIDO antes de remover o ramo, e é o motivo de a defesa não ser opcional.
   const agora = Date.UTC(2026, 7, 27, 12);
   const m = montar({ presenca: false }, agora);
-  assert.equal(m.aplicarAnistiaDaPresenca(), true, 'mudou: ganhou carimbo');
-  assert.equal(m.prefs.presenca, false, 'NÃO pode religar no mesmo instante');
-  assert.equal(m.prefs.presencaOffEm, agora);
+  assert.equal(m.aplicarAnistiaDaPresenca(), false, 'sem carimbo não há o que mudar');
+  assert.equal(m.prefs.presenca, false, 'NÃO pode religar por falta de carimbo');
+  assert.equal('presencaOffEm' in m.prefs, false, 'e não carimba: a migração saiu');
 });
 
 test('anistia: relógio que andou pra trás não conta como 9 dias', () => {
@@ -91,13 +98,16 @@ test('anistia: relógio que andou pra trás não conta como 9 dias', () => {
   assert.equal(m.prefs.presenca, false);
 });
 
-test('anistia: carimbo corrompido é tratado como ausente', () => {
+test('anistia: carimbo corrompido não religa ninguém', () => {
+  // A defesa vale pra QUALQUER origem do estado torto — armazenamento editado
+  // à mão, gravação truncada, relógio maluco —, não só pro legado que saiu.
+  // Cada um destes seis cairia no religar sem ela: `NaN < X` é false, e é
+  // isso que a comparação devolve pra todos.
   for (const lixo of ['ontem', NaN, 0, -5, null, {}]) {
     const agora = Date.UTC(2026, 7, 27, 12);
     const m = montar({ presenca: false, presencaOffEm: lixo }, agora);
-    assert.equal(m.aplicarAnistiaDaPresenca(), true, `carimbo ${JSON.stringify(lixo)}`);
-    assert.equal(m.prefs.presenca, false);
-    assert.equal(m.prefs.presencaOffEm, agora);
+    assert.equal(m.aplicarAnistiaDaPresenca(), false, `carimbo ${JSON.stringify(lixo)}`);
+    assert.equal(m.prefs.presenca, false, `religou com carimbo ${JSON.stringify(lixo)}`);
   }
 });
 
