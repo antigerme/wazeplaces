@@ -4301,8 +4301,24 @@ function showLoading(visible) {
 function sortQueue() {
     const asc = AppState.filters.sortOrder === 'oldest';
     AppState.queue.sort((a, b) => {
-        const da = (a && a.dateAdded) || 0;
-        const db = (b && b.dateAdded) || 0;
+        // Pedido SEM data vai pro FIM, nos dois sentidos — e o `|| 0` que
+        // estava aqui fazia o contrário. Um `dateAdded` nulo virava 0, que em
+        // "mais antigos" é o mais antigo possível: o pedido cravava a posição
+        // 0 da fila e ficava lá, em toda abertura da app, para sempre.
+        //
+        // É EXATAMENTE o sintoma que o owner relatou em 2026-09-10 (por outra
+        // causa: o rótulo de idade ambíguo). Não estava ativo na fila dele —
+        // medido, 370 de 370 com data —, mas o core devolve `ur.dateAdded ??
+        // null` (core.mjs:1836), então basta o Waze omitir o campo em UM
+        // pedido pra reproduzir o mesmo "isto não sai da minha frente" sem
+        // nada na tela explicando.
+        //
+        // Sem data não é "mais antigo", é DESCONHECIDO — e o fim da fila é o
+        // lugar honesto pra isso nas duas ordenações.
+        const da = Number.isFinite(a && a.dateAdded) ? a.dateAdded : null;
+        const db = Number.isFinite(b && b.dateAdded) ? b.dateAdded : null;
+        if (da === null) return db === null ? 0 : 1;
+        if (db === null) return -1;
         return asc ? da - db : db - da;
     });
 }
@@ -6468,22 +6484,67 @@ function showNoPlaces() {
     }
 }
 
+// A IDADE DO PEDIDO, e ela já MENTIU pro owner — três vezes, com relato.
+//
+// Isto usava chaves abreviadas do dicionário, e em português `time.months` era
+// `há {n}m` enquanto `time.minutes` é `há {n}min`. Um pedido de NOVE MESES
+// renderizava **"há 9m"**, que todo falante de português lê como nove MINUTOS.
+// Ao lado, na mesma linha, o rótulo de tipo diz "Novo local". A tela inteira
+// afirmava "local novo, de 9 minutos atrás" sobre um pedido de 2025-11-27 — e
+// foi exatamente assim que o owner relatou: a mesma solicitação "nova"
+// entrando toda vez que ele abre a app. Ele leu certo o que a app escreveu.
+// A mesma colisão existia em espanhol (`hace {n}m` × `hace {n}min`); inglês
+// (`mo`) e francês (` mois`) escapavam — o defeito era de DUAS línguas em
+// quatro, e o owner usa uma delas.
+//
+// E a ordenação faz dos dois um par: MEDIDO na fila real dele, o rótulo de
+// meses cabe a 1 card em 370 (0,3% — 78% são horas, 22% dias). Mas com "mais
+// antigos primeiro" o card mais velho é POR DEFINIÇÃO o mais provável de cair
+// na faixa de meses, então o único rótulo ambíguo da fila era garantidamente o
+// PRIMEIRO da tela, toda vez que ele abria a app. Cada recurso certo sozinho.
+//
+// Havia um segundo buraco, este aritmético e nas QUATRO línguas: entre 360 e
+// 364 dias, `months` dava 12 (fora da faixa) e `years` dava `floor(360/365)` =
+// 0 — a tela mostrava **"há 0a"**. Janela de 5 dias, ninguém relatou porque é
+// rara, mesmo defeito de fundo: conta à mão que produz rótulo falso.
+//
+// O conserto NÃO é escolher abreviatura melhor: é usar o mecanismo que esta
+// app JÁ usa pra idade de FOTO (`idadeDaFoto`), com o motivo já escrito lá —
+// `Intl.RelativeTimeFormat` resolve plural por idioma sozinho, e o projeto não
+// tem ICU. Duas mecânicas para o mesmo conceito é como elas divergem: o MESMO
+// card mostrava "há 9 meses" na foto e "há 9m" no pedido. Some com as 6 chaves
+// `time.*` × 4 línguas, e o ano acima de 365 dias espelha o `idadeDaFoto` —
+// "2025" decide melhor que "ano passado" num pedido que se vai julgar.
+//
+// MEDIDO antes de trocar, porque a string mais larga quase nunca está no
+// idioma em que se desenvolve (gotcha #25): 3 aparelhos × 4 idiomas × 5 faixas
+// = 60 combinações, ZERO estouro e ZERO quebra de linha; o pior caso (francês
+// no Galaxy Fold, "il y a 28 minutes") ainda deixa 88px de folga.
 function formatRelativeTime(ts) {
     if (!ts || typeof ts !== 'number' || ts <= 0) return null;
     const diff = Date.now() - ts;
-    if (diff < 0) return t('time.now');
-    const sec = Math.floor(diff / 1000);
-    if (sec < 60) return t('time.now');
-    const min = Math.floor(sec / 60);
-    if (min < 60) return t('time.minutes', { n: min });
-    const hr = Math.floor(min / 60);
-    if (hr < 24) return t('time.hours', { n: hr });
-    const days = Math.floor(hr / 24);
-    if (days < 30) return t('time.days', { n: days });
-    const months = Math.floor(days / 30);
-    if (months < 12) return t('time.months', { n: months });
-    const years = Math.floor(days / 365);
-    return t('time.years', { n: years });
+    // Relógio torto ou data no futuro: "agora" é o menos errado — não se
+    // inventa idade negativa nem se esconde o pedido.
+    const loc = i18nLocale();
+    try {
+        const rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto' });
+        if (diff < 0) return rtf.format(0, 'second');
+        const sec = Math.floor(diff / 1000);
+        if (sec < 60) return rtf.format(0, 'second');
+        const min = Math.floor(sec / 60);
+        if (min < 60) return rtf.format(-min, 'minute');
+        const hr = Math.floor(min / 60);
+        if (hr < 24) return rtf.format(-hr, 'hour');
+        const days = Math.floor(hr / 24);
+        if (days < 30) return rtf.format(-days, 'day');
+        // `< 365` e não `meses < 12`: era daqui que saía o "há 0a".
+        if (days < 365) return rtf.format(-Math.round(days / 30), 'month');
+        return new Date(ts).toLocaleDateString(loc, { year: 'numeric' });
+    } catch (e) {
+        // Sem Intl (não deve acontecer no piso da app), a data crua ainda
+        // responde a pergunta — e nunca é ambígua.
+        try { return new Date(ts).toLocaleDateString(loc); } catch (e2) { return null; }
+    }
 }
 
 // ── Mensagem de erro que veio do servidor ─────────────────────────────────
