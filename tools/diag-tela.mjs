@@ -25,6 +25,7 @@
 // é o resultado; re-executar scripts mudaria o instante que se quer olhar.
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { lerDiagnostico } from './diag-ler.mjs';
 import { basename, join } from 'node:path';
 
 // `--cru` tira as MARCAS da ferramenta (hachura na imagem que faltou, moldura no
@@ -41,7 +42,9 @@ if (!arquivo) {
   console.error('uso: node tools/diag-tela.mjs <arquivo.json> [pasta-de-saida]');
   process.exit(2);
 }
-const d = JSON.parse(readFileSync(arquivo, 'utf8'));
+// Aceita `.zip` (o formato de hoje) e `.json` cru (relato antigo, ou
+// navegador sem CompressionStream). Farejado pelos bytes, não pela extensão.
+const { dados: d, origem: _origemDoDiag } = lerDiagnostico(arquivo);
 mkdirSync(saida, { recursive: true });
 
 // Os dois formatos convivem: o primeiro diagnóstico guardava UM `dom`; o do FAB
@@ -236,7 +239,7 @@ if (alertas.length) {
   }
   console.log('');
 }
-console.log(`${linhas.length} momento(s) remontado(s) em ${saida}`);
+console.log(`${linhas.length} momento(s) remontado(s) em ${saida}   (lido de ${_origemDoDiag})`);
 for (const l of linhas) {
   console.log(`  ${l.arquivo}  ${l.motivo}  painel=${l.painel}  modais=${l.modais}`
     + `  toasts=${l.toasts}  imgsQuebradas=${l.imagensQuebradas}`);

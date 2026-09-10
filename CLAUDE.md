@@ -192,6 +192,17 @@ wazeplaces/
 │   │                        #   uma conversa de verdade. É o único teste que exercita WebRTC
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
+│   ├── migracoes.mjs        # FONTE ÚNICA do código que só existe por causa de uma versão
+│   │                        #   ANTERIOR. Marcador `// MIGRACAO: <id>` no código + entrada aqui,
+│   │                        #   conferidos nos DOIS sentidos por test/migracoes.test.mjs.
+│   ├── diag-ler.mjs         # FONTE ÚNICA de abrir um diagnóstico. Fareja os BYTES MÁGICOS (não a
+│   │                        #   extensão) e aceita .zip (o formato de hoje), .gz e .json cru — este
+│   │                        #   porque relato ANTIGO é o que se usa pra comparar antes/depois.
+│   ├── diag-replay.mjs      # Reconstrói a TELA do editor a partir do diagnóstico, VIVA: sobe a
+│   │                        #   app, injeta fila/filtros/perfil/tema/idioma no viewport dele e
+│   │                        #   para pra você medir. NÃO fala com a rede. `--tela` salva PNG.
+│   ├── diag-api.mjs         # Pergunta à API de PRODUÇÃO com o token que o diagnóstico já traz.
+│   │                        #   RECUSA por construção toda rota que escreve ou desloga.
 │   └── waze-probe.mjs       # Fala com o Waze REAL, só leitura (ver seção 🔑). Valida cookies,
 │                            #   lista países/estados, sonda se Accept-Language é honrado.
 │                            #   RECUSA /Features e /Issues/Read por construção e tem jitter
@@ -348,7 +359,7 @@ Triar pedido era trabalho solitário: a companhia já existia (dá pra ver pedid
 
 **TURN tem DOIS mecanismos, e eles não se parecem.** coturn (`TURN_URLS`+`TURN_SECRET`) CALCULA a credencial aqui, sem rede: username = expiração unix, senha = HMAC-**SHA1** do segredo (`use-auth-secret`). Cloudflare Realtime (`TURN_KEY_ID`+`TURN_API_TOKEN`) PEDE por HTTP — não dá pra calcular, quem assina é o lado deles, e isso custa uma chamada de rede por emissão de crachá. MEDIDO na conta real, porque a doc mostra dois endpoints e eles diferem: `credentials/generate` devolve `iceServers` como OBJETO com as portas 3478/5349; `credentials/generate-ice-servers` devolve ARRAY já no formato de `RTCConfiguration` e traz **também 53, 80 e 443**. Usamos o segundo, e as portas extras são o motivo — 3478 é bloqueado em rede corporativa, que é justamente onde o TURN precisa salvar. **Falha de TURN nunca derruba a presença**: `turnDaCloudflare` devolve `null` em qualquer erro e o STUN assume (travado em teste com 6 modos de falha).
 
-**NÃO há bloqueio de pessoa, e isso é decisão, não pendência** (v2026.08.22-08, do owner). O portão do login já exige **L3+ E Area Manager**: quem entra passou por um filtro de maturidade da própria comunidade, e abuso se resolve **no Waze**, onde a conta existe de verdade — não numa lista local que só vale num aparelho. O recurso chegou a existir e foi removido inteiro; enquanto durou, custou TRÊS defeitos em dois dias (beco sem saída, contagem inflada e uma folha que se contradizia). `tools/smoke-presenca.mjs` cobra a AUSÊNCIA: nenhum seletor de bloqueio, nenhuma chave no objeto `Presenca`, e `waze_places_bloqueados` apagado do aparelho na carga. Se a demanda voltar, releia o saldo antes.
+**NÃO há bloqueio de pessoa, e isso é decisão, não pendência** (v2026.08.22-08, do owner). O portão do login já exige **L3+ E Area Manager**: quem entra passou por um filtro de maturidade da própria comunidade, e abuso se resolve **no Waze**, onde a conta existe de verdade — não numa lista local que só vale num aparelho. O recurso chegou a existir e foi removido inteiro; enquanto durou, custou TRÊS defeitos em dois dias (beco sem saída, contagem inflada e uma folha que se contradizia). `tools/smoke-presenca.mjs` cobra a AUSÊNCIA do RECURSO: nenhum seletor de bloqueio e nenhuma chave no objeto `Presenca`. **A faxina do resíduo saiu em v2026.09.10-06** — a app apagava `waze_places_bloqueados` do aparelho na carga, e isso era migração; foi removida junto com o resto do legado, a pedido do owner, com o argumento de que a app não está em produção. Consequência assumida: num aparelho que teve o recurso a chave permanece até alguém limpar, e ela guardava ids de peer. Se a demanda voltar, releia o saldo antes.
 
 **O RECIBO da mensagem (entregue/lida) vive inteiro no DataChannel** — `ack` por mensagem, `lido` por trecho, zero requisição ao servidor. Três decisões que não são gosto:
 - **O quinto estado ("não chegou") existe porque aqui NÃO há servidor guardando.** No WhatsApp um tique significa "está a caminho"; aqui, tique único que não vira dois significa **não chegou e não vai**. Copiar o desenho sem copiar o significado faria o editor achar que ele é que errou. E a frase **diz o motivo** quando a app sabe (`presencaMotivoDaFalha`: `saiu` → nomeia quem saiu; `falhou`/`fechada` → conexão; senão, o "Não chegou" seco — não se inventa causa que não foi medida).
@@ -378,7 +389,7 @@ Triar pedido era trabalho solitário: a companhia já existia (dá pra ver pedid
 
 ## 🌐 Endpoints proxy → Waze
 
-Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sessionToken`, carregam os cookies criptografados do store, fazem `fetch` ao Waze (via `callWaze`), normalizam a resposta. Roteados por `dispatch(name, data, { sessions })`. O nome do endpoint é **sem `.php`** (o dispatch tolera sufixo `.php` por compat de cache antigo). Multi-região (`row`/`na`/`il`/`world`) via helpers em `core.mjs` (`wazeIssuesEndpoint`, etc).
+Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sessionToken`, carregam os cookies criptografados do store, fazem `fetch` ao Waze (via `callWaze`), normalizam a resposta. Roteados por `dispatch(name, data, { sessions })`. O nome do endpoint é **sem `.php`** — e o `dispatch` faz casamento EXATO (`ROUTES[String(name)]`), sem tolerância a sufixo. Este arquivo chegou a afirmar o contrário ("tolera `.php` por compat de cache antigo") depois de a tolerância já ter sido removida do código: doc que promete o que não existe é pior que código morto, porque o código morto não engana ninguém. Foi o caso que originou `tools/migracoes.mjs`. Multi-região (`row`/`na`/`il`/`world`) via helpers em `core.mjs` (`wazeIssuesEndpoint`, etc).
 
 | App endpoint | Waze endpoint | Notas |
 |---|---|---|
@@ -663,8 +674,30 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 ## 🔬 Diagnóstico do modo dev — o que ele captura, e por quê
 
-O FAB do modo dev gera um JSON (~1 MB) que o editor manda. Ele tem TRÊS camadas, e
+O FAB do modo dev gera um **`.zip`** que o editor manda. Ele tem TRÊS camadas, e
 a terceira entrou depois de custar uma investigação inteira:
+
+**Sai EMPACOTADO desde v2026.09.10-04** (`zipar()` em `app.js`). MEDIDO no arquivo real do
+owner: 2,61 MB → **532 KB**, 4,9×, em **529 ms com CPU 6× mais lenta** — a compressão é do
+próprio navegador (`CompressionStream('deflate-raw')`), então **não entrou dependência**.
+**ZIP e não `.gz`** por dois motivos: abre no PRÓPRIO celular sem instalar nada (`.gz` é opaco
+no Android e no iOS, e arquivo que o dono não consegue abrir é arquivo que ele manda sem poder
+conferir), e aceita MAIS DE UMA entrada — o `LEIA-ME.txt` mantém visível, na listagem de
+qualquer visualizador, o aviso de que ali dentro vai **credencial viva**, que comprimido
+sumiria de vista. Sem `CompressionStream` (iOS < 16.4) cai pro `.json` de sempre: instrumento
+de socorro não pode ter pré-requisito. Ler é pela FONTE ÚNICA `tools/diag-ler.mjs`, que fareja
+os **bytes mágicos** (não a extensão — o arquivo passa por WhatsApp e e-mail, que renomeiam) e
+aceita `.zip`, `.gz` e `.json` cru, este último porque os relatos ANTIGOS são justamente os que
+se usa pra comparar antes/depois. `test/diag-zip.test.mjs` trava as duas pontas com **oráculos
+de FORA** — o `zlib.crc32` do Node e o `unzip` do sistema —, porque escritor e leitor são meus
+e um erro combinado nos dois passa num teste de ida e volta sem piscar.
+
+**A seção `codigo` não carrega mais o que não é código.** Ela existe pra detectar PWA rodando
+versão velha (o SW é cache-first), e guarda os bytes que o aparelho REALMENTE recebeu de cada
+recurso nosso. Entravam junto duas coisas inúteis: a **fonte `.woff2`**, binária lida com
+`r.text()` — chega corrompida, e fonte não causa defeito que este arquivo investiga (MEDIDO:
+111 KB crus, **42 KB comprimidos, 8% do arquivo**); e **6 entradas `/api/*`** com `405 Método
+não permitido`, porque o coletor faz GET e a API só aceita POST.
 
 1. **O que a página É** — `dom` (o `outerHTML`), `caches`, `localStorage`, código servido.
 2. **O que a app ACHA** — `AppState`, `chamadas` (anel de 60, sempre ligado), `diario`
@@ -695,12 +728,49 @@ treina a ignorar a seção, que é como ela morre. Duas consequências já aplic
 
 `tools/diag-tela.mjs` imprime os alertas ANTES de tudo e os põe no `resumo.json`.
 
-**Armadilha estrutural, ainda aberta: o diário nasce VAZIO no primeiro relato.** `dlog()`
-sai na primeira linha se o dev mode estiver desligado, e a pessoa só o liga DEPOIS de o
-problema acontecer. No arquivo do editor L2+AM: `chamadas: 60`, `diario: []`, `momentos: 0`.
-O conserto seria um anel pequeno sempre ligado, só de fatos de layout sem PII
-(`--kb-inset` mudou, girou a tela, modal abriu) — o `API.chamadas` já é o precedente.
-Não feito ainda; decisão de produto.
+**O ARQUIVO É UMA GRAVAÇÃO, e daí saem duas ferramentas com papéis diferentes.** Ele responde
+tudo que a app perguntou e nada do que ela não perguntou — e confundir isso me fez pedir
+`cookies.txt` pra coisa que já estava no arquivo. Medido em 2026-09-10: nas QUATRO investigações
+do dia (modais achatados, "marquei como lido e voltou", L2+AM vendo 1 de 311, e a ordenação) os
+cookies **não mudaram nenhuma conclusão** — na última eles só confirmaram.
+
+- **`tools/diag-replay.mjs <arquivo.json>`** — reconstrói a tela DELE localmente e **viva**:
+  sobe o `server/node.mjs`, injeta fila/filtros/perfil/tema/idioma no viewport e dpr do
+  aparelho, e para pra você abrir modal, arrastar card, medir geometria ou rodar as sentinelas.
+  Não fala com a rede. É o que eu fazia À MÃO a cada investigação — três vezes só no dia 10,
+  e numa delas extraindo quadros de vídeo com ffmpeg pra medir o que era um
+  `getBoundingClientRect()`. `--tela` salva PNG e sai.
+- **`tools/diag-api.mjs <arquivo.json> <rota> [json]`** — pergunta à API de **produção** usando
+  o `waze_session_token` que o arquivo já carrega (**ideia do owner**). O token é a chave da
+  NOSSA API, que tem os cookies do Waze cifrados no servidor: dá pra perguntar sem nunca segurar
+  a credencial do WME. Fecha a classe "e se pedisse a página 2? e com outro filtro?" — que era o
+  único motivo real de pedir cookies. **Só leitura, por CONSTRUÇÃO**: as rotas que escrevem
+  (`validar-place`, `marcar-lido`, `excluir-foto`, `renomear-local`) e as que deslogam (`sessao`,
+  `parear`) saem com erro antes de qualquer rede, como o `waze-probe` faz com `/Features`.
+  `test/diag-ferramentas.test.mjs` deriva essa lista do `ROUTES` do core, então **rota nova
+  aparece lá em vez de passar despercebida**. Jitter da fonte única, e o token nunca é impresso
+  nem vai por query. **Cada chamada é requisição REAL no free tier** — medição pontual, nunca
+  varredura. Nota de campo: POST cru leva **403** do Bot Fight Mode; precisa de `User-Agent` de
+  navegador (medido).
+
+**O que NENHUMA das duas fecha, e cookies seguem sendo o caminho:** perguntar ao Waze algo que a
+NOSSA API não expõe — outro payload, outro endpoint, um campo que o `handleBuscarPlaces` não
+manda. Foi essa classe que respondeu "os filtros de data são do venue" e "foto em casa não tem
+autor". Ela é real, e é bem menor do que eu vinha tratando.
+
+**O diário nascia VAZIO no primeiro relato — CONSERTADO em v2026.09.10-04.** `dlog()` saía
+na primeira linha com o dev mode desligado, e a pessoa só o liga DEPOIS do problema. MEDIDO
+nos 7 diagnósticos reais: **4 chegaram com `diario: []`**, o pior deles o dos modais achatados
+(`chamadas: 60` — anel CHEIO — e diário vazio). Havia até uma ironia: o `diagCapturarErros()`
+roda incondicionalmente e registra um observador de long task que chamava `dlog('lenta')` — a
+captura sempre-ligada alimentava um anel com portão. Hoje existe `dfato()`, anel de 120 SEM
+portão, e o critério de entrada é **duplo**: (a) RARO — nada por swipe, senão volta o custo que
+justificava o portão (`dlog` continua gated pelo mesmo motivo: ~200 swipes por sessão e o valor
+da app é o ritmo); (b) SEM DADO DE TERCEIRO — nome de local, de autor e texto livre seguem só
+no `dlog`. Hoje: `kb` (o inset APLICADO ao lado do `coberto` CRU — o par que teria respondido o
+caso do iOS em minutos), `janela`, `sw.assumiu`, `tela.modal`, `tela.vazia`, `busca.falhou`,
+`lenta`, `sessao.alarmeFalso`. O `diario` do arquivo é a fusão dos dois anéis ordenada por
+tempo. Medido com o dev DESLIGADO: 0 → **9 entradas** num uso de meio minuto.
 
 **O que NÃO fazer, e por quê:** screenshot da tela real. `getDisplayMedia` abre prompt e
 captura o aparelho inteiro (dado de terceiro à vontade); `html2canvas` é dependência (o
@@ -730,7 +800,7 @@ mesma pergunta em 40 bytes por elemento.
 - **Modal "Filtros e Preferências" é TABBED** (3 abas WAI-ARIA: Filtros | Preferências | Histórico — `FILTER_TABS`/`switchFilterTab` em app.js, `.seg-tabs` em styles.css). Rodapé é **contextual**: Cancelar/Aplicar só na aba Filtros; as outras mostram "Fechar". **Preferências (idioma/undo/dev mode) aplicam NA HORA via change listener** — não passam pelo `applyFiltersFromModal` (que é só da aba Filtros). Campo de filtro novo → aba Filtros; preferência nova → aba Preferências + listener próprio. Abre sempre na aba Filtros
 - **Snackbar/toast**: `showToast(msg, type, durationMs=4000)` — bottom-center no `#notifyStack` (respeita safe-area), clique dispensa, `aria-live` no container. Undo banner vive no mesmo stack
 - **Switches vs checkboxes**: preferência on/off = `<input type="checkbox" class="ui-switch">` (estilo M3, JS lê `.checked` normal); seleção múltipla (tipos) = checkbox com `accent-cyan-600`
-- **Tema**: segue o sistema até o user tocar no toggle (aí persiste em `localStorage.waze_places_theme`). `applyTheme` também atualiza `<meta name="theme-color">`. Dark mode: usar variantes `dark:` do Tailwind no HTML em código novo; os overrides `!important` do styles.css são legado
+- **Tema**: segue o sistema até o user tocar no toggle (aí persiste em `localStorage.waze_places_theme`). `applyTheme` também atualiza `<meta name="theme-color">`. Dark mode: **100% via variantes `dark:`** no HTML/JS. O bloco de ~27 overrides globais com `!important` que existia no `styles.css` **já foi removido** (migração validada por screenshot pixel a pixel, claro e escuro) — este arquivo seguia chamando-os de "legado" como se ainda estivessem lá. Os 3 `!important` que restam são o bloco de `prefers-reduced-motion`, que é o padrão de acessibilidade e fica
 - **Safe areas (iOS PWA)**: header tem `padding-top: env(safe-area-inset-top)`; `#notifyStack`/footer usam `env(safe-area-inset-bottom)`. Não criar elemento fixed sem considerar isso
 - **Zoom NUNCA bloqueado** no viewport (WCAG 1.4.4). Lightbox tem pinch/double-tap/wheel zoom + swipe pra trocar/fechar
 - **Reduced motion**: media query global em styles.css zera animações — não criar animação essencial sem fallback estático
@@ -821,6 +891,18 @@ mesma pergunta em 40 bytes por elemento.
 - **Sincronize com `git fetch --prune`.** Sem o prune sobram refs `origin/claude/…` mortos, apontando pra commits que não existem mais no remoto. Num ambiente onde o container pode voltar a um estado antigo, ref velho é exatamente como se acredita que a árvore está em dia quando não está — **confira `git log --oneline -1` contra o GitHub antes de acreditar no estado local**. Em 2026-08-07 o container voltou CINCO vezes pra uma main de três PRs atrás; das cinco, duas só foram percebidas porque a contagem de testes não bateu (168 onde eram 180), e uma delas quase virou um push que reverteria três PRs.
 - **Sempre que abrir PR, agente subscreve no `subscribe_pr_activity`** e acompanha CI/review comments até a branch ser mergeada. Bugs apontados no review devem ser corrigidos no mesmo PR (push direto na branch). CI vermelho deve ser corrigido (não ignorado).
 
+### Compatibilidade com versão anterior: registre, não confie na memória
+
+**Todo trecho que existe só por causa de uma versão ANTERIOR ganha `// MIGRACAO: <id>` no código e entrada em `tools/migracoes.mjs`.** `test/migracoes.test.mjs` cobra os DOIS sentidos: entrada sem marcador reprova (foi removido e o registro mentiu), marcador sem entrada reprova (compat nova nascendo sem data). É exato — nada de varrer comentário atrás da palavra "legado", que geraria falso positivo, e falso positivo treina a ignorar a seção.
+
+**O prazo NÃO apaga nada.** Passou de `revisarEm`, o teste REPROVA e imprime a `removerQuando` pra um humano responder. Deleção automática não serve, e por dois motivos MEDIDOS: (a) migração quase nunca é um arquivo, é um **ramo** dentro de código vivo — dos 3 candidatos levantados em 2026-09-10 só UM era uma linha deletável, e outro (`initUndoGateSeen`) **nem migração era**, porque todo aparelho NOVO precisa dele; (b) relógio não sabe se ainda existe dado no formato antigo, que é a única pergunta que importa. Mantendo? Empurre o `revisarEm` — ato deliberado e datado, não um silêncio.
+
+**São TRÊS famílias e só uma expira por relógio.** `aparelho` (migração de localStorage) expira quando todo aparelho rodou — é onde os 30 dias do `PRAZO_PADRAO_DIAS` valem, e o teste reprova quem esticar além disso. `compat` expira quando o dado antigo some. `arquivo` **não expira por uso da app**: diagnóstico recebido é arquivo morto, fica no disco e no WhatsApp pra sempre, e é justamente o que se usa pra comparar antes/depois.
+
+**A ÉPOCA importa e está escrita no registro:** a app não está em produção — todos são testadores e podem zerar o app se preciso (owner, 2026-09-10). Isso encurta os prazos, porque a cauda de quem some deixa de custar. O precedente já estava no código antes de virar regra: o `loadSession` **descarta** sessão no formato anterior em vez de carregar compatibilidade, com esta mesma justificativa escrita. Quando houver base de verdade, a nota some e os prazos sobem.
+
+**Por que isto nasceu:** duas afirmações deste arquivo descreviam código que já tinha sido removido — a tolerância a `.php` no `dispatch` e os overrides `!important` do `styles.css`. Nenhum teste enxergava, porque doc não é código.
+
 ### Perfis de editor do Waze (referência rápida)
 - **URL canônica do perfil**: `https://www.waze.com/pt-BR/user/editor/<username>` (sem `pt-BR/` também funciona, redirect pra locale do user)
 - Quando mencionar nome de editor da comunidade WME (próprio owner, colaboradores tipo @daflash etc), sempre transformar em link clicável `target="_blank" rel="noopener noreferrer"` apontando pra esse perfil
@@ -887,7 +969,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 23. **Dark mode é 100% `dark:` no HTML/JS** — não crie override global. Se um `dark:` "não pega", é empate de especificidade: use `dark:hover:` explícito.
 24. **`applyI18n()` não entra em `<template>`** — chame `applyI18n(card)` no clone, senão o card volta pro português a cada swipe.
 25. **Auditoria de layout roda em TODAS as línguas** — a string mais larga decide o layout e quase nunca está no idioma em que você desenvolve. E texto que vaza da própria célula não aparece em teste de `scrollWidth`: meça caixa contra caixa.
-26. **Sobreposição se mede com `elementFromPoint`, NUNCA com `getBoundingClientRect`** — os dois retângulos existem e estão onde deviam; só o hit-test diz QUEM recebe o dedo. **Reincidiu em v2026.08.18-04**: o contêiner da pílula do nome no lightbox é largura cheia e nasce depois do botão de ação no DOM, então engolia o toque de aprovar/excluir nos 3 aparelhos — o owner não conseguiu aprovar uma foto. Limitar o `max-width` do BOTÃO de dentro não resolve: quem intercepta é a caixa de fora, invisível mas não transparente. `pointer-events:none` no contêiner e `auto` nos controles. **E o guard precisa EXIGIR que o alvo esteja na tela**: o meu passou verde por AUSÊNCIA de botão no cenário. Feedback transitório não pode cobrir o alvo que ainda precisa ser tocado — o countdown do dev mode tornava o próprio dev mode impossível de desbloquear. Diagnóstico: `document.elementFromPoint` no centro do alvo. **Reincidiu de novo em v2026.08.20-01, agora com o sinal comendo o CONTEÚDO em vez do alvo**: o "ver tudo" pousava por cima da 3ª linha do comentário, e o esmaecido de borda tinha rampa FIXA de 24px numa janela de 19px — apagava a única linha visível. Sinal de borda se dimensiona em fração da caixa (`min(1.5rem, 40%)`), e janela de 1 linha não leva esmaecido nenhum. Isso não estoura nada: só se vê olhando a tela, ou cobrando a regra no teste.
+26. **Sobreposição se mede com `elementFromPoint`, NUNCA com `getBoundingClientRect`** — os dois retângulos existem e estão onde deviam; só o hit-test diz QUEM recebe o dedo. **Reincidiu em v2026.08.18-04**: o contêiner da pílula do nome no lightbox é largura cheia e nasce depois do botão de ação no DOM, então engolia o toque de aprovar/excluir nos 3 aparelhos — o owner não conseguiu aprovar uma foto. Limitar o `max-width` do BOTÃO de dentro não resolve: quem intercepta é a caixa de fora, invisível mas não transparente. `pointer-events:none` no contêiner e `auto` nos controles. **E o guard precisa EXIGIR que o alvo esteja na tela**: o meu passou verde por AUSÊNCIA de botão no cenário. Feedback transitório não pode cobrir o alvo que ainda precisa ser tocado — o countdown do dev mode tornava o próprio dev mode impossível de desbloquear. Diagnóstico: `document.elementFromPoint` no centro do alvo. **Reincidiu de novo em v2026.08.20-01, agora com o sinal comendo o CONTEÚDO em vez do alvo**: o "ver tudo" pousava por cima da 3ª linha do comentário, e o esmaecido de borda tinha rampa FIXA de 24px numa janela de 19px — apagava a única linha visível. Sinal de borda se dimensiona em fração da caixa (`min(1.5rem, 40%)`), e janela de 1 linha não leva esmaecido nenhum. Isso não estoura nada: só se vê olhando a tela, ou cobrando a regra no teste. **QUARTA vez em v2026.09.10-03, e aí o buraco era a REGRA e não a medição**: o FAB do modo dev escolhia canto evitando só `DEV_FAB_ACIONAVEL` — *o que se toca* —, e o placar não é um controle, então ele pousava no "Restam". Cobrir prosa ESCONDE e a falta se percebe; cobrir número MENTE ("311" lê como "31"), e ninguém arrasta o botão pra fora de um erro que não sabe que existe. Marcador `.nao-cobrir` no `#placar`, puro e sem CSS, somado ao seletor. **E meça a TINTA**: pela caixa dava 35–42% e "não encosta"; por `Range.getBoundingClientRect()` no nó de texto, 14% no aparelho do owner, 30% no SE, 13% no Pixel 7 e **0% no Fold** — defeito que aparece e some com o aparelho. **E o conserto destapou um ponto cego no próprio guard**: o amostrador eram 5 pontos com os cantos RECUADOS a 0,15, o que em 44px deixa **6,6px cegos de cada lado** — justamente onde um vizinho encosta. Com o FAB no meio ele invadia 6px do `.card-image-next` (39px úteis de 44) e o guard via NADA. Hoje é grade 3×3 em 0,02/0,5/0,98, no `app.js` e no smoke. **E medir os SEIS cantos por interseção de retângulos** (o FAB é `z-[68]`: pixel em comum já é dele) mostrou que a ordem estava errada — o meio é a foto e a pista do polegar, e encosta em controle em 5 de 6 cards; `baixo-*` subiu na fila. Aberto: o `posicionarFabDev` decide antes de o card assentar.
 27. **A ordem do CSS decide o empate, e ela tem DOIS gumes.** **REINCIDIU em v2026.08.27-04**, e o guard existente não pegou: ele exigia `getElementById` e `classList` na MESMA instrução, e a forma natural (`const btn = …` numa linha, `btn.classList.toggle('hidden')` em outra) escapava — 390px de tirinha e 44px de botão seguindo na tela com a classe no DOM. Hoje o guard rastreia a VARIÁVEL, varre o `presenca.js` junto com o `app.js` (arquivo que esconde elemento entra na lista), e pega também o elemento que já NASCE com `hidden` no markup. Ele ficou preciso nos dois sentidos: `display: none` não derrota o `.hidden` (era falso positivo no `.auth-opt-hidden`), e a parte do seletor com `:not(….hidden…)` cede por construção — avaliada vírgula a vírgula, porque `.a, .b:not(.hidden)` tem uma metade que derrota e outra que não. Antes de v2026.08.05-04 o `styles.css` PERDIA pra utility (mordeu 6 vezes); depois da inversão ele GANHA — que é o que se queria pros estilos, mas faz `.foo{display:x}` do styles.css vencer o `.hidden` do Tailwind. Aí `classList.add('hidden')` não esconde nada, e a falha é silenciosa: o JS diz que escondeu, a classe está no DOM, só a tela discorda. Aconteceu com a pílula do nome no lightbox — o nome do local apareceu DUAS vezes, e quem viu foi o owner, não o smoke. Guard em `test/layout.test.mjs` cruza os ids que o `app.js` esconde com as classes que o `styles.css` fixa `display` (ignorando `:not(.hidden)`, que é condição e não estilo).
 28. **TODA medição leva um caso de CONTROLE — um que REPROVA se o instrumento estiver errado.** Não é só de layout (onde o controle é "a app de hoje, sem a mudança"): em medição de DADO o controle é conferir que o campo lido existe (`Object.keys` uma vez) e que o filtro pegou. **A assinatura a vigiar é RESULTADO IDÊNTICO onde ele não poderia ser** — 13 países devolvendo a mesma contagem é impossível, e apareceu nas TRÊS vezes de 2026-09-06, todas na mesma investigação: `p.countryId` num item cujo campo é `p.id`, contraste igual nas 5 fotos (eu amostrava a tarja preta), e borda igual nas 6 (eu comparava o anel com o interior da pílula, não com a foto). A quarta daquele dia não teve assinatura nenhuma e é a mais cara: mandei `residential: true` onde a app manda `null`, medi a fila que o Waze anonimiza de propósito, e quase respondi ao owner que o dado não existia — errando por 99%. Quem derrubou foi ele, com um link. **Achado que acusa a app inteira é suspeito do INSTRUMENTO antes de ser bug** — contraste "1:1" por fundo em gradiente, alvo de 20px por ler `<label>` errado, "sem anel de foco" por medir no meio da animação, "1px abaixo da dobra" por medir no mesmo `evaluate` do render (e com viewport inventada). **Todo laço de medição de layout leva um caso de CONTROLE — a app de hoje, sem a mudança**: defeito que aparece igual com e sem o recurso não é do recurso. **REINCIDIU DUAS VEZES em 2026-08-25, e as duas fora de layout — o instrumento mente igual medindo DADO:** (a) varri 13 países lendo `p.countryId` numa lista cujo campo é `p.id`; `undefined` não dá erro, o servidor cai no país padrão, e os 13 devolveram a MESMA fila do Brasil — 6 residenciais viraram "78", com cara de amostra grande. O sinal era gritante e eu quase o reportei: contagem IDÊNTICA em 13 países é impossível, e a suspeita tem que vir daí, não do dado. (b) `pgrep -f smoke-browser` casa com o próprio `bash -c` que carrega o comando: respondeu "ainda rodando" por 1h30 depois de o teste ter passado, e eu repeti isso ao owner três vezes. **As duas regras que faltavam**: campo lido de estrutura alheia se CONFERE (`Object.keys` uma vez) antes de varrer com ele, porque `undefined` costuma virar default em silêncio; e estado de processo se lê pelo ARTEFATO que ele produz (o log, o check do CI), nunca por um padrão que contém o texto do seu próprio comando.
 29. **Quem rola é a CAIXA, numa JANELA de altura fixa — nem o card, nem a caixa elástica.** Três formas já estiveram aqui e as duas primeiras eram defeito: `flex-1 min-h-0` ENCOLHIA abaixo do conteúdo (10px de texto numa linha de 19 no Fold — meia linha, com 10 ou com 200 caracteres); o "ver tudo" que a substituiu levava a caixa a `40vh` ao ser tocado, o card estourava, a rede ligava, o arraste pra cima morria e o "ver menos" caía abaixo da dobra, sem volta. Hoje: teto `calc(N * var(--linha-comentario))`, N inteiro **≥ 2**, caixa `flex-shrink-0` — a altura do card não muda com o comprimento do texto. **Expandir dentro de contêiner de altura fechada não tem pra onde expandir**: se a saída pro conteúdo longo cresce a caixa, ela cresce o card. Nas telas apertadas quem paga a 2ª linha é o piso da FOTO (gotcha #36), escopado por `:has()` — menos no deitado, que é GRADE e tem a foto na coluna AO LADO, sem como ceder altura: lá é 1 linha e o esmaecido de borda sai. O diff (`.card-changes`) segue sendo o único que absorve a sobra. **E `scrollHeight > clientHeight` NÃO distingue rolar de cortar** (é true nos dois): sem checar `overflow-y`, o guard acusa rolagem em texto cortado. Linha de altura previsível → `flex-shrink-0`. Área rolável nova → entra na exceção do `handleDragStart` E ganha `marcarBordaRolagem`.

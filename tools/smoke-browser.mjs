@@ -3536,7 +3536,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // Por isso este bloco roda com TOQUE de verdade (`hasTouch`) e eventos de
 // toque por CDP — `mouse.move` nunca teria reproduzido nenhum dos dois.
 {
-  const ALVO_PROIBIDO = 'button, a[href], input, select, textarea, label[for], [role="button"], [tabindex]:not([tabindex="-1"])';
+  // Controle acionável MAIS o que o FAB não pode cobrir por ser LEITURA
+  // (`.nao-cobrir`, hoje o #placar). Cobrir prosa esconde; cobrir número
+  // mente — "311" com a última coluna comida lê como "31".
+  const ALVO_PROIBIDO = 'button, a[href], input, select, textarea, label[for], [role="button"], [tabindex]:not([tabindex="-1"]), .nao-cobrir';
   const APARELHOS_FAB = [['iPhone SE', { width: 375, height: 667 }],
                          ['Pixel 7', { width: 412, height: 915 }],
                          ['Galaxy Fold', { width: 280, height: 653 }]];
@@ -3612,7 +3615,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         const pe = fab.style.pointerEvents, peB = btn.style.pointerEvents;
         fab.style.pointerEvents = 'none'; btn.style.pointerEvents = 'none';
         const tapa = new Set();
-        for (const [fx, fy] of [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]) {
+        // Grade ATÉ A BORDA. Com os cantos recuados a 0,15 sobravam 6,6px cegos
+        // de cada lado num quadro de 44px — e o vizinho encosta justamente aí:
+        // medido, o FAB invadia 6px do "›" e este laço passava verde.
+        const gr = [0.02, 0.5, 0.98], pts = [];
+        for (const fx of gr) for (const fy of gr) pts.push([fx, fy]);
+        for (const [fx, fy] of pts) {
           const sob = document.elementFromPoint(b.left + b.width * fx, b.top + b.height * fy);
           const a = sob && sob.closest(sel);
           if (a && !fab.contains(a)) tapa.add(a.id || a.getAttribute('aria-label') || a.className.split(' ')[0]);

@@ -33,8 +33,6 @@
 // app só admite editor L3+ AM, e abuso se resolve no Waze, não aqui), mas quem
 // já tinha bloqueado alguém ficou com o registro no aparelho. Apagamos uma vez,
 // na carga — dado órfão de recurso removido não deve envelhecer em silêncio.
-const PRESENCA_CHAVE_ANTIGA_BLOQUEIO = 'waze_places_bloqueados';
-
 // Keepalive. Na Cloudflare quem responde é o RUNTIME (auto-response), sem
 // acordar o Durable Object; na VM responde o processo. O cliente manda o mesmo
 // `ping` nos dois — ele não precisa saber em qual servidor está.
@@ -856,7 +854,6 @@ function presencaMarcarAusente(peer) {
 }
 
 function presencaEsquecerBloqueioAntigo() {
-    safeLS.remove(PRESENCA_CHAVE_ANTIGA_BLOQUEIO);
 }
 
 // ── interface ───────────────────────────────────────────────────────────────
