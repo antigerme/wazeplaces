@@ -3223,10 +3223,39 @@ const DEV_FAB_MARGEM = 12;
 // Faixa de baixo reservada aos toasts/Desfazer. Não é chute: o `#notifyStack`
 // se ancora em `bottom: 1rem + safe-area` e empilha caixas de ~56px.
 const DEV_FAB_RESERVA_TOAST = 96;
-const DEV_FAB_CANTOS = ['cima-dir', 'cima-esq', 'meio-dir', 'meio-esq', 'baixo-dir', 'baixo-esq'];
-// Quem, por baixo, desqualifica um canto. Só o que se TOCA — texto e foto o FAB
-// pode cobrir (e o editor arrasta se incomodar); botão, não.
+// ORDEM = PREFERÊNCIA, e o meio caiu pro fim depois de medido. A faixa central
+// é a FOTO e é a pista do polegar: MEDIDO em 4 aparelhos × 6 cards reais, o
+// `meio-dir` encosta em controle de verdade (`card-image-next`, o ↗ do WME) em
+// **5 de 6** cards — até 43px de um alvo de 44 —, e o `meio-esq` come a seta
+// anterior em 3 a 4. O `baixo-*` fica livre em 6/6 no aparelho do owner e no
+// Pixel 7, e nos dois estreitos só raspa 14px da BORDA de uma área rolável em
+// 2 de 6. Trocar de lugar não tem custo: o `DEV_FAB_RESERVA_TOAST` já mantém
+// essa faixa acima dos toasts.
+const DEV_FAB_CANTOS = ['cima-dir', 'cima-esq', 'baixo-dir', 'baixo-esq', 'meio-dir', 'meio-esq'];
+// Quem, por baixo, desqualifica um canto. Primeiro o que se TOCA: cobrir um
+// controle ROUBA o dedo, e nem o esmaecido avisa.
 const DEV_FAB_ACIONAVEL = 'button, a[href], input, select, textarea, label[for], [role="button"], [tabindex]:not([tabindex="-1"])';
+// E o que se LÊ COMO VALOR, mesmo sem ser clicável. A regra antiga era "texto e
+// foto o FAB pode cobrir, e o editor arrasta se incomodar" — ela vale pra prosa
+// (nome, endereço, categoria): cortar ali ESCONDE, e a falta se percebe. Não
+// vale pro placar, e a diferença não é gosto: "311" com a última coluna comida
+// lê como "31" — um número inteiro, plausível e ERRADO. Cobrir prosa esconde;
+// cobrir número MENTE, e ninguém arrasta o que não sabe que está errado.
+// MEDIDO com a tinta (`Range.getBoundingClientRect`, não a caixa do elemento):
+// no canto de cima o FAB comia 14% do "Restam" no aparelho do owner, 30% no
+// iPhone SE, 13% no Pixel 7 — e 0% no Fold, onde o placar vira 2×2 e o número
+// muda de lugar. Ou seja: o defeito aparecia e sumia com o aparelho.
+// O marcador mora no HTML, e não como lista de ids AQUI, por um motivo: assim
+// contador novo dentro do `#placar` já nasce protegido, em vez de depender de
+// alguém lembrar de somá-lo a uma lista deste arquivo. E é marcador PURO — sem
+// regra em CSS nenhuma —, senão reusar a classe arrastaria aparência junto
+// (gotcha #56) e mexer nela deixaria de ser barato.
+// Escopo de propósito ESTREITO: só o placar. As leituras curtas sobre a FOTO
+// (escala do mapa, "3/5") ficam de fora porque a foto é justamente o que o FAB
+// pode cobrir, e alargar o marcador até elas desqualificaria os cantos do meio
+// — com a chance de não sobrar canto nenhum, que é pior que o defeito.
+const DEV_FAB_LEITURA = '.nao-cobrir';
+const DEV_FAB_EVITAR = DEV_FAB_ACIONAVEL + ', ' + DEV_FAB_LEITURA;
 
 let devFabFixado = false;   // o editor arrastou → a app não escolhe mais
 
@@ -3240,16 +3269,31 @@ function devFabCoords(canto, w, h) {
     return { x, y: Math.max(topo, Math.min(innerHeight - h - DEV_FAB_MARGEM, y)) };
 }
 
-// Quantos controles acionáveis passariam por baixo do FAB neste canto.
-// Cinco pontos (centro + 4 cantos recuados) porque um ponto só no centro deixa
-// passar o alvo que encosta pela beirada — e alvo de 44px encostando é o caso
-// comum, não o raro.
+// Quantas vítimas passariam por baixo do FAB neste canto — controle acionável
+// ou leitura, os dois pesam igual (roubar o dedo e mentir o número são ruins do
+// mesmo jeito).
+//
+// A GRADE VAI ATÉ A BORDA (0,02 / 0,5 / 0,98), e o recuo que havia antes era o
+// defeito. A versão anterior amostrava 5 pontos com os cantos RECUADOS a 0,15 —
+// e o comentário dizia, com todas as letras, que isso existia pra pegar "o alvo
+// que encosta pela beirada". Não pegava: num quadro de 44px, 0,15 deixa **6,6px
+// cegos** de cada lado, e é justamente aí que um vizinho encosta. MEDIDO quando
+// o FAB desceu pro meio: ele invadia 6px do "›" (próxima foto), que ficava com
+// 39px úteis de 44 e entregava o toque do topo AO FAB — e o amostrador de 5
+// pontos via **NADA**, enquanto esta grade vê `card-image-next`. Ou seja: o
+// guard tinha um ponto cego do tamanho do problema que ele existia pra achar.
+// 0,02 e 0,98 são ~1px pra dentro: no limite exato o `elementFromPoint` fica
+// ambíguo entre as duas caixas.
+const DEV_FAB_AMOSTRAS = [0.02, 0.5, 0.98];
+
 function devFabVitimas(canto, w, h, fab) {
     const { x, y } = devFabCoords(canto, w, h);
     const vitimas = new Set();
-    for (const [fx, fy] of [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]) {
+    const pontos = [];
+    for (const fx of DEV_FAB_AMOSTRAS) for (const fy of DEV_FAB_AMOSTRAS) pontos.push([fx, fy]);
+    for (const [fx, fy] of pontos) {
         const sob = document.elementFromPoint(x + w * fx, y + h * fy);
-        const alvo = sob && sob.closest(DEV_FAB_ACIONAVEL);
+        const alvo = sob && sob.closest(DEV_FAB_EVITAR);
         // O próprio FAB nunca conta como vítima. A segunda condição não é
         // paranoia: `pointer-events: none` no contêiner NÃO tira o botão do
         // hit-test, porque ele traz `pointer-events-auto` — e sem esta linha o

@@ -266,6 +266,78 @@ test('o FAB é excluído da PRÓPRIA medição de canto', () => {
         'a posição escolhida pelo editor tem que ganhar da automática');
 });
 
+test('o FAB desvia do PLACAR, não só de botão', () => {
+    // O buraco: `devFabVitimas` contava só controle acionável, e o placar não é
+    // um. Resultado — o canto preferido (cima-dir) fica EM CIMA do "Restam", e
+    // o FAB comia a borda direita do número. MEDIDO na tinta (não na caixa):
+    // 14% no aparelho do owner, 30% no iPhone SE, 13% no Pixel 7, 0% no Fold
+    // (onde o placar vira 2×2 e o número muda de lugar) — ou seja, um defeito
+    // que aparecia e sumia com o aparelho.
+    //
+    // Por que isto é pior que cobrir texto comum: "311" com a última coluna
+    // comida lê como "31". Cobrir prosa ESCONDE e a pessoa percebe; cobrir
+    // número MENTE, e ninguém arrasta o botão pra fora do que não sabe que
+    // está errado.
+    assert.match(semCom, /const DEV_FAB_LEITURA = '\.nao-cobrir';/,
+        'sumiu o marcador de leitura: o FAB volta a só desviar de botão');
+    assert.match(semCom, /const DEV_FAB_EVITAR = DEV_FAB_ACIONAVEL \+ ', ' \+ DEV_FAB_LEITURA;/,
+        'o FAB precisa evitar as DUAS coisas — acionável e leitura');
+    const i = semCom.indexOf('function devFabVitimas(');
+    const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
+    assert.match(corpo, /closest\(DEV_FAB_EVITAR\)/,
+        'devFabVitimas voltou a olhar só o acionável');
+
+    // E o marcador precisa estar EM ALGO. Sem isto a constante existe, o teste
+    // acima passa e o FAB segue pousando no número — a falha mais barata de
+    // cometer aqui é marcar o app e esquecer o HTML.
+    const ph = HTML.indexOf('id="placar"');
+    assert.ok(ph !== -1, 'o #placar sumiu do index.html');
+    assert.match(HTML.slice(ph - 120, ph + 200), /class="[^"]*\bnao-cobrir\b/,
+        'o #placar perdeu o `nao-cobrir`: o FAB volta a cobrir o "Restam"');
+});
+
+test('a grade de amostragem do FAB vai até a BORDA', () => {
+    // O amostrador antigo eram 5 pontos com os cantos RECUADOS a 0,15 — e o
+    // comentário dizia que isso servia pra pegar "o alvo que encosta pela
+    // beirada". Não servia: em 44px, 0,15 deixa 6,6px CEGOS de cada lado, que é
+    // exatamente onde o vizinho encosta. MEDIDO quando o FAB desceu pro meio:
+    // ele invadia 6px do `.card-image-next`, o botão ficava com 39px úteis de
+    // 44 e entregava o toque do topo AO FAB — e o amostrador via NADA.
+    assert.match(semCom, /const DEV_FAB_AMOSTRAS = \[0\.02, 0\.5, 0\.98\];/,
+        'a grade voltou a recuar da borda: o vizinho que encosta fica invisível');
+    const i = semCom.indexOf('function devFabVitimas(');
+    const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
+    assert.match(corpo, /DEV_FAB_AMOSTRAS/, 'devFabVitimas parou de usar a grade');
+    assert.ok(!/0\.15|0\.85/.test(corpo),
+        'sobrou ponto recuado em devFabVitimas — é o ponto cego de novo');
+});
+
+test('o MEIO é o último canto que o FAB tenta', () => {
+    // A faixa central é a foto e a pista do polegar. MEDIDO em 4 aparelhos × 6
+    // cards reais: `meio-dir` encosta em controle de verdade (a seta de próxima
+    // foto, o ↗ do WME) em 5 de 6 cards, até 43px de um alvo de 44; `baixo-*`
+    // fica livre em 6/6 nos dois aparelhos maiores e só raspa 14px da borda de
+    // uma área rolável em 2 de 6 nos estreitos. Se alguém devolver o meio pra
+    // frente, o FAB volta a pousar em cima da seta.
+    const m = semCom.match(/const DEV_FAB_CANTOS = \[([^\]]+)\]/);
+    assert.ok(m, 'DEV_FAB_CANTOS sumiu');
+    const ordem = m[1].split(',').map((x) => x.trim().replace(/'/g, ''));
+    for (const c of ['baixo-dir', 'baixo-esq'])
+        assert.ok(ordem.indexOf(c) < ordem.indexOf('meio-dir'),
+            `${c} precisa vir ANTES de meio-dir — o meio é a pista do swipe`);
+    assert.equal(ordem.length, 6, 'o FAB precisa dos 6 cantos: menos que isso pode não sobrar nenhum');
+});
+
+test('`nao-cobrir` é marcador PURO — não vira estilo', () => {
+    // Gotcha #56: reusar classe de CSS como gancho semântico arrasta aparência
+    // junto, e aí mexer no gancho deixa de ser barato. Esta classe existe só
+    // pra o `posicionarFabDev` perguntar; se alguém pendurar `display`, `color`
+    // ou o que for nela, o próximo que precisar tirá-la de um elemento vai
+    // mudar a tela sem querer.
+    assert.ok(!/\.nao-cobrir\s*[,{]/.test(CSS),
+        'apareceu regra de CSS em .nao-cobrir — ela tem que continuar sem estilo');
+});
+
 test('segurar PEGA o botão, com aviso, e arrastar não vira toque', () => {
     // O modelo errado que gerou o defeito: segurar era um gesto CONCORRENTE
     // (baixava tudo) e arrastar só valia se o dedo saísse na hora. Em mobile
