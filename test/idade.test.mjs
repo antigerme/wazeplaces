@@ -32,13 +32,29 @@ function fatiar(nome) {
   return APP.slice(i, j);
 }
 
+// A CONSTANTE de verdade, fatiada do fonte — nunca uma cópia escrita aqui.
+//
+// Esta função nasceu de duas sabotagens que PASSARAM: o harness injetava o seu
+// próprio `const COLA_O_SIMBOLO = new Set(['pt'])`, então trocar o valor no
+// `js/app.js` não mudava nada no teste. A fixture decidia o que o teste era
+// capaz de enxergar (gotcha #52), e as asserções de tipografia por idioma eram
+// decoração — passavam com o app configurado de qualquer jeito.
+function fatiarConst(nome) {
+  const re = new RegExp('^const ' + nome + ' = .*?;', 'm');
+  const m = APP.match(re);
+  assert.ok(m, `a constante ${nome} sumiu ou mudou de forma`);
+  return m[0];
+}
+
 function montar(loc) {
   // Fatia as DUAS: o formatador chama `estiloDaIdade`, e sem ela o try/catch
   // do formatador engole o ReferenceError e devolve a data crua — o teste
   // passava a medir o fallback em vez do caminho real. Aconteceu.
   const src = 'const ESTILO_DA_IDADE = new Map();\n'
-    + "const UNIDADES_DA_IDADE = ['minute','hour','day','month','year'];\n"
-    + fatiar('estiloDaIdade') + '\n' + fatiar('formatRelativeTime');
+    + fatiarConst('UNIDADES_DA_IDADE') + '\n'
+    + fatiarConst('COLA_O_SIMBOLO') + '\n'
+    + fatiar('estiloDaIdade') + '\n' + fatiar('idadeComNormaLocal')
+    + '\n' + fatiar('formatRelativeTime');
   return new Function('i18nLocale', 'Date', 't',
     src + '\nreturn formatRelativeTime;')(
       () => loc,
@@ -138,14 +154,23 @@ test('as chaves time.* NÃO voltam ao dicionário', () => {
 
 test('a idade do PEDIDO usa o mesmo mecanismo da idade da FOTO', () => {
   const semCom = APP.replace(/\/\/[^\n]*/g, '');
-  for (const fn of ['formatRelativeTime', 'idadeDaFoto']) {
+  const corpoDe = (fn) => {
     const i = semCom.indexOf(`function ${fn}(`);
     assert.ok(i !== -1, `${fn} sumiu`);
-    const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
-    assert.match(corpo, /Intl\.RelativeTimeFormat/,
-      `${fn} parou de usar Intl — plural e ambiguidade voltam por chave manual`);
-    assert.match(corpo, /i18nLocale\(\)/, `${fn} precisa formatar no locale do editor`);
-  }
+    return semCom.slice(i, semCom.indexOf('\n}', i));
+  };
+  // A idade da FOTO usa Intl direto. A do PEDIDO delega pra
+  // `idadeComNormaLocal`, que aplica a norma tipográfica do idioma — então a
+  // asserção segue a CADEIA, não o corpo de uma função só. (A primeira versão
+  // olhava só o corpo do `formatRelativeTime` e reprovou assim que ele passou
+  // a delegar: guard amarrado na forma de hoje, não na invariante.)
+  assert.match(corpoDe('idadeDaFoto'), /Intl\.RelativeTimeFormat/, 'idadeDaFoto parou de usar Intl');
+  assert.match(corpoDe('idadeComNormaLocal'), /Intl\.RelativeTimeFormat/,
+    'a cadeia da idade do pedido parou de usar Intl — plural e ambiguidade voltam por chave manual');
+  assert.match(corpoDe('formatRelativeTime'), /idadeComNormaLocal|Intl\.RelativeTimeFormat/,
+    'formatRelativeTime saiu da cadeia do Intl');
+  for (const fn of ['formatRelativeTime', 'idadeDaFoto'])
+    assert.match(corpoDe(fn), /i18nLocale\(\)/, `${fn} precisa formatar no locale do editor`);
 });
 
 // ── a ORDENAÇÃO, que é a outra metade do relato ────────────────────────────
@@ -197,7 +222,7 @@ test('usa a abreviação OFICIAL do idioma onde ela é inequívoca, e cai pro ex
   // porque o extenso nunca é ambíguo.
   const esperado = { pt: 'short', en: 'short', fr: 'short', es: 'long' };
   const src = 'const ESTILO_DA_IDADE = new Map();\n'
-    + "const UNIDADES_DA_IDADE = ['minute','hour','day','month','year'];\n"
+    + fatiarConst('UNIDADES_DA_IDADE') + '\n'
     + fatiar('estiloDaIdade') + '\nreturn estiloDaIdade;';
   const estiloDaIdade = new Function(src)();
   for (const [lang, quero] of Object.entries(esperado)) {
@@ -212,4 +237,35 @@ test('usa a abreviação OFICIAL do idioma onde ela é inequívoca, e cai pro ex
   const fes = montar(LOCALES.es);
   assert.match(fes(AGORA - 12 * 3600000), /horas/, 'es caiu pro extenso: hora por extenso');
   assert.match(fes(AGORA - 286 * DIA), /meses/, 'es caiu pro extenso: mês por extenso');
+});
+
+test('a TIPOGRAFIA segue a norma de cada idioma, e elas divergem', () => {
+  // Pesquisado nas fontes normativas depois de o owner apontar que "há 12 h"
+  // está errado em português — e está:
+  //   pt-BR  ABNT NBR 5892: `15h`, `12h30min` — símbolo COLA no número, e
+  //          minuto é `min` sem ponto (símbolo do SI não leva ponto).
+  //   es     RAE: "12 h" com espaço OBRIGATÓRIO; ela diz que "12h" é erro.
+  //   fr     Imprimerie nationale: "12 h" com espaço INSECÁVEL.
+  //   en     AP/Chicago: "12 hr".
+  // O CLDR acerta três e erra só o português — daí o conserto ser DELE, e o
+  // controle abaixo garantir que os outros três não sejam tocados.
+  const H = 3600000;
+  const pt = montar(LOCALES.pt);
+  assert.equal(pt(AGORA - 12 * H), 'há 12h', 'ABNT: símbolo cola no número');
+  assert.equal(pt(AGORA - 28 * 60000), 'há 28min', 'ABNT: `min`, colado e SEM ponto');
+  assert.match(pt(AGORA - 5 * DIA), /^há 5 dias$/, 'palavra NÃO cola — ninguém escreve "5dias"');
+  assert.match(pt(AGORA - 286 * DIA), /^há \d+ meses$/, 'palavra NÃO cola');
+
+  // CONTROLE — sem isto, uma função que colasse tudo em todo idioma passaria
+  // nas asserções acima e quebraria a norma dos outros três em silêncio.
+  const fr = montar(LOCALES.fr);
+  assert.match(fr(AGORA - 12 * H), /^il y a 12.h$/, 'fr mantém o separador (Imprimerie nationale)');
+  // Ancorado no CARACTERE, não num índice: contar posição à mão já me fez
+  // apontar pro "2" em vez do separador.
+  assert.ok(fr(AGORA - 12 * H).includes('\u00A0'),
+    'fr exige espaço INSECÁVEL antes do símbolo — o CLDR já emite U+00A0 e não podemos perdê-lo');
+  const en = montar(LOCALES.en);
+  assert.match(en(AGORA - 12 * H), /^12 hr\. ago$/, 'en mantém o espaço (AP/Chicago)');
+  const es = montar(LOCALES.es);
+  assert.match(es(AGORA - 12 * H), /^hace 12 /, 'es mantém o espaço — a RAE diz que "12h" é erro');
 });

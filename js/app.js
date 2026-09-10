@@ -6512,6 +6512,65 @@ function showNoPlaces() {
 const ESTILO_DA_IDADE = new Map();
 const UNIDADES_DA_IDADE = ['minute', 'hour', 'day', 'month', 'year'];
 
+// A TIPOGRAFIA da unidade é NORMA DE CADA IDIOMA, e elas DIVERGEM entre si —
+// não é gosto, e não dá pra escolher uma e aplicar em todas. Pesquisado nas
+// fontes normativas depois de o owner apontar que "há 12 h" está errado em
+// português (e ele está):
+//
+//   pt-BR  ABNT NBR 5892: `15h`, `12h30min`, `20h45min20s` — o símbolo COLA no
+//          número, sem espaço e sem ponto. E minuto é `min`, nunca `m` (que é
+//          metro). O CLDR emite "há 12 h" e "há 12 min.": erra os DOIS.
+//   es     RAE: "12 h" com espaço OBRIGATÓRIO, e ela diz explicitamente que
+//          "12h" está errado. O CLDR acerta.
+//   fr     Imprimerie nationale: "12 h", com espaço INSECÁVEL — e o CLDR emite
+//          U+00A0 aqui (espaço comum nos outros), ou seja ele conhece a
+//          diferença; o dado do pt-BR é que não segue a ABNT.
+//   en     AP/Chicago: "12 hr". O CLDR acerta.
+//
+// Só o PORTUGUÊS precisa de conserto, e ele é aplicado sobre as PARTES
+// (`formatToParts`), nunca por regex no texto pronto: mexer com regex em saída
+// localizada é como se corrompe acento e plural de idioma que ninguém no time
+// lê (o mesmo motivo do gotcha #39 — quem diz o que o valor é é a ESTRUTURA,
+// não a aparência dele).
+//
+// E cola só o que é SÍMBOLO, nunca palavra: `12h` e `12min` sim, `12 dias` e
+// `12 meses` não — ninguém escreve "12dias". A distinção não é uma lista de
+// unidades cravada aqui (isso envelhece quando o CLDR mudar): símbolo é o
+// token curto que é PREFIXO ESTRITO da forma por extenso — `h` ⊂ `horas`,
+// `min` ⊂ `minutos`, enquanto `dias` == `dias` e `meses` == `meses` não são.
+const COLA_O_SIMBOLO = new Set(['pt']);   // ABNT NBR 5892
+
+function idadeComNormaLocal(loc, estilo, n, unidade) {
+    const rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: estilo });
+    const idioma = String(loc || '').slice(0, 2).toLowerCase();
+    if (estilo !== 'short' || !COLA_O_SIMBOLO.has(idioma)) return rtf.format(n, unidade);
+    try {
+        const partes = rtf.formatToParts(n, unidade);
+        const i = partes.findIndex((p) => p.type === 'integer');
+        if (i < 0 || !partes[i + 1] || partes[i + 1].type !== 'literal') return rtf.format(n, unidade);
+        const depois = partes[i + 1].value;
+        const token = depois.trim().replace(/\.$/, '');
+        // É símbolo? Compara com a forma POR EXTENSO da MESMA unidade — e o
+        // token é o literal que vem DEPOIS do número, não o primeiro da lista.
+        // (Primeira versão pegava o primeiro literal com conteúdo, que é o
+        // prefixo "há " — comparava `min` com `há`, nunca casava, e o `min.`
+        // ficava intocado. Só apareceu porque eu OLHEI a saída em vez de
+        // conferir o código.)
+        const pLongas = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: 'long' })
+            .formatToParts(n, unidade);
+        const j = pLongas.findIndex((p) => p.type === 'integer');
+        const palavra = j >= 0 && pLongas[j + 1] ? pLongas[j + 1].value.trim() : '';
+        const ehSimbolo = token.length > 0 && token.length < palavra.length && palavra.startsWith(token);
+        if (!ehSimbolo) return rtf.format(n, unidade);
+        // Cola: tira o espaço à esquerda do token e o ponto de abreviatura
+        // (símbolo do SI não leva ponto — `min`, não `min.`).
+        partes[i + 1] = { ...partes[i + 1], value: depois.replace(/^\s+/, '').replace(/\.(\s|$)/, '$1') };
+        return partes.map((x) => x.value).join('');
+    } catch (e) {
+        return rtf.format(n, unidade);
+    }
+}
+
 function estiloDaIdade(loc) {
     if (ESTILO_DA_IDADE.has(loc)) return ESTILO_DA_IDADE.get(loc);
     let estilo = 'long';
@@ -6570,18 +6629,19 @@ function formatRelativeTime(ts) {
     // inventa idade negativa nem se esconde o pedido.
     const loc = i18nLocale();
     try {
-        const rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: estiloDaIdade(loc) });
-        if (diff < 0) return rtf.format(0, 'second');
+        const estilo = estiloDaIdade(loc);
+        const f = (n, u) => idadeComNormaLocal(loc, estilo, n, u);
+        if (diff < 0) return f(0, 'second');
         const sec = Math.floor(diff / 1000);
-        if (sec < 60) return rtf.format(0, 'second');
+        if (sec < 60) return f(0, 'second');
         const min = Math.floor(sec / 60);
-        if (min < 60) return rtf.format(-min, 'minute');
+        if (min < 60) return f(-min, 'minute');
         const hr = Math.floor(min / 60);
-        if (hr < 24) return rtf.format(-hr, 'hour');
+        if (hr < 24) return f(-hr, 'hour');
         const days = Math.floor(hr / 24);
-        if (days < 30) return rtf.format(-days, 'day');
+        if (days < 30) return f(-days, 'day');
         // `< 365` e não `meses < 12`: era daqui que saía o "há 0a".
-        if (days < 365) return rtf.format(-Math.round(days / 30), 'month');
+        if (days < 365) return f(-Math.round(days / 30), 'month');
         return new Date(ts).toLocaleDateString(loc, { year: 'numeric' });
     } catch (e) {
         // Sem Intl (não deve acontecer no piso da app), a data crua ainda
