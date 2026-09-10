@@ -4301,8 +4301,24 @@ function showLoading(visible) {
 function sortQueue() {
     const asc = AppState.filters.sortOrder === 'oldest';
     AppState.queue.sort((a, b) => {
-        const da = (a && a.dateAdded) || 0;
-        const db = (b && b.dateAdded) || 0;
+        // Pedido SEM data vai pro FIM, nos dois sentidos — e o `|| 0` que
+        // estava aqui fazia o contrário. Um `dateAdded` nulo virava 0, que em
+        // "mais antigos" é o mais antigo possível: o pedido cravava a posição
+        // 0 da fila e ficava lá, em toda abertura da app, para sempre.
+        //
+        // É EXATAMENTE o sintoma que o owner relatou em 2026-09-10 (por outra
+        // causa: o rótulo de idade ambíguo). Não estava ativo na fila dele —
+        // medido, 370 de 370 com data —, mas o core devolve `ur.dateAdded ??
+        // null` (core.mjs:1836), então basta o Waze omitir o campo em UM
+        // pedido pra reproduzir o mesmo "isto não sai da minha frente" sem
+        // nada na tela explicando.
+        //
+        // Sem data não é "mais antigo", é DESCONHECIDO — e o fim da fila é o
+        // lugar honesto pra isso nas duas ordenações.
+        const da = Number.isFinite(a && a.dateAdded) ? a.dateAdded : null;
+        const db = Number.isFinite(b && b.dateAdded) ? b.dateAdded : null;
+        if (da === null) return db === null ? 0 : 1;
+        if (db === null) return -1;
         return asc ? da - db : db - da;
     });
 }
@@ -6468,22 +6484,170 @@ function showNoPlaces() {
     }
 }
 
+// A abreviação OFICIAL do idioma — quando ela for inequívoca.
+//
+// Pedido do owner: "não prefere usar as abreviações oficiais de cada idioma?".
+// Prefiro, e o CLDR as tem (`style: 'short'`). MEDIDO na fila real dele, onde
+// 78% dos cards são horas e 22% dias, a média ponderada da largura do rótulo
+// cai 31% em português (83 → 57px), 19% em inglês, 30% em espanhol e 37% em
+// francês. Num card em que cada pixel acima da foto é pixel a menos de foto,
+// isso não é enfeite.
+//
+// MAS o "short" oficial do ESPANHOL reproduz exatamente o defeito que este
+// arquivo acabou de consertar: `hace 9 m` (meses) é prefixo de `hace 9 min`
+// (minutos). O guard de `test/idade.test.mjs` pega isso sozinho, com a
+// mensagem certa — foi assim que eu descobri, tentando ligar o `short` pra
+// todo mundo de uma vez.
+//
+// Então a escolha é POR IDIOMA e por MEDIÇÃO, não por gosto: usa a abreviação
+// oficial se ela passar na mesma invariante que o teste cobra (nenhuma unidade
+// pode ser PREFIXO de outra), e cai pro extenso quando não passar. Duas
+// consequências boas: o espanhol volta pro curto sozinho no dia em que o CLDR
+// consertar, e a regra que decide aqui é a MESMA que o teste enforca — não há
+// duas versões dela pra divergirem.
+//
+// Curiosidade que confirma a régua: em português o próprio "short" do CLDR já
+// escreve "dias" e "meses" por extenso, e só abrevia `h` e `min.` — não existe
+// forma curta segura pra mês em pt. O CLDR chegou à mesma conclusão sozinho.
+const ESTILO_DA_IDADE = new Map();
+const UNIDADES_DA_IDADE = ['minute', 'hour', 'day', 'month', 'year'];
+
+// A TIPOGRAFIA da unidade é NORMA DE CADA IDIOMA, e elas DIVERGEM entre si —
+// não é gosto, e não dá pra escolher uma e aplicar em todas. Pesquisado nas
+// fontes normativas depois de o owner apontar que "há 12 h" está errado em
+// português (e ele está):
+//
+//   pt-BR  ABNT NBR 5892: `15h`, `12h30min`, `20h45min20s` — o símbolo COLA no
+//          número, sem espaço e sem ponto. E minuto é `min`, nunca `m` (que é
+//          metro). O CLDR emite "há 12 h" e "há 12 min.": erra os DOIS.
+//   es     RAE: "12 h" com espaço OBRIGATÓRIO, e ela diz explicitamente que
+//          "12h" está errado. O CLDR acerta.
+//   fr     Imprimerie nationale: "12 h", com espaço INSECÁVEL — e o CLDR emite
+//          U+00A0 aqui (espaço comum nos outros), ou seja ele conhece a
+//          diferença; o dado do pt-BR é que não segue a ABNT.
+//   en     AP/Chicago: "12 hr". O CLDR acerta.
+//
+// Só o PORTUGUÊS precisa de conserto, e ele é aplicado sobre as PARTES
+// (`formatToParts`), nunca por regex no texto pronto: mexer com regex em saída
+// localizada é como se corrompe acento e plural de idioma que ninguém no time
+// lê (o mesmo motivo do gotcha #39 — quem diz o que o valor é é a ESTRUTURA,
+// não a aparência dele).
+//
+// E cola só o que é SÍMBOLO, nunca palavra: `12h` e `12min` sim, `12 dias` e
+// `12 meses` não — ninguém escreve "12dias". A distinção não é uma lista de
+// unidades cravada aqui (isso envelhece quando o CLDR mudar): símbolo é o
+// token curto que é PREFIXO ESTRITO da forma por extenso — `h` ⊂ `horas`,
+// `min` ⊂ `minutos`, enquanto `dias` == `dias` e `meses` == `meses` não são.
+const COLA_O_SIMBOLO = new Set(['pt']);   // ABNT NBR 5892
+
+function idadeComNormaLocal(loc, estilo, n, unidade) {
+    const rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: estilo });
+    const idioma = String(loc || '').slice(0, 2).toLowerCase();
+    if (estilo !== 'short' || !COLA_O_SIMBOLO.has(idioma)) return rtf.format(n, unidade);
+    try {
+        const partes = rtf.formatToParts(n, unidade);
+        const i = partes.findIndex((p) => p.type === 'integer');
+        if (i < 0 || !partes[i + 1] || partes[i + 1].type !== 'literal') return rtf.format(n, unidade);
+        const depois = partes[i + 1].value;
+        const token = depois.trim().replace(/\.$/, '');
+        // É símbolo? Compara com a forma POR EXTENSO da MESMA unidade — e o
+        // token é o literal que vem DEPOIS do número, não o primeiro da lista.
+        // (Primeira versão pegava o primeiro literal com conteúdo, que é o
+        // prefixo "há " — comparava `min` com `há`, nunca casava, e o `min.`
+        // ficava intocado. Só apareceu porque eu OLHEI a saída em vez de
+        // conferir o código.)
+        const pLongas = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: 'long' })
+            .formatToParts(n, unidade);
+        const j = pLongas.findIndex((p) => p.type === 'integer');
+        const palavra = j >= 0 && pLongas[j + 1] ? pLongas[j + 1].value.trim() : '';
+        const ehSimbolo = token.length > 0 && token.length < palavra.length && palavra.startsWith(token);
+        if (!ehSimbolo) return rtf.format(n, unidade);
+        // Cola: tira o espaço à esquerda do token e o ponto de abreviatura
+        // (símbolo do SI não leva ponto — `min`, não `min.`).
+        partes[i + 1] = { ...partes[i + 1], value: depois.replace(/^\s+/, '').replace(/\.(\s|$)/, '$1') };
+        return partes.map((x) => x.value).join('');
+    } catch (e) {
+        return rtf.format(n, unidade);
+    }
+}
+
+function estiloDaIdade(loc) {
+    if (ESTILO_DA_IDADE.has(loc)) return ESTILO_DA_IDADE.get(loc);
+    let estilo = 'long';
+    try {
+        const curto = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: 'short' });
+        // n = 9: qualquer n >= 2 serve (em n = 1 vários idiomas usam palavra
+        // própria — "ontem", "mês passado" — e a comparação perde o sentido).
+        const saidas = UNIDADES_DA_IDADE.map((u) => curto.format(-9, u));
+        const ambiguo = saidas.some((a) => saidas.some((b) => a !== b && b.startsWith(a)));
+        if (!ambiguo) estilo = 'short';
+    } catch (e) { /* sem Intl ou locale estranho: o extenso nunca é ambíguo */ }
+    ESTILO_DA_IDADE.set(loc, estilo);
+    return estilo;
+}
+
+// A IDADE DO PEDIDO, e ela já MENTIU pro owner — três vezes, com relato.
+//
+// Isto usava chaves abreviadas do dicionário, e em português `time.months` era
+// `há {n}m` enquanto `time.minutes` é `há {n}min`. Um pedido de NOVE MESES
+// renderizava **"há 9m"**, que todo falante de português lê como nove MINUTOS.
+// Ao lado, na mesma linha, o rótulo de tipo diz "Novo local". A tela inteira
+// afirmava "local novo, de 9 minutos atrás" sobre um pedido de 2025-11-27 — e
+// foi exatamente assim que o owner relatou: a mesma solicitação "nova"
+// entrando toda vez que ele abre a app. Ele leu certo o que a app escreveu.
+// A mesma colisão existia em espanhol (`hace {n}m` × `hace {n}min`); inglês
+// (`mo`) e francês (` mois`) escapavam — o defeito era de DUAS línguas em
+// quatro, e o owner usa uma delas.
+//
+// E a ordenação faz dos dois um par: MEDIDO na fila real dele, o rótulo de
+// meses cabe a 1 card em 370 (0,3% — 78% são horas, 22% dias). Mas com "mais
+// antigos primeiro" o card mais velho é POR DEFINIÇÃO o mais provável de cair
+// na faixa de meses, então o único rótulo ambíguo da fila era garantidamente o
+// PRIMEIRO da tela, toda vez que ele abria a app. Cada recurso certo sozinho.
+//
+// Havia um segundo buraco, este aritmético e nas QUATRO línguas: entre 360 e
+// 364 dias, `months` dava 12 (fora da faixa) e `years` dava `floor(360/365)` =
+// 0 — a tela mostrava **"há 0a"**. Janela de 5 dias, ninguém relatou porque é
+// rara, mesmo defeito de fundo: conta à mão que produz rótulo falso.
+//
+// O conserto NÃO é escolher abreviatura melhor: é usar o mecanismo que esta
+// app JÁ usa pra idade de FOTO (`idadeDaFoto`), com o motivo já escrito lá —
+// `Intl.RelativeTimeFormat` resolve plural por idioma sozinho, e o projeto não
+// tem ICU. Duas mecânicas para o mesmo conceito é como elas divergem: o MESMO
+// card mostrava "há 9 meses" na foto e "há 9m" no pedido. Some com as 6 chaves
+// `time.*` × 4 línguas, e o ano acima de 365 dias espelha o `idadeDaFoto` —
+// "2025" decide melhor que "ano passado" num pedido que se vai julgar.
+//
+// MEDIDO antes de trocar, porque a string mais larga quase nunca está no
+// idioma em que se desenvolve (gotcha #25): 3 aparelhos × 4 idiomas × 5 faixas
+// = 60 combinações, ZERO estouro e ZERO quebra de linha; o pior caso (francês
+// no Galaxy Fold, "il y a 28 minutes") ainda deixa 88px de folga.
 function formatRelativeTime(ts) {
     if (!ts || typeof ts !== 'number' || ts <= 0) return null;
     const diff = Date.now() - ts;
-    if (diff < 0) return t('time.now');
-    const sec = Math.floor(diff / 1000);
-    if (sec < 60) return t('time.now');
-    const min = Math.floor(sec / 60);
-    if (min < 60) return t('time.minutes', { n: min });
-    const hr = Math.floor(min / 60);
-    if (hr < 24) return t('time.hours', { n: hr });
-    const days = Math.floor(hr / 24);
-    if (days < 30) return t('time.days', { n: days });
-    const months = Math.floor(days / 30);
-    if (months < 12) return t('time.months', { n: months });
-    const years = Math.floor(days / 365);
-    return t('time.years', { n: years });
+    // Relógio torto ou data no futuro: "agora" é o menos errado — não se
+    // inventa idade negativa nem se esconde o pedido.
+    const loc = i18nLocale();
+    try {
+        const estilo = estiloDaIdade(loc);
+        const f = (n, u) => idadeComNormaLocal(loc, estilo, n, u);
+        if (diff < 0) return f(0, 'second');
+        const sec = Math.floor(diff / 1000);
+        if (sec < 60) return f(0, 'second');
+        const min = Math.floor(sec / 60);
+        if (min < 60) return f(-min, 'minute');
+        const hr = Math.floor(min / 60);
+        if (hr < 24) return f(-hr, 'hour');
+        const days = Math.floor(hr / 24);
+        if (days < 30) return f(-days, 'day');
+        // `< 365` e não `meses < 12`: era daqui que saía o "há 0a".
+        if (days < 365) return f(-Math.round(days / 30), 'month');
+        return new Date(ts).toLocaleDateString(loc, { year: 'numeric' });
+    } catch (e) {
+        // Sem Intl (não deve acontecer no piso da app), a data crua ainda
+        // responde a pergunta — e nunca é ambígua.
+        try { return new Date(ts).toLocaleDateString(loc); } catch (e2) { return null; }
+    }
 }
 
 // ── Mensagem de erro que veio do servidor ─────────────────────────────────

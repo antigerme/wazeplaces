@@ -519,8 +519,6 @@ const I18N_DICT = {
     'prefs.undo.gate.noProfile': '🔒 Disponível depois de você logar e a app carregar seu perfil.',
     'prefs.undo.gate.countdown': '🔒 Disponível depois de tratar {threshold} PURs (você tem {current} — faltam {remaining}).',
     // relative time
-    'time.now': 'agora', 'time.minutes': 'há {n}min', 'time.hours': 'há {n}h', 'time.days': 'há {n}d',
-    'time.months': 'há {n}m', 'time.years': 'há {n}a',
     // api errors
     'api.error.connection': 'Erro de conexão', 'api.error.noSession': 'Sessão expirada',
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
@@ -1028,8 +1026,6 @@ const I18N_DICT = {
     'accessDenied.defaultMsg': 'Access denied.',
     'prefs.undo.gate.noProfile': '🔒 Available after you log in and the app loads your profile.',
     'prefs.undo.gate.countdown': '🔒 Available after handling {threshold} PURs (you have {current} — {remaining} to go).',
-    'time.now': 'now', 'time.minutes': '{n}min ago', 'time.hours': '{n}h ago', 'time.days': '{n}d ago',
-    'time.months': '{n}mo ago', 'time.years': '{n}y ago',
     'api.error.connection': 'Connection error', 'api.error.noSession': 'Session expired',
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
@@ -1537,8 +1533,6 @@ const I18N_DICT = {
     'accessDenied.defaultMsg': 'Acceso denegado.',
     'prefs.undo.gate.noProfile': '🔒 Disponible después de iniciar sesión y que la app cargue tu perfil.',
     'prefs.undo.gate.countdown': '🔒 Disponible tras tratar {threshold} PURs (tienes {current} — faltan {remaining}).',
-    'time.now': 'ahora', 'time.minutes': 'hace {n}min', 'time.hours': 'hace {n}h', 'time.days': 'hace {n}d',
-    'time.months': 'hace {n}m', 'time.years': 'hace {n}a',
     'api.error.connection': 'Error de conexión', 'api.error.noSession': 'Sesión expirada',
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
@@ -2045,8 +2039,6 @@ const I18N_DICT = {
     'accessDenied.defaultMsg': 'Accès refusé.',
     'prefs.undo.gate.noProfile': '🔒 Disponible après connexion, quand l’app aura chargé votre profil.',
     'prefs.undo.gate.countdown': '🔒 Disponible après avoir traité {threshold} PUR (vous en avez {current} — encore {remaining}).',
-    'time.now': 'à l’instant', 'time.minutes': 'il y a {n}min', 'time.hours': 'il y a {n}h', 'time.days': 'il y a {n}j',
-    'time.months': 'il y a {n} mois', 'time.years': 'il y a {n} ans',
     'api.error.connection': 'Erreur de connexion', 'api.error.noSession': 'Session expirée',
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
