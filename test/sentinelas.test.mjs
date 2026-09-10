@@ -36,7 +36,8 @@ const sao = () => ({
   varsCss: { '--kb-inset': '0px', '--header-h': '69px' },
   foco: { tag: 'BUTTON', id: 'closeFilters', emModal: true, abreTeclado: false },
   tema: { htmlClasse: 'dark', guardado: 'dark' },
-  geometria: [{ sel: '.card-btn-reject', x: 20, y: 700, w: 56, h: 56, noCentro: 'ele mesmo' }],
+  geometria: [{ sel: '.card-btn-reject', x: 20, y: 700, w: 56, h: 56, noCentro: 'ele mesmo',
+                camadaAberta: false, naCamada: false }],
 });
 
 test('sentinelas: o estado SÃO não gera alerta nenhum (o controle)', () => {
@@ -99,6 +100,34 @@ test('sentinelas: `tema-claro` + `dark` só alerta onde tem consequência', () =
   assert.deepEqual(montar()(outro), []);
 });
 
+test('sentinelas: modal aberto sobre os botões do card NÃO é alerta', () => {
+  // O PRIMEIRO diagnóstico real que chegou com sentinelas trazia 3 alertas, e os
+  // 3 eram FALSOS: o editor gerou o arquivo com os Filtros abertos, e modal
+  // cobrir o card é a função do modal. Os números aqui são os dele.
+  const c = sao();
+  c.geometria = [
+    { sel: '.card-btn-reject', x: 20, y: 700, w: 56, h: 56, noCentro: '#filtersModal', camadaAberta: true, naCamada: false },
+    { sel: '.card-btn-skip', x: 90, y: 700, w: 48, h: 48, noCentro: '#filtersModal', camadaAberta: true, naCamada: false },
+    { sel: '.card-btn-read', x: 160, y: 700, w: 56, h: 56, noCentro: '#filtersModal', camadaAberta: true, naCamada: false },
+  ];
+  assert.deepEqual(montar()(c), []);
+
+  // CONTROLE do conserto: com a MESMA camada aberta, um controle DE DENTRO dela
+  // coberto continua sendo defeito — senão o conserto vira cegueira e o gotcha
+  // #26 (que já reincidiu três vezes, todas dentro de camada) para de ser visto.
+  const dentro = sao();
+  dentro.geometria = [{ sel: '.card-btn-read', x: 0, y: 0, w: 56, h: 56,
+                        noCentro: '#lightboxCount', camadaAberta: true, naCamada: true }];
+  assert.deepEqual(chaves(montar()(dentro)), ['toqueInterceptado']);
+
+  // E o #devFab não precisa de exceção: `z-[68]` fica ACIMA do modal, então com
+  // camada aberta ele nem é interceptado (medido no diagnóstico: "ele mesmo").
+  const fab = sao();
+  fab.geometria = [{ sel: '#devFab:not(.hidden)', x: 300, y: 130, w: 44, h: 44,
+                     noCentro: 'ele mesmo', camadaAberta: true, naCamada: false }];
+  assert.deepEqual(montar()(fab), []);
+});
+
 test('sentinelas: algo por cima de um controle (gotcha #26, 3 reincidências)', () => {
   const c = sao();
   c.geometria = [{ sel: '.card-btn-read', x: 0, y: 0, w: 56, h: 56, noCentro: '#lightboxCount' }];
@@ -156,6 +185,17 @@ test('diagnóstico: a camada computada é coletada e vai pro relatório', () => 
   }
   assert.match(APP, /fora\.safeArea = medirSafeArea\(\)/, 'a safe-area saiu do computado');
   assert.match(APP, /fora\.geometria = diagGeometria\(\)/, 'a geometria saiu do computado');
+  // Os dois campos que o conserto do falso positivo usa têm que SAIR DO DOM, não
+  // de constante: com `naCamada: false` cravado a sentinela volta a acusar tudo,
+  // e com `camadaAberta: false` cravado ela nunca cala — e as duas sabotagens
+  // passaram limpas numa versão anterior deste teste, porque o caso de uso as
+  // recebe como fixture.
+  assert.match(APP, /naCamada: camadas\.some\(\(c\) => c\.contains\(e\)\)/,
+    'o coletor parou de medir se o elemento está DENTRO da camada aberta');
+  assert.match(APP, /camadaAberta: camadas\.length > 0/,
+    'o coletor parou de reportar que há camada aberta');
+  assert.match(APP, /function diagCamadasAbertas\(\)[\s\S]{0,400}classList\.contains\('hidden'\)/,
+    'diagCamadasAbertas parou de olhar o estado real das camadas');
   // Uma medição só, usada nos dois lugares: duas medições seriam dois instantes
   // e o alerta poderia sumir do relatório em que acabou de aparecer.
   assert.match(APP, /const computado = diagComputado\(\);\s*\n\s*const alertas = diagSentinelas\(computado\);/,
