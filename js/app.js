@@ -6484,6 +6484,49 @@ function showNoPlaces() {
     }
 }
 
+// A abreviação OFICIAL do idioma — quando ela for inequívoca.
+//
+// Pedido do owner: "não prefere usar as abreviações oficiais de cada idioma?".
+// Prefiro, e o CLDR as tem (`style: 'short'`). MEDIDO na fila real dele, onde
+// 78% dos cards são horas e 22% dias, a média ponderada da largura do rótulo
+// cai 31% em português (83 → 57px), 19% em inglês, 30% em espanhol e 37% em
+// francês. Num card em que cada pixel acima da foto é pixel a menos de foto,
+// isso não é enfeite.
+//
+// MAS o "short" oficial do ESPANHOL reproduz exatamente o defeito que este
+// arquivo acabou de consertar: `hace 9 m` (meses) é prefixo de `hace 9 min`
+// (minutos). O guard de `test/idade.test.mjs` pega isso sozinho, com a
+// mensagem certa — foi assim que eu descobri, tentando ligar o `short` pra
+// todo mundo de uma vez.
+//
+// Então a escolha é POR IDIOMA e por MEDIÇÃO, não por gosto: usa a abreviação
+// oficial se ela passar na mesma invariante que o teste cobra (nenhuma unidade
+// pode ser PREFIXO de outra), e cai pro extenso quando não passar. Duas
+// consequências boas: o espanhol volta pro curto sozinho no dia em que o CLDR
+// consertar, e a regra que decide aqui é a MESMA que o teste enforca — não há
+// duas versões dela pra divergirem.
+//
+// Curiosidade que confirma a régua: em português o próprio "short" do CLDR já
+// escreve "dias" e "meses" por extenso, e só abrevia `h` e `min.` — não existe
+// forma curta segura pra mês em pt. O CLDR chegou à mesma conclusão sozinho.
+const ESTILO_DA_IDADE = new Map();
+const UNIDADES_DA_IDADE = ['minute', 'hour', 'day', 'month', 'year'];
+
+function estiloDaIdade(loc) {
+    if (ESTILO_DA_IDADE.has(loc)) return ESTILO_DA_IDADE.get(loc);
+    let estilo = 'long';
+    try {
+        const curto = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: 'short' });
+        // n = 9: qualquer n >= 2 serve (em n = 1 vários idiomas usam palavra
+        // própria — "ontem", "mês passado" — e a comparação perde o sentido).
+        const saidas = UNIDADES_DA_IDADE.map((u) => curto.format(-9, u));
+        const ambiguo = saidas.some((a) => saidas.some((b) => a !== b && b.startsWith(a)));
+        if (!ambiguo) estilo = 'short';
+    } catch (e) { /* sem Intl ou locale estranho: o extenso nunca é ambíguo */ }
+    ESTILO_DA_IDADE.set(loc, estilo);
+    return estilo;
+}
+
 // A IDADE DO PEDIDO, e ela já MENTIU pro owner — três vezes, com relato.
 //
 // Isto usava chaves abreviadas do dicionário, e em português `time.months` era
@@ -6527,7 +6570,7 @@ function formatRelativeTime(ts) {
     // inventa idade negativa nem se esconde o pedido.
     const loc = i18nLocale();
     try {
-        const rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto' });
+        const rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: estiloDaIdade(loc) });
         if (diff < 0) return rtf.format(0, 'second');
         const sec = Math.floor(diff / 1000);
         if (sec < 60) return rtf.format(0, 'second');

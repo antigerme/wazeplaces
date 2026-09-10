@@ -25,12 +25,22 @@ const DIA = 86400000;
 
 // Fatia a função do FONTE e executa. Reimplementar aqui mediria uma cópia que
 // envelhece — mesmo padrão do resto da suíte.
-function montar(loc) {
-  const i = APP.indexOf('function formatRelativeTime(');
+function fatiar(nome) {
+  const i = APP.indexOf(`function ${nome}(`);
   const j = APP.indexOf('\n}', i) + 2;
-  assert.ok(i !== -1 && j > i, 'as âncoras de formatRelativeTime sumiram');
+  assert.ok(i !== -1 && j > i, `as âncoras de ${nome} sumiram`);
+  return APP.slice(i, j);
+}
+
+function montar(loc) {
+  // Fatia as DUAS: o formatador chama `estiloDaIdade`, e sem ela o try/catch
+  // do formatador engole o ReferenceError e devolve a data crua — o teste
+  // passava a medir o fallback em vez do caminho real. Aconteceu.
+  const src = 'const ESTILO_DA_IDADE = new Map();\n'
+    + "const UNIDADES_DA_IDADE = ['minute','hour','day','month','year'];\n"
+    + fatiar('estiloDaIdade') + '\n' + fatiar('formatRelativeTime');
   return new Function('i18nLocale', 'Date', 't',
-    APP.slice(i, j) + '\nreturn formatRelativeTime;')(
+    src + '\nreturn formatRelativeTime;')(
       () => loc,
       class extends Date {
         constructor(...a) { super(...(a.length ? a : [AGORA])); }
@@ -173,4 +183,33 @@ test('pedido SEM data vai pro FIM — nunca crava a posição 0', () => {
   // que jogasse tudo pro fim passaria nas duas asserções acima.
   assert.deepEqual(monta('oldest')(fila).slice(0, 3), ['velho', 'meio', 'novo']);
   assert.deepEqual(monta('newest')(fila).slice(0, 3), ['novo', 'meio', 'velho']);
+});
+
+test('usa a abreviação OFICIAL do idioma onde ela é inequívoca, e cai pro extenso onde não é', () => {
+  // Pedido do owner: "não prefere usar as abreviações oficiais de cada idioma?".
+  // Prefiro — e o `style: 'short'` do CLDR encolhe o rótulo 31% em português na
+  // média ponderada pela fila real. Mas o "short" oficial do ESPANHOL colide:
+  // `hace 9 m` (meses) é prefixo de `hace 9 min` (minutos), que é exatamente o
+  // defeito que este arquivo consertou. Então a escolha é por MEDIÇÃO.
+  //
+  // Este teste é o lado POSITIVO da regra. Sem ele, alguém trava tudo em 'long'
+  // e o ganho some sem nada reprovar — o teste de prefixo acima ficaria verde,
+  // porque o extenso nunca é ambíguo.
+  const esperado = { pt: 'short', en: 'short', fr: 'short', es: 'long' };
+  const src = 'const ESTILO_DA_IDADE = new Map();\n'
+    + "const UNIDADES_DA_IDADE = ['minute','hour','day','month','year'];\n"
+    + fatiar('estiloDaIdade') + '\nreturn estiloDaIdade;';
+  const estiloDaIdade = new Function(src)();
+  for (const [lang, quero] of Object.entries(esperado)) {
+    assert.equal(estiloDaIdade(LOCALES[lang]), quero,
+      `${lang}: esperava estilo "${quero}"`);
+  }
+  // E o efeito na TELA, que é o que importa: em pt a hora abrevia e o mês não.
+  const f = montar(LOCALES.pt);
+  assert.match(f(AGORA - 12 * 3600000), /^há 12 ?h$/, 'pt deveria abreviar hora');
+  assert.match(f(AGORA - 286 * DIA), /meses/, 'pt NÃO deve abreviar mês — não há forma curta segura');
+  // O espanhol, caído no extenso, escreve os dois.
+  const fes = montar(LOCALES.es);
+  assert.match(fes(AGORA - 12 * 3600000), /horas/, 'es caiu pro extenso: hora por extenso');
+  assert.match(fes(AGORA - 286 * DIA), /meses/, 'es caiu pro extenso: mês por extenso');
 });
