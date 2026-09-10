@@ -192,6 +192,9 @@ wazeplaces/
 │   │                        #   uma conversa de verdade. É o único teste que exercita WebRTC
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
+│   ├── migracoes.mjs        # FONTE ÚNICA do código que só existe por causa de uma versão
+│   │                        #   ANTERIOR. Marcador `// MIGRACAO: <id>` no código + entrada aqui,
+│   │                        #   conferidos nos DOIS sentidos por test/migracoes.test.mjs.
 │   ├── diag-ler.mjs         # FONTE ÚNICA de abrir um diagnóstico. Fareja os BYTES MÁGICOS (não a
 │   │                        #   extensão) e aceita .zip (o formato de hoje), .gz e .json cru — este
 │   │                        #   porque relato ANTIGO é o que se usa pra comparar antes/depois.
@@ -386,7 +389,7 @@ Triar pedido era trabalho solitário: a companhia já existia (dá pra ver pedid
 
 ## 🌐 Endpoints proxy → Waze
 
-Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sessionToken`, carregam os cookies criptografados do store, fazem `fetch` ao Waze (via `callWaze`), normalizam a resposta. Roteados por `dispatch(name, data, { sessions })`. O nome do endpoint é **sem `.php`** (o dispatch tolera sufixo `.php` por compat de cache antigo). Multi-região (`row`/`na`/`il`/`world`) via helpers em `core.mjs` (`wazeIssuesEndpoint`, etc).
+Todos os handlers em `server/core.mjs` são **proxies stateless**: recebem `sessionToken`, carregam os cookies criptografados do store, fazem `fetch` ao Waze (via `callWaze`), normalizam a resposta. Roteados por `dispatch(name, data, { sessions })`. O nome do endpoint é **sem `.php`** — e o `dispatch` faz casamento EXATO (`ROUTES[String(name)]`), sem tolerância a sufixo. Este arquivo chegou a afirmar o contrário ("tolera `.php` por compat de cache antigo") depois de a tolerância já ter sido removida do código: doc que promete o que não existe é pior que código morto, porque o código morto não engana ninguém. Foi o caso que originou `tools/migracoes.mjs`. Multi-região (`row`/`na`/`il`/`world`) via helpers em `core.mjs` (`wazeIssuesEndpoint`, etc).
 
 | App endpoint | Waze endpoint | Notas |
 |---|---|---|
@@ -797,7 +800,7 @@ mesma pergunta em 40 bytes por elemento.
 - **Modal "Filtros e Preferências" é TABBED** (3 abas WAI-ARIA: Filtros | Preferências | Histórico — `FILTER_TABS`/`switchFilterTab` em app.js, `.seg-tabs` em styles.css). Rodapé é **contextual**: Cancelar/Aplicar só na aba Filtros; as outras mostram "Fechar". **Preferências (idioma/undo/dev mode) aplicam NA HORA via change listener** — não passam pelo `applyFiltersFromModal` (que é só da aba Filtros). Campo de filtro novo → aba Filtros; preferência nova → aba Preferências + listener próprio. Abre sempre na aba Filtros
 - **Snackbar/toast**: `showToast(msg, type, durationMs=4000)` — bottom-center no `#notifyStack` (respeita safe-area), clique dispensa, `aria-live` no container. Undo banner vive no mesmo stack
 - **Switches vs checkboxes**: preferência on/off = `<input type="checkbox" class="ui-switch">` (estilo M3, JS lê `.checked` normal); seleção múltipla (tipos) = checkbox com `accent-cyan-600`
-- **Tema**: segue o sistema até o user tocar no toggle (aí persiste em `localStorage.waze_places_theme`). `applyTheme` também atualiza `<meta name="theme-color">`. Dark mode: usar variantes `dark:` do Tailwind no HTML em código novo; os overrides `!important` do styles.css são legado
+- **Tema**: segue o sistema até o user tocar no toggle (aí persiste em `localStorage.waze_places_theme`). `applyTheme` também atualiza `<meta name="theme-color">`. Dark mode: **100% via variantes `dark:`** no HTML/JS. O bloco de ~27 overrides globais com `!important` que existia no `styles.css` **já foi removido** (migração validada por screenshot pixel a pixel, claro e escuro) — este arquivo seguia chamando-os de "legado" como se ainda estivessem lá. Os 3 `!important` que restam são o bloco de `prefers-reduced-motion`, que é o padrão de acessibilidade e fica
 - **Safe areas (iOS PWA)**: header tem `padding-top: env(safe-area-inset-top)`; `#notifyStack`/footer usam `env(safe-area-inset-bottom)`. Não criar elemento fixed sem considerar isso
 - **Zoom NUNCA bloqueado** no viewport (WCAG 1.4.4). Lightbox tem pinch/double-tap/wheel zoom + swipe pra trocar/fechar
 - **Reduced motion**: media query global em styles.css zera animações — não criar animação essencial sem fallback estático
@@ -887,6 +890,18 @@ mesma pergunta em 40 bytes por elemento.
 - **Owner faz squash merge ao aprovar, e a branch é apagada AUTOMATICAMENTE** pelo GitHub (*Automatically delete head branches*). O agente sincroniza a main e apaga a local, sem perguntar.
 - **Sincronize com `git fetch --prune`.** Sem o prune sobram refs `origin/claude/…` mortos, apontando pra commits que não existem mais no remoto. Num ambiente onde o container pode voltar a um estado antigo, ref velho é exatamente como se acredita que a árvore está em dia quando não está — **confira `git log --oneline -1` contra o GitHub antes de acreditar no estado local**. Em 2026-08-07 o container voltou CINCO vezes pra uma main de três PRs atrás; das cinco, duas só foram percebidas porque a contagem de testes não bateu (168 onde eram 180), e uma delas quase virou um push que reverteria três PRs.
 - **Sempre que abrir PR, agente subscreve no `subscribe_pr_activity`** e acompanha CI/review comments até a branch ser mergeada. Bugs apontados no review devem ser corrigidos no mesmo PR (push direto na branch). CI vermelho deve ser corrigido (não ignorado).
+
+### Compatibilidade com versão anterior: registre, não confie na memória
+
+**Todo trecho que existe só por causa de uma versão ANTERIOR ganha `// MIGRACAO: <id>` no código e entrada em `tools/migracoes.mjs`.** `test/migracoes.test.mjs` cobra os DOIS sentidos: entrada sem marcador reprova (foi removido e o registro mentiu), marcador sem entrada reprova (compat nova nascendo sem data). É exato — nada de varrer comentário atrás da palavra "legado", que geraria falso positivo, e falso positivo treina a ignorar a seção.
+
+**O prazo NÃO apaga nada.** Passou de `revisarEm`, o teste REPROVA e imprime a `removerQuando` pra um humano responder. Deleção automática não serve, e por dois motivos MEDIDOS: (a) migração quase nunca é um arquivo, é um **ramo** dentro de código vivo — dos 3 candidatos levantados em 2026-09-10 só UM era uma linha deletável, e outro (`initUndoGateSeen`) **nem migração era**, porque todo aparelho NOVO precisa dele; (b) relógio não sabe se ainda existe dado no formato antigo, que é a única pergunta que importa. Mantendo? Empurre o `revisarEm` — ato deliberado e datado, não um silêncio.
+
+**São TRÊS famílias e só uma expira por relógio.** `aparelho` (migração de localStorage) expira quando todo aparelho rodou — é onde os 30 dias do `PRAZO_PADRAO_DIAS` valem, e o teste reprova quem esticar além disso. `compat` expira quando o dado antigo some. `arquivo` **não expira por uso da app**: diagnóstico recebido é arquivo morto, fica no disco e no WhatsApp pra sempre, e é justamente o que se usa pra comparar antes/depois.
+
+**A ÉPOCA importa e está escrita no registro:** a app não está em produção — todos são testadores e podem zerar o app se preciso (owner, 2026-09-10). Isso encurta os prazos, porque a cauda de quem some deixa de custar. O precedente já estava no código antes de virar regra: o `loadSession` **descarta** sessão no formato anterior em vez de carregar compatibilidade, com esta mesma justificativa escrita. Quando houver base de verdade, a nota some e os prazos sobem.
+
+**Por que isto nasceu:** duas afirmações deste arquivo descreviam código que já tinha sido removido — a tolerância a `.php` no `dispatch` e os overrides `!important` do `styles.css`. Nenhum teste enxergava, porque doc não é código.
 
 ### Perfis de editor do Waze (referência rápida)
 - **URL canônica do perfil**: `https://www.waze.com/pt-BR/user/editor/<username>` (sem `pt-BR/` também funciona, redirect pra locale do user)

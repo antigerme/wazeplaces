@@ -45,6 +45,7 @@ const st = d.appState || {};
 // `currentPlace` virou ÍNDICE no formato 3+. Nos formatos antigos ele é um
 // objeto e o `queue[0]` pode ter saído como a string "[circular]" — o mesmo
 // objeto serializado duas vezes. Os dois casos são remendados aqui.
+// MIGRACAO: diag-formato-2 — ver tools/migracoes.mjs
 const fila = (st.queue || []).map((x, i) => (x === '[circular]' ? st.currentPlace : x)).filter(Boolean);
 const idx = Number.isInteger(st.currentPlaceIdx) && st.currentPlaceIdx >= 0 ? st.currentPlaceIdx : 0;
 const LIMITE = args.includes('--tudo') ? fila.length : 30;

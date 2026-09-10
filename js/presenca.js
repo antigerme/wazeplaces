@@ -856,6 +856,7 @@ function presencaMarcarAusente(peer) {
 }
 
 function presencaEsquecerBloqueioAntigo() {
+    // MIGRACAO: presenca-chave-bloqueio — ver tools/migracoes.mjs
     safeLS.remove(PRESENCA_CHAVE_ANTIGA_BLOQUEIO);
 }
 

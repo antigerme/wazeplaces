@@ -8209,6 +8209,8 @@ function aplicarAnistiaDaPresenca() {
     // Carimbar em vez de anistiar na hora é deliberado: religar de uma vez todo
     // mundo que já estava desligado transforma um deploy numa mudança em massa
     // que ninguém pediu — e some com o significado dos 9 dias.
+    // MIGRACAO: presenca-anistia-carimbo — ver tools/migracoes.mjs. É um RAMO,
+    // não a função: os outros dois são permanentes.
     if (!Number.isFinite(p.presencaOffEm) || p.presencaOffEm <= 0) {
         p.presencaOffEm = Date.now();
         return true;
