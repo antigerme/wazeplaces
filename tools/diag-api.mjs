@@ -34,7 +34,7 @@ import { readFileSync } from 'node:fs';
 import { lerDiagnostico } from './diag-ler.mjs';
 import { pausaComJitter } from './waze-jitter.mjs';
 
-const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'sessao', 'parear']);
+const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear']);
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 '
   + '(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 

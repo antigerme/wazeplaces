@@ -286,6 +286,23 @@ const API = {
         });
     },
 
+    // Guarda (ou solta) o pedido na estrela do próprio editor. `value` vai
+    // EXPLÍCITO: o core exige boolean estrito e não tem padrão, porque é uma
+    // flag de dois lados e coerção decidiria o lado errado em silêncio.
+    async guardarPedido(venueID, updateRequestID, value) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) {
+            return { success: false, error: t('api.error.noSession') };
+        }
+        return this._post('guardar-pedido', {
+            sessionToken,
+            region: this.getRegion(),
+            venueID,
+            updateRequestID,
+            value: value === true
+        });
+    },
+
     async rejectPlace(venueID, updateRequestID) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
