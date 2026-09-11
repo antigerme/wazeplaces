@@ -58,6 +58,7 @@ const MIN_RANK_WAZE = 1; // display L2+ (Waze é 0-indexed)
 
 const wazeIssuesEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Search/List';
 const wazeMarkReadEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Read';
+const wazeStarEndpoint = (r) => (WAZE_REGIONS[r] || WAZE_REGIONS.row) + '/Issues/Star';
 const wazeFeaturesEndpoint = (r) => WAZE_FEATURES_REGIONS[r] || WAZE_FEATURES_REGIONS.row;
 // A constante acima JÁ vem com `?ignoreWarnings=false&language=pt-BR` grudado.
 // Quem precisa acrescentar parâmetro (a releitura por bbox) tem que partir da
@@ -1901,6 +1902,53 @@ async function handleMarcarLido(data, { sessions }) {
   };
 }
 
+// Guarda (ou solta) um pedido na ESTRELA do próprio editor — o mesmo favorito
+// que o WME mostra, e que tem busca salva pré-definida lá ("starred").
+//
+// É a única escrita da app que NÃO mexe no mapa: a estrela é estado do EDITOR
+// sobre o pedido, não do pedido. Por isso não tem portão de L6 — o portão
+// destrutivo existe pra o que altera dado de mapa, e aqui não altera.
+//
+// MEDIDO contra o Waze real (2026-09-11, escrita autorizada pelo owner): este
+// payload devolve 200 com corpo VAZIO; a releitura mostra o alvo com
+// `isStarred: true` e o pedido VIZINHO intocado em `false`; mandar `false`
+// devolve o estado original. Cirúrgico e reversível, conferido por leitura.
+//
+// Que a estrela é POR EDITOR não veio de suposição: na mesma medição, o
+// `isRead` — que mora no mesmo objeto e no mesmo `userPropertiesFilter` —
+// acende em 341 de 453 pedidos do Brasil (a área do owner) e em 0 de 2202 nos
+// outros cinco países de validação, todos com comunidade ativa. Flag
+// compartilhada não viria zerada na França.
+async function handleGuardarPedido(data, { sessions }) {
+  const cookies = await resolveCookies(data, sessions);
+  const region = requireRegion(data);
+  if (data.venueID === undefined || data.updateRequestID === undefined) {
+    apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  }
+  // Boolean ESTRITO e sem padrão, pelo mesmo motivo do `approve` (gotcha #59):
+  // é uma flag de dois lados, e coerção decidiria o lado errado em silêncio —
+  // a string "false" é truthy. Sem valor explícito, não escreve nada.
+  if (typeof data.value !== 'boolean') {
+    apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  }
+
+  const { cookieHeader, csrf } = prepareAuth(cookies);
+  const payload = {
+    value: data.value,
+    venueUpdateRequestIds: [{ id: data.updateRequestID, venueId: String(data.venueID) }],
+  };
+  const result = await callWaze(wazeStarEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
+  const cat = categorizeWazeError(result.httpCode, result.response, result.error);
+
+  if (result.httpCode === 200 && cat.category !== 'already_processed') {
+    return { status: 200, body: { success: true, value: data.value } };
+  }
+  return {
+    status: cat.category === 'already_processed' || cat.category === 'not_found' ? 200 : 500,
+    body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
+  };
+}
+
 // Rejeita OU aprova um pedido. Os dois caminhos são a MESMA chamada com a flag
 // invertida — confirmado num HAR do owner aprovando uma foto no WME: mesma
 // estrutura byte a byte, `approve: true`. A resposta ecoa o venue com a imagem
@@ -2537,6 +2585,7 @@ const ROUTES = {
   'testar-cookies': handleTestarCookies,
   'buscar-places': handleBuscarPlaces,
   'marcar-lido': handleMarcarLido,
+  'guardar-pedido': handleGuardarPedido,
   'validar-place': handleValidarPlace,
   'excluir-foto': handleExcluirFoto,
   'renomear-local': handleRenomearLocal,

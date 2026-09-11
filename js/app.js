@@ -172,7 +172,7 @@ const AppState = {
     _profilePromise: null,
     loadError: false,
     filters: { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
-    preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true },
+    preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false },
     devMode: { unlocked: false, active: false },
     profile: null,
     countries: [],
@@ -1080,6 +1080,14 @@ function setupModalListeners() {
         // canDisableUndo aqui é cinto de segurança contra DOM editado à mão.
         AppState.preferences.undoEnabled = canDisableUndo() ? e.target.checked : true;
         savePreferences();
+    });
+    $('prefPularGuarda').addEventListener('change', (e) => {
+        AppState.preferences.pularGuarda = e.target.checked;
+        savePreferences();
+        // O selo do ↑ muda de texto com a preferência, e o card já está na tela
+        // atrás do modal — sem isto ele só se corrigiria no próximo swipe, e a
+        // primeira vez que a pessoa arrastasse veria o texto antigo.
+        atualizarSeloDePular();
     });
     $('prefPresenca').addEventListener('change', (e) => {
         AppState.preferences.presenca = e.target.checked;
@@ -2341,6 +2349,7 @@ async function openFiltersModal() {
     renderDevModeSection();
     renderUndoGateUI();
     renderPresencaPref();
+    renderPularGuardaPref();
     $('filterUnreadOnly').checked = AppState.filters.unreadOnly !== false;
     document.querySelectorAll('.filter-type').forEach(cb => {
         cb.checked = AppState.filters.types.includes(cb.value);
@@ -4809,6 +4818,7 @@ function renderCurrentCard() {
     // nunca via estas 25 chaves. Resultado: em inglês/espanhol o card voltava pro
     // português A CADA SWIPE (o clone traz o texto pt hardcoded do HTML).
     // Traduzir aqui, no clone, é o único ponto que pega todo card novo.
+    atualizarSeloDePular(card);
     if (typeof applyI18n === 'function') applyI18n(card);
 
     // O card novo nasce travado se a janela do Desfazer ainda estiver correndo
@@ -7766,9 +7776,27 @@ function handleSkip() {
     updateStats();
     saveStats();
     advanceQueue();
-    // Skip não envia nada ao Waze (o place segue pendente) — executor no-op.
-    // Passa pelo scheduleAction só pra ganhar a janela de Desfazer (feature).
-    scheduleAction('skip', place, async () => {});
+    // A decisão é do MOMENTO DO GESTO, não do despacho: o executor roda até
+    // UNDO_WINDOW_MS depois, e nesse intervalo dá pra abrir Filtros e mexer no
+    // interruptor. Quem pulou com a preferência ligada quis guardar aquele
+    // pedido; mudar de ideia sobre o recurso não reescreve o que já foi feito.
+    const guardar = AppState.preferences.pularGuarda === true;
+    // Sem a preferência, o Pular continua sendo o que sempre foi: REDE ZERO.
+    // O place segue pendente no Waze e o executor é no-op — o scheduleAction
+    // está aqui só pela janela do Desfazer. Com a preferência, o mesmo executor
+    // passa a guardar o pedido na estrela do editor, e o Desfazer segue valendo
+    // de graça: desfazer é não rodar o executor.
+    scheduleAction('skip', place, async () => {
+        if (!guardar) return;
+        if (!place || !place.venueID || !place.updateRequestID) return;
+        const r = await callWithRetry(() => API.guardarPedido(place.venueID, place.updateRequestID, true));
+        // Falhar aqui não corrompe contador nenhum — o Pular não mexe em
+        // `serverTotal` e o `skipped` já subiu —, então não há o que reverter.
+        // O que não pode é falhar CALADO: a app prometeu guardar.
+        if (!r || r.success !== true) {
+            showToast(msgDoServidor(r, t('toast.guardarFalhou')), 'error');
+        }
+    });
 }
 
 // ── Marcar em lote (o backend já aceita items[]; feature de UI) ────────────
@@ -8326,6 +8354,9 @@ function loadPreferences() {
             // Opt-out: só desliga quem DISSE que quer desligado. `undefined`
             // (quem nunca abriu as Preferências) fica ligado, que é o padrão.
             if (typeof parsed.presenca === 'boolean') AppState.preferences.presenca = parsed.presenca;
+            // Opt-IN, ao contrário da presença logo acima: só liga quem DISSE
+            // que quer. `undefined` fica desligado, que é o padrão.
+            AppState.preferences.pularGuarda = parsed.pularGuarda === true;
             // undefined = nunca decidido (user antigo ou primeira visita).
             // Só copia se for boolean, pra initUndoGateSeen poder decidir depois.
             if (typeof parsed.undoGateSeen === 'boolean') {
@@ -8969,6 +9000,28 @@ function canDisableUndo() {
     // Modo Desenvolvedor bypassa o gate de experiência completamente.
     if (AppState.devMode && AppState.devMode.active) return true;
     return getUndoTreatedCount() >= getUndoUnlockThreshold();
+}
+
+function renderPularGuardaPref() {
+    const cb = document.getElementById('prefPularGuarda');
+    if (cb) cb.checked = AppState.preferences.pularGuarda === true;
+}
+
+// O texto do selo de arrastar-pra-cima. Fonte única porque são DOIS chamadores
+// (o card que nasce e a preferência que muda com o card já na tela), e a regra
+// de consistência do projeto cobra que o que a app FAZ e o que ela DIZ sejam a
+// mesma coisa: com a preferência ligada, o ↑ guarda — então ele tem que dizer.
+//
+// Escreve o ATRIBUTO e deixa o applyI18n traduzir, em vez de cravar o texto:
+// assim trocar de idioma com o card na tela reescreve o selo certo (o card vive
+// no documento, então o applyI18n global o alcança).
+function atualizarSeloDePular(card) {
+    const alvo = card || document.querySelector('.place-card');
+    const el = alvo && alvo.querySelector('.swipe-stamp-up span[data-i18n]');
+    if (!el) return;
+    el.setAttribute('data-i18n', AppState.preferences.pularGuarda === true
+        ? 'card.stamp.skipGuarda' : 'card.stamp.skip');
+    if (typeof applyI18n === 'function') applyI18n(alvo);
 }
 
 function renderPresencaPref() {
