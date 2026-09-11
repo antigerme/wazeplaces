@@ -7164,23 +7164,24 @@ const AUTORES_MAX_REINCIDENTES = 500;
 //
 // Era 2.000, e a fila real do owner mostrou o buraco: 856 rejeições numa semana
 // (~120/dia, ~100 delas entrando no anel) davam **19 dias** de memória contra os
-// 30 prometidos. 4.000 deu ~38; hoje são 8.000, ~76.
+// 30 prometidos. 4.000 deu ~38; hoje são 6.000, ~60.
 //
 // Performance NÃO é o limite aqui, e a tabela do mapa (mais acima, no
 // CLAUDE.md) não vale pra este anel: ela mede `nome → [contagem, datas]`, que é
 // muito mais pesado por entrada. MEDIDO no ciclo completo de uma rejeição
 // (ler + procurar + gravar), num Chromium com a CPU 6× lenta:
 //   anel 2.000 → 4,04 ms · 4.000 → 4,32 ms · 8.000 → 4,72 ms
-// Um quadro a 60fps são 8,3 ms, então quadruplicar de 2.000 pra 8.000 custou
-// 0,68 ms — ainda ruído. Tamanho no aparelho: 39,6 KB a 2.000, 63,0 KB a 4.000.
+// 6.000 não foi medido: cai ENTRE os dois últimos, abaixo de 4,72 ms. Um quadro
+// a 60fps são 8,3 ms, então a faixa inteira é ruído. Tamanho no aparelho: 39,6
+// KB a 2.000 e 63,0 KB a 4.000 — o de 6.000 também não foi medido.
 //
 // A folga extra compra o editor que rejeita MUITO mais que ~130 por dia, que
-// era exatamente o caso que tornava 4.000 errado: com 8.000 a conta só volta a
-// apertar acima de ~265/dia. O conserto definitivo continua sendo guardar o DIA
+// era exatamente o caso que tornava 4.000 errado: com 6.000 a conta só volta a
+// apertar acima de ~200/dia. O conserto definitivo continua sendo guardar o DIA
 // junto do id e podar por idade, como o mapa faz — aí o teto deixa de ser
 // palpite sobre o ritmo de quem usa. Fica como decisão separada: muda o formato
 // gravado e exige migração.
-const AUTORES_MAX_VISTOS = 8000;
+const AUTORES_MAX_VISTOS = 6000;
 // ANISTIA, e não só arrumação — a razão é do owner: "30 dias é para tirar a
 // pessoa do castigo caso o editor esqueça de desmarcar do automático e/ou o
 // editor use muito pouco o app". Ou seja, o prazo protege o AUTOR de um
