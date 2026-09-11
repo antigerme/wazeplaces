@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -620,4 +620,69 @@ test('extensão: nenhuma permissão nova, e o reload só no install', () => {
     assert.match(ponte, /try\s*\{[\s\S]*chrome\.runtime\.sendMessage/,
         'o sendMessage da ponte saiu do try — contexto órfão volta a pendurar a app por 8s');
     assert.match(ponte, /contexto-invalido/, 'sumiu a resposta imediata do contexto órfão');
+});
+
+// ── O par cookie+CSRF sai do CORE, nunca de leitura própria ────────────────
+//
+// MEDIDO em 2026-09-11, e o estrago não foi dar erro: foi o instrumento DIZER
+// QUE ESTAVA TUDO BEM. O `waze-probe` lia o cookies.txt com um regex próprio
+// (`/(^\.?|\.)waze\.com$/`) e pegava o PRIMEIRO `_csrf_token`. O export do
+// navegador traz DOIS ambientes do Waze — `beta.waze.com` e `www.waze.com` —,
+// cada um com `_web_session` e `_csrf_token` PRÓPRIOS e valores distintos
+// (conferido no arquivo do owner: 4 ocorrências de cada, 2 valores por nome).
+// Resultado: CSRF de um ambiente com a sessão do outro.
+//
+// Como o probe só faz GET, e GET não valida CSRF, ele imprimia "✓ sessão
+// válida" com o perfil completo — enquanto todo POST da app levava HTTP 403
+// `code: 103` "Invalid CSRF token". A ferramenta cujo ÚNICO trabalho é
+// responder "os cookies servem?" respondia SIM quando não serviam.
+//
+// O core já conserta (`cookieValePraHost` + `prepareAuth`, com a medição
+// registrada lá). Este guard existe porque a regra sozinha no CLAUDE.md é
+// justamente o que este projeto sabe que não gruda: script novo nasce com o
+// parser próprio, passa no GET, e ninguém percebe até um POST falhar.
+test('tool que lê cookies do editor usa o prepareAuth do core, e quem fala com o Waze usa o jitter', () => {
+    const arquivos = readdirSync(join(ROOT, 'tools')).filter((f) => f.endsWith('.mjs'));
+    // CONTROLE: se a varredura não achar arquivo nenhum, o teste passa vazio e
+    // vira decoração — a mesma armadilha que este arquivo documenta.
+    assert.ok(arquivos.length >= 5, `varredura de tools/ achou ${arquivos.length} arquivos — instrumento suspeito`);
+
+    // Comentário NÃO é código — e aqui isso não é detalhe. A primeira versão
+    // deste guard reprovou o `waze-probe` por causa do comentário que EXPLICA o
+    // defeito, que naturalmente cita o regex defeituoso. É o gotcha #14 inteiro:
+    // lá um grep casou com o comentário do index.html e "provou" que o host da
+    // Cloudflare não era servido. Então: tira comentário antes de olhar.
+    const soCodigo = (t) => t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+
+    let auditadosCookie = 0, auditadosJitter = 0;
+    for (const f of arquivos) {
+        const bruto = read(join('tools', f));
+        const src = soCodigo(bruto);
+
+        // (a) lê cookies do editor → tem que vir do core
+        if (src.includes('_csrf_token')) {
+            auditadosCookie++;
+            assert.match(src, /import\s*\{[^}]*\bprepareAuth\b[^}]*\}\s*from\s*'\.\.\/server\/core\.mjs'/,
+                `${f} mexe com _csrf_token sem importar prepareAuth do core — o par CSRF+sessão`
+                + ' volta a poder sair de ambientes diferentes (beta × www), e o sintoma é GET 200 com POST 403');
+            assert.doesNotMatch(src, /waze\\\.com\$/,
+                `${f} tem um regex próprio de domínio waze.com — é exatamente o filtro largo que`
+                + ' aceita beta.waze.com junto do www. Quem decide isso é o cookieValePraHost do core');
+        }
+
+        // (b) fala com o Waze → jitter da fonte única (instrução permanente do owner)
+        const falaComWaze = /fetch\(\s*[^)]*waze\.com/.test(src) || /BASES\s*=|row-Descartes/.test(src);
+        if (falaComWaze && f !== 'waze-jitter.mjs') {
+            auditadosJitter++;
+            assert.match(src, /from\s*'\.\/waze-jitter\.mjs'/,
+                `${f} chama o Waze sem importar o jitter da fonte única — rajada marca a conta do owner`);
+        }
+    }
+    // O ramo do JITTER tem sujeito hoje e sempre terá — se zerar, a varredura
+    // quebrou. O ramo do COOKIE pode legitimamente ficar em zero: depois do
+    // conserto de 2026-09-11 nenhum tool lê cookies por conta própria, que é o
+    // estado desejado. Ele fica armado pro PRÓXIMO, e foi visto reprovando por
+    // sabotagem (reintroduzir o parser à mão no waze-probe faz este teste cair).
+    assert.ok(auditadosJitter >= 1,
+        `nenhum tool que fala com o Waze foi auditado (${auditadosJitter}) — a varredura quebrou`);
 });

@@ -33,6 +33,9 @@
 
 import { readFileSync } from 'node:fs';
 import { pausaComJitter, JITTER_MIN_MS, JITTER_MAX_MS, estimativaMs } from './waze-jitter.mjs';
+// FONTE ÚNICA do par cookie+CSRF — a MESMA que a app usa. Ver o comentário
+// abaixo: escrever essa leitura aqui de novo era o que fazia o probe mentir.
+import { prepareAuth } from '../server/core.mjs';
 
 const BASES = {
   row: 'https://www.waze.com/row-Descartes/app',
@@ -60,22 +63,34 @@ const flag = (nome) => {
 const regiao = String(flag('regiao') || 'row').toLowerCase();
 const base = BASES[regiao] || BASES.row;
 
-// ── Cookies: mesma leitura do server/core.mjs (Netscape, só waze.com) ──────
-const pares = [];
-for (const linha of readFileSync(arq, 'utf8').split('\n')) {
-  const t = linha.trim();
-  if (!t || t[0] === '#') continue;
-  const p = t.split(/\s+/);
-  if (p.length >= 7 && /(^\.?|\.)waze\.com$/i.test(p[0])) pares.push([p[5], p[6]]);
-}
-if (!pares.length) {
-  console.error('✗ nenhum cookie de waze.com no arquivo. Exportou logado no WME (formato Netscape)?');
+// ── Cookies: pelo `prepareAuth` do core, NUNCA por leitura própria ─────────
+//
+// Isto já foi um parser escrito à mão aqui, com `/(^\.?|\.)waze\.com$/` e o
+// PRIMEIRO `_csrf_token` que aparecesse. Parecia igual ao do core e não era: o
+// export do navegador traz DOIS ambientes do Waze — `beta.waze.com` e
+// `www.waze.com` —, cada um com `_web_session` e `_csrf_token` PRÓPRIOS e
+// valores diferentes. A regra larga aceitava os dois, e o par que saía daqui
+// era o CSRF de um ambiente com a sessão do outro.
+//
+// O estrago não era dar erro: era o probe DIZER QUE ESTAVA TUDO BEM. Ele só faz
+// GET, e GET não valida CSRF — então `/Session` respondia 200 com o perfil
+// completo e o probe imprimia "✓ sessão válida", enquanto todo POST da app
+// morria com 403 `code: 103` "Invalid CSRF token". Ferramenta cujo trabalho é
+// responder "os cookies servem?" respondendo SIM quando não servem.
+//
+// O core já conserta isso (ver `cookieValePraHost` e `prepareAuth`, com a
+// medição registrada lá). Importar é o conserto; reescrever foi o defeito.
+let cookieHeader, csrf;
+try {
+  ({ cookieHeader, csrf } = prepareAuth(readFileSync(arq, 'utf8')));
+} catch (e) {
+  console.error(`✗ ${e && e.message ? e.message : e}`);
+  console.error('  Exportou logado no WME (formato Netscape)?');
   process.exit(1);
 }
-const cookieHeader = pares.map(([k, v]) => `${k}=${v}`).join('; ');
-const csrf = (pares.find(([k]) => k === '_csrf_token') || [])[1] || '';
 // Nome sim, valor NUNCA.
-console.log(`cookies: ${pares.length} (${pares.map(([k]) => k).join(', ')})`);
+const nomes = cookieHeader.split('; ').map((p) => p.split('=')[0]).filter(Boolean);
+console.log(`cookies: ${nomes.length} (${[...new Set(nomes)].join(', ')})`);
 console.log(`csrf: ${csrf ? 'presente' : 'AUSENTE — chamadas podem dar 403'} · região: ${regiao}\n`);
 
 // refBase existe só pra sonda de idioma poder variar o Referer de propósito; o
