@@ -105,3 +105,32 @@ Pages + Workers, mantendo fallback pra VM RedHat. Cobre:
 outros docs, o `.md` é a fonte e o `.pdf` é o entregável pra compartilhar.
 Regenerar o PDF: `python3 docs/scripts/md2pdf.py docs/cloudflare-migration.md docs/cloudflare-migration.pdf`.
 
+
+---
+
+## `waze-api.md`
+
+Superfície **medida** da API que o WME usa: a tabela `paths` completa (42
+caminhos REST), os 44 métodos gRPC-web, os limites e feature flags publicados
+em `info/config`, e o enquadramento do fio gRPC.
+
+**Gerado em**: 2026-09-11, a partir de um HAR de sessão real do owner (WME
+`v2.367`), do bundle de produção do editor e de uma chamada ao vivo ao
+`info/config` — que responde **200 sem credencial**.
+
+**Pra que serve aqui**: responder "isto existe?" sem chutar e sem gastar
+requisição. Cada linha vem marcada com a procedência (`[HAR]` observado no
+fio · `[bundle]` lido do código do editor · `[vivo]` chamado daqui), porque
+"o WME sabe chamar" e "o servidor aceita hoje" não são a mesma coisa.
+
+Três coisas que ele registra e que mudam decisão:
+
+- **Não existe** piso de rank publicado pro pedido de LOCAL. O
+  `minRankForEditingUpdateRequest: 1` que parece ser isso é do UR de
+  SEGMENTO — rastreado até o consumidor. Confirma por outro caminho que quem
+  sustenta o nosso portão é o AM, não o rank.
+- `grpcVenueUpdateRequestIssuesApi: false` — o endpoint que sustenta a nossa
+  fila ainda não migrou pra gRPC, mas a flag já existe.
+- `isStarred` e as buscas salvas existem no servidor e a app não os usa.
+
+Não tem PDF: é referência de consulta, não documento pra compartilhar.

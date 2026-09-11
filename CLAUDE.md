@@ -215,6 +215,11 @@ wazeplaces/
 │   ├── native-android-analysis.pdf # Mesmo doc renderizado pra compartilhar
 │   ├── cloudflare-migration.md     # Planejamento de migração Cloudflare Pages/Workers (+ fallback VM RedHat)
 │   ├── cloudflare-migration.pdf    # Mesmo doc renderizado pra compartilhar
+│   ├── waze-api.md          # Superfície MEDIDA da API do Waze: a tabela `paths` inteira do
+│   │                        #   WME (42 caminhos REST), os 44 métodos gRPC-web, e os limites
+│   │                        #   que o `info/config` publica SEM credencial. Cada linha marcada
+│   │                        #   com a procedência ([HAR] / [bundle] / [vivo]), porque "o WME sabe
+│   │                        #   chamar" e "o servidor aceita hoje" não são a mesma coisa.
 │   └── scripts/md2pdf.py    # Conversor markdown → PDF estilizado (paleta cyan da app)
 ├── README.md                # Doc pública (editores leigos + devs)
 ├── CLAUDE.md                # Este arquivo
