@@ -3901,6 +3901,140 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── Resumo do mês: a imagem nasce no aparelho, no tamanho prometido ──────
+//
+// O teste de núcleo (test/resumo.test.mjs) fatia a LEITURA do mês; o que só o
+// browser responde é o resto: o canvas de verdade com a fonte carregada, o QR
+// desenhado, o object URL na <img>, os dois botões NA TELA sem rolar (a imagem
+// tem teto de altura justamente pra isso), o download com o nome prometido e a
+// limpeza ao fechar por Esc — o caminho que NÃO passa pelo botão. Dois
+// aparelhos (o do owner e o mais apertado) × 4 idiomas, porque é a string mais
+// larga que decide se o botão e os rótulos cabem (gotcha #25).
+{
+  const onde = 'resumo do mês';
+  const APARELHOS_RESUMO = [['Pixel 7', { width: 412, height: 915 }], ['Galaxy Fold', { width: 280, height: 653 }]];
+  for (const [nomeAp, vp] of APARELHOS_RESUMO) {
+    const ctx = await browser.newContext({ viewport: vp, locale: 'pt-BR', serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    const errosR = [];
+    page.on('pageerror', (e) => errosR.push(String(e)));
+    await page.addInitScript(() => {
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+      // Um mês com forma: dois dias ativos, o de hoje claramente o mais forte.
+      // Só dias que JÁ existem (o 1º e o de hoje), pra não depender da data em
+      // que o CI roda — e somando, porque no dia 1 os dois são o mesmo balde.
+      const d = new Date(), p = (n) => String(n).padStart(2, '0');
+      const k = (dia) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(dia)}`;
+      const h = { _total: { read: 50, rejected: 35 } };
+      const soma = (dia, r, j) => { const kk = k(dia); h[kk] = h[kk] || { read: 0, rejected: 0 }; h[kk].read += r; h[kk].rejected += j; };
+      soma(1, 10, 5); soma(d.getDate(), 40, 30);
+      localStorage.setItem('waze_places_history', JSON.stringify(h));
+    });
+    await page.goto(BASE, { waitUntil: 'load' });
+    await page.waitForTimeout(600);
+    await page.waitForFunction(() => typeof AppState !== 'undefined');
+    await assentar(page, 200);
+
+    for (const lang of LINGUAS) {
+      const m = await page.evaluate(async (lg) => {
+        aplicarIdioma(lg);
+        // O toast "Idioma alterado" é do TESTE (ninguém troca de idioma com o
+        // Resumo aberto) e, no rodapé, cobriria o Baixar na hora de medir o dedo.
+        document.querySelectorAll('#toastContainer > *').forEach((el) => el.remove());
+        AppState.authenticated = true;
+        AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false };
+        AppState.history = null;   // relê o localStorage semeado
+        openModal('filtersModal'); switchFilterTab('filtersTabHistory'); renderHistory();
+        const btn = document.getElementById('resumoBotao');
+        if (!btn) return { botao: false };
+        const rb = btn.getBoundingClientRect();
+        const out = { botao: true, botaoAlto: Math.round(rb.height), botaoLargo: Math.round(rb.width),
+                      largura: innerWidth, botaoTexto: (btn.textContent || '').trim() };
+        // Pelo BOTÃO, como a pessoa faz — e espera a imagem chegar na <img>.
+        btn.click();
+        const img = document.getElementById('resumoImg');
+        for (let i = 0; i < 200 && !(img.complete && img.naturalWidth > 0); i++) await new Promise((r) => setTimeout(r, 25));
+        out.modalAberto = !document.getElementById('resumoModal').classList.contains('hidden');
+        out.filtrosFechado = document.getElementById('filtersModal').classList.contains('hidden');
+        out.natural = [img.naturalWidth, img.naturalHeight];
+        out.blob = (img.src || '').startsWith('blob:');
+        out.titulo = (document.getElementById('resumoTitle').textContent || '').trim();
+        // Os botões inteiros na tela, e quem recebe o dedo é o botão (gotcha #26).
+        const alvo = (id) => {
+          const el = document.getElementById(id), r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return { alto: Math.round(r.height), dentro: r.top >= 0 && r.bottom <= innerHeight,
+                   hit: !!hit && (hit === el || el.contains(hit)), escondido: el.classList.contains('hidden') };
+        };
+        out.baixar = alvo('resumoBaixar');
+        out.compartilhar = alvo('resumoCompartilhar');
+        out.fechar = alvo('resumoClose');
+        let podeCompartilhar = false;
+        try { podeCompartilhar = !!(navigator.canShare && navigator.canShare({ files: [new File([''], 'x.png', { type: 'image/png' })] })); } catch (e) {}
+        out.compartilharEsperado = podeCompartilhar;
+        // A imagem tem conteúdo ONDE tem que ter: o número branco em cima, o QR
+        // embaixo à direita, e o canto é fundo escuro. Blank passaria em tamanho.
+        const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+        const claros = (x, y, w, h) => {
+          const px = g.getImageData(x, y, w, h).data; let n = 0;
+          for (let i = 0; i < px.length; i += 4) if (px[i] > 200 && px[i + 1] > 200 && px[i + 2] > 200) n++;
+          return n;
+        };
+        out.pixNumero = claros(80, 240, 400, 150);
+        out.pixQr = claros(880, 1150, 120, 120);
+        out.pixCanto = claros(0, 0, 40, 40);
+        return out;
+      }, lang);
+      const id = `${onde} ${nomeAp}/${lang}`;
+      checa(m.botao, `${id}: o botão do Resumo não apareceu com mês cheio`);
+      if (!m.botao) continue;
+      checa(m.botaoAlto >= 44, `${id}: botão do Resumo com ${m.botaoAlto}px < 44`);
+      checa(m.botaoLargo <= m.largura, `${id}: botão do Resumo mais largo que a tela`, `${m.botaoLargo} > ${m.largura}`);
+      checa(!/[{}]/.test(m.botaoTexto) && !/[{}]/.test(m.titulo), `${id}: {mes} vazou cru`, m.botaoTexto + ' / ' + m.titulo);
+      checa(m.modalAberto && m.filtrosFechado, `${id}: o Resumo não abriu por cima dos Filtros`);
+      checa(m.natural[0] === 1080 && m.natural[1] === 1350, `${id}: imagem de ${m.natural.join('×')} (esperado 1080×1350)`);
+      checa(m.blob, `${id}: a <img> não recebeu object URL`);
+      for (const [nome, a] of [['Baixar', m.baixar], ['✕', m.fechar]]) {
+        checa(a.alto >= 44, `${id}: ${nome} com ${a.alto}px < 44`);
+        checa(a.dentro, `${id}: ${nome} fora da tela — a imagem empurrou os botões pra baixo da dobra`);
+        checa(a.hit, `${id}: ${nome} não recebe o dedo — algo o cobre`);
+      }
+      checa(m.compartilhar.escondido === !m.compartilharEsperado,
+        `${id}: Compartilhar ${m.compartilhar.escondido ? 'escondido' : 'visível'} num aparelho que ${m.compartilharEsperado ? 'compartilha' : 'NÃO compartilha'} arquivo`);
+      if (!m.compartilhar.escondido) {
+        checa(m.compartilhar.alto >= 44 && m.compartilhar.dentro && m.compartilhar.hit, `${id}: Compartilhar fora do alvo/tela`);
+      }
+      checa(m.pixNumero > 500, `${id}: o número grande não foi desenhado`, `${m.pixNumero} px claros`);
+      checa(m.pixQr > 1000, `${id}: o QR não foi desenhado`, `${m.pixQr} px claros`);
+      checa(m.pixCanto === 0, `${id}: o fundo não é escuro`, `${m.pixCanto} px claros no canto`);
+
+      // Baixar: UM download, com o nome prometido (wazeplaces-AAAA-MM.png).
+      const [dl] = await Promise.all([
+        page.waitForEvent('download', { timeout: 5000 }).catch(() => null),
+        page.click('#resumoBaixar'),
+      ]);
+      checa(!!dl, `${id}: Baixar não gerou download`);
+      if (dl) checa(/^wazeplaces-\d{4}-\d{2}\.png$/.test(dl.suggestedFilename()), `${id}: nome do arquivo`, dl.suggestedFilename());
+
+      // Fechar por Esc — o caminho que não passa pelo botão — solta o blob e o
+      // object URL. É o que LIMPEZA_AO_FECHAR promete.
+      await page.keyboard.press('Escape');
+      await assentar(page, 250);
+      const limpo = await page.evaluate(() => ({
+        fechado: document.getElementById('resumoModal').classList.contains('hidden'),
+        src: document.getElementById('resumoImg').getAttribute('src'),
+        atual: typeof resumoAtual === 'undefined' ? 'indefinido' : resumoAtual,
+      }));
+      checa(limpo.fechado, `${id}: Esc não fechou o Resumo`);
+      checa(limpo.src === null, `${id}: a <img> ficou com o object URL depois de fechar`, String(limpo.src));
+      checa(limpo.atual === null, `${id}: resumoAtual não foi solto ao fechar`, String(limpo.atual));
+    }
+    checa(errosR.length === 0, `${onde} ${nomeAp}: erro de JS`, errosR[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -3937,6 +4071,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
+  + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`

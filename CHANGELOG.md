@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.13-01
+
+### Adicionado
+- **Resumo do mês para compartilhar.** Na aba *Histórico* (em Filtros e Preferências), quando o mês tem pedido tratado, aparece o botão **Compartilhar meu resumo de setembro**. Ele monta, no seu aparelho, uma imagem pronta pra mandar no grupo: quantos pedidos você limpou no mês, rejeitados e lidos, o dia mais forte, os dias ativos e um gráfico dia a dia — com o QR do app no canto, pra quem perguntar "que app é esse?". Onde o celular compartilha arquivo (Android, iPhone) há o botão *Compartilhar*; em todo lugar há *Baixar imagem*.
+
+  Tudo sai do histórico que o app já guarda no seu aparelho: nenhuma consulta ao servidor, nada novo gravado, nada enviado a lugar nenhum. É o mês do calendário (setembro inteiro), diferente do "Mês" da tabela logo acima, que são os últimos 30 dias.
+
+---
+
 ## v2026.09.09-02
 
 ### Corrigido
