@@ -421,7 +421,7 @@ function mostrarEntrandoPelaExtensao(ligado) {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal', 'pedidoModal', 'autorModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal', 'pedidoModal', 'autorModal', 'resumoModal'];
 
 let lastFocusedBeforeModal = null;
 
@@ -511,6 +511,13 @@ function openModal(id) {
 // ticker do pareamento: fechando por Esc, o setInterval seguia rodando pelo
 // resto da sessão.
 const LIMPEZA_AO_FECHAR = {
+    // A imagem do Resumo é um object URL: solta a memória e o blob por
+    // qualquer caminho de fechamento (✕, Esc, scrim, voltar).
+    resumoModal() {
+        resumoAtual = null;
+        const img = document.getElementById('resumoImg');
+        if (img && img.src) { try { URL.revokeObjectURL(img.src); } catch (e) {} img.removeAttribute('src'); }
+    },
     // O padrão da lista de autores é a forma CURTA. Amarrar isto ao botão de
     // fechar deixaria os outros dois caminhos (Esc e scrim) vazando o estado
     // expandido pra próxima abertura — o gotcha dos modais deste projeto.
@@ -622,6 +629,9 @@ function setupAppListeners() {
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
     $('presencaClose').addEventListener('click', () => closeModal('presencaModal'));
     $('pedidoClose').addEventListener('click', () => closeModal('pedidoModal'));
+    $('resumoClose')?.addEventListener('click', () => closeModal('resumoModal'));
+    $('resumoCompartilhar')?.addEventListener('click', compartilharResumo);
+    $('resumoBaixar')?.addEventListener('click', baixarResumo);
     $('autorClose').addEventListener('click', () => closeModal('autorModal'));
     $('conversaClose').addEventListener('click', () => Presenca.fecharConversa());
     // O resto da presença (pílula, lista, envio) se liga sozinho: `montar` é do
@@ -6774,6 +6784,271 @@ function getHistoryStats() {
     return acc;
 }
 // ═══════════════════════════════════════════════════════════════════════════
+//  Resumo do mês — a imagem que a pessoa manda no grupo
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Uma imagem 4:5 (1080×1350 — o formato que WhatsApp e Instagram não cortam)
+// gerada NO APARELHO, com canvas e zero dependência, a partir do histórico por
+// dia que a app já guarda. Celebra uma vez, quando a pessoa pede, e não
+// pressiona ninguém: não há sequência, meta nem ranking aqui — só o mês.
+//
+// Escura de propósito, e só escura: é pra saltar no fundo claro do WhatsApp.
+//
+// O que ela NÃO mostra ainda, e por quê: "pulados" e "onde" (estados) exigem
+// que o histórico passe a gravar dado que hoje não grava. É formato novo com
+// migração — fica como etapa própria, decidida à parte.
+//
+// A fonte é a Inter auto-hospedada, que vai só até o peso 700 (ver
+// css/styles.css). Pedir 800/900 aqui não dá erro: o browser SINTETIZA o
+// negrito ou cai no fallback, em silêncio. `test/resumo.test.mjs` reprova
+// qualquer peso acima de 700 nesta seção.
+const RESUMO_LARGURA = 1080;
+const RESUMO_ALTURA = 1350;
+
+// Dados PUROS do mês-calendário, a partir do histórico por dia. Sem DOM, sem
+// i18n, sem relógio — é o que o teste fatia e exercita sem browser.
+//
+// Note a diferença pro "Este mês" da aba Histórico, que é uma JANELA de 30
+// dias: aqui é o mês do calendário, porque é assim que a pessoa fala do mês
+// ("meu setembro") e é isso que o título da imagem promete.
+function dadosDoResumo(h, ano, mesIdx) {
+    const prefixo = `${ano}-${String(mesIdx + 1).padStart(2, '0')}-`;
+    const diasNoMes = new Date(ano, mesIdx + 1, 0).getDate();
+    const serie = new Array(diasNoMes).fill(0);
+    let lidos = 0, rejeitados = 0, diasAtivos = 0;
+    let forte = { dia: 0, n: 0 };
+    for (const [k, v] of Object.entries(h || {})) {
+        if (k === '_total' || !v || typeof v !== 'object' || !k.startsWith(prefixo)) continue;
+        const dia = parseInt(k.slice(prefixo.length), 10);
+        if (!(dia >= 1 && dia <= diasNoMes)) continue;
+        const r = v.read || 0, j = v.rejected || 0, n = r + j;
+        lidos += r; rejeitados += j;
+        serie[dia - 1] = n;
+        if (n > 0) diasAtivos++;
+        // Empate: o dia mais CEDO vence — regra explícita, e não a ordem em que
+        // as chaves estão no objeto, que ninguém garante.
+        if (n > forte.n || (n > 0 && n === forte.n && dia < forte.dia)) forte = { dia, n };
+    }
+    return { ano, mesIdx, diasNoMes, lidos, rejeitados, total: lidos + rejeitados, diasAtivos, forte, serie };
+}
+
+// Desenho puro: recebe o contexto, os dados e os TEXTOS já traduzidos. Nada
+// de `t()` aqui dentro — quem chama escolhe a palavra, e este código só
+// posiciona. Pesos de fonte: só 400/500/600/700.
+function desenharResumo(ctx, d, tx, { qr = null, logo = null, hoje = null } = {}) {
+    const W = RESUMO_LARGURA, H = RESUMO_ALTURA, PAD = 80;
+    const fonte = (peso, tam) => `${peso} ${tam}px Inter, system-ui, -apple-system, sans-serif`;
+    const rr = (x, y, w, h, r) => {
+        ctx.beginPath(); ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+    };
+    const texto = (s, x, y, peso, tam, cor, alinhar = 'left', espaco = 0) => {
+        ctx.font = fonte(peso, tam); ctx.fillStyle = cor; ctx.textAlign = alinhar; ctx.textBaseline = 'alphabetic';
+        if ('letterSpacing' in ctx) ctx.letterSpacing = espaco + 'px';
+        ctx.fillText(s, x, y);
+        if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+        return ctx.measureText(s).width;
+    };
+    const cartao = (x, y, w, h) => {
+        rr(x, y, w, h, 22);
+        ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fill();
+        ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.stroke();
+    };
+
+    // Fundo
+    const g = ctx.createRadialGradient(W * 0.8, -H * 0.1, 0, W * 0.8, -H * 0.1, 1300);
+    g.addColorStop(0, '#164e63'); g.addColorStop(0.55, '#0f172a'); g.addColorStop(1, '#020617');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    // Cabeçalho: marca à esquerda, período à direita
+    if (logo) {
+        ctx.save(); rr(PAD, 72, 46, 46, 12); ctx.clip(); ctx.drawImage(logo, PAD, 72, 46, 46); ctx.restore();
+    } else {
+        rr(PAD, 72, 46, 46, 12); ctx.fillStyle = '#0891b2'; ctx.fill();
+    }
+    texto(tx.marca, PAD + 60, 104, 700, 26, '#ffffff');
+    texto(tx.periodo, W - PAD, 104, 600, 22, '#67e8f9', 'right', 2);
+
+    // O número
+    texto(tx.limpou, PAD, 232, 500, 28, '#a5f3fc');
+    texto(tx.total, PAD, 380, 700, 168, '#ffffff', 'left', -6);
+    texto(tx.pedidos, PAD, 445, 600, 34, '#e2e8f0');
+
+    // Duas caixas grandes: rejeitados · lidos
+    const gap = 18, wCol = (W - PAD * 2 - gap) / 2;
+    tx.tiles.forEach(([n, rotulo, cor], i) => {
+        const x = PAD + i * (wCol + gap), y = 520;
+        cartao(x, y, wCol, 138);
+        texto(n, x + 24, y + 70, 700, 52, cor);
+        texto(rotulo, x + 24, y + 108, 400, 21, '#cbd5e1');
+    });
+
+    // Duas caixas pequenas: dia mais forte · dias ativos
+    {
+        const y = 676;
+        cartao(PAD, y, wCol, 122);
+        texto(tx.forteRotulo, PAD + 24, y + 40, 400, 18, '#94a3b8', 'left', 1.2);
+        const w1 = texto(tx.forteValor + ' · ', PAD + 24, y + 88, 700, 30, '#ffffff');
+        texto(tx.forteN, PAD + 24 + w1, y + 88, 700, 30, '#67e8f9');
+        const x2 = PAD + wCol + gap;
+        cartao(x2, y, wCol, 122);
+        texto(tx.ativosRotulo, x2 + 24, y + 40, 400, 18, '#94a3b8', 'left', 1.2);
+        texto(tx.ativosValor, x2 + 24, y + 88, 700, 30, '#ffffff');
+    }
+
+    // O mês dia a dia: uma barra por dia. Dia futuro sai apagado; o mais forte
+    // acende. É o que dá a esta imagem a forma DAQUELE mês, e não de um modelo.
+    {
+        const y = 822, h = 230, x0 = PAD + 24, x1 = W - PAD - 24;
+        cartao(PAD, y, W - PAD * 2, h);
+        texto(tx.serieRotulo, x0, y + 40, 400, 18, '#94a3b8', 'left', 1.2);
+        const n = d.serie.length, gapB = 6, wB = (x1 - x0 - gapB * (n - 1)) / n;
+        const topo = y + 68, alt = 120, max = Math.max(1, ...d.serie);
+        for (let i = 0; i < n; i++) {
+            const v = d.serie[i];
+            const futuro = hoje !== null && i + 1 > hoje;
+            const hb = futuro ? 4 : (v > 0 ? Math.max(4, Math.round((v / max) * alt)) : 4);
+            const bx = x0 + i * (wB + gapB), by = topo + alt - hb;
+            rr(bx, by, wB, hb, Math.min(4, wB / 2));
+            ctx.fillStyle = futuro ? 'rgba(255,255,255,0.08)'
+                : (i + 1 === d.forte.dia && v > 0 ? '#67e8f9' : (v > 0 ? 'rgba(103,232,249,0.45)' : 'rgba(255,255,255,0.12)'));
+            ctx.fill();
+        }
+        // Marcas de dia embaixo — só as que cabem: 1, 10, 20 e o último.
+        const marcas = [1, 10, 20, n].filter((m, i, a) => a.indexOf(m) === i && m <= n);
+        for (const m of marcas) {
+            const cx = x0 + (m - 1) * (wB + gapB) + wB / 2;
+            texto(String(m), cx, topo + alt + 26, 400, 14, '#64748b', 'center');
+        }
+    }
+
+    // Rodapé: quem é, a frase, e o QR pra app
+    texto(tx.editor, PAD, 1218, 400, 24, '#94a3b8');
+    // A frase pode não caber ao lado do QR em idioma mais longo: encolhe até caber.
+    for (let tam = 24; tam >= 18; tam -= 2) {
+        ctx.font = fonte(600, tam);
+        if (ctx.measureText(tx.tagline).width <= 700) { texto(tx.tagline, PAD, 1258, 600, tam, '#67e8f9'); break; }
+        if (tam === 18) texto(tx.tagline, PAD, 1258, 600, 18, '#67e8f9');
+    }
+    if (qr && qr.modulos) {
+        const QUIET = 2, lado = qr.tamanho + QUIET * 2, esc = Math.floor(150 / lado), px = lado * esc;
+        const bx = W - PAD - px - 12, by = H - PAD - px - 12;
+        rr(bx - 12, by - 12, px + 24, px + 24, 14); ctx.fillStyle = '#ffffff'; ctx.fill();
+        ctx.fillStyle = '#0f172a';
+        for (let l = 0; l < qr.tamanho; l++) {
+            for (let c = 0; c < qr.tamanho; c++) {
+                if (qr.modulos[l][c]) ctx.fillRect(bx + (c + QUIET) * esc, by + (l + QUIET) * esc, esc, esc);
+            }
+        }
+    }
+}
+
+// Monta os textos (é aqui que o i18n entra), espera a fonte e o QR, e desenha.
+// Devolve null quando o mês está vazio — o botão nem aparece nesse caso, mas a
+// função se defende sozinha.
+async function gerarResumoDoMes() {
+    const agora = new Date();
+    const d = dadosDoResumo(loadHistory(), agora.getFullYear(), agora.getMonth());
+    if (d.total === 0) return null;
+    const loc = i18nLocale();
+    const p = AppState.profile || {};
+    const selos = ['L' + ((Number.isInteger(p.rank) ? p.rank : 0) + 1)];
+    if (p.isStaff) selos.push(t('profile.tag.staff'));
+    else if (p.isAreaManager) selos.push(t('profile.tag.am'));
+    const mesNome = new Date(d.ano, d.mesIdx, 1).toLocaleDateString(loc, { month: 'long' });
+    const forteData = d.forte.dia
+        ? new Date(d.ano, d.mesIdx, d.forte.dia).toLocaleDateString(loc, { weekday: 'long', day: 'numeric' })
+        : '—';
+    const tx = {
+        marca: 'WazePlaces',
+        periodo: (mesNome + ' · ' + d.ano).toLocaleUpperCase(loc),
+        limpou: t('resumo.img.limpou', { nome: p.userName || '' }),
+        total: d.total.toLocaleString(loc),
+        pedidos: t('resumo.img.pedidos'),
+        tiles: [
+            [d.rejeitados.toLocaleString(loc), t('resumo.img.rejeitados'), '#fb7185'],
+            [d.lidos.toLocaleString(loc), t('resumo.img.lidos'), '#34d399'],
+        ],
+        forteRotulo: t('resumo.img.diaForte'), forteValor: forteData, forteN: d.forte.n.toLocaleString(loc),
+        ativosRotulo: t('resumo.img.diasAtivos'),
+        ativosValor: t('resumo.img.diasDe', { n: d.diasAtivos.toLocaleString(loc), de: d.diasNoMes.toLocaleString(loc) }),
+        serieRotulo: t('resumo.img.diaADia', { mes: mesNome }),
+        editor: t('resumo.img.editor', { selos: selos.join(' · ') }),
+        tagline: t('resumo.img.tagline'),
+    };
+    // A fonte precisa estar CARREGADA antes do fillText, senão o canvas desenha
+    // com a fonte do sistema e o texto some do lugar. Falhar aqui não impede a
+    // imagem — só a deixa na fonte do sistema.
+    try {
+        if (document.fonts && document.fonts.load) {
+            await Promise.all([400, 500, 600, 700].map((w) => document.fonts.load(`${w} 24px Inter`)));
+        }
+    } catch (e) {}
+    let qr = null;
+    try { if (await carregarQr()) qr = gerarQR(location.origin); } catch (e) { qr = null; }
+    let logo = null;
+    try {
+        const img = new Image();
+        img.src = 'icons/icon-192.svg';
+        await img.decode();
+        logo = img;
+    } catch (e) { logo = null; }
+    const canvas = document.createElement('canvas');
+    canvas.width = RESUMO_LARGURA; canvas.height = RESUMO_ALTURA;
+    const hoje = (agora.getFullYear() === d.ano && agora.getMonth() === d.mesIdx) ? agora.getDate() : null;
+    desenharResumo(canvas.getContext('2d'), d, tx, { qr, logo, hoje });
+    return { canvas, mesNome, nomeArquivo: `wazeplaces-${d.ano}-${String(d.mesIdx + 1).padStart(2, '0')}.png` };
+}
+
+// O que está na folha agora: o blob e o nome. Limpo em LIMPEZA_AO_FECHAR —
+// modal fecha por três caminhos, e amarrar a limpeza a um deixa os outros vazando.
+let resumoAtual = null;
+
+async function abrirResumoDoMes() {
+    let r = null;
+    try { r = await gerarResumoDoMes(); } catch (e) { r = null; }
+    const blob = r ? await new Promise((res) => { try { r.canvas.toBlob(res, 'image/png'); } catch (e) { res(null); } }) : null;
+    if (!blob) { showToast(t('toast.resumoFalhou'), 'error'); return; }
+    resumoAtual = { blob, nome: r.nomeArquivo, mesNome: r.mesNome };
+    const img = document.getElementById('resumoImg');
+    if (img.src) { try { URL.revokeObjectURL(img.src); } catch (e) {} }
+    img.src = URL.createObjectURL(blob);
+    img.alt = t('resumo.img.alt');
+    document.getElementById('resumoTitle').textContent = t('resumo.modal.title', { mes: r.mesNome });
+    // Compartilhar só onde o aparelho compartilha ARQUIVO (Android, iOS 15+).
+    // No desktop o botão some e fica o Baixar — nunca um botão que não faz nada.
+    let podeCompartilhar = false;
+    try {
+        const arquivo = new File([blob], r.nomeArquivo, { type: 'image/png' });
+        podeCompartilhar = !!(navigator.canShare && navigator.canShare({ files: [arquivo] }));
+    } catch (e) { podeCompartilhar = false; }
+    document.getElementById('resumoCompartilhar').classList.toggle('hidden', !podeCompartilhar);
+    openModal('resumoModal');
+}
+
+async function compartilharResumo() {
+    if (!resumoAtual) return;
+    try {
+        const arquivo = new File([resumoAtual.blob], resumoAtual.nome, { type: 'image/png' });
+        await navigator.share({ files: [arquivo], title: 'WazePlaces', text: t('resumo.share.text', { mes: resumoAtual.mesNome }) });
+    } catch (e) {
+        // Cancelar a folha de compartilhar é escolha, não erro.
+    }
+}
+
+function baixarResumo() {
+    if (!resumoAtual) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(resumoAtual.blob);
+    a.download = resumoAtual.nome;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  Recusa automática: os pedidos que chegam de um autor marcado
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -7437,6 +7712,20 @@ function renderHistory() {
         `<span class="tnum font-medium"><span class="text-emerald-700 dark:text-emerald-400">${v.read}</span>` +
         ` · <span class="text-rose-600 dark:text-rose-400">${v.rejected}</span></span></div>`
     ).join('');
+    // O Resumo do mês só se oferece quando há mês: botão pra um mês vazio é
+    // convite pra uma imagem em branco.
+    const agora = new Date();
+    const mes = dadosDoResumo(loadHistory(), agora.getFullYear(), agora.getMonth());
+    if (mes.total > 0) {
+        const mesNome = new Date(mes.ano, mes.mesIdx, 1).toLocaleDateString(i18nLocale(), { month: 'long' });
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = 'resumoBotao';
+        btn.className = 'mt-3 w-full min-h-[44px] rounded-xl bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold text-sm px-4 transition';
+        btn.textContent = t('resumo.botao', { mes: mesNome });
+        btn.addEventListener('click', abrirResumoDoMes);
+        el.appendChild(btn);
+    }
 }
 
 // Na PRIMEIRA vez que cada ação é confirmada pelo Waze, diz o que ela fez lá —

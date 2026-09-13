@@ -60,8 +60,10 @@
          erro inerte de console. Não paga.
          E "desligar" também não é opção: no Bot Fight Mode (plano grátis) o
          JavaScript Detections NÃO pode ser desativado — só é opcional no Super
-         Bot Fight Mode e no Bot Management Enterprise. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+         Bot Fight Mode e no Bot Management Enterprise.
+         `img-src blob:` é do Resumo do mês (imagem do canvas mostrada por
+         object URL); sem isto ela chega quebrada, em silêncio. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).
@@ -938,6 +940,29 @@
              caminho de ação novo, com corridas próprias, sobre um pedido que a
              pessoa não tem. Quem quiser agir abre o ↗ — que é o que a app já
              manda fazer pra tudo que ela não decide. -->
+        <!-- Resumo do mês: a imagem que a pessoa manda no grupo. Folha de baixo
+             como a do pedido; a imagem tem teto de altura pra os dois botões
+             ficarem na tela sem rolar. Dismissiva à esquerda (Baixar, o caminho
+             de quem não compartilha), afirmativa à direita (Compartilhar) —
+             que só aparece onde o aparelho compartilha arquivo. -->
+        <div id="resumoModal" role="dialog" aria-modal="true" aria-labelledby="resumoTitle" class="hidden fixed inset-0 modal-root folha-modal bg-black bg-opacity-50 z-[60] flex items-end sm:items-center justify-center">
+            <div class="folha bg-white dark:bg-slate-800 w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col overflow-y-auto overscroll-contain">
+                <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+                    <h3 id="resumoTitle" class="text-base font-bold text-slate-800 dark:text-slate-100 truncate"></h3>
+                    <button id="resumoClose" type="button" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full flex-shrink-0" aria-label="Fechar" data-i18n-aria="common.close">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="p-4 flex flex-col gap-3">
+                    <img id="resumoImg" alt="" class="w-full rounded-xl bg-slate-900 max-h-[42dvh] object-contain">
+                    <div class="flex gap-3">
+                        <button id="resumoBaixar" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="resumo.baixar">Baixar imagem</button>
+                        <button id="resumoCompartilhar" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="resumo.compartilhar">Compartilhar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div id="pedidoModal" role="dialog" aria-modal="true" aria-labelledby="pedidoNome" class="hidden fixed inset-0 modal-root folha-modal bg-black bg-opacity-50 z-[60] flex items-end sm:items-center justify-center">
             <div class="folha bg-white dark:bg-slate-800 w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col overflow-y-auto overscroll-contain">
                 <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">

@@ -692,6 +692,20 @@ Mutações em 5 lugares — **toda mutação deve chamar `updatePendingCount`** 
 
 ---
 
+## 🖼 Resumo do mês — a imagem que a pessoa manda no grupo
+
+Botão na aba Histórico (`#resumoBotao`, só quando o mês tem pedido) → `abrirResumoDoMes()` → folha `resumoModal` com uma imagem **1080×1350** (4:5, o formato que WhatsApp e Instagram não cortam), gerada em **canvas, no aparelho, zero requisição**, a partir do histórico POR DIA que a app já grava. **Nada novo no armazenamento** (foi a pergunta do owner): `dadosDoResumo(h, ano, mesIdx)` só LÊ os baldes `YYYY-MM-DD` — "dia mais forte" é o balde de maior `read + rejected` (empate: o mais cedo, regra explícita e não a ordem das chaves), "dias ativos" são os baldes > 0, e a série do gráfico é a mesma leitura. É o **mês-CALENDÁRIO**, não a janela de 30 dias do "Mês" da tabela: é assim que a pessoa fala do mês e é o que o título promete. Travado em `test/resumo.test.mjs` (fatia a função; guards de "só lê, sem rede", peso de fonte, CSP e modal) e num bloco do `tools/smoke-browser.mjs` (canvas real, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc).
+
+Decisões que não são gosto:
+- **Escura, e só escura** — é pra saltar no fundo claro do WhatsApp. Não segue o tema da app.
+- **`img-src blob:` nas TRÊS cópias da CSP existe por causa dela**: a imagem é mostrada por object URL. Sem isso ela chega QUEBRADA e nenhum erro sobe — foi assim que o smoke a viu na primeira rodada (0×0, 24 reprovações), e é o que justifica o bloco de browser: o teste de núcleo não enxerga CSP.
+- **Peso de fonte ≤ 700** — a Inter auto-hospedada é `font-weight: 300 700`. Pedir 800/900 não dá erro: o browser sintetiza ou cai no fallback, em silêncio. O guard lê a faixa do próprio `@font-face`.
+- **O desenho não traduz** — `desenharResumo` recebe os textos prontos; quem chama `t()` e `toLocaleString` é `gerarResumoDoMes`. A imagem sai no idioma e no locale da pessoa.
+- **Compartilhar só onde `navigator.canShare({ files })`** — no desktop o botão some e fica o Baixar; nunca um botão que não faz nada.
+- **O que ficou de FORA, e por quê**: "pulados" e "onde" (país/estado) exigem que o histórico passe a gravar dado que hoje não grava — formato novo com migração, decidido à parte. E não há sequência, meta nem ranking: celebra uma vez, quando a pessoa pede.
+
+---
+
 ## 🔬 Diagnóstico do modo dev — o que ele captura, e por quê
 
 O FAB do modo dev gera um **`.zip`** que o editor manda. Ele tem TRÊS camadas, e
