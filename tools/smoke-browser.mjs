@@ -4035,6 +4035,92 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Foto de perfil: quando ela falha, some — nunca vira ícone de quebrado ──
+//
+// O caso real (v2026.09.14-01): o Waze trocou o host da foto e a CSP bloqueou a
+// nova URL ANTES da rede. O <img> sem tratamento desenhou o ícone de imagem
+// quebrada dentro do círculo do cabeçalho, em toda tela da app, e só o owner
+// viu — nenhum teste olhava pra isso.
+//
+// Aqui os QUATRO caminhos são exercitados com a CSP de verdade da app:
+// host fora da CSP (o defeito original, bloqueado antes da rede), 404 de mesma
+// origem, o CONTROLE (imagem boa TEM que aparecer — sem ele "esconder sempre"
+// passaria) e a troca de idioma depois da falha, que é onde o ícone voltava.
+{
+  const onde = 'foto de perfil';
+  for (const [nomeAp, vp] of [['Pixel 7', { width: 412, height: 915 }], ['Galaxy Fold', { width: 280, height: 653 }]]) {
+    const ctx = await browser.newContext({ viewport: vp, locale: 'pt-BR', serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    const errosA = [];
+    page.on('pageerror', (e) => errosA.push(String(e)));
+    await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+    await page.goto(BASE, { waitUntil: 'load' });
+    await page.waitForTimeout(600);
+    await page.waitForFunction(() => typeof AppState !== 'undefined');
+    await assentar(page, 200);
+
+    const cenario = async (url) => page.evaluate(async (u) => {
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false,
+                           profileImageUrl: u, areas: [], managedAreas: [] };
+      renderProfileHeader();
+      marcarTelaPronta();          // a app só busca a foto depois do 1º card
+      const el = document.getElementById('userAvatar');
+      // Espera a imagem ASSENTAR: carregou, falhou, ou foi escondida.
+      for (let i = 0; i < 120; i++) {
+        if (getComputedStyle(el).display === 'none' || (el.complete && el.naturalWidth > 0)) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      await new Promise((r) => setTimeout(r, 60));
+      const r = el.getBoundingClientRect();
+      return {
+        display: getComputedStyle(el).display,
+        natural: el.naturalWidth,
+        completa: el.complete,
+        // O ícone de quebrado só existe se o elemento estiver PINTANDO e sem
+        // bitmap: é exatamente esta combinação que o owner viu no iPhone.
+        quebrada: getComputedStyle(el).display !== 'none' && el.complete && el.naturalWidth === 0,
+        larguraNaTela: Math.round(r.width),
+      };
+    }, url);
+
+    // 1. O DEFEITO ORIGINAL: host que a CSP não libera (bloqueia antes da rede).
+    const bloqueado = await cenario('https://host-fora-da-csp.invalido/foto.png');
+    checa(!bloqueado.quebrada, `${onde} ${nomeAp}: host fora da CSP virou ícone de imagem quebrada no cabeçalho`);
+    checa(bloqueado.display === 'none', `${onde} ${nomeAp}: avatar bloqueado continua ocupando a tela`, bloqueado.display);
+
+    // 2. Continua escondido depois de REDESENHAR (trocar idioma redesenha o
+    //    cabeçalho — era aqui que o ícone voltava).
+    const depoisDoIdioma = await page.evaluate(async () => {
+      aplicarIdioma('en'); aplicarIdioma('pt');
+      document.querySelectorAll('#toastContainer > *').forEach((el) => el.remove());
+      await new Promise((r) => setTimeout(r, 120));
+      const el = document.getElementById('userAvatar');
+      return { display: getComputedStyle(el).display,
+               quebrada: getComputedStyle(el).display !== 'none' && el.complete && el.naturalWidth === 0 };
+    });
+    checa(!depoisDoIdioma.quebrada && depoisDoIdioma.display === 'none',
+      `${onde} ${nomeAp}: o avatar morto voltou ao trocar de idioma`, depoisDoIdioma.display);
+
+    // 3. 404 de mesma origem (host no ar, foto que não existe).
+    const perdida = await cenario('/nao-existe-esta-foto.png');
+    checa(!perdida.quebrada && perdida.display === 'none',
+      `${onde} ${nomeAp}: 404 virou ícone de quebrado`, JSON.stringify(perdida));
+
+    // 4. CONTROLE — foto BOA tem que aparecer. Sem isto, "esconder sempre"
+    //    passaria neste bloco inteiro e a app ficaria sem avatar nenhum.
+    const boa = await cenario('/icons/icon-192.svg');
+    checa(boa.display !== 'none' && boa.natural > 0,
+      `${onde} ${nomeAp}: CONTROLE falhou — a foto BOA não apareceu`, JSON.stringify(boa));
+    checa(boa.larguraNaTela >= 24 && boa.larguraNaTela <= 40,
+      `${onde} ${nomeAp}: avatar bom com largura fora do esperado`, `${boa.larguraNaTela}px`);
+
+    checa(errosA.length === 0, `${onde} ${nomeAp}: erro de JS`, errosA[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -4072,6 +4158,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
+  + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
