@@ -6947,6 +6947,23 @@ function msgDoServidor(result, textoFallback) {
     return (result && result.error) || textoFallback;
 }
 
+// Contagem é NÚMERO, e número se escreve no locale de quem lê — a mesma régua
+// que já vale pra distância, data e pontos do perfil. Fonte ÚNICA dos três
+// lugares que mostram contagem grande: o placar, as linhas do Histórico e o
+// cartão da patente.
+//
+// Sem isto a app se contradizia NA MESMA TELA: o cartão da patente mostrava
+// `3.040` e a linha "Total", quatro linhas abaixo, mostrava `1430`. A linha do
+// Histórico sempre foi crua; só não dava pra ver enquanto não havia nada
+// formatado por perto.
+//
+// Valor não-numérico ('—' quando deslogado) passa direto: quem escreve aquilo
+// não está contando nada.
+function fmtContagem(valor) {
+    const n = Number(valor);
+    return Number.isFinite(n) ? n.toLocaleString(i18nLocale()) : String(valor);
+}
+
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
     return String(str)
@@ -7371,12 +7388,11 @@ function htmlPatente() {
     const pct = prox ? Math.max(0, Math.min(100,
         Math.round(((tratados - atual.min) / (prox.min - atual.min)) * 100))) : 100;
     const nome = (r) => escapeHtml(t('conq.rank.' + r.id));
-    const num = (n) => n.toLocaleString(i18nLocale());
 
     const degraus = escadaAberta ? PATENTES.map((r, k) => `
         <div class="conq-deg${k === i ? ' aqui' : ''}">
             <span class="e">${r.emoji}</span><span class="n">${nome(r)}</span>
-            <span class="a tnum">${num(r.min)}</span>
+            <span class="a tnum">${fmtContagem(r.min)}</span>
             <span class="m" aria-hidden="true">${k < i ? '✓' : k === i ? '●' : ''}</span>
         </div>`).join('') : '';
 
@@ -7387,13 +7403,13 @@ function htmlPatente() {
                 <div class="conq-eyebrow">${escapeHtml(t('conq.patente.titulo'))}</div>
                 <div class="conq-nome">${nome(atual)}</div>
             </div>
-            <div class="conq-tot tnum"><span class="conq-num">${num(tratados)}</span><br>
+            <div class="conq-tot tnum"><span class="conq-num">${fmtContagem(tratados)}</span><br>
                 <span class="conq-sub">${escapeHtml(t('conq.patente.tratados'))}</span></div>
         </div>
         <div class="conq-barra"><i style="width:${pct}%"></i></div>
         <div class="conq-rodape conq-sub tnum">
             <span>${prox ? escapeHtml(t('conq.patente.faltam',
-                { n: num(prox.min - tratados), p: prox.emoji + ' ' + t('conq.rank.' + prox.id) }))
+                { n: fmtContagem(prox.min - tratados), p: prox.emoji + ' ' + t('conq.rank.' + prox.id) }))
                 : escapeHtml(t('conq.patente.topo'))}</span>
             <button type="button" id="conqEscadaBtn" class="conq-link" aria-expanded="${escadaAberta}">${
                 escapeHtml(t(escadaAberta ? 'conq.patente.verMenos' : 'conq.patente.ver'))}</button>
@@ -8380,8 +8396,8 @@ function renderHistory() {
         : rows.map(([k, v]) =>
             `<div class="flex justify-between items-baseline text-sm py-0.5">` +
             `<span class="text-slate-600 dark:text-slate-300">${escapeHtml(t('stats.history.' + k))}</span>` +
-            `<span class="tnum font-medium"><span class="text-emerald-700 dark:text-emerald-400">${v.read}</span>` +
-            ` · <span class="text-rose-600 dark:text-rose-400">${v.rejected}</span></span></div>`
+            `<span class="tnum font-medium"><span class="text-emerald-700 dark:text-emerald-400">${fmtContagem(v.read)}</span>` +
+            ` · <span class="text-rose-600 dark:text-rose-400">${fmtContagem(v.rejected)}</span></span></div>`
         ).join(''));
     // O Resumo do mês só se oferece quando há mês: botão pra um mês vazio é
     // convite pra uma imagem em branco.
@@ -9055,9 +9071,13 @@ const COUNT_ANIM_MAX_MS = 650;
 // conta uma história falsa. Medido: 7/2/1/99 contando até 0/0/0/3 levava ~1s.
 function setCount(el, valor, sufixo = '', semAnimar = false) {
     if (!el) return;
+    // Os QUATRO pontos de escrita passam pelo mesmo formatador, inclusive os
+    // quadros da animação: formatar só o valor final faria o número trocar de
+    // forma no último quadro, na frente de quem está olhando.
+    const esc = (n) => fmtContagem(n) + sufixo;
     if (semAnimar) {
         if (el._countRaf) cancelAnimationFrame(el._countRaf);
-        el.textContent = String(valor) + sufixo;
+        el.textContent = esc(valor);
         return;
     }
     const anterior = parseInt(String(el.textContent).replace(/\D/g, ''), 10);
@@ -9065,12 +9085,12 @@ function setCount(el, valor, sufixo = '', semAnimar = false) {
     const mudou = !Number.isFinite(anterior) || anterior !== alvo;
 
     if (!Number.isFinite(alvo) || prefersReducedMotion()) {
-        el.textContent = String(valor) + sufixo;
+        el.textContent = esc(valor);
         return;
     }
     // Sem valor anterior legível ('—', '…'): escreve direto, mas ainda pula.
     if (!Number.isFinite(anterior) || Math.abs(alvo - anterior) < 2) {
-        el.textContent = String(alvo) + sufixo;
+        el.textContent = esc(alvo);
         if (mudou) popCount(el);
         return;
     }
@@ -9083,7 +9103,7 @@ function setCount(el, valor, sufixo = '', semAnimar = false) {
     const passo = (agora) => {
         const p = Math.min(1, (agora - inicio) / dur);
         const eased = 1 - Math.pow(1 - p, 3); // ease-out: rápido no começo
-        el.textContent = String(Math.round(anterior + (alvo - anterior) * eased)) + sufixo;
+        el.textContent = esc(Math.round(anterior + (alvo - anterior) * eased));
         if (p < 1) el._countRaf = requestAnimationFrame(passo);
         else el._countRaf = null;
     };

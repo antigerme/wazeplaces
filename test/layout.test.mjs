@@ -2779,3 +2779,42 @@ test('prévias: a tela de entrada não custa banda de quem já entrou', () => {
   assert.equal((min.match(/loading="lazy"/g) || []).length >= 3, true,
     'o gerado não tem os loading="lazy" — rode `npm run html`');
 });
+
+test('contagem grande se escreve no locale — no placar E no Histórico', () => {
+  const app = read('js/app.js');
+  // UM formatador, não três. Antes havia cópia local no cartão da patente e
+  // nada no placar nem nas linhas — e a app se contradizia na MESMA TELA:
+  // `3.040` no cartão, `1430` na linha "Total" quatro linhas abaixo.
+  assert.match(app, /function fmtContagem\(valor\) \{/, 'sumiu o formatador único de contagem');
+  assert.match(app, /Number\.isFinite\(n\) \? n\.toLocaleString\(i18nLocale\(\)\)/,
+    'o formatador deixou de usar o locale de quem lê');
+
+  // TODO ponto que escreve o número do placar passa pelo formatador. Âncora na
+  // ESTRUTURA (a função inteira, delimitada pela próxima declaração de topo),
+  // nunca em distância — gotcha #67.
+  const ini = app.indexOf('function setCount(');
+  assert.ok(ini > 0, 'sumiu o setCount');
+  const resto = app.slice(ini + 1);
+  const corpo = app.slice(ini, ini + 1 + resto.search(/\n(?:function |const |\/\/ ──)/));
+  const escritas = [...corpo.matchAll(/el\.textContent\s*=\s*([^;]+);/g)].map((m) => m[1].trim());
+  assert.ok(escritas.length >= 4,
+    `esperava pelo menos 4 escritas de textContent no setCount, achei ${escritas.length}`);
+  for (const e of escritas) {
+    assert.match(e, /^esc\(/,
+      `o placar voltou a escrever número cru: "${e}". Formatar só o valor final faz o `
+      + 'número trocar de forma no último quadro da animação, na frente de quem olha.');
+  }
+
+  // E as linhas do Histórico, que eram justamente as cruas.
+  const iH = app.indexOf('function renderHistory(');
+  assert.ok(iH > 0, 'sumiu o renderHistory');
+  const restoH = app.slice(iH + 1);
+  const corpoH = app.slice(iH, iH + 1 + restoH.search(/\n(?:function |const |\/\/ ──)/));
+  assert.match(corpoH, /\$\{fmtContagem\(v\.read\)\}/, 'a linha do Histórico voltou a mostrar "lidos" cru');
+  assert.match(corpoH, /\$\{fmtContagem\(v\.rejected\)\}/, 'a linha do Histórico voltou a mostrar "rejeitados" cru');
+
+  // CONTRAPROVA de que o varredor enxerga: se ele não achasse escrita nenhuma,
+  // o laço acima passaria vazio e o guard seria decoração.
+  assert.ok(corpo.includes('esc(') && corpo.includes('_countRaf'),
+    'controle: fatiei o setCount errado — o corpo não tem nem o formatador nem o rAF');
+});

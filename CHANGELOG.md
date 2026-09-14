@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.14-05
+
+### Corrigido
+- **Os números do app agora seguem o seu idioma em todo lugar.** O placar e as linhas da aba *Histórico* mostravam `1430` enquanto o cartão da patente, quatro linhas abaixo, mostrava `3.040` — a mesma grandeza escrita de dois jeitos na mesma tela.
+
+  Agora todos passam pelo mesmo formatador e saem na convenção da sua língua: `1.430` em português, `1,430` em inglês, `1 430` em francês — e `1430` em espanhol, que é o certo lá (o espanhol só separa a partir de cinco dígitos).
+
+---
+
 ## v2026.09.14-04
 
 ### Adicionado

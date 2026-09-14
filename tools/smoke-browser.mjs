@@ -2480,7 +2480,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       };
     }, [FIXTURES_PAISES.slice(0, n), null]);
     const onde = `treino · fila de ${n}`;
-    checa(String(m.cards) === String(m.restam),
+    // Compara DÍGITOS: o "Restam" sai no locale de quem lê (1.234 / 1,234 /
+    // 1 234), e casar a string inteira só funcionaria enquanto a fila do treino
+    // tivesse 3 dígitos — que é o teto de hoje, não uma garantia.
+    checa(String(m.cards) === String(m.restam).replace(/\D/g, ''),
       `${onde}: "Restam" (${m.restam}) diverge dos cards (${m.cards}) — o contador zera com card na tela`);
     // EXATO e com os números ESCRITOS AQUI (30 e 3), não lidos do app: `<= teto`
     // passaria com um teto de 3 — a regressão pro desenho antigo que este bloco
@@ -4284,6 +4287,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         AppState.authenticated = true;
         AppState.profile = { id: 1, userName: 'a', rank, isAreaManager: true, isStaff: false };
         AppState.preferences = AppState.preferences || {}; AppState.preferences.comoFuncionaVisto = true;
+        // 4 DÍGITOS de propósito: com 3 o separador nem aparece e a comparação
+        // de formato entre placar e cartão passaria sem medir nada.
+        AppState.stats = { read: 1430, rejected: 1610, skipped: 35 };
+        AppState.serverTotal = 3311; AppState.hasMore = false;
         API.setSession('x'); API.setCountry(30);
         AppState.filters = Object.assign({}, AppState.filters, { stateId: '5' });
         AppState.history = null;
@@ -4297,11 +4304,16 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         AppState.conquistas = null; localStorage.removeItem('waze_places_conquistas');
         document.getElementById('authScreen').classList.add('hidden');
         document.getElementById('appScreen').classList.remove('hidden');
-        renderProfileHeader(); updateStats(); showLoading(false);
+        renderProfileHeader(); updateStats(true); updatePendingCount(true); showLoading(false);
+        const numPlacar = document.getElementById('readCount').textContent;
         checarConquistas();                 // a LINHA DE BASE, que é silenciosa
         const g = carregarConquistas();
         openFiltersModal(); switchFilterTab('filtersTabHistory');
-        return { base: g.base, ganhas: Object.keys(g.c).length,
+        const numPatente = (document.querySelector('.conq-num') || {}).textContent || '';
+        // A CONVENÇÃO é o que sobra tirando os dígitos: "1.430" → ".", "1430" → "".
+        const sep = (x) => String(x).replace(/[0-9]/g, '');
+        return { numPlacar, numPatente, sepPlacar: sep(numPlacar), sepPatente: sep(numPatente),
+                 base: g.base, ganhas: Object.keys(g.c).length,
                  andarilho: !!g.c.andarilho, viajante: !!g.c.viajante,
                  // O #bannerStack SEMPRE tem 1 filho (o posicionador
                  // #bannerContainer, `empty:hidden`): contar os filhos DELE.
@@ -4360,6 +4372,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           cru: /conq\.[a-z]/i.test(corpo.textContent) };
       });
 
+      checa(r.sepPlacar === r.sepPatente,
+        `${id}: o placar e o cartão da patente escrevem número de formas diferentes`,
+        `placar "${r.numPlacar}" × patente "${r.numPatente}"`);
+      checa(/\d/.test(r.numPlacar) && /\d/.test(r.numPatente),
+        `${id}: CONTROLE falhou — um dos dois números não tem dígito, a comparação de formato não vale nada`,
+        `placar "${r.numPlacar}" × patente "${r.numPatente}"`);
       checa(r.temContainer, `${id}: CONTROLE falhou — o #bannerContainer sumiu, a contagem de banner não vale nada`);
       checa(r.base === true, `${id}: a linha de base não foi marcada`);
       checa(r.banners === 0, `${id}: a primeira passada anunciou ${r.banners} banner(s) — devia ser silenciosa`);
@@ -4429,4 +4447,4 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
-  + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
+  + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (número no locale batendo entre placar e cartão, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
