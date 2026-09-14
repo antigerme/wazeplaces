@@ -8,6 +8,28 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.14-04
+
+### Adicionado
+- **Patentes e conquistas, na aba *Histórico*.** Uma escada de seis degraus pelo total de pedidos que você já tratou — de **🧤 Aprendiz** a **🏛️ Prefeito do Mapa**, passando por **🗑️ Lixeiro** no meio do caminho — e uma vitrine de **16 conquistas**.
+
+  A patente aparece num cartão no topo, com uma barra até a próxima e quantos pedidos faltam. Toque em **"ver a escada"** para ver os seis degraus de uma vez, com ✓ nos que você já passou.
+
+  A vitrine mostra o que você já ganhou e o que ainda dá pra ganhar — **as trancadas aparecem com nome e ícone**, em cinza, porque conquista escondida não é surpresa, é tela vazia. Toque em qualquer uma para ver como se ganha.
+
+  Quando você destrava algo, aparece o mesmo aviso dourado com confete que o app já usa. **Um aviso por vez**: se você cruzar um degrau e destravar uma conquista no mesmo pedido, sai o da patente — a conquista fica lá no Histórico do mesmo jeito.
+
+  **Nada disso sai do seu celular** e nada disso é enviado a lugar nenhum: é lido do histórico que o app já guardava. E **sai no "Sair"**, como todo o resto.
+
+  Duas conquistas (**📸 Curador** e **✏️ Corretor**) dependem de aprovar foto e renomear local, que são de L6+AM — para quem não tem esse acesso elas simplesmente não aparecem, e a contagem vira "de 14". Cadeado que nunca abre não é desafio, é beco sem saída.
+
+  Nada aqui cobra nada de você: **não há sequência viva, não há "você vai perder" e não há ranking**. A "Semana cheia" (7 dias seguidos) é conquista de uma vez na vida, não um contador que zera.
+
+### Melhorado
+- **O histórico passou a guardar em que estado e país você trabalhou.** É o que faz funcionar o **🗺️ Andarilho** e o **🌍 Viajante** — e é o mesmo dado que faltava para o **Resumo do mês** mostrar o "onde", que fica pra uma próxima. Dias anteriores a esta versão não têm essa informação e simplesmente não contam; nada foi perdido.
+
+---
+
 ## v2026.09.14-03
 
 ### Corrigido

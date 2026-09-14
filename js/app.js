@@ -521,7 +521,7 @@ const LIMPEZA_AO_FECHAR = {
     // O padrão da lista de autores é a forma CURTA. Amarrar isto ao botão de
     // fechar deixaria os outros dois caminhos (Esc e scrim) vazando o estado
     // expandido pra próxima abertura — o gotcha dos modais deste projeto.
-    filtersModal() { autoresExpandido = false; },
+    filtersModal() { autoresExpandido = false; escadaAberta = false; conquistaTocada = null; },
     pairShowModal() {
         pararTickerPareamento();
         // O código é credencial e já não vale nada aqui: não fica desenhado
@@ -693,6 +693,7 @@ const SELETORES_IDIOMA = ['langSelect', 'langSelectHelp'];
 
 function aplicarIdioma(valor) {
     setLang(valor);
+    registrarIdiomaUsado(valor);
     safeLS.set(LANG_KEY, valor);
     applyI18n();
     // Os dois seletores mostram a mesma escolha, tenha sido feita em qual for.
@@ -1970,6 +1971,9 @@ async function enviarAprovacao(alvo) {
             placeResolvidoPorAprovacao = alvo.place;
             AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
             updateStats();
+            // "Curador" conta CURADORIA SUA. O `already_processed` logo abaixo
+            // é outro editor que aprovou antes — conta pro placar, não pra esta.
+            contarConquista('fotos');
             return;
         }
         if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return; }
@@ -2224,7 +2228,7 @@ function aplicarNomeNaTela(place, nome) {
 async function enviarRenomeacao(alvo) {
     try {
         const r = await callWithRetry(() => API.renomearLocal(alvo.place.venueID, alvo.novo));
-        if (r && r.success) return;             // sem toast de sucesso: o nome na tela já diz
+        if (r && r.success) { contarConquista('nomes'); return; }   // sem toast: o nome na tela já diz
         if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return; }
         // Falhou: o nome na tela precisa VOLTAR, senão a app afirma uma gravação
         // que não houve — e o editor segue triando achando que corrigiu.
@@ -4282,6 +4286,8 @@ async function handleLogout() {
     AppState.inFlightActions = 0;
     AppState.history = {};
     safeLS.remove(HISTORY_KEY); // logout = esquecer tudo (inclui histórico)
+    safeLS.remove(CONQUISTAS_KEY);   // patente, conquistas e contadores somem junto
+    AppState.conquistas = null;
     // "Sair limpa tudo" não tem exceção que ninguém decidiu: este marcador (o
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
@@ -6747,6 +6753,9 @@ function showNoPlaces() {
             // computado e a animação não reinicia na segunda vez que a fila zera.
             void noMore.offsetWidth;
             noMore.classList.add('celebrate');
+            // "Tudo limpo" usa o MESMO critério do confete: abrir a app numa
+            // fila já vazia não é conquista.
+            checarConquistas({ filaZerada: true });
         }
     }
 }
@@ -7009,6 +7018,15 @@ function recordHistory(type, delta) {
     const field = type === 'read' ? 'read' : 'rejected';
     h[k][field] = Math.max(0, (h[k][field] || 0) + (delta || 0));
     h._total[field] = Math.max(0, (h._total[field] || 0) + (delta || 0));
+    // ONDE o trabalho foi feito. É o dado que faltava pra "Andarilho"/"Viajante"
+    // — e o MESMO que tirou o "onde" do Resumo do mês, que agora pode voltar.
+    // É dado SEU (onde você trabalhou), não de terceiro: pode persistir, e sai
+    // no logout junto com o resto do histórico.
+    const onde = ondeAgora();
+    if (onde && (delta || 0) > 0) {
+        if (!h[k].onde) h[k].onde = {};
+        h[k].onde[onde] = Math.max(0, (h[k].onde[onde] || 0) + delta);
+    }
     salvarHistorico(h);
 }
 function getHistoryStats() {
@@ -7030,6 +7048,407 @@ function getHistoryStats() {
     }
     return acc;
 }
+// ═══════════════════════════════════════════════════════════════════════════
+//  Patentes e Conquistas — celebra, nunca cobra
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Tudo no aparelho, zero requisição, sai no "Sair" como o resto. A régua que
+// decidiu cada peça: **isto celebra o que a pessoa fez, ou cobra o que ela não
+// fez?** Por isso não há sequência viva, não há "você vai perder", não há
+// ranking e não há contador de progresso nas trancadas ("3 de 10" é o
+// mecanismo de pressão, não a informação).
+//
+// TRÊS decisões de tela que saíram de MEDIÇÃO, não de gosto (mockups em
+// 2026-09-14, app real nos dois aparelhos, dois temas, pt e fr):
+//
+//  1. GRADE LARGA — 3 colunas no normal, 2 no estreito. Em 4, MEDIDO: as
+//     colunas saem 70/70/78/70, porque o nome mais longo força `min-width:auto`
+//     e uma delas estica — a vitrine deixa de ser uma grade. Em 3 dá 98/98/98.
+//     Custa 98px a mais de rolagem e paga. O smoke compara as larguras entre
+//     si, que é o que uma tradução longa quebra primeiro (gotcha #25).
+//  2. TRANCADA MOSTRA NOME E ÍCONE, em cinza. A versão "misteriosa" (🔒 + ?)
+//     deixa nove células IDÊNTICAS: não lê como descoberta, lê como tela
+//     quebrada — e pro editor novo, que tem 16 delas, é uma parede.
+//  3. A CONDIÇÃO MORA FORA DA CÉLULA, numa linha ao toque. Dentro, na largura
+//     que a grade tem, ela parte palavra pelo mesmo motivo do item 1.
+//
+const CONQUISTAS_KEY = 'waze_places_conquistas';
+
+// A ESCADA, por total tratado (lidos + rejeitados). Seis degraus.
+//
+// O degrau 5 era "Síndico" e mudou: é conceito de prédio brasileiro que não
+// existe nas outras três línguas sem virar frase ("gestionnaire d'immeuble" é
+// descrição, não patente). "Inspetor" vira Inspector/Inspecteur/Inspector
+// palavra por palavra. Os outros cinco atravessam — e a piada da limpeza fica,
+// porque "Lixeiro" no meio da escada É a identidade da app.
+const PATENTES = [
+    { id: 'aprendiz', emoji: '🧤', min: 0 },
+    { id: 'gari',     emoji: '🧹', min: 100 },
+    { id: 'lixeiro',  emoji: '🗑️', min: 500 },
+    { id: 'zelador',  emoji: '🔑', min: 1500 },
+    { id: 'inspetor', emoji: '🏢', min: 4000 },
+    { id: 'prefeito', emoji: '🏛️', min: 10000 },
+];
+
+// ORDEM FIXA, e ela NÃO se reordena por "ganhas primeiro". Vitrine que se
+// reorganiza a cada desbloqueio destrói o reconhecimento — você aprende que a
+// sua é o elefante do meio e no dia seguinte ela mudou de lugar. A ordem é
+// aproximadamente a de dificuldade, então na prática preenche de cima pra
+// baixo sozinha.
+//
+// `l6` marca as que dependem do portão destrutivo (aprovar foto, renomear).
+// Elas ficam no FIM de propósito: escondidas de quem não passa no portão, não
+// deixam buraco na grade. Cadeado que NUNCA abre é beco sem saída — a mesma
+// régua que tirou a extensão de Chrome da frente no celular.
+const CONQUISTAS = [
+    { id: 'primeiraFaxina', emoji: '🧹' },
+    { id: 'centuriao',      emoji: '💯' },
+    { id: 'maoFirme',       emoji: '🎯' },
+    { id: 'detetive',       emoji: '🕵️' },
+    { id: 'elefante',       emoji: '🐘' },
+    { id: 'tudoLimpo',      emoji: '🧼' },
+    { id: 'colecionador',   emoji: '⭐' },
+    { id: 'coruja',         emoji: '🌙' },
+    { id: 'segundaChance',  emoji: '↩️' },
+    { id: 'primeiroResumo', emoji: '🎉' },
+    { id: 'andarilho',      emoji: '🗺️' },
+    { id: 'viajante',       emoji: '🌍' },
+    { id: 'poliglota',      emoji: '🗣️' },
+    { id: 'semanaCheia',    emoji: '📅' },
+    { id: 'curador',        emoji: '📸', l6: true },
+    { id: 'corretor',       emoji: '✏️', l6: true },
+];
+
+// PURAS — é o que o teste exercita sem browser.
+function patenteDe(tratados) {
+    const n = Number.isFinite(tratados) ? tratados : 0;
+    let i = 0;
+    while (i + 1 < PATENTES.length && n >= PATENTES[i + 1].min) i++;
+    return i;
+}
+// Avalia TODAS e devolve só as que viraram de trancada pra ganha agora.
+// Sem DOM, sem relógio, sem armazenamento: recebe o contexto pronto.
+function avaliarConquistas(ctx, jaTem) {
+    const c = ctx || {}, tem = jaTem || {};
+    const cond = {
+        primeiraFaxina: (c.tratados || 0) >= 10,
+        centuriao:      (c.hoje || 0) >= 100,
+        maoFirme:       (c.seq || 0) >= 100,
+        detetive:       !!c.duplicado,
+        elefante:       !!c.reincidente,
+        tudoLimpo:      !!c.filaZerada,
+        colecionador:   (c.guardados || 0) >= 10,
+        coruja:         !!c.madrugada,
+        segundaChance:  !!c.desfez,
+        primeiroResumo: !!c.resumo,
+        andarilho:      (c.estados || 0) >= 3,
+        viajante:       (c.paises || 0) >= 2,
+        poliglota:      (c.idiomas || 0) >= 2,
+        semanaCheia:    (c.diasSeguidos || 0) >= 7,
+        curador:        (c.fotos || 0) >= 10,
+        corretor:       (c.nomes || 0) >= 5,
+    };
+    // Na ORDEM da lista: é ela que decide qual anunciar quando duas caem juntas.
+    return CONQUISTAS
+        .filter((x) => (!x.l6 || c.gateL6) && cond[x.id] && !tem[x.id])
+        .map((x) => x.id);
+}
+
+function carregarConquistas() {
+    if (AppState.conquistas) return AppState.conquistas;
+    let g = null;
+    try { g = JSON.parse(localStorage.getItem(CONQUISTAS_KEY) || 'null'); } catch (e) { g = null; }
+    if (!g || typeof g !== 'object') g = {};
+    AppState.conquistas = {
+        c: (g.c && typeof g.c === 'object') ? g.c : {},   // id → 'YYYY-MM-DD'
+        // Seguidas sem desfazer. Contador PRÓPRIO, e não o `semUndoSeguidas` das
+        // preferências: aquele só conta janela do Desfazer que expirou
+        // NATURALMENTE, ou seja só com o Desfazer LIGADO — quem o desligou
+        // (justamente o editor rápido, pra quem "Mão firme" faria sentido)
+        // nunca acumularia um. Este sobe na confirmação e zera no desfazer,
+        // funcionando dos dois jeitos.
+        seq: Number.isFinite(g.seq) ? g.seq : 0,
+        patente: Number.isFinite(g.patente) ? g.patente : null,
+        n: (g.n && typeof g.n === 'object') ? g.n : {},   // contadores acumulados
+        langs: Array.isArray(g.langs) ? g.langs.slice(0, 8) : [],
+        base: g.base === true,
+    };
+    return AppState.conquistas;
+}
+function salvarConquistas() {
+    try { localStorage.setItem(CONQUISTAS_KEY, JSON.stringify(AppState.conquistas)); } catch (e) {}
+}
+// Contador acumulado (guardados, fotos aprovadas, nomes corrigidos).
+function contarConquista(chave, delta) {
+    const g = carregarConquistas();
+    g.n[chave] = Math.max(0, (g.n[chave] || 0) + (delta || 1));
+    salvarConquistas();
+    checarConquistas();
+}
+// O idioma entra num conjunto pequeno — é o dado de "Poliglota", e é seu.
+function registrarIdiomaUsado(lang) {
+    const l = String(lang || '').slice(0, 2);
+    if (!l) return;
+    const g = carregarConquistas();
+    if (g.langs.includes(l)) return;
+    g.langs.push(l);
+    salvarConquistas();
+    checarConquistas();
+}
+
+// ── geografia: de onde sai "Andarilho" e "Viajante" ────────────────────────
+// O `place` NÃO carrega país/estado (o core não propaga), então a fonte é o
+// FILTRO — que é onde o editor escolheu trabalhar, e é a mesma fonte que já
+// nomeia a sala da presença.
+function ondeAgora() {
+    const pais = (typeof API !== 'undefined' && API.getCountry) ? parseInt(API.getCountry(), 10) : NaN;
+    if (!Number.isFinite(pais) || pais <= 0) return null;
+    const estado = parseInt(AppState.filters && AppState.filters.stateId, 10);
+    return Number.isFinite(estado) && estado > 0 ? pais + ':' + estado : String(pais);
+}
+// Estado é chaveado por `pais:estado`, nunca pelo id do estado sozinho: o
+// mesmo número existe em países diferentes e juntaria dois lugares num só.
+function geografiaDoHistorico(h) {
+    const paises = new Set(), estados = new Set();
+    for (const [k, v] of Object.entries(h || {})) {
+        if (k === '_total' || !v) continue;
+        // MIGRACAO: historico-onde
+        // Balde gravado antes de v2026.09.14-01 não tem `onde`, e não há como
+        // saber onde aquele trabalho foi feito — ele simplesmente não conta.
+        for (const chave of Object.keys(v.onde || {})) {
+            const pais = String(chave).split(':')[0];
+            if (pais) paises.add(pais);
+            if (String(chave).includes(':')) estados.add(chave);
+        }
+    }
+    return { paises, estados };
+}
+
+const DIA_MS = 86400000;
+const diaISO = (t) => {
+    const d = new Date(t), p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+// A MAIOR sequência de dias com trabalho. Só varre a partir de um dia cujo
+// anterior está ausente, então cada dia é visitado no máximo duas vezes.
+function maiorSequenciaDeDias(h) {
+    const dias = new Set(Object.keys(h || {})
+        .filter((k) => k !== '_total' && h[k] && ((h[k].read || 0) + (h[k].rejected || 0)) > 0));
+    let melhor = 0;
+    for (const d of dias) {
+        const t = new Date(d + 'T00:00:00').getTime();
+        if (!Number.isFinite(t) || dias.has(diaISO(t - DIA_MS))) continue;
+        let n = 1, cur = t;
+        while (dias.has(diaISO(cur + DIA_MS))) { cur += DIA_MS; n++; }
+        if (n > melhor) melhor = n;
+    }
+    return melhor;
+}
+
+// ── o portão, e a checagem ─────────────────────────────────────────────────
+// Função PRÓPRIA que delega à base, como manda o padrão dos outros destrutivos
+// (`podeExcluirFotoAqui`, `podeRenomearAqui`): nunca chamar a base direto nem
+// copiar `rank >= 5`.
+function conquistasComPortaoAqui() { return podeAgirComoL6Aqui(); }
+// O que a pessoa VÊ. Sem portão, as duas últimas não existem — nem na grade
+// nem no "de 16", que vira "de 14".
+function conquistasVisiveis() {
+    return CONQUISTAS.filter((x) => !x.l6 || conquistasComPortaoAqui());
+}
+
+function checarConquistas(extra) {
+    if (!AppState.authenticated) return;
+    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
+    const g = carregarConquistas();
+    const h = loadHistory();
+    const s = getHistoryStats();
+    const geo = geografiaDoHistorico(h);
+    const tratados = s.total.read + s.total.rejected;
+    const ctx = Object.assign({
+        tratados,
+        hoje: s.today.read + s.today.rejected,
+        seq: g.seq || 0,
+        guardados: g.n.guardados || 0,
+        fotos: g.n.fotos || 0,
+        nomes: g.n.nomes || 0,
+        idiomas: g.langs.length,
+        estados: geo.estados.size,
+        paises: geo.paises.size,
+        diasSeguidos: maiorSequenciaDeDias(h),
+        gateL6: conquistasComPortaoAqui(),
+    }, extra || {});
+
+    const novas = avaliarConquistas(ctx, g.c);
+    const hoje = historyTodayKey();
+    for (const id of novas) g.c[id] = hoje;
+
+    // LINHA DE BASE. Na primeira passada deste aparelho nada é anunciado: quem
+    // já tem 3.000 pedidos nas costas destrava oito de uma vez, e oito banners
+    // seguidos não é festa, é enxurrada. Mesmo raciocínio do `initUndoGateSeen`
+    // — e, como lá, isto NÃO é migração: todo aparelho novo também passa por
+    // aqui (e não destrava nada).
+    const iP = patenteDe(tratados);
+    if (!g.base) {
+        g.base = true;
+        g.patente = iP;
+        salvarConquistas();
+        return;
+    }
+
+    // UM AVISO POR VEZ, e a PATENTE ganha. Cruzar um degrau quase sempre cai no
+    // mesmo swipe em que uma conquista destrava, e dois banners dourados
+    // seguidos dizendo quase a mesma coisa já aconteceu entre a conquista do
+    // Desfazer e a dica. A conquista engolida não se perde: ela aparece ganha
+    // no Histórico.
+    const subiu = Number.isFinite(g.patente) && iP > g.patente;
+    g.patente = iP;
+    salvarConquistas();
+    if (subiu) { anunciarConquista(t('conq.toast.patente', { e: PATENTES[iP].emoji, p: t('conq.rank.' + PATENTES[iP].id) })); return; }
+    if (novas.length) {
+        const x = CONQUISTAS.find((y) => y.id === novas[0]);
+        anunciarConquista(t('conq.toast.conquista', {
+            e: x.emoji, n: t('conq.' + x.id + '.nome'), como: t('conq.' + x.id + '.como'),
+        }));
+    }
+}
+
+// O banner dourado com confete já existe — é o do gate do Desfazer. Banner no
+// TOPO, nunca snackbar no rodapé: medido quando ele nasceu, no rodapé ele tapa
+// os três botões do card em 2 de 3 aparelhos.
+function anunciarConquista(msg) {
+    dispararConfeteNaFila();
+    showToast(msg, 'achievement', 20000, () => {
+        openFiltersModal();
+        switchFilterTab('filtersTabHistory');
+    });
+}
+
+// Uma ação CONFIRMADA pelo Waze. Daqui saem a sequência sem desfazer, os
+// gatilhos de evento e a reavaliação.
+function registrarAcaoConfirmada(actionType, place) {
+    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
+    const g = carregarConquistas();
+    g.seq = (g.seq || 0) + 1;
+    salvarConquistas();
+    // O idioma entra no gesto, não na carga: "usou a app em 2 idiomas" é sobre
+    // TRABALHAR em dois, não sobre abrir o seletor e voltar.
+    registrarIdiomaUsado(typeof getLang === 'function' ? getLang() : '');
+    const hora = new Date().getHours();
+    checarConquistas({
+        duplicado: actionType === 'reject' && !!(place && place.duplicado),
+        // `contagemDoAutor` já inclui ESTA rejeição (o registro veio antes), então
+        // > 1 significa que havia rejeição anterior — é isso que faz reincidente.
+        reincidente: actionType === 'reject' && !!place && place.creatorId != null
+                     && contagemDoAutor(place) > 1,
+        // "Depois da meia-noite" é a MADRUGADA (0h–4h59), não a noite: às 23h a
+        // pessoa ainda está acordada no mesmo dia, e a graça da coruja é a virada.
+        madrugada: hora >= 0 && hora < 5,
+    });
+}
+
+// Desfazer zera a sequência de "Mão firme" e destrava "Segunda chance" — que é
+// de propósito o contrapeso da lista: a única que celebra CUIDADO, não volume.
+function registrarDesfazer() {
+    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
+    const g = carregarConquistas();
+    g.seq = 0;
+    salvarConquistas();
+    checarConquistas({ desfez: true });
+}
+
+// ── a tela ─────────────────────────────────────────────────────────────────
+// Estado só de VISUALIZAÇÃO (escada aberta, conquista tocada): não persiste,
+// não sai no diagnóstico, morre quando o modal fecha.
+let escadaAberta = false;
+let conquistaTocada = null;
+
+function htmlPatente() {
+    const g = carregarConquistas();
+    const s = getHistoryStats();
+    const tratados = s.total.read + s.total.rejected;
+    const i = patenteDe(tratados);
+    const atual = PATENTES[i], prox = PATENTES[i + 1] || null;
+    const pct = prox ? Math.max(0, Math.min(100,
+        Math.round(((tratados - atual.min) / (prox.min - atual.min)) * 100))) : 100;
+    const nome = (r) => escapeHtml(t('conq.rank.' + r.id));
+    const num = (n) => n.toLocaleString(i18nLocale());
+
+    const degraus = escadaAberta ? PATENTES.map((r, k) => `
+        <div class="conq-deg${k === i ? ' aqui' : ''}">
+            <span class="e">${r.emoji}</span><span class="n">${nome(r)}</span>
+            <span class="a tnum">${num(r.min)}</span>
+            <span class="m" aria-hidden="true">${k < i ? '✓' : k === i ? '●' : ''}</span>
+        </div>`).join('') : '';
+
+    return `<div class="conq-card">
+        <div class="conq-topo">
+            <span class="conq-emoji" aria-hidden="true">${atual.emoji}</span>
+            <div class="conq-id">
+                <div class="conq-eyebrow">${escapeHtml(t('conq.patente.titulo'))}</div>
+                <div class="conq-nome">${nome(atual)}</div>
+            </div>
+            <div class="conq-tot tnum"><span class="conq-num">${num(tratados)}</span><br>
+                <span class="conq-sub">${escapeHtml(t('conq.patente.tratados'))}</span></div>
+        </div>
+        <div class="conq-barra"><i style="width:${pct}%"></i></div>
+        <div class="conq-rodape conq-sub tnum">
+            <span>${prox ? escapeHtml(t('conq.patente.faltam',
+                { n: num(prox.min - tratados), p: prox.emoji + ' ' + t('conq.rank.' + prox.id) }))
+                : escapeHtml(t('conq.patente.topo'))}</span>
+            <button type="button" id="conqEscadaBtn" class="conq-link" aria-expanded="${escadaAberta}">${
+                escapeHtml(t(escadaAberta ? 'conq.patente.verMenos' : 'conq.patente.ver'))}</button>
+        </div>
+        ${escadaAberta ? `<div class="conq-escada">${degraus}</div>` : ''}
+    </div>`;
+}
+
+function htmlConquistas() {
+    const g = carregarConquistas();
+    const lista = conquistasVisiveis();
+    const ganhas = lista.filter((x) => g.c[x.id]).length;
+    // 3 colunas; o CSS cai pra 2 abaixo de 400px. Em 4 a célula fica estreita
+    // demais e uma coluna estica pra caber o nome mais longo — medido.
+    const grade = lista.map((x, k) => {
+        const on = !!g.c[x.id];
+        const sel = conquistaTocada === x.id;
+        return `<button type="button" class="conq-cel ${on ? 'on' : 'off'}${sel ? ' sel' : ''}"
+            data-conq="${escapeHtml(x.id)}" aria-pressed="${sel}">
+            <span class="e" aria-hidden="true">${x.emoji}</span>
+            <span class="n">${escapeHtml(t('conq.' + x.id + '.nome'))}</span></button>`;
+    }).join('');
+    const tocada = conquistaTocada && lista.find((x) => x.id === conquistaTocada);
+    // A condição mora AQUI e não dentro da célula: na largura da grade ela
+    // esticaria a coluna pelo mesmo motivo acima, e a frase é bem mais longa
+    // que o nome.
+    const dica = tocada
+        ? `<p class="conq-dica" id="conqDica"><span><b>${tocada.emoji} ${escapeHtml(t('conq.' + tocada.id + '.nome'))}</b>`
+          + ` — ${g.c[tocada.id] ? '✓ ' : ''}${escapeHtml(t('conq.' + tocada.id + '.como'))}</span></p>`
+        : '';
+    return `<div class="conq-h"><h4>${escapeHtml(t('conq.titulo'))}</h4>`
+         + `<span class="tnum">${escapeHtml(t('conq.de', { a: ganhas, b: lista.length }))}</span></div>`
+         + `<div class="conq-grade">${grade}</div>${dica}`;
+}
+
+// Liga os toques DEPOIS da inserção no DOM. Delegado ao container: o innerHTML
+// é reescrito a cada render e listener em filho morre junto.
+function ligarConquistas(el) {
+    el.addEventListener('click', (ev) => {
+        const b = ev.target.closest('#conqEscadaBtn');
+        if (b) { escadaAberta = !escadaAberta; renderHistory(); return; }
+        const c = ev.target.closest('[data-conq]');
+        if (!c) return;
+        const id = c.getAttribute('data-conq');
+        conquistaTocada = conquistaTocada === id ? null : id;
+        renderHistory();
+        // A linha nasce ABAIXO da grade e, tocando uma célula de cima, ela cai
+        // fora da tela — a explicação apareceria onde ninguém vê. `nearest` rola
+        // o mínimo, então quando já está visível nada se mexe sob o dedo.
+        if (conquistaTocada) {
+            document.getElementById('conqDica')?.scrollIntoView({ block: 'nearest' });
+        }
+    });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  Resumo do mês — a imagem que a pessoa manda no grupo
 // ═══════════════════════════════════════════════════════════════════════════
@@ -7279,6 +7698,7 @@ async function compartilharResumo() {
     try {
         const arquivo = new File([resumoAtual.blob], resumoAtual.nome, { type: 'image/png' });
         await navigator.share({ files: [arquivo], title: 'WazePlaces', text: t('resumo.share.text', { mes: resumoAtual.mesNome }) });
+        checarConquistas({ resumo: true });
     } catch (e) {
         // Cancelar a folha de compartilhar é escolha, não erro.
     }
@@ -7293,6 +7713,7 @@ function baixarResumo() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    checarConquistas({ resumo: true });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -7948,17 +8369,20 @@ function renderHistory() {
     if (!el) return;
     const s = getHistoryStats();
     renderAutores();
-    if (s.total.read + s.total.rejected === 0) {
-        el.innerHTML = `<p class="text-xs text-slate-500 dark:text-slate-400">${escapeHtml(t('stats.history.empty'))}</p>`;
-        return;
-    }
+    const vazio = s.total.read + s.total.rejected === 0;
     const rows = [['today', s.today], ['week', s.week], ['month', s.month], ['total', s.total]];
-    el.innerHTML = rows.map(([k, v]) =>
-        `<div class="flex justify-between items-baseline text-sm py-0.5">` +
-        `<span class="text-slate-600 dark:text-slate-300">${escapeHtml(t('stats.history.' + k))}</span>` +
-        `<span class="tnum font-medium"><span class="text-emerald-700 dark:text-emerald-400">${v.read}</span>` +
-        ` · <span class="text-rose-600 dark:text-rose-400">${v.rejected}</span></span></div>`
-    ).join('');
+    // A patente e a vitrine aparecem mesmo com histórico VAZIO — e é de propósito.
+    // Medido no mockup: como as trancadas mostram nome e ícone, "0 de 16" lê como
+    // "eis o que dá pra ganhar", não como parede de cadeados. É a tela que um
+    // editor novo vê no primeiro minuto, e ela não pode ser um vazio.
+    el.innerHTML = htmlPatente() + (vazio
+        ? `<p class="text-xs text-slate-500 dark:text-slate-400">${escapeHtml(t('stats.history.empty'))}</p>`
+        : rows.map(([k, v]) =>
+            `<div class="flex justify-between items-baseline text-sm py-0.5">` +
+            `<span class="text-slate-600 dark:text-slate-300">${escapeHtml(t('stats.history.' + k))}</span>` +
+            `<span class="tnum font-medium"><span class="text-emerald-700 dark:text-emerald-400">${v.read}</span>` +
+            ` · <span class="text-rose-600 dark:text-rose-400">${v.rejected}</span></span></div>`
+        ).join(''));
     // O Resumo do mês só se oferece quando há mês: botão pra um mês vazio é
     // convite pra uma imagem em branco.
     const agora = new Date();
@@ -7973,6 +8397,8 @@ function renderHistory() {
         btn.addEventListener('click', abrirResumoDoMes);
         el.appendChild(btn);
     }
+    el.insertAdjacentHTML('beforeend', htmlConquistas());
+    if (!el.dataset.conqLigado) { ligarConquistas(el); el.dataset.conqLigado = '1'; }
 }
 
 // Na PRIMEIRA vez que cada ação é confirmada pelo Waze, diz o que ela fez lá —
@@ -8009,6 +8435,7 @@ function handleActionResult(actionType, place, result) {
         // manda muita coisa BOA em reincidente.
         if (actionType === 'reject') registrarRejeicaoDeAutor(place);
         avisarConsequencia(actionType);
+        registrarAcaoConfirmada(actionType, place);
         return;
     }
 
@@ -8016,6 +8443,9 @@ function handleActionResult(actionType, place, result) {
 
     if (cat === 'already_processed' || cat === 'not_found') {
         recordHistory(actionType, 1);
+        // Conta como tratada pelos mesmos motivos que ela conta no placar: o
+        // objetivo de quem agiu foi cumprido, tenha sido por você ou não.
+        registrarAcaoConfirmada(actionType, place);
         showToast(t('toast.alreadyProcessed'), 'info');
         return;
     }
@@ -8333,7 +8763,9 @@ function handleSkip() {
         // O que não pode é falhar CALADO: a app prometeu guardar.
         if (!r || r.success !== true) {
             showToast(msgDoServidor(r, t('toast.guardarFalhou')), 'error');
+            return;
         }
+        contarConquista('guardados');
     });
 }
 
@@ -8574,6 +9006,7 @@ function desfazerAcaoPendente() {
     if (AppState.pendingAction) {
         AppState.pendingAction.undo();
         AppState.pendingAction = null;
+        registrarDesfazer();
     }
     removeUndoBanner();
     aplicarTravaDeAcao();

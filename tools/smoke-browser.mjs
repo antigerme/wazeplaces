@@ -4250,6 +4250,141 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Patentes e Conquistas: os três defeitos que só a TELA mostra ─────────
+// A medição de layout desta app já dava tudo verde nos três, e todos os três
+// chegaram a existir na rodada de mockup:
+//   • PALAVRA PARTIDA NO MEIO ("Colecionad / or"). Não é corte (`scrollHeight`
+//     não vê) nem estouro (`scrollWidth` não vê). Só um Range por palavra,
+//     contando em quantas LINHAS ela caiu.
+//   • SOBREPOSIÇÃO no estreito (o total por cima do nome da patente). Só
+//     `elementFromPoint`, nunca retângulo (gotcha #26).
+//   • CONTRASTE do texto trancado. Cor SÓLIDA e medida, porque `opacity` em
+//     texto mistura com o fundo sem aparecer no `getComputedStyle().color`.
+// E o portão: L6+AM vê 16 conquistas, quem não passa vê 14 — com CONTRAPROVA
+// dos dois lados, senão "não apareceu" passaria também se a grade sumisse.
+{
+  const CENAS = [
+    ['Pixel 7', { width: 412, height: 915 }, 'light', 5, 16],
+    ['Pixel 7', { width: 412, height: 915 }, 'dark', 5, 16],
+    ['Galaxy Fold', { width: 280, height: 653 }, 'light', 5, 16],
+    ['Galaxy Fold', { width: 280, height: 653 }, 'dark', 5, 16],
+    ['iPhone SE', { width: 320, height: 568 }, 'light', 1, 14],
+  ];
+  for (const [nome, viewport, tema, rank, esperadas] of CENAS) {
+    for (const lang of LINGUAS) {
+      const id = `conquistas ${nome}/${tema}/${lang}/L${rank + 1}`;
+      const ctx = await browser.newContext({ viewport, locale: lang, serviceWorkers: 'block', colorScheme: tema });
+      const page = await ctx.newPage();
+      const errosJS = [];
+      page.on('pageerror', (e) => errosJS.push(String(e.message || e).split('\n')[0]));
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(350);
+      const r = await page.evaluate(({ tema, lang, rank }) => {
+        setLang(lang); applyTheme(tema);
+        AppState.authenticated = true;
+        AppState.profile = { id: 1, userName: 'a', rank, isAreaManager: true, isStaff: false };
+        AppState.preferences = AppState.preferences || {}; AppState.preferences.comoFuncionaVisto = true;
+        API.setSession('x'); API.setCountry(30);
+        AppState.filters = Object.assign({}, AppState.filters, { stateId: '5' });
+        AppState.history = null;
+        localStorage.setItem('waze_places_history', JSON.stringify({
+          _total: { read: 1430, rejected: 1610 },
+          '2026-09-14': { read: 41, rejected: 63, onde: { '30:5': 104 } },
+          '2026-09-13': { read: 60, rejected: 70, onde: { '30:7': 130 } },
+          '2026-09-12': { read: 50, rejected: 40, onde: { '73:2': 90 } },
+          '2026-08-01': { read: 10, rejected: 5 },   // balde ANTIGO, sem `onde`
+        }));
+        AppState.conquistas = null; localStorage.removeItem('waze_places_conquistas');
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        renderProfileHeader(); updateStats(); showLoading(false);
+        checarConquistas();                 // a LINHA DE BASE, que é silenciosa
+        const g = carregarConquistas();
+        openFiltersModal(); switchFilterTab('filtersTabHistory');
+        return { base: g.base, ganhas: Object.keys(g.c).length,
+                 andarilho: !!g.c.andarilho, viajante: !!g.c.viajante,
+                 // O #bannerStack SEMPRE tem 1 filho (o posicionador
+                 // #bannerContainer, `empty:hidden`): contar os filhos DELE.
+                 banners: document.querySelectorAll('#bannerContainer > *').length,
+                 temContainer: !!document.getElementById('bannerContainer') };
+      }, { tema, lang, rank });
+      await page.waitForTimeout(250);
+      const m = await page.evaluate(() => {
+        const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+        const nums = (s) => { const x = String(s).match(/-?\d*\.?\d+/g); return x ? x.map(Number) : null; };
+        const rgb = (s) => { const n = nums(s); return n && n.length >= 3 ? n.slice(0, 3) : null; };
+        const alfa = (s) => { const n = nums(s); return n && n.length > 3 ? n[3] : 1; };
+        const fundo = (el) => { let n = el; while (n && n !== document.documentElement) {
+          const b = getComputedStyle(n).backgroundColor; if (b && alfa(b) === 1 && rgb(b)) return rgb(b); n = n.parentElement; }
+          return [255, 255, 255]; };
+        const contraste = (el) => { const f = rgb(getComputedStyle(el).color); if (!f) return null;
+          const a = lum(f), b = lum(fundo(el));
+          return +(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toFixed(2)); };
+        const corpo = document.getElementById('historyBody');
+        const partidas = (() => { const fora = [];
+          const it = document.createTreeWalker(corpo, NodeFilter.SHOW_TEXT); let n;
+          while ((n = it.nextNode())) { const t = n.nodeValue; if (!t || !t.trim()) continue;
+            const re = /[^\s­‐-―-]{4,}/g; let x;
+            while ((x = re.exec(t))) { const rg = document.createRange();
+              rg.setStart(n, x.index); rg.setEnd(n, x.index + x[0].length);
+              if (new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size > 1) fora.push(x[0]); } }
+          return [...new Set(fora)]; })();
+        const cobertos = (() => { const fora = [];
+          for (const el of [...corpo.querySelectorAll('*')].filter((e) => e.firstChild
+              && e.firstChild.nodeType === 3 && e.textContent.trim())) {
+            el.scrollIntoView({ block: 'center' });
+            const q = el.getBoundingClientRect(); if (q.width < 4 || q.height < 4) continue;
+            for (const [fx, fy] of [[0.5, 0.5], [0.12, 0.5], [0.88, 0.5]]) {
+              const top = document.elementFromPoint(q.left + q.width * fx, q.top + q.height * fy);
+              if (top && top !== el && !el.contains(top) && !top.contains(el)) {
+                fora.push((el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 16)); break; } } }
+          corpo.scrollIntoView({ block: 'start' }); return [...new Set(fora)]; })();
+        const pequenos = [...corpo.querySelectorAll('.conq-cel, .conq-link, .conq-deg')]
+          .filter((e) => { const q = e.getBoundingClientRect(); return q.height < 44 || q.width < 44; })
+          .map((e) => (e.textContent || '').trim().slice(0, 18) + ' '
+             + Math.round(e.getBoundingClientRect().width) + 'x' + Math.round(e.getBoundingClientRect().height));
+        const tr = corpo.querySelector('.conq-cel.off .n'), gn = corpo.querySelector('.conq-cel.on .n');
+        const painel = document.getElementById('filtersPanelHistory');
+        // As COLUNAS têm que sair iguais. É o que uma tradução longa quebra
+        // primeiro: um nome que não cabe força `min-width:auto` e estica só a
+        // coluna dele — a vitrine deixa de ser uma grade e nada mais denuncia.
+        const grade = corpo.querySelector('.conq-grade');
+        const colunas = grade
+          ? getComputedStyle(grade).gridTemplateColumns.split(' ').map((x) => Math.round(parseFloat(x)))
+          : [];
+        return { celulas: corpo.querySelectorAll('.conq-cel').length, colunas,
+          cTrancado: tr ? contraste(tr) : null, cGanho: gn ? contraste(gn) : null,
+          partidas, cobertos, pequenos,
+          estouroH: Math.max(0, painel.scrollWidth - painel.clientWidth),
+          cru: /conq\.[a-z]/i.test(corpo.textContent) };
+      });
+
+      checa(r.temContainer, `${id}: CONTROLE falhou — o #bannerContainer sumiu, a contagem de banner não vale nada`);
+      checa(r.base === true, `${id}: a linha de base não foi marcada`);
+      checa(r.banners === 0, `${id}: a primeira passada anunciou ${r.banners} banner(s) — devia ser silenciosa`);
+      checa(r.andarilho && r.viajante,
+        `${id}: geografia não destravou`, `andarilho=${r.andarilho} viajante=${r.viajante}`);
+      checa(m.celulas === esperadas,
+        `${id}: portão errado — ${m.celulas} células, esperado ${esperadas}`);
+      checa(!m.cru, `${id}: chave de i18n crua na tela (conq.*) — falta tradução`);
+      checa(m.colunas.length > 0, `${id}: CONTROLE falhou — não achei a grade pra medir as colunas`);
+      checa(new Set(m.colunas).size <= 1,
+        `${id}: as colunas saíram desiguais — um nome não cabe e esticou a coluna dele`,
+        m.colunas.join('/'));
+      checa(m.partidas.length === 0, `${id}: palavra partida no meio`, m.partidas.join(','));
+      checa(m.cobertos.length === 0, `${id}: texto coberto`, m.cobertos.join(','));
+      checa(m.pequenos.length === 0, `${id}: alvo de toque < 44px`, m.pequenos.join(' | '));
+      checa(m.estouroH === 0, `${id}: estouro horizontal`, m.estouroH + 'px');
+      for (const [qual, v] of [['trancado', m.cTrancado], ['ganho', m.cGanho]]) {
+        checa(v !== null && v >= 4.5, `${id}: contraste ${qual} ${v}:1 (mínimo 4,5)`);
+      }
+      checa(errosJS.length === 0, `${id}: erro de JS`, errosJS[0]);
+      await ctx.close();
+    }
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -4257,6 +4392,7 @@ if (falhas) {
   console.log(`\n✗ smoke de browser: ${falhas} falha(s)`);
   process.exit(1);
 }
+
 console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card`
   + `, + ${FIXTURES_PAISES.length} pedidos REAIS de ${new Set(FIXTURES_PAISES.map((f) => f._pais)).size} países × ${APARELHOS_PAISES.length} aparelhos × ${LINGUAS.length} idiomas`
   + `, + ${FORMATOS_FOTO.length} formatos de foto × ${APARELHOS_PAISES.length} aparelhos`
@@ -4292,4 +4428,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
-  + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`);
+  + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
+  + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
