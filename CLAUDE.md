@@ -706,6 +706,26 @@ Decisões que não são gosto:
 
 ---
 
+## 📍 Perto de mim — ordenar a fila por distância
+
+Três ordens novas no MESMO select de "Ordenar por" (`filters.sort.casa|trabalho|gps`), só o filtro — **nada no card**, decisão do owner. `sortQueue()` ganhou um ramo: havendo referência, ordena por Haversine; senão cai no sort por data de sempre.
+
+**Por que existe, MEDIDO na fila real do owner** (374 pedidos, Brasil inteiro, `hasMore:false`): ordenando por casa, só **2 dos 20 primeiros** coincidem com a ordem atual — são 1 pedido a menos de 1 km, 9 dentro de 20 km e 19 dentro de 100 km, hoje enterrados numa lista por data. Casa e trabalho deram o MESMO top 20 pra ele; as duas ficaram assim mesmo porque a amostra é de UM editor e quem mora e trabalha em cidades diferentes teria listas distintas (decisão do owner com o número na mesa).
+
+**A ORDEM DAS COORDENADAS é o defeito mais provável aqui, e ele não dá sintoma.** `place.mapa.centro` sai do `pontoDeGeometria` do core, que INVERTE o GeoJSON e devolve **[lat, lon]**; o `homeLocation`/`workLocation` do `/Session` é **[lon, lat]** cru, e o core converte com a MESMA função antes de mandar. Ler o centro como [lon, lat] não quebra nada: dá uma ordenação plausível e ERRADA — medido ao vivo na primeira tentativa, 374 pedidos "a ~4.000 km" com quartis 3999,7 / 4000,7 / 4001,2. `test/perto.test.mjs` carrega contraprova (com a referência invertida o vizinho deixa de ser o 1º).
+
+**Haversine, e não o `distanciaEntrePontos` do core**: aquele é equiretangular, calibrado pra menos de 1 km, e aqui a fila cobre 0,9–2.830 km — nessa escala a aproximação reordena, e a ordem É o produto. (Além disso o core é módulo de servidor; o `app.js` é script clássico e não importa de lá.)
+
+Decisões que não são gosto:
+- **Casa e trabalho NÃO entram no `profile`** — vêm num campo `referencias` irmão, e no cliente vivem em variável de MÓDULO (`referenciasDoPerfil`), nunca no `AppState`: o AppState inteiro vai no diagnóstico que o editor manda por WhatsApp, e a coordenada da casa dele não pode viajar junto com um relato de bug. O logout apaga as duas e a posição.
+- **A permissão só é pedida no GESTO** (o `change` do select), nunca na abertura, e com `enableHighAccuracy: false`: pra ordenar, errar 1 km não muda a ordem, e o GPS fino acende o rádio e demora. Negado → volta pro padrão e DIZ por quê; deixar "Perto de mim" selecionado sem posição seria filtro que mente.
+- **A posição NUNCA persiste** entre sessões (posição é um momento); casa e trabalho persistem porque saem do perfil a cada sessão. `ordemValida()` peneira: sem referência AGORA, cai no padrão.
+- **Opção que não dá pra cumprir não aparece** (perfil sem endereço, aparelho sem a API) — a mesma régua que tirou a extensão de Chrome da frente no celular.
+- **`Permissions-Policy` precisou de `geolocation=(self)`** nas DUAS cópias (`_headers` e `node.mjs`): com `geolocation=()` o navegador nem pergunta e a API falha calada.
+- **A dica sob o select só aparece com uma ordem de distância escolhida** — linha fixa num modal que já é longo é ruído.
+
+---
+
 ## 🔬 Diagnóstico do modo dev — o que ele captura, e por quê
 
 O FAB do modo dev gera um **`.zip`** que o editor manda. Ele tem TRÊS camadas, e

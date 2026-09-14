@@ -5,7 +5,7 @@
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
-  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Permissions-Policy: camera=(), microphone=(), geolocation=(self), payment=(), usb=()
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://venue-image.waze.com https://social-row.waze.com https://sms-profile-image.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';
 

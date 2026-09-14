@@ -2304,10 +2304,29 @@ async function handlePerfil(data, { sessions }) {
   const managedAreas = [];
   for (const ma of rd.managedAreas || []) managedAreas.push({ id: ma.id ?? null, name: ma.name || '' });
 
+  // Casa e trabalho, pro "Perto de casa/do trabalho" do filtro. O `/Session`
+  // devolve os dois como ponto GeoJSON (MEDIDO com os cookies do owner:
+  // `{type, coordinates: [lon, lat]}`), e nem todo editor tem os dois.
+  //
+  // Sai num campo PRÓPRIO, FORA do `profile`, e isso é privacidade e não
+  // arrumação: o `profile` vive no `AppState`, e o `AppState` INTEIRO entra no
+  // diagnóstico que o editor manda por WhatsApp. A coordenada da casa dele não
+  // pode viajar junto com um relato de bug.
+  //
+  // `pontoDeGeometria` é a MESMA função do mini-mapa, e ela INVERTE: entra
+  // [lon, lat] do GeoJSON, sai [lat, lon]. Ter duas ordens no mesmo app é como
+  // a ordenação sai plausível e errada, sem sintoma — foi exatamente o que
+  // aconteceu ao medir isto pela primeira vez (500 pedidos a ~4.000 km).
+  const referencias = {
+    casa: rd.homeLocation ? pontoDeGeometria(rd.homeLocation) : null,
+    trabalho: rd.workLocation ? pontoDeGeometria(rd.workLocation) : null,
+  };
+
   return {
     status: 200,
     body: {
       success: true,
+      referencias,
       profile: {
         id: rd.id ?? null,
         userName: rd.userName || '',

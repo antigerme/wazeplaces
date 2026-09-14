@@ -184,7 +184,7 @@ const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self), payment=(), usb=()',
   // HSTS estava SÓ no `_headers`, ou seja só no Cloudflare — mesma lacuna que a
   // CSP tinha (gotcha #14) e que foi fechada, só que esta ficou pra trás. Numa
   // VM o cabeçalho sumia e ninguém via: a app deixava de ser a MESMA nos dois
