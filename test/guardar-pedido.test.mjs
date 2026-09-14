@@ -49,6 +49,7 @@ test('a preferência nasce DESLIGADA, e só liga quem disse que quer', () => {
 // ── 2. A PROMESSA DO PULAR ─────────────────────────────────────────────────
 function rodarSkip({ pularGuarda }) {
   const chamadas = [];
+  const conquistas = [];
   const agendadas = [];
   const escopo = {
     AppState: {
@@ -58,6 +59,9 @@ function rodarSkip({ pularGuarda }) {
     acoesTravadas: () => false,
     Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
+    // O executor conta "Colecionador" no sucesso. O stub REGISTRA, pra que o
+    // teste possa afirmar que contou — e não só que não quebrou.
+    contarConquista: (k) => conquistas.push(k),
     scheduleAction: (tipo, place, executor) => { agendadas.push({ tipo, place, executor }); },
     API: { guardarPedido: async (v, u, val) => { chamadas.push({ v, u, val }); return { success: true }; } },
     callWithRetry: (fn) => fn(),
@@ -66,7 +70,7 @@ function rodarSkip({ pularGuarda }) {
   const nomes = Object.keys(escopo);
   const fn = new Function(...nomes, fatiarFuncao('handleSkip') + '\nreturn handleSkip;')(...nomes.map((n) => escopo[n]));
   fn();
-  return { chamadas, agendadas, stats: escopo.AppState.stats };
+  return { chamadas, conquistas, agendadas, stats: escopo.AppState.stats };
 }
 
 test('DESLIGADA, o Pular não fala com a rede — e o executor existe só pela janela do Desfazer', async () => {
@@ -84,6 +88,10 @@ test('LIGADA, o Pular guarda o pedido — e guarda o pedido CERTO', async () => 
   assert.equal(r.chamadas.length, 1, 'a preferência está ligada e nada foi guardado');
   assert.deepEqual(r.chamadas[0], { v: 'v1', u: 'ur1', val: true },
     'guardou com os ids errados, ou sem o valor explícito');
+  // "Colecionador" conta pedido GUARDADO. Sem isto, o contador podia subir no
+  // gesto (antes da resposta) e premiar guardar que falhou.
+  assert.deepEqual(r.conquistas, ['guardados'],
+    'guardar com sucesso deixou de contar pra conquista do Colecionador');
 });
 
 test('a decisão é do MOMENTO DO GESTO, não do despacho', async () => {
@@ -91,12 +99,16 @@ test('a decisão é do MOMENTO DO GESTO, não do despacho', async () => {
   // alcançável. Se o executor lesse a preferência na hora de rodar, mexer no
   // interruptor reescreveria o que já tinha sido decidido.
   const chamadas = [];
+  const conquistas = [];
   const agendadas = [];
   const prefs = { pularGuarda: true };
   const escopo = {
     AppState: { currentPlace: { venueID: 'v1', updateRequestID: 'ur1' }, queue: [], stats: { skipped: 0 }, preferences: prefs },
     acoesTravadas: () => false, Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
+    // O executor conta "Colecionador" no sucesso. O stub REGISTRA, pra que o
+    // teste possa afirmar que contou — e não só que não quebrou.
+    contarConquista: (k) => conquistas.push(k),
     scheduleAction: (tipo, place, executor) => { agendadas.push(executor); },
     API: { guardarPedido: async () => { chamadas.push(1); return { success: true }; } },
     callWithRetry: (fn) => fn(), showToast: () => {}, t: (k) => k, msgDoServidor: (r, txt) => txt,
@@ -115,6 +127,9 @@ test('falhar ao guardar NÃO é silencioso', async () => {
     AppState: { currentPlace: { venueID: 'v1', updateRequestID: 'ur1' }, queue: [], stats: { skipped: 0 }, preferences: { pularGuarda: true } },
     acoesTravadas: () => false, Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
+    // O executor conta "Colecionador" no sucesso. O stub REGISTRA, pra que o
+    // teste possa afirmar que contou — e não só que não quebrou.
+    contarConquista: (k) => conquistas.push(k),
     scheduleAction: (t_, p, ex) => { escopo._ex = ex; },
     API: { guardarPedido: async () => ({ success: false, error: 'caiu' }) },
     callWithRetry: (fn) => fn(),
@@ -188,6 +203,7 @@ async function ctxComSessao() {
 async function comFetch(responder, fn) {
   const original = globalThis.fetch;
   const chamadas = [];
+  const conquistas = [];
   globalThis.fetch = async (url, opts) => { chamadas.push({ url: String(url), opts }); return responder(); };
   try { return { resultado: await fn(), chamadas }; } finally { globalThis.fetch = original; }
 }

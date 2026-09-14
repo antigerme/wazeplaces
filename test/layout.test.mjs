@@ -1560,6 +1560,10 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // arrumação: é o mínimo que o contrato do "Sair" já promete.
     AUTORES_KEY: 'esquecerAutores()',
     SESSAO_KEY: 'esquecerPrazoDaSessao()',
+    // Patente, conquistas e contadores. É dado de QUEM ENTROU (o trabalho
+    // dele), então some junto — e some porque o contrato do "Sair" já
+    // promete, não porque alguém lembrou.
+    CONQUISTAS_KEY: 'safeLS.remove(CONQUISTAS_KEY)',
     waze_session_token: 'API.setSession(null)',
     waze_region: "API.setRegion('row')",
     waze_country: 'API.setCountry(30)',

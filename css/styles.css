@@ -2453,3 +2453,120 @@ html.tem-sessao #authScreen { display: none; }
    passa: só o pixel denuncia (gotcha #58). */
 .lb-pill-fixo { flex: none; white-space: pre; }
 .lb-pill-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 2.5rem; }
+
+/* ── Patentes e Conquistas ─────────────────────────────────────────────────
+   Tudo desenhado a partir de MEDIÇÃO na app real (2026-09-14, Pixel 411 e
+   Galaxy Fold 280, dois temas, pt e fr). Três números decidiram:
+
+   • GRADE de 3 colunas (2 abaixo de 400px). Em 4, MEDIDO no Pixel: as colunas
+     saem 70/70/78/70 — o nome mais longo força `min-width:auto` e uma coluna
+     estica, então a vitrine deixa de ser uma grade. O texto não transborda e
+     nada "quebra": o defeito é só visual, e é por isso que a guarda no smoke
+     compara as LARGURAS das colunas entre si. Em 3 dá 98/98/98.
+     (A rodada de mockup dizia que 4 colunas PARTIA a palavra ao meio. Partia lá
+     porque o CSS do mockup tinha `word-break: break-word`; este não tem, e a
+     diferença só apareceu sabotando a coluna e medindo de novo.)
+   • O CARTÃO EMPILHA abaixo de 400px. Em três colunas, o nome da patente é
+     longo, o total é tabular e não encolhe, e os dois SE SOBREPÕEM no Fold —
+     e sobreposição só se mede com `elementFromPoint`, nunca com retângulo.
+   • NADA de `opacity` no texto trancado. Opacidade mistura a cor com o fundo e
+     derruba o contraste sem aparecer no `getComputedStyle().color` — foi o erro
+     do `.valor-ausente` (0,65 → 3,79:1, reprovado). Cor sólida, medida:
+     6,92:1 no claro e 5,71:1 no escuro. */
+.conq-card { border-radius: 14px; padding: 12px; margin-bottom: 12px;
+  background: #ecfeff; border: 1px solid #a5f3fc; }
+.dark .conq-card { background: #0d3d47; border-color: #155e75; }
+.conq-topo { display: flex; align-items: center; gap: 10px; }
+.conq-emoji { font-size: 32px; line-height: 1; flex-shrink: 0; }
+.conq-id { flex: 1; min-width: 0; }
+.conq-eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: #0e7490; }
+.dark .conq-eyebrow { color: #67e8f9; }
+.conq-nome { font-size: 18px; font-weight: 800; color: #0f172a; line-height: 1.15; }
+.dark .conq-nome { color: #f1f5f9; }
+.conq-num { font-size: 15px; font-weight: 700; color: #0f172a; }
+.dark .conq-num { color: #f1f5f9; }
+.conq-sub { font-size: 11px; color: #155e75; }
+.dark .conq-sub { color: #a5f3fc; }
+.conq-tot { text-align: right; flex-shrink: 0; }
+.conq-barra { margin-top: 10px; height: 8px; border-radius: 9999px;
+  background: #cffafe; overflow: hidden; }
+.dark .conq-barra { background: #164e63; }
+.conq-barra > i { display: block; height: 100%; background: #0891b2; }
+.dark .conq-barra > i { background: #22d3ee; }
+.conq-rodape { display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-top: 4px; }
+/* `min-width` junto do `min-height`: só a altura deixava o link em 38×44 quando
+   o texto é curto ("ver menos"), abaixo dos 44 de alvo de toque. */
+.conq-link { background: none; border: 0; padding: 0 8px; font: inherit;
+  font-size: 11px; font-weight: 600; color: #0b5c72; text-decoration: underline;
+  cursor: pointer; min-height: 44px; min-width: 44px; flex-shrink: 0; }
+.dark .conq-link { color: #a5f3fc; }
+@media (max-width: 400px) {
+  .conq-topo { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center; }
+  .conq-tot { grid-column: 1 / -1; text-align: left; display: flex; align-items: baseline; gap: 5px; }
+  .conq-tot br { display: none; }
+  .conq-rodape { display: grid; gap: 0; justify-items: start; }
+}
+.conq-escada { margin-top: 10px; padding-top: 10px; border-top: 1px solid #a5f3fc;
+  display: grid; gap: 1px; }
+.dark .conq-escada { border-color: #155e75; }
+.conq-deg { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center;
+  gap: 8px; min-height: 44px; padding: 0 4px; border-radius: 8px; font-size: 13px; }
+.conq-deg .e { font-size: 17px; line-height: 1; }
+.conq-deg .n { font-weight: 600; color: #334155; min-width: 0; }
+.dark .conq-deg .n { color: #cbd5e1; }
+.conq-deg .a { font-size: 11.5px; color: #155e75; }
+.dark .conq-deg .a { color: #67e8f9; }
+.conq-deg .m { width: 14px; text-align: center; color: #0e7490; font-weight: 700; }
+.dark .conq-deg .m { color: #22d3ee; }
+/* O degrau atual é FUNDO + peso, não só a bolinha: cor sozinha não transmite
+   informação (WCAG 1.4.1) — a mesma régua que fez a pílula trocar de ícone. */
+.conq-deg.aqui { background: #cffafe; }
+.dark .conq-deg.aqui { background: #155e75; }
+.conq-deg.aqui .n { color: #0f172a; font-weight: 700; }
+.dark .conq-deg.aqui .n { color: #f1f5f9; }
+.conq-h { display: flex; justify-content: space-between; align-items: baseline; margin: 14px 0 8px; }
+.conq-h h4 { font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: #475569; margin: 0; }
+.dark .conq-h h4 { color: #94a3b8; }
+.conq-h span { font-size: 11px; color: #475569; }
+.dark .conq-h span { color: #94a3b8; }
+.conq-grade { display: grid; gap: 6px; grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 400px) { .conq-grade { grid-template-columns: repeat(2, 1fr); } }
+/* `min-width: 0` é o que mantém a grade SENDO uma grade. Sem ele, item de grid
+   nasce com `min-width: auto` e a coluna cresce até caber o conteúdo: no Fold
+   em francês, "Collectionneur" mede 76px, mais 8 de padding e 2 de borda dão
+   86 — e como só há 84, a coluna esticava e a irmã encolhia (86/82 medidos).
+   O padding lateral cai pra 2px pelo mesmo motivo: devolve os 4px que faltavam.
+   `overflow-wrap: break-word` é a rede embaixo — quebra só o que REALMENTE não
+   couber, em vez de deformar a grade em silêncio; e aí o detector de palavra
+   partida do smoke acusa, que é o sinal certo pra encurtar o nome. */
+.conq-cel { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 3px; padding: 8px 2px; border-radius: 12px; min-height: 44px;
+  min-width: 0; border: 1px solid transparent; font: inherit; cursor: pointer; }
+.conq-cel .n { overflow-wrap: break-word; }
+.conq-cel .e { font-size: 22px; line-height: 1; }
+.conq-cel .n { font-size: 10.5px; font-weight: 700; line-height: 1.2; }
+.conq-cel.on { background: #fffbeb; border-color: #fcd34d; }
+.dark .conq-cel.on { background: #3f2d0b; border-color: #a16207; }
+.conq-cel.on .n { color: #78350f; }
+.dark .conq-cel.on .n { color: #fde68a; }
+.conq-cel.off { background: #f1f5f9; border-color: #e2e8f0; }
+.dark .conq-cel.off { background: #1e293b; border-color: #334155; }
+.conq-cel.off .n { color: #475569; }
+.dark .conq-cel.off .n { color: #94a3b8; }
+.conq-cel.off .e { filter: grayscale(1); }
+.conq-cel.sel { outline: 2px solid #0e7490; outline-offset: 1px; }
+.dark .conq-cel.sel { outline-color: #22d3ee; }
+/* O conteúdo vai num filho ÚNICO de propósito. Num contêiner flex cada pedaço
+   vira um ITEM e o espaço nas bordas dele é descartado — o mesmo que já custou
+   16px na pílula do lightbox (ver `.lb-pill-fixo` acima). Aqui o sintoma era
+   "Coruja— triar", sem o espaço antes do travessão, e o `textContent` continua
+   com ele: só o pixel denuncia. */
+.conq-dica { margin-top: 8px; font-size: 12px; line-height: 1.4; color: #334155;
+  background: #f1f5f9; border-radius: 10px; padding: 8px 10px; min-height: 44px;
+  display: flex; align-items: center; }
+.dark .conq-dica { color: #cbd5e1; background: #1e293b; }
+.conq-dica b { color: #0f172a; }
+.dark .conq-dica b { color: #f1f5f9; }

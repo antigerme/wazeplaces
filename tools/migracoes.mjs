@@ -43,6 +43,27 @@ export const PRAZO_PADRAO_DIAS = 30;
 
 export const MIGRACOES = [
   {
+    id: 'historico-onde',
+    desde: '2026-09-14',
+    revisarEm: '2026-10-14',
+    familia: 'aparelho',
+    onde: 'js/app.js',
+    oque: 'O `|| {}` no `v.onde` de cada balde diário. A partir de '
+        + 'v2026.09.14-01 o `recordHistory` grava ONDE o trabalho foi feito '
+        + '(`pais` ou `pais:estado`), que é o dado de "Andarilho" e "Viajante" '
+        + '— e o mesmo que tirou o "onde" do Resumo do mês. Balde gravado '
+        + 'ANTES disso não tem o campo, e não existe como descobrir onde '
+        + 'aquele trabalho foi feito: ele simplesmente não conta.',
+    removerQuando: 'Todo aparelho tiver aberto a app uma vez depois de '
+        + 'v2026.09.14-01, porque a partir daí todo balde NOVO nasce com '
+        + '`onde`. Os baldes velhos continuam sem — mas eles expiram sozinhos '
+        + 'pela poda de `HISTORY_MAX_DIAS` (400 dias), e até lá o `|| {}` é '
+        + 'o que impede o `Object.keys(undefined)` de derrubar o render do '
+        + 'Histórico inteiro. Passou do prazo? Confira se ainda há aparelho '
+        + 'de testador parado numa versão anterior; se não houver, some com o '
+        + '`|| {}` e deixe o campo ser exigido.',
+  },
+  {
     id: 'diag-formato-2',
     desde: '2026-09-10',
     revisarEm: '2026-12-10',

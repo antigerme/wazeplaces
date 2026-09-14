@@ -66,7 +66,8 @@ test('portão L6: NINGUÉM re-implementa a comparação', () => {
 test('portão L6: cada recurso tem o SEU nome, e todos delegam', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   // Os delegadores conhecidos hoje. Recurso novo entra aqui junto com o seu.
-  const DELEGADORES = ['podeExcluirFotoAqui', 'podeRenomearAqui', 'podeAprovarAtual', 'podeRecusarAutomaticoAqui'];
+  const DELEGADORES = ['podeExcluirFotoAqui', 'podeRenomearAqui', 'podeAprovarAtual',
+                       'podeRecusarAutomaticoAqui', 'conquistasComPortaoAqui'];
   for (const nome of DELEGADORES) {
     assert.ok(semComentarios.includes(nome), `${nome} sumiu`);
   }
@@ -85,7 +86,7 @@ test('portão L6: cada recurso tem o SEU nome, e todos delegam', () => {
   const doc = readFileSync(new URL('../CLAUDE.md', import.meta.url), 'utf8');
   for (const nome of DELEGADORES) {
     assert.ok(doc.includes(nome),
-      `${nome} é um recurso destrutivo mas não está nomeado no CLAUDE.md (gotcha #16)`);
+      `${nome} delega ao portão L6 mas não está nomeado no CLAUDE.md (gotcha #16)`);
   }
 });
 
