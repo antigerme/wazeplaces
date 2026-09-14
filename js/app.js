@@ -4157,6 +4157,19 @@ function derrubarSessao(errorKey) {
 // deslocamento de layout seria péssimo negócio.
 let avatarPendente = null;
 let telaPronta = false;
+// A URL que FALHOU, pra não tentar de novo e — principalmente — pra o ícone de
+// imagem quebrada não voltar: `renderProfileHeader` roda a cada troca de idioma
+// e reexibiria o <img> morto.
+//
+// Isto existe por causa de um caso REAL (v2026.09.14-01): o Waze mudou o
+// endereço da foto de perfil de `social-row.waze.com/SocialMediaServer/images/
+// profile/<id>` pra `sms-profile-image.waze.com/<id>`, que a CSP não conhecia.
+// A imagem foi BLOQUEADA antes da rede (medido no HAR do owner: status 0 em
+// 0,06 ms, sem IP de servidor) e o cabeçalho passou a mostrar o ícone de
+// quebrado. O host novo entrou na CSP, mas isso conserta ESTE endereço, não a
+// próxima mudança — e o Waze não avisa quando muda. Foto de terceiro que some
+// tem que degradar pro estado que a app já tem pra "perfil sem foto".
+let avatarFalhou = null;
 
 function liberarAvatar() {
     if (!avatarPendente || !telaPronta) return;
@@ -4166,7 +4179,21 @@ function liberarAvatar() {
         const el = document.getElementById('userAvatar');
         // `authenticated` de novo aqui: entre o agendamento e o disparo cabe um
         // logout, e aí a busca sairia já na tela de entrada.
-        if (el && AppState.authenticated) el.src = url;
+        if (!el || !AppState.authenticated) return;
+        // `error` cobre TODOS os modos de falha desta imagem com um caminho só:
+        // CSP bloqueando, host fora do ar, 404 e rede caída.
+        el.onerror = () => {
+            avatarFalhou = url;
+            el.style.display = 'none';
+            // SÓ o host — é o que muda quando o Waze move a foto de lugar, e é
+            // a pergunta que custou um print de celular e um HAR pra responder.
+            // Nome e id do editor ficam de fora (dado de terceiro no `dfato`).
+            let host = '?';
+            try { host = new URL(url).host; } catch (e) {}
+            dfato('avatar.falhou', { host });
+        };
+        el.onload = () => { avatarFalhou = null; };
+        el.src = url;
     };
     if (typeof requestIdleCallback === 'function') requestIdleCallback(carregar, { timeout: 2000 });
     else setTimeout(carregar, 800);
@@ -4188,7 +4215,9 @@ function renderProfileHeader() {
     const avatar = document.getElementById('userAvatar');
     const nameEl = document.getElementById('userName');
     const rankEl = document.getElementById('userRank');
-    if (p.profileImageUrl) {
+    // A falha degrada pro MESMO estado de "perfil sem foto" (o `else` abaixo),
+    // que a app já tinha — em vez do ícone de quebrado do navegador.
+    if (p.profileImageUrl && p.profileImageUrl !== avatarFalhou) {
         avatar.style.display = '';
         // Já é esta a foto? Não mexe. Esta função roda de novo a cada troca de
         // idioma, e reatribuir o `src` faz o navegador re-decodificar à toa.
@@ -4257,6 +4286,7 @@ async function handleLogout() {
     window.Presenca?.esquecer?.();
     esquecerPrazoDaSessao(); // prazo da sessão do Waze: some com o resto
     avatarPendente = null;   // a próxima entrada volta a esperar o primeiro card
+    avatarFalhou = null;     // outro editor pode ter foto onde este não tinha
     telaPronta = false;
     saveStats();
     saveFilters();

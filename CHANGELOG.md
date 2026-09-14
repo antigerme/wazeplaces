@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.14-01
+
+### Corrigido
+- **A sua foto de perfil aparecia quebrada no topo do app.** No lugar dela vinha aquele ícone de imagem rasgada, em todas as telas.
+
+  O Waze mudou o endereço de onde a foto de perfil é servida. O app mantém uma lista de endereços autorizados a carregar imagem (é o que impede uma página de puxar conteúdo de qualquer lugar), e o endereço novo não estava nela — então o próprio navegador barrava a foto antes mesmo de tentar baixá-la. Nada aparecia no servidor pra denunciar: quem via era só quem usava o app.
+
+  O endereço novo foi autorizado, e o antigo continua valendo (quem entrou antes da mudança segue com a foto). Além disso, **se a foto falhar por qualquer motivo daqui pra frente, ela some em vez de virar ícone quebrado** — que é exatamente o que o app já fazia pra quem não tem foto no perfil.
+
+---
+
 ## v2026.09.13-01
 
 ### Adicionado

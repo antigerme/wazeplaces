@@ -63,7 +63,7 @@
          Bot Fight Mode e no Bot Management Enterprise.
          `img-src blob:` é do Resumo do mês (imagem do canvas mostrada por
          object URL); sem isto ela chega quebrada, em silêncio. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://venue-image.waze.com https://social-row.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://venue-image.waze.com https://social-row.waze.com https://sms-profile-image.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).
@@ -237,11 +237,16 @@
                     <p id="userRank" class="text-[0.6875rem] text-slate-500 uppercase tracking-wider truncate dark:text-slate-400"></p>
                 </div>
                 <!-- `fetchpriority="low"` porque esta é a imagem MAIS PESADA da app e a
-                     menos importante: a foto de perfil vem do Waze com 214 KB (medido) e
-                     é exibida a 32px. Não há variante menor — sondei cinco formas de URL,
-                     todas devolvem os mesmos 218 KB. Não dá pra cortar os bytes, mas dá
-                     pra tirá-la da frente: em 1,6 Mbps ela ocupa mais de um segundo de
-                     banda que o LCP (a foto do card) estava disputando. `width`/`height`
+                     menos importante: é exibida a 32px e pesa MEGABYTES. O Waze mudou o
+                     host em setembro/2026 e o tamanho subiu junto — MEDIDO nos dois:
+                     `social-row.waze.com/SocialMediaServer/images/profile/<id>` devolvia
+                     218 KB; `sms-profile-image.waze.com/<id>`, que é o de hoje, devolve
+                     1,1 MB pro owner e 1,7 MB pra outro editor medido (PNG de 1024×1024
+                     servido com `content-type: image/jpeg` — o navegador fareja os bytes
+                     e exibe). Não há variante menor: 8 formas de URL (`?w=64`, `?size=64`,
+                     `?resize=64x64`, `/64`, …) e 3 de `Accept` devolvem os MESMOS bytes.
+                     Não dá pra cortar, mas dá pra tirar da frente — por isso ela só é
+                     buscada depois do primeiro card, com a thread ociosa. `width`/`height`
                      explícitos porque o `w-8 h-8` só vale depois do CSS. -->
                 <img id="userAvatar" width="32" height="32" fetchpriority="low" decoding="async"
                      class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100 flex-shrink-0 dark:bg-slate-800" alt="">

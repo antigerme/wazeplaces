@@ -144,6 +144,28 @@ if (u.permissions !== undefined) {
   console.log(`  permissions: ${u.permissions}` + (Number(u.permissions) < 0 ? '  (negativo = todos os bits = ESCRITA)' : ''));
 }
 
+// ── A foto de perfil ainda cabe na CSP? ───────────────────────────────────
+// O Waze MUDA o host desta foto sem avisar: em setembro/2026 ele trocou
+// `social-row.waze.com/SocialMediaServer/images/profile/<id>` por
+// `sms-profile-image.waze.com/<id>`, e a app passou a mostrar um ícone de
+// imagem quebrada no cabeçalho — o navegador bloqueia antes da rede e NADA
+// aparece no servidor pra denunciar. Quem tem a resposta é esta chamada, que
+// já está sendo feita: comparar o host com a allowlist custa zero requisição.
+if (u.profileImageUrl) {
+  let host = '?';
+  try { host = new URL(u.profileImageUrl).host; } catch { /* URL estranha cai no ✗ abaixo */ }
+  const csp = readFileSync(new URL('../_headers', import.meta.url), 'utf8')
+    .match(/^\s*Content-Security-Policy:\s*(.+)$/m)?.[1] || '';
+  const img = csp.match(/img-src([^;]*)/)?.[1] || '';
+  const liberado = img.split(/\s+/).includes(`https://${host}`);
+  console.log(`  foto de perfil: ${host} → ${liberado ? '✓ na CSP' : '✗ FORA DA CSP'}`);
+  if (!liberado) {
+    console.log('    → O navegador vai BLOQUEAR a foto antes da rede e o cabeçalho mostra');
+    console.log('      ícone de quebrado. Some o host em img-src nas TRÊS cópias da CSP');
+    console.log('      (index.html, _headers, server/node.mjs) — ver test/avatar.test.mjs.');
+  }
+}
+
 // ── Sondas opcionais ──────────────────────────────────────────────────────
 if (flag('paises')) {
   const r = await get('/LocationSearch/Countries');
