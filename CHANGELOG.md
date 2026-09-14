@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.14-03
+
+### Corrigido
+- **As imagens do Waze não vão mais sumir quando ele mudar de endereço.** Hoje de manhã a sua foto de perfil apareceu quebrada porque o Waze passou a servi-la de um endereço novo, que não estava na lista de endereços autorizados do app — e o navegador a barrou sem avisar ninguém.
+
+  Consertar aquele endereço resolveu aquele caso. O risco que sobrava era o mesmo acontecer com as **fotos dos locais**, que é o que você olha para decidir cada pedido. Agora a autorização vale para **qualquer endereço do Waze**, então uma mudança desse tipo deixa de quebrar o app.
+
+  Isso vale só para **imagens**, que não executam nada. O envio de dados continua restrito endereço por endereço, como antes.
+
+---
+
 ## v2026.09.14-02
 
 ### Adicionado

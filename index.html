@@ -62,8 +62,12 @@
          JavaScript Detections NÃO pode ser desativado — só é opcional no Super
          Bot Fight Mode e no Bot Management Enterprise.
          `img-src blob:` é do Resumo do mês (imagem do canvas mostrada por
-         object URL); sem isto ela chega quebrada, em silêncio. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://venue-image.waze.com https://social-row.waze.com https://sms-profile-image.waze.com https://www.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+         object URL); sem isto ela chega quebrada, em silêncio.
+         `img-src https://*.waze.com` é curinga porque o Waze MOVE host sem
+         avisar — já custou a foto de perfil quebrada em produção, e a próxima
+         mudança pode levar a foto do card junto. Curinga em imagem é risco
+         baixo; o connect-src continua nominal. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://*.waze.com; connect-src 'self' https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).

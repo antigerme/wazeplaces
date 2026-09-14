@@ -18,6 +18,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+// FONTE ÚNICA do casamento de host na CSP — a mesma que o waze-probe usa.
+import { CSP_COPIAS, lerCsp, diretiva, hostLiberado } from '../tools/csp-img.mjs';
+
+const REPO = new URL('../', import.meta.url);
 
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 const HTML = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
@@ -32,33 +36,48 @@ function fatiarFuncao(nome) {
   return APP.slice(ini, ini + 1 + fim);
 }
 
-// A CSP se extrai pela ESTRUTURA de cada arquivo, nunca por `img-src` solto: os
-// comentários acima da meta e do `const CSP` CITAM a diretiva, e um grep frouxo
-// casa com o comentário e deixa a sabotagem passar (gotcha #14).
-function cspDe(arquivo) {
-  const txt = readFileSync(new URL('../' + arquivo, import.meta.url), 'utf8');
-  const m = arquivo === 'index.html'
-    ? txt.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)"/)
-    : arquivo === '_headers'
-      ? txt.match(/^\s*Content-Security-Policy:\s*(.+)$/m)
-      : txt.match(/^const CSP = "([^"]*)"/m);
-  assert.ok(m, `${arquivo}: não achei a CSP pela estrutura do arquivo`);
-  return m[1];
-}
-
-// ── 1. O HOST DE HOJE ──────────────────────────────────────────────────────
-test('img-src libera o host da foto de perfil nas TRÊS cópias da CSP', () => {
-  // O host ANTIGO fica junto de propósito: ele continua servindo (medido, 200 +
-  // 218 KB no mesmo id) e sessão aberta antes da mudança ainda carrega a URL
-  // velha. Tirar um pra pôr o outro reabriria o defeito pra quem não recarregou.
-  const HOSTS = ['https://sms-profile-image.waze.com', 'https://social-row.waze.com'];
-  for (const arquivo of ['index.html', '_headers', 'server/node.mjs']) {
-    const img = cspDe(arquivo).match(/img-src([^;]*)/);
+// ── 1. O HOST DE HOJE, E O PRÓXIMO ────────────────────────────────────────
+test('img-src libera os hosts de imagem do Waze nas TRÊS cópias da CSP', () => {
+  // Desde v2026.09.14-03 a allowlist é o CURINGA `https://*.waze.com`, e não
+  // uma lista de hosts. O motivo é este mesmo defeito: o Waze move host sem
+  // avisar, e listar host por host conserta ESTE endereço e não o próximo —
+  // com as fotos do CARD (o produto da app) no mesmo risco.
+  //
+  // O casamento vem da FONTE ÚNICA `tools/csp-img.mjs`, a mesma que o
+  // `waze-probe` usa: `includes()` acerta o caso comum e erra o que importa.
+  const DEVEM_PASSAR = [
+    'sms-profile-image.waze.com',   // a foto de perfil de hoje
+    'social-row.waze.com',          // a de ontem, que ainda serve
+    'venue-image.waze.com',         // as fotos do CARD
+    'www.waze.com',                 // os tiles do mini-mapa
+    'algo-que-o-waze-ainda-vai-inventar.waze.com',
+  ];
+  // CONTROLE: o curinga não pode virar porta dos fundos. Um `endsWith('waze.com')`
+  // ingênuo deixaria os dois primeiros entrarem — são domínios de OUTRO dono.
+  const NAO_PODEM = ['evilwaze.com', 'waze.com.br', 'waze.com', 'exemplo.invalido'];
+  for (const arquivo of Object.keys(CSP_COPIAS)) {
+    const img = diretiva(lerCsp(arquivo, REPO), 'img-src');
     assert.ok(img, `${arquivo}: CSP sem diretiva img-src`);
-    for (const host of HOSTS) {
-      assert.ok(img[1].includes(host + ' ') || img[1].trim().endsWith(host),
-        `${arquivo}: img-src sem ${host} — a foto de perfil é bloqueada antes da rede`);
+    for (const h of DEVEM_PASSAR) {
+      assert.ok(hostLiberado(h, img), `${arquivo}: img-src BLOQUEIA ${h} — a imagem morre antes da rede`);
     }
+    for (const h of NAO_PODEM) {
+      assert.ok(!hostLiberado(h, img), `${arquivo}: img-src LIBERA ${h}, que não é do Waze`);
+    }
+    // `data:` e `blob:` continuam (splash/ícone e o Resumo do mês).
+    assert.match(img, /\bdata:/, `${arquivo}: sumiu data: do img-src`);
+    assert.match(img, /\bblob:/, `${arquivo}: sumiu blob: — a imagem do Resumo do mês chega quebrada`);
+  }
+});
+
+test('o curinga vale SÓ pra imagem — connect-src segue nominal', () => {
+  // img-src com curinga é risco baixo (imagem não executa). `connect-src` é o
+  // caminho de SAÍDA de dado: lá, subdomínio novo do Waze não entra sozinho.
+  for (const arquivo of Object.keys(CSP_COPIAS)) {
+    const conn = diretiva(lerCsp(arquivo, REPO), 'connect-src');
+    assert.ok(conn, `${arquivo}: CSP sem connect-src`);
+    assert.doesNotMatch(conn, /\*\.waze\.com/,
+      `${arquivo}: connect-src virou curinga — isso abre saída de dado, não entrada de imagem`);
   }
 });
 
