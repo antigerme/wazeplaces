@@ -33,6 +33,7 @@
 
 import { readFileSync } from 'node:fs';
 import { pausaComJitter, JITTER_MIN_MS, JITTER_MAX_MS, estimativaMs } from './waze-jitter.mjs';
+import { lerCsp, diretiva, hostLiberado } from './csp-img.mjs';
 // FONTE ÚNICA do par cookie+CSRF — a MESMA que a app usa. Ver o comentário
 // abaixo: escrever essa leitura aqui de novo era o que fazia o probe mentir.
 import { prepareAuth } from '../server/core.mjs';
@@ -154,15 +155,18 @@ if (u.permissions !== undefined) {
 if (u.profileImageUrl) {
   let host = '?';
   try { host = new URL(u.profileImageUrl).host; } catch { /* URL estranha cai no ✗ abaixo */ }
-  const csp = readFileSync(new URL('../_headers', import.meta.url), 'utf8')
-    .match(/^\s*Content-Security-Policy:\s*(.+)$/m)?.[1] || '';
-  const img = csp.match(/img-src([^;]*)/)?.[1] || '';
-  const liberado = img.split(/\s+/).includes(`https://${host}`);
+  // Casamento pela FONTE ÚNICA: desde v2026.09.14-03 a allowlist é o curinga
+  // `https://*.waze.com`, e comparar com `includes()` diria "FORA DA CSP" pra
+  // host que na verdade passa — alarme falso treina a ignorar o aviso.
+  const img = diretiva(lerCsp('_headers', new URL('../', import.meta.url)), 'img-src');
+  const liberado = hostLiberado(host, img);
   console.log(`  foto de perfil: ${host} → ${liberado ? '✓ na CSP' : '✗ FORA DA CSP'}`);
   if (!liberado) {
     console.log('    → O navegador vai BLOQUEAR a foto antes da rede e o cabeçalho mostra');
     console.log('      ícone de quebrado. Some o host em img-src nas TRÊS cópias da CSP');
     console.log('      (index.html, _headers, server/node.mjs) — ver test/avatar.test.mjs.');
+    console.log('      Hoje a allowlist é o curinga https://*.waze.com, então isto só');
+    console.log('      dispara se o Waze servir de FORA do waze.com (ou do domínio pelado).');
   }
 }
 
