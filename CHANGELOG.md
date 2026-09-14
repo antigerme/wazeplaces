@@ -8,6 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.14-02
+
+### Adicionado
+- **Ordenar a fila por perto de você.** Em *Filtros*, "Ordenar por" ganhou três opções: **🏠 Perto de casa**, **💼 Perto do trabalho** e **📍 Perto de mim (GPS)**.
+
+  Casa e trabalho vêm do **seu perfil no WME** (o mesmo endereço que você cadastrou lá), então essas duas funcionam **sem pedir localização nenhuma**. Se o seu perfil não tiver um deles, a opção simplesmente não aparece.
+
+  O **GPS é opcional e só é pedido quando você escolhe** essa opção — nunca ao abrir o app. A localização **aproximada já basta** para ordenar, e é ela que o app pede: ordenar uma fila não precisa de precisão de rota. Se você negar (ou já tiver negado antes), a ordem volta sozinha para "Mais recentes primeiro" e o app diz o porquê, em vez de ficar num filtro que não faz o que promete. A sua posição **não é guardada**: ela vale só enquanto o app está aberto, porque amanhã você está em outro lugar.
+
+  Por que isso muda alguma coisa: medido na fila real de um editor com 374 pedidos do Brasil inteiro, ordenar por casa traz **apenas 2 dos 20 primeiros** que você veria na ordem normal. Eram 19 pedidos a menos de 100 km — os que você talvez conheça de verdade — enterrados numa lista por data.
+
+  Pedido sem coordenada vai para o **fim** da fila, e não para o começo.
+
+---
+
 ## v2026.09.14-01
 
 ### Corrigido

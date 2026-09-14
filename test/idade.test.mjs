@@ -188,7 +188,13 @@ test('pedido SEM data vai pro FIM — nunca crava a posição 0', () => {
   const corpo = APPJS.slice(i, APPJS.indexOf('\n}', i) + 2);
   const monta = (ordem) => {
     const est = { queue: [], filters: { sortOrder: ordem } };
-    const fn = new Function('AppState', corpo + '\nreturn sortQueue;')(est);
+    // `sortQueue` ganhou um ramo de DISTÂNCIA (Perto de casa/trabalho/GPS) que
+    // consulta `referenciaDaOrdem`. Aqui ela devolve null de propósito: sem
+    // referência, o sort cai no ramo de DATA, que é o que este teste prova.
+    // O ramo de distância tem teste próprio em test/perto.test.mjs.
+    const semReferencia = () => null;
+    const fn = new Function('AppState', 'referenciaDaOrdem', 'pontoDoPlace',
+      corpo + '\nreturn sortQueue;')(est, semReferencia, () => null);
     return (fila) => { est.queue = fila.slice(); fn(); return est.queue.map((p) => p.id); };
   };
   const fila = [

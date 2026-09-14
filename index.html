@@ -621,7 +621,15 @@
                             <select id="filterSort" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700">
                                 <option value="newest" data-i18n="filters.sort.newest">Mais recentes primeiro</option>
                                 <option value="oldest" data-i18n="filters.sort.oldest">Mais antigos primeiro</option>
+                                <!-- As ordens por DISTÂNCIA (casa/trabalho/GPS) entram por JS em
+                                     `popularOrdenacoes()`: casa e trabalho só existem se o perfil
+                                     do WME tiver o endereço, e o GPS só se o aparelho tiver a API.
+                                     Opção que não dá pra cumprir é beco sem saída. -->
                             </select>
+                            <!-- Linha de estado da ordenação: de onde vem a referência, e o que
+                                 aconteceu com a permissão de localização. Preenchida por JS
+                                 (`atualizarDicaDeOrdem`) porque o texto muda com o estado. -->
+                            <p id="filterSortHint" class="hidden text-[0.6875rem] mt-1 text-slate-500 dark:text-slate-400"></p>
                         </div>
 
                         <div class="pt-1">

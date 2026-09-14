@@ -4121,6 +4121,135 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Perto de mim: as três ordens por distância, no filtro ────────────────
+//
+// O que só o navegador responde aqui é a PERMISSÃO: `getCurrentPosition` é API
+// do browser, e conceder/negar muda o caminho inteiro. O Playwright controla
+// isso de verdade (grantPermissions/clearPermissions), então os dois desfechos
+// são exercitados — inclusive o negado, que é o que a pessoa vê quando já
+// recusou uma vez e o navegador não pergunta mais.
+//
+// E a ORDEM das coordenadas é medida ponta a ponta: a fila entra embaralhada e
+// tem que sair do mais perto pro mais longe. Ler [lat,lon] como [lon,lat] não
+// quebra nada — só ordena errado (medido no Waze real: 374 pedidos "a ~4.000 km").
+{
+  const onde = 'perto de mim';
+  // São Paulo como referência; os alvos ficam a ~1 km, ~360 km e ~2.130 km.
+  const REF = { lat: -23.55, lon: -46.63 };
+  const FILA = [
+    { id: 'recife', ll: [-8.05, -34.88] },
+    { id: 'vizinho', ll: [-23.56, -46.64] },
+    { id: 'rio', ll: [-22.91, -43.17] },
+  ];
+  for (const [nomeAp, vp] of [['Pixel 7', { width: 412, height: 915 }], ['Galaxy Fold', { width: 280, height: 653 }]]) {
+    for (const lang of ['pt', 'fr']) {
+      const ctx = await browser.newContext({ viewport: vp, locale: 'pt-BR', serviceWorkers: 'block' });
+      const page = await ctx.newPage();
+      const errosG = [];
+      page.on('pageerror', (e) => errosG.push(String(e)));
+      await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+        JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+      await page.goto(BASE, { waitUntil: 'load' });
+      await page.waitForTimeout(600);
+      await page.waitForFunction(() => typeof AppState !== 'undefined');
+      const id = `${onde} ${nomeAp}/${lang}`;
+
+      const abrir = (refs) => page.evaluate(({ lg, refs: r, fila }) => {
+        aplicarIdioma(lg);
+        document.querySelectorAll('#toastContainer > *').forEach((el) => el.remove());
+        AppState.authenticated = true;
+        AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false, areas: [], managedAreas: [] };
+        AppState.countries = [{ id: 30, name: 'Brazil' }];
+        // Caminho REAL: é assim que a resposta do /api/perfil chega.
+        guardarReferencias({ referencias: r });
+        AppState.queue = fila.map((f) => ({ venueID: f.id, updateRequestID: f.id, mapa: { centro: f.ll }, dateAdded: 1 }));
+        // Porta de entrada REAL: é `openFiltersModal` que popula as ordens.
+        // Chamar `openModal` direto pularia justamente a ligação que se quer provar.
+        openFiltersModal(); switchFilterTab('filtersTabFilters');
+        const sel = document.getElementById('filterSort');
+        sel.scrollIntoView({ block: 'center' });
+        return [...sel.options].map((o) => o.value);
+      }, { lg: lang, refs, fila: FILA });
+
+      // 1. COM casa e trabalho no perfil: as três opções existem.
+      const comRefs = await abrir({ casa: [REF.lat, REF.lon], trabalho: [REF.lat + 0.02, REF.lon + 0.02] });
+      for (const dever of ['newest', 'oldest', 'casa', 'trabalho', 'gps']) {
+        checa(comRefs.includes(dever), `${id}: falta a opção "${dever}" no Ordenar por`, comRefs.join(','));
+      }
+
+      // 2. A ORDEM sai do mais perto pro mais longe (ponta a ponta).
+      const ordenada = await page.evaluate(() => {
+        AppState.filters.sortOrder = 'casa';
+        sortQueue();
+        return AppState.queue.map((p) => p.venueID);
+      });
+      checa(ordenada.join(',') === 'vizinho,rio,recife',
+        `${id}: ordem por distância errada (coordenada invertida?)`, ordenada.join(','));
+
+      // 3. Layout e a dica. A dica só existe quando uma ordem por DISTÂNCIA está
+      //    escolhida — em "Mais recentes" não há o que explicar, e linha fixa
+      //    num modal que já é longo é ruído. Então escolhe primeiro, pelo
+      //    caminho real (o `change` do select).
+      const m = await page.evaluate(async () => {
+        const sel = document.getElementById('filterSort'), dica = document.getElementById('filterSortHint');
+        sel.value = 'casa';
+        await aoTrocarOrdenacao();
+        const rs = sel.getBoundingClientRect(), rd = dica.getBoundingClientRect();
+        const hit = document.elementFromPoint(rs.left + rs.width / 2, rs.top + rs.height / 2);
+        return { alvo: Math.round(rs.height), cabe: rs.right <= innerWidth && rd.right <= innerWidth,
+                 recebeToque: !!hit && (hit === sel || sel.contains(hit)),
+                 dicaVisivel: !dica.classList.contains('hidden'), dicaTxt: (dica.textContent || '').trim() };
+      });
+      checa(m.alvo >= 44, `${id}: select com ${m.alvo}px < 44`);
+      checa(m.cabe, `${id}: o select ou a dica estouram a largura da tela`);
+      checa(m.recebeToque, `${id}: algo cobre o select de ordenação`);
+      checa(m.dicaVisivel && m.dicaTxt.length > 10, `${id}: a dica de "vem do perfil" não apareceu`, m.dicaTxt);
+      checa(!/[{}]/.test(m.dicaTxt), `${id}: placeholder cru vazou na dica`, m.dicaTxt);
+
+      // 4. GPS NEGADO vem ANTES do concedido de propósito: aqui a permissão
+      //    ainda não foi dada, que é o estado real de quem nunca concedeu ou já
+      //    recusou (aí o navegador nem pergunta de novo). Testar o negado DEPOIS
+      //    do concedido mediria outra coisa — o `maximumAge` de 5 min deixa o
+      //    navegador servir a posição do cache, e o teste passaria por engano.
+      const neg = await page.evaluate(async () => {
+        const sel = document.getElementById('filterSort');
+        sel.value = 'gps';
+        await aoTrocarOrdenacao();
+        const dica = document.getElementById('filterSortHint');
+        return { valor: sel.value, dica: (dica.textContent || '').trim() };
+      });
+      checa(neg.valor === 'newest', `${id}: negado deixou "Perto de mim" selecionado sem posição`, neg.valor);
+      checa(neg.dica.length > 20 && !/[{}]/.test(neg.dica), `${id}: negado não explicou`, neg.dica);
+
+      // 5. GPS CONCEDIDO: fica em 'gps', ordena e a dica confirma.
+      await ctx.grantPermissions(['geolocation'], { origin: BASE.replace(/\/$/, '') });
+      await ctx.setGeolocation({ latitude: REF.lat, longitude: REF.lon, accuracy: 800 });
+      const ok = await page.evaluate(async () => {
+        const sel = document.getElementById('filterSort');
+        sel.value = 'gps';
+        await aoTrocarOrdenacao();
+        const dica = document.getElementById('filterSortHint');
+        AppState.filters.sortOrder = 'gps'; sortQueue();
+        return { valor: sel.value, dica: (dica.textContent || '').trim(),
+                 ordem: AppState.queue.map((p) => p.venueID).join(',') };
+      });
+      checa(ok.valor === 'gps', `${id}: com permissão concedida a ordem não ficou em GPS`, ok.valor);
+      checa(ok.ordem === 'vizinho,rio,recife', `${id}: GPS não ordenou por distância`, ok.ordem);
+      checa(!/[{}]/.test(ok.dica) && ok.dica.length > 10, `${id}: dica do GPS concedido`, ok.dica);
+
+      // 6. SEM casa/trabalho no perfil: as duas opções somem (não viram beco).
+      const semRefs = await abrir({ casa: null, trabalho: null });
+      checa(!semRefs.includes('casa') && !semRefs.includes('trabalho'),
+        `${id}: perfil sem endereço e as opções continuaram no select`, semRefs.join(','));
+      checa(semRefs.includes('newest') && semRefs.includes('oldest'),
+        `${id}: CONTROLE falhou — as opções de sempre sumiram junto`, semRefs.join(','));
+
+      checa(errosG.length === 0, `${id}: erro de JS`, errosG[0]);
+      await ctx.close();
+    }
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -4159,6 +4288,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`
+  + `, + Perto de mim em 2 aparelhos × 2 idiomas (as 3 opções, ordem ponta a ponta, GPS concedido E negado pelo browser, e o perfil sem endereço)`
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`

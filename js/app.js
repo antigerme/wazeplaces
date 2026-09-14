@@ -629,6 +629,7 @@ function setupAppListeners() {
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
     $('presencaClose').addEventListener('click', () => closeModal('presencaModal'));
     $('pedidoClose').addEventListener('click', () => closeModal('pedidoModal'));
+    $('filterSort')?.addEventListener('change', aoTrocarOrdenacao);
     $('resumoClose')?.addEventListener('click', () => closeModal('resumoModal'));
     $('resumoCompartilhar')?.addEventListener('click', compartilharResumo);
     $('resumoBaixar')?.addEventListener('click', baixarResumo);
@@ -2375,8 +2376,11 @@ async function openFiltersModal() {
     $('filterManagedArea').disabled = disabled;
 
     populateCategorySelect();
+    popularOrdenacoes();
     const sortSel = $('filterSort');
-    if (sortSel) sortSel.value = AppState.filters.sortOrder || 'newest';
+    if (sortSel) sortSel.value = ordemValida(AppState.filters.sortOrder);
+    atualizarDicaDeOrdem(sortSel && (sortSel.value === 'casa' || sortSel.value === 'trabalho') ? 'perfil'
+        : (sortSel && sortSel.value === 'gps' ? 'ok' : null));
     renderHistory();
 
     // O modal ABRE AQUI, antes de qualquer rede. País e estado vêm do Waze e,
@@ -2455,7 +2459,7 @@ function applyFiltersFromModal() {
     API.setRegion(newRegion);
     const catVal = $('filterCategory') ? $('filterCategory').value : '';
     AppState.filters.categories = catVal ? [catVal] : [];
-    AppState.filters.sortOrder = ($('filterSort') && $('filterSort').value === 'oldest') ? 'oldest' : 'newest';
+    AppState.filters.sortOrder = ordemValida($('filterSort') && $('filterSort').value);
     saveFilters();
     closeModal('filtersModal');
     // A sala É a fila: mudou país ou estado, a companhia é outra.
@@ -2712,6 +2716,7 @@ async function loadProfileAndAuxData() {
     }
     if (profileRes.success) {
         AppState.profile = profileRes.profile;
+        guardarReferencias(profileRes);
         guardarPerfilDoPortao(profileRes.profile);
         guardarPrazoDaSessao(profileRes);
         renderProfileHeader();
@@ -4075,6 +4080,7 @@ async function handleUnauthorized() {
             // chamou; aqui só recompomos o que o 401 tinha interrompido.
             if (r.success && r.profile) {
                 AppState.profile = r.profile;
+                guardarReferencias(r);
                 guardarPerfilDoPortao(r.profile);
                 renderProfileHeader();
             }
@@ -4287,6 +4293,9 @@ async function handleLogout() {
     esquecerPrazoDaSessao(); // prazo da sessão do Waze: some com o resto
     avatarPendente = null;   // a próxima entrada volta a esperar o primeiro card
     avatarFalhou = null;     // outro editor pode ter foto onde este não tinha
+    // Casa, trabalho e posição são dado de LOCALIZAÇÃO do editor: sair é sair.
+    referenciasDoPerfil = null;
+    posicaoGps = null;
     telaPronta = false;
     saveStats();
     saveFilters();
@@ -4345,9 +4354,84 @@ function showLoading(visible) {
     document.getElementById('loadingCard').classList.toggle('hidden', !visible);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  Perto de mim — ordenar a fila por DISTÂNCIA
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Três ordens novas no mesmo select de "Ordenar por": casa, trabalho e GPS. O
+// celular sabe onde você está e o WME de mesa não, e um pedido a 900 m é um
+// pedido que talvez você conheça de verdade.
+//
+// MEDIDO na fila real do owner (374 pedidos, Brasil inteiro): ordenando por
+// casa, só 2 dos 20 primeiros coincidem com a ordem atual — ou seja, isto
+// mostra pedidos que hoje ficam enterrados. São 1 a menos de 1 km, 9 dentro de
+// 20 km e 19 dentro de 100 km, invisíveis numa fila por data.
+//
+// A REFERÊNCIA NÃO MORA NO AppState, e isso não é estilo: o `AppState` inteiro
+// entra no diagnóstico que o editor manda por WhatsApp, e a coordenada da casa
+// dele não pode viajar junto com um relato de bug. Por isso ela vive aqui, em
+// escopo de módulo, e some no logout junto com o resto.
+let referenciasDoPerfil = null;   // { casa: [lat, lon]|null, trabalho: [lat, lon]|null }
+let posicaoGps = null;            // { ll: [lat, lon], precisaoM } — NUNCA persistida
+
+// As ordens que medem distância em vez de data.
+const ORDENS_POR_DISTANCIA = ['casa', 'trabalho', 'gps'];
+const ORDEM_PADRAO = 'newest';
+
+function referenciaDaOrdem(ordem) {
+    if (ordem === 'gps') return posicaoGps && posicaoGps.ll;
+    if (ordem === 'casa') return referenciasDoPerfil && referenciasDoPerfil.casa;
+    if (ordem === 'trabalho') return referenciasDoPerfil && referenciasDoPerfil.trabalho;
+    return null;
+}
+
+// Haversine, em km, entre dois pares [lat, lon].
+//
+// O core tem `distanciaEntrePontos`, e ele NÃO serve aqui por dois motivos:
+// é módulo de servidor (o app.js é script clássico, não importa de lá) e é
+// equiretangular, calibrado pra menos de 1 km. Aqui a fila cobre o país
+// inteiro — medido, de 0,9 km a 2.830 km — e nessa escala a aproximação
+// reordena. A ordem É o produto deste recurso.
+function distanciaKm(a, b) {
+    const R = 6371, rad = Math.PI / 180;
+    const dLat = (b[0] - a[0]) * rad, dLon = (b[1] - a[1]) * rad;
+    const h = Math.sin(dLat / 2) ** 2
+        + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// A coordenada do pedido, SEMPRE [lat, lon].
+//
+// CUIDADO COM A ORDEM — as duas pontas do app usam ordens diferentes e isso já
+// me pegou: `place.mapa.centro` vem do `pontoDeGeometria` do core, que INVERTE
+// o GeoJSON de propósito e devolve [lat, lon]; o `homeLocation` do Waze é
+// GeoJSON CRU, [lon, lat], e o core já o converte antes de mandar. Ler o centro
+// como [lon, lat] não dá erro: dá uma ordenação plausível e ERRADA (medido:
+// 500 pedidos "a ~4.000 km", todos praticamente iguais).
+function pontoDoPlace(p) {
+    const c = p && p.mapa && p.mapa.centro;
+    if (Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1])) return c;
+    if (Number.isFinite(p && p.lat) && Number.isFinite(p && p.lon)) return [p.lat, p.lon];
+    return null;
+}
+
 // Ordena a fila por data do pedido conforme AppState.filters.sortOrder. Client-side:
 // o Waze devolve tudo de uma vez, então ordenar localmente é confiável (B6).
 function sortQueue() {
+    const ref = referenciaDaOrdem(AppState.filters.sortOrder);
+    if (ref) {
+        AppState.queue.sort((a, b) => {
+            // Pedido SEM coordenada vai pro FIM — a MESMA regra que o sort por
+            // data já usa pra pedido sem data. "Não dá pra ordenar" não é
+            // "primeiro da fila". Medido: 0 de 374 na fila do owner, mas o
+            // core devolve `mapa: null` quando não há coordenada nenhuma.
+            const da = pontoDoPlace(a), db = pontoDoPlace(b);
+            if (!da) return db ? 1 : 0;
+            if (!db) return -1;
+            return distanciaKm(ref, da) - distanciaKm(ref, db);
+        });
+        return;
+    }
     const asc = AppState.filters.sortOrder === 'oldest';
     AppState.queue.sort((a, b) => {
         // Pedido SEM data vai pro FIM, nos dois sentidos — e o `|| 0` que
@@ -4370,6 +4454,139 @@ function sortQueue() {
         if (db === null) return -1;
         return asc ? da - db : db - da;
     });
+}
+
+// Pede a posição ao aparelho. APROXIMADA de propósito (`enableHighAccuracy:
+// false`): pra ORDENAR uma fila, errar 1 km não muda a ordem que importa, e
+// ligar o GPS fino acende o rádio e demora — a pessoa pediu uma ordem, não uma
+// rota. Quem decide a precisão de verdade é o sistema: no Android 12+ a pessoa
+// escolhe "precisa" ou "aproximada" ao conceder, e a app não força nada.
+//
+// NUNCA é chamada na abertura: só quando o editor ESCOLHE "Perto de mim" no
+// filtro. Permissão pedida sem gesto é a interrupção que a régua da casa proíbe.
+// Só aceita par numérico: o servidor pode mudar e um `null`/string aqui viraria
+// NaN na distância, que ordena de forma imprevisível em vez de falhar.
+const parDeCoordenadas = (v) =>
+    (Array.isArray(v) && Number.isFinite(v[0]) && Number.isFinite(v[1]) ? [v[0], v[1]] : null);
+
+// Guarda casa/trabalho da resposta do perfil. Fora do AppState, de propósito.
+function guardarReferencias(res) {
+    const r = res && res.referencias;
+    referenciasDoPerfil = r
+        ? { casa: parDeCoordenadas(r.casa), trabalho: parDeCoordenadas(r.trabalho) }
+        : null;
+    // A referência pode chegar DEPOIS da primeira página (perfil e fila são
+    // buscados em paralelo). Sem isto, quem salvou "perto de casa" veria a
+    // primeira fila da sessão em ordem de data com o filtro dizendo outra
+    // coisa. Só reordena antes de haver card na tela: re-ordenar por baixo de
+    // um card já exibido trocaria o topo da fila sem trocar o que se vê.
+    if (!AppState.currentPlace
+        && ORDENS_POR_DISTANCIA.includes(AppState.filters.sortOrder)
+        && referenciaDaOrdem(AppState.filters.sortOrder)) {
+        sortQueue();
+    }
+}
+
+const GPS_TIMEOUT_MS = 10000;
+function pedirPosicao() {
+    return new Promise((resolve) => {
+        if (!navigator.geolocation) { resolve(null); return; }
+        navigator.geolocation.getCurrentPosition(
+            (pos) => resolve({ ll: [pos.coords.latitude, pos.coords.longitude],
+                               precisaoM: Math.round(pos.coords.accuracy || 0) }),
+            // Negar, expirar e "indisponível" caem no MESMO lugar de propósito:
+            // pro editor os três são "não deu", e a saída é a mesma.
+            () => resolve(null),
+            { enableHighAccuracy: false, timeout: GPS_TIMEOUT_MS, maximumAge: 300000 }
+        );
+    });
+}
+
+// A linha sob o select: de onde sai a referência, e o que houve com a permissão.
+function atualizarDicaDeOrdem(estado) {
+    const el = document.getElementById('filterSortHint');
+    if (!el) return;
+    const cores = {
+        neutro: 'text-slate-500 dark:text-slate-400',
+        ok: 'text-emerald-700 dark:text-emerald-400',
+        alerta: 'text-amber-700 dark:text-amber-300',
+    };
+    const mapa = {
+        perfil: ['filters.sort.hint.perfil', 'neutro', {}],
+        pedindo: ['filters.sort.hint.pedindo', 'neutro', {}],
+        ok: ['filters.sort.hint.ok', 'ok', { m: (posicaoGps && posicaoGps.precisaoM) || 0 }],
+        negado: ['filters.sort.hint.negado', 'alerta', { padrao: t('filters.sort.' + ORDEM_PADRAO) }],
+    };
+    const item = mapa[estado];
+    el.classList.toggle('hidden', !item);
+    if (!item) return;
+    el.className = 'text-[0.6875rem] mt-1 ' + cores[item[1]];
+    el.textContent = t(item[0], item[2]);
+}
+
+// Monta as opções do "Ordenar por". As de DISTÂNCIA só entram quando há de onde
+// medir: casa/trabalho dependem do perfil no WME (nem todo editor cadastrou) e o
+// GPS depende de o aparelho ter a API. Oferecer o que não dá pra cumprir é beco
+// sem saída — a mesma régua que tirou a extensão de Chrome da frente no celular.
+// Uma ordem só vale se houver de onde medir AGORA: perfil sem casa, aparelho
+// sem GPS ou permissão negada caem no padrão. Sem esta peneira, `sortOrder`
+// ficaria num valor que o `sortQueue` ignora — a fila sairia por data com o
+// filtro afirmando distância, calado.
+function ordemValida(v) {
+    if (v === 'oldest' || v === 'newest') return v;
+    if (ORDENS_POR_DISTANCIA.includes(v) && referenciaDaOrdem(v)) return v;
+    return ORDEM_PADRAO;
+}
+
+function popularOrdenacoes() {
+    const sel = document.getElementById('filterSort');
+    if (!sel) return;
+    const disponivel = {
+        casa: !!(referenciasDoPerfil && referenciasDoPerfil.casa),
+        trabalho: !!(referenciasDoPerfil && referenciasDoPerfil.trabalho),
+        gps: !!(typeof navigator !== 'undefined' && navigator.geolocation),
+    };
+    for (const ordem of ORDENS_POR_DISTANCIA) {
+        const existente = sel.querySelector('option[value="' + ordem + '"]');
+        if (!disponivel[ordem]) { if (existente) existente.remove(); continue; }
+        const opt = existente || document.createElement('option');
+        opt.value = ordem;
+        // O emoji vem do dicionário (como em toast.langChanged e card.stamp.*),
+        // então `applyI18n` já o troca junto com o texto.
+        opt.textContent = t('filters.sort.' + ordem);
+        if (!existente) sel.appendChild(opt);
+    }
+    // Ordem salva que não existe mais neste perfil/aparelho volta ao padrão em
+    // vez de deixar o select num valor fantasma (que o browser mostra VAZIO).
+    if (!sel.querySelector('option[value="' + sel.value + '"]')) sel.value = ORDEM_PADRAO;
+}
+
+// Trocar pra "Perto de mim" PEDE a posição na hora, e não no Aplicar: o
+// resultado da permissão precisa caber na mesma tela em que a escolha foi feita.
+// Negado, a ordem volta sozinha pro padrão — deixar "Perto de mim" selecionado
+// sem posição seria um filtro que mente sobre o que vai fazer.
+async function aoTrocarOrdenacao() {
+    const sel = document.getElementById('filterSort');
+    if (!sel) return;
+    if (sel.value !== 'gps') {
+        atualizarDicaDeOrdem(sel.value === 'casa' || sel.value === 'trabalho' ? 'perfil' : null);
+        return;
+    }
+    if (posicaoGps) { atualizarDicaDeOrdem('ok'); return; }
+    atualizarDicaDeOrdem('pedindo');
+    const pos = await pedirPosicao();
+    // A pessoa pode ter mudado o select enquanto o prompt estava aberto.
+    if (sel.value !== 'gps') return;
+    if (!pos) {
+        posicaoGps = null;
+        sel.value = ORDEM_PADRAO;
+        atualizarDicaDeOrdem('negado');
+        dfato('gps.negado');
+        return;
+    }
+    posicaoGps = pos;
+    atualizarDicaDeOrdem('ok');
+    dfato('gps.ok', { precisaoM: pos.precisaoM });
 }
 
 // Acumula as categorias vistas nos places carregados — fonte do filtro de categoria (B5).
@@ -8628,7 +8845,12 @@ function loadFilters() {
             AppState.filters.myArea = !!parsed.myArea;
             AppState.filters.unreadOnly = parsed.unreadOnly !== false;
             AppState.filters.categories = Array.isArray(parsed.categories) ? parsed.categories : [];
-            AppState.filters.sortOrder = parsed.sortOrder === 'oldest' ? 'oldest' : 'newest';
+            // O GPS NUNCA volta de uma sessão anterior: posição é um momento e
+            // amanhã a pessoa está em outro lugar — restaurá-la ordenaria a fila
+            // por onde ela esteve ontem. Casa e trabalho voltam (saem do perfil
+            // a cada sessão), e o `ordemValida` confere se ainda existem.
+            AppState.filters.sortOrder = ['oldest', 'casa', 'trabalho'].includes(parsed.sortOrder)
+                ? parsed.sortOrder : ORDEM_PADRAO;
         }
     } catch (e) {}
 }
