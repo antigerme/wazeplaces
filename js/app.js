@@ -4246,8 +4246,8 @@ function renderProfileHeader() {
     rankEl.textContent = tags.join(' · ');
     // Pontos/edições no tooltip do badge (feature barata; já vem do /Session).
     const pstats = [];
-    if (p.totalPoints) pstats.push(t('profile.points', { n: Number(p.totalPoints).toLocaleString(i18nLocale()) }));
-    if (p.totalEdits) pstats.push(t('profile.edits', { n: Number(p.totalEdits).toLocaleString(i18nLocale()) }));
+    if (p.totalPoints) pstats.push(t('profile.points', { n: Number(p.totalPoints) }));
+    if (p.totalEdits) pstats.push(t('profile.edits', { n: Number(p.totalEdits) }));
     badge.title = pstats.length ? ((p.userName || '') + ' — ' + pstats.join(' · ')) : (p.userName || '');
     badge.classList.remove('hidden');
     const brandTitle = document.getElementById('brandTitle');
@@ -6947,6 +6947,23 @@ function msgDoServidor(result, textoFallback) {
     return (result && result.error) || textoFallback;
 }
 
+// CONTAGEM SAI CRUA — decisão do owner (2026-09-15): "não vamos entrar nessa
+// brincadeira de ponto e vírgula; número cru é super portável para qualquer
+// idioma". Vale pro placar, pras linhas do Histórico, pro cartão da patente,
+// pras estatísticas do perfil e pra imagem do Resumo do mês.
+//
+// O caso que originou a decisão: o cartão da patente nasceu formatado
+// (`3.040`) quatro linhas acima de números que sempre foram crus (`1430`), e a
+// app se contradizia na mesma tela. Havia dois consertos possíveis — formatar
+// tudo ou não formatar nada — e o owner escolheu o segundo, com o argumento de
+// que `1430` se lê igual em qualquer língua e `1.430` não.
+//
+// O QUE NÃO ENTRA NESSA REGRA, e a diferença não é detalhe:
+//   • DATA (`toLocaleDateString`) — não é número.
+//   • MEDIDA COM DECIMAL (`1,2 km`, `84,5 m`) — ali o separador é ARITMÉTICA:
+//     `1.2` lido por um brasileiro é mil e duzentos. Segue no locale.
+// `test/layout.test.mjs` cobra as duas pontas: contagem crua, decimal no locale.
+
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
     return String(str)
@@ -7371,12 +7388,11 @@ function htmlPatente() {
     const pct = prox ? Math.max(0, Math.min(100,
         Math.round(((tratados - atual.min) / (prox.min - atual.min)) * 100))) : 100;
     const nome = (r) => escapeHtml(t('conq.rank.' + r.id));
-    const num = (n) => n.toLocaleString(i18nLocale());
 
     const degraus = escadaAberta ? PATENTES.map((r, k) => `
         <div class="conq-deg${k === i ? ' aqui' : ''}">
             <span class="e">${r.emoji}</span><span class="n">${nome(r)}</span>
-            <span class="a tnum">${num(r.min)}</span>
+            <span class="a tnum">${r.min}</span>
             <span class="m" aria-hidden="true">${k < i ? '✓' : k === i ? '●' : ''}</span>
         </div>`).join('') : '';
 
@@ -7387,13 +7403,13 @@ function htmlPatente() {
                 <div class="conq-eyebrow">${escapeHtml(t('conq.patente.titulo'))}</div>
                 <div class="conq-nome">${nome(atual)}</div>
             </div>
-            <div class="conq-tot tnum"><span class="conq-num">${num(tratados)}</span><br>
+            <div class="conq-tot tnum"><span class="conq-num">${tratados}</span><br>
                 <span class="conq-sub">${escapeHtml(t('conq.patente.tratados'))}</span></div>
         </div>
         <div class="conq-barra"><i style="width:${pct}%"></i></div>
         <div class="conq-rodape conq-sub tnum">
             <span>${prox ? escapeHtml(t('conq.patente.faltam',
-                { n: num(prox.min - tratados), p: prox.emoji + ' ' + t('conq.rank.' + prox.id) }))
+                { n: prox.min - tratados, p: prox.emoji + ' ' + t('conq.rank.' + prox.id) }))
                 : escapeHtml(t('conq.patente.topo'))}</span>
             <button type="button" id="conqEscadaBtn" class="conq-link" aria-expanded="${escadaAberta}">${
                 escapeHtml(t(escadaAberta ? 'conq.patente.verMenos' : 'conq.patente.ver'))}</button>
@@ -7630,15 +7646,15 @@ async function gerarResumoDoMes() {
         marca: 'WazePlaces',
         periodo: (mesNome + ' · ' + d.ano).toLocaleUpperCase(loc),
         limpou: t('resumo.img.limpou', { nome: p.userName || '' }),
-        total: d.total.toLocaleString(loc),
+        total: String(d.total),
         pedidos: t('resumo.img.pedidos'),
         tiles: [
-            [d.rejeitados.toLocaleString(loc), t('resumo.img.rejeitados'), '#fb7185'],
-            [d.lidos.toLocaleString(loc), t('resumo.img.lidos'), '#34d399'],
+            [String(d.rejeitados), t('resumo.img.rejeitados'), '#fb7185'],
+            [String(d.lidos), t('resumo.img.lidos'), '#34d399'],
         ],
-        forteRotulo: t('resumo.img.diaForte'), forteValor: forteData, forteN: d.forte.n.toLocaleString(loc),
+        forteRotulo: t('resumo.img.diaForte'), forteValor: forteData, forteN: String(d.forte.n),
         ativosRotulo: t('resumo.img.diasAtivos'),
-        ativosValor: t('resumo.img.diasDe', { n: d.diasAtivos.toLocaleString(loc), de: d.diasNoMes.toLocaleString(loc) }),
+        ativosValor: t('resumo.img.diasDe', { n: d.diasAtivos, de: d.diasNoMes }),
         serieRotulo: t('resumo.img.diaADia', { mes: mesNome }),
         editor: t('resumo.img.editor', { selos: selos.join(' · ') }),
         tagline: t('resumo.img.tagline'),
@@ -9055,9 +9071,13 @@ const COUNT_ANIM_MAX_MS = 650;
 // conta uma história falsa. Medido: 7/2/1/99 contando até 0/0/0/3 levava ~1s.
 function setCount(el, valor, sufixo = '', semAnimar = false) {
     if (!el) return;
+    // Os QUATRO pontos de escrita passam pelo mesmo lugar — inclusive os
+    // quadros da animação. Hoje ele só concatena o sufixo, mas é o que garante
+    // que o '+' do "Restam" não fique de fora de um deles.
+    const esc = (n) => String(n) + sufixo;
     if (semAnimar) {
         if (el._countRaf) cancelAnimationFrame(el._countRaf);
-        el.textContent = String(valor) + sufixo;
+        el.textContent = esc(valor);
         return;
     }
     const anterior = parseInt(String(el.textContent).replace(/\D/g, ''), 10);
@@ -9065,12 +9085,12 @@ function setCount(el, valor, sufixo = '', semAnimar = false) {
     const mudou = !Number.isFinite(anterior) || anterior !== alvo;
 
     if (!Number.isFinite(alvo) || prefersReducedMotion()) {
-        el.textContent = String(valor) + sufixo;
+        el.textContent = esc(valor);
         return;
     }
     // Sem valor anterior legível ('—', '…'): escreve direto, mas ainda pula.
     if (!Number.isFinite(anterior) || Math.abs(alvo - anterior) < 2) {
-        el.textContent = String(alvo) + sufixo;
+        el.textContent = esc(alvo);
         if (mudou) popCount(el);
         return;
     }
@@ -9083,7 +9103,7 @@ function setCount(el, valor, sufixo = '', semAnimar = false) {
     const passo = (agora) => {
         const p = Math.min(1, (agora - inicio) / dur);
         const eased = 1 - Math.pow(1 - p, 3); // ease-out: rápido no começo
-        el.textContent = String(Math.round(anterior + (alvo - anterior) * eased)) + sufixo;
+        el.textContent = esc(Math.round(anterior + (alvo - anterior) * eased));
         if (p < 1) el._countRaf = requestAnimationFrame(passo);
         else el._countRaf = null;
     };

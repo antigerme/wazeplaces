@@ -2779,3 +2779,54 @@ test('prévias: a tela de entrada não custa banda de quem já entrou', () => {
   assert.equal((min.match(/loading="lazy"/g) || []).length >= 3, true,
     'o gerado não tem os loading="lazy" — rode `npm run html`');
 });
+
+test('contagem sai CRUA — e decimal e data seguem o locale', () => {
+  const app = read('js/app.js');
+  // Decisão do owner (2026-09-15): "não vamos entrar nessa brincadeira de ponto
+  // e vírgula; número cru é super portável para qualquer idioma". Este guard
+  // existe porque a tentação de "arrumar" isso volta — ela já voltou uma vez,
+  // e o conserto anterior (formatar tudo) chegou a ser escrito e medido.
+  assert.ok(!app.includes('fmtContagem'),
+    'voltou um formatador de contagem. A regra é número cru — ver o comentário acima do escapeHtml.');
+
+  // O placar: TODA escrita de textContent passa pelo mesmo lugar (é ele que
+  // garante o sufixo "+" do "Restam"), e nenhuma delas formata. Âncora na
+  // ESTRUTURA — a função inteira, até a próxima declaração de topo (gotcha #67).
+  const ini = app.indexOf('function setCount(');
+  assert.ok(ini > 0, 'sumiu o setCount');
+  const resto = app.slice(ini + 1);
+  const corpo = app.slice(ini, ini + 1 + resto.search(/\n(?:function |const |\/\/ ──)/));
+  const escritas = [...corpo.matchAll(/el\.textContent\s*=\s*([^;]+);/g)].map((m) => m[1].trim());
+  assert.ok(escritas.length >= 4,
+    `esperava pelo menos 4 escritas de textContent no setCount, achei ${escritas.length}`);
+  for (const e of escritas) {
+    assert.match(e, /^esc\(/, `o placar escreve fora do caminho único: "${e}" — o sufixo "+" ficaria de fora`);
+  }
+  assert.ok(!/toLocaleString/.test(corpo), 'o placar voltou a formatar número');
+
+  // As linhas do Histórico e o cartão da patente, que ficam na MESMA tela e
+  // foram justamente onde as duas convenções apareceram lado a lado.
+  for (const nome of ['renderHistory', 'htmlPatente']) {
+    const i = app.indexOf('function ' + nome + '(');
+    assert.ok(i > 0, `sumiu o ${nome}`);
+    const r = app.slice(i + 1);
+    const c = app.slice(i, i + 1 + r.search(/\n(?:function |const |\/\/ ──)/));
+    assert.ok(!/toLocaleString\(i18nLocale\(\)\)/.test(c),
+      `${nome} voltou a formatar contagem no locale`);
+  }
+
+  // CONTRAPROVA de que o varredor enxerga o arquivo certo: o que é DECIMAL e o
+  // que é DATA continuam no locale. Sem isto, "não achei toLocaleString" também
+  // passaria se eu tivesse fatiado o arquivo errado — ou se alguém tivesse
+  // arrancado a formatação de distância junto, que seria um bug: `1.2` lido por
+  // um brasileiro é mil e duzentos.
+  // COLADA no que guarda, nunca por distância: `[^]{0,120}` alcançava outro
+  // `toLocaleString` vizinho e passava com a distância já sabotada — gotcha #67,
+  // e foi preciso sabotar pra descobrir que a asserção era decoração.
+  const emKm = [...app.matchAll(/\(bonito \/ 1000\)\.toLocaleString\(i18nLocale\(\)\)/g)].length;
+  assert.equal(emKm, 2,
+    `a distância em km perdeu o locale em ${2 - emKm} dos 2 lugares (card e mapa ampliado) — `
+    + 'ali o separador é ARITMÉTICA: `1.2` lido por um brasileiro é mil e duzentos');
+  assert.match(app, /new Date\([^)]*\)\.toLocaleDateString\(i18nLocale\(\)/,
+    'controle: sumiu a formatação de DATA, que deve continuar no locale');
+});
