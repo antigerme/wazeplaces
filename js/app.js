@@ -4246,8 +4246,8 @@ function renderProfileHeader() {
     rankEl.textContent = tags.join(' · ');
     // Pontos/edições no tooltip do badge (feature barata; já vem do /Session).
     const pstats = [];
-    if (p.totalPoints) pstats.push(t('profile.points', { n: Number(p.totalPoints).toLocaleString(i18nLocale()) }));
-    if (p.totalEdits) pstats.push(t('profile.edits', { n: Number(p.totalEdits).toLocaleString(i18nLocale()) }));
+    if (p.totalPoints) pstats.push(t('profile.points', { n: Number(p.totalPoints) }));
+    if (p.totalEdits) pstats.push(t('profile.edits', { n: Number(p.totalEdits) }));
     badge.title = pstats.length ? ((p.userName || '') + ' — ' + pstats.join(' · ')) : (p.userName || '');
     badge.classList.remove('hidden');
     const brandTitle = document.getElementById('brandTitle');
@@ -6947,22 +6947,22 @@ function msgDoServidor(result, textoFallback) {
     return (result && result.error) || textoFallback;
 }
 
-// Contagem é NÚMERO, e número se escreve no locale de quem lê — a mesma régua
-// que já vale pra distância, data e pontos do perfil. Fonte ÚNICA dos três
-// lugares que mostram contagem grande: o placar, as linhas do Histórico e o
-// cartão da patente.
+// CONTAGEM SAI CRUA — decisão do owner (2026-09-15): "não vamos entrar nessa
+// brincadeira de ponto e vírgula; número cru é super portável para qualquer
+// idioma". Vale pro placar, pras linhas do Histórico, pro cartão da patente,
+// pras estatísticas do perfil e pra imagem do Resumo do mês.
 //
-// Sem isto a app se contradizia NA MESMA TELA: o cartão da patente mostrava
-// `3.040` e a linha "Total", quatro linhas abaixo, mostrava `1430`. A linha do
-// Histórico sempre foi crua; só não dava pra ver enquanto não havia nada
-// formatado por perto.
+// O caso que originou a decisão: o cartão da patente nasceu formatado
+// (`3.040`) quatro linhas acima de números que sempre foram crus (`1430`), e a
+// app se contradizia na mesma tela. Havia dois consertos possíveis — formatar
+// tudo ou não formatar nada — e o owner escolheu o segundo, com o argumento de
+// que `1430` se lê igual em qualquer língua e `1.430` não.
 //
-// Valor não-numérico ('—' quando deslogado) passa direto: quem escreve aquilo
-// não está contando nada.
-function fmtContagem(valor) {
-    const n = Number(valor);
-    return Number.isFinite(n) ? n.toLocaleString(i18nLocale()) : String(valor);
-}
+// O QUE NÃO ENTRA NESSA REGRA, e a diferença não é detalhe:
+//   • DATA (`toLocaleDateString`) — não é número.
+//   • MEDIDA COM DECIMAL (`1,2 km`, `84,5 m`) — ali o separador é ARITMÉTICA:
+//     `1.2` lido por um brasileiro é mil e duzentos. Segue no locale.
+// `test/layout.test.mjs` cobra as duas pontas: contagem crua, decimal no locale.
 
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
@@ -7392,7 +7392,7 @@ function htmlPatente() {
     const degraus = escadaAberta ? PATENTES.map((r, k) => `
         <div class="conq-deg${k === i ? ' aqui' : ''}">
             <span class="e">${r.emoji}</span><span class="n">${nome(r)}</span>
-            <span class="a tnum">${fmtContagem(r.min)}</span>
+            <span class="a tnum">${r.min}</span>
             <span class="m" aria-hidden="true">${k < i ? '✓' : k === i ? '●' : ''}</span>
         </div>`).join('') : '';
 
@@ -7403,13 +7403,13 @@ function htmlPatente() {
                 <div class="conq-eyebrow">${escapeHtml(t('conq.patente.titulo'))}</div>
                 <div class="conq-nome">${nome(atual)}</div>
             </div>
-            <div class="conq-tot tnum"><span class="conq-num">${fmtContagem(tratados)}</span><br>
+            <div class="conq-tot tnum"><span class="conq-num">${tratados}</span><br>
                 <span class="conq-sub">${escapeHtml(t('conq.patente.tratados'))}</span></div>
         </div>
         <div class="conq-barra"><i style="width:${pct}%"></i></div>
         <div class="conq-rodape conq-sub tnum">
             <span>${prox ? escapeHtml(t('conq.patente.faltam',
-                { n: fmtContagem(prox.min - tratados), p: prox.emoji + ' ' + t('conq.rank.' + prox.id) }))
+                { n: prox.min - tratados, p: prox.emoji + ' ' + t('conq.rank.' + prox.id) }))
                 : escapeHtml(t('conq.patente.topo'))}</span>
             <button type="button" id="conqEscadaBtn" class="conq-link" aria-expanded="${escadaAberta}">${
                 escapeHtml(t(escadaAberta ? 'conq.patente.verMenos' : 'conq.patente.ver'))}</button>
@@ -7646,15 +7646,15 @@ async function gerarResumoDoMes() {
         marca: 'WazePlaces',
         periodo: (mesNome + ' · ' + d.ano).toLocaleUpperCase(loc),
         limpou: t('resumo.img.limpou', { nome: p.userName || '' }),
-        total: d.total.toLocaleString(loc),
+        total: String(d.total),
         pedidos: t('resumo.img.pedidos'),
         tiles: [
-            [d.rejeitados.toLocaleString(loc), t('resumo.img.rejeitados'), '#fb7185'],
-            [d.lidos.toLocaleString(loc), t('resumo.img.lidos'), '#34d399'],
+            [String(d.rejeitados), t('resumo.img.rejeitados'), '#fb7185'],
+            [String(d.lidos), t('resumo.img.lidos'), '#34d399'],
         ],
-        forteRotulo: t('resumo.img.diaForte'), forteValor: forteData, forteN: d.forte.n.toLocaleString(loc),
+        forteRotulo: t('resumo.img.diaForte'), forteValor: forteData, forteN: String(d.forte.n),
         ativosRotulo: t('resumo.img.diasAtivos'),
-        ativosValor: t('resumo.img.diasDe', { n: d.diasAtivos.toLocaleString(loc), de: d.diasNoMes.toLocaleString(loc) }),
+        ativosValor: t('resumo.img.diasDe', { n: d.diasAtivos, de: d.diasNoMes }),
         serieRotulo: t('resumo.img.diaADia', { mes: mesNome }),
         editor: t('resumo.img.editor', { selos: selos.join(' · ') }),
         tagline: t('resumo.img.tagline'),
@@ -8396,8 +8396,8 @@ function renderHistory() {
         : rows.map(([k, v]) =>
             `<div class="flex justify-between items-baseline text-sm py-0.5">` +
             `<span class="text-slate-600 dark:text-slate-300">${escapeHtml(t('stats.history.' + k))}</span>` +
-            `<span class="tnum font-medium"><span class="text-emerald-700 dark:text-emerald-400">${fmtContagem(v.read)}</span>` +
-            ` · <span class="text-rose-600 dark:text-rose-400">${fmtContagem(v.rejected)}</span></span></div>`
+            `<span class="tnum font-medium"><span class="text-emerald-700 dark:text-emerald-400">${v.read}</span>` +
+            ` · <span class="text-rose-600 dark:text-rose-400">${v.rejected}</span></span></div>`
         ).join(''));
     // O Resumo do mês só se oferece quando há mês: botão pra um mês vazio é
     // convite pra uma imagem em branco.
@@ -9071,10 +9071,10 @@ const COUNT_ANIM_MAX_MS = 650;
 // conta uma história falsa. Medido: 7/2/1/99 contando até 0/0/0/3 levava ~1s.
 function setCount(el, valor, sufixo = '', semAnimar = false) {
     if (!el) return;
-    // Os QUATRO pontos de escrita passam pelo mesmo formatador, inclusive os
-    // quadros da animação: formatar só o valor final faria o número trocar de
-    // forma no último quadro, na frente de quem está olhando.
-    const esc = (n) => fmtContagem(n) + sufixo;
+    // Os QUATRO pontos de escrita passam pelo mesmo lugar — inclusive os
+    // quadros da animação. Hoje ele só concatena o sufixo, mas é o que garante
+    // que o '+' do "Restam" não fique de fora de um deles.
+    const esc = (n) => String(n) + sufixo;
     if (semAnimar) {
         if (el._countRaf) cancelAnimationFrame(el._countRaf);
         el.textContent = esc(valor);

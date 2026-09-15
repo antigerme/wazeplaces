@@ -8,12 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
-## v2026.09.14-05
+## v2026.09.15-01
 
-### Corrigido
-- **Os números do app agora seguem o seu idioma em todo lugar.** O placar e as linhas da aba *Histórico* mostravam `1430` enquanto o cartão da patente, quatro linhas abaixo, mostrava `3.040` — a mesma grandeza escrita de dois jeitos na mesma tela.
+### Melhorado
+- **Os números agora aparecem crus, sem ponto nem vírgula de milhar.** `1430`, não `1.430` — em qualquer idioma. Vale para o placar do topo, as linhas da aba *Histórico*, o cartão da patente, as estatísticas do seu perfil e a imagem do Resumo do mês.
 
-  Agora todos passam pelo mesmo formatador e saem na convenção da sua língua: `1.430` em português, `1,430` em inglês, `1 430` em francês — e `1430` em espanhol, que é o certo lá (o espanhol só separa a partir de cinco dígitos).
+  O motivo: número cru se lê igual em todo lugar. Quando o app mistura convenções, `1.430` é mil e quatrocentos para um brasileiro e **um vírgula quatro** para um americano — e não havia como o app acertar os dois ao mesmo tempo.
+
+  **Distâncias e datas não mudam**, e a diferença não é detalhe: em `1,2 km` o separador é conta, não estilo. Tirá-lo faria `1.2 km` ser lido como 1200 m.
 
 ---
 

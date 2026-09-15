@@ -2780,18 +2780,18 @@ test('prévias: a tela de entrada não custa banda de quem já entrou', () => {
     'o gerado não tem os loading="lazy" — rode `npm run html`');
 });
 
-test('contagem grande se escreve no locale — no placar E no Histórico', () => {
+test('contagem sai CRUA — e decimal e data seguem o locale', () => {
   const app = read('js/app.js');
-  // UM formatador, não três. Antes havia cópia local no cartão da patente e
-  // nada no placar nem nas linhas — e a app se contradizia na MESMA TELA:
-  // `3.040` no cartão, `1430` na linha "Total" quatro linhas abaixo.
-  assert.match(app, /function fmtContagem\(valor\) \{/, 'sumiu o formatador único de contagem');
-  assert.match(app, /Number\.isFinite\(n\) \? n\.toLocaleString\(i18nLocale\(\)\)/,
-    'o formatador deixou de usar o locale de quem lê');
+  // Decisão do owner (2026-09-15): "não vamos entrar nessa brincadeira de ponto
+  // e vírgula; número cru é super portável para qualquer idioma". Este guard
+  // existe porque a tentação de "arrumar" isso volta — ela já voltou uma vez,
+  // e o conserto anterior (formatar tudo) chegou a ser escrito e medido.
+  assert.ok(!app.includes('fmtContagem'),
+    'voltou um formatador de contagem. A regra é número cru — ver o comentário acima do escapeHtml.');
 
-  // TODO ponto que escreve o número do placar passa pelo formatador. Âncora na
-  // ESTRUTURA (a função inteira, delimitada pela próxima declaração de topo),
-  // nunca em distância — gotcha #67.
+  // O placar: TODA escrita de textContent passa pelo mesmo lugar (é ele que
+  // garante o sufixo "+" do "Restam"), e nenhuma delas formata. Âncora na
+  // ESTRUTURA — a função inteira, até a próxima declaração de topo (gotcha #67).
   const ini = app.indexOf('function setCount(');
   assert.ok(ini > 0, 'sumiu o setCount');
   const resto = app.slice(ini + 1);
@@ -2800,21 +2800,33 @@ test('contagem grande se escreve no locale — no placar E no Histórico', () =>
   assert.ok(escritas.length >= 4,
     `esperava pelo menos 4 escritas de textContent no setCount, achei ${escritas.length}`);
   for (const e of escritas) {
-    assert.match(e, /^esc\(/,
-      `o placar voltou a escrever número cru: "${e}". Formatar só o valor final faz o `
-      + 'número trocar de forma no último quadro da animação, na frente de quem olha.');
+    assert.match(e, /^esc\(/, `o placar escreve fora do caminho único: "${e}" — o sufixo "+" ficaria de fora`);
+  }
+  assert.ok(!/toLocaleString/.test(corpo), 'o placar voltou a formatar número');
+
+  // As linhas do Histórico e o cartão da patente, que ficam na MESMA tela e
+  // foram justamente onde as duas convenções apareceram lado a lado.
+  for (const nome of ['renderHistory', 'htmlPatente']) {
+    const i = app.indexOf('function ' + nome + '(');
+    assert.ok(i > 0, `sumiu o ${nome}`);
+    const r = app.slice(i + 1);
+    const c = app.slice(i, i + 1 + r.search(/\n(?:function |const |\/\/ ──)/));
+    assert.ok(!/toLocaleString\(i18nLocale\(\)\)/.test(c),
+      `${nome} voltou a formatar contagem no locale`);
   }
 
-  // E as linhas do Histórico, que eram justamente as cruas.
-  const iH = app.indexOf('function renderHistory(');
-  assert.ok(iH > 0, 'sumiu o renderHistory');
-  const restoH = app.slice(iH + 1);
-  const corpoH = app.slice(iH, iH + 1 + restoH.search(/\n(?:function |const |\/\/ ──)/));
-  assert.match(corpoH, /\$\{fmtContagem\(v\.read\)\}/, 'a linha do Histórico voltou a mostrar "lidos" cru');
-  assert.match(corpoH, /\$\{fmtContagem\(v\.rejected\)\}/, 'a linha do Histórico voltou a mostrar "rejeitados" cru');
-
-  // CONTRAPROVA de que o varredor enxerga: se ele não achasse escrita nenhuma,
-  // o laço acima passaria vazio e o guard seria decoração.
-  assert.ok(corpo.includes('esc(') && corpo.includes('_countRaf'),
-    'controle: fatiei o setCount errado — o corpo não tem nem o formatador nem o rAF');
+  // CONTRAPROVA de que o varredor enxerga o arquivo certo: o que é DECIMAL e o
+  // que é DATA continuam no locale. Sem isto, "não achei toLocaleString" também
+  // passaria se eu tivesse fatiado o arquivo errado — ou se alguém tivesse
+  // arrancado a formatação de distância junto, que seria um bug: `1.2` lido por
+  // um brasileiro é mil e duzentos.
+  // COLADA no que guarda, nunca por distância: `[^]{0,120}` alcançava outro
+  // `toLocaleString` vizinho e passava com a distância já sabotada — gotcha #67,
+  // e foi preciso sabotar pra descobrir que a asserção era decoração.
+  const emKm = [...app.matchAll(/\(bonito \/ 1000\)\.toLocaleString\(i18nLocale\(\)\)/g)].length;
+  assert.equal(emKm, 2,
+    `a distância em km perdeu o locale em ${2 - emKm} dos 2 lugares (card e mapa ampliado) — `
+    + 'ali o separador é ARITMÉTICA: `1.2` lido por um brasileiro é mil e duzentos');
+  assert.match(app, /new Date\([^)]*\)\.toLocaleDateString\(i18nLocale\(\)/,
+    'controle: sumiu a formatação de DATA, que deve continuar no locale');
 });

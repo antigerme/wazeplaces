@@ -4310,9 +4310,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         const g = carregarConquistas();
         openFiltersModal(); switchFilterTab('filtersTabHistory');
         const numPatente = (document.querySelector('.conq-num') || {}).textContent || '';
-        // A CONVENÇÃO é o que sobra tirando os dígitos: "1.430" → ".", "1430" → "".
-        const sep = (x) => String(x).replace(/[0-9]/g, '');
-        return { numPlacar, numPatente, sepPlacar: sep(numPlacar), sepPatente: sep(numPatente),
+        return { numPlacar, numPatente,
                  base: g.base, ganhas: Object.keys(g.c).length,
                  andarilho: !!g.c.andarilho, viajante: !!g.c.viajante,
                  // O #bannerStack SEMPRE tem 1 filho (o posicionador
@@ -4372,11 +4370,15 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           cru: /conq\.[a-z]/i.test(corpo.textContent) };
       });
 
-      checa(r.sepPlacar === r.sepPatente,
-        `${id}: o placar e o cartão da patente escrevem número de formas diferentes`,
-        `placar "${r.numPlacar}" × patente "${r.numPatente}"`);
-      checa(/\d/.test(r.numPlacar) && /\d/.test(r.numPatente),
-        `${id}: CONTROLE falhou — um dos dois números não tem dígito, a comparação de formato não vale nada`,
+      // Contagem sai CRUA (decisão do owner): só dígito, em todo idioma. O
+      // francês é quem denuncia primeiro — ele separa com espaço ESTREITO
+      // (U+202F), que passa despercebido numa leitura rápida do log.
+      checa(/^\d+$/.test(r.numPlacar),
+        `${id}: o placar voltou a formatar número`, `"${r.numPlacar}"`);
+      checa(/^\d+$/.test(r.numPatente),
+        `${id}: o cartão da patente voltou a formatar número`, `"${r.numPatente}"`);
+      checa(r.numPlacar.length >= 4 && r.numPatente.length >= 4,
+        `${id}: CONTROLE falhou — número com menos de 4 dígitos não distingue cru de formatado`,
         `placar "${r.numPlacar}" × patente "${r.numPatente}"`);
       checa(r.temContainer, `${id}: CONTROLE falhou — o #bannerContainer sumiu, a contagem de banner não vale nada`);
       checa(r.base === true, `${id}: a linha de base não foi marcada`);
@@ -4447,4 +4449,4 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
-  + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (número no locale batendo entre placar e cartão, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
+  + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
