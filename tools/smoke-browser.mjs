@@ -4306,11 +4306,41 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         document.getElementById('appScreen').classList.remove('hidden');
         renderProfileHeader(); updateStats(true); updatePendingCount(true); showLoading(false);
         const numPlacar = document.getElementById('readCount').textContent;
-        checarConquistas();                 // a LINHA DE BASE, que é silenciosa
+        // A ORDEM AQUI É O TESTE, e errá-la dá defeito que parece do produto:
+        // medir o placar com o modal ABERTO acusa 13/13 (o scrim cobre tudo), e
+        // destravar DEPOIS do render deixa a vitrine sem anel. Aconteceu nas
+        // duas, na primeira rodada. Então: base → destrava → mede a tela do
+        // CARD → só então abre o modal.
+        checarConquistas();                 // 1. a LINHA DE BASE, que é silenciosa
+        checarConquistas({ madrugada: true });  // 2. destrava UMA de verdade
         const g = carregarConquistas();
+        const seloAceso = !document.getElementById('conqSelo').classList.contains('hidden');
+        const ariaComSelo = document.getElementById('filtersBtn').getAttribute('aria-label') || '';
+        const bannerNoAviso = document.querySelectorAll('#bannerContainer > *').length;
+        const confeteNoAviso = document.querySelectorAll('.confetti-burst span').length;
+        // 3. Quanto do PLACAR o aviso cobre? Mede a TINTA (gotcha #26), com o
+        // modal FECHADO — `modalAberto` é o controle que denuncia o contrário.
+        const modalAberto = [...document.querySelectorAll('.modal-root')]
+          .filter((mm) => !mm.classList.contains('hidden')).map((mm) => mm.id);
+        let placarCoberto = 0, placarPts = 0;
+        const pl = document.getElementById('placar');
+        if (pl) for (const el of pl.querySelectorAll('*')) {
+          if (!el.firstChild || el.firstChild.nodeType !== 3 || !el.textContent.trim()) continue;
+          const rg = document.createRange(); rg.selectNodeContents(el);
+          const r = rg.getBoundingClientRect(); if (r.width < 2 || r.height < 2) continue;
+          placarPts++;
+          const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          if (t && t !== el && !el.contains(t) && !t.contains(el)) placarCoberto++;
+        }
+        // 4. Agora sim o modal: abrir a aba É ter visto — o selo apaga e o anel
+        // FICA nesta abertura (some só na próxima).
         openFiltersModal(); switchFilterTab('filtersTabHistory');
+        const seloApagou = document.getElementById('conqSelo').classList.contains('hidden');
+        const anelVisivel = document.querySelectorAll('.conq-cel.nova').length;
         const numPatente = (document.querySelector('.conq-num') || {}).textContent || '';
-        return { numPlacar, numPatente,
+        return { numPlacar, numPatente, seloAceso, ariaComSelo, bannerNoAviso, confeteNoAviso,
+                 placarCoberto, placarPts, modalAberto,
+                 seloApagou, anelVisivel,
                  base: g.base, ganhas: Object.keys(g.c).length,
                  andarilho: !!g.c.andarilho, viajante: !!g.c.viajante,
                  // O #bannerStack SEMPRE tem 1 filho (o posicionador
@@ -4383,6 +4413,24 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(r.temContainer, `${id}: CONTROLE falhou — o #bannerContainer sumiu, a contagem de banner não vale nada`);
       checa(r.base === true, `${id}: a linha de base não foi marcada`);
       checa(r.banners === 0, `${id}: a primeira passada anunciou ${r.banners} banner(s) — devia ser silenciosa`);
+      checa(r.seloAceso, `${id}: destravou uma conquista e o selo do #filtersBtn não acendeu`);
+      checa(r.bannerNoAviso === 0,
+        `${id}: a conquista voltou a abrir banner`, `${r.bannerNoAviso} banner(s)`);
+      checa(r.confeteNoAviso === 0,
+        `${id}: a conquista voltou a soltar confete sobre o card`, `${r.confeteNoAviso} pedaços`);
+      checa(r.modalAberto.length === 0,
+        `${id}: CONTROLE falhou — medi o placar com modal aberto, o scrim cobre tudo`,
+        r.modalAberto.join(','));
+      checa(r.placarPts >= 8,
+        `${id}: CONTROLE falhou — só achei ${r.placarPts} nós de texto no placar, a cobertura não vale nada`);
+      checa(r.placarCoberto === 0,
+        `${id}: o aviso cobre o placar`, `${r.placarCoberto} de ${r.placarPts} — o banner cobria 13 de 13`);
+      checa(/\S/.test(r.ariaComSelo) && r.ariaComSelo.includes('—'),
+        `${id}: o selo não anunciou no aria-label do botão`, `"${r.ariaComSelo}"`);
+      checa(r.seloApagou === true,
+        `${id}: abrir a aba Histórico não apagou o selo`);
+      checa(r.anelVisivel >= 1,
+        `${id}: a conquista nova não ganhou anel na vitrine`, `${r.anelVisivel} anel(éis)`);
       checa(r.andarilho && r.viajante,
         `${id}: geografia não destravou`, `andarilho=${r.andarilho} viajante=${r.viajante}`);
       checa(m.celulas === esperadas,
@@ -4449,4 +4497,4 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
-  + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
+  + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

@@ -8,6 +8,20 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.16-01
+
+### Melhorado
+- **O aviso de conquista parou de atrapalhar.** Antes, destravar uma conquista abria um banner dourado por 20 segundos e jogava confete por cima da foto do pedido — o mesmo aviso do desbloqueio do Desfazer, e ele cobria o placar inteiro enquanto durava.
+
+  Agora aparece só um **pontinho** sobre o ícone de filtros no topo. Nada tapa nada, nada tem prazo para sumir, e você repara quando reparar.
+
+  A comemoração acontece onde ela não atrapalha: ao abrir *Filtros → Histórico*, a conquista nova aparece destacada com a marca **nova**, e o pontinho some. Na próxima vez que você abrir, o destaque já saiu.
+
+  **O banner dourado com confete voltou a ser exclusivo do desbloqueio do Desfazer** — que acontece uma vez só na vida e abre uma porta de verdade (leva direto ao interruptor). Conquista não pede ação nenhuma: é só reconhecimento.
+
+---
+
+
 ## v2026.09.15-01
 
 ### Melhorado

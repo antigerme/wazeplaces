@@ -2570,3 +2570,28 @@ html.tem-sessao #authScreen { display: none; }
 .dark .conq-dica { color: #cbd5e1; background: #1e293b; }
 .conq-dica b { color: #0f172a; }
 .dark .conq-dica b { color: #f1f5f9; }
+
+/* ── Conquista nova: o selo e o anel ───────────────────────────────────────
+   MEDIDO nas quatro formas de avisar, com a app rodando (2026-09-16): banner
+   dourado cobre 13 dos 13 nós de texto do placar e joga confete sobre a foto;
+   banner "discreto" no topo cobre os mesmos 13 (o problema é a POSIÇÃO, não a
+   cor); snackbar no rodapé TAPA o ✕ no Galaxy Fold. O selo cobre ZERO.
+   Mesmo desenho da `.presenca-selo` — não custa layout, mora sobre o ícone. */
+.conq-selo {
+  position: absolute; top: 8px; right: 8px; width: 10px; height: 10px;
+  border-radius: 9999px; background: #d97706;
+  /* O anel é da cor do FUNDO do cabeçalho, não uma borda: é ele que separa o
+     ponto do ícone embaixo sem inventar uma cor nova. */
+  box-shadow: 0 0 0 2px #f8fafc;
+}
+.dark .conq-selo { box-shadow: 0 0 0 2px rgb(30 41 59); }
+/* O que destravou e a pessoa ainda não viu. Some na PRÓXIMA abertura da aba —
+   nesta ela ainda precisa ver o que ganhou. */
+.conq-cel.nova { outline: 2px solid #d97706; outline-offset: 1px; position: relative; }
+.conq-card.nova { outline: 2px solid #d97706; outline-offset: 2px; }
+.conq-tag {
+  position: absolute; top: -7px; right: -5px; font-size: 9px; font-weight: 700;
+  letter-spacing: .03em; background: #d97706; color: #fff;
+  border-radius: 9999px; padding: 1px 6px; box-shadow: 0 0 0 2px #f8fafc;
+}
+.dark .conq-tag { box-shadow: 0 0 0 2px rgb(30 41 59); }
