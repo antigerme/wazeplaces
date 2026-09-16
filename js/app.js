@@ -760,6 +760,10 @@ function switchFilterTab(tabId) {
         btn.tabIndex = selected ? 0 : -1;
         $(panel).classList.toggle('hidden', !selected);
     });
+    // Abrir a aba Histórico apaga o selo (decisão do owner). Fica AQUI e não no
+    // handler do botão porque a aba também se alcança pelo teclado (setas, Home,
+    // End) — amarrar ao clique deixaria o selo aceso pra quem navega assim.
+    if (tabId === 'filtersTabHistory') marcarConquistasVistas();
     const isFilters = tabId === 'filtersTabFilters';
     $('cancelFilters').classList.toggle('hidden', !isFilters);
     $('applyFilters').classList.toggle('hidden', !isFilters);
@@ -2617,6 +2621,8 @@ function showMainScreen() {
     document.getElementById('appScreen').classList.remove('hidden');
     document.getElementById('filtersBtn').classList.remove('hidden');
     document.getElementById('refreshBtn').classList.remove('hidden');
+    AppState.authenticated = true;   // o selo lê isto; o resto da função repete abaixo
+    atualizarSeloDeConquista();
     AppState.authenticated = true;
     updateDevBadge();
     // A sala só faz sentido logado: é o crachá do WME que abre a porta.
@@ -4288,6 +4294,7 @@ async function handleLogout() {
     safeLS.remove(HISTORY_KEY); // logout = esquecer tudo (inclui histórico)
     safeLS.remove(CONQUISTAS_KEY);   // patente, conquistas e contadores somem junto
     AppState.conquistas = null;
+    atualizarSeloDeConquista();      // o selo é estado de quem entrou: sai junto
     // "Sair limpa tudo" não tem exceção que ninguém decidiu: este marcador (o
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
@@ -7189,6 +7196,10 @@ function carregarConquistas() {
         n: (g.n && typeof g.n === 'object') ? g.n : {},   // contadores acumulados
         langs: Array.isArray(g.langs) ? g.langs.slice(0, 8) : [],
         base: g.base === true,
+        // O que destravou e a pessoa ainda NÃO viu. É isto que acende o selo no
+        // botão de Filtros e desenha o anel na vitrine — some ao abrir a aba.
+        novas: Array.isArray(g.novas) ? g.novas.slice(0, 32) : [],
+        patenteNova: g.patenteNova === true,
     };
     return AppState.conquistas;
 }
@@ -7312,65 +7323,70 @@ function checarConquistas(extra) {
         return;
     }
 
-    // UM AVISO POR VEZ, e a PATENTE ganha. Cruzar um degrau quase sempre cai no
-    // mesmo swipe em que uma conquista destrava, e dois banners dourados
-    // seguidos dizendo quase a mesma coisa já aconteceu entre a conquista do
-    // Desfazer e a dica. A conquista engolida não se perde: ela aparece ganha
-    // no Histórico.
+    // O AVISO NÃO INTERROMPE — decisão do owner (2026-09-16), depois de ver o
+    // banner na tela: "ficou parecendo com o desbloquear o Desfazer; prefiro
+    // algo mais simples, discreto e que não atrapalhe".
+    //
+    // Ele tinha razão de um jeito literal: conquista e desbloqueio do Desfazer
+    // eram o MESMO código — `dispararConfeteNaFila()` + banner dourado de 20s.
+    //
+    // MEDIDO nas quatro opções, com a app rodando. A coluna que decidiu não é
+    // estética: é quanto do PLACAR some, e o projeto marca o placar com
+    // `.nao-cobrir` porque cobrir número MENTE ("311" lê como "31").
+    //   banner dourado (o de antes) → placar coberto 13 de 13 + confete na foto
+    //   banner discreto no topo     → placar coberto 13 de 13 (7/13 no Fold)
+    //   snackbar no rodapé          → TAPA o ✕ no Galaxy Fold (gotcha #26)
+    //   selo no botão de Filtros    → 0 de 13, e nada com prazo pra sumir
+    // O banner "discreto" é a descoberta que fechou a questão: o que atrapalha
+    // é a POSIÇÃO, não a cor nem o confete.
+    //
+    // E pelo M3 conquista nunca foi candidata a banner: "banner é proeminente,
+    // TEM AÇÃO e fica mais tempo". O desbloqueio do Desfazer tem ação de
+    // verdade (abre as Preferências pra desligá-lo); tocar numa conquista só
+    // leva a OLHAR, que é navegação. Somando a frequência — Desfazer 1× na
+    // vida, conquista 16× —, o mesmo banner nos dois gastava o momento do
+    // Desfazer. Hoje o dourado com confete é exclusivo dele.
+    //
+    // A PATENTE entra na mesma regra, e não é descuido: se ela continuasse com
+    // banner, o dourado voltaria a significar duas coisas — que é o defeito
+    // que este bloco existe pra corrigir.
     const subiu = Number.isFinite(g.patente) && iP > g.patente;
     g.patente = iP;
+    if (subiu) g.patenteNova = true;
+    for (const id of novas) if (!g.novas.includes(id)) g.novas.push(id);
     salvarConquistas();
-    if (subiu) { anunciarConquista(t('conq.toast.patente', { e: PATENTES[iP].emoji, p: t('conq.rank.' + PATENTES[iP].id) })); return; }
-    if (novas.length) {
-        const x = CONQUISTAS.find((y) => y.id === novas[0]);
-        anunciarConquista(t('conq.toast.conquista', {
-            e: x.emoji, n: t('conq.' + x.id + '.nome'), como: t('conq.' + x.id + '.como'),
-        }));
-    }
+    if (subiu || novas.length) atualizarSeloDeConquista();
 }
 
-// O banner dourado com confete já existe — é o do gate do Desfazer. Banner no
-// TOPO, nunca snackbar no rodapé: medido quando ele nasceu, no rodapé ele tapa
-// os três botões do card em 2 de 3 aparelhos.
-function anunciarConquista(msg) {
-    dispararConfeteNaFila();
-    showToast(msg, 'achievement', 20000, () => {
-        openFiltersModal();
-        switchFilterTab('filtersTabHistory');
-    });
+// Um PONTO, nunca um número (decisão do owner). Número convida a "zerar", e a
+// app já tem a regra de não mostrar contador que a pessoa não consegue zerar —
+// conquista não é caixa de entrada. Mesmo desenho da pílula da presença
+// ("badged icon button" do M3), que já mede 44px e não custa layout: ele mora
+// SOBRE o ícone.
+function atualizarSeloDeConquista() {
+    const btn = document.getElementById('filtersBtn');
+    const selo = document.getElementById('conqSelo');
+    if (!btn || !selo) return;
+    // Lê do armazenamento, não do que estiver em memória: quem destravou ontem
+    // e fechou a app voltaria sem selo até o primeiro swipe. Deslogado não
+    // carrega nada — o selo é estado de quem entrou.
+    const g = AppState.authenticated ? carregarConquistas() : null;
+    const tem = !!g && (g.novas.length > 0 || g.patenteNova);
+    selo.classList.toggle('hidden', !tem);
+    // O ponto é `aria-hidden`: quem não enxerga precisa da informação no NOME
+    // do botão, senão o selo não existe pra leitor de tela nenhum.
+    btn.setAttribute('aria-label', t('header.filters.aria') + (tem ? ' — ' + t('conq.selo.aria') : ''));
 }
 
-// Uma ação CONFIRMADA pelo Waze. Daqui saem a sequência sem desfazer, os
-// gatilhos de evento e a reavaliação.
-function registrarAcaoConfirmada(actionType, place) {
-    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
-    const g = carregarConquistas();
-    g.seq = (g.seq || 0) + 1;
+// Abrir a aba É ter visto. Some o selo e, na PRÓXIMA abertura, somem os anéis —
+// nesta a pessoa ainda precisa ver o que destravou, então não re-renderiza.
+function marcarConquistasVistas() {
+    const g = AppState.conquistas;
+    if (!g || (!g.novas.length && !g.patenteNova)) return;
+    g.novas = [];
+    g.patenteNova = false;
     salvarConquistas();
-    // O idioma entra no gesto, não na carga: "usou a app em 2 idiomas" é sobre
-    // TRABALHAR em dois, não sobre abrir o seletor e voltar.
-    registrarIdiomaUsado(typeof getLang === 'function' ? getLang() : '');
-    const hora = new Date().getHours();
-    checarConquistas({
-        duplicado: actionType === 'reject' && !!(place && place.duplicado),
-        // `contagemDoAutor` já inclui ESTA rejeição (o registro veio antes), então
-        // > 1 significa que havia rejeição anterior — é isso que faz reincidente.
-        reincidente: actionType === 'reject' && !!place && place.creatorId != null
-                     && contagemDoAutor(place) > 1,
-        // "Depois da meia-noite" é a MADRUGADA (0h–4h59), não a noite: às 23h a
-        // pessoa ainda está acordada no mesmo dia, e a graça da coruja é a virada.
-        madrugada: hora >= 0 && hora < 5,
-    });
-}
-
-// Desfazer zera a sequência de "Mão firme" e destrava "Segunda chance" — que é
-// de propósito o contrapeso da lista: a única que celebra CUIDADO, não volume.
-function registrarDesfazer() {
-    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
-    const g = carregarConquistas();
-    g.seq = 0;
-    salvarConquistas();
-    checarConquistas({ desfez: true });
+    atualizarSeloDeConquista();
 }
 
 // ── a tela ─────────────────────────────────────────────────────────────────
@@ -7396,7 +7412,7 @@ function htmlPatente() {
             <span class="m" aria-hidden="true">${k < i ? '✓' : k === i ? '●' : ''}</span>
         </div>`).join('') : '';
 
-    return `<div class="conq-card">
+    return `<div class="conq-card${g.patenteNova ? ' nova' : ''}">
         <div class="conq-topo">
             <span class="conq-emoji" aria-hidden="true">${atual.emoji}</span>
             <div class="conq-id">
@@ -7427,10 +7443,13 @@ function htmlConquistas() {
     const grade = lista.map((x, k) => {
         const on = !!g.c[x.id];
         const sel = conquistaTocada === x.id;
-        return `<button type="button" class="conq-cel ${on ? 'on' : 'off'}${sel ? ' sel' : ''}"
+        const nova = g.novas.includes(x.id);
+        return `<button type="button" class="conq-cel ${on ? 'on' : 'off'}${sel ? ' sel' : ''}${nova ? ' nova' : ''}"
             data-conq="${escapeHtml(x.id)}" aria-pressed="${sel}">
             <span class="e" aria-hidden="true">${x.emoji}</span>
-            <span class="n">${escapeHtml(t('conq.' + x.id + '.nome'))}</span></button>`;
+            <span class="n">${escapeHtml(t('conq.' + x.id + '.nome'))}</span>` +
+            (nova ? `<span class="conq-tag">${escapeHtml(t('conq.nova'))}</span>` : '') +
+            `</button>`;
     }).join('');
     const tocada = conquistaTocada && lista.find((x) => x.id === conquistaTocada);
     // A condição mora AQUI e não dentro da célula: na largura da grade ela

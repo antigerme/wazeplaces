@@ -235,3 +235,73 @@ test('sem sequência viva: nada conta "dias seguidos AGORA"', () => {
   assert.match(chk, /diasSeguidos:\s*maiorSequenciaDeDias\(h\)/,
     'a "Semana cheia" deixou de sair da maior corrida histórica');
 });
+
+// ── 6. O AVISO NÃO INTERROMPE ──────────────────────────────────────────────
+// Decisão do owner (2026-09-16), olhando a tela: o banner de conquista era o
+// MESMO código do desbloqueio do Desfazer, e ele pediu algo que não atrapalhe.
+// MEDIDO: o banner cobre 13 dos 13 nós de texto do placar; o selo cobre 0.
+test('conquista NÃO dispara banner nem confete', () => {
+  // SEM COMENTÁRIO: o bloco que explica a decisão CITA `dispararConfeteNaFila()`
+  // ao dizer o que saiu, e a primeira versão deste guard reprovou por causa dele
+  // — o comentário virando prova do contrário do que ele diz (gotcha #14).
+  const semComentarios = (txt) => txt.replace(/\/\/[^\n]*/g, '');
+  const chk = semComentarios(fatiar('checarConquistas'));
+  assert.ok(!/showToast/.test(chk), 'voltou um toast no caminho da conquista');
+  assert.ok(!/dispararConfeteNaFila/.test(chk), 'voltou confete no caminho da conquista');
+  // CONTRAPROVA de que o varredor não ficou cego de vez: o corpo ainda tem o
+  // que ele DEVE ter.
+  assert.match(chk, /atualizarSeloDeConquista\(\)/,
+    'controle: fatiei errado — o corpo do checarConquistas não acende o selo');
+  assert.ok(!APP.includes('anunciarConquista'), 'o anunciador de conquista voltou');
+  assert.ok(!/conq\.toast\./.test(APP) && !/conq\.toast\./.test(I18N),
+    'sobrou chave de toast de conquista — texto morto em 4 idiomas');
+
+  // CONTRAPROVA: o gate do Desfazer CONTINUA com banner e confete. Sem isto,
+  // "não achei showToast" passaria também se eu tivesse arrancado os dois da
+  // app inteira — que seria outro bug, não este conserto.
+  const gate = fatiar('checkUndoGateUnlock');
+  assert.match(gate, /dispararConfeteNaFila\(\)/,
+    'o desbloqueio do Desfazer perdeu o confete — ele é o ÚNICO que ainda o tem');
+  assert.match(gate, /showToast\(/, 'o desbloqueio do Desfazer perdeu o banner');
+});
+
+test('o selo é um PONTO, e ele fala pra leitor de tela', () => {
+  const f = fatiar('atualizarSeloDeConquista');
+  // Ponto, nunca número (decisão do owner): número convida a "zerar", e
+  // conquista não é caixa de entrada.
+  assert.ok(!/textContent\s*=/.test(f),
+    'o selo passou a escrever texto — virou contador, e a decisão foi PONTO');
+  // O ponto é aria-hidden no HTML, então quem não enxerga só sabe pelo NOME
+  // do botão. Sem isto o selo não existe pra leitor de tela nenhum.
+  assert.match(f, /setAttribute\('aria-label'/,
+    'o selo deixou de anunciar no aria-label do botão');
+  assert.match(f, /conq\.selo\.aria/, 'o aria do selo deixou de vir do dicionário');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="conqSelo"[^>]*aria-hidden="true"/,
+    'o ponto perdeu o aria-hidden — leitor de tela leria um elemento vazio');
+  assert.match(html, /id="filtersBtn"[^>]*class="[^"]*\brelative\b/,
+    'o #filtersBtn perdeu o `relative` — o selo absoluto ancoraria em outro lugar');
+});
+
+test('abrir a aba Histórico apaga o selo — e é na TROCA DE ABA, não no clique', () => {
+  const f = fatiar('switchFilterTab');
+  assert.match(f, /filtersTabHistory'\)\s*marcarConquistasVistas\(\)/,
+    'a limpeza saiu do switchFilterTab: pelo teclado (setas/Home/End) o selo ficaria aceso');
+  const m = fatiar('marcarConquistasVistas');
+  assert.match(m, /g\.novas = \[\]/, 'parou de limpar as conquistas novas');
+  assert.match(m, /g\.patenteNova = false/, 'parou de limpar a patente nova');
+  assert.match(m, /salvarConquistas\(\)/, 'a limpeza não persiste — o selo voltaria na recarga');
+  // NÃO re-renderiza: nesta abertura a pessoa ainda precisa VER o que ganhou.
+  assert.ok(!/renderHistory\(\)/.test(m),
+    'a limpeza passou a re-renderizar — o anel sumiria antes de ser visto');
+});
+
+test('o dicionário tem o texto do selo nas quatro línguas', () => {
+  for (const l of ['pt', 'en', 'es', 'fr']) {
+    const ini = I18N.indexOf(`\n  ${l}: {`);
+    const bloco = I18N.slice(ini, I18N.indexOf('\n  },', ini));
+    for (const k of ['conq.nova', 'conq.selo.aria']) {
+      assert.ok(bloco.includes(`'${k}'`), `${l}: falta ${k}`);
+    }
+  }
+});
