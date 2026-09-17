@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.17-01
+
+### Adicionado
+- **Street View a partir do mapa ampliado.** No mapa em tela cheia apareceu um botão no canto de baixo à direita que abre o Street View **no ponto que você está vendo** — se você arrastou até a esquina pra entender qual é a entrada, é a esquina que abre, não o centro do local. Responde "esse lugar existe mesmo?" sem sair do pedido.
+
 ## v2026.09.16-01
 
 ### Melhorado

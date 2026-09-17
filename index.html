@@ -1430,6 +1430,18 @@
         </div>
         <span id="mapaLbEscala" class="absolute bottom-4 left-4 z-20 bg-black/60 text-white text-xs font-medium px-2 py-0.5 rounded tnum mapa-escala"></span>
         <span id="mapaLbLegenda" class="absolute z-20 flex flex-wrap gap-1 left-4 right-16" style="bottom: calc(2.75rem + env(safe-area-inset-bottom))"></span>
+        <!-- O SLOT DE AÇÃO deste lightbox, no rodapé do lado oposto ao ✕ do
+             topo — a mesma geometria que o lightbox da foto usa pro aprovar/
+             excluir. É o primeiro e único ocupante: segundo candidato divide
+             este slot por exclusão mútua, não ganha um canto novo. A legenda
+             já para em `right-16`, então o canto estava livre (medido: 0 de 33
+             pontos dela cobertos, Pixel e Fold, nos dois temas).
+             O `href` é reescrito no `desenhar()`, que é por onde passam os
+             QUATRO caminhos que mexem no centro: abrir, arrastar, zoom e
+             recentrar. -->
+        <a id="mapaLbStreetView" target="_blank" rel="noopener noreferrer" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center transition-colors" style="right: 0.75rem; bottom: calc(0.75rem + env(safe-area-inset-bottom))" title="Ver a rua aqui no Street View" data-i18n-title="card.map.streetView" aria-label="Ver a rua aqui no Street View" data-i18n-aria="card.map.streetView">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/></svg>
+        </a>
     </div>
 
     <div id="imageLightbox" role="dialog" aria-modal="true" aria-label="Visualização de foto" data-i18n-aria="lightbox.aria" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[65] flex items-center justify-center select-none overflow-hidden">
