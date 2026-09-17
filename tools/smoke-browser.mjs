@@ -1070,6 +1070,61 @@ for (const status of [404, 403]) {
   checa(!!aberto.escala, 'mapa ampliado: sem barra de escala, a distância vira aposta');
   checa(aberto.pequenos === 0, `mapa ampliado: ${aberto.pequenos} botão menor que 44px`);
 
+  // ── Street View: o SLOT DE AÇÃO deste lightbox ──────────────────────────
+  //
+  // O check de 44px acima varre só `button`, e este é um `<a>` — então ele
+  // precisa da própria medida. E o que decide se o botão serve não é existir:
+  // é receber o dedo (gotcha #26) e não cobrir o que já estava lá.
+  const sv = await page.evaluate(() => {
+    const a = document.getElementById('mapaLbStreetView');
+    if (!a) return { falta: true };
+    const r = a.getBoundingClientRect();
+    // Redondo: os CANTOS da caixa ficam fora do círculo por geometria, então
+    // a amostra é a cruz, não a grade 3x3.
+    const perdidos = [[0.5, 0.5], [0.08, 0.5], [0.92, 0.5], [0.5, 0.08], [0.5, 0.92]]
+      .filter(([fx, fy]) => {
+        const t = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+        return !t || !(a === t || a.contains(t));
+      }).length;
+    // E o inverso: quantos pontos dos vizinhos ELE rouba.
+    const rouba = (sel) => {
+      const e = document.querySelector(sel);
+      if (!e) return 0;
+      const b = e.getBoundingClientRect();
+      if (b.width < 1 || b.height < 1) return 0;
+      let n = 0;
+      for (let i = 0; i <= 10; i++) for (let j = 0; j <= 2; j++) {
+        const t = document.elementFromPoint(b.left + b.width * (i / 10), b.top + b.height * (j / 2));
+        if (t && t.closest('#mapaLbStreetView')) n++;
+      }
+      return n;
+    };
+    return {
+      falta: false, w: Math.round(r.width), h: Math.round(r.height), perdidos,
+      escondido: a.classList.contains('hidden'),
+      href: a.getAttribute('href'), tag: a.tagName,
+      alvo: a.getAttribute('target'), rel: a.getAttribute('rel'),
+      rotulo: a.getAttribute('aria-label'),
+      roubados: rouba('#mapaLbLegenda') + rouba('#mapaLbEscala')
+              + rouba('#mapaLbClose') + rouba('#mapaLbCentrar') + rouba('#mapaLbMais'),
+      centro: MapaLightbox.centro.slice(),
+    };
+  });
+  checa(!sv.falta, 'Street View: o botão não existe no lightbox do mapa');
+  checa(!sv.escondido, 'Street View: nasceu escondido com coordenada válida');
+  checa(sv.w >= 44 && sv.h >= 44, `Street View: alvo de ${sv.w}x${sv.h}, régua é 44px`);
+  checa(sv.perdidos === 0, `Street View: ${sv.perdidos} pontos da cruz não recebem o dedo`);
+  checa(sv.roubados === 0, `Street View: cobre ${sv.roubados} pontos de escala/legenda/✕/zoom`);
+  checa(sv.alvo === '_blank' && /noopener/.test(sv.rel || '') && /noreferrer/.test(sv.rel || ''),
+    'Street View: link externo sem target/rel seguro', `${sv.alvo} · ${sv.rel}`);
+  checa(!!sv.rotulo && !/card\.map/.test(sv.rotulo),
+    'Street View: aria-label ausente ou com a chave crua na tela', sv.rotulo);
+  // A ORDEM das coordenadas: o viewpoint tem que sair lat,lon — e lido ao
+  // contrário dá lugar plausível e errado, sem sintoma nenhum na tela.
+  const vpDe = (h) => { try { return new URL(h).searchParams.get('viewpoint'); } catch { return null; } };
+  checa(vpDe(sv.href) === `${sv.centro[0]},${sv.centro[1]}`,
+    'Street View: viewpoint não casa com o centro em [lat, lon]', `${vpDe(sv.href)} vs ${sv.centro}`);
+
   // Arrastar longe TEM que trazer tile novo — é o que separa "mapa" de "imagem".
   const antes = pedidos.size;
   const centro0 = await page.evaluate(() => MapaLightbox.centro.slice());
@@ -1084,6 +1139,12 @@ for (const status of [404, 403]) {
   checa(JSON.stringify(centro0) !== JSON.stringify(centro1), 'mapa ampliado: arrastar não moveu o mapa');
   checa(pedidos.size > antes,
     'mapa ampliado: arrastar não buscou tile novo — virou imagem esticada, não mapa');
+
+  // Amarrar o href a um dos quatro caminhos deixaria os outros com o link
+  // velho, e o panorama abriria no lugar anterior — sem erro na tela.
+  const svArr = await page.evaluate(() => document.getElementById('mapaLbStreetView').getAttribute('href'));
+  checa(vpDe(svArr) && vpDe(svArr) !== vpDe(sv.href),
+    'Street View: arrastar não mexeu no link — ele ficou no ponto anterior');
 
   // A grade não pode acumular <img> conforme se navega.
   const nDom = await page.evaluate(() => document.querySelectorAll('#mapaLbTiles img').length);
@@ -1100,6 +1161,9 @@ for (const status of [404, 403]) {
   const voltou = await page.evaluate(([c]) => JSON.stringify(MapaLightbox.centro.map((n) => +n.toFixed(4)))
     === JSON.stringify(c.map((n) => +n.toFixed(4))), [centro0]);
   checa(voltou, 'mapa ampliado: "voltar ao pedido" não recentrou');
+  const svVolta = await page.evaluate(() => document.getElementById('mapaLbStreetView').getAttribute('href'));
+  checa(vpDe(svVolta) === vpDe(sv.href),
+    'Street View: recentrar não devolveu o link ao ponto do pedido', `${vpDe(svVolta)} vs ${vpDe(sv.href)}`);
 
   // Fecha por Esc (desktop) e por ✕ (toque). O voltar do aparelho é coberto
   // pelo guard de código — aqui não há histórico de navegação real.
@@ -4497,4 +4561,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
+  + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

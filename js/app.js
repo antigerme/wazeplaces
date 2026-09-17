@@ -25,6 +25,12 @@ const UNDO_WINDOW_MS = 3000;
 // não nossa. Cravar `/pt-BR/` mandava todo mundo pro português.
 const WME_EDITOR_URL = 'https://www.waze.com/editor';
 
+// Forma DOCUMENTADA da Google Maps URLs API pra panorama. Existe a antiga
+// `?layer=c&cbll=`, que é caminho interno e não contrato publicado — esta é a
+// que a Google mantém como estável, e o custo de escolher errado aqui é o
+// botão levar a um erro do Google na cara do editor.
+const STREET_VIEW_URL = 'https://www.google.com/maps/@';
+
 // A duração da janela aparece em DUAS frases (o toggle nas Preferências e a dica
 // "você nunca desfaz"), nas três línguas — seis lugares onde o número estava
 // escrito à mão. Registrado como variável global de i18n, ele vem daqui: mexer
@@ -5366,6 +5372,32 @@ function renderMapa(card, place, refazendo) {
 //
 // Sem biblioteca, como o resto. A matemática mora em `js/mapa.js` (`mapaGrade`,
 // com `projetar`/`desprojetar`), e aqui fica só gesto e DOM.
+// O Street View abre ONDE A PESSOA ESTÁ OLHANDO, não no ponto do pedido.
+//
+// No lightbox ela arrasta e dá zoom pra entender qual é a entrada; abrir no
+// centróide jogaria fora a investigação que ela acabou de fazer. E isto só
+// existe AQUI: o mini-mapa do card usa `mapaMontar`, que é enquadramento FIXO
+// ("escolhido pra caber, minimiza tiles"), então lá a pergunta "onde você está
+// olhando" não tem resposta. Foi o que fez o botão morar no lightbox e não no
+// card — ver a regra do card decide / lightbox analisa, no CLAUDE.md.
+//
+// `centro` é [lat, lon]: o core INVERTE o GeoJSON antes de mandar. Ler ao
+// contrário NÃO quebra nada visível — dá um lugar plausível e errado. Medido
+// no Terminal 2 de Guarulhos: [lat,lon] cai no aeroporto, [lon,lat] cai no
+// Atlântico Sul, e os dois passam num teste de |lat| <= 90. `test/streetview
+// .test.mjs` carrega contraprova por isso.
+//
+// Não mandamos zoom nem `fov`: o zoom do MAPA não tem tradução pro campo de
+// visão do panorama, e inventar uma seria número sem medida atrás.
+function linkStreetView(centro) {
+    if (!Array.isArray(centro) || centro.length < 2) return null;
+    const lat = Number(centro[0]);
+    const lon = Number(centro[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const p = new URLSearchParams({ api: '1', map_action: 'pano', viewpoint: lat + ',' + lon });
+    return STREET_VIEW_URL + '?' + p;
+}
+
 const MapaLightbox = {
     centro: null, z: 16, pontos: [], _tiles: new Map(), _inicial: null,
     isOpen() { return !document.getElementById('mapaLightbox').classList.contains('hidden'); },
@@ -5407,6 +5439,19 @@ const MapaLightbox = {
 
     // Redesenha a grade. Tiles já baixados são REAPROVEITADOS (mapa por chave
     // z/x/y): sem isso, arrastar 10px refazia o DOM e piscava a tela inteira.
+    // FONTE ÚNICA do link do Street View: chamada de dentro do `desenhar()`,
+    // por onde passam abrir, arrastar, zoom e recentrar. Amarrar isto a um dos
+    // quatro deixaria os outros três com o link velho, e o sintoma seria o
+    // panorama abrir no lugar anterior — sem erro nenhum na tela.
+    atualizarStreetView() {
+        const a = document.getElementById('mapaLbStreetView');
+        if (!a) return;
+        const url = linkStreetView(this.centro);
+        // Opção que não dá pra cumprir não aparece: sem coordenada, sem botão.
+        if (url) { a.href = url; a.classList.remove('hidden'); }
+        else { a.removeAttribute('href'); a.classList.add('hidden'); }
+    },
+
     desenhar() {
         const el = document.getElementById('mapaLightbox');
         const w = el.clientWidth || innerWidth;
@@ -5436,6 +5481,7 @@ const MapaLightbox = {
             if (!vivos.has(k)) { im.remove(); this._tiles.delete(k); }
         }
         this.desenharMarcas(g);
+        this.atualizarStreetView();
     },
 
     desenharMarcas(g) {
