@@ -91,9 +91,21 @@ ocorrência** — errar uma vez e corrigir não vira parágrafo.
 **Por que ninguém notou — três motivos independentes, e o terceiro é o que dói:**
 - **A medição que justificou o recurso foi no adaptador errado.** O commit de origem (`1ca88d5`, 2026-08-27) diz: *"Verificado pelo servidor de pé: `/`, `/index.html` e `/index.min.html` servem os mesmos 106 KB"*. "Servidor de pé" é o `server/node.mjs` — a VM, onde o remap de fato roda. Os −388 ms de FCP são reais lá e **nunca chegaram a um usuário**.
 - **O guard verificava INTENÇÃO, não COMPORTAMENTO.** Ele lia o CÓDIGO dos dois adaptadores e cobrava que ambos contivessem o remap. Ambos continham. Nenhum teste de `node --test` enxerga o roteamento de assets do Cloudflare.
-- **A ferramenta que pegaria isso não roda neste repo.** O `CLAUDE.md` manda usar `npx wrangler dev` pra simular o Cloudflare. Tentado de **três formas** (no repo, com `node_modules` fora, e instalado em diretório irmão com `--config`): ele nunca estabiliza — loop infinito de `Reloading local server...`, porque `directory: "."` faz o watcher vigiar o repo todo. **A mesma linha de config causa o defeito e impede de reproduzi-lo.**
+- **Eu declarei que a ferramenta não rodava, e estava errado — isso atrasou a verificação.** O `CLAUDE.md` manda usar `npx wrangler dev` pra simular o Cloudflare. Tentei três vezes e concluí "não roda neste repo", atribuindo ao watcher. **Lendo os logs depois**: a 1ª falhou com `Address already in use` (uma instância minha anterior segurando a porta) e a 2ª com `Cannot find module 'esbuild'` (eu tinha movido o `node_modules`). Só a 3ª teve o loop de reload — e a causa dele é o wrangler escrevendo o próprio estado em `.wrangler/` DENTRO do diretório que vigia (`directory: "."`).
 
-**O conserto usa o mecanismo em vez de lutar com ele.** O arquivo que o Cloudflare já serve em `/` passou a SER o minificado: `index.html` é o GERADO, o fonte virou `index.src.html` (fora do `.assetsignore` e fora da allowlist da VM). O remap saiu dos dois adaptadores. **Isso não exige nenhum comportamento novo de plataforma** — é a mesma regra medida, com outro conteúdo no arquivo —, e por isso dava pra ter 120% de confiança sem deploy. As alternativas (`run_worker_first`, `html_handling: "none"`, `public/` como directory) todas dependiam de comportamento que não dá pra verificar daqui, que é exatamente como chegamos nesta situação.
+  **COMO RODAR, e isto vale guardar:** binário instalado FORA do repo (o `node_modules` dentro do repo também alimenta o watcher), `--config` apontando pro `wrangler.jsonc`, e **`--persist-to` num diretório fora do repo**:
+
+  ```
+  cd /tmp/wr && npm i wrangler
+  ./node_modules/.bin/wrangler dev --config /caminho/wrangler.jsonc \
+    --persist-to /tmp/wrstate --local --port 8791
+  ```
+
+  Com isso ele sobe com **1 reload** e reproduz produção byte a byte: na main, `/` devolve **182.318 b** do fonte (o defeito) e `/index.min.html` dá 307 pra `/index.min`; no conserto, `/` devolve **115.702 b** do minificado e o fonte dá 404. Produção mede 182.791 = 182.318 + os 473 bytes do script que o Cloudflare injeta — ou seja o arranjo local é fiel.
+
+  **A lição é sobre mim, não sobre a ferramenta:** "não dá pra testar aqui" é uma frase que este repo já teve escrita por meses sobre o `waze.com`, errada, travando validação de verdade. Eu a repeti. Antes de escrevê-la, leia o log do que falhou.
+
+**O conserto usa o mecanismo em vez de lutar com ele.** O arquivo que o Cloudflare já serve em `/` passou a SER o minificado: `index.html` é o GERADO, o fonte virou `index.src.html` (fora do `.assetsignore` e fora da allowlist da VM). O remap saiu dos dois adaptadores. **Isso não exige nenhum comportamento novo de plataforma** — é a mesma regra medida, com outro conteúdo no arquivo. E depois de o `wrangler dev` voltar a rodar (ver acima), deixou de ser inferência: **verificado no runtime do Cloudflare**, com o controle na main reproduzindo o defeito no mesmo arranjo. As alternativas (`run_worker_first`, `html_handling: "none"`, `public/` como directory) todas dependiam de comportamento que não dá pra verificar daqui, que é exatamente como chegamos nesta situação.
 
 **O controle mestre da mudança:** o novo `index.html` saiu **byte a byte idêntico** ao `index.min.html` anterior, e produção já servia esses mesmos bytes em `/index.min` (conferido: iguais até o fim, com só o script do Cloudflare anexado). Ou seja o conteúdo servido não mudou — só deixou de ser o cru. Risco de conteúdo: zero.
 
