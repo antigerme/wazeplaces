@@ -167,7 +167,8 @@ APIs internas do Waze
 
 ```
 wazeplaces/
-├── index.html              # Single-page app
+├── index.src.html          # Single-page app — o FONTE, comentado (é o que se edita)
+├── index.html              # GERADO por `npm run html` — é ele que a raiz serve
 ├── manifest.json           # PWA manifest
 ├── service-worker.js       # Service worker (cache + auto-update)
 ├── icons/                  # icon-192.svg, icon-512.svg
@@ -496,7 +497,7 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 - **Chave de criptografia:** Secret `ENCRYPTION_KEY` no Cloudflare; env var ou arquivo `0600` na VM. Nunca commitada.
 - **TTL de sessão:** 21 dias (`SESSION_TTL` em `server/core.mjs`). No KV expira sozinho (TTL nativo); na VM, por mtime + touch. Cookies do Waze duram ~28 dias — o TTL menor dá folga. Quando expiram de verdade, o backend devolve 401 e o frontend cai pra tela de login.
 - **Erros 500 não vazam detalhe interno** — o `dispatch` devolve mensagem genérica.
-- **CSP** definida em `index.html` e no `_headers` (precisa `unsafe-eval` por causa do Tailwind via JS — remova ao pré-compilar).
+- **CSP** definida em `index.src.html` e no `_headers` (precisa `unsafe-eval` por causa do Tailwind via JS — remova ao pré-compilar).
 
 ### O que NÃO está implementado (decisão consciente)
 
@@ -507,7 +508,7 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 ### Service Worker
 
 - **Estratégia:** network-first pra HTML/JS/CSS/JSON (com `cache: 'reload'` pra bypassar o HTTP cache); cache-first pra imagens/fontes. Cache é fallback offline.
-- **Pra invalidar caches:** bump o serial de versão (formato `YYYYMMDDnn`) em `js/version.js` (`APP_VERSION`) **e** no `CACHE_NAME` do `service-worker.js`, juntos, em toda PR que toque em `index.html`/`js`/`css`/`icons`.
+- **Pra invalidar caches:** bump o serial de versão (formato `YYYYMMDDnn`) em `js/version.js` (`APP_VERSION`) **e** no `CACHE_NAME` do `service-worker.js`, juntos, em toda PR que toque em `index.src.html`/`js`/`css`/`icons`.
 
 ### Validação rápida antes de commitar
 

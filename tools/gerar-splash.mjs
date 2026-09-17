@@ -119,15 +119,15 @@ async function carregarPlaywright() {
   process.exit(1);
 }
 
-const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+const html = readFileSync(join(ROOT, 'index.src.html'), 'utf8');
 const CORES = coresDoIndex(html);
 for (const tema of TEMAS) {
   if (!CORES[tema]) {
-    console.error(`✗ index.html não tem <meta name="theme-color"> pro esquema ${tema}`);
+    console.error(`✗ index.src.html não tem <meta name="theme-color"> pro esquema ${tema}`);
     process.exit(1);
   }
 }
-console.log(`cores lidas do index.html: claro ${CORES.light} · escuro ${CORES.dark}`);
+console.log(`cores lidas do index.src.html: claro ${CORES.light} · escuro ${CORES.dark}`);
 
 const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
   env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1' },

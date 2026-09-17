@@ -136,7 +136,7 @@ test('a leitura do modo dev NÃO passa por `window.` (gotcha #64)', () => {
 // ═══ o diário e o FAB ════════════════════════════════════════════════════════
 import { readFileSync as _rf } from 'node:fs';
 const APP = _rf(new URL('../js/app.js', import.meta.url), 'utf8');
-const HTML = _rf(new URL('../index.html', import.meta.url), 'utf8');
+const HTML = _rf(new URL('../index.src.html', import.meta.url), 'utf8');
 const CSS = _rf(new URL('../css/app.css', import.meta.url), 'utf8');
 const semCom = APP.replace(/\/\/[^\n]*/g, '');
 

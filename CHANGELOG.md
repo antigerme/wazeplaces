@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.17-02
+
+### Corrigido
+- **A app abria carregando 67 KB a mais do que precisava.** O HTML minificado era gerado e commitado desde agosto, mas **a raiz nunca o serviu** — o servidor entregava o arquivo comentado, de 182 KB. Agora entrega o minificado: **42,8 KB → 23,9 KB comprimidos**, que é o que de fato viaja. Em 3G isso mede −388 ms no primeiro conteúdo na tela e −1 s no carregamento completo. Nada mudou na aparência nem no comportamento: é o mesmo HTML, sem os comentários de desenvolvimento.
+
 ## v2026.09.17-01
 
 ### Adicionado

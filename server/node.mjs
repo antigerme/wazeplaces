@@ -213,10 +213,12 @@ const SECURITY_HEADERS = {
 // antiga, que servia com 200 os arquivos da raiz não listados.
 const ALLOWED_DIRS = ['/css/', '/js/', '/icons/', '/fonts/'];
 const ALLOWED_ROOT_FILES = new Set([
-  // O FONTE `/index.html` NÃO está aqui de propósito: a raiz e `/index.html`
-  // são remapeados pro minificado antes desta checagem, então listá-lo seria
-  // abrir um segundo caminho pro arquivo comentado — duas URLs, dois conteúdos.
-  '/index.min.html',
+  // `/index.html` é o GERADO (minificado, `npm run html`) — é ele que a raiz
+  // serve, aqui e no Cloudflare. O FONTE comentado é o `/index.src.html` e NÃO
+  // está nesta lista de propósito: listá-lo abriria um segundo caminho pro
+  // arquivo de 178 KB com os comentários de decisão — duas URLs, dois
+  // conteúdos, 67 KB de diferença. O `.assetsignore` faz o mesmo no Cloudflare.
+  '/index.html',
   '/manifest.json',
   '/service-worker.js',
   '/favicon.ico',
@@ -243,13 +245,12 @@ async function serveStatic(req, res, urlPath) {
   const isRoot = rel === '/' || rel === '';
   // Navegação = raiz ou request que aceita HTML → serve o shell da SPA no miss.
   const isNavigation = isRoot || accept.includes('text/html');
-  // A raiz serve o HTML MINIFICADO (`npm run html`), não o fonte comentado:
-  // 36 KB gzip contra 20, e -388ms de FCP num 3G. O fonte segue no repo porque
-  // é o que se edita, o que os testes leem e o que o Tailwind varre.
-  //
-  // `/index.html` cai aqui TAMBÉM, senão haveria duas URLs servindo conteúdos
-  // diferentes — e o service worker precacheia as duas.
-  if (isRoot || rel === '/index.html') rel = '/index.min.html';
+  // A raiz resolve pro índice do diretório, como qualquer servidor estático.
+  // NÃO há mais remapeamento: o `index.html` JÁ É o minificado (o fonte é o
+  // `index.src.html`), então `/` e `/index.html` servem o mesmo arquivo sem
+  // ninguém desviar rota. Era o remap que o Cloudflare ignorava — ver a nota no
+  // `tools/gerar-html.mjs`.
+  if (isRoot) rel = '/index.html';
 
   const safe = normalize(rel).replace(/^(\.\.[/\\])+/, '');
 
@@ -304,7 +305,7 @@ function notFound(res, isNavigation) {
 
 async function serveIndexFallback(res) {
   try {
-    const buf = await readFile(join(ROOT, 'index.min.html'));
+    const buf = await readFile(join(ROOT, 'index.html'));
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
     res.end(buf);
   } catch {

@@ -73,7 +73,7 @@ jobs:
         run: |
           # Mesmo contrato do CSS: js/min/ é GERADO (tools/gerar-js.mjs) e
           # COMMITADO, porque quem só roda a app não faz `npm install`. O
-          # index.html e o service-worker.js apontam pra ELE, não pro fonte —
+          # index.src.html e o service-worker.js apontam pra ELE, não pro fonte —
           # então editar js/app.js e esquecer de regenerar não quebra nada
           # visível aqui e manda a versão VELHA pra produção. É o pior tipo de
           # falha: silenciosa e só no aparelho do editor.
@@ -87,15 +87,18 @@ jobs:
 
       - name: HTML está em dia (npm run html)
         run: |
-          # Terceiro irmão do CSS e do JS. O index.min.html é GERADO e
-          # COMMITADO, e é ELE que a raiz serve — editar o index.html e esquecer
-          # de regerar manda a versão velha pro navegador sem quebrar teste
-          # nenhum (os testes leem o FONTE).
-          cp index.min.html /tmp/index.min.committed.html
+          # Terceiro irmão do CSS e do JS. O `index.html` é GERADO por
+          # `npm run html` a partir do `index.src.html`, e COMMITADO — é ELE que
+          # a raiz serve, aqui e no Cloudflare. Editar o fonte e esquecer de
+          # regerar manda a versão velha pro navegador sem quebrar teste nenhum
+          # (os testes leem o FONTE).
+          #
+          # E editar o index.html À MÃO também é pego aqui: o regerado não bate.
+          cp index.html /tmp/index.committed.html
           npm run html
-          if ! diff -q /tmp/index.min.committed.html index.min.html >/dev/null; then
-            echo "::error::index.min.html está desatualizado. Rode 'npm run html' e commite."
-            diff /tmp/index.min.committed.html index.min.html | head -20
+          if ! diff -q /tmp/index.committed.html index.html >/dev/null; then
+            echo "::error::index.html está desatualizado (ou foi editado à mão). Edite o index.src.html e rode 'npm run html'."
+            diff /tmp/index.committed.html index.html | head -20
             exit 1
           fi
 
@@ -173,8 +176,8 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           base="${{ github.event.pull_request.base.sha }}"
-          if git diff --name-only "$base" HEAD | grep -qE '^(index\.html|js/|css/|icons/|fonts/)'; then
+          if git diff --name-only "$base" HEAD | grep -qE '^(index\.(src\.)?html|js/|css/|icons/|fonts/)'; then
             if ! git diff "$base" HEAD -- service-worker.js | grep -q 'CACHE_NAME'; then
-              echo "::error::Frontend mudou (index.html/js/css/icons) mas CACHE_NAME não foi bumpado no service-worker.js"; exit 1
+              echo "::error::Frontend mudou (index.src.html/js/css/icons) mas CACHE_NAME não foi bumpado no service-worker.js"; exit 1
             fi
           fi

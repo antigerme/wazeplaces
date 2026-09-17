@@ -6,7 +6,7 @@
 //
 // Existe porque a lacuna que ele fecha passou muito tempo invisível: o
 // `_headers` é arquivo de Cloudflare, o Node nunca o leu, e rodar na VM era
-// rodar só com o `<meta>` do index.html. Ninguém percebia porque tudo
+// rodar só com o `<meta>` do index.src.html. Ninguém percebia porque tudo
 // "funcionava" — só a segunda camada não existia. Comparar arquivos não teria
 // achado isso; só pedindo a página e olhando a resposta.
 import test from 'node:test';

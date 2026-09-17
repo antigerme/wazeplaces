@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-//  Gera index.min.html — o HTML que o navegador realmente recebe
+//  Gera index.html (minificado) a partir de index.src.html — o HTML servido
 // ═══════════════════════════════════════════════════════════════════════════
 //
 //   node tools/gerar-html.mjs      (é o que `npm run html` roda)
@@ -19,16 +19,29 @@
 // (O CLS não muda: aquele deslocamento é o applyI18n trocando os textos, e não
 // tem relação com o tamanho do HTML. Medido: 0,0053 e 0,0766 nos dois casos.)
 //
-// ── POR QUE UM ARQUIVO NOVO, E NÃO SOBRESCREVER O index.html ──────────────
-// Porque 5 arquivos de teste LEEM o index.html, e vários casam linha a linha
-// (`HTML.split('\n').find(...)`). Minificar por cima quebraria 22 asserções só
-// no layout.test.mjs, e pior: elas passariam a medir o artefato em vez do
-// fonte. O fonte continua sendo o que se edita, o que os testes leem e o que o
-// Tailwind varre; os adaptadores é que servem o gerado na raiz.
+// ── POR QUE O GERADO SE CHAMA index.html (e o fonte, index.src.html) ─────
+// A primeira versão fazia o contrário: fonte em `index.html`, gerado em
+// `index.min.html`, e os DOIS adaptadores remapeavam a raiz. No Cloudflare esse
+// remap NUNCA rodou — com `assets.directory: "."` o `index.html` existe como
+// asset, `/` casa com ele, e o pipeline de assets responde ANTES de invocar o
+// Worker (`run_worker_first` ausente = falso). MEDIDO em produção: `/` devolvia
+// 182.791 bytes do fonte comentado, `/index.html` dava 307 pra `/`, e o
+// `/index.min.html` dava 307 pra `/index.min` — o alvo do nosso remap. Três
+// semanas servindo o cru, e o ganho medido aqui nunca chegou a um usuário.
+//
+// O conserto é fazer o ARQUIVO QUE O CLOUDFLARE JÁ SERVE ser o minificado, em
+// vez de tentar desviar a rota: ele funciona POR CAUSA do mecanismo, não apesar
+// dele, e não depende de nenhum recurso de plataforma que não dê pra testar
+// aqui. O remap saiu dos dois adaptadores — menos código e um destino a menos
+// pra divergir (gotcha #14).
+//
+// O fonte segue sendo o que se edita, o que os testes leem e o que o Tailwind
+// varre; ele só deixou de ser publicado (`.assetsignore`) e de ter nome de
+// entrada.
 //
 // ── O HASH DA CSP É INTOCÁVEL ────────────────────────────────────────────
 // O `<script>` inline do tema é autorizado por hash, em TRÊS cópias da CSP
-// (index.html, _headers, server/node.mjs — ver gotcha #14). Um único byte a
+// (index.src.html, _headers, server/node.mjs — ver gotcha #14). Um único byte a
 // mais no script muda o hash e o navegador BLOQUEIA o script em silêncio: a app
 // abre no esquema de cor errado e nada quebra a ponto de alguém notar.
 // Por isso o `--ignore-custom-fragments` preserva o bloco inteiro byte a byte,
@@ -40,8 +53,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
-const FONTE = join(RAIZ, 'index.html');
-const SAIDA = join(RAIZ, 'index.min.html');
+const FONTE = join(RAIZ, 'index.src.html');
+const SAIDA = join(RAIZ, 'index.html');
 const MINIFICADOR = 'html-minifier-terser@7.2.0';   // fixo: versão que muda, saída que muda
 
 const hashDoInline = (html) => {
@@ -70,10 +83,13 @@ const hFonte = hashDoInline(fonte), hSaida = hashDoInline(saida);
 if (!hFonte || hFonte !== hSaida) {
   console.error(`✗ o hash do script inline mudou (${hFonte} → ${hSaida}).`
     + '\n  A CSP bloquearia o script do tema EM SILÊNCIO. Saída descartada.');
-  writeFileSync(SAIDA, fonte);   // deixa a saída válida em vez de quebrada
+  // NÃO escrevemos o fonte na saída: `SAIDA` agora é o `index.html` que a raiz
+  // serve, e gravar o cru ali seria voltar a servir 67 KB a mais COM o diff do
+  // CI passando (regenerar daria o mesmo cru). Falhar sem escrever deixa o
+  // arquivo commitado intacto, e o guard de "está minificado" pega o resto.
   process.exit(1);
 }
 
 const kb = (s) => (Buffer.byteLength(s) / 1024).toFixed(1) + ' KB';
-console.log(`✓ index.min.html: ${kb(fonte)} → ${kb(saida)}`
+console.log(`✓ index.html: ${kb(fonte)} → ${kb(saida)}`
   + ` (-${Math.round(100 * (fonte.length - saida.length) / fonte.length)}%) · hash do inline preservado`);

@@ -276,7 +276,7 @@ test('o selo é um PONTO, e ele fala pra leitor de tela', () => {
   assert.match(f, /setAttribute\('aria-label'/,
     'o selo deixou de anunciar no aria-label do botão');
   assert.match(f, /conq\.selo\.aria/, 'o aria do selo deixou de vir do dicionário');
-  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
   assert.match(html, /id="conqSelo"[^>]*aria-hidden="true"/,
     'o ponto perdeu o aria-hidden — leitor de tela leria um elemento vazio');
   assert.match(html, /id="filtersBtn"[^>]*class="[^"]*\brelative\b/,

@@ -105,7 +105,7 @@ test('i18n: placeholders {x} consistentes entre as línguas', () => {
 });
 
 test('i18n: toda chave usada no index.html (data-i18n*) existe no dicionário', () => {
-  const html = read('index.html');
+  const html = read('index.src.html');
   const used = new Set();
   const re = /\bdata-i18n(?:-html|-ph|-aria|-title)?="([^"]+)"/g;
   let m;
@@ -121,7 +121,7 @@ test('i18n: toda chave usada no index.html (data-i18n*) existe no dicionário', 
 // paridade passa, o texto só fica com as tags à mostra. Quem tem markup usa
 // `data-i18n-html` (innerHTML, valores do próprio dicionário — nunca da rede).
 test('i18n: chave ligada por textContent (data-i18n) não pode ter markup no valor', () => {
-  const html = read('index.html');
+  const html = read('index.src.html');
   const textuais = new Set();
   const re = /\bdata-i18n="([^"]+)"/g;   // sem sufixo: textContent
   let m;
@@ -199,7 +199,7 @@ test('i18n: idioma desconhecido cai em inglês, não em português', () => {
 // primeiro, lendo instruções que não entende. O modal de Ajuda é o único
 // alcançável deslogado — por isso o segundo seletor.
 test('i18n: dá pra trocar o idioma antes de entrar', () => {
-  const html = read('index.html');
+  const html = read('index.src.html');
   const app = read('js/app.js');
   const ids = ['langSelect', 'langSelectHelp'];
   for (const id of ids) {

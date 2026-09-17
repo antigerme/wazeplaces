@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 const APP = read('js/app.js');
-const HTML = read('index.html');
+const HTML = read('index.src.html');
 const CSS = read('css/styles.css');
 const CORE = read('server/core.mjs');
 const DICT = read('js/i18n.js');

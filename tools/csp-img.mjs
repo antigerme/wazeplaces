@@ -19,7 +19,9 @@ import { readFileSync } from 'node:fs';
 // nunca por `img-src` solto: os comentários acima da meta e do `const CSP`
 // CITAM a diretiva, e grep frouxo casa com o comentário (gotcha #14).
 export const CSP_COPIAS = {
-  'index.html': (t) => (t.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || [])[1],
+  // O FONTE: é onde a meta se edita. O `index.html` gerado carrega a mesma
+  // meta por construção, e o diff do CI garante que os dois não divergem.
+  'index.src.html': (t) => (t.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || [])[1],
   '_headers': (t) => (t.match(/^\s*Content-Security-Policy:\s*(.+)$/m) || [])[1],
   'server/node.mjs': (t) => (t.match(/^const CSP = "([^"]*)"/m) || [])[1],
 };

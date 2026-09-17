@@ -8,7 +8,7 @@
 module.exports = {
   darkMode: 'class', // .dark no <html> (o mesmo que o bundle runtime usava)
   content: [
-    './index.html',
+    './index.src.html',   // o FONTE — varrer o gerado criaria dependência de ordem
     './js/app.js',
     './js/api.js',
     './js/swipe.js',
