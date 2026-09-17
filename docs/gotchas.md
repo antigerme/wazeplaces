@@ -76,6 +76,33 @@ ocorrência** — errar uma vez e corrigir não vira parágrafo.
     **O que mantém "apenas o necessário" verdadeiro é DETECÇÃO, não largura.** O `tools/cf-injecao.mjs` passou a cruzar o que está injetado com a CSP que a app publica, e classifica cada achado: `coberto` (host liberado ou mesma origem), `NÃO COBERTO` (erro de console a cada carregamento) e `inline` (host nenhum resolve). Sai com código 1 quando falta host — verificado tirando `static.cloudflareinsights.com` do `_headers`: acusa e sai 1. Recurso novo que a Cloudflare ligar aparece com nome e host, e aí se libera AQUELE host. Largura sob demanda, sem buraco.
     **E "desligar" não é opção no nosso plano**: no Bot Fight Mode o JavaScript Detections é obrigatório; só vira opcional no Super Bot Fight Mode e no Bot Management Enterprise. Mesmo formato do Web Analytics — o controle existe, só não no nível em que a gente está.
 
+## 14.1. **O Worker não é invocado pra caminho que casa com um asset — e um remap de rota ali falha VERDE**
+
+**O sintoma, medido em produção (2026-09-17):** a raiz de `places.wazebrasil.com` devolvia **182.791 bytes** do `index.html` comentado, quando o `index.min.html` de 115.702 existia, estava commitado e os DOIS adaptadores tinham o `if` que remapeia. Comprimido, o que de fato viajava: **42.821 b** contra os 23.913 do minificado — **79% a mais em todo carregamento**, por três semanas.
+
+**Quem respondeu não era o nosso código.** Quatro evidências independentes, e nenhuma delas é "achei estranho":
+1. O `_headers` estava aplicado na raiz (CSP, HSTS, Permissions-Policy). O `worker/index.mjs` põe **zero** cabeçalho de segurança — conferido por grep. `_headers` é recurso do pipeline de assets.
+2. `/index.html` devolvia **307 pra `/`**. Nosso Worker faria o oposto (reescreveria pro minificado). Esse 307 é o `html_handling` do Cloudflare.
+3. `/index.min.html` devolvia **307 pra `/index.min`** — a mesma regra comendo o alvo do nosso remap.
+4. **CONTROLE:** `/api/perfil` → `405 {"error":"Método não permitido"}` e `/sala` → `400 {"error":"Sala ausente"}`, os dois JSON NOSSO. O Worker estava vivo; o bypass era só onde existia asset homônimo.
+
+**A causa raiz é `"assets": { "directory": "." }`.** Ela publica a raiz do repo inteira, então `index.html` existe como asset, `/` casa com ele, e o Cloudflare serve o asset **antes** de invocar o Worker (`run_worker_first` ausente = falso).
+
+**Por que ninguém notou — três motivos independentes, e o terceiro é o que dói:**
+- **A medição que justificou o recurso foi no adaptador errado.** O commit de origem (`1ca88d5`, 2026-08-27) diz: *"Verificado pelo servidor de pé: `/`, `/index.html` e `/index.min.html` servem os mesmos 106 KB"*. "Servidor de pé" é o `server/node.mjs` — a VM, onde o remap de fato roda. Os −388 ms de FCP são reais lá e **nunca chegaram a um usuário**.
+- **O guard verificava INTENÇÃO, não COMPORTAMENTO.** Ele lia o CÓDIGO dos dois adaptadores e cobrava que ambos contivessem o remap. Ambos continham. Nenhum teste de `node --test` enxerga o roteamento de assets do Cloudflare.
+- **A ferramenta que pegaria isso não roda neste repo.** O `CLAUDE.md` manda usar `npx wrangler dev` pra simular o Cloudflare. Tentado de **três formas** (no repo, com `node_modules` fora, e instalado em diretório irmão com `--config`): ele nunca estabiliza — loop infinito de `Reloading local server...`, porque `directory: "."` faz o watcher vigiar o repo todo. **A mesma linha de config causa o defeito e impede de reproduzi-lo.**
+
+**O conserto usa o mecanismo em vez de lutar com ele.** O arquivo que o Cloudflare já serve em `/` passou a SER o minificado: `index.html` é o GERADO, o fonte virou `index.src.html` (fora do `.assetsignore` e fora da allowlist da VM). O remap saiu dos dois adaptadores. **Isso não exige nenhum comportamento novo de plataforma** — é a mesma regra medida, com outro conteúdo no arquivo —, e por isso dava pra ter 120% de confiança sem deploy. As alternativas (`run_worker_first`, `html_handling: "none"`, `public/` como directory) todas dependiam de comportamento que não dá pra verificar daqui, que é exatamente como chegamos nesta situação.
+
+**O controle mestre da mudança:** o novo `index.html` saiu **byte a byte idêntico** ao `index.min.html` anterior, e produção já servia esses mesmos bytes em `/index.min` (conferido: iguais até o fim, com só o script do Cloudflare anexado). Ou seja o conteúdo servido não mudou — só deixou de ser o cru. Risco de conteúdo: zero.
+
+**Duas armadilhas de guard que apareceram escrevendo o conserto**, as duas da família do gotcha #14 e do #67:
+- Procurar a STRING `index.min.html` nos adaptadores **reprova no próprio comentário** que documenta a remoção.
+- Varrer comentário antes não resolve neste arquivo: o regex de bloco `/\*…\*/` casou com o `https://*.waze.com` da string da CSP e **comeu 86% do `node.mjs`** (24.510 → 3.379 chars), zerando o guard. O guard final ancora no MECANISMO (`if (isRoot) rel =`, ausência de `alvo.pathname`) e na ENTRADA ENTRE ASPAS (`'/index.src.html'`), que comentário em prosa não produz. Oito sabotagens, todas reprovam.
+
+**Regra que fica:** guard que lê o código do adaptador prova que a intenção está escrita, não que a plataforma a executa. Pra comportamento de plataforma, só medição no destino serve — e quando a ferramenta de simulação não roda, isso precisa estar ESCRITO, senão a próxima pessoa também vai achar que testou.
+
 ## 15. **Rank do editor é 0-indexed no Waze, +1 na UI** (regra de convenção sagrada deste projeto). O `/Session` do Waze retorna `rank: 0..5` mas humanos contam `1..6`:
     - **Toda exibição pro user** usa `rank + 1` (já implementado em `renderProfileHeader` como `'L' + (p.rank + 1)`)
     - **Toda comparação interna** usa o valor cru do Waze (`MIN_RANK_WAZE = 2` no gate = "display L3+")

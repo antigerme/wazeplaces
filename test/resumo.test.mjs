@@ -24,7 +24,7 @@ import { readFileSync } from 'node:fs';
 
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 const CSS = readFileSync(new URL('../css/styles.css', import.meta.url), 'utf8');
-const HTML = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
 
 // Âncora em DECLARAÇÃO, nunca em distância (gotcha #67).
 function fatiarFuncao(nome) {
@@ -252,7 +252,7 @@ test('a <img> recebe object URL, e as TRÊS cópias da CSP liberam blob: em img-
   // primeira versão deste guard casava com o comentário — sabotagem em UMA
   // cópia passava limpa (gotcha #14, o grep que casa com o próprio comentário).
   const copias = {
-    'index.html': (HTML.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || [])[1],
+    'index.src.html': (HTML.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || [])[1],
     '_headers': (readFileSync(new URL('../_headers', import.meta.url), 'utf8').match(/^\s*Content-Security-Policy:\s*(.+)$/m) || [])[1],
     'server/node.mjs': (readFileSync(new URL('../server/node.mjs', import.meta.url), 'utf8').match(/^const CSP = "([^"]*)"/m) || [])[1],
   };

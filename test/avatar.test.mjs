@@ -24,7 +24,7 @@ import { CSP_COPIAS, lerCsp, diretiva, hostLiberado } from '../tools/csp-img.mjs
 const REPO = new URL('../', import.meta.url);
 
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-const HTML = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
 
 // Âncora em DECLARAÇÃO, nunca em distância (gotcha #67).
 function fatiarFuncao(nome) {

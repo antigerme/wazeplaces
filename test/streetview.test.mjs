@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-const HTML = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
 const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
 
 // Âncora em DECLARAÇÃO, nunca em distância (gotcha #67).

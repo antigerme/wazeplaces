@@ -104,48 +104,94 @@ test('o service worker não volta a pular o cache HTTP', async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  A raiz serve o HTML MINIFICADO, e os dois adaptadores concordam
+//  A raiz serve o HTML MINIFICADO — e NENHUM adaptador remapeia rota
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// `index.min.html` é GERADO por `npm run html` e commitado; o `index.html` é o
-// fonte comentado, que é o que se edita, o que os testes leem e o que o
+// `index.html` é o GERADO por `npm run html`; o fonte comentado é o
+// `index.src.html`, que é o que se edita, o que os testes leem e o que o
 // Tailwind varre. MEDIDO num 3G com CPU 4x lenta: 36 → 20 KB gzip, FCP de
 // 2036 para 1648ms, load de 4543 para 3540ms.
 //
-// Os DOIS adaptadores precisam remapear igual. Divergência aqui é a família do
-// gotcha #14: a app deixaria de ser a mesma nos dois destinos, e "levar pra uma
-// VM" viraria mudança de comportamento em vez de decisão de infraestrutura.
-test('raiz: os dois adaptadores servem o HTML minificado, não o fonte', async () => {
+// ── POR QUE ESTE GUARD MUDOU DE FORMA ────────────────────────────────────
+// A versão anterior cobrava que os DOIS adaptadores REMAPEASSEM a raiz pro
+// `index.min.html`. Os dois remapeavam, o guard passava — e no Cloudflare o
+// remap NUNCA rodou: com `assets.directory: "."` o `index.html` existe como
+// asset, `/` casa com ele, e o pipeline responde ANTES do Worker. O guard
+// verificava INTENÇÃO (o `if` está escrito) e não COMPORTAMENTO (ele roda).
+// MEDIDO em produção: `/` devolvia 182.791 bytes do fonte por três semanas.
+//
+// Hoje não há rota pra desviar, então o guard cobra o que dá pra verificar
+// daqui: que o arquivo servido está minificado, que o fonte não é alcançável
+// por caminho nenhum, e que ninguém reintroduziu o remap.
+test('raiz: o index.html servido é o minificado, e o fonte não vaza', () => {
   const node = readFileSync(new URL('../server/node.mjs', import.meta.url), 'utf8');
   const worker = readFileSync(new URL('../worker/index.mjs', import.meta.url), 'utf8');
+  const ignore = readFileSync(new URL('../.assetsignore', import.meta.url), 'utf8');
+  const tw = readFileSync(new URL('../tailwind.config.js', import.meta.url), 'utf8');
 
-  // Cada um remapeia a raiz E o /index.html — senão são duas URLs com conteúdos
-  // diferentes, e o service worker precacheia as duas.
-  assert.match(node, /isRoot \|\| rel === '\/index\.html'\)\s*rel = '\/index\.min\.html'/,
-    'o adaptador da VM parou de remapear a raiz pro minificado');
-  assert.match(worker, /pathname === '\/' \|\| url\.pathname === '\/index\.html'/,
-    'o adaptador do Cloudflare parou de remapear a raiz');
-  assert.match(worker, /pathname = '\/index\.min\.html'/,
-    'o adaptador do Cloudflare não aponta pro minificado');
+  // ── Ancorar na ESTRUTURA, nunca na menção do nome ──────────────────────
+  // A primeira versão deste guard procurava a STRING `index.min.html` nos
+  // adaptadores, e reprovou no próprio comentário que documenta o conserto
+  // (gotcha #14 ao contrário). A segunda tentou varrer comentário antes — e o
+  // varredor comeu 86% do node.mjs, porque a string da CSP tem
+  // `https://*.waze.com` e o `/*` dali casa até o próximo `*/` de verdade.
+  // Terceira e definitiva: cobrar o MECANISMO e a ENTRADA ENTRE ASPAS, que
+  // comentário em prosa não produz.
 
-  // O FONTE não pode ser alcançável: listá-lo na allowlist abriria um segundo
-  // caminho pro arquivo comentado.
-  const bloco = node.slice(node.indexOf('ALLOWED_ROOT_FILES'), node.indexOf('function isAllowedAsset'));
-  assert.ok(bloco.includes("'/index.min.html'"), 'o minificado saiu da allowlist da VM');
-  assert.ok(!/'\/index\.html',/.test(bloco), 'o fonte voltou pra allowlist — duas URLs, dois conteúdos');
+  // 1) A VM resolve a raiz pro índice, e não remapeia pra lugar nenhum.
+  assert.match(node, /if \(isRoot\) rel = '\/index\.html';/,
+    'a VM parou de resolver a raiz pro index.html gerado — a raiz daria 404');
+  assert.ok(!/rel = '\/index\.min\.html'/.test(node),
+    'voltou a atribuição pro index.min.html na VM — o arquivo não existe mais');
 
-  // E o gerado precisa estar EM DIA com o fonte: editar o index.html sem rodar
-  // `npm run html` manda a versão velha pro navegador, sem quebrar teste nenhum.
-  const fonte = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const min = readFileSync(new URL('../index.min.html', import.meta.url), 'utf8');
-  assert.ok(min.length < fonte.length, 'o index.min.html não está minificado');
-  assert.ok(!min.includes('<!--'), 'sobrou comentário no index.min.html');
-  // O hash do inline é o que a CSP autoriza: um byte a mais e o tema é
-  // bloqueado EM SILÊNCIO.
-  const h = (s) => {
-    const m = /<script>([\s\S]*?)<\/script>/.exec(s);
+  // 2) O Worker NÃO reescreve rota. Com `assets.directory: "."` o `/` casa com
+  //    o asset `index.html` e o pipeline responde ANTES do Worker, então um
+  //    remap aqui é um `if` que mente. MEDIDO em produção: `/` devolvia o fonte
+  //    de 182.791 bytes por três semanas com este `if` escrito e verde no teste.
+  assert.ok(!/alvo\.pathname/.test(worker),
+    'o Worker voltou a reescrever pathname — no Cloudflare esse ramo não roda');
+  assert.ok(!/new Request\(alvo/.test(worker),
+    'o Worker voltou a montar Request com alvo reescrito');
+  assert.match(worker, /return env\.ASSETS\.fetch\(request\);/,
+    'o Worker deixou de delegar o estático direto pro ASSETS');
+
+  // 3) O FONTE não é alcançável em NENHUM destino. A asserção é pela ENTRADA
+  //    ENTRE ASPAS: o comentário logo acima da lista CITA `/index.src.html`
+  //    em prosa, e é isso que precisa não contar.
+  const bloco = node.slice(node.indexOf('ALLOWED_ROOT_FILES = new Set(['),
+                           node.indexOf(']);', node.indexOf('ALLOWED_ROOT_FILES')));
+  assert.ok(bloco.includes("'/index.html',"), 'o gerado saiu da allowlist da VM — a raiz daria 404');
+  assert.ok(!bloco.includes("'/index.src.html'"),
+    'o FONTE entrou na allowlist da VM: 178 KB com 73 comentários por um segundo caminho');
+  // CONTRAPROVA de que a asserção acima distingue prosa de entrada:
+  assert.ok(bloco.includes('index.src.html'),
+    'o comentário que explica a ausência do fonte saiu da lista — sem ele a próxima pessoa relista');
+  assert.match(ignore, /^index\.src\.html$/m,
+    'o FONTE saiu do .assetsignore — o Cloudflare passaria a publicá-lo');
+
+  // 4) O Tailwind varre o FONTE. Varrer o gerado cria dependência de ORDEM
+  //    entre `npm run html` e `npm run css`, e classe nova some em silêncio.
+  assert.ok(tw.includes("'./index.src.html'"), 'o Tailwind deixou de varrer o fonte');
+  assert.ok(!tw.includes("'./index.html'"), 'o Tailwind passou a varrer o GERADO');
+
+  // 5) O gerado está minificado. Este par fecha um buraco real do gerador:
+  //    quando o hash do inline divergia, a versão antiga gravava o FONTE na
+  //    saída — e aí o diff do CI PASSAVA (regenerar dava o mesmo cru) com a
+  //    raiz servindo 67 KB a mais. Hoje o gerador não escreve nada nesse caso,
+  //    e estas duas linhas são a segunda camada.
+  const fonte = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  const gerado = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.ok(gerado.length < fonte.length * 0.8,
+    `o index.html não está minificado (${gerado.length} de ${fonte.length}) — rode \`npm run html\``);
+  assert.ok(!gerado.includes('<!--'), 'sobrou comentário no index.html gerado');
+
+  // 6) O hash do inline é o que a CSP autoriza: um byte a mais e o tema é
+  //    bloqueado EM SILÊNCIO (a app abre no esquema de cor errado).
+  const h = (x) => {
+    const m = /<script>([\s\S]*?)<\/script>/.exec(x);
     return m ? createHash('sha256').update(m[1], 'utf8').digest('base64') : null;
   };
-  assert.equal(h(min), h(fonte),
+  assert.ok(h(fonte), 'sumiu o script inline do tema do fonte');
+  assert.equal(h(gerado), h(fonte),
     'a minificação mudou o script inline — a CSP bloquearia o tema sem avisar');
 });

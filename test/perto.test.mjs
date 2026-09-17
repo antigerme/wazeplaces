@@ -22,7 +22,7 @@ import { pontoDeGeometria } from '../server/core.mjs';
 
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 const CORE = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8');
-const HTML = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
 
 // Âncora em DECLARAÇÃO, nunca em distância (gotcha #67).
 function fatiar(nome) {

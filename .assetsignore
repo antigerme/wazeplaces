@@ -20,3 +20,9 @@ CHANGELOG.md
 # Fontes do build de CSS (o css/tailwind.css gerado É publicado; a entrada não).
 tailwind.config.js
 css/tailwind.src.css
+
+# O FONTE comentado do HTML. O que a raiz serve é o `index.html` GERADO por
+# `npm run html`; publicar o fonte abriria um segundo caminho pros mesmos 178 KB
+# com 73 comentários de decisão (o gerado tem 113). Mesmo motivo do
+# `tailwind.src.css` logo acima: entrada de build não é asset.
+index.src.html

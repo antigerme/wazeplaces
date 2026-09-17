@@ -89,20 +89,18 @@ export default {
       }
     }
 
-    // Tudo que não é /api/ → arquivos estáticos (HTML, css, js, icons…)
+    // Tudo que não é /api/ nem /sala → arquivos estáticos (HTML, css, js…)
     //
-    // A raiz serve o HTML MINIFICADO (`npm run html`), não o fonte comentado:
-    // 36 KB gzip contra 20, e -388ms de FCP num 3G. Mesmo remapeamento do
-    // `server/node.mjs` — os dois adaptadores TÊM que concordar, senão "levar
-    // pra uma VM" vira mudança de comportamento (gotcha #14).
-    //
-    // `/index.html` entra junto: sem isso seriam duas URLs com conteúdos
-    // diferentes, e o service worker precacheia as duas.
-    if (url.pathname === '/' || url.pathname === '/index.html') {
-      const alvo = new URL(request.url);
-      alvo.pathname = '/index.min.html';
-      return env.ASSETS.fetch(new Request(alvo, request));
-    }
+    // SEM remapeamento de raiz, e isso é deliberado: aqui havia um `if` que
+    // reescrevia `/` pro `/index.min.html`, e ele NUNCA rodou em produção. Com
+    // `assets.directory: "."` o `index.html` existe como asset, `/` casa com
+    // ele, e o pipeline de assets responde ANTES de invocar o Worker
+    // (`run_worker_first` ausente = falso). MEDIDO: `/` devolvia o fonte
+    // comentado de 182.791 bytes e `/index.html` dava 307 pra `/` — o 307 é do
+    // Cloudflare, não nosso, o que PROVA que o Worker não era chamado.
+    // Hoje o `index.html` já É o minificado (fonte em `index.src.html`), então
+    // não há rota pra desviar: o conserto usa o mecanismo em vez de lutar com
+    // ele, e não depende de nenhum recurso de plataforma que não dê pra testar.
     return env.ASSETS.fetch(request);
   },
 };

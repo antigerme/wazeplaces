@@ -23,7 +23,7 @@ const LANGS_DO_DICT = [...read('js/i18n.js').matchAll(/^  ([a-z]{2}): \{$/gm)].m
 const N_LINGUAS = LANGS_DO_DICT.length;
 
 
-const HTML = read('index.html');
+const HTML = read('index.src.html');
 const APP = read('js/app.js');
 const I18N = read('js/i18n.js');
 
@@ -219,7 +219,7 @@ test('origem do pedido: os 4 valores do Waze traduzidos, e o 5º descartado', ()
 });
 
 test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => {
-  const HTMLs = read('index.html');
+  const HTMLs = read('index.src.html');
   const APP = read('js/app.js');
   const DICT = read('js/i18n.js');
 
@@ -543,7 +543,7 @@ test('nível mínimo anunciado na entrada == portão do servidor', () => {
 // originais funciona igual na tela e custa 432 KB em vez de 63 KB — na tela de
 // entrada, muitas vezes em dado móvel. É o tipo de regressão que ninguém vê.
 test('prévia da tela de entrada: miniaturas existem e são leves', () => {
-  const html = read('index.html');
+  const html = read('index.src.html');
   // CADA <img>, não "a string aparece em algum lugar": a primeira versão deste
   // guard passou com o alt removido de uma das três, porque as outras duas
   // bastavam pra ele. Guard que aceita meia correção afirma proteção que não

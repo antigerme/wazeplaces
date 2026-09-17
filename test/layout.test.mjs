@@ -26,7 +26,7 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 const N_LINGUAS = (read('js/i18n.js').match(/^  [a-z]{2}: \{$/gm) || []).length;
 
 
-const HTML = read('index.html');
+const HTML = read('index.src.html');
 const CSS = read('css/styles.css');
 // Comentário que explica uma regra proibida contém o texto da regra proibida.
 // Sem descomentar, o guard acusa a própria documentação.
@@ -79,7 +79,7 @@ test('nenhum texto abaixo de 11px, e em rem pra acompanhar a fonte do sistema', 
   // Piso do M3 (label-small 11sp) e do HIG (caption 11pt). E o tamanho vai em
   // `rem`: em `px` o texto ignora a preferência de fonte do usuário — o
   // Dynamic Type do HIG simplesmente não funciona.
-  for (const arquivo of ['index.html', 'js/i18n.js', 'js/app.js']) {
+  for (const arquivo of ['index.src.html', 'js/i18n.js', 'js/app.js']) {
     const px = [...read(arquivo).matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)].map((m) => m[1]);
     assert.deepEqual(px, [], `${arquivo}: tamanho de texto em px (${px.join(', ')}) — use rem`);
   }
@@ -200,7 +200,7 @@ test('o hash do script de tema bate com as DUAS cópias da CSP', () => {
   // navegador BLOQUEAR o tema. A app abre no esquema errado (fundo claro em
   // quem usa escuro), e nada quebra a ponto de alguém notar em teste de layout.
   // Por isso o hash é RECALCULADO aqui, não conferido contra um literal.
-  const HTML_ = read('index.html');
+  const HTML_ = read('index.src.html');
   const m = /<script>([\s\S]*?)<\/script>/.exec(HTML_);
   assert.ok(m, 'sumiu o script inline do tema');
   assert.match(m[1], /waze_places_theme/, 'o primeiro <script> inline não é o do tema');
@@ -215,7 +215,7 @@ test('o hash do script de tema bate com as DUAS cópias da CSP', () => {
     `o _headers não tem o hash do script de tema (${hash}) — o tema seria bloqueado em produção`);
 
   // E o `unsafe-inline` NÃO pode ter voltado junto: o hash existe pra evitá-lo.
-  for (const [nome, txt] of [['index.html', HTML_], ['_headers', headers]]) {
+  for (const [nome, txt] of [['index.src.html', HTML_], ['_headers', headers]]) {
     const sp = /script-src([^;]*);/.exec(txt);
     assert.ok(sp, `${nome}: sumiu o script-src da CSP`);
     assert.ok(!sp[1].includes("unsafe-inline"),
@@ -825,7 +825,7 @@ test('o card tem UMA área rolável de verdade, e ela cresce com o espaço', () 
 // Não custa nada pra quase todo editor: a seção nasce `hidden` e só aparece
 // depois dos 7 toques na versão, então a aba continua começando no Idioma.
 test('modo dev é a primeira opção das Preferências', () => {
-  const HTML_ = read('index.html');
+  const HTML_ = read('index.src.html');
   const ini = HTML_.indexOf('id="filtersPanelPrefs"');
   const fim = HTML_.indexOf('id="filtersPanelHistory"', ini);
   assert.ok(ini > 0 && fim > ini, 'sumiu a aba de Preferências');
@@ -1673,7 +1673,7 @@ test('a URL do WME é sempre a canônica, sem segmento de idioma', () => {
   }
   // Nenhum lugar do código volta a cravar locale numa URL do waze.com. O probe
   // é exceção declarada: ele VARIA o Referer de propósito pra medir se importa.
-  const fontes = ['js/app.js', 'js/i18n.js', 'server/core.mjs', 'index.html'];
+  const fontes = ['js/app.js', 'js/i18n.js', 'server/core.mjs', 'index.src.html'];
   const cravados = [];
   for (const arq of fontes) {
     for (const m of read(arq).matchAll(/https:\/\/www\.waze\.com\/([a-z]{2}(?:-[A-Z]{2})?)\//g)) {
@@ -1838,7 +1838,7 @@ test('foco num autor prioriza sem esconder ninguém', () => {
 
   // O alvo é a barra INTEIRA, não um ✕ dentro dela: no ritmo do swipe, alvo
   // pequeno é toque errado, e toque errado aqui trata o pedido errado.
-  const html = read('index.html');
+  const html = read('index.src.html');
   const bar = html.match(/<button id="focoAutorBar"[\s\S]*?<\/button>/);
   assert.ok(bar, 'sumiu a barra de foco');
   assert.match(bar[0], /min-h-\[44px\]/, 'a barra perdeu a altura mínima de alvo');
@@ -1857,7 +1857,7 @@ test('foco num autor prioriza sem esconder ninguém', () => {
 test('linha "X → X" não chega na tela, e o aviso só afirma o que foi comparado', () => {
   const CORE = read('server/core.mjs');
   const APP = read('js/app.js');
-  const HTML_ = read('index.html');
+  const HTML_ = read('index.src.html');
 
   // O filtro mora no CORE porque só lá existe o valor CRU. No frontend já é
   // tarde: a geometria chega formatada, e dois polígonos diferentes podem
@@ -2046,7 +2046,7 @@ test('a foto ampliada fecha pelos caminhos das DUAS plataformas', () => {
 });
 
 test('card: UMA gramática de rótulo, e a caixa do reporte só existe com texto', () => {
-  const HTML_ = read('index.html');
+  const HTML_ = read('index.src.html');
   const APP_ = read('js/app.js');
 
   // ── uma gramática só ──────────────────────────────────────────────────
@@ -2239,7 +2239,7 @@ test('splash do PWA: manifest, metas e CSS não podem divergir', () => {
   // mesmo `body.dark` da app, senão volta a haver troca de cor na abertura.
   const man = JSON.parse(read('manifest.json'));
   const css = read('css/styles.css');
-  const html = read('index.html');
+  const html = read('index.src.html');
 
   const escuroDoCss = (css.match(/body\.dark\s*\{[^}]*background-color:\s*(#[0-9a-fA-F]{6})/) || [])[1];
   assert.ok(escuroDoCss, 'sumiu o background-color do body.dark');
@@ -2276,7 +2276,7 @@ test('splash do PWA: manifest, metas e CSS não podem divergir', () => {
   }
   // O tema virou script INLINE no index.html (ver o teste do hash da CSP), então
   // é lá que se confere — ler `js/tema.js` passou a quebrar com ENOENT.
-  const inlineTema = /<script>([\s\S]*?)<\/script>/.exec(read('index.html'));
+  const inlineTema = /<script>([\s\S]*?)<\/script>/.exec(read('index.src.html'));
   assert.ok(inlineTema, 'sumiu o script inline do tema');
   assert.match(inlineTema[1], /tema-claro/,
     'o script do tema parou de marcar o claro explicitamente, e o escopo acima deixa de funcionar');
@@ -2310,7 +2310,7 @@ test('splash do iOS: todo tamanho tem o par claro+escuro, e o arquivo existe', (
   // Isso só funciona se as duas variantes existirem: com uma só, metade dos
   // aparelhos casa nada e volta a splash branca — e ninguém percebe, porque a
   // falha aparece por 300ms na abertura de um iPhone que o dev não tem.
-  const html = read('index.html');
+  const html = read('index.src.html');
   const links = [...html.matchAll(/<link rel="apple-touch-startup-image"[^>]*>/g)].map((m) => m[0]);
   assert.ok(links.length >= 2, 'sumiram os apple-touch-startup-image');
 
@@ -2544,7 +2544,7 @@ test('realce do miolo: dispara na agulha e cala no óbvio', () => {
 // local apareceu DUAS vezes durante a edição — na tela do owner, não aqui.
 test('.hidden vence: nada que o JS esconde pode ter display fixado em styles.css', () => {
   const css = readFileSync(join(ROOT, 'css', 'styles.css'), 'utf8');
-  const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+  const html = readFileSync(join(ROOT, 'index.src.html'), 'utf8');
   // O `presenca.js` entrou aqui DEPOIS, e a razão é o defeito que ele trouxe:
   // ele esconde os seus próprios elementos e o guard só varria o app.js, então
   // o botão do card e a tirinha do anexo nasceram com `display: flex` fixo e
@@ -2695,7 +2695,7 @@ test('filtros: o modal abre antes de qualquer await de rede', () => {
 // Não é segunda fonte de verdade — o initApp continua mandando, e derruba a
 // aposta chamando showAuthScreen se o token estiver vencido.
 test('entrada: quem tem sessão não vê a tela de login piscar', () => {
-  const html = read('index.html');
+  const html = read('index.src.html');
   const m = /<script>([\s\S]*?)<\/script>/.exec(html);
   assert.ok(m, 'sumiu o script inline do <head>');
   const inline = m[1];
@@ -2762,7 +2762,7 @@ test('entrada: quem tem sessão não vê a tela de login piscar', () => {
 // baixando E aparecendo, senão a tela de entrada fica sem as ilustrações.
 // Medido: com sessão 0 downloads, sem sessão 3 e visíveis.
 test('prévias: a tela de entrada não custa banda de quem já entrou', () => {
-  const html = read('index.html');
+  const html = read('index.src.html');
   const tags = [...html.matchAll(/<img[^>]*previa-[a-z]+\.jpg[^>]*>/g)].map((m) => m[0]);
   assert.equal(tags.length, 3, 'o número de prévias mudou — a regra vale para todas');
   for (const t of tags) {
@@ -2774,7 +2774,7 @@ test('prévias: a tela de entrada não custa banda de quem já entrou', () => {
     assert.match(t, /height="\d+"/, 'prévia sem height: o layout volta a pular');
   }
   // E o gerado tem que carregar a mesma coisa — é ele que o navegador recebe.
-  const min = read('index.min.html');
+  const min = read('index.html');   // o GERADO — é ele que o navegador recebe
   assert.equal((min.match(/previa-[a-z]+\.jpg/g) || []).length, 3, 'as prévias sumiram do gerado');
   assert.equal((min.match(/loading="lazy"/g) || []).length >= 3, true,
     'o gerado não tem os loading="lazy" — rode `npm run html`');
