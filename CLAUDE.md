@@ -861,6 +861,16 @@ perseguir call site é como se perde o próximo caminho de entrada que alguém
 adicionar (gotcha #39). O `via` (extensao/cookies/pareamento) é explícito nos
 três. **Sai no "Sair"** com o resto — e isso não cega nada, porque quem saiu
 sabe que saiu, e o caso investigado é o de quem NÃO saiu.
+**E o gancho no ponto único não bastava**: `API.getSession()` LÊ o token do
+armazenamento sem passar pelo `setSession`, então quem já estava logado abria
+a app sem carimbar início nenhum — o `caiu` chegava sozinho e a duração, que é
+o produto inteiro, saía vazia justamente no PRIMEIRO relato (o caso de todo
+aparelho no dia do deploy). Daí o marco `jaAtiva`, registrado na carga quando
+há token e nenhum início em aberto. **Ele NÃO é `token+`**: "já estava ativa"
+não é "entrou agora", e a duração contada dali é um PISO — entra em `ciclos`
+com `inicioConhecido: false` e FICA DE FORA da mediana. Misturar piso com
+medida erraria a estatística pra baixo, ou seja na direção que CONFIRMA o
+relato que se está investigando — a pior direção possível pra um instrumento.
 **E o suspeito número um não é nosso**: o WebKit apaga TODO o storage
 script-writable após *"seven days of Safari use without user interaction on the
 site"*, e **isenta quem está na tela inicial** ("have their own counter"). O
