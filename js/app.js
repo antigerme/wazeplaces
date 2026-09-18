@@ -5372,14 +5372,22 @@ function renderMapa(card, place, refazendo) {
 //
 // Sem biblioteca, como o resto. A matemática mora em `js/mapa.js` (`mapaGrade`,
 // com `projetar`/`desprojetar`), e aqui fica só gesto e DOM.
-// O Street View abre ONDE A PESSOA ESTÁ OLHANDO, não no ponto do pedido.
+// O Street View abre ONDE A PESSOA ESTÁ OLHANDO — e enquanto ela não mexeu no
+// mapa, isso é o PEDIDO, não o enquadramento (ver `pontoDoStreetView`).
 //
-// No lightbox ela arrasta e dá zoom pra entender qual é a entrada; abrir no
-// centróide jogaria fora a investigação que ela acabou de fazer. E isto só
-// existe AQUI: o mini-mapa do card usa `mapaMontar`, que é enquadramento FIXO
-// ("escolhido pra caber, minimiza tiles"), então lá a pergunta "onde você está
-// olhando" não tem resposta. Foi o que fez o botão morar no lightbox e não no
-// card — ver a regra do card decide / lightbox analisa, no CLAUDE.md.
+// Depois que ela arrasta ou dá zoom, o centro é escolha dela: no lightbox ela
+// mexe pra entender qual é a entrada, e abrir no centróide jogaria fora a
+// investigação que ela acabou de fazer. E isto só existe AQUI: o mini-mapa do
+// card usa `mapaMontar`, que é enquadramento FIXO ("escolhido pra caber,
+// minimiza tiles"), então lá a pergunta "onde você está olhando" não tem
+// resposta. Foi o que fez o botão morar no lightbox e não no card — ver a
+// regra do card decide / lightbox analisa, no CLAUDE.md.
+//
+// Não mandamos `heading`: MEDIDO contra a doc da Google — sem ele, "a default
+// heading is chosen based on the viewpoint and the actual location of the
+// image", ou seja o Google JÁ aponta a câmera do panorama pro viewpoint, e com
+// a informação que nós não temos (onde a imagem está). Mandar um rumo
+// calculado por nós trocaria o cálculo exato dele por uma estimativa.
 //
 // `centro` é [lat, lon]: o core INVERTE o GeoJSON antes de mandar. Ler ao
 // contrário NÃO quebra nada visível — dá um lugar plausível e errado. Medido
@@ -5399,7 +5407,7 @@ function linkStreetView(centro) {
 }
 
 const MapaLightbox = {
-    centro: null, z: 16, pontos: [], _tiles: new Map(), _inicial: null,
+    centro: null, z: 16, pontos: [], _tiles: new Map(), _inicial: null, _local: null,
     isOpen() { return !document.getElementById('mapaLightbox').classList.contains('hidden'); },
 
     open(place) {
@@ -5415,6 +5423,10 @@ const MapaLightbox = {
         const lls = this.pontos.map((p) => p.ll);
         this.centro = [ (Math.min(...lls.map((l) => l[0])) + Math.max(...lls.map((l) => l[0]))) / 2,
                         (Math.min(...lls.map((l) => l[1])) + Math.max(...lls.map((l) => l[1]))) / 2 ];
+        // O ponto do PEDIDO, guardado à parte do enquadramento: o `centro` acima
+        // é a média dos marcadores (local + entradas + posição proposta +
+        // duplicado), que em 31% dos pedidos NÃO é o local.
+        this._local = place.mapa.centro ? place.mapa.centro.slice() : null;
         this._inicial = { centro: this.centro.slice(), z: this.z };
         this._tiles.clear();
         document.getElementById('mapaLbTiles').textContent = '';
@@ -5443,10 +5455,31 @@ const MapaLightbox = {
     // por onde passam abrir, arrastar, zoom e recentrar. Amarrar isto a um dos
     // quatro deixaria os outros três com o link velho, e o sintoma seria o
     // panorama abrir no lugar anterior — sem erro nenhum na tela.
+    // FONTE ÚNICA do ponto que vai pro Street View, e a distinção que ela faz
+    // não é firula: o `centro` do lightbox é o meio da CAIXA que enquadra todos
+    // os marcadores, e enquanto a pessoa não mexeu no mapa esse ponto não foi
+    // escolhido por ninguém — é subproduto do enquadramento. MEDIDO em 9.997
+    // pedidos de 12 países: em 3.085 (31%) ele não é o local, com mediana de
+    // 22 m e máximo de 3,6 km, quase sempre porque um ponto de entrada puxou a
+    // caixa. Medindo onde o Google põe a câmera nos dois casos (849 pares):
+    // a distância dela até o local cai de 79 m para 30 m na mediana, e o pior
+    // caso despenca de 10.885 m para 393 m — melhor em 321, empate em 279 e
+    // pior em 1, que é um parque onde nenhuma das duas mostra coisa alguma.
+    //
+    // Depois que ela arrasta, manda o centro DELA: aí o ponto é escolha, e é o
+    // que faz o pedido de movimento funcionar de graça (quer ver a posição
+    // proposta? arrasta até lá e abre de lá).
+    pontoDoStreetView() {
+        if (this._local && this._inicial && Array.isArray(this.centro)
+            && this.centro[0] === this._inicial.centro[0]
+            && this.centro[1] === this._inicial.centro[1]) return this._local;
+        return this.centro;
+    },
+
     atualizarStreetView() {
         const a = document.getElementById('mapaLbStreetView');
         if (!a) return;
-        const url = linkStreetView(this.centro);
+        const url = linkStreetView(this.pontoDoStreetView());
         // Opção que não dá pra cumprir não aparece: sem coordenada, sem botão.
         if (url) { a.href = url; a.classList.remove('hidden'); }
         else { a.removeAttribute('href'); a.classList.add('hidden'); }

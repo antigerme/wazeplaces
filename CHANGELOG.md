@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.18-01
+
+### Corrigido
+- **O Street View abria no lugar errado em quase um terço dos pedidos.** O mapa em tela cheia se enquadra pra caber TUDO na tela — o local, os pontos de entrada, a posição proposta, o duplicado —, e o botão do Street View estava usando o meio desse enquadramento como se fosse o local. Não era: medido em 9.997 pedidos de 12 países, em **3.085 (31%)** esse ponto cai fora do local, tipicamente porque um ponto de entrada puxa a moldura, e num caso ele estava a **3,6 km** dali.
+
+  Agora, enquanto você não mexe no mapa, o Street View abre **no pedido**. Depois que você arrasta ou dá zoom, continua abrindo onde você está olhando — inclusive pra ver a posição proposta de um pedido de movimento: arraste até lá e abra de lá.
+
+  O ganho foi medido no Street View de verdade, não estimado: em 849 casos dos 12 países, a distância entre a câmera e o local caiu de **79 m para 30 m** na mediana, e o pior caso de **10.885 m para 393 m**. Na prática é a diferença entre olhar um muro qualquer e conseguir ler o nome na fachada. Em 321 casos melhorou, em 279 ficou igual e em 1 piorou — um parque onde nenhuma das duas mostra coisa alguma.
+
 ## v2026.09.17-02
 
 ### Corrigido

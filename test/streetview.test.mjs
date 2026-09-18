@@ -136,3 +136,101 @@ test('a chave existe nas 4 línguas e mantém a marca sem traduzir', () => {
       'Street View é MARCA e não se traduz (regra do CLAUDE.md)');
   }
 });
+
+// ── O VIEWPOINT é o LOCAL enquanto o mapa não foi movido ────────────────────
+//
+// O `centro` do lightbox é o meio da CAIXA que enquadra todos os marcadores
+// (local, entradas, posição proposta, duplicado). Enquanto a pessoa não mexeu,
+// esse ponto não foi escolhido por ninguém — e MEDIDO em 9.997 pedidos de 12
+// países ele não é o local em 31% deles, com máximo de 3,6 km. Medindo onde o
+// Google põe a câmera (849 pares), a distância dela até o local cai de 79 m
+// para 30 m na mediana e o pior caso de 10.885 m para 393 m.
+//
+// Este bloco trava as DUAS metades, porque cada uma sozinha é um defeito:
+// sempre o local mataria o "abre onde você está olhando" (a razão de o botão
+// morar no lightbox), e sempre o centro é o defeito que se está consertando.
+// Ancorado no OBJETO, nunca no nome solto: `open(` existe também no lightbox
+// de FOTO, e sem o escopo este fatiador pega o errado — o guard fica verde
+// medindo outra função (gotcha #67, que mordeu aqui na primeira escrita).
+function fatiarMetodo(nome, objeto = 'MapaLightbox') {
+  const obj = APP.indexOf('const ' + objeto + ' = {');
+  assert.ok(obj >= 0, `o objeto ${objeto} sumiu do app.js`);
+  const ini = APP.indexOf('\n    ' + nome + '(', obj);
+  assert.ok(ini >= 0, `o método ${nome} sumiu de ${objeto}`);
+  const resto = APP.slice(ini + 1);
+  const fim = resto.search(/\n    \},/);
+  assert.ok(fim > 0, `não consegui delimitar ${nome}`);
+  return APP.slice(ini + 1, ini + 1 + fim + '\n    },'.length);
+}
+
+test('CONTRAPROVA do fatiador: ele pega o open() do MAPA, não o da FOTO', () => {
+  // Sem o escopo por objeto, `open(` casa antes com o lightbox de foto — e o
+  // teste abaixo passaria a medir a função errada, em silêncio.
+  assert.match(fatiarMetodo('open'), /mapaLightbox/,
+    'o fatiador saiu do MapaLightbox');
+  assert.match(fatiarMetodo('open', 'Lightbox'), /urls/,
+    'o lightbox de foto continua alcançável, com o escopo explícito');
+});
+
+function ponto() {
+  const src = fatiarMetodo('pontoDoStreetView');
+  return new Function(`const o = { ${src} }; return o;`)();
+}
+
+const LOCAL = [-23.4356, -46.4731];   // o pedido
+const CAIXA = [-23.4301, -46.4702];   // o meio da caixa: NÃO é o local
+
+test('sem mexer no mapa, o viewpoint é o LOCAL e não o enquadramento', () => {
+  const o = ponto();
+  Object.assign(o, { _local: LOCAL.slice(), centro: CAIXA.slice(),
+                     _inicial: { centro: CAIXA.slice(), z: 16 } });
+  assert.deepEqual(o.pontoDoStreetView(), LOCAL,
+    'com o mapa parado o Street View tem que abrir no pedido, não no meio da caixa');
+});
+
+test('CONTRAPROVA: devolver sempre o centro reprova aqui', () => {
+  // Se alguém "simplificar" o método pra `return this.centro`, o caso acima
+  // passa a devolver a CAIXA — que é exatamente o defeito de antes.
+  const o = { _local: LOCAL.slice(), centro: CAIXA.slice(),
+              _inicial: { centro: CAIXA.slice(), z: 16 },
+              pontoDoStreetView() { return this.centro; } };
+  assert.notDeepEqual(o.pontoDoStreetView(), LOCAL);
+});
+
+test('depois de arrastar, o viewpoint é o centro ESCOLHIDO pela pessoa', () => {
+  const o = ponto();
+  const movido = [-23.4400, -46.4800];
+  Object.assign(o, { _local: LOCAL.slice(), centro: movido.slice(),
+                     _inicial: { centro: CAIXA.slice(), z: 16 } });
+  assert.deepEqual(o.pontoDoStreetView(), movido,
+    'quem arrastou escolheu o ponto — abrir no pedido jogaria fora a investigação');
+});
+
+test('recentrar devolve o viewpoint ao LOCAL', () => {
+  const o = ponto();
+  Object.assign(o, { _local: LOCAL.slice(), centro: [-23.44, -46.48],
+                     _inicial: { centro: CAIXA.slice(), z: 16 } });
+  o.centro = o._inicial.centro.slice();   // é o que o recentrar() faz
+  assert.deepEqual(o.pontoDoStreetView(), LOCAL);
+});
+
+test('pedido sem coordenada do local cai no centro, sem quebrar', () => {
+  const o = ponto();
+  Object.assign(o, { _local: null, centro: CAIXA.slice(),
+                     _inicial: { centro: CAIXA.slice(), z: 16 } });
+  assert.deepEqual(o.pontoDoStreetView(), CAIXA);
+});
+
+test('o link sai de pontoDoStreetView(), nunca de this.centro direto', () => {
+  const m = fatiarMetodo('atualizarStreetView');
+  assert.match(m, /linkStreetView\(this\.pontoDoStreetView\(\)\)/,
+    'atualizarStreetView tem que passar pelo ponto único');
+  assert.ok(!/linkStreetView\(this\.centro\)/.test(m),
+    'voltou a mandar o enquadramento pro Street View');
+});
+
+test('o open() guarda o ponto do PEDIDO, não o do enquadramento', () => {
+  const m = fatiarMetodo('open');
+  assert.match(m, /this\._local = place\.mapa\.centro \? place\.mapa\.centro\.slice\(\) : null;/,
+    '_local tem que sair de place.mapa.centro (e copiado, senão o arrasto mexeria nele)');
+});
