@@ -170,3 +170,55 @@ test('o arquivo diz de que versão do diagnóstico ele é', () => {
   // isto não dá pra saber se a ausência de uma seção é defeito ou idade.
   assert.match(APP, /const DIAG_VERSAO = 2;/, 'a versão do diagnóstico não subiu com as seções novas');
 });
+
+// ── A sessão que JÁ ESTAVA ativa quando o registro nasceu ──────────────────
+//
+// `API.getSession()` lê o token do armazenamento SEM passar pelo `setSession`,
+// que é onde o gancho mora. Então quem já estava logado quando esta versão
+// chegou — todo aparelho no dia do deploy, e os testadores que vão relatar —
+// abre a app sem carimbar início nenhum: o `caiu` chega sozinho e a duração,
+// que é o produto inteiro da seção, sai vazia no PRIMEIRO relato, que é
+// justamente o que interessa.
+
+test('a abertura com sessão já ativa carimba um marco próprio', () => {
+  const corpo = fatiar('marcarSessaoJaAtiva');
+  assert.match(corpo, /registrarEventoDeSessao\('jaAtiva'\)/,
+    'o marco deixou de ser registrado — o primeiro relato volta a vir sem duração');
+  assert.match(corpo, /if \(!safeLS\.get\('waze_session_token'\)\) return;/,
+    'carimba sem haver sessão — inventaria ciclo em quem está deslogado');
+  // Sem a varredura, seria uma linha por ABERTURA da app: o diário viraria
+  // ruído e quebraria a própria regra de entrada (raro, nunca por gesto).
+  assert.match(corpo, /e === 'token\+' \|\| e === 'jaAtiva'\) return;/,
+    'o marco deixou de checar se já há início em aberto — duplica a cada abertura');
+  const carga = APP.slice(APP.indexOf('const savedToken = API.getSession();'));
+  assert.match(carga.slice(0, 400), /marcarSessaoJaAtiva\(\);/,
+    'a carga com token salvo parou de carimbar o marco');
+});
+
+test('"já estava ativa" NÃO se confunde com "entrou agora"', () => {
+  // A distinção é o que separa uma MEDIDA de um PISO. Chamar os dois de
+  // entrada seria inventar um número — pior que não ter número nenhum.
+  const corpo = fatiar('diagSessao');
+  assert.match(corpo, /inicioConhecido: abriu\.e !== 'jaAtiva'/,
+    'o ciclo deixou de dizer se o início foi medido ou é só um piso');
+  assert.match(corpo, /c\.fim === 'caiu' \|\| c\.fim === 'token-'\) && c\.inicioConhecido/,
+    'o piso voltou pra estatística — a mediana passa a afirmar MENOS tempo do que houve, '
+    + 'que é o erro na direção de confirmar o relato');
+});
+
+test('a conta do piso e da medida, com o diário montado à mão', () => {
+  const H = 3600000, agora = Date.now();
+  const r = carregarDiagSessao([
+    { t: agora - 50 * H, e: 'jaAtiva' },                        // início desconhecido
+    { t: agora - 10 * H, e: 'caiu', motivo: 'x' },              // → 40h, PISO
+    { t: agora - 9 * H,  e: 'token+', via: 'cookies' },         // início medido
+    { t: agora - 1 * H,  e: 'caiu', motivo: 'x' },              // → 8h, medido
+  ], agora - 60 * H);
+  assert.equal(r.ciclos.length, 2);
+  assert.equal(r.ciclos[0].durouH, 40);
+  assert.equal(r.ciclos[0].inicioConhecido, false, 'o ciclo aberto por "jaAtiva" não é medida');
+  assert.equal(r.ciclos[1].inicioConhecido, true);
+  assert.equal(r.duracaoH.n, 1, 'o piso entrou na estatística');
+  assert.equal(r.duracaoH.mediana, 8, 'a mediana saiu do ciclo medido, não do piso');
+  assert.equal(r.pisos, 1);
+});

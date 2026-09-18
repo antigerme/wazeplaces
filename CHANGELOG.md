@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.18-05
+
+### Corrigido
+- **O relatório do modo dev não media a sessão de quem já estava logado.** O registro de sessões estreou na versão anterior, mas ele só carimba quando você *entra* — e quem já estava dentro não entra de novo. Na prática: o relatório ia mostrar a queda, sem mostrar quanto tempo a sessão tinha durado, que é exatamente o número que se está tentando descobrir. Agora, ao abrir a app com sessão já ativa, fica registrado que ela existia — e a duração contada a partir daí aparece como **"pelo menos tanto"**, nunca como medida exata, para não afirmar um número que ninguém mediu.
+
 ## v2026.09.18-03
 
 ### Corrigido

@@ -318,6 +318,9 @@ function initApp() {
 
     const savedToken = API.getSession();
     if (savedToken) {
+        // O token veio do armazenamento, não do login: sem isto o ciclo desta
+        // sessão nasce sem início e a duração não existe (ver a função).
+        marcarSessaoJaAtiva();
         showMainScreen();
         AppState._profilePromise = loadProfileAndAuxData();
         startFetching();
@@ -2959,6 +2962,33 @@ function registrarEventoDeSessao(e, d) {
     } catch (err) { /* armazenamento cheio/bloqueado: o diário é instrumento, nunca requisito */ }
 }
 
+// A sessão pode já estar ativa quando este registro começou a existir — e esse
+// é o caso de TODO aparelho no dia do deploy, inclusive o dos testadores que
+// vão relatar. `API.getSession()` lê o token do armazenamento SEM passar pelo
+// `setSession`, que é onde o gancho mora, então a abertura não carimba nada: o
+// `caiu` chega sozinho, sem início, e a duração — que é o produto inteiro desta
+// seção — sai vazia justamente no primeiro relato.
+//
+// Marco PRÓPRIO, e não `token+`: "já estava ativa" NÃO é "entrou agora". A
+// duração contada daí é um PISO ("pelo menos tanto"), nunca a medida — chamar
+// os dois de entrada seria inventar um número, que é pior que não ter nenhum.
+//
+// Só registra quando NÃO há início em aberto, senão viraria uma linha por
+// abertura da app e quebraria a regra de entrada do diário (raro, nunca por
+// gesto repetido).
+function marcarSessaoJaAtiva() {
+    try {
+        if (!safeLS.get('waze_session_token')) return;
+        const anel = lerDiarioDeSessoes();
+        for (let i = anel.length - 1; i >= 0; i--) {
+            const e = anel[i].e;
+            if (e === 'token+' || e === 'jaAtiva') return;          // já há início em aberto
+            if (e === 'token-' || e === 'caiu' || e === 'saiu') break;  // o último ciclo fechou
+        }
+        registrarEventoDeSessao('jaAtiva');
+    } catch (e) { /* instrumento nunca atrapalha a abertura */ }
+}
+
 // Quando esta app rodou pela PRIMEIRA vez NESTE armazenamento. É o detector de
 // apagamento pelo navegador, e ele funciona por CONTRADIÇÃO: o Safari apaga
 // todo o storage script-writable após 7 dias sem interação (webkit.org, e web
@@ -3219,12 +3249,15 @@ function diagSessao() {
         // duração vai em horas porque "2 dias" e "7 dias" se distinguem lá.
         let abriu = null;
         for (const l of anel) {
-            if (l.e === 'token+') { abriu = l; continue; }
+            if (l.e === 'token+' || l.e === 'jaAtiva') { abriu = l; continue; }
             if ((l.e === 'token-' || l.e === 'caiu' || l.e === 'saiu') && abriu) {
                 fora.ciclos.push({
                     de: new Date(abriu.t).toISOString(),
                     ate: new Date(l.t).toISOString(),
                     durouH: Math.round((l.t - abriu.t) / 360000) / 10,
+                    // `jaAtiva` significa que a sessão já existia quando o
+                    // registro começou: a duração é um PISO, não a medida.
+                    inicioConhecido: abriu.e !== 'jaAtiva',
                     fim: l.e, motivo: l.motivo || null,
                 });
                 abriu = null;
@@ -3232,9 +3265,15 @@ function diagSessao() {
         }
         if (abriu) {
             fora.ciclos.push({ de: new Date(abriu.t).toISOString(), ate: null,
-                               durouH: Math.round((Date.now() - abriu.t) / 360000) / 10, fim: 'em curso' });
+                               durouH: Math.round((Date.now() - abriu.t) / 360000) / 10,
+                               inicioConhecido: abriu.e !== 'jaAtiva', fim: 'em curso' });
         }
-        const fechados = fora.ciclos.filter((c) => c.fim === 'caiu' || c.fim === 'token-');
+        // Só entra na estatística o ciclo com as DUAS pontas medidas. Um piso
+        // misturado com medidas puxaria a mediana pra baixo e ela passaria a
+        // afirmar menos tempo do que houve — erro na direção que confirma o
+        // relato, que é a pior direção possível pra um instrumento.
+        const fechados = fora.ciclos.filter((c) => (c.fim === 'caiu' || c.fim === 'token-') && c.inicioConhecido);
+        fora.pisos = fora.ciclos.filter((c) => c.inicioConhecido === false).length;
         if (fechados.length) {
             const d = fechados.map((c) => c.durouH).sort((a, b) => a - b);
             fora.duracaoH = { menor: d[0], mediana: d[Math.floor(d.length / 2)], maior: d[d.length - 1], n: d.length };
