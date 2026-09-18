@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.18-03
+
+### Corrigido
+- **A app podia tratar um pedido e apagar outro da fila.** O card que você vê é sempre o primeiro da fila — mas quando a próxima página de pedidos chegava, a app reordenava a fila **por baixo do card**. A partir daí o pedido que você rejeitava ou marcava como lido era o da tela, enquanto o que saía da fila era outro: o seu voltava na sua frente depois, e o outro sumia sem ninguém tratar. Acontecia em qualquer ordenação — mais recentes, mais antigos ou perto de casa/trabalho/GPS. Agora a fila é reordenada quando o card sai da tela, e não embaixo dele.
+
+### Melhorado
+- **Mudar só a ordenação ficou instantâneo, e para de trazer de volta o que você pulou.** Antes, aplicar qualquer coisa no modal de Filtros jogava a fila fora e buscava tudo de novo no Waze — mesmo quando você só tinha mudado "mais recentes" para "mais antigos", que é ordenar no próprio aparelho. Além da espera, a fila refeita devolvia os pedidos que você já tinha pulado. Agora trocar só a ordem reordena na hora, sem ir à rede. Mudar qualquer filtro de verdade (tipo, país, categoria, não lidos…) continua buscando, como deve.
+- **O pré-carregamento das próximas fotos voltou a mirar no card certo.** Ele escolhe o que baixar olhando o próximo da fila, e roda uma vez por card. Como a fila mudava depois disso, ele baixava fotos que não iam aparecer e deixava de baixar a que ia — gastando dados do seu celular para, no fim, você ainda esperar a foto carregar.
+
 ## v2026.09.18-02
 
 ### Melhorado

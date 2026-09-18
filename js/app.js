@@ -177,6 +177,9 @@ const AppState = {
     _fetchPromise: null,
     _profilePromise: null,
     loadError: false,
+    // Uma página nova chegou enquanto havia card na tela: a ordem dela espera
+    // o `advanceQueue`. Ver o comentário no `fetchNextPage`.
+    ordemPendente: false,
     filters: { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
     preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false },
     devMode: { unlocked: false, active: false },
@@ -2448,6 +2451,10 @@ function applyFiltersFromModal() {
         return;
     }
 
+    // A foto dos filtros de BUSCA antes de qualquer mutação: é ela que decide,
+    // no fim, se dá pra reordenar no aparelho ou se é preciso ir ao Waze.
+    const buscaAntes = assinaturaDeBusca();
+
     // Preferências (undo/dev/idioma) NÃO passam por aqui — aplicam na hora,
     // via change listeners na aba Preferências (ver setupModalListeners).
     // Este handler é só da aba Filtros.
@@ -2478,8 +2485,44 @@ function applyFiltersFromModal() {
     closeModal('filtersModal');
     // A sala É a fila: mudou país ou estado, a companhia é outra.
     window.Presenca?.sincronizar?.();
+
+    // Trocar SÓ a ordem não é motivo pra ir ao Waze: ordenar é 100% no
+    // aparelho (`sortQueue` é client-side, e o comentário dele já dizia isso).
+    // Antes, qualquer Aplicar caía em `resetQueue` + `startFetching`, e isso
+    // custava duas coisas: uma requisição e ~1–2 MB de resposta contra o free
+    // tier, e os pedidos PULADOS voltavam — o skip não os marca no Waze, então
+    // a fila refeita os traz de novo. Quem só queria outra ordem via a app
+    // travar, recarregar e devolver o que ele tinha empurrado pra frente.
+    if (assinaturaDeBusca() === buscaAntes && AppState.queue.length) {
+        reordenarFilaNaTela();
+        return;
+    }
     resetQueue();
     startFetching();
+}
+
+// O que decide se é preciso RE-BUSCAR. Tudo de `filters` MENOS a ordem, mais
+// região e país — e por exclusão de propósito: filtro novo entra aqui sozinho,
+// enquanto uma lista de inclusão silenciaria a re-busca no dia em que alguém
+// esquecesse de somar o campo dele. As chaves são ordenadas porque a ordem de
+// inserção do objeto não é contrato.
+function assinaturaDeBusca() {
+    const { sortOrder, ...doServidor } = AppState.filters;
+    const chaves = Object.keys(doServidor).sort();
+    return JSON.stringify([chaves.map((k) => [k, doServidor[k]]), API.getRegion(), API.getCountry()]);
+}
+
+// Reordena e mostra o novo topo. O card na tela TROCA, e isso é o certo: a
+// pessoa pediu outra ordem, então o primeiro da fila é outro. O que não pode é
+// reordenar por baixo do card e deixar `currentPlace` e `queue[0]` diferentes —
+// é o mesmo cuidado do `fetchNextPage`, e é ele que mantém o aquecimento
+// mirando no card que vem (o `showCurrentPlace` reagenda em cima do novo topo).
+function reordenarFilaNaTela() {
+    sortQueue();
+    AppState.currentPlace = AppState.queue[0];
+    removeCurrentCardEl();
+    showCurrentPlace();
+    updatePendingCount();
 }
 
 // Teclas que pertencem ao CURSOR quando o foco está num campo de texto.
@@ -4576,6 +4619,7 @@ function resetQueue() {
     }
     removeUndoBanner();
     AppState.fetchEpoch++;              // invalida fetch em voo (descarta obsoleto)
+    AppState.ordemPendente = false;     // a fila vai embora; não há ordem a aplicar
     AppState.queue = [];
     AppState.nextPage = 1;
     AppState.hasMore = true;
@@ -4958,7 +5002,21 @@ function fetchNextPage() {
                 AppState.queue.push(...newPlaces);
                 AppState.serverTotal += newPlaces.length;
                 trackSeenCategories(newPlaces);
-                sortQueue();
+                // Reordenar AQUI, com um card já na tela, quebra a invariante de
+                // que o card exibido é o `queue[0]` — e o resto da app inteira
+                // conta com ela. `advanceQueue` remove o TOPO (`shift`), mas a
+                // ação é enviada pro `currentPlace`: divergindo os dois, a app
+                // rejeita o que você vê e apaga OUTRO da fila, que some sem ser
+                // tratado — e o seu volta na sua frente depois. MEDIDO no
+                // navegador nas três ordens (recentes, antigos e perto de casa).
+                // O aquecimento tem o mesmo prejuízo: ele mira no `queue[1]` do
+                // instante em que dispara e não roda de novo, então baixa foto
+                // que não vai aparecer e deixa de baixar a que vai.
+                //
+                // O outro ponto que reordena (`guardarReferencias`) já tinha
+                // essa proteção, com o motivo escrito; este ficou sem.
+                if (AppState.currentPlace) AppState.ordemPendente = true;
+                else sortQueue();
                 aplicarRecusaAutomatica();
             }
         } catch (error) {
@@ -9157,6 +9215,15 @@ async function handleBatchMarkRead() {
 function advanceQueue() {
     AppState.queue.shift();
     AppState.currentPlace = null;
+    // A ordem que a página nova pediu é aplicada AQUI, com o card já fora da
+    // tela: é o único instante em que reordenar não troca nada por baixo de
+    // ninguém. O `showCurrentPlace()` logo abaixo mostra o novo topo e agenda o
+    // aquecimento em cima dele, então a foto pré-carregada volta a ser a do
+    // card que vem — sem gatilho novo.
+    if (AppState.ordemPendente) {
+        AppState.ordemPendente = false;
+        sortQueue();
+    }
     updatePendingCount();
 
     if (AppState.queue.length > 0) {
