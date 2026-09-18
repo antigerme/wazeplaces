@@ -841,6 +841,34 @@ NOSSA API não expõe — outro payload, outro endpoint, um campo que o `handleB
 manda. Foi essa classe que respondeu "os filtros de data são do venue" e "foto em casa não tem
 autor". Ela é real, e é bem menor do que eu vinha tratando.
 
+**O DIÁRIO DE SESSÕES é o que sobrevive ao tombo** (v2026.09.18-02,
+`waze_places_sessoes` + `waze_places_nascimento`). O `dfato` resolveu o diário
+vazio, mas ele vive em MEMÓRIA — e a sessão cair é justamente o evento depois
+do qual o editor fecha a app; quando ele volta pra gerar o relato, o anel está
+vazio. **Mesmo buraco do `dfato`, agora no evento mais caro que a app tem**: a
+queda chegava só por `dlog` (que o dev mode desligado engole) e o `dfato` só
+marcava o ALARME FALSO, ou seja o caso em que ela NÃO cai. Origem: dois
+testadores relataram recarregar cookies "a cada 2 a 7 dias", e **o owner não
+confiava nos tempos relatados — com razão, porque memória de duração não
+existe**. O diário troca o relato por dois carimbos, e `diagSessao()` entrega a
+conta FEITA (ciclos em horas, motivo, mediana) — cruzar carimbo à mão num
+arquivo de 500 KB é o trabalho que faz a seção não ser lida. Regra de entrada
+igual à do `dfato` e por isso mesmo: RARO (entrar, cair, o prazo MUDAR — nunca
+por swipe, e `setItem` é síncrono) e SEM dado de terceiro nem token. **O gancho
+mora no `API.setSession`**, que é o ponto único por onde o token entra e sai:
+perseguir call site é como se perde o próximo caminho de entrada que alguém
+adicionar (gotcha #39). O `via` (extensao/cookies/pareamento) é explícito nos
+três. **Sai no "Sair"** com o resto — e isso não cega nada, porque quem saiu
+sabe que saiu, e o caso investigado é o de quem NÃO saiu.
+**E o suspeito número um não é nosso**: o WebKit apaga TODO o storage
+script-writable após *"seven days of Safari use without user interaction on the
+site"*, e **isenta quem está na tela inicial** ("have their own counter"). O
+sintoma é idêntico ao de sessão expirada e o conserto é outro (instalar), então
+`diagArmazenamentoDuravel()` escreve a conclusão no arquivo. As sentinelas novas
+têm ESCOPO por isso: `apagamentoPorInatividade` exige `!instalada` (senão acusa
+quem o próprio WebKit isenta) e `sessaoCaiCedo` exige DOIS ciclos < 72h (um só é
+troca de aparelho ou logout no WME).
+
 **O diário nascia VAZIO no primeiro relato — CONSERTADO em v2026.09.10-04.** `dlog()` saía
 na primeira linha com o dev mode desligado, e a pessoa só o liga DEPOIS do problema. MEDIDO
 nos 7 diagnósticos reais: **4 chegaram com `diario: []`**, o pior deles o dos modais achatados

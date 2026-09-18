@@ -399,7 +399,7 @@ function entrarPelaExtensao({ silencioso = false } = {}) {
             }
             if (d.action === 'sem-sessao') return fim(false);   // instalada, mas sem login no WME
             if (d.action !== 'sessao' || !d.token) return;
-            API.setSession(String(d.token));
+            API.setSession(String(d.token), 'extensao');
             showMainScreen();
             AppState._profilePromise = loadProfileAndAuxData();
             startFetching();
@@ -2876,6 +2876,69 @@ function dfato(k, d) {
     } catch (e) {}
 }
 
+// ── DIÁRIO DE SESSÕES: o que sobrevive ao tombo ──────────────────────────
+//
+// O `dfato` já é o anel sem portão, mas ele vive em MEMÓRIA — e a sessão cair
+// é justamente o evento depois do qual o editor fecha a app. Quando ele volta
+// pra gerar o diagnóstico, o anel está vazio: o mesmo buraco que fez o `dfato`
+// nascer ("4 dos 7 diagnósticos chegaram com `diario: []`"), agora no evento
+// mais caro que a app tem.
+//
+// Daí este anel em localStorage. Ele existe pra responder UMA pergunta que
+// hoje depende da memória de quem relata — *"quanto tempo a sessão durou?"* —
+// trocando "acho que uns dois dias" por dois carimbos de data.
+//
+// Regras de entrada, as mesmas do `dfato` e por isso mesmo: (a) RARO — entrar,
+// cair e o prazo MUDAR, nunca por swipe, senão volta o custo de escrita que o
+// gotcha do localStorage mede em quadros perdidos; (b) SEM DADO DE TERCEIRO e
+// sem token: só instante, evento, caminho de entrada e a chave do motivo.
+//
+// Sai no "Sair", com o resto (contrato de privacidade). Isso não cega a
+// investigação: quem deu Sair SABE que deu, e o caso que se investiga é o de
+// quem NÃO saiu e perdeu a sessão assim mesmo.
+const SESSOES_KEY = 'waze_places_sessoes';
+const NASCIMENTO_KEY = 'waze_places_nascimento';
+const SESSOES_TETO = 40;
+
+function lerDiarioDeSessoes() {
+    try {
+        const v = JSON.parse(safeLS.get(SESSOES_KEY) || '[]');
+        return Array.isArray(v) ? v : [];
+    } catch (e) { return []; }
+}
+
+function registrarEventoDeSessao(e, d) {
+    try {
+        const anel = lerDiarioDeSessoes();
+        anel.push({ t: Date.now(), e, ...(d || {}) });
+        while (anel.length > SESSOES_TETO) anel.shift();
+        safeLS.set(SESSOES_KEY, JSON.stringify(anel));
+    } catch (err) { /* armazenamento cheio/bloqueado: o diário é instrumento, nunca requisito */ }
+}
+
+// Quando esta app rodou pela PRIMEIRA vez NESTE armazenamento. É o detector de
+// apagamento pelo navegador, e ele funciona por CONTRADIÇÃO: o Safari apaga
+// todo o storage script-writable após 7 dias sem interação (webkit.org, e web
+// app na tela inicial é ISENTA — tem contador próprio). Quando isso acontece o
+// diário some junto, então a evidência não pode ser só o diário: um carimbo de
+// ontem num aparelho onde a pessoa diz usar a app há um mês É o apagamento.
+function nascimentoDoArmazenamento() {
+    try {
+        const v = Number(safeLS.get(NASCIMENTO_KEY));
+        if (Number.isFinite(v) && v > 0) return v;
+        const agora = Date.now();
+        safeLS.set(NASCIMENTO_KEY, String(agora));
+        return agora;
+    } catch (e) { return null; }
+}
+
+// O `API.setSession` é o ponto ÚNICO por onde o token entra e sai do
+// armazenamento, e o gancho mora LÁ de propósito: perseguir os call sites um a
+// um é como se perde o próximo caminho de entrada que alguém adicionar (a
+// mesma lição do gotcha #39 — persiga o CONCEITO, não o lugar). Aqui fica o
+// fato BRUTO; quem sabe o motivo (caiu? saiu?) registra à parte, logo depois.
+if (typeof window !== 'undefined') window.__sessaoEvento = registrarEventoDeSessao;
+
 // Identidade de pedido no diário: `creatorId` (número) e NUNCA `createdBy`.
 // O nome é dado de terceiro e o id resolve a mesma pergunta — é a mesma regra
 // que a reincidência já segue (o nome muda, o id não).
@@ -3093,6 +3156,89 @@ function diagQuemEstaNoCentro(el, r) {
 // Regra pra entrar aqui: só invariante que a app garante e que, quebrada,
 // significa defeito — nunca "achei estranho". Falso positivo aqui treina a
 // ignorar a seção inteira, que é como ela deixa de servir.
+// ── O RETRATO DA SESSÃO, com a conta JÁ FEITA ────────────────────────────
+//
+// Esta seção existe porque a pergunta do relato — *"a sessão dura 2 dias ou 7?"*
+// — hoje depende da memória de quem relata, e memória de duração é justamente
+// o que ninguém tem. Ela devolve os INTERVALOS medidos entre entrar e cair.
+//
+// E entrega CONCLUÍDO em vez de dados crus de propósito: cruzar carimbos à mão
+// num arquivo de 500 KB é o trabalho que faz a seção não ser lida.
+function diagSessao() {
+    const fora = { nascimento: null, idadeDoArmazenamentoH: null, diario: [], ciclos: [], erro: null };
+    try {
+        const nasc = Number(safeLS.get(NASCIMENTO_KEY)) || null;
+        fora.nascimento = nasc ? new Date(nasc).toISOString() : null;
+        fora.idadeDoArmazenamentoH = nasc ? Math.round((Date.now() - nasc) / 360000) / 10 : null;
+        const anel = lerDiarioDeSessoes();
+        fora.diario = anel.map((l) => ({ ...l, quando: new Date(l.t).toISOString() }));
+        // Um CICLO é entrar e sair/cair. É ele que responde a pergunta, e a
+        // duração vai em horas porque "2 dias" e "7 dias" se distinguem lá.
+        let abriu = null;
+        for (const l of anel) {
+            if (l.e === 'token+') { abriu = l; continue; }
+            if ((l.e === 'token-' || l.e === 'caiu' || l.e === 'saiu') && abriu) {
+                fora.ciclos.push({
+                    de: new Date(abriu.t).toISOString(),
+                    ate: new Date(l.t).toISOString(),
+                    durouH: Math.round((l.t - abriu.t) / 360000) / 10,
+                    fim: l.e, motivo: l.motivo || null,
+                });
+                abriu = null;
+            }
+        }
+        if (abriu) {
+            fora.ciclos.push({ de: new Date(abriu.t).toISOString(), ate: null,
+                               durouH: Math.round((Date.now() - abriu.t) / 360000) / 10, fim: 'em curso' });
+        }
+        const fechados = fora.ciclos.filter((c) => c.fim === 'caiu' || c.fim === 'token-');
+        if (fechados.length) {
+            const d = fechados.map((c) => c.durouH).sort((a, b) => a - b);
+            fora.duracaoH = { menor: d[0], mediana: d[Math.floor(d.length / 2)], maior: d[d.length - 1], n: d.length };
+        }
+    } catch (e) { fora.erro = String((e && e.message) || e); }
+    return fora;
+}
+
+// ── O AMBIENTE QUE DECIDE SE O ARMAZENAMENTO SOBREVIVE ───────────────────
+//
+// O relato ("preciso puxar os cookies toda semana") tem um candidato de
+// PLATAFORMA que não é defeito nosso: o WebKit apaga TODO o storage
+// script-writable depois de "seven days of Safari use without user interaction
+// on the site" (webkit.org). E a isenção é exatamente o que a app pede:
+// "web applications added to the home screen ... have their own counter".
+//
+// Ou seja: quem usa no Safari SEM instalar perde tudo em 7 dias, e o sintoma é
+// idêntico a "a sessão expirou". Isto responde, no arquivo, de que lado está.
+function diagArmazenamentoDuravel() {
+    const f = { modoExibicao: null, iosStandalone: null, engine: null, navegador: null,
+                riscoDeApagamento: null, pedimosPersistencia: false };
+    try {
+        for (const m of ['fullscreen', 'standalone', 'minimal-ui', 'browser']) {
+            if (matchMedia('(display-mode: ' + m + ')').matches) { f.modoExibicao = m; break; }
+        }
+        f.iosStandalone = navigator.standalone === true;
+        const ua = navigator.userAgent || '';
+        // Heurística DECLARADA como tal: UA mente, e o que importa aqui é o
+        // motor, não a marca. No iOS todo navegador é WebKit — Chrome incluso —,
+        // então "é Chrome" não exclui a regra dos 7 dias.
+        const iOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        f.engine = iOS || (/Safari/.test(ua) && !/Chrome|Chromium|Edg/.test(ua)) ? 'WebKit'
+                 : /Firefox|Gecko\//.test(ua) ? 'Gecko' : 'Blink';
+        const mb = ua.match(/(Firefox|Edg|OPR|Chrome|CriOS|FxiOS|Version)\/([\d.]+)/);
+        f.navegador = mb ? mb[1] + ' ' + mb[2] : null;
+        f.iOS = iOS;
+        const instalada = f.modoExibicao === 'standalone' || f.modoExibicao === 'fullscreen' || f.iosStandalone;
+        f.instalada = instalada;
+        // A conclusão, escrita: é isto que eu leio primeiro.
+        f.riscoDeApagamento = f.engine === 'WebKit' && !instalada
+            ? 'ALTO — WebKit fora da tela inicial: o navegador apaga todo o armazenamento após 7 dias sem abrir o site'
+            : f.engine === 'WebKit' ? 'baixo — instalada na tela inicial, que o WebKit isenta do apagamento de 7 dias'
+            : 'baixo — motor sem apagamento por inatividade (pode haver limpeza por pressão de espaço)';
+    } catch (e) { f.erro = String((e && e.message) || e); }
+    return f;
+}
+
 function diagSentinelas(comp) {
     const alertas = [];
     const diga = (chave, msg, dado) => alertas.push({ chave, msg, ...(dado || {}) });
@@ -3123,6 +3269,47 @@ function diagSentinelas(comp) {
                 '<html> tem `tema-claro` e `dark` juntos num sistema escuro — o fundo '
                 + 'sob a app não acompanha', { classe: cl });
         }
+        // 4. O armazenamento não está guardando NADA — e a app parece boa.
+        //    Invariante dura: depois de entrar, o token ESTÁ no localStorage.
+        //    Se há sessão ativa e ele não está lá, a sessão morre ao fechar a
+        //    aba, toda vez, e nenhum outro campo deste arquivo diz isso.
+        try {
+            if (AppState.authenticated && !safeLS.get('waze_session_token')) {
+                diga('tokenNaoPersiste',
+                    'há sessão ativa mas o token NÃO está no armazenamento — ele morre ao fechar a aba '
+                    + '(navegação privada, cookies bloqueados ou armazenamento cheio)');
+            }
+        } catch (e) { /* sonda nunca derruba o diagnóstico */ }
+        // 5. O ambiente apaga o armazenamento antes do prazo que a app promete.
+        //    NÃO é "achei estranho": é contradição entre o que a app garante
+        //    (sessão de semanas, com janela deslizante) e o que ESTE ambiente
+        //    faz — o WebKit apaga todo o storage após 7 dias sem interação, e
+        //    isenta quem está na tela inicial. Escopo apertado de propósito:
+        //    só com sessão ativa e fora da tela inicial, senão vira aviso
+        //    genérico de plataforma em todo diagnóstico de iPhone.
+        try {
+            const dur = diagArmazenamentoDuravel();
+            if (AppState.authenticated && dur.engine === 'WebKit' && !dur.instalada) {
+                diga('apagamentoPorInatividade',
+                    'WebKit fora da tela inicial: o navegador apaga TODO o armazenamento após 7 dias '
+                    + 'sem abrir o site — a sessão vai sumir sozinha, e instalar na tela inicial isenta',
+                    { modoExibicao: dur.modoExibicao, navegador: dur.navegador });
+            }
+        } catch (e) { /* idem */ }
+        // 6. A sessão está caindo sozinha, e isso tem NÚMERO agora.
+        //    Dois ciclos ou mais, cada um abaixo de 72 h, sem ter sido o editor
+        //    que saiu. Um só poderia ser troca de aparelho ou logout no WME;
+        //    dois é padrão. É o relato virando evidência sem depender da
+        //    memória de quem relata.
+        try {
+            const curtos = (diagSessao().ciclos || [])
+                .filter((c) => c.fim === 'caiu' && c.durouH != null && c.durouH < 72);
+            if (curtos.length >= 2) {
+                diga('sessaoCaiCedo',
+                    `a sessão caiu ${curtos.length}× em menos de 72 h — o prazo do Waze é de ~28 dias`,
+                    { duracoesH: curtos.map((c) => c.durouH), motivos: [...new Set(curtos.map((c) => c.motivo))] });
+            }
+        } catch (e) { /* idem */ }
         // 3. Gotcha #26, três reincidências: quem recebe o dedo não é o alvo.
         //    **Só vale pro controle que NÃO está atrás de camada aberta.** Modal
         //    cobrir o card é a função do modal, e sem esta condição a sentinela
@@ -3610,7 +3797,7 @@ function ligarFabDev() {
 // `derivarChave`). Foi pedido assim de propósito, porque é ele que permite
 // REPRODUZIR a falha em vez de teorizar. O arquivo diz isso na primeira linha,
 // e o caminho de anular é sair da app, que destrói a sessão no servidor.
-const DIAG_VERSAO = 1;
+const DIAG_VERSAO = 2;
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
 // (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
@@ -3861,6 +4048,10 @@ async function diagCorpo() {
             penduradas: dlogAnel.filter((l) => l.k === 'pendurada').map((l) => l.o),
             lentas: dlogAnel.filter((l) => l.k === 'lenta').length,
             telaAgora: dlogTelaAtual(),
+            // O resumo é o que se lê primeiro; estas duas respondem o relato da
+            // sessão sem abrir o resto do arquivo.
+            sessaoDuracaoH: (() => { try { return diagSessao().duracaoH || null; } catch (e) { return null; } })(),
+            riscoDeApagamento: (() => { try { return diagArmazenamentoDuravel().riscoDeApagamento; } catch (e) { return null; } })(),
             // PRIMEIRA coisa a olhar. Vazio = nenhuma invariante conhecida
             // quebrada; não significa "está tudo bem", significa "não é nenhum
             // dos defeitos que já vimos".
@@ -3874,6 +4065,10 @@ async function diagCorpo() {
         diario: [...dfatoAnel, ...dlogAnel].sort((a, b) => a.t - b.t),
         momentos: dlogMomentos,
         _gerado: new Date().toISOString(),
+        // A seção que responde o relato "a sessão não dura": ciclos medidos em
+        // horas, e o ambiente que decide se o armazenamento sobrevive.
+        sessao: diagSessao(),
+        armazenamentoDuravel: diagArmazenamentoDuravel(),
         app: { versao: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
                rotulo: typeof verLabel === 'function' ? verLabel(APP_VERSION) : null,
                url: location.href,
@@ -4128,6 +4323,24 @@ const MOTIVO_DA_QUEDA = {
 };
 
 function derrubarSessao(errorKey) {
+    // A queda é a decisão mais cara da app e era a ÚNICA que não chegava ao
+    // anel sem portão: havia `dlog('sessao.confere')`, que o dev mode desligado
+    // engole, e `dfato` só no ALARME FALSO — ou seja o caso em que ela NÃO cai.
+    // O testador liga o dev mode DEPOIS do problema, então sem isto o evento
+    // some exatamente para quem precisa relatá-lo.
+    //
+    // O prazo entra aqui porque o `esquecerPrazoDaSessao()` logo abaixo o apaga
+    // — com razão, senão a próxima entrada nasce com a contagem da sessão morta
+    // na tela. Ele sai da TELA e fica no REGISTRO.
+    const prazoQueMorreu = AppState.sessaoExpiraEm || Number(safeLS.get(SESSAO_KEY)) || null;
+    dfato('sessao.caiu', { motivo: errorKey || null });
+    registrarEventoDeSessao('caiu', {
+        motivo: errorKey || null,
+        prazo: prazoQueMorreu || null,
+        // Faltava muito, ou já tinha vencido? É o que separa "caiu antes da
+        // hora" de "venceu como esperado", sem eu ter que cruzar datas à mão.
+        faltavamH: prazoQueMorreu ? Math.round((prazoQueMorreu - Date.now() / 1000) / 360) / 10 : null,
+    });
     // Cancela ação pendente: a sessão já morreu no Waze, o executor falharia e
     // mostraria "erro ao marcar" na tela de login. Cancelar reverte o stat otimista.
     if (AppState.pendingAction) {
@@ -4310,6 +4523,14 @@ async function handleLogout() {
     // entrou, não preferência do aparelho.
     window.Presenca?.esquecer?.();
     esquecerPrazoDaSessao(); // prazo da sessão do Waze: some com o resto
+    // O diário de sessões e o carimbo de nascimento são do APARELHO, mas saem
+    // aqui assim mesmo: o contrato do "Sair" é "limpar de tudo", sem exceção
+    // que ninguém decidiu — foi por descuido assim que o marcador do convite de
+    // instalar ficou pra trás. E não cega a investigação: quem deu Sair SABE
+    // que deu, e o caso investigado é o de quem NÃO saiu e perdeu a sessão.
+    registrarEventoDeSessao('saiu');   // fica no anel até a linha seguinte apagá-lo
+    safeLS.remove(SESSOES_KEY);
+    safeLS.remove(NASCIMENTO_KEY);
     avatarPendente = null;   // a próxima entrada volta a esperar o primeiro card
     avatarFalhou = null;     // outro editor pode ter foto onde este não tinha
     // Casa, trabalho e posição são dado de LOCALIZAÇÃO do editor: sair é sair.
@@ -9286,8 +9507,13 @@ function guardarPrazoDaSessao(body) {
     if (!body || typeof body !== 'object') return;
     const prazo = Number(body.sessaoExpiraEm);
     if (!Number.isFinite(prazo) || prazo <= 0) return;
+    // Só registra quando MUDA: o Waze manda o cabeçalho ao rotacionar, e sem
+    // esta condição o diário viraria uma linha por resposta — o custo de
+    // escrita que a regra de entrada existe pra evitar.
+    const mudou = AppState.sessaoExpiraEm !== prazo;
     AppState.sessaoExpiraEm = prazo;
     safeLS.set(SESSAO_KEY, String(prazo));
+    if (mudou) registrarEventoDeSessao('prazo', { prazo, emDias: Math.round((prazo - Date.now() / 1000) / 8640) / 10 });
     atualizarAvisoDeSessao();
 }
 

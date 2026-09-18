@@ -1564,6 +1564,14 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // dele), então some junto — e some porque o contrato do "Sair" já
     // promete, não porque alguém lembrou.
     CONQUISTAS_KEY: 'safeLS.remove(CONQUISTAS_KEY)',
+    // Diário de sessões e carimbo de nascimento do armazenamento. São do
+    // APARELHO, não de quem entrou — mas saem aqui assim mesmo, porque o
+    // contrato é "limpar de tudo" e exceção que ninguém decidiu foi exatamente
+    // como o marcador do convite de instalar ficou pra trás. Não cega a
+    // investigação da sessão: quem deu Sair sabe que deu, e o caso que se
+    // investiga é o de quem NÃO saiu e perdeu a sessão assim mesmo.
+    SESSOES_KEY: 'safeLS.remove(SESSOES_KEY)',
+    NASCIMENTO_KEY: 'safeLS.remove(NASCIMENTO_KEY)',
     waze_session_token: 'API.setSession(null)',
     waze_region: "API.setRegion('row')",
     waze_country: 'API.setCountry(30)',
