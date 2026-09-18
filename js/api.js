@@ -12,10 +12,20 @@ const API = {
     region: 'row',
     countryId: 30,
 
-    setSession(token) {
+    setSession(token, via) {
+        const tinha = !!this.sessionToken;
         this.sessionToken = token;
         if (token) safeLS.set('waze_session_token', token);
         else safeLS.remove('waze_session_token');
+        // Fato BRUTO no diário de sessões: este é o ponto único por onde o
+        // token entra e sai, então nenhum caminho escapa — nem um que alguém
+        // adicione depois. O MOTIVO (caiu? saiu?) é registrado por quem o
+        // conhece, logo em seguida; aqui só o que aconteceu. Nunca o valor.
+        try {
+            if (tinha !== !!token && typeof window !== 'undefined' && window.__sessaoEvento) {
+                window.__sessaoEvento(token ? 'token+' : 'token-', via ? { via } : null);
+            }
+        } catch (e) { /* instrumento nunca derruba o login */ }
     },
 
     getSession() {
@@ -242,7 +252,7 @@ const API = {
             countryId: countryId || this.getCountry()
         });
         if (result.success && result.sessionToken) {
-            this.setSession(result.sessionToken);
+            this.setSession(result.sessionToken, 'cookies');
         }
         return result;
     },
@@ -461,7 +471,7 @@ const API = {
         const result = await this._post('parear', { action: 'claim', code });
         // Sucesso = este aparelho passa a ter sessão própria (a do computador
         // segue viva; não é transferência, é uma segunda sessão).
-        if (result.success && result.sessionToken) this.setSession(result.sessionToken);
+        if (result.success && result.sessionToken) this.setSession(result.sessionToken, 'pareamento');
         return result;
     }
 };

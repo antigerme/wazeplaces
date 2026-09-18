@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.18-02
+
+### Melhorado
+- **O diagnóstico agora responde "há quanto tempo", em vez de perguntar.** Dois editores relataram precisar recarregar os cookies a cada poucos dias, e ninguém — nem eles — sabia o intervalo de verdade: memória de duração é o que ninguém tem. O relatório do modo dev passou a guardar, **no aparelho**, a data de cada entrada e de cada queda de sessão, e a entregar a conta pronta: quanto durou cada ciclo, em horas, e por qual motivo terminou.
+
+  Junto vem o retrato do ambiente que decide se isso é problema da app ou do navegador: **se a app está instalada na tela inicial ou aberta no navegador**, qual o motor, e se o armazenamento está mesmo persistindo. Isso importa porque o Safari **apaga todos os dados de um site depois de 7 dias sem você abrir** — e quem instala na tela inicial fica de fora dessa regra. O sintoma é idêntico ao de uma sessão expirada, e a causa e o conserto são outros.
+
+  O relatório também avisa sozinho quando vê um desses três: a sessão caiu duas ou mais vezes em menos de 72 h; o aparelho está num navegador que apaga por inatividade e a app não foi instalada; ou o token não está sendo guardado (navegação privada, cookies bloqueados, armazenamento cheio).
+
+  **Nada disso sai do seu aparelho** a não ser que você mesmo gere e envie o relatório, e o registro não guarda nome de local, de quem enviou o pedido, nem o seu token — só datas, o caminho de entrada (extensão, cookies ou pareamento) e o motivo da queda. Sai inteiro quando você usa o "Sair".
+
 ## v2026.09.18-01
 
 ### Corrigido
