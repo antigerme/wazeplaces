@@ -8,6 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.18-04
+
+### Melhorado
+- **Todas as opções de "Ordenar por" ganharam ícone.** Antes só "perto de casa", "perto do trabalho" e "perto de mim" tinham (🏠 💼 📍), e as duas por data não tinham nada — cinco itens na mesma lista, três com ícone e dois sem. Agora são 🆕 mais recentes e ⏳ mais antigos.
+- **E os rótulos ficaram mais curtos**: "Mais recentes" no lugar de "Mais recentes primeiro". O "primeiro" repetia o que o próprio campo já diz ("Ordenar por"), e era ele que não deixava o ícone caber nas telas mais estreitas.
+
+### Corrigido
+- **Em francês, "mais antigos" não cabia no seletor** em telas de 280px (tipo o Galaxy Fold dobrado) — o texto era cortado no meio. Ninguém tinha relatado; apareceu ao medir a mudança acima.
+
 ## v2026.09.18-03
 
 ### Corrigido

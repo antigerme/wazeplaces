@@ -710,6 +710,9 @@ function aplicarIdioma(valor) {
         const s = document.getElementById(id);
         if (s && s.value !== valor) s.value = valor;
     }
+    // O `applyI18n` acima reescreveu o texto das opções de data (elas têm
+    // `data-i18n`), levando o ícone junto — redecora.
+    popularOrdenacoes();
     if (AppState.profile) renderProfileHeader(AppState.profile);
     if (AppState.currentPlace) showCurrentPlace();
     updateStats();
@@ -4660,6 +4663,23 @@ let posicaoGps = null;            // { ll: [lat, lon], precisaoM } — NUNCA per
 
 // As ordens que medem distância em vez de data.
 const ORDENS_POR_DISTANCIA = ['casa', 'trabalho', 'gps'];
+// O ícone de cada ordem. Ele vivia DENTRO do texto no dicionário, e isso
+// custava duas coisas:
+//
+// (a) **vazava pra prosa** — `filters.sort.hint.negado` interpola o rótulo da
+//     ordem padrão numa frase ("a ordem voltou pra «…»"), e com o emoji no
+//     texto a frase ganhava um 🆕 no meio, entre aspas;
+// (b) o dicionário passava a carregar DECORAÇÃO, então a régua "o mesmo
+//     conceito usa o mesmo ícone em toda a app" ficava espalhada por 4 línguas
+//     em vez de num lugar só — e conferível por ninguém.
+//
+// Aqui o ícone é do CONCEITO (a ordem), não da tradução: um mapa só, e o
+// dicionário volta a ser texto. Ordem nova entra aqui e no dicionário.
+const ORDEM_ICONE = Object.freeze({
+    newest: '🆕', oldest: '⏳', casa: '🏠', trabalho: '💼', gps: '📍',
+});
+const rotuloDaOrdem = (ordem) =>
+    (ORDEM_ICONE[ordem] ? ORDEM_ICONE[ordem] + ' ' : '') + t('filters.sort.' + ordem);
 const ORDEM_PADRAO = 'newest';
 
 function referenciaDaOrdem(ordem) {
@@ -4835,10 +4855,16 @@ function popularOrdenacoes() {
         if (!disponivel[ordem]) { if (existente) existente.remove(); continue; }
         const opt = existente || document.createElement('option');
         opt.value = ordem;
-        // O emoji vem do dicionário (como em toast.langChanged e card.stamp.*),
-        // então `applyI18n` já o troca junto com o texto.
-        opt.textContent = t('filters.sort.' + ordem);
+        opt.textContent = rotuloDaOrdem(ordem);
         if (!existente) sel.appendChild(opt);
+    }
+    // As duas de DATA vivem no HTML com `data-i18n`, então o `applyI18n` reescreve
+    // o textContent delas e levaria o ícone junto. Decorar aqui é o que mantém as
+    // cinco opções com a mesma régua — e é por isso que a troca de idioma chama
+    // esta função DEPOIS do `applyI18n` (ver `aplicarIdioma`).
+    for (const ordem of ['newest', 'oldest']) {
+        const opt = sel.querySelector('option[value="' + ordem + '"]');
+        if (opt) opt.textContent = rotuloDaOrdem(ordem);
     }
     // Ordem salva que não existe mais neste perfil/aparelho volta ao padrão em
     // vez de deixar o select num valor fantasma (que o browser mostra VAZIO).
