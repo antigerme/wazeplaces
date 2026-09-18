@@ -1033,9 +1033,17 @@ for (const status of [404, 403]) {
   await page.waitForTimeout(250);
   // Um pedido em que o mapa é o PRIMEIRO slide (a mesma regra do carrossel):
   // com foto na frente, ele nasce escondido e não há o que clicar.
-  const alvo = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro
+  //
+  // E, entre esses, um em que o ENQUADRAMENTO não coincide com o PEDIDO — ou
+  // seja com entrada ou posição proposta puxando a caixa. Sem isso o guard do
+  // viewpoint não distingue as duas regras possíveis e passa verde com o
+  // defeito de volta (gotcha #52: a fixture decide o que o teste consegue ver).
+  const podeAbrirMapa = (f) => f.mapa && f.mapa.centro
     && (!(f.imageUrls || []).length
-        || (f.changes || []).some((c) => c.field === 'geometry' || c.field === 'entryExitPoints')));
+        || (f.changes || []).some((c) => c.field === 'geometry' || c.field === 'entryExitPoints'));
+  const distingue = (f) => (f.mapa.entradas || []).length > 0 || !!f.mapa.proposto;
+  const alvo = FIXTURES_PAISES.find((f) => podeAbrirMapa(f) && distingue(f))
+            || FIXTURES_PAISES.find(podeAbrirMapa);
   await page.evaluate(async (pl) => {
     setLang('pt'); applyI18n();
     AppState.authenticated = true;
@@ -1108,6 +1116,7 @@ for (const status of [404, 403]) {
       roubados: rouba('#mapaLbLegenda') + rouba('#mapaLbEscala')
               + rouba('#mapaLbClose') + rouba('#mapaLbCentrar') + rouba('#mapaLbMais'),
       centro: MapaLightbox.centro.slice(),
+      local: AppState.currentPlace.mapa.centro.slice(),
     };
   });
   checa(!sv.falta, 'Street View: o botão não existe no lightbox do mapa');
@@ -1122,8 +1131,17 @@ for (const status of [404, 403]) {
   // A ORDEM das coordenadas: o viewpoint tem que sair lat,lon — e lido ao
   // contrário dá lugar plausível e errado, sem sintoma nenhum na tela.
   const vpDe = (h) => { try { return new URL(h).searchParams.get('viewpoint'); } catch { return null; } };
-  checa(vpDe(sv.href) === `${sv.centro[0]},${sv.centro[1]}`,
-    'Street View: viewpoint não casa com o centro em [lat, lon]', `${vpDe(sv.href)} vs ${sv.centro}`);
+  // CONTROLE antes do guard: se neste cenário o enquadramento COINCIDIR com o
+  // pedido, o guard abaixo não distingue as duas regras e passaria verde com o
+  // defeito de volta (gotcha #28). Exigir a divergência é o que o torna teste.
+  checa(sv.centro[0] !== sv.local[0] || sv.centro[1] !== sv.local[1],
+    'Street View: fixture não distingue enquadramento de pedido — o guard abaixo vira decoração');
+  // Com o mapa parado o viewpoint é o PEDIDO. O `centro` é a média dos
+  // marcadores e em 31% da fila real (12 países) não é o local — medido: a
+  // câmera do Google cai a 79 m de mediana pelo enquadramento contra 30 m pelo
+  // pedido, com o pior caso indo de 10.885 m para 393 m.
+  checa(vpDe(sv.href) === `${sv.local[0]},${sv.local[1]}`,
+    'Street View: viewpoint não é o ponto do pedido em [lat, lon]', `${vpDe(sv.href)} vs ${sv.local}`);
 
   // Arrastar longe TEM que trazer tile novo — é o que separa "mapa" de "imagem".
   const antes = pedidos.size;
@@ -1162,8 +1180,8 @@ for (const status of [404, 403]) {
     === JSON.stringify(c.map((n) => +n.toFixed(4))), [centro0]);
   checa(voltou, 'mapa ampliado: "voltar ao pedido" não recentrou');
   const svVolta = await page.evaluate(() => document.getElementById('mapaLbStreetView').getAttribute('href'));
-  checa(vpDe(svVolta) === vpDe(sv.href),
-    'Street View: recentrar não devolveu o link ao ponto do pedido', `${vpDe(svVolta)} vs ${vpDe(sv.href)}`);
+  checa(vpDe(svVolta) === `${sv.local[0]},${sv.local[1]}`,
+    'Street View: recentrar não devolveu o link ao ponto do pedido', `${vpDe(svVolta)} vs ${sv.local}`);
 
   // Fecha por Esc (desktop) e por ✕ (toque). O voltar do aparelho é coberto
   // pelo guard de código — aqui não há histórico de navegação real.
