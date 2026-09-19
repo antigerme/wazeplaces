@@ -118,6 +118,22 @@ test('os ouvintes de ✕ ↑ ✓ ficam FORA do montarCard', () => {
 });
 
 // ── 3. QUANDO A PILHA NÃO EXISTE ───────────────────────────────────────────
+test('o card de fundo não carrega ouvinte NENHUM', () => {
+  // `cloneNode(true)` copia atributo e NÃO copia ouvinte. Os dos botões já
+  // ficavam de fora (moram no `renderCurrentCard`), mas o `renderCardImages`
+  // pendura na foto e nas setas do carrossel — e MEDIDO no navegador, um
+  // `.click()` programático na foto do card de fundo ABRIA o lightbox. Era o
+  // mesmo defeito dos botões: ouvinte vivo, escondido só pelo `inert` e pelo
+  // `pointer-events`, ou seja por OUTRA camada.
+  const f = semComentarioJS(fatiar(APP, 'montarCardDeFundo'));
+  assert.match(f, /cloneNode\(true\)/,
+    'o card de fundo deixou de ser clonado: os ouvintes da foto e do carrossel voltam a ficar vivos nele');
+  // O clone perde propriedades JS, e uma importa: sem o `onerror` reposto, foto
+  // 404 no card de fundo vira caixa vazia em vez do "Sem Imagem".
+  assert.match(f, /onerror = \(\) =>/,
+    'o onerror da foto não é reposto depois do clone');
+});
+
 test('sem próximo na fila não há card de fundo', () => {
   const f = fatiar(APP, 'montarCardDeFundo');
   assert.match(f, /const proximo = AppState\.queue\[1\];/,

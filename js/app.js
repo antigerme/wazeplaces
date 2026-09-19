@@ -5570,6 +5570,23 @@ function montarCardDeFundo() {
         console.error('Erro ao montar o card de fundo, seguindo sem pilha:', err);
         return;
     }
+    // CLONE PROFUNDO: `cloneNode` copia atributos e NÃO copia ouvinte nenhum.
+    // Os dos botões já ficavam de fora (eles moram no `renderCurrentCard`), mas
+    // o `renderCardImages` pendura ouvinte na foto e nas setas do carrossel —
+    // e o lightbox ABRIA com um `.click()` programático no card de fundo, ou
+    // seja o ouvinte estava vivo e só não era alcançado por causa do `inert` e
+    // do `pointer-events`. É o mesmo argumento que tirou os botões dali: o que
+    // só não dispara por causa de OUTRA camada volta a disparar no dia em que
+    // alguém mexe na camada. Depois desta linha o card de fundo é uma FIGURA.
+    //
+    // O que o clone perde são propriedades JS, e só uma importa: o `onerror`
+    // da foto, que troca a imagem quebrada pelo "Sem Imagem". Ele é reposto
+    // logo abaixo — sem isso, foto 404 no card de fundo viraria caixa vazia.
+    fundo = fundo.cloneNode(true);
+    const imgF = fundo.querySelector('.card-image');
+    const semF = fundo.querySelector('.card-no-image');
+    if (imgF && semF) imgF.onerror = () => { imgF.classList.add('hidden'); semF.classList.remove('hidden'); };
+
     fundo.classList.add('card-fundo');
     // As TRÊS, e cada uma cobre o que as outras não cobrem: `inert` tira do Tab
     // e da árvore de acessibilidade E bloqueia o ponteiro, mas é recente demais
@@ -7750,6 +7767,51 @@ function carregarConquistas() {
 function salvarConquistas() {
     try { localStorage.setItem(CONQUISTAS_KEY, JSON.stringify(AppState.conquistas)); } catch (e) {}
 }
+// Uma ação CONFIRMADA pelo Waze. Daqui saem a sequência sem desfazer, os
+// gatilhos de evento e a reavaliação.
+//
+// ELA E A `registrarDesfazer` FORAM REMOVIDAS POR ENGANO em v2026.09.16-xx
+// (#215, o PR que trocou o banner de conquista por um ponto): a que precisava
+// sair era só a `anunciarConquista`, e estas duas foram junto — com os DOIS
+// call sites de cada uma ficando pra trás. O resultado estava em produção e não
+// era sutil: `handleActionResult` lançava `ReferenceError` em TODA ação
+// confirmada, e `desfazerAcaoPendente` lançava antes de tirar o banner e
+// destravar os botões — ou seja, desfazer devolvia o pedido e deixava o card
+// MORTO (banner preso, ✕ ↑ ✓ desabilitados), com o gesto ainda funcionando, que
+// é exatamente o que escondia o problema (a mesma assinatura do gotcha #63).
+// Nenhum teste enxergava porque nenhum deles CHAMA o código — os de unidade
+// fatiam a fonte e o smoke não exercitava o Desfazer até o fim.
+function registrarAcaoConfirmada(actionType, place) {
+    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
+    const g = carregarConquistas();
+    g.seq = (g.seq || 0) + 1;
+    salvarConquistas();
+    // O idioma entra no gesto, não na carga: "usou a app em 2 idiomas" é sobre
+    // TRABALHAR em dois, não sobre abrir o seletor e voltar.
+    registrarIdiomaUsado(typeof getLang === 'function' ? getLang() : '');
+    const hora = new Date().getHours();
+    checarConquistas({
+        duplicado: actionType === 'reject' && !!(place && place.duplicado),
+        // `contagemDoAutor` já inclui ESTA rejeição (o registro veio antes), então
+        // > 1 significa que havia rejeição anterior — é isso que faz reincidente.
+        reincidente: actionType === 'reject' && !!place && place.creatorId != null
+                     && contagemDoAutor(place) > 1,
+        // "Depois da meia-noite" é a MADRUGADA (0h–4h59), não a noite: às 23h a
+        // pessoa ainda está acordada no mesmo dia, e a graça da coruja é a virada.
+        madrugada: hora >= 0 && hora < 5,
+    });
+}
+
+// Desfazer zera a sequência de "Mão firme" e destrava "Segunda chance" — que é
+// de propósito o contrapeso da lista: a única que celebra CUIDADO, não volume.
+function registrarDesfazer() {
+    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
+    const g = carregarConquistas();
+    g.seq = 0;
+    salvarConquistas();
+    checarConquistas({ desfez: true });
+}
+
 // Contador acumulado (guardados, fotos aprovadas, nomes corrigidos).
 function contarConquista(chave, delta) {
     const g = carregarConquistas();

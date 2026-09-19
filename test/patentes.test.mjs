@@ -244,7 +244,19 @@ test('conquista NÃO dispara banner nem confete', () => {
   // SEM COMENTÁRIO: o bloco que explica a decisão CITA `dispararConfeteNaFila()`
   // ao dizer o que saiu, e a primeira versão deste guard reprovou por causa dele
   // — o comentário virando prova do contrário do que ele diz (gotcha #14).
-  const semComentarios = (txt) => txt.replace(/\/\/[^\n]*/g, '');
+  //
+  // A REGRA VALE PRO ARQUIVO INTEIRO, não só pro trecho fatiado, e o meio-
+  // conserto mordeu: a asserção do `anunciarConquista` logo abaixo lia o APP
+  // CRU e reprovou por causa de um comentário que explicava justamente que a
+  // função tinha sido removida. Quanto melhor o comentário, mais o guard solto
+  // erra — e corrigir só metade é o padrão do gotcha #14.
+  //
+  // Por LINHA e não por regex de `//`: `str.replace(/\/\/[^\n]*/g,'')` come o
+  // resto da linha a partir de qualquer `https://` e poderia ESCONDER uma
+  // ocorrência real.
+  const semComentarios = (txt) => txt.split('\n')
+    .filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const APP_SEM_COMENTARIO = semComentarios(APP);
   const chk = semComentarios(fatiar('checarConquistas'));
   assert.ok(!/showToast/.test(chk), 'voltou um toast no caminho da conquista');
   assert.ok(!/dispararConfeteNaFila/.test(chk), 'voltou confete no caminho da conquista');
@@ -252,7 +264,7 @@ test('conquista NÃO dispara banner nem confete', () => {
   // que ele DEVE ter.
   assert.match(chk, /atualizarSeloDeConquista\(\)/,
     'controle: fatiei errado — o corpo do checarConquistas não acende o selo');
-  assert.ok(!APP.includes('anunciarConquista'), 'o anunciador de conquista voltou');
+  assert.ok(!APP_SEM_COMENTARIO.includes('anunciarConquista'), 'o anunciador de conquista voltou');
   assert.ok(!/conq\.toast\./.test(APP) && !/conq\.toast\./.test(I18N),
     'sobrou chave de toast de conquista — texto morto em 4 idiomas');
 

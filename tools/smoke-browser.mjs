@@ -4545,10 +4545,14 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // Cada caso leva o CONTROLE junto, e é ele que decide se a medida vale.
 {
   const CARDS_PILHA = Object.entries(CARDS).slice(0, 2).map(([, p]) => p);
-  for (const [aparelho, viewport] of [['Pixel 7', { width: 393, height: 852 }],
-                                      ['Galaxy Fold', { width: 280, height: 653 }]]) {
-    for (const tema of ['light', 'dark']) {
-      const id = `pilha/${aparelho}/${tema}`;
+  // Os QUATRO idiomas, e não só o pt: a string mais larga decide o layout e
+  // quase nunca está no idioma em que se desenvolve (gotcha #25). O card de
+  // fundo tem o MESMO markup do da frente, então o que se mede aqui é a tela
+  // com os dois empilhados — cada aparelho com um tema, e todas as línguas.
+  for (const [aparelho, viewport, tema] of [['Pixel 7', { width: 393, height: 852 }, 'light'],
+                                            ['Galaxy Fold', { width: 280, height: 653 }, 'dark']]) {
+    for (const lang of LINGUAS) {
+      const id = `pilha/${aparelho}/${tema}/${lang}`;
       const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR', colorScheme: tema });
       const page = await ctx.newPage();
       const errosJS = [];
@@ -4556,7 +4560,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       await page.goto(BASE, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(300);
 
-      const montar = (n) => page.evaluate(({ fila, n }) => {
+      const montar = (n) => page.evaluate(({ fila, n, lang }) => {
+        setLang(lang);
         AppState.authenticated = true;
         AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
         AppState.stats = { read: 4, rejected: 2, skipped: 0 };
@@ -4571,7 +4576,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         // Direto, sem esperar a foto: o QUANDO é assunto do teste de unidade;
         // aqui o assunto é o que a tela faz com a pilha montada.
         montarCardDeFundo();
-      }, { fila: CARDS_PILHA, n });
+      }, { fila: CARDS_PILHA, n, lang });
 
       // CONTROLE do bloco inteiro: com UM pedido na fila a pilha não existe.
       // Sem ele, um "0 sobreposições" abaixo poderia ser só ausência de card —
@@ -4684,6 +4689,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       const comVeu = await page.screenshot();
       await page.evaluate(() => {
         // impede o aquecimento de refazer o card de fundo COM véu no meio da medida
+        window.__mcf = window.__mcf || window.montarCardDeFundo;
         window.montarCardDeFundo = () => {};
         document.querySelectorAll('.card-fundo-veu').forEach((e) => e.remove());
       });
@@ -4692,10 +4698,117 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(Buffer.compare(comVeu, semVeu) !== 0,
         `${id}: tirar o véu não mudou um pixel — ele está pintando atrás do conteúdo do card`);
 
+      // NENHUM ouvinte no card de fundo. O `.click()` programático é de
+      // propósito: ele ignora `pointer-events` e `inert`, então mede o OUVINTE
+      // e não a camada que o esconde. Antes do clone profundo, a foto do card
+      // de fundo ABRIA o lightbox por este caminho.
+      // Devolve o `montarCardDeFundo` que o teste do véu stubou pra impedir o
+      // aquecimento de refazer o card no meio da captura. Sem esta linha o
+      // stub vaza pro teste seguinte e o card de fundo simplesmente não nasce
+      // — a sabotagem do instrumento contaminando a medida de depois.
+      await page.evaluate(() => { if (window.__mcf) window.montarCardDeFundo = window.__mcf; });
+      await montar(2); await assentar(page);
+      const ouv = await page.evaluate(() => {
+        const b = document.querySelector('#cardStack .card-fundo');
+        const f = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+        const abriu = () => typeof Lightbox !== 'undefined' && Lightbox.isOpen();
+        b.querySelector('.card-image').click();
+        const noFundo = abriu(); if (noFundo) Lightbox.close();
+        const nx = b.querySelector('.card-image-next');
+        const c0 = (b.querySelector('.card-image-count') || {}).textContent;
+        if (nx) nx.click();
+        const carrossel = (b.querySelector('.card-image-count') || {}).textContent !== c0;
+        // CONTROLE: na FRENTE tem que abrir, senão "não abriu no fundo" só diria
+        // que o lightbox está quebrado.
+        f.querySelector('.card-image').click();
+        const naFrente = abriu(); if (naFrente) Lightbox.close();
+        return { noFundo, carrossel, naFrente,
+                 onerro: typeof b.querySelector('.card-image').onerror === 'function' };
+      });
+      checa(!ouv.noFundo, `${id}: a foto do card de fundo abriu o lightbox — o ouvinte está vivo e só escondido por outra camada`);
+      checa(!ouv.carrossel, `${id}: a seta do carrossel do card de fundo respondeu`);
+      checa(ouv.naFrente, `${id}: CONTROLE falhou — a foto do card da FRENTE não abriu o lightbox, então "não abriu no fundo" não prova nada`);
+      checa(ouv.onerro, `${id}: o clone comeu o onerror da foto — foto 404 no fundo vira caixa vazia em vez do "Sem Imagem"`);
+
       checa(errosJS.length === 0, `${id}: erro de JS`, errosJS[0]);
       await ctx.close();
     }
   }
+}
+
+// ── DESFAZER ATÉ O FIM ──────────────────────────────────────────────────────
+//
+// Existe porque um defeito passou por aqui e foi pra PRODUÇÃO: em #215 as
+// funções `registrarAcaoConfirmada` e `registrarDesfazer` foram removidas por
+// engano e os três call sites ficaram. `desfazerAcaoPendente` lançava ANTES de
+// tirar o banner e reabilitar os botões — desfazer devolvia o pedido e deixava
+// o card MORTO (banner preso, ✕ ↑ ✓ desabilitados), e só recarregando saía
+// disso. O GESTO continuava funcionando, que é o que escondeu: exatamente a
+// assinatura do gotcha #63.
+//
+// Nada enxergava. `node --check` não pega erro de execução; os testes de
+// unidade FATIAM a fonte em vez de rodá-la; e o smoke exercitava o Desfazer só
+// até o banner ABRIR. Este bloco vai até o fim: aperta, e confere que a tela
+// VOLTA ao que era.
+{
+  const id = 'desfazer/Pixel 7';
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 },
+    serviceWorkers: 'block', locale: 'pt-BR' });
+  const page = await ctx.newPage();
+  const errosJS = [];
+  page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(300);
+  const CARDS_UNDO = Object.entries(CARDS).slice(0, 3).map(([, p]) => p);
+  await page.evaluate(({ fila }) => {
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.stats = { read: 4, rejected: 2, skipped: 0 };
+    AppState.serverTotal = fila.length; AppState.hasMore = false;
+    AppState.preferences.undoEnabled = true;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    AppState.queue = fila.slice(); AppState.currentPlace = null; showCurrentPlace();
+  }, { fila: CARDS_UNDO });
+  await assentar(page);
+
+  const tela = () => page.evaluate(() => {
+    const f = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+    const b = f && f.querySelector('.card-btn-reject');
+    return { pedido: f && (f.querySelector('.card-name') || {}).textContent,
+             botao: b ? (b.disabled ? 'desabilitado' : 'ok') : 'sem card',
+             banner: (document.getElementById('undoContainer') || {}).innerHTML ? 'na tela' : 'limpo',
+             fila: AppState.queue.length };
+  });
+
+  const antes = await tela();
+  await page.evaluate(() => document.querySelector('.place-card:not(.card-fundo) .card-btn-reject').click());
+  await page.waitForTimeout(600);
+  const durante = await tela();
+  // CONTROLE: sem a janela aberta do jeito certo, o que vem depois não prova nada.
+  checa(durante.banner === 'na tela' && durante.botao === 'desabilitado' && durante.fila === antes.fila - 1,
+    `${id}: CONTROLE falhou — a janela do Desfazer não abriu como se espera`, JSON.stringify(durante));
+
+  const clicou = await page.evaluate(() => {
+    const b = document.querySelector('#undoContainer button');
+    if (!b) return false;
+    b.click();
+    return true;
+  });
+  checa(clicou, `${id}: o banner do Desfazer não tem botão`);
+  await page.waitForTimeout(700);
+  const depois = await tela();
+  checa(depois.pedido === antes.pedido, `${id}: o Desfazer não devolveu o pedido`,
+    `${antes.pedido} → ${depois.pedido}`);
+  checa(depois.fila === antes.fila, `${id}: a fila não voltou`, `${antes.fila} → ${depois.fila}`);
+  checa(depois.banner === 'limpo', `${id}: o banner do Desfazer ficou PRESO na tela depois de apertado`);
+  checa(depois.botao === 'ok',
+    `${id}: os botões ✕ ↑ ✓ continuaram DESABILITADOS depois do Desfazer — o card volta morto e só recarregando sai disso`);
+  checa(errosJS.length === 0, `${id}: erro de JS no caminho do Desfazer`, errosJS[0]);
+  await ctx.close();
 }
 
 await browser.close();
@@ -4743,5 +4856,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
-  + `, + pilha do próximo pedido em 2 aparelhos × 2 temas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, e tirar o véu MUDANDO pixel)`
+  + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
+  + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
