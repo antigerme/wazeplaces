@@ -234,7 +234,12 @@ function updateSwipeIndicator(deltaX, opacity, upOpacity = 0) {
 function triggerSwipe(direction, callback) {
     if (animating) return; // ignora enquanto uma animação de saída está em curso
     if (window.acoesTravadas && window.acoesTravadas()) return;
-    const card = document.querySelector('.place-card');
+    // NUNCA `document.querySelector('.place-card')` aqui: desde a pilha existem
+    // dois na tela, e o de fundo é só o próximo pedido espiando por baixo.
+    // Pegando o errado, o botão ✕ e a seta do teclado mandariam SAIR o card de
+    // baixo enquanto o de cima fica parado — o `handleReject` seguiria tratando
+    // o pedido certo, então a tela e a ação discordariam sem erro nenhum.
+    const card = window.cardDaFrente ? window.cardDaFrente() : null;
     if (!card) {
         if (callback) callback();
         return;

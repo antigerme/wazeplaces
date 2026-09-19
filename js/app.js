@@ -218,7 +218,7 @@ window.addEventListener('error', (e) => {
     }
     if (window.AppState && window.AppState.authenticated) {
         const cardStack = document.getElementById('cardStack');
-        if (cardStack && !cardStack.querySelector('.place-card') &&
+        if (cardStack && !cardDaFrente() &&
             document.getElementById('loadingCard').classList.contains('hidden') &&
             document.getElementById('noMoreCards').classList.contains('hidden')) {
             console.warn('Estado inconsistente detectado, tentando recuperar…');
@@ -2237,7 +2237,7 @@ function aplicarNomeNaTela(place, nome) {
     if (Lightbox.place === place) Lightbox.placeName = nome;
     const txt = document.getElementById('lightboxNomeTxt');
     if (txt && Lightbox.place === place) txt.textContent = nome;
-    const card = document.querySelector('.place-card');
+    const card = cardDaFrente();
     if (card && AppState.currentPlace === place) {
         const el = card.querySelector('.card-name');
         if (el) el.textContent = nome;
@@ -3070,7 +3070,7 @@ function dlogTelaAtual() {
         painel: visivel('loadErrorState') ? 'falhaAoCarregar'
               : visivel('noMoreCards') ? 'tudoLimpo'
               : visivel('loadingCard') ? 'carregando'
-              : document.querySelector('.place-card') ? 'card' : 'nada',
+              : cardDaFrente() ? 'card' : 'nada',
         modais,
         lightbox: visivel('lightbox'),
     };
@@ -3171,7 +3171,7 @@ function medirSafeArea() {
 // coisa FICOU (o que a tela deu), e `scrollHeight/clientHeight` + o `overflow-y`
 // COMPUTADO dizem se ela rola ou se está cortada — que são coisas diferentes e
 // `scrollHeight > clientHeight` é verdadeiro nas DUAS (gotcha #29).
-const DIAG_ALVOS = ['.place-card', '.card-content', '.card-changes', '.card-flag-comment',
+const DIAG_ALVOS = ['.place-card:not(.card-fundo)', '.card-fundo', '.card-content', '.card-changes', '.card-flag-comment',
                     '#cardStack', '#placar', 'header', '.modal-root:not(.hidden) > div',
                     '#imageLightbox:not(.hidden)', '#devFab:not(.hidden)',
                     '.card-btn-reject', '.card-btn-skip', '.card-btn-read'];
@@ -5144,8 +5144,24 @@ function maybePrefetch() {
 
 function removeCurrentCardEl() {
     const cardStack = document.getElementById('cardStack');
-    const existingCard = cardStack.querySelector('.place-card');
-    if (existingCard) existingCard.remove();
+    // querySelectorAll, e não querySelector: desde a pilha existem DOIS
+    // `.place-card` na tela (o da frente e o de fundo). Com `querySelector`
+    // esta função tirava só um deles — e qual seria dependia da ordem do DOM,
+    // o que é a pior forma de decidir: some o card errado e sobra um pedido
+    // fantasma na tela, sem erro nenhum. Todos os 10 chamadores querem dizer
+    // "limpa a área do card", então limpar tudo é o que eles já pediam.
+    cardStack.querySelectorAll('.place-card').forEach((e) => e.remove());
+}
+
+// O card que o editor está TRATANDO — nunca o de fundo, que é só o próximo
+// pedido espiando por baixo. FONTE ÚNICA de propósito: `document.querySelector
+// ('.place-card')` estava em 9 lugares e passou a ser ambíguo no dia em que a
+// pilha nasceu. Dois deles eram graves — o `triggerSwipe` (botão e teclado)
+// mandaria SAIR o card errado, e o `aplicarTravaDeAcao` travaria o de fundo
+// deixando os botões do da frente vivos durante o Desfazer. Nenhum dos dois dá
+// erro no console: a tela simplesmente faz outra coisa.
+function cardDaFrente() {
+    return document.querySelector('#cardStack .place-card:not(.card-fundo)');
 }
 
 // ── "Como funciona": uma vez, no primeiro card ────────────────────────────
@@ -5166,7 +5182,7 @@ function mostrarComoFuncionaSePrimeiraVez() {
     // Só quando existe card na tela: o aviso fala dos botões DELE, e aparecer
     // sobre "Tudo limpo!" ou sobre o esqueleto de carregamento explicaria algo
     // que a pessoa não está vendo.
-    if (!AppState.currentPlace || !document.querySelector('.place-card')) return;
+    if (!AppState.currentPlace || !cardDaFrente()) return;
     AppState.preferences.comoFuncionaVisto = true;
     savePreferences();
     abrirComoFunciona();
@@ -5257,6 +5273,71 @@ function renderCurrentCard() {
         });
     }
 
+    const card = montarCard(place);
+    renderFocoAutor();
+
+    // Botões de ação explícitos — gesto é atalho, nunca o único caminho
+    // (M3/HIG). Também é o único caminho acessível a leitor de tela.
+    //
+    // Ficam FORA do `montarCard` porque o card de fundo não pode tê-los: ele
+    // já é `inert` e `pointer-events:none`, mas ouvinte pendurado num botão
+    // que só não dispara por causa de OUTRA camada é o tipo de coisa que
+    // volta a disparar no dia em que alguém mexe na camada. Aqui não há o que
+    // desfazer: o botão do fundo nunca chega a ser ligado.
+    let actionFired = false;
+    const fireAction = (direction, handler) => {
+        if (actionFired) return;
+        actionFired = true;
+        if (window.triggerSwipe) window.triggerSwipe(direction, handler);
+        else handler();
+    };
+    card.querySelector('.card-btn-reject').addEventListener('click', () => fireAction('left', handleReject));
+    card.querySelector('.card-btn-skip').addEventListener('click', () => fireAction('up', handleSkip));
+    card.querySelector('.card-btn-read').addEventListener('click', () => fireAction('right', handleMarkAsRead));
+
+
+    // O card novo nasce travado se a janela do Desfazer ainda estiver correndo
+    // (o `undo` devolve o place anterior à fila e re-renderiza).
+    card.classList.toggle('acoes-travadas', acoesTravadas());
+    for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
+        card.querySelector(cls).disabled = acoesTravadas();
+    }
+
+    // As duas ÚNICAS áreas que podem rolar (nunca as duas no mesmo card: reporte
+    // é FLAG, mudanças é UPDATE). O swipe.js já não pega o gesto dentro delas.
+    marcarBordaRolagem(card.querySelector('.card-changes-list'));
+    marcarBordaRolagem(card.querySelector('.card-flag-comment-text'));
+
+    // Rede de segurança: o layout acima é dimensionado pra caber sempre, mas
+    // fonte gigante do sistema, zoom só-de-texto ou uma tela deitada muito baixa
+    // podem estourar mesmo assim — e conteúdo cortado sem jeito de alcançar é
+    // pior que perder o gesto. Quando dispara, o arraste vertical rola em vez de
+    // pular (o botão ↑ nunca some) — e o esmaecido avisa que ainda tem coisa.
+    marcarBordaRolagem(card.querySelector('.card-content'));
+    vigiarEstouroDoConteudo(card.querySelector('.card-content'));
+
+    // Mola na entrada (280ms). Roda enquanto o dedo já vai pro próximo gesto —
+    // ninguém espera por ela. A classe sai no fim pra não sobrescrever o
+    // transform do arraste (o swipe.js também tira, se você agarrar antes).
+    card.classList.add('card-enter');
+    card.addEventListener('animationend', () => card.classList.remove('card-enter'), { once: true });
+
+    removeCurrentCardEl();
+    document.getElementById('cardStack').appendChild(card);
+    // Tira o .celebrate junto: sem isso o confete não reinicia quando a fila
+    // zerar de novo (a classe ficaria pendurada do "Tudo limpo!" anterior).
+    document.getElementById('noMoreCards').classList.remove('celebrate');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    agendarAquecimento(card);
+}
+
+// Monta UM card a partir de UM pedido e devolve o elemento — sem pendurar na
+// tela, sem ouvinte, sem observador. Nasceu de dentro do `renderCurrentCard`
+// quando a pilha passou a precisar montar DOIS: o da frente e o de fundo.
+// O que ficou de fora daqui ficou de propósito — é tudo que só o card da
+// frente pode ter (ouvintes de botão, a trava do Desfazer, os
+// ResizeObserver de rolagem, a mola de entrada e o aquecimento).
+function montarCard(place) {
     const template = document.getElementById('cardTemplate');
     const clone = template.content.cloneNode(true);
     const card = clone.querySelector('.place-card');
@@ -5292,7 +5373,6 @@ function renderCurrentCard() {
     escreverValor(elTipo, elTipo.textContent, 'card.type.empty');
     escreverValor(card.querySelector('.card-creator'), place.createdBy, 'card.creator.empty');
     renderSelosDeProcedencia(card, place);
-    renderFocoAutor();
 
     if (place.isDelete) {
         card.querySelector('.card-delete-banner').classList.remove('hidden');
@@ -5420,19 +5500,6 @@ function renderCurrentCard() {
 
     renderCardChanges(card, place);
 
-    // Botões de ação explícitos — gesto é atalho, nunca o único caminho
-    // (M3/HIG). Também é o único caminho acessível a leitor de tela.
-    let actionFired = false;
-    const fireAction = (direction, handler) => {
-        if (actionFired) return;
-        actionFired = true;
-        if (window.triggerSwipe) window.triggerSwipe(direction, handler);
-        else handler();
-    };
-    card.querySelector('.card-btn-reject').addEventListener('click', () => fireAction('left', handleReject));
-    card.querySelector('.card-btn-skip').addEventListener('click', () => fireAction('up', handleSkip));
-    card.querySelector('.card-btn-read').addEventListener('click', () => fireAction('right', handleMarkAsRead));
-
     // BUG CORRIGIDO: o card é clonado de um <template>, e conteúdo de template
     // NÃO é alcançado por document.querySelectorAll — então o applyI18n() global
     // nunca via estas 25 chaves. Resultado: em inglês/espanhol o card voltava pro
@@ -5441,39 +5508,105 @@ function renderCurrentCard() {
     atualizarSeloDePular(card);
     if (typeof applyI18n === 'function') applyI18n(card);
 
-    // O card novo nasce travado se a janela do Desfazer ainda estiver correndo
-    // (o `undo` devolve o place anterior à fila e re-renderiza).
-    card.classList.toggle('acoes-travadas', acoesTravadas());
-    for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
-        card.querySelector(cls).disabled = acoesTravadas();
+    return card;
+}
+
+// ── A PILHA: o próximo pedido aparece POR BAIXO do atual ────────────────────
+//
+// Ideia de um colega do owner, pelo paralelo com o Tinder: ao puxar o cartão
+// pro lado já se vê o de baixo, sem concluir o gesto.
+//
+// O que ela NÃO faz, e isto foi MEDIDO antes de virar código: não acelera nada.
+// Eu tinha previsto que sim — que ver o próximo adiantaria a decisão — e a
+// medição derrubou. Ela entra pelo efeito visual, com o owner sabendo disso.
+//
+// Três decisões que não são gosto:
+//
+// 1. O VÉU É 35%, e o número tem escopo (gotcha #40). Mockups na app real, dois
+//    aparelhos × dois temas: sem véu os dois cards ficam com o MESMO peso — dois
+//    ✓ verdes igualmente acesos, e quem diz qual é o ativo é a posição, que
+//    durante o arraste é justamente o que está mudando. A 55% funciona no tema
+//    claro e QUEBRA no escuro: o card de fundo quase funde com o fundo da tela,
+//    e aí some o que o recurso existe pra mostrar. O mesmo véu pesa mais sobre
+//    um card que já é escuro. A 35% lê nos dois, e é por isso que o valor é UM
+//    só e não um por tema.
+//
+// 2. ELE NASCE COM O AQUECIMENTO, não junto com o card da frente. A foto do
+//    card é o LCP da app, e montar o de fundo na mesma hora põe a foto do
+//    PRÓXIMO pedido disputando banda com a que o editor precisa ver AGORA — o
+//    defeito exato que o `agendarAquecimento` já tinha medido e consertado
+//    (189 KB atropelando 12 KB). Pendurar na mesma espera é uma política só; uma
+//    espera própria seria uma segunda, pra envelhecer sozinha.
+//
+// 3. O QUE ELE CARREGA JÁ ESTÁ NA MÃO. O aquecimento aquece o primeiro slide E
+//    o resto do card de `queue[1]` — inclusive o tile do mapa quando é ele que
+//    vem primeiro (gotcha #54). O card de fundo desenha exatamente esse pedido,
+//    logo depois: sai do cache. Custo de rede da pilha: ZERO.
+function montarCardDeFundo() {
+    const stack = document.getElementById('cardStack');
+    if (!stack) return;
+    // IDEMPOTENTE de propósito. Ele é agendado junto com o aquecimento e pode
+    // disparar com a fila já tendo andado (o editor é mais rápido que a foto).
+    // Em vez de tentar cancelar o agendamento — que é como se perde o caso que
+    // ninguém imaginou —, ele relê o estado AGORA e refaz. Disparo atrasado
+    // vira trabalho repetido, nunca card errado na tela.
+    stack.querySelectorAll('.card-fundo').forEach((e) => e.remove());
+    if (!cardDaFrente()) return;
+    const proximo = AppState.queue[1];
+    // Último da fila: não há próximo a revelar, e a pilha simplesmente não
+    // existe — por baixo fica o fundo da tela. Desenhar ali o "Tudo limpo!"
+    // seria anunciar o fim antes de a ação ter sido confirmada, e a janela do
+    // Desfazer pode devolver o pedido.
+    if (!proximo) return;
+    let fundo;
+    try {
+        fundo = montarCard(proximo);
+    } catch (err) {
+        // Um pedido quebrado NUNCA pode derrubar o card que o editor está
+        // tratando. Sem este catch a exceção subiria pelo callback do
+        // aquecimento até o `window.onerror`, que tem recuperação automática:
+        // ele chamaria `advanceQueue()` e o pedido da frente sumiria da fila
+        // sem ninguém ter decidido nada.
+        console.error('Erro ao montar o card de fundo, seguindo sem pilha:', err);
+        return;
     }
+    // CLONE PROFUNDO: `cloneNode` copia atributos e NÃO copia ouvinte nenhum.
+    // Os dos botões já ficavam de fora (eles moram no `renderCurrentCard`), mas
+    // o `renderCardImages` pendura ouvinte na foto e nas setas do carrossel —
+    // e o lightbox ABRIA com um `.click()` programático no card de fundo, ou
+    // seja o ouvinte estava vivo e só não era alcançado por causa do `inert` e
+    // do `pointer-events`. É o mesmo argumento que tirou os botões dali: o que
+    // só não dispara por causa de OUTRA camada volta a disparar no dia em que
+    // alguém mexe na camada. Depois desta linha o card de fundo é uma FIGURA.
+    //
+    // O que o clone perde são propriedades JS, e só uma importa: o `onerror`
+    // da foto, que troca a imagem quebrada pelo "Sem Imagem". Ele é reposto
+    // logo abaixo — sem isso, foto 404 no card de fundo viraria caixa vazia.
+    fundo = fundo.cloneNode(true);
+    const imgF = fundo.querySelector('.card-image');
+    const semF = fundo.querySelector('.card-no-image');
+    if (imgF && semF) imgF.onerror = () => { imgF.classList.add('hidden'); semF.classList.remove('hidden'); };
 
-    // As duas ÚNICAS áreas que podem rolar (nunca as duas no mesmo card: reporte
-    // é FLAG, mudanças é UPDATE). O swipe.js já não pega o gesto dentro delas.
-    marcarBordaRolagem(card.querySelector('.card-changes-list'));
-    marcarBordaRolagem(card.querySelector('.card-flag-comment-text'));
-
-    // Rede de segurança: o layout acima é dimensionado pra caber sempre, mas
-    // fonte gigante do sistema, zoom só-de-texto ou uma tela deitada muito baixa
-    // podem estourar mesmo assim — e conteúdo cortado sem jeito de alcançar é
-    // pior que perder o gesto. Quando dispara, o arraste vertical rola em vez de
-    // pular (o botão ↑ nunca some) — e o esmaecido avisa que ainda tem coisa.
-    marcarBordaRolagem(card.querySelector('.card-content'));
-    vigiarEstouroDoConteudo(card.querySelector('.card-content'));
-
-    // Mola na entrada (280ms). Roda enquanto o dedo já vai pro próximo gesto —
-    // ninguém espera por ela. A classe sai no fim pra não sobrescrever o
-    // transform do arraste (o swipe.js também tira, se você agarrar antes).
-    card.classList.add('card-enter');
-    card.addEventListener('animationend', () => card.classList.remove('card-enter'), { once: true });
-
-    removeCurrentCardEl();
-    document.getElementById('cardStack').appendChild(card);
-    // Tira o .celebrate junto: sem isso o confete não reinicia quando a fila
-    // zerar de novo (a classe ficaria pendurada do "Tudo limpo!" anterior).
-    document.getElementById('noMoreCards').classList.remove('celebrate');
-    document.getElementById('noMoreCards').classList.add('hidden');
-    agendarAquecimento(card);
+    fundo.classList.add('card-fundo');
+    // As TRÊS, e cada uma cobre o que as outras não cobrem: `inert` tira do Tab
+    // e da árvore de acessibilidade E bloqueia o ponteiro, mas é recente demais
+    // pra ser a única linha de defesa; `aria-hidden` garante que nenhum leitor
+    // de tela anuncie um segundo pedido que não está sendo tratado; e o
+    // `pointer-events:none` do CSS vale mesmo onde o `inert` não existe. O modo
+    // de falha que elas evitam é caro: um segundo ✕/↑/✓ alcançável pelo teclado,
+    // idêntico ao real, agindo sobre o pedido errado.
+    fundo.setAttribute('aria-hidden', 'true');
+    fundo.inert = true;
+    const veu = document.createElement('div');
+    veu.className = 'card-fundo-veu';
+    veu.setAttribute('aria-hidden', 'true');
+    fundo.appendChild(veu);
+    // No FIM do #cardStack de propósito, e não no começo: quem pinta em cima é
+    // o z-index (explícito no CSS), então a ordem do DOM fica livre pra servir
+    // ao outro leitor — `document.querySelector('.place-card')` segue achando o
+    // card da FRENTE. É a diferença entre uma linha que todo mundo precisa
+    // lembrar e uma que já nasce certa.
+    stack.appendChild(fundo);
 }
 
 // Tempo máximo que o aquecimento espera a foto do card. Rede de segurança: foto
@@ -5505,6 +5638,11 @@ function agendarAquecimento(card) {
         if (disparado) return;
         disparado = true;
         prefetchNextImage();
+        // A pilha vem DEPOIS do aquecimento, na mesma espera e por dois motivos:
+        // a foto do card de fundo é exatamente a que o aquecimento acabou de
+        // pedir (sai do cache, custo zero), e montar antes seria pô-la pra
+        // competir com o LCP — o defeito que esta espera existe pra evitar.
+        montarCardDeFundo();
     };
     setTimeout(disparar, AQUECIMENTO_ESPERA_MAX_MS);
     const img = card.querySelector('.card-image');
@@ -6542,7 +6680,7 @@ function acoesTravadas() {
 // o leitor de tela anunciar. A contagem regressiva do banner diz por quanto.
 function aplicarTravaDeAcao() {
     const travado = acoesTravadas();
-    const card = document.querySelector('.place-card');
+    const card = cardDaFrente();
     if (card) card.classList.toggle('acoes-travadas', travado);
     for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
         const b = card && card.querySelector(cls);
@@ -7130,7 +7268,7 @@ function aquecerRestoDoCard(place, w, h) {
 
 function prefetchNextImage() {
     if (!AppState.queue[1]) return;
-    const cx = document.querySelector('.place-card .card-photo');
+    const cx = cardDaFrente() && cardDaFrente().querySelector('.card-photo');
     const w = (cx && cx.clientWidth) || 400;
     const h = (cx && cx.clientHeight) || 240;
     const economica = redeEconomica();
@@ -7629,6 +7767,51 @@ function carregarConquistas() {
 function salvarConquistas() {
     try { localStorage.setItem(CONQUISTAS_KEY, JSON.stringify(AppState.conquistas)); } catch (e) {}
 }
+// Uma ação CONFIRMADA pelo Waze. Daqui saem a sequência sem desfazer, os
+// gatilhos de evento e a reavaliação.
+//
+// ELA E A `registrarDesfazer` FORAM REMOVIDAS POR ENGANO em v2026.09.16-xx
+// (#215, o PR que trocou o banner de conquista por um ponto): a que precisava
+// sair era só a `anunciarConquista`, e estas duas foram junto — com os DOIS
+// call sites de cada uma ficando pra trás. O resultado estava em produção e não
+// era sutil: `handleActionResult` lançava `ReferenceError` em TODA ação
+// confirmada, e `desfazerAcaoPendente` lançava antes de tirar o banner e
+// destravar os botões — ou seja, desfazer devolvia o pedido e deixava o card
+// MORTO (banner preso, ✕ ↑ ✓ desabilitados), com o gesto ainda funcionando, que
+// é exatamente o que escondia o problema (a mesma assinatura do gotcha #63).
+// Nenhum teste enxergava porque nenhum deles CHAMA o código — os de unidade
+// fatiam a fonte e o smoke não exercitava o Desfazer até o fim.
+function registrarAcaoConfirmada(actionType, place) {
+    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
+    const g = carregarConquistas();
+    g.seq = (g.seq || 0) + 1;
+    salvarConquistas();
+    // O idioma entra no gesto, não na carga: "usou a app em 2 idiomas" é sobre
+    // TRABALHAR em dois, não sobre abrir o seletor e voltar.
+    registrarIdiomaUsado(typeof getLang === 'function' ? getLang() : '');
+    const hora = new Date().getHours();
+    checarConquistas({
+        duplicado: actionType === 'reject' && !!(place && place.duplicado),
+        // `contagemDoAutor` já inclui ESTA rejeição (o registro veio antes), então
+        // > 1 significa que havia rejeição anterior — é isso que faz reincidente.
+        reincidente: actionType === 'reject' && !!place && place.creatorId != null
+                     && contagemDoAutor(place) > 1,
+        // "Depois da meia-noite" é a MADRUGADA (0h–4h59), não a noite: às 23h a
+        // pessoa ainda está acordada no mesmo dia, e a graça da coruja é a virada.
+        madrugada: hora >= 0 && hora < 5,
+    });
+}
+
+// Desfazer zera a sequência de "Mão firme" e destrava "Segunda chance" — que é
+// de propósito o contrapeso da lista: a única que celebra CUIDADO, não volume.
+function registrarDesfazer() {
+    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
+    const g = carregarConquistas();
+    g.seq = 0;
+    salvarConquistas();
+    checarConquistas({ desfez: true });
+}
+
 // Contador acumulado (guardados, fotos aprovadas, nomes corrigidos).
 function contarConquista(chave, delta) {
     const g = carregarConquistas();
@@ -9303,7 +9486,7 @@ function advanceQueue() {
     setTimeout(() => {
         const stack = document.getElementById('cardStack');
         if (!stack) return;
-        const hasCard = !!stack.querySelector('.place-card');
+        const hasCard = !!cardDaFrente();
         const loadingHidden = document.getElementById('loadingCard').classList.contains('hidden');
         const noMoreHidden = document.getElementById('noMoreCards').classList.contains('hidden');
         if (!hasCard && loadingHidden && noMoreHidden) {
@@ -10468,7 +10651,7 @@ function renderPularGuardaPref() {
 // assim trocar de idioma com o card na tela reescreve o selo certo (o card vive
 // no documento, então o applyI18n global o alcança).
 function atualizarSeloDePular(card) {
-    const alvo = card || document.querySelector('.place-card');
+    const alvo = card || cardDaFrente();
     const el = alvo && alvo.querySelector('.swipe-stamp-up span[data-i18n]');
     if (!el) return;
     el.setAttribute('data-i18n', AppState.preferences.pularGuarda === true
@@ -10627,6 +10810,7 @@ window.showToast = showToast;
 
 // Usado pelo swipe.js: o arraste não pode furar a janela do Desfazer.
 window.acoesTravadas = acoesTravadas;
+window.cardDaFrente = cardDaFrente;
 
 // Usados pelo presenca.js, que carrega DEPOIS deste arquivo.
 window.cardParaConversa = cardParaConversa;

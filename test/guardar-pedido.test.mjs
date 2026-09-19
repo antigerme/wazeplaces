@@ -155,6 +155,9 @@ test('o selo do ↑ muda com a preferência — e volta quando ela desliga', () 
     const escopo = {
       AppState: { preferences: { pularGuarda } },
       document: { querySelector: () => alvo },
+      // O fallback do `atualizarSeloDePular` é o card da FRENTE, nunca um
+      // `.place-card` qualquer — desde a pilha existem dois na tela.
+      cardDaFrente: () => alvo,
       applyI18n: () => {},
     };
     const nomes = Object.keys(escopo);
