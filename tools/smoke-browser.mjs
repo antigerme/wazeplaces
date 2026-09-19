@@ -4535,6 +4535,169 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── A PILHA: o próximo pedido por baixo do atual ────────────────────────────
+//
+// Os guards de `test/pilha.test.mjs` leem FONTE. O que só o navegador responde:
+// quem recebe o dedo, quem o Tab alcança, e se o véu de fato pinta. Os três já
+// enganaram uma medição minha nesta mesma PR — o véu em z-index:1 pintava atrás
+// do conteúdo e as variantes saíam idênticas.
+//
+// Cada caso leva o CONTROLE junto, e é ele que decide se a medida vale.
+{
+  const CARDS_PILHA = Object.entries(CARDS).slice(0, 2).map(([, p]) => p);
+  for (const [aparelho, viewport] of [['Pixel 7', { width: 393, height: 852 }],
+                                      ['Galaxy Fold', { width: 280, height: 653 }]]) {
+    for (const tema of ['light', 'dark']) {
+      const id = `pilha/${aparelho}/${tema}`;
+      const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR', colorScheme: tema });
+      const page = await ctx.newPage();
+      const errosJS = [];
+      page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(300);
+
+      const montar = (n) => page.evaluate(({ fila, n }) => {
+        AppState.authenticated = true;
+        AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+        AppState.stats = { read: 4, rejected: 2, skipped: 0 };
+        AppState.serverTotal = 20; AppState.hasMore = false; AppState.pendingAction = null;
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+        document.getElementById('noMoreCards').classList.add('hidden');
+        document.querySelectorAll('.place-card').forEach((e) => e.remove());
+        AppState.queue = fila.slice(0, n); AppState.currentPlace = null;
+        showCurrentPlace();
+        // Direto, sem esperar a foto: o QUANDO é assunto do teste de unidade;
+        // aqui o assunto é o que a tela faz com a pilha montada.
+        montarCardDeFundo();
+      }, { fila: CARDS_PILHA, n });
+
+      // CONTROLE do bloco inteiro: com UM pedido na fila a pilha não existe.
+      // Sem ele, um "0 sobreposições" abaixo poderia ser só ausência de card —
+      // o guard que passa por AUSÊNCIA do alvo é o erro do gotcha #26.
+      await montar(1);
+      await assentar(page);
+      const so1 = await page.evaluate(() => ({
+        cards: document.querySelectorAll('#cardStack .place-card').length,
+        fundo: document.querySelectorAll('#cardStack .card-fundo').length,
+      }));
+      checa(so1.cards === 1 && so1.fundo === 0,
+        `${id}: CONTROLE falhou — com um pedido só na fila apareceu pilha`, JSON.stringify(so1));
+
+      await montar(2);
+      await assentar(page);
+      const m = await page.evaluate(() => {
+        const frente = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+        const fundo = document.querySelector('#cardStack .card-fundo');
+        if (!frente || !fundo) return { faltou: true, n: document.querySelectorAll('.place-card').length };
+        const r = frente.getBoundingClientRect();
+        // Quem recebe o dedo, em grade 3×3 sobre o card — a mesma amostragem do
+        // FAB, porque 5 pontos com cantos recuados deixam faixa cega (gotcha #26).
+        const donos = [];
+        for (const fx of [0.02, 0.5, 0.98]) for (const fy of [0.02, 0.5, 0.98]) {
+          const e = document.elementFromPoint(r.x + r.width * fx, r.y + r.height * fy);
+          donos.push(!e ? 'nada' : e.closest('.card-fundo') ? 'FUNDO'
+            : e.closest('.place-card') ? 'frente' : 'fora');
+        }
+        const veu = fundo.querySelector('.card-fundo-veu');
+        const nome = (c) => (c.querySelector('.card-name') || {}).textContent;
+        return {
+          nomeFrente: nome(frente), nomeFundo: nome(fundo),
+          igualQueue: nome(frente) !== nome(fundo),
+          donos, noFundo: donos.filter((d) => d === 'FUNDO').length,
+          aria: fundo.getAttribute('aria-hidden'), inert: fundo.inert === true,
+          ponteiro: getComputedStyle(fundo).pointerEvents,
+          zFrente: +getComputedStyle(frente).zIndex, zFundo: +getComputedStyle(fundo).zIndex,
+          veuFundo: veu ? getComputedStyle(veu).backgroundColor : null,
+          mesmaCaixa: Math.round(fundo.getBoundingClientRect().width) === Math.round(r.width)
+                   && Math.round(fundo.getBoundingClientRect().height) === Math.round(r.height),
+        };
+      });
+
+      checa(!m.faltou, `${id}: a pilha não montou`, JSON.stringify(m));
+      if (!m.faltou) {
+        checa(m.igualQueue,
+          `${id}: frente e fundo mostram o MESMO pedido — a medida não distingue "revelou o próximo" de "duplicou o atual"`);
+        checa(m.noFundo === 0,
+          `${id}: o card de fundo recebe o dedo em ${m.noFundo} de 9 pontos — toque ali trata um pedido que não está na tela`,
+          m.donos.join(','));
+        checa(m.aria === 'true' && m.inert && m.ponteiro === 'none',
+          `${id}: o card de fundo não está inerte`, `aria=${m.aria} inert=${m.inert} ponteiro=${m.ponteiro}`);
+        checa(m.zFrente > m.zFundo, `${id}: o fundo pinta em cima da frente`, `${m.zFrente} vs ${m.zFundo}`);
+        checa(m.mesmaCaixa, `${id}: o card de fundo não ocupa a mesma caixa do da frente`);
+        checa(/rgba\(2, 6, 23, 0\.35\)/.test(m.veuFundo || ''),
+          `${id}: o véu computado não é o medido`, String(m.veuFundo));
+      }
+
+      // ALCANCE PELO TECLADO — apertando Tab DE VERDADE.
+      //
+      // A primeira versão disto contava `tabIndex >= 0`, e acusou 6 controles
+      // alcançáveis no card de fundo nos 4 aparelhos/temas. Era o instrumento:
+      // `inert` tira do passeio do Tab e NÃO mexe no `tabIndex`, que continua 0.
+      // Eu estava medindo a intenção do atributo, não o alcance (gotcha #28).
+      // O único jeito de saber onde o foco pousa é pousar.
+      const passear = async (voltas) => {
+        await page.evaluate(() => document.body.focus());
+        const visto = [];
+        for (let i = 0; i < voltas; i++) {
+          await page.keyboard.press('Tab');
+          visto.push(await page.evaluate(() => {
+            const a = document.activeElement;
+            if (!a) return 'nada';
+            if (a.closest && a.closest('.card-fundo')) return 'FUNDO';
+            if (a.closest && a.closest('#cardStack')) return 'frente';
+            return 'fora';
+          }));
+        }
+        return visto;
+      };
+      const passeio = await passear(24);
+      checa(!passeio.includes('FUNDO'),
+        `${id}: o Tab pousou no card de fundo — um segundo ✕ ↑ ✓, idêntico ao real, agindo num pedido que não está na tela`,
+        passeio.join(','));
+      checa(passeio.includes('frente'),
+        `${id}: CONTROLE falhou — o Tab não alcançou NENHUM controle do card da frente, então "nunca pousa no fundo" não prova nada`,
+        passeio.join(','));
+      // CONTRAPROVA: sem o inert o passeio TEM que encontrar o card de fundo.
+      // Sem ela, um `inert` que o navegador ignorasse passaria despercebido.
+      await page.evaluate(() => {
+        const f = document.querySelector('#cardStack .card-fundo');
+        f.inert = false; f.removeAttribute('inert');
+        f.style.pointerEvents = 'auto';
+      });
+      const semInert = await passear(24);
+      checa(semInert.includes('FUNDO'),
+        `${id}: CONTRAPROVA falhou — mesmo SEM inert o Tab não chega ao card de fundo, então o teste acima não estava medindo o inert`,
+        semInert.join(','));
+      await montar(2); await assentar(page);
+
+      // O VÉU PINTA? Só o pixel responde — e o controle é a mesma tela sem ele.
+      const arrastar = () => page.evaluate(() => {
+        const f = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+        f.classList.remove('card-enter');
+        f.style.transition = 'none';
+        f.style.transform = 'translateX(-50%) rotate(-9deg)';
+      });
+      await arrastar();
+      await page.waitForTimeout(250);
+      const comVeu = await page.screenshot();
+      await page.evaluate(() => {
+        // impede o aquecimento de refazer o card de fundo COM véu no meio da medida
+        window.montarCardDeFundo = () => {};
+        document.querySelectorAll('.card-fundo-veu').forEach((e) => e.remove());
+      });
+      await page.waitForTimeout(250);
+      const semVeu = await page.screenshot();
+      checa(Buffer.compare(comVeu, semVeu) !== 0,
+        `${id}: tirar o véu não mudou um pixel — ele está pintando atrás do conteúdo do card`);
+
+      checa(errosJS.length === 0, `${id}: erro de JS`, errosJS[0]);
+      await ctx.close();
+    }
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -4580,4 +4743,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
+  + `, + pilha do próximo pedido em 2 aparelhos × 2 temas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, e tirar o véu MUDANDO pixel)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

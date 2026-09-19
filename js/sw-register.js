@@ -60,7 +60,13 @@
     const cardObserver = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
             mutation.addedNodes.forEach((node) => {
-                if (node.classList && node.classList.contains('place-card')) {
+                // O de FUNDO não arrasta: ele é o próximo pedido espiando por
+                // baixo, e arrastá-lo trataria um pedido que nem está na tela.
+                // A guarda mora AQUI, no ponto único onde o gesto é ligado, e
+                // não em cada montagem de card — é o mesmo motivo pelo qual o
+                // gancho do diário mora no `API.setSession` (gotcha #39).
+                if (node.classList && node.classList.contains('place-card')
+                    && !node.classList.contains('card-fundo')) {
                     if (window.enableSwipeOnCard) window.enableSwipeOnCard(node);
                 }
             });

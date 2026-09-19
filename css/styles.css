@@ -836,20 +836,46 @@ input.ui-switch:disabled {
 .dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
 .dark * { scrollbar-color: #475569 #1e293b; }
 
-#cardStack .place-card:nth-child(2) {
-  transform: scale(0.95) translateY(10px);
-  opacity: 0.7;
-  z-index: 1;
-}
+/* ── A PILHA: o próximo pedido por baixo do atual ───────────────────────────
+   Substitui três regras MORTAS que estavam aqui (`:nth-child(2)`, `(3)` e
+   `:first-child`), escritas pra uma pilha de três cards que nunca existiu — e
+   que não casavam com nada, porque o card é anexado no fim de um #cardStack
+   que já começa com o #focoAutorBar, o #loadingCard e o próprio <template>.
+   Posição no DOM é a pior chave possível pra isto: ela muda quando alguém
+   acrescenta um irmão, e o sintoma é o card mudando de aparência sozinho.
+   Aqui a camada é CLASSE, e a classe diz o que a coisa É.
 
-#cardStack .place-card:nth-child(3) {
-  transform: scale(0.9) translateY(20px);
-  opacity: 0.4;
-  z-index: 0;
-}
+   O véu vive DENTRO do card de fundo e não sobre a pilha inteira: sobre a
+   pilha ele escureceria também o card da frente, que é o que se está olhando.
+   `.place-card` já tem `will-change: transform`, que cria contexto de
+   empilhamento — então este z-index não tem como escapar e disputar com modal
+   (z-[60]) ou lightbox (z-[65]).
 
-#cardStack .place-card:first-child {
+   Os 35% são MEDIDOS nos dois temas, não escolhidos a olho: a 55% o card de
+   fundo quase funde com o fundo da tela no escuro (o mesmo véu pesa mais sobre
+   um card que já é escuro — gotcha #40), e sem véu nenhum os dois cards ficam
+   com o mesmo peso visual. Por isso o valor é UM só: é o que lê nos dois. */
+.place-card { z-index: 20; }
+
+.place-card.card-fundo {
   z-index: 10;
+  /* Não recebe toque nem arraste. Faz par com o `inert` e o `aria-hidden` que o
+     `montarCardDeFundo` põe no elemento: esta é a linha que vale mesmo onde o
+     `inert` ainda não existe. */
+  pointer-events: none;
+}
+
+.card-fundo-veu {
+  position: absolute;
+  inset: 0;
+  /* Acima do `.card-body` (z-10) de propósito: no primeiro mockup o véu estava
+     em z-index:1 e pintava ATRÁS do conteúdo do card — as três variantes
+     saíram idênticas (162 pixels de 1.507.920 diferentes) e eu quase reportei
+     que o escurecimento não mudava nada. */
+  z-index: 20;
+  border-radius: 1.5rem;   /* = rounded-3xl do card */
+  pointer-events: none;
+  background: rgba(2, 6, 23, 0.35);
 }
 
 .place-card * {
