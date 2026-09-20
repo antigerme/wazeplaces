@@ -293,12 +293,17 @@ const APARELHOS_TREINO = [['Pixel 7', { width: 412, height: 915 }], ['iPhone 14'
 let falhas = 0;
 // Espera o card ASSENTAR — animação terminada, não um relógio.
 //
-// O `.card-enter` anima `opacity` de 0 a 1 em 0,28s, e a verificação de
-// contraste multiplica a opacidade de TODOS os ancestrais: medir no meio da
-// animação dá uma cor mais misturada com o fundo e um contraste menor do que
-// o real. Com 350ms fixos isso passava aqui e reprovava no CI, onde o runner
-// é mais lento e a animação começa tarde — `valor-ausente 4.08:1` contra os
-// 4.84:1 medidos na mesma tela localmente.
+// O caso que originou: o card entrava com um fade de `opacity` (hoje ele nasce
+// sem efeito nenhum), e a verificação de contraste multiplica a opacidade de
+// TODOS os ancestrais — medir no meio da animação dava uma cor mais misturada
+// com o fundo e um contraste MENOR que o real. Com 350ms fixos isso passava
+// aqui e reprovava no CI, onde o runner é mais lento e a animação começa
+// tarde: `valor-ausente 4.08:1` contra os 4.84:1 medidos na mesma tela
+// localmente.
+//
+// A entrada do card saiu, mas a espera FICA, e não por precaução vaga: o
+// esqueleto, o confete, o selo do arraste e o observer do mapa seguem
+// animando, e o próximo efeito que alguém adicionar não vai vir avisar.
 //
 // Falha intermitente é pior que falha estável: ela ensina todo mundo a
 // ignorar o CI. Esperar as animações TERMINAREM não depende da velocidade da
@@ -2896,8 +2901,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           showCurrentPlace();
         }, { pl: place, l: lang });
         // Medir DEPOIS de assentar, e não no mesmo `evaluate` do render: o
-        // `.card-enter` ainda anima e o observer do mapa refaz o enquadramento,
-        // então a caixa medida no mesmo quadro é a de antes de o card assentar.
+        // observer do mapa refaz o enquadramento, então a caixa medida no mesmo
+        // quadro é a de antes de o card assentar.
         // Medido: 1,29px de sobra "abaixo da dobra" no SE que somem depois —
         // eu ia registrar como defeito da app o que era pressa do instrumento.
         await assentar(page);
@@ -4680,7 +4685,6 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       // O VÉU PINTA? Só o pixel responde — e o controle é a mesma tela sem ele.
       const arrastar = () => page.evaluate(() => {
         const f = document.querySelector('#cardStack .place-card:not(.card-fundo)');
-        f.classList.remove('card-enter');
         f.style.transition = 'none';
         f.style.transform = 'translateX(-50%) rotate(-9deg)';
       });
@@ -4811,16 +4815,63 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
-// ── ENTRADA DO CARD: só fade, e o de baixo não atravessa ────────────────────
+// ── ENTRADA DO CARD: nenhum efeito, e nada escondido ───────────────────────
 //
-// Decisão do owner (2026-09-20): o próximo card não nasce com efeito de
-// movimento. Ficou o fade, pra avaliação em uso real.
+// Decisão do owner (2026-09-20), em duas rodadas: primeiro "o próximo card não
+// pode nascer com efeito nenhum" (saíram a mola e a escala), depois "pode tirar
+// o fade". Hoje o card aparece pronto — no lugar, do tamanho final e opaco.
 //
-// Os guards de `test/pilha.test.mjs` leem o CSS. O que só o navegador responde:
-// se o card de fato NÃO se mexe, e se durante o fade a tela mostra o card de
-// BAIXO — que foi o defeito medido (3 quadros com a foto do pedido errado, e
-// os dois nomes legíveis ao mesmo tempo).
+// Os guards de `test/pilha.test.mjs` leem o CSS e o JS: eles provam que a
+// classe da entrada não existe mais. O que SÓ o navegador responde é se a tela
+// concorda — se o card de fato não se mexe, não muda de tamanho e não fica
+// translúcido, e se o card de fundo continua visível o tempo todo.
+//
+// Era UMA animação (o fade) que causava UM defeito (o card de baixo aparecendo
+// através do da frente: 3 quadros com a foto do pedido errado e os dois nomes
+// legíveis ao mesmo tempo) e exigia UM remendo (esconder o de fundo enquanto o
+// fade durava). Tirando a animação, os três somem — e é o conjunto que se mede
+// aqui, porque reintroduzir o efeito reintroduz o par inteiro.
+//
+// A CONTRAPROVA no fim é o que dá valor ao resto: "opacidade sempre 1" e
+// "nunca escondeu" são asserções que um instrumento CEGO satisfaz sozinho
+// (gotcha #28). Ela injeta o fade e o esconderijo de volta e exige que a
+// medição os VEJA.
 {
+  const medir = (page) => page.evaluate(async () => {
+    const frente = () => document.querySelector('#cardStack .place-card:not(.card-fundo)');
+    const out = []; const t0 = performance.now();
+    document.querySelector('.card-btn-reject').click();
+    await new Promise((ok) => {
+      const passo = () => {
+        const c = frente();
+        if (c) {
+          const b = c.getBoundingClientRect();
+          const f = document.querySelector('#cardStack .card-fundo');
+          out.push({ ms: Math.round(performance.now() - t0), top: b.top, w: b.width,
+                     op: +getComputedStyle(c).opacity,
+                     fundo: f ? getComputedStyle(f).visibility : 'sem fundo' });
+        }
+        if (performance.now() - t0 < 1400) requestAnimationFrame(passo); else ok();
+      };
+      requestAnimationFrame(passo);
+    });
+    // só o card NOVO: o antigo sai por volta dos 370ms
+    const s = out.filter((x) => x.ms >= 372);
+    const fim = s[s.length - 1];
+    if (!fim) return { n: 0 };
+    return {
+      n: s.length,
+      moveu: +Math.max(...s.map((x) => Math.abs(x.top - fim.top))).toFixed(1),
+      tamanho: +(Math.max(...s.map((x) => x.w)) - Math.min(...s.map((x) => x.w))).toFixed(1),
+      opMin: +Math.min(...s.map((x) => x.op)).toFixed(2),
+      escondeu: s.some((x) => x.fundo === 'hidden'),
+      // CONTROLE: "nunca escondeu" é satisfeito de graça quando não há card de
+      // fundo nenhum. Sem esta linha a asserção passa sozinha.
+      temFundo: s.some((x) => x.fundo !== 'sem fundo'),
+      fundoNoFim: fim.fundo,
+    };
+  });
+
   for (const reduzida of [false, true]) {
     const id = `entrada/${reduzida ? 'reduced-motion' : 'movimento normal'}`;
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 },
@@ -4834,7 +4885,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(300);
 
-    const CARDS_ENT = Object.entries(CARDS).slice(0, 3).map(([, p]) => p);
+    // CINCO e não três: a medição gasta um pedido e a CONTRAPROVA gasta outro,
+    // e no último da fila a app não monta pilha (de propósito — desenhar o
+    // "Tudo limpo!" por baixo anunciaria o fim antes da hora). Com três, a
+    // contraprova rodava sem card de fundo nenhum e "nunca escondeu" passava
+    // por não haver o que esconder. Foi a própria contraprova que pegou isso.
+    const CARDS_ENT = Object.entries(CARDS).slice(0, 5).map(([, p]) => p);
     await page.evaluate(({ fila }) => {
       localStorage.setItem('waze_session_token', 't');
       if (window.API && API.setSession) API.setSession('t', 'cookies');
@@ -4855,52 +4911,35 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     }, { fila: CARDS_ENT });
     await assentar(page);
 
-    const m = await page.evaluate(async () => {
-      const frente = () => document.querySelector('#cardStack .place-card:not(.card-fundo)');
-      const out = []; const t0 = performance.now();
-      document.querySelector('.card-btn-reject').click();
-      await new Promise((ok) => {
-        const passo = () => {
-          const c = frente();
-          if (c) {
-            const b = c.getBoundingClientRect();
-            const f = document.querySelector('#cardStack .card-fundo');
-            out.push({ ms: Math.round(performance.now() - t0), top: b.top, w: b.width,
-                       op: +getComputedStyle(c).opacity,
-                       fundo: f ? getComputedStyle(f).visibility : 'sem fundo' });
-          }
-          if (performance.now() - t0 < 1400) requestAnimationFrame(passo); else ok();
-        };
-        requestAnimationFrame(passo);
-      });
-      // só o card NOVO: o antigo sai por volta dos 370ms
-      const s = out.filter((x) => x.ms >= 372);
-      const fim = s[s.length - 1];
-      return {
-        n: s.length,
-        moveu: +Math.max(...s.map((x) => Math.abs(x.top - fim.top))).toFixed(1),
-        tamanho: +(Math.max(...s.map((x) => x.w)) - Math.min(...s.map((x) => x.w))).toFixed(1),
-        opMin: +Math.min(...s.map((x) => x.op)).toFixed(2),
-        escondeu: s.some((x) => x.fundo === 'hidden'),
-        fundoNoFim: fim.fundo,
-      };
-    });
+    const m = await medir(page);
 
     checa(m.n > 5, `${id}: CONTROLE falhou — quase nenhuma amostra do card novo, o resto não prova nada`, JSON.stringify(m));
     checa(m.moveu === 0, `${id}: o card NOVO se moveu ${m.moveu}px ao entrar — ele tem que nascer no lugar`);
     checa(m.tamanho === 0, `${id}: o card NOVO mudou de tamanho ${m.tamanho}px ao entrar — foi exatamente isto que o owner pediu pra tirar`);
-    checa(m.fundoNoFim !== 'hidden',
-      `${id}: o card de fundo ficou ESCONDIDO no fim — a classe da entrada não saiu, e a pilha some da app`);
+    checa(m.opMin === 1, `${id}: o card NOVO nasceu translúcido (opacidade mínima ${m.opMin}) — voltou efeito na entrada, e com ele o card de baixo atravessando o da frente`);
+    checa(m.temFundo, `${id}: CONTROLE falhou — não havia card de fundo em quadro nenhum, então tudo que se diga sobre ele abaixo passa de graça`, JSON.stringify(m));
+    checa(!m.escondeu, `${id}: o card de fundo foi ESCONDIDO em algum quadro — sem efeito na entrada não há nada pra esconder, e esconder à toa é a pilha piscando`);
+    checa(m.fundoNoFim === 'visible',
+      `${id}: o card de fundo não terminou VISÍVEL (${m.fundoNoFim}) — a pilha some da app`);
 
+    // CONTRAPROVA, uma vez só: sem ela, "opacidade sempre 1" e "nunca
+    // escondeu" passariam com a medição apontando pro lugar errado.
     if (!reduzida) {
-      checa(m.opMin < 1, `${id}: não há fade nenhum — a entrada escolhida foi o fade`);
-      checa(m.escondeu, `${id}: o card de fundo NÃO foi escondido durante o fade — ele volta a aparecer ATRAVÉS do card que entra`);
-    } else {
-      // CONTRAPROVA: com reduced-motion não há fade, então também não há o que
-      // esconder. Sem esta metade, "escondeu = false" acima passaria por motivo
-      // errado e ninguém perceberia.
-      checa(m.opMin === 1, `${id}: ainda há fade com prefers-reduced-motion`);
-      checa(!m.escondeu, `${id}: escondeu o card de fundo sem haver fade — esconder sem motivo é a pilha piscando à toa`);
+      await page.evaluate(() => {
+        const st = document.createElement('style');
+        st.textContent = '@keyframes __provaFade{from{opacity:0}to{opacity:1}}'
+          + '#cardStack .place-card:not(.card-fundo){animation:__provaFade .3s linear}'
+          + '#cardStack .place-card:not(.card-fundo) ~ .card-fundo{visibility:hidden}';
+        document.head.appendChild(st);
+      });
+      await assentar(page);
+      const sab = await medir(page);
+      checa(sab.n > 5, `${id}: CONTRAPROVA sem amostras — ela não prova nada`, JSON.stringify(sab));
+      checa(sab.temFundo, `${id}: CONTRAPROVA sem card de fundo — o esconderijo injetado não teria o que esconder, e o "não viu" abaixo seria do cenário, não da medição`, JSON.stringify(sab));
+      checa(sab.opMin < 1,
+        `${id}: CONTRAPROVA falhou — com um fade injetado de propósito a medição ainda leu opacidade ${sab.opMin}, então "sem fade" acima não estava medindo fade nenhum`);
+      checa(sab.escondeu,
+        `${id}: CONTRAPROVA falhou — com o esconderijo injetado de propósito a medição não viu o card de fundo sumir, então "nunca escondeu" acima não provava nada`);
     }
     checa(errosJS.length === 0, `${id}: erro de JS`, errosJS[0]);
     await ctx.close();
@@ -4953,6 +4992,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
-  + `, + entrada do card (só fade: zero movimento e zero mudança de tamanho medidos no DOM, card de fundo escondido durante o fade e de volta no fim, com contraprova em reduced-motion)`
+  + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

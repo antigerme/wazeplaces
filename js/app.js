@@ -83,11 +83,6 @@ function formatarCodigoPareamento(bruto) {
         ? limpo.slice(0, PAIR_CODE_GRUPO) + '-' + limpo.slice(PAIR_CODE_GRUPO)
         : limpo;
 }
-// Teto pra tirar a classe `.card-enter`. NÃO é a duração da animação (essa
-// mora no CSS, e duplicar número em dois lugares é como eles divergem): é só
-// o prazo máximo pra a classe sair de qualquer jeito, porque enquanto ela
-// estiver lá o card de fundo fica escondido.
-const ENTRADA_TETO_MS = 500;
 const PREFETCH_THRESHOLD = 3;
 
 // ── Aquecimento dos próximos cards ────────────────────────────────────────
@@ -5321,21 +5316,9 @@ function renderCurrentCard() {
     marcarBordaRolagem(card.querySelector('.card-content'));
     vigiarEstouroDoConteudo(card.querySelector('.card-content'));
 
-    // Entrada do card: SÓ um fade de 140ms (ver o comentário longo no
-    // styles.css). A classe sai no fim porque ela faz DUAS coisas — anima o
-    // fade e ESCONDE o card de fundo enquanto ele dura.
-    //
-    // E é esse segundo papel que exige a rede de segurança abaixo: se a classe
-    // ficar pendurada, o card de fundo não volta, e a pilha inteira some da
-    // app sem erro nenhum. O `animationend` não basta — ele NÃO dispara quando
-    // a animação é `none` (é o caso de quem usa `prefers-reduced-motion`), nem
-    // quando ela é interrompida. O CSS já cobre o caso do reduced-motion
-    // declarativamente; este teto cobre o resto.
-    card.classList.add('card-enter');
-    const tirarEntrada = () => card.classList.remove('card-enter');
-    card.addEventListener('animationend', tirarEntrada, { once: true });
-    setTimeout(tirarEntrada, ENTRADA_TETO_MS);
-
+    // O card novo nasce SEM EFEITO NENHUM — decisão do owner, e o porquê de
+    // cada coisa que já esteve aqui (mola, escala, fade) está medido no
+    // styles.css, junto com o que o fade arrastava atrás de si.
     removeCurrentCardEl();
     document.getElementById('cardStack').appendChild(card);
     // Tira o .celebrate junto: sem isso o confete não reinicia quando a fila

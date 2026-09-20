@@ -221,59 +221,53 @@ test('o véu chega ao css/app.css, que é o que a app carrega', () => {
 
 // ── 6. A ENTRADA DO CARD ───────────────────────────────────────────────────
 //
-// Decisão do owner (2026-09-20), olhando a app rodar: "o próximo card não pode
-// nascer com efeito nenhum". Ele ficou com o fade pra avaliar em uso real.
+// Decisão do owner (2026-09-20), em duas rodadas olhando a app rodar: primeiro
+// "o próximo card não pode nascer com efeito nenhum" — o que tirou a mola e a
+// escala —, e, depois de ver rodando o fade que tinha ficado pra
+// avaliação, "pode tirar o fade". Hoje a entrada não tem efeito nenhum.
 //
-// O que saiu foi MEDIDO no DOM depois de ele apontar que o incômodo era o card
-// "sair de um tamanho menor para maior": a escala fazia o card CRESCER 24px
-// (339 → 363px) e a mola (bezier 1.56) ainda o levava 2px ALÉM do tamanho
-// final antes de voltar — 233ms de card mexendo na frente de quem já está
-// decidindo o próximo.
-test('a entrada do card anima SÓ opacidade — nada de mover nem redimensionar', () => {
-  const regra = SEM_COMENTARIO.match(/\.card-enter\s*\{[^}]*\}/);
-  assert.ok(regra, 'a regra .card-enter sumiu do styles.css');
-  const nome = /animation:\s*([A-Za-z_$][\w$-]*)/.exec(regra[0]);
-  assert.ok(nome, 'a .card-enter deixou de declarar uma animação');
-  const kf = SEM_COMENTARIO.match(new RegExp('@keyframes\\s+' + nome[1] + '\\s*\\{[\\s\\S]*?\\n\\}'));
-  assert.ok(kf, `os keyframes de ${nome[1]} sumiram`);
-  assert.ok(!/transform/.test(kf[0]),
-    'a entrada do card voltou a animar TRANSFORM — o card volta a se mexer ou a mudar de tamanho na entrada, que é exatamente o que o owner pediu pra tirar');
-  assert.match(kf[0], /opacity/, 'a entrada deixou de ter o fade que foi escolhido');
+// O mecanismo era UM só: a classe `.card-enter`, que o `renderCurrentCard`
+// pendurava no card recém-nascido. Ela fazia DUAS coisas, e é a segunda que
+// explica por que estes guards olham o PAR: além de animar, ela escondia o
+// card de fundo, porque o fade deixava o da frente translúcido e a pilha tem
+// um card inteiro atrás (MEDIDO no pixel: 3 quadros com a foto do pedido de
+// baixo e os dois nomes legíveis ao mesmo tempo).
+//
+// Quem reintroduzir efeito na entrada reintroduz o par — e estes testes é que
+// vão cobrar isso, porque o defeito não dá erro nenhum: a tela só mostra o
+// pedido errado por 150ms.
+test('a entrada do card não tem efeito NENHUM', () => {
+  assert.ok(!/\.card-enter/.test(SEM_COMENTARIO),
+    'voltou uma regra `.card-enter` ao styles.css — o card novo passa a nascer com efeito, que é exatamente o que o owner pediu pra tirar (duas vezes)');
+  assert.ok(!/@keyframes\s+cardEnter/.test(SEM_COMENTARIO),
+    'os keyframes da entrada voltaram ao styles.css');
+  for (const [nome, fonte] of [['app.js', APP], ['swipe.js', SWIPE]]) {
+    assert.ok(!/card-enter/.test(semComentarioJS(fonte)),
+      `${nome} voltou a mexer na classe da entrada — sem regra no CSS ela não anima nada, e com regra o card volta a nascer com efeito`);
+  }
+  // Meia remoção é a falha desta casa (gotcha #14): a constante do teto só
+  // existia pra tirar a classe de qualquer jeito. Sem classe, ela é órfã.
+  assert.ok(!/ENTRADA_TETO_MS/.test(APP),
+    'a constante ENTRADA_TETO_MS ficou pra trás no app.js, sem classe nenhuma pra tirar');
 });
 
-test('o card de fundo some enquanto o da frente entra', () => {
-  // O fade deixa o card da frente TRANSLÚCIDO, e com a pilha existe um card
-  // inteiro atrás. MEDIDO no pixel: sem esta regra, 3 quadros mostravam a foto
-  // do card de BAIXO no lugar da do que entra, e dava pra ler os dois nomes
-  // sobrepostos. Com ela, o que aparece é o fundo da página — como era antes
-  // de a pilha existir.
-  assert.match(SEM_COMENTARIO, /\.card-enter\s*~\s*\.card-fundo\s*\{[^}]*visibility:\s*hidden/,
-    'saiu a regra que esconde o card de fundo durante o fade — o card de baixo volta a aparecer ATRAVÉS do que está entrando');
-});
-
-test('a pilha NÃO some para quem prefere menos movimento', () => {
-  // `animation: none` não dispara `animationend`, então a classe `.card-enter`
-  // ficaria pendurada pra sempre — e é ela que esconde o card de fundo.
+test('nada esconde o card de fundo — porque nada o atravessa', () => {
+  // A regra que escondia o card de fundo existia SÓ por causa da
+  // translucidez do fade. Sem fade não há o que esconder, e esconder sem
+  // motivo é a pilha piscando à toa. Se ela voltar sozinha, alguém reintroduziu
+  // metade do par; se voltar com o fade, a decisão do owner foi revertida sem
+  // passar por aqui.
+  const escondem = [...SEM_COMENTARIO.matchAll(/([^{}]*\.card-fundo[^{}]*)\{([^}]*)\}/g)]
+    .filter((m) => /visibility:\s*hidden/.test(m[2]));
+  assert.equal(escondem.length, 0,
+    'alguma regra voltou a esconder o card de fundo: ' + escondem.map((m) => m[1].trim()).join(' | '));
+  // E a escotilha de reduced-motion que existia só por causa dela também não
+  // pode ficar órfã — ela devolvia `visibility: visible` a um card que hoje
+  // ninguém esconde.
   const rm = CSS.match(/@media\s*\(prefers-reduced-motion[^)]*\)\s*\{[\s\S]*?\n\}/);
   assert.ok(rm, 'o bloco de prefers-reduced-motion sumiu do styles.css');
-  assert.match(rm[0], /\.card-enter\s*~\s*\.card-fundo\s*\{[^}]*visibility:\s*visible/,
-    'sem esta linha a pilha some da app inteira para quem usa reduced-motion, e sem erro nenhum');
-});
-
-test('a classe da entrada sai de qualquer jeito', () => {
-  const f = semComentarioJS(fatiar(APP, 'renderCurrentCard'));
-  assert.match(f, /addEventListener\('animationend'/,
-    'a classe .card-enter deixou de ser removida no fim da animação');
-  assert.match(f, /setTimeout\(tirarEntrada/,
-    'sumiu o teto que tira a classe mesmo sem animationend — classe pendurada esconde o card de fundo pra sempre');
-  // O teto NÃO pode ser a duração da animação copiada: número duplicado em dois
-  // arquivos é como eles divergem (a lição do UNDO_WINDOW_MS no doc).
-  const teto = /const ENTRADA_TETO_MS = (\d+);/.exec(APP);
-  assert.ok(teto, 'a constante do teto sumiu');
-  const dur = /\.card-enter\s*\{[^}]*animation:[^;]*?([\d.]+)s/.exec(SEM_COMENTARIO);
-  assert.ok(dur, 'não consegui ler a duração da animação no CSS');
-  assert.ok(+teto[1] > +dur[1] * 1000,
-    `o teto (${teto[1]}ms) não é maior que a animação (${+dur[1]*1000}ms) — ele cortaria o fade no meio`);
+  assert.ok(!/card-fundo/.test(rm[0].replace(/\/\*[\s\S]*?\*\//g, '')),
+    'sobrou no reduced-motion uma regra sobre o card de fundo que só fazia sentido com o fade');
 });
 
 test('o CSS morto da saída não voltou', () => {
@@ -289,9 +283,13 @@ test('o CSS morto da saída não voltou', () => {
     'algum arquivo passou a usar .swipe-out-* — então o CSS precisa voltar junto');
 });
 
-test('o app.css gerado carrega a entrada nova', () => {
-  assert.match(APPCSS, /\.card-enter~\.card-fundo\{[^}]*visibility:hidden/,
-    'o app.css gerado não tem a regra que esconde o card de fundo — falta `npm run css`');
+test('o app.css gerado não carrega animação de entrada', () => {
+  // O guard acima lê o FONTE; este lê o que a app de fato CARREGA. Editar o
+  // styles.css sem rodar `npm run css` não muda um pixel na tela — e aqui o
+  // sintoma seria o contrário do normal: o efeito que o owner mandou tirar
+  // continuaria rodando em produção com o fonte já limpo.
+  assert.ok(!/card-enter|cardEnter/.test(APPCSS),
+    'o app.css gerado ainda tem a animação de entrada — falta rodar `npm run css`');
   assert.ok(!/swipeOut(Left|Right|Up)/.test(APPCSS),
     'o app.css gerado ainda tem os keyframes mortos da saída');
 });

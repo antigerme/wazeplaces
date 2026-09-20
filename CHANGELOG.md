@@ -8,6 +8,30 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.20-03
+
+### Alterado
+- **O próximo card volta a aparecer sem efeito nenhum.** Ele já tinha perdido o movimento na versão anterior; agora perdeu também o esmaecido de 140ms que tinha ficado para avaliação. O card aparece pronto: no lugar, do tamanho final e opaco desde o primeiro quadro.
+
+### Corrigido
+- **E com isso some de vez o "pisca" do card de baixo.** Enquanto o card da frente estava esmaecido, dava para enxergar a foto e o nome do *próximo* pedido através dele por uma fração de segundo — o que parecia a app travando para carregar. Sem esmaecido não há o que atravessar.
+
+## v2026.09.20-02
+
+### Alterado
+- **O próximo card parou de nascer com movimento.** A entrada era uma "mola" de 280ms: o card deslizava, começava menor e crescia até o tamanho final, passando um pouco além antes de assentar. Media 233ms de card se mexendo na frente de quem já estava decidindo o próximo pedido. Ficou só um esmaecido curto — que saiu na versão seguinte.
+
+### Corrigido
+- **O tique ao confirmar um card ficou mais curto** (de 12ms para 8ms). É o sinal mais frequente da app — um por pedido tratado —, então o que passa despercebido num toque isolado vira presença constante no ritmo do swipe. (Só no Android: o iPhone não vibra em site nenhum.)
+
+## v2026.09.20-01
+
+### Adicionado
+- **O próximo pedido aparece por baixo do atual.** Ao arrastar um card, o de baixo é o pedido que vem a seguir — não mais o fundo vazio da tela. Ideia de um colega, pelo paralelo com o Tinder. Ele é só visual: não dá para tocar, arrastar nem alcançar pelo teclado, e não custa nenhuma requisição a mais (a app já buscava esse pedido adiantado).
+
+### Corrigido
+- **O botão "Desfazer" deixava o card morto.** Desfazer devolvia o pedido para a fila, mas o aviso continuava na tela e os três botões (✕ ↑ ✓) ficavam desabilitados — só recarregando a app dava para sair disso. Arrastar continuava funcionando, o que é o motivo de isso ter passado tanto tempo sem ninguém ligar uma coisa à outra. Junto com ele voltaram **cinco conquistas** que tinham ficado inalcançáveis pelo mesmo defeito.
+
 ## v2026.09.18-05
 
 ### Corrigido
