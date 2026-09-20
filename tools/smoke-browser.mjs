@@ -5168,11 +5168,18 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
     let semRede = false;
     let enviosDeAcao = [];
+    let atrasoDaAcaoMs = 0;   // usado só pra alargar a janela do teste de reenvio
     await page.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png',
       body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') }));
-    await page.route('**/api/**', (r) => {
+    await page.route('**/api/**', async (r) => {
       if (semRede) return r.abort('internetdisconnected');
-      if (/validar-place|marcar-lido/.test(r.request().url())) enviosDeAcao.push(Date.now());
+      if (/validar-place|marcar-lido/.test(r.request().url())) {
+        enviosDeAcao.push(Date.now());
+        // `__envios` é o mesmo fato do lado da PÁGINA: o teste precisa esperar
+        // "já saiu" pra matar no meio do voo, e o array vive só aqui no Node.
+        page.evaluate(() => { window.__envios = (window.__envios || 0) + 1; }).catch(() => {});
+        if (atrasoDaAcaoMs) await new Promise((ok) => setTimeout(ok, atrasoDaAcaoMs));
+      }
       r.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' });
     });
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
@@ -5255,26 +5262,68 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       `${c.id}: esvaziou em RAJADA (mediana ${mediana}ms) — é o padrão que faz um WAF marcar cliente`);
     checa(!/\d/.test(fim.aviso), `${c.id}: o indicador ficou na tela depois de esvaziar`);
 
-    // O GATILHO DA ABERTURA, sozinho: sem nenhum evento `online`, só recarregar
-    // a app tem que drenar. É o caminho de quem ficou offline e FECHOU tudo — e
-    // ele já nasceu quebrado uma vez, porque quem põe `AppState.authenticated`
-    // é o `showMainScreen()` e o esvaziamento estava sendo chamado antes dele
-    // (saía na primeira linha, calado, com a chamada no lugar pra enganar).
+    // O GATILHO DA ABERTURA, sozinho: sem nenhum evento `online`, só ABRIR a app
+    // tem que drenar. É o caminho de quem ficou offline e FECHOU tudo — e ele já
+    // nasceu quebrado uma vez, porque quem põe `AppState.authenticated` é o
+    // `showMainScreen()` e o esvaziamento estava sendo chamado antes dele (saía
+    // na primeira linha, calado, com a chamada no lugar pra enganar).
+    //
+    // A página velha é MORTA (`about:blank`) antes de a rede voltar, de
+    // propósito: com ela viva, o `setOffline(false)` dispara o `online` DELA e
+    // a medição passa a somar dois gatilhos — foi o que fez esta asserção
+    // acusar "4 requisições para 3 ações" na primeira rodada. Medido item a
+    // item: as duas primeiras eram do MESMO pedido, em páginas diferentes.
     await montar(); await dormir(400);
     semRede = true; await ctx.setOffline(true);
     await tratar(3);
     await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
     const presos = await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
     checa(presos === 3, `${c.id}: ABERTURA — as 3 ações não entraram na fila (${presos})`);
+    await page.goto('about:blank');          // mata a página VELHA antes da rede voltar
     await ctx.setOffline(false); semRede = false; enviosDeAcao = [];
-    await page.reload({ waitUntil: 'domcontentloaded' });   // nenhum `online` daqui em diante
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });   // nenhum `online` daqui em diante
     await page.waitForFunction(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0,
       null, { timeout: 40000 }).catch(() => {});
     const aberturaRestou = await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
     checa(aberturaRestou === 0,
-      `${c.id}: ABERTURA — recarregar a app NÃO drenou a fila (${aberturaRestou}): quem fechou offline nunca manda`);
+      `${c.id}: ABERTURA — abrir a app NÃO drenou a fila (${aberturaRestou}): quem fechou offline nunca manda`);
     checa(enviosDeAcao.length === 3,
       `${c.id}: ABERTURA — saíram ${enviosDeAcao.length} requisições para 3 ações presas`);
+
+    // ENTREGA AT-LEAST-ONCE: matar a app ENTRE o envio e a gravação reenvia o
+    // pedido na próxima abertura. Isso é o lado CERTO do trade — a alternativa
+    // (tirar da fila antes de saber que saiu) perde a ação, que é o defeito que
+    // esta feature existe pra acabar. O que NÃO pode acontecer é contar duas
+    // vezes: a 1ª resposta nunca foi processada, então o Histórico ganha UM.
+    await page.evaluate(() => {
+      localStorage.setItem('waze_places_saida', JSON.stringify([{ tipo: 'reject',
+        venueID: 'reenvio', updateRequestID: 77, creatorId: null, nome: null,
+        dup: false, t: Date.now(), dia: '2026-01-01', onde: '30' }]));
+      const h = JSON.parse(localStorage.getItem('waze_places_history') || '{}');
+      h._total = { read: 0, rejected: 0 }; h['2026-01-01'] = { read: 0, rejected: 0 };
+      localStorage.setItem('waze_places_history', JSON.stringify(h));
+    });
+    enviosDeAcao = []; atrasoDaAcaoMs = 700;   // alarga a janela entre mandar e gravar
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.__envios > 0, null, { timeout: 20000 })
+      .catch(() => {});
+    await dormir(150);
+    await page.goto('about:blank');            // mata no meio do voo
+    atrasoDaAcaoMs = 0;
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0,
+      null, { timeout: 20000 }).catch(() => {});
+    await dormir(300);
+    const reenvio = await page.evaluate(() => ({
+      saida: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length,
+      hist: ((JSON.parse(localStorage.getItem('waze_places_history') || '{}')._total) || {}).rejected,
+    }));
+    checa(reenvio.saida === 0,
+      `${c.id}: REENVIO — a ação interrompida no voo ficou presa (${reenvio.saida}): seria perda`);
+    checa(enviosDeAcao.length === 2,
+      `${c.id}: REENVIO — esperava 2 envios (o interrompido + o reenvio), vieram ${enviosDeAcao.length}`);
+    checa(reenvio.hist === 1,
+      `${c.id}: REENVIO — o Histórico contou ${reenvio.hist}× o mesmo pedido: a 1ª resposta nunca chegou, então é UM`);
 
     // O POUSO que falha DE VERDADE: a ação esperou offline, a rede voltou, e o
     // Waze recusa por um motivo que não é rede. O placar é PERSISTIDO, então o
@@ -5375,7 +5424,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
-  + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar a app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
+  + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar a app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, app MORTA no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
