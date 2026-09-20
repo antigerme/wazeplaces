@@ -57,11 +57,6 @@ function handleDragStart(e) {
 
     isDragging = true;
     currentCard = e.currentTarget;
-    // Se o card ainda está entrando (mola de 280ms), a animação venceria o
-    // transform inline do arraste e travaria o card no lugar. Tira a classe
-    // e o dedo assume na hora.
-    currentCard.classList.remove('card-enter');
-
     if (e.type === 'mousedown') {
         startX = e.clientX;
         startY = e.clientY;
