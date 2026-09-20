@@ -5181,13 +5181,24 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // é estrangulado a ponto de 8 itens não caberem em 40s. O teto de 3 min é rede
 // contra travar de vez, não expectativa: local termina em ~4s.
 async function esperarFimDaSaida(page, tetoMs = 180000) {
-  await page.waitForFunction(() => {
+  // O diário é CUMULATIVO, e esperar a PRESENÇA de `saida.saiu` foi um erro
+  // meu que quebrou dois blocos que passavam: depois do primeiro esvaziamento
+  // a marca já está lá, então a espera seguinte voltava NA HORA sem esperar
+  // nada — e o bloco media uma fila que ainda estava drenando. Marcador que
+  // persiste não é sinal de fim; o sinal é ele CRESCER. A foto do contador sai
+  // aqui, depois de qualquer navegação (a recarga zera o anel, e ler antes
+  // daria uma base alta que nunca mais é alcançada).
+  const base = await page.evaluate(() => {
+    const d = typeof dfatoAnel !== 'undefined' ? dfatoAnel : [];
+    return d.filter((e) => e.k === 'saida.saiu' || e.k === 'saida.erro').length;
+  }).catch(() => 0);
+  await page.waitForFunction((b) => {
     try {
       if (JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0) return true;
     } catch (e) { return true; }
     const d = typeof dfatoAnel !== 'undefined' ? dfatoAnel : [];
-    return d.some((e) => e.k === 'saida.saiu' || e.k === 'saida.erro');
-  }, null, { timeout: tetoMs, polling: 250 }).catch(() => {});
+    return d.filter((e) => e.k === 'saida.saiu' || e.k === 'saida.erro').length > b;
+  }, base, { timeout: tetoMs, polling: 250 }).catch(() => {});
 }
 
 {
