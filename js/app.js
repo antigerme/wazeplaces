@@ -9177,7 +9177,18 @@ const SAIDA_MAX = 1000;
 // que nenhum humano faz — e rajada é o padrão que faz um WAF marcar cliente.
 const SAIDA_RITMO_MS = 400;
 
-let esvaziandoSaida = false;   // trava: `online` e a abertura podem coincidir
+// Trava: `online` e a abertura podem coincidir. O gatilho que bate nela é
+// DESCARTADO, e isso é deliberado — eu cheguei a escrever uma recoleta
+// ("rodar de novo no fim") e ela NÃO SOBREVIVEU à sabotagem: tirando-a, os dois
+// cenários que montei continuaram drenando. O motivo é que a janela em que ela
+// importaria é desprezível: se o esvaziamento está dando certo, ele drena de
+// qualquer jeito; se está falhando por rede, a rede voltando faz a PRÓPRIA
+// retentativa em voo (1,5s e 3,5s) ter sucesso e o laço segue. Só o instante
+// entre a última tentativa falhar e o laço sair ficaria descoberto — e aí a
+// abertura da app, que é o outro gatilho, resolve. Guard que não distingue as
+// duas versões é decoração (a régua do #67), então a recoleta saiu em vez de
+// ser remendada até passar.
+let esvaziandoSaida = false;
 
 function carregarFilaDeSaida() {
     try {
@@ -9260,7 +9271,14 @@ async function esvaziarFilaDeSaida() {
             // O placar JÁ foi contado quando a pessoa deslizou — este ramo não
             // pode somar de novo. Por isso o resultado entra por um caminho que
             // só registra histórico/conquistas e trata o "já tratado".
-            registrarPousoDeSaida(item.tipo, place, r, item);
+            // O pouso mexe em histórico, reincidência, conquistas e DOM. Uma
+            // exceção ali NÃO pode levar o resto da fila junto: antes ela caía
+            // no catch do laço e o esvaziamento morria no meio, deixando o
+            // resto encalhado em silêncio (só um `dfato`). O item já saiu do
+            // Waze — o que falhou foi a CONTABILIDADE dele, e contabilidade de
+            // um item não é motivo pra não mandar os outros sete.
+            try { registrarPousoDeSaida(item.tipo, place, r, item); }
+            catch (e) { dfato('saida.pouso.erro', { tipo: item.tipo }); }
             // RELÊ antes de gravar, e o motivo é PERDA DE DADO na feature que
             // existe pra não perder dado: `f` foi lido antes do `await`, e nesse
             // meio-tempo o editor pode ter deslizado um pedido que também falhou

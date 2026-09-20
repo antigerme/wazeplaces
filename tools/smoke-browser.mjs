@@ -5175,9 +5175,6 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       if (semRede) return r.abort('internetdisconnected');
       if (/validar-place|marcar-lido/.test(r.request().url())) {
         enviosDeAcao.push(Date.now());
-        // `__envios` é o mesmo fato do lado da PÁGINA: o teste precisa esperar
-        // "já saiu" pra matar no meio do voo, e o array vive só aqui no Node.
-        page.evaluate(() => { window.__envios = (window.__envios || 0) + 1; }).catch(() => {});
         if (atrasoDaAcaoMs) await new Promise((ok) => setTimeout(ok, atrasoDaAcaoMs));
       }
       r.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' });
@@ -5305,8 +5302,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     });
     enviosDeAcao = []; atrasoDaAcaoMs = 700;   // alarga a janela entre mandar e gravar
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => window.__envios > 0, null, { timeout: 20000 })
-      .catch(() => {});
+    // Espera pelo lado do NODE (o array das rotas), nunca por um valor que o
+    // route handler escreveria na página: `page.evaluate` de dentro de um
+    // handler PENDENTE não roda, e com `.catch(() => {})` isso vira espera
+    // silenciosa. Já me custou um cenário inteiro que media nada.
+    const ate = Date.now() + 20000;
+    while (!enviosDeAcao.length && Date.now() < ate) await dormir(50);
+    checa(enviosDeAcao.length > 0, `${c.id}: REENVIO — nenhum envio saiu; o cenário não mediria nada`);
     await dormir(150);
     await page.goto('about:blank');            // mata no meio do voo
     atrasoDaAcaoMs = 0;

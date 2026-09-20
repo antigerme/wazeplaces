@@ -117,6 +117,28 @@ test('esvaziar tem RITMO, e o número sai de uma medição', () => {
   assert.match(f, /setTimeout\(ok, SAIDA_RITMO_MS\)/, 'a pausa entre envios sumiu');
 });
 
+test('exceção no POUSO não leva o resto da fila junto', () => {
+  // Foi ISTO que o CI pegou, e o sintoma era caro de ler: "2 requisições para
+  // 8 ações" com 6 sobrando. O pouso mexe em histórico, reincidência,
+  // conquistas e DOM; uma exceção ali caía no `catch` do LAÇO e o esvaziamento
+  // morria no meio, deixando o resto encalhado em silêncio (só um `dfato`).
+  // Reproduzido no navegador sabotando o miolo do pouso no 3º item: com o
+  // `try` local drena os 8; sem ele param em 6 — o número do CI.
+  //
+  // O item JÁ SAIU do Waze quando o pouso roda: o que falhou foi a
+  // contabilidade dele, e contabilidade de um item não é motivo pra não mandar
+  // os outros sete.
+  const f = fatiar('esvaziarFilaDeSaida');
+  assert.match(f, /try \{ registrarPousoDeSaida\(item\.tipo, place, r, item\); \}/,
+    'o pouso voltou a rodar SEM proteção: uma exceção nele encalha o resto da fila');
+  assert.match(f, /catch \(e\) \{ dfato\('saida\.pouso\.erro'/,
+    'a falha do pouso deixou de ser registrada: encalhe sem rastro é indepurável');
+  // E o `shift` tem que acontecer DEPOIS, senão a exceção some com o item.
+  const iTry = f.indexOf('try { registrarPousoDeSaida');
+  const iShift = f.indexOf('f.shift()', iTry);
+  assert.ok(iShift > iTry, 'o item sai da fila antes do pouso');
+});
+
 test('esvaziar para no que não adianta insistir, e mantém a fila', () => {
   const f = fatiar('esvaziarFilaDeSaida');
   assert.match(f, /errorCategory === 'transient'\) break/,
