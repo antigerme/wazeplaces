@@ -4865,6 +4865,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       tamanho: +(Math.max(...s.map((x) => x.w)) - Math.min(...s.map((x) => x.w))).toFixed(1),
       opMin: +Math.min(...s.map((x) => x.op)).toFixed(2),
       escondeu: s.some((x) => x.fundo === 'hidden'),
+      // CONTROLE: "nunca escondeu" é satisfeito de graça quando não há card de
+      // fundo nenhum. Sem esta linha a asserção passa sozinha.
+      temFundo: s.some((x) => x.fundo !== 'sem fundo'),
       fundoNoFim: fim.fundo,
     };
   });
@@ -4882,7 +4885,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(300);
 
-    const CARDS_ENT = Object.entries(CARDS).slice(0, 3).map(([, p]) => p);
+    // CINCO e não três: a medição gasta um pedido e a CONTRAPROVA gasta outro,
+    // e no último da fila a app não monta pilha (de propósito — desenhar o
+    // "Tudo limpo!" por baixo anunciaria o fim antes da hora). Com três, a
+    // contraprova rodava sem card de fundo nenhum e "nunca escondeu" passava
+    // por não haver o que esconder. Foi a própria contraprova que pegou isso.
+    const CARDS_ENT = Object.entries(CARDS).slice(0, 5).map(([, p]) => p);
     await page.evaluate(({ fila }) => {
       localStorage.setItem('waze_session_token', 't');
       if (window.API && API.setSession) API.setSession('t', 'cookies');
@@ -4909,9 +4917,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(m.moveu === 0, `${id}: o card NOVO se moveu ${m.moveu}px ao entrar — ele tem que nascer no lugar`);
     checa(m.tamanho === 0, `${id}: o card NOVO mudou de tamanho ${m.tamanho}px ao entrar — foi exatamente isto que o owner pediu pra tirar`);
     checa(m.opMin === 1, `${id}: o card NOVO nasceu translúcido (opacidade mínima ${m.opMin}) — voltou efeito na entrada, e com ele o card de baixo atravessando o da frente`);
+    checa(m.temFundo, `${id}: CONTROLE falhou — não havia card de fundo em quadro nenhum, então tudo que se diga sobre ele abaixo passa de graça`, JSON.stringify(m));
     checa(!m.escondeu, `${id}: o card de fundo foi ESCONDIDO em algum quadro — sem efeito na entrada não há nada pra esconder, e esconder à toa é a pilha piscando`);
-    checa(m.fundoNoFim !== 'hidden',
-      `${id}: o card de fundo ficou ESCONDIDO no fim — a pilha some da app`);
+    checa(m.fundoNoFim === 'visible',
+      `${id}: o card de fundo não terminou VISÍVEL (${m.fundoNoFim}) — a pilha some da app`);
 
     // CONTRAPROVA, uma vez só: sem ela, "opacidade sempre 1" e "nunca
     // escondeu" passariam com a medição apontando pro lugar errado.
@@ -4926,6 +4935,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       await assentar(page);
       const sab = await medir(page);
       checa(sab.n > 5, `${id}: CONTRAPROVA sem amostras — ela não prova nada`, JSON.stringify(sab));
+      checa(sab.temFundo, `${id}: CONTRAPROVA sem card de fundo — o esconderijo injetado não teria o que esconder, e o "não viu" abaixo seria do cenário, não da medição`, JSON.stringify(sab));
       checa(sab.opMin < 1,
         `${id}: CONTRAPROVA falhou — com um fade injetado de propósito a medição ainda leu opacidade ${sab.opMin}, então "sem fade" acima não estava medindo fade nenhum`);
       checa(sab.escondeu,
