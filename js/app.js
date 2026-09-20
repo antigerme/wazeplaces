@@ -340,6 +340,16 @@ function initApp() {
         // sessão nasce sem início e a duração não existe (ver a função).
         marcarSessaoJaAtiva();
         showMainScreen();
+        // O que ficou esperando de uma sessão anterior aparece e sai agora.
+        // É o segundo (e último) gatilho: o outro é o evento `online`. Nenhum
+        // dos dois é polling — a regra do free tier proíbe.
+        //
+        // DEPOIS do `showMainScreen`, e isso é load-bearing: é ELE que põe
+        // `AppState.authenticated = true`, e o esvaziamento sai na primeira
+        // linha sem isso. Chamado antes, o gatilho da abertura não fazia nada —
+        // calado, e justamente pra quem ficou offline e fechou a app.
+        updateInFlightIndicator();
+        esvaziarFilaDeSaida();
         AppState._profilePromise = loadProfileAndAuxData();
         startFetching();
         handleLaunchAction();
@@ -4648,6 +4658,11 @@ async function handleLogout() {
     registrarEventoDeSessao('saiu');   // fica no anel até a linha seguinte apagá-lo
     safeLS.remove(SESSOES_KEY);
     safeLS.remove(NASCIMENTO_KEY);
+    // A fila de saída guarda venueID, updateRequestID e o creatorId de QUEM
+    // MANDOU o pedido — dado de terceiro. Sai com o resto, e o efeito assumido
+    // é que sair com a fila cheia descarta o que ainda não foi enviado: é
+    // exatamente o que "sair é sair de tudo" promete.
+    safeLS.remove(SAIDA_KEY);
     avatarPendente = null;   // a próxima entrada volta a esperar o primeiro card
     avatarFalhou = null;     // outro editor pode ter foto onde este não tinha
     // Casa, trabalho e posição são dado de LOCALIZAÇÃO do editor: sair é sair.
@@ -7574,7 +7589,17 @@ function escapeHtml(str) {
 async function callWithRetry(fn) {
     let result = await fn();
     let attempt = 0;
-    while (result && !result.success && result.errorCategory === 'transient' && attempt < TRANSIENT_RETRY_ATTEMPTS) {
+    // SEM REDE não se retenta: as duas tentativas extras são 2 requisições e
+    // ~5s de espera (1,5 + 3,5) que já nascem condenadas. Com a fila de saída
+    // atrás, a ação não se perde por não insistir — ela sai quando a rede
+    // voltar. MEDIDO: ~509 bytes por tentativa, e offline a app fazia 3.
+    //
+    // O teste é de UMA MÃO só, de propósito: `onLine === false` é confiável
+    // pra "não tem rede"; `true` NÃO prova que tem (portal cativo de hotel diz
+    // true e mente). Então só o `false` muda o comportamento.
+    const semRede = () => navigator.onLine === false;
+    while (result && !result.success && result.errorCategory === 'transient'
+           && !semRede() && attempt < TRANSIENT_RETRY_ATTEMPTS) {
         const delay = TRANSIENT_RETRY_DELAYS_MS[attempt] || 5000;
         await new Promise(r => setTimeout(r, delay));
         attempt++;
@@ -7624,10 +7649,15 @@ function historyTodayKey() {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 // Registra no histórico persistente. type: 'read' | 'reject'. delta normalmente +1.
-function recordHistory(type, delta) {
+// `dia`/`onde` explícitos existem por causa da FILA DE SAÍDA: uma ação feita
+// offline pousa quando a rede volta, e sem eles ela cairia no balde do dia do
+// POUSO e na região do filtro de AGORA. O trabalho foi feito no dia e no lugar
+// do gesto — é isso que o editor reconhece no Histórico e no Resumo do mês.
+// Omitidos (todo caminho online), valem hoje e o filtro atual, como sempre.
+function recordHistory(type, delta, dia, onde) {
     if (type !== 'read' && type !== 'reject') return;
     const h = loadHistory();
-    const k = historyTodayKey();
+    const k = dia || historyTodayKey();
     if (!h[k]) h[k] = { read: 0, rejected: 0 };
     const field = type === 'read' ? 'read' : 'rejected';
     h[k][field] = Math.max(0, (h[k][field] || 0) + (delta || 0));
@@ -7636,10 +7666,10 @@ function recordHistory(type, delta) {
     // — e o MESMO que tirou o "onde" do Resumo do mês, que agora pode voltar.
     // É dado SEU (onde você trabalhou), não de terceiro: pode persistir, e sai
     // no logout junto com o resto do histórico.
-    const onde = ondeAgora();
-    if (onde && (delta || 0) > 0) {
+    const lugar = onde || ondeAgora();
+    if (lugar && (delta || 0) > 0) {
         if (!h[k].onde) h[k].onde = {};
-        h[k].onde[onde] = Math.max(0, (h[k].onde[onde] || 0) + delta);
+        h[k].onde[lugar] = Math.max(0, (h[k].onde[lugar] || 0) + delta);
     }
     salvarHistorico(h);
 }
@@ -8701,6 +8731,20 @@ async function enviarLote(places, opts = {}) {
             } else if (r && r.errorCategory === 'unauthorized') {
                 handleUnauthorized();
                 return;
+            } else if (r && r.errorCategory === 'transient' && !aoLandar && enfileirarSaida('reject', p)) {
+                // Rede, não recusa: o lote também entra na fila de saída, senão
+                // a promessa ("nada do que você fez se perde") valeria só pro
+                // swipe e não pro botão de rejeitar em lote. Conta como OK
+                // porque o placar otimista já subiu e o trabalho foi feito.
+                //
+                // `!aoLandar` NÃO é cinto e suspensório. Nesse modo (a recusa
+                // automática) o placar só anda no `r.success`, e o pouso da fila
+                // de propósito não soma nada — então enfileirar ali faria a ação
+                // não contar em lugar NENHUM. E não há nada a salvar: o ramo de
+                // erro já devolve o pedido pra `AppState.queue`, onde ele volta
+                // a ser um card. O contrato daquele modo ("o número na tela é
+                // sempre o que de fato foi enviado") continua valendo.
+                conta.ok++;
             } else {
                 conta.erro++;
                 // O que não saiu volta pra fila. Com o placar otimista é preciso
@@ -9103,6 +9147,198 @@ function avisarConsequencia(actionType) {
 // e isso o treino e o "Como funciona" já dizem.
 const CONSEQUENCIA_AVISADA = { reject: true, read: true };
 
+// ── FILA DE SAÍDA: o que você fez não se perde quando a rede some ─────────
+//
+// O defeito que isto conserta existe HOJE, pra todo editor, e não precisa de
+// viagem nenhuma: basta o sinal oscilar. Medido no código de antes, o caminho
+// era — placar sobe e é GRAVADO, card sai da tela, 3s de janela, envia, falha,
+// duas retentativas (1,5s e 3,5s), e aí o último ramo do `handleActionResult`
+// **reverte o placar e descarta a ação**. O pedido continua no Waze e o editor
+// vê o número voltar atrás uns 5 segundos depois de já ter seguido em frente.
+//
+// A app não tinha NENHUMA noção de estar offline — nem uma chave no dicionário.
+//
+// Só `transient` entra aqui, e a distinção não é detalhe:
+//   · `already_processed`/`not_found` → já é sucesso (outro editor chegou antes)
+//   · `unauthorized` ................. → a sessão morreu; enfileirar adiaria o
+//                                        relogin sem resolver nada
+//   · `unknown` ...................... → segue revertendo. Enfileirar o que não
+//                                        se entende é retentar pra sempre.
+const SAIDA_KEY = 'waze_places_saida';
+// Teto POR CONSTRUÇÃO (regra da casa pra estrutura que cresce por item). A fila
+// real do Brasil tem 442 pedidos e o Waze guarda ~3 dias, então 1000 é o dobro
+// do que existe pra fazer. Estourar NÃO descarta em silêncio: volta ao
+// comportamento antigo (reverte e avisa), porque perda calada é o que este
+// trecho existe pra acabar.
+const SAIDA_MAX = 1000;
+// Pausa entre os envios ao esvaziar. NÃO é número escolhido a dedo: o piso
+// MEDIDO da app sem Desfazer é 377 ms por pedido (40 pedidos reais, esperando o
+// card trocar de verdade). Esvaziar mais rápido que isso seria a app fazendo o
+// que nenhum humano faz — e rajada é o padrão que faz um WAF marcar cliente.
+const SAIDA_RITMO_MS = 400;
+
+// Trava: `online` e a abertura podem coincidir. O gatilho que bate nela é
+// DESCARTADO, e isso é deliberado — eu cheguei a escrever uma recoleta
+// ("rodar de novo no fim") e ela NÃO SOBREVIVEU à sabotagem: tirando-a, os dois
+// cenários que montei continuaram drenando. O motivo é que a janela em que ela
+// importaria é desprezível: se o esvaziamento está dando certo, ele drena de
+// qualquer jeito; se está falhando por rede, a rede voltando faz a PRÓPRIA
+// retentativa em voo (1,5s e 3,5s) ter sucesso e o laço segue. Só o instante
+// entre a última tentativa falhar e o laço sair ficaria descoberto — e aí a
+// abertura da app, que é o outro gatilho, resolve. Guard que não distingue as
+// duas versões é decoração (a régua do #67), então a recoleta saiu em vez de
+// ser remendada até passar.
+let esvaziandoSaida = false;
+
+function carregarFilaDeSaida() {
+    try {
+        const v = JSON.parse(safeLS.get(SAIDA_KEY) || '[]');
+        return Array.isArray(v) ? v : [];
+    } catch (e) { return []; }
+}
+
+function salvarFilaDeSaida(f) {
+    try { safeLS.set(SAIDA_KEY, JSON.stringify(f)); } catch (e) {}
+}
+
+// Guarda o MÍNIMO que permite reenviar E prestar contas direito no pouso:
+// `creatorId` alimenta a reincidência e a conquista do elefante, `dup` a do
+// detetive. Sem eles a ação sairia, mas o trabalho feito offline não contaria
+// pras conquistas — divergência silenciosa entre o placar e o Histórico.
+//
+// O `nome` vai junto porque a reincidência CHAVEIA por id mas EXIBE por nome, e
+// o `registrarRejeicaoDeAutor` reescreve o nome a cada rejeição: sem ele, um
+// autor que já tinha nome na lista voltaria a aparecer como NÚMERO depois de
+// uma rejeição feita offline.
+function enfileirarSaida(tipo, place) {
+    if (!place || place.venueID === undefined || place.updateRequestID === undefined) return false;
+    const f = carregarFilaDeSaida();
+    if (f.length >= SAIDA_MAX) return false;
+    f.push({ tipo, venueID: place.venueID, updateRequestID: place.updateRequestID,
+             creatorId: place.creatorId != null ? place.creatorId : null,
+             nome: place.createdBy ? String(place.createdBy) : null,
+             dup: !!place.duplicado,
+             // `t` não é lido em runtime por ninguém: existe pro DIAGNÓSTICO,
+             // que despeja o localStorage inteiro — é o que responde "há quanto
+             // tempo isto está preso aqui" sem custar uma linha de diário.
+             t: Date.now(),
+             // Carimbados AQUI, no gesto: é o dia e a região em que o trabalho
+             // foi feito. Lidos no pouso, seriam os do momento em que a rede
+             // voltou — que pode ser outro dia e outro filtro.
+             dia: historyTodayKey(), onde: ondeAgora() });
+    salvarFilaDeSaida(f);
+    updateInFlightIndicator();
+    // Só a ABERTURA da fila entra no diário, nunca cada item: `dfato` é anel de
+    // 120 e a regra da casa é "nada por swipe" — 200 pedidos numa sombra de
+    // conectividade despejariam todo o resto do diário, que é justamente o que
+    // se quer ler junto. O evento é ficar sem rede; quantos couberam sai no
+    // `saida.saiu`, e a fila inteira já está no localStorage do diagnóstico.
+    if (f.length === 1) dfato('saida.abriu', { tipo });
+    return true;
+}
+
+// Esvazia COM RITMO, um por vez. O pouso NÃO passa pelo `handleActionResult`
+// (ele somaria o placar de novo, e o número já subiu no gesto): passa pelo
+// `registrarPousoDeSaida`, que é o mesmo conjunto de regras sem essa parte.
+// A ÚNICA exceção é `unauthorized`, que precisa do `handleUnauthorized` de lá.
+async function esvaziarFilaDeSaida() {
+    if (esvaziandoSaida) return;
+    if (!AppState.authenticated) return;
+    if (navigator.onLine === false) return;
+    let f = carregarFilaDeSaida();
+    if (!f.length) return;
+    esvaziandoSaida = true;
+    let enviados = 0;
+    try {
+        while (f.length) {
+            // Sair no meio do esvaziamento: PARA. Sem isto o item já em voo
+            // pousaria depois do logout e o `recordHistory` recriaria o
+            // histórico que o "Sair" acabou de apagar.
+            if (!AppState.authenticated) break;
+            const item = f[0];
+            const place = { venueID: item.venueID, updateRequestID: item.updateRequestID,
+                            creatorId: item.creatorId, createdBy: item.nome || undefined,
+                            duplicado: item.dup ? {} : undefined };
+            const r = item.tipo === 'read'
+                ? await API.markAsRead(item.venueID, item.updateRequestID)
+                : await API.rejectPlace(item.venueID, item.updateRequestID);
+            // Rede fora de novo: PARA e deixa o resto pra próxima. Insistir aqui
+            // seria gastar requisição do free tier pra falhar em série.
+            if (r && r.errorCategory === 'transient') break;
+            // Sessão morta: para e mantém a fila. Quem decide o relogin é o
+            // `handleActionResult`, e o que foi feito não pode evaporar por isso.
+            if (r && r.errorCategory === 'unauthorized') { handleActionResult(item.tipo, place, r); break; }
+            // O placar JÁ foi contado quando a pessoa deslizou — este ramo não
+            // pode somar de novo. Por isso o resultado entra por um caminho que
+            // só registra histórico/conquistas e trata o "já tratado".
+            // O pouso mexe em histórico, reincidência, conquistas e DOM. Uma
+            // exceção ali NÃO pode levar o resto da fila junto: antes ela caía
+            // no catch do laço e o esvaziamento morria no meio, deixando o
+            // resto encalhado em silêncio (só um `dfato`). O item já saiu do
+            // Waze — o que falhou foi a CONTABILIDADE dele, e contabilidade de
+            // um item não é motivo pra não mandar os outros sete.
+            try { registrarPousoDeSaida(item.tipo, place, r, item); }
+            catch (e) { dfato('saida.pouso.erro', { tipo: item.tipo }); }
+            // RELÊ antes de gravar, e o motivo é PERDA DE DADO na feature que
+            // existe pra não perder dado: `f` foi lido antes do `await`, e nesse
+            // meio-tempo o editor pode ter deslizado um pedido que também falhou
+            // por rede — `enfileirarSaida` gravou `[A,B,C]` e um `salvarFilaDeSaida(f)`
+            // com o `f` velho gravaria `[B]` por cima, sumindo com o C em silêncio.
+            // O item que acabou de sair é sempre o `[0]` (quem entra é empurrado
+            // pro fim), então reler e tirar o primeiro preserva o que chegou.
+            f = carregarFilaDeSaida();
+            f.shift();
+            salvarFilaDeSaida(f);
+            updateInFlightIndicator();
+            enviados++;
+            if (f.length) await new Promise((ok) => setTimeout(ok, SAIDA_RITMO_MS));
+        }
+    } catch (e) {
+        dfato('saida.erro', { restam: f.length });
+    } finally {
+        esvaziandoSaida = false;
+    }
+    if (enviados) {
+        dfato('saida.saiu', { enviados, restam: f.length });
+        // Plural por chave, que é o que o projeto tem (sem ICU): `{n} enviados`
+        // com n=1 daria "1 enviados" em pt/es/fr, e UM é o caso mais comum —
+        // uma ação só falhando numa oscilação de sinal.
+        showToast(t(enviados === 1 ? 'toast.saidaEnviada' : 'toast.saidaEnviadaPlural',
+                    { n: enviados }), 'success');
+    }
+}
+
+// O pouso de um item da fila de saída. É o `handleActionResult` SEM a parte do
+// placar: o número já subiu quando a pessoa deslizou, e somar de novo aqui
+// contaria o mesmo trabalho duas vezes.
+function registrarPousoDeSaida(actionType, place, result, item) {
+    if (!result) return;
+    item = item || {};
+    const cat = result.errorCategory || (result.success ? null : 'unknown');
+    if (result.success || cat === 'already_processed' || cat === 'not_found') {
+        recordHistory(actionType, 1, item.dia, item.onde);
+        if (actionType === 'reject' && result.success) registrarRejeicaoDeAutor(place);
+        registrarAcaoConfirmada(actionType, place);
+        return;
+    }
+    // Não deu, e não é rede nem sessão: a ação falhou DE VERDADE, então o número
+    // que subiu no gesto tem que descer agora. Isto não é simetria estética — o
+    // placar é PERSISTIDO (`waze_places_stats`), então deixar só o `serverTotal`
+    // voltar deixaria "Rejeitados" inflado para sempre por algo que nunca saiu.
+    const statKey = actionType === 'read' ? 'read' : 'rejected';
+    AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
+    AppState.serverTotal++;
+    updateStats();
+    saveStats();
+    const verb = actionType === 'read' ? t('action.verb.read') : t('action.verb.reject');
+    showToast(msgDoServidor(result, t('toast.actionError', { verb })), 'error');
+}
+
+// Os DOIS gatilhos, e nenhum deles é polling (o free tier proíbe): o navegador
+// avisando que voltou, e a abertura da app. Quem ficou offline e fechou tudo
+// encontra a fila esperando na próxima vez que abrir.
+window.addEventListener('online', () => { esvaziarFilaDeSaida(); });
+
 function handleActionResult(actionType, place, result) {
     dlog('acao.fim', { tipo: actionType, ok: !!(result && result.success),
                        cat: (result && result.errorCategory) || null,
@@ -9134,6 +9370,14 @@ function handleActionResult(actionType, place, result) {
         handleUnauthorized();
         return;
     }
+
+    // REDE, não recusa: a ação vai pra fila de saída em vez de sumir. O placar
+    // NÃO reverte, porque o trabalho foi feito — só não saiu ainda.
+    //
+    // Sem toast por ação: 150 pedidos numa sombra de conectividade dariam 150
+    // interrupções. Quem presta contas é o indicador ("N esperando envio"), que
+    // some sozinho quando a fila esvazia.
+    if (cat === 'transient' && enfileirarSaida(actionType, place)) return;
 
     const statKey = actionType === 'read' ? 'read' : 'rejected';
     AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
@@ -9706,9 +9950,14 @@ function removeUndoBanner() {
     if (container) container.innerHTML = '';
 }
 
+// UM indicador para os dois estados, e não dois: eles disputam o mesmo canto e
+// nunca dizem coisas independentes — "enviando" é o que está saindo AGORA,
+// "esperando" é o que ficou pra depois. Enviando ganha, porque é o estado que
+// está mudando.
 function updateInFlightIndicator() {
     let el = document.getElementById('inFlightIndicator');
-    if (AppState.inFlightActions <= 0) {
+    const esperando = AppState.authenticated ? carregarFilaDeSaida().length : 0;
+    if (AppState.inFlightActions <= 0 && esperando <= 0) {
         if (el) el.remove();
         return;
     }
@@ -9718,13 +9967,19 @@ function updateInFlightIndicator() {
         el.className = 'fixed top-20 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg z-40 flex items-center gap-2';
         document.body.appendChild(el);
     }
-    el.innerHTML = `
+    // Girando só quando está MESMO saindo. "Esperando" com giro seria a app
+    // fingindo trabalho que não está acontecendo — e é justamente o estado em
+    // que não há rede pra trabalhar.
+    const enviando = AppState.inFlightActions > 0;
+    const giro = enviando ? `
         <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-        </svg>
-        <span>${escapeHtml(t('indicator.sending', { n: AppState.inFlightActions }))}</span>
-    `;
+        </svg>` : '';
+    const texto = enviando
+        ? t('indicator.sending', { n: AppState.inFlightActions })
+        : t('indicator.waiting', { n: esperando });
+    el.innerHTML = giro + `<span>${escapeHtml(texto)}</span>`;
 }
 
 // Feedback quando um número muda. São DOIS mecanismos, porque contar não serve

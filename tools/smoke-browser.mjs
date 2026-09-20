@@ -63,9 +63,26 @@ async function carregarPlaywright() {
 // No runner do GitHub o Chrome já vem instalado — usar o canal evita baixar
 // ~150MB de Chromium a cada run. No sandbox de dev usamos o Chromium do
 // PLAYWRIGHT_BROWSERS_PATH. Se nenhum abrir, o erro sobe (não silencia).
+// TIMER DE PÁGINA EM SEGUNDO PLANO É ESTRANGULADO, e isso derruba teste que
+// avança por `setTimeout` em cadeia. HIPÓTESE, não medição: o bloco da fila de
+// saída reprovou DUAS vezes no CI parando sempre depois de 1–2 itens — e ele
+// avança 400ms por item —, sem reproduzir aqui nem com CPU 8× mais lenta. O
+// runner abre muitos contextos e a página pode ficar em segundo plano; nessa
+// condição o Chromium adia timers agressivamente e 8 itens não cabem na janela
+// de 40s do teste. Os três flags são o desligamento padrão disso e não afrouxam
+// asserção nenhuma. Se a próxima rodada continuar vermelha, o diagnóstico que
+// o bloco agora imprime diz o motivo real — é ele, e não estes flags, que
+// fecha a questão.
+const ARGS_SEM_ESTRANGULAR = [
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
+];
+
 async function abrirBrowser(chromium) {
   const erros = [];
-  for (const opcoes of [{}, { channel: 'chrome' }, { channel: 'chromium' }]) {
+  for (const base of [{}, { channel: 'chrome' }, { channel: 'chromium' }]) {
+    const opcoes = { ...base, args: ARGS_SEM_ESTRANGULAR };
     try {
       return await chromium.launch(opcoes);
     } catch (e) {
@@ -5145,6 +5162,313 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── FILA DE SAÍDA: offline não perde o que você fez ────────────────────────
+//
+// Os guards de `test/fila-saida.test.mjs` leem o FONTE. O que só o navegador
+// responde é se a coisa acontece: se o placar de fato não reverte, se a fila
+// sobrevive a matar a app, e se o esvaziamento sai com RITMO em vez de rajada.
+//
+// Simular offline aqui tem duas armadilhas que já morderam ao escrever isto:
+//   · `route.fulfill` NÃO passa pela rede, então `setOffline` sozinho não
+//     derruba requisição interceptada — as ações davam CERTO e dois checks
+//     "passavam" pelo motivo errado. Offline de verdade é `route.abort`.
+//   · `abort` sem `setOffline` simula SINAL FRACO (`navigator.onLine` fica
+//     true e as 2 retentativas ainda rodam, ~5s por ação), não modo avião.
+//     Os dois cenários existem na estrada; este bloco mede o modo avião.
+// Espera o esvaziamento ACABAR, por SINAL POSITIVO: ou a fila zera, ou o
+// `dfato` registra o fim (`saida.saiu`) ou a falha (`saida.erro`). Prazo fixo
+// não serve — ele mede a velocidade do runner, e no CI o `setTimeout` da pausa
+// é estrangulado a ponto de 8 itens não caberem em 40s. O teto de 3 min é rede
+// contra travar de vez, não expectativa: local termina em ~4s.
+async function esperarFimDaSaida(page, tetoMs = 180000) {
+  // POLL PELO LADO DO NODE, e não `page.waitForFunction`. Três motivos, todos
+  // medidos nesta PR:
+  //  · o padrão do `waitForFunction` é pollar por `requestAnimationFrame`, que
+  //    NÃO dispara em página de segundo plano — a espera pode nem avaliar;
+  //  · com `polling: <ms>` ele passa a usar timer DA PÁGINA, que é justamente
+  //    o que o runner estrangula — o mesmo mal que se está esperando passar;
+  //  · e o `.catch(() => {})` que se põe em volta engole qualquer rejeição, o
+  //    que transformou "esperei e desisti" em "não esperei" sem deixar rastro.
+  //    A versão anterior disto voltava NA HORA e o run manteve os mesmos 8m32s
+  //    do anterior — foi essa igualdade de tempo que denunciou.
+  // Um laço aqui no Node não depende de nada disso, e DIZ por que terminou.
+  const conta = () => page.evaluate(() => {
+    let fim = 0, vazia = false;
+    try { vazia = JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0; } catch (e) {}
+    try {
+      const d = typeof dfatoAnel !== 'undefined' ? dfatoAnel : null;
+      if (d === null) return { verDiario: false, vazia, fim: 0 };
+      fim = d.filter((e) => e.k === 'saida.saiu' || e.k === 'saida.erro').length;
+    } catch (e) { return { verDiario: false, vazia, fim: 0 }; }
+    return { verDiario: true, vazia, fim };
+  });
+  // A base sai DEPOIS de qualquer navegação: o anel é cumulativo (um
+  // `saida.saiu` anterior satisfaria a condição na hora) e a recarga o zera.
+  let base = null;
+  try { base = await conta(); } catch (e) { return { motivo: 'evaluate-falhou', erro: String(e).slice(0, 80) }; }
+  const t0 = Date.now();
+  for (;;) {
+    let st;
+    try { st = await conta(); } catch (e) { return { motivo: 'evaluate-falhou', erro: String(e).slice(0, 80) }; }
+    if (st.vazia) return { motivo: 'fila-vazia', ms: Date.now() - t0 };
+    if (st.verDiario && st.fim > base.fim) return { motivo: 'diario-cresceu', ms: Date.now() - t0 };
+    if (Date.now() - t0 > tetoMs) {
+      return { motivo: 'TETO', ms: Date.now() - t0, verDiario: st.verDiario, fim: st.fim, base: base.fim };
+    }
+    await dormir(250);
+  }
+}
+
+{
+  const CENARIOS = [{ id: 'fila-saida', n: 8 }];
+  for (const c of CENARIOS) {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 },
+      serviceWorkers: 'block', locale: 'pt-BR' });
+    const page = await ctx.newPage();
+    const errosJS = [];
+    page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
+    let semRede = false;
+    let enviosDeAcao = [];
+    let atrasoDaAcaoMs = 0;   // usado só pra alargar a janela do teste de reenvio
+    await page.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png',
+      body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') }));
+    await page.route('**/api/**', async (r) => {
+      if (semRede) return r.abort('internetdisconnected');
+      if (/validar-place|marcar-lido/.test(r.request().url())) {
+        enviosDeAcao.push(Date.now());
+        if (atrasoDaAcaoMs) await new Promise((ok) => setTimeout(ok, atrasoDaAcaoMs));
+      }
+      r.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' });
+    });
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => localStorage.setItem('waze_session_token', 't'));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await dormir(400);
+    const CARDS_FS = Object.entries(CARDS).map(([, p]) => p);
+    const montar = () => page.evaluate(({ f }) => {
+      if (typeof API !== 'undefined' && API.setSession) API.setSession('t', 'cookies');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      // Desfazer DESLIGADO de verdade: a preferência sozinha não basta, o
+      // canDisableUndo() também exige a cota (a pegadinha do doc).
+      AppState.stats = { read: 500, rejected: 500, skipped: 0 };
+      AppState.preferences = Object.assign({}, AppState.preferences,
+        { undoEnabled: false, undoGateSeen: true, dicaDesfazerVista: true });
+      AppState.serverTotal = f.length; AppState.hasMore = false;
+      AppState.countries = [{ id: 30, name: 'Brazil' }]; AppState.statesByCountry = { 30: [] };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      AppState.queue = f.slice(); AppState.currentPlace = null; showCurrentPlace();
+    }, { f: [].concat(...Array(6).fill(CARDS_FS)) });
+    const estado = () => page.evaluate(() => ({
+      rejeitados: AppState.stats.rejected,
+      saida: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length,
+      aviso: (document.getElementById('inFlightIndicator') || {}).textContent || '',
+    }));
+    // Espera o card TROCAR, não a trava: logo depois do clique há ~1s em que
+    // `acoesTravadas()` ainda é false e o botão segue habilitado.
+    const tratar = (n) => page.evaluate(async (n) => {
+      const atual = () => (AppState.currentPlace && AppState.currentPlace.venueID) || null;
+      const btn = () => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+      for (let i = 0; i < n; i++) {
+        const lim = performance.now() + 20000;
+        while (((typeof acoesTravadas === 'function' && acoesTravadas()) || !btn() || btn().disabled)
+               && performance.now() < lim) await new Promise((o) => setTimeout(o, 16));
+        const a = atual(); const b = btn(); if (!b) break; b.click();
+        while (atual() === a && performance.now() < lim) await new Promise((o) => setTimeout(o, 16));
+      }
+    }, n);
+
+    await montar(); await dormir(600);
+    const antes = await estado();
+    // MODO AVIÃO: a rota cai E `navigator.onLine` fica false (sem o segundo,
+    // as retentativas rodam e o teste mede com ações ainda em voo).
+    semRede = true; await ctx.setOffline(true);
+    await tratar(c.n);
+    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    const offline = await estado();
+    checa(offline.saida === c.n, `${c.id}: ${c.n} ações offline deviam estar na fila (${offline.saida})`);
+    checa(offline.rejeitados === antes.rejeitados + c.n,
+      `${c.id}: o placar REVERTEU (${antes.rejeitados} → ${offline.rejeitados}) — é o defeito original de volta`);
+    checa(/\d/.test(offline.aviso), `${c.id}: o indicador não diz quantas esperam`, JSON.stringify(offline.aviso));
+
+    // Matar e reabrir: a fila de saída tem que sobreviver (a de PEDIDOS não,
+    // e isso é esperado — ela é memória, e persistir é outro degrau).
+    await ctx.setOffline(false);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await dormir(600);
+    const sobrou = await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
+    checa(sobrou === c.n, `${c.id}: a fila de saída não sobreviveu ao recarregamento (${sobrou})`);
+
+    // Volta a rede: esvazia, UMA requisição por ação, com ritmo.
+    //
+    // ESPERA PELO FIM, não por um prazo. A versão anterior dava 40s e media —
+    // e no CI isso reprovou três vezes com "restam 6 / 2 requisições". O
+    // diagnóstico que este bloco imprime fechou a questão: `diario=[]`, ou
+    // seja o esvaziamento NÃO TINHA TERMINADO (ele grava `saida.saiu` ao
+    // acabar e `saida.erro` se estoura), com `emVoo=0`, `travado=false` e
+    // `online=true` — nada bloqueando, só lento. Ele anda 400ms por item via
+    // `setTimeout`, e no runner o timer é estrangulado a ponto de 8 itens não
+    // caberem na janela. Prazo fixo mede a VELOCIDADE do runner; o que o teste
+    // quer saber é o RESULTADO. Nenhuma asserção afrouxa: contagem de
+    // requisições, mediana do ritmo e fila zerada seguem as mesmas.
+    await page.bringToFront();
+    await montar(); await dormir(400);
+    enviosDeAcao = []; semRede = false;
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    const porQue = await esperarFimDaSaida(page);
+    await dormir(500);
+    const fim = await estado();
+    // DIAGNÓSTICO sempre impresso, não só na falha: este bloco reprovou no CI
+    // duas vezes com "restam 6 / 2 requisições" e NÃO reproduz aqui — nem com
+    // CPU 8× mais lenta, nem com a mesma sequência de recarga. Sem saber por
+    // que o laço termina, qualquer conserto é chute. O diário do `dfato` diz
+    // exatamente isso: `saida.saiu` traz quantas saíram, `saida.erro` denuncia
+    // exceção no laço, e a ausência dos dois significa que ele nem terminou.
+    const diag = await page.evaluate(() => ({
+      diario: (typeof dfatoAnel !== 'undefined' ? dfatoAnel : [])
+        .filter((e) => String(e.k).startsWith('saida')).slice(-6),
+      auth: AppState.authenticated,
+      emVoo: AppState.inFlightActions,
+      travado: typeof acoesTravadas === 'function' ? acoesTravadas() : null,
+      pend: !!AppState.pendingAction,
+      online: navigator.onLine,
+    }));
+    console.log(`  · ${c.id} [diagnóstico] espera=${JSON.stringify(porQue)} `
+      + `restam=${fim.saida} envios=${enviosDeAcao.length} `
+      + `auth=${diag.auth} emVoo=${diag.emVoo} travado=${diag.travado} pend=${diag.pend} `
+      + `online=${diag.online} diario=${JSON.stringify(diag.diario)}`);
+    const gaps = enviosDeAcao.slice(1).map((t, i) => t - enviosDeAcao[i]).sort((a, b) => a - b);
+    const mediana = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+    checa(fim.saida === 0, `${c.id}: a fila não esvaziou (restam ${fim.saida})`);
+    checa(enviosDeAcao.length === c.n,
+      `${c.id}: saíram ${enviosDeAcao.length} requisições para ${c.n} ações — duplicou ou perdeu`);
+    checa(mediana >= 350,
+      `${c.id}: esvaziou em RAJADA (mediana ${mediana}ms) — é o padrão que faz um WAF marcar cliente`);
+    checa(!/\d/.test(fim.aviso), `${c.id}: o indicador ficou na tela depois de esvaziar`);
+
+    // O GATILHO DA ABERTURA, sozinho: sem nenhum evento `online`, só ABRIR a app
+    // tem que drenar. É o caminho de quem ficou offline e FECHOU tudo — e ele já
+    // nasceu quebrado uma vez, porque quem põe `AppState.authenticated` é o
+    // `showMainScreen()` e o esvaziamento estava sendo chamado antes dele (saía
+    // na primeira linha, calado, com a chamada no lugar pra enganar).
+    //
+    // A página velha é MORTA (`about:blank`) antes de a rede voltar, de
+    // propósito: com ela viva, o `setOffline(false)` dispara o `online` DELA e
+    // a medição passa a somar dois gatilhos — foi o que fez esta asserção
+    // acusar "4 requisições para 3 ações" na primeira rodada. Medido item a
+    // item: as duas primeiras eram do MESMO pedido, em páginas diferentes.
+    await montar(); await dormir(400);
+    semRede = true; await ctx.setOffline(true);
+    await tratar(3);
+    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    const presos = await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
+    checa(presos === 3, `${c.id}: ABERTURA — as 3 ações não entraram na fila (${presos})`);
+    await page.goto('about:blank');          // mata a página VELHA antes da rede voltar
+    await ctx.setOffline(false); semRede = false; enviosDeAcao = [];
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });   // nenhum `online` daqui em diante
+    await page.bringToFront();
+    await esperarFimDaSaida(page);
+    const aberturaRestou = await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
+    checa(aberturaRestou === 0,
+      `${c.id}: ABERTURA — abrir a app NÃO drenou a fila (${aberturaRestou}): quem fechou offline nunca manda`);
+    checa(enviosDeAcao.length === 3,
+      `${c.id}: ABERTURA — saíram ${enviosDeAcao.length} requisições para 3 ações presas`);
+
+    // ENTREGA AT-LEAST-ONCE: matar a app ENTRE o envio e a gravação reenvia o
+    // pedido na próxima abertura. Isso é o lado CERTO do trade — a alternativa
+    // (tirar da fila antes de saber que saiu) perde a ação, que é o defeito que
+    // esta feature existe pra acabar. O que NÃO pode acontecer é contar duas
+    // vezes: a 1ª resposta nunca foi processada, então o Histórico ganha UM.
+    await page.evaluate(() => {
+      localStorage.setItem('waze_places_saida', JSON.stringify([{ tipo: 'reject',
+        venueID: 'reenvio', updateRequestID: 77, creatorId: null, nome: null,
+        dup: false, t: Date.now(), dia: '2026-01-01', onde: '30' }]));
+      const h = JSON.parse(localStorage.getItem('waze_places_history') || '{}');
+      h._total = { read: 0, rejected: 0 }; h['2026-01-01'] = { read: 0, rejected: 0 };
+      localStorage.setItem('waze_places_history', JSON.stringify(h));
+    });
+    enviosDeAcao = []; atrasoDaAcaoMs = 700;   // alarga a janela entre mandar e gravar
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    // Espera pelo lado do NODE (o array das rotas), nunca por um valor que o
+    // route handler escreveria na página: `page.evaluate` de dentro de um
+    // handler PENDENTE não roda, e com `.catch(() => {})` isso vira espera
+    // silenciosa. Já me custou um cenário inteiro que media nada.
+    const ate = Date.now() + 20000;
+    while (!enviosDeAcao.length && Date.now() < ate) await dormir(50);
+    checa(enviosDeAcao.length > 0, `${c.id}: REENVIO — nenhum envio saiu; o cenário não mediria nada`);
+    await dormir(150);
+    await page.goto('about:blank');            // mata no meio do voo
+    atrasoDaAcaoMs = 0;
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarFimDaSaida(page);
+    await dormir(300);
+    const reenvio = await page.evaluate(() => ({
+      saida: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length,
+      hist: ((JSON.parse(localStorage.getItem('waze_places_history') || '{}')._total) || {}).rejected,
+    }));
+    checa(reenvio.saida === 0,
+      `${c.id}: REENVIO — a ação interrompida no voo ficou presa (${reenvio.saida}): seria perda`);
+    checa(enviosDeAcao.length === 2,
+      `${c.id}: REENVIO — esperava 2 envios (o interrompido + o reenvio), vieram ${enviosDeAcao.length}`);
+    checa(reenvio.hist === 1,
+      `${c.id}: REENVIO — o Histórico contou ${reenvio.hist}× o mesmo pedido: a 1ª resposta nunca chegou, então é UM`);
+
+    // O POUSO que falha DE VERDADE: a ação esperou offline, a rede voltou, e o
+    // Waze recusa por um motivo que não é rede. O placar é PERSISTIDO, então o
+    // número que subiu no gesto tem que descer AGORA — senão "Rejeitados" fica
+    // inflado pra sempre por algo que nunca saiu. É a única trilha que mexe num
+    // número gravado sem passar pelo `handleActionResult`.
+    await montar(); await dormir(400);
+    const a3 = await estado();
+    semRede = true; await ctx.setOffline(true);
+    await tratar(2);
+    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    const espera3 = await estado();
+    checa(espera3.saida === 2, `${c.id}: POUSO-RUIM — as 2 ações não entraram na fila (${espera3.saida})`);
+    checa(espera3.rejeitados === a3.rejeitados + 2,
+      `${c.id}: POUSO-RUIM — o placar já reverteu antes do pouso`);
+    await ctx.setOffline(false);
+    await page.unroute('**/api/**');
+    await page.route('**/api/**', (r) => r.fulfill({ status: 200, contentType: 'application/json',
+      body: '{"success":false,"error":"x","errorCategory":"unknown","httpCode":500}' }));
+    semRede = false;
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await esperarFimDaSaida(page);
+    await dormir(400);
+    const pouso3 = await page.evaluate(() => ({
+      rejeitados: AppState.stats.rejected,
+      saida: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length,
+      // GRAVADO, não só em memória: sem isto o número volta inflado no reload.
+      gravado: (JSON.parse(localStorage.getItem('waze_places_stats') || '{}') || {}).rejected,
+    }));
+    checa(pouso3.saida === 0, `${c.id}: POUSO-RUIM — a fila não drenou (${pouso3.saida})`);
+    checa(pouso3.rejeitados === a3.rejeitados,
+      `${c.id}: POUSO-RUIM — o placar ficou inflado (${a3.rejeitados} → ${pouso3.rejeitados}) por ação que NUNCA saiu`);
+    checa(pouso3.gravado === a3.rejeitados,
+      `${c.id}: POUSO-RUIM — desfez na tela mas não GRAVOU (${pouso3.gravado}): volta inflado no reload`);
+
+    // CONTROLE: erro que NÃO é rede continua revertendo, como sempre.
+    await page.unroute('**/api/**');
+    await page.route('**/api/**', (r) => r.fulfill({ status: 200, contentType: 'application/json',
+      body: '{"success":false,"error":"x","errorCategory":"unknown","httpCode":500}' }));
+    await montar(); await dormir(400);
+    const a2 = await estado();
+    await tratar(1);
+    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 20000 }).catch(() => {});
+    const d2 = await estado();
+    checa(d2.saida === 0, `${c.id}: CONTROLE — erro desconhecido entrou na fila (${d2.saida})`);
+    checa(d2.rejeitados === a2.rejeitados,
+      `${c.id}: CONTROLE — erro desconhecido deixou de reverter o placar`);
+
+    checa(errosJS.length === 0, `${c.id}: erro de JS`, errosJS[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -5191,6 +5515,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
+  + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar a app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, app MORTA no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`

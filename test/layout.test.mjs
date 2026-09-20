@@ -1560,6 +1560,11 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // arrumação: é o mínimo que o contrato do "Sair" já promete.
     AUTORES_KEY: 'esquecerAutores()',
     SESSAO_KEY: 'esquecerPrazoDaSessao()',
+    // A fila de saída (ações feitas offline que ainda não saíram). Guarda o
+    // `creatorId` de quem mandou o pedido — dado de TERCEIRO —, então sai no
+    // logout com o resto. O efeito assumido é que sair com a fila cheia
+    // descarta o que não foi enviado: é o que "sair é sair de tudo" promete.
+    SAIDA_KEY: 'safeLS.remove(SAIDA_KEY)',
     // Patente, conquistas e contadores. É dado de QUEM ENTROU (o trabalho
     // dele), então some junto — e some porque o contrato do "Sair" já
     // promete, não porque alguém lembrou.
