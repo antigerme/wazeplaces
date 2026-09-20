@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.20-05
+
+### Corrigido
+- **O relatório do modo dev voltou a saber há quanto tempo a app existe neste aparelho.** O campo que registra isso nunca era gravado — a função que o escreve foi criada em 18/09 sem nenhuma chamada, então "nascimento" e "idade do armazenamento" saíram **em branco em todo relatório** desde então. Agora são carimbados ao abrir a app.
+- **Por que isso importa para quem está perdendo a sessão a cada poucos dias:** existem duas causas com sintoma idêntico — ou a sessão do Waze expirou mesmo, ou o navegador apagou todo o armazenamento sozinho (o Safari faz isso após 7 dias sem você abrir o site, e **isenta quem instalou a app na tela inicial**). Os consertos são opostos: recarregar os cookies num caso, instalar a app no outro. Como o apagamento leva junto o registro que provaria o apagamento, a única evidência possível é a **idade** do armazenamento contradizer o uso — um carimbo de ontem em quem usa a app há um mês. Era exatamente essa evidência que estava faltando.
+- Nada muda na tela. O carimbo continua saindo no **"Sair"**, junto com o resto.
+
 ## v2026.09.20-04
 
 ### Melhorado

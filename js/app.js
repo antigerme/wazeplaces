@@ -237,6 +237,24 @@ function initApp() {
     // Armado ANTES de tudo: erro que acontece na carga é justamente o que não
     // aparece em lugar nenhum depois, e é o que mais interessa num socorro.
     diagCapturarErros();
+    // Carimba a IDADE DESTE ARMAZENAMENTO, pelo mesmo motivo da linha acima e
+    // com a mesma urgência: tem que acontecer antes de qualquer ramo.
+    //
+    // Por que AQUI e não junto do `marcarSessaoJaAtiva()`, que é o irmão dele:
+    // aquele só roda no ramo `if (savedToken)`, e o `initApp` ainda tem um
+    // `return` antes disso (o código de pareamento na URL). O carimbo é sobre o
+    // ARMAZENAMENTO, não sobre a sessão — abrir sem token, ou cair no
+    // pareamento, é carga igual, e pular a marcação nesses casos daria uma
+    // idade menor do que a real, justamente na direção que INVENTA um
+    // apagamento que não houve.
+    //
+    // Ele nasceu sem chamador na v2026.09.18-02 (a #219 trouxe a constante, a
+    // função, a leitura no `diagSessao` e a remoção no logout — e nenhuma
+    // chamada), então `nascimento` e `idadeDoArmazenamentoH` saíram `null` em
+    // TODO diagnóstico desde então. Medido nos bytes de produção, com o diário
+    // ao lado gravando normalmente: 3 entradas e 2 ciclos contra carimbo nunca
+    // escrito.
+    nascimentoDoArmazenamento();
     ligarFabDev();
     const versionEl = document.getElementById('appVersionDisplay');
     if (versionEl) {

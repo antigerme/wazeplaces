@@ -222,3 +222,58 @@ test('a conta do piso e da medida, com o diário montado à mão', () => {
   assert.equal(r.duracaoH.mediana, 8, 'a mediana saiu do ciclo medido, não do piso');
   assert.equal(r.pisos, 1);
 });
+
+// ── QUEM O DIAGNÓSTICO LÊ, ALGUÉM ESCREVE ──────────────────────────────────
+//
+// O carimbo de nascimento NASCEU sem chamador: a #219 trouxe a constante, a
+// função, a leitura no `diagSessao` e a remoção no logout — e nenhuma chamada.
+// Resultado, medido nos BYTES DE PRODUÇÃO com o diário ao lado gravando
+// normalmente (3 entradas, 2 ciclos): `nascimento` e `idadeDoArmazenamentoH`
+// saíram `null` em todo diagnóstico desde 2026-09-18.
+//
+// Nada enxergava, e o motivo é estrutural: o `chamadas-orfas.test.mjs` cobra o
+// sentido INVERSO — toda chamada tem declaração. Faltava este.
+const semComentarioJS = (s) => s.split('\n')
+  .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+const APP_SEM = semComentarioJS(APP);
+
+test('toda função que ESCREVE uma chave de armazenamento é chamada', () => {
+  // Escritora órfã é invisível: a leitura devolve `null`, que é indistinguível
+  // de "ainda não aconteceu". Foi exatamente esse o disfarce aqui.
+  const escritoras = [];
+  const re = /^(?:async )?function ([A-Za-z_$][\w$]*)\s*\(/gm;
+  const marcas = [...APP_SEM.matchAll(re)].map((m) => ({ nome: m[1], i: m.index }));
+  marcas.forEach((m, k) => {
+    const corpo = APP_SEM.slice(m.i, k + 1 < marcas.length ? marcas[k + 1].i : APP_SEM.length);
+    if (/(safeLS\.set|localStorage\.setItem)\(\s*[A-Z][A-Z0-9_]*_KEY/.test(corpo)) escritoras.push(m.nome);
+  });
+  assert.ok(escritoras.length >= 5,
+    `CONTROLE: achei só ${escritoras.length} escritoras de chave — o varredor não está enxergando`);
+  for (const nome of escritoras) {
+    // REFERÊNCIA, não chamada: `addEventListener('click', toggleTheme)` passa a
+    // função sem parênteses e está viva do mesmo jeito. Exigir `nome(` acusava
+    // ela — e guard que acusa código certo é guard que ninguém lê.
+    const refs = (APP_SEM.match(new RegExp('\\b' + nome + '\\b', 'g')) || []).length;
+    assert.ok(refs >= 2,
+      `${nome}() escreve uma chave de armazenamento e NINGUÉM a chama — a leitura correspondente `
+      + 'vai devolver null pra sempre, e null é indistinguível de "ainda não aconteceu"');
+  }
+});
+
+test('o carimbo é feito na carga, ANTES de qualquer saída antecipada', () => {
+  // A posição é load-bearing: o `initApp` tem um `return` no ramo do código de
+  // pareamento na URL, e o `marcarSessaoJaAtiva()` — o irmão dele — só roda
+  // dentro do `if (savedToken)`. Carimbar em qualquer um desses dois lugares
+  // deixaria de fora cargas legítimas, e a idade sairia MENOR que a real:
+  // erro na direção que INVENTA um apagamento que não houve.
+  const init = semComentarioJS(fatiar('initApp'));
+  const iCarimbo = init.indexOf('nascimentoDoArmazenamento()');
+  assert.ok(iCarimbo > 0, 'o carimbo saiu do initApp');
+  const iReturn = init.search(/\n\s+return;/);
+  assert.ok(iReturn > 0, 'CONTROLE: não achei a saída antecipada do initApp — o teste perdeu a âncora');
+  assert.ok(iCarimbo < iReturn,
+    'o carimbo ficou DEPOIS de um `return` do initApp: abrir pelo código de pareamento deixa de carimbar');
+  const jaAtiva = semComentarioJS(fatiar('marcarSessaoJaAtiva'));
+  assert.ok(!/nascimentoDoArmazenamento/.test(jaAtiva),
+    'o carimbo foi parar dentro do marcarSessaoJaAtiva, que tem `return` antecipado e só roda com sessão');
+});
