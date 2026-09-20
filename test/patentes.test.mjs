@@ -317,3 +317,102 @@ test('o dicionário tem o texto do selo nas quatro línguas', () => {
     }
   }
 });
+
+// ── O DESVIO: o ponto LEVA ao que destravou ────────────────────────────────
+//
+// O owner apontou a incoerência olhando a app: desbloquear o Desfazer te leva
+// ao interruptor, com destaque; destravar uma conquista te larga na aba
+// Filtros pra procurar entre 16 células. Os dois anúncios são diferentes de
+// propósito (banner × ponto, decisão dele em 2026-09-16) — o que não podia
+// diferir é o que acontece quando a pessoa ACEITA o convite.
+//
+// O caminho tem TRÊS pontos frágeis, e nenhum deles dá erro quando quebra:
+//   · a condição do ponto duplicada, passando a discordar de pra onde ele leva;
+//   · a ordem (trocar de aba antes do render mata as marcas, medido);
+//   · o alvo: patente NÃO tem célula na grade.
+const semComentariosJS = (txt) => txt.split('\n')
+  .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+test('a condição do ponto tem FONTE ÚNICA — quem acende e quem leva concordam', () => {
+  const t = fatiar('temConquistaNova');
+  assert.match(t, /novas\.length > 0 \|\| g\.patenteNova/,
+    'temConquistaNova parou de considerar as duas origens de novidade');
+  assert.match(t, /AppState\.authenticated/, 'o ponto voltaria a acender deslogado');
+  assert.match(t, /carregarConquistas\(\)/,
+    'passou a ler da memória: quem destravou ontem e fechou a app voltaria sem nada');
+  // Ninguém mais pode remontar a condição à mão.
+  const selo = semComentariosJS(fatiar('atualizarSeloDeConquista'));
+  assert.match(selo, /temConquistaNova\(\)/, 'o selo voltou a calcular a condição por conta própria');
+  assert.ok(!/novas\.length/.test(selo), 'a condição foi duplicada dentro do atualizarSeloDeConquista');
+});
+
+test('o botão de Filtros só desvia COM o ponto aceso', () => {
+  const corpo = semComentariosJS(APP);
+  const m = /filtersBtn'\)\.addEventListener\('click',([\s\S]{0,400}?)\n    \}\);/.exec(corpo);
+  assert.ok(m, 'o handler do #filtersBtn mudou de forma');
+  assert.match(m[1], /if \(temConquistaNova\(\)\) abrirConquistaNova\(\);/,
+    'o desvio saiu, ou deixou de depender do ponto — sem a condição ele sequestra o botão pra sempre');
+  assert.match(m[1], /else openFiltersModal\(\);/,
+    'sem o ramo normal o botão de Filtros deixa de abrir Filtros');
+  // O atalho do PWA é um pedido EXPLÍCITO por Filtros: não pode desviar.
+  const atalho = semComentariosJS(fatiar('handleLaunchAction'));
+  assert.ok(!/abrirConquistaNova/.test(atalho),
+    'o atalho do manifest passou a desviar — ali a pessoa escolheu "Filtros" num menu');
+});
+
+test('a troca de aba acontece DEPOIS do render, e sem esperar a rede', () => {
+  // Os dois lados da mesma linha, e os dois quebram em silêncio:
+  //  · esperar a promise inteira = a tela pisca em Filtros por até 1337ms;
+  //  · trocar de aba antes do renderHistory = as marcas são apagadas pelo
+  //    marcarConquistasVistas e o painel renderiza já sem nada (medido:
+  //    celulasMarcadas 0, tagsNova 0).
+  const h = semComentariosJS(fatiar('abrirModalNaAba'));
+  assert.match(h, /const pendente = openFiltersModal\(\);/,
+    'abrirModalNaAba voltou a dar `await` no modal — a aba só trocaria depois da rede');
+  assert.ok(h.indexOf('openFiltersModal()') < h.indexOf('switchFilterTab('),
+    'a troca de aba passou pra antes da abertura');
+
+  // E a propriedade de que isso DEPENDE, no outro arquivo da dupla: tudo que
+  // importa tem que estar antes do primeiro `await` do openFiltersModal.
+  const o = semComentariosJS(fatiar('openFiltersModal'));
+  const iRender = o.indexOf('renderHistory()');
+  const iModal = o.indexOf("openModal('filtersModal')");
+  const iAwait = o.search(/\n\s+await /);
+  assert.ok(iRender > 0 && iModal > 0 && iAwait > 0, 'não achei as âncoras no openFiltersModal');
+  assert.ok(iRender < iAwait,
+    'entrou um `await` antes do renderHistory: o painel passa a renderizar DEPOIS da troca de aba, já sem as marcas');
+  assert.ok(iModal < iAwait,
+    'entrou um `await` antes do openModal: o modal só abriria depois da rede');
+});
+
+test('o destaque mira na célula E no cartão da patente', () => {
+  const d = semComentariosJS(fatiar('destacarConquistaNova'));
+  assert.match(d, /\.conq-card\.nova[^'"`]*\.conq-cel\.nova/,
+    'o alvo deixou de cobrir os dois: quem só subiu de patente não tem célula na grade');
+  assert.match(d, /getElementById\('filtersPanelHistory'\)/,
+    'o alvo saiu do escopo do painel e pode pegar elemento de fora');
+  assert.match(d, /scrollIntoView/, 'parou de rolar até o alvo — o destaque pode nascer fora da tela');
+  assert.match(d, /prefersReducedMotion\(\)/, 'o pulso deixou de respeitar movimento reduzido');
+  // A rolagem NÃO pode estar atrás do portão de movimento: ela é o que aponta.
+  assert.ok(d.indexOf('scrollIntoView') < d.indexOf('prefersReducedMotion'),
+    'a rolagem ficou atrás do portão de reduced-motion — aí quem prefere menos movimento não é levado a lugar nenhum');
+  assert.match(d, /void el\.offsetWidth/, 'sumiu o reflow: a animação não reinicia na segunda vez');
+});
+
+test('o pulso é só sombra, é âmbar, e o app.css gerado tem ele', () => {
+  const CSS = readFileSync(new URL('../css/styles.css', import.meta.url), 'utf8');
+  const SEM = CSS.replace(/\/\*[\s\S]*?\*\//g, '');   // guard lê código, nunca comentário
+  const kf = SEM.match(/@keyframes\s+conqAlvo\s*\{[\s\S]*?\n\}/);
+  assert.ok(kf, 'os keyframes do pulso sumiram do styles.css');
+  // Só `box-shadow`: célula de grade que muda de tamanho empurra as vizinhas.
+  for (const proibido of ['transform', 'width', 'height', 'margin', 'padding', 'font-size']) {
+    assert.ok(!kf[0].includes(proibido),
+      `o pulso passou a animar ${proibido} — na grade isso mexe as células vizinhas`);
+  }
+  // Mesma cor do conceito "novo" (ponto, contorno e etiqueta são #d97706).
+  assert.match(kf[0], /217,\s*119,\s*6/,
+    'o pulso mudou de cor: a régua da casa é mesmo conceito, mesma cor');
+  const APPCSS = readFileSync(new URL('../css/app.css', import.meta.url), 'utf8');
+  assert.match(APPCSS, /conqAlvo/,
+    'o app.css gerado não tem o pulso — falta rodar `npm run css`');
+});

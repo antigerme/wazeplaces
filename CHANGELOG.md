@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.20-04
+
+### Melhorado
+- **O ponto no botão de Filtros agora te leva ao que você destravou.** Antes ele avisava que havia conquista nova e, ao tocar, abria o modal na aba **Filtros** — você tinha que perceber que existem abas, adivinhar qual, e achar a célula marcada entre 16. Agora o toque abre direto no **Histórico**, rolado até a novidade, com ela piscando. É o mesmo comportamento que o aviso de desbloqueio do Desfazer sempre teve.
+- Vale para **conquista e para patente** (que não tem célula na vitrine, e por isso ficava sem alvo), e para **várias de uma vez** — todas piscam, e a rolagem para na primeira.
+- **Acontece uma vez por novidade.** Abrir a aba apaga o ponto, então o toque seguinte abre Filtros normalmente. E o atalho "Filtros" do ícone da app (segurar o ícone) nunca desvia: ali você pediu Filtros explicitamente.
+- Quem usa **movimento reduzido** continua sendo levado à aba certa e rolado até o alvo — só não vê o pulso.
+
+### Corrigido
+- **O aviso do Desfazer não pisca mais na aba errada antes de trocar.** Ele esperava a lista de países chegar do Waze antes de ir para Preferências — em rede ruim isso era mais de um segundo olhando a aba Filtros, e só então a tela saltava. Agora troca na hora, sem esperar rede.
+
 ## v2026.09.20-03
 
 ### Alterado

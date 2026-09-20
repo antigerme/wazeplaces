@@ -4946,6 +4946,131 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── O PONTO LEVA AO QUE DESTRAVOU ──────────────────────────────────────────
+//
+// O owner apontou a incoerência olhando a app: o aviso do Desfazer te leva ao
+// interruptor com destaque, e o ponto da conquista te largava na aba Filtros
+// pra procurar entre 16 células.
+//
+// Os guards de `test/patentes.test.mjs` leem a FONTE — que a condição tem fonte
+// única, que a ordem está certa, que o alvo cobre os dois casos. O que só o
+// navegador responde é se a tela concorda, e em particular UMA coisa que não se
+// lê de código nenhum: **em que quadro** a aba troca. O `openFiltersModal`
+// termina numa chamada de rede, e esperar por ela deixaria o editor olhando a
+// aba Filtros por até 1337ms antes de a tela saltar. Por isso a rede LENTA é um
+// cenário aqui, e não uma nota de rodapé.
+{
+  const CENARIOS = [
+    // Rede boa e rede LENTA medem a MESMA coisa de propósito: a segunda é a que
+    // denuncia um `await` no lugar errado, e a primeira é o controle dela.
+    { id: 'conquista/rede boa',  novas: ['maoFirme'], patente: false, lento: 0,    reduzida: false, desvia: true },
+    { id: 'conquista/rede 1,4s', novas: ['maoFirme'], patente: false, lento: 1400, reduzida: false, desvia: true },
+    { id: 'conquista/três',      novas: ['maoFirme', 'coruja', 'detetive'], patente: false, lento: 0, reduzida: false, desvia: true },
+    { id: 'conquista/só patente', novas: [],          patente: true,  lento: 0,    reduzida: false, desvia: true },
+    { id: 'conquista/reduced',   novas: ['maoFirme'], patente: false, lento: 0,    reduzida: true,  desvia: true },
+    // CONTROLE: sem novidade o botão tem que fazer o que promete. Sem ele,
+    // "foi pro Histórico" passaria mesmo se o desvio fosse incondicional — que
+    // é justamente o defeito de sequestrar o botão pra sempre.
+    { id: 'conquista/CONTROLE sem novidade', novas: [], patente: false, lento: 0, reduzida: false, desvia: false },
+  ];
+
+  for (const c of CENARIOS) {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 },
+      serviceWorkers: 'block', locale: 'pt-BR',
+      reducedMotion: c.reduzida ? 'reduce' : 'no-preference' });
+    const page = await ctx.newPage();
+    const errosJS = [];
+    page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
+    await page.route('**/api/**', async (r) => {
+      if (c.lento) await dormir(c.lento);
+      r.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ success: true, countries: [{ id: 30, name: 'Brazil' }] }) });
+    });
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ novas, patente }) => {
+      localStorage.setItem('waze_session_token', 't');
+      // `tudoLimpo` entra como JÁ GANHA de propósito: a API deste bloco devolve
+      // fila vazia, o que destrava "Tudo limpo!" de verdade e reacende o ponto
+      // no meio da medição. Aconteceu, e por 20 minutos pareceu defeito do
+      // recurso (gotcha #28 — a fixture produzindo o achado).
+      const g = { primeiraFaxina: '2026-09-01', centuriao: '2026-09-05', tudoLimpo: '2026-09-06' };
+      for (const id of novas) g[id] = '2026-09-20';
+      localStorage.setItem('waze_places_conquistas', JSON.stringify({ c: g, seq: 1,
+        patente: 2, n: {}, langs: ['pt'], base: true, novas, patenteNova: patente }));
+    }, { novas: c.novas, patente: c.patente });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      if (window.API && API.setSession) API.setSession('t', 'cookies');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.stats = { read: 100, rejected: 50, skipped: 0 };
+      AppState.serverTotal = 10; AppState.hasMore = false;
+      AppState.countries = []; AppState.statesByCountry = {};
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+      atualizarSeloDeConquista();
+    });
+    await page.waitForTimeout(150);
+
+    const aba = () => page.evaluate(() => ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory']
+      .find((id) => document.getElementById(id).getAttribute('aria-selected') === 'true'));
+    const pontoAceso = () => page.evaluate(() =>
+      !document.getElementById('conqSelo').classList.contains('hidden'));
+
+    checa(await pontoAceso() === c.desvia,
+      `${c.id}: CONTROLE falhou — o ponto não está no estado esperado antes do toque, então nada abaixo prova nada`);
+
+    // CLIQUE de verdade no botão, não a função chamada à mão: o que está em
+    // jogo é o ROTEAMENTO, e chamar a função pula exatamente a parte medida.
+    await page.evaluate(() => document.getElementById('filtersBtn').click());
+    // No PRIMEIRO quadro: é aqui que um `await` no lugar errado apareceria.
+    const q1 = await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => ok({
+      aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory']
+        .find((id) => document.getElementById(id).getAttribute('aria-selected') === 'true'),
+      modal: !document.getElementById('filtersModal').classList.contains('hidden'),
+      marcados: document.querySelectorAll('#filtersPanelHistory .conq-cel.nova, #filtersPanelHistory .conq-card.nova').length,
+      pulsando: document.querySelectorAll('.conq-alvo').length,
+    }))));
+
+    checa(q1.modal, `${c.id}: o modal não abriu no primeiro quadro`);
+    if (c.desvia) {
+      checa(q1.aba === 'filtersTabHistory',
+        `${c.id}: no primeiro quadro a aba era ${q1.aba} — com rede lenta isso é o editor olhando a aba errada por mais de um segundo antes de a tela saltar`);
+      checa(q1.marcados >= 1,
+        `${c.id}: nenhuma marca no painel — a troca de aba apagou as novas ANTES do render, e a pessoa chega numa vitrine sem nada destacado`);
+      checa(c.reduzida ? q1.pulsando === 0 : q1.pulsando === q1.marcados,
+        `${c.id}: pulso em ${q1.pulsando} de ${q1.marcados} marcados (reduced-motion: ${c.reduzida})`);
+      // o alvo precisa estar VISÍVEL dentro do painel, não só existir
+      const naTela = await page.evaluate(() => {
+        const alvo = document.querySelector('#filtersPanelHistory .conq-card.nova, #filtersPanelHistory .conq-cel.nova');
+        const pain = document.getElementById('filtersPanelHistory');
+        if (!alvo || !pain) return null;
+        const r = alvo.getBoundingClientRect(), p = pain.getBoundingClientRect();
+        return r.top >= p.top - 1 && r.bottom <= p.bottom + 1;
+      });
+      checa(naTela === true, `${c.id}: o alvo ficou FORA da área visível do painel — destacar o que não está na tela não aponta nada`);
+      checa(await pontoAceso() === false,
+        `${c.id}: o ponto continuou aceso depois de a aba abrir`);
+    } else {
+      checa(q1.aba === 'filtersTabFilters',
+        `${c.id}: sem novidade nenhuma o botão desviou assim mesmo — aí ele sequestra Filtros pra sempre`);
+    }
+
+    // Segunda abertura: tem que voltar a ser o botão de Filtros de sempre.
+    await page.evaluate(() => closeModal('filtersModal'));
+    await page.waitForTimeout(250);
+    await page.evaluate(() => document.getElementById('filtersBtn').click());
+    await page.waitForTimeout(c.lento ? c.lento + 300 : 350);
+    checa(await aba() === 'filtersTabFilters',
+      `${c.id}: a SEGUNDA abertura ainda desvia — o desvio tem que valer uma vez por conquista`);
+
+    checa(errosJS.length === 0, `${c.id}: erro de JS`, errosJS[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -4992,6 +5117,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
+  + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
