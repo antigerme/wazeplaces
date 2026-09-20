@@ -144,29 +144,12 @@ body.dark {
   transition: none;
 }
 
-.place-card.swipe-out-left {
-  animation: swipeOutLeft 0.3s ease forwards;
-}
-
-.place-card.swipe-out-right {
-  animation: swipeOutRight 0.3s ease forwards;
-}
-
-.place-card.swipe-out-up {
-  animation: swipeOutUp 0.3s ease forwards;
-}
-
-@keyframes swipeOutLeft {
-  to { transform: translateX(-150%) rotate(-30deg); opacity: 0; }
-}
-
-@keyframes swipeOutRight {
-  to { transform: translateX(150%) rotate(30deg); opacity: 0; }
-}
-
-@keyframes swipeOutUp {
-  to { transform: translateY(-150%) scale(0.8); opacity: 0; }
-}
+/* As classes `.swipe-out-*` e seus três keyframes viviam aqui e eram CÓDIGO
+   MORTO — nenhum arquivo de `js/` as usava. Quem anima a saída é o
+   `animateSwipeOut` do swipe.js, escrevendo `style.transition`/`style.transform`
+   INLINE (0.35s na horizontal, 0.3s pra cima). Elas chegaram a me enganar
+   numa medição: procurei a classe pra saber qual card estava saindo, não achei
+   nenhuma, e conclui que o gesto não tinha commitado — quando tinha. */
 
 .swipe-indicator {
   pointer-events: none;
@@ -221,13 +204,43 @@ body.dark {
    (o mesmo estado final), então nada sobrescreve o arraste depois. Durante a
    animação, quem sobrescreve seria a animação — por isso o swipe.js remove
    esta classe no início do arraste. */
+/* ── Entrada do card: SÓ FADE, e nada mais ──────────────────────────────────
+   Decisão do owner (2026-09-20), olhando a app: "o próximo card não pode
+   nascer com efeito nenhum". Ele ficou com o fade pra avaliar em uso real, com
+   os testadores.
+
+   O que saiu, e o que cada coisa custava — MEDIDO no DOM, quadro a quadro,
+   depois de ele apontar que o incômodo era o card "sair de um tamanho menor
+   para maior":
+     · escala 0.94 → 1  ......  o card CRESCIA 24px de largura (339 → 363px)
+     · mola (bezier 1.56) ....  PASSAVA do destino: 363,1px contra 361px finais,
+                                e o topo subia 5px além do lugar antes de voltar
+     · os dois juntos ........  233ms de card mexendo na frente de quem já está
+                                decidindo o próximo
+   Só o fade: 0px de movimento, 0px de variação de tamanho. */
 .card-enter {
-  animation: cardEnter 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: cardEnter 0.14s linear;
 }
 
 @keyframes cardEnter {
-  from { transform: translateY(26px) scale(0.94); opacity: 0; }
-  to   { transform: translateY(0) scale(1); opacity: 1; }
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* O card de fundo SOME enquanto o da frente entra, e isto não é detalhe: o
+   fade deixa o card da frente TRANSLÚCIDO, e com a pilha existe outro card
+   inteiro atrás dele. MEDIDO no pixel da foto, com o card que entra laranja e
+   o de baixo roxo: no pior quadro a tela devolvia (36,20,81) — ROXO, ou seja o
+   card de BAIXO —, e dava pra ler os dois nomes sobrepostos por ~150ms. Era o
+   que lia como "a app travou pra carregar o de baixo".
+
+   Antes da pilha isso não existia: o card entrava translúcido sobre o fundo da
+   página, e não havia o que atravessar. O defeito nasceu do PAR, não do fade.
+
+   `visibility` e não `display`: o card de fundo já está montado e medido, e
+   trocar o display forçaria refluxo no meio da animação. */
+.card-enter ~ .card-fundo {
+  visibility: hidden;
 }
 
 /* ── Comemoração do "Tudo limpo!" ───────────────────────────────────────────
@@ -1406,6 +1419,14 @@ button:active {
   .card-enter,
   .celebrate .empty-badge {
     animation: none;
+  }
+  /* SEM ISTO a pilha some da app pra quem prefere menos movimento. Com
+     `animation: none` o `animationend` NUNCA dispara, então a classe
+     `.card-enter` nunca sai do card — e é ela que esconde o card de fundo.
+     O esconderijo só existe por causa do fade; sem fade não há o que
+     esconder. */
+  .card-enter ~ .card-fundo {
+    visibility: visible;
   }
   /* O selo NÃO entra aqui de propósito: ele é informação (qual gesto você está
      fazendo), não enfeite — e a escala acompanha o dedo, que é manipulação

@@ -4811,6 +4811,102 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── ENTRADA DO CARD: só fade, e o de baixo não atravessa ────────────────────
+//
+// Decisão do owner (2026-09-20): o próximo card não nasce com efeito de
+// movimento. Ficou o fade, pra avaliação em uso real.
+//
+// Os guards de `test/pilha.test.mjs` leem o CSS. O que só o navegador responde:
+// se o card de fato NÃO se mexe, e se durante o fade a tela mostra o card de
+// BAIXO — que foi o defeito medido (3 quadros com a foto do pedido errado, e
+// os dois nomes legíveis ao mesmo tempo).
+{
+  for (const reduzida of [false, true]) {
+    const id = `entrada/${reduzida ? 'reduced-motion' : 'movimento normal'}`;
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 },
+      serviceWorkers: 'block', locale: 'pt-BR',
+      reducedMotion: reduzida ? 'reduce' : 'no-preference' });
+    const page = await ctx.newPage();
+    const errosJS = [];
+    page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
+    await page.route('**/api/**', (r) => r.fulfill({ status: 200,
+      contentType: 'application/json', body: JSON.stringify({ success: true }) }));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(300);
+
+    const CARDS_ENT = Object.entries(CARDS).slice(0, 3).map(([, p]) => p);
+    await page.evaluate(({ fila }) => {
+      localStorage.setItem('waze_session_token', 't');
+      if (window.API && API.setSession) API.setSession('t', 'cookies');
+      AppState.authenticated = true;
+      // Desfazer DESLIGADO de verdade: a preferência sozinha não basta, o
+      // canDisableUndo() também exige a cota.
+      AppState.stats = { read: 200, rejected: 200, skipped: 0 };
+      AppState.preferences = Object.assign({}, AppState.preferences,
+        { undoEnabled: false, undoGateSeen: true, dicaDesfazerVista: true });
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = fila.length; AppState.hasMore = false;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      AppState.queue = fila.slice(); AppState.currentPlace = null; showCurrentPlace();
+    }, { fila: CARDS_ENT });
+    await assentar(page);
+
+    const m = await page.evaluate(async () => {
+      const frente = () => document.querySelector('#cardStack .place-card:not(.card-fundo)');
+      const out = []; const t0 = performance.now();
+      document.querySelector('.card-btn-reject').click();
+      await new Promise((ok) => {
+        const passo = () => {
+          const c = frente();
+          if (c) {
+            const b = c.getBoundingClientRect();
+            const f = document.querySelector('#cardStack .card-fundo');
+            out.push({ ms: Math.round(performance.now() - t0), top: b.top, w: b.width,
+                       op: +getComputedStyle(c).opacity,
+                       fundo: f ? getComputedStyle(f).visibility : 'sem fundo' });
+          }
+          if (performance.now() - t0 < 1400) requestAnimationFrame(passo); else ok();
+        };
+        requestAnimationFrame(passo);
+      });
+      // só o card NOVO: o antigo sai por volta dos 370ms
+      const s = out.filter((x) => x.ms >= 372);
+      const fim = s[s.length - 1];
+      return {
+        n: s.length,
+        moveu: +Math.max(...s.map((x) => Math.abs(x.top - fim.top))).toFixed(1),
+        tamanho: +(Math.max(...s.map((x) => x.w)) - Math.min(...s.map((x) => x.w))).toFixed(1),
+        opMin: +Math.min(...s.map((x) => x.op)).toFixed(2),
+        escondeu: s.some((x) => x.fundo === 'hidden'),
+        fundoNoFim: fim.fundo,
+      };
+    });
+
+    checa(m.n > 5, `${id}: CONTROLE falhou — quase nenhuma amostra do card novo, o resto não prova nada`, JSON.stringify(m));
+    checa(m.moveu === 0, `${id}: o card NOVO se moveu ${m.moveu}px ao entrar — ele tem que nascer no lugar`);
+    checa(m.tamanho === 0, `${id}: o card NOVO mudou de tamanho ${m.tamanho}px ao entrar — foi exatamente isto que o owner pediu pra tirar`);
+    checa(m.fundoNoFim !== 'hidden',
+      `${id}: o card de fundo ficou ESCONDIDO no fim — a classe da entrada não saiu, e a pilha some da app`);
+
+    if (!reduzida) {
+      checa(m.opMin < 1, `${id}: não há fade nenhum — a entrada escolhida foi o fade`);
+      checa(m.escondeu, `${id}: o card de fundo NÃO foi escondido durante o fade — ele volta a aparecer ATRAVÉS do card que entra`);
+    } else {
+      // CONTRAPROVA: com reduced-motion não há fade, então também não há o que
+      // esconder. Sem esta metade, "escondeu = false" acima passaria por motivo
+      // errado e ninguém perceberia.
+      checa(m.opMin === 1, `${id}: ainda há fade com prefers-reduced-motion`);
+      checa(!m.escondeu, `${id}: escondeu o card de fundo sem haver fade — esconder sem motivo é a pilha piscando à toa`);
+    }
+    checa(errosJS.length === 0, `${id}: erro de JS`, errosJS[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -4857,5 +4953,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
+  + `, + entrada do card (só fade: zero movimento e zero mudança de tamanho medidos no DOM, card de fundo escondido durante o fade e de volta no fim, com contraprova em reduced-motion)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

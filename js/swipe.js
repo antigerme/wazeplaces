@@ -15,6 +15,26 @@ let animating = false;
 // Velocidade mínima (px/ms) pra comitar um flick mesmo abaixo do
 // threshold de distância. ~0.6px/ms ≈ 600px/s, na faixa que M3 usa
 // pra distinguir fling de drag.
+// Duração do tique no aparelho quando o gesto vira ação. Era 12ms; o owner
+// baixou pra 8 depois de comparar 12, 10 e 8 no celular dele — foi ele quem
+// levantou que 12 parecia longo demais, e é dele a decisão.
+//
+// Três coisas a saber antes de mexer nisto de novo:
+//  · É o sinal MAIS FREQUENTE da app: um por pedido tratado, e a fila real do
+//    owner tem centenas. O que passa despercebido num toque isolado vira
+//    presença constante no ritmo do swipe.
+//  · Só existe no ANDROID. O Safari do iPhone não implementa a Vibration API,
+//    e o `if (navigator.vibrate)` acima é o que faz isso degradar calado.
+//  · Muitos motores têm tempo MÍNIMO de acionamento e achatam qualquer pulso
+//    muito curto, então a diferença entre 8 e 12 não se prevê pela tabela: se
+//    for mexer, meça no aparelho, às cegas — saber o número enfeita a
+//    percepção. O Chromium do sandbox não tem motor nenhum.
+//
+// A outra `navigator.vibrate` da app (o "peguei" do FAB do modo dev, em
+// app.js) NÃO é esta e segue em 12ms de propósito: ela marca outro conceito —
+// "agarrei o botão" — e acontece uma vez a cada muitas sessões.
+const VIBRACAO_COMMIT_MS = 8;
+
 const FLICK_VELOCITY = 0.6;
 const FLICK_MIN_DISTANCE = 40;
 
@@ -192,7 +212,7 @@ function animateSwipeOut(direction, callback) {
     animating = true;
 
     // Feedback tátil no commit (Android; iOS ignora silenciosamente)
-    if (navigator.vibrate) navigator.vibrate(12);
+    if (navigator.vibrate) navigator.vibrate(VIBRACAO_COMMIT_MS);
 
     if (direction === 'up') {
         card.style.transition = 'transform 0.3s ease, opacity 0.3s ease';

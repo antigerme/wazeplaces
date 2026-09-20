@@ -218,3 +218,124 @@ test('o véu chega ao css/app.css, que é o que a app carrega', () => {
   assert.match(APPCSS, /rgba\(2,\s*6,\s*23,\s*\.?0?\.35\)/,
     'a opacidade do véu no app.css gerado não é a mesma do styles.css');
 });
+
+// ── 6. A ENTRADA DO CARD ───────────────────────────────────────────────────
+//
+// Decisão do owner (2026-09-20), olhando a app rodar: "o próximo card não pode
+// nascer com efeito nenhum". Ele ficou com o fade pra avaliar em uso real.
+//
+// O que saiu foi MEDIDO no DOM depois de ele apontar que o incômodo era o card
+// "sair de um tamanho menor para maior": a escala fazia o card CRESCER 24px
+// (339 → 363px) e a mola (bezier 1.56) ainda o levava 2px ALÉM do tamanho
+// final antes de voltar — 233ms de card mexendo na frente de quem já está
+// decidindo o próximo.
+test('a entrada do card anima SÓ opacidade — nada de mover nem redimensionar', () => {
+  const regra = SEM_COMENTARIO.match(/\.card-enter\s*\{[^}]*\}/);
+  assert.ok(regra, 'a regra .card-enter sumiu do styles.css');
+  const nome = /animation:\s*([A-Za-z_$][\w$-]*)/.exec(regra[0]);
+  assert.ok(nome, 'a .card-enter deixou de declarar uma animação');
+  const kf = SEM_COMENTARIO.match(new RegExp('@keyframes\\s+' + nome[1] + '\\s*\\{[\\s\\S]*?\\n\\}'));
+  assert.ok(kf, `os keyframes de ${nome[1]} sumiram`);
+  assert.ok(!/transform/.test(kf[0]),
+    'a entrada do card voltou a animar TRANSFORM — o card volta a se mexer ou a mudar de tamanho na entrada, que é exatamente o que o owner pediu pra tirar');
+  assert.match(kf[0], /opacity/, 'a entrada deixou de ter o fade que foi escolhido');
+});
+
+test('o card de fundo some enquanto o da frente entra', () => {
+  // O fade deixa o card da frente TRANSLÚCIDO, e com a pilha existe um card
+  // inteiro atrás. MEDIDO no pixel: sem esta regra, 3 quadros mostravam a foto
+  // do card de BAIXO no lugar da do que entra, e dava pra ler os dois nomes
+  // sobrepostos. Com ela, o que aparece é o fundo da página — como era antes
+  // de a pilha existir.
+  assert.match(SEM_COMENTARIO, /\.card-enter\s*~\s*\.card-fundo\s*\{[^}]*visibility:\s*hidden/,
+    'saiu a regra que esconde o card de fundo durante o fade — o card de baixo volta a aparecer ATRAVÉS do que está entrando');
+});
+
+test('a pilha NÃO some para quem prefere menos movimento', () => {
+  // `animation: none` não dispara `animationend`, então a classe `.card-enter`
+  // ficaria pendurada pra sempre — e é ela que esconde o card de fundo.
+  const rm = CSS.match(/@media\s*\(prefers-reduced-motion[^)]*\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(rm, 'o bloco de prefers-reduced-motion sumiu do styles.css');
+  assert.match(rm[0], /\.card-enter\s*~\s*\.card-fundo\s*\{[^}]*visibility:\s*visible/,
+    'sem esta linha a pilha some da app inteira para quem usa reduced-motion, e sem erro nenhum');
+});
+
+test('a classe da entrada sai de qualquer jeito', () => {
+  const f = semComentarioJS(fatiar(APP, 'renderCurrentCard'));
+  assert.match(f, /addEventListener\('animationend'/,
+    'a classe .card-enter deixou de ser removida no fim da animação');
+  assert.match(f, /setTimeout\(tirarEntrada/,
+    'sumiu o teto que tira a classe mesmo sem animationend — classe pendurada esconde o card de fundo pra sempre');
+  // O teto NÃO pode ser a duração da animação copiada: número duplicado em dois
+  // arquivos é como eles divergem (a lição do UNDO_WINDOW_MS no doc).
+  const teto = /const ENTRADA_TETO_MS = (\d+);/.exec(APP);
+  assert.ok(teto, 'a constante do teto sumiu');
+  const dur = /\.card-enter\s*\{[^}]*animation:[^;]*?([\d.]+)s/.exec(SEM_COMENTARIO);
+  assert.ok(dur, 'não consegui ler a duração da animação no CSS');
+  assert.ok(+teto[1] > +dur[1] * 1000,
+    `o teto (${teto[1]}ms) não é maior que a animação (${+dur[1]*1000}ms) — ele cortaria o fade no meio`);
+});
+
+test('o CSS morto da saída não voltou', () => {
+  // `.swipe-out-left/right/up` e seus keyframes existiram por muito tempo sem
+  // NENHUM uso: quem anima a saída é o `animateSwipeOut`, escrevendo estilo
+  // inline. Elas chegaram a me enganar numa medição — procurei a classe pra
+  // saber qual card estava saindo, não achei, e conclui que o gesto não tinha
+  // commitado quando tinha.
+  assert.ok(!/\.swipe-out-(left|right|up)\s*\{/.test(SEM_COMENTARIO),
+    'as classes .swipe-out-* voltaram ao CSS sem nenhum uso em js/');
+  const usos = [APP, SWIPE].map(semComentarioJS).join('\n');
+  assert.ok(!/swipe-out-/.test(usos),
+    'algum arquivo passou a usar .swipe-out-* — então o CSS precisa voltar junto');
+});
+
+test('o app.css gerado carrega a entrada nova', () => {
+  assert.match(APPCSS, /\.card-enter~\.card-fundo\{[^}]*visibility:hidden/,
+    'o app.css gerado não tem a regra que esconde o card de fundo — falta `npm run css`');
+  assert.ok(!/swipeOut(Left|Right|Up)/.test(APPCSS),
+    'o app.css gerado ainda tem os keyframes mortos da saída');
+});
+
+// ── 7. O TIQUE NO APARELHO ─────────────────────────────────────────────────
+//
+// É o sinal MAIS FREQUENTE da app — um por pedido tratado, e a fila real tem
+// centenas. O owner baixou de 12 pra 8ms depois de comparar no celular dele.
+//
+// O guard NÃO trava o número (isso seria só detector de mudança): trava o que
+// pode quebrar sem ninguém ver — que ele saia de UMA constante nomeada, que
+// dispare no caminho do COMMIT e que degrade calado onde a API não existe.
+test('o tique do commit sai de uma constante, não de um número solto', () => {
+  const f = semComentarioJS(fatiar(SWIPE, 'animateSwipeOut'));
+  assert.match(f, /navigator\.vibrate\(VIBRACAO_COMMIT_MS\)/,
+    'o tique voltou a ser um número escrito na linha — e aí a próxima pessoa muda sem achar o porquê, que está no comentário da constante');
+  assert.match(f, /if \(navigator\.vibrate\)/,
+    'sumiu a guarda de suporte: no Safari do iPhone `navigator.vibrate` não existe e isto passa a LANÇAR no meio do gesto');
+  const c = /const VIBRACAO_COMMIT_MS = (\d+);/.exec(SWIPE);
+  assert.ok(c, 'a constante do tique sumiu do swipe.js');
+  // Faixa de sanidade, não o valor: acima disso deixa de ser tique e vira
+  // zumbido, num sinal que se repete centenas de vezes por fila.
+  assert.ok(+c[1] > 0 && +c[1] <= 40,
+    `o tique está em ${c[1]}ms — fora da faixa de um toque seco`);
+});
+
+test('o tique dispara UMA vez, e só no commit', () => {
+  const f = semComentarioJS(fatiar(SWIPE, 'animateSwipeOut'));
+  assert.equal((f.match(/navigator\.vibrate\(/g) || []).length, 1,
+    'mais de uma chamada de vibração no mesmo commit — o editor sentiria um tique duplo por pedido');
+  // O `handleDragEnd` NÃO pode vibrar por conta própria: ele é quem decide
+  // entre commitar e devolver o card ao lugar, e vibrar lá faria o gesto que
+  // NÃO trata nada avisar que tratou.
+  const fim = semComentarioJS(fatiar(SWIPE, 'handleDragEnd'));
+  assert.ok(!/navigator\.vibrate/.test(fim),
+    'o handleDragEnd passou a vibrar — o arraste que volta ao lugar não confirmou nada e não pode avisar que sim');
+});
+
+test('o tique do FAB do modo dev é OUTRO, e segue separado', () => {
+  // Conceitos diferentes podem ter durações diferentes: "confirmei um pedido"
+  // acontece centenas de vezes por fila; "agarrei o botão" acontece uma vez a
+  // cada muitas sessões. O que não pode é um puxar o outro sem querer.
+  assert.ok(!/VIBRACAO_COMMIT_MS/.test(APP),
+    'o app.js passou a usar a constante do commit — se for pra compartilhar, que seja uma decisão escrita, não um reuso silencioso');
+  assert.match(semComentarioJS(APP), /navigator\.vibrate && navigator\.vibrate\(\d+\)/,
+    'o aviso tátil do FAB do modo dev sumiu');
+});
