@@ -63,9 +63,26 @@ async function carregarPlaywright() {
 // No runner do GitHub o Chrome já vem instalado — usar o canal evita baixar
 // ~150MB de Chromium a cada run. No sandbox de dev usamos o Chromium do
 // PLAYWRIGHT_BROWSERS_PATH. Se nenhum abrir, o erro sobe (não silencia).
+// TIMER DE PÁGINA EM SEGUNDO PLANO É ESTRANGULADO, e isso derruba teste que
+// avança por `setTimeout` em cadeia. HIPÓTESE, não medição: o bloco da fila de
+// saída reprovou DUAS vezes no CI parando sempre depois de 1–2 itens — e ele
+// avança 400ms por item —, sem reproduzir aqui nem com CPU 8× mais lenta. O
+// runner abre muitos contextos e a página pode ficar em segundo plano; nessa
+// condição o Chromium adia timers agressivamente e 8 itens não cabem na janela
+// de 40s do teste. Os três flags são o desligamento padrão disso e não afrouxam
+// asserção nenhuma. Se a próxima rodada continuar vermelha, o diagnóstico que
+// o bloco agora imprime diz o motivo real — é ele, e não estes flags, que
+// fecha a questão.
+const ARGS_SEM_ESTRANGULAR = [
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
+];
+
 async function abrirBrowser(chromium) {
   const erros = [];
-  for (const opcoes of [{}, { channel: 'chrome' }, { channel: 'chromium' }]) {
+  for (const base of [{}, { channel: 'chrome' }, { channel: 'chromium' }]) {
+    const opcoes = { ...base, args: ARGS_SEM_ESTRANGULAR };
     try {
       return await chromium.launch(opcoes);
     } catch (e) {
@@ -5250,6 +5267,24 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       null, { timeout: 40000 }).catch(() => {});
     await dormir(500);
     const fim = await estado();
+    // DIAGNÓSTICO sempre impresso, não só na falha: este bloco reprovou no CI
+    // duas vezes com "restam 6 / 2 requisições" e NÃO reproduz aqui — nem com
+    // CPU 8× mais lenta, nem com a mesma sequência de recarga. Sem saber por
+    // que o laço termina, qualquer conserto é chute. O diário do `dfato` diz
+    // exatamente isso: `saida.saiu` traz quantas saíram, `saida.erro` denuncia
+    // exceção no laço, e a ausência dos dois significa que ele nem terminou.
+    const diag = await page.evaluate(() => ({
+      diario: (typeof dfatoAnel !== 'undefined' ? dfatoAnel : [])
+        .filter((e) => String(e.k).startsWith('saida')).slice(-6),
+      auth: AppState.authenticated,
+      emVoo: AppState.inFlightActions,
+      travado: typeof acoesTravadas === 'function' ? acoesTravadas() : null,
+      pend: !!AppState.pendingAction,
+      online: navigator.onLine,
+    }));
+    console.log(`  · ${c.id} [diagnóstico] restam=${fim.saida} envios=${enviosDeAcao.length} `
+      + `auth=${diag.auth} emVoo=${diag.emVoo} travado=${diag.travado} pend=${diag.pend} `
+      + `online=${diag.online} diario=${JSON.stringify(diag.diario)}`);
     const gaps = enviosDeAcao.slice(1).map((t, i) => t - enviosDeAcao[i]).sort((a, b) => a - b);
     const mediana = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
     checa(fim.saida === 0, `${c.id}: a fila não esvaziou (restam ${fim.saida})`);
