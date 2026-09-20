@@ -686,7 +686,21 @@ function setupAppListeners() {
         });
     }
     $('themeBtn').addEventListener('click', toggleTheme);
-    $('filtersBtn').addEventListener('click', openFiltersModal);
+    $('filtersBtn').addEventListener('click', () => {
+        // O ponto aceso é o MOTIVO do toque: leva direto ao que destravou, como
+        // o aviso do Desfazer já fazia. Sem ponto, o botão faz o que promete.
+        //
+        // Isso acontece NO MÁXIMO uma vez por conquista, e por CONSTRUÇÃO, não
+        // por regra escrita: abrir a aba Histórico apaga o ponto (o
+        // `marcarConquistasVistas` do `switchFilterTab`), então o próximo toque
+        // já cai em Filtros. Medido com a app de pé, não deduzido — eu cheguei a
+        // recusar este desvio achando que ele se repetiria por dias.
+        //
+        // O atalho do PWA (`/?action=filters`) NÃO passa por aqui de propósito:
+        // ali a pessoa escolheu "Filtros" num menu, e o pedido é explícito.
+        if (temConquistaNova()) abrirConquistaNova();
+        else openFiltersModal();
+    });
 
     // Clique no scrim fecha o modal (padrão M3/HIG pra diálogos dispensáveis)
     MODAL_IDS.forEach(id => {
@@ -7966,15 +7980,25 @@ function checarConquistas(extra) {
 // conquista não é caixa de entrada. Mesmo desenho da pílula da presença
 // ("badged icon button" do M3), que já mede 44px e não custa layout: ele mora
 // SOBRE o ícone.
+// Há algo destravado que a pessoa ainda não viu? FONTE ÚNICA da pergunta:
+// quem ACENDE o ponto e quem decide PRA ONDE o botão leva precisam concordar
+// sempre — duas cópias da condição é como elas passam a discordar, e aí o
+// ponto aparece levando pra lugar nenhum (ou some levando pra algum).
+//
+// Lê do ARMAZENAMENTO, não do que estiver em memória: quem destravou ontem e
+// fechou a app voltaria sem nada até o primeiro swipe. Deslogado não carrega
+// nada — isto é estado de quem entrou.
+function temConquistaNova() {
+    if (!AppState.authenticated) return false;
+    const g = carregarConquistas();
+    return !!g && (g.novas.length > 0 || g.patenteNova);
+}
+
 function atualizarSeloDeConquista() {
     const btn = document.getElementById('filtersBtn');
     const selo = document.getElementById('conqSelo');
     if (!btn || !selo) return;
-    // Lê do armazenamento, não do que estiver em memória: quem destravou ontem
-    // e fechou a app voltaria sem selo até o primeiro swipe. Deslogado não
-    // carrega nada — o selo é estado de quem entrou.
-    const g = AppState.authenticated ? carregarConquistas() : null;
-    const tem = !!g && (g.novas.length > 0 || g.patenteNova);
+    const tem = temConquistaNova();
     selo.classList.toggle('hidden', !tem);
     // O ponto é `aria-hidden`: quem não enxerga precisa da informação no NOME
     // do botão, senão o selo não existe pra leitor de tela nenhum.
@@ -10545,16 +10569,87 @@ function dispararConfeteNaFila() {
     setTimeout(() => burst.remove(), 2200);
 }
 
+// Abre o modal JÁ na aba pedida, sem esperar a rede.
+//
+// `openFiltersModal` termina com `await popularPaisEstado()`, que vai ao Waze.
+// Esperar a promise INTEIRA antes de trocar de aba deixava o editor olhando a
+// aba Filtros por 480ms em rede boa e 1337ms em rede ruim (os números estão
+// medidos no comentário de lá) — e só então a tela saltava pra outra aba. Era
+// o que o caminho do Desfazer fazia; hoje os dois passam por aqui.
+//
+// Não esperar é seguro por razão ESTRUTURAL, não por sorte: tudo que importa
+// pra este desvio — `renderHistory()` e o `openModal()` — é SÍNCRONO e roda
+// ANTES do primeiro `await` da função. Chamar sem `await` executa esse trecho
+// inteiro no mesmo tick, então a troca de aba acontece antes de qualquer
+// pintura e ninguém vê a aba errada.
+//
+// `test/patentes.test.mjs` cobra essa ordem. Um `await` novo enfiado antes do
+// `renderHistory()` quebraria isto EM SILÊNCIO — e de um jeito pior que a
+// piscada: a aba Histórico apaga as marcas ao abrir (`marcarConquistasVistas`),
+// então o painel renderizaria DEPOIS, já sem nada marcado.
+function abrirModalNaAba(aba) {
+    const pendente = openFiltersModal();
+    switchFilterTab(aba);
+    return pendente;
+}
+
 // Leva direto ao interruptor em vez de mandar procurar em Filtros → Preferências.
 async function abrirPreferenciaDoUndo() {
-    await openFiltersModal();
-    switchFilterTab('filtersTabPrefs');
+    const pendente = abrirModalNaAba('filtersTabPrefs');
     const linha = document.getElementById('prefUndoRow');
-    if (!linha || prefersReducedMotion()) return;
-    linha.classList.remove('pref-highlight');
-    void linha.offsetWidth;   // reflow: sem isso a animação não reinicia
-    linha.classList.add('pref-highlight');
-    linha.addEventListener('animationend', () => linha.classList.remove('pref-highlight'), { once: true });
+    if (linha && !prefersReducedMotion()) {
+        linha.classList.remove('pref-highlight');
+        void linha.offsetWidth;   // reflow: sem isso a animação não reinicia
+        linha.classList.add('pref-highlight');
+        linha.addEventListener('animationend', () => linha.classList.remove('pref-highlight'), { once: true });
+    }
+    await pendente;
+}
+
+// O MESMO desvio, para o ponto no botão de Filtros: leva direto ao que
+// destravou, em vez de largar a pessoa na aba Filtros pra procurar entre 16
+// células. É o irmão do aviso do Desfazer — mudou o jeito de ANUNCIAR (ponto
+// discreto em vez de banner, decisão do owner em 2026-09-16), não o que
+// acontece quando a pessoa aceita o convite.
+async function abrirConquistaNova() {
+    const pendente = abrirModalNaAba('filtersTabHistory');
+    destacarConquistaNova();
+    await pendente;
+}
+
+// Rola até o que destravou e pisca uma vez.
+//
+// O ALVO pode ser uma célula da vitrine OU o cartão da patente: patente NÃO
+// tem célula, então mirar só na grade deixaria sem alvo justamente quem subiu
+// de patente — e o ponto teria aceso mesmo assim.
+//
+// A classe não precisa de limpeza no fechamento do modal (a regra do
+// `LIMPEZA_AO_FECHAR`): o `renderHistory()` reescreve o innerHTML do painel a
+// cada abertura, então ela não sobrevive nem ao próximo `openFiltersModal`.
+function destacarConquistaNova() {
+    const painel = document.getElementById('filtersPanelHistory');
+    if (!painel) return;
+    const novos = painel.querySelectorAll('.conq-card.nova, .conq-cel.nova');
+    if (!novos.length) return;
+    // O primeiro em ordem de DOM. O cartão da patente fica ACIMA da grade,
+    // então quem subiu de patente e ganhou conquista na mesma ação vê a
+    // patente primeiro — a mesma ordem em que as duas coisas estão na tela.
+    //
+    // `center` e não `nearest` (que é o que a dica da conquista usa): ali o
+    // gesto é da pessoa e rolar o mínimo evita mexer a tela sob o dedo; aqui
+    // NINGUÉM rolou nada, a app é que está apontando, e deixar o alvo colado
+    // na borda inferior seria apontar pra beira da tela.
+    novos[0].scrollIntoView({ block: 'center' });
+    // O pulso é ENFEITE, e sai inteiro em reduced-motion: sem ele a pessoa
+    // continua caindo na aba certa, com o alvo na tela e o contorno âmbar que
+    // já existia. O que aponta é a ROLAGEM, não a animação.
+    if (prefersReducedMotion()) return;
+    novos.forEach((el) => {
+        el.classList.remove('conq-alvo');
+        void el.offsetWidth;   // reflow: sem isso a animação não reinicia
+        el.classList.add('conq-alvo');
+        el.addEventListener('animationend', () => el.classList.remove('conq-alvo'), { once: true });
+    });
 }
 
 // ── Dica por COMPORTAMENTO: "você nunca desfaz" ───────────────────────────

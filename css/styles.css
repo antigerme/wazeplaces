@@ -2613,6 +2613,30 @@ html.tem-sessao #authScreen { display: none; }
    nesta ela ainda precisa ver o que ganhou. */
 .conq-cel.nova { outline: 2px solid #d97706; outline-offset: 1px; position: relative; }
 .conq-card.nova { outline: 2px solid #d97706; outline-offset: 2px; }
+/* O pulso de "olha aqui" quando a app LEVA a pessoa até o que destravou.
+   Espelha o `prefHighlight` do Desfazer — mesma forma (sobe rápido, segura,
+   some), mesma natureza (só `box-shadow`, zero layout: uma célula da grade que
+   mudasse de tamanho empurraria as vizinhas).
+
+   ÂMBAR, e não uma cor nova: a régua da casa é "mesmo conceito, mesma cor", e
+   âmbar já é a cor de "novo" aqui — o ponto no botão, o contorno da célula e a
+   etiqueta são todos #d97706. Quem separa este pulso do contorno estático que
+   já está embaixo dele é o MOVIMENTO, não o tom.
+
+   Duas iterações e não uma: medido na app, uma só passa quase despercebida
+   sobre uma vitrine em que toda conquista ganha já é âmbar. */
+.conq-alvo {
+  animation: conqAlvo 1.9s ease-out;
+}
+
+@keyframes conqAlvo {
+  0%   { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); }
+  12%  { box-shadow: 0 0 0 6px rgba(217, 119, 6, 0.5); }
+  40%  { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); }
+  58%  { box-shadow: 0 0 0 6px rgba(217, 119, 6, 0.45); }
+  100% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); }
+}
+
 .conq-tag {
   position: absolute; top: -7px; right: -5px; font-size: 9px; font-weight: 700;
   letter-spacing: .03em; background: #d97706; color: #fff;
