@@ -8,6 +8,24 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.20-06
+
+### Adicionado
+- **O que você fez não se perde mais quando a rede some.** Se você rejeita ou marca como lido e a conexão falha, o pedido agora fica guardado no aparelho e **sai sozinho quando a rede voltar** — você não precisa fazer nada, nem lembrar de nada. Enquanto espera, um selinho discreto no canto diz quantos estão na fila ("3 esperando envio"), e ele some sozinho quando o último sai.
+- **A fila sobrevive a fechar a app.** Você pode tratar 40 pedidos numa sombra de conectividade, fechar tudo, e eles continuam lá quando abrir de novo.
+- **Funciona em túnel, elevador, estrada e metrô** — qualquer lugar em que o sinal oscila. Não é um "modo offline" que você liga: é como a app passa a se comportar sempre.
+- Vale também para o **rejeitar em lote** (o botão que aparece quando o mesmo autor tem vários pedidos).
+
+### Corrigido
+- **O placar parou de voltar atrás.** Até aqui, quando o envio falhava por rede, o número que você tinha acabado de somar era **desfeito uns 5 segundos depois**, com o card já fora da tela e você já no próximo pedido — e a ação era simplesmente descartada. Agora o número fica, porque o trabalho foi feito: só não saiu ainda.
+- **A app parou de insistir onde não há rede.** Sem sinal, cada ação tentava três vezes (a original e duas repetições, com 1,5s e 3,5s de espera) antes de desistir. Agora ela percebe que está sem rede e guarda na primeira. Efeito colateral bem-vindo para quem usa dados móveis: **em sombra de conectividade a app passa a gastar menos dados que antes**, não mais.
+
+### Notas
+- Erro que **não é de rede** continua se comportando como sempre (o número volta atrás e a app avisa) — só a falta de conexão vai para a fila.
+- Pedido já tratado por outro editor enquanto você estava offline conta normalmente como resolvido, do mesmo jeito que já contava online.
+- O **"Sair"** apaga a fila junto com o resto, como tudo que fica no aparelho. Sair com a fila cheia descarta o que ainda não foi enviado.
+- A app **não fica perguntando à rede de tempos em tempos** — ela só reage ao navegador avisando que a conexão voltou, e a cada vez que você abre a app.
+
 ## v2026.09.20-05
 
 ### Corrigido
