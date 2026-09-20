@@ -5181,24 +5181,42 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // é estrangulado a ponto de 8 itens não caberem em 40s. O teto de 3 min é rede
 // contra travar de vez, não expectativa: local termina em ~4s.
 async function esperarFimDaSaida(page, tetoMs = 180000) {
-  // O diário é CUMULATIVO, e esperar a PRESENÇA de `saida.saiu` foi um erro
-  // meu que quebrou dois blocos que passavam: depois do primeiro esvaziamento
-  // a marca já está lá, então a espera seguinte voltava NA HORA sem esperar
-  // nada — e o bloco media uma fila que ainda estava drenando. Marcador que
-  // persiste não é sinal de fim; o sinal é ele CRESCER. A foto do contador sai
-  // aqui, depois de qualquer navegação (a recarga zera o anel, e ler antes
-  // daria uma base alta que nunca mais é alcançada).
-  const base = await page.evaluate(() => {
-    const d = typeof dfatoAnel !== 'undefined' ? dfatoAnel : [];
-    return d.filter((e) => e.k === 'saida.saiu' || e.k === 'saida.erro').length;
-  }).catch(() => 0);
-  await page.waitForFunction((b) => {
+  // POLL PELO LADO DO NODE, e não `page.waitForFunction`. Três motivos, todos
+  // medidos nesta PR:
+  //  · o padrão do `waitForFunction` é pollar por `requestAnimationFrame`, que
+  //    NÃO dispara em página de segundo plano — a espera pode nem avaliar;
+  //  · com `polling: <ms>` ele passa a usar timer DA PÁGINA, que é justamente
+  //    o que o runner estrangula — o mesmo mal que se está esperando passar;
+  //  · e o `.catch(() => {})` que se põe em volta engole qualquer rejeição, o
+  //    que transformou "esperei e desisti" em "não esperei" sem deixar rastro.
+  //    A versão anterior disto voltava NA HORA e o run manteve os mesmos 8m32s
+  //    do anterior — foi essa igualdade de tempo que denunciou.
+  // Um laço aqui no Node não depende de nada disso, e DIZ por que terminou.
+  const conta = () => page.evaluate(() => {
+    let fim = 0, vazia = false;
+    try { vazia = JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0; } catch (e) {}
     try {
-      if (JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0) return true;
-    } catch (e) { return true; }
-    const d = typeof dfatoAnel !== 'undefined' ? dfatoAnel : [];
-    return d.filter((e) => e.k === 'saida.saiu' || e.k === 'saida.erro').length > b;
-  }, base, { timeout: tetoMs, polling: 250 }).catch(() => {});
+      const d = typeof dfatoAnel !== 'undefined' ? dfatoAnel : null;
+      if (d === null) return { verDiario: false, vazia, fim: 0 };
+      fim = d.filter((e) => e.k === 'saida.saiu' || e.k === 'saida.erro').length;
+    } catch (e) { return { verDiario: false, vazia, fim: 0 }; }
+    return { verDiario: true, vazia, fim };
+  });
+  // A base sai DEPOIS de qualquer navegação: o anel é cumulativo (um
+  // `saida.saiu` anterior satisfaria a condição na hora) e a recarga o zera.
+  let base = null;
+  try { base = await conta(); } catch (e) { return { motivo: 'evaluate-falhou', erro: String(e).slice(0, 80) }; }
+  const t0 = Date.now();
+  for (;;) {
+    let st;
+    try { st = await conta(); } catch (e) { return { motivo: 'evaluate-falhou', erro: String(e).slice(0, 80) }; }
+    if (st.vazia) return { motivo: 'fila-vazia', ms: Date.now() - t0 };
+    if (st.verDiario && st.fim > base.fim) return { motivo: 'diario-cresceu', ms: Date.now() - t0 };
+    if (Date.now() - t0 > tetoMs) {
+      return { motivo: 'TETO', ms: Date.now() - t0, verDiario: st.verDiario, fim: st.fim, base: base.fim };
+    }
+    await dormir(250);
+  }
 }
 
 {
@@ -5301,7 +5319,7 @@ async function esperarFimDaSaida(page, tetoMs = 180000) {
     await montar(); await dormir(400);
     enviosDeAcao = []; semRede = false;
     await page.evaluate(() => window.dispatchEvent(new Event('online')));
-    await esperarFimDaSaida(page);
+    const porQue = await esperarFimDaSaida(page);
     await dormir(500);
     const fim = await estado();
     // DIAGNÓSTICO sempre impresso, não só na falha: este bloco reprovou no CI
@@ -5319,7 +5337,8 @@ async function esperarFimDaSaida(page, tetoMs = 180000) {
       pend: !!AppState.pendingAction,
       online: navigator.onLine,
     }));
-    console.log(`  · ${c.id} [diagnóstico] restam=${fim.saida} envios=${enviosDeAcao.length} `
+    console.log(`  · ${c.id} [diagnóstico] espera=${JSON.stringify(porQue)} `
+      + `restam=${fim.saida} envios=${enviosDeAcao.length} `
       + `auth=${diag.auth} emVoo=${diag.emVoo} travado=${diag.travado} pend=${diag.pend} `
       + `online=${diag.online} diario=${JSON.stringify(diag.diario)}`);
     const gaps = enviosDeAcao.slice(1).map((t, i) => t - enviosDeAcao[i]).sort((a, b) => a - b);
