@@ -193,6 +193,11 @@ wazeplaces/
 │   ├── smoke-browser.mjs    # Smoke de layout (npm run test:browser): aparelhos × idiomas × tipos de card
 │   ├── smoke-presenca.mjs   # Smoke da presença (npm run test:presenca): DOIS navegadores, uma sala,
 │   │                        #   uma conversa de verdade. É o único teste que exercita WebRTC
+│   ├── rodar-longo.mjs     # FONTE ÚNICA de rodar comando LONGO em segundo plano (o smoke).
+│   │                        #   Existe pra não deixar VIGIA ZUMBI: o estado vai num arquivo
+│   │                        #   IRMÃO (`<log>.estado`), escrito no fim NORMAL, no com ERRO e
+│   │                        #   ao ser MORTO. `--esperar` ainda confere se o PID existe e tem
+│   │                        #   TETO — três saídas independentes, nenhuma esperando pra sempre.
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
 │   ├── migracoes.mjs        # FONTE ÚNICA do código que só existe por causa de uma versão
@@ -247,6 +252,9 @@ npm run css            # SÓ se mexeu em classe do Tailwind OU no css/styles.css
 npm run js             # SEMPRE que mexer em js/*.js — regenera js/min/, que é o que a app CARREGA (CI cobra)
 npm run html           # SEMPRE que mexer no index.src.html — regenera o index.html, que é o que a RAIZ serve (CI cobra)
 npm run test:presenca  # SÓ se mexeu em presença/sala: 2 navegadores, WebSocket e WebRTC de verdade
+# smoke em segundo plano SEM deixar vigia zumbi (ver a regra abaixo):
+#   node tools/rodar-longo.mjs /tmp/smoke.log -- npm run test:browser
+#   node tools/rodar-longo.mjs --esperar /tmp/smoke.log
 node server/node.mjs   # smoke: sobe, serve estáticos, /api/* responde (401 sem sessão, etc.)
 node tools/waze-probe.mjs <cookies.txt>   # OBRIGATÓRIO se mexeu em algo que fala com o Waze (ver 🔑)
 ```
@@ -256,6 +264,20 @@ node tools/waze-probe.mjs <cookies.txt>   # OBRIGATÓRIO se mexeu em algo que fa
 **Auditoria de layout em TODOS os presets** (`scratchpad/presets.mjs`): 40 viewports distintos × 4 idiomas × 6 casos de card. Duas armadilhas de instrumento, ambas já corrigidas nele: (a) contar como "área rolando" qualquer `scrollHeight > clientHeight` acusa 148 falsos positivos, porque `overflow:hidden` com line-clamp satisfaz isso sem rolar — exija `overflow-y: auto|scroll`; (b) `eval(string)` no `page.evaluate` bate na CSP da app (que corretamente não tem `unsafe-eval`) e função como ARGUMENTO o Playwright não serializa — a medição vai INLINE no callback.
 
 **Smoke de browser (`npm run test:browser`, roda no CI):** `tools/smoke-browser.mjs` renderiza o card em 5 aparelhos × 4 idiomas × 4 tipos de pedido e MEDE — rolagem dupla, alvo de toque < 44px, estouro horizontal, área rolável sem nome, caixa longa com teto fixo, português vazando fora do pt. Mora em `tools/` e **não** em `test/` de propósito: o `node --test` varre o diretório `test/` inteiro e o smoke precisa de browser — dentro de `test/` ele entrava no `npm test` e quebrava a promessa de suíte com zero dependência (já aconteceu). No CI o Playwright entra com `npm i --no-save` + `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, usando o Chrome que o runner já traz.
+
+**COMANDO LONGO EM SEGUNDO PLANO NUNCA GANHA UM VIGIA QUE POLE ARQUIVO.** Três `until grep -q "EXIT=" <log>; do sleep 15; done` ficaram vivos ao mesmo tempo, o mais velho com **34 minutos**, esperando logs de smokes que eu tinha MATADO pra regerar o `js/min/` — o sentinela só era escrito pelo caminho feliz, então matar o comando condenava o vigia a esperar pra sempre. Quem percebeu foi o owner (*"realmente estas tarefas ainda estão executando?"*), não eu. São dois gotchas conhecidos dentro do meu próprio instrumento: **#62** (o vigia inferia "rodando" da AUSÊNCIA do sentinela, e ausência não distingue "não terminou" de "terminou sem escrever") e **#28** (`ps aux | grep "[s]moke-browser" | wc -l` devolvia 2 e eu lia "rodando" — um era o processo, o outro o `sh -c` que CARREGA O TEXTO DO COMANDO).
+
+**A regra, em ordem:**
+1. **Na maioria das vezes o vigia não precisa existir** — o próprio `run_in_background` avisa quando o comando termina, inclusive quando ele é morto. Vigia à parte só se você REALMENTE precisa bloquear.
+2. Se precisar, use `node tools/rodar-longo.mjs <log> -- <comando>` e `node tools/rodar-longo.mjs --esperar <log>`. Ele fecha as três portas: o estado é carimbado **também ao morrer** (trap de SIGTERM/INT/HUP), o `--esperar` confere que **o PID existe** (pega o `kill -9`, em que nenhum trap roda) e tem **teto**. `test/rodar-longo.test.mjs` prova os quatro desfechos, e as duas sabotagens — tirar a prova de vida, tirar o trap — reprovam.
+3. **Estado de processo se lê pelo ARTEFATO**: bytes do log e `utime` do `/proc/<pid>/stat` em duas amostras. Contagem de `ps` não distingue o processo do wrapper que carrega a linha de comando dele.
+
+**E matar tem que levar o NETO junto** — o comando real é `npm run test:browser`, ou seja `npm` é o filho e `node tools/smoke-browser.mjs` é o neto. MEDIDO antes da correção: o npm morria e o neto seguia rodando com o Chromium; o vigia era liberado e mesmo assim sobrava trabalho órfão, que é o zumbi de novo, só que caro. `detached: true` + sinal no GRUPO (`process.kill(-pid)`) + SIGKILL depois de 1,5s resolvem os dois casos (o que obedece ao TERM e o que não obedece).
+
+**Três armadilhas de instrumento apareceram escrevendo este guard, e as três já têm gotcha:**
+- **O contador se contava.** `grep -c -- <marca>` casa com a linha do próprio `grep`, com o `sh -c` que o `execSync` cria e com os **args do wrapper** (que carregam o comando inteiro). Reprovou com o neto já morto, sobrando só o instrumento — gotcha #28 dentro do teste escrito pra evitar o zumbi.
+- **"Apareceu no `ps`" não é "está pronto".** O `ps` mostra o processo no `exec`, ANTES de o JS rodar: matar ali pega o neto sem o handler de SIGTERM registrado e ele morre como qualquer um, fazendo o cenário medir o caso fácil. Prontidão é sinal POSITIVO (o neto escreve um arquivo), nunca presença numa lista — gotcha #62.
+- **Uma guarda minha era decoração, e a sabotagem provou.** Eu supus que o `close` do filho faria o wrapper sair antes da carência e escrevi um flag pra impedir. Sabotando: o wrapper seguiu vivo em 1,0s e o neto morreu na carência — o `close` do Node espera os PIPES, e o neto **herda os pipes** do filho, então ele nem dispara enquanto houver neto. A guarda saiu, com a medição no lugar, em vez de ser remendada até passar.
 
 **O Chromium do sandbox NÃO tem saída de rede.** MEDIDO com controle: `page.goto` falha com `ERR_CONNECTION_RESET` até em `example.com`, com e sem o proxy do ambiente apontado — enquanto `curl` e o `fetch` do Node passam normalmente. Consequência prática pro planejamento: **navegador só contra `localhost`**; produção se valida por HTTP (Node). Pra que a metade de navegador valha pro que está no ar, baixe os arquivos publicados e compare com a main — se forem byte a byte iguais (a única diferença esperada é o script do Bot Fight Mode que o Cloudflare injeta no `index.html`), o smoke local está exercitando o front de produção.
 
