@@ -5175,6 +5175,21 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //   · `abort` sem `setOffline` simula SINAL FRACO (`navigator.onLine` fica
 //     true e as 2 retentativas ainda rodam, ~5s por ação), não modo avião.
 //     Os dois cenários existem na estrada; este bloco mede o modo avião.
+// Espera o esvaziamento ACABAR, por SINAL POSITIVO: ou a fila zera, ou o
+// `dfato` registra o fim (`saida.saiu`) ou a falha (`saida.erro`). Prazo fixo
+// não serve — ele mede a velocidade do runner, e no CI o `setTimeout` da pausa
+// é estrangulado a ponto de 8 itens não caberem em 40s. O teto de 3 min é rede
+// contra travar de vez, não expectativa: local termina em ~4s.
+async function esperarFimDaSaida(page, tetoMs = 180000) {
+  await page.waitForFunction(() => {
+    try {
+      if (JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0) return true;
+    } catch (e) { return true; }
+    const d = typeof dfatoAnel !== 'undefined' ? dfatoAnel : [];
+    return d.some((e) => e.k === 'saida.saiu' || e.k === 'saida.erro');
+  }, null, { timeout: tetoMs, polling: 250 }).catch(() => {});
+}
+
 {
   const CENARIOS = [{ id: 'fila-saida', n: 8 }];
   for (const c of CENARIOS) {
@@ -5260,11 +5275,22 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(sobrou === c.n, `${c.id}: a fila de saída não sobreviveu ao recarregamento (${sobrou})`);
 
     // Volta a rede: esvazia, UMA requisição por ação, com ritmo.
+    //
+    // ESPERA PELO FIM, não por um prazo. A versão anterior dava 40s e media —
+    // e no CI isso reprovou três vezes com "restam 6 / 2 requisições". O
+    // diagnóstico que este bloco imprime fechou a questão: `diario=[]`, ou
+    // seja o esvaziamento NÃO TINHA TERMINADO (ele grava `saida.saiu` ao
+    // acabar e `saida.erro` se estoura), com `emVoo=0`, `travado=false` e
+    // `online=true` — nada bloqueando, só lento. Ele anda 400ms por item via
+    // `setTimeout`, e no runner o timer é estrangulado a ponto de 8 itens não
+    // caberem na janela. Prazo fixo mede a VELOCIDADE do runner; o que o teste
+    // quer saber é o RESULTADO. Nenhuma asserção afrouxa: contagem de
+    // requisições, mediana do ritmo e fila zerada seguem as mesmas.
+    await page.bringToFront();
     await montar(); await dormir(400);
     enviosDeAcao = []; semRede = false;
     await page.evaluate(() => window.dispatchEvent(new Event('online')));
-    await page.waitForFunction(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0,
-      null, { timeout: 40000 }).catch(() => {});
+    await esperarFimDaSaida(page);
     await dormir(500);
     const fim = await estado();
     // DIAGNÓSTICO sempre impresso, não só na falha: este bloco reprovou no CI
@@ -5314,8 +5340,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.goto('about:blank');          // mata a página VELHA antes da rede voltar
     await ctx.setOffline(false); semRede = false; enviosDeAcao = [];
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });   // nenhum `online` daqui em diante
-    await page.waitForFunction(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0,
-      null, { timeout: 40000 }).catch(() => {});
+    await page.bringToFront();
+    await esperarFimDaSaida(page);
     const aberturaRestou = await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
     checa(aberturaRestou === 0,
       `${c.id}: ABERTURA — abrir a app NÃO drenou a fila (${aberturaRestou}): quem fechou offline nunca manda`);
@@ -5348,8 +5374,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.goto('about:blank');            // mata no meio do voo
     atrasoDaAcaoMs = 0;
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0,
-      null, { timeout: 20000 }).catch(() => {});
+    await esperarFimDaSaida(page);
     await dormir(300);
     const reenvio = await page.evaluate(() => ({
       saida: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length,
@@ -5382,8 +5407,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       body: '{"success":false,"error":"x","errorCategory":"unknown","httpCode":500}' }));
     semRede = false;
     await page.evaluate(() => window.dispatchEvent(new Event('online')));
-    await page.waitForFunction(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0,
-      null, { timeout: 40000 }).catch(() => {});
+    await esperarFimDaSaida(page);
     await dormir(400);
     const pouso3 = await page.evaluate(() => ({
       rejeitados: AppState.stats.rejected,
