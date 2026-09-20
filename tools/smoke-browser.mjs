@@ -5071,6 +5071,80 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── O CARIMBO DE NASCIMENTO EXISTE DEPOIS DE ABRIR ─────────────────────────
+//
+// É o guard que teria pego o defeito original, e nenhum outro pegaria: a função
+// nasceu sem chamador na v2026.09.18-02 e `diagSessao().nascimento` saiu `null`
+// em TODO diagnóstico por dois dias. Os testes de unidade FATIAM a fonte em vez
+// de rodá-la, então "declarada mas nunca chamada" passava limpo.
+//
+// O CONTROLE aqui é o diário, que é o instrumento IRMÃO e depende do mesmo
+// armazenamento: se ele também estivesse vazio, "carimbo ausente" não provaria
+// nada — seria só um navegador recém-aberto. Foi exatamente assim que a minha
+// primeira medição reprovou, e com razão.
+{
+  for (const cenario of ['normal', 'pelo código de pareamento']) {
+    const id = `carimbo/${cenario}`;
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 },
+      serviceWorkers: 'block', locale: 'pt-BR' });
+    const page = await ctx.newPage();
+    const errosJS = [];
+    page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
+    let bateuNoParear = false;
+    await page.route('**/api/**', (r) => {
+      if (/parear/.test(r.request().url())) bateuNoParear = true;
+      r.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(cenario === 'normal' ? { success: true } : { success: false, error: 'x' }) });
+    });
+    // O ramo do pareamento tem `return` ANTES do resto do initApp: é a carga
+    // que deixaria de carimbar se a chamada descesse um punhado de linhas.
+    const alvo = cenario === 'normal' ? BASE : BASE + '/#pair=ABC123XYZ';
+    await page.goto(alvo, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(700);
+
+    if (cenario !== 'normal') {
+      checa(bateuNoParear, `${id}: CONTROLE falhou — o ramo do pareamento não foi tomado, então nada abaixo mede o que diz medir`);
+    }
+    const um = await page.evaluate(() => localStorage.getItem('waze_places_nascimento'));
+    checa(!!um && Number(um) > 0, `${id}: a carga NÃO escreveu o carimbo — `
+      + '`diagSessao().nascimento` volta a sair null em todo diagnóstico');
+
+    // Recarregar não pode reescrever: se reescrevesse, a idade zeraria a cada
+    // abertura e o detector nunca acusaria apagamento nenhum.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(500);
+    const dois = await page.evaluate(() => localStorage.getItem('waze_places_nascimento'));
+    checa(dois === um, `${id}: recarregar REESCREVEU o carimbo — a idade zera a cada abertura e o detector fica cego`);
+
+    // CONTROLE + contraprova: o diário (instrumento irmão, mesmo armazenamento)
+    // grava quando há evento, e o carimbo continua o MESMO.
+    // `API` é `const` no api.js, e `const` de topo em script clássico NÃO vira
+    // propriedade de `window` — só entra no escopo léxico global. Então
+    // `window.API` é SEMPRE undefined e testar por ele nunca dá verdadeiro:
+    // a primeira versão deste bloco virava um no-op silencioso e o controle
+    // acusava "diário vazio" por culpa da medição. Vizinho do gotcha #64.
+    // Os scripts ainda são `defer`, então a espera continua necessária — o que
+    // muda é POR QUEM se espera.
+    await page.waitForFunction(() => typeof API !== 'undefined' && !!API.setSession,
+      null, { timeout: 5000 }).catch(() => {});
+    const par = await page.evaluate(async () => {
+      if (typeof API === 'undefined' || !API.setSession) return { semApi: true };
+      API.setSession('t-de-teste', 'cookies');
+      await new Promise((ok) => setTimeout(ok, 250));
+      const s = typeof diagSessao === 'function' ? diagSessao() : {};
+      return { diario: (s.diario || []).length, nascimento: s.nascimento,
+               idadeH: s.idadeDoArmazenamentoH };
+    });
+    checa(!par.semApi, `${id}: CONTROLE falhou — o objeto API não carregou, então a medição abaixo não mede nada`);
+    checa(par.diario > 0, `${id}: CONTROLE falhou — o diário também não gravou, então o carimbo não prova nada`);
+    checa(par.nascimento !== null && par.idadeH !== null,
+      `${id}: o diagSessao ainda devolve nascimento/idade nulos — é o defeito original de volta`);
+
+    checa(errosJS.length === 0, `${id}: erro de JS`, errosJS[0]);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 servidor.kill();
 
@@ -5117,6 +5191,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
+  + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`

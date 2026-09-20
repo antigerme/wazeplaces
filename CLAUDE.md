@@ -880,6 +880,28 @@ não é "entrou agora", e a duração contada dali é um PISO — entra em `cicl
 com `inicioConhecido: false` e FICA DE FORA da mediana. Misturar piso com
 medida erraria a estatística pra baixo, ou seja na direção que CONFIRMA o
 relato que se está investigando — a pior direção possível pra um instrumento.
+**O CARIMBO DE NASCIMENTO NASCEU SEM CHAMADOR, e rodou assim em produção**
+(v2026.09.18-02 → v2026.09.20-05). O diff da #219 trouxe a constante, a função,
+a leitura no `diagSessao` e a remoção no logout — e **nenhuma chamada**. Não foi
+regressão de refactor: subiu inalcançável. Consequência: `nascimento` e
+`idadeDoArmazenamentoH` saíram `null` em TODO diagnóstico, e a única evidência
+possível do apagamento do WebKit não existia. **Medido nos bytes de produção,
+com controle**: pelo ciclo real (entrar → sair → entrar) o diário grava 3
+entradas e 2 ciclos enquanto o carimbo nunca é escrito — sem esse controle,
+"nascimento null" é indistinguível de navegador recém-aberto, e a primeira
+medição reprovou por isso, com razão. A chamada mora no TOPO do `initApp`,
+colada ao `diagCapturarErros()`: o `initApp` tem `return` antecipado no ramo do
+código de pareamento, e o `marcarSessaoJaAtiva()` — o irmão do carimbo — só roda
+dentro do `if (savedToken)`; carimbar em qualquer um dos dois deixaria carga
+legítima de fora e daria idade MENOR que a real, ou seja na direção que INVENTA
+um apagamento que não houve. **O guard que faltava é o INVERSO do
+`chamadas-orfas`**: aquele cobra que toda chamada tenha declaração; este cobra
+que **toda função que ESCREVE uma chave de armazenamento seja referenciada** —
+escritora órfã é invisível porque a leitura devolve `null`, e `null` é
+indistinguível de "ainda não aconteceu". Conta REFERÊNCIA e não chamada:
+`addEventListener('click', toggleTheme)` passa a função sem parênteses e está
+viva (foi o primeiro falso positivo do guard).
+
 **E o suspeito número um não é nosso**: o WebKit apaga TODO o storage
 script-writable após *"seven days of Safari use without user interaction on the
 site"*, e **isenta quem está na tela inicial** ("have their own counter"). O
