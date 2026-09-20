@@ -5118,13 +5118,21 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 
     // CONTROLE + contraprova: o diário (instrumento irmão, mesmo armazenamento)
     // grava quando há evento, e o carimbo continua o MESMO.
+    // ESPERA o `API` existir antes de mexer nele. Os scripts são `defer`, então
+    // logo após a carga ele pode não estar lá — e `if (window.API && …)` vira
+    // um no-op SILENCIOSO, com o controle abaixo acusando "diário vazio" por
+    // culpa da medição, não do código. Foi o que aconteceu na primeira rodada.
+    await page.waitForFunction(() => !!(window.API && window.API.setSession), null, { timeout: 5000 })
+      .catch(() => {});
     const par = await page.evaluate(async () => {
-      if (window.API && API.setSession) API.setSession('t-de-teste', 'cookies');
-      await new Promise((ok) => setTimeout(ok, 150));
+      if (!(window.API && API.setSession)) return { semApi: true };
+      API.setSession('t-de-teste', 'cookies');
+      await new Promise((ok) => setTimeout(ok, 250));
       const s = typeof diagSessao === 'function' ? diagSessao() : {};
       return { diario: (s.diario || []).length, nascimento: s.nascimento,
                idadeH: s.idadeDoArmazenamentoH };
     });
+    checa(!par.semApi, `${id}: CONTROLE falhou — o objeto API não carregou, então a medição abaixo não mede nada`);
     checa(par.diario > 0, `${id}: CONTROLE falhou — o diário também não gravou, então o carimbo não prova nada`);
     checa(par.nascimento !== null && par.idadeH !== null,
       `${id}: o diagSessao ainda devolve nascimento/idade nulos — é o defeito original de volta`);
