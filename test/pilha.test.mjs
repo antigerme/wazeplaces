@@ -295,3 +295,47 @@ test('o app.css gerado carrega a entrada nova', () => {
   assert.ok(!/swipeOut(Left|Right|Up)/.test(APPCSS),
     'o app.css gerado ainda tem os keyframes mortos da saída');
 });
+
+// ── 7. O TIQUE NO APARELHO ─────────────────────────────────────────────────
+//
+// É o sinal MAIS FREQUENTE da app — um por pedido tratado, e a fila real tem
+// centenas. O owner baixou de 12 pra 8ms depois de comparar no celular dele.
+//
+// O guard NÃO trava o número (isso seria só detector de mudança): trava o que
+// pode quebrar sem ninguém ver — que ele saia de UMA constante nomeada, que
+// dispare no caminho do COMMIT e que degrade calado onde a API não existe.
+test('o tique do commit sai de uma constante, não de um número solto', () => {
+  const f = semComentarioJS(fatiar(SWIPE, 'animateSwipeOut'));
+  assert.match(f, /navigator\.vibrate\(VIBRACAO_COMMIT_MS\)/,
+    'o tique voltou a ser um número escrito na linha — e aí a próxima pessoa muda sem achar o porquê, que está no comentário da constante');
+  assert.match(f, /if \(navigator\.vibrate\)/,
+    'sumiu a guarda de suporte: no Safari do iPhone `navigator.vibrate` não existe e isto passa a LANÇAR no meio do gesto');
+  const c = /const VIBRACAO_COMMIT_MS = (\d+);/.exec(SWIPE);
+  assert.ok(c, 'a constante do tique sumiu do swipe.js');
+  // Faixa de sanidade, não o valor: acima disso deixa de ser tique e vira
+  // zumbido, num sinal que se repete centenas de vezes por fila.
+  assert.ok(+c[1] > 0 && +c[1] <= 40,
+    `o tique está em ${c[1]}ms — fora da faixa de um toque seco`);
+});
+
+test('o tique dispara UMA vez, e só no commit', () => {
+  const f = semComentarioJS(fatiar(SWIPE, 'animateSwipeOut'));
+  assert.equal((f.match(/navigator\.vibrate\(/g) || []).length, 1,
+    'mais de uma chamada de vibração no mesmo commit — o editor sentiria um tique duplo por pedido');
+  // O `handleDragEnd` NÃO pode vibrar por conta própria: ele é quem decide
+  // entre commitar e devolver o card ao lugar, e vibrar lá faria o gesto que
+  // NÃO trata nada avisar que tratou.
+  const fim = semComentarioJS(fatiar(SWIPE, 'handleDragEnd'));
+  assert.ok(!/navigator\.vibrate/.test(fim),
+    'o handleDragEnd passou a vibrar — o arraste que volta ao lugar não confirmou nada e não pode avisar que sim');
+});
+
+test('o tique do FAB do modo dev é OUTRO, e segue separado', () => {
+  // Conceitos diferentes podem ter durações diferentes: "confirmei um pedido"
+  // acontece centenas de vezes por fila; "agarrei o botão" acontece uma vez a
+  // cada muitas sessões. O que não pode é um puxar o outro sem querer.
+  assert.ok(!/VIBRACAO_COMMIT_MS/.test(APP),
+    'o app.js passou a usar a constante do commit — se for pra compartilhar, que seja uma decisão escrita, não um reuso silencioso');
+  assert.match(semComentarioJS(APP), /navigator\.vibrate && navigator\.vibrate\(\d+\)/,
+    'o aviso tátil do FAB do modo dev sumiu');
+});
