@@ -1577,6 +1577,11 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // logout com o resto. O efeito assumido é que sair com a fila cheia
     // descarta o que não foi enviado: é o que "sair é sair de tudo" promete.
     SAIDA_KEY: 'safeLS.remove(SAIDA_KEY)',
+    // As duas do offline saem juntas, por `offlineEsquecer()`: uma é banco
+    // (IndexedDB, não passa por safeLS) e a outra é Cache API. A fila guardada
+    // tem nome de quem enviou e a foto é de terceiro — "sair é sair de tudo".
+    OFFLINE_DB: 'offlineEsquecer()',
+    OFFLINE_TILES_CACHE: 'offlineEsquecer()',
     // Patente, conquistas e contadores. É dado de QUEM ENTROU (o trabalho
     // dele), então some junto — e some porque o contrato do "Sair" já
     // promete, não porque alguém lembrou.
@@ -1609,7 +1614,12 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
 
   // Nome da constante quando existe; senão a própria chave literal.
   const porConstante = new Map();
-  for (const m of fonte.matchAll(/const\s+([A-Z_a-z]+)\s*=\s*'(waze[_a-z0-9]*)'/g)) {
+  // O hífen entra AQUI também, e não só na varredura abaixo: sem isso o guard
+  // captura `'waze-places-tiles'` como chave mas não consegue ligá-la à sua
+  // constante, e acusa uma chave que ESTÁ declarada. A assimetria apareceu no
+  // primeiro cache com hífen (o do offline) — e hífen é a convenção que o
+  // service worker já usa nos nomes de cache.
+  for (const m of fonte.matchAll(/const\s+([A-Z_a-z]+)\s*=\s*'(waze[-_a-z0-9]*)'/g)) {
     porConstante.set(m[2], m[1]);
   }
   const chaves = new Set();

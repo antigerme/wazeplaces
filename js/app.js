@@ -351,7 +351,11 @@ function initApp() {
         updateInFlightIndicator();
         esvaziarFilaDeSaida();
         AppState._profilePromise = loadProfileAndAuxData();
-        startFetching();
+        // Sem rede, a fila guardada entra no lugar da tela de falha — e aí NÃO
+        // se chama `startFetching`, que só gastaria uma requisição fadada a
+        // falhar. Com rede, segue o caminho de sempre e a varredura pega
+        // carona na resposta que chegar.
+        offlineTentarAbrirSemRede().then((abriu) => { if (!abriu) startFetching(); });
         handleLaunchAction();
     } else {
         // Sem sessão: antes de mostrar a tela de login, PERGUNTA à extensão.
@@ -1154,6 +1158,17 @@ function setupModalListeners() {
         AppState.preferences.undoEnabled = canDisableUndo() ? e.target.checked : true;
         savePreferences();
     });
+    $('prefOfflineDisponivel')?.addEventListener('change', (e) => {
+        AppState.preferences.offlineDisponivel = e.target.checked;
+        savePreferences();
+        if (e.target.checked) {
+            offlineMarcarGesto();       // marcar JA e o gesto: nao dorme
+            offlineVarrer();            // enche agora, com o custo na tela
+        } else {
+            offlineEsquecer();          // desligou: some o que foi guardado
+        }
+        atualizarLinhaDoOffline(0, 0);
+    });
     $('prefPularGuarda').addEventListener('change', (e) => {
         AppState.preferences.pularGuarda = e.target.checked;
         savePreferences();
@@ -1387,7 +1402,7 @@ const Lightbox = {
     _render() {
         this.resetZoom();
         const img = document.getElementById('lightboxImage');
-        img.src = this.urls[this.idx];
+        img.src = urlDaFoto(this.urls[this.idx]);
         img.alt = this.placeName ? t('lightbox.img.alt', { name: this.placeName }) : t('lightbox.img.altGeneric');
         const prevBtn = document.getElementById('lightboxPrev');
         const nextBtn = document.getElementById('lightboxNext');
@@ -4751,6 +4766,9 @@ async function handleLogout() {
     // é que sair com a fila cheia descarta o que ainda não foi enviado: é
     // exatamente o que "sair é sair de tudo" promete.
     safeLS.remove(SAIDA_KEY);
+    // A fila guardada tem nome de quem enviou e foto de terceiro. "Sair e sair
+    // de tudo" nao abre excecao que ninguem decidiu.
+    offlineEsquecer();
     avatarPendente = null;   // a próxima entrada volta a esperar o primeiro card
     avatarFalhou = null;     // outro editor pode ter foto onde este não tinha
     // Casa, trabalho e posição são dado de LOCALIZAÇÃO do editor: sair é sair.
@@ -5211,6 +5229,9 @@ function fetchNextPage() {
             } else {
                 AppState.emptyPagesInRow = 0;
                 AppState.queue.push(...newPlaces);
+                // Guardar o texto NAO custa requisicao: ele acabou de chegar.
+                // Sai calado quando o toggle esta desligado.
+                offlineGravarFila();
                 AppState.serverTotal += newPlaces.length;
                 trackSeenCategories(newPlaces);
                 // Reordenar AQUI, com um card já na tela, quebra a invariante de
@@ -5495,6 +5516,12 @@ function renderCurrentCard() {
     // enquadramento do fallback — o observer só o corrige quando a caixa
     // CRESCE, e num card com diff ela encolhe. Ver `desenharMapaComCaixa`.
     desenharMapaComCaixa(card, place);
+    // DEPOIS do appendChild pela mesma razão do mapa: a caixa da foto precisa
+    // existir pra receber o aviso. Sai calado quando há rede ou quando o
+    // pedido não é de foto.
+    marcarCardSemFoto(card, place);
+    // Quem está deslizando está usando a app: a varredura não dorme.
+    offlineMarcarGesto();
     // Tira o .celebrate junto: sem isso o confete não reinicia quando a fila
     // zerar de novo (a classe ficaria pendurada do "Tudo limpo!" anterior).
     document.getElementById('noMoreCards').classList.remove('celebrate');
@@ -6387,7 +6414,9 @@ function renderCardImages(card, place) {
         // avatar: os dois juntos é que tiram os 214 KB da foto de perfil da
         // frente dos ~50 KB que o editor precisa VER pra decidir.
         img.fetchPriority = 'high';
-        img.src = s.foto;
+        // urlDaFoto: MESMA URL que o aquecimento usou. Se divergir, o card pede
+        // um endereco que ninguem aqueceu e a foto some offline, sem erro.
+        img.src = urlDaFoto(s.foto);
         // Num LOCAL NOVO toda foto está sendo proposta junto com o local — e o
         // card não põe o ✨ nelas de propósito (ver a nota longa acima: o selo
         // ficaria sempre ligado e perderia sentido onde ele decide algo). Mas a
@@ -7470,7 +7499,7 @@ function tilesDoCard(place, w, h) {
 function aquecerPrimeiroSlide(place, w, h) {
     if (!place) return;
     if (mapaVemPrimeiro(place)) { for (const u of tilesDoCard(place, w, h)) aquecer(u); return; }
-    aquecer((place.imageUrls && place.imageUrls[0]) || place.imageUrl);
+    aquecer(urlDaFoto((place.imageUrls && place.imageUrls[0]) || place.imageUrl));
 }
 
 // O RESTO do card: as outras fotos e, se o mapa não era o primeiro slide, os
@@ -9566,6 +9595,9 @@ window.addEventListener('online', async () => {
     // era e estava errado. A causa, reproduzida depois e determinística, era o
     // gatilho ENGOLIDO pela guarda de reentrada (ver `saidaPedidaDeNovo`).
     await esvaziarFilaDeSaida();
+    // A rede voltou: é a janela pra repor o que venceu na sombra. Sai calado
+    // com o toggle desligado, e só baixa o que de fato faltava.
+    offlineTalvezVarrer();
     // E refaz a BUSCA se ela tinha falhado. Sem isto o editor ficava olhando
     // "Falha ao carregar" com 4g funcionando até tocar no botão — a fila de
     // saída se resolvia sozinha e a de PEDIDOS não, o que é incoerente. O
@@ -9609,9 +9641,333 @@ window.addEventListener('online', async () => {
 // justamente quando ela falha. Quem está no ar já vai processar a fila inteira,
 // então não há nada a anotar.
 API.aoProvarRede = () => {
+    // SAI CEDO durante o esvaziamento, e agora por DOIS motivos. O primeiro já
+    // estava escrito abaixo (retentar na hora contraria a política de rede). O
+    // segundo é novo: varrer o offline no meio do esvaziamento é competir por
+    // banda exatamente no pior momento — a rede acabou de voltar, muitas vezes
+    // em dados móveis. O guard de `test/fila-saida.test.mjs` cobra isto, e
+    // estava certo quando eu tentei tirar.
     if (esvaziandoSaida) return;
     esvaziarFilaDeSaida();
+    // Resposta que CHEGA prova rede, e as duas pontas do offline pegam carona
+    // nela: o que estava preso pra SAIR e o que falta ENTRAR.
+    offlineTalvezVarrer();
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DISPONÍVEL OFFLINE — o TRABALHO sobrevive à sombra de sinal
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// O Degrau 1 (fila de saída) fez a AÇÃO sobreviver: você desliza sem rede e o
+// envio sai sozinho depois. Isto faz o TRABALHO sobreviver: os pedidos, o mapa
+// e as fotos ficam no aparelho, e a app se vira sozinha no vai-e-volta de sinal
+// de uma estrada.
+//
+// OPT-IN ESTRITO, e isso é o contrato: quem não marcou não paga NADA. Nem um
+// byte, nem uma requisição, nem sequer uma URL diferente (ver `urlDaFoto`).
+//
+// ── OS TRÊS ITENS TÊM PRAZOS DIFERENTES, e isso decide o desenho ───────────
+//   texto   →  IndexedDB nosso        →  permanente
+//   mapa    →  Cache API nosso        →  permanente (o tile TEM CORS: guardável)
+//   foto    →  cache do navegador     →  60 min, e NÃO dá pra guardar
+//
+// A foto não é guardável porque `venue-image.waze.com` não manda CORS (medido:
+// `access-control-allow-origin` ausente em toda variante e toda origem). Sem
+// CORS a resposta é OPACA, e o Chrome cobra ~7,8 MB de orçamento por resposta
+// opaca — medido com controle: os mesmos bytes custam 1,01× com CORS e 132×
+// sem. As 226 fotos de uma fila custariam 1,76 GB contra ~1 GB de orçamento.
+//
+// ── O RELÓGIO ROLANTE ─────────────────────────────────────────────────────
+// A foto vale 60 min A PARTIR DO DOWNLOAD, e a app não estica isso: reaquecer
+// uma foto viva sai do cache, custa zero e NÃO renova o prazo (medido). O que
+// renova é baixar de novo — e pra forçar isso a app troca o SUFIXO da URL
+// (`?w=<janela>`), que o CDN do Waze aceita devolvendo bytes idênticos (medido
+// em 5 variantes) e que o navegador trata como entrada separada, com relógio
+// próprio (medido, com controle: a URL velha morre no prazo dela).
+//
+// Ciclo de 20 min = toda foto tem SEMPRE ao menos 40 min de vida quando o sinal
+// cai. Custa uma varredura completa a cada 20 min: ~41 MB/h no Brasil. A conta
+// só corre com a app ABERTA e COM SINAL — na sombra não há o que gastar.
+const OFFLINE_CICLO_MS = 20 * 60 * 1000;
+const OFFLINE_DB = 'waze_places_offline';
+const OFFLINE_STORE = 'fila';
+// O cache dos tiles é SEPARADO do da versão de propósito: o `activate` do
+// service worker apaga todo cache que não seja o `CACHE_NAME`, então guardar
+// tile lá dentro faria cada deploy apagar o que você provisionou — e você
+// descobriria no meio da estrada. O SW isenta este nome explicitamente.
+const OFFLINE_TILES_CACHE = 'waze-places-tiles';
+// Quantas imagens em voo ao mesmo tempo. Baixo de propósito: a varredura não
+// pode atropelar a foto do card que o editor está olhando AGORA — é o defeito
+// que o `agendarAquecimento` já existe pra evitar.
+const OFFLINE_CONCORRENCIA = 3;
+// Sem gesto na tela por este tempo, a varredura dorme. Sem isto a app cobraria
+// dados de quem a deixou aberta no bolso.
+const OFFLINE_OCIOSO_MS = 3 * 60 * 1000;
+
+let offlineVarrendo = false;
+let offlinePedidaDeNovo = false;
+let offlineUltimoGesto = Date.now();
+// A janela que a app SERVE — e ela NÃO é a hora atual. Só avança quando uma
+// varredura termina de aquecer tudo sob o sufixo novo. Sem isso, virar a janela
+// OFFLINE faria o card pedir uma URL que ninguém aqueceu e a foto sumiria com
+// a cópia boa parada no cache, a um sufixo de distância.
+let offlineJanelaServida = null;
+
+function offlineLigado() {
+    return AppState.preferences.offlineDisponivel === true;
+}
+
+// FONTE ÚNICA da URL da foto. Card, lightbox e aquecimento passam TODOS por
+// aqui — se um deles usar a URL crua, ele pede um endereço que ninguém aqueceu
+// e a foto some offline, sem erro nenhum na tela. `test/offline.test.mjs`
+// reprova quem atribuir `.src` a partir de `imageUrls` sem passar por aqui.
+function urlDaFoto(u) {
+    if (!u || !offlineLigado() || offlineJanelaServida === null) return u;
+    return u + (u.indexOf('?') === -1 ? '?' : '&') + 'w=' + offlineJanelaServida;
+}
+
+// ── IndexedDB, o mínimo ───────────────────────────────────────────────────
+// `localStorage` está fora: é SÍNCRONO e travaria a thread do swipe, que é o
+// valor central da app (medido no projeto: 16,5 ms por gravação com 10 mil
+// registros). Aqui são 357 KB de uma vez.
+function offlineDB() {
+    return new Promise((ok, erro) => {
+        let req;
+        try { req = indexedDB.open(OFFLINE_DB, 1); } catch (e) { return erro(e); }
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(OFFLINE_STORE)) db.createObjectStore(OFFLINE_STORE);
+        };
+        req.onsuccess = () => ok(req.result);
+        req.onerror = () => erro(req.error);
+    });
+}
+
+async function offlineGravarFila() {
+    if (!offlineLigado() || !AppState.queue.length) return false;
+    try {
+        const db = await offlineDB();
+        await new Promise((ok, erro) => {
+            const tx = db.transaction(OFFLINE_STORE, 'readwrite');
+            tx.objectStore(OFFLINE_STORE).put({
+                t: Date.now(),
+                filtros: JSON.parse(JSON.stringify(AppState.filters || {})),
+                places: AppState.queue,
+            }, 'fila');
+            tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
+        });
+        db.close();
+        dfato('offline.gravou', { n: AppState.queue.length });
+        return true;
+    } catch (e) { return false; }
+}
+
+async function offlineLerFila() {
+    try {
+        const db = await offlineDB();
+        const v = await new Promise((ok, erro) => {
+            const tx = db.transaction(OFFLINE_STORE, 'readonly');
+            const r = tx.objectStore(OFFLINE_STORE).get('fila');
+            r.onsuccess = () => ok(r.result); r.onerror = () => erro(r.error);
+        });
+        db.close();
+        return v && Array.isArray(v.places) && v.places.length ? v : null;
+    } catch (e) { return null; }
+}
+
+async function offlineEsquecer() {
+    offlineJanelaServida = null;
+    try { indexedDB.deleteDatabase(OFFLINE_DB); } catch (e) {}
+    try { if (window.caches) await caches.delete(OFFLINE_TILES_CACHE); } catch (e) {}
+}
+
+// ── A VARREDURA ───────────────────────────────────────────────────────────
+// Ordem de FILA (o card 1 primeiro), e o que FALHA volta pro fim. A retomada
+// não é zelo: MEDIDO numa estrada simulada de 20s de sinal / 40s de buraco, com
+// retomada saem 160 cards prontos e ZERO perdidos; sem ela, 77 cards e 404
+// pedaços perdidos PARA SEMPRE. É metade do recurso numa linha.
+function offlineItensDaFila(janela) {
+    const itens = [];
+    const cx = cardDaFrente() && cardDaFrente().querySelector('.card-photo');
+    const w = (cx && cx.clientWidth) || 400;
+    const h = (cx && cx.clientHeight) || 240;
+    for (const p of AppState.queue) {
+        for (const u of tilesDoCard(p, w, h)) itens.push({ u, tile: true });
+        const f = (p.imageUrls && p.imageUrls[0]) || p.imageUrl;
+        if (f) itens.push({ u: f + (f.indexOf('?') === -1 ? '?' : '&') + 'w=' + janela, tile: false });
+    }
+    return itens;
+}
+
+function offlineBaixar(u, tile) {
+    // Tile vai pro NOSSO cache (tem CORS, então a resposta é transparente e
+    // custa 1,01× de orçamento). Foto vai pro cache do navegador via <img>, que
+    // é o MESMO caminho que o card usa — `fetch` popula outra entrada, e a
+    // <img> não a enxerga (medido: aquecido por fetch, o card quebra offline).
+    if (!tile) {
+        return new Promise((r) => {
+            const i = new Image();
+            i.fetchPriority = 'low'; i.decoding = 'async';
+            i.onload = () => r(true); i.onerror = () => r(false);
+            i.src = u;
+        });
+    }
+    return (async () => {
+        try {
+            const resp = await fetch(u, { mode: 'cors' });
+            if (!resp.ok) return false;
+            const c = await caches.open(OFFLINE_TILES_CACHE);
+            await c.put(u, resp);
+            return true;
+        } catch (e) { return false; }
+    })();
+}
+
+async function offlineVarrer() {
+    if (!offlineLigado()) return;
+    if (offlineVarrendo) { offlinePedidaDeNovo = true; return; }
+    if (!AppState.authenticated || !AppState.queue.length) return;
+    // `onLine === false` é confiável pra "não tem rede"; `true` não prova nada
+    // (portal cativo diz true e mente). Só o false muda comportamento — a mesma
+    // regra de uma mão só da fila de saída.
+    if (navigator.onLine === false) return;
+    if (Date.now() - offlineUltimoGesto > OFFLINE_OCIOSO_MS) return;
+
+    offlineVarrendo = true;
+    offlinePedidaDeNovo = false;
+    const janela = Math.floor(Date.now() / OFFLINE_CICLO_MS);
+    try {
+        await offlineGravarFila();
+        const pend = offlineItensDaFila(janela);
+        const total = pend.length;
+        let falhas = 0;
+        const trabalhar = async () => {
+            while (pend.length) {
+                if (!offlineLigado() || navigator.onLine === false) return;
+                const it = pend.shift();
+                const ok = await offlineBaixar(it.u, it.tile);
+                if (!ok) {
+                    // volta pro FIM: buraco de sinal não pode perder o item
+                    falhas++;
+                    if (falhas > total * 2) return;   // teto: rede morta, para
+                    pend.push(it);
+                    await new Promise((r) => setTimeout(r, 400));
+                }
+                atualizarLinhaDoOffline(total - pend.length, total);
+            }
+        };
+        await Promise.all(Array.from({ length: OFFLINE_CONCORRENCIA }, trabalhar));
+        // Só AGORA a janela vira: enquanto a varredura não terminou, o card
+        // segue pedindo o sufixo anterior, cuja cópia está viva no cache.
+        if (!pend.length) {
+            offlineJanelaServida = janela;
+            dfato('offline.pronto', { n: AppState.queue.length, itens: total });
+        }
+        atualizarLinhaDoOffline(total - pend.length, total);
+    } catch (e) {
+        dfato('offline.erro', { e: String((e && e.message) || e).slice(0, 60) });
+    } finally {
+        offlineVarrendo = false;
+        if (offlinePedidaDeNovo) { offlinePedidaDeNovo = false; return offlineVarrer(); }
+    }
+}
+
+// ── A LINHA DA PREFERÊNCIA ────────────────────────────────────────────────
+// Cinco estados, e nenhum deles é uma barra de status ambiente: isto é
+// RESPOSTA A UM GESTO que a pessoa acabou de fazer. Aviso permanente de
+// "offline parcial" seria ansiedade sem ação — ninguém faz sinal aparecer.
+function atualizarLinhaDoOffline(feitos, total) {
+    const el = document.getElementById('prefOfflineDesc');
+    if (!el) return;
+    if (!offlineLigado()) { el.textContent = t('prefs.offline.desc'); return; }
+    const semRede = navigator.onLine === false;
+    if (semRede) {
+        const n = AppState.queue.length;
+        el.innerHTML = n
+            ? `<span class="text-amber-800 dark:text-amber-300 font-semibold">${escapeHtml(
+                t(n === 1 ? 'prefs.offline.esperaA' : 'prefs.offline.esperaAPlural', { n }))}</span> `
+              + escapeHtml(t('prefs.offline.esperaB'))
+            : `<span class="text-amber-800 dark:text-amber-300 font-semibold">${escapeHtml(
+                t('prefs.offline.vazioA'))}</span> ` + escapeHtml(t('prefs.offline.vazioB'));
+        return;
+    }
+    if (offlineVarrendo && total) {
+        el.innerHTML = `<span class="text-cyan-800 dark:text-cyan-300">${escapeHtml(
+            t('prefs.offline.enchendo', { feitos, total }))}</span>`;
+        return;
+    }
+    const n = AppState.queue.length;
+    el.innerHTML = `<span class="text-emerald-700 dark:text-emerald-400 font-semibold">${escapeHtml(
+        t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n }))}</span> `
+        + escapeHtml(t('prefs.offline.prontoB'));
+}
+
+// ── OS GATILHOS: quatro, e NENHUM deles é polling ─────────────────────────
+// O free tier é restrição de projeto, então nada aqui "atualiza a cada N
+// minutos" por conta própria. Todos pegam carona no que já ia acontecer:
+//   1. a prova de rede (resposta que CHEGA — o mesmo gancho da fila de saída)
+//   2. o evento `online` do navegador
+//   3. a abertura da app
+//   4. o card que troca (o gesto de quem está trabalhando)
+// O relógio de 20 min NÃO é um timer: é a comparação de `offlineJanelaServida`
+// com a janela atual, feita quando um dos quatro acima acontece de qualquer
+// jeito. Sem rede, nenhum deles dispara nada.
+function offlinePrecisaVarrer() {
+    if (!offlineLigado()) return false;
+    if (offlineJanelaServida === null) return true;          // nunca encheu
+    return Math.floor(Date.now() / OFFLINE_CICLO_MS) !== offlineJanelaServida;
+}
+
+function offlineTalvezVarrer() {
+    if (!offlinePrecisaVarrer()) return;
+    offlineVarrer();
+}
+
+function offlineMarcarGesto() { offlineUltimoGesto = Date.now(); }
+
+// Abre a app sem rede: em vez da tela de falha, a fila que ficou guardada.
+// Os pedidos de FOTO saem do baralho — sem a imagem não há o que decidir, e
+// oferecer ✕/✓ ali seria pedir decisão no escuro. O contador conta o que é
+// ALCANÇÁVEL, nunca o que está guardado (gotcha #66).
+async function offlineTentarAbrirSemRede() {
+    if (!offlineLigado() || navigator.onLine !== false) return false;
+    const guardada = await offlineLerFila();
+    if (!guardada) return false;
+    AppState.queue = guardada.places.slice();
+    AppState.serverTotal = AppState.queue.length;
+    AppState.hasMore = false;
+    AppState.loadError = false;
+    updatePendingCount();
+    sortQueue();
+    showCurrentPlace();
+    dfato('offline.abriu', { n: AppState.queue.length, idade: Math.round((Date.now() - guardada.t) / 60000) });
+    return true;
+}
+
+// O card de FOTO sem a foto: diz na PRÓPRIA CAIXA da imagem, e trava ✕ e ✓
+// deixando o ↑ vivo. Botão morto com cara de vivo lê como app quebrada, e
+// decidir foto sem ver a foto é decidir no escuro.
+function marcarCardSemFoto(card, place) {
+    if (!card || !place) return false;
+    const tipoDeFoto = place.purType === 'NEW_PHOTO' || place.purType === 'FLAGGED_PHOTO';
+    if (!tipoDeFoto || navigator.onLine !== false) return false;
+    const caixa = card.querySelector('.card-photo');
+    if (!caixa || caixa.querySelector('.card-sem-foto')) return false;
+    for (const f of Array.from(caixa.children)) f.classList.add('hidden');
+    const av = document.createElement('div');
+    av.className = 'card-sem-foto';
+    av.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">'
+        + '<path d="M3 3l18 18M10.6 5.2A9 9 0 0 1 21 12M2 12a9 9 0 0 1 4-7.4M8.5 16.5a5 5 0 0 1 7 0"/>'
+        + '<circle cx="12" cy="20" r="1"/></svg>'
+        + `<strong>${escapeHtml(t('card.semFoto.titulo'))}</strong>`
+        + `<span>${escapeHtml(t('card.semFoto.desc'))}</span>`;
+    caixa.appendChild(av);
+    for (const sel of ['.card-btn-reject', '.card-btn-read']) {
+        const b = card.querySelector(sel);
+        if (b) { b.disabled = true; b.classList.add('acoes-travadas'); }
+    }
+    return true;
+}
 
 function handleActionResult(actionType, place, result) {
     dlog('acao.fim', { tipo: actionType, ok: !!(result && result.success),
@@ -10601,6 +10957,8 @@ function loadPreferences() {
             // Opt-IN, ao contrário da presença logo acima: só liga quem DISSE
             // que quer. `undefined` fica desligado, que é o padrão.
             AppState.preferences.pularGuarda = parsed.pularGuarda === true;
+            // Opt-IN estrito tambem: quem nunca marcou nao paga byte nenhum.
+            AppState.preferences.offlineDisponivel = parsed.offlineDisponivel === true;
             // undefined = nunca decidido (user antigo ou primeira visita).
             // Só copia se for boolean, pra initUndoGateSeen poder decidir depois.
             if (typeof parsed.undoGateSeen === 'boolean') {
@@ -11320,6 +11678,13 @@ function canDisableUndo() {
 function renderPularGuardaPref() {
     const cb = document.getElementById('prefPularGuarda');
     if (cb) cb.checked = AppState.preferences.pularGuarda === true;
+    // A linha do offline se redesenha junto: ela tem cinco estados e o modal é
+    // por onde a pessoa vem olhar. Abrir o modal também é gesto — sem isto,
+    // abrir pra conferir encontraria a varredura dormindo.
+    const off = document.getElementById('prefOfflineDisponivel');
+    if (off) off.checked = AppState.preferences.offlineDisponivel === true;
+    offlineMarcarGesto();
+    atualizarLinhaDoOffline(0, 0);
 }
 
 // O texto do selo de arrastar-pra-cima. Fonte única porque são DOIS chamadores

@@ -2643,3 +2643,28 @@ html.tem-sessao #authScreen { display: none; }
   border-radius: 9999px; padding: 1px 6px; box-shadow: 0 0 0 2px #f8fafc;
 }
 .dark .conq-tag { box-shadow: 0 0 0 2px rgb(30 41 59); }
+
+/* ── "A foto precisa de sinal" ────────────────────────────────────────────
+   O pedido de FOTO sem a foto, offline. A app JÁ tinha um "Sem Imagem", e ele
+   diz a coisa ERRADA aqui: "sem imagem" é não existir foto; o caso é o oposto
+   — ela existe e não desceu. Usar o placeholder de hoje seria mentir calado.
+
+   Ocupa a caixa inteira da foto (que é `relative`) em vez de empurrar layout:
+   o card não pode mudar de altura por causa do estado de rede. */
+.card-sem-foto {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 1.1rem;
+    text-align: center;
+}
+.card-sem-foto svg { width: 34px; height: 34px; opacity: 0.6; }
+.card-sem-foto strong { font-size: 0.95rem; font-weight: 600; }
+/* 0.75 e não menos: o esmaecido MISTURA a cor com o fundo e derruba o
+   contraste sem aparecer no `getComputedStyle().color` — foi assim que o
+   `.valor-ausente` nasceu reprovado no WCAG (3,79:1 com 0.65). */
+.card-sem-foto span { font-size: 0.8rem; opacity: 0.75; max-width: 24ch; }

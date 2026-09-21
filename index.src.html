@@ -770,6 +770,27 @@
                             </label>
                         </div>
 
+                        <!-- DISPONÍVEL OFFLINE — no FIM da aba e DESMARCADA de
+                             fábrica, a pedido do owner: é exceção (a estrada),
+                             não o padrão. Opt-in ESTRITO no `loadPreferences`
+                             (`=== true`), então quem nunca marcou não gasta um
+                             byte a mais nem recebe URL de foto diferente.
+
+                             A descrição é escrita pelo JS (`atualizarLinhaDoOffline`)
+                             porque ela tem CINCO estados: desmarcado, enchendo,
+                             pronto, sem-rede-com-fila e sem-rede-vazio. O texto
+                             do HTML é só o primeiro, pra a linha não nascer vazia
+                             antes do JS rodar. -->
+                        <div>
+                            <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
+                                <span>
+                                    <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.offline.label">Disponível offline</span>
+                                    <span id="prefOfflineDesc" class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="prefs.offline.desc">Guarda os pedidos e o mapa no aparelho para você seguir sem sinal.</span>
+                                </span>
+                                <input id="prefOfflineDisponivel" type="checkbox" class="ui-switch">
+                            </label>
+                        </div>
+
                     </div>
 
                     <!-- ══ ABA HISTÓRICO (só leitura) ══ -->
