@@ -3091,6 +3091,14 @@ function dlogVoltou(o) {
 let dlogMomentos = [];
 const DLOG_MAX_MOMENTOS = 12;
 
+// Teto POR MOTIVO, só pro que acontece por uso normal. Motivo que só dispara
+// quando algo deu errado (erro de JS, alarme falso de sessão) não entra aqui:
+// ali o anel inteiro é pouco. O arraste é o oposto — é o gesto central da app,
+// e sem cota ele toma as 12 vagas sozinho.
+// DOIS e não um: o primeiro arraste da sessão raramente é o que interessa, e
+// com dois sobra o mais recente, que é o que a pessoa acabou de ver.
+const DLOG_COTA_POR_MOTIVO = { 'auto:arraste': 2 };
+
 function dlogTelaAtual() {
     // `offsetParent` NÃO serve aqui: ele é `null` para elemento `position:
     // fixed`, e TODO modal desta app é fixed. Com ele, `modais` vinha sempre
@@ -3214,6 +3222,16 @@ function medirSafeArea() {
 // COMPUTADO dizem se ela rola ou se está cortada — que são coisas diferentes e
 // `scrollHeight > clientHeight` é verdadeiro nas DUAS (gotcha #29).
 const DIAG_ALVOS = ['.place-card:not(.card-fundo)', '.card-fundo', '.card-content', '.card-changes', '.card-flag-comment',
+                    // O mapa entrou em v2026.09.21-05, e a razão é uma falha do
+                    // próprio instrumento: o owner relatou o mapa do card de
+                    // fundo mudando de tamanho ao virar frente, e o diagnóstico
+                    // dele NÃO tinha como mostrar isso. A geometria já media os
+                    // dois cards lado a lado, mas nenhuma coluna distinguia o
+                    // caso — as CAIXAS sempre bateram; o que divergia era o
+                    // ENQUADRAMENTO (`data-mapa-w/h`), que só existia no `dom`
+                    // cru de 140 KB. Dado que só está no HTML é dado que
+                    // ninguém procura sem já saber a resposta.
+                    '.card-map:not(.hidden)',
                     '#cardStack', '#placar', 'header', '.modal-root:not(.hidden) > div',
                     '#imageLightbox:not(.hidden)', '#devFab:not(.hidden)',
                     '.card-btn-reject', '.card-btn-skip', '.card-btn-read'];
@@ -3246,6 +3264,16 @@ function diagGeometria() {
                 // retângulos existem e só o hit-test diz quem intercepta —, e
                 // ele já reincidiu três vezes neste projeto.
                 noCentro: diagQuemEstaNoCentro(e, r),
+                // O ENQUADRAMENTO do mapa: pra que tamanho ele foi desenhado.
+                // Sem isto, frente e fundo saem idênticos no relatório mesmo
+                // quando um deles está desenhado pra outra caixa.
+                ...(e.dataset && e.dataset.mapaW
+                    ? { mapaPara: e.dataset.mapaW + 'x' + e.dataset.mapaH } : {}),
+                // Do card de FUNDO? Ele é coberto pelo da frente POR
+                // CONSTRUÇÃO (`inert` + `pointer-events:none`), então o
+                // hit-test nele acusa o normal como defeito — ver a sentinela
+                // do toque.
+                noFundo: !!(e.closest && e.closest('.card-fundo')),
                 // DENTRO de uma camada aberta, ou atrás dela? Quem está atrás é
                 // coberto por construção, e alertar nisso é ruído.
                 naCamada: camadas.some((c) => c.contains(e)),
@@ -3262,7 +3290,13 @@ function diagQuemEstaNoCentro(el, r) {
                                                Math.round(r.top + r.height / 2));
         if (!alvo) return 'nada';
         if (alvo === el || el.contains(alvo)) return 'ele mesmo';
-        return (alvo.id ? '#' + alvo.id : alvo.tagName + '.' + String(alvo.className).split(' ')[0]).slice(0, 60);
+        // `className` de elemento SVG é um SVGAnimatedString, não uma string:
+        // `String(...)` devolvia `[object SVGAnimatedString]` e o rótulo saía
+        // como `path.[object` — inútil justamente no alerta cujo produto é
+        // dizer QUEM interceptou. Os ícones do card são SVG, então isso valia
+        // pra todo alerta de toque que já saiu.
+        const cls = alvo.getAttribute ? (alvo.getAttribute('class') || '') : '';
+        return (alvo.id ? '#' + alvo.id : alvo.tagName + (cls ? '.' + cls.split(' ')[0] : '')).slice(0, 60);
     } catch (e) { return null; }
 }
 
@@ -3449,7 +3483,15 @@ function diagSentinelas(comp) {
         for (const g of comp.geometria || []) {
             if (g.noCentro && g.noCentro !== 'ele mesmo' && g.noCentro !== 'nada'
                 && /card-btn|devFab/.test(g.sel)
-                && !(g.camadaAberta && !g.naCamada)) {
+                && !(g.camadaAberta && !g.naCamada)
+                // REINCIDIU pela PILHA (v2026.09.21-05): o card de fundo tem os
+                // mesmos três botões, e eles são cobertos pelo da frente — que
+                // é a função da pilha. MEDIDO com controle: 3 alertas com dois
+                // pedidos na fila, ZERO com um. Ou seja, desde v2026.09.19-01
+                // TODO diagnóstico com fila cheia trazia três alertas falsos,
+                // na seção que se lê primeiro. Mesma sentinela, mesma
+                // quantidade, causa nova — e a regra é a mesma do modal aberto.
+                && !g.noFundo) {
                 diga('toqueInterceptado',
                     'algo está por cima de um controle: o dedo não chega nele',
                     { alvo: g.sel, recebe: g.noCentro });
@@ -3458,6 +3500,33 @@ function diagSentinelas(comp) {
             if (/card-btn|devFab/.test(g.sel) && (g.w < 44 || g.h < 44)) {
                 diga('alvoPequeno', 'alvo de toque abaixo de 44px',
                     { alvo: g.sel, w: g.w, h: g.h });
+            }
+        }
+        // 5. O mapa desenhado pra uma caixa que não é a dele.
+        //
+        // INVARIANTE que a app garante: `renderMapa` enumera os tiles pra
+        // cobrir exatamente `larguraPx × alturaPx`, então o enquadramento tem
+        // que ser o tamanho da caixa. Quando não é, sobra faixa sem tile (caixa
+        // maior que o enquadramento) ou o zoom foi escolhido pra outra
+        // proporção (caixa menor) — os dois visíveis, nenhum detectável pelo
+        // resto deste arquivo.
+        //
+        // Nasceu de uma falha do INSTRUMENTO: o owner relatou o mapa do card de
+        // fundo mudando de tamanho ao virar frente, e o diagnóstico dele não
+        // tinha como mostrar. A geometria já media os dois cards, mas as CAIXAS
+        // sempre batem — o que diverge é o enquadramento.
+        //
+        // Tolerância de 1px porque `clientWidth` é inteiro arredondado
+        // (gotcha #34) e o enquadramento guarda o valor lido na hora.
+        for (const g of comp.geometria || []) {
+            if (!g.mapaPara || !/card-map/.test(g.sel)) continue;
+            const [mw, mh] = g.mapaPara.split('x').map(Number);
+            if (Math.abs(mw - g.w) > 1 || Math.abs(mh - g.h) > 1) {
+                diga('mapaForaDaCaixa',
+                    'o mini-mapa foi desenhado pra um tamanho que não é o da caixa dele — '
+                    + 'sobra faixa sem tile, ou o zoom é de outra proporção',
+                    { onde: g.noFundo ? 'card de fundo' : 'card da frente',
+                      caixa: g.w + 'x' + g.h, desenhadoPara: g.mapaPara });
             }
         }
         // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é
@@ -3515,6 +3584,25 @@ function dlogCapturar(motivo) {
             dom: document.documentElement.outerHTML,
         };
         dlogMomentos.push(m);
+        // COTA POR MOTIVO pro que é FREQUENTE, e o arraste é o caso: ele é o
+        // gesto central da app, então a uma captura por 30s ele enche as 12
+        // vagas do anel em ~6 minutos de triagem — e empurra pra fora o momento
+        // do erro de JS e o da queda de sessão, que são os que se quer ler.
+        // É o mesmo risco que o comentário do `dlogCapturarAuto` já descrevia
+        // ("um erro em laço enche o anel e empurra pra fora justamente o
+        // começo"), só que disparado pelo uso NORMAL em vez de por defeito.
+        //
+        // MEDIDO: um momento pesa 147 KB e o anel cheio leva o diagnóstico de
+        // 760 KB pra 2,5 MB — com TODAS as vagas em `auto:arraste`. Com a cota,
+        // o arraste descarta o próprio mais antigo e nunca toca nos outros.
+        const cota = DLOG_COTA_POR_MOTIVO[motivo];
+        if (cota) {
+            let sobrando = dlogMomentos.filter((x) => x.motivo === motivo).length - cota;
+            for (let i = 0; i < dlogMomentos.length && sobrando > 0; ) {
+                if (dlogMomentos[i].motivo === motivo) { dlogMomentos.splice(i, 1); sobrando--; }
+                else i++;
+            }
+        }
         if (dlogMomentos.length > DLOG_MAX_MOMENTOS) dlogMomentos.shift();
         dlog('momento', { motivo, painel: m.painel });
         return m;
@@ -5360,6 +5448,23 @@ function renderCurrentCard() {
     card.querySelector('.card-btn-skip').addEventListener('click', () => fireAction('up', handleSkip));
     card.querySelector('.card-btn-read').addEventListener('click', () => fireAction('right', handleMarkAsRead));
 
+    // Ampliar o mapa é interação, então segue a MESMA regra dos três botões
+    // acima: mora no card da frente, nunca no `montarCard`. Antes ficava
+    // dentro do `renderMapa`, que roda mais de uma vez por card — e aí cada
+    // passada pendurava outro ouvinte no mesmo elemento (`stopPropagation`
+    // não impede o irmão; isso seria `stopImmediatePropagation`).
+    // O box existe sempre no template, mesmo quando o mapa não é o primeiro
+    // slide: pendurar aqui é uma vez por card, e o clique só chega quando ele
+    // está visível.
+    const mapaBoxF = card.querySelector('.card-map');
+    if (mapaBoxF) {
+        mapaBoxF.addEventListener('click', (ev) => {
+            if (ev.target.closest('button')) return;   // as setas do carrossel não
+            ev.stopPropagation(); ev.preventDefault();
+            MapaLightbox.open(place);
+        });
+    }
+
 
     // O card novo nasce travado se a janela do Desfazer ainda estiver correndo
     // (o `undo` devolve o place anterior à fila e re-renderiza).
@@ -5386,6 +5491,10 @@ function renderCurrentCard() {
     // styles.css, junto com o que o fade arrastava atrás de si.
     removeCurrentCardEl();
     document.getElementById('cardStack').appendChild(card);
+    // Agora que a caixa existe. Sem isto o card da frente também guarda o
+    // enquadramento do fallback — o observer só o corrige quando a caixa
+    // CRESCE, e num card com diff ela encolhe. Ver `desenharMapaComCaixa`.
+    desenharMapaComCaixa(card, place);
     // Tira o .celebrate junto: sem isso o confete não reinicia quando a fila
     // zerar de novo (a classe ficaria pendurada do "Tudo limpo!" anterior).
     document.getElementById('noMoreCards').classList.remove('celebrate');
@@ -5604,6 +5713,30 @@ function montarCard(place) {
 //    o resto do card de `queue[1]` — inclusive o tile do mapa quando é ele que
 //    vem primeiro (gotcha #54). O card de fundo desenha exatamente esse pedido,
 //    logo depois: sai do cache. Custo de rede da pilha: ZERO.
+// O mapa só sabe se enquadrar quando a caixa EXISTE, e ela só existe no DOM.
+//
+// `renderMapa` mede com `box.clientWidth || 400`: fora do DOM isso é 0 e ele
+// enquadra pra 400×240 — um tamanho que não é o de card nenhum. O observer de
+// `vigiarCaixaDoMapa` conserta só metade dos casos, porque ele refaz quando a
+// caixa CRESCE (encolher não abre buraco, e refazer à toa é custo por quadro).
+// Quando a caixa real é MENOR que o fallback — card com diff, que deixa pouca
+// altura pro mapa — ele não refaz, e o enquadramento fica calculado pra outra
+// proporção: 400×240 é 1,67 e 359×144 é 2,49, então o zoom escolhido é outro.
+//
+// MEDIDO nos dois sentidos: o card de fundo guardava 400×240 numa caixa de
+// 359×337 (faixa sem mapa embaixo, o que o owner fotografou), e o da frente
+// guardava 400×240 numa caixa de 359×144 (enquadramento de outra proporção).
+// Chamar isto depois do `appendChild` conserta os dois pela raiz, em vez de
+// repor o observer perdido no clone.
+function desenharMapaComCaixa(card, place) {
+    const box = card && card.querySelector('.card-map');
+    // Escondido a caixa mede 0 e cairíamos no mesmo fallback. O mapa que não é
+    // o primeiro slide se desenha quando o editor navega até ele — e aí o card
+    // já está no DOM, que é justamente a condição que falta aqui.
+    if (!box || box.classList.contains('hidden')) return;
+    try { renderMapa(card, place, true); } catch (e) { /* mapa nunca derruba o card */ }
+}
+
 function montarCardDeFundo() {
     const stack = document.getElementById('cardStack');
     if (!stack) return;
@@ -5669,6 +5802,28 @@ function montarCardDeFundo() {
     // card da FRENTE. É a diferença entre uma linha que todo mundo precisa
     // lembrar e uma que já nasce certa.
     stack.appendChild(fundo);
+
+    // E SÓ AGORA o mapa, porque só agora a caixa tem tamanho.
+    //
+    // `renderMapa` mede com `box.clientWidth || 400` — fora do DOM isso é 0, e
+    // ele enquadra pra 400×240, um tamanho que não é o do card. No card da
+    // FRENTE o erro se conserta sozinho: o `ResizeObserver` de
+    // `vigiarCaixaDoMapa` refaz quando a caixa assenta. No de fundo, não —
+    // `cloneNode` copia atributo e **não copia propriedade JS**, então o
+    // observer fica no original e o clone guarda o enquadramento errado PRA
+    // SEMPRE.
+    //
+    // RELATADO pelo owner, com duas capturas do mesmo pedido: puxando o card
+    // da frente, o mapa do de baixo tem um tamanho; quando ele chega à frente,
+    // tem outro. REPRODUZIDO aqui — caixa 359×337 nos dois, desenhada pra
+    // 359×337 na frente e pra 400×240 no fundo, com o tile 48px fora do lugar
+    // e uma faixa sem mapa embaixo. O card de fundo é a PROMESSA do que vem;
+    // promessa que muda ao virar realidade lê como a app tropeçando.
+    //
+    // Um redesenho basta, e ele reinstala o observer de quebra. Só quando o
+    // mapa está VISÍVEL: escondido a caixa é 0 e cairíamos no mesmo fallback
+    // que este conserto existe pra evitar.
+    desenharMapaComCaixa(fundo, proximo);
 }
 
 // Tempo máximo que o aquecimento espera a foto do card. Rede de segurança: foto
@@ -5893,14 +6048,15 @@ function renderMapa(card, place, refazendo) {
         s.appendChild(document.createTextNode(t(p.rot)));
         leg.appendChild(s);
     }
-    // Clicar amplia — o mesmo gesto da foto, que é o que os testadores
-    // pediram. `once` porque `renderMapa` só monta uma vez por card.
+    // Clicar amplia, mas o OUVINTE não mora aqui — ver `renderCurrentCard`.
+    // O comentário que estava nesta linha dizia "`once` porque `renderMapa` só
+    // monta uma vez por card", e as duas metades eram falsas: o código passava
+    // `{ once: false }`, e o observer de caixa logo acima refaz o mapa sempre
+    // que o layout assenta. MEDIDO: o mapa já NASCIA com dois ouvintes (um
+    // clique abria o lightbox 2×) e ia a três depois do primeiro refazer.
+    // Desenho puro aqui também é o que deixa o card de FUNDO redesenhar sem
+    // ganhar interação — ele é uma figura, e precisa ser igual ao que vem.
     box.style.cursor = 'zoom-in';
-    box.addEventListener('click', (ev) => {
-        if (ev.target.closest('button')) return;   // as setas do carrossel não
-        ev.stopPropagation(); ev.preventDefault();
-        MapaLightbox.open(place);
-    }, { once: false });
     box.dataset.pronto = '1';
     return true;
 }
@@ -10082,22 +10238,55 @@ function updateInFlightIndicator() {
     if (!el) {
         el = document.createElement('div');
         el.id = 'inFlightIndicator';
-        el.className = 'fixed top-20 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg z-40 flex items-center gap-2';
         document.body.appendChild(el);
     }
     // Girando só quando está MESMO saindo. "Esperando" com giro seria a app
     // fingindo trabalho que não está acontecendo — e é justamente o estado em
     // que não há rede pra trabalhar.
     const enviando = AppState.inFlightActions > 0;
-    const giro = enviando ? `
-        <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-        </svg>` : '';
+    const n = enviando ? AppState.inFlightActions : esperando;
     const texto = enviando
         ? t('indicator.sending', { n: AppState.inFlightActions })
         : t('indicator.waiting', { n: esperando });
-    el.innerHTML = giro + `<span>${escapeHtml(texto)}</span>`;
+
+    // ÍCONE + NÚMERO, sem pílula (decisão do owner, 2026-09-21, olhando mockups
+    // na tela real: *"o texto não poderia ser mais discreto?"*).
+    //
+    // MEDIDO nas cinco variantes, no iPhone dele e no Fold: a frase inteira
+    // custava 128px e tapava **100% da tinta do RESTAM**; isto custa 23px e
+    // **zero**. Ou seja, encolher resolveu de graça o que tinha sido avaliado e
+    // mantido a contragosto uma hora antes — foi o dado novo que a régua de
+    // "não re-proponha sem dado novo" pedia.
+    //
+    // O ÍCONE é que carrega o estado, nunca a cor sozinha (WCAG 1.4.1, a mesma
+    // régua que fez a pílula da presença trocar de ícone): spinner girando =
+    // saindo agora, relógio = parado esperando rede. A cor só reforça.
+    //
+    // SÓ NÚMERO foi medido e RECUSADO: "2" e "3" ficam visualmente idênticos, e
+    // aí se perde exatamente a distinção que importa quando não há sinal —
+    // entre o trabalho estar saindo e estar encalhado.
+    const icone = enviando ? `
+        <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+        </svg>` : `
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>
+        </svg>`;
+    // As shades do CLARO são -800 e não -700: sem pílula o contraste é contra o
+    // cartão do placar, e -700 media 4,8:1 contra um mínimo de 4,5 — passa, mas
+    // com 0,3 de folga. O `.valor-ausente` já nasceu numa margem dessas e teve
+    // que ser corrigido depois (gotcha #40: constante de contraste tem ESCOPO).
+    el.className = 'fixed top-20 right-4 z-40 flex items-center gap-1 text-[0.6875rem] font-semibold '
+        + (enviando ? 'text-cyan-800 dark:text-cyan-300'
+                    : 'text-amber-800 dark:text-amber-300');
+    el.title = texto;
+    // A FRASE INTEIRA continua existindo pra quem usa leitor de tela: o que
+    // encolheu foi o pixel, não a informação. Sem o `sr-only` ele ouviria "3" e
+    // mais nada — e "3" sozinho não diz nem o que são, nem em que estado estão.
+    el.innerHTML = icone + `<span class="tnum" aria-hidden="true">${escapeHtml(String(n))}</span>`
+        + `<span class="sr-only">${escapeHtml(texto)}</span>`;
 }
 
 // Feedback quando um número muda. São DOIS mecanismos, porque contar não serve
