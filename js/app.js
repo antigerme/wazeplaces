@@ -3091,6 +3091,14 @@ function dlogVoltou(o) {
 let dlogMomentos = [];
 const DLOG_MAX_MOMENTOS = 12;
 
+// Teto POR MOTIVO, só pro que acontece por uso normal. Motivo que só dispara
+// quando algo deu errado (erro de JS, alarme falso de sessão) não entra aqui:
+// ali o anel inteiro é pouco. O arraste é o oposto — é o gesto central da app,
+// e sem cota ele toma as 12 vagas sozinho.
+// DOIS e não um: o primeiro arraste da sessão raramente é o que interessa, e
+// com dois sobra o mais recente, que é o que a pessoa acabou de ver.
+const DLOG_COTA_POR_MOTIVO = { 'auto:arraste': 2 };
+
 function dlogTelaAtual() {
     // `offsetParent` NÃO serve aqui: ele é `null` para elemento `position:
     // fixed`, e TODO modal desta app é fixed. Com ele, `modais` vinha sempre
@@ -3576,6 +3584,25 @@ function dlogCapturar(motivo) {
             dom: document.documentElement.outerHTML,
         };
         dlogMomentos.push(m);
+        // COTA POR MOTIVO pro que é FREQUENTE, e o arraste é o caso: ele é o
+        // gesto central da app, então a uma captura por 30s ele enche as 12
+        // vagas do anel em ~6 minutos de triagem — e empurra pra fora o momento
+        // do erro de JS e o da queda de sessão, que são os que se quer ler.
+        // É o mesmo risco que o comentário do `dlogCapturarAuto` já descrevia
+        // ("um erro em laço enche o anel e empurra pra fora justamente o
+        // começo"), só que disparado pelo uso NORMAL em vez de por defeito.
+        //
+        // MEDIDO: um momento pesa 147 KB e o anel cheio leva o diagnóstico de
+        // 760 KB pra 2,5 MB — com TODAS as vagas em `auto:arraste`. Com a cota,
+        // o arraste descarta o próprio mais antigo e nunca toca nos outros.
+        const cota = DLOG_COTA_POR_MOTIVO[motivo];
+        if (cota) {
+            let sobrando = dlogMomentos.filter((x) => x.motivo === motivo).length - cota;
+            for (let i = 0; i < dlogMomentos.length && sobrando > 0; ) {
+                if (dlogMomentos[i].motivo === motivo) { dlogMomentos.splice(i, 1); sobrando--; }
+                else i++;
+            }
+        }
         if (dlogMomentos.length > DLOG_MAX_MOMENTOS) dlogMomentos.shift();
         dlog('momento', { motivo, painel: m.painel });
         return m;

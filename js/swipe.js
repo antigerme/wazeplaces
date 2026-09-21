@@ -38,6 +38,22 @@ const VIBRACAO_COMMIT_MS = 8;
 const FLICK_VELOCITY = 0.6;
 const FLICK_MIN_DISTANCE = 40;
 
+// Qual dedo está arrastando. `null` no mouse, que não tem o problema.
+let dragTouchId = null;
+
+// Uma captura por arraste, não por quadro: o `touchmove` dispara dezenas de
+// vezes e cada momento carrega um `outerHTML` inteiro.
+let capturouNesteGesto = false;
+
+// Acha o toque do arraste numa TouchList. `identifier` pode ser 0, então a
+// comparação é contra `null` e nunca `!id` — o mesmo cuidado que o
+// `autorEmFoco` já exigiu com id 0 (falsy que mandava o foco embora calado).
+function toqueDoArraste(lista) {
+    if (dragTouchId === null || !lista) return null;
+    for (const t of lista) if (t.identifier === dragTouchId) return t;
+    return null;
+}
+
 function enableSwipeOnCard(card) {
     card.addEventListener('mousedown', handleDragStart);
     card.addEventListener('touchstart', handleDragStart, { passive: false });
@@ -56,13 +72,31 @@ function handleDragStart(e) {
     if (e.target.closest('button, a, input, select, textarea, .card-changes-list, .card-flag-comment-text')) return;
 
     isDragging = true;
+    capturouNesteGesto = false;
     currentCard = e.currentTarget;
     if (e.type === 'mousedown') {
+        dragTouchId = null;
         startX = e.clientX;
         startY = e.clientY;
     } else {
-        startX = e.touches[0].clientX;
-        startY = e.touches[0].clientY;
+        // QUAL dedo começou. Sem isto, o `touchend` no `document` não distingue
+        // dedos: qualquer SEGUNDO toque que saia da tela durante o arraste era
+        // lido como "soltou o card" e, passado o limiar, COMMITAVA.
+        //
+        // MEDIDO com controle: segundo dedo encostando e não soltando → o card
+        // fica; segundo dedo tocando e SOLTANDO, com o primeiro ainda
+        // segurando → o card avança e o placar sobe **1 rejeitado**. Ou seja um
+        // pedido tratado sem ninguém ter decidido.
+        //
+        // Isso não é só o botão do modo dev (foi por onde o owner topou com
+        // ele): vale pra palma encostando na borda, pro outro polegar, pra
+        // qualquer toque acidental — e acontece CALADO, que é o que o torna
+        // caro. `changedTouches[0]` e não `touches[0]`: o que interessa é o
+        // dedo que ACABOU de encostar, e num segundo toque ele não é o [0].
+        const t = e.changedTouches && e.changedTouches[0];
+        dragTouchId = t ? t.identifier : null;
+        startX = (t || e.touches[0]).clientX;
+        startY = (t || e.touches[0]).clientY;
     }
     currentX = startX;
     currentY = startY;
@@ -90,8 +124,12 @@ function handleDragMove(e) {
         currentX = e.clientX;
         currentY = e.clientY;
     } else {
-        currentX = e.touches[0].clientX;
-        currentY = e.touches[0].clientY;
+        // O MESMO dedo, não o `[0]`: com dois na tela, se o primeiro sair o
+        // `touches[0]` passa a ser o outro e o card SALTA pra onde ele estiver.
+        const t = toqueDoArraste(e.touches);
+        if (!t) return;            // este `touchmove` é de outro dedo
+        currentX = t.clientX;
+        currentY = t.clientY;
     }
 
     const now = performance.now();
@@ -104,6 +142,27 @@ function handleDragMove(e) {
     const deltaX = currentX - startX;
     const deltaY = currentY - startY;
     const dominantVertical = Math.abs(deltaY) > Math.abs(deltaX) && deltaY < -30;
+
+    // CAPTURA o estado do meio do gesto, UMA vez por arraste, quando ele passa
+    // do limiar. Pedido do owner (2026-09-21), e o motivo é que o defeito do
+    // mapa do card de fundo SÓ EXISTE aqui: com o card deslocado, o de baixo
+    // aparecendo. Ele teve que fotografar a tela com o celular porque o
+    // diagnóstico não tinha esse instante.
+    //
+    // AUTOMÁTICA e não por botão, e isso é regra da casa escrita no próprio
+    // `dlogCapturarAuto`: *"vale mais que o botão: o defeito não espera a
+    // pessoa ser rápida"*. Com botão seriam dois dedos na tela — que era, por
+    // sinal, como o defeito do multi-toque aparecia.
+    //
+    // O portão e o teto de 30s por motivo são do `dlogCapturarAuto`: fora do
+    // modo dev isto sai na primeira linha, e o momento carrega o DOM (nome e
+    // endereço de terceiros), então nunca roda sem o dev ATIVO. `umaVezPorGesto`
+    // é o que impede ~200 capturas por sessão — cada uma com um `outerHTML`.
+    if (!capturouNesteGesto
+        && (Math.abs(deltaX) > window.innerWidth * 0.25 || Math.abs(deltaY) > 120)) {
+        capturouNesteGesto = true;
+        try { if (window.dlogCapturarAuto) window.dlogCapturarAuto('arraste'); } catch (err) { /* nunca derruba o gesto */ }
+    }
 
     if (dominantVertical) {
         currentCard.style.transform = `translate(0, ${deltaY}px) scale(${Math.max(0.85, 1 + deltaY / 1000)})`;
@@ -132,6 +191,7 @@ function dragVelocity() {
 function handleDragCancel() {
     if (!isDragging || !currentCard) return;
     isDragging = false;
+    dragTouchId = null;
     if (dragHandlers) {
         document.removeEventListener('mousemove', dragHandlers.move);
         document.removeEventListener('mouseup', dragHandlers.end);
@@ -151,7 +211,14 @@ function handleDragCancel() {
 
 function handleDragEnd(e) {
     if (!isDragging || !currentCard) return;
+    // SÓ o dedo que começou o arraste encerra o gesto. Sem esta linha, um
+    // segundo toque saindo da tela COMMITAVA o card — medido: o placar subia
+    // 1 rejeitado sem ninguém ter decidido. O `e` pode faltar (o `cancel`
+    // chama isto sem evento em alguns caminhos), e aí encerra como sempre.
+    if (e && e.changedTouches && dragTouchId !== null
+        && !toqueDoArraste(e.changedTouches)) return;
     isDragging = false;
+    dragTouchId = null;
 
     const deltaX = currentX - startX;
     const deltaY = currentY - startY;

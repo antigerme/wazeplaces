@@ -611,3 +611,30 @@ test('o rótulo de quem interceptou não quebra em SVG', () => {
   assert.match(q, /getAttribute\('class'\)/,
     'o rótulo precisa ler o atributo `class`, que vale em HTML e em SVG');
 });
+
+test('motivo FREQUENTE tem cota própria e não expulsa os outros do anel', () => {
+  const app = semLinhaComentada(APP);
+  assert.match(app, /DLOG_COTA_POR_MOTIVO = \{ 'auto:arraste': 2 \}/,
+    'a cota do arraste sumiu: ele é o gesto CENTRAL da app e, a uma captura por 30s, '
+    + 'toma as 12 vagas do anel em ~6 minutos — empurrando pra fora o momento do erro '
+    + 'de JS e o da queda de sessão, que são os que se quer ler');
+  const cap = semLinhaComentada(APP.slice(APP.indexOf('function dlogCapturar(')));
+  // A poda tem que acontecer ANTES do corte do anel: se rodar depois, o
+  // `shift()` já tirou o mais antigo de OUTRO motivo, que é o dano que a cota
+  // existe pra evitar.
+  const iCota = cap.indexOf('DLOG_COTA_POR_MOTIVO[motivo]');
+  const iShift = cap.indexOf('dlogMomentos.shift()');
+  assert.ok(iCota > 0 && iShift > 0, 'não achei as âncoras da poda');
+  assert.ok(iCota < iShift,
+    'a cota passou pra depois do corte do anel — aí o `shift()` já removeu o momento '
+    + 'de outro motivo e a cota não protege mais nada');
+  // E ela poda o PRÓPRIO motivo, nunca varre o anel inteiro.
+  assert.match(cap, /dlogMomentos\[i\]\.motivo === motivo/,
+    'a poda deixou de olhar o motivo: ela passa a descartar momento alheio, que é '
+    + 'exatamente o oposto do que a cota existe pra fazer');
+  // MEDIDO: 147 KB por momento; sem cota o anel cheio leva o diagnóstico de
+  // 760 KB a 2,5 MB, com TODAS as vagas em arraste. Com cota: 1,06 MB cru,
+  // +47 KB no ZIP que o editor manda.
+  assert.ok(/DLOG_MAX_MOMENTOS = 12/.test(app),
+    'o teto do anel mudou — os números da cota foram medidos contra 12 vagas');
+});
