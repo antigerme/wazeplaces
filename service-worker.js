@@ -1,7 +1,10 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026092107';
+const CACHE_NAME = 'waze-places-2026092108';
+// Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
+// ver a nota no `activate`.
+const TILES_CACHE = 'waze-places-tiles';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -34,7 +37,10 @@ self.addEventListener('activate', event => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
-          if (cacheName !== CACHE_NAME) {
+          // O cache dos tiles do offline NÃO entra na faxina. Ele é da FILA,
+          // não da versão: apagá-lo a cada deploy faria o mapa que o editor
+          // provisionou sumir sem aviso — e ele descobriria na estrada.
+          if (cacheName !== CACHE_NAME && cacheName !== TILES_CACHE) {
             return caches.delete(cacheName);
           }
         })
@@ -61,7 +67,23 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(event.request.url);
 
-  if (url.origin !== self.location.origin) return;
+  // EXCEÇÃO ESTREITA ao "ignore tudo de fora": só o tile do mapa, e só quando
+  // ele já está no nosso cache. Abrir pra todo domínio externo seria passar a
+  // guardar coisa que ninguém pediu. Quem PÕE no cache é o app.js (ver
+  // `offlineBaixar`); aqui só servimos o que já está lá, que é o que faz o
+  // mapa existir na sombra — o tile vem com `max-age=600` e o navegador o
+  // descartaria em dez minutos.
+  if (url.origin !== self.location.origin) {
+    if (/-tiles\/live\/base\//.test(url.pathname)) {
+      event.respondWith(
+        caches.open(TILES_CACHE)
+          .then((c) => c.match(event.request))
+          .then((hit) => hit || fetch(event.request))
+          .catch(() => fetch(event.request))
+      );
+    }
+    return;
+  }
 
   if (url.pathname.startsWith('/api/')) return;
 

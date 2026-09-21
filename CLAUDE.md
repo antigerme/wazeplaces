@@ -644,6 +644,46 @@ Editar `js/app.js` sem `npm run js` deixou o navegador sem `enfileirarSaida` enq
 
 ---
 
+## 📴 Disponível offline — o TRABALHO sobrevive à sombra de sinal
+
+Degrau 2, v2026.09.21-08. O Degrau 1 (fila de saída) fez a **ação** sobreviver; isto faz o **trabalho** sobreviver. Toggle **opt-in ESTRITO** (`=== true`), **desmarcado de fábrica**, última linha da aba Preferências — decisão do owner: *"é exceção e não o padrão"*. **Quem não marca não paga NADA**: nem byte, nem requisição, nem sequer uma URL de foto diferente.
+
+**Os três itens têm prazos DIFERENTES, e é isso que desenha tudo:**
+
+| | onde | prazo | porque |
+|---|---|---|---|
+| texto (357 KB/294 pedidos) | IndexedDB nosso | permanente | já chegou; gravar não custa requisição |
+| mapa (11,8 MB) | Cache API nosso | permanente | o tile **tem CORS** (`ACAO: *`) → transparente, 1,01× |
+| foto (13,5 MB) | cache do navegador | **60 min** | **sem CORS** → opaca → **7,8 MB de orçamento cada** |
+
+**A foto não é guardável, e o número é brutal.** MEDIDO com controle (mesmos bytes, mudando só o cabeçalho): 1,19 MB custam **1,20 MB** com CORS e **157,37 MB** sem — 132×. As 226 fotos de uma fila custariam **1,76 GB** contra ~1 GB de orçamento; 100 fotos já consomem 780 MB. Não é limitação nossa: é defesa do navegador contra medir o peso de recurso alheio. E não há variante com CORS — testadas 5 (`thumb_`, `thumb200_`, `thumb1000_`, sem `/thumbs`, com `Origin` de produção) e o preflight: **nenhuma**.
+
+**O RELÓGIO ROLANTE, e a física dele.** A foto vale 60 min **a partir do download**, e reaquecer uma foto viva **sai do cache, custa zero e NÃO renova** (medido). O que renova é baixar de novo — e pra forçar isso a app troca o **sufixo da URL** (`?w=<janela>`), que o CDN do Waze aceita devolvendo **bytes idênticos** (medido em 5 variantes) e que o navegador trata como entrada separada com relógio próprio (medido, com controle: a URL velha morre no prazo dela). Daí a relação que decide o custo: **ciclo de C minutos → toda foto tem sempre ≥ (60−C) minutos de vida**. Ciclo escolhido pelo owner: **20 min** → ≥40 min garantidos, ~41 MB/h **de uso com sinal** (na sombra não há o que gastar; com a app fechada, idem).
+
+**Quatro coisas que quebram calado se alguém mexer:**
+- **O sufixo é CONTRATO.** Card, lightbox e aquecimento passam TODOS por `urlDaFoto()`. Um usando a URL crua pede endereço que ninguém aqueceu → foto some offline, **sem erro nenhum**. `test/offline.test.mjs` reprova `.src` cru a partir de `imageUrls`.
+- **A janela servida (`offlineJanelaServida`) só avança quando a varredura TERMINA.** Virá-la antes faz o card pedir um sufixo não aquecido com a cópia boa parada no cache, a um sufixo de distância.
+- **O item que falha VOLTA pro fim da fila.** MEDIDO numa estrada simulada (20s sinal / 40s buraco): com retomada, **160 cards e ZERO perdidos**; sem ela, **77 cards e 404 itens perdidos PARA SEMPRE**. Metade do recurso numa linha.
+- **O cache dos tiles é ISENTO da faxina do `activate`.** O SW apaga todo cache ≠ `CACHE_NAME`; sem a isenção, **cada deploy apagaria o mapa provisionado** e o editor descobriria na estrada.
+
+**Gatilhos: quatro, nenhum deles polling** — a prova de rede (`API.aoProvarRede`, o mesmo gancho da fila de saída), o evento `online`, a abertura da app e o card que troca. O ciclo de 20 min **não é um timer**: é comparar a janela servida com a atual quando um dos quatro acontece de qualquer jeito. E o gancho **sai cedo durante o esvaziamento** — varrer no meio dele é competir por banda no pior momento (o guard do `fila-saida` cobra isso, e estava certo quando tentei tirar).
+
+**A FILA DO BRASIL NÃO REPRESENTA, e foi o owner quem cobrou.** Eu dimensionei tudo com 294 pedidos brasileiros; os outros 5 países obrigatórios voltam **zero pela API da app** (filtro de permissão — mede a permissão do owner, não o país). Medindo o dado **CRU** dos seis:
+
+| | UK | México | Portugal | Brasil | França | Espanha |
+|---|---|---|---|---|---|---|
+| pedidos | 165 | 502 | 455 | 310 | 534 | 541 |
+| **foto decide** (fora do baralho) | **1%** | 11% | 11% | 30% | 26% | **41%** |
+| provisionar custa | 13 MB | 48 MB | 37 MB | 28 MB | 40 MB | 48 MB |
+
+**1% a 41%** — variação de 40×, com o Brasil no meio, que é o que esconde o problema. Consequência aplicada: **o tamanho NUNCA vai cravado na tradução** (a frase "Cerca de 25 MB" mentia pra 5 dos 6 países). E `FLAGGED_PHOTO` é **0% nos seis**, não só no Brasil — a afirmação antiga deste arquivo sugeria o contrário.
+
+**Duas armadilhas de instrumento que custaram rodadas aqui:**
+- **`fetch` e `<img>` populam entradas de cache DIFERENTES.** Aquecer por `fetch(no-cors)` e consumir por `<img>` = foto quebrada offline. O aquecimento tem que usar o MESMO caminho do consumo.
+- **`setLang()` troca o dicionário mas NÃO repinta a tela** — falta `aplicarIdioma()`. E `aplicarIdioma()` dispara um **toast de confirmação**: num laço de mockups eles empilham e cobrem justamente a linha medida. Medição por `getBoundingClientRect` sobrevive (mede geometria, não o que está por cima); **captura, não**.
+
+---
+
 ## 🧠 AppState e fila de places
 
 `AppState` em `app.js` é o estado central:
