@@ -9219,6 +9219,17 @@ const SAIDA_RITMO_MS = 400;
 // duas versões é decoração (a régua do #67), então a recoleta saiu em vez de
 // ser remendada até passar.
 let esvaziandoSaida = false;
+// O gatilho que chegou COM o esvaziamento no ar. Sem ele a guarda de reentrada
+// vira uma PERDA: o `online` do navegador não é promessa de rede boa (o próprio
+// `callWithRetry` só confia no `false`), então a rede que volta em dois tempos —
+// túnel, elevador, 4G firmando — manda um `online` com a rede ainda ruim e outro
+// logo depois já firme. O primeiro entra, quebra no `transient` e SAI; o segundo
+// cai na guarda e some. Aí a fila fica presa com a rede ótima, e o próximo
+// gatilho é só na abertura seguinte da app — podem ser horas.
+// MEDIDO: com o abort atrasado em 900ms pra alargar a janela, a fila ficava em 2
+// com `esvaziando:false` e `onLine:true` por toda a medição. É também o que o
+// runner do CI produz sozinho, por lentidão — aqui a janela é de ~30ms.
+let saidaPedidaDeNovo = false;
 
 function carregarFilaDeSaida() {
     try {
@@ -9272,12 +9283,19 @@ function enfileirarSaida(tipo, place) {
 // `registrarPousoDeSaida`, que é o mesmo conjunto de regras sem essa parte.
 // A ÚNICA exceção é `unauthorized`, que precisa do `handleUnauthorized` de lá.
 async function esvaziarFilaDeSaida() {
-    if (esvaziandoSaida) return;
+    // Já tem um esvaziamento no ar: ANOTA o pedido em vez de descartá-lo. Duas
+    // chamadas simultâneas não podem drenar a mesma fila (é o que a trava
+    // impede), mas o gatilho não pode evaporar — ver `saidaPedidaDeNovo`.
+    if (esvaziandoSaida) { saidaPedidaDeNovo = true; return; }
     if (!AppState.authenticated) return;
     if (navigator.onLine === false) return;
     let f = carregarFilaDeSaida();
     if (!f.length) return;
     esvaziandoSaida = true;
+    // Zera ao ENTRAR, não ao sair: o que interessa é o gatilho que chegar DAQUI
+    // pra frente. Zerar no fim apagaria justamente o pedido que esta passada
+    // ainda não pôde atender.
+    saidaPedidaDeNovo = false;
     let enviados = 0;
     try {
         while (f.length) {
@@ -9336,6 +9354,15 @@ async function esvaziarFilaDeSaida() {
         showToast(t(enviados === 1 ? 'toast.saidaEnviada' : 'toast.saidaEnviadaPlural',
                     { n: enviados }), 'success');
     }
+    // O gatilho que chegou no meio é atendido AGORA. Não vira laço: a passada
+    // seguinte só existe se alguém pedir de novo DURANTE ela, e quem pede é o
+    // evento `online` do navegador ou a abertura da app — nenhum dos dois é
+    // nosso, nenhum é polling. As guardas do topo (deslogado, `onLine === false`,
+    // fila vazia) seguem valendo e param na primeira linha.
+    if (saidaPedidaDeNovo) {
+        saidaPedidaDeNovo = false;
+        return esvaziarFilaDeSaida();
+    }
 }
 
 // O pouso de um item da fila de saída. É o `handleActionResult` SEM a parte do
@@ -9370,18 +9397,18 @@ function registrarPousoDeSaida(actionType, place, result, item) {
 window.addEventListener('online', async () => {
     // EM ORDEM, nunca em paralelo — e a ordem é "trabalho do editor primeiro".
     //
-    // A primeira versão disparava os dois juntos e o CI reprovou: o
-    // `resetQueue()` roda SÍNCRONO no meio do esvaziamento (que está num
-    // `await`), mexendo em `pendingAction`, na fila e no `serverTotal` embaixo
-    // dele. Aqui a corrida passava; no runner, não — e o sintoma era a fila de
-    // saída não drenar, ou seja PERDER trabalho já feito, que é exatamente o
-    // que a fila existe pra impedir.
+    // O motivo é o free tier: a rede acabou de voltar, muitas vezes em dados
+    // móveis, e disparar duas correntes de requisição no mesmo instante é
+    // competir justamente no pior momento. Esperar não trava nada — o
+    // esvaziamento tem fim garantido (para no primeiro `transient`).
     //
-    // E há um motivo além da corrida: a rede acabou de voltar, muitas vezes em
-    // dados móveis. Disparar duas correntes de requisição no mesmo instante é
-    // competir justamente no pior momento — e o free tier é restrição de
-    // projeto. O esvaziamento tem fim garantido (para no primeiro `transient`),
-    // então esperar por ele não trava nada.
+    // Além disso o `resetQueue()` roda SÍNCRONO e mexe em `pendingAction`, na
+    // fila e no `serverTotal`; rodá-lo no meio de um `await` do esvaziamento é
+    // corrida por construção, mesmo que nenhuma medição a tenha pego.
+    //
+    // NÃO foi isto que reprovou o bloco da fila de saída no CI — eu afirmei que
+    // era e estava errado. A causa, reproduzida depois e determinística, era o
+    // gatilho ENGOLIDO pela guarda de reentrada (ver `saidaPedidaDeNovo`).
     await esvaziarFilaDeSaida();
     // E refaz a BUSCA se ela tinha falhado. Sem isto o editor ficava olhando
     // "Falha ao carregar" com 4g funcionando até tocar no botão — a fila de
