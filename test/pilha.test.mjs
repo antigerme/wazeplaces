@@ -337,3 +337,76 @@ test('o tique do FAB do modo dev é OUTRO, e segue separado', () => {
   assert.match(semComentarioJS(APP), /navigator\.vibrate && navigator\.vibrate\(\d+\)/,
     'o aviso tátil do FAB do modo dev sumiu');
 });
+
+test('o card de fundo desenha o mapa DEPOIS de entrar no DOM', () => {
+  const f = fatiar(APP, 'montarCardDeFundo');
+  const fSem = semComentarioJS(f);
+  // `renderMapa` mede com `box.clientWidth || 400`: fora do DOM isso é 0 e ele
+  // enquadra pra 400×240, um tamanho que não é o do card. No card da FRENTE o
+  // erro se conserta sozinho (o ResizeObserver de `vigiarCaixaDoMapa` refaz
+  // quando a caixa assenta); no de fundo NÃO, porque `cloneNode` não copia
+  // propriedade JS e o observer fica no original.
+  // Relatado pelo owner com duas capturas do mesmo pedido, e reproduzido:
+  // caixa 359×337 nos dois, desenhada pra 359×337 na frente e 400×240 no fundo.
+  const iAppend = fSem.indexOf('stack.appendChild(fundo)');
+  const iMapa = fSem.indexOf('desenharMapaComCaixa(fundo');
+  assert.ok(iAppend > 0, 'não achei o appendChild do card de fundo');
+  assert.ok(iMapa > 0,
+    'o card de fundo não redesenha mais o mapa: ele volta a guardar o enquadramento '
+    + 'de uma caixa 400×240 que não é a dele, e o mapa MUDA DE TAMANHO ao virar frente');
+  assert.ok(iMapa > iAppend,
+    'o redesenho do mapa ficou ANTES do appendChild — fora do DOM a caixa mede 0 e '
+    + '`renderMapa` cai no mesmo fallback de 400×240 que este conserto existe pra evitar');
+
+  // O card da FRENTE tem o MESMO problema, e o observer só o conserta quando a
+  // caixa CRESCE: num card com diff ela ENCOLHE em relação ao fallback (359×144
+  // contra 400×240, proporção 2,49 contra 1,67 — zoom diferente) e ninguém
+  // refaz. Por isso o desenho é fonte única e vale pros dois.
+  const rSem = semComentarioJS(fatiar(APP, 'renderCurrentCard'));
+  const jAppend = rSem.indexOf("getElementById('cardStack').appendChild(card)");
+  const jMapa = rSem.indexOf('desenharMapaComCaixa(card');
+  assert.ok(jAppend > 0 && jMapa > 0,
+    'o card da FRENTE não desenha mais o mapa com a caixa no DOM: ele guarda o '
+    + 'enquadramento do fallback sempre que a caixa real é menor que 400×240');
+  assert.ok(jMapa > jAppend,
+    'o desenho do mapa do card da frente ficou ANTES do appendChild — mesma caixa 0, '
+    + 'mesmo fallback');
+
+  // Só com o mapa VISÍVEL: escondido a caixa é 0 e o fallback volta.
+  const h = semComentarioJS(fatiar(APP, 'desenharMapaComCaixa'));
+  assert.match(h, /classList\.contains\('hidden'\)[\s\S]{0,60}return/,
+    'o desenho deixou de exigir o mapa visível — caixa escondida mede 0 e cai no '
+    + 'fallback de novo');
+});
+
+test('o ouvinte que amplia o mapa é pendurado UMA vez, no card da frente', () => {
+  const rm = semComentarioJS(fatiar(APP, 'renderMapa'));
+  // `renderMapa` roda MAIS DE UMA VEZ por card: o observer de caixa o refaz
+  // quando o layout assenta. Com o ouvinte lá dentro, cada passada pendurava
+  // outro no MESMO elemento — e `stopPropagation` não impede o irmão (isso
+  // seria `stopImmediatePropagation`). MEDIDO antes do conserto: um clique
+  // abria o lightbox 2× num card recém-montado, e 3× depois do 1º refazer.
+  assert.ok(!/addEventListener\('click'/.test(rm),
+    'o ouvinte de clique voltou pro `renderMapa`, que roda mais de uma vez por card: '
+    + 'cada refazer pendura outro e o lightbox passa a abrir N vezes por clique');
+  // E ele existe no card da FRENTE — senão o conserto virou remoção do recurso.
+  const rc = semComentarioJS(fatiar(APP, 'renderCurrentCard'));
+  assert.match(rc, /\.card-map'\)[\s\S]{0,200}addEventListener\('click'[\s\S]{0,200}MapaLightbox\.open\(place\)/,
+    'ninguém mais amplia o mapa pelo card: tirar o ouvinte do renderMapa sem repô-lo '
+    + 'aqui não é conserto, é remoção do recurso');
+  // O card de FUNDO segue sem interação: quem monta os dois é o `montarCard`.
+  const mc = semComentarioJS(fatiar(APP, 'montarCard'));
+  assert.ok(!/\.card-map'\)[\s\S]{0,160}addEventListener\('click'/.test(mc),
+    'o ouvinte do mapa entrou no `montarCard` — o card de FUNDO passaria a ter '
+    + 'interação, que é o que o clone existe pra impedir');
+  // gotcha #22: é o js/min/ que o navegador carrega. A âncora NÃO pode ser um
+  // nome de variável local — o minificador os renomeia (`fundo` virou `e`),
+  // então `renderMapa(fundo` reprovava código certo. Nome de função global
+  // sobrevive, e o que muda com o conserto é a CONTAGEM de chamadas:
+  // a declaração + `vigiarCaixaDoMapa` + `updateImage` + o card de fundo.
+  const MIN = readFileSync(new URL('../js/min/app.js', import.meta.url), 'utf8');
+  const usos = (MIN.match(/desenharMapaComCaixa\(/g) || []).length;
+  assert.equal(usos, 3,
+    `js/min/app.js tem ${usos} usos de desenharMapaComCaixa, esperado 3 (declaração + `
+    + 'card da frente + card de fundo). Faltou `npm run js`, ou uma chamada saiu');
+});

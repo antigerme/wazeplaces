@@ -5360,6 +5360,23 @@ function renderCurrentCard() {
     card.querySelector('.card-btn-skip').addEventListener('click', () => fireAction('up', handleSkip));
     card.querySelector('.card-btn-read').addEventListener('click', () => fireAction('right', handleMarkAsRead));
 
+    // Ampliar o mapa é interação, então segue a MESMA regra dos três botões
+    // acima: mora no card da frente, nunca no `montarCard`. Antes ficava
+    // dentro do `renderMapa`, que roda mais de uma vez por card — e aí cada
+    // passada pendurava outro ouvinte no mesmo elemento (`stopPropagation`
+    // não impede o irmão; isso seria `stopImmediatePropagation`).
+    // O box existe sempre no template, mesmo quando o mapa não é o primeiro
+    // slide: pendurar aqui é uma vez por card, e o clique só chega quando ele
+    // está visível.
+    const mapaBoxF = card.querySelector('.card-map');
+    if (mapaBoxF) {
+        mapaBoxF.addEventListener('click', (ev) => {
+            if (ev.target.closest('button')) return;   // as setas do carrossel não
+            ev.stopPropagation(); ev.preventDefault();
+            MapaLightbox.open(place);
+        });
+    }
+
 
     // O card novo nasce travado se a janela do Desfazer ainda estiver correndo
     // (o `undo` devolve o place anterior à fila e re-renderiza).
@@ -5386,6 +5403,10 @@ function renderCurrentCard() {
     // styles.css, junto com o que o fade arrastava atrás de si.
     removeCurrentCardEl();
     document.getElementById('cardStack').appendChild(card);
+    // Agora que a caixa existe. Sem isto o card da frente também guarda o
+    // enquadramento do fallback — o observer só o corrige quando a caixa
+    // CRESCE, e num card com diff ela encolhe. Ver `desenharMapaComCaixa`.
+    desenharMapaComCaixa(card, place);
     // Tira o .celebrate junto: sem isso o confete não reinicia quando a fila
     // zerar de novo (a classe ficaria pendurada do "Tudo limpo!" anterior).
     document.getElementById('noMoreCards').classList.remove('celebrate');
@@ -5604,6 +5625,30 @@ function montarCard(place) {
 //    o resto do card de `queue[1]` — inclusive o tile do mapa quando é ele que
 //    vem primeiro (gotcha #54). O card de fundo desenha exatamente esse pedido,
 //    logo depois: sai do cache. Custo de rede da pilha: ZERO.
+// O mapa só sabe se enquadrar quando a caixa EXISTE, e ela só existe no DOM.
+//
+// `renderMapa` mede com `box.clientWidth || 400`: fora do DOM isso é 0 e ele
+// enquadra pra 400×240 — um tamanho que não é o de card nenhum. O observer de
+// `vigiarCaixaDoMapa` conserta só metade dos casos, porque ele refaz quando a
+// caixa CRESCE (encolher não abre buraco, e refazer à toa é custo por quadro).
+// Quando a caixa real é MENOR que o fallback — card com diff, que deixa pouca
+// altura pro mapa — ele não refaz, e o enquadramento fica calculado pra outra
+// proporção: 400×240 é 1,67 e 359×144 é 2,49, então o zoom escolhido é outro.
+//
+// MEDIDO nos dois sentidos: o card de fundo guardava 400×240 numa caixa de
+// 359×337 (faixa sem mapa embaixo, o que o owner fotografou), e o da frente
+// guardava 400×240 numa caixa de 359×144 (enquadramento de outra proporção).
+// Chamar isto depois do `appendChild` conserta os dois pela raiz, em vez de
+// repor o observer perdido no clone.
+function desenharMapaComCaixa(card, place) {
+    const box = card && card.querySelector('.card-map');
+    // Escondido a caixa mede 0 e cairíamos no mesmo fallback. O mapa que não é
+    // o primeiro slide se desenha quando o editor navega até ele — e aí o card
+    // já está no DOM, que é justamente a condição que falta aqui.
+    if (!box || box.classList.contains('hidden')) return;
+    try { renderMapa(card, place, true); } catch (e) { /* mapa nunca derruba o card */ }
+}
+
 function montarCardDeFundo() {
     const stack = document.getElementById('cardStack');
     if (!stack) return;
@@ -5669,6 +5714,28 @@ function montarCardDeFundo() {
     // card da FRENTE. É a diferença entre uma linha que todo mundo precisa
     // lembrar e uma que já nasce certa.
     stack.appendChild(fundo);
+
+    // E SÓ AGORA o mapa, porque só agora a caixa tem tamanho.
+    //
+    // `renderMapa` mede com `box.clientWidth || 400` — fora do DOM isso é 0, e
+    // ele enquadra pra 400×240, um tamanho que não é o do card. No card da
+    // FRENTE o erro se conserta sozinho: o `ResizeObserver` de
+    // `vigiarCaixaDoMapa` refaz quando a caixa assenta. No de fundo, não —
+    // `cloneNode` copia atributo e **não copia propriedade JS**, então o
+    // observer fica no original e o clone guarda o enquadramento errado PRA
+    // SEMPRE.
+    //
+    // RELATADO pelo owner, com duas capturas do mesmo pedido: puxando o card
+    // da frente, o mapa do de baixo tem um tamanho; quando ele chega à frente,
+    // tem outro. REPRODUZIDO aqui — caixa 359×337 nos dois, desenhada pra
+    // 359×337 na frente e pra 400×240 no fundo, com o tile 48px fora do lugar
+    // e uma faixa sem mapa embaixo. O card de fundo é a PROMESSA do que vem;
+    // promessa que muda ao virar realidade lê como a app tropeçando.
+    //
+    // Um redesenho basta, e ele reinstala o observer de quebra. Só quando o
+    // mapa está VISÍVEL: escondido a caixa é 0 e cairíamos no mesmo fallback
+    // que este conserto existe pra evitar.
+    desenharMapaComCaixa(fundo, proximo);
 }
 
 // Tempo máximo que o aquecimento espera a foto do card. Rede de segurança: foto
@@ -5893,14 +5960,15 @@ function renderMapa(card, place, refazendo) {
         s.appendChild(document.createTextNode(t(p.rot)));
         leg.appendChild(s);
     }
-    // Clicar amplia — o mesmo gesto da foto, que é o que os testadores
-    // pediram. `once` porque `renderMapa` só monta uma vez por card.
+    // Clicar amplia, mas o OUVINTE não mora aqui — ver `renderCurrentCard`.
+    // O comentário que estava nesta linha dizia "`once` porque `renderMapa` só
+    // monta uma vez por card", e as duas metades eram falsas: o código passava
+    // `{ once: false }`, e o observer de caixa logo acima refaz o mapa sempre
+    // que o layout assenta. MEDIDO: o mapa já NASCIA com dois ouvintes (um
+    // clique abria o lightbox 2×) e ia a três depois do primeiro refazer.
+    // Desenho puro aqui também é o que deixa o card de FUNDO redesenhar sem
+    // ganhar interação — ele é uma figura, e precisa ser igual ao que vem.
     box.style.cursor = 'zoom-in';
-    box.addEventListener('click', (ev) => {
-        if (ev.target.closest('button')) return;   // as setas do carrossel não
-        ev.stopPropagation(); ev.preventDefault();
-        MapaLightbox.open(place);
-    }, { once: false });
     box.dataset.pronto = '1';
     return true;
 }

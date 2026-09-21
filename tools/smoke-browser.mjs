@@ -4657,6 +4657,64 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           `${id}: o véu computado não é o medido`, String(m.veuFundo));
       }
 
+      // O CARD DE FUNDO É A PROMESSA DO QUE VEM — e ela tem que ser cumprida.
+      //
+      // RELATADO pelo owner com duas capturas do mesmo pedido: puxando o card
+      // da frente, o mapa do de baixo tem um tamanho; quando ele chega à
+      // frente, tem outro. A causa é o `renderMapa` medir a caixa com
+      // `box.clientWidth || 400` — fora do DOM isso é 0 e ele enquadra pra
+      // 400×240. Na FRENTE o erro se conserta sozinho (o ResizeObserver de
+      // `vigiarCaixaDoMapa` refaz quando a caixa assenta); no FUNDO não,
+      // porque `cloneNode` não copia propriedade JS e o observer fica pra trás.
+      //
+      // Mede o ENQUADRAMENTO (`data-mapa-w/h`), que é o que o mapa foi
+      // desenhado pra cobrir, e não só a caixa: as duas caixas sempre bateram
+      // — era o desenho dentro delas que divergia.
+      // FILA PRÓPRIA, e ela é o cenário do relato: um pedido SEM FOTO, em que
+      // o mapa é o PRIMEIRO slide. Com foto o mapa nasce `hidden`, a caixa
+      // mede 0 e não há enquadramento a comparar — foi o que o controle abaixo
+      // pegou na primeira rodada, com `{f:null,b:null}` nos 8 cenários.
+      await page.evaluate(({ base }) => {
+        const semFoto = (id) => Object.assign({}, base, {
+          venueID: 'map' + id, updateRequestID: 'umap' + id,
+          imageUrl: null, imageUrls: [],
+          mapa: { centro: [-18.9, -48.27], entradas: [] },
+        });
+        AppState.queue = [semFoto('A'), semFoto('B')];
+        AppState.currentPlace = null;
+        document.querySelectorAll('#cardStack .place-card').forEach((e) => e.remove());
+        showCurrentPlace();
+        montarCardDeFundo();
+      }, { base: CARDS_PILHA[0] });
+      await assentar(page);
+
+      const mp = await page.evaluate(() => {
+        const q = (raiz) => {
+          const b = raiz && raiz.querySelector('.card-map');
+          if (!b || b.classList.contains('hidden')) return null;
+          const t = b.querySelector('.card-map-tiles img');
+          return { caixa: Math.round(b.clientWidth) + 'x' + Math.round(b.clientHeight),
+                   para: (b.dataset.mapaW || '?') + 'x' + (b.dataset.mapaH || '?'),
+                   ro: !!b._roMapa,
+                   tile: t ? Math.round(t.getBoundingClientRect().top - b.getBoundingClientRect().top) : null };
+        };
+        return { f: q(document.querySelector('#cardStack .place-card:not(.card-fundo)')),
+                 b: q(document.querySelector('#cardStack .card-fundo')) };
+      });
+      // CONTROLE do instrumento: sem mapa nos dois, o cenário não mede nada e
+      // passaria com o conserto arrancado.
+      checa(!!(mp.f && mp.b),
+        `${id}: PROMESSA — um dos cards não tem mapa visível, o cenário não mediria nada`,
+        JSON.stringify(mp));
+      if (mp.f && mp.b) {
+        checa(mp.f.para === mp.b.para,
+          `${id}: PROMESSA — o mapa do fundo foi desenhado pra ${mp.b.para} e o da frente pra ${mp.f.para}: ele MUDA DE TAMANHO ao virar frente`);
+        checa(mp.f.tile === mp.b.tile,
+          `${id}: PROMESSA — o tile do fundo está em ${mp.b.tile}px e o da frente em ${mp.f.tile}px`);
+        checa(mp.b.ro,
+          `${id}: PROMESSA — o card de fundo ficou sem o observer de caixa: o clone não copia propriedade JS e o mapa nunca mais se corrige`);
+      }
+
       // ALCANCE PELO TECLADO — apertando Tab DE VERDADE.
       //
       // A primeira versão disto contava `tabIndex >= 0`, e acusou 6 controles
@@ -5606,7 +5664,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
-  + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
+  + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente, e o mapa do fundo DESENHADO pro mesmo tamanho do da frente — a promessa que o relato do iPhone mostrou quebrada)`
   + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar a app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), resposta que CHEGA drenando a fila SEM nenhum evento online novo (o relato do iPhone, com controle de que ela não drenou antes), app MORTA no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
