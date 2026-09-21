@@ -272,8 +272,14 @@ test('dois esvaziamentos não rodam juntos', () => {
 });
 
 test('os DOIS gatilhos existem, e nenhum é polling', () => {
-  assert.match(APP_SEM, /addEventListener\('online', \(\) => \{ esvaziarFilaDeSaida\(\); \}\)/,
-    'o gatilho do evento `online` sumiu');
+  // O ouvinte cresceu (hoje ele também refaz a BUSCA que falhou), então o
+  // guard cobra o QUE ele faz, não a forma de uma linha só — casar a linha
+  // inteira reprovava código certo na primeira vez que ela ganhou um irmão.
+  const iOn = APP_SEM.indexOf("addEventListener('online'");
+  assert.ok(iOn > 0, 'o gatilho do evento `online` sumiu');
+  const ouvinte = APP_SEM.slice(iOn, iOn + 600);
+  assert.match(ouvinte, /esvaziarFilaDeSaida\(\)/,
+    'o `online` deixou de esvaziar a fila de saída');
   const init = fatiar('initApp');
   const iEsvazia = init.indexOf('esvaziarFilaDeSaida()');
   const iMain = init.indexOf('showMainScreen()');

@@ -5073,7 +5073,18 @@ function fetchNextPage() {
                     AppState.loadError = true;
                     handleUnauthorized();
                 } else {
-                    showToast(msgDoServidor(result, t('toast.loadPlacesError')), 'error');
+                    // UM anúncio só. Com a fila vazia o `showNoPlaces` desenha
+                    // o painel de erro inteiro, e o toast repete o mesmo fato no
+                    // RODAPÉ — onde ficam os botões do card. Com card na tela o
+                    // painel não aparece, e aí o toast é o único sinal: fica.
+                    //
+                    // Este é o ramo que de fato pinta o toast vermelho que o
+                    // owner viu: o `api.js` RETORNA a falha em vez de lançar,
+                    // então o `catch` lá embaixo nem roda. Silenciar só o catch
+                    // era mirar no lugar errado — medido na tela, com 2 toasts.
+                    if (!!AppState.currentPlace || AppState.queue.length > 0) {
+                        showToast(msgDoServidor(result, t('toast.loadPlacesError')), 'error');
+                    }
                     AppState.loadError = true;
                     AppState.hasMore = false;
                 }
@@ -5136,7 +5147,14 @@ function fetchNextPage() {
             dlog('busca.erro', { erro: String((error && error.message) || error).slice(0, 120) });
             console.error('fetchNextPage error', error);
             if (epoch === AppState.fetchEpoch) {
-                showToast(t('toast.loadPlacesError'), 'error');
+                // O toast só fala quando o PAINEL não vai falar. Com a fila
+                // vazia o `showNoPlaces` desenha o estado de erro inteiro, e
+                // somar um toast vermelho é anunciar o mesmo fato duas vezes —
+                // com o agravante de que ele pousa no rodapé, onde ficam os
+                // botões do card. Com card na tela o painel NÃO aparece, e aí
+                // o toast é o único sinal: ele continua.
+                const temCard = !!AppState.currentPlace || AppState.queue.length > 0;
+                if (temCard) showToast(t('toast.loadPlacesError'), 'error');
                 AppState.loadError = true;
                 AppState.hasMore = false;
             }
@@ -7344,6 +7362,18 @@ function showNoPlaces() {
         // zerou o backlog). Mostra estado de erro com "Tentar novamente".
         noMore.classList.add('hidden');
         errEl.classList.remove('hidden');
+        // SEM CONEXÃO é coisa que a app SABE — `onLine === false` é confiável
+        // nessa direção (o inverso não é: portal cativo diz true e mente). Então
+        // ali ela AFIRMA em vez de aconselhar "verifique sua conexão", e promete
+        // o que o gatilho do `online` cumpre. O botão FICA, decisão do owner
+        // olhando os mockups: o evento `online` às vezes não dispara, e aí ele é
+        // a única saída manual — mesma razão pela qual o `callWithRetry` não
+        // confia no `true`.
+        const semRede = navigator.onLine === false;
+        const h3 = errEl.querySelector('h3');
+        const p = errEl.querySelector('p');
+        if (h3) h3.textContent = t(semRede ? 'states.error.titleOffline' : 'states.error.title');
+        if (p) p.textContent = t(semRede ? 'states.error.bodyOffline' : 'states.error.body');
     } else {
         if (errEl) errEl.classList.add('hidden');
         noMore.classList.remove('hidden');
@@ -9337,7 +9367,24 @@ function registrarPousoDeSaida(actionType, place, result, item) {
 // Os DOIS gatilhos, e nenhum deles é polling (o free tier proíbe): o navegador
 // avisando que voltou, e a abertura da app. Quem ficou offline e fechou tudo
 // encontra a fila esperando na próxima vez que abrir.
-window.addEventListener('online', () => { esvaziarFilaDeSaida(); });
+window.addEventListener('online', () => {
+    esvaziarFilaDeSaida();
+    // E refaz a BUSCA se ela tinha falhado. Sem isto o editor ficava olhando
+    // "Falha ao carregar" com 4g funcionando até tocar no botão — a fila de
+    // saída se resolvia sozinha e a de PEDIDOS não, o que é incoerente. O
+    // `loadError` é o portão: sem ele isto viraria uma requisição a cada
+    // oscilação de rede, e o free tier é restrição de projeto.
+    // `resetQueue()` ANTES, e não é zelo: a falha deixou `hasMore = false`, e o
+    // `fetchNextPage` sai na PRIMEIRA linha com isso (`if (!AppState.hasMore)
+    // return`). MEDIDO — sem o reset a app trocava "Falha ao carregar" por
+    // **"Tudo limpo!"** com a fila vazia, que é pior que o erro original. É
+    // também o mesmo par que o botão "Tentar novamente" já usa: o caminho
+    // automático e o manual têm que fazer a mesma coisa.
+    if (AppState.authenticated && AppState.loadError && !AppState.fetching) {
+        resetQueue();
+        startFetching();
+    }
+});
 
 function handleActionResult(actionType, place, result) {
     dlog('acao.fim', { tipo: actionType, ok: !!(result && result.success),
@@ -10163,6 +10210,14 @@ function updatePendingCount(semAnimar = false) {
     }
     if (AppState.fetching && AppState.serverTotal === 0) {
         el.textContent = '…';
+        return;
+    }
+    // FALHOU: a app NÃO SABE quantos restam, e zero não é "não sei" — zero é
+    // "tudo limpo", que é o oposto. Medido no relato do owner: a tela dizia
+    // RESTAM 0 com 426 pedidos esperando do outro lado. O traço é o mesmo
+    // símbolo que o deslogado já usa, então o editor não precisa aprender nada.
+    if (AppState.loadError) {
+        el.textContent = '—';
         return;
     }
     setCount(el, AppState.serverTotal, AppState.hasMore ? '+' : '', semAnimar);
