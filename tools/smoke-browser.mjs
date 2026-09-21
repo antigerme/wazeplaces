@@ -5230,10 +5230,18 @@ async function esperarFimDaSaida(page, tetoMs = 180000) {
     let semRede = false;
     let enviosDeAcao = [];
     let atrasoDaAcaoMs = 0;   // usado só pra alargar a janela do teste de reenvio
+    let abortLento = false;  // alarga a janela do bloco DOIS TEMPOS (ver lá)
     await page.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png',
       body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') }));
     await page.route('**/api/**', async (r) => {
-      if (semRede) return r.abort('internetdisconnected');
+      if (semRede) {
+        // ALARGA a janela de propósito, só no bloco DOIS TEMPOS. A corrida é
+        // real com ~30ms aqui e o runner do CI a produz sozinho por lentidão —
+        // medir por sorte de timing é não medir (foi o que fez este cenário
+        // passar 3 vezes aqui enquanto reprovava lá).
+        if (abortLento) await new Promise((ok) => setTimeout(ok, 900));
+        return r.abort('internetdisconnected');
+      }
       if (/validar-place|marcar-lido/.test(r.request().url())) {
         enviosDeAcao.push(Date.now());
         if (atrasoDaAcaoMs) await new Promise((ok) => setTimeout(ok, atrasoDaAcaoMs));
@@ -5349,6 +5357,47 @@ async function esperarFimDaSaida(page, tetoMs = 180000) {
     checa(mediana >= 350,
       `${c.id}: esvaziou em RAJADA (mediana ${mediana}ms) — é o padrão que faz um WAF marcar cliente`);
     checa(!/\d/.test(fim.aviso), `${c.id}: o indicador ficou na tela depois de esvaziar`);
+
+    // A REDE QUE VOLTA EM DOIS TEMPOS — o `online` que chega com o
+    // esvaziamento no ar NÃO pode ser descartado.
+    //
+    // `navigator.onLine === true` não prova rede (o projeto já não confia nele
+    // em nenhum outro lugar). Saindo de um túnel ou de um elevador o navegador
+    // manda um `online` com a rede ainda ruim e outro logo depois já firme. O
+    // primeiro entra no esvaziamento, quebra no `transient` e sai; o segundo
+    // chega DENTRO da janela e batia na guarda de reentrada, sumindo. Resultado
+    // medido: fila presa em 2 com `esvaziando:false` e `onLine:true`, e o
+    // próximo gatilho só na abertura seguinte da app — podem ser horas.
+    //
+    // Foi ISTO que reprovou o bloco POUSO-RUIM no CI, e não a ordem do
+    // `online`: lá o runner produz a mesma janela por lentidão. Aqui ela é
+    // EXPLÍCITA (`abortLento`), porque com os ~30ms naturais o cenário passava
+    // três vezes seguidas enquanto o CI reprovava.
+    await montar(); await dormir(400);
+    semRede = true; await ctx.setOffline(true);
+    await tratar(2);
+    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    const dt0 = await estado();
+    checa(dt0.saida === 2, `${c.id}: DOIS TEMPOS — as 2 ações não entraram na fila (${dt0.saida})`);
+    abortLento = true;
+    await ctx.setOffline(false);
+    enviosDeAcao = [];
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));  // rede AINDA ruim
+    await dormir(120);
+    // CONTROLE do instrumento: sem um esvaziamento de fato no ar, este cenário
+    // mediria o caso fácil e passaria com a guarda quebrada.
+    const naJanela = await page.evaluate(() => (typeof esvaziandoSaida !== 'undefined' ? esvaziandoSaida : null));
+    checa(naJanela === true,
+      `${c.id}: DOIS TEMPOS — o esvaziamento não estava no ar (${naJanela}): o cenário não mediria nada`);
+    semRede = false; abortLento = false;
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));  // rede firme, DENTRO da janela
+    await esperarFimDaSaida(page, 30000);
+    await dormir(300);
+    const dt1 = await estado();
+    checa(dt1.saida === 0,
+      `${c.id}: DOIS TEMPOS — o 2º \`online\` foi ENGOLIDO e a fila ficou presa (${dt1.saida}) com a rede boa`);
+    checa(enviosDeAcao.length === 2,
+      `${c.id}: DOIS TEMPOS — saíram ${enviosDeAcao.length} requisições para 2 ações`);
 
     // O GATILHO DA ABERTURA, sozinho: sem nenhum evento `online`, só ABRIR a app
     // tem que drenar. É o caminho de quem ficou offline e FECHOU tudo — e ele já
@@ -5515,7 +5564,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
-  + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar a app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, app MORTA no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
+  + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar a app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), app MORTA no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`

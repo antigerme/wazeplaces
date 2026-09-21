@@ -266,14 +266,23 @@ test('o diário registra a TRANSIÇÃO, não cada swipe', () => {
 
 test('dois esvaziamentos não rodam juntos', () => {
   const f = fatiar('esvaziarFilaDeSaida');
-  assert.match(f, /if \(esvaziandoSaida\) return/,
+  // A trava é cobrada pelo QUE ela faz, não pela grafia de uma linha só: ela
+  // ganhou um irmão (anotar o gatilho, ver o teste da rede em dois tempos) e a
+  // regex que casava a linha inteira reprovou código certo.
+  assert.match(f, /if \(esvaziandoSaida\)[^\n]*return/,
     'sumiu a trava: `online` e a abertura da app podem coincidir e mandar tudo duas vezes');
   assert.match(f, /esvaziandoSaida = false/, 'a trava nunca é solta');
 });
 
 test('os DOIS gatilhos existem, e nenhum é polling', () => {
-  assert.match(APP_SEM, /addEventListener\('online', \(\) => \{ esvaziarFilaDeSaida\(\); \}\)/,
-    'o gatilho do evento `online` sumiu');
+  // O ouvinte cresceu (hoje ele também refaz a BUSCA que falhou), então o
+  // guard cobra o QUE ele faz, não a forma de uma linha só — casar a linha
+  // inteira reprovava código certo na primeira vez que ela ganhou um irmão.
+  const iOn = APP_SEM.indexOf("addEventListener('online'");
+  assert.ok(iOn > 0, 'o gatilho do evento `online` sumiu');
+  const ouvinte = APP_SEM.slice(iOn, iOn + 600);
+  assert.match(ouvinte, /esvaziarFilaDeSaida\(\)/,
+    'o `online` deixou de esvaziar a fila de saída');
   const init = fatiar('initApp');
   const iEsvazia = init.indexOf('esvaziarFilaDeSaida()');
   const iMain = init.indexOf('showMainScreen()');
@@ -316,4 +325,31 @@ test('o bundle GERADO tem a fila — senão nada disso está no ar', () => {
   // (gotcha #22) — foi exatamente o que aconteceu ao escrever este recurso.
   assert.match(MIN, /enfileirarSaida/, 'o js/min/app.js não tem a fila de saída — falta `npm run js`');
   assert.match(MIN, /waze_places_saida/, 'a chave da fila não chegou ao bundle gerado');
+});
+
+test('o gatilho que chega COM o esvaziamento no ar não pode evaporar', () => {
+  const f = fatiar('esvaziarFilaDeSaida');
+  // A guarda de reentrada ANOTA em vez de descartar. `navigator.onLine === true`
+  // não prova rede — o projeto já não confia nele em nenhum outro lugar —, então
+  // a rede que volta em dois tempos (túnel, elevador, 4G firmando) manda um
+  // `online` com a rede ainda ruim e outro logo depois já firme. O primeiro entra,
+  // quebra no `transient` e sai; sem esta linha o segundo caía na guarda e sumia,
+  // deixando a fila presa com a rede boa até a PRÓXIMA abertura da app.
+  assert.match(f, /if \(esvaziandoSaida\) \{ saidaPedidaDeNovo = true; return; \}/,
+    'a guarda de reentrada voltou a DESCARTAR o gatilho em vez de anotá-lo');
+  // E o pedido anotado é atendido no fim.
+  assert.match(f, /if \(saidaPedidaDeNovo\) \{\s*saidaPedidaDeNovo = false;\s*return esvaziarFilaDeSaida\(\);\s*\}/,
+    'ninguém atende o gatilho anotado — anotar sem atender é o mesmo defeito com mais código');
+  // Zerar ao ENTRAR, e não ao sair: zerar no fim apagaria justamente o pedido
+  // que esta passada não pôde atender, que é o caso inteiro.
+  const iEntra = f.indexOf('esvaziandoSaida = true;');
+  const iZera = f.indexOf('saidaPedidaDeNovo = false;');
+  const iLaco = f.indexOf('while (f.length)');
+  assert.ok(iEntra > 0 && iZera > 0 && iLaco > 0, 'não achei as âncoras');
+  assert.ok(iEntra < iZera && iZera < iLaco,
+    'a bandeira precisa ser zerada DEPOIS de travar e ANTES do laço — fora daí ela apaga '
+    + 'o pedido que esta passada não pôde atender, ou perde o que chegou durante o laço');
+  // E o `js/min/` é o que o navegador carrega (gotcha #22).
+  assert.ok(/saidaPedidaDeNovo/.test(MIN),
+    'js/min/app.js não tem a correção — faltou `npm run js`, e o browser segue com o defeito');
 });

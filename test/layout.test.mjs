@@ -1357,7 +1357,19 @@ test('o convite de instalar aparece no "Tudo limpo!", não no meio do trabalho',
   // E quem o atualiza é o próprio showNoPlaces: sem essa chamada ele nunca
   // reavalia (fica visível pra quem acabou de instalar, some pra quem não).
   const app = read('js/app.js');
-  const corpo = app.slice(app.indexOf('function showNoPlaces'), app.indexOf('function showNoPlaces') + 1400);
+  // Fatia por CHAVES, não por distância. A versão anterior pegava 1400
+  // caracteres a partir do nome e reprovou código CERTO assim que a função
+  // cresceu — é o gotcha #67 ao pé da letra: guard apertado por distância
+  // reprova quando o trecho cresce, e largo demais alcança outra ocorrência.
+  const iNo = app.indexOf('function showNoPlaces');
+  assert.notEqual(iNo, -1, 'sumiu o showNoPlaces');
+  let prof = 0, fimNo = app.length;
+  for (let j = app.indexOf('{', iNo); j < app.length; j++) {
+    if (app[j] === '{') prof++;
+    else if (app[j] === '}') { prof--; if (prof === 0) { fimNo = j + 1; break; } }
+  }
+  const corpo = app.slice(iNo, fimNo);
+  assert.ok(corpo.length > 200, `fatiei ${corpo.length} chars do showNoPlaces — instrumento quebrado`);
   assert.match(corpo, /atualizarConviteInstalar\(\)/,
     'showNoPlaces parou de reavaliar o convite');
 });
