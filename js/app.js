@@ -9427,6 +9427,36 @@ window.addEventListener('online', async () => {
     }
 });
 
+// O TERCEIRO gatilho, e o único que não depende do navegador avisar nada: uma
+// resposta NOSSA que chegou prova que a rede existe.
+//
+// RELATADO pelo owner, no iPhone: modo avião, trata 3, sai do modo avião — e o
+// "3 esperando envio" fica parado. Ele então trata mais 2, que saem NA HORA, e
+// os 3 continuam lá. A app tinha a prova de rede na mão (duas requisições
+// bem-sucedidas) e não a usava.
+//
+// REPRODUZIDO com sonda, e a causa não é o evento faltar: ele CHEGA quando o
+// rádio liga, e nesse instante a rede ainda não passa tráfego. O esvaziamento
+// entra, quebra no `transient` e sai — e nenhum gatilho novo vem depois, porque
+// os dois que existiam eram o `online` (já gasto) e a ABERTURA da app (e ela
+// nunca foi fechada). Consertar isso pelo evento é impossível: `onLine === true`
+// não prova rede, e o projeto não confia nele em lugar nenhum.
+//
+// Não é polling e não custa requisição (o free tier é restrição de projeto):
+// isto só REAGE ao que já saiu. Com a fila vazia sai na segunda linha do
+// `esvaziarFilaDeSaida`.
+//
+// SAI CEDO durante o esvaziamento, e não é zelo: cada item que ele manda com
+// sucesso passaria por aqui e marcaria `saidaPedidaDeNovo`, fazendo a passada
+// re-executar no fim. Isso contraria o "para no primeiro `transient`" — o laço
+// que quebrou por rede ruim tentaria de novo NA HORA, gastando requisição
+// justamente quando ela falha. Quem está no ar já vai processar a fila inteira,
+// então não há nada a anotar.
+API.aoProvarRede = () => {
+    if (esvaziandoSaida) return;
+    esvaziarFilaDeSaida();
+};
+
 function handleActionResult(actionType, place, result) {
     dlog('acao.fim', { tipo: actionType, ok: !!(result && result.success),
                        cat: (result && result.errorCategory) || null,

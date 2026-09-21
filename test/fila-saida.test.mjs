@@ -353,3 +353,54 @@ test('o gatilho que chega COM o esvaziamento no ar não pode evaporar', () => {
   assert.ok(/saidaPedidaDeNovo/.test(MIN),
     'js/min/app.js não tem a correção — faltou `npm run js`, e o browser segue com o defeito');
 });
+
+test('resposta que CHEGA é prova de rede, e é o terceiro gatilho', () => {
+  const api = readFileSync(new URL('../js/api.js', import.meta.url), 'utf8');
+  const apiSem = semComentarios(api);
+  const apiMin = readFileSync(new URL('../js/min/api.js', import.meta.url), 'utf8');
+
+  // O evento `online` do navegador NÃO basta: ele chega quando o rádio liga, e
+  // nesse instante a rede ainda não passa tráfego. O esvaziamento entra, quebra
+  // no `transient` e sai — e não vem gatilho novo, porque a app não foi fechada.
+  // Relatado no iPhone do owner: 3 presas enquanto 2 novas saíam com sucesso.
+  const iDisparo = apiSem.indexOf('this.aoProvarRede(');
+  assert.ok(iDisparo > 0,
+    'o transporte não avisa mais que uma resposta chegou: a fila de saída volta a '
+    + 'depender só do evento `online`, que pode não vir');
+
+  // POSIÇÃO: tem que ser onde a resposta EXISTE. No `catch` seria o contrário do
+  // que o nome diz — falha de rede "provando" rede.
+  const iPost = apiSem.indexOf('async _post(');
+  const iCatch = apiSem.indexOf('} catch (error) {', iPost);
+  const iRet = apiSem.indexOf('return data;', iPost);
+  assert.ok(iPost > 0 && iCatch > 0 && iRet > 0, 'não achei as âncoras do _post');
+  assert.ok(iDisparo > iPost && iDisparo < iCatch,
+    'o aviso saiu de dentro do `try`: no `catch` ele diria que a rede voltou '
+    + 'justamente quando ela não respondeu');
+  assert.ok(iDisparo < iRet, 'o aviso ficou depois do `return` — código morto');
+
+  // E ele NUNCA pode derrubar a resposta que o editor está esperando.
+  const trecho = apiSem.slice(iDisparo - 120, iDisparo + 120);
+  assert.match(trecho, /try \{[^}]*this\.aoProvarRede\([^)]*\)[^}]*\} catch/,
+    'o aviso roda sem try/catch: um erro no consumidor derruba a resposta');
+
+  // O CONSUMIDOR: sem ele o gancho é decoração.
+  const iReg = APP_SEM.indexOf('API.aoProvarRede =');
+  assert.ok(iReg > 0, 'ninguém registra o gancho — o transporte avisa no vácuo');
+  const consumidor = APP_SEM.slice(iReg, iReg + 260);
+  assert.match(consumidor, /esvaziarFilaDeSaida\(\)/,
+    'o gancho deixou de esvaziar a fila de saída');
+  // SAI CEDO durante o esvaziamento: cada item que ele manda passaria por aqui e
+  // marcaria `saidaPedidaDeNovo`, fazendo a passada re-executar no fim — o laço
+  // que quebrou por rede ruim tentaria de novo NA HORA, gastando requisição
+  // justamente quando ela falha. Contraria o "para no primeiro `transient`".
+  const iSai = consumidor.indexOf('if (esvaziandoSaida) return;');
+  const iChama = consumidor.indexOf('esvaziarFilaDeSaida()');
+  assert.ok(iSai >= 0 && iSai < iChama,
+    'o gancho deixou de sair cedo durante o esvaziamento: a fila volta a ser '
+    + 'retentada na hora depois de um `transient`, contra a política de rede');
+
+  // gotcha #22: é o js/min/ que o navegador carrega.
+  assert.ok(/aoProvarRede/.test(apiMin) && /aoProvarRede/.test(MIN),
+    'js/min/ não tem o gancho — faltou `npm run js`, e o iPhone segue com o defeito');
+});
