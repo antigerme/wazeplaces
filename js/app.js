@@ -9367,8 +9367,22 @@ function registrarPousoDeSaida(actionType, place, result, item) {
 // Os DOIS gatilhos, e nenhum deles é polling (o free tier proíbe): o navegador
 // avisando que voltou, e a abertura da app. Quem ficou offline e fechou tudo
 // encontra a fila esperando na próxima vez que abrir.
-window.addEventListener('online', () => {
-    esvaziarFilaDeSaida();
+window.addEventListener('online', async () => {
+    // EM ORDEM, nunca em paralelo — e a ordem é "trabalho do editor primeiro".
+    //
+    // A primeira versão disparava os dois juntos e o CI reprovou: o
+    // `resetQueue()` roda SÍNCRONO no meio do esvaziamento (que está num
+    // `await`), mexendo em `pendingAction`, na fila e no `serverTotal` embaixo
+    // dele. Aqui a corrida passava; no runner, não — e o sintoma era a fila de
+    // saída não drenar, ou seja PERDER trabalho já feito, que é exatamente o
+    // que a fila existe pra impedir.
+    //
+    // E há um motivo além da corrida: a rede acabou de voltar, muitas vezes em
+    // dados móveis. Disparar duas correntes de requisição no mesmo instante é
+    // competir justamente no pior momento — e o free tier é restrição de
+    // projeto. O esvaziamento tem fim garantido (para no primeiro `transient`),
+    // então esperar por ele não trava nada.
+    await esvaziarFilaDeSaida();
     // E refaz a BUSCA se ela tinha falhado. Sem isto o editor ficava olhando
     // "Falha ao carregar" com 4g funcionando até tocar no botão — a fila de
     // saída se resolvia sozinha e a de PEDIDOS não, o que é incoerente. O

@@ -103,6 +103,17 @@ test('a rede voltando refaz a BUSCA, não só a fila de saída', () => {
     'o refetch perdeu o portão do loadError — vira requisição a cada oscilação');
   assert.match(ouvinte, /!AppState\.fetching/,
     'o refetch pode empilhar em cima de uma busca já em curso');
+  // EM ORDEM, nunca em paralelo. A primeira versão disparava os dois juntos e
+  // o CI reprovou: o `resetQueue()` roda SÍNCRONO no meio do esvaziamento (que
+  // está num `await`) e mexe no estado embaixo dele. O sintoma era a fila de
+  // saída não drenar — PERDER trabalho já feito, que é o oposto do que ela
+  // existe pra fazer. Aqui a corrida passava; no runner, não.
+  assert.match(ouvinte, /await esvaziarFilaDeSaida\(\)/,
+    'o esvaziamento voltou a correr EM PARALELO com o refetch');
+  const iEsv = ouvinte.indexOf('esvaziarFilaDeSaida()');
+  const iRef = ouvinte.indexOf('startFetching()');
+  assert.ok(iEsv > 0 && iRef > iEsv,
+    'o refetch ficou ANTES do esvaziamento: o trabalho do editor vem primeiro');
 });
 
 test('as 2 chaves novas existem nos 4 idiomas', () => {
