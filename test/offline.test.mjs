@@ -180,3 +180,74 @@ test('js/min/ está em dia com o fonte (gotcha #22)', () => {
     assert.ok(MIN.includes(nome), `${nome} não está em js/min/app.js — falta rodar npm run js`);
   }
 });
+
+// ── O DEFEITO QUE FOI PRA PRODUÇÃO (v2026.09.21-08), e o guard que faltava ──
+//
+// A varredura baixava tile com `fetch(url)`, e a CSP escolhe a diretiva pelo
+// DESTINO da requisição: `fetch` cru tem destino '' → `connect-src`; `<img>`
+// tem destino 'image' → `img-src`. O `img-src` já permitia `https://*.waze.com`
+// (a foto passava), o `connect-src` é NOMINAL e não tinha o host do tile —
+// então TODO tile era bloqueado ANTES da rede, sem erro no console da app.
+//
+// Sintoma no aparelho do owner: "Preparando… 197 de 530" parado pra sempre.
+// Os 197 eram as fotos; os tiles nunca entraram. REPRODUZIDO num servidor local
+// com a mesma forma de CSP (fetch BLOQUEADO / <img> OK) e o conserto provado
+// no mesmo instrumento. O cache `waze-places-tiles` do diagnóstico dele: ZERO.
+//
+// Nenhum teste de fonte enxergaria isto — CSP é comportamento de navegador. O
+// guard abaixo cobre a REGRESSÃO; quem cobre a CLASSE é o bloco do smoke.
+test('o host do tile está no connect-src das TRÊS cópias da CSP', () => {
+  const MAPA = readFileSync(new URL('../js/mapa.js', import.meta.url), 'utf8');
+  const HEADERS = readFileSync(new URL('../_headers', import.meta.url), 'utf8');
+  const NODE = readFileSync(new URL('../server/node.mjs', import.meta.url), 'utf8');
+  // o host sai do PRÓPRIO mapa.js: copiar a string aqui é como elas divergem
+  const m = semComentarios(MAPA).match(/https:\/\/([a-z0-9.-]+)\/\$\{[^}]*\}-tiles/);
+  assert.ok(m, 'não achei o host do tile no mapa.js — o guard cegou');
+  const host = m[1];
+  for (const [nome, cru] of [['_headers', HEADERS], ['index.src.html', HTML], ['server/node.mjs', NODE]]) {
+    // TRÊS armadilhas numa linha só, e as três me pegaram escrevendo este guard:
+    //  1. os três arquivos CITAM `connect-src` num comentário que explica por
+    //     que ele é nominal — casar o nome solto lia a citação (gotcha #67);
+    //  2. excluir o apóstrofo da classe parava o casamento no `'self'`, e o
+    //     guard acusava arquivo que estava CERTO;
+    //  3. e tirar comentário com `/\*…\*/` é pior ainda aqui: o próprio CSP
+    //     tem `https://*.waze.com`, cujo `/*` abre um "bloco" que engole o
+    //     resto do arquivo. O removedor de comentário virou o defeito.
+    // A saída é ancorar na FORMA da diretiva: só a de verdade tem `'self'`.
+    const cs = cru.match(/connect-src 'self'[^;"`]*/);
+    assert.ok(cs, `${nome}: sem connect-src`);
+    assert.ok(cs[0].includes(host),
+      `${nome}: connect-src não permite ${host} — a varredura do offline não consegue`
+      + ' baixar tile nenhum, e o bloqueio é ANTES da rede (sem erro visível)');
+  }
+});
+
+test('a linha não fica presa em "Preparando…" quando a varredura desiste', () => {
+  const corpo = fatiar('offlineVarrer');
+  const i = corpo.indexOf('offlineVarrendo = false');
+  assert.ok(i > 0, 'a bandeira precisa ser baixada no finally');
+  const depois = corpo.slice(i, i + 220);
+  assert.match(depois, /atualizarLinhaDoOffline\(/,
+    'o redesenho tem que vir DEPOIS de baixar a bandeira; antes dela a linha'
+    + ' mostra "Preparando…" de uma varredura que já acabou — e congela ali');
+  // DOIS casos distintos, e a asserção precisa distinguir: a varredura que
+  // termina com fila sobrando (o `else`) e a que morre de exceção (o `catch`).
+  // Cobrar só a string casava com QUALQUER um dos dois, então tirar um deixava
+  // o guard verde — ele foi sabotado, passou limpo, e virou isto.
+  assert.match(corpo, /\}\s*else\s*\{[^}]*offlineUltimoResultado = 'parcial'/,
+    'a varredura que acaba com fila sobrando tem que se declarar parcial');
+  assert.match(corpo, /catch \([^)]*\) \{[^}]*offlineUltimoResultado = 'parcial'/,
+    'a que morre de exceção também — senão a linha mentiria "Pronto" depois de um erro');
+});
+
+test('o estado parcial existe nas quatro línguas e não diz "Pronto"', () => {
+  for (const k of ['prefs.offline.parcialA', 'prefs.offline.parcialB']) {
+    const n = (I18N.match(new RegExp("'" + k.replace(/\./g, '\\.') + "':", 'g')) || []).length;
+    assert.equal(n, 4, `${k} aparece ${n}× — tem que ser 4`);
+  }
+  const corpo = fatiar('atualizarLinhaDoOffline');
+  const iPar = corpo.indexOf("offlineUltimoResultado === 'parcial'");
+  const iPronto = corpo.indexOf("prefs.offline.prontoA");
+  assert.ok(iPar > 0 && iPronto > iPar,
+    'o ramo do parcial tem que vir ANTES do de pronto, senão ele nunca é alcançado');
+});

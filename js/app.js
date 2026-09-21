@@ -1161,8 +1161,11 @@ function setupModalListeners() {
     $('prefOfflineDisponivel')?.addEventListener('change', (e) => {
         AppState.preferences.offlineDisponivel = e.target.checked;
         savePreferences();
+        // Zera ANTES dos dois ramos: alternar o toggle apaga o resultado da
+        // varredura anterior, senão religar mostraria o "parcial" de antes.
+        offlineUltimoResultado = null;
         if (e.target.checked) {
-            offlineMarcarGesto();       // marcar JA e o gesto: nao dorme
+            offlineMarcarGesto();       // marcar JÁ é o gesto: não dorme
             offlineVarrer();            // enche agora, com o custo na tela
         } else {
             offlineEsquecer();          // desligou: some o que foi guardado
@@ -9712,6 +9715,12 @@ let offlineUltimoGesto = Date.now();
 // OFFLINE faria o card pedir uma URL que ninguém aqueceu e a foto sumiria com
 // a cópia boa parada no cache, a um sufixo de distância.
 let offlineJanelaServida = null;
+// Como a ÚLTIMA varredura terminou: 'pronto' | 'parcial' | null (nunca correu).
+// Sem isto a linha congelava em "Preparando… 197 de 530" PARA SEMPRE quando a
+// varredura desistia — o relato do owner. A varredura tinha ACABADO; quem
+// mentia era a tela, porque o único redesenho acontecia com `offlineVarrendo`
+// ainda true e nada redesenhava depois que ele virava false.
+let offlineUltimoResultado = null;
 
 function offlineLigado() {
     return AppState.preferences.offlineDisponivel === true;
@@ -9861,13 +9870,20 @@ async function offlineVarrer() {
         // segue pedindo o sufixo anterior, cuja cópia está viva no cache.
         if (!pend.length) {
             offlineJanelaServida = janela;
+            offlineUltimoResultado = 'pronto';
             dfato('offline.pronto', { n: AppState.queue.length, itens: total });
+        } else {
+            offlineUltimoResultado = 'parcial';
+            dfato('offline.parcial', { feitos: total - pend.length, total, falhas });
         }
-        atualizarLinhaDoOffline(total - pend.length, total);
     } catch (e) {
+        offlineUltimoResultado = 'parcial';
         dfato('offline.erro', { e: String((e && e.message) || e).slice(0, 60) });
     } finally {
         offlineVarrendo = false;
+        // DEPOIS de baixar a bandeira, senão a linha fica no "Preparando…" de
+        // uma varredura que já acabou.
+        atualizarLinhaDoOffline(0, 0);
         if (offlinePedidaDeNovo) { offlinePedidaDeNovo = false; return offlineVarrer(); }
     }
 }
@@ -9894,6 +9910,13 @@ function atualizarLinhaDoOffline(feitos, total) {
     if (offlineVarrendo && total) {
         el.innerHTML = `<span class="text-cyan-800 dark:text-cyan-300">${escapeHtml(
             t('prefs.offline.enchendo', { feitos, total }))}</span>`;
+        return;
+    }
+    if (offlineUltimoResultado === 'parcial') {
+        // Nem "Pronto" (seria mentira) nem "Preparando…" (já acabou). O próximo
+        // gatilho retoma sozinho — a janela servida não avançou.
+        el.innerHTML = `<span class="text-amber-800 dark:text-amber-300 font-semibold">${escapeHtml(
+            t('prefs.offline.parcialA'))}</span> ` + escapeHtml(t('prefs.offline.parcialB'));
         return;
     }
     const n = AppState.queue.length;
