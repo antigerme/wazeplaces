@@ -3214,6 +3214,16 @@ function medirSafeArea() {
 // COMPUTADO dizem se ela rola ou se está cortada — que são coisas diferentes e
 // `scrollHeight > clientHeight` é verdadeiro nas DUAS (gotcha #29).
 const DIAG_ALVOS = ['.place-card:not(.card-fundo)', '.card-fundo', '.card-content', '.card-changes', '.card-flag-comment',
+                    // O mapa entrou em v2026.09.21-05, e a razão é uma falha do
+                    // próprio instrumento: o owner relatou o mapa do card de
+                    // fundo mudando de tamanho ao virar frente, e o diagnóstico
+                    // dele NÃO tinha como mostrar isso. A geometria já media os
+                    // dois cards lado a lado, mas nenhuma coluna distinguia o
+                    // caso — as CAIXAS sempre bateram; o que divergia era o
+                    // ENQUADRAMENTO (`data-mapa-w/h`), que só existia no `dom`
+                    // cru de 140 KB. Dado que só está no HTML é dado que
+                    // ninguém procura sem já saber a resposta.
+                    '.card-map:not(.hidden)',
                     '#cardStack', '#placar', 'header', '.modal-root:not(.hidden) > div',
                     '#imageLightbox:not(.hidden)', '#devFab:not(.hidden)',
                     '.card-btn-reject', '.card-btn-skip', '.card-btn-read'];
@@ -3246,6 +3256,16 @@ function diagGeometria() {
                 // retângulos existem e só o hit-test diz quem intercepta —, e
                 // ele já reincidiu três vezes neste projeto.
                 noCentro: diagQuemEstaNoCentro(e, r),
+                // O ENQUADRAMENTO do mapa: pra que tamanho ele foi desenhado.
+                // Sem isto, frente e fundo saem idênticos no relatório mesmo
+                // quando um deles está desenhado pra outra caixa.
+                ...(e.dataset && e.dataset.mapaW
+                    ? { mapaPara: e.dataset.mapaW + 'x' + e.dataset.mapaH } : {}),
+                // Do card de FUNDO? Ele é coberto pelo da frente POR
+                // CONSTRUÇÃO (`inert` + `pointer-events:none`), então o
+                // hit-test nele acusa o normal como defeito — ver a sentinela
+                // do toque.
+                noFundo: !!(e.closest && e.closest('.card-fundo')),
                 // DENTRO de uma camada aberta, ou atrás dela? Quem está atrás é
                 // coberto por construção, e alertar nisso é ruído.
                 naCamada: camadas.some((c) => c.contains(e)),
@@ -3262,7 +3282,13 @@ function diagQuemEstaNoCentro(el, r) {
                                                Math.round(r.top + r.height / 2));
         if (!alvo) return 'nada';
         if (alvo === el || el.contains(alvo)) return 'ele mesmo';
-        return (alvo.id ? '#' + alvo.id : alvo.tagName + '.' + String(alvo.className).split(' ')[0]).slice(0, 60);
+        // `className` de elemento SVG é um SVGAnimatedString, não uma string:
+        // `String(...)` devolvia `[object SVGAnimatedString]` e o rótulo saía
+        // como `path.[object` — inútil justamente no alerta cujo produto é
+        // dizer QUEM interceptou. Os ícones do card são SVG, então isso valia
+        // pra todo alerta de toque que já saiu.
+        const cls = alvo.getAttribute ? (alvo.getAttribute('class') || '') : '';
+        return (alvo.id ? '#' + alvo.id : alvo.tagName + (cls ? '.' + cls.split(' ')[0] : '')).slice(0, 60);
     } catch (e) { return null; }
 }
 
@@ -3449,7 +3475,15 @@ function diagSentinelas(comp) {
         for (const g of comp.geometria || []) {
             if (g.noCentro && g.noCentro !== 'ele mesmo' && g.noCentro !== 'nada'
                 && /card-btn|devFab/.test(g.sel)
-                && !(g.camadaAberta && !g.naCamada)) {
+                && !(g.camadaAberta && !g.naCamada)
+                // REINCIDIU pela PILHA (v2026.09.21-05): o card de fundo tem os
+                // mesmos três botões, e eles são cobertos pelo da frente — que
+                // é a função da pilha. MEDIDO com controle: 3 alertas com dois
+                // pedidos na fila, ZERO com um. Ou seja, desde v2026.09.19-01
+                // TODO diagnóstico com fila cheia trazia três alertas falsos,
+                // na seção que se lê primeiro. Mesma sentinela, mesma
+                // quantidade, causa nova — e a regra é a mesma do modal aberto.
+                && !g.noFundo) {
                 diga('toqueInterceptado',
                     'algo está por cima de um controle: o dedo não chega nele',
                     { alvo: g.sel, recebe: g.noCentro });
@@ -3458,6 +3492,33 @@ function diagSentinelas(comp) {
             if (/card-btn|devFab/.test(g.sel) && (g.w < 44 || g.h < 44)) {
                 diga('alvoPequeno', 'alvo de toque abaixo de 44px',
                     { alvo: g.sel, w: g.w, h: g.h });
+            }
+        }
+        // 5. O mapa desenhado pra uma caixa que não é a dele.
+        //
+        // INVARIANTE que a app garante: `renderMapa` enumera os tiles pra
+        // cobrir exatamente `larguraPx × alturaPx`, então o enquadramento tem
+        // que ser o tamanho da caixa. Quando não é, sobra faixa sem tile (caixa
+        // maior que o enquadramento) ou o zoom foi escolhido pra outra
+        // proporção (caixa menor) — os dois visíveis, nenhum detectável pelo
+        // resto deste arquivo.
+        //
+        // Nasceu de uma falha do INSTRUMENTO: o owner relatou o mapa do card de
+        // fundo mudando de tamanho ao virar frente, e o diagnóstico dele não
+        // tinha como mostrar. A geometria já media os dois cards, mas as CAIXAS
+        // sempre batem — o que diverge é o enquadramento.
+        //
+        // Tolerância de 1px porque `clientWidth` é inteiro arredondado
+        // (gotcha #34) e o enquadramento guarda o valor lido na hora.
+        for (const g of comp.geometria || []) {
+            if (!g.mapaPara || !/card-map/.test(g.sel)) continue;
+            const [mw, mh] = g.mapaPara.split('x').map(Number);
+            if (Math.abs(mw - g.w) > 1 || Math.abs(mh - g.h) > 1) {
+                diga('mapaForaDaCaixa',
+                    'o mini-mapa foi desenhado pra um tamanho que não é o da caixa dele — '
+                    + 'sobra faixa sem tile, ou o zoom é de outra proporção',
+                    { onde: g.noFundo ? 'card de fundo' : 'card da frente',
+                      caixa: g.w + 'x' + g.h, desenhadoPara: g.mapaPara });
             }
         }
         // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é

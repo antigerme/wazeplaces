@@ -881,6 +881,27 @@ treina a ignorar a seção, que é como ela morre. Duas consequências já aplic
   regra que lê `.tema-claro` vive dentro de `@media (prefers-color-scheme: dark)`. Sem
   esse escopo ela alertaria em todo diagnóstico de quem trocou de tema.
 
+**A SENTINELA PRECISA DE UM DADO QUE O ARQUIVO CARREGUE, e a do mapa nasceu de uma falha do
+INSTRUMENTO** (v2026.09.21-05, pergunta do owner: *"se eu te mandasse o diagnóstico, você
+conseguiria pegar o problema?"*). MEDIDO gerando o arquivo com o app de ANTES do conserto: o
+`resumo.alertas` não dizia nada, a `computado.geometria` não media o mapa, e o dado existia só
+no `dom` cru de 140 KB (`data-mapa-w/h` = `359x337` na frente e `400x240` no fundo). Ou seja: eu
+acharia **se já soubesse o que procurar**, que é o oposto do que esta seção existe pra fazer. A
+geometria já media os dois cards lado a lado — o ponto cego é que as CAIXAS sempre batem, e o
+que diverge é o ENQUADRAMENTO. Hoje `.card-map:not(.hidden)` está no `DIAG_ALVOS` (sem o
+`:not` a caixa mede 0 e a sentinela alerta em todo card com foto), a geometria carrega
+`mapaPara` e `noFundo`, e `mapaForaDaCaixa` compara os dois. Provado com o instrumento de HOJE
+contra o app de ONTEM: **1 alerta** nomeando o card de fundo, **0** no app consertado.
+
+**E o mesmo exercício achou TRÊS ALERTAS FALSOS que já saíam em todo relatório.** A sentinela do
+toque reincidiu — a primeira vez foi o modal aberto, a segunda é a PILHA: o card de fundo tem os
+mesmos três botões e eles são cobertos pelo da frente, que é a função da pilha. Controle: 3
+alertas com dois pedidos na fila, **ZERO** com um; ou seja, desde v2026.09.19-01 todo diagnóstico
+com fila cheia trazia três falsos na seção que se lê PRIMEIRO. Daí o `!g.noFundo`, irmão da
+exceção de camada aberta. **De quebra, o rótulo estava quebrado desde sempre**: `String(el.className)`
+num elemento SVG devolve `[object SVGAnimatedString]`, então o alerta saía como `path.[object` —
+perdendo exatamente a informação que ele existe pra dar, e os ícones do card são todos SVG.
+
 `tools/diag-tela.mjs` imprime os alertas ANTES de tudo e os põe no `resumo.json`.
 
 **O ARQUIVO É UMA GRAVAÇÃO, e daí saem duas ferramentas com papéis diferentes.** Ele responde

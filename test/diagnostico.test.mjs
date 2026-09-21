@@ -533,3 +533,81 @@ test('a pílula continua com o visual de sempre — sem crachá', () => {
         'voltou o nowrap: os espaços em volta do "·" somem e a pílula cola tudo');
 });
 
+
+// ── O diagnóstico precisa ENXERGAR o mini-mapa ──────────────────────────────
+//
+// Nasceu de uma falha do INSTRUMENTO, não do app: o owner relatou o mapa do
+// card de fundo mudando de tamanho ao virar frente, e o diagnóstico dele não
+// tinha como mostrar isso. A geometria já media os dois cards lado a lado, mas
+// nenhuma coluna distinguia o caso — as CAIXAS sempre batem; o que diverge é o
+// ENQUADRAMENTO, que só existia no `dom` cru de 140 KB. Dado que mora só no
+// HTML é dado que ninguém procura sem já saber a resposta.
+const semLinhaComentada = (s) => s.split('\n')
+  .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+test('a geometria do diagnóstico MEDE o mini-mapa, com o enquadramento junto', () => {
+  const app = semLinhaComentada(APP);
+  const i = app.indexOf('const DIAG_ALVOS');
+  const lista = app.slice(i, app.indexOf('];', i));
+  assert.match(lista, /'\.card-map/,
+    'o `.card-map` saiu do DIAG_ALVOS: o diagnóstico volta a não medir o mapa, e o '
+    + 'defeito de enquadramento só existe no `dom` cru — onde ninguém procura');
+  // O seletor SEM o `:not(.hidden)` mediria caixa 0 (mapa que não é o primeiro
+  // slide nasce escondido) e a sentinela alertaria em todo card com foto.
+  assert.match(lista, /'\.card-map:not\(\.hidden\)'/,
+    'o seletor do mapa precisa excluir o escondido — caixa 0 dispara a sentinela à toa');
+
+  const g = semLinhaComentada(APP.slice(APP.indexOf('function diagGeometria')));
+  assert.match(g, /mapaPara:[\s\S]{0,80}dataset\.mapaW/,
+    'a geometria parou de carregar o ENQUADRAMENTO: frente e fundo voltam a sair '
+    + 'idênticos no relatório mesmo com um deles desenhado pra outra caixa');
+  assert.match(g, /noFundo:[\s\S]{0,60}closest\([^)]*card-fundo/,
+    'a geometria parou de dizer de QUAL card é o elemento — sem isso a sentinela do '
+    + 'toque volta a acusar o card de fundo, que é coberto por construção');
+});
+
+test('a sentinela do mapa compara a CAIXA com o enquadramento', () => {
+  const s = semLinhaComentada(APP.slice(APP.indexOf('function diagSentinelas')));
+  assert.match(s, /mapaForaDaCaixa/,
+    'a sentinela do mapa sumiu: o relato "o mapa muda de tamanho" volta a não ter '
+    + 'nenhuma linha no arquivo que o editor manda');
+  // Ela precisa comparar as DUAS coisas: só olhar a caixa não distingue nada
+  // (elas sempre batem), e só olhar o enquadramento não tem com o que comparar.
+  assert.match(s, /mapaPara[\s\S]{0,400}Math\.abs\([\s\S]{0,40}g\.w\)[\s\S]{0,120}g\.h\)/,
+    'a sentinela deixou de comparar o enquadramento com a caixa medida — é a '
+    + 'comparação inteira, porque as caixas sempre batem');
+  // Tolerância: `clientWidth` é inteiro arredondado (gotcha #34).
+  assert.match(s, /Math\.abs\([^)]*\)\s*>\s*1/,
+    'a sentinela ficou sem tolerância de 1px: `clientWidth` é arredondado e ela '
+    + 'passa a alertar por ruído de arredondamento');
+});
+
+test('o card de fundo NÃO entra no alerta de toque interceptado', () => {
+  const s = semLinhaComentada(APP.slice(APP.indexOf('function diagSentinelas')));
+  const i = s.indexOf("diga('toqueInterceptado'");
+  assert.ok(i > 0, 'a sentinela do toque sumiu');
+  const cond = s.slice(s.lastIndexOf('if (', i), i);
+  // MEDIDO com controle: 3 alertas com dois pedidos na fila, ZERO com um. Desde
+  // a pilha (v2026.09.19-01) todo diagnóstico com fila cheia trazia três
+  // alertas falsos, na seção que se lê PRIMEIRO. É a segunda reincidência desta
+  // mesma sentinela — a primeira foi o modal aberto.
+  assert.match(cond, /!g\.noFundo/,
+    'o card de fundo voltou pro alerta de toque: os botões dele são cobertos pelo '
+    + 'card da frente POR CONSTRUÇÃO, e isso são 3 alertas falsos em todo relatório '
+    + 'com fila cheia — falso positivo treina a ignorar a seção');
+  assert.match(cond, /camadaAberta/,
+    'a exceção de camada aberta saiu junto — ela cobre o outro caso (modal por cima)');
+});
+
+test('o rótulo de quem interceptou não quebra em SVG', () => {
+  const q = semLinhaComentada(APP.slice(APP.indexOf('function diagQuemEstaNoCentro')));
+  // `className` de elemento SVG é um SVGAnimatedString: `String(...)` devolve
+  // `[object SVGAnimatedString]` e o rótulo saía `path.[object` — inútil
+  // justamente no alerta cujo produto é dizer QUEM interceptou. Os ícones do
+  // card são SVG, então isso valia pra todo alerta de toque já emitido.
+  assert.ok(!/String\(\s*alvo\.className\s*\)/.test(q),
+    'voltou a ler `className` como string: em SVG isso vira `[object SVGAnimatedString]` '
+    + 'e o alerta perde exatamente a informação que ele existe pra dar');
+  assert.match(q, /getAttribute\('class'\)/,
+    'o rótulo precisa ler o atributo `class`, que vale em HTML e em SVG');
+});
