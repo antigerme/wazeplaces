@@ -5399,6 +5399,49 @@ async function esperarFimDaSaida(page, tetoMs = 180000) {
     checa(enviosDeAcao.length === 2,
       `${c.id}: DOIS TEMPOS — saíram ${enviosDeAcao.length} requisições para 2 ações`);
 
+    // O RELATO DO OWNER (iPhone, 2026-09-21): modo avião, trata 3, sai do modo
+    // avião — e o "3 esperando envio" fica PARADO. Ele trata mais 2, que saem na
+    // hora, e os 3 continuam lá.
+    //
+    // A causa não é o evento faltar: ele CHEGA quando o rádio liga, e nesse
+    // instante a rede ainda não passa tráfego — o esvaziamento entra, quebra no
+    // `transient` e sai. Depois disso não vem gatilho nenhum, porque os dois que
+    // existiam eram o `online` (já gasto) e a ABERTURA (a app não foi fechada).
+    //
+    // O terceiro gatilho é a PROVA DE REDE: uma resposta nossa que chegou. Aqui
+    // o cenário NÃO dispara `online` nenhum depois do primeiro — quem tem que
+    // drenar a fila é o sucesso das ações novas.
+    await montar(); await dormir(400);
+    semRede = true; await ctx.setOffline(true);
+    await tratar(3);
+    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    const pv0 = await estado();
+    checa(pv0.saida === 3, `${c.id}: PROVA DE REDE — as 3 ações não entraram na fila (${pv0.saida})`);
+    // Sai do modo avião com a rede AINDA ruim: o `online` do navegador é gasto
+    // aqui, contra uma rota que ainda aborta.
+    abortLento = true;
+    await ctx.setOffline(false);
+    await dormir(1400);
+    const pv1 = await estado();
+    // CONTROLE do instrumento: se a fila já tivesse drenado aqui, o resto do
+    // cenário mediria o caso fácil e passaria com o gancho arrancado.
+    checa(pv1.saida === 3,
+      `${c.id}: PROVA DE REDE — a fila drenou no \`online\` (${pv1.saida}): o cenário não mediria o gancho`);
+    // A rede FIRMA. Nenhum evento novo — é exatamente o estado do relato.
+    semRede = false; abortLento = false;
+    await dormir(600);
+    enviosDeAcao = [];
+    await tratar(2);                      // as 2 novas saem com sucesso
+    await esperarFimDaSaida(page, 30000);
+    await dormir(400);
+    const pv2 = await estado();
+    checa(pv2.saida === 0,
+      `${c.id}: PROVA DE REDE — ${pv2.saida} ficaram presas com a rede boa: é o relato do owner de volta`);
+    checa(enviosDeAcao.length === 5,
+      `${c.id}: PROVA DE REDE — saíram ${enviosDeAcao.length} requisições (esperado 5: as 2 novas + as 3 presas)`);
+    checa(!/\d/.test(pv2.aviso),
+      `${c.id}: PROVA DE REDE — o indicador ficou na tela depois de drenar`);
+
     // O GATILHO DA ABERTURA, sozinho: sem nenhum evento `online`, só ABRIR a app
     // tem que drenar. É o caminho de quem ficou offline e FECHOU tudo — e ele já
     // nasceu quebrado uma vez, porque quem põe `AppState.authenticated` é o
@@ -5564,7 +5607,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente)`
-  + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar a app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), app MORTA no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
+  + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar a app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), resposta que CHEGA drenando a fila SEM nenhum evento online novo (o relato do iPhone, com controle de que ela não drenou antes), app MORTA no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`

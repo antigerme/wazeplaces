@@ -163,6 +163,20 @@ const API = {
         }
     },
 
+    // PROVA DE REDE — o único sinal que não custa requisição nenhuma, porque
+    // ela já aconteceu. Uma resposta que CHEGA (qualquer status, inclusive 401
+    // ou 500) prova que o pacote foi e voltou; o `catch` abaixo é o caso em que
+    // não chegou. `navigator.onLine === true` não prova nada disto, e o evento
+    // `online` do navegador pode não vir: no iPhone do owner, sair do modo
+    // avião deixou 3 ações presas na fila enquanto DUAS novas saíam com sucesso
+    // na mesma tela — a app tinha a prova na mão e não a usava.
+    //
+    // O gancho existe pra o TRANSPORTE não precisar conhecer a fila de saída:
+    // quem registra é o `app.js`. Chamado de dentro de um try/catch próprio,
+    // porque um erro no consumidor não pode derrubar a resposta que o editor
+    // está esperando.
+    aoProvarRede: null,
+
     async _post(endpoint, body) {
         const _t0 = performance.now();
         // Timeout no lado browser→backend: sem isso um fetch pendurado deixava
@@ -221,6 +235,7 @@ const API = {
             // sem chance de retry — era o caminho mais curto pro editor cair na
             // tela de login sem ter pedido pra sair. Quem decide é o
             // `handleUnauthorized`, que confirma antes de derrubar.
+            try { if (this.aoProvarRede) this.aoProvarRede(endpoint); } catch (e) { /* nunca derruba a resposta */ }
             return data;
         } catch (error) {
             console.error(`Erro em ${endpoint}:`, error);
