@@ -404,3 +404,38 @@ test('resposta que CHEGA é prova de rede, e é o terceiro gatilho', () => {
   assert.ok(/aoProvarRede/.test(apiMin) && /aoProvarRede/.test(MIN),
     'js/min/ não tem o gancho — faltou `npm run js`, e o iPhone segue com o defeito');
 });
+
+test('o indicador é ÍCONE + número, e o ícone é que diz o estado', () => {
+  const f = fatiar('updateInFlightIndicator');
+  // Decisão do owner (2026-09-21) olhando mockups na tela real: a frase inteira
+  // custava 128px e tapava 100% da tinta do RESTAM no iPhone; isto custa 23px e
+  // zero. Encolher resolveu de graça o que tinha sido mantido a contragosto.
+  assert.ok(!/rounded-full/.test(f) || !/bg-slate-800/.test(f),
+    'a pílula voltou: o indicador cresce de novo e volta a tapar o número do placar');
+  // O que separa "saindo agora" de "parado esperando rede" é o ÍCONE, nunca a
+  // cor sozinha (WCAG 1.4.1) — e nunca só o número, que foi medido e recusado
+  // porque "2" e "3" ficam visualmente idênticos.
+  const iEnviando = f.indexOf('animate-spin');
+  const iEsperando = f.indexOf('M12 7v5l3 2');       // ponteiros do relógio
+  assert.ok(iEnviando > 0, 'o spinner do estado "enviando" sumiu');
+  assert.ok(iEsperando > 0,
+    'o ícone do estado "esperando" sumiu: sem ele os dois estados viram o mesmo '
+    + 'número e some a distinção entre o trabalho estar saindo e estar encalhado');
+  // Cor é REFORÇO, e as shades do claro são -800 porque sem pílula o contraste
+  // é contra o cartão do placar: -700 media 4,8:1 pra um mínimo de 4,5 (0,3 de
+  // folga), -800 mede 6,78:1. Gotcha #40.
+  assert.match(f, /text-cyan-800 dark:text-cyan-300/,
+    'a cor do "enviando" saiu do -800 no claro — a folga de contraste some');
+  assert.match(f, /text-amber-800 dark:text-amber-300/,
+    'a cor do "esperando" saiu do -800 no claro — a folga de contraste some');
+  // A FRASE INTEIRA continua pra quem usa leitor de tela: encolheu o pixel, não
+  // a informação. Sem isto ele ouve "3" e mais nada.
+  assert.match(f, /sr-only[\s\S]{0,60}escapeHtml\(texto\)/,
+    'o texto completo saiu do `sr-only`: quem usa leitor de tela passa a ouvir só '
+    + 'o número, que não diz nem o que são nem em que estado estão');
+  assert.match(f, /el\.title = texto/,
+    'o `title` sumiu — é o que explica o ícone pra quem aponta no desktop');
+  // gotcha #22: é o js/min/ que o navegador carrega.
+  assert.ok(/M12 7v5l3 2/.test(MIN),
+    'js/min/app.js não tem o ícone novo — faltou `npm run js`');
+});

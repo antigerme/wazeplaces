@@ -10211,22 +10211,55 @@ function updateInFlightIndicator() {
     if (!el) {
         el = document.createElement('div');
         el.id = 'inFlightIndicator';
-        el.className = 'fixed top-20 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg z-40 flex items-center gap-2';
         document.body.appendChild(el);
     }
     // Girando só quando está MESMO saindo. "Esperando" com giro seria a app
     // fingindo trabalho que não está acontecendo — e é justamente o estado em
     // que não há rede pra trabalhar.
     const enviando = AppState.inFlightActions > 0;
-    const giro = enviando ? `
-        <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-        </svg>` : '';
+    const n = enviando ? AppState.inFlightActions : esperando;
     const texto = enviando
         ? t('indicator.sending', { n: AppState.inFlightActions })
         : t('indicator.waiting', { n: esperando });
-    el.innerHTML = giro + `<span>${escapeHtml(texto)}</span>`;
+
+    // ÍCONE + NÚMERO, sem pílula (decisão do owner, 2026-09-21, olhando mockups
+    // na tela real: *"o texto não poderia ser mais discreto?"*).
+    //
+    // MEDIDO nas cinco variantes, no iPhone dele e no Fold: a frase inteira
+    // custava 128px e tapava **100% da tinta do RESTAM**; isto custa 23px e
+    // **zero**. Ou seja, encolher resolveu de graça o que tinha sido avaliado e
+    // mantido a contragosto uma hora antes — foi o dado novo que a régua de
+    // "não re-proponha sem dado novo" pedia.
+    //
+    // O ÍCONE é que carrega o estado, nunca a cor sozinha (WCAG 1.4.1, a mesma
+    // régua que fez a pílula da presença trocar de ícone): spinner girando =
+    // saindo agora, relógio = parado esperando rede. A cor só reforça.
+    //
+    // SÓ NÚMERO foi medido e RECUSADO: "2" e "3" ficam visualmente idênticos, e
+    // aí se perde exatamente a distinção que importa quando não há sinal —
+    // entre o trabalho estar saindo e estar encalhado.
+    const icone = enviando ? `
+        <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+        </svg>` : `
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>
+        </svg>`;
+    // As shades do CLARO são -800 e não -700: sem pílula o contraste é contra o
+    // cartão do placar, e -700 media 4,8:1 contra um mínimo de 4,5 — passa, mas
+    // com 0,3 de folga. O `.valor-ausente` já nasceu numa margem dessas e teve
+    // que ser corrigido depois (gotcha #40: constante de contraste tem ESCOPO).
+    el.className = 'fixed top-20 right-4 z-40 flex items-center gap-1 text-[0.6875rem] font-semibold '
+        + (enviando ? 'text-cyan-800 dark:text-cyan-300'
+                    : 'text-amber-800 dark:text-amber-300');
+    el.title = texto;
+    // A FRASE INTEIRA continua existindo pra quem usa leitor de tela: o que
+    // encolheu foi o pixel, não a informação. Sem o `sr-only` ele ouviria "3" e
+    // mais nada — e "3" sozinho não diz nem o que são, nem em que estado estão.
+    el.innerHTML = icone + `<span class="tnum" aria-hidden="true">${escapeHtml(String(n))}</span>`
+        + `<span class="sr-only">${escapeHtml(texto)}</span>`;
 }
 
 // Feedback quando um número muda. São DOIS mecanismos, porque contar não serve
