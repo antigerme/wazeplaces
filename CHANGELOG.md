@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.22-04
+
+### Corrigido
+- **Reabrir a app sem sinal não fica mais parado no "carregando".** Com o **Disponível offline** ligado, quem fechava a app e a abria de novo sem rede via a tela de carregamento para sempre — e os pedidos guardados estavam ali, prontos, só que **por baixo** dela. Agora o primeiro pedido aparece normalmente, com o mapa guardado.
+
+### Melhorado — relatório do modo dev
+- **Um alerta novo avisa quando a tela de carregamento fica por cima de um pedido já aberto.** No relatório deste defeito, o resumo dizia só "carregando", e foi preciso vasculhar o arquivo pra achar o pedido escondido.
+
 ## v2026.09.22-03
 
 ### Corrigido

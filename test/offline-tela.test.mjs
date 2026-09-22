@@ -132,3 +132,36 @@ test('o bundle GERADO tem tudo — senão nada disso está no ar', () => {
   assert.match(MIN, /titleOffline/, 'o js/min/ não tem o texto de sem-conexão — falta `npm run js`');
   assert.match(MIN, /startFetching/, 'o js/min/ está defasado');
 });
+
+// ── A APP REABERTA SEM REDE: o card nasce, e o esqueleto tem que SAIR ──
+// Relato de 2026-09-22: o owner ligou o offline, deixou encher, fechou a app e
+// reabriu no modo avião — a tela ficou parada no esqueleto de "carregando". O
+// diagnóstico dele mostrou o resto: a fila guardada ENTROU (236 pedidos, o
+// `offline.abriu` no diário), o card da frente estava MONTADO e o mapa dele até
+// carregou do cache. Só que por BAIXO do `#loadingCard`, que nasce visível no
+// HTML com z-50 e que só o `startFetching` escondia — e a abertura sem rede, de
+// propósito, não chama o `startFetching`.
+test('montou card, o esqueleto sai — FONTE ÚNICA no `renderCurrentCard`', () => {
+  const r = fatiar('renderCurrentCard');
+  const iCard = r.indexOf("document.getElementById('cardStack').appendChild(card);");
+  const iEsq = r.search(/^\s+showLoading\(false\);/m);
+  assert.ok(iCard > 0, 'o renderCurrentCard deixou de pendurar o card na pilha');
+  assert.ok(iEsq > iCard,
+    'o renderCurrentCard não esconde o esqueleto DEPOIS de montar o card — a app reaberta sem rede fica parada no "carregando"');
+  assert.match(r, /getElementById\('loadErrorState'\)\?\.classList\.add\('hidden'\)/,
+    'card na tela e o painel de falha também visível: o card tem que tirá-lo');
+});
+
+test('o esqueleto nasce VISÍVEL no HTML — é por isso que alguém tem que escondê-lo', () => {
+  // Se um dia o markup nascer com `hidden`, a regra de cima continua certa,
+  // mas o motivo muda: este teste existe pra que a premissa seja CONFERIDA.
+  const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  const tag = HTML.match(/<div id="loadingCard" class="([^"]*)"/);
+  assert.ok(tag, 'o #loadingCard sumiu do index.src.html');
+  // Por LISTA de classes: `\bhidden\b` casa com o `hidden` de `overflow-hidden`
+  // (o hífen é fronteira de palavra) — foi o erro que eu cometi lendo o
+  // diagnóstico deste mesmo relato.
+  assert.ok(!tag[1].split(/\s+/).includes('hidden'),
+    'o esqueleto passou a nascer escondido — reveja quem o mostra na abertura');
+  assert.ok(tag[1].split(/\s+/).includes('z-50'), 'o esqueleto deixou de ficar POR CIMA do card (z-50)');
+});

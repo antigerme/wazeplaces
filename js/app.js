@@ -3252,6 +3252,17 @@ function diagComputado() {
             src: foto ? String(foto.currentSrc || foto.src || '').slice(0, 160) : null,
         } : null;
         fora.tilesGuardadosQueFalharam = diagTilesGuardadosQueFalharam.slice(-5);
+        // O esqueleto de "carregando" e o card da frente, cada um por si: o
+        // `painel` do `dlogTelaAtual` diz só o de CIMA ("carregando"), e foi
+        // assim que o relato de 2026-09-22 chegou sem dizer que havia um card
+        // montado por baixo (ver a sentinela `esqueletoSobreCard`). Classe E
+        // caixa, a mesma régua do `visivel` de lá.
+        const esq = document.getElementById('loadingCard');
+        const rEsq = esq && esq.getBoundingClientRect();
+        fora.telaDoCard = {
+            esqueleto: !!(esq && !esq.classList.contains('hidden') && rEsq.width > 0 && rEsq.height > 0),
+            card: !!frente,
+        };
     } catch (e) {
         fora._erro = String((e && e.message) || e).slice(0, 160);
     }
@@ -3624,6 +3635,20 @@ function diagSentinelas(comp) {
             diga('tileGuardadoFalhou',
                 'pedaço de mapa GUARDADO no aparelho falhou na tela — o service worker não o serviu',
                 { n: tf.length, exemplos: tf.slice(-3).map((x) => x.url) });
+        }
+        // 9. O esqueleto de "carregando" POR CIMA de um card montado.
+        //
+        // INVARIANTE desde v2026.09.22-04: o `renderCurrentCard` esconde o
+        // esqueleto ao pendurar o card, e todo card da frente passa por ele.
+        // Os dois visíveis juntos é o defeito do relato de 2026-09-22 — a app
+        // reaberta sem rede "não carregava nada" com o pedido montado por
+        // baixo do esqueleto (z-50) —, e o resumo daquele arquivo dizia só
+        // "carregando", sem alerta nenhum.
+        const tc = comp.telaDoCard;
+        if (tc && tc.esqueleto && tc.card) {
+            diga('esqueletoSobreCard',
+                'o esqueleto de "carregando" está POR CIMA de um card já montado — a tela parece '
+                + 'parada e o pedido está ali embaixo');
         }
         // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é
         // deliberada. Eu escrevi uma (< 25% da janela) e ela não disparou no
@@ -5711,6 +5736,16 @@ function renderCurrentCard() {
     // zerar de novo (a classe ficaria pendurada do "Tudo limpo!" anterior).
     document.getElementById('noMoreCards').classList.remove('celebrate');
     document.getElementById('noMoreCards').classList.add('hidden');
+    // CARD NA TELA ⇒ NENHUM PAINEL POR CIMA DELE, e a regra mora AQUI porque
+    // todo caminho que monta um card passa por esta função. O esqueleto
+    // (`#loadingCard`, z-50) nasce VISÍVEL no HTML, e só o `startFetching` o
+    // escondia — a abertura sem rede, que de propósito não chama o
+    // `startFetching`, montava o card POR BAIXO dele: relato de 2026-09-22, app
+    // reaberta no modo avião com 236 pedidos guardados, o card montado e o mapa
+    // carregado do cache, e a tela parada no esqueleto. Nenhum smoke via porque
+    // o helper que monta cards chamava `showLoading(false)` por conta própria.
+    showLoading(false);
+    document.getElementById('loadErrorState')?.classList.add('hidden');
     agendarAquecimento(card);
 }
 

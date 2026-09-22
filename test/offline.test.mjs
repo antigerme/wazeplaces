@@ -562,6 +562,30 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   exigir(/diz\('e o worker esquece a LISTA dele/,
     'sumiu a prova de que esquecer limpa também a lista do worker (endereços de pedidos de terceiros)');
 
+  // A APP FECHADA E REABERTA SEM REDE (relato de 2026-09-22, v2026.09.22-04).
+  // A seção 5 chamava a função numa página VIVA e o helper `montarNa` fazia
+  // `showLoading(false)` por conta própria — o instrumento fazia o que a app
+  // esquecia, e o esqueleto por cima do card passou por tudo. A 5b só vale se
+  // abrir uma página NOVA e deixar o `initApp` decidir, e se medir o DEDO.
+  exigir(/secao\('5b\. FECHAR E REABRIR SEM REDE/,
+    'sumiu a reabertura FRIA sem rede — é o único lugar em que a app decide sozinha, sem helper');
+  const i5b = CODIGO.indexOf("secao('5b.");
+  const bloco5b = CODIGO.slice(i5b, CODIGO.indexOf("secao('6.", i5b));
+  assert.match(bloco5b, /const fria = await ctx\.newPage\(\);/, 'a 5b tem que abrir uma página NOVA');
+  assert.match(bloco5b, /await fria\.goto\(BASE \+ '\/'/, 'a página nova tem que CARREGAR a app, não receber estado injetado');
+  assert.doesNotMatch(bloco5b, /montarNa\(fria/,
+    'a página reaberta ganhou o helper de montagem — ele esconde o esqueleto e apaga o defeito que a seção mede');
+  assert.match(bloco5b, /document\.elementFromPoint\(/, 'a 5b tem que medir o que o DEDO alcança, não se o card existe');
+  assert.match(bloco5b, /ServiceWorker\.stopAllWorkers/, 'a 5b perdeu a variante com o worker encerrado');
+  // O controle vem DEPOIS da medida sã: medir com o esqueleto recolocado e
+  // chamar isso de "são" passaria por vácuo.
+  const iMedida = bloco5b.indexOf('const agora = medir();');
+  const iControle = bloco5b.indexOf('showLoading(true);');
+  assert.ok(iMedida > 0 && iControle > iMedida,
+    'a medida sã da 5b tem que vir ANTES do controle que recoloca o esqueleto');
+  exigir(/diz\(`\$\{variante\.nome\}: CONTROLE — com o esqueleto de volta por cima/,
+    'a 5b perdeu o controle que prova que o dedo e a sentinela ENXERGAM o esqueleto');
+
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],
     'falta o script `test:offline` no package.json');

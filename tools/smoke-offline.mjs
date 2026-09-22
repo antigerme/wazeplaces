@@ -365,6 +365,114 @@ const off = await page.evaluate(async () => {
 diz('a fila guardada entra no lugar da tela de falha', off.abriu === true && off.n === 3 && off.erro === false,
   JSON.stringify(off));
 
+secao('5b. FECHAR E REABRIR SEM REDE — a página NOVA, a app de verdade decidindo');
+// O relato de 2026-09-22: "ativei o modo offline, baixou tudo, fechei a
+// aplicação e ao reabrir não carrega nada". O diagnóstico dele mostrou a fila
+// guardada ENTRANDO (236, `offline.abriu`), o card montado e o mapa vindo do
+// cache — por BAIXO do esqueleto de "carregando", que nasce visível (z-50) e
+// que só o `startFetching` escondia.
+//
+// A seção 5 não podia ver isso, e o motivo é o instrumento: ela chama
+// `offlineTentarAbrirSemRede()` numa página JÁ VIVA, com o esqueleto já
+// escondido, e confere o `AppState`. E o `montarNa` desta casa faz
+// `showLoading(false)` por conta própria — ou seja, o helper fazia exatamente o
+// que a app esquecia. Aqui ninguém ajuda: token, preferências e fila vão pro
+// ARMAZENAMENTO, e uma página NOVA abre sem rede com o `initApp` de verdade.
+// E o que se mede é o que o DEDO alcança (`elementFromPoint`, gotcha #26), não
+// se o card existe no DOM — ele existia no relato.
+aviao = false; await ctx.setOffline(false);
+await montar([SO_MAPA(81), SO_MAPA(82), SO_MAPA(83)]);
+await page.evaluate(() => {
+  AppState.preferences.offlineDisponivel = true;
+  AppState.preferences.comoFuncionaVisto = true;
+  savePreferences();
+  API.setSession('tok-reabrir');
+  offlineJanelaServida = null; offlineUltimoResultado = null; offlineMarcarGesto(); offlineVarrer();
+});
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
+const encheu5b = await page.evaluate(() => offlineUltimoResultado);
+diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU antes de fechar a app', encheu5b === 'pronto', String(encheu5b));
+aviao = true; await ctx.setOffline(true);
+const cdpReabrir = await ctx.newCDPSession(page);
+let estadosReabrir = [];
+cdpReabrir.on('ServiceWorker.workerVersionUpdated', (e) => { estadosReabrir = e.versions.map((v) => v.runningStatus); });
+await cdpReabrir.send('ServiceWorker.enable');
+for (const variante of [
+  { nome: 'worker VIVO (o caso do relato)', parar: false },
+  { nome: 'worker ENCERRADO (a app fechada por mais de ~30s)', parar: true },
+]) {
+  if (variante.parar) {
+    estadosReabrir = [];
+    await cdpReabrir.send('ServiceWorker.stopAllWorkers');
+    for (let i = 0; i < 30 && !estadosReabrir.includes('stopped'); i++) await dormir(100);
+    diz(`${variante.nome}: CONTROLE — o worker foi de fato ENCERRADO antes de reabrir`,
+      estadosReabrir.includes('stopped'), JSON.stringify(estadosReabrir));
+  }
+  const fria = await ctx.newPage();
+  fria.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ' [reaberta]', txt: String(e.message) }));
+  fria.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+    violacoes.push({ secao: secaoAtual + ' [reaberta]', txt: m.text() }); });
+  let m = null;
+  try {
+    await fria.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+    // Sinal POSITIVO: a app DIZ que abriu a fila guardada; e depois o mapa do
+    // card da frente termina de tentar (do cache, que é o que se espera).
+    await esperarNaPagina(fria, () => typeof dfatoAnel !== 'undefined'
+      && dfatoAnel.some((e) => e.k === 'offline.abriu'), 20000, 100);
+    await esperarNaPagina(fria, () => { const f = typeof cardDaFrente === 'function' && cardDaFrente();
+      return !!f && [...f.querySelectorAll('.card-map-tiles img')].every((x) => x.complete); }, 8000, 100);
+    await dormir(300);
+    m = await fria.evaluate(() => {
+      const esq = document.getElementById('loadingCard');
+      const frente = cardDaFrente();
+      const onde = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        if (!alvo) return null;
+        if (frente && frente.contains(alvo)) return 'card';
+        if (esq && esq.contains(alvo)) return 'esqueleto';
+        return String(alvo.id || alvo.className || alvo.tagName).slice(0, 40);
+      };
+      const tl = frente ? [...frente.querySelectorAll('.card-map-tiles img')] : [];
+      const medir = () => ({ esqueletoOculto: !!esq && esq.classList.contains('hidden'),
+        painel: dlogTelaAtual().painel, dedoNoX: onde(frente && frente.querySelector('.card-btn-reject')),
+        dedoNoCartao: onde(frente && frente.querySelector('.card-name')),
+        alertas: diagSentinelas(diagComputado()).map((a) => a.chave) });
+      const agora = medir();
+      // CONTROLE do instrumento: o esqueleto de volta POR CIMA do card tem que
+      // ser VISTO pelo dedo e pela sentinela — senão "o dedo cai no card"
+      // passaria por vácuo no dia em que o esqueleto mudar de camada.
+      showLoading(true);
+      const comEsqueleto = medir();
+      showLoading(false);
+      return { onLine: navigator.onLine, fila: AppState.queue.length,
+        caiuNaAbertura: dfatoAnel.some((e) => e.k === 'rede.caiu' && e.naAbertura),
+        tiles: { pedidos: tl.length, ok: tl.filter((x) => x.naturalWidth > 0).length },
+        ...agora, controle: comEsqueleto };
+    });
+  } catch (e) {
+    m = { erro: String((e && e.message) || e).slice(0, 200) };
+  }
+  await fria.close();
+  diz(`${variante.nome}: PRÉ-CONDIÇÃO — a página NOVA nasceu sem rede e a fila guardada entrou`,
+    m?.onLine === false && m?.caiuNaAbertura === true && m?.fila === 3, JSON.stringify(m));
+  diz(`${variante.nome}: o esqueleto SAIU — o que se vê é o card`,
+    m?.esqueletoOculto === true && m?.painel === 'card', JSON.stringify(m));
+  diz(`${variante.nome}: o dedo no ✕ e no nome cai NO CARD, não no esqueleto`,
+    m?.dedoNoX === 'card' && m?.dedoNoCartao === 'card', JSON.stringify(m));
+  diz(`${variante.nome}: o mapa do card veio do cache, sem rede`,
+    m?.tiles?.pedidos > 0 && m?.tiles?.ok === m?.tiles?.pedidos, JSON.stringify(m?.tiles));
+  diz(`${variante.nome}: e o relatório não acusa esqueleto por cima de card`,
+    Array.isArray(m?.alertas) && !m.alertas.includes('esqueletoSobreCard'), JSON.stringify(m?.alertas));
+  diz(`${variante.nome}: CONTROLE — com o esqueleto de volta por cima, o dedo o acerta e a sentinela acusa`,
+    m?.controle?.dedoNoX === 'esqueleto' && m?.controle?.alertas?.includes('esqueletoSobreCard'),
+    JSON.stringify(m?.controle));
+}
+// Volta ao estado em que a seção 5 deixou: sem rede, sem sessão, `aviao` a cargo da 6.
+await page.evaluate(() => { API.setSession(null); });
+aviao = false;
+
 secao('6. O CARD DE FOTO SEM REDE: a foto que VEIO aparece, a que NÃO VEIO avisa');
 // ESTA SEÇÃO EXIGIA O DEFEITO COMO CORRETO. Ela montava um card de FOTO sem rede
 // e cobrava o aviso "precisa de sinal" — sem nunca perguntar se a foto estava
