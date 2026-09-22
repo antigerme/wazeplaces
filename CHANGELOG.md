@@ -8,6 +8,24 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.22-03
+
+### Corrigido
+- **O mapa guardado aparece sem sinal mesmo quando a preparação foi interrompida.** Se o sinal caía no meio do "Preparando…" — o normal na estrada, que é pra onde o offline existe —, os pedaços de mapa que **já tinham sido guardados** ficavam no aparelho mas não apareciam: a parte da app que serve o mapa só ficava sabendo deles quando a preparação chegava ao fim. Agora ela fica sabendo aos poucos, durante a preparação, e sempre que ela para, seja qual for o motivo.
+- **Desligar o offline, ou sair, limpa também a memória da parte da app que serve o mapa.** Ela seguia lembrando os endereços dos pedaços de mapa já apagados — que dizem onde ficam os pedidos — até o Android adormecê-la.
+
+### Melhorado — relatório do modo dev
+- **O relatório passa a dizer sozinho quando o offline falhou**, com dois alertas novos: foto escondida pelo aviso "precisa de sinal" embora tivesse chegado, e pedaço de mapa guardado que falhou mesmo assim. Foi esse segundo alerta, ainda sendo escrito, que achou o defeito acima.
+- **Cada captura diz se havia rede** e em que pé estava o offline naquele momento, e o diário anota a hora em que o sinal **caiu** e em que **voltou**.
+- **Uma seção própria do offline**, só pra quem o ligou: quantos pedidos e pedaços de mapa estão guardados, de quando, e quais falharam.
+- **A parte da app que serve o mapa offline responde por si** no relatório: se acabou de ser reiniciada pelo Android, se já sabe o que está guardado, e quantos pedaços de mapa entregou do aparelho.
+- **Com o modo dev ligado, a lista de carregamentos da página vai até 1000** (o navegador para em 250). E o relatório avisa quando a lista encheu, em vez de parecer que nada mais foi carregado.
+- **Falha de envio sem sinal parou de virar erro no relatório.** No modo avião ela é o esperado — no último relatório eram 16 das 64 anotações —, e a hora certa já está no diário.
+- **O relatório dizia que a foto ampliada estava fechada em toda captura**, mesmo com ela aberta. Corrigido.
+
+### Notas
+- Além do mapa acima, nada muda na tela. Quem não ligou o **Disponível offline** nem o modo dev não percebe diferença nenhuma.
+
 ## v2026.09.22-02
 
 ### Corrigido

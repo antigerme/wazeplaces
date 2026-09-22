@@ -92,9 +92,12 @@ test('UM anúncio: o toast cala quando o painel fala', () => {
 });
 
 test('a rede voltando refaz a BUSCA, não só a fila de saída', () => {
-  const iOn = APP_SEM.indexOf("addEventListener('online'");
-  assert.ok(iOn > 0, 'sumiu o ouvinte de `online`');
-  const ouvinte = APP_SEM.slice(iOn, iOn + 700);
+  // O ouvinte que REFAZ a busca — não "o primeiro do arquivo", que hoje é o do
+  // diagnóstico anotando a transição da rede (gotcha #67).
+  const ouvintes = [...APP_SEM.matchAll(/addEventListener\('online'/g)]
+    .map((m) => APP_SEM.slice(m.index, m.index + 700));
+  assert.ok(ouvintes.length > 0, 'sumiu o ouvinte de `online`');
+  const ouvinte = ouvintes.find((o) => /startFetching\(\)/.test(o)) || '';
   assert.match(ouvinte, /startFetching\(\)/,
     'a busca não é refeita quando a rede volta: o editor fica olhando "Falha ao carregar" com 4g');
   // PORTÃO: sem `loadError` isto vira uma requisição a cada oscilação de

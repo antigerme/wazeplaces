@@ -527,6 +527,41 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   assert.match(bloco6c, /await offlineTentarAbrirSemRede\(\)/,
     'a 6c tem de reabrir pelo caminho de abertura de verdade');
 
+  // O DIAGNÓSTICO DO OFFLINE (v2026.09.22-03). O relato de 2026-09-22 se
+  // resolveu com um arquivo que não DIZIA o que estava errado — dava pra achar
+  // lendo 500 KB, sabendo o que procurar. As seções abaixo medem o que o
+  // relatório passou a dizer sozinho, e cada uma carrega o lado em que ele tem
+  // de ficar CALADO: sem isso, "acusou" passa por vácuo. Lido só o CÓDIGO e
+  // ancorado na chamada (`secao(`/`diz(`), porque um comentário citando o
+  // rótulo passaria no lugar da seção apagada (gotcha #67).
+  const CODIGO = SMOKE.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const exigir = (re, msg) => assert.match(CODIGO, re, msg);
+  exigir(/secao\('7d\. A PREPARAÇÃO INTERROMPIDA/,
+    'sumiu a preparação interrompida — era o buraco REAL que a sentinela do mapa achou:'
+    + ' só a varredura PRONTA avisava o worker, e o que uma parcial guardou não aparecia');
+  exigir(/diz\('PRÉ-CONDIÇÃO: a preparação terminou PARCIAL/,
+    'a 7d tem de provar que a varredura PAROU no meio — sem isso ela mede a pronta, que já funcionava');
+  exigir(/diz\('CONTROLE: o worker NÃO foi recriado no meio/,
+    'a 7d precisa do controle de que o worker não renasceu: a partida dele relê o cache e esconde o defeito');
+  exigir(/diz\('o worker RECRIADO se apresenta/,
+    'o relatório do worker tem de ser medido no worker RECRIADO, que é o caso do Android');
+  exigir(/secao\('8b\. O DIAGNÓSTICO ENXERGA O OFFLINE/,
+    'sumiu a seção que mede o relatório do offline: a seção nova, a sentinela do mapa e o teto dos recursos');
+  exigir(/diz\('CONTROLE: sem o dev, a lista para no teto do navegador/,
+    'o teto dos recursos precisa do controle SEM o dev — sem ele, "passou de 300" não prova que foi o dev');
+  exigir(/diz\('aviso por cima de foto CARREGADA/,
+    'a sentinela da foto tem de ser vista ACUSANDO o defeito encenado, não só calada no caso certo');
+  exigir(/diz\('o diário anota a rede CAINDO e depois VOLTANDO/,
+    'a ESTRADA perdeu a prova de que o diário carimba a queda e a volta do sinal');
+  exigir(/diz\('sem rede, as 6 ações que falharam NÃO viraram erro no console/,
+    'a ESTRADA perdeu a prova de que ação sem rede não vira erro no console (eram 16 no relato)');
+  exigir(/page\.evaluate\(\(\) => baixarDiagnostico\(\)\)/,
+    'o relatório tem de sair pelo caminho do BOTÃO (baixarDiagnostico) — montado à mão, não prova que o arquivo sai');
+  exigir(/diz\('o RELATÓRIO de verdade/,
+    'sumiu o relatório de VERDADE, baixado e lido pela ferramenta: as peças medidas soltas não provam que o arquivo sai');
+  exigir(/diz\('e o worker esquece a LISTA dele/,
+    'sumiu a prova de que esquecer limpa também a lista do worker (endereços de pedidos de terceiros)');
+
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],
     'falta o script `test:offline` no package.json');
@@ -627,4 +662,45 @@ test('todo smoke aceita o playwright do REPO, e não só o do sandbox', () => {
       'honra o playwright do repo volta a falhar em silêncio');
   }
   assert.equal(olhados, 4, `esperava 4 smokes que carregam playwright, achei ${olhados} — o guard perdeu alcance`);
+});
+
+// ── O worker responde sobre si, e a varredura sempre o avisa ──────────────
+test('o service worker responde ao DIAG e a releitura da lista SEGURA os tiles', () => {
+  // O defeito do mapa de 2026-09-22 (o worker acordando sem lembrar dos tiles)
+  // não aparecia no relatório: ele só dizia "ativo e controlando".
+  assert.match(SW_SEM, /event\.data\.type === 'DIAG' && event\.ports && event\.ports\[0\]/,
+    'o worker parou de atender a pergunta do diagnóstico');
+  assert.match(SW_SEM, /iniciadoEm: swIniciadoEm, idadeMs: Date\.now\(\) - swIniciadoEm/,
+    'a resposta tem que dizer QUANDO o worker nasceu — é o que mostra que ele foi recriado');
+  assert.match(SW_SEM, /tilesNaLista: tilesGuardados\.size/, 'a resposta tem que dizer quantos tiles ele conhece');
+  assert.match(SW_SEM, /swConta\[hit \? 'doCache' : 'cacheSemEntrada'\]\+\+/,
+    'o worker parou de contar o que serviu do cache');
+  // A releitura (aviso da varredura) também tem que SEGURAR o tile, senão o
+  // tile guardado agora e pedido logo em seguida cai na lista velha.
+  const hid = SW_SEM.slice(SW_SEM.indexOf('function hidratarTiles('), SW_SEM.indexOf('hidratacao = (async'));
+  assert.match(hid, /tilesHidratados = false;/,
+    'a releitura da lista deixou de segurar os tiles — o recém-guardado vai pra rede');
+});
+
+test('a varredura avisa o worker em TODO fim, e no meio dela', () => {
+  // Só o "pronto" avisava: a preparação INTERROMPIDA (o sinal caindo no meio,
+  // o caso comum de quem sai de casa) guardava tiles que o worker não servia.
+  const v = fatiar('offlineVarrer');
+  const fin = v.slice(v.indexOf('} finally {'));
+  assert.match(fin, /if \(epoca === offlineEpoca && tilesNovos\) offlineAnunciarTiles\(\);/,
+    'o aviso ao worker voltou a sair só no "pronto"');
+  assert.match(v, /\+\+tilesNovos % OFFLINE_ANUNCIAR_A_CADA === 0\) offlineAnunciarTiles\(\);/,
+    'a varredura parou de avisar o worker durante o caminho');
+  const pronto = v.slice(v.indexOf("offlineUltimoResultado = 'pronto'"), v.indexOf("offlineUltimoResultado = 'parcial'"));
+  assert.ok(!/postMessage/.test(pronto), 'o aviso voltou a morar só no ramo do "pronto"');
+  assert.match(fatiar('offlineAnunciarTiles'), /offlineUltimoAnuncio = Date\.now\(\);/,
+    'o aviso tem que carimbar a hora — a sentinela do tile respeita essa janela');
+  // ESQUECER também avisa, e DEPOIS de apagar: a lista do worker é o mesmo dado
+  // em memória (endereços de pedidos de terceiros), e relida ANTES do
+  // `caches.delete` ela sairia cheia de novo. Só código, sem comentário (#67).
+  const esq = fatiar('offlineEsquecer').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const iDel = esq.indexOf('caches.delete(OFFLINE_TILES_CACHE)');
+  const iAviso = esq.search(/^\s+offlineAnunciarTiles\(\);/m);
+  assert.ok(iDel > 0, 'o esquecer deixou de apagar o cache de tiles');
+  assert.ok(iAviso > iDel, 'esquecer não avisa o worker DEPOIS de apagar — a lista dele fica com os endereços');
 });

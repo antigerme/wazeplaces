@@ -1,7 +1,7 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026092202';
+const CACHE_NAME = 'waze-places-2026092203';
 // Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
 // ver a nota no `activate`.
 const TILES_CACHE = 'waze-places-tiles';
@@ -10,10 +10,28 @@ const TILES_CACHE = 'waze-places-tiles';
 // await não dá mais pra dizer "deixa o navegador cuidar". Sem esta lista o SW
 // teria que prometer resposta pra tudo — que foi exatamente o defeito.
 let tilesGuardados = new Set();
-// `false` até a lista ser lida do cache NESTA vida do worker.
+// `false` até a lista ser lida do cache NESTA vida do worker — e de novo a cada
+// RELEITURA (o aviso da varredura): enquanto ela corre, o tile pedido ESPERA a
+// lista nova em vez de ser julgado pela velha. Sem isso, o tile que acabou de
+// ser guardado e é pedido logo em seguida caía na lista antiga e ia à rede.
 let tilesHidratados = false;
 let hidratacao = null;
+
+// ── O que o worker diz de si mesmo (diagnóstico do modo dev) ────────────────
+// O relatório só sabia que o worker estava "ativo e controlando", e o defeito
+// do mapa de 2026-09-22 — o worker ACORDANDO sem lembrar dos tiles — não
+// aparecia em nada: foi preciso reproduzir derrubando o worker à força. Agora
+// ele responde quando nasceu, quando leu a lista, quantos tiles conhece e o que
+// fez com os que passaram por ele NESTA vida. Tudo em memória: morre junto com
+// ele, e é por isso que `iniciadoEm` vem junto — diz quanto tempo os números
+// cobrem. Perguntar ACORDA o worker se ele estiver parado; aí `idadeMs` sai
+// pequeno, e isso já é a resposta.
+const swIniciadoEm = Date.now();
+let swHidratadoEm = null;
+const swConta = { doCache: 0, cacheSemEntrada: 0, esperouLeitura: 0, foraDaLista: 0 };
+
 function hidratarTiles() {
+  tilesHidratados = false;
   hidratacao = (async () => {
     try {
       // `caches.has` antes de `open`: `open` CRIA o cache, e quem nunca ligou o
@@ -25,6 +43,7 @@ function hidratarTiles() {
         tilesGuardados = new Set();
       }
     } catch (e) { tilesGuardados = new Set(); }
+    swHidratadoEm = Date.now();
     tilesHidratados = true;
   })();
   return hidratacao;
@@ -92,6 +111,16 @@ self.addEventListener('message', event => {
   if (event.data && event.data.type === 'TILES_GUARDADOS') {
     event.waitUntil(hidratarTiles());
   }
+  // O diagnóstico pergunta por um MessageChannel e espera a resposta com teto:
+  // worker de versão antiga não conhece esta mensagem e simplesmente não
+  // responde, o que o relatório registra como "sem resposta".
+  if (event.data && event.data.type === 'DIAG' && event.ports && event.ports[0]) {
+    event.ports[0].postMessage({
+      versao: CACHE_NAME, iniciadoEm: swIniciadoEm, idadeMs: Date.now() - swIniciadoEm,
+      hidratadoEm: swHidratadoEm, listaPronta: tilesHidratados, tilesNaLista: tilesGuardados.size,
+      ...swConta,
+    });
+  }
 });
 
 // Estratégia: network-first pra HTML, JS, CSS e JSON (incluindo manifest).
@@ -134,13 +163,16 @@ self.addEventListener('fetch', event => {
       const doCache = () => caches.open(TILES_CACHE)
         .then((c) => c.match(event.request))
         // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar.
-        .then((hit) => hit || fetch(event.request))
+        .then((hit) => { swConta[hit ? 'doCache' : 'cacheSemEntrada']++; return hit || fetch(event.request); })
         .catch(() => fetch(event.request));
       if (tilesHidratados) {
         // O caminho de sempre, ESTRITAMENTE ADITIVO: sem entrada, não responde.
         if (tilesGuardados.has(url.href)) event.respondWith(doCache());
+        else swConta.foraDaLista++;
       } else {
-        // O worker ACABOU de acordar e a lista ainda está sendo lida. O
+        swConta.esperouLeitura++;
+        // O worker ACABOU de acordar — ou está RELENDO a lista porque a
+        // varredura avisou que guardou mais — e a lista ainda está sendo lida. O
         // `respondWith` tem de ser decidido agora, e não responder aqui é
         // perder o tile: é exatamente o primeiro pedido depois da recriação,
         // e o card pede todos os tiles de uma vez. Então espera a leitura (são

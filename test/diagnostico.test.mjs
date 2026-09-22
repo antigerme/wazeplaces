@@ -694,3 +694,123 @@ test('motivo FREQUENTE tem cota própria e não expulsa os outros do anel', () =
   assert.ok(/DLOG_MAX_MOMENTOS = 12/.test(app),
     'o teto do anel mudou — os números da cota foram medidos contra 12 vagas');
 });
+
+// ── O que o relato de 2026-09-22 mostrou que faltava ──────────────────────
+//
+// O arquivo daquele relato decidiu o conserto, e mesmo assim custou tempo:
+// não dizia quando a rede caiu, não trazia o estado do offline, o service
+// worker era caixa-preta, o tile que falhava sumia junto com a prova, a lista
+// de recursos bateu no teto e os alertas ficaram mudos. Cada guard abaixo trava
+// uma dessas lacunas; o COMPORTAMENTO é medido no `tools/smoke-offline.mjs`.
+const fatiarFn = (fonte, nome) => {
+  const i = fonte.indexOf('function ' + nome + '(');
+  assert.ok(i !== -1, `${nome} sumiu`);
+  const a = fonte.indexOf('{', fonte.indexOf(')', i));
+  let prof = 0;
+  for (let j = a; j < fonte.length; j++) {
+    if (fonte[j] === '{') prof++;
+    else if (fonte[j] === '}' && --prof === 0) return fonte.slice(i, j + 1);
+  }
+  return '';
+};
+
+test('o diário anota quando a rede CAIU e quando VOLTOU', () => {
+  const cap = fatiarFn(semCom, 'diagCapturarErros');
+  assert.match(cap, /addEventListener\('offline', \(\) => dfato\('rede\.caiu'\)\)/,
+    'sem `rede.caiu` a janela sem sinal volta a ser reconstruída de erro de rede');
+  assert.match(cap, /addEventListener\('online', \(\) => dfato\('rede\.voltou'\)\)/,
+    'sem `rede.voltou` não se sabe quando a rede voltou');
+  assert.match(cap, /if \(navigator\.onLine === false\) dfato\('rede\.caiu', \{ naAbertura: true \}\)/,
+    'a app aberta JÁ sem rede não dispara `offline` — tem que anotar na abertura');
+});
+
+test('falha de rede SEM sinal não vira ruído no diário', () => {
+  // 16 das 64 entradas do relato eram "Failed to fetch" esperados sem rede.
+  const API_ = _rf(new URL('../js/api.js', import.meta.url), 'utf8');
+  assert.match(API_, /if \(navigator\.onLine !== false\) console\.error\(`Erro em \$\{endpoint\}:`, error\);/,
+    'o erro de rede voltou a ser registrado mesmo sem sinal');
+  assert.ok(!/\n\s*console\.error\(`Erro em \$\{endpoint\}:`/.test(API_),
+    'sobrou um console.error de falha de rede sem o portão do onLine');
+});
+
+test('cada captura diz se havia rede e em que estado estava o offline', () => {
+  const cap = fatiarFn(semCom, 'dlogCapturar');
+  assert.match(cap, /rede: diagRedeAgora\(\),/, 'a captura voltou a não dizer se havia rede');
+  assert.match(cap, /offline: diagOfflineAgora\(\),/, 'a captura voltou a não trazer o estado do offline');
+  const agora = fatiarFn(semCom, 'diagOfflineAgora');
+  for (const campo of ['ligado: offlineLigado()', 'janelaServida: offlineJanelaServida',
+                       'resultado: offlineUltimoResultado', 'varrendo: offlineVarrendo']) {
+    assert.ok(agora.includes(campo), `o retrato do offline perdeu \`${campo}\``);
+  }
+});
+
+test('todo id que a captura consulta EXISTE no HTML (o `lightbox` que nunca existiu)', () => {
+  // `visivel('lightbox')` saía `false` em todo momento de todo relatório: o id
+  // não existe. Id errado num seletor some com o dado SEM DIZER NADA.
+  const tela = fatiarFn(semCom, 'dlogTelaAtual');
+  const ids = [...tela.matchAll(/visivel\('([A-Za-z0-9_-]+)'\)/g)].map((m) => m[1]);
+  assert.ok(ids.length >= 5, `achei ${ids.length} ids em dlogTelaAtual — o varredor quebrou`);
+  const faltando = ids.filter((id) => !HTML.includes(`id="${id}"`));
+  assert.deepEqual(faltando, [], `a captura consulta id que não existe: ${faltando.join(', ')}`);
+  assert.match(tela, /visivel\('imageLightbox'\)/, 'a captura deixou de ver o lightbox da foto');
+  assert.match(tela, /visivel\('mapaLightbox'\)/, 'a captura deixou de ver o mapa ampliado');
+});
+
+test('o mapa CONTA o tile que falhou antes de tirá-lo da tela', () => {
+  // A app apaga o tile quebrado (ícone quebrado não informa nada) e a prova ia
+  // junto: nas 6 capturas do relato não há tile quebrado nenhum.
+  const mapa = fatiarFn(semCom, 'renderMapa');
+  assert.match(mapa, /box\.dataset\.tilesPedidos = String\(r\.tiles\.length\);/,
+    'o mapa deixou de dizer quantos tiles pediu');
+  assert.match(mapa, /im\.onerror = \(\) => \{ registrarFalhaDeTile\(box, t\.url\); im\.remove\(\); \};/,
+    'o tile que falha voltou a sumir SEM ser contado');
+  assert.match(semCom, /im\.onerror = \(\) => \{ registrarFalhaDeTile\(null, t\.url\); im\.remove\(\);/,
+    'o mapa ampliado voltou a apagar o tile sem registrar');
+  assert.match(fatiarFn(semCom, 'diagGeometria'), /tiles: \{ pedidos: \+e\.dataset\.tilesPedidos, falharam:/,
+    'a geometria parou de levar a contagem de tiles do mapa');
+  const reg = fatiarFn(semCom, 'registrarFalhaDeTile');
+  // `caches.open` CRIARIA o cache: quem nunca ligou o offline ganharia um vazio.
+  assert.match(reg, /caches\.match\(url, \{ cacheName: OFFLINE_TILES_CACHE \}\)/,
+    'a checagem de "guardado" tem que ser por `caches.match` com cacheName');
+  assert.ok(!/caches\.open\(/.test(reg), 'a checagem voltou a usar caches.open, que CRIA o cache');
+  // As três condições que fazem disto INVARIANTE e não palpite.
+  assert.match(reg, /navigator\.serviceWorker && navigator\.serviceWorker\.controller/,
+    'sem service worker no comando o cache não serve ninguém — falhar é esperado');
+  assert.match(reg, /if \(offlineVarrendo \|\| Date\.now\(\) - offlineUltimoAnuncio < 2000\) return;/,
+    'tile guardado DURANTE a varredura só é servido depois do aviso — não é anomalia');
+  // O anel diz onde ficam pedidos de terceiros: sai junto com o offline.
+  assert.match(fatiarFn(semCom, 'offlineEsquecer'), /diagTilesGuardadosQueFalharam = \[\];/,
+    'esquecer o offline deixou pra trás as URLs de tile que falharam');
+});
+
+test('o relatório traz o offline, o service worker pela boca dele e o teto dos recursos', () => {
+  const corpo = fatiarFn(semCom, 'diagCorpo');
+  assert.match(corpo, /offline: await diagOffline\(\),/, 'a seção `offline` saiu do relatório');
+  assert.match(corpo, /sw\.proprio = await diagServiceWorker\(\);/, 'o service worker deixou de ser perguntado');
+  assert.match(corpo, /recursosInfo: \{ n: recursos\.length, encheu: diagRecursosCheio,/,
+    'o relatório deixou de dizer se a lista de recursos bateu no teto');
+  // Quem nunca ligou o offline: nada de abrir a base (abrir CRIA a base).
+  const off = fatiarFn(semCom, 'diagOffline');
+  const iSai = off.indexOf('if (!o.ligado) return o;');
+  const iLe = off.indexOf('offlineLerFila()');
+  assert.ok(iSai > 0 && iLe > iSai, 'o diagnóstico abre a base do offline de quem nunca o ligou');
+  assert.match(off, /filaGuardada = f \? \{ n: f\.places\.length, idadeMin:/,
+    'a fila guardada vai só como NÚMERO e IDADE — o conteúdo já está no appState');
+  // Worker antigo não conhece a pergunta: sem teto o diagnóstico pendura.
+  const sw = fatiarFn(semCom, 'diagServiceWorker');
+  assert.match(sw, /setTimeout\(\(\) => ok\(\{ semResposta: true \}\), 1500\)/,
+    'a pergunta ao worker perdeu o teto — worker velho penduraria o diagnóstico');
+  assert.match(sw, /ctl\.postMessage\(\{ type: 'DIAG' \}, \[canal\.port2\]\)/,
+    'a pergunta ao worker tem que ir por MessageChannel');
+  // O teto sobe só com o dev ligado, e em todo caminho que o liga.
+  assert.match(fatiarFn(semCom, 'diagAjustarRecursos'), /if \(dlogLigado\(\) && performance\.setResourceTimingBufferSize\)/,
+    'o teto dos recursos tem que subir só com o modo dev ligado');
+  assert.match(fatiarFn(semCom, 'loadDevMode'), /diagAjustarRecursos\(\);/,
+    'quem abre a app com o dev ligado ficou com o teto de 250');
+  assert.match(semCom, /AppState\.devMode\.active = e\.target\.checked;[\s\S]{0,200}?diagAjustarRecursos\(\);/,
+    'ligar o dev nas Preferências não sobe o teto');
+  assert.match(fatiarFn(semCom, 'diagCapturarErros'), /addEventListener\('resourcetimingbufferfull'/,
+    'sem o aviso de teto, a ausência do que veio depois lê como "não aconteceu"');
+  const v = Number((APP.match(/const DIAG_VERSAO = (\d+);/) || [])[1]);
+  assert.ok(v >= 3, `a versão do diagnóstico não subiu com as seções novas (${v})`);
+});
