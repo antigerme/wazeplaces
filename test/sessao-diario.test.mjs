@@ -168,7 +168,10 @@ test('a sentinela de queda exige PADRÃO, não um caso isolado', () => {
 test('o arquivo diz de que versão do diagnóstico ele é', () => {
   // Relato antigo é justamente o que se usa pra comparar antes/depois, e sem
   // isto não dá pra saber se a ausência de uma seção é defeito ou idade.
-  assert.match(APP, /const DIAG_VERSAO = 2;/, 'a versão do diagnóstico não subiu com as seções novas');
+  // Pelo NÚMERO, não pelo literal: a versão sobe de novo a cada seção nova, e
+  // o que este teste guarda é ela ter subido com as de SESSÃO (a 2).
+  const v = Number((APP.match(/const DIAG_VERSAO = (\d+);/) || [])[1]);
+  assert.ok(v >= 2, `a versão do diagnóstico não subiu com as seções novas (${v})`);
 });
 
 // ── A sessão que JÁ ESTAVA ativa quando o registro nasceu ──────────────────

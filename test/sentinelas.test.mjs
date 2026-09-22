@@ -211,3 +211,64 @@ test('diagnóstico: a camada computada é coletada e vai pro relatório', () => 
   assert.match(APP, /coberto: Math\.round\(window\.innerHeight - vv\.height - vv\.offsetTop\)/,
     'o `coberto` já subtraído saiu — deixar a conta pro leitor é deixar o erro passar');
 });
+
+// ── As duas do relato de 2026-09-22 ─────────────────────────────────────────
+//
+// O arquivo daquele relato tinha o defeito na tela e `alertas: []`. As duas
+// nasceram de garantias que o conserto criou, e por isso podem ser sentinela:
+// o aviso "precisa de sinal" só existe DEPOIS de a foto falhar, e tile guardado
+// é servido do cache com o service worker no comando.
+
+test('sentinelas: aviso de "precisa de sinal" sobre foto CARREGADA — o defeito do relato', () => {
+  // O caso REAL: em 4 das 6 capturas do owner o aviso estava na tela e a foto
+  // não estava quebrada.
+  const c = sao();
+  c.fotoDaFrente = { aviso: true, carregada: true, src: 'https://venue-image.waze.com/thumbs/thumb700_x?w=1' };
+  const r = montar()(c);
+  assert.deepEqual(chaves(r), ['fotoEscondidaComAviso']);
+  assert.match(r[0].foto, /thumb700_x/, 'o alerta tem que dizer QUAL foto');
+});
+
+test('sentinelas: aviso com a foto que FALHOU de verdade é o comportamento certo — cala', () => {
+  // Este é o caso LEGÍTIMO do aviso (a foto não veio): alertar aqui seria
+  // acusar o conserto como defeito, e a seção morreria de falso positivo.
+  const c = sao();
+  c.fotoDaFrente = { aviso: true, carregada: false, src: 'x' };
+  assert.deepEqual(montar()(c), []);
+  const semAviso = sao();
+  semAviso.fotoDaFrente = { aviso: false, carregada: true, src: 'x' };
+  assert.deepEqual(montar()(semAviso), [], 'foto carregada sem aviso é o card normal');
+  const semCard = sao();
+  semCard.fotoDaFrente = null;
+  assert.deepEqual(montar()(semCard), [], 'sem card na frente não há o que acusar');
+});
+
+test('sentinelas: pedaço de mapa GUARDADO que falhou — o outro defeito do relato', () => {
+  const c = sao();
+  c.tilesGuardadosQueFalharam = [
+    { t: 1, url: 'https://www.waze.com/row-tiles/live/base/17/1/1/tile.png' },
+    { t: 2, url: 'https://www.waze.com/row-tiles/live/base/17/1/2/tile.png' },
+  ];
+  const r = montar()(c);
+  assert.deepEqual(chaves(r), ['tileGuardadoFalhou']);
+  assert.equal(r[0].n, 2);
+  assert.equal(r[0].exemplos.length, 2, 'o alerta tem que trazer QUAIS tiles');
+  const vazio = sao();
+  vazio.tilesGuardadosQueFalharam = [];
+  assert.deepEqual(montar()(vazio), [], 'anel vazio é o normal');
+});
+
+test('diagnóstico: as duas sentinelas novas leem o que o COLETOR mede de verdade', () => {
+  // A sentinela é função pura sobre o `computado`; se o coletor parar de medir,
+  // ela cala pra sempre — e calar é o estado que passa em todo teste de cima.
+  const i = APP.indexOf('function diagComputado(');
+  const corpo = APP.slice(i, APP.indexOf('\n}', i));
+  assert.match(corpo, /aviso: !!frente\.querySelector\('\.card-sem-foto'\)/,
+    'o coletor parou de ver o aviso do card da frente');
+  assert.match(corpo, /carregada: !!\(foto && foto\.complete && foto\.naturalWidth > 0\)/,
+    'o coletor parou de medir se a foto CARREGOU (complete E naturalWidth)');
+  assert.match(corpo, /const frente = cardDaFrente\(\);/,
+    'a medição tem que ser do card da FRENTE — o de fundo é clone, sem ouvinte');
+  assert.match(corpo, /fora\.tilesGuardadosQueFalharam = diagTilesGuardadosQueFalharam\.slice\(-5\)/,
+    'o coletor parou de levar o anel de tiles guardados que falharam');
+});

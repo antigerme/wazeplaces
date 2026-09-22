@@ -238,7 +238,13 @@ const API = {
             try { if (this.aoProvarRede) this.aoProvarRede(endpoint); } catch (e) { /* nunca derruba a resposta */ }
             return data;
         } catch (error) {
-            console.error(`Erro em ${endpoint}:`, error);
+            // SEM REDE, falhar é o ESPERADO, e o diário já carrega a hora certa
+            // (`rede.caiu`/`rede.voltou`). Registrar cada falha aqui fez 16 das
+            // 64 entradas do diário do relato de 2026-09-22 serem "Failed to
+            // fetch" — ruído em cima do que se queria ler. A chamada continua
+            // inteira no anel `chamadas` (http 0, `transient`). Com `onLine`
+            // verdadeiro a falha é SURPRESA e segue indo pro console.
+            if (navigator.onLine !== false) console.error(`Erro em ${endpoint}:`, error);
             // Rede caiu / abortou por timeout / 5xx sem JSON → transient, pra a
             // política de retry (callWithRetry) atuar. Era o caso mais comum e
             // ficava sem categoria, então nunca era retentado.

@@ -278,9 +278,13 @@ test('os DOIS gatilhos existem, e nenhum é polling', () => {
   // O ouvinte cresceu (hoje ele também refaz a BUSCA que falhou), então o
   // guard cobra o QUE ele faz, não a forma de uma linha só — casar a linha
   // inteira reprovava código certo na primeira vez que ela ganhou um irmão.
-  const iOn = APP_SEM.indexOf("addEventListener('online'");
-  assert.ok(iOn > 0, 'o gatilho do evento `online` sumiu');
-  const ouvinte = APP_SEM.slice(iOn, iOn + 600);
+  // Há mais de um ouvinte de `online` (o diagnóstico anota a transição da rede
+  // num deles), então o guard procura o que ESVAZIA — pegar "o primeiro do
+  // arquivo" passou a ler o do diagnóstico e reprovou código certo (gotcha #67).
+  const ouvintes = [...APP_SEM.matchAll(/addEventListener\('online'/g)]
+    .map((m) => APP_SEM.slice(m.index, m.index + 600));
+  assert.ok(ouvintes.length > 0, 'o gatilho do evento `online` sumiu');
+  const ouvinte = ouvintes.find((o) => /esvaziarFilaDeSaida\(\)/.test(o)) || '';
   assert.match(ouvinte, /esvaziarFilaDeSaida\(\)/,
     'o `online` deixou de esvaziar a fila de saída');
   const init = fatiar('initApp');

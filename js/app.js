@@ -1202,6 +1202,7 @@ function setupModalListeners() {
         saveDevMode();
         updateDevBadge();
         atualizarFabDev();
+        diagAjustarRecursos();
         if (!e.target.checked) {
             dlogApagar();
             enforceDevGatedFilters();
@@ -3144,8 +3145,35 @@ function dlogTelaAtual() {
               : visivel('loadingCard') ? 'carregando'
               : cardDaFrente() ? 'card' : 'nada',
         modais,
-        lightbox: visivel('lightbox'),
+        // Era `visivel('lightbox')`, e esse id NÃO EXISTE (os dois são
+        // `imageLightbox` e `mapaLightbox`): o campo saiu `false` em TODO
+        // momento de todo relatório, com o lightbox aberto ou não. É a mesma
+        // falha que o comentário do FAB já registra ("escrevi `lightbox` e o
+        // elemento se chama `imageLightbox`") — id errado num seletor some com
+        // o dado SEM DIZER NADA. `test/diagnostico.test.mjs` cobra que todo id
+        // consultado aqui exista no HTML.
+        lightbox: visivel('imageLightbox') ? 'foto' : (visivel('mapaLightbox') ? 'mapa' : false),
     };
+}
+
+// ── REDE e OFFLINE no instante da captura ─────────────────────────────────
+// O relato de 2026-09-22 foi TODO sobre a falta de rede, e nenhuma captura
+// dizia se havia rede: a janela sem sinal foi reconstruída de 16 "Failed to
+// fetch" e da fila de saída abrindo e fechando. E o estado do offline (a janela
+// que monta a URL da foto, o resultado da varredura) morava em variáveis que
+// não iam pro arquivo — a janela foi deduzida do sufixo das URLs. Duas funções
+// baratas e síncronas, sem dado de ninguém.
+function diagRedeAgora() {
+    const c = navigator.connection || {};
+    return { online: navigator.onLine, tipo: c.effectiveType || null };
+}
+
+function diagOfflineAgora() {
+    try {
+        return { ligado: offlineLigado(), janelaServida: offlineJanelaServida,
+                 janelaAtual: Math.floor(Date.now() / OFFLINE_CICLO_MS),
+                 resultado: offlineUltimoResultado, varrendo: offlineVarrendo };
+    } catch (e) { return { erro: String((e && e.message) || e).slice(0, 120) }; }
 }
 
 // ── A camada COMPUTADA: o que o NAVEGADOR decidiu ─────────────────────────
@@ -3212,6 +3240,18 @@ function diagComputado() {
 
         fora.camadasAbertas = diagCamadasAbertas().map((e) => e.id || e.className.slice(0, 40));
         fora.geometria = diagGeometria();
+        // A foto do card da FRENTE: o aviso de "precisa de sinal" está lá, e a
+        // foto carregou? Os dois juntos são o defeito do relato de 2026-09-22
+        // (ver a sentinela `fotoEscondidaComAviso`). Só o da frente: o de fundo
+        // é clone e não tem ouvinte nenhum.
+        const frente = cardDaFrente();
+        const foto = frente && frente.querySelector('.card-image');
+        fora.fotoDaFrente = frente ? {
+            aviso: !!frente.querySelector('.card-sem-foto'),
+            carregada: !!(foto && foto.complete && foto.naturalWidth > 0),
+            src: foto ? String(foto.currentSrc || foto.src || '').slice(0, 160) : null,
+        } : null;
+        fora.tilesGuardadosQueFalharam = diagTilesGuardadosQueFalharam.slice(-5);
     } catch (e) {
         fora._erro = String((e && e.message) || e).slice(0, 160);
     }
@@ -3291,6 +3331,11 @@ function diagGeometria() {
                 // quando um deles está desenhado pra outra caixa.
                 ...(e.dataset && e.dataset.mapaW
                     ? { mapaPara: e.dataset.mapaW + 'x' + e.dataset.mapaH } : {}),
+                // Quantos tiles o desenho pediu e quantos FALHARAM. O tile que
+                // falha sai da tela (ícone quebrado não informa nada), então
+                // sem esta contagem "mapa com buraco" não aparece no arquivo.
+                ...(e.dataset && e.dataset.tilesPedidos
+                    ? { tiles: { pedidos: +e.dataset.tilesPedidos, falharam: +(e.dataset.tilesFalharam || 0) } } : {}),
                 // Do card de FUNDO? Ele é coberto pelo da frente POR
                 // CONSTRUÇÃO (`inert` + `pointer-events:none`), então o
                 // hit-test nele acusa o normal como defeito — ver a sentinela
@@ -3551,6 +3596,35 @@ function diagSentinelas(comp) {
                       caixa: g.w + 'x' + g.h, desenhadoPara: g.mapaPara });
             }
         }
+        // 7. "A foto precisa de sinal" por cima de uma foto CARREGADA.
+        //
+        // INVARIANTE desde v2026.09.22-02: o aviso nasce do `onerror` da foto
+        // em decisão, ou seja só existe DEPOIS de ela falhar — e foto que
+        // falhou tem `naturalWidth` zero. Aviso com a foto carregada embaixo é
+        // o defeito do relato de 2026-09-22 (o aviso posto por suposição
+        // escondia a foto guardada), e aconteceu em 4 das 6 capturas dele sem
+        // nenhuma sentinela dizer nada. Só o card da FRENTE: o de fundo é
+        // clone e não tem ouvinte nenhum.
+        const fd = comp.fotoDaFrente;
+        if (fd && fd.aviso && fd.carregada) {
+            diga('fotoEscondidaComAviso',
+                'o card diz "a foto precisa de sinal" mas a foto em decisão CARREGOU — o aviso '
+                + 'está escondendo uma foto que o aparelho tem', { foto: fd.src });
+        }
+        // 8. Pedaço de mapa GUARDADO que falhou na tela.
+        //
+        // INVARIANTE: com o service worker no comando, tile que está no cache
+        // de tiles é servido do cache — com ou sem rede. O anel só recebe a
+        // falha nas condições em que isso vale (ver `registrarFalhaDeTile`), e
+        // é o defeito do mapa do relato de 2026-09-22 (o worker acordava sem
+        // saber dos tiles), que o arquivo dele não tinha como mostrar: a app
+        // tira da tela o tile que falha, e a prova ia junto.
+        const tf = comp.tilesGuardadosQueFalharam || [];
+        if (tf.length) {
+            diga('tileGuardadoFalhou',
+                'pedaço de mapa GUARDADO no aparelho falhou na tela — o service worker não o serviu',
+                { n: tf.length, exemplos: tf.slice(-3).map((x) => x.url) });
+        }
         // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é
         // deliberada. Eu escrevi uma (< 25% da janela) e ela não disparou no
         // caso real que a motivou: o modal de Filtros achatado tinha 302px de
@@ -3571,6 +3645,8 @@ function dlogCapturar(motivo) {
         const m = {
             t: new Date().toISOString(),
             motivo,
+            rede: diagRedeAgora(),
+            offline: diagOfflineAgora(),
             ...dlogTelaAtual(),
             // Os toasts NA TELA agora. O anel do diário guarda os que já
             // sumiram; este campo diz quais estavam visíveis no instante.
@@ -4049,7 +4125,10 @@ function ligarFabDev() {
 // `derivarChave`). Foi pedido assim de propósito, porque é ele que permite
 // REPRODUZIR a falha em vez de teorizar. O arquivo diz isso na primeira linha,
 // e o caminho de anular é sair da app, que destrói a sessão no servidor.
-const DIAG_VERSAO = 2;
+// 3 (v2026.09.22-03): entraram a seção `offline`, `serviceWorker.proprio` (o
+// worker respondendo sobre si), `recursosInfo`, `rede`/`offline` em cada
+// momento e `tiles` na geometria do mapa. Aditivo: leitor antigo só ignora.
+const DIAG_VERSAO = 3;
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
 // (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
@@ -4075,7 +4154,28 @@ function diagSeguro(v, prof = 0, vistos = new WeakSet()) {
 
 // Erros de JS acumulados desde a carga. Armado cedo, no `initApp`.
 const diagErros = [];
+// ── O teto da lista de RECURSOS ───────────────────────────────────────────
+// O navegador guarda só 250 entradas de Resource Timing e DESCARTA o que vem
+// depois. No relato de 2026-09-22 tiles e fotos da varredura ocuparam 230 das
+// 250 vagas, e o que aconteceu depois — o card sem sinal, a parte que
+// interessava — não entrou. Com o modo dev ligado o teto sobe; desligado fica
+// o padrão, que é de graça. Cada entrada é pequena (URL, duração, bytes).
+const DIAG_RECURSOS_TETO = 1000;
+let diagRecursosCheio = false;
+function diagAjustarRecursos() {
+    try {
+        if (dlogLigado() && performance.setResourceTimingBufferSize) {
+            performance.setResourceTimingBufferSize(DIAG_RECURSOS_TETO);
+        }
+    } catch (e) { /* navegador sem a API: fica o padrão */ }
+}
+
 function diagCapturarErros() {
+    // A lista bateu no teto: o relatório tem que DIZER isso, senão a ausência
+    // do que veio depois lê como "não aconteceu".
+    try {
+        performance.addEventListener('resourcetimingbufferfull', () => { diagRecursosCheio = true; });
+    } catch (e) {}
     addEventListener('error', (e) => {
         // Com CONTEXTO DE TELA: erro sem saber ONDE aconteceu manda procurar no
         // arquivo inteiro. É a diferença entre pista e ruído.
@@ -4113,6 +4213,16 @@ function diagCapturarErros() {
         if (diagErros.length > 50) diagErros.shift();
     });
 
+    // A REDE CAIU / VOLTOU. O relato de 2026-09-22 foi todo sobre a falta de
+    // rede, e o arquivo não dizia QUANDO ela faltou: a janela sem sinal foi
+    // reconstruída de 16 "Failed to fetch" e da fila de saída abrindo e
+    // fechando. Evento RARO e sem dado de ninguém — a regra de entrada do
+    // `dfato`. `onLine === false` é a metade confiável (a da regra de uma mão
+    // só): o que se registra é a TRANSIÇÃO que o navegador anuncia.
+    addEventListener('offline', () => dfato('rede.caiu'));
+    addEventListener('online', () => dfato('rede.voltou'));
+    if (navigator.onLine === false) dfato('rede.caiu', { naAbertura: true });
+
     // A TELA MUDOU DE TAMANHO. Girar o aparelho, a barra do navegador sumir, a
     // janela do PWA reabrir — tudo isso remonta o layout, e num relato de "ficou
     // torto" a primeira pergunta é se aconteceu antes ou depois. Só quando o
@@ -4139,6 +4249,49 @@ function diagCapturarErros() {
                 () => dfato('sw.assumiu', { v: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null }));
         }
     } catch (e) {}
+}
+
+// ── O OFFLINE no relatório ────────────────────────────────────────────────
+// O estado que decide se a foto e o mapa abrem sem sinal mora em variáveis de
+// módulo e numa base IndexedDB, e nada disso ia pro arquivo: no relato de
+// 2026-09-22 a janela servida foi deduzida do sufixo das URLs, e a idade da
+// fila guardada não aparecia em lugar nenhum. A fila vai só como NÚMERO e
+// IDADE — o conteúdo é pedido de terceiro e já está inteiro no `appState`.
+// Quem nunca ligou o offline sai sem abrir a base: abrir CRIA a base.
+async function diagOffline() {
+    const o = { ...diagOfflineAgora(), tilesGuardadosQueFalharam: diagTilesGuardadosQueFalharam.length };
+    if (!o.ligado) return o;
+    try {
+        const f = await offlineLerFila();
+        o.filaGuardada = f ? { n: f.places.length, idadeMin: Math.round((Date.now() - f.t) / 60000) } : null;
+    } catch (e) { o.filaGuardada = { erro: String((e && e.message) || e).slice(0, 120) }; }
+    try { o.janelaGuardada = await offlineLerJanela(); } catch (e) {}
+    try {
+        if (window.caches && await caches.has(OFFLINE_TILES_CACHE)) {
+            o.tilesNoCache = (await (await caches.open(OFFLINE_TILES_CACHE)).keys()).length;
+        } else o.tilesNoCache = 0;
+    } catch (e) { o.tilesNoCache = { erro: String((e && e.message) || e).slice(0, 120) }; }
+    return o;
+}
+
+// ── O service worker, pela boca DELE ──────────────────────────────────────
+// Até aqui o relatório só sabia que ele estava "ativo e controlando", e o
+// defeito do mapa de 2026-09-22 — o worker ACORDANDO sem lembrar dos tiles —
+// não aparecia em nada. Agora ele diz quando nasceu, se a lista está lida,
+// quantos tiles conhece e o que fez com os que passaram por ele (ver o `DIAG`
+// no `service-worker.js`). Com TETO: worker de versão antiga não conhece a
+// pergunta e não responde, e o diagnóstico não pode esperar pra sempre.
+function diagServiceWorker() {
+    return new Promise((ok) => {
+        try {
+            const ctl = navigator.serviceWorker && navigator.serviceWorker.controller;
+            if (!ctl || typeof MessageChannel === 'undefined') return ok(null);
+            const canal = new MessageChannel();
+            const teto = setTimeout(() => ok({ semResposta: true }), 1500);
+            canal.port1.onmessage = (e) => { clearTimeout(teto); ok(e.data); };
+            ctl.postMessage({ type: 'DIAG' }, [canal.port2]);
+        } catch (e) { ok({ erro: String((e && e.message) || e).slice(0, 120) }); }
+    });
 }
 
 async function diagCorpo() {
@@ -4172,6 +4325,7 @@ async function diagCorpo() {
                 instalando: r.installing && r.installing.scriptURL });
         }
     } catch (e) { sw.erro = String(e); }
+    sw.proprio = await diagServiceWorker();
 
     const cachesDoAparelho = {};
     try {
@@ -4304,6 +4458,11 @@ async function diagCorpo() {
             // sessão sem abrir o resto do arquivo.
             sessaoDuracaoH: (() => { try { return diagSessao().duracaoH || null; } catch (e) { return null; } })(),
             riscoDeApagamento: (() => { try { return diagArmazenamentoDuravel().riscoDeApagamento; } catch (e) { return null; } })(),
+            // O relato de 2026-09-22 foi todo sobre a falta de rede, e o resumo
+            // não dizia nem se havia rede. A linha do tempo está no diário
+            // (`rede.caiu`/`rede.voltou`); aqui vai o AGORA.
+            rede: navigator.onLine,
+            offline: (() => { const o = diagOfflineAgora(); return o.ligado ? o.resultado || 'ligado' : 'desligado'; })(),
             // PRIMEIRA coisa a olhar. Vazio = nenhuma invariante conhecida
             // quebrada; não significa "está tudo bem", significa "não é nenhum
             // dos defeitos que já vimos".
@@ -4342,9 +4501,14 @@ async function diagCorpo() {
         sessionStorage: ss,
         indexedDB: idb,
         serviceWorker: sw,
+        offline: await diagOffline(),
         caches: cachesDoAparelho,
         chamadas: (typeof API !== 'undefined' && API.chamadas) || [],
         recursos,
+        // Se a lista de recursos bateu no teto do navegador, o que veio DEPOIS
+        // não está nela — e sem este aviso a ausência lê como "não aconteceu".
+        recursosInfo: { n: recursos.length, encheu: diagRecursosCheio,
+                        teto: dlogLigado() ? DIAG_RECURSOS_TETO : 'padrão do navegador (250)' },
         erros: diagErros,
         // `currentPlace` É `queue[0]` — o MESMO objeto —, então o `diagSeguro`
         // marcava um dos dois como `[circular]`, e quem perdia era sempre o card
@@ -6011,6 +6175,11 @@ function renderMapa(card, place, refazendo) {
     if (!r) return false;
     box.dataset.mapaW = String(larguraCaixa);
     box.dataset.mapaH = String(alturaCaixa);
+    // Quantos tiles este desenho PEDIU, e quantos falharam — contados ANTES de
+    // o tile quebrado sair da tela (ver `registrarFalhaDeTile`). A geometria do
+    // diagnóstico lê os dois.
+    box.dataset.tilesPedidos = String(r.tiles.length);
+    box.dataset.tilesFalharam = '0';
     vigiarCaixaDoMapa(box, card, place);
 
     const tiles = box.querySelector('.card-map-tiles');
@@ -6024,8 +6193,9 @@ function renderMapa(card, place, refazendo) {
         im.decoding = 'async';
         im.className = 'absolute mapa-tile';
         im.style.cssText = `left:${t.left}px;top:${t.top}px;width:${r.tamanho}px;height:${r.tamanho}px`;
-        // Tile que não vem não pode deixar um alt quebrado no meio do mapa.
-        im.onerror = () => im.remove();
+        // Tile que não vem não pode deixar um alt quebrado no meio do mapa —
+        // mas a falha é CONTADA antes, senão some a prova junto com o ícone.
+        im.onerror = () => { registrarFalhaDeTile(box, t.url); im.remove(); };
         tiles.appendChild(im);
     }
     // Linha do movimento: sem ela, dois pontos próximos parecem dois locais
@@ -6249,7 +6419,7 @@ const MapaLightbox = {
                 im.src = t.url; im.alt = ''; im.decoding = 'async';
                 im.className = 'absolute mapa-tile';
                 im.style.width = im.style.height = g.tamanho + 'px';
-                im.onerror = () => { im.remove(); this._tiles.delete(t.chave); };
+                im.onerror = () => { registrarFalhaDeTile(null, t.url); im.remove(); this._tiles.delete(t.chave); };
                 this._tiles.set(t.chave, im);
                 caixa.appendChild(im);
             }
@@ -9787,6 +9957,47 @@ let offlineUltimoGesto = Date.now();
 // OFFLINE faria o card pedir uma URL que ninguém aqueceu e a foto sumiria com
 // a cópia boa parada no cache, a um sufixo de distância.
 let offlineJanelaServida = null;
+// Quando a varredura avisou o service worker pela última vez (`offlineAnunciarTiles`).
+// O aviso é assíncrono: tile guardado há menos de um instante pode ainda não
+// estar na lista do worker — `registrarFalhaDeTile` respeita essa janela.
+let offlineUltimoAnuncio = 0;
+
+// ── Pedaço de mapa GUARDADO que falhou na tela ────────────────────────────
+// A app tira da tela o tile que falha (ícone quebrado no meio do mapa não
+// informa nada) — e com ele sumia também a PROVA: nas 6 capturas do relato de
+// 2026-09-22 não há tile quebrado nenhum, e nem poderia haver. Agora o mapa
+// conta quantos pediu e quantos falharam (`data-tiles-*`, lidos pela geometria
+// do diagnóstico) antes de apagar, e o tile que falhou ESTANDO GUARDADO entra
+// no anel abaixo, que a sentinela `tileGuardadoFalhou` lê.
+//
+// "Guardado que falhou" só é anomalia com as três condições — é isso que faz
+// dele INVARIANTE e não palpite:
+//   · há service worker no comando (sem ele o cache não serve ninguém);
+//   · nenhuma varredura em andamento e o último aviso ao worker tem mais de 2s
+//     — tile guardado DURANTE a varredura só é servido depois do aviso, e o
+//     aviso é assíncrono;
+//   · o tile ESTÁ no cache de tiles na hora da falha. `caches.match` com
+//     `cacheName` não CRIA o cache (o `caches.open` criaria), então quem nunca
+//     ligou o offline não ganha um cache vazio por um tile falhar na rede.
+const DIAG_TILES_FALHOS_TETO = 20;
+let diagTilesGuardadosQueFalharam = [];
+function registrarFalhaDeTile(box, url) {
+    try {
+        if (box && box.dataset) {
+            box.dataset.tilesFalharam = String((parseInt(box.dataset.tilesFalharam, 10) || 0) + 1);
+        }
+        if (!url || !window.caches) return;
+        if (!(navigator.serviceWorker && navigator.serviceWorker.controller)) return;
+        if (offlineVarrendo || Date.now() - offlineUltimoAnuncio < 2000) return;
+        caches.match(url, { cacheName: OFFLINE_TILES_CACHE }).then((hit) => {
+            if (!hit) return;
+            diagTilesGuardadosQueFalharam.push({ t: Date.now(), url: String(url).slice(0, 200) });
+            if (diagTilesGuardadosQueFalharam.length > DIAG_TILES_FALHOS_TETO) diagTilesGuardadosQueFalharam.shift();
+            dfato('mapa.guardadoFalhou');
+        }).catch(() => {});
+    } catch (e) { /* o diagnóstico nunca derruba o mapa */ }
+}
+
 // Como a ÚLTIMA varredura terminou: 'pronto' | 'parcial' | null (nunca correu).
 // Sem isto a linha congelava em "Preparando… 197 de 530" PARA SEMPRE quando a
 // varredura desistia — o relato do owner. A varredura tinha ACABADO; quem
@@ -9906,8 +10117,16 @@ async function offlineEsquecer() {
     offlineEpoca++;                 // invalida qualquer varredura em voo
     offlineJanelaServida = null;
     offlineUltimoResultado = null;
+    // As URLs de tile dizem ONDE ficam pedidos de terceiros: vão junto com o
+    // resto do que o offline guardou.
+    diagTilesGuardadosQueFalharam = [];
     try { indexedDB.deleteDatabase(OFFLINE_DB); } catch (e) {}
     try { if (window.caches) await caches.delete(OFFLINE_TILES_CACHE); } catch (e) {}
+    // E o worker esquece a LISTA dele, que é o mesmo dado em memória: sem o
+    // aviso, ela seguiria com centenas de endereços até ele adormecer — e o
+    // relatório o mostraria "conhecendo" tiles que já não existem. Relida com
+    // o cache apagado, ela sai vazia.
+    offlineAnunciarTiles();
 }
 
 // ── A VARREDURA ───────────────────────────────────────────────────────────
@@ -10016,6 +10235,17 @@ function offlineBaixar(u, tile) {
     })();
 }
 
+// Avisa o service worker que há tile novo no cache. Ele só responde pelo que
+// CONHECE (lista síncrona), e sem o aviso só saberia na próxima partida — a
+// sombra de sinal chegaria antes. Sai a cada `OFFLINE_ANUNCIAR_A_CADA` tiles
+// guardados e em todo fim de varredura; reler a lista custa um `keys()` de
+// algumas centenas de entradas.
+const OFFLINE_ANUNCIAR_A_CADA = 50;
+function offlineAnunciarTiles() {
+    offlineUltimoAnuncio = Date.now();
+    try { navigator.serviceWorker?.controller?.postMessage({ type: 'TILES_GUARDADOS' }); } catch (e) {}
+}
+
 async function offlineVarrer() {
     if (!offlineLigado()) return;
     if (offlineVarrendo) { offlinePedidaDeNovo = true; return; }
@@ -10030,6 +10260,7 @@ async function offlineVarrer() {
     offlinePedidaDeNovo = false;
     const janela = Math.floor(Date.now() / OFFLINE_CICLO_MS);
     const epoca = offlineEpoca;
+    let tilesNovos = 0;
     try {
         await offlineGravarFila();
         const pend = await offlineItensDaFila(janela);
@@ -10044,6 +10275,12 @@ async function offlineVarrer() {
                 // DEPOIS do await também: é aqui que a corrida mora — o
                 // download pousa e o `cache.put` recriaria o que foi apagado.
                 if (epoca !== offlineEpoca) return;
+                // O worker só serve o tile que ele CONHECE, e ele só fica
+                // sabendo pelo aviso. Avisar só no fim deixava o que já foi
+                // guardado invisível pra ele a varredura inteira — e numa rede
+                // ruim, que é quando ela demora, é justamente quando o mapa
+                // precisa do cache.
+                if (ok && it.tile && ++tilesNovos % OFFLINE_ANUNCIAR_A_CADA === 0) offlineAnunciarTiles();
                 if (!ok) {
                     // volta pro FIM: buraco de sinal não pode perder o item
                     falhas++;
@@ -10065,10 +10302,6 @@ async function offlineVarrer() {
             // seguida entra na fila do IndexedDB DEPOIS dele e apaga tudo.
             offlineGravarJanela(janela);
             offlineUltimoResultado = 'pronto';
-            // Avisa o service worker que há tile novo no cache. Ele só responde
-            // pelo que CONHECE (lista síncrona), e sem este aviso só saberia no
-            // próximo `activate` — a sombra de sinal chegaria antes.
-            try { navigator.serviceWorker?.controller?.postMessage({ type: 'TILES_GUARDADOS' }); } catch (e) {}
             dfato('offline.pronto', { n: AppState.queue.length, itens: total });
         } else {
             offlineUltimoResultado = 'parcial';
@@ -10078,6 +10311,14 @@ async function offlineVarrer() {
         offlineUltimoResultado = 'parcial';
         dfato('offline.erro', { e: String((e && e.message) || e).slice(0, 60) });
     } finally {
+        // O aviso ao worker sai em TODO fim — pronto, parcial ou erro —, e não
+        // só no "pronto", como era. A varredura interrompida (o sinal caindo no
+        // meio da preparação, que é o caso comum de quem sai de casa) guardava
+        // tiles que o worker não servia até a próxima partida dele: o mapa
+        // estava no aparelho e sumia do card. Achado desenhando a sentinela
+        // `tileGuardadoFalhou`, que acusaria exatamente isso. Não avisa se
+        // esqueceram no meio: aí o cache foi apagado.
+        if (epoca === offlineEpoca && tilesNovos) offlineAnunciarTiles();
         offlineVarrendo = false;
         // DEPOIS de baixar a bandeira, senão a linha fica no "Preparando…" de
         // uma varredura que já acabou.
@@ -11277,6 +11518,7 @@ function loadDevMode() {
             // O boot também precisa mostrar o FAB: quem já estava com o dev
             // ligado não vai desligar e religar só pra ele aparecer.
             setTimeout(atualizarFabDev, 0);
+            diagAjustarRecursos();
         }
     } catch (e) {}
 }

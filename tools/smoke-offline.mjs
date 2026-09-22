@@ -27,11 +27,13 @@
 
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina } from './esperar-saida.mjs';
+import { lerDiagnostico } from './diag-ler.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -155,7 +157,16 @@ let rotaTile = 0;
 // tile e religá-lo, e `unroute` sem a referência derruba tudo que casa com o
 // padrão — inclusive o que as seções seguintes dependem.
 let aviao = false;   // modo avião DE VERDADE é abort + setOffline (gotcha #28)
-const servirTile = (r) => { if (aviao) return r.abort('internetdisconnected'); rotaTile++;
+// `atrasoTile` deixa a varredura LENTA de propósito (seção 7d): sem ele ela
+// termina em menos de um segundo e não há "meio" em que o sinal possa cair.
+// Número (ms pra todo tile) ou função `(url) => ms`, quando a seção precisa
+// que uns cheguem e outros não.
+let atrasoTile = 0;
+const servirTile = async (r) => {
+  if (aviao) return r.abort('internetdisconnected');
+  const espera = typeof atrasoTile === 'function' ? atrasoTile(r.request().url()) : atrasoTile;
+  if (espera) { await dormir(espera); if (aviao) return r.abort('internetdisconnected'); }
+  rotaTile++;
   return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
     headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }); };
 await ctx.route('**/*-tiles/live/base/**', servirTile);
@@ -173,6 +184,11 @@ const secao = (nome) => { secaoAtual = nome; console.log(`\n\u2500\u2500 ${nome}
 const errosJs = [];
 const violacoes = [];
 page.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+// Falha de rede SEM sinal não pode virar erro no console: é o esperado, e o
+// diário já tem a hora certa (`rede.caiu`). No relato de 2026-09-22 isso deu 16
+// das 64 entradas do diário. Conta só durante o avião.
+let errosDeRedeNoAviao = 0;
+page.on('console', (m) => { if (aviao && m.type() === 'error' && /^Erro em /.test(m.text())) errosDeRedeNoAviao++; });
 page.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
   violacoes.push({ secao: secaoAtual, txt: m.text() }); });
 
@@ -398,6 +414,10 @@ const depoisDaAcao = await lerFotoDoCard();
 diz('e a trava SOBREVIVE à ação anterior terminar (✕ e ✓ seguem travados, ↑ vivo)',
   depoisDaAcao.temAviso && depoisDaAcao.rejTravado && depoisDaAcao.lidoTravado && depoisDaAcao.pularVivo,
   JSON.stringify(depoisDaAcao));
+// O aviso nascido da falha de VERDADE é o comportamento certo: a sentinela cala.
+const sentFalhou = await page.evaluate(() => diagSentinelas(diagComputado()).map((a) => a.chave));
+diz('com a foto que FALHOU de verdade, o aviso é o certo — a sentinela da foto cala',
+  !sentFalhou.includes('fotoEscondidaComAviso'), JSON.stringify(sentFalhou));
 // 6b) a foto CHEGA — o defeito que chegou aos testadores
 await montar([{ ...PLACE(10, 'NEW_PHOTO'), imageUrls: [BASE + '/icons/screenshots/previa-card.jpg'] }]);
 await esperarNaPagina(page, () => { const i = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image');
@@ -408,6 +428,19 @@ diz('a foto CHEGOU: ela aparece no card de foto, sem aviso', comFotoCard.fotoVis
   JSON.stringify(comFotoCard));
 diz('e o ✕ fica vivo — há foto pra decidir', !comFotoCard.rejTravado && !comFotoCard.lidoTravado,
   JSON.stringify(comFotoCard));
+// 6d) A SENTINELA do aviso, com o defeito ENCENADO. Com o conserto o aviso só
+// nasce da FALHA da foto — então aviso por cima de foto carregada é exatamente
+// o defeito do relato, e o relatório dele ficou mudo com isso na tela.
+const sentFoto = await page.evaluate(() => {
+  const chaves = () => diagSentinelas(diagComputado()).map((a) => a.chave);
+  const certo = chaves();
+  marcarCardSemFoto(cardDaFrente(), AppState.currentPlace);
+  return { certo, defeito: chaves(), aviso: !!cardDaFrente().querySelector('.card-sem-foto') };
+});
+diz('CONTROLE: foto carregada e sem aviso — a sentinela da foto cala',
+  !sentFoto.certo.includes('fotoEscondidaComAviso'), JSON.stringify(sentFoto));
+diz('aviso por cima de foto CARREGADA (o defeito do relato, encenado) — a sentinela acusa',
+  sentFoto.aviso && sentFoto.defeito.includes('fotoEscondidaComAviso'), JSON.stringify(sentFoto));
 aviao = false;
 await ctx.setOffline(false);
 
@@ -597,8 +630,24 @@ const estradaEncheu = await page.evaluate(async () => {
 diz('encheu até o FIM (na main de antes NUNCA terminava — o "Preparando… 197 de 530")',
   estradaEncheu.res === 'pronto' && estradaEncheu.n > 0, JSON.stringify(estradaEncheu));
 
+const tAntesDoAviao = await page.evaluate(() => Date.now());
 aviao = true; await ctx.setOffline(true);
 const tileAntes = rotaTile;
+// A captura feita SEM REDE diz que estava sem rede, e em que pé estava o
+// offline — o que o relato de 2026-09-22 não dizia: a janela sem sinal foi
+// reconstruída de erro de rede, e a janela servida, do sufixo das fotos.
+await esperarNaPagina(page, () => navigator.onLine === false, 5000);
+const capturaNoAviao = await page.evaluate(() => {
+  const m = dlogCapturar('manual');
+  return m && { rede: m.rede, offline: m.offline };
+});
+// Encadeado com `?.` de propósito: sem o campo, a asserção tem de REPROVAR com
+// nome, e não derrubar o smoke num TypeError — foi assim que a sabotagem que o
+// tirava da captura passou por "sem falha" num contador de linhas ✗.
+diz('a captura feita sem rede DIZ que estava sem rede, com o estado do offline',
+  capturaNoAviao?.rede?.online === false && capturaNoAviao?.offline?.ligado === true
+  && Number.isInteger(capturaNoAviao?.offline?.janelaServida) && capturaNoAviao?.offline?.resultado === 'pronto',
+  JSON.stringify(capturaNoAviao));
 const naEstrada = [];
 for (let i = 0; i < 6; i++) {
   await dormir(600);
@@ -681,6 +730,12 @@ const saiuMesmo = api.filter((u) => /validar-place/.test(u) && !/AVIAO/.test(u))
 diz('a fila de saída ESVAZIOU quando a rede voltou', depoisDaEstrada.fila === 0, JSON.stringify(depoisDaEstrada));
 diz(`as 6 saíram de verdade PELA REDE (${saiuMesmo} tentativas)`, saiuMesmo >= 6, JSON.stringify(api.slice(-3)));
 diz('o placar não contou duas vezes', depoisDaEstrada.rej === 6, 'rejeitados=' + depoisDaEstrada.rej);
+const redeNoDiario = await page.evaluate((t0) => dfatoAnel
+  .filter((e) => e.t >= t0 && /^rede\./.test(e.k)).map((e) => e.k), tAntesDoAviao);
+diz('o diário anota a rede CAINDO e depois VOLTANDO',
+  redeNoDiario[0] === 'rede.caiu' && redeNoDiario.includes('rede.voltou'), JSON.stringify(redeNoDiario));
+diz('sem rede, as 6 ações que falharam NÃO viraram erro no console (nem ruído no diário)',
+  errosDeRedeNoAviao === 0, 'erros=' + errosDeRedeNoAviao);
 await ctx.unroute('**/api/*', rotaApi);
 await page.evaluate(() => { API.setSession(null); });
 
@@ -778,6 +833,78 @@ await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().q
 const acordou = await tileNaFrente();
 diz('o worker ACORDOU sabendo dos tiles: o mapa guardado aparece sem rede', acordou.ok > 0 && acordou.ok === acordou.tiles,
   JSON.stringify(acordou));
+// O worker recriado responde ao diagnóstico pela boca DELE — e é esta a
+// resposta que teria mostrado o defeito do relato sem precisar reproduzi-lo:
+// nascido agora, lista lida, servindo do cache.
+const guardadosAgora = await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length);
+const doSw = await page.evaluate(() => diagServiceWorker());
+diz('o worker RECRIADO se apresenta: nasceu há pouco, com a lista lida e servindo do cache',
+  !!doSw && doSw.idadeMs < 60000 && doSw.listaPronta === true && doSw.tilesNaLista === guardadosAgora && doSw.doCache > 0,
+  JSON.stringify(doSw) + ' cache=' + guardadosAgora);
+const falhasGuardadas = await page.evaluate(() => diagTilesGuardadosQueFalharam.length);
+diz('nenhum tile GUARDADO falhou na tela — é o que a sentinela do mapa acusaria',
+  falhasGuardadas === 0, 'anel=' + falhasGuardadas);
+aviao = false; await ctx.setOffline(false);
+
+secao('7d. A PREPARAÇÃO INTERROMPIDA: o sinal cai no meio, e o que JÁ foi guardado aparece');
+// Só o "pronto" avisava o service worker, e ele só serve o tile que CONHECE. A
+// preparação interrompida — o sinal caindo no meio, o caso comum de quem sai
+// de casa — deixava tiles NO APARELHO que o card não mostrava. Achado
+// desenhando a sentinela do mapa, que acusaria exatamente isto.
+//
+// DOIS controles, porque dois atalhos fariam esta seção passar sem medir o
+// conserto: a varredura tem que ter terminado PARCIAL (senão é o caminho do
+// "pronto", que sempre avisou), e o worker NÃO pode ter sido recriado no meio
+// (recriado, ele relê o cache na partida e acharia os tiles por outro motivo).
+const ALVO_7D = { ...SO_MAPA(90), mapa: { centro: [-10.5, -40.5], entradas: [] } };
+const RESTO_7D = Array.from({ length: 8 }, (_, k) =>
+  ({ ...SO_MAPA(91 + k), mapa: { centro: [-10.5 + (k + 1) * 0.7, -40.5], entradas: [] } }));
+await montar([ALVO_7D, ...RESTO_7D]);
+const swAntes7d = await page.evaluate(() => diagServiceWorker());
+// O ALVO chega rápido e o RESTO demora. A folga entre "o alvo está guardado" e
+// "o sinal cai" é o tempo do resto, e é ela que decide se a varredura termina
+// PARCIAL. Com 250ms pra todo tile ela ficava ABAIXO de 1,5s — MEDIDO: a
+// sabotagem que atrasava em 1,5s a resposta do worker bastava pra fechá-la, e
+// a varredura terminava PRONTA. Com o resto a 4s, um runner lento não a fecha.
+const urlsDoAlvo7d = new Set(await page.evaluate(() => [...tilesDaFaixa(AppState.queue[0], offlineFaixaDeCaixas())]));
+atrasoTile = (url) => (urlsDoAlvo7d.has(url) ? 250 : 4000);
+await page.evaluate(() => { offlineUltimoResultado = null; offlineMarcarGesto(); offlineVarrer(); });
+// Sinal POSITIVO: todos os tiles do ALVO (o 1º da fila) já estão no cache.
+const alvoNoCache = await esperarNaPagina(page, async () => {
+  const urls = [...tilesDaFaixa(AppState.queue[0], offlineFaixaDeCaixas())];
+  if (!urls.length) return false;
+  for (const u of urls) if (!(await caches.match(u, { cacheName: 'waze-places-tiles' }))) return false;
+  return true;
+}, 30000, 100);
+const swNoMeio = await page.evaluate(() => diagServiceWorker());
+aviao = true; await ctx.setOffline(true);
+await esperarNaPagina(page, () => !offlineVarrendo, 20000, 100);
+const fim7d = await page.evaluate(() => ({ res: offlineUltimoResultado }));
+atrasoTile = 0;
+// `Number.isInteger`/`isFinite` antes da igualdade: com o worker MUDO, os dois
+// lados viriam `undefined` e `undefined === undefined` passaria por vácuo.
+diz('PRÉ-CONDIÇÃO: os tiles do alvo chegaram ao cache ANTES do sinal cair, sem aviso ao worker no meio',
+  alvoNoCache.ok && Number.isInteger(swAntes7d.tilesNaLista) && swNoMeio.tilesNaLista === swAntes7d.tilesNaLista,
+  JSON.stringify({ alvoNoCache, alvo: urlsDoAlvo7d.size, antes: swAntes7d.tilesNaLista, noMeio: swNoMeio.tilesNaLista }));
+diz('PRÉ-CONDIÇÃO: a preparação terminou PARCIAL (o sinal caiu no meio)', fim7d.res === 'parcial', JSON.stringify(fim7d));
+const anel7dAntes = await page.evaluate(() => diagTilesGuardadosQueFalharam.length);
+await montar([ALVO_7D]);
+await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
+  return !!b && Number(b.dataset.tilesPedidos) > 0
+    && [...b.querySelectorAll('.card-map-tiles img')].every((x) => x.complete); }, 8000);
+await dormir(300);
+const mapa7d = await page.evaluate(() => { const b = cardDaFrente().querySelector('.card-map');
+  const tl = [...b.querySelectorAll('.card-map-tiles img')];
+  return { pedidos: Number(b.dataset.tilesPedidos), falharam: Number(b.dataset.tilesFalharam),
+           ok: tl.filter((x) => x.naturalWidth > 0).length }; });
+const swDepois7d = await page.evaluate(() => diagServiceWorker());
+diz('CONTROLE: o worker NÃO foi recriado no meio (senão a partida dele mascararia o defeito)',
+  Number.isFinite(swAntes7d.iniciadoEm) && swDepois7d.iniciadoEm === swAntes7d.iniciadoEm,
+  `${swAntes7d.iniciadoEm} → ${swDepois7d.iniciadoEm}`);
+diz('o mapa guardado numa preparação INTERROMPIDA aparece sem rede, inteiro',
+  mapa7d.pedidos > 0 && mapa7d.falharam === 0 && mapa7d.ok === mapa7d.pedidos, JSON.stringify(mapa7d));
+const anel7d = await page.evaluate(() => diagTilesGuardadosQueFalharam.length);
+diz('e a sentinela do mapa não tem o que acusar', anel7d === anel7dAntes, `${anel7dAntes} → ${anel7d}`);
 aviao = false; await ctx.setOffline(false);
 
 secao('8. O DEPLOY NÃO APAGA O MAPA PROVISIONADO');
@@ -857,20 +984,166 @@ await esperarNaPagina(page, () => typeof offlineVarrer === 'function', 20000);
 await page.evaluate(() => { AppState.preferences.offlineDisponivel = true; }).catch(() => {});
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
 
+secao('8b. O DIAGNÓSTICO ENXERGA O OFFLINE — e o worker responde por si');
+// O relatório do relato de 2026-09-22 decidiu o conserto e mesmo assim custou
+// tempo: não trazia o estado do offline, o worker era caixa-preta, o tile que
+// falhava sumia com a prova, e a lista de recursos bateu no teto. Cada linha
+// aqui mede, na app de verdade, uma dessas lacunas fechada.
+const noRelatorio = await page.evaluate(async () => ({ off: await diagOffline(), sw: await diagServiceWorker() }));
+diz('a seção offline diz o que o aparelho guardou: fila, janela e tiles',
+  noRelatorio.off?.ligado === true && noRelatorio.off?.tilesNoCache > 0
+  && noRelatorio.off?.filaGuardada?.n > 0
+  && Number.isFinite(noRelatorio.off?.janelaGuardada), JSON.stringify(noRelatorio.off));
+diz('o worker responde pela boca dele, e conhece EXATAMENTE os tiles do cache',
+  noRelatorio.sw?.listaPronta === true
+  && Number.isInteger(noRelatorio.sw?.tilesNaLista) && noRelatorio.sw.tilesNaLista === noRelatorio.off?.tilesNoCache
+  && /^waze-places-\d{10}$/.test(noRelatorio.sw?.versao || ''), JSON.stringify(noRelatorio.sw));
+// O RELATÓRIO DE VERDADE, pelo caminho do botão: `baixarDiagnostico()` junta
+// as peças em `diagCorpo()` (com os `await` novos), serializa, empacota em ZIP
+// e baixa — e ele é lido pela FONTE ÚNICA das ferramentas (`diag-ler.mjs`). As
+// medidas acima são das PEÇAS, e nenhum smoke gerava o arquivo: um `await` que
+// rejeitasse ali derrubaria o relatório inteiro, não só a seção nova. Só a
+// FORMA é conferida e nada do arquivo é impresso — ele leva o token da sessão
+// (de teste, aqui, mas a regra não tem exceção).
+//
+// Estado FRESCO primeiro: a troca de worker da seção 8 RECARREGOU a página, e
+// com ela foram o diário e as capturas da estrada. Cai a rede, captura, volta.
+aviao = true; await ctx.setOffline(true);
+await esperarNaPagina(page, () => navigator.onLine === false, 5000);
+await page.evaluate(() => { dlogCapturar('manual'); });
+aviao = false; await ctx.setOffline(false);
+await esperarNaPagina(page, () => navigator.onLine === true, 5000);
+await dormir(300);   // o `online` dispara gatilhos (varredura); deixa nascerem, e espera acabarem
+await esperarNaPagina(page, () => !offlineVarrendo, 30000, 100);
+const dirDiag = mkdtempSync(join(tmpdir(), 'diag-offline-'));
+let relatorio;
+try {
+  const [dl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30000 }),
+    page.evaluate(() => baixarDiagnostico()),
+  ]);
+  const arq = join(dirDiag, 'diag.zip');
+  await dl.saveAs(arq);
+  const { dados: d, origem } = lerDiagnostico(arq);
+  const momentos = d.momentos || [];
+  relatorio = {
+    origem, v: d._versaoDoDiag, rede: d.resumo?.rede, offline: d.resumo?.offline,
+    alertas: (d.resumo?.alertas || []).map((a) => a.chave),
+    offLigado: d.offline?.ligado, offTiles: d.offline?.tilesNoCache,
+    swPronta: d.serviceWorker?.proprio?.listaPronta, swLista: d.serviceWorker?.proprio?.tilesNaLista,
+    recN: d.recursosInfo?.n, recLen: Array.isArray(d.recursos) ? d.recursos.length : null,
+    capturas: momentos.length,
+    capturaSemRede: momentos.filter((m) => m.rede?.online === false && m.offline?.ligado === true).length,
+    redeNoDiario: (d.diario || []).filter((e) => /^rede\./.test(e.k)).map((e) => e.k),
+  };
+} catch (e) {
+  relatorio = { erro: String((e && e.message) || e).slice(0, 200) };
+} finally {
+  rmSync(dirDiag, { recursive: true, force: true });
+}
+diz('o RELATÓRIO de verdade (baixado em ZIP, lido pela ferramenta) traz as peças novas',
+  relatorio.origem === 'zip' && relatorio.v === 3 && relatorio.rede === true
+  && ['pronto', 'parcial', 'ligado'].includes(relatorio.offline)
+  && relatorio.offLigado === true && relatorio.offTiles > 0
+  // worker × cache: a IGUALDADE está medida nas peças, logo acima; aqui é a
+  // forma, e a volta da rede pode ter posto uma varredura no meio do arquivo
+  && relatorio.swPronta === true && relatorio.swLista > 0
+  && relatorio.recN > 0 && relatorio.recN === relatorio.recLen,
+  JSON.stringify(relatorio));
+diz('e leva o que aconteceu: a captura SEM rede e a queda e a volta no diário',
+  relatorio.capturaSemRede >= 1 && relatorio.redeNoDiario?.includes('rede.caiu')
+  && relatorio.redeNoDiario.includes('rede.voltou'), JSON.stringify(relatorio));
+diz('no estado são, as duas sentinelas NOVAS ficam caladas no relatório',
+  Array.isArray(relatorio.alertas) && !relatorio.alertas.includes('fotoEscondidaComAviso')
+  && !relatorio.alertas.includes('tileGuardadoFalhou'), JSON.stringify(relatorio.alertas));
+// A SENTINELA do mapa, dos dois lados. O defeito natural (o worker acordando
+// sem a lista) está medido na 7c; aqui a falha é ENCENADA, nas condições que a
+// app exige: worker no comando, varredura parada e o tile no cache — e um
+// tile que NÃO está guardado falhando junto, que não pode entrar.
+const sentMapa = await page.evaluate(async () => {
+  for (let i = 0; i < 100 && offlineVarrendo; i++) await new Promise((r) => setTimeout(r, 50));
+  const guardado = (await (await caches.open('waze-places-tiles')).keys())[0].url;
+  diagTilesGuardadosQueFalharam = [];
+  offlineUltimoAnuncio = 0;   // longe de qualquer aviso: a janela de 2s não se aplica
+  const semAlerta = diagSentinelas(diagComputado()).map((a) => a.chave);
+  registrarFalhaDeTile(null, 'https://www.waze.com/row-tiles/live/base/3/0/0/tile.png');
+  registrarFalhaDeTile(null, guardado);
+  for (let i = 0; i < 40 && !diagTilesGuardadosQueFalharam.length; i++) await new Promise((r) => setTimeout(r, 25));
+  await new Promise((r) => setTimeout(r, 150));   // folga pro não guardado, se ele entrasse (errado)
+  const r = { semAlerta, anel: diagTilesGuardadosQueFalharam.map((x) => (x.url === guardado ? 'guardado' : x.url)),
+              comAlerta: diagSentinelas(diagComputado()).map((a) => a.chave) };
+  diagTilesGuardadosQueFalharam = [];
+  return r;
+});
+diz('CONTROLE: sem falha registrada, a sentinela do mapa cala',
+  !sentMapa.semAlerta.includes('tileGuardadoFalhou'), JSON.stringify(sentMapa));
+diz('o tile GUARDADO que falha entra no anel — e o que não está guardado, não',
+  sentMapa.anel.length === 1 && sentMapa.anel[0] === 'guardado', JSON.stringify(sentMapa));
+diz('e a sentinela do mapa acusa', sentMapa.comAlerta.includes('tileGuardadoFalhou'), JSON.stringify(sentMapa));
+// A LISTA DE RECURSOS: o navegador guarda 250 e descarta o resto. Página nova
+// em cada medida (o teto vale por documento), sem worker nem rota, e 300
+// requisições de mesma origem. O CONTROLE é a de baixo: sem ele, "passou de
+// 300 com o dev" não distingue teto que subiu de teto que nunca existiu.
+const ctxR = await browser.newContext({ serviceWorkers: 'block' });
+const medirRecursos = async (comDev) => {
+  const pg = await ctxR.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  await esperarNaPagina(pg, () => typeof diagAjustarRecursos === 'function', 10000);
+  const r = await pg.evaluate(async (comDev) => {
+    if (comDev) { AppState.devMode = { unlocked: true, active: true }; diagAjustarRecursos(); }
+    // O corpo é LIDO: a entrada de Resource Timing só nasce quando a resposta
+    // termina, e sem ler as últimas ainda não tinham pousado quando a lista
+    // era contada (medido: 296 de 313, variando). Depois, espera a contagem
+    // PARAR de mudar — o resultado, nunca um prazo.
+    for (let i = 0; i < 300; i++) { try { await (await fetch('/manifest.json?rec=' + i)).text(); } catch (e) { /* conta igual */ } }
+    let n = -1;
+    for (let k = 0; k < 40; k++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const agora = performance.getEntriesByType('resource').length;
+      if (agora === n) break;
+      n = agora;
+    }
+    return { n, encheu: diagRecursosCheio };
+  }, comDev);
+  await pg.close();
+  return r;
+};
+const recSemDev = await medirRecursos(false);
+const recComDev = await medirRecursos(true);
+diz('CONTROLE: sem o dev, a lista para no teto do navegador — e o relatório SABE que encheu',
+  recSemDev.n === 250 && recSemDev.encheu === true, JSON.stringify(recSemDev));
+diz('com o dev ligado o teto sobe e nada se perde',
+  recComDev.n > 300 && recComDev.encheu === false, JSON.stringify(recComDev));
+await ctxR.close();
+
 secao('9. ESQUECER PARA a varredura em voo (privacidade)');
 // Enche, e ESQUECE no meio: o download já a caminho não pode pousar depois.
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   AppState.preferences.offlineDisponivel = true; offlineMarcarGesto(); offlineVarrer(); });
 await dormir(60);
+// Uma entrada no anel ANTES de esquecer: sem ela, "o anel ficou vazio" passaria
+// por vácuo — ele já está vazio a esta altura.
+await page.evaluate(() => { diagTilesGuardadosQueFalharam.push({ t: Date.now(), url: 'https://www.waze.com/row-tiles/live/base/3/1/1/tile.png' }); });
+// Idem a lista do WORKER: ela tem de estar CHEIA antes, senão "esqueceu" passa
+// por vácuo.
+const swAntes9 = await page.evaluate(() => diagServiceWorker());
 await page.evaluate(() => offlineEsquecer());
 await dormir(900);
+const swDepois9 = await page.evaluate(() => diagServiceWorker());
 const depois = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
   return { cache: (await c.keys()).length, fila: !!(await offlineLerFila()),
-    janela: offlineJanelaServida, res: offlineUltimoResultado };
+    janela: offlineJanelaServida, res: offlineUltimoResultado,
+    janelaGuardada: await offlineLerJanela(), anel: diagTilesGuardadosQueFalharam.length };
 });
 diz('depois de esquecer, o cache de tiles fica VAZIO', depois.cache === 0, JSON.stringify(depois));
 diz('a fila guardada some e a janela zera', depois.fila === false && depois.janela === null, JSON.stringify(depois));
+diz('e a janela GRAVADA e o anel de tiles que falharam somem junto (dizem onde ficam pedidos de terceiros)',
+  depois.janelaGuardada === null && depois.anel === 0, JSON.stringify(depois));
+diz('e o worker esquece a LISTA dele (o mesmo dado, em memória)',
+  swAntes9?.tilesNaLista > 0 && swDepois9?.tilesNaLista === 0,
+  `${swAntes9?.tilesNaLista} → ${swDepois9?.tilesNaLista}`);
 
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
@@ -882,10 +1155,10 @@ if (falhas) {
   console.log(`\n✗ smoke do offline: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log('\n✓ smoke do offline: 14 seções (13 com o service worker LIGADO) — o MAPINHA DO CARD e o'
+console.log('\n✓ smoke do offline: 16 seções (15 com o service worker LIGADO) — o MAPINHA DO CARD e o'
   + ' MAPA AMPLIADO desenhando tile (com contraprova que vai a zero), mapa intacto com o'
   + ' toggle desligado e com o cache cheio, fila em IndexedDB, sufixo da foto como contrato'
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e a app reaberta sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), e esquecer PARANDO o download em voo');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), e esquecer PARANDO o download em voo');

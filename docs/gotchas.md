@@ -413,6 +413,8 @@ ocorrência** — errar uma vez e corrigir não vira parágrafo.
 
     **Regra que fica**: quando existir o fato POSITIVO (um campo focado, uma mensagem que só a v2 manda), decida por ele e use a medição indireta só pra dimensionar. E todo estado derivado precisa de um gatilho que sobreviva ao resto da app — se os únicos são eventos que outra funcionalidade suprime, o valor errado é permanente.
 
+    **REINCIDIU em v2026.09.22-03, dentro do instrumento de SABOTAGEM.** O runner que tira um trecho do código, roda o smoke e conta as linhas `✗` leu **zero** como "a sabotagem passou" — e o smoke nem tinha chegado a medir: tinha MORRIDO num `TypeError` (`capturaNoAviao.rede.online`, com `rede` tirado pela própria sabotagem). Ausência de `✗` não distingue "passou" de "caiu antes de asserir". PROVADO rodando os dois lados com a sabotagem aplicada: a asserção antiga dá exit 1, zero `✗` e o `TypeError`; a nova, com `?.`, reprova com NOME. Duas regras: o runner lê o exit code (queda sem `✗` é reprovação SEM NOME, e isso é defeito do smoke), e a asserção que lê campo que uma regressão pode tirar reprova em vez de lançar. No CI a queda já reprovava (exit 1), então o custo era de diagnóstico, não de falso verde — mas foi o que me fez ler uma sabotagem como falha de cobertura.
+
 ## 63. **Regra de estado que vale em duas telas mora em UMA função** (v2026.08.07-02). O owner: *"os botões de aprovar/apagar fotos não estão sendo desativados que nem é feito nos cards quando o Desfazer tá na tela."* Estava certo — e o CLAUDE.md já tinha a regra escrita, só que aplicada a um lugar só.
     **O que existia**: `acoesTravadas()` olhava apenas `AppState.pendingAction` (o swipe), e `aplicarTravaDeAcao()` mexia apenas nos `.card-btn-*`. As ações de FOTO abrem a mesma janela de Desfazer e escrevem no mesmo local, mas seus botões ficavam vivos. Havia até uma proteção acidental — o banner do Desfazer cobre o canto do botão —, e proteção acidental é a pior espécie: some quando o layout muda, sem aviso.
     **O conserto não é "travar também no lightbox", é ter UMA regra**: `acoesTravadas()` passou a incluir `aprovacaoPendente`/`exclusaoPendente`, e `aplicarTravaDeAcao()` aplica nos dois conjuntos de botões. Duas funções paralelas seriam duas chances de divergir na próxima mudança — é assim que esta divergência nasceu.
@@ -530,3 +532,15 @@ Escrevendo o guard que exige o host do tile no `connect-src` das três cópias d
 **A lição não é "limpar melhor".** É que decidir o que é comentário por regex é adivinhação, e adivinhação erra justamente em conteúdo que se parece com sintaxe. A saída foi ancorar na **FORMA do que se procura**: só a diretiva de verdade tem `'self'` logo depois do nome; o comentário nunca tem.
 
 **Como isso foi distinguido:** os três sintomas eram idênticos — "o guard reprova um arquivo que está correto". Só imprimindo **o que a regex de fato casou** em cada arquivo é que se separaram três causas diferentes que se apresentavam como uma. Ler o resultado do instrumento, e não só o veredito dele, é o que fecha esta classe.
+
+## 68. **Id errado num seletor some com o dado SEM DIZER NADA** (v2026.09.22-03). Duas vezes, e as duas com o MESMO id que não existe.
+
+`getElementById('x')` de um id que não existe devolve `null`, `filter(Boolean)` o descarta, e um `visivel('x')` responde `false` — nenhum dos três reclama. O código segue, e o dado some.
+
+**Primeira vez: a lista de camadas do FAB.** Eu escrevi `lightbox` onde o elemento se chama `imageLightbox`, e o lightbox de foto simplesmente não era vigiado: o FAB não mudava de canto quando ele abria. O comentário do `ligarFabDev` registra isso, e `test/diagnostico.test.mjs` passou a cobrar que todo id da lista exista no HTML.
+
+**Segunda vez, e com o MESMO nome: o `dlogTelaAtual`.** Ele fazia `visivel('lightbox')` pra dizer, em cada captura do diagnóstico, se o lightbox estava aberto. O id não existe — os dois são `imageLightbox` e `mapaLightbox` —, então o campo saiu `false` em TODO momento de TODO relatório desde que foi escrito, com o lightbox aberto ou não. Nenhum teste pegou: o guard da primeira vez cobrava a lista do FAB, não esta função. Foi achado LENDO o código, ao melhorar o diagnóstico depois do relato de 2026-09-22.
+
+**Por que é caro**: `false` é indistinguível de "estava fechado". É a família do gotcha #62 — inferir um estado da AUSÊNCIA de sinal —, agora dentro do próprio instrumento: o relatório afirmava com segurança uma coisa que ele nunca mediu.
+
+**A regra**: todo id que o código consulta pra MEDIR alguma coisa precisa de um guard que confira que ele existe no HTML. Hoje são dois: a lista de camadas do FAB e o `dlogTelaAtual` (este varre todo `visivel('…')` da função, com piso de contagem pra o varredor não passar por vácuo).
