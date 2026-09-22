@@ -3898,6 +3898,88 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       `FAB/${nomeAp}: depois de apagar não voltou ao canto automático`,
       `${Math.round(zerou.x)} ≠ ${vp.width - antes.w - 12}`);
 
+    // ── o SELO conta só o que VOCÊ registrou ────────────────────────────
+    // Pedido do owner depois de ver o selo ir a 2, 4 e 5 em três toques: ele
+    // somava as capturas AUTOMÁTICAS (o arraste do card além do limiar, com
+    // cota de 2) às do toque, e o primeiro toque já mostrava 2. Aqui as duas
+    // coisas acontecem DE VERDADE — arraste por toque no card, toque no FAB —,
+    // e o selo tem que contar só o toque. Com o selo antigo este bloco reproduz
+    // o relato exato: o primeiro toque mostra "2".
+    //
+    // DOIS controles, e os dois já pegaram coisa: o ponto do arraste tem que
+    // cair NO card (na primeira versão o "Como funciona" estava por cima e o
+    // arraste nunca aconteceu), e a automática tem que ter ENTRADO no anel —
+    // sem ela, "o selo não contou a automática" passaria com a automática
+    // simplesmente não existindo.
+    await page.evaluate(() => {
+      try { if (Lightbox.isOpen()) Lightbox.close(); } catch (e) {}
+      const aberto = MODAL_IDS.find((m) => !document.getElementById(m).classList.contains('hidden'));
+      if (aberto) closeModal(aberto);
+    });
+    await assentar(page, 300);
+    const lerSelo = () => page.evaluate(() => {
+      const s = document.getElementById('devFabBadge');
+      return { txt: s.textContent.trim(), visivel: !s.classList.contains('hidden'), anel: dlogMomentos.length,
+        auto: dlogMomentos.filter((m) => m.motivo === 'auto:arraste').length, naoBaixados: dlogNaoBaixados() };
+    });
+    const tocarFab = async () => {
+      const c = await page.evaluate(() => {
+        const b = document.getElementById('devFab').getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: c.x, y: c.y }] });
+      await page.waitForTimeout(60);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await assentar(page, 300);
+    };
+    const pArr = await page.evaluate(() => {
+      const n = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-name');
+      const r = n.getBoundingClientRect();
+      const x = r.left + Math.min(40, r.width / 2), y = r.top + r.height / 2;
+      const sob = document.elementFromPoint(x, y);
+      return { x, y, noCard: !!(sob && sob.closest('#cardStack .place-card:not(.card-fundo)')),
+               pedido: AppState.currentPlace && AppState.currentPlace.updateRequestID };
+    });
+    checa(pArr.noCard, `FAB/${nomeAp}: CONTROLE — o ponto do arraste não cai no card da frente`, JSON.stringify(pArr));
+    // Até 40% da largura (o limiar é 25%) e de volta, DEVAGAR: soltar no lugar
+    // e parado não decide nada — só a captura automática acontece.
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pArr.x, y: pArr.y }] });
+    for (let i = 1; i <= 10; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove',
+        touchPoints: [{ x: pArr.x + vp.width * 0.4 * i / 10, y: pArr.y }] });
+      await page.waitForTimeout(16);
+    }
+    for (let i = 9; i >= 0; i--) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove',
+        touchPoints: [{ x: pArr.x + vp.width * 0.4 * i / 10, y: pArr.y }] });
+      await page.waitForTimeout(30);
+    }
+    await page.waitForTimeout(200);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await assentar(page, 500);
+    const s0 = await lerSelo();
+    checa(s0.auto === 1 && s0.anel === 1,
+      `FAB/${nomeAp}: CONTROLE — o arraste além do limiar não capturou sozinho (a medida do selo não valeria)`,
+      JSON.stringify(s0));
+    const pedidoDepois = await page.evaluate(() => AppState.currentPlace && AppState.currentPlace.updateRequestID);
+    checa(pedidoDepois === pArr.pedido, `FAB/${nomeAp}: o arraste de volta decidiu o pedido`,
+      `${pArr.pedido} → ${pedidoDepois}`);
+    await tocarFab();
+    const s1 = await lerSelo();
+    checa(s1.txt === '1' && s1.visivel && s1.anel === 2,
+      `FAB/${nomeAp}: o selo contou a captura automática — o primeiro toque tem que mostrar 1`, JSON.stringify(s1));
+    await tocarFab();
+    const s2 = await lerSelo();
+    checa(s2.txt === '2' && s2.anel === 3 && s2.naoBaixados === 2,
+      `FAB/${nomeAp}: o segundo toque tem que mostrar 2, e o aviso do desligar contar o mesmo`, JSON.stringify(s2));
+    // Baixado é marcado NO momento: o aviso zera, e a captura seguinte conta 1.
+    const s3 = await page.evaluate(() => { dlogMarcarBaixados(); return dlogNaoBaixados(); });
+    checa(s3 === 0, `FAB/${nomeAp}: baixado, o aviso do desligar ainda conta captura`, String(s3));
+    await tocarFab();
+    const s4 = await lerSelo();
+    checa(s4.txt === '3' && s4.naoBaixados === 1,
+      `FAB/${nomeAp}: depois de baixar, o selo segue contando (3) e o aviso só a nova (1)`, JSON.stringify(s4));
+
     checa(errosF.length === 0, `FAB/${nomeAp}: erro de JS`, errosF[0]);
     await ctx.close();
   }

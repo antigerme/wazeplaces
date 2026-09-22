@@ -17,6 +17,8 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - **O mapa guardado não some mais depois de uma pausa.** O Android "adormece" a parte da app que serve o mapa offline quando ela fica meio minuto parada — e ela acordava sem lembrar quais pedaços do mapa estavam guardados. Resultado: no modo avião, o mapa aparecia só com os marcadores, sem as ruas. Agora ela relê a lista toda vez que acorda.
 - **Reportes com comentário e pedidos com alteração passam a ter o mapa inteiro sem sinal.** Nesses cards a área do mapa é mais baixa, e às vezes precisa de um enquadramento diferente — com pedaços do mapa que não tinham sido guardados. A preparação agora guarda o que qualquer altura de card vai pedir.
 - **O ✕ e o ✓ não destravam mais sozinhos num card sem foto.** Terminar a ação do pedido anterior liberava os dois botões de volta, e dava pra decidir uma foto que não estava na tela.
+- **O pedido mandado pela conversa mostra a foto certa.** Num pedido de "Nova foto" (ou de foto denunciada), o colega recebia a **primeira** foto do local — uma que o local já tinha — em vez da foto sobre a qual você estava perguntando. Agora vai a mesma foto que o card mostra.
+- **O número no botão do modo dev conta só as capturas que você fez.** Ele somava as capturas que o próprio modo dev faz sozinho quando um arraste passa do ponto de decisão, então o primeiro toque já mostrava 2. As automáticas continuam indo no relatório; só não entram mais no número. O aviso ao desligar o modo dev conta a mesma coisa.
 
 ### Notas
 - A preparação do offline guarda **cerca de 40% mais pedaços de mapa** do que antes (medido na fila real: de 221 para 313). É o preço de o mapa sair certo nos cards com comentário; o aumento acontece uma vez, na preparação.

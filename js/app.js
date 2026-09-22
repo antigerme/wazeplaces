@@ -3666,10 +3666,24 @@ function dlogApagar() {
     atualizarFabDev();
 }
 
-// Quantos momentos ainda não foram baixados. É o que o FAB mostra no selo, e é
-// o que impede o desligar de levar trabalho embora em silêncio.
-let dlogBaixados = 0;
-function dlogNaoBaixados() { return Math.max(0, dlogMomentos.length - dlogBaixados); }
+// O selo do FAB e o aviso do desligar contam SÓ o que a PESSOA registrou (o
+// motivo 'manual', o toque no FAB). Pedido do owner depois de ver o selo ir a
+// 2, 4 e 5 em três toques: o número somava as capturas AUTOMÁTICAS — o arraste
+// do card passando do limiar, com cota de 2 — às dele, então o primeiro toque
+// já mostrava 2 e ele leu "capturou duas vezes". As automáticas continuam no
+// anel e no relatório, iguais; só não entram num número que a pessoa lê como
+// "quantas vezes eu apertei". Os dois pontos contam a MESMA coisa: aviso de
+// "3 não baixados" com o selo mostrando 1 seria a app discordando de si mesma.
+function dlogCapturasDoEditor() { return dlogMomentos.filter((m) => m.motivo === 'manual'); }
+
+// Quais já foram BAIXADOS, marcados no próprio momento. Era uma CONTAGEM (o
+// tamanho do anel na hora do download), que mentia assim que o anel cheio
+// girava: com 12 baixados, uma captura nova empurrava a mais velha pra fora e
+// a conta seguia dizendo "0 não baixados". `WeakSet` e não um campo no objeto
+// porque o momento vai inteiro pro JSON do relatório.
+const dlogJaBaixados = new WeakSet();
+function dlogMarcarBaixados() { for (const m of dlogMomentos) dlogJaBaixados.add(m); }
+function dlogNaoBaixados() { return dlogCapturasDoEditor().filter((m) => !dlogJaBaixados.has(m)).length; }
 
 // ── O FAB ─────────────────────────────────────────────────────────────────
 // UM gesto de toque e UM de arrasto, e nada mais. Toque = registra um momento;
@@ -3838,7 +3852,8 @@ function atualizarFabDev() {
     fab.classList.toggle('hidden', !ligado);
     const selo = document.getElementById('devFabBadge');
     if (selo) {
-        const n = dlogMomentos.length;
+        // Só as que a pessoa fez — ver `dlogCapturasDoEditor`.
+        const n = dlogCapturasDoEditor().length;
         selo.textContent = String(n);
         selo.classList.toggle('hidden', n === 0);
     }
@@ -4477,7 +4492,7 @@ async function baixarDiagnostico() {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 30000);
-        dlogBaixados = dlogMomentos.length;
+        dlogMarcarBaixados();
         atualizarFabDev();
         showToast(t('toast.diagPronto'), 'success');
     } catch (e) {
@@ -7086,7 +7101,12 @@ function cardParaConversa() {
     const place = AppState.currentPlace;
     if (!place || !place.venueID) return null;
     if (place._treino) return null;   // pedido inerte não existe pra mais ninguém
-    const fotos = Array.isArray(place.imageUrls) ? place.imageUrls : [];
+    // A foto que o CARD mostra, pela mesma regra do carrossel (`fotosDoCard`):
+    // num pedido de foto, a que está EM DECISÃO. Mandava `place.imageUrl`, que é
+    // a PRIMEIRA do local — num pedido de "Nova foto" o colega recebia uma foto
+    // que o local já tinha, e não a que se estava perguntando sobre. Vai CRUA,
+    // sem o sufixo do offline: o cache de quem recebe não é o de quem manda.
+    const fotos = fotosDoCard(place);
     return {
         venueID: place.venueID,
         updateRequestID: place.updateRequestID || null,
@@ -7094,7 +7114,7 @@ function cardParaConversa() {
         address: place.address || '',
         categories: Array.isArray(place.categories) ? place.categories.slice(0, 4) : [],
         updateTypeKey: place.updateTypeKey || null,
-        imageUrl: place.imageUrl || fotos[0] || null,
+        imageUrl: fotos.urls[fotos.inicial] || null,
         lat: place.lat ?? null,
         lon: place.lon ?? null,
         // A região vai junto porque o link do WME depende dela e quem recebe

@@ -253,6 +253,62 @@ test('a captura NÃO dispara toast — o instrumento não pode medir a si mesmo'
   assert.ok(!/showToast/.test(corpo), 'voltou o toast na captura — ele bloqueia o toque seguinte');
 });
 
+test('o selo do FAB e o aviso do desligar contam SÓ o que a pessoa registrou', () => {
+  // Pedido do owner depois de ver o selo ir a 2, 4 e 5 em três toques: ele
+  // somava as capturas AUTOMÁTICAS (o arraste do card além do limiar, com cota
+  // de 2) às do toque, e o primeiro toque já mostrava 2. As automáticas seguem
+  // no relatório; o NÚMERO é o das que a pessoa fez.
+  // Fatia por CHAVES, não até o próximo `\n}`: as funções de uma linha só
+  // não têm `\n}` próprio e o corte alcançaria a vizinha (gotcha #67).
+  const fatia = (nome) => {
+    const i = semCom.indexOf('function ' + nome + '(');
+    assert.ok(i !== -1, `${nome} sumiu do app.js`);
+    const a = semCom.indexOf('{', semCom.indexOf(')', i));
+    let prof = 0;
+    for (let j = a; j < semCom.length; j++) {
+      if (semCom[j] === '{') prof++;
+      else if (semCom[j] === '}' && --prof === 0) return semCom.slice(i, j + 1);
+    }
+    return '';
+  };
+  // O filtro usa o MESMO motivo que o toque grava ('manual', cobrado no teste
+  // acima). Divergir os dois deixa o selo em zero pra sempre, calado.
+  assert.match(fatia('dlogCapturasDoEditor'), /m\.motivo === 'manual'/,
+    'o selo deixou de filtrar pelo motivo do toque no FAB');
+  const selo = fatia('atualizarFabDev');
+  assert.match(selo, /const n = dlogCapturasDoEditor\(\)\.length;/,
+    'o selo voltou a contar outra coisa que não as capturas da pessoa');
+  assert.doesNotMatch(selo, /dlogMomentos\.length/,
+    'o selo voltou a contar o anel inteiro — as automáticas entram no número (2 → 4 → 5)');
+  // O aviso do desligar diz o MESMO número que o selo: "3 não baixados" com o
+  // selo mostrando 1 seria a app discordando de si mesma.
+  const nao = fatia('dlogNaoBaixados');
+  assert.match(nao, /dlogCapturasDoEditor\(\)/, 'o aviso do desligar voltou a contar as automáticas');
+  assert.match(nao, /dlogJaBaixados\.has\(m\)/, 'o aviso deixou de saber quais já foram baixadas');
+  // Baixado é MARCADO no momento; a contagem antiga mentia quando o anel girava.
+  assert.match(fatia('baixarDiagnostico'), /dlogMarcarBaixados\(\);/,
+    'baixar o relatório parou de marcar o que foi baixado — o aviso do desligar mentiria');
+  assert.doesNotMatch(semCom, /\bdlogBaixados\b/,
+    'voltou o contador de baixados — com o anel cheio ele dizia "0 não baixados" com captura nova');
+});
+
+test('o smoke de browser mede o selo com arraste e toque DE VERDADE', () => {
+  // A contagem se prova na tela: o guard acima trava a FORMA, o smoke faz a
+  // captura automática acontecer (arraste do card além do limiar) e toca no
+  // FAB. Sem ele, o selo voltar a somar as automáticas não reprovaria nada que
+  // rode num navegador — e foi num navegador (o do owner) que o 2 → 4 → 5 apareceu.
+  const SMOKE = _rf(new URL('../tools/smoke-browser.mjs', import.meta.url), 'utf8');
+  const i = SMOKE.indexOf('o SELO conta só o que VOCÊ registrou');
+  assert.ok(i !== -1, 'sumiu do smoke o bloco do selo do FAB');
+  const bloco = SMOKE.slice(i, SMOKE.indexOf('erro de JS', i));
+  assert.match(bloco, /CONTROLE — o ponto do arraste não cai no card da frente/,
+    'o bloco perdeu o controle do ponto do arraste (sem ele o arraste pode nem acontecer)');
+  assert.match(bloco, /CONTROLE — o arraste além do limiar não capturou sozinho/,
+    'o bloco perdeu o controle de que a captura automática ENTROU no anel');
+  assert.match(bloco, /s1\.txt === '1'/, 'o bloco deixou de cobrar que o primeiro toque mostra 1');
+  assert.match(bloco, /Input\.dispatchTouchEvent/, 'o bloco deixou de usar toque de verdade');
+});
+
 test('a tela é lida pelo que decide o PIXEL, não por offsetParent', () => {
   // `offsetParent` é null para `position: fixed`, e TODO modal desta app é
   // fixed — com ele, `modais` vinha sempre vazio e o FAB não capturava o
