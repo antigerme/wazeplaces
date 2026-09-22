@@ -309,6 +309,43 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   assert.match(SMOKE, /offline DESLIGADO/,
     'tem que medir o mapa com o toggle desligado — quem não marcou nada foi quem mais sofreu');
 
+  // O que o editor RECLAMOU foi "o mapa parou de carregar", e o que responde a
+  // isso não é uma <img> solta: é o MAPINHA QUE A APP DESENHA. O smoke mede os
+  // dois lugares em que o tile aparece, e carrega a CONTRAPROVA — sem ela,
+  // "desenhou" passaria por vácuo no dia em que o seletor mudar de nome, porque
+  // a asserção é `ok === n` e 0 === 0 é verdade (gotcha #28).
+  assert.match(SMOKE, /card-map-tiles img/,
+    'o smoke não mede o mapinha DO CARD — era ele que estava vazio no celular do editor');
+  assert.match(SMOKE, /mapaLbTiles/,
+    'o smoke não mede o mapa AMPLIADO, o outro lugar em que o tile aparece');
+  assert.match(SMOKE, /CONTRAPROVA/,
+    'a medida do mapa precisa de um caso que vá a ZERO, senão ela passa por vácuo');
+
+  // A ESTRADA é o teste de ACEITAÇÃO: o percurso que o recurso promete. As
+  // outras seções medem peça por peça, e as peças podem estar todas certas com
+  // o percurso quebrado — foi exatamente o que chegou aos testadores.
+  assert.match(SMOKE, /A ESTRADA/,
+    'sumiu a seção da ESTRADA — é ela que exercita o percurso inteiro (encher,'
+    + ' modo avião, triar com foto e mapa do cache, e a rede voltando pra drenar)');
+  assert.match(SMOKE, /setOffline\(true\)/,
+    'modo avião de verdade é abort MAIS setOffline — só abort deixa navigator.onLine true');
+  assert.match(SMOKE, /icons\/splash\/[a-z0-9-]+\.png/,
+    'a foto da ESTRADA tem que vir de um arquivo REAL do servidor: route.fulfill'
+    + ' NÃO popula o cache HTTP, e o cache é o mecanismo inteiro da foto offline');
+
+  // O DEPLOY é o outro modo de o mapa sumir, e ele não dá sintoma até a estrada:
+  // o `activate` apaga todo cache ≠ CACHE_NAME, e sem a isenção o mapa
+  // provisionado ia junto a cada versão nova. O guard de fonte abaixo lê a
+  // linha do `if`; o smoke faz a faxina RODAR e mede o que sobrou.
+  assert.match(SMOKE, /DEPLOY N\u00c3O APAGA O MAPA/,
+    'sumiu a se\u00e7\u00e3o do deploy — sem ela, a isen\u00e7\u00e3o do cache de tiles s\u00f3 existe no papel');
+  assert.match(SMOKE, /service-worker\.js\?deploy=/,
+    'o deploy precisa ser encenado por URL de script DIFERENTE no mesmo escopo:'
+    + ' medido, o ctx.route n\u00e3o v\u00ea o script do SW e unregister+register na mesma URL n\u00e3o reinstala');
+  assert.match(SMOKE, /waze-places-2020010101/,
+    'sumiu a ISCA — sem um cache de vers\u00e3o anterior pra faxina levar, "o mapa'
+    + ' sobreviveu" passa por v\u00e1cuo no dia em que a faxina parar de rodar');
+
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],
     'falta o script `test:offline` no package.json');

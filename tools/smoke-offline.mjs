@@ -111,6 +111,10 @@ const diz = (n, cond, det = '') => {
   if (cond) console.log(`  ✓ ${n}`);
   else { console.log(`  ✗ ${n}${det ? '  — ' + det : ''}`); falhas++; }
 };
+// Pedido SEM foto: aí o mapa é o PRIMEIRO slide e nasce visível. Com foto, quem
+// abre é a foto e o `.card-map` nasce `hidden` — medir o mapa ali daria zero
+// com a app certa, que é medir outra coisa (`mapaVemPrimeiro()` decide).
+const SO_MAPA = (i) => ({ ...PLACE(i), imageUrls: [], imageUrl: null });
 const PLACE = (i, purType = 'NEW_PLACE') => ({
   venueID: 'v' + i, updateRequestID: 'u' + i, name: 'Local ' + i, categories: ['PARK'],
   address: 'Rua ' + i, updateType: 'Novo local', updateTypeKey: 'NEW_PLACE', purType,
@@ -124,9 +128,14 @@ const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
   serviceWorkers: 'allow', locale: 'pt-BR', colorScheme: 'dark' });
 let rotaTile = 0;
-await ctx.route('**/*-tiles/live/base/**', (r) => { rotaTile++;
+// Handler NOMEADO de propósito: a contraprova da seção 1 precisa DESLIGAR o
+// tile e religá-lo, e `unroute` sem a referência derruba tudo que casa com o
+// padrão — inclusive o que as seções seguintes dependem.
+let aviao = false;   // modo avião DE VERDADE é abort + setOffline (gotcha #28)
+const servirTile = (r) => { if (aviao) return r.abort('internetdisconnected'); rotaTile++;
   return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
-    headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }); });
+    headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }); };
+await ctx.route('**/*-tiles/live/base/**', servirTile);
 await ctx.route('**/venue-image.waze.com/**', (r) => r.fulfill({ status: 200,
   contentType: 'image/png', body: PX, headers: { 'cache-control': 'public, max-age=3600' } }));
 const page = await ctx.newPage();
@@ -156,11 +165,59 @@ const montar = (pls) => page.evaluate((ps) => {
 }, pls);
 
 console.log('\n── 1. O MAPA COM O TOGGLE DESLIGADO (o defeito que foi a produção) ──');
+// DUAS camadas, e a segunda é a única que responde ao relato do owner ("o mapa
+// parou de carregar"). A primeira mede uma <img> SOLTA; a segunda mede o
+// MAPINHA QUE A APP DESENHA — que é o que sumiu da tela de quem nunca ligou o
+// offline. Medido na main de antes do conserto: 0 de 4 combinações desenhavam
+// um tile sequer, com o instrumento acusando `imgs=0 rede=0`.
 rotaTile = 0;
 const semToggle = await page.evaluate((u) => new Promise((res) => { const i = new Image();
   i.onload = () => res('CARREGOU'); i.onerror = () => res('QUEBROU'); i.src = u; }), TILE);
 diz('tile carrega normal com o SW ativo e o offline DESLIGADO', semToggle === 'CARREGOU' && rotaTile > 0,
   `${semToggle}, rota=${rotaTile}`);
+
+const mapaDoCard = () => page.evaluate(async () => {
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const card = document.querySelector('#cardStack .place-card');
+  const box = card && card.querySelector('.card-map');
+  const im = box ? [...box.querySelectorAll('.card-map-tiles img')] : [];
+  return { visivel: !!(box && !box.classList.contains('hidden')), n: im.length,
+    ok: im.filter((i) => i.naturalWidth > 0).length };
+});
+await montar([SO_MAPA(1), SO_MAPA(2)]);
+await dormir(1400);
+const mCard = await mapaDoCard();
+diz('o MAPINHA DO CARD desenha tile com o service worker no controle',
+  mCard.visivel && mCard.n > 0 && mCard.ok === mCard.n, JSON.stringify(mCard));
+
+// CONTRAPROVA — sem ela, "desenhou" passa por vácuo no dia em que o seletor
+// mudar de nome ou o mapa deixar de montar: a medida devolveria 0 de 0 e a
+// asserção acima, escrita com `ok === n`, aceitaria. Com o tile CAINDO, a
+// mesma medida tem que ir a zero DESENHADO.
+await ctx.unroute('**/*-tiles/live/base/**', servirTile);
+await ctx.route('**/*-tiles/live/base/**', (r) => r.abort());
+await montar([SO_MAPA(11), SO_MAPA(12)]);
+await dormir(1400);
+const mZero = await mapaDoCard();
+diz('CONTRAPROVA: com o tile caindo, nenhum tile fica desenhado (o instrumento enxerga)',
+  mZero.ok === 0, JSON.stringify(mZero));
+await ctx.unroute('**/*-tiles/live/base/**');
+await ctx.route('**/*-tiles/live/base/**', servirTile);
+
+console.log('\n── 1b. O MAPA AMPLIADO (o outro lugar em que o tile aparece) ──');
+await montar([SO_MAPA(13), SO_MAPA(14)]);
+await dormir(800);
+const mAmp = await page.evaluate(async () => {
+  MapaLightbox.open(AppState.currentPlace);
+  await new Promise((r) => setTimeout(r, 1200));
+  const cx = document.getElementById('mapaLbTiles');
+  const im = cx ? [...cx.querySelectorAll('img')] : [];
+  const aberto = MapaLightbox.isOpen();
+  MapaLightbox.close();
+  return { aberto, n: im.length, ok: im.filter((i) => i.naturalWidth > 0).length };
+});
+diz('o mapa AMPLIADO abre e desenha tile com o SW no controle',
+  mAmp.aberto && mAmp.n > 0 && mAmp.ok === mAmp.n, JSON.stringify(mAmp));
 
 console.log('\n── 2. A FILA SOBREVIVE (IndexedDB) ──');
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
@@ -233,7 +290,23 @@ for (let i = 0; guardado && i < 25; i++) {
 diz('o tile guardado volta do CACHE, sem tocar a rede', doCache === 'CARREGOU' && rede === 0,
   `${doCache}, rede=${rede}`);
 
+// E o MAPA CONTINUA DESENHANDO com o cache cheio. Esta é a outra metade do
+// defeito que foi à produção: lá o SW passou a interceptar o tile e a pagar com
+// um `fetch` que a CSP dele barrava — `respondWith` é PROMESSA DE RESPONDER,
+// então a imagem falhava onde sem o SW o navegador a teria carregado. Medir só
+// "o cache serve" não pega isso: o caminho que quebrou é o do tile que NÃO está
+// no cache, e com a varredura cheia ele continua existindo (outro card, outro
+// enquadramento, outro zoom).
+await montar([SO_MAPA(21), SO_MAPA(22)]);
+await dormir(1400);
+const mCheio = await mapaDoCard();
+diz('com o cache CHEIO, o mapinha do card segue desenhando (tile fora do cache não pode quebrar)',
+  mCheio.visivel && mCheio.n > 0 && mCheio.ok === mCheio.n, JSON.stringify(mCheio));
+
 console.log('\n── 5. ABRIR SEM REDE ──');
+// Remonta os 3 ANTES de gravar: as seções do mapa trocam a fila, e sem isto a
+// asserção mediria o tamanho da última montagem em vez do que ela promete.
+await montar([PLACE(1), PLACE(2), PLACE(3)]);
 await page.evaluate(() => offlineGravarFila());
 await ctx.setOffline(true);
 const off = await page.evaluate(async () => {
@@ -265,7 +338,190 @@ diz('✕ e ✓ ficam travados e o ↑ continua vivo', semFoto.rejTravado && semF
   JSON.stringify(semFoto));
 await ctx.setOffline(false);
 
-console.log('\n── 7. ESQUECER PARA a varredura em voo (privacidade) ──');
+console.log('\n── 7. A ESTRADA: marco o toggle, encho, entro no avião e volto ──');
+// É o teste de ACEITAÇÃO do recurso — a promessa que o owner pediu em palavras:
+// "sair de casa, marcar o toggle, sair tratando as solicitações e ter a mesma
+// experiência como se tivesse rede". As seções acima medem peça por peça; esta
+// mede o PERCURSO. Na main de antes do conserto ela reprova em três pontos, com
+// os sintomas exatos do relato: o enchimento nunca termina, o mapa some, e a
+// violação de CSP aparece na seção 9.
+//
+// A FOTO vem de um arquivo REAL do próprio servidor (mesma origem, logo
+// permitida pela CSP, e com Cache-Control de verdade). MEDIDO com controle:
+// `route.fulfill` NÃO popula o cache HTTP do navegador — a imagem interceptada
+// carrega na 1ª vez e QUEBRA offline na 2ª, enquanto o mesmo byte vindo de um
+// servidor de verdade volta do cache sem tocar a rede. Stub não consegue medir
+// NADA que dependa do cache, e o cache é o mecanismo inteiro da foto offline.
+//
+// Metade dos pedidos vem SEM foto de propósito: com foto o 1º slide é a foto e
+// o `.card-map` nasce `hidden`, então só os sem-foto respondem pelo mapa.
+const FOTOS_REAIS = ['/icons/splash/splash-750x1334-dark.png',
+  '/icons/splash/splash-750x1334-light.png', '/icons/splash/splash-828x1792-light.png'];
+const ESTRADA = Array.from({ length: 12 }, (_, k) => {
+  const p = PLACE(40 + k);
+  return k % 2 === 0 ? { ...p, imageUrls: [BASE + FOTOS_REAIS[k % 3]] }
+                     : { ...p, imageUrls: [], imageUrl: null };
+});
+const api = [];
+const rotaApi = (r) => { api.push(r.request().url().split('/api/')[1] + (aviao ? ' [AVIAO]' : ''));
+  if (aviao) return r.abort('internetdisconnected');
+  return r.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' }); };
+await ctx.route('**/api/*', rotaApi);
+await page.evaluate(() => {
+  // A chave é `waze_session_token`. Sem ela o `_post` sai ANTES da rede, a ação
+  // não chega a FALHAR por rede, e por isso não enfileira — o sintoma é
+  // indistinguível de a fila de saída estar quebrada (foi o que me enganou).
+  API.setSession('tok-estrada');
+  // `undoEnabled:false` SOZINHO não desliga a janela do Desfazer: `canDisableUndo()`
+  // também cobra a cota. Sem isto metade dos cliques bate em botão travado e eu
+  // mediria a trava em vez do offline (a armadilha está escrita no CLAUDE.md).
+  AppState.stats.read = 200;
+  AppState.preferences.undoEnabled = false;
+  AppState.preferences.offlineDisponivel = true;
+});
+await montar(ESTRADA);
+await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+  offlineMarcarGesto(); return offlineVarrer(); });
+await page.waitForFunction(() => offlineUltimoResultado !== null, { timeout: 120000, polling: 250 }).catch(() => {});
+const estradaEncheu = await page.evaluate(async () => {
+  const c = await caches.open('waze-places-tiles');
+  return { n: (await c.keys()).length, res: offlineUltimoResultado };
+});
+diz('encheu até o FIM (na main de antes NUNCA terminava — o "Preparando… 197 de 530")',
+  estradaEncheu.res === 'pronto' && estradaEncheu.n > 0, JSON.stringify(estradaEncheu));
+
+aviao = true; await ctx.setOffline(true);
+const tileAntes = rotaTile;
+const naEstrada = [];
+for (let i = 0; i < 6; i++) {
+  await dormir(600);
+  naEstrada.push(await page.evaluate(async () => {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const card = document.querySelector('#cardStack .place-card');
+    const foto = card && card.querySelector('.card-image');
+    // `.card-image` existe SEMPRE no template — quem diz se há foto é o src.
+    const src = foto ? String(foto.getAttribute('src') || '') : '';
+    const box = card && card.querySelector('.card-map');
+    const tl = box ? [...box.querySelectorAll('.card-map-tiles img')] : [];
+    const rej = card && card.querySelector('.card-btn-reject');
+    return { temFoto: !!src && !foto.classList.contains('hidden'),
+      fotoOk: !!(foto && foto.naturalWidth > 0), tiles: tl.length,
+      tilesOk: tl.filter((x) => x.naturalWidth > 0).length, rejVivo: !!(rej && !rej.disabled) };
+  }));
+  const antes = await page.evaluate(() => AppState.queue.length);
+  await page.evaluate(() => { const b = document.querySelector('#cardStack .place-card .card-btn-reject');
+    if (b && !b.disabled) b.click(); });
+  // espera o RESULTADO (a fila andar), nunca um prazo: prazo mede o runner
+  for (let j = 0; j < 40; j++) { if (await page.evaluate(() => AppState.queue.length) < antes) break; await dormir(100); }
+}
+const comFoto = naEstrada.filter((v) => v.temFoto);
+const soMapa = naEstrada.filter((v) => !v.temFoto);
+diz(`as fotos guardadas abriram SEM REDE (${comFoto.filter((v) => v.fotoOk).length}/${comFoto.length})`,
+  comFoto.length > 0 && comFoto.every((v) => v.fotoOk), JSON.stringify(naEstrada));
+diz(`os mapas guardados desenharam SEM REDE (${soMapa.filter((v) => v.tilesOk > 0).length}/${soMapa.length})`,
+  soMapa.length > 0 && soMapa.every((v) => v.tilesOk > 0), JSON.stringify(soMapa.map((v) => v.tilesOk)));
+diz('nenhuma requisição de tile saiu no avião — tudo veio do cache', rotaTile === tileAntes,
+  `+${rotaTile - tileAntes}`);
+diz('o ✕ ficou vivo nos 6 cards (nada ficou indecidível)', naEstrada.every((v) => v.rejVivo),
+  JSON.stringify(naEstrada.map((v) => v.rejVivo)));
+const naFila = await page.evaluate(() => { try {
+  return JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length; } catch (e) { return -1; } });
+diz('as 6 ações viraram FILA DE SAÍDA — nada se perdeu', naFila === 6, 'fila=' + naFila);
+
+aviao = false; await ctx.setOffline(false);
+await page.evaluate(() => window.dispatchEvent(new Event('online')));
+await page.waitForFunction(() => { try {
+  return JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0; } catch (e) { return false; } },
+  { timeout: 60000, polling: 250 }).catch(() => {});
+const depoisDaEstrada = await page.evaluate(() => ({
+  fila: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length,
+  rej: AppState.stats.rejected }));
+const saiuMesmo = api.filter((u) => /validar-place/.test(u) && !/AVIAO/.test(u)).length;
+diz('a fila de saída ESVAZIOU quando a rede voltou', depoisDaEstrada.fila === 0, JSON.stringify(depoisDaEstrada));
+diz(`as 6 saíram de verdade PELA REDE (${saiuMesmo})`, saiuMesmo === 6, JSON.stringify(api.slice(-3)));
+diz('o placar não contou duas vezes', depoisDaEstrada.rej === 6, 'rejeitados=' + depoisDaEstrada.rej);
+await ctx.unroute('**/api/*', rotaApi);
+await page.evaluate(() => { API.setSession(null); });
+
+console.log('\n── 8. O DEPLOY NÃO APAGA O MAPA PROVISIONADO ──');
+// O `activate` apaga TODO cache ≠ CACHE_NAME. Sem a isenção do TILES_CACHE,
+// cada deploy levaria junto o mapa que o editor provisionou — e ele só
+// descobriria na estrada, sem sinal pra refazer. O guard de fonte lê a linha
+// do `if`; aqui a FAXINA RODA DE VERDADE, no service worker de verdade.
+//
+// Como o deploy é encenado, e por que não de outro jeito (os três MEDIDOS):
+//   • reescrever o `service-worker.js` pelo `ctx.route` — IMPOSSÍVEL: o route
+//     não vê o script do SW (0 requisições de 0), porque quem o busca é o
+//     NAVEGADOR, não a página;
+//   • `unregister()` + `register()` na MESMA URL — não reinstala nada: volta
+//     em 9ms e a isca continua viva 20s depois;
+//   • `register('/service-worker.js?deploy=2')` — URL de script diferente no
+//     MESMO escopo, então o navegador INSTALA uma versão nova. Ela fica em
+//     `waiting` (a página segue controlada pela antiga) até alguém mandar
+//     `SKIP_WAITING` — que é exatamente o que o `js/sw-register.js` faz num
+//     deploy real. Aqui o teste manda, porque o ouvinte dele está pendurado
+//     na registração que a app criou no `load`, não na que o teste provocou.
+//
+// A ISCA é um cache no nome de uma versão anterior: é o que a faxina precisa
+// levar, ao lado do de tiles que ela precisa poupar. E ela é metade do teste —
+// sem o controle, "o mapa sobreviveu" passa por vácuo no dia em que a faxina
+// parar de rodar. Passou mesmo, na primeira versão desta seção (gotcha #28).
+const ISCA = 'waze-places-2020010101';
+const antesDoDeploy = await page.evaluate(async (isca) => {
+  const d = await caches.open(isca);
+  await d.put(new Request('/manifest.json'), new Response('isca'));
+  const c = await caches.open('waze-places-tiles');
+  return { tiles: (await c.keys()).length, nomes: await caches.keys() };
+}, ISCA);
+diz('antes do deploy: há tile guardado E a isca de versão anterior no lugar',
+  antesDoDeploy.tiles > 0 && antesDoDeploy.nomes.includes(ISCA), JSON.stringify(antesDoDeploy));
+
+await page.evaluate(async () => {
+  const reg = await navigator.serviceWorker.register('/service-worker.js?deploy=2');
+  const pular = (w) => {
+    if (!w) return;
+    if (w.state === 'installed') { w.postMessage({ type: 'SKIP_WAITING' }); return; }
+    w.addEventListener('statechange', () => {
+      if (w.state === 'installed') w.postMessage({ type: 'SKIP_WAITING' });
+    });
+  };
+  pular(reg.waiting); pular(reg.installing);
+  reg.addEventListener('updatefound', () => pular(reg.installing));
+}).catch(() => { /* a troca de controller derruba o evaluate; o que vale é o cache */ });
+// A troca de controller RECARREGA a página (o auto-update da app fazendo o que
+// promete), e isso ABORTA um `waitForFunction` no meio: ele volta sem erro e a
+// medição acontece ANTES da faxina — foi o que fez esta seção reprovar três
+// vezes com o código certo. A espera tem que sobreviver à navegação, então é
+// um laço que tolera o contexto morrer e para por SINAL POSITIVO (a isca
+// sumiu), com teto.
+let depoisDoDeploy = { nomes: [], tiles: -1 };
+for (let i = 0; i < 75; i++) {
+  const r = await page.evaluate(async () => {
+    const nomes = await caches.keys();
+    const c = await caches.open('waze-places-tiles');
+    return { nomes, tiles: (await c.keys()).length };
+  }).catch(() => null);
+  if (r) { depoisDoDeploy = r; if (!r.nomes.includes(ISCA)) break; }
+  await dormir(400);
+}
+diz('a FAXINA RODOU: a isca da versão anterior foi embora (sem isto o resto passa por vácuo)',
+  depoisDoDeploy.nomes.length > 0 && !depoisDoDeploy.nomes.includes(ISCA),
+  JSON.stringify(depoisDoDeploy));
+diz('e o cache do MAPA sobreviveu INTEIRO ao deploy',
+  depoisDoDeploy.tiles === antesDoDeploy.tiles && depoisDoDeploy.nomes.includes('waze-places-tiles'),
+  `antes=${antesDoDeploy.tiles} depois=${depoisDoDeploy.tiles}`);
+
+// A troca de controller RECARREGA a página (é o auto-update da app fazendo o
+// que promete). Espere ela assentar e devolva o estado que a seção seguinte
+// precisa — sem isto o `offlineVarrer()` de lá roda com fila vazia e a
+// asserção "o cache ficou vazio" passa por vácuo.
+await page.waitForLoadState('load').catch(() => {});
+await page.waitForFunction(() => typeof offlineVarrer === 'function',
+  { timeout: 20000, polling: 200 }).catch(() => {});
+await page.evaluate(() => { AppState.preferences.offlineDisponivel = true; }).catch(() => {});
+await montar([PLACE(1), PLACE(2), PLACE(3)]);
+
+console.log('\n── 9. ESQUECER PARA a varredura em voo (privacidade) ──');
 // Enche, e ESQUECE no meio: o download já a caminho não pode pousar depois.
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   AppState.preferences.offlineDisponivel = true; offlineMarcarGesto(); offlineVarrer(); });
@@ -280,7 +536,7 @@ const depois = await page.evaluate(async () => {
 diz('depois de esquecer, o cache de tiles fica VAZIO', depois.cache === 0, JSON.stringify(depois));
 diz('a fila guardada some e a janela zera', depois.fila === false && depois.janela === null, JSON.stringify(depois));
 
-console.log('\n── 8. NADA DE ERRO, NADA DE CSP ──');
+console.log('\n── 10. NADA DE ERRO, NADA DE CSP ──');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, errosJs[0] || '');
 diz('nenhuma violação de CSP', violacoes.length === 0, violacoes[0] || '');
 
@@ -290,7 +546,8 @@ if (falhas) {
   console.log(`\n✗ smoke do offline: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log('\n✓ smoke do offline: 8 seções com o service worker LIGADO — mapa intacto com o'
-  + ' toggle desligado, fila em IndexedDB, sufixo da foto como contrato (app E card),'
-  + ' varredura enchendo e servindo do cache sem rede, abertura offline, card de foto'
-  + ' travado com o ↑ vivo, e esquecer PARANDO o download em voo');
+console.log('\n✓ smoke do offline: 11 seções com o service worker LIGADO — o MAPINHA DO CARD e o'
+  + ' MAPA AMPLIADO desenhando tile (com contraprova que vai a zero), mapa intacto com o'
+  + ' toggle desligado e com o cache cheio, fila em IndexedDB, sufixo da foto como contrato'
+  + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
+  + ' card de foto travado com o ↑ vivo, A ESTRADA inteira (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), e esquecer PARANDO o download em voo');
