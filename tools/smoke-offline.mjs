@@ -42,8 +42,21 @@ for (const tentar of [
   () => '/opt/node22/lib/node_modules/playwright/index.mjs',
   () => 'playwright',
 ]) {
-  try { ({ chromium } = await import(tentar())); if (chromium) break; }
-  catch (e) { erros.push(String(e.message || e).slice(0, 90)); }
+  let alvo = null;
+  try { alvo = tentar(); } catch (e) { erros.push(String(e.message || e).slice(0, 90)); continue; }
+  let mod = null;
+  try { mod = await import(alvo); }
+  catch (e) { erros.push(String(e.message || e).slice(0, 90)); continue; }
+  // O pacote PUBLICADO é CJS (`index.js`): `import()` por CAMINHO devolve um
+  // namespace só com `default`, e `mod.chromium` vem UNDEFINED. Sem tratar
+  // isso, a primeira tentativa — a que existe justamente pra honrar o
+  // playwright FIXADO no repo (o do CI) — falhava CALADA e o laço caía no
+  // global do sandbox. Medido em 2026-09-22: por caminho as chaves são
+  // `default`; por especificador BARE vêm os nomeados. Era por isso que
+  // "não reproduz aqui" não queria dizer nada — aqui rodava 1.56 e o CI 1.49.
+  const pw = mod && mod.chromium ? mod : (mod && mod.default) || {};
+  if (pw.chromium) { chromium = pw.chromium; break; }
+  erros.push(`${alvo}: importou sem 'chromium' (chaves: ${Object.keys(mod || {}).join(', ')})`);
 }
 if (!chromium) {
   console.error('playwright não encontrado:\n  - ' + erros.join('\n  - '));

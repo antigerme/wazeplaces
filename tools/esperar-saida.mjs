@@ -93,3 +93,22 @@ export async function esperarNaPagina(page, fn, tetoMs = 20000, passoMs = 200) {
     await new Promise((r) => setTimeout(r, passoMs));
   }
 }
+
+/**
+ * A mesma espera, mas que EXPLODE em vez de voltar calada.
+ *
+ * `esperarNaPagina` devolve `{ok:false}` no estouro, e trocar por ela uma
+ * espera que hoje LANÇA rebaixa uma falha alta a uma silenciosa — o gotcha #62
+ * dentro do próprio conserto. Onde o smoke quer parar, é esta que se usa, e a
+ * mensagem diz por quem se esperava.
+ *
+ * @param {import('playwright').Page} page
+ * @param {() => boolean} fn
+ * @param {string} oQue   aparece na mensagem do erro
+ * @param {number} tetoMs
+ */
+export async function esperarOuExplodir(page, fn, oQue, tetoMs = 15000) {
+  const r = await esperarNaPagina(page, fn, tetoMs);
+  if (!r.ok) throw new Error(`a espera por ${oQue} estourou (${tetoMs}ms) — a página não chegou no estado esperado`);
+  return r;
+}
