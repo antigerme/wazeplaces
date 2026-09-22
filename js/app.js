@@ -1161,8 +1161,11 @@ function setupModalListeners() {
     $('prefOfflineDisponivel')?.addEventListener('change', (e) => {
         AppState.preferences.offlineDisponivel = e.target.checked;
         savePreferences();
+        // Zera ANTES dos dois ramos: alternar o toggle apaga o resultado da
+        // varredura anterior, senão religar mostraria o "parcial" de antes.
+        offlineUltimoResultado = null;
         if (e.target.checked) {
-            offlineMarcarGesto();       // marcar JA e o gesto: nao dorme
+            offlineMarcarGesto();       // marcar JÁ é o gesto: não dorme
             offlineVarrer();            // enche agora, com o custo na tela
         } else {
             offlineEsquecer();          // desligou: some o que foi guardado
@@ -9712,6 +9715,25 @@ let offlineUltimoGesto = Date.now();
 // OFFLINE faria o card pedir uma URL que ninguém aqueceu e a foto sumiria com
 // a cópia boa parada no cache, a um sufixo de distância.
 let offlineJanelaServida = null;
+// Como a ÚLTIMA varredura terminou: 'pronto' | 'parcial' | null (nunca correu).
+// Sem isto a linha congelava em "Preparando… 197 de 530" PARA SEMPRE quando a
+// varredura desistia — o relato do owner. A varredura tinha ACABADO; quem
+// mentia era a tela, porque o único redesenho acontecia com `offlineVarrendo`
+// ainda true e nada redesenhava depois que ele virava false.
+let offlineUltimoResultado = null;
+// ÉPOCA do offline, no mesmo espírito do `fetchEpoch` da fila. `offlineEsquecer`
+// a incrementa, e a varredura desiste se ela mudou DURANTE um `await`.
+//
+// Sem isto existe uma corrida REAL e com consequência de privacidade: o
+// worker checa a preferência no topo do laço, mas o download já a caminho
+// pousa DEPOIS do apagamento e faz `cache.put` num cache que acabou de ser
+// deletado — recriando-o. O editor pediu pra esquecer e dado de mapa de
+// terceiro volta a ser gravado. MEDIDO: `offlineEsquecer()` deixava 1 entrada
+// no cache e a janela servida com valor.
+//
+// É a mesma regra que a fila de saída já tinha escrita: "sair no meio também
+// PARA o laço".
+let offlineEpoca = 0;
 
 function offlineLigado() {
     return AppState.preferences.offlineDisponivel === true;
@@ -9776,7 +9798,9 @@ async function offlineLerFila() {
 }
 
 async function offlineEsquecer() {
+    offlineEpoca++;                 // invalida qualquer varredura em voo
     offlineJanelaServida = null;
+    offlineUltimoResultado = null;
     try { indexedDB.deleteDatabase(OFFLINE_DB); } catch (e) {}
     try { if (window.caches) await caches.delete(OFFLINE_TILES_CACHE); } catch (e) {}
 }
@@ -9812,10 +9836,14 @@ function offlineBaixar(u, tile) {
             i.src = u;
         });
     }
+    const epoca = offlineEpoca;
     return (async () => {
         try {
             const resp = await fetch(u, { mode: 'cors' });
             if (!resp.ok) return false;
+            // Última trava antes de ESCREVER: se esqueceram durante o download,
+            // gravar aqui recria o cache que o "Sair" acabou de apagar.
+            if (epoca !== offlineEpoca) return false;
             const c = await caches.open(OFFLINE_TILES_CACHE);
             await c.put(u, resp);
             return true;
@@ -9836,6 +9864,7 @@ async function offlineVarrer() {
     offlineVarrendo = true;
     offlinePedidaDeNovo = false;
     const janela = Math.floor(Date.now() / OFFLINE_CICLO_MS);
+    const epoca = offlineEpoca;
     try {
         await offlineGravarFila();
         const pend = offlineItensDaFila(janela);
@@ -9843,9 +9872,13 @@ async function offlineVarrer() {
         let falhas = 0;
         const trabalhar = async () => {
             while (pend.length) {
+                if (epoca !== offlineEpoca) return;   // esqueceram no meio
                 if (!offlineLigado() || navigator.onLine === false) return;
                 const it = pend.shift();
                 const ok = await offlineBaixar(it.u, it.tile);
+                // DEPOIS do await também: é aqui que a corrida mora — o
+                // download pousa e o `cache.put` recriaria o que foi apagado.
+                if (epoca !== offlineEpoca) return;
                 if (!ok) {
                     // volta pro FIM: buraco de sinal não pode perder o item
                     falhas++;
@@ -9859,15 +9892,27 @@ async function offlineVarrer() {
         await Promise.all(Array.from({ length: OFFLINE_CONCORRENCIA }, trabalhar));
         // Só AGORA a janela vira: enquanto a varredura não terminou, o card
         // segue pedindo o sufixo anterior, cuja cópia está viva no cache.
+        if (epoca !== offlineEpoca) return;   // esqueceram: não grava resultado
         if (!pend.length) {
             offlineJanelaServida = janela;
+            offlineUltimoResultado = 'pronto';
+            // Avisa o service worker que há tile novo no cache. Ele só responde
+            // pelo que CONHECE (lista síncrona), e sem este aviso só saberia no
+            // próximo `activate` — a sombra de sinal chegaria antes.
+            try { navigator.serviceWorker?.controller?.postMessage({ type: 'TILES_GUARDADOS' }); } catch (e) {}
             dfato('offline.pronto', { n: AppState.queue.length, itens: total });
+        } else {
+            offlineUltimoResultado = 'parcial';
+            dfato('offline.parcial', { feitos: total - pend.length, total, falhas });
         }
-        atualizarLinhaDoOffline(total - pend.length, total);
     } catch (e) {
+        offlineUltimoResultado = 'parcial';
         dfato('offline.erro', { e: String((e && e.message) || e).slice(0, 60) });
     } finally {
         offlineVarrendo = false;
+        // DEPOIS de baixar a bandeira, senão a linha fica no "Preparando…" de
+        // uma varredura que já acabou.
+        atualizarLinhaDoOffline(0, 0);
         if (offlinePedidaDeNovo) { offlinePedidaDeNovo = false; return offlineVarrer(); }
     }
 }
@@ -9894,6 +9939,13 @@ function atualizarLinhaDoOffline(feitos, total) {
     if (offlineVarrendo && total) {
         el.innerHTML = `<span class="text-cyan-800 dark:text-cyan-300">${escapeHtml(
             t('prefs.offline.enchendo', { feitos, total }))}</span>`;
+        return;
+    }
+    if (offlineUltimoResultado === 'parcial') {
+        // Nem "Pronto" (seria mentira) nem "Preparando…" (já acabou). O próximo
+        // gatilho retoma sozinho — a janela servida não avançou.
+        el.innerHTML = `<span class="text-amber-800 dark:text-amber-300 font-semibold">${escapeHtml(
+            t('prefs.offline.parcialA'))}</span> ` + escapeHtml(t('prefs.offline.parcialB'));
         return;
     }
     const n = AppState.queue.length;

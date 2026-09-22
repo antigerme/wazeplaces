@@ -129,6 +129,12 @@ jobs:
           # que exercita o WebRTC — e WebRTC não tem versão sem browser. Reusa o
           # chromium já instalado no passo acima.
           npm run test:presenca
+          # O offline LIGA o service worker — a camada que nenhum outro teste
+          # cobria. Dois defeitos chegaram aos testadores por causa disso: o
+          # tile barrado pela CSP (a varredura travava) e o SW prometendo
+          # responder por tile que não tinha (o MAPA sumiu pra TODO MUNDO).
+          # Os dois reprovam aqui hoje, provado por sabotagem.
+          npm run test:offline
 
       - name: Boot smoke do adaptador Node
         run: |

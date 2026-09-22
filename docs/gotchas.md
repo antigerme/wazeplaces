@@ -516,3 +516,17 @@ Havia como fazer a sabotagem falhar: bastava afirmar que `'5abc'` passa. Mas iss
 **O teste foi REMOVIDO, com o motivo escrito no lugar dele.** Remendar uma asserção até ela reprovar a sabotagem é como se acerta o alvo depois de atirar; o que se pergunta é se a coisa que ela guarda existe.
 
 **A regra que fecha os dois:** toda guarda que lê fonte precisa passar por duas perguntas — *ela reprova a sabotagem?* e *ela continua passando se o código certo mudar de forma?* Uma só das duas não basta, e é sempre a outra que morde.
+
+## 67.1. **O removedor de comentário pode ser o defeito** (v2026.09.22-01).
+
+Escrevendo o guard que exige o host do tile no `connect-src` das três cópias da CSP, eu caí em **três armadilhas na mesma linha**, e cada conserto revelou a seguinte.
+
+**Primeira — o guard leu o comentário.** Os três arquivos CITAM `connect-src` num comentário que explica por que ela é nominal. Casar o nome solto lia a citação, e o guard acusava o `_headers` de não ter o host que estava lá. É o #67 clássico: quanto melhor o comentário, mais o guard erra.
+
+**Segunda — a classe excluiu o apóstrofo que está dentro do que eu procurava.** Escrevi `[^;'"]*` para parar no fim da diretiva, e o `'` de `'self'` é o PRIMEIRO caractere depois do espaço. O casamento devolvia `"connect-src "` e a asserção reprovava código **certo**.
+
+**Terceira, e é a nova — a limpeza de comentário engoliu o arquivo.** Apliquei o conserto canônico do #67 (tirar `/* … */` antes de casar) e aí o `server/node.mjs` passou a não casar **nada**. A causa: a própria CSP contém `img-src … https://*.waze.com`, e aquele `/*` **abre um bloco de comentário** para a regex, que então procura o próximo `*/` e apaga tudo até lá — inclusive a diretiva que eu queria medir.
+
+**A lição não é "limpar melhor".** É que decidir o que é comentário por regex é adivinhação, e adivinhação erra justamente em conteúdo que se parece com sintaxe. A saída foi ancorar na **FORMA do que se procura**: só a diretiva de verdade tem `'self'` logo depois do nome; o comentário nunca tem.
+
+**Como isso foi distinguido:** os três sintomas eram idênticos — "o guard reprova um arquivo que está correto". Só imprimindo **o que a regex de fato casou** em cada arquivo é que se separaram três causas diferentes que se apresentavam como uma. Ler o resultado do instrumento, e não só o veredito dele, é o que fecha esta classe.

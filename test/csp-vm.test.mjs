@@ -60,6 +60,38 @@ test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
   });
 });
 
+// A CSP QUE SAI COM O SCRIPT DO SERVICE WORKER GOVERNA O `fetch` DELE.
+//
+// Isto não é dedução: foi MEDIDO com controle, em duas origens locais, mudando
+// só o `connect-src` — sem o host, o `fetch` de dentro do worker morre em
+// "Failed to fetch"; com ele, volta 200. O `<meta>` do index NÃO alcança o
+// worker, então quem manda ali é exclusivamente este cabeçalho.
+//
+// É a causa raiz do mapa ter sumido da app de todo editor em v2026.09.21-08: o
+// worker interceptava o tile, pagava com `fetch(event.request)`, a CSP dele
+// barrava, e `respondWith` é PROMESSA DE RESPONDER — a imagem falhava onde sem
+// o service worker o navegador a teria carregado.
+//
+// O guard existe porque a dependência é invisível pelos dois lados: quem mexe
+// na CSP não pensa no worker, e quem mexe no worker não pensa na CSP.
+test('o script do service worker sai COM a CSP, e ela deixa o worker buscar tile', async () => {
+  await comServidor(8474, async () => {
+    const r = await fetch('http://127.0.0.1:8474/service-worker.js');
+    assert.equal(r.status, 200, 'o service-worker.js não respondeu 200');
+    const csp = r.headers.get('content-security-policy');
+    assert.ok(csp, 'o service-worker.js saiu SEM Content-Security-Policy — o <meta> não alcança o worker,'
+      + ' então a política que governa o fetch dele deixaria de existir sem ninguém perceber');
+    const conn = (csp.match(/connect-src ([^;]*)/) || [])[1] || '';
+    assert.ok(/https:\/\/www\.waze\.com(\s|$)/.test(conn),
+      'o connect-src da resposta do service worker não tem https://www.waze.com — o fetch do worker'
+      + ' pelo tile é barrado e o MAPA SOME pra todo editor, inclusive quem nunca ligou o offline.'
+      + ' connect-src = ' + conn);
+    // E o worker tem que poder ser registrado: `worker-src` governa isso.
+    assert.match(csp, /worker-src [^;]*'self'/,
+      'a CSP não permite registrar worker de mesma origem — o service worker nem instala');
+  });
+});
+
 // A CSP não é o único cabeçalho que o `_headers` declara e o Node precisa
 // repetir. HSTS ficou pra trás quando a CSP foi portada — mesma família, mesmo
 // arquivo, correção incompleta — e passou despercebido porque o teste olhava um

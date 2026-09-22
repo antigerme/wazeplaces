@@ -180,3 +180,216 @@ test('js/min/ está em dia com o fonte (gotcha #22)', () => {
     assert.ok(MIN.includes(nome), `${nome} não está em js/min/app.js — falta rodar npm run js`);
   }
 });
+
+// ── O DEFEITO QUE FOI PRA PRODUÇÃO (v2026.09.21-08), e o guard que faltava ──
+//
+// A varredura baixava tile com `fetch(url)`, e a CSP escolhe a diretiva pelo
+// DESTINO da requisição: `fetch` cru tem destino '' → `connect-src`; `<img>`
+// tem destino 'image' → `img-src`. O `img-src` já permitia `https://*.waze.com`
+// (a foto passava), o `connect-src` é NOMINAL e não tinha o host do tile —
+// então TODO tile era bloqueado ANTES da rede, sem erro no console da app.
+//
+// Sintoma no aparelho do owner: "Preparando… 197 de 530" parado pra sempre.
+// Os 197 eram as fotos; os tiles nunca entraram. REPRODUZIDO num servidor local
+// com a mesma forma de CSP (fetch BLOQUEADO / <img> OK) e o conserto provado
+// no mesmo instrumento. O cache `waze-places-tiles` do diagnóstico dele: ZERO.
+//
+// Nenhum teste de fonte enxergaria isto — CSP é comportamento de navegador. O
+// guard abaixo cobre a REGRESSÃO; quem cobre a CLASSE é o bloco do smoke.
+test('o host do tile está no connect-src das TRÊS cópias da CSP', () => {
+  const MAPA = readFileSync(new URL('../js/mapa.js', import.meta.url), 'utf8');
+  const HEADERS = readFileSync(new URL('../_headers', import.meta.url), 'utf8');
+  const NODE = readFileSync(new URL('../server/node.mjs', import.meta.url), 'utf8');
+  // o host sai do PRÓPRIO mapa.js: copiar a string aqui é como elas divergem
+  const m = semComentarios(MAPA).match(/https:\/\/([a-z0-9.-]+)\/\$\{[^}]*\}-tiles/);
+  assert.ok(m, 'não achei o host do tile no mapa.js — o guard cegou');
+  const host = m[1];
+  for (const [nome, cru] of [['_headers', HEADERS], ['index.src.html', HTML], ['server/node.mjs', NODE]]) {
+    // TRÊS armadilhas numa linha só, e as três me pegaram escrevendo este guard:
+    //  1. os três arquivos CITAM `connect-src` num comentário que explica por
+    //     que ele é nominal — casar o nome solto lia a citação (gotcha #67);
+    //  2. excluir o apóstrofo da classe parava o casamento no `'self'`, e o
+    //     guard acusava arquivo que estava CERTO;
+    //  3. e tirar comentário com `/\*…\*/` é pior ainda aqui: o próprio CSP
+    //     tem `https://*.waze.com`, cujo `/*` abre um "bloco" que engole o
+    //     resto do arquivo. O removedor de comentário virou o defeito.
+    // A saída é ancorar na FORMA da diretiva: só a de verdade tem `'self'`.
+    const cs = cru.match(/connect-src 'self'[^;"`]*/);
+    assert.ok(cs, `${nome}: sem connect-src`);
+    assert.ok(cs[0].includes(host),
+      `${nome}: connect-src não permite ${host} — a varredura do offline não consegue`
+      + ' baixar tile nenhum, e o bloqueio é ANTES da rede (sem erro visível)');
+  }
+});
+
+test('a linha não fica presa em "Preparando…" quando a varredura desiste', () => {
+  const corpo = fatiar('offlineVarrer');
+  const i = corpo.indexOf('offlineVarrendo = false');
+  assert.ok(i > 0, 'a bandeira precisa ser baixada no finally');
+  const depois = corpo.slice(i, i + 220);
+  assert.match(depois, /atualizarLinhaDoOffline\(/,
+    'o redesenho tem que vir DEPOIS de baixar a bandeira; antes dela a linha'
+    + ' mostra "Preparando…" de uma varredura que já acabou — e congela ali');
+  // DOIS casos distintos, e a asserção precisa distinguir: a varredura que
+  // termina com fila sobrando (o `else`) e a que morre de exceção (o `catch`).
+  // Cobrar só a string casava com QUALQUER um dos dois, então tirar um deixava
+  // o guard verde — ele foi sabotado, passou limpo, e virou isto.
+  assert.match(corpo, /\}\s*else\s*\{[^}]*offlineUltimoResultado = 'parcial'/,
+    'a varredura que acaba com fila sobrando tem que se declarar parcial');
+  assert.match(corpo, /catch \([^)]*\) \{[^}]*offlineUltimoResultado = 'parcial'/,
+    'a que morre de exceção também — senão a linha mentiria "Pronto" depois de um erro');
+});
+
+test('o estado parcial existe nas quatro línguas e não diz "Pronto"', () => {
+  for (const k of ['prefs.offline.parcialA', 'prefs.offline.parcialB']) {
+    const n = (I18N.match(new RegExp("'" + k.replace(/\./g, '\\.') + "':", 'g')) || []).length;
+    assert.equal(n, 4, `${k} aparece ${n}× — tem que ser 4`);
+  }
+  const corpo = fatiar('atualizarLinhaDoOffline');
+  const iPar = corpo.indexOf("offlineUltimoResultado === 'parcial'");
+  const iPronto = corpo.indexOf("prefs.offline.prontoA");
+  assert.ok(iPar > 0 && iPronto > iPar,
+    'o ramo do parcial tem que vir ANTES do de pronto, senão ele nunca é alcançado');
+});
+
+// ── O DEFEITO QUE QUEBROU O MAPA DE TODO MUNDO ────────────────────────────
+//
+// O SW passou a interceptar o tile e a responder `hit || fetch(...)`.
+// `respondWith` é uma PROMESSA DE RESPONDER: com o fetch falhando (ali, barrado
+// pela CSP), a imagem falhava — enquanto SEM o service worker o navegador a
+// teria carregado normalmente. O mapa sumiu inclusive pra quem NUNCA ligou o
+// offline, que é o oposto do que o recurso promete.
+//
+// A invariante: a interceptação é ESTRITAMENTE ADITIVA. Sem entrada no cache,
+// o SW não responde e o navegador faz o que sempre fez.
+test('o SW só responde pelo tile que JÁ está guardado (nunca promete rede)', () => {
+  const i = SW_SEM.indexOf('url.origin !== self.location.origin');
+  const bloco = SW_SEM.slice(i, i + 900);
+  assert.match(bloco, /tilesGuardados\.has\(/,
+    'a decisão de responder tem que consultar a lista SÍNCRONA do que está guardado');
+  // e o respondWith tem que estar DENTRO desse if, não antes dele
+  const iHas = bloco.indexOf('tilesGuardados.has(');
+  const iResp = bloco.indexOf('event.respondWith');
+  assert.ok(iHas > 0 && iResp > iHas,
+    'o `respondWith` tem que vir DEPOIS da checagem — senão o SW promete responder'
+    + ' por tile que ele não tem, e a imagem quebra quando a rede falha');
+});
+
+test('a lista de tiles guardados é hidratada e se mantém viva', () => {
+  assert.match(SW_SEM, /async function hidratarTiles/);
+  assert.match(SW_SEM, /hidratarTiles\(\)[\s\S]{0,60}clients\.claim/,
+    'tem que hidratar no activate, senão o SW acorda sem saber o que tem');
+  assert.match(SW_SEM, /TILES_GUARDADOS[\s\S]{0,140}hidratarTiles\(\)/,
+    'e re-hidratar quando a app avisa, senão só saberia no próximo activate');
+  assert.match(APP_SEM, /postMessage\(\{ type: 'TILES_GUARDADOS' \}\)/,
+    'a app precisa avisar o SW depois de guardar');
+});
+
+// ── O BURACO ESTRUTURAL: nenhum teste ligava o service worker ─────────────
+//
+// Os DOIS defeitos de produção passaram pela mesma razão: o smoke tinha 47
+// contextos com `serviceWorkers: 'block'` e ZERO com 'allow'. O SW nunca foi
+// exercitado, então quebrá-lo não reprovava nada.
+//
+// Este guard é META de propósito: ele não testa a app, testa se a COBERTURA
+// existe. Sem ele, o próximo refactor do smoke pode remover a única cobertura
+// de SW e ninguém perceberia — que é exatamente como o buraco nasceu.
+test('existe cobertura de service worker E ela roda no CI', () => {
+  const SMOKE = readFileSync(new URL('../tools/smoke-offline.mjs', import.meta.url), 'utf8');
+  const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const CI = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+
+  assert.match(SMOKE, /serviceWorkers:\s*'allow'/,
+    'o smoke do offline tem que LIGAR o service worker — foi com ele bloqueado em'
+    + ' 47 contextos e ligado em zero que o mapa quebrou pra todo mundo sem nada reprovar');
+  assert.match(SMOKE, /-tiles\/live\/base/, 'e exercitar o TILE, que é o que o SW intercepta');
+  // Ancorado na ESTRUTURA, não na grafia: o que importa é esperar o SW ASSUMIR
+  // por SINAL POSITIVO (`navigator.serviceWorker.controller`) e por um poll do
+  // lado do Node, nunca por relógio. A versão anterior deste guard casava a
+  // string `controller !== null` e reprovou código certo quando a espera trocou
+  // de forma — gotcha #67 dentro do guard escrito pra evitar o #62.
+  assert.match(SMOKE, /esperarNaPagina\([\s\S]{0,80}?serviceWorker[\s\S]{0,40}?controller/,
+    'a espera pelo SW ASSUMIR tem que ser sinal POSITIVO pollado do Node (gotcha #62)');
+  // o caso que mais importa: o mapa com o offline DESLIGADO
+  assert.match(SMOKE, /offline DESLIGADO/,
+    'tem que medir o mapa com o toggle desligado — quem não marcou nada foi quem mais sofreu');
+
+  // O que o editor RECLAMOU foi "o mapa parou de carregar", e o que responde a
+  // isso não é uma <img> solta: é o MAPINHA QUE A APP DESENHA. O smoke mede os
+  // dois lugares em que o tile aparece, e carrega a CONTRAPROVA — sem ela,
+  // "desenhou" passaria por vácuo no dia em que o seletor mudar de nome, porque
+  // a asserção é `ok === n` e 0 === 0 é verdade (gotcha #28).
+  assert.match(SMOKE, /card-map-tiles img/,
+    'o smoke não mede o mapinha DO CARD — era ele que estava vazio no celular do editor');
+  assert.match(SMOKE, /mapaLbTiles/,
+    'o smoke não mede o mapa AMPLIADO, o outro lugar em que o tile aparece');
+  assert.match(SMOKE, /CONTRAPROVA/,
+    'a medida do mapa precisa de um caso que vá a ZERO, senão ela passa por vácuo');
+
+  // A ESTRADA é o teste de ACEITAÇÃO: o percurso que o recurso promete. As
+  // outras seções medem peça por peça, e as peças podem estar todas certas com
+  // o percurso quebrado — foi exatamente o que chegou aos testadores.
+  assert.match(SMOKE, /A ESTRADA/,
+    'sumiu a seção da ESTRADA — é ela que exercita o percurso inteiro (encher,'
+    + ' modo avião, triar com foto e mapa do cache, e a rede voltando pra drenar)');
+  assert.match(SMOKE, /setOffline\(true\)/,
+    'modo avião de verdade é abort MAIS setOffline — só abort deixa navigator.onLine true');
+  assert.match(SMOKE, /icons\/splash\/[a-z0-9-]+\.png/,
+    'a foto da ESTRADA tem que vir de um arquivo REAL do servidor: route.fulfill'
+    + ' NÃO popula o cache HTTP, e o cache é o mecanismo inteiro da foto offline');
+
+  // O DEPLOY é o outro modo de o mapa sumir, e ele não dá sintoma até a estrada:
+  // o `activate` apaga todo cache ≠ CACHE_NAME, e sem a isenção o mapa
+  // provisionado ia junto a cada versão nova. O guard de fonte abaixo lê a
+  // linha do `if`; o smoke faz a faxina RODAR e mede o que sobrou.
+  assert.match(SMOKE, /DEPLOY N\u00c3O APAGA O MAPA/,
+    'sumiu a se\u00e7\u00e3o do deploy — sem ela, a isen\u00e7\u00e3o do cache de tiles s\u00f3 existe no papel');
+  assert.match(SMOKE, /service-worker\.js\?deploy=/,
+    'o deploy precisa ser encenado por URL de script DIFERENTE no mesmo escopo:'
+    + ' medido, o ctx.route n\u00e3o v\u00ea o script do SW e unregister+register na mesma URL n\u00e3o reinstala');
+  assert.match(SMOKE, /waze-places-2020010101/,
+    'sumiu a ISCA — sem um cache de vers\u00e3o anterior pra faxina levar, "o mapa'
+    + ' sobreviveu" passa por v\u00e1cuo no dia em que a faxina parar de rodar');
+
+  // Cobertura que não roda é cobertura que não existe.
+  assert.ok(PKG.scripts && PKG.scripts['test:offline'],
+    'falta o script `test:offline` no package.json');
+  assert.match(CI, /npm run test:offline/,
+    'o CI não roda o smoke do offline — sem isso ele vira arquivo morto no dia em'
+    + ' que alguém esquecer de rodá-lo à mão, que é exatamente como o buraco nasceu');
+});
+
+// A ESPERA DO ESVAZIAMENTO É FONTE ÚNICA, e este guard existe porque a lição
+// não pegou por estar escrita: o comentário dentro do `smoke-browser.mjs` já
+// listava as armadilhas do `page.waitForFunction`, e eu as repeti todas ao
+// escrever a seção da ESTRADA no smoke do offline — o CI reprovou com `fila:5`.
+// Reimplementar a espera é como ela volta a ser feita errado.
+test('a espera do esvaziamento é FONTE ÚNICA, nunca reimplementada num smoke', () => {
+  const OFF = readFileSync(new URL('../tools/smoke-offline.mjs', import.meta.url), 'utf8');
+  const BROW = readFileSync(new URL('../tools/smoke-browser.mjs', import.meta.url), 'utf8');
+  const MOD = readFileSync(new URL('../tools/esperar-saida.mjs', import.meta.url), 'utf8');
+
+  for (const [nome, src] of [['smoke-offline', OFF], ['smoke-browser', BROW]]) {
+    // Tolera outros nomes na MESMA importação (o módulo também exporta o
+    // esperador genérico): o que o guard cobra é a origem, não a lista.
+    assert.match(src, /import \{[^}]*\besperarFimDaSaida\b[^}]*\} from '\.\/esperar-saida\.mjs'/,
+      `${nome} não importa a fonte única da espera do esvaziamento`);
+    // Reimplementar com `waitForFunction` sobre a fila é exatamente o que
+    // quebrou: rAF não dispara em segundo plano, `polling` usa o timer da
+    // página (que o runner estrangula), e as opções na posição do ARGUMENTO
+    // não valem nada. Sem comentário na conta (gotcha #67).
+    const codigo = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    assert.doesNotMatch(codigo, /waitForFunction\([^)]*waze_places_saida/,
+      `${nome} voltou a esperar a fila de saída com page.waitForFunction — use esperarFimDaSaida`);
+  }
+  // E o módulo tem que continuar pollando pelo lado do NODE, por sinal
+  // POSITIVO e dizendo o motivo. Sem isto ele vira outro waitForFunction.
+  // Sem o comentário na conta: ele CITA `waitForFunction` justamente pra
+  // explicar por que não se usa, e o guard reprovava o arquivo certo — gotcha
+  // #67 dentro do guard escrito pra evitar o erro que o #67 descreve.
+  const modCodigo = MOD.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.doesNotMatch(modCodigo, /waitForFunction/,
+    'a fonte única passou a usar waitForFunction — é justamente o que ela existe pra evitar');
+  assert.match(MOD, /motivo: 'fila-vazia'/, 'sumiu o sinal positivo de fim');
+  assert.match(MOD, /motivo: 'TETO'/, 'sumiu o teto — sem ele a espera pode não terminar nunca');
+});
