@@ -1596,6 +1596,295 @@ atrasoBusca9b = 0;
 atrasoDecisao9b = () => 0;
 await ctx.unroute('**/api/*', rotaApi9b);
 
+secao('9c. O DIAGNÓSTICO SOBREVIVE A FECHAR A APP — o número do botão e o relatório');
+// O mesmo relato do 9b: "usei o FAB 2 vezes, fechei e abri a aplicação e o
+// número sumiu do FAB". Capturas, diário, chamadas e erros viviam só em
+// MEMÓRIA — e o defeito daquele dia só existia atravessando um fechar e
+// reabrir, então a prova de antes de fechar era justamente o que sumia.
+//
+// Aqui o botão é tocado DE VERDADE (toque do DevTools Protocol, num contexto
+// com toque — o mesmo jeito do bloco do FAB no smoke de layout), a app é
+// fechada como o usuário fecha, e o relatório é o de verdade, lido pelo leitor
+// único. Contexto PRÓPRIO: armazenamento limpo, sem sobra das seções de cima.
+// E cada regra de saída do que foi guardado é medida: baixar, 24 h, desligar o
+// modo dev e o Sair — e o modo dev desligado não cria nada no aparelho.
+const ctx9c = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
+  hasTouch: true, isMobile: true, serviceWorkers: 'block' });
+const PEDIDOS_9C = [SO_MAPA(131), SO_MAPA(132)];
+await ctx9c.route('**/*-tiles/live/base/**', servirTile);
+await ctx9c.route('**/api/*', (r) => {
+  const rota = r.request().url().split('/api/')[1];
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (rota === 'buscar-places') return json({ success: true, places: PEDIDOS_9C, hasMore: false, page: 1, total: PEDIDOS_9C.length });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, areas: [] } });
+  return r.abort('failed');   // presença, países, sessão: fora do que esta seção mede
+});
+const abrir9c = async (nome) => {
+  const pg = await ctx9c.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
+  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
+  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  return pg;
+};
+// A base do diagnóstico lida DE FORA, sem criá-la (só abre se ela existe).
+const guardado9c = (pg) => pg.evaluate(async () => {
+  const existe = (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag');
+  if (!existe) return { existe: false, abertas: [] };
+  return await new Promise((ok) => {
+    const req = indexedDB.open('waze_places_diag');
+    req.onerror = () => ok({ existe: true, erro: 'abrir' });
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('aberturas')) { db.close(); return ok({ existe: true, abertas: [] }); }
+      const r = db.transaction('aberturas').objectStore('aberturas').getAll();
+      r.onsuccess = () => { db.close(); ok({ existe: true, abertas: r.result.map((a) => ({ id: a.id,
+        capturas: (a.momentos || []).length, manuais: (a.momentos || []).filter((m) => m.motivo === 'manual').length,
+        alertas: (a.momentos || []).flatMap((m) => (m.alertas || []).map((x) => x.chave)),
+        comCorpo: (a.chamadas || []).some((c) => 'corpoReq' in c || 'corpoResposta' in c),
+        salvoPor: a.salvoPor })) }); };
+      r.onerror = () => { db.close(); ok({ existe: true, erro: 'ler' }); };
+    };
+  });
+});
+const selo9c = (pg) => pg.evaluate(() => { const s = document.getElementById('devFabBadge');
+  return { txt: s.textContent.trim(), visivel: !s.classList.contains('hidden') }; });
+// Toque de VERDADE no botão, e espera o RESULTADO (o anel crescer). Antes,
+// espera o botão PARAR: logo depois de abrir, ele se reposiciona quando o card
+// assenta (`posicionarFabDev` escolhe o canto pelo que está na tela), e o toque
+// calculado no lugar velho cai fora dele — foi o que fez o primeiro toque de
+// cada abertura sumir na primeira rodada desta seção.
+const tocar9c = async (pg, cdp) => {
+  let ultimo = '';
+  for (let j = 0, parado = 0; j < 60 && parado < 3; j++) {
+    const agora = await pg.evaluate(() => { const f = document.getElementById('devFab');
+      const b = f.getBoundingClientRect();
+      return f.classList.contains('hidden') ? 'escondido' : `${Math.round(b.left)},${Math.round(b.top)}`; });
+    parado = agora !== 'escondido' && agora === ultimo ? parado + 1 : 0;
+    ultimo = agora;
+    await dormir(100);
+  }
+  const antes = await pg.evaluate(() => dlogMomentos.length);
+  const c = await pg.evaluate(() => { const b = document.getElementById('devFab').getBoundingClientRect();
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: c.x, y: c.y }] });
+  await dormir(60);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  for (let j = 0; j < 50 && (await pg.evaluate(() => dlogMomentos.length)) <= antes; j++) await dormir(100);
+  return (await pg.evaluate(() => dlogMomentos.length)) > antes;
+};
+const pronta9c = (pg) => esperarNaPagina(pg, () => typeof dfatoAnel !== 'undefined'
+  && dfatoAnel.some((e) => e.k === 'tela.primeiroCard'), 20000, 100);
+const carregou9c = (pg) => esperarNaPagina(pg, () => typeof dfatoAnel !== 'undefined'
+  && dfatoAnel.some((e) => e.k === 'diag.aberturas'), 20000, 100);
+// Ir pro FUNDO sem descarregar a página — o que o celular faz quando a pessoa
+// troca de app ou abre os recentes. No headless a página nunca fica oculta sem
+// ser descarregada, e descarregar ABORTA o IndexedDB em voo: MEDIDO, duas
+// sabotagens ("guarda a captura já baixada" e "grava sem o modo dev") passavam
+// limpas porque a gravação do fechar nunca terminava, com ou sem elas. Aqui o
+// `visibilityState` vira "hidden", o evento sai, e o ouvinte DA APP roda com a
+// página viva; depois espera a fila de gravações terminar e volta ao visível.
+const irProFundo9c = async (pg) => {
+  await pg.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await pg.evaluate(() => (typeof diagGuardando !== 'undefined' ? diagGuardando : null));
+  await pg.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
+};
+// Espera o registro DESTA abertura ter `n` capturas guardadas.
+const guardouNesta9c = (pg, n) => esperarNaPagina(pg, async () => { try {
+  const db = await new Promise((ok, err) => { const r = indexedDB.open('waze_places_diag'); r.onsuccess = () => ok(r.result); r.onerror = err; });
+  const todas = await new Promise((ok) => { const r = db.transaction('aberturas').objectStore('aberturas').getAll(); r.onsuccess = () => ok(r.result); });
+  db.close();
+  return todas.some((a) => a.id === DIAG_ABERTURA.id && (a.momentos || []).length === n);
+} catch (e) { return false; } }, 10000, 100);
+
+// 0. Sessão, e o modo dev DESLIGADO: fechar a app não pode criar nada.
+const prep9c = await abrir9c('preparo');
+await esperarNaPagina(prep9c, () => typeof API !== 'undefined', 20000, 100);
+await prep9c.evaluate(() => {
+  API.setSession('tok-9c');
+  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+});
+await prep9c.close({ runBeforeUnload: true });
+const semDev = await abrir9c('modo dev desligado');
+await pronta9c(semDev);
+await irProFundo9c(semDev);
+const gSemDev = await guardado9c(semDev);
+diz('com o modo dev DESLIGADO, abrir e ir pro fundo não cria nada no aparelho', gSemDev.existe === false, JSON.stringify(gSemDev));
+await semDev.evaluate(() => localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })));
+await semDev.close({ runBeforeUnload: true });
+
+// 1. Modo dev ligado: dois toques no botão — um com a tela sã e outro com um
+//    DEFEITO na tela (o pedido da frente posto na fila de saída, que a
+//    sentinela do 9b acusa) —, e a app é fechada.
+const p1d = await abrir9c('abertura 1');
+await pronta9c(p1d);
+await carregou9c(p1d);
+const cdp1d = await ctx9c.newCDPSession(p1d);
+const id1d = await p1d.evaluate(() => DIAG_ABERTURA.id);
+const tocou1 = await tocar9c(p1d, cdp1d);
+await p1d.evaluate(() => { const p = AppState.currentPlace; localStorage.setItem('waze_places_saida',
+  JSON.stringify([{ tipo: 'read', venueID: p.venueID, updateRequestID: p.updateRequestID, t: Date.now() }])); });
+const tocou2 = await tocar9c(p1d, cdp1d);
+await p1d.evaluate(() => localStorage.removeItem('waze_places_saida'));
+diz('PRÉ-CONDIÇÃO: os dois toques no botão viraram capturas', tocou1 && tocou2, `${tocou1} ${tocou2}`);
+await esperarNaPagina(p1d, async () => { try {
+  const db = await new Promise((ok, err) => { const r = indexedDB.open('waze_places_diag'); r.onsuccess = () => ok(r.result); r.onerror = err; });
+  const todas = await new Promise((ok) => { const r = db.transaction('aberturas').objectStore('aberturas').getAll(); r.onsuccess = () => ok(r.result); });
+  db.close();
+  return todas.some((a) => a.id === DIAG_ABERTURA.id && (a.momentos || []).length === 2);
+} catch (e) { return false; } }, 10000, 100);
+const g1d = await guardado9c(p1d);
+const s1d = await selo9c(p1d);
+diz('a captura vai pro aparelho NA HORA, e o número do botão mostra 2',
+  s1d.txt === '2' && s1d.visivel && g1d.abertas.some((a) => a.id === id1d && a.manuais === 2),
+  JSON.stringify({ s1d, g1d }));
+diz('a captura do defeito ACUSA a sentinela, e o guardado leva a acusação',
+  g1d.abertas.some((a) => a.id === id1d && a.alertas.includes('pedidoDecididoNaFila')), JSON.stringify(g1d));
+diz('as chamadas vão pro aparelho SEM corpo', g1d.abertas.every((a) => !a.comCorpo), JSON.stringify(g1d));
+// Como no aparelho: a app vai pro fundo (os recentes) e depois é fechada.
+await irProFundo9c(p1d);
+await p1d.close({ runBeforeUnload: true });
+
+// 2. Reaberta: o número volta, e o relatório de verdade leva a abertura anterior.
+const p2d = await abrir9c('abertura 2');
+await pronta9c(p2d);
+await carregou9c(p2d);
+const r2d = await p2d.evaluate(() => ({ desta: dlogMomentos.length, id: DIAG_ABERTURA.id,
+  anteriores: diagAberturasAnteriores.map((a) => ({ id: a.id, n: (a.momentos || []).length })) }));
+const s2d = await selo9c(p2d);
+diz('REABERTA, o número do botão continua 2 — o relato',
+  s2d.txt === '2' && s2d.visivel, JSON.stringify({ s2d, r2d }));
+diz('CONTROLE: nenhuma captura NESTA abertura — as 2 vieram do aparelho, da abertura anterior',
+  r2d.desta === 0 && r2d.anteriores.length === 1 && r2d.anteriores[0].id === id1d && r2d.anteriores[0].n === 2,
+  JSON.stringify(r2d));
+const cdp2d = await ctx9c.newCDPSession(p2d);
+await tocar9c(p2d, cdp2d);
+const s3d = await selo9c(p2d);
+diz('uma captura nova soma às guardadas: 3', s3d.txt === '3', JSON.stringify(s3d));
+let rel9c = null;
+const dir9c = mkdtempSync(join(tmpdir(), 'diag-9c-'));
+try {
+  const [dl] = await Promise.all([
+    p2d.waitForEvent('download', { timeout: 30000 }),
+    p2d.evaluate(() => baixarDiagnostico()),
+  ]);
+  const arq = join(dir9c, 'diag.zip');
+  await dl.saveAs(arq);
+  const { dados: d } = lerDiagnostico(arq);
+  const triagem = execFileSync(process.execPath, [join(ROOT, 'tools/diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 20000 });
+  const ant = (d.aberturasAnteriores || [])[0] || {};
+  rel9c = {
+    n: (d.aberturasAnteriores || []).length, id: ant.id, capturas: (ant.momentos || []).length,
+    comDom: (ant.momentos || []).every((m) => typeof m.dom === 'string' && m.dom.length > 1000),
+    diario: (ant.diario || []).length, semCorpo: (ant.chamadas || []).every((c) => !('corpoReq' in c) && !('corpoResposta' in c)),
+    atual: d.aberturaAtual && d.aberturaAtual.id, resumo: d.resumo && d.resumo.aberturasAnteriores,
+    alertaAnterior: (d.resumo?.alertasNasCapturas || []).some((c) => c.abertura === id1d && c.alertas.includes('pedidoDecididoNaFila')),
+    triagemSecao: triagem.includes('ABERTURAS ANTERIORES') && triagem.includes('abertura ' + id1d),
+    triagemAlerta: triagem.includes('[abertura anterior ' + id1d + ']'),
+    vazouToken: triagem.includes('tok-9c'),
+  };
+} catch (e) {
+  rel9c = { erro: String((e && e.message) || e).slice(0, 200) };
+} finally {
+  rmSync(dir9c, { recursive: true, force: true });
+}
+diz('o RELATÓRIO leva a abertura anterior inteira: as 2 capturas (com o DOM), o diário, as chamadas sem corpo',
+  rel9c?.n === 1 && rel9c?.id === id1d && rel9c?.capturas === 2 && rel9c?.comDom === true && rel9c?.diario > 0
+  && rel9c?.semCorpo === true && rel9c?.atual === r2d.id && rel9c?.resumo?.n === 1 && rel9c?.resumo?.capturas === 2,
+  JSON.stringify(rel9c));
+diz('o resumo e o leitor mostram o defeito capturado ANTES de fechar, dizendo de qual abertura — sem o token',
+  rel9c?.alertaAnterior === true && rel9c?.triagemSecao === true && rel9c?.triagemAlerta === true && rel9c?.vazouToken === false,
+  JSON.stringify(rel9c));
+const apagou = await esperarNaPagina(p2d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
+const s4d = await selo9c(p2d);
+diz('BAIXADO, o que estava guardado sai do aparelho (e nesta abertura o número segue contando, como sempre)',
+  apagou.ok && s4d.txt === '3', JSON.stringify({ apagou, s4d }));
+// Segue usando depois do download: uma captura NOVA, e a app vai pro fundo.
+// É o caso que separa "guardar o que não foi entregue" de "guardar tudo": com
+// o anel desta abertura tendo uma baixada e uma nova, só a nova pode voltar.
+const tBaixado = await p2d.evaluate(() => diagBaixadoEm);
+const tocouPos = await tocar9c(p2d, cdp2d);
+await guardouNesta9c(p2d, 1);
+await irProFundo9c(p2d);
+await p2d.close({ runBeforeUnload: true });
+
+// 3. Reaberta depois do download: o que foi entregue não volta.
+const p3d = await abrir9c('abertura 3');
+await pronta9c(p3d);
+await carregou9c(p3d);
+const r3d = await p3d.evaluate((tb) => ({ capturas: diagMomentosAnteriores().length,
+  manuais: diagCapturasAnterioresDoEditor().length,
+  diarioAntes: diagAberturasAnteriores.flatMap((a) => a.diario || []).filter((e) => e.t <= tb).length }), tBaixado);
+const s5d = await selo9c(p3d);
+diz('o que foi BAIXADO não volta: reaberta, só a captura feita DEPOIS do download volta — e o diário de antes dele também não',
+  tocouPos && r3d.capturas === 1 && r3d.manuais === 1 && r3d.diarioAntes === 0 && s5d.txt === '1',
+  JSON.stringify({ tocouPos, r3d, s5d }));
+
+// 4. O prazo de 24 h: uma abertura guardada de 25 h atrás sai; a de 23 h fica.
+await p3d.evaluate(() => new Promise((ok) => {
+  const req = indexedDB.open('waze_places_diag', 1);
+  req.onupgradeneeded = () => req.result.createObjectStore('aberturas', { keyPath: 'id' });
+  req.onsuccess = () => {
+    const db = req.result; const h = 3600e3; const agora = Date.now();
+    const tx = db.transaction('aberturas', 'readwrite'); const st = tx.objectStore('aberturas');
+    const cap = () => [{ t: new Date().toISOString(), motivo: 'manual', alertas: [] }];
+    st.put({ id: 'velha', inicio: agora - 26 * h, salvoEm: agora - 25 * h, salvoPor: 'oculta', momentos: cap(), diario: [], chamadas: [], erros: [] });
+    st.put({ id: 'fresca', inicio: agora - 24 * h, salvoEm: agora - 23 * h, salvoPor: 'oculta', momentos: cap(), diario: [], chamadas: [], erros: [] });
+    tx.oncomplete = () => { db.close(); ok(); };
+  };
+}));
+await p3d.close({ runBeforeUnload: true });
+const p4d = await abrir9c('abertura 4');
+await pronta9c(p4d);
+await carregou9c(p4d);
+const r4d = await p4d.evaluate(() => diagAberturasAnteriores.map((a) => a.id));
+const g4d = await guardado9c(p4d);
+const s6d = await selo9c(p4d);
+// O número: a captura pós-download da abertura 2 + a da "fresca" = 2.
+diz('a abertura guardada há MAIS de 24 h sai do aparelho; a de 23 h fica, com a captura contando no número',
+  !r4d.includes('velha') && r4d.includes('fresca') && !g4d.abertas.some((a) => a.id === 'velha') && s6d.txt === '2',
+  JSON.stringify({ r4d, g4d, s6d }));
+
+// 5. Desligar o modo dev apaga o que ficou guardado (e avisa antes).
+const naoBaixadas = await p4d.evaluate(() => dlogNaoBaixados());
+await p4d.evaluate(() => { const cb = document.getElementById('prefDevModeActive');
+  cb.checked = false; cb.dispatchEvent(new Event('change')); });
+const apagouDev = await esperarNaPagina(p4d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
+const r5d = await p4d.evaluate(() => ({ memoria: diagAberturasAnteriores.length,
+  fab: document.getElementById('devFab').classList.contains('hidden') }));
+diz('DESLIGAR o modo dev avisa das capturas não baixadas e apaga o guardado — do aparelho e da memória',
+  naoBaixadas === 2 && apagouDev.ok && r5d.memoria === 0 && r5d.fab === true, JSON.stringify({ naoBaixadas, apagouDev, r5d }));
+await p4d.evaluate(() => localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })));
+await p4d.close({ runBeforeUnload: true });
+
+// 6. O "Sair" leva o que foi guardado junto.
+const p5d = await abrir9c('abertura 5');
+await pronta9c(p5d);
+await carregou9c(p5d);
+const cdp5d = await ctx9c.newCDPSession(p5d);
+const tocou5 = await tocar9c(p5d, cdp5d);
+// Espera o REGISTRO com a captura, não a base existir: a base nasce vazia na
+// própria abertura (a leitura do guardado a abre), então "existe" chegava antes
+// da gravação e o guard lia uma lista vazia.
+await esperarNaPagina(p5d, async () => { try {
+  const db = await new Promise((ok, err) => { const r = indexedDB.open('waze_places_diag'); r.onsuccess = () => ok(r.result); r.onerror = err; });
+  const todas = await new Promise((ok) => { const r = db.transaction('aberturas').objectStore('aberturas').getAll(); r.onsuccess = () => ok(r.result); });
+  db.close();
+  return todas.some((a) => a.id === DIAG_ABERTURA.id && (a.momentos || []).length === 1);
+} catch (e) { return false; } }, 10000, 100);
+const g5d = await guardado9c(p5d);
+diz('PRÉ-CONDIÇÃO: o toque no botão da abertura 5 virou captura', tocou5, String(tocou5));
+await p5d.evaluate(() => { handleLogout(); });
+const apagouSair = await esperarNaPagina(p5d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
+diz('o SAIR apaga o que foi guardado (e a captura que ia pro próximo relatório)',
+  g5d.abertas.some((a) => a.manuais === 1) && apagouSair.ok, JSON.stringify({ g5d, apagouSair }));
+await p5d.close();
+await ctx9c.close();
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));

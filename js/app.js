@@ -285,6 +285,9 @@ function initApp() {
     carregarPrazoDaSessao();
     loadDevMode();
     enforceDevGatedFilters();
+    // O que as aberturas anteriores deixaram guardado (só com o modo dev
+    // ligado — sem ele a função sai na primeira linha e nem abre a base).
+    diagCarregarAberturas();
     // Tema: segue o sistema até o user escolher manualmente (M3/HIG).
     applyTheme(getPreferredTheme());
     const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
@@ -307,6 +310,10 @@ function initApp() {
     setupKeyboardInset();
     setupAlturaDoHeader();
     setupDescargaAoSair();
+    // DEPOIS do de cima, e a ordem importa: os dois ouvem o ir-pro-fundo, e a
+    // ação que estava na janela do Desfazer tem que ir pra fila de saída antes
+    // de o diagnóstico ser guardado — senão o diário guardado não a mostra.
+    setupGuardaDoDiagnostico();
     marcarSuporteAExtensao();
     setupInstalarApp();
 
@@ -3782,6 +3789,9 @@ function dlogCapturar(motivo) {
         if (dlogMomentos.length > DLOG_MAX_MOMENTOS) dlogMomentos.shift();
         dlog('momento', { motivo, painel: m.painel, cardMontado: m.cardMontado,
                           alertas: (m.alertas || []).map((a) => a.chave) });
+        // A captura vai pro aparelho NA HORA: é ela que prova o defeito, e a
+        // app pode morrer antes de ir pro fundo (ver `diagGuardarAbertura`).
+        diagGuardarAbertura('captura');
         return m;
     } catch (e) {
         dlog('momento.falhou', { erro: String((e && e.message) || e).slice(0, 120) });
@@ -3809,6 +3819,11 @@ function dlogCapturarAuto(motivo) {
 function dlogApagar() {
     dlogAnel = [];
     dlogMomentos = [];
+    // E o que ficou GUARDADO de aberturas anteriores, no aparelho e na memória:
+    // desligado é desligado, e ali há o DOM das capturas, com dado de terceiro.
+    diagAberturasAnteriores = [];
+    diagBaixadoEm = 0;
+    diagEsquecerGuardado();
     for (const h of dlogPendencias.values()) clearTimeout(h);
     dlogPendencias.clear();
     try { for (const c of (API.chamadas || [])) { delete c.corpoResposta; delete c._bytes; } } catch (e) {}
@@ -3837,8 +3852,228 @@ function dlogCapturasDoEditor() { return dlogMomentos.filter((m) => m.motivo ===
 // a conta seguia dizendo "0 não baixados". `WeakSet` e não um campo no objeto
 // porque o momento vai inteiro pro JSON do relatório.
 const dlogJaBaixados = new WeakSet();
-function dlogMarcarBaixados() { for (const m of dlogMomentos) dlogJaBaixados.add(m); }
-function dlogNaoBaixados() { return dlogCapturasDoEditor().filter((m) => !dlogJaBaixados.has(m)).length; }
+// As guardadas de aberturas ANTERIORES entram nas duas contas (ver
+// `diagAberturasAnteriores`): o número do botão é "o que vai no próximo
+// relatório", e é isso que precisa sobreviver a fechar a app.
+function dlogMarcarBaixados() {
+    for (const m of dlogMomentos) dlogJaBaixados.add(m);
+    for (const m of diagMomentosAnteriores()) dlogJaBaixados.add(m);
+}
+function dlogNaoBaixados() {
+    return [...dlogCapturasDoEditor(), ...diagCapturasAnterioresDoEditor()]
+        .filter((m) => !dlogJaBaixados.has(m)).length;
+}
+
+// ── O DIAGNÓSTICO QUE SOBREVIVE A FECHAR A APP ────────────────────────────
+//
+// Relato de 2026-09-22 (owner, no modo avião): capturou o defeito com o botão
+// duas vezes, fechou a app, reabriu — e o número sumiu do botão. As capturas,
+// o diário, as chamadas e os erros viviam só em MEMÓRIA e morriam ao fechar. E
+// o defeito daquele dia (o pedido tratado voltando como card) só existia
+// ATRAVESSANDO um fechar e reabrir: o relatório, gerado numa abertura
+// posterior, não tinha como mostrá-lo, e a prova de antes de fechar era
+// exatamente o que sumia.
+//
+// Com o modo dev LIGADO, cada abertura guarda no aparelho o que o relatório
+// levaria dela — as capturas ainda não baixadas, o diário, as chamadas (só os
+// metadados) e os erros —, e as aberturas seguintes os devolvem: o número do
+// botão sobrevive, e o relatório conta o que houve em cada uma. Decisão do
+// owner, com o custo na mesa: até ~1,8 MB (12 capturas de ~150 KB) e, o que
+// pesou, dado de terceiro no aparelho — a captura leva o DOM, com nome e
+// endereço dos pedidos na tela. Por isso tudo tem saída: o que foi guardado
+// some ao BAIXAR o diagnóstico (já foi entregue), ao DESLIGAR o modo dev, no
+// "Sair", ou depois de 24 h.
+//
+// IndexedDB e não localStorage: 1,8 MB num `setItem` SÍNCRONO trava a thread do
+// swipe. E base PRÓPRIA, não a do offline: aquela é apagada inteira quando o
+// toggle dele desliga, e as duas coisas não têm nada a ver uma com a outra.
+//
+// Grava a cada CAPTURA e quando a app vai pro fundo (`visibilitychange`
+// oculto, o último momento confiável no celular) ou sai (`pagehide`). NUNCA
+// por swipe: o diário do modo dev anota cada ação, e gravar a cada anotação
+// seria justamente o custo que o anel existe pra não ter.
+const DIAG_DB = 'waze_places_diag';
+const DIAG_STORE = 'aberturas';
+const DIAG_GUARDA_MS = 24 * 60 * 60 * 1000;
+const DIAG_ABERTURAS_MAX = 5;
+// O mesmo teto do anel desta abertura (`DLOG_MAX_MOMENTOS`), somado entre TODAS
+// as aberturas guardadas — é ele que segura o armazenamento em ~1,8 MB, e as
+// capturas mais recentes ganham das mais velhas.
+const DIAG_CAPTURAS_GUARDADAS_MAX = DLOG_MAX_MOMENTOS;
+// Esta abertura: o id nasce com a página e morre com ela.
+const DIAG_ABERTURA = { id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+                        inicio: Date.now() };
+// O que as aberturas ANTERIORES deixaram, lido do aparelho na abertura (só com
+// o modo dev ligado). Fica em memória até a página morrer: mesmo baixado, segue
+// indo nos relatórios desta abertura — é o que já acontece com as capturas dela.
+let diagAberturasAnteriores = [];
+// O último download do diagnóstico NESTA abertura. O que veio antes já foi
+// entregue: não volta a ser guardado.
+let diagBaixadoEm = 0;
+
+function diagMomentosAnteriores() {
+    return diagAberturasAnteriores.flatMap((a) => (Array.isArray(a.momentos) ? a.momentos : []));
+}
+function diagCapturasAnterioresDoEditor() {
+    return diagMomentosAnteriores().filter((m) => m && m.motivo === 'manual');
+}
+
+function diagDB() {
+    return new Promise((ok, erro) => {
+        let req;
+        try { req = indexedDB.open(DIAG_DB, 1); } catch (e) { return erro(e); }
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(DIAG_STORE)) db.createObjectStore(DIAG_STORE, { keyPath: 'id' });
+        };
+        req.onsuccess = () => ok(req.result);
+        req.onerror = () => erro(req.error);
+    });
+}
+
+function diagLerGuardado(db) {
+    return new Promise((ok, erro) => {
+        const r = db.transaction(DIAG_STORE, 'readonly').objectStore(DIAG_STORE).getAll();
+        r.onsuccess = () => ok(Array.isArray(r.result) ? r.result : []);
+        r.onerror = () => erro(r.error);
+    });
+}
+
+// A chamada vai só com os METADADOS. O corpo da resposta é a fila inteira —
+// dado de terceiro em massa, e pesado — e o do pedido não responde nada do que
+// se investiga entre uma abertura e outra.
+function diagChamadaSemCorpo(c) {
+    const { corpoReq, corpoResposta, _bytes, ...resto } = c || {};
+    return resto;
+}
+
+// O que ESTA abertura guarda: só o que ainda não foi entregue — as capturas não
+// baixadas e, do diário, das chamadas e dos erros, o que veio depois do último
+// download (sem download, tudo).
+function diagRegistroDaAbertura(motivo) {
+    const depois = (x) => {
+        if (!diagBaixadoEm) return true;
+        const t = typeof x.t === 'number' ? x.t : Date.parse(x.t);
+        return !(t <= diagBaixadoEm);
+    };
+    return {
+        id: DIAG_ABERTURA.id,
+        inicio: DIAG_ABERTURA.inicio,
+        salvoEm: Date.now(),
+        salvoPor: motivo,
+        versao: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
+        diario: [...dfatoAnel, ...dlogAnel].filter(depois).sort((a, b) => a.t - b.t),
+        chamadas: (API.chamadas || []).filter(depois).map(diagChamadaSemCorpo),
+        erros: diagErros.filter(depois),
+        momentos: dlogMomentos.filter((m) => !dlogJaBaixados.has(m)),
+    };
+}
+
+// A PODA, pura. O que passou de 24 h sai inteiro; das que ficam, só as
+// DIAG_ABERTURAS_MAX mais recentes; e as capturas, somadas, não passam do teto —
+// a abertura mais nova primeiro, e dentro de cada uma as capturas mais novas.
+// Devolve o que manter (com as capturas já cortadas), os ids que saem e os ids
+// cortados (que precisam ser regravados).
+function diagPodarAberturas(lista, agora) {
+    const todas = (Array.isArray(lista) ? lista : []).filter((a) => a && typeof a.id === 'string');
+    const vivas = todas
+        .filter((a) => Number.isFinite(a.salvoEm) && agora - a.salvoEm <= DIAG_GUARDA_MS)
+        .sort((a, b) => (b.inicio || 0) - (a.inicio || 0))
+        .slice(0, DIAG_ABERTURAS_MAX);
+    let cabem = DIAG_CAPTURAS_GUARDADAS_MAX;
+    const cortadas = [];
+    const manter = vivas.map((a) => {
+        const ms = Array.isArray(a.momentos) ? a.momentos : [];
+        const ficam = cabem > 0 ? ms.slice(-cabem) : [];
+        cabem -= ficam.length;
+        if (ficam.length === ms.length) return a;
+        cortadas.push(a.id);
+        return { ...a, momentos: ficam };
+    });
+    const ficam = new Set(manter.map((a) => a.id));
+    return { manter, sair: todas.filter((a) => !ficam.has(a.id)).map((a) => a.id), cortadas };
+}
+
+async function diagAplicarPoda(db, poda, novos) {
+    await new Promise((ok, erro) => {
+        const tx = db.transaction(DIAG_STORE, 'readwrite');
+        const st = tx.objectStore(DIAG_STORE);
+        for (const id of poda.sair) st.delete(id);
+        for (const a of poda.manter) if (novos.has(a.id) || poda.cortadas.includes(a.id)) st.put(a);
+        tx.oncomplete = ok;
+        tx.onerror = () => erro(tx.error);
+        tx.onabort = () => erro(tx.error);
+    });
+}
+
+// Uma gravação de cada vez, em ORDEM: a de uma captura e a de ir pro fundo
+// podem sair no mesmo instante, e a mais velha não pode pousar por cima da
+// mais nova. O retrato é tirado DEPOIS do `await`, pelo mesmo motivo.
+let diagGuardando = Promise.resolve();
+function diagGuardarAbertura(motivo) {
+    if (!dlogLigado()) return Promise.resolve(false);
+    const esta = diagGuardando.then(async () => {
+        if (!dlogLigado()) return false;
+        let db = null;
+        try {
+            db = await diagDB();
+            const guardadas = (await diagLerGuardado(db)).filter((a) => a.id !== DIAG_ABERTURA.id);
+            const atual = diagRegistroDaAbertura(motivo);
+            const poda = diagPodarAberturas([atual, ...guardadas], Date.now());
+            await diagAplicarPoda(db, poda, new Set([atual.id]));
+            return true;
+        } catch (e) {
+            dfato('diag.guardarFalhou', { motivo, erro: String((e && e.name) || e).slice(0, 60) });
+            return false;
+        } finally {
+            try { if (db) db.close(); } catch (e) {}
+        }
+    });
+    diagGuardando = esta.catch(() => false);
+    return esta;
+}
+
+// Na abertura, com o modo dev ligado: traz o que as aberturas anteriores
+// deixaram, já podado (o que venceu sai do aparelho aqui mesmo).
+async function diagCarregarAberturas() {
+    if (!dlogLigado()) return;
+    let db = null;
+    try {
+        db = await diagDB();
+        const guardadas = (await diagLerGuardado(db)).filter((a) => a.id !== DIAG_ABERTURA.id);
+        const poda = diagPodarAberturas(guardadas, Date.now());
+        if (poda.sair.length || poda.cortadas.length) await diagAplicarPoda(db, poda, new Set());
+        diagAberturasAnteriores = poda.manter;
+        dfato('diag.aberturas', { n: poda.manter.length, capturas: diagMomentosAnteriores().length });
+        atualizarFabDev();
+    } catch (e) {
+        dfato('diag.carregarFalhou', { erro: String((e && e.name) || e).slice(0, 60) });
+    } finally {
+        try { if (db) db.close(); } catch (e) {}
+    }
+}
+
+// Apaga TUDO o que foi guardado: no download (já foi entregue), no desligar do
+// modo dev e no "Sair". Entra na MESMA fila das gravações: a que estava em voo
+// termina antes (senão recriaria a base logo depois de apagada), e a que for
+// pedida depois acontece depois.
+function diagEsquecerGuardado() {
+    const esta = diagGuardando.then(() => new Promise((ok) => {
+        try {
+            const r = indexedDB.deleteDatabase(DIAG_DB);
+            r.onsuccess = r.onerror = r.onblocked = () => ok(true);
+        } catch (e) { ok(false); }
+    }));
+    diagGuardando = esta.catch(() => false);
+    return esta;
+}
+
+function setupGuardaDoDiagnostico() {
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') diagGuardarAbertura('oculta');
+    });
+    window.addEventListener('pagehide', () => { diagGuardarAbertura('saida'); });
+}
 
 // ── O FAB ─────────────────────────────────────────────────────────────────
 // UM gesto de toque e UM de arrasto, e nada mais. Toque = registra um momento;
@@ -4007,8 +4242,10 @@ function atualizarFabDev() {
     fab.classList.toggle('hidden', !ligado);
     const selo = document.getElementById('devFabBadge');
     if (selo) {
-        // Só as que a pessoa fez — ver `dlogCapturasDoEditor`.
-        const n = dlogCapturasDoEditor().length;
+        // Só as que a pessoa fez — ver `dlogCapturasDoEditor` —, desta abertura
+        // e das anteriores que ficaram guardadas: o número é "o que vai no
+        // próximo relatório", e ele tem que sobreviver a fechar a app.
+        const n = dlogCapturasDoEditor().length + diagCapturasAnterioresDoEditor().length;
         selo.textContent = String(n);
         selo.classList.toggle('hidden', n === 0);
     }
@@ -4211,7 +4448,10 @@ function ligarFabDev() {
 // `cardMontado`; o resumo ganha `alertasNasCapturas`. Aditivo também.
 // 5 (v2026.09.22-06): o resumo ganha `saida` (a fila de saída em números), o
 // `computado` ganha `decididos` (e a sentinela `pedidoDecididoNaFila`), e a
-// seção `offline` ganha `pousosGravados` e o `desdeMin` da fila guardada.
+// seção `offline` ganha `pousosGravados` e o `desdeMin` da fila guardada. E o
+// arquivo passa a levar as ABERTURAS ANTERIORES guardadas no aparelho
+// (`aberturasAnteriores`, `aberturaAtual`, e no resumo a contagem e os alertas
+// das capturas delas, com a `abertura` de cada uma). Aditivo.
 const DIAG_VERSAO = 5;
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
@@ -4592,7 +4832,20 @@ async function diagCorpo() {
             alertasNasCapturas: dlogMomentos
                 .filter((m) => Array.isArray(m.alertas) && m.alertas.length)
                 .map((m) => ({ t: m.t, motivo: m.motivo, painel: m.painel,
-                               alertas: m.alertas.map((a) => a.chave) })),
+                               alertas: m.alertas.map((a) => a.chave) }))
+                // E as das aberturas ANTERIORES que ficaram guardadas, com a
+                // abertura de cada uma: o defeito que só aparece depois de
+                // fechar e reabrir foi capturado ANTES, noutra abertura.
+                .concat(diagAberturasAnteriores.flatMap((a) => (a.momentos || [])
+                    .filter((m) => Array.isArray(m.alertas) && m.alertas.length)
+                    .map((m) => ({ t: m.t, motivo: m.motivo, painel: m.painel, abertura: a.id,
+                                   alertas: m.alertas.map((x) => x.chave) }))))
+                .sort((x, y) => Date.parse(x.t) - Date.parse(y.t)),
+            // Quantas aberturas anteriores ficaram guardadas, e com quantas
+            // capturas — a primeira pergunta de um relato que atravessa fechar
+            // e reabrir a app.
+            aberturasAnteriores: { n: diagAberturasAnteriores.length,
+                                   capturas: diagMomentosAnteriores().length },
         },
         computado,
         // Os DOIS anéis numa linha do tempo só: o sempre-ligado (`dfato`) e o do
@@ -4601,6 +4854,12 @@ async function diagCorpo() {
         // custou a investigação dos modais achatados.
         diario: [...dfatoAnel, ...dlogAnel].sort((a, b) => a.t - b.t),
         momentos: dlogMomentos,
+        // O que as aberturas ANTERIORES deixaram guardado no aparelho (só com o
+        // modo dev ligado nelas): diário, chamadas sem corpo, erros e as
+        // capturas não baixadas, cada abertura com o seu id, início e versão.
+        // Ver `diagAberturasAnteriores`.
+        aberturaAtual: { id: DIAG_ABERTURA.id, inicio: new Date(DIAG_ABERTURA.inicio).toISOString() },
+        aberturasAnteriores: diagAberturasAnteriores,
         _gerado: new Date().toISOString(),
         // A seção que responde o relato "a sessão não dura": ciclos medidos em
         // horas, e o ambiente que decide se o armazenamento sobrevive.
@@ -4783,6 +5042,11 @@ async function baixarDiagnostico() {
         a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 30000);
         dlogMarcarBaixados();
+        // Entregue: o que estava guardado no aparelho sai (ver
+        // `diagAberturasAnteriores`), e desta abertura só volta a ser guardado
+        // o que acontecer daqui pra frente.
+        diagBaixadoEm = Date.now();
+        diagEsquecerGuardado();
         atualizarFabDev();
         showToast(t('toast.diagPronto'), 'success');
     } catch (e) {
@@ -5047,6 +5311,12 @@ async function handleLogout() {
     AppState.filters = { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
     AppState.preferences = { undoEnabled: true, presenca: true };
     AppState.devMode = { unlocked: false, active: false };
+    // O que o modo dev gravou sai junto — as capturas desta abertura (em
+    // memória) e as das anteriores (guardadas no aparelho). Elas levam o DOM,
+    // com nome e endereço dos pedidos na tela: "sair é sair de tudo". Antes
+    // disto as da memória ficavam até a página fechar, e iriam no relatório de
+    // quem entrasse depois e ligasse o modo dev.
+    dlogApagar();
     AppState.profile = null;
     AppState.authenticated = false;
     AppState.pendingAction = null;

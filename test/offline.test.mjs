@@ -626,6 +626,36 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   assert.doesNotMatch(bloco9b, /chaveDoPedido|offlineLerPousos|semOsJaDecididos/,
     'a 9b passou a depender de função nova da app — não roda mais contra a de antes, e a prova do conserto some');
 
+  // O DIAGNÓSTICO QUE SOBREVIVE A FECHAR A APP (mesmo relato, v2026.09.22-06):
+  // "usei o FAB 2 vezes, fechei e abri a aplicação e o número sumiu". A 9c só
+  // vale se TOCAR o botão de verdade (toque do DevTools, contexto com toque),
+  // fechar como o usuário fecha, e medir cada saída do que foi guardado.
+  exigir(/secao\('9c\. O DIAGNÓSTICO SOBREVIVE A FECHAR A APP/,
+    'sumiu a seção do diagnóstico entre aberturas — é o relato do número sumindo do botão');
+  const i9c = CODIGO.indexOf("secao('9c.");
+  const bloco9c = CODIGO.slice(i9c, CODIGO.indexOf("secao('10.", i9c));
+  assert.match(bloco9c, /hasTouch: true, isMobile: true/, 'a 9c tem que rodar num contexto com TOQUE — o botão responde a toque');
+  assert.match(bloco9c, /Input\.dispatchTouchEvent/, 'a 9c tem que TOCAR o botão, não chamar a captura por fora');
+  assert.doesNotMatch(bloco9c, /dlogCapturar\(/, 'a 9c chamou a captura por fora — o toque de verdade é o que se mede');
+  assert.match(bloco9c, /\.close\(\{ runBeforeUnload: true \}\)/, 'a 9c tem que fechar como o usuário fecha (pagehide/visibilitychange)');
+  // Ir pro FUNDO sem descarregar: descarregar aborta o IndexedDB em voo, e aí
+  // "guarda a captura já baixada" e "grava sem o modo dev" passavam limpas
+  // (medido: as duas sabotagens sobreviveram antes disto).
+  assert.match(bloco9c, /await irProFundo9c\(semDev\);/, 'a 9c tem que ir pro fundo com o modo dev DESLIGADO — é onde "grava sem o dev" apareceria');
+  assert.match(bloco9c, /const tocouPos = await tocar9c\(/, 'a 9c perdeu a captura DEPOIS do download — é ela que separa guardar o não entregue de guardar tudo');
+  for (const [re, porque] of [
+    [/diz\('com o modo dev DESLIGADO, abrir e ir pro fundo não cria nada/, 'quem não liga o modo dev não paga nada'],
+    [/diz\('REABERTA, o número do botão continua 2/, 'é a frase do relato'],
+    [/diz\('CONTROLE: nenhuma captura NESTA abertura/, 'sem ele, o número podia vir de uma captura nova'],
+    [/diz\('o RELATÓRIO leva a abertura anterior inteira/, 'o arquivo de verdade, lido pela ferramenta'],
+    [/diz\('o resumo e o leitor mostram o defeito capturado ANTES de fechar/, 'o motivo de guardar'],
+    [/diz\('BAIXADO, o que estava guardado sai do aparelho/, 'o que foi entregue não fica'],
+    [/diz\('o que foi BAIXADO não volta/, 'o que foi entregue não volta'],
+    [/diz\('a abertura guardada há MAIS de 24 h sai do aparelho/, 'o prazo que a Ajuda promete'],
+    [/diz\('DESLIGAR o modo dev avisa das capturas não baixadas e apaga/, 'desligado é desligado'],
+    [/diz\('o SAIR apaga o que foi guardado/, 'sair é sair de tudo'],
+  ]) assert.match(bloco9c, re, `a 9c perdeu uma medida — ${porque}`);
+
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],
     'falta o script `test:offline` no package.json');

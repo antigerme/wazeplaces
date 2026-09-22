@@ -63,7 +63,7 @@ else for (const a of alertas) out(`no relatório: ${a.chave} — ${String(a.msg 
 const nasCapturas = r.alertasNasCapturas;
 if (nasCapturas === undefined) out('nas capturas: ' + AUSENTE);
 else if (!nasCapturas.length) out('nas capturas: nenhum');
-else for (const c of nasCapturas) out(`nas capturas: ${hora(c.t)} ${c.motivo} (painel ${c.painel}) → ${c.alertas.join(', ')}`);
+else for (const c of nasCapturas) out(`nas capturas: ${hora(c.t)} ${c.motivo} (painel ${c.painel}) → ${c.alertas.join(', ')}${c.abertura ? ` [abertura anterior ${c.abertura}]` : ''}`);
 
 secao('TELA NA HORA DO RELATÓRIO');
 const ta = r.telaAgora || {};
@@ -125,15 +125,53 @@ for (const c of chamadas.slice(-30)) {
 }
 if (chamadas.length > 30) out(`(… e mais ${chamadas.length - 30} antes destas)`);
 
+// Uma captura em três linhas — a mesma forma pra desta abertura e pras
+// anteriores, senão as duas seções divergem na primeira mudança.
+function linhasDaCaptura(m, recuo = '') {
+  const quebradas = Array.isArray(m.imagens) ? m.imagens.filter((i) => i.quebrada).length : '—';
+  const alertasM = Array.isArray(m.alertas) ? (m.alertas.length ? m.alertas.map((a) => a.chave).join(', ') : 'nenhum') : AUSENTE;
+  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${m.painel} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}`);
+  out(`${recuo}    rede ${m.rede === undefined ? AUSENTE : j(m.rede)} · offline ${m.offline === undefined ? AUSENTE : j(m.offline)}`);
+  out(`${recuo}    fila ${m.estado?.fila} · restam ${m.estado?.serverTotal} · hasMore ${m.estado?.hasMore} · loadError ${m.estado?.loadError} · imagens quebradas ${quebradas} · alertas: ${alertasM}`);
+}
+
 secao('CAPTURAS');
 const momentos = Array.isArray(d.momentos) ? d.momentos : [];
 if (!momentos.length) out('(nenhuma)');
-for (const m of momentos) {
-  const quebradas = Array.isArray(m.imagens) ? m.imagens.filter((i) => i.quebrada).length : '—';
-  const alertasM = Array.isArray(m.alertas) ? (m.alertas.length ? m.alertas.map((a) => a.chave).join(', ') : 'nenhum') : AUSENTE;
-  out(`${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${m.painel} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}`);
-  out(`    rede ${m.rede === undefined ? AUSENTE : j(m.rede)} · offline ${m.offline === undefined ? AUSENTE : j(m.offline)}`);
-  out(`    fila ${m.estado?.fila} · restam ${m.estado?.serverTotal} · hasMore ${m.estado?.hasMore} · loadError ${m.estado?.loadError} · imagens quebradas ${quebradas} · alertas: ${alertasM}`);
+for (const m of momentos) linhasDaCaptura(m);
+
+// As aberturas ANTERIORES que ficaram guardadas no aparelho (só com o modo dev
+// ligado nelas) — é onde mora o defeito que atravessa fechar e reabrir a app.
+// As mesmas regras do resto: nada de `dom`, nenhum corpo de chamada (que nem
+// chega a ser guardado), e o token trocado no fim.
+const quando = (t) => {
+  const dt = typeof t === 'number' ? new Date(t) : new Date(String(t));
+  return Number.isNaN(dt.getTime()) ? String(t) : dt.toISOString().replace('T', ' ').slice(0, 19);
+};
+secao('ABERTURAS ANTERIORES (guardadas no aparelho)');
+const anteriores = d.aberturasAnteriores;
+if (anteriores === undefined) out(AUSENTE);
+else if (!anteriores.length) out('(nenhuma)');
+else {
+  for (const a of [...anteriores].sort((x, y) => (x.inicio || 0) - (y.inicio || 0))) {
+    const di = Array.isArray(a.diario) ? a.diario : [];
+    const ch = Array.isArray(a.chamadas) ? a.chamadas : [];
+    const er = Array.isArray(a.erros) ? a.erros : [];
+    const ms = Array.isArray(a.momentos) ? a.momentos : [];
+    out(`abertura ${a.id} · ${quando(a.inicio)} → ${quando(a.salvoEm)} (guardada por: ${a.salvoPor}) · v${a.versao ?? '?'}`);
+    out(`  diário ${di.length} · chamadas ${ch.length} (falhas ${ch.filter((c) => !c.ok).length}) · erros ${er.length} · capturas ${ms.length}`);
+    const t0a = di.length ? di[0].t : 0;
+    for (const e of di) {
+      const { t, k, ...resto } = e;
+      const delta = typeof t === 'number' && typeof t0a === 'number' ? ` +${((t - t0a) / 1000).toFixed(3)}s` : '';
+      out(`  ${hora(t)}${delta}  ${k}  ${Object.keys(resto).length ? j(resto, 200) : ''}`);
+    }
+    for (const c of ch.filter((x) => !x.ok)) {
+      out(`  chamada FALHOU ${hora(c.t)} ${c.rota} http ${c.http}${c.errorCategory ? ' · ' + c.errorCategory : ''}${c.errorKey ? ' · ' + c.errorKey : ''}`);
+    }
+    for (const m of ms) linhasDaCaptura(m, '  ');
+    for (const e of er) out(`  erro ${hora(e.t)} ${e.tipo || 'erro'} ${String(e.msg || '').slice(0, 200)}`);
+  }
 }
 
 secao('ERROS DE JS');
