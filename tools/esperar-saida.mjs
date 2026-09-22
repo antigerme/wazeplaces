@@ -6,7 +6,6 @@
 // que injeta código nessa superfície vira ruído indistinguível de defeito — e foi
 // assim que o CI acusou um `EvalError: Refused to evaluate a string as JavaScript`
 // que a app não produz (ela não tem `eval` nenhum).
-
 //
 // Nasceu dentro do `smoke-browser.mjs`, depois de aquele bloco reprovar TRÊS
 // vezes no CI e NUNCA aqui. Virou módulo quando o `smoke-offline.mjs` precisou
