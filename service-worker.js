@@ -1,7 +1,7 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026092201';
+const CACHE_NAME = 'waze-places-2026092202';
 // Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
 // ver a nota no `activate`.
 const TILES_CACHE = 'waze-places-tiles';
@@ -10,12 +10,35 @@ const TILES_CACHE = 'waze-places-tiles';
 // await não dá mais pra dizer "deixa o navegador cuidar". Sem esta lista o SW
 // teria que prometer resposta pra tudo — que foi exatamente o defeito.
 let tilesGuardados = new Set();
-async function hidratarTiles() {
-  try {
-    const c = await caches.open(TILES_CACHE);
-    tilesGuardados = new Set((await c.keys()).map((r) => r.url));
-  } catch (e) { tilesGuardados = new Set(); }
+// `false` até a lista ser lida do cache NESTA vida do worker.
+let tilesHidratados = false;
+let hidratacao = null;
+function hidratarTiles() {
+  hidratacao = (async () => {
+    try {
+      // `caches.has` antes de `open`: `open` CRIA o cache, e quem nunca ligou o
+      // offline não precisa ganhar um vazio a cada partida do worker.
+      if (await caches.has(TILES_CACHE)) {
+        const c = await caches.open(TILES_CACHE);
+        tilesGuardados = new Set((await c.keys()).map((r) => r.url));
+      } else {
+        tilesGuardados = new Set();
+      }
+    } catch (e) { tilesGuardados = new Set(); }
+    tilesHidratados = true;
+  })();
+  return hidratacao;
 }
+// EM TODA PARTIDA do worker — não só no `activate`. Service worker é EFÊMERO:
+// o Chrome o encerra depois de ~30s ocioso e o recria no próximo evento, com
+// as variáveis globais ZERADAS. Até v2026.09.22-01 a lista só era lida no
+// `activate` (que não roda de novo numa recriação) e no aviso da varredura, então
+// depois da primeira pausa de meio minuto o worker acordava com a lista VAZIA,
+// não respondia por tile nenhum e, sem rede, o mapa guardado sumia. RELATADO
+// pelo owner no Android com a varredura em "Pronto" e 243 tiles no cache;
+// reproduzido encerrando o worker pelo DevTools Protocol no meio do modo avião.
+// O smoke nunca pegava: durante um teste curto o worker não chega a adormecer.
+hidratarTiles();
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -107,14 +130,27 @@ self.addEventListener('fetch', event => {
     // DUAS condições, e não é redundância: o caminho mantém a exceção estreita
     // aqui (nunca respondemos por domínio externo qualquer, mesmo que algo
     // estranho entre no cache), e a lista mantém a interceptação ADITIVA.
-    if (/-tiles\/live\/base\//.test(url.pathname) && tilesGuardados.has(url.href)) {
-      event.respondWith(
-        caches.open(TILES_CACHE)
-          .then((c) => c.match(event.request))
-          // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar.
-          .then((hit) => hit || fetch(event.request))
-          .catch(() => fetch(event.request))
-      );
+    if (/-tiles\/live\/base\//.test(url.pathname)) {
+      const doCache = () => caches.open(TILES_CACHE)
+        .then((c) => c.match(event.request))
+        // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar.
+        .then((hit) => hit || fetch(event.request))
+        .catch(() => fetch(event.request));
+      if (tilesHidratados) {
+        // O caminho de sempre, ESTRITAMENTE ADITIVO: sem entrada, não responde.
+        if (tilesGuardados.has(url.href)) event.respondWith(doCache());
+      } else {
+        // O worker ACABOU de acordar e a lista ainda está sendo lida. O
+        // `respondWith` tem de ser decidido agora, e não responder aqui é
+        // perder o tile: é exatamente o primeiro pedido depois da recriação,
+        // e o card pede todos os tiles de uma vez. Então espera a leitura (são
+        // milissegundos) e decide com a lista pronta. Se o tile não estiver
+        // guardado, o worker busca por conta própria — o que a CSP do script
+        // dele permite (`connect-src` com o host do tile, cobrado em
+        // `test/csp-vm.test.mjs`) e dá o mesmo que o navegador daria.
+        event.respondWith(hidratacao.then(() =>
+          (tilesGuardados.has(url.href) ? doCache() : fetch(event.request))));
+      }
     }
     return;
   }

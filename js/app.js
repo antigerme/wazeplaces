@@ -1492,7 +1492,11 @@ const Lightbox = {
                 b.type = 'button';
                 b.className = 'lb-mini';
                 const im = document.createElement('img');
-                im.src = u;   // a MESMA URL da foto grande: já está em cache (ver a nota acima)
+                // a MESMA URL da foto grande: já está em cache (ver a nota acima).
+                // `urlDaFoto` é o que a torna a mesma — com o offline ligado a
+                // grande leva o sufixo, e a crua seria outra cópia, baixada à toa
+                // com sinal e quebrada sem ele.
+                im.src = urlDaFoto(u);
                 im.alt = '';
                 im.decoding = 'async';
                 im.loading = 'lazy';
@@ -5519,10 +5523,9 @@ function renderCurrentCard() {
     // enquadramento do fallback — o observer só o corrige quando a caixa
     // CRESCE, e num card com diff ela encolhe. Ver `desenharMapaComCaixa`.
     desenharMapaComCaixa(card, place);
-    // DEPOIS do appendChild pela mesma razão do mapa: a caixa da foto precisa
-    // existir pra receber o aviso. Sai calado quando há rede ou quando o
-    // pedido não é de foto.
-    marcarCardSemFoto(card, place);
+    // O aviso de "a foto precisa de sinal" NÃO nasce aqui: ele vem do `onerror`
+    // da foto em decisão (ver `renderCardImages`). Posto no render, ele se
+    // antecipava à imagem e escondia a foto que estava guardada.
     // Quem está deslizando está usando a app: a varredura não dorme.
     offlineMarcarGesto();
     // Tira o .celebrate junto: sem isso o confete não reinicia quando a fila
@@ -6342,9 +6345,8 @@ function renderCardImages(card, place) {
     const imgNext = card.querySelector('.card-image-next');
     const newBadge = card.querySelector('.card-image-new-badge');
     const newBorder = card.querySelector('.card-image-new-border');
-    const urls = place.imageUrls && place.imageUrls.length > 0
-        ? place.imageUrls
-        : (place.imageUrl ? [place.imageUrl] : []);
+    const fotos = fotosDoCard(place);
+    const urls = fotos.urls;
 
     // O mapa é mais um SLIDE do carrossel — nunca uma linha nova no card, que
     // acabou de ser espremido até caber. Ele vem PRIMEIRO quando é a evidência
@@ -6376,20 +6378,17 @@ function renderCardImages(card, place) {
     // algo justamente onde discrimina — no pedido de FOTO, em que uma entre
     // quatro é a nova. E o contexto já desambigua: a linha `Tipo: Novo local`
     // diz que tudo ali é novo. Decisão do owner depois da medição.
-    // O vínculo com a foto denunciada é o `flagEntityID`, que bate exatamente com
-    // `venue.images[].id` (confirmado no HAR do "Ponto de Mergulho"). Sem ele o
-    // editor via 4 fotos e nenhuma pista de qual tinha sido reportada.
-    const idxPorId = (id) => (id ? urls.findIndex(u => u.indexOf(id) !== -1) : -1);
-    const denunciadaIdx = idxPorId(place.flagEntityID);
-    const eDenuncia = denunciadaIdx >= 0;
-    const newImageIdx = eDenuncia ? denunciadaIdx : idxPorId(place.updateRequestID);
+    // QUAL das N fotos é o pedido sai do `fotosDoCard` — a MESMA regra que o
+    // aquecimento e a varredura do offline usam pra saber qual foto guardar.
+    const eDenuncia = fotos.eDenuncia;
+    const newImageIdx = fotos.emDecisao;
     newBadge.textContent = eDenuncia ? '🚩' : '✨';
     // Via atributo, não via .title: o applyI18n() roda DEPOIS deste render e
     // sobrescreveria um title escrito na mão.
     newBadge.setAttribute('data-i18n-title', eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
     newBorder.classList.toggle('ring-amber-400', !eDenuncia);
     newBorder.classList.toggle('ring-rose-500', eDenuncia);
-    let currentImgIdx = newImageIdx >= 0 ? newImageIdx : 0;
+    let currentImgIdx = fotos.inicial;
 
     // O índice do carrossel agora anda pelos SLIDES; a foto tem o seu próprio,
     // porque `newImageIdx` e o lightbox falam em posição na lista de FOTOS.
@@ -6442,7 +6441,19 @@ function renderCardImages(card, place) {
     img.classList.add('cursor-zoom-in');
     img.decoding = 'async';
     // Foto quebrada (404 do Waze) → cai pro placeholder "Sem Imagem".
-    img.onerror = () => { img.classList.add('hidden'); noImg.classList.remove('hidden'); };
+    // E SEM REDE, se a que falhou é a foto EM DECISÃO, o card diz "precisa de
+    // sinal" e trava ✕/✓ — mas só DEPOIS de a imagem falhar de verdade. Até
+    // v2026.09.22-01 o aviso era posto por SUPOSIÇÃO (`offline` + tipo de foto)
+    // antes de a imagem tentar, e escondia a foto que a varredura acabara de
+    // guardar justamente pra este momento. RELATADO pelo owner com o toggle
+    // ligado e a varredura em "Pronto" 1 minuto antes: os três cards de foto
+    // vieram vazios. Reproduzido com controle: a mesma URL, numa <img> solta e
+    // sem rede, carregava do cache.
+    img.onerror = () => {
+        img.classList.add('hidden');
+        noImg.classList.remove('hidden');
+        if (newImageIdx < 0 || currentImgIdx === newImageIdx) marcarCardSemFoto(card, place);
+    };
     updateImage();
 
     img.addEventListener('click', (e) => {
@@ -6932,9 +6943,18 @@ function aplicarTravaDeAcao() {
     const travado = acoesTravadas();
     const card = cardDaFrente();
     if (card) card.classList.toggle('acoes-travadas', travado);
+    // Card de FOTO cuja foto não veio (`marcarCardSemFoto`): ✕ e ✓ ficam
+    // travados MESMO fora da janela do Desfazer, com o ↑ vivo. Esta função roda
+    // a cada ação que começa, termina ou é desfeita, e antes escrevia
+    // `disabled = travado` nos três botões sem saber do aviso — então a ação
+    // ANTERIOR terminar reabria ✕ e ✓ num card sem foto, e dava pra rejeitar
+    // uma foto que ninguém viu. Visto no smoke da estrada rodando contra a main
+    // de antes: aviso na tela e ✕ vivo. Duas escritas no mesmo atributo, sem
+    // uma saber da outra, é o gotcha #63; a trava mora AQUI, numa função só.
+    const semFoto = !!(card && card.querySelector('.card-sem-foto'));
     for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
         const b = card && card.querySelector(cls);
-        if (b) b.disabled = travado;
+        if (b) b.disabled = travado || (semFoto && cls !== '.card-btn-skip');
     }
     // Os do lightbox seguem a MESMA regra e a mesma função. Regra duplicada é
     // como as duas telas divergem sem ninguém notar; o esmaecido vem do
@@ -7450,6 +7470,30 @@ function mapaVemPrimeiro(place) {
     return nFotos === 0 || eEspacial;
 }
 
+// QUAL FOTO o card mostra — FONTE ÚNICA, pelo mesmo motivo do `mapaVemPrimeiro`
+// logo acima. Num pedido de FOTO o carrossel não abre na primeira da lista: abre
+// na que está EM DECISÃO — a denunciada (`flagEntityID`, que bate exatamente com
+// `venue.images[].id`, confirmado no HAR do "Ponto de Mergulho") ou a proposta
+// (`updateRequestID`). Sem esse vínculo o editor via 4 fotos e nenhuma pista de
+// qual era o pedido.
+//
+// Vale em TRÊS lugares: o carrossel, o aquecimento do próximo card e a varredura
+// do offline. Até v2026.09.22-01 os dois últimos pegavam `imageUrls[0]` por
+// conta própria, e MEDIDO na fila do owner a foto em decisão NÃO é a primeira em
+// 13 de 76 pedidos de foto: a varredura guardava a foto errada, e sem rede o card
+// abria justamente na que ninguém guardou — "a foto precisa de sinal", com ✕ e ✓
+// travados, num pedido que o recurso tinha prometido resolver.
+function fotosDoCard(place) {
+    const urls = place.imageUrls && place.imageUrls.length > 0
+        ? place.imageUrls
+        : (place.imageUrl ? [place.imageUrl] : []);
+    const idxPorId = (id) => (id ? urls.findIndex((u) => u.indexOf(id) !== -1) : -1);
+    const denunciadaIdx = idxPorId(place.flagEntityID);
+    const eDenuncia = denunciadaIdx >= 0;
+    const emDecisao = eDenuncia ? denunciadaIdx : idxPorId(place.updateRequestID);
+    return { urls, eDenuncia, emDecisao, inicial: emDecisao >= 0 ? emDecisao : 0 };
+}
+
 // Aquece o que o PRÓXIMO card vai mostrar primeiro — não "a foto dele".
 //
 // Antes isto era `imageUrls[0]`, sempre. Medido em 4188 cards reais de 12
@@ -7502,18 +7546,26 @@ function tilesDoCard(place, w, h) {
 function aquecerPrimeiroSlide(place, w, h) {
     if (!place) return;
     if (mapaVemPrimeiro(place)) { for (const u of tilesDoCard(place, w, h)) aquecer(u); return; }
-    aquecer(urlDaFoto((place.imageUrls && place.imageUrls[0]) || place.imageUrl));
+    // A foto em que o carrossel ABRE — num pedido de foto, a que está em decisão.
+    const f = fotosDoCard(place);
+    aquecer(urlDaFoto(f.urls[f.inicial]));
 }
 
 // O RESTO do card: as outras fotos e, se o mapa não era o primeiro slide, os
 // tiles dele. Serve quem PAROU e começou a explorar o carrossel — por isso vai
 // só pro card seguinte, e com teto.
+//
+// Também passa pelo `urlDaFoto`: com o offline ligado o carrossel pede a foto
+// COM o sufixo, e aquecer a URL crua era baixar uma cópia que ninguém ia pedir.
 function aquecerRestoDoCard(place, w, h) {
     if (!place) return;
-    const fotos = (place.imageUrls && place.imageUrls.length ? place.imageUrls : [place.imageUrl]).filter(Boolean);
-    const inicio = mapaVemPrimeiro(place) ? 0 : 1;   // a [0] já foi no primeiro slide
-    for (const u of fotos.slice(inicio, PREFETCH_TETO_FOTOS)) aquecer(u);
-    if (!mapaVemPrimeiro(place)) for (const u of tilesDoCard(place, w, h)) aquecer(u);
+    const f = fotosDoCard(place);
+    const mapaPrimeiro = mapaVemPrimeiro(place);
+    // Com a foto no 1º slide, a INICIAL já foi aquecida — e o teto conta com ela.
+    const resto = mapaPrimeiro ? f.urls : f.urls.filter((_, i) => i !== f.inicial);
+    const teto = mapaPrimeiro ? PREFETCH_TETO_FOTOS : PREFETCH_TETO_FOTOS - 1;
+    for (const u of resto.slice(0, teto)) aquecer(urlDaFoto(u));
+    if (!mapaPrimeiro) for (const u of tilesDoCard(place, w, h)) aquecer(u);
 }
 
 function prefetchNextImage() {
@@ -9784,6 +9836,39 @@ async function offlineGravarFila() {
     } catch (e) { return false; }
 }
 
+// A JANELA SERVIDA também fica guardada, na mesma base e com a mesma vida (o
+// `offlineEsquecer` apaga as duas). É ela que monta a URL que a varredura
+// aqueceu (`urlDaFoto`), e ela morava só em memória: a app REABERTA sem rede
+// nascia com a janela nula, pedia a foto CRUA — que ninguém aqueceu — e TODO
+// card de foto abria com "a foto precisa de sinal". É o caso do Android, que
+// encerra o app em segundo plano e o faz renascer justamente na sombra.
+// Gravada só quando a varredura TERMINA, igual à janela em memória: sufixo de
+// varredura pela metade é foto que não está no cache.
+async function offlineGravarJanela(janela) {
+    try {
+        const db = await offlineDB();
+        await new Promise((ok, erro) => {
+            const tx = db.transaction(OFFLINE_STORE, 'readwrite');
+            tx.objectStore(OFFLINE_STORE).put({ janela, t: Date.now() }, 'janela');
+            tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
+        });
+        db.close();
+    } catch (e) {}
+}
+
+async function offlineLerJanela() {
+    try {
+        const db = await offlineDB();
+        const v = await new Promise((ok, erro) => {
+            const tx = db.transaction(OFFLINE_STORE, 'readonly');
+            const r = tx.objectStore(OFFLINE_STORE).get('janela');
+            r.onsuccess = () => ok(r.result); r.onerror = () => erro(r.error);
+        });
+        db.close();
+        return v && Number.isFinite(v.janela) ? v.janela : null;
+    } catch (e) { return null; }
+}
+
 async function offlineLerFila() {
     try {
         const db = await offlineDB();
@@ -9810,15 +9895,75 @@ async function offlineEsquecer() {
 // não é zelo: MEDIDO numa estrada simulada de 20s de sinal / 40s de buraco, com
 // retomada saem 160 cards prontos e ZERO perdidos; sem ela, 77 cards e 404
 // pedaços perdidos PARA SEMPRE. É metade do recurso numa linha.
-function offlineItensDaFila(janela) {
-    const itens = [];
-    const cx = cardDaFrente() && cardDaFrente().querySelector('.card-photo');
+// A caixa do mapa NÃO é a mesma em todo card. Ela é o que sobra depois do
+// texto, e encolhe quando o card tem comentário de reporte ou diff: MEDIDO no
+// aparelho do owner, 378×337 num card de foto e 378×189 no reporte com
+// comentário. Caixa diferente pode escolher OUTRO ZOOM — logo outros tiles. A
+// varredura usava a caixa do card que estivesse na frente pra TODOS, e na fila
+// real dele isso deixava 7 de 172 cards com buraco no mapa numa caixa de 189px
+// e 12 numa de 144 (e 37 numa de 88, o piso). Por isso os tiles saem da FAIXA
+// de alturas que um card pode ter, não de uma altura só.
+//
+// O PISO é o menor `min-height` do `.card-photo` no styles.css (o card com
+// comentário, 5.5rem), convertido pela fonte da raiz na hora — rem acompanha a
+// fonte do sistema. `test/offline.test.mjs` cobra que o CSS não desça abaixo.
+//
+// O TETO é a pilha, limitado a MAPA_TILE − 8: MEDIDO, até 504px o custo é o
+// mesmo (313 tiles na fila do owner), e em 512 salta pra 470 — é onde a caixa
+// deixa de caber numa fileira de tiles. Foto de card de celular nunca chega
+// perto disso: o texto ocupa ~190px.
+//
+// O PASSO de 16px é exato: na fila real, toda altura inteira de 88 a 504 dá os
+// MESMOS 313 tiles que passos de 4, 8, 16, 32 e até 64px. 16 fica com folga.
+const OFFLINE_CAIXA_MIN_REM = 5.5;
+const OFFLINE_CAIXA_PASSO_PX = 16;
+
+function offlineFaixaDeCaixas() {
+    const frente = cardDaFrente();
+    const cx = frente && frente.querySelector('.card-photo');
     const w = (cx && cx.clientWidth) || 400;
-    const h = (cx && cx.clientHeight) || 240;
-    for (const p of AppState.queue) {
-        for (const u of tilesDoCard(p, w, h)) itens.push({ u, tile: true });
-        const f = (p.imageUrls && p.imageUrls[0]) || p.imageUrl;
+    const hFrente = (cx && cx.clientHeight) || 240;
+    const pilha = document.getElementById('cardStack');
+    const hPilha = (pilha && pilha.clientHeight) || hFrente;
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const hMin = Math.round(OFFLINE_CAIXA_MIN_REM * rem);
+    const hMax = Math.max(hFrente, Math.min(hPilha, MAPA_TILE - 8));
+    return { w, hMin: Math.min(hMin, hMax), hMax };
+}
+
+// Os tiles de TODAS as alturas da faixa. Mesmo zoom em caixa menor pede um
+// subconjunto; o que a faixa acrescenta é o zoom que muda quando a caixa encolhe.
+function tilesDaFaixa(place, faixa) {
+    const s = new Set();
+    for (let h = faixa.hMax; h >= faixa.hMin; h -= OFFLINE_CAIXA_PASSO_PX) {
+        for (const u of tilesDoCard(place, faixa.w, h)) s.add(u);
+    }
+    for (const u of tilesDoCard(place, faixa.w, faixa.hMin)) s.add(u);
+    return s;
+}
+
+async function offlineItensDaFila(janela) {
+    const itens = [];
+    const vistos = new Set();   // pedido vizinho divide tile: baixa uma vez só
+    const faixa = offlineFaixaDeCaixas();
+    // CÓPIA da fila: o laço cede a thread, e quem tria desliza no meio — o
+    // `shift()` do avanço deslocaria o iterador e pularia um pedido calado.
+    const fila = AppState.queue.slice();
+    let i = 0;
+    for (const p of fila) {
+        for (const u of tilesDaFaixa(p, faixa)) {
+            if (vistos.has(u)) continue;
+            vistos.add(u);
+            itens.push({ u, tile: true });
+        }
+        // A foto em que o card ABRE, pela mesma regra do carrossel: num pedido de
+        // foto é a EM DECISÃO, que em 13 de 76 da fila do owner não é a primeira.
+        const fotos = fotosDoCard(p);
+        const f = fotos.urls[fotos.inicial];
         if (f) itens.push({ u: f + (f.indexOf('?') === -1 ? '?' : '&') + 'w=' + janela, tile: false });
+        // ~16 ms num desktop pra fila inteira, e 4–6× isso num celular: sem
+        // ceder a thread vira tarefa longa no meio do arraste de quem tria.
+        if (++i % 20 === 0) await new Promise((r) => setTimeout(r, 0));
     }
     return itens;
 }
@@ -9867,7 +10012,7 @@ async function offlineVarrer() {
     const epoca = offlineEpoca;
     try {
         await offlineGravarFila();
-        const pend = offlineItensDaFila(janela);
+        const pend = await offlineItensDaFila(janela);
         const total = pend.length;
         let falhas = 0;
         const trabalhar = async () => {
@@ -9895,6 +10040,10 @@ async function offlineVarrer() {
         if (epoca !== offlineEpoca) return;   // esqueceram: não grava resultado
         if (!pend.length) {
             offlineJanelaServida = janela;
+            // SEM `await` antes, e isso importa: o `open` sai neste mesmo tique,
+            // logo depois da checagem de época acima — um "Sair" que venha em
+            // seguida entra na fila do IndexedDB DEPOIS dele e apaga tudo.
+            offlineGravarJanela(janela);
             offlineUltimoResultado = 'pronto';
             // Avisa o service worker que há tile novo no cache. Ele só responde
             // pelo que CONHECE (lista síncrona), e sem este aviso só saberia no
@@ -9978,13 +10127,20 @@ function offlineTalvezVarrer() {
 function offlineMarcarGesto() { offlineUltimoGesto = Date.now(); }
 
 // Abre a app sem rede: em vez da tela de falha, a fila que ficou guardada.
-// Os pedidos de FOTO saem do baralho — sem a imagem não há o que decidir, e
-// oferecer ✕/✓ ali seria pedir decisão no escuro. O contador conta o que é
-// ALCANÇÁVEL, nunca o que está guardado (gotcha #66).
+// Todos os pedidos entram — inclusive os de FOTO, cuja foto a varredura
+// guardou no cache do navegador. O que não abrir de lá trava ✕/✓ no próprio
+// card (`marcarCardSemFoto`, pelo `onerror`), em vez de sair do baralho por
+// suposição. (Este comentário dizia que os de foto "saíam do baralho"; o
+// código nunca fez isso.)
 async function offlineTentarAbrirSemRede() {
     if (!offlineLigado() || navigator.onLine !== false) return false;
     const guardada = await offlineLerFila();
     if (!guardada) return false;
+    // A janela da última varredura COMPLETA, antes de qualquer card nascer: sem
+    // ela o card pede a foto crua, que ninguém guardou. Só quando a memória não
+    // tem uma — com a app viva, a de memória é a mais nova.
+    const janelaGuardada = await offlineLerJanela();
+    if (offlineJanelaServida === null) offlineJanelaServida = janelaGuardada;
     AppState.queue = guardada.places.slice();
     AppState.serverTotal = AppState.queue.length;
     AppState.hasMore = false;
@@ -9999,6 +10155,11 @@ async function offlineTentarAbrirSemRede() {
 // O card de FOTO sem a foto: diz na PRÓPRIA CAIXA da imagem, e trava ✕ e ✓
 // deixando o ↑ vivo. Botão morto com cara de vivo lê como app quebrada, e
 // decidir foto sem ver a foto é decidir no escuro.
+//
+// Chamada SÓ pelo `onerror` da foto em decisão — ou seja, depois de a imagem
+// falhar de verdade. "Sem rede" não é "sem foto": a varredura do offline
+// guarda a foto no cache do navegador exatamente pra ela abrir sem sinal.
+// `test/offline.test.mjs` reprova quem voltar a chamá-la no render.
 function marcarCardSemFoto(card, place) {
     if (!card || !place) return false;
     const tipoDeFoto = place.purType === 'NEW_PHOTO' || place.purType === 'FLAGGED_PHOTO';

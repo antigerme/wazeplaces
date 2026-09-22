@@ -18,6 +18,10 @@
 // com 'allow'. Este arquivo é a camada que faltava: ele LIGA o service worker
 // e exercita cada caminho do recurso contra a app de verdade.
 //
+// A ÚNICA exceção é a seção 6c: ela BLOQUEIA o service worker e não registra
+// rota nenhuma, porque é o único jeito de medir a foto no cache HTTP do
+// navegador — qualquer rota no contexto desliga esse cache (ver lá).
+//
 // Regra que vale pra todo caso aqui: medir FATO, não intenção. Guard de fonte
 // não enxerga CSP, não enxerga cache e não enxerga service worker.
 
@@ -129,6 +133,11 @@ const diz = (n, cond, det = '') => {
 // abre é a foto e o `.card-map` nasce `hidden` — medir o mapa ali daria zero
 // com a app certa, que é medir outra coisa (`mapaVemPrimeiro()` decide).
 const SO_MAPA = (i) => ({ ...PLACE(i), imageUrls: [], imageUrl: null });
+// Fotos REAIS do próprio servidor (mesma origem, logo permitidas pela CSP, e
+// com `Cache-Control` de verdade), TRÊS arquivos diferentes: é o que deixa um
+// teste distinguir QUAL foto chegou. As seções 6c e 7 usam.
+const FOTOS_REAIS = ['/icons/splash/splash-750x1334-dark.png',
+  '/icons/splash/splash-750x1334-light.png', '/icons/splash/splash-828x1792-light.png'];
 const PLACE = (i, purType = 'NEW_PLACE') => ({
   venueID: 'v' + i, updateRequestID: 'u' + i, name: 'Local ' + i, categories: ['PARK'],
   address: 'Rua ' + i, updateType: 'Novo local', updateTypeKey: 'NEW_PLACE', purType,
@@ -150,8 +159,11 @@ const servirTile = (r) => { if (aviao) return r.abort('internetdisconnected'); r
   return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
     headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }); };
 await ctx.route('**/*-tiles/live/base/**', servirTile);
-await ctx.route('**/venue-image.waze.com/**', (r) => r.fulfill({ status: 200,
-  contentType: 'image/png', body: PX, headers: { 'cache-control': 'public, max-age=3600' } }));
+// A foto do Waze respeita o modo avião como o tile: `setOffline` NÃO derruba
+// requisição interceptada por `route.fulfill` (gotcha #28), então sem o abort a
+// foto "carregava sem rede" e o card de foto nunca era posto à prova.
+await ctx.route('**/venue-image.waze.com/**', (r) => aviao ? r.abort('internetdisconnected')
+  : r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'cache-control': 'public, max-age=3600' } }));
 const page = await ctx.newPage();
 // O erro capturado diz ONDE e vem INTEIRO. Sem isso, "erro de JS em algum
 // lugar do percurso" é adivinhação — e foi o que me custou uma rodada de CI
@@ -172,7 +184,7 @@ await esperarNaPagina(page, () => typeof offlineVarrer === 'function', 10000);
 const controlado = await page.evaluate(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller));
 diz('o service worker ASSUMIU (sem isto nada abaixo mede o que promete)', controlado);
 
-const montar = (pls) => page.evaluate((ps) => {
+const montarNa = (pg, pls) => pg.evaluate((ps) => {
   AppState.authenticated = true;
   AppState.preferences.comoFuncionaVisto = true;
   AppState.profile = { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false };
@@ -182,6 +194,7 @@ const montar = (pls) => page.evaluate((ps) => {
   AppState.queue = ps; AppState.currentPlace = ps[0]; AppState.serverTotal = ps.length;
   showCurrentPlace(); updatePendingCount();
 }, pls);
+const montar = (pls) => montarNa(page, pls);
 
 secao('1. O MAPA COM O TOGGLE DESLIGADO (o defeito que foi a produção)');
 // DUAS camadas, e a segunda é a única que responde ao relato do owner ("o mapa
@@ -336,26 +349,199 @@ const off = await page.evaluate(async () => {
 diz('a fila guardada entra no lugar da tela de falha', off.abriu === true && off.n === 3 && off.erro === false,
   JSON.stringify(off));
 
-secao('6. O CARD QUE NÃO DÁ PRA DECIDIR');
-await montar([PLACE(9, 'NEW_PHOTO')]);
-const semFoto = await page.evaluate(async () => {
-  const card = document.querySelector('.place-card:not(.card-fundo)') || document.querySelector('.place-card');
-  // O `renderCurrentCard` JÁ chama o `marcarCardSemFoto` — chamar de novo
-  // devolve `false` ("já marcado"), que é o comportamento certo. Quem responde
-  // a pergunta é a TELA, não o retorno da minha chamada redundante.
+secao('6. O CARD DE FOTO SEM REDE: a foto que VEIO aparece, a que NÃO VEIO avisa');
+// ESTA SEÇÃO EXIGIA O DEFEITO COMO CORRETO. Ela montava um card de FOTO sem rede
+// e cobrava o aviso "precisa de sinal" — sem nunca perguntar se a foto estava
+// guardada. A app, igual: o aviso nascia por SUPOSIÇÃO (`offline` + tipo de foto)
+// e escondia a foto que a varredura tinha acabado de guardar pra este momento.
+// RELATADO pelo owner no Android, com a varredura em "Pronto" 1 minuto antes: os
+// três cards de "Nova foto" vieram vazios. E o diagnóstico dele PROVA que o
+// cache funcionou: as três fotos estão `quebrada: false`, com o sufixo certo,
+// em momentos capturados SEM REDE — a app só as escondia.
+//
+// Os DOIS lados são medidos, e por sinal POSITIVO de cada desfecho (gotcha #62):
+//   · a foto NÃO chega  → aviso, ✕ e ✓ travados, ↑ vivo;
+//   · a foto CHEGA      → ela aparece, sem aviso, com ✕ vivo.
+// LIMITE DO INSTRUMENTO, dito aqui e não escondido: a foto real é de OUTRA
+// origem e sai do cache HTTP do navegador. Este sandbox intercepta TLS por nome
+// de host e ignora `--host-resolver-rules` (medido: o mapeamento pra um servidor
+// local devolve o 403 do bucket real), então não dá pra servir
+// `venue-image.waze.com` daqui. O que esta seção trava é a LÓGICA — carregou,
+// aparece; falhou, avisa —, e o caminho do cache ficou provado no aparelho.
+aviao = true;
+const lerFotoDoCard = () => page.evaluate(() => {
+  const card = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  const img = card && card.querySelector('.card-image');
   const aviso = card && card.querySelector('.card-sem-foto');
   const rej = card && card.querySelector('.card-btn-reject');
   const lido = card && card.querySelector('.card-btn-read');
   const pular = card && card.querySelector('.card-btn-skip');
   return { temAviso: !!aviso, texto: aviso ? aviso.textContent.slice(0, 40) : '',
+    fotoVisivel: !!(img && !img.classList.contains('hidden') && img.naturalWidth > 0),
     rejTravado: !!(rej && rej.disabled), lidoTravado: !!(lido && lido.disabled),
     pularVivo: !!(pular && !pular.disabled) };
 });
-diz('offline, o pedido de FOTO avisa que precisa de sinal — pelo render, sem ninguém chamar nada',
-  semFoto.temAviso && /sinal/i.test(semFoto.texto), JSON.stringify(semFoto));
-diz('✕ e ✓ ficam travados e o ↑ continua vivo', semFoto.rejTravado && semFoto.lidoTravado && semFoto.pularVivo,
+// 6a) a foto NÃO chega (a do Waze, abortada no avião)
+await montar([PLACE(9, 'NEW_PHOTO')]);
+await esperarNaPagina(page, () => !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-sem-foto'), 8000);
+const semFoto = await lerFotoDoCard();
+diz('a foto NÃO chegou: o card avisa que precisa de sinal', semFoto.temAviso && /sinal/i.test(semFoto.texto),
   JSON.stringify(semFoto));
+diz('e trava ✕ e ✓, com o ↑ vivo', semFoto.rejTravado && semFoto.lidoTravado && semFoto.pularVivo,
+  JSON.stringify(semFoto));
+// A trava tem que SOBREVIVER à ação anterior terminar. `aplicarTravaDeAcao` roda
+// a cada ação que começa, termina ou é desfeita, e escrevia `disabled` nos três
+// botões sem saber do aviso — reabrindo ✕ e ✓ num card sem foto. Foi como a
+// estrada, rodando contra a main de antes, mostrou aviso na tela e ✕ vivo.
+await page.evaluate(() => aplicarTravaDeAcao());
+const depoisDaAcao = await lerFotoDoCard();
+diz('e a trava SOBREVIVE à ação anterior terminar (✕ e ✓ seguem travados, ↑ vivo)',
+  depoisDaAcao.temAviso && depoisDaAcao.rejTravado && depoisDaAcao.lidoTravado && depoisDaAcao.pularVivo,
+  JSON.stringify(depoisDaAcao));
+// 6b) a foto CHEGA — o defeito que chegou aos testadores
+await montar([{ ...PLACE(10, 'NEW_PHOTO'), imageUrls: [BASE + '/icons/screenshots/previa-card.jpg'] }]);
+await esperarNaPagina(page, () => { const i = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image');
+  return !!(i && i.naturalWidth > 0); }, 8000);
+await dormir(400);   // folga pra um aviso tardio aparecer, se o defeito voltar
+const comFotoCard = await lerFotoDoCard();
+diz('a foto CHEGOU: ela aparece no card de foto, sem aviso', comFotoCard.fotoVisivel && !comFotoCard.temAviso,
+  JSON.stringify(comFotoCard));
+diz('e o ✕ fica vivo — há foto pra decidir', !comFotoCard.rejTravado && !comFotoCard.lidoTravado,
+  JSON.stringify(comFotoCard));
+aviao = false;
 await ctx.setOffline(false);
+
+secao('6c. A FOTO GUARDADA É A FOTO EM DECISÃO — e a app REABERTA sem rede a encontra');
+// DOIS defeitos, e os dois só aparecem no card de FOTO SEM REDE:
+//  1. A varredura guardava `imageUrls[0]`, e o card de foto abre na foto EM
+//     DECISÃO (a proposta ou a denunciada). MEDIDO na fila do owner: em 13 de
+//     76 pedidos de foto ela NÃO é a primeira — o card abria na que ninguém
+//     guardou, com "a foto precisa de sinal" e ✕/✓ travados.
+//  2. A janela do sufixo (`?w=`) morava só em memória. A app REABERTA sem rede
+//     (o Android encerra o app em segundo plano) nascia com ela nula, pedia a
+//     foto CRUA — e a crua ninguém guardou.
+//
+// UM CONTEXTO À PARTE, com o service worker BLOQUEADO, e é isso que o torna
+// fiel: a foto do Waze é de OUTRA origem, o SW a ignora e ela vive no cache
+// HTTP do navegador. Aqui a foto é do próprio servidor (a CSP só admite
+// `'self'` e o Waze, e este sandbox não serve `venue-image.waze.com`), e com o
+// SW ligado ela passaria pelo cache DELE, que o modo avião do Playwright nem
+// alcança. Com o SW fora, o caminho é o do aparelho: `<img>` → cache HTTP, e
+// o avião derruba o que não estiver guardado.
+//
+// E SEM NENHUM `route` — nem o do tile. QUALQUER rota registrada no contexto
+// DESLIGA o cache HTTP do navegador (o Playwright o desativa ao ligar a
+// interceptação). MEDIDO com controle, mesma foto, mesmo servidor: sem rota
+// ela volta do cache no avião; com uma rota que nem casa com ela, QUEBRA. É por
+// isso que nenhuma outra seção deste arquivo consegue medir a foto offline — o
+// contexto principal tem rotas —, e por isso os pedidos daqui vêm sem mapa: sem
+// tile, a varredura fecha pronta sem precisar da rota.
+//
+// A fixture DISTINGUE os casos (pergunta 2 do CLAUDE.md): a foto em decisão é
+// a 2ª num pedido e a 3ª no outro, cada foto um arquivo diferente, e os dois
+// ficam atrás de 4 cards SEM foto — nada foi pintado nem pré-carregado CRU
+// antes da varredura, então o que abrir sem rede só pode ter vindo dela. O
+// CONTROLE disso é medido, não suposto (a primeira asserção de rede abaixo).
+const ctxFoto = await browser.newContext({ viewport: { width: 390, height: 844 },
+  serviceWorkers: 'block', locale: 'pt-BR', colorScheme: 'dark' });
+const pgFoto = await ctxFoto.newPage();
+pgFoto.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+pgFoto.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+  violacoes.push({ secao: secaoAtual, txt: m.text() }); });
+// O que a PÁGINA pediu ao servidor. É a medida de rede: com o SW bloqueado,
+// todo pedido de foto aparece aqui, e o sufixo diz quem o fez.
+const fotosPedidas = [];
+pgFoto.on('request', (r) => { if (r.url().indexOf('/icons/splash/') !== -1) fotosPedidas.push(r.url().slice(BASE.length)); });
+await pgFoto.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+await esperarNaPagina(pgFoto, () => typeof offlineVarrer === 'function', 10000);
+const arquivo = (k) => FOTOS_REAIS[k].split('/').pop().replace('.png', '');
+// O vínculo com a foto em decisão é o ID dentro da URL — `updateRequestID` na
+// foto proposta, `flagEntityID` na denunciada —, como no Waze.
+const FOTO_NA_2A = { ...PLACE(61, 'NEW_PHOTO'), mapa: null, updateRequestID: arquivo(1),
+  imageUrls: [BASE + FOTOS_REAIS[0], BASE + FOTOS_REAIS[1]] };
+const DENUNCIA_NA_3A = { ...PLACE(62, 'FLAGGED_PHOTO'), mapa: null, flagEntityID: arquivo(2), flagSubjectType: 'IMAGE',
+  imageUrls: [BASE + FOTOS_REAIS[0], BASE + FOTOS_REAIS[1], BASE + FOTOS_REAIS[2]] };
+const VAZIO = (i) => ({ ...PLACE(i), imageUrls: [], imageUrl: null, mapa: null });
+const FILA_6C = [VAZIO(51), VAZIO(52), VAZIO(53), VAZIO(54), FOTO_NA_2A, DENUNCIA_NA_3A];
+await pgFoto.evaluate(() => { AppState.preferences.offlineDisponivel = true; });
+await montarNa(pgFoto, FILA_6C);
+await dormir(1500);   // o aquecimento do próximo card é AGENDADO: deixa ele sair antes da foto
+const cruasAntes = fotosPedidas.filter((u) => u.indexOf('?w=') === -1);
+diz('CONTROLE: nenhuma foto foi pedida CRUA antes da varredura (o que abrir sem rede veio dela)',
+  cruasAntes.length === 0, JSON.stringify(cruasAntes));
+await pgFoto.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+  offlineMarcarGesto(); return offlineVarrer(); });
+await esperarNaPagina(pgFoto, () => offlineUltimoResultado !== null, 60000, 250);
+const enc6c = await pgFoto.evaluate(() => ({ res: offlineUltimoResultado, janela: offlineJanelaServida }));
+diz('a varredura fechou PRONTA', enc6c.res === 'pronto' && enc6c.janela !== null, JSON.stringify(enc6c));
+const sufixo = '?w=' + enc6c.janela;
+const emDecisao = [FOTOS_REAIS[1] + sufixo, FOTOS_REAIS[2] + sufixo];
+diz('a varredura guardou a foto EM DECISÃO de cada pedido de foto (a 2ª e a 3ª da lista)',
+  emDecisao.every((u) => fotosPedidas.includes(u)), JSON.stringify(fotosPedidas));
+diz('e NÃO a primeira da lista, que nenhum dos dois cards mostra',
+  !fotosPedidas.includes(FOTOS_REAIS[0] + sufixo), JSON.stringify(fotosPedidas));
+
+// CONTROLE DO INSTRUMENTO nos dois sentidos, antes de medir a app: sem rede,
+// uma foto que JÁ veio tem que abrir do cache HTTP, e uma que NUNCA foi pedida
+// tem que quebrar. Sem o primeiro, "abriu" poderia ser rede vazando; sem o
+// segundo, a medida não distinguiria guardado de não guardado.
+const imgSolta = (u) => pgFoto.evaluate((u) => new Promise((res) => { const i = new Image();
+  i.onload = () => res('CARREGOU'); i.onerror = () => res('QUEBROU'); i.src = u; }), u);
+const jaVeio = BASE + FOTOS_REAIS[0] + '?controle=1';
+await imgSolta(jaVeio);
+aviao = true; await ctxFoto.setOffline(true);
+const ctrlVeio = await imgSolta(jaVeio);
+const ctrlNunca = await imgSolta(BASE + FOTOS_REAIS[0] + '?controle=nunca');
+diz('CONTROLE: sem rede, a foto que já veio abre do cache e a nunca pedida quebra',
+  ctrlVeio === 'CARREGOU' && ctrlNunca === 'QUEBROU', `${ctrlVeio} / ${ctrlNunca}`);
+const lerFotoEm = (pg) => pg.evaluate(() => {
+  const card = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  const img = card && card.querySelector('.card-image');
+  const rej = card && card.querySelector('.card-btn-reject');
+  return { src: img ? String(img.getAttribute('src') || '').replace(location.origin, '') : '',
+    fotoVisivel: !!(img && !img.classList.contains('hidden') && img.naturalWidth > 0),
+    temAviso: !!(card && card.querySelector('.card-sem-foto')), rejVivo: !!(rej && !rej.disabled) };
+});
+// Espera a foto DECIDIR — carregou ou caiu no aviso —, pelo lado do Node e por
+// sinal POSITIVO dos dois desfechos (gotcha #62). Prazo fixo mediria o runner.
+const fotoDecidiu = () => {
+  const card = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  const img = card && card.querySelector('.card-image');
+  return !!(card && (card.querySelector('.card-sem-foto') || (img && img.complete && img.naturalWidth > 0)));
+};
+const conferirCardDeFoto = async (rotulo, arquivoEsperado) => {
+  await esperarNaPagina(pgFoto, fotoDecidiu, 8000);
+  await dormir(300);   // folga pra um aviso tardio aparecer, se o defeito voltar
+  const v = await lerFotoEm(pgFoto);
+  diz(`${rotulo}: o card pede a foto EM DECISÃO, com o sufixo que a varredura guardou`,
+    v.src === arquivoEsperado + sufixo, JSON.stringify(v));
+  diz(`${rotulo}: e ela ABRE sem rede, sem aviso, com o ✕ vivo`, v.fotoVisivel && !v.temAviso && v.rejVivo,
+    JSON.stringify(v));
+};
+await montarNa(pgFoto, [FOTO_NA_2A, DENUNCIA_NA_3A]);
+await conferirCardDeFoto('foto proposta na 2ª posição', FOTOS_REAIS[1]);
+await montarNa(pgFoto, [DENUNCIA_NA_3A]);
+await conferirCardDeFoto('foto denunciada na 3ª posição', FOTOS_REAIS[2]);
+
+// A app RENASCE sem rede: nada em memória, nem a fila nem a janela. É o
+// caminho de abertura de verdade (`offlineTentarAbrirSemRede`), e depois dele
+// o baralho anda até o primeiro pedido de foto — os 4 da frente não têm foto.
+const reaberta = await pgFoto.evaluate(async () => {
+  offlineJanelaServida = null; offlineUltimoResultado = null;
+  AppState.queue = []; AppState.currentPlace = null; AppState.serverTotal = 0; AppState.loadError = true;
+  const abriu = await offlineTentarAbrirSemRede();
+  return { abriu, n: AppState.queue.length, janela: offlineJanelaServida };
+});
+diz('REABERTA sem rede: volta a fila E a janela da última varredura completa',
+  reaberta.abriu === true && reaberta.n === FILA_6C.length && reaberta.janela === enc6c.janela,
+  JSON.stringify(reaberta));
+await pgFoto.evaluate(() => {
+  while (AppState.queue.length && !/PHOTO$/.test(AppState.queue[0].purType)) AppState.queue.shift();
+  AppState.currentPlace = AppState.queue[0]; showCurrentPlace();
+});
+await conferirCardDeFoto('REABERTA, foto proposta na 2ª posição', FOTOS_REAIS[1]);
+aviao = false;
+await ctxFoto.close();
 
 secao('7. A ESTRADA: marco o toggle, encho, entro no avião e volto');
 // É o teste de ACEITAÇÃO do recurso — a promessa que o owner pediu em palavras:
@@ -374,12 +560,14 @@ secao('7. A ESTRADA: marco o toggle, encho, entro no avião e volto');
 //
 // Metade dos pedidos vem SEM foto de propósito: com foto o 1º slide é a foto e
 // o `.card-map` nasce `hidden`, então só os sem-foto respondem pelo mapa.
-const FOTOS_REAIS = ['/icons/splash/splash-750x1334-dark.png',
-  '/icons/splash/splash-750x1334-light.png', '/icons/splash/splash-828x1792-light.png'];
+// Metade dos que TÊM foto é pedido DE FOTO (`NEW_PHOTO`). A estrada só usava
+// `NEW_PLACE` — justamente o único tipo em que o defeito do aviso não podia
+// aparecer —, e por isso "as fotos guardadas abriram SEM REDE" passava enquanto
+// no aparelho todo card de "Nova foto" vinha vazio. A fixture não DISTINGUIA os
+// casos (pergunta 2 do CLAUDE.md).
 const ESTRADA = Array.from({ length: 12 }, (_, k) => {
-  const p = PLACE(40 + k);
-  return k % 2 === 0 ? { ...p, imageUrls: [BASE + FOTOS_REAIS[k % 3]] }
-                     : { ...p, imageUrls: [], imageUrl: null };
+  if (k % 2 !== 0) return { ...PLACE(40 + k), imageUrls: [], imageUrl: null };
+  return { ...PLACE(40 + k, k % 4 === 0 ? 'NEW_PHOTO' : 'NEW_PLACE'), imageUrls: [BASE + FOTOS_REAIS[k % 3]] };
 });
 const api = [];
 const rotaApi = (r) => { api.push(r.request().url().split('/api/')[1] + (aviao ? ' [AVIAO]' : ''));
@@ -418,13 +606,17 @@ for (let i = 0; i < 6; i++) {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const card = document.querySelector('#cardStack .place-card');
     const foto = card && card.querySelector('.card-image');
-    // `.card-image` existe SEMPRE no template — quem diz se há foto é o src.
-    const src = foto ? String(foto.getAttribute('src') || '') : '';
     const box = card && card.querySelector('.card-map');
     const tl = box ? [...box.querySelectorAll('.card-map-tiles img')] : [];
     const rej = card && card.querySelector('.card-btn-reject');
-    return { temFoto: !!src && !foto.classList.contains('hidden'),
-      fotoOk: !!(foto && foto.naturalWidth > 0), tiles: tl.length,
+    // QUEM TEM FOTO é o PEDIDO que diz, nunca a tela. Classificado pelo que
+    // estava visível, o card de foto com a foto ESCONDIDA pelo aviso caía no
+    // grupo do mapa, e a falha saía como "os mapas desenharam 3/4" — nomeando
+    // o sintoma errado (visto rodando este smoke contra a main de antes).
+    const pl = AppState.currentPlace;
+    return { temFoto: !!(pl && ((pl.imageUrls && pl.imageUrls.length) || pl.imageUrl)),
+      fotoOk: !!(foto && !foto.classList.contains('hidden') && foto.naturalWidth > 0),
+      aviso: !!(card && card.querySelector('.card-sem-foto')), tiles: tl.length,
       tilesOk: tl.filter((x) => x.naturalWidth > 0).length, rejVivo: !!(rej && !rej.disabled) };
   }));
   const antes = await page.evaluate(() => AppState.queue.length);
@@ -435,8 +627,8 @@ for (let i = 0; i < 6; i++) {
 }
 const comFoto = naEstrada.filter((v) => v.temFoto);
 const soMapa = naEstrada.filter((v) => !v.temFoto);
-diz(`as fotos guardadas abriram SEM REDE (${comFoto.filter((v) => v.fotoOk).length}/${comFoto.length})`,
-  comFoto.length > 0 && comFoto.every((v) => v.fotoOk), JSON.stringify(naEstrada));
+diz(`as fotos guardadas abriram SEM REDE, sem aviso (${comFoto.filter((v) => v.fotoOk && !v.aviso).length}/${comFoto.length})`,
+  comFoto.length > 0 && comFoto.every((v) => v.fotoOk && !v.aviso), JSON.stringify(naEstrada));
 diz(`os mapas guardados desenharam SEM REDE (${soMapa.filter((v) => v.tilesOk > 0).length}/${soMapa.length})`,
   soMapa.length > 0 && soMapa.every((v) => v.tilesOk > 0), JSON.stringify(soMapa.map((v) => v.tilesOk)));
 diz('nenhuma requisição de tile saiu no avião — tudo veio do cache', rotaTile === tileAntes,
@@ -491,6 +683,102 @@ diz(`as 6 saíram de verdade PELA REDE (${saiuMesmo} tentativas)`, saiuMesmo >= 
 diz('o placar não contou duas vezes', depoisDaEstrada.rej === 6, 'rejeitados=' + depoisDaEstrada.rej);
 await ctx.unroute('**/api/*', rotaApi);
 await page.evaluate(() => { API.setSession(null); });
+
+secao('7b. O REPORTE COM COMENTÁRIO (caixa curta) acha TODOS os seus tiles sem rede');
+// A caixa do mapa é o que sobra depois do texto, e ENCOLHE no card com
+// comentário de reporte ou diff — no aparelho do owner, 378×337 num card de foto
+// e 378×189 no reporte da Marina. Caixa menor pode escolher OUTRO ZOOM, e a
+// varredura calculava os tiles de todos os pedidos com a caixa do card que
+// estivesse na frente: na fila real dele, 7 de 172 pedidos ficavam com buraco
+// no mapa numa caixa de 189px. Hoje a varredura guarda a FAIXA de alturas.
+//
+// A geometria é ACHADA AQUI, com as caixas que esta tela deu, e a troca de zoom
+// é PRÉ-CONDIÇÃO: sem ela, os tiles da caixa curta seriam subconjunto dos da
+// alta e qualquer código passaria (gotcha #28 — teste que não pode reprovar).
+const ALTO = { ...PLACE(60), imageUrls: [BASE + FOTOS_REAIS[0]] };
+const CURTA = { ...PLACE(61, 'FLAGGED_PLACE'), updateTypeKey: 'FLAG', reqType: 'REQUEST', reqSubType: 'FLAG',
+  flagType: 'CLOSED', imageUrls: [], imageUrl: null,
+  flagComment: 'Mudou de nome e de dono. Agora é outro lugar, com outro horário e outra entrada pela rua de trás.' };
+await montar([ALTO]);
+const cxAlta = await page.evaluate(() => { const c = cardDaFrente().querySelector('.card-photo');
+  return { w: c.clientWidth, h: c.clientHeight }; });
+await montar([CURTA]);
+const cxCurta = await page.evaluate(() => { const b = cardDaFrente().querySelector('.card-map');
+  return { w: b.clientWidth, h: b.clientHeight }; });
+const geo = await page.evaluate(({ a, c }) => {
+  const C = [-22.90, -43.20];
+  for (let dm = 20; dm <= 800; dm += 5) {
+    const e = [C[0] + dm / 111320, C[1]];
+    const za = mapaMontar([C, e], a.w, a.h, 'row'), zc = mapaMontar([C, e], c.w, c.h, 'row');
+    if (za && zc && za.z !== zc.z) return { centro: C, entradas: [{ ll: e, estado: 'ok' }], dm, za: za.z, zc: zc.z };
+  }
+  return null;
+}, { a: cxAlta, c: cxCurta });
+diz('PRÉ-CONDIÇÃO: a caixa do reporte é mais CURTA e o zoom muda entre as duas',
+  !!geo && cxCurta.h < cxAlta.h, JSON.stringify({ cxAlta, cxCurta, geo }));
+CURTA.mapa = geo ? { centro: geo.centro, entradas: geo.entradas } : CURTA.mapa;
+// a varredura roda com o card ALTO na frente, como no aparelho
+await montar([ALTO, CURTA]);
+await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+  offlineMarcarGesto(); return offlineVarrer(); });
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
+aviao = true; await ctx.setOffline(true);
+await montar([CURTA]);
+const tilesDaCurta = () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
+  if (!b || !b.dataset.mapaW) return null;
+  const pedidos = tilesDoCard(AppState.currentPlace, +b.dataset.mapaW, +b.dataset.mapaH).length;
+  const ok = [...b.querySelectorAll('.card-map-tiles img')].filter((x) => x.naturalWidth > 0).length;
+  return { pedidos, ok }; };
+// sinal positivo: todos os pedidos desenhados. Tile que falha SAI do DOM, então
+// no defeito isto não se cumpre e a espera bate no teto — daí o teto curto.
+await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
+  if (!b || !b.dataset.mapaW) return false;
+  const n = tilesDoCard(AppState.currentPlace, +b.dataset.mapaW, +b.dataset.mapaH).length;
+  return n > 0 && [...b.querySelectorAll('.card-map-tiles img')].filter((x) => x.naturalWidth > 0).length === n; }, 8000);
+const curta = await page.evaluate(tilesDaCurta);
+diz('TODOS os tiles do mapa curto aparecem sem rede (o card da Marina)',
+  !!curta && curta.pedidos > 0 && curta.ok === curta.pedidos, JSON.stringify(curta));
+aviao = false; await ctx.setOffline(false);
+
+secao('7c. O ANDROID ENCERRA O SERVICE WORKER OCIOSO — e o mapa guardado não pode sumir');
+// Service worker é EFÊMERO: o Chrome o encerra depois de ~30s parado e o recria
+// no próximo evento, com as variáveis globais ZERADAS. A lista de tiles
+// guardados vivia numa dessas e só era lida no `activate` (que não roda numa
+// recriação) — então, depois da primeira pausa de meio minuto, o worker
+// acordava sem saber de tile nenhum e, sem rede, o mapa sumia. É o card da
+// Marina no relato: mapa sem um tile, com 243 guardados no cache. Nenhum teste
+// pegava porque num teste curto o worker não chega a adormecer — aqui ele é
+// encerrado à força, pelo DevTools Protocol, que é o que o Android faz sozinho.
+await montar([SO_MAPA(70), SO_MAPA(71)]);
+await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+  offlineMarcarGesto(); return offlineVarrer(); });
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
+aviao = true; await ctx.setOffline(true);
+const tileNaFrente = () => page.evaluate(() => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
+  const tl = b ? [...b.querySelectorAll('.card-map-tiles img')] : [];
+  return { tiles: tl.length, ok: tl.filter((x) => x.naturalWidth > 0).length }; });
+await montar([SO_MAPA(70)]);
+await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
+  return !!b && [...b.querySelectorAll('.card-map-tiles img')].some((x) => x.naturalWidth > 0); }, 8000);
+const comWorkerVivo = await tileNaFrente();
+diz('CONTROLE: com o worker vivo, o tile guardado aparece sem rede', comWorkerVivo.ok > 0, JSON.stringify(comWorkerVivo));
+const cdp = await ctx.newCDPSession(page);
+let estadosDoWorker = [];
+cdp.on('ServiceWorker.workerVersionUpdated', (e) => { estadosDoWorker = e.versions.map((v) => v.runningStatus); });
+await cdp.send('ServiceWorker.enable');
+await cdp.send('ServiceWorker.stopAllWorkers');
+// CONTROLE do instrumento: o worker foi MESMO encerrado. Sem isto, a asserção
+// de baixo passaria com ele vivo — e mediria o caso que já funcionava.
+for (let i = 0; i < 30 && !estadosDoWorker.includes('stopped'); i++) await dormir(100);
+diz('CONTROLE: o service worker foi de fato ENCERRADO', estadosDoWorker.includes('stopped'),
+  JSON.stringify(estadosDoWorker));
+await montar([SO_MAPA(71)]);
+await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
+  return !!b && [...b.querySelectorAll('.card-map-tiles img')].some((x) => x.naturalWidth > 0); }, 8000);
+const acordou = await tileNaFrente();
+diz('o worker ACORDOU sabendo dos tiles: o mapa guardado aparece sem rede', acordou.ok > 0 && acordou.ok === acordou.tiles,
+  JSON.stringify(acordou));
+aviao = false; await ctx.setOffline(false);
 
 secao('8. O DEPLOY NÃO APAGA O MAPA PROVISIONADO');
 // O `activate` apaga TODO cache ≠ CACHE_NAME. Sem a isenção do TILES_CACHE,
@@ -594,8 +882,10 @@ if (falhas) {
   console.log(`\n✗ smoke do offline: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log('\n✓ smoke do offline: 11 seções com o service worker LIGADO — o MAPINHA DO CARD e o'
+console.log('\n✓ smoke do offline: 14 seções (13 com o service worker LIGADO) — o MAPINHA DO CARD e o'
   + ' MAPA AMPLIADO desenhando tile (com contraprova que vai a zero), mapa intacto com o'
   + ' toggle desligado e com o cache cheio, fila em IndexedDB, sufixo da foto como contrato'
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
-  + ' card de foto travado com o ↑ vivo, A ESTRADA inteira (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), e esquecer PARANDO o download em voo');
+  + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
+  + ' EM DECISÃO (e a app reaberta sem rede achando-a — num contexto à parte, com o SW fora, pelo'
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), e esquecer PARANDO o download em voo');

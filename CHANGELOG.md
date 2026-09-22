@@ -8,6 +8,22 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.22-02
+
+### Corrigido
+- **A foto dos pedidos de "Nova foto" volta a aparecer sem sinal.** Com o **Disponível offline** ligado, a app guardava as fotos no aparelho — e, ao ficar sem rede, **escondia** todas elas atrás do aviso "A foto precisa de sinal", sem nem tentar abrir. O aviso agora só aparece quando a foto **realmente** não veio; quando ela está guardada, ela aparece e o ✕/✓ ficam liberados.
+- **A preparação guarda a foto CERTA nos pedidos de foto.** Quando o local já tinha outras fotos, ela guardava a primeira do local — e não a que está sendo decidida. Sem sinal, o card abria justamente na foto que tinha ficado de fora. Medido numa fila real: 13 de 76 pedidos de foto eram assim.
+- **Abrir a app já sem sinal mostra as fotos guardadas.** Se a app fosse fechada — ou o Android a encerrasse em segundo plano — e reaberta sem rede, os pedidos voltavam mas as fotos não: todo card de foto dizia "A foto precisa de sinal".
+- **O mapa guardado não some mais depois de uma pausa.** O Android "adormece" a parte da app que serve o mapa offline quando ela fica meio minuto parada — e ela acordava sem lembrar quais pedaços do mapa estavam guardados. Resultado: no modo avião, o mapa aparecia só com os marcadores, sem as ruas. Agora ela relê a lista toda vez que acorda.
+- **Reportes com comentário e pedidos com alteração passam a ter o mapa inteiro sem sinal.** Nesses cards a área do mapa é mais baixa, e às vezes precisa de um enquadramento diferente — com pedaços do mapa que não tinham sido guardados. A preparação agora guarda o que qualquer altura de card vai pedir.
+- **O ✕ e o ✓ não destravam mais sozinhos num card sem foto.** Terminar a ação do pedido anterior liberava os dois botões de volta, e dava pra decidir uma foto que não estava na tela.
+
+### Notas
+- A preparação do offline guarda **cerca de 40% mais pedaços de mapa** do que antes (medido na fila real: de 221 para 313). É o preço de o mapa sair certo nos cards com comentário; o aumento acontece uma vez, na preparação.
+- **Pra todo mundo, com ou sem o offline:** nos pedidos de foto, a app agora pré-carrega a foto que o card vai mostrar (a nova ou a denunciada), e não a primeira do local.
+- Com o offline ligado, a tira de miniaturas da foto ampliada deixa de baixar uma segunda cópia de cada foto.
+- Fora isso, nada muda pra quem não ligou o **Disponível offline**.
+
 ## v2026.09.20-06
 
 ### Adicionado
