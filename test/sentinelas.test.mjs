@@ -272,3 +272,43 @@ test('diagnóstico: as duas sentinelas novas leem o que o COLETOR mede de verdad
   assert.match(corpo, /fora\.tilesGuardadosQueFalharam = diagTilesGuardadosQueFalharam\.slice\(-5\)/,
     'o coletor parou de levar o anel de tiles guardados que falharam');
 });
+
+// ── O esqueleto POR CIMA do card (relato de 2026-09-22, a app reaberta sem rede) ──
+// O arquivo daquele relato dizia "painel: carregando" e `alertas: []` — e havia
+// um card montado, com o mapa carregado do cache, embaixo do esqueleto (z-50).
+// A leitura só achou o card cavando o `dom` cru. Com o conserto, card montado
+// e esqueleto visível ao mesmo tempo passou a ser impossível pela app.
+
+test('sentinelas: esqueleto de "carregando" POR CIMA de um card montado — o defeito do relato', () => {
+  const c = sao();
+  c.telaDoCard = { esqueleto: true, card: true };
+  assert.deepEqual(chaves(montar()(c)), ['esqueletoSobreCard']);
+});
+
+test('sentinelas: esqueleto SEM card é carregar de verdade, e card sem esqueleto é o normal — cala', () => {
+  // Alertar no carregamento legítimo (a fila ainda chegando, sem card) seria
+  // acusar toda abertura da app, e a seção morreria de falso positivo.
+  for (const [esqueleto, card, porque] of [
+    [true, false, 'a fila ainda está chegando: é o esqueleto fazendo o trabalho dele'],
+    [false, true, 'o card na tela, sem nada por cima: o normal'],
+    [false, false, 'painel vazio ou tela de fila vazia'],
+  ]) {
+    const c = sao();
+    c.telaDoCard = { esqueleto, card };
+    assert.deepEqual(montar()(c), [], porque);
+  }
+  const semDado = sao();   // relatório de versão antiga: o campo não existe
+  assert.deepEqual(montar()(semDado), [], 'sem o dado, a sentinela não inventa alerta');
+});
+
+test('diagnóstico: a sentinela do esqueleto lê o que o COLETOR mede (esqueleto E card)', () => {
+  const i = APP.indexOf('function diagComputado(');
+  const corpo = APP.slice(i, APP.indexOf('\n}', i)).split('\n')
+    .filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(corpo, /fora\.telaDoCard = \{/, 'o coletor parou de levar a tela do card');
+  // Classe E caixa: só a classe diria "visível" pra um esqueleto fora da tela,
+  // e só a caixa não distingue o `hidden` que a app usa pra esconder.
+  assert.match(corpo, /esqueleto: !!\(esq && !esq\.classList\.contains\('hidden'\) && rEsq\.width > 0 && rEsq\.height > 0\)/,
+    'o esqueleto tem que ser medido pela classe `hidden` E pela caixa');
+  assert.match(corpo, /card: !!frente,/, 'o card medido tem que ser o da FRENTE (`cardDaFrente()`)');
+});

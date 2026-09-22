@@ -814,3 +814,63 @@ test('o relatório traz o offline, o service worker pela boca dele e o teto dos 
   const v = Number((APP.match(/const DIAG_VERSAO = (\d+);/) || [])[1]);
   assert.ok(v >= 3, `a versão do diagnóstico não subiu com as seções novas (${v})`);
 });
+
+// ── As sentinelas NO INSTANTE da captura, e a tela de carregamento no diário ──
+// (v2026.09.22-05, depois do relato do "não carrega nada"). O toque no botão
+// foi às 20:27:24, com o defeito na tela e sem modal nenhum; o relatório saiu
+// um minuto depois, com o modal de Filtros por cima — e sem alerta nenhum.
+test('cada captura leva o `computado` e os ALERTAS daquele instante', () => {
+  const cap = fatiarFn(semCom, 'dlogCapturar');
+  const iTela = cap.indexOf('...dlogTelaAtual(),');
+  const iInst = cap.indexOf('...diagNoInstante(),');
+  const iDom = cap.indexOf('dom: document.documentElement.outerHTML');
+  assert.ok(iTela > 0 && iInst > iTela, 'a captura deixou de rodar as sentinelas no instante');
+  assert.ok(iDom > iInst, 'as sentinelas têm que rodar ANTES de copiar o `dom` (é o mesmo instante)');
+  const inst = fatiarFn(semCom, 'diagNoInstante');
+  assert.match(inst, /const computado = diagComputado\(\);\s+return \{ computado, alertas: diagSentinelas\(computado\) \};/,
+    'as sentinelas da captura têm que ler o MESMO `computado` que vai junto');
+  // Sentinela quebrada não pode derrubar a captura: vira alerta, como no relatório.
+  assert.match(inst, /catch \(e\) \{\s+return \{ alertas: \[\{ chave: '_erro'/,
+    'falha na coleta tem que virar alerta `_erro`, e a captura seguir');
+  assert.match(fatiarFn(semCom, 'dlogTelaAtual'), /cardMontado: !!cardDaFrente\(\),/,
+    'a tela deixou de dizer se há card montado por baixo do painel');
+});
+
+test('o resumo do relatório junta os alertas das CAPTURAS', () => {
+  const corpo = fatiarFn(semCom, 'diagCorpo');
+  assert.match(corpo, /alertasNasCapturas: dlogMomentos\s+\.filter\(\(m\) => Array\.isArray\(m\.alertas\) && m\.alertas\.length\)/,
+    'o resumo parou de mostrar o que as capturas acusaram');
+  const v = Number((APP.match(/const DIAG_VERSAO = (\d+);/) || [])[1]);
+  assert.ok(v >= 4, `a versão do diagnóstico não subiu com as capturas novas (${v})`);
+});
+
+test('a tela de carregamento entra no diário só na TRANSIÇÃO — nunca por swipe', () => {
+  // COMPORTAMENTO, não texto: o `renderCurrentCard` chama `showLoading(false)`
+  // a cada card montado, e o `dfato` é anel sem portão. Anotado por chamada,
+  // 200 pedidos tratados engoliriam o diário inteiro.
+  const src = fatiarFn(semCom, 'showLoading');
+  const classes = new Set();   // nasce VISÍVEL, como no HTML
+  const el = { classList: {
+    contains: (c) => classes.has(c),
+    toggle: (c, on) => { if (on) classes.add(c); else classes.delete(c); },
+  } };
+  const anotado = [];
+  const showLoading = new Function('document', 'dfato', src + '\nreturn showLoading;')(
+    { getElementById: () => el }, (k, o) => anotado.push([k, o]));
+  showLoading(false); showLoading(false); showLoading(false);   // três cards seguidos
+  assert.deepEqual(anotado, [['tela.carregando', { visivel: false }]], 'anotou por chamada, não por transição');
+  showLoading(true); showLoading(true);
+  assert.equal(anotado.length, 2, 'a volta do esqueleto tem que ser anotada UMA vez');
+  assert.deepEqual(anotado[1], ['tela.carregando', { visivel: true }]);
+});
+
+test('o diário diz desde quando o esqueleto está lá, e quando o primeiro card montou', () => {
+  assert.match(fatiarFn(semCom, 'diagCapturarErros'),
+    /if \(document\.getElementById\('loadingCard'\)\?\.classList\.contains\('hidden'\) === false\) \{\s+dfato\('tela\.carregando', \{ visivel: true, naAbertura: true \}\);/,
+    'o esqueleto nasce visível: sem a anotação da abertura, o diário não diz desde quando');
+  const r = fatiarFn(semCom, 'renderCurrentCard');
+  assert.match(r, /if \(!primeiroCardAnotado\) \{\s+primeiroCardAnotado = true;\s+dfato\('tela\.primeiroCard'/,
+    'o primeiro card da página tem que ser anotado UMA vez');
+  assert.ok(r.indexOf("dfato('tela.primeiroCard'") > r.indexOf('showLoading(false);'),
+    'o primeiro card é anotado DEPOIS de o esqueleto sair');
+});

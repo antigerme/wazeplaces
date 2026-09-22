@@ -8,6 +8,24 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.22-05
+
+### Melhorado — relatório do modo dev
+- **Cada captura pelo botão agora confere os alertas naquele instante.** Antes, os alertas só eram conferidos quando o relatório era gerado — e ele costuma ser gerado depois, com o menu de Filtros aberto, quando parte dos alertas fica cega. O relatório passa a dizer, logo no resumo, o que estava errado **no momento em que você tocou no botão**.
+- **Cada captura diz se havia um pedido montado** por baixo do que estava na tela, e não só a camada de cima.
+- **O diário anota quando a tela de carregamento aparece e some**, e o instante em que o primeiro pedido ficou pronto. Só nessas mudanças — nunca a cada pedido tratado.
+
+### Notas
+- Nada muda na tela: tudo isso só aparece no relatório do modo dev.
+
+## v2026.09.22-04
+
+### Corrigido
+- **Reabrir a app sem sinal não fica mais parado no "carregando".** Com o **Disponível offline** ligado, quem fechava a app e a abria de novo sem rede via a tela de carregamento para sempre — e os pedidos guardados estavam ali, prontos, só que **por baixo** dela. Agora o primeiro pedido aparece normalmente, com o mapa guardado.
+
+### Melhorado — relatório do modo dev
+- **Um alerta novo avisa quando a tela de carregamento fica por cima de um pedido já aberto.** No relatório deste defeito, o resumo dizia só "carregando", e foi preciso vasculhar o arquivo pra achar o pedido escondido.
+
 ## v2026.09.22-03
 
 ### Corrigido
