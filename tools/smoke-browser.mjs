@@ -25,6 +25,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as dormir } from 'node:timers/promises';
+import { esperarFimDaSaida } from './esperar-saida.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8123);
@@ -5233,49 +5234,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //   · `abort` sem `setOffline` simula SINAL FRACO (`navigator.onLine` fica
 //     true e as 2 retentativas ainda rodam, ~5s por ação), não modo avião.
 //     Os dois cenários existem na estrada; este bloco mede o modo avião.
-// Espera o esvaziamento ACABAR, por SINAL POSITIVO: ou a fila zera, ou o
-// `dfato` registra o fim (`saida.saiu`) ou a falha (`saida.erro`). Prazo fixo
-// não serve — ele mede a velocidade do runner, e no CI o `setTimeout` da pausa
-// é estrangulado a ponto de 8 itens não caberem em 40s. O teto de 3 min é rede
-// contra travar de vez, não expectativa: local termina em ~4s.
-async function esperarFimDaSaida(page, tetoMs = 180000) {
-  // POLL PELO LADO DO NODE, e não `page.waitForFunction`. Três motivos, todos
-  // medidos nesta PR:
-  //  · o padrão do `waitForFunction` é pollar por `requestAnimationFrame`, que
-  //    NÃO dispara em página de segundo plano — a espera pode nem avaliar;
-  //  · com `polling: <ms>` ele passa a usar timer DA PÁGINA, que é justamente
-  //    o que o runner estrangula — o mesmo mal que se está esperando passar;
-  //  · e o `.catch(() => {})` que se põe em volta engole qualquer rejeição, o
-  //    que transformou "esperei e desisti" em "não esperei" sem deixar rastro.
-  //    A versão anterior disto voltava NA HORA e o run manteve os mesmos 8m32s
-  //    do anterior — foi essa igualdade de tempo que denunciou.
-  // Um laço aqui no Node não depende de nada disso, e DIZ por que terminou.
-  const conta = () => page.evaluate(() => {
-    let fim = 0, vazia = false;
-    try { vazia = JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0; } catch (e) {}
-    try {
-      const d = typeof dfatoAnel !== 'undefined' ? dfatoAnel : null;
-      if (d === null) return { verDiario: false, vazia, fim: 0 };
-      fim = d.filter((e) => e.k === 'saida.saiu' || e.k === 'saida.erro').length;
-    } catch (e) { return { verDiario: false, vazia, fim: 0 }; }
-    return { verDiario: true, vazia, fim };
-  });
-  // A base sai DEPOIS de qualquer navegação: o anel é cumulativo (um
-  // `saida.saiu` anterior satisfaria a condição na hora) e a recarga o zera.
-  let base = null;
-  try { base = await conta(); } catch (e) { return { motivo: 'evaluate-falhou', erro: String(e).slice(0, 80) }; }
-  const t0 = Date.now();
-  for (;;) {
-    let st;
-    try { st = await conta(); } catch (e) { return { motivo: 'evaluate-falhou', erro: String(e).slice(0, 80) }; }
-    if (st.vazia) return { motivo: 'fila-vazia', ms: Date.now() - t0 };
-    if (st.verDiario && st.fim > base.fim) return { motivo: 'diario-cresceu', ms: Date.now() - t0 };
-    if (Date.now() - t0 > tetoMs) {
-      return { motivo: 'TETO', ms: Date.now() - t0, verDiario: st.verDiario, fim: st.fim, base: base.fim };
-    }
-    await dormir(250);
-  }
-}
+// A espera do fim do esvaziamento mora em `tools/esperar-saida.mjs` (fonte
+// única): o `smoke-offline.mjs` precisa da MESMA espera, e quando ela era local
+// aqui eu repeti lá, palavra por palavra, o erro que o comentário dela descreve.
 
 {
   const CENARIOS = [{ id: 'fila-saida', n: 8 }];

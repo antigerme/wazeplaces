@@ -353,3 +353,36 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     'o CI não roda o smoke do offline — sem isso ele vira arquivo morto no dia em'
     + ' que alguém esquecer de rodá-lo à mão, que é exatamente como o buraco nasceu');
 });
+
+// A ESPERA DO ESVAZIAMENTO É FONTE ÚNICA, e este guard existe porque a lição
+// não pegou por estar escrita: o comentário dentro do `smoke-browser.mjs` já
+// listava as armadilhas do `page.waitForFunction`, e eu as repeti todas ao
+// escrever a seção da ESTRADA no smoke do offline — o CI reprovou com `fila:5`.
+// Reimplementar a espera é como ela volta a ser feita errado.
+test('a espera do esvaziamento é FONTE ÚNICA, nunca reimplementada num smoke', () => {
+  const OFF = readFileSync(new URL('../tools/smoke-offline.mjs', import.meta.url), 'utf8');
+  const BROW = readFileSync(new URL('../tools/smoke-browser.mjs', import.meta.url), 'utf8');
+  const MOD = readFileSync(new URL('../tools/esperar-saida.mjs', import.meta.url), 'utf8');
+
+  for (const [nome, src] of [['smoke-offline', OFF], ['smoke-browser', BROW]]) {
+    assert.match(src, /import \{ esperarFimDaSaida \} from '\.\/esperar-saida\.mjs'/,
+      `${nome} não importa a fonte única da espera do esvaziamento`);
+    // Reimplementar com `waitForFunction` sobre a fila é exatamente o que
+    // quebrou: rAF não dispara em segundo plano, `polling` usa o timer da
+    // página (que o runner estrangula), e as opções na posição do ARGUMENTO
+    // não valem nada. Sem comentário na conta (gotcha #67).
+    const codigo = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    assert.doesNotMatch(codigo, /waitForFunction\([^)]*waze_places_saida/,
+      `${nome} voltou a esperar a fila de saída com page.waitForFunction — use esperarFimDaSaida`);
+  }
+  // E o módulo tem que continuar pollando pelo lado do NODE, por sinal
+  // POSITIVO e dizendo o motivo. Sem isto ele vira outro waitForFunction.
+  // Sem o comentário na conta: ele CITA `waitForFunction` justamente pra
+  // explicar por que não se usa, e o guard reprovava o arquivo certo — gotcha
+  // #67 dentro do guard escrito pra evitar o erro que o #67 descreve.
+  const modCodigo = MOD.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.doesNotMatch(modCodigo, /waitForFunction/,
+    'a fonte única passou a usar waitForFunction — é justamente o que ela existe pra evitar');
+  assert.match(MOD, /motivo: 'fila-vazia'/, 'sumiu o sinal positivo de fim');
+  assert.match(MOD, /motivo: 'TETO'/, 'sumiu o teto — sem ele a espera pode não terminar nunca');
+});

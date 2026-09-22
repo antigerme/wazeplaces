@@ -27,6 +27,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as dormir } from 'node:timers/promises';
+import { esperarFimDaSaida } from './esperar-saida.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -147,9 +148,9 @@ page.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.tex
 await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
 // sinal POSITIVO de que o SW assumiu — esperar por relógio mediria a máquina
 await page.waitForFunction(() => navigator.serviceWorker && navigator.serviceWorker.controller !== null,
-  { timeout: 20000 }).catch(() => {});
+  null, { timeout: 20000 }).catch(() => {});
 await page.reload({ waitUntil: 'domcontentloaded' });
-await page.waitForFunction(() => typeof offlineVarrer === 'function', { timeout: 10000 }).catch(() => {});
+await page.waitForFunction(() => typeof offlineVarrer === 'function', null, { timeout: 10000 }).catch(() => {});
 const controlado = await page.evaluate(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller));
 diz('o service worker ASSUMIU (sem isto nada abaixo mede o que promete)', controlado);
 
@@ -261,7 +262,7 @@ console.log('\n── 4. A VARREDURA ENCHE, E O TILE VOLTA DO CACHE ──');
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null; });
 rotaTile = 0;
 await page.evaluate(() => { offlineMarcarGesto(); return offlineVarrer(); });
-await page.waitForFunction(() => offlineUltimoResultado !== null, { timeout: 25000, polling: 200 }).catch(() => {});
+await page.waitForFunction(() => offlineUltimoResultado !== null, null, { timeout: 25000, polling: 200 }).catch(() => {});
 const varredura = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
   return { n: (await c.keys()).length, res: offlineUltimoResultado, janela: offlineJanelaServida };
@@ -382,7 +383,7 @@ await page.evaluate(() => {
 await montar(ESTRADA);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
-await page.waitForFunction(() => offlineUltimoResultado !== null, { timeout: 120000, polling: 250 }).catch(() => {});
+await page.waitForFunction(() => offlineUltimoResultado !== null, null, { timeout: 120000, polling: 250 }).catch(() => {});
 const estradaEncheu = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
   return { n: (await c.keys()).length, res: offlineUltimoResultado };
@@ -430,15 +431,45 @@ diz('as 6 ações viraram FILA DE SAÍDA — nada se perdeu', naFila === 6, 'fil
 
 aviao = false; await ctx.setOffline(false);
 await page.evaluate(() => window.dispatchEvent(new Event('online')));
-await page.waitForFunction(() => { try {
-  return JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 0; } catch (e) { return false; } },
-  { timeout: 60000, polling: 250 }).catch(() => {});
+// Espera o esvaziamento ACABAR pela FONTE ÚNICA, nunca por prazo nem por
+// `page.waitForFunction`: prazo mede a velocidade do runner (o `setTimeout` de
+// 400ms por item é estrangulado lá), e o `waitForFunction` polla por rAF, usa
+// o timer DA PÁGINA quando se pede `polling`, e — a que reprovou este bloco no
+// CI — recebe as opções como ARGUMENTO na forma de 2 parâmetros, então nem o
+// timeout nem o polling que você escreveu valem. O motivo é IMPRESSO: falha
+// futura chega explicada em vez de virar adivinhação.
+// O laço do esvaziamento dá `break` no PRIMEIRO `transient` e deixa o resto
+// pra próxima — é decisão do produto (insistir em série gasta o free tier pra
+// falhar). No aparelho real "a próxima" sempre chega: outro `online`, a prova
+// de rede, a abertura da app. O teste dava UM gatilho só, então qualquer
+// oscilação no runner deixava a fila pela metade e a culpa parecia do app —
+// foi o que reprovou o CI (`fila:5`, 1 de 6). Aqui ele dá os gatilhos que o
+// mundo dá, e IMPRIME quantas rodadas precisou: uma regressão que passe a
+// exigir cinco aparece, em vez de se esconder atrás de um laço complacente.
+let rodadas = 0;
+let fimDaSaida = null;
+for (; rodadas < 6; rodadas++) {
+  fimDaSaida = await esperarFimDaSaida(page, 25000);   // teto é rede contra travar, não expectativa: local fecha em ~2,3s
+  const resta = await page.evaluate(() => { try {
+    return JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length; } catch (e) { return -1; } });
+  if (resta === 0) break;
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await dormir(400);
+}
+console.log(`  · estrada [esvaziamento] rodadas=${rodadas + 1} ${JSON.stringify(fimDaSaida)}`);
 const depoisDaEstrada = await page.evaluate(() => ({
   fila: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length,
   rej: AppState.stats.rejected }));
+// Conta TENTATIVAS, não sucessos — e por isso o piso é `>= 6`, não `=== 6`.
+// A entrega é AT-LEAST-ONCE por decisão de produto: um item que quebra em
+// `transient` volta na rodada seguinte, e cravar a igualdade faria o teste
+// reprovar justamente pelo comportamento que a app promete. Quem guarda o
+// desperdício é o bloco da fila de saída no `smoke-browser.mjs` ("UMA
+// requisição por ação"); quem guarda o que importa aqui é a linha de baixo —
+// o placar NÃO pode contar duas vezes, e essa segue exata.
 const saiuMesmo = api.filter((u) => /validar-place/.test(u) && !/AVIAO/.test(u)).length;
 diz('a fila de saída ESVAZIOU quando a rede voltou', depoisDaEstrada.fila === 0, JSON.stringify(depoisDaEstrada));
-diz(`as 6 saíram de verdade PELA REDE (${saiuMesmo})`, saiuMesmo === 6, JSON.stringify(api.slice(-3)));
+diz(`as 6 saíram de verdade PELA REDE (${saiuMesmo} tentativas)`, saiuMesmo >= 6, JSON.stringify(api.slice(-3)));
 diz('o placar não contou duas vezes', depoisDaEstrada.rej === 6, 'rejeitados=' + depoisDaEstrada.rej);
 await ctx.unroute('**/api/*', rotaApi);
 await page.evaluate(() => { API.setSession(null); });
@@ -516,7 +547,7 @@ diz('e o cache do MAPA sobreviveu INTEIRO ao deploy',
 // precisa — sem isto o `offlineVarrer()` de lá roda com fila vazia e a
 // asserção "o cache ficou vazio" passa por vácuo.
 await page.waitForLoadState('load').catch(() => {});
-await page.waitForFunction(() => typeof offlineVarrer === 'function',
+await page.waitForFunction(() => typeof offlineVarrer === 'function', null,
   { timeout: 20000, polling: 200 }).catch(() => {});
 await page.evaluate(() => { AppState.preferences.offlineDisponivel = true; }).catch(() => {});
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
