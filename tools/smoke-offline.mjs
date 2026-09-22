@@ -25,7 +25,7 @@
 // Regra que vale pra todo caso aqui: medir FATO, não intenção. Guard de fonte
 // não enxerga CSP, não enxerga cache e não enxerga service worker.
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -440,19 +440,58 @@ for (const variante of [
         dedoNoCartao: onde(frente && frente.querySelector('.card-name')),
         alertas: diagSentinelas(diagComputado()).map((a) => a.chave) });
       const agora = medir();
+      // A linha do tempo que o diário conta da ABERTURA — lida ANTES do
+      // controle, que recoloca e tira o esqueleto (e anota as duas coisas).
+      const linhaDoTempo = dfatoAnel.filter((e) => /^tela\.(carregando|primeiroCard)$|^offline\.abriu$/.test(e.k))
+        .map((e) => ({ k: e.k, visivel: e.visivel, naAbertura: e.naAbertura }));
+      const resumoCap = (c) => c && { painel: c.painel, cardMontado: c.cardMontado,
+        alertas: (c.alertas || []).map((a) => a.chave) };
+      // A captura pelo botão, no estado são: nada a acusar, e o card montado.
+      const capSa = resumoCap(dlogCapturar('manual'));
       // CONTROLE do instrumento: o esqueleto de volta POR CIMA do card tem que
       // ser VISTO pelo dedo e pela sentinela — senão "o dedo cai no card"
-      // passaria por vácuo no dia em que o esqueleto mudar de camada.
+      // passaria por vácuo no dia em que o esqueleto mudar de camada. E a
+      // captura feita AGORA tem que acusar no instante: é o toque no botão com
+      // o defeito na tela, que o relatório (gerado depois) não vê.
       showLoading(true);
       const comEsqueleto = medir();
+      const capEsq = resumoCap(dlogCapturar('manual'));
       showLoading(false);
       return { onLine: navigator.onLine, fila: AppState.queue.length,
         caiuNaAbertura: dfatoAnel.some((e) => e.k === 'rede.caiu' && e.naAbertura),
         tiles: { pedidos: tl.length, ok: tl.filter((x) => x.naturalWidth > 0).length },
+        linhaDoTempo, capSa, capEsq,
         ...agora, controle: comEsqueleto };
     });
   } catch (e) {
     m = { erro: String((e && e.message) || e).slice(0, 200) };
+  }
+  // O RELATÓRIO de verdade desta página, e o LEITOR rodando nele — uma vez só
+  // (na primeira variante): o alerta da captura tem que chegar ao resumo do
+  // arquivo, e a triagem tem que mostrá-lo sem o token da sessão. É o caminho
+  // inteiro do relato: toque no botão com o defeito na tela, arquivo gerado
+  // depois, e a leitura.
+  let relReaberto = null;
+  if (!variante.parar && m && !m.erro) {
+    const dirR = mkdtempSync(join(tmpdir(), 'diag-reaberta-'));
+    try {
+      const [dl] = await Promise.all([
+        fria.waitForEvent('download', { timeout: 30000 }),
+        fria.evaluate(() => baixarDiagnostico()),
+      ]);
+      const arq = join(dirR, 'diag.zip');
+      await dl.saveAs(arq);
+      const { dados: d } = lerDiagnostico(arq);
+      const triagem = execFileSync(process.execPath, [join(ROOT, 'tools/diag-resumo.mjs'), arq],
+        { encoding: 'utf8', timeout: 20000 });
+      relReaberto = { v: d._versaoDoDiag, nasCapturas: d.resumo?.alertasNasCapturas,
+        triagemAcusa: /nas capturas: .*→ .*esqueletoSobreCard/.test(triagem),
+        vazouToken: triagem.includes('tok-reabrir') };
+    } catch (e) {
+      relReaberto = { erro: String((e && e.message) || e).slice(0, 200) };
+    } finally {
+      rmSync(dirR, { recursive: true, force: true });
+    }
   }
   await fria.close();
   diz(`${variante.nome}: PRÉ-CONDIÇÃO — a página NOVA nasceu sem rede e a fila guardada entrou`,
@@ -468,6 +507,28 @@ for (const variante of [
   diz(`${variante.nome}: CONTROLE — com o esqueleto de volta por cima, o dedo o acerta e a sentinela acusa`,
     m?.controle?.dedoNoX === 'esqueleto' && m?.controle?.alertas?.includes('esqueletoSobreCard'),
     JSON.stringify(m?.controle));
+  // O DIÁRIO conta a abertura sozinho: esqueleto desde o início, o primeiro
+  // card, e o esqueleto SAINDO — no relato, a última linha nunca veio.
+  const lt = m?.linhaDoTempo || [];
+  const iSai = lt.findIndex((e) => e.k === 'tela.carregando' && e.visivel === false);
+  diz(`${variante.nome}: o diário conta a abertura — carregando desde o início, o primeiro card, e o carregando SAINDO`,
+    lt[0]?.k === 'tela.carregando' && lt[0]?.visivel === true && lt[0]?.naAbertura === true
+    && lt.some((e) => e.k === 'tela.primeiroCard') && iSai > 0, JSON.stringify(lt));
+  diz(`${variante.nome}: a captura no estado são não acusa esqueleto, e diz que o card está montado`,
+    m?.capSa?.painel === 'card' && m?.capSa?.cardMontado === true
+    && Array.isArray(m?.capSa?.alertas) && !m.capSa.alertas.includes('esqueletoSobreCard'), JSON.stringify(m?.capSa));
+  diz(`${variante.nome}: CONTROLE — a captura com o esqueleto por cima ACUSA no instante`,
+    m?.capEsq?.painel === 'carregando' && m?.capEsq?.cardMontado === true
+    && m?.capEsq?.alertas?.includes('esqueletoSobreCard'), JSON.stringify(m?.capEsq));
+  if (!variante.parar) {
+    const nc = relReaberto?.nasCapturas;
+    diz(`${variante.nome}: o RELATÓRIO de verdade leva o alerta DA CAPTURA no resumo, e o leitor o mostra sem o token`,
+      relReaberto?.v >= 4 && Array.isArray(nc)
+      && nc.some((c) => c.painel === 'carregando' && c.alertas.includes('esqueletoSobreCard'))
+      && !nc.some((c) => c.painel === 'card' && c.alertas.includes('esqueletoSobreCard'))
+      && relReaberto.triagemAcusa === true && relReaberto.vazouToken === false,
+      JSON.stringify(relReaberto));
+  }
 }
 // Volta ao estado em que a seção 5 deixou: sem rede, sem sessão, `aviao` a cargo da 6.
 await page.evaluate(() => { API.setSession(null); });
@@ -1150,7 +1211,9 @@ try {
   rmSync(dirDiag, { recursive: true, force: true });
 }
 diz('o RELATÓRIO de verdade (baixado em ZIP, lido pela ferramenta) traz as peças novas',
-  relatorio.origem === 'zip' && relatorio.v === 3 && relatorio.rede === true
+  // `>= 3`: a versão que TROUXE estas peças. Cravar o número quebrava a cada
+  // versão nova do formato, que é aditivo por contrato.
+  relatorio.origem === 'zip' && relatorio.v >= 3 && relatorio.rede === true
   && ['pronto', 'parcial', 'ligado'].includes(relatorio.offline)
   && relatorio.offLigado === true && relatorio.offTiles > 0
   // worker × cache: a IGUALDADE está medida nas peças, logo acima; aqui é a

@@ -225,6 +225,10 @@ wazeplaces/
 │   ├── diag-ler.mjs         # FONTE ÚNICA de abrir um diagnóstico. Fareja os BYTES MÁGICOS (não a
 │   │                        #   extensão) e aceita .zip (o formato de hoje), .gz e .json cru — este
 │   │                        #   porque relato ANTIGO é o que se usa pra comparar antes/depois.
+│   ├── diag-resumo.mjs      # FONTE ÚNICA de LER um diagnóstico: a triagem (alertas do relatório E
+│   │                        #   das capturas, tela, offline, worker, diário, chamadas sem corpo).
+│   │                        #   Lista branca de campos + troca final do token por `<TOKEN>`: credencial
+│   │                        #   e dado de terceiro em massa nunca saem. Provado com canários.
 │   ├── diag-replay.mjs      # Reconstrói a TELA do editor a partir do diagnóstico, VIVA: sobe a
 │   │                        #   app, injeta fila/filtros/perfil/tema/idioma no viewport dele e
 │   │                        #   para pra você medir. NÃO fala com a rede. `--tela` salva PNG.
@@ -1060,6 +1064,24 @@ pra quem já sabia o que procurar. Entrou, todo ADITIVO (leitor antigo ignora):
   CORPO da resposta termina. O smoke disparava 300 `fetch` sem ler o corpo e contava na hora — deu
   296 a 300, menos que as 300 disparadas mais as que já havia, e pareceu que o dev não subia o
   teto. Lê o corpo e espera a contagem PARAR.
+
+**A CAPTURA RODA AS SENTINELAS NO INSTANTE** (v2026.09.22-05, `DIAG_VERSAO` 4). Até ali só o
+relatório as rodava — e ele costuma ser gerado com o modal de Filtros por cima, quando as de toque
+calam de propósito. No relato do "não carrega nada" o toque no botão foi às 20:27:24, com o
+defeito na tela e NENHUM modal; o relatório saiu um minuto depois, com o modal, e `alertas: []`.
+Hoje `diagNoInstante()` põe `computado` + `alertas` em cada momento (~1,5 KB contra os ~147 KB do
+`dom`; falha vira `_erro`, nunca derruba a captura), o resumo ganha `alertasNasCapturas`, e a tela
+diz `cardMontado` — o `painel` diz só a camada de CIMA. **O diário da tela anota a TRANSIÇÃO,
+nunca a chamada**: o `renderCurrentCard` chama `showLoading(false)` a cada card (desde a -04),
+ou seja a cada swipe, e o `dfato` é anel sem portão — o teste é COMPORTAMENTAL (fatia o
+`showLoading`, chama três vezes, conta uma anotação). Junto: o estado do esqueleto na abertura e
+`tela.primeiroCard`, uma vez por página — o par que separa "o card nunca montou" de "montou e ficou
+coberto".
+
+**Pra LER o arquivo, `node tools/diag-resumo.mjs <arquivo>`** — e não um leitor avulso. Eu
+escrevia um por relato, e no do "não carrega nada" dois deles me enganaram (as armadilhas estão
+logo acima). O leitor único lê o que a app MEDIU, nunca vasculha o `dom`, e abre relatório antigo
+marcando o que a versão dele não trazia.
 
 `tools/diag-tela.mjs` imprime os alertas ANTES de tudo e os põe no `resumo.json`.
 

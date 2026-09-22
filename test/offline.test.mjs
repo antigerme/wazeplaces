@@ -585,6 +585,17 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     'a medida sã da 5b tem que vir ANTES do controle que recoloca o esqueleto');
   exigir(/diz\(`\$\{variante\.nome\}: CONTROLE — com o esqueleto de volta por cima/,
     'a 5b perdeu o controle que prova que o dedo e a sentinela ENXERGAM o esqueleto');
+  // E o que o RELATÓRIO passa a contar dessa mesma abertura (v2026.09.22-05):
+  // o diário com a tela de carregamento, a captura acusando NO INSTANTE, e o
+  // arquivo de verdade lido pelo leitor único — sem o token.
+  exigir(/diz\(`\$\{variante\.nome\}: o diário conta a abertura/,
+    'a 5b perdeu a linha do tempo da tela de carregamento no diário');
+  exigir(/diz\(`\$\{variante\.nome\}: CONTROLE — a captura com o esqueleto por cima ACUSA no instante/,
+    'a 5b perdeu a prova de que a CAPTURA acusa no instante (o relatório gerado depois não vê)');
+  exigir(/diz\(`\$\{variante\.nome\}: o RELATÓRIO de verdade leva o alerta DA CAPTURA/,
+    'a 5b perdeu o caminho inteiro: captura → arquivo → leitor');
+  assert.match(bloco5b, /join\(ROOT, 'tools\/diag-resumo\.mjs'\)/,
+    'a 5b tem que rodar o LEITOR único no arquivo de verdade, não um parser próprio');
 
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],

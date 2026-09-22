@@ -3144,6 +3144,10 @@ function dlogTelaAtual() {
               : visivel('noMoreCards') ? 'tudoLimpo'
               : visivel('loadingCard') ? 'carregando'
               : cardDaFrente() ? 'card' : 'nada',
+        // O `painel` diz só a camada de CIMA. No relato de 2026-09-22 ele
+        // disse "carregando" com um card montado por baixo, e a captura não
+        // tinha como contar o resto — este campo conta.
+        cardMontado: !!cardDaFrente(),
         modais,
         // Era `visivel('lightbox')`, e esse id NÃO EXISTE (os dois são
         // `imageLightbox` e `mapaLightbox`): o campo saiu `false` em TODO
@@ -3665,6 +3669,25 @@ function diagSentinelas(comp) {
     return alertas;
 }
 
+// As sentinelas NO INSTANTE da captura. Até v2026.09.22-04 só o relatório as
+// rodava — e ele costuma ser gerado com o modal de Filtros ABERTO (o botão de
+// baixar mora lá), quando as sentinelas de toque calam de propósito pela
+// exceção de camada aberta. No relato de 2026-09-22 o toque no botão foi às
+// 20:27:24, com o defeito na tela e NENHUM modal: rodadas ali, elas diriam
+// "esqueleto por cima do card" (e três toques interceptados); rodadas no
+// relatório, disseram nada. O `computado` vai junto porque é dele que as
+// sentinelas leem — sentinela que nascer depois ainda pode ser conferida contra
+// a captura velha. Custa ~1,5 KB por captura, contra os ~147 KB do `dom`, e
+// nunca derruba a captura: o que falhar vira alerta, como no relatório.
+function diagNoInstante() {
+    try {
+        const computado = diagComputado();
+        return { computado, alertas: diagSentinelas(computado) };
+    } catch (e) {
+        return { alertas: [{ chave: '_erro', msg: String((e && e.message) || e).slice(0, 160) }] };
+    }
+}
+
 function dlogCapturar(motivo) {
     try {
         const m = {
@@ -3673,6 +3696,9 @@ function dlogCapturar(motivo) {
             rede: diagRedeAgora(),
             offline: diagOfflineAgora(),
             ...dlogTelaAtual(),
+            // O que o navegador decidiu e o que as SENTINELAS acham, no INSTANTE
+            // da captura (ver `diagNoInstante`).
+            ...diagNoInstante(),
             // Os toasts NA TELA agora. O anel do diário guarda os que já
             // sumiram; este campo diz quais estavam visíveis no instante.
             toastsNaTela: [...document.querySelectorAll('#toastContainer > *, #bannerContainer > *')]
@@ -3727,7 +3753,8 @@ function dlogCapturar(motivo) {
             }
         }
         if (dlogMomentos.length > DLOG_MAX_MOMENTOS) dlogMomentos.shift();
-        dlog('momento', { motivo, painel: m.painel });
+        dlog('momento', { motivo, painel: m.painel, cardMontado: m.cardMontado,
+                          alertas: (m.alertas || []).map((a) => a.chave) });
         return m;
     } catch (e) {
         dlog('momento.falhou', { erro: String((e && e.message) || e).slice(0, 120) });
@@ -4153,7 +4180,9 @@ function ligarFabDev() {
 // 3 (v2026.09.22-03): entraram a seção `offline`, `serviceWorker.proprio` (o
 // worker respondendo sobre si), `recursosInfo`, `rede`/`offline` em cada
 // momento e `tiles` na geometria do mapa. Aditivo: leitor antigo só ignora.
-const DIAG_VERSAO = 3;
+// 4 (v2026.09.22-05): cada momento leva `computado` + `alertas` do instante e
+// `cardMontado`; o resumo ganha `alertasNasCapturas`. Aditivo também.
+const DIAG_VERSAO = 4;
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
 // (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
@@ -4247,6 +4276,11 @@ function diagCapturarErros() {
     addEventListener('offline', () => dfato('rede.caiu'));
     addEventListener('online', () => dfato('rede.voltou'));
     if (navigator.onLine === false) dfato('rede.caiu', { naAbertura: true });
+    // O esqueleto nasce VISÍVEL no HTML, então a primeira transição dele é o
+    // SUMIR — sem esta linha, o diário não diria desde quando ele estava lá.
+    if (document.getElementById('loadingCard')?.classList.contains('hidden') === false) {
+        dfato('tela.carregando', { visivel: true, naAbertura: true });
+    }
 
     // A TELA MUDOU DE TAMANHO. Girar o aparelho, a barra do navegador sumir, a
     // janela do PWA reabrir — tudo isso remonta o layout, e num relato de "ficou
@@ -4492,6 +4526,14 @@ async function diagCorpo() {
             // quebrada; não significa "está tudo bem", significa "não é nenhum
             // dos defeitos que já vimos".
             alertas,
+            // As sentinelas de cada CAPTURA, no instante dela (`diagNoInstante`),
+            // só as que acusaram algo. É aqui que aparece o defeito que estava na
+            // tela quando a pessoa tocou no botão — e que o relatório, gerado
+            // depois e com o modal de Filtros por cima, não enxerga.
+            alertasNasCapturas: dlogMomentos
+                .filter((m) => Array.isArray(m.alertas) && m.alertas.length)
+                .map((m) => ({ t: m.t, motivo: m.motivo, painel: m.painel,
+                               alertas: m.alertas.map((a) => a.chave) })),
         },
         computado,
         // Os DOIS anéis numa linha do tempo só: o sempre-ligado (`dfato`) e o do
@@ -5041,7 +5083,17 @@ function resetQueue() {
 }
 
 function showLoading(visible) {
-    document.getElementById('loadingCard').classList.toggle('hidden', !visible);
+    const el = document.getElementById('loadingCard');
+    if (!el) return;
+    // O DIÁRIO anota a TRANSIÇÃO, nunca a chamada: o `renderCurrentCard` chama
+    // isto a cada card montado — ou seja a cada swipe —, e o `dfato` é anel de
+    // 120 sem portão; anotado por chamada, ele engoliria o resto do diário.
+    // Com a transição, a linha do tempo do relato de 2026-09-22 teria saído
+    // pronta: "carregando" desde a abertura, primeiro card 89 ms depois, e o
+    // "carregando" NUNCA saindo.
+    const estava = !el.classList.contains('hidden');
+    el.classList.toggle('hidden', !visible);
+    if (estava !== !!visible) dfato('tela.carregando', { visivel: !!visible });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5629,6 +5681,7 @@ function showCurrentPlace() {
     try { mostrarComoFuncionaSePrimeiraVez(); } catch (e) { console.error(e); }
 }
 
+let primeiroCardAnotado = false;   // `tela.primeiroCard`: uma vez por página
 function renderCurrentCard() {
     const place = AppState.queue[0];
     if (!place) {
@@ -5746,6 +5799,13 @@ function renderCurrentCard() {
     // o helper que monta cards chamava `showLoading(false)` por conta própria.
     showLoading(false);
     document.getElementById('loadErrorState')?.classList.add('hidden');
+    // UMA vez por página: o instante em que o primeiro pedido ficou pronto.
+    // Junto do `tela.carregando`, é o par que separa "o card nunca montou" de
+    // "montou e ficou coberto" — os dois pareciam a mesma tela parada.
+    if (!primeiroCardAnotado) {
+        primeiroCardAnotado = true;
+        dfato('tela.primeiroCard', { fila: AppState.queue.length });
+    }
     agendarAquecimento(card);
 }
 
