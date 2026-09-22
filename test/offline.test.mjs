@@ -381,6 +381,24 @@ test('a espera do esvaziamento é FONTE ÚNICA, nunca reimplementada num smoke',
     const codigo = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
     assert.doesNotMatch(codigo, /waitForFunction\([^)]*waze_places_saida/,
       `${nome} voltou a esperar a fila de saída com page.waitForFunction — use esperarFimDaSaida`);
+
+    // E NENHUM `page.waitForFunction`, em espera nenhuma. Isto deixou de ser
+    // preferência quando a causa do `EvalError` foi MEDIDA (2026-09-22):
+    //
+    //   pw1.49.1 (a versão que o CI FIXA), mesma app, mesma CSP, mesmo binário
+    //   de Chromium, N=12 por modo de espera —
+    //     polling PADRÃO (rAF) ... 4/12 com EvalError na página
+    //     polling numérico 250 ... 0/12
+    //     poll pelo lado do NODE . 0/12
+    //
+    // O poller do rAF avalia STRING dentro da página, e a CSP da app (que com
+    // razão não tem `unsafe-eval`) o barra — vira promessa rejeitada, o
+    // `unhandledrejection` da própria app a registra, e o smoke acusa "erro de
+    // JS" que é do INSTRUMENTO. ~22% de taxa: some numa rodada e volta na
+    // outra, que é como ele reprovou o CI uma vez e nunca aqui.
+    assert.doesNotMatch(codigo, /page\.waitForFunction\(/,
+      `${nome} voltou a usar page.waitForFunction — sob a CSP desta app o poller ` +
+      'do rAF evalua string e vira EvalError intermitente. Use esperarNaPagina/esperarOuExplodir.');
   }
   // E o módulo tem que continuar pollando pelo lado do NODE, por sinal
   // POSITIVO e dizendo o motivo. Sem isto ele vira outro waitForFunction.
@@ -392,4 +410,45 @@ test('a espera do esvaziamento é FONTE ÚNICA, nunca reimplementada num smoke',
     'a fonte única passou a usar waitForFunction — é justamente o que ela existe pra evitar');
   assert.match(MOD, /motivo: 'fila-vazia'/, 'sumiu o sinal positivo de fim');
   assert.match(MOD, /motivo: 'TETO'/, 'sumiu o teto — sem ele a espera pode não terminar nunca');
+  // O irmão que EXPLODE tem que existir: sem ele, trocar uma espera que hoje
+  // LANÇA por uma que volta `{ok:false}` rebaixa falha alta a silenciosa.
+  assert.match(MOD, /export async function esperarOuExplodir/,
+    'sumiu o esperarOuExplodir — sem ele a conversão silencia falhas que hoje param o smoke');
+  assert.match(MOD, /if \(!r\.ok\) throw new Error/,
+    'o esperarOuExplodir parou de lançar — virou mais uma espera calada');
+});
+
+// ── Os smokes têm que honrar o playwright FIXADO no repo, não o do sandbox ──
+//
+// MEDIDO em 2026-09-22: `import()` do pacote PUBLICADO (CJS `index.js`) POR
+// CAMINHO devolve um namespace só com `default` — `mod.chromium` vem
+// `undefined`. Dois smokes faziam `({ chromium } = await import(caminho))` e,
+// como o laço só segue se `chromium` for verdadeiro, a primeira tentativa (a
+// que existe justamente pra pegar o playwright do repo) falhava CALADA:
+// localmente caía no global do sandbox (1.56) e no CI só funcionava porque a
+// TERCEIRA tentativa usa especificador bare, que traz os nomeados.
+//
+// O custo disso não foi teórico. O `EvalError` do smoke do offline ficou três
+// rodadas como "não reproduz aqui" — e não reproduzia porque aqui nunca rodava
+// a versão do CI. Com o carregador consertado, `npm i --no-save
+// playwright@1.49.1` passou a bastar, e o antes/depois saiu na hora:
+// código de 4963e0c 2/6 rodadas com EvalError, código de hoje 0/6.
+test('todo smoke aceita o playwright do REPO, e não só o do sandbox', () => {
+  const SMOKES = ['smoke-offline', 'smoke-browser', 'smoke-presenca', 'smoke-fluxo'];
+  let olhados = 0;
+  for (const nome of SMOKES) {
+    const src = readFileSync(new URL(`../tools/${nome}.mjs`, import.meta.url), 'utf8');
+    // Sem comentário na conta (gotcha #67): este arquivo CITA o padrão errado
+    // pra explicar por que ele é errado.
+    const codigo = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    if (!/resolve\('playwright'/.test(codigo)) continue;   // não abre browser
+    olhados++;
+    assert.doesNotMatch(codigo, /\(\s*\{\s*chromium\s*\}\s*=\s*await import\(/,
+      `${nome} desestrutura 'chromium' direto do import — por CAMINHO isso vem undefined ` +
+      'e o smoke cai calado no playwright do sandbox em vez do FIXADO no repo');
+    assert.match(codigo, /mod\s*&&\s*mod\.chromium\s*\?\s*mod\s*:\s*\(mod\s*&&\s*mod\.default\)/,
+      `${nome} não aceita a forma CJS (namespace só com 'default') — a tentativa que ` +
+      'honra o playwright do repo volta a falhar em silêncio');
+  }
+  assert.equal(olhados, 4, `esperava 4 smokes que carregam playwright, achei ${olhados} — o guard perdeu alcance`);
 });

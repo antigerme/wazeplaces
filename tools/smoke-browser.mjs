@@ -25,7 +25,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as dormir } from 'node:timers/promises';
-import { esperarFimDaSaida } from './esperar-saida.mjs';
+import { esperarFimDaSaida, esperarNaPagina, esperarOuExplodir } from './esperar-saida.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8123);
@@ -3668,7 +3668,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // `assentar` entra por `page.evaluate`, e evaluate durante navegação morre
     // com "Execution context was destroyed" — espera crua primeiro.
     await page.waitForTimeout(600);
-    await page.waitForFunction(() => typeof AppState !== 'undefined');
+    await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
     await assentar(page, 200);
     await page.evaluate((fila) => {
       AppState.devMode = { unlocked: true, active: true };
@@ -3934,7 +3934,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   });
   await page.goto(BASE, { waitUntil: 'load' });
   await page.waitForTimeout(600);
-  await page.waitForFunction(() => typeof AppState !== 'undefined');
+  await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
   await page.evaluate(() => {
     document.getElementById('authScreen')?.classList.add('hidden');
     document.getElementById('appScreen')?.classList.remove('hidden');
@@ -4040,7 +4040,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     });
     await page.goto(BASE, { waitUntil: 'load' });
     await page.waitForTimeout(600);
-    await page.waitForFunction(() => typeof AppState !== 'undefined');
+    await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
     await assentar(page, 200);
 
     for (const lang of LINGUAS) {
@@ -4165,7 +4165,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
     await page.goto(BASE, { waitUntil: 'load' });
     await page.waitForTimeout(600);
-    await page.waitForFunction(() => typeof AppState !== 'undefined');
+    await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
     await assentar(page, 200);
 
     const cenario = async (url) => page.evaluate(async (u) => {
@@ -4259,7 +4259,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
       await page.goto(BASE, { waitUntil: 'load' });
       await page.waitForTimeout(600);
-      await page.waitForFunction(() => typeof AppState !== 'undefined');
+      await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
       const id = `${onde} ${nomeAp}/${lang}`;
 
       const abrir = (refs) => page.evaluate(({ lg, refs: r, fila }) => {
@@ -5201,8 +5201,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // acusava "diário vazio" por culpa da medição. Vizinho do gotcha #64.
     // Os scripts ainda são `defer`, então a espera continua necessária — o que
     // muda é POR QUEM se espera.
-    await page.waitForFunction(() => typeof API !== 'undefined' && !!API.setSession,
-      null, { timeout: 5000 }).catch(() => {});
+    await esperarNaPagina(page, () => typeof API !== 'undefined' && !!API.setSession, 5000);
     const par = await page.evaluate(async () => {
       if (typeof API === 'undefined' || !API.setSession) return { semApi: true };
       API.setSession('t-de-teste', 'cookies');
@@ -5315,7 +5314,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // as retentativas rodam e o teste mede com ações ainda em voo).
     semRede = true; await ctx.setOffline(true);
     await tratar(c.n);
-    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    await esperarNaPagina(page, () => AppState.inFlightActions === 0, 30000);
     const offline = await estado();
     checa(offline.saida === c.n, `${c.id}: ${c.n} ações offline deviam estar na fila (${offline.saida})`);
     checa(offline.rejeitados === antes.rejeitados + c.n,
@@ -5395,7 +5394,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await montar(); await dormir(400);
     semRede = true; await ctx.setOffline(true);
     await tratar(2);
-    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    await esperarNaPagina(page, () => AppState.inFlightActions === 0, 30000);
     const dt0 = await estado();
     checa(dt0.saida === 2, `${c.id}: DOIS TEMPOS — as 2 ações não entraram na fila (${dt0.saida})`);
     abortLento = true;
@@ -5433,7 +5432,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await montar(); await dormir(400);
     semRede = true; await ctx.setOffline(true);
     await tratar(3);
-    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    await esperarNaPagina(page, () => AppState.inFlightActions === 0, 30000);
     const pv0 = await estado();
     checa(pv0.saida === 3, `${c.id}: PROVA DE REDE — as 3 ações não entraram na fila (${pv0.saida})`);
     // Sai do modo avião com a rede AINDA ruim: o `online` do navegador é gasto
@@ -5475,7 +5474,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await montar(); await dormir(400);
     semRede = true; await ctx.setOffline(true);
     await tratar(3);
-    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    await esperarNaPagina(page, () => AppState.inFlightActions === 0, 30000);
     const presos = await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
     checa(presos === 3, `${c.id}: ABERTURA — as 3 ações não entraram na fila (${presos})`);
     await page.goto('about:blank');          // mata a página VELHA antes da rede voltar
@@ -5537,7 +5536,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const a3 = await estado();
     semRede = true; await ctx.setOffline(true);
     await tratar(2);
-    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 30000 }).catch(() => {});
+    await esperarNaPagina(page, () => AppState.inFlightActions === 0, 30000);
     const espera3 = await estado();
     checa(espera3.saida === 2, `${c.id}: POUSO-RUIM — as 2 ações não entraram na fila (${espera3.saida})`);
     checa(espera3.rejeitados === a3.rejeitados + 2,
@@ -5569,7 +5568,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await montar(); await dormir(400);
     const a2 = await estado();
     await tratar(1);
-    await page.waitForFunction(() => AppState.inFlightActions === 0, null, { timeout: 20000 }).catch(() => {});
+    await esperarNaPagina(page, () => AppState.inFlightActions === 0, 20000);
     const d2 = await estado();
     checa(d2.saida === 0, `${c.id}: CONTROLE — erro desconhecido entrou na fila (${d2.saida})`);
     checa(d2.rejeitados === a2.rejeitados,
