@@ -18,7 +18,7 @@
 // não herda a cobertura do core (gotcha #61).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
@@ -31,7 +31,14 @@ const URL_ = (p) => `http://127.0.0.1:${PORTA}${p}`;
 
 // Código = o que o SW trata como network-first. Se esta lista divergir da do
 // `service-worker.js` (`isCode`), um tipo fica sem a garantia e ninguém vê.
-const CODIGO = ['/', '/index.html', '/js/app.js', '/js/i18n.js', '/css/app.css', '/manifest.json'];
+//
+// Os caminhos são os que a app CARREGA (`/js/min/…`), não os fontes. Até
+// 2026-09-22 esta lista pedia `/js/app.js` e `/js/i18n.js`, que a app nunca
+// busca — ela media o cabeçalho de um arquivo que ninguém recebe, e passava
+// verde enquanto o `js/min/` real seguia sem ser conferido aqui. O conserto
+// que tirou os fontes de circulação foi o que denunciou: eles viraram 404 e a
+// asserção caiu.
+const CODIGO = ['/', '/index.html', '/js/min/app.js', '/js/min/i18n.js', '/css/app.css', '/manifest.json'];
 
 async function comServidor(fn) {
   const p = spawn(process.execPath, [join(RAIZ, 'server', 'node.mjs')], {
@@ -77,12 +84,17 @@ test('estáticos da VM: ETag diferente para conteúdo diferente, e nada de 304 f
   await comServidor(async () => {
     // Dois arquivos distintos não podem compartilhar ETag — senão o navegador
     // recebe 304 pra um recurso que ele nunca baixou e a app quebra em silêncio.
-    const a = (await fetch(URL_('/js/app.js'))).headers.get('etag');
-    const b = (await fetch(URL_('/js/i18n.js'))).headers.get('etag');
+    // Os caminhos são os SERVIDOS. Com os fontes (`/js/app.js`) isto media dois
+    // 404 sem ETag: `notEqual(null, null)` reprova — mas se só UM fosse nulo
+    // passaria, e o teste estaria verde medindo o nada. Daí a checagem de
+    // presença antes da comparação.
+    const a = (await fetch(URL_('/js/min/app.js'))).headers.get('etag');
+    const b = (await fetch(URL_('/js/min/i18n.js'))).headers.get('etag');
+    assert.ok(a && b, 'um dos dois veio sem ETag — sem isto a comparação abaixo passa por vácuo');
     assert.notEqual(a, b, 'dois arquivos diferentes com o mesmo ETag');
 
     // E ETag que não bate NÃO pode virar 304.
-    const r = await fetch(URL_('/js/app.js'), { headers: { 'If-None-Match': '"naoexiste"' } });
+    const r = await fetch(URL_('/js/min/app.js'), { headers: { 'If-None-Match': '"naoexiste"' } });
     assert.equal(r.status, 200, 'devolveu 304 pra um ETag que não é o do arquivo');
     assert.ok((await r.text()).length > 0, '200 sem corpo');
   });
@@ -194,4 +206,132 @@ test('raiz: o index.html servido é o minificado, e o fonte não vaza', () => {
   assert.ok(h(fonte), 'sumiu o script inline do tema do fonte');
   assert.equal(h(gerado), h(fonte),
     'a minificação mudou o script inline — a CSP bloquearia o tema sem avisar');
+});
+
+// ── O .assetsignore decide o que o Cloudflare PUBLICA, e o esquecimento é mudo ──
+//
+// Medido na produção em 2026-09-22, com a app no ar: `/tools/waze-probe.mjs`,
+// `/tools/fixtures-paises.json` e `/test/core.test.mjs` respondiam **200** —
+// 23 arquivos de ferramenta e 47 de teste servidos como se fossem frontend. E
+// junto deles os FONTES comentados: `js/app.js` com 622 KB contra os 201 KB do
+// `js/min/app.js` que a app de fato carrega, `css/styles.css` com 117 KB
+// contra 77 KB do `css/app.css`.
+//
+// Nada disso dá erro. O `assets.directory` é a raiz, então o padrão é PUBLICAR,
+// e quem não está na lista entra — pasta nova nasce pública e ninguém percebe,
+// porque a app continua funcionando exatamente igual. É o contrário do modo de
+// falha normal: aqui o defeito é algo a MAIS existir, e teste que exercita a
+// app nunca olha pra isso.
+//
+// Daí os dois sentidos abaixo. O primeiro cobra que toda entrada da raiz tenha
+// uma DECISÃO (frontend ou ignorada) — pasta nova reprova em vez de vazar. O
+// segundo é o inverso e é o que protege a produção: tudo que o `index.html` e
+// o `service-worker.js` carregam tem que CONTINUAR publicado. Sem ele, um
+// padrão largo demais (`js/*.js` escrito como `js/**`) apagaria o `js/min/` e
+// derrubaria a app inteira — e o primeiro guard passaria feliz.
+
+// Casador no estilo .gitignore, só o que a lista usa: nome exato (casa em
+// qualquer nível), `dir/arquivo`, `dir/*.ext` (o `*` NÃO atravessa `/`) e
+// `*.ext`. É o bastante pros padrões daqui, e é explícito pra não virar
+// adivinhação silenciosa quando alguém acrescentar um padrão novo.
+function ignorado(caminho, padroes) {
+  const partes = caminho.split('/');
+  for (const p of padroes) {
+    if (!p.includes('/')) {
+      // sem barra: casa em qualquer nível
+      const re = new RegExp('^' + p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '$');
+      if (partes.some((s) => re.test(s))) return p;
+      continue;
+    }
+    // com barra: ancorado na raiz, e `*` não atravessa `/`
+    const re = new RegExp('^' + p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '(/|$)');
+    if (re.test(caminho)) return p;
+  }
+  return null;
+}
+
+const PADROES = readFileSync(join(RAIZ, '.assetsignore'), 'utf8')
+  .split('\n').map((l) => l.trim())
+  .filter((l) => l && !l.startsWith('#'));   // comentário nunca é padrão (gotcha #67)
+
+test('.assetsignore: toda entrada da raiz tem DECISÃO — frontend ou ignorada', () => {
+  // O que é frontend de verdade. Curto de propósito: crescer esta lista é um
+  // ato deliberado, que é justamente o que faltou pro `tools/` e pro `test/`.
+  const FRONTEND = new Set([
+    'index.html', 'manifest.json', 'service-worker.js',
+    'js', 'css', 'icons', 'fonts',
+    '_headers',            // consumido pelo Cloudflare, nunca servido
+    'LICENSE',             // licença do projeto: publicar é o certo
+    'extensao-chrome',     // a extensão que o editor instala — distribuição
+  ]);
+  // `git ls-files` e não `ls-tree HEAD`: o índice já enxerga a pasta nova que
+  // alguém acabou de `git add`, e é aí que o aviso vale — depois de commitada
+  // ela já está a um merge de ser publicada. Em CI os dois dão o mesmo.
+  const entradas = [...new Set(execSync('git ls-files', { cwd: RAIZ, encoding: 'utf8' })
+    .split('\n').map((s) => s.trim()).filter(Boolean).map((s) => s.split('/')[0]))];
+  assert.ok(entradas.length > 10, 'não consegui listar a raiz do repo — instrumento quebrado');
+
+  const vazando = entradas.filter((e) => !FRONTEND.has(e) && !ignorado(e, PADROES));
+  assert.deepEqual(vazando, [],
+    `estas entradas da raiz seriam PUBLICADAS e não são frontend: ${vazando.join(', ')}. ` +
+    'Ou acrescente ao .assetsignore, ou declare como frontend na lista deste teste.');
+
+  // As duas que motivaram o guard, por nome — pra a regressão dizer o que quebrou
+  for (const d of ['tools', 'test']) {
+    assert.ok(ignorado(d, PADROES), `${d}/ voltou a ser publicado (23+47 arquivos de dev no ar)`);
+  }
+  // E os FONTES, que são entrada de build e não asset (mesma decisão do index.src.html)
+  assert.ok(ignorado('js/app.js', PADROES), 'o fonte comentado do app voltou a ser publicado');
+  assert.ok(ignorado('css/styles.css', PADROES), 'o fonte do CSS voltou a ser publicado');
+});
+
+test('.assetsignore: nada que a app CARREGA pode estar ignorado', () => {
+  // O sentido inverso, e é o que protege a produção. Um padrão largo demais
+  // apaga o `js/min/` e a app morre inteira — com o guard de cima passando.
+  const html = readFileSync(join(RAIZ, 'index.html'), 'utf8');
+  const sw = readFileSync(join(RAIZ, 'service-worker.js'), 'utf8');
+
+  const doHtml = [...html.matchAll(/(?:src|href)="((?!https?:|data:|\/\/)[^"]+\.(?:js|css))"/g)]
+    .map((m) => m[1].replace(/^\.?\//, ''));
+  const doSw = [...sw.matchAll(/^\s*'\/((?:js|css)\/[^']+)',?\s*$/gm)].map((m) => m[1]);
+  const carregados = [...new Set([...doHtml, ...doSw, 'js/min/qr.js'])];   // qr entra sob demanda
+
+  assert.ok(carregados.length >= 9,
+    `achei só ${carregados.length} recursos carregados — o extrator quebrou, não o .assetsignore`);
+  assert.ok(carregados.some((c) => c.startsWith('js/min/')) && carregados.includes('css/app.css'),
+    'o extrator não achou nem os js/min nem o css/app.css — instrumento errado');
+
+  const mortos = carregados.map((c) => [c, ignorado(c, PADROES)]).filter(([, p]) => p);
+  assert.deepEqual(mortos, [],
+    'o .assetsignore está apagando arquivo que a app CARREGA — a produção subiria quebrada: ' +
+    mortos.map(([c, p]) => `${c} (pelo padrão "${p}")`).join(', '));
+});
+
+test('a VM NÃO serve fonte de build — e o .assetsignore não alcança ela', async () => {
+  // O outro destino. O `.assetsignore` é arquivo de Cloudflare e o Node nunca o
+  // leu: tirar `js/*.js` de lá conserta a borda e deixa a VM servindo os mesmos
+  // 622 KB. Gotcha #14 — a app tem que ser a MESMA nos dois, senão "levar pra
+  // uma VM" deixa de ser decisão de infraestrutura e vira mudança de
+  // comportamento. E por RESPOSTA HTTP, não por string: o `csp-vm` já pagou
+  // essa lição (arquivo igual não prova cabeçalho enviado).
+  await comServidor(async () => {
+    const SOME = ['/js/app.js', '/js/i18n.js', '/js/swipe.js', '/js/mapa.js', '/js/api.js',
+                  '/css/styles.css', '/css/tailwind.src.css',
+                  '/tools/waze-probe.mjs', '/test/core.test.mjs'];
+    for (const c of SOME) {
+      const r = await fetch(URL_(c));
+      assert.equal(r.status, 404,
+        `${c} é servido pela VM (${r.status}) — fonte de build ou ferramenta de dev no ar`);
+    }
+    // CONTROLE, e sem ele o teste acima passa por vácuo: um corte largo demais
+    // levaria o `js/min/` junto e TODO caminho daria 404, com as asserções de
+    // cima todas verdes e a app morta.
+    const FICA = ['/js/min/app.js', '/js/min/i18n.js', '/js/min/qr.js', '/js/min/version.js',
+                  '/css/app.css', '/index.html', '/manifest.json', '/service-worker.js',
+                  '/icons/icon-192.svg', '/fonts/inter-latin-wght-normal.woff2'];
+    for (const c of FICA) {
+      const r = await fetch(URL_(c));
+      assert.equal(r.status, 200, `${c} PAROU de ser servido pela VM — a app sobe quebrada`);
+    }
+  });
 });

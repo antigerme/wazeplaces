@@ -224,9 +224,32 @@ const ALLOWED_ROOT_FILES = new Set([
   '/favicon.ico',
   '/favicon.svg',
 ]);
+// Os FONTES comentados moram DENTRO de `/js/` e `/css/`, então a allowlist de
+// diretório acima os deixava passar: `/js/app.js` respondia 200 com 622 KB ao
+// lado dos 201 KB do `/js/min/app.js` que a app carrega, e `/css/styles.css`
+// 117 KB ao lado dos 77 KB do `/css/app.css`. É a MESMA decisão já escrita pro
+// `/index.src.html` logo acima — ela só não tinha sido aplicada aqui.
+//
+// E é o gotcha #14 outra vez: o `.assetsignore` corrige isto no Cloudflare e
+// NÃO alcança a VM, que tem allowlist própria. Correção que vale num destino e
+// não no outro é a divergência que faz "levar pra uma VM" deixar de ser decisão
+// de infraestrutura e virar mudança de comportamento. `test/vm-estaticos.test.mjs`
+// cobra os dois lados, e cobra pela RESPOSTA HTTP — não pela string no arquivo.
+//
+// O corte é por FORMA e não por lista de nomes: o que é servido de `/js/` é o
+// que está em `/js/min/`, e de `/css/` é o `app.css`. Arquivo novo em `js/`
+// nasce privado, que é o lado certo do erro.
+const FONTE_DE_BUILD = [
+  [/^\/js\//, /^\/js\/min\//],        // de /js/, só /js/min/
+  [/^\/css\//, /^\/css\/app\.css$/],  // de /css/, só o app.css gerado
+];
 function isAllowedAsset(path) {
   if (ALLOWED_ROOT_FILES.has(path)) return true;
-  return ALLOWED_DIRS.some((d) => path.startsWith(d));
+  if (!ALLOWED_DIRS.some((d) => path.startsWith(d))) return false;
+  for (const [dir, servivel] of FONTE_DE_BUILD) {
+    if (dir.test(path) && !servivel.test(path)) return false;
+  }
+  return true;
 }
 
 async function serveStatic(req, res, urlPath) {
