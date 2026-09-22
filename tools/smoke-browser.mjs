@@ -5370,7 +5370,15 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       document.getElementById('noMoreCards').classList.add('hidden');
       document.querySelectorAll('.place-card').forEach((e) => e.remove());
       AppState.queue = f.slice(); AppState.currentPlace = null; showCurrentPlace();
-    }, { f: [].concat(...Array(6).fill(CARDS_FS)) });
+    // Seis CÓPIAS dos cards pra ter ações de sobra — e cada card com o pedido
+    // PRÓPRIO. Eram cópias idênticas, com os mesmos ids, e a própria `CARDS`
+    // tem dois cards com o mesmo pedido (`v6`/`u6`): a fila real nunca tem dois
+    // cards do mesmo pedido (gotcha 3.5), e desde v2026.09.22-06 a fila de saída
+    // recusa o mesmo pedido duas vezes (é a segunda decisão do relato de reabrir
+    // sem rede). A 7ª e a 8ª ação caíam em pedidos já decididos, e o bloco
+    // acusava "o placar reverteu" medindo a fixture, não a app.
+    }, { f: Array.from({ length: 6 }, (_, i) => CARDS_FS.map((p, k) => ({ ...p,
+      updateRequestID: String(p.updateRequestID) + '-c' + i + '-' + k }))).flat() });
     const estado = () => page.evaluate(() => ({
       rejeitados: AppState.stats.rejected,
       saida: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length,

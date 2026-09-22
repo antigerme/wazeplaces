@@ -79,6 +79,18 @@ if (off === undefined) out(AUSENTE);
 else {
   out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} / gravada ${off.janelaGuardada === undefined ? '—' : off.janelaGuardada}`);
   out(`fila guardada ${j(off.filaGuardada)} · tiles no cache ${j(off.tilesNoCache)} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam}`);
+  if (off.ligado) out(`pousos gravados depois da fila guardada: ${off.pousosGravados === undefined ? AUSENTE : off.pousosGravados}`);
+}
+
+// Só os NÚMEROS que a app mediu (`resumo.saida`). O conteúdo da fila de saída
+// (ids e o autor de cada pedido) mora no localStorage, que este leitor não lê.
+secao('FILA DE SAÍDA');
+const sa = r.saida;
+if (sa === undefined) out(AUSENTE);
+else if (sa.erro) out('erro ao medir: ' + sa.erro);
+else {
+  out(`esperando envio ${sa.n} · pedidos distintos ${sa.distintas} · REPETIDOS ${sa.repetidas} · tipos ${j(sa.tipos)} · o mais velho espera há ${sa.maisAntigaMin ?? '—'} min`);
+  if (sa.repetidas > 0) out('ATENÇÃO: a mesma decisão está na fila mais de uma vez — algum caminho devolveu um pedido já decidido.');
 }
 
 secao('SERVICE WORKER');

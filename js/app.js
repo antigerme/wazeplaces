@@ -2050,6 +2050,8 @@ async function enviarAprovacao(alvo) {
     try {
         const r = await API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID);
         if (r && r.success) {
+            // Aprovar RESOLVE o pedido no Waze: é um pouso como o do ✕ e o do ✓.
+            registrarPouso(alvo.place);
             // Sem toast de sucesso: o ✨ sumindo e o botão virando lixeira JÁ
             // dizem que valeu — mesma razão do excluir.
             placeResolvidoPorAprovacao = alvo.place;
@@ -2064,6 +2066,7 @@ async function enviarAprovacao(alvo) {
         // `already_processed` conta como sucesso: outro editor aprovou antes, e
         // o objetivo de quem tocou foi cumprido (mesma lógica do resto da app).
         if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
+            registrarPouso(alvo.place);
             placeResolvidoPorAprovacao = alvo.place;
             AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
             updateStats();
@@ -3267,6 +3270,15 @@ function diagComputado() {
             esqueleto: !!(esq && !esq.classList.contains('hidden') && rEsq.width > 0 && rEsq.height > 0),
             card: !!frente,
         };
+        // Pedido que já está esperando envio e voltou pra fila de pedidos: o
+        // defeito do relato de 2026-09-22 (ver `semOsJaDecididos` e a sentinela
+        // `pedidoDecididoNaFila`). Vai só a CONTAGEM — a chave é id de pedido
+        // de terceiro, e o conteúdo da fila de saída já está no localStorage.
+        const naSaida = new Set(carregarFilaDeSaida().map(chaveDoPedido).filter(Boolean));
+        fora.decididos = {
+            naSaida: naSaida.size,
+            naFila: (AppState.queue || []).filter((p) => naSaida.has(chaveDoPedido(p))).length,
+        };
     } catch (e) {
         fora._erro = String((e && e.message) || e).slice(0, 160);
     }
@@ -3653,6 +3665,21 @@ function diagSentinelas(comp) {
             diga('esqueletoSobreCard',
                 'o esqueleto de "carregando" está POR CIMA de um card já montado — a tela parece '
                 + 'parada e o pedido está ali embaixo');
+        }
+        // 10. Pedido que já está esperando envio DE VOLTA na fila de pedidos.
+        //
+        // INVARIANTE desde v2026.09.22-06: o que está na fila de saída não entra
+        // na fila de pedidos — o filtro (`semOsJaDecididos`) está nos DOIS
+        // caminhos por onde pedido entra, a busca e a reabertura sem rede. Os
+        // dois juntos é o relato de 2026-09-22: reaberta no modo avião, a app
+        // devolvia como card o que o owner já tinha tratado, e dava pra decidir
+        // de novo — contando duas vezes e mandando duas decisões pro Waze.
+        const dc = comp.decididos;
+        if (dc && dc.naFila > 0) {
+            diga('pedidoDecididoNaFila',
+                'pedido que já está esperando envio voltou como card — dá pra decidir de novo, '
+                + 'e o segundo gesto conta outra vez',
+                { n: dc.naFila });
         }
         // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é
         // deliberada. Eu escrevi uma (< 25% da janela) e ela não disparou no
@@ -4182,7 +4209,10 @@ function ligarFabDev() {
 // momento e `tiles` na geometria do mapa. Aditivo: leitor antigo só ignora.
 // 4 (v2026.09.22-05): cada momento leva `computado` + `alertas` do instante e
 // `cardMontado`; o resumo ganha `alertasNasCapturas`. Aditivo também.
-const DIAG_VERSAO = 4;
+// 5 (v2026.09.22-06): o resumo ganha `saida` (a fila de saída em números), o
+// `computado` ganha `decididos` (e a sentinela `pedidoDecididoNaFila`), e a
+// seção `offline` ganha `pousosGravados` e o `desdeMin` da fila guardada.
+const DIAG_VERSAO = 5;
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
 // (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
@@ -4310,6 +4340,25 @@ function diagCapturarErros() {
     } catch (e) {}
 }
 
+// ── A FILA DE SAÍDA no resumo ─────────────────────────────────────────────
+// Em NÚMEROS: quantos itens, quantos pedidos distintos, quantos repetidos, de
+// que tipo e há quanto tempo o mais velho espera. `repetidas` > 0 é a mesma
+// decisão mandada duas vezes — o que o relato de 2026-09-22 deixava acontecer.
+// Os ids e o autor de cada pedido ficam de fora: são dado de terceiro, e o
+// resumo é o que se lê primeiro e se cola numa conversa.
+function diagResumoDaSaida() {
+    try {
+        const f = carregarFilaDeSaida();
+        const chaves = f.map(chaveDoPedido).filter(Boolean);
+        const distintas = new Set(chaves).size;
+        const tipos = {};
+        for (const it of f) tipos[it.tipo] = (tipos[it.tipo] || 0) + 1;
+        const ts = f.map((it) => it.t).filter(Number.isFinite);
+        return { n: f.length, distintas, repetidas: chaves.length - distintas, tipos,
+                 maisAntigaMin: ts.length ? Math.round((Date.now() - Math.min(...ts)) / 60000) : null };
+    } catch (e) { return { erro: String((e && e.message) || e).slice(0, 120) }; }
+}
+
 // ── O OFFLINE no relatório ────────────────────────────────────────────────
 // O estado que decide se a foto e o mapa abrem sem sinal mora em variáveis de
 // módulo e numa base IndexedDB, e nada disso ia pro arquivo: no relato de
@@ -4322,8 +4371,14 @@ async function diagOffline() {
     if (!o.ligado) return o;
     try {
         const f = await offlineLerFila();
-        o.filaGuardada = f ? { n: f.places.length, idadeMin: Math.round((Date.now() - f.t) / 60000) } : null;
+        // `desdeMin`: de quando é a LISTA (o começo da busca que a trouxe). É
+        // contra ele que os pousos filtram a reabertura sem rede.
+        o.filaGuardada = f ? { n: f.places.length, idadeMin: Math.round((Date.now() - f.t) / 60000),
+                               desdeMin: Number.isFinite(f.desde) ? Math.round((Date.now() - f.desde) / 60000) : null } : null;
     } catch (e) { o.filaGuardada = { erro: String((e && e.message) || e).slice(0, 120) }; }
+    // Quantos pedidos pousaram no Waze depois da foto — os que a reabertura sem
+    // rede tira da fila guardada. Só o número.
+    try { o.pousosGravados = offlineLerPousos().length; } catch (e) {}
     try { o.janelaGuardada = await offlineLerJanela(); } catch (e) {}
     try {
         if (window.caches && await caches.has(OFFLINE_TILES_CACHE)) {
@@ -4522,6 +4577,10 @@ async function diagCorpo() {
             // (`rede.caiu`/`rede.voltou`); aqui vai o AGORA.
             rede: navigator.onLine,
             offline: (() => { const o = diagOfflineAgora(); return o.ligado ? o.resultado || 'ligado' : 'desligado'; })(),
+            // A fila de saída em NÚMEROS. O relato de 2026-09-22 dependia dela
+            // (pedido esperando envio que voltou como card) e o resumo não a
+            // mencionava: estava no localStorage, cru, junto do token.
+            saida: diagResumoDaSaida(),
             // PRIMEIRA coisa a olhar. Vazio = nenhuma invariante conhecida
             // quebrada; não significa "está tudo bem", significa "não é nenhum
             // dos defeitos que já vimos".
@@ -5019,8 +5078,13 @@ async function handleLogout() {
     // é que sair com a fila cheia descarta o que ainda não foi enviado: é
     // exatamente o que "sair é sair de tudo" promete.
     safeLS.remove(SAIDA_KEY);
+    // O que foi decidido nesta página (ids de pedidos de terceiros, em memória).
+    // Quem entrar depois começa do zero: a fila dele vem da busca dele.
+    pousosDaPagina.clear();
+    pedidosEmAndamento.clear();
     // A fila guardada tem nome de quem enviou e foto de terceiro. "Sair e sair
-    // de tudo" nao abre excecao que ninguem decidiu.
+    // de tudo" nao abre excecao que ninguem decidiu. Leva junto os pousos
+    // gravados (`OFFLINE_POUSOS_KEY`).
     offlineEsquecer();
     avatarPendente = null;   // a próxima entrada volta a esperar o primeiro card
     avatarFalhou = null;     // outro editor pode ter foto onde este não tinha
@@ -5402,6 +5466,10 @@ function fetchNextPage() {
     // acabou o trabalho" ninguém reporta. Ideia do botequei, onde o watchdog
     // flagrou o GPS preso no prompt comendo check-ins.
     dlogVigiar('buscar');
+    // O instante em que a LISTA é pedida. Decisão que pousar depois disto pode
+    // ou não estar refletida no que o Waze devolver — e por isso sai no filtro
+    // (`semOsJaDecididos`). O que pousou antes, a lista já reflete.
+    const inicioDaBusca = Date.now();
     AppState._fetchPromise = (async () => {
         try {
             const result = await API.fetchPlaces(pageToFetch, filters);
@@ -5477,7 +5545,13 @@ function fetchNextPage() {
             // Backend antigo não manda o campo → 0, e a dica simplesmente não aparece.
             AppState.serverBlocked += Number(result.blocked) || 0;
 
-            const newPlaces = result.places || [];
+            // O que este aparelho já decidiu não entra de novo — ver
+            // `semOsJaDecididos`. A contagem abaixo (`serverTotal`) é a da lista
+            // FILTRADA: "Restam" é o que falta fazer, e o que está saindo já foi
+            // feito.
+            const filtrada = semOsJaDecididos(result.places || [], inicioDaBusca);
+            if (filtrada.excluidos) dfato('busca.jaDecididos', { n: filtrada.excluidos });
+            const newPlaces = filtrada.places;
             if (newPlaces.length === 0) {
                 AppState.emptyPagesInRow++;
                 if (AppState.emptyPagesInRow >= MAX_EMPTY_PAGES) {
@@ -5493,8 +5567,9 @@ function fetchNextPage() {
                 AppState.emptyPagesInRow = 0;
                 AppState.queue.push(...newPlaces);
                 // Guardar o texto NAO custa requisicao: ele acabou de chegar.
-                // Sai calado quando o toggle esta desligado.
-                offlineGravarFila();
+                // Sai calado quando o toggle esta desligado. O `desde` é o
+                // começo da BUSCA, não a hora de gravar: é dali que a lista é.
+                offlineGravarFila(inicioDaBusca);
                 AppState.serverTotal += newPlaces.length;
                 trackSeenCategories(newPlaces);
                 // Reordenar AQUI, com um card já na tela, quebra a invariante de
@@ -9267,6 +9342,11 @@ async function enviarLote(places, opts = {}) {
         if (aoLandar) { updateStats(); saveStats(); updatePendingCount(); }
         if (opts.aoProgredir) opts.aoProgredir(places.length - conta.ok - conta.ja - conta.erro, conta);
     };
+    // Em andamento até cada um resolver: uma busca que chegue no meio não os
+    // traz de volta como card (ver `semOsJaDecididos`). A marca mora AQUI e não
+    // só no `scheduleAction` porque a recusa automática chega sem passar por
+    // ele — ela tira os pedidos da fila e manda direto.
+    marcarEmAndamento(places, true);
     AppState.inFlightActions++;
     updateInFlightIndicator();
     try {
@@ -9274,6 +9354,7 @@ async function enviarLote(places, opts = {}) {
             const r = await callWithRetry(() => API.rejectPlace(p.venueID, p.updateRequestID));
             if (r && r.success) {
                 conta.ok++;
+                registrarPouso(p);
                 recordHistory('reject', 1);
                 registrarRejeicaoDeAutor(p);
                 if (aoLandar) {
@@ -9282,6 +9363,7 @@ async function enviarLote(places, opts = {}) {
                 }
             } else if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
                 conta.ja++;
+                registrarPouso(p);
                 if (aoLandar) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
             } else if (r && r.errorCategory === 'unauthorized') {
                 handleUnauthorized();
@@ -9311,9 +9393,13 @@ async function enviarLote(places, opts = {}) {
                 }
                 AppState.queue.push(p);
             }
+            // Resolvido: pousou, está na fila de saída, ou voltou pra fila.
+            marcarEmAndamento(p, false);
             progresso();
         }
     } finally {
+        // Todos, inclusive os que não chegaram a sair (sessão morta no meio).
+        marcarEmAndamento(places, false);
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         updateStats();
@@ -9779,6 +9865,18 @@ function salvarFilaDeSaida(f) {
 function enfileirarSaida(tipo, place) {
     if (!place || place.venueID === undefined || place.updateRequestID === undefined) return false;
     const f = carregarFilaDeSaida();
+    // O MESMO pedido duas vezes na fila é a mesma decisão mandada duas vezes —
+    // e, se o tipo mudou, duas decisões diferentes executadas no Waze (ler não
+    // resolve o pedido, então um "rejeitar" depois dele vale). Com o filtro de
+    // entrada (`semOsJaDecididos`) um pedido que está aqui não volta a ser card,
+    // então isto não deveria acontecer: se acontecer, é um caminho novo que
+    // escapou do filtro, e o diário diz. Vale a PRIMEIRA decisão, e quem chama
+    // desfaz a contagem do gesto repetido.
+    const chave = chaveDoPedido(place);
+    if (chave && f.some((it) => chaveDoPedido(it) === chave)) {
+        dfato('saida.repetida', { tipo });
+        return 'repetida';
+    }
     if (f.length >= SAIDA_MAX) return false;
     f.push({ tipo, venueID: place.venueID, updateRequestID: place.updateRequestID,
              creatorId: place.creatorId != null ? place.creatorId : null,
@@ -9898,6 +9996,7 @@ function registrarPousoDeSaida(actionType, place, result, item) {
     item = item || {};
     const cat = result.errorCategory || (result.success ? null : 'unknown');
     if (result.success || cat === 'already_processed' || cat === 'not_found') {
+        registrarPouso(place);
         recordHistory(actionType, 1, item.dia, item.onde);
         if (actionType === 'reject' && result.success) registrarRejeicaoDeAutor(place);
         registrarAcaoConfirmada(actionType, place);
@@ -9914,6 +10013,140 @@ function registrarPousoDeSaida(actionType, place, result, item) {
     saveStats();
     const verb = actionType === 'read' ? t('action.verb.read') : t('action.verb.reject');
     showToast(msgDoServidor(result, t('toast.actionError', { verb })), 'error');
+}
+
+// ── PEDIDO JÁ DECIDIDO NÃO VOLTA COMO CARD ────────────────────────────────
+//
+// Relato de 2026-09-22, no modo avião: o owner tratou pedidos, eles foram pra
+// fila de saída, a app foi fechada e reaberta — e os MESMOS pedidos voltaram
+// como card, com a fila de saída ainda segurando as decisões deles. Dava pra
+// decidir de novo: o segundo gesto contava outra vez no placar e mandava uma
+// SEGUNDA decisão pro Waze, que pode ser outra ("lido" na primeira, "rejeitado"
+// na segunda — e as duas são executadas, porque ler não resolve o pedido).
+//
+// A causa: a fila guardada do offline só é regravada COM rede (na busca e no
+// começo da varredura), e a reabertura sem rede a restaurava INTEIRA. Nada
+// perguntava o que este aparelho tinha decidido depois de ela ser tirada.
+//
+// O mesmo buraco existia com rede, só que estreito: a busca da abertura corre
+// junto com o esvaziamento da fila de saída, e o Waze só esquece um pedido
+// quando a decisão CHEGA. O que ainda estava na fila de saída — ou pousou
+// depois de o Waze montar a lista — voltava como card.
+//
+// A regra é UMA pros dois caminhos (`semOsJaDecididos`): um pedido só entra na
+// fila se este aparelho não o decidiu DEPOIS de a lista ter sido tirada.
+// "Decidiu" é: está na fila de saída, está na janela do Desfazer ou em voo, ou
+// POUSOU no Waze depois do instante em que a lista foi tirada (`desde`). O que
+// pousou ANTES a própria lista já reflete, e aí quem manda é o Waze — um pedido
+// LIDO volta com o filtro "só não lidos" desligado, e isso é o de sempre.
+
+// A chave de um pedido é o par que a fila de saída guarda e que o Waze usa pra
+// decidir. `String` nos dois lados: o JSON da fila de saída e o da busca não
+// prometem o mesmo tipo pro mesmo id, e `12 !== '12'` faria o filtro passar
+// calado — que é o defeito inteiro de volta, sem erro nenhum.
+function chaveDoPedido(p) {
+    if (!p || p.venueID == null || p.updateRequestID == null) return null;
+    return String(p.venueID) + '|' + String(p.updateRequestID);
+}
+
+// Janela do Desfazer e envio em andamento. Só em memória: morre com a página,
+// e o que sobrevive a ela (fila de saída e pousos gravados) mora no aparelho.
+// Entra no GESTO, porque é ali que o card sai da fila: uma busca que chegue
+// durante a janela traria o pedido de volta, e o Desfazer o devolveria DE NOVO
+// — o mesmo pedido duas vezes na fila.
+const pedidosEmAndamento = new Set();
+// Chave → quando a decisão pousou no Waze, NESTA página. É o que cobre a
+// corrida da busca com o esvaziamento. Todo mundo tem, com ou sem offline, e
+// não custa armazenamento: morre com a página.
+const pousosDaPagina = new Map();
+// Mais velho que isto, qualquer busca nova já o reflete — a poda só impede que
+// o mapa cresça numa sessão longa.
+const POUSO_NA_MEMORIA_MS = 10 * 60 * 1000;
+
+function marcarEmAndamento(places, sim) {
+    for (const p of (Array.isArray(places) ? places : [places])) {
+        const k = chaveDoPedido(p);
+        if (!k) continue;
+        if (sim) pedidosEmAndamento.add(k);
+        else pedidosEmAndamento.delete(k);
+    }
+}
+
+function offlineLerPousos() {
+    try {
+        const v = JSON.parse(safeLS.get(OFFLINE_POUSOS_KEY) || '[]');
+        return Array.isArray(v) ? v.filter((e) => Array.isArray(e) && typeof e[0] === 'string' && Number.isFinite(e[1])) : [];
+    } catch (e) { return []; }
+}
+
+// FONTE ÚNICA do "a decisão chegou no Waze". Todo pouso passa por aqui — o do
+// card, o da fila de saída, o do lote e o da aprovação de foto —, e um caminho
+// que não passar deixa o pedido voltar como card depois de reabrir sem rede,
+// sem erro nenhum na tela. Aceita um pedido ou uma lista (o lote grava UMA vez).
+//
+// A cópia GRAVADA só existe com o offline ligado: é ela que a reabertura sem
+// rede consulta, e quem não ligou o offline não reabre sem rede. "Quem não
+// marca não paga nada."
+function registrarPouso(places) {
+    const agora = Date.now();
+    const chaves = [];
+    for (const p of (Array.isArray(places) ? places : [places])) {
+        const k = chaveDoPedido(p);
+        if (k) { chaves.push(k); pousosDaPagina.set(k, agora); }
+    }
+    if (!chaves.length) return;
+    if (pousosDaPagina.size > 500) {
+        for (const [k, t] of pousosDaPagina) if (agora - t > POUSO_NA_MEMORIA_MS) pousosDaPagina.delete(k);
+    }
+    if (!offlineLigado()) return;
+    const lista = offlineLerPousos();
+    for (const k of chaves) lista.push([k, agora]);
+    while (lista.length > OFFLINE_POUSOS_MAX) lista.shift();
+    try { safeLS.set(OFFLINE_POUSOS_KEY, JSON.stringify(lista)); } catch (e) {}
+}
+
+// A fila guardada foi regravada: o que pousou ANTES de ela ser tirada já está
+// refletido nela e sai da lista. Chamada só DEPOIS de a gravação fechar — se
+// ela falhar, a lista tem que continuar valendo contra a foto velha.
+function offlinePodarPousos(desde) {
+    const lista = offlineLerPousos();
+    const ficam = lista.filter((e) => e[1] >= desde);
+    if (ficam.length === lista.length) return;
+    try {
+        if (ficam.length) safeLS.set(OFFLINE_POUSOS_KEY, JSON.stringify(ficam));
+        else safeLS.remove(OFFLINE_POUSOS_KEY);
+    } catch (e) {}
+}
+
+// O filtro, usado pelos DOIS caminhos por onde pedido entra na fila: a busca
+// (`fetchNextPage`) e a reabertura sem rede (`offlineTentarAbrirSemRede`).
+// `desde` é o instante em que a LISTA foi tirada — o começo da busca, ou o
+// `desde` gravado junto da fila guardada. Devolve os que ficam e QUANTOS saíram,
+// porque o número vai pro diário: é a prova de que o filtro agiu.
+function semOsJaDecididos(places, desde) {
+    const lista = Array.isArray(places) ? places : [];
+    const naSaida = new Set();
+    for (const it of carregarFilaDeSaida()) {
+        const k = chaveDoPedido(it);
+        if (k) naSaida.add(k);
+    }
+    const pousoEm = new Map(pousosDaPagina);
+    if (offlineLigado()) {
+        for (const [k, t] of offlineLerPousos()) if (!(pousoEm.get(k) >= t)) pousoEm.set(k, t);
+    }
+    const limite = Number.isFinite(desde) ? desde : 0;
+    const ficam = [];
+    let excluidos = 0;
+    for (const p of lista) {
+        const k = chaveDoPedido(p);
+        const pousou = k ? pousoEm.get(k) : undefined;
+        if (k && (naSaida.has(k) || pedidosEmAndamento.has(k) || (pousou !== undefined && pousou >= limite))) {
+            excluidos++;
+            continue;
+        }
+        ficam.push(p);
+    }
+    return { places: ficam, excluidos };
 }
 
 // Os DOIS gatilhos, e nenhum deles é polling (o free tier proíbe): o navegador
@@ -10036,6 +10269,17 @@ const OFFLINE_STORE = 'fila';
 // tile lá dentro faria cada deploy apagar o que você provisionou — e você
 // descobriria no meio da estrada. O SW isenta este nome explicitamente.
 const OFFLINE_TILES_CACHE = 'waze-places-tiles';
+// Os pedidos que POUSARAM no Waze depois de a fila guardada ser tirada (ver
+// `registrarPouso`). É o que falta pra reabertura sem rede não devolver como
+// card o que o editor já tratou COM rede. localStorage e não a base: a
+// gravação é pequena e tem que valer mesmo se a app morrer logo depois do
+// pouso — transação de IndexedDB pode não fechar a tempo.
+const OFFLINE_POUSOS_KEY = 'waze_places_offline_pousos';
+// Teto POR CONSTRUÇÃO. A lista é podada toda vez que a fila guardada é
+// regravada (a cada busca e a cada varredura, no máximo 20 min de uso), então
+// na prática ela guarda uns minutos de trabalho — o teto é só pra que um
+// defeito na poda não a faça crescer sem fim.
+const OFFLINE_POUSOS_MAX = 1000;
 // Quantas imagens em voo ao mesmo tempo. Baixo de propósito: a varredura não
 // pode atropelar a foto do card que o editor está olhando AGORA — é o defeito
 // que o `agendarAquecimento` já existe pra evitar.
@@ -10143,20 +10387,29 @@ function offlineDB() {
     });
 }
 
-async function offlineGravarFila() {
+// `desde` é o instante a partir do qual a lista gravada vale: o começo da busca
+// que a trouxe, ou AGORA quando quem grava é a varredura (aí a lista é a fila
+// viva, que já não tem nada do que foi decidido nesta página). Vai gravado junto
+// porque é contra ele que a reabertura sem rede filtra os pousos.
+async function offlineGravarFila(desde) {
     if (!offlineLigado() || !AppState.queue.length) return false;
+    const valeDesde = Number.isFinite(desde) ? desde : Date.now();
     try {
         const db = await offlineDB();
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
             tx.objectStore(OFFLINE_STORE).put({
                 t: Date.now(),
+                desde: valeDesde,
                 filtros: JSON.parse(JSON.stringify(AppState.filters || {})),
                 places: AppState.queue,
             }, 'fila');
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
         });
         db.close();
+        // Só DEPOIS de a gravação fechar: se ela falhar, os pousos continuam
+        // valendo contra a fila velha, que é a que a reabertura vai ler.
+        offlinePodarPousos(valeDesde);
         dfato('offline.gravou', { n: AppState.queue.length });
         return true;
     } catch (e) { return false; }
@@ -10215,6 +10468,9 @@ async function offlineEsquecer() {
     // As URLs de tile dizem ONDE ficam pedidos de terceiros: vão junto com o
     // resto do que o offline guardou.
     diagTilesGuardadosQueFalharam = [];
+    // Os pousos só existem pra filtrar a fila guardada, que sai na linha de
+    // baixo: sem ela não há o que filtrar, e são ids de pedidos de terceiros.
+    safeLS.remove(OFFLINE_POUSOS_KEY);
     try { indexedDB.deleteDatabase(OFFLINE_DB); } catch (e) {}
     try { if (window.caches) await caches.delete(OFFLINE_TILES_CACHE); } catch (e) {}
     // E o worker esquece a LISTA dele, que é o mesmo dado em memória: sem o
@@ -10497,14 +10753,30 @@ async function offlineTentarAbrirSemRede() {
     // tem uma — com a app viva, a de memória é a mais nova.
     const janelaGuardada = await offlineLerJanela();
     if (offlineJanelaServida === null) offlineJanelaServida = janelaGuardada;
-    AppState.queue = guardada.places.slice();
+    // A fila guardada é uma FOTO: não sabe do que foi decidido depois dela — na
+    // sombra (está na fila de saída) nem com rede (pousou depois da foto). Sem
+    // este filtro, tudo isso voltava como card (relato de 2026-09-22). Fila
+    // guardada por versão anterior não tem `desde`: vale a hora em que foi
+    // gravada, que é o mais perto que se sabe.
+    // MIGRACAO: fila-guardada-desde
+    const desde = Number.isFinite(guardada.desde) ? guardada.desde : guardada.t;
+    const filtrada = semOsJaDecididos(guardada.places, desde);
+    // Tudo decidido: não há o que mostrar, e a tela certa é a de sempre (a
+    // falha de rede), não uma fila vazia que se passaria por "Tudo limpo!".
+    if (!filtrada.places.length) {
+        dfato('offline.abriu', { n: 0, excluidos: filtrada.excluidos,
+                                 idade: Math.round((Date.now() - guardada.t) / 60000) });
+        return false;
+    }
+    AppState.queue = filtrada.places;
     AppState.serverTotal = AppState.queue.length;
     AppState.hasMore = false;
     AppState.loadError = false;
     updatePendingCount();
     sortQueue();
     showCurrentPlace();
-    dfato('offline.abriu', { n: AppState.queue.length, idade: Math.round((Date.now() - guardada.t) / 60000) });
+    dfato('offline.abriu', { n: AppState.queue.length, excluidos: filtrada.excluidos,
+                             idade: Math.round((Date.now() - guardada.t) / 60000) });
     return true;
 }
 
@@ -10544,6 +10816,7 @@ function handleActionResult(actionType, place, result) {
                        key: (result && result.errorKey) || null });
     if (!result) return;
     if (result.success) {
+        registrarPouso(place);
         recordHistory(actionType, 1);
         // Só REJEIÇÃO conta reincidência. Marcar como lido não é juízo
         // sobre o pedido — é "eu vi" —, e contá-lo transformaria quem
@@ -10557,6 +10830,7 @@ function handleActionResult(actionType, place, result) {
     const cat = result.errorCategory || 'unknown';
 
     if (cat === 'already_processed' || cat === 'not_found') {
+        registrarPouso(place);
         recordHistory(actionType, 1);
         // Conta como tratada pelos mesmos motivos que ela conta no placar: o
         // objetivo de quem agiu foi cumprido, tenha sido por você ou não.
@@ -10576,7 +10850,21 @@ function handleActionResult(actionType, place, result) {
     // Sem toast por ação: 150 pedidos numa sombra de conectividade dariam 150
     // interrupções. Quem presta contas é o indicador ("N esperando envio"), que
     // some sozinho quando a fila esvazia.
-    if (cat === 'transient' && enfileirarSaida(actionType, place)) return;
+    if (cat === 'transient') {
+        const naFila = enfileirarSaida(actionType, place);
+        // A decisão deste pedido JÁ estava esperando: a primeira vale, e este
+        // gesto não pode contar de novo no placar. O `serverTotal` fica: o card
+        // repetido também tinha sido contado nele, então o desconto do gesto
+        // acertou a conta.
+        if (naFila === 'repetida') {
+            const k = actionType === 'read' ? 'read' : 'rejected';
+            AppState.stats[k] = Math.max(0, AppState.stats[k] - 1);
+            updateStats();
+            saveStats();
+            return;
+        }
+        if (naFila) return;
+    }
 
     const statKey = actionType === 'read' ? 'read' : 'rejected';
     AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
@@ -10923,6 +11211,7 @@ async function handleBatchMarkRead() {
     try {
         const result = await callWithRetry(() => API.markAsReadBatch(items));
         if (result && result.success) {
+            registrarPouso(items);
             AppState.stats.read += n;
             updateStats();
             saveStats();
@@ -11017,6 +11306,11 @@ function scheduleAction(type, place, executor, opts = {}) {
         AppState.pendingAction = null;
     }
     removeUndoBanner();
+    // Do gesto até o fim do envio o pedido está "em andamento": uma busca que
+    // chegar nesse meio não o traz de volta (ver `semOsJaDecididos`). Sai no fim
+    // do envio — quando ele já está no pouso ou na fila de saída — e no
+    // Desfazer/cancelar, quando ele volta a ser só um pedido da fila.
+    marcarEmAndamento(places, true);
 
     let executed = false;
     const runExecutor = async () => {
@@ -11032,6 +11326,7 @@ function scheduleAction(type, place, executor, opts = {}) {
         } finally {
             AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
             updateInFlightIndicator();
+            marcarEmAndamento(places, false);
         }
     };
 
@@ -11072,16 +11367,42 @@ function scheduleAction(type, place, executor, opts = {}) {
             if (!executed) {
                 executed = true;
                 clearTimeout(timerId);
+                marcarEmAndamento(places, false);
                 reverterPlacar(!!salvarPlacar);
             }
         },
         // O que fazer quando a página está morrendo. Ver o comentário da
         // assinatura: o lote CANCELA porque meio-lote enviado não tem sintoma.
         aoSair,
+        // Página morrendo SEM REDE: a decisão vai direto pra fila de saída, na
+        // hora e sem tentar a rede. O caminho normal chegaria lá do mesmo jeito
+        // — tenta, falha por rede, enfileira —, mas por uma cadeia ASSÍNCRONA
+        // que precisa de mais uma volta do laço de eventos, e a página que está
+        // sendo encerrada pode não ter essa volta. Aí a decisão sumia com o
+        // placar já contado, e o pedido voltava como card na reabertura. Só pra
+        // um pedido de ✕ ou ✓: o lote tem regra própria (`aoSair: 'cancel'`) e o
+        // Pular não escreve nada no Waze.
+        enfileirarSemRede: () => {
+            if (executed || n !== 1 || (type !== 'read' && type !== 'reject')) return false;
+            const r = enfileirarSaida(type, places[0]);
+            if (!r) return false;          // fila cheia: segue o caminho de sempre
+            executed = true;
+            clearTimeout(timerId);
+            AppState.pendingAction = null;
+            marcarEmAndamento(places, false);
+            // Já estava na fila de saída: o placar contou este gesto em cima de
+            // uma decisão que já tinha sido contada.
+            if (r === 'repetida') reverterPlacar(true);
+            removeUndoBanner();
+            aplicarTravaDeAcao();
+            return true;
+        },
         undo: () => {
             if (!executed) {
                 executed = true;
                 clearTimeout(timerId);
+                // Volta a ser um pedido da fila como qualquer outro.
+                marcarEmAndamento(places, false);
                 // Usou: a evidência de "nunca desfaz" morre aqui e recomeça do
                 // zero. Quem desfaz de vez em quando não deve receber a dica.
                 zerarJanelasSemUndo();
@@ -11646,6 +11967,15 @@ function descarregarAcaoPendente() {
         try { p.enviar(); } catch (e) { console.error('Falha ao descarregar:', e); }
     }
     if (!AppState.pendingAction) return;
+    // Sem rede não há o que tentar: a decisão vai pra fila de saída de forma
+    // SÍNCRONA, antes de a página morrer (ver `enfileirarSemRede`). Só o `false`
+    // decide — `onLine === true` não prova rede, e aí vale o caminho de sempre.
+    try {
+        if (navigator.onLine === false && AppState.pendingAction.enfileirarSemRede
+            && AppState.pendingAction.enfileirarSemRede()) return;
+    } catch (e) {
+        console.error('Falha ao enfileirar a ação pendente:', e);
+    }
     // Fetch normal é cancelado no unload; keepalive sobrevive.
     if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(true);
     try {

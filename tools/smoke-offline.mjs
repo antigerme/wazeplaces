@@ -1316,6 +1316,286 @@ diz('e o worker esquece a LISTA dele (o mesmo dado, em memória)',
   swAntes9?.tilesNaLista > 0 && swDepois9?.tilesNaLista === 0,
   `${swAntes9?.tilesNaLista} → ${swDepois9?.tilesNaLista}`);
 
+secao('9b. O QUE FOI TRATADO NÃO VOLTA — reabrir no meio da triagem, com e sem rede');
+// O relato de 2026-09-22 (o terceiro do dia): preparou o offline, fechou, entrou
+// no avião, reabriu, tratou uns pedidos (foram pra fila de saída), fechou e
+// reabriu — e os MESMOS pedidos voltaram como card, com a fila de saída ainda
+// segurando as decisões. Dava pra decidir de novo: o placar contava outra vez e
+// o Waze recebia duas decisões, que podem ser DIFERENTES (ler não resolve o
+// pedido, então um "rejeitar" depois dele vale).
+//
+// A causa: a fila guardada é uma FOTO tirada com rede, e a reabertura sem rede
+// a restaurava inteira. Esta seção encena o percurso dele em páginas NOVAS, com
+// a app de verdade decidindo, e mais os três vizinhos que a mesma regra cobre:
+// o pedido tratado COM rede depois da foto, a ação que estava na janela do
+// Desfazer quando a app foi fechada, e a busca da reabertura COM rede correndo
+// junto do esvaziamento da fila de saída.
+//
+// CONTROLE que torna a seção honesta: a fila guardada tem que continuar com os
+// CINCO pedidos (a foto é de antes das decisões). Se ela fosse regravada, a
+// reabertura esconderia os decididos por outro motivo e o filtro não estaria
+// sendo medido.
+aviao = false; await ctx.setOffline(false);
+const DEC_9B = [101, 102, 103, 104, 105].map((i) => SO_MAPA(i));
+// A chave do pedido é calculada AQUI e dentro da página, à mão, e nunca pela
+// `chaveDoPedido` da app: assim esta seção roda igual contra a app de ANTES do
+// conserto — que é como se prova que ela reprova o defeito, e não uma função
+// que ainda não existia.
+const chave9b = (p) => p.venueID + '|' + p.updateRequestID;
+// O "Waze" desta seção: o conjunto de pedidos PENDENTES, que perde o pedido
+// quando a decisão chega — e a lista da busca é tirada na CHEGADA do pedido,
+// não na resposta, como no Waze de verdade. É isso que abre a corrida.
+const pendentes9b = new Map(DEC_9B.map((p) => [chave9b(p), p]));
+const decisoes9b = [];              // cada decisão que CHEGOU: { chave, rota, t }
+const buscas9b = [];                // cada busca: { tPedido, tResposta, lista }
+let atrasoBusca9b = 0;
+let atrasoDecisao9b = () => 0;
+const rotaApi9b = async (r) => {
+  const rota = r.request().url().split('/api/')[1];
+  if (aviao) return r.abort('internetdisconnected');
+  let corpo = {};
+  try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* corpo vazio */ }
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (rota === 'buscar-places') {
+    const b = { tPedido: Date.now(), lista: [...pendentes9b.keys()] };
+    const places = [...pendentes9b.values()];
+    if (atrasoBusca9b) await dormir(atrasoBusca9b);
+    b.tResposta = Date.now();
+    buscas9b.push(b);
+    return json({ success: true, places, hasMore: false, page: 1, total: places.length });
+  }
+  if (rota === 'marcar-lido' || rota === 'validar-place') {
+    const chave = corpo.venueID + '|' + corpo.updateRequestID;
+    const espera = atrasoDecisao9b(chave);
+    if (espera) await dormir(espera);
+    decisoes9b.push({ chave, rota, t: Date.now() });
+    pendentes9b.delete(chave);
+    return json({ success: true });
+  }
+  if (rota === 'perfil') {
+    return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, areas: [] } });
+  }
+  // Presença, países e o resto ficam fora do que esta seção mede.
+  return r.abort('failed');
+};
+await ctx.route('**/api/*', rotaApi9b);
+await page.evaluate(() => {
+  localStorage.removeItem('waze_places_saida');
+  localStorage.removeItem('waze_places_offline_pousos');
+  API.setSession('tok-9b');
+  // Cota do Desfazer batida (senão metade dos cliques bate em botão travado) e
+  // GRAVADA: as páginas novas leem do armazenamento, não desta memória.
+  AppState.stats = { read: 200, rejected: 0, skipped: 0 };
+  saveStats();
+  AppState.preferences.undoEnabled = false;
+  AppState.preferences.offlineDisponivel = true;
+  AppState.preferences.comoFuncionaVisto = true;
+  savePreferences();
+});
+const historico9b = (pg) => pg.evaluate(() => { try {
+  const t = JSON.parse(localStorage.getItem('waze_places_history') || '{}')._total || {};
+  return { read: t.read || 0, rejected: t.rejected || 0 }; } catch (e) { return null; } });
+const histAntes9b = await historico9b(page);
+await montar(DEC_9B.map((p) => ({ ...p })));
+await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+  offlineMarcarGesto(); offlineVarrer(); });
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
+const foto9b = await page.evaluate(async () => ({ res: offlineUltimoResultado,
+  n: ((await offlineLerFila()) || {}).places?.length }));
+diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU e a fila guardada tem os 5',
+  foto9b.res === 'pronto' && foto9b.n === 5, JSON.stringify(foto9b));
+
+// Lê a fila de saída do ARMAZENAMENTO, que é o que sobrevive a fechar a app.
+const saida9b = (pg) => pg.evaluate(() => { try {
+  return JSON.parse(localStorage.getItem('waze_places_saida') || '[]')
+    .map((it) => ({ chave: it.venueID + '|' + it.updateRequestID, tipo: it.tipo }));
+} catch (e) { return null; } });
+// Decide o card da FRENTE pelo botão e espera o RESULTADO: a fila andar e, se
+// `esperarSaida`, a decisão cair na fila de saída.
+const decidir9b = async (pg, botao, esperarSaida) => {
+  const antes = await pg.evaluate(() => ({ k: AppState.currentPlace ? AppState.currentPlace.venueID + '|' + AppState.currentPlace.updateRequestID : null, n: AppState.queue.length,
+    s: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length }));
+  await pg.evaluate((b) => cardDaFrente().querySelector(b).click(), botao);
+  for (let j = 0; j < 60; j++) {
+    const agora = await pg.evaluate(() => ({ n: AppState.queue.length,
+      s: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length }));
+    if (agora.n < antes.n && (!esperarSaida || agora.s > antes.s)) break;
+    await dormir(100);
+  }
+  return antes.k;
+};
+
+// 1. COM rede, depois da foto: o ✕ pousa no Waze e a foto não sabe disso.
+const k101 = await decidir9b(page, '.card-btn-reject', false);
+for (let j = 0; j < 50 && !decisoes9b.some((d) => d.chave === k101); j++) await dormir(100);
+const pousos9b = await page.evaluate(() => { try {
+  return JSON.parse(localStorage.getItem('waze_places_offline_pousos') || '[]').map((e) => e[0]); } catch (e) { return []; } });
+diz('COM rede, o ✕ pousou no Waze e ficou gravado como pouso DEPOIS da fila guardada',
+  decisoes9b.length === 1 && decisoes9b[0].chave === k101 && pousos9b.includes(k101),
+  JSON.stringify({ k101, decisoes9b, pousos9b }));
+// A página de antes sai de cena: viva, ela também esvaziaria a fila de saída
+// quando a rede voltasse, e a medição somaria duas páginas.
+await page.goto('about:blank');
+
+const abrirFria9b = async (nome) => {
+  const fria = await ctx.newPage();
+  fria.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
+  fria.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
+  await fria.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  return fria;
+};
+const estadoDaFila9b = (pg) => pg.evaluate(async () => {
+  const k = (p) => (p ? p.venueID + '|' + p.updateRequestID : null);
+  return {
+  onLine: navigator.onLine,
+  fila: AppState.queue.map(k),
+  frente: k(AppState.currentPlace),
+  restam: AppState.serverTotal,
+  abriu: dfatoAnel.filter((e) => e.k === 'offline.abriu').map((e) => ({ n: e.n, excluidos: e.excluidos })),
+  guardada: ((await offlineLerFila()) || {}).places?.length,
+  alertas: diagSentinelas(diagComputado()).map((a) => a.chave),
+  };
+});
+
+// 2. Avião, e a app REABERTA: o ✕ dado com rede não volta.
+aviao = true; await ctx.setOffline(true);
+const p1 = await abrirFria9b('reaberta 1');
+await esperarNaPagina(p1, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'offline.abriu'), 20000, 100);
+const r1 = await estadoDaFila9b(p1);
+diz('CONTROLE: a fila guardada continua com os 5 — a foto é de ANTES do ✕, então quem tira é o filtro',
+  r1.guardada === 5, JSON.stringify(r1));
+diz('reaberta sem rede, o pedido tratado COM rede depois da foto NÃO volta',
+  r1.onLine === false && r1.fila.length === 4 && !r1.fila.includes(k101) && r1.restam === 4
+  && r1.abriu.at(-1)?.n === 4 && r1.abriu.at(-1)?.excluidos === 1, JSON.stringify(r1));
+
+// 3. Sem rede: dois pedidos tratados vão pra fila de saída, e um terceiro fica
+//    na janela do Desfazer quando a app é FECHADA.
+const k1 = await decidir9b(p1, '.card-btn-reject', true);
+const k2 = await decidir9b(p1, '.card-btn-read', true);
+await p1.evaluate(() => { AppState.preferences.undoEnabled = true; });
+const k3 = await p1.evaluate(() => (AppState.currentPlace ? AppState.currentPlace.venueID + '|' + AppState.currentPlace.updateRequestID : null));
+await p1.evaluate(() => cardDaFrente().querySelector('.card-btn-reject').click());
+// O clique passa pela animação do `triggerSwipe` (~350ms) ANTES de agendar a
+// ação: fechar antes disso é fechar sem decisão nenhuma, e mediria o nada.
+// Sinal POSITIVO: a ação está na janela.
+await esperarNaPagina(p1, () => !!AppState.pendingAction, 5000, 50);
+const naJanela = await p1.evaluate(() => { const p = AppState.pendingAction && AppState.pendingAction.place;
+  return p ? p.venueID + '|' + p.updateRequestID : null; });
+diz('PRÉ-CONDIÇÃO: o terceiro ✕ está na JANELA do Desfazer quando a app é fechada',
+  naJanela === k3 && !!k3, JSON.stringify({ naJanela, k3 }));
+// Fechar COMO O USUÁRIO FECHA: com `pagehide` e `visibilitychange`, que é o
+// que o aparelho dispara ao sair da app. O `close()` puro muda de semântica
+// entre as versões — MEDIDO: no Playwright 1.49 (o do CI, Chromium 131) ele
+// destrói a página SEM disparar nenhum dos dois; no 1.56 (o do sandbox)
+// dispara. Sem o `runBeforeUnload`, esta asserção passava aqui e reprovava no
+// CI por motivo de instrumento.
+await p1.close({ runBeforeUnload: true });
+
+// 4. Reaberta de novo, sem rede: nada do que foi decidido volta.
+const p2 = await abrirFria9b('reaberta 2');
+await esperarNaPagina(p2, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'offline.abriu'), 20000, 100);
+const r2 = await estadoDaFila9b(p2);
+const s2 = await saida9b(p2);
+diz('a ação que estava na janela do Desfazer ao FECHAR sem rede foi pra fila de saída (nada se perdeu)',
+  Array.isArray(s2) && s2.some((x) => x.chave === k3), JSON.stringify({ k3, s2 }));
+diz('a fila de saída tem as TRÊS decisões, uma vez cada',
+  Array.isArray(s2) && s2.length === 3 && new Set(s2.map((x) => x.chave)).size === 3
+  && [k1, k2, k3].every((k) => s2.some((x) => x.chave === k)), JSON.stringify(s2));
+diz('reaberta de novo, NENHUM pedido decidido volta como card (o relato)',
+  r2.onLine === false && r2.fila.length === 1 && ![k101, k1, k2, k3].some((k) => r2.fila.includes(k))
+  && r2.restam === 1 && r2.abriu.at(-1)?.excluidos === 4, JSON.stringify(r2));
+diz('e o relatório não acusa pedido decidido na fila', !r2.alertas.includes('pedidoDecididoNaFila'),
+  JSON.stringify(r2.alertas));
+// CONTROLE da sentinela: o pedido que está na tela, posto na fila de saída,
+// tem que ser ACUSADO — senão "não acusa" passaria por vácuo.
+const controle9b = await p2.evaluate(() => {
+  const cru = localStorage.getItem('waze_places_saida');
+  const f = JSON.parse(cru || '[]');
+  const p = AppState.currentPlace;
+  f.push({ tipo: 'read', venueID: p.venueID, updateRequestID: p.updateRequestID, t: Date.now() });
+  localStorage.setItem('waze_places_saida', JSON.stringify(f));
+  const alertas = diagSentinelas(diagComputado()).map((a) => a.chave);
+  localStorage.setItem('waze_places_saida', cru);
+  return alertas;
+});
+diz('CONTROLE: com um pedido da fila de saída na tela, a sentinela ACUSA',
+  controle9b.includes('pedidoDecididoNaFila'), JSON.stringify(controle9b));
+
+// 5. O último, e a rede volta: sai UMA decisão por pedido, e o placar e o
+//    histórico contam cada uma UMA vez.
+const k4 = await decidir9b(p2, '.card-btn-read', true);
+aviao = false; await ctx.setOffline(false);
+await p2.evaluate(() => window.dispatchEvent(new Event('online')));
+let rodadas9b = 0;
+for (; rodadas9b < 6; rodadas9b++) {
+  await esperarFimDaSaida(p2, 25000);
+  const resta = (await saida9b(p2) || []).length;
+  if (resta === 0) break;
+  await p2.evaluate(() => window.dispatchEvent(new Event('online')));
+  await dormir(400);
+}
+const chegaram = decisoes9b.map((d) => d.chave);
+const final9b = await p2.evaluate(() => JSON.parse(localStorage.getItem('waze_places_stats') || '{}'));
+const histDepois9b = await historico9b(p2);
+console.log(`  · 9b [esvaziamento] rodadas=${rodadas9b + 1}`);
+diz('a rede voltou e cada pedido recebeu UMA decisão — nenhum repetido no Waze',
+  chegaram.length === 5 && new Set(chegaram).size === 5
+  && [k101, k1, k2, k3, k4].every((k) => chegaram.includes(k)), JSON.stringify(chegaram));
+// O placar conta GESTOS, e o que ele promete é contar PEDIDOS: com o defeito,
+// cinco gestos caíam em dois pedidos (o mesmo card voltando) e o número batia
+// com os gestos — medido na main de antes, 202/3 com só DOIS pedidos decididos.
+// Por isso a conta é contra os pedidos DISTINTOS que chegaram ao Waze.
+const distintos9b = new Set(chegaram).size;
+diz('o placar contou cada PEDIDO uma vez — 5 decididos, 5 no placar (3 ✕ e 2 ✓)',
+  final9b.rejected === 3 && final9b.read === 202 && distintos9b === 5
+  && (final9b.rejected + final9b.read - 200) === distintos9b, JSON.stringify({ final9b, distintos9b }));
+const dHist9b = { read: histDepois9b?.read - histAntes9b?.read, rejected: histDepois9b?.rejected - histAntes9b?.rejected };
+diz('e o histórico também (cada pouso é um pedido)',
+  dHist9b.rejected === 3 && dHist9b.read === 2 && dHist9b.rejected + dHist9b.read === distintos9b,
+  JSON.stringify({ histAntes9b, histDepois9b, distintos9b }));
+await p2.close();
+
+// 6. A reabertura COM rede e a fila de saída ainda cheia: a busca corre junto
+//    do esvaziamento. O "Waze" tira a lista NA CHEGADA da busca e responde
+//    1,5s depois; nesse meio, a 1ª decisão POUSA (100ms) e a 2ª continua no ar
+//    (4s). As duas estavam na lista, e nenhuma pode virar card.
+for (const i of [106, 107, 108]) pendentes9b.set(chave9b(SO_MAPA(i)), SO_MAPA(i));
+aviao = true; await ctx.setOffline(true);
+const prep = await abrirFria9b('preparo 6');
+await esperarNaPagina(prep, () => typeof enfileirarSaida === 'function', 20000, 100);
+await prep.evaluate((ps) => { enfileirarSaida('reject', ps[0]); enfileirarSaida('read', ps[1]); },
+  [SO_MAPA(106), SO_MAPA(107)]);
+await prep.close();
+const k106 = chave9b(SO_MAPA(106));
+const k107 = chave9b(SO_MAPA(107));
+atrasoBusca9b = 1500;
+atrasoDecisao9b = (k) => (k === k106 ? 100 : 4000);
+aviao = false; await ctx.setOffline(false);
+const p3 = await abrirFria9b('reaberta com rede');
+await esperarNaPagina(p3, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'tela.primeiroCard'), 20000, 100);
+const r3 = await p3.evaluate(() => ({ fila: AppState.queue.map((p) => p.venueID + '|' + p.updateRequestID), restam: AppState.serverTotal,
+  jaDecididos: dfatoAnel.filter((e) => e.k === 'busca.jaDecididos').map((e) => e.n) }));
+const b3 = buscas9b.at(-1);
+const d106 = decisoes9b.find((d) => d.chave === k106);
+diz('PRÉ-CONDIÇÃO: a lista da busca tinha os dois; a 1ª decisão pousou DEPOIS de ela ser tirada e ANTES da resposta, e a 2ª ainda estava no ar',
+  !!b3 && b3.lista.includes(k106) && b3.lista.includes(k107) && !!d106
+  && d106.t >= b3.tPedido && d106.t <= b3.tResposta && !decisoes9b.some((d) => d.chave === k107 && d.t <= b3.tResposta),
+  JSON.stringify({ b3, d106 }));
+diz('reaberta COM rede, nem o que pousou no meio da busca nem o que está saindo vira card',
+  r3.fila.length === 1 && r3.fila[0] === chave9b(SO_MAPA(108)) && r3.restam === 1
+  && r3.jaDecididos.includes(2), JSON.stringify(r3));
+for (let j = 0; j < 80 && !decisoes9b.some((d) => d.chave === k107); j++) await dormir(100);
+await esperarFimDaSaida(p3, 25000);
+diz('e as duas decisões saíram uma vez cada',
+  decisoes9b.filter((d) => d.chave === k106).length === 1 && decisoes9b.filter((d) => d.chave === k107).length === 1,
+  JSON.stringify(decisoes9b.map((d) => d.chave)));
+await p3.evaluate(() => { API.setSession(null); });
+await p3.close();
+atrasoBusca9b = 0;
+atrasoDecisao9b = () => 0;
+await ctx.unroute('**/api/*', rotaApi9b);
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));
@@ -1326,10 +1606,10 @@ if (falhas) {
   console.log(`\n✗ smoke do offline: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log('\n✓ smoke do offline: 16 seções (15 com o service worker LIGADO) — o MAPINHA DO CARD e o'
+console.log('\n✓ smoke do offline: 17 seções (16 com o service worker LIGADO) — o MAPINHA DO CARD e o'
   + ' MAPA AMPLIADO desenhando tile (com contraprova que vai a zero), mapa intacto com o'
   + ' toggle desligado e com o cache cheio, fila em IndexedDB, sufixo da foto como contrato'
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e a app reaberta sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), e esquecer PARANDO o download em voo');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle)');

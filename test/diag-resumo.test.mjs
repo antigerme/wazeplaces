@@ -116,3 +116,31 @@ test('diag-resumo: lê pela FONTE ÚNICA (`diag-ler.mjs`), não por um parser pr
   assert.match(SRC, /import \{ lerDiagnostico \} from '\.\/diag-ler\.mjs';/,
     'o leitor deixou de usar a fonte única — ZIP renomeado e relato antigo deixariam de abrir');
 });
+
+test('diag-resumo: a fila de saída sai em NÚMEROS, e o REPETIDO ganha aviso — sem ids nem autor', () => {
+  // v2026.09.22-06: o relato de reabrir sem rede dependia da fila de saída, e o
+  // resumo não a mencionava — ela estava só no localStorage, cru, junto do token.
+  const VENUE = 'CANARIO-VENUE-8877';
+  const d = relatorioV4();
+  d._versaoDoDiag = 5;
+  d.resumo.saida = { n: 3, distintas: 2, repetidas: 1, tipos: { reject: 2, read: 1 }, maisAntigaMin: 7 };
+  d.offline.pousosGravados = 4;
+  d.localStorage.waze_places_saida = JSON.stringify([{ tipo: 'reject', venueID: VENUE, updateRequestID: 'u1', nome: LOCAL }]);
+  const s = rodar(d);
+  assert.match(s, /── FILA DE SAÍDA ─+\nesperando envio 3 · pedidos distintos 2 · REPETIDOS 1 · tipos \{"reject":2,"read":1\} · o mais velho espera há 7 min/,
+    'a fila de saída sumiu da triagem');
+  assert.match(s, /ATENÇÃO: a mesma decisão está na fila mais de uma vez/, 'o repetido tem que ganhar aviso');
+  assert.match(s, /pousos gravados depois da fila guardada: 4/, 'os pousos gravados sumiram da seção offline');
+  assert.ok(!s.includes(VENUE), 'o id de um pedido da fila de saída vazou — o leitor não lê o localStorage');
+  assert.ok(!s.includes(LOCAL), 'o autor de um pedido da fila de saída vazou');
+  assert.ok(!s.includes(TOKEN), 'o token vazou');
+  // Sem repetido, sem aviso: aviso que aparece sempre é o que se aprende a ignorar.
+  d.resumo.saida = { n: 2, distintas: 2, repetidas: 0, tipos: { read: 2 }, maisAntigaMin: 1 };
+  assert.ok(!/ATENÇÃO: a mesma decisão/.test(rodar(d)), 'o aviso de repetido apareceu sem repetido');
+});
+
+test('diag-resumo: relatório de antes da fila de saída no resumo diz que ela não vinha', () => {
+  const s = rodar(relatorioV4());   // v4: sem `resumo.saida`
+  assert.match(s, /── FILA DE SAÍDA ─+\n\(ausente nesta versão\)/);
+  assert.match(s, /pousos gravados depois da fila guardada: \(ausente nesta versão\)/);
+});

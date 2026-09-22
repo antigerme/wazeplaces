@@ -8,6 +8,18 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.22-06
+
+### Corrigido
+- **Pedido que você já tratou não volta mais como card ao reabrir a app sem sinal.** Com o **Disponível offline** ligado, quem tratava pedidos no modo avião, fechava a app e a reabria via os **mesmos pedidos** de novo, enquanto eles continuavam na fila de envio. Dava pra decidir outra vez: o placar contava de novo e o Waze recebia as duas decisões quando o sinal voltava. Isso vale também pro pedido tratado **com** sinal pouco antes de a rede cair.
+- **Fechar a app sem sinal logo depois de tratar um pedido não perde mais a decisão.** Se você fechava durante os segundos do "Desfazer", a decisão podia sumir com o placar já contado, e o pedido voltava na abertura seguinte. Agora ela vai direto pra fila de envio.
+- **Ao reabrir com sinal e ainda com decisões esperando envio**, os pedidos que estão sendo enviados naquele momento não aparecem mais de novo na fila enquanto o envio termina.
+- **"Restam" conta certo depois de reabrir:** os pedidos esperando envio já foram feitos, então não entram mais na conta.
+
+### Melhorado — relatório do modo dev
+- **Um alerta novo avisa quando um pedido que está esperando envio aparece de novo como card.**
+- **O resumo mostra a fila de envio em números**: quantos pedidos, se algum aparece repetido e há quanto tempo o mais antigo espera.
+
 ## v2026.09.22-05
 
 ### Melhorado — relatório do modo dev

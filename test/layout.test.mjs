@@ -1582,6 +1582,9 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // tem nome de quem enviou e a foto é de terceiro — "sair é sair de tudo".
     OFFLINE_DB: 'offlineEsquecer()',
     OFFLINE_TILES_CACHE: 'offlineEsquecer()',
+    // Os pedidos que pousaram no Waze depois da fila guardada: ids de pedidos
+    // de terceiros, que só existem pra filtrar a fila guardada — e saem com ela.
+    OFFLINE_POUSOS_KEY: 'offlineEsquecer()',
     // Patente, conquistas e contadores. É dado de QUEM ENTROU (o trabalho
     // dele), então some junto — e some porque o contrato do "Sair" já
     // promete, não porque alguém lembrou.

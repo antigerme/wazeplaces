@@ -312,3 +312,47 @@ test('diagnóstico: a sentinela do esqueleto lê o que o COLETOR mede (esqueleto
     'o esqueleto tem que ser medido pela classe `hidden` E pela caixa');
   assert.match(corpo, /card: !!frente,/, 'o card medido tem que ser o da FRENTE (`cardDaFrente()`)');
 });
+
+test('sentinelas: pedido que já está esperando envio DE VOLTA na fila — o relato de reabrir sem rede', () => {
+  // v2026.09.22-06: reaberta no modo avião, a app devolvia como card o que o
+  // owner já tinha tratado, e dava pra decidir de novo.
+  const c = sao();
+  c.decididos = { naSaida: 3, naFila: 2 };
+  const r = montar()(c);
+  assert.deepEqual(chaves(r), ['pedidoDecididoNaFila']);
+  assert.equal(r[0].n, 2, 'o alerta leva QUANTOS voltaram — é o número que se compara com a fila de saída');
+});
+
+test('sentinelas: fila de saída cheia com a fila de pedidos limpa é o normal — cala', () => {
+  // Pedido esperando envio é o comportamento certo sem rede; o defeito é ele
+  // voltar a ser card. Alertar só por haver fila de saída acusaria todo
+  // relatório gerado na estrada.
+  for (const [decididos, porque] of [
+    [{ naSaida: 5, naFila: 0 }, 'decisões esperando rede, nenhuma de volta: o normal do offline'],
+    [{ naSaida: 0, naFila: 0 }, 'sem fila de saída'],
+  ]) {
+    const c = sao();
+    c.decididos = decididos;
+    assert.deepEqual(montar()(c), [], porque);
+  }
+  assert.deepEqual(montar()(sao()), [], 'relatório de versão antiga (sem o campo): não inventa alerta');
+});
+
+test('diagnóstico: a sentinela do pedido decidido lê o que o COLETOR mede (fila de saída × fila de pedidos)', () => {
+  const i = APP.indexOf('function diagComputado(');
+  const corpo = APP.slice(i, APP.indexOf('\n}', i)).split('\n')
+    .filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  // A MESMA chave dos dois lados, pela fonte única — é ela que o filtro usa.
+  assert.match(corpo, /const naSaida = new Set\(carregarFilaDeSaida\(\)\.map\(chaveDoPedido\)\.filter\(Boolean\)\);/,
+    'o coletor tem que ler a fila de saída pela `chaveDoPedido`, a mesma do filtro');
+  assert.match(corpo, /naFila: \(AppState\.queue \|\| \[\]\)\.filter\(\(p\) => naSaida\.has\(chaveDoPedido\(p\)\)\)\.length,/,
+    'o coletor tem que cruzar com a fila de PEDIDOS');
+  // Só números: a chave é id de pedido de terceiro.
+  assert.ok(!/decididos = \{[^}]*chaves/.test(corpo), 'o coletor passou a levar as CHAVES — só a contagem vai');
+  // O NOME que o coletor grava é o que a sentinela lê. Sem esta amarra, renomear
+  // um dos lados deixava os dois testes verdes e a sentinela muda pra sempre —
+  // foi a sabotagem que sobreviveu na primeira rodada.
+  assert.match(corpo, /fora\.decididos = \{/, 'o coletor parou de gravar `decididos`');
+  const s = APP.slice(APP.indexOf('function diagSentinelas('), APP.indexOf('\n}', APP.indexOf('function diagSentinelas(')));
+  assert.match(s, /const dc = comp\.decididos;/, 'a sentinela parou de ler `comp.decididos`');
+});

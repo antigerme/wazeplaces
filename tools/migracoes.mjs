@@ -84,4 +84,23 @@ export const MIGRACOES = [
         + 'Tirar isto hoje quebraria o replay do arquivo que o owner mandou '
         + 'hoje de manhã.',
   },
+  {
+    id: 'fila-guardada-desde',
+    desde: '2026-09-22',
+    revisarEm: '2026-10-22',
+    familia: 'aparelho',
+    onde: 'js/app.js',
+    oque: 'O `: guardada.t` no `offlineTentarAbrirSemRede`. A partir de '
+        + 'v2026.09.22-06 a fila guardada do offline leva `desde` — o instante '
+        + 'em que a LISTA foi tirada —, e é contra ele que os pousos filtram a '
+        + 'reabertura sem rede (o pedido tratado com rede depois da foto não '
+        + 'volta como card). Fila guardada ANTES disso não tem o campo, e o '
+        + 'mais perto que se sabe é a hora em que ela foi gravada.',
+    removerQuando: 'Toda fila guardada tiver sido regravada por '
+        + 'v2026.09.22-06 ou depois — o que acontece na primeira busca ou '
+        + 'varredura COM rede, ou seja no primeiro uso com sinal. Passou do '
+        + 'prazo? Some com o `: guardada.t` e deixe `desde` ser exigido: sem '
+        + 'ele o filtro usa 0 e tira TODO pouso gravado, que é o lado seguro '
+        + '(esconder o que foi decidido, nunca mostrá-lo de novo).',
+  },
 ];

@@ -597,6 +597,35 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   assert.match(bloco5b, /join\(ROOT, 'tools\/diag-resumo\.mjs'\)/,
     'a 5b tem que rodar o LEITOR único no arquivo de verdade, não um parser próprio');
 
+  // O QUE FOI TRATADO NÃO VOLTA (relato de 2026-09-22, v2026.09.22-06). A 5b
+  // reabria sem decidir nada e a ESTRADA decidia sem reabrir: nenhuma seção
+  // fazia as duas coisas, que é o percurso de quem usa (gotcha #52 — a fixture
+  // não tinha a combinação). A 9b só vale se DECIDIR e REABRIR em página nova,
+  // com o controle de que a fila guardada continua com os cinco — senão a
+  // reabertura esconderia os decididos por outro motivo.
+  exigir(/secao\('9b\. O QUE FOI TRATADO NÃO VOLTA/,
+    'sumiu a seção que decide e reabre — é o percurso do relato, e nenhuma outra o faz');
+  const i9b = CODIGO.indexOf("secao('9b.");
+  const bloco9b = CODIGO.slice(i9b, CODIGO.indexOf("secao('10.", i9b));
+  assert.match(bloco9b, /await ctx\.newPage\(\)/, 'a 9b tem que reabrir em página NOVA');
+  assert.match(bloco9b, /await fria\.goto\(BASE \+ '\/'/, 'a página nova tem que CARREGAR a app');
+  assert.doesNotMatch(bloco9b, /montarNa\(/, 'a página reaberta ganhou o helper de montagem — é a app que tem que decidir');
+  for (const [re, porque] of [
+    [/diz\('CONTROLE: a fila guardada continua com os 5/, 'sem ele, a reabertura esconderia os decididos por outro motivo'],
+    [/diz\('reaberta de novo, NENHUM pedido decidido volta como card/, 'é a frase do relato'],
+    [/diz\('a ação que estava na janela do Desfazer ao FECHAR sem rede/, 'o caminho síncrono de fechar sem rede'],
+    [/diz\('a rede voltou e cada pedido recebeu UMA decisão/, 'o dano no Waze: a mesma decisão mandada de novo'],
+    [/diz\('o placar contou cada PEDIDO uma vez/, 'o placar conta gesto; a conta tem que ser contra pedidos DISTINTOS'],
+    [/diz\('CONTROLE: com um pedido da fila de saída na tela, a sentinela ACUSA/, 'sem ele, "não acusa" passa por vácuo'],
+    [/diz\('PRÉ-CONDIÇÃO: a lista da busca tinha os dois/, 'sem ela, a corrida da busca pode não ter acontecido'],
+    [/diz\('reaberta COM rede, nem o que pousou no meio da busca/, 'o mesmo buraco com rede, na abertura'],
+  ]) assert.match(bloco9b, re, `a 9b perdeu uma medida — ${porque}`);
+  // A chave é calculada na mão, sem função nova da app: assim a seção roda
+  // igual contra a app de ANTES do conserto, que é como se prova que ela
+  // reprova o defeito (10 falhas lá, 0 aqui).
+  assert.doesNotMatch(bloco9b, /chaveDoPedido|offlineLerPousos|semOsJaDecididos/,
+    'a 9b passou a depender de função nova da app — não roda mais contra a de antes, e a prova do conserto some');
+
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],
     'falta o script `test:offline` no package.json');
