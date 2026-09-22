@@ -176,7 +176,18 @@ wazeplaces/
 │   └── index.mjs            # Adaptador Cloudflare Workers: roteia /api/* (store=KV, key=Secret), /sala (DO) e delega estáticos pro ASSETS
 ├── _headers                 # Cloudflare: headers/CSP/cache (substitui o antigo .htaccess)
 ├── wrangler.jsonc           # Cloudflare: binding do KV SESSIONS + compat date
-├── .assetsignore            # Exclui server/docs/etc do publish estático dos Workers (static assets)
+├── .assetsignore            # O que o Cloudflare NÃO publica. O padrão é PUBLICAR (`assets.directory`
+│                            #   é a raiz), então esquecimento vaza CALADO — a app segue funcionando
+│                            #   igual, só com coisa a mais no ar. MEDIDO na produção em 2026-09-22:
+│                            #   `tools/` (23 arq.) e `test/` (47) respondiam 200, e os FONTES
+│                            #   comentados também (`js/app.js` 622 KB ao lado dos 201 KB do
+│                            #   `js/min/app.js` que a app carrega). **E ele é SÓ do Cloudflare**: a
+│                            #   VM tem allowlist própria em `isAllowedAsset` (`server/node.mjs`), que
+│                            #   precisou do MESMO corte — gotcha #14, correção que vale num destino
+│                            #   e não no outro. `test/vm-estaticos.test.mjs` cobra os dois sentidos:
+│                            #   entrada nova da raiz sem decisão reprova, e nada que o `index.html`
+│                            #   ou o SW carregam pode estar ignorado (padrão largo demais apagaria o
+│                            #   `js/min/` e subiria a app morta, com o primeiro guard verde).
 ├── package.json             # Scripts: start (node), cf:dev, cf:deploy. Zero dependências.
 ├── tools/
 │   ├── fixtures-paises.json # 51 pedidos REAIS dos 6 países obrigatórios, usados pelo smoke E pelo

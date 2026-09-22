@@ -26,3 +26,27 @@ css/tailwind.src.css
 # com 73 comentários de decisão (o gerado tem 113). Mesmo motivo do
 # `tailwind.src.css` logo acima: entrada de build não é asset.
 index.src.html
+
+# ── Nada disto é frontend: são ferramentas de DEV e a suíte de testes. ────────
+# Estavam sendo publicados: 23 arquivos em `tools/` (680 KB) e 47 em `test/`
+# (936 KB), medidos ao vivo em produção — `/tools/waze-probe.mjs` e
+# `/test/core.test.mjs` respondiam 200. Não há segredo embutido em nenhum deles
+# (varrido), e nada em runtime carrega de lá: o `index.html` e o
+# `service-worker.js` só referenciam `js/min/*` e `css/app.css`. O que se ganha
+# é não publicar o mapa das nossas defesas — cada teste diz, por escrito, qual
+# invariante ele protege e como sabotá-la.
+tools
+test
+
+# ── FONTES comentados: entrada de build não é asset. ─────────────────────────
+# Mesma decisão já tomada pro `index.src.html` e pro `css/tailwind.src.css`
+# logo acima — ela só não tinha sido aplicada aqui. O que a app CARREGA é
+# `js/min/*` e `css/app.css`; os fontes seguiam publicados ao lado, medidos em
+# produção: `js/app.js` 622 KB contra 201 KB do minificado, `css/styles.css`
+# 117 KB contra 77 KB. É um segundo caminho pros mesmos bytes, carregando os
+# comentários de decisão que o gerador tira de propósito.
+#
+# O `js/*.js` casa SÓ o que está direto em `js/` — `js/min/*.js` continua
+# publicado (verificado com `wrangler dev`, não deduzido: ver gotcha #14.1).
+js/*.js
+css/styles.css

@@ -38,7 +38,10 @@ test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
   await comServidor(8471, async () => {
     // O HTML é o que mais importa (é onde o script roda), mas os estáticos
     // também levam: a política vale pra resposta, não pra "página".
-    for (const caminho of ['/', '/js/app.js', '/css/app.css']) {
+    // `/js/min/app.js` e não `/js/app.js`: o fonte comentado deixou de ser
+    // servido (é entrada de build, como o `index.src.html`), então pedi-lo aqui
+    // media um 404 e a asserção reprovava por motivo alheio à CSP.
+    for (const caminho of ['/', '/js/min/app.js', '/css/app.css']) {
       const r = await fetch('http://127.0.0.1:8471' + caminho);
       assert.equal(r.status, 200, `${caminho} não respondeu 200`);
       const csp = r.headers.get('content-security-policy');
@@ -186,7 +189,7 @@ test('o Cache-Control por caminho da VM bate com o do _headers', async () => {
   // arquivo que ele governa.
   const EXEMPLOS = {
     '/service-worker.js': '/service-worker.js',
-    '/js/*': '/js/app.js',
+    '/js/*': '/js/min/app.js',   // o SERVIDO; o fonte é entrada de build (404)
     '/css/*': '/css/app.css',
     '/manifest.json': '/manifest.json',
     '/icons/*': '/icons/icon-512.svg',
