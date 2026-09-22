@@ -1,10 +1,21 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026092109';
+const CACHE_NAME = 'waze-places-2026092201';
 // Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
 // ver a nota no `activate`.
 const TILES_CACHE = 'waze-places-tiles';
+// Quais tiles ESTÃO guardados, em memória. Existe porque `respondWith` precisa
+// ser decidido de forma SÍNCRONA: perguntar ao cache exige await, e depois do
+// await não dá mais pra dizer "deixa o navegador cuidar". Sem esta lista o SW
+// teria que prometer resposta pra tudo — que foi exatamente o defeito.
+let tilesGuardados = new Set();
+async function hidratarTiles() {
+  try {
+    const c = await caches.open(TILES_CACHE);
+    tilesGuardados = new Set((await c.keys()).map((r) => r.url));
+  } catch (e) { tilesGuardados = new Set(); }
+}
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -45,13 +56,18 @@ self.addEventListener('activate', event => {
           }
         })
       );
-    }).then(() => self.clients.claim())
+    }).then(() => hidratarTiles()).then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
+  }
+  // A app avisa quando terminou de guardar tiles. Sem isto o SW só saberia
+  // deles no próximo `activate`, e a sombra de sinal chegaria antes.
+  if (event.data && event.data.type === 'TILES_GUARDADOS') {
+    event.waitUntil(hidratarTiles());
   }
 });
 
@@ -74,10 +90,28 @@ self.addEventListener('fetch', event => {
   // mapa existir na sombra — o tile vem com `max-age=600` e o navegador o
   // descartaria em dez minutos.
   if (url.origin !== self.location.origin) {
-    if (/-tiles\/live\/base\//.test(url.pathname)) {
+    // SÓ RESPONDE O QUE JÁ ESTÁ GUARDADO. Nunca chama `respondWith` pra pedir
+    // à rede — e isto não é zelo, é o conserto de um defeito que QUEBROU O MAPA
+    // DE TODO MUNDO na v2026.09.21-08.
+    //
+    // A versão anterior fazia `hit || fetch(event.request)`, e `respondWith`
+    // é uma PROMESSA DE RESPONDER: se o fetch falha, a imagem falha — enquanto
+    // SEM o service worker o navegador a teria carregado normalmente. Ali o
+    // fetch era barrado pela CSP (`connect-src` não tinha o host do tile), e o
+    // resultado foi o mapa sumir inclusive para quem NUNCA ligou o offline.
+    //
+    // Agora a interceptação é ESTRITAMENTE ADITIVA: sem entrada no cache, o SW
+    // sai sem responder e o navegador faz o que sempre fez. `tilesGuardados` é
+    // consultado de forma SÍNCRONA porque `respondWith` tem que ser decidido no
+    // mesmo tique — não dá pra "desistir" depois de um await.
+    // DUAS condições, e não é redundância: o caminho mantém a exceção estreita
+    // aqui (nunca respondemos por domínio externo qualquer, mesmo que algo
+    // estranho entre no cache), e a lista mantém a interceptação ADITIVA.
+    if (/-tiles\/live\/base\//.test(url.pathname) && tilesGuardados.has(url.href)) {
       event.respondWith(
         caches.open(TILES_CACHE)
           .then((c) => c.match(event.request))
+          // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar.
           .then((hit) => hit || fetch(event.request))
           .catch(() => fetch(event.request))
       );

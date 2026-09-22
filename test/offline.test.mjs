@@ -251,3 +251,68 @@ test('o estado parcial existe nas quatro línguas e não diz "Pronto"', () => {
   assert.ok(iPar > 0 && iPronto > iPar,
     'o ramo do parcial tem que vir ANTES do de pronto, senão ele nunca é alcançado');
 });
+
+// ── O DEFEITO QUE QUEBROU O MAPA DE TODO MUNDO ────────────────────────────
+//
+// O SW passou a interceptar o tile e a responder `hit || fetch(...)`.
+// `respondWith` é uma PROMESSA DE RESPONDER: com o fetch falhando (ali, barrado
+// pela CSP), a imagem falhava — enquanto SEM o service worker o navegador a
+// teria carregado normalmente. O mapa sumiu inclusive pra quem NUNCA ligou o
+// offline, que é o oposto do que o recurso promete.
+//
+// A invariante: a interceptação é ESTRITAMENTE ADITIVA. Sem entrada no cache,
+// o SW não responde e o navegador faz o que sempre fez.
+test('o SW só responde pelo tile que JÁ está guardado (nunca promete rede)', () => {
+  const i = SW_SEM.indexOf('url.origin !== self.location.origin');
+  const bloco = SW_SEM.slice(i, i + 900);
+  assert.match(bloco, /tilesGuardados\.has\(/,
+    'a decisão de responder tem que consultar a lista SÍNCRONA do que está guardado');
+  // e o respondWith tem que estar DENTRO desse if, não antes dele
+  const iHas = bloco.indexOf('tilesGuardados.has(');
+  const iResp = bloco.indexOf('event.respondWith');
+  assert.ok(iHas > 0 && iResp > iHas,
+    'o `respondWith` tem que vir DEPOIS da checagem — senão o SW promete responder'
+    + ' por tile que ele não tem, e a imagem quebra quando a rede falha');
+});
+
+test('a lista de tiles guardados é hidratada e se mantém viva', () => {
+  assert.match(SW_SEM, /async function hidratarTiles/);
+  assert.match(SW_SEM, /hidratarTiles\(\)[\s\S]{0,60}clients\.claim/,
+    'tem que hidratar no activate, senão o SW acorda sem saber o que tem');
+  assert.match(SW_SEM, /TILES_GUARDADOS[\s\S]{0,140}hidratarTiles\(\)/,
+    'e re-hidratar quando a app avisa, senão só saberia no próximo activate');
+  assert.match(APP_SEM, /postMessage\(\{ type: 'TILES_GUARDADOS' \}\)/,
+    'a app precisa avisar o SW depois de guardar');
+});
+
+// ── O BURACO ESTRUTURAL: nenhum teste ligava o service worker ─────────────
+//
+// Os DOIS defeitos de produção passaram pela mesma razão: o smoke tinha 47
+// contextos com `serviceWorkers: 'block'` e ZERO com 'allow'. O SW nunca foi
+// exercitado, então quebrá-lo não reprovava nada.
+//
+// Este guard é META de propósito: ele não testa a app, testa se a COBERTURA
+// existe. Sem ele, o próximo refactor do smoke pode remover a única cobertura
+// de SW e ninguém perceberia — que é exatamente como o buraco nasceu.
+test('existe cobertura de service worker E ela roda no CI', () => {
+  const SMOKE = readFileSync(new URL('../tools/smoke-offline.mjs', import.meta.url), 'utf8');
+  const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const CI = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+
+  assert.match(SMOKE, /serviceWorkers:\s*'allow'/,
+    'o smoke do offline tem que LIGAR o service worker — foi com ele bloqueado em'
+    + ' 47 contextos e ligado em zero que o mapa quebrou pra todo mundo sem nada reprovar');
+  assert.match(SMOKE, /-tiles\/live\/base/, 'e exercitar o TILE, que é o que o SW intercepta');
+  assert.match(SMOKE, /controller !== null/,
+    'esperando o SW ASSUMIR por sinal positivo, nunca por relógio (gotcha #62)');
+  // o caso que mais importa: o mapa com o offline DESLIGADO
+  assert.match(SMOKE, /offline DESLIGADO/,
+    'tem que medir o mapa com o toggle desligado — quem não marcou nada foi quem mais sofreu');
+
+  // Cobertura que não roda é cobertura que não existe.
+  assert.ok(PKG.scripts && PKG.scripts['test:offline'],
+    'falta o script `test:offline` no package.json');
+  assert.match(CI, /npm run test:offline/,
+    'o CI não roda o smoke do offline — sem isso ele vira arquivo morto no dia em'
+    + ' que alguém esquecer de rodá-lo à mão, que é exatamente como o buraco nasceu');
+});

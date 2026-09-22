@@ -5619,6 +5619,21 @@ async function esperarFimDaSaida(page, tetoMs = 180000) {
   }
 }
 
+// ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
+//
+// Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
+// service worker LIGADO, e este arquivo é de LAYOUT: são 47 contextos com
+// `serviceWorkers: 'block'`, porque SW no meio de medição de pixel só
+// atrapalha. Misturar as duas coisas deixou o bloco medindo com `js/min/`
+// regerado no meio da execução — falha de instrumento, não da app.
+//
+// O arquivo dedicado cobre o mesmo e mais: mapa intacto com o toggle
+// DESLIGADO (o defeito que sumiu com o mapa de todo mundo), a varredura
+// enchendo com a CSP real, o tile voltando do cache sem tocar a rede, a
+// abertura offline, o card de foto travado e o "esquecer" parando o download
+// em voo. E ele foi SABOTADO com os dois defeitos de produção: os dois
+// reprovam. Roda no CI por `npm run test:offline`.
+
 await browser.close();
 servidor.kill();
 
@@ -5627,76 +5642,6 @@ if (falhas) {
   process.exit(1);
 }
 
-// ── DISPONÍVEL OFFLINE: o tile chega mesmo ao cache, COM a CSP da app ──────
-//
-// Este bloco existe por um defeito que FOI PRA PRODUÇÃO (v2026.09.21-08) e que
-// NENHUM teste de fonte poderia pegar: a varredura baixava tile com
-// `fetch(url)`, e a CSP escolhe a diretiva pelo DESTINO da requisição —
-// `fetch` cru tem destino '' e responde a `connect-src`, que é NOMINAL e não
-// tinha o host do tile. Resultado: todo tile bloqueado ANTES da rede, sem erro
-// no console da app, e a linha travada em "Preparando… 197 de 530".
-//
-// O sinal que este bloco mede é POSITIVO e não a ausência de erro: a rota do
-// tile tem que ser ATINGIDA. Requisição barrada pela CSP nem chega ao
-// interceptador do Playwright — então "rota nunca chamada" É o defeito, e é
-// exatamente o que um `expect(semErros)` não enxergaria.
-{
-  // o mesmo JPEG de 1×1 que outros blocos usam: aqui o que importa é a
-  // requisição CHEGAR, não o que vem dentro dela
-  const PNG_1PX = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
-    serviceWorkers: 'block', locale: 'pt-BR', colorScheme: 'dark' });
-  let tilesPedidos = 0;
-  await ctx.route('**/*-tiles/live/base/**', (r) => {
-    tilesPedidos++;
-    return r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX,
-      headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } });
-  });
-  await ctx.route('**/venue-image.waze.com/**', (r) =>
-    r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }));
-  const page = await ctx.newPage();
-  const violacoes = [];
-  page.on('console', (m) => { if (/Content Security Policy|Refused to connect/i.test(m.text())) violacoes.push(m.text().slice(0, 140)); });
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(400);
-
-  const pl = JSON.parse(JSON.stringify(Object.values(CARDS)[0]));
-  await page.evaluate((p) => {
-    AppState.authenticated = true;
-    AppState.preferences.comoFuncionaVisto = true;
-    AppState.preferences.offlineDisponivel = true;
-    AppState.profile = { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false };
-    document.getElementById('authScreen').classList.add('hidden');
-    document.getElementById('appScreen').classList.remove('hidden');
-    showLoading(false);
-    AppState.queue = [p, JSON.parse(JSON.stringify(p))];
-    AppState.currentPlace = p;
-    showCurrentPlace();
-  }, pl);
-  await assentar(page);
-  await page.evaluate(() => { offlineMarcarGesto(); return offlineVarrer(); });
-  await page.waitForTimeout(1200);
-
-  const r = await page.evaluate(async () => {
-    const c = await caches.open('waze-places-tiles');
-    return { guardados: (await c.keys()).length, janela: offlineJanelaServida, resultado: offlineUltimoResultado };
-  });
-  if (!tilesPedidos) {
-    console.log('  ✗ offline: a rota do tile NUNCA foi chamada — a CSP está barrando o download'
-      + (violacoes.length ? ` (${violacoes[0]})` : ' (sem violação no console: outro caminho)'));
-    falhas++;
-  } else if (!r.guardados) {
-    console.log(`  ✗ offline: ${tilesPedidos} tiles pedidos e ZERO guardados no cache`);
-    falhas++;
-  } else if (r.resultado !== 'pronto' || r.janela === null) {
-    console.log(`  ✗ offline: varredura não fechou (resultado=${r.resultado}, janela=${r.janela})`);
-    falhas++;
-  } else {
-    console.log(`  ✓ offline: ${tilesPedidos} tiles pedidos, ${r.guardados} guardados, varredura PRONTA`);
-  }
-  if (violacoes.length) { console.log(`  ✗ offline: violação de CSP — ${violacoes[0]}`); falhas++; }
-  await ctx.close();
-}
 
 console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card`
   + `, + ${FIXTURES_PAISES.length} pedidos REAIS de ${new Set(FIXTURES_PAISES.map((f) => f._pais)).size} países × ${APARELHOS_PAISES.length} aparelhos × ${LINGUAS.length} idiomas`
@@ -5741,5 +5686,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
-  + `, + Disponível offline com a CSP REAL da app (a rota do tile tem que ser ATINGIDA — requisição barrada por CSP nem chega ao interceptador, que foi o defeito de produção — mais o cache preenchido e a varredura fechando)`
+  + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

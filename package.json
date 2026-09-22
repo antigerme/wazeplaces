@@ -21,7 +21,8 @@
     "test:fluxo": "node tools/smoke-fluxo.mjs",
     "js": "node tools/gerar-js.mjs",
     "html": "node tools/gerar-html.mjs",
-    "test:diag-tela": "node tools/smoke-diag-tela.mjs"
+    "test:diag-tela": "node tools/smoke-diag-tela.mjs",
+    "test:offline": "node tools/smoke-offline.mjs"
   },
   "engines": {
     "node": ">=22"
