@@ -328,6 +328,47 @@ test('todo método que o app.js chama existe mesmo no objeto Presenca', () => {
     `o app.js chama Presenca.${faltando.join('/')} que não existe no objeto`);
 });
 
+test('o pedido mandado pela conversa leva a foto que o CARD mostra', () => {
+  // Levava `place.imageUrl`, que é a PRIMEIRA foto do local. Num pedido de
+  // "Nova foto" o card abre na foto EM DECISÃO — que na fila do owner não é a
+  // primeira em 13 de 76 pedidos de foto —, então o colega recebia uma foto que
+  // o local já tinha, e não a que se perguntava. A regra é a do carrossel:
+  // `fotosDoCard`, fonte única.
+  const APP = read('js/app.js');
+  const i = APP.indexOf('function cardParaConversa(');
+  assert.ok(i !== -1, 'cardParaConversa sumiu do app.js');
+  const a = APP.indexOf('{', APP.indexOf(')', i));
+  let prof = 0, fim = -1;
+  for (let j = a; j < APP.length; j++) {
+    if (APP[j] === '{') prof++;
+    else if (APP[j] === '}' && --prof === 0) { fim = j + 1; break; }
+  }
+  // Só CÓDIGO: o comentário da função cita `place.imageUrl` justamente pra
+  // explicar por que ele saiu (gotcha #67).
+  const corpo = APP.slice(i, fim).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(corpo, /fotosDoCard\(place\)/, 'a conversa voltou a escolher a foto por conta própria');
+  assert.match(corpo, /imageUrl: fotos\.urls\[fotos\.inicial\]/,
+    'a conversa tem que mandar a foto em que o card ABRE');
+  assert.doesNotMatch(corpo, /place\.imageUrl|imageUrls\[0\]/,
+    'a conversa voltou a mandar a primeira foto do local');
+  // CRUA: o sufixo `?w=` é do cache de quem MANDA, e o de quem recebe é outro.
+  assert.doesNotMatch(corpo, /urlDaFoto\(/, 'a foto da conversa não pode levar o sufixo do offline');
+});
+
+test('o smoke da presença manda um pedido cuja foto do pedido NÃO é a primeira', () => {
+  // Com a lista de fotos vazia, o smoke nunca perguntava QUAL foto ia pela
+  // conversa. A fixture tem que DISTINGUIR: duas fotos, `imageUrl` com a
+  // primeira (como o servidor manda) e o pedido casado com a segunda.
+  const SMOKE = read('tools/smoke-presenca.mjs');
+  assert.match(SMOKE, /imageUrl: 'https:\/\/venue-image\.waze\.com\/thumbs\/thumb700_ja-no-local'/,
+    'a fixture perdeu a primeira foto no `imageUrl` — sem ela o código antigo passaria');
+  assert.match(SMOKE, /recebido\.foto === 'https:\/\/venue-image\.waze\.com\/thumbs\/thumb700_ur-smoke'/,
+    'o smoke deixou de cobrar que chega a foto DO PEDIDO');
+  // E nunca vai ao CDN de verdade: no CI o navegador tem rede.
+  assert.match(SMOKE, /ctx\.route\('\*\*\/venue-image\.waze\.com\/\*\*'/,
+    'o smoke passaria a pedir a foto ao Waze de verdade');
+});
+
 test('o estado e o objeto exportado são o MESMO — nada de dois Presenca', () => {
   // Enquanto forem dois objetos, `Presenca.x` e `window.Presenca.x` podem
   // divergir, e a diferença só aparece em runtime, num clique específico.

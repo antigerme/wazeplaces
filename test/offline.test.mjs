@@ -72,6 +72,52 @@ test('urlDaFoto é FONTE ÚNICA: os três consumidores passam por ela', () => {
   for (const c of cruas) {
     assert.match(c, /urlDaFoto\(/, `atribuição crua de .src a partir de imageUrls: ${c}`);
   }
+  // O varredor acima só enxerga quem ESCREVE `imageUrls` na linha — e a tira
+  // do lightbox (`im.src = u`) e o aquecimento do resto do card (`aquecer(u)`)
+  // escapavam dele por receberem a URL numa variável. Os dois pediam a foto
+  // CRUA enquanto a grande pedia com sufixo: com sinal, cópia baixada à toa;
+  // sem ele, miniatura quebrada. Daí a regra pelo CONCEITO: todo `aquecer(`
+  // ou é de TILE (dentro do laço do `tilesDoCard`, na mesma linha) ou passa
+  // pelo `urlDaFoto`.
+  assert.match(APP_SEM, /im\.src = urlDaFoto\(u\)/, 'a tira do lightbox voltou a pedir a foto crua');
+  const chamadas = APP_SEM.split('\n').filter((l) => /\baquecer\(/.test(l) && !/function aquecer\(/.test(l));
+  assert.ok(chamadas.length >= 4, `achei ${chamadas.length} chamadas de aquecer — o varredor quebrou`);
+  for (const l of chamadas) {
+    assert.ok(/aquecer\(urlDaFoto\(/.test(l) || /of tilesDoCard\([^)]*\)\) aquecer\(u\)/.test(l),
+      `aquecimento de foto sem passar pelo urlDaFoto: ${l.trim()}`);
+  }
+});
+
+// ── A foto guardada tem que ser a foto que o card MOSTRA ─────────────────────
+//
+// Num pedido de FOTO o carrossel abre na foto EM DECISÃO (a denunciada ou a
+// proposta), e o aquecimento e a varredura do offline pegavam `imageUrls[0]`
+// por conta própria. MEDIDO na fila do owner: em 13 de 76 pedidos de foto a em
+// decisão não é a primeira — a varredura guardava a errada e, sem rede, o card
+// abria na que ninguém guardou, com "a foto precisa de sinal" e ✕/✓ travados.
+test('card, aquecimento e varredura escolhem a foto pela MESMA regra (fotosDoCard)', () => {
+  const regra = fatiar('fotosDoCard');
+  assert.match(regra, /flagEntityID/, 'a regra perdeu a foto DENUNCIADA');
+  assert.match(regra, /updateRequestID/, 'a regra perdeu a foto PROPOSTA');
+  assert.match(regra, /inicial: emDecisao >= 0 \? emDecisao : 0/,
+    'sem foto em decisão o card abre na primeira — e só aí');
+  for (const nome of ['renderCardImages', 'aquecerPrimeiroSlide', 'aquecerRestoDoCard', 'offlineItensDaFila']) {
+    const c = fatiar(nome);
+    assert.match(c, /fotosDoCard\(/, `${nome} voltou a escolher a foto por conta própria`);
+    assert.doesNotMatch(c, /imageUrls\[0\]/, `${nome} voltou a pegar a PRIMEIRA foto da lista`);
+    assert.doesNotMatch(c, /flagEntityID|updateRequestID/,
+      `${nome} recopiou a regra da foto em decisão — duplicada, ela diverge (foi o defeito)`);
+  }
+  // E cada consumidor usa o índice INICIAL, não a primeira da lista devolvida.
+  assert.match(fatiar('renderCardImages'), /let currentImgIdx = fotos\.inicial;/,
+    'o carrossel deixou de abrir na foto em decisão');
+  assert.match(fatiar('aquecerPrimeiroSlide'), /aquecer\(urlDaFoto\(f\.urls\[f\.inicial\]\)\)/,
+    'o aquecimento do próximo card deixou de mirar a foto em que ele abre');
+  assert.match(fatiar('offlineItensDaFila'), /const f = fotos\.urls\[fotos\.inicial\];/,
+    'a varredura deixou de guardar a foto em que o card abre');
+  // O resto do card não repete a inicial (já foi no 1º slide) e o teto conta com ela.
+  assert.match(fatiar('aquecerRestoDoCard'), /filter\(\(_, i\) => i !== f\.inicial\)/,
+    'o resto do card voltou a pular a [0] em vez da foto que já foi aquecida');
 });
 
 test('urlDaFoto devolve a URL INTACTA com o toggle desligado', () => {
@@ -275,14 +321,97 @@ test('o SW só responde pelo tile que JÁ está guardado (nunca promete rede)', 
     + ' por tile que ele não tem, e a imagem quebra quando a rede falha');
 });
 
-test('a lista de tiles guardados é hidratada e se mantém viva', () => {
-  assert.match(SW_SEM, /async function hidratarTiles/);
+// ── O service worker é EFÊMERO, e a lista de tiles tem que sobreviver a isso ─
+//
+// Este guard se chamava "a lista de tiles guardados é hidratada e SE MANTÉM
+// VIVA" — e cobrava a leitura no `activate` e no aviso da varredura, mas não na
+// PARTIDA do worker. O título prometia exatamente o que o código não fazia: o
+// Chrome encerra o worker ocioso em ~30s e o recria com as globais zeradas, e o
+// `activate` não roda numa recriação. RELATADO pelo owner no Android (mapa sem
+// um tile, com 243 guardados) e reproduzido encerrando o worker pelo DevTools
+// Protocol. O smoke (`7c`) prova o comportamento; este trava a forma no fonte.
+test('a lista de tiles guardados é lida em TODA partida do worker, não só no activate', () => {
+  assert.match(SW_SEM, /function hidratarTiles\(/);
+  // Linha própria, na coluna 0: é o TOPO do script, que roda a cada partida.
+  // Dentro de listener ele só roda no evento — que é o defeito.
+  assert.match(SW_SEM, /^hidratarTiles\(\);$/m,
+    'hidratarTiles() saiu do topo do service-worker.js — o worker recriado pelo Android acorda sem saber de tile nenhum');
   assert.match(SW_SEM, /hidratarTiles\(\)[\s\S]{0,60}clients\.claim/,
-    'tem que hidratar no activate, senão o SW acorda sem saber o que tem');
+    'tem que hidratar no activate também');
   assert.match(SW_SEM, /TILES_GUARDADOS[\s\S]{0,140}hidratarTiles\(\)/,
-    'e re-hidratar quando a app avisa, senão só saberia no próximo activate');
+    'e re-hidratar quando a app avisa, senão só saberia na próxima partida');
+  // A janela logo depois de acordar: a lista ainda está sendo lida e o
+  // `respondWith` tem de ser decidido já. Sem o ramo, o PRIMEIRO pedido depois
+  // da recriação vai pra rede — e o card pede todos os tiles de uma vez.
+  assert.match(SW_SEM, /if \(tilesHidratados\)/,
+    'sumiu a distinção entre lista pronta e lista ainda sendo lida');
+  assert.match(SW_SEM, /respondWith\(hidratacao\.then\(/,
+    'na janela logo depois de acordar, o tile tem de ESPERAR a leitura da lista');
   assert.match(APP_SEM, /postMessage\(\{ type: 'TILES_GUARDADOS' \}\)/,
     'a app precisa avisar o SW depois de guardar');
+});
+
+// ── "Sem rede" não é "sem foto" ──────────────────────────────────────────────
+//
+// O aviso "a foto precisa de sinal" era posto no RENDER, por suposição
+// (`offline` + tipo de foto), antes de a imagem tentar — e escondia a foto que a
+// varredura tinha acabado de guardar. No diagnóstico do owner as três fotos
+// dos cards de "Nova foto" estão `quebrada: false`, sem rede: o cache funcionou,
+// a app é que as escondeu.
+test('o aviso "a foto precisa de sinal" nasce da FALHA da foto, nunca da suposição', () => {
+  assert.doesNotMatch(fatiar('renderCurrentCard'), /marcarCardSemFoto\(/,
+    'renderCurrentCard voltou a pôr o aviso por suposição — esconde a foto guardada antes de ela carregar');
+  assert.match(fatiar('renderCardImages'), /img\.onerror = \(\) => \{[\s\S]{0,300}marcarCardSemFoto\(card, place\)/,
+    'o aviso tem de vir do onerror da foto em decisão');
+});
+
+test('a trava de ação respeita o card sem foto — terminar a ação anterior não reabre ✕/✓', () => {
+  const t = fatiar('aplicarTravaDeAcao');
+  assert.match(t, /querySelector\('\.card-sem-foto'\)/,
+    'aplicarTravaDeAcao voltou a ignorar o card sem foto');
+  assert.match(t, /b\.disabled = travado \|\| \(semFoto && cls !== '\.card-btn-skip'\)/,
+    'sem foto, ✕ e ✓ ficam travados e o ↑ vivo — a regra mora nesta função só (gotcha #63)');
+});
+
+// ── A janela do sufixo sobrevive ao app renascer ─────────────────────────────
+//
+// Ela morava só em memória: a app REABERTA sem rede (o Android encerra o app
+// em segundo plano) nascia com a janela nula, pedia a foto CRUA — que a
+// varredura nunca guarda — e todo card de foto abria com "precisa de sinal".
+test('a janela servida é GRAVADA quando vira e VOLTA na abertura sem rede', () => {
+  assert.match(fatiar('offlineVarrer'), /offlineJanelaServida = janela;\s*offlineGravarJanela\(janela\);/,
+    'a janela tem de ser gravada no MESMO tique em que vira — sem await antes, um "Sair"'
+    + ' logo depois entra na fila do IndexedDB atrás dela e apaga tudo');
+  const abrir = fatiar('offlineTentarAbrirSemRede');
+  const iLer = abrir.indexOf('offlineLerJanela()');
+  const iCard = abrir.indexOf('showCurrentPlace()');
+  assert.ok(iLer > 0 && iCard > iLer, 'a janela tem de voltar ANTES do primeiro card nascer');
+  assert.match(abrir, /if \(offlineJanelaServida === null\) offlineJanelaServida = janelaGuardada;/,
+    'com a app viva a janela de memória é a mais nova — a guardada só entra quando não há outra');
+  // Mesma base da fila, e é ela que o "Sair" e o desmarcar apagam.
+  assert.match(fatiar('offlineGravarJanela'), /OFFLINE_STORE/, 'a janela saiu da base que o esquecer apaga');
+  assert.match(fatiar('offlineEsquecer'), /deleteDatabase\(OFFLINE_DB\)/,
+    'o esquecer parou de apagar a base — a janela (e a fila) sobreviveriam ao "Sair"');
+});
+
+// ── A caixa do mapa encolhe com o texto, e o zoom muda com ela ───────────────
+test('a varredura guarda os tiles da FAIXA de alturas, com piso amarrado ao CSS', () => {
+  const itens = fatiar('offlineItensDaFila');
+  assert.match(itens, /tilesDaFaixa\(/, 'a varredura voltou a usar UMA caixa só');
+  assert.match(itens, /AppState\.queue\.slice\(\)/,
+    'o laço cede a thread: tem de iterar uma CÓPIA, senão o avanço da fila pula um pedido calado');
+  assert.match(fatiar('offlineFaixaDeCaixas'), /MAPA_TILE - 8/,
+    'o teto tem de ficar abaixo de um tile: acima de 504px o custo dobra (medido: 313 → 470 tiles)');
+  // O piso NÃO pode ficar acima do menor `min-height` do `.card-photo`: se o
+  // CSS deixar a caixa encolher mais, o zoom cai mais e o mapa fica com buraco
+  // sem rede. O deitado (`min-height: 0`) é GRADE, com a foto na coluna ao lado
+  // e altura cheia — não entra na conta, e o regex só pega `rem`.
+  const piso = Number((APP_SEM.match(/const OFFLINE_CAIXA_MIN_REM = ([\d.]+);/) || [])[1]);
+  const CSS = readFileSync(new URL('../css/styles.css', import.meta.url), 'utf8');
+  const pisos = [...CSS.matchAll(/\.card-photo[^{]*\{[^}]*?min-height:\s*([\d.]+)rem/g)].map((x) => Number(x[1]));
+  assert.ok(pisos.length >= 2, `achei ${pisos.length} pisos de .card-photo no CSS — o extrator quebrou`);
+  assert.ok(piso > 0 && piso <= Math.min(...pisos),
+    `o CSS deixa a caixa encolher até ${Math.min(...pisos)}rem, e a varredura só cobre até ${piso}rem`);
 });
 
 // ── O BURACO ESTRUTURAL: nenhum teste ligava o service worker ─────────────
@@ -335,8 +464,8 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   assert.match(SMOKE, /setOffline\(true\)/,
     'modo avião de verdade é abort MAIS setOffline — só abort deixa navigator.onLine true');
   assert.match(SMOKE, /icons\/splash\/[a-z0-9-]+\.png/,
-    'a foto da ESTRADA tem que vir de um arquivo REAL do servidor: route.fulfill'
-    + ' NÃO popula o cache HTTP, e o cache é o mecanismo inteiro da foto offline');
+    'a foto tem que vir de um arquivo REAL do servidor: stub não passa pelo cache'
+    + ' HTTP, e o cache é o mecanismo inteiro da foto offline');
 
   // O DEPLOY é o outro modo de o mapa sumir, e ele não dá sintoma até a estrada:
   // o `activate` apaga todo cache ≠ CACHE_NAME, e sem a isenção o mapa
@@ -350,6 +479,53 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   assert.match(SMOKE, /waze-places-2020010101/,
     'sumiu a ISCA — sem um cache de vers\u00e3o anterior pra faxina levar, "o mapa'
     + ' sobreviveu" passa por v\u00e1cuo no dia em que a faxina parar de rodar');
+
+  // Os TRÊS defeitos do relato de 2026-09-22 e a trava que se desfazia. Cada
+  // um passou por uma cobertura que existia e não podia reprovar: a seção 6
+  // EXIGIA o aviso como correto, a estrada só usava `NEW_PLACE`, e nenhum teste
+  // encerrava o worker nem desenhava um card de caixa curta.
+  assert.match(SMOKE, /stopAllWorkers/,
+    'sumiu o worker ENCERRADO — o Android faz isso sozinho em ~30s, e sem a seção'
+    + ' o defeito da lista de tiles zerada volta sem ninguém ver');
+  assert.match(SMOKE, /runningStatus/,
+    'o worker encerrado precisa do CONTROLE de que foi mesmo encerrado — sem ele a'
+    + ' seção passa com o worker vivo, medindo o caso que já funcionava');
+  assert.match(SMOKE, /PRÉ-CONDIÇÃO: a caixa do reporte é mais CURTA e o zoom muda/,
+    'o card de caixa curta precisa da pré-condição de troca de zoom — sem ela os'
+    + ' tiles da caixa curta são subconjunto dos da alta e qualquer código passa');
+  assert.match(SMOKE, /a foto CHEGOU: ela aparece no card de foto/,
+    'a seção 6 tem de medir os DOIS lados: foto que chega aparece, foto que não chega avisa');
+  assert.match(SMOKE, /a trava SOBREVIVE à ação anterior terminar/,
+    'sumiu a prova de que terminar a ação anterior não reabre ✕/✓ num card sem foto');
+  assert.match(SMOKE, /k % 4 === 0 \? 'NEW_PHOTO'/,
+    'a ESTRADA voltou a só ter NEW_PLACE — o único tipo em que o defeito da foto não aparece');
+  assert.match(SMOKE, /temFoto: !!\(pl && /,
+    'a ESTRADA tem de saber QUEM TEM FOTO pelo pedido, não pela tela: pela tela, a foto'
+    + ' escondida pelo aviso contava como card de mapa e a falha nomeava o sintoma errado');
+
+  // A FOTO OFFLINE vive no cache HTTP do navegador, e o contexto principal do
+  // smoke NÃO consegue medi-lo: QUALQUER `route` no contexto desliga esse cache
+  // (medido com controle — a mesma foto volta do cache sem rota e quebra com
+  // uma rota que nem casa com ela). A seção 6c roda num contexto SEM rota e é a
+  // ÚNICA que mede a foto de verdade; com uma rota, passaria a medir o vazio.
+  const i6c = SMOKE.indexOf("secao('6c.");
+  const f6c = SMOKE.indexOf('ctxFoto.close()');
+  assert.ok(i6c > 0 && f6c > i6c, 'sumiu a seção 6c — a foto em decisão e a app reaberta sem rede');
+  const bloco6c = SMOKE.slice(i6c, f6c).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.doesNotMatch(bloco6c, /(ctxFoto|pgFoto)\.route\(/,
+    'o contexto da 6c ganhou uma rota — com ela o cache HTTP desliga e a foto offline nunca abre');
+  assert.match(bloco6c, /serviceWorkers: 'block'/,
+    'a 6c precisa do SW fora: com ele, a foto de mesma origem passaria pelo cache DELE, que o avião não alcança');
+  assert.match(bloco6c, /CONTROLE: sem rede, a foto que já veio abre do cache e a nunca pedida quebra/,
+    'a 6c perdeu o controle do instrumento nos dois sentidos');
+  assert.match(bloco6c, /CONTROLE: nenhuma foto foi pedida CRUA antes da varredura/,
+    'a 6c perdeu o controle de que o que abre sem rede veio da varredura');
+  assert.match(bloco6c, /flagEntityID: arquivo\(2\)/,
+    'a 6c precisa da foto DENUNCIADA fora da 1ª posição');
+  assert.match(bloco6c, /updateRequestID: arquivo\(1\)/,
+    'a 6c precisa da foto PROPOSTA fora da 1ª posição');
+  assert.match(bloco6c, /await offlineTentarAbrirSemRede\(\)/,
+    'a 6c tem de reabrir pelo caminho de abertura de verdade');
 
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],

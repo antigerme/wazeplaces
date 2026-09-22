@@ -92,6 +92,10 @@ async function editor(nome, peer, rank, am, lang) {
   const ctx = await browser.newContext({
     viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true, serviceWorkers: 'block',
   });
+  // A foto do pedido mandado pela conversa é do Waze: servida AQUI, pra o smoke
+  // nunca bater no CDN de verdade (no CI o navegador tem rede).
+  await ctx.route('**/venue-image.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/gif',
+    body: Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64') }));
   const page = await ctx.newPage();
   page.on('pageerror', (e) => anota(`[${nome}] erro de página: ${e.message}`));
   await page.addInitScript((l) => { try { localStorage.setItem('waze_places_lang', l); } catch (e) {} }, lang || 'pt');
@@ -251,7 +255,14 @@ try {
     window.AppState.currentPlace = {
       venueID: '205522459.2055159053.3242788', updateRequestID: 'ur-smoke',
       name: 'Padaria Estrela do Norte', address: 'R. Aurora, 412 — São Paulo',
-      categories: ['BAKERY'], updateTypeKey: 'IMAGE', imageUrls: [],
+      categories: ['BAKERY'], updateTypeKey: 'IMAGE',
+      // DUAS fotos, e a do pedido é a SEGUNDA — a que o card mostra, casada pelo
+      // `updateRequestID` na URL, como no Waze. Com a lista vazia o smoke nunca
+      // perguntava QUAL foto ia pela conversa, e ela levava a PRIMEIRA do local
+      // (`imageUrl`, que o servidor preenche com ela). Relato do owner, 2026-09-22.
+      imageUrls: ['https://venue-image.waze.com/thumbs/thumb700_ja-no-local',
+                  'https://venue-image.waze.com/thumbs/thumb700_ur-smoke'],
+      imageUrl: 'https://venue-image.waze.com/thumbs/thumb700_ja-no-local',
       lat: -23.55, lon: -46.63,
     };
     window.presencaRenderAnexo();
@@ -292,6 +303,9 @@ try {
   if (recebido && recebido.nome === 'Padaria Estrela do Norte' && recebido.tipo === 'IMAGE'
       && recebido.txt.includes('fachada')) ok('card e pergunta chegam como UMA mensagem');
   else anota(`o que chegou está errado: ${JSON.stringify(recebido)}`);
+  if (recebido && recebido.foto === 'https://venue-image.waze.com/thumbs/thumb700_ur-smoke') {
+    ok('a foto que chega é a DO PEDIDO (a 2ª do local), não a primeira');
+  } else anota(`a foto que chegou não é a do pedido: ${JSON.stringify(recebido && recebido.foto)}`);
 
   // Mandou: a tirinha tem que sumir, senão o pedido apareceria em dois lugares.
   const depoisDeMandar = await ana.page.evaluate(() => ({
