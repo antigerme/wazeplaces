@@ -1,4 +1,12 @@
-// FONTE ÚNICA de esperar o esvaziamento da FILA DE SAÍDA terminar, num smoke.
+// FONTE ÚNICA de ESPERAR, num smoke, SEM injetar nada na página.
+//
+// Duas esperas moram aqui, e o que elas têm em comum é o que importa: as duas
+// pollam pelo lado do NODE. O smoke do offline MEDE a superfície de erro da app
+// (`pageerror` e o `unhandledrejection` que ela mesma captura), então instrumento
+// que injeta código nessa superfície vira ruído indistinguível de defeito — e foi
+// assim que o CI acusou um `EvalError: Refused to evaluate a string as JavaScript`
+// que a app não produz (ela não tem `eval` nenhum).
+
 //
 // Nasceu dentro do `smoke-browser.mjs`, depois de aquele bloco reprovar TRÊS
 // vezes no CI e NUNCA aqui. Virou módulo quando o `smoke-offline.mjs` precisou
@@ -59,5 +67,30 @@ export async function esperarFimDaSaida(page, tetoMs = 180000) {
       return { motivo: 'TETO', ms: Date.now() - t0, verDiario: st.verDiario, fim: st.fim, base: base.fim };
     }
     await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+/**
+ * Espera uma condição NA PÁGINA pollando pelo lado do Node.
+ *
+ * `page.waitForFunction` seria o caminho óbvio e tem quatro armadilhas já
+ * documentadas aqui — e uma quinta: ele instala maquinaria DENTRO da página,
+ * que é exatamente o lugar que este smoke está medindo. `page.evaluate(fn)`
+ * chama a função por referência, sem avaliar string.
+ *
+ * @param {import('playwright').Page} page
+ * @param {() => boolean} fn   avaliada na página; erro ou contexto morto conta como "ainda não"
+ * @param {number} tetoMs      rede contra travar, nunca expectativa
+ * @param {number} passoMs
+ * @returns {Promise<{ok: boolean, ms: number}>}
+ */
+export async function esperarNaPagina(page, fn, tetoMs = 20000, passoMs = 200) {
+  const t0 = Date.now();
+  for (;;) {
+    let v = null;
+    try { v = await page.evaluate(fn); } catch (e) { v = null; }   // navegando: tenta de novo
+    if (v) return { ok: true, ms: Date.now() - t0 };
+    if (Date.now() - t0 > tetoMs) return { ok: false, ms: Date.now() - t0 };
+    await new Promise((r) => setTimeout(r, passoMs));
   }
 }

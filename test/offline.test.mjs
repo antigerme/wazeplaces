@@ -303,8 +303,13 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     'o smoke do offline tem que LIGAR o service worker — foi com ele bloqueado em'
     + ' 47 contextos e ligado em zero que o mapa quebrou pra todo mundo sem nada reprovar');
   assert.match(SMOKE, /-tiles\/live\/base/, 'e exercitar o TILE, que é o que o SW intercepta');
-  assert.match(SMOKE, /controller !== null/,
-    'esperando o SW ASSUMIR por sinal positivo, nunca por relógio (gotcha #62)');
+  // Ancorado na ESTRUTURA, não na grafia: o que importa é esperar o SW ASSUMIR
+  // por SINAL POSITIVO (`navigator.serviceWorker.controller`) e por um poll do
+  // lado do Node, nunca por relógio. A versão anterior deste guard casava a
+  // string `controller !== null` e reprovou código certo quando a espera trocou
+  // de forma — gotcha #67 dentro do guard escrito pra evitar o #62.
+  assert.match(SMOKE, /esperarNaPagina\([\s\S]{0,80}?serviceWorker[\s\S]{0,40}?controller/,
+    'a espera pelo SW ASSUMIR tem que ser sinal POSITIVO pollado do Node (gotcha #62)');
   // o caso que mais importa: o mapa com o offline DESLIGADO
   assert.match(SMOKE, /offline DESLIGADO/,
     'tem que medir o mapa com o toggle desligado — quem não marcou nada foi quem mais sofreu');
@@ -365,7 +370,9 @@ test('a espera do esvaziamento é FONTE ÚNICA, nunca reimplementada num smoke',
   const MOD = readFileSync(new URL('../tools/esperar-saida.mjs', import.meta.url), 'utf8');
 
   for (const [nome, src] of [['smoke-offline', OFF], ['smoke-browser', BROW]]) {
-    assert.match(src, /import \{ esperarFimDaSaida \} from '\.\/esperar-saida\.mjs'/,
+    // Tolera outros nomes na MESMA importação (o módulo também exporta o
+    // esperador genérico): o que o guard cobra é a origem, não a lista.
+    assert.match(src, /import \{[^}]*\besperarFimDaSaida\b[^}]*\} from '\.\/esperar-saida\.mjs'/,
       `${nome} não importa a fonte única da espera do esvaziamento`);
     // Reimplementar com `waitForFunction` sobre a fila é exatamente o que
     // quebrou: rAF não dispara em segundo plano, `polling` usa o timer da
