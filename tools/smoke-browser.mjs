@@ -4373,8 +4373,18 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(neg.dica.length > 20 && !/[{}]/.test(neg.dica), `${id}: negado não explicou`, neg.dica);
 
       // 5. GPS CONCEDIDO: fica em 'gps', ordena e a dica confirma.
+      //    Numa página RECARREGADA, e o motivo é do WebKit: lá o negado do passo 4
+      //    vale pra página inteira. MEDIDO: conceder depois dele e pedir de novo
+      //    NA MESMA página devolve "User denied Geolocation"; recarregada, a
+      //    posição chega. É o Safari de verdade (quem negou e depois liberou
+      //    precisa recarregar). No Chromium o concedido vale na hora, e
+      //    recarregar não muda o que este passo mede.
       await ctx.grantPermissions(['geolocation'], { origin: BASE.replace(/\/$/, '') });
       await ctx.setGeolocation({ latitude: REF.lat, longitude: REF.lon, accuracy: 800 });
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForTimeout(600);
+      await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
+      await abrir({ casa: [REF.lat, REF.lon], trabalho: [REF.lat + 0.02, REF.lon + 0.02] });
       const ok = await page.evaluate(async () => {
         const sel = document.getElementById('filterSort');
         sel.value = 'gps';
