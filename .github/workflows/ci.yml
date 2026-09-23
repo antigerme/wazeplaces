@@ -13,20 +13,6 @@ on:
   # Só fica disponível depois de estar na branch padrão (é como o GitHub
   # funciona), então ele não salva a rodada de HOJE — salva a próxima.
   workflow_dispatch: {}
-  # Rodada SEMANAL na main, pedida pelo owner (2026-09-23). O CI usa o
-  # Playwright MAIS NOVO (`PLAYWRIGHT_VERSAO: latest`), mas só quando alguma
-  # coisa o dispara: semana sem PR era semana em que o Chrome e o Safari novos
-  # chegavam no celular dos editores sem ninguém testar a app neles. Aqui a
-  # main é testada toda segunda com o que houver de mais novo, com ou sem PR.
-  #
-  # Segunda 09:17 UTC (06:17 em Brasília), e o minuto não é enfeite: o GitHub
-  # avisa que agendamento na hora cheia atrasa e pode ser DESCARTADO sob carga.
-  # Se reprovar, o GitHub manda e-mail a quem mexeu por último no `cron` — o
-  # owner, que faz o merge. E ele DESLIGA agendamento de repositório público
-  # parado há 60 dias; com a app em desenvolvimento isso não acontece, mas é
-  # por isso que um dia a rodada pode simplesmente parar de aparecer.
-  schedule:
-    - cron: '17 9 * * 1'
 jobs:
   check:
     runs-on: ubuntu-latest

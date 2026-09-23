@@ -216,15 +216,6 @@ test('o ajuste de ICE da presença vale SÓ fora do Chromium, e só troca o nome
   assert.equal(ajustados, contextos, 'contexto novo na presença sem o ajuste de ICE — no WebKit a conversa não abre nele');
 });
 
-test('a main roda o CI toda semana, fora da hora cheia', () => {
-  // O `latest` só testa o navegador novo quando algo dispara o CI; semana sem
-  // PR era semana sem teste. A rodada semanal fecha isso.
-  const ci = ler('.github/workflows/ci.yml');
-  const m = ci.match(/^\s+schedule:\s*\n\s+- cron: '(\d+) (\d+) \* \* (\d)'\s*$/m);
-  assert.ok(m, 'sumiu a rodada semanal (ou deixou de ser semanal)');
-  assert.notEqual(m[1], '0', 'o GitHub avisa que agendamento na hora cheia atrasa e pode ser descartado sob carga');
-});
-
 test('o FAB é medido depois de QUADROS, não de um prazo', () => {
   // MEDIDO no WebKit: 250 ms depois de abrir a Ajuda, o FAB ainda estava no
   // canto velho em 4 de 8 rodadas — ele se reposiciona no primeiro QUADRO, e o

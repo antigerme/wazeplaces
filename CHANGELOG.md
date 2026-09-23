@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.23-01
+
+### Corrigido
+- **"Perto de mim" no iPhone: a mensagem de localização negada agora diz o que fazer.** Quem negava a localização e depois a liberava nas configurações via a mensagem pedir pra "tentar de novo" — e no iPhone isso não funcionava sem reabrir a app, porque o Safari guarda o "não" até a página recarregar. Agora a mensagem diz pra liberar **e reabrir a app**, nos 4 idiomas.
+
+### Notas
+- Os testes automáticos passaram a rodar também no **motor do Safari** (o WebKit, o mesmo de todo navegador do iPhone), além do Chrome. Foi assim que o caso acima apareceu.
+
 ## v2026.09.22-06
 
 ### Corrigido
