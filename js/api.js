@@ -292,7 +292,10 @@ const API = {
         });
     },
 
-    async markAsRead(venueID, updateRequestID) {
+    // `presenca` (opcional): a posição do card na tela, de carona na ação — o
+    // servidor a escreve no mapa do WME na mesma ida (fase 2). Sem ela, o corpo
+    // sai exatamente como sempre saiu.
+    async markAsRead(venueID, updateRequestID, presenca) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return { success: false, error: t('api.error.noSession') };
@@ -301,7 +304,8 @@ const API = {
             sessionToken,
             region: this.getRegion(),
             venueID,
-            updateRequestID
+            updateRequestID,
+            ...(presenca ? { presenca } : {})
         });
     },
 
@@ -334,7 +338,7 @@ const API = {
         });
     },
 
-    async rejectPlace(venueID, updateRequestID) {
+    async rejectPlace(venueID, updateRequestID, presenca) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return { success: false, error: t('api.error.noSession') };
@@ -343,7 +347,8 @@ const API = {
             sessionToken,
             region: this.getRegion(),
             venueID,
-            updateRequestID
+            updateRequestID,
+            ...(presenca ? { presenca } : {})
         });
     },
 
@@ -420,6 +425,19 @@ const API = {
         return this._post('perfil', {
             sessionToken,
             region: this.getRegion()
+        });
+    },
+
+    // A presença no mapa do WME, pela rota própria. Na fase 2 só serve pro
+    // GESTO de desligar (`visivel: false`) — mover e ligar vão de carona nas
+    // ações, sem requisição nova.
+    async presencaWaze(campos) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        return this._post('presenca-waze', {
+            sessionToken,
+            region: this.getRegion(),
+            ...campos
         });
     },
 

@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.23-03
+
+### Corrigido
+- **Ajuda → Privacidade: a lista do que a app faz com os seus cookies ficou completa.** Ela dizia "rejeita, marca como lido e aprova ou exclui foto nova. Nada além disso", mas a app também põe ⭐ no pedido (com o "Pular guarda o pedido" ligado) e corrige o nome do local. Agora a lista traz as duas coisas, nos 4 idiomas, e não promete mais que é só isso.
+
+### Notas
+- Primeira parte da troca da presença pela infraestrutura do próprio Waze: quem usa a app passa a aparecer no mapa do WME enquanto tria, de carona nas decisões que a app já manda, sem nenhuma requisição a mais. Nada muda na tela da app.
+
 ## v2026.09.23-02
 
 ### Corrigido

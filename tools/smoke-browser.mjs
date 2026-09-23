@@ -5655,6 +5655,123 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── PRESENÇA NO WME: a posição vai DE CARONA na ação (fase 2) ─────────────
+//
+// Medido pela REDE, com a app de verdade (o JS minificado que vai pro ar): o
+// que cada ação leva, o que a segunda ação logo em seguida NÃO leva (freio de
+// 30 s), a visibilidade ligando sozinha de carona, o interruptor desligando o
+// WME na hora e religando na ação seguinte, e quem se escondeu pelo WME sendo
+// respeitado. Os testes de unidade fatiam a fonte; este roda a tela.
+{
+  const id = 'presença no WME/Pixel 7';
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  const page = await ctx.newPage();
+  const errosJS = [];
+  page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
+  let visivelNoWme = false;
+  const pedidos = [];
+  await page.route('**/api/**', async (route) => {
+    const rota = route.request().url().split('/api/')[1].split('?')[0];
+    let corpo = {};
+    try { corpo = JSON.parse(route.request().postData() || '{}'); } catch { /* corpo vazio */ }
+    pedidos.push({ rota, corpo });
+    const json = (b) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) });
+    if (rota === 'perfil') {
+      return json({ success: true, visivelNoWme,
+        profile: { id: 12444348, userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [], managedAreas: [] } });
+    }
+    if (rota === 'lista-paises') return json({ success: true, countries: [] });
+    if (rota === 'validar-place' || rota === 'marcar-lido') {
+      return json({ success: true, ...(corpo.presenca ? { presenca: { ok: true, marca: true } } : {}) });
+    }
+    if (rota === 'presenca-waze') return json({ success: true });
+    return json({ success: false });
+  });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(400);
+  const FILA = FIXTURES_PAISES.filter((p) => p.mapa && Array.isArray(p.mapa.centro)).slice(0, 8);
+  await page.evaluate(async ({ fila }) => {
+    API.setSession('token-de-teste');
+    AppState.authenticated = true;
+    AppState.preferences.undoEnabled = true;
+    AppState.serverTotal = fila.length; AppState.hasMore = false;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    await loadProfileAndAuxData();       // o caminho REAL do perfil decide a visibilidade
+    updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    AppState.queue = JSON.parse(JSON.stringify(fila)); AppState.currentPlace = null; showCurrentPlace();
+  }, { fila: FILA });
+  await assentar(page);
+
+  const acoesDe = (rota) => pedidos.filter((x) => x.rota === rota);
+  const esperarPedido = async (rota, n) => {
+    for (let i = 0; i < 80 && acoesDe(rota).length < n; i++) await dormir(100);
+    return acoesDe(rota)[n - 1];
+  };
+  const clicar = (sel) => page.evaluate((s) => document.querySelector('#cardStack .place-card:not(.card-fundo) ' + s).click(), sel);
+  const naTela = () => page.evaluate(() => AppState.currentPlace && AppState.currentPlace.mapa.centro);
+
+  // 1. Perfil disse "invisível" e a app nunca a viu ligada: a PRIMEIRA ação liga.
+  checa(acoesDe('perfil').length === 1, `${id}: CONTROLE — o perfil não foi pedido pelo caminho real`);
+  await clicar('.card-btn-reject');
+  const r1 = await esperarPedido('validar-place', 1);
+  checa(!!r1, `${id}: o ✕ não chegou à rede (a seção ficaria cega)`);
+  const centro1 = await naTela();
+  const p1 = r1 && r1.corpo.presenca;
+  checa(!!p1, `${id}: a 1ª ação saiu SEM a posição`, JSON.stringify(r1 && r1.corpo));
+  checa(p1 && p1.userId === '12444348' && p1.pais === 30, `${id}: posição sem o id da pessoa ou sem o país da fila`, JSON.stringify(p1));
+  checa(p1 && p1.lat === centro1[0] && p1.lon === centro1[1],
+    `${id}: a posição não é a do card NA TELA, em [lat, lon]`, JSON.stringify({ p1, centro1 }));
+  checa(p1 && p1.visivel === true, `${id}: o perfil disse invisível e a 1ª ação não ligou a visibilidade`, JSON.stringify(p1));
+  checa(await page.evaluate(() => AppState.preferences.presencaWmeVisto === true),
+    `${id}: a app não anotou que já viu a visibilidade LIGADA`);
+
+  // 2. A segunda ação dentro de 30 s vai SEM posição (o freio).
+  await page.waitForTimeout(3600);                      // a janela do Desfazer da 1ª
+  await clicar('.card-btn-read');
+  const r2 = await esperarPedido('marcar-lido', 1);
+  checa(!!r2, `${id}: o ✓ não chegou à rede`);
+  checa(r2 && !('presenca' in r2.corpo), `${id}: a 2ª ação em menos de 30 s levou posição (o freio sumiu)`, JSON.stringify(r2 && r2.corpo));
+
+  // 3. Desligar o "Ver quem está na fila": some do WME NA HORA.
+  await page.evaluate(() => { const c = document.getElementById('prefPresenca'); c.checked = false; c.dispatchEvent(new Event('change')); });
+  const off = await esperarPedido('presenca-waze', 1);
+  checa(!!off && off.corpo.visivel === false && off.corpo.userId === '12444348' && !('posicao' in off.corpo),
+    `${id}: desligar não mandou o WME esconder a pessoa (visivel:false)`, JSON.stringify(off && off.corpo));
+  await page.waitForTimeout(3600);
+  await clicar('.card-btn-reject');
+  const r3 = await esperarPedido('validar-place', 2);
+  checa(r3 && !('presenca' in r3.corpo), `${id}: com a presença DESLIGADA a ação levou posição`, JSON.stringify(r3 && r3.corpo));
+
+  // 4. Religar: a próxima ação liga de novo, sem esperar o freio.
+  await page.evaluate(() => { const c = document.getElementById('prefPresenca'); c.checked = true; c.dispatchEvent(new Event('change')); });
+  await page.waitForTimeout(3600);
+  await clicar('.card-btn-read');
+  const r4 = await esperarPedido('marcar-lido', 2);
+  const centro4 = await naTela();
+  checa(r4 && r4.corpo.presenca && r4.corpo.presenca.visivel === true,
+    `${id}: religar não fez a ação seguinte ligar a visibilidade`, JSON.stringify(r4 && r4.corpo));
+  checa(r4 && r4.corpo.presenca && r4.corpo.presenca.lat === centro4[0], `${id}: a posição religada não é a do card na tela`);
+
+  // 5. Escondeu-se pelo WME (vista ligada, perfil agora diz invisível): conta como desligar.
+  visivelNoWme = false;
+  await page.evaluate(async () => { await loadProfileAndAuxData(); });
+  const estado = await page.evaluate(() => ({ presenca: AppState.preferences.presenca, off: AppState.preferences.presencaOffEm,
+                                              chk: document.getElementById('prefPresenca').checked }));
+  checa(estado.presenca === false && Number.isFinite(estado.off) && estado.chk === false,
+    `${id}: quem se escondeu pelo WME foi religado pela app (ou o interruptor ficou mentindo)`, JSON.stringify(estado));
+  await page.waitForTimeout(3600);
+  await clicar('.card-btn-reject');
+  const r5 = await esperarPedido('validar-place', 3);
+  checa(r5 && !('presenca' in r5.corpo), `${id}: depois de se esconder pelo WME a ação levou posição`, JSON.stringify(r5 && r5.corpo));
+  checa(acoesDe('presenca-waze').length === 1, `${id}: a app mexeu no WME de quem se escondeu por lá`, JSON.stringify(acoesDe('presenca-waze')));
+
+  checa(errosJS.length === 0, `${id}: erro de JS no caminho da presença`, errosJS[0]);
+  await ctx.close();
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -5723,5 +5840,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
+  + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e quem se escondeu pelo WME respeitado)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

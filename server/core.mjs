@@ -21,6 +21,7 @@ import {
   corpoMensagens, corpoSoCabecalho, corpoMarcarLida, corpoConfirmar, corpoPerfis,
   lerEnvio, lerConversas, lerMensagens, lerNaoLidas, lerPerfis, lerMarcarLida, lerProvedor,
 } from './wme-grpc.mjs';
+import { marcarPosicao, paisValido } from './marca-app.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Constantes
@@ -2013,7 +2014,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   return { places, blocked };
 }
 
-async function handleMarcarLido(data, { sessions }) {
+async function handleMarcarLido(data, { sessions, aoFundo }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
 
@@ -2031,18 +2032,23 @@ async function handleMarcarLido(data, { sessions }) {
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
   const payload = { value: true, venueUpdateRequestIds: ids };
+  // A presença sai JUNTO da ação, depois de a ação ter passado na validação —
+  // presença sem ação seria a pessoa andar no mapa por um pedido que nem saiu.
+  const carona = iniciarCarona(data, cookieHeader, region);
   const result = await callWaze(wazeMarkReadEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
+  const presenca = await esperarCarona(carona, aoFundo);
+  const extra = presenca ? { presenca } : {};
 
   if (result.httpCode === 200 && cat.category !== 'already_processed') {
     return {
       status: 200,
-      body: { success: true, count: ids.length, message: ids.length === 1 ? 'Place marcado como lido com sucesso' : `${ids.length} places marcados como lidos` },
+      body: { success: true, count: ids.length, message: ids.length === 1 ? 'Place marcado como lido com sucesso' : `${ids.length} places marcados como lidos`, ...extra },
     };
   }
   return {
     status: cat.category === 'already_processed' || cat.category === 'not_found' ? 200 : 500,
-    body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
+    body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode, ...extra },
   };
 }
 
@@ -2101,7 +2107,7 @@ async function handleGuardarPedido(data, { sessions }) {
 // Aprovar existe SÓ pra foto, e essa restrição vive no cliente — como a da
 // lixeira, e pelo mesmo motivo do owner: quem quiser aprovar outra coisa já
 // consegue pelo WME. O que a app promete é não OFERECER, não impedir.
-async function handleValidarPlace(data, { sessions }) {
+async function handleValidarPlace(data, { sessions, aoFundo }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
   if (data.venueID === undefined || data.updateRequestID === undefined) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
@@ -2129,8 +2135,11 @@ async function handleValidarPlace(data, { sessions }) {
       ],
     },
   };
+  const carona = iniciarCarona(data, cookieHeader, region);
   const result = await callWaze(wazeFeaturesEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
+  const presenca = await esperarCarona(carona, aoFundo);
+  const extra = presenca ? { presenca } : {};
 
   if (result.httpCode === 200 && cat.category !== 'already_processed') {
     return {
@@ -2139,12 +2148,13 @@ async function handleValidarPlace(data, { sessions }) {
         success: true,
         message: aprovar ? 'Pedido aprovado com sucesso' : 'Place rejeitado com sucesso',
         action: aprovar ? 'approved' : 'rejected',
+        ...extra,
       },
     };
   }
   return {
     status: cat.category === 'already_processed' || cat.category === 'not_found' ? 200 : 500,
-    body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
+    body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode, ...extra },
   };
 }
 
@@ -2466,11 +2476,19 @@ async function handlePerfil(data, { sessions }) {
     trabalho: rd.workLocation ? pontoDeGeometria(rd.workLocation) : null,
   };
 
+  // A chave "visível" da presença do WME (a mesma que a pessoa liga e desliga
+  // lá). Vem aqui porque o `/Session` já a traz — saber se a pessoa está
+  // visível não custa requisição nenhuma. `null` quando o Waze não mandou: aí o
+  // cliente não decide nada, em vez de ler ausência como "desligada".
+  const detalhes = rd.onlineEditorDetails || rd.user?.onlineEditorDetails;
+  const visivelNoWme = typeof detalhes?.visible === 'boolean' ? detalhes.visible : null;
+
   return {
     status: 200,
     body: {
       success: true,
       referencias,
+      visivelNoWme,
       profile: {
         id: rd.id ?? null,
         userName: rd.userName || '',
@@ -2786,12 +2804,94 @@ function pontoValido(p) {
   return { lat, lon };
 }
 
+// ── A presença DE CARONA (fase 2) ─────────────────────────────────────────
+//
+// A posição do card viaja DENTRO da ação que a app já faz (rejeitar, marcar
+// como lido) e o servidor a escreve no WME na mesma ida. É isso que deixa a
+// fase 2 com ZERO requisição nova ao nosso `/api` — a app roda no free tier do
+// Cloudflare, e uma chamada por card seria a conveniência pagando com o recurso
+// contado. A sub-requisição ao Waze não conta no limite diário do Worker.
+//
+// Três regras que não são gosto:
+//   · a presença NUNCA derruba a ação: entrada malformada é ignorada, falha do
+//     Waze vira `{ ok: false }` na resposta, e a ação segue com o resultado dela;
+//   · a regravação do cookie rotacionado vai só com a AÇÃO (`ctx` nulo aqui),
+//     como na rota da presença: duas escritas paralelas no mesmo blob são uma
+//     corrida por nada;
+//   · a carona só LIGA a visibilidade (`visivel: true`). Desligar é a pessoa
+//     pedindo, e tem rota própria (`presenca-waze`).
+//
+// E a espera tem TETO: a escrita corre em paralelo com a ação, e a resposta não
+// espera por ela mais que CARONA_ESPERA_MS depois de a ação acabar — o editor
+// está esperando o card dele, não a presença. O que passar do teto termina em
+// segundo plano (`aoFundo`: o `waitUntil` do Worker; no Node o processo segue
+// vivo de qualquer jeito).
+const CARONA_ESPERA_MS = 1500;
+
+function lerCarona(v) {
+  if (v === null || typeof v !== 'object') return null;
+  const userId = String(v.userId ?? '');
+  if (!ID_WAZE.test(userId)) return null;
+  const { lat, lon, pais } = v;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  if (!paisValido(pais)) return null;
+  if (v.visivel !== undefined && v.visivel !== true) return null;
+  return { userId, ...marcarPosicao({ lat, lon }, pais), ...(v.visivel === true ? { visivel: true } : {}) };
+}
+
+function iniciarCarona(data, cookieHeader, region) {
+  if (data.presenca === undefined || data.presenca === null) return null;
+  const p = lerCarona(data.presenca);
+  if (!p) return Promise.resolve({ ok: false, categoria: 'invalida' });
+  const base = WAZE_GRPC_PRESENCA[region] || WAZE_GRPC_PRESENCA.row;
+  // O corpo é montado DENTRO da corrente: qualquer coisa que lance vira
+  // rejeição, e rejeição vira `{ ok: false }` lá embaixo.
+  return Promise.resolve()
+    .then(() => callWazeGrpc(base + 'updateOnlineEditor', cookieHeader, corpoAtualizarPresenca(p), region, null))
+    .then((r) => {
+      const cat = categorizeGrpcError(r);
+      if (cat) return { ok: false, categoria: cat.category };
+      // A resposta traz o registro com a posição: dá pra conferir a marca a
+      // cada escrita, sem custo. `null` quando não veio posição pra conferir —
+      // "não sei" não é "perdeu a marca".
+      let eco = null;
+      try { eco = r.dados ? lerEditorOnline(r.dados) : null; } catch { eco = null; }
+      const marca = eco && eco.lat !== null && eco.lon !== null
+        ? Math.round(eco.lat * 1e6) === Math.round(p.lat * 1e6) && Math.round(eco.lon * 1e6) === Math.round(p.lon * 1e6)
+        : null;
+      return { ok: true, marca };
+    })
+    // DEFESA sem caminho hoje: o `callWazeGrpc` captura tudo, e a sabotagem que
+    // tira esta linha passa nos testes por isso. Ela fica porque o custo de uma
+    // rejeição aqui não seria a presença falhar: o `esperarCarona` a levaria pro
+    // handler, e uma AÇÃO feita no Waze voltaria ao editor como erro 500.
+    .catch(() => ({ ok: false, categoria: 'transient' }));
+}
+
+async function esperarCarona(carona, aoFundo) {
+  if (!carona) return null;
+  if (typeof aoFundo === 'function') {
+    try { aoFundo(carona); } catch { /* sem segundo plano, a escrita só pode ser cortada */ }
+  }
+  let timer;
+  const teto = new Promise((resolve) => { timer = setTimeout(() => resolve(null), CARONA_ESPERA_MS); });
+  try {
+    return await Promise.race([carona, teto]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Presença: mover a pessoa (posição e/ou visibilidade) e ver quem está online
-// numa caixa, NA MESMA IDA — é uma requisição por card, e não duas.
+// numa caixa, NA MESMA IDA.
 //
 // A escrita exige o id da própria pessoa (o `profile.id` que a app já tem do
 // `perfil`). Não há risco de se passar por outra: o Waze recusa id que não é o
 // do cookie (MEDIDO, status 7 “cannot modify another user's data”).
+//
+// TODA posição que a app escreve leva a marca da app (`marca-app.mjs`), por
+// isso a posição exige o `pais`: posição sem marca faria a pessoa sumir da
+// lista dos outros usuários da app.
 //
 // A app nunca DESLIGA a visibilidade por conta própria: ela é a mesma chave do
 // WME, e desligar aqui esconderia a pessoa lá sem ela saber. `visivel: false`
@@ -2800,7 +2900,11 @@ async function handlePresencaWaze(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
   const caixa = data.caixa == null ? null : caixaValida(data.caixa);
-  const posicao = data.posicao == null ? null : pontoValido(data.posicao);
+  let posicao = data.posicao == null ? null : pontoValido(data.posicao);
+  if (posicao) {
+    if (!paisValido(data.pais)) incompleto();
+    posicao = marcarPosicao(posicao, data.pais);
+  }
   if (data.visivel !== undefined && typeof data.visivel !== 'boolean') incompleto();
   const escreve = !!posicao || typeof data.visivel === 'boolean';
   if (!escreve && !caixa) incompleto();

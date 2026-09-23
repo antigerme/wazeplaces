@@ -11,6 +11,7 @@ import { webcrypto } from 'node:crypto';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 import { dispatch, categorizeGrpcError } from '../server/core.mjs';
 import * as g from '../server/wme-grpc.mjs';
+import { marcarPosicao, temMarcaDaApp, paisDaMarca } from '../server/marca-app.mjs';
 
 const F = JSON.parse(readFileSync(new URL('./wme-grpc.fixture.json', import.meta.url), 'utf8'));
 const deB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -80,15 +81,26 @@ test('presenca-waze: a região escolhe o servidor (a presença é separada por s
   }
 });
 
-test('presenca-waze: mover e listar saem JUNTOS, e o corpo da escrita é o do WME', async () => {
+test('presenca-waze: mover e listar saem JUNTOS, e a escrita é a do WME com a posição MARCADA', async () => {
   const { resultado, pedidos } = await comWaze((metodo) => (metodo === 'updateOnlineEditor'
     ? respostaGrpc({ dados: deB64(F.atualizarPosicao.res) })
     : respostaGrpc({ dados: new Uint8Array() })),
-  () => dispatch('presenca-waze', { cookies: COOKIES, userId: '183164343', posicao: { lat: -12.597498, lon: -39.511208 }, caixa: [-40, -13.5, -39, -12] }, {}));
+  () => dispatch('presenca-waze', { cookies: COOKIES, userId: '183164343', posicao: { lat: -12.597498, lon: -39.511208 }, pais: 30, caixa: [-40, -13.5, -39, -12] }, {}));
   assert.equal(resultado.status, 200);
   assert.deepEqual(pedidos.map((p) => p.metodo).sort(), ['listOnlineEditors', 'updateOnlineEditor']);
   const escrita = pedidos.find((p) => p.metodo === 'updateOnlineEditor');
-  assert.equal(b64(escrita.corpo), F.atualizarPosicao.req, 'o corpo da posição não é mais o que o WME manda');
+  // O corpo é o do WME (a fixture), trocada SÓ a posição pela marcada: mesma
+  // pessoa, mesma máscara, mesmos campos.
+  const marcada = marcarPosicao({ lat: -12.597498, lon: -39.511208 }, 30);
+  assert.equal(b64(escrita.corpo), b64(g.corpoAtualizarPresenca({ userId: '183164343', ...marcada })));
+  assert.notEqual(b64(escrita.corpo), F.atualizarPosicao.req, 'a posição saiu SEM a marca da app');
+  const loc = um(g.lerCampos(um(g.lerCampos(escrita.corpo), 1)), 2);
+  const ll = g.lerCampos(loc);
+  // int64 negativo viaja em complemento de dois: lido cru, dá um número enorme
+  // e o resto sai lixo (foi o que este teste acusou na primeira versão).
+  const assinado = (v) => Number(BigInt.asIntN(64, BigInt(v)));
+  assert.ok(temMarcaDaApp({ lat: assinado(um(ll, 102)) / 1e6 }), 'a latitude escrita não tem a marca da app');
+  assert.equal(paisDaMarca({ lon: assinado(um(ll, 101)) / 1e6 }), 30, 'a longitude escrita não carrega o país');
   assert.equal(resultado.body.eu.nome, 'cafanha');
   assert.deepEqual(resultado.body.editores, []);
 });
@@ -99,9 +111,15 @@ test('presenca-waze: validação antes de qualquer rede', async () => {
     { caixa: [-39, -12, -40, -13.5] },                           // caixa invertida
     { caixa: [-40, -13.5, -39] },                                // caixa incompleta
     { caixa: [-200, -13.5, -39, -12] },                          // fora do mundo
-    { posicao: { lat: -12.6, lon: -39.5 } },                     // escrita sem id
-    { posicao: { lat: -12.6, lon: -39.5 }, userId: '12a' },       // id que não é do Waze
-    { posicao: { lat: 91, lon: -39.5 }, userId: '1' },            // latitude impossível
+    { posicao: { lat: -12.6, lon: -39.5 }, pais: 30 },            // escrita sem id
+    { posicao: { lat: -12.6, lon: -39.5 }, pais: 30, userId: '12a' }, // id que não é do Waze
+    { posicao: { lat: 91, lon: -39.5 }, userId: '1', pais: 30 },  // latitude impossível
+    // Posição sem país não tem como levar a marca da app, e posição sem marca
+    // tiraria a pessoa da lista dos outros usuários da app — então não sai.
+    { posicao: { lat: -12.6, lon: -39.5 }, userId: '1' },
+    { posicao: { lat: -12.6, lon: -39.5 }, userId: '1', pais: 0 },
+    { posicao: { lat: -12.6, lon: -39.5 }, userId: '1', pais: 1000 },
+    { posicao: { lat: -12.6, lon: -39.5 }, userId: '1', pais: '30' },   // coerção
     // coerção: a string "true" não liga nada. Vai COM caixa de propósito: sem
     // ela o 400 viria de "nada a fazer", e a guarda da coerção seria decorativa
     // (a sabotagem passou assim); com ela, sem a guarda, o pedido de aparecer
@@ -121,11 +139,11 @@ test('presenca-waze: validação antes de qualquer rede', async () => {
 
 test('presenca-waze: cookie que não vale → 401; id de OUTRA pessoa → erro NOSSO, não sessão morta', async () => {
   const guest = await comWaze(() => respostaGrpc({ status: 7, mensagem: '(403) This operation is not allowed by guest user., Code 101' }),
-    () => dispatch('presenca-waze', { cookies: COOKIES, userId: '183164343', posicao: { lat: 1, lon: 1 } }, {}));
+    () => dispatch('presenca-waze', { cookies: COOKIES, userId: '183164343', posicao: { lat: 1, lon: 1 }, pais: 30 }, {}));
   assert.equal(guest.resultado.status, 401);
   assert.equal(guest.resultado.body.errorCategory, 'unauthorized');
   const outro = await comWaze(() => respostaGrpc({ status: 7, mensagem: "(403) cannot modify another user's data, Code 101" }),
-    () => dispatch('presenca-waze', { cookies: COOKIES, userId: '12444348', posicao: { lat: 1, lon: 1 } }, {}));
+    () => dispatch('presenca-waze', { cookies: COOKIES, userId: '12444348', posicao: { lat: 1, lon: 1 }, pais: 30 }, {}));
   assert.equal(outro.resultado.status, 500);
   assert.equal(outro.resultado.body.errorCategory, 'unknown',
     'id errado virou "sessão morta": o cliente desconfiaria da sessão de quem não errou');

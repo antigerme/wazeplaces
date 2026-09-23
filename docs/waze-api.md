@@ -236,6 +236,9 @@ em `/<região>-Descartes/grpc/`:
 | Lista | **pública**: responde sem cookie. Exclui quem pede. Mundo inteiro = 48 editores, 2,9 KB, ~0,5 s |
 | Escrita | exige o cookie e o id da PRÓPRIA pessoa: sem id → 3 `Missing parameter value for 'user_id'`; id de outra → 7 `cannot modify another user's data`. Posição e visibilidade vão numa chamada só (máscara com os dois caminhos) |
 | O WME não redesenha | guarda a caixa já buscada e não tem relógio: o avatar de quem se move só anda quando o mapa de quem OLHA sai da caixa, ou no botão de recarregar. E deixa avatar fantasma: a resposta nova vem sem a pessoa e o WME junta com a antiga sem apagar |
+| Posição volta EXATA | os inteiros ×1e6 que a pessoa escreve voltam idênticos na lista de quem lê (cafanha escreveu, antigerme leu: 3 de 3, duas posições com os últimos dígitos marcados e uma de controle redonda). É o que sustenta a marca de quem usa a app (`server/marca-app.mjs`) |
+| Eco da escrita | o `updateOnlineEditor` devolve o registro da pessoa, com a posição quando ela foi escrita (sem posição quando só a visibilidade mudou) — dá pra conferir a marca a cada escrita sem chamada a mais |
+| Lista × CORS | a lista é pública, mas o `www.waze.com` não libera leitura por outro site: o preflight responde **415** e nenhuma resposta traz `Access-Control-Allow-Origin` (a mesma chamada, feita do servidor, devolveu 13 editores). O navegador não lê a lista direto: ela passa pelo nosso `/api` |
 
 **Chat** — `com.waze.wmp.{Messaging,MessagingHistory}`, em `/<geoEnv>-wmp/`:
 
