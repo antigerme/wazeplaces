@@ -221,6 +221,9 @@ wazeplaces/
 │   │                        #   Exige o Playwright do REPO (o do CI, o mais novo), só aceita o
 │   │                        #   global do sandbox com PLAYWRIGHT_GLOBAL=1, imprime QUAL
 │   │                        #   navegador rodou e avisa quando o npm já tem versão mais nova.
+│   │                        #   `MOTOR=webkit` troca pro motor do Safari; o que só o Chromium
+│   │                        #   mede é pulado PELO NOME (`pularForaDoChromium`), e o que o motor
+│   │                        #   diz no console sem ser erro da app mora numa lista FECHADA.
 │   ├── waze-jitter.mjs      # FONTE ÚNICA do ritmo das chamadas ao Waze: pausaComJitter().
 │   │                        #   Script novo que fale com o Waze IMPORTA daqui, não reinventa sleep.
 │   ├── migracoes.mjs        # FONTE ÚNICA do código que só existe por causa de uma versão
@@ -280,6 +283,7 @@ npm run js             # SEMPRE que mexer em js/*.js — regenera js/min/, que �
 npm run html           # SEMPRE que mexer no index.src.html — regenera o index.html, que é o que a RAIZ serve (CI cobra)
 npm run test:presenca  # SÓ se mexeu em presença/sala: 2 navegadores, WebSocket e WebRTC de verdade
 # o navegador dos smokes é o do CI, o MAIS NOVO — 1ª vez na sessão, instale (ver o parágrafo do smoke de browser)
+# MOTOR=webkit npm run test:browser   # o mesmo smoke no motor do Safari (o CI roda layout, fluxo e presença nele)
 # smoke em segundo plano SEM deixar vigia zumbi (ver a regra abaixo):
 #   node tools/rodar-longo.mjs /tmp/smoke.log -- npm run test:browser
 #   node tools/rodar-longo.mjs --esperar /tmp/smoke.log
@@ -302,6 +306,21 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-latest npm run test:offline
 ```
 
 **Consequência assumida:** uma versão nova pode reprovar um PR que não mexeu em nada. É informação, não ruído — ou o navegador que vai chegar no celular quebrou algo, ou o teste precisa de ajuste. Se um Playwright vier QUEBRADO, fixe a versão no workflow com o motivo e a data; o `test/navegador.test.mjs` cobra o `latest` de propósito, pra fixar ser ato deliberado e não um pino esquecido. **E "o mais novo do Playwright" anda ~1 versão atrás do Chrome estável**: ele traz o Chrome com que foi testado (hoje o 153, com o 154 já no celular). Rodar um Chrome de fora do Playwright chegaria no 154, mas ele não garante a combinação — trocar um atraso de semanas por um instrumento sem garantia é pior que o atraso.
+
+**E o WebKit roda junto, num job PARALELO** (pedido do owner, 2026-09-23): o motor do Safari — e o de TODO navegador do iPhone, onde até o Chrome é WebKit por baixo. `MOTOR=webkit` troca o motor em `tools/navegador.mjs`; o job roda layout, fluxo e presença, e o Playwright 1.63 traz o WebKit 26.6, o do Safari 26. Cinco coisas MEDIDAS na primeira rodada, e cada uma virou regra:
+- **O WebKit precisa de bibliotecas do SISTEMA** (GTK 4, GStreamer…): sem elas não abre ("Host system is missing dependencies"). Daí o `--with-deps` só nele — o job do Chromium segue sem.
+- **Ele não abre com NENHUMA chave de linha de comando do Chromium** — o launch morre ("Target page, context or browser has been closed"). `abrirNavegador` tira o `args` fora do Chromium.
+- **A conversa não conectava**: o WebKit também anuncia o candidato de rede como `<uuid>.local`, o contêiner não resolve mDNS e o ICE fica em "new" pra sempre. A chave do Chromium que resolve isso não existe lá; o equivalente é trocar o nome por 127.0.0.1 no TESTE (`iceSemMdnsForaDoChromium`, só fora do Chromium). MEDIDO com duas conexões na mesma página: com `.local` nunca abre; trocado, "connected". Ajuste do instrumento — num iPhone de verdade quem conecta é o candidato do STUN/TURN.
+- **O Safari avisa no console que ignora o `interactive-widget`** do viewport (é do Chrome), com nível de ERRO, em toda página: foram as 75 falhas da primeira rodada do fluxo, e mais nada. `ruidoDoMotor()` é a lista FECHADA do que o motor diz e não é erro da app — frase exata, ancorada, com o motivo escrito.
+- **O offline fica SÓ no Chromium, por medição**: o modo avião simulado do Playwright no WebKit derruba até a resposta que o service worker tem guardada (`fetch` do asset guardado: "Load failed" no WebKit, 200 no Chromium; página nova: "WebKit encountered an internal error"). **Contraprova**: derrubando o servidor de VERDADE, o worker do WebKit serve o asset (200) e abre a app sem rede, igual ao Chromium — o defeito é da simulação, não da app. E a reabertura sem rede depende de `navigator.onLine === false`, que é justamente o que só a simulação dá; medir o offline no WebKit exige outro método (servidor derrubado + `onLine` forjado), e ele ainda não existe.
+
+**O que só o Chromium mede é PULADO pelo nome** (`pularForaDoChromium`) e contado no fim de cada smoke; hoje é um trecho — o gesto de segurar e arrastar o FAB, que só se sintetiza pelo protocolo do DevTools. `test/navegador.test.mjs` cobra a lista: pulo novo entra lá, com motivo, ou reprova. **O que o job NÃO é**: o Safari do iPhone. É o motor, num Linux — pega CSS, JavaScript, WebRTC e IndexedDB do WebKit, e não pega teclado de verdade, PWA instalado nem o apagamento de armazenamento do iOS. Reproduzir aqui:
+
+```bash
+npx playwright install-deps webkit                                  # uma vez por máquina (apt)
+PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-latest npx playwright install webkit
+MOTOR=webkit PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-latest npm run test:presenca
+```
 
 **E o mesmo `page.close()` não é o mesmo evento nas duas versões** (MEDIDO com sonda nas duas, v2026.09.22-06): no 1.49 (Chromium 131) ele destrói a página SEM `pagehide` nem `visibilitychange`; no 1.56 dispara os dois. O teste do que a app faz ao ser FECHADA passava aqui e reprovava na combinação do CI — e só não chegou ao CI porque ela foi rodada antes de empurrar. Fechar como o usuário fecha é `close({ runBeforeUnload: true })`, que dispara os dois nas duas versões.
 
@@ -334,7 +353,7 @@ screenshot. Foi assim que o A2 (dark mode) foi validado: capturar antes/depois e
 comparar **pixel a pixel** (PIL disponível). Para refactor visual, essa é a
 prova — não confie em leitura de código. Use um worktree
 (`git worktree add --detach <dir> origin/main`) pro "antes" em vez de `git stash`.
-CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump de `CACHE_NAME`** (gotcha #17). **Gatilhos: `pull_request` e `push` só em `main`** — push em branch de agente NÃO roda CI. Já me enganei com isso: prometi "aviso o resultado do CI" depois de empurrar dois commits numa branch sem PR, e nenhum run existia pra reportar. Se a validação precisa ser do CI e não só local, **abra o PR** (o owner já autoriza isso na seção de workflow abaixo). A suite de testes usa só `node:test`/`node:assert` (built-in) e cobre cripto/sessão, `categorizeWazeError`, `isUserAllowed`, parsing de cookies e o filtro de domínio.
+CI (`.github/workflows/ci.yml`) roda check + test + boot smoke + **guard do bump de `CACHE_NAME`** (gotcha #17), e um job PARALELO com os smokes no WebKit. **Gatilhos: `pull_request`, `push` só em `main`, o manual e uma rodada SEMANAL na main** (segunda 09:17 UTC — o `latest` só testa o navegador novo quando algo dispara o CI, e semana sem PR era semana sem teste) — push em branch de agente NÃO roda CI. Já me enganei com isso: prometi "aviso o resultado do CI" depois de empurrar dois commits numa branch sem PR, e nenhum run existia pra reportar. Se a validação precisa ser do CI e não só local, **abra o PR** (o owner já autoriza isso na seção de workflow abaixo). A suite de testes usa só `node:test`/`node:assert` (built-in) e cobre cripto/sessão, `categorizeWazeError`, `isUserAllowed`, parsing de cookies e o filtro de domínio.
 
 ### 🌍 SEMPRE valide com estes PAÍSES (instrução permanente)
 

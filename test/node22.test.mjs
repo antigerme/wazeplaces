@@ -34,10 +34,14 @@ test('o piso é o MESMO número no package.json, no CI e no servidor', () => {
     'o `engines.node` do package.json saiu de sincronia com o piso');
 
   const ci = ler('.github/workflows/ci.yml');
-  const m = ci.match(/node-version:\s*(\d+)/);
-  assert.ok(m, 'o CI não declara mais uma node-version');
-  assert.equal(Number(m[1]), PISO,
-    `o CI roda no Node ${m && m[1]} e o piso é ${PISO} — o CI tem que rodar NO PISO, que é o que pega uso de API mais nova`);
+  // TODOS os jobs, não só o primeiro: o do WebKit entrou depois, e um job novo
+  // com outro Node seria metade do CI fora do piso.
+  const versoes = [...ci.matchAll(/node-version:\s*(\d+)/g)].map((m) => Number(m[1]));
+  assert.ok(versoes.length > 0, 'o CI não declara mais uma node-version');
+  for (const v of versoes) {
+    assert.equal(v, PISO,
+      `um job do CI roda no Node ${v} e o piso é ${PISO} — o CI tem que rodar NO PISO, que é o que pega uso de API mais nova`);
+  }
 
   const node = ler('server/node.mjs');
   const g = node.match(/const MIN_NODE = (\d+);/);

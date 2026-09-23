@@ -27,7 +27,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as dormir } from 'node:timers/promises';
-import { carregarPlaywright, abrirChromium } from './navegador.mjs';
+import { carregarPlaywright, abrirNavegador, motorPedido, resumoDosPulos, ruidoDoMotor } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.PORTA_FLUXO || 8188);
@@ -356,7 +356,8 @@ const FERRAMENTAS = (PEDIDO_JSON) => {
 let falhas = 0;
 const dizer = (msg, det) => { falhas++; console.log(`  ✗ ${msg}${det ? ' — ' + det : ''}`); };
 
-const browser = await abrirChromium(pw);
+const MOTOR = motorPedido();
+const browser = await abrirNavegador(pw);
 
 async function novaPagina() {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', locale: 'pt-BR' });
@@ -364,7 +365,7 @@ async function novaPagina() {
   const errosJs = [];
   const escritas = [];
   page.on('pageerror', (e) => errosJs.push(String(e).slice(0, 140)));
-  page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) errosJs.push('console: ' + m.text().slice(0, 140)); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404/.test(m.text()) && !ruidoDoMotor(m.text())) errosJs.push('console: ' + m.text().slice(0, 140)); });
   // Toda chamada de ESCRITA é registrada e respondida aqui — assim o teste mede
   // o que SAIU, e nada toca o Waze de verdade.
   await page.route('**/__stub__/**', (route) => route.fulfill({
@@ -929,6 +930,7 @@ for (const est of ESTADOS.filter((e) => !['deslogado', 'filaVazia', 'desfazerCor
 
 await browser.close();
 servidor.kill();
+if (resumoDosPulos(MOTOR)) console.log(resumoDosPulos(MOTOR));
 
 if (falhas) {
   console.log(`\n✗ smoke de fluxo: ${falhas} falha(s)`);

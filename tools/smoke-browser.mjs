@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina, esperarOuExplodir } from './esperar-saida.mjs';
-import { carregarPlaywright, abrirChromium } from './navegador.mjs';
+import { carregarPlaywright, abrirNavegador, motorPedido, pularForaDoChromium, resumoDosPulos } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8123);
@@ -310,7 +310,8 @@ async function esperarServidor() {
 
 const pw = await carregarPlaywright();
 await esperarServidor();
-const browser = await abrirChromium(pw, { args: ARGS_SEM_ESTRANGULAR });
+const MOTOR = motorPedido();
+const browser = await abrirNavegador(pw, { args: ARGS_SEM_ESTRANGULAR });
 
 // O aviso "Como funciona" abre sozinho no PRIMEIRO card — que é exatamente o
 // que todo bloco daqui renderiza. Sem suprimir, ele cobre o card com um scrim e
@@ -3723,6 +3724,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(!antes.calo || antes.calo === 'none',
       `FAB/${nomeAp}: sem -webkit-touch-callout:none o balão do toque longo rouba o gesto`, antes.calo);
 
+    if (pularForaDoChromium(MOTOR, `FAB/${nomeAp}: o gesto de segurar e arrastar`,
+      'toque com arraste só se sintetiza pelo protocolo do Chromium (CDP)')) {
+      checa(errosF.length === 0, `FAB/${nomeAp}: erro de JS`, errosF[0]);
+      await ctx.close();
+      continue;
+    }
     const cdp = await ctx.newCDPSession(page);
     const cx = antes.x + antes.w / 2, cy = antes.y + antes.h / 2;
     const destinoX = 16 + antes.w / 2, destinoY = vp.height - 140;
@@ -5640,6 +5647,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 
 await browser.close();
 servidor.kill();
+if (resumoDosPulos(MOTOR)) console.log(resumoDosPulos(MOTOR));
 
 if (falhas) {
   console.log(`\n✗ smoke de browser: ${falhas} falha(s)`);

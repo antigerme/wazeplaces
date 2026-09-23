@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { makeCrachas, base64ToBytes } from '../server/core.mjs';
 import { setTimeout as dormir } from 'node:timers/promises';
-import { carregarPlaywright, abrirChromium } from './navegador.mjs';
+import { carregarPlaywright, abrirNavegador, motorPedido, resumoDosPulos } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8134);
@@ -39,6 +39,28 @@ const CHAVE = Buffer.alloc(32, 5).toString('base64');
 // seguintes verdes. Desligar é ajuste do INSTRUMENTO (o teste roda em
 // localhost), não do produto — a app continua com o padrão do browser.
 const ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns'];
+
+// O MESMO ajuste, no WebKit — que não aceita a chave acima (MEDIDO: o launch
+// falha com qualquer chave do Chromium). Lá o candidato de rede também chega
+// como `<uuid>.local`, e sem resposta de mDNS no contêiner o ICE nem começa.
+// MEDIDO com duas conexões na MESMA página: com o `.local`, o estado fica em
+// "new" e o DataChannel não abre; com o mesmo candidato apontando pra
+// 127.0.0.1, "connected" e abre. Ajuste do INSTRUMENTO, como o de cima: a app
+// segue com o padrão do navegador, e num iPhone de verdade o candidato que
+// conecta vem do STUN/TURN, não do nome local.
+async function iceSemMdnsForaDoChromium(ctx) {
+  if (MOTOR === 'chromium') return;
+  await ctx.addInitScript(() => {
+    const original = RTCPeerConnection.prototype.addIceCandidate;
+    RTCPeerConnection.prototype.addIceCandidate = function (c, ...resto) {
+      if (c && typeof c.candidate === 'string' && /\.local\b/i.test(c.candidate)) {
+        const base = typeof c.toJSON === 'function' ? c.toJSON() : c;
+        c = { ...base, candidate: c.candidate.replace(/[0-9a-f-]+\.local\b/i, '127.0.0.1') };
+      }
+      return original.call(this, c, ...resto);
+    };
+  });
+}
 
 const falhas = [];
 const anota = (m) => { falhas.push(m); console.log('  ✗ ' + m); };
@@ -54,7 +76,8 @@ for (let i = 0; i < 100; i++) {
 }
 
 const pw = await carregarPlaywright();
-const browser = await abrirChromium(pw, { args: ARGS });
+const MOTOR = motorPedido();
+const browser = await abrirNavegador(pw, { args: ARGS });
 const crachas = makeCrachas({ keyBytes: base64ToBytes(CHAVE) });
 
 async function editor(nome, peer, rank, am, lang) {
@@ -65,6 +88,7 @@ async function editor(nome, peer, rank, am, lang) {
   const ctx = await browser.newContext({
     viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true, serviceWorkers: 'block',
   });
+  await iceSemMdnsForaDoChromium(ctx);
   // A foto do pedido mandado pela conversa é do Waze: servida AQUI, pra o smoke
   // nunca bater no CDN de verdade (no CI o navegador tem rede).
   await ctx.route('**/venue-image.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/gif',
@@ -435,6 +459,7 @@ try {
   {
     const ligar = async (nome, peer) => {
       const c = await browser.newContext({ viewport: { width: 393, height: 851 }, serviceWorkers: 'block' });
+      await iceSemMdnsForaDoChromium(c);
       const pg = await c.newPage();
       await pg.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'domcontentloaded' });
       for (let i = 0; i < 150; i++) {
@@ -528,6 +553,7 @@ try {
 
     // Um editor que fala com a app ATRAVÉS do buraco negro.
     const viaProxy = await browser.newContext({ viewport: { width: 393, height: 851 }, serviceWorkers: 'block' });
+    await iceSemMdnsForaDoChromium(viaProxy);
     const pgx = await viaProxy.newPage();
     // `/api/presenca` exige cookies REAIS do Waze; aqui o crachá é assinado
     // localmente, porque o que se mede é o RELIGAMENTO, não a autenticação.
@@ -651,5 +677,6 @@ try {
   srv.kill('SIGKILL');
 }
 
+if (resumoDosPulos(MOTOR)) console.log(resumoDosPulos(MOTOR));
 console.log(falhas.length ? `\n✗ ${falhas.length} falha(s)` : '\n✓ presença ok');
 process.exit(falhas.length ? 1 : 0);

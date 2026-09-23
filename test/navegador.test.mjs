@@ -11,7 +11,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { _paraTeste } from '../tools/navegador.mjs';
+import { _paraTeste, ruidoDoMotor } from '../tools/navegador.mjs';
+const _paraTesteDoRuido = { ruidoDoMotor };
 
 const ler = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
 // Sem comentário na conta (gotcha #67): os arquivos CITAM o padrão errado
@@ -78,8 +79,8 @@ test('a fonte única: o do repo primeiro, o global só pedido, a versão no log 
   }
 
   // O log diz com o que testou: a versão do Playwright, a origem e a do navegador.
-  assert.match(src, /console\.log\(`navegador: Chromium \$\{browser\.version\(\)\} · Playwright \$\{pw\.versao\} \(\$\{pw\.origem\}\)`\)/,
-    'a linha que diz QUAL navegador rodou sumiu ou mudou de forma');
+  assert.match(src, /console\.log\(`navegador: \$\{MOTORES\[motor\]\} \$\{browser\.version\(\)\} · Playwright \$\{pw\.versao\} \(\$\{pw\.origem\}\)`\)/,
+    'a linha que diz QUAL navegador rodou — motor, versão e Playwright — sumiu ou mudou de forma');
 
   // Sem plano B: se o Chromium do Playwright não abrir, o script para.
   assert.doesNotMatch(src, /channel\s*:/,
@@ -113,8 +114,113 @@ test('o CI testa com o Playwright MAIS NOVO, por um botão só', () => {
   // que ser o da vez. Fixar uma versão é EXCEÇÃO: se um Playwright novo vier
   // quebrado, fixe aqui e no workflow, com o motivo e a data — ato deliberado,
   // não um pino esquecido por 21 meses.
-  assert.match(ci, /PLAYWRIGHT_VERSAO:\s*latest\s*$/m, 'o CI deixou de usar o Playwright mais novo');
+  // TODOS os jobs: com o do WebKit, um `latest` em qualquer lugar do arquivo
+  // deixava o outro job fixar versão sem reprovar (a sabotagem passou).
+  // Só as linhas de código do YAML: os comentários CITAM o botão (gotcha #67).
+  const ciSemComentario = ci.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const botoes = [...ciSemComentario.matchAll(/PLAYWRIGHT_VERSAO:\s*(\S+)/g)].map((m) => m[1]);
+  assert.ok(botoes.length >= 2, `esperava o botão nos dois jobs, achei ${botoes.length}`);
+  for (const b of botoes) assert.equal(b, 'latest', `um job do CI fixou o Playwright em ${b}`);
   assert.match(ci, /npm i --no-save "playwright@\$PLAYWRIGHT_VERSAO"/,
     'o CI instala o Playwright sem passar pelo botão PLAYWRIGHT_VERSAO');
   assert.doesNotMatch(ci, /playwright@\d/, 'o CI voltou a cravar uma versão do Playwright');
+});
+
+// ── O WebKit (o motor do Safari e de todo navegador do iPhone) ──────────────
+
+test('fora do Chromium o launch vai SEM as chaves do Chromium', () => {
+  // MEDIDO: o WebKit não abre com nenhuma chave de linha de comando do
+  // Chromium ("Target page, context or browser has been closed"). Sem este
+  // corte, o job do WebKit morre no primeiro launch.
+  const src = semComentario(ler('tools/navegador.mjs'));
+  assert.match(src, /const \{ args, \.\.\.semArgs \} = opcoes;/, 'sumiu o corte das chaves do Chromium');
+  assert.match(src, /pw\[motor\]\.launch\(motor === 'chromium' \? opcoes : semArgs\)/,
+    'o launch voltou a mandar as chaves do Chromium pra qualquer motor');
+  // Motor desconhecido PARA: `MOTOR=safari` cair calado no Chromium seria
+  // testar o motor errado achando que testou o certo.
+  assert.match(src, /if \(!Object\.hasOwn\(MOTORES, m\)\) \{[\s\S]{0,200}?process\.exit\(2\)/,
+    'motor desconhecido deixou de parar o script');
+});
+
+test('os smokes que o CI roda no WebKit abrem pelo motor pedido', () => {
+  const ci = ler('.github/workflows/ci.yml').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const job = ci.slice(ci.indexOf('\n  webkit:'));
+  assert.ok(ci.includes('\n  webkit:'), 'sumiu o job do WebKit no CI');
+  assert.match(job, /MOTOR: webkit/, 'o job do WebKit não pede o WebKit');
+  assert.match(job, /npx playwright install --with-deps webkit/,
+    'o WebKit precisa das bibliotecas do sistema (--with-deps) — sem elas ele não abre');
+  assert.match(job, /npm i --no-save "playwright@\$PLAYWRIGHT_VERSAO"/, 'o job do WebKit não usa o botão da versão');
+  assert.match(job, /PLAYWRIGHT_VERSAO:\s*latest\s*$/m, 'o job do WebKit deixou de usar o mais novo');
+  // O job é PARALELO: esperar o outro somaria os dois tempos.
+  assert.doesNotMatch(job, /^\s+needs:/m, 'o job do WebKit passou a esperar o outro — o CI dobra de tempo');
+  const rodados = [...job.matchAll(/npm run (test:[a-z]+)/g)].map((m) => m[1]).sort();
+  assert.deepEqual(rodados, ['test:browser', 'test:fluxo', 'test:presenca'],
+    'mudou o que roda no WebKit — o offline fica de fora por MEDIÇÃO (ver o comentário do job)');
+  const script = { 'test:browser': 'smoke-browser', 'test:fluxo': 'smoke-fluxo', 'test:presenca': 'smoke-presenca' };
+  for (const t of rodados) {
+    const codigo = semComentario(ler(`tools/${script[t]}.mjs`));
+    assert.match(codigo, /abrirNavegador\(pw\b/, `${script[t]} não abre pelo motor pedido — no job do WebKit ele abriria o Chromium`);
+    assert.doesNotMatch(codigo, /abrirChromium\(/, `${script[t]} abre o Chromium à força`);
+  }
+});
+
+test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () => {
+  // Pulo calado é teste que morreu sem ninguém ver. Pulo novo tem que entrar
+  // AQUI, de propósito — o número por arquivo é a lista.
+  const ESPERADOS = { 'smoke-browser.mjs': 1 };
+  const achados = {};
+  for (const f of readdirSync(new URL('../tools/', import.meta.url)).filter((x) => x.endsWith('.mjs') && x !== 'navegador.mjs')) {
+    const codigo = semComentario(ler(`tools/${f}`));
+    const chamadas = [...codigo.matchAll(/pularForaDoChromium\(MOTOR,\s*(`[^`]+`|'[^']+'),\s*(`[^`]+`|'[^']+')\)/g)];
+    const soltas = (codigo.match(/pularForaDoChromium\(/g) || []).length;
+    assert.equal(chamadas.length, soltas,
+      `${f}: pulo sem nome ou sem motivo literal — "fora do WebKit: ???" não diz o que deixou de rodar`);
+    for (const c of chamadas) assert.ok(c[2].length > 20, `${f}: motivo curto demais pra explicar o pulo: ${c[2]}`);
+    if (chamadas.length) achados[f] = chamadas.length;
+  }
+  assert.deepEqual(achados, ESPERADOS, 'a lista de pulos mudou — pulo novo entra aqui com o motivo, não calado');
+  // E o fim de cada smoke do WebKit DIZ quantos pulou.
+  for (const f of ['smoke-browser', 'smoke-fluxo', 'smoke-presenca']) {
+    assert.match(semComentario(ler(`tools/${f}.mjs`)), /if \(resumoDosPulos\(MOTOR\)\) console\.log\(resumoDosPulos\(MOTOR\)\);/,
+      `${f} não imprime os pulos no fim`);
+  }
+});
+
+test('o que o motor diz no console e não é erro da página: lista FECHADA e exata', () => {
+  const { RUIDO_DO_MOTOR } = _paraTeste;
+  // Uma frase só, MEDIDA: o Safari avisando que ignora o `interactive-widget`.
+  assert.equal(RUIDO_DO_MOTOR.length, 1, 'a lista de ruído do motor cresceu — frase nova entra com o motivo e a medição');
+  for (const r of RUIDO_DO_MOTOR) {
+    assert.ok(r.source.startsWith('^') && r.source.endsWith('$'),
+      `ruído sem âncora (${r.source}) engole erro de verdade que CONTENHA a frase`);
+  }
+  const { ruidoDoMotor } = _paraTesteDoRuido;
+  assert.equal(ruidoDoMotor('Viewport argument key "interactive-widget" not recognized and ignored.'), true);
+  // O que tem que continuar sendo ERRO: a mesma frase com mais coisa, e erro de verdade.
+  assert.equal(ruidoDoMotor('TypeError: x is undefined'), false);
+  assert.equal(ruidoDoMotor('Viewport argument key "interactive-widget" not recognized and ignored. TypeError: boom'), false);
+});
+
+test('o ajuste de ICE da presença vale SÓ fora do Chromium, e só troca o nome mDNS', () => {
+  // O Chromium já sai com o IP de verdade pela chave de linha de comando; no
+  // WebKit o mesmo efeito é trocar o `<uuid>.local` por 127.0.0.1 no teste.
+  // MEDIDO com duas conexões na mesma página: com `.local`, o ICE fica em
+  // "new" e o DataChannel não abre; trocado, "connected".
+  const codigo = semComentario(ler('tools/smoke-presenca.mjs'));
+  assert.match(codigo, /async function iceSemMdnsForaDoChromium\(ctx\) \{\s*if \(MOTOR === 'chromium'\) return;/,
+    'o ajuste de ICE passou a valer no Chromium também — lá o instrumento já é outro');
+  assert.match(codigo, /replace\(\/\[0-9a-f-\]\+\\\.local\\b\/i, '127\.0\.0\.1'\)/,
+    'o ajuste deixou de ser SÓ a troca do nome mDNS');
+  const contextos = (codigo.match(/await browser\.newContext\(/g) || []).length;
+  const ajustados = (codigo.match(/await iceSemMdnsForaDoChromium\(/g) || []).length;
+  assert.equal(ajustados, contextos, 'contexto novo na presença sem o ajuste de ICE — no WebKit a conversa não abre nele');
+});
+
+test('a main roda o CI toda semana, fora da hora cheia', () => {
+  // O `latest` só testa o navegador novo quando algo dispara o CI; semana sem
+  // PR era semana sem teste. A rodada semanal fecha isso.
+  const ci = ler('.github/workflows/ci.yml');
+  const m = ci.match(/^\s+schedule:\s*\n\s+- cron: '(\d+) (\d+) \* \* (\d)'\s*$/m);
+  assert.ok(m, 'sumiu a rodada semanal (ou deixou de ser semanal)');
+  assert.notEqual(m[1], '0', 'o GitHub avisa que agendamento na hora cheia atrasa e pode ser descartado sob carga');
 });
