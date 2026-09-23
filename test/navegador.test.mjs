@@ -224,3 +224,14 @@ test('a main roda o CI toda semana, fora da hora cheia', () => {
   assert.ok(m, 'sumiu a rodada semanal (ou deixou de ser semanal)');
   assert.notEqual(m[1], '0', 'o GitHub avisa que agendamento na hora cheia atrasa e pode ser descartado sob carga');
 });
+
+test('o FAB é medido depois de QUADROS, não de um prazo', () => {
+  // MEDIDO no WebKit: 250 ms depois de abrir a Ajuda, o FAB ainda estava no
+  // canto velho em 4 de 8 rodadas — ele se reposiciona no primeiro QUADRO, e o
+  // WebKit do Playwright desenha um a cada ~100 ms. Com dois quadros, 0 de 8.
+  const codigo = semComentario(ler('tools/smoke-browser.mjs'));
+  assert.match(codigo, /const doisQuadros = \(page\) => page\.evaluate\(\(\) => new Promise\(\(ok\) => \{\s*setTimeout\(ok, 2000\);\s*requestAnimationFrame\(\(\) => requestAnimationFrame\(ok\)\);/,
+    'a espera por dois quadros sumiu ou mudou de forma');
+  assert.match(codigo, /\} else if \(alvo\) openModal\(alvo\);\s*\}, id\);\s*await assentar\(page, 250\);\s*await doisQuadros\(page\);/,
+    'a medição do FAB em cada camada voltou a esperar só um prazo');
+});

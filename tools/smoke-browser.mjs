@@ -287,6 +287,20 @@ const assentar = async (page, extra = 60) => {
   await page.waitForTimeout(extra);
 };
 
+// Espera por QUADRO, não por relógio: dois `requestAnimationFrame` garantem que
+// todo quadro pedido ANTES — como o do FAB, que se reposiciona no primeiro
+// quadro depois de a camada mudar — já rodou. MEDIDO no WebKit do Playwright,
+// que desenha um quadro a cada ~100 ms: medindo 250 ms depois de abrir a Ajuda,
+// o FAB ainda estava no canto velho, por cima do seletor de idioma, em 4 de 8
+// rodadas; esperando os dois quadros, em 0 de 8 — com a CPU livre e ocupada.
+// A app estava certa: o prazo é que media a velocidade do motor.
+// O teto de 2 s é só pra não pendurar o smoke numa página sem quadro: se ele
+// estourar, a medição segue e reprova pelo que vir — nunca passa por isso.
+const doisQuadros = (page) => page.evaluate(() => new Promise((ok) => {
+  setTimeout(ok, 2000);
+  requestAnimationFrame(() => requestAnimationFrame(ok));
+}));
+
 const checa = (ok, msg, detalhe) => {
   if (!ok) { falhas++; console.log(`  ✗ ${msg}${detalhe ? ' — ' + detalhe : ''}`); }
 };
@@ -3666,6 +3680,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         } else if (alvo) openModal(alvo);
       }, id);
       await assentar(page, 250);
+      await doisQuadros(page);
       const r = await page.evaluate((sel) => {
         const fab = document.getElementById('devFab');
         const btn = document.getElementById('devFabBtn');
