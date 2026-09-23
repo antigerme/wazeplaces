@@ -26,7 +26,6 @@
 // não enxerga CSP, não enxerga cache e não enxerga service worker.
 
 import { spawn, execFileSync } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -34,41 +33,17 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina } from './esperar-saida.mjs';
 import { lerDiagnostico } from './diag-ler.mjs';
+import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 
-const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.PORTA_OFFLINE || 8192);
 const BASE = `http://127.0.0.1:${PORTA}`;
 
 // ── browser ────────────────────────────────────────────────────────────────
-let chromium = null;
-const erros = [];
-for (const tentar of [
-  () => require.resolve('playwright', { paths: [ROOT] }),
-  () => '/opt/node22/lib/node_modules/playwright/index.mjs',
-  () => 'playwright',
-]) {
-  let alvo = null;
-  try { alvo = tentar(); } catch (e) { erros.push(String(e.message || e).slice(0, 90)); continue; }
-  let mod = null;
-  try { mod = await import(alvo); }
-  catch (e) { erros.push(String(e.message || e).slice(0, 90)); continue; }
-  // O pacote PUBLICADO é CJS (`index.js`): `import()` por CAMINHO devolve um
-  // namespace só com `default`, e `mod.chromium` vem UNDEFINED. Sem tratar
-  // isso, a primeira tentativa — a que existe justamente pra honrar o
-  // playwright FIXADO no repo (o do CI) — falhava CALADA e o laço caía no
-  // global do sandbox. Medido em 2026-09-22: por caminho as chaves são
-  // `default`; por especificador BARE vêm os nomeados. Era por isso que
-  // "não reproduz aqui" não queria dizer nada — aqui rodava 1.56 e o CI 1.49.
-  const pw = mod && mod.chromium ? mod : (mod && mod.default) || {};
-  if (pw.chromium) { chromium = pw.chromium; break; }
-  erros.push(`${alvo}: importou sem 'chromium' (chaves: ${Object.keys(mod || {}).join(', ')})`);
-}
-if (!chromium) {
-  console.error('playwright não encontrado:\n  - ' + erros.join('\n  - '));
-  console.error('  No CI: npm i --no-save playwright@1.49.1 (com PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');
-  process.exit(1);
-}
+// Carregar e abrir passam pela fonte única (`tools/navegador.mjs`): ela exige
+// o Playwright do REPO — o mesmo do CI, o mais novo — e diz no log qual
+// navegador abriu.
+const pw = await carregarPlaywright();
 
 // ── servidor ───────────────────────────────────────────────────────────────
 // Chave FIXA: a seção da sala precisa assinar crachás iguais aos do servidor.
@@ -149,7 +124,7 @@ const PLACE = (i, purType = 'NEW_PLACE') => ({
   dateAdded: '2026-09-20T10:00:00Z', lat: -22.9, lon: -43.2,
 });
 
-const browser = await chromium.launch();
+const browser = await abrirChromium(pw);
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
   serviceWorkers: 'allow', locale: 'pt-BR', colorScheme: 'dark' });
 let rotaTile = 0;
@@ -588,7 +563,23 @@ const sentFalhou = await page.evaluate(() => diagSentinelas(diagComputado()).map
 diz('com a foto que FALHOU de verdade, o aviso é o certo — a sentinela da foto cala',
   !sentFalhou.includes('fotoEscondidaComAviso'), JSON.stringify(sentFalhou));
 // 6b) a foto CHEGA — o defeito que chegou aos testadores
-await montar([{ ...PLACE(10, 'NEW_PHOTO'), imageUrls: [BASE + '/icons/screenshots/previa-card.jpg'] }]);
+//
+// A foto que "chega" sem rede é a que foi AQUECIDA com rede — é o que a varredura
+// faz de verdade. Até o Playwright 1.56 esta seção passava SEM aquecer, por um
+// buraco do instrumento: o `setOffline` não alcançava o `fetch` de DENTRO do
+// service worker, e a foto de mesma origem ia buscar na rede em pleno "modo
+// avião". MEDIDO com controle, mesma app, a foto nunca pedida: 1.56.1 (Chromium
+// 141) CARREGA sem rede; 1.63.0 (Chrome 153) QUEBRA — como num celular de
+// verdade —, e a já aquecida carrega nas duas. Sem aquecer, a seção passou a
+// medir uma foto que nunca veio, e cobrava dela o comportamento da que veio.
+// Aquece a MESMA URL que o card vai pedir (`urlDaFoto`, com o sufixo do offline).
+const FOTO_QUE_CHEGA = BASE + '/icons/screenshots/previa-card.jpg';
+aviao = false; await ctx.setOffline(false);
+const fotoAquecida = await page.evaluate((u) => new Promise((res) => { const i = new Image();
+  i.onload = () => res(true); i.onerror = () => res(false); i.src = urlDaFoto(u); }), FOTO_QUE_CHEGA);
+aviao = true; await ctx.setOffline(true);
+diz('PRÉ-CONDIÇÃO: a foto que vai chegar foi aquecida COM rede', fotoAquecida);
+await montar([{ ...PLACE(10, 'NEW_PHOTO'), imageUrls: [FOTO_QUE_CHEGA] }]);
 await esperarNaPagina(page, () => { const i = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image');
   return !!(i && i.naturalWidth > 0); }, 8000);
 await dormir(400);   // folga pra um aviso tardio aparecer, se o defeito voltar

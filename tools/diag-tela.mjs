@@ -23,7 +23,7 @@
 //
 // A página é montada SEM JAVASCRIPT e SEM REDE de propósito: o DOM capturado já
 // é o resultado; re-executar scripts mudaria o instante que se quer olhar.
-import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { lerDiagnostico } from './diag-ler.mjs';
 import { basename, join } from 'node:path';
@@ -150,7 +150,7 @@ function preparar(m) {
   return html;
 }
 
-const browser = await chromium.launch();
+const browser = await abrirChromium(await carregarPlaywright());
 const linhas = [];
 for (let i = 0; i < momentos.length; i++) {
   const m = momentos[i];

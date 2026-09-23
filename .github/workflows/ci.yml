@@ -116,8 +116,22 @@ jobs:
         # economizar o download — mas isso depende do caminho onde a imagem do
         # runner instala o Chrome, que não é contrato. Baixar o chromium do
         # próprio Playwright custa ~30s e não depende de nada.
+        env:
+          # O Playwright MAIS NOVO, e com ele o Chrome da vez — é o que está
+          # chegando no celular dos editores, porque o Chrome se atualiza
+          # sozinho. Até 2026-09-23 isto era `1.49.1`, cravado havia ~21 meses:
+          # o CI testava no Chromium 131 enquanto a app rodava no 15x, e duas
+          # diferenças de versão viraram "não reproduz aqui". Cada smoke imprime
+          # a versão que rodou (tools/navegador.mjs); reproduzir é instalar ESSA.
+          #
+          # Uma versão nova pode reprovar um PR que não mexeu em nada. Isso é
+          # informação, não ruído: ou o navegador que vai chegar no celular
+          # quebrou algo, ou o teste precisa de ajuste. Se um Playwright vier
+          # QUEBRADO, fixe a versão aqui com o motivo e a data — e no
+          # test/navegador.test.mjs, que cobra o `latest` de propósito.
+          PLAYWRIGHT_VERSAO: latest
         run: |
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i --no-save playwright@1.49.1
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i --no-save "playwright@$PLAYWRIGHT_VERSAO"
           npx playwright install chromium
           npm run test:browser
           # Smoke de FLUXO: a app como máquina de estados. O de cima mede TELAS

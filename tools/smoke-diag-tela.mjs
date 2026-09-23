@@ -13,7 +13,7 @@
 // O valor do cookie NUNCA é ecoado: entra por `page.evaluate` (que não repete o
 // argumento no log de erro, ao contrário do `page.fill`) dentro de try/catch que
 // não repassa a mensagem crua.
-import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,7 +35,7 @@ const srv = spawn('node', ['server/node.mjs'], { cwd: '/home/user/wazeplaces',
   env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 1200));
 
-const browser = await chromium.launch();
+const browser = await abrirChromium(await carregarPlaywright());
 
 // ── compara dois PNG dentro do próprio Chromium ───────────────────────────
 // Não há PIL nem sharp aqui, e o projeto não ganha dependência por causa de um

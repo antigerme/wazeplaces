@@ -23,46 +23,21 @@
 // `test/` quebraria a promessa de suíte com zero dependência.
 
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as dormir } from 'node:timers/promises';
+import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 
-const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.PORTA_FLUXO || 8188);
 const BASE = `http://127.0.0.1:${PORTA}`;
 
 // ── browser ────────────────────────────────────────────────────────────────
-let chromium = null;
-const erros = [];
-for (const tentar of [
-  () => require.resolve('playwright', { paths: [ROOT] }),
-  () => '/opt/node22/lib/node_modules/playwright/index.mjs',
-  () => 'playwright',
-]) {
-  let alvo = null;
-  try { alvo = tentar(); } catch (e) { erros.push(String(e.message || e).slice(0, 90)); continue; }
-  let mod = null;
-  try { mod = await import(alvo); }
-  catch (e) { erros.push(String(e.message || e).slice(0, 90)); continue; }
-  // O pacote PUBLICADO é CJS (`index.js`): `import()` por CAMINHO devolve um
-  // namespace só com `default`, e `mod.chromium` vem UNDEFINED. Sem tratar
-  // isso, a primeira tentativa — a que existe justamente pra honrar o
-  // playwright FIXADO no repo (o do CI) — falhava CALADA e o laço caía no
-  // global do sandbox. Medido em 2026-09-22: por caminho as chaves são
-  // `default`; por especificador BARE vêm os nomeados. Era por isso que
-  // "não reproduz aqui" não queria dizer nada — aqui rodava 1.56 e o CI 1.49.
-  const pw = mod && mod.chromium ? mod : (mod && mod.default) || {};
-  if (pw.chromium) { chromium = pw.chromium; break; }
-  erros.push(`${alvo}: importou sem 'chromium' (chaves: ${Object.keys(mod || {}).join(', ')})`);
-}
-if (!chromium) {
-  console.error('playwright não encontrado:\n  - ' + erros.join('\n  - '));
-  console.error('  No CI: npm i --no-save playwright@1.49.1 (com PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');
-  process.exit(1);
-}
+// Carregar e abrir passam pela fonte única (`tools/navegador.mjs`): ela exige
+// o Playwright do REPO — o mesmo do CI, o mais novo — e diz no log qual
+// navegador abriu.
+const pw = await carregarPlaywright();
 
 // ── servidor ───────────────────────────────────────────────────────────────
 // Chave FIXA: a seção da sala precisa assinar crachás iguais aos do servidor.
@@ -381,7 +356,7 @@ const FERRAMENTAS = (PEDIDO_JSON) => {
 let falhas = 0;
 const dizer = (msg, det) => { falhas++; console.log(`  ✗ ${msg}${det ? ' — ' + det : ''}`); };
 
-const browser = await chromium.launch();
+const browser = await abrirChromium(pw);
 
 async function novaPagina() {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', locale: 'pt-BR' });
