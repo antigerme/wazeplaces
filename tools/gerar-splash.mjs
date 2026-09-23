@@ -23,11 +23,11 @@
 
 import { spawn } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { paletizar } from './png-palette.mjs';
 import { setTimeout as dormir } from 'node:timers/promises';
+import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SPLASH_PORT || 8127);
@@ -103,22 +103,6 @@ if (process.argv.includes('--links')) {
   process.exit(0);
 }
 
-async function carregarPlaywright() {
-  const req = createRequire(import.meta.url);
-  for (const t of [
-    () => req.resolve('playwright', { paths: [ROOT] }),
-    () => '/opt/node22/lib/node_modules/playwright/index.mjs',
-    () => 'playwright',
-  ]) {
-    let mod;
-    try { mod = await import(t()); } catch { continue; }
-    const pw = mod && mod.chromium ? mod : (mod && mod.default) || {};
-    if (pw.chromium) return pw;
-  }
-  console.error('✗ Playwright não encontrado.');
-  process.exit(1);
-}
-
 const html = readFileSync(join(ROOT, 'index.src.html'), 'utf8');
 const CORES = coresDoIndex(html);
 for (const tema of TEMAS) {
@@ -164,8 +148,7 @@ function pagina(tema) {
 </body></html>`;
 }
 
-const { chromium } = await carregarPlaywright();
-const browser = await chromium.launch();
+const browser = await abrirChromium(await carregarPlaywright());
 mkdirSync(SAIDA, { recursive: true });
 
 let total = 0;

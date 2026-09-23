@@ -64,7 +64,8 @@ console.log(`tela:    ${W}x${H} @${dpr}x · tema ${escuro ? 'escuro' : 'claro'} 
 console.log(`fila:    ${fila.length} pedido(s), injetando ${recorte.length} a partir do índice ${idx}`);
 console.log(`filtros: ${JSON.stringify(st.filters || {})}`);
 
-const { chromium } = await import('/opt/node22/lib/node_modules/playwright/index.mjs');
+const { carregarPlaywright, abrirChromium } = await import('./navegador.mjs');
+const pw = await carregarPlaywright();
 
 const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
   env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1' },
@@ -82,7 +83,7 @@ for (let i = 0; i < 60; i++) {
   }
 }
 
-const browser = await chromium.launch({ headless: !args.includes('--abrir') });
+const browser = await abrirChromium(pw, { headless: !args.includes('--abrir') });
 const ctx = await browser.newContext({
   viewport: { width: W, height: H }, deviceScaleFactor: dpr,
   locale: lang, hasTouch: true, isMobile: true, serviceWorkers: 'block',

@@ -21,49 +21,16 @@
 
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina, esperarOuExplodir } from './esperar-saida.mjs';
+import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8123);
 const BASE = `http://127.0.0.1:${PORTA}/`;
 
-async function carregarPlaywright() {
-  const req = createRequire(import.meta.url);
-  const tentativas = [
-    () => req.resolve('playwright', { paths: [ROOT] }),
-    () => '/opt/node22/lib/node_modules/playwright/index.mjs',
-    () => 'playwright',
-  ];
-  const erros = [];
-  for (const t of tentativas) {
-    let mod;
-    try {
-      mod = await import(t());
-    } catch (e) {
-      erros.push(String(e.message || e).split('\n')[0]);
-      continue;
-    }
-    // O pacote publicado é CJS (`index.js`): `import()` devolve namespace só com
-    // `default`, e `mod.chromium` vem undefined. O `index.mjs` do global do
-    // sandbox tem exports nomeados — por isso funcionava aqui e quebrou no CI
-    // com "Cannot read properties of undefined (reading 'launch')". Aceitar as
-    // duas formas, e só aceitar candidato que realmente tenha o `chromium`.
-    const pw = mod && mod.chromium ? mod : (mod && mod.default) || {};
-    if (pw.chromium) return pw;
-    erros.push(`${t()}: importou, mas sem export 'chromium' (chaves: ${Object.keys(mod).join(', ')})`);
-  }
-  console.error('✗ Playwright não encontrado. Tentativas:\n  - ' + erros.join('\n  - '));
-  console.error('  No CI: npm i --no-save playwright@1.49.1 (com PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');
-  process.exit(1);
-}
-
-// No runner do GitHub o Chrome já vem instalado — usar o canal evita baixar
-// ~150MB de Chromium a cada run. No sandbox de dev usamos o Chromium do
-// PLAYWRIGHT_BROWSERS_PATH. Se nenhum abrir, o erro sobe (não silencia).
 // TIMER DE PÁGINA EM SEGUNDO PLANO É ESTRANGULADO, e isso derruba teste que
 // avança por `setTimeout` em cadeia. HIPÓTESE, não medição: o bloco da fila de
 // saída reprovou DUAS vezes no CI parando sempre depois de 1–2 itens — e ele
@@ -79,19 +46,6 @@ const ARGS_SEM_ESTRANGULAR = [
   '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',
 ];
-
-async function abrirBrowser(chromium) {
-  const erros = [];
-  for (const base of [{}, { channel: 'chrome' }, { channel: 'chromium' }]) {
-    const opcoes = { ...base, args: ARGS_SEM_ESTRANGULAR };
-    try {
-      return await chromium.launch(opcoes);
-    } catch (e) {
-      erros.push(`${JSON.stringify(opcoes)}: ${String(e.message || e).split('\n')[0]}`);
-    }
-  }
-  throw new Error('nenhum browser abriu:\n  - ' + erros.join('\n  - '));
-}
 
 // RETRATO, não paisagem — e a diferença não é estética.
 //
@@ -354,9 +308,9 @@ async function esperarServidor() {
   throw new Error(`servidor não subiu em ${BASE}`);
 }
 
-const { chromium } = await carregarPlaywright();
+const pw = await carregarPlaywright();
 await esperarServidor();
-const browser = await abrirBrowser(chromium);
+const browser = await abrirChromium(pw, { args: ARGS_SEM_ESTRANGULAR });
 
 // O aviso "Como funciona" abre sozinho no PRIMEIRO card — que é exatamente o
 // que todo bloco daqui renderiza. Sem suprimir, ele cobre o card com um scrim e

@@ -19,36 +19,17 @@
 
 import { spawn } from 'node:child_process';
 import { createServer, connect } from 'node:net';
-import { createRequire } from 'node:module';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { makeCrachas, base64ToBytes } from '../server/core.mjs';
 import { setTimeout as dormir } from 'node:timers/promises';
+import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8134);
 const CHAVE = Buffer.alloc(32, 5).toString('base64');
-
-async function carregarPlaywright() {
-  const req = createRequire(import.meta.url);
-  const tentativas = [
-    () => req.resolve('playwright', { paths: [ROOT] }),
-    () => '/opt/node22/lib/node_modules/playwright/index.mjs',
-    () => 'playwright',
-  ];
-  const erros = [];
-  for (const t of tentativas) {
-    let mod;
-    try { mod = await import(t()); } catch (e) { erros.push(String(e.message || e).split('\n')[0]); continue; }
-    const pw = mod && mod.chromium ? mod : (mod && mod.default) || {};
-    if (pw.chromium) return pw;
-    erros.push(`${t()}: importou, mas sem export 'chromium'`);
-  }
-  console.error('✗ Playwright não encontrado. Tentativas:\n  - ' + erros.join('\n  - '));
-  process.exit(1);
-}
 
 // `WebRtcHideLocalIpsWithMdns` faz o Chromium anunciar o candidato host como um
 // nome `.local` de mDNS em vez do IP. É proteção de privacidade e está certa no
@@ -58,14 +39,6 @@ async function carregarPlaywright() {
 // seguintes verdes. Desligar é ajuste do INSTRUMENTO (o teste roda em
 // localhost), não do produto — a app continua com o padrão do browser.
 const ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns'];
-
-async function abrirBrowser(chromium) {
-  const erros = [];
-  for (const opcoes of [{ args: ARGS }, { channel: 'chrome', args: ARGS }, { channel: 'chromium', args: ARGS }]) {
-    try { return await chromium.launch(opcoes); } catch (e) { erros.push(`${JSON.stringify(opcoes)}: ${String(e.message || e).split('\n')[0]}`); }
-  }
-  throw new Error('nenhum browser abriu:\n  - ' + erros.join('\n  - '));
-}
 
 const falhas = [];
 const anota = (m) => { falhas.push(m); console.log('  ✗ ' + m); };
@@ -80,8 +53,8 @@ for (let i = 0; i < 100; i++) {
   try { await fetch(`http://127.0.0.1:${PORTA}/`); break; } catch { await dormir(100); }
 }
 
-const { chromium } = await carregarPlaywright();
-const browser = await abrirBrowser(chromium);
+const pw = await carregarPlaywright();
+const browser = await abrirChromium(pw, { args: ARGS });
 const crachas = makeCrachas({ keyBytes: base64ToBytes(CHAVE) });
 
 async function editor(nome, peer, rank, am, lang) {

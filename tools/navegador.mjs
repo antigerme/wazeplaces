@@ -1,0 +1,149 @@
+// FONTE ÚNICA de abrir o navegador nos scripts do repo: os quatro smokes do CI,
+// as ferramentas do diagnóstico e o gerador de splash.
+//
+// Ela existe porque a VERSÃO do navegador já custou um diagnóstico inteiro, e o
+// erro foi sempre o mesmo: medir numa versão e concluir sobre outra sem saber.
+// O CI fixava o Playwright 1.49.1 (Chromium 131, de novembro de 2024), o
+// sandbox tinha o 1.56.1 global (Chromium 141), e o navegador de quem usa a app
+// se atualiza sozinho (Chrome 15x). Três versões, e nenhum log dizendo qual
+// rodou. Duas diferenças entre elas morderam em dois dias — o `EvalError` do
+// poller do rAF, que só aparecia no 1.49, e o `page.close()`, que dispara
+// `pagehide` no 1.56 e não no 1.49 — e as duas foram "não reproduz aqui"
+// antes de alguém conferir a versão.
+//
+// Por isso o CI passou a usar o Playwright MAIS NOVO (`playwright@latest`), que
+// traz o Chrome da vez — é o que está chegando no celular dos editores —, e este
+// módulo fecha as portas por onde a divergência entrava:
+//
+// 1. QUAL Playwright carrega. O do REPO (`npm i --no-save playwright@latest`,
+//    o MESMO comando do CI) ganha de tudo. O global do sandbox só entra se
+//    você pedir (`PLAYWRIGHT_GLOBAL=1`) e, mesmo assim, avisando: um smoke que
+//    caía nele calado era o caminho do "não reproduz aqui".
+// 2. O import por CAMINHO de um pacote CJS devolve só o `default` (medido em
+//    2026-09-22: o laço caía calado no global por causa disso). Aqui o import é
+//    pelo especificador, que traz os nomeados, e o `default` segue aceito.
+// 3. QUAL navegador abriu. Toda execução imprime a versão do Playwright, de
+//    onde ele veio e a do navegador que o `launch` devolveu — o log do CI
+//    passa a dizer com o que testou, e reproduzir aqui é instalar aquela
+//    versão. E não há mais "se o Chromium do Playwright não abrir, tenta o
+//    Chrome do sistema": aquele era outro navegador, com outra versão, entrando
+//    em silêncio.
+//
+// E ele confere, sem custar nada à app, se o npm já tem versão mais NOVA que a
+// instalada: numa sessão longa, o que foi instalado ontem pode não ser mais o
+// que o CI usa hoje.
+
+import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const GLOBAL_DO_SANDBOX = '/opt/node22/lib/node_modules/playwright/index.mjs';
+
+export const COMO_INSTALAR =
+  'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i --no-save playwright@latest && npx playwright install chromium';
+
+const primeiraLinha = (e) => String((e && e.message) || e).split('\n')[0];
+
+function versaoDoPacote(arquivoDeEntrada) {
+  try {
+    return JSON.parse(readFileSync(join(dirname(arquivoDeEntrada), 'package.json'), 'utf8')).version || '?';
+  } catch {
+    return '?';
+  }
+}
+
+// O pacote publicado é CJS por baixo: dependendo de como é importado, o
+// namespace vem com os nomeados ou só com o `default`. Aceitar as duas formas,
+// e só aceitar o candidato que tenha MESMO o `chromium`.
+function comChromium(mod) {
+  const pw = mod && mod.chromium ? mod : (mod && mod.default) || {};
+  return pw.chromium ? pw : null;
+}
+
+// Compara 'a.b.c' numericamente; pré-release conta como a versão base.
+function maisNova(a, b) {
+  const p = (v) => String(v).split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
+  const [x, y] = [p(a), p(b)];
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+}
+
+// Uma consulta por processo, mesmo que o script abra mais de um navegador.
+let consultaAoNpm = null;
+function versaoNoNpm() {
+  consultaAoNpm ??= new Promise((resolve) => {
+    execFile('npm', ['view', 'playwright', 'version'], { timeout: 8000 }, (erro, saida) => {
+      resolve(erro ? { erro: primeiraLinha(erro) } : { versao: String(saida).trim() });
+    });
+  });
+  return consultaAoNpm;
+}
+
+/**
+ * Carrega o Playwright do repo (ou, pedido explicitamente, o global do sandbox).
+ * @returns {Promise<{ chromium: any, versao: string, origem: 'repo'|'global do sandbox', caminho: string }>}
+ */
+export async function carregarPlaywright() {
+  const erros = [];
+
+  try {
+    const caminho = fileURLToPath(import.meta.resolve('playwright'));
+    const pw = comChromium(await import('playwright'));
+    if (pw) {
+      const noRepo = caminho.startsWith(join(ROOT, 'node_modules') + sep);
+      return { chromium: pw.chromium, versao: versaoDoPacote(caminho), origem: noRepo ? 'repo' : 'fora do repo', caminho };
+    }
+    erros.push(`${caminho}: importou, mas sem 'chromium'`);
+  } catch (e) {
+    erros.push(`do repo: ${primeiraLinha(e)}`);
+  }
+
+  if (process.env.PLAYWRIGHT_GLOBAL === '1') {
+    try {
+      const pw = comChromium(await import(GLOBAL_DO_SANDBOX));
+      if (pw) return { chromium: pw.chromium, versao: versaoDoPacote(GLOBAL_DO_SANDBOX), origem: 'global do sandbox', caminho: GLOBAL_DO_SANDBOX };
+      erros.push(`${GLOBAL_DO_SANDBOX}: importou, mas sem 'chromium'`);
+    } catch (e) {
+      erros.push(`global do sandbox: ${primeiraLinha(e)}`);
+    }
+  }
+
+  console.error('✗ Playwright não encontrado no repo.\n  - ' + erros.join('\n  - '));
+  console.error(`  Instale o mesmo do CI (o mais novo):\n    ${COMO_INSTALAR}`);
+  if (process.env.PLAYWRIGHT_GLOBAL !== '1') {
+    console.error('  (o global do sandbox só entra com PLAYWRIGHT_GLOBAL=1 — e aí o resultado pode divergir do CI)');
+  }
+  process.exit(1);
+}
+
+/**
+ * Abre o Chromium DESTA versão do Playwright e diz no log qual abriu.
+ * Sem plano B: se ele não abrir, o script para — outro navegador no lugar
+ * seria outra versão, que é justamente o que este módulo existe pra evitar.
+ */
+export async function abrirChromium(pw, opcoes = {}) {
+  let browser;
+  try {
+    browser = await pw.chromium.launch(opcoes);
+  } catch (e) {
+    console.error(`✗ o Chromium do Playwright ${pw.versao} não abriu: ${primeiraLinha(e)}`);
+    console.error('  Baixe o navegador desta versão: npx playwright install chromium');
+    process.exit(1);
+  }
+  console.log(`navegador: Chromium ${browser.version()} · Playwright ${pw.versao} (${pw.origem})`);
+  const avisos = [];
+  if (pw.origem !== 'repo') avisos.push('este NÃO é o Playwright do CI — o resultado pode divergir');
+  const npm = await versaoNoNpm();
+  if (npm.erro) {
+    console.log(`  ⚠ não deu pra conferir se há versão mais nova no npm (${npm.erro})`);
+  } else if (maisNova(npm.versao, pw.versao)) {
+    avisos.push(`o npm já tem o Playwright ${npm.versao} — é o que o CI vai usar`);
+  }
+  for (const a of avisos) console.log(`  ⚠ ${a}`);
+  if (avisos.length) console.log(`  Instale o do CI:\n    ${COMO_INSTALAR}`);
+  return browser;
+}
+
+export const _paraTeste = { comChromium, maisNova };
