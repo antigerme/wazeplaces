@@ -80,7 +80,7 @@ const MOTOR = motorPedido();
 const browser = await abrirNavegador(pw, { args: ARGS });
 const crachas = makeCrachas({ keyBytes: base64ToBytes(CHAVE) });
 
-async function editor(nome, peer, rank, am, lang) {
+async function editor(nome, peer, rank, am, lang, preparar) {
   // `serviceWorkers: 'block'`: o SW da app se auto-atualiza e RECARREGA a página
   // no `controllerchange`. No meio do teste isso apaga o estado injetado e o
   // sintoma chega como "Presenca is not defined" — parece bug do produto e é do
@@ -89,6 +89,9 @@ async function editor(nome, peer, rank, am, lang) {
     viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true, serviceWorkers: 'block',
   });
   await iceSemMdnsForaDoChromium(ctx);
+  // Script que precisa estar na página ANTES da app (o `addInitScript` só vale
+  // pra navegação seguinte) — o passo 11 atrasa a sala por aqui.
+  if (preparar) await preparar(ctx);
   // A foto do pedido mandado pela conversa é do Waze: servida AQUI, pra o smoke
   // nunca bater no CDN de verdade (no CI o navegador tem rede).
   await ctx.route('**/venue-image.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/gif',
@@ -384,6 +387,8 @@ try {
   else anota('a pílula ficou na tela sem ninguém na sala');
   // `saiu` e não `fechada`: o `onclose` do canal escrevia por cima do motivo
   // que já tinha sido decidido, e os dois casos deixavam de ser distinguíveis.
+  // Qual aviso chega primeiro aqui é SORTE (o do canal ou o da sala); o
+  // passo 11 força a ordem ruim, que já reprovou este passo uma vez no WebKit.
   if (depois.estado === 'saiu') ok('a conversa diz que a pessoa saiu');
   else anota(`a conversa não avisou a saída (estado: ${depois.estado})`);
 
@@ -670,6 +675,136 @@ try {
     await fran.ctx.close();
     await eva.ctx.close();
     proxy.close();
+  }
+
+  // ── 11) O CANAL FECHA ANTES DE A SALA AVISAR ──────────────────────────────
+  //
+  // Quando alguém sai, os dois avisos partem juntos (o `pagehide` manda o
+  // `sair` e fecha o canal), mas o do canal vai DIRETO ao outro aparelho e o
+  // da sala dá dois saltos pelo servidor. MEDIDO saindo como o usuário sai
+  // (`close({ runBeforeUnload: true })`): 1 em 8 rodadas o canal chegava
+  // primeiro, nos dois motores. A conversa ficava em 'fechada', a sala era
+  // ignorada, e 15 s depois a falha do pc que seguia vivo trocava o cabeçalho
+  // pra "Não deu pra conectar com esta pessoa". O passo 5 só pegava a ordem
+  // ruim por sorte — foi assim que ele reprovou UMA vez no WebKit.
+  //
+  // Aqui a ordem é FORÇADA no TRANSPORTE, sem depender de nome de função da
+  // app: as mensagens da sala ficam RETIDAS na hana até o canal fechar — o
+  // servidor mais longe que o outro aparelho, o caso comum fora do localhost.
+  // Retidas e não atrasadas por um prazo: 500 ms bastavam no WebKit e nem
+  // sempre no Chromium, e prazo mede a velocidade da máquina (gotcha #62).
+  //
+  // Às vezes o canal NEM FECHA: MEDIDO, 1 em 10 no Chromium a página morre
+  // antes de o fechamento sair, e aí o aviso da sala é o único (o caminho do
+  // passo 5). Nessa rodada não há a ordem que este bloco mede, então ele
+  // tenta com outro par — até 3 vezes, e IMPRIME quantas precisou.
+  {
+    const segurarSala = (ctx) => ctx.addInitScript(() => {
+      const d = Object.getOwnPropertyDescriptor(WebSocket.prototype, 'onmessage');
+      window.__salaRetida = [];
+      window.__salaSoltar = () => { window.__salaSegurar = false; for (const f of window.__salaRetida.splice(0)) f(); };
+      Object.defineProperty(WebSocket.prototype, 'onmessage', {
+        configurable: true,
+        get() { return d.get.call(this); },
+        set(fn) {
+          d.set.call(this, fn && function (ev) {
+            const entregar = () => {
+              // CONTROLE: em que estado a conversa estava quando a LISTA chegou.
+              let t = null;
+              try { t = JSON.parse(ev.data).t; } catch (e) {}
+              if (t === 'lista' && window.__salaAlvo) {
+                try { (window.__antesDaLista ||= []).push(Presenca.conversas.get(window.__salaAlvo)?.estado); } catch (e) {}
+              }
+              fn.call(this, ev);
+            };
+            if (window.__salaSegurar) window.__salaRetida.push(entregar);
+            else entregar();
+          });
+        },
+      });
+    });
+    // Espera sem anotar: aqui "não aconteceu" é uma resposta, não uma falha.
+    const quando = async (e, fn, arg, ms) => {
+      for (const fim = Date.now() + ms; Date.now() < fim; await dormir(50)) {
+        if (await e.page.evaluate(fn, arg).catch(() => false)) return true;
+      }
+      return false;
+    };
+
+    const tentar = async (n) => {
+      const ph = 'ph' + n, pi = 'pi' + n;
+      const hana = await editor('hana', ph, 4, true, 'pt', segurarSala);
+      const ines = await editor('ines', pi, 3, true);
+      try {
+        if (!await esperar(hana, new Function(`return Presenca.peers.some((p) => p.peer === '${pi}')`), 'hana não viu ines')) return { erro: true };
+        await hana.page.evaluate((p) => window.presencaAbrirConversa(p), pi);
+        if (!await esperar(hana, new Function(`return Presenca.conversas.get('${pi}')?.estado === 'aberta'`), 'o canal hana→ines não abriu')
+          || !await esperar(ines, new Function(`return Presenca.conversas.get('${ph}')?.estado === 'aberta'`), 'o canal ines→hana não abriu')) return { erro: true };
+        // O "não chegou" só aparece depois do `oi` do outro lado (é o portão
+        // do PRESENCA_CONVERSA_V): sem ele, o que se mediria é a ausência.
+        if (!await esperar(hana, new Function(`return Presenca.conversas.get('${pi}')?.recibos === true`),
+          'controle: a ines não se anunciou (oi) — sem isso o "não chegou" nem aparece')) return { erro: true };
+
+        // A resposta da ines não volta a tempo: a mensagem da hana fica EM VOO
+        // quando ela sai, que é a que o "não chegou" tem que explicar.
+        await ines.page.evaluate((p) => { Presenca.conversas.get(p).canal.onmessage = () => {}; }, ph);
+        await hana.page.evaluate((p) => window.presencaMandarTexto(p, 'ainda está aí?'), pi);
+        if (!await esperar(hana, new Function(`return Presenca.conversas.get('${pi}').msgs.some((m) => m.meu && m.estado === 'enviada')`),
+          'controle: a mensagem da hana não ficou em voo')) return { erro: true };
+
+        await hana.page.evaluate((p) => { window.__salaAlvo = p; window.__salaSegurar = true; }, pi);
+        await ines.page.close({ runBeforeUnload: true });   // sai como o usuário sai: `pagehide`
+        await ines.ctx.close();
+        const fechou = await quando(hana, (p) => Presenca.conversas.get(p)?.estado === 'fechada', pi, 3000);
+        await hana.page.evaluate(() => window.__salaSoltar());
+        if (!fechou) return { semOrdem: true };
+
+        const saiu = await quando(hana, (p) => Presenca.conversas.get(p)?.estado === 'saiu', pi, 5000);
+        const r = await hana.page.evaluate((p) => {
+          const c = Presenca.conversas.get(p);
+          return {
+            antesDaLista: window.__antesDaLista || [],
+            estado: c && c.estado,
+            msgs: document.getElementById('conversaMsgs').textContent,
+            fraseSaiu: t('presenca.recibo.naoChegouSaiu', { nome: 'ines' }),
+            fraseConexao: t('presenca.recibo.naoChegouConexao'),
+            conexaoVelha: !!(c && (c.pc || c.canal)),
+            recibos: c && c.recibos,
+            minhas: c ? c.msgs.filter((m) => m.meu).map((m) => `${m.estado}/${m.motivo}`) : [],
+          };
+        }, pi);
+        return { saiu, r };
+      } finally {
+        await ines.ctx.close().catch(() => {});
+        await hana.ctx.close();
+      }
+    };
+
+    let res = null, tentativas = 0;
+    while (tentativas < 3) {
+      tentativas++;
+      res = await tentar(tentativas);
+      if (!res.semOrdem) break;
+    }
+    if (res.semOrdem) anota(`o canal não fechou antes da sala em ${tentativas} tentativas — o bloco não mediu a ordem que existe pra medir`);
+    else if (!res.erro) {
+      const { saiu, r } = res;
+      if (r.antesDaLista.includes('fechada')) ok(`controle: o canal fechou ANTES de a lista da sala chegar${tentativas > 1 ? ` (na tentativa ${tentativas})` : ''}`);
+      else anota(`controle: a ordem não foi forçada — estado quando a lista chegou: ${JSON.stringify(r.antesDaLista)}`);
+      if (saiu) ok('a sala confirma a saída depois do canal fechado');
+      else anota(`o canal fechou antes da sala e a conversa NÃO passou a "saiu" (estado: ${r.estado})`);
+      // O CABEÇALHO não se confere aqui, de propósito: 'fechada' já mostra o
+      // mesmo "saiu da fila", então a asserção passava com e sem o conserto
+      // (sabotado). O que ele erra é 15 s depois, e é o que a checagem da
+      // conexão velha, logo abaixo, cobre sem pagar os 15 s.
+      if (r.msgs.includes(r.fraseSaiu) && !r.msgs.includes(r.fraseConexao)) ok('a mensagem em voo diz que não chegou porque ela SAIU');
+      else anota(`o "não chegou" deu outro motivo: ${JSON.stringify(r.msgs.slice(-120))} — recibos=${r.recibos} minhas=${JSON.stringify(r.minhas)}`);
+      // Sem conexão velha, nada reescreve o cabeçalho 15 s depois (MEDIDO: é o
+      // `connectionstatechange` do pc que ficava vivo). O efeito tardio em si
+      // está no test/presenca-saida.test.mjs, com o pc que falha depois.
+      if (!r.conexaoVelha) ok('a conexão velha é encerrada: nada a reescreve depois');
+      else anota('a conexão velha segue viva — em ~15 s a falha dela reescreve a conversa');
+    }
   }
 
 } finally {

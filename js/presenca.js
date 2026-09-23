@@ -478,6 +478,11 @@ function presencaLigarCanal(peer, canal) {
     if (canal.readyState === 'open') abriu();
     canal.onclose = () => {
         c.estado = 'fechada';
+        // O motivo que este fechamento dá ('conexao') é PROVISÓRIO: quando a
+        // outra pessoa sai, este aviso pode chegar ANTES do da sala (ver
+        // `presencaConfirmarSaida`). Guardar QUAIS mensagens ele derrubou é o
+        // que deixa a sala corrigir o motivo delas — e só delas.
+        c.derrubadas = c.msgs.filter((m) => m.meu && (m.estado === 'enviando' || m.estado === 'enviada'));
         presencaMarcarNaoChegou(c);
         presencaRenderConversa();
     };
@@ -829,16 +834,39 @@ function presencaEncerrarConversa(peer, manterMsgs) {
     if (!manterMsgs) { c.estado = 'parado'; Presenca.conversas.delete(peer); }
 }
 
+// A SALA é quem sabe se a pessoa saiu — o canal só sabe que fechou. Quando
+// ela sai, os dois avisos partem juntos (o `pagehide` manda o `sair` e fecha
+// o canal no mesmo instante), mas o do canal vai DIRETO ao outro aparelho e o
+// da sala dá dois saltos pelo servidor. MEDIDO saindo da app como o usuário
+// sai, nos dois motores: 1 em 8 rodadas o canal chegava primeiro — e isso em
+// localhost, com o servidor a milissegundos. Com ele mais longe que o outro
+// aparelho, a ordem ao contrário provavelmente é mais comum (hipótese, não
+// medida). A conversa ficava em 'fechada' e a sala era ignorada. E não era só o nome: o pc seguia vivo, e 15 s depois a falha de
+// conexão dele trocava o cabeçalho de "saiu da fila" para "Não deu pra
+// conectar com esta pessoa" — sobre alguém que conectou e SAIU.
+//
+// Só o fechamento IMEDIATAMENTE anterior tem o motivo corrigido: uma falha de
+// conexão mais antiga (antes de uma reconexão) foi mesmo a conexão, e a sala
+// confirmar a saída agora não muda isso. Por isso 'falhou' também não entra.
+function presencaConfirmarSaida(peer, c) {
+    const derrubadas = c.estado === 'fechada' ? (c.derrubadas || []) : [];
+    c.derrubadas = null;
+    c.estado = 'saiu';
+    presencaMarcarNaoChegou(c);
+    for (const m of derrubadas) {
+        if (m.estado === 'falhou' && m.motivo === 'conexao') m.motivo = 'saiu';
+    }
+    presencaEncerrarConversa(peer, true);
+}
+
 // Quem saiu da fila não some da conversa em silêncio: a pessoa merece saber
 // por que parou de receber resposta.
 function presencaConferirSumicos() {
     const vivos = new Set(Presenca.peers.map((p) => p.peer));
     for (const [peer, c] of Presenca.conversas) {
         if (vivos.has(peer) || c.estado === 'saiu') continue;
-        if (c.estado === 'aberta' || c.estado === 'chamando') {
-            c.estado = 'saiu';
-            presencaMarcarNaoChegou(c);
-            presencaEncerrarConversa(peer, true);
+        if (c.estado === 'aberta' || c.estado === 'chamando' || c.estado === 'fechada') {
+            presencaConfirmarSaida(peer, c);
         }
     }
     presencaRenderConversa();
@@ -847,9 +875,7 @@ function presencaConferirSumicos() {
 function presencaMarcarAusente(peer) {
     const c = Presenca.conversas.get(peer);
     if (!c) return;
-    c.estado = 'saiu';
-    presencaMarcarNaoChegou(c);
-    presencaEncerrarConversa(peer, true);
+    presencaConfirmarSaida(peer, c);
     presencaRenderConversa();
 }
 
