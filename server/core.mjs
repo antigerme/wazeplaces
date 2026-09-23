@@ -14,6 +14,13 @@
 import {
   salaDaFila, assinarCracha, conferirCracha, credenciaisTurn, CRACHA_TTL,
 } from './presenca.mjs';
+import {
+  quadroGrpcWebTexto, lerRespostaGrpcWeb, decodificarMensagemGrpc,
+  SERVICO_PRESENCA, corpoListarOnline, corpoAtualizarPresenca, lerListaOnline, lerEditorOnline,
+  SERVICO_MENSAGENS, SERVICO_HISTORICO, cabecalhoWmp, corpoEnviarTexto, corpoRecibo, corpoConversas,
+  corpoMensagens, corpoSoCabecalho, corpoMarcarLida, corpoConfirmar, corpoPerfis,
+  lerEnvio, lerConversas, lerMensagens, lerNaoLidas, lerPerfis, lerMarcarLida, lerProvedor,
+} from './wme-grpc.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Constantes
@@ -40,8 +47,30 @@ const WAZE_FEATURES_REGIONS = {
   world: 'https://www.waze.com/Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
 };
 
+// Presença do WME (gRPC). É SEPARADA POR SERVIDOR — MEDIDO: um WME aberto no
+// servidor da América do Norte não via ninguém do resto do mundo —, então segue
+// a região da fila, como o resto da app.
+const WAZE_GRPC_PRESENCA = {
+  row: 'https://www.waze.com/row-Descartes/grpc/' + SERVICO_PRESENCA + '/',
+  na: 'https://www.waze.com/na-Descartes/grpc/' + SERVICO_PRESENCA + '/',
+  il: 'https://www.waze.com/il-Descartes/grpc/' + SERVICO_PRESENCA + '/',
+  world: 'https://www.waze.com/Descartes/grpc/' + SERVICO_PRESENCA + '/',
+};
+// Chat do WME (WMP). O backend é GLOBAL — MEDIDO: `row-wmp`, `na-wmp` e `il-wmp`
+// devolvem a mesma contagem de não lidas para a mesma conta, e `usa-wmp` dá
+// 404. O prefixo só roteia; o WME usa o `geoEnv` da conta, e aqui vai a região.
+const WAZE_WMP = {
+  row: 'https://www.waze.com/row-wmp/',
+  na: 'https://www.waze.com/na-wmp/',
+  il: 'https://www.waze.com/il-wmp/',
+  world: 'https://www.waze.com/row-wmp/',
+};
+
 const WAZE_IMAGE_BASE = 'https://venue-image.waze.com/thumbs/thumb700_';
 const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
+// O mesmo navegador nos DOIS fios (JSON e gRPC): identidade que muda de uma
+// chamada pra outra é mais estranha para quem olha do que qualquer uma delas.
+const SEC_CH_UA = '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"';
 
 export const SESSION_TTL = 1814400; // 21 dias (cookies do Waze duram ~28d)
 // De quanto em quanto tempo o prazo é reescrito no store. Não é o prazo: é a
@@ -351,7 +380,7 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = nu
     'X-CSRF-Token': csrfToken,
     Cookie: cookieHeader,
     'User-Agent': USER_AGENT,
-    'sec-ch-ua': '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+    'sec-ch-ua': SEC_CH_UA,
     'sec-ch-ua-mobile': '?0',
     'sec-ch-ua-platform': '"Linux"',
     'sec-fetch-dest': 'empty',
@@ -373,26 +402,72 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = nu
     } finally {
       clearTimeout(timer);
     }
-    // O Waze ROTACIONA o cookie de sessão a cada resposta — MEDIDO com cookies
-    // reais: 3 chamadas ao `Session` devolveram 3 valores distintos de
-    // `_web_session` (o `_csrf_token` não muda). A app guardava o retrato do
-    // login e nunca mais o atualizava, então o retrato azedava sozinho e o
-    // editor era deslogado "sem ter pedido pra sair" — o relato do owner.
-    //
-    // Devolver os cookies novos aqui é o que permite reescrever a sessão. Quem
-    // decide se vale a escrita é o chamador (ver `atualizarCookiesDaSessao`):
-    // o KV aceita 1 escrita/s por chave e há uma chamada por swipe.
     const setCookie = lerSetCookie(res);
-    // Melhor-esforço e sem `await` no caminho crítico do editor? NÃO: em
-    // Workers, promessa solta depois do return é cancelada quando a requisição
-    // termina. Custa uma leitura e (no máximo 1x/h) uma escrita no KV.
-    if (ctx && ctx.sessions && ctx.data && ctx.data.sessionToken && setCookie.length) {
-      const atualizado = aplicarCookiesRotacionados(ctx.cookies, setCookie);
-      if (atualizado) await ctx.sessions.refreshCookies(ctx.data.sessionToken, atualizado);
-    }
+    await guardarCookiesRotacionados(ctx, setCookie);
     return { httpCode: res.status, response, error: '', setCookie };
   } catch (e) {
     return { httpCode: 0, response: '', error: e && e.message ? e.message : 'fetch failed' };
+  }
+}
+
+// O fio gRPC-web do WME (presença e chat). Mesmo host, mesmo cookie e mesma
+// regravação do `callWaze`, com três diferenças MEDIDAS no HAR do owner:
+//   · o corpo é base64 de quadros protobuf (`wme-grpc.mjs` monta e lê);
+//   · NÃO vai `X-CSRF-Token` — o WME não manda, e funciona só com o cookie;
+//   · o erro chega com HTTP 200 e o status no TRAILER (`grpc-status`), às
+//     vezes nos próprios cabeçalhos HTTP, quando a resposta é só de trailer.
+// O chat vem de outra página do WME (`/chat/embed`) e se identifica com
+// `X-User-Agent`; a presença, não. Os cabeçalhos seguem cada um.
+const WME_CHAT_URL = 'https://www.waze.com/chat/embed?app_id=WAZE_MAP_EDITOR';
+async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat = false } = {}) {
+  const headers = {
+    Accept: 'application/grpc-web-text',
+    'Content-Type': 'application/grpc-web-text',
+    'X-Grpc-Web': '1',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    Origin: 'https://www.waze.com',
+    Referer: chat ? WME_CHAT_URL : WME_EDITOR_URL + '?env=' + wazeRefererEnv(region),
+    Cookie: cookieHeader,
+    'User-Agent': USER_AGENT,
+    'sec-ch-ua': SEC_CH_UA,
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Linux"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+  };
+  if (chat) headers['X-User-Agent'] = 'grpc-web-javascript/0.1';
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    let res, texto;
+    try {
+      res = await fetch(url, { method: 'POST', headers, body: quadroGrpcWebTexto(corpo), signal: controller.signal });
+      texto = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+    await guardarCookiesRotacionados(ctx, lerSetCookie(res));
+    const r = { httpCode: res.status, response: '', grpcStatus: null, grpcMessage: '', dados: null, malformada: false, error: '' };
+    if (res.status !== 200) {
+      r.response = texto;
+      return r;
+    }
+    try {
+      const lido = lerRespostaGrpcWeb(texto);
+      r.dados = lido.dados;
+      r.grpcStatus = lido.status;
+      r.grpcMessage = lido.mensagem;
+    } catch {
+      r.malformada = true;
+    }
+    if (r.grpcStatus === null && res.headers.get('grpc-status') !== null) {
+      r.grpcStatus = Number(res.headers.get('grpc-status'));
+      r.grpcMessage = decodificarMensagemGrpc(res.headers.get('grpc-message') || '');
+    }
+    return r;
+  } catch (e) {
+    return { httpCode: 0, response: '', grpcStatus: null, grpcMessage: '', dados: null, malformada: false, error: e && e.message ? e.message : 'fetch failed' };
   }
 }
 
@@ -407,6 +482,27 @@ function lerSetCookie(res) {
     }
   } catch {}
   return [];
+}
+
+// O Waze ROTACIONA o cookie de sessão a cada resposta — MEDIDO com cookies
+// reais: 3 chamadas ao `Session` devolveram 3 valores distintos de
+// `_web_session` (o `_csrf_token` não muda). A app guardava o retrato do login
+// e nunca mais o atualizava, então o retrato azedava sozinho e o editor era
+// deslogado "sem ter pedido pra sair" — o relato do owner.
+//
+// Fonte ÚNICA da regravação, usada pelo `callWaze` (JSON) e pelo
+// `callWazeGrpc` (presença e chat): o gRPC também devolve `Set-Cookie`, e uma
+// cópia desta regra num dos dois seria como a correção chega a um e não ao
+// outro. Quem decide se vale a escrita é o store (`refreshCookies`, no máximo
+// 1x/h): o KV aceita 1 escrita/s por chave e há uma chamada por swipe.
+//
+// Com `await` de propósito: em Workers, promessa solta depois do return é
+// cancelada quando a requisição termina. Custa uma leitura e (no máximo 1x/h)
+// uma escrita no KV.
+async function guardarCookiesRotacionados(ctx, setCookie) {
+  if (!ctx || !ctx.sessions || !ctx.data || !ctx.data.sessionToken || !setCookie || !setCookie.length) return;
+  const atualizado = aplicarCookiesRotacionados(ctx.cookies, setCookie);
+  if (atualizado) await ctx.sessions.refreshCookies(ctx.data.sessionToken, atualizado);
 }
 
 // Quando a sessão do WAZE vence, em segundos-epoch — ou null se não deu pra
@@ -526,6 +622,54 @@ export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
     return { category: 'transient', message: `Servidor Waze indisponível (HTTP ${httpCode})`, messageKey: 'srv.err.wazeDown', messageVars: { code: httpCode } };
   }
   return { category: 'unknown', message: `Erro do Waze (HTTP ${httpCode})`, messageKey: 'srv.err.wazeUnknown', messageVars: { code: httpCode } };
+}
+
+// Categoria do resultado de um `callWazeGrpc`, ou null se deu certo.
+//
+// No gRPC o HTTP vem 200 e o erro mora no status do trailer. O 7
+// (PERMISSION_DENIED) é AMBÍGUO e só a MENSAGEM decide — MEDIDO com as contas
+// do owner e com cookie inválido:
+//   cookie que não vale        → 7 "(403) This operation is not allowed by guest user., Code 101"
+//   sem cookie nenhum          → 7 "(403) Empty CSRF token, Code 103"
+//   chat com cookie que não vale → 7 SEM mensagem
+//   id de OUTRA pessoa         → 7 "(403) cannot modify another user's data, Code 101"
+// Os três primeiros são sessão morta. O último é defeito NOSSO (mandamos o id
+// errado), e chamá-lo de `unauthorized` levaria o cliente a desconfiar da
+// sessão de quem não errou. Por isso ele cai em `unknown`.
+//
+// Sem mensagem de erro nova no dicionário nesta fase (nenhuma tela chama estas
+// rotas ainda): as chaves são as que não citam HTTP, e o status vai à parte.
+export function categorizeGrpcError(r) {
+  if (r.error) return categorizeWazeError(0, '', r.error);
+  if (r.httpCode !== 200) return categorizeWazeError(r.httpCode, r.response);
+  const sessaoMorta = { category: 'unauthorized', message: 'Cookies expirados ou inválidos', messageKey: 'srv.err.cookiesExpired' };
+  const transitorio = { category: 'transient', message: 'Erro de conexão com o Waze', messageKey: 'srv.err.connection' };
+  const inesperado = { category: 'unknown', message: 'Resposta inesperada do Waze', messageKey: 'srv.err.badWazeResponse' };
+  const st = r.grpcStatus;
+  const msg = String(r.grpcMessage || '');
+  if (st === 0) return null;
+  // Sem status nenhum: com dados inteiros, a resposta chegou (o cliente do WME
+  // aceita igual); sem dados, cortou no meio — e cortar é de rede.
+  if (st === null) return r.dados && !r.malformada ? null : transitorio;
+  if (st === 16) return sessaoMorta;
+  // Só o que PROVA sessão morta vira `unauthorized`; o resto do 7 (o id de outra
+  // pessoa, a conversa que não existe) cai em `unknown`. Uma regra própria para
+  // o "another user" chegou a existir e era código morto — a sabotagem passou.
+  if (st === 7) return !msg || /guest user|csrf/i.test(msg) ? sessaoMorta : inesperado;
+  if (st === 5) return { category: 'not_found', message: 'Resposta inesperada do Waze', messageKey: 'srv.err.badWazeResponse' };
+  // DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED, UNAVAILABLE, INTERNAL, UNKNOWN: do lado de lá.
+  if ([2, 4, 8, 13, 14].includes(st)) return transitorio;
+  return inesperado;
+}
+
+function respostaDeErroGrpc(cat, r) {
+  return {
+    status: cat.category === 'unauthorized' ? 401 : 500,
+    body: {
+      success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars,
+      errorCategory: cat.category, httpCode: r.httpCode, grpcStatus: r.grpcStatus,
+    },
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -2598,6 +2742,215 @@ async function handlePresenca(data, { sessions, crachas, turn }) {
   return { status: 200, body: { success: true, cracha, ice } };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Presença e chat DO WME (gRPC) — fase 1 da troca da sala própria
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Nenhuma tela chama isto ainda: é o servidor pronto e medido contra o Waze
+// real antes de qualquer mudança visual. O fio mora em `wme-grpc.mjs`.
+
+const ID_WAZE = /^\d{1,19}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const incompleto = () => apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+
+function idWaze(v) {
+  const s = String(v ?? '');
+  if (!ID_WAZE.test(s)) incompleto();
+  return s;
+}
+function listaDe(v, validar, teto) {
+  if (!Array.isArray(v) || !v.length || v.length > teto) incompleto();
+  return v.map(validar);
+}
+function uuid(v) {
+  const s = String(v ?? '');
+  if (!UUID.test(s)) incompleto();
+  return s.toLowerCase();
+}
+function instante(v) {
+  if (v === undefined || v === null) return null;
+  if (!Number.isSafeInteger(v) || v <= 0) incompleto();
+  return v;
+}
+// [lonMin, latMin, lonMax, latMax], a ordem das caixas da app. O mundo inteiro
+// é permitido: MEDIDO, a lista do mundo inteiro tinha 48 editores e 2,9 KB.
+function caixaValida(c) {
+  if (!Array.isArray(c) || c.length !== 4 || !c.every(Number.isFinite)) incompleto();
+  const [lonMin, latMin, lonMax, latMax] = c;
+  if (lonMin < -180 || lonMax > 180 || latMin < -90 || latMax > 90 || lonMin >= lonMax || latMin >= latMax) incompleto();
+  return c;
+}
+function pontoValido(p) {
+  const lat = p && p.lat, lon = p && p.lon;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) incompleto();
+  return { lat, lon };
+}
+
+// Presença: mover a pessoa (posição e/ou visibilidade) e ver quem está online
+// numa caixa, NA MESMA IDA — é uma requisição por card, e não duas.
+//
+// A escrita exige o id da própria pessoa (o `profile.id` que a app já tem do
+// `perfil`). Não há risco de se passar por outra: o Waze recusa id que não é o
+// do cookie (MEDIDO, status 7 “cannot modify another user's data”).
+//
+// A app nunca DESLIGA a visibilidade por conta própria: ela é a mesma chave do
+// WME, e desligar aqui esconderia a pessoa lá sem ela saber. `visivel: false`
+// existe porque é a pessoa que pode pedir.
+async function handlePresencaWaze(data, { sessions }) {
+  const cookies = await resolveCookies(data, sessions);
+  const region = requireRegion(data);
+  const caixa = data.caixa == null ? null : caixaValida(data.caixa);
+  const posicao = data.posicao == null ? null : pontoValido(data.posicao);
+  if (data.visivel !== undefined && typeof data.visivel !== 'boolean') incompleto();
+  const escreve = !!posicao || typeof data.visivel === 'boolean';
+  if (!escreve && !caixa) incompleto();
+  const userId = escreve ? idWaze(data.userId) : null;
+
+  const { cookieHeader } = prepareAuth(cookies);
+  const base = WAZE_GRPC_PRESENCA[region] || WAZE_GRPC_PRESENCA.row;
+  // A regravação do cookie vai com UMA das duas chamadas paralelas só.
+  const ctx = { data, sessions, cookies };
+  const [escrita, lista] = await Promise.all([
+    escreve
+      ? callWazeGrpc(base + 'updateOnlineEditor', cookieHeader,
+        corpoAtualizarPresenca({ userId, lat: posicao?.lat, lon: posicao?.lon, visivel: data.visivel }), region, ctx)
+      : null,
+    caixa ? callWazeGrpc(base + 'listOnlineEditors', cookieHeader, corpoListarOnline(caixa), region, escreve ? null : ctx) : null,
+  ]);
+  for (const r of [escrita, lista]) {
+    const cat = r && categorizeGrpcError(r);
+    if (cat) return respostaDeErroGrpc(cat, r);
+  }
+  const body = { success: true };
+  try {
+    if (escrita) body.eu = escrita.dados ? lerEditorOnline(escrita.dados) : null;
+    if (lista) body.editores = lerListaOnline(lista.dados);
+  } catch {
+    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  }
+  return { status: 200, body };
+}
+
+// Chat do WME. Uma rota com `acao`, como `sessao` e `parear`: são leituras e
+// escritas da MESMA conversa, e rota por ação espalharia a mesma validação.
+//
+//   token     → o token do fluxo de tempo real (24 h), o endereço e a chave. O
+//               navegador abre o fluxo DIRETO no Google, sem passar por aqui
+//               (CORS aberto a qualquer origem — medido). Exige a `instalacao`
+//               ESTÁVEL do aparelho: cada instalação é um aparelho novo para o
+//               chat, e uma avulsa por pedido criaria aparelhos à toa.
+//   naoLidas  → total e a marca de leitura
+//   conversas → uma página (antesDe = a atividade da última da página anterior)
+//   mensagens → histórico de uma conversa
+//   perfis    → nomes a partir de ids
+//   enviar    → texto, com contexto invisível opcional (o card mandado)
+//   recibo    → “entregue” ou “lida” de mensagens recebidas pelo fluxo
+//   lida      → marca a conversa como lida (o Waze manda os recibos sozinho)
+//   confirmar → confirma ao Waze o que chegou pelo fluxo (como o WME faz)
+//
+// O REMETENTE nunca decide nada: o Waze grava como vindo do dono do cookie,
+// mesmo que se mande outro (MEDIDO). `de` vai só para o pedido sair igual ao
+// do WME.
+const TEXTO_MAX = 4000;
+const CONTEXTO_MAX_BYTES = 6144;
+async function handleChat(data, { sessions }) {
+  const cookies = await resolveCookies(data, sessions);
+  const region = requireRegion(data);
+  const acao = String(data.acao || '');
+  const instalacao = data.instalacao === undefined ? null : uuid(data.instalacao);
+  if (acao === 'token' && !instalacao) incompleto();
+  const cabecalho = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: instalacao || crypto.randomUUID() });
+  const de = data.de == null ? null : idWaze(data.de);
+
+  let metodo, corpo, ler;
+  switch (acao) {
+    case 'token':
+      metodo = SERVICO_MENSAGENS + '/GetMessagingProvider';
+      corpo = corpoSoCabecalho(cabecalho);
+      ler = (d) => {
+        const p = d && lerProvedor(d);
+        if (!p || !p.token || !p.base || !p.chave) throw new Error('provedor vazio');
+        return { token: p.token, base: p.base, chave: p.chave, expiraEm: p.expiraEmMs == null ? null : Date.now() + p.expiraEmMs };
+      };
+      break;
+    case 'naoLidas':
+      metodo = SERVICO_MENSAGENS + '/GetUnreadMessagesCount';
+      corpo = corpoSoCabecalho(cabecalho);
+      ler = lerNaoLidas;
+      break;
+    case 'conversas':
+      metodo = SERVICO_HISTORICO + '/ListConversations';
+      corpo = corpoConversas({ cabecalho, antesDe: instante(data.antesDe), lidoAte: instante(data.lidoAte) });
+      ler = lerConversas;
+      break;
+    case 'mensagens':
+      metodo = SERVICO_HISTORICO + '/ListMessages';
+      corpo = corpoMensagens({ cabecalho, com: idWaze(data.com), antesDe: instante(data.antesDe) });
+      ler = lerMensagens;
+      break;
+    case 'perfis':
+      metodo = SERVICO_MENSAGENS + '/GetProfileInfo';
+      corpo = corpoPerfis({ cabecalho, ids: listaDe(data.ids, idWaze, 50) });
+      ler = (d) => ({ perfis: lerPerfis(d) });
+      break;
+    case 'enviar': {
+      if (typeof data.texto !== 'string' || !data.texto.trim() || data.texto.length > TEXTO_MAX) incompleto();
+      let ctx = null;
+      if (data.contexto != null) {
+        if (typeof data.contexto !== 'object' || Array.isArray(data.contexto)) incompleto();
+        const pares = Object.entries(data.contexto);
+        if (!pares.length || pares.length > 8 || pares.some(([k, v]) => !k || k.length > 64 || typeof v !== 'string')) incompleto();
+        if (new TextEncoder().encode(JSON.stringify(data.contexto)).length > CONTEXTO_MAX_BYTES) incompleto();
+        ctx = data.contexto;
+      }
+      const id = data.id == null ? crypto.randomUUID() : uuid(data.id);
+      metodo = SERVICO_MENSAGENS + '/SendMessage';
+      corpo = corpoEnviarTexto({ cabecalho, ts: Date.now(), id, para: idWaze(data.para), de, texto: data.texto, ctx });
+      ler = (d) => ({ id, ...(d ? lerEnvio(d) : {}) });
+      break;
+    }
+    case 'recibo': {
+      const tipo = data.tipo === 'entregue' ? 1 : data.tipo === 'lida' ? 2 : 0;
+      if (!tipo) incompleto();
+      metodo = SERVICO_MENSAGENS + '/SendMessage';
+      corpo = corpoRecibo({ cabecalho, ts: Date.now(), id: crypto.randomUUID(), para: idWaze(data.para), de, tipo, ids: listaDe(data.ids, uuid, 100) });
+      ler = () => ({});
+      break;
+    }
+    case 'lida':
+      metodo = SERVICO_MENSAGENS + '/MarkConversationRead';
+      corpo = corpoMarcarLida({ cabecalho, com: idWaze(data.com) });
+      ler = lerMarcarLida;
+      break;
+    case 'confirmar':
+      metodo = SERVICO_MENSAGENS + '/AckMessages';
+      corpo = corpoConfirmar({ cabecalho, ids: listaDe(data.ids, uuid, 100) });
+      ler = () => ({});
+      break;
+    default:
+      incompleto();
+  }
+
+  const { cookieHeader } = prepareAuth(cookies);
+  const base = WAZE_WMP[region] || WAZE_WMP.row;
+  const r = await callWazeGrpc(base + metodo, cookieHeader, corpo, region, { data, sessions, cookies }, { chat: true });
+  // Marcar como lida uma conversa que nunca existiu não é erro: não havia o que
+  // marcar. MEDIDO: status 7 com a mensagem exata "NO_EXISTING_CONVERSATION" —
+  // o mesmo 7 da sessão morta, por isso a exceção é pela mensagem e só aqui.
+  if (acao === 'lida' && r.grpcStatus === 7 && r.grpcMessage === 'NO_EXISTING_CONVERSATION') {
+    return { status: 200, body: { success: true, recibos: [] } };
+  }
+  const cat = categorizeGrpcError(r);
+  if (cat) return respostaDeErroGrpc(cat, r);
+  let resultado;
+  try {
+    resultado = ler(r.dados);
+  } catch {
+    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  }
+  return { status: 200, body: { success: true, ...resultado } };
+}
+
 const ROUTES = {
   sessao: handleSessao,
   parear: handleParear,
@@ -2610,6 +2963,8 @@ const ROUTES = {
   'renomear-local': handleRenomearLocal,
   perfil: handlePerfil,
   presenca: handlePresenca,
+  'presenca-waze': handlePresencaWaze,
+  chat: handleChat,
   'lista-paises': handleListaPaises,
   'lista-estados': handleListaEstados,
 };

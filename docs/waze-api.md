@@ -211,9 +211,69 @@ Exemplo real, `listOnlineEditors` (bbox de dois cantos; `101` é longitude e
     2 { 101:-38318827  102:-12891999 } }   // canto B
 ```
 
-Escrever um cliente gRPC-web aqui é viável sem dependência (o enquadramento é
-trivial e o protobuf a gente já sabe montar à mão), mas **hoje não há motivo**:
-nada do que o nosso produto faz está do lado gRPC.
+O cliente gRPC-web existe desde 2026-09-23: `server/wme-grpc.mjs`, sem
+dependência, para a presença e o chat do WME (§4.1). Os pedidos que ele monta
+saem **byte a byte iguais** aos do WME — travado em `test/wme-grpc.test.mjs`
+contra quadros reais das gravações do owner.
+
+### 4.1 Presença e chat do WME — medidos em 2026-09-23
+
+WME `v2.370`, quatro HARs do owner, o código do editor e do chat
+(`chat-web/prod/*`), chamadas ao vivo com as contas antigerme (L6+AM) e cafanha
+(L1), e o WME de verdade aberto com as duas contas ao mesmo tempo. Tudo `[vivo]`
+salvo onde marcado.
+
+**Presença** — `MapEditorWebServer/{listOnlineEditors,updateOnlineEditor}`,
+em `/<região>-Descartes/grpc/`:
+
+| O quê | Medido |
+|---|---|
+| Registro `OnlineEditor` | `1 user_id · 2 location{101 lon×1e6, 102 lat×1e6} · 3 visible · 4 user_name · 5 rank` (só esses 5, `[bundle]`) |
+| Visibilidade | chave do PERFIL (`/Session` → `onlineEditorDetails.visible`), persiste entre sessões e vale no WME também |
+| Expira | **~15 min depois da última atualização de qualquer tipo** (posição ou só visibilidade): presente aos 14,75 → fora aos 15,0; e presente a 14,0 → fora a 15,5 depois de um `visible=true` sozinho. A visibilidade continua ligada — só sai da lista |
+| WME aberto e parado | **some igual**: 14,5 min presente → 16,6 min fora. O WME só escreve a posição no `moveend` do mapa; não há pulso (código + 14 min de HAR + o inventário completo do WME parado) |
+| Separada por servidor | um WME no servidor NA não vê ninguém do ROW. WME recém-instalado cai no NA até alguém trocar (`localStorage.editorLocation`) |
+| Lista | **pública**: responde sem cookie. Exclui quem pede. Mundo inteiro = 48 editores, 2,9 KB, ~0,5 s |
+| Escrita | exige o cookie e o id da PRÓPRIA pessoa: sem id → 3 `Missing parameter value for 'user_id'`; id de outra → 7 `cannot modify another user's data`. Posição e visibilidade vão numa chamada só (máscara com os dois caminhos) |
+| O WME não redesenha | guarda a caixa já buscada e não tem relógio: o avatar de quem se move só anda quando o mapa de quem OLHA sai da caixa, ou no botão de recarregar. E deixa avatar fantasma: a resposta nova vem sem a pessoa e o WME junta com a antiga sem apagar |
+
+**Chat** — `com.waze.wmp.{Messaging,MessagingHistory}`, em `/<geoEnv>-wmp/`:
+
+| O quê | Medido |
+|---|---|
+| Prefixo | backend GLOBAL: `row-wmp`, `na-wmp`, `il-wmp` devolvem o mesmo; `usa-wmp` = 404. O WME usa o `geoEnv` da conta (vem no HTML de `/chat/embed`) |
+| Cabeçalho | `1 requisição · 2 aparelho (100 = WEB) · 4 instalação · 6 app (2 = WAZE_MAP_EDITOR)` |
+| Mensagem | `1 hora ms · 2 id (do cliente) · 3 destino · 4 remetente · 5 contexto · 6 classe (1 texto, 2 recibo) · 101 conteúdo{1 tipo, 101 Texto{1}} · 102 recibo{1 tipo (1 entregue, 2 lida), 2 [{1 id}]}` |
+| Remetente | **ignorado**: mandado trocado ou omitido, o Waze grava o dono do cookie |
+| Contexto | pares chave/valor que o chat do WME não mostra; um resumo de card de 2 KB voltou byte a byte. Link no texto vira link de verdade no chat do WME |
+| Recibos | são mensagens (classe 2) mandadas pelo cliente; `MarkConversationRead` gera os dois (entregue e lida) no servidor e devolve os ids |
+| Não lidas | `GetUnreadMessagesCount` → `{1{1 total}, 2 marca de leitura}`; a 1ª página de `ListConversations` leva a marca no campo 6 |
+| Páginas | `ListConversations`: seguinte com o campo 2 = a atividade (campo 8) da última conversa da anterior, como o WME. `ListMessages`: `2 destino · 3 antes de · 5 tamanho · 7:1` |
+| Conversa inexistente | `MarkConversationRead` → 7 `NO_EXISTING_CONVERSATION` |
+| `PullMessages` | é a fila do APARELHO, não histórico: trouxe 2 mensagens e, na chamada seguinte, 0 |
+
+**Tempo real** — `GetMessagingProvider` devolve `{1 token (bytes), 2 validade
+µs ≈ 24 h, 3 endereço, 4 chave de API}`. O fluxo é um POST JSON longo em
+`instantmessaging-pa.googleapis.com/v1/messages:receive` com o token em
+`auth_token_payload` e a chave em `X-Goog-Api-Key`:
+
+- **CORS aberto a qualquer origem** (preflight e resposta ecoam a origem que
+  pediu; testado com a nossa e num Chromium de verdade em outra origem).
+  Controles: sem chave → 403; token falso → 401. A chave aceita nosso Referer.
+- Um token por **instalação**; a mesma instalação recebe sempre o mesmo. Várias
+  conexões da mesma pessoa recebem a mesma mensagem, e nenhuma derruba a outra.
+- Sinal de vida (`pong`) a cada 10 s; a conexão cai sozinha a cada **6,2 min**
+  (5 vezes seguidas, 6,20–6,24), com dado 2–4 s antes: é tempo máximo, não
+  inatividade. Daqui não dá para separar Google de saída de rede do ambiente.
+- Só entrega o que chega com a conexão ABERTA: reconectar não reentrega nem o
+  que chegou fora, nem o que chegou e não foi confirmado (`AckMessages`).
+  Quem estava fora acha as mensagens nas não lidas e no histórico.
+- Latência do envio à chegada no outro aparelho: 0,52–0,60 s (5 medidas).
+
+**Erros** — HTTP 200 com o status no trailer. O **7 é ambíguo** e se decide
+pela mensagem: `guest user` (cookie que não vale), `Empty CSRF token` (sem
+cookie) e 7 **sem** mensagem (chat com cookie que não vale) são sessão morta;
+`another user` e `NO_EXISTING_CONVERSATION`, não. `categorizeGrpcError` no core.
 
 ---
 
