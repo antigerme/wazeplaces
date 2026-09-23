@@ -694,10 +694,13 @@ try {
   // Retidas e não atrasadas por um prazo: 500 ms bastavam no WebKit e nem
   // sempre no Chromium, e prazo mede a velocidade da máquina (gotcha #62).
   //
-  // Às vezes o canal NEM FECHA: MEDIDO, 1 em 10 no Chromium a página morre
-  // antes de o fechamento sair, e aí o aviso da sala é o único (o caminho do
-  // passo 5). Nessa rodada não há a ordem que este bloco mede, então ele
-  // tenta com outro par — até 3 vezes, e IMPRIME quantas precisou.
+  // A ines sai pelo MESMO caminho da app — o ouvinte de `pagehide` —, mas com
+  // a página VIVA até o fechamento do canal chegar. MEDIDO: com a página
+  // morrendo junto (`close({ runBeforeUnload: true })`), o Chromium às vezes
+  // nem manda o fechamento (3 de 16 tentativas) e não há a ordem que este
+  // bloco mede; com ela viva, 20 de 20 nos dois motores. A saída com a página
+  // morrendo segue medida no passo 5. Se mesmo assim o canal não fechar, o
+  // bloco tenta com outro par — até 3 vezes, e IMPRIME quantas precisou.
   {
     const segurarSala = (ctx) => ctx.addInitScript(() => {
       const d = Object.getOwnPropertyDescriptor(WebSocket.prototype, 'onmessage');
@@ -753,10 +756,10 @@ try {
           'controle: a mensagem da hana não ficou em voo')) return { erro: true };
 
         await hana.page.evaluate((p) => { window.__salaAlvo = p; window.__salaSegurar = true; }, pi);
-        await ines.page.close({ runBeforeUnload: true });   // sai como o usuário sai: `pagehide`
-        await ines.ctx.close();
+        await ines.page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false })));
         const fechou = await quando(hana, (p) => Presenca.conversas.get(p)?.estado === 'fechada', pi, 3000);
         await hana.page.evaluate(() => window.__salaSoltar());
+        await ines.ctx.close();
         if (!fechou) return { semOrdem: true };
 
         const saiu = await quando(hana, (p) => Presenca.conversas.get(p)?.estado === 'saiu', pi, 5000);
