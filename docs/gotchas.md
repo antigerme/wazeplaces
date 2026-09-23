@@ -525,6 +525,11 @@ Havia como fazer a sabotagem falhar: bastava afirmar que `'5abc'` passa. Mas iss
 
 **A regra que fecha os dois:** toda guarda que lê fonte precisa passar por duas perguntas — *ela reprova a sabotagem?* e *ela continua passando se o código certo mudar de forma?* Uma só das duas não basta, e é sempre a outra que morde.
 
+**Reincidiu no YAML (2026-09-23), com o job do WebKit.** Dois guards de `test/navegador.test.mjs` sobre o `.github/workflows/ci.yml`:
+
+- `ci.matchAll(/PLAYWRIGHT_VERSAO:\s*(\S+)/g)` casou com o comentário do job novo, que cita o botão entre crases (`` `PLAYWRIGHT_VERSAO: latest` ``), e capturou `latest`),` — o guard reprovou o workflow CERTO. Em YAML o comentário é a linha que começa com `#`; filtrá-las antes de casar resolveu.
+- Antes disso, a versão ingênua (`assert.match(ci, /PLAYWRIGHT_VERSAO:\s*latest\s*$/m)`) PASSOU a sabotagem de fixar a versão só no job do Chromium: o `latest` do job do WebKit satisfazia o `match`. Com um arquivo de um job só, "existe um `latest`" e "todos são `latest`" são a mesma pergunta; com dois, não. Hoje o guard coleta TODAS as ocorrências e cobra cada uma.
+
 ## 67.1. **O removedor de comentário pode ser o defeito** (v2026.09.22-01).
 
 Escrevendo o guard que exige o host do tile no `connect-src` das três cópias da CSP, eu caí em **três armadilhas na mesma linha**, e cada conserto revelou a seguinte.

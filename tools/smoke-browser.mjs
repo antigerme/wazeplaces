@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina, esperarOuExplodir } from './esperar-saida.mjs';
-import { carregarPlaywright, abrirChromium } from './navegador.mjs';
+import { carregarPlaywright, abrirNavegador, motorPedido, pularForaDoChromium, resumoDosPulos } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8123);
@@ -287,6 +287,20 @@ const assentar = async (page, extra = 60) => {
   await page.waitForTimeout(extra);
 };
 
+// Espera por QUADRO, não por relógio: dois `requestAnimationFrame` garantem que
+// todo quadro pedido ANTES — como o do FAB, que se reposiciona no primeiro
+// quadro depois de a camada mudar — já rodou. MEDIDO no WebKit do Playwright,
+// que desenha um quadro a cada ~100 ms: medindo 250 ms depois de abrir a Ajuda,
+// o FAB ainda estava no canto velho, por cima do seletor de idioma, em 4 de 8
+// rodadas; esperando os dois quadros, em 0 de 8 — com a CPU livre e ocupada.
+// A app estava certa: o prazo é que media a velocidade do motor.
+// O teto de 2 s é só pra não pendurar o smoke numa página sem quadro: se ele
+// estourar, a medição segue e reprova pelo que vir — nunca passa por isso.
+const doisQuadros = (page) => page.evaluate(() => new Promise((ok) => {
+  setTimeout(ok, 2000);
+  requestAnimationFrame(() => requestAnimationFrame(ok));
+}));
+
 const checa = (ok, msg, detalhe) => {
   if (!ok) { falhas++; console.log(`  ✗ ${msg}${detalhe ? ' — ' + detalhe : ''}`); }
 };
@@ -310,7 +324,8 @@ async function esperarServidor() {
 
 const pw = await carregarPlaywright();
 await esperarServidor();
-const browser = await abrirChromium(pw, { args: ARGS_SEM_ESTRANGULAR });
+const MOTOR = motorPedido();
+const browser = await abrirNavegador(pw, { args: ARGS_SEM_ESTRANGULAR });
 
 // O aviso "Como funciona" abre sozinho no PRIMEIRO card — que é exatamente o
 // que todo bloco daqui renderiza. Sem suprimir, ele cobre o card com um scrim e
@@ -3665,6 +3680,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         } else if (alvo) openModal(alvo);
       }, id);
       await assentar(page, 250);
+      await doisQuadros(page);
       const r = await page.evaluate((sel) => {
         const fab = document.getElementById('devFab');
         const btn = document.getElementById('devFabBtn');
@@ -3723,6 +3739,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(!antes.calo || antes.calo === 'none',
       `FAB/${nomeAp}: sem -webkit-touch-callout:none o balão do toque longo rouba o gesto`, antes.calo);
 
+    if (pularForaDoChromium(MOTOR, `FAB/${nomeAp}: o gesto de segurar e arrastar`,
+      'toque com arraste só se sintetiza pelo protocolo do Chromium (CDP)')) {
+      checa(errosF.length === 0, `FAB/${nomeAp}: erro de JS`, errosF[0]);
+      await ctx.close();
+      continue;
+    }
     const cdp = await ctx.newCDPSession(page);
     const cx = antes.x + antes.w / 2, cy = antes.y + antes.h / 2;
     const destinoX = 16 + antes.w / 2, destinoY = vp.height - 140;
@@ -4366,8 +4388,18 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(neg.dica.length > 20 && !/[{}]/.test(neg.dica), `${id}: negado não explicou`, neg.dica);
 
       // 5. GPS CONCEDIDO: fica em 'gps', ordena e a dica confirma.
+      //    Numa página RECARREGADA, e o motivo é do WebKit: lá o negado do passo 4
+      //    vale pra página inteira. MEDIDO: conceder depois dele e pedir de novo
+      //    NA MESMA página devolve "User denied Geolocation"; recarregada, a
+      //    posição chega. É o Safari de verdade (quem negou e depois liberou
+      //    precisa recarregar). No Chromium o concedido vale na hora, e
+      //    recarregar não muda o que este passo mede.
       await ctx.grantPermissions(['geolocation'], { origin: BASE.replace(/\/$/, '') });
       await ctx.setGeolocation({ latitude: REF.lat, longitude: REF.lon, accuracy: 800 });
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForTimeout(600);
+      await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
+      await abrir({ casa: [REF.lat, REF.lon], trabalho: [REF.lat + 0.02, REF.lon + 0.02] });
       const ok = await page.evaluate(async () => {
         const sel = document.getElementById('filterSort');
         sel.value = 'gps';
@@ -5640,6 +5672,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 
 await browser.close();
 servidor.kill();
+if (resumoDosPulos(MOTOR)) console.log(resumoDosPulos(MOTOR));
 
 if (falhas) {
   console.log(`\n✗ smoke de browser: ${falhas} falha(s)`);

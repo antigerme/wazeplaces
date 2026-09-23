@@ -13,6 +13,20 @@ on:
   # Só fica disponível depois de estar na branch padrão (é como o GitHub
   # funciona), então ele não salva a rodada de HOJE — salva a próxima.
   workflow_dispatch: {}
+  # Rodada SEMANAL na main, pedida pelo owner (2026-09-23). O CI usa o
+  # Playwright MAIS NOVO (`PLAYWRIGHT_VERSAO: latest`), mas só quando alguma
+  # coisa o dispara: semana sem PR era semana em que o Chrome e o Safari novos
+  # chegavam no celular dos editores sem ninguém testar a app neles. Aqui a
+  # main é testada toda segunda com o que houver de mais novo, com ou sem PR.
+  #
+  # Segunda 09:17 UTC (06:17 em Brasília), e o minuto não é enfeite: o GitHub
+  # avisa que agendamento na hora cheia atrasa e pode ser DESCARTADO sob carga.
+  # Se reprovar, o GitHub manda e-mail a quem mexeu por último no `cron` — o
+  # owner, que faz o merge. E ele DESLIGA agendamento de repositório público
+  # parado há 60 dias; com a app em desenvolvimento isso não acontece, mas é
+  # por isso que um dia a rodada pode simplesmente parar de aparecer.
+  schedule:
+    - cron: '17 9 * * 1'
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -201,3 +215,44 @@ jobs:
               echo "::error::Frontend mudou (index.src.html/js/css/icons) mas CACHE_NAME não foi bumpado no service-worker.js"; exit 1
             fi
           fi
+
+  # O WebKit — o motor do Safari, e o de TODO navegador do iPhone (lá o Chrome
+  # também é WebKit por baixo). Pedido do owner (2026-09-23): os defeitos de
+  # iPhone que já chegaram (os modais achatados pelo teclado fantasma, o
+  # convite de instalar que o Safari nunca dispara) passaram por um CI que só
+  # conhecia o Chromium.
+  #
+  # Job PARALELO, pra não somar ao tempo do outro. Roda os três smokes que
+  # funcionam igual nos dois motores; o que só se mede no Chromium (toque com
+  # arraste pelo protocolo do DevTools) é PULADO pelo nome e contado no fim
+  # (tools/navegador.mjs). O do offline fica de fora INTEIRO, e por MEDIÇÃO: o
+  # modo avião simulado do Playwright no WebKit derruba até a resposta que o
+  # service worker tem guardada ("Load failed"), então o smoke mediria o
+  # instrumento. Contraprova: com o servidor derrubado de VERDADE, o worker do
+  # WebKit serve a app do cache igual ao Chromium.
+  #
+  # O que isto NÃO é: o Safari do iPhone. É o mesmo motor (WebKit 26.x, o do
+  # Safari 26), num Linux — pega o que é do MOTOR (CSS, JavaScript, WebRTC,
+  # IndexedDB) e não o que é do iOS (teclado de verdade, PWA instalado, o
+  # apagamento de armazenamento depois de 7 dias).
+  webkit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 22 }
+      - name: Smokes no WebKit (layout, fluxo e presença)
+        env:
+          # O mesmo botão do job do Chromium: o mais novo, e com ele o WebKit da vez.
+          PLAYWRIGHT_VERSAO: latest
+          MOTOR: webkit
+        run: |
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i --no-save "playwright@$PLAYWRIGHT_VERSAO"
+          # --with-deps: ao contrário do Chromium, o WebKit precisa de bibliotecas
+          # do SISTEMA (GTK 4, GStreamer…). MEDIDO numa máquina Ubuntu 24.04, a
+          # base do runner: sem elas ele não abre ("Host system is missing
+          # dependencies"); com elas, abre.
+          npx playwright install --with-deps webkit
+          npm run test:browser
+          npm run test:fluxo
+          npm run test:presenca
