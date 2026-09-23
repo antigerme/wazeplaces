@@ -276,14 +276,20 @@ test('o selo do FAB e o aviso do desligar contam SÓ o que a pessoa registrou', 
   assert.match(fatia('dlogCapturasDoEditor'), /m\.motivo === 'manual'/,
     'o selo deixou de filtrar pelo motivo do toque no FAB');
   const selo = fatia('atualizarFabDev');
-  assert.match(selo, /const n = dlogCapturasDoEditor\(\)\.length;/,
-    'o selo voltou a contar outra coisa que não as capturas da pessoa');
+  // As desta abertura E as das anteriores que ficaram guardadas (v2026.09.22-06:
+  // o número sumia ao fechar a app, relato do owner) — as duas SÓ da pessoa.
+  assert.match(selo, /const n = dlogCapturasDoEditor\(\)\.length \+ diagCapturasAnterioresDoEditor\(\)\.length;/,
+    'o selo voltou a contar outra coisa que não as capturas da pessoa (desta abertura e das guardadas)');
+  assert.match(fatia('diagCapturasAnterioresDoEditor'), /m\.motivo === 'manual'/,
+    'as capturas guardadas de aberturas anteriores passaram a contar as automáticas no selo');
   assert.doesNotMatch(selo, /dlogMomentos\.length/,
     'o selo voltou a contar o anel inteiro — as automáticas entram no número (2 → 4 → 5)');
   // O aviso do desligar diz o MESMO número que o selo: "3 não baixados" com o
   // selo mostrando 1 seria a app discordando de si mesma.
   const nao = fatia('dlogNaoBaixados');
   assert.match(nao, /dlogCapturasDoEditor\(\)/, 'o aviso do desligar voltou a contar as automáticas');
+  assert.match(nao, /diagCapturasAnterioresDoEditor\(\)/,
+    'o aviso do desligar esqueceu as capturas guardadas de aberturas anteriores — desligar as apaga');
   assert.match(nao, /dlogJaBaixados\.has\(m\)/, 'o aviso deixou de saber quais já foram baixadas');
   // Baixado é MARCADO no momento; a contagem antiga mentia quando o anel girava.
   assert.match(fatia('baixarDiagnostico'), /dlogMarcarBaixados\(\);/,

@@ -52,7 +52,9 @@ function fatiar(nome) {
 
 test('só REDE entra na fila — recusa do Waze não', () => {
   const h = fatiar('handleActionResult');
-  assert.match(h, /cat === 'transient' && enfileirarSaida\(actionType, place\)/,
+  // O gancho é um bloco desde que a fila passou a recusar o pedido REPETIDO
+  // (v2026.09.22-06): quem enfileira fica DENTRO do `if` da categoria.
+  assert.match(h, /if \(cat === 'transient'\) \{\s*const naFila = enfileirarSaida\(actionType, place\);/,
     'o gancho da fila de saída saiu, ou deixou de exigir `transient`');
   // As três categorias que NÃO podem entrar, e o motivo de cada uma:
   //  · already_processed/not_found → já é sucesso (outro editor chegou antes)
@@ -260,8 +262,17 @@ test('o diário registra a TRANSIÇÃO, não cada swipe', () => {
   const e = fatiar('enfileirarSaida');
   assert.match(e, /if \(f\.length === 1\) dfato\(/,
     'o diário voltou a registrar item a item — o anel de 120 vira só isto');
-  const porItem = (e.match(/dfato\(/g) || []).length;
-  assert.equal(porItem, 1, `enfileirarSaida escreve no diário ${porItem}× — só a abertura cabe`);
+  // Duas anotações e nenhuma é por item: a abertura da fila, e o ALARME do
+  // pedido repetido — que só existe num ramo que não deveria acontecer nunca
+  // (o filtro de entrada impede o card de voltar). Qualquer terceira é nova.
+  const chaves = [...e.matchAll(/dfato\('([^']+)'/g)].map((m) => m[1]).sort();
+  assert.deepEqual(chaves, ['saida.abriu', 'saida.repetida'],
+    `enfileirarSaida escreve no diário ${JSON.stringify(chaves)} — só a abertura e o alarme cabem`);
+  assert.equal((e.match(/dfato\(/g) || []).length, 2, 'há dfato fora das duas chaves conhecidas');
+  // O alarme mora no ramo do repetido, que SAI na linha seguinte. Solto no
+  // corpo, ele viraria um registro por item.
+  assert.match(e, /dfato\('saida\.repetida'[^\n]*\n\s*return 'repetida';/,
+    'o alarme do repetido saiu do ramo do repetido — virou anotação por item');
 });
 
 test('dois esvaziamentos não rodam juntos', () => {

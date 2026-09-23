@@ -116,3 +116,73 @@ test('diag-resumo: lê pela FONTE ÚNICA (`diag-ler.mjs`), não por um parser pr
   assert.match(SRC, /import \{ lerDiagnostico \} from '\.\/diag-ler\.mjs';/,
     'o leitor deixou de usar a fonte única — ZIP renomeado e relato antigo deixariam de abrir');
 });
+
+test('diag-resumo: a fila de saída sai em NÚMEROS, e o REPETIDO ganha aviso — sem ids nem autor', () => {
+  // v2026.09.22-06: o relato de reabrir sem rede dependia da fila de saída, e o
+  // resumo não a mencionava — ela estava só no localStorage, cru, junto do token.
+  const VENUE = 'CANARIO-VENUE-8877';
+  const d = relatorioV4();
+  d._versaoDoDiag = 5;
+  d.resumo.saida = { n: 3, distintas: 2, repetidas: 1, tipos: { reject: 2, read: 1 }, maisAntigaMin: 7 };
+  d.offline.pousosGravados = 4;
+  d.localStorage.waze_places_saida = JSON.stringify([{ tipo: 'reject', venueID: VENUE, updateRequestID: 'u1', nome: LOCAL }]);
+  const s = rodar(d);
+  assert.match(s, /── FILA DE SAÍDA ─+\nesperando envio 3 · pedidos distintos 2 · REPETIDOS 1 · tipos \{"reject":2,"read":1\} · o mais velho espera há 7 min/,
+    'a fila de saída sumiu da triagem');
+  assert.match(s, /ATENÇÃO: a mesma decisão está na fila mais de uma vez/, 'o repetido tem que ganhar aviso');
+  assert.match(s, /pousos gravados depois da fila guardada: 4/, 'os pousos gravados sumiram da seção offline');
+  assert.ok(!s.includes(VENUE), 'o id de um pedido da fila de saída vazou — o leitor não lê o localStorage');
+  assert.ok(!s.includes(LOCAL), 'o autor de um pedido da fila de saída vazou');
+  assert.ok(!s.includes(TOKEN), 'o token vazou');
+  // Sem repetido, sem aviso: aviso que aparece sempre é o que se aprende a ignorar.
+  d.resumo.saida = { n: 2, distintas: 2, repetidas: 0, tipos: { read: 2 }, maisAntigaMin: 1 };
+  assert.ok(!/ATENÇÃO: a mesma decisão/.test(rodar(d)), 'o aviso de repetido apareceu sem repetido');
+});
+
+test('diag-resumo: relatório de antes da fila de saída no resumo diz que ela não vinha', () => {
+  const s = rodar(relatorioV4());   // v4: sem `resumo.saida`
+  assert.match(s, /── FILA DE SAÍDA ─+\n\(ausente nesta versão\)/);
+  assert.match(s, /pousos gravados depois da fila guardada: \(ausente nesta versão\)/);
+});
+
+test('diag-resumo: as ABERTURAS ANTERIORES guardadas aparecem, com diário, capturas e alertas — sem dom nem corpo', () => {
+  // v2026.09.22-06: o relato que atravessa fechar e reabrir a app. O defeito
+  // foi capturado ANTES de fechar, noutra abertura, e o relatório de depois
+  // tem que mostrar isso.
+  const CORPO = 'CANARIO-CORPO-da-fila';
+  const d = relatorioV4();
+  d._versaoDoDiag = 5;
+  d.aberturaAtual = { id: 'atual-1', inicio: '2026-09-22T22:02:14.000Z' };
+  d.aberturasAnteriores = [{
+    id: 'ant-9', inicio: Date.parse('2026-09-22T21:58:00.000Z'), salvoEm: Date.parse('2026-09-22T21:59:30.000Z'),
+    salvoPor: 'oculta', versao: '2026092206',
+    diario: [{ t: 1790114280000, k: 'offline.abriu', n: 276, excluidos: 0 },
+             { t: 1790114300000, k: 'saida.abriu', tipo: 'read' }],
+    chamadas: [{ t: '2026-09-22T21:58:10.000Z', rota: 'marcar-lido', http: 0, ok: false,
+                 errorCategory: 'transient', corpoResposta: CORPO }],
+    erros: [{ t: '2026-09-22T21:58:20.000Z', tipo: 'erro', msg: 'quebrou com ' + TOKEN }],
+    momentos: [{ t: '2026-09-22T21:59:00.000Z', motivo: 'manual', tela: 'app', painel: 'card', cardMontado: true,
+                 modais: [], estado: { fila: 276, serverTotal: 276, atual: { nome: LOCAL } },
+                 alertas: [{ chave: 'pedidoDecididoNaFila', msg: 'x' }], dom: '<div>' + DOM + '</div>' }],
+  }];
+  d.resumo.alertasNasCapturas = [...d.resumo.alertasNasCapturas,
+    { t: '2026-09-22T21:59:00.000Z', motivo: 'manual', painel: 'card', abertura: 'ant-9', alertas: ['pedidoDecididoNaFila'] }];
+  const s = rodar(d);
+  assert.match(s, /nas capturas: 21:59:00\.000 manual \(painel card\) → pedidoDecididoNaFila \[abertura anterior ant-9\]/,
+    'o alerta de uma captura de abertura ANTERIOR tem que aparecer na triagem, dizendo de qual abertura');
+  assert.match(s, /── ABERTURAS ANTERIORES \(guardadas no aparelho\) ─+\nabertura ant-9 · 2026-09-22 21:58:00 → 2026-09-22 21:59:30 \(guardada por: oculta\) · v2026092206/,
+    'a seção das aberturas anteriores sumiu');
+  assert.match(s, /diário 2 · chamadas 1 \(falhas 1\) · erros 1 · capturas 1/);
+  assert.match(s, /\+20\.000s\s+saida\.abriu/, 'o diário da abertura anterior tem que vir com o tempo relativo DELA');
+  assert.match(s, /chamada FALHOU 21:58:10\.000 marcar-lido http 0 · transient/);
+  assert.match(s, /  21:59:00\.000  manual · tela app · painel card/, 'a captura da abertura anterior sumiu');
+  assert.ok(!s.includes(DOM), 'o dom de uma captura anterior vazou');
+  assert.ok(!s.includes(LOCAL), 'dado de terceiro de uma captura anterior vazou');
+  assert.ok(!s.includes(CORPO), 'o corpo de uma chamada anterior vazou (nem devia estar guardado)');
+  assert.ok(!s.includes(TOKEN), 'o token vazou de dentro de um erro de abertura anterior');
+  assert.match(s, /quebrou com <TOKEN>/);
+});
+
+test('diag-resumo: relatório de antes das aberturas guardadas diz que elas não vinham', () => {
+  assert.match(rodar(relatorioV4()), /── ABERTURAS ANTERIORES \(guardadas no aparelho\) ─+\n\(ausente nesta versão\)/);
+});

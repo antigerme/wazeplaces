@@ -8,6 +8,24 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.22-06
+
+### Corrigido
+- **Pedido que você já tratou não volta mais como card ao reabrir a app sem sinal.** Com o **Disponível offline** ligado, quem tratava pedidos no modo avião, fechava a app e a reabria via os **mesmos pedidos** de novo, enquanto eles continuavam na fila de envio. Dava pra decidir outra vez: o placar contava de novo e o Waze recebia as duas decisões quando o sinal voltava. Isso vale também pro pedido tratado **com** sinal pouco antes de a rede cair.
+- **Fechar a app sem sinal logo depois de tratar um pedido não perde mais a decisão.** Se você fechava durante os segundos do "Desfazer", a decisão podia sumir com o placar já contado, e o pedido voltava na abertura seguinte. Agora ela vai direto pra fila de envio.
+- **Ao reabrir com sinal e ainda com decisões esperando envio**, os pedidos que estão sendo enviados naquele momento não aparecem mais de novo na fila enquanto o envio termina.
+- **"Restam" conta certo depois de reabrir:** os pedidos esperando envio já foram feitos, então não entram mais na conta.
+- **A Ajuda passou a dizer tudo o que fica no aparelho.** Ela afirmava que nenhum pedido era gravado — mas, com o **Disponível offline** ligado, os pedidos e o mapa ficam guardados, e as ações esperando envio também ficam no aparelho. Agora ela diz isso, e também o que o modo dev guarda (abaixo).
+- **Sair agora apaga também as capturas do modo dev.** Antes, as da memória ficavam até a app ser fechada.
+
+### Melhorado — relatório do modo dev
+- **As capturas não somem mais ao fechar a app.** Com o modo dev ligado, o número do botão sobrevive a fechar e reabrir: as capturas ainda não baixadas, o diário, as chamadas e os erros de cada abertura ficam guardados no aparelho, e o relatório mostra o que houve em cada uma — inclusive o defeito que só aparece depois de reabrir. O que fica guardado sai ao **baixar o diagnóstico**, ao **desligar o modo dev**, ao **sair da app** ou depois de **24 h**.
+- **Um alerta novo avisa quando um pedido que está esperando envio aparece de novo como card.**
+- **O resumo mostra a fila de envio em números**: quantos pedidos, se algum aparece repetido e há quanto tempo o mais antigo espera.
+
+### Notas
+- Quem não liga o modo dev não guarda nada a mais no aparelho.
+
 ## v2026.09.22-05
 
 ### Melhorado — relatório do modo dev
