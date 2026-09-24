@@ -5354,6 +5354,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   for (const c of CENARIOS) {
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 },
       serviceWorkers: 'block', locale: 'pt-BR' });
+    // No CONTEXTO, embaixo da rota da página (que tem precedência e segue
+    // abortando no modo avião): só pega o pedido que cai na troca `unroute` →
+    // `route` lá embaixo. O `online` do `setOffline(false)` pede a lista de novo
+    // quando o último pedido de token tem mais de 5 min — no runner o bloco
+    // passa disso, e o pedido ia pro servidor de verdade no meio da troca.
+    await presencaViva(ctx);
     const page = await ctx.newPage();
     const errosJS = [];
     page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
