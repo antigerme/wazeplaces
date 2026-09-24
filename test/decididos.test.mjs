@@ -1,7 +1,7 @@
 // PEDIDO JÁ DECIDIDO NÃO VOLTA COMO CARD (v2026.09.22-06).
 //
 // O relato: no modo avião, o owner tratou pedidos (foram pra fila de saída),
-// fechou a app e reabriu — e os MESMOS pedidos voltaram como card, com a fila
+// fechou o app e reabriu — e os MESMOS pedidos voltaram como card, com a fila
 // de saída ainda segurando as decisões. Dava pra decidir de novo: o placar
 // contava outra vez e o Waze recebia duas decisões, que podem ser diferentes
 // (ler não resolve o pedido, então um "rejeitar" depois dele vale).
@@ -55,7 +55,7 @@ const constante = (nome) => {
 };
 
 // Um "aparelho" de mentira: armazenamento, relógio do diário, e as funções
-// reais da app.
+// reais do app.
 function montar({ offline = true } = {}) {
   const guardado = new Map();
   const escritas = [];
@@ -138,7 +138,7 @@ test('os pousos GRAVADOS valem pra reabertura — e só com o offline ligado', (
   const desligado = montar({ offline: false });
   desligado.guardado.set(desligado.deps.OFFLINE_POUSOS_KEY, JSON.stringify([['v3|3', 2000]]));
   assert.equal(desligado.app.semOsJaDecididos([P('v3', 3)], 1500).excluidos, 0,
-    'com o offline desligado a lista gravada não existe pra app (e nem é lida)');
+    'com o offline desligado a lista gravada não existe pro app (e nem é lida)');
 });
 
 test('o filtro não inventa: pedido sem id fica, a lista original não é mexida, e a conta bate', () => {

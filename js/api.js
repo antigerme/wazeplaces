@@ -71,7 +71,7 @@ const API = {
     // Guarda SEMPRE, não só com o modo dev ligado: o defeito acontece ANTES de
     // alguém abrir o diagnóstico, e anel que começa a gravar na hora do socorro
     // nasce vazio justo quando importa. Custo: 60 objetos pequenos em memória,
-    // zero requisição, zero gravação no aparelho, e some ao fechar a app.
+    // zero requisição, zero gravação no aparelho, e some ao fechar o app.
     //
     // NUNCA guarda o corpo enviado nem o recebido: o corpo leva o sessionToken
     // em toda chamada, e o recebido leva dado de terceiro (nome de quem mandou
@@ -104,18 +104,38 @@ const API = {
             if (c.sessionToken) c.sessionToken = '[token — ver localStorage]';
             if (c.cookies) c.cookies = '[cookies do login — nunca guardados]';
             if (c.code) c.code = '[código de pareamento]';
-            // A conversa é dado PRIVADO — a minha mensagem e o pedido que vai
-            // junto. O registro guarda o tamanho, que é o que depura.
-            if (typeof c.texto === 'string') c.texto = `[mensagem · ${c.texto.length} caracteres]`;
-            if (c.contexto) c.contexto = '[contexto da mensagem]';
+            // Sem o modo dev o registro roda pra TODO editor, o tempo todo: da
+            // conversa (a mensagem e o pedido que vai junto) fica só o tamanho,
+            // que é o que depura. Com o modo dev ela vai inteira — privacidade
+            // não é critério ali (decisão do owner, 2026-09-24).
+            if (!this._guardaCorpo()) {
+                if (typeof c.texto === 'string') c.texto = `[mensagem · ${c.texto.length} caracteres]`;
+                if (c.contexto) c.contexto = '[contexto da mensagem]';
+            }
             return c;
         } catch (e) { return '[não serializável]'; }
     },
 
-    // Rotas cuja RESPOSTA nunca entra no registro, nem com o modo dev: o
-    // histórico e a prévia das conversas (dado privado de terceiro) e o token
-    // do tempo real (credencial). O registro fica (rota, status, tempo).
-    _ROTAS_PRIVADAS: ['chat', 'presenca-app'],
+    // Rotas cuja resposta traz a CREDENCIAL do tempo real (o token de 24 h do
+    // chat e a chave). Com o modo dev a resposta entra no registro — é ela que
+    // explica "não vejo ninguém" e "a conversa sumiu da lista" —, mas esses dois
+    // campos saem como marcador: credencial não ajuda a depurar, e o prazo dela
+    // já vai no `presencaApp.token` do resumo.
+    _ROTAS_COM_CREDENCIAL: ['chat', 'presenca-app'],
+    _semCredencial(bruto) {
+        try {
+            const o = JSON.parse(bruto);
+            const anda = (v) => {
+                if (!v || typeof v !== 'object') return;
+                for (const k of Object.keys(v)) {
+                    if ((k === 'token' || k === 'chave') && typeof v[k] === 'string') v[k] = '[credencial do tempo real]';
+                    else anda(v[k]);
+                }
+            };
+            anda(o);
+            return JSON.stringify(o);
+        } catch (e) { return '[resposta que não é JSON]'; }
+    },
 
     // Corpo de resposta só entra com o modo dev ATIVO — que é exatamente quem
     // está com problema e ligou pra reproduzir. Guardar sempre poria a fila
@@ -178,7 +198,7 @@ const API = {
     // não chegou. `navigator.onLine === true` não prova nada disto, e o evento
     // `online` do navegador pode não vir: no iPhone do owner, sair do modo
     // avião deixou 3 ações presas na fila enquanto DUAS novas saíam com sucesso
-    // na mesma tela — a app tinha a prova na mão e não a usava.
+    // na mesma tela — o app tinha a prova na mão e não a usava.
     //
     // O gancho existe pra o TRANSPORTE não precisar conhecer a fila de saída:
     // quem registra é o `app.js`. Chamado de dentro de um try/catch próprio,
@@ -206,7 +226,7 @@ const API = {
             // é JSON (desafio do WAF da Cloudflare, 502 da borda, página de erro
             // do gateway) faz o `.json()` LANÇAR, e no `catch` a única coisa que
             // sobrava era `http: 0` — indistinguível de "o celular ficou sem
-            // rede". A app roda atrás do Bot Fight Mode, então esse caso não é
+            // rede". O app roda atrás do Bot Fight Mode, então esse caso não é
             // hipotético: "a Cloudflare barrou o aparelho" e "o wifi piscou"
             // ficavam idênticos no diagnóstico.
             const http = response.status;
@@ -226,8 +246,8 @@ const API = {
                 naoEraJson = bruto.slice(0, 600);
                 throw new Error('resposta não é JSON (HTTP ' + http + ')');
             } finally {
-                const guarda = this._guardaCorpo() && !this._ROTAS_PRIVADAS.includes(endpoint);
-                const corpo = guarda ? bruto : null;
+                const corpo = !this._guardaCorpo() ? null
+                    : this._ROTAS_COM_CREDENCIAL.includes(endpoint) ? this._semCredencial(bruto) : bruto;
                 this._registrar(endpoint, _t0, http, data, {
                     cab,
                     naoEraJson,
@@ -398,7 +418,7 @@ const API = {
         }).catch(() => {});
     },
 
-    // Renomear o local. Escrita de dado de LOCAL — a única da app — e por isso
+    // Renomear o local. Escrita de dado de LOCAL — a única do app — e por isso
     // o `nome` vai CRU: quem apara é o servidor (`trim`, teto) e quem recusa de
     // verdade é o Waze, que valida permissão e lockRank na gravação.
     async renomearLocal(venueID, nome) {
@@ -450,7 +470,7 @@ const API = {
         });
     },
 
-    // Quem usa a app no país e as conversas da app (fase 3), e, com
+    // Quem usa o app no país e as conversas do app (fase 3), e, com
     // `token: true`, o token do tempo real. `campos` traz pais, userId,
     // conhecidos e, quando houver, a instalação e os ids a confirmar.
     async presencaApp(campos) {

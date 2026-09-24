@@ -16,7 +16,7 @@
   },
   // Presença: um Durable Object por FILA. `new_sqlite_classes` (e não
   // `new_classes`) porque é o backend SQLite que libera Durable Objects no
-  // plano gratuito — a app roda no free tier, e classe migrada como
+  // plano gratuito — o app roda no free tier, e classe migrada como
   // `new_classes` é recusada no deploy sem plano pago.
   //
   // A sala não GRAVA nada (a presença é a conexão aberta); o backend SQLite

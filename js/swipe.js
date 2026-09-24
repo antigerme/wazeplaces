@@ -20,7 +20,7 @@ let animating = false;
 // levantou que 12 parecia longo demais, e é dele a decisão.
 //
 // Três coisas a saber antes de mexer nisto de novo:
-//  · É o sinal MAIS FREQUENTE da app: um por pedido tratado, e a fila real do
+//  · É o sinal MAIS FREQUENTE do app: um por pedido tratado, e a fila real do
 //    owner tem centenas. O que passa despercebido num toque isolado vira
 //    presença constante no ritmo do swipe.
 //  · Só existe no ANDROID. O Safari do iPhone não implementa a Vibration API,
@@ -30,7 +30,7 @@ let animating = false;
 //    for mexer, meça no aparelho, às cegas — saber o número enfeita a
 //    percepção. O Chromium do sandbox não tem motor nenhum.
 //
-// A outra `navigator.vibrate` da app (o "peguei" do FAB do modo dev, em
+// A outra `navigator.vibrate` do app (o "peguei" do FAB do modo dev, em
 // app.js) NÃO é esta e segue em 12ms de propósito: ela marca outro conceito —
 // "agarrei o botão" — e acontece uma vez a cada muitas sessões.
 const VIBRACAO_COMMIT_MS = 8;

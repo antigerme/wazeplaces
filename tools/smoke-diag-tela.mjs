@@ -1,4 +1,4 @@
-// Valida o `tools/diag-tela.mjs` do jeito mais duro que existe: dirige a app de
+// Valida o `tools/diag-tela.mjs` do jeito mais duro que existe: dirige o app de
 // VERDADE (servidor real, Waze real, cookies do owner), e em cada estado tira a
 // tela AO VIVO no mesmo instante em que o FAB captura. Depois remonta o
 // diagnóstico e compara as duas imagens PIXEL A PIXEL.
@@ -73,7 +73,7 @@ async function diferenca(a, b) {
   return r;
 }
 
-// ── a app, de verdade ─────────────────────────────────────────────────────
+// ── o app, de verdade ─────────────────────────────────────────────────────
 const ctx = await browser.newContext({
   viewport: { width: 390, height: 844 }, deviceScaleFactor: 2,
   acceptDownloads: true, serviceWorkers: 'block',
@@ -83,7 +83,7 @@ const ctx = await browser.newContext({
 // que ninguém viu), então deixar a foto do Waze carregar só de um lado mede a
 // FOTO, não a fidelidade: medido, dava 46% de diferença só por causa dela.
 // Bloqueando nos dois, o que sobra na conta é o que a ferramenta promete
-// remontar — o desenho da própria app.
+// remontar — o desenho do próprio app.
 await ctx.route('**/*', (r) => {
   const u = r.request().url();
   const tipo = r.request().resourceType();
@@ -128,7 +128,7 @@ await page.click('#prefDevModeActive'); await page.waitForTimeout(300);
 await page.evaluate(() => closeModal('filtersModal')); await page.waitForTimeout(400);
 
 // Captura: a tela AO VIVO e o momento, no mesmo instante. O FAB é escondido no
-// print ao vivo E na remontagem (ele é do instrumento, não da app) — comparar
+// print ao vivo E na remontagem (ele é do instrumento, não do app) — comparar
 // com ele dentro mediria o botão, não a tela.
 const aoVivo = [];
 async function capturar(nome) {
@@ -195,16 +195,16 @@ console.log(`\ndiagnóstico: ${Math.round(readFileSync(json, 'utf8').length / 10
   + `${(d.momentos || []).length} momentos\n`);
 
 // `--cru`: sem as marcas do instrumento (hachura, molduras). Elas são anotação
-// da ferramenta, não desenho da app — com elas ligadas a conta media a anotação.
+// da ferramenta, não desenho do app — com elas ligadas a conta media a anotação.
 execFileSync('node', ['tools/diag-tela.mjs', json, join(SAIDA, 'remontado'), '--cru'],
   { cwd: '/home/user/wazeplaces', stdio: 'inherit' });
 
 // O FAB tem que sumir da remontagem também, senão ele conta como diferença.
-// (O tool o marca com moldura; aqui o alvo é comparar a APP.)
+// (O tool o marca com moldura; aqui o alvo é comparar o APP.)
 console.log('\n── remontagem × tela ao vivo ──');
 // Só os momentos MANUAIS pareiam com as capturas: a captura AUTOMÁTICA (erro de
 // JS, painel de falha) entra sozinha e é o recurso funcionando — casar 1:1 com
-// os toques media o instrumento, não a app.
+// os toques media o instrumento, não o app.
 const todos = d.momentos || [];
 const momentos = todos.filter((m) => m.motivo === 'manual');
 checa(momentos.length === aoVivo.length,
@@ -250,7 +250,7 @@ for (let i = 0; i < momentos.length; i++) {
       'foi este o defeito que entregou imagem sem estilo duas vezes');
     checa(est.fundo !== 'rgba(0, 0, 0, 0)', `o corpo tem fundo pintado (${est.fundo})`);
     checa(/Inter/.test(est.fonte), `a fonte real está embutida (${est.fonte})`);
-    checa(est.scripts === 0, 'nenhum script sobrou — a remontagem não re-executa a app');
+    checa(est.scripts === 0, 'nenhum script sobrou — a remontagem não re-executa o app');
     checa(est.canvas === 0, 'todo canvas virou imagem — pixel de canvas não vive no DOM');
   }
   // O painel que o momento DIZ que estava visível é o que aparece na remontagem.
@@ -269,7 +269,7 @@ const iFr = aoVivo.findIndex((a) => a.nome === 'interface em francês');
 const htmlFr = readFileSync(join(SAIDA, 'remontado', `.momento-${idx[iFr] + 1}.html`), 'utf8');
 checa(/Filtres|Aide|Passer/i.test(htmlFr), 'o momento em francês remonta EM FRANCÊS');
 
-checa(errosJs.length === 0, 'zero erro de JS na app durante toda a bateria', errosJs[0] || '');
+checa(errosJs.length === 0, 'zero erro de JS no app durante toda a bateria', errosJs[0] || '');
 
 // ── o caminho de ABORTO ───────────────────────────────────────────────────
 console.log('\n── recusa de entregar imagem errada ──');

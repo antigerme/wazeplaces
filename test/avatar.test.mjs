@@ -7,12 +7,12 @@
 // dele: status 0 em 0,06 ms, sem IP de servidor (uma requisição que sai de
 // verdade e falha leva ~25 ms, que é o que o beacon bloqueado do mesmo HAR
 // mostra). O `<img>` sem tratamento de erro então desenhou o ícone de imagem
-// quebrada dentro do círculo do cabeçalho, em toda tela da app.
+// quebrada dentro do círculo do cabeçalho, em toda tela do app.
 //
 // São DUAS coisas separadas, e por isso dois blocos de teste:
 //   1. o host de hoje está nas TRÊS cópias da CSP (conserta ESTE endereço);
-//   2. quando a foto falhar — por CSP, 404, host fora do ar ou rede caída — a
-//      app degrada pro estado "perfil sem foto" que ela JÁ tinha, em vez do
+//   2. quando a foto falhar — por CSP, 404, host fora do ar ou rede caída — o
+//      app degrada pro estado "perfil sem foto" que ele JÁ tinha, em vez do
 //      ícone de quebrado. Isto é o que sobrevive à PRÓXIMA mudança de host,
 //      que o Waze não vai avisar.
 import test from 'node:test';
@@ -41,7 +41,7 @@ test('img-src libera os hosts de imagem do Waze nas TRÊS cópias da CSP', () =>
   // Desde v2026.09.14-03 a allowlist é o CURINGA `https://*.waze.com`, e não
   // uma lista de hosts. O motivo é este mesmo defeito: o Waze move host sem
   // avisar, e listar host por host conserta ESTE endereço e não o próximo —
-  // com as fotos do CARD (o produto da app) no mesmo risco.
+  // com as fotos do CARD (o produto do app) no mesmo risco.
   //
   // O casamento vem da FONTE ÚNICA `tools/csp-img.mjs`, a mesma que o
   // `waze-probe` usa: `includes()` acerta o caso comum e erra o que importa.

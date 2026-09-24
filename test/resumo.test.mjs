@@ -2,7 +2,7 @@
 //
 // O que se trava aqui, e por quê:
 //
-//   1. `dadosDoResumo` LÊ o histórico por dia que a app já grava — nada novo no
+//   1. `dadosDoResumo` LÊ o histórico por dia que o app já grava — nada novo no
 //      armazenamento, nenhuma escrita, nenhuma rede — e responde só pelo
 //      MÊS-CALENDÁRIO pedido: outro mês, o `_total` e balde inválido ficam de
 //      fora. "Dia mais forte", "dias ativos" e a série de barras saem da mesma

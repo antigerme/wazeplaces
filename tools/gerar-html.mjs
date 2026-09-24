@@ -42,7 +42,7 @@
 // ── O HASH DA CSP É INTOCÁVEL ────────────────────────────────────────────
 // O `<script>` inline do tema é autorizado por hash, em TRÊS cópias da CSP
 // (index.src.html, _headers, server/node.mjs — ver gotcha #14). Um único byte a
-// mais no script muda o hash e o navegador BLOQUEIA o script em silêncio: a app
+// mais no script muda o hash e o navegador BLOQUEIA o script em silêncio: o app
 // abre no esquema de cor errado e nada quebra a ponto de alguém notar.
 // Por isso o `--ignore-custom-fragments` preserva o bloco inteiro byte a byte,
 // e por isso este gerador CONFERE o hash no fim, antes de escrever.

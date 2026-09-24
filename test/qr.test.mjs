@@ -2,8 +2,8 @@
 //
 // O QR do pareamento é o caminho que NÃO precisa ser explicado — aponta a
 // câmera e entra. Se ele sair errado, não há erro no console nem teste que
-// quebre: simplesmente ninguém consegue escanear, e o editor acha que a app
-// está quebrada. Por isso os vetores dourados.
+// quebre: simplesmente ninguém consegue escanear, e o editor acha que o app
+// está quebrado. Por isso os vetores dourados.
 //
 // Como os valores abaixo foram obtidos: durante o desenvolvimento comparei a
 // saída deste gerador, MÓDULO A MÓDULO, com o pacote `qrcode` (referência

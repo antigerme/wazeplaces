@@ -28,7 +28,7 @@ tabela de região que o `core.mjs` já usa (`row` → `row`, `na` → `usa`,
 
 ## 2. REST — a tabela `paths` COMPLETA do WME
 
-São **42 caminhos**, extraídos da constante `Config.paths` do bundle. A app
+São **42 caminhos**, extraídos da constante `Config.paths` do bundle. O app
 usa **6**. Os outros 36 não são segredo nem novidade: são simplesmente o resto
 do editor (segmentos, fechamentos, eventos de trânsito, camadas de imagem).
 
@@ -124,7 +124,7 @@ Outros limites publicados (`[vivo]`, confere com o `[HAR]`):
 O CLAUDE.md registra "mediana 497 pedidos" nos países de validação. 497 está
 três abaixo do teto de página que o servidor publica, e isso pode ser
 coincidência (o país tem 497 mesmo) ou pode ser a medição tendo visto uma
-página só. Os dois desfechos são possíveis com o que está medido hoje: a app
+página só. Os dois desfechos são possíveis com o que está medido hoje: o app
 pagina, e as filas maiores (França 583, máximo 655) passam dos 500 justamente
 por isso. **O que decide é o `hasMore` daquela chamada**, e ele não foi
 registrado por país. Antes de citar a mediana como propriedade das filas,
@@ -230,13 +230,15 @@ em `/<região>-Descartes/grpc/`:
 |---|---|
 | Registro `OnlineEditor` | `1 user_id · 2 location{101 lon×1e6, 102 lat×1e6} · 3 visible · 4 user_name · 5 rank` (só esses 5, `[bundle]`) |
 | Visibilidade | chave do PERFIL (`/Session` → `onlineEditorDetails.visible`), persiste entre sessões e vale no WME também |
+| O WME e a visibilidade | abrir o WME e arrastar o mapa NÃO mexem nela: carregar não escreve nada, e a escrita do `moveend` leva a máscara só em `location` (a conta estava visível e seguiu visível) `[vivo, 2026-09-24]` |
 | Expira | **~15 min depois da última atualização de qualquer tipo** (posição ou só visibilidade): presente aos 14,75 → fora aos 15,0; e presente a 14,0 → fora a 15,5 depois de um `visible=true` sozinho. A visibilidade continua ligada — só sai da lista |
 | WME aberto e parado | **some igual**: 14,5 min presente → 16,6 min fora. O WME só escreve a posição no `moveend` do mapa; não há pulso (código + 14 min de HAR + o inventário completo do WME parado) |
 | Separada por servidor | um WME no servidor NA não vê ninguém do ROW. WME recém-instalado cai no NA até alguém trocar (`localStorage.editorLocation`) |
 | Lista | **pública**: responde sem cookie. Exclui quem pede. Mundo inteiro = 48 editores, 2,9 KB, ~0,5 s |
+| Invisível na lista | **não vem**: com `visible=false` a pessoa SOME da resposta (não chega com `visible` falso), e volta com `visible=true`. Mesma caixa, a cafanha olhando o antigerme: presente → fora → presente, com `grpc 0` nas três `[vivo, 2026-09-24]`. O `e.visivel !== false` do `filtrarOnlineDaApp` fica como defesa |
 | Escrita | exige o cookie e o id da PRÓPRIA pessoa: sem id → 3 `Missing parameter value for 'user_id'`; id de outra → 7 `cannot modify another user's data`. Posição e visibilidade vão numa chamada só (máscara com os dois caminhos) |
 | O WME não redesenha | guarda a caixa já buscada e não tem relógio: o avatar de quem se move só anda quando o mapa de quem OLHA sai da caixa, ou no botão de recarregar. E deixa avatar fantasma: a resposta nova vem sem a pessoa e o WME junta com a antiga sem apagar |
-| Posição volta EXATA | os inteiros ×1e6 que a pessoa escreve voltam idênticos na lista de quem lê (cafanha escreveu, antigerme leu: 3 de 3, duas posições com os últimos dígitos marcados e uma de controle redonda). É o que sustenta a marca de quem usa a app (`server/marca-app.mjs`) |
+| Posição volta EXATA | os inteiros ×1e6 que a pessoa escreve voltam idênticos na lista de quem lê (cafanha escreveu, antigerme leu: 3 de 3, duas posições com os últimos dígitos marcados e uma de controle redonda). É o que sustenta a marca de quem usa o app (`server/marca-app.mjs`) |
 | Eco da escrita | o `updateOnlineEditor` devolve o registro da pessoa, com a posição quando ela foi escrita (sem posição quando só a visibilidade mudou) — dá pra conferir a marca a cada escrita sem chamada a mais |
 | Lista × CORS | a lista é pública, mas o `www.waze.com` não libera leitura por outro site: o preflight responde **415** e nenhuma resposta traz `Access-Control-Allow-Origin` (a mesma chamada, feita do servidor, devolveu 13 editores). O navegador não lê a lista direto: ela passa pelo nosso `/api` |
 
@@ -254,7 +256,7 @@ em `/<região>-Descartes/grpc/`:
 | Páginas | `ListConversations`: seguinte com o campo 2 = a atividade (campo 8) da última conversa da anterior, como o WME. `ListMessages`: `2 destino · 3 antes de · 5 tamanho · 7:1` |
 | Conversa inexistente | `MarkConversationRead` → 7 `NO_EXISTING_CONVERSATION` |
 | Ordem do histórico | `ListMessages` devolve da mais NOVA pra mais antiga, e só texto: nenhum recibo vem no histórico `[vivo, fase 3]`. O "Lida" de uma conversa antiga só existe se o aparelho guardou o recibo que o fluxo contou |
-| Prévia da lista | a `ultima` de cada conversa do `ListConversations` é a última mensagem de TEXTO (50 de 50 medidas), com o contexto — é onde a marca da app aparece |
+| Prévia da lista | a `ultima` de cada conversa do `ListConversations` é a última mensagem de TEXTO (50 de 50 medidas), com o contexto — é onde a marca do app aparece |
 | Link no texto | o link LONGO do ↗ (`env`, `lat`, `lon`, `zoomLevel=22`, `venues`, `venueUpdateRequest`, `tab`) abre o local selecionado; o CURTO (só `env` e `venues`) abre o WME a 7.755 km e não seleciona nada `[vivo, fase 3]` |
 | `PullMessages` | é a fila do APARELHO, não histórico: trouxe 2 mensagens e, na chamada seguinte, 0 |
 
@@ -278,7 +280,7 @@ em `/<região>-Descartes/grpc/`:
   sem aquilo. Os recibos às vezes só aparecem na reconexão SEGUINTE (chegam
   segundos depois). Uma instalação NOVA não recebe nada — e é por isso que a
   fase 1 escreveu aqui "reconectar não reentrega nada": ela media sorteando uma
-  instalação por vez. A app usa uma instalação estável por aparelho e confirma
+  instalação por vez. O app usa uma instalação estável por aparelho e confirma
   de carona nos pedidos que já faz.
 - Latência do envio à chegada no outro aparelho: 0,52–0,60 s (5 medidas).
 
@@ -289,9 +291,9 @@ cookie) e 7 **sem** mensagem (chat com cookie que não vale) são sessão morta;
 
 ---
 
-## 5. As DUAS lacunas reais da app, medidas
+## 5. As DUAS lacunas reais do app, medidas
 
-### 5.1 `isStarred` — a app MOSTRA e não deixa MARCAR
+### 5.1 `isStarred` — o app MOSTRA e não deixa MARCAR
 
 O pedido já chega com a estrelinha: `mapIssues.venueUpdateRequests.objects[]`
 traz `isStarred` `[HAR]`, o `core.mjs` já o repassa (`isStarred: !!ur.isStarred`)
@@ -301,21 +303,21 @@ e o card já o desenha (`.card-starred`). O que falta são as duas pontas:
   `{ value: <bool>, venueUpdateRequestIds: [{ id: <updateRequestID>, venueId: "<venueID>" }] }`
   `[bundle]` — payload idêntico ao do `Read`, com `value` no lugar.
 - **filtrar**: `userPropertiesFilter` aceita **exatamente dois** booleanos,
-  `isRead` e `isStarred` `[bundle]`. A app manda só o primeiro.
+  `isRead` e `isStarred` `[bundle]`. O app manda só o primeiro.
 
 Isto é **estado compartilhado com o WME**: estrela posta aqui aparece lá, e
-vice-versa. Seria a primeira coisa da app que grava sem ser destrutiva — mas
+vice-versa. Seria a primeira coisa do app que grava sem ser destrutiva — mas
 **é gravação**, então entra pela mesma régua das outras (portão, teste contra o
 payload do HAR, nunca exercitar `/Features` com os cookies do owner).
 
-### 5.2 Buscas salvas — existem, são compartilháveis, e a app não as vê
+### 5.2 Buscas salvas — existem, são compartilháveis, e o app não as vê
 
 O `/Session` do owner traz `savedIssueTrackerSearches: []` `[HAR]` e a flag
 `IssueTrackerShareSavedSearch` está ligada. Os quatro caminhos
 (`Search/Save`, `/Update`, `/Share`, mais DELETE no `/Save`) são o mecanismo
 de salvar e **compartilhar um conjunto de filtros por link** `[bundle]`.
 
-Hoje os filtros da app moram só no `localStorage` do aparelho. Nada a decidir
+Hoje os filtros do app moram só no `localStorage` do aparelho. Nada a decidir
 agora; fica registrado que o servidor guarda isso de graça.
 
 ---
@@ -330,7 +332,7 @@ resposta errada ao owner:
 o CALCULA (`this.attributes.editableCountryIDs && !isEmpty(...)`) `[bundle]`.
 Ausência do campo não é ausência do status — foi exatamente esse o erro.
 
-A app **já recebe e já usa** `editableCountryIDs`: o `populateCountrySelect`
+O app **já recebe e já usa** `editableCountryIDs`: o `populateCountrySelect`
 restringe o seletor de país a ele. Ou seja, a restrição de Country Manager já
 está implementada — sem nunca ter sido chamada assim.
 

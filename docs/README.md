@@ -16,7 +16,7 @@ Tipagens oficiais do Waze Map Editor SDK (TypeScript declaration file).
 
 ### Pra que serve aqui
 
-Nossa app fala com a API interna do Waze (`Issues/Search/List`, `Features`, `Session`, etc.) raspando cookies. O SDK oficial cobre uma superfície parcialmente sobreposta — usar a tipagem como **referência canônica** ajuda quando:
+Nosso app fala com a API interna do Waze (`Issues/Search/List`, `Features`, `Session`, etc.) raspando cookies. O SDK oficial cobre uma superfície parcialmente sobreposta — usar a tipagem como **referência canônica** ajuda quando:
 
 - Surge dúvida sobre o que é um campo do `Venue` (tipo `lockRank`, `isAdLocked`, formato de `openingHours`)
 - Vamos adicionar parsing de novo campo no `handleBuscarPlaces` (server/core.mjs)
@@ -33,7 +33,7 @@ Especialmente útil:
 
 ### Não é runtime
 
-Esta tipagem é **apenas referência humana e de agentes**. A app é vanilla JS sem TypeScript — não há nenhum import dela em código de produção. Não fica no service worker, não é servida via PWA.
+Esta tipagem é **apenas referência humana e de agentes**. O app é vanilla JS sem TypeScript — não há nenhum import dela em código de produção. Não fica no service worker, não é servida via PWA.
 
 ### Como atualizar
 
@@ -51,7 +51,7 @@ E atualizar este README com a nova versão (campo `version` no `package.json` ex
 
 ## `native-android-analysis.md` + `.pdf`
 
-Análise técnica completa do que mudaria se reescrevêssemos a app como Android nativo (Kotlin) ou cross-platform (Flutter, KMM). Cobre:
+Análise técnica completa do que mudaria se reescrevêssemos o app como Android nativo (Kotlin) ou cross-platform (Flutter, KMM). Cobre:
 
 - Por que o backend PHP existe hoje (CORS + segurança de cookies)
 - Por que sumiria num nativo de verdade (sem CORS, Android Keystore mais seguro)
@@ -77,7 +77,7 @@ pip install weasyprint markdown pygments
 python3 docs/scripts/md2pdf.py docs/native-android-analysis.md docs/native-android-analysis.pdf
 ```
 
-(Ver `docs/scripts/md2pdf.py` — script de ~30 linhas com CSS pra A4 + paleta cyan que combina com a app.)
+(Ver `docs/scripts/md2pdf.py` — script de ~30 linhas com CSS pra A4 + paleta cyan que combina com o app.)
 
 ---
 
@@ -131,6 +131,6 @@ Três coisas que ele registra e que mudam decisão:
   sustenta o nosso portão é o AM, não o rank.
 - `grpcVenueUpdateRequestIssuesApi: false` — o endpoint que sustenta a nossa
   fila ainda não migrou pra gRPC, mas a flag já existe.
-- `isStarred` e as buscas salvas existem no servidor e a app não os usa.
+- `isStarred` e as buscas salvas existem no servidor e o app não os usa.
 
 Não tem PDF: é referência de consulta, não documento pra compartilhar.

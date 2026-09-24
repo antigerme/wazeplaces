@@ -28,13 +28,13 @@
 //   · só faz GET (nunca manda corpo);
 //   · nunca imprime valor de cookie — só o nome e a contagem.
 // A recusa é mecânica de propósito: regra que depende de alguém lembrar não é
-// regra. Se algum dia precisar MESMO escrever, faça pela app com o owner
+// regra. Se algum dia precisar MESMO escrever, faça pelo app com o owner
 // acompanhando, não por aqui.
 
 import { readFileSync } from 'node:fs';
 import { pausaComJitter, JITTER_MIN_MS, JITTER_MAX_MS, estimativaMs } from './waze-jitter.mjs';
 import { lerCsp, diretiva, hostLiberado } from './csp-img.mjs';
-// FONTE ÚNICA do par cookie+CSRF — a MESMA que a app usa. Ver o comentário
+// FONTE ÚNICA do par cookie+CSRF — a MESMA que o app usa. Ver o comentário
 // abaixo: escrever essa leitura aqui de novo era o que fazia o probe mentir.
 import { prepareAuth } from '../server/core.mjs';
 
@@ -75,7 +75,7 @@ const base = BASES[regiao] || BASES.row;
 //
 // O estrago não era dar erro: era o probe DIZER QUE ESTAVA TUDO BEM. Ele só faz
 // GET, e GET não valida CSRF — então `/Session` respondia 200 com o perfil
-// completo e o probe imprimia "✓ sessão válida", enquanto todo POST da app
+// completo e o probe imprimia "✓ sessão válida", enquanto todo POST do app
 // morria com 403 `code: 103` "Invalid CSRF token". Ferramenta cujo trabalho é
 // responder "os cookies servem?" respondendo SIM quando não servem.
 //
@@ -148,7 +148,7 @@ if (u.permissions !== undefined) {
 // ── A foto de perfil ainda cabe na CSP? ───────────────────────────────────
 // O Waze MUDA o host desta foto sem avisar: em setembro/2026 ele trocou
 // `social-row.waze.com/SocialMediaServer/images/profile/<id>` por
-// `sms-profile-image.waze.com/<id>`, e a app passou a mostrar um ícone de
+// `sms-profile-image.waze.com/<id>`, e o app passou a mostrar um ícone de
 // imagem quebrada no cabeçalho — o navegador bloqueia antes da rede e NADA
 // aparece no servidor pra denunciar. Quem tem a resposta é esta chamada, que
 // já está sendo feita: comparar o host com a allowlist custa zero requisição.
@@ -193,7 +193,7 @@ if (flag('idioma')) {
   // forbidden header name no Fetch, o browser ignora e manda o dele.
   console.log('\nAccept-Language muda os nomes? (variando só o header e o Referer)');
   const vars = [
-    ['pt-BR (o que a app manda)', 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', WME_EDITOR_URL],
+    ['pt-BR (o que o app manda)', 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', WME_EDITOR_URL],
     ['fr-FR', 'fr-FR,fr;q=0.9,en;q=0.8', WME_EDITOR_URL],
     ['en-US', 'en-US,en;q=0.9', WME_EDITOR_URL],
     ['fr-FR + Referer /fr/', 'fr-FR,fr;q=0.9,en;q=0.8', 'https://www.waze.com/fr/editor'],

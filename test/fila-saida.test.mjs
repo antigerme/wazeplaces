@@ -7,7 +7,7 @@
 // e descartava a ação**. O pedido continuava no Waze e o editor via o número
 // voltar atrás uns 5 segundos depois de já ter seguido em frente.
 //
-// A app não tinha NENHUMA noção de estar offline — nem uma chave no dicionário.
+// O app não tinha NENHUMA noção de estar offline — nem uma chave no dicionário.
 //
 // O que estes guards protegem não é a feliz: é cada uma das bordas em que ela
 // se transforma em outra coisa — enfileirar o que não devia, contar o trabalho
@@ -110,8 +110,8 @@ test('o LOTE só enfileira no modo de placar OTIMISTA', () => {
 test('esvaziar tem RITMO, e o número sai de uma medição', () => {
   const r = /const SAIDA_RITMO_MS = (\d+);/.exec(APP_SEM);
   assert.ok(r, 'a constante de ritmo sumiu');
-  // MEDIDO: o piso da app sem Desfazer é 377 ms por pedido (40 pedidos reais,
-  // esperando o card trocar de verdade). Esvaziar mais rápido que isso é a app
+  // MEDIDO: o piso do app sem Desfazer é 377 ms por pedido (40 pedidos reais,
+  // esperando o card trocar de verdade). Esvaziar mais rápido que isso é o app
   // fazendo o que nenhum humano faz — e rajada marca cliente num WAF.
   assert.ok(+r[1] >= 377,
     `ritmo de ${r[1]}ms é mais rápido que o piso humano medido (377ms) — vira rajada`);
@@ -281,7 +281,7 @@ test('dois esvaziamentos não rodam juntos', () => {
   // ganhou um irmão (anotar o gatilho, ver o teste da rede em dois tempos) e a
   // regex que casava a linha inteira reprovou código certo.
   assert.match(f, /if \(esvaziandoSaida\)[^\n]*return/,
-    'sumiu a trava: `online` e a abertura da app podem coincidir e mandar tudo duas vezes');
+    'sumiu a trava: `online` e a abertura do app podem coincidir e mandar tudo duas vezes');
   assert.match(f, /esvaziandoSaida = false/, 'a trava nunca é solta');
 });
 
@@ -302,7 +302,7 @@ test('os DOIS gatilhos existem, e nenhum é polling', () => {
   const iEsvazia = init.indexOf('esvaziarFilaDeSaida()');
   const iMain = init.indexOf('showMainScreen()');
   assert.ok(iEsvazia > 0,
-    'a abertura da app deixou de esvaziar: quem ficou offline e fechou tudo nunca mandaria');
+    'a abertura do app deixou de esvaziar: quem ficou offline e fechou tudo nunca mandaria');
   // ORDEM: é o `showMainScreen` que põe `AppState.authenticated = true`, e o
   // esvaziamento sai na primeira linha sem isso. Antes dele o gatilho da
   // abertura não faz NADA, calado — e a chamada continua lá pra enganar quem
@@ -335,7 +335,7 @@ test('sem rede não se retenta, e o teste é de UMA MÃO', () => {
 });
 
 test('o bundle GERADO tem a fila — senão nada disso está no ar', () => {
-  // Os testes acima fatiam o FONTE; a app carrega o `js/min/`. Editar um sem
+  // Os testes acima fatiam o FONTE; o app carrega o `js/min/`. Editar um sem
   // regerar o outro passa limpo aqui e manda a versão velha pra produção
   // (gotcha #22) — foi exatamente o que aconteceu ao escrever este recurso.
   assert.match(MIN, /enfileirarSaida/, 'o js/min/app.js não tem a fila de saída — falta `npm run js`');
@@ -349,7 +349,7 @@ test('o gatilho que chega COM o esvaziamento no ar não pode evaporar', () => {
   // a rede que volta em dois tempos (túnel, elevador, 4G firmando) manda um
   // `online` com a rede ainda ruim e outro logo depois já firme. O primeiro entra,
   // quebra no `transient` e sai; sem esta linha o segundo caía na guarda e sumia,
-  // deixando a fila presa com a rede boa até a PRÓXIMA abertura da app.
+  // deixando a fila presa com a rede boa até a PRÓXIMA abertura do app.
   assert.match(f, /if \(esvaziandoSaida\) \{ saidaPedidaDeNovo = true; return; \}/,
     'a guarda de reentrada voltou a DESCARTAR o gatilho em vez de anotá-lo');
   // E o pedido anotado é atendido no fim.
@@ -376,7 +376,7 @@ test('resposta que CHEGA é prova de rede, e é o terceiro gatilho', () => {
 
   // O evento `online` do navegador NÃO basta: ele chega quando o rádio liga, e
   // nesse instante a rede ainda não passa tráfego. O esvaziamento entra, quebra
-  // no `transient` e sai — e não vem gatilho novo, porque a app não foi fechada.
+  // no `transient` e sai — e não vem gatilho novo, porque o app não foi fechado.
   // Relatado no iPhone do owner: 3 presas enquanto 2 novas saíam com sucesso.
   const iDisparo = apiSem.indexOf('this.aoProvarRede(');
   assert.ok(iDisparo > 0,

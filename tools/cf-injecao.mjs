@@ -43,7 +43,7 @@ const PADROES = {
   'ofuscador de e-mail': { re: /<script[^>]*\/cdn-cgi\/scripts\/[^"]*email-decode/, exige: { tipo: 'self' } },
 };
 
-// A CSP que a app publica, lida do arquivo — a pergunta é "o que está injetado
+// A CSP que o app publica, lida do arquivo — a pergunta é "o que está injetado
 // está coberto por ela?", e responder isso à mão é como a permissão sumiu.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

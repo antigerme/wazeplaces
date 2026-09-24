@@ -30,7 +30,7 @@
 // Os DOIS fontes continuam existindo e editáveis:
 //   css/tailwind.src.css  → as diretivas @tailwind
 //   css/styles.css        → o CSS custom, com os comentários
-// A saída `css/app.css` é GERADA e commitada (zero build pra quem só roda a
+// A saída `css/app.css` é GERADA e commitada (zero build pra quem só roda o
 // app), e o CI reprova se estiver desatualizada.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';

@@ -1,6 +1,6 @@
 // A TELA QUANDO A BUSCA FALHA — e o que ela tem o direito de afirmar.
 //
-// Veio do relato do owner com print: ele abriu a app, fechou, desligou os
+// Veio do relato do owner com print: ele abriu o app, fechou, desligou os
 // dados e abriu de novo. A tela dizia **RESTAM 0** — e o número real era 426,
 // como o `busca.ok` do diagnóstico mostrou assim que a rede voltou. Zero não
 // é "não sei": zero é "tudo limpo", que é o oposto da verdade. Este repo já
@@ -37,7 +37,7 @@ function fatiar(nome) {
   return corpo;
 }
 
-test('"RESTAM" não pode dizer ZERO quando a app não sabe', () => {
+test('"RESTAM" não pode dizer ZERO quando o app não sabe', () => {
   const c = fatiar('updatePendingCount');
   assert.match(c, /if \(AppState\.loadError\) \{\s*el\.textContent = '—';/,
     'o placar voltou a imprimir o serverTotal com a busca falhada — e aí ele diz 0 pra 426 pedidos');
@@ -51,7 +51,7 @@ test('"RESTAM" não pode dizer ZERO quando a app não sabe', () => {
     'o deslogado deixou de usar o traço — os dois estados precisam do mesmo símbolo');
 });
 
-test('sem conexão a tela AFIRMA, e só quando a app sabe', () => {
+test('sem conexão a tela AFIRMA, e só quando o app sabe', () => {
   const c = fatiar('showNoPlaces');
   assert.match(c, /navigator\.onLine === false/,
     'a tela parou de distinguir "sem conexão" de "falhou" — volta a aconselhar sem saber');
@@ -127,14 +127,14 @@ test('as 2 chaves novas existem nos 4 idiomas', () => {
 });
 
 test('o bundle GERADO tem tudo — senão nada disso está no ar', () => {
-  // Os testes acima fatiam o FONTE; a app carrega o `js/min/` (gotcha #22, que
+  // Os testes acima fatiam o FONTE; o app carrega o `js/min/` (gotcha #22, que
   // já mordeu DUAS vezes nesta mesma sessão).
   assert.match(MIN, /titleOffline/, 'o js/min/ não tem o texto de sem-conexão — falta `npm run js`');
   assert.match(MIN, /startFetching/, 'o js/min/ está defasado');
 });
 
-// ── A APP REABERTA SEM REDE: o card nasce, e o esqueleto tem que SAIR ──
-// Relato de 2026-09-22: o owner ligou o offline, deixou encher, fechou a app e
+// ── O APP REABERTO SEM REDE: o card nasce, e o esqueleto tem que SAIR ──
+// Relato de 2026-09-22: o owner ligou o offline, deixou encher, fechou o app e
 // reabriu no modo avião — a tela ficou parada no esqueleto de "carregando". O
 // diagnóstico dele mostrou o resto: a fila guardada ENTROU (236 pedidos, o
 // `offline.abriu` no diário), o card da frente estava MONTADO e o mapa dele até
@@ -147,7 +147,7 @@ test('montou card, o esqueleto sai — FONTE ÚNICA no `renderCurrentCard`', () 
   const iEsq = r.search(/^\s+showLoading\(false\);/m);
   assert.ok(iCard > 0, 'o renderCurrentCard deixou de pendurar o card na pilha');
   assert.ok(iEsq > iCard,
-    'o renderCurrentCard não esconde o esqueleto DEPOIS de montar o card — a app reaberta sem rede fica parada no "carregando"');
+    'o renderCurrentCard não esconde o esqueleto DEPOIS de montar o card — o app reaberto sem rede fica parado no "carregando"');
   assert.match(r, /getElementById\('loadErrorState'\)\?\.classList\.add\('hidden'\)/,
     'card na tela e o painel de falha também visível: o card tem que tirá-lo');
 });

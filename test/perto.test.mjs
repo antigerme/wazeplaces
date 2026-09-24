@@ -39,7 +39,7 @@ test('o core converte casa/trabalho de [lon,lat] pra [lat,lon]', () => {
   // GeoJSON do Waze: coordinates: [lon, lat]. São Paulo fica em lat -23, lon -46.
   const p = pontoDeGeometria({ type: 'Point', coordinates: [-46.63, -23.55] });
   assert.deepEqual(p, [-23.55, -46.63],
-    'a conversão inverteu errado: a app inteira mede distância em [lat, lon]');
+    'a conversão inverteu errado: o app inteiro mede distância em [lat, lon]');
   // E o handler usa ESTA função, não uma conta própria — se alguém copiar o
   // `coordinates` cru pro `referencias`, a ordem diverge do resto do app.
   const h = CORE.slice(CORE.indexOf('const referencias = {'), CORE.indexOf('const referencias = {') + 260);

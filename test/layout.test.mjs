@@ -197,7 +197,7 @@ test('o hash do script de tema bate com as DUAS cópias da CSP', () => {
   // `unsafe-inline`, que continua proibido.
   //
   // O risco é silencioso e caro: mexer no script sem atualizar o hash faz o
-  // navegador BLOQUEAR o tema. A app abre no esquema errado (fundo claro em
+  // navegador BLOQUEAR o tema. O app abre no esquema errado (fundo claro em
   // quem usa escuro), e nada quebra a ponto de alguém notar em teste de layout.
   // Por isso o hash é RECALCULADO aqui, não conferido contra um literal.
   const HTML_ = read('index.src.html');
@@ -472,13 +472,13 @@ test('o leitor de tela ouve o tipo do pedido no MESMO idioma da tela', () => {
 });
 
 test('nenhum modal FECHA e outro ABRE no mesmo quadro', () => {
-  // Isso expulsa o editor da app, e o contador não denuncia.
+  // Isso expulsa o editor do app, e o contador não denuncia.
   //
   // `closeModal` AGENDA um `history.back()`; o `openModal` seguinte empilha uma
   // entrada nova; o back pendente come justamente essa. Sobra `profundidade: 1`
   // sem entrada real por trás — e o PRÓXIMO fechamento manda o back pra fora da
   // página. MEDIDO no caminho real: Ajuda → "Conectar outro aparelho" → fechar
-  // tirava a pessoa da app, com `history.length` e `profundidade` parecendo
+  // tirava a pessoa do app, com `history.length` e `profundidade` parecendo
   // normais o tempo todo.
   //
   // Não é preciso fechar antes: `openModal` já esconde os outros modais, e
@@ -985,7 +985,7 @@ test('durante a janela do Desfazer ninguém prossegue, por caminho nenhum', () =
   assert.match(APP_, /window\.acoesTravadas = acoesTravadas;/, 'o swipe.js não enxerga mais a trava');
 
   // Botão travado tem que PARECER travado: botão morto com cara de vivo lê como
-  // app quebrada (M3/HIG). Medido: disabled=true, opacidade 0.4.
+  // app quebrado (M3/HIG). Medido: disabled=true, opacidade 0.4.
   assert.match(APP_, /\.disabled = acoesTravadas\(\)/, 'os botões não ficam disabled durante a janela');
   const CSS_ = read('css/styles.css');
   const regra = CSS_.match(/\.acoes-travadas[^{]*\{[^}]*\}/);
@@ -1110,7 +1110,7 @@ test('as TRÊS cópias da CSP dizem a mesma coisa', () => {
   //
   // A do node.mjs entrou depois: o `_headers` é arquivo de Cloudflare e o Node
   // nunca o leu, então rodar na VM era rodar só com o <meta>, uma camada a
-  // menos. A app tem que ser a MESMA nos dois destinos.
+  // menos. O app tem que ser o MESMO nos dois destinos.
   const norm = (csp) => Object.fromEntries(
     csp.split(';').map((d) => d.trim()).filter(Boolean)
       .map((d) => { const [k, ...v] = d.split(/\s+/); return [k, v.sort().join(' ')]; }));
@@ -1233,7 +1233,7 @@ test('o tipo do card não repete a lista de mudanças', () => {
   assert.match(live, /place\.updateType/, 'o leitor de tela perdeu o detalhe do que mudou');
 });
 
-test('a app cabe na tela em QUALQUER aparelho, sem rolagem de página', () => {
+test('o app cabe na tela em QUALQUER aparelho, sem rolagem de página', () => {
   // Num 1366×768 os custos fixos (header 69 + placar 87 + margens 80) mais o
   // card davam 850px: 82px de rolagem que não precisava existir — e rolagem
   // disputa com o gesto de "pular". O card passa a receber a SOBRA por uma
@@ -1289,7 +1289,7 @@ test('a foto cede espaço ANTES do texto', () => {
   assert.match(foto, /shrink-\[\d+\]/, 'a foto voltou a ceder junto com o texto — barra de rolagem à toa');
 });
 
-test('o placar é compacto: o produto da app é o card', () => {
+test('o placar é compacto: o produto do app é o card', () => {
   // Cada pixel acima do card é pixel a menos de foto — e é a foto que o editor
   // olha pra decidir. O placar NÃO é alvo de toque, então a régua de 44/48px
   // não se aplica: o que vale é rótulo ≥ 11px (coberto por outro teste) e
@@ -1339,7 +1339,7 @@ test('o vão entre a barra fixa e o placar é medido até a TINTA, não até a c
 });
 
 // ── Convite de instalar ────────────────────────────────────────────────────
-// Ninguém estava instalando a app, e a medição explicou por quê: o convite só
+// Ninguém estava instalando o app, e a medição explicou por quê: o convite só
 // existia dentro do modal de Ajuda, e o iPhone NUNCA dispara
 // `beforeinstallprompt` — no Safari a instalação é manual. Nada no código
 // perguntava por `display-mode: standalone`, então quem já tinha instalado
@@ -1571,7 +1571,7 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // cota do Desfazer. Sai no logout como todo o resto: é dado de quem entrou.
     PERFIL_GATE_KEY: 'safeLS.remove(PERFIL_GATE_KEY)',
     // Contagem de rejeições por autor. É dado sobre TERCEIRO — a pessoa que
-    // mandou o pedido, não quem usa a app —, então sair no logout não é
+    // mandou o pedido, não quem usa o app —, então sair no logout não é
     // arrumação: é o mínimo que o contrato do "Sair" já promete.
     AUTORES_KEY: 'esquecerAutores()',
     SESSAO_KEY: 'esquecerPrazoDaSessao()',
@@ -1685,8 +1685,8 @@ test('o logout não espera a rede pra limpar o aparelho, e não falha calado', (
     'a exclusão no servidor voltou a falhar sem avisar o editor');
 });
 
-test('a Ajuda diz o que a app guarda, por quanto tempo e como apagar', () => {
-  // GDPR Art. 13 / LGPD Art. 9 — mas antes disso é confiança: a app pede os
+test('a Ajuda diz o que o app guarda, por quanto tempo e como apagar', () => {
+  // GDPR Art. 13 / LGPD Art. 9 — mas antes disso é confiança: o app pede os
   // cookies de sessão do editor, que permitem agir no Waze em nome dele.
   for (const chave of ['help.privacy.server', 'help.privacy.notStored', 'help.privacy.retention',
                        'help.privacy.device', 'help.privacy.credentials', 'help.privacy.infra']) {
@@ -1695,7 +1695,7 @@ test('a Ajuda diz o que a app guarda, por quanto tempo e como apagar', () => {
   // Canal para exercício de direitos (LGPD Art. 18) — com link, então -html.
   assert.ok(HTML.includes('data-i18n-html="help.privacy.contact"'),
     'sumiu o contato do responsável pelos dados');
-  // Sair da app não desloga do Waze: sem isto, quem sai preocupado conclui que
+  // Sair do app não desloga do Waze: sem isto, quem sai preocupado conclui que
   // cortou o acesso — e não cortou.
   assert.ok(HTML.includes('data-i18n-html="modal.logout.waze"'),
     'o diálogo de sair parou de avisar que os cookies seguem válidos no Waze');
@@ -1822,7 +1822,7 @@ test('o ↗ leva o LOCAL selecionado, o pedido aberto e a aba do editor', () => 
 // cadência. O risco desta feature não é ela não funcionar — é ela funcionar
 // PELA METADE: se a camada fecha por outro caminho (✕, Esc, scrim) sem consumir
 // a entrada de histórico, sobra uma entrada MORTA e o próximo voltar não faz
-// nada. A pessoa aperta, vê a tela parada, aperta de novo e SAI DA APP. Pior
+// nada. A pessoa aperta, vê a tela parada, aperta de novo e SAI DO APP. Pior
 // que o ✕ que motivou o pedido.
 test('voltar fecha camada, e todo fechamento consome a entrada', () => {
   const app = read('js/app.js');
@@ -1869,7 +1869,7 @@ test('a dica do lightbox conta que arrastar pra baixo fecha', () => {
 // ── Foco num autor ────────────────────────────────────────────────────────
 // 42% da fila vem de quem enviou 3+ pedidos. Tocar no selo traz os dele pra
 // frente. É PRIORIZAÇÃO, não filtragem, e a diferença não é semântica: esconder
-// os outros faria a fila "esvaziar" e a app mostrar "Tudo limpo!" com mais de
+// os outros faria a fila "esvaziar" e o app mostrar "Tudo limpo!" com mais de
 // cem pendentes. O guard trava as duas propriedades que sustentam isso.
 test('foco num autor prioriza sem esconder ninguém', () => {
   const app = read('js/app.js');
@@ -1878,7 +1878,7 @@ test('foco num autor prioriza sem esconder ninguém', () => {
   // Reordena a fila INTEIRA: os do autor na frente, o resto atrás. Trocar por
   // um filter() que descarta o resto reprova aqui.
   assert.match(f[0], /\.\.\.daPessoa, \.\.\.AppState\.queue\.filter\(\(x\) => x\.creatorId !== id\)/,
-    'o foco passou a DESCARTAR os outros pedidos — a fila esvaziaria e a app diria "Tudo limpo!" mentindo');
+    'o foco passou a DESCARTAR os outros pedidos — a fila esvaziaria e o app diria "Tudo limpo!" mentindo');
   // Chaveado por ID, nunca por nome: 69% dos autores têm nome GERADO, que muda
   // no dia em que a pessoa escolhe um. Medido: zero colisões nome→id numa fila,
   // então isto é robustez, não conserto de defeito vivo — mas evita que o
@@ -1952,7 +1952,7 @@ test('objeto desconhecido no card não vira JSON nem [object Object]', () => {
   const APP = read('js/app.js');
   const CORE = read('server/core.mjs');
 
-  // Objeto que a app não conhece (o Waze acrescenta campo sem avisar) tem que
+  // Objeto que o app não conhece (o Waze acrescenta campo sem avisar) tem que
   // sair legível: `chave valor · chave valor`, sem chaves nem aspas. A regra
   // segue sendo "feio, nunca invisível" — nenhuma chave e nenhum valor somem.
   assert.match(APP, /function objetoLegivel/, 'sumiu o formatador de objeto desconhecido');
@@ -1980,7 +1980,7 @@ test('item de lista vazio aparece como placeholder, e o esmaecido não derruba o
 
   // O Waze manda lista com item vazio: medido na fila real, um pedido do
   // "Posto Equador" propunha `services: [""]`. O card mostrava `Serviços: +` e
-  // mais nada — lê como app quebrada, não como "adicionando um item vazio".
+  // mais nada — lê como app quebrado, não como "adicionando um item vazio".
   assert.match(APP, /function itemDeListaAusente/, 'sumiu a detecção de item de lista vazio');
   const fn = APP.match(/function valorDeLista\([^)]*\)[\s\S]*?\n\}/)[0];
   assert.match(fn, /if \(itemDeListaAusente\(v\)\) return t\('card\.value\.empty'\);/,
@@ -2040,7 +2040,7 @@ test('um 401 sozinho não derruba o editor da sessão', () => {
   assert.match(APP, /MOTIVO_DA_QUEDA\[errorKey\] \|\| 'toast\.sessionExpired'/,
     'sumiu o fallback pra chave que não conhecemos');
 
-  // Trava de concorrência: ao abrir a app saem TRÊS chamadas ao Waze quase
+  // Trava de concorrência: ao abrir o app saem TRÊS chamadas ao Waze quase
   // juntas (perfil, países, busca). Sem ela, cada 401 fazia sua verificação e
   // seu toast — foi o que produziu os dois toasts do print.
   assert.match(APP, /if \(verificandoSessao \|\| !AppState\.authenticated\) return;/,
@@ -2089,7 +2089,7 @@ test('a foto ampliada fecha pelos caminhos das DUAS plataformas', () => {
     'a tecla ↓ parou de fechar a foto');
 
   // Só BAIXO: o toque fecha com `dy > 80`, e só. Inventar ↑ criaria um gesto
-  // que o celular não tem — a app ficaria ensinando duas coisas diferentes.
+  // que o celular não tem — o app ficaria ensinando duas coisas diferentes.
   assert.doesNotMatch(teclas, /e\.key === 'ArrowUp'/,
     '↑ ganhou função na foto — o toque não fecha pra cima');
 
@@ -2268,7 +2268,7 @@ test('o pedido à extensão não atropela um login que aconteceu no meio', () =>
   // extensão responder. Entre o pedido e a resposta passam centenas de ms, e
   // nesse meio alguém pode ter entrado por outro caminho (colar cookies, código
   // de pareamento, token injetado). Sem guarda, a escrita atrasada derrubava a
-  // sessão nova e escondia a app JÁ montada.
+  // sessão nova e escondia o app JÁ montado.
   //
   // Apareceu no smoke como "card sem endereço / botões 0px", mudando de
   // aparelho a cada rodada porque atinge sempre o PRIMEIRO card medido — que é
@@ -2293,7 +2293,7 @@ test('splash do PWA: manifest, metas e CSS não podem divergir', () => {
   //
   // O manifest NÃO aceita variante por esquema (issue aberta no WICG), então a
   // única defesa é as cores não divergirem: o fundo do splash tem que ser o
-  // mesmo `body.dark` da app, senão volta a haver troca de cor na abertura.
+  // mesmo `body.dark` do app, senão volta a haver troca de cor na abertura.
   const man = JSON.parse(read('manifest.json'));
   const css = read('css/styles.css');
   const html = read('index.src.html');
@@ -2316,7 +2316,7 @@ test('splash do PWA: manifest, metas e CSS não podem divergir', () => {
   // A media query é a aposta na brecha do MDN ("browsers MAY override
   // background_color from a prefers-color-scheme in your CSS"). Só vale
   // escopada: sem o :not(.tema-claro), quem escolheu claro num sistema escuro
-  // recebe fundo escuro por baixo de uma app clara.
+  // recebe fundo escuro por baixo de um app claro.
   assert.match(css, /@media \(prefers-color-scheme: dark\)/,
     'sumiu o gancho de prefers-color-scheme — o navegador fica sem de onde derivar');
   // Confere CADA seletor do bloco, não "a string aparece em algum lugar".
@@ -2687,7 +2687,7 @@ test('.hidden vence: nada que o JS esconde pode ter display fixado em styles.css
 //
 // `openFiltersModal` é `async` e busca país e estado no Waze. Enquanto o
 // `openModal` era a ÚLTIMA linha, tocar em Filtros não fazia nada visível até
-// as duas chamadas voltarem. MEDIDO com a app de pé: o modal aparecia aos
+// as duas chamadas voltarem. MEDIDO com o app de pé: o modal aparecia aos
 // 480ms em rede boa e aos 1337ms em rede ruim na PRIMEIRA abertura da sessão,
 // e aos 80ms depois — as listas ficam em cache de memória, e é por isso que a
 // lentidão era intermitente e difícil de nomear. Depois do conserto: 92ms nas
@@ -2735,7 +2735,7 @@ test('filtros: o modal abre antes de qualquer await de rede', () => {
 // initApp, quando o app.js executa. Isso é uma CORRIDA com o primeiro paint, e
 // o APARELHO decide quem ganha. MEDIDO lendo o display computado DENTRO do
 // observador de paint, com sessão válida e o SW ativo — o cenário de quem abre
-// a app várias vezes por dia:
+// o app várias vezes por dia:
 //
 //     CPU     antes            depois
 //      1x     cards            cards
@@ -2791,7 +2791,7 @@ test('entrada: quem tem sessão não vê a tela de login piscar', () => {
   const corpo = app.slice(i, app.indexOf('\n}\n', i));
   assert.match(corpo, /classList\.remove\('tem-sessao'\)/,
     'showAuthScreen não tira a marca — a aposta otimista vira segunda fonte de verdade');
-  // O CSS GERADO é o que a app carrega — editar o fonte e não regerar não vale.
+  // O CSS GERADO é o que o app carrega — editar o fonte e não regerar não vale.
   // Confere a REGRA no gerado, não só o nome da classe: `.tem-sessao-XX`
   // contém `.tem-sessao` e passava batido (pego na sabotagem).
   const gerado = read('css/app.css');

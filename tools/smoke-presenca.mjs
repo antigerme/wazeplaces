@@ -4,13 +4,13 @@
 // Desde a fase 3 a lista e a conversa são as do WME: o servidor lê a lista e o
 // chat do Waze, e o tempo real vai do navegador DIRETO ao Google. Nada disso
 // roda sem as contas do owner — então este smoke faz o papel dos dois lados de
-// fora, com o que a app CONFIA deles:
+// fora, com o que o app CONFIA deles:
 //   · a API (`/api/presenca-app`, `/api/chat`, as ações) é respondida por um
 //     chat de mentira em memória, que filtra com as MESMAS funções do servidor
 //     (`filtrarOnlineDaApp`, `filtrarConversasDaApp`) e monta as mensagens com
 //     o MESMO construtor de protobuf (`server/wme-grpc.mjs`);
 //   · o tempo real é o host de verdade do Google (roteado pelo Playwright), o
-//     que prova de quebra que a CSP da app deixa ele passar — o host novo do
+//     que prova de quebra que a CSP do app deixa ele passar — o host novo do
 //     `connect-src` é o tipo de coisa que some calada (o mapa já sumiu assim);
 //   · a conexão do tempo real fica PRESA até haver o que entregar, como a do
 //     Google, e religa sozinha quando termina.
@@ -62,7 +62,7 @@ const kmEntre = (a, b) => {
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 const KM = Math.round(kmEntre(PESSOAS['12444348'].pos, PESSOAS['183164343'].pos));
-const naApp = new Set();          // quem está com a app aberta (e aparece na lista)
+const naApp = new Set();          // quem está com o app aberto (e aparece na lista)
 const mensagens = [];             // { id, ts, de, para, texto, ctx, lida }
 const filas = new Map();          // id -> { itens: [{ inbox, bytes }], acordar }
 const falharEnvioDe = new Set();
@@ -137,7 +137,7 @@ function responderApi(eu, rota, c) {
     if (c.acao === 'lida') { marcarLida(eu, c.com); return { success: true, recibos: [], ...confirmados }; }
     if (c.acao === 'enviar') {
       if (falharEnvioDe.has(eu)) return { success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' };
-      // A marca da app quem põe é o SERVIDOR (como no core).
+      // A marca do app quem põe é o SERVIDOR (como no core).
       const m = { id: c.id, ts: Date.now(), de: eu, para: c.para, texto: c.texto, ctx: { ...(c.contexto || {}), app: 'wazeplaces' } };
       if (!mensagens.some((x) => x.id === m.id)) mensagens.push(m);
       entregar(c.para, bytesMsg(m));
@@ -148,7 +148,7 @@ function responderApi(eu, rota, c) {
   // A abertura de VERDADE (o `initApp` com a sessão salva): perfil, países e a
   // fila. Injetar isso tudo por fora escondeu um defeito: a presença pedia a
   // lista ANTES de o perfil chegar e desistia calada (gotcha #52 — o helper
-  // que arruma a tela faz o que a app esquece).
+  // que arruma a tela faz o que o app esquece).
   if (rota === 'perfil') {
     const p = PESSOAS[eu];
     return { success: true, visivelNoWme: true, referencias: { casa: null, trabalho: null },
@@ -164,7 +164,7 @@ function responderApi(eu, rota, c) {
   return { success: false };
 }
 
-// ── o servidor da app (os estáticos e a CSP de verdade) ─────────────────────
+// ── o servidor do app (os estáticos e a CSP de verdade) ─────────────────────
 const dir = await mkdtemp(join(tmpdir(), 'wp-presenca-'));
 const srv = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
   env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1', SESSION_DIR: dir, ENCRYPTION_KEY: CHAVE },
@@ -198,7 +198,7 @@ const pedido = (lat, lon) => ({
 
 async function editor(id, { lang = 'pt' } = {}) {
   const p = PESSOAS[id];
-  // `serviceWorkers: 'block'`: o SW da app se auto-atualiza e RECARREGA a página
+  // `serviceWorkers: 'block'`: o SW do app se auto-atualiza e RECARREGA a página
   // no `controllerchange`, apagando o estado injetado no meio do teste.
   const ctx = await browser.newContext({
     viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true, serviceWorkers: 'block',
@@ -302,14 +302,14 @@ try {
   // A bia abre PRIMEIRO. A lista não anda sozinha (nada de polling: é o free
   // tier), então quem abre depois vê quem já estava, e quem já estava só vê
   // quem chegou na próxima ação, lista aberta ou volta do segundo plano. A
-  // primeira versão deste smoke abria na ordem contrária e "reprovou" a app por
+  // primeira versão deste smoke abria na ordem contrária e "reprovou" o app por
   // fazer exatamente o combinado.
   const bia = await editor('183164343');
   const ana = await editor('12444348');
 
   // ── 1. ABRIR: UM pedido, o tempo real direto no Google, e nada da sala velha
-  console.log('\n1. abrir a app');
-  if (await esperar(ana, () => Presenca.online.some((p) => p.nome === 'cafanha'), 'a lista da app não chegou pra ana')) ok('a lista da app chega (quem usa a app no país)');
+  console.log('\n1. abrir o app');
+  if (await esperar(ana, () => Presenca.online.some((p) => p.nome === 'cafanha'), 'a lista do app não chegou pra ana')) ok('a lista do app chega (quem usa o app no país)');
   const biaAntes = await bia.page.evaluate(() => Presenca.online.length);
   if (biaAntes === 0) ok('controle: quem abriu antes não vê quem chegou depois — a lista não é polling');
   else anota(`a lista da bia andou sozinha: ${biaAntes}`);
@@ -325,14 +325,14 @@ try {
     if (f && f.cookie) anota('o pedido ao Google levou cookie');
   }
   const velhos = ana.pedidos.filter((u) => /\/api\/presenca(\?|$)|\/sala\b/.test(u));
-  if (velhos.length) anota(`a app ainda fala com a sala própria: ${velhos.join(', ')}`);
+  if (velhos.length) anota(`o app ainda fala com a sala própria: ${velhos.join(', ')}`);
   else ok('nada de /api/presenca nem de /sala: a sala própria saiu do cliente');
   const pilula = await ana.page.evaluate(() => ({
     visivel: !document.getElementById('presencaPill').classList.contains('hidden'),
     selo: document.getElementById('presencaCount').textContent,
     gente: !document.getElementById('presencaIconGente').classList.contains('hidden'),
   }));
-  if (pilula.visivel && pilula.selo === '1' && pilula.gente) ok('a pílula mostra 1 na app, com o ícone de gente');
+  if (pilula.visivel && pilula.selo === '1' && pilula.gente) ok('a pílula mostra 1 no app, com o ícone de gente');
   else anota(`pílula errada: ${JSON.stringify(pilula)}`);
 
   // ── 2. A LISTA: tocar custa um pedido, e mostra a distância ────────────────
@@ -361,7 +361,7 @@ try {
       estado: document.getElementById('conversaEstado').textContent.trim(),
       aviso: document.querySelector('#conversaMsgs .conversa-aviso').textContent,
     }));
-    if (tela.titulo === 'cafanha' && tela.estado === `Na app agora · L4 · a ${KM} km daqui` && /chat do WME/.test(tela.aviso)) ok(`o topo diz onde ela está e que a conversa fica no WME`);
+    if (tela.titulo === 'cafanha' && tela.estado === `No app agora · L4 · a ${KM} km daqui` && /chat do WME/.test(tela.aviso)) ok(`o topo diz onde ela está e que a conversa fica no WME`);
     else anota(`topo da conversa errado: ${JSON.stringify(tela)}`);
   }
   if (apiDe(ana, 'chat', 'abrir').length === 1) ok('abrir a conversa custa UM pedido (histórico e "lida" juntos)');
@@ -376,7 +376,7 @@ try {
   await ana.page.tap('#conversaEnviar');
   if (await esperar(ana, () => !!document.querySelector('#conversaMsgs .conversa-bolha.minha .presenca-recibo.enviada'), 'a mensagem não virou "enviada"')) ok('a mensagem sai e vira ✓ Enviada');
   const envio1 = apiDe(ana, 'chat', 'enviar')[0];
-  if (envio1 && envio1.c.texto === 'oi, viu o posto da Faria Lima?' && !('contexto' in envio1.c) && envio1.c.para === '183164343') ok('texto puro vai sem contexto (a marca da app quem põe é o servidor)');
+  if (envio1 && envio1.c.texto === 'oi, viu o posto da Faria Lima?' && !('contexto' in envio1.c) && envio1.c.para === '183164343') ok('texto puro vai sem contexto (a marca do app quem põe é o servidor)');
   else anota(`o envio saiu errado: ${JSON.stringify(envio1 && envio1.c)}`);
   // A não lida pode estar contada AO VIVO (`vivas`) ou já pela lista, se o
   // pedido do nome de quem escreveu (conversa nova) voltou antes: o que importa
@@ -429,7 +429,7 @@ try {
       const b = document.querySelector('#conversaMsgs .conversa-pedido.dela');
       return { nome: b.querySelector('.cp-nome').textContent, legenda: b.querySelector('.cp-legenda').textContent, link: b.textContent.includes('waze.com/editor') };
     });
-    if (cartao.nome === 'Padaria Estrela do Norte' && cartao.legenda.includes('fachada') && !cartao.link) ok('na app da bia chega UM cartão com a pergunta — sem a linha nem o link do WME');
+    if (cartao.nome === 'Padaria Estrela do Norte' && cartao.legenda.includes('fachada') && !cartao.link) ok('no app da bia chega UM cartão com a pergunta — sem a linha nem o link do WME');
     else anota(`o cartão da bia está errado: ${JSON.stringify(cartao)}`);
     await bia.page.tap('#conversaMsgs .conversa-pedido.dela');
     if (await esperar(bia, () => !document.getElementById('pedidoModal').classList.contains('hidden') && document.getElementById('pedidoNome').textContent.includes('Padaria'), 'o pedido recebido não abriu')) ok('tocar no cartão abre o pedido, só leitura');
@@ -468,7 +468,7 @@ try {
     }
   }
 
-  // ── 8. QUEM SÓ USA O WME: a app não mostra — mas confirma ───────────────────
+  // ── 8. QUEM SÓ USA O WME: o app não mostra — mas confirma ───────────────────
   console.log('\n8. mensagem de quem só usa o WME');
   const antes = reg(ana.id).confirmados.length;
   const soWme = { id: randomUUID(), ts: Date.now(), de: '555', para: ana.id, texto: 'oi, vi você no mapa', ctx: null };
@@ -478,8 +478,8 @@ try {
   await dormir(1500);
   const depois = await ana.page.evaluate(() => ({ conversas: Presenca.conversas.map((c) => c.id), naoLidas: presencaNaoLidasTotal() }));
   if (!depois.conversas.includes('555') && depois.naoLidas === 0) ok('a mensagem de quem só usa o WME não aparece (decisão do owner)');
-  else anota(`a mensagem do WME apareceu na app: ${JSON.stringify(depois)}`);
-  // O próximo pedido que a app faria leva a confirmação de carona.
+  else anota(`a mensagem do WME apareceu no app: ${JSON.stringify(depois)}`);
+  // O próximo pedido que o app faria leva a confirmação de carona.
   await ana.page.evaluate(() => closeModal('conversaModal'));
   await ana.page.tap('#presencaPill').catch(() => {});
   await esperar(ana, () => true, '', 1500);
@@ -488,7 +488,7 @@ try {
 
   // ── 9. A CARONA: a ação traz a lista, sem pedido novo ───────────────────────
   console.log('\n9. carona na ação');
-  naApp.delete(bia.id);   // a bia fechou a app
+  naApp.delete(bia.id);   // a bia fechou o app
   await ana.page.evaluate(() => { closeModal('presencaModal'); });
   const pedidosAntes = apiDe(ana, 'presenca-app').length;
   await ana.page.evaluate(() => handleReject());
@@ -500,22 +500,22 @@ try {
     else anota('a lista precisou de um pedido próprio');
   }
   const lista9 = await ana.page.evaluate(() => { openModal('presencaModal'); presencaRenderLista(); return document.getElementById('presencaLista').innerHTML; });
-  if (/presenca\.sheet\.vazio|Ninguém mais na app agora/.test(lista9) && /cafanha/.test(lista9)) ok('a bia saiu da "Triando agora" e a conversa continua em "Conversas"');
+  if (/presenca\.sheet\.vazio|Ninguém mais no app agora/.test(lista9) && /cafanha/.test(lista9)) ok('a bia saiu da "Triando agora" e a conversa continua em "Conversas"');
   else anota('a lista depois da saída não tem a conversa em "Conversas"');
   await ana.page.evaluate(() => closeModal('presencaModal'));
   // A regra nova da pílula: com mensagem NÃO LIDA ela fica, mesmo sem ninguém
-  // na app — a mensagem pode vir de quem já saiu, e sem a pílula a conversa não
+  // no app — a mensagem pode vir de quem já saiu, e sem a pílula a conversa não
   // teria caminho de volta.
   const semNinguem = await ana.page.evaluate(() => ({ online: Presenca.online.length, pilula: !document.getElementById('presencaPill').classList.contains('hidden') }));
   if (semNinguem.online === 0 && !semNinguem.pilula) ok('controle: sem ninguém e sem mensagem, a pílula some');
   else anota(`controle da pílula vazia errado: ${JSON.stringify(semNinguem)}`);
   // A folha do pedido escondeu a conversa da bia (seção 6): reabre.
   await bia.page.evaluate(() => { if (document.getElementById('conversaModal').classList.contains('hidden')) presencaAbrirConversa('12444348'); });
-  await bia.page.fill('#conversaInput', 'saí da app, mas te respondo daqui');
+  await bia.page.fill('#conversaInput', 'saí do app, mas te respondo daqui');
   await bia.page.tap('#conversaEnviar');
   if (await esperar(ana, () => Presenca.online.length === 0 && !document.getElementById('presencaPill').classList.contains('hidden')
     && !document.getElementById('presencaIconMsg').classList.contains('hidden'), 'mensagem de quem saiu não acendeu a pílula')) {
-    ok('mensagem de quem SAIU acende a pílula com o balão, mesmo sem ninguém na app');
+    ok('mensagem de quem SAIU acende a pílula com o balão, mesmo sem ninguém no app');
   }
 
   // ── 10. SAIR apaga o chat do aparelho e fecha o tempo real ──────────────────

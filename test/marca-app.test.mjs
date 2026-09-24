@@ -1,4 +1,4 @@
-// A marca de quem está na NOSSA app, gravada na posição da presença do WME
+// A marca de quem está na NOSSO app, gravada na posição da presença do WME
 // (`server/marca-app.mjs`).
 //
 // O que ela precisa garantir, e que este arquivo cobra com dado REAL (os
@@ -29,10 +29,10 @@ test('marca: nos pedidos REAIS dos seis países, a posição marcada tem a marca
     const centro = p.mapa && p.mapa.centro;
     if (!Array.isArray(centro)) continue;
     // `mapa.centro` é [lat, lon] (o core inverte o GeoJSON) — ler ao contrário
-    // daria lugar plausível e errado; aqui a ordem é a da app.
+    // daria lugar plausível e errado; aqui a ordem é a do app.
     const [lat, lon] = centro;
     const m = marcarPosicao({ lat, lon }, pais);
-    assert.ok(temMarcaDaApp(m), `${p._pais}: sem a marca da app`);
+    assert.ok(temMarcaDaApp(m), `${p._pais}: sem a marca do app`);
     assert.equal(paisDaMarca(m), pais, `${p._pais}: o país não foi na marca`);
     assert.ok(Math.abs(micro(m.lat) - micro(lat)) <= 50, `${p._pais}: a latitude andou mais que 50 µ°`);
     assert.ok(Math.abs(micro(m.lon) - micro(lon)) <= 500, `${p._pais}: a longitude andou mais que 500 µ°`);
@@ -104,7 +104,7 @@ test('marca: nos extremos do mundo ninguém sai do mapa, e perto do zero o teto 
   }
 });
 
-test('marca: país e posição inválidos LANÇAM — posição da app sem país não é marcável', () => {
+test('marca: país e posição inválidos LANÇAM — posição do app sem país não é marcável', () => {
   assert.equal(PAIS_MAX, 999);
   for (const pais of [0, -1, 1000, 30.5, '30', null, undefined, NaN]) {
     assert.equal(paisValido(pais), false, String(pais));

@@ -51,7 +51,7 @@ test('diag-api: a recusa acontece ANTES de qualquer rede', () => {
 });
 
 test('diag-api: o token nunca é impresso nem vai por linha de comando', () => {
-  // Ele viaja no CORPO do POST, que é onde a criptografia da app pressupõe que
+  // Ele viaja no CORPO do POST, que é onde a criptografia do app pressupõe que
   // ele viva (gotcha #60: token em URL/query/log derruba a garantia).
   assert.ok(!/console\.log\([^)]*\btoken\b/.test(API), 'algum console.log imprime o token');
   assert.match(API, /sessionToken: '<TOKEN>'/, 'o resumo do corpo parou de mascarar o token');
@@ -125,4 +125,18 @@ test('diagnóstico: currentPlace vai como ÍNDICE, não duplicado', () => {
   // E o replay tem que continuar entendendo o formato ANTIGO, que já está no
   // aparelho dos editores.
   assert.match(REPLAY, /'\[circular\]'/, 'o replay parou de remendar os arquivos do formato antigo');
+});
+
+test('diag-tela: procura a FONTE também nos recursos — o coletor a deixa fora do `codigo`', () => {
+  // Desde v2026.09.10-04 o coletor pula a fonte (binário lido como texto não
+  // serve), e o `diag-tela` só procurava no `codigo`: toda tela remontada saiu
+  // com a fonte do sistema, sem aviso. MEDIDO no relatório real de 2026-09-24:
+  // `fontesEmbutidas: []` com o leitor de antes, a Inter com o de hoje.
+  assert.match(APP, /if \(\/\\\.\(woff2\?\|ttf\|/, 'o coletor voltou a guardar a fonte? então este guard mudou de sentido — releia');
+  const TELA = readFileSync(join(ROOT, 'tools/diag-tela.mjs'), 'utf8');
+  const semCom = TELA.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const laco = semCom.match(/for \(const u of ([\w.()]+)\) \{\s*\n\s*const m = \/\\\/fonts\\\//);
+  assert.ok(laco, 'sumiu o laço que casa a fonte pelo nome');
+  const def = new RegExp(`const ${laco[1].replace(/[.()]/g, '\\$&')} = ([\\s\\S]*?);\\n`).exec(semCom);
+  assert.ok(def && /d\.recursos/.test(def[1]), `a busca da fonte itera \`${laco[1]}\`, que não inclui os recursos da página`);
 });

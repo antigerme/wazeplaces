@@ -3,7 +3,7 @@
 // Três promessas, e cada teste aqui existe pra reprovar se uma delas quebrar:
 //   1. a preferência nasce DESLIGADA e só liga quem disse que quer;
 //   2. DESLIGADA, o Pular continua sendo o que sempre foi: rede ZERO;
-//   3. LIGADA, o que a app FAZ e o que ela DIZ são a mesma coisa (o selo).
+//   3. LIGADA, o que o app FAZ e o que ele DIZ são a mesma coisa (o selo).
 //
 // O app.js é script de browser, não módulo, então o teste FATIA a fonte e a
 // executa num escopo de mentira — mesmo padrão de test/preferencias.test.mjs.
@@ -79,7 +79,7 @@ test('DESLIGADA, o Pular não fala com a rede — e o executor existe só pela j
   assert.equal(r.agendadas.length, 1, 'o Pular deixou de passar pelo scheduleAction (perde o Desfazer)');
   await r.agendadas[0].executor();
   assert.equal(r.chamadas.length, 0,
-    'o Pular passou a escrever no Waze com a preferência DESLIGADA — a saída barata da app deixou de ser barata');
+    'o Pular passou a escrever no Waze com a preferência DESLIGADA — a saída barata do app deixou de ser barata');
 });
 
 test('LIGADA, o Pular guarda o pedido — e guarda o pedido CERTO', async () => {
@@ -139,11 +139,11 @@ test('falhar ao guardar NÃO é silencioso', async () => {
   const nomes = Object.keys(escopo).filter((k) => k !== '_ex');
   new Function(...nomes, fatiarFuncao('handleSkip') + '\nreturn handleSkip;')(...nomes.map((n) => escopo[n]))();
   await escopo._ex();
-  assert.equal(avisos.length, 1, 'a app prometeu guardar, falhou, e não disse nada');
+  assert.equal(avisos.length, 1, 'o app prometeu guardar, falhou, e não disse nada');
   assert.equal(avisos[0].tipo, 'error');
 });
 
-// ── 3. O QUE A APP FAZ É O QUE ELA DIZ ─────────────────────────────────────
+// ── 3. O QUE O APP FAZ É O QUE ELE DIZ ─────────────────────────────────────
 test('o selo do ↑ muda com a preferência — e volta quando ela desliga', () => {
   const feito = [];
   const el = {
@@ -178,7 +178,7 @@ test('as duas chaves do selo existem nas 4 línguas, e são DIFERENTES entre si'
   assert.equal(skip.length, linguas.length, 'a varredura do selo antigo quebrou');
   for (let i = 0; i < skip.length; i++) {
     assert.notEqual(skip[i], guarda[i],
-      `em ${linguas[i]} os dois selos dizem a mesma coisa — a app faria algo diferente sem avisar`);
+      `em ${linguas[i]} os dois selos dizem a mesma coisa — o app faria algo diferente sem avisar`);
     assert.match(guarda[i], /⭐/, `o selo de guardar em ${linguas[i]} não traz a ⭐ que o card usa`);
   }
 });

@@ -147,7 +147,7 @@ const CARDS = {
     changes: [
       // Item de lista VAZIO. O Waze manda isso: medido na fila real, um pedido
       // do "Posto Equador" propunha `services: [""]`. O card mostrava `+` e
-      // mais nada, que lê como app quebrada. Vira `(vazio)` com
+      // mais nada, que lê como app quebrado. Vira `(vazio)` com
       // `.valor-ausente`, e é aqui que o smoke mede o contraste dele DENTRO do
       // verde do `.diff-add` — o 0.8 de opacidade foi medido sobre branco, não
       // sobre verde.
@@ -226,7 +226,7 @@ const APARELHOS = [
   ['laptop 1280x800', { width: 1280, height: 800 }],
   // Os dois que mais apertam a conta de altura, e onde a barra ✕/↑/✓ nascia
   // abaixo da dobra: o estreito (placar vira 2×2 e o custo fixo pula pra 219px)
-  // e o deitado (393px de altura pra app inteira).
+  // e o deitado (393px de altura pro app inteiro).
   ['Galaxy Fold', { width: 280, height: 653 }],
   ['paisagem 852x393', { width: 852, height: 393 }],
   // POR QUE o iPhone SE 2016 (320x568) NÃO está aqui, apesar de o CHANGELOG já
@@ -293,7 +293,7 @@ const assentar = async (page, extra = 60) => {
 // que desenha um quadro a cada ~100 ms: medindo 250 ms depois de abrir a Ajuda,
 // o FAB ainda estava no canto velho, por cima do seletor de idioma, em 4 de 8
 // rodadas; esperando os dois quadros, em 0 de 8 — com a CPU livre e ocupada.
-// A app estava certa: o prazo é que media a velocidade do motor.
+// O app estava certo: o prazo é que media a velocidade do motor.
 // O teto de 2 s é só pra não pendurar o smoke numa página sem quadro: se ele
 // estourar, a medição segue e reprova pelo que vir — nunca passa por isso.
 const doisQuadros = (page) => page.evaluate(() => new Promise((ok) => {
@@ -343,7 +343,7 @@ const _newContext = browser.newContext.bind(browser);
 // 17 contextos em 6 blocos levavam esse 401. No avatar a sessão caía antes de
 // a foto sair e o WebKit reprovou; nos outros o bloco terminava antes da
 // conferência — num runner mais lento, mediria a tela de entrada (gotcha #62).
-// `presencaViva` responde a lista como sessão viva, com ninguém mais na app.
+// `presencaViva` responde a lista como sessão viva, com ninguém mais no app.
 // É ROTA, então só nos blocos que chamam a presença: rota desliga o cache HTTP
 // do contexto, e 26 contextos daqui não têm rota nenhuma.
 const presencaViva = (alvo) => alvo.route('**/api/presenca-app', (r) => r.fulfill({ status: 200,
@@ -426,7 +426,7 @@ for (const [aparelho, viewport] of APARELHOS) {
           if (!/auto|scroll/.test(getComputedStyle(e).overflowY)) return false;
           return e.scrollHeight > e.clientHeight + 1;
         };
-        // A barra ✕/↑/✓ está NA TELA e recebe o toque? É a ação principal da
+        // A barra ✕/↑/✓ está NA TELA e recebe o toque? É a ação principal do
         // app: fora da dobra ela é inalcançável, porque o card tem
         // `touch-action: none` (arrastar pra cima é "pular") e a página só rola
         // agarrando a margem. Medir contra a VIEWPORT, não contra o contêiner.
@@ -468,7 +468,7 @@ for (const [aparelho, viewport] of APARELHOS) {
         const comTetoFixo = [...c.querySelectorAll('.card-changes-list')]
           .filter((e) => e.offsetParent && getComputedStyle(e).maxHeight !== 'none')
           .map((e) => `${[...e.classList][0]}=${getComputedStyle(e).maxHeight}`);
-        // Contraste do que a app esmaece. `opacity` MISTURA a cor com o fundo,
+        // Contraste do que o app esmaece. `opacity` MISTURA a cor com o fundo,
         // e getComputedStyle().color não conta isso — só medindo aparece. Já
         // reprovou: o esmaecido nasceu em 0.65 e deu 3.79:1 no tema claro.
         const rgb = (v) => (v.match(/[\d.]+/g) || []).map(Number);
@@ -598,7 +598,7 @@ for (const [aparelho, viewport] of APARELHOS) {
       checa(m.roláveisSemNome === 0, `${rot}: ${m.roláveisSemNome} área(s) rolável(is) sem aria-label`);
       checa(m.comTetoFixo.length === 0, `${rot}: caixa longa com teto fixo em vez de flex`, m.comTetoFixo.join(', '));
       checa(m.contrasteBaixo.length === 0, `${rot}: texto esmaecido abaixo do contraste do WCAG`, m.contrasteBaixo.join(', '));
-      // A app cabe na tela: card dimensionado pela SOBRA, não por fração da
+      // O app cabe na tela: card dimensionado pela SOBRA, não por fração da
       // janela. Sem isso a barra de ações nasce abaixo da dobra (medido: 87px
       // no Fold, 92px deitado, 17px no iPhone SE).
       checa(m.acoesFora === 0, `${rot}: barra ✕/↑/✓ fora da tela`, `${m.acoesFora}px`);
@@ -715,7 +715,7 @@ for (const [nome, vp, iOS] of [
     serviceWorkers: 'block', locale: 'pt-BR', deviceScaleFactor: 1 });
   const page = await ctx.newPage();
   const laco = [];
-  // O erro chega por window.onerror, NÃO por pageerror — a app o intercepta e
+  // O erro chega por window.onerror, NÃO por pageerror — o app o intercepta e
   // registra no console. Qualquer ocorrência significa que o laço voltou.
   page.on('console', (m) => { if (/ResizeObserver loop/i.test(m.text())) laco.push(m.text().slice(0, 80)); });
   page.on('pageerror', (e) => { if (/ResizeObserver loop/i.test(String(e))) laco.push(String(e).slice(0, 80)); });
@@ -994,7 +994,7 @@ for (const status of [404, 403]) {
   // Uma fixture em que o mapa é o PRIMEIRO slide — sem foto, ou com mudança de
   // posição. A primeira versão pegava "a primeira com mapa", que tinha foto e
   // nenhuma mudança espacial: ali o mapa é o ÚLTIMO slide e nasce escondido,
-  // então o teste contava zero marcador e acusava a app de perder a evidência.
+  // então o teste contava zero marcador e acusava o app de perder a evidência.
   // Instrumento errando antes do código, de novo — a mesma regra do carrossel
   // (`mapaVemPrimeiro`) tem que valer aqui.
   const alvo = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro
@@ -1221,7 +1221,7 @@ for (const status of [404, 403]) {
 
 // ── Lixeira do lightbox: portão, alvo e a camada da confirmação ──────────
 //
-// É o único caminho da app que ESCREVE no mapa em si, então a rede fica aqui e
+// É o único caminho do app que ESCREVE no mapa em si, então a rede fica aqui e
 // não só no `node --test`: quem some é o botão, e botão que aparece pra quem
 // não devia só se vê renderizando. As três coisas que já mordem em app assim:
 // portão furado, alvo de toque abaixo de 44px, e o diálogo que abre DE DENTRO
@@ -1311,9 +1311,9 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
-// ── Aprovar foto nova: o único "aprovar" que a app tem ───────────────────
+// ── Aprovar foto nova: o único "aprovar" que o app tem ───────────────────
 //
-// A regra de ouro de produto é que a app não aprova, e a foto é a exceção
+// A regra de ouro de produto é que o app não aprova, e a foto é a exceção
 // medida — então o CI guarda exatamente as três coisas que a tornariam de novo
 // uma violação: aparecer onde não é foto pendente, aparecer pra quem não passa
 // no portão, e ENVIAR antes de a janela de Desfazer fechar sozinha. O terceiro
@@ -1442,7 +1442,7 @@ for (const status of [404, 403]) {
   // Botão travado precisa PARECER travado — a mesma regra dos ✕/↑/✓ do card.
   // O owner viu a divergência: "não estão sendo desativados que nem é feito nos
   // cards". Mede o ATRIBUTO e o PIXEL, porque `disabled` sem esmaecer continua
-  // lendo como app quebrada (M3/HIG), e esmaecer sem `disabled` engana o Tab e
+  // lendo como app quebrado (M3/HIG), e esmaecer sem `disabled` engana o Tab e
   // o leitor de tela.
   const trava = await page.evaluate(() => {
     const alvo = ['lightboxDelete', 'lightboxApprove']
@@ -1596,10 +1596,10 @@ for (const status of [404, 403]) {
 //
 // A tela que o owner mandou: "Tudo limpo!", 0 RESTAM, e o toast "Conexão
 // instável — sua sessão continua válida" no rodapé. MEDIDO na produção no mesmo
-// minuto: a fila dele tinha 217 pedidos. A app afirmou que o trabalho acabou.
+// minuto: a fila dele tinha 217 pedidos. O app afirmou que o trabalho acabou.
 //
 // É o defeito mais caro do projeto pela régua dele mesmo — "parece que acabou o
-// trabalho" ninguém reporta, porque a pessoa fecha a app satisfeita.
+// trabalho" ninguém reporta, porque a pessoa fecha o app satisfeita.
 //
 // Guard de texto não pega: `showNoPlaces` já lia `loadError` e o comentário dele
 // já dizia a intenção. O que faltava era o ramo de 401 do `fetchNextPage`
@@ -1664,7 +1664,7 @@ for (const status of [404, 403]) {
 
   // A asserção que importa, e ela tem as DUAS metades: sem a segunda, um
   // "esconde tudo" passaria; sem a primeira, mostrar os dois passaria.
-  checa(!r.tudoLimpo, 'falha virou "Tudo limpo!" — a app afirmou que o backlog zerou (é a tela do owner)');
+  checa(!r.tudoLimpo, 'falha virou "Tudo limpo!" — o app afirmou que o backlog zerou (é a tela do owner)');
   checa(r.falhaAoCarregar, 'falha não mostrou "Falha ao carregar" com o botão de tentar de novo');
   checa(r.fila === 0, 'controle: a fila tinha que estar vazia neste cenário', String(r.fila));
   // E o toast do alarme falso continua aparecendo: o conserto não pode
@@ -1826,7 +1826,7 @@ for (const status of [404, 403]) {
 
   // A LARGURA não acompanha a profundidade: os cards +2 e +3 recebem SÓ o
   // primeiro slide. Se `C2` aparecer, o segundo laço deixou de ser preso ao
-  // queue[1] e a app passou a baixar foto que ninguém pediu.
+  // queue[1] e o app passou a baixar foto que ninguém pediu.
   checa(!pediu('C2.png'), 'aquecimento: o card +2 recebeu as fotos EXTRAS — a largura vazou pra profundidade');
   checa(!pediu('D2.png'), 'aquecimento: o card +3 recebeu as fotos EXTRAS — a largura vazou pra profundidade');
   // E há um fim: o card +4 fica de fora.
@@ -1863,7 +1863,7 @@ for (const status of [404, 403]) {
 // toque: quem nunca usou vê três círculos e adivinha. O aviso resolve isso uma
 // vez só — e "uma vez só" é justamente o que quebra em silêncio quando alguém
 // mexe no marcador. O outro é o beco sem saída de quem instala a extensão com a
-// tela de entrada aberta: a app pergunta à extensão UMA vez, no carregamento.
+// tela de entrada aberta: o app pergunta à extensão UMA vez, no carregamento.
 {
   const cru = FIXTURES_PAISES.find((p) => (p.imageUrls || []).length && p.name) || FIXTURES_PAISES[0];
   // `primeiraVez` desliga a supressão do aviso — este bloco é justamente quem
@@ -1908,7 +1908,7 @@ for (const status of [404, 403]) {
 
   // Reabrir pela Ajuda não pode deixar o histórico torto. A primeira versão
   // fechava a Ajuda antes de abrir e o Esc seguinte levava a `about:blank` —
-  // a pessoa saía da app inteira. Por isso o teste mede a URL, não o modal.
+  // a pessoa saía do app inteiro. Por isso o teste mede a URL, não o modal.
   await page.evaluate(() => openModal('helpModal'));
   await page.waitForTimeout(250);
   await page.click('#reverComoFunciona');
@@ -1919,7 +1919,7 @@ for (const status of [404, 403]) {
   const antes = page.url();
   await page.keyboard.press('Escape');
   await page.waitForTimeout(500);
-  checa(page.url() === antes, `como funciona: o Esc NAVEGOU pra fora da app (${page.url()})`);
+  checa(page.url() === antes, `como funciona: o Esc NAVEGOU pra fora do app (${page.url()})`);
   checa(!(await abertoComoFunciona()), 'como funciona: o Esc não fechou');
   await ctx.close();
 }
@@ -2315,12 +2315,12 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
 }
 
 
-// ── Ponto no ícone da app instalada ─────────────────────────────────────
+// ── Ponto no ícone do app instalado ─────────────────────────────────────
 // Espiona `setAppBadge`/`clearAppBadge` em vez de depender do sistema: o badge
-// de verdade só existe com a app INSTALADA, e o que este projeto controla é
+// de verdade só existe com o app INSTALADO, e o que este projeto controla é
 // QUANDO chama e COM O QUÊ. Três coisas que quebram calado se alguém mexer:
-//   1. mandar NÚMERO em vez de ponto — o badge só é escrito quando a app roda,
-//      então um número fica velho no instante em que ela fecha;
+//   1. mandar NÚMERO em vez de ponto — o badge só é escrito quando o app roda,
+//      então um número fica velho no instante em que ele fecha;
 //   2. PEDIR permissão de notificação — prompt não solicitado é a interrupção
 //      que a régua do projeto proíbe, e no iOS é o que o badge exigiria;
 //   3. deixar a promessa REJEITADA escapar — no iOS sem permissão ela rejeita,
@@ -2357,7 +2357,7 @@ for (const suporte of [true, false]) {
     const r1 = await page.evaluate(() => window.__badge);
     checa(r1.some((x) => x[0] === 'set' && x[1] === 'ponto'), `${onde}: não pediu o PONTO`, JSON.stringify(r1));
     checa(!r1.some((x) => x[0] === 'set' && typeof x[1] === 'number'),
-      `${onde}: mandou NÚMERO — ele fica velho assim que a app fecha`, JSON.stringify(r1));
+      `${onde}: mandou NÚMERO — ele fica velho assim que o app fecha`, JSON.stringify(r1));
     await page.evaluate(() => { window.__badge = []; AppState.serverTotal = 0; updatePendingCount(); });
     const r2 = await page.evaluate(() => window.__badge);
     checa(r2.length && r2[r2.length - 1][0] === 'clear', `${onde}: fila zerada não limpou o ponto`, JSON.stringify(r2));
@@ -2458,7 +2458,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // aviso, e medir elemento escondido dá caixa 0×0 em (0,0) — que "estoura"
     // o pai pela esquerda e cai fora do `elementFromPoint`. Reprovou 16 de 16,
     // em aparelho e idioma onde a medição manual dava limpo: achado que acusa
-    // tudo é o instrumento, não a app (gotcha #28).
+    // tudo é o instrumento, não o app (gotcha #28).
     const m = await page.evaluate((quando) => {
       const el = document.getElementById('avisoSessao');
       AppState.sessaoExpiraEm = quando;
@@ -2621,7 +2621,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 }
 
 // ── A foto de perfil não pode competir com a foto do PEDIDO ─────────────
-// Ela é a imagem mais pesada da app (214 KB, medido na produção) e aparece com
+// Ela é a imagem mais pesada do app (214 KB, medido na produção) e aparece com
 // 32px. A regra: nem começa a ser buscada antes de a tela estar pronta.
 //
 // Medido pela REDE, não por flag interna — o que importa é o que sai do
@@ -2694,7 +2694,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 
 // ── A CSP não pode bloquear nada nosso ──────────────────────────────────
 // O tema é um <script> INLINE autorizado por HASH. Hash defasado BLOQUEIA o
-// script, e o sintoma é sutil: a app abre no esquema errado por um instante e
+// script, e o sintoma é sutil: o app abre no esquema errado por um instante e
 // nada "quebra". Medido com o hash sabotado — o `tema-claro` some e o console
 // registra "Refused to execute inline script".
 //
@@ -2935,7 +2935,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         // observer do mapa refaz o enquadramento, então a caixa medida no mesmo
         // quadro é a de antes de o card assentar.
         // Medido: 1,29px de sobra "abaixo da dobra" no SE que somem depois —
-        // eu ia registrar como defeito da app o que era pressa do instrumento.
+        // eu ia registrar como defeito do app o que era pressa do instrumento.
         await assentar(page);
         const m = await page.evaluate(() => {
           const c = document.querySelector('.place-card');
@@ -2978,8 +2978,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
   // CONTROLE: `naoResolvido` é o card de HOJE, sem nada do recurso. Se a margem
   // dele for igual à dos outros, o recurso custou zero pixel de dobra — e se um
-  // dia der diferença, a diferença é do recurso, não da app. Sem esta conta eu
-  // ia registrar como defeito da app um 1,29px que era o instrumento medindo
+  // dia der diferença, a diferença é do recurso, não do app. Sem esta conta eu
+  // ia registrar como defeito do app um 1,29px que era o instrumento medindo
   // antes de o card assentar.
   for (const [aparelho] of APARELHOS_DUP) {
     for (const lang of LINGUAS) {
@@ -3097,7 +3097,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 
 // ── Renomear o local pelo lightbox ─────────────────────────────────────────
 //
-// A única escrita de dado de LOCAL da app. Três coisas só o browser responde:
+// A única escrita de dado de LOCAL do app. Três coisas só o browser responde:
 // o portão, a janela do Desfazer medida pela REDE, e se o campo sobrevive ao
 // teclado — que é DO SISTEMA e varia muito de altura, então aqui vão três.
 //
@@ -3454,6 +3454,66 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── A Ajuda: toda seção no MESMO molde, medido na TELA ─────────────────────
+// "Quem está no app" nasceu com a lista em 16px (as vizinhas são 14) e o título
+// sem dois-pontos, e ficou assim um mês — quem viu foi o owner, olhando. O
+// test/ajuda.test.mjs cobra as CLASSES; aqui se mede o que a tela DEU (o tamanho
+// computado), nos 4 idiomas, no aparelho do owner e no mais apertado. A
+// contraprova devolve a classe antiga e exige que a medida a enxergue.
+{
+  const medirAjuda = (page) => page.evaluate(() => {
+    const painel = document.querySelector('#helpModal > div');
+    return [...painel.querySelectorAll('h4')].map((h) => {
+      const corpo = h.nextElementSibling;
+      const texto = corpo && /^(UL|OL|P)$/.test(corpo.tagName) ? (corpo.tagName === 'P' ? corpo : corpo.querySelector('li')) : null;
+      return {
+        chave: h.getAttribute('data-i18n'),
+        titulo: h.textContent.trim(),
+        caixa: getComputedStyle(h).textTransform === 'uppercase',
+        fonte: texto ? getComputedStyle(texto).fontSize : null,
+      };
+    });
+  });
+  for (const [ap, viewport] of [['Pixel 7', { width: 412, height: 915 }], ['Galaxy Fold', { width: 280, height: 653 }]]) {
+    for (const lang of LINGUAS) {
+      const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: lang === 'en' ? 'en-US' : lang });
+      const page = await ctx.newPage();
+      await page.addInitScript((l) => {
+        localStorage.setItem('waze_places_lang', l);
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+      }, lang);
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(450);
+      await page.click('#helpBtn');   // o ⓘ existe deslogado: é o caminho de quem ainda nem entrou
+      await assentar(page, 200);
+      const onde = `Ajuda/${ap}/${lang}`;
+      const secoes = await medirAjuda(page);
+      const corpos = secoes.filter((s) => s.fonte);
+      checa(corpos.length >= 7, `${onde}: esperava 7+ seções com lista ou parágrafo`, String(corpos.length));
+      const tamanhos = [...new Set(corpos.map((s) => s.fonte))];
+      checa(tamanhos.length === 1, `${onde}: o texto das seções sai em tamanhos diferentes`,
+        corpos.map((s) => `${s.chave}=${s.fonte}`).join(' '));
+      for (const s of secoes) {
+        if (s.caixa) checa(!/:\s*$/.test(s.titulo), `${onde}: o título de caixa "${s.titulo}" ganhou dois-pontos`);
+        else checa(/:$/.test(s.titulo), `${onde}: o título "${s.titulo}" não termina em dois-pontos, como as vizinhas`);
+      }
+      const chaves = secoes.map((s) => s.chave);
+      checa(chaves.indexOf('help.presenca.title') === chaves.indexOf('help.howToUse.title') + 1,
+        `${onde}: "Quem está no app" não está logo depois de "Como usar"`, chaves.join(' → '));
+      if (ap === 'Pixel 7' && lang === 'pt') {
+        // CONTRAPROVA: a lista com a classe de ANTES tem que aparecer na medida.
+        await page.evaluate(() => {
+          const ul = document.querySelector('[data-i18n="help.presenca.title"]').nextElementSibling;
+          ul.className = 'list-disc list-inside space-y-1 text-slate-600 dark:text-slate-300';
+        });
+        const sab = [...new Set((await medirAjuda(page)).filter((s) => s.fonte).map((s) => s.fonte))];
+        checa(sab.length === 2, `${onde}: a contraprova (a lista de antes, em 16px) não apareceu na medida`, sab.join(' '));
+      }
+      await ctx.close();
+    }
+  }
+}
+
 
 // ── Renomeando: as acoes de foto SOMEM, e as setas sao do CURSOR ───────────
 // DOIS relatos do owner, mesma tela e mesma familia de falha (regra de estado
@@ -3708,7 +3768,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     for (const [nome, id] of camadas) {
       // Fechar e abrir no MESMO quadro é o gotcha #65: o `closeModal` AGENDA um
       // `history.back()` e o `openModal` seguinte empilha, o back pendente come
-      // a entrada nova, e umas voltas depois a aba sai da app — que aqui
+      // a entrada nova, e umas voltas depois a aba sai do app — que aqui
       // aparecia como "Execution context was destroyed". Fecha num quadro, abre
       // no outro. E fecha só o que está aberto: `closeModal` de modal fechado
       // sai cedo, mas o do lightbox não tem essa guarda.
@@ -3795,7 +3855,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy }] });
     await page.waitForTimeout(700);
     // PEGOU? O aviso vive em dois canais de propósito (WCAG 1.4.1): sem ele
-    // não há como distinguir "a app agarrou" de "o toque se perdeu", que é a
+    // não há como distinguir "o app agarrou" de "o toque se perdeu", que é a
     // descrição literal que o owner deu — "parece que tem algo segurando".
     const pego = await page.evaluate(() => ({
       classe: document.getElementById('devFab').classList.contains('fab-pego'),
@@ -3877,11 +3937,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       `FAB/${nomeAp}: toque devagar deixou de registrar momento`, `${antesLento} → ${depoisLento}`);
     checa(baixouF === 0, `FAB/${nomeAp}: segurar voltou a baixar arquivo`, String(baixouF));
 
-    // ── fixado, a app não mexe mais ─────────────────────────────────────
+    // ── fixado, o app não mexe mais ─────────────────────────────────────
     // O #devFab tem transição de 0,16s e a reposição é adiada por rAF: ler o
     // rect no MESMO quadro devolve a posição VELHA. É o gotcha #58 no eixo do
     // TEMPO — medir o que a tela deu, sim, mas DEPOIS de ela ter dado. Aqui
-    // isso daria falso POSITIVO: a app poderia estar movendo o botão fixado e
+    // isso daria falso POSITIVO: o app poderia estar movendo o botão fixado e
     // a leitura imediata diria que não.
     const antesDoModal = await page.evaluate(() => {
       const b = document.getElementById('devFab').getBoundingClientRect();
@@ -3896,7 +3956,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.evaluate(() => closeModal('filtersModal'));
     await assentar(page, 300);
     checa(Math.abs(aindaLa.x - antesDoModal.x) <= 1 && Math.abs(aindaLa.y - antesDoModal.y) <= 1,
-      `FAB/${nomeAp}: fixado pelo editor, mas a app o moveu sozinha`,
+      `FAB/${nomeAp}: fixado pelo editor, mas o app o moveu sozinho`,
       `${Math.round(antesDoModal.x)},${Math.round(antesDoModal.y)} → ${Math.round(aindaLa.x)},${Math.round(aindaLa.y)}`);
 
     // ── desligar o modo dev devolve o automático ────────────────────────
@@ -4249,10 +4309,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //
 // O caso real (v2026.09.14-01): o Waze trocou o host da foto e a CSP bloqueou a
 // nova URL ANTES da rede. O <img> sem tratamento desenhou o ícone de imagem
-// quebrada dentro do círculo do cabeçalho, em toda tela da app, e só o owner
+// quebrada dentro do círculo do cabeçalho, em toda tela do app, e só o owner
 // viu — nenhum teste olhava pra isso.
 //
-// Aqui os QUATRO caminhos são exercitados com a CSP de verdade da app:
+// Aqui os QUATRO caminhos são exercitados com a CSP de verdade do app:
 // host fora da CSP (o defeito original, bloqueado antes da rede), 404 de mesma
 // origem, o CONTROLE (imagem boa TEM que aparecer — sem ele "esconder sempre"
 // passaria) e a troca de idioma depois da falha, que é onde o ícone voltava.
@@ -4275,7 +4335,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false,
                            profileImageUrl: u, areas: [], managedAreas: [] };
       renderProfileHeader();
-      marcarTelaPronta();          // a app só busca a foto depois do 1º card
+      marcarTelaPronta();          // o app só busca a foto depois do 1º card
       const el = document.getElementById('userAvatar');
       // Espera a imagem ASSENTAR: carregou, falhou, ou foi escondida.
       for (let i = 0; i < 120; i++) {
@@ -4319,7 +4379,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       `${onde} ${nomeAp}: 404 virou ícone de quebrado`, JSON.stringify(perdida));
 
     // 4. CONTROLE — foto BOA tem que aparecer. Sem isto, "esconder sempre"
-    //    passaria neste bloco inteiro e a app ficaria sem avatar nenhum.
+    //    passaria neste bloco inteiro e o app ficaria sem avatar nenhum.
     const boa = await cenario('/icons/icon-192.svg');
     checa(boa.display !== 'none' && boa.natural > 0,
       `${onde} ${nomeAp}: CONTROLE falhou — a foto BOA não apareceu`, JSON.stringify(boa));
@@ -4471,7 +4531,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 }
 
 // ── Patentes e Conquistas: os três defeitos que só a TELA mostra ─────────
-// A medição de layout desta app já dava tudo verde nos três, e todos os três
+// A medição de layout deste app já dava tudo verde nos três, e todos os três
 // chegaram a existir na rodada de mockup:
 //   • PALAVRA PARTIDA NO MEIO ("Colecionad / or"). Não é corte (`scrollHeight`
 //     não vê) nem estouro (`scrollWidth` não vê). Só um Range por palavra,
@@ -5074,7 +5134,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.waitForTimeout(300);
 
     // CINCO e não três: a medição gasta um pedido e a CONTRAPROVA gasta outro,
-    // e no último da fila a app não monta pilha (de propósito — desenhar o
+    // e no último da fila o app não monta pilha (de propósito — desenhar o
     // "Tudo limpo!" por baixo anunciaria o fim antes da hora). Com três, a
     // contraprova rodava sem card de fundo nenhum e "nunca escondeu" passava
     // por não haver o que esconder. Foi a própria contraprova que pegou isso.
@@ -5108,7 +5168,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(m.temFundo, `${id}: CONTROLE falhou — não havia card de fundo em quadro nenhum, então tudo que se diga sobre ele abaixo passa de graça`, JSON.stringify(m));
     checa(!m.escondeu, `${id}: o card de fundo foi ESCONDIDO em algum quadro — sem efeito na entrada não há nada pra esconder, e esconder à toa é a pilha piscando`);
     checa(m.fundoNoFim === 'visible',
-      `${id}: o card de fundo não terminou VISÍVEL (${m.fundoNoFim}) — a pilha some da app`);
+      `${id}: o card de fundo não terminou VISÍVEL (${m.fundoNoFim}) — a pilha some do app`);
 
     // CONTRAPROVA, uma vez só: sem ela, "opacidade sempre 1" e "nunca
     // escondeu" passariam com a medição apontando pro lugar errado.
@@ -5136,7 +5196,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 
 // ── O PONTO LEVA AO QUE DESTRAVOU ──────────────────────────────────────────
 //
-// O owner apontou a incoerência olhando a app: o aviso do Desfazer te leva ao
+// O owner apontou a incoerência olhando o app: o aviso do Desfazer te leva ao
 // interruptor com destaque, e o ponto da conquista te largava na aba Filtros
 // pra procurar entre 16 células.
 //
@@ -5336,7 +5396,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //
 // Os guards de `test/fila-saida.test.mjs` leem o FONTE. O que só o navegador
 // responde é se a coisa acontece: se o placar de fato não reverte, se a fila
-// sobrevive a matar a app, e se o esvaziamento sai com RITMO em vez de rajada.
+// sobrevive a matar o app, e se o esvaziamento sai com RITMO em vez de rajada.
 //
 // Simular offline aqui tem duas armadilhas que já morderam ao escrever isto:
 //   · `route.fulfill` NÃO passa pela rede, então `setOffline` sozinho não
@@ -5412,7 +5472,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // cards do mesmo pedido (gotcha 3.5), e desde v2026.09.22-06 a fila de saída
     // recusa o mesmo pedido duas vezes (é a segunda decisão do relato de reabrir
     // sem rede). A 7ª e a 8ª ação caíam em pedidos já decididos, e o bloco
-    // acusava "o placar reverteu" medindo a fixture, não a app.
+    // acusava "o placar reverteu" medindo a fixture, não o app.
     }, { f: Array.from({ length: 6 }, (_, i) => CARDS_FS.map((p, k) => ({ ...p,
       updateRequestID: String(p.updateRequestID) + '-c' + i + '-' + k }))).flat() });
     const estado = () => page.evaluate(() => ({
@@ -5511,7 +5571,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // primeiro entra no esvaziamento, quebra no `transient` e sai; o segundo
     // chega DENTRO da janela e batia na guarda de reentrada, sumindo. Resultado
     // medido: fila presa em 2 com `esvaziando:false` e `onLine:true`, e o
-    // próximo gatilho só na abertura seguinte da app — podem ser horas.
+    // próximo gatilho só na abertura seguinte do app — podem ser horas.
     //
     // Foi ISTO que reprovou o bloco POUSO-RUIM no CI, e não a ordem do
     // `online`: lá o runner produz a mesma janela por lentidão. Aqui ela é
@@ -5550,7 +5610,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // A causa não é o evento faltar: ele CHEGA quando o rádio liga, e nesse
     // instante a rede ainda não passa tráfego — o esvaziamento entra, quebra no
     // `transient` e sai. Depois disso não vem gatilho nenhum, porque os dois que
-    // existiam eram o `online` (já gasto) e a ABERTURA (a app não foi fechada).
+    // existiam eram o `online` (já gasto) e a ABERTURA (o app não foi fechado).
     //
     // O terceiro gatilho é a PROVA DE REDE: uma resposta nossa que chegou. Aqui
     // o cenário NÃO dispara `online` nenhum depois do primeiro — quem tem que
@@ -5586,7 +5646,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(!/\d/.test(pv2.aviso),
       `${c.id}: PROVA DE REDE — o indicador ficou na tela depois de drenar`);
 
-    // O GATILHO DA ABERTURA, sozinho: sem nenhum evento `online`, só ABRIR a app
+    // O GATILHO DA ABERTURA, sozinho: sem nenhum evento `online`, só ABRIR o app
     // tem que drenar. É o caminho de quem ficou offline e FECHOU tudo — e ele já
     // nasceu quebrado uma vez, porque quem põe `AppState.authenticated` é o
     // `showMainScreen()` e o esvaziamento estava sendo chamado antes dele (saía
@@ -5610,11 +5670,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await esperarFimDaSaida(page);
     const aberturaRestou = await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
     checa(aberturaRestou === 0,
-      `${c.id}: ABERTURA — abrir a app NÃO drenou a fila (${aberturaRestou}): quem fechou offline nunca manda`);
+      `${c.id}: ABERTURA — abrir o app NÃO drenou a fila (${aberturaRestou}): quem fechou offline nunca manda`);
     checa(enviosDeAcao.length === 3,
       `${c.id}: ABERTURA — saíram ${enviosDeAcao.length} requisições para 3 ações presas`);
 
-    // ENTREGA AT-LEAST-ONCE: matar a app ENTRE o envio e a gravação reenvia o
+    // ENTREGA AT-LEAST-ONCE: matar o app ENTRE o envio e a gravação reenvia o
     // pedido na próxima abertura. Isso é o lado CERTO do trade — a alternativa
     // (tirar da fila antes de saber que saiu) perde a ação, que é o defeito que
     // esta feature existe pra acabar. O que NÃO pode acontecer é contar duas
@@ -5707,11 +5767,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 
 // ── PRESENÇA NO WME: a posição vai DE CARONA na ação (fase 2) ─────────────
 //
-// Medido pela REDE, com a app de verdade (o JS minificado que vai pro ar): o
+// Medido pela REDE, com o app de verdade (o JS minificado que vai pro ar): o
 // que cada ação leva, o que a segunda ação logo em seguida NÃO leva (freio de
 // 30 s), a visibilidade ligando sozinha de carona, o interruptor desligando o
-// WME na hora e religando na ação seguinte, e quem se escondeu pelo WME sendo
-// respeitado. Os testes de unidade fatiam a fonte; este roda a tela.
+// WME na hora e religando na ação seguinte, e o invisível do WME NÃO desligando
+// o app — a ação seguinte religa de carona (decisão do owner, 2026-09-24). Os
+// testes de unidade fatiam a fonte; este roda a tela.
 {
   const id = 'presença no WME/Pixel 7';
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', locale: 'pt-BR' });
@@ -5763,7 +5824,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const clicar = (sel) => page.evaluate((s) => document.querySelector('#cardStack .place-card:not(.card-fundo) ' + s).click(), sel);
   const naTela = () => page.evaluate(() => AppState.currentPlace && AppState.currentPlace.mapa.centro);
 
-  // 1. Perfil disse "invisível" e a app nunca a viu ligada: a PRIMEIRA ação liga.
+  // 1. Perfil disse "invisível" e o app nunca a viu ligada: a PRIMEIRA ação liga.
   checa(acoesDe('perfil').length === 1, `${id}: CONTROLE — o perfil não foi pedido pelo caminho real`);
   await clicar('.card-btn-reject');
   const r1 = await esperarPedido('validar-place', 1);
@@ -5775,8 +5836,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   checa(p1 && p1.lat === centro1[0] && p1.lon === centro1[1],
     `${id}: a posição não é a do card NA TELA, em [lat, lon]`, JSON.stringify({ p1, centro1 }));
   checa(p1 && p1.visivel === true, `${id}: o perfil disse invisível e a 1ª ação não ligou a visibilidade`, JSON.stringify(p1));
-  checa(await page.evaluate(() => AppState.preferences.presencaWmeVisto === true),
-    `${id}: a app não anotou que já viu a visibilidade LIGADA`);
+  const ligou = await esperarNaPagina(page, () => presencaWme.ligarNaProxima === false, 5000);
+  checa(ligou.ok, `${id}: a visibilidade ligou de carona e o app seguiu pedindo pra ligar`);
 
   // 2. A segunda ação dentro de 30 s vai SEM posição (o freio).
   await page.waitForTimeout(3600);                      // a janela do Desfazer da 1ª
@@ -5785,7 +5846,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   checa(!!r2, `${id}: o ✓ não chegou à rede`);
   checa(r2 && !('presenca' in r2.corpo), `${id}: a 2ª ação em menos de 30 s levou posição (o freio sumiu)`, JSON.stringify(r2 && r2.corpo));
 
-  // 3. Desligar o "Ver quem está na fila": some do WME NA HORA.
+  // 3. Desligar o "Ver quem está no app": some do WME NA HORA.
   await page.evaluate(() => { const c = document.getElementById('prefPresenca'); c.checked = false; c.dispatchEvent(new Event('change')); });
   const off = await esperarPedido('presenca-waze', 1);
   checa(!!off && off.corpo.visivel === false && off.corpo.userId === '12444348' && !('posicao' in off.corpo),
@@ -5805,18 +5866,25 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     `${id}: religar não fez a ação seguinte ligar a visibilidade`, JSON.stringify(r4 && r4.corpo));
   checa(r4 && r4.corpo.presenca && r4.corpo.presenca.lat === centro4[0], `${id}: a posição religada não é a do card na tela`);
 
-  // 5. Escondeu-se pelo WME (vista ligada, perfil agora diz invisível): conta como desligar.
+  // 5. Invisível pelo WME DEPOIS de o app já tê-la ligado: o WME NÃO desliga o
+  //    app (decisão do owner, 2026-09-24). O interruptor segue ligado, nada é
+  //    carimbado, e a ação seguinte religa de carona.
+  const antes = await page.evaluate(() => AppState.preferences.presencaOffEm);
   visivelNoWme = false;
   await page.evaluate(async () => { await loadProfileAndAuxData(); });
   const estado = await page.evaluate(() => ({ presenca: AppState.preferences.presenca, off: AppState.preferences.presencaOffEm,
-                                              chk: document.getElementById('prefPresenca').checked }));
-  checa(estado.presenca === false && Number.isFinite(estado.off) && estado.chk === false,
-    `${id}: quem se escondeu pelo WME foi religado pela app (ou o interruptor ficou mentindo)`, JSON.stringify(estado));
+                                              chk: document.getElementById('prefPresenca').checked, ligar: presencaWme.ligarNaProxima }));
+  checa(estado.presenca !== false && estado.chk === true && estado.off === antes,
+    `${id}: o invisível do WME desligou o "Ver quem está no app"`, JSON.stringify(estado));
+  checa(estado.ligar === true, `${id}: o invisível do WME não fez o app pedir pra religar`, JSON.stringify(estado));
   await page.waitForTimeout(3600);
+  await page.evaluate(() => { presencaWme.ultimaEm = 0; });   // sem esperar o freio de 30 s da ação 4
   await clicar('.card-btn-reject');
   const r5 = await esperarPedido('validar-place', 3);
-  checa(r5 && !('presenca' in r5.corpo), `${id}: depois de se esconder pelo WME a ação levou posição`, JSON.stringify(r5 && r5.corpo));
-  checa(acoesDe('presenca-waze').length === 1, `${id}: a app mexeu no WME de quem se escondeu por lá`, JSON.stringify(acoesDe('presenca-waze')));
+  checa(r5 && r5.corpo.presenca && r5.corpo.presenca.visivel === true,
+    `${id}: depois do invisível do WME a ação não religou a visibilidade`, JSON.stringify(r5 && r5.corpo));
+  checa(acoesDe('presenca-waze').length === 1,
+    `${id}: o app chamou a rota da presença por conta própria (só o gesto de desligar chama)`, JSON.stringify(acoesDe('presenca-waze')));
 
   checa(errosJS.length === 0, `${id}: erro de JS no caminho da presença`, errosJS[0]);
   await ctx.close();
@@ -5828,7 +5896,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // service worker LIGADO, e este arquivo é de LAYOUT: são 47 contextos com
 // `serviceWorkers: 'block'`, porque SW no meio de medição de pixel só
 // atrapalha. Misturar as duas coisas deixou o bloco medindo com `js/min/`
-// regerado no meio da execução — falha de instrumento, não da app.
+// regerado no meio da execução — falha de instrumento, não do app.
 //
 // O arquivo dedicado cobre o mesmo e mais: mapa intacto com o toggle
 // DESLIGADO (o defeito que sumiu com o mapa de todo mundo), a varredura
@@ -5862,7 +5930,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + falha de busca NUNCA vira "Tudo limpo!" (401 com alarme falso, medido pela REDE)`
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`
-  + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair da app, e o "Já instalei" que recarrega)`
+  + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair do app, e o "Já instalei" que recarrega)`
   + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida)`
   + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
@@ -5879,6 +5947,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
+  + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`
   + `, + Perto de mim em 2 aparelhos × 2 idiomas (as 3 opções, ordem ponta a ponta, GPS concedido E negado pelo browser, e o perfil sem endereço)`
@@ -5888,11 +5957,11 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente, e o mapa do fundo DESENHADO pro mesmo tamanho do da frente — a promessa que o relato do iPhone mostrou quebrada)`
-  + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar a app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), resposta que CHEGA drenando a fila SEM nenhum evento online novo (o relato do iPhone, com controle de que ela não drenou antes), app MORTA no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
+  + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar o app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), resposta que CHEGA drenando a fila SEM nenhum evento online novo (o relato do iPhone, com controle de que ela não drenou antes), app MORTO no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
-  + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e quem se escondeu pelo WME respeitado)`
+  + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

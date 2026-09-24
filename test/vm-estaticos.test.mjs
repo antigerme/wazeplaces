@@ -32,8 +32,8 @@ const URL_ = (p) => `http://127.0.0.1:${PORTA}${p}`;
 // Código = o que o SW trata como network-first. Se esta lista divergir da do
 // `service-worker.js` (`isCode`), um tipo fica sem a garantia e ninguém vê.
 //
-// Os caminhos são os que a app CARREGA (`/js/min/…`), não os fontes. Até
-// 2026-09-22 esta lista pedia `/js/app.js` e `/js/i18n.js`, que a app nunca
+// Os caminhos são os que o app CARREGA (`/js/min/…`), não os fontes. Até
+// 2026-09-22 esta lista pedia `/js/app.js` e `/js/i18n.js`, que o app nunca
 // busca — ela media o cabeçalho de um arquivo que ninguém recebe, e passava
 // verde enquanto o `js/min/` real seguia sem ser conferido aqui. O conserto
 // que tirou os fontes de circulação foi o que denunciou: eles viraram 404 e a
@@ -83,7 +83,7 @@ test('estáticos da VM: no-cache no código, ETag em tudo, e 304 quando bate', a
 test('estáticos da VM: ETag diferente para conteúdo diferente, e nada de 304 falso', async () => {
   await comServidor(async () => {
     // Dois arquivos distintos não podem compartilhar ETag — senão o navegador
-    // recebe 304 pra um recurso que ele nunca baixou e a app quebra em silêncio.
+    // recebe 304 pra um recurso que ele nunca baixou e o app quebra em silêncio.
     // Os caminhos são os SERVIDOS. Com os fontes (`/js/app.js`) isto media dois
     // 404 sem ETag: `notEqual(null, null)` reprova — mas se só UM fosse nulo
     // passaria, e o teste estaria verde medindo o nada. Daí a checagem de
@@ -102,7 +102,7 @@ test('estáticos da VM: ETag diferente para conteúdo diferente, e nada de 304 f
 
 test('o service worker não volta a pular o cache HTTP', async () => {
   // `cache: 'reload'` pula o cache E não manda If-None-Match, então todo
-  // carregamento rebaixa a app inteira. MEDIDO no fio, num F5 com o SW no
+  // carregamento rebaixa o app inteiro. MEDIDO no fio, num F5 com o SW no
   // controle: 680 KB com `reload` contra 4,2 KB sem opção nenhuma. E
   // `cache: 'no-cache'` NÃO resolve — medido igual ao `reload`, 0 × 304.
   const { readFileSync } = await import('node:fs');
@@ -111,7 +111,7 @@ test('o service worker não volta a pular o cache HTTP', async () => {
   assert.ok(chamada.length > 0, 'sumiu o fetch do ramo network-first');
   for (const c of chamada) {
     assert.doesNotMatch(c, /cache:\s*'(reload|no-cache)'/,
-      `${c} rebaixa a app inteira a cada carregamento — a garantia anti-skew é do no-cache do servidor`);
+      `${c} rebaixa o app inteiro a cada carregamento — a garantia anti-skew é do no-cache do servidor`);
   }
 });
 
@@ -198,7 +198,7 @@ test('raiz: o index.html servido é o minificado, e o fonte não vaza', () => {
   assert.ok(!gerado.includes('<!--'), 'sobrou comentário no index.html gerado');
 
   // 6) O hash do inline é o que a CSP autoriza: um byte a mais e o tema é
-  //    bloqueado EM SILÊNCIO (a app abre no esquema de cor errado).
+  //    bloqueado EM SILÊNCIO (o app abre no esquema de cor errado).
   const h = (x) => {
     const m = /<script>([\s\S]*?)<\/script>/.exec(x);
     return m ? createHash('sha256').update(m[1], 'utf8').digest('base64') : null;
@@ -210,17 +210,17 @@ test('raiz: o index.html servido é o minificado, e o fonte não vaza', () => {
 
 // ── O .assetsignore decide o que o Cloudflare PUBLICA, e o esquecimento é mudo ──
 //
-// Medido na produção em 2026-09-22, com a app no ar: `/tools/waze-probe.mjs`,
+// Medido na produção em 2026-09-22, com o app no ar: `/tools/waze-probe.mjs`,
 // `/tools/fixtures-paises.json` e `/test/core.test.mjs` respondiam **200** —
 // 23 arquivos de ferramenta e 47 de teste servidos como se fossem frontend. E
 // junto deles os FONTES comentados: `js/app.js` com 622 KB contra os 201 KB do
-// `js/min/app.js` que a app de fato carrega, `css/styles.css` com 117 KB
+// `js/min/app.js` que o app de fato carrega, `css/styles.css` com 117 KB
 // contra 77 KB do `css/app.css`.
 //
 // Nada disso dá erro. O `assets.directory` é a raiz, então o padrão é PUBLICAR,
 // e quem não está na lista entra — pasta nova nasce pública e ninguém percebe,
-// porque a app continua funcionando exatamente igual. É o contrário do modo de
-// falha normal: aqui o defeito é algo a MAIS existir, e teste que exercita a
+// porque o app continua funcionando exatamente igual. É o contrário do modo de
+// falha normal: aqui o defeito é algo a MAIS existir, e teste que exercita o
 // app nunca olha pra isso.
 //
 // Daí os dois sentidos abaixo. O primeiro cobra que toda entrada da raiz tenha
@@ -228,7 +228,7 @@ test('raiz: o index.html servido é o minificado, e o fonte não vaza', () => {
 // segundo é o inverso e é o que protege a produção: tudo que o `index.html` e
 // o `service-worker.js` carregam tem que CONTINUAR publicado. Sem ele, um
 // padrão largo demais (`js/*.js` escrito como `js/**`) apagaria o `js/min/` e
-// derrubaria a app inteira — e o primeiro guard passaria feliz.
+// derrubaria o app inteiro — e o primeiro guard passaria feliz.
 
 // Casador no estilo .gitignore, só o que a lista usa: nome exato (casa em
 // qualquer nível), `dir/arquivo`, `dir/*.ext` (o `*` NÃO atravessa `/`) e
@@ -285,9 +285,9 @@ test('.assetsignore: toda entrada da raiz tem DECISÃO — frontend ou ignorada'
   assert.ok(ignorado('css/styles.css', PADROES), 'o fonte do CSS voltou a ser publicado');
 });
 
-test('.assetsignore: nada que a app CARREGA pode estar ignorado', () => {
+test('.assetsignore: nada que o app CARREGA pode estar ignorado', () => {
   // O sentido inverso, e é o que protege a produção. Um padrão largo demais
-  // apaga o `js/min/` e a app morre inteira — com o guard de cima passando.
+  // apaga o `js/min/` e o app morre inteiro — com o guard de cima passando.
   const html = readFileSync(join(RAIZ, 'index.html'), 'utf8');
   const sw = readFileSync(join(RAIZ, 'service-worker.js'), 'utf8');
 
@@ -303,14 +303,14 @@ test('.assetsignore: nada que a app CARREGA pode estar ignorado', () => {
 
   const mortos = carregados.map((c) => [c, ignorado(c, PADROES)]).filter(([, p]) => p);
   assert.deepEqual(mortos, [],
-    'o .assetsignore está apagando arquivo que a app CARREGA — a produção subiria quebrada: ' +
+    'o .assetsignore está apagando arquivo que o app CARREGA — a produção subiria quebrada: ' +
     mortos.map(([c, p]) => `${c} (pelo padrão "${p}")`).join(', '));
 });
 
 test('a VM NÃO serve fonte de build — e o .assetsignore não alcança ela', async () => {
   // O outro destino. O `.assetsignore` é arquivo de Cloudflare e o Node nunca o
   // leu: tirar `js/*.js` de lá conserta a borda e deixa a VM servindo os mesmos
-  // 622 KB. Gotcha #14 — a app tem que ser a MESMA nos dois, senão "levar pra
+  // 622 KB. Gotcha #14 — o app tem que ser o MESMO nos dois, senão "levar pra
   // uma VM" deixa de ser decisão de infraestrutura e vira mudança de
   // comportamento. E por RESPOSTA HTTP, não por string: o `csp-vm` já pagou
   // essa lição (arquivo igual não prova cabeçalho enviado).
@@ -325,13 +325,13 @@ test('a VM NÃO serve fonte de build — e o .assetsignore não alcança ela', a
     }
     // CONTROLE, e sem ele o teste acima passa por vácuo: um corte largo demais
     // levaria o `js/min/` junto e TODO caminho daria 404, com as asserções de
-    // cima todas verdes e a app morta.
+    // cima todas verdes e o app morto.
     const FICA = ['/js/min/app.js', '/js/min/i18n.js', '/js/min/qr.js', '/js/min/version.js',
                   '/css/app.css', '/index.html', '/manifest.json', '/service-worker.js',
                   '/icons/icon-192.svg', '/fonts/inter-latin-wght-normal.woff2'];
     for (const c of FICA) {
       const r = await fetch(URL_(c));
-      assert.equal(r.status, 200, `${c} PAROU de ser servido pela VM — a app sobe quebrada`);
+      assert.equal(r.status, 200, `${c} PAROU de ser servido pela VM — o app sobe quebrado`);
     }
   });
 });

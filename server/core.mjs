@@ -50,7 +50,7 @@ const WAZE_FEATURES_REGIONS = {
 
 // Presença do WME (gRPC). É SEPARADA POR SERVIDOR — MEDIDO: um WME aberto no
 // servidor da América do Norte não via ninguém do resto do mundo —, então segue
-// a região da fila, como o resto da app.
+// a região da fila, como o resto do app.
 const WAZE_GRPC_PRESENCA = {
   row: 'https://www.waze.com/row-Descartes/grpc/' + SERVICO_PRESENCA + '/',
   na: 'https://www.waze.com/na-Descartes/grpc/' + SERVICO_PRESENCA + '/',
@@ -76,7 +76,7 @@ const SEC_CH_UA = '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="
 export const SESSION_TTL = 1814400; // 21 dias (cookies do Waze duram ~28d)
 // De quanto em quanto tempo o prazo é reescrito no store. Não é o prazo: é a
 // granularidade da renovação. Um dia limita a ~1 escrita por sessão por dia
-// (o KV do Cloudflare aceita 1 escrita/s por chave, e a app faz 3 chamadas só
+// (o KV do Cloudflare aceita 1 escrita/s por chave, e o app faz 3 chamadas só
 // ao abrir), e ainda deixa 20 dias de folga sobre o TTL de 21.
 export const SESSION_REFRESH_AFTER = 86400; // 1 dia
 // De quanto em quanto tempo os cookies rotacionados pelo Waze são regravados.
@@ -171,7 +171,7 @@ function randomToken() {
 //
 // O que isto NÃO protege, e não adianta fingir: quem publica código no Worker
 // pode registrar o segredo quando ele chega. A diferença é o alcance — deixa de
-// ser "todos os editores, inclusive os de ontem" e vira "quem usar a app
+// ser "todos os editores, inclusive os de ontem" e vira "quem usar o app
 // enquanto esse código estiver no ar", com rastro em `wrangler deployments`.
 //
 // Depende de UMA coisa: o segredo nunca pode entrar em log. Hoje o token viaja
@@ -242,7 +242,7 @@ export function isWazeCookieDomain(domain) {
   return d === 'waze.com' || d.endsWith('.waze.com');
 }
 
-// O ÚNICO host que a app chama. Todos os endpoints acima (Descartes, Features,
+// O ÚNICO host que o app chama. Todos os endpoints acima (Descartes, Features,
 // Session, LocationSearch) saem daqui, e o WME_EDITOR_URL também.
 export const WAZE_API_HOST = 'www.waze.com';
 
@@ -262,7 +262,7 @@ export const WAZE_API_HOST = 'www.waze.com';
 //   só www.waze.com        → 200, 500 pedidos
 //
 // E o modo de falha era o pior possível: `/Session` (o login) é TOLERANTE e
-// respondia 200, então a app dizia "Cookies válidos! Você está autenticado." e
+// respondia 200, então o app dizia "Cookies válidos! Você está autenticado." e
 // TODA chamada seguinte morria com "cookies expirados". Quem passa por isso
 // conclui que exportou errado — e reexportar não resolve, porque o beta segue lá.
 //
@@ -343,7 +343,7 @@ export function cookieHeaderFrom(cookiesContent, porHost = true) {
     else if (isWazeCookieDomain(parts[0])) largos.push(parts[5] + '=' + parts[6]);
   }
   // Header VAZIO é o pior desfecho possível e sai daqui sem erro nenhum: a
-  // chamada vai ao Waze sem credencial, ele responde 403, e a app diz pra pessoa
+  // chamada vai ao Waze sem credencial, ele responde 403, e o app diz pra pessoa
   // que a sessão dela morreu — quando quem desistiu foi o nosso parser.
   //
   // Acontece quando o `includes('\t')` acerta o formato ERRADO: um header
@@ -487,7 +487,7 @@ function lerSetCookie(res) {
 
 // O Waze ROTACIONA o cookie de sessão a cada resposta — MEDIDO com cookies
 // reais: 3 chamadas ao `Session` devolveram 3 valores distintos de
-// `_web_session` (o `_csrf_token` não muda). A app guardava o retrato do login
+// `_web_session` (o `_csrf_token` não muda). O app guardava o retrato do login
 // e nunca mais o atualizava, então o retrato azedava sozinho e o editor era
 // deslogado "sem ter pedido pra sair" — o relato do owner.
 //
@@ -508,7 +508,7 @@ async function guardarCookiesRotacionados(ctx, setCookie) {
 
 // Quando a sessão do WAZE vence, em segundos-epoch — ou null se não deu pra
 // saber. É o prazo que de fato desloga o editor, e não se confunde com o
-// `SESSION_TTL` da app: aquele é DESLIZANTE (`loadSession` renova a cada uso),
+// `SESSION_TTL` do app: aquele é DESLIZANTE (`loadSession` renova a cada uso),
 // este é FIXO.
 //
 // MEDIDO com os cookies do owner, 3 chamadas de leitura seguidas ao `/Session`
@@ -752,7 +752,7 @@ export function makeSessions({ store, keyBytes }) {
     // O adaptador de arquivo da VM sempre fez isso (mtime + touch). O KV do
     // Cloudflare NÃO: `expirationTtl` conta do `put`, e o `get` não estende
     // nada. Resultado medido com o core de verdade e um KV simulado: editor
-    // usando a app TODO DIA era deslogado no dia 21, com ZERO escritas no KV
+    // usando o app TODO DIA era deslogado no dia 21, com ZERO escritas no KV
     // no período. A validade contava do login, não do último uso — e o
     // CLAUDE.md descrevia os dois adaptadores como se fossem equivalentes.
     //
@@ -762,7 +762,7 @@ export function makeSessions({ store, keyBytes }) {
     //
     // Só reescreve depois de SESSION_REFRESH_AFTER, e isso não é economia à
     // toa: o KV limita 1 escrita por segundo por chave, e renovar a cada
-    // chamada (são 3 só ao abrir a app) esbarraria nesse teto — trocaria um
+    // chamada (são 3 só ao abrir o app) esbarraria nesse teto — trocaria um
     // logout por outro.
     async loadSession(token) {
       if (!token) return null;
@@ -771,7 +771,7 @@ export function makeSessions({ store, keyBytes }) {
       if (!raw) return null;
 
       // Formato único: `carimbo|blob`. Valor sem carimbo é lixo (formato de
-      // antes desta versão) e não vale a pena carregar compatibilidade — a app
+      // antes desta versão) e não vale a pena carregar compatibilidade — o app
       // ainda está em dev/testes, não há sessão de produção pra preservar.
       // Registro que não abre é LIXO, e lixo se apaga em vez de esperar vencer.
       //
@@ -929,7 +929,7 @@ export function prepareAuth(cookiesContent) {
   // Filtra por HOST antes de qualquer coisa, e o "antes" é o ponto: o
   // `extractCSRFToken` pega o PRIMEIRO `_csrf_token` que encontra, então sem
   // este filtro ele escolhe o de `beta.waze.com` quando o export traz os dois —
-  // e aí a app manda o CSRF de um ambiente com a sessão do outro (HTTP 403 em
+  // e aí o app manda o CSRF de um ambiente com a sessão do outro (HTTP 403 em
   // tudo, com o login passando).
   //
   // Aqui e não só no `handleTestarCookies` porque este é o caminho que roda com
@@ -948,7 +948,7 @@ export function prepareAuth(cookiesContent) {
   //
   // Então: filtra, e só ADOTA o resultado se ele continuar válido. Na pior das
   // hipóteses volta-se ao comportamento anterior ao filtro — que pode dar 403,
-  // mas 403 a app sabe tratar (derruba a sessão e leva pra tela de entrar). Uma
+  // mas 403 o app sabe tratar (derruba a sessão e leva pra tela de entrar). Uma
   // recusa de FORMATO culpa quem não errou e não tem saída nenhuma.
   const filtrado = filterWazeCookies(cookiesContent);
   // O CSRF e o COOKIE DE SESSÃO têm que sair do MESMO conjunto, sempre. Foi a
@@ -984,7 +984,7 @@ export function prepareAuth(cookiesContent) {
 // É lista de EXCLUSÃO, não de inclusão, de propósito: campo novo que o Waze
 // passe a mandar aparece com o nome cru (o fallback do fieldLabels) — feio, mas
 // visível. Uma lista de inclusão esconderia calado uma mudança de verdade, que
-// é o oposto do que a app existe pra fazer.
+// é o oposto do que o app existe pra fazer.
 const CAMPOS_ESCRITURACAO = new Set([
   'id', 'permissions', 'updatedOn', 'updatedBy', 'createdOn', 'createdBy',
 ]);
@@ -1377,7 +1377,7 @@ async function handleTestarCookies(data, { sessions }) {
       message: 'Cookies válidos! Você está autenticado.',
       sessionToken: token,
       expiresIn: SESSION_TTL,
-      // Prazo do WAZE (fixo), não o da app (deslizante). Ver `prazoDaSessaoWaze`.
+      // Prazo do WAZE (fixo), não o do app (deslizante). Ver `prazoDaSessaoWaze`.
       sessaoExpiraEm: prazoDaSessaoWaze(result.setCookie),
     },
   };
@@ -1565,12 +1565,12 @@ async function handleBuscarPlaces(data, { sessions }) {
       page,
       total: places.length,
       // totalAll = o que existe na região pros filtros atuais, INCLUINDO os que
-      // este editor não pode editar (venue.permissions >= 0). A app trata só os
+      // este editor não pode editar (venue.permissions >= 0). O app trata só os
       // editáveis; o extra vira a dica "de N na região" no contador (D13).
       totalAll: places.length + blocked,
       blocked,
       // Vai aqui porque esta é a chamada que se repete: o prazo se auto-corrige
-      // sozinho se o editor relogar no WME, sem a app ter que perguntar.
+      // sozinho se o editor relogar no WME, sem o app ter que perguntar.
       sessaoExpiraEm: prazoDaSessaoWaze(result.setCookie),
     },
   };
@@ -1617,7 +1617,7 @@ export function purTypeDoUR(ur) {
 
 // Este PUR deve ser DESCARTADO pelo filtro de tipos? (true = descarta)
 //
-// Tipo que a app não sabe nomear (`UNKNOWN`) NUNCA é descartado: o filtro é uma
+// Tipo que o app não sabe nomear (`UNKNOWN`) NUNCA é descartado: o filtro é uma
 // lista de PERMITIDOS, então um tipo novo que o Waze inventasse sumiria calado
 // de toda fila — e "sumiu" é o defeito mais caro deste projeto, porque ninguém
 // reporta o que não vê. Melhor aparecer com rótulo feio do que não aparecer.
@@ -1750,7 +1750,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     // imagem, e o WME mostra exatamente isso ("Enviado 01/11/2014 por
     // Coskobeu") — foi o owner que apontou, com um local em que aparece.
     //
-    // MEDIDO na fila real dos 13 países de validação, com o MESMO filtro que a
+    // MEDIDO na fila real dos 13 países de validação, com o MESMO filtro que o
     // app manda (`residential: null`): das 1595 fotos JÁ NO MAPA, 1579 (99,0%)
     // trazem o campo. E 23,7% dos locais têm fotos de PESSOAS DIFERENTES no
     // mesmo carrossel — é por isso que a atribuição tem que ser POR FOTO e
@@ -1801,7 +1801,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       // O filtro isRead que mandamos ao Waze (userPropertiesFilter) é POR VENUE:
       // o venue volta se QUALQUER PUR dele estiver não-lido. Sem este skip por
       // PUR, uma foto já lida re-vira card eternamente enquanto um PUR irmão
-      // (ex.: REQUEST, gated e invisível na app) seguir não-lido — o place
+      // (ex.: REQUEST, gated e invisível no app) seguir não-lido — o place
       // "volta" sem o user ter como sair do loop. Confirmado via HAR (Batalhão
       // PMDF: IMAGE isRead:true + REQUEST isRead:false → venue retornava sempre).
       if (unreadOnly && ur.isRead === true) continue;
@@ -2054,7 +2054,7 @@ async function handleMarcarLido(data, { sessions, aoFundo }) {
 // Guarda (ou solta) um pedido na ESTRELA do próprio editor — o mesmo favorito
 // que o WME mostra, e que tem busca salva pré-definida lá ("starred").
 //
-// É a única escrita da app que NÃO mexe no mapa: a estrela é estado do EDITOR
+// É a única escrita do app que NÃO mexe no mapa: a estrela é estado do EDITOR
 // sobre o pedido, não do pedido. Por isso não tem portão de L6 — o portão
 // destrutivo existe pra o que altera dado de mapa, e aqui não altera.
 //
@@ -2105,7 +2105,7 @@ async function handleGuardarPedido(data, { sessions }) {
 //
 // Aprovar existe SÓ pra foto, e essa restrição vive no cliente — como a da
 // lixeira, e pelo mesmo motivo do owner: quem quiser aprovar outra coisa já
-// consegue pelo WME. O que a app promete é não OFERECER, não impedir.
+// consegue pelo WME. O que o app promete é não OFERECER, não impedir.
 async function handleValidarPlace(data, { sessions, aoFundo }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
@@ -2160,7 +2160,7 @@ async function handleValidarPlace(data, { sessions, aoFundo }) {
 //  Excluir uma foto do local (a lixeira do lightbox)
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// É a PRIMEIRA escrita da app no mapa em si. Todas as outras (rejeitar, marcar
+// É a PRIMEIRA escrita do app no mapa em si. Todas as outras (rejeitar, marcar
 // lido) mexem no PEDIDO; esta mexe no LOCAL. Daí o cuidado extra.
 //
 // O contrato do Waze não tem "apague a foto X" — só "a lista de fotos agora é
@@ -2189,7 +2189,7 @@ async function handleValidarPlace(data, { sessions, aoFundo }) {
 // reais de países diferentes, não deduzido: ver scratchpad/bbox-segura.mjs.
 const RELEITURA_BBOX_GRAUS = 0.0002;
 
-// Quanto tempo a releitura vale antes de a app ter que fazê-la de novo.
+// Quanto tempo a releitura vale antes de o app ter que fazê-la de novo.
 //
 // A releitura é disparada quando o editor TOCA na lixeira, e usada quando ele
 // CONFIRMA — assim os ~700ms dela cabem dentro do tempo em que ele lê o
@@ -2239,7 +2239,7 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
   const enxuto = { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) };
   try {
     await sessions.store.put(chave, Math.floor(Date.now() / 1000) + '|' + JSON.stringify(enxuto), RELEITURA_TTL);
-  } catch (e) { /* sem cache a app só fica mais lenta */ }
+  } catch (e) { /* sem cache o app só fica mais lento */ }
   return { venue: enxuto, doCache: false };
 }
 
@@ -2261,7 +2261,7 @@ async function handleExcluirFoto(data, { sessions }) {
   // foto se abrir o WME"*. O Waze valida `permissions` e `lockRank` na
   // gravação — quem não pode apagar por aqui também não consegue por lá. Então
   // isto nunca foi fronteira de segurança: era trava de PRODUTO, pra o recurso
-  // não aparecer pra qualquer editor na NOSSA app. Trava de produto vive no
+  // não aparecer pra qualquer editor na NOSSO app. Trava de produto vive no
   // cliente (`podeExcluirFotoAqui`), onde já estava desde o começo.
   //
   // Eu tinha feito o contrário — portão no servidor com cache de perfil pra
@@ -2353,7 +2353,7 @@ async function handleExcluirFoto(data, { sessions }) {
   return { status: 200, body: { success: true, restantes: restantes.map((i) => i.id) } };
 }
 
-// Renomear um local, do lightbox. É a PRIMEIRA escrita de dado de LOCAL da app,
+// Renomear um local, do lightbox. É a PRIMEIRA escrita de dado de LOCAL do app,
 // e a regra de ouro do projeto pede que isso esteja justificado, não tolerado:
 //
 // O que libera é a natureza da decisão, igual à exceção da foto. O editor está
@@ -2362,7 +2362,7 @@ async function handleExcluirFoto(data, { sessions }) {
 // WME": é a MESMA gravação, com uma ida e volta no meio. MEDIDO no HAR do owner
 // renomeando no WME: o editor não faz busca por duplicado, não valida convenção,
 // não confere nada — ele manda `{id, name}` e pronto. Não existe rede de
-// segurança lá que a app estaria pulando.
+// segurança lá que o app estaria pulando.
 //
 // O payload é o do WME byte a byte, e ele é PATCH, não substituição. Isso
 // contraria o que eu supus a partir do gotcha #57 (nas fotos o Waze troca a
@@ -2501,7 +2501,7 @@ async function handlePerfil(data, { sessions }) {
         areas,
         managedAreas,
       },
-      // O perfil é buscado na abertura da app, então o prazo já chega no primeiro
+      // O perfil é buscado na abertura do app, então o prazo já chega no primeiro
       // render — antes mesmo da primeira busca de pedidos.
       sessaoExpiraEm: prazoDaSessaoWaze(result.setCookie),
     },
@@ -2788,7 +2788,7 @@ function instante(v) {
   if (!Number.isSafeInteger(v) || v <= 0) incompleto();
   return v;
 }
-// [lonMin, latMin, lonMax, latMax], a ordem das caixas da app. O mundo inteiro
+// [lonMin, latMin, lonMax, latMax], a ordem das caixas do app. O mundo inteiro
 // é permitido: MEDIDO, a lista do mundo inteiro tinha 48 editores e 2,9 KB.
 function caixaValida(c) {
   if (!Array.isArray(c) || c.length !== 4 || !c.every(Number.isFinite)) incompleto();
@@ -2804,9 +2804,9 @@ function pontoValido(p) {
 
 // ── A presença DE CARONA (fase 2) ─────────────────────────────────────────
 //
-// A posição do card viaja DENTRO da ação que a app já faz (rejeitar, marcar
+// A posição do card viaja DENTRO da ação que o app já faz (rejeitar, marcar
 // como lido) e o servidor a escreve no WME na mesma ida. É isso que deixa a
-// fase 2 com ZERO requisição nova ao nosso `/api` — a app roda no free tier do
+// fase 2 com ZERO requisição nova ao nosso `/api` — o app roda no free tier do
 // Cloudflare, e uma chamada por card seria a conveniência pagando com o recurso
 // contado. A sub-requisição ao Waze não conta no limite diário do Worker.
 //
@@ -2839,7 +2839,7 @@ function lerCarona(v) {
 
 // A carona leva DUAS coisas, e elas voltam em campos separados da resposta:
 //   · `presenca`    — a posição escrita no WME (fase 2): `{ ok, marca }`;
-//   · `presencaApp` — quem usa a app no país e as conversas da app (fase 3),
+//   · `presencaApp` — quem usa o app no país e as conversas do app (fase 3),
 //                     lidas na mesma ida pra pílula andar sem pedido novo.
 // As duas correm em paralelo com a ação e têm o MESMO teto de espera; a que
 // passar do teto some da resposta sem arrastar a outra.
@@ -2850,8 +2850,10 @@ function iniciarCarona(data, cookieHeader, region) {
   const conhecidos = lerConhecidos(data.presenca.conhecidos);
   const app = listaDaApp(cookieHeader, region, { pais: data.presenca.pais, eu: p.userId, conhecidos })
     // As duas partes falharam: some da resposta. Chegar como `{ online: null }`
-    // seria o cliente ler "ninguém na app" de uma lista que nem veio.
-    .then((a) => (a.online || a.conversas ? { online: a.online, conversas: a.conversas } : null))
+    // seria o cliente ler "ninguém no app" de uma lista que nem veio.
+    .then((a) => (a.online || a.conversas
+      ? { online: a.online, conversas: a.conversas, ...(a.contagem ? { contagem: a.contagem } : {}) }
+      : null))
     // DEFESA sem caminho hoje, como a da escrita: o `callWazeGrpc` captura a
     // rede e os leitores estão em try. Fica pelo mesmo motivo de lá — uma
     // rejeição aqui faria uma AÇÃO feita voltar ao editor como erro 500.
@@ -2906,21 +2908,21 @@ async function esperarCarona(carona, aoFundo) {
   }
 }
 
-// ── A presença DA APP (fase 3) ─────────────────────────────────────────────
+// ── A presença DO APP (fase 3) ─────────────────────────────────────────────
 //
-// Quem usa a app no país do filtro, e as conversas que são da app. A mesma
+// Quem usa o app no país do filtro, e as conversas que são do app. A mesma
 // resposta sai por dois caminhos: de carona nas ações (zero pedido a mais) e
-// pela rota `presenca-app` (ao abrir a app e ao abrir a lista).
+// pela rota `presenca-app` (ao abrir o app e ao abrir a lista).
 //
 // A lista é a do WME, do MUNDO inteiro (medido: 48 editores, 2,9 KB), filtrada
-// aqui pela marca da app e pelo país (`marca-app.mjs`). Quem pede não vem (o
+// aqui pela marca do app e pelo país (`marca-app.mjs`). Quem pede não vem (o
 // Waze exclui), e quem está invisível também não.
 //
-// A conversa é "da app" quando a última mensagem traz a marca no contexto, OU
-// quando o aparelho já a conhece (`conhecidos`: conversa que passou pela app
+// A conversa é "do app" quando a última mensagem traz a marca no contexto, OU
+// quando o aparelho já a conhece (`conhecidos`: conversa que passou pelo app
 // antes). A marca sozinha não bastaria: uma resposta dada pelo WME, sem marca,
-// tiraria a conversa da app no meio. Conversa de quem só usa o WME não vem —
-// decisão do owner ("a app não mostra nada").
+// tiraria a conversa do app no meio. Conversa de quem só usa o WME não vem —
+// decisão do owner ("o app não mostra nada").
 const CAIXA_MUNDO = [-180, -85, 180, 85];
 export const APP_CONTEXTO = 'wazeplaces';
 const CONHECIDOS_MAX = 50;
@@ -2944,7 +2946,7 @@ function cardDoContexto(ctx) {
   } catch { return null; }
 }
 
-// A prévia da conversa. Mensagem da app manda a pergunta em `legenda` (o texto
+// A prévia da conversa. Mensagem do app manda a pergunta em `legenda` (o texto
 // do Waze leva também o nome do local e o link, pra quem lê pelo WME).
 function resumoDaUltima(m, eu) {
   if (!m) return null;
@@ -2964,14 +2966,40 @@ export function filtrarOnlineDaApp(editores, { pais, eu }) {
     .map((e) => ({ id: String(e.id), nome: e.nome, rank: e.rank, lat: e.lat, lon: e.lon }));
 }
 
+// Os mesmos predicados servem ao filtro e à contagem: lista e contagem que
+// divergissem mandariam o diagnóstico procurar defeito onde não há.
+const conversaValida = (c) => !!(c && c.com && ID_WAZE.test(String(c.com.id)) && !c.bloqueada);
+const conversaMarcada = (c) => !!(c.ultima && c.ultima.contexto && c.ultima.contexto.app === APP_CONTEXTO);
+
 export function filtrarConversasDaApp(conversas, { eu, conhecidos }) {
   return (conversas || [])
-    .filter((c) => c && c.com && ID_WAZE.test(String(c.com.id)) && !c.bloqueada
-      && ((c.ultima && c.ultima.contexto && c.ultima.contexto.app === APP_CONTEXTO) || conhecidos.has(String(c.com.id))))
+    .filter((c) => conversaValida(c) && (conversaMarcada(c) || conhecidos.has(String(c.com.id))))
     .map((c) => ({
       id: String(c.com.id), nome: c.nome, naoLidas: c.naoLidas || 0, atividade: c.atividade,
       ultima: resumoDaUltima(c.ultima, eu),
     }));
+}
+
+// O PORQUÊ das duas listas, em números. É o que responde "não vejo ninguém" e
+// "a conversa sumiu da lista" sem adivinhar:
+//   · online: quantos OUTROS estão visíveis no WME (a lista do Waze já tira quem
+//     pede e quem está invisível — medido), quantos têm a marca do app, e
+//     quantos desses no país do filtro (é a lista que aparece);
+//   · conversas: quantas o Waze devolveu, quantas têm a marca na última
+//     mensagem, e quantas entram (marca OU já conhecida no aparelho).
+export function contarOnlineDaApp(editores, { pais, eu }) {
+  const outros = (editores || []).filter((e) => e && e.visivel !== false && String(e.id) !== eu);
+  const comMarca = outros.filter((e) => temMarcaDaApp(e));
+  return { noWme: outros.length, comMarca: comMarca.length, noPais: comMarca.filter((e) => paisDaMarca(e) === pais).length };
+}
+
+export function contarConversasDaApp(conversas, { conhecidos }) {
+  const validas = (conversas || []).filter(conversaValida);
+  return {
+    noWaze: validas.length,
+    marcadas: validas.filter(conversaMarcada).length,
+    daApp: validas.filter((c) => conversaMarcada(c) || conhecidos.has(String(c.com.id))).length,
+  };
 }
 
 // As duas leituras em paralelo. Cada parte pode faltar (`null`) sem derrubar a
@@ -2985,13 +3013,29 @@ async function listaDaApp(cookieHeader, region, { pais, eu, conhecidos }, ctx = 
     callWazeGrpc(base + 'listOnlineEditors', cookieHeader, corpoListarOnline(CAIXA_MUNDO), region, ctx),
     callWazeGrpc(wmp + SERVICO_HISTORICO + '/ListConversations', cookieHeader, corpoConversas({ cabecalho }), region, null, { chat: true }),
   ]);
-  const out = { online: null, conversas: null, erro: null, r: null };
+  const out = { online: null, conversas: null, contagem: null, erro: null, r: null };
   const catL = categorizeGrpcError(lista);
   const catC = categorizeGrpcError(conv);
   if (catL && catL.category === 'unauthorized') { out.erro = catL; out.r = lista; }
   else if (catC && catC.category === 'unauthorized') { out.erro = catC; out.r = conv; }
-  if (!catL) { try { out.online = filtrarOnlineDaApp(lerListaOnline(lista.dados), { pais, eu }); } catch { /* fica null */ } }
-  if (!catC) { try { out.conversas = filtrarConversasDaApp(lerConversas(conv.dados).conversas, { eu, conhecidos }); } catch { /* fica null */ } }
+  // As contagens vão pro diagnóstico do aparelho (ver `contarOnlineDaApp`), e a
+  // parte que falhou vai dita — sem isso "a lista não veio" não diz qual metade.
+  const contagem = {};
+  if (!catL) {
+    try {
+      const todos = lerListaOnline(lista.dados);
+      out.online = filtrarOnlineDaApp(todos, { pais, eu });
+      contagem.online = contarOnlineDaApp(todos, { pais, eu });
+    } catch { contagem.online = { falhou: 'leitura' }; }   // a lista fica null
+  } else contagem.online = { falhou: catL.category };
+  if (!catC) {
+    try {
+      const lidas = lerConversas(conv.dados).conversas;
+      out.conversas = filtrarConversasDaApp(lidas, { eu, conhecidos });
+      contagem.conversas = contarConversasDaApp(lidas, { conhecidos });
+    } catch { contagem.conversas = { falhou: 'leitura' }; }   // as conversas ficam null
+  } else contagem.conversas = { falhou: catC.category };
+  if (contagem.online || contagem.conversas) out.contagem = contagem;
   return out;
 }
 
@@ -3008,7 +3052,7 @@ function tokenDoProvedor(d) {
 // eco das próprias e os recibos) — e ele cai sozinho a cada ~6 min. Sem
 // confirmar, cada reconexão baixa de novo a fila inteira do aparelho, que só
 // cresce. Um pedido à nossa API por mensagem recebida seria o free tier pagando
-// o que o WME resolve de graça; então os ids vão JUNTO de um pedido que a app
+// o que o WME resolve de graça; então os ids vão JUNTO de um pedido que o app
 // já faz (`presenca-app` e `chat`), e o Waze confirma em paralelo.
 //
 // É ACESSÓRIA por construção: entrada ruim é ignorada (nunca vira 400 no
@@ -3030,7 +3074,7 @@ function confirmarDeCarona(data, cookieHeader, region) {
     .catch(() => 0);
 }
 
-// Ao abrir a app e ao abrir a lista: quem usa a app no país, as conversas da
+// Ao abrir o app e ao abrir a lista: quem usa o app no país, as conversas do
 // app e, com `token: true` e a `instalacao` do aparelho, o token do tempo real
 // — UMA ida. O token é PEDIDO, e não implícito na instalação: ela também vai
 // junto só pra confirmar o que chegou pelo fluxo, e aí buscar token seria uma
@@ -3065,6 +3109,7 @@ async function handlePresencaApp(data, { sessions }) {
     status: 200,
     body: {
       success: true, online: app.online, conversas: app.conversas,
+      ...(app.contagem ? { contagem: app.contagem } : {}),
       ...(querToken ? { chat } : {}),
       ...(confirmados ? { confirmados } : {}),
     },
@@ -3074,15 +3119,15 @@ async function handlePresencaApp(data, { sessions }) {
 // Presença: mover a pessoa (posição e/ou visibilidade) e ver quem está online
 // numa caixa, NA MESMA IDA.
 //
-// A escrita exige o id da própria pessoa (o `profile.id` que a app já tem do
+// A escrita exige o id da própria pessoa (o `profile.id` que o app já tem do
 // `perfil`). Não há risco de se passar por outra: o Waze recusa id que não é o
 // do cookie (MEDIDO, status 7 “cannot modify another user's data”).
 //
-// TODA posição que a app escreve leva a marca da app (`marca-app.mjs`), por
+// TODA posição que o app escreve leva a marca do app (`marca-app.mjs`), por
 // isso a posição exige o `pais`: posição sem marca faria a pessoa sumir da
-// lista dos outros usuários da app.
+// lista dos outros usuários do app.
 //
-// A app nunca DESLIGA a visibilidade por conta própria: ela é a mesma chave do
+// O app nunca DESLIGA a visibilidade por conta própria: ela é a mesma chave do
 // WME, e desligar aqui esconderia a pessoa lá sem ela saber. `visivel: false`
 // existe porque é a pessoa que pode pedir.
 async function handlePresencaWaze(data, { sessions }) {
@@ -3199,9 +3244,9 @@ async function handleChat(data, { sessions }) {
         if (new TextEncoder().encode(JSON.stringify(data.contexto)).length > CONTEXTO_MAX_BYTES) incompleto();
         ctx = data.contexto;
       }
-      // Toda mensagem que passa por aqui SAIU DA APP, por definição: a marca é
+      // Toda mensagem que passa por aqui SAIU DO APP, por definição: a marca é
       // posta pelo servidor, e não pedida ao cliente — cliente velho ou
-      // descuidado não tira a conversa da app.
+      // descuidado não tira a conversa do app.
       ctx = { ...(ctx || {}), app: APP_CONTEXTO };
       const id = data.id == null ? crypto.randomUUID() : uuid(data.id);
       metodo = SERVICO_MENSAGENS + '/SendMessage';
@@ -3263,7 +3308,7 @@ async function comConfirmados(resposta, confirmacao) {
   return resposta;
 }
 
-// Abrir uma conversa na app: o histórico e o "lida" numa ida só (fase 3). O
+// Abrir uma conversa no app: o histórico e o "lida" numa ida só (fase 3). O
 // "lida" é acessório: QUALQUER falha dele vira `recibos: []` e o histórico
 // segue — inclusive a conversa que ainda não existe (status 7 com
 // NO_EXISTING_CONVERSATION, medido), que não é erro nenhum. Marcar como lida

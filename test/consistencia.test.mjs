@@ -84,7 +84,7 @@ test('um conceito, um nome: sem sinônimos concorrentes na mesma língua', () =>
   const PROIBIDOS = {
     pt: [['aparelho', 'dispositivo'], ['celular', 'telefone']],
     es: [['dispositivo', 'aparato']],
-    // "appareil" é o termo da app; "dispositif" em francês soa a dispositivo
+    // "appareil" é o termo do app; "dispositif" em francês soa a dispositivo
     // médico/jurídico e é o sinônimo que uma tradução nova traria sem pensar.
     fr: [['appareil', 'dispositif'], ['téléphone', 'portable']],
   };
@@ -173,7 +173,7 @@ test('o mesmo conceito não pode ter dois nomes no MESMO card', () => {
   // "INAPPROPRIATE não ocorre nenhuma vez", as duas coisas falsas.
   //
   // MEDIDO em 386 reportes de 13 países (2026-08-22), em ordem de frequência.
-  // A app passou no teste real: os 8 já tinham tradução nos 4 idiomas, então
+  // O app passou no teste real: os 8 já tinham tradução nos 4 idiomas, então
   // o defeito era só do texto. Nomeá-los aqui é o que impede o contrário —
   // um motivo comum perder tradução e ninguém notar até o enum cru na tela.
   //
@@ -196,7 +196,7 @@ test('origem do pedido: os 4 valores do Waze traduzidos, e o 5º descartado', ()
   //   J = { SOURCE_UNSPECIFIED: Symbol("UNMAPPED_UPDATE_REQUEST_SOURCE"),
   //         MOBILE_CLIENT: REPORT_MENU, WEB: LIVE_MAP,
   //         MOBILE_WEB: HELP_AND_FEEDBACK, REPORTING_AGENT: REPORTING_AGENT }
-  // A app conhecia só os DOIS que aparecem na fila do owner hoje (medido: 369
+  // O app conhecia só os DOIS que aparecem na fila do owner hoje (medido: 369
   // URs, MOBILE_CLIENT e WEB apenas). Os outros dois existem — e o featureFlag
   // URSourceReportingAgent está LIGADO no ambiente dele —, então cairiam no
   // humanizarEnum e sairiam como "Mobile web" / "Reporting agent" em inglês no
@@ -224,7 +224,7 @@ test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => 
   const DICT = read('js/i18n.js');
 
   // A ordem importa e é a mesma nos dois lugares de propósito: duas listas com
-  // a mesma ideia em ordens diferentes é como o editor descobre que a app se
+  // a mesma ideia em ordens diferentes é como o editor descobre que o app se
   // contradiz. Aqui não é estética — o `TYPES_ALL` é o padrão marcado, e o HTML
   // é o que ele vê; divergir faz "todos marcados" parecer uma seleção parcial.
   const noHtml = [...HTMLs.matchAll(/class="filter-type[^"]*"\s+value="([A-Z_]+)"/g)].map((m) => m[1]);
@@ -252,7 +252,7 @@ test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => 
 
   // ── quais nascem MARCADOS ──────────────────────────────────────────────
   // A instalação nova é decidida em DOIS lugares: o `checked` do HTML (o que a
-  // pessoa VÊ ao abrir Filtros) e o TYPES_PADRAO (o que a app USA na primeira
+  // pessoa VÊ ao abrir Filtros) e o TYPES_PADRAO (o que o app USA na primeira
   // busca). Divergir é silencioso e cruel nos dois sentidos: caixa marcada com
   // tipo que não vem faz parecer que a fila acabou; caixa desmarcada com tipo
   // que vem faz o filtro parecer quebrado. Nenhum dos dois dá erro na tela.
@@ -276,7 +276,7 @@ test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => 
     'o que nasce marcado no HTML e o TYPES_PADRAO divergiram');
 
   // `DETAILS_UPDATE` e `FLAGGED_PLACE` nascem DESMARCADOS, e o motivo é de
-  // PRODUTO: a app é estilo Tinder, e o gesto rápido funciona quando há o que
+  // PRODUTO: o app é estilo Tinder, e o gesto rápido funciona quando há o que
   // olhar. Medido na fila real: os 5 tipos do padrão somam 178 cards com 66% de
   // foto, contra 117 cards e 44% nos dois de fora.
   //
@@ -286,7 +286,7 @@ test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => 
   // porque não é o layout que os mantém fora.
   //
   // O que este teste trava não é a decisão, que é do owner e muda quando ele
-  // quiser: é a PARIDADE acima, entre o que a tela mostra marcado e o que a app
+  // quiser: é a PARIDADE acima, entre o que a tela mostra marcado e o que o app
   // de fato vai buscar.
   //
   // Nenhum tipo pode sumir do filtro. Esconder é diferente de desmarcar: o
@@ -294,7 +294,7 @@ test('tipos de pedido: HTML, código e dicionário contam a MESMA lista', () => 
   for (const t of noCodigo) {
     assert.ok(noHtml.includes(t), `${t} sumiu do filtro — desmarcar é uma coisa, esconder é outra`);
   }
-  assert.ok(marcadosHtml.length > 0, 'nenhum tipo nasce marcado — a app abriria vazia');
+  assert.ok(marcadosHtml.length > 0, 'nenhum tipo nasce marcado — o app abriria vazio');
 });
 
 test('países de validação: a lista é fonte única e o CLAUDE.md conta a mesma história', async () => {
@@ -501,7 +501,7 @@ test('as duas camadas dos gotchas não podem divergir', () => {
 
 // A tela de entrada AFIRMA um critério de acesso antes de qualquer resposta do
 // servidor — e quem barra de fato é o `isUserAllowed` do core. Se os dois
-// divergirem, a app promete uma coisa e aplica outra: o editor faz o trabalho
+// divergirem, o app promete uma coisa e aplica outra: o editor faz o trabalho
 // todo (instalar extensão, entrar no WME, voltar) pra descobrir que a frase
 // estava errada. Pior do que não avisar nada.
 //
@@ -549,7 +549,7 @@ test('prévia da tela de entrada: miniaturas existem e são leves', () => {
   // bastavam pra ele. Guard que aceita meia correção afirma proteção que não
   // existe — foi assim no guard da splash também.
   const imgs = [...html.matchAll(/<img[^>]+src="icons\/screenshots\/[^"]+"[^>]*>/g)].map((m) => m[0]);
-  assert.ok(imgs.length >= 3, 'a tela de entrada perdeu a prévia da app');
+  assert.ok(imgs.length >= 3, 'a tela de entrada perdeu a prévia do app');
   for (const img of imgs) {
     const src = /src="([^"]+)"/.exec(img)[1];
     assert.match(src, /previa-/, `${src} não é miniatura — usar a captura original custa ~7x mais`);
@@ -614,11 +614,11 @@ test('extensão: nenhuma permissão nova, e o reload só no install', () => {
         'o onInstalled deixou de filtrar por reason — vai recarregar a aba de quem está triando');
 
     // Contexto órfão (extensão se atualiza com a aba aberta): sem o try, o
-    // `aguarde` já foi enviado e a app espera o prazo INTEIRO dela. Medido:
+    // `aguarde` já foi enviado e o app espera o prazo INTEIRO dele. Medido:
     // 8450ms de spinner contra 233ms com a defesa.
     const ponte = read('extensao-chrome/ponte.js');
     assert.match(ponte, /try\s*\{[\s\S]*chrome\.runtime\.sendMessage/,
-        'o sendMessage da ponte saiu do try — contexto órfão volta a pendurar a app por 8s');
+        'o sendMessage da ponte saiu do try — contexto órfão volta a pendurar o app por 8s');
     assert.match(ponte, /contexto-invalido/, 'sumiu a resposta imediata do contexto órfão');
 });
 
@@ -633,7 +633,7 @@ test('extensão: nenhuma permissão nova, e o reload só no install', () => {
 // Resultado: CSRF de um ambiente com a sessão do outro.
 //
 // Como o probe só faz GET, e GET não valida CSRF, ele imprimia "✓ sessão
-// válida" com o perfil completo — enquanto todo POST da app levava HTTP 403
+// válida" com o perfil completo — enquanto todo POST do app levava HTTP 403
 // `code: 103` "Invalid CSRF token". A ferramenta cujo ÚNICO trabalho é
 // responder "os cookies servem?" respondia SIM quando não serviam.
 //

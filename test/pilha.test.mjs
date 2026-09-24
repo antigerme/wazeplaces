@@ -139,7 +139,7 @@ test('sem próximo na fila não há card de fundo', () => {
   assert.match(f, /const proximo = AppState\.queue\[1\];/,
     'o card de fundo deixou de sair de queue[1]');
   assert.match(f, /if \(!proximo\) return;/,
-    'no último pedido da fila a app passaria a desenhar algo por baixo — e o que há ali é o fim da fila, que a janela do Desfazer ainda pode desfazer');
+    'no último pedido da fila o app passaria a desenhar algo por baixo — e o que há ali é o fim da fila, que a janela do Desfazer ainda pode desfazer');
   assert.match(f, /if \(!cardDaFrente\(\)\) return;/,
     'sem card na frente não há pilha: um card de fundo sozinho seria um pedido na tela que ninguém pode tratar');
 });
@@ -158,7 +158,7 @@ test('a limpeza da área do card tira os DOIS', () => {
 
 // ── 4. QUANDO ELA É MONTADA ────────────────────────────────────────────────
 test('a pilha nasce junto do aquecimento, nunca junto do card da frente', () => {
-  // A foto do card é o LCP da app. Montar o de fundo na mesma hora põe a foto
+  // A foto do card é o LCP do app. Montar o de fundo na mesma hora põe a foto
   // do PRÓXIMO pedido disputando banda com a que o editor precisa ver AGORA —
   // o defeito que o agendarAquecimento já tinha medido (189 KB atropelando 12).
   // De quebra é o que faz o custo de rede da pilha ser ZERO: o que ela desenha
@@ -210,7 +210,7 @@ test('o card da frente pinta acima do de fundo, por CLASSE e não por posição'
     'voltou a decidir a camada da pilha por posição no DOM');
 });
 
-test('o véu chega ao css/app.css, que é o que a app carrega', () => {
+test('o véu chega ao css/app.css, que é o que o app carrega', () => {
   // `styles.css` é minificado PARA DENTRO do app.css (gotcha #22): editar um
   // sem rodar `npm run css` não muda um pixel na tela.
   assert.match(APPCSS, /\.card-fundo-veu/,
@@ -221,7 +221,7 @@ test('o véu chega ao css/app.css, que é o que a app carrega', () => {
 
 // ── 6. A ENTRADA DO CARD ───────────────────────────────────────────────────
 //
-// Decisão do owner (2026-09-20), em duas rodadas olhando a app rodar: primeiro
+// Decisão do owner (2026-09-20), em duas rodadas olhando o app rodar: primeiro
 // "o próximo card não pode nascer com efeito nenhum" — o que tirou a mola e a
 // escala —, e, depois de ver rodando o fade que tinha ficado pra
 // avaliação, "pode tirar o fade". Hoje a entrada não tem efeito nenhum.
@@ -284,7 +284,7 @@ test('o CSS morto da saída não voltou', () => {
 });
 
 test('o app.css gerado não carrega animação de entrada', () => {
-  // O guard acima lê o FONTE; este lê o que a app de fato CARREGA. Editar o
+  // O guard acima lê o FONTE; este lê o que o app de fato CARREGA. Editar o
   // styles.css sem rodar `npm run css` não muda um pixel na tela — e aqui o
   // sintoma seria o contrário do normal: o efeito que o owner mandou tirar
   // continuaria rodando em produção com o fonte já limpo.
@@ -296,7 +296,7 @@ test('o app.css gerado não carrega animação de entrada', () => {
 
 // ── 7. O TIQUE NO APARELHO ─────────────────────────────────────────────────
 //
-// É o sinal MAIS FREQUENTE da app — um por pedido tratado, e a fila real tem
+// É o sinal MAIS FREQUENTE do app — um por pedido tratado, e a fila real tem
 // centenas. O owner baixou de 12 pra 8ms depois de comparar no celular dele.
 //
 // O guard NÃO trava o número (isso seria só detector de mudança): trava o que

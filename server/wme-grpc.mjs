@@ -211,7 +211,7 @@ const lerPonto = (v) => {
   return lon === null || lat === null ? null : { lon: lon / 1e6, lat: lat / 1e6 };
 };
 
-// caixa = [lonMin, latMin, lonMax, latMax], a mesma ordem das caixas da app.
+// caixa = [lonMin, latMin, lonMax, latMax], a mesma ordem das caixas do app.
 export function corpoListarOnline(caixa) {
   const [lonMin, latMin, lonMax, latMax] = caixa;
   return campo.msg(1, ponto(1, lonMin, latMin), ponto(2, lonMax, latMax));

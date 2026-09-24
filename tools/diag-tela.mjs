@@ -30,7 +30,7 @@ import { basename, join } from 'node:path';
 
 // `--cru` tira as MARCAS da ferramenta (hachura na imagem que faltou, moldura no
 // canvas e no FAB). Elas existem porque espaço vazio se confunde com "estava
-// vazio pra ele" — mas são anotação do instrumento, não desenho da app. O
+// vazio pra ele" — mas são anotação do instrumento, não desenho do app. O
 // `tools/smoke-diag-tela.mjs` compara a remontagem com a tela ao vivo pixel a
 // pixel, e com as marcas ligadas ele mediria a anotação: medido, elas sozinhas
 // respondem por ~6 pontos percentuais num card com foto.
@@ -71,9 +71,16 @@ if (!css) console.warn('aviso: nenhum CSS no arquivo — a tela sai sem estilo')
 // PROJETO: casar pelo nome e embutir em base64 devolve a métrica exata.
 //
 // Só casa por NOME DE ARQUIVO dentro de `fonts/` deste repositório: nada é
-// buscado na rede, e diagnóstico de outra app simplesmente não encontra par.
+// buscado na rede, e diagnóstico de outro app simplesmente não encontra par.
+//
+// Procura nos RECURSOS da página, e não só no `codigo`: desde v2026.09.10-04 o
+// coletor deixa a fonte FORA do `codigo` (binário lido como texto não serve), e
+// esta busca olhava só lá — toda tela remontada desde então saiu com a fonte do
+// sistema, sem aviso. A correção valeu no coletor e não no leitor.
 const fontes = [];
-for (const u of Object.keys(codigo)) {
+const urlsDaPagina = [...new Set([...Object.keys(codigo),
+  ...(Array.isArray(d.recursos) ? d.recursos.map((r) => r && r.url).filter((u) => typeof u === 'string') : [])])];
+for (const u of urlsDaPagina) {
   const m = /\/fonts\/([\w.-]+\.woff2?)$/.exec(u);
   if (!m) continue;
   const local = new URL('../fonts/' + m[1], import.meta.url);
@@ -208,7 +215,7 @@ for (let i = 0; i < momentos.length; i++) {
 await browser.close();
 
 // As SENTINELAS vêm antes de tudo. Quem roda esta ferramenta está procurando o
-// que está errado; se a app já sabe, ela diz aqui, e não numa linha perdida de
+// que está errado; se o app já sabe, ele diz aqui, e não numa linha perdida de
 // 1 MB de JSON.
 const alertas = (d.resumo && d.resumo.alertas) || [];
 
@@ -231,7 +238,7 @@ const resumo = {
 };
 writeFileSync(join(saida, 'resumo.json'), JSON.stringify(resumo, null, 1));
 if (alertas.length) {
-  console.log(`\n⚠ ${alertas.length} alerta(s) da app — invariante conhecida quebrada NO APARELHO:`);
+  console.log(`\n⚠ ${alertas.length} alerta(s) do app — invariante conhecida quebrada NO APARELHO:`);
   for (const al of alertas) {
     const extra = Object.entries(al).filter(([k]) => k !== 'chave' && k !== 'msg')
       .map(([k, v]) => `${k}=${v}`).join(' ');

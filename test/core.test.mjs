@@ -132,7 +132,7 @@ test('filterWazeCookies: descarta outros domínios (Netscape), preserva Waze', (
 // Achado com os cookies do owner, que tinha as duas sessões no mesmo export.
 // MEDIDO contra `Issues/Search/List` (só leitura): tudo → 403 · só beta → 403 ·
 // só www → 200 com 500 pedidos. E o login PASSAVA, porque `/Session` é tolerante
-// — então a app dizia "Cookies válidos!" e tudo depois morria com "expirados".
+// — então o app dizia "Cookies válidos!" e tudo depois morria com "expirados".
 test('cookie de beta.waze.com NUNCA entra: é outro ambiente, com sessão própria', () => {
   const raw = [
     NETSCAPE('beta.waze.com', '_csrf_token', 'CSRF-DO-BETA'),
@@ -307,7 +307,7 @@ test('constantes de sanidade', () => {
 // Fixture derivada de HAR REAL (bug "place volta", 2026-07-24): venue
 // "3o Batalhão PMDF" com 2 PURs — IMAGE já lida + REQUEST/UPDATE não-lido.
 // O filtro isRead do Waze é POR VENUE, então o venue volta na busca de não
-// lidos enquanto o REQUEST (gated, invisível na app) seguir não-lido. O core
+// lidos enquanto o REQUEST (gated, invisível no app) seguir não-lido. O core
 // PRECISA pular PURs já lidos, senão a foto lida re-vira card eternamente.
 const harBatalhao = () => ({
   users: { objects: [{ id: 2254353226, userName: 'AoInfinito' }] },
@@ -411,7 +411,7 @@ test('buildPlacesFromSearch: REQUEST/UPDATE não-lido vira card quando o tipo é
 });
 
 // Fixture do caso REAL reportado pelo owner (2026-07-28): "Estádio Gigante do
-// Itiberê", em Paranaguá. O WME oficial mostra UMA mudança — categorias. A app
+// Itiberê", em Paranaguá. O WME oficial mostra UMA mudança — categorias. O app
 // mostrava TRÊS: Id, Categorias e UpdatedOn.
 const harEstadio = () => ({
   users: { objects: [{ id: 999, userName: 'AsafeCorrea' }] },
@@ -464,7 +464,7 @@ test('buildPlacesFromSearch: escrituração do venue não vira "mudança propost
 test('buildPlacesFromSearch: campo desconhecido continua aparecendo, com o nome cru', () => {
   // Lista de EXCLUSÃO, não de inclusão. Campo novo que o Waze passe a mandar
   // aparece feio (nome cru da API), mas aparece — esconder calado uma mudança
-  // de verdade é o oposto do que a app existe pra fazer.
+  // de verdade é o oposto do que o app existe pra fazer.
   const rd = harEstadio();
   rd.venues.objects[0].venueUpdateRequests[0].changedVenue.campoNovoDoWaze = 'valor';
   const { places } = buildPlacesFromSearch(rd, { filterTypes: ['DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE', 'FLAGGED_PHOTO', 'DELETE_PHOTO'], unreadOnly: true });
@@ -515,7 +515,7 @@ const harMergulho = () => ({
 });
 
 test('buildPlacesFromSearch: reporte leva o MOTIVO, não só o comentário vazio', () => {
-  // A app lia só `flagComment` (texto livre), herdado do PHP e nunca conferido
+  // O app lia só `flagComment` (texto livre), herdado do PHP e nunca conferido
   // contra um reporte real. Ele vem vazio: quem carrega o motivo é o `flagType`.
   const { places } = buildPlacesFromSearch(harMergulho(), { filterTypes: null, unreadOnly: true });
   assert.equal(places.length, 1);
@@ -815,12 +815,12 @@ test('folha de objeto que é lista vira delta, não dois blocos de JSON', async 
   assert.deepEqual([e[0].de, e[0].para], ['a', 'b']);
 });
 
-test('a sessão é janela DESLIZANTE: usar a app renova o prazo', async () => {
+test('a sessão é janela DESLIZANTE: usar o app renova o prazo', async () => {
   const { makeSessions, SESSION_TTL, SESSION_REFRESH_AFTER } = await import('../server/core.mjs');
 
   // O adaptador de arquivo da VM sempre renovou (mtime + touch). O KV do
   // Cloudflare NÃO: `expirationTtl` conta do `put` e o `get` não estende nada.
-  // Medido com este mesmo simulador antes da correção: editor usando a app
+  // Medido com este mesmo simulador antes da correção: editor usando o app
   // TODO DIA era deslogado no dia 21, com ZERO escritas no KV no período.
   const DIA = 86400;
   const T0 = 1785000000;
@@ -851,7 +851,7 @@ test('a sessão é janela DESLIZANTE: usar a app renova o prazo', async () => {
     }
 
     // Rajada no MESMO dia não pode virar uma escrita por leitura: o KV aceita
-    // 1 escrita/s por chave, e a app faz 3 chamadas só ao abrir. Trocar o
+    // 1 escrita/s por chave, e o app faz 3 chamadas só ao abrir. Trocar o
     // logout por estouro de limite de escrita seria trocar de defeito.
     const antes = escritas;
     for (let i = 0; i < 30; i++) { agora += 1; await sessions.loadSession(token); }
@@ -871,7 +871,7 @@ test('valor de sessão SEM carimbo é rejeitado, não adivinhado', async () => {
 
   // Formato único: `carimbo|blob`. Havia compatibilidade pro formato antigo
   // (blob puro) enquanto se supunha sessão em produção pra preservar — o owner
-  // confirmou que a app está em dev/testes, então saiu. Aceitar as duas formas
+  // confirmou que o app está em dev/testes, então saiu. Aceitar as duas formas
   // faria a renovação de prazo depender de adivinhação: sem carimbo não dá pra
   // saber quando a sessão foi escrita.
   const kv = new Map();
@@ -934,7 +934,7 @@ test('cookie rotacionado pelo Waze é aplicado por cima do guardado', async () =
   assert.match(comVirgula, /_web_session\ta,b,c/, 'o valor foi cortado na vírgula');
 });
 
-test('o prazo da sessão do Waze é FIXO, e é ele que a app conta', async () => {
+test('o prazo da sessão do Waze é FIXO, e é ele que o app conta', async () => {
   const { prazoDaSessaoWaze } = await import('../server/core.mjs');
 
   // Cabeçalho REAL, copiado das 3 chamadas de leitura que mediram a questão que
@@ -945,7 +945,7 @@ test('o prazo da sessão do Waze é FIXO, e é ele que a app conta', async () =>
   //
   // Se um dia o Waze passar a DESLIZAR o prazo, este teste é onde se percebe:
   // as três chamadas passariam a devolver o mesmo `Max-Age` e um `Expires`
-  // andando pra frente — e aí o aviso da app vira mentira e tem que sair.
+  // andando pra frente — e aí o aviso do app vira mentira e tem que sair.
   const ROTACOES = [2622757, 2622754, 2622751].map((maxAge) => ([
     `_web_session=VALOR${maxAge}; Path=/; Expires=Tue, 15-Sep-2026 02:04:14 GMT; Max-Age=${maxAge}; Secure; HttpOnly`,
     `_csrf_token=CSRF; Path=/; Expires=Tue, 15-Sep-2026 02:04:14 GMT; Max-Age=${maxAge}; Secure`,
@@ -961,7 +961,7 @@ test('o prazo da sessão do Waze é FIXO, e é ele que a app conta', async () =>
   assert.equal(prazoDaSessaoWaze(['_web_session=X; Expires=Tue, 15 Sep 2026 02:04:14 GMT'], T0), soExpires,
     'o formato com espaços deixou de ser aceito');
 
-  // Não saber é `null`, nunca um número inventado: a app trata ausente como
+  // Não saber é `null`, nunca um número inventado: o app trata ausente como
   // "mantém o que já sabia", e um 0 ou NaN aqui viraria "vence hoje" na tela.
   assert.equal(prazoDaSessaoWaze([], T0), null);
   assert.equal(prazoDaSessaoWaze(null, T0), null);
@@ -1052,7 +1052,7 @@ test('purTypeDoUR: classifica cada forma REAL no tipo do WME', () => {
       `${JSON.stringify(ur)} deveria ser ${esperado}`);
   }
   // O par que distingue local de foto é `flagSubjectType`, e é o ÚNICO sinal:
-  // trocá-lo tem que trocar o tipo, senão a app junta duas coisas diferentes.
+  // trocá-lo tem que trocar o tipo, senão o app junta duas coisas diferentes.
   assert.notEqual(
     purTypeDoUR({ type: 'REQUEST', subType: 'FLAG', flagSubjectType: 'VENUE' }),
     purTypeDoUR({ type: 'REQUEST', subType: 'FLAG', flagSubjectType: 'IMAGE' }),
@@ -1222,7 +1222,7 @@ test('excluir-foto: escreve a lista que veio da RELEITURA, não a que o celular 
 
 // ── O que está guardado no servidor não presta sem o aparelho do editor ─────
 //
-// Este teste É a frase pública. Se ele passar a falhar, a app deixou de poder
+// Este teste É a frase pública. Se ele passar a falhar, o app deixou de poder
 // dizer que "nem quem opera consegue abrir o que está guardado" — e a frase
 // está na Ajuda, em quatro idiomas.
 //
@@ -1261,7 +1261,7 @@ test('sessão: Secret + dump do KV, SEM o token, não abre nada', async () => {
     () => crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(ivB) }, cruas, b64(ctB)),
     'o Secret sozinho NÃO pode decifrar — se decifrou, a derivação sumiu');
 
-  // 3. Com o token (a requisição normal), abre — senão a app não funcionaria.
+  // 3. Com o token (a requisição normal), abre — senão o app não funcionaria.
   assert.equal(await sessions.loadSession(token), COOKIES);
 
   // 4. E o token de outra pessoa não abre esta sessão.
@@ -1511,7 +1511,7 @@ test('duplicado: a caixa se centra no centróide, não no primeiro vértice', as
     const r = await dispatch('buscar-places', { sessionToken: token, region: 'row' }, { sessions });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const p = r.body.places[0];
-    // O que a app expõe como posição do local É o primeiro vértice — é daqui
+    // O que o app expõe como posição do local É o primeiro vértice — é daqui
     // que vinha o erro, e deixar isso explícito impede de "consertar" o
     // extractLonLat, que está certo pro que ele serve.
     assert.equal(p.lon, -0.003, 'place.lon deixou de ser o primeiro vértice — o teste perdeu o sentido');
@@ -1534,10 +1534,10 @@ test('duplicado: a caixa se centra no centróide, não no primeiro vértice', as
 
 // ── Renomear o local ────────────────────────────────────────────────────────
 //
-// A ÚNICA escrita de dado de LOCAL da app. O payload abaixo é o do WME byte a
+// A ÚNICA escrita de dado de LOCAL do app. O payload abaixo é o do WME byte a
 // byte, tirado de um HAR do owner renomeando "Teste AG" → "Teste AGE": só `id` e
 // `name`. É PATCH, não substituição — o oposto do que as fotos fazem (gotcha
-// #57), e supor o contrário teria feito a app mandar o venue inteiro.
+// #57), e supor o contrário teria feito o app mandar o venue inteiro.
 //
 // O caminho foi exercitado contra o Waze REAL no local de testes do owner, com
 // autorização explícita dele: renomear → releitura independente confirmando →
@@ -1600,7 +1600,7 @@ test('renomear-local: recusa nome vazio e venueID ausente, sem tocar no Waze', a
 
 test('renomear-local: o Waze dizer 200 e NÃO ter mudado vira erro, não sucesso', async () => {
   // O eco não é prova (mesma ressalva do excluir-foto), mas quando ele CONTRADIZ
-  // o pedido, afirmar sucesso seria a app mentir na cara do editor.
+  // o pedido, afirmar sucesso seria o app mentir na cara do editor.
   const VID = 'v-1';
   const { r } = await renomearComStub(
     { venueID: VID, nome: 'Nome Novo' },

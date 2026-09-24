@@ -1,7 +1,7 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026092401';
+const CACHE_NAME = 'waze-places-2026092402';
 // Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
 // ver a nota no `activate`.
 const TILES_CACHE = 'waze-places-tiles';
@@ -106,7 +106,7 @@ self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
-  // A app avisa quando terminou de guardar tiles. Sem isto o SW só saberia
+  // O app avisa quando terminou de guardar tiles. Sem isto o SW só saberia
   // deles no próximo `activate`, e a sombra de sinal chegaria antes.
   if (event.data && event.data.type === 'TILES_GUARDADOS') {
     event.waitUntil(hidratarTiles());
@@ -205,7 +205,7 @@ self.addEventListener('fetch', event => {
     // `no-cache, must-revalidate` nesses arquivos — e `no-cache` já OBRIGA a
     // perguntar ao servidor antes de reusar. A garantia virou do cabeçalho; o
     // `reload` só sobrava, e sobrava caro: ele pula o cache e NÃO manda
-    // `If-None-Match`, então todo carregamento rebaixava a app inteira.
+    // `If-None-Match`, então todo carregamento rebaixava o app inteiro.
     //
     // MEDIDO no fio, com o SW no controle, num F5:
     //   cache: 'reload'   → 0 requisições condicionais, 0 × 304, 680 KB

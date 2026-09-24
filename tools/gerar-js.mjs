@@ -23,7 +23,7 @@
 // `carregarQr()`. Um bundle mudaria as três coisas de uma vez, sem ganho de
 // tamanho — o custo aqui é byte, não número de requisições (HTTP/2 multiplexa).
 //
-// A saída é COMMITADA: quem só roda a app não precisa de `npm install`, que é
+// A saída é COMMITADA: quem só roda o app não precisa de `npm install`, que é
 // valor explícito do projeto. O CI cobra que ela esteja em dia.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';

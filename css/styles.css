@@ -60,7 +60,7 @@ body.dark {
    preferência; se não, sobra o `background_color` do manifest.
 
    O escopo `:not(.tema-claro)` é obrigatório: quem ESCOLHEU claro num celular
-   em modo escuro não pode receber fundo escuro por baixo de uma app clara —
+   em modo escuro não pode receber fundo escuro por baixo de um app claro —
    seria trocar o incômodo do owner por um pior. O `tema.js` põe essa classe
    antes do primeiro paint, então nunca há um quadro com a decisão errada. */
 @media (prefers-color-scheme: dark) {
@@ -74,7 +74,7 @@ body.dark {
  *
  * Nasceu de um relato: o editor marcava como lido, atualizava, e o pedido
  * voltava. NÃO era bug — o filtro dele estava com "Apenas pedidos não lidos"
- * desmarcado, e aí a app pede ao Waze TUDO, inclusive lido. O que faltava era o
+ * desmarcado, e aí o app pede ao Waze TUDO, inclusive lido. O que faltava era o
  * card dizer isso; ele não podia, porque o `isRead` era lido só pra filtrar no
  * core e descartado antes de chegar aqui.
  *
@@ -90,7 +90,7 @@ body.dark {
  * VERDE e ✓ porque é o MESMO conceito do botão de marcar como lido — regra de
  * consistência do projeto (mesmo conceito, mesmo ícone, mesma cor).
  *
- * NÃO leva `title`: title não se alcança no celular, que é onde a app roda —
+ * NÃO leva `title`: title não se alcança no celular, que é onde o app roda —
  * é o defeito que a linha "de N na região" já tem. */
 .card-read-banner:not(.hidden) {
   display: block;
@@ -198,7 +198,7 @@ body.dark {
 .swipe-stamp-up    { top: 46%; left: 50%; color: #d97706; --tx: -50%; --rot: -6deg; }
 
 /* ── Entrada do card: NENHUM efeito ─────────────────────────────────────────
-   Decisão do owner (2026-09-20), em duas rodadas, olhando a app rodar: "o
+   Decisão do owner (2026-09-20), em duas rodadas, olhando o app rodar: "o
    próximo card não pode nascer com efeito nenhum" e, depois de ver rodando
    o fade que tinha ficado pra avaliação, "pode tirar o fade".
 
@@ -221,7 +221,7 @@ body.dark {
    card de baixo não tem por onde atravessar: a regra que o escondia durante o
    fade saiu JUNTO, e com ela a escotilha de `prefers-reduced-motion` que
    existia só por causa dela (com `animation: none` o `animationend` nunca
-   dispara, então a classe ficava pendurada e a pilha sumia da app). Quem
+   dispara, então a classe ficava pendurada e a pilha sumia do app). Quem
    reintroduzir QUALQUER efeito na entrada reintroduz o PAR inteiro — leia isto
    antes, não só a regra que for escrever.
 
@@ -230,9 +230,9 @@ body.dark {
    direto no valor final. Ela serve ao arraste que volta pro lugar. */
 
 /* ── Comemoração do "Tudo limpo!" ───────────────────────────────────────────
-   O único momento da app em que o editor TERMINOU algo — e o único onde festa
+   O único momento do app em que o editor TERMINOU algo — e o único onde festa
    é de graça, porque não há próxima ação esperando. Só toca quando ele de fato
-   tratou algo na sessão (ver showNoPlaces): abrir a app numa fila já vazia não
+   tratou algo na sessão (ver showNoPlaces): abrir o app numa fila já vazia não
    é conquista. */
 .confetti {
   position: absolute;
@@ -314,7 +314,7 @@ body.dark {
 
 /* A pré-condição só aparece onde ela morde: no dedo. Quem chega direto no
    celular não tem caminho nenhum sozinho — as três opções exigem um computador
-   em algum momento —, e a app nunca dizia isso. Num computador a frase seria
+   em algum momento —, e o app nunca dizia isso. Num computador a frase seria
    ruído, porque lá o caminho existe. */
 @media (pointer: coarse) {
   /* `#authScreen` na frente porque `.auth-precondicao` sozinha EMPATA com o
@@ -419,7 +419,7 @@ body.dark {
 /* O segundo seletor é o estado ANTES do JS: com sessão no aparelho, o script
    inline do <head> marca o <html> e a tela dos cards já é pintada. Ele PRECISA
    estar aqui junto, e não numa regra própria com `display:flex` — a cadeia de
-   flex inteira é que dá a altura ao card (ver "A app cabe na tela"). Sem ela o
+   flex inteira é que dá a altura ao card (ver "O app cabe na tela"). Sem ela o
    #appScreen nascia com 416px em vez de 730, o placar ocupava a tela toda e
    tudo se reacomodava quando o JS chegava: MEDIDO, CLS de 0,0053 pra 0,19 num
    3G. Regra separada = duas fontes pro mesmo layout, e elas divergiram. */
@@ -428,14 +428,14 @@ html.tem-sessao #appScreen {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  /* Elo do meio da cadeia que dá a sobra da janela ao card (ver "A app cabe na
+  /* Elo do meio da cadeia que dá a sobra da janela ao card (ver "O app cabe na
      tela"). Sem o `min-height: 0` o filho flex não encolhe abaixo do conteúdo e
      a cadeia inteira não serve pra nada. */
   flex: 1 1 auto;
   min-height: 0;
 }
 
-/* ── A app cabe na tela, em QUALQUER aparelho ──────────────────────────────
+/* ── O app cabe na tela, em QUALQUER aparelho ──────────────────────────────
    Num 1366×768 os custos fixos (header 69 + placar 87 + margens 80) mais o
    card de 614px davam 850px: 82px de rolagem numa tela que não precisava
    rolar. E rolagem disputa com o gesto de "pular".
@@ -508,7 +508,7 @@ body > main {
   #placarGrid > :nth-child(n + 3)  { border-top-width: 1px; padding-top: 0.375rem; }
 
   /* A segunda fileira custa altura numa tela que já é a mais curta de todas, e
-     altura aqui vira rolagem — que numa app de swipe disputa com o gesto de
+     altura aqui vira rolagem — que num app de swipe disputa com o gesto de
      "pular".
      Aqui existiam dois "cortes" que não cortavam nada: `font-size: 1.25rem` é
      exatamente o `text-xl` que ele achava estar reduzindo (medido: 20px/28px
@@ -609,9 +609,9 @@ body > main {
   mask-image: linear-gradient(to bottom, #000 calc(100% - min(1.5rem, 40%)), transparent);
 }
 
-/* Valor que a APP escreveu, não que veio do Waze. Os parênteses no texto já
+/* Valor que o APP escreveu, não que veio do Waze. Os parênteses no texto já
    dizem sozinhos (e o leitor de tela os lê); isto é o reforço visual pra quem
-   bate o olho. Cor sozinha não bastaria — WCAG 1.4.1, e a app é usada no sol.
+   bate o olho. Cor sozinha não bastaria — WCAG 1.4.1, e o app é usado no sol.
    Itálico da Inter é sintético (o arquivo variável só traz o peso normal), o
    que é aceitável num rótulo curto e nunca é o único sinal.
    Dois seletores porque `.card-name` etc. empatam com utility do Tailwind e
@@ -643,7 +643,7 @@ body > main {
 }
 
 /* Janela do "Desfazer" correndo: os três botões ficam visivelmente travados.
-   Botão que não responde e parece normal lê como app quebrada — o M3 pede que
+   Botão que não responde e parece normal lê como app quebrado — o M3 pede que
    estado desabilitado seja visível. A contagem regressiva do próprio banner diz
    por quanto tempo. Dois seletores porque `.card-btn-*` empata com utility do
    Tailwind e perderia por ordem de carga (gotcha #27). */
@@ -1153,7 +1153,7 @@ button:active {
   #noMoreCards .empty-badge {
     display: none;
   }
-  /* Estreito E baixo é a pior conta da app: com 280px de largura cada linha
+  /* Estreito E baixo é a pior conta do app: com 280px de largura cada linha
      vira duas, e a altura pra absorver isso não existe. Medido com a fixture
      pesada do CI, faltavam 14px (UPDATE) e 18px (FLAG) — só respiro, nenhuma
      informação. Estes três cortes devolvem ~22px e o conteúdo volta a caber
@@ -1280,7 +1280,7 @@ button:active {
      ações na coluna 2 sobravam 193px de 268 pro texto, e um UPDATE comum pede
      253. Assim o texto recebe a altura INTEIRA do card e não rola — logo o
      arraste pra cima continua sendo "pular" (gotcha #29), que é o laço
-     principal da app. A foto perde altura mas mantém a largura toda da coluna;
+     principal do app. A foto perde altura mas mantém a largura toda da coluna;
      deitado ela já era o elemento que mais sobrava. */
   .place-card .card-photo {
     grid-column: 1;
@@ -1614,7 +1614,7 @@ button:active {
 .selo-rank { background: #e0f2fe; color: #075985; }
 .selo-src  { background: #f1f5f9; color: #475569; }
 .selo-lote { background: #fef3c7; color: #92400e; }
-/* Reincidência é REJEIÇÃO ACUMULADA, então herda o ROSA do ✕ — a app já fixa
+/* Reincidência é REJEIÇÃO ACUMULADA, então herda o ROSA do ✕ — o app já fixa
    "✕ rejeitar/rosa, ✓ lido/verde, ↑ pular/âmbar", e o âmbar já é do lote: duas
    coisas âmbar na MESMA linha seriam duas gramáticas pro mesmo lugar.
    Contraste MEDIDO: 6.68:1 no claro, 6.78:1 no escuro (WCAG 1.4.3 pede 4.5). */
@@ -1756,7 +1756,7 @@ button:active {
    especificidade, e a ordem de carga decide. Medido: `display: flex` valendo
    COM a classe `hidden` presente, e o elemento roubando 276px do card (ele é
    filho do <main>, que é elo da cadeia de flex do gotcha #32).
-   O `:not(.hidden)` é o mesmo remédio que a app já usa no #appScreen. */
+   O `:not(.hidden)` é o mesmo remédio que o app já usa no #appScreen. */
 #extLoginState:not(.hidden) {
   display: flex;
   flex-direction: column;
@@ -1926,8 +1926,8 @@ button:active {
    inteira do recurso. A pílula deixa 301px no Fold e 513px no Pixel 7.
 
    `--kb-inset` é publicado pelo `setupKeyboardInset()` a partir da
-   `visualViewport`: é o teclado DO SISTEMA (Gboard, iOS…), que a app não
-   desenha — ela só cede o espaço. No desktop o inset é 0 e nada se move. */
+   `visualViewport`: é o teclado DO SISTEMA (Gboard, iOS…), que o app não
+   desenha — ele só cede o espaço. No desktop o inset é 0 e nada se move. */
 .lb-nome {
   left: 0.75rem;
   right: 0.75rem;
@@ -2103,7 +2103,7 @@ button:active {
      5.5rem NAQUELE card, o estouro é ZERO em todos os comprimentos. */
   .card-flag-comment-text { max-height: calc(2 * var(--linha-comentario)); }
 }
-/* Deitado: 393px de altura pra app inteira, e o card já usa 268. Mesmo
+/* Deitado: 393px de altura pro app inteiro, e o card já usa 268. Mesmo
    raciocínio, mesmo remédio. */
 @media (max-height: 480px) and (min-width: 600px) {
   .card-flag-comment > p:first-of-type { display: none; }
@@ -2223,7 +2223,7 @@ button:active {
 /* ── A LISTA A (fase 3): "Triando agora" + "Conversas" ─────────────────────
    Uma lista, duas partes — o desenho aprovado nos mockups. As medidas são as
    das linhas de antes (56px de alvo, a mesma pílula de não lidas); o que muda
-   é a SEGUNDA linha: a distância de quem está na app, ou a prévia da conversa.
+   é a SEGUNDA linha: a distância de quem está no app, ou a prévia da conversa.
    Tons: slate-500 sobre branco = 4,76:1 e slate-400 sobre slate-800 = 5,71:1,
    os dois acima do mínimo de 4,5 pra texto pequeno (WCAG 1.4.3). */
 .presenca-sub { font-size: 0.8125rem; color: rgb(100 116 139); margin: -0.5rem 0 0.5rem; }
@@ -2410,7 +2410,7 @@ button:active {
 .dark .conversa-anexo-nome { color: rgb(226 232 240); }
 /* slate-300, não slate-400: sobre o slate-700 da tirinha o 400 dá 4,04:1 e
    REPROVA o mínimo de 4,5 pra texto pequeno. O mesmo slate-400 passa em outros
-   lugares da app porque lá o fundo é o slate-800 — contraste tem ESCOPO, e o
+   lugares do app porque lá o fundo é o slate-800 — contraste tem ESCOPO, e o
    escopo é o fundo em que foi medido (gotcha #40). */
 .dark .conversa-anexo-meta { color: rgb(203 213 225); }
 .conversa-anexo-x {
@@ -2498,7 +2498,7 @@ html.tem-sessao #authScreen { display: none; }
 }
 
 /* O botão PEGO: cresce e ganha sombra. É o retorno que faltava por inteiro —
-   sem ele não dá pra saber se a app agarrou o botão ou se o toque se perdeu, e
+   sem ele não dá pra saber se o app agarrou o botão ou se o toque se perdeu, e
    "parece que tem algo segurando" é a descrição de um gesto sem resposta.
    Vence o `active:scale-95` do Tailwind por especificidade (dois ids) E por
    ordem (o styles.css entra depois no app.css, gotcha #27) — de propósito:
@@ -2549,7 +2549,7 @@ html.tem-sessao #authScreen { display: none; }
 .lb-pill-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 2.5rem; }
 
 /* ── Patentes e Conquistas ─────────────────────────────────────────────────
-   Tudo desenhado a partir de MEDIÇÃO na app real (2026-09-14, Pixel 411 e
+   Tudo desenhado a partir de MEDIÇÃO no app real (2026-09-14, Pixel 411 e
    Galaxy Fold 280, dois temas, pt e fr). Três números decidiram:
 
    • GRADE de 3 colunas (2 abaixo de 400px). Em 4, MEDIDO no Pixel: as colunas
@@ -2666,7 +2666,7 @@ html.tem-sessao #authScreen { display: none; }
 .dark .conq-dica b { color: #f1f5f9; }
 
 /* ── Conquista nova: o selo e o anel ───────────────────────────────────────
-   MEDIDO nas quatro formas de avisar, com a app rodando (2026-09-16): banner
+   MEDIDO nas quatro formas de avisar, com o app rodando (2026-09-16): banner
    dourado cobre 13 dos 13 nós de texto do placar e joga confete sobre a foto;
    banner "discreto" no topo cobre os mesmos 13 (o problema é a POSIÇÃO, não a
    cor); snackbar no rodapé TAPA o ✕ no Galaxy Fold. O selo cobre ZERO.
@@ -2683,7 +2683,7 @@ html.tem-sessao #authScreen { display: none; }
    nesta ela ainda precisa ver o que ganhou. */
 .conq-cel.nova { outline: 2px solid #d97706; outline-offset: 1px; position: relative; }
 .conq-card.nova { outline: 2px solid #d97706; outline-offset: 2px; }
-/* O pulso de "olha aqui" quando a app LEVA a pessoa até o que destravou.
+/* O pulso de "olha aqui" quando o app LEVA a pessoa até o que destravou.
    Espelha o `prefHighlight` do Desfazer — mesma forma (sobe rápido, segura,
    some), mesma natureza (só `box-shadow`, zero layout: uma célula da grade que
    mudasse de tamanho empurraria as vizinhas).
@@ -2693,7 +2693,7 @@ html.tem-sessao #authScreen { display: none; }
    etiqueta são todos #d97706. Quem separa este pulso do contorno estático que
    já está embaixo dele é o MOVIMENTO, não o tom.
 
-   Duas iterações e não uma: medido na app, uma só passa quase despercebida
+   Duas iterações e não uma: medido no app, uma só passa quase despercebida
    sobre uma vitrine em que toda conquista ganha já é âmbar. */
 .conq-alvo {
   animation: conqAlvo 1.9s ease-out;
@@ -2715,7 +2715,7 @@ html.tem-sessao #authScreen { display: none; }
 .dark .conq-tag { box-shadow: 0 0 0 2px rgb(30 41 59); }
 
 /* ── "A foto precisa de sinal" ────────────────────────────────────────────
-   O pedido de FOTO sem a foto, offline. A app JÁ tinha um "Sem Imagem", e ele
+   O pedido de FOTO sem a foto, offline. O app JÁ tinha um "Sem Imagem", e ele
    diz a coisa ERRADA aqui: "sem imagem" é não existir foto; o caso é o oposto
    — ela existe e não desceu. Usar o placeholder de hoje seria mentir calado.
 

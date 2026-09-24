@@ -105,7 +105,7 @@ test('autores: no teto, sai quem tem a rejeição mais ANTIGA (não a menor cont
 });
 
 // O anel expira por CAPACIDADE e o mapa por IDADE — então o teto do anel tem
-// que COBRIR a janela do mapa, senão a app para de promover quem foi rejeitado
+// que COBRIR a janela do mapa, senão o app para de promover quem foi rejeitado
 // no dia 1 e no dia 25 (o id do dia 1 já saiu por lotação) e a promessa do card
 // quebra em SILÊNCIO. Foi o defeito real: com 2.000, a fila do owner dava 19
 // dias contra os 30 prometidos.
@@ -147,7 +147,7 @@ test('autores: esquecer um autor tira só ele', () => {
   assert.deepEqual(m.listaDeAutores().map((x) => x.id), ['222']);
 });
 
-test('autores: armazenamento corrompido não derruba a app', () => {
+test('autores: armazenamento corrompido não derruba o app', () => {
   const m = montar();
   m.guardado.set(m.AUTORES_KEY, '{"v":"não é array","r":42}');
   m.escopo.AppState.autores = null;
@@ -172,7 +172,7 @@ test('autores: o selo só aparece a partir de 2, e o destaque só no limiar', ()
   const bloco = semComentarios.slice(i, semComentarios.indexOf('function ', i + 10));
   assert.match(bloco, /reincidente >= 2/, 'o piso de 2 saiu do selo');
   assert.match(bloco, /reincidente >= AUTOR_LIMIAR_DESTAQUE \? 'selo-reinc' : 'selo-src'/,
-    'o rosa precisa ficar atrás do limiar — abaixo dele a app CONTA, não acusa');
+    'o rosa precisa ficar atrás do limiar — abaixo dele o app CONTA, não acusa');
 });
 
 test('autores: o core manda o id numérico junto com o nome', () => {
@@ -228,7 +228,7 @@ test('lote: "já tratado por outro editor" NÃO conta como falha', () => {
   const i = semComentarios.indexOf('async function enviarLote');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('function mostrarResultadoDoLote'));
   assert.match(bloco, /already_processed[\s\S]{0,80}conta\.ja\+\+/,
-    'a app já trata isso como objetivo cumprido no card único — chamar de falha aqui daria dois nomes à mesma coisa');
+    'o app já trata isso como objetivo cumprido no card único — chamar de falha aqui daria dois nomes à mesma coisa');
   assert.match(bloco, /conta\.erro\+\+[\s\S]{0,420}AppState\.queue\.push\(p\)/,
     'o que NÃO saiu tem que voltar pra fila, senão o pedido some sem ter sido tratado');
 });
@@ -260,7 +260,7 @@ test('selo vermelho é SEMPRE tocável, e a folha é que se adapta ao tamanho da
   assert.ok(!/folha:[^,]*pedidosDoAutorNaFila/.test(selo),
     'a contagem da fila decide o CONTEÚDO da folha, nunca se ela abre');
   assert.ok(!/folha: pedidosDoAutorNaFila\(place\)\.length > 1 \? place/.test(selo),
-    'sem o limiar, a app oferece rejeição em lote pra quem ela nem acusa');
+    'sem o limiar, o app oferece rejeição em lote pra quem ele nem acusa');
 
   const iFolha = semComentarios.indexOf('function abrirFolhaDoAutor');
   const folha = semComentarios.slice(iFolha, semComentarios.indexOf('\nfunction ', iFolha + 10));
@@ -406,7 +406,7 @@ test('auto: nada acontece sem o portão, nem no treino, nem duas vezes ao mesmo 
 });
 
 test('auto: os pedidos saem da fila ANTES de serem enviados', () => {
-  // Senão o editor veria como card um pedido que a app já está rejeitando, e
+  // Senão o editor veria como card um pedido que o app já está rejeitando, e
   // poderia agir nele — dois envios pro mesmo pedido.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');

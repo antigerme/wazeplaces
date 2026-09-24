@@ -8,7 +8,7 @@
 // `hidden` de `overflow-hidden` e deu "esqueleto escondido" com ele VISÍVEL, e
 // contar `class="place-card` no `dom` contou o card do `<template>` e deu "dois
 // cards da frente". Leitor único é onde a lição fica: aqui ninguém vasculha o
-// `dom` — lê-se o que a app JÁ MEDIU (alertas, `cardMontado`, `telaDoCard`),
+// `dom` — lê-se o que o app JÁ MEDIU (alertas, `cardMontado`, `telaDoCard`),
 // que é pra isso que as medições existem.
 //
 // O QUE NUNCA SAI, por construção:
@@ -82,7 +82,7 @@ else {
   if (off.ligado) out(`pousos gravados depois da fila guardada: ${off.pousosGravados === undefined ? AUSENTE : off.pousosGravados}`);
 }
 
-// Só os NÚMEROS que a app mediu (`resumo.saida`). O conteúdo da fila de saída
+// Só os NÚMEROS que o app mediu (`resumo.saida`). O conteúdo da fila de saída
 // (ids e o autor de cada pedido) mora no localStorage, que este leitor não lê.
 secao('FILA DE SAÍDA');
 const sa = r.saida;
@@ -94,30 +94,69 @@ else {
 }
 
 // A presença no mapa do WME (fase 2, `resumo.presencaWme`): só números e
-// estados que a app mediu — nenhuma posição sai daqui.
+// estados que o app mediu — nenhuma posição sai daqui.
 secao('PRESENÇA NO WME');
 const pw = r.presencaWme;
 if (pw === undefined) out(AUSENTE);
 else if (pw.erro) out('erro ao medir: ' + pw.erro);
 else {
-  out(`ligada ${pw.ligada} · já vista ligada ${pw.visto} · ligar na próxima ação ${pw.ligarNaProxima} · escritas ${pw.enviadas} · falhas ${pw.falhas}${pw.ultimaFalha ? ` (última: ${pw.ultimaFalha})` : ''} · última escrita há ${pw.ultimaHaS ?? '—'} s`);
-  if (pw.marcaPerdida) out('ATENÇÃO: o Waze devolveu a posição SEM a marca da app — a lista de quem está na app vai vir vazia.');
+  // `visto` só existe em relatório de antes de v2026.09.24-02, quando o WME
+  // ainda podia desligar a presença do app.
+  out(`ligada ${pw.ligada}${pw.visto !== undefined ? ` · já vista ligada ${pw.visto}` : ''} · ligar na próxima ação ${pw.ligarNaProxima} · escritas ${pw.enviadas} · falhas ${pw.falhas}${pw.ultimaFalha ? ` (última: ${pw.ultimaFalha})` : ''} · última escrita há ${pw.ultimaHaS ?? '—'} s`);
+  // `perfilVisivel` entrou no relatório v8.
+  if (pw.perfilVisivel !== undefined) out(`o perfil do WME disse visível: ${pw.perfilVisivel ?? '—'}${pw.perfilHaS != null ? ` (há ${pw.perfilHaS} s)` : ''}`);
+  if (pw.marcaPerdida) out('ATENÇÃO: o Waze devolveu a posição SEM a marca do app — a lista de quem está no app vai vir vazia.');
+  // A presença do WME expira ~15 min depois da última escrita (medido): quem
+  // parou de agir já sumiu da lista dos outros, e isso NÃO é defeito.
+  if (pw.ligada && pw.ultimaHaS > 900) out(`nota: ${Math.round(pw.ultimaHaS / 60)} min sem escrever a posição — pros outros, a pessoa já saiu da lista (expira em ~15 min parado).`);
+  if (pw.ligada && pw.enviadas === 0 && pw.ultimaHaS == null) out('nota: nenhuma ação com presença desde que o app abriu — pros outros, a pessoa só aparece depois da primeira ✕ ou ✓.');
 }
 
-// A lista e o chat da app (fase 3, `resumo.presencaApp`): só contagens e
+// A lista e o chat do app (fase 3, `resumo.presencaApp`): só contagens e
 // estados — nome, texto e token nunca vão pro relatório.
-secao('PRESENÇA NA APP (lista e conversa)');
+secao('PRESENÇA NO APP (lista e conversa)');
 const pa = r.presencaApp;
 if (pa === undefined) out(AUSENTE);
 else if (!pa) out('sem a presença carregada');
 else if (pa.erro) out('erro ao medir: ' + pa.erro);
 else {
   const f = pa.fluxo || {};
-  out(`ligada ${pa.ligada} · na app ${pa.online} · conversas ${pa.conversas} · não lidas ${pa.naoLidas} · lista de há ${pa.atualizadaHaS ?? '—'} s · conversa aberta ${pa.conversaAberta}`);
+  out(`ligada ${pa.ligada} · no app ${pa.online} · conversas ${pa.conversas} · não lidas ${pa.naoLidas} · lista de há ${pa.atualizadaHaS ?? '—'} s · conversa aberta ${pa.conversaAberta}`);
   out(`token ${pa.token ? `válido ${pa.token.valido} (vence em ${pa.token.expiraEmH ?? '?'} h)` : 'nenhum'} · tempo real aberto ${f.aberto}${f.aberto ? ` há ${f.haS} s` : ''} · aberturas ${f.aberturas} · quadros ${f.quadros} · mensagens ${f.mensagens} · recibos ${f.recibos} · recuo ${f.tentativa}${f.ultimoErro ? ` · último erro: ${f.ultimoErro}` : ''}`);
-  out(`conhecidas no aparelho ${pa.conhecidos} · a confirmar ${pa.aConfirmar}`);
+  out(`conhecidas no aparelho ${pa.conhecidos} · a confirmar ${pa.aConfirmar}${f.ignoradas !== undefined ? ` · mensagens só do WME (ignoradas de propósito) ${f.ignoradas}` : ''}${f.quedasSeguidas ? ` · quedas seguidas do tempo real ${f.quedasSeguidas}` : ''}`);
+  // O PORQUÊ da lista, contado no servidor (relatório v8): separa "ninguém usa
+  // o app agora" de "está no app, mas noutro país" e de "a marca se perdeu".
+  const ct = pa.contagem;
+  if (ct === undefined) out('por que a lista é essa: ' + AUSENTE);
+  else if (!ct) out('por que a lista é essa: (nenhuma lista chegou ainda)');
+  else {
+    const o = ct.online, c = ct.conversas;
+    if (o) out(o.falhou ? `lista do WME: FALHOU (${o.falhou})` : `no WME agora: ${o.noWme} visíveis · com a marca do app: ${o.comMarca} · no país do filtro: ${o.noPais}`);
+    if (c) out(c.falhou ? `conversas do Waze: FALHOU (${c.falhou})` : `conversas no Waze: ${c.noWaze} · com a marca do app: ${c.marcadas} · entram na lista (marca ou já conhecida): ${c.daApp}`);
+  }
   if (pa.ligada && pa.token && !pa.token.valido) out('ATENÇÃO: o token do tempo real venceu — mensagem nova só aparece no próximo pedido.');
   if (pa.aConfirmar >= 90) out('ATENÇÃO: a fila de confirmação está quase no teto — a confirmação de carona pode não estar voltando.');
+}
+
+// Que código o aparelho está rodando. Desde o relatório v8 o `codigo` guarda o
+// tamanho, o hash e a versão de cada arquivo (o corpo, só do CSS); o
+// `cacheVsRede` compara o que o aparelho tem com o que o servidor serve AGORA.
+secao('CÓDIGO NO APARELHO');
+{
+  const cod = d.codigo || {};
+  const cvr = d.cacheVsRede || {};
+  const nome = (u) => String(u).replace(/^https?:\/\/[^/]+/, '') || '/';
+  const versoes = Object.entries(cod).filter(([, v]) => v && v.versao).map(([u, v]) => `${nome(u)} ${v.versao}`);
+  out(`app ${d.app?.versao ?? '?'}${versoes.length ? ' · declarado nos arquivos: ' + versoes.join(' · ') : ''}`);
+  // Nota e não alerta: numa atualização em curso o worker novo já chegou e a
+  // página ainda roda a versão de antes, e isso é normal por alguns segundos.
+  const distintas = new Set([d.app?.versao, ...Object.values(cod).map((v) => v && v.versao)].filter(Boolean));
+  if (distintas.size > 1) out(`nota: os arquivos declaram ${distintas.size} versões diferentes — normal só durante uma atualização; fora dela, o cache está misturado.`);
+  const dif = Object.entries(cvr).filter(([, v]) => v && v.igual === false);
+  const erros = Object.entries(cvr).filter(([, v]) => v && v.erro);
+  out(`${Object.keys(cvr).length} arquivos conferidos com o servidor · diferentes: ${dif.length}${erros.length ? ` · sem conferir: ${erros.length}` : ''}`);
+  for (const [u, v] of dif) out(`  DIFERENTE: ${nome(u)} (aparelho ${v.bytesAparelho} bytes · servidor ${v.bytesServidor} bytes)`);
+  if (dif.length) out('ATENÇÃO: o aparelho roda código diferente do servidor — versão velha no cache, ou misturada.');
 }
 
 secao('SERVICE WORKER');
@@ -148,7 +187,10 @@ secao('CHAMADAS À API (sem corpo)');
 const chamadas = Array.isArray(d.chamadas) ? d.chamadas : [];
 if (!chamadas.length) out('(nenhuma)');
 for (const c of chamadas.slice(-30)) {
-  out(`${hora(c.t)}  ${String(c.rota).padEnd(16)} http ${c.http} · ${c.ok ? 'ok' : 'FALHOU'} · ${c.ms} ms${c.errorCategory ? ' · ' + c.errorCategory : ''}${c.errorKey ? ' · ' + c.errorKey : ''}`);
+  // A AÇÃO do chat (abrir, enviar, confirmar…) é o que distingue as chamadas
+  // dele entre si; o resto do pedido fica no arquivo.
+  const acao = c.rota === 'chat' && c.corpoReq && typeof c.corpoReq.acao === 'string' ? ` (${c.corpoReq.acao.slice(0, 12)})` : '';
+  out(`${hora(c.t)}  ${(String(c.rota) + acao).padEnd(16)} http ${c.http} · ${c.ok ? 'ok' : 'FALHOU'} · ${c.ms} ms${c.errorCategory ? ' · ' + c.errorCategory : ''}${c.errorKey ? ' · ' + c.errorKey : ''}`);
 }
 if (chamadas.length > 30) out(`(… e mais ${chamadas.length - 30} antes destas)`);
 
@@ -168,7 +210,7 @@ if (!momentos.length) out('(nenhuma)');
 for (const m of momentos) linhasDaCaptura(m);
 
 // As aberturas ANTERIORES que ficaram guardadas no aparelho (só com o modo dev
-// ligado nelas) — é onde mora o defeito que atravessa fechar e reabrir a app.
+// ligado nelas) — é onde mora o defeito que atravessa fechar e reabrir o app.
 // As mesmas regras do resto: nada de `dom`, nenhum corpo de chamada (que nem
 // chega a ser guardado), e o token trocado no fim.
 const quando = (t) => {

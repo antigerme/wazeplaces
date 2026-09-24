@@ -119,11 +119,13 @@ for (const [rota, extra, caminhoDaAcao] of [
     assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
     assert.equal(resultado.body.success, true);
     assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
-    // Fase 3: além da ação e da escrita, a carona LÊ quem usa a app e as
+    // Fase 3: além da ação e da escrita, a carona LÊ quem usa o app e as
     // conversas — uma chamada de cada, nem mais nem menos.
     assert.deepEqual(pedidos.map((p) => p.tipo).sort(), ['acao', 'conversas', 'escrita', 'lista'],
-      'devia sair a ação, a escrita e as duas leituras da app, uma de cada');
-    assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [] });
+      'devia sair a ação, a escrita e as duas leituras do app, uma de cada');
+    // As contagens (o PORQUÊ da lista, pro diagnóstico) vêm junto: zero aqui
+    // porque o Waze de mentira devolve as duas listas vazias.
+    assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [], contagem: { online: { noWme: 0, comMarca: 0, noPais: 0 }, conversas: { noWaze: 0, marcadas: 0, daApp: 0 } } });
     const acao = pedidos.find((p) => p.tipo === 'acao');
     const pres = pedidos.find((p) => p.tipo === 'escrita');
     assert.ok(acao.url.includes(caminhoDaAcao), acao.url);
@@ -133,7 +135,7 @@ for (const [rota, extra, caminhoDaAcao] of [
     const e = lerEscrita(pres.corpo);
     assert.equal(e.userId, '12444348');
     assert.deepEqual(e.caminhos, ['location'], 'sem pedido de ligar, a carona só move');
-    assert.ok(temMarcaDaApp(e), 'a posição foi SEM a marca da app');
+    assert.ok(temMarcaDaApp(e), 'a posição foi SEM a marca do app');
     assert.equal(paisDaMarca(e), 30);
     const m = marcarPosicao(PRESENCA, 30);
     assert.equal(Math.round(e.lat * 1e6), Math.round(m.lat * 1e6));
@@ -236,7 +238,7 @@ test('carona: a validação da AÇÃO vem antes — pedido inválido não move n
 });
 
 test('carona: o eco do Waze CONFERE a marca — posição arredondada vira marca:false', async () => {
-  // O dia em que o Waze arredondar a posição, a marca some e a lista da app
+  // O dia em que o Waze arredondar a posição, a marca some e a lista do app
   // esvazia. A resposta de cada escrita traz a posição: é ali que se vê.
   const { resultado } = await comWaze({
     acao: ACAO_OK,
@@ -265,10 +267,10 @@ test('carona: presença LENTA não segura a resposta — teto de espera, e o res
   assert.equal(resultado.body.success, true);
   assert.ok(!('presenca' in resultado.body), 'esperou a presença lenta em vez de responder');
   assert.ok(levou < 2500, `a resposta esperou ${levou} ms — o teto é 1,5 s depois da ação`);
-  // Duas partes vão ao segundo plano — a escrita e a leitura da app —, cada uma
+  // Duas partes vão ao segundo plano — a escrita e a leitura do app —, cada uma
   // no seu tempo. A leitura (rápida aqui) chega na resposta; a escrita, não.
   assert.equal(fundo.length, 2, 'a carona não entregou as duas partes ao segundo plano');
-  assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [] }, 'a leitura rápida ficou presa atrás da escrita lenta');
+  assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [], contagem: { online: { noWme: 0, comMarca: 0, noPais: 0 }, conversas: { noWaze: 0, marcadas: 0, daApp: 0 } } }, 'a leitura rápida ficou presa atrás da escrita lenta');
   assert.equal(concluiu, false);
   const fins = await Promise.all(fundo);
   assert.equal(concluiu, true);
@@ -281,7 +283,7 @@ test('carona: a região escolhe o servidor da presença (a lista é separada por
       () => dispatch('validar-place', { cookies: COOKIES, region, venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
     assert.equal(pedidos.find((p) => p.tipo === 'escrita').url,
       `https://www.waze.com/${prefixo}/grpc/com.waze.mapeditor.web.api.MapEditorWebServer/updateOnlineEditor`, region);
-    // A lista de quem usa a app vem do MESMO servidor da presença.
+    // A lista de quem usa o app vem do MESMO servidor da presença.
     assert.equal(pedidos.find((p) => p.tipo === 'lista').url,
       `https://www.waze.com/${prefixo}/grpc/com.waze.mapeditor.web.api.MapEditorWebServer/listOnlineEditors`, region);
   }

@@ -38,7 +38,7 @@ const LANG_REF = 'pt';
 const placeholders = (s) => (String(s).match(/\{[a-zA-Z0-9_]+\}/g) || []).sort().join(',');
 
 test('i18n: dicionário tem os idiomas suportados', () => {
-  // A app declara os suportados em LANGS_SUPORTADOS = Object.keys(I18N_DICT) e
+  // O app declara os suportados em LANGS_SUPORTADOS = Object.keys(I18N_DICT) e
   // monta os <option> a partir de LANG_NOMES. Idioma no dicionário sem nome no
   // mapa apareceria como o código cru ("fr") no seletor.
   assert.ok(LANGS.length >= 3, `só ${LANGS.length} idioma(s) no dicionário`);
@@ -61,7 +61,7 @@ test('i18n: dicionário tem os idiomas suportados', () => {
       `${l} não tem locale — número e data sairiam no padrão do fallback sem ninguém notar`);
   }
 
-  // Decisão do owner: a app tem UM idioma por língua, nunca variante regional
+  // Decisão do owner: o app tem UM idioma por língua, nunca variante regional
   // como opção separada. Só se vê pt, en, es, fr — não pt-BR ao lado de pt-PT,
   // nem fr-FR ao lado de fr-CA. Variante do NAVEGADOR colapsa no idioma (provado
   // no teste do fallback); variante como CHAVE seria um segundo francês no
@@ -185,7 +185,7 @@ test('i18n: idioma desconhecido cai em inglês, não em português', () => {
   }
   // E quem É atendido vem da detecção, sem passar pelo fallback. Repare que a
   // lista tem VARIANTES REGIONAIS de propósito: ela prova que todas colapsam num
-  // idioma de 2 letras. A app tem UM francês, como tem UM português — nunca
+  // idioma de 2 letras. O app tem UM francês, como tem UM português — nunca
   // fr-FR e fr-CA como coisas separadas no seletor.
   for (const [loc, esperado] of [['pt-BR', 'pt'], ['pt-PT', 'pt'], ['en-GB', 'en'], ['es-AR', 'es'],
                                  ['fr-FR', 'fr'], ['fr-CA', 'fr']]) {
@@ -265,7 +265,7 @@ test('{undoSeg} é registrado por setI18nVars a partir de UNDO_WINDOW_MS', () =>
 // ── A ponte servidor → dicionário ─────────────────────────────────────────
 // O core manda `errorKey`; o frontend traduz e, se a chave não existir, cai na
 // frase crua do servidor — que é PORTUGUÊS. Então chave nova no core sem entrada
-// aqui não quebra nada: só devolve a app pro português para quem escolheu outro
+// aqui não quebra nada: só devolve o app pro português para quem escolheu outro
 // idioma, exatamente o bug que a chave existe pra consertar. Nenhuma auditoria
 // de dicionário pega isso, porque a chave chega pela REDE.
 test('i18n: toda errorKey do backend existe no dicionário', () => {
@@ -294,7 +294,7 @@ test('i18n: dicionário não acumula srv.err.* órfã', () => {
 });
 
 // O `||` que fazia o português do servidor GANHAR da tradução. Era o buraco de
-// i18n mais fundo da app: 8 pontos onde `result.error || t('...')` mostrava a
+// i18n mais fundo do app: 8 pontos onde `result.error || t('...')` mostrava a
 // frase do backend e só usava o dicionário se o servidor não dissesse nada.
 test('i18n: mensagem do servidor passa pelo tradutor, não pelo ||', () => {
   const app = read('js/app.js');
@@ -309,7 +309,7 @@ test('i18n: mensagem do servidor passa pelo tradutor, não pelo ||', () => {
 // ── O manifest é servido IGUAL pra todo mundo ──────────────────────────────
 // Não tem como traduzi-lo por leitor: é arquivo estático, e o sistema o lê uma
 // vez, na instalação. Então o texto dele é neutro — o mesmo critério do
-// LANG_FALLBACK, que atende quem a app não consegue detectar. Estava em
+// LANG_FALLBACK, que atende quem o app não consegue detectar. Estava em
 // português: nome, descrição, `lang`, as duas legendas de screenshot e os DOIS
 // atalhos (que aparecem no toque longo do ícone no Android) — 10 strings, e eu
 // só tinha achado 3 na primeira varredura porque parei no topo do arquivo.
@@ -319,7 +319,7 @@ test('manifest: texto neutro e lang igual ao LANG_FALLBACK', () => {
   assert.ok(fallback, "não achei o LANG_FALLBACK em js/i18n.js");
   assert.equal(man.lang, fallback,
     `manifest.lang (${man.lang}) tem que ser o LANG_FALLBACK (${fallback}): os dois respondem ` +
-    'à mesma pergunta — o que mostrar pra quem a app não sabe identificar');
+    'à mesma pergunta — o que mostrar pra quem o app não sabe identificar');
 
   // Diacrítico de pt/es/fr em qualquer campo de TEXTO do manifest. Não é prova
   // de idioma, é farol: acusa a recaída óbvia (voltar a escrever "Validação",
@@ -382,4 +382,43 @@ test('selos do card: todo selo que é PALAVRA começa com maiúscula, nas 4 lín
   // que seja decisão e não arrasto.
   const dica = dict.match(/'card\.source\.MOBILE_CLIENT\.title': '([^']*)'/);
   assert.ok(dica && dica[1].length > 15, 'a dica virou rótulo curto — foi decisão?');
+});
+
+// "App" em português é MASCULINO — decisão do owner (2026-09-24): *"normalmente
+// falamos 'no app' e não 'na app'"*. O app, no app, do app, pelo app, este app,
+// um app — e a concordância junto ("o app fica aberto", "Ele rejeita…"). A UI
+// portuguesa é a brasileira (`LOCALE_POR_LANG.pt` é pt-BR); "o app" e
+// "aplicação" são o uso de Portugal. A regra pega o artigo ou a preposição
+// FEMININA colada em "app", no dicionário pt e no texto VISÍVEL do
+// index.src.html (sem comentário nem <script>: o HTML é o que aparece antes do
+// applyI18n). A concordância que vem DEPOIS ("o app está aberta") ela não
+// enxerga — essa foi revisada à mão, e é o que se confere ao escrever texto novo.
+const APP_FEMININO = /(^|[^\p{L}\p{N}_])(a|as|à|às|na|nas|da|das|pela|pelas|uma|numa|duma|esta|nesta|desta|essa|nessa|dessa|aquela|naquela|daquela|sua|nossa|minha|toda|outra|própria|mesma|nova)\s+apps?(?![\p{L}\p{N}_])/iu;
+const APLICACAO = /aplicaç(ão|ões)/iu;
+const textoVisivelDoHtml = (html) => html
+  .replace(/<!--[\s\S]*?-->/g, ' ')
+  .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+  .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+const femininoEm = (s) => APP_FEMININO.test(s) || APLICACAO.test(s);
+
+test('pt: "app" é masculino — no dicionário e no texto visível do HTML', () => {
+  // Contraprova: a regra enxerga as formas que o app tinha, e deixa passar as certas.
+  for (const errado of ['Quem está na app:', 'Para anular: sair da app.', 'Esta aplicação nunca aprova',
+    'reabra a app pra tentar', 'usar a app em 2 idiomas', 'volte à app', 'nesta app', 'A app guarda'])
+    assert.ok(femininoEm(errado), `a regra não enxerga "${errado}"`);
+  for (const certo of ['Quem está no app:', 'sair do app', 'Este app nunca aprova', 'reabra o app',
+    'Sua sessão no app venceu', 'Instalar o aplicativo', 'mande no WhatsApp', 'os apps do celular', 'para app'])
+    assert.ok(!femininoEm(certo), `a regra acusa "${certo}", que está certo`);
+
+  const noDicionario = Object.entries(DICT.pt)
+    .filter(([, v]) => femininoEm(String(v)))
+    .map(([k, v]) => `${k}: ${String(v).slice(0, 90)}`);
+  assert.deepEqual(noDicionario, [],
+    '"app" no feminino no português — no Brasil é "o app"/"no app"/"do app", e "aplicação" vira "app"');
+
+  const html = textoVisivelDoHtml(read('index.src.html'));
+  assert.ok(html.includes('data-i18n="help.presenca.title"'), 'o recorte do HTML perdeu a Ajuda — a regra estaria lendo nada');
+  const noHtml = [...html.matchAll(new RegExp(APP_FEMININO.source, 'giu'))].map((m) => m[0].trim())
+    .concat([...html.matchAll(new RegExp(APLICACAO.source, 'giu'))].map((m) => m[0]));
+  assert.deepEqual(noHtml, [], '"app" no feminino no texto visível do index.src.html');
 });

@@ -146,7 +146,7 @@ test('diag-resumo: relatório de antes da fila de saída no resumo diz que ela n
 });
 
 test('diag-resumo: as ABERTURAS ANTERIORES guardadas aparecem, com diário, capturas e alertas — sem dom nem corpo', () => {
-  // v2026.09.22-06: o relato que atravessa fechar e reabrir a app. O defeito
+  // v2026.09.22-06: o relato que atravessa fechar e reabrir o app. O defeito
   // foi capturado ANTES de fechar, noutra abertura, e o relatório de depois
   // tem que mostrar isso.
   const CORPO = 'CANARIO-CORPO-da-fila';
@@ -187,7 +187,7 @@ test('diag-resumo: relatório de antes das aberturas guardadas diz que elas não
   assert.match(rodar(relatorioV4()), /── ABERTURAS ANTERIORES \(guardadas no aparelho\) ─+\n\(ausente nesta versão\)/);
 });
 
-test('diag-resumo: a presença da app (fase 3) sai em CONTAGENS, com os avisos — nunca nome, texto ou token', () => {
+test('diag-resumo: a presença do app (fase 3) sai em CONTAGENS, com os avisos — nunca nome, texto ou token', () => {
   const d = relatorioV4();
   d._versaoDoDiag = 7;
   d.resumo.presencaApp = {
@@ -197,12 +197,107 @@ test('diag-resumo: a presença da app (fase 3) sai em CONTAGENS, com os avisos �
     conhecidos: 5, aConfirmar: 95,
   };
   const s = rodar(d);
-  assert.match(s, /── PRESENÇA NA APP \(lista e conversa\) ─+\nligada true · na app 2 · conversas 3 · não lidas 1/, 'a seção da presença da app sumiu');
+  assert.match(s, /── PRESENÇA NO APP \(lista e conversa\) ─+\nligada true · no app 2 · conversas 3 · não lidas 1/, 'a seção da presença do app sumiu');
   assert.match(s, /tempo real aberto true há 12 s · aberturas 4 · quadros 31 · mensagens 2 · recibos 1 · recuo 0/);
   assert.match(s, /ATENÇÃO: o token do tempo real venceu/, 'o aviso do token vencido não saiu');
   assert.match(s, /ATENÇÃO: a fila de confirmação está quase no teto/, 'o aviso da confirmação não saiu');
   assert.ok(!s.includes(TOKEN), 'o token vazou');
   // Relatório de antes da fase 3: a seção diz que não havia.
   const antigo = rodar(relatorioV4());
-  assert.match(antigo, /── PRESENÇA NA APP \(lista e conversa\) ─+\n\(ausente nesta versão\)/);
+  assert.match(antigo, /── PRESENÇA NO APP \(lista e conversa\) ─+\n\(ausente nesta versão\)/);
+});
+
+// ── v8 (v2026.09.24-02): o relatório pra entender os relatos da fase 3 ──────
+// Com o modo dev, o anel de chamadas passou a guardar a conversa (o texto que
+// sai e a resposta do chat). O LEITOR segue imprimindo só a triagem: quem
+// precisa da conversa abre o arquivo; o resumo é o que se cola numa conversa
+// sobre o relato, e ali texto de terceiro não ajuda.
+const TEXTO = 'CANARIO-TEXTO-da-conversa';
+
+const relatorioV8 = () => {
+  const d = relatorioV4();
+  d._versaoDoDiag = 8;
+  d.app = { versao: '2026092402', rotulo: '2026.09.24-02' };
+  d.resumo.presencaWme = { ligada: true, ligarNaProxima: false, enviadas: 3, falhas: 0, ultimaFalha: null,
+                           ultimaHaS: 1200, perfilVisivel: false, perfilHaS: 1300, marcaPerdida: false };
+  d.resumo.presencaApp = {
+    ligada: true, online: 0, conversas: 1, naoLidas: 0, atualizadaHaS: 30, conversaAberta: true,
+    token: { valido: true, expiraEmH: 23 },
+    fluxo: { aberto: true, haS: 12, tentativa: 0, aberturas: 2, quadros: 9, mensagens: 1, recibos: 0,
+             ignoradas: 4, quedasSeguidas: 2, ultimoFim: 1, ultimoErro: 'TypeError' },
+    conhecidos: 1, aConfirmar: 0,
+    contagem: { online: { noWme: 48, comMarca: 3, noPais: 0 }, conversas: { noWaze: 9, marcadas: 1, daApp: 1 } },
+  };
+  d.chamadas.push(
+    { t: '2026-09-24T18:00:01.000Z', rota: 'chat', ms: 180, http: 200, ok: true,
+      corpoReq: { acao: 'enviar', texto: TEXTO, para: '183164343' }, corpoResposta: JSON.stringify({ success: true, eco: TEXTO }) },
+    { t: '2026-09-24T18:00:02.000Z', rota: 'chat', ms: 90, http: 200, ok: true,
+      corpoReq: { acao: 'abrir', com: '183164343' },
+      corpoResposta: JSON.stringify({ success: true, mensagens: [{ texto: TEXTO }], token: '[credencial do tempo real]' }) });
+  d.codigo = {
+    'https://x.dev/': { http: 200, bytes: 20000, hash: 'aaaa' },
+    'https://x.dev/js/min/version.js': { http: 200, bytes: 180, hash: 'bbbb', versao: '2026092402' },
+    'https://x.dev/service-worker.js': { http: 200, bytes: 9000, hash: 'cccc', versao: '2026092401' },
+    'https://x.dev/css/app.css': { http: 200, bytes: 60000, hash: 'dddd', corpo: '.x{}' + DOM },
+  };
+  d.cacheVsRede = {
+    'https://x.dev/': { aparelho: 'aaaa', servidor: 'aaaa', igual: true, bytesAparelho: 20000, bytesServidor: 20000, http: 200 },
+    'https://x.dev/js/min/app.js': { aparelho: 'eeee', servidor: 'ffff', igual: false, bytesAparelho: 70000, bytesServidor: 70100, http: 200 },
+    'https://x.dev/manifest.json': { erro: 'Failed to fetch' },
+  };
+  return d;
+};
+
+test('diag-resumo v8: a lista do app vem com o PORQUÊ contado no servidor', () => {
+  const s = rodar(relatorioV8());
+  assert.match(s, /no WME agora: 48 visíveis · com a marca do app: 3 · no país do filtro: 0/, 'o porquê da lista de online sumiu');
+  assert.match(s, /conversas no Waze: 9 · com a marca do app: 1 · entram na lista \(marca ou já conhecida\): 1/);
+  assert.match(s, /mensagens só do WME \(ignoradas de propósito\) 4 · quedas seguidas do tempo real 2/);
+  assert.match(s, /último erro: TypeError/);
+  // Parte que falhou no servidor diz que falhou — não "0 visíveis".
+  const f = relatorioV8();
+  f.resumo.presencaApp.contagem = { online: { falhou: 'transient' }, conversas: { noWaze: 0, marcadas: 0, daApp: 0 } };
+  assert.match(rodar(f), /lista do WME: FALHOU \(transient\)/);
+  // Relatório v7 (sem contagem): a linha diz que a versão não trazia.
+  const v7 = relatorioV8();
+  v7._versaoDoDiag = 7;
+  delete v7.resumo.presencaApp.contagem;
+  assert.match(rodar(v7), /por que a lista é essa: \(ausente nesta versão\)/);
+});
+
+test('diag-resumo v8: a presença no WME diz o que o perfil disse e explica quem sumiu da lista por estar parado', () => {
+  const s = rodar(relatorioV8());
+  assert.match(s, /o perfil do WME disse visível: false \(há 1300 s\)/);
+  assert.match(s, /nota: 20 min sem escrever a posição — pros outros, a pessoa já saiu da lista/);
+  const d = relatorioV8();
+  Object.assign(d.resumo.presencaWme, { enviadas: 0, ultimaHaS: null });
+  assert.match(rodar(d), /nota: nenhuma ação com presença desde que o app abriu/);
+  // Controle: quem escreveu há pouco não ganha nota nenhuma.
+  Object.assign(d.resumo.presencaWme, { enviadas: 2, ultimaHaS: 60 });
+  assert.ok(!/nota: .*(sem escrever|nenhuma ação)/.test(rodar(d)), 'nota de presença apareceu sem motivo');
+});
+
+test('diag-resumo v8: o CÓDIGO no aparelho — versões declaradas, arquivos diferentes do servidor, e nunca o corpo', () => {
+  const s = rodar(relatorioV8());
+  assert.match(s, /── CÓDIGO NO APARELHO ─+\napp 2026092402 · declarado nos arquivos: \/js\/min\/version\.js 2026092402 · \/service-worker\.js 2026092401/);
+  assert.match(s, /nota: os arquivos declaram 2 versões diferentes/, 'a mistura de versões não foi notada');
+  assert.match(s, /3 arquivos conferidos com o servidor · diferentes: 1 · sem conferir: 1/);
+  assert.match(s, /DIFERENTE: \/js\/min\/app\.js \(aparelho 70000 bytes · servidor 70100 bytes\)/);
+  assert.match(s, /ATENÇÃO: o aparelho roda código diferente do servidor/);
+  assert.ok(!s.includes(DOM), 'o corpo do CSS vazou na saída');
+  // Controle: tudo igual e uma versão só — nem nota, nem atenção.
+  const d = relatorioV8();
+  d.codigo['https://x.dev/service-worker.js'].versao = '2026092402';
+  d.cacheVsRede = { 'https://x.dev/': d.cacheVsRede['https://x.dev/'] };
+  const t = rodar(d);
+  assert.ok(!/nota: os arquivos declaram/.test(t) && !/ATENÇÃO: o aparelho roda código diferente/.test(t), 'aviso de código sem diferença');
+});
+
+test('diag-resumo v8: as chamadas do chat dizem a AÇÃO — e a conversa que o modo dev guarda não sai no resumo', () => {
+  const s = rodar(relatorioV8());
+  assert.match(s, /chat \(enviar\)\s+http 200 · ok · 180 ms/);
+  assert.match(s, /chat \(abrir\)\s+http 200 · ok · 90 ms/);
+  assert.ok(!s.includes(TEXTO), 'o texto de uma conversa vazou no resumo');
+  assert.ok(!s.includes('183164343'), 'o id de quem conversa vazou no resumo');
+  assert.ok(!s.includes(TOKEN), 'o token vazou');
 });

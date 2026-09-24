@@ -20,7 +20,7 @@
 // O owner VÊ os PURs de fora mesmo sem poder editar lá. Como
 // `buildPlacesFromSearch` (com razão) descarta venue sem permissão, a fixture
 // de teste força `permissions: -1` antes de expandir — maquiagem de FIXTURE,
-// nunca da app: o filtro de permissão segue valendo em produção, e é o
+// nunca do app: o filtro de permissão segue valendo em produção, e é o
 // `test/core.test.mjs` que cobre isso.
 
 // Os SEIS que nunca faltam. Lista fechada pelo owner; tirar um é decisão dele.

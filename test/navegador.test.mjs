@@ -110,7 +110,7 @@ test('o carregador aceita as duas formas do módulo, e só com o `chromium`', ()
 
 test('o CI testa com o Playwright MAIS NOVO, por um botão só', () => {
   const ci = ler('.github/workflows/ci.yml');
-  // O navegador de quem usa a app se atualiza sozinho; o do teste também tem
+  // O navegador de quem usa o app se atualiza sozinho; o do teste também tem
   // que ser o da vez. Fixar uma versão é EXCEÇÃO: se um Playwright novo vier
   // quebrado, fixe aqui e no workflow, com o motivo e a data — ato deliberado,
   // não um pino esquecido por 21 meses.
@@ -206,7 +206,7 @@ test('a presença não usa WebRTC desde a fase 3 — e o smoke dela exercita o t
   // ICE no teste (o nome mDNS `.local`, que o contêiner não resolve). Desde a
   // fase 3 a conversa é o chat do WME: sem WebRTC, o ajuste saiu com ele.
   // O que o smoke precisa provar agora é o tempo real saindo pro host do Google
-  // — com a CSP de verdade da app, que é onde ele morreria calado.
+  // — com a CSP de verdade do app, que é onde ele morreria calado.
   const codigo = semComentario(ler('tools/smoke-presenca.mjs'));
   assert.doesNotMatch(codigo, /RTCPeerConnection|iceSemMdns|createDataChannel/,
     'o smoke da presença voltou a usar WebRTC — a conversa não é mais par a par');
@@ -214,7 +214,7 @@ test('a presença não usa WebRTC desde a fase 3 — e o smoke dela exercita o t
     'o smoke deixou de rotear o host de verdade do tempo real — a CSP não seria exercitada');
   assert.match(codigo, /await ctx\.route\(GOOGLE \+ '\*\*'/, 'o tempo real não é mais roteado no smoke');
   assert.match(codigo, /spawn\(process\.execPath, \[join\(ROOT, 'server', 'node\.mjs'\)\]/,
-    'o smoke tem que servir a app pelo servidor de verdade — é ele que manda a CSP');
+    'o smoke tem que servir o app pelo servidor de verdade — é ele que manda a CSP');
 });
 
 test('a main roda o CI toda semana, fora da hora cheia', () => {

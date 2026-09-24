@@ -63,7 +63,7 @@ const I18N_DICT = {
     'modal.comoFunciona.wme': 'Para corrigir o local de verdade, use o ↗ do card e abra no Waze Map Editor.',
     'help.howToProcess.rever': 'Ver de novo “Como funciona”',
     'auth.requisito': '<b>Quem pode entrar:</b> editor <b>nível {nivelMinimo}+</b> que seja <b>Area Manager</b>, ou staff do Waze.',
-    'auth.previa.aria': 'Prévia da aplicação',
+    'auth.previa.aria': 'Prévia do app',
     'auth.previa.card': 'Um pedido com foto, categoria e endereço',
     'auth.previa.map': 'Mapa mostrando onde o local fica',
     'auth.previa.changes': 'Mudanças propostas em antes e depois',
@@ -78,7 +78,7 @@ const I18N_DICT = {
     'modal.logout.title': 'Sair?',
     'modal.logout.body': 'Sua sessão será encerrada e <strong>todos os dados locais</strong> (cookies, estatísticas, filtros e preferências) serão apagados deste aparelho. Esta ação não pode ser desfeita.',
     'modal.accessDenied.title': 'Acesso restrito',
-    'modal.accessDenied.subtitle': 'Exclusiva para editor nível {nivelMinimo}+ que seja Area Manager, ou staff do Waze',
+    'modal.accessDenied.subtitle': 'Exclusivo para editor nível {nivelMinimo}+ que seja Area Manager, ou staff do Waze',
     'modal.accessDenied.help': 'Se você acredita que deveria ter acesso, peça para verificar suas permissões no Waze Map Editor (rank e status de Area Manager).',
     'modal.accessDenied.dismiss': 'Entendi',
     'modal.filters.title': 'Filtros e Preferências',
@@ -95,7 +95,7 @@ const I18N_DICT = {
     'filters.diag.gerando': 'Juntando tudo…',
     'filters.diag.aviso': 'Traz <b>tudo</b> que está neste aparelho, inclusive o <b>token da sessão</b>. Trate como senha.',
     'toast.diagPronto': 'Diagnóstico baixado 📋',
-    'diag.leiame': 'DIAGNÓSTICO DO WAZE PLACES (v{v})\n\nATENÇÃO: o diagnostico.json aqui dentro contém o waze_session_token, que é\nCREDENCIAL VIVA da conta do Waze de quem gerou. Trate este arquivo como senha:\nquem o tiver pode agir na conta até a sessão vencer.\n\nPara anular: sair da app. Isso destrói a sessão no servidor e o token do\narquivo deixa de valer.\n\nNÃO contém os cookies do Waze — eles são de outra origem e não ficam neste\naparelho.\n',
+    'diag.leiame': 'DIAGNÓSTICO DO WAZE PLACES (v{v})\n\nATENÇÃO: o diagnostico.json aqui dentro contém o waze_session_token, que é\nCREDENCIAL VIVA da conta do Waze de quem gerou. Trate este arquivo como senha:\nquem o tiver pode agir na conta até a sessão vencer.\n\nPara anular: sair do app. Isso destrói a sessão no servidor e o token do\narquivo deixa de valer.\n\nLeva também o que o app mostrou e recebeu: os pedidos da fila, nomes de\neditores e, se você usou o chat, as conversas. Mande só para quem vai\ninvestigar o problema.\n\nNÃO contém os cookies do Waze — eles são de outra origem e não ficam neste\naparelho.\n',
     'toast.diagFalhou': 'Não deu pra gerar o diagnóstico: {erro}',
     'filters.section.filters': 'Filtros', 'filters.section.batch': 'Ações em lote',
     'filters.section.location': 'Localização',
@@ -134,7 +134,7 @@ const I18N_DICT = {
     'filters.sort.hint.perfil': 'Casa e trabalho vêm do seu perfil no WME — sem pedir localização.',
     'filters.sort.hint.pedindo': 'O aparelho vai pedir permissão de localização agora. Aproximada já basta pra ordenar.',
     'filters.sort.hint.ok': 'Localização obtida (±{m} m). A fila fica dos mais próximos pros mais distantes.',
-    'filters.sort.hint.negado': 'Sem permissão de localização — a ordem voltou pra "{padrao}". Libere nas configurações do navegador e reabra a app pra tentar de novo.',
+    'filters.sort.hint.negado': 'Sem permissão de localização — a ordem voltou pra "{padrao}". Libere nas configurações do navegador e reabra o app pra tentar de novo.',
     'batch.button': 'Marcar todos os pendentes como lidos',
     'batch.hint': 'Marca de uma vez todos os pedidos já carregados na fila. Vai direto pro Waze, sem desfazer.',
     // stats
@@ -282,7 +282,7 @@ const I18N_DICT = {
     'card.focoAutor.aria': 'Mostrando primeiro os {n} pedidos de {autor}. Tocar para voltar à ordem normal.',
     'card.creatorRank.title': 'Nível de quem enviou o pedido',
     'card.source.title': 'De onde o pedido foi enviado',
-    // Convite pra instalar. A voz é a mesma do resto da app ("Mandou bem, wazer!"),
+    // Convite pra instalar. A voz é a mesma do resto do app ("Mandou bem, wazer!"),
     // e o texto diz o GANHO concreto — tela cheia dá mais espaço pra foto, que é o
     // que o editor olha pra decidir —, não só a graça.
     'install.invite': '🚗💨 Bota o Waze Places na tela inicial: abre num toque e sobra mais tela pra foto.',
@@ -432,16 +432,16 @@ const I18N_DICT = {
     'help.howToUse.step5': 'Processe os cards (botões, arraste ou setas do teclado; <code>z</code> desfaz)',
     'help.howToUse.step6': 'Já pegou o ritmo? Em <strong>Filtros → Preferências</strong> dá pra desligar a espera do Desfazer e tratar sem pausa',
     'help.important.title': 'Importante:',
-    'help.important.body': 'Esta aplicação <strong>nunca aprova</strong> dados de local — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs">↗</span> no card. A única exceção é <strong>foto nova</strong>: ampliada, ela pode ser aprovada ou excluída ali mesmo (L6+AM ou staff).',
+    'help.important.body': 'Este app <strong>nunca aprova</strong> dados de local — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs">↗</span> no card. A única exceção é <strong>foto nova</strong>: ampliada, ela pode ser aprovada ou excluída ali mesmo (L6+AM ou staff).',
     'help.security.title': 'Segurança:',
     'help.security.body': 'Os cookies são criptografados no servidor com chave secreta e descartados após 21 dias sem uso. O cliente só guarda um token de sessão, que pode ser invalidado a qualquer momento pelo botão de "Sair".',
     'help.privacy.title': 'Privacidade e dados:',
     'help.privacy.server': 'No servidor fica só uma coisa: os seus cookies do Waze, criptografados (AES-256-GCM). Nada além disso.',
-    'help.privacy.zeroKnowledge': 'E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera a app. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.',
-    'help.privacy.notStored': 'Os pedidos NÃO são guardados: nome, foto, endereço e coordenada de place existem só na memória, enquanto a app está aberta. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, as capturas ficam até você baixar o diagnóstico, no máximo 24 h.',
+    'help.privacy.zeroKnowledge': 'E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera o app. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.',
+    'help.privacy.notStored': 'Os pedidos NÃO são guardados: nome, foto, endereço e coordenada de place existem só na memória, enquanto o app está aberto. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, as capturas ficam até você baixar o diagnóstico, no máximo 24 h.',
     'help.privacy.retention': 'Prazo: 21 dias sem uso, ou até você tocar em “Sair” — o que vier primeiro. Código de pareamento dura 5 minutos e é de uso único.',
-    'help.privacy.device': 'Neste aparelho ficam placar, filtros, preferências, histórico, as ações esperando envio e, das conversas, quais são da app e até onde cada pessoa leu. Todos apagados no “Sair”.',
-    'help.privacy.credentials': 'Seus cookies são credenciais: permitem que a app aja no Waze em seu nome. Ela rejeita, marca como lido, dá ⭐ no pedido, corrige o nome do local e — só em foto nova — aprova ou exclui a foto.',
+    'help.privacy.device': 'Neste aparelho ficam placar, filtros, preferências, histórico, as ações esperando envio e, das conversas, quais são do app e até onde cada pessoa leu. Todos apagados no “Sair”.',
+    'help.privacy.credentials': 'Seus cookies são credenciais: permitem que o app aja no Waze em seu nome. Ele rejeita, marca como lido, dá ⭐ no pedido, corrige o nome do local e — só em foto nova — aprova ou exclui a foto.',
     'help.privacy.infra': 'Roda na Cloudflare (hospedagem e medição de acesso sem cookies). Sem anúncios e sem rastreadores.',
     'help.privacy.contact': 'Dúvidas, acesso aos seus dados ou pedido de exclusão: fale com <a href="https://www.waze.com/user/editor/antigerme" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">@antigerme</a>.',
     'modal.logout.waze': 'Isto apaga os dados daqui e do servidor, mas <strong>não desconecta você do Waze</strong> — os seus cookies continuam válidos. Para encerrar de verdade, saia também no <a href="https://www.waze.com/editor" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">Waze Map Editor</a>.',
@@ -530,7 +530,7 @@ const I18N_DICT = {
     'conq.primeiroResumo.nome': 'Primeiro resumo', 'conq.primeiroResumo.como': 'compartilhar o resumo do mês',
     'conq.andarilho.nome': 'Andarilho', 'conq.andarilho.como': 'tratar em 3 estados',
     'conq.viajante.nome': 'Viajante', 'conq.viajante.como': 'tratar em 2 países',
-    'conq.poliglota.nome': 'Poliglota', 'conq.poliglota.como': 'usar a app em 2 idiomas',
+    'conq.poliglota.nome': 'Poliglota', 'conq.poliglota.como': 'usar o app em 2 idiomas',
     'conq.semanaCheia.nome': 'Semana cheia', 'conq.semanaCheia.como': '7 dias seguidos, uma vez',
     'conq.curador.nome': 'Curador', 'conq.curador.como': 'aprovar 10 fotos',
     'conq.corretor.nome': 'Corretor', 'conq.corretor.como': 'corrigir 5 nomes',
@@ -540,7 +540,7 @@ const I18N_DICT = {
     'autor.sheet.esquecer.desc': 'Zera a contagem neste aparelho · não muda nada no Waze',
     'autor.sheet.ver': 'Ver os {n} primeiro', 'autor.sheet.ver.desc': 'Põe os pedidos dele na frente da fila',
     'autor.sheet.rejeitar': 'Rejeitar os {n} da fila', 'autor.sheet.rejeitar.desc': 'Só os que estão aqui agora · começa ao tocar',
-    'autor.sheet.aviso': '<b>Não há segunda pergunta.</b> Tocar em rejeitar já escreve no Waze, e a app não desfaz depois de enviado.',
+    'autor.sheet.aviso': '<b>Não há segunda pergunta.</b> Tocar em rejeitar já escreve no Waze, e o app não desfaz depois de enviado.',
     'autor.lote.titulo': '{n} pedidos, {n} resolvidos', 'autor.lote.rejeitados': '{n} rejeitados',
     'autor.lote.rejeitados.desc': 'Foram pro Waze no seu nome',
     'autor.lote.jaTratados': '{n} já tratados por outro editor',
@@ -566,7 +566,7 @@ const I18N_DICT = {
     'profile.points': '{n} pontos', 'profile.edits': '{n} edições',
     'accessDenied.defaultMsg': 'Acesso negado.',
     // undo gate
-    'prefs.undo.gate.noProfile': '🔒 Disponível depois de você logar e a app carregar seu perfil.',
+    'prefs.undo.gate.noProfile': '🔒 Disponível depois de você logar e o app carregar seu perfil.',
     'prefs.undo.gate.countdown': '🔒 Disponível depois de tratar {threshold} PURs (você tem {current} — faltam {remaining}).',
     // relative time
     // api errors
@@ -574,7 +574,7 @@ const I18N_DICT = {
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
-    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    // `result.error || t(...)` — o português ganhava da tradução em todo o app.
     'srv.err.connection': 'Erro de conexão com o Waze',
     'srv.err.cookiesExpired': 'Cookies expirados ou inválidos',
     'srv.err.alreadyHandled': 'Já tratado por outro editor',
@@ -608,16 +608,16 @@ const I18N_DICT = {
     'srv.err.badProfile': 'Perfil inválido',
     'srv.err.accessDenied': 'Acesso restrito a editores Area Manager de nível {minLevel}+ ou Staff.',
     // ── Presença e conversa entre editores ──────────────────────────────────
-    'presenca.pill.aria': '{n} editor na app agora',
-    'presenca.pill.ariaPlural': '{n} editores na app agora',
+    'presenca.pill.aria': '{n} editor no app agora',
+    'presenca.pill.ariaPlural': '{n} editores no app agora',
     'presenca.pill.msg': '{n} mensagem nova',
     'presenca.pill.msgPlural': '{n} mensagens novas',
-    'presenca.sheet.title': 'Na app agora',
+    'presenca.sheet.title': 'No app agora',
     'presenca.sheet.sub': '{pais} · quem triou nos últimos 15 min',
     'presenca.sheet.subSemPais': 'Quem triou nos últimos 15 min',
     'presenca.sheet.agora': 'Triando agora',
     'presenca.sheet.conversas': 'Conversas',
-    'presenca.sheet.vazio': 'Ninguém mais na app agora.',
+    'presenca.sheet.vazio': 'Ninguém mais no app agora.',
     'presenca.dist': 'a {km} km daqui',
     'presenca.distPerto': 'a menos de 1 km daqui',
     'presenca.hora.ontem': 'ontem',
@@ -626,8 +626,8 @@ const I18N_DICT = {
     'presenca.anon': 'Editor',
     'presenca.conversa.ph': 'Mensagem',
     'presenca.conversa.enviar': 'Enviar',
-    'presenca.conversa.naApp': 'Na app agora',
-    'presenca.conversa.fora': 'Fora da app agora · recebe quando voltar',
+    'presenca.conversa.naApp': 'No app agora',
+    'presenca.conversa.fora': 'Fora do app agora · recebe quando voltar',
     'presenca.conversa.aviso': 'Esta conversa também fica no chat do WME de vocês dois.',
     'presenca.conversa.carregando': 'Carregando a conversa…',
     'presenca.conversa.erro': 'Não deu pra carregar a conversa.',
@@ -662,9 +662,9 @@ const I18N_DICT = {
     'prefs.pularGuarda.label': 'Pular guarda o pedido',
     'prefs.pularGuarda.desc': 'O pedido ganha ⭐ no WME e volta marcado da próxima vez.',
     'toast.guardarFalhou': 'Não deu pra guardar o pedido',
-    'prefs.presenca.label': 'Ver quem está na app',
-    'help.presenca.title': 'Quem está na app',
-    'help.presenca.oQue': 'A pílula 👥 no topo mostra quantos editores estão usando a app no mesmo país que você, nos últimos 15 minutos. Toque nela pra ver quem é e conversar.',
+    'prefs.presenca.label': 'Ver quem está no app',
+    'help.presenca.title': 'Quem está no app:',
+    'help.presenca.oQue': 'A pílula 👥 no topo mostra quantos editores estão usando o app no mesmo país que você, nos últimos 15 minutos. Toque nela pra ver quem é e conversar.',
     'help.presenca.conversa': 'As conversas passam pelo chat do Waze: ficam guardadas lá e também aparecem no chat do WME de vocês dois.',
     'help.presenca.privacidade': 'Enquanto você tria, o WME mostra seu nome e nível no mapa, no lugar do pedido que está na sua tela, até uns 15 minutos depois da última ação. O nosso servidor não guarda nada disso.',
 
@@ -745,7 +745,7 @@ const I18N_DICT = {
     'filters.diag.gerando': 'Gathering everything…',
     'filters.diag.aviso': 'Includes <b>everything</b> on this device, including the <b>session token</b>. Treat it like a password.',
     'toast.diagPronto': 'Diagnostics downloaded 📋',
-    'diag.leiame': 'WAZE PLACES DIAGNOSTICS (v{v})\n\nWARNING: the diagnostico.json inside contains the waze_session_token, a LIVE\ncredential for the Waze account that generated it. Treat this file like a\npassword: anyone holding it can act on that account until the session expires.\n\nTo revoke: log out of the app. That destroys the session on the server and the\ntoken in this file stops working.\n\nIt does NOT contain the Waze cookies — those belong to another origin and are\nnot stored on this device.\n',
+    'diag.leiame': 'WAZE PLACES DIAGNOSTICS (v{v})\n\nWARNING: the diagnostico.json inside contains the waze_session_token, a LIVE\ncredential for the Waze account that generated it. Treat this file like a\npassword: anyone holding it can act on that account until the session expires.\n\nTo revoke: log out of the app. That destroys the session on the server and the\ntoken in this file stops working.\n\nIt also carries what the app showed and received: the requests in the queue,\neditor names and, if you used the chat, the conversations. Send it only to\nwhoever is investigating the problem.\n\nIt does NOT contain the Waze cookies — those belong to another origin and are\nnot stored on this device.\n',
     'toast.diagFalhou': 'Could not build the diagnostics: {erro}',
     'filters.section.filters': 'Filters', 'filters.section.batch': 'Bulk actions',
     'filters.section.location': 'Location',
@@ -1155,7 +1155,7 @@ const I18N_DICT = {
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
-    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    // `result.error || t(...)` — o português ganhava da tradução em todo o app.
     'srv.err.connection': 'Connection error reaching Waze',
     'srv.err.cookiesExpired': 'Cookies expired or invalid',
     'srv.err.alreadyHandled': 'Already handled by another editor',
@@ -1244,7 +1244,7 @@ const I18N_DICT = {
     'prefs.pularGuarda.desc': 'The request gets a ⭐ in WME and comes back marked next time.',
     'toast.guardarFalhou': "Couldn't save the request",
     'prefs.presenca.label': 'See who is on the app',
-    'help.presenca.title': 'Who is on the app',
+    'help.presenca.title': 'Who is on the app:',
     'help.presenca.oQue': 'The 👥 pill at the top shows how many editors are using the app in the same country as you, over the last 15 minutes. Tap it to see who they are and chat.',
     'help.presenca.conversa': 'Chats go through the Waze chat: they are stored there and also show up in the WME chat of you both.',
     'help.presenca.privacidade': 'While you triage, WME shows your name and level on the map, at the request on your screen, until about 15 minutes after your last action. Our server keeps none of it.',
@@ -1326,7 +1326,7 @@ const I18N_DICT = {
     'filters.diag.gerando': 'Reuniendo todo…',
     'filters.diag.aviso': 'Incluye <b>todo</b> lo que hay en este dispositivo, incluido el <b>token de sesión</b>. Trátalo como una contraseña.',
     'toast.diagPronto': 'Diagnóstico descargado 📋',
-    'diag.leiame': 'DIAGNÓSTICO DE WAZE PLACES (v{v})\n\nATENCIÓN: el diagnostico.json que está aquí dentro contiene el\nwaze_session_token, que es CREDENCIAL VIVA de la cuenta de Waze de quien lo\ngeneró. Trata este archivo como una contraseña: quien lo tenga puede actuar en\nesa cuenta hasta que la sesión caduque.\n\nPara anularlo: salir de la app. Eso destruye la sesión en el servidor y el token\ndel archivo deja de valer.\n\nNO contiene las cookies de Waze — son de otro origen y no quedan en este\ndispositivo.\n',
+    'diag.leiame': 'DIAGNÓSTICO DE WAZE PLACES (v{v})\n\nATENCIÓN: el diagnostico.json que está aquí dentro contiene el\nwaze_session_token, que es CREDENCIAL VIVA de la cuenta de Waze de quien lo\ngeneró. Trata este archivo como una contraseña: quien lo tenga puede actuar en\nesa cuenta hasta que la sesión caduque.\n\nPara anularlo: salir de la app. Eso destruye la sesión en el servidor y el token\ndel archivo deja de valer.\n\nTambién lleva lo que la app mostró y recibió: las solicitudes de la cola,\nnombres de editores y, si usaste el chat, las conversaciones. Envíalo solo a\nquien vaya a investigar el problema.\n\nNO contiene las cookies de Waze — son de otro origen y no quedan en este\ndispositivo.\n',
     'toast.diagFalhou': 'No se pudo generar el diagnóstico: {erro}',
     'filters.section.filters': 'Filtros', 'filters.section.batch': 'Acciones en lote',
     'filters.section.location': 'Ubicación',
@@ -1737,7 +1737,7 @@ const I18N_DICT = {
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
-    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    // `result.error || t(...)` — o português ganhava da tradução em todo o app.
     'srv.err.connection': 'Error de conexión con Waze',
     'srv.err.cookiesExpired': 'Cookies caducadas o inválidas',
     'srv.err.alreadyHandled': 'Ya tratado por otro editor',
@@ -1826,7 +1826,7 @@ const I18N_DICT = {
     'prefs.pularGuarda.desc': 'La solicitud recibe una ⭐ en WME y vuelve marcada la próxima vez.',
     'toast.guardarFalhou': 'No se pudo guardar la solicitud',
     'prefs.presenca.label': 'Ver quién está en la app',
-    'help.presenca.title': 'Quién está en la app',
+    'help.presenca.title': 'Quién está en la app:',
     'help.presenca.oQue': 'La píldora 👥 de arriba muestra cuántos editores están usando la app en el mismo país que tú, en los últimos 15 minutos. Tócala para ver quiénes son y conversar.',
     'help.presenca.conversa': 'Las conversaciones pasan por el chat de Waze: quedan guardadas allí y también aparecen en el chat del WME de los dos.',
     'help.presenca.privacidade': 'Mientras revisas, el WME muestra tu nombre y nivel en el mapa, en el lugar de la solicitud que está en tu pantalla, hasta unos 15 minutos después de tu última acción. Nuestro servidor no guarda nada de eso.',
@@ -1908,7 +1908,7 @@ const I18N_DICT = {
     'filters.diag.gerando': 'Rassemblement…',
     'filters.diag.aviso': 'Contient <b>tout</b> ce qui est sur cet appareil, y compris le <b>jeton de session</b>. À traiter comme un mot de passe.',
     'toast.diagPronto': 'Diagnostic téléchargé 📋',
-    'diag.leiame': 'DIAGNOSTIC DE WAZE PLACES (v{v})\n\nATTENTION : le diagnostico.json contenu ici porte le waze_session_token, qui est\nun IDENTIFIANT ACTIF du compte Waze de la personne qui l’a généré. Traitez ce\nfichier comme un mot de passe : qui le détient peut agir sur ce compte jusqu’à\nl’expiration de la session.\n\nPour l’annuler : se déconnecter de l’app. Cela détruit la session sur le serveur\net le jeton du fichier cesse d’être valable.\n\nIl ne contient PAS les cookies de Waze — ils relèvent d’une autre origine et ne\nrestent pas sur cet appareil.\n',
+    'diag.leiame': 'DIAGNOSTIC DE WAZE PLACES (v{v})\n\nATTENTION : le diagnostico.json contenu ici porte le waze_session_token, qui est\nun IDENTIFIANT ACTIF du compte Waze de la personne qui l’a généré. Traitez ce\nfichier comme un mot de passe : qui le détient peut agir sur ce compte jusqu’à\nl’expiration de la session.\n\nPour l’annuler : se déconnecter de l’app. Cela détruit la session sur le serveur\net le jeton du fichier cesse d’être valable.\n\nIl contient aussi ce que l’app a affiché et reçu : les demandes de la file,\ndes noms d’éditeurs et, si vous avez utilisé le chat, les conversations.\nNe l’envoyez qu’à la personne qui enquête sur le problème.\n\nIl ne contient PAS les cookies de Waze — ils relèvent d’une autre origine et ne\nrestent pas sur cet appareil.\n',
     'toast.diagFalhou': 'Impossible de générer le diagnostic : {erro}',
     'filters.section.filters': 'Filtres', 'filters.section.batch': 'Actions en lot',
     'filters.section.location': 'Localisation',
@@ -2318,7 +2318,7 @@ const I18N_DICT = {
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
-    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    // `result.error || t(...)` — o português ganhava da tradução em todo o app.
     'srv.err.connection': 'Erreur de connexion à Waze',
     'srv.err.cookiesExpired': 'Cookies expirés ou invalides',
     'srv.err.alreadyHandled': 'Déjà traité par un autre éditeur',
@@ -2407,7 +2407,7 @@ const I18N_DICT = {
     'prefs.pularGuarda.desc': 'La demande reçoit une ⭐ dans WME et revient marquée la prochaine fois.',
     'toast.guardarFalhou': 'Impossible de mettre la demande de côté',
     'prefs.presenca.label': 'Voir qui est sur l’app',
-    'help.presenca.title': 'Qui est sur l’app',
+    'help.presenca.title': 'Qui est sur l’app :',
     'help.presenca.oQue': 'La pastille 👥 en haut indique combien d’éditeurs utilisent l’app dans le même pays que vous, sur les 15 dernières minutes. Touchez-la pour voir qui c’est et discuter.',
     'help.presenca.conversa': 'Les conversations passent par le chat de Waze : elles y sont conservées et apparaissent aussi dans le chat WME de vous deux.',
     'help.presenca.privacidade': 'Pendant que vous triez, WME affiche votre nom et votre niveau sur la carte, à l’emplacement de la demande à l’écran, jusqu’à environ 15 minutes après votre dernière action. Notre serveur n’en garde rien.',

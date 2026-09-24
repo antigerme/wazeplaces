@@ -62,7 +62,7 @@ test('o NOME DA SALA nasce só no servidor — e o cliente não fala mais com a 
   for (const proibido of [/salaDaFila/, /new WebSocket/, /RTCPeerConnection/, /['"]\/sala['"]/, /API\.presenca\(/, /cracha/]) {
     assert.equal(proibido.test(CLIENTE), false, `o cliente voltou a usar a sala própria (${proibido})`);
   }
-  assert.match(CLIENTE, /API\.presencaApp\(/, 'o cliente parou de pedir a lista da app');
+  assert.match(CLIENTE, /API\.presencaApp\(/, 'o cliente parou de pedir a lista do app');
 
   const CORE = read('server/core.mjs');
   assert.match(CORE, /salaDaFila\(/, 'o servidor parou de usar a fonte única do nome da sala');
@@ -393,13 +393,23 @@ test('o recuo do tempo real só zera quando o Google ENTREGA o lote, não quando
   // lote inicial (`endOfBatch`) — é o `eu` da sala, noutra roupa. O desligar
   // também zera, e é outra coisa: é a pessoa saindo, não a rede voltando.
   const CLI = read('js/presenca.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  // DENTRO do bloco do fim do lote, medido casando as chaves — e não "na mesma
+  // linha", que reprovava o bloco assim que ele ganhou mais de uma instrução
+  // (gotcha #67: guard amarrado na forma, não na estrutura).
+  const iniLote = CLI.indexOf('if (o.endOfBatch) {');
+  assert.ok(iniLote > 0, 'sumiu o tratamento do fim do lote');
+  let prof = 0, fimLote = -1;
+  for (let i = CLI.indexOf('{', iniLote); i < CLI.length; i++) {
+    if (CLI[i] === '{') prof++;
+    else if (CLI[i] === '}' && --prof === 0) { fimLote = i; break; }
+  }
   const zeragens = [...CLI.matchAll(/fluxoTentativa\s*=\s*0/g)].map((m) => {
     const linha = CLI.slice(CLI.lastIndexOf('\n', m.index) + 1, CLI.indexOf('\n', m.index));
     const fn = [...CLI.slice(0, m.index).matchAll(/function (\w+)\(/g)].pop();
-    return { linha: linha.trim(), fn: fn ? fn[1] : '?' };
+    return { linha: linha.trim(), fn: fn ? fn[1] : '?', noLote: m.index > iniLote && m.index < fimLote };
   });
-  assert.ok(zeragens.some((z) => /o\.endOfBatch/.test(z.linha)), 'o fim do lote deixou de zerar o recuo');
-  const fora = zeragens.filter((z) => !/o\.endOfBatch/.test(z.linha) && z.fn !== 'presencaDesligar');
+  assert.ok(zeragens.some((z) => z.noLote), 'o fim do lote deixou de zerar o recuo');
+  const fora = zeragens.filter((z) => !z.noLote && z.fn !== 'presencaDesligar');
   assert.deepEqual(fora.map((z) => `${z.fn}: ${z.linha}`), [],
     'o recuo do tempo real é zerado fora do fim do lote — abrir a conexão não é ter conectado');
 });
@@ -457,7 +467,7 @@ test('o núcleo da sala não fala com plataforma nenhuma', () => {
 test('a presença é a CONEXÃO, não um registro com prazo', () => {
   // Contrato publicado na Ajuda: "some assim que você sai". Isso só é verdade
   // enquanto ninguém guardar presença com TTL — no minuto em que a sala passar
-  // a lembrar de quem fechou a app, a Ajuda vira mentira nas 4 línguas.
+  // a lembrar de quem fechou o app, a Ajuda vira mentira nas 4 línguas.
   const src = read('server/presenca.mjs');
   assert.equal(/PRESENCA_TTL|setTimeout|setInterval/.test(src), false,
     'a sala passou a guardar presença com prazo: revisite a frase da Ajuda');

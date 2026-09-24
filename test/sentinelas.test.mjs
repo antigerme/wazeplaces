@@ -2,7 +2,7 @@
 // ele diz o que está errado — no aparelho do editor, onde eu não chego.
 //
 // Cada uma nasce de um defeito que já chegou na tela de alguém, e a regra de
-// entrada é dura: só invariante que a app GARANTE. Falso positivo aqui treina a
+// entrada é dura: só invariante que o app GARANTE. Falso positivo aqui treina a
 // ignorar a seção inteira, que é como ela deixa de servir. Por isso cada teste
 // tem os DOIS lados — dispara com o defeito, cala sem ele.
 //
@@ -273,11 +273,11 @@ test('diagnóstico: as duas sentinelas novas leem o que o COLETOR mede de verdad
     'o coletor parou de levar o anel de tiles guardados que falharam');
 });
 
-// ── O esqueleto POR CIMA do card (relato de 2026-09-22, a app reaberta sem rede) ──
+// ── O esqueleto POR CIMA do card (relato de 2026-09-22, o app reaberto sem rede) ──
 // O arquivo daquele relato dizia "painel: carregando" e `alertas: []` — e havia
 // um card montado, com o mapa carregado do cache, embaixo do esqueleto (z-50).
 // A leitura só achou o card cavando o `dom` cru. Com o conserto, card montado
-// e esqueleto visível ao mesmo tempo passou a ser impossível pela app.
+// e esqueleto visível ao mesmo tempo passou a ser impossível pelo app.
 
 test('sentinelas: esqueleto de "carregando" POR CIMA de um card montado — o defeito do relato', () => {
   const c = sao();
@@ -287,7 +287,7 @@ test('sentinelas: esqueleto de "carregando" POR CIMA de um card montado — o de
 
 test('sentinelas: esqueleto SEM card é carregar de verdade, e card sem esqueleto é o normal — cala', () => {
   // Alertar no carregamento legítimo (a fila ainda chegando, sem card) seria
-  // acusar toda abertura da app, e a seção morreria de falso positivo.
+  // acusar toda abertura do app, e a seção morreria de falso positivo.
   for (const [esqueleto, card, porque] of [
     [true, false, 'a fila ainda está chegando: é o esqueleto fazendo o trabalho dele'],
     [false, true, 'o card na tela, sem nada por cima: o normal'],
@@ -307,14 +307,14 @@ test('diagnóstico: a sentinela do esqueleto lê o que o COLETOR mede (esqueleto
     .filter((l) => !/^\s*\/\//.test(l)).join('\n');
   assert.match(corpo, /fora\.telaDoCard = \{/, 'o coletor parou de levar a tela do card');
   // Classe E caixa: só a classe diria "visível" pra um esqueleto fora da tela,
-  // e só a caixa não distingue o `hidden` que a app usa pra esconder.
+  // e só a caixa não distingue o `hidden` que o app usa pra esconder.
   assert.match(corpo, /esqueleto: !!\(esq && !esq\.classList\.contains\('hidden'\) && rEsq\.width > 0 && rEsq\.height > 0\)/,
     'o esqueleto tem que ser medido pela classe `hidden` E pela caixa');
   assert.match(corpo, /card: !!frente,/, 'o card medido tem que ser o da FRENTE (`cardDaFrente()`)');
 });
 
 test('sentinelas: pedido que já está esperando envio DE VOLTA na fila — o relato de reabrir sem rede', () => {
-  // v2026.09.22-06: reaberta no modo avião, a app devolvia como card o que o
+  // v2026.09.22-06: reaberta no modo avião, o app devolvia como card o que o
   // owner já tinha tratado, e dava pra decidir de novo.
   const c = sao();
   c.decididos = { naSaida: 3, naFila: 2 };

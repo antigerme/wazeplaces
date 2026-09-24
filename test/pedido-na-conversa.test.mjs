@@ -34,7 +34,7 @@ const msgCard = (extra = {}) => ({ meu: true, texto: '', legenda: '', ts: 1, id:
 
 test('pedido: o que chega é copiado CAMPO A CAMPO, não espalhado', () => {
   // Espalhar (`{...c}`) aceitaria qualquer chave que o outro aparelho
-  // inventasse, e ela viajaria pro resto da app sem ninguém ter decidido isso.
+  // inventasse, e ela viajaria pro resto do app sem ninguém ter decidido isso.
   const m = montar();
   const limpo = m.presencaCardSeguro({ ...CARD, __proto__: null, coisaEstranha: 'x', onerror: 'y' });
   assert.equal('coisaEstranha' in limpo, false);

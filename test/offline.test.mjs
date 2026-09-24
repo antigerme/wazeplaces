@@ -153,9 +153,9 @@ test('`onLine` é usado de UMA MÃO só: só o false muda comportamento', () => 
     'nada pode depender de onLine ser true');
 });
 
-test('a varredura dorme quando ninguém está usando a app', () => {
+test('a varredura dorme quando ninguém está usando o app', () => {
   assert.match(fatiar('offlineVarrer'), /OFFLINE_OCIOSO_MS/,
-    'sem isso a app cobra dados de quem a deixou aberta no bolso');
+    'sem isso o app cobra dados de quem o deixou aberto no bolso');
   assert.match(APP_SEM, /function offlineMarcarGesto/);
 });
 
@@ -233,7 +233,7 @@ test('js/min/ está em dia com o fonte (gotcha #22)', () => {
 // DESTINO da requisição: `fetch` cru tem destino '' → `connect-src`; `<img>`
 // tem destino 'image' → `img-src`. O `img-src` já permitia `https://*.waze.com`
 // (a foto passava), o `connect-src` é NOMINAL e não tinha o host do tile —
-// então TODO tile era bloqueado ANTES da rede, sem erro no console da app.
+// então TODO tile era bloqueado ANTES da rede, sem erro no console do app.
 //
 // Sintoma no aparelho do owner: "Preparando… 197 de 530" parado pra sempre.
 // Os 197 eram as fotos; os tiles nunca entraram. REPRODUZIDO num servidor local
@@ -339,7 +339,7 @@ test('a lista de tiles guardados é lida em TODA partida do worker, não só no 
   assert.match(SW_SEM, /hidratarTiles\(\)[\s\S]{0,60}clients\.claim/,
     'tem que hidratar no activate também');
   assert.match(SW_SEM, /TILES_GUARDADOS[\s\S]{0,140}hidratarTiles\(\)/,
-    'e re-hidratar quando a app avisa, senão só saberia na próxima partida');
+    'e re-hidratar quando o app avisa, senão só saberia na próxima partida');
   // A janela logo depois de acordar: a lista ainda está sendo lida e o
   // `respondWith` tem de ser decidido já. Sem o ramo, o PRIMEIRO pedido depois
   // da recriação vai pra rede — e o card pede todos os tiles de uma vez.
@@ -348,7 +348,7 @@ test('a lista de tiles guardados é lida em TODA partida do worker, não só no 
   assert.match(SW_SEM, /respondWith\(hidratacao\.then\(/,
     'na janela logo depois de acordar, o tile tem de ESPERAR a leitura da lista');
   assert.match(APP_SEM, /postMessage\(\{ type: 'TILES_GUARDADOS' \}\)/,
-    'a app precisa avisar o SW depois de guardar');
+    'o app precisa avisar o SW depois de guardar');
 });
 
 // ── "Sem rede" não é "sem foto" ──────────────────────────────────────────────
@@ -357,7 +357,7 @@ test('a lista de tiles guardados é lida em TODA partida do worker, não só no 
 // (`offline` + tipo de foto), antes de a imagem tentar — e escondia a foto que a
 // varredura tinha acabado de guardar. No diagnóstico do owner as três fotos
 // dos cards de "Nova foto" estão `quebrada: false`, sem rede: o cache funcionou,
-// a app é que as escondeu.
+// o app é que as escondeu.
 test('o aviso "a foto precisa de sinal" nasce da FALHA da foto, nunca da suposição', () => {
   assert.doesNotMatch(fatiar('renderCurrentCard'), /marcarCardSemFoto\(/,
     'renderCurrentCard voltou a pôr o aviso por suposição — esconde a foto guardada antes de ela carregar');
@@ -375,7 +375,7 @@ test('a trava de ação respeita o card sem foto — terminar a ação anterior 
 
 // ── A janela do sufixo sobrevive ao app renascer ─────────────────────────────
 //
-// Ela morava só em memória: a app REABERTA sem rede (o Android encerra o app
+// Ela morava só em memória: o app REABERTO sem rede (o Android encerra o app
 // em segundo plano) nascia com a janela nula, pedia a foto CRUA — que a
 // varredura nunca guarda — e todo card de foto abria com "precisa de sinal".
 test('a janela servida é GRAVADA quando vira e VOLTA na abertura sem rede', () => {
@@ -387,7 +387,7 @@ test('a janela servida é GRAVADA quando vira e VOLTA na abertura sem rede', () 
   const iCard = abrir.indexOf('showCurrentPlace()');
   assert.ok(iLer > 0 && iCard > iLer, 'a janela tem de voltar ANTES do primeiro card nascer');
   assert.match(abrir, /if \(offlineJanelaServida === null\) offlineJanelaServida = janelaGuardada;/,
-    'com a app viva a janela de memória é a mais nova — a guardada só entra quando não há outra');
+    'com o app vivo a janela de memória é a mais nova — a guardada só entra quando não há outra');
   // Mesma base da fila, e é ela que o "Sair" e o desmarcar apagam.
   assert.match(fatiar('offlineGravarJanela'), /OFFLINE_STORE/, 'a janela saiu da base que o esquecer apaga');
   assert.match(fatiar('offlineEsquecer'), /deleteDatabase\(OFFLINE_DB\)/,
@@ -420,7 +420,7 @@ test('a varredura guarda os tiles da FAIXA de alturas, com piso amarrado ao CSS'
 // contextos com `serviceWorkers: 'block'` e ZERO com 'allow'. O SW nunca foi
 // exercitado, então quebrá-lo não reprovava nada.
 //
-// Este guard é META de propósito: ele não testa a app, testa se a COBERTURA
+// Este guard é META de propósito: ele não testa o app, testa se a COBERTURA
 // existe. Sem ele, o próximo refactor do smoke pode remover a única cobertura
 // de SW e ninguém perceberia — que é exatamente como o buraco nasceu.
 test('existe cobertura de service worker E ela roda no CI', () => {
@@ -444,7 +444,7 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     'tem que medir o mapa com o toggle desligado — quem não marcou nada foi quem mais sofreu');
 
   // O que o editor RECLAMOU foi "o mapa parou de carregar", e o que responde a
-  // isso não é uma <img> solta: é o MAPINHA QUE A APP DESENHA. O smoke mede os
+  // isso não é uma <img> solta: é o MAPINHA QUE O APP DESENHA. O smoke mede os
   // dois lugares em que o tile aparece, e carrega a CONTRAPROVA — sem ela,
   // "desenhou" passaria por vácuo no dia em que o seletor mudar de nome, porque
   // a asserção é `ok === n` e 0 === 0 é verdade (gotcha #28).
@@ -510,7 +510,7 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   // ÚNICA que mede a foto de verdade; com uma rota, passaria a medir o vazio.
   const i6c = SMOKE.indexOf("secao('6c.");
   const f6c = SMOKE.indexOf('ctxFoto.close()');
-  assert.ok(i6c > 0 && f6c > i6c, 'sumiu a seção 6c — a foto em decisão e a app reaberta sem rede');
+  assert.ok(i6c > 0 && f6c > i6c, 'sumiu a seção 6c — a foto em decisão e o app reaberto sem rede');
   const bloco6c = SMOKE.slice(i6c, f6c).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   assert.doesNotMatch(bloco6c, /(ctxFoto|pgFoto)\.route\(/,
     'o contexto da 6c ganhou uma rota — com ela o cache HTTP desliga e a foto offline nunca abre');
@@ -562,17 +562,17 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   exigir(/diz\('e o worker esquece a LISTA dele/,
     'sumiu a prova de que esquecer limpa também a lista do worker (endereços de pedidos de terceiros)');
 
-  // A APP FECHADA E REABERTA SEM REDE (relato de 2026-09-22, v2026.09.22-04).
+  // O APP FECHADO E REABERTO SEM REDE (relato de 2026-09-22, v2026.09.22-04).
   // A seção 5 chamava a função numa página VIVA e o helper `montarNa` fazia
-  // `showLoading(false)` por conta própria — o instrumento fazia o que a app
+  // `showLoading(false)` por conta própria — o instrumento fazia o que o app
   // esquecia, e o esqueleto por cima do card passou por tudo. A 5b só vale se
   // abrir uma página NOVA e deixar o `initApp` decidir, e se medir o DEDO.
   exigir(/secao\('5b\. FECHAR E REABRIR SEM REDE/,
-    'sumiu a reabertura FRIA sem rede — é o único lugar em que a app decide sozinha, sem helper');
+    'sumiu a reabertura FRIA sem rede — é o único lugar em que o app decide sozinho, sem helper');
   const i5b = CODIGO.indexOf("secao('5b.");
   const bloco5b = CODIGO.slice(i5b, CODIGO.indexOf("secao('6.", i5b));
   assert.match(bloco5b, /const fria = await ctx\.newPage\(\);/, 'a 5b tem que abrir uma página NOVA');
-  assert.match(bloco5b, /await fria\.goto\(BASE \+ '\/'/, 'a página nova tem que CARREGAR a app, não receber estado injetado');
+  assert.match(bloco5b, /await fria\.goto\(BASE \+ '\/'/, 'a página nova tem que CARREGAR o app, não receber estado injetado');
   assert.doesNotMatch(bloco5b, /montarNa\(fria/,
     'a página reaberta ganhou o helper de montagem — ele esconde o esqueleto e apaga o defeito que a seção mede');
   assert.match(bloco5b, /document\.elementFromPoint\(/, 'a 5b tem que medir o que o DEDO alcança, não se o card existe');
@@ -608,8 +608,8 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   const i9b = CODIGO.indexOf("secao('9b.");
   const bloco9b = CODIGO.slice(i9b, CODIGO.indexOf("secao('10.", i9b));
   assert.match(bloco9b, /await ctx\.newPage\(\)/, 'a 9b tem que reabrir em página NOVA');
-  assert.match(bloco9b, /await fria\.goto\(BASE \+ '\/'/, 'a página nova tem que CARREGAR a app');
-  assert.doesNotMatch(bloco9b, /montarNa\(/, 'a página reaberta ganhou o helper de montagem — é a app que tem que decidir');
+  assert.match(bloco9b, /await fria\.goto\(BASE \+ '\/'/, 'a página nova tem que CARREGAR o app');
+  assert.doesNotMatch(bloco9b, /montarNa\(/, 'a página reaberta ganhou o helper de montagem — é o app que tem que decidir');
   for (const [re, porque] of [
     [/diz\('CONTROLE: a fila guardada continua com os 5/, 'sem ele, a reabertura esconderia os decididos por outro motivo'],
     [/diz\('reaberta de novo, NENHUM pedido decidido volta como card/, 'é a frase do relato'],
@@ -620,17 +620,17 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     [/diz\('PRÉ-CONDIÇÃO: a lista da busca tinha os dois/, 'sem ela, a corrida da busca pode não ter acontecido'],
     [/diz\('reaberta COM rede, nem o que pousou no meio da busca/, 'o mesmo buraco com rede, na abertura'],
   ]) assert.match(bloco9b, re, `a 9b perdeu uma medida — ${porque}`);
-  // A chave é calculada na mão, sem função nova da app: assim a seção roda
-  // igual contra a app de ANTES do conserto, que é como se prova que ela
+  // A chave é calculada na mão, sem função nova do app: assim a seção roda
+  // igual contra o app de ANTES do conserto, que é como se prova que ela
   // reprova o defeito (10 falhas lá, 0 aqui).
   assert.doesNotMatch(bloco9b, /chaveDoPedido|offlineLerPousos|semOsJaDecididos/,
-    'a 9b passou a depender de função nova da app — não roda mais contra a de antes, e a prova do conserto some');
+    'a 9b passou a depender de função nova do app — não roda mais contra a de antes, e a prova do conserto some');
 
-  // O DIAGNÓSTICO QUE SOBREVIVE A FECHAR A APP (mesmo relato, v2026.09.22-06):
+  // O DIAGNÓSTICO QUE SOBREVIVE A FECHAR O APP (mesmo relato, v2026.09.22-06):
   // "usei o FAB 2 vezes, fechei e abri a aplicação e o número sumiu". A 9c só
   // vale se TOCAR o botão de verdade (toque do DevTools, contexto com toque),
   // fechar como o usuário fecha, e medir cada saída do que foi guardado.
-  exigir(/secao\('9c\. O DIAGNÓSTICO SOBREVIVE A FECHAR A APP/,
+  exigir(/secao\('9c\. O DIAGNÓSTICO SOBREVIVE A FECHAR O APP/,
     'sumiu a seção do diagnóstico entre aberturas — é o relato do número sumindo do botão');
   const i9c = CODIGO.indexOf("secao('9c.");
   const bloco9c = CODIGO.slice(i9c, CODIGO.indexOf("secao('10.", i9c));
@@ -690,19 +690,19 @@ test('a espera do esvaziamento é FONTE ÚNICA, nunca reimplementada num smoke',
     // E NENHUM `page.waitForFunction`, em espera nenhuma. Isto deixou de ser
     // preferência quando a causa do `EvalError` foi MEDIDA (2026-09-22):
     //
-    //   pw1.49.1 (a que o CI fixava até 2026-09-23), mesma app, mesma CSP, mesmo binário
+    //   pw1.49.1 (a que o CI fixava até 2026-09-23), mesmo app, mesma CSP, mesmo binário
     //   de Chromium, N=12 por modo de espera —
     //     polling PADRÃO (rAF) ... 4/12 com EvalError na página
     //     polling numérico 250 ... 0/12
     //     poll pelo lado do NODE . 0/12
     //
-    // O poller do rAF avalia STRING dentro da página, e a CSP da app (que com
+    // O poller do rAF avalia STRING dentro da página, e a CSP do app (que com
     // razão não tem `unsafe-eval`) o barra — vira promessa rejeitada, o
-    // `unhandledrejection` da própria app a registra, e o smoke acusa "erro de
+    // `unhandledrejection` do próprio app a registra, e o smoke acusa "erro de
     // JS" que é do INSTRUMENTO. ~22% de taxa: some numa rodada e volta na
     // outra, que é como ele reprovou o CI uma vez e nunca aqui.
     assert.doesNotMatch(codigo, /page\.waitForFunction\(/,
-      `${nome} voltou a usar page.waitForFunction — sob a CSP desta app o poller ` +
+      `${nome} voltou a usar page.waitForFunction — sob a CSP deste app o poller ` +
       'do rAF evalua string e vira EvalError intermitente. Use esperarNaPagina/esperarOuExplodir.');
   }
   // E o módulo tem que continuar pollando pelo lado do NODE, por sinal

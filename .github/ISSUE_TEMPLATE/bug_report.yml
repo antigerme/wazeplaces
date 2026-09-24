@@ -1,5 +1,5 @@
 name: 🐛 Reportar um problema
-description: Algo não funciona como deveria na app
+description: Algo não funciona como deveria no app
 labels: ["bug"]
 body:
   - type: markdown
@@ -12,7 +12,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Versão da app
+      label: Versão do app
       description: Está no rodapé da tela, no formato `v2026.07.24-01`. É o dado que mais ajuda — sem ele, não dá pra saber se você já está com a correção.
       placeholder: v2026.07.24-01
     validations:
@@ -34,7 +34,7 @@ body:
     attributes:
       label: Como reproduzir
       placeholder: |
-        1. Abri a app e entrei com meus cookies
+        1. Abri o app e entrei com meus cookies
         2. Deslizei o card pra direita (marcar como lido)
         3. Toquei em atualizar
         4. O mesmo place apareceu de novo
@@ -55,9 +55,9 @@ body:
       label: Onde aconteceu
       options:
         - Celular Android (Chrome)
-        - Celular Android (app instalada / PWA)
+        - Celular Android (app instalado / PWA)
         - iPhone (Safari)
-        - iPhone (app instalada / PWA)
+        - iPhone (app instalado / PWA)
         - Computador (Chrome / Edge)
         - Computador (Firefox)
         - Computador (Safari)

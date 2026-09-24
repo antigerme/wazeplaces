@@ -1,10 +1,10 @@
-// A presença DA APP (fase 3): quem usa a app no país do filtro e as conversas
-// que são da app, lidas do WME — pela rota `presenca-app`, de carona nas ações
+// A presença DO APP (fase 3): quem usa o app no país do filtro e as conversas
+// que são do app, lidas do WME — pela rota `presenca-app`, de carona nas ações
 // e ao abrir uma conversa (`chat` com `acao: 'abrir'`).
 //
 // O modelo é do owner, e é ele que estes testes travam: a infra é do Waze, mas
-// a app mostra SÓ quem usa a app (a marca na posição, `marca-app.mjs`) e SÓ as
-// conversas que começaram na app. Conversa de quem só usa o WME não aparece.
+// o app mostra SÓ quem usa o app (a marca na posição, `marca-app.mjs`) e SÓ as
+// conversas que começaram no app. Conversa de quem só usa o WME não aparece.
 //
 // O Waze de mentira responde por MÉTODO e anota cada pedido. Os corpos de
 // resposta são montados com os mesmos construtores de protobuf do servidor; os
@@ -14,7 +14,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
-import { dispatch, filtrarOnlineDaApp, filtrarConversasDaApp, APP_CONTEXTO } from '../server/core.mjs';
+import { dispatch, filtrarOnlineDaApp, filtrarConversasDaApp, contarOnlineDaApp, contarConversasDaApp, APP_CONTEXTO } from '../server/core.mjs';
 import * as g from '../server/wme-grpc.mjs';
 import { marcarPosicao } from '../server/marca-app.mjs';
 import { readFileSync } from 'node:fs';
@@ -83,7 +83,7 @@ function conversa({ com, nome, ultima = null, naoLidas = 0, bloqueada = false, a
 }
 const conversas = (...cs) => g.junta(...cs.map(conversa));
 
-// Uma pessoa na app: posição com a marca e o país dela.
+// Uma pessoa no app: posição com a marca e o país dela.
 const naApp = (id, nome, pais, lat = -23.55, lon = -46.63, extra = {}) => ({ id, nome, ...marcarPosicao({ lat, lon }, pais), ...extra });
 // Quem SÓ usa o WME, no caso que a marca existe pra separar: a longitude cai,
 // por acaso, nos dígitos do país (1 em 1000), e só a latitude não tem o 47. Uma
@@ -119,7 +119,7 @@ async function comWaze(r, fn) {
 
 // ── filtros puros ────────────────────────────────────────────────────────────
 
-test('online da app: só quem tem a marca, no país do filtro, visível — e nunca eu', () => {
+test('online do app: só quem tem a marca, no país do filtro, visível — e nunca eu', () => {
   const eds = [
     { id: 183164343, nome: 'cafanha', rank: 4, visivel: true, ...marcarPosicao({ lat: -23.55, lon: -46.63 }, BRASIL) },
     { id: 12444348, nome: 'antigerme', rank: 5, visivel: true, ...marcarPosicao({ lat: -23.5, lon: -46.6 }, BRASIL) },
@@ -140,7 +140,7 @@ test('online da app: só quem tem a marca, no país do filtro, visível — e nu
   assert.deepEqual(filtrarOnlineDaApp(eds, { pais: FRANCA, eu: EU }).map((e) => e.nome), ['na_franca']);
 });
 
-test('conversas da app: a marca na última mensagem OU já conhecida no aparelho — a do WME não aparece', () => {
+test('conversas do app: a marca na última mensagem OU já conhecida no aparelho — a do WME não aparece', () => {
   const cs = g.lerConversas(conversas(
     { com: 183164343, nome: 'cafanha', naoLidas: 2, ultima: { id: 'a0000000-0000-1000-8000-000000000001', de: '183164343', para: EU, texto: 'Esse é duplicado?\n📍 Loja · Foto nova\nhttps://www.waze.com/editor?x', ctx: { app: APP_CONTEXTO, legenda: 'Esse é duplicado?', card: JSON.stringify({ name: 'Loja', updateTypeKey: 'NEW_PHOTO' }) } } },
     { com: 600, nome: 'so_wme', ultima: { id: 'a0000000-0000-1000-8000-000000000002', de: '600', para: EU, texto: 'Oi, vi você no mapa' } },
@@ -162,7 +162,41 @@ test('conversas da app: a marca na última mensagem OU já conhecida no aparelho
   assert.equal(minha.ultima.card, null);
 });
 
-test('conversas da app: prévia com teto e cartão que não se lê vira null — nunca derruba a lista', () => {
+// O PORQUÊ da lista vai pro diagnóstico do aparelho (relatório v8): é o que
+// separa "ninguém usa o app agora" de "está no app, mas noutro país" e de "a
+// conversa não tem a marca nem é conhecida". Com os MESMOS critérios dos
+// filtros — contagem e lista que divergissem mandariam procurar defeito à toa.
+test('contagens: o PORQUÊ das duas listas, com os mesmos critérios dos filtros', () => {
+  const eds = [
+    { id: 183164343, nome: 'cafanha', rank: 4, visivel: true, ...marcarPosicao({ lat: -23.55, lon: -46.63 }, BRASIL) },
+    { id: 12444348, nome: 'antigerme', rank: 5, visivel: true, ...marcarPosicao({ lat: -23.5, lon: -46.6 }, BRASIL) },
+    { id: 500, nome: 'na_franca', rank: 2, visivel: true, ...marcarPosicao({ lat: 48.85, lon: 2.35 }, FRANCA) },
+    { rank: 2, visivel: true, ...soNoWme(501, 'so_wme', BRASIL) },
+    { id: 502, nome: 'escondida', rank: 2, visivel: false, ...marcarPosicao({ lat: -22.9, lon: -43.2 }, BRASIL) },
+    { id: 503, nome: 'sem_chave', rank: 2, visivel: null, ...marcarPosicao({ lat: -22.9, lon: -43.2 }, BRASIL) },
+  ];
+  // Fora eu e a invisível: cafanha, na_franca, so_wme e sem_chave no WME; três
+  // com a marca; duas no Brasil — e na França, uma.
+  const br = contarOnlineDaApp(eds, { pais: BRASIL, eu: EU });
+  assert.deepEqual(br, { noWme: 4, comMarca: 3, noPais: 2 });
+  assert.equal(br.noPais, filtrarOnlineDaApp(eds, { pais: BRASIL, eu: EU }).length, 'a contagem diverge da lista');
+  assert.deepEqual(contarOnlineDaApp(eds, { pais: FRANCA, eu: EU }), { noWme: 4, comMarca: 3, noPais: 1 });
+
+  const cs = g.lerConversas(conversas(
+    { com: 183164343, nome: 'cafanha', ultima: { id: 'a0000000-0000-1000-8000-000000000001', de: '183164343', para: EU, ctx: { app: APP_CONTEXTO } } },
+    { com: 600, nome: 'so_wme', ultima: { id: 'a0000000-0000-1000-8000-000000000002', de: '600', para: EU, texto: 'oi' } },
+    { com: 601, nome: 'respondeu_pelo_wme', ultima: { id: 'a0000000-0000-1000-8000-000000000003', de: '601', para: EU, texto: 'x' } },
+    { com: 602, nome: 'bloqueada', bloqueada: true, ultima: { id: 'a0000000-0000-1000-8000-000000000004', de: '602', para: EU, ctx: { app: APP_CONTEXTO } } },
+    { com: 603, nome: 'minha', ultima: { id: 'a0000000-0000-1000-8000-000000000005', de: EU, para: '603', ctx: { app: APP_CONTEXTO } } },
+  )).conversas;
+  const conhecidos = new Set(['601']);
+  const c = contarConversasDaApp(cs, { conhecidos });
+  // A bloqueada não conta em nada; duas com a marca; uma entra por ser conhecida.
+  assert.deepEqual(c, { noWaze: 4, marcadas: 2, daApp: 3 });
+  assert.equal(c.daApp, filtrarConversasDaApp(cs, { eu: EU, conhecidos }).length, 'a contagem diverge da lista');
+});
+
+test('conversas do app: prévia com teto e cartão que não se lê vira null — nunca derruba a lista', () => {
   const cs = g.lerConversas(conversas(
     { com: 700, nome: 'longa', ultima: { id: 'a0000000-0000-1000-8000-000000000006', de: '700', para: EU, texto: 'x'.repeat(900), ctx: { app: APP_CONTEXTO, card: '{isto não é json' } } },
   )).conversas;
@@ -192,6 +226,8 @@ test('presenca-app: lista e conversas numa ida, em paralelo, no servidor da regi
   assert.deepEqual(resultado.body.online.map((e) => e.nome), ['cafanha']);
   assert.deepEqual(resultado.body.conversas.map((c) => c.nome), ['cafanha']);
   assert.ok(!('chat' in resultado.body), 'sem instalação não há token pra devolver');
+  assert.deepEqual(resultado.body.contagem, { online: { noWme: 1, comMarca: 1, noPais: 1 }, conversas: { noWaze: 1, marcadas: 1, daApp: 1 } },
+    'o PORQUÊ da lista não veio junto');
   assert.deepEqual(pedidos.map((p) => p.metodo).sort(), ['ListConversations', 'listOnlineEditors']);
   // A lista é a do MUNDO: a caixa inteira, e o país sai da marca.
   const caixa = g.lerCampos(um(g.lerCampos(pedidos.find((p) => p.metodo === 'listOnlineEditors').corpo), 1));
@@ -253,6 +289,18 @@ test('presenca-app: uma parte que falha fica null e a outra chega; sessão morta
   assert.equal(parcial.resultado.status, 200);
   assert.deepEqual(parcial.resultado.body.online.map((e) => e.nome), ['cafanha']);
   assert.equal(parcial.resultado.body.conversas, null, 'falha passageira virou "nenhuma conversa"');
+  // A parte que falhou vai DITA na contagem — é o que o diagnóstico mostra.
+  assert.deepEqual(parcial.resultado.body.contagem.online, { noWme: 1, comMarca: 1, noPais: 1 });
+  assert.equal(typeof parcial.resultado.body.contagem.conversas.falhou, 'string', 'a metade que falhou não foi dita');
+  // Resposta que chega mas não se LÊ (bytes que não são protobuf) também é
+  // dita — "não veio" e "veio ilegível" são defeitos diferentes.
+  const ilegivel = await comWaze({
+    listOnlineEditors: () => respostaGrpc({ dados: Uint8Array.of(0x0f) }),
+    ListConversations: () => respostaGrpc({ dados: Uint8Array.of(0x0f) }),
+  }, () => dispatch('presenca-app', BASE, {}));
+  assert.equal(ilegivel.resultado.body.online, null);
+  assert.deepEqual(ilegivel.resultado.body.contagem, { online: { falhou: 'leitura' }, conversas: { falhou: 'leitura' } },
+    'a resposta ilegível sumiu da contagem em vez de ser dita');
 
   // O status 7 com a mensagem do convidado é sessão morta (medido na fase 1).
   const morta = await comWaze({
@@ -283,7 +331,7 @@ test('presenca-app: os conhecidos do aparelho têm teto de 50 e só aceitam id d
 
 // ── de carona na ação ────────────────────────────────────────────────────────
 
-test('carona: a ação traz quem usa a app no país e as conversas da app, sem pedido novo à nossa API', async () => {
+test('carona: a ação traz quem usa o app no país e as conversas do app, sem pedido novo à nossa API', async () => {
   const pres = { userId: EU, lat: -23.5, lon: -46.6, pais: BRASIL, conhecidos: ['601'] };
   const { resultado, pedidos } = await comWaze({
     Read: () => respostaJson(200, '{}'),
@@ -303,6 +351,10 @@ test('carona: a ação traz quem usa a app no país e as conversas da app, sem p
   assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
   assert.deepEqual(resultado.body.presencaApp.online.map((e) => e.nome), ['cafanha']);
   assert.deepEqual(resultado.body.presencaApp.conversas.map((c) => c.nome), ['conhecida']);
+  // As contagens vêm de carona também: 3 no WME, 2 com a marca (uma na França),
+  // 1 no Brasil; 2 conversas no Waze, nenhuma marcada, 1 conhecida.
+  assert.deepEqual(resultado.body.presencaApp.contagem,
+    { online: { noWme: 3, comMarca: 2, noPais: 1 }, conversas: { noWaze: 2, marcadas: 0, daApp: 1 } });
   assert.equal(pedidos.filter((p) => p.metodo === 'listOnlineEditors').length, 1);
 });
 
@@ -317,7 +369,7 @@ test('carona: a lista que falha some da resposta — a ação e a escrita seguem
   assert.equal(resultado.status, 200);
   assert.equal(resultado.body.success, true);
   assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
-  assert.ok(!('presencaApp' in resultado.body), 'lista que falhou inteira não pode chegar como "ninguém na app"');
+  assert.ok(!('presencaApp' in resultado.body), 'lista que falhou inteira não pode chegar como "ninguém no app"');
 });
 
 // ── chat: abrir uma conversa ─────────────────────────────────────────────────

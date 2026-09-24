@@ -1,4 +1,4 @@
-// A MARCA de quem está usando a NOSSA app, gravada dentro da própria presença
+// A MARCA de quem está usando a NOSSO app, gravada dentro da própria presença
 // do Waze.
 //
 // A lista de "editores online" do WME traz todo mundo que está visível, sem
@@ -8,8 +8,8 @@
 // owner em 2026-09-23, três posições (duas com dígitos marcados e uma de
 // controle, redonda) escritas por uma conta e lidas pela outra, 3 de 3 iguais.
 //
-// Então a app grava a posição do card com os últimos dígitos num padrão nosso:
-//   · lat em µ°, resto por 100  = MARCA_APP → "esta pessoa está na app"
+// Então o app grava a posição do card com os últimos dígitos num padrão nosso:
+//   · lat em µ°, resto por 100  = MARCA_APP → "esta pessoa está no app"
 //   · lon em µ°, resto por 1000 = o país da fila (countryId, 1–999)
 // e, na fase da lista, fica só com quem tem a marca, no país dela. Sem tabela
 // de fronteiras: o país vai NA marca.
@@ -25,7 +25,7 @@
 // e 500 µ° na longitude (~55 m no equador, menos longe dele) — não se nota
 // num mapa. A chance de uma posição QUALQUER do WME cair na marca e no mesmo
 // país por acaso é 1 em 100 mil (2 dígitos × 3 dígitos), e o custo disso é
-// baixo por construção: quem está no WME já pode ver e falar com quem usa a
+// baixo por construção: quem está no WME já pode ver e falar com quem usa o
 // app de qualquer jeito.
 //
 // Puro como o `wme-grpc.mjs`: sem I/O e sem relógio. Quem ESCREVE é o core, e
@@ -60,9 +60,9 @@ export function paisValido(pais) {
   return Number.isInteger(pais) && pais >= 1 && pais <= PAIS_MAX;
 }
 
-// { lat, lon } em graus → a mesma posição com a marca da app e o país, em
+// { lat, lon } em graus → a mesma posição com a marca do app e o país, em
 // graus, com os milionésimos EXATOS (o codec arredonda ×1e6 de volta ao mesmo
-// inteiro). Lança com país inválido: posição da app sem país não é marcável, e
+// inteiro). Lança com país inválido: posição do app sem país não é marcável, e
 // quem chama decide o que fazer (o core simplesmente não escreve).
 export function marcarPosicao({ lat, lon }, pais) {
   if (!paisValido(pais)) throw new Error('país inválido para a marca');

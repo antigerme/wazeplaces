@@ -14,7 +14,7 @@
 // Recusa AQUI, e não lá na frente com um erro críptico. Numa VM o `nodejs` da
 // distro costuma vir mais antigo, e o sintoma de rodar abaixo do piso seria um
 // `ReferenceError` no meio de um pedido — difícil de ligar à causa por quem só
-// quer subir a app. O `engines` do package.json avisa quem usa npm; isto avisa
+// quer subir o app. O `engines` do package.json avisa quem usa npm; isto avisa
 // quem roda `node server/node.mjs` direto, que é como o README manda.
 const MIN_NODE = 22;
 const versaoAtual = Number(process.versions.node.split('.')[0]);
@@ -166,7 +166,7 @@ const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest'
 // Node nunca o leu —, então na VM a única política ativa era o `<meta>` do
 // index.html. Rodar na VM era rodar com uma camada a menos, sem nada avisando.
 //
-// Isso importa além do detalhe de segurança: a app precisa ser a MESMA nos dois
+// Isso importa além do detalhe de segurança: o app precisa ser o MESMO nos dois
 // destinos, senão "levar pra uma VM" deixa de ser uma decisão de infraestrutura
 // e vira uma mudança de comportamento. `test/layout.test.mjs` compara as TRÊS
 // cópias (meta, _headers e esta) diretiva por diretiva, e `test/csp-vm.test.mjs`
@@ -184,7 +184,7 @@ const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest'
 // nominal (venue-image, social-row, sms-profile-image, www) já custou um defeito
 // em produção: o Waze moveu a foto de perfil pra um host novo e o navegador a
 // bloqueou ANTES da rede, sem sinal nenhum do nosso lado. A próxima mudança
-// pode ser no `venue-image`, e aí some a foto do CARD, que é o produto da app.
+// pode ser no `venue-image`, e aí some a foto do CARD, que é o produto do app.
 // Curinga em IMAGEM é risco baixo — imagem não executa. O `connect-src` segue
 // NOMINAL: lá o risco é de SAÍDA de dado, e é outra conversa.
 //
@@ -192,7 +192,7 @@ const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest'
 // chat do WME (fase 3 da presença): o navegador abre o fluxo DIRETO lá, com o
 // token que o `presenca-app` devolve. Sem o host, a mensagem nova não chega —
 // barrada antes da rede, sem erro na tela.
-const CSP = "default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://*.waze.com; connect-src 'self' https://www.waze.com https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com https://instantmessaging-pa.googleapis.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';";
+const CSP = "default-src 'self'; script-src 'self' 'sha256-quzrIZ27j7FNwTF7T/940jV0pWHxlsSbeQmnlqM5RhE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://*.waze.com; connect-src 'self' https://www.waze.com https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com https://instantmessaging-pa.googleapis.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';";
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
@@ -200,7 +200,7 @@ const SECURITY_HEADERS = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self), payment=(), usb=()',
   // HSTS estava SÓ no `_headers`, ou seja só no Cloudflare — mesma lacuna que a
   // CSP tinha (gotcha #14) e que foi fechada, só que esta ficou pra trás. Numa
-  // VM o cabeçalho sumia e ninguém via: a app deixava de ser a MESMA nos dois
+  // VM o cabeçalho sumia e ninguém via: o app deixava de ser o MESMO nos dois
   // destinos, e "levar pra uma VM" virava mudança de comportamento em vez de
   // decisão de infraestrutura.
   // Mandar sempre é seguro: o navegador IGNORA HSTS em conexão não-HTTPS, então
@@ -231,7 +231,7 @@ const ALLOWED_ROOT_FILES = new Set([
 ]);
 // Os FONTES comentados moram DENTRO de `/js/` e `/css/`, então a allowlist de
 // diretório acima os deixava passar: `/js/app.js` respondia 200 com 622 KB ao
-// lado dos 201 KB do `/js/min/app.js` que a app carrega, e `/css/styles.css`
+// lado dos 201 KB do `/js/min/app.js` que o app carrega, e `/css/styles.css`
 // 117 KB ao lado dos 77 KB do `/css/app.css`. É a MESMA decisão já escrita pro
 // `/index.src.html` logo acima — ela só não tinha sido aplicada aqui.
 //
@@ -307,7 +307,7 @@ async function serveStatic(req, res, urlPath) {
     // ETag + 304. `no-cache` manda REVALIDAR, não rebaixar: sem ETag o
     // navegador não tem o que perguntar e a revalidação vira download inteiro.
     // O Cloudflare já fazia isto sozinho (medido em produção); a VM não fazia,
-    // então lá cada carregamento custava a app inteira. Hash do conteúdo, não
+    // então lá cada carregamento custava o app inteiro. Hash do conteúdo, não
     // mtime: `git checkout` mexe no mtime sem mudar um byte, e aí o editor
     // rebaixaria tudo por causa de um deploy que não mudou nada.
     const etag = '"' + createHash('sha256').update(buf).digest('base64url').slice(0, 22) + '"';

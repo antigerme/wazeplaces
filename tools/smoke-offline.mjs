@@ -16,7 +16,7 @@
 //
 // O smoke de layout tinha 47 contextos com `serviceWorkers: 'block'` e ZERO
 // com 'allow'. Este arquivo é a camada que faltava: ele LIGA o service worker
-// e exercita cada caminho do recurso contra a app de verdade.
+// e exercita cada caminho do recurso contra o app de verdade.
 //
 // A ÚNICA exceção é a seção 6c: ela BLOQUEIA o service worker e não registra
 // rota nenhuma, porque é o único jeito de medir a foto no cache HTTP do
@@ -108,7 +108,7 @@ const diz = (n, cond, det = '') => {
 };
 // Pedido SEM foto: aí o mapa é o PRIMEIRO slide e nasce visível. Com foto, quem
 // abre é a foto e o `.card-map` nasce `hidden` — medir o mapa ali daria zero
-// com a app certa, que é medir outra coisa (`mapaVemPrimeiro()` decide).
+// com o app certo, que é medir outra coisa (`mapaVemPrimeiro()` decide).
 const SO_MAPA = (i) => ({ ...PLACE(i), imageUrls: [], imageUrl: null });
 // Fotos REAIS do próprio servidor (mesma origem, logo permitidas pela CSP, e
 // com `Cache-Control` de verdade), TRÊS arquivos diferentes: é o que deixa um
@@ -153,7 +153,7 @@ await ctx.route('**/venue-image.waze.com/**', (r) => aviao ? r.abort('internetdi
 const page = await ctx.newPage();
 // O erro capturado diz ONDE e vem INTEIRO. Sem isso, "erro de JS em algum
 // lugar do percurso" é adivinhação — e foi o que me custou uma rodada de CI
-// atrás de um `EvalError` que a app não podia produzir (ela não tem `eval`).
+// atrás de um `EvalError` que o app não podia produzir (ele não tem `eval`).
 let secaoAtual = 'abertura';
 const secao = (nome) => { secaoAtual = nome; console.log(`\n\u2500\u2500 ${nome} \u2500\u2500`); };
 const errosJs = [];
@@ -190,7 +190,7 @@ const montar = (pls) => montarNa(page, pls);
 secao('1. O MAPA COM O TOGGLE DESLIGADO (o defeito que foi a produção)');
 // DUAS camadas, e a segunda é a única que responde ao relato do owner ("o mapa
 // parou de carregar"). A primeira mede uma <img> SOLTA; a segunda mede o
-// MAPINHA QUE A APP DESENHA — que é o que sumiu da tela de quem nunca ligou o
+// MAPINHA QUE O APP DESENHA — que é o que sumiu da tela de quem nunca ligou o
 // offline. Medido na main de antes do conserto: 0 de 4 combinações desenhavam
 // um tile sequer, com o instrumento acusando `imgs=0 rede=0`.
 rotaTile = 0;
@@ -340,7 +340,7 @@ const off = await page.evaluate(async () => {
 diz('a fila guardada entra no lugar da tela de falha', off.abriu === true && off.n === 3 && off.erro === false,
   JSON.stringify(off));
 
-secao('5b. FECHAR E REABRIR SEM REDE — a página NOVA, a app de verdade decidindo');
+secao('5b. FECHAR E REABRIR SEM REDE — a página NOVA, o app de verdade decidindo');
 // O relato de 2026-09-22: "ativei o modo offline, baixou tudo, fechei a
 // aplicação e ao reabrir não carrega nada". O diagnóstico dele mostrou a fila
 // guardada ENTRANDO (236, `offline.abriu`), o card montado e o mapa vindo do
@@ -351,7 +351,7 @@ secao('5b. FECHAR E REABRIR SEM REDE — a página NOVA, a app de verdade decidi
 // `offlineTentarAbrirSemRede()` numa página JÁ VIVA, com o esqueleto já
 // escondido, e confere o `AppState`. E o `montarNa` desta casa faz
 // `showLoading(false)` por conta própria — ou seja, o helper fazia exatamente o
-// que a app esquecia. Aqui ninguém ajuda: token, preferências e fila vão pro
+// que o app esquecia. Aqui ninguém ajuda: token, preferências e fila vão pro
 // ARMAZENAMENTO, e uma página NOVA abre sem rede com o `initApp` de verdade.
 // E o que se mede é o que o DEDO alcança (`elementFromPoint`, gotcha #26), não
 // se o card existe no DOM — ele existia no relato.
@@ -366,7 +366,7 @@ await page.evaluate(() => {
 });
 await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
 const encheu5b = await page.evaluate(() => offlineUltimoResultado);
-diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU antes de fechar a app', encheu5b === 'pronto', String(encheu5b));
+diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU antes de fechar o app', encheu5b === 'pronto', String(encheu5b));
 aviao = true; await ctx.setOffline(true);
 const cdpReabrir = await ctx.newCDPSession(page);
 let estadosReabrir = [];
@@ -374,7 +374,7 @@ cdpReabrir.on('ServiceWorker.workerVersionUpdated', (e) => { estadosReabrir = e.
 await cdpReabrir.send('ServiceWorker.enable');
 for (const variante of [
   { nome: 'worker VIVO (o caso do relato)', parar: false },
-  { nome: 'worker ENCERRADO (a app fechada por mais de ~30s)', parar: true },
+  { nome: 'worker ENCERRADO (o app fechado por mais de ~30s)', parar: true },
 ]) {
   if (variante.parar) {
     estadosReabrir = [];
@@ -390,7 +390,7 @@ for (const variante of [
   let m = null;
   try {
     await fria.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-    // Sinal POSITIVO: a app DIZ que abriu a fila guardada; e depois o mapa do
+    // Sinal POSITIVO: o app DIZ que abriu a fila guardada; e depois o mapa do
     // card da frente termina de tentar (do cache, que é o que se espera).
     await esperarNaPagina(fria, () => typeof dfatoAnel !== 'undefined'
       && dfatoAnel.some((e) => e.k === 'offline.abriu'), 20000, 100);
@@ -512,12 +512,12 @@ aviao = false;
 secao('6. O CARD DE FOTO SEM REDE: a foto que VEIO aparece, a que NÃO VEIO avisa');
 // ESTA SEÇÃO EXIGIA O DEFEITO COMO CORRETO. Ela montava um card de FOTO sem rede
 // e cobrava o aviso "precisa de sinal" — sem nunca perguntar se a foto estava
-// guardada. A app, igual: o aviso nascia por SUPOSIÇÃO (`offline` + tipo de foto)
+// guardada. O app, igual: o aviso nascia por SUPOSIÇÃO (`offline` + tipo de foto)
 // e escondia a foto que a varredura tinha acabado de guardar pra este momento.
 // RELATADO pelo owner no Android, com a varredura em "Pronto" 1 minuto antes: os
 // três cards de "Nova foto" vieram vazios. E o diagnóstico dele PROVA que o
 // cache funcionou: as três fotos estão `quebrada: false`, com o sufixo certo,
-// em momentos capturados SEM REDE — a app só as escondia.
+// em momentos capturados SEM REDE — o app só as escondia.
 //
 // Os DOIS lados são medidos, e por sinal POSITIVO de cada desfecho (gotcha #62):
 //   · a foto NÃO chega  → aviso, ✕ e ✓ travados, ↑ vivo;
@@ -568,7 +568,7 @@ diz('com a foto que FALHOU de verdade, o aviso é o certo — a sentinela da fot
 // faz de verdade. Até o Playwright 1.56 esta seção passava SEM aquecer, por um
 // buraco do instrumento: o `setOffline` não alcançava o `fetch` de DENTRO do
 // service worker, e a foto de mesma origem ia buscar na rede em pleno "modo
-// avião". MEDIDO com controle, mesma app, a foto nunca pedida: 1.56.1 (Chromium
+// avião". MEDIDO com controle, mesmo app, a foto nunca pedida: 1.56.1 (Chromium
 // 141) CARREGA sem rede; 1.63.0 (Chrome 153) QUEBRA — como num celular de
 // verdade —, e a já aquecida carrega nas duas. Sem aquecer, a seção passou a
 // medir uma foto que nunca veio, e cobrava dela o comportamento da que veio.
@@ -604,13 +604,13 @@ diz('aviso por cima de foto CARREGADA (o defeito do relato, encenado) — a sent
 aviao = false;
 await ctx.setOffline(false);
 
-secao('6c. A FOTO GUARDADA É A FOTO EM DECISÃO — e a app REABERTA sem rede a encontra');
+secao('6c. A FOTO GUARDADA É A FOTO EM DECISÃO — e o app REABERTO sem rede a encontra');
 // DOIS defeitos, e os dois só aparecem no card de FOTO SEM REDE:
 //  1. A varredura guardava `imageUrls[0]`, e o card de foto abre na foto EM
 //     DECISÃO (a proposta ou a denunciada). MEDIDO na fila do owner: em 13 de
 //     76 pedidos de foto ela NÃO é a primeira — o card abria na que ninguém
 //     guardou, com "a foto precisa de sinal" e ✕/✓ travados.
-//  2. A janela do sufixo (`?w=`) morava só em memória. A app REABERTA sem rede
+//  2. A janela do sufixo (`?w=`) morava só em memória. O app REABERTO sem rede
 //     (o Android encerra o app em segundo plano) nascia com ela nula, pedia a
 //     foto CRUA — e a crua ninguém guardou.
 //
@@ -674,7 +674,7 @@ diz('a varredura guardou a foto EM DECISÃO de cada pedido de foto (a 2ª e a 3�
 diz('e NÃO a primeira da lista, que nenhum dos dois cards mostra',
   !fotosPedidas.includes(FOTOS_REAIS[0] + sufixo), JSON.stringify(fotosPedidas));
 
-// CONTROLE DO INSTRUMENTO nos dois sentidos, antes de medir a app: sem rede,
+// CONTROLE DO INSTRUMENTO nos dois sentidos, antes de medir o app: sem rede,
 // uma foto que JÁ veio tem que abrir do cache HTTP, e uma que NUNCA foi pedida
 // tem que quebrar. Sem o primeiro, "abriu" poderia ser rede vazando; sem o
 // segundo, a medida não distinguiria guardado de não guardado.
@@ -716,7 +716,7 @@ await conferirCardDeFoto('foto proposta na 2ª posição', FOTOS_REAIS[1]);
 await montarNa(pgFoto, [DENUNCIA_NA_3A]);
 await conferirCardDeFoto('foto denunciada na 3ª posição', FOTOS_REAIS[2]);
 
-// A app RENASCE sem rede: nada em memória, nem a fila nem a janela. É o
+// O app RENASCE sem rede: nada em memória, nem a fila nem a janela. É o
 // caminho de abertura de verdade (`offlineTentarAbrirSemRede`), e depois dele
 // o baralho anda até o primeiro pedido de foto — os 4 da frente não têm foto.
 const reaberta = await pgFoto.evaluate(async () => {
@@ -860,7 +860,7 @@ await page.evaluate(() => window.dispatchEvent(new Event('online')));
 // O laço do esvaziamento dá `break` no PRIMEIRO `transient` e deixa o resto
 // pra próxima — é decisão do produto (insistir em série gasta o free tier pra
 // falhar). No aparelho real "a próxima" sempre chega: outro `online`, a prova
-// de rede, a abertura da app. O teste dava UM gatilho só, então qualquer
+// de rede, a abertura do app. O teste dava UM gatilho só, então qualquer
 // oscilação no runner deixava a fila pela metade e a culpa parecia do app —
 // foi o que reprovou o CI (`fila:5`, 1 de 6). Aqui ele dá os gatilhos que o
 // mundo dá, e IMPRIME quantas rodadas precisou: uma regressão que passe a
@@ -882,7 +882,7 @@ const depoisDaEstrada = await page.evaluate(() => ({
 // Conta TENTATIVAS, não sucessos — e por isso o piso é `>= 6`, não `=== 6`.
 // A entrega é AT-LEAST-ONCE por decisão de produto: um item que quebra em
 // `transient` volta na rodada seguinte, e cravar a igualdade faria o teste
-// reprovar justamente pelo comportamento que a app promete. Quem guarda o
+// reprovar justamente pelo comportamento que o app promete. Quem guarda o
 // desperdício é o bloco da fila de saída no `smoke-browser.mjs` ("UMA
 // requisição por ação"); quem guarda o que importa aqui é a linha de baixo —
 // o placar NÃO pode contar duas vezes, e essa segue exata.
@@ -1084,7 +1084,7 @@ secao('8. O DEPLOY NÃO APAGA O MAPA PROVISIONADO');
 //     `waiting` (a página segue controlada pela antiga) até alguém mandar
 //     `SKIP_WAITING` — que é exatamente o que o `js/sw-register.js` faz num
 //     deploy real. Aqui o teste manda, porque o ouvinte dele está pendurado
-//     na registração que a app criou no `load`, não na que o teste provocou.
+//     na registração que o app criou no `load`, não na que o teste provocou.
 //
 // A ISCA é um cache no nome de uma versão anterior: é o que a faxina precisa
 // levar, ao lado do de tiles que ela precisa poupar. E ela é metade do teste —
@@ -1112,7 +1112,7 @@ await page.evaluate(async () => {
   pular(reg.waiting); pular(reg.installing);
   reg.addEventListener('updatefound', () => pular(reg.installing));
 }).catch(() => { /* a troca de controller derruba o evaluate; o que vale é o cache */ });
-// A troca de controller RECARREGA a página (o auto-update da app fazendo o que
+// A troca de controller RECARREGA a página (o auto-update do app fazendo o que
 // promete), e isso ABORTA um `waitForFunction` no meio: ele volta sem erro e a
 // medição acontece ANTES da faxina — foi o que fez esta seção reprovar três
 // vezes com o código certo. A espera tem que sobreviver à navegação, então é
@@ -1135,7 +1135,7 @@ diz('e o cache do MAPA sobreviveu INTEIRO ao deploy',
   depoisDoDeploy.tiles === antesDoDeploy.tiles && depoisDoDeploy.nomes.includes('waze-places-tiles'),
   `antes=${antesDoDeploy.tiles} depois=${depoisDoDeploy.tiles}`);
 
-// A troca de controller RECARREGA a página (é o auto-update da app fazendo o
+// A troca de controller RECARREGA a página (é o auto-update do app fazendo o
 // que promete). Espere ela assentar e devolva o estado que a seção seguinte
 // precisa — sem isto o `offlineVarrer()` de lá roda com fila vazia e a
 // asserção "o cache ficou vazio" passa por vácuo.
@@ -1148,7 +1148,7 @@ secao('8b. O DIAGNÓSTICO ENXERGA O OFFLINE — e o worker responde por si');
 // O relatório do relato de 2026-09-22 decidiu o conserto e mesmo assim custou
 // tempo: não trazia o estado do offline, o worker era caixa-preta, o tile que
 // falhava sumia com a prova, e a lista de recursos bateu no teto. Cada linha
-// aqui mede, na app de verdade, uma dessas lacunas fechada.
+// aqui mede, no app de verdade, uma dessas lacunas fechada.
 const noRelatorio = await page.evaluate(async () => ({ off: await diagOffline(), sw: await diagServiceWorker() }));
 diz('a seção offline diz o que o aparelho guardou: fila, janela e tiles',
   noRelatorio.off?.ligado === true && noRelatorio.off?.tilesNoCache > 0
@@ -1195,6 +1195,22 @@ try {
     capturas: momentos.length,
     capturaSemRede: momentos.filter((m) => m.rede?.online === false && m.offline?.ligado === true).length,
     redeNoDiario: (d.diario || []).filter((e) => /^rede\./.test(e.k)).map((e) => e.k),
+    // O `codigo` enxuto (v2026.09.24-02): tamanho, hash e versão; o corpo, só do
+    // CSS. E o `cacheVsRede` tem que ter comparado ANTES de o corpo sair.
+    app: d.app?.versao,
+    codigo: (() => {
+      const e = Object.entries(d.codigo || {});
+      return {
+        n: e.length,
+        comCorpo: e.filter(([, v]) => v && typeof v.corpo === 'string').map(([u]) => u.replace(/^https?:\/\/[^/]+/, '')),
+        semHash: e.filter(([, v]) => v && !v.erro && !v.hash).length,
+        versoes: [...new Set(e.map(([, v]) => v && v.versao).filter(Boolean))],
+      };
+    })(),
+    cvr: (() => {
+      const e = Object.values(d.cacheVsRede || {});
+      return { n: e.length, semCorpoLocal: e.filter((v) => v && v.erro === 'sem corpo local').length };
+    })(),
   };
 } catch (e) {
   relatorio = { erro: String((e && e.message) || e).slice(0, 200) };
@@ -1215,11 +1231,17 @@ diz('o RELATÓRIO de verdade (baixado em ZIP, lido pela ferramenta) traz as peç
 diz('e leva o que aconteceu: a captura SEM rede e a queda e a volta no diário',
   relatorio.capturaSemRede >= 1 && relatorio.redeNoDiario?.includes('rede.caiu')
   && relatorio.redeNoDiario.includes('rede.voltou'), JSON.stringify(relatorio));
+diz('o CÓDIGO sai enxuto (tamanho, hash e versão; o corpo só do CSS) e o cacheVsRede segue comparando',
+  relatorio.codigo?.n > 0 && relatorio.codigo.comCorpo.length >= 1
+  && relatorio.codigo.comCorpo.every((u) => /\.css(\?|$)/.test(u)) && relatorio.codigo.semHash === 0
+  && relatorio.codigo.versoes.length === 1 && relatorio.codigo.versoes[0] === relatorio.app
+  && relatorio.cvr?.n > 0 && relatorio.cvr.semCorpoLocal === 0,
+  JSON.stringify({ app: relatorio.app, codigo: relatorio.codigo, cvr: relatorio.cvr }));
 diz('no estado são, as duas sentinelas NOVAS ficam caladas no relatório',
   Array.isArray(relatorio.alertas) && !relatorio.alertas.includes('fotoEscondidaComAviso')
   && !relatorio.alertas.includes('tileGuardadoFalhou'), JSON.stringify(relatorio.alertas));
 // A SENTINELA do mapa, dos dois lados. O defeito natural (o worker acordando
-// sem a lista) está medido na 7c; aqui a falha é ENCENADA, nas condições que a
+// sem a lista) está medido na 7c; aqui a falha é ENCENADA, nas condições que o
 // app exige: worker no comando, varredura parada e o tile no cache — e um
 // tile que NÃO está guardado falhando junto, que não pode entrar.
 const sentMapa = await page.evaluate(async () => {
@@ -1317,9 +1339,9 @@ secao('9b. O QUE FOI TRATADO NÃO VOLTA — reabrir no meio da triagem, com e se
 //
 // A causa: a fila guardada é uma FOTO tirada com rede, e a reabertura sem rede
 // a restaurava inteira. Esta seção encena o percurso dele em páginas NOVAS, com
-// a app de verdade decidindo, e mais os três vizinhos que a mesma regra cobre:
+// o app de verdade decidindo, e mais os três vizinhos que a mesma regra cobre:
 // o pedido tratado COM rede depois da foto, a ação que estava na janela do
-// Desfazer quando a app foi fechada, e a busca da reabertura COM rede correndo
+// Desfazer quando o app foi fechado, e a busca da reabertura COM rede correndo
 // junto do esvaziamento da fila de saída.
 //
 // CONTROLE que torna a seção honesta: a fila guardada tem que continuar com os
@@ -1329,7 +1351,7 @@ secao('9b. O QUE FOI TRATADO NÃO VOLTA — reabrir no meio da triagem, com e se
 aviao = false; await ctx.setOffline(false);
 const DEC_9B = [101, 102, 103, 104, 105].map((i) => SO_MAPA(i));
 // A chave do pedido é calculada AQUI e dentro da página, à mão, e nunca pela
-// `chaveDoPedido` da app: assim esta seção roda igual contra a app de ANTES do
+// `chaveDoPedido` do app: assim esta seção roda igual contra o app de ANTES do
 // conserto — que é como se prova que ela reprova o defeito, e não uma função
 // que ainda não existia.
 const chave9b = (p) => p.venueID + '|' + p.updateRequestID;
@@ -1396,7 +1418,7 @@ const foto9b = await page.evaluate(async () => ({ res: offlineUltimoResultado,
 diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU e a fila guardada tem os 5',
   foto9b.res === 'pronto' && foto9b.n === 5, JSON.stringify(foto9b));
 
-// Lê a fila de saída do ARMAZENAMENTO, que é o que sobrevive a fechar a app.
+// Lê a fila de saída do ARMAZENAMENTO, que é o que sobrevive a fechar o app.
 const saida9b = (pg) => pg.evaluate(() => { try {
   return JSON.parse(localStorage.getItem('waze_places_saida') || '[]')
     .map((it) => ({ chave: it.venueID + '|' + it.updateRequestID, tipo: it.tipo }));
@@ -1449,7 +1471,7 @@ const estadoDaFila9b = (pg) => pg.evaluate(async () => {
   };
 });
 
-// 2. Avião, e a app REABERTA: o ✕ dado com rede não volta.
+// 2. Avião, e o app REABERTO: o ✕ dado com rede não volta.
 aviao = true; await ctx.setOffline(true);
 const p1 = await abrirFria9b('reaberta 1');
 await esperarNaPagina(p1, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'offline.abriu'), 20000, 100);
@@ -1461,7 +1483,7 @@ diz('reaberta sem rede, o pedido tratado COM rede depois da foto NÃO volta',
   && r1.abriu.at(-1)?.n === 4 && r1.abriu.at(-1)?.excluidos === 1, JSON.stringify(r1));
 
 // 3. Sem rede: dois pedidos tratados vão pra fila de saída, e um terceiro fica
-//    na janela do Desfazer quando a app é FECHADA.
+//    na janela do Desfazer quando o app é FECHADO.
 const k1 = await decidir9b(p1, '.card-btn-reject', true);
 const k2 = await decidir9b(p1, '.card-btn-read', true);
 await p1.evaluate(() => { AppState.preferences.undoEnabled = true; });
@@ -1473,10 +1495,10 @@ await p1.evaluate(() => cardDaFrente().querySelector('.card-btn-reject').click()
 await esperarNaPagina(p1, () => !!AppState.pendingAction, 5000, 50);
 const naJanela = await p1.evaluate(() => { const p = AppState.pendingAction && AppState.pendingAction.place;
   return p ? p.venueID + '|' + p.updateRequestID : null; });
-diz('PRÉ-CONDIÇÃO: o terceiro ✕ está na JANELA do Desfazer quando a app é fechada',
+diz('PRÉ-CONDIÇÃO: o terceiro ✕ está na JANELA do Desfazer quando o app é fechado',
   naJanela === k3 && !!k3, JSON.stringify({ naJanela, k3 }));
 // Fechar COMO O USUÁRIO FECHA: com `pagehide` e `visibilitychange`, que é o
-// que o aparelho dispara ao sair da app. O `close()` puro muda de semântica
+// que o aparelho dispara ao sair do app. O `close()` puro muda de semântica
 // entre as versões — MEDIDO: no Playwright 1.49 (o do CI, Chromium 131) ele
 // destrói a página SEM disparar nenhum dos dois; no 1.56 (o do sandbox)
 // dispara. Sem o `runBeforeUnload`, esta asserção passava aqui e reprovava no
@@ -1587,15 +1609,15 @@ atrasoBusca9b = 0;
 atrasoDecisao9b = () => 0;
 await ctx.unroute('**/api/*', rotaApi9b);
 
-secao('9c. O DIAGNÓSTICO SOBREVIVE A FECHAR A APP — o número do botão e o relatório');
+secao('9c. O DIAGNÓSTICO SOBREVIVE A FECHAR O APP — o número do botão e o relatório');
 // O mesmo relato do 9b: "usei o FAB 2 vezes, fechei e abri a aplicação e o
 // número sumiu do FAB". Capturas, diário, chamadas e erros viviam só em
 // MEMÓRIA — e o defeito daquele dia só existia atravessando um fechar e
 // reabrir, então a prova de antes de fechar era justamente o que sumia.
 //
 // Aqui o botão é tocado DE VERDADE (toque do DevTools Protocol, num contexto
-// com toque — o mesmo jeito do bloco do FAB no smoke de layout), a app é
-// fechada como o usuário fecha, e o relatório é o de verdade, lido pelo leitor
+// com toque — o mesmo jeito do bloco do FAB no smoke de layout), o app é
+// fechado como o usuário fecha, e o relatório é o de verdade, lido pelo leitor
 // único. Contexto PRÓPRIO: armazenamento limpo, sem sobra das seções de cima.
 // E cada regra de saída do que foi guardado é medida: baixar, 24 h, desligar o
 // modo dev e o Sair — e o modo dev desligado não cria nada no aparelho.
@@ -1673,7 +1695,7 @@ const carregou9c = (pg) => esperarNaPagina(pg, () => typeof dfatoAnel !== 'undef
 // ser descarregada, e descarregar ABORTA o IndexedDB em voo: MEDIDO, duas
 // sabotagens ("guarda a captura já baixada" e "grava sem o modo dev") passavam
 // limpas porque a gravação do fechar nunca terminava, com ou sem elas. Aqui o
-// `visibilityState` vira "hidden", o evento sai, e o ouvinte DA APP roda com a
+// `visibilityState` vira "hidden", o evento sai, e o ouvinte DO APP roda com a
 // página viva; depois espera a fila de gravações terminar e volta ao visível.
 const irProFundo9c = async (pg) => {
   await pg.evaluate(() => {
@@ -1691,7 +1713,7 @@ const guardouNesta9c = (pg, n) => esperarNaPagina(pg, async () => { try {
   return todas.some((a) => a.id === DIAG_ABERTURA.id && (a.momentos || []).length === n);
 } catch (e) { return false; } }, 10000, 100);
 
-// 0. Sessão, e o modo dev DESLIGADO: fechar a app não pode criar nada.
+// 0. Sessão, e o modo dev DESLIGADO: fechar o app não pode criar nada.
 const prep9c = await abrir9c('preparo');
 await esperarNaPagina(prep9c, () => typeof API !== 'undefined', 20000, 100);
 await prep9c.evaluate(() => {
@@ -1710,7 +1732,7 @@ await semDev.close({ runBeforeUnload: true });
 
 // 1. Modo dev ligado: dois toques no botão — um com a tela sã e outro com um
 //    DEFEITO na tela (o pedido da frente posto na fila de saída, que a
-//    sentinela do 9b acusa) —, e a app é fechada.
+//    sentinela do 9b acusa) —, e o app é fechado.
 const p1d = await abrir9c('abertura 1');
 await pronta9c(p1d);
 await carregou9c(p1d);
@@ -1736,7 +1758,7 @@ diz('a captura vai pro aparelho NA HORA, e o número do botão mostra 2',
 diz('a captura do defeito ACUSA a sentinela, e o guardado leva a acusação',
   g1d.abertas.some((a) => a.id === id1d && a.alertas.includes('pedidoDecididoNaFila')), JSON.stringify(g1d));
 diz('as chamadas vão pro aparelho SEM corpo', g1d.abertas.every((a) => !a.comCorpo), JSON.stringify(g1d));
-// Como no aparelho: a app vai pro fundo (os recentes) e depois é fechada.
+// Como no aparelho: o app vai pro fundo (os recentes) e depois é fechado.
 await irProFundo9c(p1d);
 await p1d.close({ runBeforeUnload: true });
 
@@ -1794,7 +1816,7 @@ const apagou = await esperarNaPagina(p2d, async () => !(await indexedDB.database
 const s4d = await selo9c(p2d);
 diz('BAIXADO, o que estava guardado sai do aparelho (e nesta abertura o número segue contando, como sempre)',
   apagou.ok && s4d.txt === '3', JSON.stringify({ apagou, s4d }));
-// Segue usando depois do download: uma captura NOVA, e a app vai pro fundo.
+// Segue usando depois do download: uma captura NOVA, e o app vai pro fundo.
 // É o caso que separa "guardar o que não foi entregue" de "guardar tudo": com
 // o anel desta abertura tendo uma baixada e uma nova, só a nova pode voltar.
 const tBaixado = await p2d.evaluate(() => diagBaixadoEm);
@@ -1891,5 +1913,5 @@ console.log('\n✓ smoke do offline: 17 seções (16 com o service worker LIGADO
   + ' toggle desligado e com o cache cheio, fila em IndexedDB, sufixo da foto como contrato'
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
-  + ' EM DECISÃO (e a app reaberta sem rede achando-a — num contexto à parte, com o SW fora, pelo'
+  + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
   + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle)');

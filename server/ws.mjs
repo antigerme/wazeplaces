@@ -56,7 +56,7 @@ class ConexaoWS {
     // `end` E `close`, e o `end` é o que importa: o socket de um upgrade fica
     // meio-aberto (`allowHalfOpen`), então quando o outro lado some o Node
     // emite só `end` — `close` fica esperando NÓS fecharmos a escrita, o que
-    // não acontece sozinho. Ouvindo só `close`, quem fechava a app continuava
+    // não acontece sozinho. Ouvindo só `close`, quem fechava o app continuava
     // na lista dos outros pra sempre: a presença deixava de ser a conexão.
     socket.on('end', () => this.encerrar());
     socket.on('close', () => this.encerrar());
