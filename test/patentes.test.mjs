@@ -12,7 +12,7 @@
 //     buraco na grade.
 //  4. A GEOGRAFIA. Estado chaveado por `pais:estado`, senão o mesmo número em
 //     países diferentes vira um lugar só. E balde ANTIGO (sem `onde`) não pode
-//     derrubar o render — é a migração `historico-onde`.
+//     derrubar as conquistas — é a migração `historico-onde`.
 //  5. O DICIONÁRIO cobre cada id nas quatro línguas. Chave faltando não quebra
 //     nada: aparece a chave crua na tela.
 import test from 'node:test';
@@ -167,11 +167,22 @@ test('MIGRACAO historico-onde: balde antigo não derruba nada', () => {
   const g = geografiaDoHistorico(h);
   assert.equal(g.paises.size, 1, 'o balde antigo não pode contribuir nem atrapalhar');
   assert.equal(g.estados.size, 1);
-  // E o registro tem que EXISTIR, com a família certa: é isso que faz alguém
-  // revisitar o `|| {}` em vez de ele virar código eterno.
+  // E o registro tem que EXISTIR, com a família e o prazo certos: é isso que faz
+  // alguém revisitar o `|| {}` em vez de ele virar código eterno, e só quando
+  // tirá-lo não quebra nada. O balde velho fica GUARDADO até a poda de
+  // HISTORY_MAX_DIAS (abrir a versão nova não o apaga), então isto é `compat`,
+  // que expira quando o dado some. A entrada nasceu `aparelho`, com revisão em
+  // 30 dias: seguida, tirava o `|| {}` com os baldes antigos ainda no aparelho,
+  // e o `checarConquistas` lançaria a cada ação.
   const m = MIGRACOES.find((x) => x.id === 'historico-onde');
   assert.ok(m, 'a migração historico-onde saiu do registro mas o código ainda tolera balde sem `onde`');
-  assert.equal(m.familia, 'aparelho', 'é migração de localStorage: a família decide o prazo');
+  assert.equal(m.familia, 'compat', 'o balde velho fica guardado até a poda: é dado antigo, não aparelho antigo');
+  const dias = Number((/^const HISTORY_MAX_DIAS = (\d+);/m.exec(APP) || [])[1]);
+  assert.ok(dias > 0, 'HISTORY_MAX_DIAS sumiu do app.js');
+  const podaDoUltimo = new Date(Date.parse(m.desde + 'T00:00:00Z') + dias * 86400000)
+    .toISOString().slice(0, 10);
+  assert.ok(m.revisarEm >= podaDoUltimo,
+    `revisar em ${m.revisarEm} é antes de a poda levar o último balde sem \`onde\` (${podaDoUltimo})`);
 });
 
 // ── a sequência de dias ────────────────────────────────────────────────────
