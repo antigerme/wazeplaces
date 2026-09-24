@@ -1,40 +1,23 @@
 // Mandar o pedido aberto pela conversa: o que trafega, o que se aceita de
 // volta, e como o cartão é desenhado.
 //
-// O módulo mora no js/presenca.js (script de browser, não módulo), então o
-// teste FATIA a fonte — mesmo padrão do test/recibos.test.mjs.
+// O js/presenca.js roda INTEIRO no navegador de mentira do
+// `_presenca-cliente.mjs` (o `escapeHtml` é o do app.js, fatiado de lá): o
+// teste mede o que o cliente FAZ. Desde a fase 3 o pedido vai pelo chat do WME:
+// o cartão viaja num campo do contexto que o WME não mostra, e o texto leva a
+// pergunta, o 📍 e o link (ver `presenca-cliente.test.mjs`).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { novoCliente } from './_presenca-cliente.mjs';
 
 const fonte = readFileSync(new URL('../js/presenca.js', import.meta.url), 'utf8');
 
-function fatiar(inicio, fim) {
-  assert.ok(fonte.includes(inicio), `sumiu do presenca.js: ${inicio}`);
-  assert.ok(fonte.includes(fim), `sumiu do presenca.js: ${fim} — o corte precisa ser revisto`);
-  const a = fonte.indexOf(inicio), b = fonte.indexOf(fim);
-  assert.ok(b > a, `${fim} veio ANTES de ${inicio}`);
-  return fonte.slice(a, b);
-}
-const trecho = fatiar('function presencaResumoDoCard(', 'function presencaConfirmar(')
-  + '\n' + fatiar('const PRESENCA_GLIFO = {', 'function presencaRenderConversa() {');
-
+// Os nomes que os testes usam, com o `t` do harness devolvendo `chave{vars}`.
 function montar() {
-  const escopo = {
-    Presenca: { aberta: 'p1', conversas: new Map(), anexo: null },
-    document: { visibilityState: 'visible' },
-    t: (k, v) => (v && v.nome ? `${k}:${v.nome}` : k),
-    // Cópia FIEL do escapeHtml do app.js — dublê mais generoso que o original
-    // mede um comportamento que a app não tem.
-    escapeHtml: (s) => (s === null || s === undefined ? '' : String(s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#039;')),
-    presencaRenderConversa: () => {},
-  };
-  const nomes = Object.keys(escopo);
-  const corpo = trecho + '\nreturn { presencaResumoDoCard, presencaCardSeguro, PRESENCA_FOTO_OK,'
-    + ' presencaHtmlDoPedido, presencaHtmlDasMsgs, presencaRecibo };';
-  return new Function(...nomes, corpo)(...nomes.map((n) => escopo[n]));
+  const { P } = novoCliente();
+  const t = { presencaHtmlDasMsgs: (conv) => P.presencaHtmlDasMsgs('p1', conv) };
+  return { ...P, ...t };
 }
 
 const CARD = {
@@ -44,8 +27,8 @@ const CARD = {
   imageUrl: 'https://venue-image.waze.com/thumbs/thumb700_A.png',
   lat: -23.5, lon: -46.6, region: 'row',
 };
-const conv = (msgs) => ({ nome: 'carla_am', estado: 'aberta', recibos: true, msgs });
-const msgCard = (extra = {}) => ({ meu: true, txt: '', ts: 1, id: 1, estado: 'entregue', motivo: null, card: CARD, ...extra });
+const conv = (msgs) => ({ msgs });
+const msgCard = (extra = {}) => ({ meu: true, texto: '', legenda: '', ts: 1, id: 'm1', estado: 'enviada', card: CARD, ...extra });
 
 // ═══ o que se aceita de volta ═══════════════════════════════════════════════
 
@@ -124,7 +107,8 @@ test('pedido: o resumo usa CHAVE de tipo, não texto pronto', () => {
   // Quem manda pode estar em português e quem recebe em francês. O remetente
   // não escolhe a palavra que aparece na tela do outro.
   const m = montar();
-  assert.equal(m.presencaResumoDoCard(CARD), 'card.updateType.IMAGE · BAKERY');
+  // O tipo sai do dicionário de quem LÊ (o do harness é o português).
+  assert.equal(m.presencaResumoDoCard(CARD), 'Nova foto · BAKERY');
 });
 
 test('pedido: categoria sai CRUA — o Waze regionaliza por PAÍS, não por idioma', () => {
@@ -152,13 +136,13 @@ test('pedido: o cartão é um <button> com rótulo — teclado e leitor chegam n
   const m = montar();
   const html = m.presencaHtmlDasMsgs(conv([msgCard()]));
   assert.match(html, /<button type="button" class="conversa-pedido/);
-  assert.match(html, /aria-label="presenca\.pedido\.abrir:Padaria Estrela do Norte"/);
+  assert.match(html, /aria-label="presenca\.pedido\.abrir\{&quot;nome&quot;:&quot;Padaria Estrela do Norte&quot;\}"/);
   assert.match(html, /data-msg="0"/, 'sem o índice, o clique não sabe qual pedido abrir');
 });
 
 test('pedido: com pergunta, card e texto são UMA mensagem e UM recibo', () => {
   const m = montar();
-  const html = m.presencaHtmlDasMsgs(conv([msgCard({ txt: 'é fachada?', estado: 'lida' })]));
+  const html = m.presencaHtmlDasMsgs(conv([msgCard({ legenda: 'é fachada?' })]));
   assert.match(html, /com-legenda/);
   assert.equal((html.match(/class="presenca-recibo/g) || []).length, 1,
     'dois recibos na mesma mensagem seria contar a mesma entrega duas vezes');
@@ -194,7 +178,7 @@ test('pedido: sem foto não se desenha caixa de foto vazia', () => {
 test('pedido: nome e legenda saem ESCAPADOS — o texto vem de outro aparelho', () => {
   const m = montar();
   const html = m.presencaHtmlDasMsgs(conv([msgCard({
-    txt: '<img src=x onerror=alert(1)>',
+    legenda: '<img src=x onerror=alert(1)>',
     card: { ...CARD, name: '"><script>alert(1)</script>' },
   })]));
   assert.ok(!html.includes('<script'), 'nome não pode injetar tag');
@@ -215,13 +199,6 @@ test('pedido: a URL da foto sai escapada dentro do atributo src', () => {
     'a aspa tem que sair como entidade, dentro do mesmo atributo');
 });
 
-test('pedido: peer sem recibo desenha o cartão, só sem os tiques', () => {
-  const m = montar();
-  const html = m.presencaHtmlDasMsgs({ ...conv([msgCard()]), recibos: false });
-  assert.match(html, /conversa-pedido/, 'o pedido em si tem que aparecer');
-  assert.ok(!html.includes('presenca-recibo'));
-});
-
 test('pedido: o cartão que ELA mandou não leva recibo', () => {
   const m = montar();
   const html = m.presencaHtmlDasMsgs(conv([msgCard({ meu: false, estado: null })]));
@@ -229,20 +206,39 @@ test('pedido: o cartão que ELA mandou não leva recibo', () => {
   assert.ok(!html.includes('presenca-recibo'));
 });
 
-// ═══ o que o transporte tem que deixar passar ═══════════════════════════════
+// ═══ o que o envio tem que deixar passar ════════════════════════════════════
 
-test('pedido: mensagem SÓ com card (sem texto) não pode ser descartada', () => {
-  // O `onmessage` sai fora quando não há texto. Com pedido e sem pergunta a
-  // mensagem é legítima — mandar o card pelado é um jeito de perguntar.
-  const recebe = fonte.slice(fonte.indexOf('canal.onmessage = (ev) => {'),
-    fonte.indexOf('async function presencaChamar('));
-  assert.match(recebe, /if \(!txt && !card\) return;/,
-    'o corte por texto vazio tem que considerar o card');
+test('pedido: mandar SÓ o card (sem pergunta) é legítimo — o campo vazio não barra', async () => {
+  // Com pedido e sem pergunta a mensagem é legítima: mandar o card pelado é um
+  // jeito de perguntar. Pelo caminho de verdade: o `submit` do formulário.
+  const c = novoCliente({ api: { chat: () => ({ success: true }) } });
+  c.P.presencaMontar();
+  c.P.Presenca.aberta = '183164343';
+  c.P.Presenca.anexo = CARD;
+  c.$('conversaInput').value = '   ';
+  c.$('conversaForm').disparar('submit');
+  await new Promise((r) => setImmediate(r));
+  const envio = c.chamadas.chat.find((x) => x.acao === 'enviar');
+  assert.ok(envio, 'o card sem pergunta não saiu');
+  assert.ok(envio.texto.startsWith('📍 Padaria Estrela do Norte'), envio.texto);
+  assert.equal(c.P.Presenca.anexo, null, 'o anexo não soltou depois de mandar');
+  // Sem card e sem texto, nada sai.
+  c.$('conversaInput').value = '';
+  c.$('conversaForm').disparar('submit');
+  await new Promise((r) => setImmediate(r));
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 1);
 });
 
-test('pedido: o card só entra no que trafega quando existe', () => {
-  const envia = fonte.slice(fonte.indexOf('function presencaEntregarMsg('),
-    fonte.indexOf('const PRESENCA_PESO'));
-  assert.match(envia, /m\.card\s*\n?\s*\?\s*\{ txt: m\.txt, id: m\.id, card: m\.card \}/,
-    'mensagem sem card não deve carregar a chave `card` à toa');
+test('pedido: o cartão que chega pelo contexto passa pela limpeza campo a campo', () => {
+  // O contexto é escrito por OUTRO aparelho (ou por quem quiser mandar pelo
+  // WME): o cartão dele não entra na tela sem passar pelo `presencaCardSeguro`.
+  const m = montar();
+  const vindo = m.presencaMsgDoWaze({
+    id: 'x', ts: 1, de: { tipo: 1, id: '183164343' }, texto: '📍 x\nhttps://www.waze.com/editor',
+    contexto: { app: 'wazeplaces', card: JSON.stringify({ ...CARD, imageUrl: 'javascript:alert(1)', onerror: 'y' }) },
+  }, '12444348');
+  assert.equal(vindo.card.imageUrl, null);
+  assert.equal('onerror' in vindo.card, false);
+  assert.match(fonte, /card = presencaCardSeguro\(JSON\.parse\(ctx\.card\)\)/,
+    'o cartão do contexto tem que passar pela limpeza');
 });

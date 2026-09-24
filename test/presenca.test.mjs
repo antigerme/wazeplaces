@@ -52,15 +52,17 @@ test('salaDaFila resolve a fila em nome de sala', () => {
   assert.equal(limpar('x'.repeat(200)).length, 64, 'sem teto de tamanho');
 });
 
-test('o NOME DA SALA nasce só no servidor — o cliente usa o que o crachá diz', () => {
-  // Duas montagens do mesmo nome divergem sozinhas (o estado entra num lado e
-  // não no outro) e o sintoma é "não vejo ninguém", que ninguém sabe depurar.
-  // Por isso o cliente NÃO monta: manda região/país/estado, o servidor resolve
-  // com `salaDaFila` e devolve a sala DENTRO do crachá assinado — o mesmo valor
-  // que a sala confere na entrada.
-  const CLIENTE = read('js/presenca.js');
-  assert.equal(/salaDaFila/.test(CLIENTE), false, 'o cliente voltou a montar o nome da sala');
-  assert.match(CLIENTE, /cracha\.sala/, 'o cliente parou de usar a sala do crachá');
+test('o NOME DA SALA nasce só no servidor — e o cliente não fala mais com a sala', () => {
+  // Duas montagens do mesmo nome divergem sozinhas e o sintoma é "não vejo
+  // ninguém". O servidor resolve com `salaDaFila` e devolve a sala DENTRO do
+  // crachá. Desde a fase 3 o CLIENTE não usa a sala nenhuma: a lista e o chat
+  // são os do WME. A sala segue no servidor até a fase 4, que a remove — e um
+  // cliente misturando os dois modelos seria a pior das duas coisas.
+  const CLIENTE = read('js/presenca.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  for (const proibido of [/salaDaFila/, /new WebSocket/, /RTCPeerConnection/, /['"]\/sala['"]/, /API\.presenca\(/, /cracha/]) {
+    assert.equal(proibido.test(CLIENTE), false, `o cliente voltou a usar a sala própria (${proibido})`);
+  }
+  assert.match(CLIENTE, /API\.presencaApp\(/, 'o cliente parou de pedir a lista da app');
 
   const CORE = read('server/core.mjs');
   assert.match(CORE, /salaDaFila\(/, 'o servidor parou de usar a fonte única do nome da sala');
@@ -380,8 +382,29 @@ test('o estado e o objeto exportado são o MESMO — nada de dois Presenca', () 
 });
 
 // ── O CUSTO DE RECONECTAR ───────────────────────────────────────────────────
+//
+// Desde a fase 3 quem reconecta é o TEMPO REAL do chat, direto ao Google — e a
+// lição da sala vale igual: abrir a conexão não é ter conectado.
 
-test('o recuo só zera quando o servidor ACEITA, não quando o socket abre', () => {
+test('o recuo do tempo real só zera quando o Google ENTREGA o lote, não quando a conexão abre', () => {
+  // O bug mais caro da sala, e ele vale pro fluxo do Google do mesmo jeito:
+  // zerar o recuo ao abrir faz toda falha virar uma tentativa nova a cada
+  // poucos segundos, pra sempre. O que prova que a conexão SERVE é o fim do
+  // lote inicial (`endOfBatch`) — é o `eu` da sala, noutra roupa. O desligar
+  // também zera, e é outra coisa: é a pessoa saindo, não a rede voltando.
+  const CLI = read('js/presenca.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const zeragens = [...CLI.matchAll(/fluxoTentativa\s*=\s*0/g)].map((m) => {
+    const linha = CLI.slice(CLI.lastIndexOf('\n', m.index) + 1, CLI.indexOf('\n', m.index));
+    const fn = [...CLI.slice(0, m.index).matchAll(/function (\w+)\(/g)].pop();
+    return { linha: linha.trim(), fn: fn ? fn[1] : '?' };
+  });
+  assert.ok(zeragens.some((z) => /o\.endOfBatch/.test(z.linha)), 'o fim do lote deixou de zerar o recuo');
+  const fora = zeragens.filter((z) => !/o\.endOfBatch/.test(z.linha) && z.fn !== 'presencaDesligar');
+  assert.deepEqual(fora.map((z) => `${z.fn}: ${z.linha}`), [],
+    'o recuo do tempo real é zerado fora do fim do lote — abrir a conexão não é ter conectado');
+});
+
+test('o recuo só zera quando o servidor ACEITA, não quando o socket abre (a sala, até a fase 4)', () => {
   // O bug mais caro do recurso, e ele não aparece em teste de layout nem de
   // protocolo: `onopen` zerava o contador de tentativas. Mas abrir o socket
   // NÃO é ter conectado — a recusa do crachá, o fechamento pelo servidor e a
@@ -392,36 +415,27 @@ test('o recuo só zera quando o servidor ACEITA, não quando o socket abre', () 
   // todas espaçadas 2s. Cada uma custa DUAS requisições ao Worker (o crachá e
   // o upgrade) e uma chamada ao Waze — ~3.600 requisições/hora por aparelho
   // preso. Depois do conserto, ~120.
-  const CLI = read('js/presenca.js');
-
-  const onopen = CLI.match(/ws\.onopen = \(\) => \{[\s\S]*?\n    \};/);
-  assert.ok(onopen, 'sumiu o onopen do socket');
-  assert.equal(/tentativa\s*=\s*0/.test(onopen[0]), false,
-    'o `onopen` voltou a zerar o recuo — abrir o socket não é ter conectado');
-
-  // Quem zera é a confirmação do servidor — e SÓ ela. A verificação é sobre
-  // TODAS as ocorrências, não sobre uma linha específica: já tentei pôr um
-  // `tentativa = 0` no evento `online` do navegador, e este teste me barrou com
-  // razão. `online` quer dizer "existe interface de rede", não "a internet
-  // funciona": num wi-fi instável ele dispara repetidamente e o recuo nunca
-  // cresceria — o mesmo defeito, noutra roupa.
-  const bloco = CLI.match(/if \(m\.t === 'eu'\)[\s\S]*?\n    \}/);
-  assert.ok(bloco, 'sumiu o tratamento da mensagem `eu`');
-  assert.match(bloco[0], /Presenca\.tentativa = 0/,
-    'a mensagem `eu` deixou de zerar o recuo');
-  const zeragens = (CLI.match(/Presenca\.tentativa\s*=\s*0/g) || []).length;
-  assert.equal(zeragens, 1,
-    `o recuo é zerado em ${zeragens} lugares — só a mensagem \`eu\` pode fazer isso`);
+  // Desde a fase 3 não há cliente da sala: o `eu` que zerava o recuo saiu com
+  // ele. O que este teste trava agora é que NINGUÉM volte a zerar um recuo no
+  // evento `online` do navegador — `online` quer dizer "existe interface de
+  // rede", não "a internet funciona", e num wi-fi instável ele dispara em laço.
+  const CLI = read('js/presenca.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const online = CLI.match(/addEventListener\('online', [^\n]*/);
+  assert.ok(online, 'sumiu o ouvinte do `online`');
+  assert.doesNotMatch(online[0], /Tentativa\s*=\s*0|tentativa\s*=\s*0/, 'o `online` voltou a zerar o recuo');
 });
 
 test('a espera de reconexão tem jitter', () => {
   // Servidor que cai desconecta TODO mundo no mesmo instante. Espera igual pra
   // todos transforma uma queda numa rajada sincronizada de volta — o mesmo
-  // motivo do jitter das chamadas ao Waze, agora do lado do cliente.
+  // motivo do jitter das chamadas ao Waze, agora do lado do cliente. O fim
+  // NORMAL do fluxo (o Google fecha a cada ~6 min) religa em 1 s, sem recuo.
   const CLI = read('js/presenca.js');
-  const fn = CLI.match(/function presencaReagendar\(\)[\s\S]*?\n\}/);
-  assert.ok(fn, 'sumiu o presencaReagendar');
+  const fn = CLI.match(/function presencaFluxoReagendar\(fimNormal\)[\s\S]*?\n\}/);
+  assert.ok(fn, 'sumiu o presencaFluxoReagendar');
   assert.match(fn[0], /Math\.random\(\)/, 'a espera de reconexão voltou a ser fixa');
+  assert.match(fn[0], /if \(fimNormal\) \{\s+espera = PRESENCA_FLUXO_RELIGAR_MS;/,
+    'o fim normal do fluxo deixou de religar logo');
 });
 
 // ── O QUE O SERVIDOR NÃO SABE ───────────────────────────────────────────────

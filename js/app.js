@@ -604,6 +604,9 @@ const LIMPEZA_AO_FECHAR = {
         // continua chegando como "conversa aberta" e nunca vira aviso.
         window.Presenca?.esquecerAberta?.();
     },
+    // A lista leva a prévia da última mensagem de cada conversa, que é dado
+    // privado: fechada, ela não fica no DOM (que o diagnóstico leva inteiro).
+    presencaModal() { window.Presenca?.esquecerLista?.(); },
     pairEnterModal() {
         const campo = document.getElementById('pairCodeInput');
         if (campo) campo.value = '';
@@ -2872,6 +2875,13 @@ async function loadProfileAndAuxData() {
     if (countriesRes.success) {
         AppState.countries = countriesRes.countries;
     }
+    // A presença (fase 3) precisa do id do PERFIL — a lista exclui a própria
+    // pessoa e o chat é dela. O `showMainScreen` chama a presença antes de o
+    // perfil chegar, e ela desiste calada; sem esta linha, quem abria a app com
+    // a sessão salva ficava sem lista e sem conversa até mexer nos filtros.
+    // Depois dos países, porque o subtítulo da lista usa o nome do país.
+    // (Achado na validação ao vivo: o smoke injetava o perfil ANTES e não via.)
+    if (profileRes.success) window.Presenca?.sincronizar?.();
 }
 
 // UM 401 não é prova de que a sessão morreu — e tratar como se fosse era o
@@ -3772,7 +3782,7 @@ function dlogCapturar(motivo) {
             }),
             rolagem: [...document.querySelectorAll('.card-changes-list, .card-flag-comment-text, #noMoreCards')]
                 .map((e) => ({ classe: [...e.classList][0], top: e.scrollTop, altura: e.scrollHeight })),
-            dom: document.documentElement.outerHTML,
+            dom: domParaDiagnostico(),
         };
         dlogMomentos.push(m);
         // COTA POR MOTIVO pro que é FREQUENTE, e o arraste é o caso: ele é o
@@ -4463,11 +4473,39 @@ function ligarFabDev() {
 // 6 (v2026.09.23-03): o resumo ganha `presencaWme` (a presença no mapa do WME,
 // de carona nas ações): ligada, já vista ligada, escritas, falhas e se a marca
 // de quem está na app voltou diferente. Aditivo.
-const DIAG_VERSAO = 6;
+// 7 (v2026.09.24-01): o resumo ganha `presencaApp` (a lista e o chat da app,
+// fase 3: quantos na app, conversas, não lidas, o token e o tempo real — só
+// CONTAGENS), e o `dom` (do relatório e de cada captura) sai SEM a conversa e
+// sem a prévia da lista (`domParaDiagnostico`), com a contagem do que saiu.
+const DIAG_VERSAO = 7;
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
 // (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
 // e o arquivo sai vazio — falha silenciosa no instrumento de socorro.
+// O HTML da página pro diagnóstico, SEM as conversas. A conversa aberta e a
+// prévia da lista são dado privado de terceiro — mais sensível que o nome de
+// quem mandou um pedido, que é público no mapa —, e o diagnóstico é um arquivo
+// que viaja por WhatsApp. O elemento fica (é ele que diz que a conversa estava
+// aberta), vazio e com a contagem do que saiu.
+//
+// Por troca de TEXTO, e não por clone: o `outerHTML` de um elemento é trecho
+// exato do `outerHTML` da página (é o mesmo serializador), e clonar a página
+// inteira recriaria cada <img> — pedido de rede dentro de um instrumento.
+const DIAG_PRIVADOS = ['conversaMsgs', 'presencaLista'];
+function domParaDiagnostico() {
+    let html = document.documentElement.outerHTML;
+    for (const id of DIAG_PRIVADOS) {
+        const el = document.getElementById(id);
+        if (!el || !el.innerHTML) continue;
+        const vazio = el.cloneNode(false);
+        vazio.setAttribute('data-diag-omitido', String(el.childElementCount));
+        // Função, e não texto, na troca: texto de troca interpreta `$&` e `$1`.
+        // O elemento vazio não tem cifrão hoje; não depender disso custa nada.
+        html = html.replace(el.outerHTML, () => vazio.outerHTML);
+    }
+    return html;
+}
+
 function diagSeguro(v, prof = 0, vistos = new WeakSet()) {
     if (v === null || typeof v !== 'object') {
         return typeof v === 'function' ? '[função]' : v;
@@ -4836,6 +4874,10 @@ async function diagCorpo() {
             // sem abrir o resto: ligada? a app já a viu ligada? as escritas de
             // carona estão saindo, falhando, voltando sem a marca?
             presencaWme: (() => { try { return presencaWmeDiag(); } catch (e) { return { erro: String(e && e.message) }; } })(),
+            // A lista e o chat da app (fase 3): quantos estão na app, quantas
+            // conversas e não lidas, o token e o tempo real. Só CONTAGENS — a
+            // conversa é dado privado e não entra no diagnóstico de jeito nenhum.
+            presencaApp: (() => { try { return window.Presenca?.diag?.() || null; } catch (e) { return { erro: String(e && e.message) }; } })(),
             // PRIMEIRA coisa a olhar. Vazio = nenhuma invariante conhecida
             // quebrada; não significa "está tudo bem", significa "não é nenhum
             // dos defeitos que já vimos".
@@ -4928,7 +4970,7 @@ async function diagCorpo() {
         })(),
         // O HTML como está AGORA, com as classes que decidem o que aparece na
         // tela. É o que mostra qual painel estava visível no momento da queixa.
-        dom: document.documentElement.outerHTML,
+        dom: domParaDiagnostico(),
         codigo,
         cacheVsRede,
         armazenamento,
@@ -5347,7 +5389,8 @@ async function handleLogout() {
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
     safeLS.remove(PERFIL_GATE_KEY);   // rank do último perfil: some com o resto
     esquecerAutores();  // contagem por autor: é dado de TERCEIRO, sai primeiro
-    // Fecha a conexão da sala e apaga os bloqueios: são escolhas de quem
+    // Fecha o tempo real e apaga o que o chat guardou no aparelho (a
+    // instalação, as conversas conhecidas, até onde cada um leu): é de quem
     // entrou, não preferência do aparelho.
     window.Presenca?.esquecer?.();
     esquecerPrazoDaSessao(); // prazo da sessão do Waze: some com o resto
@@ -11453,6 +11496,11 @@ function presencaWmeDaAcao(placeDaAcao) {
         presencaWme.ultimaEm = agora;
         const presenca = { userId: String(id), lat: centro[0], lon: centro[1], pais: API.getCountry() };
         if (presencaWme.ligarNaProxima) presenca.visivel = true;
+        // Fase 3: a lista de quem usa a app volta de carona, e as conversas que
+        // o aparelho já conhece vão junto pra ela incluir as que foram
+        // respondidas pelo WME (sem a marca da app).
+        const conhecidos = window.Presenca?.conhecidos?.();
+        if (Array.isArray(conhecidos) && conhecidos.length) presenca.conhecidos = conhecidos;
         return presenca;
     } catch (e) {
         return null;
@@ -11461,6 +11509,10 @@ function presencaWmeDaAcao(placeDaAcao) {
 
 function presencaWmeAoResponder(presenca, result) {
     try {
+        // A lista de quem usa a app e as conversas (fase 3), de carona. O
+        // instante é o de quando a carona SAIU: mensagem que chegou ao vivo
+        // depois disso a lista ainda não contou.
+        if (presenca && result && result.presencaApp) window.Presenca?.aoCarona?.(result.presencaApp, presencaWme.ultimaEm);
         const r = presenca && result && result.presenca;
         if (!r) return;
         if (r.ok) {

@@ -66,18 +66,32 @@ function lerEscrita(corpoPedido) {
   };
 }
 
-// Troca o fetch: `acao(url, corpo)` responde a ação; `presenca(corpo)` a escrita
-// da presença. Anota cada pedido com o instante em que SAIU.
-async function comWaze({ acao, presenca }, fn) {
+// Troca o fetch. Desde a fase 3 a carona faz TRÊS leituras/escritas no Waze
+// além da ação, e cada uma tem seu responder:
+//   `acao`      — o JSON da ação (`/Features`, `/Issues/Read`);
+//   `presenca`  — a ESCRITA da posição (`updateOnlineEditor`);
+//   `lista`     — quem está online (`listOnlineEditors`), padrão: ninguém;
+//   `conversas` — as conversas (`ListConversations`, no `-wmp`), padrão: nenhuma.
+// Cada pedido é anotado com o `tipo` e o instante em que SAIU.
+const LISTA_VAZIA = () => respostaGrpc({});
+const CONVERSAS_VAZIAS = () => respostaGrpc({});
+function tipoDoPedido(u) {
+  if (u.includes('/updateOnlineEditor')) return 'escrita';
+  if (u.includes('/listOnlineEditors')) return 'lista';
+  if (u.includes('-wmp/')) return 'conversas';
+  return 'acao';
+}
+async function comWaze({ acao, presenca, lista = LISTA_VAZIA, conversas = CONVERSAS_VAZIAS }, fn) {
   const original = globalThis.fetch;
   const pedidos = [];
   const t0 = Date.now();
   globalThis.fetch = async (url, init) => {
     const u = String(url);
-    const grpc = u.includes('/grpc/');
-    const p = { url: u, grpc, t: Date.now() - t0, init, corpo: init && init.body };
+    const tipo = tipoDoPedido(u);
+    const grpc = tipo !== 'acao';
+    const p = { url: u, grpc, tipo, t: Date.now() - t0, init, corpo: init && init.body };
     pedidos.push(p);
-    const r = grpc ? await presenca(p) : await acao(p);
+    const r = await ({ acao, escrita: presenca, lista, conversas })[tipo](p);
     p.respondidoEm = Date.now() - t0;
     return r;
   };
@@ -105,9 +119,13 @@ for (const [rota, extra, caminhoDaAcao] of [
     assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
     assert.equal(resultado.body.success, true);
     assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
-    assert.equal(pedidos.length, 2, 'devia sair exatamente a ação e a presença');
-    const acao = pedidos.find((p) => !p.grpc);
-    const pres = pedidos.find((p) => p.grpc);
+    // Fase 3: além da ação e da escrita, a carona LÊ quem usa a app e as
+    // conversas — uma chamada de cada, nem mais nem menos.
+    assert.deepEqual(pedidos.map((p) => p.tipo).sort(), ['acao', 'conversas', 'escrita', 'lista'],
+      'devia sair a ação, a escrita e as duas leituras da app, uma de cada');
+    assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [] });
+    const acao = pedidos.find((p) => p.tipo === 'acao');
+    const pres = pedidos.find((p) => p.tipo === 'escrita');
     assert.ok(acao.url.includes(caminhoDaAcao), acao.url);
     assert.equal(pres.url, 'https://www.waze.com/row-Descartes/grpc/com.waze.mapeditor.web.api.MapEditorWebServer/updateOnlineEditor');
     // A ação vai IGUAL à de sempre: a presença não entra no payload do Waze.
@@ -136,8 +154,8 @@ test('carona: a presença sai JUNTO com a ação (em paralelo), não depois dela
     acao: async () => { await esperar(250); return ACAO_OK(); },
     presenca: PRESENCA_OK,
   }, () => dispatch('validar-place', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
-  const acao = pedidos.find((p) => !p.grpc);
-  const pres = pedidos.find((p) => p.grpc);
+  const acao = pedidos.find((p) => p.tipo === 'acao');
+  const pres = pedidos.find((p) => p.tipo === 'escrita');
   assert.ok(pres.t < acao.respondidoEm, `a presença só saiu depois da ação (${pres.t} ms × ${acao.respondidoEm} ms)`);
 });
 
@@ -145,7 +163,7 @@ test('carona: pedido de ligar vai junto na MESMA escrita (location + visible)', 
   const { resultado, pedidos } = await comWaze({ acao: ACAO_OK, presenca: PRESENCA_OK },
     () => dispatch('marcar-lido', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: { ...PRESENCA, visivel: true } }, {}));
   assert.equal(resultado.body.presenca.ok, true);
-  const e = lerEscrita(pedidos.find((p) => p.grpc).corpo);
+  const e = lerEscrita(pedidos.find((p) => p.tipo === 'escrita').corpo);
   assert.deepEqual(e.caminhos, ['location', 'visible']);
   assert.equal(e.visivel, true);
 });
@@ -201,7 +219,8 @@ test('carona: presença MALFORMADA é ignorada sem ir ao WME — e a ação sai 
     42,
   ];
   for (const presenca of ruins) {
-    const { resultado, pedidos } = await comWaze({ acao: ACAO_OK, presenca: () => assert.fail('foi ao WME com presença ruim') },
+    const { resultado, pedidos } = await comWaze({ acao: ACAO_OK, presenca: () => assert.fail('foi ao WME com presença ruim'),
+      lista: () => assert.fail('leu a lista com presença ruim'), conversas: () => assert.fail('leu as conversas com presença ruim') },
       () => dispatch('validar-place', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca }, {}));
     assert.equal(resultado.body.success, true, JSON.stringify(presenca));
     assert.equal(pedidos.length, 1, JSON.stringify(presenca));
@@ -246,19 +265,25 @@ test('carona: presença LENTA não segura a resposta — teto de espera, e o res
   assert.equal(resultado.body.success, true);
   assert.ok(!('presenca' in resultado.body), 'esperou a presença lenta em vez de responder');
   assert.ok(levou < 2500, `a resposta esperou ${levou} ms — o teto é 1,5 s depois da ação`);
-  assert.equal(fundo.length, 1, 'a escrita que passou do teto não foi entregue ao segundo plano');
+  // Duas partes vão ao segundo plano — a escrita e a leitura da app —, cada uma
+  // no seu tempo. A leitura (rápida aqui) chega na resposta; a escrita, não.
+  assert.equal(fundo.length, 2, 'a carona não entregou as duas partes ao segundo plano');
+  assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [] }, 'a leitura rápida ficou presa atrás da escrita lenta');
   assert.equal(concluiu, false);
-  const fim = await fundo[0];
+  const fins = await Promise.all(fundo);
   assert.equal(concluiu, true);
-  assert.deepEqual(fim, { ok: true, marca: true }, 'a escrita em segundo plano não terminou direito');
+  assert.ok(fins.some((f) => f && f.ok === true && f.marca === true), 'a escrita em segundo plano não terminou direito');
 });
 
 test('carona: a região escolhe o servidor da presença (a lista é separada por servidor)', async () => {
   for (const [region, prefixo] of [['na', 'na-Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes']]) {
     const { pedidos } = await comWaze({ acao: ACAO_OK, presenca: PRESENCA_OK },
       () => dispatch('validar-place', { cookies: COOKIES, region, venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
-    assert.equal(pedidos.find((p) => p.grpc).url,
+    assert.equal(pedidos.find((p) => p.tipo === 'escrita').url,
       `https://www.waze.com/${prefixo}/grpc/com.waze.mapeditor.web.api.MapEditorWebServer/updateOnlineEditor`, region);
+    // A lista de quem usa a app vem do MESMO servidor da presença.
+    assert.equal(pedidos.find((p) => p.tipo === 'lista').url,
+      `https://www.waze.com/${prefixo}/grpc/com.waze.mapeditor.web.api.MapEditorWebServer/listOnlineEditors`, region);
   }
 });
 
@@ -334,9 +359,10 @@ test('Worker: a escrita que passa do teto vai pro ctx.waitUntil (senão a Cloudf
   });
   assert.equal(resultado.status, 200);
   assert.equal(resultado.body.success, true);
-  assert.equal(entregues.length, 1, 'o Worker não entregou a escrita ao waitUntil');
+  assert.equal(entregues.length, 2, 'o Worker não entregou a escrita e a leitura ao waitUntil');
   assert.equal(concluiu, false);
-  assert.deepEqual(await entregues[0], { ok: true, marca: true });
+  const fins = await Promise.all(entregues);
+  assert.ok(fins.some((f) => f && f.ok === true && f.marca === true), 'a escrita entregue ao waitUntil não terminou direito');
   assert.equal(concluiu, true);
 });
 

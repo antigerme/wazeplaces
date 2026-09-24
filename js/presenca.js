@@ -1,5 +1,5 @@
-// Presença e conversa entre editores — quem mais está triando a MESMA fila que
-// você, e um jeito de falar com essa pessoa.
+// Presença e conversa entre editores — quem mais está usando a app no mesmo
+// país que você, e um jeito de falar com essa pessoa.
 //
 // ── POR QUE ISTO EXISTE ─────────────────────────────────────────────────────
 // Triar pedido é trabalho solitário: você abre a app, faz 40 swipes e fecha,
@@ -7,151 +7,95 @@
 // companhia já estava lá — dá pra notar pedidos sumindo da própria fila —, só
 // não estava VISÍVEL. A pílula do cabeçalho é isso: você não está sozinho.
 //
-// ── ONDE A MENSAGEM PASSA (e onde NÃO passa) ────────────────────────────────
-// O servidor só transporta o APERTO DE MÃO do WebRTC (offer/answer/ICE). O
-// texto vai por um DataChannel, cifrado com DTLS, direto entre os dois
-// aparelhos — não passa pelo nosso servidor nem fica guardado em lugar nenhum.
-// Fechou a conversa, acabou: não há histórico pra buscar depois, e isso é
-// decisão, não pendência.
+// ── DE ONDE VEM (fase 3 da troca da sala própria) ───────────────────────────
+// A presença e o chat são OS DO WME. O modelo é do owner, e ele não é "a app é
+// o WME": a infra é do Waze, mas a app mostra SÓ o que é entre usuários da app.
+//   · A LISTA é a de quem está online no WME, filtrada no servidor pela MARCA
+//     da app na posição (`server/marca-app.mjs`) e pelo país do filtro. Quem
+//     só usa o WME não aparece.
+//   · As CONVERSAS são as do chat do WME que começaram na app: a marca vai no
+//     contexto de toda mensagem que sai daqui, e o aparelho lembra as que já
+//     viu (`conhecidos`) pra que uma resposta dada pelo WME não tire a conversa
+//     da lista. Mensagem de quem só usa o WME: a app não mostra nada.
+//   · A conversa FICA GUARDADA no chat do Waze e aparece no chat do WME dos
+//     dois. Por isso não há mais "não chegou": quem saiu lê quando voltar.
 //
-// ── O QUE O SERVIDOR SABE ───────────────────────────────────────────────────
-// Enquanto a conexão está aberta: seu nome do WME, rank, se é AM, e a fila
-// escolhida. Nada em disco. Socket fechou, some — a presença É a conexão.
+// ── O QUE CUSTA (free tier) ─────────────────────────────────────────────────
+// Nada de polling. A lista chega (a) de carona nas ações ✕/✓, sem pedido
+// novo, e (b) ao abrir a app, ao abrir a lista e ao voltar do segundo plano —
+// um pedido cada. Mensagem chegando custa ZERO: o tempo real vai do navegador
+// DIRETO ao Google (CORS aberto, medido), com um token que o `presenca-app`
+// devolve. Confirmar ao Google o que chegou também é de graça: os ids vão de
+// carona no próximo pedido que a app já faria.
 //
-// ── QUEM DIZ QUE VOCÊ É VOCÊ ────────────────────────────────────────────────
-// O nome NÃO sai daqui. Ele vem num CRACHÁ assinado pelo servidor, que o
-// emitiu depois de chamar o `/Session` do Waze com os cookies da sua sessão.
-// Aqui o nome carrega reputação (rank, Area Manager): se o cliente pudesse
-// dizer o próprio nome, a lista seria um convite a se passar por autoridade.
-//
-// O `sessionToken` NUNCA entra aqui. Ele é metade da chave que decifra os
-// cookies (gotcha #60) e viaja só no corpo do POST; o WebSocket carrega a URL
-// pro log de acesso, então o que vai na URL é o nome da sala, e o crachá vai
-// na primeira MENSAGEM.
+// ── O QUE FICA NO APARELHO ──────────────────────────────────────────────────
+// Uma chave só (`CHAT_KEY`): a instalação do chat (o "aparelho" pro Waze), as
+// conversas conhecidas, até onde cada pessoa leu, e os ids a confirmar. Sem
+// texto de mensagem nenhum. O TOKEN do tempo real NUNCA vai pro armazenamento:
+// é credencial, e o diagnóstico leva o localStorage inteiro.
 
-// Chave de uma versão anterior, que teve bloqueio de pessoa. O recurso saiu (a
-// app só admite editor L3+ AM, e abuso se resolve no Waze, não aqui), mas quem
-// já tinha bloqueado alguém ficou com o registro no aparelho. Apagamos uma vez,
-// na carga — dado órfão de recurso removido não deve envelhecer em silêncio.
-// Keepalive. Na Cloudflare quem responde é o RUNTIME (auto-response), sem
-// acordar o Durable Object; na VM responde o processo. O cliente manda o mesmo
-// `ping` nos dois — ele não precisa saber em qual servidor está.
-const PRESENCA_KEEPALIVE_MS = 45_000;
+const CHAT_KEY = 'waze_places_chat';
 
-// Prazo pro `pong` voltar depois de um `ping`. É o que transforma o keepalive
-// em DETECÇÃO — antes ele só falava sozinho.
-//
-// O defeito que isto conserta, relatado pelo owner ("muitas vezes o App só
-// mostra que tem alguém online quando atualizo a página"): quando a conexão
-// morre EM SILÊNCIO — sem quadro de fechamento, que é o caso comum em rede
-// móvel, NAT e proxy —, o `readyState` fica OPEN pra sempre e o `onclose`
-// NUNCA dispara. O cliente segue achando que está conectado, mandando ping pro
-// vazio, com a lista vazia. Só recarregar resolvia.
-//
-// MEDIDO com um proxy que para de repassar nos dois sentidos sem fechar nada:
-// 70 segundos depois, `readyState=1`, zero tentativas de religar, e a lista
-// vazia enquanto havia gente na sala. E do outro lado é pior: os colegas
-// continuam VENDO quem já não está lá, porque pro servidor o socket também
-// parece vivo.
-//
-// 10s é folgado pro pong: quem responde é o runtime da Cloudflare (sem nem
-// acordar o Durable Object) ou o processo na VM — nenhum dos dois pensa.
-const PRESENCA_PONG_MS = 10_000;
+// O servidor corta no mesmo número (`CONHECIDOS_MAX` no core). Mais que isso
+// não mudaria nada: a lista de conversas lida é a primeira página do Waze, e
+// ela tem 50.
+const PRESENCA_CONHECIDOS_MAX = 50;
+const PRESENCA_LIDAS_MAX = 50;
+const PRESENCA_CONFIRMAR_MAX = 100;
 
-// Ao voltar pra tela, o prazo é mais curto: o aparelho provavelmente dormiu e
-// o socket provavelmente morreu. Esperar os 45s do keepalive aqui seria deixar
-// a pessoa olhando uma lista mentirosa justo no momento em que ela voltou pra
-// usar a app.
-const PRESENCA_PONG_VOLTA_MS = 4000;
+// Com muitas conversas a lista fica longa; o combinado nos mockups foi mostrar
+// as mais recentes. As que têm mensagem NÃO LIDA entram sempre, além destas:
+// número que a pessoa não consegue zerar é o gotcha #66.
+const PRESENCA_CONVERSAS_NA_LISTA = 5;
 
-// Rede de segurança pra lista velha.
-//
-// A sala só DIFUNDE em entrada e saída. Se a conexão piscar exatamente nesse
-// instante, a mensagem se perde e ninguém reenvia — MEDIDO: com os pacotes
-// engolidos por 20s e a rede voltando, o socket segue vivo e a lista fica vazia
-// pra sempre. Era este o relato do owner.
-//
-// O pedido é BARATO no servidor mas NÃO é de graça na Cloudflare: ele acorda o
-// Durable Object, ao contrário do `ping`, que o runtime responde sozinho. Por
-// isso 2 minutos, e não os 45s do keepalive: 30 acordadas por hora por editor
-// em vez de 80. Os momentos que realmente importam são cobertos por evento
-// (voltar pra tela, rede voltar, abrir a lista) e não pagam esta conta.
-const PRESENCA_RESSINC_MS = 2 * 60 * 1000;
+// Voltar do segundo plano custa UM pedido (as não lidas e a lista). Trocar de
+// app três vezes num minuto não pode custar três.
+const PRESENCA_VOLTA_MIN_MS = 60_000;
 
-// Prazo pra conexão DAR CERTO — do `new WebSocket` até o `eu` do servidor.
-//
-// Sem isto o cliente pendura pra sempre: um socket que nunca completa o
-// handshake não dispara `onopen`, nem `onerror`, nem `onclose`. MEDIDO, e foi
-// assim que apareceu: o religamento saiu no meio de uma interrupção de rede, o
-// `readyState` ficou em 0 (CONNECTING) e ali permaneceu — 35 segundos depois de
-// a rede ter voltado, nada. Como o recuo só é reagendado a partir de um desses
-// eventos, uma única tentativa infeliz encerrava as tentativas pra sempre.
-//
-// O marco é o `eu`, e não o `onopen`: abrir o socket não prova nada (a recusa
-// do crachá vem depois). É o mesmo motivo que faz o recuo zerar só no `eu`.
-const PRESENCA_ABRIR_MS = 12_000;
+// O token do tempo real vale 24 h (medido). Renovar com uma hora de folga faz
+// a renovação cair num pedido que a app já faria, em vez de o fluxo morrer.
+const PRESENCA_TOKEN_FOLGA_MS = 60 * 60 * 1000;
+// Pedir token de novo tem teto: um token recusado em laço seria um pedido à
+// nossa API a cada reconexão.
+const PRESENCA_TOKEN_REPETIR_MS = 5 * 60 * 1000;
 
-// Prazo pra confirmação de ENTREGA de uma mensagem voltar.
-//
-// Aqui isto vale mais que num app de mensagem comum, e a diferença é a
-// arquitetura: o WhatsApp tem servidor guardando, então "um tique" significa
-// "está a caminho, chega quando ela abrir". NÓS não temos — o texto vai direto
-// de um aparelho pro outro. Se o outro lado não está lá, a mensagem não fica
-// esperando em lugar nenhum: ela simplesmente não chega, e ninguém é avisado.
-//
-// E o caso que isto conserta é real: o `presencaMandarTexto` mostrava a
-// mensagem na tela assim que o `send()` não lançava exceção. Só que o
-// `readyState` diz `open` numa conexão que já morreu em silêncio — é a MESMA
-// doença que o `PRESENCA_PONG_MS` trata no WebSocket. A mensagem aparecia
-// bonitinha na tela e nunca tinha saído do aparelho.
-//
-// 8s por simetria com aquele prazo (10s): é o tempo que este projeto já usa
-// pra transformar silêncio em informação. Quem confirma é o `onmessage` do
-// outro lado, que não pensa — só responde.
-const PRESENCA_RECIBO_MS = 8000;
+// O Google manda sinal de vida a cada 10 s (medido). 35 s sem NADA é conexão
+// morta em silêncio — o caso comum em rede móvel, em que nenhum evento dispara.
+const PRESENCA_FLUXO_SILENCIO_MS = 35_000;
+// A conexão cai SOZINHA a cada ~6,2 min (medido, é tempo máximo do Google):
+// esse fim é normal e religa em 1 s. Erro de verdade usa o recuo, com jitter —
+// reconectar em rajada é o que faz um WAF marcar o cliente.
+const PRESENCA_FLUXO_RELIGAR_MS = 1000;
+const PRESENCA_FLUXO_ESPERAS_MS = [2000, 5000, 15_000, 30_000, 60_000];
 
-// Versão do protocolo da CONVERSA (não do sinal). O `oi` é trocado na abertura
-// do canal e é o que autoriza mostrar recibo.
-//
-// Sem ele o recurso mentiria por dias a cada deploy: o service worker é
-// cache-first pra asset, então sobra por aí aparelho rodando o `presenca.js`
-// antigo — que manda `{txt}` sem id e não sabe confirmar nada. Um cliente novo
-// falando com um velho mostraria UM TIQUE PRA SEMPRE, indistinguível de
-// mensagem perdida. Sem o `oi`, nenhum recibo aparece e a conversa volta a se
-// comportar como antes. Degradar é honesto; tique errado não.
-const PRESENCA_CONVERSA_V = 2;
+// Mensagens que chegam juntas viram UM "lida" só.
+const PRESENCA_LIDA_ATRASO_MS = 1200;
 
-// O crachá vale 15 min (CRACHA_TTL no servidor). Renovar aos 13 dá margem pra
-// uma tentativa falhar sem derrubar quem está conversando.
-const PRESENCA_RENOVAR_MS = 13 * 60 * 1000;
-
-// Espera antes de tentar de novo. Cresce e para de crescer: rede de celular cai
-// e volta o tempo todo, e reconectar em rajada é o que faz um WAF marcar o
-// cliente. O último degrau se repete pra sempre — desistir calado deixaria a
-// pílula mentindo "ninguém aqui".
-const PRESENCA_ESPERAS_MS = [2000, 5000, 15_000, 30_000, 60_000];
+const PRESENCA_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PRESENCA_ID = /^\d{1,19}$/;
 
 const Presenca = {
-    // `peer` é sorteado a cada carga da página. Não é identidade: identidade é
-    // o nome do crachá. Ele só serve pra endereçar mensagem dentro da sala, e
-    // ser efêmero é o ponto — não dá pra seguir alguém entre sessões por ele.
-    peer: null,
-    ws: null,
-    cracha: null,
-    ice: null,
-    peers: [],
-    total: 0,
-    conversas: new Map(),   // peer -> { pc, canal, msgs, naoLidas, nome, estado }
-    aberta: null,           // peer da conversa aberta agora
-    // Pedido preso à barra, esperando ser mandado junto com a pergunta. Só
-    // existe entre o toque no botão e o envio — some ao mandar e ao fechar a
-    // conversa. Um por vez: a barra tem lugar pra um, e "qual dos dois?" é
-    // pergunta que ninguém precisa responder.
+    online: [],             // [{ id, nome, rank, lat, lon }] — quem usa a app no país
+    conversas: [],          // [{ id, nome, naoLidas, atividade, ultima }] — as da app
+    pais: null,             // o país da lista na tela
+    atualizadaEm: 0,        // quando a última lista SAIU (o pedido), não quando chegou
+    pedindo: null,          // a promessa do `presenca-app` em voo (um por vez)
+    chat: null,             // { token, base, chave, expiraEm } — só em memória
+    tokenPedidoEm: 0,
+    fluxo: null,            // a conexão de tempo real aberta agora
+    fluxoTentativa: 0,
+    fluxoDiag: { aberturas: 0, quadros: 0, mensagens: 0, recibos: 0, ultimoFim: null, ultimoErro: null },
+    // Mensagens que chegaram AO VIVO com a conversa fechada, por pessoa. Somam
+    // às não lidas do servidor até a próxima lista, que já as conta.
+    vivas: new Map(),
+    vistas: new Set(),      // ids de mensagem já contados (o fluxo reentrega)
+    historico: new Map(),   // pessoa -> { msgs, maisAntigas, carregada, erro, carregando }
+    aberta: null,           // id da pessoa da conversa aberta
     anexo: null,
-    filtro: null,
-    tentativa: 0,
-    timers: { keepalive: null, renovar: null, religar: null, vigia: null, ressinc: null, abrir: null },
-    ligando: false,
+    ultimaPosicao: null,    // [lat, lon] do último card na tela — o "daqui"
+    lidaEnviadaAte: new Map(),
+    epoca: 0,               // ++ a cada desligar: resposta velha não pousa
+    timers: { fluxo: null, silencio: null, lida: null, nome: null },
 };
 
 function presencaLigada() {
@@ -160,209 +104,232 @@ function presencaLigada() {
     return AppState.preferences.presenca !== false;
 }
 
-function presencaPodeConectar() {
-    return !!(AppState.authenticated && presencaLigada() && API.getSession() && API.getCountry());
+function presencaEu() {
+    const id = AppState.profile && AppState.profile.id;
+    return id !== null && id !== undefined && PRESENCA_ID.test(String(id)) ? String(id) : null;
 }
 
-// ── conexão ─────────────────────────────────────────────────────────────────
+function presencaPodeConectar() {
+    return !!(AppState.authenticated && presencaLigada() && API.getSession() && API.getCountry() && presencaEu());
+}
+
+// ── o que fica no aparelho ──────────────────────────────────────────────────
+
+function chatGuardado() {
+    try {
+        const o = JSON.parse(safeLS.get(CHAT_KEY) || '{}');
+        return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+    } catch (e) { return {}; }
+}
+
+function chatGuardar(o) {
+    safeLS.set(CHAT_KEY, JSON.stringify(o));
+}
+
+function presencaUuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+// A instalação é o APARELHO pro chat do Waze. Ela é estável de propósito: o
+// token é por instalação, e o fluxo reentrega à MESMA instalação o que ela não
+// confirmou (medido). Sorteada por pedido, cada abertura seria um aparelho
+// novo, e o que chegou com a app fechada se perderia.
+function chatInstalacao() {
+    const g = chatGuardado();
+    if (typeof g.inst === 'string' && PRESENCA_UUID.test(g.inst)) return g.inst;
+    g.inst = presencaUuid();
+    chatGuardar(g);
+    return g.inst;
+}
+
+function chatConhecidos() {
+    const l = chatGuardado().conhecidos;
+    return Array.isArray(l) ? l.filter((x) => PRESENCA_ID.test(String(x))).map(String) : [];
+}
+
+// Conversa conhecida vai pra FRENTE: o teto descarta a que ficou mais tempo
+// sem movimento, nunca a de agora.
+function chatConhecer(ids) {
+    const novos = (Array.isArray(ids) ? ids : [ids]).map(String).filter((x) => PRESENCA_ID.test(x));
+    if (!novos.length) return;
+    const g = chatGuardado();
+    const velhos = Array.isArray(g.conhecidos) ? g.conhecidos.map(String) : [];
+    const lista = [...novos, ...velhos.filter((x) => !novos.includes(x))].slice(0, PRESENCA_CONHECIDOS_MAX);
+    if (lista.join(',') === velhos.join(',')) return;   // nada mudou: sem escrita
+    g.conhecidos = lista;
+    chatGuardar(g);
+}
+
+function chatConhecido(id) {
+    return chatConhecidos().includes(String(id));
+}
+
+// Até quando a pessoa leu o que eu mandei (ms). O histórico do Waze NÃO traz
+// os recibos (medido): o "Lida" de uma conversa antiga só existe porque o
+// aparelho guardou o que o fluxo contou.
+function chatLidaAte(id) {
+    const l = chatGuardado().lidas;
+    const v = l && typeof l === 'object' ? l[String(id)] : null;
+    return Number.isFinite(v) ? v : 0;
+}
+
+function chatMarcarLidaAte(id, ts) {
+    if (!Number.isFinite(ts)) return;
+    const g = chatGuardado();
+    const l = g.lidas && typeof g.lidas === 'object' ? g.lidas : {};
+    const k = String(id);
+    if ((l[k] || 0) >= ts) return;
+    l[k] = ts;
+    // Teto: fica quem leu por último.
+    const ordem = Object.entries(l).sort((a, b) => b[1] - a[1]).slice(0, PRESENCA_LIDAS_MAX);
+    g.lidas = Object.fromEntries(ordem);
+    chatGuardar(g);
+}
+
+function chatAConfirmar() {
+    const l = chatGuardado().confirmar;
+    return Array.isArray(l) ? l.filter((x) => PRESENCA_UUID.test(String(x))) : [];
+}
+
+function chatGuardarAConfirmar(id) {
+    if (!PRESENCA_UUID.test(String(id))) return;
+    const g = chatGuardado();
+    const l = Array.isArray(g.confirmar) ? g.confirmar : [];
+    if (l.includes(id)) return;
+    l.push(id);
+    // Se estourar, saem os MAIS VELHOS: o pior que acontece é o fluxo os
+    // reentregar, e o aparelho já os descarta como repetidos.
+    g.confirmar = l.slice(-PRESENCA_CONFIRMAR_MAX);
+    chatGuardar(g);
+}
+
+// Solta SÓ o que foi mandado e o Waze confirmou; o que chegou no meio fica.
+function chatSoltarConfirmados(enviados) {
+    const g = chatGuardado();
+    const l = Array.isArray(g.confirmar) ? g.confirmar : [];
+    g.confirmar = l.filter((x) => !enviados.includes(x));
+    chatGuardar(g);
+}
+
+// O que vai de carona num pedido: a instalação e os ids a confirmar.
+function chatCarona() {
+    const confirmar = chatAConfirmar().slice(0, PRESENCA_CONFIRMAR_MAX);
+    return confirmar.length ? { instalacao: chatInstalacao(), confirmar } : {};
+}
+
+function chatAoResponder(r, carona) {
+    if (r && r.confirmados && carona && carona.confirmar) chatSoltarConfirmados(carona.confirmar);
+}
+
+// ── a lista ─────────────────────────────────────────────────────────────────
 
 async function presencaSincronizar() {
     if (!presencaPodeConectar()) return presencaDesligar();
-    // Já conectado com o MESMO filtro? Nada a fazer. Sem esta guarda, cada
-    // aplicação de filtro derrubaria e refaria a conexão — inclusive quando o
-    // filtro mudado não muda a sala (tipo de pedido, ordem, categoria).
-    //
-    // A comparação é sobre o PEDIDO (região, país, estado), não sobre o nome da
-    // sala: quem traduz filtro em sala é o servidor, e reproduzir a fórmula
-    // aqui pra poder comparar seria justamente a duplicação que a fonte única
-    // existe pra evitar.
-    const filtro = presencaFiltroAtual();
-    if (Presenca.ws && Presenca.filtro === filtro) return;
-    presencaDesligar();
-    await presencaConectar(filtro);
+    // Mesmo país e lista fresca: nada a pedir. Sem esta guarda, cada filtro
+    // aplicado (tipo, ordem, categoria) custaria um pedido sem mudar a lista.
+    const fresca = Date.now() - Presenca.atualizadaEm < PRESENCA_VOLTA_MIN_MS;
+    if (Presenca.pais === API.getCountry() && fresca) { presencaFluxoGarantir(); return; }
+    await presencaAtualizar();
 }
 
-function presencaFiltroAtual() {
-    const st = parseInt(AppState.filters.stateId, 10);
-    return `${API.getRegion()}|${API.getCountry()}|${Number.isFinite(st) && st > 0 ? st : ''}`;
-}
-
-async function presencaConectar(filtro) {
-    if (Presenca.ligando || !presencaPodeConectar()) return;
-    Presenca.ligando = true;
-    Presenca.filtro = filtro || presencaFiltroAtual();
-    try {
-        if (!Presenca.peer) Presenca.peer = presencaSortearPeer();
-        const r = await API.presenca(Presenca.peer, AppState.filters.stateId);
-        if (!r || !r.success || !r.cracha) {
-            // 401 já derruba a sessão pelo caminho comum da app; aqui só
-            // reagenda. Presença é acessório: ela nunca tira ninguém da fila.
-            presencaReagendar();
-            return;
+async function presencaAtualizar({ token = false } = {}) {
+    if (!presencaPodeConectar()) return;
+    if (Presenca.pedindo) return Presenca.pedindo;
+    const epoca = Presenca.epoca;
+    const pais = API.getCountry();
+    const inicio = Date.now();
+    const querToken = token || !presencaTokenValido();
+    const carona = chatCarona();
+    const campos = { pais, userId: presencaEu(), conhecidos: chatConhecidos(), ...carona };
+    if (querToken) { campos.instalacao = chatInstalacao(); campos.token = true; Presenca.tokenPedidoEm = inicio; }
+    Presenca.pedindo = (async () => {
+        try {
+            const r = await API.presencaApp(campos);
+            if (epoca !== Presenca.epoca) return;       // desligou ou saiu no meio
+            chatAoResponder(r, carona);
+            if (!r || !r.success) {
+                if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+                return;
+            }
+            // Trocou de país no meio: a lista que chegou é do país velho.
+            if (pais !== API.getCountry()) return;
+            presencaAplicarLista(r, inicio, pais);
+            if (r.chat && r.chat.token) {
+                Presenca.chat = r.chat;
+                presencaFluxoGarantir();
+            }
+        } catch (e) {
+            /* presença é acessório: nunca tira ninguém da fila */
+        } finally {
+            Presenca.pedindo = null;
         }
-        Presenca.cracha = r.cracha;
-        Presenca.ice = r.ice || { iceServers: [] };
-        presencaAbrirSocket();
-    } catch (e) {
-        presencaReagendar();
-    } finally {
-        Presenca.ligando = false;
+    })();
+    return Presenca.pedindo;
+}
+
+// A mesma resposta chega por dois caminhos: a rota própria e a carona das
+// ações. `null` numa parte é "não veio", NUNCA "ninguém": manter a anterior é
+// melhor que a pílula sumir por uma falha passageira.
+function presencaAplicarLista(r, inicio, pais) {
+    if (Array.isArray(r.online)) Presenca.online = r.online.filter((p) => p && PRESENCA_ID.test(String(p.id)));
+    if (Array.isArray(r.conversas)) {
+        Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
+        // O que chegou ao vivo ANTES de o pedido sair o servidor já contou.
+        for (const [id, v] of Presenca.vivas) if (v.ultimaTs < inicio) Presenca.vivas.delete(id);
+        // Conversa que o servidor diz ser da app o aparelho passa a conhecer:
+        // é isso que a mantém na lista quando a resposta vier pelo WME, sem a
+        // marca. As mais recentes primeiro, pelo teto.
+        chatConhecer([...Presenca.conversas].sort((a, b) => (b.atividade || 0) - (a.atividade || 0)).map((c) => c.id));
     }
+    Presenca.pais = pais;
+    Presenca.atualizadaEm = Math.max(Presenca.atualizadaEm, inicio);
+    presencaRenderTudo();
 }
 
-function presencaSortearPeer() {
-    if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
-    const b = new Uint8Array(8);
-    crypto.getRandomValues(b);
-    return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+// Chamado pelo app.js com o que voltou DE CARONA na ação (`presencaApp`).
+function presencaAoCarona(p, inicio) {
+    try {
+        if (!p || !presencaPodeConectar()) return;
+        presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, API.getCountry());
+    } catch (e) { /* diagnóstico nunca derruba a ação */ }
 }
 
-function presencaAbrirSocket() {
-    const url = new URL('/sala', location.href);
-    url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    url.searchParams.set('s', Presenca.cracha.sala);
-
-    let ws;
-    try { ws = new WebSocket(url.toString()); } catch (e) { presencaReagendar(); return; }
-    Presenca.ws = ws;
-
-    // Prazo pra conexão vingar. Sem ele, um handshake que nunca responde deixa
-    // o cliente pendurado em CONNECTING e as tentativas param de acontecer.
-    clearTimeout(Presenca.timers.abrir);
-    Presenca.timers.abrir = setTimeout(() => presencaDeclararMorto(ws), PRESENCA_ABRIR_MS);
-
-    ws.onopen = () => {
-        // O contador de tentativas NÃO zera aqui. Abrir o socket não é ter
-        // conectado: a recusa do crachá, o fechamento pelo servidor e a queda
-        // de rede vêm todos DEPOIS do `onopen`. Zerando aqui, o recuo nunca
-        // cresce — MEDIDO: 16 tentativas em 31s, todas a 2s, pra sempre. Cada
-        // uma custa DUAS requisições ao Worker (crachá + upgrade) e uma
-        // chamada ao Waze. Quem zera é o `eu`, que só chega se o servidor
-        // aceitou o crachá.
-        ws.send(JSON.stringify({ t: 'entrar', cracha: Presenca.cracha }));
-        clearInterval(Presenca.timers.keepalive);
-        Presenca.timers.keepalive = setInterval(
-            () => presencaSondar(ws, PRESENCA_PONG_MS), PRESENCA_KEEPALIVE_MS);
-        clearInterval(Presenca.timers.ressinc);
-        Presenca.timers.ressinc = setInterval(presencaPedirLista, PRESENCA_RESSINC_MS);
-        clearTimeout(Presenca.timers.renovar);
-        // Renovar o crachá é reconectar: a sala confere o crachá na ENTRADA, e
-        // trocar o passe de quem já está dentro não faria diferença nenhuma.
-        Presenca.timers.renovar = setTimeout(() => { const f = Presenca.filtro; presencaDesligar(); presencaConectar(f); }, PRESENCA_RENOVAR_MS);
-    };
-    ws.onmessage = (ev) => presencaReceber(ev.data);
-    ws.onclose = () => {
-        if (Presenca.ws === ws) { Presenca.ws = null; presencaLimparLista(); presencaReagendar(); }
-    };
-    ws.onerror = () => { /* o `close` vem logo atrás e cuida do religamento */ };
+function presencaNaoLidasDe(id) {
+    const c = Presenca.conversas.find((x) => x.id === id);
+    const v = Presenca.vivas.get(id);
+    return (c ? c.naoLidas || 0 : 0) + (v ? v.n : 0);
 }
 
-// A tela voltou (destravou o celular, trocou de app de volta, bfcache).
-//
-// É o momento mais provável de a conexão estar quebrada E o mais provável de a
-// pessoa estar OLHANDO — ela voltou pra usar a app. Os três estados possíveis:
-//
-//   ABERTO      — pode estar vivo ou morto em silêncio. Sonda com prazo curto
-//                 e pede a lista, porque ela pode ter envelhecido enquanto a
-//                 tela estava apagada (a difusão de quem entrou se perdeu).
-//   A MEIO      — CONNECTING ou CLOSING. Não dá pra saber HÁ QUANTO TEMPO: os
-//                 timers ficam congelados com a tela apagada, então um
-//                 handshake pendurado pode estar assim há uma hora. Descarta e
-//                 recomeça limpo — era o buraco desta função: nenhum ramo
-//                 tratava isso e a pessoa esperava o prazo de 12s pra nada.
-//   SEM SOCKET  — tenta agora, sem esperar o recuo (que pode estar em 60s).
-//
-// O recuo NÃO zera aqui, pelo mesmo motivo do `online`: voltar pra tela não diz
-// nada sobre a rede. Quem zera é o `eu`. O que impede rajada é o `ligando`.
-function presencaAoVoltar() {
-    if (!presencaPodeConectar()) return;
-    const ws = Presenca.ws;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        presencaSondar(ws, PRESENCA_PONG_VOLTA_MS);
-        presencaPedirLista();
-        return;
-    }
-    if (ws) {
-        // A meio caminho, e sem saber desde quando: descarta.
-        presencaDeclararMorto(ws);
-    }
-    if (Presenca.ligando) return;
-    clearTimeout(Presenca.timers.religar);
-    presencaConectar(Presenca.filtro);
-}
-
-// Pede a lista de novo. Usada quando ela provavelmente está velha: ao voltar
-// pra tela, quando a rede volta, ao abrir a lista, e num intervalo de segurança.
-function presencaPedirLista() {
-    const ws = Presenca.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !Presenca.cracha) return;
-    try { ws.send(JSON.stringify({ t: 'lista' })); } catch (e) { /* morrendo */ }
-}
-
-// Manda `ping` e cobra o `pong` dentro do prazo. Sem cobrar, o keepalive é só
-// ruído: ele mantém o NAT aberto mas não descobre nada.
-function presencaSondar(ws, prazo) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    try { ws.send('ping'); } catch (e) { presencaDeclararMorto(ws); return; }
-    clearTimeout(Presenca.timers.vigia);
-    Presenca.timers.vigia = setTimeout(() => presencaDeclararMorto(ws), prazo);
-}
-
-// O socket não respondeu: está morto, ainda que o navegador diga OPEN.
-//
-// NÃO confio no `onclose` pra religar aqui. Num socket em buraco negro, o
-// `close()` manda um quadro de fechamento que nunca chega, e o navegador só
-// dispara o `close` quando o prazo INTERNO dele vence — que pode ser longo, e
-// não é meu. Então eu solto os ouvintes, fecho por educação e religo na mão.
-function presencaDeclararMorto(ws) {
-    clearTimeout(Presenca.timers.vigia);
-    clearTimeout(Presenca.timers.abrir);
-    if (Presenca.ws !== ws) return;           // já trocou de socket: nada a fazer
-    Presenca.ws = null;
-    clearInterval(Presenca.timers.keepalive);
-    clearInterval(Presenca.timers.ressinc);
-    clearTimeout(Presenca.timers.renovar);
-    try { ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; } catch (e) {}
-    try { ws.close(); } catch (e) {}
-    presencaLimparLista();
-    presencaReagendar();
-}
-
-function presencaReagendar() {
-    if (!presencaPodeConectar()) return;
-    clearTimeout(Presenca.timers.religar);
-    const base = PRESENCA_ESPERAS_MS[Math.min(Presenca.tentativa, PRESENCA_ESPERAS_MS.length - 1)];
-    // Jitter de ±25%: se o servidor cair, TODO mundo é desconectado no mesmo
-    // instante e volta no mesmo instante. Espera igual pra todos transforma
-    // uma queda em rajada sincronizada — o mesmo motivo do jitter das chamadas
-    // ao Waze, agora do lado de cá.
-    const espera = Math.round(base * (0.75 + Math.random() * 0.5));
-    Presenca.tentativa += 1;
-    Presenca.timers.religar = setTimeout(() => presencaConectar(Presenca.filtro), espera);
+function presencaNaoLidasTotal() {
+    let n = 0;
+    for (const c of Presenca.conversas) n += c.naoLidas || 0;
+    for (const v of Presenca.vivas.values()) n += v.n;
+    return n;
 }
 
 function presencaDesligar() {
-    clearInterval(Presenca.timers.keepalive);
-    clearInterval(Presenca.timers.ressinc);
-    clearTimeout(Presenca.timers.vigia);
-    clearTimeout(Presenca.timers.abrir);
-    clearTimeout(Presenca.timers.renovar);
-    clearTimeout(Presenca.timers.religar);
-    if (Presenca.ws) {
-        const ws = Presenca.ws;
-        Presenca.ws = null;
-        try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'sair' })); } catch (e) {}
-        try { ws.close(); } catch (e) {}
-    }
-    for (const peer of [...Presenca.conversas.keys()]) presencaEncerrarConversa(peer);
-    Presenca.cracha = null;
-    Presenca.filtro = null;
-    presencaLimparLista();
-}
-
-function presencaLimparLista() {
-    Presenca.peers = [];
-    Presenca.total = 0;
+    Presenca.epoca += 1;
+    presencaFluxoFechar();
+    clearTimeout(Presenca.timers.fluxo);
+    clearTimeout(Presenca.timers.lida);
+    clearTimeout(Presenca.timers.nome);
+    Presenca.online = [];
+    Presenca.conversas = [];
+    Presenca.vivas.clear();
+    Presenca.vistas.clear();
+    Presenca.historico.clear();
+    Presenca.lidaEnviadaAte.clear();
+    Presenca.pais = null;
+    Presenca.atualizadaEm = 0;
+    Presenca.pedindo = null;
+    Presenca.chat = null;
+    Presenca.fluxoTentativa = 0;
     presencaRenderPilula();
     presencaRenderLista();
 }
@@ -370,276 +337,547 @@ function presencaLimparLista() {
 // Logout: "se pedir para sair, é realmente para sair".
 function presencaEsquecer() {
     presencaDesligar();
-    Presenca.peer = null;
-    presencaEsquecerBloqueioAntigo();
+    Presenca.ultimaPosicao = null;
+    safeLS.remove(CHAT_KEY);
 }
 
-function presencaReceber(bruto) {
-    // QUALQUER byte que chega prova que o socket está vivo — não só o `pong`.
-    // Cobrar só o pong deixaria o vigia matando uma conexão movimentada que
-    // por acaso não respondeu no prazo.
-    clearTimeout(Presenca.timers.vigia);
-    if (bruto === 'pong') return;
-    let m;
-    try { m = JSON.parse(bruto); } catch (e) { return; }
-    if (!m || typeof m !== 'object') return;
+// ── o tempo real (direto do navegador ao Google) ────────────────────────────
 
-    // Entrou de verdade: só agora a conexão provou que serve, e só agora o
-    // recuo pode ser zerado.
-    if (m.t === 'eu') {
-        // Chegou o `eu`: a conexão provou que serve. Só agora o prazo de abrir
-        // é desarmado e o recuo zera.
-        clearTimeout(Presenca.timers.abrir);
-        Presenca.tentativa = 0;
+function presencaTokenValido() {
+    const c = Presenca.chat;
+    if (!c || !c.token || !c.base || !c.chave) return false;
+    return !Number.isFinite(c.expiraEm) || c.expiraEm - Date.now() > PRESENCA_TOKEN_FOLGA_MS;
+}
+
+function presencaFluxoGarantir() {
+    if (!presencaPodeConectar() || Presenca.fluxo) return;
+    if (document.visibilityState === 'hidden' || navigator.onLine === false) return;
+    if (!presencaTokenValido()) {
+        if (Date.now() - Presenca.tokenPedidoEm > PRESENCA_TOKEN_REPETIR_MS) presencaAtualizar({ token: true });
         return;
     }
-
-    if (m.t === 'lista') {
-        Presenca.peers = Array.isArray(m.peers) ? m.peers : [];
-        Presenca.total = m.total || 0;
-        presencaRenderPilula();
-        presencaRenderLista();
-        presencaConferirSumicos();
-        return;
-    }
-    if (m.t === 'ausente') return presencaMarcarAusente(m.peer);
-    if (m.t === 'sinal') return presencaSinalRecebido(m);
+    presencaFluxoAbrir();
 }
 
-// ── WebRTC ──────────────────────────────────────────────────────────────────
-
-function presencaEnviarSinal(para, tipo, payload) {
-    if (!Presenca.ws || Presenca.ws.readyState !== WebSocket.OPEN) return;
-    Presenca.ws.send(JSON.stringify({ t: 'sinal', para, tipo, payload }));
+function presencaFluxoFechar() {
+    const f = Presenca.fluxo;
+    Presenca.fluxo = null;
+    clearTimeout(Presenca.timers.silencio);
+    if (f) { try { f.ctl.abort(); } catch (e) {} }
 }
 
-function presencaConversa(peer, nome) {
-    let c = Presenca.conversas.get(peer);
-    if (!c) {
-        c = {
-            pc: null, canal: null, msgs: [], naoLidas: 0, nome: nome || '', estado: 'parado',
-            pendentes: [], iceEspera: [], fila: null,
-            // Numeração das MINHAS mensagens. Cada lado numera as suas, então
-            // não há colisão: eu só confirmo as SUAS e você só as MINHAS.
-            seq: 0,
-            // Maior id que RECEBI — é o que vai no `lido`, que confirma até um
-            // ponto em vez de uma por uma (ler é abrir a conversa e ver tudo).
-            ultimaRecebida: 0,
-            // Só vira true quando o outro lado se anuncia (ver PRESENCA_CONVERSA_V).
-            recibos: false,
-        };
-        Presenca.conversas.set(peer, c);
-    }
-    if (nome) c.nome = nome;
-    return c;
+function presencaVigiarSilencio(fluxo) {
+    clearTimeout(Presenca.timers.silencio);
+    Presenca.timers.silencio = setTimeout(() => {
+        if (Presenca.fluxo !== fluxo) return;
+        Presenca.fluxoDiag.ultimoErro = 'silencio';
+        try { fluxo.ctl.abort(); } catch (e) {}
+    }, PRESENCA_FLUXO_SILENCIO_MS);
 }
 
-function presencaCriarPC(peer) {
-    const c = presencaConversa(peer);
-    if (c.pc) return c.pc;
-    const pc = new RTCPeerConnection(Presenca.ice || { iceServers: [] });
-    c.pc = pc;
-    pc.onicecandidate = (ev) => {
-        if (ev.candidate) presencaEnviarSinal(peer, 'ice', ev.candidate.toJSON());
-    };
-    pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-            c.estado = 'falhou';
-            presencaMarcarNaoChegou(c);   // depois do estado: o motivo sai dele
-            presencaRenderConversa();
-        }
-    };
-    pc.ondatachannel = (ev) => presencaLigarCanal(peer, ev.channel);
-    return pc;
-}
-
-function presencaLigarCanal(peer, canal) {
-    const c = presencaConversa(peer);
-    c.canal = canal;
-    const abriu = () => {
-        c.estado = 'aberta';
-        // Anuncia que este lado sabe confirmar recebimento. Vai ANTES da fila
-        // de pendentes: assim o outro lado já sabe confirmar o que chegar logo
-        // atrás, em vez de a primeira mensagem ficar sem recibo por corrida.
-        try { canal.send(JSON.stringify({ t: 'oi', v: PRESENCA_CONVERSA_V })); } catch (e) {}
-        // O que foi digitado enquanto conectava não se perde: a pessoa apertou
-        // enviar, e "some sem avisar" é pior que demorar.
-        for (const m of c.pendentes.splice(0)) presencaEntregarMsg(peer, c, m);
-        presencaRenderConversa();
-        presencaRenderLista();
-    };
-    canal.onopen = abriu;
-    // Quem RECEBE o canal (`ondatachannel`) pode recebê-lo JÁ ABERTO: aí o
-    // `onopen` nunca dispara, porque o evento já passou. O estado ficava em
-    // "Conectando…" pra sempre enquanto as mensagens iam e vinham normalmente —
-    // e o que estava digitado antes ficava preso em `pendentes`, porque só o
-    // `onopen` esvazia a fila. Conferir o `readyState` na hora de ligar é o
-    // conserto; foi o CI que pegou, com o mesmo código passando aqui.
-    if (canal.readyState === 'open') abriu();
-    canal.onclose = () => {
-        c.estado = 'fechada';
-        // O motivo que este fechamento dá ('conexao') é PROVISÓRIO: quando a
-        // outra pessoa sai, este aviso pode chegar ANTES do da sala (ver
-        // `presencaConfirmarSaida`). Guardar QUAIS mensagens ele derrubou é o
-        // que deixa a sala corrigir o motivo delas — e só delas.
-        c.derrubadas = c.msgs.filter((m) => m.meu && (m.estado === 'enviando' || m.estado === 'enviada'));
-        presencaMarcarNaoChegou(c);
-        presencaRenderConversa();
-    };
-    canal.onmessage = (ev) => {
-        let m;
-        try { m = JSON.parse(ev.data); } catch (e) { return; }
-        if (!m || typeof m !== 'object') return;
-
-        // ── recados de protocolo ────────────────────────────────────────────
-        // Cliente ANTIGO ignora todos estes em silêncio: ele lê `m.txt`, acha
-        // vazio e sai pelo `if (!txt) return`. É o que torna a troca segura nos
-        // dias em que as duas versões convivem.
-        //
-        // Os TRÊS acendem `recibos`, e não só o `oi`. A capacidade do outro lado
-        // não pode depender de UM quadro que pode se perder: o `oi` sai de dentro
-        // de um `try/catch` vazio no `abriu()`, então um `send` que falhe some sem
-        // rastro e desliga TODOS os recibos daquela conversa PARA SEMPRE — e o
-        // sintoma é indistinguível do caso legítimo que o `PRESENCA_CONVERSA_V`
-        // existe pra cobrir (o outro lado numa versão velha). Pego pelo CI em
-        // 2026-09-03: `recibos` false com o `ack` do MESMO canal já processado.
-        //
-        // O canal é ORDENADO e confiável por padrão (`createDataChannel` sem
-        // opções), e o `oi` sai antes de qualquer `ack` poder existir. Então ack
-        // recebido com `recibos` false só acontece se o `oi` nunca saiu — não se
-        // ele atrasou. Daí a inferência, que é exata nos dois sentidos: `ack` e
-        // `lido` NÃO EXISTEM antes do v2, então cliente antigo não os manda e não
-        // pode acender isto por engano; e quem os manda sabe confirmar por
-        // definição. É a mesma pergunta respondida por evidência que não se perde.
-        if (m.t === 'oi') { c.recibos = true; presencaRenderConversa(); return; }
-        if (m.t === 'ack') { c.recibos = true; presencaConfirmar(c, m.id, 'entregue'); return; }
-        if (m.t === 'lido') { c.recibos = true; presencaConfirmar(c, m.ate, 'lida'); return; }
-
-        const txt = String(m.txt || '').slice(0, 2000);
-        const card = presencaCardSeguro(m.card);
-        // Mensagem sem texto E sem pedido não é mensagem. Com pedido e sem
-        // texto é: mandar o card pelado é legítimo (variante A do desenho).
-        if (!txt && !card) return;
-        const id = Number.isFinite(m.id) ? m.id : 0;
-        if (id > c.ultimaRecebida) c.ultimaRecebida = id;
-        c.msgs.push({ meu: false, txt, ts: Date.now(), id, estado: null, motivo: null, card });
-
-        // Confirma a ENTREGA na hora — é um fato do aparelho, não da pessoa.
-        // Mensagem de cliente antigo vem sem id: não há o que confirmar.
-        if (id) { try { canal.send(JSON.stringify({ t: 'ack', id })); } catch (e) {} }
-
-        // Ler é outra coisa: só conta se a conversa estiver ABERTA e a app na
-        // TELA. Modal aberto com o celular no bolso não é leitura, e um recibo
-        // que mente é pior que recibo nenhum.
-        if (presencaOlhando(peer)) presencaMarcarLidas(peer);
-        else {
-            c.naoLidas += 1;
-            presencaRenderPilula();
-            presencaRenderLista();
-        }
-        presencaRenderConversa();
-    };
-}
-
-async function presencaChamar(peer, nome) {
-    const c = presencaConversa(peer, nome);
-    if (c.estado === 'aberta' || c.estado === 'chamando') return;
-    c.estado = 'chamando';
-    presencaRenderConversa();
+async function presencaFluxoAbrir() {
+    const chat = Presenca.chat;
+    const fluxo = { ctl: new AbortController(), emLote: false, epoca: Presenca.epoca, desde: Date.now(), vivoEm: Date.now() };
+    Presenca.fluxo = fluxo;
+    Presenca.fluxoDiag.aberturas += 1;
+    presencaVigiarSilencio(fluxo);
+    let fimNormal = false;
     try {
-        const pc = presencaCriarPC(peer);
-        presencaLigarCanal(peer, pc.createDataChannel('conversa'));
-        const oferta = await pc.createOffer();
-        await pc.setLocalDescription(oferta);
-        presencaEnviarSinal(peer, 'offer', { type: oferta.type, sdp: oferta.sdp });
-    } catch (e) {
-        c.estado = 'falhou';
-        presencaRenderConversa();
-    }
-}
-
-// Os sinais de UM par são tratados EM FILA, um de cada vez. Cada `onmessage`
-// começa uma cadeia async própria, então sem a fila o `ice` que chega logo
-// atrás do `offer` era processado ENQUANTO o offer ainda estava sendo aplicado
-// — e caía no `else` de "ainda não tem remoteDescription", que descartava o
-// candidato em silêncio. O sintoma era o pior possível: conexão que funciona na
-// maioria das vezes e falha de vez em quando, sem erro nenhum.
-function presencaSinalRecebido(m) {
-    const peer = m.de;
-    if (!peer) return;
-    const c = presencaConversa(peer, m.nome);
-    c.fila = (c.fila || Promise.resolve())
-        .then(() => presencaTratarSinal(peer, c, m))
-        .catch(() => { c.estado = 'falhou'; presencaRenderConversa(); });
-}
-
-async function presencaTratarSinal(peer, c, m) {
-    if (m.tipo === 'offer') {
-        // Quem chama tem prioridade de quem entrou primeiro: se os dois se
-        // chamarem ao mesmo tempo, um dos lados descarta a própria oferta.
-        // Sem isso as duas conexões ficam em `have-local-offer` e nenhuma
-        // completa — e o sintoma é "conectando..." pra sempre.
-        if (c.pc && c.pc.signalingState === 'have-local-offer') {
-            if (Presenca.peer < peer) return;   // eu cedo, o outro comanda
-            presencaEncerrarConversa(peer, true);
+        const base = chat.base.endsWith('/') ? chat.base : chat.base + '/';
+        const res = await fetch(base + 'v1/messages:receive', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-goog-api-key': chat.chave },
+            body: JSON.stringify({ header: {
+                request_id: presencaUuid(), app: 'Waze',
+                client_info: { api_version: 'V4', platform_type: 7 },
+                auth_token_payload: chat.token,
+            } }),
+            signal: fluxo.ctl.signal,
+            credentials: 'omit',
+            cache: 'no-store',
+        });
+        if (res.status === 401 || res.status === 403) {
+            // Token recusado: descarta e pede outro, com teto (ver o garantir).
+            if (Presenca.chat === chat) Presenca.chat = null;
+            Presenca.fluxoDiag.ultimoErro = 'token ' + res.status;
+            return;
         }
-        const pc = presencaCriarPC(peer);
-        await pc.setRemoteDescription(m.payload);
-        await presencaSoltarIce(c);
-        const resposta = await pc.createAnswer();
-        await pc.setLocalDescription(resposta);
-        presencaEnviarSinal(peer, 'answer', { type: resposta.type, sdp: resposta.sdp });
-        c.estado = 'chamando';
-        presencaAvisarConvite(peer, c);
-        return;
-    }
-    if (m.tipo === 'answer') {
-        if (!c.pc) return;
-        await c.pc.setRemoteDescription(m.payload);
-        await presencaSoltarIce(c);
-        return;
-    }
-    if (m.tipo === 'ice') {
-        if (!c.pc) return;
-        // Candidato que chega antes da descrição remota fica GUARDADO, não
-        // descartado: sem ele o par pode simplesmente não achar caminho.
-        if (!c.pc.remoteDescription) { (c.iceEspera || (c.iceEspera = [])).push(m.payload); return; }
-        await c.pc.addIceCandidate(m.payload);
-    }
-}
-
-async function presencaSoltarIce(c) {
-    const espera = c.iceEspera;
-    if (!espera || !espera.length) return;
-    c.iceEspera = [];
-    for (const cand of espera) {
-        try { await c.pc.addIceCandidate(cand); } catch (e) { /* candidato velho não derruba a conexão */ }
+        if (!res.ok || !res.body) throw new Error('http ' + res.status);
+        const leitor = res.body.getReader();
+        const dec = new TextDecoder();
+        const ler = presencaLeitorDeArray();
+        for (;;) {
+            const { value, done } = await leitor.read();
+            if (done) break;
+            if (Presenca.fluxo !== fluxo) return;
+            fluxo.vivoEm = Date.now();
+            presencaVigiarSilencio(fluxo);
+            for (const quadro of ler(dec.decode(value, { stream: true }))) presencaQuadro(fluxo, quadro);
+        }
+        fimNormal = true;
+    } catch (e) {
+        if (Presenca.fluxo === fluxo && Presenca.fluxoDiag.ultimoErro !== 'silencio') {
+            Presenca.fluxoDiag.ultimoErro = String((e && e.name) || e).slice(0, 40);
+        }
+    } finally {
+        if (Presenca.fluxo === fluxo) {
+            Presenca.fluxo = null;
+            clearTimeout(Presenca.timers.silencio);
+            Presenca.fluxoDiag.ultimoFim = Date.now();
+            presencaFluxoReagendar(fimNormal);
+        }
     }
 }
 
-function presencaAvisarConvite(peer, c) {
-    if (Presenca.aberta === peer) return;
-    // Banner, não snackbar: tem ação e precisa esperar a pessoa terminar o
-    // swipe que está no meio. Clicar abre a conversa.
-    showToast(t('presenca.toast.convite', { nome: c.nome || t('presenca.anon') }), 'hint', 8000,
-        () => presencaAbrirConversa(peer));
+function presencaFluxoReagendar(fimNormal) {
+    if (!presencaPodeConectar()) return;
+    clearTimeout(Presenca.timers.fluxo);
+    let espera;
+    if (fimNormal) {
+        espera = PRESENCA_FLUXO_RELIGAR_MS;
+    } else {
+        const base = PRESENCA_FLUXO_ESPERAS_MS[Math.min(Presenca.fluxoTentativa, PRESENCA_FLUXO_ESPERAS_MS.length - 1)];
+        // Jitter de ±25%: se o Google derrubar todo mundo junto, todo mundo
+        // volta junto — espera igual pra todos transforma queda em rajada.
+        espera = Math.round(base * (0.75 + Math.random() * 0.5));
+        Presenca.fluxoTentativa += 1;
+    }
+    Presenca.timers.fluxo = setTimeout(presencaFluxoGarantir, espera);
+}
+
+// O fluxo é UM array JSON que chega aos pedaços e nunca fecha enquanto a
+// conexão vive. Este leitor devolve cada objeto do topo assim que ele fecha.
+function presencaLeitorDeArray() {
+    let buf = '', prof = 0, emStr = false, esc = false, ini = -1;
+    return (pedaco) => {
+        const saida = [];
+        for (let i = 0; i < pedaco.length; i++) {
+            const ch = pedaco[i];
+            buf += ch;
+            if (emStr) {
+                if (esc) esc = false;
+                else if (ch === '\\') esc = true;
+                else if (ch === '"') emStr = false;
+                continue;
+            }
+            if (ch === '"') { emStr = true; continue; }
+            if (ch === '{') { if (prof === 0) ini = buf.length - 1; prof += 1; }
+            else if (ch === '}') {
+                prof -= 1;
+                if (prof === 0 && ini >= 0) {
+                    try { saida.push(JSON.parse(buf.slice(ini))); } catch (e) { /* quadro quebrado: ignora */ }
+                    buf = '';
+                    ini = -1;
+                }
+            }
+        }
+        // Entre objetos só passam vírgula, colchete e espaço: não acumula.
+        if (prof === 0 && ini < 0) buf = '';
+        return saida;
+    };
+}
+
+function presencaQuadro(fluxo, o) {
+    if (!o || typeof o !== 'object') return;
+    Presenca.fluxoDiag.quadros += 1;
+    if (o.startOfBatch) { fluxo.emLote = true; return; }
+    if (o.endOfBatch) { fluxo.emLote = false; Presenca.fluxoTentativa = 0; return; }
+    const im = o.inboxMessage;
+    if (!im) return;
+    // TUDO que chega é confirmado — inclusive a mensagem de quem só usa o WME,
+    // que a app não mostra. Confirmar não marca nada como lido (isso é outro
+    // método) e não mexe na fila do WME da pessoa: a fila é da INSTALAÇÃO.
+    if (im.messageId) chatGuardarAConfirmar(String(im.messageId).toLowerCase());
+    if (im.messageType === 'USERDATA' || typeof im.message !== 'string') return;
+    let m;
+    try { m = presencaLerMensagem(presencaDeBase64(im.message)); } catch (e) { return; }
+    presencaMensagemDoFluxo(m, fluxo.emLote);
+}
+
+// ── protobuf, só a leitura que o fluxo precisa ──────────────────────────────
+//
+// Espelho do `server/wme-grpc.mjs` (`lerCampos` + `lerMensagem`), e é o MESMO
+// formato: `test/presenca-cliente.test.mjs` decodifica os bytes da fixture com
+// os dois e exige o mesmo resultado. Varint vira Number: ids e horas cabem
+// folgados em 2^53.
+function presencaDeBase64(s) {
+    const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return u8;
+}
+
+function presencaLerCampos(u8) {
+    const campos = [];
+    let i = 0;
+    const varint = () => {
+        let v = 0, mult = 1, b;
+        do {
+            if (i >= u8.length) throw new Error('varint cortado');
+            b = u8[i++];
+            v += (b & 0x7f) * mult;
+            mult *= 128;
+        } while (b & 0x80);
+        return v;
+    };
+    while (i < u8.length) {
+        const chave = varint();
+        const n = Math.floor(chave / 8), t = chave % 8;
+        if (t === 0) campos.push({ n, v: varint() });
+        else if (t === 2) {
+            const len = varint();
+            if (i + len > u8.length) throw new Error('campo cortado');
+            campos.push({ n, v: u8.subarray(i, i + len) });
+            i += len;
+        } else if (t === 1) i += 8;
+        else if (t === 5) i += 4;
+        else throw new Error('tipo de fio desconhecido: ' + t);
+    }
+    return campos;
+}
+
+function presencaLerMensagem(u8) {
+    const dec = new TextDecoder();
+    const um = (c, n) => { const x = c.find((y) => y.n === n); return x ? x.v : undefined; };
+    const todos = (c, n) => c.filter((y) => y.n === n).map((y) => y.v);
+    const sub = (v) => (v instanceof Uint8Array ? presencaLerCampos(v) : []);
+    const txt = (v) => (v instanceof Uint8Array ? dec.decode(v) : null);
+    const num = (v) => (typeof v === 'number' ? v : null);
+    const ident = (v) => { const c = sub(v); return { tipo: num(um(c, 1)), id: txt(um(c, 2)) }; };
+    const c = presencaLerCampos(u8);
+    const classe = num(um(c, 6));
+    const out = {
+        id: txt(um(c, 2)),
+        ts: num(um(c, 1)),
+        de: um(c, 4) ? ident(um(c, 4)) : null,
+        para: um(c, 3) ? ident(um(c, 3)) : null,
+        classe: classe === 1 ? 'texto' : classe === 2 ? 'recibo' : 'outro',
+        texto: null,
+        recibo: null,
+        contexto: null,
+    };
+    if (um(c, 101)) {
+        const t = um(sub(um(c, 101)), 101);
+        if (t) out.texto = txt(um(sub(t), 1)) ?? '';
+    }
+    if (um(c, 102)) {
+        const r = sub(um(c, 102));
+        out.recibo = {
+            tipo: ({ 1: 'entregue', 2: 'lida' })[num(um(r, 1))] || 'outro',
+            ids: todos(r, 2).map((info) => txt(um(sub(info), 1))),
+        };
+    }
+    if (um(c, 5)) {
+        const pares = todos(sub(um(c, 5)), 4).map(sub);
+        out.contexto = Object.fromEntries(pares.map((p) => [txt(um(p, 1)), txt(um(p, 2))]));
+    }
+    return out;
+}
+
+// ── as mensagens ────────────────────────────────────────────────────────────
+
+// O texto que vai pro Waze leva, além da pergunta, o nome do local e o link —
+// é o que quem lê pelo WME vê (o cartão vai num campo que o WME não mostra).
+// Na app, a linha e o link não aparecem: aparece o cartão, e a pergunta sai
+// daqui de volta (`presencaLegendaDoTexto`).
+function presencaTextoParaWme(legenda, card) {
+    if (!card) return legenda;
+    const nome = (card.name || '').trim() || (card.address || '').trim() || t('card.noName');
+    const tipo = presencaTipo(card.updateTypeKey);
+    const linha = '📍 ' + nome + (tipo ? ' · ' + tipo : '');
+    const link = typeof linkWmeDoPedido === 'function' ? linkWmeDoPedido(card, card.region || API.getRegion()) : '';
+    return (legenda ? legenda + '\n' : '') + linha + (link ? '\n' + link : '');
+}
+
+// A pergunta de uma mensagem com pedido: tudo ANTES da linha do 📍. A última
+// ocorrência, porque a pergunta pode citar o alfinete; a linha do pedido vem
+// sempre depois dela.
+function presencaLegendaDoTexto(texto) {
+    const s = String(texto || '');
+    const i = s.lastIndexOf('📍 ');
+    if (i < 0) return null;
+    if (i === 0) return '';
+    return s[i - 1] === '\n' ? s.slice(0, i - 1) : null;
+}
+
+// Uma mensagem do Waze (do histórico ou do fluxo) no formato da tela.
+function presencaMsgDoWaze(m, eu) {
+    const ctx = m.contexto || {};
+    let card = null;
+    if (typeof ctx.card === 'string') {
+        try { card = presencaCardSeguro(JSON.parse(ctx.card)); } catch (e) { card = null; }
+    }
+    const meu = !!(m.de && String(m.de.id) === eu);
+    let legenda = null;
+    if (card) {
+        legenda = presencaLegendaDoTexto(m.texto);
+        if (legenda === null) legenda = typeof ctx.legenda === 'string' ? ctx.legenda : '';
+    }
+    return {
+        id: String(m.id || ''),
+        ts: Number.isFinite(m.ts) ? m.ts : Date.now(),
+        meu,
+        texto: String(m.texto || '').slice(0, 4000),
+        card,
+        legenda,
+        estado: meu ? 'enviada' : null,
+    };
+}
+
+function presencaMensagemDoFluxo(m, doLote) {
+    const eu = presencaEu();
+    if (!eu || !m) return;
+    if (m.classe === 'recibo') {
+        // Só o "lida" interessa: o "entregue" sairia de graça do aparelho de
+        // quem recebe, e a app não o mostra (decisão do owner: só Enviada e Lida).
+        if (!m.recibo || m.recibo.tipo !== 'lida') return;
+        const de = m.de && String(m.de.id);
+        if (!de || de === eu || !PRESENCA_ID.test(de)) return;
+        Presenca.fluxoDiag.recibos += 1;
+        // Ler a conversa marca TUDO até ali: o recibo vale pra toda mensagem
+        // minha mandada antes dele.
+        chatMarcarLidaAte(de, Number.isFinite(m.ts) ? m.ts : Date.now());
+        if (Presenca.aberta === de) presencaRenderConversa();
+        return;
+    }
+    if (m.classe !== 'texto' || !m.id) return;
+    const deMim = !!(m.de && String(m.de.id) === eu);
+    const com = String(deMim ? (m.para && m.para.id) : (m.de && m.de.id));
+    if (!PRESENCA_ID.test(com) || com === eu) return;
+    const daApp = (m.contexto && m.contexto.app === 'wazeplaces')
+        || chatConhecido(com) || Presenca.conversas.some((c) => c.id === com);
+    // Quem só usa o WME: a app não mostra nada (decisão do owner).
+    if (!daApp) return;
+    Presenca.fluxoDiag.mensagens += 1;
+    chatConhecer(com);
+    const msg = presencaMsgDoWaze(m, eu);
+    const h = Presenca.historico.get(com);
+    if (h && h.carregada) presencaJuntarMsgs(h, [msg]);
+    presencaAtualizarPrevia(com, msg);
+    const nova = !Presenca.vistas.has(msg.id);
+    Presenca.vistas.add(msg.id);
+    if (!deMim && nova) {
+        if (presencaOlhando(com)) presencaAgendarLida(com);
+        // Do LOTE só conta o que chegou depois da última lista: o resto a lista
+        // já contou, e o fluxo reentrega o que não foi confirmado.
+        else if (!doLote || msg.ts > Presenca.atualizadaEm) {
+            const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0 };
+            v.n += 1;
+            v.ultimaTs = Math.max(v.ultimaTs, msg.ts);
+            Presenca.vivas.set(com, v);
+        }
+    }
+    presencaRenderTudo();
+}
+
+// Junta sem repetir (o fluxo reentrega, e o eco da minha própria mensagem
+// volta por ele) e mantém a ordem do relógio.
+function presencaJuntarMsgs(h, novas) {
+    for (const m of novas) {
+        if (!m.id) continue;
+        const i = h.msgs.findIndex((x) => x.id === m.id);
+        if (i < 0) { h.msgs.push(m); continue; }
+        const velha = h.msgs[i];
+        // A minha, que estava saindo, virou enviada; o resto não rebaixa.
+        if (velha.meu && velha.estado !== 'enviada') { velha.estado = 'enviada'; velha.motivo = null; }
+        if (Number.isFinite(m.ts)) velha.ts = m.ts;
+    }
+    h.msgs.sort((a, b) => a.ts - b.ts);
+}
+
+function presencaAtualizarPrevia(com, msg) {
+    let c = Presenca.conversas.find((x) => x.id === com);
+    if (!c) {
+        const on = Presenca.online.find((p) => p.id === com);
+        c = { id: com, nome: on ? on.nome : '', naoLidas: 0, atividade: 0, ultima: null };
+        Presenca.conversas.push(c);
+        // Conversa nova de quem não está na lista: o nome vem da próxima lista.
+        // UM pedido, e só nesse caso raro (primeira mensagem de alguém de fora).
+        if (!c.nome) presencaPedirNome();
+    }
+    if ((c.atividade || 0) > msg.ts) return;
+    c.atividade = msg.ts;
+    c.ultima = {
+        deMim: msg.meu, ts: msg.ts, recibo: false,
+        texto: String((msg.card ? msg.legenda : msg.texto) || '').slice(0, 140),
+        card: msg.card ? { name: msg.card.name, updateTypeKey: msg.card.updateTypeKey } : null,
+    };
+}
+
+function presencaPedirNome() {
+    clearTimeout(Presenca.timers.nome);
+    Presenca.timers.nome = setTimeout(() => presencaAtualizar(), 3000);
+}
+
+// "Lida" só é verdade com a conversa ABERTA e a app NA TELA. Modal aberto com
+// o celular no bolso não é leitura, e um recibo que mente é pior que nenhum.
+//
+// E "aberta" é a conversa VISÍVEL, não o `Presenca.aberta`: o `openModal` de
+// outra camada (o pedido que chegou pela conversa, por exemplo) ESCONDE a
+// conversa sem passar pela limpeza dela, e o `aberta` fica. Sem conferir a
+// tela, a próxima mensagem dessa pessoa virava "lida" com a conversa fora da
+// vista (achado pelo smoke da presença).
+function presencaOlhando(id) {
+    const modal = document.getElementById('conversaModal');
+    return Presenca.aberta === id && document.visibilityState === 'visible'
+        && !!modal && !modal.classList.contains('hidden');
+}
+
+function presencaAgendarLida(id) {
+    clearTimeout(Presenca.timers.lida);
+    Presenca.timers.lida = setTimeout(() => presencaMarcarLida(id), PRESENCA_LIDA_ATRASO_MS);
+}
+
+async function presencaMarcarLida(id) {
+    if (!presencaOlhando(id)) return;
+    const h = Presenca.historico.get(id);
+    const ultimaDela = h ? Math.max(0, ...h.msgs.filter((m) => !m.meu).map((m) => m.ts)) : 0;
+    // Nada dela, ou nada depois do último "lida": não há o que marcar, e o
+    // pedido seria à toa (voltar pra tela chama isto sempre).
+    if (!ultimaDela || (Presenca.lidaEnviadaAte.get(id) || 0) >= ultimaDela) return;
+    Presenca.lidaEnviadaAte.set(id, ultimaDela);
+    const carona = chatCarona();
+    const r = await API.chat({ acao: 'lida', com: id, ...carona });
+    chatAoResponder(r, carona);
+}
+
+// ── a conversa ──────────────────────────────────────────────────────────────
+
+function presencaAbrirConversa(id) {
+    id = String(id);
+    if (!PRESENCA_ID.test(id)) return;
+    Presenca.aberta = id;
+    chatConhecer(id);
+    // Abrir é ler: o servidor marca como lida no mesmo pedido do histórico.
+    const c = Presenca.conversas.find((x) => x.id === id);
+    if (c) c.naoLidas = 0;
+    Presenca.vivas.delete(id);
+    // `openModal` sozinho: ele JÁ esconde os outros modais, e trocar de camada
+    // não empilha histórico (gotcha #65).
+    openModal('conversaModal');
+    presencaRenderConversa({ rolarAoFim: true });
+    presencaRenderAnexo();
+    presencaRenderPilula();
+    presencaRenderLista();
+    presencaCarregarConversa(id);
+    const campo = document.getElementById('conversaInput');
+    if (campo) campo.focus();
+}
+
+async function presencaCarregarConversa(id, { antes = null } = {}) {
+    let h = Presenca.historico.get(id);
+    if (!h) { h = { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false }; Presenca.historico.set(id, h); }
+    if (h.carregando) return;
+    h.carregando = true;
+    h.erro = false;
+    presencaRenderConversa();
+    const epoca = Presenca.epoca;
+    const carona = chatCarona();
+    const r = await API.chat({ acao: 'abrir', com: id, ...(antes ? { antesDe: antes } : {}), ...carona });
+    h.carregando = false;
+    if (epoca !== Presenca.epoca) return;
+    chatAoResponder(r, carona);
+    if (!r || !r.success) {
+        h.erro = true;
+        if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+        presencaRenderConversa();
+        return;
+    }
+    const eu = presencaEu();
+    const msgs = (Array.isArray(r.mensagens) ? r.mensagens : [])
+        .filter((m) => m && m.classe === 'texto' && m.id)
+        .map((m) => presencaMsgDoWaze(m, eu));
+    for (const m of msgs) Presenca.vistas.add(m.id);
+    presencaJuntarMsgs(h, msgs);
+    // `maisAntigas` diz se há página ANTES da que chegou. Na primeira, é a
+    // resposta; numa página antiga, idem — a de cima da lista é sempre a última.
+    h.maisAntigas = !!r.maisAntigas;
+    h.carregada = true;
+    if (!antes) {
+        const ultimaDela = Math.max(0, ...msgs.filter((m) => !m.meu).map((m) => m.ts));
+        if (ultimaDela) Presenca.lidaEnviadaAte.set(id, ultimaDela);
+    }
+    presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
+}
+
+function presencaFecharConversa() {
+    closeModal('conversaModal');   // a limpeza do modal solta o `aberta`
+}
+
+// Chamado por LIMPEZA_AO_FECHAR['conversaModal'] — ou seja, por QUALQUER
+// caminho de fechamento (✕, Esc, scrim, voltar do aparelho).
+function presencaEsquecerAberta() {
+    Presenca.aberta = null;
+    // O anexo é da conversa, não do aparelho: fechar sem mandar descarta. Vai
+    // AQUI e não no ✕, pelos mesmos quatro caminhos de fechamento.
+    Presenca.anexo = null;
+    presencaRenderAnexo();
+    // A conversa é dado PRIVADO de terceiro, e o diagnóstico leva o DOM
+    // inteiro: fechada, ela não fica desenhada esperando uma captura.
+    const corpo = document.getElementById('conversaMsgs');
+    if (corpo) corpo.innerHTML = '';
     presencaRenderPilula();
     presencaRenderLista();
 }
 
-function presencaMandarTexto(peer, txt, card) {
-    const c = presencaConversa(peer);
-    // A mensagem entra na lista JÁ — inclusive com o canal fechado. Antes ela
-    // ficava invisível na fila de `pendentes` e só aparecia ao ser enviada; com
-    // recibo, "enviando" é um estado que a pessoa PODE ver, e ver é melhor que
-    // um vão em branco enquanto a conexão levanta.
-    const m = {
-        meu: true, txt, ts: Date.now(), id: ++c.seq, estado: 'enviando', motivo: null,
-        card: card || null,
+// Idem para a lista: a prévia da última mensagem também é conversa.
+function presencaEsquecerLista() {
+    const lista = document.getElementById('presencaLista');
+    if (lista) lista.innerHTML = '';
+}
+
+function presencaEnviar(legenda, card) {
+    const id = Presenca.aberta;
+    const eu = presencaEu();
+    if (!id || !eu) return;
+    const h = Presenca.historico.get(id) || { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false };
+    Presenca.historico.set(id, h);
+    const msg = {
+        id: presencaUuid(), ts: Date.now(), meu: true,
+        texto: presencaTextoParaWme(legenda, card), card: card || null, legenda: card ? legenda : null,
+        estado: 'enviando', motivo: null,
     };
-    c.msgs.push(m);
-    presencaEntregarMsg(peer, c, m);
+    h.msgs.push(msg);
+    chatConhecer(id);
+    presencaAtualizarPrevia(id, msg);
+    presencaRenderConversa({ rolarAoFim: true });
+    presencaMandar(id, msg);
+}
+
+async function presencaMandar(com, msg) {
+    msg.estado = 'enviando';
+    msg.motivo = null;
     presencaRenderConversa();
+    // O cartão vai num campo que o WME não mostra, com a pergunta curta pra
+    // prévia da lista. A MARCA da app quem põe é o servidor.
+    const contexto = msg.card ? { legenda: String(msg.legenda || '').slice(0, 280), card: JSON.stringify(msg.card) } : undefined;
+    const carona = chatCarona();
+    // Uma tentativa só, sem `callWithRetry`: repetir sozinho pode duplicar a
+    // mensagem no Waze. Quem repete é a pessoa, no "Tentar de novo" — com o
+    // MESMO id, que é o que dá ao Waze a chance de reconhecer a repetição.
+    const r = await API.chat({
+        acao: 'enviar', para: com, id: msg.id, texto: msg.texto, de: presencaEu(),
+        ...(contexto ? { contexto } : {}), ...carona,
+    });
+    chatAoResponder(r, carona);
+    if (r && r.success) {
+        msg.estado = 'enviada';
+        if (Number.isFinite(r.ts)) msg.ts = r.ts;
+        Presenca.vistas.add(msg.id);
+    } else {
+        msg.estado = 'falhou';
+        msg.motivo = r && r.errorCategory === 'transient' ? 'conexao' : 'erro';
+        if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+    }
+    presencaRenderConversa();
+    presencaRenderLista();
+}
+
+function presencaTentarDeNovo() {
+    const id = Presenca.aberta;
+    const h = id && Presenca.historico.get(id);
+    if (!h) return;
+    for (const m of h.msgs.filter((x) => x.meu && x.estado === 'falhou')) presencaMandar(id, m);
 }
 
 // Prende o pedido ABERTO à barra. Não manda ainda: a tirinha existe justamente
@@ -676,49 +914,34 @@ function presencaRenderAnexo() {
         document.getElementById('conversaAnexoMeta').textContent = presencaResumoDoCard(a);
         // Quem some é a CAIXA, não o <img>: escondendo só a imagem sobravam
         // 40px de vão vazio com o `gap` do lado, que lê como foto que não
-        // carregou. Mesma decisão do cartão, que não desenha caixa sem foto.
+        // carregou.
         const img = document.getElementById('conversaAnexoFoto');
         const caixa = img.parentElement;
         if (a.imageUrl) { img.src = a.imageUrl; caixa.classList.remove('hidden'); }
         else { img.removeAttribute('src'); caixa.classList.add('hidden'); }
     }
-    // Ação impossível sai da frente em vez de virar botão morto — mesma régua
-    // que faz a pílula sumir quando a sala esvazia.
+    // Ação impossível sai da frente em vez de virar botão morto.
     const temPedido = !!(window.cardParaConversa && window.cardParaConversa());
     botao.classList.toggle('hidden', !!a || !temPedido);
+}
+
+// O nome do tipo do pedido, pela MESMA regra do card (`rotuloDeEnum`): chave que
+// o dicionário não conhece sai humanizada — feio, nunca a chave crua na tela. O
+// tipo que chega é de OUTRO aparelho, e ele pode ser de uma versão que conhece
+// um tipo que esta não conhece.
+function presencaTipo(chave) {
+    if (!chave) return '';
+    return typeof rotuloDeEnum === 'function' ? rotuloDeEnum('card.updateType.', chave) : t('card.updateType.' + chave);
 }
 
 // "Foto nova · Padaria". Tipo e categoria são CHAVE e enum crus no que trafega;
 // a palavra é escolhida aqui, na língua de quem lê.
 function presencaResumoDoCard(card) {
     const partes = [];
-    if (card.updateTypeKey) partes.push(t('card.updateType.' + card.updateTypeKey));
+    if (card.updateTypeKey) partes.push(presencaTipo(card.updateTypeKey));
     // Categoria sai CRUA: o Waze regionaliza por PAÍS, não por idioma (gotcha #39).
     if (card.categories && card.categories.length) partes.push(card.categories[0]);
     return partes.join(' · ');
-}
-
-function presencaEntregarMsg(peer, c, m) {
-    if (!c.canal || c.canal.readyState !== 'open') { c.pendentes.push(m); return; }
-    try {
-        c.canal.send(JSON.stringify(m.card
-            ? { txt: m.txt, id: m.id, card: m.card }
-            : { txt: m.txt, id: m.id }));
-        m.estado = 'enviada';
-        // O prazo não se cancela: quando o `ack` chega, o estado deixa de ser
-        // 'enviada' e este callback não faz nada. Guardar id de timer por
-        // mensagem seria mais uma coisa pra limpar em cada caminho de saída.
-        setTimeout(() => {
-            if (m.estado !== 'enviada') return;
-            m.estado = 'falhou';
-            m.motivo = presencaMotivoDaFalha(c);
-            presencaRenderConversa();
-        }, PRESENCA_RECIBO_MS);
-    } catch (e) {
-        c.estado = 'falhou';
-        m.estado = 'falhou';
-        m.motivo = presencaMotivoDaFalha(c);
-    }
 }
 
 // O que chega pela rede é DADO DE OUTRO APARELHO, e o outro aparelho pode estar
@@ -727,8 +950,8 @@ function presencaEntregarMsg(peer, c, m) {
 //
 // A `imageUrl` é o campo perigoso: ela vira `src` de uma <img>, então só passa
 // URL https do domínio de imagem do Waze. Sem isto, quem manda escolheria pra
-// onde o aparelho de quem recebe faz requisição — e um `javascript:` viraria
-// execução. A CSP já barraria a maior parte disso; esta é a segunda camada.
+// onde o aparelho de quem recebe faz requisição. A CSP já barraria a maior
+// parte disso; esta é a segunda camada.
 const PRESENCA_FOTO_OK = /^https:\/\/[a-z0-9-]+\.waze\.com\//i;
 function presencaCardSeguro(c) {
     if (!c || typeof c !== 'object') return null;
@@ -752,266 +975,152 @@ function presencaCardSeguro(c) {
     };
 }
 
-// Marca as MINHAS mensagens até `ate` (inclusive) — o `ack` confirma uma, o
-// `lido` confirma um trecho. Nunca REBAIXA: um `ack` que chegue depois do
-// `lido` (a rede reordena mais do que se imagina) não pode desfazer a leitura.
-const PRESENCA_PESO = { enviando: 0, enviada: 1, entregue: 2, lida: 3 };
-function presencaConfirmar(c, ate, estado) {
-    const teto = Number.isFinite(ate) ? ate : 0;
-    if (!teto) return;
-    let mudou = false;
-    for (const m of c.msgs) {
-        if (!m.meu || m.id > teto) continue;
-        if ((PRESENCA_PESO[m.estado] || 0) >= PRESENCA_PESO[estado]) continue;
-        m.estado = estado;
-        m.motivo = null;   // chegou depois de eu ter desistido: a verdade é que chegou
-        mudou = true;
-    }
-    if (mudou) presencaRenderConversa();
-}
-
-// Por que a mensagem não chegou. A app SABE distinguir os casos, e dizer qual
-// é vale mais que um "não chegou" seco: quem lê decide se espera, se tenta de
-// novo mais tarde, ou se procura a pessoa por outro caminho.
-function presencaMotivoDaFalha(c) {
-    if (c.estado === 'saiu') return 'saiu';
-    if (c.estado === 'falhou' || c.estado === 'fechada') return 'conexao';
-    // Canal ainda "aberto" e sem resposta: é o silêncio de sempre. Não invento
-    // um motivo que não medi.
-    return null;
-}
-
-// Tudo que estava a caminho vira "não chegou" no instante em que se descobre o
-// motivo — sem esperar os 8s. Quando a pessoa saiu da fila, esperar o prazo é
-// deixar a tela mentir por 8 segundos com a resposta já na mão.
-function presencaMarcarNaoChegou(c) {
-    let mudou = false;
-    for (const m of c.msgs) {
-        if (!m.meu || (m.estado !== 'enviando' && m.estado !== 'enviada')) continue;
-        m.estado = 'falhou';
-        m.motivo = presencaMotivoDaFalha(c);
-        mudou = true;
-    }
-    return mudou;
-}
-
-// "Lida" só é verdade com a conversa ABERTA e a app NA TELA.
-function presencaOlhando(peer) {
-    return Presenca.aberta === peer && document.visibilityState === 'visible';
-}
-
-// Zera as não lidas E avisa o outro lado. As duas coisas juntas de propósito:
-// enquanto eram separadas, a app zerava o contador em caminhos que não mandavam
-// recibo nenhum, e o outro lado ficava esperando pra sempre.
-function presencaMarcarLidas(peer) {
-    const c = Presenca.conversas.get(peer);
-    if (!c) return;
-    c.naoLidas = 0;
-    if (!c.ultimaRecebida) return;
-    if (!c.canal || c.canal.readyState !== 'open') return;
-    try { c.canal.send(JSON.stringify({ t: 'lido', ate: c.ultimaRecebida })); } catch (e) {}
-}
-
-function presencaEncerrarConversa(peer, manterMsgs) {
-    const c = Presenca.conversas.get(peer);
-    if (!c) return;
-    // Solta os ouvintes ANTES de fechar. Fechar dispara `onclose`, que escrevia
-    // `estado: 'fechada'` por cima do motivo que quem chamou já tinha decidido
-    // — medido: sair da sala deixava a conversa em "fechada" em vez de "saiu",
-    // e os dois casos deixavam de ser distinguíveis um minuto depois.
-    try {
-        if (c.canal) { c.canal.onopen = c.canal.onclose = c.canal.onmessage = null; c.canal.close(); }
-    } catch (e) {}
-    try {
-        if (c.pc) { c.pc.onicecandidate = c.pc.ondatachannel = c.pc.onconnectionstatechange = null; c.pc.close(); }
-    } catch (e) {}
-    c.canal = null;
-    c.pc = null;
-    c.iceEspera = [];
-    c.fila = null;
-    // `manterMsgs` marca "quem chamou já decidiu o estado" (ex.: saiu):
-    // sobrescrever aqui apagaria o motivo.
-    if (!manterMsgs) { c.estado = 'parado'; Presenca.conversas.delete(peer); }
-}
-
-// A SALA é quem sabe se a pessoa saiu — o canal só sabe que fechou. Quando
-// ela sai, os dois avisos partem juntos (o `pagehide` manda o `sair` e fecha
-// o canal no mesmo instante), mas o do canal vai DIRETO ao outro aparelho e o
-// da sala dá dois saltos pelo servidor. MEDIDO saindo da app como o usuário
-// sai, nos dois motores: 1 em 8 rodadas o canal chegava primeiro — e isso em
-// localhost, com o servidor a milissegundos. Com ele mais longe que o outro
-// aparelho, a ordem ao contrário provavelmente é mais comum (hipótese, não
-// medida). A conversa ficava em 'fechada' e a sala era ignorada. E não era só o nome: o pc seguia vivo, e 15 s depois a falha de
-// conexão dele trocava o cabeçalho de "saiu da fila" para "Não deu pra
-// conectar com esta pessoa" — sobre alguém que conectou e SAIU.
-//
-// Só o fechamento IMEDIATAMENTE anterior tem o motivo corrigido: uma falha de
-// conexão mais antiga (antes de uma reconexão) foi mesmo a conexão, e a sala
-// confirmar a saída agora não muda isso. Por isso 'falhou' também não entra.
-function presencaConfirmarSaida(peer, c) {
-    const derrubadas = c.estado === 'fechada' ? (c.derrubadas || []) : [];
-    c.derrubadas = null;
-    c.estado = 'saiu';
-    presencaMarcarNaoChegou(c);
-    for (const m of derrubadas) {
-        if (m.estado === 'falhou' && m.motivo === 'conexao') m.motivo = 'saiu';
-    }
-    presencaEncerrarConversa(peer, true);
-}
-
-// Quem saiu da fila não some da conversa em silêncio: a pessoa merece saber
-// por que parou de receber resposta.
-function presencaConferirSumicos() {
-    const vivos = new Set(Presenca.peers.map((p) => p.peer));
-    for (const [peer, c] of Presenca.conversas) {
-        if (vivos.has(peer) || c.estado === 'saiu') continue;
-        if (c.estado === 'aberta' || c.estado === 'chamando' || c.estado === 'fechada') {
-            presencaConfirmarSaida(peer, c);
-        }
-    }
-    presencaRenderConversa();
-}
-
-function presencaMarcarAusente(peer) {
-    const c = Presenca.conversas.get(peer);
-    if (!c) return;
-    presencaConfirmarSaida(peer, c);
-    presencaRenderConversa();
-}
-
-function presencaEsquecerBloqueioAntigo() {
-}
-
 // ── interface ───────────────────────────────────────────────────────────────
+
+function presencaRenderTudo() {
+    presencaRenderPilula();
+    const folha = document.getElementById('presencaModal');
+    if (folha && !folha.classList.contains('hidden')) presencaRenderLista();
+    if (Presenca.aberta) presencaRenderConversa();
+}
 
 function presencaRenderPilula() {
     const btn = document.getElementById('presencaPill');
     if (!btn) return;
-    const n = Presenca.peers.length;
     const ligado = presencaLigada() && AppState.authenticated;
-    // Sem ninguém, a pílula SOME. Ela não é um botão de recurso: é a notícia de
-    // que tem gente, e "0 editores" não é notícia — é ruído ocupando o header.
-    //
-    btn.classList.toggle('hidden', !ligado || n === 0);
-    if (!ligado || n === 0) return;
-
-    // Conta só as não lidas de quem está NA LISTA agora. Conversa cujo peer já
-    // saiu não é abrível — a folha não a mostra —, então contá-la põe na pílula
-    // um número que a pessoa não consegue zerar de jeito nenhum. E isso não é
-    // caso raro: o `peer` é sorteado a cada carga da página, então quem
-    // recarrega volta como outro peer e deixa a conversa anterior órfã, com as
-    // não lidas presas. MEDIDO no aparelho do owner: pílula 4, lista 2.
-    const vivos = new Set(Presenca.peers.map((p) => p.peer));
-    let naoLidas = 0;
-    for (const [peer, c] of Presenca.conversas) {
-        if (vivos.has(peer)) naoLidas += c.naoLidas;
-    }
-
+    const n = Presenca.online.length;
+    const naoLidas = presencaNaoLidasTotal();
+    // Sem ninguém e sem mensagem, a pílula SOME: ela não é botão de recurso, é
+    // a notícia de que tem gente. Com mensagem NÃO LIDA ela fica, mesmo sem
+    // ninguém na app — a mensagem pode vir de quem já saiu, e sem a pílula a
+    // conversa não teria caminho de volta.
+    const some = !ligado || (n === 0 && naoLidas === 0);
+    btn.classList.toggle('hidden', some);
+    if (some) return;
     // Mensagem nova troca o ÍCONE (gente → balão), não só a cor: cor sozinha
     // não transmite informação (WCAG 1.4.1).
     document.getElementById('presencaIconGente').classList.toggle('hidden', naoLidas > 0);
     document.getElementById('presencaIconMsg').classList.toggle('hidden', naoLidas === 0);
-
     const selo = document.getElementById('presencaCount');
-    const total = Math.max(n, Presenca.total);
-    const valor = naoLidas > 0 ? naoLidas : total;
-    // Zero não é notícia: "0" num selo lê como contador quebrado.
+    const valor = naoLidas > 0 ? naoLidas : n;
     selo.classList.toggle('hidden', valor === 0);
     selo.textContent = valor > 99 ? '99+' : String(valor);
     selo.classList.toggle('tem-msg', naoLidas > 0);
-
     const rotulo = naoLidas > 0
         ? t(naoLidas === 1 ? 'presenca.pill.msg' : 'presenca.pill.msgPlural', { n: naoLidas })
-        : t(total === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n: total });
+        : t(n === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n });
     btn.setAttribute('aria-label', rotulo);
     btn.setAttribute('title', rotulo);
+}
+
+// De onde medir o "a 3 km daqui": o card NA TELA, que é onde a pessoa está
+// olhando — e é a mesma posição que a carona escreve no WME. Sem card na tela
+// (fila vazia), vale o último que esteve.
+function presencaMinhaPosicao() {
+    const c = AppState.currentPlace && AppState.currentPlace.mapa && AppState.currentPlace.mapa.centro;
+    if (Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1])) Presenca.ultimaPosicao = [c[0], c[1]];
+    return Presenca.ultimaPosicao;
+}
+
+// Contagem sai CRUA (decisão do owner: número inteiro é portável pra qualquer
+// idioma), então "a 1920 km", sem separador de milhar.
+function presencaDistancia(p) {
+    const eu = presencaMinhaPosicao();
+    if (!eu || !Number.isFinite(p.lat) || !Number.isFinite(p.lon) || typeof distanciaKm !== 'function') return null;
+    const km = distanciaKm(eu, [p.lat, p.lon]);
+    return { km, texto: km < 1 ? t('presenca.distPerto') : t('presenca.dist', { km: String(Math.round(km)) }) };
+}
+
+function presencaNomeDoPais(id) {
+    const c = (AppState.countries || []).find((x) => String(x.id) === String(id));
+    return c ? c.name : '';
+}
+
+// Hora curta pra lista: hoje "14:02", ontem "ontem", na semana o dia, e antes
+// disso a data. Sempre no locale de quem lê.
+function presencaHoraCurta(ts) {
+    if (!Number.isFinite(ts)) return '';
+    const d = new Date(ts), hoje = new Date();
+    const dias = Math.round((new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate())
+        - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86_400_000);
+    if (dias <= 0) return d.toLocaleTimeString(i18nLocale(), { hour: '2-digit', minute: '2-digit' });
+    if (dias === 1) return t('presenca.hora.ontem');
+    if (dias < 7) return d.toLocaleDateString(i18nLocale(), { weekday: 'short' });
+    return d.toLocaleDateString(i18nLocale(), { day: 'numeric', month: 'short' });
+}
+
+function presencaPrevia(u) {
+    if (!u) return '';
+    if (u.card) {
+        if (u.texto) return '📍 ' + u.texto;
+        const nome = (u.card.name || '').trim() || t('card.noName');
+        const tipo = presencaTipo(u.card.updateTypeKey);
+        return '📍 ' + nome + (tipo ? ' · ' + tipo : '');
+    }
+    return u.texto || '';
+}
+
+function presencaBadge(n) {
+    return n ? `<span class="presenca-badge">${n > 9 ? '9+' : n}</span>` : '';
 }
 
 function presencaRenderLista() {
     const lista = document.getElementById('presencaLista');
     if (!lista) return;
-    const gente = Presenca.peers;
-    document.getElementById('presencaVazio').classList.toggle('hidden', gente.length > 0);
+    const sub = document.getElementById('presencaSub');
+    if (sub) {
+        const pais = presencaNomeDoPais(Presenca.pais || API.getCountry());
+        sub.textContent = pais ? t('presenca.sheet.sub', { pais }) : t('presenca.sheet.subSemPais');
+    }
+    // Quem está na app, do mais perto pro mais longe: "a quem perguntar sobre
+    // este lugar" é a pergunta que a distância responde.
+    const gente = Presenca.online.map((p) => ({ p, d: presencaDistancia(p) }))
+        .sort((a, b) => (a.d ? a.d.km : Infinity) - (b.d ? b.d.km : Infinity)
+            || String(a.p.nome || '').localeCompare(String(b.p.nome || ''), i18nLocale()));
+    const linhasOnline = gente.map(({ p, d }) => `<li>
+            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(p.id)}">
+                <span class="presenca-txt">
+                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(p.nome || t('presenca.anon'))}</span><span class="presenca-selos">L${escapeHtml(String((p.rank || 0) + 1))}</span></span>
+                    ${d ? `<span class="presenca-l2">${escapeHtml(d.texto)}</span>` : ''}
+                </span>
+                ${presencaBadge(presencaNaoLidasDe(p.id))}
+            </button>
+        </li>`).join('');
 
-    lista.innerHTML = gente.map((p) => {
-        const c = Presenca.conversas.get(p.peer);
-        const selo = p.staff ? t('profile.tag.staff') : (p.am ? t('profile.tag.am') : '');
-        const nivel = 'L' + ((p.rank || 0) + 1);
-        const badge = c && c.naoLidas
-            ? `<span class="presenca-badge">${c.naoLidas > 9 ? '9+' : c.naoLidas}</span>`
-            : '';
+    // Conversas com quem NÃO está na app agora (quem está já aparece acima,
+    // com o selo das não lidas): as mais recentes, e toda que tiver não lida.
+    const naApp = new Set(Presenca.online.map((p) => p.id));
+    const conversas = Presenca.conversas.filter((c) => !naApp.has(c.id))
+        .sort((a, b) => (b.atividade || 0) - (a.atividade || 0));
+    const mostrar = conversas.filter((c, i) => i < PRESENCA_CONVERSAS_NA_LISTA || presencaNaoLidasDe(c.id) > 0);
+    const linhasConversa = mostrar.map((c) => {
+        const n = presencaNaoLidasDe(c.id);
+        const hora = presencaHoraCurta(c.ultima ? c.ultima.ts : c.atividade);
         return `<li>
-            <button type="button" class="presenca-linha" data-peer="${escapeHtml(p.peer)}" data-nome="${escapeHtml(p.nome)}">
-                <span class="presenca-nome">${escapeHtml(p.nome || t('presenca.anon'))}</span>
-                <span class="presenca-selos">${escapeHtml(nivel)}${selo ? ' · ' + escapeHtml(selo) : ''}</span>
-                ${badge}
+            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(c.id)}">
+                <span class="presenca-txt">
+                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(c.nome || t('presenca.anon'))}</span></span>
+                    <span class="presenca-l2${n ? ' forte' : ''}">${escapeHtml(presencaPrevia(c.ultima))}</span>
+                </span>
+                <span class="presenca-dir">${hora ? `<span class="presenca-hora">${escapeHtml(hora)}</span>` : ''}${presencaBadge(n)}</span>
             </button>
         </li>`;
     }).join('');
 
-}
-
-function presencaAbrirConversa(peer) {
-    const p = Presenca.peers.find((x) => x.peer === peer);
-    const c = presencaConversa(peer, p && p.nome);
-    Presenca.aberta = peer;
-    // `presencaMarcarLidas` e não `c.naoLidas = 0`: zerar aqui e avisar o outro
-    // lado é a MESMA decisão, e separá-las é como um lado fica esperando um
-    // recibo que o outro já considerou entregue.
-    presencaMarcarLidas(peer);
-    // `openModal` sozinho: ele JÁ esconde os outros modais, e trocar de camada
-    // não empilha histórico. Fechar a lista antes empilhava um `history.back()`
-    // e o `openModal` seguinte empurrava outra entrada no mesmo quadro — o
-    // saldo ficava errado e o próximo Esc/voltar saía DA APP em vez de fechar a
-    // conversa. Medido no smoke: a página ia pra `about:blank`.
-    openModal('conversaModal');
-    presencaRenderConversa();
-    presencaRenderAnexo();
-    presencaRenderPilula();
-    presencaRenderLista();
-    if (c.estado !== 'aberta') presencaChamar(peer, c.nome);
-    const campo = document.getElementById('conversaInput');
-    if (campo) campo.focus();
-}
-
-function presencaFecharConversa() {
-    closeModal('conversaModal');   // a limpeza do modal solta o `aberta`
-}
-
-// Chamado por LIMPEZA_AO_FECHAR['conversaModal'] — ou seja, por QUALQUER
-// caminho de fechamento (✕, Esc, scrim, voltar do aparelho). Precisa ser uma
-// FUNÇÃO exportada e não `Presenca.aberta = null` lá do app.js: o `Presenca`
-// visível no app.js é o objeto EXPORTADO, e o estado real mora no `const
-// Presenca` deste arquivo. Escrever de lá criava um campo num objeto que
-// ninguém lê, e a conversa continuava "aberta" pra sempre — mensagem nova
-// nunca mais viraria aviso.
-function presencaEsquecerAberta() {
-    Presenca.aberta = null;
-    // O anexo é da conversa, não do aparelho: fechar sem mandar descarta. Vai
-    // AQUI e não no ✕ porque a conversa fecha por quatro caminhos (✕, Esc,
-    // scrim, voltar do aparelho) e amarrar num deles deixa os outros três
-    // vazando — o pedido reapareceria preso na próxima conversa, de outra
-    // pessoa. Mesma lição do ticker do pareamento.
-    Presenca.anexo = null;
-    presencaRenderAnexo();
-    presencaRenderPilula();
-    presencaRenderLista();
+    lista.innerHTML = `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.agora'))}</li>`
+        + (linhasOnline || `<li class="presenca-vazio">${escapeHtml(t('presenca.sheet.vazio'))}</li>`)
+        + (linhasConversa ? `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.conversas'))}</li>` + linhasConversa : '');
 }
 
 // ── DESENHO DO RECIBO ───────────────────────────────────────────────────────
 //
-// A distinção principal é de FORMA — um tique, dois tiques, relógio, alerta —
-// e não de cor: cor sozinha não transmite informação (WCAG 1.4.1, a mesma régua
-// que faz a pílula trocar de ícone em vez de só de tom).
-//
-// E é por isso que "Lida" ganha uma LINHA DE TEXTO embaixo da última lida: dois
-// tiques brancos contra dois tiques cyan é diferença só de cor, e ninguém
-// deveria precisar comparar dois tons pra saber se foi lida. O branco virou
-// reforço; quem carrega o estado é a palavra — que o leitor de tela também lê.
+// Dois estados, decididos com o owner: ✓ "Enviada" (o Waze guardou) e ✓✓ com
+// a palavra "Lida". A distinção é de FORMA — um tique, dois tiques, relógio,
+// alerta — e não de cor (WCAG 1.4.1), e "Lida" ganha uma LINHA DE TEXTO embaixo
+// da última lida, que o leitor de tela também lê.
 const PRESENCA_GLIFO = {
     enviando: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 1.8"/>',
     enviada: '<path d="M4 12.5l5 5L20 6.5"/>',
-    entregue: '<path d="M1 12.5l4 4L13 8"/><path d="M9.5 14.5l2 2L21 7"/>',
     lida: '<path d="M1 12.5l4 4L13 8"/><path d="M9.5 14.5l2 2L21 7"/>',
     falhou: '<path d="M12 3.8L22 20H2z"/><path d="M12 9.5v4.2"/><path d="M12 16.6h.01"/>',
 };
@@ -1019,58 +1128,60 @@ const PRESENCA_GLIFO = {
 function presencaRecibo(estado) {
     const glifo = PRESENCA_GLIFO[estado];
     if (!glifo) return '';
-    const rotulo = t('presenca.recibo.' + (estado === 'falhou' ? 'naoChegou' : estado));
+    const rotulo = t('presenca.recibo.' + (estado === 'falhou' ? 'naoEnviadaErro' : estado));
     return `<span class="presenca-recibo ${estado}" role="img" aria-label="${escapeHtml(rotulo)}">`
         + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${estado === 'enviando' || estado === 'falhou' ? '2.2' : '2.5'}"`
         + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glifo}</svg></span>`;
 }
 
-// A frase do "não chegou" DIZ O MOTIVO quando a app sabe qual é — e ela sabe,
-// porque já distingue "saiu da fila" de "conexão caiu" pra decidir o texto do
-// cabeçalho. Sem motivo conhecido fica o "Não chegou" seco: inventar uma causa
-// que não foi medida é pior que não dizer.
-function presencaFraseDaFalha(c, m) {
-    if (m.motivo === 'saiu') return t('presenca.recibo.naoChegouSaiu', { nome: c.nome || t('presenca.anon') });
-    if (m.motivo === 'conexao') return t('presenca.recibo.naoChegouConexao');
-    return t('presenca.recibo.naoChegou');
+// O estado do recibo de uma mensagem MINHA. "Lida" tem duas provas: o recibo
+// que o fluxo contou (guardado no aparelho) e a resposta da pessoa — quem
+// respondeu depois leu.
+function presencaEstadoDaMinha(m, lidaAte, ultimaDela) {
+    if (m.estado === 'enviando' || m.estado === 'falhou') return m.estado;
+    return m.ts <= lidaAte || m.ts < ultimaDela ? 'lida' : 'enviada';
 }
 
-function presencaHtmlDasMsgs(c) {
-    // Entrega é ORDENADA e confiável (SCTP), então falha é sempre um sufixo:
-    // existe no máximo UMA corrida de "não chegou", no fim. Uma linha por
-    // mensagem falha repetiria a mesma frase N vezes sem dizer nada novo.
+function presencaRotuloDoDia(ts) {
+    const d = new Date(ts), hoje = new Date();
+    const dias = Math.round((new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate())
+        - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86_400_000);
+    if (dias <= 0) return t('presenca.dia.hoje');
+    if (dias === 1) return t('presenca.dia.ontem');
+    return d.toLocaleDateString(i18nLocale(), { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+function presencaHtmlDasMsgs(id, h) {
+    const lidaAte = chatLidaAte(id);
+    const ultimaDela = Math.max(0, ...h.msgs.filter((m) => !m.meu).map((m) => m.ts));
+    const estados = h.msgs.map((m) => (m.meu ? presencaEstadoDaMinha(m, lidaAte, ultimaDela) : null));
     let ultimaLida = -1, ultimaFalha = -1;
-    for (let i = 0; i < c.msgs.length; i++) {
-        const m = c.msgs[i];
-        if (!m.meu) continue;
-        if (m.estado === 'lida') ultimaLida = i;
-        if (m.estado === 'falhou') ultimaFalha = i;
-    }
-    // Peer sem recibo (versão antiga) não ganha glifo nenhum — nem o de falha,
-    // que ali seria adivinhação: ele nunca ia confirmar coisa alguma.
-    const mostrar = c.recibos;
-    return c.msgs.map((m, i) => {
-        const recibo = mostrar && m.meu && m.estado ? presencaRecibo(m.estado) : '';
-        let linha = '';
-        if (mostrar && i === ultimaFalha) {
-            linha = `<p class="conversa-falhou">${escapeHtml(presencaFraseDaFalha(c, m))}</p>`;
-        } else if (mostrar && i === ultimaLida) {
-            linha = `<p class="conversa-lida">${escapeHtml(t('presenca.recibo.lida'))}</p>`;
-        }
-        const corpo = m.card
+    estados.forEach((e, i) => {
+        if (e === 'lida') ultimaLida = i;
+        if (e === 'falhou') ultimaFalha = i;
+    });
+    let dia = '';
+    return h.msgs.map((m, i) => {
+        let html = '';
+        const rotulo = presencaRotuloDoDia(m.ts);
+        if (rotulo !== dia) { dia = rotulo; html += `<div class="conversa-dia"><span>${escapeHtml(rotulo)}</span></div>`; }
+        const recibo = m.meu ? presencaRecibo(estados[i]) : '';
+        html += m.card
             ? presencaHtmlDoPedido(m, i, recibo)
-            : `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">`
-                + `${escapeHtml(m.txt)}${recibo}</div>`;
-        return corpo + linha;
+            : `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">${escapeHtml(m.texto)}${recibo}</div>`;
+        if (i === ultimaFalha) {
+            const frase = m.motivo === 'conexao' ? t('presenca.recibo.naoEnviada') : t('presenca.recibo.naoEnviadaErro');
+            html += `<p class="conversa-falhou">${escapeHtml(frase)} <button type="button" class="conversa-reenviar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
+        } else if (i === ultimaLida) {
+            html += `<p class="conversa-lida">${escapeHtml(t('presenca.recibo.lida'))}</p>`;
+        }
+        return html;
     }).join('');
 }
 
 // O pedido dentro da conversa. É um CARTÃO, não uma bolha de texto — e é um
 // <button> porque se abre: sem isso o teclado e o leitor de tela não chegam
-// nele, e ele seria a única coisa clicável da conversa fora do alcance dos dois.
-//
-// Card e pergunta saem como UMA mensagem quando há texto: é como a pergunta
-// realmente é feita, e dá UM recibo em vez de dois — o "Lida" cobre o conjunto.
+// nele. Card e pergunta são UMA mensagem: um recibo em vez de dois.
 function presencaHtmlDoPedido(m, i, recibo) {
     const card = m.card;
     const nome = (card.name || '').trim() || (card.address || '').trim() || t('card.noName');
@@ -1082,8 +1193,8 @@ function presencaHtmlDoPedido(m, i, recibo) {
         + `<span class="cp-nome">${escapeHtml(nome)}</span>`
         + (meta ? `<span class="cp-meta">${escapeHtml(meta)}</span>` : '')
         + '</span></span>';
-    const legenda = m.txt
-        ? `<span class="cp-legenda">${escapeHtml(m.txt)}${recibo}</span>`
+    const legenda = m.legenda
+        ? `<span class="cp-legenda">${escapeHtml(m.legenda)}${recibo}</span>`
         : '';
     return `<button type="button" class="conversa-pedido ${m.meu ? 'minha' : 'dela'}`
         + `${legenda ? ' com-legenda' : ''}" data-msg="${i}"`
@@ -1091,145 +1202,138 @@ function presencaHtmlDoPedido(m, i, recibo) {
         + topo + legenda + (legenda ? '' : recibo) + '</button>';
 }
 
-function presencaRenderConversa() {
-    if (!Presenca.aberta) return;
-    const c = Presenca.conversas.get(Presenca.aberta);
-    if (!c) return;
+function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {}) {
+    const id = Presenca.aberta;
+    if (!id) return;
+    const pessoa = Presenca.online.find((p) => p.id === id);
+    const conversa = Presenca.conversas.find((c) => c.id === id);
+    const nome = (pessoa && pessoa.nome) || (conversa && conversa.nome) || t('presenca.anon');
     const titulo = document.getElementById('conversaTitle');
-    if (titulo) titulo.textContent = c.nome || t('presenca.anon');
+    if (titulo) titulo.textContent = nome;
 
+    // Onde a pessoa está. "Fora da app" não é aviso de problema: a mensagem
+    // fica guardada e ela lê quando voltar — por isso o campo nunca trava.
     const estado = document.getElementById('conversaEstado');
     if (estado) {
-        const textos = {
-            chamando: t('presenca.conversa.conectando'),
-            falhou: t('presenca.conversa.falhou'),
-            saiu: t('presenca.conversa.saiu', { nome: c.nome || t('presenca.anon') }),
-            fechada: t('presenca.conversa.saiu', { nome: c.nome || t('presenca.anon') }),
-        };
-        estado.textContent = textos[c.estado] || '';
-        estado.classList.toggle('hidden', !textos[c.estado]);
+        let frase;
+        if (pessoa) {
+            const d = presencaDistancia(pessoa);
+            frase = [t('presenca.conversa.naApp'), 'L' + ((pessoa.rank || 0) + 1), d && d.texto].filter(Boolean).join(' · ');
+        } else frase = t('presenca.conversa.fora');
+        estado.innerHTML = `<span class="presenca-estado"><span class="presenca-ponto${pessoa ? '' : ' fora'}" aria-hidden="true"></span>${escapeHtml(frase)}</span>`;
+        estado.classList.remove('hidden');
     }
 
     const corpo = document.getElementById('conversaMsgs');
     if (corpo) {
-        corpo.innerHTML = c.msgs.length
-            ? presencaHtmlDasMsgs(c)
-            : `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.vazio'))}</p>`;
-        corpo.scrollTop = corpo.scrollHeight;
+        const h = Presenca.historico.get(id) || { msgs: [], carregada: false };
+        const pertoDoFim = corpo.scrollHeight - corpo.scrollTop - corpo.clientHeight < 80;
+        const alturaAntes = corpo.scrollHeight;
+        const topoAntes = corpo.scrollTop;
+        let html = `<p class="conversa-aviso">${escapeHtml(t('presenca.conversa.aviso'))}</p>`;
+        if (h.maisAntigas) html += `<button type="button" class="conversa-anteriores">${escapeHtml(t('presenca.conversa.anteriores'))}</button>`;
+        if (h.msgs.length) html += presencaHtmlDasMsgs(id, h);
+        else if (h.erro) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.erro'))} <button type="button" class="conversa-recarregar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
+        else if (!h.carregada) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.carregando'))}</p>`;
+        else html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.vazio'))}</p>`;
+        corpo.innerHTML = html;
+        // Página antiga entrando em cima: a mensagem que estava na tela fica
+        // onde estava. Mensagem nova: segue o fim só se a pessoa já estava lá
+        // — quem rolou pra ler o começo não é arrancado de volta.
+        if (manterTopo) corpo.scrollTop = topoAntes + (corpo.scrollHeight - alturaAntes);
+        else if (rolarAoFim || pertoDoFim) corpo.scrollTop = corpo.scrollHeight;
     }
-
     const enviar = document.getElementById('conversaEnviar');
     const campo = document.getElementById('conversaInput');
-    const travado = c.estado === 'saiu' || c.estado === 'falhou' || c.estado === 'fechada';
-    if (enviar) enviar.disabled = travado;
-    if (campo) campo.disabled = travado;
+    if (enviar) enviar.disabled = false;
+    if (campo) campo.disabled = false;
 }
 
 // ── ligações com a app ──────────────────────────────────────────────────────
 
+function presencaAoVoltar() {
+    if (!presencaPodeConectar()) return;
+    // O fluxo pode ter morrido com a tela apagada (os timers congelam): se não
+    // chegou nada no prazo do silêncio, descarta e religa já.
+    const f = Presenca.fluxo;
+    if (f && Date.now() - (f.vivoEm || f.desde) > PRESENCA_FLUXO_SILENCIO_MS) presencaFluxoFechar();
+    if (Date.now() - Presenca.atualizadaEm >= PRESENCA_VOLTA_MIN_MS) presencaAtualizar();
+    clearTimeout(Presenca.timers.fluxo);
+    presencaFluxoGarantir();
+    // Voltar pra tela com a conversa aberta É ler o que chegou nesse meio-tempo.
+    if (Presenca.aberta) presencaAgendarLida(Presenca.aberta);
+}
+
 function presencaMontar() {
-    presencaEsquecerBloqueioAntigo();
-
-    // ── VOLTAR PRA TELA é o momento mais provável de o socket estar morto ────
-    //
-    // O caso real do editor: ele tria pedidos, troca de app ou trava o celular,
-    // e volta minutos depois. O sistema operacional já matou a conexão — sem
-    // avisar ninguém. Sem esta sonda, ele olharia uma lista vazia por até 45
-    // segundos (o intervalo do keepalive) justo no instante em que voltou pra
-    // usar a app, e concluiria que não há ninguém online.
-    //
-    // A sonda é BARATA: um `ping` de 4 bytes. Ela não reconecta por conta
-    // própria — só faz a pergunta; quem declara a morte é o vigia do prazo.
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState !== 'visible') return;
-        presencaAoVoltar();
-        // Voltar pra tela com a conversa aberta É ler. Sem isto, quem deixou o
-        // modal aberto e trocou de app voltava, lia tudo, e o outro lado seguia
-        // com "Entregue" — o recibo ficaria certo só pra quem abre a conversa
-        // do zero, que é o caminho menos comum de quem já está conversando.
-        if (Presenca.aberta) {
-            presencaMarcarLidas(Presenca.aberta);
-            presencaRenderPilula();
-            presencaRenderLista();
-        }
+        if (document.visibilityState === 'visible') presencaAoVoltar();
     });
-
-    // `pageshow` com `persisted` é o retorno pelo CACHE DE NAVEGAÇÃO (bfcache):
-    // a página inteira volta congelada, com os timers e o socket do estado de
-    // antes. No iOS é assim que um PWA costuma voltar, e nem sempre acompanha
-    // um `visibilitychange`. Sem isto, justamente o aparelho mais comum entre
-    // editores voltaria com a lista velha.
+    // bfcache (o jeito comum de um PWA voltar no iOS): a página volta congelada,
+    // nem sempre com `visibilitychange`.
     window.addEventListener('pageshow', (ev) => { if (ev.persisted) presencaAoVoltar(); });
-
-    // ── A REDE VOLTOU: tentar na hora, mas SEM zerar o recuo ────────────────
-    //
-    // Esperar o degrau de 60s aqui desperdiça o único sinal que o navegador
-    // oferece. Mas o recuo NÃO zera, e a diferença importa: `online` quer dizer
-    // "existe interface de rede", não "a internet funciona" — num wi-fi
-    // instável ele dispara repetidamente sem que nada tenha melhorado. Zerar
-    // ali seria o mesmo defeito que já custou caro neste recurso (o recuo que
-    // nunca crescia), só que em outra roupa. Quem zera é o `eu`, e só ele.
-    //
-    // O que impede rajada é o `ligando`: enquanto uma tentativa está em voo, o
-    // evento não inicia outra.
-    window.addEventListener('online', () => {
-        if (!presencaPodeConectar()) return;
-        clearTimeout(Presenca.timers.religar);
-        if (Presenca.ws) { presencaSondar(Presenca.ws, PRESENCA_PONG_VOLTA_MS); presencaPedirLista(); }
-        else if (!Presenca.ligando) presencaConectar(Presenca.filtro);
-    });
+    window.addEventListener('online', () => { clearTimeout(Presenca.timers.fluxo); presencaFluxoGarantir(); });
+    // Sair da página fecha a conexão com o Google na hora. Voltar pelo bfcache
+    // religa pelo `pageshow`.
+    window.addEventListener('pagehide', () => presencaFluxoFechar());
 
     const pill = document.getElementById('presencaPill');
     if (pill) pill.addEventListener('click', () => {
         openModal('presencaModal');
         presencaRenderLista();
-        // Pedir aqui é de graça (só quando a pessoa toca) e garante que a lista
-        // esteja certa exatamente no momento em que ela é OLHADA.
-        presencaPedirLista();
+        // Abrir a lista custa UM pedido: é o momento em que ela é OLHADA.
+        presencaAtualizar();
     });
 
-    const lista = document.getElementById('presencaModal');
-    if (lista) lista.addEventListener('click', (ev) => {
+    const folha = document.getElementById('presencaModal');
+    if (folha) folha.addEventListener('click', (ev) => {
         const linha = ev.target.closest('.presenca-linha');
-        if (linha) return presencaAbrirConversa(linha.dataset.peer);
+        if (linha) presencaAbrirConversa(linha.dataset.pessoa);
     });
 
     const form = document.getElementById('conversaForm');
     if (form) form.addEventListener('submit', (ev) => {
         ev.preventDefault();
         const campo = document.getElementById('conversaInput');
-        const txt = (campo.value || '').trim().slice(0, 2000);
+        const texto = (campo.value || '').trim().slice(0, 2000);
         // Com pedido preso, mandar SÓ o card é legítimo — perguntar é opcional.
-        if ((!txt && !Presenca.anexo) || !Presenca.aberta) return;
+        if ((!texto && !Presenca.anexo) || !Presenca.aberta) return;
         const card = Presenca.anexo;
         campo.value = '';
-        // Solta o anexo ANTES de mandar: o `presencaMandarTexto` redesenha a
-        // conversa, e redesenhar com a tirinha ainda presa mostraria o pedido
-        // em dois lugares no mesmo quadro.
+        // Solta o anexo ANTES de mandar: redesenhar com a tirinha ainda presa
+        // mostraria o pedido em dois lugares no mesmo quadro.
         if (card) presencaSoltarAnexo();
-        presencaMandarTexto(Presenca.aberta, txt, card);
+        presencaEnviar(texto, card);
     });
 
-    // Prender o pedido aberto à barra.
     const btnCard = document.getElementById('conversaCardBtn');
     if (btnCard) btnCard.addEventListener('click', () => presencaAnexarCard());
     const tirar = document.getElementById('conversaAnexoTirar');
     if (tirar) tirar.addEventListener('click', () => presencaSoltarAnexo());
 
-    // Abrir um pedido que chegou. Delegado: as bolhas são redesenhadas a cada
-    // mensagem, e ouvinte por bolha vazaria a cada render.
+    // Delegado: as bolhas são redesenhadas a cada mensagem, e ouvinte por
+    // bolha vazaria a cada render.
     const msgs = document.getElementById('conversaMsgs');
     if (msgs) {
         msgs.addEventListener('click', (ev) => {
+            const id = Presenca.aberta;
+            if (!id) return;
+            if (ev.target.closest('.conversa-reenviar')) return presencaTentarDeNovo();
+            if (ev.target.closest('.conversa-recarregar')) return presencaCarregarConversa(id);
+            if (ev.target.closest('.conversa-anteriores')) {
+                const h = Presenca.historico.get(id);
+                const antes = h && h.msgs.length ? h.msgs[0].ts : null;
+                if (antes) presencaCarregarConversa(id, { antes });
+                return;
+            }
             const alvo = ev.target.closest('.conversa-pedido');
-            if (!alvo || !Presenca.aberta) return;
-            const c = Presenca.conversas.get(Presenca.aberta);
-            const m = c && c.msgs[Number(alvo.dataset.msg)];
+            if (!alvo) return;
+            const h = Presenca.historico.get(id);
+            const m = h && h.msgs[Number(alvo.dataset.msg)];
             if (!m || !m.card) return;
-            // Meu nome sai do CRACHÁ (é o do WME, assinado pelo servidor);
-            // o dela, da conversa. A folha diz "de quem" porque o pedido
-            // aberto ali não é da fila de ninguém: é o que alguém mostrou.
-            const de = m.meu ? (Presenca.cracha && Presenca.cracha.nome) : c.nome;
+            // A folha diz "de quem" porque o pedido aberto ali não é da fila de
+            // ninguém: é o que alguém mostrou.
+            const conv = Presenca.conversas.find((c) => c.id === id) || Presenca.online.find((p) => p.id === id);
+            const de = m.meu ? (AppState.profile && AppState.profile.userName) : (conv && conv.nome);
             window.abrirPedidoRecebido?.(m.card, de);
         });
         // Foto de terceiro que não carrega (apagada no Waze, rede caída) não
@@ -1240,33 +1344,39 @@ function presencaMontar() {
             if (img && img.tagName === 'IMG') img.closest('.cp-foto')?.remove();
         }, true);
     }
-    // A tirinha mostra a MESMA foto e merece o mesmo tratamento: sem isto, a
-    // única foto quebrada visível da app ficaria justamente na hora de decidir
-    // se manda ou não.
     const anexoFoto = document.getElementById('conversaAnexoFoto');
     if (anexoFoto) anexoFoto.addEventListener('error', () => {
         anexoFoto.parentElement.classList.add('hidden');
     });
+}
 
-    // Sair da página fecha o socket na hora. Sem isto o outro lado continua
-    // vendo você na lista até o TCP desistir sozinho — e a promessa é
-    // "some assim que você sai".
-    window.addEventListener('pagehide', () => presencaDesligar());
+// O que o diagnóstico leva da presença: CONTAGENS e estado, nunca nome, texto
+// ou token. A conversa é dado privado de terceiro.
+function presencaDiag() {
+    const agora = Date.now();
+    return {
+        ligada: presencaLigada(),
+        online: Presenca.online.length,
+        conversas: Presenca.conversas.length,
+        naoLidas: presencaNaoLidasTotal(),
+        atualizadaHaS: Presenca.atualizadaEm ? Math.round((agora - Presenca.atualizadaEm) / 1000) : null,
+        token: Presenca.chat ? { valido: presencaTokenValido(), expiraEmH: Number.isFinite(Presenca.chat.expiraEm) ? Math.round((Presenca.chat.expiraEm - agora) / 36e5) : null } : null,
+        fluxo: {
+            aberto: !!Presenca.fluxo,
+            haS: Presenca.fluxo ? Math.round((agora - Presenca.fluxo.desde) / 1000) : null,
+            tentativa: Presenca.fluxoTentativa,
+            ...Presenca.fluxoDiag,
+        },
+        conhecidos: chatConhecidos().length,
+        aConfirmar: chatAConfirmar().length,
+        conversaAberta: !!Presenca.aberta,
+    };
 }
 
 // Os métodos vão NO PRÓPRIO objeto de estado, e `window.Presenca` aponta pra
-// ele. Não é estilo: é o conserto de um bug que chegou na tela do owner.
-//
-// `const Presenca` aqui em cima é um binding LÉXICO global — e binding léxico
-// GANHA de propriedade de `window` em qualquer script clássico. Então um
-// `Presenca.fecharConversa()` escrito no app.js não achava o objeto exportado:
-// achava o de ESTADO, que não tem métodos. Resultado: "Presenca.fecharConversa
-// is not a function" ao tocar no ✕ da conversa.
-//
-// O erro só aparecia no ✕ porque todos os outros pontos do app.js escrevem
-// `window.Presenca?.…` explícito. Um objeto só acaba com a classe inteira:
-// `Presenca` e `window.Presenca` passam a ser a MESMA coisa, e tanto faz como
-// se escreve.
+// ele. `const Presenca` é um binding LÉXICO global, e binding léxico GANHA de
+// propriedade de `window` em script clássico: com dois objetos, `Presenca.x()`
+// no app.js achava o de estado e dava "is not a function" (gotcha #64).
 Object.assign(Presenca, {
     sincronizar: presencaSincronizar,
     desligar: presencaDesligar,
@@ -1274,6 +1384,10 @@ Object.assign(Presenca, {
     montar: presencaMontar,
     fecharConversa: presencaFecharConversa,
     esquecerAberta: presencaEsquecerAberta,
+    esquecerLista: presencaEsquecerLista,
     renderPilula: presencaRenderPilula,
+    aoCarona: presencaAoCarona,
+    conhecidos: chatConhecidos,
+    diag: presencaDiag,
 });
 window.Presenca = Presenca;

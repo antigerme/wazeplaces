@@ -104,9 +104,18 @@ const API = {
             if (c.sessionToken) c.sessionToken = '[token — ver localStorage]';
             if (c.cookies) c.cookies = '[cookies do login — nunca guardados]';
             if (c.code) c.code = '[código de pareamento]';
+            // A conversa é dado PRIVADO — a minha mensagem e o pedido que vai
+            // junto. O registro guarda o tamanho, que é o que depura.
+            if (typeof c.texto === 'string') c.texto = `[mensagem · ${c.texto.length} caracteres]`;
+            if (c.contexto) c.contexto = '[contexto da mensagem]';
             return c;
         } catch (e) { return '[não serializável]'; }
     },
+
+    // Rotas cuja RESPOSTA nunca entra no registro, nem com o modo dev: o
+    // histórico e a prévia das conversas (dado privado de terceiro) e o token
+    // do tempo real (credencial). O registro fica (rota, status, tempo).
+    _ROTAS_PRIVADAS: ['chat', 'presenca-app'],
 
     // Corpo de resposta só entra com o modo dev ATIVO — que é exatamente quem
     // está com problema e ligou pra reproduzir. Guardar sempre poria a fila
@@ -217,7 +226,7 @@ const API = {
                 naoEraJson = bruto.slice(0, 600);
                 throw new Error('resposta não é JSON (HTTP ' + http + ')');
             } finally {
-                const guarda = this._guardaCorpo();
+                const guarda = this._guardaCorpo() && !this._ROTAS_PRIVADAS.includes(endpoint);
                 const corpo = guarda ? bruto : null;
                 this._registrar(endpoint, _t0, http, data, {
                     cab,
@@ -441,20 +450,20 @@ const API = {
         });
     },
 
-    // Porta de entrada da presença: devolve o CRACHÁ assinado (nome/rank/AM do
-    // /Session do Waze, mais a sala já resolvida) e os servidores de rede.
-    // O nome não vai daqui pro servidor — vem de lá, assinado, justamente pra
-    // ninguém poder se apresentar como outra pessoa na lista.
-    async presenca(peer, stateId) {
+    // Quem usa a app no país e as conversas da app (fase 3), e, com
+    // `token: true`, o token do tempo real. `campos` traz pais, userId,
+    // conhecidos e, quando houver, a instalação e os ids a confirmar.
+    async presencaApp(campos) {
         const sessionToken = this.getSession();
         if (!sessionToken) return { success: false, error: t('api.error.noSession') };
-        return this._post('presenca', {
-            sessionToken,
-            region: this.getRegion(),
-            countryId: this.getCountry(),
-            stateId: stateId || null,
-            peer
-        });
+        return this._post('presenca-app', { sessionToken, region: this.getRegion(), ...campos });
+    },
+
+    // O chat do WME: `abrir`, `enviar`, `lida` (e as outras ações da rota).
+    async chat(campos) {
+        const sessionToken = this.getSession();
+        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        return this._post('chat', { sessionToken, region: this.getRegion(), ...campos });
     },
 
     async listCountries() {

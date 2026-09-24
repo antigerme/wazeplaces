@@ -1552,7 +1552,10 @@ test('a Ajuda conta que a espera do Desfazer pode ser desligada', () => {
 test('toda chave gravada no aparelho é resolvida no logout', () => {
   const app = read('js/app.js');
   const api = read('js/api.js');
-  const fonte = app + '\n' + api;
+  // O presenca.js grava a chave do chat (fase 3). Ficava FORA desta varredura,
+  // e chave de arquivo não varrido é exatamente como uma escapa do "Sair".
+  const presenca = read('js/presenca.js');
+  const fonte = app + '\n' + api + '\n' + presenca;
 
   // Apagadas no logout, cada uma pelo seu meio. Sobrescrever com o padrão
   // (saveStats e cia.) conta: o valor antigo deixa de existir.
@@ -1601,6 +1604,11 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // investiga é o de quem NÃO saiu e perdeu a sessão assim mesmo.
     SESSOES_KEY: 'safeLS.remove(SESSOES_KEY)',
     NASCIMENTO_KEY: 'safeLS.remove(NASCIMENTO_KEY)',
+    // O chat do WME (fase 3): a instalação, as conversas conhecidas (ids de
+    // outros editores), até onde cada um leu e os ids a confirmar. Sai pelo
+    // `esquecer` da presença, que o logout chama — conferido abaixo que o
+    // esquecer de fato APAGA a chave, senão a chamada seria decoração.
+    CHAT_KEY: 'window.Presenca?.esquecer?.()',
     waze_session_token: 'API.setSession(null)',
     waze_region: "API.setRegion('row')",
     waze_country: 'API.setCountry(30)',
@@ -1650,6 +1658,13 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
   for (const [nome, chamada] of Object.entries(APAGADAS)) {
     assert.ok(corpo.includes(chamada), `o logout parou de limpar ${nome} (esperava "${chamada}")`);
   }
+  // O `esquecer` da presença tem que APAGAR a chave do chat — a chamada no
+  // logout só vale se a função fizer o que o nome promete.
+  const j = presenca.indexOf('function presencaEsquecer(');
+  assert.notEqual(j, -1, 'sumiu o presencaEsquecer');
+  const esquecer = presenca.slice(j, presenca.indexOf('\n}', j));
+  assert.match(esquecer, /safeLS\.remove\(CHAT_KEY\)/, 'o esquecer da presença parou de apagar a chave do chat');
+  assert.match(presenca, /esquecer: presencaEsquecer,/, 'o esquecer da presença não está exportado');
 });
 
 test('o logout não espera a rede pra limpar o aparelho, e não falha calado', () => {

@@ -201,19 +201,20 @@ test('o que o motor diz no console e não é erro da página: lista FECHADA e ex
   assert.equal(ruidoDoMotor('Viewport argument key "interactive-widget" not recognized and ignored. TypeError: boom'), false);
 });
 
-test('o ajuste de ICE da presença vale SÓ fora do Chromium, e só troca o nome mDNS', () => {
-  // O Chromium já sai com o IP de verdade pela chave de linha de comando; no
-  // WebKit o mesmo efeito é trocar o `<uuid>.local` por 127.0.0.1 no teste.
-  // MEDIDO com duas conexões na mesma página: com `.local`, o ICE fica em
-  // "new" e o DataChannel não abre; trocado, "connected".
+test('a presença não usa WebRTC desde a fase 3 — e o smoke dela exercita o tempo real de verdade', () => {
+  // Até a fase 2 a conversa era WebRTC, e o WebKit precisava de um ajuste de
+  // ICE no teste (o nome mDNS `.local`, que o contêiner não resolve). Desde a
+  // fase 3 a conversa é o chat do WME: sem WebRTC, o ajuste saiu com ele.
+  // O que o smoke precisa provar agora é o tempo real saindo pro host do Google
+  // — com a CSP de verdade da app, que é onde ele morreria calado.
   const codigo = semComentario(ler('tools/smoke-presenca.mjs'));
-  assert.match(codigo, /async function iceSemMdnsForaDoChromium\(ctx\) \{\s*if \(MOTOR === 'chromium'\) return;/,
-    'o ajuste de ICE passou a valer no Chromium também — lá o instrumento já é outro');
-  assert.match(codigo, /replace\(\/\[0-9a-f-\]\+\\\.local\\b\/i, '127\.0\.0\.1'\)/,
-    'o ajuste deixou de ser SÓ a troca do nome mDNS');
-  const contextos = (codigo.match(/await browser\.newContext\(/g) || []).length;
-  const ajustados = (codigo.match(/await iceSemMdnsForaDoChromium\(/g) || []).length;
-  assert.equal(ajustados, contextos, 'contexto novo na presença sem o ajuste de ICE — no WebKit a conversa não abre nele');
+  assert.doesNotMatch(codigo, /RTCPeerConnection|iceSemMdns|createDataChannel/,
+    'o smoke da presença voltou a usar WebRTC — a conversa não é mais par a par');
+  assert.match(codigo, /const GOOGLE = 'https:\/\/instantmessaging-pa\.googleapis\.com\/';/,
+    'o smoke deixou de rotear o host de verdade do tempo real — a CSP não seria exercitada');
+  assert.match(codigo, /await ctx\.route\(GOOGLE \+ '\*\*'/, 'o tempo real não é mais roteado no smoke');
+  assert.match(codigo, /spawn\(process\.execPath, \[join\(ROOT, 'server', 'node\.mjs'\)\]/,
+    'o smoke tem que servir a app pelo servidor de verdade — é ele que manda a CSP');
 });
 
 test('a main roda o CI toda semana, fora da hora cheia', () => {

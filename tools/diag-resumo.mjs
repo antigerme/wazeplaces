@@ -104,6 +104,22 @@ else {
   if (pw.marcaPerdida) out('ATENÇÃO: o Waze devolveu a posição SEM a marca da app — a lista de quem está na app vai vir vazia.');
 }
 
+// A lista e o chat da app (fase 3, `resumo.presencaApp`): só contagens e
+// estados — nome, texto e token nunca vão pro relatório.
+secao('PRESENÇA NA APP (lista e conversa)');
+const pa = r.presencaApp;
+if (pa === undefined) out(AUSENTE);
+else if (!pa) out('sem a presença carregada');
+else if (pa.erro) out('erro ao medir: ' + pa.erro);
+else {
+  const f = pa.fluxo || {};
+  out(`ligada ${pa.ligada} · na app ${pa.online} · conversas ${pa.conversas} · não lidas ${pa.naoLidas} · lista de há ${pa.atualizadaHaS ?? '—'} s · conversa aberta ${pa.conversaAberta}`);
+  out(`token ${pa.token ? `válido ${pa.token.valido} (vence em ${pa.token.expiraEmH ?? '?'} h)` : 'nenhum'} · tempo real aberto ${f.aberto}${f.aberto ? ` há ${f.haS} s` : ''} · aberturas ${f.aberturas} · quadros ${f.quadros} · mensagens ${f.mensagens} · recibos ${f.recibos} · recuo ${f.tentativa}${f.ultimoErro ? ` · último erro: ${f.ultimoErro}` : ''}`);
+  out(`conhecidas no aparelho ${pa.conhecidos} · a confirmar ${pa.aConfirmar}`);
+  if (pa.ligada && pa.token && !pa.token.valido) out('ATENÇÃO: o token do tempo real venceu — mensagem nova só aparece no próximo pedido.');
+  if (pa.aConfirmar >= 90) out('ATENÇÃO: a fila de confirmação está quase no teto — a confirmação de carona pode não estar voltando.');
+}
+
 secao('SERVICE WORKER');
 const sw = d.serviceWorker || {};
 out(`controlando ${sw.controlando} · registros ${j((sw.registros || []).map((x) => ({ estado: x.estadoAtivo, esperando: !!x.esperando, instalando: !!x.instalando })))}`);

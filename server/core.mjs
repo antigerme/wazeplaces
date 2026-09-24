@@ -21,7 +21,7 @@ import {
   corpoMensagens, corpoSoCabecalho, corpoMarcarLida, corpoConfirmar, corpoPerfis,
   lerEnvio, lerConversas, lerMensagens, lerNaoLidas, lerPerfis, lerMarcarLida, lerProvedor,
 } from './wme-grpc.mjs';
-import { marcarPosicao, paisValido } from './marca-app.mjs';
+import { marcarPosicao, paisValido, temMarcaDaApp, paisDaMarca } from './marca-app.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Constantes
@@ -2037,8 +2037,7 @@ async function handleMarcarLido(data, { sessions, aoFundo }) {
   const carona = iniciarCarona(data, cookieHeader, region);
   const result = await callWaze(wazeMarkReadEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
-  const presenca = await esperarCarona(carona, aoFundo);
-  const extra = presenca ? { presenca } : {};
+  const extra = await esperarCarona(carona, aoFundo);
 
   if (result.httpCode === 200 && cat.category !== 'already_processed') {
     return {
@@ -2138,8 +2137,7 @@ async function handleValidarPlace(data, { sessions, aoFundo }) {
   const carona = iniciarCarona(data, cookieHeader, region);
   const result = await callWaze(wazeFeaturesEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
-  const presenca = await esperarCarona(carona, aoFundo);
-  const extra = presenca ? { presenca } : {};
+  const extra = await esperarCarona(carona, aoFundo);
 
   if (result.httpCode === 200 && cat.category !== 'already_processed') {
     return {
@@ -2839,10 +2837,29 @@ function lerCarona(v) {
   return { userId, ...marcarPosicao({ lat, lon }, pais), ...(v.visivel === true ? { visivel: true } : {}) };
 }
 
+// A carona leva DUAS coisas, e elas voltam em campos separados da resposta:
+//   · `presenca`    — a posição escrita no WME (fase 2): `{ ok, marca }`;
+//   · `presencaApp` — quem usa a app no país e as conversas da app (fase 3),
+//                     lidas na mesma ida pra pílula andar sem pedido novo.
+// As duas correm em paralelo com a ação e têm o MESMO teto de espera; a que
+// passar do teto some da resposta sem arrastar a outra.
 function iniciarCarona(data, cookieHeader, region) {
   if (data.presenca === undefined || data.presenca === null) return null;
   const p = lerCarona(data.presenca);
-  if (!p) return Promise.resolve({ ok: false, categoria: 'invalida' });
+  if (!p) return { presenca: Promise.resolve({ ok: false, categoria: 'invalida' }) };
+  const conhecidos = lerConhecidos(data.presenca.conhecidos);
+  const app = listaDaApp(cookieHeader, region, { pais: data.presenca.pais, eu: p.userId, conhecidos })
+    // As duas partes falharam: some da resposta. Chegar como `{ online: null }`
+    // seria o cliente ler "ninguém na app" de uma lista que nem veio.
+    .then((a) => (a.online || a.conversas ? { online: a.online, conversas: a.conversas } : null))
+    // DEFESA sem caminho hoje, como a da escrita: o `callWazeGrpc` captura a
+    // rede e os leitores estão em try. Fica pelo mesmo motivo de lá — uma
+    // rejeição aqui faria uma AÇÃO feita voltar ao editor como erro 500.
+    .catch(() => null);
+  return { presenca: escreverPresenca(p, cookieHeader, region), presencaApp: app };
+}
+
+function escreverPresenca(p, cookieHeader, region) {
   const base = WAZE_GRPC_PRESENCA[region] || WAZE_GRPC_PRESENCA.row;
   // O corpo é montado DENTRO da corrente: qualquer coisa que lance vira
   // rejeição, e rejeição vira `{ ok: false }` lá embaixo.
@@ -2868,18 +2885,190 @@ function iniciarCarona(data, cookieHeader, region) {
     .catch(() => ({ ok: false, categoria: 'transient' }));
 }
 
+// Devolve o que ficou pronto dentro do teto, já no formato do corpo da resposta
+// (`{ presenca, presencaApp }`, cada um só se chegou). Sem carona, `{}`.
 async function esperarCarona(carona, aoFundo) {
-  if (!carona) return null;
+  if (!carona) return {};
+  const partes = Object.entries(carona);
   if (typeof aoFundo === 'function') {
-    try { aoFundo(carona); } catch { /* sem segundo plano, a escrita só pode ser cortada */ }
+    for (const [, p] of partes) {
+      try { aoFundo(p); } catch { /* sem segundo plano, a escrita só pode ser cortada */ }
+    }
   }
+  const ESGOTOU = Symbol('esgotou');
   let timer;
-  const teto = new Promise((resolve) => { timer = setTimeout(() => resolve(null), CARONA_ESPERA_MS); });
+  const teto = new Promise((resolve) => { timer = setTimeout(() => resolve(ESGOTOU), CARONA_ESPERA_MS); });
   try {
-    return await Promise.race([carona, teto]);
+    const prontas = await Promise.all(partes.map(([k, p]) => Promise.race([p, teto]).then((v) => [k, v])));
+    return Object.fromEntries(prontas.filter(([, v]) => v !== ESGOTOU && v != null));
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ── A presença DA APP (fase 3) ─────────────────────────────────────────────
+//
+// Quem usa a app no país do filtro, e as conversas que são da app. A mesma
+// resposta sai por dois caminhos: de carona nas ações (zero pedido a mais) e
+// pela rota `presenca-app` (ao abrir a app e ao abrir a lista).
+//
+// A lista é a do WME, do MUNDO inteiro (medido: 48 editores, 2,9 KB), filtrada
+// aqui pela marca da app e pelo país (`marca-app.mjs`). Quem pede não vem (o
+// Waze exclui), e quem está invisível também não.
+//
+// A conversa é "da app" quando a última mensagem traz a marca no contexto, OU
+// quando o aparelho já a conhece (`conhecidos`: conversa que passou pela app
+// antes). A marca sozinha não bastaria: uma resposta dada pelo WME, sem marca,
+// tiraria a conversa da app no meio. Conversa de quem só usa o WME não vem —
+// decisão do owner ("a app não mostra nada").
+const CAIXA_MUNDO = [-180, -85, 180, 85];
+export const APP_CONTEXTO = 'wazeplaces';
+const CONHECIDOS_MAX = 50;
+
+function lerConhecidos(v) {
+  if (!Array.isArray(v)) return new Set();
+  return new Set(v.slice(0, CONHECIDOS_MAX).map((x) => String(x ?? '')).filter((x) => ID_WAZE.test(x)));
+}
+
+// Do pedido mandado pela conversa, só o que a LISTA precisa pra resumir a
+// última mensagem. O cartão inteiro quem monta é o cliente, ao abrir.
+function cardDoContexto(ctx) {
+  if (!ctx || typeof ctx.card !== 'string') return null;
+  try {
+    const c = JSON.parse(ctx.card);
+    if (!c || typeof c !== 'object') return null;
+    return {
+      name: typeof c.name === 'string' ? c.name.slice(0, 120) : '',
+      updateTypeKey: typeof c.updateTypeKey === 'string' ? c.updateTypeKey.slice(0, 40) : null,
+    };
+  } catch { return null; }
+}
+
+// A prévia da conversa. Mensagem da app manda a pergunta em `legenda` (o texto
+// do Waze leva também o nome do local e o link, pra quem lê pelo WME).
+function resumoDaUltima(m, eu) {
+  if (!m) return null;
+  const ctx = m.contexto || {};
+  return {
+    deMim: !!(m.de && String(m.de.id) === eu),
+    ts: m.ts,
+    recibo: m.classe === 'recibo',
+    texto: String((typeof ctx.legenda === 'string' ? ctx.legenda : m.texto) || '').slice(0, 140),
+    card: cardDoContexto(ctx),
+  };
+}
+
+export function filtrarOnlineDaApp(editores, { pais, eu }) {
+  return (editores || [])
+    .filter((e) => e && e.visivel !== false && String(e.id) !== eu && temMarcaDaApp(e) && paisDaMarca(e) === pais)
+    .map((e) => ({ id: String(e.id), nome: e.nome, rank: e.rank, lat: e.lat, lon: e.lon }));
+}
+
+export function filtrarConversasDaApp(conversas, { eu, conhecidos }) {
+  return (conversas || [])
+    .filter((c) => c && c.com && ID_WAZE.test(String(c.com.id)) && !c.bloqueada
+      && ((c.ultima && c.ultima.contexto && c.ultima.contexto.app === APP_CONTEXTO) || conhecidos.has(String(c.com.id))))
+    .map((c) => ({
+      id: String(c.com.id), nome: c.nome, naoLidas: c.naoLidas || 0, atividade: c.atividade,
+      ultima: resumoDaUltima(c.ultima, eu),
+    }));
+}
+
+// As duas leituras em paralelo. Cada parte pode faltar (`null`) sem derrubar a
+// outra; o `erro` só vem quando é sessão morta, pra rota responder 401.
+async function listaDaApp(cookieHeader, region, { pais, eu, conhecidos }, ctx = null) {
+  const base = WAZE_GRPC_PRESENCA[region] || WAZE_GRPC_PRESENCA.row;
+  const wmp = WAZE_WMP[region] || WAZE_WMP.row;
+  const cabecalho = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: crypto.randomUUID() });
+  // A regravação do cookie rotacionado vai com UMA das chamadas só.
+  const [lista, conv] = await Promise.all([
+    callWazeGrpc(base + 'listOnlineEditors', cookieHeader, corpoListarOnline(CAIXA_MUNDO), region, ctx),
+    callWazeGrpc(wmp + SERVICO_HISTORICO + '/ListConversations', cookieHeader, corpoConversas({ cabecalho }), region, null, { chat: true }),
+  ]);
+  const out = { online: null, conversas: null, erro: null, r: null };
+  const catL = categorizeGrpcError(lista);
+  const catC = categorizeGrpcError(conv);
+  if (catL && catL.category === 'unauthorized') { out.erro = catL; out.r = lista; }
+  else if (catC && catC.category === 'unauthorized') { out.erro = catC; out.r = conv; }
+  if (!catL) { try { out.online = filtrarOnlineDaApp(lerListaOnline(lista.dados), { pais, eu }); } catch { /* fica null */ } }
+  if (!catC) { try { out.conversas = filtrarConversasDaApp(lerConversas(conv.dados).conversas, { eu, conhecidos }); } catch { /* fica null */ } }
+  return out;
+}
+
+function tokenDoProvedor(d) {
+  const p = d && lerProvedor(d);
+  if (!p || !p.token || !p.base || !p.chave) throw new Error('provedor vazio');
+  return { token: p.token, base: p.base, chave: p.chave, expiraEm: p.expiraEmMs == null ? null : Date.now() + p.expiraEmMs };
+}
+
+// A CONFIRMAÇÃO do que chegou pelo fluxo em tempo real, de carona.
+//
+// O fluxo REENTREGA ao reconectar tudo o que a MESMA instalação recebeu e não
+// confirmou (MEDIDO na fase 3: mensagens que chegaram com o fluxo fechado, o
+// eco das próprias e os recibos) — e ele cai sozinho a cada ~6 min. Sem
+// confirmar, cada reconexão baixa de novo a fila inteira do aparelho, que só
+// cresce. Um pedido à nossa API por mensagem recebida seria o free tier pagando
+// o que o WME resolve de graça; então os ids vão JUNTO de um pedido que a app
+// já faz (`presenca-app` e `chat`), e o Waze confirma em paralelo.
+//
+// É ACESSÓRIA por construção: entrada ruim é ignorada (nunca vira 400 no
+// pedido principal), falha vira `false`, e o cliente guarda os ids pra próxima
+// carona. A instalação é a do aparelho — a fila é dela, e confirmar com outra
+// não tiraria nada de lá.
+const CONFIRMAR_MAX = 100;
+function confirmarDeCarona(data, cookieHeader, region) {
+  if (!Array.isArray(data.confirmar) || !data.confirmar.length) return null;
+  const instalacao = String(data.instalacao ?? '');
+  if (!UUID.test(instalacao)) return null;
+  const ids = data.confirmar.slice(0, CONFIRMAR_MAX).map((x) => String(x ?? '')).filter((x) => UUID.test(x)).map((x) => x.toLowerCase());
+  if (!ids.length) return null;
+  const wmp = WAZE_WMP[region] || WAZE_WMP.row;
+  const cabecalho = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: instalacao.toLowerCase() });
+  return Promise.resolve()
+    .then(() => callWazeGrpc(wmp + SERVICO_MENSAGENS + '/AckMessages', cookieHeader, corpoConfirmar({ cabecalho, ids }), region, null, { chat: true }))
+    .then((r) => (categorizeGrpcError(r) ? 0 : ids.length))
+    .catch(() => 0);
+}
+
+// Ao abrir a app e ao abrir a lista: quem usa a app no país, as conversas da
+// app e, com `token: true` e a `instalacao` do aparelho, o token do tempo real
+// — UMA ida. O token é PEDIDO, e não implícito na instalação: ela também vai
+// junto só pra confirmar o que chegou pelo fluxo, e aí buscar token seria uma
+// chamada a mais ao Waze sem ninguém precisar dele.
+async function handlePresencaApp(data, { sessions }) {
+  const cookies = await resolveCookies(data, sessions);
+  const region = requireRegion(data);
+  if (!paisValido(data.pais)) incompleto();
+  const eu = idWaze(data.userId);
+  const conhecidos = lerConhecidos(data.conhecidos);
+  const instalacao = data.instalacao === undefined || data.instalacao === null ? null : uuid(data.instalacao);
+  const querToken = data.token === true;
+  if (querToken && !instalacao) incompleto();   // o token é da instalação
+  const { cookieHeader } = prepareAuth(cookies);
+  const wmp = WAZE_WMP[region] || WAZE_WMP.row;
+  const [app, prov, confirmados] = await Promise.all([
+    listaDaApp(cookieHeader, region, { pais: data.pais, eu, conhecidos }, { data, sessions, cookies }),
+    querToken
+      ? callWazeGrpc(wmp + SERVICO_MENSAGENS + '/GetMessagingProvider', cookieHeader,
+        corpoSoCabecalho(cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao })), region, null, { chat: true })
+      : null,
+    confirmarDeCarona(data, cookieHeader, region),
+  ]);
+  if (app.erro) return respostaDeErroGrpc(app.erro, app.r);
+  let chat = null;
+  if (prov) {
+    const cat = categorizeGrpcError(prov);
+    if (cat && cat.category === 'unauthorized') return respostaDeErroGrpc(cat, prov);
+    if (!cat) { try { chat = tokenDoProvedor(prov.dados); } catch { chat = null; } }
+  }
+  return {
+    status: 200,
+    body: {
+      success: true, online: app.online, conversas: app.conversas,
+      ...(querToken ? { chat } : {}),
+      ...(confirmados ? { confirmados } : {}),
+    },
+  };
 }
 
 // Presença: mover a pessoa (posição e/ou visibilidade) e ver quem está online
@@ -2965,17 +3154,20 @@ async function handleChat(data, { sessions }) {
   if (acao === 'token' && !instalacao) incompleto();
   const cabecalho = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: instalacao || crypto.randomUUID() });
   const de = data.de == null ? null : idWaze(data.de);
+  if (acao === 'abrir') {
+    // Valida ANTES de confirmar: um pedido recusado não confirma nada.
+    idWaze(data.com);
+    instante(data.antesDe);
+    const confirmacao = confirmarDeCarona(data, prepareAuth(cookies).cookieHeader, region);
+    return comConfirmados(await abrirConversa(data, { sessions, cookies, region, cabecalho, instalacao }), confirmacao);
+  }
 
   let metodo, corpo, ler;
   switch (acao) {
     case 'token':
       metodo = SERVICO_MENSAGENS + '/GetMessagingProvider';
       corpo = corpoSoCabecalho(cabecalho);
-      ler = (d) => {
-        const p = d && lerProvedor(d);
-        if (!p || !p.token || !p.base || !p.chave) throw new Error('provedor vazio');
-        return { token: p.token, base: p.base, chave: p.chave, expiraEm: p.expiraEmMs == null ? null : Date.now() + p.expiraEmMs };
-      };
+      ler = tokenDoProvedor;
       break;
     case 'naoLidas':
       metodo = SERVICO_MENSAGENS + '/GetUnreadMessagesCount';
@@ -3007,6 +3199,10 @@ async function handleChat(data, { sessions }) {
         if (new TextEncoder().encode(JSON.stringify(data.contexto)).length > CONTEXTO_MAX_BYTES) incompleto();
         ctx = data.contexto;
       }
+      // Toda mensagem que passa por aqui SAIU DA APP, por definição: a marca é
+      // posta pelo servidor, e não pedida ao cliente — cliente velho ou
+      // descuidado não tira a conversa da app.
+      ctx = { ...(ctx || {}), app: APP_CONTEXTO };
       const id = data.id == null ? crypto.randomUUID() : uuid(data.id);
       metodo = SERVICO_MENSAGENS + '/SendMessage';
       corpo = corpoEnviarTexto({ cabecalho, ts: Date.now(), id, para: idWaze(data.para), de, texto: data.texto, ctx });
@@ -3037,22 +3233,68 @@ async function handleChat(data, { sessions }) {
 
   const { cookieHeader } = prepareAuth(cookies);
   const base = WAZE_WMP[region] || WAZE_WMP.row;
+  // A confirmação de carona sai JUNTO (em paralelo), e só depois de o pedido
+  // principal ter passado na validação: um pedido recusado não confirma nada.
+  const confirmacao = acao === 'confirmar' ? null : confirmarDeCarona(data, cookieHeader, region);
   const r = await callWazeGrpc(base + metodo, cookieHeader, corpo, region, { data, sessions, cookies }, { chat: true });
   // Marcar como lida uma conversa que nunca existiu não é erro: não havia o que
   // marcar. MEDIDO: status 7 com a mensagem exata "NO_EXISTING_CONVERSATION" —
   // o mesmo 7 da sessão morta, por isso a exceção é pela mensagem e só aqui.
   if (acao === 'lida' && r.grpcStatus === 7 && r.grpcMessage === 'NO_EXISTING_CONVERSATION') {
-    return { status: 200, body: { success: true, recibos: [] } };
+    return comConfirmados({ status: 200, body: { success: true, recibos: [] } }, confirmacao);
   }
   const cat = categorizeGrpcError(r);
-  if (cat) return respostaDeErroGrpc(cat, r);
+  if (cat) return comConfirmados(respostaDeErroGrpc(cat, r), confirmacao);
   let resultado;
   try {
     resultado = ler(r.dados);
   } catch {
     apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
   }
-  return { status: 200, body: { success: true, ...resultado } };
+  return comConfirmados({ status: 200, body: { success: true, ...resultado } }, confirmacao);
+}
+
+// Põe `confirmados` na resposta quando a confirmação de carona deu certo. O
+// cliente só solta os ids que o Waze confirmou; o resto vai na próxima carona.
+async function comConfirmados(resposta, confirmacao) {
+  if (!confirmacao) return resposta;
+  const n = await confirmacao;
+  if (n && resposta && resposta.body) resposta.body.confirmados = n;
+  return resposta;
+}
+
+// Abrir uma conversa na app: o histórico e o "lida" numa ida só (fase 3). O
+// "lida" é acessório: QUALQUER falha dele vira `recibos: []` e o histórico
+// segue — inclusive a conversa que ainda não existe (status 7 com
+// NO_EXISTING_CONVERSATION, medido), que não é erro nenhum. Marcar como lida
+// já gera, no servidor do Waze, os recibos que o remetente recebe (fase 1).
+async function abrirConversa(data, { sessions, cookies, region, cabecalho, instalacao }) {
+  const com = idWaze(data.com);
+  const antesDe = instante(data.antesDe);
+  const { cookieHeader } = prepareAuth(cookies);
+  const base = WAZE_WMP[region] || WAZE_WMP.row;
+  const cabLida = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: instalacao || crypto.randomUUID() });
+  const [hist, lida] = await Promise.all([
+    callWazeGrpc(base + SERVICO_HISTORICO + '/ListMessages', cookieHeader, corpoMensagens({ cabecalho, com, antesDe }),
+      region, { data, sessions, cookies }, { chat: true }),
+    // Página mais antiga (`antesDe`) é só leitura: quem rola pra trás não está
+    // lendo mensagem nova.
+    antesDe ? null : callWazeGrpc(base + SERVICO_MENSAGENS + '/MarkConversationRead', cookieHeader,
+      corpoMarcarLida({ cabecalho: cabLida, com }), region, null, { chat: true }),
+  ]);
+  const cat = categorizeGrpcError(hist);
+  if (cat) return respostaDeErroGrpc(cat, hist);
+  let resultado;
+  try {
+    resultado = lerMensagens(hist.dados);
+  } catch {
+    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  }
+  let recibos = [];
+  if (lida && !categorizeGrpcError(lida)) {
+    try { recibos = lerMarcarLida(lida.dados).recibos; } catch { recibos = []; }
+  }
+  return { status: 200, body: { success: true, ...resultado, recibos } };
 }
 
 const ROUTES = {
@@ -3068,6 +3310,7 @@ const ROUTES = {
   perfil: handlePerfil,
   presenca: handlePresenca,
   'presenca-waze': handlePresencaWaze,
+  'presenca-app': handlePresencaApp,
   chat: handleChat,
   'lista-paises': handleListaPaises,
   'lista-estados': handleListaEstados,

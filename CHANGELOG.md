@@ -8,6 +8,25 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.24-01
+
+### Mudado
+- **A pílula 👥 e a conversa passaram a usar a presença e o chat do próprio Waze.**
+  - A pílula mostra quem está usando a **app** no mesmo país do seu filtro, nos últimos 15 minutos. Antes era quem estava conectado na mesma fila naquele instante.
+  - A lista tem duas partes: **Triando agora**, com a distância até onde cada um está triando ("a 3 km daqui"), e **Conversas**, com as mais recentes e toda conversa com mensagem nova.
+  - A conversa **fica guardada** no chat do Waze e aparece também no chat do WME de vocês dois — o topo da conversa avisa isso. Dá pra escrever pra quem já saiu da app: a pessoa lê quando voltar. Por isso acabou o "Não chegou".
+  - Recibos: ✓ **Enviada** e ✓✓ com a palavra **Lida**. Se o envio falhar, a mensagem diz "Não enviada, sem conexão" com um **Tentar de novo** ao lado.
+  - A conversa mostra a separação por dia ("Ontem", "Hoje") e, no topo, se a pessoa está na app agora (com o nível e a distância) ou fora dela.
+  - O pedido mandado pela conversa continua chegando como cartão pra quem usa a app. Pra quem lê pelo WME, ele chega como texto com o nome do local e um link que abre o pedido no editor.
+  - Com mensagem nova, a pílula aparece com o balão mesmo sem ninguém na app.
+  - Mensagem de quem só usa o WME não aparece na app: ela fica no chat do WME.
+- **"Ver quem está na fila" virou "Ver quem está na app"**, e o título da lista, "Na app agora".
+- **Ajuda → Quem está na app**: diz como a lista e a conversa funcionam agora, e que o WME mostra no mapa quem está triando, até uns 15 minutos depois da última ação.
+
+### Notas
+- Nada disso consulta o servidor da app periodicamente. A lista chega junto das suas decisões (✕ e ✓), e ao abrir a app, a lista ou a conversa. Mensagem chegando vai do Waze direto pro seu aparelho, sem passar pelo servidor da app.
+- **Sair** apaga do aparelho o que a conversa guardava nele (quais conversas são da app e até onde cada pessoa leu).
+
 ## v2026.09.23-03
 
 ### Corrigido

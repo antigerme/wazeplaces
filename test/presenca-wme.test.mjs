@@ -48,6 +48,8 @@ function escopoDaAcao(sobre = {}) {
     API: { getCountry: () => 30 },
     navigator: { onLine: sobre.onLine ?? true },
     Date: sobre.Date || Date,
+    // A presença da app (fase 3): quais conversas o aparelho conhece.
+    window: { Presenca: { conhecidos: () => (sobre.conhecidos ?? []) } },
   };
 }
 
@@ -58,6 +60,19 @@ test('ação: a posição é a do card NA TELA, [lat, lon] na ordem certa, com o
   // Contraprova da ordem: com o centro invertido o lat viraria -43.2 — e -43.2
   // é uma latitude VÁLIDA, então nada reclamaria. É o defeito sem sintoma.
   assert.notEqual(p.lat, PROXIMO.mapa.centro[1]);
+});
+
+test('ação: as conversas que o aparelho conhece vão JUNTO — e só quando existem', () => {
+  // Fase 3: a lista de conversas volta de carona, e ela só inclui as que foram
+  // respondidas pelo WME (sem a marca da app) se o aparelho disser quais conhece.
+  const com = montar('presencaWmeDaAcao', escopoDaAcao({ conhecidos: ['183164343', '600'] }))(CARD);
+  assert.deepEqual(com.conhecidos, ['183164343', '600']);
+  const sem = montar('presencaWmeDaAcao', escopoDaAcao({ conhecidos: [] }))(CARD);
+  assert.ok(!('conhecidos' in sem), 'lista vazia foi junto: bytes à toa em toda ação');
+  // Presença ausente (script ainda não carregou) não derruba a carona.
+  const e = escopoDaAcao();
+  e.window = {};
+  assert.ok(montar('presencaWmeDaAcao', e)(CARD), 'sem a presença carregada a posição sumiu');
 });
 
 test('ação: sem card na tela (fila acabou), a posição é a do pedido decidido', () => {
@@ -173,6 +188,29 @@ test('resposta: ligou de carona → "já vista ligada" gravada; marca perdida �
   assert.equal(p2.ligarNaProxima, true);
 });
 
+test('resposta: a lista da app que voltou de carona vai pra presença, com o instante da SAÍDA', () => {
+  // O instante é o de quando a carona saiu (`ultimaEm`): mensagem que chegou ao
+  // vivo DEPOIS disso a lista ainda não contou, e a presença não pode apagá-la.
+  const chamadas = [];
+  const presencaWme = { ligarNaProxima: false, ultimaEm: 12345, enviadas: 0, falhas: 0, ultimaFalha: null, marcaPerdida: false };
+  const escopo = {
+    presencaWme, AppState: { preferences: {} }, savePreferences: () => {}, dfato: () => {},
+    window: { Presenca: { aoCarona: (...a) => chamadas.push(a) } },
+  };
+  const f = montar('presencaWmeAoResponder', escopo);
+  const lista = { online: [{ id: '1', nome: 'x' }], conversas: [] };
+  f({ userId: '1' }, { success: true, presenca: { ok: true, marca: true }, presencaApp: lista });
+  assert.deepEqual(chamadas, [[lista, 12345]]);
+  assert.equal(presencaWme.enviadas, 1, 'a escrita deixou de ser contada');
+  // Sem carona na ação, uma lista na resposta não é desta ação: não pousa.
+  f(null, { success: true, presencaApp: lista });
+  // A escrita falhou mas a lista veio: ela pousa assim mesmo.
+  f({ userId: '1' }, { success: true, presenca: { ok: false, categoria: 'transient' }, presencaApp: lista });
+  assert.equal(chamadas.length, 2);
+  // Presença ainda não carregada: nada quebra.
+  montar('presencaWmeAoResponder', { ...escopo, window: {} })({ userId: '1' }, { presencaApp: lista, presenca: { ok: true } });
+});
+
 function rodarPerfil(visivel, preferences) {
   const salvos = [];
   const fatos = [];
@@ -282,4 +320,18 @@ test('api.js: a presença vai no corpo SÓ quando existe — sem ela o corpo é 
   }
   const pw = API_JS.slice(API_JS.indexOf('async presencaWaze('), API_JS.indexOf('async presenca(peer'));
   assert.match(pw, /this\._post\('presenca-waze'/);
+});
+
+test('a presença sincroniza quando o PERFIL chega — o `showMainScreen` chama cedo demais', () => {
+  // Achado na validação ao vivo: com a sessão salva, o `showMainScreen` chama a
+  // presença antes de o perfil existir, ela desiste calada (sem o id não há
+  // lista nem chat), e ninguém chamava de novo. O smoke injetava o perfil antes
+  // e não via (gotcha #52); hoje ele abre pelo `initApp` de verdade.
+  const corpo = semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData'));
+  const iPerfil = corpo.indexOf('AppState.profile = profileRes.profile;');
+  const iPaises = corpo.indexOf('AppState.countries = countriesRes.countries;');
+  const iSinc = corpo.indexOf('window.Presenca?.sincronizar?.()');
+  assert.ok(iPerfil > 0, 'o perfil deixou de ser guardado aqui — o guard ficaria cego');
+  assert.ok(iSinc > iPerfil, 'a presença não sincroniza depois de o perfil chegar');
+  assert.ok(iSinc > iPaises, 'a presença sincroniza antes dos países — o subtítulo da lista sairia sem o país');
 });
