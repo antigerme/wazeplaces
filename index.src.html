@@ -1634,6 +1634,20 @@
                     </ol>
                 </div>
 
+                <!-- Logo depois de "Como usar:" porque é recurso de uso: quem abre a
+                     Ajuda pra saber o que é a pílula 👥 acha aqui, e não no fim, depois
+                     das extensões de login, onde a seção nasceu. Ela nasceu também com
+                     a lista em 16px e o título sem dois-pontos, destoando das vizinhas
+                     por um mês; hoje o padrão é cobrado em test/ajuda.test.mjs. -->
+                <div>
+                    <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.presenca.title">Quem está na app:</h4>
+                    <ul class="list-disc list-inside space-y-1.5 text-sm">
+                        <li data-i18n="help.presenca.oQue">A pílula 👥 no topo mostra quantos editores estão usando a app no mesmo país que você, nos últimos 15 minutos. Toque nela pra ver quem é e conversar.</li>
+                        <li data-i18n="help.presenca.conversa">As conversas passam pelo chat do Waze: ficam guardadas lá e também aparecem no chat do WME de vocês dois.</li>
+                        <li data-i18n="help.presenca.privacidade">Enquanto você tria, o WME mostra seu nome e nível no mapa, no lugar do pedido que está na sua tela, até uns 15 minutos depois da última ação. O nosso servidor não guarda nada disso.</li>
+                    </ul>
+                </div>
+
                 <div>
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.important.title">Importante:</h4>
                     <p class="text-sm" data-i18n-html="help.important.body">Esta aplicação <strong>nunca aprova</strong> dados de local — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs dark:bg-cyan-600/20">↗</span> no card. A única exceção é <strong>foto nova</strong>: ampliada, ela pode ser aprovada ou excluída ali mesmo (L6+AM ou staff).</p>
@@ -1671,15 +1685,6 @@
                     <ul class="list-disc list-inside space-y-1 text-sm">
                         <li data-i18n-html="help.extensions.chrome"><strong>Chrome/Edge:</strong> "Get cookies.txt LOCALLY"</li>
                         <li data-i18n-html="help.extensions.firefox"><strong>Firefox:</strong> "cookies.txt"</li>
-                    </ul>
-                </div>
-
-                <div>
-                    <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.presenca.title">Quem está na app</h4>
-                    <ul class="list-disc list-inside space-y-1 text-slate-600 dark:text-slate-300">
-                        <li data-i18n="help.presenca.oQue">A pílula 👥 no topo mostra quantos editores estão usando a app no mesmo país que você, nos últimos 15 minutos. Toque nela pra ver quem é e conversar.</li>
-                        <li data-i18n="help.presenca.conversa">As conversas passam pelo chat do Waze: ficam guardadas lá e também aparecem no chat do WME de vocês dois.</li>
-                        <li data-i18n="help.presenca.privacidade">Enquanto você tria, o WME mostra seu nome e nível no mapa, no lugar do pedido que está na sua tela, até uns 15 minutos depois da última ação. O nosso servidor não guarda nada disso.</li>
                     </ul>
                 </div>
 

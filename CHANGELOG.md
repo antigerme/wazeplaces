@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.24-02
+
+### Corrigido
+- **Ajuda → Quem está na app: com a mesma letra das outras seções.** O texto dela saía maior que o do resto da Ajuda e o título vinha sem os dois-pontos que os outros têm. Agora ela segue o mesmo padrão, nos 4 idiomas.
+
+### Mudado
+- **A seção "Quem está na app" subiu pra logo depois de "Como usar"**. Antes ela era a última da Ajuda, depois das extensões de login, longe de quem procura saber o que é a pílula 👥.
+
 ## v2026.09.24-01
 
 ### Mudado

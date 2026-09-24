@@ -3454,6 +3454,66 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── A Ajuda: toda seção no MESMO molde, medido na TELA ─────────────────────
+// "Quem está na app" nasceu com a lista em 16px (as vizinhas são 14) e o título
+// sem dois-pontos, e ficou assim um mês — quem viu foi o owner, olhando. O
+// test/ajuda.test.mjs cobra as CLASSES; aqui se mede o que a tela DEU (o tamanho
+// computado), nos 4 idiomas, no aparelho do owner e no mais apertado. A
+// contraprova devolve a classe antiga e exige que a medida a enxergue.
+{
+  const medirAjuda = (page) => page.evaluate(() => {
+    const painel = document.querySelector('#helpModal > div');
+    return [...painel.querySelectorAll('h4')].map((h) => {
+      const corpo = h.nextElementSibling;
+      const texto = corpo && /^(UL|OL|P)$/.test(corpo.tagName) ? (corpo.tagName === 'P' ? corpo : corpo.querySelector('li')) : null;
+      return {
+        chave: h.getAttribute('data-i18n'),
+        titulo: h.textContent.trim(),
+        caixa: getComputedStyle(h).textTransform === 'uppercase',
+        fonte: texto ? getComputedStyle(texto).fontSize : null,
+      };
+    });
+  });
+  for (const [ap, viewport] of [['Pixel 7', { width: 412, height: 915 }], ['Galaxy Fold', { width: 280, height: 653 }]]) {
+    for (const lang of LINGUAS) {
+      const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: lang === 'en' ? 'en-US' : lang });
+      const page = await ctx.newPage();
+      await page.addInitScript((l) => {
+        localStorage.setItem('waze_places_lang', l);
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+      }, lang);
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(450);
+      await page.click('#helpBtn');   // o ⓘ existe deslogado: é o caminho de quem ainda nem entrou
+      await assentar(page, 200);
+      const onde = `Ajuda/${ap}/${lang}`;
+      const secoes = await medirAjuda(page);
+      const corpos = secoes.filter((s) => s.fonte);
+      checa(corpos.length >= 7, `${onde}: esperava 7+ seções com lista ou parágrafo`, String(corpos.length));
+      const tamanhos = [...new Set(corpos.map((s) => s.fonte))];
+      checa(tamanhos.length === 1, `${onde}: o texto das seções sai em tamanhos diferentes`,
+        corpos.map((s) => `${s.chave}=${s.fonte}`).join(' '));
+      for (const s of secoes) {
+        if (s.caixa) checa(!/:\s*$/.test(s.titulo), `${onde}: o título de caixa "${s.titulo}" ganhou dois-pontos`);
+        else checa(/:$/.test(s.titulo), `${onde}: o título "${s.titulo}" não termina em dois-pontos, como as vizinhas`);
+      }
+      const chaves = secoes.map((s) => s.chave);
+      checa(chaves.indexOf('help.presenca.title') === chaves.indexOf('help.howToUse.title') + 1,
+        `${onde}: "Quem está na app" não está logo depois de "Como usar"`, chaves.join(' → '));
+      if (ap === 'Pixel 7' && lang === 'pt') {
+        // CONTRAPROVA: a lista com a classe de ANTES tem que aparecer na medida.
+        await page.evaluate(() => {
+          const ul = document.querySelector('[data-i18n="help.presenca.title"]').nextElementSibling;
+          ul.className = 'list-disc list-inside space-y-1 text-slate-600 dark:text-slate-300';
+        });
+        const sab = [...new Set((await medirAjuda(page)).filter((s) => s.fonte).map((s) => s.fonte))];
+        checa(sab.length === 2, `${onde}: a contraprova (a lista de antes, em 16px) não apareceu na medida`, sab.join(' '));
+      }
+      await ctx.close();
+    }
+  }
+}
+
 
 // ── Renomeando: as acoes de foto SOMEM, e as setas sao do CURSOR ───────────
 // DOIS relatos do owner, mesma tela e mesma familia de falha (regra de estado
@@ -5879,6 +5939,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
+  + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está na app" logo depois de "Como usar", com contraprova da lista de antes)`
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`
   + `, + Perto de mim em 2 aparelhos × 2 idiomas (as 3 opções, ordem ponta a ponta, GPS concedido E negado pelo browser, e o perfil sem endereço)`
