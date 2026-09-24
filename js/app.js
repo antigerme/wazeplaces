@@ -4473,7 +4473,11 @@ function ligarFabDev() {
 // 6 (v2026.09.23-03): o resumo ganha `presencaWme` (a presença no mapa do WME,
 // de carona nas ações): ligada, já vista ligada, escritas, falhas e se a marca
 // de quem está na app voltou diferente. Aditivo.
-const DIAG_VERSAO = 6;
+// 7 (v2026.09.24-01): o resumo ganha `presencaApp` (a lista e o chat da app,
+// fase 3: quantos na app, conversas, não lidas, o token e o tempo real — só
+// CONTAGENS), e o `dom` (do relatório e de cada captura) sai SEM a conversa e
+// sem a prévia da lista (`domParaDiagnostico`), com a contagem do que saiu.
+const DIAG_VERSAO = 7;
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
 // (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança

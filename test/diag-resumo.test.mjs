@@ -186,3 +186,23 @@ test('diag-resumo: as ABERTURAS ANTERIORES guardadas aparecem, com diário, capt
 test('diag-resumo: relatório de antes das aberturas guardadas diz que elas não vinham', () => {
   assert.match(rodar(relatorioV4()), /── ABERTURAS ANTERIORES \(guardadas no aparelho\) ─+\n\(ausente nesta versão\)/);
 });
+
+test('diag-resumo: a presença da app (fase 3) sai em CONTAGENS, com os avisos — nunca nome, texto ou token', () => {
+  const d = relatorioV4();
+  d._versaoDoDiag = 7;
+  d.resumo.presencaApp = {
+    ligada: true, online: 2, conversas: 3, naoLidas: 1, atualizadaHaS: 40, conversaAberta: false,
+    token: { valido: false, expiraEmH: -1 },
+    fluxo: { aberto: true, haS: 12, tentativa: 0, aberturas: 4, quadros: 31, mensagens: 2, recibos: 1, ultimoFim: 1, ultimoErro: null },
+    conhecidos: 5, aConfirmar: 95,
+  };
+  const s = rodar(d);
+  assert.match(s, /── PRESENÇA NA APP \(lista e conversa\) ─+\nligada true · na app 2 · conversas 3 · não lidas 1/, 'a seção da presença da app sumiu');
+  assert.match(s, /tempo real aberto true há 12 s · aberturas 4 · quadros 31 · mensagens 2 · recibos 1 · recuo 0/);
+  assert.match(s, /ATENÇÃO: o token do tempo real venceu/, 'o aviso do token vencido não saiu');
+  assert.match(s, /ATENÇÃO: a fila de confirmação está quase no teto/, 'o aviso da confirmação não saiu');
+  assert.ok(!s.includes(TOKEN), 'o token vazou');
+  // Relatório de antes da fase 3: a seção diz que não havia.
+  const antigo = rodar(relatorioV4());
+  assert.match(antigo, /── PRESENÇA NA APP \(lista e conversa\) ─+\n\(ausente nesta versão\)/);
+});
