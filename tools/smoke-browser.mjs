@@ -2604,6 +2604,16 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await ctx.route('https://social-row.waze.com/**', (r) => { pedidos.push('avatar'); return r.fulfill({ body: PX, contentType: 'image/jpeg' }); });
     await ctx.route('https://venue-image.waze.com/**', (r) => { pedidos.push('foto-do-card'); return r.fulfill({ body: PX, contentType: 'image/jpeg' }); });
     await ctx.route('https://www.waze.com/**', (r) => r.fulfill({ body: PX, contentType: 'image/png' }));
+    // A API responde como SESSÃO VIVA (e ninguém mais na app). Sem isto o token
+    // falso leva 401 de VERDADE do servidor: desde a fase 3 a lista da presença
+    // sai no `showMainScreen`, o 401 dela chama o `handleUnauthorized` (certo, é
+    // o que a app faz com toda rota), e a sessão cai 1,2 s depois. MEDIDO: no
+    // WebKit, que não tem `requestIdleCallback`, o avatar sai 800 ms depois da
+    // tela pronta — já deslogado — e o bloco acusava "a foto NUNCA chegou"; no
+    // Chromium ele passava por sorte de tempo (sai em ~30 ms), com a sessão
+    // caindo logo depois. Era a fixture medindo outra coisa (gotcha #62).
+    await ctx.route('**/api/**', (r) => r.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ success: true, online: [], conversas: [] }) }));
     const page = await ctx.newPage();
     const erros = [];
     page.on('pageerror', (e) => erros.push(e.message));
@@ -2639,6 +2649,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // Agora a tela fica pronta. PROVA POSITIVA: o avatar TEM que chegar.
     await page.evaluate((temFila) => { if (temFila) showCurrentPlace(); else showNoPlaces(); }, cenario === 'com fila');
     await page.waitForTimeout(2600);   // idle + o timeout de 2s do requestIdleCallback
+    // PREMISSA antes do veredito: o avatar só sai com a sessão de pé (o
+    // `carregar` confere `authenticated`). Sessão caída no meio faz o "NUNCA
+    // chegou" abaixo acusar o avatar pelo que é defeito da fixture.
+    checa(await page.evaluate(() => AppState.authenticated === true),
+      `${onde}: a sessão caiu no meio do bloco — o que falhou foi a fixture, não o avatar`);
     checa(pedidos.includes('avatar'),
       `${onde}: a foto de perfil NUNCA chegou — o editor fica com o cinza pra sempre`, pedidos.join(' → '));
     if (cenario === 'com fila') {
