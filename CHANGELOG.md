@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.24-03
+
+### Removido
+- **A sala antiga de presença saiu do servidor.** Desde a v2026.09.24-01 a lista de quem está no app e a conversa são as do WME, e as peças antigas ficaram no servidor sem ninguém chamando: a sala por WebSocket, o crachá, o TURN e a rota que os entregava. Agora saíram. **Nada muda pra quem usa o app.**
+
+### Notas
+- Pra quem mantém uma instalação: o deploy apaga o Durable Object da sala sozinho (a migração está no `wrangler.jsonc`). Os Secrets `TURN_KEY_ID` e `TURN_API_TOKEN` e o app TURN do Realtime podem ser apagados; numa VM, também as variáveis `TURN_URLS`/`TURN_SECRET`, o coturn e as linhas de WebSocket do proxy.
+
 ## v2026.09.24-02
 
 ### Corrigido

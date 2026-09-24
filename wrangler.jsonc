@@ -14,18 +14,19 @@
     "directory": ".",
     "binding": "ASSETS"
   },
-  // Presença: um Durable Object por FILA. `new_sqlite_classes` (e não
-  // `new_classes`) porque é o backend SQLite que libera Durable Objects no
-  // plano gratuito — o app roda no free tier, e classe migrada como
-  // `new_classes` é recusada no deploy sem plano pago.
+  // A sala de presença (um Durable Object `SalaDO` por fila) saiu na fase 4:
+  // desde a fase 3 a lista e a conversa são as do WME. O binding foi tirado, e
+  // a migração `v2` APAGA a classe — com o namespace e o que ele guardasse (a
+  // sala não gravava nada: a presença era a conexão aberta).
   //
-  // A sala não GRAVA nada (a presença é a conexão aberta); o backend SQLite
-  // está aqui só como forma de migração aceita no free tier.
-  "durable_objects": {
-    "bindings": [{ "name": "SALA", "class_name": "SalaDO" }]
-  },
+  // As migrações são um HISTÓRICO: a `v1` fica. A Cloudflare aplica só as
+  // tags posteriores à última já aplicada, e tirar a `v1` faria o deploy
+  // procurar uma história que não bate com a do servidor. `exports` (a forma
+  // nova, declarativa) não entra junto: os dois campos são mutuamente
+  // exclusivos, e a configuração com os dois é recusada.
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["SalaDO"] }
+    { "tag": "v1", "new_sqlite_classes": ["SalaDO"] },
+    { "tag": "v2", "deleted_classes": ["SalaDO"] }
   ],
   "kv_namespaces": [
     {

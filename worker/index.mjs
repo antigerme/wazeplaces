@@ -7,17 +7,14 @@
 //   - ASSETS   → assets estáticos (configurado em wrangler.jsonc: assets.binding)
 //   - SESSIONS → namespace KV pras sessões
 //   - ENCRYPTION_KEY → Secret (base64, 32 bytes): openssl rand -base64 32
-//   - SALA     → Durable Object da presença (worker/sala-do.mjs)
-//   - TURN_KEY_ID / TURN_API_TOKEN → opcionais: Cloudflare Realtime TURN
-//   - TURN_URLS / TURN_SECRET      → opcionais: coturn próprio (alternativa)
-//     Sem nenhum dos dois pares, a conversa fica só com STUN
+//
+// A sala de presença (Durable Object `SalaDO`, o WebSocket do `/sala` e o
+// TURN) saiu na fase 4: desde a fase 3 a lista e a conversa são as do WME. A
+// classe é apagada pela migração `v2` do wrangler.jsonc.
 //
 // Toda a lógica vive em server/core.mjs (compartilhada com a VM Node).
 
-import { dispatch, makeSessions, makeCrachas, base64ToBytes, SESSION_TTL } from '../server/core.mjs';
-import { limpar } from '../server/presenca.mjs';
-
-export { SalaDO } from './sala-do.mjs';
+import { dispatch, makeSessions, base64ToBytes, SESSION_TTL } from '../server/core.mjs';
 
 // `no-store` em TODA resposta de /api. Hoje nada é cacheado ali — é POST, e
 // POST não entra em cache por padrão —, mas "por padrão" é a palavra que
@@ -34,16 +31,6 @@ const json = (body, status) =>
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-
-    // Sala de presença: WebSocket direto pro Durable Object daquela FILA. O
-    // nome da sala escolhe o objeto; quem decide se o socket entra é o crachá
-    // assinado, conferido lá dentro.
-    if (url.pathname === '/sala') {
-      if (!env.SALA) return json({ success: false, error: 'Presença não configurada' }, 500);
-      const sala = limpar(url.searchParams.get('s'));
-      if (!sala) return json({ success: false, error: 'Sala ausente' }, 400);
-      return env.SALA.get(env.SALA.idFromName(sala)).fetch(request);
-    }
 
     if (url.pathname.startsWith('/api/')) {
       if (request.method !== 'POST') {
@@ -71,21 +58,12 @@ export default {
           delete: (h) => env.SESSIONS.delete('sess_' + h),
         };
         const sessions = makeSessions({ store, keyBytes });
-        const crachas = makeCrachas({ keyBytes });
-        const turn = {
-          // Cloudflare Realtime TURN (o painel dá os dois valores juntos)
-          keyId: env.TURN_KEY_ID || '',
-          apiToken: env.TURN_API_TOKEN || '',
-          // coturn próprio, caso a instalação prefira
-          urls: env.TURN_URLS || '',
-          segredo: env.TURN_SECRET || '',
-        };
 
         // `aoFundo`: o que o handler deixa correndo DEPOIS da resposta (a escrita
         // da presença de carona que passou do teto de espera). Sem `waitUntil`
         // o runtime da Cloudflare corta a promessa assim que a resposta sai.
         const aoFundo = ctx && typeof ctx.waitUntil === 'function' ? (p) => ctx.waitUntil(p) : undefined;
-        const { status, body } = await dispatch(route, data, { sessions, crachas, turn, aoFundo });
+        const { status, body } = await dispatch(route, data, { sessions, aoFundo });
         return json(body, status);
       } catch (err) {
         console.error('Erro no handler /api:', err);
@@ -93,7 +71,7 @@ export default {
       }
     }
 
-    // Tudo que não é /api/ nem /sala → arquivos estáticos (HTML, css, js…)
+    // Tudo que não é /api/ → arquivos estáticos (HTML, css, js…)
     //
     // SEM remapeamento de raiz, e isso é deliberado: aqui havia um `if` que
     // reescrevia `/` pro `/index.min.html`, e ele NUNCA rodou em produção. Com

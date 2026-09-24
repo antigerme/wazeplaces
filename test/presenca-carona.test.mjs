@@ -371,6 +371,6 @@ test('Worker: a escrita que passa do teto vai pro ctx.waitUntil (senão a Cloudf
 test('Node: o adaptador da VM também entrega o aoFundo ao dispatch', () => {
   const node = readFileSync(new URL('../server/node.mjs', import.meta.url), 'utf8');
   const cod = node.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  assert.match(cod, /dispatch\(route, data, \{ sessions, crachas, turn, aoFundo \}\)/,
+  assert.match(cod, /dispatch\(route, data, \{ sessions, aoFundo \}\)/,
     'a VM chama o dispatch sem o aoFundo: a carona lenta perderia o resultado');
 });

@@ -27,7 +27,7 @@ const CORE = readFileSync(join(ROOT, 'server/core.mjs'), 'utf8');
 
 // Toda rota que ESCREVE (ou desloga) tem que estar na recusa. A lista sai do
 // ROUTES do core, então rota nova aparece aqui em vez de passar despercebida.
-const LEITURA = new Set(['perfil', 'buscar-places', 'lista-paises', 'lista-estados', 'presenca', 'testar-cookies']);
+const LEITURA = new Set(['perfil', 'buscar-places', 'lista-paises', 'lista-estados', 'testar-cookies']);
 
 test('diag-api: TODA rota não-leitura está na lista de recusa', () => {
   const bloco = API.match(/const ESCRITA = new Set\(\[([^\]]+)\]\)/);

@@ -1,6 +1,6 @@
 // wme-grpc.mjs — o fio gRPC-web da presença e do chat do Waze, sem I/O.
 //
-// PURO de propósito, como o `presenca.mjs`: nada de fetch, relógio, cripto ou
+// PURO de propósito, como o `marca-app.mjs`: nada de fetch, relógio, cripto ou
 // plataforma. Monta e lê bytes; quem chama o Waze é o `core.mjs`
 // (`callWazeGrpc`). Roda igual no Worker e no Node, por isso só usa
 // `Uint8Array`, `TextEncoder`/`TextDecoder` e `btoa`/`atob` (nada de Buffer).

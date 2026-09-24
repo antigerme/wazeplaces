@@ -13,8 +13,9 @@
 //
 // O QUE ELE NÃO COMPROU:
 //   · servidor WebSocket. O Node não tem — conferido em `node:http`, `node:net`
-//     e no escopo global. Por isso `server/ws.mjs` continua sendo nosso, e
-//     apagá-lo "porque agora o Node tem WebSocket" quebraria a sala.
+//     e no escopo global. O projeto teve o seu (`server/ws.mjs`) enquanto houve
+//     a sala de presença; os dois saíram juntos na fase 4, quando a lista e a
+//     conversa passaram a ser as do WME.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -65,11 +66,16 @@ test('a documentação promete o mesmo piso', () => {
 test('o piso do Node NÃO vale pro que roda no Cloudflare', () => {
   // ESTA É A INVARIANTE QUE PROTEGE A PRODUÇÃO.
   //
-  // `core.mjs` e `presenca.mjs` são importados pelo `worker/`, que roda no
-  // Workers — não é Node. Subir o piso do Node é exatamente o tipo de mudança
-  // que convida alguém a "modernizar" o core com `node:crypto` ou `Buffer`, e
-  // o estrago não aparece em teste local nenhum: aparece no deploy.
-  for (const arquivo of ['server/core.mjs', 'server/presenca.mjs']) {
+  // O `worker/` importa o `core.mjs`, e o core importa o `wme-grpc.mjs` e o
+  // `marca-app.mjs`: os três rodam no Workers — não é Node. Subir o piso do
+  // Node é exatamente o tipo de mudança que convida alguém a "modernizar" o
+  // core com `node:crypto` ou `Buffer`, e o estrago não aparece em teste local
+  // nenhum: aparece no deploy. A lista sai dos imports do próprio core, pra que
+  // módulo novo que ele passe a importar entre na conferência sozinho.
+  const doCore = [...ler('server/core.mjs').matchAll(/^\s*import\s[^;]*?from\s+'\.\/([^']+)'/gm)].map((m) => 'server/' + m[1]);
+  assert.ok(doCore.includes('server/wme-grpc.mjs') && doCore.includes('server/marca-app.mjs'),
+    `a lista de módulos do core não bate com o esperado (${doCore.join(', ')}) — o recorte dos imports mudou?`);
+  for (const arquivo of ['server/core.mjs', ...doCore]) {
     const s = ler(arquivo);
     const imports = [...s.matchAll(/^\s*import\s[^;]*?from\s+'([^']+)'/gm)].map((x) => x[1]);
     const nodeApi = imports.filter((x) => x.startsWith('node:'));
@@ -82,16 +88,16 @@ test('o piso do Node NÃO vale pro que roda no Cloudflare', () => {
   }
 });
 
-test('o servidor WebSocket continua sendo nosso — o Node não tem um', () => {
-  // Medido: o `WebSocket` global do Node é CLIENTE. Não há servidor em
-  // `node:http`, `node:net` nem no escopo global. Apagar `server/ws.mjs`
-  // "porque agora o Node tem WebSocket" derrubaria a sala inteira na VM.
+test('o WebSocket do Node é CLIENTE — e o projeto não tem mais servidor WebSocket', () => {
+  // Medido: o `WebSocket` global do Node é cliente, e ele é parte do que o piso
+  // 22 comprou. Servidor o Node não tem (`node:http`, `node:net`, escopo
+  // global). O nosso, `server/ws.mjs`, existia só pela sala de presença, e saiu
+  // com ela na fase 4: o `node.mjs` não atende mais `upgrade` nenhum.
   assert.equal(typeof WebSocket, 'function', 'o WebSocket cliente sumiu — o piso 22 não está valendo');
   assert.equal(typeof globalThis.WebSocketServer, 'undefined',
-    'o Node passou a ter servidor WebSocket: revisite server/ws.mjs, que talvez possa ir embora');
-
-  const ws = ler('server/ws.mjs');
-  assert.match(ws, /class|export/, 'server/ws.mjs sumiu — a sala não sobe na VM sem ele');
+    'o Node passou a ter servidor WebSocket — anote no cabeçalho deste arquivo o que o piso passou a comprar');
+  const node = ler('server/node.mjs').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.doesNotMatch(node, /\.on\('upgrade'/, 'o node.mjs voltou a atender upgrade de WebSocket — a sala voltou?');
 });
 
 test('cada lado usa a forma de dormir do SEU lado', () => {
