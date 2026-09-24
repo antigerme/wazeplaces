@@ -2875,6 +2875,13 @@ async function loadProfileAndAuxData() {
     if (countriesRes.success) {
         AppState.countries = countriesRes.countries;
     }
+    // A presença (fase 3) precisa do id do PERFIL — a lista exclui a própria
+    // pessoa e o chat é dela. O `showMainScreen` chama a presença antes de o
+    // perfil chegar, e ela desiste calada; sem esta linha, quem abria a app com
+    // a sessão salva ficava sem lista e sem conversa até mexer nos filtros.
+    // Depois dos países, porque o subtítulo da lista usa o nome do país.
+    // (Achado na validação ao vivo: o smoke injetava o perfil ANTES e não via.)
+    if (profileRes.success) window.Presenca?.sincronizar?.();
 }
 
 // UM 401 não é prova de que a sessão morreu — e tratar como se fosse era o

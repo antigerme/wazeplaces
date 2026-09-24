@@ -321,3 +321,17 @@ test('api.js: a presença vai no corpo SÓ quando existe — sem ela o corpo é 
   const pw = API_JS.slice(API_JS.indexOf('async presencaWaze('), API_JS.indexOf('async presenca(peer'));
   assert.match(pw, /this\._post\('presenca-waze'/);
 });
+
+test('a presença sincroniza quando o PERFIL chega — o `showMainScreen` chama cedo demais', () => {
+  // Achado na validação ao vivo: com a sessão salva, o `showMainScreen` chama a
+  // presença antes de o perfil existir, ela desiste calada (sem o id não há
+  // lista nem chat), e ninguém chamava de novo. O smoke injetava o perfil antes
+  // e não via (gotcha #52); hoje ele abre pelo `initApp` de verdade.
+  const corpo = semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData'));
+  const iPerfil = corpo.indexOf('AppState.profile = profileRes.profile;');
+  const iPaises = corpo.indexOf('AppState.countries = countriesRes.countries;');
+  const iSinc = corpo.indexOf('window.Presenca?.sincronizar?.()');
+  assert.ok(iPerfil > 0, 'o perfil deixou de ser guardado aqui — o guard ficaria cego');
+  assert.ok(iSinc > iPerfil, 'a presença não sincroniza depois de o perfil chegar');
+  assert.ok(iSinc > iPaises, 'a presença sincroniza antes dos países — o subtítulo da lista sairia sem o país');
+});

@@ -25,6 +25,7 @@
 //   npm run test:presenca
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -144,6 +145,19 @@ function responderApi(eu, rota, c) {
       return { success: true, id: m.id, ts: m.ts, ...confirmados };
     }
   }
+  // A abertura de VERDADE (o `initApp` com a sessão salva): perfil, países e a
+  // fila. Injetar isso tudo por fora escondeu um defeito: a presença pedia a
+  // lista ANTES de o perfil chegar e desistia calada (gotcha #52 — o helper
+  // que arruma a tela faz o que a app esquece).
+  if (rota === 'perfil') {
+    const p = PESSOAS[eu];
+    return { success: true, visivelNoWme: true, referencias: { casa: null, trabalho: null },
+      profile: { id: Number(eu), userName: p.nome, rank: p.rank, isStaff: false, isAreaManager: true, isEditor: true,
+        editableCountryIDs: [BRASIL], areas: [], managedAreas: [] } };
+  }
+  if (rota === 'lista-paises') return { success: true, countries: [{ id: BRASIL, name: 'Brazil', abbr: 'BR' }] };
+  if (rota === 'lista-estados') return { success: true, states: [] };
+  if (rota === 'buscar-places') return { success: true, places: [pedido(PESSOAS[eu].pos.lat, PESSOAS[eu].pos.lon)], hasMore: false, page: 1, total: 1 };
   if (rota === 'validar-place' || rota === 'marcar-lido') {
     return { success: true, presenca: { ok: true, marca: true }, presencaApp: { online: listaPara(eu), conversas: conversasPara(eu, (c.presenca && c.presenca.conhecidos) || []) } };
   }
@@ -164,18 +178,22 @@ const pw = await carregarPlaywright();
 const MOTOR = motorPedido();
 const browser = await abrirNavegador(pw);
 
-// O pedido aberto de cada um: dado nosso, não do Waze. DUAS fotos, e a do
+// O pedido aberto de cada um: um pedido REAL da fixture do Brasil (todos os
+// campos que o servidor manda), com o que importa trocado. DUAS fotos, e a do
 // pedido é a SEGUNDA — a que o card mostra, casada pelo `updateRequestID` na
 // URL, como no Waze. O `imageUrl` traz a PRIMEIRA (o servidor preenche assim),
 // e é o que a conversa mandava antes do conserto.
+const REAL = JSON.parse(readFileSync(join(ROOT, 'tools', 'fixtures-paises.json'), 'utf8'))
+  .find((p) => p.mapa && p.mapa.centro && p.mapa.centro[1] < -40 && p.mapa.centro[0] < 0);
 const pedido = (lat, lon) => ({
+  ...REAL,
   venueID: '205522459.2055159053.3242788', updateRequestID: 'ur-smoke',
   name: 'Padaria Estrela do Norte', address: 'R. Aurora, 412 — São Paulo',
-  categories: ['BAKERY'], updateTypeKey: 'IMAGE',
+  categories: ['BAKERY'], updateTypeKey: 'IMAGE', purType: 'NEW_PHOTO', reqType: 'IMAGE',
   imageUrls: ['https://venue-image.waze.com/thumbs/thumb700_ja-no-local',
               'https://venue-image.waze.com/thumbs/thumb700_ur-smoke'],
   imageUrl: 'https://venue-image.waze.com/thumbs/thumb700_ja-no-local',
-  lat, lon, mapa: { centro: [lat, lon] }, changes: [],
+  lat, lon, mapa: { ...REAL.mapa, centro: [lat, lon], entradas: [] }, changes: [], flagComment: null,
 });
 
 async function editor(id, { lang = 'pt' } = {}) {
@@ -228,38 +246,23 @@ async function editor(id, { lang = 'pt' } = {}) {
     // A CSP barrando o tempo real é EXATAMENTE o defeito que este smoke vigia.
     if (/Content Security Policy|Refused to connect/i.test(m.text())) anota(`[${p.nome}] a CSP barrou: ${m.text().slice(0, 200)}`);
   });
-  await page.addInitScript((l) => {
+  // A sessão SALVA, como quem já tinha entrado: o `initApp` de verdade faz o
+  // resto (perfil, países, fila e presença), pela API de mentira acima.
+  await page.addInitScript(({ l, tk }) => {
     try {
       localStorage.setItem('waze_places_lang', l);
+      localStorage.setItem('waze_session_token', tk);
       localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
     } catch (e) {}
-  }, lang);
+  }, { l: lang, tk: 'token-da-sessao-' + p.nome });
+  naApp.add(id);
   await page.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'domcontentloaded' });
-  // Espera o `initApp` DECIDIR — sem sessão, ele mostra a tela de entrada e
-  // desliga a presença. Injetar antes disso é correr com ele: a primeira versão
-  // deste smoke injetava assim que os globais existiam, e o `initApp` desligava
-  // a presença por cima, com a lista já na tela (MEDIDO: `online` voltava a 0).
-  // O sinal é POSITIVO (a tela de entrada visível), não um prazo.
+  // Espera o card de verdade na tela: sinal POSITIVO de que a abertura andou.
   // Mesmo motivo do `esperar` abaixo: nada de `waitForFunction` neste arquivo.
   for (let i = 0; i < 150; i++) {
-    if (await page.evaluate(() => !!(window.Presenca && window.AppState && window.showMainScreen)
-      && !document.getElementById('authScreen').classList.contains('hidden')).catch(() => false)) break;
+    if (await page.evaluate(() => !!(window.AppState && AppState.profile && AppState.currentPlace && document.querySelector('#cardStack .place-card'))).catch(() => false)) break;
     await dormir(100);
   }
-  naApp.add(id);
-  await page.evaluate(({ id, nome, rank, card }) => {
-    API.setSession('token-da-sessao-' + nome);
-    AppState.authenticated = true;
-    AppState.profile = { id: Number(id), userName: nome, rank, isAreaManager: true, isStaff: false };
-    AppState.countries = [{ id: 30, name: 'Brazil' }];
-    AppState.queue = [card];
-    AppState.currentPlace = card;
-    AppState.serverTotal = 1;
-    AppState.hasMore = false;
-    showMainScreen(); renderProfileHeader(); updateStats(); showLoading(false);
-    document.getElementById('noMoreCards').classList.add('hidden');
-    showCurrentPlace();
-  }, { id, nome: p.nome, rank: p.rank, card: pedido(p.pos.lat, p.pos.lon) });
   return { id, nome: p.nome, page, ctx, pedidos };
 }
 
