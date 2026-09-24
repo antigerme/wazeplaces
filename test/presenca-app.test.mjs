@@ -366,3 +366,97 @@ test('chat abrir: o "lida" que falha não derruba o histórico; o histórico que
   assert.equal(semCom.resultado.status, 400);
   assert.equal(semCom.pedidos.length, 0);
 });
+
+// ── a confirmação do fluxo, de carona ────────────────────────────────────────
+//
+// O fluxo em tempo real reentrega, a cada reconexão (~6 min), tudo o que a
+// instalação recebeu e não confirmou. Confirmar custaria um pedido por mensagem;
+// de carona, zero. As regras que estes testes travam: vai com a instalação do
+// APARELHO, nunca derruba o pedido principal, e pedido recusado não confirma.
+
+const INST = '0f2a8c1e-5b3d-11f1-9c4e-7d1a2b3c4d5e';
+const IDS = ['e656f4a0-b76e-11f1-b21f-03d86fcc0bb7', 'a6bfe37d-a3ef-42ca-a8d0-97912b1c4d94'];
+const idsDoAck = (p) => g.lerCampos(p.corpo).filter((c) => c.n === 2).map((c) => new TextDecoder().decode(c.v));
+const instDoAck = (p) => new TextDecoder().decode(um(g.lerCampos(um(g.lerCampos(p.corpo), 1)), 4));
+
+test('confirmação: vai JUNTO do presenca-app, com a instalação do aparelho, e volta contada', async () => {
+  const { resultado, pedidos } = await comWaze({
+    listOnlineEditors: () => respostaGrpc({}),
+    ListConversations: () => respostaGrpc({}),
+    GetMessagingProvider: () => respostaGrpc({}),
+    AckMessages: () => respostaGrpc({}),
+  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, confirmar: [...IDS, 'nao-e-uuid', 42] }, {}));
+  assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
+  const ack = pedidos.find((p) => p.metodo === 'AckMessages');
+  assert.ok(ack, 'a confirmação não saiu');
+  assert.deepEqual(idsDoAck(ack), IDS, 'lixo na lista virou id, ou id bom ficou de fora');
+  assert.equal(instDoAck(ack), INST, 'confirmou na fila de OUTRA instalação — a do aparelho segue cheia');
+  assert.equal(resultado.body.confirmados, 2);
+});
+
+test('confirmação: sem instalação, ou só com lixo, nada sai — e o pedido principal segue', async () => {
+  for (const extra of [{ confirmar: IDS }, { instalacao: INST, confirmar: ['x', null] }, { instalacao: INST, confirmar: [] }, { instalacao: INST, confirmar: 'e656f4a0' }]) {
+    const { resultado, pedidos } = await comWaze({
+      listOnlineEditors: () => respostaGrpc({}),
+      ListConversations: () => respostaGrpc({}),
+      GetMessagingProvider: () => respostaGrpc({}),
+    }, () => dispatch('presenca-app', { ...BASE, ...extra }, {}));
+    assert.equal(resultado.status, 200, JSON.stringify(extra));
+    assert.ok(!pedidos.some((p) => p.metodo === 'AckMessages'), JSON.stringify(extra));
+    assert.ok(!('confirmados' in resultado.body), JSON.stringify(extra));
+  }
+});
+
+test('confirmação: a que falha não derruba o pedido e não é contada; o teto é 100', async () => {
+  const falha = await comWaze({
+    listOnlineEditors: () => respostaGrpc({}),
+    ListConversations: () => respostaGrpc({}),
+    GetMessagingProvider: () => respostaGrpc({}),
+    AckMessages: () => respostaGrpc({ status: 14, mensagem: 'unavailable' }),
+  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, confirmar: IDS }, {}));
+  assert.equal(falha.resultado.status, 200);
+  assert.ok(!('confirmados' in falha.resultado.body), 'confirmação que falhou foi contada: o cliente soltaria ids que seguem na fila');
+
+  const muitos = Array.from({ length: 130 }, (_, i) => `00000000-0000-1000-8000-${String(i).padStart(12, '0')}`);
+  const teto = await comWaze({
+    listOnlineEditors: () => respostaGrpc({}),
+    ListConversations: () => respostaGrpc({}),
+    GetMessagingProvider: () => respostaGrpc({}),
+    AckMessages: () => respostaGrpc({}),
+  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, confirmar: muitos }, {}));
+  assert.equal(idsDoAck(teto.pedidos.find((p) => p.metodo === 'AckMessages')).length, 100);
+  assert.equal(teto.resultado.body.confirmados, 100);
+});
+
+test('confirmação: vai junto de QUALQUER ação do chat — e pedido recusado não confirma nada', async () => {
+  const envio = await comWaze({
+    SendMessage: () => respostaGrpc({ dados: deB64(F.enviarTexto.res) }),
+    AckMessages: () => respostaGrpc({}),
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'enviar', para: '183164343', texto: 'oi', instalacao: INST, confirmar: IDS }, {}));
+  assert.equal(envio.resultado.status, 200);
+  assert.equal(envio.resultado.body.confirmados, 2);
+
+  const abrir = await comWaze({
+    ListMessages: () => respostaGrpc({}),
+    MarkConversationRead: () => respostaGrpc({}),
+    AckMessages: () => respostaGrpc({}),
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343', instalacao: INST, confirmar: IDS }, {}));
+  assert.equal(abrir.resultado.status, 200);
+  assert.equal(abrir.resultado.body.confirmados, 2);
+
+  for (const ruim of [
+    { acao: 'enviar', para: '183164343', texto: '' },
+    { acao: 'abrir', com: 'fulano' },
+    { acao: 'lida', com: 'fulano' },
+  ]) {
+    const r = await comWaze({}, () => dispatch('chat', { cookies: COOKIES, instalacao: INST, confirmar: IDS, ...ruim }, {}));
+    assert.equal(r.resultado.status, 400, JSON.stringify(ruim));
+    assert.equal(r.pedidos.length, 0, `pedido recusado confirmou: ${JSON.stringify(ruim)}`);
+  }
+
+  // A ação `confirmar` já É a confirmação: não sai uma segunda de carona.
+  const explicita = await comWaze({ AckMessages: () => respostaGrpc({}) },
+    () => dispatch('chat', { cookies: COOKIES, acao: 'confirmar', ids: IDS, instalacao: INST, confirmar: IDS }, {}));
+  assert.equal(explicita.resultado.status, 200);
+  assert.equal(explicita.pedidos.length, 1);
+});

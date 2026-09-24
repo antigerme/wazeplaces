@@ -3001,6 +3001,35 @@ function tokenDoProvedor(d) {
   return { token: p.token, base: p.base, chave: p.chave, expiraEm: p.expiraEmMs == null ? null : Date.now() + p.expiraEmMs };
 }
 
+// A CONFIRMAÇÃO do que chegou pelo fluxo em tempo real, de carona.
+//
+// O fluxo REENTREGA ao reconectar tudo o que a MESMA instalação recebeu e não
+// confirmou (MEDIDO na fase 3: mensagens que chegaram com o fluxo fechado, o
+// eco das próprias e os recibos) — e ele cai sozinho a cada ~6 min. Sem
+// confirmar, cada reconexão baixa de novo a fila inteira do aparelho, que só
+// cresce. Um pedido à nossa API por mensagem recebida seria o free tier pagando
+// o que o WME resolve de graça; então os ids vão JUNTO de um pedido que a app
+// já faz (`presenca-app` e `chat`), e o Waze confirma em paralelo.
+//
+// É ACESSÓRIA por construção: entrada ruim é ignorada (nunca vira 400 no
+// pedido principal), falha vira `false`, e o cliente guarda os ids pra próxima
+// carona. A instalação é a do aparelho — a fila é dela, e confirmar com outra
+// não tiraria nada de lá.
+const CONFIRMAR_MAX = 100;
+function confirmarDeCarona(data, cookieHeader, region) {
+  if (!Array.isArray(data.confirmar) || !data.confirmar.length) return null;
+  const instalacao = String(data.instalacao ?? '');
+  if (!UUID.test(instalacao)) return null;
+  const ids = data.confirmar.slice(0, CONFIRMAR_MAX).map((x) => String(x ?? '')).filter((x) => UUID.test(x)).map((x) => x.toLowerCase());
+  if (!ids.length) return null;
+  const wmp = WAZE_WMP[region] || WAZE_WMP.row;
+  const cabecalho = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: instalacao.toLowerCase() });
+  return Promise.resolve()
+    .then(() => callWazeGrpc(wmp + SERVICO_MENSAGENS + '/AckMessages', cookieHeader, corpoConfirmar({ cabecalho, ids }), region, null, { chat: true }))
+    .then((r) => (categorizeGrpcError(r) ? 0 : ids.length))
+    .catch(() => 0);
+}
+
 // Ao abrir a app e ao abrir a lista: quem usa a app no país, as conversas da
 // app e, com a `instalacao` do aparelho, o token do tempo real — UMA ida.
 async function handlePresencaApp(data, { sessions }) {
@@ -3012,12 +3041,13 @@ async function handlePresencaApp(data, { sessions }) {
   const instalacao = data.instalacao === undefined || data.instalacao === null ? null : uuid(data.instalacao);
   const { cookieHeader } = prepareAuth(cookies);
   const wmp = WAZE_WMP[region] || WAZE_WMP.row;
-  const [app, prov] = await Promise.all([
+  const [app, prov, confirmados] = await Promise.all([
     listaDaApp(cookieHeader, region, { pais: data.pais, eu, conhecidos }, { data, sessions, cookies }),
     instalacao
       ? callWazeGrpc(wmp + SERVICO_MENSAGENS + '/GetMessagingProvider', cookieHeader,
         corpoSoCabecalho(cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao })), region, null, { chat: true })
       : null,
+    confirmarDeCarona(data, cookieHeader, region),
   ]);
   if (app.erro) return respostaDeErroGrpc(app.erro, app.r);
   let chat = null;
@@ -3026,7 +3056,14 @@ async function handlePresencaApp(data, { sessions }) {
     if (cat && cat.category === 'unauthorized') return respostaDeErroGrpc(cat, prov);
     if (!cat) { try { chat = tokenDoProvedor(prov.dados); } catch { chat = null; } }
   }
-  return { status: 200, body: { success: true, online: app.online, conversas: app.conversas, ...(instalacao ? { chat } : {}) } };
+  return {
+    status: 200,
+    body: {
+      success: true, online: app.online, conversas: app.conversas,
+      ...(instalacao ? { chat } : {}),
+      ...(confirmados ? { confirmados } : {}),
+    },
+  };
 }
 
 // Presença: mover a pessoa (posição e/ou visibilidade) e ver quem está online
@@ -3112,7 +3149,13 @@ async function handleChat(data, { sessions }) {
   if (acao === 'token' && !instalacao) incompleto();
   const cabecalho = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: instalacao || crypto.randomUUID() });
   const de = data.de == null ? null : idWaze(data.de);
-  if (acao === 'abrir') return abrirConversa(data, { sessions, cookies, region, cabecalho, instalacao });
+  if (acao === 'abrir') {
+    // Valida ANTES de confirmar: um pedido recusado não confirma nada.
+    idWaze(data.com);
+    instante(data.antesDe);
+    const confirmacao = confirmarDeCarona(data, prepareAuth(cookies).cookieHeader, region);
+    return comConfirmados(await abrirConversa(data, { sessions, cookies, region, cabecalho, instalacao }), confirmacao);
+  }
 
   let metodo, corpo, ler;
   switch (acao) {
@@ -3185,22 +3228,34 @@ async function handleChat(data, { sessions }) {
 
   const { cookieHeader } = prepareAuth(cookies);
   const base = WAZE_WMP[region] || WAZE_WMP.row;
+  // A confirmação de carona sai JUNTO (em paralelo), e só depois de o pedido
+  // principal ter passado na validação: um pedido recusado não confirma nada.
+  const confirmacao = acao === 'confirmar' ? null : confirmarDeCarona(data, cookieHeader, region);
   const r = await callWazeGrpc(base + metodo, cookieHeader, corpo, region, { data, sessions, cookies }, { chat: true });
   // Marcar como lida uma conversa que nunca existiu não é erro: não havia o que
   // marcar. MEDIDO: status 7 com a mensagem exata "NO_EXISTING_CONVERSATION" —
   // o mesmo 7 da sessão morta, por isso a exceção é pela mensagem e só aqui.
   if (acao === 'lida' && r.grpcStatus === 7 && r.grpcMessage === 'NO_EXISTING_CONVERSATION') {
-    return { status: 200, body: { success: true, recibos: [] } };
+    return comConfirmados({ status: 200, body: { success: true, recibos: [] } }, confirmacao);
   }
   const cat = categorizeGrpcError(r);
-  if (cat) return respostaDeErroGrpc(cat, r);
+  if (cat) return comConfirmados(respostaDeErroGrpc(cat, r), confirmacao);
   let resultado;
   try {
     resultado = ler(r.dados);
   } catch {
     apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
   }
-  return { status: 200, body: { success: true, ...resultado } };
+  return comConfirmados({ status: 200, body: { success: true, ...resultado } }, confirmacao);
+}
+
+// Põe `confirmados` na resposta quando a confirmação de carona deu certo. O
+// cliente só solta os ids que o Waze confirmou; o resto vai na próxima carona.
+async function comConfirmados(resposta, confirmacao) {
+  if (!confirmacao) return resposta;
+  const n = await confirmacao;
+  if (n && resposta && resposta.body) resposta.body.confirmados = n;
+  return resposta;
 }
 
 // Abrir uma conversa na app: o histórico e o "lida" numa ida só (fase 3). O
