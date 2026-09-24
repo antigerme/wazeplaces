@@ -11462,10 +11462,15 @@ window.Treino = Treino;
 //     gesto): é onde a pessoa está olhando. Sem card na tela, a do pedido;
 //   · a VISIBILIDADE liga sozinha e em silêncio (decisão do owner). O perfil diz
 //     como ela está (`visivelNoWme`, de graça no `/Session`) e, se estiver
-//     desligada, a próxima ação a liga de carona. Se ela aparece desligada
-//     DEPOIS de a app já a ter visto ligada, foi a pessoa, fora da app (no WME
-//     ou noutro aparelho): conta como desligar, a mesma regra do "Ver quem está
-//     na fila" — só volta sozinha depois de 9 dias, em silêncio;
+//     desligada, a próxima ação a liga de carona. Quem decide é SÓ o "Ver quem
+//     está na app" (decisão do owner, 2026-09-24: por padrão a pessoa aparece,
+//     como a comunidade decidiu). Até ali, invisível no WME DEPOIS de a app já
+//     a ter visto ligada desligava o interruptor por 9 dias; saiu. Consequência
+//     assumida: é a mesma chave nos dois lugares, então quem se esconde pelo WME
+//     e segue triando com o interruptor ligado volta a aparecer na ação
+//     seguinte — pra ficar invisível usando a app, o caminho é o interruptor.
+//     E abrir o WME NÃO desliga ninguém (MEDIDO: ele só escreve no `moveend`,
+//     com a máscara só em `location`);
 //   · nada disso pode derrubar a ação: qualquer erro aqui vira "sem posição".
 const PRESENCA_WME_FREIO_MS = 30000;
 const presencaWme = {
@@ -11517,13 +11522,7 @@ function presencaWmeAoResponder(presenca, result) {
         if (!r) return;
         if (r.ok) {
             presencaWme.enviadas++;
-            if (presenca.visivel === true) {
-                presencaWme.ligarNaProxima = false;
-                if (AppState.preferences.presencaWmeVisto !== true) {
-                    AppState.preferences.presencaWmeVisto = true;
-                    savePreferences();
-                }
-            }
+            if (presenca.visivel === true) presencaWme.ligarNaProxima = false;
             // O Waze devolve a posição gravada: se os dígitos voltarem diferentes,
             // a marca de quem está na app se perdeu (o dia em que ele arredondar).
             if (r.marca === false && !presencaWme.marcaPerdida) {
@@ -11537,38 +11536,19 @@ function presencaWmeAoResponder(presenca, result) {
     } catch (e) { /* diagnóstico nunca derruba a ação */ }
 }
 
+// O WME só INFORMA: invisível lá, com o interruptor da app ligado, vira "ligar
+// na próxima ação". Nunca desliga o interruptor nem grava preferência — quem
+// decide é a pessoa, na app (ver o cabeçalho desta seção).
 function presencaWmeAoCarregarPerfil(visivel) {
     if (typeof visivel !== 'boolean') return;   // servidor antigo: não decide nada
-    const p = AppState.preferences;
-    if (p.presenca === false) return;           // desligado: a app não mexe no WME
-    if (visivel) {
-        presencaWme.ligarNaProxima = false;
-        if (p.presencaWmeVisto !== true) {
-            p.presencaWmeVisto = true;
-            savePreferences();
-        }
-        return;
-    }
-    if (p.presencaWmeVisto === true) {
-        p.presenca = false;
-        p.presencaOffEm = Date.now();
-        delete p.presencaWmeVisto;
-        savePreferences();
-        presencaWme.ligarNaProxima = false;
-        dfato('presencaWme.desligadaFora', {});
-        const chk = document.getElementById('prefPresenca');
-        if (chk) chk.checked = false;
-        window.Presenca?.sincronizar?.();
-        return;
-    }
-    presencaWme.ligarNaProxima = true;
+    if (AppState.preferences.presenca === false) return;   // desligado: a app não mexe no WME
+    presencaWme.ligarNaProxima = !visivel;
 }
 
 // A pessoa desligou o "Ver quem está na fila": some do WME na hora. É a única
 // requisição própria da fase 2, e só acontece no GESTO.
 function presencaWmeDesligar() {
     presencaWme.ligarNaProxima = false;
-    delete AppState.preferences.presencaWmeVisto;
     const id = AppState.profile && AppState.profile.id;
     if (id === null || id === undefined || !API.getSession()) return;
     API.presencaWaze({ userId: String(id), visivel: false }).catch(() => {});
@@ -11594,7 +11574,6 @@ function presencaWmeDiag() {
     const ligada = typeof presencaLigada === 'function' ? presencaLigada() : AppState.preferences.presenca !== false;
     return {
         ligada,
-        visto: AppState.preferences.presencaWmeVisto === true,
         ligarNaProxima: presencaWme.ligarNaProxima,
         enviadas: presencaWme.enviadas,
         falhas: presencaWme.falhas,
@@ -12366,10 +12345,8 @@ function loadPreferences() {
             if (Number.isFinite(parsed.presencaOffEm) && parsed.presencaOffEm > 0) {
                 AppState.preferences.presencaOffEm = parsed.presencaOffEm;
             }
-            // A app já viu a visibilidade do WME LIGADA (fase 2). É o que separa
-            // "nunca esteve ligada" (a app liga) de "a pessoa desligou fora da
-            // app" (conta como desligar). Estrito: só `true` conta.
-            if (parsed.presencaWmeVisto === true) AppState.preferences.presencaWmeVisto = true;
+            // O `presencaWmeVisto` da fase 2 não é mais lido: sem carregar, o
+            // próximo `savePreferences` já grava sem ele.
         }
     } catch (e) {}
     preferenciasCarregadas = true;

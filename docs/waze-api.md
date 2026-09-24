@@ -230,6 +230,7 @@ em `/<região>-Descartes/grpc/`:
 |---|---|
 | Registro `OnlineEditor` | `1 user_id · 2 location{101 lon×1e6, 102 lat×1e6} · 3 visible · 4 user_name · 5 rank` (só esses 5, `[bundle]`) |
 | Visibilidade | chave do PERFIL (`/Session` → `onlineEditorDetails.visible`), persiste entre sessões e vale no WME também |
+| O WME e a visibilidade | abrir o WME e arrastar o mapa NÃO mexem nela: carregar não escreve nada, e a escrita do `moveend` leva a máscara só em `location` (a conta estava visível e seguiu visível) `[vivo, 2026-09-24]` |
 | Expira | **~15 min depois da última atualização de qualquer tipo** (posição ou só visibilidade): presente aos 14,75 → fora aos 15,0; e presente a 14,0 → fora a 15,5 depois de um `visible=true` sozinho. A visibilidade continua ligada — só sai da lista |
 | WME aberto e parado | **some igual**: 14,5 min presente → 16,6 min fora. O WME só escreve a posição no `moveend` do mapa; não há pulso (código + 14 min de HAR + o inventário completo do WME parado) |
 | Separada por servidor | um WME no servidor NA não vê ninguém do ROW. WME recém-instalado cai no NA até alguém trocar (`localStorage.editorLocation`) |

@@ -157,7 +157,7 @@ test('ação: fila de saída, lote e lote de lidos NUNCA levam posição', () =>
     /presenca/, 'o lote de lidos passou a levar presença');
 });
 
-test('resposta: ligou de carona → "já vista ligada" gravada; marca perdida → UM aviso no diário', () => {
+test('resposta: ligou de carona → para de pedir pra ligar, sem gravar preferência; marca perdida → UM aviso no diário', () => {
   const salvos = [];
   const fatos = [];
   const presencaWme = { ligarNaProxima: true, ultimaEm: 1, enviadas: 0, falhas: 0, ultimaFalha: null, marcaPerdida: false };
@@ -168,9 +168,11 @@ test('resposta: ligou de carona → "já vista ligada" gravada; marca perdida �
   f({}, { presenca: { ok: true, marca: null } });
   assert.equal(fatos.length, 0, '"não sei" (eco sem posição) virou "perdeu a marca"');
   f({ visivel: true }, { success: true, presenca: { ok: true, marca: true } });
-  assert.equal(escopo.AppState.preferences.presencaWmeVisto, true);
   assert.equal(presencaWme.ligarNaProxima, false);
-  assert.equal(salvos.length, 1);
+  // Até v2026.09.24-01 isto gravava o "já vista ligada", que era o que deixava o
+  // WME desligar a presença da app depois. A regra saiu (decisão do owner).
+  assert.equal(salvos.length, 0, 'a resposta da carona voltou a gravar preferência');
+  assert.deepEqual(escopo.AppState.preferences, {}, 'a resposta da carona mexeu nas preferências');
   f({}, { presenca: { ok: true, marca: false } });
   f({}, { presenca: { ok: true, marca: false } });
   assert.deepEqual(fatos, ['presencaWme.marcaPerdida'], 'o aviso da marca perdida repetiu (ou não saiu)');
@@ -230,29 +232,34 @@ function rodarPerfil(visivel, preferences) {
   return { preferences, presencaWme, salvos, fatos, sincronizou, chk };
 }
 
-test('perfil: visível no WME → a app anota que JÁ VIU ligada, e não pede pra ligar', () => {
+test('perfil: visível no WME → não pede pra ligar, e não grava nada', () => {
   const r = rodarPerfil(true, { presenca: true });
-  assert.equal(r.preferences.presencaWmeVisto, true);
   assert.equal(r.presencaWme.ligarNaProxima, false);
-  assert.equal(r.salvos.length, 1);
+  assert.equal(r.salvos.length, 0);
+  assert.deepEqual(r.preferences, { presenca: true });
 });
 
-test('perfil: desligada e NUNCA vista ligada → liga sozinha, de carona na próxima ação, sem aviso', () => {
+test('perfil: invisível no WME → liga sozinha, de carona na próxima ação, sem aviso', () => {
   const r = rodarPerfil(false, { presenca: true });
   assert.equal(r.presencaWme.ligarNaProxima, true);
   assert.equal(r.preferences.presenca, true, 'desligou o toggle de quem nunca desligou nada');
   assert.equal(r.fatos.length, 0);
 });
 
-test('perfil: desligada DEPOIS de vista ligada → foi a pessoa, fora da app: conta como desligar (9 dias)', () => {
+// Decisão do owner (2026-09-24): quem decide a presença na app é SÓ o "Ver quem
+// está na app", e por padrão a pessoa aparece (a comunidade decidiu assim). Até
+// v2026.09.24-01, invisível no WME DEPOIS de a app já a ter visto ligada
+// desligava o interruptor por 9 dias. O marcador daquela regra (`presencaWmeVisto`)
+// ainda pode estar gravado num aparelho, e é com ele que o caso se prova.
+test('perfil: invisível no WME DEPOIS de a app já tê-la ligado → o WME não desliga a app; a próxima ação religa', () => {
   const r = rodarPerfil(false, { presenca: true, presencaWmeVisto: true });
-  assert.equal(r.preferences.presenca, false, 'religou quem se escondeu pelo WME');
-  assert.equal(r.preferences.presencaOffEm, 1_700_000_000_000, 'sem o carimbo, a anistia de 9 dias nunca conta');
-  assert.ok(!('presencaWmeVisto' in r.preferences));
-  assert.equal(r.presencaWme.ligarNaProxima, false);
-  assert.equal(r.chk.checked, false, 'o interruptor da tela ficou mentindo "ligado"');
-  assert.equal(r.sincronizou.length, 1, 'a sala da app não soube que a pessoa desligou');
-  assert.deepEqual(r.fatos, ['presencaWme.desligadaFora']);
+  assert.equal(r.preferences.presenca, true, 'o WME desligou o "Ver quem está na app"');
+  assert.ok(!('presencaOffEm' in r.preferences), 'o WME carimbou um desligar que a pessoa não fez');
+  assert.equal(r.presencaWme.ligarNaProxima, true, 'a próxima ação não vai religar a visibilidade');
+  assert.equal(r.chk.checked, true, 'o interruptor da tela foi desligado');
+  assert.equal(r.sincronizou.length, 0);
+  assert.deepEqual(r.fatos, []);
+  assert.equal(r.salvos.length, 0, 'o perfil gravou preferência');
 });
 
 test('perfil: com a presença DESLIGADA na app, nada muda; e sem o campo (servidor antigo), nada se decide', () => {
@@ -269,17 +276,16 @@ test('perfil: com a presença DESLIGADA na app, nada muda; e sem o campo (servid
   }
 });
 
-test('toggle: desligar some do WME NA HORA (visivel:false) e esquece o "já vista"; religar pede ligar sem freio', async () => {
+test('toggle: desligar some do WME NA HORA (visivel:false); religar pede ligar sem freio', async () => {
   const pedidos = [];
   const presencaWme = { ligarNaProxima: true, ultimaEm: 99 };
-  const prefs = { presencaWmeVisto: true };
+  const prefs = {};
   const escopo = {
     presencaWme, AppState: { preferences: prefs, profile: { id: 12444348 } },
     API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return { success: true }; } },
   };
   montar('presencaWmeDesligar', escopo)();
   assert.deepEqual(pedidos, [{ userId: '12444348', visivel: false }]);
-  assert.ok(!('presencaWmeVisto' in prefs));
   assert.equal(presencaWme.ligarNaProxima, false);
   montar('presencaWmeReligar', escopo)();
   assert.equal(presencaWme.ligarNaProxima, true);
@@ -289,15 +295,12 @@ test('toggle: desligar some do WME NA HORA (visivel:false) e esquece o "já vist
   montar('presencaWmeDesligar', semSessao)();
 });
 
-test('toggle: o interruptor chama desligar/religar ANTES de gravar as preferências', () => {
+test('toggle: o interruptor fala com a presença do WME nos dois sentidos', () => {
   const ini = APP.indexOf("$('prefPresenca').addEventListener('change'");
   assert.ok(ini > 0, 'o ouvinte do interruptor sumiu');
   const corpo = semComentario(APP.slice(ini, APP.indexOf('});', ini)));
-  const iRel = corpo.indexOf('presencaWmeReligar();');
-  const iDes = corpo.indexOf('presencaWmeDesligar();');
-  const iSalvar = corpo.indexOf('savePreferences();');
-  assert.ok(iRel > 0 && iDes > 0, 'o interruptor não fala com a presença do WME');
-  assert.ok(iRel < iSalvar && iDes < iSalvar, 'o "já vista" seria gravado antes de ser esquecido');
+  assert.ok(corpo.includes('presencaWmeReligar();'), 'religar o interruptor não liga a visibilidade no WME');
+  assert.ok(corpo.includes('presencaWmeDesligar();'), 'desligar o interruptor não esconde a pessoa no WME');
 });
 
 test('perfil e sair: o perfil decide a visibilidade; o "Sair" zera o freio e os contadores', () => {
@@ -305,9 +308,19 @@ test('perfil e sair: o perfil decide a visibilidade; o "Sair" zera o freio e os 
   assert.match(perfil, /presencaWmeAoCarregarPerfil\(profileRes\.visivelNoWme\)/);
   const sair = semComentario(fatiarFuncao(APP, 'handleLogout'));
   assert.match(sair, /presencaWmeZerar\(\);/, 'o "Sair" deixa o freio de quem saiu pra quem entra');
-  const carga = APP.match(/if \(parsed\.presencaWmeVisto[^;]*;/);
-  assert.ok(carga, 'o "já vista" não é carregado das preferências');
-  assert.match(carga[0], /=== true/, 'a carga do "já vista" virou coerção');
+});
+
+test('o WME não desliga a app: nenhum código lê o marcador antigo, e o perfil não mexe no interruptor', () => {
+  // A regra do "se escondeu fora da app" (até v2026.09.24-01) morava no
+  // `presencaWmeVisto`. Ele voltar a ser lido ou escrito é ela voltando.
+  assert.doesNotMatch(semComentario(APP), /presencaWmeVisto/, 'o marcador da regra que saiu voltou ao código');
+  const perfil = semComentario(fatiarFuncao(APP, 'presencaWmeAoCarregarPerfil'));
+  for (const [re, msg] of [
+    // Atribuição, não a comparação `=== false` que o perfil faz de propósito.
+    [/\.presenca\s*=(?!=)/, 'o perfil do WME escreve no interruptor da app'],
+    [/presencaOffEm/, 'o perfil do WME carimba um desligar'],
+    [/savePreferences\(/, 'o perfil do WME grava preferência'],
+  ]) assert.doesNotMatch(perfil, re, msg);
 });
 
 test('api.js: a presença vai no corpo SÓ quando existe — sem ela o corpo é o de sempre', () => {

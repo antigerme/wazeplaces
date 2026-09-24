@@ -100,7 +100,9 @@ const pw = r.presencaWme;
 if (pw === undefined) out(AUSENTE);
 else if (pw.erro) out('erro ao medir: ' + pw.erro);
 else {
-  out(`ligada ${pw.ligada} · já vista ligada ${pw.visto} · ligar na próxima ação ${pw.ligarNaProxima} · escritas ${pw.enviadas} · falhas ${pw.falhas}${pw.ultimaFalha ? ` (última: ${pw.ultimaFalha})` : ''} · última escrita há ${pw.ultimaHaS ?? '—'} s`);
+  // `visto` só existe em relatório de antes de v2026.09.24-02, quando o WME
+  // ainda podia desligar a presença da app.
+  out(`ligada ${pw.ligada}${pw.visto !== undefined ? ` · já vista ligada ${pw.visto}` : ''} · ligar na próxima ação ${pw.ligarNaProxima} · escritas ${pw.enviadas} · falhas ${pw.falhas}${pw.ultimaFalha ? ` (última: ${pw.ultimaFalha})` : ''} · última escrita há ${pw.ultimaHaS ?? '—'} s`);
   if (pw.marcaPerdida) out('ATENÇÃO: o Waze devolveu a posição SEM a marca da app — a lista de quem está na app vai vir vazia.');
 }
 

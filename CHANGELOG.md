@@ -15,6 +15,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ### Mudado
 - **A seção "Quem está na app" subiu pra logo depois de "Como usar"**. Antes ela era a última da Ajuda, depois das extensões de login, longe de quem procura saber o que é a pílula 👥.
+- **O "Ver quem está na app" só muda quando você mexe nele.** Ficar invisível pelo WME não desliga mais a opção na app: por padrão você aparece pra quem usa a app enquanto tria.
 
 ## v2026.09.24-01
 

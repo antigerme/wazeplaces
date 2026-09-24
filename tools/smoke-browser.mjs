@@ -5770,8 +5770,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // Medido pela REDE, com a app de verdade (o JS minificado que vai pro ar): o
 // que cada ação leva, o que a segunda ação logo em seguida NÃO leva (freio de
 // 30 s), a visibilidade ligando sozinha de carona, o interruptor desligando o
-// WME na hora e religando na ação seguinte, e quem se escondeu pelo WME sendo
-// respeitado. Os testes de unidade fatiam a fonte; este roda a tela.
+// WME na hora e religando na ação seguinte, e o invisível do WME NÃO desligando
+// a app — a ação seguinte religa de carona (decisão do owner, 2026-09-24). Os
+// testes de unidade fatiam a fonte; este roda a tela.
 {
   const id = 'presença no WME/Pixel 7';
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', locale: 'pt-BR' });
@@ -5835,8 +5836,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   checa(p1 && p1.lat === centro1[0] && p1.lon === centro1[1],
     `${id}: a posição não é a do card NA TELA, em [lat, lon]`, JSON.stringify({ p1, centro1 }));
   checa(p1 && p1.visivel === true, `${id}: o perfil disse invisível e a 1ª ação não ligou a visibilidade`, JSON.stringify(p1));
-  checa(await page.evaluate(() => AppState.preferences.presencaWmeVisto === true),
-    `${id}: a app não anotou que já viu a visibilidade LIGADA`);
+  const ligou = await esperarNaPagina(page, () => presencaWme.ligarNaProxima === false, 5000);
+  checa(ligou.ok, `${id}: a visibilidade ligou de carona e a app seguiu pedindo pra ligar`);
 
   // 2. A segunda ação dentro de 30 s vai SEM posição (o freio).
   await page.waitForTimeout(3600);                      // a janela do Desfazer da 1ª
@@ -5865,18 +5866,25 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     `${id}: religar não fez a ação seguinte ligar a visibilidade`, JSON.stringify(r4 && r4.corpo));
   checa(r4 && r4.corpo.presenca && r4.corpo.presenca.lat === centro4[0], `${id}: a posição religada não é a do card na tela`);
 
-  // 5. Escondeu-se pelo WME (vista ligada, perfil agora diz invisível): conta como desligar.
+  // 5. Invisível pelo WME DEPOIS de a app já tê-la ligado: o WME NÃO desliga a
+  //    app (decisão do owner, 2026-09-24). O interruptor segue ligado, nada é
+  //    carimbado, e a ação seguinte religa de carona.
+  const antes = await page.evaluate(() => AppState.preferences.presencaOffEm);
   visivelNoWme = false;
   await page.evaluate(async () => { await loadProfileAndAuxData(); });
   const estado = await page.evaluate(() => ({ presenca: AppState.preferences.presenca, off: AppState.preferences.presencaOffEm,
-                                              chk: document.getElementById('prefPresenca').checked }));
-  checa(estado.presenca === false && Number.isFinite(estado.off) && estado.chk === false,
-    `${id}: quem se escondeu pelo WME foi religado pela app (ou o interruptor ficou mentindo)`, JSON.stringify(estado));
+                                              chk: document.getElementById('prefPresenca').checked, ligar: presencaWme.ligarNaProxima }));
+  checa(estado.presenca !== false && estado.chk === true && estado.off === antes,
+    `${id}: o invisível do WME desligou o "Ver quem está na app"`, JSON.stringify(estado));
+  checa(estado.ligar === true, `${id}: o invisível do WME não fez a app pedir pra religar`, JSON.stringify(estado));
   await page.waitForTimeout(3600);
+  await page.evaluate(() => { presencaWme.ultimaEm = 0; });   // sem esperar o freio de 30 s da ação 4
   await clicar('.card-btn-reject');
   const r5 = await esperarPedido('validar-place', 3);
-  checa(r5 && !('presenca' in r5.corpo), `${id}: depois de se esconder pelo WME a ação levou posição`, JSON.stringify(r5 && r5.corpo));
-  checa(acoesDe('presenca-waze').length === 1, `${id}: a app mexeu no WME de quem se escondeu por lá`, JSON.stringify(acoesDe('presenca-waze')));
+  checa(r5 && r5.corpo.presenca && r5.corpo.presenca.visivel === true,
+    `${id}: depois do invisível do WME a ação não religou a visibilidade`, JSON.stringify(r5 && r5.corpo));
+  checa(acoesDe('presenca-waze').length === 1,
+    `${id}: a app chamou a rota da presença por conta própria (só o gesto de desligar chama)`, JSON.stringify(acoesDe('presenca-waze')));
 
   checa(errosJS.length === 0, `${id}: erro de JS no caminho da presença`, errosJS[0]);
   await ctx.close();
@@ -5954,6 +5962,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
-  + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e quem se escondeu pelo WME respeitado)`
+  + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando a app: a ação seguinte religa de carona)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
