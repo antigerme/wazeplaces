@@ -72,8 +72,15 @@ if (!css) console.warn('aviso: nenhum CSS no arquivo — a tela sai sem estilo')
 //
 // Só casa por NOME DE ARQUIVO dentro de `fonts/` deste repositório: nada é
 // buscado na rede, e diagnóstico de outro app simplesmente não encontra par.
+//
+// Procura nos RECURSOS da página, e não só no `codigo`: desde v2026.09.10-04 o
+// coletor deixa a fonte FORA do `codigo` (binário lido como texto não serve), e
+// esta busca olhava só lá — toda tela remontada desde então saiu com a fonte do
+// sistema, sem aviso. A correção valeu no coletor e não no leitor.
 const fontes = [];
-for (const u of Object.keys(codigo)) {
+const urlsDaPagina = [...new Set([...Object.keys(codigo),
+  ...(Array.isArray(d.recursos) ? d.recursos.map((r) => r && r.url).filter((u) => typeof u === 'string') : [])])];
+for (const u of urlsDaPagina) {
   const m = /\/fonts\/([\w.-]+\.woff2?)$/.exec(u);
   if (!m) continue;
   const local = new URL('../fonts/' + m[1], import.meta.url);

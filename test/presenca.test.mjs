@@ -393,13 +393,23 @@ test('o recuo do tempo real só zera quando o Google ENTREGA o lote, não quando
   // lote inicial (`endOfBatch`) — é o `eu` da sala, noutra roupa. O desligar
   // também zera, e é outra coisa: é a pessoa saindo, não a rede voltando.
   const CLI = read('js/presenca.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  // DENTRO do bloco do fim do lote, medido casando as chaves — e não "na mesma
+  // linha", que reprovava o bloco assim que ele ganhou mais de uma instrução
+  // (gotcha #67: guard amarrado na forma, não na estrutura).
+  const iniLote = CLI.indexOf('if (o.endOfBatch) {');
+  assert.ok(iniLote > 0, 'sumiu o tratamento do fim do lote');
+  let prof = 0, fimLote = -1;
+  for (let i = CLI.indexOf('{', iniLote); i < CLI.length; i++) {
+    if (CLI[i] === '{') prof++;
+    else if (CLI[i] === '}' && --prof === 0) { fimLote = i; break; }
+  }
   const zeragens = [...CLI.matchAll(/fluxoTentativa\s*=\s*0/g)].map((m) => {
     const linha = CLI.slice(CLI.lastIndexOf('\n', m.index) + 1, CLI.indexOf('\n', m.index));
     const fn = [...CLI.slice(0, m.index).matchAll(/function (\w+)\(/g)].pop();
-    return { linha: linha.trim(), fn: fn ? fn[1] : '?' };
+    return { linha: linha.trim(), fn: fn ? fn[1] : '?', noLote: m.index > iniLote && m.index < fimLote };
   });
-  assert.ok(zeragens.some((z) => /o\.endOfBatch/.test(z.linha)), 'o fim do lote deixou de zerar o recuo');
-  const fora = zeragens.filter((z) => !/o\.endOfBatch/.test(z.linha) && z.fn !== 'presencaDesligar');
+  assert.ok(zeragens.some((z) => z.noLote), 'o fim do lote deixou de zerar o recuo');
+  const fora = zeragens.filter((z) => !z.noLote && z.fn !== 'presencaDesligar');
   assert.deepEqual(fora.map((z) => `${z.fn}: ${z.linha}`), [],
     'o recuo do tempo real é zerado fora do fim do lote — abrir a conexão não é ter conectado');
 });

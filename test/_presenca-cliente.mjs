@@ -71,7 +71,7 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
   const els = new Map();
   const $ = (id) => { if (!els.has(id)) els.set(id, elemento(id)); return els.get(id); };
   const armazenado = new Map();
-  const chamadas = { presencaApp: [], chat: [], openModal: [], closeModal: [], unauthorized: 0, fetch: [] };
+  const chamadas = { presencaApp: [], chat: [], openModal: [], closeModal: [], unauthorized: 0, fetch: [], dfato: [] };
   const timers = [];
   let proximoTimer = 1;
   const relogio = { agora: agora ?? Date.now() };
@@ -122,6 +122,9 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     openModal: (id) => { chamadas.openModal.push(id); $(id).classList.remove('hidden'); },
     closeModal: (id) => { chamadas.closeModal.push(id); $(id).classList.add('hidden'); },
     handleUnauthorized: () => { chamadas.unauthorized += 1; },
+    // O diário sempre ligado do app.js (`dfato`). Aqui ele só GUARDA, pra o
+    // teste ver a linha do tempo que a presença deixa pro diagnóstico.
+    dfato: (k, o) => { chamadas.dfato.push([k, o]); },
     fetch: async (...a) => { chamadas.fetch.push(a); return api.fetch ? api.fetch(...a) : new Response('[]'); },
     setTimeout: (fn, ms) => { const id = proximoTimer++; timers.push({ id, fn, ms }); return id; },
     clearTimeout: (id) => { const i = timers.findIndex((x) => x.id === id); if (i >= 0) timers.splice(i, 1); },

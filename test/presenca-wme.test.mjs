@@ -161,7 +161,9 @@ test('resposta: ligou de carona → para de pedir pra ligar, sem gravar preferê
   const salvos = [];
   const fatos = [];
   const presencaWme = { ligarNaProxima: true, ultimaEm: 1, enviadas: 0, falhas: 0, ultimaFalha: null, marcaPerdida: false };
-  const escopo = { presencaWme, AppState: { preferences: {} }, savePreferences: () => salvos.push(1), dfato: (k) => fatos.push(k) };
+  const relogio = { agora: 1_700_000_000_000 };
+  const escopo = { presencaWme, AppState: { preferences: {} }, savePreferences: () => salvos.push(1), dfato: (k) => fatos.push(k),
+                   Date: { now: () => relogio.agora } };
   const f = montar('presencaWmeAoResponder', escopo);
   // "Não sei" (eco sem posição) PRIMEIRO, com o aviso ainda não disparado: depois
   // do primeiro aviso ele não repete, e o caso ficaria cego (a sabotagem passou).
@@ -175,15 +177,35 @@ test('resposta: ligou de carona → para de pedir pra ligar, sem gravar preferê
   assert.deepEqual(escopo.AppState.preferences, {}, 'a resposta da carona mexeu nas preferências');
   f({}, { presenca: { ok: true, marca: false } });
   f({}, { presenca: { ok: true, marca: false } });
-  assert.deepEqual(fatos, ['presencaWme.marcaPerdida'], 'o aviso da marca perdida repetiu (ou não saiu)');
+  // O "ligou de carona" entra no diário (é a transição que o relato de "não
+  // apareço no WME" pede), e a marca perdida entra UMA vez.
+  assert.deepEqual(fatos, ['presencaWme.visivel', 'presencaWme.marcaPerdida'], 'o aviso da marca perdida repetiu (ou não saiu)');
   f({}, { presenca: { ok: false, categoria: 'unauthorized' } });
-  assert.equal(presencaWme.falhas, 1);
+  f({}, { presenca: { ok: false, categoria: 'unauthorized' } });
+  assert.equal(presencaWme.falhas, 2);
   assert.equal(presencaWme.ultimaFalha, 'unauthorized');
+  // A MESMA falha em série é uma linha só no diário.
+  assert.deepEqual(fatos.filter((k) => k === 'presencaWme.falhou').length, 1, 'a falha repetida encheu o diário');
   assert.equal(presencaWme.enviadas, 4, 'as quatro escritas aceitas (ligar, duas sem marca e uma sem eco)');
+  // Um sucesso NÃO zera a série: o Waze falhando uma sim, outra não, viraria
+  // uma linha por falha — até duas por minuto, pelo freio de 30 s.
+  for (let i = 0; i < 5; i++) {
+    relogio.agora += 30000;
+    f({}, { presenca: { ok: true, marca: true } });
+    relogio.agora += 30000;
+    f({}, { presenca: { ok: false, categoria: 'unauthorized' } });
+  }
+  assert.equal(fatos.filter((k) => k === 'presencaWme.falhou').length, 1, 'a falha alternando com sucesso encheu o diário');
+  // Categoria NOVA entra na hora; a mesma, de novo depois de 10 min.
+  f({}, { presenca: { ok: false, categoria: 'transient' } });
+  assert.equal(fatos.filter((k) => k === 'presencaWme.falhou').length, 2, 'a falha de outro tipo tem que entrar na hora');
+  relogio.agora += 10 * 60000;
+  f({}, { presenca: { ok: false, categoria: 'transient' } });
+  assert.equal(fatos.filter((k) => k === 'presencaWme.falhou').length, 3, 'depois de 10 min a mesma falha tem que voltar a entrar');
   // Sem presença na ação, ou resposta sem o campo (servidor antigo): nada muda.
   f(null, { presenca: { ok: true } });
   f({}, { success: true });
-  assert.equal(presencaWme.enviadas, 4);
+  assert.equal(presencaWme.enviadas, 9);
   // Ligar que FALHOU segue pedindo pra ligar.
   const p2 = { ligarNaProxima: true, ultimaEm: 1, enviadas: 0, falhas: 0, ultimaFalha: null, marcaPerdida: false };
   montar('presencaWmeAoResponder', { ...escopo, presencaWme: p2 })({ visivel: true }, { presenca: { ok: false, categoria: 'transient' } });
@@ -239,11 +261,15 @@ test('perfil: visível no WME → não pede pra ligar, e não grava nada', () =>
   assert.deepEqual(r.preferences, { presenca: true });
 });
 
-test('perfil: invisível no WME → liga sozinha, de carona na próxima ação, sem aviso', () => {
+test('perfil: invisível no WME → liga sozinha, de carona na próxima ação, sem aviso na tela', () => {
   const r = rodarPerfil(false, { presenca: true });
   assert.equal(r.presencaWme.ligarNaProxima, true);
   assert.equal(r.preferences.presenca, true, 'desligou o toggle de quem nunca desligou nada');
-  assert.equal(r.fatos.length, 0);
+  // Uma linha no diário (o relatório tem que mostrar que o perfil disse
+  // "invisível"), e o que ele disse fica no estado do diagnóstico.
+  assert.deepEqual(r.fatos, ['presencaWme.visivel']);
+  assert.equal(r.presencaWme.perfilVisivel, false);
+  assert.equal(r.presencaWme.perfilEm, 1_700_000_000_000);
 });
 
 // Decisão do owner (2026-09-24): quem decide a presença no app é SÓ o "Ver quem
@@ -258,7 +284,7 @@ test('perfil: invisível no WME DEPOIS de o app já tê-la ligado → o WME não
   assert.equal(r.presencaWme.ligarNaProxima, true, 'a próxima ação não vai religar a visibilidade');
   assert.equal(r.chk.checked, true, 'o interruptor da tela foi desligado');
   assert.equal(r.sincronizou.length, 0);
-  assert.deepEqual(r.fatos, []);
+  assert.deepEqual(r.fatos, ['presencaWme.visivel'], 'o perfil tem que anotar o "invisível" (e só isso)');
   assert.equal(r.salvos.length, 0, 'o perfil gravou preferência');
 });
 
@@ -278,18 +304,24 @@ test('perfil: com a presença DESLIGADA no app, nada muda; e sem o campo (servid
 
 test('toggle: desligar some do WME NA HORA (visivel:false); religar pede ligar sem freio', async () => {
   const pedidos = [];
+  const fatos = [];
   const presencaWme = { ligarNaProxima: true, ultimaEm: 99 };
   const prefs = {};
   const escopo = {
     presencaWme, AppState: { preferences: prefs, profile: { id: 12444348 } },
     API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return { success: true }; } },
+    dfato: (k, o) => fatos.push([k, o]),
   };
   montar('presencaWmeDesligar', escopo)();
   assert.deepEqual(pedidos, [{ userId: '12444348', visivel: false }]);
   assert.equal(presencaWme.ligarNaProxima, false);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(fatos, [['presencaWme.visivel', { desligou: true, via: 'interruptor', ok: true }]],
+    'o desligar (e se o Waze aceitou) tem que ir pro diário');
   montar('presencaWmeReligar', escopo)();
   assert.equal(presencaWme.ligarNaProxima, true);
   assert.equal(presencaWme.ultimaEm, 0, 'quem religou esperaria o freio pra aparecer');
+  assert.deepEqual(fatos[1], ['presencaWme.visivel', { religou: true, via: 'interruptor' }]);
   // Sem sessão não há o que desligar no Waze (e nada lança).
   const semSessao = { ...escopo, API: { getSession: () => null, presencaWaze: () => assert.fail('chamou sem sessão') } };
   montar('presencaWmeDesligar', semSessao)();

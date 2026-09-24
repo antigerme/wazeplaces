@@ -525,7 +525,8 @@ Decidido pelo owner em 2026-09-23, com o relatório medido na mesa: o app vai us
 - **Recibos: só "Enviada" e "Lida"** (decisão do owner: "Entregue" custaria um pedido por mensagem recebida). "Lida" tem duas provas: o recibo que o fluxo conta, guardado por pessoa no aparelho — o HISTÓRICO do Waze não traz recibo nenhum (medido) — e a pessoa ter respondido depois. **Acabou o "Não chegou"**: a mensagem fica guardada no Waze e quem saiu lê quando voltar, então o campo nunca trava. A única falha é a do envio ("Não enviada, sem conexão." + "Tentar de novo", que repete com o MESMO id; uma tentativa só, sem `callWithRetry`, pra não duplicar).
 - **O pedido mandado**: o texto que vai pro Waze leva a pergunta, o 📍 com nome e tipo e o link LONGO do ↗ (`linkWmeDoPedido`). O link curto (só `env` e `venues`) foi MEDIDO no WME de verdade: abre a 7.755 km e não seleciona nada. O cartão vai no contexto (`card`) com a pergunta curta (`legenda`, 280 caracteres — a pergunta inteira estouraria o teto de 6 KB do servidor); no app, a pergunta volta do TEXTO (`presencaLegendaDoTexto`). O tipo do pedido passa pelo `rotuloDeEnum`, como no card: o cartão vem de outro aparelho, que pode ser de uma versão com tipo que esta não conhece.
 - **Custo, medido no smoke**: abrir o app 1 pedido (lista + token), abrir a lista 1, abrir a conversa 1 (histórico e "lida" juntos), mandar 1; mensagem chegando 0; confirmar 0.
-- **Privacidade**: a conversa e a prévia da lista saem do DOM ao fechar, e o diagnóstico copia a página por `domParaDiagnostico()`, sem elas. O registro de chamadas guarda o TAMANHO da mensagem, nunca o texto, e nem com o modo dev guarda a resposta de `chat`/`presenca-app`. O "Sair" apaga `waze_places_chat` (e o guard do logout passou a varrer o `presenca.js`, que antes escapava dele).
+- **Diagnóstico** (v2026.09.24-02; até ali era "Privacidade" e dizia o contrário): com o modo dev, o relatório leva a conversa — o DOM inteiro, o texto que sai e a resposta de `chat`/`presenca-app`, com o token e a chave do tempo real trocados por marcador —, porque privacidade não é critério no modo dev (ver a seção do diagnóstico). Sem o modo dev, o registro de chamadas guarda só o TAMANHO da mensagem. A conversa e a prévia da lista saem do DOM ao fechar: a captura mostra o que estava NA TELA. O "Sair" apaga `waze_places_chat` (e o guard do logout passou a varrer o `presenca.js`, que antes escapava dele).
+- **As conversas conhecidas moram no APARELHO**, e isso tem uma consequência que só a `contagem` do diagnóstico mostra: em aparelho novo, ou depois do "Sair", a conversa cuja última mensagem veio pelo WME (sem a marca) some da lista até a próxima mensagem mandada pelo app. No relatório aparece como `marcadas` < conversas que a pessoa espera ver.
 - **Testes**: `test/presenca-cliente.test.mjs` roda o `presenca.js` INTEIRO num navegador de mentira (`test/_presenca-cliente.mjs`) e o decodificador do cliente é conferido contra o do servidor nos bytes REAIS da fixture. Os testes da conversa P2P (`recibos`, `presenca-saida`) saíram com ela.
 - **Fixture de gRPC só com as contas do owner** (antigerme 12444348, cafanha 183164343). A lista de online gravada tinha terceiros e ficou de fora; a resposta do `GetMessagingProvider` (token e chave) nunca entra. Conferido por leitura ESTRUTURAL do protobuf: procurar dígitos nos bytes crus deu dois falsos positivos (um id colado na etiqueta do campo seguinte e um pedaço de uuid).
 - **Validar exige as duas contas ao mesmo tempo**, como o owner avisou: testar uma, fechar e abrir a outra mede a expiração, não a presença.
@@ -1029,6 +1030,19 @@ Decisões que não são gosto:
 
 ## 🔬 Diagnóstico do modo dev — o que ele captura, e por quê
 
+**PRIVACIDADE NÃO É CRITÉRIO NO MODO DEV** (decisão do owner, 2026-09-24: *"Não se
+preocupe com privacidade em modo dev"*). O relatório e as capturas só existem com o
+modo dev ligado (o botão de baixar mora atrás dele) e servem pra entender o relato de
+quem usa e testa; completude ganha. Texto de conversa, prévia da lista e o que
+estiver na tela podem ir. O que continua valendo, por OUTROS motivos:
+- **Nada novo é coletado SEM o modo dev.** Aí o custo é de memória e de tempo de
+  todo editor, o tempo todo. O `dfato` roda pra todo mundo, então segue sem texto
+  livre nem resposta inteira.
+- **A Ajuda diz a verdade** sobre o que fica no aparelho.
+- **Credencial que não ajuda a depurar não entra.** O token e a chave do tempo real saem
+  como marcador. O token do login continua, porque é ele que o `diag-api` usa, e o LEIA-ME
+  avisa.
+
 O FAB do modo dev gera um **`.zip`** que o editor manda. Ele tem TRÊS camadas, e
 a terceira entrou depois de custar uma investigação inteira:
 
@@ -1053,6 +1067,20 @@ recurso nosso. Entravam junto duas coisas inúteis: a **fonte `.woff2`**, binár
 `r.text()` — chega corrompida, e fonte não causa defeito que este arquivo investiga (MEDIDO:
 111 KB crus, **42 KB comprimidos, 8% do arquivo**); e **6 entradas `/api/*`** com `405 Método
 não permitido`, porque o coletor faz GET e a API só aceita POST.
+
+**E desde v2026.09.24-02 ela não carrega o CORPO, fora o do CSS** (`diagCodigoEnxuto`). O JS e o
+HTML inteiros eram ~166 KB dos 382 KB do .zip do relatório real e respondiam uma pergunta só —
+"versão velha?" —, que tamanho, hash e versão declarada (`APP_VERSION`, `waze-places-<serial>`)
+respondem igual — e o .zip do mesmo relatório real caiu de 382 pra 229 KB, levando MAIS coisa
+(a conversa e o DOM inteiro). O CSS fica porque é dele que o `diag-tela` remonta a tela. A ORDEM importa: o
+enxugamento roda DEPOIS do `cacheVsRede`, que precisa do corpo pra comparar com a rede, e o
+`cacheVsRede` compara só o que entrou no `codigo` — comparando a lista inteira, a fonte e a
+`/api/*` viravam "sem corpo local" (7 de 19 linhas no relatório real) e o leitor as contava como
+arquivo que não deu pra conferir. **E a saída da fonte tinha quebrado o `diag-tela` calado**: ele
+procurava a fonte só no `codigo`, então desde v2026.09.10-04 toda tela remontada saiu com a fonte
+do sistema (`fontesEmbutidas: []` no relatório real; a Inter, com a busca nos recursos). Correção
+que valeu no coletor e não no leitor — o gotcha #14 dentro do instrumento. Os três travados em
+teste, e o 8b do smoke do offline confere no arquivo de verdade.
 
 1. **O que a página É** — `dom` (o `outerHTML`), `caches`, `localStorage`, código servido.
 2. **O que o app ACHA** — `AppState`, `chamadas` (anel de 60, sempre ligado), `diario`
@@ -1181,6 +1209,34 @@ logo acima). O leitor único lê o que o app MEDIU, nunca vasculha o `dom`, e ab
 marcando o que a versão dele não trazia.
 
 `tools/diag-tela.mjs` imprime os alertas ANTES de tudo e os põe no `resumo.json`.
+
+**O RELATÓRIO v8 (v2026.09.24-02) existe pros relatos da fase 3**, e nasceu de gerar um relatório
+REAL (conta do owner, app aberto, conversa com a cafanha) e ler como se fosse de um testador: a
+presença e o chat não tinham linha do tempo, e "0 conversas" não tinha como dizer por quê. O que
+entrou:
+- **Linha do tempo no `dfato`** (o anel sempre ligado): `presenca.lista`, `presenca.token`,
+  `presenca.fluxo` (`conectou` uma vez, `caiu` com o erro, `voltou` depois de queda; a religada
+  normal de ~6 min não entra), `chat.abrir`, `chat.envio`, `chat.chegou` (o lote da reconexão vira
+  um número), `presencaWme.visivel` e `presencaWme.falhou`. **Cada uma tem LIMITADOR, e três deles
+  saíram de medir o relatório real, não de imaginar**: o anel tem 120 entradas pra tudo, e o app
+  fica aberto por horas. A lista entra quando MUDA, com o total do WME (`noWme`) FORA da comparação
+  — ele andou 39 → 41 entre duas ações, e com ele quase toda carona virava linha. Mensagem chegando
+  e envio que deu certo, no máximo uma linha por minuto de cada, com `juntas` (quantas desde a
+  anterior) — um teto por página deixava de fora justamente a mensagem do fim da tarde; a falha de
+  envio entra sempre. A falha da presença no WME entra quando a categoria é nova e, a mesma, uma a
+  cada 10 min: zerar no sucesso deixava o Waze falhando uma sim, outra não, virar duas linhas por
+  minuto. Queda do tempo real: as 3 primeiras de cada série, cada troca de erro e uma a cada 10.
+  **Continua sem texto, id e nome** — o `dfato` roda pra todo editor, e a regra do modo dev não
+  vale pra ele (`test/presenca-cliente.test.mjs` planta canários).
+- **O PORQUÊ da lista, contado no servidor** (`contagem` na resposta de `presenca-app` e na carona):
+  `online: { noWme, comMarca, noPais }` e `conversas: { noWaze, marcadas, daApp }`. Separa "ninguém
+  usa o app agora" de "está no app, mas noutro país", de "a marca se perdeu" e de "a conversa veio
+  pelo WME sem marca". Parte que falhou vem `{ falhou: categoria }` (ou `'leitura'`, quando veio e
+  não deu pra ler), nunca zero.
+- **A presença no WME diz o que o PERFIL disse** (`perfilVisivel`, `perfilHaS`) e o leitor explica
+  o sumiço da lista por 15 min parado — que não é defeito, e é a primeira pergunta de quem testa.
+- **As mensagens só do WME são CONTADAS** (`ignoradas`): chegaram e foram deixadas de lado de
+  propósito, e sem o número isso é indistinguível de "não chegou".
 
 **O ARQUIVO É UMA GRAVAÇÃO, e daí saem duas ferramentas com papéis diferentes.** Ele responde
 tudo que o app perguntou e nada do que ele não perguntou — e confundir isso me fez pedir

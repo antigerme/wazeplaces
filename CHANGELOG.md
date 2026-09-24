@@ -18,6 +18,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Mudado
 - **A seção "Quem está no app" subiu pra logo depois de "Como usar"**. Antes ela era a última da Ajuda, depois das extensões de login, longe de quem procura saber o que é a pílula 👥.
 - **O "Ver quem está no app" só muda quando você mexe nele.** Ficar invisível pelo WME não desliga mais a opção no app: por padrão você aparece pra quem usa o app enquanto tria.
+- **Modo Desenvolvedor: o diagnóstico ficou pronto pros relatos da lista e da conversa.**
+  - Ele conta a história da lista e do chat: quando a lista mudou ou falhou, quando o tempo real conectou, caiu e voltou, cada conversa aberta e cada envio.
+  - Diz **por que** a lista está como está: quantos estão no WME agora, quantos com o app, quantos no país do seu filtro, e quantas conversas o Waze tem contra quantas entram no app.
+  - Com o modo dev ligado, leva também as conversas que passaram pelo app. O LEIA-ME de dentro do arquivo avisa isso.
+  - Ficou menor: o código do app entra só como tamanho e versão, o que já basta pra saber se o aparelho roda uma versão velha.
 
 ## v2026.09.24-01
 

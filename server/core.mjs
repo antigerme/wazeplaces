@@ -2851,7 +2851,9 @@ function iniciarCarona(data, cookieHeader, region) {
   const app = listaDaApp(cookieHeader, region, { pais: data.presenca.pais, eu: p.userId, conhecidos })
     // As duas partes falharam: some da resposta. Chegar como `{ online: null }`
     // seria o cliente ler "ninguém no app" de uma lista que nem veio.
-    .then((a) => (a.online || a.conversas ? { online: a.online, conversas: a.conversas } : null))
+    .then((a) => (a.online || a.conversas
+      ? { online: a.online, conversas: a.conversas, ...(a.contagem ? { contagem: a.contagem } : {}) }
+      : null))
     // DEFESA sem caminho hoje, como a da escrita: o `callWazeGrpc` captura a
     // rede e os leitores estão em try. Fica pelo mesmo motivo de lá — uma
     // rejeição aqui faria uma AÇÃO feita voltar ao editor como erro 500.
@@ -2964,14 +2966,40 @@ export function filtrarOnlineDaApp(editores, { pais, eu }) {
     .map((e) => ({ id: String(e.id), nome: e.nome, rank: e.rank, lat: e.lat, lon: e.lon }));
 }
 
+// Os mesmos predicados servem ao filtro e à contagem: lista e contagem que
+// divergissem mandariam o diagnóstico procurar defeito onde não há.
+const conversaValida = (c) => !!(c && c.com && ID_WAZE.test(String(c.com.id)) && !c.bloqueada);
+const conversaMarcada = (c) => !!(c.ultima && c.ultima.contexto && c.ultima.contexto.app === APP_CONTEXTO);
+
 export function filtrarConversasDaApp(conversas, { eu, conhecidos }) {
   return (conversas || [])
-    .filter((c) => c && c.com && ID_WAZE.test(String(c.com.id)) && !c.bloqueada
-      && ((c.ultima && c.ultima.contexto && c.ultima.contexto.app === APP_CONTEXTO) || conhecidos.has(String(c.com.id))))
+    .filter((c) => conversaValida(c) && (conversaMarcada(c) || conhecidos.has(String(c.com.id))))
     .map((c) => ({
       id: String(c.com.id), nome: c.nome, naoLidas: c.naoLidas || 0, atividade: c.atividade,
       ultima: resumoDaUltima(c.ultima, eu),
     }));
+}
+
+// O PORQUÊ das duas listas, em números. É o que responde "não vejo ninguém" e
+// "a conversa sumiu da lista" sem adivinhar:
+//   · online: quantos OUTROS estão visíveis no WME (a lista do Waze já tira quem
+//     pede e quem está invisível — medido), quantos têm a marca do app, e
+//     quantos desses no país do filtro (é a lista que aparece);
+//   · conversas: quantas o Waze devolveu, quantas têm a marca na última
+//     mensagem, e quantas entram (marca OU já conhecida no aparelho).
+export function contarOnlineDaApp(editores, { pais, eu }) {
+  const outros = (editores || []).filter((e) => e && e.visivel !== false && String(e.id) !== eu);
+  const comMarca = outros.filter((e) => temMarcaDaApp(e));
+  return { noWme: outros.length, comMarca: comMarca.length, noPais: comMarca.filter((e) => paisDaMarca(e) === pais).length };
+}
+
+export function contarConversasDaApp(conversas, { conhecidos }) {
+  const validas = (conversas || []).filter(conversaValida);
+  return {
+    noWaze: validas.length,
+    marcadas: validas.filter(conversaMarcada).length,
+    daApp: validas.filter((c) => conversaMarcada(c) || conhecidos.has(String(c.com.id))).length,
+  };
 }
 
 // As duas leituras em paralelo. Cada parte pode faltar (`null`) sem derrubar a
@@ -2985,13 +3013,29 @@ async function listaDaApp(cookieHeader, region, { pais, eu, conhecidos }, ctx = 
     callWazeGrpc(base + 'listOnlineEditors', cookieHeader, corpoListarOnline(CAIXA_MUNDO), region, ctx),
     callWazeGrpc(wmp + SERVICO_HISTORICO + '/ListConversations', cookieHeader, corpoConversas({ cabecalho }), region, null, { chat: true }),
   ]);
-  const out = { online: null, conversas: null, erro: null, r: null };
+  const out = { online: null, conversas: null, contagem: null, erro: null, r: null };
   const catL = categorizeGrpcError(lista);
   const catC = categorizeGrpcError(conv);
   if (catL && catL.category === 'unauthorized') { out.erro = catL; out.r = lista; }
   else if (catC && catC.category === 'unauthorized') { out.erro = catC; out.r = conv; }
-  if (!catL) { try { out.online = filtrarOnlineDaApp(lerListaOnline(lista.dados), { pais, eu }); } catch { /* fica null */ } }
-  if (!catC) { try { out.conversas = filtrarConversasDaApp(lerConversas(conv.dados).conversas, { eu, conhecidos }); } catch { /* fica null */ } }
+  // As contagens vão pro diagnóstico do aparelho (ver `contarOnlineDaApp`), e a
+  // parte que falhou vai dita — sem isso "a lista não veio" não diz qual metade.
+  const contagem = {};
+  if (!catL) {
+    try {
+      const todos = lerListaOnline(lista.dados);
+      out.online = filtrarOnlineDaApp(todos, { pais, eu });
+      contagem.online = contarOnlineDaApp(todos, { pais, eu });
+    } catch { contagem.online = { falhou: 'leitura' }; }   // a lista fica null
+  } else contagem.online = { falhou: catL.category };
+  if (!catC) {
+    try {
+      const lidas = lerConversas(conv.dados).conversas;
+      out.conversas = filtrarConversasDaApp(lidas, { eu, conhecidos });
+      contagem.conversas = contarConversasDaApp(lidas, { conhecidos });
+    } catch { contagem.conversas = { falhou: 'leitura' }; }   // as conversas ficam null
+  } else contagem.conversas = { falhou: catC.category };
+  if (contagem.online || contagem.conversas) out.contagem = contagem;
   return out;
 }
 
@@ -3065,6 +3109,7 @@ async function handlePresencaApp(data, { sessions }) {
     status: 200,
     body: {
       success: true, online: app.online, conversas: app.conversas,
+      ...(app.contagem ? { contagem: app.contagem } : {}),
       ...(querToken ? { chat } : {}),
       ...(confirmados ? { confirmados } : {}),
     },

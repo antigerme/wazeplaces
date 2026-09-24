@@ -123,7 +123,9 @@ for (const [rota, extra, caminhoDaAcao] of [
     // conversas — uma chamada de cada, nem mais nem menos.
     assert.deepEqual(pedidos.map((p) => p.tipo).sort(), ['acao', 'conversas', 'escrita', 'lista'],
       'devia sair a ação, a escrita e as duas leituras do app, uma de cada');
-    assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [] });
+    // As contagens (o PORQUÊ da lista, pro diagnóstico) vêm junto: zero aqui
+    // porque o Waze de mentira devolve as duas listas vazias.
+    assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [], contagem: { online: { noWme: 0, comMarca: 0, noPais: 0 }, conversas: { noWaze: 0, marcadas: 0, daApp: 0 } } });
     const acao = pedidos.find((p) => p.tipo === 'acao');
     const pres = pedidos.find((p) => p.tipo === 'escrita');
     assert.ok(acao.url.includes(caminhoDaAcao), acao.url);
@@ -268,7 +270,7 @@ test('carona: presença LENTA não segura a resposta — teto de espera, e o res
   // Duas partes vão ao segundo plano — a escrita e a leitura do app —, cada uma
   // no seu tempo. A leitura (rápida aqui) chega na resposta; a escrita, não.
   assert.equal(fundo.length, 2, 'a carona não entregou as duas partes ao segundo plano');
-  assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [] }, 'a leitura rápida ficou presa atrás da escrita lenta');
+  assert.deepEqual(resultado.body.presencaApp, { online: [], conversas: [], contagem: { online: { noWme: 0, comMarca: 0, noPais: 0 }, conversas: { noWaze: 0, marcadas: 0, daApp: 0 } } }, 'a leitura rápida ficou presa atrás da escrita lenta');
   assert.equal(concluiu, false);
   const fins = await Promise.all(fundo);
   assert.equal(concluiu, true);

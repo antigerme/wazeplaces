@@ -604,8 +604,8 @@ const LIMPEZA_AO_FECHAR = {
         // continua chegando como "conversa aberta" e nunca vira aviso.
         window.Presenca?.esquecerAberta?.();
     },
-    // A lista leva a prévia da última mensagem de cada conversa, que é dado
-    // privado: fechada, ela não fica no DOM (que o diagnóstico leva inteiro).
+    // Fechada, a lista não fica no DOM: a captura do diagnóstico (que leva o
+    // DOM inteiro) mostra o que estava NA TELA, não uma lista velha escondida.
     presencaModal() { window.Presenca?.esquecerLista?.(); },
     pairEnterModal() {
         const campo = document.getElementById('pairCodeInput');
@@ -4477,35 +4477,55 @@ function ligarFabDev() {
 // fase 3: quantos no app, conversas, não lidas, o token e o tempo real — só
 // CONTAGENS), e o `dom` (do relatório e de cada captura) sai SEM a conversa e
 // sem a prévia da lista (`domParaDiagnostico`), com a contagem do que saiu.
-const DIAG_VERSAO = 7;
+// 8 (v2026.09.24-02), pra entender os relatos da fase 3 — e sem filtro de
+// privacidade, que não é critério no modo dev (decisão do owner):
+//   · o `dom` volta INTEIRO (a conversa e a lista entram);
+//   · o anel de chamadas guarda a resposta de `chat` e `presenca-app` (o token e
+//     a chave do tempo real saem como marcador), e o texto que se manda;
+//   · o diário ganha a linha do tempo da presença e do chat (`presenca.lista`,
+//     `presenca.token`, `presenca.fluxo`, `chat.abrir`, `chat.envio`,
+//     `chat.chegou`, `presencaWme.visivel`, `presencaWme.falhou`);
+//   · o `presencaApp` ganha `contagem` (o PORQUÊ da lista, contado no servidor)
+//     e o `fluxoDiag`, as mensagens ignoradas e as quedas seguidas; o
+//     `presencaWme` ganha o que o perfil disse da visibilidade;
+//   · o `codigo` perde o corpo (menos do CSS): fica tamanho, hash e versão.
+const DIAG_VERSAO = 8;
+
+// O `codigo` do relatório, ENXUTO: o CORPO fica só no CSS, que é de onde o
+// `tools/diag-tela.mjs` tira o estilo exato do aparelho pra remontar a tela. Do
+// resto bastam o tamanho, o hash (a MESMA função do `cacheVsRede`, pra os dois
+// se compararem) e a versão quando o arquivo a declara — é o que responde "este
+// aparelho roda versão velha, ou misturada?". MEDIDO no relatório real de
+// v2026.09.24-02: o JS e o HTML inteiros eram 580 KB de 1,9 MB, e ~166 KB dos
+// 382 KB do .zip — quase metade do que a pessoa manda. Roda DEPOIS do
+// `cacheVsRede`, que precisa do corpo pra comparar com a rede.
+async function diagCodigoEnxuto(codigo, hash) {
+    for (const u of Object.keys(codigo)) {
+        const c = codigo[u];
+        if (!c || typeof c.corpo !== 'string') continue;
+        c.bytes = c.corpo.length;
+        c.hash = await hash(c.corpo);
+        const v = /APP_VERSION\s*=\s*['"]?(\d{10})/.exec(c.corpo) || /waze-places-(\d{10})/.exec(c.corpo);
+        if (v) c.versao = v[1];
+        if (!/\.css(\?|$)/.test(u)) delete c.corpo;
+    }
+    return codigo;
+}
+
+// O HTML da página pro diagnóstico, INTEIRO: a conversa aberta e a lista de
+// presença entram. O relatório e as capturas só existem com o modo dev ligado, e
+// ali privacidade não é critério (decisão do owner, 2026-09-24). Até v2026.09.24-02
+// as duas saíam vazias, e um relato de "a mensagem ficou como não enviada"
+// chegaria sem a mensagem na tela. Fica como FONTE ÚNICA da cópia — o relatório
+// e cada captura passam por aqui —, pra que o dia em que algo precisar sair seja
+// um lugar só.
+function domParaDiagnostico() {
+    return document.documentElement.outerHTML;
+}
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
 // (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
 // e o arquivo sai vazio — falha silenciosa no instrumento de socorro.
-// O HTML da página pro diagnóstico, SEM as conversas. A conversa aberta e a
-// prévia da lista são dado privado de terceiro — mais sensível que o nome de
-// quem mandou um pedido, que é público no mapa —, e o diagnóstico é um arquivo
-// que viaja por WhatsApp. O elemento fica (é ele que diz que a conversa estava
-// aberta), vazio e com a contagem do que saiu.
-//
-// Por troca de TEXTO, e não por clone: o `outerHTML` de um elemento é trecho
-// exato do `outerHTML` da página (é o mesmo serializador), e clonar a página
-// inteira recriaria cada <img> — pedido de rede dentro de um instrumento.
-const DIAG_PRIVADOS = ['conversaMsgs', 'presencaLista'];
-function domParaDiagnostico() {
-    let html = document.documentElement.outerHTML;
-    for (const id of DIAG_PRIVADOS) {
-        const el = document.getElementById(id);
-        if (!el || !el.innerHTML) continue;
-        const vazio = el.cloneNode(false);
-        vazio.setAttribute('data-diag-omitido', String(el.childElementCount));
-        // Função, e não texto, na troca: texto de troca interpreta `$&` e `$1`.
-        // O elemento vazio não tem cifrão hoje; não depender disso custa nada.
-        html = html.replace(el.outerHTML, () => vazio.outerHTML);
-    }
-    return html;
-}
-
 function diagSeguro(v, prof = 0, vistos = new WeakSet()) {
     if (v === null || typeof v !== 'object') {
         return typeof v === 'function' ? '[função]' : v;
@@ -4738,9 +4758,10 @@ async function diagCorpo() {
         }
     } catch (e) { cachesDoAparelho._erro = String(e); }
 
-    // O CÓDIGO que está rodando, com o corpo. É isto que responde "o PWA está
-    // com a versão velha?" — pergunta que o serial sozinho não responde, porque
-    // ele só diz o que o `version.js` carregado afirma, não o que o resto é.
+    // O CÓDIGO que está rodando: tamanho, hash e versão de cada arquivo (o corpo,
+    // só do CSS — ver abaixo). É isto que responde "o PWA está com a versão
+    // velha?" — pergunta que o serial sozinho não responde, porque ele só diz o
+    // que o `version.js` carregado afirma, não o que o resto é.
     const recursos = performance.getEntriesByType('resource')
         .map((r) => ({ url: r.name, tipo: r.initiatorType, ms: Math.round(r.duration),
                        bytes: r.transferSize,
@@ -4783,8 +4804,13 @@ async function diagCorpo() {
             return [...new Uint8Array(b)].slice(0, 8).map((x) => x.toString(16).padStart(2, '0')).join('');
         } catch (e) { return 'sem-hash:' + txt.length; }
     };
+    // Só o que entrou no `codigo`: a fonte e a `/api/*` ficam fora dele de
+    // propósito (ver acima), e compará-las dava "sem corpo local" — 7 das 19
+    // linhas no relatório real de 2026-09-24, que o leitor contava como arquivo
+    // que não deu pra conferir. Assim, "sem corpo local" só sai quando a
+    // leitura do arquivo NO APARELHO falhou, que é o caso que importa.
     const cacheVsRede = {};
-    for (const u of nossos) {
+    for (const u of Object.keys(codigo)) {
         const local = codigo[u] && codigo[u].corpo;
         if (typeof local !== 'string') { cacheVsRede[u] = { erro: 'sem corpo local' }; continue; }
         try {
@@ -4796,6 +4822,7 @@ async function diagCorpo() {
                                http: r.status };
         } catch (e) { cacheVsRede[u] = { erro: String((e && e.message) || e) }; }
     }
+    await diagCodigoEnxuto(codigo, hash);
 
     // ── O armazenamento local funciona mesmo? ──────────────────────────────
     // O `safeLS` engole exceção DE PROPÓSITO, então armazenamento cheio ou
@@ -4875,8 +4902,9 @@ async function diagCorpo() {
             // carona estão saindo, falhando, voltando sem a marca?
             presencaWme: (() => { try { return presencaWmeDiag(); } catch (e) { return { erro: String(e && e.message) }; } })(),
             // A lista e o chat do app (fase 3): quantos estão no app, quantas
-            // conversas e não lidas, o token e o tempo real. Só CONTAGENS — a
-            // conversa é dado privado e não entra no diagnóstico de jeito nenhum.
+            // conversas e não lidas, o token e o tempo real, e o PORQUÊ da lista
+            // contado no servidor (`contagem`). É o RESUMO: a conversa em si vai
+            // pelo registro de chamadas e pelo DOM.
             presencaApp: (() => { try { return window.Presenca?.diag?.() || null; } catch (e) { return { erro: String(e && e.message) }; } })(),
             // PRIMEIRA coisa a olhar. Vazio = nenhuma invariante conhecida
             // quebrada; não significa "está tudo bem", significa "não é nenhum
@@ -11479,7 +11507,11 @@ const presencaWme = {
     enviadas: 0,
     falhas: 0,
     ultimaFalha: null,
+    falhaAnotada: null,     // a última falha que foi pro diário, e quando (ver o limitador)
+    falhaAnotadaEm: 0,
     marcaPerdida: false,
+    perfilVisivel: null,    // o que o `/Session` disse da visibilidade na última leitura
+    perfilEm: 0,
 };
 
 function presencaWmeDaAcao(placeDaAcao) {
@@ -11522,7 +11554,10 @@ function presencaWmeAoResponder(presenca, result) {
         if (!r) return;
         if (r.ok) {
             presencaWme.enviadas++;
-            if (presenca.visivel === true) presencaWme.ligarNaProxima = false;
+            if (presenca.visivel === true) {
+                presencaWme.ligarNaProxima = false;
+                dfato('presencaWme.visivel', { ligou: true, via: 'carona', marca: r.marca });
+            }
             // O Waze devolve a posição gravada: se os dígitos voltarem diferentes,
             // a marca de quem está no app se perdeu (o dia em que ele arredondar).
             if (r.marca === false && !presencaWme.marcaPerdida) {
@@ -11532,6 +11567,17 @@ function presencaWmeAoResponder(presenca, result) {
         } else {
             presencaWme.falhas++;
             presencaWme.ultimaFalha = r.categoria || 'erro';
+            // No diário, a falha NOVA (categoria que ainda não entrou) e, da
+            // mesma, uma a cada 10 min. Zerar no sucesso não serve: com o Waze
+            // falhando uma escrita sim, outra não, cada falha virava uma linha —
+            // até duas por minuto, pelo freio de 30 s — e empurrava o resto do
+            // anel (120) pra fora em uma hora. O total fica em `falhas`.
+            const agora = Date.now();
+            if (presencaWme.falhaAnotada !== presencaWme.ultimaFalha || agora - presencaWme.falhaAnotadaEm >= 10 * 60000) {
+                presencaWme.falhaAnotada = presencaWme.ultimaFalha;
+                presencaWme.falhaAnotadaEm = agora;
+                dfato('presencaWme.falhou', { categoria: presencaWme.ultimaFalha, visivel: presenca.visivel === true, total: presencaWme.falhas });
+            }
         }
     } catch (e) { /* diagnóstico nunca derruba a ação */ }
 }
@@ -11541,8 +11587,11 @@ function presencaWmeAoResponder(presenca, result) {
 // decide é a pessoa, no app (ver o cabeçalho desta seção).
 function presencaWmeAoCarregarPerfil(visivel) {
     if (typeof visivel !== 'boolean') return;   // servidor antigo: não decide nada
+    presencaWme.perfilVisivel = visivel;
+    presencaWme.perfilEm = Date.now();
     if (AppState.preferences.presenca === false) return;   // desligado: o app não mexe no WME
     presencaWme.ligarNaProxima = !visivel;
+    if (!visivel) dfato('presencaWme.visivel', { perfil: false, ligarNaProxima: true });
 }
 
 // A pessoa desligou o "Ver quem está na fila": some do WME na hora. É a única
@@ -11551,7 +11600,10 @@ function presencaWmeDesligar() {
     presencaWme.ligarNaProxima = false;
     const id = AppState.profile && AppState.profile.id;
     if (id === null || id === undefined || !API.getSession()) return;
-    API.presencaWaze({ userId: String(id), visivel: false }).catch(() => {});
+    API.presencaWaze({ userId: String(id), visivel: false })
+        .then((r) => dfato('presencaWme.visivel', { desligou: true, via: 'interruptor', ok: !!(r && r.success),
+            ...(r && r.success ? {} : { categoria: (r && r.errorCategory) || 'sem resposta' }) }))
+        .catch(() => {});
 }
 
 // Religou à mão: a próxima ação liga a visibilidade de carona, sem esperar o
@@ -11559,6 +11611,7 @@ function presencaWmeDesligar() {
 function presencaWmeReligar() {
     presencaWme.ligarNaProxima = true;
     presencaWme.ultimaEm = 0;
+    dfato('presencaWme.visivel', { religou: true, via: 'interruptor' });
 }
 
 function presencaWmeZerar() {
@@ -11567,7 +11620,11 @@ function presencaWmeZerar() {
     presencaWme.enviadas = 0;
     presencaWme.falhas = 0;
     presencaWme.ultimaFalha = null;
+    presencaWme.falhaAnotada = null;
+    presencaWme.falhaAnotadaEm = 0;
     presencaWme.marcaPerdida = false;
+    presencaWme.perfilVisivel = null;
+    presencaWme.perfilEm = 0;
 }
 
 function presencaWmeDiag() {
@@ -11580,6 +11637,10 @@ function presencaWmeDiag() {
         ultimaFalha: presencaWme.ultimaFalha,
         marcaPerdida: presencaWme.marcaPerdida,
         ultimaHaS: presencaWme.ultimaEm ? Math.round((Date.now() - presencaWme.ultimaEm) / 1000) : null,
+        // O que o `/Session` disse da visibilidade (e há quanto tempo): com o
+        // interruptor ligado, `false` aqui vira "ligar na próxima ação".
+        perfilVisivel: presencaWme.perfilVisivel,
+        perfilHaS: presencaWme.perfilEm ? Math.round((Date.now() - presencaWme.perfilEm) / 1000) : null,
     };
 }
 

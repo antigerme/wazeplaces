@@ -126,7 +126,10 @@ test('a leitura do modo dev NÃO passa por `window.` (gotcha #64)', () => {
   // Sem comentários: o próprio comentário do conserto CITA `window.AppState`
   // pra explicar o que não fazer, e o guard reprovava o texto que o documenta.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
-  const i = semComentarios.indexOf('_guardaCorpo()');
+  // A DEFINIÇÃO, e não a primeira ocorrência: o `_semSegredo` passou a CHAMAR
+  // o `_guardaCorpo()` antes dela (gotcha #67, guard amarrado na posição).
+  const i = semComentarios.indexOf('_guardaCorpo() {');
+  assert.ok(i > 0, 'sumiu a definição do _guardaCorpo');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('},', i));
   assert.ok(!/window\.AppState/.test(bloco),
     'voltou a ler `window.AppState` — em script clássico isso é sempre undefined');
@@ -829,7 +832,7 @@ test('cada captura leva o `computado` e os ALERTAS daquele instante', () => {
   const cap = fatiarFn(semCom, 'dlogCapturar');
   const iTela = cap.indexOf('...dlogTelaAtual(),');
   const iInst = cap.indexOf('...diagNoInstante(),');
-  // O `dom` sai SEM as conversas (dado privado de terceiro), pelo helper.
+  // O `dom` sai pelo helper, a fonte única da cópia.
   const iDom = cap.indexOf('dom: domParaDiagnostico()');
   assert.ok(iTela > 0 && iInst > iTela, 'a captura deixou de rodar as sentinelas no instante');
   assert.ok(iDom > iInst, 'as sentinelas têm que rodar ANTES de copiar o `dom` (é o mesmo instante)');
@@ -882,56 +885,92 @@ test('o diário diz desde quando o esqueleto está lá, e quando o primeiro card
     'o primeiro card é anotado DEPOIS de o esqueleto sair');
 });
 
-// ═══ a conversa não entra no diagnóstico (fase 3) ════════════════════════════
-test('a conversa é PRIVADA: o texto e o contexto saem do corpo registrado, e a resposta nem com o dev', async () => {
-  // O diagnóstico é um arquivo que viaja por WhatsApp. A fila pública do mapa
-  // já vai nele (com o dev ligado); a conversa entre duas pessoas, não — nem a
-  // minha mensagem, nem o histórico, nem o token do tempo real.
-  const api = montar({ corpo: '{"success":true,"mensagens":[{"texto":"PRIVADO_DELA"}],"chat":{"token":"TOKEN_X"}}', devAtivo: true });
-  await api._post('chat', { sessionToken: 'x', acao: 'enviar', texto: 'PRIVADO_MEU', contexto: { card: '{"name":"LOCAL_X"}' }, para: '1' });
+// ═══ a conversa no diagnóstico: inteira no modo dev, só o tamanho fora dele ════
+// Privacidade NÃO é critério no modo dev (decisão do owner, 2026-09-24): o
+// relatório existe pra entender o relato de quem testa. Fora do modo dev o anel
+// roda pra TODO editor, o tempo todo, e aí da conversa fica só o tamanho. A
+// CREDENCIAL do tempo real (token e chave) sai como marcador nos dois casos.
+test('modo dev: a conversa e a resposta do chat entram INTEIRAS, com a credencial do tempo real mascarada', async () => {
+  const corpo = '{"success":true,"mensagens":[{"texto":"TEXTO_DELA"}],"chat":{"token":"TOKEN_X","chave":"CHAVE_X","base":"https://x/","expiraEm":1}}';
+  const api = montar({ corpo, devAtivo: true });
+  await api._post('chat', { sessionToken: 'x', acao: 'enviar', texto: 'TEXTO_MEU', contexto: { card: '{"name":"LOCAL_X"}' }, para: '1' });
   await api._post('presenca-app', { sessionToken: 'x', pais: 30 });
   const tudo = JSON.stringify(api.chamadas);
-  for (const s of ['PRIVADO_MEU', 'PRIVADO_DELA', 'TOKEN_X', 'LOCAL_X']) assert.ok(!tudo.includes(s), `o registro levou ${s}`);
-  assert.equal(api.chamadas[0].corpoReq.texto, '[mensagem · 11 caracteres]', 'o TAMANHO é o que depura: ele tem que ficar');
-  assert.equal(api.chamadas[0].corpoReq.acao, 'enviar', 'o resto do pedido tem que continuar legível');
-  assert.equal(api.chamadas[0].corpoResposta, undefined);
-  assert.equal(api.chamadas[1].corpoResposta, undefined);
-  // Controle: a rota pública, com o dev ligado, segue guardando o corpo.
-  await api._post('buscar-places', {});
-  assert.ok(api.chamadas[2].corpoResposta, 'o controle não guardou corpo — o teste não distinguiria');
+  for (const s of ['TEXTO_MEU', 'TEXTO_DELA', 'LOCAL_X']) assert.ok(tudo.includes(s), `o modo dev deixou ${s} de fora`);
+  for (const s of ['TOKEN_X', 'CHAVE_X']) assert.ok(!tudo.includes(s), `a credencial do tempo real foi pro registro: ${s}`);
+  assert.match(api.chamadas[1].corpoResposta, /\[credencial do tempo real\]/, 'o marcador tem que ficar no lugar do token');
+  assert.match(api.chamadas[1].corpoResposta, /"base":"https:\/\/x\/"/, 'o resto do provedor (base, prazo) é o que depura: fica');
+  assert.equal(api.chamadas[0].corpoReq.sessionToken, '[token — ver localStorage]', 'o token da sessão segue fora do corpo do pedido');
 });
 
-test('o DOM do diagnóstico sai SEM a conversa e sem a prévia da lista — com cifrão e tudo', () => {
-  // Troca por TEXTO dentro do `outerHTML` da página: o `outerHTML` do elemento
-  // é trecho exato do da página. O cifrão na mensagem é o caso que um `replace`
-  // por regex (em vez de texto) quebraria.
+test('SEM o modo dev: da conversa fica só o tamanho, e resposta nenhuma', async () => {
+  const api = montar({ corpo: '{"success":true,"mensagens":[{"texto":"TEXTO_DELA"}],"chat":{"token":"TOKEN_X"}}', devAtivo: false });
+  await api._post('chat', { sessionToken: 'x', acao: 'enviar', texto: 'TEXTO_MEU', contexto: { card: '{"name":"LOCAL_X"}' }, para: '1' });
+  const tudo = JSON.stringify(api.chamadas);
+  for (const s of ['TEXTO_MEU', 'TEXTO_DELA', 'TOKEN_X', 'LOCAL_X']) assert.ok(!tudo.includes(s), `sem o modo dev o registro levou ${s}`);
+  assert.equal(api.chamadas[0].corpoReq.texto, '[mensagem · 9 caracteres]', 'o TAMANHO é o que depura: ele tem que ficar');
+  assert.equal(api.chamadas[0].corpoReq.acao, 'enviar', 'o resto do pedido tem que continuar legível');
+  assert.equal(api.chamadas[0].corpoResposta, undefined);
+});
+
+test('o DOM do diagnóstico vai INTEIRO (modo dev), e passa por UM lugar só', () => {
   const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  const ini = APP.indexOf('const DIAG_PRIVADOS');
+  const ini = APP.indexOf('function domParaDiagnostico()');
   const fim = APP.indexOf('\nfunction diagSeguro(');
   assert.ok(ini > 0 && fim > ini, 'sumiu o domParaDiagnostico');
-  const el = (id, dentro, n) => ({
-    innerHTML: dentro, childElementCount: n,
-    outerHTML: `<div id="${id}" class="x">${dentro}</div>`,
-    cloneNode() {
-      const attrs = {};
-      return { setAttribute: (k, v) => { attrs[k] = v; }, get outerHTML() { return `<div id="${id}" class="x"${Object.entries(attrs).map(([k, v]) => ` ${k}="${v}"`).join('')}></div>`; } };
-    },
-  });
-  const els = {
-    conversaMsgs: el('conversaMsgs', '<p>PRIVADO custa $& e $1</p><p>mais</p>', 2),
-    presencaLista: el('presencaLista', '<li>📍 PREVIA</li>', 1),
-  };
-  const pagina = `<html><body><h1>ok</h1>${els.conversaMsgs.outerHTML}<ul>${els.presencaLista.outerHTML}</ul></body></html>`;
-  const document = { documentElement: { outerHTML: pagina }, getElementById: (id) => els[id] || null };
-  const f = new Function('document', APP.slice(ini, fim) + '\nreturn domParaDiagnostico;')(document);
-  const dom = f();
-  assert.ok(!dom.includes('PRIVADO') && !dom.includes('PREVIA'), 'a conversa foi pro diagnóstico');
-  assert.match(dom, /<div id="conversaMsgs" class="x" data-diag-omitido="2"><\/div>/, 'o elemento tem que ficar, vazio e com a contagem');
-  assert.match(dom, /<h1>ok<\/h1>/, 'o resto da página sumiu junto');
-  // E TODO lugar que copia a página passa pelo helper: o `outerHTML` cru da
-  // página só pode existir dentro dele (o relatório e cada captura).
+  const pagina = '<html><body><div id="conversaMsgs"><p>TEXTO custa $& e $1</p></div><ul id="presencaLista"><li>PREVIA</li></ul></body></html>';
+  const f = new Function('document', APP.slice(ini, fim) + '\nreturn domParaDiagnostico;')({ documentElement: { outerHTML: pagina } });
+  assert.equal(f(), pagina, 'a cópia da página tem que sair igual à página — a conversa e a lista entram');
+  // E TODO lugar que copia a página passa pelo helper: o dia em que algo
+  // precisar sair da cópia, é um lugar só.
   const codigo = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   const crus = codigo.match(/document\.documentElement\.outerHTML/g) || [];
-  assert.equal(crus.length, 1, `a página é copiada crua em ${crus.length} lugares — a conversa vazaria por um deles`);
+  assert.equal(crus.length, 1, `a página é copiada crua em ${crus.length} lugares — fora do helper`);
   assert.equal((codigo.match(/dom: domParaDiagnostico\(\)/g) || []).length, 2, 'o relatório e as capturas têm que usar o helper');
+});
+
+// ── O `codigo` enxuto (v2026.09.24-02) ───────────────────────────────────────
+// O JS e o HTML inteiros eram quase metade do .zip e respondiam uma pergunta só:
+// "este aparelho roda versão velha?". Tamanho, hash e versão respondem igual.
+test('código: tamanho, hash e versão de cada arquivo — o CORPO, só do CSS (é dele que o diag-tela remonta a tela)', async () => {
+  const enxuto = new Function(`return async ${fatiarFn(APP, 'diagCodigoEnxuto')};`)();
+  const hash = async (t) => 'h' + t.length;
+  const HTML_SERVIDO = '<!DOCTYPE html><html>' + 'x'.repeat(50) + '</html>';
+  const codigo = {
+    'https://x.dev/': { http: 200, corpo: HTML_SERVIDO },
+    'https://x.dev/js/min/version.js': { http: 200, corpo: 'const APP_VERSION="2026092402";function verLabel(i){}' },
+    'https://x.dev/service-worker.js': { http: 200, corpo: "const CACHE_NAME='waze-places-2026092401';self.x=1" },
+    'https://x.dev/js/min/app.js': { http: 200, corpo: 'const v=typeof APP_VERSION<"u"?APP_VERSION:"?";' },
+    'https://x.dev/css/app.css': { http: 200, corpo: '.a{b:c}' },
+    'https://x.dev/manifest.json': { erro: 'Failed to fetch' },
+  };
+  await enxuto(codigo, hash);
+  const html = codigo['https://x.dev/'];
+  assert.equal(html.corpo, undefined, 'o HTML seguiu inteiro no relatório');
+  assert.equal(html.bytes, HTML_SERVIDO.length);
+  assert.equal(html.hash, 'h' + HTML_SERVIDO.length, 'o hash tem que ser o da MESMA função do cacheVsRede');
+  assert.equal(codigo['https://x.dev/js/min/version.js'].versao, '2026092402');
+  assert.equal(codigo['https://x.dev/service-worker.js'].versao, '2026092401', 'a versão do worker (o CACHE_NAME) sumiu');
+  assert.equal(codigo['https://x.dev/js/min/app.js'].versao, undefined, 'quem só LÊ a versão não a declara');
+  assert.equal(codigo['https://x.dev/js/min/app.js'].corpo, undefined);
+  assert.equal(codigo['https://x.dev/css/app.css'].corpo, '.a{b:c}', 'o CSS perdeu o corpo — o diag-tela remonta a tela sem estilo');
+  assert.deepEqual(codigo['https://x.dev/manifest.json'], { erro: 'Failed to fetch' }, 'o arquivo que falhou virou outra coisa');
+});
+
+test('código: o enxugamento roda DEPOIS do cacheVsRede, que precisa do corpo pra comparar', () => {
+  const corpo = fatiarFn(APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), 'diagCorpo');
+  const chamadas = corpo.match(/^\s+await diagCodigoEnxuto\(codigo, hash\);$/gm) || [];
+  assert.equal(chamadas.length, 1, 'o relatório tem que enxugar o `codigo` exatamente uma vez');
+  const iEnxuto = corpo.search(/^\s+await diagCodigoEnxuto\(codigo, hash\);$/m);
+  const iComparar = corpo.indexOf('cacheVsRede[u] = { aparelho: ha, servidor: hb');
+  assert.ok(iComparar > 0 && iEnxuto > iComparar, 'enxugar ANTES de comparar deixa todo arquivo "sem corpo local"');
+});
+
+test('código: o cacheVsRede compara SÓ o que entrou no `codigo` — a fonte e a /api/* não viram "sem corpo local"', () => {
+  const corpo = fatiarFn(APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), 'diagCorpo');
+  const i = corpo.indexOf('const cacheVsRede = {};');
+  assert.ok(i > 0, 'sumiu o cacheVsRede');
+  const laco = /for \(const u of ([^)]+\)?)\) \{/.exec(corpo.slice(i));
+  assert.ok(laco, 'sumiu o laço do cacheVsRede');
+  assert.equal(laco[1], 'Object.keys(codigo)', 'o cacheVsRede voltou a comparar o que o coletor pula de propósito');
 });

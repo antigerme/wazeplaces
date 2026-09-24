@@ -1195,6 +1195,22 @@ try {
     capturas: momentos.length,
     capturaSemRede: momentos.filter((m) => m.rede?.online === false && m.offline?.ligado === true).length,
     redeNoDiario: (d.diario || []).filter((e) => /^rede\./.test(e.k)).map((e) => e.k),
+    // O `codigo` enxuto (v2026.09.24-02): tamanho, hash e versão; o corpo, só do
+    // CSS. E o `cacheVsRede` tem que ter comparado ANTES de o corpo sair.
+    app: d.app?.versao,
+    codigo: (() => {
+      const e = Object.entries(d.codigo || {});
+      return {
+        n: e.length,
+        comCorpo: e.filter(([, v]) => v && typeof v.corpo === 'string').map(([u]) => u.replace(/^https?:\/\/[^/]+/, '')),
+        semHash: e.filter(([, v]) => v && !v.erro && !v.hash).length,
+        versoes: [...new Set(e.map(([, v]) => v && v.versao).filter(Boolean))],
+      };
+    })(),
+    cvr: (() => {
+      const e = Object.values(d.cacheVsRede || {});
+      return { n: e.length, semCorpoLocal: e.filter((v) => v && v.erro === 'sem corpo local').length };
+    })(),
   };
 } catch (e) {
   relatorio = { erro: String((e && e.message) || e).slice(0, 200) };
@@ -1215,6 +1231,12 @@ diz('o RELATÓRIO de verdade (baixado em ZIP, lido pela ferramenta) traz as peç
 diz('e leva o que aconteceu: a captura SEM rede e a queda e a volta no diário',
   relatorio.capturaSemRede >= 1 && relatorio.redeNoDiario?.includes('rede.caiu')
   && relatorio.redeNoDiario.includes('rede.voltou'), JSON.stringify(relatorio));
+diz('o CÓDIGO sai enxuto (tamanho, hash e versão; o corpo só do CSS) e o cacheVsRede segue comparando',
+  relatorio.codigo?.n > 0 && relatorio.codigo.comCorpo.length >= 1
+  && relatorio.codigo.comCorpo.every((u) => /\.css(\?|$)/.test(u)) && relatorio.codigo.semHash === 0
+  && relatorio.codigo.versoes.length === 1 && relatorio.codigo.versoes[0] === relatorio.app
+  && relatorio.cvr?.n > 0 && relatorio.cvr.semCorpoLocal === 0,
+  JSON.stringify({ app: relatorio.app, codigo: relatorio.codigo, cvr: relatorio.cvr }));
 diz('no estado são, as duas sentinelas NOVAS ficam caladas no relatório',
   Array.isArray(relatorio.alertas) && !relatorio.alertas.includes('fotoEscondidaComAviso')
   && !relatorio.alertas.includes('tileGuardadoFalhou'), JSON.stringify(relatorio.alertas));

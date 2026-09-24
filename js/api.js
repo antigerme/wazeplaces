@@ -104,18 +104,38 @@ const API = {
             if (c.sessionToken) c.sessionToken = '[token — ver localStorage]';
             if (c.cookies) c.cookies = '[cookies do login — nunca guardados]';
             if (c.code) c.code = '[código de pareamento]';
-            // A conversa é dado PRIVADO — a minha mensagem e o pedido que vai
-            // junto. O registro guarda o tamanho, que é o que depura.
-            if (typeof c.texto === 'string') c.texto = `[mensagem · ${c.texto.length} caracteres]`;
-            if (c.contexto) c.contexto = '[contexto da mensagem]';
+            // Sem o modo dev o registro roda pra TODO editor, o tempo todo: da
+            // conversa (a mensagem e o pedido que vai junto) fica só o tamanho,
+            // que é o que depura. Com o modo dev ela vai inteira — privacidade
+            // não é critério ali (decisão do owner, 2026-09-24).
+            if (!this._guardaCorpo()) {
+                if (typeof c.texto === 'string') c.texto = `[mensagem · ${c.texto.length} caracteres]`;
+                if (c.contexto) c.contexto = '[contexto da mensagem]';
+            }
             return c;
         } catch (e) { return '[não serializável]'; }
     },
 
-    // Rotas cuja RESPOSTA nunca entra no registro, nem com o modo dev: o
-    // histórico e a prévia das conversas (dado privado de terceiro) e o token
-    // do tempo real (credencial). O registro fica (rota, status, tempo).
-    _ROTAS_PRIVADAS: ['chat', 'presenca-app'],
+    // Rotas cuja resposta traz a CREDENCIAL do tempo real (o token de 24 h do
+    // chat e a chave). Com o modo dev a resposta entra no registro — é ela que
+    // explica "não vejo ninguém" e "a conversa sumiu da lista" —, mas esses dois
+    // campos saem como marcador: credencial não ajuda a depurar, e o prazo dela
+    // já vai no `presencaApp.token` do resumo.
+    _ROTAS_COM_CREDENCIAL: ['chat', 'presenca-app'],
+    _semCredencial(bruto) {
+        try {
+            const o = JSON.parse(bruto);
+            const anda = (v) => {
+                if (!v || typeof v !== 'object') return;
+                for (const k of Object.keys(v)) {
+                    if ((k === 'token' || k === 'chave') && typeof v[k] === 'string') v[k] = '[credencial do tempo real]';
+                    else anda(v[k]);
+                }
+            };
+            anda(o);
+            return JSON.stringify(o);
+        } catch (e) { return '[resposta que não é JSON]'; }
+    },
 
     // Corpo de resposta só entra com o modo dev ATIVO — que é exatamente quem
     // está com problema e ligou pra reproduzir. Guardar sempre poria a fila
@@ -226,8 +246,8 @@ const API = {
                 naoEraJson = bruto.slice(0, 600);
                 throw new Error('resposta não é JSON (HTTP ' + http + ')');
             } finally {
-                const guarda = this._guardaCorpo() && !this._ROTAS_PRIVADAS.includes(endpoint);
-                const corpo = guarda ? bruto : null;
+                const corpo = !this._guardaCorpo() ? null
+                    : this._ROTAS_COM_CREDENCIAL.includes(endpoint) ? this._semCredencial(bruto) : bruto;
                 this._registrar(endpoint, _t0, http, data, {
                     cab,
                     naoEraJson,
