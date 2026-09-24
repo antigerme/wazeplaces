@@ -3499,7 +3499,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       }
       const chaves = secoes.map((s) => s.chave);
       checa(chaves.indexOf('help.presenca.title') === chaves.indexOf('help.howToUse.title') + 1,
-        `${onde}: "Quem está na app" não está logo depois de "Como usar"`, chaves.join(' → '));
+        `${onde}: "Quem está no app" não está logo depois de "Como usar"`, chaves.join(' → '));
       if (ap === 'Pixel 7' && lang === 'pt') {
         // CONTRAPROVA: a lista com a classe de ANTES tem que aparecer na medida.
         await page.evaluate(() => {
@@ -5846,7 +5846,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   checa(!!r2, `${id}: o ✓ não chegou à rede`);
   checa(r2 && !('presenca' in r2.corpo), `${id}: a 2ª ação em menos de 30 s levou posição (o freio sumiu)`, JSON.stringify(r2 && r2.corpo));
 
-  // 3. Desligar o "Ver quem está na fila": some do WME NA HORA.
+  // 3. Desligar o "Ver quem está no app": some do WME NA HORA.
   await page.evaluate(() => { const c = document.getElementById('prefPresenca'); c.checked = false; c.dispatchEvent(new Event('change')); });
   const off = await esperarPedido('presenca-waze', 1);
   checa(!!off && off.corpo.visivel === false && off.corpo.userId === '12444348' && !('posicao' in off.corpo),
@@ -5875,7 +5875,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const estado = await page.evaluate(() => ({ presenca: AppState.preferences.presenca, off: AppState.preferences.presencaOffEm,
                                               chk: document.getElementById('prefPresenca').checked, ligar: presencaWme.ligarNaProxima }));
   checa(estado.presenca !== false && estado.chk === true && estado.off === antes,
-    `${id}: o invisível do WME desligou o "Ver quem está na app"`, JSON.stringify(estado));
+    `${id}: o invisível do WME desligou o "Ver quem está no app"`, JSON.stringify(estado));
   checa(estado.ligar === true, `${id}: o invisível do WME não fez a app pedir pra religar`, JSON.stringify(estado));
   await page.waitForTimeout(3600);
   await page.evaluate(() => { presencaWme.ultimaEm = 0; });   // sem esperar o freio de 30 s da ação 4
@@ -5947,7 +5947,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
-  + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está na app" logo depois de "Como usar", com contraprova da lista de antes)`
+  + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`
   + `, + Perto de mim em 2 aparelhos × 2 idiomas (as 3 opções, ordem ponta a ponta, GPS concedido E negado pelo browser, e o perfil sem endereço)`

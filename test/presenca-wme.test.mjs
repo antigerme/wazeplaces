@@ -253,7 +253,7 @@ test('perfil: invisível no WME → liga sozinha, de carona na próxima ação, 
 // ainda pode estar gravado num aparelho, e é com ele que o caso se prova.
 test('perfil: invisível no WME DEPOIS de a app já tê-la ligado → o WME não desliga a app; a próxima ação religa', () => {
   const r = rodarPerfil(false, { presenca: true, presencaWmeVisto: true });
-  assert.equal(r.preferences.presenca, true, 'o WME desligou o "Ver quem está na app"');
+  assert.equal(r.preferences.presenca, true, 'o WME desligou o "Ver quem está no app"');
   assert.ok(!('presencaOffEm' in r.preferences), 'o WME carimbou um desligar que a pessoa não fez');
   assert.equal(r.presencaWme.ligarNaProxima, true, 'a próxima ação não vai religar a visibilidade');
   assert.equal(r.chk.checked, true, 'o interruptor da tela foi desligado');

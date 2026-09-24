@@ -383,3 +383,42 @@ test('selos do card: todo selo que é PALAVRA começa com maiúscula, nas 4 lín
   const dica = dict.match(/'card\.source\.MOBILE_CLIENT\.title': '([^']*)'/);
   assert.ok(dica && dica[1].length > 15, 'a dica virou rótulo curto — foi decisão?');
 });
+
+// "App" em português é MASCULINO — decisão do owner (2026-09-24): *"normalmente
+// falamos 'no app' e não 'na app'"*. O app, no app, do app, pelo app, este app,
+// um app — e a concordância junto ("o app fica aberto", "Ele rejeita…"). A UI
+// portuguesa é a brasileira (`LOCALE_POR_LANG.pt` é pt-BR); "a app" e
+// "aplicação" são o uso de Portugal. A regra pega o artigo ou a preposição
+// FEMININA colada em "app", no dicionário pt e no texto VISÍVEL do
+// index.src.html (sem comentário nem <script>: o HTML é o que aparece antes do
+// applyI18n). A concordância que vem DEPOIS ("o app está aberta") ela não
+// enxerga — essa foi revisada à mão, e é o que se confere ao escrever texto novo.
+const APP_FEMININO = /(^|[^\p{L}\p{N}_])(a|as|à|às|na|nas|da|das|pela|pelas|uma|numa|duma|esta|nesta|desta|essa|nessa|dessa|aquela|naquela|daquela|sua|nossa|minha|toda|outra|própria|mesma|nova)\s+apps?(?![\p{L}\p{N}_])/iu;
+const APLICACAO = /aplicaç(ão|ões)/iu;
+const textoVisivelDoHtml = (html) => html
+  .replace(/<!--[\s\S]*?-->/g, ' ')
+  .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+  .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+const femininoEm = (s) => APP_FEMININO.test(s) || APLICACAO.test(s);
+
+test('pt: "app" é masculino — no dicionário e no texto visível do HTML', () => {
+  // Contraprova: a regra enxerga as formas que o app tinha, e deixa passar as certas.
+  for (const errado of ['Quem está na app:', 'Para anular: sair da app.', 'Esta aplicação nunca aprova',
+    'reabra a app pra tentar', 'usar a app em 2 idiomas', 'volte à app', 'nesta app', 'A app guarda'])
+    assert.ok(femininoEm(errado), `a regra não enxerga "${errado}"`);
+  for (const certo of ['Quem está no app:', 'sair do app', 'Este app nunca aprova', 'reabra o app',
+    'Sua sessão no app venceu', 'Instalar o aplicativo', 'mande no WhatsApp', 'os apps do celular', 'para app'])
+    assert.ok(!femininoEm(certo), `a regra acusa "${certo}", que está certo`);
+
+  const noDicionario = Object.entries(DICT.pt)
+    .filter(([, v]) => femininoEm(String(v)))
+    .map(([k, v]) => `${k}: ${String(v).slice(0, 90)}`);
+  assert.deepEqual(noDicionario, [],
+    '"app" no feminino no português — no Brasil é "o app"/"no app"/"do app", e "aplicação" vira "app"');
+
+  const html = textoVisivelDoHtml(read('index.src.html'));
+  assert.ok(html.includes('data-i18n="help.presenca.title"'), 'o recorte do HTML perdeu a Ajuda — a regra estaria lendo nada');
+  const noHtml = [...html.matchAll(new RegExp(APP_FEMININO.source, 'giu'))].map((m) => m[0].trim())
+    .concat([...html.matchAll(new RegExp(APLICACAO.source, 'giu'))].map((m) => m[0]));
+  assert.deepEqual(noHtml, [], '"app" no feminino no texto visível do index.src.html');
+});

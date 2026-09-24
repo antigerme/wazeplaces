@@ -2,7 +2,7 @@
 
 Mudanças relevantes do **Waze Places**, das mais recentes pras mais antigas.
 
-A versão que a app mostra no rodapé é um **serial de zona DNS** (`YYYYMMDDnn` → exibido como `v2026.07.24-01`): data da build + revisão do dia. Ela cresce sempre e diz *de quando* é o código que está rodando no seu celular. Fonte única: `js/version.js`.
+A versão que o app mostra no fim da Ajuda é um **serial de zona DNS** (`YYYYMMDDnn` → exibido como `v2026.07.24-01`): data da build + revisão do dia. Ela cresce sempre e diz *de quando* é o código que está rodando no seu celular. Fonte única: `js/version.js`.
 
 Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
@@ -11,11 +11,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.09.24-02
 
 ### Corrigido
-- **Ajuda → Quem está na app: com a mesma letra das outras seções.** O texto dela saía maior que o do resto da Ajuda e o título vinha sem os dois-pontos que os outros têm. Agora ela segue o mesmo padrão, nos 4 idiomas.
+- **Ajuda → Quem está no app: com a mesma letra das outras seções.** O texto dela saía maior que o do resto da Ajuda e o título vinha sem os dois-pontos que os outros têm. Agora ela segue o mesmo padrão, nos 4 idiomas.
+- **Em português, "app" agora é masculino, como se fala no Brasil**: "no app", "do app", "Quem está no app", "Ver quem está no app". E onde a tela dizia "aplicação", agora diz "app".
+- **A página do projeto (o README) voltou a dizer o que o app faz.** A conversa passa pelo chat do Waze e fica guardada lá (a página dizia que ia direto de um aparelho pro outro), o Desfazer dura 3 segundos (dizia 5) e o acesso é pra nível 2+ com Area Manager (dizia 3+).
 
 ### Mudado
-- **A seção "Quem está na app" subiu pra logo depois de "Como usar"**. Antes ela era a última da Ajuda, depois das extensões de login, longe de quem procura saber o que é a pílula 👥.
-- **O "Ver quem está na app" só muda quando você mexe nele.** Ficar invisível pelo WME não desliga mais a opção na app: por padrão você aparece pra quem usa a app enquanto tria.
+- **A seção "Quem está no app" subiu pra logo depois de "Como usar"**. Antes ela era a última da Ajuda, depois das extensões de login, longe de quem procura saber o que é a pílula 👥.
+- **O "Ver quem está no app" só muda quando você mexe nele.** Ficar invisível pelo WME não desliga mais a opção no app: por padrão você aparece pra quem usa o app enquanto tria.
 
 ## v2026.09.24-01
 

@@ -1,4 +1,4 @@
-// Anistia da presença: "Ver quem está na fila" volta sozinha depois de 9 dias.
+// Anistia da presença: "Ver quem está no app" volta sozinha depois de 9 dias.
 //
 // O módulo mora no js/app.js (script de browser, não módulo), então o teste
 // FATIA a fonte e a executa num escopo de mentira — mesmo padrão do

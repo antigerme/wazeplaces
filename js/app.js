@@ -3547,7 +3547,7 @@ function diagSentinelas(comp) {
         if (sistemaEscuro && cl.includes('tema-claro') && /\bdark\b/.test(cl)) {
             diga('temaContraditorio',
                 '<html> tem `tema-claro` e `dark` juntos num sistema escuro — o fundo '
-                + 'sob a app não acompanha', { classe: cl });
+                + 'sob o app não acompanha', { classe: cl });
         }
         // 4. O armazenamento não está guardando NADA — e a app parece boa.
         //    Invariante dura: depois de entrar, o token ESTÁ no localStorage.
@@ -4841,7 +4841,7 @@ async function diagCorpo() {
     const alertas = diagSentinelas(computado);
     return {
         _leia_isto: 'Este arquivo contém o waze_session_token, que é CREDENCIAL VIVA da conta do Waze '
-            + 'de quem gerou. Trate como senha. Pra anular: sair da app, o que destrói a sessão no '
+            + 'de quem gerou. Trate como senha. Pra anular: sair do app, o que destrói a sessão no '
             + 'servidor. NÃO contém os cookies do Waze — eles são de outra origem e não ficam neste aparelho.',
         _versaoDoDiag: DIAG_VERSAO,
         _formato: DIAG_FORMATO,

@@ -2,7 +2,7 @@
 
 PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidamente os pedidos de places enviados por usuários — fotos lixo, nomes ruins, endereços errados, categorias absurdas. Arraste para rejeitar (lixo) ou marcar como lido (você decide depois no WME).
 
-> ⚠️ **Esta aplicação NUNCA aprova dados de local** — nome, categoria, endereço, posição. Isso exige ajuste no mapa e é feito no WME oficial (o botão ↗ do card abre lá). Aqui você **rejeita** ou **marca como lido**, eliminando o lixo antes que outro editor novato aprove besteira.
+> ⚠️ **Este app NUNCA aprova dados de local** — nome, categoria, endereço, posição. Isso exige ajuste no mapa e é feito no WME oficial (o botão ↗ do card abre lá). Aqui você **rejeita** ou **marca como lido**, eliminando o lixo antes que outro editor novato aprove besteira.
 >
 > A única exceção é **foto nova**: ampliando a foto no card dá pra **aprovar** ou **excluir** ali mesmo, porque essa decisão está inteira na tela — ou a foto serve, ou não serve. Só aparece para quem é **L6 + Area Manager** ou **staff** do Waze.
 
@@ -11,11 +11,11 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
 ## 📑 Índice
 
 - [🟢 Para Editores (Guia Simples)](#-para-editores-guia-simples)
-  - [O que essa app faz](#o-que-essa-app-faz)
+  - [O que esse app faz](#o-que-esse-app-faz)
   - [Como usar (a forma mais fácil)](#como-usar-a-forma-mais-fácil)
   - [Como exportar seus cookies do Waze](#como-exportar-seus-cookies-do-waze)
-  - [Usando a aplicação](#usando-a-aplicação)
-  - [Quem mais está na sua fila](#quem-mais-está-na-sua-fila)
+  - [Usando o app](#usando-o-app)
+  - [Quem mais está no app](#quem-mais-está-no-app)
   - [Instalar como app no celular](#instalar-como-app-no-celular)
   - [Quem pode usar](#quem-pode-usar)
   - [Problemas comuns](#problemas-comuns)
@@ -25,11 +25,11 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
 
 ## 🟢 Para Editores (Guia Simples)
 
-### O que essa app faz
+### O que esse app faz
 
 Quando você abre o **Issue Tracker** do Waze Map Editor, vê uma fila enorme de pedidos enviados por usuários comuns. Muitos são lixo: foto borrada, nome errado, categoria absurda. Limpar isso no WME um por um é lento.
 
-Esta aplicação mostra os pedidos em formato de **cards estilo Tinder**:
+Este app mostra os pedidos em formato de **cards estilo Tinder**:
 
 - **Arraste para a esquerda (←)** → Rejeita o pedido (lixo)
 - **Arraste para a direita (→)** → Marca como lido (você decide depois no WME)
@@ -37,24 +37,24 @@ Esta aplicação mostra os pedidos em formato de **cards estilo Tinder**:
 - **Botões ✕ / ↑ / ✓** no rodapé do card fazem o mesmo (o gesto é atalho)
 - **Botão ↗ no card** → Abre o local direto no WME para você ajustar e aprovar manualmente
 
-Funciona no celular, no tablet ou no PC, e pode ser **instalada como app no seu celular** (sem precisar de Play Store / App Store).
+Funciona no celular, no tablet ou no PC, e pode ser **instalado no seu celular** como qualquer app (sem precisar de Play Store / App Store).
 
 ### Como usar (a forma mais fácil)
 
-Você **não precisa instalar nada** — a app roda hospedada. Basta acessar:
+Você **não precisa instalar nada** — o app roda hospedado. Basta acessar:
 
 👉 **https://places.wazebrasil.com**
 
 Aí é só fazer login com seus cookies do Waze (veja abaixo). A forma mais cômoda no desktop é a extensão de login automático:
 
-- **Login automático (recomendado, Chrome):** instale a extensão **WazePlaces Rapid Access** ([Chrome Web Store](https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn), feita por [@daflash](https://www.waze.com/pt-BR/user/editor/daflash) da comunidade WME). Estando logado no WME, clique nela e a app abre já autenticada — sem copiar cookies.
+- **Login automático (recomendado, Chrome):** instale a extensão **WazePlaces Rapid Access** ([Chrome Web Store](https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn), feita por [@daflash](https://www.waze.com/pt-BR/user/editor/daflash) da comunidade WME). Estando logado no WME, clique nela e o app abre já autenticado — sem copiar cookies.
 - **Login manual:** exporte seu `cookies.txt` do Waze (instruções abaixo) e faça upload / cole na tela inicial.
 
 > 📱 **No celular** (onde não há extensões): use o login manual com o `cookies.txt`.
 
 ### Como exportar seus cookies do Waze
 
-A app precisa dos seus cookies de login para acessar a fila de pedidos no seu nome.
+O app precisa dos seus cookies de login para acessar a fila de pedidos no seu nome.
 
 #### Chrome / Edge / Brave
 
@@ -72,7 +72,7 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 4. Clique em **Export cookies.txt**
 5. Vai baixar o arquivo
 
-### Usando a aplicação
+### Usando o app
 
 1. Faça login (extensão de login automático ou upload/colar do `cookies.txt`).
 2. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"**, seu **avatar do Waze e nome** aparecem no topo, e os cards começam a carregar (Brasil é o padrão).
@@ -81,7 +81,7 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
    - **← (esquerda):** Rejeitar (lixo)
    - **→ (direita):** Marcar como lido
    - **↑ (cima):** Pular (não chama API, só passa pro próximo)
-5. Cometeu um erro? Tem uma **janela de 5 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
+5. Cometeu um erro? Tem uma **janela de 3 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
 6. O botão de **ajuda (?)** no topo abre um painel com atalhos, legenda, instruções e o botão **"Sair"**.
 
 **Coisas que aparecem no card:**
@@ -92,18 +92,17 @@ A app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 
 **Caixa de estatísticas:** **Lidos** · **Rejeitados** · **Pulados** · **Restam**. "Restam" mostra quantos pedidos ainda estão pendentes no Waze; diminui a cada `Lido`/`Rejeitado` (pular não diminui). Sinal `+` (ex: `215+`) = ainda há mais páginas a buscar.
 
-### Quem mais está na sua fila
+### Quem mais está no app
 
-Quando outro editor está triando a **mesma fila** que você (mesma região, país e estado), aparece uma pílula 👥 no topo com quantos são. Toque nela pra ver quem é — nome, nível e se é Area Manager — e toque num nome pra conversar.
+A pílula 👥 no topo mostra quantos editores estão usando o app no mesmo país que você, nos últimos 15 minutos. Toque nela pra ver quem é e conversar.
 
-- **A mensagem vai direto de um aparelho pro outro**, cifrada, sem passar pelo servidor da aplicação e sem ficar guardada em lugar nenhum. Fechou a conversa, acabou.
-- **Enquanto você está conectado**, o servidor sabe o seu nome do WME, o seu nível, se você é AM e a fila escolhida. Nada disso é gravado, e some assim que você sai.
-- **O nome vem do Waze**, conferido e assinado pelo servidor — ninguém consegue se apresentar na lista como um editor que não é.
-- Vem ligado. Pra desligar: **Filtros e preferências → Preferências → "Ver quem está na fila"**.
+- **As conversas passam pelo chat do Waze**: ficam guardadas lá e também aparecem no chat do WME de vocês dois.
+- **Enquanto você tria**, o WME mostra seu nome e nível no mapa, no lugar do pedido que está na sua tela, até uns 15 minutos depois da última ação. O nosso servidor não guarda nada disso.
+- Vem ligado. Pra desligar: **Filtros e Preferências → Preferências → "Ver quem está no app"**.
 
 ### Instalar como app no celular
 
-Depois de abrir a app no celular:
+Depois de abrir o app no celular:
 
 - **Chrome / Edge:** Toque no menu (3 pontinhos) → **"Instalar aplicativo"** ou **"Adicionar à tela inicial"**
 - **Safari (iPhone):** Toque no ícone de compartilhar (quadrado com seta) → **"Adicionar à Tela de Início"**
@@ -112,22 +111,22 @@ Vai virar um ícone normal no seu celular, abrindo em tela cheia sem barra do na
 
 ### Quem pode usar
 
-Esta aplicação é **restrita** a editores do Waze com perfil mais avançado, para reduzir risco de uso indevido por editores novatos:
+Este app é **restrito** a editores do Waze com perfil mais avançado, para reduzir risco de uso indevido por editores novatos:
 
 - **Staff do Waze** (qualquer nível) → libera direto
-- **Area Manager** com nível **3 ou maior** → libera
+- **Area Manager** com nível **2 ou maior** → libera
 
-Editores nível 1-2, ou sem badge de Area Manager, recebem a mensagem **"Acesso restrito"** ao tentar fazer login.
+Editores nível 1, ou sem badge de Area Manager, recebem a mensagem **"Acesso restrito"** ao tentar fazer login.
 
 ### Problemas comuns
 
 | Problema | O que fazer |
 |----------|-------------|
-| **"Acesso restrito"** | Você precisa ser Staff do Waze ou Area Manager nível 3+. Verifique seu perfil no WME |
+| **"Acesso restrito"** | Você precisa ser Staff do Waze ou Area Manager nível 2+. Verifique seu perfil no WME |
 | **"Cookies expirados ou inválidos"** | Faça logout do WME, faça login de novo, exporte os cookies novamente |
 | **"Token CSRF não encontrado"** | O arquivo `cookies.txt` está incompleto. Confirme que você fez login antes de exportar |
 | **"Não há places para mostrar"** | Não tem nada na fila daquela região/país. Tente outro país no menu de filtros |
-| **A app não atualiza para a versão nova** | No navegador: `Ctrl+Shift+R`. No celular: geralmente atualiza sozinha; se não, feche e reabra o app |
+| **O app não atualiza para a versão nova** | No navegador: `Ctrl+Shift+R`. No celular: geralmente atualiza sozinho; se não, feche e reabra o app |
 
 ---
 
@@ -220,6 +219,8 @@ Para simular o ambiente Cloudflare localmente (Worker + KV): `npx wrangler dev` 
 
 ### Deploy
 
+> **A sala, o TURN e o `/sala` estão sem uso desde a v2026.09.24-01 (fase 3).** A lista de quem está no app e a conversa passaram a ser as do WME, e o app não pede mais crachá, sala nem TURN. O servidor ainda tem essas peças, sem ninguém chamando, até a fase 4 removê-las, e as instruções abaixo sobre o Durable Object `SALA`, o TURN e o proxy do `/sala` saem junto. Até lá, configurá-las não muda nada pra quem usa o app.
+
 #### Opção A — Cloudflare Workers (recomendado)
 
 É um **Worker com static assets** (mesmo modelo do botequei): `worker/index.mjs` roteia `/api/*` e serve o frontend via binding `ASSETS`. Deploy por CLI ou conectando o repo no dashboard.
@@ -302,7 +303,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' 'https://places.seudominio.com/sala?s=
 | **500** | O binding `SALA` não foi aplicado — olhe o log do build |
 | **400** | Chegou no Worker mas sem o parâmetro `s` — confira a URL do comando |
 
-O TURN não dá pra conferir por fora (a credencial só sai junto do crachá, que exige sessão). O teste dele é a app: com dois editores na mesma fila, a conversa conecta.
+O TURN não dá pra conferir por fora (a credencial só sai junto do crachá, que exige sessão) e, desde a fase 3, nem pelo app, que não pede mais crachá.
 
 > **Fork / instância própria:** o `wrangler.jsonc` fixa `routes` com o Custom Domain `places.wazebrasil.com` (domínio da instância oficial). Em outra conta esse `wrangler deploy` falha — ajuste o `pattern` pro seu próprio domínio ou remova o bloco `routes` inteiro (aí o Worker fica no subdomínio `*.workers.dev`).
 
@@ -356,7 +357,7 @@ sudo systemctl enable --now wazeplaces
     # A sala de presença é WebSocket, e ela precisa vir ANTES da regra genérica
     # — a primeira ProxyPass que casa é a que vale. Sem estas duas linhas o
     # estático responde 200 normalmente e SÓ a presença quebra, o que faz o
-    # problema parecer da aplicação. Medido: com o vhost sem elas o handshake
+    # problema parecer do app. Medido: com o vhost sem elas o handshake
     # falha; com elas, o editor entra na sala.
     ProxyPass        /sala ws://127.0.0.1:8080/sala
     ProxyPassReverse /sala ws://127.0.0.1:8080/sala
@@ -413,9 +414,9 @@ Environment=TURN_SECRET=<o mesmo static-auth-secret>
 Environment=TURN_URLS=turn:places.seudominio.com:3478,turns:places.seudominio.com:5349
 ```
 
-A aplicação emite credenciais efêmeras (usuário = expiração unix, senha = `HMAC-SHA1` do segredo) no padrão `use-auth-secret` do coturn — não há lista de usuários pra manter.
+O servidor emite credenciais efêmeras (usuário = expiração unix, senha = `HMAC-SHA1` do segredo) no padrão `use-auth-secret` do coturn — não há lista de usuários pra manter.
 
-> **Por que Apache só como proxy e não roda a app direto?** Na v2.x o Apache
+> **Por que Apache só como proxy e não roda o app direto?** Na v2.x o Apache
 > servia PHP via mod_php. Na v3.0 o backend é Node — Apache não executa JS, então
 > o papel dele é encaminhar pro `server/node.mjs`. Um processo Node só, sem
 > `restorecon`, sem tuning de workers, e o único boolean SELinux necessário é o
@@ -530,7 +531,7 @@ node server/node.mjs   # smoke test: sobe, serve estáticos, /api/* responde
 ## ⚠️ Avisos
 
 1. **Não compartilhe seu `cookies.txt`** — contém suas credenciais de login do Waze
-2. **Esta aplicação NÃO é oficial do Waze** — é uma ferramenta da comunidade
+2. **Este app NÃO é oficial do Waze** — é uma ferramenta da comunidade
 3. **Respeite as diretrizes do Waze** — não rejeite em massa sem analisar cada pedido
 
 ---

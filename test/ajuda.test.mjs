@@ -104,7 +104,7 @@ test('ajuda: título de seção termina em dois-pontos em todos os idiomas; o de
   }
 });
 
-test('ajuda: "Quem está na app" vem logo depois de "Como usar:"', () => {
+test('ajuda: "Quem está no app" vem logo depois de "Como usar:"', () => {
   // Decisão do owner (2026-09-24): é recurso de uso, e quem procura o que é a
   // pílula 👥 não devia ter que passar por privacidade e extensões de login.
   const chaves = SECOES.map((s) => s.chave);

@@ -421,7 +421,7 @@
                      instalação do PWA (icons/screenshots/), em versão pequena:
                      as originais somam 432 KB e estas 30 KB, e isto aqui carrega
                      na tela de entrada, muitas vezes em dado móvel. -->
-                <div class="auth-previa mt-6 flex justify-center gap-2" role="group" aria-label="Prévia da aplicação" data-i18n-aria="auth.previa.aria">
+                <div class="auth-previa mt-6 flex justify-center gap-2" role="group" aria-label="Prévia do app" data-i18n-aria="auth.previa.aria">
                     <img src="icons/screenshots/previa-card.jpg" width="144" height="311" loading="lazy" decoding="async"
                          class="w-[4.5rem] h-auto rounded-lg border border-slate-200/70 shadow-sm dark:border-slate-600/60"
                          alt="Um pedido com foto, categoria e endereço" data-i18n-alt="auth.previa.card">
@@ -552,7 +552,7 @@
                     </div>
                     <div>
                         <h3 id="accessDeniedTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.accessDenied.title">Acesso restrito</h3>
-                        <p class="text-xs text-slate-500 mt-0.5 dark:text-slate-400" data-i18n="modal.accessDenied.subtitle">Esta aplicação é exclusiva para certos níveis de editor</p>
+                        <p class="text-xs text-slate-500 mt-0.5 dark:text-slate-400" data-i18n="modal.accessDenied.subtitle">Exclusivo para certos níveis de editor</p>
                     </div>
                 </div>
                 <p id="accessDeniedMessage" class="text-sm text-slate-600 mb-3 dark:text-slate-300"></p>
@@ -769,7 +769,7 @@
                              procurava não é convidado a pensar no assunto. -->
                         <div>
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.presenca.label">Ver quem está na app</span>
+                                <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.presenca.label">Ver quem está no app</span>
                                 <input id="prefPresenca" type="checkbox" class="ui-switch" checked>
                             </label>
                         </div>
@@ -924,14 +924,14 @@
         <div id="presencaModal" role="dialog" aria-modal="true" aria-labelledby="presencaTitle" class="hidden fixed inset-0 modal-root folha-modal bg-black bg-opacity-50 z-[60] flex items-end sm:items-center justify-center">
             <div class="folha bg-white dark:bg-slate-800 w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl shadow-2xl p-5 overflow-y-auto overscroll-contain">
                 <div class="flex items-center justify-between mb-3">
-                    <h3 id="presencaTitle" class="text-lg font-bold text-slate-800 dark:text-slate-100" data-i18n="presenca.sheet.title">Na app agora</h3>
+                    <h3 id="presencaTitle" class="text-lg font-bold text-slate-800 dark:text-slate-100" data-i18n="presenca.sheet.title">No app agora</h3>
                     <button id="presencaClose" type="button" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full" aria-label="Fechar" data-i18n-aria="common.close">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                 </div>
                 <!-- De onde vem a lista: o país do filtro e a janela de ~15 min
-                     da presença do WME. "Na app agora" sem isto leria como "está
-                     com a app aberta neste segundo", e não é o que o dado diz. -->
+                     da presença do WME. "No app agora" sem isto leria como "está
+                     com o app aberto neste segundo", e não é o que o dado diz. -->
                 <p id="presencaSub" class="presenca-sub"></p>
                 <!-- Uma lista, duas partes (desenho A, aprovado nos mockups):
                      "Triando agora" e "Conversas". As duas são desenhadas pelo
@@ -1640,9 +1640,9 @@
                      a lista em 16px e o título sem dois-pontos, destoando das vizinhas
                      por um mês; hoje o padrão é cobrado em test/ajuda.test.mjs. -->
                 <div>
-                    <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.presenca.title">Quem está na app:</h4>
+                    <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.presenca.title">Quem está no app:</h4>
                     <ul class="list-disc list-inside space-y-1.5 text-sm">
-                        <li data-i18n="help.presenca.oQue">A pílula 👥 no topo mostra quantos editores estão usando a app no mesmo país que você, nos últimos 15 minutos. Toque nela pra ver quem é e conversar.</li>
+                        <li data-i18n="help.presenca.oQue">A pílula 👥 no topo mostra quantos editores estão usando o app no mesmo país que você, nos últimos 15 minutos. Toque nela pra ver quem é e conversar.</li>
                         <li data-i18n="help.presenca.conversa">As conversas passam pelo chat do Waze: ficam guardadas lá e também aparecem no chat do WME de vocês dois.</li>
                         <li data-i18n="help.presenca.privacidade">Enquanto você tria, o WME mostra seu nome e nível no mapa, no lugar do pedido que está na sua tela, até uns 15 minutos depois da última ação. O nosso servidor não guarda nada disso.</li>
                     </ul>
@@ -1650,7 +1650,7 @@
 
                 <div>
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.important.title">Importante:</h4>
-                    <p class="text-sm" data-i18n-html="help.important.body">Esta aplicação <strong>nunca aprova</strong> dados de local — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs dark:bg-cyan-600/20">↗</span> no card. A única exceção é <strong>foto nova</strong>: ampliada, ela pode ser aprovada ou excluída ali mesmo (L6+AM ou staff).</p>
+                    <p class="text-sm" data-i18n-html="help.important.body">Este app <strong>nunca aprova</strong> dados de local — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs dark:bg-cyan-600/20">↗</span> no card. A única exceção é <strong>foto nova</strong>: ampliada, ela pode ser aprovada ou excluída ali mesmo (L6+AM ou staff).</p>
                 </div>
 
                 <div>
@@ -1670,11 +1670,11 @@
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.privacy.title">Privacidade e dados:</h4>
                     <ul class="list-disc list-inside space-y-1.5 text-sm">
                         <li data-i18n="help.privacy.server">No servidor fica só uma coisa: os seus cookies do Waze, criptografados (AES-256-GCM). Nada além disso.</li>
-                        <li data-i18n-html="help.privacy.zeroKnowledge">E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera a app. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.</li>
-                        <li data-i18n="help.privacy.notStored">Os pedidos NÃO são guardados: nome, foto, endereço e coordenada de place existem só na memória, enquanto a app está aberta. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, as capturas ficam até você baixar o diagnóstico, no máximo 24 h.</li>
+                        <li data-i18n-html="help.privacy.zeroKnowledge">E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera o app. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.</li>
+                        <li data-i18n="help.privacy.notStored">Os pedidos NÃO são guardados: nome, foto, endereço e coordenada de place existem só na memória, enquanto o app está aberto. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, as capturas ficam até você baixar o diagnóstico, no máximo 24 h.</li>
                         <li data-i18n="help.privacy.retention">Prazo: 21 dias sem uso, ou até você tocar em “Sair” — o que vier primeiro. Código de pareamento dura 5 minutos e é de uso único.</li>
-                        <li data-i18n="help.privacy.device">Neste aparelho ficam placar, filtros, preferências, histórico, as ações esperando envio e, das conversas, quais são da app e até onde cada pessoa leu. Todos apagados no “Sair”.</li>
-                        <li data-i18n="help.privacy.credentials">Seus cookies são credenciais: permitem que a app aja no Waze em seu nome. Ela rejeita, marca como lido, dá ⭐ no pedido, corrige o nome do local e — só em foto nova — aprova ou exclui a foto.</li>
+                        <li data-i18n="help.privacy.device">Neste aparelho ficam placar, filtros, preferências, histórico, as ações esperando envio e, das conversas, quais são do app e até onde cada pessoa leu. Todos apagados no “Sair”.</li>
+                        <li data-i18n="help.privacy.credentials">Seus cookies são credenciais: permitem que o app aja no Waze em seu nome. Ele rejeita, marca como lido, dá ⭐ no pedido, corrige o nome do local e — só em foto nova — aprova ou exclui a foto.</li>
                         <li data-i18n="help.privacy.infra">Roda na Cloudflare (hospedagem e medição de acesso sem cookies). Sem anúncios e sem rastreadores.</li>
                         <li data-i18n-html="help.privacy.contact">Dúvidas, acesso aos seus dados ou pedido de exclusão: fale com <a href="https://www.waze.com/user/editor/antigerme" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">@antigerme</a>.</li>
                     </ul>

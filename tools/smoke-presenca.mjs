@@ -361,7 +361,7 @@ try {
       estado: document.getElementById('conversaEstado').textContent.trim(),
       aviso: document.querySelector('#conversaMsgs .conversa-aviso').textContent,
     }));
-    if (tela.titulo === 'cafanha' && tela.estado === `Na app agora · L4 · a ${KM} km daqui` && /chat do WME/.test(tela.aviso)) ok(`o topo diz onde ela está e que a conversa fica no WME`);
+    if (tela.titulo === 'cafanha' && tela.estado === `No app agora · L4 · a ${KM} km daqui` && /chat do WME/.test(tela.aviso)) ok(`o topo diz onde ela está e que a conversa fica no WME`);
     else anota(`topo da conversa errado: ${JSON.stringify(tela)}`);
   }
   if (apiDe(ana, 'chat', 'abrir').length === 1) ok('abrir a conversa custa UM pedido (histórico e "lida" juntos)');
@@ -500,7 +500,7 @@ try {
     else anota('a lista precisou de um pedido próprio');
   }
   const lista9 = await ana.page.evaluate(() => { openModal('presencaModal'); presencaRenderLista(); return document.getElementById('presencaLista').innerHTML; });
-  if (/presenca\.sheet\.vazio|Ninguém mais na app agora/.test(lista9) && /cafanha/.test(lista9)) ok('a bia saiu da "Triando agora" e a conversa continua em "Conversas"');
+  if (/presenca\.sheet\.vazio|Ninguém mais no app agora/.test(lista9) && /cafanha/.test(lista9)) ok('a bia saiu da "Triando agora" e a conversa continua em "Conversas"');
   else anota('a lista depois da saída não tem a conversa em "Conversas"');
   await ana.page.evaluate(() => closeModal('presencaModal'));
   // A regra nova da pílula: com mensagem NÃO LIDA ela fica, mesmo sem ninguém
