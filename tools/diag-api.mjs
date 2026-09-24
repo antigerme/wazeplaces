@@ -34,7 +34,11 @@ import { readFileSync } from 'node:fs';
 import { lerDiagnostico } from './diag-ler.mjs';
 import { pausaComJitter } from './waze-jitter.mjs';
 
-const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear']);
+// `presenca-waze` move o avatar da pessoa no WME, e `chat` manda mensagem,
+// recibo e marca conversa como lida — e o que ele LÊ são conversas privadas,
+// com gente de fora, e o token do fluxo de tempo real. Nenhuma das duas cabe
+// numa ferramenta que age com o token de outra pessoa.
+const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear', 'presenca-waze', 'chat']);
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 '
   + '(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 

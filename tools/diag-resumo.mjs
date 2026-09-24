@@ -93,6 +93,17 @@ else {
   if (sa.repetidas > 0) out('ATENÇÃO: a mesma decisão está na fila mais de uma vez — algum caminho devolveu um pedido já decidido.');
 }
 
+// A presença no mapa do WME (fase 2, `resumo.presencaWme`): só números e
+// estados que a app mediu — nenhuma posição sai daqui.
+secao('PRESENÇA NO WME');
+const pw = r.presencaWme;
+if (pw === undefined) out(AUSENTE);
+else if (pw.erro) out('erro ao medir: ' + pw.erro);
+else {
+  out(`ligada ${pw.ligada} · já vista ligada ${pw.visto} · ligar na próxima ação ${pw.ligarNaProxima} · escritas ${pw.enviadas} · falhas ${pw.falhas}${pw.ultimaFalha ? ` (última: ${pw.ultimaFalha})` : ''} · última escrita há ${pw.ultimaHaS ?? '—'} s`);
+  if (pw.marcaPerdida) out('ATENÇÃO: o Waze devolveu a posição SEM a marca da app — a lista de quem está na app vai vir vazia.');
+}
+
 secao('SERVICE WORKER');
 const sw = d.serviceWorker || {};
 out(`controlando ${sw.controlando} · registros ${j((sw.registros || []).map((x) => ({ estado: x.estadoAtivo, esperando: !!x.esperando, instalando: !!x.instalando })))}`);

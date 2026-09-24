@@ -1,0 +1,78 @@
+{
+ "_procedencia": "Quadros REAIS de gRPC-web (base64 do protobuf, sem o enquadramento) tirados das gravações do owner em 2026-09-23 (WME v2.370): só as trocas entre as contas dele, antigerme (12444348) e cafanha (183164343). Conferido por leitura estrutural: nenhum id, nome ou texto de terceiro, e nenhuma resposta com token ou chave (a do GetMessagingProvider ficou de fora de propósito). res null = resposta que não entra; \"\" = resposta vazia de verdade.",
+ "atualizarPosicao": {
+  "metodo": "updateOnlineEditor",
+  "req": "Ch8It7urVxIYqAbYtpTt//////8BsAaGjv/5//////8BEgoKCGxvY2F0aW9uGAE=",
+  "res": "CLe7q1cSGKgG2LaU7f//////AbAGho7/+f//////ARgBIgdjYWZhbmhhKAA="
+ },
+ "atualizarVisivel": {
+  "metodo": "updateOnlineEditor",
+  "req": "CgcIt7urVxgBEgkKB3Zpc2libGUYAQ==",
+  "res": "CLe7q1cYASIHY2FmYW5oYSgA"
+ },
+ "listarVazio": {
+  "metodo": "listOnlineEditors",
+  "req": "CjQKGKgG/aHb6///////AbAG6ceq+f//////ARIYqAa0y83u//////8BsAaE/dP6//////8B",
+  "res": ""
+ },
+ "enviarTexto": {
+  "metodo": "SendMessage",
+  "req": "ClAKJGRjNzcwODMwLWI3NmUtMTFmMS1hZDYzLTM3YTY1Yjg3NTk4YRBkIiQ5NTM5YmEzMC1iNzZlLTExZjEtYWY5NS1iMTM4ZmVjYjAwNTcwAhJkCLHAs/mMNBIkZGM3NmJhMTAtYjc2ZS0xMWYxLWFkNjMtMzdhNjViODc1OThhGgwIARIIMTI0NDQzNDgiDQgBEgkxODMxNjQzNDMwAaoGFQgBqgYQCg5PbMOhIGFudGlnZXJtZQ==",
+  "res": "CIDDs/mMNBIkZGM3NmJhMTAtYjc2ZS0xMWYxLWFkNjMtMzdhNjViODc1OThh"
+ },
+ "reciboEntregue": {
+  "metodo": "SendMessage",
+  "req": "ClAKJGRkNzZlYzAxLWI3NmUtMTFmMS1iMjFmLTAzZDg2ZmNjMGJiNxBkIiQxYmEwOGQyMC00NmYzLTExZjEtYmEzZS05ZjI0MDA2OTA3YzQwAhJ5CMDNs/mMNBIkZGQ3NmVjMDAtYjc2ZS0xMWYxLWIyMWYtMDNkODZmY2MwYmI3Gg0IARIJMTgzMTY0MzQzIgwIARIIMTI0NDQzNDgwArIGKggBEiYKJGRjNzZiYTEwLWI3NmUtMTFmMS1hZDYzLTM3YTY1Yjg3NTk4YQ==",
+  "res": "CN/Ps/mMNBIkZGQ3NmVjMDAtYjc2ZS0xMWYxLWIyMWYtMDNkODZmY2MwYmI3"
+ },
+ "reciboLida": {
+  "metodo": "SendMessage",
+  "req": "ClAKJGU0MzEyZTcxLWI3NmUtMTFmMS1iMjFmLTAzZDg2ZmNjMGJiNxBkIiQxYmEwOGQyMC00NmYzLTExZjEtYmEzZS05ZjI0MDA2OTA3YzQwAhJ5CNeltPmMNBIkZTQzMTJlNzAtYjc2ZS0xMWYxLWIyMWYtMDNkODZmY2MwYmI3Gg0IARIJMTgzMTY0MzQzIgwIARIIMTI0NDQzNDgwArIGKggCEiYKJGRjNzZiYTEwLWI3NmUtMTFmMS1hZDYzLTM3YTY1Yjg3NTk4YQ==",
+  "res": "CMiotPmMNBIkZTQzMTJlNzAtYjc2ZS0xMWYxLWIyMWYtMDNkODZmY2MwYmI3"
+ },
+ "enviarTexto2": {
+  "metodo": "SendMessage",
+  "req": "ClAKJGU2NTc0MmMwLWI3NmUtMTFmMS1iMjFmLTAzZDg2ZmNjMGJiNxBkIiQxYmEwOGQyMC00NmYzLTExZjEtYmEzZS05ZjI0MDA2OTA3YzQwAhJjCOrBtPmMNBIkZTY1NmY0YTAtYjc2ZS0xMWYxLWIyMWYtMDNkODZmY2MwYmI3Gg0IARIJMTgzMTY0MzQzIgwIARIIMTI0NDQzNDgwAaoGFAgBqgYPCg1PbMOhIGNhZmFuaGEh",
+  "res": "CPrDtPmMNBIkZTY1NmY0YTAtYjc2ZS0xMWYxLWIyMWYtMDNkODZmY2MwYmI3"
+ },
+ "marcarLida": {
+  "metodo": "MarkConversationRead",
+  "req": "ClAKJGU2YmIwZGEwLWI3NmUtMTFmMS1hZDYzLTM3YTY1Yjg3NTk4YRBkIiQ5NTM5YmEzMC1iNzZlLTExZjEtYWY5NS1iMTM4ZmVjYjAwNTcwAhIMCAESCDEyNDQ0MzQ4",
+  "res": "EiRhNmJmZTM3ZC1hM2VmLTQyY2EtYThkMC05NzkxMmIxYzRkOTQSJDYyMzllY2NkLTZmNDctNDdkYS05MDQyLTY3Y2FiY2U0NDMyNQ=="
+ },
+ "confirmar": {
+  "metodo": "AckMessages",
+  "req": "ClAKJGU3ZWRjMTQwLWI3NmUtMTFmMS1hZDYzLTM3YTY1Yjg3NTk4YRBkIiQ5NTM5YmEzMC1iNzZlLTExZjEtYWY5NS1iMTM4ZmVjYjAwNTcwAhIkZTY1NmY0YTAtYjc2ZS0xMWYxLWIyMWYtMDNkODZmY2MwYmI3EiRhNmJmZTM3ZC1hM2VmLTQyY2EtYThkMC05NzkxMmIxYzRkOTQSJDYyMzllY2NkLTZmNDctNDdkYS05MDQyLTY3Y2FiY2U0NDMyNQ==",
+  "res": ""
+ },
+ "naoLidas": {
+  "metodo": "GetUnreadMessagesCount",
+  "req": "ClAKJGM5ZWEwYTAwLWI3NmUtMTFmMS1hZDYzLTM3YTY1Yjg3NTk4YRBkIiQ5NTM5YmEzMC1iNzZlLTExZjEtYWY5NS1iMTM4ZmVjYjAwNTcwAg==",
+  "res": "CgIIABD5z7H5jDQ="
+ },
+ "perfis": {
+  "metodo": "GetProfileInfo",
+  "req": "ClAKJGRjZGY4ZTAwLWI3NmUtMTFmMS1iMjFmLTAzZDg2ZmNjMGJiNxBkIiQxYmEwOGQyMC00NmYzLTExZjEtYmEzZS05ZjI0MDA2OTA3YzQwAhINCAESCTE4MzE2NDM0Mw==",
+  "res": "ChgKDQgBEgkxODMxNjQzNDMSB2NhZmFuaGE="
+ },
+ "mensagens": {
+  "metodo": "ListMessages",
+  "req": "ClAKJGQ4NmU3ODQwLWI3NmUtMTFmMS1hZDYzLTM3YTY1Yjg3NTk4YRBkIiQ5NTM5YmEzMC1iNzZlLTExZjEtYWY5NS1iMTM4ZmVjYjAwNTcwAhIMCAESCDEyNDQ0MzQ4KDI4AQ==",
+  "res": ""
+ },
+ "mensagensAntes": {
+  "metodo": "ListMessages",
+  "req": "ClAKJGUzOWUxNjMwLWI3NmUtMTFmMS1iMjFmLTAzZDg2ZmNjMGJiNxBkIiQxYmEwOGQyMC00NmYzLTExZjEtYmEzZS05ZjI0MDA2OTA3YzQwAhINCAESCTE4MzE2NDM0MxiAw7P5jDQoZDgB",
+  "res": ""
+ },
+ "conversas": {
+  "metodo": "ListConversations",
+  "req": "ClAKJGNhMzkxNDYwLWI3NmUtMTFmMS1hZDYzLTM3YTY1Yjg3NTk4YRBkIiQ5NTM5YmEzMC1iNzZlLTExZjEtYWY5NS1iMTM4ZmVjYjAwNTcwAiAyMPnPsfmMNA==",
+  "res": "GPnPsfmMNA=="
+ },
+ "provedorPedido": {
+  "metodo": "GetMessagingProvider",
+  "req": "ClAKJGM5YTdkMGUwLWI3NmUtMTFmMS1hZDYzLTM3YTY1Yjg3NTk4YRBkIiQ5NTM5YmEzMC1iNzZlLTExZjEtYWY5NS1iMTM4ZmVjYjAwNTcwAg==",
+  "res": null
+ }
+}

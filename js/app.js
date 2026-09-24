@@ -1190,9 +1190,16 @@ function setupModalListeners() {
     $('prefPresenca').addEventListener('change', (e) => {
         AppState.preferences.presenca = e.target.checked;
         // O carimbo é do DESLIGAR. Religar à mão zera: quem voltou por vontade
-        // própria não está no meio de nenhuma contagem.
-        if (e.target.checked) delete AppState.preferences.presencaOffEm;
-        else AppState.preferences.presencaOffEm = Date.now();
+        // própria não está no meio de nenhuma contagem. E a mesma chave vale
+        // pro mapa do WME (fase 2): desligar some de lá na hora, religar volta
+        // na próxima ação.
+        if (e.target.checked) {
+            delete AppState.preferences.presencaOffEm;
+            presencaWmeReligar();
+        } else {
+            AppState.preferences.presencaOffEm = Date.now();
+            presencaWmeDesligar();
+        }
         savePreferences();
         window.Presenca?.sincronizar?.();
     });
@@ -2860,6 +2867,7 @@ async function loadProfileAndAuxData() {
         guardarPerfilDoPortao(profileRes.profile);
         guardarPrazoDaSessao(profileRes);
         renderProfileHeader();
+        presencaWmeAoCarregarPerfil(profileRes.visivelNoWme);
     }
     if (countriesRes.success) {
         AppState.countries = countriesRes.countries;
@@ -4452,7 +4460,10 @@ function ligarFabDev() {
 // arquivo passa a levar as ABERTURAS ANTERIORES guardadas no aparelho
 // (`aberturasAnteriores`, `aberturaAtual`, e no resumo a contagem e os alertas
 // das capturas delas, com a `abertura` de cada uma). Aditivo.
-const DIAG_VERSAO = 5;
+// 6 (v2026.09.23-03): o resumo ganha `presencaWme` (a presença no mapa do WME,
+// de carona nas ações): ligada, já vista ligada, escritas, falhas e se a marca
+// de quem está na app voltou diferente. Aditivo.
+const DIAG_VERSAO = 6;
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
 // (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
@@ -4821,6 +4832,10 @@ async function diagCorpo() {
             // (pedido esperando envio que voltou como card) e o resumo não a
             // mencionava: estava no localStorage, cru, junto do token.
             saida: diagResumoDaSaida(),
+            // A presença no mapa do WME (fase 2). Responde "não apareço no WME"
+            // sem abrir o resto: ligada? a app já a viu ligada? as escritas de
+            // carona estão saindo, falhando, voltando sem a marca?
+            presencaWme: (() => { try { return presencaWmeDiag(); } catch (e) { return { erro: String(e && e.message) }; } })(),
             // PRIMEIRA coisa a olhar. Vazio = nenhuma invariante conhecida
             // quebrada; não significa "está tudo bem", significa "não é nenhum
             // dos defeitos que já vimos".
@@ -5318,6 +5333,7 @@ async function handleLogout() {
     // quem entrasse depois e ligasse o modo dev.
     dlogApagar();
     AppState.profile = null;
+    presencaWmeZerar();              // o freio e os contadores eram de quem saiu
     AppState.authenticated = false;
     AppState.pendingAction = null;
     AppState.inFlightActions = 0;
@@ -11381,6 +11397,161 @@ const Treino = {
 };
 window.Treino = Treino;
 
+// ── Presença no WME, de carona nas ações (fase 2) ─────────────────────────
+//
+// Quem usa a app aparece no mapa do WME, no lugar do card que está olhando. A
+// posição vai DENTRO da ação que a app já manda (rejeitar, marcar como lido) e
+// o servidor a escreve no WME com a marca de quem está na app
+// (`server/marca-app.mjs`). Zero requisição nova: a app roda no free tier do
+// Cloudflare, e uma chamada por card seria a conveniência pagando com o recurso
+// contado (decisão do owner, 2026-09-23).
+//
+// Decisões que não são gosto:
+//   · só o envio AO VIVO leva posição. A fila de saída manda depois, quando a
+//     posição já é velha; o lote e a recusa automática não são alguém olhando
+//     um card. Por isso a posição é montada DENTRO do executor, na hora do
+//     envio, e nunca guardada em item nenhum;
+//   · FREIO de 30 s entre escritas. Quem olha pelo WME não percebe: o WME não
+//     redesenha sozinho (MEDIDO, fase 1). E dobrar as chamadas ao Waze em nome
+//     de cada editor, no ritmo do swipe, é a assinatura que faz um WAF marcar a
+//     conta de quem está triando;
+//   · a posição é a do card NA TELA quando a ação sai (o próximo, depois do
+//     gesto): é onde a pessoa está olhando. Sem card na tela, a do pedido;
+//   · a VISIBILIDADE liga sozinha e em silêncio (decisão do owner). O perfil diz
+//     como ela está (`visivelNoWme`, de graça no `/Session`) e, se estiver
+//     desligada, a próxima ação a liga de carona. Se ela aparece desligada
+//     DEPOIS de a app já a ter visto ligada, foi a pessoa, fora da app (no WME
+//     ou noutro aparelho): conta como desligar, a mesma regra do "Ver quem está
+//     na fila" — só volta sozinha depois de 9 dias, em silêncio;
+//   · nada disso pode derrubar a ação: qualquer erro aqui vira "sem posição".
+const PRESENCA_WME_FREIO_MS = 30000;
+const presencaWme = {
+    ligarNaProxima: false,
+    ultimaEm: 0,
+    enviadas: 0,
+    falhas: 0,
+    ultimaFalha: null,
+    marcaPerdida: false,
+};
+
+function presencaWmeDaAcao(placeDaAcao) {
+    try {
+        if (Treino.ativo) return null;
+        const ligada = typeof presencaLigada === 'function'
+            ? presencaLigada() : AppState.preferences.presenca !== false;
+        if (!ligada || !AppState.authenticated) return null;
+        if (navigator.onLine === false) return null;
+        const id = AppState.profile && AppState.profile.id;
+        if (id === null || id === undefined || !/^\d{1,19}$/.test(String(id))) return null;
+        const place = AppState.currentPlace || placeDaAcao;
+        // `mapa.centro` é [lat, lon] — o core inverte o GeoJSON. Ler ao contrário
+        // põe a pessoa num lugar plausível e ERRADO, sem erro nenhum.
+        const centro = place && place.mapa && place.mapa.centro;
+        if (!Array.isArray(centro) || !Number.isFinite(centro[0]) || !Number.isFinite(centro[1])) return null;
+        const agora = Date.now();
+        if (agora - presencaWme.ultimaEm < PRESENCA_WME_FREIO_MS) return null;
+        presencaWme.ultimaEm = agora;
+        const presenca = { userId: String(id), lat: centro[0], lon: centro[1], pais: API.getCountry() };
+        if (presencaWme.ligarNaProxima) presenca.visivel = true;
+        return presenca;
+    } catch (e) {
+        return null;
+    }
+}
+
+function presencaWmeAoResponder(presenca, result) {
+    try {
+        const r = presenca && result && result.presenca;
+        if (!r) return;
+        if (r.ok) {
+            presencaWme.enviadas++;
+            if (presenca.visivel === true) {
+                presencaWme.ligarNaProxima = false;
+                if (AppState.preferences.presencaWmeVisto !== true) {
+                    AppState.preferences.presencaWmeVisto = true;
+                    savePreferences();
+                }
+            }
+            // O Waze devolve a posição gravada: se os dígitos voltarem diferentes,
+            // a marca de quem está na app se perdeu (o dia em que ele arredondar).
+            if (r.marca === false && !presencaWme.marcaPerdida) {
+                presencaWme.marcaPerdida = true;
+                dfato('presencaWme.marcaPerdida', {});
+            }
+        } else {
+            presencaWme.falhas++;
+            presencaWme.ultimaFalha = r.categoria || 'erro';
+        }
+    } catch (e) { /* diagnóstico nunca derruba a ação */ }
+}
+
+function presencaWmeAoCarregarPerfil(visivel) {
+    if (typeof visivel !== 'boolean') return;   // servidor antigo: não decide nada
+    const p = AppState.preferences;
+    if (p.presenca === false) return;           // desligado: a app não mexe no WME
+    if (visivel) {
+        presencaWme.ligarNaProxima = false;
+        if (p.presencaWmeVisto !== true) {
+            p.presencaWmeVisto = true;
+            savePreferences();
+        }
+        return;
+    }
+    if (p.presencaWmeVisto === true) {
+        p.presenca = false;
+        p.presencaOffEm = Date.now();
+        delete p.presencaWmeVisto;
+        savePreferences();
+        presencaWme.ligarNaProxima = false;
+        dfato('presencaWme.desligadaFora', {});
+        const chk = document.getElementById('prefPresenca');
+        if (chk) chk.checked = false;
+        window.Presenca?.sincronizar?.();
+        return;
+    }
+    presencaWme.ligarNaProxima = true;
+}
+
+// A pessoa desligou o "Ver quem está na fila": some do WME na hora. É a única
+// requisição própria da fase 2, e só acontece no GESTO.
+function presencaWmeDesligar() {
+    presencaWme.ligarNaProxima = false;
+    delete AppState.preferences.presencaWmeVisto;
+    const id = AppState.profile && AppState.profile.id;
+    if (id === null || id === undefined || !API.getSession()) return;
+    API.presencaWaze({ userId: String(id), visivel: false }).catch(() => {});
+}
+
+// Religou à mão: a próxima ação liga a visibilidade de carona, sem esperar o
+// freio (quem acabou de pedir pra aparecer não espera 30 s pra aparecer).
+function presencaWmeReligar() {
+    presencaWme.ligarNaProxima = true;
+    presencaWme.ultimaEm = 0;
+}
+
+function presencaWmeZerar() {
+    presencaWme.ligarNaProxima = false;
+    presencaWme.ultimaEm = 0;
+    presencaWme.enviadas = 0;
+    presencaWme.falhas = 0;
+    presencaWme.ultimaFalha = null;
+    presencaWme.marcaPerdida = false;
+}
+
+function presencaWmeDiag() {
+    const ligada = typeof presencaLigada === 'function' ? presencaLigada() : AppState.preferences.presenca !== false;
+    return {
+        ligada,
+        visto: AppState.preferences.presencaWmeVisto === true,
+        ligarNaProxima: presencaWme.ligarNaProxima,
+        enviadas: presencaWme.enviadas,
+        falhas: presencaWme.falhas,
+        ultimaFalha: presencaWme.ultimaFalha,
+        marcaPerdida: presencaWme.marcaPerdida,
+        ultimaHaS: presencaWme.ultimaEm ? Math.round((Date.now() - presencaWme.ultimaEm) / 1000) : null,
+    };
+}
+
 function handleMarkAsRead() {
     if (!AppState.currentPlace) return;
     if (acoesTravadas()) return;   // janela do Desfazer correndo
@@ -11393,7 +11564,9 @@ function handleMarkAsRead() {
     saveStats();
     advanceQueue();
     scheduleAction('read', place, async () => {
-        const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID));
+        const presenca = presencaWmeDaAcao(place);
+        const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca));
+        presencaWmeAoResponder(presenca, result);
         handleActionResult('read', place, result);
     });
 }
@@ -11410,7 +11583,9 @@ function handleReject() {
     saveStats();
     advanceQueue();
     scheduleAction('reject', place, async () => {
-        const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID));
+        const presenca = presencaWmeDaAcao(place);
+        const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca));
+        presencaWmeAoResponder(presenca, result);
         handleActionResult('reject', place, result);
     });
 }
@@ -12139,6 +12314,10 @@ function loadPreferences() {
             if (Number.isFinite(parsed.presencaOffEm) && parsed.presencaOffEm > 0) {
                 AppState.preferences.presencaOffEm = parsed.presencaOffEm;
             }
+            // A app já viu a visibilidade do WME LIGADA (fase 2). É o que separa
+            // "nunca esteve ligada" (a app liga) de "a pessoa desligou fora da
+            // app" (conta como desligar). Estrito: só `true` conta.
+            if (parsed.presencaWmeVisto === true) AppState.preferences.presencaWmeVisto = true;
         }
     } catch (e) {}
     preferenciasCarregadas = true;

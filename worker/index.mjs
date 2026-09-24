@@ -32,7 +32,7 @@ const json = (body, status) =>
   });
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // Sala de presença: WebSocket direto pro Durable Object daquela FILA. O
@@ -81,7 +81,11 @@ export default {
           segredo: env.TURN_SECRET || '',
         };
 
-        const { status, body } = await dispatch(route, data, { sessions, crachas, turn });
+        // `aoFundo`: o que o handler deixa correndo DEPOIS da resposta (a escrita
+        // da presença de carona que passou do teto de espera). Sem `waitUntil`
+        // o runtime da Cloudflare corta a promessa assim que a resposta sai.
+        const aoFundo = ctx && typeof ctx.waitUntil === 'function' ? (p) => ctx.waitUntil(p) : undefined;
+        const { status, body } = await dispatch(route, data, { sessions, crachas, turn, aoFundo });
         return json(body, status);
       } catch (err) {
         console.error('Erro no handler /api:', err);

@@ -379,7 +379,10 @@ const server = createServer(async (req, res) => {
       } catch {
         data = {};
       }
-      const { status, body } = await dispatch(route, data, { sessions, crachas, turn });
+      // No Node o processo segue vivo depois da resposta: o que o handler deixa
+      // correndo termina sozinho. Só não pode virar rejeição sem dono.
+      const aoFundo = (p) => { Promise.resolve(p).catch(() => {}); };
+      const { status, body } = await dispatch(route, data, { sessions, crachas, turn, aoFundo });
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(body));
       return;
