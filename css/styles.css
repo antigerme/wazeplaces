@@ -2177,8 +2177,8 @@ button:active {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  min-height: 48px;
+  gap: 0.625rem;
+  min-height: 56px;
   padding: 0.5rem 0.75rem;
   border-radius: 0.75rem;
   text-align: left;
@@ -2188,7 +2188,6 @@ button:active {
 .dark .presenca-linha:hover { background: rgb(6 182 212 / 0.1); }
 
 .presenca-nome {
-  flex: 1;
   min-width: 0;
   font-weight: 600;
   font-size: 0.875rem;
@@ -2220,6 +2219,41 @@ button:active {
   line-height: 1.25rem;
   text-align: center;
 }
+
+/* ── A LISTA A (fase 3): "Triando agora" + "Conversas" ─────────────────────
+   Uma lista, duas partes — o desenho aprovado nos mockups. As medidas são as
+   das linhas de antes (56px de alvo, a mesma pílula de não lidas); o que muda
+   é a SEGUNDA linha: a distância de quem está na app, ou a prévia da conversa.
+   Tons: slate-500 sobre branco = 4,76:1 e slate-400 sobre slate-800 = 5,71:1,
+   os dois acima do mínimo de 4,5 pra texto pequeno (WCAG 1.4.3). */
+.presenca-sub { font-size: 0.8125rem; color: rgb(100 116 139); margin: -0.5rem 0 0.5rem; }
+.dark .presenca-sub { color: rgb(148 163 184); }
+.presenca-lista li.presenca-secao {
+  display: block;
+  font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: rgb(100 116 139); padding: 0.75rem 0.75rem 0.25rem;
+}
+.dark .presenca-lista li.presenca-secao { color: rgb(148 163 184); }
+.presenca-lista li.presenca-vazio {
+  display: block;
+  font-size: 0.875rem; color: rgb(100 116 139); padding: 0.5rem 0.75rem 0.75rem;
+}
+.dark .presenca-lista li.presenca-vazio { color: rgb(148 163 184); }
+.presenca-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* O nome encolhe com reticências; o nível NUNCA sai da linha (medido no Fold,
+   280px, com o nome longo dos mockups). */
+.presenca-l1 { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.presenca-l2 {
+  font-size: 0.8125rem; color: rgb(100 116 139);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dark .presenca-l2 { color: rgb(148 163 184); }
+/* Não lida: a prévia fica FORTE — peso, não só cor (WCAG 1.4.1). */
+.presenca-l2.forte { color: rgb(30 41 59); font-weight: 600; }
+.dark .presenca-l2.forte { color: rgb(226 232 240); }
+.presenca-dir { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.presenca-hora { font-size: 0.6875rem; color: rgb(100 116 139); }
+.dark .presenca-hora { color: rgb(148 163 184); }
 
 
 /* A folha respeita a área segura de baixo: sem isto, o último item fica sob a
@@ -2313,6 +2347,42 @@ button:active {
   padding: 2rem 0;
 }
 .dark .conversa-vazio { color: rgb(148 163 184); }
+
+/* ── A CONVERSA GUARDADA (fase 3) ───────────────────────────────────────────
+   Ela vem do chat do Waze e fica lá: por isso o aviso fixo no topo, o
+   separador de dia e o fim do "não chegou" — a única falha que sobra é a do
+   próprio envio, com o "Tentar de novo" ao lado. */
+.conversa-aviso {
+  text-align: center; font-size: 0.75rem; line-height: 1.4;
+  color: rgb(100 116 139); padding: 0 0.75rem 0.25rem;
+}
+.dark .conversa-aviso { color: rgb(148 163 184); }
+.conversa-dia { display: flex; justify-content: center; padding: 0.25rem 0; }
+.conversa-dia span {
+  font-size: 0.6875rem; font-weight: 600; color: rgb(71 85 105);
+  background: rgb(241 245 249); padding: 2px 10px; border-radius: 999px;
+}
+.dark .conversa-dia span { background: rgb(51 65 85); color: rgb(203 213 225); }
+/* Onde a pessoa está. O PONTO muda de forma (cheio × anel), não só de cor. */
+.presenca-estado { display: flex; align-items: center; gap: 0.45rem; }
+.presenca-ponto { width: 8px; height: 8px; border-radius: 999px; background: rgb(5 150 105); flex-shrink: 0; }
+.dark .presenca-ponto { background: rgb(52 211 153); }
+.presenca-ponto.fora { background: transparent; box-shadow: inset 0 0 0 1.5px rgb(100 116 139); }
+.dark .presenca-ponto.fora { background: transparent; box-shadow: inset 0 0 0 1.5px rgb(148 163 184); }
+/* "Tentar de novo" e "Ver mensagens anteriores" são alvos de toque de verdade
+   (44px), mesmo parecendo texto: é a régua do projeto pra tudo que se toca. */
+.conversa-reenviar,
+.conversa-recarregar {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.25rem;
+  margin: -0.75rem 0; font-weight: 600; text-decoration: underline; text-underline-offset: 2px;
+  color: inherit;
+}
+.conversa-anteriores {
+  display: flex; align-items: center; justify-content: center; margin: 0 auto;
+  min-height: 44px; padding: 0 0.75rem; font-size: 0.75rem; font-weight: 600;
+  color: rgb(14 116 144); border-radius: 999px;
+}
+.dark .conversa-anteriores { color: rgb(103 232 249); }
 
 /* ── A TIRINHA DO PEDIDO ANEXADO ────────────────────────────────────────────
    Existe só ENTRE o toque no botão e o envio. Ela responde "o que exatamente

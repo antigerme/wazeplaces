@@ -201,7 +201,7 @@ test('presenca-app: lista e conversas numa ida, em paralelo, no servidor da regi
   assert.match(pedidos.find((p) => p.metodo === 'ListConversations').url, /\/row-wmp\//);
 });
 
-test('presenca-app: com a instalação do aparelho, o token do tempo real vem junto — pela MESMA instalação', async () => {
+test('presenca-app: com `token` e a instalação do aparelho, o token do tempo real vem junto — pela MESMA instalação', async () => {
   const instalacao = '0f2a8c1e-5b3d-11f1-9c4e-7d1a2b3c4d5e';
   const { resultado, pedidos } = await comWaze({
     listOnlineEditors: () => respostaGrpc({}),
@@ -209,7 +209,7 @@ test('presenca-app: com a instalação do aparelho, o token do tempo real vem ju
     GetMessagingProvider: () => respostaGrpc({ dados: g.junta(g.campo.msg(1,
       g.campo.bytes(1, new Uint8Array([1, 2, 3])), g.campo.inteiro(2, 86_400_000_000),
       g.campo.texto(3, 'https://instantmessaging-pa.googleapis.com/'), g.campo.texto(4, 'chave-de-teste'))) }),
-  }, () => dispatch('presenca-app', { ...BASE, instalacao }, {}));
+  }, () => dispatch('presenca-app', { ...BASE, instalacao, token: true }, {}));
   assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
   assert.equal(resultado.body.chat.token, 'AQID');
   assert.equal(resultado.body.chat.base, 'https://instantmessaging-pa.googleapis.com/');
@@ -221,11 +221,22 @@ test('presenca-app: com a instalação do aparelho, o token do tempo real vem ju
   assert.deepEqual(resultado.body.conversas, []);
 });
 
+test('presenca-app: a instalação SEM `token` não busca token — ela vai só pra confirmar', async () => {
+  const { resultado, pedidos } = await comWaze({
+    listOnlineEditors: () => respostaGrpc({}),
+    ListConversations: () => respostaGrpc({}),
+  }, () => dispatch('presenca-app', { ...BASE, instalacao: '0f2a8c1e-5b3d-11f1-9c4e-7d1a2b3c4d5e' }, {}));
+  assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
+  assert.ok(!pedidos.some((p) => p.metodo === 'GetMessagingProvider'), 'buscou token que ninguém pediu');
+  assert.ok(!('chat' in resultado.body));
+});
+
 test('presenca-app: validação ANTES de qualquer rede', async () => {
   const casos = [
     { pais: undefined }, { pais: 0 }, { pais: 1000 }, { pais: '30' },
     { userId: undefined }, { userId: 'fulano' },
     { instalacao: 'nao-e-uuid' },
+    { token: true },   // token é da instalação: sem ela não há o que pedir
   ];
   for (const extra of casos) {
     const { resultado, pedidos } = await comWaze({}, () => dispatch('presenca-app', { ...BASE, ...extra }, {}));
@@ -385,7 +396,7 @@ test('confirmação: vai JUNTO do presenca-app, com a instalação do aparelho, 
     ListConversations: () => respostaGrpc({}),
     GetMessagingProvider: () => respostaGrpc({}),
     AckMessages: () => respostaGrpc({}),
-  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, confirmar: [...IDS, 'nao-e-uuid', 42] }, {}));
+  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, token: true, confirmar: [...IDS, 'nao-e-uuid', 42] }, {}));
   assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
   const ack = pedidos.find((p) => p.metodo === 'AckMessages');
   assert.ok(ack, 'a confirmação não saiu');

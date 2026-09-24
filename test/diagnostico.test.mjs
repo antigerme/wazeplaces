@@ -829,7 +829,8 @@ test('cada captura leva o `computado` e os ALERTAS daquele instante', () => {
   const cap = fatiarFn(semCom, 'dlogCapturar');
   const iTela = cap.indexOf('...dlogTelaAtual(),');
   const iInst = cap.indexOf('...diagNoInstante(),');
-  const iDom = cap.indexOf('dom: document.documentElement.outerHTML');
+  // O `dom` sai SEM as conversas (dado privado de terceiro), pelo helper.
+  const iDom = cap.indexOf('dom: domParaDiagnostico()');
   assert.ok(iTela > 0 && iInst > iTela, 'a captura deixou de rodar as sentinelas no instante');
   assert.ok(iDom > iInst, 'as sentinelas têm que rodar ANTES de copiar o `dom` (é o mesmo instante)');
   const inst = fatiarFn(semCom, 'diagNoInstante');
@@ -879,4 +880,58 @@ test('o diário diz desde quando o esqueleto está lá, e quando o primeiro card
     'o primeiro card da página tem que ser anotado UMA vez');
   assert.ok(r.indexOf("dfato('tela.primeiroCard'") > r.indexOf('showLoading(false);'),
     'o primeiro card é anotado DEPOIS de o esqueleto sair');
+});
+
+// ═══ a conversa não entra no diagnóstico (fase 3) ════════════════════════════
+test('a conversa é PRIVADA: o texto e o contexto saem do corpo registrado, e a resposta nem com o dev', async () => {
+  // O diagnóstico é um arquivo que viaja por WhatsApp. A fila pública do mapa
+  // já vai nele (com o dev ligado); a conversa entre duas pessoas, não — nem a
+  // minha mensagem, nem o histórico, nem o token do tempo real.
+  const api = montar({ corpo: '{"success":true,"mensagens":[{"texto":"PRIVADO_DELA"}],"chat":{"token":"TOKEN_X"}}', devAtivo: true });
+  await api._post('chat', { sessionToken: 'x', acao: 'enviar', texto: 'PRIVADO_MEU', contexto: { card: '{"name":"LOCAL_X"}' }, para: '1' });
+  await api._post('presenca-app', { sessionToken: 'x', pais: 30 });
+  const tudo = JSON.stringify(api.chamadas);
+  for (const s of ['PRIVADO_MEU', 'PRIVADO_DELA', 'TOKEN_X', 'LOCAL_X']) assert.ok(!tudo.includes(s), `o registro levou ${s}`);
+  assert.equal(api.chamadas[0].corpoReq.texto, '[mensagem · 11 caracteres]', 'o TAMANHO é o que depura: ele tem que ficar');
+  assert.equal(api.chamadas[0].corpoReq.acao, 'enviar', 'o resto do pedido tem que continuar legível');
+  assert.equal(api.chamadas[0].corpoResposta, undefined);
+  assert.equal(api.chamadas[1].corpoResposta, undefined);
+  // Controle: a rota pública, com o dev ligado, segue guardando o corpo.
+  await api._post('buscar-places', {});
+  assert.ok(api.chamadas[2].corpoResposta, 'o controle não guardou corpo — o teste não distinguiria');
+});
+
+test('o DOM do diagnóstico sai SEM a conversa e sem a prévia da lista — com cifrão e tudo', () => {
+  // Troca por TEXTO dentro do `outerHTML` da página: o `outerHTML` do elemento
+  // é trecho exato do da página. O cifrão na mensagem é o caso que um `replace`
+  // por regex (em vez de texto) quebraria.
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const ini = APP.indexOf('const DIAG_PRIVADOS');
+  const fim = APP.indexOf('\nfunction diagSeguro(');
+  assert.ok(ini > 0 && fim > ini, 'sumiu o domParaDiagnostico');
+  const el = (id, dentro, n) => ({
+    innerHTML: dentro, childElementCount: n,
+    outerHTML: `<div id="${id}" class="x">${dentro}</div>`,
+    cloneNode() {
+      const attrs = {};
+      return { setAttribute: (k, v) => { attrs[k] = v; }, get outerHTML() { return `<div id="${id}" class="x"${Object.entries(attrs).map(([k, v]) => ` ${k}="${v}"`).join('')}></div>`; } };
+    },
+  });
+  const els = {
+    conversaMsgs: el('conversaMsgs', '<p>PRIVADO custa $& e $1</p><p>mais</p>', 2),
+    presencaLista: el('presencaLista', '<li>📍 PREVIA</li>', 1),
+  };
+  const pagina = `<html><body><h1>ok</h1>${els.conversaMsgs.outerHTML}<ul>${els.presencaLista.outerHTML}</ul></body></html>`;
+  const document = { documentElement: { outerHTML: pagina }, getElementById: (id) => els[id] || null };
+  const f = new Function('document', APP.slice(ini, fim) + '\nreturn domParaDiagnostico;')(document);
+  const dom = f();
+  assert.ok(!dom.includes('PRIVADO') && !dom.includes('PREVIA'), 'a conversa foi pro diagnóstico');
+  assert.match(dom, /<div id="conversaMsgs" class="x" data-diag-omitido="2"><\/div>/, 'o elemento tem que ficar, vazio e com a contagem');
+  assert.match(dom, /<h1>ok<\/h1>/, 'o resto da página sumiu junto');
+  // E TODO lugar que copia a página passa pelo helper: o `outerHTML` cru da
+  // página só pode existir dentro dele (o relatório e cada captura).
+  const codigo = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const crus = codigo.match(/document\.documentElement\.outerHTML/g) || [];
+  assert.equal(crus.length, 1, `a página é copiada crua em ${crus.length} lugares — a conversa vazaria por um deles`);
+  assert.equal((codigo.match(/dom: domParaDiagnostico\(\)/g) || []).length, 2, 'o relatório e as capturas têm que usar o helper');
 });

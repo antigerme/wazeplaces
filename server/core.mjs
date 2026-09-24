@@ -3031,7 +3031,10 @@ function confirmarDeCarona(data, cookieHeader, region) {
 }
 
 // Ao abrir a app e ao abrir a lista: quem usa a app no país, as conversas da
-// app e, com a `instalacao` do aparelho, o token do tempo real — UMA ida.
+// app e, com `token: true` e a `instalacao` do aparelho, o token do tempo real
+// — UMA ida. O token é PEDIDO, e não implícito na instalação: ela também vai
+// junto só pra confirmar o que chegou pelo fluxo, e aí buscar token seria uma
+// chamada a mais ao Waze sem ninguém precisar dele.
 async function handlePresencaApp(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
@@ -3039,11 +3042,13 @@ async function handlePresencaApp(data, { sessions }) {
   const eu = idWaze(data.userId);
   const conhecidos = lerConhecidos(data.conhecidos);
   const instalacao = data.instalacao === undefined || data.instalacao === null ? null : uuid(data.instalacao);
+  const querToken = data.token === true;
+  if (querToken && !instalacao) incompleto();   // o token é da instalação
   const { cookieHeader } = prepareAuth(cookies);
   const wmp = WAZE_WMP[region] || WAZE_WMP.row;
   const [app, prov, confirmados] = await Promise.all([
     listaDaApp(cookieHeader, region, { pais: data.pais, eu, conhecidos }, { data, sessions, cookies }),
-    instalacao
+    querToken
       ? callWazeGrpc(wmp + SERVICO_MENSAGENS + '/GetMessagingProvider', cookieHeader,
         corpoSoCabecalho(cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao })), region, null, { chat: true })
       : null,
@@ -3060,7 +3065,7 @@ async function handlePresencaApp(data, { sessions }) {
     status: 200,
     body: {
       success: true, online: app.online, conversas: app.conversas,
-      ...(instalacao ? { chat } : {}),
+      ...(querToken ? { chat } : {}),
       ...(confirmados ? { confirmados } : {}),
     },
   };
