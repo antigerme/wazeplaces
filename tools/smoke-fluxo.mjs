@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Smoke de FLUXO: a app como MÁQUINA DE ESTADOS, não como coleção de telas.
+// Smoke de FLUXO: o app como MÁQUINA DE ESTADOS, não como coleção de telas.
 //
 // POR QUE ESTE ARQUIVO EXISTE, com os dois defeitos que o motivaram:
 //
@@ -139,7 +139,7 @@ const ENDPOINTS_DE_ESCRITA = ['validar-place', 'marcar-lido', 'excluir-foto', 'r
 
 // ── ESTADOS QUE PODEM COEXISTIR ────────────────────────────────────────────
 //
-// A app bloqueia de DUAS formas, e as duas são desenho, não acidente:
+// O app bloqueia de DUAS formas, e as duas são desenho, não acidente:
 //
 //   `some`       — o controle sai da tela. É o certo quando a ação não existe
 //                  naquele contexto (no treino nada escreve; renomeando, as
@@ -226,7 +226,7 @@ const ESTADOS = [
 // estado + AÇÃO: renomeando, TROCAR DE FOTO reacendia a lixeira/aprovar.
 //
 // Entrar nos dois estados não reproduz nada. O que reproduz é entrar e depois
-// SACUDIR — fazer a app se redesenhar. Toda ação abaixo é coisa que o editor
+// SACUDIR — fazer o app se redesenhar. Toda ação abaixo é coisa que o editor
 // faz o tempo todo e que, por desenho, não pode mexer no que está bloqueado.
 // Ação nova que redesenhe entra aqui.
 const ACOES_NEUTRAS = [
@@ -250,8 +250,8 @@ const FERRAMENTAS = (PEDIDO_JSON) => {
     montar() {
       // SEM TOKEN, `API.markAsRead` e companhia retornam ANTES de tocar a rede
       // (`if (!sessionToken) return`). Sem isto, "zero escrita no fio" passava
-      // por VÁCUO: nada escreveria em estado nenhum, e o teste diria que a app
-      // está protegida quando na verdade está apenas deslogada. Foi o CONTROLE
+      // por VÁCUO: nada escreveria em estado nenhum, e o teste diria que o app
+      // está protegido quando na verdade está apenas deslogado. Foi o CONTROLE
       // da rede que pegou — é literalmente pra isso que ele existe.
       API.setSession('token-de-teste-do-smoke-de-fluxo');
       AppState.authenticated = true;
@@ -343,7 +343,7 @@ const FERRAMENTAS = (PEDIDO_JSON) => {
         // viewport, não o defeito.
         presente: visivel && naTela,
         alcancavel: visivel && naTela && !desabilitado && recebeToque,
-        // Botão morto com cara de vivo lê como app quebrada: `disabled` sem
+        // Botão morto com cara de vivo lê como app quebrado: `disabled` sem
         // esmaecer engana o olho, esmaecido sem `disabled` engana o Tab.
         opacidade: parseFloat(cs.opacity),
       };
@@ -575,7 +575,7 @@ for (const est of ['treino', 'desfazerCorrendo']) {
   await ctx.close();
 }
 // CONTROLE da rede: fora dos estados bloqueados, a escrita PRECISA sair —
-// senão "zero escrita" seria verdade com a app inteira quebrada.
+// senão "zero escrita" seria verdade com o app inteiro quebrado.
 {
   const { ctx, page, escritas } = await novaPagina();
   // NÃO uso `undoEnabled: false` pra encurtar: o CLAUDE.md avisa que ele
@@ -584,7 +584,7 @@ for (const est of ['treino', 'desfazerCorrendo']) {
   // real de todo editor e não depende de flag nenhuma.
   await page.evaluate(() => document.querySelector('.card-btn-read')?.click());
   await page.waitForTimeout(4200);   // UNDO_WINDOW_MS = 3000, com folga
-  if (!escritas.length) dizer('controle da rede: marcar lido NÃO mandou nada nem com a janela vencida — o teste inteiro estaria medindo uma app morta');
+  if (!escritas.length) dizer('controle da rede: marcar lido NÃO mandou nada nem com a janela vencida — o teste inteiro estaria medindo um app morto');
   else console.log(`  ok controle: fora dos bloqueios a escrita sai (${[...new Set(escritas)].join(', ')})`);
   await ctx.close();
 }
@@ -646,7 +646,7 @@ console.log('\n5. TECLADO — foco em campo de texto: a seta é do cursor, em to
     await ctx.close();
   }
   // CONTROLE: SEM campo focado, a seta TEM que agir. Senão o item acima
-  // passaria com o teclado morto na app inteira.
+  // passaria com o teclado morto no app inteiro.
   const { ctx, page } = await novaPagina();
   await entrar(page, 'lightbox');
   await page.evaluate(() => document.getElementById('lightboxClose').focus());
@@ -661,7 +661,7 @@ console.log('\n5. TECLADO — foco em campo de texto: a seta é do cursor, em to
 
 // ═══ 6. TODA CAMADA TEM VOLTA, e a de baixo continua viva ═════════════════
 // "Sem saída" é o defeito que mais custa: a pessoa aperta, não acontece nada,
-// aperta de novo e sai da app.
+// aperta de novo e sai do app.
 console.log('\n6. VOLTA — Esc fecha a camada de cima e devolve a de baixo funcionando');
 // `treino` fica de fora porque NÃO é camada: é um MODO, e sair dele por Esc
 // seria uma decisão de produto que ninguém tomou. `filaVazia`/`deslogado`/
@@ -676,7 +676,7 @@ for (const est of ESTADOS.filter((e) => !['deslogado', 'filaVazia', 'desfazerCor
   const aindaAberto = await page.evaluate((expr) => __fx.estado(expr), est.ativo);
   if (aindaAberto === true) dizer(`volta/${est.nome}: Esc não fechou a camada`);
   else {
-    // E o card de baixo tem que voltar a responder — camada fechada que deixa a
+    // E o card de baixo tem que voltar a responder — camada fechada que deixa o
     // app inerte é o mesmo beco sem saída, só que silencioso.
     const vivo = await page.evaluate(() => {
       const b = document.querySelector('.card-btn-read');
@@ -890,7 +890,7 @@ for (const est of ESTADOS.filter((e) => !['deslogado', 'filaVazia', 'desfazerCor
 
   // ── 7f. SAIR REMOVE DA LISTA DE TODOS, sem prazo ────────────────────────
   // A Ajuda promete "some assim que você sai", nas 4 línguas. Se isto falhar,
-  // a app mente — e ninguém consegue depurar uma promessa de texto.
+  // o app mente — e ninguém consegue depurar uma promessa de texto.
   {
     const fica = await cliente({ nome: 'fica', peer: 'f1' });
     const vai = await cliente({ nome: 'vai', peer: 'v1' });

@@ -102,7 +102,7 @@ App armazena email/senha encriptados, faz login programático quando cookies exp
 
 - Exige guardar senha do user (responsabilidade enorme)
 - Waze tem bot detection / reCAPTCHA / device fingerprinting que pode pegar
-- Viola Waze ToS de forma mais clara que o resto da app
+- Viola Waze ToS de forma mais clara que o resto do app
 
 ---
 
@@ -113,7 +113,7 @@ App armazena email/senha encriptados, faz login programático quando cookies exp
 - **Gestos de swipe verdadeiros**: hoje a PWA usa touch events no DOM com inércia simulada. Nativo tem `RecyclerView` + `ItemTouchHelper` ou Compose `swipeable` — feel muito melhor, especialmente com swipe-back animation, haptic feedback (`HapticFeedbackConstants`), spring animations naturais
 - **Animações 60-120fps**: GPU-accelerated, sem competir com main thread JS
 - **Splash screen nativa**: aparece em <100ms vs PWA esperando JS carregar
-- **Status bar / nav bar customizadas**: cor que combina com a app, immersive mode
+- **Status bar / nav bar customizadas**: cor que combina com o app, immersive mode
 - **Modo paisagem** com layouts adaptativos otimizados
 - **Foldables / tablets** com layouts diferenciados (Galaxy Fold etc.)
 
@@ -202,11 +202,11 @@ Ou Flutter (Dart) que tem curva diferente.
 
 ### Risco de banimento Waze (mesmo)
 
-Vale notar: **o risco do Waze rejeitar/banir a app é o mesmo em ambos os casos.** Tanto a PWA quanto um app nativo são "uso não-oficial" da API interna deles. A diferença:
+Vale notar: **o risco do Waze rejeitar/banir o app é o mesmo em ambos os casos.** Tanto a PWA quanto um app nativo são "uso não-oficial" da API interna deles. A diferença:
 
-- PWA: Waze pode bloquear o IP do nosso servidor → matamos a app
+- PWA: Waze pode bloquear o IP do nosso servidor → matamos o app
 - Nativo: Waze pode bloquear o User-Agent / certificate hash do app → mais difícil pra Waze fazer, mas possível
-- Em ambos casos: Waze pode mudar a API e quebrar a app
+- Em ambos casos: Waze pode mudar a API e quebrar o app
 
 ---
 
@@ -431,7 +431,7 @@ Pra o estado atual do projeto (iteração rápida, time sem experiência Android
 
 **Exceção**: se mantiver PWA + nativo coexistindo, backend continua existindo pra a PWA. Não pode ser deletado.
 
-**Bonus que não esperava**: indo nativo, *muitos* problemas que viraram gotchas dolorosos (cache version skew, service worker, CSP, mod_pagespeed, Cloudflare cache) literalmente desaparecem. A app fica estruturalmente mais simples.
+**Bonus que não esperava**: indo nativo, *muitos* problemas que viraram gotchas dolorosos (cache version skew, service worker, CSP, mod_pagespeed, Cloudflare cache) literalmente desaparecem. O app fica estruturalmente mais simples.
 
 ---
 

@@ -1,11 +1,11 @@
 // FONTE ÚNICA de ESPERAR, num smoke, SEM injetar nada na página.
 //
 // Duas esperas moram aqui, e o que elas têm em comum é o que importa: as duas
-// pollam pelo lado do NODE. O smoke do offline MEDE a superfície de erro da app
-// (`pageerror` e o `unhandledrejection` que ela mesma captura), então instrumento
+// pollam pelo lado do NODE. O smoke do offline MEDE a superfície de erro do app
+// (`pageerror` e o `unhandledrejection` que ele mesmo captura), então instrumento
 // que injeta código nessa superfície vira ruído indistinguível de defeito — e foi
 // assim que o CI acusou um `EvalError: Refused to evaluate a string as JavaScript`
-// que a app não produz (ela não tem `eval` nenhum).
+// que o app não produz (ele não tem `eval` nenhum).
 //
 // Nasceu dentro do `smoke-browser.mjs`, depois de aquele bloco reprovar TRÊS
 // vezes no CI e NUNCA aqui. Virou módulo quando o `smoke-offline.mjs` precisou

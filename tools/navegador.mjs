@@ -6,7 +6,7 @@
 // Ela existe porque a VERSÃO do navegador já custou um diagnóstico inteiro, e o
 // erro foi sempre o mesmo: medir numa versão e concluir sobre outra sem saber.
 // O CI fixava o Playwright 1.49.1 (Chromium 131, de novembro de 2024), o
-// sandbox tinha o 1.56.1 global (Chromium 141), e o navegador de quem usa a app
+// sandbox tinha o 1.56.1 global (Chromium 141), e o navegador de quem usa o app
 // se atualiza sozinho (Chrome 15x). Três versões, e nenhum log dizendo qual
 // rodou. Duas diferenças entre elas morderam em dois dias — o `EvalError` do
 // poller do rAF, que só aparecia no 1.49, e o `page.close()`, que dispara
@@ -31,7 +31,7 @@
 //    Chrome do sistema": aquele era outro navegador, com outra versão, entrando
 //    em silêncio.
 //
-// E ele confere, sem custar nada à app, se o npm já tem versão mais NOVA que a
+// E ele confere, sem custar nada ao app, se o npm já tem versão mais NOVA que a
 // instalada: numa sessão longa, o que foi instalado ontem pode não ser mais o
 // que o CI usa hoje.
 
@@ -183,7 +183,7 @@ export function abrirChromium(pw, opcoes = {}) {
 // ── O que o MOTOR diz no console e não é erro da página ─────────────────────
 //
 // Lista FECHADA, cada frase MEDIDA e com o porquê. Serve pra quem conta erro de
-// console como erro da app: sem ela, o aviso do motor vira falha de teste; com
+// console como erro do app: sem ela, o aviso do motor vira falha de teste; com
 // ela aberta demais, erro de verdade passa calado. Frase nova só entra com o
 // motivo escrito aqui, e o test/navegador.test.mjs cobra isso.
 const RUIDO_DO_MOTOR = [

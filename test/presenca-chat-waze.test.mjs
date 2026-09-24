@@ -18,7 +18,7 @@ const deB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const b64 = (u8) => btoa(String.fromCharCode(...u8));
 const um = (campos, n) => campos.find((c) => c.n === n)?.v;
 
-// Cookie de mentira no formato Netscape (o mesmo que a app guarda).
+// Cookie de mentira no formato Netscape (o mesmo que o app guarda).
 const COOKIES = [
   '.waze.com\tTRUE\t/\tTRUE\t0\t_csrf_token\tcsrf-de-teste',
   '.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tsessao-de-teste',
@@ -70,7 +70,7 @@ test('presenca-waze: só a lista → UMA chamada ao listOnlineEditors, do servid
   assert.ok(!('X-CSRF-Token' in h), 'o WME não manda CSRF no gRPC — mandar seria uma assinatura a mais');
   assert.ok(!('X-User-Agent' in h), 'a presença do WME não se identifica como cliente de chat');
   assert.match(h.Cookie, /_web_session=sessao-de-teste/);
-  assert.equal(h.Referer, 'https://www.waze.com/editor?env=row', 'Referer sem idioma, como toda URL do WME na app');
+  assert.equal(h.Referer, 'https://www.waze.com/editor?env=row', 'Referer sem idioma, como toda URL do WME no app');
 });
 
 test('presenca-waze: a região escolhe o servidor (a presença é separada por servidor)', async () => {
@@ -93,13 +93,13 @@ test('presenca-waze: mover e listar saem JUNTOS, e a escrita é a do WME com a p
   // pessoa, mesma máscara, mesmos campos.
   const marcada = marcarPosicao({ lat: -12.597498, lon: -39.511208 }, 30);
   assert.equal(b64(escrita.corpo), b64(g.corpoAtualizarPresenca({ userId: '183164343', ...marcada })));
-  assert.notEqual(b64(escrita.corpo), F.atualizarPosicao.req, 'a posição saiu SEM a marca da app');
+  assert.notEqual(b64(escrita.corpo), F.atualizarPosicao.req, 'a posição saiu SEM a marca do app');
   const loc = um(g.lerCampos(um(g.lerCampos(escrita.corpo), 1)), 2);
   const ll = g.lerCampos(loc);
   // int64 negativo viaja em complemento de dois: lido cru, dá um número enorme
   // e o resto sai lixo (foi o que este teste acusou na primeira versão).
   const assinado = (v) => Number(BigInt.asIntN(64, BigInt(v)));
-  assert.ok(temMarcaDaApp({ lat: assinado(um(ll, 102)) / 1e6 }), 'a latitude escrita não tem a marca da app');
+  assert.ok(temMarcaDaApp({ lat: assinado(um(ll, 102)) / 1e6 }), 'a latitude escrita não tem a marca do app');
   assert.equal(paisDaMarca({ lon: assinado(um(ll, 101)) / 1e6 }), 30, 'a longitude escrita não carrega o país');
   assert.equal(resultado.body.eu.nome, 'cafanha');
   assert.deepEqual(resultado.body.editores, []);
@@ -114,8 +114,8 @@ test('presenca-waze: validação antes de qualquer rede', async () => {
     { posicao: { lat: -12.6, lon: -39.5 }, pais: 30 },            // escrita sem id
     { posicao: { lat: -12.6, lon: -39.5 }, pais: 30, userId: '12a' }, // id que não é do Waze
     { posicao: { lat: 91, lon: -39.5 }, userId: '1', pais: 30 },  // latitude impossível
-    // Posição sem país não tem como levar a marca da app, e posição sem marca
-    // tiraria a pessoa da lista dos outros usuários da app — então não sai.
+    // Posição sem país não tem como levar a marca do app, e posição sem marca
+    // tiraria a pessoa da lista dos outros usuários do app — então não sai.
     { posicao: { lat: -12.6, lon: -39.5 }, userId: '1' },
     { posicao: { lat: -12.6, lon: -39.5 }, userId: '1', pais: 0 },
     { posicao: { lat: -12.6, lon: -39.5 }, userId: '1', pais: 1000 },
@@ -216,12 +216,12 @@ test('chat enviar: texto, contexto e id do cliente; SEM remetente quando não se
   assert.equal(resultado.body.ts, 1790182220160);
   const m = g.lerMensagem(um(g.lerCampos(pedidos[0].corpo), 2));
   assert.deepEqual([m.classe, m.texto, m.para.id, m.de], ['texto', 'Olá antigerme', '12444348', null]);
-  // O contexto do cliente vai inteiro, e a MARCA da app vai junto (fase 3).
+  // O contexto do cliente vai inteiro, e a MARCA do app vai junto (fase 3).
   assert.deepEqual(m.contexto, { wp_card: '{"v":1}', app: 'wazeplaces' });
 });
 
-test('chat enviar: a marca da app é do SERVIDOR — o cliente não a tira nem a troca', async () => {
-  // É a marca que põe a conversa na lista da app. Cliente velho (sem contexto)
+test('chat enviar: a marca do app é do SERVIDOR — o cliente não a tira nem a troca', async () => {
+  // É a marca que põe a conversa na lista do app. Cliente velho (sem contexto)
   // ou descuidado (com outra `app`) não pode tirar a conversa de lá.
   for (const contexto of [undefined, null, { app: 'outra' }, { legenda: 'oi', app: '' }]) {
     const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: deB64(F.enviarTexto.res) }),

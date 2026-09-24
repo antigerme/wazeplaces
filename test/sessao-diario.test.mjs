@@ -179,7 +179,7 @@ test('o arquivo diz de que versão do diagnóstico ele é', () => {
 // `API.getSession()` lê o token do armazenamento SEM passar pelo `setSession`,
 // que é onde o gancho mora. Então quem já estava logado quando esta versão
 // chegou — todo aparelho no dia do deploy, e os testadores que vão relatar —
-// abre a app sem carimbar início nenhum: o `caiu` chega sozinho e a duração,
+// abre o app sem carimbar início nenhum: o `caiu` chega sozinho e a duração,
 // que é o produto inteiro da seção, sai vazia no PRIMEIRO relato, que é
 // justamente o que interessa.
 
@@ -189,7 +189,7 @@ test('a abertura com sessão já ativa carimba um marco próprio', () => {
     'o marco deixou de ser registrado — o primeiro relato volta a vir sem duração');
   assert.match(corpo, /if \(!safeLS\.get\('waze_session_token'\)\) return;/,
     'carimba sem haver sessão — inventaria ciclo em quem está deslogado');
-  // Sem a varredura, seria uma linha por ABERTURA da app: o diário viraria
+  // Sem a varredura, seria uma linha por ABERTURA do app: o diário viraria
   // ruído e quebraria a própria regra de entrada (raro, nunca por gesto).
   assert.match(corpo, /e === 'token\+' \|\| e === 'jaAtiva'\) return;/,
     'o marco deixou de checar se já há início em aberto — duplica a cada abertura');

@@ -1,5 +1,5 @@
 // O diagnóstico passou a sair EMPACOTADO (v2026.09.10-04). Este arquivo trava as
-// duas pontas: o que a app escreve e o que as ferramentas leem.
+// duas pontas: o que o app escreve e o que as ferramentas leem.
 //
 // MEDIDO no diagnóstico real do owner antes de escrever uma linha: 2,61 MB →
 // 532 KB (4,9×), em 529 ms com CPU 6× mais lenta. A compressão é do próprio
@@ -32,7 +32,7 @@ function montarZipar() {
 
 const { zipar, crc32 } = montarZipar();
 
-test('o CRC da app bate com uma implementação INDEPENDENTE', () => {
+test('o CRC do app bate com uma implementação INDEPENDENTE', () => {
   // Oráculo: `zlib.crc32` do Node. Se os dois concordarem em entrada vazia, em
   // ASCII, em acento e em binário, a tabela está certa — e CRC errado é o erro
   // que faz o pacote abrir em UM programa e falhar em outro.
@@ -45,7 +45,7 @@ test('o CRC da app bate com uma implementação INDEPENDENTE', () => {
   }
 });
 
-test('ida e volta: o que a app empacota, a ferramenta abre', async () => {
+test('ida e volta: o que o app empacota, a ferramenta abre', async () => {
   const original = { _leia_isto: 'aviso', appState: { queue: [{ venueID: 'x' }] }, n: 42 };
   const zip = await zipar([['diagnostico.json', JSON.stringify(original)], ['LEIA-ME.txt', 'aviso curto']]);
   const dir = mkdtempSync(join(tmpdir(), 'diagzip-'));

@@ -214,7 +214,7 @@ test('atributo: a classe do rótulo desliga o break-all no CSS', () => {
   assert.ok(bloco, 'a regra do rótulo traduzido sumiu do styles.css');
   assert.match(bloco[0], /word-break:\s*normal/, 'sem isto o rótulo parte no meio da palavra');
   assert.match(bloco[0], /font-family:\s*inherit/, 'prosa em monoespaçado');
-  // E ela precisa estar no CSS que a app CARREGA, não só no fonte.
+  // E ela precisa estar no CSS que o app CARREGA, não só no fonte.
   assert.match(read('css/app.css'), /\.diff-obj-caminho\.diff-obj-rotulo/,
     'faltou rodar `npm run css`');
 });

@@ -6,7 +6,7 @@
 //  (a) o rótulo da ordem padrão é INTERPOLADO numa frase — o aviso de GPS
 //      negado diz "a ordem voltou pra «…»" —, então o emoji ia parar no meio
 //      da prosa, entre aspas;
-//  (b) a régua "o mesmo conceito usa o mesmo ícone em toda a app" ficava
+//  (b) a régua "o mesmo conceito usa o mesmo ícone em todo o app" ficava
 //      espalhada por 4 dicionários, sem um lugar onde conferir.
 //
 // Agora o ícone é do CONCEITO (um mapa), e o dicionário volta a ser texto.

@@ -146,7 +146,7 @@ test('diag-resumo: relatório de antes da fila de saída no resumo diz que ela n
 });
 
 test('diag-resumo: as ABERTURAS ANTERIORES guardadas aparecem, com diário, capturas e alertas — sem dom nem corpo', () => {
-  // v2026.09.22-06: o relato que atravessa fechar e reabrir a app. O defeito
+  // v2026.09.22-06: o relato que atravessa fechar e reabrir o app. O defeito
   // foi capturado ANTES de fechar, noutra abertura, e o relatório de depois
   // tem que mostrar isso.
   const CORPO = 'CANARIO-CORPO-da-fila';
@@ -187,7 +187,7 @@ test('diag-resumo: relatório de antes das aberturas guardadas diz que elas não
   assert.match(rodar(relatorioV4()), /── ABERTURAS ANTERIORES \(guardadas no aparelho\) ─+\n\(ausente nesta versão\)/);
 });
 
-test('diag-resumo: a presença da app (fase 3) sai em CONTAGENS, com os avisos — nunca nome, texto ou token', () => {
+test('diag-resumo: a presença do app (fase 3) sai em CONTAGENS, com os avisos — nunca nome, texto ou token', () => {
   const d = relatorioV4();
   d._versaoDoDiag = 7;
   d.resumo.presencaApp = {
@@ -197,12 +197,12 @@ test('diag-resumo: a presença da app (fase 3) sai em CONTAGENS, com os avisos �
     conhecidos: 5, aConfirmar: 95,
   };
   const s = rodar(d);
-  assert.match(s, /── PRESENÇA NA APP \(lista e conversa\) ─+\nligada true · na app 2 · conversas 3 · não lidas 1/, 'a seção da presença da app sumiu');
+  assert.match(s, /── PRESENÇA NO APP \(lista e conversa\) ─+\nligada true · no app 2 · conversas 3 · não lidas 1/, 'a seção da presença do app sumiu');
   assert.match(s, /tempo real aberto true há 12 s · aberturas 4 · quadros 31 · mensagens 2 · recibos 1 · recuo 0/);
   assert.match(s, /ATENÇÃO: o token do tempo real venceu/, 'o aviso do token vencido não saiu');
   assert.match(s, /ATENÇÃO: a fila de confirmação está quase no teto/, 'o aviso da confirmação não saiu');
   assert.ok(!s.includes(TOKEN), 'o token vazou');
   // Relatório de antes da fase 3: a seção diz que não havia.
   const antigo = rodar(relatorioV4());
-  assert.match(antigo, /── PRESENÇA NA APP \(lista e conversa\) ─+\n\(ausente nesta versão\)/);
+  assert.match(antigo, /── PRESENÇA NO APP \(lista e conversa\) ─+\n\(ausente nesta versão\)/);
 });

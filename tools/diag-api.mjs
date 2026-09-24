@@ -5,7 +5,7 @@
 //   node tools/diag-api.mjs <arquivo.json> lista-estados '{"countryId":73}'
 //
 // POR QUE ISTO EXISTE — e a ideia é do owner. O diagnóstico é uma GRAVAÇÃO:
-// responde tudo que a app perguntou, e nada do que ela não perguntou. Quando a
+// responde tudo que o app perguntou, e nada do que ele não perguntou. Quando a
 // dúvida vira "e se pedisse a página 2? e com outro filtro?", antes disso só
 // havia um caminho: pedir o `cookies.txt` dele. Mas o arquivo já traz o
 // `waze_session_token`, e ele é a chave da NOSSA API — que por sua vez tem os
@@ -21,7 +21,7 @@
 //     `waze-probe.mjs` tem contra `/Features` e `/Issues/Read`.
 //  2. JITTER da fonte única (`waze-jitter.mjs`), como toda varredura deste repo.
 //  3. O TOKEN NUNCA É IMPRESSO nem passa por linha de comando — ele vai no CORPO
-//     do POST, que é onde a criptografia da app pressupõe que ele viva
+//     do POST, que é onde a criptografia do app pressupõe que ele viva
 //     (gotcha #60). O corpo sai por stdin do curl... aqui, por `fetch` direto.
 //
 // E UM CUSTO QUE NÃO É ÓBVIO: cada chamada aqui é uma requisição REAL no free
@@ -62,7 +62,7 @@ const { dados: d, origem: _origemDoDiag } = lerDiagnostico(ARQ);
 const token = (d.localStorage || {}).waze_session_token;
 if (!token) { console.error('o diagnóstico não traz waze_session_token'); process.exit(1); }
 const base = String((d.app && d.app.url) || '').replace(/\/+$/, '');
-if (!/^https:\/\//.test(base)) { console.error('URL da app ausente ou não-https no diagnóstico'); process.exit(1); }
+if (!/^https:\/\//.test(base)) { console.error('URL do app ausente ou não-https no diagnóstico'); process.exit(1); }
 
 const corpo = { sessionToken: token, region: 'row', ...(EXTRA ? JSON.parse(EXTRA) : {}) };
 const semSegredo = { ...corpo, sessionToken: '<TOKEN>' };

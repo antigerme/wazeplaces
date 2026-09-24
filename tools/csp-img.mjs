@@ -1,4 +1,4 @@
-// FONTE ÚNICA de "este host pode carregar imagem na app?".
+// FONTE ÚNICA de "este host pode carregar imagem no app?".
 //
 // DUAS pontas fazem essa pergunta e elas têm que responder IGUAL: o
 // `test/avatar.test.mjs`, que trava a CSP no CI, e o `tools/waze-probe.mjs`,

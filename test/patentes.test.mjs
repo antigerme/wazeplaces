@@ -269,8 +269,8 @@ test('conquista NÃO dispara banner nem confete', () => {
     'sobrou chave de toast de conquista — texto morto em 4 idiomas');
 
   // CONTRAPROVA: o gate do Desfazer CONTINUA com banner e confete. Sem isto,
-  // "não achei showToast" passaria também se eu tivesse arrancado os dois da
-  // app inteira — que seria outro bug, não este conserto.
+  // "não achei showToast" passaria também se eu tivesse arrancado os dois do
+  // app inteiro — que seria outro bug, não este conserto.
   const gate = fatiar('checkUndoGateUnlock');
   assert.match(gate, /dispararConfeteNaFila\(\)/,
     'o desbloqueio do Desfazer perdeu o confete — ele é o ÚNICO que ainda o tem');
@@ -320,7 +320,7 @@ test('o dicionário tem o texto do selo nas quatro línguas', () => {
 
 // ── O DESVIO: o ponto LEVA ao que destravou ────────────────────────────────
 //
-// O owner apontou a incoerência olhando a app: desbloquear o Desfazer te leva
+// O owner apontou a incoerência olhando o app: desbloquear o Desfazer te leva
 // ao interruptor, com destaque; destravar uma conquista te larga na aba
 // Filtros pra procurar entre 16 células. Os dois anúncios são diferentes de
 // propósito (banner × ponto, decisão dele em 2026-09-16) — o que não podia
@@ -339,7 +339,7 @@ test('a condição do ponto tem FONTE ÚNICA — quem acende e quem leva concord
     'temConquistaNova parou de considerar as duas origens de novidade');
   assert.match(t, /AppState\.authenticated/, 'o ponto voltaria a acender deslogado');
   assert.match(t, /carregarConquistas\(\)/,
-    'passou a ler da memória: quem destravou ontem e fechou a app voltaria sem nada');
+    'passou a ler da memória: quem destravou ontem e fechou o app voltaria sem nada');
   // Ninguém mais pode remontar a condição à mão.
   const selo = semComentariosJS(fatiar('atualizarSeloDeConquista'));
   assert.match(selo, /temConquistaNova\(\)/, 'o selo voltou a calcular a condição por conta própria');

@@ -4,7 +4,7 @@
 // `há {n}min`. Um pedido de NOVE MESES saía como "há 9m" — nove minutos pra
 // qualquer falante de português. Ao lado, o rótulo de tipo dizia "Novo local".
 // O relato que chegou foi literalmente "a mesma solicitação 'nova' entrando
-// assim que abro a aplicação". Ele leu certo o que a app escreveu.
+// assim que abro a aplicação". Ele leu certo o que o app escreveu.
 //
 // A INVARIANTE aqui não é "meses tem que ser por extenso" — isso amarraria o
 // teste na implementação de hoje. É a forma GERAL do defeito: **duas unidades
@@ -177,7 +177,7 @@ test('a idade do PEDIDO usa o mesmo mecanismo da idade da FOTO', () => {
 test('pedido SEM data vai pro FIM — nunca crava a posição 0', () => {
   // O `|| 0` que estava no sortQueue transformava `dateAdded: null` em 0, que
   // em "mais antigos primeiro" é o mais antigo possível: o pedido ficava na
-  // posição 0 da fila em TODA abertura da app, para sempre. É exatamente o
+  // posição 0 da fila em TODA abertura do app, para sempre. É exatamente o
   // sintoma relatado ("a mesma solicitação entrando assim que abro"), por uma
   // causa diferente da que gerou o relato — e sem nada na tela explicando.
   //

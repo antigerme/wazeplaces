@@ -51,7 +51,7 @@ test('diag-api: a recusa acontece ANTES de qualquer rede', () => {
 });
 
 test('diag-api: o token nunca é impresso nem vai por linha de comando', () => {
-  // Ele viaja no CORPO do POST, que é onde a criptografia da app pressupõe que
+  // Ele viaja no CORPO do POST, que é onde a criptografia do app pressupõe que
   // ele viva (gotcha #60: token em URL/query/log derruba a garantia).
   assert.ok(!/console\.log\([^)]*\btoken\b/.test(API), 'algum console.log imprime o token');
   assert.match(API, /sessionToken: '<TOKEN>'/, 'o resumo do corpo parou de mascarar o token');

@@ -71,7 +71,7 @@ const API = {
     // Guarda SEMPRE, não só com o modo dev ligado: o defeito acontece ANTES de
     // alguém abrir o diagnóstico, e anel que começa a gravar na hora do socorro
     // nasce vazio justo quando importa. Custo: 60 objetos pequenos em memória,
-    // zero requisição, zero gravação no aparelho, e some ao fechar a app.
+    // zero requisição, zero gravação no aparelho, e some ao fechar o app.
     //
     // NUNCA guarda o corpo enviado nem o recebido: o corpo leva o sessionToken
     // em toda chamada, e o recebido leva dado de terceiro (nome de quem mandou
@@ -178,7 +178,7 @@ const API = {
     // não chegou. `navigator.onLine === true` não prova nada disto, e o evento
     // `online` do navegador pode não vir: no iPhone do owner, sair do modo
     // avião deixou 3 ações presas na fila enquanto DUAS novas saíam com sucesso
-    // na mesma tela — a app tinha a prova na mão e não a usava.
+    // na mesma tela — o app tinha a prova na mão e não a usava.
     //
     // O gancho existe pra o TRANSPORTE não precisar conhecer a fila de saída:
     // quem registra é o `app.js`. Chamado de dentro de um try/catch próprio,
@@ -206,7 +206,7 @@ const API = {
             // é JSON (desafio do WAF da Cloudflare, 502 da borda, página de erro
             // do gateway) faz o `.json()` LANÇAR, e no `catch` a única coisa que
             // sobrava era `http: 0` — indistinguível de "o celular ficou sem
-            // rede". A app roda atrás do Bot Fight Mode, então esse caso não é
+            // rede". O app roda atrás do Bot Fight Mode, então esse caso não é
             // hipotético: "a Cloudflare barrou o aparelho" e "o wifi piscou"
             // ficavam idênticos no diagnóstico.
             const http = response.status;
@@ -398,7 +398,7 @@ const API = {
         }).catch(() => {});
     },
 
-    // Renomear o local. Escrita de dado de LOCAL — a única da app — e por isso
+    // Renomear o local. Escrita de dado de LOCAL — a única do app — e por isso
     // o `nome` vai CRU: quem apara é o servidor (`trim`, teto) e quem recusa de
     // verdade é o Waze, que valida permissão e lockRank na gravação.
     async renomearLocal(venueID, nome) {
@@ -450,7 +450,7 @@ const API = {
         });
     },
 
-    // Quem usa a app no país e as conversas da app (fase 3), e, com
+    // Quem usa o app no país e as conversas do app (fase 3), e, com
     // `token: true`, o token do tempo real. `campos` traz pais, userId,
     // conhecidos e, quando houver, a instalação e os ids a confirmar.
     async presencaApp(campos) {

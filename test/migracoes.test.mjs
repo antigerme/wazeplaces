@@ -100,7 +100,7 @@ test('nenhuma migração passou do prazo de REVISÃO', () => {
 test('o prazo PADRÃO vale pra família "aparelho"', () => {
   // Migração de aparelho expira quando todo aparelho rodou — é o único caso em
   // que o relógio responde a pergunta certa, e é onde os 30 dias valem. Família
-  // `arquivo` NÃO expira por uso da app (diagnóstico recebido fica no disco pra
+  // `arquivo` NÃO expira por uso do app (diagnóstico recebido fica no disco pra
   // sempre), então ela tem prazo próprio e mais longo, de propósito.
   const dia = 86400000;
   for (const m of MIGRACOES.filter((x) => x.familia === 'aparelho')) {

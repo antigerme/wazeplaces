@@ -38,7 +38,7 @@ function montar({ status = 200, corpo = '{"success":true}', cab = {}, lanca = nu
 
 // ═══ o buraco que valia horas ════════════════════════════════════════════════
 test('corpo que NÃO é JSON preserva o status real — não vira "sem rede"', async () => {
-  // A app roda atrás do Bot Fight Mode da Cloudflare. Desafio do WAF, 502 da
+  // O app roda atrás do Bot Fight Mode da Cloudflare. Desafio do WAF, 502 da
   // borda e página de erro do gateway devolvem HTML: o `.json()` lança, e antes
   // do conserto o `catch` registrava `http: 0` — indistinguível de rede caída.
   // "A Cloudflare barrou o aparelho" e "o wifi piscou" ficavam idênticos.
@@ -141,7 +141,7 @@ const CSS = _rf(new URL('../css/app.css', import.meta.url), 'utf8');
 const semCom = APP.replace(/\/\/[^\n]*/g, '');
 
 test('o diário sai na PRIMEIRA linha quando o dev está desligado', () => {
-  // Custo zero desligado não é detalhe: são 200 swipes por sessão e o valor da
+  // Custo zero desligado não é detalhe: são 200 swipes por sessão e o valor do
   // app é o ritmo. Nada de closure, objeto ou stringify antes da checagem.
   const i = semCom.indexOf('function dlog(');
   const corpo = semCom.slice(i, semCom.indexOf('\n}', i));
@@ -277,7 +277,7 @@ test('o selo do FAB e o aviso do desligar contam SÓ o que a pessoa registrou', 
     'o selo deixou de filtrar pelo motivo do toque no FAB');
   const selo = fatia('atualizarFabDev');
   // As desta abertura E as das anteriores que ficaram guardadas (v2026.09.22-06:
-  // o número sumia ao fechar a app, relato do owner) — as duas SÓ da pessoa.
+  // o número sumia ao fechar o app, relato do owner) — as duas SÓ da pessoa.
   assert.match(selo, /const n = dlogCapturasDoEditor\(\)\.length \+ diagCapturasAnterioresDoEditor\(\)\.length;/,
     'o selo voltou a contar outra coisa que não as capturas da pessoa (desta abertura e das guardadas)');
   assert.match(fatia('diagCapturasAnterioresDoEditor'), /m\.motivo === 'manual'/,
@@ -285,7 +285,7 @@ test('o selo do FAB e o aviso do desligar contam SÓ o que a pessoa registrou', 
   assert.doesNotMatch(selo, /dlogMomentos\.length/,
     'o selo voltou a contar o anel inteiro — as automáticas entram no número (2 → 4 → 5)');
   // O aviso do desligar diz o MESMO número que o selo: "3 não baixados" com o
-  // selo mostrando 1 seria a app discordando de si mesma.
+  // selo mostrando 1 seria o app discordando de si mesmo.
   const nao = fatia('dlogNaoBaixados');
   assert.match(nao, /dlogCapturasDoEditor\(\)/, 'o aviso do desligar voltou a contar as automáticas');
   assert.match(nao, /diagCapturasAnterioresDoEditor\(\)/,
@@ -316,7 +316,7 @@ test('o smoke de browser mede o selo com arraste e toque DE VERDADE', () => {
 });
 
 test('a tela é lida pelo que decide o PIXEL, não por offsetParent', () => {
-  // `offsetParent` é null para `position: fixed`, e TODO modal desta app é
+  // `offsetParent` é null para `position: fixed`, e TODO modal deste app é
   // fixed — com ele, `modais` vinha sempre vazio e o FAB não capturava o
   // contexto, em silêncio.
   const i = semCom.indexOf('function dlogTelaAtual(');
@@ -449,7 +449,7 @@ test('segurar PEGA o botão, com aviso, e arrastar não vira toque', () => {
     const pegar = fab.slice(iP, fab.indexOf('};', iP));
     assert.match(pegar, /classList\.add\('fab-pego'\)/, 'sumiu o aviso visual de pegou');
     assert.match(pegar, /navigator\.vibrate/, 'sumiu o aviso tátil de pegou');
-    assert.match(pegar, /devFabFixado = true/, 'pegar precisa fixar: a app não pode mover o que está na mão');
+    assert.match(pegar, /devFabFixado = true/, 'pegar precisa fixar: o app não pode mover o que está na mão');
     // e o CSS do aviso existe de verdade no arquivo COMPILADO — classe que só
     // existe no JS é indistinguível de classe certa se olhar só o JS
     assert.match(CSS, /#devFab\.fab-pego #devFabBtn\{[^}]*transform:scale/,
@@ -517,7 +517,7 @@ test('desligar o modo dev apaga também a posição fixada do FAB', () => {
 // O owner viu no WME ("Enviado 01/11/2014 por Coskobeu") e perguntou se dava
 // pra ter. Dá — e a MEDIÇÃO é a parte que quase me fez responder errado: com o
 // filtro `residential: true` a cobertura é 0,4%, e eu cheguei a concluir que o
-// dado não existia. Com o filtro que a app REALMENTE manda (`residential:
+// dado não existia. Com o filtro que o app REALMENTE manda (`residential:
 // null`), são 1579 de 1595 fotos já no mapa (99,0%), e 23,7% dos locais têm
 // fotos de PESSOAS DIFERENTES no mesmo carrossel.
 
@@ -677,7 +677,7 @@ test('o rótulo de quem interceptou não quebra em SVG', () => {
 test('motivo FREQUENTE tem cota própria e não expulsa os outros do anel', () => {
   const app = semLinhaComentada(APP);
   assert.match(app, /DLOG_COTA_POR_MOTIVO = \{ 'auto:arraste': 2 \}/,
-    'a cota do arraste sumiu: ele é o gesto CENTRAL da app e, a uma captura por 30s, '
+    'a cota do arraste sumiu: ele é o gesto CENTRAL do app e, a uma captura por 30s, '
     + 'toma as 12 vagas do anel em ~6 minutos — empurrando pra fora o momento do erro '
     + 'de JS e o da queda de sessão, que são os que se quer ler');
   const cap = semLinhaComentada(APP.slice(APP.indexOf('function dlogCapturar(')));
@@ -727,7 +727,7 @@ test('o diário anota quando a rede CAIU e quando VOLTOU', () => {
   assert.match(cap, /addEventListener\('online', \(\) => dfato\('rede\.voltou'\)\)/,
     'sem `rede.voltou` não se sabe quando a rede voltou');
   assert.match(cap, /if \(navigator\.onLine === false\) dfato\('rede\.caiu', \{ naAbertura: true \}\)/,
-    'a app aberta JÁ sem rede não dispara `offline` — tem que anotar na abertura');
+    'o app aberto JÁ sem rede não dispara `offline` — tem que anotar na abertura');
 });
 
 test('falha de rede SEM sinal não vira ruído no diário', () => {
@@ -763,7 +763,7 @@ test('todo id que a captura consulta EXISTE no HTML (o `lightbox` que nunca exis
 });
 
 test('o mapa CONTA o tile que falhou antes de tirá-lo da tela', () => {
-  // A app apaga o tile quebrado (ícone quebrado não informa nada) e a prova ia
+  // O app apaga o tile quebrado (ícone quebrado não informa nada) e a prova ia
   // junto: nas 6 capturas do relato não há tile quebrado nenhum.
   const mapa = fatiarFn(semCom, 'renderMapa');
   assert.match(mapa, /box\.dataset\.tilesPedidos = String\(r\.tiles\.length\);/,
@@ -812,7 +812,7 @@ test('o relatório traz o offline, o service worker pela boca dele e o teto dos 
   assert.match(fatiarFn(semCom, 'diagAjustarRecursos'), /if \(dlogLigado\(\) && performance\.setResourceTimingBufferSize\)/,
     'o teto dos recursos tem que subir só com o modo dev ligado');
   assert.match(fatiarFn(semCom, 'loadDevMode'), /diagAjustarRecursos\(\);/,
-    'quem abre a app com o dev ligado ficou com o teto de 250');
+    'quem abre o app com o dev ligado ficou com o teto de 250');
   assert.match(semCom, /AppState\.devMode\.active = e\.target\.checked;[\s\S]{0,200}?diagAjustarRecursos\(\);/,
     'ligar o dev nas Preferências não sobe o teto');
   assert.match(fatiarFn(semCom, 'diagCapturarErros'), /addEventListener\('resourcetimingbufferfull'/,

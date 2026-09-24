@@ -19,7 +19,7 @@
 // de então (não exercitava o Desfazer até o fim).
 //
 // Este guard fecha a classe: toda chamada em posição de INSTRUÇÃO precisa ter
-// declaração visível nos scripts que a app carrega.
+// declaração visível nos scripts que o app carrega.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

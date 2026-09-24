@@ -70,7 +70,7 @@ test('teclado: o teto de 75% limita o estrago sem cortar teclado legítimo', () 
 });
 
 test('teclado: o portão do foco é ALLOWLIST — checkbox e botão não abrem teclado', () => {
-  // `openModal` foca o primeiro focável do modal, e a app tem 12 checkboxes e
+  // `openModal` foca o primeiro focável do modal, e o app tem 12 checkboxes e
   // 70 botões: seletor frouxo daria "campo focado" em quase toda abertura, que
   // é exatamente o estado em que o bug apareceu.
   const i = APP.indexOf('const CAMPOS_COM_TECLADO');

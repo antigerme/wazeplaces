@@ -25,26 +25,26 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - **A pílula 👥 e a conversa passaram a usar a presença e o chat do próprio Waze.**
   - A pílula mostra quem está usando a **app** no mesmo país do seu filtro, nos últimos 15 minutos. Antes era quem estava conectado na mesma fila naquele instante.
   - A lista tem duas partes: **Triando agora**, com a distância até onde cada um está triando ("a 3 km daqui"), e **Conversas**, com as mais recentes e toda conversa com mensagem nova.
-  - A conversa **fica guardada** no chat do Waze e aparece também no chat do WME de vocês dois — o topo da conversa avisa isso. Dá pra escrever pra quem já saiu da app: a pessoa lê quando voltar. Por isso acabou o "Não chegou".
+  - A conversa **fica guardada** no chat do Waze e aparece também no chat do WME de vocês dois — o topo da conversa avisa isso. Dá pra escrever pra quem já saiu do app: a pessoa lê quando voltar. Por isso acabou o "Não chegou".
   - Recibos: ✓ **Enviada** e ✓✓ com a palavra **Lida**. Se o envio falhar, a mensagem diz "Não enviada, sem conexão" com um **Tentar de novo** ao lado.
-  - A conversa mostra a separação por dia ("Ontem", "Hoje") e, no topo, se a pessoa está na app agora (com o nível e a distância) ou fora dela.
-  - O pedido mandado pela conversa continua chegando como cartão pra quem usa a app. Pra quem lê pelo WME, ele chega como texto com o nome do local e um link que abre o pedido no editor.
-  - Com mensagem nova, a pílula aparece com o balão mesmo sem ninguém na app.
-  - Mensagem de quem só usa o WME não aparece na app: ela fica no chat do WME.
+  - A conversa mostra a separação por dia ("Ontem", "Hoje") e, no topo, se a pessoa está no app agora (com o nível e a distância) ou fora dele.
+  - O pedido mandado pela conversa continua chegando como cartão pra quem usa o app. Pra quem lê pelo WME, ele chega como texto com o nome do local e um link que abre o pedido no editor.
+  - Com mensagem nova, a pílula aparece com o balão mesmo sem ninguém no app.
+  - Mensagem de quem só usa o WME não aparece no app: ela fica no chat do WME.
 - **"Ver quem está na fila" virou "Ver quem está na app"**, e o título da lista, "Na app agora".
 - **Ajuda → Quem está na app**: diz como a lista e a conversa funcionam agora, e que o WME mostra no mapa quem está triando, até uns 15 minutos depois da última ação.
 
 ### Notas
-- Nada disso consulta o servidor da app periodicamente. A lista chega junto das suas decisões (✕ e ✓), e ao abrir a app, a lista ou a conversa. Mensagem chegando vai do Waze direto pro seu aparelho, sem passar pelo servidor da app.
-- **Sair** apaga do aparelho o que a conversa guardava nele (quais conversas são da app e até onde cada pessoa leu).
+- Nada disso consulta o servidor do app periodicamente. A lista chega junto das suas decisões (✕ e ✓), e ao abrir o app, a lista ou a conversa. Mensagem chegando vai do Waze direto pro seu aparelho, sem passar pelo servidor do app.
+- **Sair** apaga do aparelho o que a conversa guardava nele (quais conversas são do app e até onde cada pessoa leu).
 
 ## v2026.09.23-03
 
 ### Corrigido
-- **Ajuda → Privacidade: a lista do que a app faz com os seus cookies ficou completa.** Ela dizia "rejeita, marca como lido e aprova ou exclui foto nova. Nada além disso", mas a app também põe ⭐ no pedido (com o "Pular guarda o pedido" ligado) e corrige o nome do local. Agora a lista traz as duas coisas, nos 4 idiomas, e não promete mais que é só isso.
+- **Ajuda → Privacidade: a lista do que o app faz com os seus cookies ficou completa.** Ela dizia "rejeita, marca como lido e aprova ou exclui foto nova. Nada além disso", mas o app também põe ⭐ no pedido (com o "Pular guarda o pedido" ligado) e corrige o nome do local. Agora a lista traz as duas coisas, nos 4 idiomas, e não promete mais que é só isso.
 
 ### Notas
-- Primeira parte da troca da presença pela infraestrutura do próprio Waze: quem usa a app passa a aparecer no mapa do WME enquanto tria, de carona nas decisões que a app já manda, sem nenhuma requisição a mais. Nada muda na tela da app.
+- Primeira parte da troca da presença pela infraestrutura do próprio Waze: quem usa o app passa a aparecer no mapa do WME enquanto tria, de carona nas decisões que o app já manda, sem nenhuma requisição a mais. Nada muda na tela do app.
 
 ## v2026.09.23-02
 
@@ -54,7 +54,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.09.23-01
 
 ### Corrigido
-- **"Perto de mim" no iPhone: a mensagem de localização negada agora diz o que fazer.** Quem negava a localização e depois a liberava nas configurações via a mensagem pedir pra "tentar de novo" — e no iPhone isso não funcionava sem reabrir a app, porque o Safari guarda o "não" até a página recarregar. Agora a mensagem diz pra liberar **e reabrir a app**, nos 4 idiomas.
+- **"Perto de mim" no iPhone: a mensagem de localização negada agora diz o que fazer.** Quem negava a localização e depois a liberava nas configurações via a mensagem pedir pra "tentar de novo" — e no iPhone isso não funcionava sem reabrir o app, porque o Safari guarda o "não" até a página recarregar. Agora a mensagem diz pra liberar **e reabrir o app**, nos 4 idiomas.
 
 ### Notas
 - Os testes automáticos passaram a rodar também no **motor do Safari** (o WebKit, o mesmo de todo navegador do iPhone), além do Chrome. Foi assim que o caso acima apareceu.
@@ -62,15 +62,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.09.22-06
 
 ### Corrigido
-- **Pedido que você já tratou não volta mais como card ao reabrir a app sem sinal.** Com o **Disponível offline** ligado, quem tratava pedidos no modo avião, fechava a app e a reabria via os **mesmos pedidos** de novo, enquanto eles continuavam na fila de envio. Dava pra decidir outra vez: o placar contava de novo e o Waze recebia as duas decisões quando o sinal voltava. Isso vale também pro pedido tratado **com** sinal pouco antes de a rede cair.
-- **Fechar a app sem sinal logo depois de tratar um pedido não perde mais a decisão.** Se você fechava durante os segundos do "Desfazer", a decisão podia sumir com o placar já contado, e o pedido voltava na abertura seguinte. Agora ela vai direto pra fila de envio.
+- **Pedido que você já tratou não volta mais como card ao reabrir o app sem sinal.** Com o **Disponível offline** ligado, quem tratava pedidos no modo avião, fechava o app e o reabria via os **mesmos pedidos** de novo, enquanto eles continuavam na fila de envio. Dava pra decidir outra vez: o placar contava de novo e o Waze recebia as duas decisões quando o sinal voltava. Isso vale também pro pedido tratado **com** sinal pouco antes de a rede cair.
+- **Fechar o app sem sinal logo depois de tratar um pedido não perde mais a decisão.** Se você fechava durante os segundos do "Desfazer", a decisão podia sumir com o placar já contado, e o pedido voltava na abertura seguinte. Agora ela vai direto pra fila de envio.
 - **Ao reabrir com sinal e ainda com decisões esperando envio**, os pedidos que estão sendo enviados naquele momento não aparecem mais de novo na fila enquanto o envio termina.
 - **"Restam" conta certo depois de reabrir:** os pedidos esperando envio já foram feitos, então não entram mais na conta.
 - **A Ajuda passou a dizer tudo o que fica no aparelho.** Ela afirmava que nenhum pedido era gravado — mas, com o **Disponível offline** ligado, os pedidos e o mapa ficam guardados, e as ações esperando envio também ficam no aparelho. Agora ela diz isso, e também o que o modo dev guarda (abaixo).
-- **Sair agora apaga também as capturas do modo dev.** Antes, as da memória ficavam até a app ser fechada.
+- **Sair agora apaga também as capturas do modo dev.** Antes, as da memória ficavam até o app ser fechado.
 
 ### Melhorado — relatório do modo dev
-- **As capturas não somem mais ao fechar a app.** Com o modo dev ligado, o número do botão sobrevive a fechar e reabrir: as capturas ainda não baixadas, o diário, as chamadas e os erros de cada abertura ficam guardados no aparelho, e o relatório mostra o que houve em cada uma — inclusive o defeito que só aparece depois de reabrir. O que fica guardado sai ao **baixar o diagnóstico**, ao **desligar o modo dev**, ao **sair da app** ou depois de **24 h**.
+- **As capturas não somem mais ao fechar o app.** Com o modo dev ligado, o número do botão sobrevive a fechar e reabrir: as capturas ainda não baixadas, o diário, as chamadas e os erros de cada abertura ficam guardados no aparelho, e o relatório mostra o que houve em cada uma — inclusive o defeito que só aparece depois de reabrir. O que fica guardado sai ao **baixar o diagnóstico**, ao **desligar o modo dev**, ao **sair do app** ou depois de **24 h**.
 - **Um alerta novo avisa quando um pedido que está esperando envio aparece de novo como card.**
 - **O resumo mostra a fila de envio em números**: quantos pedidos, se algum aparece repetido e há quanto tempo o mais antigo espera.
 
@@ -90,7 +90,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.09.22-04
 
 ### Corrigido
-- **Reabrir a app sem sinal não fica mais parado no "carregando".** Com o **Disponível offline** ligado, quem fechava a app e a abria de novo sem rede via a tela de carregamento para sempre — e os pedidos guardados estavam ali, prontos, só que **por baixo** dela. Agora o primeiro pedido aparece normalmente, com o mapa guardado.
+- **Reabrir o app sem sinal não fica mais parado no "carregando".** Com o **Disponível offline** ligado, quem fechava o app e o abria de novo sem rede via a tela de carregamento para sempre — e os pedidos guardados estavam ali, prontos, só que **por baixo** dela. Agora o primeiro pedido aparece normalmente, com o mapa guardado.
 
 ### Melhorado — relatório do modo dev
 - **Um alerta novo avisa quando a tela de carregamento fica por cima de um pedido já aberto.** No relatório deste defeito, o resumo dizia só "carregando", e foi preciso vasculhar o arquivo pra achar o pedido escondido.
@@ -98,14 +98,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.09.22-03
 
 ### Corrigido
-- **O mapa guardado aparece sem sinal mesmo quando a preparação foi interrompida.** Se o sinal caía no meio do "Preparando…" — o normal na estrada, que é pra onde o offline existe —, os pedaços de mapa que **já tinham sido guardados** ficavam no aparelho mas não apareciam: a parte da app que serve o mapa só ficava sabendo deles quando a preparação chegava ao fim. Agora ela fica sabendo aos poucos, durante a preparação, e sempre que ela para, seja qual for o motivo.
-- **Desligar o offline, ou sair, limpa também a memória da parte da app que serve o mapa.** Ela seguia lembrando os endereços dos pedaços de mapa já apagados — que dizem onde ficam os pedidos — até o Android adormecê-la.
+- **O mapa guardado aparece sem sinal mesmo quando a preparação foi interrompida.** Se o sinal caía no meio do "Preparando…" — o normal na estrada, que é pra onde o offline existe —, os pedaços de mapa que **já tinham sido guardados** ficavam no aparelho mas não apareciam: a parte do app que serve o mapa só ficava sabendo deles quando a preparação chegava ao fim. Agora ela fica sabendo aos poucos, durante a preparação, e sempre que ela para, seja qual for o motivo.
+- **Desligar o offline, ou sair, limpa também a memória da parte do app que serve o mapa.** Ela seguia lembrando os endereços dos pedaços de mapa já apagados — que dizem onde ficam os pedidos — até o Android adormecê-la.
 
 ### Melhorado — relatório do modo dev
 - **O relatório passa a dizer sozinho quando o offline falhou**, com dois alertas novos: foto escondida pelo aviso "precisa de sinal" embora tivesse chegado, e pedaço de mapa guardado que falhou mesmo assim. Foi esse segundo alerta, ainda sendo escrito, que achou o defeito acima.
 - **Cada captura diz se havia rede** e em que pé estava o offline naquele momento, e o diário anota a hora em que o sinal **caiu** e em que **voltou**.
 - **Uma seção própria do offline**, só pra quem o ligou: quantos pedidos e pedaços de mapa estão guardados, de quando, e quais falharam.
-- **A parte da app que serve o mapa offline responde por si** no relatório: se acabou de ser reiniciada pelo Android, se já sabe o que está guardado, e quantos pedaços de mapa entregou do aparelho.
+- **A parte do app que serve o mapa offline responde por si** no relatório: se acabou de ser reiniciada pelo Android, se já sabe o que está guardado, e quantos pedaços de mapa entregou do aparelho.
 - **Com o modo dev ligado, a lista de carregamentos da página vai até 1000** (o navegador para em 250). E o relatório avisa quando a lista encheu, em vez de parecer que nada mais foi carregado.
 - **Falha de envio sem sinal parou de virar erro no relatório.** No modo avião ela é o esperado — no último relatório eram 16 das 64 anotações —, e a hora certa já está no diário.
 - **O relatório dizia que a foto ampliada estava fechada em toda captura**, mesmo com ela aberta. Corrigido.
@@ -116,10 +116,10 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.09.22-02
 
 ### Corrigido
-- **A foto dos pedidos de "Nova foto" volta a aparecer sem sinal.** Com o **Disponível offline** ligado, a app guardava as fotos no aparelho — e, ao ficar sem rede, **escondia** todas elas atrás do aviso "A foto precisa de sinal", sem nem tentar abrir. O aviso agora só aparece quando a foto **realmente** não veio; quando ela está guardada, ela aparece e o ✕/✓ ficam liberados.
+- **A foto dos pedidos de "Nova foto" volta a aparecer sem sinal.** Com o **Disponível offline** ligado, o app guardava as fotos no aparelho — e, ao ficar sem rede, **escondia** todas elas atrás do aviso "A foto precisa de sinal", sem nem tentar abrir. O aviso agora só aparece quando a foto **realmente** não veio; quando ela está guardada, ela aparece e o ✕/✓ ficam liberados.
 - **A preparação guarda a foto CERTA nos pedidos de foto.** Quando o local já tinha outras fotos, ela guardava a primeira do local — e não a que está sendo decidida. Sem sinal, o card abria justamente na foto que tinha ficado de fora. Medido numa fila real: 13 de 76 pedidos de foto eram assim.
-- **Abrir a app já sem sinal mostra as fotos guardadas.** Se a app fosse fechada — ou o Android a encerrasse em segundo plano — e reaberta sem rede, os pedidos voltavam mas as fotos não: todo card de foto dizia "A foto precisa de sinal".
-- **O mapa guardado não some mais depois de uma pausa.** O Android "adormece" a parte da app que serve o mapa offline quando ela fica meio minuto parada — e ela acordava sem lembrar quais pedaços do mapa estavam guardados. Resultado: no modo avião, o mapa aparecia só com os marcadores, sem as ruas. Agora ela relê a lista toda vez que acorda.
+- **Abrir o app já sem sinal mostra as fotos guardadas.** Se o app fosse fechado — ou o Android o encerrasse em segundo plano — e reaberto sem rede, os pedidos voltavam mas as fotos não: todo card de foto dizia "A foto precisa de sinal".
+- **O mapa guardado não some mais depois de uma pausa.** O Android "adormece" a parte do app que serve o mapa offline quando ela fica meio minuto parada — e ela acordava sem lembrar quais pedaços do mapa estavam guardados. Resultado: no modo avião, o mapa aparecia só com os marcadores, sem as ruas. Agora ela relê a lista toda vez que acorda.
 - **Reportes com comentário e pedidos com alteração passam a ter o mapa inteiro sem sinal.** Nesses cards a área do mapa é mais baixa, e às vezes precisa de um enquadramento diferente — com pedaços do mapa que não tinham sido guardados. A preparação agora guarda o que qualquer altura de card vai pedir.
 - **O ✕ e o ✓ não destravam mais sozinhos num card sem foto.** Terminar a ação do pedido anterior liberava os dois botões de volta, e dava pra decidir uma foto que não estava na tela.
 - **O pedido mandado pela conversa mostra a foto certa.** Num pedido de "Nova foto" (ou de foto denunciada), o colega recebia a **primeira** foto do local — uma que o local já tinha — em vez da foto sobre a qual você estava perguntando. Agora vai a mesma foto que o card mostra.
@@ -127,7 +127,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ### Notas
 - A preparação do offline guarda **cerca de 40% mais pedaços de mapa** do que antes (medido na fila real: de 221 para 313). É o preço de o mapa sair certo nos cards com comentário; o aumento acontece uma vez, na preparação.
-- **Pra todo mundo, com ou sem o offline:** nos pedidos de foto, a app agora pré-carrega a foto que o card vai mostrar (a nova ou a denunciada), e não a primeira do local.
+- **Pra todo mundo, com ou sem o offline:** nos pedidos de foto, o app agora pré-carrega a foto que o card vai mostrar (a nova ou a denunciada), e não a primeira do local.
 - Com o offline ligado, a tira de miniaturas da foto ampliada deixa de baixar uma segunda cópia de cada foto.
 - Fora isso, nada muda pra quem não ligou o **Disponível offline**.
 
@@ -135,25 +135,25 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ### Adicionado
 - **O que você fez não se perde mais quando a rede some.** Se você rejeita ou marca como lido e a conexão falha, o pedido agora fica guardado no aparelho e **sai sozinho quando a rede voltar** — você não precisa fazer nada, nem lembrar de nada. Enquanto espera, um selinho discreto no canto diz quantos estão na fila ("3 esperando envio"), e ele some sozinho quando o último sai.
-- **A fila sobrevive a fechar a app.** Você pode tratar 40 pedidos numa sombra de conectividade, fechar tudo, e eles continuam lá quando abrir de novo.
-- **Funciona em túnel, elevador, estrada e metrô** — qualquer lugar em que o sinal oscila. Não é um "modo offline" que você liga: é como a app passa a se comportar sempre.
+- **A fila sobrevive a fechar o app.** Você pode tratar 40 pedidos numa sombra de conectividade, fechar tudo, e eles continuam lá quando abrir de novo.
+- **Funciona em túnel, elevador, estrada e metrô** — qualquer lugar em que o sinal oscila. Não é um "modo offline" que você liga: é como o app passa a se comportar sempre.
 - Vale também para o **rejeitar em lote** (o botão que aparece quando o mesmo autor tem vários pedidos).
 
 ### Corrigido
 - **O placar parou de voltar atrás.** Até aqui, quando o envio falhava por rede, o número que você tinha acabado de somar era **desfeito uns 5 segundos depois**, com o card já fora da tela e você já no próximo pedido — e a ação era simplesmente descartada. Agora o número fica, porque o trabalho foi feito: só não saiu ainda.
-- **A app parou de insistir onde não há rede.** Sem sinal, cada ação tentava três vezes (a original e duas repetições, com 1,5s e 3,5s de espera) antes de desistir. Agora ela percebe que está sem rede e guarda na primeira. Efeito colateral bem-vindo para quem usa dados móveis: **em sombra de conectividade a app passa a gastar menos dados que antes**, não mais.
+- **O app parou de insistir onde não há rede.** Sem sinal, cada ação tentava três vezes (a original e duas repetições, com 1,5s e 3,5s de espera) antes de desistir. Agora ela percebe que está sem rede e guarda na primeira. Efeito colateral bem-vindo para quem usa dados móveis: **em sombra de conectividade o app passa a gastar menos dados que antes**, não mais.
 
 ### Notas
-- Erro que **não é de rede** continua se comportando como sempre (o número volta atrás e a app avisa) — só a falta de conexão vai para a fila.
+- Erro que **não é de rede** continua se comportando como sempre (o número volta atrás e o app avisa) — só a falta de conexão vai para a fila.
 - Pedido já tratado por outro editor enquanto você estava offline conta normalmente como resolvido, do mesmo jeito que já contava online.
 - O **"Sair"** apaga a fila junto com o resto, como tudo que fica no aparelho. Sair com a fila cheia descarta o que ainda não foi enviado.
-- A app **não fica perguntando à rede de tempos em tempos** — ela só reage ao navegador avisando que a conexão voltou, e a cada vez que você abre a app.
+- O app **não fica perguntando à rede de tempos em tempos** — ele só reage ao navegador avisando que a conexão voltou, e a cada vez que você abre o app.
 
 ## v2026.09.20-05
 
 ### Corrigido
-- **O relatório do modo dev voltou a saber há quanto tempo a app existe neste aparelho.** O campo que registra isso nunca era gravado — a função que o escreve foi criada em 18/09 sem nenhuma chamada, então "nascimento" e "idade do armazenamento" saíram **em branco em todo relatório** desde então. Agora são carimbados ao abrir a app.
-- **Por que isso importa para quem está perdendo a sessão a cada poucos dias:** existem duas causas com sintoma idêntico — ou a sessão do Waze expirou mesmo, ou o navegador apagou todo o armazenamento sozinho (o Safari faz isso após 7 dias sem você abrir o site, e **isenta quem instalou a app na tela inicial**). Os consertos são opostos: recarregar os cookies num caso, instalar a app no outro. Como o apagamento leva junto o registro que provaria o apagamento, a única evidência possível é a **idade** do armazenamento contradizer o uso — um carimbo de ontem em quem usa a app há um mês. Era exatamente essa evidência que estava faltando.
+- **O relatório do modo dev voltou a saber há quanto tempo o app existe neste aparelho.** O campo que registra isso nunca era gravado — a função que o escreve foi criada em 18/09 sem nenhuma chamada, então "nascimento" e "idade do armazenamento" saíram **em branco em todo relatório** desde então. Agora são carimbados ao abrir o app.
+- **Por que isso importa para quem está perdendo a sessão a cada poucos dias:** existem duas causas com sintoma idêntico — ou a sessão do Waze expirou mesmo, ou o navegador apagou todo o armazenamento sozinho (o Safari faz isso após 7 dias sem você abrir o site, e **isenta quem instalou o app na tela inicial**). Os consertos são opostos: recarregar os cookies num caso, instalar o app no outro. Como o apagamento leva junto o registro que provaria o apagamento, a única evidência possível é a **idade** do armazenamento contradizer o uso — um carimbo de ontem em quem usa o app há um mês. Era exatamente essa evidência que estava faltando.
 - Nada muda na tela. O carimbo continua saindo no **"Sair"**, junto com o resto.
 
 ## v2026.09.20-04
@@ -161,7 +161,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Melhorado
 - **O ponto no botão de Filtros agora te leva ao que você destravou.** Antes ele avisava que havia conquista nova e, ao tocar, abria o modal na aba **Filtros** — você tinha que perceber que existem abas, adivinhar qual, e achar a célula marcada entre 16. Agora o toque abre direto no **Histórico**, rolado até a novidade, com ela piscando. É o mesmo comportamento que o aviso de desbloqueio do Desfazer sempre teve.
 - Vale para **conquista e para patente** (que não tem célula na vitrine, e por isso ficava sem alvo), e para **várias de uma vez** — todas piscam, e a rolagem para na primeira.
-- **Acontece uma vez por novidade.** Abrir a aba apaga o ponto, então o toque seguinte abre Filtros normalmente. E o atalho "Filtros" do ícone da app (segurar o ícone) nunca desvia: ali você pediu Filtros explicitamente.
+- **Acontece uma vez por novidade.** Abrir a aba apaga o ponto, então o toque seguinte abre Filtros normalmente. E o atalho "Filtros" do ícone do app (segurar o ícone) nunca desvia: ali você pediu Filtros explicitamente.
 - Quem usa **movimento reduzido** continua sendo levado à aba certa e rolado até o alvo — só não vê o pulso.
 
 ### Corrigido
@@ -173,7 +173,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - **O próximo card volta a aparecer sem efeito nenhum.** Ele já tinha perdido o movimento na versão anterior; agora perdeu também o esmaecido de 140ms que tinha ficado para avaliação. O card aparece pronto: no lugar, do tamanho final e opaco desde o primeiro quadro.
 
 ### Corrigido
-- **E com isso some de vez o "pisca" do card de baixo.** Enquanto o card da frente estava esmaecido, dava para enxergar a foto e o nome do *próximo* pedido através dele por uma fração de segundo — o que parecia a app travando para carregar. Sem esmaecido não há o que atravessar.
+- **E com isso some de vez o "pisca" do card de baixo.** Enquanto o card da frente estava esmaecido, dava para enxergar a foto e o nome do *próximo* pedido através dele por uma fração de segundo — o que parecia o app travando para carregar. Sem esmaecido não há o que atravessar.
 
 ## v2026.09.20-02
 
@@ -181,20 +181,20 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - **O próximo card parou de nascer com movimento.** A entrada era uma "mola" de 280ms: o card deslizava, começava menor e crescia até o tamanho final, passando um pouco além antes de assentar. Media 233ms de card se mexendo na frente de quem já estava decidindo o próximo pedido. Ficou só um esmaecido curto — que saiu na versão seguinte.
 
 ### Corrigido
-- **O tique ao confirmar um card ficou mais curto** (de 12ms para 8ms). É o sinal mais frequente da app — um por pedido tratado —, então o que passa despercebido num toque isolado vira presença constante no ritmo do swipe. (Só no Android: o iPhone não vibra em site nenhum.)
+- **O tique ao confirmar um card ficou mais curto** (de 12ms para 8ms). É o sinal mais frequente do app — um por pedido tratado —, então o que passa despercebido num toque isolado vira presença constante no ritmo do swipe. (Só no Android: o iPhone não vibra em site nenhum.)
 
 ## v2026.09.20-01
 
 ### Adicionado
-- **O próximo pedido aparece por baixo do atual.** Ao arrastar um card, o de baixo é o pedido que vem a seguir — não mais o fundo vazio da tela. Ideia de um colega, pelo paralelo com o Tinder. Ele é só visual: não dá para tocar, arrastar nem alcançar pelo teclado, e não custa nenhuma requisição a mais (a app já buscava esse pedido adiantado).
+- **O próximo pedido aparece por baixo do atual.** Ao arrastar um card, o de baixo é o pedido que vem a seguir — não mais o fundo vazio da tela. Ideia de um colega, pelo paralelo com o Tinder. Ele é só visual: não dá para tocar, arrastar nem alcançar pelo teclado, e não custa nenhuma requisição a mais (o app já buscava esse pedido adiantado).
 
 ### Corrigido
-- **O botão "Desfazer" deixava o card morto.** Desfazer devolvia o pedido para a fila, mas o aviso continuava na tela e os três botões (✕ ↑ ✓) ficavam desabilitados — só recarregando a app dava para sair disso. Arrastar continuava funcionando, o que é o motivo de isso ter passado tanto tempo sem ninguém ligar uma coisa à outra. Junto com ele voltaram **cinco conquistas** que tinham ficado inalcançáveis pelo mesmo defeito.
+- **O botão "Desfazer" deixava o card morto.** Desfazer devolvia o pedido para a fila, mas o aviso continuava na tela e os três botões (✕ ↑ ✓) ficavam desabilitados — só recarregando o app dava para sair disso. Arrastar continuava funcionando, o que é o motivo de isso ter passado tanto tempo sem ninguém ligar uma coisa à outra. Junto com ele voltaram **cinco conquistas** que tinham ficado inalcançáveis pelo mesmo defeito.
 
 ## v2026.09.18-05
 
 ### Corrigido
-- **O relatório do modo dev não media a sessão de quem já estava logado.** O registro de sessões estreou na versão anterior, mas ele só carimba quando você *entra* — e quem já estava dentro não entra de novo. Na prática: o relatório ia mostrar a queda, sem mostrar quanto tempo a sessão tinha durado, que é exatamente o número que se está tentando descobrir. Agora, ao abrir a app com sessão já ativa, fica registrado que ela existia — e a duração contada a partir daí aparece como **"pelo menos tanto"**, nunca como medida exata, para não afirmar um número que ninguém mediu.
+- **O relatório do modo dev não media a sessão de quem já estava logado.** O registro de sessões estreou na versão anterior, mas ele só carimba quando você *entra* — e quem já estava dentro não entra de novo. Na prática: o relatório ia mostrar a queda, sem mostrar quanto tempo a sessão tinha durado, que é exatamente o número que se está tentando descobrir. Agora, ao abrir o app com sessão já ativa, fica registrado que ela existia — e a duração contada a partir daí aparece como **"pelo menos tanto"**, nunca como medida exata, para não afirmar um número que ninguém mediu.
 ## v2026.09.18-04
 
 ### Melhorado
@@ -207,7 +207,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.09.18-03
 
 ### Corrigido
-- **A app podia tratar um pedido e apagar outro da fila.** O card que você vê é sempre o primeiro da fila — mas quando a próxima página de pedidos chegava, a app reordenava a fila **por baixo do card**. A partir daí o pedido que você rejeitava ou marcava como lido era o da tela, enquanto o que saía da fila era outro: o seu voltava na sua frente depois, e o outro sumia sem ninguém tratar. Acontecia em qualquer ordenação — mais recentes, mais antigos ou perto de casa/trabalho/GPS. Agora a fila é reordenada quando o card sai da tela, e não embaixo dele.
+- **O app podia tratar um pedido e apagar outro da fila.** O card que você vê é sempre o primeiro da fila — mas quando a próxima página de pedidos chegava, o app reordenava a fila **por baixo do card**. A partir daí o pedido que você rejeitava ou marcava como lido era o da tela, enquanto o que saía da fila era outro: o seu voltava na sua frente depois, e o outro sumia sem ninguém tratar. Acontecia em qualquer ordenação — mais recentes, mais antigos ou perto de casa/trabalho/GPS. Agora a fila é reordenada quando o card sai da tela, e não embaixo dele.
 
 ### Melhorado
 - **Mudar só a ordenação ficou instantâneo, e para de trazer de volta o que você pulou.** Antes, aplicar qualquer coisa no modal de Filtros jogava a fila fora e buscava tudo de novo no Waze — mesmo quando você só tinha mudado "mais recentes" para "mais antigos", que é ordenar no próprio aparelho. Além da espera, a fila refeita devolvia os pedidos que você já tinha pulado. Agora trocar só a ordem reordena na hora, sem ir à rede. Mudar qualquer filtro de verdade (tipo, país, categoria, não lidos…) continua buscando, como deve.
@@ -218,9 +218,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Melhorado
 - **O diagnóstico agora responde "há quanto tempo", em vez de perguntar.** Dois editores relataram precisar recarregar os cookies a cada poucos dias, e ninguém — nem eles — sabia o intervalo de verdade: memória de duração é o que ninguém tem. O relatório do modo dev passou a guardar, **no aparelho**, a data de cada entrada e de cada queda de sessão, e a entregar a conta pronta: quanto durou cada ciclo, em horas, e por qual motivo terminou.
 
-  Junto vem o retrato do ambiente que decide se isso é problema da app ou do navegador: **se a app está instalada na tela inicial ou aberta no navegador**, qual o motor, e se o armazenamento está mesmo persistindo. Isso importa porque o Safari **apaga todos os dados de um site depois de 7 dias sem você abrir** — e quem instala na tela inicial fica de fora dessa regra. O sintoma é idêntico ao de uma sessão expirada, e a causa e o conserto são outros.
+  Junto vem o retrato do ambiente que decide se isso é problema do app ou do navegador: **se o app está instalado na tela inicial ou aberto no navegador**, qual o motor, e se o armazenamento está mesmo persistindo. Isso importa porque o Safari **apaga todos os dados de um site depois de 7 dias sem você abrir** — e quem instala na tela inicial fica de fora dessa regra. O sintoma é idêntico ao de uma sessão expirada, e a causa e o conserto são outros.
 
-  O relatório também avisa sozinho quando vê um desses três: a sessão caiu duas ou mais vezes em menos de 72 h; o aparelho está num navegador que apaga por inatividade e a app não foi instalada; ou o token não está sendo guardado (navegação privada, cookies bloqueados, armazenamento cheio).
+  O relatório também avisa sozinho quando vê um desses três: a sessão caiu duas ou mais vezes em menos de 72 h; o aparelho está num navegador que apaga por inatividade e o app não foi instalado; ou o token não está sendo guardado (navegação privada, cookies bloqueados, armazenamento cheio).
 
   **Nada disso sai do seu aparelho** a não ser que você mesmo gere e envie o relatório, e o registro não guarda nome de local, de quem enviou o pedido, nem o seu token — só datas, o caminho de entrada (extensão, cookies ou pareamento) e o motivo da queda. Sai inteiro quando você usa o "Sair".
 
@@ -236,7 +236,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.09.17-02
 
 ### Corrigido
-- **A app abria carregando 67 KB a mais do que precisava.** O HTML minificado era gerado e commitado desde agosto, mas **a raiz nunca o serviu** — o servidor entregava o arquivo comentado, de 182 KB. Agora entrega o minificado: **42,8 KB → 23,9 KB comprimidos**, que é o que de fato viaja. Em 3G isso mede −388 ms no primeiro conteúdo na tela e −1 s no carregamento completo. Nada mudou na aparência nem no comportamento: é o mesmo HTML, sem os comentários de desenvolvimento.
+- **O app abria carregando 67 KB a mais do que precisava.** O HTML minificado era gerado e commitado desde agosto, mas **a raiz nunca o serviu** — o servidor entregava o arquivo comentado, de 182 KB. Agora entrega o minificado: **42,8 KB → 23,9 KB comprimidos**, que é o que de fato viaja. Em 3G isso mede −388 ms no primeiro conteúdo na tela e −1 s no carregamento completo. Nada mudou na aparência nem no comportamento: é o mesmo HTML, sem os comentários de desenvolvimento.
 
 ## v2026.09.17-01
 
@@ -455,9 +455,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.27-01
 
 ### Alterado
-- **A app abre mais rápido: o HTML encolheu 45%.** O arquivo principal tinha 36 KB comprimidos, e **42% disso era comentário** — o projeto documenta as decisões junto do código, e isso vinha junto pela rede em toda abertura.
+- **O app abre mais rápido: o HTML encolheu 45%.** O arquivo principal tinha 36 KB comprimidos, e **42% disso era comentário** — o projeto documenta as decisões junto do código, e isso vinha junto pela rede em toda abertura.
 
-  Agora o navegador recebe uma versão sem comentários (20 KB), enquanto o arquivo comentado continua no repositório, que é onde ele serve. Medido num 3G com aparelho lento: o **primeiro pixel aparece 388 ms antes**, e a app fica pronta **1 segundo antes**.
+  Agora o navegador recebe uma versão sem comentários (20 KB), enquanto o arquivo comentado continua no repositório, que é onde ele serve. Medido num 3G com aparelho lento: o **primeiro pixel aparece 388 ms antes**, e o app fica pronto **1 segundo antes**.
 
   É o mesmo tratamento que o CSS e o JavaScript já recebiam.
 
@@ -494,11 +494,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
   Medido: o modal aparecia em **480 ms** com rede boa e em **1,3 s** com rede ruim. Agora aparece em **92 ms** nas duas. País e estado se preenchem sozinhos, mostrando *“Carregando…”* enquanto chegam. Se a rede falhar, o modal abre do mesmo jeito.
 
-- **A app ficou 58% mais leve para carregar.** O JavaScript passou a ser minificado, como já era o CSS: de **187 KB para 78 KB** comprimidos. Num celular em rede ruim isso são vários segundos a menos para abrir.
+- **O app ficou 58% mais leve para carregar.** O JavaScript passou a ser minificado, como já era o CSS: de **187 KB para 78 KB** comprimidos. Num celular em rede ruim isso são vários segundos a menos para abrir.
 
   O gerador de QR do pareamento (12 KB) saiu do carregamento inicial — ele só é buscado quando você abre o pareamento, que a maioria dos editores nunca usa.
 
-  Nada muda no que a app faz. É o mesmo código, entregue menor.
+  Nada muda no que o app faz. É o mesmo código, entregue menor.
 
 ---
 
@@ -571,15 +571,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Adicionado
 - **Dá pra deixar o app rejeitando sozinho os próximos pedidos de um autor.** O interruptor fica na lista de autores, na aba Histórico.
 
-  **É só o interruptor que é restrito** — a **L6 + Area Manager ou staff**, o mesmo nível que já libera excluir e aprovar foto. Todo o resto do tratamento de autor continua para **qualquer editor que usa a app**: o selo `✕ N` no card, a lista de autores com a lixeira, a folha do autor e o rejeitar em lote.
+  **É só o interruptor que é restrito** — a **L6 + Area Manager ou staff**, o mesmo nível que já libera excluir e aprovar foto. Todo o resto do tratamento de autor continua para **qualquer editor que usa o app**: o selo `✕ N` no card, a lista de autores com a lixeira, a folha do autor e o rejeitar em lote.
 
   Quando chegam pedidos de alguém marcado, eles saem da fila e um aviso aparece no topo: **“2 pedidos de fulano serão rejeitados — toque para cancelar”**. Nada é enviado ao Waze durante esses **20 segundos**. Se você tocar, tudo volta para a fila como estava.
 
-  Passado esse tempo, o aviso muda para **“2 pedidos de fulano rejeitados — toque para desligar isto”**. Aí não há mais o que cancelar, e a única coisa verdadeira que a app pode oferecer é parar de fazer isso de novo.
+  Passado esse tempo, o aviso muda para **“2 pedidos de fulano rejeitados — toque para desligar isto”**. Aí não há mais o que cancelar, e a única coisa verdadeira que o app pode oferecer é parar de fazer isso de novo.
 
   **O card não trava durante a espera.** Quando você rejeita um pedido, os três botões ficam desabilitados até a janela vencer — é você que agiu e o app espera confirmação. Aqui você não pediu nada, então continuar trabalhando no card atual não custa nada.
 
-  Fechar a app no meio da espera **cancela**: nada é enviado pela metade, e os pedidos voltam na próxima busca.
+  Fechar o app no meio da espera **cancela**: nada é enviado pela metade, e os pedidos voltam na próxima busca.
 
 ---
 
@@ -595,13 +595,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.24-02
 
 ### Adicionado
-- **Dá pra tratar a série inteira de um autor de uma vez.** Toque no selo `✕ N` do card e a app abre uma folha com duas saídas: **ver os pedidos dele primeiro** (que só reordena a fila, sem escrever nada) ou **rejeitar os que estão na fila agora**.
+- **Dá pra tratar a série inteira de um autor de uma vez.** Toque no selo `✕ N` do card e o app abre uma folha com duas saídas: **ver os pedidos dele primeiro** (que só reordena a fila, sem escrever nada) ou **rejeitar os que estão na fila agora**.
 
   Não há tela de confirmação depois — o número vai no próprio botão e o aviso diz que começa ao tocar. Uma segunda pergunta que só repetisse o número treinaria todo mundo a tocar sem ler.
 
   O lote respeita **a mesma janela de Desfazer** de um card só: os três botões travam, o banner mostra a contagem regressiva, e nada é enviado antes de ela vencer. Desfazer devolve os pedidos **na ordem original** e volta para o primeiro deles.
 
-- **No fim, a app diz o que de fato aconteceu com cada pedido** — "12 rejeitados · 2 já tratados por outro editor". Os pedidos vão um a um, e quem outro editor já tratou conta como cumprido, não como falha: é a mesma regra que a app usa quando você trata um card e alguém chegou primeiro. O que não deu certo volta para a fila.
+- **No fim, o app diz o que de fato aconteceu com cada pedido** — "12 rejeitados · 2 já tratados por outro editor". Os pedidos vão um a um, e quem outro editor já tratou conta como cumprido, não como falha: é a mesma regra que o app usa quando você trata um card e alguém chegou primeiro. O que não deu certo volta para a fila.
 
 ### Corrigido
 - **Depois de desfazer, os três botões do card ficavam mortos.** Valia para qualquer Desfazer, não só o do lote, e escapava porque o gesto continuava funcionando — só o caminho canônico (e o de quem usa leitor de tela, já que `disabled` também tira da ordem do Tab) é que parava de responder até o próximo card.
@@ -613,11 +613,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Adicionado
 - **O card agora diz quantos pedidos daquela pessoa você já rejeitou.** Um selo `✕ 14` na linha do criador, ao lado do nível e da origem. Ele existe porque há um tipo de pedido que só se reconhece com memória: o mesmo autor mandando lixo semana após semana — no caso que originou isto, fotos do pacote de entrega, muitas delas com nome, endereço e telefone do destinatário no rótulo.
 
-  A app não consegue distinguir esse autor do melhor contribuinte da fila pelos dados do pedido: medido, os dois são 100% foto, uma foto por local, e o ritmo se sobrepõe. O único sinal que separa é a **sua** rejeição repetida — e ela era jogada fora a cada dia.
+  O app não consegue distinguir esse autor do melhor contribuinte da fila pelos dados do pedido: medido, os dois são 100% foto, uma foto por local, e o ritmo se sobrepõe. O único sinal que separa é a **sua** rejeição repetida — e ela era jogada fora a cada dia.
 
-  Abaixo de 10 rejeições o selo é **cinza**: a app conta, não acusa. A partir daí fica rosa, a mesma cor do ✕.
+  Abaixo de 10 rejeições o selo é **cinza**: o app conta, não acusa. A partir daí fica rosa, a mesma cor do ✕.
 
-- **A aba Histórico ganhou a lista desses autores**, abaixo do seu placar, com uma lixeira para esquecer quem você quiser. A contagem entra na **segunda** rejeição, sai depois de **30 dias** sem rejeição nova, e fica **só neste aparelho** — sair da app apaga tudo.
+- **A aba Histórico ganhou a lista desses autores**, abaixo do seu placar, com uma lixeira para esquecer quem você quiser. A contagem entra na **segunda** rejeição, sai depois de **30 dias** sem rejeição nova, e fica **só neste aparelho** — sair do app apaga tudo.
 
 ### Alterado
 - **Os selos do criador ficaram mais curtos**: `pelo app` virou `app`, `pelo site` virou `site`, e `+2 deste autor` virou `ver +2`. Não é enxugar por estética — é espaço medido. Com os rótulos antigos, o nome do criador aparecia pela metade no iPhone e sumia inteiro em telas estreitas; com os curtos, **quatro** selos cabem melhor do que três cabiam antes (81% do nome no Pixel 7 contra 62%, 66% no iPhone 14 contra 47%). A explicação completa de cada selo continua no toque longo.
@@ -644,9 +644,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## Sem versão nova (nada muda no app)
 
 ### Melhorado
-- **O projeto agora exige Node 22 ou mais novo.** Isso não muda nada para quem usa a app — é o piso de quem *roda o servidor* (VM própria) ou trabalha no código. O motivo: uma parte dos testes precisava do WebSocket que o Node já traz de fábrica, e o piso antigo obrigava a reescrever à mão o que a plataforma dá pronta. Saíram cerca de 90 linhas escritas só por causa disso, e mais 27 esperas artesanais espalhadas pelos testes.
+- **O projeto agora exige Node 22 ou mais novo.** Isso não muda nada para quem usa o app — é o piso de quem *roda o servidor* (VM própria) ou trabalha no código. O motivo: uma parte dos testes precisava do WebSocket que o Node já traz de fábrica, e o piso antigo obrigava a reescrever à mão o que a plataforma dá pronta. Saíram cerca de 90 linhas escritas só por causa disso, e mais 27 esperas artesanais espalhadas pelos testes.
 
-  Quem sobe a app numa VM: se o `node -v` mostrar menos que 22, o servidor agora recusa a subir com uma mensagem clara, em vez de falhar com um erro obscuro no meio de um pedido. O README traz a instrução de instalação atualizada.
+  Quem sobe o app numa VM: se o `node -v` mostrar menos que 22, o servidor agora recusa a subir com uma mensagem clara, em vez de falhar com um erro obscuro no meio de um pedido. O README traz a instrução de instalação atualizada.
 
 ---
 
@@ -654,7 +654,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ### Corrigido
 ### Melhorado
-- **A bateria de fluxo agora cobre a sala de presença.** Ela testava a app como máquina de estados, mas só a tela de triagem — presença vive no servidor e só existe com várias conexões ao mesmo tempo, então nenhum problema dela cabia num navegador só. Agora o teste abre conexões de verdade e cobra o que a Ajuda promete ao editor: cada pessoa aparece uma vez, ninguém aparece na própria lista, duas filas são dois lugares que não se enxergam nem conseguem se falar, crachá vencido ou de outra fila não entra, o aperto de mão da conversa chega só a quem é destinatário, quem sai some na hora, e o servidor nunca repassa o texto da conversa.
+- **A bateria de fluxo agora cobre a sala de presença.** Ela testava o app como máquina de estados, mas só a tela de triagem — presença vive no servidor e só existe com várias conexões ao mesmo tempo, então nenhum problema dela cabia num navegador só. Agora o teste abre conexões de verdade e cobra o que a Ajuda promete ao editor: cada pessoa aparece uma vez, ninguém aparece na própria lista, duas filas são dois lugares que não se enxergam nem conseguem se falar, crachá vencido ou de outra fila não entra, o aperto de mão da conversa chega só a quem é destinatário, quem sai some na hora, e o servidor nunca repassa o texto da conversa.
 
 ### Corrigido
 - **Recarregar a página duplicava você na lista de quem está online — e você aparecia na sua própria lista.** Recarregando de novo, triplicava; seus colegas também viam você repetido, e a pílula contava errado.
@@ -670,12 +670,12 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.23-05
 
 ### Corrigido
-- **Entrar ou sair do modo treino agora fecha a foto ampliada.** Antes, uma foto aberta ao trocar de modo continuava na tela — junto com controles que pertenciam ao pedido do outro lado. Não havia como chegar nesse estado usando a app normalmente, mas era a mesma armadilha que causou os dois problemas da versão anterior, então foi fechada de vez.
+- **Entrar ou sair do modo treino agora fecha a foto ampliada.** Antes, uma foto aberta ao trocar de modo continuava na tela — junto com controles que pertenciam ao pedido do outro lado. Não havia como chegar nesse estado usando o app normalmente, mas era a mesma armadilha que causou os dois problemas da versão anterior, então foi fechada de vez.
 
 ### Melhorado
-- **Nova bateria de testes automáticos que verifica a app como um todo, e não tela por tela.** Os dois problemas reportados na v2026.08.23-04 (a ação de foto reaparecendo ao trocar de foto durante a renomeação, e as setas do teclado mexendo na foto em vez do texto) passaram por todos os testes que existiam, porque cada um deles olhava uma tela de cada vez. Os dois só aparecem quando duas coisas acontecem ao mesmo tempo.
+- **Nova bateria de testes automáticos que verifica o app como um todo, e não tela por tela.** Os dois problemas reportados na v2026.08.23-04 (a ação de foto reaparecendo ao trocar de foto durante a renomeação, e as setas do teclado mexendo na foto em vez do texto) passaram por todos os testes que existiam, porque cada um deles olhava uma tela de cada vez. Os dois só aparecem quando duas coisas acontecem ao mesmo tempo.
 
-  A bateria nova combina os estados da app dois a dois — treino, foto ampliada, renomeação, mapa, janela do Desfazer, fila vazia, cada janela de diálogo — e depois **sacode**: troca de foto, redesenha, muda de idioma, muda de tema. Em cada combinação ela cobra que nada que grave no Waze fique alcançável onde não deve, medindo inclusive **o que sai pela rede**, e não só se o botão parece desligado. Foram 67 combinações × 6 ações. Conferida contra os dois problemas da versão anterior: reintroduzindo cada um, ela reprova.
+  A bateria nova combina os estados do app dois a dois — treino, foto ampliada, renomeação, mapa, janela do Desfazer, fila vazia, cada janela de diálogo — e depois **sacode**: troca de foto, redesenha, muda de idioma, muda de tema. Em cada combinação ela cobra que nada que grave no Waze fique alcançável onde não deve, medindo inclusive **o que sai pela rede**, e não só se o botão parece desligado. Foram 67 combinações × 6 ações. Conferida contra os dois problemas da versão anterior: reintroduzindo cada um, ela reprova.
 
 ---
 
@@ -730,7 +730,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Removido
 - **Bloquear pessoas saiu da aplicação.** Não existe mais botão de bloquear, lista de bloqueados nem nada do tipo — e o registro de quem já tinha bloqueado alguém é apagado do aparelho na primeira abertura.
 
-  O motivo é que o recurso não tinha por que existir aqui: só entra na app editor **nível 3+ que seja Area Manager**, ou seja gente madura da comunidade. Se alguém fizer spam ou criar problema, isso se resolve no Waze, que é onde a conta existe de verdade — não numa lista local que só vale no seu celular.
+  O motivo é que o recurso não tinha por que existir aqui: só entra no app editor **nível 3+ que seja Area Manager**, ou seja gente madura da comunidade. Se alguém fizer spam ou criar problema, isso se resolve no Waze, que é onde a conta existe de verdade — não numa lista local que só vale no seu celular.
 
   Decisão de [@antigerme](https://www.waze.com/user/editor/antigerme): *"nosso objetivo é interação/pertencimento"*.
 
@@ -748,7 +748,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.22-06
 
 ### Corrigido
-- **"Conectar outro aparelho" tirava você da aplicação.** Abrir a Ajuda, tocar em "Conectar outro aparelho" e depois fechar a janela do código levava o navegador para fora da app — de volta para a página anterior, perdendo a fila carregada. Encontrado medindo, enquanto se investigava outro problema.
+- **"Conectar outro aparelho" tirava você da aplicação.** Abrir a Ajuda, tocar em "Conectar outro aparelho" e depois fechar a janela do código levava o navegador para fora do app — de volta para a página anterior, perdendo a fila carregada. Encontrado medindo, enquanto se investigava outro problema.
 - **O ✕ da conversa dava erro em vez de fechar.** Tocar no ✕ mostrava "Erro inesperado" na tela e a janela ficava aberta — só o Esc, o toque fora e o voltar do aparelho funcionavam. Reportado por [@antigerme](https://www.waze.com/user/editor/antigerme).
 
 ---
@@ -821,7 +821,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.20-03
 
 ### Corrigido
-- **A medição de acesso voltou a funcionar — ela estava bloqueada pela própria app.** O Cloudflare injeta um script de medição em toda página, e a política de segurança da app (CSP) não o permitia. Resultado: um erro no console a cada carregamento e **nenhum dado coletado** — enquanto a tela de Ajuda já prometia *"medição de acesso sem cookies"*. A app afirmava sobre si mesma algo que ela mesma impedia.
+- **A medição de acesso voltou a funcionar — ela estava bloqueada pelo próprio app.** O Cloudflare injeta um script de medição em toda página, e a política de segurança do app (CSP) não o permitia. Resultado: um erro no console a cada carregamento e **nenhum dado coletado** — enquanto a tela de Ajuda já prometia *"medição de acesso sem cookies"*. O app afirmava sobre si mesmo algo que ele mesmo impedia.
 
   Continua **sem cookies, sem anúncios e sem rastreadores**, como a Ajuda diz. O que mudou é que a frase virou verdade.
 
@@ -837,7 +837,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.20-02
 
 ### Melhorado
-- **A app abre baixando 5 KB no lugar de 680.** Todo carregamento — abrir o atalho, dar F5, voltar pro app — rebaixava o site inteiro: HTML, todos os JS, o CSS. Não era por release; era toda vez.
+- **O app abre baixando 5 KB no lugar de 680.** Todo carregamento — abrir o atalho, dar F5, voltar pro app — rebaixava o site inteiro: HTML, todos os JS, o CSS. Não era por release; era toda vez.
 
   A causa era uma defesa velha no service worker que mandava ignorar o cache do navegador. Ela existia porque, no servidor antigo, o JS ficava um mês em cache e o F5 não pegava versão nova (e celular não tem Ctrl+Shift+R). Só que o servidor de hoje já manda "pergunte antes de reusar" em todo arquivo de código — a defesa virou redundante e ficou cobrando o preço.
 
@@ -909,7 +909,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.18-02
 
 ### Adicionado
-- **Dá para corrigir o nome do local sem sair da app.** Ao ampliar a foto de um pedido, o nome do local aparece embaixo. Toque nele, corrija e pronto — a gravação vai para o Waze depois dos 3 segundos de "Desfazer", como qualquer outra ação.
+- **Dá para corrigir o nome do local sem sair do app.** Ao ampliar a foto de um pedido, o nome do local aparece embaixo. Toque nele, corrija e pronto — a gravação vai para o Waze depois dos 3 segundos de "Desfazer", como qualquer outra ação.
 
   Nasceu de um relato de um editor nível 6: às vezes chega uma foto boa de fachada e, olhando para ela, dá para ver que o nome cadastrado está errado — `Odontodente Consultório` onde a placa diz `Odontodente Sorriso`. Até agora o único caminho era abrir o Waze Map Editor no meio da triagem.
 
@@ -922,7 +922,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.18-01
 
 ### Adicionado
-- **Quando duas versões de um texto parecem iguais, a app marca o que mudou.** Nos pedidos de alteração, o card mostra o valor antigo riscado e o novo ao lado — e pra quase tudo isso basta: `Bom Atacarejo` → `Strapasson` se lê num piscar. Mas há um caso em que o olho não tem onde se agarrar:
+- **Quando duas versões de um texto parecem iguais, o app marca o que mudou.** Nos pedidos de alteração, o card mostra o valor antigo riscado e o novo ao lado — e pra quase tudo isso basta: `Bom Atacarejo` → `Strapasson` se lê num piscar. Mas há um caso em que o olho não tem onde se agarrar:
 
   ```
   Aeroport Josep Tarradellas Barcelona - El Prat T1
@@ -933,7 +933,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
   Só acende quando a diferença **não muda o tamanho** do texto — foi isso que a medição em 453 alterações de 13 países mostrou separar o difícil do óbvio. `Car Park` → `Car Parkuuuu` cresce e você vê; `Terminal 2F` → `Terminal 2C` não cresce e passa batido. Dispara em cerca de 1 em 10 alterações de texto; nas outras 9 a linha sai exatamente como antes.
 
-  Em texto longo, a app mostra a vizinhança da diferença em vez do começo da frase (`…Barcelona - El Prat T1`). Isso conserta de quebra um problema que já existia: em tela estreita o card cortava o nome **antes** da parte que decide, então `T1` e `T2` apareciam idênticos. O valor completo fica no toque longo / passar o mouse.
+  Em texto longo, o app mostra a vizinhança da diferença em vez do começo da frase (`…Barcelona - El Prat T1`). Isso conserta de quebra um problema que já existia: em tela estreita o card cortava o nome **antes** da parte que decide, então `T1` e `T2` apareciam idênticos. O valor completo fica no toque longo / passar o mouse.
 
   Ideia discutida com [@antigerme](https://www.waze.com/user/editor/antigerme), que recusou duas propostas anteriores (selos que explicavam o que o editor já lia) e apontou o caminho certo: *"os editores de mapas não são assim tão burros para precisar dessa muleta"*.
 
@@ -944,9 +944,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Adicionado
 - **O pedido de "duplicado" agora diz duplicado DE QUEM — e mostra onde.** Antes o card dizia só `Motivo: Duplicado`, que é meia frase: o que decide é qual é o outro local. Agora ele diz `Duplicado de “Natan Estacionamento”` e o mini-mapa ganha um marcador (losango roxo) na posição desse outro local, ao lado do marcador do local do pedido — dá pra ver num olhar se são de fato o mesmo lugar ou dois vizinhos parecidos.
 
-  O Waze sempre mandou o dado (medindo as filas dos seis países, **os 7 pedidos de duplicado trazem o id do outro local**), mas não manda o nome dele: a busca só devolve locais que têm pedido pendente, e o local duplicado normalmente não tem. Medido: em 6 de 6 casos reais o alvo **não** estava na resposta. A app agora vai buscar o nome, e acha em 6 de 6.
+  O Waze sempre mandou o dado (medindo as filas dos seis países, **os 7 pedidos de duplicado trazem o id do outro local**), mas não manda o nome dele: a busca só devolve locais que têm pedido pendente, e o local duplicado normalmente não tem. Medido: em 6 de 6 casos reais o alvo **não** estava na resposta. O app agora vai buscar o nome, e acha em 6 de 6.
 
-  Quando não dá pra resolver — local apagado, ou fora do alcance da busca —, o card volta a dizer só `Duplicado`, sem "de" pendurado. Achado por [@antigerme](https://www.waze.com/user/editor/antigerme), que reparou que o WME mostrava o nome e a app não.
+  Quando não dá pra resolver — local apagado, ou fora do alcance da busca —, o card volta a dizer só `Duplicado`, sem "de" pendurado. Achado por [@antigerme](https://www.waze.com/user/editor/antigerme), que reparou que o WME mostrava o nome e o app não.
 
   **Correção de servidor, sem número de versão novo** (o rodapé continua `v2026.08.17-01`): na primeira versão a busca pelo outro local partia do primeiro canto do local em vez do centro dele. Em local desenhado como área isso desloca a busca — num estacionamento em Salvador, **272 metros** —, e o duplicado ficava de fora por pouco, com espaço de sobra do outro lado. Achado por [@antigerme](https://www.waze.com/user/editor/antigerme) no primeiro caso real depois do lançamento.
 
@@ -970,7 +970,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
   Ajuda mais em dois casos que são exatamente onde a decisão mora: **foto denunciada** (o pedido é sobre uma foto entre várias) e **foto nova** (a proposta ao lado das que o local já tem).
 
-  Aparece só quando o local tem duas ou mais fotos — cerca de um terço dos pedidos. E **não custa dados nenhum**: a app já adianta as fotos do pedido seguinte enquanto você olha o atual, então quando você amplia elas já estão no aparelho, e a tira reaproveita exatamente as mesmas. Observação de [@antigerme](https://www.waze.com/user/editor/antigerme), que percebeu o desperdício na primeira versão.
+  Aparece só quando o local tem duas ou mais fotos — cerca de um terço dos pedidos. E **não custa dados nenhum**: o app já adianta as fotos do pedido seguinte enquanto você olha o atual, então quando você amplia elas já estão no aparelho, e a tira reaproveita exatamente as mesmas. Observação de [@antigerme](https://www.waze.com/user/editor/antigerme), que percebeu o desperdício na primeira versão.
 
   **A tira nunca cobre a foto.** Medi o espaço livre em cinco aparelhos: na maioria sobra bastante, mas no iPhone SE com foto em pé sobram 27 pixels e no celular deitado, nenhum. Então ela ocupa espaço de verdade em vez de flutuar por cima — a foto encolhe um pouco, mas continua inteira à vista.
 
@@ -979,17 +979,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.16-04
 
 ### Corrigido
-- **Rodando fora do Cloudflare, a app estava com uma camada de segurança a menos.** A política que restringe quais scripts podem rodar na página existia em dois lugares: dentro do próprio HTML e num arquivo que só o Cloudflare lê. Quem subisse a app num servidor próprio ficava só com a primeira — e nada avisava. Agora o servidor próprio manda a política junto, igual ao Cloudflare, e um teste sobe o servidor de verdade para conferir que ela sai na resposta.
+- **Rodando fora do Cloudflare, o app estava com uma camada de segurança a menos.** A política que restringe quais scripts podem rodar na página existia em dois lugares: dentro do próprio HTML e num arquivo que só o Cloudflare lê. Quem subisse o app num servidor próprio ficava só com a primeira — e nada avisava. Agora o servidor próprio manda a política junto, igual ao Cloudflare, e um teste sobe o servidor de verdade para conferir que ela sai na resposta.
 
 ### Alterado
-- **Uma permissão que não servia para nada saiu da política de segurança.** Ela liberava o domínio da análise de tráfego do Cloudflare, que não é carregado nesta app. Permissão que não é usada é permissão que alguém reaproveita sem pensar.
+- **Uma permissão que não servia para nada saiu da política de segurança.** Ela liberava o domínio da análise de tráfego do Cloudflare, que não é carregado neste app. Permissão que não é usada é permissão que alguém reaproveita sem pensar.
 
 ---
 
 ## v2026.08.16-03
 
 ### Alterado
-- **O carregamento do próximo pedido parou de atrapalhar o atual.** A app adianta as fotos do pedido seguinte enquanto você olha o de agora — bom recurso, mas ele começava no mesmo instante que a foto que você precisa ver. Num pedido com quatro fotos isso eram 189 KB do que ainda não interessa disputando banda com os 12 KB que interessam. Agora ele espera a foto atual terminar.
+- **O carregamento do próximo pedido parou de atrapalhar o atual.** O app adianta as fotos do pedido seguinte enquanto você olha o de agora — bom recurso, mas ele começava no mesmo instante que a foto que você precisa ver. Num pedido com quatro fotos isso eram 189 KB do que ainda não interessa disputando banda com os 12 KB que interessam. Agora ele espera a foto atual terminar.
 - **Menos uma coisa segurando o desenho da tela.** O trecho que aplica o tema antes de tudo virou parte da própria página em vez de um arquivo separado — uma requisição a menos, sem afrouxar nenhuma regra de segurança.
 
 ---
@@ -997,7 +997,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.16-02
 
 ### Alterado
-- **A sua foto de perfil deixou de atrasar o primeiro pedido.** Ela vem do Waze com 214 KB para aparecer com 32 pixels no cabeçalho — é a imagem mais pesada da app e a menos importante, e não existe versão menor no Waze. Agora ela só começa a ser buscada **depois que o primeiro card está na tela**, e ainda espera o aparelho ficar ocioso.
+- **A sua foto de perfil deixou de atrasar o primeiro pedido.** Ela vem do Waze com 214 KB para aparecer com 32 pixels no cabeçalho — é a imagem mais pesada do app e a menos importante, e não existe versão menor no Waze. Agora ela só começa a ser buscada **depois que o primeiro card está na tela**, e ainda espera o aparelho ficar ocioso.
 
   Em rede móvel esses 214 KB eram mais de um segundo de banda ocupada bem na hora em que você está esperando **ver** o pedido. O espaço dela no cabeçalho fica reservado desde o começo, então quando a foto chega nada se move.
 
@@ -1008,14 +1008,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.16-01
 
 ### Alterado
-- **A app abre mais rápido, principalmente no celular.** Quatro mudanças, todas medidas contra o relatório do Lighthouse que [@antigerme](https://www.waze.com/user/editor/antigerme) rodou na produção:
+- **O app abre mais rápido, principalmente no celular.** Quatro mudanças, todas medidas contra o relatório do Lighthouse que [@antigerme](https://www.waze.com/user/editor/antigerme) rodou na produção:
 
   - **Um arquivo de estilo em vez de dois, e agora minificado.** O nosso CSS ia para o navegador com todos os comentários — e comentário comprime, mas não some: eram 23,4 KB que viraram 5,3 KB. Como ele bloqueia o desenho da tela, essa é a maior economia da lista.
   - **As três miniaturas da tela de entrada emagreceram de 65 KB para 30 KB.** Elas tinham 240 pixels de largura e são exibidas com 72 — foram para 144, que já sobra até em tela de alta densidade. Foto não encolhe na compressão, então esses 35 KB eram desperdício puro em dado móvel.
   - **A sua foto de perfil deixou de atrapalhar.** Ela vem do Waze com 214 KB e aparece com 32 pixels no cabeçalho; não existe versão menor (testei). Agora ela é buscada com prioridade baixa e a **foto do pedido** com prioridade alta — o que você precisa ver para decidir passa na frente.
   - **Os scripts não seguram mais o desenho da página.**
 
-  Nada disso muda o que a app faz, nem adiciona qualquer consulta ao servidor.
+  Nada disso muda o que o app faz, nem adiciona qualquer consulta ao servidor.
 
 ---
 
@@ -1038,9 +1038,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.15-02
 
 ### Adicionado
-- **A app avisa quando a sua sessão está para vencer.** Uma linha discreta embaixo do placar, nos últimos dias: *"Sua sessão vence em 3 dias · renove num computador"*. Ela existe porque o fim da sessão sempre chegava de surpresa, e chegava no pior lugar — no celular, onde não há como renovar: quem entrou pelo QR precisa de um computador, e descobrir isso no meio da fila custa a triagem inteira.
+- **O app avisa quando a sua sessão está para vencer.** Uma linha discreta embaixo do placar, nos últimos dias: *"Sua sessão vence em 3 dias · renove num computador"*. Ela existe porque o fim da sessão sempre chegava de surpresa, e chegava no pior lugar — no celular, onde não há como renovar: quem entrou pelo QR precisa de um computador, e descobrir isso no meio da fila custa a triagem inteira.
 
-  **O prazo é real, medido, não estimado.** O Waze troca o seu cookie de sessão a cada resposta, mas o vencimento não muda junto: em três consultas seguidas o cookie veio diferente nas três e a data de validade ficou parada. É essa data que a app mostra. Se você entrar de novo no editor do Waze, o prazo novo chega na próxima busca e o aviso some sozinho.
+  **O prazo é real, medido, não estimado.** O Waze troca o seu cookie de sessão a cada resposta, mas o vencimento não muda junto: em três consultas seguidas o cookie veio diferente nas três e a data de validade ficou parada. É essa data que o app mostra. Se você entrar de novo no editor do Waze, o prazo novo chega na próxima busca e o aviso some sozinho.
 
   Não é botão nem link, de propósito: nesse tamanho de texto o alvo ficaria menor que o mínimo tocável, logo acima da área onde você desliza o card. E some no "Sair", como todo o resto. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
 
@@ -1049,19 +1049,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.15-01
 
 ### Adicionado
-- **O ícone da app instalada ganha um pontinho quando há pedidos esperando — no computador.** Sem número, de propósito: o ponto só pode ser escrito enquanto a app está aberta, então um "118" ficaria congelado no ícone e mentiria a partir do instante em que você fecha. O ponto diz apenas *"tem trabalho"*, e isso continua verdade. Some sozinho quando a fila zera e quando você sai.
+- **O ícone do app instalado ganha um pontinho quando há pedidos esperando — no computador.** Sem número, de propósito: o ponto só pode ser escrito enquanto o app está aberto, então um "118" ficaria congelado no ícone e mentiria a partir do instante em que você fecha. O ponto diz apenas *"tem trabalho"*, e isso continua verdade. Some sozinho quando a fila zera e quando você sai.
 
   **Onde ele aparece de verdade** (esta parte foi corrigida depois da entrega, quando [@antigerme](https://www.waze.com/user/editor/antigerme) testou no aparelho dele e não viu ponto nenhum):
 
   | onde | aparece? |
   |---|---|
-  | Windows, macOS e ChromeOS, app instalada pelo Chrome ou Edge | sim |
+  | Windows, macOS e ChromeOS, app instalado pelo Chrome ou Edge | sim |
   | **Android** | **não, e não é possível** |
   | iPhone e iPad, app na tela de início | só com notificações autorizadas |
 
-  **No Android o pontinho nunca vai aparecer**, e não é falta da app nem instalação errada: o Chrome do Android não tem essa função. O badge do Android é derivado de notificação e o sistema só deixa *esconder* um, nunca acender — por isso a função nunca foi portada para lá. Trocar o ponto por um número também não resolveria: o número é justamente a parte que o Android não sabe fazer.
+  **No Android o pontinho nunca vai aparecer**, e não é falta do app nem instalação errada: o Chrome do Android não tem essa função. O badge do Android é derivado de notificação e o sistema só deixa *esconder* um, nunca acender — por isso a função nunca foi portada para lá. Trocar o ponto por um número também não resolveria: o número é justamente a parte que o Android não sabe fazer.
 
-  **Não pede permissão de notificação nenhuma.** No iPhone o pontinho depende de notificações autorizadas; se não estiverem, ele simplesmente não aparece — e a app não te interrompe pra pedir. Onde a função não existe, a app não faz nada e não reclama: o "Restam" na tela continua sendo o indicador que funciona em todo aparelho. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
+  **Não pede permissão de notificação nenhuma.** No iPhone o pontinho depende de notificações autorizadas; se não estiverem, ele simplesmente não aparece — e o app não te interrompe pra pedir. Onde a função não existe, o app não faz nada e não reclama: o "Restam" na tela continua sendo o indicador que funciona em todo aparelho. Ideia de [@antigerme](https://www.waze.com/user/editor/antigerme).
 
 ---
 
@@ -1107,11 +1107,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.13-02
 
 ### Adicionado
-- **Modo treino: dá pra praticar sem enviar nada ao Waze.** Três pedidos de exemplo onde você rejeita, pula e marca como lido à vontade — e a cada ação a app diz o que *teria* acontecido de verdade. Nada sai daqui. Entra pela **Ajuda › "Praticar sem enviar nada"** ou pelo botão "Quero treinar antes" no aviso de primeira vez, e a sua fila real volta intacta ao sair.
+- **Modo treino: dá pra praticar sem enviar nada ao Waze.** Três pedidos de exemplo onde você rejeita, pula e marca como lido à vontade — e a cada ação o app diz o que *teria* acontecido de verdade. Nada sai daqui. Entra pela **Ajuda › "Praticar sem enviar nada"** ou pelo botão "Quero treinar antes" no aviso de primeira vez, e a sua fila real volta intacta ao sair.
 
   Ele existe porque duas das três ações escrevem no Waze **em seu nome**, e a rejeição não tem volta depois dos segundos do Desfazer. Poder errar de mentira vale mais que qualquer texto explicativo.
 
-- **A app passou a dizer o que cada ação FAZ, não só o que ela quer dizer.** Na primeira vez que você rejeita e na primeira vez que marca como lido, aparece uma linha explicando o efeito real. A diferença importa mais no ✓: **marcar como lido não aprova nada** — o pedido continua existindo, só sai da sua fila. O ✓ verde sugere o contrário para quem chegou agora.
+- **O app passou a dizer o que cada ação FAZ, não só o que ela quer dizer.** Na primeira vez que você rejeita e na primeira vez que marca como lido, aparece uma linha explicando o efeito real. A diferença importa mais no ✓: **marcar como lido não aprova nada** — o pedido continua existindo, só sai da sua fila. O ✓ verde sugere o contrário para quem chegou agora.
 
 ## v2026.08.13-01
 
@@ -1120,17 +1120,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
   A alternativa era escrever o nome embaixo de cada botão — e ela foi medida e recusada: custaria 20px de **foto** em todo card, para sempre, para ensinar algo que se aprende uma vez.
 
-- **"Já instalei — entrar", na opção de login automático.** Quem instalava a extensão com a página aberta ficava esperando para sempre: a app pergunta à extensão uma única vez, no carregamento, e a extensão não entra numa aba que já estava aberta. O botão aparece depois que você clica em instalar e recarrega a página, que é o que faz a ligação funcionar. A app também volta a perguntar sozinha quando você retorna para a aba.
+- **"Já instalei — entrar", na opção de login automático.** Quem instalava a extensão com a página aberta ficava esperando para sempre: o app pergunta à extensão uma única vez, no carregamento, e a extensão não entra numa aba que já estava aberta. O botão aparece depois que você clica em instalar e recarrega a página, que é o que faz a ligação funcionar. O app também volta a perguntar sozinho quando você retorna para a aba.
 
 ## v2026.08.12-02
 
 ### Adicionado
 - **A tela de entrada agora diz quem pode entrar, antes de você tentar.** Até aqui só se descobria depois de instalar a extensão, entrar no WME e voltar — e a recusa dizia apenas "certos níveis de editor". Agora o critério está escrito logo de cara: **editor nível 3 ou acima que seja Area Manager, ou staff do Waze**. O modal de recusa passou a dizer o mesmo, em vez da frase vaga.
 
-- **A app se mostra antes de pedir qualquer coisa.** Três telas de exemplo — um pedido com foto, o mapa e as mudanças propostas — logo abaixo das opções de entrada. Quem chega novo estava sendo convidado a instalar uma extensão sem nunca ter visto do que se trata.
+- **O app se mostra antes de pedir qualquer coisa.** Três telas de exemplo — um pedido com foto, o mapa e as mudanças propostas — logo abaixo das opções de entrada. Quem chega novo estava sendo convidado a instalar uma extensão sem nunca ter visto do que se trata.
 
 ### Alterado
-- **A frase de boas-vindas parou de pedir a coisa errada.** Ela dizia *"você precisa fornecer seus cookies de autenticação"* — que não é verdade em dois dos três caminhos (pela extensão e pelo código você não fornece cookie nenhum), e que assusta quem não é técnico. Agora diz o que a app faz: *"Triagem rápida dos pedidos de places que chegam no Waze: você vê um por vez e decide com um toque."*
+- **A frase de boas-vindas parou de pedir a coisa errada.** Ela dizia *"você precisa fornecer seus cookies de autenticação"* — que não é verdade em dois dos três caminhos (pela extensão e pelo código você não fornece cookie nenhum), e que assusta quem não é técnico. Agora diz o que o app faz: *"Triagem rápida dos pedidos de places que chegam no Waze: você vê um por vez e decide com um toque."*
 
   No celular, a faixa de "quem pode entrar" fica **abaixo** dos botões, e no computador acima. Não é capricho: em cima, ela empurrava o botão principal para fora da primeira tela no Galaxy Fold e no iPhone SE. Medido antes e depois, em seis aparelhos — o botão principal continua exatamente onde estava.
 
@@ -1141,14 +1141,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
   No Android a limitação continua: o fundo da abertura vem de um arquivo que o navegador lê uma vez e que **não** aceita duas cores. No iPhone existe um caminho diferente, que aceita — e é ele que está sendo usado agora, em 17 tamanhos de tela, do iPhone SE ao 16 Pro Max, mais os iPads.
 
-- **As imagens que aparecem na hora de instalar o app foram refeitas.** Eram duas, antigas. Agora são seis, tiradas da fila de verdade: o card com foto, um pedido de foto nova com as fotos que o local já tem, o mapa de evidência, as mudanças propostas em antes/depois, a tela de filtros e a app no computador.
+- **As imagens que aparecem na hora de instalar o app foram refeitas.** Eram duas, antigas. Agora são seis, tiradas da fila de verdade: o card com foto, um pedido de foto nova com as fotos que o local já tem, o mapa de evidência, as mudanças propostas em antes/depois, a tela de filtros e o app no computador.
 
   Estão em inglês porque os testadores são de vários países e essas imagens **não** podem variar por idioma — quem escolhe a língua do resto do manifesto (nome, descrição, atalhos) não cobre as imagens. O nome de quem enviou cada pedido foi trocado por um genérico: são imagens públicas.
 
 ## v2026.08.11-01
 
 ### Corrigido
-- **A tela de abertura não seguia mais o seu tema.** Quem usa o app instalado no celular em modo escuro via um clarão branco por meio segundo antes da app aparecer. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme), com vídeo e print do aparelho.
+- **A tela de abertura não seguia mais o seu tema.** Quem usa o app instalado no celular em modo escuro via um clarão branco por meio segundo antes do app aparecer. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme), com vídeo e print do aparelho.
 
   A **barra de status** agora acompanha a sua preferência desde o primeiro instante — antes ela vinha num azul aceso fixo, que era metade do clarão. E o fundo da abertura passou a ser o mesmo do tema escuro do app, em vez de branco.
 
@@ -1159,21 +1159,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Corrigido
 - **Os botões de aprovar e excluir foto ficavam ativos durante o Desfazer.** No card, os ✕/↑/✓ ficam apagados e sem resposta enquanto a janela corre; no lightbox eles continuavam com cara de clicáveis. Agora seguem a mesma regra — e é a **mesma função** que trava os dois, para não voltarem a divergir. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme).
 
-- **"Conexão instável" que não passava, e só o "Sair" resolvia.** Depois do deploy anterior — que invalidou as sessões existentes de propósito —, quem tinha sessão antiga via esse aviso a cada tentativa e ficava preso: a app achava que a sessão continuava válida e nunca oferecia a tela de entrar. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+- **"Conexão instável" que não passava, e só o "Sair" resolvia.** Depois do deploy anterior — que invalidou as sessões existentes de propósito —, quem tinha sessão antiga via esse aviso a cada tentativa e ficava preso: o app achava que a sessão continuava válida e nunca oferecia a tela de entrar. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme).
 
-  A causa não era a criptografia: a app decidia "sessão viva" pela **ausência** de um sinal de erro, e a resposta que diz "sua sessão não existe mais" não trazia esse sinal. Agora ela traz, e a app só considera a sessão viva quando a verificação **responde de verdade**. Oscilação de rede continua não derrubando ninguém — que era o defeito oposto, corrigido antes.
+  A causa não era a criptografia: o app decidia "sessão viva" pela **ausência** de um sinal de erro, e a resposta que diz "sua sessão não existe mais" não trazia esse sinal. Agora ela traz, e o app só considera a sessão viva quando a verificação **responde de verdade**. Oscilação de rede continua não derrubando ninguém — que era o defeito oposto, corrigido antes.
 
 ## v2026.08.07-01
 
 ### Corrigido
-- **Na VM, a limpeza automática apagava as sessões boas.** Quem rodasse a app fora da Cloudflare via todo mundo ser deslogado a cada boot do servidor e a cada hora. A rotina que remove sessões abandonadas usava o mesmo critério para dois tipos de registro que guardam datas com significados opostos — a do pareamento é "vence em", a da sessão é "usada pela última vez em" —, e por isso julgava tudo como vencido. Não afetava quem usa a versão hospedada.
+- **Na VM, a limpeza automática apagava as sessões boas.** Quem rodasse o app fora da Cloudflare via todo mundo ser deslogado a cada boot do servidor e a cada hora. A rotina que remove sessões abandonadas usava o mesmo critério para dois tipos de registro que guardam datas com significados opostos — a do pareamento é "vence em", a da sessão é "usada pela última vez em" —, e por isso julgava tudo como vencido. Não afetava quem usa a versão hospedada.
 
 ## v2026.08.06-07
 
 ### Melhorado
 - **O que está guardado no servidor não abre sem o seu aparelho.** Antes, a chave que decifra os seus cookies era um segredo do servidor: quem tivesse esse segredo e uma cópia do banco lia tudo. Agora a chave é derivada do **token de sessão que fica no seu aparelho** — o servidor sozinho não decifra nada. Um vazamento do banco, um acesso indevido ou um pedido judicial devolvem blocos embaralhados que não servem para nada.
 
-  Isso **não** protege contra quem publica código novo no servidor: essa pessoa pode registrar o seu token quando ele chega. A diferença é o alcance — deixa de ser "todos os editores, inclusive os de ontem" e passa a ser "quem usar a app enquanto esse código estiver no ar". A Ajuda foi atualizada para dizer exatamente isso, sem promessa a mais.
+  Isso **não** protege contra quem publica código novo no servidor: essa pessoa pode registrar o seu token quando ele chega. A diferença é o alcance — deixa de ser "todos os editores, inclusive os de ontem" e passa a ser "quem usar o app enquanto esse código estiver no ar". A Ajuda foi atualizada para dizer exatamente isso, sem promessa a mais.
 
 - **Sessão que não abre mais é apagada na hora.** As sessões criadas antes desta mudança não funcionam mais (você entra de novo, uma vez). Antes elas ficavam guardadas até vencer, ainda legíveis pelo servidor — o oposto do que a mudança acima promete. Agora, na primeira tentativa de uso, o registro é removido.
 
@@ -1186,7 +1186,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.06-06
 
 ### Melhorado
-- **Aprovar virou um botão só, do tamanho da lixeira, e os dois ganharam cor.** Saiu a barra preta com o texto "esta foto ainda não está no mapa": o ✨ em cima da foto já dizia isso, e a barra custava 78px de foto — numa app cujo produto é a foto, é o troco errado. No lugar, um **✓ verde** no mesmo canto onde mora a **🗑 vermelha**, do mesmo tamanho. Nunca aparecem juntos: foto pendente se aprova, foto que já está no mapa se exclui.
+- **Aprovar virou um botão só, do tamanho da lixeira, e os dois ganharam cor.** Saiu a barra preta com o texto "esta foto ainda não está no mapa": o ✨ em cima da foto já dizia isso, e a barra custava 78px de foto — num app cujo produto é a foto, é o troco errado. No lugar, um **✓ verde** no mesmo canto onde mora a **🗑 vermelha**, do mesmo tamanho. Nunca aparecem juntos: foto pendente se aprova, foto que já está no mapa se exclui.
 
   A cor não é só enfeite — **conserta um problema de leitura que já estava no ar**. Os botões eram um preto transparente, então a foto atravessava e num fundo claro o ícone branco quase sumia (2,85:1, abaixo do mínimo de 3:1 das normas de acessibilidade). Com a cor cheia o número não depende mais da foto: 4,83:1 no vermelho e 5,48:1 no verde. Cada botão ganhou também uma borda de dois tons, clara por dentro e escura por fora, pra não desaparecer sobre uma foto da mesma cor dele.
 
@@ -1198,9 +1198,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.06-05
 
 ### Adicionado
-- **Dá para aprovar uma foto nova sem sair da app.** Abra a foto do pedido e, se ela ainda não está no mapa, aparece **"Aprovar"** embaixo. Tocou, ela entra — o ✨ some na hora e o botão vira lixeira, porque a partir dali a foto está no mapa como qualquer outra. Pedido de um global champ, trazido pelo [@antigerme](https://www.waze.com/user/editor/antigerme).
+- **Dá para aprovar uma foto nova sem sair do app.** Abra a foto do pedido e, se ela ainda não está no mapa, aparece **"Aprovar"** embaixo. Tocou, ela entra — o ✨ some na hora e o botão vira lixeira, porque a partir dali a foto está no mapa como qualquer outra. Pedido de um global champ, trazido pelo [@antigerme](https://www.waze.com/user/editor/antigerme).
 
-  Vale **só para foto**, e o motivo é o que a decisão exige de você: uma foto ou serve ou não serve, e ela está inteira na sua tela. Nome, categoria, endereço e posição continuam sem "aprovar" na app — ali aprovar é escolher um valor, e quem tem campo para isso é o WME (o botão ↗ do card).
+  Vale **só para foto**, e o motivo é o que a decisão exige de você: uma foto ou serve ou não serve, e ela está inteira na sua tela. Nome, categoria, endereço e posição continuam sem "aprovar" no app — ali aprovar é escolher um valor, e quem tem campo para isso é o WME (o botão ↗ do card).
 
   Aparece para quem já podia excluir foto: **nível 6 com Area Manager**, ou staff do Waze. E é preciso ter **ampliado** a foto — não há atalho pelo card, justamente porque aprovar sem olhar não é aprovar.
 
@@ -1211,30 +1211,30 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ### Melhorado
 - **Excluir foto agora é um toque só.** Acabou a pergunta "excluir esta foto?": tocou na lixeira, a foto sai. Você já abriu a foto, navegou até ela e mirou num alvo pequeno — perguntar de novo era desconfiar de você.
 
-  No lugar entra o **Desfazer** que a app já usa no swipe: a foto some na hora e você tem alguns segundos para se arrepender. Ele **respeita a sua preferência** — quem desligou o Desfazer nas Preferências não vê banner nenhum e a exclusão vai direto, com a lixeira virando um indicador de progresso enquanto o Waze responde.
+  No lugar entra o **Desfazer** que o app já usa no swipe: a foto some na hora e você tem alguns segundos para se arrepender. Ele **respeita a sua preferência** — quem desligou o Desfazer nas Preferências não vê banner nenhum e a exclusão vai direto, com a lixeira virando um indicador de progresso enquanto o Waze responde.
 
   E some o aviso "Foto excluída": a foto sumindo já é a confirmação. Ficam só os avisos que a tela não mostra sozinha — "outro editor já tinha excluído" e os erros.
 
 ## v2026.08.06-03
 
 ### Melhorado
-- **Excluir foto ficou bem mais rápido e deixou de parecer travado.** Antes, ao confirmar, o diálogo fechava na hora e por alguns segundos nada indicava que a app estava trabalhando — parecia que tinha engasgado. Agora o diálogo fica com **"Excluindo…"** até o Waze responder, e só então fecha.
+- **Excluir foto ficou bem mais rápido e deixou de parecer travado.** Antes, ao confirmar, o diálogo fechava na hora e por alguns segundos nada indicava que o app estava trabalhando — parecia que tinha engasgado. Agora o diálogo fica com **"Excluindo…"** até o Waze responder, e só então fecha.
 
-  E a espera encolheu de verdade: a app deixou de perguntar ao Waze quem é você a cada exclusão, e passou a **adiantar** a consulta ao local no instante em que você toca na lixeira — enquanto você lê a pergunta. Medido: o tempo depois do "Excluir" caiu de **727 ms para 3 ms**. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme).
+  E a espera encolheu de verdade: o app deixou de perguntar ao Waze quem é você a cada exclusão, e passou a **adiantar** a consulta ao local no instante em que você toca na lixeira — enquanto você lê a pergunta. Medido: o tempo depois do "Excluir" caiu de **727 ms para 3 ms**. Relatado por [@antigerme](https://www.waze.com/user/editor/antigerme).
 
 ## v2026.08.06-01
 
 ### Melhorado
-- **O próximo pedido já vem pronto.** A app carrega o pedido seguinte **por inteiro** enquanto você olha o atual — foto, as outras fotos e o mapinha. Quando você passa o card, ele já está lá: sem caixa cinza esperando carregar.
+- **O próximo pedido já vem pronto.** O app carrega o pedido seguinte **por inteiro** enquanto você olha o atual — foto, as outras fotos e o mapinha. Quando você passa o card, ele já está lá: sem caixa cinza esperando carregar.
 
-  E dos **dois pedidos depois desse** ela adianta a primeira imagem. Assim, se você parar um pouco num pedido e depois passar três rápido, os três já têm imagem. **Isso não consome dados a mais** — eles seriam baixados de qualquer jeito quando chegassem na sua vez; a app só aproveita o tempo em que a conexão estaria parada.
+  E dos **dois pedidos depois desse** ele adianta a primeira imagem. Assim, se você parar um pouco num pedido e depois passar três rápido, os três já têm imagem. **Isso não consome dados a mais** — eles seriam baixados de qualquer jeito quando chegassem na sua vez; o app só aproveita o tempo em que a conexão estaria parada.
 
   **Sem pesar nos seus dados**: esse carregamento antecipado tem prioridade baixa, então nunca atrasa o que está na sua tela agora; respeita o modo de economia de dados do aparelho; e para nas 4 primeiras fotos de cada pedido — as demais chegam quando você navegar até elas.
 
 ## v2026.08.05-04
 
 ### Interno
-- **Ordem de carregamento do CSS invertida.** Mudança de bastidor, sem efeito visível: medido pixel a pixel em 150 telas (25 estados × 3 aparelhos × claro e escuro), **zero diferença**. Serve pra que ajustes de estilo da app parem de ser silenciosamente ignorados pelo framework — uma fonte recorrente de "arrumei e não pegou".
+- **Ordem de carregamento do CSS invertida.** Mudança de bastidor, sem efeito visível: medido pixel a pixel em 150 telas (25 estados × 3 aparelhos × claro e escuro), **zero diferença**. Serve pra que ajustes de estilo do app parem de ser silenciosamente ignorados pelo framework — uma fonte recorrente de "arrumei e não pegou".
 
 ### Corrigido
 - **Botão ✕ ficava quadrado ao receber foco.** O anel de foco sobrescrevia o formato do próprio botão. Aparecia ao abrir Filtros, Ajuda, a foto ampliada e o mapa ampliado pelo teclado.
@@ -1247,11 +1247,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.05-02
 
 ### Adicionado
-- **Lixeira na foto ampliada.** Abriu a foto e é lixo? Toca na lixeira, no canto de baixo, e ela sai do local. Pergunta uma vez antes — é a única ação da app que muda o mapa em si, e não tem desfazer.
+- **Lixeira na foto ampliada.** Abriu a foto e é lixo? Toca na lixeira, no canto de baixo, e ela sai do local. Pergunta uma vez antes — é a única ação do app que muda o mapa em si, e não tem desfazer.
 
   Aparece só para **editores nível 6 que são gerentes de área**, e só na foto que já está no mapa: a foto **proposta no pedido** (a do ✨) continua saindo pelo ✕ ou ✓ do card, que é o caminho dela.
 
-  Antes de excluir, a app **relê as fotos do local no Waze**. O motivo é que o Waze não aceita "apague esta foto" — só "a lista de fotos agora é esta". Sem reler, excluir uma foto lixo apagaria junto qualquer foto que outro editor tivesse subido nesse meio-tempo, sem aviso nenhum.
+  Antes de excluir, o app **relê as fotos do local no Waze**. O motivo é que o Waze não aceita "apague esta foto" — só "a lista de fotos agora é esta". Sem reler, excluir uma foto lixo apagaria junto qualquer foto que outro editor tivesse subido nesse meio-tempo, sem aviso nenhum.
 
 ## v2026.08.05-01
 
@@ -1268,7 +1268,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.04-10
 
 ### Corrigido
-- **O card seguinte agora chega pronto quando ele abre no mapa.** A app já adiantava a foto do próximo pedido, mas em **1 de cada 4** o primeiro slide é o mapa — e em **1 de cada 5** não há foto nenhuma, então não adiantava nada e você via a caixa cinza esperando. Agora ela adianta o que o próximo card vai mostrar de fato.
+- **O card seguinte agora chega pronto quando ele abre no mapa.** O app já adiantava a foto do próximo pedido, mas em **1 de cada 4** o primeiro slide é o mapa — e em **1 de cada 5** não há foto nenhuma, então não adiantava nada e você via a caixa cinza esperando. Agora ela adianta o que o próximo card vai mostrar de fato.
 
   Não gasta mais dados: os blocos do mapa seriam baixados de qualquer jeito quando o card chegasse. A fila é sequencial, então o "próximo" é literalmente o próximo que você vê.
 
@@ -1282,7 +1282,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.04-07
 
 ### Corrigido
-- **O mapa gasta menos dados no celular deitado.** Em tela deitada a área do mapa é mais larga que um bloco do mapa do Waze, e a app acabava baixando até **6 blocos** por card em vez de 2. Agora são **2,27 em média** (era 3,24), com o mesmo enquadramento. Em pé a economia também apareceu: 1,29 por card, contra 1,94.
+- **O mapa gasta menos dados no celular deitado.** Em tela deitada a área do mapa é mais larga que um bloco do mapa do Waze, e o app acabava baixando até **6 blocos** por card em vez de 2. Agora são **2,27 em média** (era 3,24), com o mesmo enquadramento. Em pé a economia também apareceu: 1,29 por card, contra 1,94.
 
 ### Interno
 - Mais medição saiu da bancada e entrou no teste automático: o mapa agora é verificado contra os **51 pedidos reais de 6 países** (enquadramento, orçamento de blocos, zoom coerente, região), os **três formatos de foto** (paisagem, quadrada e retrato) e o **contraste do texto do mapa** nos 4 idiomas. Foi esse teste que achou o gasto extra em tela deitada.
@@ -1322,7 +1322,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ## v2026.08.04-04
 
 ### Alterado
-- **"Atualização de detalhes" e "Local marcado" seguem desmarcados por padrão** — agora por escolha de produto, não por limitação. A app é estilo Tinder: o ritmo do swipe funciona quando há o que **olhar**, e esses dois tipos costumam ser texto. Na fila de teste, os 5 tipos do padrão somam 178 cards com **66% de foto**; os dois de fora, 117 cards com **44%**.
+- **"Atualização de detalhes" e "Local marcado" seguem desmarcados por padrão** — agora por escolha de produto, não por limitação. O app é estilo Tinder: o ritmo do swipe funciona quando há o que **olhar**, e esses dois tipos costumam ser texto. Na fila de teste, os 5 tipos do padrão somam 178 cards com **66% de foto**; os dois de fora, 117 cards com **44%**.
 
   Eles continuam no filtro, com o mesmo nome do WME, a um toque de distância — e agora **cabem na tela**, o que antes não acontecia. Se você trabalha bastante esses pedidos, é só marcar uma vez: sua escolha fica salva.
 
@@ -1363,7 +1363,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 - **O selo de origem passou a cobrir as quatro formas de enviar um pedido**, não só duas. Além de "pelo app" e "pelo site", agora existem **"pela ajuda"** (o pedido veio pelo formulário de Ajuda e comentários) e **"por voz"** (Assistente do Mapa, o alerta falado dentro do app). Antes esses dois apareciam em inglês, com o nome técnico do Waze. Passar o mouse (ou tocar e segurar) mostra a explicação completa, com a mesma redação que você lê no WME.
 
 ### Corrigido
-- **Pedido com origem "não especificada" não desenha mais um selo vazio de sentido.** O próprio WME não mostra nada nesse caso; agora a app faz igual.
+- **Pedido com origem "não especificada" não desenha mais um selo vazio de sentido.** O próprio WME não mostra nada nesse caso; agora o app faz igual.
 
 ### Sobre "sumiu o selo de origem"
 Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **não é defeito**: o Waze só informa a origem nos pedidos de **alteração** de um local que já existe. Local novo e foto nova nunca vêm com essa informação — e a proporção de cada tipo na sua fila muda sozinha conforme o que os usuários enviam.
@@ -1396,26 +1396,26 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.08.01-01
 
 ### Alterado
-- **Quando a sessão cair de verdade, a app agora diz de qual lado falhou.** Antes era sempre a mesma frase. Agora: *"O Waze recusou o acesso: seus cookies mudaram ou expiraram"* quando o problema veio de lá, e *"Sua sessão no app venceu por inatividade"* quando foi daqui. A ação é a mesma — entrar de novo — mas na próxima vez que acontecer dá pra saber a origem sem investigação.
+- **Quando a sessão cair de verdade, o app agora diz de qual lado falhou.** Antes era sempre a mesma frase. Agora: *"O Waze recusou o acesso: seus cookies mudaram ou expiraram"* quando o problema veio de lá, e *"Sua sessão no app venceu por inatividade"* quando foi daqui. A ação é a mesma — entrar de novo — mas na próxima vez que acontecer dá pra saber a origem sem investigação.
 
 ### Corrigido
-- **A causa raiz da sessão que expirava sozinha: o Waze troca o cookie a cada resposta e a app jogava fora.** Medido com cookies reais — três chamadas devolveram três valores diferentes. A app guardava o retrato do login e nunca mais o atualizava, então o retrato azedava sozinho, por mais válido que o seu acesso ao Waze estivesse. Agora a app acompanha a troca: enquanto o seu acesso ao Waze valer, a sessão vale junto.
+- **A causa raiz da sessão que expirava sozinha: o Waze troca o cookie a cada resposta e o app jogava fora.** Medido com cookies reais — três chamadas devolveram três valores diferentes. O app guardava o retrato do login e nunca mais o atualizava, então o retrato azedava sozinho, por mais válido que o seu acesso ao Waze estivesse. Agora o app acompanha a troca: enquanto o seu acesso ao Waze valer, a sessão vale junto.
 
 ### Removido
-- **Todo o código de compatibilidade com versões antigas.** A app está em testes e o owner avisou a turma que vai precisar reinstalar. Saíram: a migração de token do armazenamento de sessão, a tolerância a endereços terminados em `.php` (herança do backend anterior), o formato de sessão sem carimbo de data e a soma retroativa do histórico. **Quem já usava precisa entrar de novo.**
+- **Todo o código de compatibilidade com versões antigas.** O app está em testes e o owner avisou a turma que vai precisar reinstalar. Saíram: a migração de token do armazenamento de sessão, a tolerância a endereços terminados em `.php` (herança do backend anterior), o formato de sessão sem carimbo de data e a soma retroativa do histórico. **Quem já usava precisa entrar de novo.**
 
 ## v2026.07.31-01
 
 ### Corrigido
 - **A sessão expirava sozinha, sem você ter pedido pra sair.** Eram dois problemas somados.
-  - **O prazo contava do login, não do último uso.** Na hospedagem atual o prazo de 21 dias era gravado uma vez e nunca renovado: quem usava a app todo dia era deslogado no dia 21 do mesmo jeito. Agora cada uso renova — enquanto você aparecer pelo menos uma vez a cada 21 dias, a sessão não vence. Quem some por mais que isso continua precisando entrar de novo, como sempre.
-  - **Uma única resposta de recusa derrubava a sessão na hora.** E "recusa" não quer dizer só "seus cookies venceram": o Waze também responde assim quando recebe várias chamadas juntas, e a app faz três ao abrir. Agora, antes de derrubar, ela confirma com uma segunda chamada — se a sessão estiver viva, nada é apagado e você só vê um aviso discreto de conexão instável.
+  - **O prazo contava do login, não do último uso.** Na hospedagem atual o prazo de 21 dias era gravado uma vez e nunca renovado: quem usava o app todo dia era deslogado no dia 21 do mesmo jeito. Agora cada uso renova — enquanto você aparecer pelo menos uma vez a cada 21 dias, a sessão não vence. Quem some por mais que isso continua precisando entrar de novo, como sempre.
+  - **Uma única resposta de recusa derrubava a sessão na hora.** E "recusa" não quer dizer só "seus cookies venceram": o Waze também responde assim quando recebe várias chamadas juntas, e o app faz três ao abrir. Agora, antes de derrubar, ela confirma com uma segunda chamada — se a sessão estiver viva, nada é apagado e você só vê um aviso discreto de conexão instável.
 - **Dois avisos de "Sessão expirou" apareciam empilhados.** Cada chamada que falhava avisava por conta própria. Agora é uma verificação só, e um aviso só.
 
 ## v2026.07.30-14
 
 ### Corrigido
-- **Um item de lista vazio aparecia como um `+` sozinho, sem nada do lado.** Acontece quando o pedido propõe adicionar um serviço em branco — o Waze manda isso mesmo. Lido na tela parecia app quebrada; agora aparece `+ (vazio)`, que é o que de fato está sendo pedido.
+- **Um item de lista vazio aparecia como um `+` sozinho, sem nada do lado.** Acontece quando o pedido propõe adicionar um serviço em branco — o Waze manda isso mesmo. Lido na tela parecia app quebrado; agora aparece `+ (vazio)`, que é o que de fato está sendo pedido.
 
 ## v2026.07.30-13
 
@@ -1432,12 +1432,12 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 
 ### Corrigido
 - **Campo com estrutura interna aparecia como um bloco de JSON.** Um eletroposto mostrava o objeto inteiro só pra dizer que a rede tinha mudado de nome. Agora aparece só o que mudou lá dentro: `CHARGING_STATION.network: Porsche Smart Mobility GmbH → Ponto de Carga`.
-- **E quando o que mudou lá dentro era uma lista, ela também virava JSON.** No mesmo eletroposto, a troca dos pontos de recarga eram dois blocos de 150 caracteres lado a lado. Agora é o mesmo verde-entra/vermelho-sai que a app já usa nos outros campos de lista, com o conteúdo legível: `+ portId TYPE2.11 · connectorTypes TYPE2 · count 2`.
+- **E quando o que mudou lá dentro era uma lista, ela também virava JSON.** No mesmo eletroposto, a troca dos pontos de recarga eram dois blocos de 150 caracteres lado a lado. Agora é o mesmo verde-entra/vermelho-sai que o app já usa nos outros campos de lista, com o conteúdo legível: `+ portId TYPE2.11 · connectorTypes TYPE2 · count 2`.
 
 ## v2026.07.30-10
 
 ### Corrigido
-- **O erro vermelho "ResizeObserver loop…" que aparecia ao abrir a foto.** Nada estava quebrado: era um aviso do navegador que a app mostrava como se fosse defeito, bem em cima do card. A causa era a própria vigia que decide se o card precisa rolar — ela mexia no layout no meio da medição, e no computador (onde a barra de rolagem ocupa espaço) isso se mordia a si mesmo. Agora a vigia mede primeiro e só depois mexe, e avisos do navegador que não pedem ação nenhuma ficam no console em vez de na sua frente.
+- **O erro vermelho "ResizeObserver loop…" que aparecia ao abrir a foto.** Nada estava quebrado: era um aviso do navegador que o app mostrava como se fosse defeito, bem em cima do card. A causa era a própria vigia que decide se o card precisa rolar — ela mexia no layout no meio da medição, e no computador (onde a barra de rolagem ocupa espaço) isso se mordia a si mesmo. Agora a vigia mede primeiro e só depois mexe, e avisos do navegador que não pedem ação nenhuma ficam no console em vez de na sua frente.
 - **A última linha do card ficava cortada e aparecia uma barra de rolagem por causa de poucos pixels.** Quem encolhia era o texto, com a foto intacta — e apertar o texto não ajudava, porque a foto reabsorvia o espaço na hora. Agora quem cede é a foto, que é o elemento que mais sobra. Nos cards de mudanças e de reporte nada muda: lá a lista continua sendo a única área que rola.
 
 ## v2026.07.30-09
@@ -1448,7 +1448,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.30-07
 
 ### Adicionado
-- **O botão voltar do aparelho agora fecha a foto e os diálogos**, em vez de sair da app. Veio de um retorno de editora: no ritmo do swipe, ir até o ✕ quebra a cadência. Vale para a foto ampliada e para todos os diálogos — fazer só na foto seria pior, porque você aprenderia que voltar fecha, tentaria em Filtros e sairia da app perdendo o que estava montando. No iPhone em modo app não existe voltar; lá o ✕ e o arrastar continuam.
+- **O botão voltar do aparelho agora fecha a foto e os diálogos**, em vez de sair do app. Veio de um retorno de editora: no ritmo do swipe, ir até o ✕ quebra a cadência. Vale para a foto ampliada e para todos os diálogos — fazer só na foto seria pior, porque você aprenderia que voltar fecha, tentaria em Filtros e sairia do app perdendo o que estava montando. No iPhone em modo app não existe voltar; lá o ✕ e o arrastar continuam.
 - **A dica da foto ampliada agora conta que arrastar pra baixo fecha.** Esse gesto sempre existiu e não estava escrito em lugar nenhum.
 - **O card mostra de onde veio o pedido e quem mandou**: o nível de quem enviou (L1…L6), se veio do site ou do app do celular, e quantos outros pedidos daquela mesma pessoa estão na fila. Um pedido de nível 1 feito dirigindo é uma coisa; um de nível 5 feito na mesa é outra — e quando alguém mandou 15, decidir sobre o primeiro costuma decidir sobre os outros.
 
@@ -1465,7 +1465,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.30-04
 
 ### Adicionado
-- **Mudanças, reportes e pedidos de remoção agora aparecem para todo mundo.** Estavam atrás do Modo Desenvolvedor enquanto os cards não davam conta deles. O custo disso só ficou claro medindo uma fila de verdade: de 137 pedidos, **135 eram desses tipos** — o editor abria a app e via dois.
+- **Mudanças, reportes e pedidos de remoção agora aparecem para todo mundo.** Estavam atrás do Modo Desenvolvedor enquanto os cards não davam conta deles. O custo disso só ficou claro medindo uma fila de verdade: de 137 pedidos, **135 eram desses tipos** — o editor abria o app e via dois.
 
 ### Corrigido
 - **Mudança de posição no mapa dizia `[object Object]`.** Agora diz quanto o ponto andou ("moveu 36 m") e, quando é uma área, quantos vértices ela ganhou ou perdeu. A distância é medida do centro da forma: medir do primeiro ponto fazia uma área que mudou parecer parada.
@@ -1479,29 +1479,29 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.30-02
 
 ### Corrigido
-- **O botão ↗ do card abria o WME em português para todo mundo.** O endereço tinha o idioma cravado, então quem usa a app em inglês, espanhol ou francês clicava e caía numa interface que não é a dele. Agora abre o endereço oficial (`waze.com/editor`) e o Waze escolhe o idioma pela sua conta — que é quem deve decidir.
+- **O botão ↗ do card abria o WME em português para todo mundo.** O endereço tinha o idioma cravado, então quem usa o app em inglês, espanhol ou francês clicava e caía numa interface que não é a dele. Agora abre o endereço oficial (`waze.com/editor`) e o Waze escolhe o idioma pela sua conta — que é quem deve decidir.
 
 ## v2026.07.30-01
 
 ### Adicionado
-- **A app fala francês.** Todas as 309 mensagens, do card aos diálogos, avisos e mensagens de erro. Quem tem o navegador em francês passa a cair no francês sozinho, e o idioma está nos dois seletores (Filtros → Preferências e a Ajuda, que funciona mesmo sem estar conectado). Como nos outros, é **um** francês — quem tem o navegador em qualquer variante cai no mesmo idioma, do mesmo jeito que português do Brasil e de Portugal caem em um só.
+- **O app fala francês.** Todas as 309 mensagens, do card aos diálogos, avisos e mensagens de erro. Quem tem o navegador em francês passa a cair no francês sozinho, e o idioma está nos dois seletores (Filtros → Preferências e a Ajuda, que funciona mesmo sem estar conectado). Como nos outros, é **um** francês — quem tem o navegador em qualquer variante cai no mesmo idioma, do mesmo jeito que português do Brasil e de Portugal caem em um só.
 
 ### Corrigido
-- **A app falava português com quem escolheu outro idioma sempre que dava erro.** Este é o mais sério da leva. As mensagens de erro nasciam prontas no servidor, em português, e a tela as mostrava direto — a tradução ao lado só era usada se o servidor não dissesse nada. Resultado: cookie recusado, sessão expirada, falha de conexão, código de pareamento errado ou pedido já tratado por outro editor apareciam **em português para quem usava a app em inglês, espanhol ou francês**. São 26 mensagens. Agora o servidor manda um código e quem escolhe a palavra é a app, no idioma de quem está lendo.
+- **O app falava português com quem escolheu outro idioma sempre que dava erro.** Este é o mais sério da leva. As mensagens de erro nasciam prontas no servidor, em português, e a tela as mostrava direto — a tradução ao lado só era usada se o servidor não dissesse nada. Resultado: cookie recusado, sessão expirada, falha de conexão, código de pareamento errado ou pedido já tratado por outro editor apareciam **em português para quem usava o app em inglês, espanhol ou francês**. São 26 mensagens. Agora o servidor manda um código e quem escolhe a palavra é o app, no idioma de quem está lendo.
 - **O aviso de acesso restrito também vinha em português** — e justamente para quem foi bloqueado, no momento em que a explicação mais importa. Ele repetia o seu perfil, que a tela já mostrava logo abaixo com os selos traduzidos.
-- **Escolher um idioma no seletor podia ser ignorado.** A app tinha uma lista fixa de idiomas aceitos, separada da lista de traduções: qualquer idioma novo era reconhecido pelo navegador mas descartado quando escolhido à mão, voltando calado para o idioma do sistema. As duas listas agora são a mesma coisa.
+- **Escolher um idioma no seletor podia ser ignorado.** O app tinha uma lista fixa de idiomas aceitos, separada da lista de traduções: qualquer idioma novo era reconhecido pelo navegador mas descartado quando escolhido à mão, voltando calado para o idioma do sistema. As duas listas agora são a mesma coisa.
 - **Números e datas em francês saíam no formato inglês.** O idioma não tinha formato próprio declarado e caía no padrão do inglês sem avisar.
-- **Mudança de posição no mapa aparecia como `[object Object]`.** Em toda a app, em qualquer idioma, desde sempre. Medido na fila de um editor de verdade: **33 de 142 pedidos** tinham mudança de geometria, e em todos eles a linha "Mudanças propostas" mostrava esse texto no lugar da coordenada. Agora mostra a coordenada (e, quando é uma área e não um ponto, também quantos vértices ela tem — sem isso, uma área que mudou nos outros cantos apareceria como se nada tivesse mudado).
+- **Mudança de posição no mapa aparecia como `[object Object]`.** Em todo o app, em qualquer idioma, desde sempre. Medido na fila de um editor de verdade: **33 de 142 pedidos** tinham mudança de geometria, e em todos eles a linha "Mudanças propostas" mostrava esse texto no lugar da coordenada. Agora mostra a coordenada (e, quando é uma área e não um ponto, também quantos vértices ela tem — sem isso, uma área que mudou nos outros cantos apareceria como se nada tivesse mudado).
 - **Quatro campos apareciam com o nome técnico do Waze** (`ExternalProviderIDs`, `Services`, `LockRank`, `CategoryAttributes`) porque não tinham tradução. Agora têm, nas quatro línguas.
-- **O nome, a descrição e os atalhos da app instalada estavam em português para todos.** O arquivo que o celular lê na instalação é o mesmo para o mundo inteiro, então não havia como traduzi-lo por pessoa: passou a ser neutro. Quem já instalou continua com o mesmo app (a identidade não mudou); o rótulo no celular acompanha na próxima atualização.
+- **O nome, a descrição e os atalhos do app instalado estavam em português para todos.** O arquivo que o celular lê na instalação é o mesmo para o mundo inteiro, então não havia como traduzi-lo por pessoa: passou a ser neutro. Quem já instalou continua com o mesmo app (a identidade não mudou); o rótulo no celular acompanha na próxima atualização.
 - **A lista de países era ordenada pela regra do português para todo mundo.** Ordenar agora acontece no idioma de quem está lendo. Medindo, ficou claro que hoje isso não muda nada visível — os nomes de país vêm do Waze **sempre em inglês**, e nenhuma das quatro línguas os ordena diferente. Fica certo para quando entrar um idioma que ordene de outro jeito.
 - **No celular mais estreito (dobrável de 280px), o card de reporte em francês passava a rolar por dentro** — o que desliga o gesto de "pular". O título da seção quebrava em duas linhas onde as outras línguas cabem em uma.
 
 ## v2026.07.29-06
 
 ### Adicionado
-- **A Ajuda agora tem "Privacidade e dados".** Em sete linhas: no servidor fica só o seu cookie do Waze, criptografado; nenhum dado de pedido é gravado em lugar nenhum; o prazo é de 21 dias ou até você sair; o que fica neste aparelho; que os seus cookies são credenciais e que a app nunca aprova nada; onde ela roda; e com quem falar para acessar ou apagar seus dados.
-- **O diálogo de "Sair" avisa que sair da app não desconecta você do Waze.** Os seus cookies continuam válidos lá — quem quiser encerrar de verdade precisa sair também no Waze Map Editor, e agora o link está ali.
+- **A Ajuda agora tem "Privacidade e dados".** Em sete linhas: no servidor fica só o seu cookie do Waze, criptografado; nenhum dado de pedido é gravado em lugar nenhum; o prazo é de 21 dias ou até você sair; o que fica neste aparelho; que os seus cookies são credenciais e que o app nunca aprova nada; onde ela roda; e com quem falar para acessar ou apagar seus dados.
+- **O diálogo de "Sair" avisa que sair do app não desconecta você do Waze.** Os seus cookies continuam válidos lá — quem quiser encerrar de verdade precisa sair também no Waze Map Editor, e agora o link está ali.
 
 ### Corrigido
 - **"Sair" com a internet fora não engana mais.** A limpeza do aparelho sempre aconteceu; a do servidor falhava em silêncio. Agora ela é tentada de novo e, se ainda assim não completar, você é avisado do que ficou pendente — e de que expira sozinho em até 21 dias.
@@ -1511,7 +1511,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.29-05
 
 ### Adicionado
-- **A app agora avisa quem nunca usa o "Desfazer".** Se você deixou passar 20 pedidos seguidos sem desfazer nenhum, ela conta que dá para desligar a espera de 3 segundos — uma vez só, num aviso no topo que abre a preferência com um toque. Antes, o único aviso aparecia no momento exato em que você cruzava a cota de liberação; quem já estava acima dela quando esse aviso foi criado nunca soube que a opção existia. Eram justamente os editores mais ativos — os que mais perdem tempo com a espera.
+- **O app agora avisa quem nunca usa o "Desfazer".** Se você deixou passar 20 pedidos seguidos sem desfazer nenhum, ele conta que dá para desligar a espera de 3 segundos — uma vez só, num aviso no topo que abre a preferência com um toque. Antes, o único aviso aparecia no momento exato em que você cruzava a cota de liberação; quem já estava acima dela quando esse aviso foi criado nunca soube que a opção existia. Eram justamente os editores mais ativos — os que mais perdem tempo com a espera.
 - **A Ajuda passou a dizer que a opção existe.** Era o lugar onde alguém curioso iria procurar, e não estava escrito lá.
 
 ## v2026.07.29-04
@@ -1522,14 +1522,14 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 - **Com o celular deitado, os botões passaram para baixo da foto.** Assim o texto recebe a altura inteira do card e para de rolar por dentro nos quatro tipos de pedido.
 
 ### Alterado
-- **O placar ficou mais enxuto em telas baixas**, devolvendo até 42px para o card — que é o produto da app. Os rótulos não encolheram: 11px é o piso de legibilidade.
+- **O placar ficou mais enxuto em telas baixas**, devolvendo até 42px para o card — que é o produto do app. Os rótulos não encolheram: 11px é o piso de legibilidade.
 
 ## v2026.07.29-03
 
 ### Adicionado
-- **A app agora convida você a instalá-la na tela inicial — na hora certa.** O convite aparece no **"Tudo limpo!"**, o único momento em que você terminou a fila e não há próximo pedido esperando. Em qualquer outro lugar ele disputaria com o gesto. Um toque em "Agora não" e ele não volta mais.
+- **O app agora convida você a instalá-lo na tela inicial — na hora certa.** O convite aparece no **"Tudo limpo!"**, o único momento em que você terminou a fila e não há próximo pedido esperando. Em qualquer outro lugar ele disputaria com o gesto. Um toque em "Agora não" e ele não volta mais.
 - **Quem usa iPhone finalmente tem um caminho.** O Safari nunca oferece o botão de instalar (no iOS a instalação é manual), então o convite mostra os dois passos: **Compartilhar → Adicionar à Tela de Início**. Antes, quem entrava pelo QR do pareamento — que empurra justamente para o celular — não tinha instrução nenhuma.
-- **Quem já instalou não é mais convidado.** A app passou a reconhecer que está rodando instalada, tanto no Android/desktop quanto no iPhone.
+- **Quem já instalou não é mais convidado.** O app passou a reconhecer que está rodando instalado, tanto no Android/desktop quanto no iPhone.
 
 ### Corrigido
 - **O "Tudo limpo!" não corta mais o convite em tela pequena.** Medido: no Galaxy Fold o botão de instalar ficava fora da tela e, com o celular deitado, os passos do iPhone — a instrução, no aparelho que não tem botão. Onde falta espaço, sai a decoração (o selo verde repete o ✓ que o título já diz) e fica a ação. Em último caso o painel rola, com o aviso de que há mais conteúdo abaixo.
@@ -1554,7 +1554,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 
 ### Alterado
 - **Pedido sem nome agora é identificado pelo endereço.** Antes o card estampava **"sem nome"** no maior texto da tela, e a única coisa que identificava o local — o endereço — ficava em cinza pequeno logo abaixo. Estava invertido. Agora o endereço ocupa o título, e um selo **SEM NOME** ao lado registra a falta, que continua sendo informação útil para decidir. Sem nome e sem endereço, aparece *(local sem nome)*.
-- **Dá para saber o que é dado e o que é a app falando.** Tudo que a app escreve no lugar de um valor ausente agora vem entre parênteses e em itálico esmaecido — *(desconhecido)*, *(sem categoria)*, *(sem endereço)*. Antes um local chamado "sem nome" era indistinguível de um local sem nome.
+- **Dá para saber o que é dado e o que é o app falando.** Tudo que o app escreve no lugar de um valor ausente agora vem entre parênteses e em itálico esmaecido — *(desconhecido)*, *(sem categoria)*, *(sem endereço)*. Antes um local chamado "sem nome" era indistinguível de um local sem nome.
 
 ## v2026.07.28-07
 
@@ -1565,13 +1565,13 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.28-06
 
 ### Segurança
-- **Um script injetado não consegue mais ler a sua sessão.** A app guarda o token de sessão no navegador e a política de segurança permitia executar script escrito direto na página — juntos, isso significava que uma única brecha bastava para roubar a sessão. Os dois blocos de script que estavam dentro do HTML viraram arquivos, e a política agora recusa script inline. Medido nos dois: no que está no ar, o script injetado executou e leu o token; agora é bloqueado.
+- **Um script injetado não consegue mais ler a sua sessão.** O app guarda o token de sessão no navegador e a política de segurança permitia executar script escrito direto na página — juntos, isso significava que uma única brecha bastava para roubar a sessão. Os dois blocos de script que estavam dentro do HTML viraram arquivos, e a política agora recusa script inline. Medido nos dois: no que está no ar, o script injetado executou e leu o token; agora é bloqueado.
 - **A tela não pisca claro para quem usa tema escuro** — conferido quadro a quadro numa carga lenta, antes e depois. E o primeiro desenho da tela continua no mesmo tempo (992ms contra 996ms, com rede e processador lentos).
 
 ## v2026.07.28-05
 
 ### Corrigido
-- **Fechar a app logo depois de tratar um pedido fazia a ação se perder — com o placar dizendo que ela aconteceu.** O "Desfazer" segura a ação por 3 segundos antes de mandar pro Waze, mas o contador já era somado e salvo na hora do gesto. Quem fechava a aba (ou trocava de app) nesses 3 segundos ficava com o pedido intacto no Waze e o número errado para sempre. Medido: **nenhuma** requisição chegava ao servidor. Agora a ação é despachada ao sair, e chega.
+- **Fechar o app logo depois de tratar um pedido fazia a ação se perder — com o placar dizendo que ela aconteceu.** O "Desfazer" segura a ação por 3 segundos antes de mandar pro Waze, mas o contador já era somado e salvo na hora do gesto. Quem fechava a aba (ou trocava de app) nesses 3 segundos ficava com o pedido intacto no Waze e o número errado para sempre. Medido: **nenhuma** requisição chegava ao servidor. Agora a ação é despachada ao sair, e chega.
 - **O aviso de "nova versão" falava português com todo mundo.** A tradução já existia nas três línguas; a mensagem simplesmente não a usava.
 
 ### Nota para quem edita o projeto
@@ -1580,7 +1580,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.28-04
 
 ### Corrigido
-- **A app falava português com quem escolheu inglês ou espanhol.** No card de atualização, os nomes dos campos (`Nome`, `Telefone`, `Descrição`) e os valores especiais (`(vazio)`, `Sim`/`Não`) vinham prontos do servidor, em português, no meio de uma interface traduzida. O mesmo com os tipos de pedido: um local novo aparecia como "Novo Local" em qualquer idioma. Agora tudo isso é traduzido de verdade nas três línguas. Termo que ainda não conhecemos continua aparecendo — em inglês, nunca escondido.
+- **O app falava português com quem escolheu inglês ou espanhol.** No card de atualização, os nomes dos campos (`Nome`, `Telefone`, `Descrição`) e os valores especiais (`(vazio)`, `Sim`/`Não`) vinham prontos do servidor, em português, no meio de uma interface traduzida. O mesmo com os tipos de pedido: um local novo aparecia como "Novo Local" em qualquer idioma. Agora tudo isso é traduzido de verdade nas três línguas. Termo que ainda não conhecemos continua aparecendo — em inglês, nunca escondido.
 - **Nenhuma mudança proposta fica mais escondida.** O card mostrava no máximo 4 e resumia o resto em "+N mais" — e essas não apareciam nem rolando. Agora a caixa lista todas; ela já rola e avisa que rola.
 - **A caixa que rola agora funciona com teclado e leitor de tela.** Ela é o único caminho para ver o resto das mudanças, mas não tinha nome nem lugar na ordem do Tab: só era alcançável por um recurso recente do Chrome, que o Safari/iPhone não tem.
 
@@ -1590,7 +1590,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.28-03
 
 ### Corrigido
-- **Reportes vinham em branco.** O card de um reporte mostrava só "Reporte (Sinalização)" e quem reportou — nem o motivo, nem o que foi reportado. O WME, no mesmo pedido, mostra "Foto sinalizada" e "Motivo da marcação: Inapropriado". A app lia apenas o campo de comentário livre, que quase sempre vem vazio; o motivo mora em outro campo, que ninguém lia desde a versão em PHP.
+- **Reportes vinham em branco.** O card de um reporte mostrava só "Reporte (Sinalização)" e quem reportou — nem o motivo, nem o que foi reportado. O WME, no mesmo pedido, mostra "Foto sinalizada" e "Motivo da marcação: Inapropriado". O app lia apenas o campo de comentário livre, que quase sempre vem vazio; o motivo mora em outro campo, que ninguém lia desde a versão em PHP.
 
 ### Adicionado
 - **O card diz o motivo do reporte** — "Inapropriado" e afins — em português, inglês e espanhol. Motivo que ainda não conhecemos aparece com o nome original, nunca é escondido.
@@ -1600,7 +1600,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.28-02
 
 ### Corrigido
-- **"Mudanças propostas" mostrava linhas que ninguém propôs.** Num pedido de atualização apareciam `Id` e `UpdatedOn` junto da mudança de verdade — o WME oficial mostra só a mudança. `Id` é a identificação do local (a mesma antes e depois) e `UpdatedOn` é o carimbo de "última modificação", que muda porque a edição acontece, não porque alguém pediu. Os dois vinham porque o Waze devolve o local inteiro com os valores novos, não só o que mudou. Reportado com o caso do *Estádio Gigante do Itiberê*, em Paranaguá: a app listava 3 mudanças, o editor do Waze listava 1.
+- **"Mudanças propostas" mostrava linhas que ninguém propôs.** Num pedido de atualização apareciam `Id` e `UpdatedOn` junto da mudança de verdade — o WME oficial mostra só a mudança. `Id` é a identificação do local (a mesma antes e depois) e `UpdatedOn` é o carimbo de "última modificação", que muda porque a edição acontece, não porque alguém pediu. Os dois vinham porque o Waze devolve o local inteiro com os valores novos, não só o que mudou. Reportado com o caso do *Estádio Gigante do Itiberê*, em Paranaguá: o app listava 3 mudanças, o editor do Waze listava 1.
 - **Isso podia esconder mudança de verdade.** O card mostra até 4 mudanças e resume o resto em "+N mais" — com duas linhas de ruído no meio, um pedido com 4 alterações reais mostrava só 2 delas.
 
 ## v2026.07.28-01
@@ -1627,7 +1627,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 
 ### Adicionado
 - **QR code para entrar no celular.** No computador, "Conectar outro aparelho" agora mostra um QR: aponte a câmera do celular e pronto — sem digitar código, sem decorar caminho de menu, sem decidir como mandar o link pra você mesmo. O código de 6 caracteres continua ali embaixo para quem não tem câmera à mão.
-- **A tela de entrada no celular agora diz o que é preciso.** Quem abre a app direto no telefone, sem nunca ter entrado num computador, não tinha caminho nenhum — e a app não avisava: a pessoa tentava as três opções, falhava nas três e achava que o erro era dela. Agora a primeira coisa que aparece é: *a sessão começa num computador*.
+- **A tela de entrada no celular agora diz o que é preciso.** Quem abre o app direto no telefone, sem nunca ter entrado num computador, não tinha caminho nenhum — e o app não avisava: a pessoa tentava as três opções, falhava nas três e achava que o erro era dela. Agora a primeira coisa que aparece é: *a sessão começa num computador*.
 
 ### Alterado
 - **Os textos do pareamento encolheram.** Cada tela explicava o que fazer no outro aparelho, que não está na sua frente. Com o QR, quase não sobra o que explicar.
@@ -1640,7 +1640,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.27-12
 
 ### Alterado
-- **O placar (Lidos · Rejeitados · Pulados · Restam) ficou mais enxuto e o card cresceu.** O produto da app é o card, e cada pixel acima dele era pixel a menos de foto. O placar foi de 87 para 67px e o espaço morto ao redor caiu junto — no total, **44px a mais de card** em toda tela. Os números continuam grandes e empilhados: o placar segue legível de relance.
+- **O placar (Lidos · Rejeitados · Pulados · Restam) ficou mais enxuto e o card cresceu.** O produto do app é o card, e cada pixel acima dele era pixel a menos de foto. O placar foi de 87 para 67px e o espaço morto ao redor caiu junto — no total, **44px a mais de card** em toda tela. Os números continuam grandes e empilhados: o placar segue legível de relance.
   - Num notebook 1366×768, o card foi de 533 para **577px**.
   - Num iPhone SE, a rolagem da página caiu de 102 para **58px**; no celular deitado, de 177 para **133px**.
 
@@ -1667,12 +1667,12 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ### Corrigido
 - **O código de pareamento aparecia de um jeito e era pedido de outro.** A tela mostrava `6C4-97S` e o campo sugeria `ABC123`, sem hífen — dava pra ficar na dúvida se o traço entrava ou não. Agora o campo assume o mesmo formato: digitou 3 caracteres, o traço entra sozinho. Tanto faz digitar com ou sem ele, e colar direto o que está na tela funciona.
 - **"Marcar em lote" perguntava uma coisa e o botão dizia outra** ("Marcar como lido os N pedidos?" com botão "Marcar lidos"). O botão agora repete o verbo da pergunta.
-- **A tela de sair falava em "dispositivo"** enquanto o resto da app fala em "aparelho".
+- **A tela de sair falava em "dispositivo"** enquanto o resto do app fala em "aparelho".
 
 ## v2026.07.27-08
 
 ### Alterado
-- **Quem não fala português, inglês ou espanhol agora vê a app em inglês** (antes via em português). A mudança não afeta ninguém que já era atendido — brasileiro, americano e hispano-falante continuam vindo da detecção do navegador. Ela vale só para o resto: francês, alemão, italiano, japonês, russo, holandês, chinês.
+- **Quem não fala português, inglês ou espanhol agora vê o app em inglês** (antes via em português). A mudança não afeta ninguém que já era atendido — brasileiro, americano e hispano-falante continuam vindo da detecção do navegador. Ela vale só para o resto: francês, alemão, italiano, japonês, russo, holandês, chinês.
 
 ### Adicionado
 - **Dá pra trocar o idioma sem estar logado.** O seletor existia só em Filtros → Preferências, e o botão de Filtros só aparece depois de entrar — ou seja, quem caísse num idioma que não lê precisaria fazer login lendo instruções que não entende. Agora há um seletor também no menu de Ajuda (ⓘ), que fica visível o tempo todo. Os dois ficam em sincronia.
@@ -1680,7 +1680,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.27-07
 
 ### Alterado
-- **Passamos a app inteira pela régua de acessibilidade (Material Design 3 + Apple HIG)** e ajustamos tudo que não passava, em 5 aparelhos × 13 telas × claro/escuro × pt/en/es:
+- **Passamos o app inteiro pela régua de acessibilidade (Material Design 3 + Apple HIG)** e ajustamos tudo que não passava, em 5 aparelhos × 13 telas × claro/escuro × pt/en/es:
   - **Botões coloridos ficaram legíveis.** "Aplicar", "Entrar", "Confirmar" e os botões da tela de entrada tinham texto branco sobre um azul claro demais — a leitura ficava fraca especialmente no sol. Agora o fundo é mais fundo no tema claro e, no escuro, o botão fica claro com texto escuro.
   - **Nenhum texto abaixo de 11px**, e todos os tamanhos passaram a acompanhar a preferência de tamanho de fonte do seu celular (antes alguns ficavam fixos e ignoravam esse ajuste).
   - **Mais respiro entre os botões do topo**, pra diminuir toque errado.
@@ -1699,7 +1699,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.27-05
 
 ### Alterado
-- **A versão saiu do rodapé e foi pro fim do menu de Ajuda (ⓘ).** O rodapé fixo custava 40px de rolagem em toda tela e não deixava o card nem um pixel maior. Num iPhone 14 Pro esses 40px eram **65% de toda a rolagem da página** — agora a app praticamente não rola, e rolar deixa de disputar com o gesto de "pular". O ⓘ está no topo mesmo sem estar logado, então continua fácil dizer que versão você está usando.
+- **A versão saiu do rodapé e foi pro fim do menu de Ajuda (ⓘ).** O rodapé fixo custava 40px de rolagem em toda tela e não deixava o card nem um pixel maior. Num iPhone 14 Pro esses 40px eram **65% de toda a rolagem da página** — agora o app praticamente não rola, e rolar deixa de disputar com o gesto de "pular". O ⓘ está no topo mesmo sem estar logado, então continua fácil dizer que versão você está usando.
 
 ### Corrigido
 - **O Modo Desenvolvedor era impossível de desbloquear.** Os 7 toques na versão nunca chegavam ao fim: o aviso "faltam 3 toques" aparecia por cima da própria versão e passava a receber os toques no lugar dela — em qualquer aparelho, desde sempre. Agora o aviso aparece **ao lado** da versão.
@@ -1756,10 +1756,10 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 - **Selos de gesto no card.** Arrastando, aparece um carimbo dizendo o que vai acontecer: **✕ Rejeitar**, **✓ Lido** ou **↑ Pular**, na cor do gesto e crescendo conforme você se compromete. O "Pular" (arrastar pra cima) era o único gesto **sem nenhum retorno visual** — agora tem. Os botões e o teclado também acendem o selo, então o mesmo gesto dá o mesmo retorno por qualquer caminho.
 - **Mola na entrada do card.** O próximo pedido sobe com um leve pulo, em vez de simplesmente aparecer.
 - **Números que reagem.** O contador dá um pulinho quando muda (é o que se vê num +1) e conta subindo quando o salto é grande (a fila carregando de 0 a 191).
-- **Comemoração no "Tudo limpo!"** — confete quando você zera a fila. Só toca se você de fato tratou algo na sessão: abrir a app numa fila já vazia não é conquista.
+- **Comemoração no "Tudo limpo!"** — confete quando você zera a fila. Só toca se você de fato tratou algo na sessão: abrir o app numa fila já vazia não é conquista.
 
 ### Corrigido
-- **O card não voltava mais pro português.** Quem usava a app em inglês ou espanhol via o card inteiro (Categorias, Endereço, Tipo, Criador, botões) reverter pro português **a cada swipe**. São 25 textos no elemento mais importante da tela. Causa: o card é montado a partir de um molde que o tradutor não alcançava.
+- **O card não voltava mais pro português.** Quem usava o app em inglês ou espanhol via o card inteiro (Categorias, Endereço, Tipo, Criador, botões) reverter pro português **a cada swipe**. São 25 textos no elemento mais importante da tela. Causa: o card é montado a partir de um molde que o tradutor não alcançava.
 
 ### Sobre o ritmo
 - Nenhuma dessas animações entra **entre** o seu swipe e o próximo card. Todas rodam em cima de tempo que já ia ser gasto de qualquer jeito — o backlog continua sendo limpo na mesma velocidade. Quem usa o sistema com "reduzir movimento" ligado não vê animação nenhuma; os selos continuam aparecendo, porque ali é informação e não enfeite.
@@ -1767,7 +1767,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.25-01
 
 ### Corrigido
-- **A data no rodapé estava errada.** As duas versões publicadas em 25/07 saíram carimbadas como `2026.07.24` — a revisão foi incrementada sem reconferir o dia. Como o número serve justamente pra dizer *de quando* é a versão que está no seu celular, ele estava mentindo. Nenhuma mudança de comportamento na app; só o carimbo corrigido.
+- **A data no rodapé estava errada.** As duas versões publicadas em 25/07 saíram carimbadas como `2026.07.24` — a revisão foi incrementada sem reconferir o dia. Como o número serve justamente pra dizer *de quando* é a versão que está no seu celular, ele estava mentindo. Nenhuma mudança de comportamento no app; só o carimbo corrigido.
 
 ### Sobre a versão anterior (v2026.07.24-03, publicada em 25/07)
 - Liberado na política de segurança (CSP) o script de analytics que o Cloudflare injeta. Antes ele era bloqueado: sobrava um erro no console a cada carregamento e nenhuma estatística coletada.
@@ -1775,13 +1775,13 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.24-02
 
 ### Adicionado
-- **Contador "de N na região"** abaixo de *Restam*: aparece quando existem pedidos na sua região que você **não tem permissão de editar**. Eles nunca entraram na fila (a app não mostra card que você não consegue tratar), mas até agora sumiam sem explicação — a diferença pro número do WME parecia um bug. Passe o mouse/toque pra ver quantos são.
-- **Atalhos na PWA**: segurando o ícone da app aparecem *Filtros* e *Atualizar*, que abrem direto na ação.
-- **Screenshots no instalador**: a tela de instalação da PWA agora mostra prévias da app.
+- **Contador "de N na região"** abaixo de *Restam*: aparece quando existem pedidos na sua região que você **não tem permissão de editar**. Eles nunca entraram na fila (o app não mostra card que você não consegue tratar), mas até agora sumiam sem explicação — a diferença pro número do WME parecia um bug. Passe o mouse/toque pra ver quantos são.
+- **Atalhos na PWA**: segurando o ícone do app aparecem *Filtros* e *Atualizar*, que abrem direto na ação.
+- **Screenshots no instalador**: a tela de instalação da PWA agora mostra prévias do app.
 
 ### Alterado
 - **Tailwind pré-compilado**: o CSS deixou de ser gerado no seu navegador a cada carregamento. São **407 KB a menos** pra baixar e nada de compilar no celular. Como efeito colateral de segurança, a política de conteúdo (CSP) não precisa mais liberar `unsafe-eval`.
-- **Fonte Inter auto-hospedada**: a app não busca mais nada no Google Fonts — carrega mais rápido, funciona offline de verdade e para de vazar sua visita pra um terceiro.
+- **Fonte Inter auto-hospedada**: o app não busca mais nada no Google Fonts — carrega mais rápido, funciona offline de verdade e para de vazar sua visita pra um terceiro.
 
 ### Interno
 - Dark mode migrado dos overrides globais com `!important` para variantes `dark:` por elemento. Refactor puro, validado por comparação de captura de tela pixel a pixel (light e dark, incluindo estados de *hover*): **nenhuma mudança visual**.
@@ -1789,7 +1789,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 ## v2026.07.24-01
 
 ### Corrigido
-- **Places que voltavam mesmo depois de marcados como lidos** (Batalhão PMDF, Padaria do Moinho, Praia de Tarituba e outros). O filtro de "não lidos" do Waze é por *local*, não por *pedido*: bastava um pedido irmão invisível na app (ex.: alteração de categoria) pra o local inteiro voltar, e a app re-emitia a foto **já lida** como card novo. Agora pedido já lido nunca vira card de novo.
+- **Places que voltavam mesmo depois de marcados como lidos** (Batalhão PMDF, Padaria do Moinho, Praia de Tarituba e outros). O filtro de "não lidos" do Waze é por *local*, não por *pedido*: bastava um pedido irmão invisível no app (ex.: alteração de categoria) pra o local inteiro voltar, e o app re-emitia a foto **já lida** como card novo. Agora pedido já lido nunca vira card de novo.
 
 ### Alterado
 - Modal **Filtros e Preferências** reorganizado em 3 abas (*Filtros* · *Preferências* · *Histórico*), com rodapé contextual. Preferências (idioma, desfazer, modo dev) passam a valer **na hora** — antes, trocar o botão e fechar no X perdia a mudança em silêncio.
@@ -1822,7 +1822,7 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 - Sessões com **AES-256-GCM**; cookies do Waze nunca mais trafegam depois do login.
 
 ### Corrigido
-- **Login falhando com HTTP 400**: a app mandava *todos* os cookies do navegador (~30 KB, 41 domínios) pro Waze. Agora só os de `waze.com` — corrige o login e para de vazar credenciais de terceiros.
+- **Login falhando com HTTP 400**: o app mandava *todos* os cookies do navegador (~30 KB, 41 domínios) pro Waze. Agora só os de `waze.com` — corrige o login e para de vazar credenciais de terceiros.
 
 ## Versões anteriores (2.x)
 
@@ -1832,4 +1832,4 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 - Um card por **pedido**, não por local — fim da primeira encarnação do bug "place volta".
 - Carrossel completo nas fotos, com a foto nova destacada.
 - Correção de "F5 não atualiza no celular": alinhamento das três camadas de cache (service worker, cache do navegador e servidor).
-- Categorização de corrida entre editores: quando outro editor trata o mesmo pedido antes, a app mostra "já tratado por outro editor 👍" em vez de erro.
+- Categorização de corrida entre editores: quando outro editor trata o mesmo pedido antes, o app mostra "já tratado por outro editor 👍" em vez de erro.

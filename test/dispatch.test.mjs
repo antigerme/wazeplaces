@@ -132,7 +132,7 @@ test('dispatch marcar-lido: race do Waze (500 + code 300) vira already_processed
 });
 
 test('dispatch validar-place: aprovar só quando pedido EXPLICITAMENTE', async () => {
-  // Este teste guardava a regra "a app NUNCA aprova". A regra mudou por decisão
+  // Este teste guardava a regra "o app NUNCA aprova". A regra mudou por decisão
   // do owner — foto é o caso em que aprovar não exige ajuste no mapa, porque
   // não há campo pra corrigir: ou serve ou não serve, e está tudo na tela.
   //
@@ -168,7 +168,7 @@ test('dispatch: rota é o nome EXATO — nada de sufixo tolerado', async () => {
   assert.equal((await dispatch('nao-existe', {}, { sessions: null })).status, 404);
 
   // O `.php` era resíduo da v2.x (backend PHP) e vivia como tolerância no
-  // dispatch, pra cache antigo. Removido: a app está em dev/testes, não há
+  // dispatch, pra cache antigo. Removido: o app está em dev/testes, não há
   // cliente velho pra atender, e tolerância silenciosa esconde erro de rota.
   const { resultado } = await comFetchMockado(
     () => ok(wazePayload()),
@@ -177,7 +177,7 @@ test('dispatch: rota é o nome EXATO — nada de sufixo tolerado', async () => {
 });
 
 // ─── Pareamento computador → celular ────────────────────────────────────────
-// Resolve o gargalo real da app: copiar cookies num celular é inviável. O
+// Resolve o gargalo real do app: copiar cookies num celular é inviável. O
 // editor loga no computador e traz a sessão por um código curto e efêmero.
 test('dispatch parear: create exige sessão; claim entrega sessão NOVA', async () => {
   const { ctx, token } = await ctxComSessao();

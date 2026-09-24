@@ -8,7 +8,7 @@
 // `hidden` de `overflow-hidden` e deu "esqueleto escondido" com ele VISÍVEL, e
 // contar `class="place-card` no `dom` contou o card do `<template>` e deu "dois
 // cards da frente". Leitor único é onde a lição fica: aqui ninguém vasculha o
-// `dom` — lê-se o que a app JÁ MEDIU (alertas, `cardMontado`, `telaDoCard`),
+// `dom` — lê-se o que o app JÁ MEDIU (alertas, `cardMontado`, `telaDoCard`),
 // que é pra isso que as medições existem.
 //
 // O QUE NUNCA SAI, por construção:
@@ -82,7 +82,7 @@ else {
   if (off.ligado) out(`pousos gravados depois da fila guardada: ${off.pousosGravados === undefined ? AUSENTE : off.pousosGravados}`);
 }
 
-// Só os NÚMEROS que a app mediu (`resumo.saida`). O conteúdo da fila de saída
+// Só os NÚMEROS que o app mediu (`resumo.saida`). O conteúdo da fila de saída
 // (ids e o autor de cada pedido) mora no localStorage, que este leitor não lê.
 secao('FILA DE SAÍDA');
 const sa = r.saida;
@@ -94,28 +94,28 @@ else {
 }
 
 // A presença no mapa do WME (fase 2, `resumo.presencaWme`): só números e
-// estados que a app mediu — nenhuma posição sai daqui.
+// estados que o app mediu — nenhuma posição sai daqui.
 secao('PRESENÇA NO WME');
 const pw = r.presencaWme;
 if (pw === undefined) out(AUSENTE);
 else if (pw.erro) out('erro ao medir: ' + pw.erro);
 else {
   // `visto` só existe em relatório de antes de v2026.09.24-02, quando o WME
-  // ainda podia desligar a presença da app.
+  // ainda podia desligar a presença do app.
   out(`ligada ${pw.ligada}${pw.visto !== undefined ? ` · já vista ligada ${pw.visto}` : ''} · ligar na próxima ação ${pw.ligarNaProxima} · escritas ${pw.enviadas} · falhas ${pw.falhas}${pw.ultimaFalha ? ` (última: ${pw.ultimaFalha})` : ''} · última escrita há ${pw.ultimaHaS ?? '—'} s`);
-  if (pw.marcaPerdida) out('ATENÇÃO: o Waze devolveu a posição SEM a marca da app — a lista de quem está na app vai vir vazia.');
+  if (pw.marcaPerdida) out('ATENÇÃO: o Waze devolveu a posição SEM a marca do app — a lista de quem está no app vai vir vazia.');
 }
 
-// A lista e o chat da app (fase 3, `resumo.presencaApp`): só contagens e
+// A lista e o chat do app (fase 3, `resumo.presencaApp`): só contagens e
 // estados — nome, texto e token nunca vão pro relatório.
-secao('PRESENÇA NA APP (lista e conversa)');
+secao('PRESENÇA NO APP (lista e conversa)');
 const pa = r.presencaApp;
 if (pa === undefined) out(AUSENTE);
 else if (!pa) out('sem a presença carregada');
 else if (pa.erro) out('erro ao medir: ' + pa.erro);
 else {
   const f = pa.fluxo || {};
-  out(`ligada ${pa.ligada} · na app ${pa.online} · conversas ${pa.conversas} · não lidas ${pa.naoLidas} · lista de há ${pa.atualizadaHaS ?? '—'} s · conversa aberta ${pa.conversaAberta}`);
+  out(`ligada ${pa.ligada} · no app ${pa.online} · conversas ${pa.conversas} · não lidas ${pa.naoLidas} · lista de há ${pa.atualizadaHaS ?? '—'} s · conversa aberta ${pa.conversaAberta}`);
   out(`token ${pa.token ? `válido ${pa.token.valido} (vence em ${pa.token.expiraEmH ?? '?'} h)` : 'nenhum'} · tempo real aberto ${f.aberto}${f.aberto ? ` há ${f.haS} s` : ''} · aberturas ${f.aberturas} · quadros ${f.quadros} · mensagens ${f.mensagens} · recibos ${f.recibos} · recuo ${f.tentativa}${f.ultimoErro ? ` · último erro: ${f.ultimoErro}` : ''}`);
   out(`conhecidas no aparelho ${pa.conhecidos} · a confirmar ${pa.aConfirmar}`);
   if (pa.ligada && pa.token && !pa.token.valido) out('ATENÇÃO: o token do tempo real venceu — mensagem nova só aparece no próximo pedido.');
@@ -170,7 +170,7 @@ if (!momentos.length) out('(nenhuma)');
 for (const m of momentos) linhasDaCaptura(m);
 
 // As aberturas ANTERIORES que ficaram guardadas no aparelho (só com o modo dev
-// ligado nelas) — é onde mora o defeito que atravessa fechar e reabrir a app.
+// ligado nelas) — é onde mora o defeito que atravessa fechar e reabrir o app.
 // As mesmas regras do resto: nada de `dom`, nenhum corpo de chamada (que nem
 // chega a ser guardado), e o token trocado no fim.
 const quando = (t) => {

@@ -8,7 +8,7 @@ Uso:
 Deps:
     pip install weasyprint markdown pygments
 
-Paleta cyan combinando com a app (#33CCFF). A4, 12pt-ish, footer com
+Paleta cyan combinando com o app (#33CCFF). A4, 12pt-ish, footer com
 numeração de página. Tabelas, code blocks com syntax highlight, blockquotes.
 """
 import sys

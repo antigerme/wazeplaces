@@ -1,8 +1,8 @@
 // A ordem da fila, e a invariante que ela quase derrubou.
 //
-// O contrato que o resto da app inteira assume: **o card na tela é sempre o
+// O contrato que o resto do app inteiro assume: **o card na tela é sempre o
 // `queue[0]`**. `advanceQueue` remove o TOPO (`shift()`), mas a ação é enviada
-// pro `currentPlace` — divergindo os dois, a app trata o que você vê e apaga
+// pro `currentPlace` — divergindo os dois, o app trata o que você vê e apaga
 // OUTRO da fila, que some sem ser tratado, enquanto o seu volta na sua frente
 // depois. MEDIDO no navegador nas três ordens (recentes, antigos, perto de
 // casa). O aquecimento é a segunda vítima da mesma causa: ele mira no
@@ -69,7 +69,7 @@ test('a flag nasce declarada e morre no resetQueue', () => {
 test('a assinatura de busca é por EXCLUSÃO, não por lista de inclusão', () => {
   // Esta é a parte que decide se um filtro NOVO vai continuar rebuscando. Com
   // lista de inclusão, quem adicionasse um campo e esquecesse de somá-lo aqui
-  // faria a app parar de ir ao Waze — em silêncio, e só pra esse filtro.
+  // faria o app parar de ir ao Waze — em silêncio, e só pra esse filtro.
   const corpo = fatiar('assinaturaDeBusca');
   assert.match(corpo, /const \{ sortOrder, \.\.\.doServidor \} = AppState\.filters;/,
     'a assinatura deixou de ser "tudo menos a ordem" — filtro novo pode nascer sem re-busca');

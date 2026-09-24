@@ -6,7 +6,7 @@
 // POR QUE ISTO EXISTE. O `background_color` do manifest é UM valor só — o W3C
 // não tem variante por esquema de cor (issue #1045, aberta) e o origin trial do
 // Chrome ("Dark mode support for web apps", 109–114) era só desktop e nunca
-// virou recurso. Então no Android a splash é uma cor fixa, e o máximo que a app
+// virou recurso. Então no Android a splash é uma cor fixa, e o máximo que o app
 // faz é escolher a cor certa. O iOS é o único lugar onde dá pra entregar o que
 // o owner pediu de verdade: `apple-touch-startup-image` aceita
 // `prefers-color-scheme` no `media`, então existe uma splash clara e uma escura,
@@ -15,7 +15,7 @@
 // AS CORES NÃO SÃO DIGITADAS AQUI. Saem das duas <meta name="theme-color"> do
 // index.html, que o `test/layout.test.mjs` já amarra ao fundo do `body.dark`.
 // Digitar a cor de novo seria o terceiro lugar pra ela divergir — e divergência
-// de cor de splash é silenciosa: ninguém abre a app pra conferir o flash.
+// de cor de splash é silenciosa: ninguém abre o app pra conferir o flash.
 //
 // O ÍCONE TAMBÉM NÃO É REDESENHADO: a página carrega `icons/icon-512.svg`, o
 // mesmo arquivo do manifest. Splash com logo diferente do ícone instalado é a
@@ -38,7 +38,7 @@ const SAIDA = join(ROOT, 'icons', 'splash');
 // e é essa trinca que o `media` do link precisa casar EXATAMENTE — o iOS não
 // aproxima. Tamanho sem link não é usado; link sem arquivo é splash branca.
 //
-// Só retrato: a app é de triagem no celular, e o iOS pede um arquivo por
+// Só retrato: o app é de triagem no celular, e o iOS pede um arquivo por
 // orientação. Paisagem sem imagem cai no comportamento de hoje (fundo do
 // `background_color`), que já não é branco desde v2026.08.11-01.
 export const APARELHOS_IOS = [

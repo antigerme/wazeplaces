@@ -1,6 +1,6 @@
-// O DIAGNÓSTICO QUE SOBREVIVE A FECHAR A APP (v2026.09.22-06).
+// O DIAGNÓSTICO QUE SOBREVIVE A FECHAR O APP (v2026.09.22-06).
 //
-// Relato do owner: capturou o defeito com o botão duas vezes, fechou a app,
+// Relato do owner: capturou o defeito com o botão duas vezes, fechou o app,
 // reabriu — e o número sumiu. Capturas, diário, chamadas e erros viviam só em
 // memória. E o defeito daquele dia só existia ATRAVESSANDO um fechar e
 // reabrir: a prova de antes de fechar era exatamente o que sumia.
@@ -221,7 +221,7 @@ test('o relatório leva as aberturas anteriores, e o resumo acusa o que elas cap
 
 test('a Ajuda diz a verdade sobre o que fica no aparelho, nos 4 idiomas', () => {
   // A frase dizia "não são gravados em lugar nenhum" enquanto o offline já
-  // guardava a fila e o mapa — e o modo dev passou a guardar capturas. A app
+  // guardava a fila e o mapa — e o modo dev passou a guardar capturas. O app
   // não mente sobre si (é a mesma régua do `help.privacy.zeroKnowledge`): a
   // frase cita o NOME que a tela usa pra cada exceção, e o prazo do CÓDIGO.
   const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');

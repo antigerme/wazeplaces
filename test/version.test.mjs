@@ -116,7 +116,7 @@ test('DICA_SEM_UNDO é derivado do tempo, não um literal', () => {
   const janela = Number(src.match(/const\s+UNDO_WINDOW_MS\s*=\s*(\d+)/)?.[1]);
   assert.ok(Number.isFinite(orcamento) && Number.isFinite(janela), 'não achei as duas constantes');
 
-  // O que a app promete é o MINUTO — não o 20. Mudar isto é decisão de produto,
+  // O que o app promete é o MINUTO — não o 20. Mudar isto é decisão de produto,
   // e o teste existe pra forçar que seja deliberada.
   assert.equal(orcamento, 60000, 'o orçamento da dica é um minuto de espera desperdiçada');
 

@@ -1,4 +1,4 @@
-// A presença no mapa do WME, do lado da app (fase 2): a posição do card vai de
+// A presença no mapa do WME, do lado do app (fase 2): a posição do card vai de
 // carona na ação, com freio, e a visibilidade liga sozinha — respeitando quem
 // desligou, inclusive pelo próprio WME.
 //
@@ -48,7 +48,7 @@ function escopoDaAcao(sobre = {}) {
     API: { getCountry: () => 30 },
     navigator: { onLine: sobre.onLine ?? true },
     Date: sobre.Date || Date,
-    // A presença da app (fase 3): quais conversas o aparelho conhece.
+    // A presença do app (fase 3): quais conversas o aparelho conhece.
     window: { Presenca: { conhecidos: () => (sobre.conhecidos ?? []) } },
   };
 }
@@ -64,7 +64,7 @@ test('ação: a posição é a do card NA TELA, [lat, lon] na ordem certa, com o
 
 test('ação: as conversas que o aparelho conhece vão JUNTO — e só quando existem', () => {
   // Fase 3: a lista de conversas volta de carona, e ela só inclui as que foram
-  // respondidas pelo WME (sem a marca da app) se o aparelho disser quais conhece.
+  // respondidas pelo WME (sem a marca do app) se o aparelho disser quais conhece.
   const com = montar('presencaWmeDaAcao', escopoDaAcao({ conhecidos: ['183164343', '600'] }))(CARD);
   assert.deepEqual(com.conhecidos, ['183164343', '600']);
   const sem = montar('presencaWmeDaAcao', escopoDaAcao({ conhecidos: [] }))(CARD);
@@ -170,7 +170,7 @@ test('resposta: ligou de carona → para de pedir pra ligar, sem gravar preferê
   f({ visivel: true }, { success: true, presenca: { ok: true, marca: true } });
   assert.equal(presencaWme.ligarNaProxima, false);
   // Até v2026.09.24-01 isto gravava o "já vista ligada", que era o que deixava o
-  // WME desligar a presença da app depois. A regra saiu (decisão do owner).
+  // WME desligar a presença do app depois. A regra saiu (decisão do owner).
   assert.equal(salvos.length, 0, 'a resposta da carona voltou a gravar preferência');
   assert.deepEqual(escopo.AppState.preferences, {}, 'a resposta da carona mexeu nas preferências');
   f({}, { presenca: { ok: true, marca: false } });
@@ -190,7 +190,7 @@ test('resposta: ligou de carona → para de pedir pra ligar, sem gravar preferê
   assert.equal(p2.ligarNaProxima, true);
 });
 
-test('resposta: a lista da app que voltou de carona vai pra presença, com o instante da SAÍDA', () => {
+test('resposta: a lista do app que voltou de carona vai pra presença, com o instante da SAÍDA', () => {
   // O instante é o de quando a carona saiu (`ultimaEm`): mensagem que chegou ao
   // vivo DEPOIS disso a lista ainda não contou, e a presença não pode apagá-la.
   const chamadas = [];
@@ -246,12 +246,12 @@ test('perfil: invisível no WME → liga sozinha, de carona na próxima ação, 
   assert.equal(r.fatos.length, 0);
 });
 
-// Decisão do owner (2026-09-24): quem decide a presença na app é SÓ o "Ver quem
-// está na app", e por padrão a pessoa aparece (a comunidade decidiu assim). Até
-// v2026.09.24-01, invisível no WME DEPOIS de a app já a ter visto ligada
+// Decisão do owner (2026-09-24): quem decide a presença no app é SÓ o "Ver quem
+// está no app", e por padrão a pessoa aparece (a comunidade decidiu assim). Até
+// v2026.09.24-01, invisível no WME DEPOIS de o app já a ter visto ligada
 // desligava o interruptor por 9 dias. O marcador daquela regra (`presencaWmeVisto`)
 // ainda pode estar gravado num aparelho, e é com ele que o caso se prova.
-test('perfil: invisível no WME DEPOIS de a app já tê-la ligado → o WME não desliga a app; a próxima ação religa', () => {
+test('perfil: invisível no WME DEPOIS de o app já tê-la ligado → o WME não desliga o app; a próxima ação religa', () => {
   const r = rodarPerfil(false, { presenca: true, presencaWmeVisto: true });
   assert.equal(r.preferences.presenca, true, 'o WME desligou o "Ver quem está no app"');
   assert.ok(!('presencaOffEm' in r.preferences), 'o WME carimbou um desligar que a pessoa não fez');
@@ -262,7 +262,7 @@ test('perfil: invisível no WME DEPOIS de a app já tê-la ligado → o WME não
   assert.equal(r.salvos.length, 0, 'o perfil gravou preferência');
 });
 
-test('perfil: com a presença DESLIGADA na app, nada muda; e sem o campo (servidor antigo), nada se decide', () => {
+test('perfil: com a presença DESLIGADA no app, nada muda; e sem o campo (servidor antigo), nada se decide', () => {
   for (const v of [true, false]) {
     const r = rodarPerfil(v, { presenca: false, presencaOffEm: 5 });
     assert.equal(r.presencaWme.ligarNaProxima, false);
@@ -310,14 +310,14 @@ test('perfil e sair: o perfil decide a visibilidade; o "Sair" zera o freio e os 
   assert.match(sair, /presencaWmeZerar\(\);/, 'o "Sair" deixa o freio de quem saiu pra quem entra');
 });
 
-test('o WME não desliga a app: nenhum código lê o marcador antigo, e o perfil não mexe no interruptor', () => {
-  // A regra do "se escondeu fora da app" (até v2026.09.24-01) morava no
+test('o WME não desliga o app: nenhum código lê o marcador antigo, e o perfil não mexe no interruptor', () => {
+  // A regra do "se escondeu fora do app" (até v2026.09.24-01) morava no
   // `presencaWmeVisto`. Ele voltar a ser lido ou escrito é ela voltando.
   assert.doesNotMatch(semComentario(APP), /presencaWmeVisto/, 'o marcador da regra que saiu voltou ao código');
   const perfil = semComentario(fatiarFuncao(APP, 'presencaWmeAoCarregarPerfil'));
   for (const [re, msg] of [
     // Atribuição, não a comparação `=== false` que o perfil faz de propósito.
-    [/\.presenca\s*=(?!=)/, 'o perfil do WME escreve no interruptor da app'],
+    [/\.presenca\s*=(?!=)/, 'o perfil do WME escreve no interruptor do app'],
     [/presencaOffEm/, 'o perfil do WME carimba um desligar'],
     [/savePreferences\(/, 'o perfil do WME grava preferência'],
   ]) assert.doesNotMatch(perfil, re, msg);

@@ -5,7 +5,7 @@
 //
 // POR QUE ISTO EXISTE. O `diag-tela.mjs` remonta uma FOTO do momento (DOM
 // congelado, sem JS, sem rede) e responde "o que ele via". Esta ferramenta
-// responde outra pergunta: "e se eu mexer?". Ela sobe a app de verdade, injeta a
+// responde outra pergunta: "e se eu mexer?". Ela sobe o app de verdade, injeta a
 // fila, os filtros, o perfil, o tema e o idioma DELE, no viewport DELE — e a
 // partir daí dá pra abrir modal, arrastar card, medir geometria, rodar o
 // coletor do diagnóstico ou tirar um antes/depois de uma correção.
@@ -143,7 +143,7 @@ if (args.includes('--tela')) {
   await browser.close();
   parar();
 } else {
-  console.log(`\napp viva em http://127.0.0.1:${PORTA}/ com o estado dele.`);
+  console.log(`\napp vivo em http://127.0.0.1:${PORTA}/ com o estado dele.`);
   console.log('Ctrl+C encerra (o servidor cai junto).');
   await new Promise(() => {});
 }

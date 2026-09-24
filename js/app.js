@@ -10,7 +10,7 @@ const LANG_KEY = 'waze_places_lang';
 const HISTORY_KEY = 'waze_places_history';
 const SESSAO_KEY = 'waze_places_sessao_expira';
 // Rank e staff do último perfil que CARREGOU. Não é preferência — é memória do
-// que o Waze já respondeu, e existe por um motivo medido: sem ela, abrir a app
+// que o Waze já respondeu, e existe por um motivo medido: sem ela, abrir o app
 // com a conexão ruim faz o `/api/perfil` falhar, o perfil fica nulo, e a cota
 // do Desfazer volta a travar. O editor que já tinha conquistado o direito de
 // desligar leva a janela de 3s de volta — e a tela ainda diz "disponível
@@ -52,7 +52,7 @@ if (typeof setI18nVars === 'function') {
 // de 1 — gotcha #15). A verdade mora no `MIN_RANK_WAZE` do `server/core.mjs`,
 // que é quem barra de fato; aqui é só o número que a tela de entrada mostra
 // ANTES de existir qualquer resposta do servidor pra citar. `test/consistencia`
-// reprova se os dois divergirem — divergir aqui é a app prometer um critério e
+// reprova se os dois divergirem — divergir aqui é o app prometer um critério e
 // aplicar outro, que é pior do que não avisar nada.
 //
 // Vai por `setI18nVars` e não escrito na frase porque `applyI18n()` chama
@@ -118,11 +118,11 @@ const PREFETCH_TETO_FOTOS = 4;
 const MAX_EMPTY_PAGES = 5;
 // Os 7 tipos do WME, na ordem em que aparecem no filtro (local → foto). É a
 // MESMA ordem do index.html de propósito: duas listas com a mesma ideia em
-// ordens diferentes é como o editor descobre que a app se contradiz.
+// ordens diferentes é como o editor descobre que o app se contradiz.
 const TYPES_ALL = ['NEW_PLACE', 'DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE',
                    'NEW_PHOTO', 'FLAGGED_PHOTO', 'DELETE_PHOTO'];
 // Quais vêm MARCADOS numa instalação nova. `DETAILS_UPDATE` e `FLAGGED_PLACE`
-// ficam de fora, e o motivo é de PRODUTO, não de layout: a app é estilo Tinder,
+// ficam de fora, e o motivo é de PRODUTO, não de layout: o app é estilo Tinder,
 // e o gesto rápido funciona quando há o que OLHAR. Decisão do owner.
 //
 // Os dois já estiveram desmarcados por um motivo diferente — o card deles não
@@ -143,8 +143,8 @@ const TYPES_ALL = ['NEW_PLACE', 'DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE
 // diferentes, e só a primeira decide se vale mandar o filtro ao Waze.
 const TYPES_PADRAO = TYPES_ALL.filter((t) => t !== 'DETAILS_UPDATE' && t !== 'FLAGGED_PLACE');
 // O filtro salvo pode trazer lixo: storage de uma versão que não existe mais,
-// chave editada à mão, JSON meio gravado. Fica só o que a app conhece — e se
-// não sobrar NADA, volta ao padrão em vez de virar filtro vazio, que abriria a
+// chave editada à mão, JSON meio gravado. Fica só o que o app conhece — e se
+// não sobrar NADA, volta ao padrão em vez de virar filtro vazio, que abriria o
 // app numa fila sem um card e sem um erro na tela. "Parece que acabou o
 // trabalho" é o defeito mais caro possível, porque ninguém reporta.
 function sanearTiposSalvos(lista) {
@@ -198,9 +198,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initApp();
 });
 
-// Aviso do browser, não defeito da app: o navegador emite isto quando um
+// Aviso do browser, não defeito do app: o navegador emite isto quando um
 // ResizeObserver provoca layout que exige mais uma rodada de entrega no mesmo
-// quadro. Nada quebrou, não há o que o editor fazer, e a app já convergiu no
+// quadro. Nada quebrou, não há o que o editor fazer, e o app já convergiu no
 // quadro seguinte — mas chegava como toast VERMELHO "Erro inesperado" em cima
 // do card. Fica no console pra não virar invisível; some da cara de quem tria.
 // Filtro estreito de propósito: só esta família de mensagem, nunca "todo erro
@@ -354,7 +354,7 @@ function initApp() {
         // DEPOIS do `showMainScreen`, e isso é load-bearing: é ELE que põe
         // `AppState.authenticated = true`, e o esvaziamento sai na primeira
         // linha sem isso. Chamado antes, o gatilho da abertura não fazia nada —
-        // calado, e justamente pra quem ficou offline e fechou a app.
+        // calado, e justamente pra quem ficou offline e fechou o app.
         updateInFlightIndicator();
         esvaziarFilaDeSaida();
         AppState._profilePromise = loadProfileAndAuxData();
@@ -374,7 +374,7 @@ function initApp() {
             // esta linha passam centenas de ms, e nesse meio alguém pode ter
             // entrado por outro caminho (colar cookies, código de pareamento,
             // token injetado). Sem esta guarda o `showAuthScreen` derrubava a
-            // sessão recém-criada e escondia a app JÁ montada — apareceu como
+            // sessão recém-criada e escondia o app JÁ montado — apareceu como
             // "card sem endereço / botões 0px" no smoke, mudando de aparelho a
             // cada rodada porque atinge sempre o PRIMEIRO card medido.
             if (API.getSession() || AppState.authenticated) return;
@@ -386,13 +386,13 @@ function initApp() {
 // ── Handshake com a extensão WazePlaces Rapid Access (@daflash) ───────────
 //
 // A extensão já sabia fazer login sozinha, mas só reagia ao botão dela dentro
-// do WME: abrir a app direto não acionava nada, e sessão vencida obrigava a
+// do WME: abrir o app direto não acionava nada, e sessão vencida obrigava a
 // voltar ao WME e clicar de novo. O handshake inverte quem começa a conversa —
-// a APP pede, a extensão responde —, e com isso o login vira invisível nos dois
+// o APP pede, a extensão responde —, e com isso o login vira invisível nos dois
 // momentos que importam: ao abrir, e quando a sessão morre no meio do uso.
 //
 // O protocolo é `postMessage` na própria janela porque a extensão já injeta um
-// content script na app (`auto-login.js`): é o canal que existe sem pedir
+// content script no app (`auto-login.js`): é o canal que existe sem pedir
 // permissão nova no manifesto dela.
 //
 // SEGURANÇA: aceitar um token por postMessage NÃO abre superfície nova —
@@ -460,8 +460,8 @@ function entrarPelaExtensao({ silencioso = false } = {}) {
 // Ao LIGAR esconde a tela de login e mostra o spinner. Ao desligar, esconde só
 // o spinner — quem decide se a tela de login volta é o CHAMADOR, que sabe se o
 // handshake deu certo. A primeira versão fazia o `toggle` nos dois no mesmo
-// lugar e, ao terminar com sucesso, re-exibia o "Bem-vindo!" por cima da app já
-// logada. Só apareceu com a extensão carregada de verdade.
+// lugar e, ao terminar com sucesso, re-exibia o "Bem-vindo!" por cima do app já
+// logado. Só apareceu com a extensão carregada de verdade.
 function mostrarEntrandoPelaExtensao(ligado) {
     document.getElementById('extLoginState')?.classList.toggle('hidden', !ligado);
     if (ligado) document.getElementById('authScreen')?.classList.add('hidden');
@@ -478,17 +478,17 @@ let lastFocusedBeforeModal = null;
 
 // ── O VOLTAR do aparelho fecha o que está por cima ────────────────────────
 // Pedido de uma editora: no ritmo do swipe, ir até o ✕ do lightbox quebra a
-// cadência. No Android o reflexo é o botão/gesto de voltar, que em toda app
-// nativa significa "fecha a camada de cima".
+// cadência. No Android o reflexo é o botão/gesto de voltar, que em todo app
+// nativo significa "fecha a camada de cima".
 //
 // Vale pra lightbox E pra modais de propósito. Fazer só na foto seria PIOR que
 // não fazer: a pessoa aprenderia que voltar fecha, tentaria em Filtros e SAIRIA
-// DA APP — e ainda perderia os filtros que estava montando.
+// DO APP — e ainda perderia os filtros que estava montando.
 //
 // O detalhe que decide se isto ajuda ou atrapalha é CONSUMIR a entrada quando a
 // camada fecha por outro caminho (✕, Esc, scrim, arrastar). Sem isso sobra uma
 // entrada morta no histórico e o próximo voltar não faz nada — o usuário aperta,
-// olha pra tela parada e aperta de novo, aí sai da app. Pior que o ✕.
+// olha pra tela parada e aperta de novo, aí sai do app. Pior que o ✕.
 //
 // iOS em modo standalone não tem voltar; lá o ✕ e o arrastar pra baixo seguem
 // sendo o caminho. Isto ADICIONA um jeito, não substitui nenhum.
@@ -700,7 +700,7 @@ function setupAppListeners() {
     $('treinoSairBtn')?.addEventListener('click', () => Treino.sair());
     $('treinoFimOk')?.addEventListener('click', () => { closeModal('treinoFimModal'); Treino.sair(); });
 
-    // "Instalei… e agora?" — o beco sem saída medido: a app pergunta à extensão
+    // "Instalei… e agora?" — o beco sem saída medido: o app pergunta à extensão
     // UMA vez, no carregamento, com 350ms de janela, e o `ponte.js` não é
     // injetado numa aba que já estava aberta. Quem instala olhando pra esta tela
     // fica aqui pra sempre. Aparece só DEPOIS do clique em instalar, pra não ser
@@ -735,7 +735,7 @@ function setupAppListeners() {
         // Isso acontece NO MÁXIMO uma vez por conquista, e por CONSTRUÇÃO, não
         // por regra escrita: abrir a aba Histórico apaga o ponto (o
         // `marcarConquistasVistas` do `switchFilterTab`), então o próximo toque
-        // já cai em Filtros. Medido com a app de pé, não deduzido — eu cheguei a
+        // já cai em Filtros. Medido com o app de pé, não deduzido — eu cheguei a
         // recusar este desvio achando que ele se repetiria por dias.
         //
         // O atalho do PWA (`/?action=filters`) NÃO passa por aqui de propósito:
@@ -861,7 +861,7 @@ function setupFilterTabs() {
     });
 }
 
-// Atalhos do manifest PWA (long-press no ícone da app): /?action=filters e
+// Atalhos do manifest PWA (long-press no ícone do app): /?action=filters e
 // /?action=refresh. Só valem com sessão ativa — deslogado a tela de auth manda.
 // A query é limpa da URL depois (replaceState) pra um F5 não repetir a ação.
 function handleLaunchAction() {
@@ -903,7 +903,7 @@ function limparQrPareamento() {
 }
 
 // O gerador de QR (12KB) só serve ao pareamento, que a maioria dos editores
-// nunca abre — e era baixado em TODA abertura da app. Aqui ele vem sob demanda,
+// nunca abre — e era baixado em TODA abertura do app. Aqui ele vem sob demanda,
 // uma vez por sessão. É `self` na CSP, então injetar a tag é permitido.
 let _qrCarregando = null;
 function carregarQr() {
@@ -959,7 +959,7 @@ async function abrirPareamento() {
     // jeito mais traiçoeiro possível: o `closeModal` agenda um `history.back()`,
     // o `openModal` seguinte empilha uma entrada NOVA, e o back que estava
     // pendente come justamente essa. Sobra `profundidade: 1` sem entrada real
-    // por trás — e o próximo fechamento manda o `back()` pra fora da app.
+    // por trás — e o próximo fechamento manda o `back()` pra fora do app.
     //
     // MEDIDO: Ajuda → Conectar outro aparelho → fechar tirava o editor da
     // página. O contador não denuncia (fica em 1, com history.length 3): só
@@ -997,7 +997,7 @@ async function abrirPareamento() {
 }
 
 // Contagem regressiva: deixa claro que o segredo morre — e evita o editor ficar
-// tentando um código velho achando que a app quebrou. Vale pro QR e pro código
+// tentando um código velho achando que o app quebrou. Vale pro QR e pro código
 // digitado, que são registros SEPARADOS e vencem cada um no seu tempo.
 function iniciarTickerPareamento(elemento, segundos, aoVencer) {
     let restante = segundos;
@@ -1256,7 +1256,7 @@ function setupModalListeners() {
 // miniaturas visíveis decodificam).
 //
 // Resumo pro próximo que achar o `thumb100`: ele é ótimo em abstrato e inútil
-// aqui, porque a app já tem a foto grande antes de precisar da pequena.
+// aqui, porque o app já tem a foto grande antes de precisar da pequena.
 
 // Quando a foto foi tirada, na forma que o editor usa pra decidir.
 //
@@ -1305,7 +1305,7 @@ function idadeDaFoto(ms) {
 function atualizarAcoesDeFoto() {
     // No treino as duas ações NÃO existem: escrevem no mapa e não têm ensaio
     // possível. Some em vez de desabilitar — botão morto com cara de vivo lê
-    // como app quebrada, e "desabilitado" convida à pergunta "por que não
+    // como app quebrado, e "desabilitado" convida à pergunta "por que não
     // posso?", que num treino não tem resposta boa.
     //
     // Renomeando, mesma coisa: elas ficam no mesmo canto do confirmar/cancelar.
@@ -1480,7 +1480,7 @@ const Lightbox = {
         badge.classList.toggle('hidden', this.idx !== this.newIdx);
         // No treino as duas ações de foto NÃO existem: elas escrevem no mapa e
         // não têm ensaio possível. Some em vez de desabilitar — botão morto com
-        // cara de vivo lê como app quebrada, e "desabilitado" convida à pergunta
+        // cara de vivo lê como app quebrado, e "desabilitado" convida à pergunta
         // "por que não posso?", que num treino não tem resposta boa.
         atualizarAcoesDeFoto();
         this._renderTira();
@@ -1658,15 +1658,15 @@ const Lightbox = {
 //  O portão dos recursos destrutivos: L6 + Area Manager, ou staff
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// A app tem DOIS níveis, e o par é deliberado:
+// O app tem DOIS níveis, e o par é deliberado:
 //   · ENTRAR é L3+AM (`isUserAllowed`, no core) — é o portão de verdade, no
-//     SERVIDOR, e é ele que impede que qualquer um com cookies do Waze use a app.
+//     SERVIDOR, e é ele que impede que qualquer um com cookies do Waze use o app.
 //   · AGIR de forma destrutiva é L6+AM — este aqui, só do CLIENTE.
 //
 // Só do cliente é decisão, não esquecimento: o Waze valida `permissions` e
 // `lockRank` na gravação, então quem não pode por aqui também não consegue por
 // lá. Isto nunca foi fronteira de segurança — é trava de produto pra o recurso
-// não aparecer pra qualquer editor na NOSSA app. Houve um espelho no servidor,
+// não aparecer pra qualquer editor na NOSSO app. Houve um espelho no servidor,
 // com cache de perfil pra não custar caro, e SAIU: a chamada que ele exigia era
 // a mais lenta das três (977ms medidos) e existia pra reconfirmar o que o Waze
 // reconfirma de novo ao gravar (gotcha #59).
@@ -1908,7 +1908,7 @@ function openLightbox(urls, startIdx, newImageIdx, placeName, eDenuncia, place) 
 // SEM diálogo de confirmação, por decisão do owner: a pessoa já fez três gestos
 // deliberados pra chegar aqui (abrir a foto, navegar até ela, mirar num alvo
 // pequeno), e perguntar de novo é desconfiar dela. No lugar entra a JANELA DE
-// DESFAZER que a app já usa no swipe — que não desfaz depois, ADIA o envio.
+// DESFAZER que o app já usa no swipe — que não desfaz depois, ADIA o envio.
 //
 // A janela respeita a preferência do editor, igual ao swipe. Quem a desligou
 // paga o preço da própria escolha: a exclusão vai na hora, e não há volta —
@@ -2042,7 +2042,7 @@ function pedirExclusaoDaFoto() {
 // janela de Desfazer, mesma regra de que o envio só sai quando a janela fecha
 // SOZINHA. O que muda é o sentido — aqui a foto passa a valer no mapa.
 //
-// Por que aprovar foto não fere a regra de ouro ("a app nunca aprova"): a regra
+// Por que aprovar foto não fere a regra de ouro ("o app nunca aprova"): a regra
 // existe porque aprovar dado de LOCAL exige ajuste no WME — nome, categoria,
 // posição têm campo pra corrigir. Foto não tem: ou serve ou não serve, e a
 // decisão está inteira na tela. Decisão do owner, a pedido de um global champ.
@@ -2081,7 +2081,7 @@ async function enviarAprovacao(alvo) {
         }
         if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return; }
         // `already_processed` conta como sucesso: outro editor aprovou antes, e
-        // o objetivo de quem tocou foi cumprido (mesma lógica do resto da app).
+        // o objetivo de quem tocou foi cumprido (mesma lógica do resto do app).
         if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
             registrarPouso(alvo.place);
             placeResolvidoPorAprovacao = alvo.place;
@@ -2163,7 +2163,7 @@ function aprovarFotoAtual() {
 
 // ── Renomear o local, do lightbox ──────────────────────────────────────────
 //
-// A ÚNICA escrita de dado de LOCAL da app, e o que a justifica é a natureza da
+// A ÚNICA escrita de dado de LOCAL do app, e o que a justifica é a natureza da
 // decisão, não a conveniência: o editor está com a FACHADA ampliada na tela, que
 // é prova primária do nome. E a alternativa não é decidir melhor no WME — é a
 // MESMA gravação com uma ida e volta no meio. Medido no HAR do owner renomeando
@@ -2266,7 +2266,7 @@ function atualizarBotaoSalvarNome() {
     if (!inp || !ok) return;
     const v = inp.value.trim();
     // Vazio ou igual ao atual não é renomeação. Botão morto com cara de vivo lê
-    // como app quebrada, então ele fica `disabled` E esmaecido.
+    // como app quebrado, então ele fica `disabled` E esmaecido.
     ok.disabled = !v || v === String(Lightbox.place && Lightbox.place.name || '').trim();
 }
 
@@ -2334,7 +2334,7 @@ async function enviarRenomeacao(alvo) {
         const r = await callWithRetry(() => API.renomearLocal(alvo.place.venueID, alvo.novo));
         if (r && r.success) { contarConquista('nomes'); return; }   // sem toast: o nome na tela já diz
         if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return; }
-        // Falhou: o nome na tela precisa VOLTAR, senão a app afirma uma gravação
+        // Falhou: o nome na tela precisa VOLTAR, senão o app afirma uma gravação
         // que não houve — e o editor segue triando achando que corrigiu.
         aplicarNomeNaTela(alvo.place, alvo.antigo);
         showToast(msgDoServidor(r) || t('toast.renameFailed'), 'error');
@@ -2346,7 +2346,7 @@ async function enviarRenomeacao(alvo) {
 
 // Banner próprio, com a MESMA aparência e o mesmo tempo do Desfazer do card —
 // é a mesma ideia, e duas gramáticas pro mesmo conceito é como o editor
-// descobre que a app se contradiz.
+// descobre que o app se contradiz.
 function mostrarDesfazer(mensagem, aoDesfazer) {
     removeUndoBanner();
     const container = document.getElementById('undoContainer');
@@ -2492,7 +2492,7 @@ async function openFiltersModal() {
     renderHistory();
 
     // O modal ABRE AQUI, antes de qualquer rede. País e estado vêm do Waze e,
-    // na PRIMEIRA abertura da sessão, são duas idas — MEDIDO com a app de pé:
+    // na PRIMEIRA abertura da sessão, são duas idas — MEDIDO com o app de pé:
     // o modal só aparecia aos 480ms em rede boa e aos 1337ms em rede ruim,
     // porque o `openModal` era a última linha de uma função `async`. O editor
     // tocava em Filtros e não acontecia NADA até o Waze responder duas vezes.
@@ -2582,7 +2582,7 @@ function applyFiltersFromModal() {
     // Antes, qualquer Aplicar caía em `resetQueue` + `startFetching`, e isso
     // custava duas coisas: uma requisição e ~1–2 MB de resposta contra o free
     // tier, e os pedidos PULADOS voltavam — o skip não os marca no Waze, então
-    // a fila refeita os traz de novo. Quem só queria outra ordem via a app
+    // a fila refeita os traz de novo. Quem só queria outra ordem via o app
     // travar, recarregar e devolver o que ele tinha empurrado pra frente.
     if (assinaturaDeBusca() === buscaAntes && AppState.queue.length) {
         reordenarFilaNaTela();
@@ -2632,7 +2632,7 @@ function focoEmCampoDeTexto() {
 }
 
 function handleKeyDown(e) {
-    // Foco num campo de texto: as setas são do CURSOR, não da app.
+    // Foco num campo de texto: as setas são do CURSOR, não do app.
     //
     // Relatado pelo owner renomeando um local: usar ← → pra corrigir uma letra
     // TROCAVA A FOTO, e o `preventDefault()` do lightbox ainda matava o
@@ -2663,7 +2663,7 @@ function handleKeyDown(e) {
         else if (e.key === 'ArrowRight') { e.preventDefault(); Lightbox.next(); }
         // ↓ fecha, espelhando o arraste pra baixo do toque. Relato do owner:
         // aprendeu o gesto no celular, sentou no laptop e a mão foi pro ↓ —
-        // o modelo mental funcionando e a app não correspondendo.
+        // o modelo mental funcionando e o app não correspondendo.
         //
         // Só BAIXO, porque é só o que o toque faz (`dy > 80`); inventar ↑ aqui
         // criaria um gesto que o celular não tem. E é caminho ADICIONAL: o Esc
@@ -2877,7 +2877,7 @@ async function loadProfileAndAuxData() {
     }
     // A presença (fase 3) precisa do id do PERFIL — a lista exclui a própria
     // pessoa e o chat é dela. O `showMainScreen` chama a presença antes de o
-    // perfil chegar, e ela desiste calada; sem esta linha, quem abria a app com
+    // perfil chegar, e ela desiste calada; sem esta linha, quem abria o app com
     // a sessão salva ficava sem lista e sem conversa até mexer nos filtros.
     // Depois dos países, porque o subtítulo da lista usa o nome do país.
     // (Achado na validação ao vivo: o smoke injetava o perfil ANTES e não via.)
@@ -2914,7 +2914,7 @@ let verificandoSessao = false;
 //
 // `loadError` é o que distingue "a fila esvaziou por FALHA" de "a fila acabou
 // de verdade". Sem essa distinção, forçar `hasMore` gastaria uma requisição a
-// mais toda vez que o backlog tivesse realmente zerado — e a app roda no free
+// mais toda vez que o backlog tivesse realmente zerado — e o app roda no free
 // tier, onde requisição é recurso contado.
 const MAX_REBUSCAS_AUTO = 2;
 let rebuscasAuto = 0;
@@ -2960,8 +2960,8 @@ function rebuscarDepoisDeFalha() {
 // não é instrumento.
 //
 // CUSTO ZERO DESLIGADO: `dlog` sai na primeira linha. Nada de closure, nada de
-// objeto criado, nada de `JSON.stringify` — a app tem 200 swipes por sessão e o
-// valor dela é o ritmo.
+// objeto criado, nada de `JSON.stringify` — o app tem 200 swipes por sessão e o
+// valor dele é o ritmo.
 const DLOG_TETO = 800;
 // 3: entraram `resumo.alertas` (sentinelas) e a seção `computado` — a camada
 // que o navegador decidiu, que o `dom` não mostra. Aditivo: leitor de formato 2
@@ -2998,8 +2998,8 @@ function dlog(k, d) {
 // um anel com portão — o dado de travada era jogado fora exatamente quando
 // ninguém estava gravando.
 //
-// **O portão do `dlog` continua valendo, e por CUSTO**: a app tem ~200 swipes
-// por sessão e o valor dela é o ritmo. Por isso este anel é só o subconjunto que
+// **O portão do `dlog` continua valendo, e por CUSTO**: o app tem ~200 swipes
+// por sessão e o valor dele é o ritmo. Por isso este anel é só o subconjunto que
 // sai de graça, e o critério de entrada é duplo:
 //   1. **RARO** — nada que aconteça uma vez por swipe. Modal abre, tela gira,
 //      teclado sobe, busca falha: acontecem unidades de vezes por sessão.
@@ -3021,10 +3021,10 @@ function dfato(k, d) {
 // ── DIÁRIO DE SESSÕES: o que sobrevive ao tombo ──────────────────────────
 //
 // O `dfato` já é o anel sem portão, mas ele vive em MEMÓRIA — e a sessão cair
-// é justamente o evento depois do qual o editor fecha a app. Quando ele volta
+// é justamente o evento depois do qual o editor fecha o app. Quando ele volta
 // pra gerar o diagnóstico, o anel está vazio: o mesmo buraco que fez o `dfato`
 // nascer ("4 dos 7 diagnósticos chegaram com `diario: []`"), agora no evento
-// mais caro que a app tem.
+// mais caro que o app tem.
 //
 // Daí este anel em localStorage. Ele existe pra responder UMA pergunta que
 // hoje depende da memória de quem relata — *"quanto tempo a sessão durou?"* —
@@ -3070,7 +3070,7 @@ function registrarEventoDeSessao(e, d) {
 // os dois de entrada seria inventar um número, que é pior que não ter nenhum.
 //
 // Só registra quando NÃO há início em aberto, senão viraria uma linha por
-// abertura da app e quebraria a regra de entrada do diário (raro, nunca por
+// abertura do app e quebraria a regra de entrada do diário (raro, nunca por
 // gesto repetido).
 function marcarSessaoJaAtiva() {
     try {
@@ -3085,12 +3085,12 @@ function marcarSessaoJaAtiva() {
     } catch (e) { /* instrumento nunca atrapalha a abertura */ }
 }
 
-// Quando esta app rodou pela PRIMEIRA vez NESTE armazenamento. É o detector de
+// Quando este app rodou pela PRIMEIRA vez NESTE armazenamento. É o detector de
 // apagamento pelo navegador, e ele funciona por CONTRADIÇÃO: o Safari apaga
 // todo o storage script-writable após 7 dias sem interação (webkit.org, e web
 // app na tela inicial é ISENTA — tem contador próprio). Quando isso acontece o
 // diário some junto, então a evidência não pode ser só o diário: um carimbo de
-// ontem num aparelho onde a pessoa diz usar a app há um mês É o apagamento.
+// ontem num aparelho onde a pessoa diz usar o app há um mês É o apagamento.
 function nascimentoDoArmazenamento() {
     try {
         const v = Number(safeLS.get(NASCIMENTO_KEY));
@@ -3144,7 +3144,7 @@ const DLOG_MAX_MOMENTOS = 12;
 
 // Teto POR MOTIVO, só pro que acontece por uso normal. Motivo que só dispara
 // quando algo deu errado (erro de JS, alarme falso de sessão) não entra aqui:
-// ali o anel inteiro é pouco. O arraste é o oposto — é o gesto central da app,
+// ali o anel inteiro é pouco. O arraste é o oposto — é o gesto central do app,
 // e sem cota ele toma as 12 vagas sozinho.
 // DOIS e não um: o primeiro arraste da sessão raramente é o que interessa, e
 // com dois sobra o mais recente, que é o que a pessoa acabou de ver.
@@ -3152,7 +3152,7 @@ const DLOG_COTA_POR_MOTIVO = { 'auto:arraste': 2 };
 
 function dlogTelaAtual() {
     // `offsetParent` NÃO serve aqui: ele é `null` para elemento `position:
-    // fixed`, e TODO modal desta app é fixed. Com ele, `modais` vinha sempre
+    // fixed`, e TODO modal deste app é fixed. Com ele, `modais` vinha sempre
     // vazio — ou seja a capacidade central do FAB (registrar EM CONTEXTO, com o
     // modal por cima) não capturava o contexto, em silêncio. Pego pelo teste
     // ponta a ponta, que abria a Ajuda antes de tocar e cobrava o modal na
@@ -3209,7 +3209,7 @@ function diagOfflineAgora() {
 }
 
 // ── A camada COMPUTADA: o que o NAVEGADOR decidiu ─────────────────────────
-// O diagnóstico já trazia o que a página É (`dom`) e o que a app ACHA
+// O diagnóstico já trazia o que a página É (`dom`) e o que o app ACHA
 // (`AppState`). Faltava a terceira: o que o navegador decidiu. Bug de layout
 // mora inteiro aí, e ela não se lê do `outerHTML`.
 //
@@ -3424,7 +3424,7 @@ function diagQuemEstaNoCentro(el, r) {
 // no APARELHO dele, onde eu não chego — e uma linha no topo do relatório vale
 // mais que 1 MB pra vasculhar.
 //
-// Regra pra entrar aqui: só invariante que a app garante e que, quebrada,
+// Regra pra entrar aqui: só invariante que o app garante e que, quebrada,
 // significa defeito — nunca "achei estranho". Falso positivo aqui treina a
 // ignorar a seção inteira, que é como ela deixa de servir.
 // ── O RETRATO DA SESSÃO, com a conta JÁ FEITA ────────────────────────────
@@ -3485,7 +3485,7 @@ function diagSessao() {
 // O relato ("preciso puxar os cookies toda semana") tem um candidato de
 // PLATAFORMA que não é defeito nosso: o WebKit apaga TODO o storage
 // script-writable depois de "seven days of Safari use without user interaction
-// on the site" (webkit.org). E a isenção é exatamente o que a app pede:
+// on the site" (webkit.org). E a isenção é exatamente o que o app pede:
 // "web applications added to the home screen ... have their own counter".
 //
 // Ou seja: quem usa no Safari SEM instalar perde tudo em 7 dias, e o sintoma é
@@ -3549,7 +3549,7 @@ function diagSentinelas(comp) {
                 '<html> tem `tema-claro` e `dark` juntos num sistema escuro — o fundo '
                 + 'sob o app não acompanha', { classe: cl });
         }
-        // 4. O armazenamento não está guardando NADA — e a app parece boa.
+        // 4. O armazenamento não está guardando NADA — e o app parece boa.
         //    Invariante dura: depois de entrar, o token ESTÁ no localStorage.
         //    Se há sessão ativa e ele não está lá, a sessão morre ao fechar a
         //    aba, toda vez, e nenhum outro campo deste arquivo diz isso.
@@ -3560,8 +3560,8 @@ function diagSentinelas(comp) {
                     + '(navegação privada, cookies bloqueados ou armazenamento cheio)');
             }
         } catch (e) { /* sonda nunca derruba o diagnóstico */ }
-        // 5. O ambiente apaga o armazenamento antes do prazo que a app promete.
-        //    NÃO é "achei estranho": é contradição entre o que a app garante
+        // 5. O ambiente apaga o armazenamento antes do prazo que o app promete.
+        //    NÃO é "achei estranho": é contradição entre o que o app garante
         //    (sessão de semanas, com janela deslizante) e o que ESTE ambiente
         //    faz — o WebKit apaga todo o storage após 7 dias sem interação, e
         //    isenta quem está na tela inicial. Escopo apertado de propósito:
@@ -3623,7 +3623,7 @@ function diagSentinelas(comp) {
         }
         // 5. O mapa desenhado pra uma caixa que não é a dele.
         //
-        // INVARIANTE que a app garante: `renderMapa` enumera os tiles pra
+        // INVARIANTE que o app garante: `renderMapa` enumera os tiles pra
         // cobrir exatamente `larguraPx × alturaPx`, então o enquadramento tem
         // que ser o tamanho da caixa. Quando não é, sobra faixa sem tile (caixa
         // maior que o enquadramento) ou o zoom foi escolhido pra outra
@@ -3669,7 +3669,7 @@ function diagSentinelas(comp) {
         // de tiles é servido do cache — com ou sem rede. O anel só recebe a
         // falha nas condições em que isso vale (ver `registrarFalhaDeTile`), e
         // é o defeito do mapa do relato de 2026-09-22 (o worker acordava sem
-        // saber dos tiles), que o arquivo dele não tinha como mostrar: a app
+        // saber dos tiles), que o arquivo dele não tinha como mostrar: o app
         // tira da tela o tile que falha, e a prova ia junto.
         const tf = comp.tilesGuardadosQueFalharam || [];
         if (tf.length) {
@@ -3681,8 +3681,8 @@ function diagSentinelas(comp) {
         //
         // INVARIANTE desde v2026.09.22-04: o `renderCurrentCard` esconde o
         // esqueleto ao pendurar o card, e todo card da frente passa por ele.
-        // Os dois visíveis juntos é o defeito do relato de 2026-09-22 — a app
-        // reaberta sem rede "não carregava nada" com o pedido montado por
+        // Os dois visíveis juntos é o defeito do relato de 2026-09-22 — o app
+        // reaberto sem rede "não carregava nada" com o pedido montado por
         // baixo do esqueleto (z-50) —, e o resumo daquele arquivo dizia só
         // "carregando", sem alerta nenhum.
         const tc = comp.telaDoCard;
@@ -3696,7 +3696,7 @@ function diagSentinelas(comp) {
         // INVARIANTE desde v2026.09.22-06: o que está na fila de saída não entra
         // na fila de pedidos — o filtro (`semOsJaDecididos`) está nos DOIS
         // caminhos por onde pedido entra, a busca e a reabertura sem rede. Os
-        // dois juntos é o relato de 2026-09-22: reaberta no modo avião, a app
+        // dois juntos é o relato de 2026-09-22: reaberta no modo avião, o app
         // devolvia como card o que o owner já tinha tratado, e dava pra decidir
         // de novo — contando duas vezes e mandando duas decisões pro Waze.
         const dc = comp.decididos;
@@ -3786,7 +3786,7 @@ function dlogCapturar(motivo) {
         };
         dlogMomentos.push(m);
         // COTA POR MOTIVO pro que é FREQUENTE, e o arraste é o caso: ele é o
-        // gesto central da app, então a uma captura por 30s ele enche as 12
+        // gesto central do app, então a uma captura por 30s ele enche as 12
         // vagas do anel em ~6 minutos de triagem — e empurra pra fora o momento
         // do erro de JS e o da queda de sessão, que são os que se quer ler.
         // É o mesmo risco que o comentário do `dlogCapturarAuto` já descrevia
@@ -3807,7 +3807,7 @@ function dlogCapturar(motivo) {
         if (dlogMomentos.length > DLOG_MAX_MOMENTOS) dlogMomentos.shift();
         dlog('momento', { motivo, painel: m.painel, cardMontado: m.cardMontado,
                           alertas: (m.alertas || []).map((a) => a.chave) });
-        // A captura vai pro aparelho NA HORA: é ela que prova o defeito, e a
+        // A captura vai pro aparelho NA HORA: é ela que prova o defeito, e o
         // app pode morrer antes de ir pro fundo (ver `diagGuardarAbertura`).
         diagGuardarAbertura('captura');
         return m;
@@ -3861,7 +3861,7 @@ function dlogApagar() {
 // já mostrava 2 e ele leu "capturou duas vezes". As automáticas continuam no
 // anel e no relatório, iguais; só não entram num número que a pessoa lê como
 // "quantas vezes eu apertei". Os dois pontos contam a MESMA coisa: aviso de
-// "3 não baixados" com o selo mostrando 1 seria a app discordando de si mesma.
+// "3 não baixados" com o selo mostrando 1 seria o app discordando de si mesmo.
 function dlogCapturasDoEditor() { return dlogMomentos.filter((m) => m.motivo === 'manual'); }
 
 // Quais já foram BAIXADOS, marcados no próprio momento. Era uma CONTAGEM (o
@@ -3872,7 +3872,7 @@ function dlogCapturasDoEditor() { return dlogMomentos.filter((m) => m.motivo ===
 const dlogJaBaixados = new WeakSet();
 // As guardadas de aberturas ANTERIORES entram nas duas contas (ver
 // `diagAberturasAnteriores`): o número do botão é "o que vai no próximo
-// relatório", e é isso que precisa sobreviver a fechar a app.
+// relatório", e é isso que precisa sobreviver a fechar o app.
 function dlogMarcarBaixados() {
     for (const m of dlogMomentos) dlogJaBaixados.add(m);
     for (const m of diagMomentosAnteriores()) dlogJaBaixados.add(m);
@@ -3882,10 +3882,10 @@ function dlogNaoBaixados() {
         .filter((m) => !dlogJaBaixados.has(m)).length;
 }
 
-// ── O DIAGNÓSTICO QUE SOBREVIVE A FECHAR A APP ────────────────────────────
+// ── O DIAGNÓSTICO QUE SOBREVIVE A FECHAR O APP ────────────────────────────
 //
 // Relato de 2026-09-22 (owner, no modo avião): capturou o defeito com o botão
-// duas vezes, fechou a app, reabriu — e o número sumiu do botão. As capturas,
+// duas vezes, fechou o app, reabriu — e o número sumiu do botão. As capturas,
 // o diário, as chamadas e os erros viviam só em MEMÓRIA e morriam ao fechar. E
 // o defeito daquele dia (o pedido tratado voltando como card) só existia
 // ATRAVESSANDO um fechar e reabrir: o relatório, gerado numa abertura
@@ -3906,7 +3906,7 @@ function dlogNaoBaixados() {
 // swipe. E base PRÓPRIA, não a do offline: aquela é apagada inteira quando o
 // toggle dele desliga, e as duas coisas não têm nada a ver uma com a outra.
 //
-// Grava a cada CAPTURA e quando a app vai pro fundo (`visibilitychange`
+// Grava a cada CAPTURA e quando o app vai pro fundo (`visibilitychange`
 // oculto, o último momento confiável no celular) ou sai (`pagehide`). NUNCA
 // por swipe: o diário do modo dev anota cada ação, e gravar a cada anotação
 // seria justamente o custo que o anel existe pra não ter.
@@ -4128,7 +4128,7 @@ function setupGuardaDoDiagnostico() {
 // contra 30,9 a 46,0) E são os únicos sem controle por baixo em tela nenhuma.
 //
 // Duas escolhas que não são gosto:
-//  · **A posição do editor SEMPRE ganha.** Arrastou, fixou: a partir daí a app
+//  · **A posição do editor SEMPRE ganha.** Arrastou, fixou: a partir daí o app
 //    não mexe mais. Instrumento que foge da mão é pior que instrumento no
 //    lugar errado.
 //  · **Nada de canto embaixo no centro.** Ali moram os toasts, em z-70 — ACIMA
@@ -4178,7 +4178,7 @@ const DEV_FAB_ACIONAVEL = 'button, a[href], input, select, textarea, label[for],
 const DEV_FAB_LEITURA = '.nao-cobrir';
 const DEV_FAB_EVITAR = DEV_FAB_ACIONAVEL + ', ' + DEV_FAB_LEITURA;
 
-let devFabFixado = false;   // o editor arrastou → a app não escolhe mais
+let devFabFixado = false;   // o editor arrastou → o app não escolhe mais
 
 function devFabCoords(canto, w, h) {
     const cab = document.querySelector('header');
@@ -4262,7 +4262,7 @@ function atualizarFabDev() {
     if (selo) {
         // Só as que a pessoa fez — ver `dlogCapturasDoEditor` —, desta abertura
         // e das anteriores que ficaram guardadas: o número é "o que vai no
-        // próximo relatório", e ele tem que sobreviver a fechar a app.
+        // próximo relatório", e ele tem que sobreviver a fechar o app.
         const n = dlogCapturasDoEditor().length + diagCapturasAnterioresDoEditor().length;
         selo.textContent = String(n);
         selo.classList.toggle('hidden', n === 0);
@@ -4319,7 +4319,7 @@ function ligarFabDev() {
         fab.style.right = 'auto'; fab.style.bottom = 'auto';
     };
     // O AVISO de que pegou é o que faltava por inteiro: sem ele não há como
-    // saber se a app agarrou o botão ou se o toque se perdeu — e "parece que
+    // saber se o app agarrou o botão ou se o toque se perdeu — e "parece que
     // tem algo segurando" é exatamente a descrição de um gesto sem retorno.
     // São dois canais de propósito (WCAG 1.4.1 — sinal não pode viver só num):
     // o botão CRESCE e o aparelho VIBRA.
@@ -4458,7 +4458,7 @@ function ligarFabDev() {
 // a sessão vencer, e é METADE da chave que decifra os cookies no servidor (ver
 // `derivarChave`). Foi pedido assim de propósito, porque é ele que permite
 // REPRODUZIR a falha em vez de teorizar. O arquivo diz isso na primeira linha,
-// e o caminho de anular é sair da app, que destrói a sessão no servidor.
+// e o caminho de anular é sair do app, que destrói a sessão no servidor.
 // 3 (v2026.09.22-03): entraram a seção `offline`, `serviceWorker.proprio` (o
 // worker respondendo sobre si), `recursosInfo`, `rede`/`offline` em cada
 // momento e `tiles` na geometria do mapa. Aditivo: leitor antigo só ignora.
@@ -4472,9 +4472,9 @@ function ligarFabDev() {
 // das capturas delas, com a `abertura` de cada uma). Aditivo.
 // 6 (v2026.09.23-03): o resumo ganha `presencaWme` (a presença no mapa do WME,
 // de carona nas ações): ligada, já vista ligada, escritas, falhas e se a marca
-// de quem está na app voltou diferente. Aditivo.
-// 7 (v2026.09.24-01): o resumo ganha `presencaApp` (a lista e o chat da app,
-// fase 3: quantos na app, conversas, não lidas, o token e o tempo real — só
+// de quem está no app voltou diferente. Aditivo.
+// 7 (v2026.09.24-01): o resumo ganha `presencaApp` (a lista e o chat do app,
+// fase 3: quantos no app, conversas, não lidas, o token e o tempo real — só
 // CONTAGENS), e o `dom` (do relatório e de cada captura) sai SEM a conversa e
 // sem a prévia da lista (`domParaDiagnostico`), com a contagem do que saiu.
 const DIAG_VERSAO = 7;
@@ -4560,7 +4560,7 @@ function diagCapturarErros() {
     });
 
     // O `console.error/warn` some com a aba fechada, e é onde o navegador conta
-    // coisa que a app não vê: falha de WebRTC, storage recusando, recurso
+    // coisa que o app não vê: falha de WebRTC, storage recusando, recurso
     // bloqueado. Embrulhar aqui é um funil só, em vez de trocar 200 chamadas.
     for (const nivel of ['error', 'warn']) {
         const orig = console[nivel].bind(console);
@@ -4573,7 +4573,7 @@ function diagCapturarErros() {
         };
     }
 
-    // Travada de quadro é defeito de PRODUTO aqui: o valor da app é o ritmo do
+    // Travada de quadro é defeito de PRODUTO aqui: o valor do app é o ritmo do
     // swipe, e 200ms de thread presa são ~24 quadros perdidos.
     try {
         new PerformanceObserver((l) => {
@@ -4761,7 +4761,7 @@ async function diagCorpo() {
         // investiga. MEDIDO no diagnóstico do owner: 111 KB crus, **42 KB
         // comprimidos, 8% do arquivo inteiro**. **E `/api/*`**: o coletor faz
         // GET e a API só aceita POST, então eram 6 entradas de `405 Método não
-        // permitido` — um erro que a app nunca vê. O que fica é o que responde
+        // permitido` — um erro que o app nunca vê. O que fica é o que responde
         // "qual código este aparelho está rodando": o HTML, o SW, o CSS, os
         // `js/min/*` e o manifest.
         if (/\.(woff2?|ttf|otf|eot|png|jpe?g|gif|webp|avif|ico|mp4|webm)(\?|$)/i.test(u)) continue;
@@ -4800,7 +4800,7 @@ async function diagCorpo() {
     // ── O armazenamento local funciona mesmo? ──────────────────────────────
     // O `safeLS` engole exceção DE PROPÓSITO, então armazenamento cheio ou
     // navegação privada falham em SILÊNCIO: filtro não persiste, sessão não
-    // grava, e a app parece boa. É uma classe inteira de defeito que nenhum
+    // grava, e o app parece boa. É uma classe inteira de defeito que nenhum
     // outro campo deste arquivo revelaria — só a sonda escreve-lê-apaga.
     const armazenamento = { quota: null, uso: null, escreve: null, erroEscrita: null };
     try {
@@ -4871,10 +4871,10 @@ async function diagCorpo() {
             // mencionava: estava no localStorage, cru, junto do token.
             saida: diagResumoDaSaida(),
             // A presença no mapa do WME (fase 2). Responde "não apareço no WME"
-            // sem abrir o resto: ligada? a app já a viu ligada? as escritas de
+            // sem abrir o resto: ligada? o app já a viu ligada? as escritas de
             // carona estão saindo, falhando, voltando sem a marca?
             presencaWme: (() => { try { return presencaWmeDiag(); } catch (e) { return { erro: String(e && e.message) }; } })(),
-            // A lista e o chat da app (fase 3): quantos estão na app, quantas
+            // A lista e o chat do app (fase 3): quantos estão no app, quantas
             // conversas e não lidas, o token e o tempo real. Só CONTAGENS — a
             // conversa é dado privado e não entra no diagnóstico de jeito nenhum.
             presencaApp: (() => { try { return window.Presenca?.diag?.() || null; } catch (e) { return { erro: String(e && e.message) }; } })(),
@@ -4900,7 +4900,7 @@ async function diagCorpo() {
                 .sort((x, y) => Date.parse(x.t) - Date.parse(y.t)),
             // Quantas aberturas anteriores ficaram guardadas, e com quantas
             // capturas — a primeira pergunta de um relato que atravessa fechar
-            // e reabrir a app.
+            // e reabrir o app.
             aberturasAnteriores: { n: diagAberturasAnteriores.length,
                                    capturas: diagMomentosAnteriores().length },
         },
@@ -5116,11 +5116,11 @@ async function baixarDiagnostico() {
 }
 
 async function handleUnauthorized() {
-    // Concorrência é o normal aqui, não a exceção: ao abrir a app saem TRÊS
+    // Concorrência é o normal aqui, não a exceção: ao abrir o app saem TRÊS
     // chamadas ao Waze quase juntas (perfil, países, busca). Sem esta trava,
     // cada uma que voltasse 401 fazia sua própria verificação e seu próprio
     // toast — foi assim que o owner recebeu DOIS "Sessão expirou" empilhados.
-    // A decisão mais cara da app: derrubar ou não a sessão. Registrar as duas
+    // A decisão mais cara do app: derrubar ou não a sessão. Registrar as duas
     // pontas (o que motivou e o que a sonda respondeu) é o que transforma
     // "conexão instável pra sempre" em evidência.
     // O log vem ANTES da trava, e não dentro dela: assim a linha da trava fica
@@ -5186,7 +5186,7 @@ const MOTIVO_DA_QUEDA = {
 };
 
 function derrubarSessao(errorKey) {
-    // A queda é a decisão mais cara da app e era a ÚNICA que não chegava ao
+    // A queda é a decisão mais cara do app e era a ÚNICA que não chegava ao
     // anel sem portão: havia `dlog('sessao.confere')`, que o dev mode desligado
     // engole, e `dfato` só no ALARME FALSO — ou seja o caso em que ela NÃO cai.
     // O testador liga o dev mode DEPOIS do problema, então sem isto o evento
@@ -5221,7 +5221,7 @@ function derrubarSessao(errorKey) {
 
     // Antes de mandar pra tela de login, PERGUNTA à extensão — em silêncio.
     //
-    // A sessão da app venceu, mas o login do editor no WME quase sempre não:
+    // A sessão do app venceu, mas o login do editor no WME quase sempre não:
     // são prazos diferentes. Quem tem a extensão renova sem sair do lugar, e a
     // fila continua na tela. Só quem não tem (ou está deslogado do WME) vê o
     // toast e cai no login — por isso o aviso é ADIADO até a extensão falhar:
@@ -5238,7 +5238,7 @@ function derrubarSessao(errorKey) {
 }
 
 // ── A foto de perfil espera o primeiro card ──────────────────────────────
-// Ela é a imagem MAIS PESADA da app e a MENOS importante: 214 KB vindos do
+// Ela é a imagem MAIS PESADA do app e a MENOS importante: 214 KB vindos do
 // Waze para aparecer com 32px no cabeçalho, e não existe variante menor
 // (sondadas 5 formas de URL, todas devolvem os mesmos 218 KB). O
 // `fetchpriority="low"` já a tirou da frente na fila de prioridades, mas os
@@ -5266,7 +5266,7 @@ let telaPronta = false;
 // 0,06 ms, sem IP de servidor) e o cabeçalho passou a mostrar o ícone de
 // quebrado. O host novo entrou na CSP, mas isso conserta ESTE endereço, não a
 // próxima mudança — e o Waze não avisa quando muda. Foto de terceiro que some
-// tem que degradar pro estado que a app já tem pra "perfil sem foto".
+// tem que degradar pro estado que o app já tem pra "perfil sem foto".
 let avatarFalhou = null;
 
 function liberarAvatar() {
@@ -5314,7 +5314,7 @@ function renderProfileHeader() {
     const nameEl = document.getElementById('userName');
     const rankEl = document.getElementById('userRank');
     // A falha degrada pro MESMO estado de "perfil sem foto" (o `else` abaixo),
-    // que a app já tinha — em vez do ícone de quebrado do navegador.
+    // que o app já tinha — em vez do ícone de quebrado do navegador.
     if (p.profileImageUrl && p.profileImageUrl !== avatarFalhou) {
         avatar.style.display = '';
         // Já é esta a foto? Não mexe. Esta função roda de novo a cada troca de
@@ -5346,7 +5346,7 @@ function renderProfileHeader() {
 
 // Sair = esquecer o user completamente. Apaga sessão, stats, filters,
 // preferences, region e country deste dispositivo. Equivale a "reinstalar
-// a app". Único item mantido: tema (light/dark) por ser preferência de
+// o app". Único item mantido: tema (light/dark) por ser preferência de
 // dispositivo, não identidade do usuário. handleUnauthorized (cookies
 // expiram pelo Waze) NÃO chama isso — preserva tudo pra próximo login.
 async function handleLogout() {
@@ -5438,7 +5438,7 @@ async function handleLogout() {
     // A exclusão no servidor é METADE da promessa do "Sair", e falhava calada
     // com a rede fora: o `_post` devolve erro em vez de lançar, então ninguém
     // ficava sabendo. Agora tenta de novo (mesma política de transiente do resto
-    // da app) e, se ainda assim não for, diz o que aconteceu e o que acontece
+    // do app) e, se ainda assim não for, diz o que aconteceu e o que acontece
     // depois — o blob fica órfão (a chave é o hash do token, que já foi embora)
     // e expira sozinho em até 21 dias.
     if (tokenParaApagar) {
@@ -5518,7 +5518,7 @@ const ORDENS_POR_DISTANCIA = ['casa', 'trabalho', 'gps'];
 //     ordem padrão numa frase ("a ordem voltou pra «…»"), e com o emoji no
 //     texto a frase ganhava um 🆕 no meio, entre aspas;
 // (b) o dicionário passava a carregar DECORAÇÃO, então a régua "o mesmo
-//     conceito usa o mesmo ícone em toda a app" ficava espalhada por 4 línguas
+//     conceito usa o mesmo ícone em todo o app" ficava espalhada por 4 línguas
 //     em vez de num lugar só — e conferível por ninguém.
 //
 // Aqui o ícone é do CONCEITO (a ordem), não da tradução: um mapa só, e o
@@ -5589,7 +5589,7 @@ function sortQueue() {
         // Pedido SEM data vai pro FIM, nos dois sentidos — e o `|| 0` que
         // estava aqui fazia o contrário. Um `dateAdded` nulo virava 0, que em
         // "mais antigos" é o mais antigo possível: o pedido cravava a posição
-        // 0 da fila e ficava lá, em toda abertura da app, para sempre.
+        // 0 da fila e ficava lá, em toda abertura do app, para sempre.
         //
         // É EXATAMENTE o sintoma que o owner relatou em 2026-09-10 (por outra
         // causa: o rótulo de idade ambíguo). Não estava ativo na fila dele —
@@ -5612,7 +5612,7 @@ function sortQueue() {
 // false`): pra ORDENAR uma fila, errar 1 km não muda a ordem que importa, e
 // ligar o GPS fino acende o rádio e demora — a pessoa pediu uma ordem, não uma
 // rota. Quem decide a precisão de verdade é o sistema: no Android 12+ a pessoa
-// escolhe "precisa" ou "aproximada" ao conceder, e a app não força nada.
+// escolhe "precisa" ou "aproximada" ao conceder, e o app não força nada.
 //
 // NUNCA é chamada na abertura: só quando o editor ESCOLHE "Perto de mim" no
 // filtro. Permissão pedida sem gesto é a interrupção que a régua da casa proíbe.
@@ -5817,7 +5817,7 @@ function fetchNextPage() {
                     // Este ramo confia no `handleUnauthorized` pra recompor — ou
                     // ele derruba pra tela de entrar (sessão morta), ou ele
                     // rebusca (alarme falso). Só que ele tem uma TRAVA de
-                    // concorrência (`verificandoSessao`): ao abrir a app saem
+                    // concorrência (`verificandoSessao`): ao abrir o app saem
                     // três chamadas quase juntas, e a segunda que chega encontra
                     // a trava fechada e volta NA HORA, sem derrubar e sem
                     // rebuscar. A rebusca do alarme falso também reentra aqui e
@@ -5835,7 +5835,7 @@ function fetchNextPage() {
                     // sempre ("o editor acharia que zerou o backlog"); faltava
                     // este ramo. E é o pior defeito possível pela régua do
                     // próprio projeto: "parece que acabou o trabalho" ninguém
-                    // reporta — o editor fecha a app achando que terminou.
+                    // reporta — o editor fecha o app achando que terminou.
                     AppState.loadError = true;
                     handleUnauthorized();
                 } else {
@@ -5867,7 +5867,7 @@ function fetchNextPage() {
             rebuscasAuto = 0;
             // Esta é a chamada que se repete, então é ela que mantém o prazo em
             // dia: se o editor relogar no WME, o Waze passa a mandar um `Expires`
-            // novo e o aviso some sozinho, sem a app precisar perguntar nada.
+            // novo e o aviso some sozinho, sem o app precisar perguntar nada.
             guardarPrazoDaSessao(result);
 
             // D13: acumula igual ao serverTotal (uma busca pode vir em páginas).
@@ -5902,9 +5902,9 @@ function fetchNextPage() {
                 AppState.serverTotal += newPlaces.length;
                 trackSeenCategories(newPlaces);
                 // Reordenar AQUI, com um card já na tela, quebra a invariante de
-                // que o card exibido é o `queue[0]` — e o resto da app inteira
+                // que o card exibido é o `queue[0]` — e o resto do app inteiro
                 // conta com ela. `advanceQueue` remove o TOPO (`shift`), mas a
-                // ação é enviada pro `currentPlace`: divergindo os dois, a app
+                // ação é enviada pro `currentPlace`: divergindo os dois, o app
                 // rejeita o que você vê e apaga OUTRO da fila, que some sem ser
                 // tratado — e o seu volta na sua frente depois. MEDIDO no
                 // navegador nas três ordens (recentes, antigos e perto de casa).
@@ -6008,7 +6008,7 @@ function cardDaFrente() {
 // ── "Como funciona": uma vez, no primeiro card ────────────────────────────
 // Os três botões do card só têm `aria-label` e `title` — e `title` NÃO existe no
 // toque. No celular, quem nunca usou vê três círculos coloridos e adivinha. Não
-// havia nada explicando em lugar nenhum da app.
+// havia nada explicando em lugar nenhum do app.
 //
 // A alternativa era rótulo fixo sob cada botão, e ela foi medida e recusada:
 // custa 20px de FOTO em todo card, pra sempre (329 → 309px no iPhone; 181 → 160
@@ -6034,7 +6034,7 @@ function mostrarComoFuncionaSePrimeiraVez() {
 // aberto. Minha primeira versão fechava a Ajuda antes "para não empilhar" — e
 // era exatamente isso que quebrava: `closeModal` CONSOME a entrada do histórico
 // e o `openModal` seguinte, vendo nenhum modal aberto, empilhava outra. Medido,
-// o Esc depois disso levava a `about:blank` — a pessoa saía da app inteira.
+// o Esc depois disso levava a `about:blank` — a pessoa saía do app inteiro.
 function abrirComoFunciona() {
     openModal('comoFuncionaModal');
 }
@@ -6187,7 +6187,7 @@ function renderCurrentCard() {
     // O aviso de "a foto precisa de sinal" NÃO nasce aqui: ele vem do `onerror`
     // da foto em decisão (ver `renderCardImages`). Posto no render, ele se
     // antecipava à imagem e escondia a foto que estava guardada.
-    // Quem está deslizando está usando a app: a varredura não dorme.
+    // Quem está deslizando está usando o app: a varredura não dorme.
     offlineMarcarGesto();
     // Tira o .celebrate junto: sem isso o confete não reinicia quando a fila
     // zerar de novo (a classe ficaria pendurada do "Tudo limpo!" anterior).
@@ -6301,7 +6301,7 @@ function montarCard(place) {
     card.querySelector('.card-read-banner')?.classList.toggle('hidden', place.isRead !== true);
 
     // Reporte: o motivo (`flagType`) é a informação principal e quase sempre a
-    // ÚNICA — o comentário livre vem vazio na maioria dos casos. A app só olhava
+    // ÚNICA — o comentário livre vem vazio na maioria dos casos. O app só olhava
     // o comentário, então o card de reporte saía sem dizer por que o local foi
     // denunciado, enquanto o WME mostrava "Motivo da marcação: Inapropriado".
     if (place.flagType) {
@@ -6312,10 +6312,10 @@ function montarCard(place) {
         // "Duplicado DE <local>", e o alvo é justamente a informação que decide
         // — sem ela o editor tem que abrir o WME só pra saber de quem. O core
         // resolve o nome quando consegue (ver `resolverDuplicados`); quando não
-        // consegue, fica a forma isolada, que é o que a app já mostrava.
+        // consegue, fica a forma isolada, que é o que o app já mostrava.
         // Só com NOME. Alvo achado e sem nome existe, e aí a frase completa
         // sairia `Duplicado de “(local sem nome)”` — aspas em volta de
-        // parênteses, que é a marca de placeholder da app: duas convenções
+        // parênteses, que é a marca de placeholder do app: duas convenções
         // empilhadas dizendo a mesma ausência. Nesse caso o texto volta a ser o
         // de hoje e quem responde "onde" é o marcador no mapa, que continua lá.
         if (place.flagType === 'DUPLICATE' && place.duplicado && place.duplicado.nome) {
@@ -6360,7 +6360,7 @@ function montarCard(place) {
     // (que é um UUID). Confirmado via HAR comparando URL do WME nativo.
     //
     // A URL é CANÔNICA, sem segmento de idioma (decisão do owner). Estava
-    // `/pt-BR/editor`: um editor que usa a app em francês clicava no ↗ e caía
+    // `/pt-BR/editor`: um editor que usa o app em francês clicava no ↗ e caía
     // num WME em português. O `/editor` cru responde 200 direto (medido, sem
     // redirect HTTP) e o Waze resolve o idioma pela conta de quem abriu — que é
     // exatamente o certo, porque quem decide não somos nós.
@@ -6404,7 +6404,7 @@ function montarCard(place) {
 //
 // Três decisões que não são gosto:
 //
-// 1. O VÉU É 35%, e o número tem escopo (gotcha #40). Mockups na app real, dois
+// 1. O VÉU É 35%, e o número tem escopo (gotcha #40). Mockups no app real, dois
 //    aparelhos × dois temas: sem véu os dois cards ficam com o MESMO peso — dois
 //    ✓ verdes igualmente acesos, e quem diz qual é o ativo é a posição, que
 //    durante o arraste é justamente o que está mudando. A 55% funciona no tema
@@ -6414,7 +6414,7 @@ function montarCard(place) {
 //    só e não um por tema.
 //
 // 2. ELE NASCE COM O AQUECIMENTO, não junto com o card da frente. A foto do
-//    card é o LCP da app, e montar o de fundo na mesma hora põe a foto do
+//    card é o LCP do app, e montar o de fundo na mesma hora põe a foto do
 //    PRÓXIMO pedido disputando banda com a que o editor precisa ver AGORA — o
 //    defeito exato que o `agendarAquecimento` já tinha medido e consertado
 //    (189 KB atropelando 12 KB). Pendurar na mesma espera é uma política só; uma
@@ -6529,7 +6529,7 @@ function montarCardDeFundo() {
     // tem outro. REPRODUZIDO aqui — caixa 359×337 nos dois, desenhada pra
     // 359×337 na frente e pra 400×240 no fundo, com o tile 48px fora do lugar
     // e uma faixa sem mapa embaixo. O card de fundo é a PROMESSA do que vem;
-    // promessa que muda ao virar realidade lê como a app tropeçando.
+    // promessa que muda ao virar realidade lê como o app tropeçando.
     //
     // Um redesenho basta, e ele reinstala o observer de quebra. Só quando o
     // mapa está VISÍVEL: escondido a caixa é 0 e cairíamos no mesmo fallback
@@ -6862,7 +6862,7 @@ const MapaLightbox = {
         document.body.style.overflow = '';
         // Consome a entrada de histórico quando NÃO foi o voltar que fechou —
         // sem isso sobra entrada morta e o próximo voltar não faz nada, a
-        // pessoa aperta de novo e sai da app (a mesma regra do lightbox).
+        // pessoa aperta de novo e sai do app (a mesma regra do lightbox).
         if (!viaHistorico) CamadaVoltar.consumir();
     },
 
@@ -7093,7 +7093,7 @@ function renderCardImages(card, place) {
         }
         if (mapaBox) mapaBox.classList.add('hidden');
         currentImgIdx = urls.indexOf(s.foto);
-        // A foto do card é o LCP da app, e o Lighthouse aponta que ela chega sem
+        // A foto do card é o LCP do app, e o Lighthouse aponta que ela chega sem
         // dica de prioridade (`priorityHinted: false`). Pré-carregar não dá — a
         // URL só existe depois da resposta da API —, mas dizer que ela é a mais
         // importante da página, dá. Faz par com o `fetchpriority="low"` do
@@ -7253,7 +7253,7 @@ function valorDeLista(v, campo) {
             const dias = v.days.length >= 7 ? t('card.oh.everyday') : v.days.map(nomeDoDia).join(', ');
             return `${dias} · ${v.fromHour}–${v.toHour}`;
         }
-        // Objeto que a app não conhece: em vez de JSON cru, `chave valor` com
+        // Objeto que o app não conhece: em vez de JSON cru, `chave valor` com
         // separador. Nenhuma chave e nenhum valor somem — a regra continua
         // sendo "feio, nunca invisível" — mas sem chaves, aspas e vírgulas, que
         // é o que fazia o editor pular a linha inteira. Medido no
@@ -7314,7 +7314,7 @@ function objetoLegivel(v, prof = 0) {
     return partes.length ? partes.join(' · ') : '{}';
 }
 
-// Quem pediu, de onde, e se veio sozinho. Três sinais que o Waze manda e a app
+// Quem pediu, de onde, e se veio sozinho. Três sinais que o Waze manda e o app
 // descartava — todos cabem na linha do criador, sem custar altura de card.
 //
 // Por que cada um decide algo:
@@ -7328,7 +7328,7 @@ function objetoLegivel(v, prof = 0) {
 // ganho de tempo que apareceu medindo a fila real.
 //
 // É PRIORIZAÇÃO, não filtragem, e a diferença importa: esconder os outros 126
-// faria a fila "esvaziar" depois dos 14 e a app mostraria "Tudo limpo!" com 126
+// faria a fila "esvaziar" depois dos 14 e o app mostraria "Tudo limpo!" com 126
 // pendentes — mentira. Aqui os do autor sobem pra frente e o resto continua
 // depois, na mesma ordem relativa. Nada some, nada mente, e o editor recebe
 // exatamente o que queria: a série do autor em sequência.
@@ -7423,8 +7423,8 @@ function renderSelosDeProcedencia(card, place) {
                      title: t('card.sameAuthor.acao'), acao: place.creatorId });
     }
     // Reincidência: quantos pedidos DESTE autor você já rejeitou. Rosa é a cor
-    // do ✕ em toda a app — reincidência é rejeição acumulada, então herda dele.
-    // Abaixo do limiar sai em cinza: a app CONTA, não acusa.
+    // do ✕ em todo o app — reincidência é rejeição acumulada, então herda dele.
+    // Abaixo do limiar sai em cinza: o app CONTA, não acusa.
     const reincidente = contagemDoAutor(place);
     if (reincidente >= 2) {
         selos.push({
@@ -7433,9 +7433,9 @@ function renderSelosDeProcedencia(card, place) {
             title: t('card.reincidencia.title', { n: reincidente }),
             // Vira BOTÃO sempre que o selo está VERMELHO — a cor é a promessa,
             // e selo vermelho sem toque é promessa quebrada. Vermelho quer dizer
-            // "a app está acusando esta pessoa"; se acusa, tem que haver pra onde
-            // ir. Abaixo do limiar o selo é cinza (a app CONTA sem acusar) e
-            // segue sendo span: não há decisão a tomar sobre quem ela não acusa.
+            // "o app está acusando esta pessoa"; se acusa, tem que haver pra onde
+            // ir. Abaixo do limiar o selo é cinza (o app CONTA sem acusar) e
+            // segue sendo span: não há decisão a tomar sobre quem ele não acusa.
             //
             // Já esteve amarrado TAMBÉM a `pedidosDoAutorNaFila(place).length > 1`,
             // e essa segunda condição estava errada — mas não pelo motivo óbvio.
@@ -7621,7 +7621,7 @@ function acoesTravadas() {
 }
 
 // Botão travado precisa PARECER travado: botão que não responde e parece normal
-// lê como app quebrada (M3/HIG). O `disabled` também tira da ordem do Tab e faz
+// lê como app quebrado (M3/HIG). O `disabled` também tira da ordem do Tab e faz
 // o leitor de tela anunciar. A contagem regressiva do banner diz por quanto.
 function aplicarTravaDeAcao() {
     const travado = acoesTravadas();
@@ -7825,7 +7825,7 @@ const coordDoLink = (n) => Number(n.toFixed(COORD_CASAS));
 // `venues=` e `tab=feature_editor` entraram a pedido do owner (2026-09-03): sem
 // eles o WME abria a SOLICITAÇÃO mas não selecionava o local, então quem clicava
 // pra corrigir ainda tinha que achar o lugar no mapa. Com eles, cai no editor do
-// local com a solicitação aberta — que é exatamente o que o ↗ promete, já que a
+// local com a solicitação aberta — que é exatamente o que o ↗ promete, já que o
 // app não edita dado de local por princípio.
 //
 // Os DOIS levam o `venueID`, e é contraintuitivo: `venueUpdateRequest` NÃO leva
@@ -8276,7 +8276,7 @@ function prefetchNextImage() {
 
 function showNoPlaces() {
     // O painel de fila vazia tem DOIS significados e a distinção é a flag —
-    // foi ela que faltou e fez a app dizer "Tudo limpo!" sobre 217 pedidos.
+    // foi ela que faltou e fez o app dizer "Tudo limpo!" sobre 217 pedidos.
     dfato('tela.vazia', { loadError: AppState.loadError, hasMore: AppState.hasMore,
                           serverTotal: AppState.serverTotal });
     if (AppState.loadError) dlogCapturarAuto('falhaAoCarregar');
@@ -8291,7 +8291,7 @@ function showNoPlaces() {
         // zerou o backlog). Mostra estado de erro com "Tentar novamente".
         noMore.classList.add('hidden');
         errEl.classList.remove('hidden');
-        // SEM CONEXÃO é coisa que a app SABE — `onLine === false` é confiável
+        // SEM CONEXÃO é coisa que o app SABE — `onLine === false` é confiável
         // nessa direção (o inverso não é: portal cativo diz true e mente). Então
         // ali ela AFIRMA em vez de aconselhar "verifique sua conexão", e promete
         // o que o gatilho do `online` cumpre. O botão FICA, decisão do owner
@@ -8315,7 +8315,7 @@ function showNoPlaces() {
             marcarBordaRolagem(noMore);
             noMore.dataset.bordaRolagem = '1';
         }
-        // Festa só quando o editor de fato zerou algo NESTA sessão. Abrir a app
+        // Festa só quando o editor de fato zerou algo NESTA sessão. Abrir o app
         // numa fila já vazia não é conquista — confete ali seria ruído.
         const tratou = (AppState.stats.read || 0) + (AppState.stats.rejected || 0) > 0;
         noMore.classList.remove('celebrate');
@@ -8324,7 +8324,7 @@ function showNoPlaces() {
             // computado e a animação não reinicia na segunda vez que a fila zera.
             void noMore.offsetWidth;
             noMore.classList.add('celebrate');
-            // "Tudo limpo" usa o MESMO critério do confete: abrir a app numa
+            // "Tudo limpo" usa o MESMO critério do confete: abrir o app numa
             // fila já vazia não é conquista.
             checarConquistas({ filaZerada: true });
         }
@@ -8441,7 +8441,7 @@ function estiloDaIdade(loc) {
 // Ao lado, na mesma linha, o rótulo de tipo diz "Novo local". A tela inteira
 // afirmava "local novo, de 9 minutos atrás" sobre um pedido de 2025-11-27 — e
 // foi exatamente assim que o owner relatou: a mesma solicitação "nova"
-// entrando toda vez que ele abre a app. Ele leu certo o que a app escreveu.
+// entrando toda vez que ele abre o app. Ele leu certo o que o app escreveu.
 // A mesma colisão existia em espanhol (`hace {n}m` × `hace {n}min`); inglês
 // (`mo`) e francês (` mois`) escapavam — o defeito era de DUAS línguas em
 // quatro, e o owner usa uma delas.
@@ -8450,14 +8450,14 @@ function estiloDaIdade(loc) {
 // meses cabe a 1 card em 370 (0,3% — 78% são horas, 22% dias). Mas com "mais
 // antigos primeiro" o card mais velho é POR DEFINIÇÃO o mais provável de cair
 // na faixa de meses, então o único rótulo ambíguo da fila era garantidamente o
-// PRIMEIRO da tela, toda vez que ele abria a app. Cada recurso certo sozinho.
+// PRIMEIRO da tela, toda vez que ele abria o app. Cada recurso certo sozinho.
 //
 // Havia um segundo buraco, este aritmético e nas QUATRO línguas: entre 360 e
 // 364 dias, `months` dava 12 (fora da faixa) e `years` dava `floor(360/365)` =
 // 0 — a tela mostrava **"há 0a"**. Janela de 5 dias, ninguém relatou porque é
 // rara, mesmo defeito de fundo: conta à mão que produz rótulo falso.
 //
-// O conserto NÃO é escolher abreviatura melhor: é usar o mecanismo que esta
+// O conserto NÃO é escolher abreviatura melhor: é usar o mecanismo que este
 // app JÁ usa pra idade de FOTO (`idadeDaFoto`), com o motivo já escrito lá —
 // `Intl.RelativeTimeFormat` resolve plural por idioma sozinho, e o projeto não
 // tem ICU. Duas mecânicas para o mesmo conceito é como elas divergem: o MESMO
@@ -8491,7 +8491,7 @@ function formatRelativeTime(ts) {
         if (days < 365) return f(-Math.round(days / 30), 'month');
         return new Date(ts).toLocaleDateString(loc, { year: 'numeric' });
     } catch (e) {
-        // Sem Intl (não deve acontecer no piso da app), a data crua ainda
+        // Sem Intl (não deve acontecer no piso do app), a data crua ainda
         // responde a pergunta — e nunca é ambígua.
         try { return new Date(ts).toLocaleDateString(loc); } catch (e2) { return null; }
     }
@@ -8500,10 +8500,10 @@ function formatRelativeTime(ts) {
 // ── Mensagem de erro que veio do servidor ─────────────────────────────────
 // O backend manda CHAVE (`errorKey`) + `errorVars`; a frase em `error` é só o
 // último recurso. Antes daqui o padrão era `result.error || t('...')`, e o `||`
-// fazia a string PORTUGUESA do servidor GANHAR da tradução: quem usava a app em
+// fazia a string PORTUGUESA do servidor GANHAR da tradução: quem usava o app em
 // inglês, espanhol ou francês lia português em todo erro de sessão, cookie,
 // rede ou race — e a tradução ao lado só entrava se o servidor não dissesse
-// nada. Era o buraco de i18n mais fundo da app, porque nenhuma auditoria de
+// nada. Era o buraco de i18n mais fundo do app, porque nenhuma auditoria de
 // dicionário enxerga string que chega pela rede.
 //
 // A frase crua continua no fim da cadeia de propósito: o service worker é
@@ -8524,7 +8524,7 @@ function msgDoServidor(result, textoFallback) {
 // pras estatísticas do perfil e pra imagem do Resumo do mês.
 //
 // O caso que originou a decisão: o cartão da patente nasceu formatado
-// (`3.040`) quatro linhas acima de números que sempre foram crus (`1430`), e a
+// (`3.040`) quatro linhas acima de números que sempre foram crus (`1430`), e o
 // app se contradizia na mesma tela. Havia dois consertos possíveis — formatar
 // tudo ou não formatar nada — e o owner escolheu o segundo, com o argumento de
 // que `1430` se lê igual em qualquer língua e `1.430` não.
@@ -8551,7 +8551,7 @@ async function callWithRetry(fn) {
     // SEM REDE não se retenta: as duas tentativas extras são 2 requisições e
     // ~5s de espera (1,5 + 3,5) que já nascem condenadas. Com a fila de saída
     // atrás, a ação não se perde por não insistir — ela sai quando a rede
-    // voltar. MEDIDO: ~509 bytes por tentativa, e offline a app fazia 3.
+    // voltar. MEDIDO: ~509 bytes por tentativa, e offline o app fazia 3.
     //
     // O teste é de UMA MÃO só, de propósito: `onLine === false` é confiável
     // pra "não tem rede"; `true` NÃO prova que tem (portal cativo de hotel diz
@@ -8683,7 +8683,7 @@ const CONQUISTAS_KEY = 'waze_places_conquistas';
 // existe nas outras três línguas sem virar frase ("gestionnaire d'immeuble" é
 // descrição, não patente). "Inspetor" vira Inspector/Inspecteur/Inspector
 // palavra por palavra. Os outros cinco atravessam — e a piada da limpeza fica,
-// porque "Lixeiro" no meio da escada É a identidade da app.
+// porque "Lixeiro" no meio da escada É a identidade do app.
 const PATENTES = [
     { id: 'aprendiz', emoji: '🧤', min: 0 },
     { id: 'gari',     emoji: '🧹', min: 100 },
@@ -8804,7 +8804,7 @@ function registrarAcaoConfirmada(actionType, place) {
     const g = carregarConquistas();
     g.seq = (g.seq || 0) + 1;
     salvarConquistas();
-    // O idioma entra no gesto, não na carga: "usou a app em 2 idiomas" é sobre
+    // O idioma entra no gesto, não na carga: "usou o app em 2 idiomas" é sobre
     // TRABALHAR em dois, não sobre abrir o seletor e voltar.
     registrarIdiomaUsado(typeof getLang === 'function' ? getLang() : '');
     const hora = new Date().getHours();
@@ -8954,7 +8954,7 @@ function checarConquistas(extra) {
     // Ele tinha razão de um jeito literal: conquista e desbloqueio do Desfazer
     // eram o MESMO código — `dispararConfeteNaFila()` + banner dourado de 20s.
     //
-    // MEDIDO nas quatro opções, com a app rodando. A coluna que decidiu não é
+    // MEDIDO nas quatro opções, com o app rodando. A coluna que decidiu não é
     // estética: é quanto do PLACAR some, e o projeto marca o placar com
     // `.nao-cobrir` porque cobrir número MENTE ("311" lê como "31").
     //   banner dourado (o de antes) → placar coberto 13 de 13 + confete na foto
@@ -8982,7 +8982,7 @@ function checarConquistas(extra) {
     if (subiu || novas.length) atualizarSeloDeConquista();
 }
 
-// Um PONTO, nunca um número (decisão do owner). Número convida a "zerar", e a
+// Um PONTO, nunca um número (decisão do owner). Número convida a "zerar", e o
 // app já tem a regra de não mostrar contador que a pessoa não consegue zerar —
 // conquista não é caixa de entrada. Mesmo desenho da pílula da presença
 // ("badged icon button" do M3), que já mede 44px e não custa layout: ele mora
@@ -8993,7 +8993,7 @@ function checarConquistas(extra) {
 // ponto aparece levando pra lugar nenhum (ou some levando pra algum).
 //
 // Lê do ARMAZENAMENTO, não do que estiver em memória: quem destravou ontem e
-// fechou a app voltaria sem nada até o primeiro swipe. Deslogado não carrega
+// fechou o app voltaria sem nada até o primeiro swipe. Deslogado não carrega
 // nada — isto é estado de quem entrou.
 function temConquistaNova() {
     if (!AppState.authenticated) return false;
@@ -9124,7 +9124,7 @@ function ligarConquistas(el) {
 //
 // Uma imagem 4:5 (1080×1350 — o formato que WhatsApp e Instagram não cortam)
 // gerada NO APARELHO, com canvas e zero dependência, a partir do histórico por
-// dia que a app já guarda. Celebra uma vez, quando a pessoa pede, e não
+// dia que o app já guarda. Celebra uma vez, quando a pessoa pede, e não
 // pressiona ninguém: não há sequência, meta nem ranking aqui — só o mês.
 //
 // Escura de propósito, e só escura: é pra saltar no fundo claro do WhatsApp.
@@ -9258,7 +9258,7 @@ function desenharResumo(ctx, d, tx, { qr = null, logo = null, hoje = null } = {}
         }
     }
 
-    // Rodapé: quem é, a frase, e o QR pra app
+    // Rodapé: quem é, a frase, e o QR pro app
     texto(tx.editor, PAD, 1218, 400, 24, '#94a3b8');
     // A frase pode não caber ao lado do QR em idioma mais longo: encolhe até caber.
     for (let tam = 24; tam >= 18; tam -= 2) {
@@ -9389,7 +9389,7 @@ function baixarResumo() {
 //  Recusa automática: os pedidos que chegam de um autor marcado
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// É o único recurso da app que decide sobre pedido que ainda não existia quando
+// É o único recurso do app que decide sobre pedido que ainda não existia quando
 // o editor escolheu. Duas coisas foram desenhadas contra o instinto:
 //
 // 1. PORTÃO. Só L6+AM ou staff — champs e staff do Waze, não qualquer editor.
@@ -9398,7 +9398,7 @@ function baixarResumo() {
 //    spammer persistente, não um toque apressado.
 //
 // 2. O PLACAR ANDA COM O ENVIO, não antes dele (`contarAoLandar`). Em todo o
-//    resto da app o placar é otimista, porque existe uma janela de Desfazer que
+//    resto do app o placar é otimista, porque existe uma janela de Desfazer que
 //    devolve o número. Aqui não há janela: os pedidos vão direto, um a um. Se
 //    a página morresse no meio de um laço já contado, o placar ficaria com
 //    números que nunca saíram — e não haveria quando reconciliar. Contando ao
@@ -9453,7 +9453,7 @@ async function aplicarRecusaAutomatica() {
     const n = alvos.length;
     const autor = alvos[0].createdBy || String(alvos[0].creatorId);
     // Saem da fila ANTES de enviar: senão o editor veria como card o pedido que
-    // a app já está rejeitando, e poderia agir nele — dois envios pro mesmo.
+    // o app já está rejeitando, e poderia agir nele — dois envios pro mesmo.
     const fora = new Set(alvos);
     const eraOAtual = AppState.currentPlace && fora.has(AppState.currentPlace);
     AppState.queue = AppState.queue.filter((x) => !fora.has(x));
@@ -9506,7 +9506,7 @@ async function aplicarRecusaAutomatica() {
 // mundo a tocar sem ler.
 //
 // O lote vai UM A UM, e isso não é preguiça: o lote atômico do WME falha
-// INTEIRO quando outro editor já tratou um dos itens (o mesmo caso que a app
+// INTEIRO quando outro editor já tratou um dos itens (o mesmo caso que o app
 // já sabe tratar como `already_processed`). N requisições que sempre terminam
 // valem mais que uma que às vezes morre inteira.
 const ICONE_OLHO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
@@ -9516,7 +9516,7 @@ const ICONE_OLHO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewB
 const ICONE_X = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
     + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>';
 // A lixeira é a MESMA da lista do Histórico — mesmo conceito, mesmo ícone em
-// toda a app. Era um `const lixo` local do `renderAutores`; virou módulo quando
+// todo o app. Era um `const lixo` local do `renderAutores`; virou módulo quando
 // a folha do autor passou a oferecer o mesmo esquecer.
 const ICONE_LIXO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
     + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"'
@@ -9589,7 +9589,7 @@ function abrirFolhaDoAutor(place) {
                       t('autor.sheet.rejeitar', { n: naFila.length }), t('autor.sheet.rejeitar.desc'), 'autorRejeitar')
             : '')
         // Mesmo portão da lista do Histórico: mostrar o interruptor desabilitado
-        // anunciaria um recurso que a pessoa não pode usar, e a app não faz isso.
+        // anunciaria um recurso que a pessoa não pode usar, e o app não faz isso.
         + (podeRecusarAutomaticoAqui() ? linhaAuto() : '')
         + linha(ICONE_LIXO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
                 t('stats.autores.esquecer'), t('autor.sheet.esquecer.desc'), 'autorEsquecer')
@@ -9622,7 +9622,7 @@ function abrirFolhaDoAutor(place) {
         closeModal('autorModal');
         esquecerAutor(chave);
         // O selo que abriu esta folha some agora: fechar deixando o `✕ N` na tela
-        // faria a app afirmar uma contagem que ela acabou de apagar.
+        // faria o app afirmar uma contagem que ela acabou de apagar.
         removeCurrentCardEl();
         showCurrentPlace();
     });
@@ -9653,11 +9653,11 @@ function rejeitarLoteDoAutor(place) {
 }
 
 // Um a um, e o resultado NÃO é um número só: cada pedido tem destino próprio.
-// "Já tratado por outro editor" conta como cumprido — é a mesma regra que a app
+// "Já tratado por outro editor" conta como cumprido — é a mesma regra que o app
 // usa no card único, e chamá-lo de falha aqui daria dois nomes à mesma coisa.
 // `silencioso` existe pra recusa automática: lá quem presta contas é o banner
 // (que já diz o número e oferece desligar), e abrir a folha por cima do card
-// seria a app interrompendo por algo que o editor não pediu.
+// seria o app interrompendo por algo que o editor não pediu.
 // `contarAoLandar` troca o placar OTIMISTA pelo placar que anda junto com o
 // envio. O lote manual (que tem janela de Desfazer) precisa do otimista: ele
 // mostra o resultado antes de mandar, e o Desfazer devolve. A recusa automática
@@ -9771,10 +9771,10 @@ function mostrarResultadoDoLote(conta) {
 // ruim — é dado pessoal de terceiro indo pro mapa público, e o mesmo autor
 // repete por semanas.
 //
-// O que a app NÃO consegue: distinguir esse autor do melhor contribuinte da
+// O que o app NÃO consegue: distinguir esse autor do melhor contribuinte da
 // fila pelos metadados. Medido — os dois são 100% foto, 1 foto por local, e o
 // ritmo se sobrepõe. O único sinal que separa é a SUA rejeição repetida, e
-// esse a app jogava fora: o histórico só guardava números por dia.
+// esse o app jogava fora: o histórico só guardava números por dia.
 //
 // ── POR QUE DUAS LISTAS, e não um mapa só ────────────────────────────────
 // Medido na fila real (4.008 pedidos, 12 países, varredura só-leitura):
@@ -9794,7 +9794,7 @@ const AUTORES_MAX_REINCIDENTES = 500;
 //
 // O número sai dos 30 DIAS logo abaixo, não de performance — e essa é a parte
 // que engana. O mapa expira por IDADE; o anel expira por CAPACIDADE. Se ele não
-// segurar 30 dias de rejeições, a app deixa de promover quem foi rejeitado no
+// segurar 30 dias de rejeições, o app deixa de promover quem foi rejeitado no
 // dia 1 e no dia 25, porque o id do dia 1 já saiu por lotação. A promessa que o
 // próprio card faz ("entra quem você rejeitou 2 vezes") quebra EM SILÊNCIO, e o
 // editor não tem como perceber.
@@ -9837,7 +9837,7 @@ const AUTORES_MAX_DIAS = 30;
 // com o teto são 1,2 tela em qualquer tamanho. Render nunca foi o problema
 // (22ms com 500) — o custo é o polegar.
 const AUTORES_VISIVEIS = 10;
-// Acima disto o selo passa de cinza (a app CONTA) a rosa (a app DESTACA).
+// Acima disto o selo passa de cinza (o app CONTA) a rosa (o app DESTACA).
 //
 // Era 10, e a justificativa escrita aqui dizia que "o maior lote de um mesmo
 // autor num único instantâneo foi 7", logo 10 exigiria repetição ENTRE buscas.
@@ -10004,10 +10004,10 @@ function renderAutores() {
             + `✕ ${a.n}</span>`
             // O interruptor da recusa automática só EXISTE pra quem passa no
             // portão: mostrá-lo desabilitado anunciaria um recurso que a pessoa
-            // não pode usar, e a app não faz isso em nenhum outro lugar.
+            // não pode usar, e o app não faz isso em nenhum outro lugar.
             + (podeRecusarAutomaticoAqui()
                 // O <label> de 44px é o ALVO; o interruptor em si tem 26px de
-                // altura (componente padrão da app). Nas Preferências o alvo vem
+                // altura (componente padrão do app). Nas Preferências o alvo vem
                 // da linha inteira ser um label — aqui não dá, porque a linha
                 // também tem a lixeira, e um toque perto dela alternaria o
                 // automático sem querer.
@@ -10026,7 +10026,7 @@ function renderAutores() {
             + `<span class="basis-full text-[0.6875rem] text-slate-500 dark:text-slate-400 leading-tight -mt-1.5 pb-1.5">`
             + `${escapeHtml(rejeitadoQuando(a.dia))}</span>`
             + `</div>`).join('')
-        // Largura cheia e 44px de alvo, como todo botão da app. O número vai NO
+        // Largura cheia e 44px de alvo, como todo botão do app. O número vai NO
         // rótulo porque "Ver mais" sozinho não diz se são 3 ou 300 — e é isso que
         // decide se vale o toque. O "Ver menos" existe porque sem ele expandir é
         // irreversível sem fechar o modal.
@@ -10045,7 +10045,7 @@ function renderAutores() {
         renderAutores();
         // Ao recolher, o botão sobe junto com a lista e o dedo fica sobre outra
         // coisa. Devolver a lista ao campo de visão é o mínimo pra não parecer
-        // que a app pulou pra outro lugar.
+        // que o app pulou pra outro lugar.
         if (!autoresExpandido) el.scrollIntoView({ block: 'nearest' });
     });
     // Delegação seria mais curta, mas o painel é re-renderizado inteiro a cada
@@ -10096,7 +10096,7 @@ function renderHistory() {
 }
 
 // Na PRIMEIRA vez que cada ação é confirmada pelo Waze, diz o que ela fez lá —
-// não o que ela quis dizer aqui. A app explicava a INTENÇÃO ("o pedido não deve
+// não o que ela quis dizer aqui. O app explicava a INTENÇÃO ("o pedido não deve
 // entrar no mapa") e nunca a CONSEQUÊNCIA, e as duas divergem no caso que mais
 // importa: marcar como lido NÃO aprova nada, mas o ✓ verde diz o contrário pra
 // quem chegou agora.
@@ -10126,7 +10126,7 @@ const CONSEQUENCIA_AVISADA = { reject: true, read: true };
 // **reverte o placar e descarta a ação**. O pedido continua no Waze e o editor
 // vê o número voltar atrás uns 5 segundos depois de já ter seguido em frente.
 //
-// A app não tinha NENHUMA noção de estar offline — nem uma chave no dicionário.
+// O app não tinha NENHUMA noção de estar offline — nem uma chave no dicionário.
 //
 // Só `transient` entra aqui, e a distinção não é detalhe:
 //   · `already_processed`/`not_found` → já é sucesso (outro editor chegou antes)
@@ -10142,8 +10142,8 @@ const SAIDA_KEY = 'waze_places_saida';
 // trecho existe pra acabar.
 const SAIDA_MAX = 1000;
 // Pausa entre os envios ao esvaziar. NÃO é número escolhido a dedo: o piso
-// MEDIDO da app sem Desfazer é 377 ms por pedido (40 pedidos reais, esperando o
-// card trocar de verdade). Esvaziar mais rápido que isso seria a app fazendo o
+// MEDIDO do app sem Desfazer é 377 ms por pedido (40 pedidos reais, esperando o
+// card trocar de verdade). Esvaziar mais rápido que isso seria o app fazendo o
 // que nenhum humano faz — e rajada é o padrão que faz um WAF marcar cliente.
 const SAIDA_RITMO_MS = 400;
 
@@ -10155,7 +10155,7 @@ const SAIDA_RITMO_MS = 400;
 // qualquer jeito; se está falhando por rede, a rede voltando faz a PRÓPRIA
 // retentativa em voo (1,5s e 3,5s) ter sucesso e o laço segue. Só o instante
 // entre a última tentativa falhar e o laço sair ficaria descoberto — e aí a
-// abertura da app, que é o outro gatilho, resolve. Guard que não distingue as
+// abertura do app, que é o outro gatilho, resolve. Guard que não distingue as
 // duas versões é decoração (a régua do #67), então a recoleta saiu em vez de
 // ser remendada até passar.
 let esvaziandoSaida = false;
@@ -10165,7 +10165,7 @@ let esvaziandoSaida = false;
 // túnel, elevador, 4G firmando — manda um `online` com a rede ainda ruim e outro
 // logo depois já firme. O primeiro entra, quebra no `transient` e SAI; o segundo
 // cai na guarda e some. Aí a fila fica presa com a rede ótima, e o próximo
-// gatilho é só na abertura seguinte da app — podem ser horas.
+// gatilho é só na abertura seguinte do app — podem ser horas.
 // MEDIDO: com o abort atrasado em 900ms pra alargar a janela, a fila ficava em 2
 // com `esvaziando:false` e `onLine:true` por toda a medição. É também o que o
 // runner do CI produz sozinho, por lentidão — aqui a janela é de ~30ms.
@@ -10308,7 +10308,7 @@ async function esvaziarFilaDeSaida() {
     }
     // O gatilho que chegou no meio é atendido AGORA. Não vira laço: a passada
     // seguinte só existe se alguém pedir de novo DURANTE ela, e quem pede é o
-    // evento `online` do navegador ou a abertura da app — nenhum dos dois é
+    // evento `online` do navegador ou a abertura do app — nenhum dos dois é
     // nosso, nenhum é polling. As guardas do topo (deslogado, `onLine === false`,
     // fila vazia) seguem valendo e param na primeira linha.
     if (saidaPedidaDeNovo) {
@@ -10347,7 +10347,7 @@ function registrarPousoDeSaida(actionType, place, result, item) {
 // ── PEDIDO JÁ DECIDIDO NÃO VOLTA COMO CARD ────────────────────────────────
 //
 // Relato de 2026-09-22, no modo avião: o owner tratou pedidos, eles foram pra
-// fila de saída, a app foi fechada e reaberta — e os MESMOS pedidos voltaram
+// fila de saída, o app foi fechado e reaberto — e os MESMOS pedidos voltaram
 // como card, com a fila de saída ainda segurando as decisões deles. Dava pra
 // decidir de novo: o segundo gesto contava outra vez no placar e mandava uma
 // SEGUNDA decisão pro Waze, que pode ser outra ("lido" na primeira, "rejeitado"
@@ -10479,7 +10479,7 @@ function semOsJaDecididos(places, desde) {
 }
 
 // Os DOIS gatilhos, e nenhum deles é polling (o free tier proíbe): o navegador
-// avisando que voltou, e a abertura da app. Quem ficou offline e fechou tudo
+// avisando que voltou, e a abertura do app. Quem ficou offline e fechou tudo
 // encontra a fila esperando na próxima vez que abrir.
 window.addEventListener('online', async () => {
     // EM ORDEM, nunca em paralelo — e a ordem é "trabalho do editor primeiro".
@@ -10507,7 +10507,7 @@ window.addEventListener('online', async () => {
     // oscilação de rede, e o free tier é restrição de projeto.
     // `resetQueue()` ANTES, e não é zelo: a falha deixou `hasMore = false`, e o
     // `fetchNextPage` sai na PRIMEIRA linha com isso (`if (!AppState.hasMore)
-    // return`). MEDIDO — sem o reset a app trocava "Falha ao carregar" por
+    // return`). MEDIDO — sem o reset o app trocava "Falha ao carregar" por
     // **"Tudo limpo!"** com a fila vazia, que é pior que o erro original. É
     // também o mesmo par que o botão "Tentar novamente" já usa: o caminho
     // automático e o manual têm que fazer a mesma coisa.
@@ -10522,14 +10522,14 @@ window.addEventListener('online', async () => {
 //
 // RELATADO pelo owner, no iPhone: modo avião, trata 3, sai do modo avião — e o
 // "3 esperando envio" fica parado. Ele então trata mais 2, que saem NA HORA, e
-// os 3 continuam lá. A app tinha a prova de rede na mão (duas requisições
+// os 3 continuam lá. O app tinha a prova de rede na mão (duas requisições
 // bem-sucedidas) e não a usava.
 //
 // REPRODUZIDO com sonda, e a causa não é o evento faltar: ele CHEGA quando o
 // rádio liga, e nesse instante a rede ainda não passa tráfego. O esvaziamento
 // entra, quebra no `transient` e sai — e nenhum gatilho novo vem depois, porque
-// os dois que existiam eram o `online` (já gasto) e a ABERTURA da app (e ela
-// nunca foi fechada). Consertar isso pelo evento é impossível: `onLine === true`
+// os dois que existiam eram o `online` (já gasto) e a ABERTURA do app (e ele
+// nunca foi fechado). Consertar isso pelo evento é impossível: `onLine === true`
 // não prova rede, e o projeto não confia nele em lugar nenhum.
 //
 // Não é polling e não custa requisição (o free tier é restrição de projeto):
@@ -10562,7 +10562,7 @@ API.aoProvarRede = () => {
 //
 // O Degrau 1 (fila de saída) fez a AÇÃO sobreviver: você desliza sem rede e o
 // envio sai sozinho depois. Isto faz o TRABALHO sobreviver: os pedidos, o mapa
-// e as fotos ficam no aparelho, e a app se vira sozinha no vai-e-volta de sinal
+// e as fotos ficam no aparelho, e o app se vira sozinho no vai-e-volta de sinal
 // de uma estrada.
 //
 // OPT-IN ESTRITO, e isso é o contrato: quem não marcou não paga NADA. Nem um
@@ -10580,16 +10580,16 @@ API.aoProvarRede = () => {
 // sem. As 226 fotos de uma fila custariam 1,76 GB contra ~1 GB de orçamento.
 //
 // ── O RELÓGIO ROLANTE ─────────────────────────────────────────────────────
-// A foto vale 60 min A PARTIR DO DOWNLOAD, e a app não estica isso: reaquecer
+// A foto vale 60 min A PARTIR DO DOWNLOAD, e o app não estica isso: reaquecer
 // uma foto viva sai do cache, custa zero e NÃO renova o prazo (medido). O que
-// renova é baixar de novo — e pra forçar isso a app troca o SUFIXO da URL
+// renova é baixar de novo — e pra forçar isso o app troca o SUFIXO da URL
 // (`?w=<janela>`), que o CDN do Waze aceita devolvendo bytes idênticos (medido
 // em 5 variantes) e que o navegador trata como entrada separada, com relógio
 // próprio (medido, com controle: a URL velha morre no prazo dela).
 //
 // Ciclo de 20 min = toda foto tem SEMPRE ao menos 40 min de vida quando o sinal
 // cai. Custa uma varredura completa a cada 20 min: ~41 MB/h no Brasil. A conta
-// só corre com a app ABERTA e COM SINAL — na sombra não há o que gastar.
+// só corre com o app ABERTO e COM SINAL — na sombra não há o que gastar.
 const OFFLINE_CICLO_MS = 20 * 60 * 1000;
 const OFFLINE_DB = 'waze_places_offline';
 const OFFLINE_STORE = 'fila';
@@ -10601,7 +10601,7 @@ const OFFLINE_TILES_CACHE = 'waze-places-tiles';
 // Os pedidos que POUSARAM no Waze depois de a fila guardada ser tirada (ver
 // `registrarPouso`). É o que falta pra reabertura sem rede não devolver como
 // card o que o editor já tratou COM rede. localStorage e não a base: a
-// gravação é pequena e tem que valer mesmo se a app morrer logo depois do
+// gravação é pequena e tem que valer mesmo se o app morrer logo depois do
 // pouso — transação de IndexedDB pode não fechar a tempo.
 const OFFLINE_POUSOS_KEY = 'waze_places_offline_pousos';
 // Teto POR CONSTRUÇÃO. A lista é podada toda vez que a fila guardada é
@@ -10613,14 +10613,14 @@ const OFFLINE_POUSOS_MAX = 1000;
 // pode atropelar a foto do card que o editor está olhando AGORA — é o defeito
 // que o `agendarAquecimento` já existe pra evitar.
 const OFFLINE_CONCORRENCIA = 3;
-// Sem gesto na tela por este tempo, a varredura dorme. Sem isto a app cobraria
-// dados de quem a deixou aberta no bolso.
+// Sem gesto na tela por este tempo, a varredura dorme. Sem isto o app cobraria
+// dados de quem o deixou aberto no bolso.
 const OFFLINE_OCIOSO_MS = 3 * 60 * 1000;
 
 let offlineVarrendo = false;
 let offlinePedidaDeNovo = false;
 let offlineUltimoGesto = Date.now();
-// A janela que a app SERVE — e ela NÃO é a hora atual. Só avança quando uma
+// A janela que o app SERVE — e ela NÃO é a hora atual. Só avança quando uma
 // varredura termina de aquecer tudo sob o sufixo novo. Sem isso, virar a janela
 // OFFLINE faria o card pedir uma URL que ninguém aqueceu e a foto sumiria com
 // a cópia boa parada no cache, a um sufixo de distância.
@@ -10631,7 +10631,7 @@ let offlineJanelaServida = null;
 let offlineUltimoAnuncio = 0;
 
 // ── Pedaço de mapa GUARDADO que falhou na tela ────────────────────────────
-// A app tira da tela o tile que falha (ícone quebrado no meio do mapa não
+// O app tira da tela o tile que falha (ícone quebrado no meio do mapa não
 // informa nada) — e com ele sumia também a PROVA: nas 6 capturas do relato de
 // 2026-09-22 não há tile quebrado nenhum, e nem poderia haver. Agora o mapa
 // conta quantos pediu e quantos falharam (`data-tiles-*`, lidos pela geometria
@@ -10701,7 +10701,7 @@ function urlDaFoto(u) {
 
 // ── IndexedDB, o mínimo ───────────────────────────────────────────────────
 // `localStorage` está fora: é SÍNCRONO e travaria a thread do swipe, que é o
-// valor central da app (medido no projeto: 16,5 ms por gravação com 10 mil
+// valor central do app (medido no projeto: 16,5 ms por gravação com 10 mil
 // registros). Aqui são 357 KB de uma vez.
 function offlineDB() {
     return new Promise((ok, erro) => {
@@ -10746,7 +10746,7 @@ async function offlineGravarFila(desde) {
 
 // A JANELA SERVIDA também fica guardada, na mesma base e com a mesma vida (o
 // `offlineEsquecer` apaga as duas). É ela que monta a URL que a varredura
-// aqueceu (`urlDaFoto`), e ela morava só em memória: a app REABERTA sem rede
+// aqueceu (`urlDaFoto`), e ela morava só em memória: o app REABERTO sem rede
 // nascia com a janela nula, pedia a foto CRUA — que ninguém aqueceu — e TODO
 // card de foto abria com "a foto precisa de sinal". É o caso do Android, que
 // encerra o app em segundo plano e o faz renascer justamente na sombra.
@@ -11049,7 +11049,7 @@ function atualizarLinhaDoOffline(feitos, total) {
 // minutos" por conta própria. Todos pegam carona no que já ia acontecer:
 //   1. a prova de rede (resposta que CHEGA — o mesmo gancho da fila de saída)
 //   2. o evento `online` do navegador
-//   3. a abertura da app
+//   3. a abertura do app
 //   4. o card que troca (o gesto de quem está trabalhando)
 // O relógio de 20 min NÃO é um timer: é a comparação de `offlineJanelaServida`
 // com a janela atual, feita quando um dos quatro acima acontece de qualquer
@@ -11067,7 +11067,7 @@ function offlineTalvezVarrer() {
 
 function offlineMarcarGesto() { offlineUltimoGesto = Date.now(); }
 
-// Abre a app sem rede: em vez da tela de falha, a fila que ficou guardada.
+// Abre o app sem rede: em vez da tela de falha, a fila que ficou guardada.
 // Todos os pedidos entram — inclusive os de FOTO, cuja foto a varredura
 // guardou no cache do navegador. O que não abrir de lá trava ✕/✓ no próprio
 // card (`marcarCardSemFoto`, pelo `onerror`), em vez de sair do baralho por
@@ -11079,7 +11079,7 @@ async function offlineTentarAbrirSemRede() {
     if (!guardada) return false;
     // A janela da última varredura COMPLETA, antes de qualquer card nascer: sem
     // ela o card pede a foto crua, que ninguém guardou. Só quando a memória não
-    // tem uma — com a app viva, a de memória é a mais nova.
+    // tem uma — com o app vivo, a de memória é a mais nova.
     const janelaGuardada = await offlineLerJanela();
     if (offlineJanelaServida === null) offlineJanelaServida = janelaGuardada;
     // A fila guardada é uma FOTO: não sabe do que foi decidido depois dela — na
@@ -11110,7 +11110,7 @@ async function offlineTentarAbrirSemRede() {
 }
 
 // O card de FOTO sem a foto: diz na PRÓPRIA CAIXA da imagem, e trava ✕ e ✓
-// deixando o ↑ vivo. Botão morto com cara de vivo lê como app quebrada, e
+// deixando o ↑ vivo. Botão morto com cara de vivo lê como app quebrado, e
 // decidir foto sem ver a foto é decidir no escuro.
 //
 // Chamada SÓ pelo `onerror` da foto em decisão — ou seja, depois de a imagem
@@ -11207,7 +11207,7 @@ function handleActionResult(actionType, place, result) {
 
 // ── Modo treino: errar sem consequência ───────────────────────────────────
 // Duas das três ações ESCREVEM no Waze em nome da pessoa, e a rejeição não tem
-// volta depois dos 3s. Numa app assim, poder errar de mentira vale mais que
+// volta depois dos 3s. Num app assim, poder errar de mentira vale mais que
 // qualquer texto explicativo — e é a única forma de "pegar na mão" que não cobra
 // nada de quem já sabe, porque só entra quem pede.
 //
@@ -11237,7 +11237,7 @@ const Treino = {
     // O `updateRequestID` que substitui o real. As duas escritas do card
     // (`validar-place` e `marcar-lido`) precisam de venueID E updateRequestID,
     // então um pedido de treino não endereça pedido nenhum: se algum dia
-    // vazasse, o Waze responderia 702 "not found on venue" — que a app já trata
+    // vazasse, o Waze responderia 702 "not found on venue" — que o app já trata
     // como "já tratado por outro editor". É a segunda camada; a primeira é o
     // guard no topo dos handlers.
     //
@@ -11353,8 +11353,8 @@ const Treino = {
         AppState.queue = this.cards();
         // Do TAMANHO da fila de treino, nunca de um número cravado. Estava em 3
         // enquanto o treino montava 4 cards (1 sintético + 3 reais): o "Restam"
-        // zerava com um card ainda na tela — o que a app MOSTRA divergindo do
-        // que ela ACEITA, que é a regra de ouro de consistência do projeto.
+        // zerava com um card ainda na tela — o que o app MOSTRA divergindo do
+        // que ele ACEITA, que é a regra de ouro de consistência do projeto.
         AppState.serverTotal = AppState.queue.length;
         AppState.currentPlace = AppState.queue[0];
         document.getElementById('treinoBanner')?.classList.replace('hidden', 'flex');
@@ -11427,7 +11427,7 @@ const Treino = {
         this.passo++;
         updatePendingCount();
         // No ÚLTIMO, o card fica na tela enquanto o aviso é lido: tirá-lo deixava
-        // 2,2s de área em branco antes do modal final, o que lê como app quebrada.
+        // 2,2s de área em branco antes do modal final, o que lê como app quebrado.
         // Quem limpa é o `sair()`.
         if (AppState.currentPlace) { removeCurrentCardEl(); showCurrentPlace(); return; }
         const efeito = document.getElementById('treinoFimEfeito');
@@ -11442,10 +11442,10 @@ window.Treino = Treino;
 
 // ── Presença no WME, de carona nas ações (fase 2) ─────────────────────────
 //
-// Quem usa a app aparece no mapa do WME, no lugar do card que está olhando. A
-// posição vai DENTRO da ação que a app já manda (rejeitar, marcar como lido) e
-// o servidor a escreve no WME com a marca de quem está na app
-// (`server/marca-app.mjs`). Zero requisição nova: a app roda no free tier do
+// Quem usa o app aparece no mapa do WME, no lugar do card que está olhando. A
+// posição vai DENTRO da ação que o app já manda (rejeitar, marcar como lido) e
+// o servidor a escreve no WME com a marca de quem está no app
+// (`server/marca-app.mjs`). Zero requisição nova: o app roda no free tier do
 // Cloudflare, e uma chamada por card seria a conveniência pagando com o recurso
 // contado (decisão do owner, 2026-09-23).
 //
@@ -11463,12 +11463,12 @@ window.Treino = Treino;
 //   · a VISIBILIDADE liga sozinha e em silêncio (decisão do owner). O perfil diz
 //     como ela está (`visivelNoWme`, de graça no `/Session`) e, se estiver
 //     desligada, a próxima ação a liga de carona. Quem decide é SÓ o "Ver quem
-//     está na app" (decisão do owner, 2026-09-24: por padrão a pessoa aparece,
-//     como a comunidade decidiu). Até ali, invisível no WME DEPOIS de a app já
+//     está no app" (decisão do owner, 2026-09-24: por padrão a pessoa aparece,
+//     como a comunidade decidiu). Até ali, invisível no WME DEPOIS de o app já
 //     a ter visto ligada desligava o interruptor por 9 dias; saiu. Consequência
 //     assumida: é a mesma chave nos dois lugares, então quem se esconde pelo WME
 //     e segue triando com o interruptor ligado volta a aparecer na ação
-//     seguinte — pra ficar invisível usando a app, o caminho é o interruptor.
+//     seguinte — pra ficar invisível usando o app, o caminho é o interruptor.
 //     E abrir o WME NÃO desliga ninguém (MEDIDO: ele só escreve no `moveend`,
 //     com a máscara só em `location`);
 //   · nada disso pode derrubar a ação: qualquer erro aqui vira "sem posição".
@@ -11501,9 +11501,9 @@ function presencaWmeDaAcao(placeDaAcao) {
         presencaWme.ultimaEm = agora;
         const presenca = { userId: String(id), lat: centro[0], lon: centro[1], pais: API.getCountry() };
         if (presencaWme.ligarNaProxima) presenca.visivel = true;
-        // Fase 3: a lista de quem usa a app volta de carona, e as conversas que
+        // Fase 3: a lista de quem usa o app volta de carona, e as conversas que
         // o aparelho já conhece vão junto pra ela incluir as que foram
-        // respondidas pelo WME (sem a marca da app).
+        // respondidas pelo WME (sem a marca do app).
         const conhecidos = window.Presenca?.conhecidos?.();
         if (Array.isArray(conhecidos) && conhecidos.length) presenca.conhecidos = conhecidos;
         return presenca;
@@ -11514,7 +11514,7 @@ function presencaWmeDaAcao(placeDaAcao) {
 
 function presencaWmeAoResponder(presenca, result) {
     try {
-        // A lista de quem usa a app e as conversas (fase 3), de carona. O
+        // A lista de quem usa o app e as conversas (fase 3), de carona. O
         // instante é o de quando a carona SAIU: mensagem que chegou ao vivo
         // depois disso a lista ainda não contou.
         if (presenca && result && result.presencaApp) window.Presenca?.aoCarona?.(result.presencaApp, presencaWme.ultimaEm);
@@ -11524,7 +11524,7 @@ function presencaWmeAoResponder(presenca, result) {
             presencaWme.enviadas++;
             if (presenca.visivel === true) presencaWme.ligarNaProxima = false;
             // O Waze devolve a posição gravada: se os dígitos voltarem diferentes,
-            // a marca de quem está na app se perdeu (o dia em que ele arredondar).
+            // a marca de quem está no app se perdeu (o dia em que ele arredondar).
             if (r.marca === false && !presencaWme.marcaPerdida) {
                 presencaWme.marcaPerdida = true;
                 dfato('presencaWme.marcaPerdida', {});
@@ -11536,12 +11536,12 @@ function presencaWmeAoResponder(presenca, result) {
     } catch (e) { /* diagnóstico nunca derruba a ação */ }
 }
 
-// O WME só INFORMA: invisível lá, com o interruptor da app ligado, vira "ligar
+// O WME só INFORMA: invisível lá, com o interruptor do app ligado, vira "ligar
 // na próxima ação". Nunca desliga o interruptor nem grava preferência — quem
-// decide é a pessoa, na app (ver o cabeçalho desta seção).
+// decide é a pessoa, no app (ver o cabeçalho desta seção).
 function presencaWmeAoCarregarPerfil(visivel) {
     if (typeof visivel !== 'boolean') return;   // servidor antigo: não decide nada
-    if (AppState.preferences.presenca === false) return;   // desligado: a app não mexe no WME
+    if (AppState.preferences.presenca === false) return;   // desligado: o app não mexe no WME
     presencaWme.ligarNaProxima = !visivel;
 }
 
@@ -11647,7 +11647,7 @@ function handleSkip() {
         const r = await callWithRetry(() => API.guardarPedido(place.venueID, place.updateRequestID, true));
         // Falhar aqui não corrompe contador nenhum — o Pular não mexe em
         // `serverTotal` e o `skipped` já subiu —, então não há o que reverter.
-        // O que não pode é falhar CALADO: a app prometeu guardar.
+        // O que não pode é falhar CALADO: o app prometeu guardar.
         if (!r || r.success !== true) {
             showToast(msgDoServidor(r, t('toast.guardarFalhou')), 'error');
             return;
@@ -11962,7 +11962,7 @@ function updateInFlightIndicator() {
         el.id = 'inFlightIndicator';
         document.body.appendChild(el);
     }
-    // Girando só quando está MESMO saindo. "Esperando" com giro seria a app
+    // Girando só quando está MESMO saindo. "Esperando" com giro seria o app
     // fingindo trabalho que não está acontecendo — e é justamente o estado em
     // que não há rede pra trabalhar.
     const enviando = AppState.inFlightActions > 0;
@@ -12093,8 +12093,8 @@ function updateStats(semAnimar = false) {
     updatePendingCount(semAnimar);
 }
 
-// ── Ponto no ícone da app instalada ──────────────────────────────────────
-// PONTO, não número, e a razão é honestidade: o badge só é escrito quando a app
+// ── Ponto no ícone do app instalado ──────────────────────────────────────
+// PONTO, não número, e a razão é honestidade: o badge só é escrito quando o app
 // RODA, então um número fica velho no instante em que a pessoa fecha. "118" no
 // ícone dois dias depois é uma afirmação falsa; o ponto diz "há trabalho", que
 // continua verdadeiro enquanto a fila não zera — e a fila medida do owner nunca
@@ -12120,8 +12120,8 @@ function atualizarPontoNoIcone() {
 // computador, e descobrir isso no meio da fila custa a sessão inteira de
 // triagem.
 //
-// O prazo é o do WAZE, não o da app, e a diferença é o que torna a conta
-// honesta. O `SESSION_TTL` da app (21 dias) é DESLIZANTE — o `loadSession`
+// O prazo é o do WAZE, não o do app, e a diferença é o que torna a conta
+// honesta. O `SESSION_TTL` do app (21 dias) é DESLIZANTE — o `loadSession`
 // renova a cada uso, então quem usa nunca chega perto dele e contar a partir
 // dali seria inventar um prazo que não vence. Já o cookie do Waze tem prazo
 // FIXO: MEDIDO com 3 chamadas de leitura seguidas, o valor do `_web_session`
@@ -12194,7 +12194,7 @@ function updatePendingCount(semAnimar = false) {
         el.textContent = '…';
         return;
     }
-    // FALHOU: a app NÃO SABE quantos restam, e zero não é "não sei" — zero é
+    // FALHOU: o app NÃO SABE quantos restam, e zero não é "não sei" — zero é
     // "tudo limpo", que é o oposto. Medido no relato do owner: a tela dizia
     // RESTAM 0 com 426 pedidos esperando do outro lado. O traço é o mesmo
     // símbolo que o deslogado já usa, então o editor não precisa aprender nada.
@@ -12208,7 +12208,7 @@ function updatePendingCount(semAnimar = false) {
 
 // D13: "de N na região". `serverBlocked` são pedidos que existem na região mas
 // cujo venue este editor não pode editar — o backend os tira da fila (senão o
-// editor via card que não consegue tratar). Sem essa linha, o número da app
+// editor via card que não consegue tratar). Sem essa linha, o número do app
 // parece "errado" contra o que o WME mostra. Só aparece quando há bloqueados.
 function updatePendingTotalHint() {
     const hint = document.getElementById('pendingTotalHint');
@@ -12491,7 +12491,7 @@ function setupAlturaDoHeader() {
 
 // Só estes abrem teclado ou seletor do sistema. É ALLOWLIST, não denylist, e a
 // direção importa: errar pra menos deixa um campo novo atrás do teclado (chato);
-// errar pra mais devolve o bug que motivou esta função — a app tem 12 checkboxes
+// errar pra mais devolve o bug que motivou esta função — o app tem 12 checkboxes
 // e 70 botões, e `openModal` foca o primeiro focável do modal, então um seletor
 // frouxo daria "campo focado" em quase toda abertura.
 const CAMPOS_COM_TECLADO = 'textarea, select, [contenteditable=""], [contenteditable="true"], '
@@ -12509,7 +12509,7 @@ function campoDeTextoFocado() {
 // Três defesas, uma por modo de falha, e só a primeira conserta o bug relatado:
 //
 // 1. PORTÃO NO FOCO. O inset existe pra sair da frente do TECLADO, e não há
-//    teclado sem campo focado. Sem o portão a app acreditava em qualquer leitura
+//    teclado sem campo focado. Sem o portão o app acreditava em qualquer leitura
 //    do `visualViewport`: no PWA do iOS de um editor ela ficou cravada em 388px
 //    com nada focado, e como o valor só é recalculado em `resize`/`scroll` do
 //    visualViewport — que o scroll-lock do modal (`body{overflow:hidden}`)
@@ -12746,7 +12746,7 @@ function renderDevModeSection() {
 // quatro do WME — atualização de detalhes, local marcado, excluir local e foto
 // sinalizada. Fica o registro do que ela custou enquanto esteve fechada atrás
 // do modo dev, porque a lição vale pro próximo gate: numa fila real de 137
-// pedidos, 135 eram REQUEST — o editor abria a app e via DOIS. Meça quanto da
+// pedidos, 135 eram REQUEST — o editor abria o app e via DOIS. Meça quanto da
 // fila um gate esconde antes de deixá-lo fechado mais um mês.
 //
 // Não há mais tipo gated por dev mode. A função fica como ponto de extensão
@@ -12961,7 +12961,7 @@ function destacarConquistaNova() {
     //
     // `center` e não `nearest` (que é o que a dica da conquista usa): ali o
     // gesto é da pessoa e rolar o mínimo evita mexer a tela sob o dedo; aqui
-    // NINGUÉM rolou nada, a app é que está apontando, e deixar o alvo colado
+    // NINGUÉM rolou nada, o app é que está apontando, e deixar o alvo colado
     // na borda inferior seria apontar pra beira da tela.
     novos[0].scrollIntoView({ block: 'center' });
     // O pulso é ENFEITE, e sai inteiro em reduced-motion: sem ele a pessoa
@@ -12989,7 +12989,7 @@ function destacarConquistaNova() {
 // o recurso é só espera. Dispara uma vez.
 //
 // O LIMIAR NÃO É NÚMERO ESCOLHIDO A DEDO: é um orçamento de tempo. Quanto da
-// vida do editor a app deixa evaporar antes de mencionar que existe um
+// vida do editor o app deixa evaporar antes de mencionar que existe um
 // interruptor. Um minuto é a régua — dá pra sentir, e ainda é um oitavo do que
 // 200 pedidos custam (~8 min).
 const ESPERA_DESPERDICADA_ANTES_DA_DICA_MS = 60000;
@@ -12999,7 +12999,7 @@ const ESPERA_DESPERDICADA_ANTES_DA_DICA_MS = 60000;
 // corre, acoesTravadas() barra botão, gesto e tecla. Então o limiar é o orçamento
 // dividido pelo custo de UMA janela — hoje 60000/3000 = 20, o mesmo valor de
 // antes, agora derivado. Mexer no UNDO_WINDOW_MS reajusta sozinho, porque o que
-// a app promete é o MINUTO, não o vinte.
+// o app promete é o MINUTO, não o vinte.
 //
 // Rank não entra aqui, de propósito: a cota do gate escala por rank porque mede
 // COMPETÊNCIA, e rank é proxy razoável disso. Isto mede PREFERÊNCIA revelada pelo
@@ -13067,7 +13067,7 @@ function renderPularGuardaPref() {
 
 // O texto do selo de arrastar-pra-cima. Fonte única porque são DOIS chamadores
 // (o card que nasce e a preferência que muda com o card já na tela), e a regra
-// de consistência do projeto cobra que o que a app FAZ e o que ela DIZ sejam a
+// de consistência do projeto cobra que o que o app FAZ e o que ele DIZ sejam a
 // mesma coisa: com a preferência ligada, o ↑ guarda — então ele tem que dizer.
 //
 // Escreve o ATRIBUTO e deixa o applyI18n traduzir, em vez de cravar o texto:
@@ -13171,7 +13171,7 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
         // Conquista: dourado, pra não se confundir com um "sucesso" qualquer.
         achievement: 'bg-gradient-to-r from-amber-700 to-amber-800',
         // Dica: cyan da marca. Não é conquista (não houve mérito), não é erro e
-        // não é confirmação — é a app contando algo que ela observou.
+        // não é confirmação — é o app contando algo que ele observou.
         hint: 'bg-gradient-to-r from-cyan-700 to-cyan-800'
     };
 

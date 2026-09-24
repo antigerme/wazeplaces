@@ -1,5 +1,5 @@
 // A Ajuda é uma coluna de seções no MESMO molde: um título e, logo embaixo, o
-// corpo (lista ou parágrafo). A seção "Quem está na app" nasceu fora dele
+// corpo (lista ou parágrafo). A seção "Quem está no app" nasceu fora dele
 // (#150, 2026-08-22) — lista em 16px, sem o `text-sm` das vizinhas (14px), e
 // título sem os dois-pontos — e ficou assim um mês, até o owner olhar a tela.
 // Nenhum teste via, porque nenhum comparava uma seção com as outras.

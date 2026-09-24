@@ -6,7 +6,7 @@
 //
 // O que vem do app.js (escapeHtml, distanciaKm, linkWmeDoPedido) é FATIADO de
 // lá, não reescrito: dublê mais generoso que o original mede um comportamento
-// que a app não tem.
+// que o app não tem.
 import { readFileSync } from 'node:fs';
 import { webcrypto } from 'node:crypto';
 

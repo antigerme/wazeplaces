@@ -1,32 +1,32 @@
-// Presença e conversa entre editores — quem mais está usando a app no mesmo
+// Presença e conversa entre editores — quem mais está usando o app no mesmo
 // país que você, e um jeito de falar com essa pessoa.
 //
 // ── POR QUE ISTO EXISTE ─────────────────────────────────────────────────────
-// Triar pedido é trabalho solitário: você abre a app, faz 40 swipes e fecha,
+// Triar pedido é trabalho solitário: você abre o app, faz 40 swipes e fecha,
 // sem sinal nenhum de que tem mais gente do outro lado fazendo o mesmo. A
 // companhia já estava lá — dá pra notar pedidos sumindo da própria fila —, só
 // não estava VISÍVEL. A pílula do cabeçalho é isso: você não está sozinho.
 //
 // ── DE ONDE VEM (fase 3 da troca da sala própria) ───────────────────────────
-// A presença e o chat são OS DO WME. O modelo é do owner, e ele não é "a app é
-// o WME": a infra é do Waze, mas a app mostra SÓ o que é entre usuários da app.
+// A presença e o chat são OS DO WME. O modelo é do owner, e ele não é "o app é
+// o WME": a infra é do Waze, mas o app mostra SÓ o que é entre usuários do app.
 //   · A LISTA é a de quem está online no WME, filtrada no servidor pela MARCA
-//     da app na posição (`server/marca-app.mjs`) e pelo país do filtro. Quem
+//     do app na posição (`server/marca-app.mjs`) e pelo país do filtro. Quem
 //     só usa o WME não aparece.
-//   · As CONVERSAS são as do chat do WME que começaram na app: a marca vai no
+//   · As CONVERSAS são as do chat do WME que começaram no app: a marca vai no
 //     contexto de toda mensagem que sai daqui, e o aparelho lembra as que já
 //     viu (`conhecidos`) pra que uma resposta dada pelo WME não tire a conversa
-//     da lista. Mensagem de quem só usa o WME: a app não mostra nada.
+//     da lista. Mensagem de quem só usa o WME: o app não mostra nada.
 //   · A conversa FICA GUARDADA no chat do Waze e aparece no chat do WME dos
 //     dois. Por isso não há mais "não chegou": quem saiu lê quando voltar.
 //
 // ── O QUE CUSTA (free tier) ─────────────────────────────────────────────────
 // Nada de polling. A lista chega (a) de carona nas ações ✕/✓, sem pedido
-// novo, e (b) ao abrir a app, ao abrir a lista e ao voltar do segundo plano —
+// novo, e (b) ao abrir o app, ao abrir a lista e ao voltar do segundo plano —
 // um pedido cada. Mensagem chegando custa ZERO: o tempo real vai do navegador
 // DIRETO ao Google (CORS aberto, medido), com um token que o `presenca-app`
 // devolve. Confirmar ao Google o que chegou também é de graça: os ids vão de
-// carona no próximo pedido que a app já faria.
+// carona no próximo pedido que o app já faria.
 //
 // ── O QUE FICA NO APARELHO ──────────────────────────────────────────────────
 // Uma chave só (`CHAT_KEY`): a instalação do chat (o "aparelho" pro Waze), as
@@ -53,7 +53,7 @@ const PRESENCA_CONVERSAS_NA_LISTA = 5;
 const PRESENCA_VOLTA_MIN_MS = 60_000;
 
 // O token do tempo real vale 24 h (medido). Renovar com uma hora de folga faz
-// a renovação cair num pedido que a app já faria, em vez de o fluxo morrer.
+// a renovação cair num pedido que o app já faria, em vez de o fluxo morrer.
 const PRESENCA_TOKEN_FOLGA_MS = 60 * 60 * 1000;
 // Pedir token de novo tem teto: um token recusado em laço seria um pedido à
 // nossa API a cada reconexão.
@@ -75,8 +75,8 @@ const PRESENCA_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const PRESENCA_ID = /^\d{1,19}$/;
 
 const Presenca = {
-    online: [],             // [{ id, nome, rank, lat, lon }] — quem usa a app no país
-    conversas: [],          // [{ id, nome, naoLidas, atividade, ultima }] — as da app
+    online: [],             // [{ id, nome, rank, lat, lon }] — quem usa o app no país
+    conversas: [],          // [{ id, nome, naoLidas, atividade, ultima }] — as do app
     pais: null,             // o país da lista na tela
     atualizadaEm: 0,        // quando a última lista SAIU (o pedido), não quando chegou
     pedindo: null,          // a promessa do `presenca-app` em voo (um por vez)
@@ -139,7 +139,7 @@ function presencaUuid() {
 // A instalação é o APARELHO pro chat do Waze. Ela é estável de propósito: o
 // token é por instalação, e o fluxo reentrega à MESMA instalação o que ela não
 // confirmou (medido). Sorteada por pedido, cada abertura seria um aparelho
-// novo, e o que chegou com a app fechada se perderia.
+// novo, e o que chegou com o app fechado se perderia.
 function chatInstalacao() {
     const g = chatGuardado();
     if (typeof g.inst === 'string' && PRESENCA_UUID.test(g.inst)) return g.inst;
@@ -282,7 +282,7 @@ function presencaAplicarLista(r, inicio, pais) {
         Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
         // O que chegou ao vivo ANTES de o pedido sair o servidor já contou.
         for (const [id, v] of Presenca.vivas) if (v.ultimaTs < inicio) Presenca.vivas.delete(id);
-        // Conversa que o servidor diz ser da app o aparelho passa a conhecer:
+        // Conversa que o servidor diz ser do app o aparelho passa a conhecer:
         // é isso que a mantém na lista quando a resposta vier pelo WME, sem a
         // marca. As mais recentes primeiro, pelo teto.
         chatConhecer([...Presenca.conversas].sort((a, b) => (b.atividade || 0) - (a.atividade || 0)).map((c) => c.id));
@@ -485,7 +485,7 @@ function presencaQuadro(fluxo, o) {
     const im = o.inboxMessage;
     if (!im) return;
     // TUDO que chega é confirmado — inclusive a mensagem de quem só usa o WME,
-    // que a app não mostra. Confirmar não marca nada como lido (isso é outro
+    // que o app não mostra. Confirmar não marca nada como lido (isso é outro
     // método) e não mexe na fila do WME da pessoa: a fila é da INSTALAÇÃO.
     if (im.messageId) chatGuardarAConfirmar(String(im.messageId).toLowerCase());
     if (im.messageType === 'USERDATA' || typeof im.message !== 'string') return;
@@ -578,7 +578,7 @@ function presencaLerMensagem(u8) {
 
 // O texto que vai pro Waze leva, além da pergunta, o nome do local e o link —
 // é o que quem lê pelo WME vê (o cartão vai num campo que o WME não mostra).
-// Na app, a linha e o link não aparecem: aparece o cartão, e a pergunta sai
+// No app, a linha e o link não aparecem: aparece o cartão, e a pergunta sai
 // daqui de volta (`presencaLegendaDoTexto`).
 function presencaTextoParaWme(legenda, card) {
     if (!card) return legenda;
@@ -629,7 +629,7 @@ function presencaMensagemDoFluxo(m, doLote) {
     if (!eu || !m) return;
     if (m.classe === 'recibo') {
         // Só o "lida" interessa: o "entregue" sairia de graça do aparelho de
-        // quem recebe, e a app não o mostra (decisão do owner: só Enviada e Lida).
+        // quem recebe, e o app não o mostra (decisão do owner: só Enviada e Lida).
         if (!m.recibo || m.recibo.tipo !== 'lida') return;
         const de = m.de && String(m.de.id);
         if (!de || de === eu || !PRESENCA_ID.test(de)) return;
@@ -646,7 +646,7 @@ function presencaMensagemDoFluxo(m, doLote) {
     if (!PRESENCA_ID.test(com) || com === eu) return;
     const daApp = (m.contexto && m.contexto.app === 'wazeplaces')
         || chatConhecido(com) || Presenca.conversas.some((c) => c.id === com);
-    // Quem só usa o WME: a app não mostra nada (decisão do owner).
+    // Quem só usa o WME: o app não mostra nada (decisão do owner).
     if (!daApp) return;
     Presenca.fluxoDiag.mensagens += 1;
     chatConhecer(com);
@@ -709,7 +709,7 @@ function presencaPedirNome() {
     Presenca.timers.nome = setTimeout(() => presencaAtualizar(), 3000);
 }
 
-// "Lida" só é verdade com a conversa ABERTA e a app NA TELA. Modal aberto com
+// "Lida" só é verdade com a conversa ABERTA e o app NA TELA. Modal aberto com
 // o celular no bolso não é leitura, e um recibo que mente é pior que nenhum.
 //
 // E "aberta" é a conversa VISÍVEL, não o `Presenca.aberta`: o `openModal` de
@@ -849,7 +849,7 @@ async function presencaMandar(com, msg) {
     msg.motivo = null;
     presencaRenderConversa();
     // O cartão vai num campo que o WME não mostra, com a pergunta curta pra
-    // prévia da lista. A MARCA da app quem põe é o servidor.
+    // prévia da lista. A MARCA do app quem põe é o servidor.
     const contexto = msg.card ? { legenda: String(msg.legenda || '').slice(0, 280), card: JSON.stringify(msg.card) } : undefined;
     const carona = chatCarona();
     // Uma tentativa só, sem `callWithRetry`: repetir sozinho pode duplicar a
@@ -992,7 +992,7 @@ function presencaRenderPilula() {
     const naoLidas = presencaNaoLidasTotal();
     // Sem ninguém e sem mensagem, a pílula SOME: ela não é botão de recurso, é
     // a notícia de que tem gente. Com mensagem NÃO LIDA ela fica, mesmo sem
-    // ninguém na app — a mensagem pode vir de quem já saiu, e sem a pílula a
+    // ninguém no app — a mensagem pode vir de quem já saiu, e sem a pílula a
     // conversa não teria caminho de volta.
     const some = !ligado || (n === 0 && naoLidas === 0);
     btn.classList.toggle('hidden', some);
@@ -1072,7 +1072,7 @@ function presencaRenderLista() {
         const pais = presencaNomeDoPais(Presenca.pais || API.getCountry());
         sub.textContent = pais ? t('presenca.sheet.sub', { pais }) : t('presenca.sheet.subSemPais');
     }
-    // Quem está na app, do mais perto pro mais longe: "a quem perguntar sobre
+    // Quem está no app, do mais perto pro mais longe: "a quem perguntar sobre
     // este lugar" é a pergunta que a distância responde.
     const gente = Presenca.online.map((p) => ({ p, d: presencaDistancia(p) }))
         .sort((a, b) => (a.d ? a.d.km : Infinity) - (b.d ? b.d.km : Infinity)
@@ -1087,7 +1087,7 @@ function presencaRenderLista() {
             </button>
         </li>`).join('');
 
-    // Conversas com quem NÃO está na app agora (quem está já aparece acima,
+    // Conversas com quem NÃO está no app agora (quem está já aparece acima,
     // com o selo das não lidas): as mais recentes, e toda que tiver não lida.
     const naApp = new Set(Presenca.online.map((p) => p.id));
     const conversas = Presenca.conversas.filter((c) => !naApp.has(c.id))
@@ -1211,7 +1211,7 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
     const titulo = document.getElementById('conversaTitle');
     if (titulo) titulo.textContent = nome;
 
-    // Onde a pessoa está. "Fora da app" não é aviso de problema: a mensagem
+    // Onde a pessoa está. "Fora do app" não é aviso de problema: a mensagem
     // fica guardada e ela lê quando voltar — por isso o campo nunca trava.
     const estado = document.getElementById('conversaEstado');
     if (estado) {
@@ -1249,7 +1249,7 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
     if (campo) campo.disabled = false;
 }
 
-// ── ligações com a app ──────────────────────────────────────────────────────
+// ── ligações com o app ──────────────────────────────────────────────────────
 
 function presencaAoVoltar() {
     if (!presencaPodeConectar()) return;

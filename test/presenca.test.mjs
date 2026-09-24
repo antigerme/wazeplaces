@@ -62,7 +62,7 @@ test('o NOME DA SALA nasce só no servidor — e o cliente não fala mais com a 
   for (const proibido of [/salaDaFila/, /new WebSocket/, /RTCPeerConnection/, /['"]\/sala['"]/, /API\.presenca\(/, /cracha/]) {
     assert.equal(proibido.test(CLIENTE), false, `o cliente voltou a usar a sala própria (${proibido})`);
   }
-  assert.match(CLIENTE, /API\.presencaApp\(/, 'o cliente parou de pedir a lista da app');
+  assert.match(CLIENTE, /API\.presencaApp\(/, 'o cliente parou de pedir a lista do app');
 
   const CORE = read('server/core.mjs');
   assert.match(CORE, /salaDaFila\(/, 'o servidor parou de usar a fonte única do nome da sala');
@@ -457,7 +457,7 @@ test('o núcleo da sala não fala com plataforma nenhuma', () => {
 test('a presença é a CONEXÃO, não um registro com prazo', () => {
   // Contrato publicado na Ajuda: "some assim que você sai". Isso só é verdade
   // enquanto ninguém guardar presença com TTL — no minuto em que a sala passar
-  // a lembrar de quem fechou a app, a Ajuda vira mentira nas 4 línguas.
+  // a lembrar de quem fechou o app, a Ajuda vira mentira nas 4 línguas.
   const src = read('server/presenca.mjs');
   assert.equal(/PRESENCA_TTL|setTimeout|setInterval/.test(src), false,
     'a sala passou a guardar presença com prazo: revisite a frase da Ajuda');

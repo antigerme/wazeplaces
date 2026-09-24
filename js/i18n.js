@@ -282,7 +282,7 @@ const I18N_DICT = {
     'card.focoAutor.aria': 'Mostrando primeiro os {n} pedidos de {autor}. Tocar para voltar à ordem normal.',
     'card.creatorRank.title': 'Nível de quem enviou o pedido',
     'card.source.title': 'De onde o pedido foi enviado',
-    // Convite pra instalar. A voz é a mesma do resto da app ("Mandou bem, wazer!"),
+    // Convite pra instalar. A voz é a mesma do resto do app ("Mandou bem, wazer!"),
     // e o texto diz o GANHO concreto — tela cheia dá mais espaço pra foto, que é o
     // que o editor olha pra decidir —, não só a graça.
     'install.invite': '🚗💨 Bota o Waze Places na tela inicial: abre num toque e sobra mais tela pra foto.',
@@ -574,7 +574,7 @@ const I18N_DICT = {
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
-    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    // `result.error || t(...)` — o português ganhava da tradução em todo o app.
     'srv.err.connection': 'Erro de conexão com o Waze',
     'srv.err.cookiesExpired': 'Cookies expirados ou inválidos',
     'srv.err.alreadyHandled': 'Já tratado por outro editor',
@@ -1155,7 +1155,7 @@ const I18N_DICT = {
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
-    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    // `result.error || t(...)` — o português ganhava da tradução em todo o app.
     'srv.err.connection': 'Connection error reaching Waze',
     'srv.err.cookiesExpired': 'Cookies expired or invalid',
     'srv.err.alreadyHandled': 'Already handled by another editor',
@@ -1737,7 +1737,7 @@ const I18N_DICT = {
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
-    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    // `result.error || t(...)` — o português ganhava da tradução em todo o app.
     'srv.err.connection': 'Error de conexión con Waze',
     'srv.err.cookiesExpired': 'Cookies caducadas o inválidas',
     'srv.err.alreadyHandled': 'Ya tratado por otro editor',
@@ -2318,7 +2318,7 @@ const I18N_DICT = {
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
-    // `result.error || t(...)` — o português ganhava da tradução em toda a app.
+    // `result.error || t(...)` — o português ganhava da tradução em todo o app.
     'srv.err.connection': 'Erreur de connexion à Waze',
     'srv.err.cookiesExpired': 'Cookies expirés ou invalides',
     'srv.err.alreadyHandled': 'Déjà traité par un autre éditeur',

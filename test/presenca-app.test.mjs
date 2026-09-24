@@ -1,10 +1,10 @@
-// A presença DA APP (fase 3): quem usa a app no país do filtro e as conversas
-// que são da app, lidas do WME — pela rota `presenca-app`, de carona nas ações
+// A presença DO APP (fase 3): quem usa o app no país do filtro e as conversas
+// que são do app, lidas do WME — pela rota `presenca-app`, de carona nas ações
 // e ao abrir uma conversa (`chat` com `acao: 'abrir'`).
 //
 // O modelo é do owner, e é ele que estes testes travam: a infra é do Waze, mas
-// a app mostra SÓ quem usa a app (a marca na posição, `marca-app.mjs`) e SÓ as
-// conversas que começaram na app. Conversa de quem só usa o WME não aparece.
+// o app mostra SÓ quem usa o app (a marca na posição, `marca-app.mjs`) e SÓ as
+// conversas que começaram no app. Conversa de quem só usa o WME não aparece.
 //
 // O Waze de mentira responde por MÉTODO e anota cada pedido. Os corpos de
 // resposta são montados com os mesmos construtores de protobuf do servidor; os
@@ -83,7 +83,7 @@ function conversa({ com, nome, ultima = null, naoLidas = 0, bloqueada = false, a
 }
 const conversas = (...cs) => g.junta(...cs.map(conversa));
 
-// Uma pessoa na app: posição com a marca e o país dela.
+// Uma pessoa no app: posição com a marca e o país dela.
 const naApp = (id, nome, pais, lat = -23.55, lon = -46.63, extra = {}) => ({ id, nome, ...marcarPosicao({ lat, lon }, pais), ...extra });
 // Quem SÓ usa o WME, no caso que a marca existe pra separar: a longitude cai,
 // por acaso, nos dígitos do país (1 em 1000), e só a latitude não tem o 47. Uma
@@ -119,7 +119,7 @@ async function comWaze(r, fn) {
 
 // ── filtros puros ────────────────────────────────────────────────────────────
 
-test('online da app: só quem tem a marca, no país do filtro, visível — e nunca eu', () => {
+test('online do app: só quem tem a marca, no país do filtro, visível — e nunca eu', () => {
   const eds = [
     { id: 183164343, nome: 'cafanha', rank: 4, visivel: true, ...marcarPosicao({ lat: -23.55, lon: -46.63 }, BRASIL) },
     { id: 12444348, nome: 'antigerme', rank: 5, visivel: true, ...marcarPosicao({ lat: -23.5, lon: -46.6 }, BRASIL) },
@@ -140,7 +140,7 @@ test('online da app: só quem tem a marca, no país do filtro, visível — e nu
   assert.deepEqual(filtrarOnlineDaApp(eds, { pais: FRANCA, eu: EU }).map((e) => e.nome), ['na_franca']);
 });
 
-test('conversas da app: a marca na última mensagem OU já conhecida no aparelho — a do WME não aparece', () => {
+test('conversas do app: a marca na última mensagem OU já conhecida no aparelho — a do WME não aparece', () => {
   const cs = g.lerConversas(conversas(
     { com: 183164343, nome: 'cafanha', naoLidas: 2, ultima: { id: 'a0000000-0000-1000-8000-000000000001', de: '183164343', para: EU, texto: 'Esse é duplicado?\n📍 Loja · Foto nova\nhttps://www.waze.com/editor?x', ctx: { app: APP_CONTEXTO, legenda: 'Esse é duplicado?', card: JSON.stringify({ name: 'Loja', updateTypeKey: 'NEW_PHOTO' }) } } },
     { com: 600, nome: 'so_wme', ultima: { id: 'a0000000-0000-1000-8000-000000000002', de: '600', para: EU, texto: 'Oi, vi você no mapa' } },
@@ -162,7 +162,7 @@ test('conversas da app: a marca na última mensagem OU já conhecida no aparelho
   assert.equal(minha.ultima.card, null);
 });
 
-test('conversas da app: prévia com teto e cartão que não se lê vira null — nunca derruba a lista', () => {
+test('conversas do app: prévia com teto e cartão que não se lê vira null — nunca derruba a lista', () => {
   const cs = g.lerConversas(conversas(
     { com: 700, nome: 'longa', ultima: { id: 'a0000000-0000-1000-8000-000000000006', de: '700', para: EU, texto: 'x'.repeat(900), ctx: { app: APP_CONTEXTO, card: '{isto não é json' } } },
   )).conversas;
@@ -283,7 +283,7 @@ test('presenca-app: os conhecidos do aparelho têm teto de 50 e só aceitam id d
 
 // ── de carona na ação ────────────────────────────────────────────────────────
 
-test('carona: a ação traz quem usa a app no país e as conversas da app, sem pedido novo à nossa API', async () => {
+test('carona: a ação traz quem usa o app no país e as conversas do app, sem pedido novo à nossa API', async () => {
   const pres = { userId: EU, lat: -23.5, lon: -46.6, pais: BRASIL, conhecidos: ['601'] };
   const { resultado, pedidos } = await comWaze({
     Read: () => respostaJson(200, '{}'),
@@ -317,7 +317,7 @@ test('carona: a lista que falha some da resposta — a ação e a escrita seguem
   assert.equal(resultado.status, 200);
   assert.equal(resultado.body.success, true);
   assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
-  assert.ok(!('presencaApp' in resultado.body), 'lista que falhou inteira não pode chegar como "ninguém na app"');
+  assert.ok(!('presencaApp' in resultado.body), 'lista que falhou inteira não pode chegar como "ninguém no app"');
 });
 
 // ── chat: abrir uma conversa ─────────────────────────────────────────────────

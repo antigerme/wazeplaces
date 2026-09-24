@@ -16,14 +16,14 @@ on:
   # Rodada SEMANAL na main, pedida pelo owner (2026-09-23). O CI usa o
   # Playwright MAIS NOVO (`PLAYWRIGHT_VERSAO: latest`), mas só quando alguma
   # coisa o dispara: semana sem PR era semana em que o Chrome e o Safari novos
-  # chegavam no celular dos editores sem ninguém testar a app neles. Aqui a
+  # chegavam no celular dos editores sem ninguém testar o app neles. Aqui a
   # main é testada toda segunda com o que houver de mais novo, com ou sem PR.
   #
   # Segunda 09:17 UTC (06:17 em Brasília), e o minuto não é enfeite: o GitHub
   # avisa que agendamento na hora cheia atrasa e pode ser DESCARTADO sob carga.
   # Se reprovar, o GitHub manda e-mail a quem mexeu por último no `cron` — o
   # owner, que faz o merge. E ele DESLIGA agendamento de repositório público
-  # parado há 60 dias; com a app em desenvolvimento isso não acontece, mas é
+  # parado há 60 dias; com o app em desenvolvimento isso não acontece, mas é
   # por isso que um dia a rodada pode simplesmente parar de aparecer.
   schedule:
     - cron: '17 9 * * 1'
@@ -86,7 +86,7 @@ jobs:
       - name: JS está em dia (npm run js)
         run: |
           # Mesmo contrato do CSS: js/min/ é GERADO (tools/gerar-js.mjs) e
-          # COMMITADO, porque quem só roda a app não faz `npm install`. O
+          # COMMITADO, porque quem só roda o app não faz `npm install`. O
           # index.src.html e o service-worker.js apontam pra ELE, não pro fonte —
           # então editar js/app.js e esquecer de regenerar não quebra nada
           # visível aqui e manda a versão VELHA pra produção. É o pior tipo de
@@ -134,7 +134,7 @@ jobs:
           # O Playwright MAIS NOVO, e com ele o Chrome da vez — é o que está
           # chegando no celular dos editores, porque o Chrome se atualiza
           # sozinho. Até 2026-09-23 isto era `1.49.1`, cravado havia ~21 meses:
-          # o CI testava no Chromium 131 enquanto a app rodava no 15x, e duas
+          # o CI testava no Chromium 131 enquanto o app rodava no 15x, e duas
           # diferenças de versão viraram "não reproduz aqui". Cada smoke imprime
           # a versão que rodou (tools/navegador.mjs); reproduzir é instalar ESSA.
           #
@@ -148,10 +148,10 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i --no-save "playwright@$PLAYWRIGHT_VERSAO"
           npx playwright install chromium
           npm run test:browser
-          # Smoke de FLUXO: a app como máquina de estados. O de cima mede TELAS
+          # Smoke de FLUXO: o app como máquina de estados. O de cima mede TELAS
           # (960 renders) e passou verde nos dois defeitos que o owner relatou
           # em 2026-08-23 — os dois só existem quando dois estados coexistem e
-          # a app se redesenha. Cobertura de tela não é cobertura de fluxo.
+          # o app se redesenha. Cobertura de tela não é cobertura de fluxo.
           npm run test:fluxo
           # Dois navegadores, uma sala, uma conversa de verdade. É o único teste
           # que exercita o WebRTC — e WebRTC não tem versão sem browser. Reusa o
@@ -229,7 +229,7 @@ jobs:
   # modo avião simulado do Playwright no WebKit derruba até a resposta que o
   # service worker tem guardada ("Load failed"), então o smoke mediria o
   # instrumento. Contraprova: com o servidor derrubado de VERDADE, o worker do
-  # WebKit serve a app do cache igual ao Chromium.
+  # WebKit serve o app do cache igual ao Chromium.
   #
   # O que isto NÃO é: o Safari do iPhone. É o mesmo motor (WebKit 26.x, o do
   # Safari 26), num Linux — pega o que é do MOTOR (CSS, JavaScript, WebRTC,

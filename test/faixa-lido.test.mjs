@@ -56,7 +56,7 @@ test('faixa: é linha de altura previsível — quem cede espaço é a FOTO', ()
 
 test('faixa: NÃO tem title — title não se alcança no celular', () => {
   // Mesma lição da linha "de N na região", que explica os bloqueados só num
-  // `title` e por isso não explica nada no aparelho onde a app roda. Aqui é
+  // `title` e por isso não explica nada no aparelho onde o app roda. Aqui é
   // ainda mais direto: a faixa EXISTE pra explicar, então esconder a explicação
   // num title seria não fazer nada.
   const tag = HTML.match(/<div class="card-read-banner[^"]*"[^>]*>/)[0];
@@ -66,7 +66,7 @@ test('faixa: NÃO tem title — title não se alcança no celular', () => {
 
 test('faixa: verde e ✓ — o MESMO conceito do botão de marcar como lido', () => {
   // Regra de consistência do projeto: mesmo conceito, mesmo ícone e mesma cor
-  // em toda a app (✕ rejeitar/rosa, ✓ lido/verde, ↑ pular/âmbar).
+  // em todo o app (✕ rejeitar/rosa, ✓ lido/verde, ↑ pular/âmbar).
   const bloco = CSS.slice(CSS.indexOf('.card-read-banner:not(.hidden)'),
                           CSS.indexOf('.dark .card-read-banner') + 240);
   assert.ok(bloco.length > 100, 'o bloco da faixa sumiu do styles.css');

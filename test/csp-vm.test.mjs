@@ -45,7 +45,7 @@ test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
       const r = await fetch('http://127.0.0.1:8471' + caminho);
       assert.equal(r.status, 200, `${caminho} não respondeu 200`);
       const csp = r.headers.get('content-security-policy');
-      assert.ok(csp, `${caminho}: a VM não mandou Content-Security-Policy — a app fica só com o <meta>`);
+      assert.ok(csp, `${caminho}: a VM não mandou Content-Security-Policy — o app fica só com o <meta>`);
       assert.match(csp, /script-src [^;]*'self'/,
         `${caminho}: a CSP da VM não restringe script`);
       assert.doesNotMatch(csp, /script-src[^;]*unsafe-inline/,
@@ -70,7 +70,7 @@ test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
 // "Failed to fetch"; com ele, volta 200. O `<meta>` do index NÃO alcança o
 // worker, então quem manda ali é exclusivamente este cabeçalho.
 //
-// É a causa raiz do mapa ter sumido da app de todo editor em v2026.09.21-08: o
+// É a causa raiz do mapa ter sumido do app de todo editor em v2026.09.21-08: o
 // worker interceptava o tile, pagava com `fetch(event.request)`, a CSP dele
 // barrava, e `respondWith` é PROMESSA DE RESPONDER — a imagem falhava onde sem
 // o service worker o navegador a teria carregado.
@@ -160,7 +160,7 @@ test('toda resposta de /api sai com no-store, no Node e no Worker', async () => 
   });
 
   // E o adaptador do Cloudflare tem que carimbar igual — os dois destinos
-  // precisam ser a MESMA app (gotcha #14).
+  // precisam ser o MESMO app (gotcha #14).
   const worker = readFileSync(join(RAIZ, 'worker', 'index.mjs'), 'utf8');
   const fn = worker.match(/const json = [\s\S]*?\}\);/);
   assert.ok(fn, 'sumiu o helper json() do worker');

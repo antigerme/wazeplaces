@@ -71,7 +71,7 @@
          real do chat do WME: o navegador abre o fluxo DIRETO lá (zero pedido
          à nossa API), e sem o host a mensagem nova simplesmente não chega —
          barrada antes da rede, sem erro na tela. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vCKtiKw0Fx2kWzq6k17nx0d/l+c5Gv2v9MdD0WpzRvE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://*.waze.com; connect-src 'self' https://www.waze.com https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com https://instantmessaging-pa.googleapis.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-quzrIZ27j7FNwTF7T/940jV0pWHxlsSbeQmnlqM5RhE=' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://*.waze.com; connect-src 'self' https://www.waze.com https://venue-image.waze.com https://social-row.waze.com https://cloudflareinsights.com https://instantmessaging-pa.googleapis.com; worker-src 'self' blob:; base-uri 'self'; form-action 'self'; object-src 'none';">
     <title>Waze Places - Validação</title>
 
     <!-- Inter é auto-hospedada (@font-face em css/styles.css → fonts/*.woff2).
@@ -174,7 +174,7 @@
          CSS. Inline ele custa zero requisição e roda antes de tudo.
          MEXEU AQUI? o hash muda. `test/layout.test.mjs` recalcula e reprova se
          as duas cópias da CSP (esta meta e o _headers) não tiverem o novo —
-         sem isso o tema seria BLOQUEADO e a app abriria no esquema errado. -->
+         sem isso o tema seria BLOQUEADO e o app abriria no esquema errado. -->
     <script>
         (function () {
           try {
@@ -185,7 +185,7 @@
             if (t === 'dark') document.documentElement.classList.add('dark');
             // Marca o claro EXPLICITAMENTE pra a media query do styles.css saber que
             // não deve pintar escuro (ver o comentário lá). Sem isto, quem escolheu
-            // claro num sistema escuro veria fundo escuro por baixo de uma app clara.
+            // claro num sistema escuro veria fundo escuro por baixo de um app claro.
             else document.documentElement.classList.add('tema-claro');
             // As duas metas com `media` já acertam quando o tema SEGUE o sistema.
             // Só há o que corrigir quando a pessoa ESCOLHEU o contrário do sistema —
@@ -208,7 +208,7 @@
             // MEDIDO, mesma rede, variando só a CPU: 1x e 4x sem flash; 8x mostra
             // a tela de login por 573ms; 12x por 949ms; 20x por 2131ms. No
             // desktop o JS ganha por 2ms — foi por isso que nunca apareceu aqui,
-            // e aparece "quase toda vez" no celular do owner, que abre a app
+            // e aparece "quase toda vez" no celular do owner, que abre o app
             // várias vezes por dia com sessão válida de 21 dias.
             //
             // A decisão não depende de rede nem de nada assíncrono: o token está
@@ -244,7 +244,7 @@
                     <p id="userName" class="text-xs font-bold text-slate-700 truncate dark:text-slate-200"></p>
                     <p id="userRank" class="text-[0.6875rem] text-slate-500 uppercase tracking-wider truncate dark:text-slate-400"></p>
                 </div>
-                <!-- `fetchpriority="low"` porque esta é a imagem MAIS PESADA da app e a
+                <!-- `fetchpriority="low"` porque esta é a imagem MAIS PESADA do app e a
                      menos importante: é exibida a 32px e pesa MEGABYTES. O Waze mudou o
                      host em setembro/2026 e o tamanho subiu junto — MEDIDO nos dois:
                      `social-row.waze.com/SocialMediaServer/images/profile/<id>` devolvia
@@ -366,7 +366,7 @@
                                     <span data-i18n="auth.autoLogin.cta">Instalar na Chrome Web Store</span>
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                 </a>
-                                <!-- "Instalei… e agora?" — o beco sem saída medido. A app pergunta
+                                <!-- "Instalei… e agora?" — o beco sem saída medido. O app pergunta
                                      à extensão UMA vez, no carregamento, e só espera 350ms; e o
                                      `ponte.js` não é injetado numa aba que já estava aberta. Ou
                                      seja: quem instala olhando pra esta tela fica aqui pra sempre.
@@ -411,9 +411,9 @@
                     </button>
                 </div>
 
-                <!-- A app se mostra sem exigir login. Quem chega aqui está
+                <!-- O app se mostra sem exigir login. Quem chega aqui está
                      sendo convidado a instalar uma extensão ou exportar cookies
-                     sem nunca ter visto a tela — e a única prova do que a app é
+                     sem nunca ter visto a tela — e a única prova do que o app é
                      está atrás do login. Fica DEPOIS das opções, não antes: em cima ela
                      empurrava o botão principal pra fora da primeira tela no
                      iPhone (medido: a ação principal ia de 441 pra 735px numa
@@ -519,7 +519,7 @@
                      aviso flutuante. Antes ele era um toast e o modal só abria 2,2s
                      depois pra dar tempo de ler — e nesses 2,2s a área do card ficava
                      VAZIA, porque a animação do swipe já tinha tirado o card da tela.
-                     Tela em branco lê como app quebrada. -->
+                     Tela em branco lê como app quebrado. -->
                 <p id="treinoFimEfeito" class="hidden text-sm text-slate-700 bg-slate-100 border border-slate-200 rounded-xl p-3 mb-4 leading-relaxed text-left dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200"></p>
                 <p class="text-sm text-slate-600 mb-6 leading-relaxed dark:text-slate-300" data-i18n="treino.fim.body">Nada disso foi enviado ao Waze. Agora vale de verdade — e o Desfazer te dá alguns segundos em cada ação.</p>
                 <button id="treinoFimOk" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="treino.fim.cta">Ir para a fila</button>
@@ -530,7 +530,7 @@
             <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.logout.title">Sair?</h3>
                 <p class="text-sm text-slate-500 mb-3 dark:text-slate-400" data-i18n-html="modal.logout.body">Sua sessão será encerrada e <strong>todos os dados locais</strong> (cookies, estatísticas, filtros e preferências) serão apagados deste dispositivo. Esta ação não pode ser desfeita.</p>
-                <!-- Sair da app NÃO invalida os cookies no Waze. Quem sai preocupado
+                <!-- Sair do app NÃO invalida os cookies no Waze. Quem sai preocupado
                      com privacidade pode concluir que cortou o acesso — não cortou.
                      Dizer isso aqui é o único momento em que a informação chega a
                      quem precisa dela. -->
@@ -989,8 +989,8 @@
         <!-- O pedido que CHEGOU pela conversa. SÓ LEITURA, e isso é decisão:
              ele não está na fila de quem recebe, então ✕ ↑ ✓ aqui abririam um
              caminho de ação novo, com corridas próprias, sobre um pedido que a
-             pessoa não tem. Quem quiser agir abre o ↗ — que é o que a app já
-             manda fazer pra tudo que ela não decide. -->
+             pessoa não tem. Quem quiser agir abre o ↗ — que é o que o app já
+             manda fazer pra tudo que ele não decide. -->
         <!-- Resumo do mês: a imagem que a pessoa manda no grupo. Folha de baixo
              como a do pedido; a imagem tem teto de altura pra os dois botões
              ficarem na tela sem rolar. Dismissiva à esquerda (Baixar, o caminho
@@ -1118,7 +1118,7 @@
             </div>
 
             <!-- A ALTURA do card não mora aqui: ela é a sobra da janela, calculada
-                 pela cadeia de flex em css/styles.css ("A app cabe na tela"). Um
+                 pela cadeia de flex em css/styles.css ("O app cabe na tela"). Um
                  `h-[min(80dvh,640px)]` aqui vinha de uma fração da JANELA e
                  ignorava os 152px (219 no aparelho estreito) já gastos acima —
                  era o que jogava a barra ✕/↑/✓ pra baixo da dobra. Classe de
@@ -1192,7 +1192,7 @@
                         </button>
 
                         <!-- Convite pra instalar. Aparece AQUI porque este é o único momento
-                             da app em que o editor TERMINOU algo: não há próxima ação
+                             do app em que o editor TERMINOU algo: não há próxima ação
                              esperando, e a tela já é de festa (o mesmo motivo do confete).
                              Convite em qualquer outro lugar disputaria com o gesto.
                              Some sozinho quando já está instalado (display-mode: standalone
@@ -1658,7 +1658,7 @@
                     <p class="text-sm" data-i18n="help.security.body">Os cookies são criptografados no servidor com chave secreta e descartados após 21 dias sem uso. O cliente só guarda um token de sessão, que pode ser invalidado a qualquer momento pelo botão de "Sair".</p>
                 </div>
 
-                <!-- Aviso de privacidade. A app pede os cookies de sessão do editor
+                <!-- Aviso de privacidade. O app pede os cookies de sessão do editor
                      — credenciais que permitem agir no Waze em nome dele — e até
                      aqui não havia UMA linha escrita dizendo o que é guardado, por
                      quanto tempo e como apagar. GDPR Art. 13 e LGPD Art. 9 pedem
@@ -1746,7 +1746,7 @@
          contrário. O contêiner não recebe toque; só o botão — senão a caixa
          invisível engole o gesto do card (gotcha #26).
          Nasce EMBAIXO DO CABEÇALHO, não no rodapé: medido, o rodapé o punha
-         por cima da barra ✕ ↑ ✓ (a ação principal da app) e dentro da faixa do
+         por cima da barra ✕ ↑ ✓ (a ação principal do app) e dentro da faixa do
          toast — que é justamente o aviso que se quer registrar. Aqui em cima
          ele cai sobre o canto vazio da foto, e ainda dá pra arrastar. -->
     <div id="devFab" class="hidden fixed z-[68] pointer-events-none" style="right: 12px; top: calc(var(--header-h, 4rem) + 8px)">

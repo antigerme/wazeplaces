@@ -59,7 +59,7 @@ function formatarNetscape(cookies) {
 // `region` é obrigatório na API. `countryId` NÃO é usado pelo `testar-cookies`
 // — a v0.0.3 mandava 30 (Brasil) e o servidor ignorava. Sai daqui: mandar um
 // país fixo num endpoint que não o lê só sugeria que a extensão é brasileira,
-// e a app atende qualquer país onde o editor tenha permissão.
+// e o app atende qualquer país onde o editor tenha permissão.
 async function trocarPorToken(cookiesTxt) {
   const resp = await fetch(`${API_BASE}/api/testar-cookies`, {
     method: 'POST',
@@ -98,16 +98,16 @@ async function autenticar(urlDaAba) {
 }
 
 chrome.runtime.onMessage.addListener((req, sender, responder) => {
-  // Pedido vindo da PONTE (a app pediu sessão). Devolve o token pra ela, sem
-  // abrir aba nem gravar nada: quem guarda é a própria app, no localStorage
-  // dela. Guardar aqui também era o que obrigava o `location.reload()`.
+  // Pedido vindo da PONTE (o app pediu sessão). Devolve o token pra ela, sem
+  // abrir aba nem gravar nada: quem guarda é o próprio app, no localStorage
+  // dele. Guardar aqui também era o que obrigava o `location.reload()`.
   if (req.action === 'autenticar') {
     autenticar(sender.tab ? sender.tab.url : null).then(responder);
     return true;
   }
 
   // Pedido vindo do botão no WME. Mesma autenticação; a diferença é que aqui
-  // ainda não existe aba da app, então o token vai por `chrome.storage` e a
+  // ainda não existe aba do app, então o token vai por `chrome.storage` e a
   // ponte o entrega assim que a aba abre.
   if (req.action === 'abrirPlaces') {
     autenticar(sender.tab ? sender.tab.url : null).then((r) => {
@@ -125,11 +125,11 @@ chrome.runtime.onMessage.addListener((req, sender, responder) => {
 });
 
 // ── Quem instala com a aba do Places já aberta ───────────────────────────
-// O beco sem saída que o owner mediu: a app pergunta à ponte UMA vez, no
+// O beco sem saída que o owner mediu: o app pergunta à ponte UMA vez, no
 // carregamento, com 350ms de janela — e o Chrome NÃO injeta content script numa
 // aba que já estava aberta. Resultado: quem instala olhando pra tela de entrada
 // ficava ali pra sempre. Recarregar a aba resolve os dois lados de uma vez: a
-// ponte entra e a app pergunta de novo.
+// ponte entra e o app pergunta de novo.
 //
 // NÃO PRECISA DE PERMISSÃO NOVA, e isso foi medido antes de escrever a linha:
 // `chrome.tabs.query({url})` é autorizado pelo `host_permissions` que já

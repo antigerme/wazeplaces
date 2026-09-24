@@ -26,7 +26,7 @@
 // Decidiu manter? Empurre o `revisarEm` — ato deliberado e datado, não um
 // silêncio. Decidiu remover? Tire o marcador do código e a entrada daqui.
 //
-// A ÉPOCA IMPORTA: a app não está em produção — todos são testadores e podem
+// A ÉPOCA IMPORTA: o app não está em produção — todos são testadores e podem
 // zerar o app se preciso (decisão do owner, 2026-09-10). Isso encurta o prazo,
 // porque a cauda de quem some deixa de custar. O precedente já estava no código
 // antes de virar regra: o `loadSession` DESCARTA sessão no formato anterior em
@@ -54,7 +54,7 @@ export const MIGRACOES = [
         + '— e o mesmo que tirou o "onde" do Resumo do mês. Balde gravado '
         + 'ANTES disso não tem o campo, e não existe como descobrir onde '
         + 'aquele trabalho foi feito: ele simplesmente não conta.',
-    removerQuando: 'Todo aparelho tiver aberto a app uma vez depois de '
+    removerQuando: 'Todo aparelho tiver aberto o app uma vez depois de '
         + 'v2026.09.14-01, porque a partir daí todo balde NOVO nasce com '
         + '`onde`. Os baldes velhos continuam sem — mas eles expiram sozinhos '
         + 'pela poda de `HISTORY_MAX_DIAS` (400 dias), e até lá o `|| {}` é '
@@ -77,7 +77,7 @@ export const MIGRACOES = [
         + 'nos 7 diagnósticos guardados: 3 precisam, e DOIS deles são formato '
         + '3 — inclusive o mais recente do owner, com 395 pedidos.',
     removerQuando: 'Os diagnósticos guardados deixarem de interessar. **Não** '
-        + 'expira por uso da app, e é por isso que ele sobreviveu à limpeza de '
+        + 'expira por uso do app, e é por isso que ele sobreviveu à limpeza de '
         + '2026-09-10: "todos são testadores e podem zerar o app" vale pra '
         + 'APARELHO, e um arquivo já enviado não se zera — ele está no disco e '
         + 'no WhatsApp, e é justamente o que se usa pra comparar antes/depois. '

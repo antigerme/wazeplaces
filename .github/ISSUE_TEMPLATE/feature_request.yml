@@ -7,7 +7,7 @@ body:
       value: |
         Ideias de quem usa de verdade são as melhores. Só um lembrete do escopo:
 
-        **A app nunca aprova dados de local** — nome, categoria, endereço, posição. Isso exige ajuste no mapa pelo WME oficial (por isso todo card tem o link "↗ abrir no WME"), e sugestões de "aprovar isso pela app" ficam fora por decisão de produto.
+        **O app nunca aprova dados de local** — nome, categoria, endereço, posição. Isso exige ajuste no mapa pelo WME oficial (por isso todo card tem o link "↗ abrir no WME"), e sugestões de "aprovar isso pelo app" ficam fora por decisão de produto.
 
         **Foto nova é a única exceção** e já existe: ampliando a foto dá pra aprovar ou excluir ali mesmo (para L6 + Area Manager ou staff).
 

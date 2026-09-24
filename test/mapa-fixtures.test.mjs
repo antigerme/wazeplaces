@@ -6,7 +6,7 @@
 // verificação é pura, então cabe na suíte de zero dependência em vez de
 // depender de browser.
 //
-// Ironia que motivou o arquivo: o mapa era o recurso mais novo da app e o
+// Ironia que motivou o arquivo: o mapa era o recurso mais novo do app e o
 // menos coberto contra dado de verdade.
 
 import test from 'node:test';
@@ -44,7 +44,7 @@ test('todo pedido real de 6 países produz um mapa desenhável', () => {
   assert.equal(comMapa, FIXTURES.length * CAIXAS.length);
 });
 
-test('nenhum marcador cai fora da caixa — nem os que a app decidiu não desenhar', () => {
+test('nenhum marcador cai fora da caixa — nem os que o app decidiu não desenhar', () => {
   for (const f of FIXTURES) {
     const pts = pontosDo(f);
     for (const [nome, w, h] of CAIXAS) {

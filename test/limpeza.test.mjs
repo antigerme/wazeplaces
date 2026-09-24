@@ -1,4 +1,4 @@
-// Auditoria de sobras — o que a app deixa para trás quando ninguém está olhando.
+// Auditoria de sobras — o que o app deixa para trás quando ninguém está olhando.
 //
 // Nada aqui quebra em uso normal: o QR fica desenhado depois de fechar, o
 // timer segue rodando, o histórico cresce um balde por dia. Não há erro no

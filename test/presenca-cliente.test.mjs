@@ -57,19 +57,19 @@ test('leitor do fluxo: cada objeto sai inteiro, com o texto cortado em QUALQUER 
   assert.deepEqual([...texto].flatMap((ch) => ler(ch)), objetos);
 });
 
-// ── só o que é da app, e nada contado duas vezes ────────────────────────────
+// ── só o que é do app, e nada contado duas vezes ────────────────────────────
 
 test('fluxo: mensagem de quem SÓ usa o WME não aparece — mas é confirmada', async () => {
   const c = novoCliente();
   const bytes = await bytesDeMensagem({ id: uuid(1), de: '600', para: EU, texto: 'oi, vi você no mapa' });
   c.P.presencaQuadro(fluxoDe(c), inbox(bytes));
-  assert.equal(c.P.presencaNaoLidasTotal(), 0, 'mensagem do WME virou não lida na app');
+  assert.equal(c.P.presencaNaoLidasTotal(), 0, 'mensagem do WME virou não lida no app');
   assert.equal(c.P.Presenca.conversas.length, 0);
   assert.deepEqual(c.guardado().confirmar, [uuid(901)], 'o que chegou tem que ser confirmado, senão volta a cada reconexão');
   assert.ok(!(c.guardado().conhecidos || []).includes('600'));
 });
 
-test('fluxo: mensagem da app AO VIVO vira não lida, acende o balão e a pessoa passa a ser conhecida', async () => {
+test('fluxo: mensagem do app AO VIVO vira não lida, acende o balão e a pessoa passa a ser conhecida', async () => {
   const c = novoCliente();
   c.P.Presenca.atualizadaEm = 1;
   const bytes = await bytesDeMensagem({ id: uuid(2), de: CAF, para: EU, texto: 'Viu o posto novo?', ctx: APP, ts: 1790200000000 });
@@ -83,7 +83,7 @@ test('fluxo: mensagem da app AO VIVO vira não lida, acende o balão e a pessoa 
   assert.ok(c.timers.some((t) => t.ms === 3000), 'não pediu o nome de quem escreveu');
 });
 
-test('fluxo: uma conversa CONHECIDA segue sendo da app mesmo respondida pelo WME, sem a marca', async () => {
+test('fluxo: uma conversa CONHECIDA segue sendo do app mesmo respondida pelo WME, sem a marca', async () => {
   const c = novoCliente();
   c.P.chatConhecer(CAF);
   c.P.Presenca.atualizadaEm = 1;
@@ -156,7 +156,7 @@ test('lista: parte que não veio (null) mantém a anterior; a que veio substitui
   const c = novoCliente();
   c.P.presencaAplicarLista({ online: [pessoa(CAF, 'cafanha', -23.5, -46.6)], conversas: [conversa('700', 'x', 5)] }, 1, 30);
   c.P.presencaAplicarLista({ online: null, conversas: [] }, 2, 30);
-  assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['cafanha'], 'falha passageira apagou quem estava na app');
+  assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['cafanha'], 'falha passageira apagou quem estava no app');
   assert.deepEqual(c.P.Presenca.conversas, []);
 });
 
@@ -169,13 +169,13 @@ test('lista: a não lida que chegou ao vivo DEPOIS do pedido sobrevive à lista;
   assert.equal(c.P.presencaNaoLidasDe('2'), 1, 'a mensagem que chegou depois do pedido sumiu');
 });
 
-test('lista: toda conversa que o servidor diz ser da app vira conhecida, da mais recente pra mais antiga', () => {
+test('lista: toda conversa que o servidor diz ser do app vira conhecida, da mais recente pra mais antiga', () => {
   const c = novoCliente();
   c.P.presencaAplicarLista({ online: [], conversas: [conversa('1', 'a', 10), conversa('2', 'b', 30), conversa('3', 'c', 20)] }, 1, 30);
   assert.deepEqual(c.guardado().conhecidos, ['2', '3', '1']);
 });
 
-test('lista A: "Triando agora" do mais perto pro mais longe, com a distância; conversas de quem não está na app', () => {
+test('lista A: "Triando agora" do mais perto pro mais longe, com a distância; conversas de quem não está no app', () => {
   const c = novoCliente();
   c.AppState.currentPlace = { mapa: { centro: [-23.55, -46.63] } };   // [lat, lon]
   c.P.presencaAplicarLista({
@@ -186,7 +186,7 @@ test('lista A: "Triando agora" do mais perto pro mais longe, com a distância; c
   c.P.presencaRenderLista();
   const html = c.$('presencaLista').innerHTML;
   const ordem = [...html.matchAll(/presenca-nome">([^<]+)</g)].map((m) => m[1]);
-  assert.deepEqual(ordem, ['perto', 'medio', 'longe', 'fora'], 'a ordem não é a da distância, ou quem está na app apareceu duas vezes');
+  assert.deepEqual(ordem, ['perto', 'medio', 'longe', 'fora'], 'a ordem não é a da distância, ou quem está no app apareceu duas vezes');
   assert.match(html, /presenca\.distPerto/, 'menos de 1 km tem frase própria');
   // (as aspas saem como entidade: o texto passa pelo escapeHtml)
   assert.match(html, /presenca\.dist\{&quot;km&quot;:&quot;21&quot;\}/, 'a distância sai em km inteiros, crus');
@@ -216,7 +216,7 @@ test('lista A: das conversas, as 5 mais recentes — e TODA com não lida, onde 
   const nomes = [...c.$('presencaLista').innerHTML.matchAll(/presenca-nome">([^<]+)</g)].map((m) => m[1]);
   assert.deepEqual(nomes, ['p0', 'p1', 'p2', 'p3', 'p4', 'p8'], 'a conversa com não lida ficou escondida: número que não se zera');
   assert.match(c.$('presencaLista').innerHTML, /presenca-l2 forte/, 'a não lida tem que ficar forte');
-  assert.match(c.$('presencaLista').innerHTML, /presenca-vazio">presenca\.sheet\.vazio</, 'ninguém na app sem a linha de ninguém');
+  assert.match(c.$('presencaLista').innerHTML, /presenca-vazio">presenca\.sheet\.vazio</, 'ninguém no app sem a linha de ninguém');
 });
 
 test('lista A: o subtítulo diz o país do filtro — pelo MESMO nome que o filtro mostra', () => {
@@ -338,7 +338,7 @@ test('mandar: texto puro vai sem contexto; na tela vira ENVIANDO e depois ENVIAD
   assert.equal(m.id, envio.id);
   assert.equal(m.estado, 'enviada');
   assert.equal(m.ts, 1790200000999, 'a hora é a do servidor');
-  assert.ok(c.guardado().conhecidos.includes(CAF), 'conversa que sai da app não virou conhecida');
+  assert.ok(c.guardado().conhecidos.includes(CAF), 'conversa que sai do app não virou conhecida');
 });
 
 test('mandar: com pedido, o WME recebe a pergunta, o 📍 com nome e tipo e o link LONGO do ↗', async () => {
@@ -352,14 +352,14 @@ test('mandar: com pedido, o WME recebe a pergunta, o 📍 com nome e tipo e o li
   assert.match(link, /^https:\/\/www\.waze\.com\/editor\?env=row&lat=-23\.55679&lon=-46\.63123&zoomLevel=22&venues=205522459\.2055159053\.3242788&venueUpdateRequest=205522459\.2055159053\.3242788&tab=feature_editor$/);
   // Só o pedido, sem pergunta: começa no alfinete.
   assert.ok(c.P.presencaTextoParaWme('', CARD).startsWith('📍 Padaria'));
-  // E a pergunta volta do texto: é o que a app mostra no lugar da linha e do link.
+  // E a pergunta volta do texto: é o que o app mostra no lugar da linha e do link.
   assert.equal(c.P.presencaLegendaDoTexto(txt), 'Esse aqui tá certo?');
   assert.equal(c.P.presencaLegendaDoTexto(c.P.presencaTextoParaWme('', CARD)), '');
   assert.equal(c.P.presencaLegendaDoTexto(c.P.presencaTextoParaWme('o 📍 tá errado?', CARD)), 'o 📍 tá errado?');
   assert.equal(c.P.presencaLegendaDoTexto('sem pedido'), null);
 });
 
-test('mandar: com pedido, o contexto leva o cartão e a pergunta CURTA (a marca da app quem põe é o servidor)', async () => {
+test('mandar: com pedido, o contexto leva o cartão e a pergunta CURTA (a marca do app quem põe é o servidor)', async () => {
   const c = novoCliente({ api: { chat: () => ({ success: true }) } });
   c.P.Presenca.aberta = CAF;
   c.P.presencaEnviar('x'.repeat(2000), CARD);
@@ -389,7 +389,7 @@ test('mandar: falha de rede vira "Não enviada, sem conexão" + "Tentar de novo"
   assert.equal(envios.length, 2);
   assert.equal(envios[1].id, envios[0].id, 'a repetição mudou o id: o Waze não teria como reconhecer a mensagem repetida');
   assert.equal(m.estado, 'enviada');
-  // Sessão morta segue pelo caminho da app.
+  // Sessão morta segue pelo caminho do app.
   const d = novoCliente({ api: { chat: () => ({ success: false, errorCategory: 'unauthorized' }) } });
   d.P.Presenca.aberta = CAF;
   d.P.presencaEnviar('oi', null);
@@ -416,7 +416,7 @@ test('abrir: histórico da mais nova pra mais antiga vira ordem do relógio; o p
   const h = c.P.Presenca.historico.get(CAF);
   assert.deepEqual(h.msgs.map((m) => m.ts), [1000, 2000, 3000]);
   const pedido = h.msgs[1];
-  assert.equal(pedido.legenda, 'Esse aqui?', 'a app mostrou o texto do WME (com o link) em vez da pergunta');
+  assert.equal(pedido.legenda, 'Esse aqui?', 'o app mostrou o texto do WME (com o link) em vez da pergunta');
   assert.equal(pedido.card.imageUrl, null, 'foto de fora do waze.com passou do contexto pro src');
   assert.ok(!('extra' in pedido.card), 'o cartão foi espalhado em vez de copiado campo a campo');
   assert.equal(c.chamadas.chat[0].acao, 'abrir');
@@ -439,7 +439,7 @@ test('abrir: os ids a confirmar vão de CARONA na abertura, e saem quando o Waze
   assert.deepEqual(c.guardado().confirmar, []);
 });
 
-test('abrir: o estado de quem está na app vs quem saiu — e o campo nunca trava', () => {
+test('abrir: o estado de quem está no app vs quem saiu — e o campo nunca trava', () => {
   const c = novoCliente();
   c.AppState.currentPlace = { mapa: { centro: [-23.55, -46.63] } };
   c.P.Presenca.online = [pessoa(CAF, 'cafanha', -23.40, -46.50, 4)];
