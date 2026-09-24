@@ -45,23 +45,27 @@ export const MIGRACOES = [
   {
     id: 'historico-onde',
     desde: '2026-09-14',
-    revisarEm: '2026-10-14',
-    familia: 'aparelho',
+    revisarEm: '2027-10-20',
+    familia: 'compat',
     onde: 'js/app.js',
-    oque: 'O `|| {}` no `v.onde` de cada balde diário. A partir de '
-        + 'v2026.09.14-01 o `recordHistory` grava ONDE o trabalho foi feito '
-        + '(`pais` ou `pais:estado`), que é o dado de "Andarilho" e "Viajante" '
+    oque: 'O `|| {}` no `v.onde` de cada balde diário, no `geografiaDoHistorico`. '
+        + 'A partir de v2026.09.14-04 o `recordHistory` grava ONDE o trabalho foi '
+        + 'feito (`pais` ou `pais:estado`), que é o dado de "Andarilho" e "Viajante" '
         + '— e o mesmo que tirou o "onde" do Resumo do mês. Balde gravado '
         + 'ANTES disso não tem o campo, e não existe como descobrir onde '
         + 'aquele trabalho foi feito: ele simplesmente não conta.',
-    removerQuando: 'Todo aparelho tiver aberto o app uma vez depois de '
-        + 'v2026.09.14-01, porque a partir daí todo balde NOVO nasce com '
-        + '`onde`. Os baldes velhos continuam sem — mas eles expiram sozinhos '
-        + 'pela poda de `HISTORY_MAX_DIAS` (400 dias), e até lá o `|| {}` é '
-        + 'o que impede o `Object.keys(undefined)` de derrubar o render do '
-        + 'Histórico inteiro. Passou do prazo? Confira se ainda há aparelho '
-        + 'de testador parado numa versão anterior; se não houver, some com o '
-        + '`|| {}` e deixe o campo ser exigido.',
+    removerQuando: 'A poda de `HISTORY_MAX_DIAS` (400 dias, feita no `loadHistory`) '
+        + 'tiver levado o último balde sem `onde`: os de até 2026-09-14 saem em '
+        + '2027-10-19. **A entrada nasceu ERRADA**, como `aparelho`, com revisão em '
+        + '30 dias e a condição "todo aparelho abriu o app depois da versão nova". '
+        + 'Abrir o app não apaga balde velho: ele fica guardado até a poda. E sem o '
+        + '`|| {}` o `geografiaDoHistorico` lança dentro do `checarConquistas`, que '
+        + 'roda a cada ação confirmada, no Desfazer e na fila zerada: seguir a '
+        + 'entrada antiga em outubro de 2026 quebraria as conquistas de todo '
+        + 'testador com histórico de antes de 14/09. Todo balde novo já nasce com '
+        + '`onde` (toda gravação é de uma ação, e o país do filtro tem padrão 30), '
+        + 'então depois da poda o campo pode ser exigido. Antecipar, só se todo '
+        + 'testador usar o "Sair", que apaga o histórico.',
   },
   {
     id: 'diag-formato-2',
