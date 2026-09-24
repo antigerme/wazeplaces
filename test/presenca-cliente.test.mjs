@@ -126,6 +126,7 @@ test('fluxo: o recibo de LEIDA marca como lidas as minhas mensagens até ele', a
 test('fluxo: com a conversa ABERTA e na tela, mensagem nova vira "lida" (um pedido, juntando várias)', async () => {
   const c = novoCliente();
   c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');
   c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true, maisAntigas: false });
   for (let i = 0; i < 3; i++) {
     const bytes = await bytesDeMensagem({ id: uuid(10 + i), de: CAF, para: EU, texto: 'm' + i, ctx: APP, ts: 1790200000000 + i });
@@ -138,6 +139,7 @@ test('fluxo: com a conversa ABERTA e na tela, mensagem nova vira "lida" (um pedi
   // Com a tela apagada não é leitura.
   const d = novoCliente({ visivel: 'hidden' });
   d.P.Presenca.aberta = CAF;
+  d.$('conversaModal').classList.remove('hidden');
   d.P.Presenca.historico.set(CAF, { msgs: [], carregada: true });
   d.P.Presenca.atualizadaEm = 1;
   d.P.presencaQuadro(fluxoDe(d), inbox(await bytesDeMensagem({ id: uuid(20), de: CAF, para: EU, ctx: APP, ts: 1790200000000 })));
@@ -230,8 +232,8 @@ test('lista A: o subtítulo diz o país do filtro — pelo MESMO nome que o filt
 
 test('lista A: a prévia de um pedido mandado mostra o alfinete com a pergunta, ou o nome e o tipo', () => {
   const c = novoCliente();
-  assert.equal(c.P.presencaPrevia({ card: { name: 'Loja', updateTypeKey: 'NEW_PHOTO' }, texto: 'é fachada?' }), '📍 é fachada?');
-  assert.equal(c.P.presencaPrevia({ card: { name: 'Loja', updateTypeKey: 'NEW_PHOTO' }, texto: '' }), '📍 Loja · card.updateType.NEW_PHOTO');
+  assert.equal(c.P.presencaPrevia({ card: { name: 'Loja', updateTypeKey: 'IMAGE' }, texto: 'é fachada?' }), '📍 é fachada?');
+  assert.equal(c.P.presencaPrevia({ card: { name: 'Loja', updateTypeKey: 'IMAGE' }, texto: '' }), '📍 Loja · Nova foto');
   assert.equal(c.P.presencaPrevia({ card: null, texto: 'oi' }), 'oi');
 });
 
@@ -316,7 +318,7 @@ test('aparelho: o TOKEN do tempo real nunca vai pro armazenamento', async () => 
 const CARD = {
   venueID: '205522459.2055159053.3242788', updateRequestID: 'ur-1',
   name: 'Padaria Estrela do Norte', address: 'R. Aurora, 412', categories: ['BAKERY'],
-  updateTypeKey: 'NEW_PHOTO', imageUrl: 'https://venue-image.waze.com/thumbs/thumb700_A.png',
+  updateTypeKey: 'IMAGE', imageUrl: 'https://venue-image.waze.com/thumbs/thumb700_A.png',
   lat: -23.556789, lon: -46.631234, region: 'row',
 };
 
@@ -344,7 +346,7 @@ test('mandar: com pedido, o WME recebe a pergunta, o 📍 com nome e tipo e o li
   const txt = c.P.presencaTextoParaWme('Esse aqui tá certo?', CARD);
   const [pergunta, linha, link] = txt.split('\n');
   assert.equal(pergunta, 'Esse aqui tá certo?');
-  assert.equal(linha, '📍 Padaria Estrela do Norte · card.updateType.NEW_PHOTO');
+  assert.equal(linha, '📍 Padaria Estrela do Norte · Nova foto');
   // O link CURTO (só env e venues) foi medido e NÃO serve: o WME abre noutro
   // lugar e não seleciona nada. Vai o mesmo do ↗ do card.
   assert.match(link, /^https:\/\/www\.waze\.com\/editor\?env=row&lat=-23\.55679&lon=-46\.63123&zoomLevel=22&venues=205522459\.2055159053\.3242788&venueUpdateRequest=205522459\.2055159053\.3242788&tab=feature_editor$/);
@@ -467,6 +469,12 @@ test('recibo: Lida pelo recibo guardado OU pela resposta; a linha "Lida" só sob
   assert.equal((html.match(/presenca-recibo enviada/g) || []).length, 1);
   assert.ok(html.indexOf('conversa-lida') < html.indexOf('presenca-recibo enviada'), 'a linha "Lida" tem que ficar sob a última lida');
   assert.doesNotMatch(html, /entregue/, 'o "Entregue" saiu (decisão do owner)');
+  // Com uma falha DEPOIS, a "Lida" continua sob a última lida (como no mockup
+  // aprovado): cada linha diz respeito à SUA mensagem.
+  const comFalha = c.P.presencaHtmlDasMsgs(CAF, { msgs: [minha(10), minha(20), { ...minha(40), estado: 'falhou', motivo: 'conexao' }] });
+  assert.equal((comFalha.match(/conversa-lida/g) || []).length, 1, 'a falha embaixo apagou a "Lida" de cima');
+  assert.equal((comFalha.match(/conversa-falhou/g) || []).length, 1);
+  assert.ok(comFalha.indexOf('conversa-lida') < comFalha.indexOf('conversa-falhou'));
 });
 
 test('recibo: separador de dia antes da primeira mensagem de cada dia', () => {
@@ -515,4 +523,36 @@ test('privado: o diagnóstico da presença leva CONTAGENS — nenhum nome, texto
   }
   assert.match(diag, /"online":1/);
   assert.match(diag, /"naoLidas":2/);
+});
+
+test('tipo do pedido que esta versão não conhece sai HUMANIZADO, nunca a chave crua', () => {
+  // O cartão vem de OUTRO aparelho, que pode ser de uma versão com um tipo novo.
+  // Mesma regra do card (`rotuloDeEnum`): feio, nunca "card.updateType.X".
+  const c = novoCliente();
+  // O `t` do harness devolve a própria chave pra tudo — é o caso "não conhece".
+  assert.equal(c.P.presencaTipo('NOVO_TIPO'), 'Novo tipo');
+  assert.ok(!c.P.presencaResumoDoCard({ updateTypeKey: 'NOVO_TIPO', categories: [] }).includes('card.updateType'));
+  assert.ok(!c.P.presencaPrevia({ card: { name: 'x', updateTypeKey: 'NOVO_TIPO' }, texto: '' }).includes('card.updateType'));
+  assert.ok(!c.P.presencaTextoParaWme('', { venueID: '1', name: 'x', updateTypeKey: 'NOVO_TIPO' }).includes('card.updateType'));
+});
+
+test('fluxo: conversa ESCONDIDA por outra camada não é leitura, mesmo com o `aberta` de pé', async () => {
+  // O `openModal` do pedido recebido esconde a conversa SEM passar pela limpeza
+  // dela, e o `aberta` fica. Mensagem que chega aí é não lida — "lida" com a
+  // conversa fora da vista seria um recibo que mente. Achado pelo smoke.
+  const c = novoCliente();
+  c.P.Presenca.aberta = CAF;
+  c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true });
+  c.P.Presenca.atualizadaEm = 1;
+  c.$('conversaModal').classList.add('hidden');   // o pedido abriu por cima
+  c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(30), de: CAF, para: EU, ctx: APP, ts: 1790200000000 })));
+  assert.equal(c.P.presencaNaoLidasDe(CAF), 1, 'mensagem com a conversa escondida virou lida');
+  assert.ok(!c.timers.some((t) => t.ms === 1200), 'agendou "lida" com a conversa fora da tela');
+  // Controle: com a conversa VISÍVEL, a mesma mensagem é lida.
+  const d = novoCliente();
+  d.P.Presenca.aberta = CAF;
+  d.P.Presenca.historico.set(CAF, { msgs: [], carregada: true });
+  d.$('conversaModal').classList.remove('hidden');
+  d.P.presencaQuadro(fluxoDe(d), inbox(await bytesDeMensagem({ id: uuid(31), de: CAF, para: EU, ctx: APP, ts: 1790200000000 })));
+  assert.ok(d.timers.some((t) => t.ms === 1200), 'o controle não agendou o "lida" — o teste não distinguiria');
 });

@@ -25,7 +25,15 @@ function fatiarDoApp(nome) {
   }
   throw new Error(`não delimitei ${nome}`);
 }
-const DO_APP = ['WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml']
+// O dicionário de VERDADE, pro que o teste quer ver traduzido (os tipos de
+// pedido). O resto do `t` devolve a própria chave, que é o que as asserções
+// casam — e é também o caso "chave que esta versão não conhece".
+const I18N = new Function('window', 'navigator', 'localStorage', 'document',
+  readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\nreturn I18N_DICT;')(
+  {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
+const TRADUZIDAS = /^card\.updateType\./;
+
+const DO_APP = ['WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum']
   .map(fatiarDoApp).join('\n');
 
 class Classes {
@@ -109,7 +117,7 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
       set: (k, v) => armazenado.set(k, String(v)),
       remove: (k) => armazenado.delete(k),
     },
-    t: (k, v) => (v ? `${k}${JSON.stringify(v)}` : k),
+    t: (k, v) => (TRADUZIDAS.test(k) && I18N.pt[k] ? I18N.pt[k] : v ? `${k}${JSON.stringify(v)}` : k),
     i18nLocale: () => 'pt-BR',
     openModal: (id) => { chamadas.openModal.push(id); $(id).classList.remove('hidden'); },
     closeModal: (id) => { chamadas.closeModal.push(id); $(id).classList.add('hidden'); },
@@ -126,7 +134,7 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
   const corpo = `${DO_APP}\n${FONTE}\nreturn { ${nomes.join(', ')} };`;
   const P = new Function(...globais, corpo)(...globais.map((g) => escopo[g]));
   // Todos os elementos que a presença consulta nascem ESCONDIDOS, como no HTML.
-  for (const id of ['presencaPill', 'presencaModal', 'conversaAnexo', 'conversaCardBtn', 'presencaIconMsg', 'conversaEstado']) $(id).classList.add('hidden');
+  for (const id of ['presencaPill', 'presencaModal', 'conversaModal', 'conversaAnexo', 'conversaCardBtn', 'presencaIconMsg', 'conversaEstado']) $(id).classList.add('hidden');
   return {
     P, $, els, armazenado, chamadas, timers, relogio, AppState, API, doc, win, escopo,
     // Roda os timers pendentes (os que existem AGORA), em ordem de prazo.

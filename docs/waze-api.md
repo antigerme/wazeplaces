@@ -253,6 +253,9 @@ em `/<região>-Descartes/grpc/`:
 | Não lidas | `GetUnreadMessagesCount` → `{1{1 total}, 2 marca de leitura}`; a 1ª página de `ListConversations` leva a marca no campo 6 |
 | Páginas | `ListConversations`: seguinte com o campo 2 = a atividade (campo 8) da última conversa da anterior, como o WME. `ListMessages`: `2 destino · 3 antes de · 5 tamanho · 7:1` |
 | Conversa inexistente | `MarkConversationRead` → 7 `NO_EXISTING_CONVERSATION` |
+| Ordem do histórico | `ListMessages` devolve da mais NOVA pra mais antiga, e só texto: nenhum recibo vem no histórico `[vivo, fase 3]`. O "Lida" de uma conversa antiga só existe se o aparelho guardou o recibo que o fluxo contou |
+| Prévia da lista | a `ultima` de cada conversa do `ListConversations` é a última mensagem de TEXTO (50 de 50 medidas), com o contexto — é onde a marca da app aparece |
+| Link no texto | o link LONGO do ↗ (`env`, `lat`, `lon`, `zoomLevel=22`, `venues`, `venueUpdateRequest`, `tab`) abre o local selecionado; o CURTO (só `env` e `venues`) abre o WME a 7.755 km e não seleciona nada `[vivo, fase 3]` |
 | `PullMessages` | é a fila do APARELHO, não histórico: trouxe 2 mensagens e, na chamada seguinte, 0 |
 
 **Tempo real** — `GetMessagingProvider` devolve `{1 token (bytes), 2 validade
@@ -268,9 +271,15 @@ em `/<região>-Descartes/grpc/`:
 - Sinal de vida (`pong`) a cada 10 s; a conexão cai sozinha a cada **6,2 min**
   (5 vezes seguidas, 6,20–6,24), com dado 2–4 s antes: é tempo máximo, não
   inatividade. Daqui não dá para separar Google de saída de rede do ambiente.
-- Só entrega o que chega com a conexão ABERTA: reconectar não reentrega nem o
-  que chegou fora, nem o que chegou e não foi confirmado (`AckMessages`).
-  Quem estava fora acha as mensagens nas não lidas e no histórico.
+- **A MESMA instalação recebe de volta, ao reconectar, tudo o que não
+  confirmou** `[vivo, fase 3]`: as mensagens que chegaram com o fluxo fechado,
+  o eco das próprias e os recibos — num lote inicial (`startOfBatch` …
+  `endOfBatch`). `AckMessages` tira da fila; confirmado, o lote seguinte vem
+  sem aquilo. Os recibos às vezes só aparecem na reconexão SEGUINTE (chegam
+  segundos depois). Uma instalação NOVA não recebe nada — e é por isso que a
+  fase 1 escreveu aqui "reconectar não reentrega nada": ela media sorteando uma
+  instalação por vez. A app usa uma instalação estável por aparelho e confirma
+  de carona nos pedidos que já faz.
 - Latência do envio à chegada no outro aparelho: 0,52–0,60 s (5 medidas).
 
 **Erros** — HTTP 200 com o status no trailer. O **7 é ambíguo** e se decide

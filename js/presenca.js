@@ -583,7 +583,7 @@ function presencaLerMensagem(u8) {
 function presencaTextoParaWme(legenda, card) {
     if (!card) return legenda;
     const nome = (card.name || '').trim() || (card.address || '').trim() || t('card.noName');
-    const tipo = card.updateTypeKey ? t('card.updateType.' + card.updateTypeKey) : '';
+    const tipo = presencaTipo(card.updateTypeKey);
     const linha = '📍 ' + nome + (tipo ? ' · ' + tipo : '');
     const link = typeof linkWmeDoPedido === 'function' ? linkWmeDoPedido(card, card.region || API.getRegion()) : '';
     return (legenda ? legenda + '\n' : '') + linha + (link ? '\n' + link : '');
@@ -711,8 +711,16 @@ function presencaPedirNome() {
 
 // "Lida" só é verdade com a conversa ABERTA e a app NA TELA. Modal aberto com
 // o celular no bolso não é leitura, e um recibo que mente é pior que nenhum.
+//
+// E "aberta" é a conversa VISÍVEL, não o `Presenca.aberta`: o `openModal` de
+// outra camada (o pedido que chegou pela conversa, por exemplo) ESCONDE a
+// conversa sem passar pela limpeza dela, e o `aberta` fica. Sem conferir a
+// tela, a próxima mensagem dessa pessoa virava "lida" com a conversa fora da
+// vista (achado pelo smoke da presença).
 function presencaOlhando(id) {
-    return Presenca.aberta === id && document.visibilityState === 'visible';
+    const modal = document.getElementById('conversaModal');
+    return Presenca.aberta === id && document.visibilityState === 'visible'
+        && !!modal && !modal.classList.contains('hidden');
 }
 
 function presencaAgendarLida(id) {
@@ -917,11 +925,20 @@ function presencaRenderAnexo() {
     botao.classList.toggle('hidden', !!a || !temPedido);
 }
 
+// O nome do tipo do pedido, pela MESMA regra do card (`rotuloDeEnum`): chave que
+// o dicionário não conhece sai humanizada — feio, nunca a chave crua na tela. O
+// tipo que chega é de OUTRO aparelho, e ele pode ser de uma versão que conhece
+// um tipo que esta não conhece.
+function presencaTipo(chave) {
+    if (!chave) return '';
+    return typeof rotuloDeEnum === 'function' ? rotuloDeEnum('card.updateType.', chave) : t('card.updateType.' + chave);
+}
+
 // "Foto nova · Padaria". Tipo e categoria são CHAVE e enum crus no que trafega;
 // a palavra é escolhida aqui, na língua de quem lê.
 function presencaResumoDoCard(card) {
     const partes = [];
-    if (card.updateTypeKey) partes.push(t('card.updateType.' + card.updateTypeKey));
+    if (card.updateTypeKey) partes.push(presencaTipo(card.updateTypeKey));
     // Categoria sai CRUA: o Waze regionaliza por PAÍS, não por idioma (gotcha #39).
     if (card.categories && card.categories.length) partes.push(card.categories[0]);
     return partes.join(' · ');
@@ -1037,7 +1054,7 @@ function presencaPrevia(u) {
     if (u.card) {
         if (u.texto) return '📍 ' + u.texto;
         const nome = (u.card.name || '').trim() || t('card.noName');
-        const tipo = u.card.updateTypeKey ? t('card.updateType.' + u.card.updateTypeKey) : '';
+        const tipo = presencaTipo(u.card.updateTypeKey);
         return '📍 ' + nome + (tipo ? ' · ' + tipo : '');
     }
     return u.texto || '';
@@ -1155,7 +1172,7 @@ function presencaHtmlDasMsgs(id, h) {
         if (i === ultimaFalha) {
             const frase = m.motivo === 'conexao' ? t('presenca.recibo.naoEnviada') : t('presenca.recibo.naoEnviadaErro');
             html += `<p class="conversa-falhou">${escapeHtml(frase)} <button type="button" class="conversa-reenviar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
-        } else if (i === ultimaLida && ultimaLida > ultimaFalha) {
+        } else if (i === ultimaLida) {
             html += `<p class="conversa-lida">${escapeHtml(t('presenca.recibo.lida'))}</p>`;
         }
         return html;

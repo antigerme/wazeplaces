@@ -107,7 +107,8 @@ test('pedido: o resumo usa CHAVE de tipo, não texto pronto', () => {
   // Quem manda pode estar em português e quem recebe em francês. O remetente
   // não escolhe a palavra que aparece na tela do outro.
   const m = montar();
-  assert.equal(m.presencaResumoDoCard(CARD), 'card.updateType.IMAGE · BAKERY');
+  // O tipo sai do dicionário de quem LÊ (o do harness é o português).
+  assert.equal(m.presencaResumoDoCard(CARD), 'Nova foto · BAKERY');
 });
 
 test('pedido: categoria sai CRUA — o Waze regionaliza por PAÍS, não por idioma', () => {
