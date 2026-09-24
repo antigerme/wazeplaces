@@ -336,9 +336,37 @@ const browser = await abrirNavegador(pw, { args: ARGS_SEM_ESTRANGULAR });
 // Mora no `newContext` e não em cada chamada porque são ~20 contextos espalhados
 // pelo arquivo: um esquecido daria falha intermitente e difícil de ligar à causa.
 const _newContext = browser.newContext.bind(browser);
+// A LISTA DA PRESENÇA sai no `showMainScreen` desde a fase 3. Com o token FALSO
+// dos blocos daqui ela leva 401 de VERDADE do servidor, o `handleUnauthorized`
+// confere com o `perfil` e, 1,2 s depois, a sessão cai (ou, com o `perfil`
+// respondido, sai o aviso de alarme falso e a fila é buscada de novo). MEDIDO:
+// 17 contextos em 6 blocos levavam esse 401. No avatar a sessão caía antes de
+// a foto sair e o WebKit reprovou; nos outros o bloco terminava antes da
+// conferência — num runner mais lento, mediria a tela de entrada (gotcha #62).
+// `presencaViva` responde a lista como sessão viva, com ninguém mais na app.
+// É ROTA, então só nos blocos que chamam a presença: rota desliga o cache HTTP
+// do contexto, e 26 contextos daqui não têm rota nenhuma.
+const presencaViva = (alvo) => alvo.route('**/api/presenca-app', (r) => r.fulfill({ status: 200,
+  contentType: 'application/json', body: JSON.stringify({ success: true, online: [], conversas: [] }) }));
+// A SENTINELA que impede a próxima vez de passar calada: um OUVINTE (não
+// rota, o cache fica como está) em TODO contexto. Se a presença chegar ao
+// servidor com a sessão falsa, o 401 dele (`srv.err.session…`) é anotado com a
+// linha do bloco, e o fim do smoke reprova dizendo onde responder.
+const presencaComSessaoFalsa = [];
 browser.newContext = async (opts = {}) => {
   const { primeiraVez = false, ...resto } = opts;
+  // A linha do BLOCO que criou o contexto: o 1º quadro deste arquivo fora
+  // deste invólucro. Tirada antes do primeiro `await`, com o chamador na pilha.
+  const linhas = (new Error().stack || '').split('\n')
+    .map((l) => (l.match(/smoke-browser\.mjs:(\d+)/) || [])[1]).filter(Boolean);
+  const bloco = linhas[1] || linhas[0] || '?';
   const ctx = await _newContext(resto);
+  ctx.on('response', async (r) => {
+    if (r.status() !== 401 || !/\/api\/(presenca-app|chat)(\?|$)/.test(r.url())) return;
+    let chave = '';
+    try { chave = String((await r.json()).errorKey || ''); } catch (e) { /* página fechou */ }
+    if (chave.startsWith('srv.err.session')) presencaComSessaoFalsa.push(`linha ${bloco}`);
+  });
   if (!primeiraVez) {
     await ctx.addInitScript(() => {
       try {
@@ -2239,6 +2267,7 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
 //      função no meio e a tela pode não mudar nada.
 {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
@@ -2298,6 +2327,7 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
 //      e um "unhandled rejection" por sessão é ruído que mascara erro real.
 for (const suporte of [true, false]) {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
@@ -2370,6 +2400,7 @@ const DIAS = (d) => Math.floor(Date.now() / 1000) + Math.round(d * 86400);
 for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['Pixel 7', { width: 412, height: 915 }]]) {
   for (const lang of LINGUAS) {
     const ctx = await browser.newContext({ viewport, locale: lang === 'en' ? 'en-US' : lang, serviceWorkers: 'block' });
+    await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
     const page = await ctx.newPage();
     const erros = [];
     page.on('pageerror', (e) => erros.push(e.message));
@@ -2517,6 +2548,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 {
   const chave = (p) => `${p.updateTypeKey || '—'}|${(p.imageUrls || []).length ? 'foto' : 'sem'}`;
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
@@ -2604,16 +2636,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await ctx.route('https://social-row.waze.com/**', (r) => { pedidos.push('avatar'); return r.fulfill({ body: PX, contentType: 'image/jpeg' }); });
     await ctx.route('https://venue-image.waze.com/**', (r) => { pedidos.push('foto-do-card'); return r.fulfill({ body: PX, contentType: 'image/jpeg' }); });
     await ctx.route('https://www.waze.com/**', (r) => r.fulfill({ body: PX, contentType: 'image/png' }));
-    // A API responde como SESSÃO VIVA (e ninguém mais na app). Sem isto o token
-    // falso leva 401 de VERDADE do servidor: desde a fase 3 a lista da presença
-    // sai no `showMainScreen`, o 401 dela chama o `handleUnauthorized` (certo, é
-    // o que a app faz com toda rota), e a sessão cai 1,2 s depois. MEDIDO: no
-    // WebKit, que não tem `requestIdleCallback`, o avatar sai 800 ms depois da
-    // tela pronta — já deslogado — e o bloco acusava "a foto NUNCA chegou"; no
-    // Chromium ele passava por sorte de tempo (sai em ~30 ms), com a sessão
-    // caindo logo depois. Era a fixture medindo outra coisa (gotcha #62).
-    await ctx.route('**/api/**', (r) => r.fulfill({ status: 200, contentType: 'application/json',
-      body: JSON.stringify({ success: true, online: [], conversas: [] }) }));
+    // Sessão VIVA pra lista da presença. Sem isto o WebKit, que não tem
+    // `requestIdleCallback`, pedia o avatar 800 ms depois da tela pronta — com
+    // a sessão já caída pelo 401 da presença — e o bloco acusava "a foto NUNCA
+    // chegou". No Chromium passava por sorte de tempo (gotcha #62).
+    await presencaViva(ctx);
     const page = await ctx.newPage();
     const erros = [];
     page.on('pageerror', (e) => erros.push(e.message));
@@ -2705,6 +2732,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
                                     ['deitado', { width: 852, height: 393 }],
                                     ['iPhone SE 2016', { width: 320, height: 568 }]]) {
   const ctx = await browser.newContext({ viewport, locale: 'pt-BR', serviceWorkers: 'block' });
+  await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
   await ctx.route('https://venue-image.waze.com/**', (r) => r.fulfill({ body: PX_TIRA, contentType: 'image/jpeg' }));
   const page = await ctx.newPage();
   const erros = [];
@@ -2779,6 +2807,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //   3. plural errado: o projeto não tem ICU, e "há 1 dias" é o defeito clássico.
 {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
   await ctx.route('https://venue-image.waze.com/**', (r) => r.fulfill({ body: PX_TIRA, contentType: 'image/jpeg' }));
   const page = await ctx.newPage();
   const erros = [];
@@ -5804,6 +5833,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 
 await browser.close();
 servidor.kill();
+checa(presencaComSessaoFalsa.length === 0,
+  `a lista da presença levou 401 DE VERDADE com a sessão falsa em ${presencaComSessaoFalsa.length} contexto(s) — o bloco mediu uma sessão que ia cair; responda a presença com \`presencaViva(ctx)\``,
+  [...new Set(presencaComSessaoFalsa)].join(', '));
 if (resumoDosPulos(MOTOR)) console.log(resumoDosPulos(MOTOR));
 
 if (falhas) {
