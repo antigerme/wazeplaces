@@ -1,0 +1,368 @@
+// A presença DA APP (fase 3): quem usa a app no país do filtro e as conversas
+// que são da app, lidas do WME — pela rota `presenca-app`, de carona nas ações
+// e ao abrir uma conversa (`chat` com `acao: 'abrir'`).
+//
+// O modelo é do owner, e é ele que estes testes travam: a infra é do Waze, mas
+// a app mostra SÓ quem usa a app (a marca na posição, `marca-app.mjs`) e SÓ as
+// conversas que começaram na app. Conversa de quem só usa o WME não aparece.
+//
+// O Waze de mentira responde por MÉTODO e anota cada pedido. Os corpos de
+// resposta são montados com os mesmos construtores de protobuf do servidor; os
+// campos de cada mensagem foram MEDIDOS contra o Waze na fase 1 (ver
+// `docs/waze-api.md` §4.1) e o leitor é o mesmo que roda em produção.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
+import { dispatch, filtrarOnlineDaApp, filtrarConversasDaApp, APP_CONTEXTO } from '../server/core.mjs';
+import * as g from '../server/wme-grpc.mjs';
+import { marcarPosicao } from '../server/marca-app.mjs';
+import { readFileSync } from 'node:fs';
+
+const F = JSON.parse(readFileSync(new URL('./wme-grpc.fixture.json', import.meta.url), 'utf8'));
+const deB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const b64 = (u8) => btoa(String.fromCharCode(...u8));
+const um = (campos, n) => campos.find((c) => c.n === n)?.v;
+
+const COOKIES = [
+  '.waze.com\tTRUE\t/\tTRUE\t0\t_csrf_token\tcsrf-de-teste',
+  '.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tsessao-de-teste',
+].join('\n');
+
+const EU = '12444348';
+const BRASIL = 30;
+const FRANCA = 73;
+
+function quadro(flag, corpo) {
+  const q = new Uint8Array(5 + corpo.length);
+  q[0] = flag;
+  new DataView(q.buffer).setUint32(1, corpo.length);
+  q.set(corpo, 5);
+  return q;
+}
+function respostaGrpc({ dados = null, status = 0, mensagem = '' } = {}) {
+  const trailer = new TextEncoder().encode(`grpc-status:${status}\r\ngrpc-message:${encodeURIComponent(mensagem)}\r\n`);
+  const corpo = (dados ? b64(quadro(0, dados)) : '') + b64(quadro(0x80, trailer));
+  return new Response(corpo, { status: 200, headers: { 'content-type': 'application/grpc-web-text+proto' } });
+}
+function respostaJson(status, corpo) {
+  return new Response(corpo, { status, headers: { 'content-type': 'application/json' } });
+}
+
+// ── construtores de resposta ─────────────────────────────────────────────────
+
+// Um editor da lista de online: 1 id · 2 posição (101 lon, 102 lat, ×1e6) ·
+// 3 visível · 4 nome · 5 rank CRU.
+function editor({ id, nome, rank = 2, lat, lon, visivel = true }) {
+  return g.junta(
+    g.campo.inteiro(1, id),
+    g.campo.msg(2, g.campo.inteiro(101, Math.round(lon * 1e6)), g.campo.inteiro(102, Math.round(lat * 1e6))),
+    visivel === null ? null : g.campo.bool(3, visivel),
+    g.campo.texto(4, nome),
+    g.campo.inteiro(5, rank),
+  );
+}
+const lista = (...eds) => g.junta(...eds.map((e) => g.campo.msg(1, editor(e))));
+
+// A mensagem exatamente como o servidor a monta pra enviar (o histórico devolve
+// o mesmo registro): tira o campo 2 do pedido de envio.
+function msg({ id, ts = 1790182220160, de, para, texto = 'oi', ctx = null }) {
+  const corpo = g.corpoEnviarTexto({ cabecalho: null, ts, id, para, de, texto, ctx });
+  return um(g.lerCampos(corpo), 2);
+}
+// Um item da lista de conversas: 1 com quem · 2 perfil (2 = nome) · 3 última ·
+// 4 não lidas · 5 bloqueada · 8 atividade.
+function conversa({ com, nome, ultima = null, naoLidas = 0, bloqueada = false, atividade = 1790182220160 }) {
+  return g.campo.msg(1,
+    g.campo.msg(1, g.campo.inteiro(1, 1), g.campo.texto(2, String(com))),
+    g.campo.msg(2, g.campo.texto(2, nome)),
+    ultima ? g.campo.bytes(3, msg(ultima)) : null,
+    naoLidas ? g.campo.inteiro(4, naoLidas) : null,
+    bloqueada ? g.campo.bool(5, true) : null,
+    g.campo.inteiro(8, atividade));
+}
+const conversas = (...cs) => g.junta(...cs.map(conversa));
+
+// Uma pessoa na app: posição com a marca e o país dela.
+const naApp = (id, nome, pais, lat = -23.55, lon = -46.63, extra = {}) => ({ id, nome, ...marcarPosicao({ lat, lon }, pais), ...extra });
+// Quem SÓ usa o WME, no caso que a marca existe pra separar: a longitude cai,
+// por acaso, nos dígitos do país (1 em 1000), e só a latitude não tem o 47. Uma
+// posição qualquer seria excluída pelo PAÍS e o teste não veria a marca faltar
+// — foi o que a sabotagem mostrou na primeira versão.
+function soNoWme(id, nome, pais) {
+  const { lon } = marcarPosicao({ lat: -23.55, lon: -46.63 }, pais);
+  return { id, nome, lat: -23.550001, lon };
+}
+
+// O Waze de mentira. `r` responde por método; o que não tem resposta falha o teste.
+async function comWaze(r, fn) {
+  const original = globalThis.fetch;
+  const pedidos = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    const metodo = u.split('/').pop();
+    // Só o gRPC tem corpo enquadrado; o da ação é JSON.
+    const grpc = u.includes('/grpc/') || u.includes('-wmp/');
+    const corpo = grpc ? g.lerRespostaGrpcWeb(init.body).dados : null;
+    const p = { url: u, metodo, corpo };
+    pedidos.push(p);
+    const resp = r[metodo];
+    if (!resp) assert.fail(`chamada inesperada ao Waze: ${metodo}`);
+    return resp(p);
+  };
+  try {
+    return { resultado: await fn(), pedidos };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+// ── filtros puros ────────────────────────────────────────────────────────────
+
+test('online da app: só quem tem a marca, no país do filtro, visível — e nunca eu', () => {
+  const eds = [
+    { id: 183164343, nome: 'cafanha', rank: 4, visivel: true, ...marcarPosicao({ lat: -23.55, lon: -46.63 }, BRASIL) },
+    { id: 12444348, nome: 'antigerme', rank: 5, visivel: true, ...marcarPosicao({ lat: -23.5, lon: -46.6 }, BRASIL) },
+    { id: 500, nome: 'na_franca', rank: 2, visivel: true, ...marcarPosicao({ lat: 48.85, lon: 2.35 }, FRANCA) },
+    { rank: 2, visivel: true, ...soNoWme(501, 'so_wme', BRASIL) },
+    { id: 502, nome: 'escondida', rank: 2, visivel: false, ...marcarPosicao({ lat: -22.9, lon: -43.2 }, BRASIL) },
+    { id: 503, nome: 'sem_chave', rank: 2, visivel: null, ...marcarPosicao({ lat: -22.9, lon: -43.2 }, BRASIL) },
+  ];
+  const r = filtrarOnlineDaApp(eds, { pais: BRASIL, eu: EU });
+  assert.deepEqual(r.map((e) => e.nome), ['cafanha', 'sem_chave']);
+  // Forma: id como TEXTO (o mesmo das conversas), rank CRU (a tela soma 1).
+  assert.deepEqual(Object.keys(r[0]).sort(), ['id', 'lat', 'lon', 'nome', 'rank']);
+  assert.equal(r[0].id, '183164343');
+  assert.equal(r[0].rank, 4);
+  // Controle: a pessoa "só no WME" tem a longitude com o país do filtro — é a
+  // marca da latitude, e só ela, que a separa. E na França a mesma lista
+  // mostra a outra pessoa.
+  assert.deepEqual(filtrarOnlineDaApp(eds, { pais: FRANCA, eu: EU }).map((e) => e.nome), ['na_franca']);
+});
+
+test('conversas da app: a marca na última mensagem OU já conhecida no aparelho — a do WME não aparece', () => {
+  const cs = g.lerConversas(conversas(
+    { com: 183164343, nome: 'cafanha', naoLidas: 2, ultima: { id: 'a0000000-0000-1000-8000-000000000001', de: '183164343', para: EU, texto: 'Esse é duplicado?\n📍 Loja · Foto nova\nhttps://www.waze.com/editor?x', ctx: { app: APP_CONTEXTO, legenda: 'Esse é duplicado?', card: JSON.stringify({ name: 'Loja', updateTypeKey: 'NEW_PHOTO' }) } } },
+    { com: 600, nome: 'so_wme', ultima: { id: 'a0000000-0000-1000-8000-000000000002', de: '600', para: EU, texto: 'Oi, vi você no mapa' } },
+    { com: 601, nome: 'respondeu_pelo_wme', ultima: { id: 'a0000000-0000-1000-8000-000000000003', de: '601', para: EU, texto: 'respondi daqui do WME' } },
+    { com: 602, nome: 'bloqueada', bloqueada: true, ultima: { id: 'a0000000-0000-1000-8000-000000000004', de: '602', para: EU, texto: 'x', ctx: { app: APP_CONTEXTO } } },
+    { com: 603, nome: 'minha', ultima: { id: 'a0000000-0000-1000-8000-000000000005', de: EU, para: '603', texto: 'mandei eu', ctx: { app: APP_CONTEXTO } } },
+  )).conversas;
+  const r = filtrarConversasDaApp(cs, { eu: EU, conhecidos: new Set(['601']) });
+  assert.deepEqual(r.map((c) => c.nome), ['cafanha', 'respondeu_pelo_wme', 'minha'],
+    'a do WME apareceu, ou a que a pessoa respondeu pelo WME sumiu');
+  const [caf, , minha] = r;
+  assert.equal(caf.id, '183164343');
+  assert.equal(caf.naoLidas, 2);
+  // A prévia é a PERGUNTA (a legenda), não o texto do Waze com link.
+  assert.equal(caf.ultima.texto, 'Esse é duplicado?');
+  assert.deepEqual(caf.ultima.card, { name: 'Loja', updateTypeKey: 'NEW_PHOTO' });
+  assert.equal(caf.ultima.deMim, false);
+  assert.equal(minha.ultima.deMim, true);
+  assert.equal(minha.ultima.card, null);
+});
+
+test('conversas da app: prévia com teto e cartão que não se lê vira null — nunca derruba a lista', () => {
+  const cs = g.lerConversas(conversas(
+    { com: 700, nome: 'longa', ultima: { id: 'a0000000-0000-1000-8000-000000000006', de: '700', para: EU, texto: 'x'.repeat(900), ctx: { app: APP_CONTEXTO, card: '{isto não é json' } } },
+  )).conversas;
+  const [c] = filtrarConversasDaApp(cs, { eu: EU, conhecidos: new Set() });
+  assert.equal(c.ultima.texto.length, 140);
+  assert.equal(c.ultima.card, null);
+});
+
+// ── rota presenca-app ────────────────────────────────────────────────────────
+
+const BASE = { cookies: COOKIES, pais: BRASIL, userId: EU };
+
+test('presenca-app: lista e conversas numa ida, em paralelo, no servidor da região — e SEM token sem instalação', { timeout: 5000 }, async () => {
+  const soltar = {};
+  const chegou = new Set();
+  const esperaAsDuas = (m, resp) => (p) => new Promise((ok) => {
+    chegou.add(m);
+    soltar[m] = () => ok(resp());
+    // Só responde quando AS DUAS já saíram: em série, a segunda nunca chega e o teste estoura.
+    if (chegou.size === 2) Object.values(soltar).forEach((f) => f());
+  });
+  const { resultado, pedidos } = await comWaze({
+    listOnlineEditors: esperaAsDuas('lista', () => respostaGrpc({ dados: lista(naApp(183164343, 'cafanha', BRASIL)) })),
+    ListConversations: esperaAsDuas('conv', () => respostaGrpc({ dados: conversas({ com: 183164343, nome: 'cafanha', ultima: { id: 'a0000000-0000-1000-8000-000000000001', de: '183164343', para: EU, ctx: { app: APP_CONTEXTO } } }) })),
+  }, () => dispatch('presenca-app', { ...BASE, region: 'row' }, {}));
+  assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
+  assert.deepEqual(resultado.body.online.map((e) => e.nome), ['cafanha']);
+  assert.deepEqual(resultado.body.conversas.map((c) => c.nome), ['cafanha']);
+  assert.ok(!('chat' in resultado.body), 'sem instalação não há token pra devolver');
+  assert.deepEqual(pedidos.map((p) => p.metodo).sort(), ['ListConversations', 'listOnlineEditors']);
+  // A lista é a do MUNDO: a caixa inteira, e o país sai da marca.
+  const caixa = g.lerCampos(um(g.lerCampos(pedidos.find((p) => p.metodo === 'listOnlineEditors').corpo), 1));
+  const ponto = (v) => { const c = g.lerCampos(v); return [Number(BigInt.asIntN(64, um(c, 101))) / 1e6, Number(BigInt.asIntN(64, um(c, 102))) / 1e6]; };
+  assert.deepEqual([...ponto(um(caixa, 1)), ...ponto(um(caixa, 2))], [-180, -85, 180, 85]);
+  assert.match(pedidos.find((p) => p.metodo === 'listOnlineEditors').url, /\/row-Descartes\/grpc\//);
+  assert.match(pedidos.find((p) => p.metodo === 'ListConversations').url, /\/row-wmp\//);
+});
+
+test('presenca-app: com a instalação do aparelho, o token do tempo real vem junto — pela MESMA instalação', async () => {
+  const instalacao = '0f2a8c1e-5b3d-11f1-9c4e-7d1a2b3c4d5e';
+  const { resultado, pedidos } = await comWaze({
+    listOnlineEditors: () => respostaGrpc({}),
+    ListConversations: () => respostaGrpc({}),
+    GetMessagingProvider: () => respostaGrpc({ dados: g.junta(g.campo.msg(1,
+      g.campo.bytes(1, new Uint8Array([1, 2, 3])), g.campo.inteiro(2, 86_400_000_000),
+      g.campo.texto(3, 'https://instantmessaging-pa.googleapis.com/'), g.campo.texto(4, 'chave-de-teste'))) }),
+  }, () => dispatch('presenca-app', { ...BASE, instalacao }, {}));
+  assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
+  assert.equal(resultado.body.chat.token, 'AQID');
+  assert.equal(resultado.body.chat.base, 'https://instantmessaging-pa.googleapis.com/');
+  assert.equal(resultado.body.chat.chave, 'chave-de-teste');
+  assert.ok(resultado.body.chat.expiraEm > Date.now() + 86_000_000);
+  const cab = g.lerCampos(um(g.lerCampos(pedidos.find((p) => p.metodo === 'GetMessagingProvider').corpo), 1));
+  assert.equal(new TextDecoder().decode(um(cab, 4)), instalacao, 'o token saiu para outra instalação — a do aparelho não recebe o fluxo');
+  assert.deepEqual(resultado.body.online, []);
+  assert.deepEqual(resultado.body.conversas, []);
+});
+
+test('presenca-app: validação ANTES de qualquer rede', async () => {
+  const casos = [
+    { pais: undefined }, { pais: 0 }, { pais: 1000 }, { pais: '30' },
+    { userId: undefined }, { userId: 'fulano' },
+    { instalacao: 'nao-e-uuid' },
+  ];
+  for (const extra of casos) {
+    const { resultado, pedidos } = await comWaze({}, () => dispatch('presenca-app', { ...BASE, ...extra }, {}));
+    assert.equal(resultado.status, 400, JSON.stringify(extra));
+    assert.equal(pedidos.length, 0, JSON.stringify(extra));
+  }
+});
+
+test('presenca-app: uma parte que falha fica null e a outra chega; sessão morta é 401', async () => {
+  const parcial = await comWaze({
+    listOnlineEditors: () => respostaGrpc({ dados: lista(naApp(183164343, 'cafanha', BRASIL)) }),
+    ListConversations: () => respostaGrpc({ status: 14, mensagem: 'unavailable' }),
+  }, () => dispatch('presenca-app', BASE, {}));
+  assert.equal(parcial.resultado.status, 200);
+  assert.deepEqual(parcial.resultado.body.online.map((e) => e.nome), ['cafanha']);
+  assert.equal(parcial.resultado.body.conversas, null, 'falha passageira virou "nenhuma conversa"');
+
+  // O status 7 com a mensagem do convidado é sessão morta (medido na fase 1).
+  const morta = await comWaze({
+    listOnlineEditors: () => respostaGrpc({ status: 7, mensagem: 'Operation not allowed by guest user' }),
+    ListConversations: () => respostaGrpc({}),
+  }, () => dispatch('presenca-app', BASE, {}));
+  assert.equal(morta.resultado.status, 401);
+  assert.equal(morta.resultado.body.errorCategory, 'unauthorized');
+  const mortaNoChat = await comWaze({
+    listOnlineEditors: () => respostaGrpc({}),
+    ListConversations: () => respostaJson(403, '{}'),
+  }, () => dispatch('presenca-app', BASE, {}));
+  assert.equal(mortaNoChat.resultado.status, 401, 'o chat recusou a sessão e a rota respondeu como se nada fosse');
+});
+
+test('presenca-app: os conhecidos do aparelho têm teto de 50 e só aceitam id do Waze', async () => {
+  const ultima = (com) => ({ id: `a0000000-0000-1000-8000-${String(com).padStart(12, '0')}`, de: String(com), para: EU, texto: 'pelo WME' });
+  const ids = Array.from({ length: 60 }, (_, i) => 1000 + i);
+  const { resultado } = await comWaze({
+    listOnlineEditors: () => respostaGrpc({}),
+    ListConversations: () => respostaGrpc({ dados: conversas(...ids.map((com) => ({ com, nome: 'p' + com, ultima: ultima(com) }))) }),
+  }, () => dispatch('presenca-app', { ...BASE, conhecidos: [...ids.map(String), 'fulano', null] }, {}));
+  assert.equal(resultado.status, 200);
+  const vistos = resultado.body.conversas.map((c) => Number(c.id));
+  assert.equal(vistos.length, 50);
+  assert.ok(!vistos.includes(1050), 'o 51º conhecido passou pelo teto');
+});
+
+// ── de carona na ação ────────────────────────────────────────────────────────
+
+test('carona: a ação traz quem usa a app no país e as conversas da app, sem pedido novo à nossa API', async () => {
+  const pres = { userId: EU, lat: -23.5, lon: -46.6, pais: BRASIL, conhecidos: ['601'] };
+  const { resultado, pedidos } = await comWaze({
+    Read: () => respostaJson(200, '{}'),
+    updateOnlineEditor: () => respostaGrpc({ dados: editor({ id: Number(EU), nome: 'antigerme', ...marcarPosicao({ lat: -23.5, lon: -46.6 }, BRASIL) }) }),
+    listOnlineEditors: () => respostaGrpc({ dados: lista(
+      naApp(183164343, 'cafanha', BRASIL),
+      naApp(500, 'na_franca', FRANCA, 48.85, 2.35),
+      soNoWme(501, 'so_wme', BRASIL),
+    ) }),
+    ListConversations: () => respostaGrpc({ dados: conversas(
+      { com: 601, nome: 'conhecida', ultima: { id: 'a0000000-0000-1000-8000-000000000003', de: '601', para: EU, texto: 'pelo WME' } },
+      { com: 600, nome: 'so_wme', ultima: { id: 'a0000000-0000-1000-8000-000000000002', de: '600', para: EU, texto: 'oi' } },
+    ) }),
+  }, () => dispatch('marcar-lido', { cookies: COOKIES, venueID: '1', updateRequestID: '2', presenca: pres }, {}));
+  assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
+  assert.equal(resultado.body.success, true);
+  assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
+  assert.deepEqual(resultado.body.presencaApp.online.map((e) => e.nome), ['cafanha']);
+  assert.deepEqual(resultado.body.presencaApp.conversas.map((c) => c.nome), ['conhecida']);
+  assert.equal(pedidos.filter((p) => p.metodo === 'listOnlineEditors').length, 1);
+});
+
+test('carona: a lista que falha some da resposta — a ação e a escrita seguem', async () => {
+  const pres = { userId: EU, lat: -23.5, lon: -46.6, pais: BRASIL };
+  const { resultado } = await comWaze({
+    Read: () => respostaJson(200, '{}'),
+    updateOnlineEditor: () => respostaGrpc({ dados: editor({ id: Number(EU), nome: 'antigerme', ...marcarPosicao({ lat: -23.5, lon: -46.6 }, BRASIL) }) }),
+    listOnlineEditors: () => { throw new Error('rede caiu no meio'); },
+    ListConversations: () => respostaGrpc({ status: 14, mensagem: 'unavailable' }),
+  }, () => dispatch('marcar-lido', { cookies: COOKIES, venueID: '1', updateRequestID: '2', presenca: pres }, {}));
+  assert.equal(resultado.status, 200);
+  assert.equal(resultado.body.success, true);
+  assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
+  assert.ok(!('presencaApp' in resultado.body), 'lista que falhou inteira não pode chegar como "ninguém na app"');
+});
+
+// ── chat: abrir uma conversa ─────────────────────────────────────────────────
+
+test('chat abrir: o histórico e o "lida" numa ida, em paralelo', { timeout: 5000 }, async () => {
+  const soltar = [];
+  const esperaAsDuas = (resp) => () => new Promise((ok) => {
+    soltar.push(() => ok(resp()));
+    if (soltar.length === 2) soltar.forEach((f) => f());
+  });
+  const hist = g.junta(g.campo.bytes(1, msg({ id: 'a0000000-0000-1000-8000-000000000009', de: '183164343', para: EU, texto: 'WP-TESTE oi', ctx: { app: APP_CONTEXTO } })));
+  const { resultado, pedidos } = await comWaze({
+    ListMessages: esperaAsDuas(() => respostaGrpc({ dados: hist })),
+    MarkConversationRead: esperaAsDuas(() => respostaGrpc({ dados: deB64(F.marcarLida.res) })),
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343' }, {}));
+  assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
+  assert.equal(resultado.body.mensagens.length, 1);
+  assert.equal(resultado.body.mensagens[0].texto, 'WP-TESTE oi');
+  assert.deepEqual(resultado.body.mensagens[0].contexto, { app: APP_CONTEXTO });
+  assert.equal(resultado.body.recibos.length, 2, 'os recibos que o Waze gerou ao marcar como lida sumiram');
+  // As duas chamadas falam da MESMA conversa.
+  const comDe = (p, n) => new TextDecoder().decode(um(g.lerCampos(um(g.lerCampos(p.corpo), n)), 2));
+  assert.equal(comDe(pedidos.find((p) => p.metodo === 'ListMessages'), 2), '183164343');
+  assert.equal(comDe(pedidos.find((p) => p.metodo === 'MarkConversationRead'), 2), '183164343');
+});
+
+test('chat abrir: página ANTIGA não marca como lida; conversa nova (NO_EXISTING_CONVERSATION) não é erro', async () => {
+  const antiga = await comWaze({ ListMessages: () => respostaGrpc({}) },
+    () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343', antesDe: 1790182220160 }, {}));
+  assert.equal(antiga.resultado.status, 200);
+  assert.deepEqual(antiga.pedidos.map((p) => p.metodo), ['ListMessages'], 'rolar pra trás marcou a conversa como lida');
+
+  const nova = await comWaze({
+    ListMessages: () => respostaGrpc({}),
+    MarkConversationRead: () => respostaGrpc({ status: 7, mensagem: 'NO_EXISTING_CONVERSATION' }),
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343' }, {}));
+  assert.equal(nova.resultado.status, 200, JSON.stringify(nova.resultado.body));
+  assert.deepEqual(nova.resultado.body.mensagens, []);
+  assert.deepEqual(nova.resultado.body.recibos, []);
+});
+
+test('chat abrir: o "lida" que falha não derruba o histórico; o histórico que falha, sim', async () => {
+  const semLida = await comWaze({
+    ListMessages: () => respostaGrpc({}),
+    MarkConversationRead: () => respostaGrpc({ status: 14, mensagem: 'unavailable' }),
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343' }, {}));
+  assert.equal(semLida.resultado.status, 200);
+  assert.deepEqual(semLida.resultado.body.recibos, []);
+
+  const morta = await comWaze({
+    ListMessages: () => respostaGrpc({ status: 16, mensagem: '' }),
+    MarkConversationRead: () => respostaGrpc({}),
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343' }, {}));
+  assert.equal(morta.resultado.status, 401);
+
+  const semCom = await comWaze({}, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: 'fulano' }, {}));
+  assert.equal(semCom.resultado.status, 400);
+  assert.equal(semCom.pedidos.length, 0);
+});

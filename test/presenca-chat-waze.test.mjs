@@ -216,7 +216,21 @@ test('chat enviar: texto, contexto e id do cliente; SEM remetente quando não se
   assert.equal(resultado.body.ts, 1790182220160);
   const m = g.lerMensagem(um(g.lerCampos(pedidos[0].corpo), 2));
   assert.deepEqual([m.classe, m.texto, m.para.id, m.de], ['texto', 'Olá antigerme', '12444348', null]);
-  assert.deepEqual(m.contexto, { wp_card: '{"v":1}' });
+  // O contexto do cliente vai inteiro, e a MARCA da app vai junto (fase 3).
+  assert.deepEqual(m.contexto, { wp_card: '{"v":1}', app: 'wazeplaces' });
+});
+
+test('chat enviar: a marca da app é do SERVIDOR — o cliente não a tira nem a troca', async () => {
+  // É a marca que põe a conversa na lista da app. Cliente velho (sem contexto)
+  // ou descuidado (com outra `app`) não pode tirar a conversa de lá.
+  for (const contexto of [undefined, null, { app: 'outra' }, { legenda: 'oi', app: '' }]) {
+    const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: deB64(F.enviarTexto.res) }),
+      () => dispatch('chat', { cookies: COOKIES, acao: 'enviar', para: '12444348', texto: 'oi', ...(contexto !== undefined ? { contexto } : {}) }, {}));
+    assert.equal(resultado.status, 200, JSON.stringify(contexto));
+    const m = g.lerMensagem(um(g.lerCampos(pedidos[0].corpo), 2));
+    assert.equal(m.contexto && m.contexto.app, 'wazeplaces', JSON.stringify(contexto));
+    if (contexto && contexto.legenda) assert.equal(m.contexto.legenda, 'oi', 'o resto do contexto do cliente se perdeu');
+  }
 });
 
 test('chat enviar: validação antes de qualquer rede', async () => {
