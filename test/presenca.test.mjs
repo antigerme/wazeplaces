@@ -1,305 +1,71 @@
-// O núcleo da sala de presença (`server/presenca.mjs`) — o que ele aceita, o
-// que recusa, e o que ele se recusa a saber.
+// A presença do app — a lista de quem usa o app e a conversa, que desde a
+// fase 3 são as do WME. Aqui ficam as regras que se leem no TEXTO do cliente,
+// e o guard que impede a sala própria de voltar.
 //
-// Existe porque a sala é o único pedaço do projeto que roda em dois servidores
-// ao mesmo tempo (o Durable Object da Cloudflare e o adaptador Node) e não tem
-// tela pra denunciar quando diverge. Crachá que aceita assinatura errada, lista
-// que inclui você mesmo ou nome de sala montado diferente nos dois lados não
-// quebram nada visível — só ficam errados.
+// O comportamento mora em outros arquivos: o do cliente em
+// `test/presenca-cliente.test.mjs` (o `presenca.js` inteiro num navegador de
+// mentira), o do servidor em `test/presenca-app.test.mjs`,
+// `test/presenca-carona.test.mjs` e `test/wme-grpc.test.mjs`.
 //
-// Relógio é INJETADO em toda função de tempo, então nada aqui dorme.
+// Até a fase 4 este arquivo era o do núcleo da sala (`server/presenca.mjs`):
+// crachá assinado, nome da sala, lista e TURN. A sala saiu inteira — o núcleo,
+// o WebSocket da VM, o Durable Object e a rota `presenca` —, e os testes dela
+// junto.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import {
-  salaDaFila, limpar, credenciaisTurn, listaDePares,
-  assinarCracha, conferirCracha, corpoDoCracha, igualEmTempoConstante,
-  CRACHA_TTL, LIMITE_LISTA, MAX_BODY,
-} from '../server/presenca.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+// Comentário fora ANTES de casar: o comentário que explica por que algo saiu
+// cita o nome do que saiu (gotcha #67).
+const semComentario = (t) => t.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
 
-// O mesmo HMAC que o adaptador injeta. Assinatura de teste feita com outro
-// algoritmo mediria o teste, não o código.
-const hmac = async (segredo, msg) => createHmac('sha1', segredo).update(msg).digest('base64');
-const SEGREDO = 'segredo-de-teste';
-const T0 = 1_700_000_000_000;
+// ── A SALA PRÓPRIA NÃO VOLTA ────────────────────────────────────────────────
 
-// ── A SALA É A FILA ─────────────────────────────────────────────────────────
+test('a sala própria não existe mais — nem no cliente, nem nos servidores, nem no wrangler', async () => {
+  // Saiu na fase 4. O que sobrasse dela seria código que ninguém chama e que
+  // alguém um dia "conserta" — ou um Durable Object pendurado no deploy.
+  for (const arq of ['server/presenca.mjs', 'server/ws.mjs', 'worker/sala-do.mjs']) {
+    assert.equal(existsSync(join(ROOT, arq)), false, `${arq} voltou`);
+  }
 
-test('salaDaFila resolve a fila em nome de sala', () => {
-  assert.equal(salaDaFila('row', 30, 5), 'row:30:5');
-  assert.equal(salaDaFila('row', '30', null), 'row:30');
-  assert.equal(salaDaFila('row', 30, ''), 'row:30');
-  assert.equal(salaDaFila('row', 30, 'SP'), 'row:30', 'estado não-numérico devia ser ignorado');
-  assert.equal(salaDaFila(null, 30), 'row:30', 'região ausente devia cair no padrão');
+  // A rota, pelo COMPORTAMENTO: o dispatch a trata como qualquer rota que não existe.
+  const { dispatch } = await import('../server/core.mjs');
+  const r = await dispatch('presenca', { region: 'row', countryId: 30 }, {});
+  assert.equal(r.status, 404, 'a rota `presenca` voltou');
+  assert.equal(r.body.errorKey, 'srv.err.endpointNotFound');
+  // Controle: uma rota que existe NÃO dá 404 — senão o 404 acima mediria um
+  // dispatch quebrado, e não a ausência da rota.
+  const viva = await dispatch('presenca-app', {}, {});
+  assert.notEqual(viva.status, 404, 'o controle falhou: presenca-app deu 404, e o 404 acima não prova nada');
 
-  // Sem país não existe sala: "todo mundo do mundo" não é a fila de ninguém, e
-  // a lista deixaria de dizer o que promete (quem está triando O MESMO lugar).
-  assert.equal(salaDaFila('row', null), null);
-  assert.equal(salaDaFila('row', 0), null);
-  assert.equal(salaDaFila('row', 'abc'), null);
+  // Os dois adaptadores: nenhum atende o /sala nem sobe servidor WebSocket.
+  assert.doesNotMatch(semComentario(read('worker/index.mjs')), /['"]\/sala['"]|SalaDO|env\.SALA/,
+    'o Worker voltou a atender a sala');
+  assert.doesNotMatch(semComentario(read('server/node.mjs')), /\.on\('upgrade'|['"]\/sala['"]/,
+    'o node.mjs voltou a atender a sala');
 
-  // O nome vira id de Durable Object e chave de mapa: `..` de path e `/` de
-  // URL não podem sobreviver.
-  assert.equal(salaDaFila('../../etc', 30), 'etc:30');
-  assert.equal(limpar('a b/c\nd'), 'abcd');
-  assert.equal(limpar('x'.repeat(200)).length, 64, 'sem teto de tamanho');
-});
+  // O wrangler: sem binding, e com a migração que APAGA a classe. A de criação
+  // fica antes dela: as migrações são um HISTÓRICO, e a Cloudflare aplica só as
+  // tags posteriores à última já aplicada no servidor.
+  const cfg = JSON.parse(read('wrangler.jsonc').replace(/^\s*\/\/.*$/gm, ''));
+  assert.equal(cfg.durable_objects, undefined, 'o binding do Durable Object voltou');
+  assert.deepEqual((cfg.migrations || []).map((m) => m.tag).slice(0, 2), ['v1', 'v2'],
+    'as migrações não começam mais em v1 → v2: a história não bate com a do servidor');
+  assert.deepEqual(cfg.migrations[0].new_sqlite_classes, ['SalaDO'], 'a migração de criação sumiu ou mudou');
+  assert.deepEqual(cfg.migrations[1].deleted_classes, ['SalaDO'], 'sumiu a migração que apaga o SalaDO');
+  assert.equal('exports' in cfg, false, '`exports` e `migrations` são mutuamente exclusivos: a Cloudflare recusa os dois');
 
-test('o NOME DA SALA nasce só no servidor — e o cliente não fala mais com a sala', () => {
-  // Duas montagens do mesmo nome divergem sozinhas e o sintoma é "não vejo
-  // ninguém". O servidor resolve com `salaDaFila` e devolve a sala DENTRO do
-  // crachá. Desde a fase 3 o CLIENTE não usa a sala nenhuma: a lista e o chat
-  // são os do WME. A sala segue no servidor até a fase 4, que a remove — e um
-  // cliente misturando os dois modelos seria a pior das duas coisas.
-  const CLIENTE = read('js/presenca.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  for (const proibido of [/salaDaFila/, /new WebSocket/, /RTCPeerConnection/, /['"]\/sala['"]/, /API\.presenca\(/, /cracha/]) {
+  // E o cliente não fala com nada disso.
+  const CLIENTE = semComentario(read('js/presenca.js'));
+  for (const proibido of [/new WebSocket/, /RTCPeerConnection/, /['"]\/sala['"]/, /API\.presenca\(/, /cracha/]) {
     assert.equal(proibido.test(CLIENTE), false, `o cliente voltou a usar a sala própria (${proibido})`);
   }
   assert.match(CLIENTE, /API\.presencaApp\(/, 'o cliente parou de pedir a lista do app');
-
-  const CORE = read('server/core.mjs');
-  assert.match(CORE, /salaDaFila\(/, 'o servidor parou de usar a fonte única do nome da sala');
-});
-
-// ── CRACHÁ ──────────────────────────────────────────────────────────────────
-
-test('crachá válido passa; assinatura de outro segredo não', async () => {
-  const c = await assinarCracha({ peer: 'p1', nome: 'Ana', rank: 5, am: true, sala: 'row:30' }, SEGREDO, T0, hmac);
-  assert.equal(c.exp, Math.floor(T0 / 1000) + CRACHA_TTL);
-  assert.ok(await conferirCracha(c, SEGREDO, T0, hmac), 'crachá recém-assinado foi recusado');
-  assert.equal(await conferirCracha(c, 'outro-segredo', T0, hmac), null, 'aceitou assinatura de outro segredo');
-});
-
-test('crachá adulterado é recusado em QUALQUER campo — inclusive rank e AM', async () => {
-  // O ponto do crachá: rank e AM carregam reputação. Se dessem pra editar no
-  // cliente, a lista viraria um convite a se passar por gente com autoridade.
-  const base = { peer: 'p1', nome: 'Ana', rank: 1, am: false, staff: false, sala: 'row:30' };
-  const c = await assinarCracha(base, SEGREDO, T0, hmac);
-  for (const campo of ['peer', 'nome', 'rank', 'am', 'staff', 'sala', 'exp']) {
-    const forjado = { ...c };
-    forjado[campo] = campo === 'rank' ? 6 : (campo === 'am' || campo === 'staff') ? true
-      : campo === 'exp' ? c.exp + 3600 : `${c[campo]}x`;
-    assert.equal(await conferirCracha(forjado, SEGREDO, T0, hmac), null, `aceitou crachá com ${campo} trocado`);
-  }
-});
-
-test('crachá vencido é recusado, e lixo não derruba a conferência', async () => {
-  const c = await assinarCracha({ peer: 'p1', nome: 'Ana', sala: 'row:30' }, SEGREDO, T0, hmac);
-  assert.ok(await conferirCracha(c, SEGREDO, T0 + CRACHA_TTL * 1000 - 1000, hmac), 'venceu antes da hora');
-  assert.equal(await conferirCracha(c, SEGREDO, T0 + CRACHA_TTL * 1000 + 1000, hmac), null, 'crachá vencido entrou');
-
-  // Quem chama está no caminho de rede: `null` é resposta, exceção é queda.
-  for (const lixo of [null, undefined, 0, 'x', [], {}, { sig: 'a' }, { sig: 'a', exp: 'ontem' }]) {
-    assert.equal(await conferirCracha(lixo, SEGREDO, T0, hmac), null, `lançou ou aceitou com ${JSON.stringify(lixo)}`);
-  }
-});
-
-test('o corpo assinado tem ordem FIXA e normaliza booleano', async () => {
-  // Assinatura é sobre string: chave em ordem diferente é outra string. E
-  // `true` × `'true'` assinariam diferente depois de uma volta pelo JSON.
-  const c = { peer: 'p1', nome: 'Ana', rank: 5, am: true, staff: false, sala: 'row:30', exp: 123 };
-  assert.equal(corpoDoCracha(c), 'p1|Ana|5|1|0|row:30|123');
-  assert.equal(corpoDoCracha({ ...c, am: 1, staff: 0 }), corpoDoCracha(c));
-});
-
-test('a comparação de assinatura é em tempo constante', () => {
-  assert.equal(igualEmTempoConstante('abc', 'abc'), true);
-  assert.equal(igualEmTempoConstante('abc', 'abd'), false);
-  assert.equal(igualEmTempoConstante('abc', 'ab'), false);
-  assert.equal(igualEmTempoConstante('', ''), true);
-  // O que o guard protege é o CÓDIGO: `===` volta silencioso e vira oráculo de
-  // prefixo pra forjar assinatura byte a byte.
-  const src = read('server/presenca.mjs');
-  const fn = src.match(/export function igualEmTempoConstante[\s\S]*?\n\}/);
-  assert.ok(fn, 'sumiu a comparação de tempo constante');
-  assert.match(fn[0], /\^/, 'a comparação deixou de ser por XOR acumulado');
-  const conferir = src.match(/export async function conferirCracha[\s\S]*?\n\}/)[0];
-  assert.match(conferir, /igualEmTempoConstante/, 'a conferência voltou a comparar assinatura com ===');
-});
-
-test('a sala confere o crachá, e confere que ele é DESTA sala', async () => {
-  // Crachá é assinado para uma sala. Sem conferir o campo `sala`, um crachá
-  // legítimo do Brasil entraria na sala de Portugal — assinatura válida, lugar
-  // errado, e ninguém veria erro nenhum.
-  for (const arq of ['worker/sala-do.mjs', 'server/node.mjs']) {
-    const src = read(arq);
-    assert.match(src, /conferir\(/, `${arq} não confere crachá`);
-    assert.match(src, /cracha\.sala\s*!==|cracha\.sala\s*!=/, `${arq} aceita crachá de outra sala`);
-  }
-});
-
-// ── A LISTA ─────────────────────────────────────────────────────────────────
-
-test('a lista NÃO inclui quem perguntou, e sai em ordem estável', () => {
-  // Incluir você mesmo faria a pílula contar "1 editor online" com você sozinho
-  // na sala. E ordem instável faz a folha piscar a cada entrada e saída.
-  const gente = [
-    { peer: 'eu', nome: 'Zeca' },
-    { peer: 'b', nome: 'Bia' },
-    { peer: 'a', nome: 'Ana' },
-    { peer: 'b', nome: 'Bia' },   // dois sockets do mesmo peer: conta uma vez
-  ];
-  const r = listaDePares(gente, 'eu');
-  assert.deepEqual(r.peers.map((p) => p.peer), ['a', 'b'], 'ordem instável, duplicou ou incluiu a si mesmo');
-  assert.equal(r.total, 2);
-  assert.deepEqual(listaDePares(gente, 'eu').peers.map((p) => p.peer), ['a', 'b'], 'duas leituras, ordens diferentes');
-  assert.deepEqual(listaDePares([], 'eu'), { total: 0, peers: [] });
-});
-
-test('quem é "a mesma pessoa" é o NOME, nunca o peer', () => {
-  // Relatado pelo owner com print: recarregar a página o duplicava na lista —
-  // e ele aparecia na PRÓPRIA lista, com a pílula contando 3 onde havia 1
-  // colega. Recarregando de novo, acumulava; os colegas o viam repetido também.
-  //
-  // A causa: o `peer` é sorteado A CADA CARGA DA PÁGINA. Ele endereça uma
-  // CONEXÃO, não um editor. Enquanto o socket antigo não fecha, a mesma pessoa
-  // está na sala com dois peers, e a comparação por peer não os junta.
-  //
-  // O nome vem do crachá ASSINADO pelo servidor (username do WME): único por
-  // conta, e não dá pra forjar.
-  const sala = [
-    { peer: 'p1', nome: 'antigerme', rank: 5, am: true, staff: false, desde: 1 },
-    { peer: 'p2', nome: 'antigerme', rank: 5, am: true, staff: false, desde: 2 },
-    { peer: 'p3', nome: 'antigerme', rank: 5, am: true, staff: false, desde: 3 },
-    { peer: 'p9', nome: 'PatrickBLopes', rank: 5, am: true, staff: false, desde: 1 },
-  ];
-
-  // Eu, no socket mais novo: NÃO me vejo, e a pílula conta só o colega.
-  const meu = listaDePares(sala, { peer: 'p3', nome: 'antigerme' });
-  assert.equal(meu.total, 1, 'a pílula voltou a contar as minhas próprias conexões');
-  assert.deepEqual(meu.peers.map((p) => p.nome), ['PatrickBLopes']);
-
-  // O colega vê UM antigerme — e o do socket MAIS RECENTE, porque é pra esse
-  // peer que a conversa é chamada; o antigo é o que está morrendo.
-  const dele = listaDePares(sala, { peer: 'p9', nome: 'PatrickBLopes' });
-  assert.equal(dele.total, 1, 'o colega voltou a ver a mesma pessoa repetida');
-  assert.equal(dele.peers[0].peer, 'p3', 'a lista aponta pra conexão velha, e a conversa cairia num socket morto');
-
-  // Sem nome (não deveria acontecer, mas não pode juntar gente diferente).
-  const anon = listaDePares([{ peer: 'x' }, { peer: 'y' }], { peer: 'z' });
-  assert.equal(anon.total, 2, 'sem nome, peers distintos viraram a mesma pessoa');
-});
-
-test('a lista tem teto, mas o total continua verdadeiro', () => {
-  // Fila grande (o Brasil inteiro) pode ter muita gente. Cortar a lista sem
-  // mandar o total faria a pílula mentir justamente onde há mais companhia.
-  const muitos = Array.from({ length: LIMITE_LISTA + 10 }, (_, i) => ({ peer: `p${String(i).padStart(3, '0')}`, nome: `E${i}` }));
-  const r = listaDePares(muitos, 'ninguem');
-  assert.equal(r.peers.length, LIMITE_LISTA, 'a lista passou do teto');
-  assert.equal(r.total, LIMITE_LISTA + 10, 'o total foi cortado junto com a lista');
-});
-
-test('a lista carrega rank/AM/staff, e só isso', () => {
-  // O que aparece na folha. Campo a mais aqui é campo que o servidor repassa
-  // sem ninguém ter decidido — e a Ajuda promete uma lista curta.
-  const [p] = listaDePares([{ peer: 'a', nome: 'Ana', rank: 5, am: true, staff: false, ip: '1.2.3.4' }], 'eu').peers;
-  assert.deepEqual(Object.keys(p).sort(), ['am', 'nome', 'peer', 'rank', 'staff']);
-});
-
-// ── TURN ────────────────────────────────────────────────────────────────────
-
-test('credencial TURN segue o padrão do coturn (use-auth-secret)', async () => {
-  const { iceServers } = await credenciaisTurn('turn:a:3478,turns:a:5349', SEGREDO, 3600, T0, hmac);
-  const [srv] = iceServers;
-  assert.deepEqual(srv.urls, ['turn:a:3478', 'turns:a:5349'], 'a lista separada por vírgula não virou array');
-  // username = expiração unix; credential = base64(HMAC-SHA1(segredo, username)).
-  // Divergir disso não dá erro daqui: dá 401 no coturn, do outro lado da rede.
-  assert.equal(srv.username, String(Math.floor(T0 / 1000) + 3600));
-  assert.equal(srv.credential, createHmac('sha1', SEGREDO).update(srv.username).digest('base64'));
-
-  const arr = await credenciaisTurn(['turn:b:3478'], SEGREDO, 0, T0, hmac);
-  assert.deepEqual(arr.iceServers[0].urls, ['turn:b:3478'], 'array não passou direto');
-  assert.equal(arr.iceServers[0].username, String(Math.floor(T0 / 1000) + 86400), 'ttl inválido não caiu no padrão');
-});
-
-test('o TURN do servidor é assinado com SHA-1 — o coturn não valida outra coisa', () => {
-  // HMAC-SHA256 aqui não dá erro nenhum do nosso lado: dá 401 no coturn, longe
-  // daqui, e o sintoma é "a conversa não conecta em rede simétrica".
-  const CORE = read('server/core.mjs');
-  const chamada = CORE.match(/credenciaisTurn\([\s\S]{0,400}?\)\);/);
-  assert.ok(chamada, 'sumiu a emissão de credencial TURN');
-  assert.match(chamada[0], /'SHA-1'/, 'o TURN deixou de ser assinado com SHA-1');
-});
-
-// ── TURN da Cloudflare ──────────────────────────────────────────────────────
-// Mecanismo DIFERENTE do coturn: a credencial não é calculada, é pedida por
-// HTTP. Testado com `fetch` injetado, e a resposta é a que foi MEDIDA na conta
-// real — não uma que eu imaginei.
-
-test('turnDaCloudflare devolve os iceServers no formato do RTCPeerConnection', async () => {
-  const { turnDaCloudflare } = await import('../server/core.mjs');
-  // Resposta REAL de /credentials/generate-ice-servers (usuário e senha
-  // trocados). As portas 53/80/443 são o motivo de usarmos ESTE endpoint e não
-  // o irmão: 3478 é bloqueado em muita rede corporativa.
-  const respostaReal = {
-    iceServers: [
-      { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53'] },
-      {
-        urls: [
-          'turn:turn.cloudflare.com:3478?transport=udp',
-          'turn:turn.cloudflare.com:3478?transport=tcp',
-          'turns:turn.cloudflare.com:5349?transport=tcp',
-          'turn:turn.cloudflare.com:53?transport=udp',
-          'turn:turn.cloudflare.com:80?transport=tcp',
-          'turns:turn.cloudflare.com:443?transport=tcp',
-        ],
-        username: 'u', credential: 'c',
-      },
-    ],
-  };
-  let visto = null;
-  const falso = async (url, opts) => { visto = { url, opts }; return { status: 201, json: async () => respostaReal }; };
-
-  const lista = await turnDaCloudflare('chave-123', 'token-abc', 900, falso);
-  assert.deepEqual(lista, respostaReal.iceServers);
-  assert.match(visto.url, /\/v1\/turn\/keys\/chave-123\/credentials\/generate-ice-servers$/);
-  assert.equal(visto.opts.method, 'POST');
-  assert.equal(visto.opts.headers.Authorization, 'Bearer token-abc');
-  assert.deepEqual(JSON.parse(visto.opts.body), { ttl: 900 });
-  // Porta que atravessa firewall corporativo — o que este endpoint tem a mais.
-  assert.ok(lista[1].urls.some((u) => u.includes(':443')), 'sumiu a porta 443 do TURN');
-});
-
-test('turnDaCloudflare aceita a forma de OBJETO do endpoint irmão', async () => {
-  // `/credentials/generate` devolve `iceServers` como objeto único, não array.
-  // Trocar a URL sem tratar isso entregaria `iceServers` inválido pro browser.
-  const { turnDaCloudflare } = await import('../server/core.mjs');
-  const falso = async () => ({ status: 201, json: async () => ({ iceServers: { urls: ['turn:x:3478'], username: 'u', credential: 'c' } }) });
-  assert.deepEqual(await turnDaCloudflare('k', 't', 900, falso), [{ urls: ['turn:x:3478'], username: 'u', credential: 'c' }]);
-});
-
-test('TURN fora do ar NÃO derruba a presença — devolve null e o STUN assume', async () => {
-  // Trocar "a conversa não conecta em NAT simétrico" por "ninguém aparece na
-  // lista" seria piorar o problema. Qualquer falha vira `null`.
-  const { turnDaCloudflare } = await import('../server/core.mjs');
-  const casos = [
-    ['HTTP 401', async () => ({ status: 401, json: async () => ({}) })],
-    ['HTTP 500', async () => ({ status: 500, json: async () => ({}) })],
-    ['corpo sem iceServers', async () => ({ status: 201, json: async () => ({}) })],
-    ['lista vazia', async () => ({ status: 201, json: async () => ({ iceServers: [] }) })],
-    ['json quebrado', async () => ({ status: 201, json: async () => { throw new Error('json'); } })],
-    ['rede fora', async () => { throw new Error('ECONNREFUSED'); }],
-  ];
-  for (const [nome, falso] of casos) {
-    assert.equal(await turnDaCloudflare('k', 't', 900, falso), null, `${nome} devia virar null`);
-  }
-});
-
-test('o token do TURN não vaza no core', () => {
-  // Ele é credencial de conta, não de sessão. O core não tem `console`, mas o
-  // guard existe porque a tentação de "só um log pra depurar" é exatamente aqui.
-  const CORE = read('server/core.mjs');
-  const bloco = CORE.slice(CORE.indexOf('export async function turnDaCloudflare'));
-  const fim = bloco.indexOf('\n}');
-  assert.equal(/console\.|apiToken\s*\+|\$\{apiToken\}[^`]*`\s*\)/.test(bloco.slice(0, fim)), false,
-    'o token do TURN entrou em log ou em concatenação fora do header');
 });
 
 // ── O CLIENTE ───────────────────────────────────────────────────────────────
@@ -381,11 +147,6 @@ test('o estado e o objeto exportado são o MESMO — nada de dois Presenca', () 
     'voltou a existir um segundo objeto Presenca — é o bug do ✕ de novo');
 });
 
-// ── O CUSTO DE RECONECTAR ───────────────────────────────────────────────────
-//
-// Desde a fase 3 quem reconecta é o TEMPO REAL do chat, direto ao Google — e a
-// lição da sala vale igual: abrir a conexão não é ter conectado.
-
 test('o recuo do tempo real só zera quando o Google ENTREGA o lote, não quando a conexão abre', () => {
   // O bug mais caro da sala, e ele vale pro fluxo do Google do mesmo jeito:
   // zerar o recuo ao abrir faz toda falha virar uma tentativa nova a cada
@@ -414,21 +175,13 @@ test('o recuo do tempo real só zera quando o Google ENTREGA o lote, não quando
     'o recuo do tempo real é zerado fora do fim do lote — abrir a conexão não é ter conectado');
 });
 
-test('o recuo só zera quando o servidor ACEITA, não quando o socket abre (a sala, até a fase 4)', () => {
-  // O bug mais caro do recurso, e ele não aparece em teste de layout nem de
-  // protocolo: `onopen` zerava o contador de tentativas. Mas abrir o socket
-  // NÃO é ter conectado — a recusa do crachá, o fechamento pelo servidor e a
-  // queda de rede vêm todos DEPOIS do `onopen`. Zerando ali, o recuo nunca
-  // cresce e cada falha vira uma tentativa nova a cada 2 segundos, pra sempre.
-  //
-  // MEDIDO com o servidor fechando logo após o upgrade: 16 tentativas em 31s,
-  // todas espaçadas 2s. Cada uma custa DUAS requisições ao Worker (o crachá e
-  // o upgrade) e uma chamada ao Waze — ~3.600 requisições/hora por aparelho
-  // preso. Depois do conserto, ~120.
-  // Desde a fase 3 não há cliente da sala: o `eu` que zerava o recuo saiu com
-  // ele. O que este teste trava agora é que NINGUÉM volte a zerar um recuo no
-  // evento `online` do navegador — `online` quer dizer "existe interface de
-  // rede", não "a internet funciona", e num wi-fi instável ele dispara em laço.
+test('o `online` do navegador não zera o recuo do tempo real', () => {
+  // Herdado da sala própria, onde custou caro: zerar o recuo num evento que
+  // não prova conexão fazia cada falha virar uma tentativa nova a cada 2 s, pra
+  // sempre (MEDIDO na época: ~3.600 requisições por hora por aparelho preso).
+  // `online` quer dizer "existe interface de rede", não "a internet funciona",
+  // e num wi-fi instável ele dispara em laço. Quem zera é o fim do lote do
+  // Google (o teste acima).
   const CLI = read('js/presenca.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   const online = CLI.match(/addEventListener\('online', [^\n]*/);
   assert.ok(online, 'sumiu o ouvinte do `online`');
@@ -446,50 +199,4 @@ test('a espera de reconexão tem jitter', () => {
   assert.match(fn[0], /Math\.random\(\)/, 'a espera de reconexão voltou a ser fixa');
   assert.match(fn[0], /if \(fimNormal\) \{\s+espera = PRESENCA_FLUXO_RELIGAR_MS;/,
     'o fim normal do fluxo deixou de religar logo');
-});
-
-// ── O QUE O SERVIDOR NÃO SABE ───────────────────────────────────────────────
-
-test('o núcleo da sala não fala com plataforma nenhuma', () => {
-  // Ele roda no Worker E no Node. Um `node:` aqui quebra o Worker; um
-  // `console` aqui é log de quem está online, num servidor que promete não
-  // guardar nada.
-  const src = read('server/presenca.mjs');
-  const codigo = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-  for (const proibido of [/require\s*\(/, /from\s+'node:/, /\bprocess\./, /\bconsole\./, /globalThis\./]) {
-    assert.equal(proibido.test(codigo), false, `o núcleo puro passou a usar ${proibido}`);
-  }
-  // Relógio injetado: `Date.now()` aqui torna a validade do crachá impossível
-  // de testar sem dormir, e é assim que teste de tempo vira teste que ninguém roda.
-  assert.equal(/Date\.now\(\)/.test(codigo), false, 'o núcleo passou a ler o relógio sozinho');
-});
-
-test('a presença é a CONEXÃO, não um registro com prazo', () => {
-  // Contrato publicado na Ajuda: "some assim que você sai". Isso só é verdade
-  // enquanto ninguém guardar presença com TTL — no minuto em que a sala passar
-  // a lembrar de quem fechou o app, a Ajuda vira mentira nas 4 línguas.
-  const src = read('server/presenca.mjs');
-  assert.equal(/PRESENCA_TTL|setTimeout|setInterval/.test(src), false,
-    'a sala passou a guardar presença com prazo: revisite a frase da Ajuda');
-
-  // E os adaptadores não podem GRAVAR presença em lugar nenhum. `Map` em
-  // memória é a implementação certa: ela some com o processo, que é
-  // exatamente o que a Ajuda promete.
-  const DO = read('worker/sala-do.mjs');
-  assert.equal(/state\.storage|\.sql\b|ctx\.storage/.test(DO), false,
-    'o Durable Object passou a persistir — o servidor prometeu não guardar');
-  const NODE = read('server/node.mjs');
-  const salaNoNode = NODE.slice(NODE.indexOf('const salas = new Map()'), NODE.indexOf('server.listen('));
-  assert.ok(salaNoNode.length > 500, 'sumiu a sala do adaptador Node');
-  assert.equal(/writeFile|fsStore|SESSION_DIR/.test(salaNoNode), false,
-    'a sala do Node passou a escrever em disco');
-});
-
-test('frame maior que MAX_BODY é recusado nos dois adaptadores', () => {
-  // SDP grande cabe com folga em 64KB. Sem teto, um cliente hostil manda um
-  // frame de 2GB e o servidor aloca o buffer antes de olhar o conteúdo.
-  assert.equal(MAX_BODY, 65536);
-  for (const arq of ['worker/sala-do.mjs', 'server/node.mjs']) {
-    assert.match(read(arq), /MAX_BODY/, `${arq} não tem teto de tamanho de frame`);
-  }
 });

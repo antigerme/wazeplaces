@@ -153,9 +153,10 @@ jobs:
           # em 2026-08-23 — os dois só existem quando dois estados coexistem e
           # o app se redesenha. Cobertura de tela não é cobertura de fluxo.
           npm run test:fluxo
-          # Dois navegadores, uma sala, uma conversa de verdade. É o único teste
-          # que exercita o WebRTC — e WebRTC não tem versão sem browser. Reusa o
-          # chromium já instalado no passo acima.
+          # Dois navegadores conversando pelo chat do WME de mentira (os mesmos
+          # bytes e filtros do servidor), com o tempo real no host de verdade
+          # do Google e a CSP de verdade. Reusa o chromium já instalado no passo
+          # acima.
           npm run test:presenca
           # O offline LIGA o service worker — a camada que nenhum outro teste
           # cobria. Dois defeitos chegaram aos testadores por causa disso: o
@@ -232,9 +233,9 @@ jobs:
   # WebKit serve o app do cache igual ao Chromium.
   #
   # O que isto NÃO é: o Safari do iPhone. É o mesmo motor (WebKit 26.x, o do
-  # Safari 26), num Linux — pega o que é do MOTOR (CSS, JavaScript, WebRTC,
-  # IndexedDB) e não o que é do iOS (teclado de verdade, PWA instalado, o
-  # apagamento de armazenamento depois de 7 dias).
+  # Safari 26), num Linux — pega o que é do MOTOR (CSS, JavaScript, o fluxo do
+  # tempo real, IndexedDB) e não o que é do iOS (teclado de verdade, PWA
+  # instalado, o apagamento de armazenamento depois de 7 dias).
   webkit:
     runs-on: ubuntu-latest
     steps:
