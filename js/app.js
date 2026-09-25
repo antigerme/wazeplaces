@@ -5908,7 +5908,11 @@ function fetchNextPage() {
             // feito.
             const filtrada = semOsJaDecididos(result.places || [], inicioDaBusca);
             if (filtrada.excluidos) dfato('busca.jaDecididos', { n: filtrada.excluidos });
-            const newPlaces = filtrada.places;
+            // E o que a fila já tem não entra de novo: a página seguinte repete
+            // o local que ficou na divisa — ver `semOsQueJaEstaoNaFila`.
+            const novos = semOsQueJaEstaoNaFila(filtrada.places);
+            if (novos.repetidos) dfato('busca.repetidos', { n: novos.repetidos });
+            const newPlaces = novos.places;
             if (newPlaces.length === 0) {
                 AppState.emptyPagesInRow++;
                 if (AppState.emptyPagesInRow >= MAX_EMPTY_PAGES) {
@@ -10504,6 +10508,33 @@ function semOsJaDecididos(places, desde) {
         ficam.push(p);
     }
     return { places: ficam, excluidos };
+}
+
+// Uma página NOVA da busca pode trazer pedido que a fila JÁ tem. MEDIDO na fila
+// real do Brasil (2026-09-25, 697 pedidos em duas páginas): o Waze pagina por
+// PEDIDO, mas cada página traz o LOCAL com todos os pedidos pendentes dele —
+// então o local com pedidos dos dois lados da divisa vem nas duas páginas, com
+// os mesmos pedidos (5 repetidos, de 2 locais). Sem isto eles entravam de novo
+// na fila, apareciam duas vezes e o "Restam" os contava duas vezes. Compara com
+// a fila inteira (o card na tela é o `queue[0]`), com o `currentPlace` por
+// garantia, e com o próprio lote.
+function semOsQueJaEstaoNaFila(places) {
+    const vistos = new Set();
+    for (const p of AppState.queue) {
+        const k = chaveDoPedido(p);
+        if (k) vistos.add(k);
+    }
+    const atual = chaveDoPedido(AppState.currentPlace);
+    if (atual) vistos.add(atual);
+    const ficam = [];
+    let repetidos = 0;
+    for (const p of Array.isArray(places) ? places : []) {
+        const k = chaveDoPedido(p);
+        if (k && vistos.has(k)) { repetidos++; continue; }
+        if (k) vistos.add(k);
+        ficam.push(p);
+    }
+    return { places: ficam, repetidos };
 }
 
 // Os DOIS gatilhos, e nenhum deles é polling (o free tier proíbe): o navegador

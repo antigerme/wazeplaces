@@ -68,7 +68,7 @@ function montar({ offline = true } = {}) {
   const estado = { offline };
   const fontes = ['chaveDoPedido', 'marcarEmAndamento', 'offlineLerPousos', 'registrarPouso',
     'offlinePodarPousos', 'semOsJaDecididos', 'carregarFilaDeSaida', 'salvarFilaDeSaida',
-    'enfileirarSaida', 'diagResumoDaSaida'].map(fatiar).join('\n');
+    'enfileirarSaida', 'diagResumoDaSaida', 'semOsQueJaEstaoNaFila'].map(fatiar).join('\n');
   const deps = {
     safeLS,
     SAIDA_KEY: constante('SAIDA_KEY'),
@@ -83,11 +83,12 @@ function montar({ offline = true } = {}) {
     updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-22',
     ondeAgora: () => '30',
+    AppState: { queue: [], currentPlace: null },
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + `
     return { chaveDoPedido, marcarEmAndamento, offlineLerPousos, registrarPouso, offlinePodarPousos,
-             semOsJaDecididos, carregarFilaDeSaida, enfileirarSaida, diagResumoDaSaida };`)(...nomes.map((n) => deps[n]));
+             semOsJaDecididos, carregarFilaDeSaida, enfileirarSaida, diagResumoDaSaida, semOsQueJaEstaoNaFila };`)(...nomes.map((n) => deps[n]));
   return { app, deps, guardado, escritas, diario, estado };
 }
 const P = (v, u, extra = {}) => ({ venueID: v, updateRequestID: u, ...extra });
@@ -244,7 +245,11 @@ test('a BUSCA filtra o que chega, e conta o filtrado', () => {
     'o instante da busca tem que ser tomado ANTES do pedido — depois, o pouso que acontece no meio passaria');
   assert.match(f, /const filtrada = semOsJaDecididos\(result\.places \|\| \[\], inicioDaBusca\);/,
     'a busca deixou de filtrar o que o aparelho já decidiu');
-  assert.match(f, /const newPlaces = filtrada\.places;/, 'o que entra na fila tem que ser o FILTRADO');
+  assert.match(f, /const novos = semOsQueJaEstaoNaFila\(filtrada\.places\);/,
+    'a busca deixou de tirar o que a fila JÁ tem — a página seguinte repete o local da divisa');
+  assert.match(f, /const newPlaces = novos\.places;/, 'o que entra na fila tem que ser o FILTRADO dos dois jeitos');
+  const iDecididos = f.indexOf('semOsJaDecididos(result.places'), iNaFila = f.indexOf('semOsQueJaEstaoNaFila(filtrada.places)');
+  assert.ok(iDecididos > 0 && iNaFila > iDecididos, 'a ordem é: primeiro o que já foi decidido, depois o que a fila já tem');
   assert.ok(!/result\.places \|\| \[\];/.test(f.replace('semOsJaDecididos(result.places || [], inicioDaBusca);', '')),
     'sobrou um uso da lista CRUA da busca');
   const iPush = f.indexOf('AppState.queue.push(...newPlaces);');
@@ -252,6 +257,44 @@ test('a BUSCA filtra o que chega, e conta o filtrado', () => {
   assert.ok(iPush > 0 && iTotal > 0, '"Restam" tem que contar o filtrado: o que está saindo já foi feito');
   assert.match(f, /offlineGravarFila\(inicioDaBusca\);/,
     'a fila guardada tem que valer desde o COMEÇO da busca, não da hora de gravar');
+});
+
+// ── a página que repete o que a fila já tem ─────────────────────────────
+// MEDIDO na fila real do Brasil (2026-09-25): o Waze pagina por PEDIDO, mas
+// cada página traz o LOCAL com todos os pedidos pendentes dele. O local com
+// pedidos dos dois lados da divisa vinha nas duas páginas, e os pedidos dele
+// entravam de novo na fila (5 repetidos em 697, de 2 locais).
+test('a página que repete o que a fila já tem não entra de novo — o medido', () => {
+  const { app, deps } = montar();
+  // página 1 na fila: o local C tem dois pedidos (C1, C2), e ele fica na divisa
+  deps.AppState.queue = [P('A', 'a1'), P('B', 'b1'), P('C', 'c1'), P('C', 'c2')];
+  const pagina2 = [P('C', 'c1'), P('C', 'c2'), P('D', 'd1'), P('E', 'e1')];
+  const r = app.semOsQueJaEstaoNaFila(pagina2);
+  assert.deepEqual(r.places.map((p) => p.updateRequestID), ['d1', 'e1']);
+  assert.equal(r.repetidos, 2, 'a conta dos repetidos vai pro diário: é a prova de que o filtro agiu');
+  assert.equal(pagina2.length, 4, 'a lista que chegou não pode ser mexida');
+});
+
+test('o card na TELA conta, mesmo fora da fila; pedido sem id passa; e o lote não repete a si mesmo', () => {
+  const { app, deps } = montar();
+  deps.AppState.queue = [];
+  deps.AppState.currentPlace = P('A', 'a1');
+  const r = app.semOsQueJaEstaoNaFila([P('A', 'a1'), { name: 'sem id' }, P('B', 'b1'), P('B', 'b1')]);
+  assert.deepEqual(r.places.map((p) => p.updateRequestID ?? p.name), ['sem id', 'b1']);
+  assert.equal(r.repetidos, 2);
+});
+
+test('controle: fila vazia e nada na tela não tiram nada — o filtro não inventa', () => {
+  const { app, deps } = montar();
+  deps.AppState.queue = [];
+  deps.AppState.currentPlace = null;
+  const pagina = [P('A', 'a1'), P('B', 'b1')];
+  const r = app.semOsQueJaEstaoNaFila(pagina);
+  assert.equal(r.places.length, 2);
+  assert.equal(r.repetidos, 0);
+  // e o mesmo local com OUTRO pedido é outro card: a chave são os dois ids
+  deps.AppState.queue = [P('A', 'a1')];
+  assert.equal(app.semOsQueJaEstaoNaFila([P('A', 'a2')]).places.length, 1);
 });
 
 test('a REABERTURA SEM REDE filtra a foto, e desiste se tudo foi decidido', () => {
