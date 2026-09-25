@@ -82,6 +82,7 @@ function montar({ offline = true } = {}) {
     dfato: (k, o) => diario.push([k, o]),
     updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-22',
+    contaAgora: () => null,   // a conta do gesto (ver test/conta.test.mjs)
     ondeAgora: () => '30',
     AppState: { queue: [], currentPlace: null },
     pedidosQueEntraramNaFila: new Set(),

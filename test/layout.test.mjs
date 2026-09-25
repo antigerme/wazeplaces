@@ -1570,6 +1570,9 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // que o Waze respondeu — e existe pra que uma falha de rede não re-trave a
     // cota do Desfazer. Sai no logout como todo o resto: é dado de quem entrou.
     PERFIL_GATE_KEY: 'safeLS.remove(PERFIL_GATE_KEY)',
+    // DE QUEM são os dados do aparelho (o id do Waze e a marca da sessão em que
+    // foi visto). Sem dados, não há de quem — e o id é de quem entrou.
+    CONTA_KEY: 'safeLS.remove(CONTA_KEY)',
     // Contagem de rejeições por autor. É dado sobre TERCEIRO — a pessoa que
     // mandou o pedido, não quem usa o app —, então sair no logout não é
     // arrumação: é o mínimo que o contrato do "Sair" já promete.

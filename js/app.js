@@ -16,6 +16,9 @@ const SESSAO_KEY = 'waze_places_sessao_expira';
 // desligar leva a janela de 3s de volta — e a tela ainda diz "disponível
 // depois que o app carregar seu perfil", como se fosse culpa dele.
 const PERFIL_GATE_KEY = 'waze_places_perfil_gate';
+// DE QUEM são os dados deste aparelho: o id do Waze da conta, e a marca da
+// sessão em que ele foi visto (ver `contaAgora`). Sai no "Sair".
+const CONTA_KEY = 'waze_places_conta';
 const DEVMODE_TAPS_NEEDED = 7;
 const DEVMODE_TAP_TIMEOUT_MS = 3000;
 const UNDO_WINDOW_MS = 3000;
@@ -3102,6 +3105,9 @@ async function loadProfileAndAuxData() {
     }
     if (profileRes.success) {
         AppState.profile = profileRes.profile;
+        // ANTES do que depende do perfil: se a conta é outra, o que era da
+        // anterior sai antes de a recusa automática e a presença rodarem.
+        aoConhecerConta(profileRes.profile);
         guardarReferencias(profileRes);
         guardarPerfilDoPortao(profileRes.profile);
         guardarPrazoDaSessao(profileRes);
@@ -5918,6 +5924,7 @@ async function handleLogout() {
     // "Agora não" do convite de instalar) ficava pra trás só por descuido.
     safeLS.remove(CHAVE_INSTALL_DISPENSADO);
     safeLS.remove(PERFIL_GATE_KEY);   // rank do último perfil: some com o resto
+    safeLS.remove(CONTA_KEY);         // de quem eram os dados: não há mais dados
     esquecerAutores();  // contagem por autor: é dado de TERCEIRO, sai primeiro
     // Fecha o tempo real e apaga o que o chat guardou no aparelho (a
     // instalação, as conversas conhecidas, até onde cada um leu): é de quem
@@ -10968,6 +10975,81 @@ let esvaziandoSaida = false;
 // com `esvaziando:false` e `onLine:true` por toda a medição. É também o que o
 // runner do CI produz sozinho, por lentidão — aqui a janela é de ~30ms.
 let saidaPedidaDeNovo = false;
+// O esvaziamento parou num item de conta ainda DESCONHECIDA (a sessão nova ainda
+// sem perfil): a chegada do perfil o chama de novo (ver `aoConhecerConta`).
+let saidaEsperandoConta = false;
+
+// ── DE QUEM É O QUE ESTÁ NO APARELHO ──────────────────────────────────────
+//
+// Depois de uma QUEDA de sessão (sem o "Sair"), outra pessoa pode entrar no
+// mesmo aparelho. Tudo que o aparelho guarda era de quem estava: a fila de
+// saída (as decisões DELA, que iriam pro Waze no nome de quem entrou), a lista
+// de autores com a recusa automática que ELA ligou (agindo no nome de quem
+// entrou), o placar, o Histórico, as conquistas, as conversas, a fila guardada
+// do offline (auditoria de 2026-09-25). A conta de cada gesto vai no item da
+// fila de saída, e a do aparelho fica guardada: conta NOVA, dados da anterior
+// saem — como no "Sair", de onde saem as mesmas coisas.
+//
+// Uma marca CURTA do token (FNV-1a, 32 bits): só pra saber se a conta guardada
+// foi vista NESTA sessão. Não é segredo nem prova de nada.
+function marcaDaSessao(token) {
+    let h = 0x811c9dc5;
+    const txt = String(token || '');
+    for (let i = 0; i < txt.length; i++) { h ^= txt.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(16);
+}
+
+// A conta de AGORA: a do perfil vivo; sem ele (aberto sem rede), a guardada —
+// mas só se foi vista nesta MESMA sessão. Numa sessão nova, antes de o perfil
+// chegar, é desconhecida (`null`): a guardada é da sessão anterior, que pode
+// ser de outra pessoa.
+function contaAgora() {
+    const vivo = AppState.profile && AppState.profile.id;
+    if (vivo !== undefined && vivo !== null && vivo !== '') return String(vivo);
+    try {
+        const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null');
+        if (c && c.id && c.s === marcaDaSessao(API.getSession())) return String(c.id);
+    } catch (e) { /* ilegível: desconhecida */ }
+    return null;
+}
+
+// O perfil chegou: agora se sabe de quem é a sessão.
+function aoConhecerConta(perfil) {
+    const id = perfil && perfil.id !== undefined && perfil.id !== null && perfil.id !== '' ? String(perfil.id) : null;
+    if (!id) return;
+    let antes = null;
+    try { antes = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { antes = null; }
+    if (antes && antes.id && String(antes.id) !== id) esquecerOutraConta(id);
+    safeLS.set(CONTA_KEY, JSON.stringify({ id, s: marcaDaSessao(API.getSession()) }));
+    if (saidaEsperandoConta) { saidaEsperandoConta = false; esvaziarFilaDeSaida(); }
+}
+
+// O que o aparelho guardava da conta ANTERIOR e é DELA sai: o trabalho (placar,
+// Histórico, conquistas), os autores e a recusa automática, as conversas, a fila
+// guardada do offline, as capturas do modo dev e as decisões dela que esperavam
+// envio. Da fila de saída saem só os itens da outra conta: os sem conta são
+// desta sessão (feitos antes de o perfil chegar). Ficam as escolhas do aparelho
+// — idioma, tema, preferências e filtros — e a fila na tela, que já veio da
+// busca de quem entrou.
+function esquecerOutraConta(id) {
+    dfato('conta.trocou');
+    const f = carregarFilaDeSaida();
+    const desta = f.filter((it) => !it || !it.conta || String(it.conta) === id);
+    if (desta.length !== f.length) { salvarFilaDeSaida(desta); updateInFlightIndicator(); }
+    esquecerAutores();
+    window.Presenca?.esquecer?.();
+    AppState.history = null;
+    safeLS.remove(HISTORY_KEY);
+    safeLS.remove(CONQUISTAS_KEY);
+    AppState.conquistas = null;
+    atualizarSeloDeConquista();
+    AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+    saveStats();
+    updateStats();
+    offlineEsquecer();
+    dlogApagar();
+    showToast(t('toast.outraConta'), 'info');
+}
 
 function carregarFilaDeSaida() {
     try {
@@ -11017,6 +11099,9 @@ function enfileirarSaida(tipo, place, regiao) {
              // foi feito. Lidos no pouso, seriam os do momento em que a rede
              // voltou — que pode ser outro dia e outro filtro.
              dia: historyTodayKey(), onde: ondeAgora(),
+             // E a CONTA do gesto (ver `contaAgora`): a fila não pode sair no
+             // nome de outra pessoa que entre neste aparelho depois.
+             conta: contaAgora(),
              // E a REGIÃO do Waze (row/na/il/world), pelo mesmo motivo: enviado
              // depois de a pessoa trocar de região, o pedido iria pro servidor
              // errado, voltaria "não encontrado" e contaria como feito.
@@ -11059,6 +11144,28 @@ async function esvaziarFilaDeSaida() {
             // histórico que o "Sair" acabou de apagar.
             if (!AppState.authenticated) break;
             const item = f[0];
+            // A conta do GESTO contra a de agora (ver `contaAgora`). Desconhecida
+            // agora (sessão nova, perfil a caminho): espera — o perfil chegando
+            // chama de novo. De OUTRA conta: sai da fila sem ir ao Waze, e o
+            // placar que subiu no gesto desce (o mesmo da falha de verdade).
+            if (item && item.conta) {
+                const agora = contaAgora();
+                if (!agora) { saidaEsperandoConta = true; break; }
+                if (String(item.conta) !== agora) {
+                    f = carregarFilaDeSaida();
+                    const i = f.findIndex((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
+                        && x.updateRequestID === item.updateRequestID);
+                    if (i >= 0) f.splice(i, 1);
+                    salvarFilaDeSaida(f);
+                    const statKey = item.tipo === 'read' ? 'read' : 'rejected';
+                    AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
+                    updateStats();
+                    saveStats();
+                    updateInFlightIndicator();
+                    dfato('saida.outraConta', { tipo: item.tipo });
+                    continue;
+                }
+            }
             const place = { venueID: item.venueID, updateRequestID: item.updateRequestID,
                             creatorId: item.creatorId, createdBy: item.nome || undefined,
                             duplicado: item.dup ? {} : undefined };

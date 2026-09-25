@@ -477,7 +477,7 @@ function montarResultado() {
     showToast: (m, tipo) => chamadas.push('toast:' + tipo), msgDoServidor: (r, d) => d, t: (k) => k,
     handleUnauthorized: () => chamadas.push('confere'),
     updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {},
-    historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
+    historyTodayKey: () => '2026-09-25', ondeAgora: () => '30', contaAgora: () => null,
   };
   const fontes = ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'handleActionResult'].map(fatiar).join('\n');
   const nomes = Object.keys(deps);
