@@ -97,7 +97,7 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
     handleUnauthorized: () => {}, showToast: (m, tipo) => toasts.push(tipo), msgDoServidor: (r, d) => d, t: (k) => k,
     rebuscasAuto: 0, guardarPrazoDaSessao: () => {}, offlineGravarFila: () => {}, trackSeenCategories: () => {},
-    sortQueue: () => {}, aplicarRecusaAutomatica: () => {}, updatePendingCount: () => contadores.push(AppState.loadError),
+    sortQueue: () => {}, aplicarRecusaAutomatica: () => {}, aoMudarAFilaPorBaixo: () => {}, updatePendingCount: () => contadores.push(AppState.loadError),
     offlineVarrer: () => varreduras.push(Date.now()),
     bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(),
     pedidosEmAndamento: new Set(), pousosDaPagina: new Map(), offlineLigado: () => false,

@@ -154,9 +154,17 @@ secao('CÓDIGO NO APARELHO');
   if (distintas.size > 1) out(`nota: os arquivos declaram ${distintas.size} versões diferentes — normal só durante uma atualização; fora dela, o cache está misturado.`);
   const dif = Object.entries(cvr).filter(([, v]) => v && v.igual === false);
   const erros = Object.entries(cvr).filter(([, v]) => v && v.erro);
-  out(`${Object.keys(cvr).length} arquivos conferidos com o servidor · diferentes: ${dif.length}${erros.length ? ` · sem conferir: ${erros.length}` : ''}`);
-  for (const [u, v] of dif) out(`  DIFERENTE: ${nome(u)} (aparelho ${v.bytesAparelho} bytes · servidor ${v.bytesServidor} bytes)`);
-  if (dif.length) out('ATENÇÃO: o aparelho roda código diferente do servidor — versão velha no cache, ou misturada.');
+  // Relatório ANTERIOR ao v9 comparava o `/` com o script que o Cloudflare injeta
+  // a cada resposta (token e hora próprios): diferia SEMPRE, com o mesmo tamanho
+  // (MEDIDO em produção em 2026-09-25). Não é versão velha, e não vira alerta.
+  const soBorda = (u, v) => (d._versaoDoDiag ?? 0) < 9 && nome(u) === '/' && v.bytesAparelho === v.bytesServidor;
+  const reais = dif.filter(([u, v]) => !soBorda(u, v));
+  out(`${Object.keys(cvr).length} arquivos conferidos com o servidor · diferentes: ${reais.length}${erros.length ? ` · sem conferir: ${erros.length}` : ''}`);
+  for (const [u, v] of dif) {
+    out(`  DIFERENTE: ${nome(u)} (aparelho ${v.bytesAparelho} bytes · servidor ${v.bytesServidor} bytes)`
+      + (soBorda(u, v) ? ' — com o mesmo tamanho: é o script que o Cloudflare injeta a cada resposta, que o relatório anterior ao v9 não descontava' : ''));
+  }
+  if (reais.length) out('ATENÇÃO: o aparelho roda código diferente do servidor — versão velha no cache, ou misturada.');
 }
 
 secao('SERVICE WORKER');

@@ -354,3 +354,43 @@ test('a queda da sessão com ação na janela do Desfazer GRAVA o placar reverti
   const bloco = d.slice(i, d.indexOf('}', i));
   assert.match(bloco, /saveStats\(\);/, 'o placar revertido não é gravado na queda da sessão');
 });
+
+test('fila que termina com PULADOS não diz "Tudo limpo!" nem "confira o país": diz que eles seguem pendentes', () => {
+  // Auditoria de 2026-09-25: quem pulava tudo via "Tudo limpo!" e "confira o
+  // país e a região" — os pulados seguem pendentes, e o "Verificar novamente"
+  // logo abaixo os traz de volta.
+  const el = (i18n) => ({ attrs: { 'data-i18n': i18n }, textContent: '', classList: { add() {}, remove() {}, contains: () => false },
+    setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k]; }, dataset: { bordaRolagem: '1' } });
+  const h3 = el('states.empty.title'), p = el('states.empty.body');
+  const noMore = { ...el(''), querySelector: (sel) => (sel.startsWith('h3') ? h3 : p), offsetWidth: 0 };
+  const rodar = ({ skipped, base, tratou }) => {
+    const deps = {
+      AppState: { loadError: false, hasMore: false, serverTotal: 0, stats: { skipped } },
+      document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
+      dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
+      atualizarConviteInstalar() {}, marcarBordaRolagem() {}, checarConquistas() {}, dlog() {},
+      trocarTextoI18n: (e, k) => { if (e) e.attrs['data-i18n'] = k; },
+    };
+    const chaves = Object.keys(deps);
+    const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base};\n`
+      + fatiar('showNoPlaces') + '\nreturn showNoPlaces;')(...chaves.map((k) => deps[k]));
+    fn();
+    return [h3.attrs['data-i18n'], p.attrs['data-i18n']];
+  };
+  assert.deepEqual(rodar({ skipped: 12, base: 9, tratou: false }), ['states.empty.titlePulados', 'states.empty.bodyPulados']);
+  assert.deepEqual(rodar({ skipped: 12, base: 9, tratou: true }), ['states.empty.titlePulados', 'states.empty.bodyPulados']);
+  // CONTROLES: sem pulados, as duas frases de antes.
+  assert.deepEqual(rodar({ skipped: 9, base: 9, tratou: true }), ['states.empty.title', 'states.empty.body']);
+  assert.deepEqual(rodar({ skipped: 9, base: 9, tratou: false }), ['states.empty.title', 'states.empty.bodyNada']);
+  // A linha de base é zerada quando a fila recomeça e ao carregar o placar.
+  assert.match(fatiar('resetQueue'), /puladosNoInicioDaFila = AppState\.stats\.skipped \|\| 0;/);
+  assert.match(APP_SEM, /loadStats\(\);\s*puladosNoInicioDaFila = AppState\.stats\.skipped \|\| 0;/);
+});
+
+test('o "Sair" cancela os códigos de pareamento que o aparelho emitiu', () => {
+  const sair = fatiar('handleLogout');
+  assert.match(sair, /for \(const code of pareamentosEmitidos\) API\.cancelarPareamento\(code\)/,
+    'o QR mostrado antes do "Sair" segue valendo 5 min');
+  assert.equal((APP_SEM.match(/pareamentosEmitidos\.add\(r\.code\);/g) || []).length, 2,
+    'os DOIS códigos (QR e o curto) têm que ser lembrados');
+});

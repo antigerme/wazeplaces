@@ -160,13 +160,28 @@ const API = {
     // campos saem como marcador: credencial não ajuda a depurar, e o prazo dela
     // já vai no `presencaApp.token` do resumo.
     _ROTAS_COM_CREDENCIAL: ['chat', 'presenca-app'],
-    _semCredencial(bruto) {
+    // E o PAREAMENTO devolve o segredo (`code`, e o `curto` digitável): ele vale
+    // uma sessão NOVA por 5 minutos e não depura nada — o que depura é o prazo e o
+    // sucesso, que ficam. O `sessionToken` de qualquer resposta (o `claim`, o
+    // `testar-cookies`) sai como no corpo do pedido: ele já está no arquivo uma
+    // vez, no localStorage (auditoria de 2026-09-25).
+    _SEGREDOS_POR_ROTA: {
+        'chat': { token: '[credencial do tempo real]', chave: '[credencial do tempo real]' },
+        'presenca-app': { token: '[credencial do tempo real]', chave: '[credencial do tempo real]' },
+        'parear': { code: '[código de pareamento]', curto: '[código de pareamento]' },
+    },
+    _semSegredoNaResposta(endpoint, bruto) {
+        const chaves = Object.assign({}, this._SEGREDOS_POR_ROTA[endpoint] || {});
+        if (bruto.includes('"sessionToken"')) chaves.sessionToken = '[token — ver localStorage]';
+        return Object.keys(chaves).length ? this._semCredencial(bruto, chaves) : bruto;
+    },
+    _semCredencial(bruto, chaves) {
         try {
             const o = JSON.parse(bruto);
             const anda = (v) => {
                 if (!v || typeof v !== 'object') return;
                 for (const k of Object.keys(v)) {
-                    if ((k === 'token' || k === 'chave') && typeof v[k] === 'string') v[k] = '[credencial do tempo real]';
+                    if (Object.prototype.hasOwnProperty.call(chaves, k) && typeof v[k] === 'string') v[k] = chaves[k];
                     else anda(v[k]);
                 }
             };
@@ -284,8 +299,7 @@ const API = {
                 naoEraJson = bruto.slice(0, 600);
                 throw new Error('resposta não é JSON (HTTP ' + http + ')');
             } finally {
-                const corpo = !this._guardaCorpo() ? null
-                    : this._ROTAS_COM_CREDENCIAL.includes(endpoint) ? this._semCredencial(bruto) : bruto;
+                const corpo = !this._guardaCorpo() ? null : this._semSegredoNaResposta(endpoint, bruto);
                 this._registrar(endpoint, _t0, http, data, {
                     cab,
                     naoEraJson,
@@ -582,6 +596,13 @@ const API = {
         const sessionToken = this.getSession();
         if (!sessionToken) return semSessao();
         return this._post('parear', { action: 'create', sessionToken, comCodigo });
+    },
+
+    // O "Sair" cancela os códigos de pareamento que ESTE aparelho emitiu (ver o
+    // `cancel` no core). Melhor esforço: sem rede, o código vence em 5 min.
+    async cancelarPareamento(code) {
+        if (!code) return { success: true };
+        return this._post('parear', { action: 'cancel', code });
     },
 
     async resgatarPareamento(code) {

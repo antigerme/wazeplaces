@@ -384,3 +384,38 @@ test('a presença sincroniza quando o PERFIL chega — o `showMainScreen` chama 
   assert.ok(iSinc > iPerfil, 'a presença não sincroniza depois de o perfil chegar');
   assert.ok(iSinc > iPaises, 'a presença sincroniza antes dos países — o subtítulo da lista sairia sem o país');
 });
+
+// Desligar o "Ver quem está no app" SEM REDE: o `visivel: false` não saía, e é a
+// MESMA chave do perfil do WME — a pessoa seguia visível lá (auditoria de
+// 2026-09-25). A próxima prova de rede o refaz; recusa de verdade não repete.
+test('desligar sem rede fica pendente, e a próxima prova de rede refaz o "invisível" no WME', async () => {
+  const pedidos = [];
+  let resposta = { success: false, errorCategory: 'transient' };
+  const presencaWme = { ligarNaProxima: true, desligarPendente: false };
+  const escopo = {
+    AppState: { preferences: { presenca: false }, profile: { id: 12444348 } },
+    presencaWme, dfato: () => {},
+    API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
+  };
+  const desligar = montar('presencaWmeDesligar', escopo);
+  const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
+  desligar();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(presencaWme.desligarPendente, true, 'o desligar que não saiu por rede não ficou pendente');
+  resposta = { success: true };
+  refazer();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(pedidos.length, 2, 'a prova de rede não refez o desligar');
+  assert.deepEqual(pedidos[1], { userId: '12444348', visivel: false });
+  assert.equal(presencaWme.desligarPendente, false);
+  // CONTROLE: recusa que não é rede não fica pendente (não repete sozinha)...
+  resposta = { success: false, errorCategory: 'unknown' };
+  desligar();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(presencaWme.desligarPendente, false);
+  // ...e quem religou o interruptor no meio não é desligado de novo.
+  presencaWme.desligarPendente = true;
+  escopo.AppState.preferences.presenca = true;
+  refazer();
+  assert.equal(pedidos.length, 3, 'refez um desligar de quem já religou');
+});

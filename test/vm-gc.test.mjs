@@ -111,3 +111,38 @@ test('varredura da VM: preserva sessão viva e apaga pareamento vencido', async 
       'a sessão sobreviveu no disco mas parou de valer — a varredura corrompeu algo');
   });
 });
+
+// A gravação da sessão na VM é ATÔMICA (temporário + rename): um processo
+// derrubado no meio da escrita deixava a sessão truncada — que não decifra, é
+// apagada e desloga a pessoa (auditoria de 2026-09-25). E o temporário que
+// sobrar de uma queda sai na varredura.
+test('VM: a sessão é gravada inteira (temporário + rename), e o temporário velho sai na varredura', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wp-atom-'));
+  const tmpVelho = join(dir, '.tmp_' + 'b'.repeat(64) + '_123_abcd');
+  await writeFile(tmpVelho, 'lixo');
+  const umaHoraAtras = new Date(Date.now() - 3600 * 1000);
+  await utimes(tmpVelho, umaHoraAtras, umaHoraAtras);
+  const sessoes = makeSessions({
+    store: {
+      get: async (h) => { try { return await readFile(join(dir, 'sess_' + h), 'utf8'); } catch { return null; } },
+      put: async (h, v) => { await writeFile(join(dir, 'sess_' + h), v, { mode: 0o600 }); },
+      delete: async () => {},
+    },
+    keyBytes: new Uint8Array(32).fill(7),
+  });
+  const token = await sessoes.createSession(COOKIES);
+  await comServidor(dir, 8353, async (api) => {
+    // O pareamento GRAVA pelo `put` do adaptador — é a escrita que se mede.
+    const par = await api('parear', { action: 'create', sessionToken: token });
+    assert.ok(par.code, 'não deu pra criar o pareamento de teste');
+    const ate = Date.now() + 10000;
+    let nomes = await readdir(dir);
+    while (nomes.includes(tmpVelho.split('/').pop()) && Date.now() < ate) { await dormir(100); nomes = await readdir(dir); }
+    assert.ok(!nomes.includes(tmpVelho.split('/').pop()), 'o temporário velho de uma queda seguiu no disco');
+    assert.ok(!nomes.some((n) => n.startsWith('.tmp_')), 'a gravação deixou temporário pra trás');
+    assert.ok(nomes.some((n) => n.startsWith('sess_pair_')), 'o pareamento não foi gravado');
+  });
+  const fonte = await readFile(join(RAIZ, 'server', 'node.mjs'), 'utf8');
+  const put = fonte.slice(fonte.indexOf('  async put(hash, blob) {'), fonte.indexOf('  async delete(hash) {'));
+  assert.match(put, /await writeFile\(temp,[\s\S]*await rename\(temp, final\)/, 'a gravação voltou a escrever direto no arquivo final');
+});

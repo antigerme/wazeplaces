@@ -185,7 +185,8 @@ test('pedido SEM data vai pro FIM — nunca crava a posição 0', () => {
   // `ur.dateAdded ?? null`: basta o Waze omitir o campo uma vez.
   const APPJS = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   const i = APPJS.indexOf('function sortQueue()');
-  const corpo = APPJS.slice(i, APPJS.indexOf('\n}', i) + 2);
+  const iFoco = APPJS.indexOf('function manterFocoNaFrente()');
+  const corpo = APPJS.slice(i, APPJS.indexOf('\n}', i) + 2) + '\n' + APPJS.slice(iFoco, APPJS.indexOf('\n}', iFoco) + 2);
   const monta = (ordem) => {
     const est = { queue: [], filters: { sortOrder: ordem } };
     // `sortQueue` ganhou um ramo de DISTÂNCIA (Perto de casa/trabalho/GPS) que

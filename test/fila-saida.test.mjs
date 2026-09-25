@@ -510,3 +510,14 @@ test('401 com a fila de saída CHEIA: aí sim reverte o placar (como a recusa), 
   assert.equal(AppState.serverTotal, 11);
   assert.ok(chamadas.includes('confere'));
 });
+
+test('o "N enviados" do fim do esvaziamento conta só o que POUSOU (a recusa já avisou com erro)', () => {
+  // Auditoria de 2026-09-25: a recusa de verdade mostrava o toast de erro e
+  // entrava no "N enviados" de sucesso logo depois — o mesmo pedido dito falho e
+  // enviado.
+  const src = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const i = src.indexOf('async function esvaziarFilaDeSaida(');
+  const corpo = src.slice(i, src.indexOf('\nfunction ', i + 10));
+  assert.match(corpo, /if \(r && \(r\.success \|\| r\.errorCategory === 'already_processed' \|\| r\.errorCategory === 'not_found'\)\) enviados\+\+;/,
+    'o contador de enviados voltou a somar as recusas');
+});

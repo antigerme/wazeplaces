@@ -1,7 +1,7 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026092504';
+const CACHE_NAME = 'waze-places-2026092505';
 // Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
 // ver a nota no `activate`.
 const TILES_CACHE = 'waze-places-tiles';
@@ -30,19 +30,26 @@ const swIniciadoEm = Date.now();
 let swHidratadoEm = null;
 const swConta = { doCache: 0, cacheSemEntrada: 0, esperouLeitura: 0, foraDaLista: 0 };
 
+// Só a leitura MAIS NOVA vale: a partida do worker e o aviso da varredura podem
+// pedir duas seguidas, e elas terminavam fora de ordem — a velha, com MENOS
+// tiles, sobrescrevia a nova, e o tile recém-guardado sumia do mapa sem rede
+// (auditoria de 2026-09-25).
+let hidratacaoGeracao = 0;
 function hidratarTiles() {
+  const geracao = ++hidratacaoGeracao;
   tilesHidratados = false;
   hidratacao = (async () => {
+    let lista = new Set();
     try {
       // `caches.has` antes de `open`: `open` CRIA o cache, e quem nunca ligou o
       // offline não precisa ganhar um vazio a cada partida do worker.
       if (await caches.has(TILES_CACHE)) {
         const c = await caches.open(TILES_CACHE);
-        tilesGuardados = new Set((await c.keys()).map((r) => r.url));
-      } else {
-        tilesGuardados = new Set();
+        lista = new Set((await c.keys()).map((r) => r.url));
       }
-    } catch (e) { tilesGuardados = new Set(); }
+    } catch (e) { lista = new Set(); }
+    if (geracao !== hidratacaoGeracao) return;
+    tilesGuardados = lista;
     swHidratadoEm = Date.now();
     tilesHidratados = true;
   })();
@@ -175,8 +182,9 @@ self.addEventListener('fetch', event => {
     // aqui (nunca respondemos por domínio externo qualquer, mesmo que algo
     // estranho entre no cache), e a lista mantém a interceptação ADITIVA.
     if (/-tiles\/live\/base\//.test(url.pathname)) {
-      const doCache = () => caches.open(TILES_CACHE)
-        .then((c) => c.match(event.request))
+      // `caches.match` com o nome, e não `open` + `match`: o `open` CRIARIA o
+      // cache que o "Sair" ou o desligar acabou de apagar.
+      const doCache = () => caches.match(event.request, { cacheName: TILES_CACHE })
         // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar.
         .then((hit) => { swConta[hit ? 'doCache' : 'cacheSemEntrada']++; return hit || fetch(event.request); })
         .catch(() => fetch(event.request));

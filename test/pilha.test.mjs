@@ -410,3 +410,32 @@ test('o ouvinte que amplia o mapa é pendurado UMA vez, no card da frente', () =
     `js/min/app.js tem ${usos} usos de desenharMapaComCaixa, esperado 3 (declaração + `
     + 'card da frente + card de fundo). Faltou `npm run js`, ou uma chamada saiu');
 });
+
+test('a distância de uma entrada proposta é até o local DO CARD — o de fundo não mede a partir do da frente', () => {
+  // Auditoria de 2026-09-25: `valorDeLista` lia o centro do `AppState.currentPlace`,
+  // e o card de FUNDO da pilha mostrava a entrada dele "a 3 km" do local da frente.
+  const APP_ = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const fatia = (nome) => {
+    const i = APP_.indexOf('function ' + nome + '(');
+    return APP_.slice(i, APP_.indexOf('\n}\n', i) + 2);
+  };
+  const deps = {
+    t: (k, v) => (k === 'card.eep.aDistancia' ? `a ${v.d}` : k),
+    formatarMetros: (m) => Math.round(m) + ' m',
+    itemDeListaAusente: (v) => v == null || v === '',
+    nomeDoDia: String, objetoLegivel: JSON.stringify, rotuloDeEnum: String,
+    AppState: { currentPlace: { mapa: { centro: [-23.0, -46.0] } } },   // o da FRENTE, longe
+  };
+  const nomes = Object.keys(deps);
+  const valor = new Function(...nomes, fatia('valorDeLista') + '\nreturn valorDeLista;')(...nomes.map((n) => deps[n]));
+  const entrada = { entry: true, point: { type: 'Point', coordinates: [-46.6333, -23.5505] } };   // GeoJSON: [lon, lat]
+  const doFundo = [-23.5506, -46.6333];   // o local DESTE card, a ~11 m
+  const r = valor(entrada, 'entryExitPoints', doFundo);
+  assert.match(r, /a 11 m$/, `a distância não é até o local do card: ${r}`);
+  // Controle: sem o centro do card, a coordenada volta (nunca a distância até OUTRO local).
+  assert.match(valor(entrada, 'entryExitPoints', null), /-23\.55050, -46\.63330$/);
+  // E quem monta o card passa o centro DELE.
+  assert.match(fatia('renderCardChanges'), /const centroDoLocal = place\.mapa && place\.mapa\.centro;/);
+  assert.match(fatia('renderCardChanges'), /itemDeLista\(v, 'diff-add', '\+', c\.field, centroDoLocal\)/);
+  assert.doesNotMatch(fatia('valorDeLista'), /AppState\.currentPlace/, 'voltou a medir a partir do card da frente');
+});

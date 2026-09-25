@@ -1733,3 +1733,55 @@ test('excluir-foto: duas exclusões seguidas no mesmo local — a segunda não d
     globalThis.fetch = original;
   }
 });
+
+// O "Sair" cancela o código de pareamento que o aparelho emitiu: sem isso, o QR
+// mostrado antes seguia valendo 5 min e entrava numa conta que acabou de sair
+// (auditoria de 2026-09-25).
+test('pareamento: `cancel` com o código apaga o registro — o resgate depois falha', async () => {
+  const store = memStore();
+  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const token = await sessions.createSession([
+    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
+  ].join('\n'));
+  const criar = await dispatch('parear', { action: 'create', sessionToken: token }, { sessions });
+  assert.equal(criar.status, 200);
+  const cancel = await dispatch('parear', { action: 'cancel', code: criar.body.code }, { sessions });
+  assert.equal(cancel.status, 200);
+  const claim = await dispatch('parear', { action: 'claim', code: criar.body.code }, { sessions });
+  assert.notEqual(claim.status, 200, 'o código cancelado ainda entrou');
+  // CONTROLE: sem cancelar, o resgate entra.
+  const outro = await dispatch('parear', { action: 'create', sessionToken: token }, { sessions });
+  const ok = await dispatch('parear', { action: 'claim', code: outro.body.code }, { sessions });
+  assert.equal(ok.status, 200, 'CONTROLE: o resgate normal parou de funcionar');
+});
+
+// O lote do "marcar lido" tem TETO e id tem FORMA (auditoria de 2026-09-25):
+// sem isso, um corpo de 5 MB virava um lote de dezenas de milhares no Waze, e
+// objeto no lugar de id ia pro Waze como veio.
+test('marcar-lido: lote acima do teto é recusado ANTES do Waze, e id que não é texto/número fica de fora', async () => {
+  const store = memStore();
+  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const token = await sessions.createSession([
+    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
+  ].join('\n'));
+  const enviados = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (init && init.body) enviados.push(JSON.parse(init.body));
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const muitos = Array.from({ length: 501 }, (_, i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i }));
+    const r = await dispatch('marcar-lido', { sessionToken: token, region: 'row', items: muitos }, { sessions });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.errorKey, 'srv.err.tooManyItems');
+    assert.equal(enviados.length, 0, 'o lote grande chegou ao Waze');
+    const ok = await dispatch('marcar-lido', { sessionToken: token, region: 'row', items: [
+      { venueID: 'v1', updateRequestID: 'u1' }, { venueID: { x: 1 }, updateRequestID: 'u2' }, { venueID: 'v3', updateRequestID: ['u3'] },
+    ] }, { sessions });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.deepEqual(enviados.at(-1).venueUpdateRequestIds, [{ id: 'u1', venueId: 'v1' }], 'id que não é texto/número foi pro Waze');
+  } finally {
+    globalThis.fetch = original;
+  }
+});

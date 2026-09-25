@@ -239,7 +239,10 @@ test('lote: o lote respeita a trava e o treino', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function rejeitarLoteDoAutor');
   const bloco = semComentarios.slice(i, i + 400);
-  assert.match(bloco, /if \(acoesTravadas\(\)\) return;/, 'o lote tem que respeitar a janela em curso');
+  // Respeita a janela — e DIZ (a folha já fechou com o toque; sair calado
+  // deixava a pessoa achando que rejeitou).
+  assert.match(bloco, /if \(acoesTravadas\(\)\) \{ showToast\(t\('toast\.esperaDesfazer'\), 'info'\); return; \}/,
+    'o lote tem que respeitar a janela em curso, e avisar');
   assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
 });
 
@@ -628,6 +631,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
     showCurrentPlace: () => { throw new Error('trocou o card da tela'); }, startFetching: () => {}, showNoPlaces: () => {},
     showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
     enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
+    aoMudarAFilaPorBaixo: () => {},   // acerta o "Ver +N" e o fundo — não troca o card
   };
   const chaves = Object.keys(deps);
   const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
@@ -659,12 +663,15 @@ function lote({ respostas }) {
     throw new Error('não fechou');
   };
   const els = { autorTitle: { textContent: '' }, autorCorpo: { innerHTML: '' } };
+  const historico = [];
+  const confirmadas = { n: 0 };
   const fila = respostas.slice();
   const deps = {
     AppState: { stats: { rejected: 0 }, serverTotal: 9, queue: [], inFlightActions: 0 },
     epocaDaSessao: 0, callWithRetry: (fn) => fn(),
     API: { rejectPlace: async () => fila.shift() },
-    registrarPouso() {}, recordHistory() {}, registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
+    registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
+    registrarAcaoConfirmada: () => { confirmadas.n++; },
     enfileirarSaida: () => 'ok', handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
     saveStats() {}, updatePendingCount() {}, openModal() {},
     document: { getElementById: (id) => els[id] || null },
@@ -674,7 +681,7 @@ function lote({ respostas }) {
   const enviar = new Function(...chaves, fatiarFn('enviarLote') + '\n' + fatiarFn('mostrarResultadoDoLote')
     + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));
   const pl = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: 7 });
-  return { rodar: () => enviar(respostas.map((_, i) => pl(i))), els };
+  return { rodar: () => enviar(respostas.map((_, i) => pl(i))), els, historico, confirmadas };
 }
 
 test('lote: com UM pedido, singular no título e na linha ("1 rejeitado", não "1 rejeitados")', async () => {
@@ -696,4 +703,14 @@ test('lote: sem rede, o que foi pra fila de SAÍDA não diz "foi pro Waze" — �
   // O título não afirma "resolvidos": a chave antiga dizia isso até com falha.
   const pt = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
   assert.doesNotMatch(pt, /'autor\.lote\.titulo': '[^']*resolv/);
+});
+
+test('lote: "já tratado" entra no Histórico como no card único, e o que saiu conta pras conquistas', async () => {
+  // Auditoria de 2026-09-25: no placar otimista o "já tratado" JÁ contou, e o
+  // Histórico não — o placar e o Histórico divergiam por lote. E o lote da
+  // pessoa não contava pras conquistas (a "Mão firme", por exemplo).
+  const m = lote({ respostas: [{ success: true }, { success: false, errorCategory: 'already_processed' }] });
+  await m.rodar();
+  assert.deepEqual(m.historico, [['reject', 1], ['reject', 1]], 'o "já tratado" do lote não entrou no Histórico');
+  assert.equal(m.confirmadas.n, 1, 'o rejeitado do lote não contou pras conquistas');
 });

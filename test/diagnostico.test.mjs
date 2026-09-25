@@ -963,11 +963,44 @@ test('o DOM do diagnóstico vai INTEIRO (modo dev), e passa por UM lugar só', (
   assert.equal((codigo.match(/dom: domParaDiagnostico\(\)/g) || []).length, 2, 'o relatório e as capturas têm que usar o helper');
 });
 
+// ── O script que a BORDA injeta no HTML (v2026.09.25-05) ─────────────────────
+// A régua que o `cacheVsRede` e o `codigo` usam: a constante e a função, juntas.
+const BORDA = () => {
+  const i = APP.indexOf('const DIAG_INJECAO_DA_BORDA');
+  const f = APP.indexOf('function diagSemInjecaoDaBorda', i);
+  assert.ok(i > 0 && f > i, 'sumiu a régua da injeção da borda');
+  return APP.slice(i, APP.indexOf('\n}\n', f) + 3);
+};
+// A forma MEDIDA em produção em 2026-09-25 (valores trocados por sintéticos do
+// mesmo formato — são token e hora por resposta, não nossos).
+const INJETADO = (r, t) => `<script>window.__CF$cv$params={r:'${r}',t:'${t}',u:'01a0dabc24147031a351eb3a5367a672',ut:'x-1790376158-1.2.1.1-_y',i:60};(function(){if(!document.body)return;var s=document.createElement('script');s.src='/cdn-cgi/challenge-platform/scripts/precursor/main.js';document.head.appendChild(s);})();</script>`;
+
+test('código: o `/` servido pelo Cloudflare é comparado SEM o script que a borda injeta a cada resposta', () => {
+  const tirar = new Function(`${BORDA()}\nreturn diagSemInjecaoDaBorda;`)();
+  const nosso = '<!DOCTYPE html><html><body><script defer src="js/min/app.js"></script>';
+  const a = nosso + INJETADO('a40d8b0cd819f90b', 'MTc5MDM3NjE1OA==') + '</body> </html>';
+  const b = nosso + INJETADO('a40d8b1a8a795949', 'MTc5MDM3NjE2MA==') + '</body> </html>';
+  assert.equal(a.length, b.length, 'a fixture perdeu a forma medida (mesmo tamanho, bytes diferentes)');
+  assert.notEqual(a, b);
+  assert.equal(tirar(a), tirar(b), 'duas respostas do MESMO código diferem pela injeção da borda');
+  // Controle: uma mudança no NOSSO código continua sendo diferença.
+  const c = nosso.replace('app.js', 'app2.js') + INJETADO('a40d8b0cd819f90b', 'MTc5MDM3NjE1OA==') + '</body> </html>';
+  assert.notEqual(tirar(a), tirar(c), 'a régua engoliu uma diferença real do nosso HTML');
+  // E sem injeção (VM, ou `wrangler dev`) nada muda.
+  assert.equal(tirar(nosso), nosso);
+  // Os DOIS lados passam pela régua antes do hash, e o `codigo` usa a mesma.
+  const corpo = fatiarFn(APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), 'diagCorpo');
+  assert.match(corpo, /const \[la, lb\] = \[diagSemInjecaoDaBorda\(local\), diagSemInjecaoDaBorda\(remoto\)\];\s*const \[ha, hb\] = \[await hash\(la\), await hash\(lb\)\];/,
+    'o cacheVsRede voltou a comparar com o script da borda');
+  assert.match(fatiarFn(APP, 'diagCodigoEnxuto'), /c\.hash = await hash\(diagSemInjecaoDaBorda\(c\.corpo\)\);/,
+    'o hash do `codigo` deixou de ser o mesmo do cacheVsRede');
+});
+
 // ── O `codigo` enxuto (v2026.09.24-02) ───────────────────────────────────────
 // O JS e o HTML inteiros eram quase metade do .zip e respondiam uma pergunta só:
 // "este aparelho roda versão velha?". Tamanho, hash e versão respondem igual.
 test('código: tamanho, hash e versão de cada arquivo — o CORPO, só do CSS (é dele que o diag-tela remonta a tela)', async () => {
-  const enxuto = new Function(`return async ${fatiarFn(APP, 'diagCodigoEnxuto')};`)();
+  const enxuto = new Function(`${BORDA()}\nreturn async ${fatiarFn(APP, 'diagCodigoEnxuto')};`)();
   const hash = async (t) => 'h' + t.length;
   const HTML_SERVIDO = '<!DOCTYPE html><html>' + 'x'.repeat(50) + '</html>';
   const codigo = {
@@ -1030,4 +1063,107 @@ test('desligar o modo dev com captura não baixada: o 1º toque AVISA e não apa
   const iApaga = h.indexOf('dlogApagar();');
   assert.ok(iVolta > 0 && iAviso > iVolta, 'o primeiro toque não devolve o interruptor');
   assert.ok(h.slice(iAviso, iApaga).includes('return;'), 'depois do aviso ele APAGA na mesma hora');
+});
+
+// ── A cópia segura do estado (auditoria de 2026-09-25) ───────────────────────
+const SEGURO = () => {
+  const c = /^const DIAG_FUNDO = \d+;$/m.exec(APP);
+  assert.ok(c, 'sumiu o DIAG_FUNDO');
+  return new Function(`${c[0]}\n${fatiarFn(APP, 'diagSeguro')}\nreturn diagSeguro;`)();
+};
+
+test('diagSeguro: a coordenada de uma entrada proposta chega inteira, e o mesmo objeto em dois ramos não vira [circular]', () => {
+  const seguro = SEGURO();
+  // O caminho do relatório: `appState` (0) → queue (1) → [0] (2) → changes (3) →
+  // [0] (4) → delta (5) → add (6) → [0] (7) → point (8) → coordinates (9).
+  const ponto = { type: 'Point', coordinates: [-46.6333, -23.5505] };
+  const place = { venueID: 'v1', changes: [{ field: 'entryExitPoints', delta: { add: [{ point: ponto }] } }] };
+  const r = seguro({ queue: [place], selecionado: ponto });
+  assert.deepEqual(r.queue[0].changes[0].delta.add[0].point.coordinates, [-46.6333, -23.5505],
+    'a coordenada da entrada proposta virou [fundo]');
+  assert.deepEqual(r.selecionado, { type: 'Point', coordinates: [-46.6333, -23.5505] },
+    'o mesmo objeto noutro ramo virou [circular] sem ser ciclo');
+  // Controle: ciclo de verdade segue cortado (é o que impede o `stringify` de lançar).
+  const a = { nome: 'a' }; a.eu = a; a.filhos = [a];
+  const ra = seguro(a);
+  assert.equal(ra.eu, '[circular]');
+  assert.equal(ra.filhos[0], '[circular]');
+  assert.doesNotThrow(() => JSON.stringify(ra));
+  // E o fundo segue existindo.
+  const raiz = {}; let x = raiz; for (let i = 0; i < 30; i++) { x.f = {}; x = x.f; }
+  assert.match(JSON.stringify(seguro(raiz)), /"\[fundo\]"/, 'sem teto de profundidade');
+});
+
+test('captura: os filtros vão como CÓPIA — o Aplicar muda o objeto no LUGAR', () => {
+  const seguro = SEGURO();
+  const filtros = { countryId: '30', types: ['NEW_PLACE'] };
+  const foto = seguro(filtros);
+  filtros.countryId = '73'; filtros.types.push('NEW_PHOTO');   // o que o `applyFiltersFromModal` faz
+  assert.deepEqual(foto, { countryId: '30', types: ['NEW_PLACE'] }, 'a captura mudou junto com o filtro');
+  assert.match(fatiarFn(semCom, 'dlogCapturar'), /filtros: diagSeguro\(AppState\.filters\),/,
+    'a captura voltou a guardar a referência viva dos filtros');
+});
+
+test('o aviso de ResizeObserver não vira "erro de JS" nem captura automática no diagnóstico', () => {
+  const ouvintes = {};
+  const erros = [];
+  const capturas = [];
+  const ini = APP.indexOf('const RUIDO_RESIZE_OBSERVER');
+  const ruido = APP.slice(ini, APP.indexOf('\n', ini));
+  const cap = new Function('addEventListener', 'performance', 'console', 'dfato', 'dlog', 'dlogCapturarAuto',
+    'diagErros', 'navigator', 'PerformanceObserver', 'document', 'innerWidth', 'innerHeight', 'devicePixelRatio',
+    `${ruido}\nlet diagRecursosCheio = false;\n${fatiarFn(APP, 'diagCapturarErros')}\nreturn diagCapturarErros;`)(
+    (tipo, fn) => { (ouvintes[tipo] = ouvintes[tipo] || []).push(fn); },
+    { addEventListener() {} }, { error() {}, warn() {} }, () => {}, () => {},
+    (m) => capturas.push(m), erros, { onLine: true }, class { observe() {} },
+    { getElementById: () => null }, 400, 800, 2);
+  cap();
+  const disparar = (msg) => (ouvintes.error || []).forEach((fn) => fn({ message: msg, filename: 'x.js', lineno: 1 }));
+  disparar('ResizeObserver loop completed with undelivered notifications.');
+  assert.equal(erros.length, 0, 'o ruído do ResizeObserver entrou como erro de JS');
+  assert.equal(capturas.length, 0, 'o ruído do ResizeObserver disparou uma captura automática');
+  // Controle: erro de verdade segue entrando e capturando.
+  disparar('TypeError: x is not a function');
+  assert.equal(erros.length, 1);
+  assert.deepEqual(capturas, ['erroDeJs']);
+});
+
+// ── O segredo do pareamento fica fora do relatório (auditoria de 2026-09-25) ──
+// Ele vale uma sessão NOVA por 5 minutos e não depura nada. O modo dev leva a
+// conversa inteira; credencial que não ajuda a depurar, não.
+test('modo dev: a resposta do pareamento vai SEM o segredo, e o sessionToken de qualquer resposta sai como no pedido', async () => {
+  const api = montar({ corpo: '{"success":true,"code":"SEGREDO20SIMBOLOSXYZ","curto":"K7Q9ZX","expiresIn":300}', devAtivo: true });
+  await api._post('parear', { sessionToken: 'x', action: 'create' });
+  const r = api.chamadas[0].corpoResposta;
+  assert.ok(!r.includes('SEGREDO20SIMBOLOSXYZ') && !r.includes('K7Q9ZX'), 'o segredo do pareamento foi pro registro');
+  assert.match(r, /"code":"\[código de pareamento\]"/);
+  assert.match(r, /"expiresIn":300/, 'o prazo é o que depura: fica');
+  const login = montar({ corpo: '{"success":true,"sessionToken":"TOKEN_NOVO_Q","profile":{"rank":5}}', devAtivo: true });
+  await login._post('testar-cookies', { cookies: 'c' });
+  assert.ok(!login.chamadas[0].corpoResposta.includes('TOKEN_NOVO_Q'), 'o token da resposta do login foi pro registro');
+  assert.match(login.chamadas[0].corpoResposta, /"rank":5/, 'o resto da resposta tem que ficar');
+  // Controle: resposta sem segredo nenhum passa INTEIRA (inclusive a que não é JSON-com-segredo).
+  const fila = montar({ corpo: '{"success":true,"places":[{"name":"LOCAL_X"}]}', devAtivo: true });
+  await fila._post('buscar-places', { sessionToken: 'x' });
+  assert.equal(fila.chamadas[0].corpoResposta, '{"success":true,"places":[{"name":"LOCAL_X"}]}');
+});
+
+test('a cópia da página e as capturas saem SEM o segredo do pareamento (o do QR e o digitável)', () => {
+  const ini = APP.indexOf('function domParaDiagnostico');
+  const fim = APP.indexOf('\n}\n', ini) + 3;
+  const fmt = fatiarFn(APP, 'formatarCodigoPareamento');
+  const pagina = '<html><body><div id="pairCode" data-raw="SEGREDO20SIMBOLOSXYZ" data-curto="K7Q9ZX">K7Q-9ZX</div><p>resto</p></body></html>';
+  const doc = { documentElement: { outerHTML: pagina },
+                getElementById: (id) => (id === 'pairCode' ? { dataset: { raw: 'SEGREDO20SIMBOLOSXYZ', curto: 'K7Q9ZX' } } : null) };
+  const f = new Function('document', `const PAIR_CODE_LEN = 6, PAIR_CODE_GRUPO = 3;\n${fmt}\n${APP.slice(ini, fim)}\nreturn domParaDiagnostico;`)(doc);
+  const saida = f();
+  for (const s of ['SEGREDO20SIMBOLOSXYZ', 'K7Q9ZX', 'K7Q-9ZX']) assert.ok(!saida.includes(s), `o segredo foi pra cópia da página: ${s}`);
+  assert.match(saida, /<p>resto<\/p>/, 'o resto da página tem que ficar');
+  // Controle: sem pareamento aberto, a página sai idêntica.
+  const semPar = { documentElement: { outerHTML: '<html>x K7Q9ZX</html>' }, getElementById: () => ({ dataset: {} }) };
+  const g = new Function('document', `const PAIR_CODE_LEN = 6, PAIR_CODE_GRUPO = 3;\n${fmt}\n${APP.slice(ini, fim)}\nreturn domParaDiagnostico;`)(semPar);
+  assert.equal(g(), '<html>x K7Q9ZX</html>');
+  // E a captura não desenha o QR do pareamento.
+  assert.match(fatiarFn(semCom, 'dlogCapturar'), /if \(c\.id === 'pairQr'\) return \{ classe: c\.className, omitido: 'QR do pareamento' \};/,
+    'a captura voltou a levar o QR do pareamento');
 });

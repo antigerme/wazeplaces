@@ -8,6 +8,36 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.25-05
+
+Terceira rodada da auditoria, com a verificação em produção da v2026.09.25-04 (58 ✓ · 0 ✗).
+
+### Corrigido
+- **A fila que termina com pedidos pulados não diz mais "Tudo limpo!".** Ela diz "Fim da fila" e que os pulados continuam pendentes, e o "Verificar novamente" logo abaixo traz todos de volta. Antes, quem pulava tudo lia "Tudo limpo!" e "confira o país e a região".
+- **Aprovar e excluir foto tentam de novo numa oscilação de rede**, como o renomear já fazia (antes a primeira falha já virava "não deu").
+- **Renomear um local ou excluir uma foto vale também pros outros pedidos do mesmo local na fila**: o card seguinte do mesmo local mostrava o nome antigo e a foto que já tinha saído.
+- **O card de baixo da pilha acompanha a fila**: quando uma página nova chega ou a recusa automática tira pedidos, ele mostra o pedido que vem de fato, e o "Ver +N" do card da frente é recontado. A distância de uma entrada proposta no card de baixo passa a ser medida até o local DELE (era até o do card da frente).
+- **"Ver +N" (a série de um autor) não se desfaz quando chega uma página nova**: a série dele continua na frente até acabar.
+- **Street View no mapa ampliado**: dar zoom no + e no − não troca mais o ponto do pedido pelo meio do enquadramento.
+- **Desligar o "Ver quem está no app" sem sinal** agora vale também no WME assim que a rede voltar; antes você continuava visível lá.
+- **Conversa**: a mensagem que o Waze recebeu não vira mais "Não enviada" quando a resposta se perde no caminho; a foto do pedido recebido que não carrega sai da folha, em vez do ícone de imagem quebrada; trocar de país com a lista carregando não deixa mais o tempo real parado nem o país novo sem lista; e com a hora do celular errada, a mensagem nova não conta mais duas vezes nem some.
+- **Quem usa leitor de tela ouve a mensagem que chega com a conversa aberta.**
+- **"Sair" cancela os códigos de pareamento que o aparelho mostrou**: antes o QR seguia valendo 5 minutos depois de sair.
+- **"Disponível offline"**: a preparação não fica mais presa se o armazenamento do aparelho encher ou não responder, e o mapa guardado não some por duas leituras da lista terminando fora de ordem.
+
+### Segurança
+- **O `cookies.txt` colado sai do campo por qualquer caminho de fechar a janela** (Esc, tocar fora, voltar). Antes só o "Cancelar" o apagava, e num aparelho compartilhado a próxima pessoa podia reabrir a janela e ler o arquivo inteiro.
+- **A foto de um pedido recebido na conversa só é aceita do servidor de fotos do Waze** (antes, de qualquer endereço `*.waze.com`).
+- **O servidor recusa lote de "marcar como lido" acima de 500 pedidos e ids que não sejam texto ou número.**
+
+### Mudado
+- **Na VM, a sessão é gravada de forma atômica** (um processo derrubado no meio da gravação não corrompe mais a sessão de ninguém).
+- **Modo Desenvolvedor**: o diagnóstico não acusa mais "código diferente do servidor" em todo relatório de produção (era o script que o Cloudflare injeta a cada resposta); os filtros de cada captura são os daquele instante; a coordenada de uma entrada proposta não sai mais cortada; o aviso de ResizeObserver não vira "erro de JS" nem captura; os botões travados de propósito na janela do Desfazer não viram alerta; o código de pareamento não entra no relatório; e o registro do tempo real mostra o erro da conexão atual.
+- **README**: o ícone de filtros é o funil, o app abre no país do seu perfil, e o ↑ com "Pular guarda o pedido" dá a estrela.
+
+### Ficou pra decisão
+- **O português aparece antes da tradução** pra quem usa o app em inglês, espanhol ou francês: medido, 2,75 s na primeira visita num 3G rápido (a partir da segunda, ~60 ms). Esconder o texto até traduzir muda a tela de abertura, e mudança de tela passa por mockup antes.
+
 ## v2026.09.25-04
 
 Segunda rodada da auditoria, com a verificação em produção da v2026.09.25-03.
