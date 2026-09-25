@@ -106,7 +106,9 @@ test('botão de confirmar ecoa o verbo do enunciado', () => {
   for (const [lang, corpo, botao] of [
     ['pt', 'marcar como lido', 'marcar como lidos'],
     ['en', 'as read', 'mark as read'],
-    ['es', 'marcar como leída', 'marcar como leídos'],
+    // es: a SOLICITUD é feminina — o botão "leídos" contradizia o enunciado
+    // ("leídas las N solicitudes"), e este teste o fixava (auditoria de 2026-09-25).
+    ['es', 'marcar como leída', 'marcar como leídas'],
     ['fr', 'marquer comme lue', 'marquer comme lues'],
   ]) {
     const m = I18N.match(new RegExp(`\\n  ${lang}: \\{([\\s\\S]*?)\\n  \\},?\\n`));

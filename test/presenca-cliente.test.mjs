@@ -802,3 +802,27 @@ test('fluxo: fim SEM lote e logo não é "normal" — não religa a cada 1 s pra
   assert.ok(d.timers.some((x) => x.ms === 1000), 'o fim normal deixou de religar rápido');
   assert.ok(religa);
 });
+
+test('token que falhou por REDE não bloqueia o tempo real por 5 min: a rede voltando pede de novo', async () => {
+  // Aberto sem sinal, o pedido do token falhava e ficava marcado como "pedido
+  // agora"; o `online` achava recente e desistia — e o chat ficava sem tempo
+  // real até 5 min depois (auditoria de 2026-09-25).
+  let fora = true;
+  const c = novoCliente({ api: { presencaApp: async (campos) => (fora
+    ? { success: false, errorCategory: 'transient' }
+    : { success: true, online: [], conversas: [], ...(campos.token ? { chat: { token: 't', chave: 'k', base: 'https://instantmessaging-pa.googleapis.com/', expiraEm: Date.now() + 864e5 } } : {}) }) } });
+  await c.P.presencaAtualizar({ token: true });
+  const antes = c.chamadas.presencaApp.length;
+  fora = false;
+  c.P.presencaFluxoGarantir();                 // é o que o `online` chama
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(c.chamadas.presencaApp.length, antes + 1, 'a rede voltou e o token não foi pedido de novo');
+  assert.equal(c.chamadas.presencaApp[antes].token, true);
+  // CONTROLE: recusa de VERDADE (não rede) segue respeitando o teto.
+  const d = novoCliente({ api: { presencaApp: async () => ({ success: false, errorCategory: 'unknown' }) } });
+  await d.P.presencaAtualizar({ token: true });
+  const n = d.chamadas.presencaApp.length;
+  d.P.presencaFluxoGarantir();
+  await Promise.resolve();
+  assert.equal(d.chamadas.presencaApp.length, n, 'recusa que não é rede passou a repetir sem teto');
+});

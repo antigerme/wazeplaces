@@ -8,6 +8,31 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.25-04
+
+Segunda rodada da auditoria, com a verificação em produção da v2026.09.25-03.
+
+### Corrigido
+- **A rede voltando traz de volta os pedidos pulados sem sinal.** Na v2026.09.25-03, quem pulava tudo sem rede (por exemplo os cards de foto cuja foto não veio) via a fila terminar vazia quando a rede voltava, com os pedidos ainda pendentes. Achado pela auditoria em produção: com a fila vazia, a volta da rede e o "Tentar novamente" voltam a atualizar a fila.
+- **Sem sessão, quem usa o app em espanhol volta pra tela de entrar.** O aviso "Sesión expirada" não era reconhecido, e a tela ficava em "Falha ao carregar".
+- **Horário de verão no Histórico**: a maior sequência de dias contava um dia a mais atravessando a troca de horário (Europa, Reino Unido, México), e as contagens da semana e do mês erravam perto da meia-noite.
+- **Zoom da foto ampliada**: o ponto sob os dedos fica parado. Depois do primeiro zoom a foto escorregava a cada movimento da pinça.
+- **Excluir duas fotos do mesmo local em seguida** não manda mais a primeira de volta: a lista guardada por alguns segundos pra acelerar a exclusão era a de antes dela.
+- **O botão direito do mouse não arrasta mais o card** (soltar além do limite rejeitava ou marcava como lido sem querer).
+- **Tab na foto e no mapa ampliados** não sai mais pro card de trás.
+- **A sessão caindo com uma ação na janela do Desfazer** não deixa mais um pedido a mais no placar.
+- **"Restam" mostra "—" sem rede com a fila vazia**, em vez do número antigo.
+- **A conversa volta a receber mensagens assim que a rede volta**: aberto sem sinal, o app ficava até 5 minutos sem o tempo real.
+- **"Disponível offline"**: o mapa guardado fica só com o que a fila usa. Antes ele crescia a cada fila nova, sem limite.
+- **Textos**: o "Sair" e a Privacidade dizem exatamente o que fica no aparelho (o idioma e o tema ficam; as conquistas e a lista de autores rejeitados saem); em espanhol, o placar e os avisos concordam com "solicitud" (Leídas, Rechazadas, Saltadas); em francês, "marquée comme lue"; apóstrofos tipográficos em inglês e francês; frases em inglês revistas.
+- **Modo Desenvolvedor**: o diagnóstico passa a comparar de verdade o código do aparelho com o do servidor (a comparação passava pelo service worker e dava "igual" sempre), e cada leitura dele tem teto de tempo; as sentinelas não acusam mais "mapa fora da caixa" nem "alvo pequeno" no meio do arraste; e o botão flutuante não fica mais preso ao ser segurado sem arrastar, não se move com outro dedo na tela, responde a Enter/Espaço e volta dentro da tela ao girar o aparelho.
+
+### Mudado
+- **Uma leitura do armazenamento de sessão por ação, não duas**, no plano grátis do Cloudflare.
+
+### Segurança
+- **As respostas da API saem com `nosniff`** nos dois destinos (Cloudflare e VM), e os erros da VM com o conjunto de cabeçalhos de segurança.
+
 ## v2026.09.25-03
 
 Primeira rodada da auditoria completa do app, feita antes do anúncio pros Global Champs.

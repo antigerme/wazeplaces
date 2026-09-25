@@ -156,7 +156,15 @@ test('toda resposta de /api sai com no-store, no Node e no Worker', async () => 
       assert.equal(r.status, esperado, `${metodo} /api/${rota}`);
       assert.match(r.headers.get('cache-control') || '', /no-store/,
         `${metodo} /api/${rota} saiu sem no-store`);
+      // E com `nosniff` (e o resto do conjunto de segurança): a VM respondia a
+      // API sem eles (auditoria de 2026-09-25).
+      assert.equal(r.headers.get('x-content-type-options'), 'nosniff', `${metodo} /api/${rota} saiu sem nosniff`);
+      assert.ok(r.headers.get('x-frame-options'), `${metodo} /api/${rota} saiu sem X-Frame-Options`);
     }
+    // O 405 dos ESTÁTICOS também leva o conjunto.
+    const r405 = await fetch(`http://127.0.0.1:${porta}/index.html`, { method: 'DELETE' });
+    assert.equal(r405.status, 405);
+    assert.equal(r405.headers.get('x-content-type-options'), 'nosniff', 'o 405 dos estáticos saiu sem nosniff');
   });
 
   // E o adaptador do Cloudflare tem que carimbar igual — os dois destinos
@@ -166,6 +174,8 @@ test('toda resposta de /api sai com no-store, no Node e no Worker', async () => 
   assert.ok(fn, 'sumiu o helper json() do worker');
   assert.match(fn[0], /'Cache-Control':\s*'no-store'/,
     'o Worker parou de carimbar no-store nas respostas de /api');
+  assert.match(fn[0], /'X-Content-Type-Options':\s*'nosniff'/,
+    'o Worker parou de carimbar nosniff nas respostas de /api');
 });
 
 // O `_headers` corta o Cache-Control por CAMINHO, e o adaptador cortava por

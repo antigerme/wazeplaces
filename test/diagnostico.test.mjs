@@ -251,7 +251,13 @@ test('a captura NÃO dispara toast — o instrumento não pode medir a si mesmo'
   assert.ok(iF !== -1, 'ligarFabDev sumiu');
   const fab = semCom.slice(iF, semCom.indexOf('\nfunction ', iF + 10));
   const i = fab.indexOf('const soltar = ');
-  const corpo = fab.slice(i, fab.indexOf('};', i));
+  const soltar = fab.slice(i, fab.indexOf('};', i));
+  assert.match(soltar, /capturar\(\);/, 'o toque parou de registrar');
+  // A captura em si mora em `capturar()` — o toque e o teclado (Enter/Espaço)
+  // passam por ela, então é NELA que o toast não pode estar.
+  const iC = fab.indexOf('function capturar()');
+  assert.ok(iC !== -1, 'a captura saiu de `capturar()`');
+  const corpo = fab.slice(iC, fab.indexOf('\n    }', iC));
   assert.match(corpo, /dlogCapturar\('manual'\)/, 'o toque parou de registrar');
   assert.ok(!/showToast/.test(corpo), 'voltou o toast na captura — ele bloqueia o toque seguinte');
 });
@@ -452,7 +458,14 @@ test('segurar PEGA o botão, com aviso, e arrastar não vira toque', () => {
     const pegar = fab.slice(iP, fab.indexOf('};', iP));
     assert.match(pegar, /classList\.add\('fab-pego'\)/, 'sumiu o aviso visual de pegou');
     assert.match(pegar, /navigator\.vibrate/, 'sumiu o aviso tátil de pegou');
-    assert.match(pegar, /devFabFixado = true/, 'pegar precisa fixar: o app não pode mover o que está na mão');
+    // O app não pode mover o que está na mão — mas quem garante isso é o
+    // `posicionarFabDev` ignorar o botão PEGO, não o pegar FIXAR: fixar no
+    // pegar deixava o toque devagar (segurou e soltou sem andar) fixando o
+    // botão pra sempre (auditoria de 2026-09-25; executado em test/fab-dev).
+    assert.doesNotMatch(pegar, /devFabFixado = true/, 'pegar voltou a fixar: toque devagar prende o botão');
+    const pos = semCom.slice(semCom.indexOf('function posicionarFabDev('));
+    assert.match(pos.slice(0, 400), /if \(fab\.classList\.contains\('fab-pego'\)\) return;/,
+        'o app voltou a poder mover o botão que está na mão');
     // e o CSS do aviso existe de verdade no arquivo COMPILADO — classe que só
     // existe no JS é indistinguível de classe certa se olhar só o JS
     assert.match(CSS, /#devFab\.fab-pego #devFabBtn\{[^}]*transform:scale/,
@@ -462,6 +475,7 @@ test('segurar PEGA o botão, com aviso, e arrastar não vira toque', () => {
     const mover = fab.slice(iM, fab.indexOf('};', iM));
     assert.match(mover, /pegar\(\);/, 'sair andando antes do relógio precisa pegar na hora');
     assert.match(mover, /arrastou = true/, 'o arrasto não se marca, e vira toque ao soltar');
+    assert.match(mover, /devFabFixado = true/, 'ARRASTAR tem que fixar: é a pessoa escolhendo o lugar');
     const iS = fab.indexOf('const soltar = ');
     const soltar = fab.slice(iS, fab.indexOf('};', iS));
     assert.match(soltar, /if \(arrastou\) return;/, 'arrastar voltou a registrar um momento');
@@ -638,13 +652,33 @@ test('a sentinela do mapa compara a CAIXA com o enquadramento', () => {
     + 'nenhuma linha no arquivo que o editor manda');
   // Ela precisa comparar as DUAS coisas: só olhar a caixa não distingue nada
   // (elas sempre batem), e só olhar o enquadramento não tem com o que comparar.
-  assert.match(s, /mapaPara[\s\S]{0,400}Math\.abs\([\s\S]{0,40}g\.w\)[\s\S]{0,120}g\.h\)/,
-    'a sentinela deixou de comparar o enquadramento com a caixa medida — é a '
-    + 'comparação inteira, porque as caixas sempre batem');
-  // Tolerância: `clientWidth` é inteiro arredondado (gotcha #34).
-  assert.match(s, /Math\.abs\([^)]*\)\s*>\s*1/,
-    'a sentinela ficou sem tolerância de 1px: `clientWidth` é arredondado e ela '
-    + 'passa a alertar por ruído de arredondamento');
+  // A comparação mora em `diagMapaForaDaCaixa`, EXECUTADA no teste abaixo.
+  assert.match(s, /if \(diagMapaForaDaCaixa\(g\)\)/,
+    'a sentinela deixou de comparar o enquadramento com a caixa medida');
+});
+
+test('as sentinelas de TAMANHO usam a caixa de layout: o arraste (girado) e a saída (encolhida) não disparam', () => {
+  // Auditoria de 2026-09-25: o `getBoundingClientRect` inclui a transformação.
+  // Toda captura `auto:arraste` com o mapa na frente trazia "mapa fora da caixa",
+  // e a saída do card pra cima, "alvo pequeno" no ↑ de 48px.
+  const app = semLinhaComentada(APP);
+  const fora = new Function(fatiarFn(app, 'diagMapaForaDaCaixa') + '\nreturn diagMapaForaDaCaixa;')();
+  const pequeno = new Function(fatiarFn(app, 'diagAlvoPequeno') + '\nreturn diagAlvoPequeno;')();
+  // Card girado no arraste: o rect cresce, a caixa de layout é a de sempre.
+  assert.equal(fora({ mapaPara: '359x337', w: 402, h: 381, cw: 359, ch: 337 }), false, 'o arraste acusou o mapa');
+  // CONTROLE: o defeito de verdade (desenhado pra outra caixa) segue acusado...
+  assert.equal(fora({ mapaPara: '400x240', w: 359, h: 337, cw: 359, ch: 337 }), true, 'o defeito real sumiu da sentinela');
+  // ...com a tolerância de 1px (clientWidth arredondado, gotcha #34)...
+  assert.equal(fora({ mapaPara: '359x337', w: 360, h: 338, cw: 360, ch: 338 }), false);
+  // ...e relatório antigo (sem `cw`) cai no rect, como antes.
+  assert.equal(fora({ mapaPara: '400x240', w: 359, h: 337 }), true);
+  // Botão de 48px encolhido pela animação de saída: não é alvo pequeno.
+  assert.equal(pequeno({ w: 43, h: 43, ow: 48, oh: 48 }), false, 'a animação acusou alvo pequeno');
+  assert.equal(pequeno({ w: 40, h: 40, ow: 40, oh: 40 }), true, 'CONTROLE: o alvo pequeno de verdade sumiu');
+  // E a geometria GRAVA os dois tamanhos de layout.
+  const g = fatiarFn(app, 'diagGeometria');
+  assert.match(g, /cw: e\.clientWidth, ch: e\.clientHeight/);
+  assert.match(g, /ow: e\.offsetWidth, oh: e\.offsetHeight/);
 });
 
 test('o card de fundo NÃO entra no alerta de toque interceptado', () => {

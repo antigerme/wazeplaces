@@ -339,12 +339,17 @@ async function serveIndexFallback(res) {
   }
 }
 
+// Cabeçalhos de TODA resposta de /api: `no-store` (ver o Worker) e os de
+// segurança — a VM respondia a API (e o 405/500 dos estáticos) SEM eles, e o app
+// deixava de ser o mesmo nos dois destinos (gotcha #14; auditoria de 2026-09-25).
+const API_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY_HEADERS };
+
 const server = createServer(async (req, res) => {
   const url = req.url || '/';
   try {
     if (url.startsWith('/api/')) {
       if (req.method !== 'POST') {
-        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.writeHead(405, API_HEADERS);
         res.end(JSON.stringify({ success: false, error: 'Método não permitido' }));
         return;
       }
@@ -361,13 +366,13 @@ const server = createServer(async (req, res) => {
       // correndo termina sozinho. Só não pode virar rejeição sem dono.
       const aoFundo = (p) => { Promise.resolve(p).catch(() => {}); };
       const { status, body } = await dispatch(route, data, { sessions, aoFundo });
-      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.writeHead(status, API_HEADERS);
       res.end(JSON.stringify(body));
       return;
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
       res.end('Method not allowed');
       return;
     }
@@ -381,10 +386,10 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (url.startsWith('/api/')) {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.writeHead(500, API_HEADERS);
       res.end(JSON.stringify({ success: false, error: 'Erro interno' }));
     } else {
-      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
       res.end('Erro interno');
     }
   }

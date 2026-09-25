@@ -31,6 +31,15 @@ function soCookiesDoWaze(texto) {
     }).join('\n');
 }
 
+// "Sem sessão" nasce AQUI, no aparelho, e vai CARIMBADO: quem decide derrubar a
+// sessão lê a CATEGORIA. Ia só com o texto traduzido, e o app o reconhecia
+// procurando "sess" — o que o espanhol ("Sesión") não tem (auditoria de
+// 2026-09-25): sem token, quem usava o app em espanhol via "Falha ao carregar"
+// em vez da tela de entrar.
+function semSessao() {
+    return { success: false, error: t('api.error.noSession'), errorKey: 'api.error.noSession', errorCategory: 'unauthorized' };
+}
+
 const API = {
     baseUrl: '/api',
     sessionToken: null,
@@ -343,7 +352,7 @@ const API = {
     async fetchPlaces(page = 1, filters = {}) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('buscar-places', {
             sessionToken,
@@ -364,7 +373,7 @@ const API = {
     async markAsRead(venueID, updateRequestID, presenca, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('marcar-lido', {
             sessionToken,
@@ -378,7 +387,7 @@ const API = {
     async markAsReadBatch(items, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('marcar-lido', {
             sessionToken,
@@ -393,7 +402,7 @@ const API = {
     async guardarPedido(venueID, updateRequestID, value, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('guardar-pedido', {
             sessionToken,
@@ -407,7 +416,7 @@ const API = {
     async rejectPlace(venueID, updateRequestID, presenca, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('validar-place', {
             sessionToken,
@@ -426,7 +435,7 @@ const API = {
     async aprovarPedido(venueID, updateRequestID) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('validar-place', {
             sessionToken,
@@ -461,7 +470,7 @@ const API = {
     async renomearLocal(venueID, nome) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('renomear-local', {
             sessionToken, region: this.getRegion(), venueID, nome,
@@ -471,7 +480,7 @@ const API = {
     async excluirFoto(venueID, imageID, lat, lon) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('excluir-foto', {
             sessionToken,
@@ -487,7 +496,7 @@ const API = {
     async getProfile(regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('perfil', {
             sessionToken,
@@ -500,7 +509,7 @@ const API = {
     // ações, sem requisição nova.
     async presencaWaze(campos) {
         const sessionToken = this.getSession();
-        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        if (!sessionToken) return semSessao();
         return this._post('presenca-waze', {
             sessionToken,
             region: this.getRegion(),
@@ -513,14 +522,14 @@ const API = {
     // conhecidos e, quando houver, a instalação e os ids a confirmar.
     async presencaApp(campos) {
         const sessionToken = this.getSession();
-        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        if (!sessionToken) return semSessao();
         return this._post('presenca-app', { sessionToken, region: this.getRegion(), ...campos });
     },
 
     // O chat do WME: `abrir`, `enviar`, `lida` (e as outras ações da rota).
     async chat(campos) {
         const sessionToken = this.getSession();
-        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        if (!sessionToken) return semSessao();
         return this._post('chat', { sessionToken, region: this.getRegion(), ...campos });
     },
 
@@ -529,7 +538,7 @@ const API = {
     async listCountries(regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('lista-paises', {
             sessionToken,
@@ -540,7 +549,7 @@ const API = {
     async listStates(countryId, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('lista-estados', {
             sessionToken,
@@ -571,7 +580,7 @@ const API = {
     // `derivarChave` no core. O padrão é o forte, de propósito.
     async criarPareamento({ comCodigo = false } = {}) {
         const sessionToken = this.getSession();
-        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        if (!sessionToken) return semSessao();
         return this._post('parear', { action: 'create', sessionToken, comCodigo });
     },
 

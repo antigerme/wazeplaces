@@ -756,6 +756,20 @@ export function normalizePairCode(code) {
 }
 
 export function makeSessions({ store, keyBytes }) {
+  // O carimbo que o `loadSession` acabou de LER, por sessão. O Waze rotaciona o
+  // cookie em TODA resposta, então o `refreshCookies` roda a cada chamada — e
+  // cada uma custava uma 2ª LEITURA do KV (cota: 100 mil por dia no plano
+  // grátis) só pra descobrir que ainda não era hora de regravar, cujo teto é
+  // 1/h. Com o carimbo lembrado, a leitura só acontece quando pode gravar
+  // (auditoria de 2026-09-25). Carimbo só CRESCE, então um lembrado recente
+  // prova que o de verdade também é: pular é seguro; um lembrado velho só faz
+  // ler, como antes. No Worker isto vive uma requisição (o `makeSessions` é por
+  // requisição); na VM, o processo inteiro — daí o teto.
+  const carimboLido = new Map();
+  const lembrarCarimbo = (hash, carimbo) => {
+    if (carimboLido.size >= 5000) carimboLido.clear();
+    carimboLido.set(hash, carimbo);
+  };
   return {
     // Exposto pra quem precisa de cache curto próprio (a releitura do local
     // antes de excluir foto). Quem usar isto escolhe prefixo próprio na chave.
@@ -820,6 +834,7 @@ export function makeSessions({ store, keyBytes }) {
       if (!cookies) { await descartar(); return null; }
 
       const agora = Math.floor(Date.now() / 1000);
+      let carimboAtual = carimbo;
       if (agora - carimbo >= SESSION_REFRESH_AFTER) {
         // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
         // a sessão segue valendo com o prazo antigo. Deixar isto lançar
@@ -827,10 +842,12 @@ export function makeSessions({ store, keyBytes }) {
         // que esta função existe pra corrigir.
         try {
           await store.put(hash, agora + '|' + blob, SESSION_TTL);
+          carimboAtual = agora;
         } catch (e) {
           // silêncio proposital: nada aqui deve derrubar a sessão
         }
       }
+      lembrarCarimbo(hash, carimboAtual);
       return cookies;
     },
     // Lê antes de apagar: a rota não exige nada além de um token qualquer, e no
@@ -840,6 +857,7 @@ export function makeSessions({ store, keyBytes }) {
     async destroySession(token) {
       if (typeof token !== 'string' || !token) return;
       const hash = await sha256hex(token);
+      carimboLido.delete(hash);
       if ((await store.get(hash)) == null) return;
       await store.delete(hash);
     },
@@ -862,14 +880,20 @@ export function makeSessions({ store, keyBytes }) {
       if (!token || !conteudoNovo) return false;
       try {
         const hash = await sha256hex(token);
+        const agora = Math.floor(Date.now() / 1000);
+        const lembrado = carimboLido.get(hash);
+        if (lembrado != null && agora - lembrado < SESSION_COOKIE_REFRESH) return false;
         const raw = await store.get(hash);
         if (!raw) return false;
         const sep = raw.indexOf('|');
         const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
-        const agora = Math.floor(Date.now() / 1000);
-        if (Number.isFinite(carimbo) && agora - carimbo < SESSION_COOKIE_REFRESH) return false;
+        if (Number.isFinite(carimbo) && agora - carimbo < SESSION_COOKIE_REFRESH) {
+          lembrarCarimbo(hash, carimbo);
+          return false;
+        }
         const blob = await encryptCookies(conteudoNovo, await derivarChave(keyBytes, token));
         await store.put(hash, agora + '|' + blob, SESSION_TTL);
+        lembrarCarimbo(hash, agora);
         return true;
       } catch {
         return false;
@@ -2250,9 +2274,11 @@ const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
 // quem está sendo verificado: bastaria mandar uma lista curta pra apagar tudo.
 // Hoje o cliente só diz QUAL foto quer excluir; quem monta a lista é o
 // servidor, a partir do que o Waze respondeu.
+const chaveDaReleitura = async (data) => 'reler_' + (await sha256hex(String(data.sessionToken) + '|' + data.venueID));
+
 async function relerLocal(data, sessions, cookieHeader, csrf, region) {
   const venueID = data.venueID;
-  const chave = 'reler_' + (await sha256hex(String(data.sessionToken) + '|' + venueID));
+  const chave = await chaveDaReleitura(data);
   try {
     const bruto = await sessions.store.get(chave);
     if (bruto) {
@@ -2377,6 +2403,17 @@ async function handleExcluirFoto(data, { sessions }) {
       body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
+
+  // A RELEITURA guardada passa a ser a lista que acabou de ser gravada. Sem
+  //    isto, uma segunda exclusão no mesmo local dentro de RELEITURA_TTL lia a
+  //    lista VELHA do cache e mandava de volta a foto que acabou de sair (o Waze
+  //    substitui a lista inteira). MEDIDO que o Waze não a ressuscita, mas
+  //    depender disso é depender do eco que o próprio passo 4 diz não ser prova
+  //    (auditoria de 2026-09-25).
+  try {
+    await sessions.store.put(await chaveDaReleitura(data),
+      Math.floor(Date.now() / 1000) + '|' + JSON.stringify({ id: venue.id, images: restantes }), RELEITURA_TTL_STORE);
+  } catch (e) { /* sem cache, a próxima exclusão relê do Waze */ }
 
   // 4) Conferência pelo que o Waze DEVOLVEU — e o eco NÃO É PROVA, então isto
   //    é uma rede a mais, não a garantia.

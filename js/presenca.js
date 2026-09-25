@@ -317,6 +317,11 @@ async function presencaAtualizar({ token = false } = {}) {
             if (epoca !== Presenca.epoca) return;       // desligou ou saiu no meio
             chatAoResponder(r, carona);
             if (!r || !r.success) {
+                // Pedido de token que falhou por REDE não conta no teto de 5 min:
+                // aberto sem sinal, o app ficava 5 min sem o tempo real depois de
+                // a rede voltar (o `online` achava o pedido "recente" e desistia).
+                // Recusa de verdade segue contando (auditoria de 2026-09-25).
+                if (querToken && (!r || r.errorCategory === 'transient')) Presenca.tokenPedidoEm = 0;
                 presencaAnotarLista({ via: 'pedido', falhou: (r && r.errorCategory) || 'sem resposta' });
                 if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
                 return;

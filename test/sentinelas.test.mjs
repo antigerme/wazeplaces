@@ -22,11 +22,16 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const APP = readFileSync(join(ROOT, 'js/app.js'), 'utf8');
 
 // Fatia e AVALIA a função pura — nunca parseia a expressão (gotcha #49).
+// Com as duas comparações de TAMANHO que ela usa (caixa de layout, não o rect
+// transformado — ver `diagMapaForaDaCaixa`).
 function montar() {
-  const i = APP.indexOf('function diagSentinelas(');
-  assert.ok(i > 0, 'diagSentinelas sumiu do app.js');
-  const fim = APP.indexOf('\n}', i);
-  return new Function(APP.slice(i, fim + 2) + '\nreturn diagSentinelas;')();
+  const pega = (nome) => {
+    const i = APP.indexOf('function ' + nome + '(');
+    assert.ok(i > 0, `${nome} sumiu do app.js`);
+    return APP.slice(i, APP.indexOf('\n}', i) + 2);
+  };
+  return new Function(['diagMapaForaDaCaixa', 'diagAlvoPequeno', 'diagSentinelas'].map(pega).join('\n')
+    + '\nreturn diagSentinelas;')();
 }
 const chaves = (r) => r.map((a) => a.chave).sort();
 

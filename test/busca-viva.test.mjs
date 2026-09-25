@@ -88,6 +88,7 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     filters: { unreadOnly, types: TYPES_ALL.slice(), residential: '', myArea: false, stateId: '', managedAreaId: '', categories: [] },
     profile: null,
   };
+  const contadores = [];
   const deps = {
     AppState, TYPES_ALL, PREFETCH_THRESHOLD, MAX_EMPTY_PAGES, MAX_PAGINAS_POR_BUSCA,
     navigator: { onLine: online },
@@ -96,7 +97,7 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
     handleUnauthorized: () => {}, showToast: (m, tipo) => toasts.push(tipo), msgDoServidor: (r, d) => d, t: (k) => k,
     rebuscasAuto: 0, guardarPrazoDaSessao: () => {}, offlineGravarFila: () => {}, trackSeenCategories: () => {},
-    sortQueue: () => {}, aplicarRecusaAutomatica: () => {}, updatePendingCount: () => {},
+    sortQueue: () => {}, aplicarRecusaAutomatica: () => {}, updatePendingCount: () => contadores.push(AppState.loadError),
     offlineVarrer: () => varreduras.push(Date.now()),
     bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(),
     pedidosEmAndamento: new Set(), pousosDaPagina: new Map(), offlineLigado: () => false,
@@ -109,7 +110,7 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     .map(fatiar).join('\n');
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + '\nreturn { fetchNextPage };')(...nomes.map((n) => deps[n]));
-  return { app, AppState, deps, diario, toasts, varreduras };
+  return { app, AppState, deps, diario, toasts, varreduras, contadores };
 }
 
 const chave = (p) => `${p.venueID}|${p.updateRequestID}`;
@@ -297,6 +298,8 @@ test('SEM REDE com a fila vazia: a tela é a de "sem sinal" (loadError), nunca o
   assert.equal(m.AppState.loadError, true, 'sem o loadError o showNoPlaces desenharia "Tudo limpo!"');
   assert.equal(m.AppState.hasMore, false, 'sem isto o laço do startFetching não termina (gotcha #19)');
   assert.ok(m.diario.some(([k]) => k === 'busca.semRede'), 'o diário não anotou a busca sem rede');
+  // E o "Restam" é redesenhado JÁ com o `loadError` ("—"), não fica no número velho.
+  assert.ok(m.contadores.includes(true), 'o contador não foi redesenhado com o "não sei" (—)');
 });
 
 test('uma página que falha POR REDE no meio da leitura guarda o que já veio e ESPERA calada', async () => {
@@ -376,13 +379,25 @@ test('`fetching` preso SEM promessa não vira laço: a busca sai de novo', async
   assert.equal(m.AppState.fetching, false);
 });
 
-test('a volta da rede e o "Tentar novamente" retomam SEM zerar a fila (os pulados não voltam)', () => {
-  // Era `resetQueue()` + `startFetching()`: os pedidos que a pessoa PULOU nesta
-  // sessão voltavam, e com card na tela o card era arrancado e a ação da janela
-  // do Desfazer saía antes da hora (auditoria 2026-09-25).
+test('a volta da rede e o "Tentar novamente": com a fila VAZIA é atualizar; com card na tela, só retoma', () => {
+  // Era `resetQueue()` + `startFetching()` SEMPRE: com card na tela o card era
+  // arrancado e a ação da janela do Desfazer saía antes da hora. A primeira
+  // correção (só retomar, sempre) errou do outro lado, e a auditoria EM PRODUÇÃO
+  // pegou: reaberto sem rede e tudo pulado (o card de foto sem a foto), a rede
+  // voltava e a fila terminava VAZIA, com os pedidos pendentes (2026-09-25).
   const r = fatiar('retomarBusca');
-  assert.match(r, /AppState\.loadError = false;\s*AppState\.hasMore = true;\s*startFetching\(\);/);
-  assert.doesNotMatch(r, /resetQueue/);
+  const chamadas = [];
+  const AppState = { queue: [], loadError: true, hasMore: false };
+  const rodar = new Function('AppState', 'resetQueue', 'startFetching', r + '\nreturn retomarBusca;')(
+    AppState, () => chamadas.push('reset'), () => chamadas.push('buscar'));
+  rodar();
+  assert.deepEqual(chamadas, ['reset', 'buscar'], 'com a fila vazia, a volta não atualizou (os pulados sem sinal não voltam)');
+  chamadas.length = 0;
+  AppState.queue = [{ venueID: 'v' }];
+  rodar();
+  assert.deepEqual(chamadas, ['buscar'], 'com card na tela, a volta ZEROU a fila (arranca o card da mão)');
+  assert.equal(AppState.loadError, false);
+  assert.equal(AppState.hasMore, true);
   assert.match(APP_SEM, /if \(AppState\.authenticated && AppState\.loadError && !AppState\.fetching\) \{\s*retomarBusca\(\);\s*\}/,
     'a volta da rede voltou a zerar a fila');
   assert.match(APP_SEM, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(\) => \{\s*if \(await offlineTentarAbrirSemRede\(\)\) return;\s*retomarBusca\(\);/,
