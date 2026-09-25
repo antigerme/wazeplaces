@@ -661,6 +661,15 @@ const LIMPEZA_AO_FECHAR = {
         if (campo) campo.value = '';
         document.getElementById('pairEnterError')?.classList.add('hidden');
     },
+    // O `cookies.txt` colado é o CHAVEIRO do navegador inteiro (medido no do
+    // owner: 4.370 cookies de 362 domínios). Só o ✕ Cancelar e o Entrar o
+    // limpavam: fechado por Esc, pelo fundo ou pelo voltar, ele ficava no campo —
+    // e depois do "Sair", num aparelho compartilhado, a pessoa seguinte reabria
+    // e lia tudo (auditoria de 2026-09-25).
+    pasteModal() {
+        const campo = document.getElementById('cookiesTextarea');
+        if (campo) campo.value = '';
+    },
 };
 
 function closeModal(id, { viaHistorico = false } = {}) {
@@ -692,10 +701,8 @@ function setupAuthListeners() {
     $('fileInput').addEventListener('change', handleFileUpload);
     $('pasteBtn').addEventListener('click', () => openModal('pasteModal'));
     $('confirmPaste').addEventListener('click', handlePasteConfirm);
-    $('cancelPaste').addEventListener('click', () => {
-        closeModal('pasteModal');
-        $('cookiesTextarea').value = '';
-    });
+    // A limpeza do campo mora no `LIMPEZA_AO_FECHAR` (vale pros quatro caminhos).
+    $('cancelPaste').addEventListener('click', () => closeModal('pasteModal'));
     $('byAuthor').addEventListener('click', () => {
         window.open('https://www.waze.com/user/editor/antigerme', '_blank', 'noopener');
     });
@@ -3001,9 +3008,8 @@ async function handlePasteConfirm() {
         showToast(t('toast.pasteEmpty'), 'error');
         return;
     }
-    closeModal('pasteModal');
+    closeModal('pasteModal');   // limpa o campo (ver `LIMPEZA_AO_FECHAR`); o conteúdo já foi lido
     await authenticateWithCookies(content);
-    document.getElementById('cookiesTextarea').value = '';
 }
 
 let authInFlight = false;

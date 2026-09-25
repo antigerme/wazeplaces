@@ -89,6 +89,12 @@ const Presenca = {
     diagUltimaLista: null,  // a última lista anotada no diário (só a MUDANÇA entra)
     diagMsgs: {},           // por tipo de linha: { em, juntas } (ver `presencaAnotarMsg`)
     pedindo: null,          // a promessa do `presenca-app` em voo (um por vez)
+    // Relógio do SERVIDOR menos o do APARELHO (ms), medido a cada lista. As
+    // horas que vêm de fora (o prazo do token, a hora de cada mensagem) são
+    // levadas pro relógio daqui antes de comparar com ele: aparelho com a hora
+    // errada contava mensagem duas vezes, perdia a não lida, ou — um dia
+    // adiantado — nunca abria o tempo real (auditoria de 2026-09-25).
+    desvio: 0,
     chat: null,             // { token, base, chave, expiraEm } — só em memória
     tokenPedidoEm: 0,
     fluxo: null,            // a conexão de tempo real aberta agora
@@ -311,11 +317,13 @@ async function presencaAtualizar({ token = false } = {}) {
     const carona = chatCarona();
     const campos = { pais, userId: presencaEu(), conhecidos: chatConhecidos(), ...carona };
     if (querToken) { campos.instalacao = chatInstalacao(); campos.token = true; Presenca.tokenPedidoEm = inicio; }
+    let refazer = false;
     Presenca.pedindo = (async () => {
         try {
             const r = await API.presencaApp(campos);
             if (epoca !== Presenca.epoca) return;       // desligou ou saiu no meio
             chatAoResponder(r, carona);
+            if (r && Number.isFinite(r.agora)) Presenca.desvio = r.agora - Date.now();
             if (!r || !r.success) {
                 // Pedido de token que falhou por REDE não conta no teto de 5 min:
                 // aberto sem sinal, o app ficava 5 min sem o tempo real depois de
@@ -326,11 +334,19 @@ async function presencaAtualizar({ token = false } = {}) {
                 if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
                 return;
             }
-            // Trocou de país no meio: a lista que chegou é do país velho.
-            if (pais !== API.getCountry()) return;
-            presencaAplicarLista(r, inicio, pais, 'pedido');
+            // Trocou de país no meio: a LISTA que chegou é do país velho e fica
+            // de fora — mas o TOKEN do chat não tem país e fica (jogá-lo fora
+            // deixava o tempo real parado até o próximo pedido de token, 5 min
+            // depois). E o país novo pede a lista DELE quando esta termina: quem
+            // pediu no meio recebeu ESTA promessa e ficava sem lista até a
+            // próxima ação. O caso comum é a abertura: o app troca pro país do
+            // perfil com o primeiro pedido no ar (auditoria de 2026-09-25).
+            if (pais !== API.getCountry()) refazer = true;
+            else presencaAplicarLista(r, inicio, pais, 'pedido');
             if (r.chat && r.chat.token) {
-                Presenca.chat = r.chat;
+                // O prazo vem no relógio do servidor; vai pro daqui (ver `desvio`).
+                Presenca.chat = Number.isFinite(r.chat.expiraEm)
+                    ? { ...r.chat, expiraEm: r.chat.expiraEm - Presenca.desvio } : r.chat;
                 presencaFluxoGarantir();
             }
             if (querToken) {
@@ -341,7 +357,13 @@ async function presencaAtualizar({ token = false } = {}) {
             /* presença é acessório: nunca tira ninguém da fila */
             presencaAnotarLista({ via: 'pedido', falhou: 'excecao' });
         } finally {
-            Presenca.pedindo = null;
+            // Só o pedido DESTA época solta a marca: o de antes de um desligar,
+            // chegando depois, apagava a do pedido novo em voo — e um terceiro
+            // saía junto, pagando o free tier em dobro (auditoria de 2026-09-25).
+            if (epoca === Presenca.epoca) {
+                Presenca.pedindo = null;
+                if (refazer) presencaAtualizar();
+            }
         }
     })();
     return Presenca.pedindo;
@@ -374,6 +396,16 @@ function presencaAoCarona(p, inicio) {
         if (!p || !presencaPodeConectar()) return;
         presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, API.getCountry(), 'carona');
     } catch (e) { /* diagnóstico nunca derruba a ação */ }
+}
+
+// Os ids já contados, com TETO: o app fica aberto por horas e cada mensagem que
+// passa (ao vivo, do lote, do histórico) entrava pra sempre (auditoria de
+// 2026-09-25). O que o teto solta é o mais VELHO: a reentrega que o `vistas`
+// existe pra barrar é a da reconexão, de minutos, e cada lote é confirmado.
+const PRESENCA_VISTAS_MAX = 2000;
+function presencaMarcarVista(id) {
+    Presenca.vistas.add(id);
+    if (Presenca.vistas.size > PRESENCA_VISTAS_MAX) Presenca.vistas.delete(Presenca.vistas.values().next().value);
 }
 
 function presencaNaoLidasDe(id) {
@@ -776,7 +808,7 @@ function presencaMensagemDoFluxo(m, doLote) {
     if (h) presencaJuntarMsgs(h, [msg]);
     presencaAtualizarPrevia(com, msg);
     const nova = !Presenca.vistas.has(msg.id);
-    Presenca.vistas.add(msg.id);
+    presencaMarcarVista(msg.id);
     // No diário: a do LOTE vira um número no fim dele; a que chega ao vivo, uma
     // linha por minuto no máximo (`presencaAnotarMsg`).
     if (!deMim && nova) {
@@ -784,14 +816,22 @@ function presencaMensagemDoFluxo(m, doLote) {
         else presencaAnotarMsg('chat.chegou', { aoVivo: true, olhando: presencaOlhando(com) });
     }
     if (!deMim && nova) {
-        if (presencaOlhando(com)) presencaAgendarLida(com);
+        if (presencaOlhando(com)) { presencaAgendarLida(com); presencaAnunciar(msg); }
         // Do LOTE só conta o que chegou depois da última lista: o resto a lista
         // já contou, e o fluxo reentrega o que não foi confirmado.
-        else if (!doLote || msg.ts > Presenca.atualizadaEm) {
-            const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0 };
-            v.n += 1;
-            v.ultimaTs = Math.max(v.ultimaTs, msg.ts);
-            Presenca.vivas.set(com, v);
+        //
+        // Tudo no relógio DAQUI, que é o da `atualizadaEm` e o do `inicio` de
+        // cada lista: a do lote vem com a hora do Google, convertida pelo
+        // `desvio`; a ao vivo vale pela hora em que CHEGOU, que é exatamente o
+        // que a lista seguinte precisa saber ("chegou antes de eu pedir?").
+        else {
+            const chegou = doLote ? msg.ts - Presenca.desvio : Date.now();
+            if (!doLote || chegou > Presenca.atualizadaEm) {
+                const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0 };
+                v.n += 1;
+                v.ultimaTs = Math.max(v.ultimaTs, chegou);
+                Presenca.vivas.set(com, v);
+            }
         }
     }
     presencaRenderTudo();
@@ -848,6 +888,17 @@ function presencaOlhando(id) {
     const modal = document.getElementById('conversaModal');
     return Presenca.aberta === id && document.visibilityState === 'visible'
         && !!modal && !modal.classList.contains('hidden');
+}
+
+// Quem usa leitor de tela não ouvia a mensagem que chega com a conversa aberta.
+// Região viva na lista não serve: ela é redesenhada INTEIRA a cada mensagem, e o
+// leitor leria a conversa toda de novo. O anúncio vai por uma região PRÓPRIA, só
+// com a que chegou (auditoria de 2026-09-25). Sai ao fechar, com o resto.
+function presencaAnunciar(msg) {
+    const el = document.getElementById('conversaAnuncio');
+    if (!el) return;
+    const nome = (document.getElementById('conversaTitle') || {}).textContent || '';
+    el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(msg.texto || '').slice(0, 280) });
 }
 
 function presencaAgendarLida(id) {
@@ -920,7 +971,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     const msgs = (Array.isArray(r.mensagens) ? r.mensagens : [])
         .filter((m) => m && m.classe === 'texto' && m.id)
         .map((m) => presencaMsgDoWaze(m, eu));
-    for (const m of msgs) Presenca.vistas.add(m.id);
+    for (const m of msgs) presencaMarcarVista(m.id);
     presencaJuntarMsgs(h, msgs);
     // `maisAntigas` diz se há página ANTES da que chegou. Na primeira, é a
     // resposta; numa página antiga, idem — a de cima da lista é sempre a última.
@@ -955,6 +1006,8 @@ function presencaEsquecerAberta() {
     // estava NA TELA, não a última conversa aberta escondida num modal.
     const corpo = document.getElementById('conversaMsgs');
     if (corpo) corpo.innerHTML = '';
+    const anuncio = document.getElementById('conversaAnuncio');
+    if (anuncio) anuncio.textContent = '';
     presencaRenderPilula();
     presencaRenderLista();
 }
@@ -1007,7 +1060,7 @@ async function presencaMandar(com, msg) {
     if (r && r.success) {
         msg.estado = 'enviada';
         if (Number.isFinite(r.ts)) msg.ts = r.ts;
-        Presenca.vistas.add(msg.id);
+        presencaMarcarVista(msg.id);
     } else if (msg.estado === 'enviada') {
         // O ECO já voltou pelo tempo real (`presencaJuntarMsgs`): o Waze RECEBEU
         // a mensagem, e foi a resposta que se perdeu no caminho. Rebaixar pra
@@ -1220,6 +1273,14 @@ function presencaBadge(n) {
 function presencaRenderLista() {
     const lista = document.getElementById('presencaLista');
     if (!lista) return;
+    // Só com a folha NA TELA. Abrir e fechar uma conversa, mandar uma mensagem e
+    // desligar redesenhavam a lista com a folha fechada, e a prévia das conversas
+    // (texto de terceiro) voltava pro DOM escondida — a captura do diagnóstico
+    // mostrava o que NÃO estava na tela (auditoria de 2026-09-25). Fechada, ela
+    // fica vazia; abrir redesenha (o toque na pílula chama isto DEPOIS do
+    // `openModal`).
+    const folha = document.getElementById('presencaModal');
+    if (!folha || folha.classList.contains('hidden')) { lista.innerHTML = ''; return; }
     const sub = document.getElementById('presencaSub');
     if (sub) {
         const pais = presencaNomeDoPais(Presenca.pais || API.getCountry());

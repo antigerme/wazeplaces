@@ -254,6 +254,10 @@ test('presenca-app: com `token` e a instalação do aparelho, o token do tempo r
   assert.equal(resultado.body.chat.base, 'https://instantmessaging-pa.googleapis.com/');
   assert.equal(resultado.body.chat.chave, 'chave-de-teste');
   assert.ok(resultado.body.chat.expiraEm > Date.now() + 86_000_000);
+  // A hora do SERVIDOR vai junto: é com ela que o cliente leva o prazo pro
+  // relógio do aparelho (auditoria de 2026-09-25).
+  assert.ok(Number.isFinite(resultado.body.agora) && Math.abs(resultado.body.agora - Date.now()) < 5000,
+    'a resposta perdeu a hora do servidor');
   const cab = g.lerCampos(um(g.lerCampos(pedidos.find((p) => p.metodo === 'GetMessagingProvider').corpo), 1));
   assert.equal(new TextDecoder().decode(um(cab, 4)), instalacao, 'o token saiu para outra instalação — a do aparelho não recebe o fluxo');
   assert.deepEqual(resultado.body.online, []);

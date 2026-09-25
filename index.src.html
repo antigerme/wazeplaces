@@ -953,6 +953,9 @@
                 </div>
                 <p id="conversaEstado" class="hidden text-xs text-slate-500 dark:text-slate-400 px-4 py-2 flex-shrink-0" role="status" aria-live="polite"></p>
                 <div id="conversaMsgs" class="conversa-msgs flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3 space-y-2"></div>
+                <!-- Só pro leitor de tela: a mensagem que CHEGA com a conversa aberta.
+                     A lista acima é redesenhada inteira e não pode ser região viva. -->
+                <p id="conversaAnuncio" class="sr-only" role="status" aria-live="polite"></p>
                 <!-- A tirinha do pedido anexado. Só existe ENTRE o toque no botão e o
                      envio — não é moldura permanente. Ela responde "o que exatamente
                      vai sair daqui?", que com a conversa aberta não dá pra ver de outro

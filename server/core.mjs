@@ -3054,6 +3054,9 @@ async function handlePresencaApp(data, { sessions }) {
       ...(app.contagem ? { contagem: app.contagem } : {}),
       ...(querToken ? { chat } : {}),
       ...(confirmados ? { confirmados } : {}),
+      // A hora do SERVIDOR: o cliente leva pro relógio do aparelho o prazo do
+      // token e a hora das mensagens (ver `Presenca.desvio`).
+      agora: Date.now(),
     },
   };
 }

@@ -197,12 +197,16 @@ test('lista A: "Triando agora" do mais perto pro mais longe, com a distância; c
   const inv = novoCliente();
   inv.AppState.currentPlace = { mapa: { centro: [-46.63, -23.55] } };
   inv.P.presencaAplicarLista({ online: [pessoa('1', 'longe', -22.90, -43.20), pessoa('2', 'perto', -23.556, -46.635)], conversas: [] }, 1, 30);
+  inv.$('presencaModal').classList.remove('hidden');   // a lista só é desenhada com a folha na tela
+
   inv.P.presencaRenderLista();
   assert.notEqual([...inv.$('presencaLista').innerHTML.matchAll(/presenca-nome">([^<]+)</g)][0][1], 'perto',
     'a contraprova não reprovou: o teste não enxergaria a ordem trocada');
   // Sem card na tela e sem posição anterior, não há "daqui": a linha não inventa.
   const semRef = novoCliente();
   semRef.P.presencaAplicarLista({ online: [pessoa('1', 'x', -22.9, -43.2)], conversas: [] }, 1, 30);
+  semRef.$('presencaModal').classList.remove('hidden');   // a lista só é desenhada com a folha na tela
+
   semRef.P.presencaRenderLista();
   assert.doesNotMatch(semRef.$('presencaLista').innerHTML, /presenca\.dist/);
 });
@@ -212,6 +216,8 @@ test('lista A: das conversas, as 5 mais recentes — e TODA com não lida, onde 
   const cs = Array.from({ length: 9 }, (_, i) => conversa(String(100 + i), 'p' + i, 100 - i, 0, { texto: 't' + i, ts: 100 - i }));
   cs[8].naoLidas = 3;   // a mais antiga tem mensagem nova
   c.P.presencaAplicarLista({ online: [], conversas: cs }, 1, 30);
+  c.$('presencaModal').classList.remove('hidden');   // a lista só é desenhada com a folha na tela
+
   c.P.presencaRenderLista();
   const nomes = [...c.$('presencaLista').innerHTML.matchAll(/presenca-nome">([^<]+)</g)].map((m) => m[1]);
   assert.deepEqual(nomes, ['p0', 'p1', 'p2', 'p3', 'p4', 'p8'], 'a conversa com não lida ficou escondida: número que não se zera');
@@ -222,10 +228,14 @@ test('lista A: das conversas, as 5 mais recentes — e TODA com não lida, onde 
 test('lista A: o subtítulo diz o país do filtro — pelo MESMO nome que o filtro mostra', () => {
   const c = novoCliente();
   c.P.presencaAplicarLista({ online: [], conversas: [] }, 1, 30);
+  c.$('presencaModal').classList.remove('hidden');   // a lista só é desenhada com a folha na tela
+
   c.P.presencaRenderLista();
   assert.equal(c.$('presencaSub').textContent, 'presenca.sheet.sub{"pais":"Brazil"}');
   const semPaises = novoCliente();
   semPaises.AppState.countries = [];
+  semPaises.$('presencaModal').classList.remove('hidden');   // a lista só é desenhada com a folha na tela
+
   semPaises.P.presencaRenderLista();
   assert.equal(semPaises.$('presencaSub').textContent, 'presenca.sheet.subSemPais');
 });
@@ -854,4 +864,137 @@ test('diagnóstico do tempo real: o erro é da CONEXÃO — um "silencio" antigo
   c.P.Presenca.fluxoDiag.ultimoErro = 'silencio';          // de uma conexão ANTERIOR
   await c.P.presencaFluxoAbrir();
   assert.equal(c.P.Presenca.fluxoDiag.ultimoErro, 'TypeError', `a queda nova saiu como "${c.P.Presenca.fluxoDiag.ultimoErro}"`);
+});
+
+test('trocar de país com a lista NO AR: o token do chat fica, a lista velha não entra, e o país novo pede a dele', async () => {
+  // Auditoria de 2026-09-25: o caso comum é a abertura — o app troca pro país
+  // do perfil com o primeiro pedido no ar. O token (que não tem país) ia fora
+  // junto com a lista, e o tempo real ficava parado até 5 min; e o país novo
+  // ficava sem lista até a próxima ação.
+  let libera, liberaNovo;
+  const c = novoCliente({ api: { presencaApp: (campos) => (campos.pais === 30
+    ? new Promise((ok) => { libera = () => ok({ success: true, online: [{ id: '777', nome: 'do-brasil' }], conversas: [],
+        chat: { token: 't', chave: 'k', base: 'https://instantmessaging-pa.googleapis.com/', expiraEm: Date.now() + 864e5 } }); })
+    : new Promise((ok) => { liberaNovo = () => ok({ success: true, online: [{ id: '888', nome: 'da-franca' }], conversas: [] }); })) } });
+  const p = c.P.presencaAtualizar({ token: true });
+  c.API.getCountry = () => 73;                    // o app foi pro país do perfil
+  c.P.presencaAtualizar();                        // quem pediu no meio recebe a promessa em voo
+  assert.equal(c.chamadas.presencaApp.length, 1, 'o controle mudou: o pedido do meio saiu na hora');
+  libera();
+  await p;
+  assert.equal(c.P.Presenca.chat && c.P.Presenca.chat.token, 't', 'o token do chat foi jogado fora com a lista');
+  assert.ok(!c.P.Presenca.online.some((x) => x.id === '777'), 'a lista do país VELHO entrou na tela do país novo');
+  assert.ok(c.chamadas.presencaApp.some((x) => x.pais === 73), 'o país novo não pediu a lista dele');
+  liberaNovo();
+  await new Promise((ok) => setImmediate(ok));
+  assert.deepEqual(c.P.Presenca.online.map((x) => x.id), ['888'], 'a lista do país novo não entrou');
+});
+
+test('um pedido de ANTES de desligar, chegando depois, não solta a marca do pedido novo em voo', async () => {
+  // Sem isto um terceiro pedido saía junto com o segundo — o free tier em dobro.
+  const libera = [];
+  const c = novoCliente({ api: { presencaApp: () => new Promise((ok) => libera.push(() => ok({ success: true, online: [], conversas: [] }))) } });
+  const a = c.P.presencaAtualizar();
+  c.P.presencaDesligar();                         // desligou com o A no ar
+  const b = c.P.presencaAtualizar();              // religou: o B sai
+  assert.equal(c.chamadas.presencaApp.length, 2);
+  libera[0]();                                    // o A (velho) chega agora
+  await a;
+  assert.ok(c.P.Presenca.pedindo, 'o pedido velho soltou a marca do pedido novo');
+  c.P.presencaAtualizar();                        // um terceiro gatilho com o B no ar
+  assert.equal(c.chamadas.presencaApp.length, 2, 'saiu um pedido em dobro com o B no ar');
+  libera[1]();
+  await b;
+  assert.equal(c.P.Presenca.pedindo, null, 'o B terminou e não soltou a marca');
+});
+
+// ── relógio do aparelho ≠ do servidor (auditoria de 2026-09-25) ──────────────
+// O prazo do token e a hora de cada mensagem vêm de fora; a `atualizadaEm` e o
+// `inicio` de cada lista são do aparelho. Comparados crus, aparelho com a hora
+// errada contava mensagem duas vezes, perdia a não lida, ou nunca abria o
+// tempo real.
+const SERVIDOR = 1790200000000;
+
+test('relógio: aparelho UM DIA adiantado — o token do servidor não nasce vencido', async () => {
+  const c = novoCliente({ agora: SERVIDOR + 864e5 + 36e5, api: { presencaApp: async () => ({ success: true, online: [], conversas: [], agora: SERVIDOR,
+    chat: { token: 't', chave: 'k', base: 'https://instantmessaging-pa.googleapis.com/', expiraEm: SERVIDOR + 864e5 } }) } });
+  await c.P.presencaAtualizar({ token: true });
+  assert.equal(c.P.presencaTokenValido(), true, 'o token virou "vencido" no aparelho adiantado: o tempo real nunca abriria');
+  // Controle: sem a hora do servidor na resposta, a comparação crua é a de antes.
+  const d = novoCliente({ agora: SERVIDOR + 864e5 + 36e5, api: { presencaApp: async () => ({ success: true, online: [], conversas: [],
+    chat: { token: 't', chave: 'k', base: 'https://instantmessaging-pa.googleapis.com/', expiraEm: SERVIDOR + 864e5 } }) } });
+  await d.P.presencaAtualizar({ token: true });
+  assert.equal(d.P.presencaTokenValido(), false);
+});
+
+test('relógio: aparelho 2 min ADIANTADO — a mensagem do lote que chegou depois da lista não se perde', async () => {
+  const c = novoCliente({ agora: SERVIDOR + 120000, api: { presencaApp: async () => ({ success: true, online: [], conversas: [], agora: SERVIDOR }) } });
+  await c.P.presencaAtualizar();                  // a lista, pedida às SERVIDOR no relógio de lá
+  const f = fluxoDe(c);
+  f.emLote = true;
+  const depois = await bytesDeMensagem({ id: uuid(70), de: CAF, para: EU, texto: 'depois da lista', ctx: APP, ts: SERVIDOR + 60000 });
+  c.P.presencaQuadro(f, inbox(depois, 1));
+  assert.equal(c.P.presencaNaoLidasDe(CAF), 1, 'a mensagem que chegou DEPOIS da lista se perdeu no aparelho adiantado');
+});
+
+test('relógio: aparelho 2 min ATRASADO — a mensagem ao vivo que a lista já contou não conta de novo', async () => {
+  const c = novoCliente({ agora: SERVIDOR - 120000, api: { presencaApp: async () => ({ success: true, online: [],
+    conversas: [{ id: CAF, naoLidas: 1, atividade: SERVIDOR }], agora: SERVIDOR + 20000 }) } });
+  c.P.Presenca.atualizadaEm = 1;
+  const viva = await bytesDeMensagem({ id: uuid(71), de: CAF, para: EU, texto: 'ao vivo', ctx: APP, ts: SERVIDOR });
+  c.P.presencaQuadro(fluxoDe(c), inbox(viva));    // chegou aqui às SERVIDOR − 2 min (relógio daqui)
+  assert.equal(c.P.presencaNaoLidasDe(CAF), 1);
+  c.relogio.agora += 20000;                       // 20 s depois, a lista — que já conta essa mensagem
+  await c.P.presencaAtualizar();
+  assert.equal(c.P.presencaNaoLidasDe(CAF), 1, 'a mensagem ao vivo contou duas vezes (a lista já a contava)');
+});
+
+test('os ids de mensagem já contados têm TETO — o mais velho sai', () => {
+  const c = novoCliente();
+  const max = c.P.PRESENCA_VISTAS_MAX;
+  for (let i = 0; i < max + 5; i++) c.P.presencaMarcarVista('m' + i);
+  assert.equal(c.P.Presenca.vistas.size, max, 'o conjunto passou do teto');
+  assert.ok(!c.P.Presenca.vistas.has('m0') && c.P.Presenca.vistas.has('m' + (max + 4)), 'saiu o errado');
+  const FONTE = readFileSync(new URL('../js/presenca.js', import.meta.url), 'utf8');
+  assert.equal((FONTE.match(/Presenca\.vistas\.add\(/g) || []).length, 1, 'um id entra no conjunto por fora do teto');
+});
+
+test('a lista só é desenhada com a folha NA TELA — fechada, a prévia das conversas não volta pro DOM escondida', () => {
+  // Auditoria de 2026-09-25: abrir e fechar uma conversa, mandar mensagem e
+  // desligar redesenhavam a lista com a folha fechada; a captura do diagnóstico
+  // levava a prévia (texto de terceiro) que não estava na tela.
+  const c = novoCliente();
+  c.P.presencaAplicarLista({ online: [], conversas: [conversa('9', 'fora', 40, 0, { texto: 'PREVIA-SECRETA', ts: 40 })] }, 1, 30);
+  c.P.presencaRenderLista();                       // folha fechada (nasce escondida)
+  assert.equal(c.$('presencaLista').innerHTML, '', 'a lista foi desenhada com a folha fechada');
+  c.$('presencaModal').classList.remove('hidden'); // o toque na pílula abre a folha e desenha
+  c.P.presencaRenderLista();
+  assert.match(c.$('presencaLista').innerHTML, /PREVIA-SECRETA/, 'com a folha aberta a lista tem que aparecer');
+  // Abriu uma conversa (a folha some) e fechou: a lista NÃO volta escondida.
+  c.$('presencaModal').classList.add('hidden');
+  c.P.Presenca.aberta = '9';
+  c.P.presencaEsquecerAberta();
+  assert.doesNotMatch(c.$('presencaLista').innerHTML, /PREVIA-SECRETA/, 'fechar a conversa redesenhou a lista escondida');
+});
+
+test('leitor de tela: a mensagem que CHEGA com a conversa aberta é anunciada numa região própria — e sai ao fechar', async () => {
+  const c = novoCliente();
+  c.P.Presenca.atualizadaEm = 1;
+  c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');
+  c.$('conversaTitle').textContent = 'cafanha';
+  const bytes = await bytesDeMensagem({ id: uuid(72), de: CAF, para: EU, texto: 'Viu o posto novo?', ctx: APP, ts: 1790200000000 });
+  c.P.presencaQuadro(fluxoDe(c), inbox(bytes));
+  assert.equal(c.$('conversaAnuncio').textContent, 'presenca.conversa.anuncio{"nome":"cafanha","texto":"Viu o posto novo?"}',
+    'a mensagem nova não foi anunciada pro leitor de tela');
+  c.P.presencaEsquecerAberta();
+  assert.equal(c.$('conversaAnuncio').textContent, '', 'o anúncio (texto de terceiro) ficou no DOM depois de fechar');
+  // Controle: com a conversa FECHADA não se anuncia nada (quem avisa é a pílula).
+  const d = novoCliente();
+  d.P.Presenca.atualizadaEm = 1;
+  d.P.presencaQuadro(fluxoDe(d), inbox(await bytesDeMensagem({ id: uuid(73), de: CAF, para: EU, texto: 'oi', ctx: APP, ts: 1790200000000 })));
+  assert.equal(d.$('conversaAnuncio').textContent, '');
+  // E a região existe no HTML, como região viva.
+  const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  assert.match(HTML, /<p id="conversaAnuncio" class="sr-only" role="status" aria-live="polite"><\/p>/);
 });
