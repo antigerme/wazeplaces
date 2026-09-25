@@ -1753,6 +1753,8 @@ for (const status of [404, 403]) {
 // volta manda o que foi decidido sem sinal e traz o que ainda faltava.
 {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  // A rede voltando faz a presença pedir a lista de novo, e a sessão daqui é falsa.
+  await presencaViva(ctx);
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
