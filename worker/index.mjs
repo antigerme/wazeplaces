@@ -22,10 +22,13 @@ import { dispatch, makeSessions, base64ToBytes, SESSION_TTL } from '../server/co
 // respostas de fetch handler, e o modo de falha aqui não é lentidão, é a
 // resposta de um editor sendo servida pra outro. Depender de um default
 // implícito pra impedir isso é caro demais pra economizar um header.
+// E `nosniff`: o `_headers` só vale pros estáticos que o Cloudflare serve; a
+// resposta que o Worker monta sai sem ele, e JSON sem `nosniff` pode ser lido
+// como outro tipo por navegador antigo (auditoria de 2026-09-25).
 const json = (body, status) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
   });
 
 export default {

@@ -74,6 +74,11 @@ function handleDragStart(e) {
     // engolia a rolagem — e arrastar pra cima PULAVA o card no lugar de rolar
     // o texto (auditoria de 2026-09-25; a regra do CLAUDE.md sobre área rolável).
     if (e.target.closest('button, a, input, select, textarea, .card-changes-list, .card-flag-comment-text, .card-content-rola')) return;
+    // Só o botão PRINCIPAL do mouse arrasta. O direito abre o menu de contexto
+    // e o do meio rola; os dois começavam um arraste que COMETIA a ação ao
+    // soltar além do limiar — rejeitar com o botão direito, sem querer
+    // (auditoria de 2026-09-25).
+    if (e.type === 'mousedown' && e.button !== 0) return;
 
     isDragging = true;
     capturouNesteGesto = false;

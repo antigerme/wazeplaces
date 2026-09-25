@@ -343,3 +343,14 @@ test('perfil que FALHOU é pedido de novo na próxima prova de rede (no máximo 
   assert.match(l, /presencaWmeAoCarregarPerfil\(profileRes\.visivelNoWme\);\s*aplicarRecusaAutomatica\(\);/,
     'a recusa automática (L6) não reage ao perfil que chegou depois da fila');
 });
+
+test('a queda da sessão com ação na janela do Desfazer GRAVA o placar revertido', () => {
+  // O gesto grava o +1 na hora; o `cancel()` sem argumento reverte só em
+  // memória. Quem fecha o app depois da queda ficava com um pedido a mais no
+  // placar pra sempre (auditoria de 2026-09-25).
+  const d = fatiar('derrubarSessao');
+  const i = d.indexOf('AppState.pendingAction.cancel();');
+  assert.ok(i > 0, 'a queda deixou de cancelar a ação pendente');
+  const bloco = d.slice(i, d.indexOf('}', i));
+  assert.match(bloco, /saveStats\(\);/, 'o placar revertido não é gravado na queda da sessão');
+});

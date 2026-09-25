@@ -34,10 +34,10 @@ function fatiar(nome, tipo = 'function') {
   return APP.slice(ini, ini + 1 + fim);
 }
 // UM escopo só: `patenteDe` lê `PATENTES`, `avaliarConquistas` lê `CONQUISTAS`
-// e `maiorSequenciaDeDias` lê `diaISO`/`DIA_MS`. Fatiar cada uma isolada dava
+// e `maiorSequenciaDeDias` lê `chaveMaisDias`. Fatiar cada uma isolada dava
 // "is not defined" — e é o tipo de erro que some se o teste só checar o retorno.
-const NOMES = [['PATENTES', 'const'], ['CONQUISTAS', 'const'], ['DIA_MS', 'const'],
-               ['diaISO', 'const'], ['patenteDe', 'function'], ['avaliarConquistas', 'function'],
+const NOMES = [['PATENTES', 'const'], ['CONQUISTAS', 'const'], ['chaveMaisDias', 'function'],
+               ['patenteDe', 'function'], ['avaliarConquistas', 'function'],
                ['maiorSequenciaDeDias', 'function'], ['geografiaDoHistorico', 'function']];
 const EXPORTA = NOMES.map(([n]) => n).join(', ');
 // eslint-disable-next-line no-new-func

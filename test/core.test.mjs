@@ -1654,3 +1654,82 @@ test('buildPlacesFromSearch: o place diz se o LOCAL já foi aprovado', () => {
   // lado que some não avisa ninguém.
   assert.equal(monta(undefined).localAprovado, true, 'campo ausente passou a esconder o renomear, e isso falha calado');
 });
+
+// Uma ação = UMA leitura do KV (auditoria de 2026-09-25). O Waze rotaciona o
+// cookie em toda resposta, e o `refreshCookies` relia a sessão a cada chamada
+// só pra descobrir que não era hora de gravar: duas leituras por swipe, na cota
+// de 100 mil por dia do plano grátis.
+test('sessão: carregar e depois tentar regravar o cookie rotacionado custa UMA leitura, não duas', async () => {
+  const { SESSION_COOKIE_REFRESH } = await import('../server/core.mjs');
+  const T0 = 1_800_000_000;
+  let agora = T0;
+  const relogio = Date.now;
+  Date.now = () => agora * 1000;
+  try {
+    const kv = new Map();
+    let leituras = 0, escritas = 0;
+    const store = {
+      get: (h) => { leituras++; return kv.get(h) ?? null; },
+      put: (h, v) => { escritas++; kv.set(h, v); },
+      delete: (h) => kv.delete(h),
+    };
+    const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+    const token = await sessions.createSession('c1');
+    leituras = 0; escritas = 0;
+    // O que cada ação faz: resolveCookies (loadSession) e, com o Set-Cookie do
+    // Waze, a tentativa de regravar.
+    for (let i = 0; i < 10; i++) {
+      agora += 5;
+      assert.equal(await sessions.loadSession(token), 'c1');
+      assert.equal(await sessions.refreshCookies(token, 'c1-rot'), false);
+    }
+    assert.equal(leituras, 10, `10 ações custaram ${leituras} leituras`);
+    assert.equal(escritas, 0);
+    // CONTROLE: passada a janela, a tentativa LÊ e GRAVA, como antes.
+    agora = T0 + SESSION_COOKIE_REFRESH + 60;
+    assert.equal(await sessions.loadSession(token), 'c1');
+    assert.equal(await sessions.refreshCookies(token, 'c2'), true, 'o lembrete impediu a regravação devida');
+    assert.equal(await sessions.loadSession(token), 'c2');
+    // E sem ter carregado antes (outro caminho), ela lê como sempre leu.
+    const outra = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+    leituras = 0;
+    assert.equal(await outra.refreshCookies(token, 'x'), false);
+    assert.equal(leituras, 1, 'sem carimbo lembrado, a tentativa não leu o KV pra decidir');
+  } finally {
+    Date.now = relogio;
+  }
+});
+
+// Duas exclusões no MESMO local dentro da janela da releitura guardada: a
+// segunda lia a lista VELHA do cache e mandava de volta a foto que a primeira
+// tinha tirado — o Waze substitui a lista inteira (auditoria de 2026-09-25).
+test('excluir-foto: duas exclusões seguidas no mesmo local — a segunda não devolve a primeira', async () => {
+  const store = memStore();
+  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const token = await sessions.createSession([
+    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
+  ].join('\n'));
+  const VID = 'v-3';
+  let noWaze = [{ id: 'a', approved: true }, { id: 'b', approved: true }, { id: 'c', approved: true }];
+  const escritas = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const j = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (init?.method === 'POST') {
+      const enviadas = JSON.parse(init.body).actions._subActions[0].attributes.images;
+      escritas.push(enviadas.map((i) => i.id));
+      noWaze = enviadas;
+      return j({ venues: { [VID]: { id: VID, images: enviadas } }, status: 0, synced: true });
+    }
+    return j({ venues: { objects: [{ id: VID, permissions: -1, images: noWaze }] }, users: { objects: [] } });
+  };
+  try {
+    const base = { sessionToken: token, region: 'row', venueID: VID, lat: 0, lon: 0 };
+    assert.equal((await dispatch('excluir-foto', { ...base, imageID: 'a', action: 'preparar' }, { sessions })).status, 200);
+    assert.equal((await dispatch('excluir-foto', { ...base, imageID: 'a' }, { sessions })).status, 200);
+    assert.equal((await dispatch('excluir-foto', { ...base, imageID: 'b' }, { sessions })).status, 200);
+    assert.deepEqual(escritas, [['b', 'c'], ['c']], `a 2ª escrita devolveu a foto já excluída: ${JSON.stringify(escritas)}`);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

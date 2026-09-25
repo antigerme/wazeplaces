@@ -29,6 +29,7 @@ async function varrer(itens, baixar, { treino = false } = {}) {
   const tentativas = new Map();
   const diario = [];
   let gravou = 0;
+  const podas = [];
   const st = { varrendo: false, pedida: false, janela: null, resultado: null, gesto: Date.now(), epoca: 0 };
   const deps = {
     AppState: { authenticated: true, queue: [{ venueID: 'v' }] },
@@ -40,6 +41,7 @@ async function varrer(itens, baixar, { treino = false } = {}) {
     offlineGravarFila: async () => { gravou++; }, offlineItensDaFila: async () => itens.map((u) => ({ u, tile: /tile/.test(u) })),
     offlineBaixar: async (u) => { tentativas.set(u, (tentativas.get(u) || 0) + 1); return baixar(u); },
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
+    offlinePodarTiles: async (manter) => { podas.push([...manter].sort()); return 0; },
     dfato: (k, o) => diario.push([k, o]),
     setTimeout: (fn) => { fn(); return 0; },
   };
@@ -50,7 +52,7 @@ async function varrer(itens, baixar, { treino = false } = {}) {
   const chaves = Object.keys(deps);
   const offlineVarrer = new Function(...chaves, '__st', corpo + '\nreturn offlineVarrer;')(...chaves.map((k) => deps[k]), st);
   await offlineVarrer();
-  return { st, tentativas, diario, gravou };
+  return { st, tentativas, diario, gravou, podas };
 }
 
 test('uma foto QUEBRADA com o resto andando: poucas tentativas, e a preparação fica PRONTA', async () => {
@@ -144,4 +146,37 @@ test('offlineGravarFila: no treino não grava; e o treino que começa com a base
   const c = gravarCom();
   assert.equal(await c.gravar(), true);
   assert.equal(c.puts[0].places.length, 2);
+});
+
+// O cache do mapa só CRESCIA: cada fila nova somava os tiles dela aos de todas
+// as anteriores (auditoria de 2026-09-25). A varredura PRONTA poda ao que a fila
+// usa; a parcial não mexe (a lista dela não é a da fila inteira).
+test('varredura PRONTA poda o cache do mapa aos tiles da fila; a PARCIAL não poda', async () => {
+  const ok = await varrer(['tile-a', 'foto-1', 'tile-b'], () => true);
+  assert.equal(ok.st.resultado, 'pronto');
+  assert.deepEqual(ok.podas, [['tile-a', 'tile-b']], 'a poda não recebeu os tiles da fila');
+  const parcial = await varrer(['tile-a', 'tile-b'], () => false);
+  assert.equal(parcial.st.resultado, 'parcial');
+  assert.deepEqual(parcial.podas, [], 'podou numa varredura PARCIAL');
+});
+
+test('offlinePodarTiles: apaga só o que não é da fila, e não cria o cache de quem nunca ligou', async () => {
+  const guardados = ['https://t/1', 'https://t/2', 'https://t/3'];
+  const apagados = [];
+  let criou = false;
+  const deps = {
+    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles',
+    caches: {
+      has: async () => guardados.length > 0,
+      open: async () => { criou = true; return { keys: async () => guardados.map((url) => ({ url })), delete: async (r) => { apagados.push(r.url); } }; },
+    },
+  };
+  const chaves = Object.keys(deps);
+  const podar = new Function(...chaves, fatiar('offlinePodarTiles') + '\nreturn offlinePodarTiles;')(...chaves.map((k) => deps[k]));
+  assert.equal(await podar(new Set(['https://t/2']), 0), 2);
+  assert.deepEqual(apagados.sort(), ['https://t/1', 'https://t/3']);
+  // Sem cache (quem nunca ligou o offline): não abre — `open` CRIARIA um vazio.
+  guardados.length = 0; criou = false;
+  assert.equal(await podar(new Set(), 0), 0);
+  assert.equal(criou, false, 'a poda criou o cache do mapa pra quem nunca o teve');
 });

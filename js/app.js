@@ -1481,11 +1481,17 @@ const Lightbox = {
             this.tx = 0;
             this.ty = 0;
         } else if (cx !== undefined) {
+            // O `rect` já inclui a transformação: o centro dele é o centro
+            // VISUAL (o de layout + t). Com d = dedo − centro visual, o ponto sob
+            // o dedo fica parado quando t' = t + d·(1 − r). A fórmula de antes,
+            // (t − d)·r + d, só coincide com esta quando t = 0 — depois do
+            // primeiro zoom a foto ESCORREGAVA t·(r − 1) a cada passo da pinça
+            // (auditoria de 2026-09-25; invariante em test/lightbox-zoom).
             const imgCx = rect.left + rect.width / 2;
             const imgCy = rect.top + rect.height / 2;
             const ratio = this.scale / prevScale;
-            this.tx = (this.tx - (cx - imgCx)) * ratio + (cx - imgCx);
-            this.ty = (this.ty - (cy - imgCy)) * ratio + (cy - imgCy);
+            this.tx = this.tx + (cx - imgCx) * (1 - ratio);
+            this.ty = this.ty + (cy - imgCy) * (1 - ratio);
         }
         this._applyTransform();
     },
@@ -2801,6 +2807,9 @@ function handleKeyDown(e) {
         else if (e.key === 'ArrowLeft') { e.preventDefault(); MapaLightbox.arrastar(80, 0); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); MapaLightbox.arrastar(-80, 0); }
         else if (e.key === 'ArrowUp') { e.preventDefault(); MapaLightbox.arrastar(0, 80); }
+        // As camadas são `aria-modal`: o Tab não pode sair delas pro card de
+        // trás (Shift+Tab caía no ✓ — ação escondida atrás da foto).
+        else if (e.key === 'Tab') trapTabInModal(e, document.getElementById('mapaLightbox'));
         return;
     }
     if (Lightbox.isOpen()) {
@@ -2817,6 +2826,7 @@ function handleKeyDown(e) {
         // a dica não muda de texto (decisão do owner: um texto só, não um
         // catatau por plataforma).
         else if (e.key === 'ArrowDown') { e.preventDefault(); Lightbox.close(); }
+        else if (e.key === 'Tab') trapTabInModal(e, document.getElementById('imageLightbox'));
         return;
     }
 
@@ -2868,11 +2878,20 @@ function handleKeyDown(e) {
 // Confina o Tab dentro do modal aberto — sem isso, Tab saía do diálogo e Enter
 // podia disparar uma ação destrutiva no card invisível atrás (M3/HIG).
 function trapTabInModal(e, modal) {
+    if (!modal) return;
     const sel = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([type=hidden]):not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const list = Array.from(modal.querySelectorAll(sel)).filter(el => el.offsetParent !== null);
     if (list.length === 0) return;
     const first = list[0];
     const last = list[list.length - 1];
+    // Foco FORA da camada (a camada abriu sem puxá-lo, ou ele ficou no corpo):
+    // o Tab seguinte ia pro próximo da página — o card de trás. Entra pela
+    // ponta certa, em vez de só dar a volta quando já está dentro.
+    if (!modal.contains(document.activeElement)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+    }
     if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
         last.focus();
@@ -3605,6 +3624,26 @@ function diagCamadasAbertas() {
         .filter((e) => e && !e.classList.contains('hidden') && getComputedStyle(e).display !== 'none');
 }
 
+// As duas comparações de TAMANHO das sentinelas usam a caixa de LAYOUT, nunca o
+// `getBoundingClientRect`: esse inclui a transformação, e no arraste o card anda,
+// GIRA (caixa maior) e, saindo, encolhe. MEDIDO pela auditoria de 2026-09-25: toda
+// captura `auto:arraste` com o mapa na frente trazia "mapa fora da caixa", e a
+// saída pra cima, "alvo pequeno" no ↑ de 48px. Relatório antigo não tem `cw`/`ow`
+// e cai no `rect`, como antes.
+function diagMapaForaDaCaixa(g) {
+    if (!g || !g.mapaPara) return false;
+    const [mw, mh] = String(g.mapaPara).split('x').map(Number);
+    const w = Number.isFinite(g.cw) ? g.cw : g.w;
+    const h = Number.isFinite(g.ch) ? g.ch : g.h;
+    // Tolerância de 1px: `clientWidth` é inteiro arredondado (gotcha #34).
+    return Math.abs(mw - w) > 1 || Math.abs(mh - h) > 1;
+}
+function diagAlvoPequeno(g) {
+    const w = Number.isFinite(g.ow) ? g.ow : g.w;
+    const h = Number.isFinite(g.oh) ? g.oh : g.h;
+    return w < 44 || h < 44;
+}
+
 function diagGeometria() {
     const fora = [];
     const camadas = diagCamadasAbertas();
@@ -3630,7 +3669,15 @@ function diagGeometria() {
                 // Sem isto, frente e fundo saem idênticos no relatório mesmo
                 // quando um deles está desenhado pra outra caixa.
                 ...(e.dataset && e.dataset.mapaW
-                    ? { mapaPara: e.dataset.mapaW + 'x' + e.dataset.mapaH } : {}),
+                    ? { mapaPara: e.dataset.mapaW + 'x' + e.dataset.mapaH,
+                        // A caixa SEM transformação, que é a que o `renderMapa`
+                        // mediu: no arraste o card anda e GIRA, e o `rect` acima
+                        // é a caixa girada (maior). Ver `diagMapaForaDaCaixa`.
+                        cw: e.clientWidth, ch: e.clientHeight } : {}),
+                // O tamanho de LAYOUT (border-box, sem transformação) — é ele o
+                // alvo de toque. O `rect` encolhe na animação de saída do card e
+                // acusava "alvo pequeno" num botão de 48px.
+                ...(typeof e.offsetWidth === 'number' ? { ow: e.offsetWidth, oh: e.offsetHeight } : {}),
                 // Quantos tiles o desenho pediu e quantos FALHARAM. O tile que
                 // falha sai da tela (ícone quebrado não informa nada), então
                 // sem esta contagem "mapa com buraco" não aparece no arquivo.
@@ -3869,9 +3916,9 @@ function diagSentinelas(comp) {
                     { alvo: g.sel, recebe: g.noCentro });
             }
             // 4. Alvo de toque abaixo da régua M3/HIG.
-            if (/card-btn|devFab/.test(g.sel) && (g.w < 44 || g.h < 44)) {
+            if (/card-btn|devFab/.test(g.sel) && diagAlvoPequeno(g)) {
                 diga('alvoPequeno', 'alvo de toque abaixo de 44px',
-                    { alvo: g.sel, w: g.w, h: g.h });
+                    { alvo: g.sel, w: g.ow ?? g.w, h: g.oh ?? g.h });
             }
         }
         // 5. O mapa desenhado pra uma caixa que não é a dele.
@@ -3892,13 +3939,12 @@ function diagSentinelas(comp) {
         // (gotcha #34) e o enquadramento guarda o valor lido na hora.
         for (const g of comp.geometria || []) {
             if (!g.mapaPara || !/card-map/.test(g.sel)) continue;
-            const [mw, mh] = g.mapaPara.split('x').map(Number);
-            if (Math.abs(mw - g.w) > 1 || Math.abs(mh - g.h) > 1) {
+            if (diagMapaForaDaCaixa(g)) {
                 diga('mapaForaDaCaixa',
                     'o mini-mapa foi desenhado pra um tamanho que não é o da caixa dele — '
                     + 'sobra faixa sem tile, ou o zoom é de outra proporção',
                     { onde: g.noFundo ? 'card de fundo' : 'card da frente',
-                      caixa: g.w + 'x' + g.h, desenhadoPara: g.mapaPara });
+                      caixa: (g.cw ?? g.w) + 'x' + (g.ch ?? g.h), desenhadoPara: g.mapaPara });
             }
         }
         // 7. "A foto precisa de sinal" por cima de uma foto CARREGADA.
@@ -4484,6 +4530,8 @@ function devFabVitimas(canto, w, h, fab) {
 function posicionarFabDev() {
     const fab = document.getElementById('devFab');
     if (!fab || devFabFixado || fab.classList.contains('hidden')) return;
+    // Pego (segurado, sem ter andado ainda): não se mexe debaixo do dedo.
+    if (fab.classList.contains('fab-pego')) return;
     const r = fab.getBoundingClientRect();
     const w = r.width || 44, h = r.height || 44;
     // O FAB inteiro sai do hit-test durante a medição — contêiner E botão —
@@ -4567,7 +4615,10 @@ function ligarFabDev() {
     // Ouvir na `window` e não capturar o ponteiro é a regra do gotcha #56.
     // Desenhar por QUADRO também: `pointermove` chega a 120Hz e escrever
     // `left/top` a cada um é layout jogado fora.
-    let pego = false, arrastou = false, dx = 0, dy = 0, quadro = 0, alvo = null, relogio = null;
+    // `dedo`: o ponteiro que PEGOU. Sem ele, qualquer outro dedo na tela movia o
+    // FAB e o soltar de qualquer um encerrava o gesto — a mesma armadilha do
+    // `dragTouchId` do swipe (auditoria de 2026-09-25).
+    let pego = false, arrastou = false, dx = 0, dy = 0, quadro = 0, alvo = null, relogio = null, dedo = null;
     const desenhar = () => {
         quadro = 0;
         if (!alvo) return;
@@ -4579,10 +4630,12 @@ function ligarFabDev() {
     // tem algo segurando" é exatamente a descrição de um gesto sem retorno.
     // São dois canais de propósito (WCAG 1.4.1 — sinal não pode viver só num):
     // o botão CRESCE e o aparelho VIBRA.
+    // Pegar NÃO fixa: só ARRASTAR fixa (ver `mover`). Um toque devagar — segurou
+    // e soltou sem andar — é toque, e fixar ali deixava o botão parado pra
+    // sempre, sem nunca mais sair de cima do que viesse a cobrir.
     const pegar = () => {
         if (pego) return;
         pego = true;
-        devFabFixado = true;
         fab.classList.add('fab-pego');
         try { navigator.vibrate && navigator.vibrate(12); } catch (e) {}
     };
@@ -4592,16 +4645,23 @@ function ligarFabDev() {
     };
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
     btn.addEventListener('pointerdown', (e) => {
+        // O gesto é DESTE ponteiro: `mover` e `fim` só atendem a ele. (Travar um
+        // segundo `pointerdown` foi descartado: um `pointerup` perdido — soltar
+        // fora da janela — deixaria o botão surdo pra sempre.)
+        const meu = e.pointerId;
+        dedo = meu;
         arrastou = false;
         const r = fab.getBoundingClientRect();
         dx = e.clientX - r.left; dy = e.clientY - r.top;
         fab.style.transition = 'none';   // dedo e transição brigando = botão escorregando
         relogio = setTimeout(pegar, DEV_FAB_PEGAR_MS);
         const mover = (ev) => {
+            if (ev.pointerId !== meu) return;
             if (!pego && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 8) return;
             if (relogio) { clearTimeout(relogio); relogio = null; }
             pegar();
             arrastou = true;
+            devFabFixado = true;
             if (ev.cancelable) ev.preventDefault();
             alvo = {
                 x: Math.min(innerWidth - r.width - 4, Math.max(4, ev.clientX - dx)),
@@ -4613,7 +4673,9 @@ function ligarFabDev() {
         // gesto cancelado deixava `mover` e `fim` pendurados na window PRA
         // SEMPRE — a cada toque sobrava mais um par, todos escrevendo a mesma
         // posição a partir de coordenadas velhas.
-        const fim = () => {
+        const fim = (ev) => {
+            if (ev && ev.pointerId !== meu) return;
+            if (dedo === meu) dedo = null;
             removeEventListener('pointermove', mover);
             removeEventListener('pointerup', fim);
             removeEventListener('pointercancel', fim);
@@ -4636,8 +4698,17 @@ function ligarFabDev() {
     // sendo toque, e é o que impede que segurar sem querer vire um beco.
     // `pointerup` e não `click` porque, com captura implícita, o clique nem
     // sempre chega quando o dedo saiu do botão.
-    const soltar = () => {
+    const soltar = (ev) => {
         if (arrastou) return;   // arrastar não é tocar
+        if (ev && dedo !== null && ev.pointerId !== dedo) return;
+        capturar();
+    };
+    btn.addEventListener('pointerup', soltar);
+    // TECLADO: Enter e Espaço num <button> disparam `click` (com `detail` 0) e
+    // nunca `pointerup` — o botão existia pro Tab e não fazia nada (auditoria de
+    // 2026-09-25). O clique do dedo tem `detail` ≥ 1 e já passou pelo `soltar`.
+    btn.addEventListener('click', (e) => { if (e.detail === 0) capturar(); });
+    function capturar() {
         const m = dlogCapturar('manual');
         atualizarFabDev();
         // SEM toast, e o motivo é o próprio instrumento: o toast vive em z-70,
@@ -4649,8 +4720,7 @@ function ligarFabDev() {
             btn.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.25)' }, { transform: 'scale(1)' }],
                         { duration: 220, easing: 'ease-out' });
         }
-    };
-    btn.addEventListener('pointerup', soltar);
+    }
 
     // ── Quando reavaliar o canto ──────────────────────────────────────────
     //
@@ -4687,9 +4757,16 @@ function ligarFabDev() {
     try {
         const pos = sessionStorage.getItem('__devFabPos');
         if (pos) {
-            const [x, y] = pos.split('|');
-            fab.style.left = x; fab.style.top = y; fab.style.right = 'auto'; fab.style.bottom = 'auto';
-            devFabFixado = true;
+            // DENTRO da tela: a posição foi gravada noutra orientação (retrato →
+            // paisagem) e voltava fora dela, sem `resize` pra corrigir. 56px é o
+            // maior tamanho do botão (pego); o `resize` acerta o resto.
+            const [x, y] = pos.split('|').map((v) => parseFloat(v));
+            if (Number.isFinite(x) && Number.isFinite(y)) {
+                fab.style.left = Math.max(4, Math.min(innerWidth - 60, x)) + 'px';
+                fab.style.top = Math.max(4, Math.min(innerHeight - 60, y)) + 'px';
+                fab.style.right = 'auto'; fab.style.bottom = 'auto';
+                devFabFixado = true;
+            }
         }
     } catch (e) {}
 }
@@ -4973,6 +5050,18 @@ function diagServiceWorker() {
     });
 }
 
+// Toda leitura do diagnóstico tem TETO: a coleta faz umas duas dezenas de
+// pedidos em SÉRIE, e rede pendurada (portal cativo, sinal indo e voltando)
+// deixava o "Baixar diagnóstico" sem resposta nenhuma — justamente na hora em
+// que ele é pedido (auditoria de 2026-09-25). O sinal vale pro corpo também.
+const DIAG_FETCH_TETO_MS = 4000;
+function diagFetch(url, opts = {}) {
+    let sinal;
+    try { sinal = AbortSignal.timeout(DIAG_FETCH_TETO_MS); }
+    catch (e) { const c = new AbortController(); setTimeout(() => c.abort(), DIAG_FETCH_TETO_MS); sinal = c.signal; }
+    return fetch(url, { ...opts, signal: sinal });
+}
+
 async function diagCorpo() {
     const meu = location.origin;
     // Só recurso da NOSSA origem: de terceiro a resposta é opaca e a leitura
@@ -4981,7 +5070,7 @@ async function diagCorpo() {
     // velho; buscar da rede mediria o servidor, não o aparelho.
     const texto = async (url) => {
         try {
-            const r = await fetch(url, { cache: 'force-cache' });
+            const r = await diagFetch(url, { cache: 'force-cache' });
             return { http: r.status, tipo: r.headers.get('content-type'),
                      etag: r.headers.get('etag'), corpo: await r.text() };
         } catch (e) { return { erro: String((e && e.message) || e) }; }
@@ -5070,7 +5159,9 @@ async function diagCorpo() {
         const local = codigo[u] && codigo[u].corpo;
         if (typeof local !== 'string') { cacheVsRede[u] = { erro: 'sem corpo local' }; continue; }
         try {
-            const r = await fetch(u, { cache: 'reload' });
+            // `diag-rede` passa POR FORA do service worker (ver lá): sem isso o
+            // "servidor" era o cache do próprio aparelho, e dava "igual" sempre.
+            const r = await diagFetch(u + (u.indexOf('?') === -1 ? '?' : '&') + 'diag-rede=1', { cache: 'reload' });
             const remoto = await r.text();
             const [ha, hb] = [await hash(local), await hash(remoto)];
             cacheVsRede[u] = { aparelho: ha, servidor: hb, igual: ha === hb,
@@ -5104,7 +5195,7 @@ async function diagCorpo() {
     // comparação de prazo sair torta — e o sintoma nunca aponta pro relógio.
     const relogio = { aparelho: new Date().toISOString(), servidor: null, desvioSeg: null };
     try {
-        const r = await fetch(meu + '/manifest.json', { cache: 'no-store', method: 'HEAD' });
+        const r = await diagFetch(meu + '/manifest.json?diag-rede=1', { cache: 'no-store', method: 'HEAD' });
         const d = r.headers.get('date');
         if (d) {
             relogio.servidor = new Date(d).toISOString();
@@ -5504,10 +5595,14 @@ function derrubarSessao(errorKey, { depois } = {}) {
         faltavamH: prazoQueMorreu ? Math.round((prazoQueMorreu - Date.now() / 1000) / 360) / 10 : null,
     });
     // Cancela ação pendente: a sessão já morreu no Waze, o executor falharia e
-    // mostraria "erro ao marcar" na tela de login. Cancelar reverte o stat otimista.
+    // mostraria "erro ao marcar" na tela de login. Cancelar reverte o stat otimista
+    // — e a reversão é GRAVADA: o gesto já tinha gravado o +1, e quem fecha o app
+    // depois da queda (o caso comum) ficava com um pedido a mais no placar pra
+    // sempre (auditoria de 2026-09-25). O logout não precisa: ele zera o placar.
     if (AppState.pendingAction) {
         AppState.pendingAction.cancel();
         AppState.pendingAction = null;
+        saveStats();
     }
     removeUndoBanner();
     API.setSession(null);
@@ -6107,6 +6202,10 @@ function fetchNextPage() {
             AppState.loadError = true;
             AppState.hasMore = false;
             dfato('busca.semRede', {});
+            // O "Restam" diz "—" (não sei) em vez do número velho com "+": o
+            // contador só se redesenha quando alguém o chama (auditoria de
+            // 2026-09-25).
+            updatePendingCount();
         }
         return Promise.resolve();
     }
@@ -6183,8 +6282,7 @@ function fetchNextPage() {
                     dfato('busca.falhou', { key: result.errorKey || null,
                                             cat: result.errorCategory || null });
                     dlogCapturarAuto('buscaFalhou');
-                    if (result.errorCategory === 'unauthorized' ||
-                        (result.error && result.error.toLowerCase().includes('sess'))) {
+                    if (result.errorCategory === 'unauthorized') {
                         AppState.hasMore = false;
                         // `loadError` TAMBÉM aqui, e a falta dele foi o defeito que o
                         // owner viu: "Tudo limpo!" sobre 217 pedidos pendentes.
@@ -9085,9 +9183,21 @@ function recordHistory(type, delta, dia, onde) {
     }
     salvarHistorico(h);
 }
+// Dias de CALENDÁRIO entre chaves `YYYY-MM-DD`, sem passar por milissegundo
+// local: o dia de troca do horário de verão tem 23 ou 25 h, e contar "idade"
+// dividindo por 86.400.000 errava por um dia perto da meia-noite (auditoria de
+// 2026-09-25). Em UTC, a conta de datas não tem horário de verão.
+function diasEntreChaves(a, b) {
+    const [ya, ma, da] = String(a).split('-').map(Number), [yb, mb, db] = String(b).split('-').map(Number);
+    return Math.round((Date.UTC(yb, mb - 1, db) - Date.UTC(ya, ma - 1, da)) / 86400000);
+}
+function chaveMaisDias(k, n) {
+    const [y, m, d] = String(k).split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
 function getHistoryStats() {
     const h = loadHistory();
-    const now = Date.now();
     const tk = historyTodayKey();
     const acc = { today: { read: 0, rejected: 0 }, week: { read: 0, rejected: 0 }, month: { read: 0, rejected: 0 }, total: { read: 0, rejected: 0 } };
     // "Total" sai do acumulador, não da soma dos baldes: os antigos foram
@@ -9098,7 +9208,7 @@ function getHistoryStats() {
         if (k === '_total' || !v) continue;
         const r = v.read || 0, j = v.rejected || 0;
         if (k === tk) { acc.today.read += r; acc.today.rejected += j; }
-        const ageDays = Math.floor((now - new Date(k + 'T00:00:00').getTime()) / 86400000);
+        const ageDays = diasEntreChaves(k, tk);
         if (ageDays >= 0 && ageDays < 7) { acc.week.read += r; acc.week.rejected += j; }
         if (ageDays >= 0 && ageDays < 30) { acc.month.read += r; acc.month.rejected += j; }
     }
@@ -9341,22 +9451,18 @@ function geografiaDoHistorico(h) {
     return { paises, estados };
 }
 
-const DIA_MS = 86400000;
-const diaISO = (t) => {
-    const d = new Date(t), p = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
 // A MAIOR sequência de dias com trabalho. Só varre a partir de um dia cujo
-// anterior está ausente, então cada dia é visitado no máximo duas vezes.
+// anterior está ausente, então cada dia é visitado no máximo duas vezes. Anda
+// por DATA (`chaveMaisDias`), nunca somando 24 h: no fim do horário de verão o
+// dia tem 25 h, a soma caía no MESMO dia e a sequência de 6 contava 7.
 function maiorSequenciaDeDias(h) {
     const dias = new Set(Object.keys(h || {})
-        .filter((k) => k !== '_total' && h[k] && ((h[k].read || 0) + (h[k].rejected || 0)) > 0));
+        .filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k) && h[k] && ((h[k].read || 0) + (h[k].rejected || 0)) > 0));
     let melhor = 0;
     for (const d of dias) {
-        const t = new Date(d + 'T00:00:00').getTime();
-        if (!Number.isFinite(t) || dias.has(diaISO(t - DIA_MS))) continue;
-        let n = 1, cur = t;
-        while (dias.has(diaISO(cur + DIA_MS))) { cur += DIA_MS; n++; }
+        if (dias.has(chaveMaisDias(d, -1))) continue;
+        let n = 1, cur = d;
+        while (dias.has(chaveMaisDias(cur, 1))) { cur = chaveMaisDias(cur, 1); n++; }
         if (n > melhor) melhor = n;
     }
     return melhor;
@@ -11069,6 +11175,18 @@ window.addEventListener('online', async () => {
 // da janela do Desfazer antes da hora. `hasMore` volta a ser verdade porque a
 // falha o tinha desligado, e o `fetchNextPage` sai na primeira linha sem ele.
 function retomarBusca() {
+    // Com a fila VAZIA (a tela de "sem conexão"), voltar é ATUALIZAR: os pedidos
+    // que passaram pela fila sem decisão — pulados sem sinal, como o card de foto
+    // cuja foto não veio — voltam. Sem o reset, a rede voltava e a fila terminava
+    // VAZIA com eles pendentes: "parece que acabou" (MEDIDO na auditoria em
+    // produção de 2026-09-25, reaberto sem rede, tudo pulado, rede de volta: 0
+    // cards). Com card na tela só retoma: o reset arrancaria o card da mão e
+    // despacharia a ação da janela do Desfazer antes da hora.
+    if (AppState.queue.length === 0) {
+        resetQueue();
+        startFetching();
+        return;
+    }
     AppState.loadError = false;
     AppState.hasMore = true;
     startFetching();
@@ -11489,6 +11607,27 @@ function offlineBaixar(u, tile) {
     })();
 }
 
+// PODA o cache do mapa ao que a fila guardada usa. Sem ela o cache só crescia:
+// cada fila nova somava os tiles dela aos de todas as anteriores, pra sempre
+// (auditoria de 2026-09-25). Renovar não era problema — MEDIDO: o servidor de
+// tile responde `If-None-Match` com 304, então a varredura a cada janela já
+// revalida o tile barato. `caches.has` antes de `open` pelo mesmo motivo da
+// hidratação do worker (`open` CRIA o cache), e a época pra não mexer num cache
+// que o "Sair" acabou de apagar.
+async function offlinePodarTiles(manter, epoca) {
+    try {
+        if (!(await caches.has(OFFLINE_TILES_CACHE))) return 0;
+        const c = await caches.open(OFFLINE_TILES_CACHE);
+        if (epoca !== offlineEpoca) return 0;
+        let n = 0;
+        for (const req of await c.keys()) {
+            if (epoca !== offlineEpoca) return n;
+            if (!manter.has(req.url)) { await c.delete(req); n++; }
+        }
+        return n;
+    } catch (e) { return 0; }
+}
+
 // Avisa o service worker que há tile novo no cache. Ele só responde pelo que
 // CONHECE (lista síncrona), e sem o aviso só saberia na próxima partida — a
 // sombra de sinal chegaria antes. Sai a cada `OFFLINE_ANUNCIAR_A_CADA` tiles
@@ -11521,6 +11660,9 @@ async function offlineVarrer() {
         await offlineGravarFila();
         const pend = await offlineItensDaFila(janela);
         const total = pend.length;
+        // Os tiles DESTA fila, antes de o laço consumir a lista: é o que a poda
+        // do fim mantém.
+        const tilesDaFila = new Set(pend.filter((it) => it.tile).map((it) => it.u));
         let falhas = 0;
         let sucessos = 0;
         // O que desistiu por REDE (a varredura toda parada) e o que desistiu por
@@ -11580,6 +11722,11 @@ async function offlineVarrer() {
             offlineGravarJanela(janela);
             offlineUltimoResultado = 'pronto';
             dfato('offline.pronto', { n: AppState.queue.length, itens: total, ...(definitivos ? { definitivos } : {}) });
+            // Só no "pronto": a lista inteira é a da fila guardada. Sem aguardar —
+            // a poda não muda o resultado, e o aviso ao worker sai quando ela acaba.
+            offlinePodarTiles(tilesDaFila, epoca).then((n) => {
+                if (n && epoca === offlineEpoca) { offlineAnunciarTiles(); dfato('offline.podou', { n }); }
+            });
         } else {
             offlineUltimoResultado = 'parcial';
             dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos });

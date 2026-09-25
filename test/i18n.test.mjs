@@ -495,3 +495,50 @@ test('treino: com o "Pular guarda o pedido" ligado, o efeito do ↑ NÃO diz que
   assert.match(app, /'treino\.efeito\.' \+ \(tipo === 'skip' && AppState\.preferences\.pularGuarda === true \? 'skipGuarda' : tipo\)/);
   for (const lang of LANGS) assert.match(DICT[lang]['treino.efeito.skipGuarda'], /⭐/, lang);
 });
+
+test('o "Sair" e a Privacidade dizem o que o aparelho guarda e o que FICA (idioma e tema)', () => {
+  // Auditoria de 2026-09-25: o diálogo prometia apagar "cookies" (o aparelho não
+  // guarda cookie nenhum, só o token) e "todos os dados" (idioma e tema ficam,
+  // de propósito); a Privacidade omitia as conquistas e a lista de autores
+  // rejeitados — id e nome de TERCEIROS.
+  for (const lang of LANGS) {
+    const sair = DICT[lang]['modal.logout.body'];
+    const aparelho = DICT[lang]['help.privacy.device'];
+    assert.doesNotMatch(sair, /cookie/i, `${lang}: o "Sair" promete apagar cookies do aparelho`);
+    const conq = DICT[lang]['conq.titulo'].toLowerCase();
+    assert.ok(sair.toLowerCase().includes(conq) && aparelho.toLowerCase().includes(conq), `${lang}: "${conq}" não aparece`);
+    // Os dois textos dizem que idioma e tema FICAM.
+    const fica = { pt: /idioma e o tema/, en: /language and theme/, es: /idioma y el tema/, fr: /langue et le thème/ }[lang];
+    assert.match(sair, fica, `${lang}: o "Sair" não diz que idioma e tema ficam`);
+    assert.match(aparelho, fica, `${lang}: a Privacidade não diz que idioma e tema ficam`);
+  }
+  // O que o logout MANTÉM é exatamente isso (a lista do teste de layout).
+  const layout = read('test/layout.test.mjs');
+  assert.match(layout, /const MANTIDAS = \['THEME_KEY', 'LANG_KEY'\];/);
+});
+
+test('espanhol: pedido é "solicitud" (feminino), e o placar concorda com ela', () => {
+  // Auditoria de 2026-09-25: 71 textos diziam "solicitud" e dois "pedido"; e o
+  // placar dizia "Leídos/Rechazados/Saltados" enquanto o Resumo do mês dizia
+  // "leídas/rechazadas" — o mesmo conceito com dois gêneros.
+  const es = DICT.es;
+  for (const [k, v] of Object.entries(es)) assert.doesNotMatch(v, /\bpedidos?\b/i, `es: ${k} diz "pedido": "${v}"`);
+  assert.deepEqual([es['stats.read'], es['stats.rejected'], es['stats.skipped']], ['Leídas', 'Rechazadas', 'Saltadas']);
+  assert.match(es['resumo.img.lidos'], /leídas/);
+});
+
+test('inglês e francês usam o apóstrofo tipográfico (’) — só as strings OFICIAIS do WME ficam como vieram', () => {
+  // Auditoria de 2026-09-25: 9 textos em inglês e 8 em francês tinham o
+  // apóstrofo reto no meio de centenas com o tipográfico. Os `card.attr.*` são
+  // colhidos da página do WME em cada idioma e ficam byte a byte como lá.
+  for (const lang of ['en', 'fr']) {
+    for (const [k, v] of Object.entries(DICT[lang])) {
+      if (k.startsWith('card.attr.')) continue;
+      assert.doesNotMatch(v.replace(/<[^>]*>/g, ''), /[A-Za-zÀ-ÿ]'[A-Za-zÀ-ÿ]/, `${lang}: ${k} tem apóstrofo reto: "${v}"`);
+    }
+  }
+  // francês: a DEMANDA é marcada como lue (feminino), como no botão.
+  for (const k of ['undo.read', 'consequencia.read', 'modal.comoFunciona.read.nome', 'card.btn.read.aria']) {
+    assert.match(DICT.fr[k], /lue\b/, `fr: ${k} = "${DICT.fr[k]}"`);
+  }
+});

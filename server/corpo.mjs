@@ -22,7 +22,7 @@ export function readBody(req, res) {
         tooLarge = true;
         // Responde 413 limpo antes de cortar a conexão (em vez de só req.destroy()).
         if (!res.headersSent) {
-          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
           res.end(JSON.stringify({ success: false, error: 'Corpo da requisição muito grande' }));
         }
         req.destroy();

@@ -1690,6 +1690,30 @@ diz('7: a rede de volta manda as 4 decisões e traz SOZINHA o pedido que chegou 
   chegou7.ok && depois7.frente === k114
   && [111, 112, 113, 108].every((i) => decisoes9b.filter((d) => d.chave === chave9b(SO_MAPA(i))).length === 1),
   JSON.stringify({ depois7, decisoes: decisoes9b.map((d) => d.chave) }));
+// 8. PULOU TUDO SEM REDE e a rede voltou: os pulados VOLTAM. Pular não decide
+// nada — e sem sinal é o que sobra pro card de foto cuja foto não veio. Com a
+// fila vazia (a tela de "sem conexão"), a volta da rede é um ATUALIZAR. Uma
+// correção desta mesma auditoria a trocou por "só retomar", e a fila terminava
+// VAZIA com os pedidos pendentes — achado pela auditoria EM PRODUÇÃO
+// (2026-09-25): este smoke não tinha o caminho.
+aviao = true; await ctx.setOffline(true);
+const pulados8 = [];
+for (let j = 0; j < 8; j++) {
+  const antes = await p5.evaluate(() => ({ n: AppState.queue.length, k: AppState.currentPlace
+    ? AppState.currentPlace.venueID + '|' + AppState.currentPlace.updateRequestID : null }));
+  if (!antes.n || !antes.k) break;
+  await p5.evaluate(() => cardDaFrente().querySelector('.card-btn-skip').click());
+  for (let t = 0; t < 50; t++) { if ((await p5.evaluate(() => AppState.queue.length)) < antes.n) break; await dormir(100); }
+  pulados8.push(antes.k);
+}
+const semConexao8 = await esperarNaPagina(p5, () => !document.getElementById('loadErrorState').classList.contains('hidden'), 10000, 100);
+diz('8: PRÉ-CONDIÇÃO — sem rede, pulado tudo, a tela é a de "sem conexão"',
+  pulados8.length > 0 && semConexao8.ok, JSON.stringify({ pulados8, semConexao8 }));
+aviao = false; await ctx.setOffline(false);
+const voltou8 = await esperarNaPagina(p5, () => AppState.queue.length > 0 && !!cardDaFrente(), 25000, 200);
+const depois8 = await estadoDaFila9b(p5);
+diz('8: a rede de volta traz de volta os PULADOS sem sinal (a fila não termina vazia com pedido pendente)',
+  voltou8.ok && pulados8.every((k) => depois8.fila.includes(k)), JSON.stringify({ pulados8, depois8 }));
 await p5.evaluate(() => { API.setSession(null); });
 await p5.close();
 await ctx.unroute('**/api/*', rotaApi9b);

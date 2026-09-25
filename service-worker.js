@@ -204,6 +204,14 @@ self.addEventListener('fetch', event => {
 
   if (url.pathname.startsWith('/api/')) return;
 
+  // O diagnóstico compara o que o aparelho TEM com o que o servidor SERVE, e o
+  // lado do servidor não pode passar por aqui: o `/` e os ícones caem no
+  // cache-first abaixo (a comparação dava "igual" SEMPRE) e, sem rede, o
+  // network-first devolve o cache ("conferido, igual" sem ter conferido nada).
+  // Com `?diag-rede` o pedido vai direto à rede — e sem rede FALHA, que é a
+  // resposta certa (auditoria de 2026-09-25).
+  if (url.searchParams.has('diag-rede')) return;
+
   const isHTML = event.request.mode === 'navigate' ||
     (event.request.headers.get('accept') || '').includes('text/html');
   // Todo JS/CSS/JSON é código nosso agora (o vendor Tailwind de 407KB saiu na
