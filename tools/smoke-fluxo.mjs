@@ -120,6 +120,12 @@ const PEDIDO = {
   imageUrls: [...URLS_FOTO],
   // A 2ª e a 3ª sao APROVADAS (dao lixeira); a 1ª e a proposta (da o aprovar).
   approvedImageIds: [IDS_FOTO[1], IDS_FOTO[2]],
+  // Fiel ao dado real: num pedido de FOTO NOVA o id do pedido É o id da foto
+  // proposta, e o `podeAprovarAtual` exige os dois (tipo e foto) desde a
+  // auditoria de 2026-09-25 — o botão de aprovar num pedido de outro tipo
+  // aprovaria o pedido errado.
+  purType: 'NEW_PHOTO',
+  updateRequestID: IDS_FOTO[0],
   imageDates: {},
 };
 

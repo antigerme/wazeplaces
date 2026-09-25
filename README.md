@@ -4,7 +4,7 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
 
 > ⚠️ **Este app NUNCA aprova dados de local** — nome, categoria, endereço, posição. Isso exige ajuste no mapa e é feito no WME oficial (o botão ↗ do card abre lá). Aqui você **rejeita** ou **marca como lido**, eliminando o lixo antes que outro editor novato aprove besteira.
 >
-> A única exceção é **foto nova**: ampliando a foto no card dá pra **aprovar** ou **excluir** ali mesmo, porque essa decisão está inteira na tela — ou a foto serve, ou não serve. Só aparece para quem é **L6 + Area Manager** ou **staff** do Waze.
+> As exceções ficam na **foto ampliada**, e só para quem é **L6 + Area Manager** ou **staff** do Waze: **aprovar a foto nova** do pedido, **excluir uma foto** que já está no local e **corrigir o nome** do local. Nas três a decisão está inteira na tela — a foto ou a fachada ampliada é o dado completo.
 
 ---
 
@@ -33,7 +33,7 @@ Este app mostra os pedidos em formato de **cards estilo Tinder**:
 
 - **Arraste para a esquerda (←)** → Rejeita o pedido (lixo)
 - **Arraste para a direita (→)** → Marca como lido (você decide depois no WME)
-- **Arraste para cima (↑)** → Pula (não chama nada, só avança)
+- **Arraste para cima (↑)** → Pula (o pedido continua pendente no Waze e volta quando você atualizar a fila; com a preferência "Pular guarda o pedido" ligada, ele ganha a ⭐ no WME)
 - **Botões ✕ / ↑ / ✓** no rodapé do card fazem o mesmo (o gesto é atalho)
 - **Botão ↗ no card** → Abre o local direto no WME para você ajustar e aprovar manualmente
 
@@ -50,7 +50,7 @@ Aí é só fazer login com seus cookies do Waze (veja abaixo). A forma mais côm
 - **Login automático (recomendado, Chrome):** instale a extensão **WazePlaces Rapid Access** ([Chrome Web Store](https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn), feita por [@daflash](https://www.waze.com/pt-BR/user/editor/daflash) da comunidade WME). Estando logado no WME, clique nela e o app abre já autenticado — sem copiar cookies.
 - **Login manual:** exporte seu `cookies.txt` do Waze (instruções abaixo) e faça upload / cole na tela inicial.
 
-> 📱 **No celular** (onde não há extensões): use o login manual com o `cookies.txt`.
+> 📱 **No celular** (onde não há extensões): entre primeiro no computador e use **Conectar outro aparelho** (na Ajuda ⓘ): aparece um **QR** — aponte a câmera do celular e pronto. Sem câmera, peça o código de 6 caracteres e digite em **Entrar com um código**. O `cookies.txt` também funciona no celular, mas dá mais trabalho.
 
 ### Como exportar seus cookies do Waze
 
@@ -364,11 +364,17 @@ location / {
 | Região | Endpoint base | Uso típico |
 |---|---|---|
 | `row` | `www.waze.com/row-Descartes/...` | Brasil, Europa, outros |
-| `na` | `www.waze.com/na-Descartes/...` | EUA, Canadá |
+| `na` | `www.waze.com/Descartes/...` (sem prefixo) | EUA, Canadá |
 | `il` | `www.waze.com/il-Descartes/...` | Israel |
-| `world` | `www.waze.com/Descartes/...` | Fallback |
 
-Configure pelo modal de filtros (header). Default `row`.
+São os TRÊS servidores do WME. A América do Norte é o servidor **sem prefixo**:
+`na-Descartes` não existe (medido em 2026-09-25: 404 em tudo). Havia uma 4ª
+opção, `world`, que era esse mesmo servidor com outro nome; quem a tinha
+escolhido passa pra `na` sozinho.
+
+Configure pelo modal de filtros (header). No primeiro login o app já vai pro
+país onde você edita (o `editableCountryIDs` do seu perfil no WME), inclusive
+trocando de servidor se for o caso.
 
 ### Gate de acesso (quem pode usar)
 
@@ -380,7 +386,7 @@ isStaff === true                          → libera
 caso contrário                            → 403 access_denied
 ```
 
-`MIN_RANK_WAZE = 2` (Waze é 0-indexed; equivale a "display L3+"). Como a checagem é no servidor **antes** de criar a sessão, não dá pra burlar editando JS no DevTools.
+`MIN_RANK_WAZE = 1` (Waze é 0-indexed; equivale a "display L2+", com área). Como a checagem é no servidor **antes** de criar a sessão, não dá pra burlar editando JS no DevTools. O `testar-cookies` é a ÚNICA porta que cria sessão (o pareamento só copia uma sessão que já passou por ela), toda rota exige o `sessionToken`, e o `perfil` reconfere o portão a cada abertura do app: quem perdeu nível ou área no Waze perde a sessão.
 
 ### Resiliência a race conditions entre editores
 
@@ -404,34 +410,40 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 
 - **Cookies trafegam apenas no login.** Viram um `sessionToken` opaco; os cookies ficam criptografados (**AES-256-GCM**) no store (KV/filesystem).
 - **Chave de criptografia:** Secret `ENCRYPTION_KEY` no Cloudflare; env var ou arquivo `0600` na VM. Nunca commitada.
-- **TTL de sessão:** 21 dias (`SESSION_TTL` em `server/core.mjs`). No KV expira sozinho (TTL nativo); na VM, por mtime + touch. Cookies do Waze duram ~28 dias — o TTL menor dá folga. Quando expiram de verdade, o backend devolve 401 e o frontend cai pra tela de login.
+- **TTL de sessão:** 21 dias **sem uso** (`SESSION_TTL` em `server/core.mjs`) — janela deslizante nos dois adaptadores: o KV renova o prazo no máximo uma vez por dia de uso; a VM, por mtime + touch. Cookies do Waze duram ~28 dias. Quando expiram de verdade, o backend devolve 401 e o frontend cai pra tela de login.
 - **Erros 500 não vazam detalhe interno** — o `dispatch` devolve mensagem genérica.
-- **CSP** definida em `index.src.html` e no `_headers` (precisa `unsafe-eval` por causa do Tailwind via JS — remova ao pré-compilar).
+- **CSP** em TRÊS cópias que precisam bater: o `<meta>` do `index.src.html`, o `_headers` (Cloudflare) e o `server/node.mjs` (VM). Sem `unsafe-eval` e sem `unsafe-inline` em `script-src` — o único script inline (o do tema) entra por hash, e `test/layout.test.mjs` o recalcula.
 
 ### O que NÃO está implementado (decisão consciente)
 
 - Rate limiting no nível do app (Waze Staff pediu pra manter sem, por ora)
-- Tailwind pré-compilado (usa o bundle JS por enquanto)
 - iOS/desktop nativo (a PWA cobre; ver `docs/native-android-analysis.md`)
+
+(O Tailwind já é pré-compilado: `npm run css` gera o `css/app.css`, que é commitado.)
 
 ### Service Worker
 
-- **Estratégia:** network-first pra HTML/JS/CSS/JSON (com `cache: 'reload'` pra bypassar o HTTP cache); cache-first pra imagens/fontes. Cache é fallback offline.
+- **Estratégia:** network-first pra HTML/JS/CSS/JSON (sem opção de `cache`: quem garante o frescor é o `no-cache` + ETag do servidor, e assim a revalidação volta 304 em vez de baixar tudo); cache-first pra imagens/fontes. Cache é fallback offline, e o que a página carrega é instalado de forma atômica (sem rede, o app abre).
 - **Pra invalidar caches:** bump o serial de versão (formato `YYYYMMDDnn`) em `js/version.js` (`APP_VERSION`) **e** no `CACHE_NAME` do `service-worker.js`, juntos, em toda PR que toque em `index.src.html`/`js`/`css`/`icons`.
 
 ### Validação rápida antes de commitar
 
 ```bash
-for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done
-node server/node.mjs   # smoke test: sobe, serve estáticos, /api/* responde
+npm run check          # node --check em js/, server/ e worker/
+npm test               # a suíte (node:test, zero dependência)
+npm run css            # se mexeu em classe do Tailwind ou no css/styles.css (o CI cobra)
+npm run js             # se mexeu em js/*.js — regenera js/min/, que é o que o app carrega
+npm run html           # se mexeu no index.src.html — regenera o index.html
+npm run test:browser   # smokes de navegador (precisam do Playwright; ver o CLAUDE.md)
+node server/node.mjs   # sobe, serve estáticos, /api/* responde
 ```
 
-> ⚠️ O sandbox de CI e agentes tem allowlist que bloqueia `*.waze.com`. Não dá pra testar contra o Waze real automaticamente — valide com fixtures de HAR ou teste manual.
+O sandbox alcança o `waze.com`: com um `cookies.txt` de verdade dá pra validar contra o WME real (`node tools/waze-probe.mjs <cookies.txt>`, só leitura e com jitter).
 
 ### Contribuindo
 
 1. Fork → branch a partir de `main`
-2. Mudanças + `node --check`
+2. Mudanças + `npm run check` + `npm test` (e `npm run js`/`css`/`html` quando for o caso)
 3. PR com descrição do **porquê** (não só o quê)
 
 ---

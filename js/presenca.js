@@ -176,7 +176,13 @@ function chatGuardado() {
     } catch (e) { return {}; }
 }
 
+// Só com sessão. A resposta de um pedido em voo (a lista, o `abrir`, a
+// confirmação de carona) chegava DEPOIS do "Sair" e recriava a chave que o
+// `presencaEsquecer` tinha acabado de apagar — com a instalação, as conversas
+// conhecidas e os ids a confirmar de quem saiu. MEDIDO em produção
+// (2026-09-25): conversar, sair, e a chave estava de volta no aparelho.
 function chatGuardar(o) {
+    if (!AppState.authenticated) return;
     safeLS.set(CHAT_KEY, JSON.stringify(o));
 }
 
@@ -1079,7 +1085,9 @@ function presencaCardSeguro(c) {
         updateTypeKey: txt(c.updateTypeKey, 40) || null,
         imageUrl: PRESENCA_FOTO_OK.test(foto) ? foto : null,
         lat: num(c.lat), lon: num(c.lon),
-        region: ['row', 'na', 'il', 'world'].includes(c.region) ? c.region : 'row',
+        // MIGRACAO: regiao-world — cartão mandado por versão anterior, que
+        // ainda chamava a América do Norte de `world`.
+        region: c.region === 'world' ? 'na' : REGIOES_DO_WAZE.includes(c.region) ? c.region : 'row',
     };
 }
 

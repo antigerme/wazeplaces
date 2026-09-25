@@ -42,8 +42,10 @@ test('"RESTAM" não pode dizer ZERO quando o app não sabe', () => {
   assert.match(c, /if \(AppState\.loadError\) \{\s*el\.textContent = '—';/,
     'o placar voltou a imprimir o serverTotal com a busca falhada — e aí ele diz 0 pra 426 pedidos');
   // ORDEM: o ramo tem que vir ANTES do `setCount`, senão nunca é alcançado.
+  // O `setCount` do placar REAL (o do treino vem antes, num ramo próprio que
+  // retorna — e o placar do treino não tem `loadError`).
   const iErro = c.indexOf('AppState.loadError');
-  const iSet = c.indexOf('setCount(el');
+  const iSet = c.indexOf('setCount(el, AppState.serverTotal');
   assert.ok(iErro > 0 && iSet > 0 && iErro < iSet,
     'o ramo de falha ficou DEPOIS do setCount: código morto, e a tela segue mentindo');
   // E o traço é o MESMO símbolo do deslogado, não um terceiro vocabulário.

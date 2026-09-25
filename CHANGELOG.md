@@ -8,6 +8,36 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.25-03
+
+Primeira rodada da auditoria completa do app, feita antes do anúncio pros Global Champs.
+
+### Corrigido
+- **A região NA (Estados Unidos e Canadá) voltou a funcionar.** O app mandava todo pedido da América do Norte pra um servidor do Waze que não existe, e nada abria: nem a fila, nem o perfil, nem a lista de países. A opção "World", que era esse mesmo servidor com outro nome, saiu do seletor, e quem a tinha escolhido passa pra NA sozinho.
+- **Você já entra no país onde edita.** O app abria sempre no Brasil, e quem edita em outro país via "Tudo limpo!" sem ter tratado nada. Agora ele vai pro país que o seu perfil no WME diz que você edita, trocando até de região se for o caso, e avisa. Dá pra mudar em Filtros como sempre.
+- **O "Tudo limpo!" só comemora o que você tratou.** Abrir o app numa fila vazia soltava confete e liberava a conquista "Tudo limpo". E a frase "Você processou todos os pedidos" aparecia pra quem não tinha processado nenhum: nesse caso ela agora sugere conferir o país e a região.
+- **Aprovar foto não sai mais no pedido errado.** Se a aprovação de uma foto falhasse depois que você já tinha aberto outro pedido, a marca ✨ e o botão de aprovar iam parar na foto desse outro pedido. Agora o botão só aparece num pedido de foto nova, na foto dele.
+- **Aprovar ou excluir sem o Desfazer não mostram mais sucesso quando o Waze recusa.** A foto pendente chegava a aparecer como aprovada (e ganhava a lixeira) com a aprovação recusada. E o servidor não exclui mais foto que ainda é proposta de um pedido.
+- **Aprovar e fechar a foto em menos de 3 segundos avança o card**, como aprovar com calma. Antes o pedido aprovado ficava na frente, e o ✓ seguinte o contava de novo.
+- **O modo treino não mistura mais com a fila de verdade.** Entrar no treino enquanto a fila carregava podia congelar a aba ao sair dele, e deslogado ele ligava escondido. O placar do treino também não mexe mais no seu placar.
+- **"Sair" e entrar de novo sem fechar o app** funciona de verdade: antes o histórico, as conquistas e a reincidência paravam de contar até recarregar. E a resposta de uma ação que ainda estava no ar na hora do "Sair" não grava mais nada no aparelho, nem a conversa.
+- **Ir pra outro app durante o Desfazer não deixa mais o card travado.** O botão "Desfazer" some junto com a ação que já saiu, e o rejeitar em lote que não chegou a sair volta pra fila.
+- **Uma ação que dava "sessão expirada" por engano não se perde mais**: ela vai pra fila de envio e sai assim que a sessão se confirma.
+- **Trocar de região com ações ainda saindo** não as manda mais pro servidor errado.
+- **O "Disponível offline" prepara tudo ao abrir o app**, sem esperar a primeira ação, e não diz mais "Pronto" antes de preparar. Uma foto que o Waze tirou do ar não trava mais a preparação.
+- **Sem rede, o app abre mesmo depois de uma atualização baixada pela metade**, e o atalho "Filtros" do ícone também abre sem rede.
+- **O `cookies.txt` do curl e das extensões do Firefox** (com as linhas `#HttpOnly_`) entra; antes o login dizia "cookies expirados".
+- **Só as linhas do Waze saem do seu aparelho** quando você entra pelo `cookies.txt`. Antes o arquivo inteiro (que traz os cookies de todos os sites do navegador) ia até o servidor, que só então separava os do Waze.
+- **Renomear um local pra um nome com "Duplicate" ou "Already"** não volta mais como "já tratado".
+- **O título da página e a descrição do link** (o que aparece ao compartilhar no Discord ou no WhatsApp) estão em inglês neutro, e o crédito da extensão na tela de entrada é traduzido.
+- **A Ajuda e a Privacidade dizem exatamente o que o app grava no Waze**: além de rejeitar, marcar como lido e dar estrela, enviar as mensagens da conversa; e, pra L6+AM ou staff, aprovar a foto nova, excluir foto do local e corrigir o nome.
+
+### Segurança
+- **O portão de acesso (nível 2+ com área, ou staff) não tinha mais atalhos.** Dava pra criar sessão e agir mandando cookies direto pro servidor, sem passar pela conferência de nível. Agora a única porta é o login normal, e o perfil reconfere o portão a cada abertura: quem perdeu o nível ou a área no Waze perde a sessão.
+
+### Mudado
+- **Na Ajuda, "Praticar", "Conectar outro aparelho" e "Sair" só aparecem depois de entrar.**
+
 ## v2026.09.25-02
 
 ### Corrigido

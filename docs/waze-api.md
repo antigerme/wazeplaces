@@ -19,10 +19,14 @@ servidor aceita hoje.
 
 ## 1. Prefixo e regiões
 
-Tudo abaixo pende de `https://www.waze.com/<região>-Descartes/app/`, com a
-tabela de região que o `core.mjs` já usa (`row` → `row`, `na` → `usa`,
-`il` → `il`, `world` → `row`). O gRPC pende de
-`https://www.waze.com/<região>-Descartes/grpc/`.
+Tudo abaixo pende de `https://www.waze.com/<prefixo>Descartes/app/`, e o
+prefixo é `row-` (resto do mundo), `il-` (Israel) ou **NENHUM** (América do
+Norte). **`na-Descartes` não existe**: MEDIDO em 2026-09-25, `Session`,
+`info/config`, `LocationSearch/Countries` e `Issues/Search/List` dão 404 lá e 200
+em `/Descartes/` (8 países; a fila dos EUA com 512 pedidos). O `env` do Referer
+segue outra tabela (`row` → `row`, `na` → `usa`, `il` → `il`). O gRPC pende de
+`https://www.waze.com/<prefixo>Descartes/grpc/`, com o mesmo prefixo. O chat
+(`<região>-wmp`) é outro backend e TEM prefixo: `na-wmp` existe.
 
 ---
 

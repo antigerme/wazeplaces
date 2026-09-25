@@ -1,7 +1,7 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026092502';
+const CACHE_NAME = 'waze-places-2026092503';
 // Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
 // ver a nota no `activate`.
 const TILES_CACHE = 'waze-places-tiles';
@@ -58,18 +58,27 @@ function hidratarTiles() {
 // reproduzido encerrando o worker pelo DevTools Protocol no meio do modo avião.
 // O smoke nunca pegava: durante um teste curto o worker não chega a adormecer.
 hidratarTiles();
-const STATIC_ASSETS = [
+// O que o app PRECISA pra abrir sem rede: a página e tudo que ela carrega
+// (`test/offline.test.mjs` confere contra os <script> e o <link> do HTML).
+// `/index.html` NÃO entra: no Cloudflare ele é um 307 pra `/`, e o `cache.add`
+// guardava a resposta REDIRECIONADA — que o Chrome recusa numa navegação, então
+// o fallback de HTML abria a página de erro do navegador.
+const CRITICOS = [
   '/',
-  '/index.html',
   '/css/app.css',
-  '/js/min/sw-register.js',
   '/js/min/version.js',
-  '/js/min/qr.js',
   '/js/min/i18n.js',
-  '/js/min/app.js',
   '/js/min/api.js',
   '/js/min/mapa.js',
   '/js/min/swipe.js',
+  '/js/min/app.js',
+  '/js/min/presenca.js',
+  '/js/min/sw-register.js',
+];
+// O resto ajuda, e a falta de um não impede nada: o QR vem sob demanda, a fonte
+// tem a do sistema como reserva, e os ícones são do atalho e do instalar.
+const OPCIONAIS = [
+  '/js/min/qr.js',
   '/fonts/inter-latin-wght-normal.woff2',
   '/manifest.json',
   '/icons/icon-192.svg',
@@ -80,8 +89,14 @@ const STATIC_ASSETS = [
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      // allSettled: um asset 404 não derruba o precache inteiro (addAll é atômico).
-      .then(cache => Promise.allSettled(STATIC_ASSETS.map(u => cache.add(u))))
+      // Os críticos são ATÔMICOS (`addAll`): com um deles faltando a instalação
+      // FALHA, o worker novo é descartado e o antigo segue no controle com o
+      // cache inteiro — o navegador tenta de novo depois. Era `allSettled` em
+      // tudo: com sinal fraco no deploy, a instalação "dava certo" pela metade,
+      // o `activate` apagava o cache ANTIGO (o completo) e, sem rede, o app não
+      // abria mais. Os opcionais seguem tolerantes.
+      .then(cache => cache.addAll(CRITICOS)
+        .then(() => Promise.allSettled(OPCIONAIS.map(u => cache.add(u)))))
   );
 });
 
@@ -227,11 +242,14 @@ self.addEventListener('fetch', event => {
           }
           return response;
         })
-        .catch(() => caches.match(event.request).then(cached => {
+        .catch(() => caches.match(event.request, isHTML ? { ignoreSearch: true } : undefined).then(cached => {
           if (cached) return cached;
           // Fallback HTML só pra navegação. NUNCA devolver HTML pra request de JS/CSS
           // (browser engasga ao tentar parsear HTML como script — ver gotcha #11).
-          if (isHTML) return caches.match('/index.html');
+          // `ignoreSearch` acima e `/` aqui: o atalho do manifest abre
+          // `/?action=filters`, que nunca foi guardado com essa query — e o
+          // `/index.html` de antes era uma resposta redirecionada, recusada.
+          if (isHTML) return caches.match('/').then((raiz) => raiz || Response.error());
           return Response.error();
         }))
     );

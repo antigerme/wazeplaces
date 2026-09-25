@@ -24,25 +24,31 @@ import { marcarPosicao, paisValido, temMarcaDaApp, paisDaMarca } from './marca-a
 // Constantes
 // ─────────────────────────────────────────────────────────────────────────
 
+// A América do Norte é o servidor SEM prefixo. `na-Descartes` NÃO EXISTE:
+// MEDIDO em 2026-09-25 com a conta do owner, `Session`, `info/config`,
+// `LocationSearch/Countries` e `Issues/Search/List` dão 404 lá e 200 em
+// `/Descartes/` (8 países, e a fila dos EUA com 512 pedidos). O app mandava
+// todo editor dos EUA e do Canadá pra um servidor inexistente — só a opção
+// "World" funcionava, por acaso, porque apontava pra `/Descartes/`. O WME tem
+// TRÊS servidores (NA, ROW, IL), e o app agora também: `world` virou sinônimo
+// de `na` (ver `requireRegion`). O chat (`na-wmp`) tem prefixo e existe:
+// o backend dele é outro (ver `WAZE_WMP`).
 export const WAZE_REGIONS = {
   row: 'https://www.waze.com/row-Descartes/app/v1',
-  na: 'https://www.waze.com/na-Descartes/app/v1',
+  na: 'https://www.waze.com/Descartes/app/v1',
   il: 'https://www.waze.com/il-Descartes/app/v1',
-  world: 'https://www.waze.com/Descartes/app/v1',
 };
 
 const WAZE_BASE_REGIONS = {
   row: 'https://www.waze.com/row-Descartes/app',
-  na: 'https://www.waze.com/na-Descartes/app',
+  na: 'https://www.waze.com/Descartes/app',
   il: 'https://www.waze.com/il-Descartes/app',
-  world: 'https://www.waze.com/Descartes/app',
 };
 
 const WAZE_FEATURES_REGIONS = {
   row: 'https://www.waze.com/row-Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
-  na: 'https://www.waze.com/na-Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
+  na: 'https://www.waze.com/Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
   il: 'https://www.waze.com/il-Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
-  world: 'https://www.waze.com/Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
 };
 
 // Presença do WME (gRPC). É SEPARADA POR SERVIDOR — MEDIDO: um WME aberto no
@@ -50,9 +56,8 @@ const WAZE_FEATURES_REGIONS = {
 // a região da fila, como o resto do app.
 const WAZE_GRPC_PRESENCA = {
   row: 'https://www.waze.com/row-Descartes/grpc/' + SERVICO_PRESENCA + '/',
-  na: 'https://www.waze.com/na-Descartes/grpc/' + SERVICO_PRESENCA + '/',
+  na: 'https://www.waze.com/Descartes/grpc/' + SERVICO_PRESENCA + '/',
   il: 'https://www.waze.com/il-Descartes/grpc/' + SERVICO_PRESENCA + '/',
-  world: 'https://www.waze.com/Descartes/grpc/' + SERVICO_PRESENCA + '/',
 };
 // Chat do WME (WMP). O backend é GLOBAL — MEDIDO: `row-wmp`, `na-wmp` e `il-wmp`
 // devolvem a mesma contagem de não lidas para a mesma conta, e `usa-wmp` dá
@@ -61,7 +66,6 @@ const WAZE_WMP = {
   row: 'https://www.waze.com/row-wmp/',
   na: 'https://www.waze.com/na-wmp/',
   il: 'https://www.waze.com/il-wmp/',
-  world: 'https://www.waze.com/row-wmp/',
 };
 
 const WAZE_IMAGE_BASE = 'https://venue-image.waze.com/thumbs/thumb700_';
@@ -280,12 +284,19 @@ export function cookieValePraHost(domain, host = WAZE_API_HOST) {
 // (30KB+ vs ~1.7KB só do Waze) → o Waze/Cloudflare rejeita com HTTP 400. Filtramos
 // na entrada pra que o store só persista cookies do Waze. Formato header (sem tabs)
 // não expõe o domínio → devolve como veio (a extensão já coleta só cookies do Waze).
+//
+// `#HttpOnly_` NÃO é comentário: é como o curl, o wget e extensões do Firefox
+// marcam cookie HttpOnly no formato Netscape (`#HttpOnly_.waze.com<TAB>…`). O
+// `_web_session` do Waze é HttpOnly, então tratar a linha como comentário
+// descartava justamente a sessão, e o login dizia "cookies expirados" pra quem
+// exportou certo. O prefixo sai AQUI, na entrada: o que fica guardado já está
+// normalizado, e o resto do core segue lendo `#` como comentário.
 export function filterWazeCookies(cookiesContent) {
   const s = String(cookiesContent).trim();
   if (!s.includes('\t')) return s;
   const kept = new Map();
   for (const line of s.split('\n')) {
-    const t = line.trim();
+    const t = line.trim().replace(/^#HttpOnly_/, '');
     if (!t || t[0] === '#') continue;
     const parts = t.split(/\s+/);
     if (parts.length < 7 || !cookieValePraHost(parts[0])) continue;
@@ -582,6 +593,17 @@ export function aplicarCookiesRotacionados(conteudoAtual, setCookie) {
 // Categorização de erro do Waze (porte 1:1 do PHP — ver comentário histórico)
 // ─────────────────────────────────────────────────────────────────────────
 
+// Corpo do Waze que PRECISA ser um objeto. `JSON.parse('null')` não lança, e o
+// `rd.algo` logo depois virava TypeError: a pessoa via o "Erro interno"
+// genérico em vez da mensagem de resposta inválida, e o diário não distinguia
+// um defeito nosso de uma resposta estranha do Waze.
+function objetoDoWaze(texto) {
+  let v = null;
+  try { v = JSON.parse(texto); } catch { /* cai no erro abaixo */ }
+  if (!v || typeof v !== 'object') apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  return v;
+}
+
 export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
   if (fetchError) return { category: 'transient', message: 'Erro de conexão: ' + fetchError, messageKey: 'srv.err.connection' };
   if (httpCode === 401 || httpCode === 403) return { category: 'unauthorized', message: 'Cookies expirados ou inválidos', messageKey: 'srv.err.cookiesExpired' };
@@ -612,7 +634,11 @@ export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
     bodyLower.includes('updated by another') ||
     bodyLower.includes('no longer') ||
     bodyLower.includes('has been resolved');
-  if ((httpCode === 200 || httpCode === 400 || httpCode === 422) && hasAlreadyHint) {
+  // A pista pelo TEXTO só vale em resposta de ERRO. Numa resposta 2xx quem
+  // decide é o `errorList` (acima): o corpo de sucesso ECOA o que foi gravado, e
+  // renomear um local para "Duplicate Keys" ou "Already Home" gravava de verdade
+  // e voltava pro app como "já tratado", desfazendo o nome na tela.
+  if ((httpCode === 400 || httpCode === 422) && hasAlreadyHint) {
     return { category: 'already_processed', message: 'Já tratado por outro editor', messageKey: 'srv.err.alreadyHandled' };
   }
 
@@ -807,9 +833,14 @@ export function makeSessions({ store, keyBytes }) {
       }
       return cookies;
     },
+    // Lê antes de apagar: a rota não exige nada além de um token qualquer, e no
+    // plano grátis do KV o apagamento é a cota curta (1.000 por dia, contra
+    // 100.000 leituras). Sem a leitura, token inventado em série gastava a cota
+    // do dia e o "Sair" de verdade parava de apagar.
     async destroySession(token) {
-      if (!token) return;
+      if (typeof token !== 'string' || !token) return;
       const hash = await sha256hex(token);
+      if ((await store.get(hash)) == null) return;
       await store.delete(hash);
     },
 
@@ -898,7 +929,11 @@ export function makeSessions({ store, keyBytes }) {
 
 function requireRegion(data) {
   let region = data && data.region ? String(data.region).toLowerCase().trim() : 'row';
-  if (!WAZE_REGIONS[region]) region = 'row';
+  // MIGRACAO: regiao-world — `world` era a 4ª opção do filtro e sempre foi o
+  // servidor da América do Norte com outro nome (ver `WAZE_REGIONS`).
+  if (region === 'world') region = 'na';
+  // `hasOwn`: `constructor` e cia. são "verdadeiros" num objeto comum.
+  if (!Object.hasOwn(WAZE_REGIONS, region)) region = 'row';
   return region;
 }
 
@@ -915,7 +950,12 @@ async function resolveCookies(data, sessions) {
     if (!cookies) throw new ApiError({ success: false, error: 'Sessão expirada ou inválida', errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' }, 401);
     return cookies;
   }
-  if (data && data.cookies) return String(data.cookies).trim();
+  // SÓ sessão. Aceitava também `cookies` crus no corpo, em QUALQUER rota, e
+  // isso furava o portão do login: o `isUserAllowed` só roda no
+  // `testar-cookies`, então quem mandasse o próprio cookies.txt direto no
+  // `validar-place` ou no `marcar-lido` rejeitava e lia pedido sem nunca passar
+  // pelo L2+AM. Nenhum cliente usava o atalho (a extensão e o app entram pelo
+  // `testar-cookies`); só os testes, que agora criam uma sessão de verdade.
   throw new ApiError({ success: false, error: 'Sessão ou cookies não fornecidos', errorKey: 'srv.err.sessionMissing', errorCategory: 'unauthorized' }, 401);
 }
 
@@ -1279,17 +1319,13 @@ const extractLonLatDeep = (coords) => {
 // Handlers — cada um retorna { status, body }
 // ─────────────────────────────────────────────────────────────────────────
 
+// Só `destroy`. Havia um `create` — e ele era o PADRÃO de quem não mandava
+// `action` — que guardava cookies crus e devolvia um token SEM consultar o Waze
+// nem o `isUserAllowed`: qualquer conta, de qualquer nível, ganhava sessão. O
+// único caminho de entrada é o `testar-cookies` (e o pareamento, que copia uma
+// sessão que já passou por ele).
 async function handleSessao(data, { sessions }) {
-  const action = (data && data.action) || 'create';
-  if (action === 'create') {
-    if (!data.cookies) apiError('Cookies não fornecidos', 400, 'srv.err.cookiesMissing');
-    // Filtra pro domínio do Waze antes de armazenar (ver filterWazeCookies).
-    const cookies = filterWazeCookies(String(data.cookies).trim());
-    if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado', 400, 'srv.err.cookieFormatNoWaze');
-    if (!extractCSRFToken(cookies)) apiError('Token CSRF não encontrado', 400, 'srv.err.csrfMissing');
-    const token = await sessions.createSession(cookies);
-    return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL } };
-  }
+  const action = data && data.action;
   if (action === 'destroy') {
     await sessions.destroySession(data && data.sessionToken);
     return { status: 200, body: { success: true } };
@@ -1452,31 +1488,37 @@ async function resolverDuplicados(places, cookieHeader, csrf, region, ctx) {
   if (alvos.length === 0) return;
 
   const d = DUPLICADO_BBOX_GRAUS;
-  await Promise.all(alvos.map(async ({ p, centro }) => {
-    const [cLat, cLon] = centro;
-    const q = new URLSearchParams({
-      bbox: [cLon - d, cLat - d, cLon + d, cLat + d].join(','),
-      v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
-    });
-    const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, ctx);
-    if (lida.httpCode !== 200) return;
-    let atual;
-    try { atual = JSON.parse(lida.response); } catch { return; }
-    const alvo = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === p.flagEntityID);
-    if (!alvo) return;
-    const ll = pontoDeGeometria(alvo.geometry);
-    // Mesma origem do enquadramento: a distância que o card mostra e o centro
-    // da caixa que achou o alvo são a MESMA conta.
-    const dist = ll ? distanciaEntrePontos(centro, ll) : null;
-    p.duplicado = {
-      id: alvo.id,
-      // Nome CRU do Waze. `null` = existe e não tem nome — quem escreve
-      // "(local sem nome)" é o frontend, que é a fonte única de string de UI.
-      nome: String(alvo.name || '').trim() || null,
-      ll,
-      distM: Number.isFinite(dist) ? dist : null,
-    };
-  }));
+  // Melhor-esforço POR ALVO: o nome do duplicado é enfeite do card, e uma
+  // leitura que volte estranha (corpo `null`, venue sem geometria) não pode
+  // derrubar a FILA inteira com um 500 — era o que um `atual.venues` de `null`
+  // fazia, porque a exceção subia pelo `Promise.all` até o `buscar-places`.
+  await Promise.all(alvos.map(({ p, centro }) => resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx).catch(() => {})));
+}
+
+async function resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx) {
+  const [cLat, cLon] = centro;
+  const q = new URLSearchParams({
+    bbox: [cLon - d, cLat - d, cLon + d, cLat + d].join(','),
+    v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
+  });
+  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, ctx);
+  if (lida.httpCode !== 200) return;
+  let atual;
+  try { atual = JSON.parse(lida.response); } catch { return; }
+  const alvo = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === p.flagEntityID);
+  if (!alvo) return;
+  const ll = pontoDeGeometria(alvo.geometry);
+  // Mesma origem do enquadramento: a distância que o card mostra e o centro
+  // da caixa que achou o alvo são a MESMA conta.
+  const dist = ll ? distanciaEntrePontos(centro, ll) : null;
+  p.duplicado = {
+    id: alvo.id,
+    // Nome CRU do Waze. `null` = existe e não tem nome — quem escreve
+    // "(local sem nome)" é o frontend, que é a fonte única de string de UI.
+    nome: String(alvo.name || '').trim() || null,
+    ll,
+    distM: Number.isFinite(dist) ? dist : null,
+  };
 }
 
 async function handleBuscarPlaces(data, { sessions }) {
@@ -1535,12 +1577,7 @@ async function handleBuscarPlaces(data, { sessions }) {
     };
   }
 
-  let rd;
-  try {
-    rd = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
-  }
+  const rd = objetoDoWaze(result.response);
 
   const { places, blocked } = buildPlacesFromSearch(rd, { filterTypes, unreadOnly });
 
@@ -1640,7 +1677,9 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   const statesDict = {};
   for (const st of rd?.states?.objects || []) statesDict[st.id] = st.name;
 
-  const brandLookup = {};
+  // Sem protótipo: uma marca chamada "constructor" ou "toString" daria
+  // "conhecida" num objeto comum.
+  const brandLookup = Object.create(null);
   const categoryBrands = rd?.venues?.categoryBrands || {};
   for (const cat of Object.keys(categoryBrands)) {
     for (const b of categoryBrands[cat] || []) {
@@ -2198,6 +2237,12 @@ const RELEITURA_BBOX_GRAUS = 0.0002;
 // ela cobre a hesitação normal e nada além; quem parar pra pensar mais que isso
 // paga a releitura de novo, que é o certo.
 const RELEITURA_TTL = 15;
+// O prazo que vai pro STORE é outro número, e não pode ser o de cima: o KV do
+// Cloudflare recusa `expirationTtl` abaixo de 60 s (o `put` lança), e o
+// `catch` logo abaixo engolia isso — no Worker o cache NUNCA era gravado, e
+// toda exclusão pagava a releitura de novo. Quem garante os 15 s é o carimbo
+// no valor, conferido na leitura; o KV só precisa jogar o registro fora depois.
+const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
 // Relê o local no Waze e guarda o resultado por RELEITURA_TTL.
 //
 // O cache fica no SERVIDOR de propósito. A alternativa óbvia — o cliente ler,
@@ -2229,13 +2274,14 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
   if (lida.httpCode !== 200) return { erro: categorizeWazeError(lida.httpCode, lida.response, lida.error), httpCode: lida.httpCode };
   let atual;
   try { atual = JSON.parse(lida.response); } catch { return { erroParse: true }; }
+  if (!atual || typeof atual !== 'object') return { erroParse: true };
   const venue = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === venueID);
   if (!venue) return { semLocal: true };
   // Só o que a escrita precisa. Guardar o venue inteiro seria guardar geometria
   // e escrituração à toa.
   const enxuto = { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) };
   try {
-    await sessions.store.put(chave, Math.floor(Date.now() / 1000) + '|' + JSON.stringify(enxuto), RELEITURA_TTL);
+    await sessions.store.put(chave, Math.floor(Date.now() / 1000) + '|' + JSON.stringify(enxuto), RELEITURA_TTL_STORE);
   } catch (e) { /* sem cache o app só fica mais lento */ }
   return { venue: enxuto, doCache: false };
 }
@@ -2296,9 +2342,17 @@ async function handleExcluirFoto(data, { sessions }) {
   // Foto já não existe: outro editor chegou primeiro. Isso NÃO é erro — o
   // objetivo de quem tocou na lixeira foi cumprido (mesma lógica que o
   // `already_processed` de rejeitar/marcar lido).
-  if (!imagensAgora.some((i) => i.id === imageID)) {
+  const aExcluir = imagensAgora.find((i) => i.id === imageID);
+  if (!aExcluir) {
     return { status: 200, body: { success: true, jaExcluida: true, restantes: imagensAgora.map((i) => i.id) } };
   }
+  // Só foto APROVADA sai pela lixeira. A pendente (a proposta de um pedido de
+  // foto) ainda não está no mapa: tirá-la da lista apagava a imagem E deixava o
+  // pedido órfão, sem ninguém tratar — o caminho dela é o ✕/✓ do card. O
+  // cliente já só oferece a lixeira em foto aprovada (`idFotoAtual`), mas uma
+  // tela que mentisse sobre isso (como o `.finally` que marcava aprovada a foto
+  // cuja aprovação FALHOU) chegava aqui. `=== false`: sem o campo, segue.
+  if (aExcluir.approved === false) apiError('Só foto já aprovada pode ser excluída', 400, 'srv.err.photoNotApproved');
   const restantes = imagensAgora.filter((i) => i.id !== imageID);
 
   // 3) Escrita. Mesma forma do HAR do WME, byte a byte na estrutura.
@@ -2432,11 +2486,29 @@ async function handlePerfil(data, { sessions }) {
       body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
-  let rd;
-  try {
-    rd = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  const rd = objetoDoWaze(result.response);
+
+  // O portão, de novo. A porta de entrada é o `testar-cookies`, mas o nível e a
+  // área mudam no Waze depois do login, e uma sessão de 21 dias DESLIZANTES
+  // nunca mais passaria por lá. O perfil sai uma vez por abertura do app e o
+  // `/Session` que ele já lê traz o que o portão precisa: zero chamada a mais.
+  // Pega também sessão criada pelo atalho que existia no `sessao` (ver
+  // `handleSessao`). Só RECUSA com os três campos presentes e do tipo certo
+  // (MEDIDO nas duas contas do owner: number, boolean, boolean): um `/Session`
+  // que venha sem eles não pode derrubar a sessão de todo mundo de uma vez.
+  if (typeof rd.rank === 'number' && typeof rd.isAreaManager === 'boolean' && typeof rd.isStaff === 'boolean') {
+    const check = isUserAllowed(rd);
+    if (!check.allowed) {
+      try { await sessions.destroySession(data.sessionToken); } catch (e) { /* a resposta sai igual */ }
+      return {
+        status: 403,
+        body: {
+          success: false, error: check.reason, errorKey: check.reasonKey, errorVars: check.reasonVars,
+          errorCategory: 'access_denied',
+          profile: { userName: rd.userName || '', rank: rd.rank, isAreaManager: rd.isAreaManager, isStaff: rd.isStaff },
+        },
+      };
+    }
   }
 
   const areas = [];
@@ -2518,12 +2590,7 @@ async function handleListaPaises(data, { sessions }) {
       body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
-  let rd;
-  try {
-    rd = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
-  }
+  const rd = objetoDoWaze(result.response);
   const countries = (rd.countries || []).map((c) => ({
     id: c.id ?? null,
     name: c.name || '',
@@ -2554,12 +2621,7 @@ async function handleListaEstados(data, { sessions }) {
       body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
-  let rd;
-  try {
-    rd = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
-  }
+  const rd = objetoDoWaze(result.response);
   const states = [];
   for (const s of rd.states || []) {
     if (Number(s.countryId) !== countryId) continue;
@@ -3187,7 +3249,10 @@ const ROUTES = {
  * erro inesperado vira 500 genérico, sem vazar detalhe interno).
  */
 export async function dispatch(name, data, ctx) {
-  const handler = ROUTES[String(name || '')];
+  // `hasOwn`, não `ROUTES[nome]` solto: o objeto herda de Object.prototype, e
+  // `/api/constructor` ou `/api/toString` achavam uma "rota" que não é nossa.
+  const nome = String(name || '');
+  const handler = Object.hasOwn(ROUTES, nome) ? ROUTES[nome] : null;
   if (!handler) return { status: 404, body: { success: false, error: 'Endpoint não encontrado', errorKey: 'srv.err.endpointNotFound' } };
   try {
     return await handler(data || {}, ctx);

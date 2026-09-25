@@ -12,6 +12,7 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 import { dispatch, categorizeGrpcError } from '../server/core.mjs';
 import * as g from '../server/wme-grpc.mjs';
 import { marcarPosicao, temMarcaDaApp, paisDaMarca } from '../server/marca-app.mjs';
+import { sessaoDeTeste } from './_sessao.mjs';
 
 const F = JSON.parse(readFileSync(new URL('./wme-grpc.fixture.json', import.meta.url), 'utf8'));
 const deB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -23,6 +24,8 @@ const COOKIES = [
   '.waze.com\tTRUE\t/\tTRUE\t0\t_csrf_token\tcsrf-de-teste',
   '.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tsessao-de-teste',
 ].join('\n');
+// Toda rota exige sessão de verdade (ver test/_sessao.mjs e `resolveCookies`).
+const S = await sessaoDeTeste(COOKIES);
 
 function quadro(flag, corpo) {
   const q = new Uint8Array(5 + corpo.length);
@@ -59,7 +62,7 @@ async function comWaze(responder, fn) {
 
 test('presenca-waze: só a lista → UMA chamada ao listOnlineEditors, do servidor da região', async () => {
   const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: g.junta(g.campo.bytes(1, deB64(F.atualizarPosicao.res))) }),
-    () => dispatch('presenca-waze', { cookies: COOKIES, region: 'row', caixa: [-40, -13.5, -39, -12] }, {}));
+    () => dispatch('presenca-waze', { ...S.dados, region: 'row', caixa: [-40, -13.5, -39, -12] }, S.ctx));
   assert.equal(resultado.status, 200);
   assert.deepEqual(resultado.body.editores, [{ id: 183164343, nome: 'cafanha', rank: 0, visivel: true, lat: -12.597498, lon: -39.511208 }]);
   assert.equal(pedidos.length, 1);
@@ -74,9 +77,9 @@ test('presenca-waze: só a lista → UMA chamada ao listOnlineEditors, do servid
 });
 
 test('presenca-waze: a região escolhe o servidor (a presença é separada por servidor)', async () => {
-  for (const [region, prefixo] of [['na', 'na-Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes'], ['xx', 'row-Descartes']]) {
+  for (const [region, prefixo] of [['na', 'Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes'], ['xx', 'row-Descartes'], ['constructor', 'row-Descartes']]) {
     const { pedidos } = await comWaze(() => respostaGrpc({ dados: new Uint8Array() }),
-      () => dispatch('presenca-waze', { cookies: COOKIES, region, caixa: [-1, -1, 1, 1] }, {}));
+      () => dispatch('presenca-waze', { ...S.dados, region, caixa: [-1, -1, 1, 1] }, S.ctx));
     assert.equal(pedidos[0].url, `https://www.waze.com/${prefixo}/grpc/com.waze.mapeditor.web.api.MapEditorWebServer/listOnlineEditors`, region);
   }
 });
@@ -85,7 +88,7 @@ test('presenca-waze: mover e listar saem JUNTOS, e a escrita é a do WME com a p
   const { resultado, pedidos } = await comWaze((metodo) => (metodo === 'updateOnlineEditor'
     ? respostaGrpc({ dados: deB64(F.atualizarPosicao.res) })
     : respostaGrpc({ dados: new Uint8Array() })),
-  () => dispatch('presenca-waze', { cookies: COOKIES, userId: '183164343', posicao: { lat: -12.597498, lon: -39.511208 }, pais: 30, caixa: [-40, -13.5, -39, -12] }, {}));
+  () => dispatch('presenca-waze', { ...S.dados, userId: '183164343', posicao: { lat: -12.597498, lon: -39.511208 }, pais: 30, caixa: [-40, -13.5, -39, -12] }, S.ctx));
   assert.equal(resultado.status, 200);
   assert.deepEqual(pedidos.map((p) => p.metodo).sort(), ['listOnlineEditors', 'updateOnlineEditor']);
   const escrita = pedidos.find((p) => p.metodo === 'updateOnlineEditor');
@@ -128,7 +131,7 @@ test('presenca-waze: validação antes de qualquer rede', async () => {
   ];
   for (const extra of casos) {
     const { resultado, pedidos } = await comWaze(() => assert.fail('não podia ter ido ao Waze'),
-      () => dispatch('presenca-waze', { cookies: COOKIES, ...extra }, {}));
+      () => dispatch('presenca-waze', { ...S.dados, ...extra }, S.ctx));
     assert.equal(resultado.status, 400, JSON.stringify(extra));
     assert.equal(resultado.body.errorKey, 'srv.err.incompleteParams');
     assert.equal(pedidos.length, 0);
@@ -139,11 +142,11 @@ test('presenca-waze: validação antes de qualquer rede', async () => {
 
 test('presenca-waze: cookie que não vale → 401; id de OUTRA pessoa → erro NOSSO, não sessão morta', async () => {
   const guest = await comWaze(() => respostaGrpc({ status: 7, mensagem: '(403) This operation is not allowed by guest user., Code 101' }),
-    () => dispatch('presenca-waze', { cookies: COOKIES, userId: '183164343', posicao: { lat: 1, lon: 1 }, pais: 30 }, {}));
+    () => dispatch('presenca-waze', { ...S.dados, userId: '183164343', posicao: { lat: 1, lon: 1 }, pais: 30 }, S.ctx));
   assert.equal(guest.resultado.status, 401);
   assert.equal(guest.resultado.body.errorCategory, 'unauthorized');
   const outro = await comWaze(() => respostaGrpc({ status: 7, mensagem: "(403) cannot modify another user's data, Code 101" }),
-    () => dispatch('presenca-waze', { cookies: COOKIES, userId: '12444348', posicao: { lat: 1, lon: 1 }, pais: 30 }, {}));
+    () => dispatch('presenca-waze', { ...S.dados, userId: '12444348', posicao: { lat: 1, lon: 1 }, pais: 30 }, S.ctx));
   assert.equal(outro.resultado.status, 500);
   assert.equal(outro.resultado.body.errorCategory, 'unknown',
     'id errado virou "sessão morta": o cliente desconfiaria da sessão de quem não errou');
@@ -172,7 +175,7 @@ test('categorizeGrpcError: cada status medido cai na categoria certa', () => {
 
 test('gRPC: status só nos CABEÇALHOS HTTP (resposta só de trailer) também é lido', async () => {
   const { resultado } = await comWaze(() => new Response('', { status: 200, headers: { 'grpc-status': '7', 'grpc-message': encodeURIComponent('(403) This operation is not allowed by guest user., Code 101') } }),
-    () => dispatch('presenca-waze', { cookies: COOKIES, caixa: [-1, -1, 1, 1] }, {}));
+    () => dispatch('presenca-waze', { ...S.dados, caixa: [-1, -1, 1, 1] }, S.ctx));
   assert.equal(resultado.status, 401);
 });
 
@@ -180,7 +183,7 @@ test('gRPC: status só nos CABEÇALHOS HTTP (resposta só de trailer) também é
 
 test('chat: fala com o WMP da região, identificado como o cliente de chat do WME', async () => {
   const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: deB64(F.naoLidas.res) }),
-    () => dispatch('chat', { cookies: COOKIES, region: 'na', acao: 'naoLidas' }, {}));
+    () => dispatch('chat', { ...S.dados, region: 'na', acao: 'naoLidas' }, S.ctx));
   assert.equal(resultado.status, 200);
   assert.deepEqual([resultado.body.total, resultado.body.lidoAte], [0, 1790182189049]);
   assert.equal(pedidos[0].url, 'https://www.waze.com/na-wmp/com.waze.wmp.Messaging/GetUnreadMessagesCount');
@@ -191,13 +194,13 @@ test('chat: fala com o WMP da região, identificado como o cliente de chat do WM
 
 test('chat: o token exige a instalação ESTÁVEL do aparelho, e a instalação vai no cabeçalho', async () => {
   const semInst = await comWaze(() => assert.fail('não podia ter ido ao Waze'),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'token' }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'token' }, S.ctx));
   assert.equal(semInst.resultado.status, 400, 'sem instalação, cada pedido de token criaria um aparelho novo no chat');
   const prov = g.campo.msg(1, g.campo.bytes(1, Uint8Array.from([1, 2, 3])), g.campo.inteiro(2, 86399912947),
     g.campo.texto(3, 'https://exemplo.invalido/'), g.campo.texto(4, 'chave-falsa'));
   const inst = '9539ba30-b76e-11f1-af95-b138fecb0057';
   const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: prov }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'token', instalacao: inst }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'token', instalacao: inst }, S.ctx));
   assert.equal(resultado.status, 200);
   assert.equal(resultado.body.token, 'AQID');
   assert.equal(resultado.body.chave, 'chave-falsa');
@@ -210,7 +213,7 @@ test('chat: o token exige a instalação ESTÁVEL do aparelho, e a instalação 
 test('chat enviar: texto, contexto e id do cliente; SEM remetente quando não se sabe', async () => {
   const id = 'dc76ba10-b76e-11f1-ad63-37a65b87598a';
   const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: deB64(F.enviarTexto.res) }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'enviar', para: '12444348', id, texto: 'Olá antigerme', contexto: { wp_card: '{"v":1}' } }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'enviar', para: '12444348', id, texto: 'Olá antigerme', contexto: { wp_card: '{"v":1}' } }, S.ctx));
   assert.equal(resultado.status, 200);
   assert.equal(resultado.body.id, id);
   assert.equal(resultado.body.ts, 1790182220160);
@@ -225,7 +228,7 @@ test('chat enviar: a marca do app é do SERVIDOR — o cliente não a tira nem a
   // ou descuidado (com outra `app`) não pode tirar a conversa de lá.
   for (const contexto of [undefined, null, { app: 'outra' }, { legenda: 'oi', app: '' }]) {
     const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: deB64(F.enviarTexto.res) }),
-      () => dispatch('chat', { cookies: COOKIES, acao: 'enviar', para: '12444348', texto: 'oi', ...(contexto !== undefined ? { contexto } : {}) }, {}));
+      () => dispatch('chat', { ...S.dados, acao: 'enviar', para: '12444348', texto: 'oi', ...(contexto !== undefined ? { contexto } : {}) }, S.ctx));
     assert.equal(resultado.status, 200, JSON.stringify(contexto));
     const m = g.lerMensagem(um(g.lerCampos(pedidos[0].corpo), 2));
     assert.equal(m.contexto && m.contexto.app, 'wazeplaces', JSON.stringify(contexto));
@@ -234,7 +237,7 @@ test('chat enviar: a marca do app é do SERVIDOR — o cliente não a tira nem a
 });
 
 test('chat enviar: validação antes de qualquer rede', async () => {
-  const base = { cookies: COOKIES, acao: 'enviar', para: '12444348', texto: 'oi' };
+  const base = { ...S.dados, acao: 'enviar', para: '12444348', texto: 'oi' };
   const casos = [
     { texto: '' }, { texto: '   ' }, { texto: 'x'.repeat(4001) }, { texto: 42 },
     { para: 'fulano' }, { id: 'nao-e-uuid' }, { de: 'x' },
@@ -244,61 +247,61 @@ test('chat enviar: validação antes de qualquer rede', async () => {
   ];
   for (const extra of casos) {
     const { resultado, pedidos } = await comWaze(() => assert.fail('não podia ter ido ao Waze'),
-      () => dispatch('chat', { ...base, ...extra }, {}));
+      () => dispatch('chat', { ...base, ...extra }, S.ctx));
     assert.equal(resultado.status, 400, JSON.stringify(extra).slice(0, 80));
     assert.equal(pedidos.length, 0);
   }
   const semAcao = await comWaze(() => assert.fail('não podia ter ido ao Waze'),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'apagarTudo' }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'apagarTudo' }, S.ctx));
   assert.equal(semAcao.resultado.status, 400, 'ação desconhecida não pode virar chamada nenhuma');
 });
 
 test('chat recibo: entregue ou lida, com os ids das mensagens — e nada além disso', async () => {
   const ids = ['dc76ba10-b76e-11f1-ad63-37a65b87598a'];
   const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: deB64(F.reciboLida.res) }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'recibo', para: '183164343', tipo: 'lida', ids }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'recibo', para: '183164343', tipo: 'lida', ids }, S.ctx));
   assert.equal(resultado.status, 200);
   const m = g.lerMensagem(um(g.lerCampos(pedidos[0].corpo), 2));
   assert.deepEqual([m.classe, m.recibo.tipo, m.recibo.ids], ['recibo', 'lida', ids]);
   for (const tipo of ['aberta', 1, undefined]) {
     const r = await comWaze(() => assert.fail('não podia ter ido ao Waze'),
-      () => dispatch('chat', { cookies: COOKIES, acao: 'recibo', para: '183164343', tipo, ids }, {}));
+      () => dispatch('chat', { ...S.dados, acao: 'recibo', para: '183164343', tipo, ids }, S.ctx));
     assert.equal(r.resultado.status, 400, String(tipo));
   }
 });
 
 test('chat lida: conversa que não existe é "nada a marcar", não erro (e só nesse caso)', async () => {
   const vazia = await comWaze(() => respostaGrpc({ status: 7, mensagem: 'NO_EXISTING_CONVERSATION' }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'lida', com: '183164343' }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'lida', com: '183164343' }, S.ctx));
   assert.equal(vazia.resultado.status, 200);
   assert.deepEqual(vazia.resultado.body.recibos, []);
   // O mesmo 7 SEM essa mensagem é sessão morta: a exceção não pode engolir o resto.
   const morta = await comWaze(() => respostaGrpc({ status: 7, mensagem: '' }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'lida', com: '183164343' }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'lida', com: '183164343' }, S.ctx));
   assert.equal(morta.resultado.status, 401);
   const cheia = await comWaze(() => respostaGrpc({ dados: deB64(F.marcarLida.res) }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'lida', com: '183164343' }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'lida', com: '183164343' }, S.ctx));
   assert.equal(cheia.resultado.body.recibos.length, 2);
 });
 
 test('chat: conversas, mensagens, perfis e confirmar montam o pedido do WME', async () => {
   const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: deB64(F.perfis.res) }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'perfis', ids: ['183164343'] }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'perfis', ids: ['183164343'] }, S.ctx));
   assert.deepEqual(resultado.body.perfis, [{ id: '183164343', nome: 'cafanha' }]);
   assert.equal(pedidos[0].metodo, 'GetProfileInfo');
   const conv = await comWaze(() => respostaGrpc({ dados: deB64(F.conversas.res) }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'conversas', lidoAte: 1790182189049 }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'conversas', lidoAte: 1790182189049 }, S.ctx));
   assert.deepEqual(conv.resultado.body.conversas, []);
   assert.equal(Number(um(g.lerCampos(conv.pedidos[0].corpo), 6)), 1790182189049);
   const msgs = await comWaze(() => respostaGrpc({ dados: new Uint8Array() }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'mensagens', com: '12444348', antesDe: 1790182220160 }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'mensagens', com: '12444348', antesDe: 1790182220160 }, S.ctx));
   assert.deepEqual(msgs.resultado.body.mensagens, []);
   assert.equal(Number(um(g.lerCampos(msgs.pedidos[0].corpo), 3)), 1790182220160);
   const conf = await comWaze(() => respostaGrpc({ dados: new Uint8Array() }),
-    () => dispatch('chat', { cookies: COOKIES, acao: 'confirmar', ids: ['dc76ba10-b76e-11f1-ad63-37a65b87598a'] }, {}));
+    () => dispatch('chat', { ...S.dados, acao: 'confirmar', ids: ['dc76ba10-b76e-11f1-ad63-37a65b87598a'] }, S.ctx));
   assert.equal(conf.resultado.status, 200);
   for (const extra of [{ acao: 'perfis', ids: [] }, { acao: 'perfis', ids: Array(51).fill('1') }, { acao: 'mensagens' }, { acao: 'conversas', antesDe: -1 }, { acao: 'confirmar', ids: ['x'] }]) {
-    const r = await comWaze(() => assert.fail('não podia ter ido ao Waze'), () => dispatch('chat', { cookies: COOKIES, ...extra }, {}));
+    const r = await comWaze(() => assert.fail('não podia ter ido ao Waze'), () => dispatch('chat', { ...S.dados, ...extra }, S.ctx));
     assert.equal(r.resultado.status, 400, JSON.stringify(extra).slice(0, 60));
   }
 });

@@ -6,6 +6,31 @@ const safeLS = {
     remove(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
 
+// Só as linhas do Waze saem do aparelho no login. O cookies.txt que as
+// extensões exportam é o NAVEGADOR INTEIRO (medido no arquivo do owner: 4.370
+// cookies de 362 domínios, 21 do waze.com): o servidor já filtrava na entrada,
+// mas o chaveiro completo viajava até ele. A régua aqui é a LARGA, qualquer
+// *.waze.com; quem estreita pro host da API é o servidor (`cookieValePraHost`).
+// `#HttpOnly_` é o prefixo de cookie HttpOnly no formato Netscape (curl,
+// extensões do Firefox) e passa como veio: quem o normaliza é o servidor.
+// Sem TAB é o formato de cabeçalho (`a=b; c=d`), que não diz o domínio; é o que
+// a extensão do Chrome manda, já só do Waze, e vai como veio.
+// Os TRÊS servidores do WME: América do Norte, resto do mundo e Israel. Havia
+// um quarto, `world`, que era a América do Norte com outro nome (ver
+// `WAZE_REGIONS` no core, onde está medido que `na-Descartes` não existe).
+const REGIOES_DO_WAZE = ['row', 'na', 'il'];
+
+function soCookiesDoWaze(texto) {
+    const s = String(texto || '');
+    if (!s.includes('\t')) return s.trim();
+    return s.split('\n').filter((linha) => {
+        const t = linha.trim().replace(/^#HttpOnly_/, '');
+        if (!t || t[0] === '#') return false;
+        const dominio = t.split(/\s+/)[0].replace(/^\./, '').toLowerCase();
+        return dominio === 'waze.com' || dominio.endsWith('.waze.com');
+    }).join('\n');
+}
+
 const API = {
     baseUrl: '/api',
     sessionToken: null,
@@ -34,13 +59,17 @@ const API = {
     },
 
     setRegion(region) {
-        this.region = region || 'row';
+        this.region = REGIOES_DO_WAZE.includes(region) ? region : 'row';
         safeLS.set('waze_region', this.region);
     },
 
     getRegion() {
         const stored = safeLS.get('waze_region');
         if (stored) this.region = stored;
+        // MIGRACAO: regiao-world — `world` era a América do Norte com outro
+        // nome (ver `WAZE_REGIONS` no core); quem a escolheu vai pra `na`.
+        if (this.region === 'world') { this.region = 'na'; safeLS.set('waze_region', 'na'); }
+        if (!REGIOES_DO_WAZE.includes(this.region)) this.region = 'row';
         return this.region;
     },
 
@@ -296,8 +325,12 @@ const API = {
     },
 
     async testCookies(cookies, region, countryId) {
+        const soDoWaze = soCookiesDoWaze(cookies);
+        if (!soDoWaze.trim()) {
+            return { success: false, errorKey: 'srv.err.cookieFormatExport', error: t('srv.err.cookieFormatExport') };
+        }
         const result = await this._post('testar-cookies', {
-            cookies,
+            cookies: soDoWaze,
             region: region || this.getRegion(),
             countryId: countryId || this.getCountry()
         });
@@ -324,14 +357,18 @@ const API = {
     // `presenca` (opcional): a posição do card na tela, de carona na ação — o
     // servidor a escreve no mapa do WME na mesma ida (fase 2). Sem ela, o corpo
     // sai exatamente como sempre saiu.
-    async markAsRead(venueID, updateRequestID, presenca) {
+    // `regiao` é a do GESTO (ver `handleReject`): a ação pode sair segundos ou
+    // dias depois (janela do Desfazer, retentativa, fila de saída), e a região
+    // do filtro pode ter mudado nesse meio. Pedido mandado ao servidor errado
+    // volta "não encontrado", que o app lê como "já tratado" e conta como feito.
+    async markAsRead(venueID, updateRequestID, presenca, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return { success: false, error: t('api.error.noSession') };
         }
         return this._post('marcar-lido', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             updateRequestID,
             ...(presenca ? { presenca } : {})
@@ -353,28 +390,28 @@ const API = {
     // Guarda (ou solta) o pedido na estrela do próprio editor. `value` vai
     // EXPLÍCITO: o core exige boolean estrito e não tem padrão, porque é uma
     // flag de dois lados e coerção decidiria o lado errado em silêncio.
-    async guardarPedido(venueID, updateRequestID, value) {
+    async guardarPedido(venueID, updateRequestID, value, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return { success: false, error: t('api.error.noSession') };
         }
         return this._post('guardar-pedido', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             updateRequestID,
             value: value === true
         });
     },
 
-    async rejectPlace(venueID, updateRequestID, presenca) {
+    async rejectPlace(venueID, updateRequestID, presenca, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return { success: false, error: t('api.error.noSession') };
         }
         return this._post('validar-place', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             updateRequestID,
             ...(presenca ? { presenca } : {})
@@ -446,14 +483,15 @@ const API = {
         });
     },
 
-    async getProfile() {
+    // `regiao` só pra quem PERGUNTA a outro servidor (ver `paisDoPerfil`).
+    async getProfile(regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return { success: false, error: t('api.error.noSession') };
         }
         return this._post('perfil', {
             sessionToken,
-            region: this.getRegion()
+            region: regiao || this.getRegion()
         });
     },
 

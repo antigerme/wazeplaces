@@ -101,6 +101,8 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(),
     pedidosEmAndamento: new Set(), pousosDaPagina: new Map(), offlineLigado: () => false,
     offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
+    // O treino tem fila de EXEMPLOS: a busca não roda com ele ativo.
+    Treino: { ativo: false },
     console: { error: () => {} },
   };
   const fontes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage']
@@ -309,11 +311,15 @@ test('uma página que falha no meio da leitura guarda o que já veio e marca a f
 });
 
 // ── o diário e a varredura do offline ─────────────────────────────────────
-test('a abertura não é reposição; a reposição anota no diário e chama a varredura do offline', async () => {
+test('a abertura não é reposição; TODA busca que traz pedido chama a varredura do offline', async () => {
+  // Até a auditoria de 2026-09-25 a abertura NÃO chamava, contando com "a
+  // próxima resposta que chegar" — e a primeira prova de rede (a própria busca)
+  // roda antes de a fila existir: quem abria o app em casa e não triava saía
+  // sem nada preparado, com as Preferências dizendo "Pronto".
   const waze = wazeVivo(12);
   const m = montar(waze);
   await m.app.fetchNextPage();
-  assert.equal(m.varreduras.length, 0, 'a abertura chamou a varredura — quem cuida dela são os gatilhos de sempre');
+  assert.equal(m.varreduras.length, 1, 'a abertura não preparou o offline');
   assert.ok(!m.diario.some(([k]) => k === 'busca.reposicao'), 'a abertura não é reposição');
   for (const p of m.AppState.queue.splice(0, 3)) waze.tratar(chave(p), 'rejeitar');
   await m.app.fetchNextPage();
@@ -321,6 +327,34 @@ test('a abertura não é reposição; a reposição anota no diário e chama a v
   assert.ok(linha, 'a reposição não foi anotada');
   assert.deepEqual(Object.keys(linha[1]).sort(), ['hasMore', 'jaVistos', 'novos', 'paginas'],
     'o diário roda pra todo editor: só contagens');
-  assert.equal(m.varreduras.length, 1, 'o que entrou numa reposição não foi pra varredura');
+  assert.equal(m.varreduras.length, 2, 'o que entrou numa reposição não foi pra varredura');
   assert.equal(m.AppState.ultimaBusca.paginas, 1);
+});
+
+// ── o treino e a reentrância (auditoria de 2026-09-25) ────────────────────
+test('treino ativo: a busca NÃO roda — pedido real pousaria na fila de exemplos', async () => {
+  const waze = wazeVivo(12);
+  const m = montar(waze);
+  m.deps.Treino.ativo = true;
+  await m.app.fetchNextPage();
+  assert.deepEqual(waze.pedidas, [], 'buscou com o treino ativo');
+  assert.equal(m.AppState.queue.length, 0);
+  // CONTROLE: fora do treino a mesma chamada busca.
+  m.deps.Treino.ativo = false;
+  await m.app.fetchNextPage();
+  assert.deepEqual(waze.pedidas, [1]);
+});
+
+test('`fetching` preso SEM promessa não vira laço: a busca sai de novo', async () => {
+  // Era o estado que o treino deixava (restaurava `fetching = true` depois de a
+  // busca terminar), e o `startFetching` girava em microtarefa pra sempre
+  // porque a reentrância devolvia `Promise.resolve()` sem buscar nada.
+  const waze = wazeVivo(12);
+  const m = montar(waze);
+  m.AppState.fetching = true;
+  m.AppState._fetchPromise = null;
+  await m.app.fetchNextPage();
+  assert.deepEqual(waze.pedidas, [1], 'a busca não saiu com `fetching` preso');
+  assert.ok(m.AppState.queue.length > 0);
+  assert.equal(m.AppState.fetching, false);
 });

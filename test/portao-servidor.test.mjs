@@ -1,0 +1,320 @@
+// O servidor, pela auditoria de 2026-09-25. Cada teste daqui foi visto
+// REPROVANDO com o conserto desfeito (gotcha #28, pergunta 1).
+//
+// O furo principal era o portão: o `isUserAllowed` (L2+AM ou staff) só roda no
+// `testar-cookies`, e duas portas laterais o contornavam — o `sessao` criava
+// sessão de cookies crus (e era o PADRÃO de quem não mandava `action`), e o
+// `resolveCookies` aceitava `cookies` crus no corpo de QUALQUER rota.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { dispatch, categorizeWazeError, filterWazeCookies, prepareAuth } from '../server/core.mjs';
+import { readBody } from '../server/corpo.mjs';
+import { sessaoDeTeste } from './_sessao.mjs';
+
+const NETSCAPE = (d, n, v, httpOnly = false) => `${httpOnly ? '#HttpOnly_' : ''}${d}\tTRUE\t/\tTRUE\t9999999999\t${n}\t${v}`;
+const COOKIES = [NETSCAPE('.waze.com', '_csrf_token', 'csrf-abc'), NETSCAPE('.waze.com', '_web_session', 'sess-xyz')].join('\n');
+
+// Troca o fetch por um Waze que ANOTA cada chamada e responde o que o teste mandar.
+async function comWaze(responder, fn) {
+  const original = globalThis.fetch;
+  const chamadas = [];
+  globalThis.fetch = async (url, init = {}) => {
+    chamadas.push({ url: String(url), init });
+    return responder(String(url), init);
+  };
+  try {
+    return { r: await fn(), chamadas };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+const naoPodiaIrAoWaze = () => { throw new Error('não podia ter ido ao Waze'); };
+const json = (o, status = 200) => new Response(typeof o === 'string' ? o : JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
+
+// ── o portão ────────────────────────────────────────────────────────────────
+
+test('sessao: não cria sessão — nem com `create`, nem sem `action` (era o padrão)', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  const antes = s.store.mem.size;
+  for (const corpo of [{ cookies: COOKIES }, { action: 'create', cookies: COOKIES }, {}]) {
+    const { r, chamadas } = await comWaze(naoPodiaIrAoWaze, () => dispatch('sessao', corpo, s.ctx));
+    assert.equal(r.status, 400, JSON.stringify(corpo).slice(0, 60));
+    assert.equal(r.body.errorKey, 'srv.err.badAction');
+    assert.ok(!r.body.sessionToken, 'devolveu token sem passar pelo portão do login');
+    assert.equal(chamadas.length, 0);
+  }
+  assert.equal(s.store.mem.size, antes, 'gravou sessão no store');
+});
+
+// Toda rota que age em nome de alguém. Os corpos passam na validação de cada
+// uma, então o 401 só pode vir da falta de sessão.
+const ROTAS = {
+  'validar-place': { venueID: 'v1', updateRequestID: 'u1' },
+  'marcar-lido': { venueID: 'v1', updateRequestID: 'u1' },
+  'guardar-pedido': { venueID: 'v1', updateRequestID: 'u1', value: true },
+  'buscar-places': { countryId: 30 },
+  'renomear-local': { venueID: 'v1', nome: 'Padaria' },
+  'excluir-foto': { venueID: 'v1', imageID: 'i1', lat: -23.5, lon: -46.6 },
+  perfil: {},
+  'lista-paises': {},
+  'lista-estados': { countryId: 30 },
+  parear: { action: 'create' },
+  'presenca-waze': { caixa: [-1, -1, 1, 1] },
+  'presenca-app': { pais: 30, userId: '1' },
+  chat: { acao: 'naoLidas' },
+};
+
+test('rotas: `cookies` crus no corpo NÃO valem como sessão — 401, sem ir ao Waze', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  for (const [rota, extra] of Object.entries(ROTAS)) {
+    const { r, chamadas } = await comWaze(naoPodiaIrAoWaze, () => dispatch(rota, { cookies: COOKIES, region: 'row', ...extra }, s.ctx));
+    assert.equal(r.status, 401, `${rota}: HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
+    assert.equal(r.body.errorCategory, 'unauthorized', rota);
+    assert.equal(chamadas.length, 0, `${rota} foi ao Waze com os cookies crus`);
+  }
+});
+
+test('rotas: CONTROLE — com a sessão, as mesmas rotas vão ao Waze (o instrumento enxerga)', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  for (const rota of ['validar-place', 'marcar-lido', 'perfil']) {
+    const { chamadas } = await comWaze(() => json({}), () => dispatch(rota, { ...s.dados, region: 'row', ...ROTAS[rota] }, s.ctx));
+    assert.ok(chamadas.length > 0, `${rota} com sessão não chamou o Waze — o teste acima passaria por vácuo`);
+  }
+});
+
+test('sessao destroy: token inventado não gasta o apagamento do KV (a cota curta)', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  let apagamentos = 0;
+  const apagar = s.store.delete;
+  s.store.delete = async (k) => { apagamentos++; return apagar(k); };
+  for (const lixo of ['inventado', { x: 1 }, 42]) {
+    const r = await dispatch('sessao', { action: 'destroy', sessionToken: lixo }, s.ctx);
+    assert.equal(r.body.success, true, 'o "Sair" responde igual — quem saiu não precisa saber');
+  }
+  assert.equal(apagamentos, 0, 'apagou no KV por um token que não existe');
+  await dispatch('sessao', { action: 'destroy', sessionToken: s.sessionToken }, s.ctx);
+  assert.equal(apagamentos, 1, 'a sessão de verdade não foi apagada');
+  assert.equal(await s.sessions.loadSession(s.sessionToken), null);
+});
+
+// O `/Session` com os campos do portão — tipos MEDIDOS nas duas contas do owner.
+const SESSAO_WAZE = (campos) => ({ userName: 'fulano', areas: [], managedAreas: [], ...campos });
+
+test('perfil: reconfere o portão — quem caiu abaixo de L2+AM perde a sessão', async () => {
+  const casos = [
+    [{ rank: 1, isAreaManager: true, isStaff: false }, true],    // L2+AM, a fronteira
+    [{ rank: 0, isAreaManager: false, isStaff: true }, true],    // staff
+    [{ rank: 0, isAreaManager: true, isStaff: false }, false],   // L1+AM
+    [{ rank: 5, isAreaManager: false, isStaff: false }, false],  // L6 sem área
+  ];
+  for (const [campos, entra] of casos) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(() => json(SESSAO_WAZE(campos)), () => dispatch('perfil', { ...s.dados, region: 'row' }, s.ctx));
+    const quem = JSON.stringify(campos);
+    if (entra) {
+      assert.equal(r.status, 200, quem);
+      assert.equal(r.body.success, true, quem);
+      assert.ok(await s.sessions.loadSession(s.sessionToken), `${quem}: a sessão de quem passa sumiu`);
+    } else {
+      assert.equal(r.status, 403, quem);
+      assert.equal(r.body.errorCategory, 'access_denied', quem);
+      assert.equal(r.body.profile.userName, 'fulano', 'o diálogo de acesso negado mostra o perfil');
+      assert.equal(await s.sessions.loadSession(s.sessionToken), null, `${quem}: a sessão seguiu valendo`);
+    }
+  }
+});
+
+test('perfil: /Session SEM os campos do portão não derruba ninguém (mudança do Waze não desloga todo mundo)', async () => {
+  for (const campos of [{}, { rank: '0', isAreaManager: true, isStaff: false }, { rank: 0, isAreaManager: null, isStaff: false }]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(() => json(SESSAO_WAZE(campos)), () => dispatch('perfil', { ...s.dados, region: 'row' }, s.ctx));
+    assert.equal(r.status, 200, JSON.stringify(campos));
+    assert.ok(await s.sessions.loadSession(s.sessionToken));
+  }
+});
+
+// ── o resto do servidor ─────────────────────────────────────────────────────
+
+test('dispatch: nome herdado de Object.prototype não é rota', async () => {
+  for (const nome of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+    const r = await dispatch(nome, {}, {});
+    assert.equal(r.status, 404, `/api/${nome} respondeu ${r.status}`);
+  }
+});
+
+test('2xx: o texto do corpo não vira "já tratado" — só o errorList decide', () => {
+  const c = (h, b) => categorizeWazeError(h, b).category;
+  for (const nome of ['Duplicate Keys Ltd', 'Already Home', 'No Longer Bar', 'Updated By Another Café']) {
+    assert.notEqual(c(200, JSON.stringify({ venues: { v1: { name: nome } } })), 'already_processed', nome);
+  }
+  // CONTROLE: o errorList vale em 2xx, e a pista de texto segue valendo em ERRO.
+  assert.equal(c(200, JSON.stringify({ errorList: [{ code: 702, details: 'was not found' }] })), 'already_processed');
+  assert.equal(c(400, 'this request was already handled'), 'already_processed');
+});
+
+test('renomear-local: nome com "Duplicate" grava e o app fica sabendo (não volta como "já tratado")', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  const nome = 'Duplicate Keys Ltd';
+  const { r } = await comWaze(() => json({ status: 0, synced: true, venues: { v1: { name: nome } } }),
+    () => dispatch('renomear-local', { ...s.dados, region: 'row', venueID: 'v1', nome }, s.ctx));
+  assert.equal(r.body.success, true, JSON.stringify(r.body));
+  assert.equal(r.body.nome, nome);
+});
+
+test('#HttpOnly_ (curl, extensões do Firefox): a sessão HttpOnly entra, não vira comentário', async () => {
+  const arq = ['# Netscape HTTP Cookie File',
+    NETSCAPE('.waze.com', '_csrf_token', 'csrf-abc'),
+    NETSCAPE('.waze.com', '_web_session', 'sess-xyz', true),
+    NETSCAPE('.google.com', 'SID', 'de-terceiro', true)].join('\n');
+  const { cookieHeader, csrf } = prepareAuth(filterWazeCookies(arq));
+  assert.match(cookieHeader, /(^|; )_web_session=sess-xyz(;|$)/, 'o _web_session HttpOnly ficou de fora');
+  assert.equal(csrf, 'csrf-abc');
+  assert.doesNotMatch(cookieHeader, /SID=/, 'cookie de terceiro vazou pro Waze');
+
+  // Ponta a ponta pelo login: o Cookie que sai pro Waze leva a sessão.
+  const s = await sessaoDeTeste(COOKIES);
+  const { r, chamadas } = await comWaze(() => json(SESSAO_WAZE({ rank: 1, isAreaManager: true, isStaff: false })),
+    () => dispatch('testar-cookies', { cookies: arq, region: 'row' }, s.ctx));
+  assert.equal(r.body.success, true, JSON.stringify(r.body));
+  assert.match(String(chamadas[0].init.headers.Cookie), /_web_session=sess-xyz/);
+});
+
+test('corpo `null` do Waze: resposta inválida, não "Erro interno"', async () => {
+  for (const rota of ['perfil', 'lista-paises', 'lista-estados']) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(() => json('null'), () => dispatch(rota, { ...s.dados, region: 'row', countryId: 30 }, s.ctx));
+    assert.equal(r.status, 500, rota);
+    assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `${rota}: ${r.body.errorKey}`);
+  }
+  // A releitura do excluir-foto: `null` virava TypeError dentro do `relerLocal`.
+  const s = await sessaoDeTeste(COOKIES);
+  const { r, chamadas } = await comWaze(() => json('null'),
+    () => dispatch('excluir-foto', { ...s.dados, region: 'row', venueID: 'v1', imageID: 'i1', lat: -23.5, lon: -46.6 }, s.ctx));
+  assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `excluir-foto: ${r.body.errorKey}`);
+  assert.ok(chamadas.every((c) => (c.init.method || 'GET') === 'GET'), 'escreveu no Waze sem ter lido o local');
+});
+
+test('releitura do excluir-foto: o prazo gravado no store respeita o mínimo do KV (60 s)', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  // Store fiel ao KV do Cloudflare: `expirationTtl` abaixo de 60 LANÇA.
+  const prazos = [];
+  const gravar = s.store.put;
+  s.store.put = async (k, v, ttl) => {
+    prazos.push(ttl);
+    if (ttl !== undefined && ttl < 60) throw new Error(`Invalid expiration_ttl of ${ttl}. Expiration TTL must be at least 60.`);
+    return gravar(k, v, ttl);
+  };
+  const venue = { id: 'v1', images: [{ id: 'i1', approved: true }, { id: 'i2', approved: true }] };
+  await comWaze((url, init) => (init.method === 'POST' ? json({ status: 0 }) : json({ venues: { objects: [venue] } })),
+    () => dispatch('excluir-foto', { ...s.dados, region: 'row', venueID: 'v1', imageID: 'i1', lat: -23.5, lon: -46.6, action: 'preparar' }, s.ctx));
+  const doCache = prazos.filter((p) => p !== undefined && p < 3600);
+  assert.ok(doCache.length > 0, 'a releitura não tentou gravar o cache — o teste não mediu nada');
+  assert.ok(doCache.every((p) => p >= 60), `prazo abaixo do mínimo do KV: ${doCache}`);
+});
+
+test('VM: acento cortado na divisa entre dois pedaços do corpo chega inteiro', async () => {
+  const texto = JSON.stringify({ nome: 'São João 🌽' });
+  const bytes = Buffer.from(texto, 'utf8');
+  // Corta DENTRO do "ã" (2 bytes em UTF-8) e dentro do emoji (4 bytes).
+  const i = bytes.indexOf(Buffer.from('ã')) + 1;
+  const j = bytes.indexOf(Buffer.from('🌽')) + 2;
+  const req = new EventEmitter();
+  req.destroy = () => {};
+  const res = { headersSent: false, writeHead() {}, end() {} };
+  const lido = readBody(req, res);
+  req.emit('data', bytes.subarray(0, i));
+  req.emit('data', bytes.subarray(i, j));
+  req.emit('data', bytes.subarray(j));
+  req.emit('end');
+  assert.equal(await lido, texto);
+});
+
+// ── o que SAI do aparelho no login ──────────────────────────────────────────
+// O cookies.txt das extensões é o navegador INTEIRO (medido no do owner: 4.370
+// cookies de 362 domínios, 21 do waze.com). O servidor sempre filtrou na
+// entrada, mas o chaveiro completo viajava até ele.
+import { readFileSync } from 'node:fs';
+const API_JS = readFileSync(new URL('../js/api.js', import.meta.url), 'utf8');
+function fatiarDoApi(nome) {
+  const i = API_JS.search(new RegExp('^function ' + nome + '\\(', 'm'));
+  assert.ok(i >= 0, `${nome} sumiu do api.js`);
+  let prof = 0, fim = -1;
+  for (let j = API_JS.indexOf('{', i); j < API_JS.length; j++) {
+    if (API_JS[j] === '{') prof++;
+    else if (API_JS[j] === '}') { prof--; if (prof === 0) { fim = j + 1; break; } }
+  }
+  return new Function(API_JS.slice(i, fim) + `; return ${nome};`)();
+}
+
+test('login: só as linhas do Waze saem do aparelho (e o formato de cabeçalho vai como veio)', () => {
+  const so = fatiarDoApi('soCookiesDoWaze');
+  const arq = ['# Netscape HTTP Cookie File',
+    NETSCAPE('.google.com', 'SID', 'de-terceiro'),
+    NETSCAPE('.waze.com', '_csrf_token', 'csrf-abc'),
+    NETSCAPE('.waze.com', '_web_session', 'sess-xyz', true),
+    NETSCAPE('www.waze.com', 'outro', 'v'),
+    NETSCAPE('github.com', 'user_session', 'de-terceiro', true),
+    NETSCAPE('evilwaze.com', 'x', 'de-terceiro'),
+    NETSCAPE('waze.com.br', 'y', 'de-terceiro')].join('\n');
+  const saiu = so(arq);
+  assert.doesNotMatch(saiu, /de-terceiro/, 'cookie de outro site saiu do aparelho');
+  assert.match(saiu, /_csrf_token\tcsrf-abc/);
+  assert.match(saiu, /^#HttpOnly_\.waze\.com\t.*_web_session\tsess-xyz$/m, 'a sessão HttpOnly ficou pra trás');
+  assert.match(saiu, /www\.waze\.com\t.*outro/);
+  // Formato de cabeçalho (o que a extensão do Chrome manda): sem domínio pra filtrar.
+  assert.equal(so('_csrf_token=a; _web_session=b'), '_csrf_token=a; _web_session=b');
+  // E o servidor aceita o que sobrou, como aceitava o arquivo inteiro.
+  const { cookieHeader, csrf } = prepareAuth(filterWazeCookies(saiu));
+  assert.equal(csrf, 'csrf-abc');
+  assert.match(cookieHeader, /_web_session=sess-xyz/);
+});
+
+test('login: o testar-cookies manda o arquivo FILTRADO, e sem linha do Waze nem sai', async () => {
+  // O `testCookies` do API chama o `soCookiesDoWaze`; o guard é de fonte porque
+  // o objeto API não se instancia fora do navegador.
+  const corpo = /async testCookies\([^)]*\) \{([\s\S]*?)\n    \},/.exec(API_JS);
+  assert.ok(corpo, 'testCookies sumiu do api.js');
+  assert.match(corpo[1], /const soDoWaze = soCookiesDoWaze\(cookies\);/);
+  assert.match(corpo[1], /cookies: soDoWaze,/, 'o testar-cookies voltou a mandar o arquivo inteiro');
+  assert.match(corpo[1], /if \(!soDoWaze\.trim\(\)\) \{\s*return \{ success: false, errorKey: 'srv\.err\.cookieFormatExport'/);
+});
+
+// ── a América do Norte ──────────────────────────────────────────────────────
+// `na-Descartes` NÃO EXISTE: MEDIDO em 2026-09-25, `Session`, `info/config`,
+// `LocationSearch/Countries` e `Issues/Search/List` dão 404 lá e 200 em
+// `/Descartes/` (a fila dos EUA com 512 pedidos). Todo editor dos EUA e do
+// Canadá que escolhia "NA" ficava sem app.
+test('região NA: toda chamada vai pro servidor SEM prefixo (`/Descartes/`), e `world` é a mesma coisa', async () => {
+  for (const region of ['na', 'world', 'NA']) {
+    const s = await sessaoDeTeste(COOKIES);
+    const rotas = [['buscar-places', { countryId: 235 }], ['perfil', {}], ['lista-paises', {}], ['marcar-lido', { venueID: 'v1', updateRequestID: 'u1' }]];
+    for (const [rota, extra] of rotas) {
+      const { chamadas } = await comWaze(() => json({}), () => dispatch(rota, { ...s.dados, region, ...extra }, s.ctx));
+      assert.ok(chamadas.length > 0, `${rota} não chamou o Waze`);
+      for (const c of chamadas) {
+        assert.match(c.url, /^https:\/\/www\.waze\.com\/Descartes\//, `${region} ${rota}: ${c.url}`);
+      }
+    }
+  }
+  // CONTROLE: as outras regiões seguem com prefixo.
+  const s = await sessaoDeTeste(COOKIES);
+  for (const [region, prefixo] of [['row', 'row-Descartes'], ['il', 'il-Descartes'], ['xx', 'row-Descartes']]) {
+    const { chamadas } = await comWaze(() => json({}), () => dispatch('perfil', { ...s.dados, region }, s.ctx));
+    assert.ok(chamadas[0].url.startsWith(`https://www.waze.com/${prefixo}/`), `${region}: ${chamadas[0].url}`);
+  }
+});
+
+test('excluir-foto: foto PENDENTE (a de um pedido) não sai pela lixeira — só a aprovada', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  const venue = { id: 'v1', images: [{ id: 'aprovada', approved: true }, { id: 'pendente', approved: false }] };
+  const responder = (url, init) => (init.method === 'POST' ? json({ status: 0 }) : json({ venues: { objects: [venue] } }));
+  const pend = await comWaze(responder, () => dispatch('excluir-foto', { ...s.dados, region: 'row', venueID: 'v1', imageID: 'pendente', lat: -23.5, lon: -46.6 }, s.ctx));
+  assert.equal(pend.r.status, 400);
+  assert.equal(pend.r.body.errorKey, 'srv.err.photoNotApproved');
+  assert.ok(pend.chamadas.every((c) => (c.init.method || 'GET') === 'GET'), 'escreveu a lista sem a foto pendente');
+  // CONTROLE: a aprovada sai (a escrita acontece).
+  const s2 = await sessaoDeTeste(COOKIES);
+  const apr = await comWaze(responder, () => dispatch('excluir-foto', { ...s2.dados, region: 'row', venueID: 'v1', imageID: 'aprovada', lat: -23.5, lon: -46.6 }, s2.ctx));
+  assert.ok(apr.chamadas.some((c) => c.init.method === 'POST'), 'a foto aprovada não foi excluída — o teste não distingue');
+});

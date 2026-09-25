@@ -337,7 +337,14 @@ test('manifest: texto neutro e lang igual ao LANG_FALLBACK', () => {
     }
   };
   colher(man, '');
-  const comAcento = textos.filter(([, v]) => /[ãõçáéíóúâêôàèùïüñ]/i.test(v));
+  // E o <title> e a descrição da página: são a PRÉVIA do link (Discord,
+  // WhatsApp, fórum) e nada os traduz — o `applyI18n` só roda depois. Estavam em
+  // português ("Waze Places - Validação"), o que ainda contradizia o "nunca aprova".
+  const html = read('index.src.html');
+  textos.push(['<title>', (/<title>([^<]*)<\/title>/.exec(html) || [])[1] || '']);
+  textos.push(['<meta description>', (/<meta name="description" content="([^"]*)"/.exec(html) || [])[1] || '']);
+  assert.ok(textos.every(([, v]) => v), 'o <title> ou a descrição sumiram — o guard ficaria cego');
+  const comAcento = textos.filter(([, v]) => /[ãõçáéíóúâêôàèùïüñ]/i.test(v) || /Valida[çc]/i.test(v));
   assert.equal(comAcento.length, 0,
     'texto acentuado no manifest (ele é servido igual pra todo mundo):\n' +
     comAcento.map(([c, v]) => `  ${c} → ${v}`).join('\n'));

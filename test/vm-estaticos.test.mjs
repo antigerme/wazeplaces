@@ -283,6 +283,12 @@ test('.assetsignore: toda entrada da raiz tem DECISÃO — frontend ou ignorada'
   // E os FONTES, que são entrada de build e não asset (mesma decisão do index.src.html)
   assert.ok(ignorado('js/app.js', PADROES), 'o fonte comentado do app voltou a ser publicado');
   assert.ok(ignorado('css/styles.css', PADROES), 'o fonte do CSS voltou a ser publicado');
+  // E o que só existe na máquina de quem desenvolve: um `wrangler deploy` local
+  // publica o diretório como ele está, e é nele que o cookies.txt do owner
+  // circula (seção 🔑 do CLAUDE.md), ao lado de logs e diagnósticos com token.
+  for (const f of ['cookies.txt', 'antigerme_cookies.txt', 'tools/smoke.log', 'diagnostico-2026-09-25.zip']) {
+    assert.ok(ignorado(f, PADROES), `${f} seria PUBLICADO num deploy feito da máquina local`);
+  }
 });
 
 test('.assetsignore: nada que o app CARREGA pode estar ignorado', () => {

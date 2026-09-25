@@ -15,7 +15,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile, utimes } from 'node:fs/promises';
+import { makeSessions } from '../server/core.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,15 +51,33 @@ async function comServidor(dir, porta, fn) {
 test('varredura da VM: preserva sessão viva e apaga pareamento vencido', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wp-gc-'));
 
-  const { token, arquivos } = await comServidor(dir, 8351, async (api) => {
-    const s = await api('sessao', { action: 'create', cookies: COOKIES });
-    assert.equal(s.success, true, 'não deu pra criar a sessão de teste');
-    const par = await api('parear', { action: 'create', sessionToken: s.sessionToken });
+  // A sessão nasce direto no disco, com a MESMA chave e o MESMO nome de arquivo
+  // que o adaptador usa: a rota que criava sessão de cookies crus (`sessao`
+  // com `create`) era o furo do portão e saiu. Entrar pelo `testar-cookies`
+  // exigiria o Waze de verdade.
+  const sessoes = makeSessions({
+    store: {
+      get: async (h) => { try { return await readFile(join(dir, 'sess_' + h), 'utf8'); } catch { return null; } },
+      put: async (h, v) => { await writeFile(join(dir, 'sess_' + h), v, { mode: 0o600 }); },
+      delete: async () => {},
+    },
+    keyBytes: new Uint8Array(32).fill(7),
+  });
+  const token = await sessoes.createSession(COOKIES);
+  // O cache da releitura do excluir-foto (`reler_…`) vale 15 s: um VELHO tem
+  // que sair na varredura, e não ficar os 21 dias de uma sessão.
+  const relerVelho = join(dir, 'sess_reler_' + 'a'.repeat(64));
+  await writeFile(relerVelho, '1|{}');
+  const umaHoraAtras = new Date(Date.now() - 3600 * 1000);
+  await utimes(relerVelho, umaHoraAtras, umaHoraAtras);
+
+  const { arquivos } = await comServidor(dir, 8351, async (api) => {
+    const par = await api('parear', { action: 'create', sessionToken: token });
     assert.ok(par.code, 'não deu pra criar o pareamento de teste');
-    return { token: s.sessionToken, arquivos: await readdir(dir) };
+    return { arquivos: await readdir(dir) };
   });
 
-  assert.equal(arquivos.length, 2, 'esperava sessão + pareamento no disco');
+  assert.equal(arquivos.filter((n) => !n.startsWith('sess_reler_')).length, 2, 'esperava sessão + pareamento no disco');
   const doPar = arquivos.filter((n) => n.startsWith('sess_pair_'));
   assert.equal(doPar.length, 1, 'o pareamento precisa ser reconhecível pelo NOME — é isso que a varredura usa');
 
@@ -81,8 +100,10 @@ test('varredura da VM: preserva sessão viva e apaga pareamento vencido', async 
     }
     assert.equal(depois.filter((n) => n.startsWith('sess_pair_')).length, 0,
       'pareamento vencido tinha que sair em até 10s — ele vale 5 min, não 21 dias');
-    assert.equal(depois.filter((n) => n.startsWith('sess_') && !n.startsWith('sess_pair_')).length, 1,
+    assert.equal(depois.filter((n) => n.startsWith('sess_') && !n.startsWith('sess_pair_') && !n.startsWith('sess_reler_')).length, 1,
       'a SESSÃO não pode ser apagada pela varredura');
+    assert.equal(depois.filter((n) => n.startsWith('sess_reler_')).length, 0,
+      'o cache da releitura de 1 h atrás seguiu no disco — ele vale 15 s, não 21 dias');
 
     // E ela tem que seguir funcionando de verdade, não só existir no disco.
     const r = await api('perfil', { sessionToken: token, region: 'row' });

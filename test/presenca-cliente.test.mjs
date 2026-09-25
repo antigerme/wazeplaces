@@ -742,3 +742,18 @@ test('diário: abrir a conversa e mandar — o desfecho, o tamanho e a categoria
   assert.deepEqual(anotados(c, 'chat.envio').at(-1), { ok: true, bytes: 'terceira'.length, comPedido: false, juntas: 2 });
   for (const s of ['mensagem_privada_unica', 'Padaria Estrela', CAF]) assert.ok(!JSON.stringify(c.chamadas.dfato).includes(s), `o diário levou ${s}`);
 });
+
+test('"Sair": resposta em voo que chega DEPOIS não recria o `waze_places_chat` (medido em produção)', () => {
+  // 2026-09-25: conversar, sair, e a chave estava de volta no aparelho — com a
+  // instalação, as conversas conhecidas e os ids a confirmar de quem saiu.
+  const c = novoCliente();
+  c.P.chatConhecer(['183164343']);
+  assert.ok(c.armazenado.has('waze_places_chat'), 'CONTROLE: com sessão, a conversa conhecida é guardada');
+  c.P.presencaEsquecer();
+  assert.ok(!c.armazenado.has('waze_places_chat'));
+  c.AppState.authenticated = false;             // o "Sair" já passou
+  c.P.chatConhecer(['12444348']);               // a resposta que estava em voo
+  c.P.chatGuardarAConfirmar('dc76ba10-b76e-11f1-ad63-37a65b87598a');
+  c.P.chatMarcarLidaAte('12444348', Date.now());
+  assert.ok(!c.armazenado.has('waze_places_chat'), 'a chave do chat voltou depois do "Sair"');
+});

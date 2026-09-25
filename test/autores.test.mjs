@@ -219,7 +219,9 @@ test('lote: quem agenda o lote pede o cancelamento ao sair', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function rejeitarLoteDoAutor');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('\nasync function', i));
-  assert.match(bloco, /scheduleAction\('reject', places, [^,]+, \{ aoSair: 'cancel' \}\)/,
+  // O executor leva a região do gesto (`{ regiao }`), então ele tem vírgula
+  // dentro: casa até o `{ aoSair` em vez de parar na primeira vírgula.
+  assert.match(bloco, /scheduleAction\('reject', places, \(\) => enviarLote\(places, \{ regiao \}\), \{ aoSair: 'cancel' \}\)/,
     'sem o aoSair o lote herda o despacho do card único');
 });
 
