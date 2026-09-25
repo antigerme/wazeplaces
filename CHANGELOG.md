@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.25-02
+
+### Corrigido
+- **O "Tudo limpo!" não aparece mais com pedidos pendentes.** Numa fila com mais de 500 pedidos, o Waze entrega a fila em páginas, e cada página é contada sobre a lista daquele momento. Quando a pessoa terminava a primeira página, os pedidos da segunda já tinham subido pra primeira: a segunda vinha vazia, e o app mostrava "Tudo limpo!" com dezenas de pedidos pendentes, que só apareciam ao atualizar. Agora o app sempre busca de novo a partir do começo da lista e deixa de fora o que a pessoa já viu. Os pedidos que chegam durante a triagem também passam a entrar.
+- **Sem sinal no meio da triagem, o app espera em vez de desistir.** Antes, a busca falhava com um aviso de erro e a fila não era mais completada. Agora, enquanto houver cards, ele segue sem avisar nada e busca de novo na próxima ação com sinal. Se a fila acabar sem sinal, a tela é "Você está sem conexão", e os pedidos voltam sozinhos quando a rede voltar.
+- **Com o "Disponível offline" marcado**, a fila guardada aberta sem rede termina em "Você está sem conexão" em vez de "Tudo limpo!", e o app volta a buscar sozinho quando a rede voltar. Os pedidos que entram numa nova busca já são preparados na hora (foto e mapa), sem esperar o próximo ciclo de 20 minutos.
+
 ## v2026.09.25-01
 
 ### Corrigido

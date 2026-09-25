@@ -68,7 +68,7 @@ function montar({ offline = true } = {}) {
   const estado = { offline };
   const fontes = ['chaveDoPedido', 'marcarEmAndamento', 'offlineLerPousos', 'registrarPouso',
     'offlinePodarPousos', 'semOsJaDecididos', 'carregarFilaDeSaida', 'salvarFilaDeSaida',
-    'enfileirarSaida', 'diagResumoDaSaida', 'semOsQueJaEstaoNaFila'].map(fatiar).join('\n');
+    'enfileirarSaida', 'diagResumoDaSaida', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila'].map(fatiar).join('\n');
   const deps = {
     safeLS,
     SAIDA_KEY: constante('SAIDA_KEY'),
@@ -84,11 +84,13 @@ function montar({ offline = true } = {}) {
     historyTodayKey: () => '2026-09-22',
     ondeAgora: () => '30',
     AppState: { queue: [], currentPlace: null },
+    pedidosQueEntraramNaFila: new Set(),
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + `
     return { chaveDoPedido, marcarEmAndamento, offlineLerPousos, registrarPouso, offlinePodarPousos,
-             semOsJaDecididos, carregarFilaDeSaida, enfileirarSaida, diagResumoDaSaida, semOsQueJaEstaoNaFila };`)(...nomes.map((n) => deps[n]));
+             semOsJaDecididos, carregarFilaDeSaida, enfileirarSaida, diagResumoDaSaida,
+             registrarEntradaNaFila, semOsQueJaPassaramPelaFila };`)(...nomes.map((n) => deps[n]));
   return { app, deps, guardado, escritas, diario, estado };
 }
 const P = (v, u, extra = {}) => ({ venueID: v, updateRequestID: u, ...extra });
@@ -245,16 +247,18 @@ test('a BUSCA filtra o que chega, e conta o filtrado', () => {
     'o instante da busca tem que ser tomado ANTES do pedido — depois, o pouso que acontece no meio passaria');
   assert.match(f, /const filtrada = semOsJaDecididos\(result\.places \|\| \[\], inicioDaBusca\);/,
     'a busca deixou de filtrar o que o aparelho já decidiu');
-  assert.match(f, /const novos = semOsQueJaEstaoNaFila\(filtrada\.places\);/,
-    'a busca deixou de tirar o que a fila JÁ tem — a página seguinte repete o local da divisa');
+  assert.match(f, /const novos = semOsQueJaPassaramPelaFila\(filtrada\.places\);/,
+    'a busca deixou de tirar o que já passou pela fila — relendo do topo, o Waze devolve o que continua pendente');
   assert.match(f, /const newPlaces = novos\.places;/, 'o que entra na fila tem que ser o FILTRADO dos dois jeitos');
-  const iDecididos = f.indexOf('semOsJaDecididos(result.places'), iNaFila = f.indexOf('semOsQueJaEstaoNaFila(filtrada.places)');
+  const iDecididos = f.indexOf('semOsJaDecididos(result.places'), iNaFila = f.indexOf('semOsQueJaPassaramPelaFila(filtrada.places)');
   assert.ok(iDecididos > 0 && iNaFila > iDecididos, 'a ordem é: primeiro o que já foi decidido, depois o que a fila já tem');
   assert.ok(!/result\.places \|\| \[\];/.test(f.replace('semOsJaDecididos(result.places || [], inicioDaBusca);', '')),
     'sobrou um uso da lista CRUA da busca');
   const iPush = f.indexOf('AppState.queue.push(...newPlaces);');
   const iTotal = f.indexOf('AppState.serverTotal += newPlaces.length;');
   assert.ok(iPush > 0 && iTotal > 0, '"Restam" tem que contar o filtrado: o que está saindo já foi feito');
+  assert.match(f, /AppState\.queue\.push\(\.\.\.newPlaces\);\s*\n\s*registrarEntradaNaFila\(newPlaces\);/,
+    'o que entra na fila tem que ser anotado NA HORA — sem isso a próxima busca o traz de volta');
   assert.match(f, /offlineGravarFila\(inicioDaBusca\);/,
     'a fila guardada tem que valer desde o COMEÇO da busca, não da hora de gravar');
 });
@@ -269,7 +273,7 @@ test('a página que repete o que a fila já tem não entra de novo — o medido'
   // página 1 na fila: o local C tem dois pedidos (C1, C2), e ele fica na divisa
   deps.AppState.queue = [P('A', 'a1'), P('B', 'b1'), P('C', 'c1'), P('C', 'c2')];
   const pagina2 = [P('C', 'c1'), P('C', 'c2'), P('D', 'd1'), P('E', 'e1')];
-  const r = app.semOsQueJaEstaoNaFila(pagina2);
+  const r = app.semOsQueJaPassaramPelaFila(pagina2);
   assert.deepEqual(r.places.map((p) => p.updateRequestID), ['d1', 'e1']);
   assert.equal(r.repetidos, 2, 'a conta dos repetidos vai pro diário: é a prova de que o filtro agiu');
   assert.equal(pagina2.length, 4, 'a lista que chegou não pode ser mexida');
@@ -279,7 +283,7 @@ test('o card na TELA conta, mesmo fora da fila; pedido sem id passa; e o lote n�
   const { app, deps } = montar();
   deps.AppState.queue = [];
   deps.AppState.currentPlace = P('A', 'a1');
-  const r = app.semOsQueJaEstaoNaFila([P('A', 'a1'), { name: 'sem id' }, P('B', 'b1'), P('B', 'b1')]);
+  const r = app.semOsQueJaPassaramPelaFila([P('A', 'a1'), { name: 'sem id' }, P('B', 'b1'), P('B', 'b1')]);
   assert.deepEqual(r.places.map((p) => p.updateRequestID ?? p.name), ['sem id', 'b1']);
   assert.equal(r.repetidos, 2);
 });
@@ -289,12 +293,39 @@ test('controle: fila vazia e nada na tela não tiram nada — o filtro não inve
   deps.AppState.queue = [];
   deps.AppState.currentPlace = null;
   const pagina = [P('A', 'a1'), P('B', 'b1')];
-  const r = app.semOsQueJaEstaoNaFila(pagina);
+  const r = app.semOsQueJaPassaramPelaFila(pagina);
   assert.equal(r.places.length, 2);
   assert.equal(r.repetidos, 0);
   // e o mesmo local com OUTRO pedido é outro card: a chave são os dois ids
   deps.AppState.queue = [P('A', 'a1')];
-  assert.equal(app.semOsQueJaEstaoNaFila([P('A', 'a2')]).places.length, 1);
+  assert.equal(app.semOsQueJaPassaramPelaFila([P('A', 'a2')]).places.length, 1);
+});
+
+// A busca relê a partir da página 1 (ver `test/busca-viva.test.mjs`), e o Waze
+// devolve de novo o que continua pendente lá — o pulado, o lido com "lidos
+// também". O que JÁ SAIU da fila também não volta.
+test('o que já PASSOU pela fila e saiu não volta; o registro guarda os dois ids', () => {
+  const { app, deps } = montar();
+  deps.AppState.queue = [];
+  deps.AppState.currentPlace = null;
+  app.registrarEntradaNaFila([P('A', 'a1'), { name: 'sem id' }]);
+  app.registrarEntradaNaFila(P(7, 12));
+  assert.deepEqual([...deps.pedidosQueEntraramNaFila].sort(), ['7|12', 'A|a1']);
+  const r = app.semOsQueJaPassaramPelaFila([P('A', 'a1'), P('7', '12'), P('B', 'b1')]);
+  assert.deepEqual(r.places.map((p) => p.updateRequestID), ['b1'], 'o que já passou voltou — inclusive com o id em outro tipo');
+  assert.equal(r.repetidos, 2);
+  assert.equal(deps.pedidosQueEntraramNaFila.size, 2, 'o filtro não pode anotar nada: quem anota é quem PÕE na fila');
+});
+
+test('fila nova esquece o que passou, e a fila guardada reaberta começa uma fila com a busca ligada', () => {
+  assert.match(fatiar('resetQueue'), /pedidosQueEntraramNaFila\.clear\(\);/,
+    'o "atualizar" deixou de trazer de volta o que a pessoa pulou');
+  const f = fatiar('offlineTentarAbrirSemRede');
+  assert.match(f, /pedidosQueEntraramNaFila\.clear\(\);\s*\n\s*registrarEntradaNaFila\(AppState\.queue\);/,
+    'a fila guardada não anotou o que trouxe — a busca, com a rede de volta, os traria de novo');
+  assert.match(f, /AppState\.hasMore = true;/, 'a fila guardada voltou a dizer "acabou"');
+  assert.ok(!/AppState\.hasMore = false;/.test(f),
+    'com `hasMore = false`, terminar a fila guardada mostra "Tudo limpo!" — mesmo com a rede de volta');
 });
 
 test('a REABERTURA SEM REDE filtra a foto, e desiste se tudo foi decidido', () => {

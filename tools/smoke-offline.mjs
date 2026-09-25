@@ -1607,6 +1607,55 @@ await p3.evaluate(() => { API.setSession(null); });
 await p3.close();
 atrasoBusca9b = 0;
 atrasoDecisao9b = () => 0;
+
+// 7. A FILA GUARDADA TERMINADA SEM REDE. Reaberta sem rede, ela voltava com
+//    `hasMore = false`, e terminá-la mostrava "Tudo limpo!" — com pedido ainda
+//    pendente no Waze, e mesmo com a rede de volta, porque nada mais buscava.
+//    A tela certa é a de "sem conexão" ("os pedidos voltam sozinhos quando a
+//    rede voltar"), e é o que a volta da rede tem que cumprir: aqui, trazendo
+//    um pedido que CHEGOU enquanto a pessoa tratava sem sinal.
+for (const i of [111, 112, 113]) pendentes9b.set(chave9b(SO_MAPA(i)), SO_MAPA(i));
+const p4 = await abrirFria9b('preparo 7');
+await esperarNaPagina(p4, () => typeof API !== 'undefined', 20000, 100);
+await p4.evaluate(() => { API.setSession('tok-9b'); });
+await p4.reload({ waitUntil: 'domcontentloaded' });
+await esperarNaPagina(p4, () => typeof AppState !== 'undefined' && AppState.queue.length === 4, 20000, 100);
+await p4.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+  offlineMarcarGesto(); offlineVarrer(); });
+await esperarNaPagina(p4, () => offlineUltimoResultado !== null, 60000, 250);
+const foto7 = await p4.evaluate(async () => ({ res: offlineUltimoResultado, n: ((await offlineLerFila()) || {}).places?.length }));
+await p4.close();
+diz('7: PRÉ-CONDIÇÃO — com rede, a fila guardada tem os 4 pendentes', foto7.res === 'pronto' && foto7.n === 4,
+  JSON.stringify(foto7));
+aviao = true; await ctx.setOffline(true);
+const p5 = await abrirFria9b('reaberta 7');
+await esperarNaPagina(p5, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'offline.abriu'), 20000, 100);
+const r5 = await p5.evaluate(() => ({ fila: AppState.queue.length, hasMore: AppState.hasMore }));
+pendentes9b.set(chave9b(SO_MAPA(114)), SO_MAPA(114));        // chega enquanto a pessoa está sem rede
+for (let i = 0; i < 4; i++) await decidir9b(p5, '.card-btn-reject', true);
+await dormir(300);
+const tela7 = await p5.evaluate(() => {
+  const aberto = (id) => !document.getElementById(id).classList.contains('hidden');
+  return { fila: AppState.queue.length, limpo: aberto('noMoreCards'), falha: aberto('loadErrorState'),
+           saida: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length };
+});
+diz('7: reaberta sem rede, a fila guardada volta dizendo "pode haver mais" — não "acabou"',
+  r5.fila === 4 && r5.hasMore === true, JSON.stringify(r5));
+diz('7: terminada SEM REDE, a tela é a de "sem conexão", nunca o "Tudo limpo!"',
+  tela7.fila === 0 && tela7.falha && !tela7.limpo && tela7.saida === 4, JSON.stringify(tela7));
+const k114 = chave9b(SO_MAPA(114));
+aviao = false; await ctx.setOffline(false);
+const chegou7 = await esperarNaPagina(p5, () => {
+  const p = AppState.currentPlace;
+  return !!p && AppState.queue.length === 1 && AppState.inFlightActions === 0;
+}, 25000, 200);
+const depois7 = await estadoDaFila9b(p5);
+diz('7: a rede de volta manda as 4 decisões e traz SOZINHA o pedido que chegou sem sinal',
+  chegou7.ok && depois7.frente === k114
+  && [111, 112, 113, 108].every((i) => decisoes9b.filter((d) => d.chave === chave9b(SO_MAPA(i))).length === 1),
+  JSON.stringify({ depois7, decisoes: decisoes9b.map((d) => d.chave) }));
+await p5.evaluate(() => { API.setSession(null); });
+await p5.close();
 await ctx.unroute('**/api/*', rotaApi9b);
 
 secao('9c. O DIAGNÓSTICO SOBREVIVE A FECHAR O APP — o número do botão e o relatório');

@@ -1676,14 +1676,16 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
-// ── A página 2 não repete o que a fila já tem ────────────────────────────
+// ── O local da divisa não entra duas vezes ────────────────────────────────
 //
 // MEDIDO na fila real do Brasil (2026-09-25): o Waze pagina por PEDIDO, mas cada
 // página traz o LOCAL com todos os pedidos pendentes dele, e o local que fica na
 // divisa vinha nas duas páginas — 5 pedidos repetidos em 697. O `fetchNextPage`
 // de verdade roda duas vezes contra uma busca de duas páginas que repete os dois
-// pedidos de um local; a fila tem que terminar sem repetido e o "Restam" contando
-// cada pedido uma vez só.
+// pedidos de um local. A segunda relê a página 1 (a busca sempre recomeça do
+// topo — ver o bloco "A fila VIVA", logo abaixo), acha só o que já passou pela
+// fila e anda até a 2; a fila tem que terminar sem repetido e o "Restam"
+// contando cada pedido uma vez só.
 {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
   const page = await ctx.newPage();
@@ -1711,23 +1713,186 @@ for (const status of [404, 403]) {
     AppState.authenticated = true;
     AppState.preferences.comoFuncionaVisto = true;
     AppState.profile = { userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
-    AppState.queue = []; AppState.currentPlace = null; AppState.serverTotal = 0;
-    AppState.nextPage = 1; AppState.hasMore = true; AppState.fetching = false;
+    resetQueue();
     await fetchNextPage();
     const depoisDa1 = AppState.queue.length;
     await fetchNextPage();
     const chaves = AppState.queue.map((p) => p.venueID + '|' + p.updateRequestID);
     return { depoisDa1, fila: chaves.length, distintos: new Set(chaves).size, restam: AppState.serverTotal,
-             diario: dfatoAnel.filter((e) => e && e.k === 'busca.repetidos').map((e) => e.n) };
+             diario: dfatoAnel.filter((e) => e && e.k === 'busca.reposicao')
+               .map((e) => ({ paginas: e.paginas, novos: e.novos, jaVistos: e.jaVistos })) };
   });
-  checa(paginasServidas.includes(1) && paginasServidas.includes(2),
-    'controle: as duas páginas da busca tinham que ser pedidas', JSON.stringify(paginasServidas));
+  checa(JSON.stringify(paginasServidas) === '[1,1,2]',
+    'a segunda busca tinha que reler a página 1 e andar até a 2', JSON.stringify(paginasServidas));
   checa(r.depoisDa1 === 5, 'controle: a página 1 entra inteira', String(r.depoisDa1));
-  checa(r.fila === 7 && r.distintos === 7, 'a página 2 repetiu pedido na fila (o local da divisa entrou duas vezes)',
+  checa(r.fila === 7 && r.distintos === 7, 'o local da divisa entrou duas vezes na fila',
     `${r.fila} cards, ${r.distintos} distintos`);
   checa(r.restam === 7, 'o "Restam" contou o repetido duas vezes', String(r.restam));
-  checa(r.diario.length === 1 && r.diario[0] === 2, 'o diário não registrou os 2 repetidos da página 2', JSON.stringify(r.diario));
-  checa(erros.length === 0, 'página repetida: erro de JS', erros[0]);
+  checa(JSON.stringify(r.diario) === '[{"paginas":2,"novos":2,"jaVistos":7}]',
+    'o diário não registrou a busca que releu as duas páginas', JSON.stringify(r.diario));
+  checa(erros.length === 0, 'local da divisa: erro de JS', erros[0]);
+  await ctx.close();
+}
+
+// ── A fila VIVA: a busca relê do topo, e sem rede ela espera ──────────────
+//
+// MEDIDO na fila real do Brasil (2026-09-25): o Waze conta a página sobre a
+// lista do MOMENTO do pedido. O app pedia a "próxima página" quando sobravam 3
+// cards, ou seja depois de a pessoa tratar a página 1 — e a essa altura os
+// pedidos da página 2 já tinham subido pra página 1: a "página 2" vinha curta
+// ou vazia, e o "Tudo limpo!" aparecia com pedidos pendentes. O "Waze" daqui
+// faz o mesmo: 12 pedidos, páginas de 5, e cada ✕ tira o pedido da lista. A
+// pessoa trata a fila inteira pelo BOTÃO, com o Desfazer desligado (modo dev),
+// e cada card tem que aparecer uma vez só, com o "Tudo limpo!" chegando só
+// quando o Waze não tem mais nada. A mesma regra de Waze, com a lógica antiga,
+// perde 2 pedidos — o controle disso está no `test/busca-viva.test.mjs`.
+//
+// E a segunda metade é a de quem perde o SINAL no meio da triagem: com card na
+// fila a busca espera calada (nenhum pedido ao servidor, nenhum toast), com a
+// fila vazia a tela é a de "sem conexão" e nunca o "Tudo limpo!", e a rede de
+// volta manda o que foi decidido sem sinal e traz o que ainda faltava.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  const POR_PAGINA = 5;
+  const pendentes = [];
+  const chegar = (de, ate) => { for (let i = de; i <= ate; i++) pendentes.push({ venueID: 'V' + i, updateRequestID: 'R' + i, i }); };
+  chegar(1, 12);
+  const pedido = (p) => ({ venueID: p.venueID, updateRequestID: p.updateRequestID, purType: 'NEW_PLACE',
+    updateTypeKey: 'NEW_PLACE', name: `Local ${p.venueID}`, categories: ['RESTAURANT'], address: '',
+    createdBy: 'wazer' + p.i, creatorId: 100 + p.i, imageUrls: [], mapa: null, lat: -23.5, lon: -46.6,
+    dateAdded: Date.UTC(2026, 8, 25, 12, 0, 0) - p.i * 60000 });
+  const buscas = [];
+  await ctx.route('**/api/buscar-places', (r) => {
+    let n = 1;
+    try { n = JSON.parse(r.request().postData() || '{}').page || 1; } catch { n = 1; }
+    const fatia = pendentes.slice((n - 1) * POR_PAGINA, n * POR_PAGINA);
+    buscas.push({ page: n, chaves: fatia.map((p) => p.updateRequestID) });
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      success: true, places: fatia.map(pedido), hasMore: n * POR_PAGINA < pendentes.length, page: n, total: fatia.length }) });
+  });
+  const decididos = [];
+  await ctx.route('**/api/validar-place', (r) => {
+    let d = {};
+    try { d = JSON.parse(r.request().postData() || '{}'); } catch { d = {}; }
+    const i = pendentes.findIndex((p) => p.venueID === d.venueID && p.updateRequestID === d.updateRequestID);
+    if (i >= 0) pendentes.splice(i, 1);
+    decididos.push(`${d.venueID}|${d.updateRequestID}`);
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(page, () => typeof AppState !== 'undefined' && typeof startFetching === 'function', 'o app');
+  await page.evaluate(async () => {
+    API.setSession('token-de-teste');
+    AppState.authenticated = true;
+    AppState.devMode = { unlocked: true, active: true };
+    AppState.preferences.undoEnabled = false;
+    AppState.preferences.comoFuncionaVisto = true;
+    AppState.profile = { id: 1, userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    resetQueue();
+    await startFetching();
+  });
+  // A tela, lida como a pessoa a vê: o card da FRENTE, e qual painel está aberto.
+  const tela = () => page.evaluate(() => {
+    const f = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+    const aberto = (id) => !document.getElementById(id).classList.contains('hidden');
+    return { card: f ? (f.querySelector('.card-name') || {}).textContent : null,
+             limpo: aberto('noMoreCards'), falha: aberto('loadErrorState'),
+             titulo: (document.querySelector('#loadErrorState h3') || {}).textContent || '',
+             fila: AppState.queue.length, hasMore: AppState.hasMore, emVoo: AppState.inFlightActions };
+  });
+  // Trata o card da frente pelo ✕ e espera a tela mudar (outro card, ou um
+  // painel). O nome do card de antes fica NA PÁGINA: a espera não repassa
+  // argumento, e sem ele toda espera voltaria na hora, com o mesmo card na tela.
+  const rejeitarDaFrente = async () => {
+    await page.evaluate(() => {
+      const f = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+      window.__cardAntes = (f.querySelector('.card-name') || {}).textContent;
+      f.querySelector('.card-btn-reject').click();
+    });
+    const mudou = await esperarNaPagina(page, () => {
+      const f = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+      const aberto = (id) => !document.getElementById(id).classList.contains('hidden');
+      const agora = f ? (f.querySelector('.card-name') || {}).textContent : null;
+      return (agora && agora !== window.__cardAntes) || aberto('noMoreCards') || aberto('loadErrorState');
+    }, 15000, 100);
+    return { mudou: mudou.ok };
+  };
+
+  const vistos = [];
+  let aTelaParou = null;
+  for (let passo = 0; passo < 30; passo++) {
+    const t = await tela();
+    if (!t.card) break;
+    vistos.push(t.card);
+    const { mudou } = await rejeitarDaFrente();
+    if (!mudou) { aTelaParou = await tela(); break; }
+  }
+  await esperarNaPagina(page, () => AppState.inFlightActions === 0 && !AppState.fetching, 10000, 100);
+  const fim = await tela();
+  checa(aTelaParou === null, 'fila viva: a tela parou depois de um ✕', JSON.stringify(aTelaParou));
+  checa(buscas.some((b) => b.page === 1 && b.chaves.includes('R6')),
+    'PRÉ-CONDIÇÃO: o pedido R6, da página 2, tinha que ter SUBIDO pra página 1 numa releitura — sem isso o "Waze" daqui não é vivo',
+    JSON.stringify(buscas.map((b) => b.page + ':' + b.chaves.join(','))));
+  checa(new Set(vistos).size === vistos.length, 'fila viva: um card apareceu duas vezes', vistos.join(' '));
+  checa(vistos.length === 12 && decididos.length === 12,
+    `fila viva: a pessoa viu ${vistos.length} de 12 cards (${decididos.length} decididos)`, vistos.join(' '));
+  checa(pendentes.length === 0 && fim.limpo && !fim.falha,
+    'fila viva: o "Tudo limpo!" tinha que chegar, e só com o Waze vazio',
+    JSON.stringify({ pendentes: pendentes.map((p) => p.updateRequestID), fim }));
+
+  // ── sem sinal no meio da triagem ──
+  chegar(20, 25);                                    // seis pedidos novos no Waze
+  await page.evaluate(async () => { resetQueue(); await startFetching(); });
+  const comRede = await tela();
+  const buscasAntes = buscas.length;
+  // O toast some em 4 s: conta os de ERRO que NASCEM daqui pra frente.
+  await page.evaluate(() => {
+    window.__toastsDeErro = 0;
+    new MutationObserver((ms) => {
+      for (const m of ms) for (const n of m.addedNodes) {
+        if (n.nodeType === 1 && String(n.className).includes('bg-rose-600')) window.__toastsDeErro++;
+      }
+    }).observe(document.getElementById('toastContainer'), { childList: true, subtree: true });
+  });
+  await ctx.setOffline(true);
+  const semRede = [];
+  for (let passo = 0; passo < 10; passo++) {
+    const t = await tela();
+    if (!t.card) break;
+    semRede.push(t.card);
+    const { mudou } = await rejeitarDaFrente();
+    if (!mudou) break;
+  }
+  await page.waitForTimeout(300);
+  const vazioSemRede = await tela();
+  const toastsVermelhos = await page.evaluate(() => window.__toastsDeErro);
+  checa(comRede.card && comRede.fila === 5 && comRede.hasMore,
+    'sem sinal: PRÉ-CONDIÇÃO — a página 1 dos seis novos tinha que entrar com mais por vir', JSON.stringify(comRede));
+  checa(semRede.length === 5, `sem sinal: a pessoa tinha que tratar os 5 cards que já tinha (tratou ${semRede.length})`,
+    semRede.join(' '));
+  checa(buscas.length === buscasAntes, 'sem sinal: a busca foi ao servidor sem rede',
+    JSON.stringify(buscas.slice(buscasAntes)));
+  checa(vazioSemRede.falha && !vazioSemRede.limpo && /conex|offline/i.test(vazioSemRede.titulo),
+    'sem sinal: com a fila vazia a tela tinha que ser a de "sem conexão", nunca o "Tudo limpo!"', JSON.stringify(vazioSemRede));
+  checa(toastsVermelhos === 0, 'sem sinal: toast de erro pra quem está sem rede tratando o que tem', String(toastsVermelhos));
+
+  await ctx.setOffline(false);
+  const voltou = await esperarNaPagina(page, () => {
+    const f = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+    return !!f && AppState.inFlightActions === 0;
+  }, 25000, 200);
+  const depois = await tela();
+  checa(voltou.ok && depois.card === 'Local V25' && depois.fila === 1,
+    'sem sinal: com a rede de volta, o pedido que faltava tinha que aparecer sozinho', JSON.stringify(depois));
+  checa(pendentes.length === 1 && decididos.length === 17,
+    'sem sinal: as 5 decisões sem rede tinham que chegar ao Waze quando a rede voltou',
+    JSON.stringify({ pendentes: pendentes.map((p) => p.updateRequestID), decididos: decididos.length }));
+  checa(erros.length === 0, 'fila viva: erro de JS', erros[0]);
   await ctx.close();
 }
 
