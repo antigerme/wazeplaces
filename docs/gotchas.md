@@ -26,6 +26,17 @@ ocorrência** — errar uma vez e corrigir não vira parágrafo.
 
 ## 3. **`Issues/Search/List` retorna tudo de uma vez** — confirmado via HAR. Não tente implementar "paginação real" assumindo que cada page tem N items. Use `hasMore` como verdade e trate a queue como global.
 
+**A regra estava errada pela metade, e a metade errada custou um "Tudo limpo!" falso (2026-09-25).** O HAR de onde ela saiu tinha ~200 pedidos, uma página só. Com a fila do Brasil em 697 e depois 803, o Waze passou a entregar em páginas de 500, e duas medições na fila real, só lendo, mostraram o resto:
+
+- **a divisa repete o local**: 503 + 199 cards, com 5 pedidos de 2 locais nas duas páginas (cada página traz o LOCAL com todos os pedidos pendentes dele). Consertado na v2026.09.25-01, tirando da página nova o que a fila já tinha;
+- **a página anda**: com a conta que tem pedidos lidos, a mesma busca no mesmo instante deu 500 + 307 com "lidos também" e 500 + 54 com "só não lidos", e os 4 lidos da página 1 fizeram a página 1 do segundo filtro chegar exatamente 4 pedidos mais fundo. A página é contada DEPOIS dos filtros, sobre a lista do momento. Não há cursor nem retrato: só o número da página.
+
+Juntando as duas: o app pedia a página 2 quando sobravam 3 cards, isto é, depois de a pessoa tratar a página 1 — e cada pedido tratado (lido ou rejeitado) já tinha puxado um da página 2 pra 1. Com 554 não lidos, a página 2 vinha vazia, `hasMore` vinha `false`, e o app mostrava "Tudo limpo!" com 54 pedidos pendentes. "Use `hasMore` como verdade" era exatamente o que produzia a mentira: ele diz se há mais AGORA, não onde o resto está.
+
+**Por que não se viu antes**: fila acima de 500 era rara (mediana medida de 497 nos 13 países), e o defeito só aparece no fim da triagem, com a tela dizendo que acabou — o defeito que ninguém reporta. Quem cobrou olhar os números foi o owner, lembrando que "o mapa do Waze é vivo".
+
+**O conserto (v2026.09.25-02)** não tenta adivinhar a página certa: a busca sempre relê a partir da 1 e tira o que já passou pela fila (`pedidosQueEntraramNaFila`), andando pelas páginas até achar pedido novo. O instrumento que distingue as duas lógicas é um Waze de mentira com a regra medida (`test/busca-viva.test.mjs`): a lógica antiga perde 2 de 12 pedidos nele, e o teste que diz isso é o CONTROLE que abre o arquivo.
+
 ## 3.5. **Um venue pode ter VÁRIOS `venueUpdateRequests`** (consertado v2.14.0). Caso típico: usuário sobe 2 fotos novas pra mesma loja, então o mesmo venue volta com 2 PURs do tipo IMAGE. Pegar só `venueUpdateRequests[0]` (como o código antigo fazia) causa bug "place volta": user marca o primeiro lido, próximo fetch o venue reaparece com o segundo. Tratamento certo: **um card por updateRequest**, não por venue. **Sempre devolver TODAS as imagens do venue** (aprovadas + pendentes) em `imageUrls`, mesmo pra IMAGE PUR — o editor precisa comparar a foto nova com as existentes. O frontend identifica a foto nova via `image.id === updateRequest.id` (confirmado via HAR) e marca com ✨ + borda âmbar. Já regredi isso uma vez (v2.14.0 enviava só a foto pareada, escondendo o carrossel) — não regredir de novo.
 
 4. ~~**PHP_CLI_SERVER_WORKERS**~~ **(OBSOLETO na v3.0 — histórico)**: no backend PHP, `php -S` single-thread travava o app (cada cURL ao Waze bloqueava as outras requests); `start.sh` setava `=4`. Não se aplica mais — Workers escalam por request e o Node é assíncrono. Registrado só pra contexto.

@@ -115,7 +115,15 @@ const PREFETCH_PROFUNDIDADE = 3;
 // dados móveis sozinho.
 const PREFETCH_TETO_FOTOS = 4;
 
+// Páginas SEGUIDAS sem nenhum pedido que o editor possa tratar (a região é de
+// quem ele não edita, e o Waze segue dizendo `hasMore`): a busca desiste.
 const MAX_EMPTY_PAGES = 5;
+// Teto de páginas numa busca só. Ela relê a partir da página 1 (ver
+// `fetchNextPage`), e no filtro "lidos também" as primeiras páginas são as que
+// a pessoa já leu, que continuam pendentes no Waze — ela anda por elas até
+// achar pedido novo. A maior fila medida tem ~800 pedidos (2 páginas); 20 são
+// 10 mil, e o teto existe só pro Waze que dissesse `hasMore` pra sempre.
+const MAX_PAGINAS_POR_BUSCA = 20;
 // Os 7 tipos do WME, na ordem em que aparecem no filtro (local → foto). É a
 // MESMA ordem do index.html de propósito: duas listas com a mesma ideia em
 // ordens diferentes é como o editor descobre que o app se contradiz.
@@ -163,10 +171,12 @@ const AppState = {
     authenticated: false,
     currentPlace: null,
     queue: [],
-    nextPage: 1,
     hasMore: true,
-    emptyPagesInRow: 0,
     fetching: false,
+    // A última busca, em números (páginas lidas, novos, já vistos, já
+    // decididos): vai no diagnóstico. Não há "próxima página" — ver
+    // `fetchNextPage`.
+    ultimaBusca: null,
     serverTotal: 0,
     serverBlocked: 0,   // D13: pedidos da região que este editor não pode editar
     blockedPartial: false, // true = paramos antes do fim → serverBlocked é piso
@@ -3761,7 +3771,7 @@ function dlogCapturar(motivo) {
                 hasMore: AppState.hasMore,
                 loadError: AppState.loadError,
                 fetching: AppState.fetching,
-                nextPage: AppState.nextPage,
+                ultimaBusca: AppState.ultimaBusca,
                 pendingAction: AppState.pendingAction ? AppState.pendingAction.type : null,
                 filtros: AppState.filters,
                 autorEmFoco: AppState.autorEmFoco,
@@ -5490,9 +5500,11 @@ function resetQueue() {
     AppState.fetchEpoch++;              // invalida fetch em voo (descarta obsoleto)
     AppState.ordemPendente = false;     // a fila vai embora; não há ordem a aplicar
     AppState.queue = [];
-    AppState.nextPage = 1;
     AppState.hasMore = true;
-    AppState.emptyPagesInRow = 0;
+    // Fila nova: o que passou pela anterior pode voltar — é o "atualizar".
+    pedidosQueEntraramNaFila.clear();
+    bloqueadosPorPagina.clear();
+    AppState.ultimaBusca = null;
     // Gesto explícito (atualizar, filtro, tentar de novo) recomeça a conta.
     rebuscasAuto = 0;
     AppState.currentPlace = null;
@@ -5784,19 +5796,38 @@ function trackSeenCategories(places) {
     AppState.seenCategories = [...set].sort((a, b) => String(a).localeCompare(String(b), i18nLocale()));
 }
 
+// D13 por página (ver `fetchNextPage`): a busca relê as mesmas páginas.
+const bloqueadosPorPagina = new Map();
+
 function fetchNextPage() {
     // Reentrância: se já há um fetch em voo, devolve a MESMA promise (não gira
     // busy-loop de microtasks — era o P0 que congelava a aba no startFetching).
     if (AppState.fetching) return AppState._fetchPromise || Promise.resolve();
     if (!AppState.hasMore) return Promise.resolve();
     if (!AppState.authenticated) return Promise.resolve();
+    // SEM REDE a busca nem tenta: o pedido falharia na hora, e a falha DESISTIA
+    // da fila (`hasMore = false`) com um toast vermelho pra quem está num túnel
+    // tratando o que já tem. Com card na fila, só espera: a próxima ação busca
+    // de novo, e com a rede de volta a busca relê do topo sem perder nem
+    // repetir nada. Com a fila VAZIA, a tela certa é a de "sem sinal", nunca o
+    // "Tudo limpo!": o `loadError` a pede ao `showNoPlaces`, e é ele que a volta
+    // da rede usa pra buscar de novo. O `hasMore = false` ali encerra o laço do
+    // `startFetching` — sem ele a espera viraria o laço do gotcha #19.
+    // `onLine === false` é a mão confiável da API (o `true` não prova rede).
+    if (navigator.onLine === false) {
+        if (AppState.queue.length === 0) {
+            AppState.loadError = true;
+            AppState.hasMore = false;
+            dfato('busca.semRede', {});
+        }
+        return Promise.resolve();
+    }
 
     AppState.fetching = true;
     // Época capturada aqui: se resetQueue() rodar durante o await (refresh, troca
     // de filtro, logout), a época muda e descartamos o resultado obsoleto pra não
     // injetar places de filtros/região antigos na fila nova.
     const epoch = AppState.fetchEpoch;
-    const pageToFetch = AppState.nextPage;
     const filters = {
         unreadOnly: AppState.filters.unreadOnly !== false
     };
@@ -5819,137 +5850,187 @@ function fetchNextPage() {
         filters.categories = AppState.filters.categories; // backend filtra server-side (core.mjs já aceita)
     }
 
-    // VIGIA a busca: fila congelada não grita, a tela só para — e "parece que
-    // acabou o trabalho" ninguém reporta. Ideia do botequei, onde o watchdog
-    // flagrou o GPS preso no prompt comendo check-ins.
-    dlogVigiar('buscar');
-    // O instante em que a LISTA é pedida. Decisão que pousar depois disto pode
-    // ou não estar refletida no que o Waze devolver — e por isso sai no filtro
-    // (`semOsJaDecididos`). O que pousou antes, a lista já reflete.
-    const inicioDaBusca = Date.now();
+    // A BUSCA RELÊ A PARTIR DA PÁGINA 1 — sempre, e nunca "a próxima página".
+    // MEDIDO em 2026-09-25, na fila real do Brasil e só lendo: o Waze conta a
+    // página sobre a lista do MOMENTO do pedido, já sem os lidos. A mesma conta,
+    // no mesmo instante, deu 500 + 307 com "lidos também" e 500 + 54 com "só
+    // não lidos", e os 4 lidos da página 1 fizeram a página 1 do segundo filtro
+    // chegar exatamente 4 pedidos mais fundo. Ou seja: cada pedido que a pessoa
+    // trata (ou que outro editor resolve) SOBE os de baixo, e cada pedido novo
+    // os DESCE. A próxima página só era pedida quando sobravam 3 cards — depois
+    // de a pessoa tratar a página 1 —, e a essa altura a "página 2" já tinha
+    // andado: vinha vazia, e o app mostrava "Tudo limpo!" com dezenas de pedidos
+    // pendentes (54 na fila do owner naquele dia), que só apareciam ao atualizar.
+    //
+    // Relendo do topo, o que já passou pela fila sai no filtro
+    // (`semOsQueJaPassaramPelaFila`), e o que sobra é o que falta: o que subiu,
+    // o que chegou durante a triagem e o que estava depois. A leitura anda pelas
+    // páginas enquanto não achar pedido novo — no filtro "lidos também" as
+    // primeiras são as já lidas, que continuam pendentes lá — e para quando a
+    // fila tem com o que seguir (algo novo, e mais que `PREFETCH_THRESHOLD`),
+    // quando o Waze diz que acabou, ou num dos tetos. Na abertura, com a fila
+    // vazia, é a página 1 e pronto, como sempre foi. O custo é o mesmo: uma
+    // leitura por busca, e mais só onde as primeiras páginas já são conhecidas.
     AppState._fetchPromise = (async () => {
+        const busca = { paginas: 0, novos: 0, jaVistos: 0, jaDecididos: 0 };
+        // Reposição = a fila já teve pedido antes desta busca (não é a abertura).
+        const reposicao = pedidosQueEntraramNaFila.size > 0;
+        let semNadaSeguidas = 0;
         try {
-            const result = await API.fetchPlaces(pageToFetch, filters);
-            if (epoch !== AppState.fetchEpoch) return; // reset durante o fetch → descarta
-            if (!result.success) {
-                dlogVoltou('buscar');
-                dfato('busca.falhou', { key: result.errorKey || null,
-                                        cat: result.errorCategory || null });
-                dlogCapturarAuto('buscaFalhou');
-                if (result.errorCategory === 'unauthorized' ||
-                    (result.error && result.error.toLowerCase().includes('sess'))) {
-                    AppState.hasMore = false;
-                    // `loadError` TAMBÉM aqui, e a falta dele foi o defeito que o
-                    // owner viu: "Tudo limpo!" sobre 217 pedidos pendentes.
-                    //
-                    // Este ramo confia no `handleUnauthorized` pra recompor — ou
-                    // ele derruba pra tela de entrar (sessão morta), ou ele
-                    // rebusca (alarme falso). Só que ele tem uma TRAVA de
-                    // concorrência (`verificandoSessao`): ao abrir o app saem
-                    // três chamadas quase juntas, e a segunda que chega encontra
-                    // a trava fechada e volta NA HORA, sem derrubar e sem
-                    // rebuscar. A rebusca do alarme falso também reentra aqui e
-                    // encontra a própria trava. Em qualquer desses caminhos
-                    // sobrava fila vazia + `hasMore: false` + `loadError: false`,
-                    // que o `showNoPlaces` desenha como "Tudo limpo!".
-                    //
-                    // Marcar aqui é seguro porque quem REBUSCA limpa: o
-                    // `startFetching` zera `loadError` antes de tentar. Ou seja,
-                    // a flag só sobrevive quando de fato ninguém recompôs — que é
-                    // exatamente quando a tela precisa dizer "Falha ao carregar"
-                    // com o botão de tentar de novo.
-                    //
-                    // O comentário do `showNoPlaces` já dizia a intenção desde
-                    // sempre ("o editor acharia que zerou o backlog"); faltava
-                    // este ramo. E é o pior defeito possível pela régua do
-                    // próprio projeto: "parece que acabou o trabalho" ninguém
-                    // reporta — o editor fecha o app achando que terminou.
-                    AppState.loadError = true;
-                    handleUnauthorized();
-                } else {
-                    // UM anúncio só. Com a fila vazia o `showNoPlaces` desenha
-                    // o painel de erro inteiro, e o toast repete o mesmo fato no
-                    // RODAPÉ — onde ficam os botões do card. Com card na tela o
-                    // painel não aparece, e aí o toast é o único sinal: fica.
-                    //
-                    // Este é o ramo que de fato pinta o toast vermelho que o
-                    // owner viu: o `api.js` RETORNA a falha em vez de lançar,
-                    // então o `catch` lá embaixo nem roda. Silenciar só o catch
-                    // era mirar no lugar errado — medido na tela, com 2 toasts.
-                    if (!!AppState.currentPlace || AppState.queue.length > 0) {
-                        showToast(msgDoServidor(result, t('toast.loadPlacesError')), 'error');
+            for (let pagina = 1; ; pagina++) {
+                // VIGIA a busca: fila congelada não grita, a tela só para — e
+                // "parece que acabou o trabalho" ninguém reporta. Ideia do
+                // botequei, onde o watchdog flagrou o GPS preso no prompt
+                // comendo check-ins.
+                dlogVigiar('buscar');
+                // O instante em que a LISTA é pedida. Decisão que pousar depois
+                // disto pode ou não estar refletida no que o Waze devolver — e
+                // por isso sai no filtro (`semOsJaDecididos`). O que pousou
+                // antes, a lista já reflete.
+                const inicioDaBusca = Date.now();
+                const result = await API.fetchPlaces(pagina, filters);
+                if (epoch !== AppState.fetchEpoch) return; // reset durante o fetch → descarta
+                if (!result.success) {
+                    dlogVoltou('buscar');
+                    dfato('busca.falhou', { key: result.errorKey || null,
+                                            cat: result.errorCategory || null });
+                    dlogCapturarAuto('buscaFalhou');
+                    if (result.errorCategory === 'unauthorized' ||
+                        (result.error && result.error.toLowerCase().includes('sess'))) {
+                        AppState.hasMore = false;
+                        // `loadError` TAMBÉM aqui, e a falta dele foi o defeito que o
+                        // owner viu: "Tudo limpo!" sobre 217 pedidos pendentes.
+                        //
+                        // Este ramo confia no `handleUnauthorized` pra recompor — ou
+                        // ele derruba pra tela de entrar (sessão morta), ou ele
+                        // rebusca (alarme falso). Só que ele tem uma TRAVA de
+                        // concorrência (`verificandoSessao`): ao abrir o app saem
+                        // três chamadas quase juntas, e a segunda que chega encontra
+                        // a trava fechada e volta NA HORA, sem derrubar e sem
+                        // rebuscar. A rebusca do alarme falso também reentra aqui e
+                        // encontra a própria trava. Em qualquer desses caminhos
+                        // sobrava fila vazia + `hasMore: false` + `loadError: false`,
+                        // que o `showNoPlaces` desenha como "Tudo limpo!".
+                        //
+                        // Marcar aqui é seguro porque quem REBUSCA limpa: o
+                        // `startFetching` zera `loadError` antes de tentar. Ou seja,
+                        // a flag só sobrevive quando de fato ninguém recompôs — que é
+                        // exatamente quando a tela precisa dizer "Falha ao carregar"
+                        // com o botão de tentar de novo.
+                        //
+                        // O comentário do `showNoPlaces` já dizia a intenção desde
+                        // sempre ("o editor acharia que zerou o backlog"); faltava
+                        // este ramo. E é o pior defeito possível pela régua do
+                        // próprio projeto: "parece que acabou o trabalho" ninguém
+                        // reporta — o editor fecha o app achando que terminou.
+                        AppState.loadError = true;
+                        handleUnauthorized();
+                    } else {
+                        // UM anúncio só. Com a fila vazia o `showNoPlaces` desenha
+                        // o painel de erro inteiro, e o toast repete o mesmo fato no
+                        // RODAPÉ — onde ficam os botões do card. Com card na tela o
+                        // painel não aparece, e aí o toast é o único sinal: fica.
+                        //
+                        // Este é o ramo que de fato pinta o toast vermelho que o
+                        // owner viu: o `api.js` RETORNA a falha em vez de lançar,
+                        // então o `catch` lá embaixo nem roda. Silenciar só o catch
+                        // era mirar no lugar errado — medido na tela, com 2 toasts.
+                        if (!!AppState.currentPlace || AppState.queue.length > 0) {
+                            showToast(msgDoServidor(result, t('toast.loadPlacesError')), 'error');
+                        }
+                        AppState.loadError = true;
+                        AppState.hasMore = false;
                     }
-                    AppState.loadError = true;
-                    AppState.hasMore = false;
+                    return;
                 }
-                return;
-            }
 
-            dlogVoltou('buscar');
-            dlog('busca.ok', { n: (result.places || []).length, hasMore: !!result.hasMore,
-                               page: pageToFetch, total: result.total });
-            AppState.hasMore = !!result.hasMore;
-            AppState.nextPage++;
-            // Busca que deu certo encerra a cadeia: o teto é de tentativas
-            // SEGUIDAS sem sucesso, não da vida da sessão.
-            rebuscasAuto = 0;
-            // Esta é a chamada que se repete, então é ela que mantém o prazo em
-            // dia: se o editor relogar no WME, o Waze passa a mandar um `Expires`
-            // novo e o aviso some sozinho, sem o app precisar perguntar nada.
-            guardarPrazoDaSessao(result);
+                dlogVoltou('buscar');
+                busca.paginas++;
+                dlog('busca.ok', { n: (result.places || []).length, hasMore: !!result.hasMore,
+                                   page: pagina, total: result.total });
+                AppState.hasMore = !!result.hasMore;
+                // Busca que deu certo encerra a cadeia: o teto é de tentativas
+                // SEGUIDAS sem sucesso, não da vida da sessão.
+                rebuscasAuto = 0;
+                // Esta é a chamada que se repete, então é ela que mantém o prazo
+                // em dia: se o editor relogar no WME, o Waze passa a mandar um
+                // `Expires` novo e o aviso some sozinho, sem o app perguntar nada.
+                guardarPrazoDaSessao(result);
 
-            // D13: acumula igual ao serverTotal (uma busca pode vir em páginas).
-            // Backend antigo não manda o campo → 0, e a dica simplesmente não aparece.
-            AppState.serverBlocked += Number(result.blocked) || 0;
+                // D13, POR PÁGINA: a busca relê as mesmas páginas, e somar a cada
+                // leitura contaria o mesmo bloqueado de novo a cada volta. Backend
+                // antigo não manda o campo → 0, e a dica simplesmente não aparece.
+                bloqueadosPorPagina.set(pagina, Number(result.blocked) || 0);
+                AppState.serverBlocked = [...bloqueadosPorPagina.values()].reduce((a, b) => a + b, 0);
 
-            // O que este aparelho já decidiu não entra de novo — ver
-            // `semOsJaDecididos`. A contagem abaixo (`serverTotal`) é a da lista
-            // FILTRADA: "Restam" é o que falta fazer, e o que está saindo já foi
-            // feito.
-            const filtrada = semOsJaDecididos(result.places || [], inicioDaBusca);
-            if (filtrada.excluidos) dfato('busca.jaDecididos', { n: filtrada.excluidos });
-            // E o que a fila já tem não entra de novo: a página seguinte repete
-            // o local que ficou na divisa — ver `semOsQueJaEstaoNaFila`.
-            const novos = semOsQueJaEstaoNaFila(filtrada.places);
-            if (novos.repetidos) dfato('busca.repetidos', { n: novos.repetidos });
-            const newPlaces = novos.places;
-            if (newPlaces.length === 0) {
-                AppState.emptyPagesInRow++;
-                if (AppState.emptyPagesInRow >= MAX_EMPTY_PAGES) {
+                // O que este aparelho já decidiu não entra de novo — ver
+                // `semOsJaDecididos` —, e o que já passou pela fila também não:
+                // relendo do topo, o Waze devolve o que continua pendente lá. A
+                // contagem abaixo (`serverTotal`) é a da lista FILTRADA: "Restam"
+                // é o que falta fazer, e o que está saindo já foi feito.
+                const filtrada = semOsJaDecididos(result.places || [], inicioDaBusca);
+                const novos = semOsQueJaPassaramPelaFila(filtrada.places);
+                busca.jaDecididos += filtrada.excluidos;
+                busca.jaVistos += novos.repetidos;
+                const newPlaces = novos.places;
+                if (newPlaces.length > 0) {
+                    AppState.queue.push(...newPlaces);
+                    registrarEntradaNaFila(newPlaces);
+                    // Guardar o texto NAO custa requisicao: ele acabou de chegar.
+                    // Sai calado quando o toggle esta desligado. O `desde` é o
+                    // começo da BUSCA, não a hora de gravar: é dali que a lista é.
+                    offlineGravarFila(inicioDaBusca);
+                    AppState.serverTotal += newPlaces.length;
+                    busca.novos += newPlaces.length;
+                    trackSeenCategories(newPlaces);
+                    // Reordenar AQUI, com um card já na tela, quebra a invariante de
+                    // que o card exibido é o `queue[0]` — e o resto do app inteiro
+                    // conta com ela. `advanceQueue` remove o TOPO (`shift`), mas a
+                    // ação é enviada pro `currentPlace`: divergindo os dois, o app
+                    // rejeita o que você vê e apaga OUTRO da fila, que some sem ser
+                    // tratado — e o seu volta na sua frente depois. MEDIDO no
+                    // navegador nas três ordens (recentes, antigos e perto de casa).
+                    // O aquecimento tem o mesmo prejuízo: ele mira no `queue[1]` do
+                    // instante em que dispara e não roda de novo, então baixa foto
+                    // que não vai aparecer e deixa de baixar a que vai.
+                    //
+                    // O outro ponto que reordena (`guardarReferencias`) já tinha
+                    // essa proteção, com o motivo escrito; este ficou sem.
+                    if (AppState.currentPlace) AppState.ordemPendente = true;
+                    else sortQueue();
+                    aplicarRecusaAutomatica();
+                }
+                semNadaSeguidas = (result.places || []).length > 0 ? 0 : semNadaSeguidas + 1;
+
+                if (!result.hasMore) break;
+                if (busca.novos > 0 && AppState.queue.length > PREFETCH_THRESHOLD) break;
+                if (semNadaSeguidas >= MAX_EMPTY_PAGES || busca.paginas >= MAX_PAGINAS_POR_BUSCA) {
                     // Desistimos com o Waze ainda dizendo hasMore → o que contamos
                     // até aqui (inclusive `blocked`) é um PISO, não o total. Sem
                     // esta flag a dica do D13 mostraria número parcial com cara de
                     // exato. Acontece de verdade: região onde o editor não pode
                     // editar nada devolve páginas cheias de bloqueados e zero cards.
-                    if (result.hasMore) AppState.blockedPartial = true;
+                    AppState.blockedPartial = true;
                     AppState.hasMore = false;
+                    break;
                 }
-            } else {
-                AppState.emptyPagesInRow = 0;
-                AppState.queue.push(...newPlaces);
-                // Guardar o texto NAO custa requisicao: ele acabou de chegar.
-                // Sai calado quando o toggle esta desligado. O `desde` é o
-                // começo da BUSCA, não a hora de gravar: é dali que a lista é.
-                offlineGravarFila(inicioDaBusca);
-                AppState.serverTotal += newPlaces.length;
-                trackSeenCategories(newPlaces);
-                // Reordenar AQUI, com um card já na tela, quebra a invariante de
-                // que o card exibido é o `queue[0]` — e o resto do app inteiro
-                // conta com ela. `advanceQueue` remove o TOPO (`shift`), mas a
-                // ação é enviada pro `currentPlace`: divergindo os dois, o app
-                // rejeita o que você vê e apaga OUTRO da fila, que some sem ser
-                // tratado — e o seu volta na sua frente depois. MEDIDO no
-                // navegador nas três ordens (recentes, antigos e perto de casa).
-                // O aquecimento tem o mesmo prejuízo: ele mira no `queue[1]` do
-                // instante em que dispara e não roda de novo, então baixa foto
-                // que não vai aparecer e deixa de baixar a que vai.
-                //
-                // O outro ponto que reordena (`guardarReferencias`) já tinha
-                // essa proteção, com o motivo escrito; este ficou sem.
-                if (AppState.currentPlace) AppState.ordemPendente = true;
-                else sortQueue();
-                aplicarRecusaAutomatica();
             }
+            if (busca.jaDecididos) dfato('busca.jaDecididos', { n: busca.jaDecididos });
+            // Uma linha por busca que releu (reposição, ou mais de uma página),
+            // e só contagens: o `dfato` roda pra todo editor.
+            if (reposicao || busca.paginas > 1) {
+                dfato('busca.reposicao', { paginas: busca.paginas, novos: busca.novos,
+                                           jaVistos: busca.jaVistos, hasMore: AppState.hasMore });
+            }
+            AppState.ultimaBusca = { ...busca, t: Date.now() };
+            // Com o offline marcado, o que ENTROU numa reposição vai pra
+            // varredura na hora: ela só roda quando vira a janela de 20 min, e
+            // sem isto a foto e o mapa desses pedidos esperariam até lá — quem
+            // entrasse num túnel antes abriria o card sem foto. A varredura sai
+            // calada com o toggle desligado, sem rede ou com a pessoa ociosa, e
+            // o que já está guardado volta do cache sem custar rede. Na abertura
+            // quem cuida são os gatilhos de sempre.
+            if (reposicao && busca.novos > 0) offlineVarrer();
         } catch (error) {
             dlogVoltou('buscar');
             dlog('busca.erro', { erro: String((error && error.message) || error).slice(0, 120) });
@@ -10510,16 +10591,30 @@ function semOsJaDecididos(places, desde) {
     return { places: ficam, excluidos };
 }
 
-// Uma página NOVA da busca pode trazer pedido que a fila JÁ tem. MEDIDO na fila
-// real do Brasil (2026-09-25, 697 pedidos em duas páginas): o Waze pagina por
-// PEDIDO, mas cada página traz o LOCAL com todos os pedidos pendentes dele —
-// então o local com pedidos dos dois lados da divisa vem nas duas páginas, com
-// os mesmos pedidos (5 repetidos, de 2 locais). Sem isto eles entravam de novo
-// na fila, apareciam duas vezes e o "Restam" os contava duas vezes. Compara com
-// a fila inteira (o card na tela é o `queue[0]`), com o `currentPlace` por
-// garantia, e com o próprio lote.
-function semOsQueJaEstaoNaFila(places) {
-    const vistos = new Set();
+// Tudo que ENTROU na fila desde o último `resetQueue`: o que está nela e o que
+// já saiu (decidido, pulado, descartado). A busca relê a partir da página 1
+// (ver `fetchNextPage`), e o Waze devolve de novo o que continua pendente lá: o
+// card que segue na fila, o pulado, o lido com o filtro "lidos também", e o
+// local que ficou na divisa entre duas páginas — MEDIDO na fila real do Brasil
+// (2026-09-25, 697 pedidos): o Waze pagina por PEDIDO, mas cada página traz o
+// LOCAL com todos os pedidos pendentes dele, e 5 pedidos de 2 locais vieram nas
+// duas páginas. Nada disso volta como card na mesma fila, que é como sempre
+// foi: o que passou pela pessoa só volta quando ela atualiza, e é o
+// `resetQueue` que zera isto. Só em memória, como a própria fila.
+const pedidosQueEntraramNaFila = new Set();
+
+function registrarEntradaNaFila(places) {
+    for (const p of (Array.isArray(places) ? places : [places])) {
+        const k = chaveDoPedido(p);
+        if (k) pedidosQueEntraramNaFila.add(k);
+    }
+}
+
+// O filtro da busca: tira o que já passou pela fila, o card na tela (por
+// garantia: ele é o `queue[0]`) e o repetido dentro do próprio lote. Devolve
+// QUANTOS saíram, que vai pro diário.
+function semOsQueJaPassaramPelaFila(places) {
+    const vistos = new Set(pedidosQueEntraramNaFila);
     for (const p of AppState.queue) {
         const k = chaveDoPedido(p);
         if (k) vistos.add(k);
@@ -11157,8 +11252,17 @@ async function offlineTentarAbrirSemRede() {
         return false;
     }
     AppState.queue = filtrada.places;
+    // A fila guardada começa uma fila: o que ela traz já ENTROU, e a busca,
+    // quando a rede voltar, relê do topo sem repetir nada disso.
+    pedidosQueEntraramNaFila.clear();
+    registrarEntradaNaFila(AppState.queue);
     AppState.serverTotal = AppState.queue.length;
-    AppState.hasMore = false;
+    // "Pode haver mais", e não "acabou": a fila guardada é uma foto de antes, e
+    // o Waze tem o que chegou depois e o que estava além dela. Sem rede a busca
+    // nem tenta (ver `fetchNextPage`) e, se a fila esvaziar, a tela é a de "sem
+    // sinal". Com `false` aqui, terminar a fila guardada mostrava "Tudo limpo!"
+    // — mesmo com a rede de volta, porque nada mais buscava.
+    AppState.hasMore = true;
     AppState.loadError = false;
     updatePendingCount();
     sortQueue();
