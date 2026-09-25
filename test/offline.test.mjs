@@ -659,7 +659,10 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     [/diz\('BAIXADO, o que estava guardado sai do aparelho/, 'o que foi entregue não fica'],
     [/diz\('o que foi BAIXADO não volta/, 'o que foi entregue não volta'],
     [/diz\('a abertura guardada há MAIS de 24 h sai do aparelho/, 'o prazo que a Ajuda promete'],
-    [/diz\('DESLIGAR o modo dev avisa das capturas não baixadas e apaga/, 'desligado é desligado'],
+    // Desde a auditoria de 2026-09-25 são DOIS toques com captura não baixada:
+    // o 1º só avisa (e o que existe fica), o 2º desliga e apaga.
+    [/diz\('com captura NÃO baixada, o 1º toque em desligar só AVISA/, 'o aviso vem ANTES de apagar, não junto'],
+    [/diz\('o 2º toque DESLIGA o modo dev e apaga o guardado/, 'desligado é desligado'],
     [/diz\('o SAIR apaga o que foi guardado/, 'sair é sair de tudo'],
   ]) assert.match(bloco9c, re, `a 9c perdeu uma medida — ${porque}`);
 
