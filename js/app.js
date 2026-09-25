@@ -13931,10 +13931,19 @@ function setupKeyboardInset() {
 // resolve o que é inconveniente; o que é impossível sai da frente.
 // Os outros três caminhos (código, upload, colar) seguem visíveis, então
 // errar a detecção não tranca ninguém do lado de fora.
+// E só em navegador CHROMIUM de computador — Chrome, Edge, Brave, Opera: a
+// extensão é da Chrome Web Store. No Firefox e no Safari ela não existe, e no
+// iPad o Safari se anuncia como Mac: oferecê-la como caminho ali era o beco sem
+// saída que a régua de "isto é acionável AQUI?" proíbe (auditoria de
+// 2026-09-25). Com Client Hints, a marca "Chromium" (todo navegador Chromium a
+// traz); sem eles (Firefox e Safari não têm), o `Chrome/` da UA sem ser celular.
 function podeInstalarExtensao() {
     const dados = navigator.userAgentData;
-    if (dados && typeof dados.mobile === 'boolean') return !dados.mobile;
-    return !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+    if (dados && typeof dados.mobile === 'boolean') {
+        return !dados.mobile && (dados.brands || []).some((b) => /Chromium/i.test((b && b.brand) || ''));
+    }
+    const ua = navigator.userAgent || '';
+    return /Chrome\//.test(ua) && !/Android|iPhone|iPad|iPod|Mobile|CriOS|EdgiOS/i.test(ua);
 }
 
 function marcarSuporteAExtensao() {

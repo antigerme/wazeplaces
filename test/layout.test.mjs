@@ -505,6 +505,23 @@ test('não oferecemos ação impossível no aparelho', () => {
   assert.match(JS, /function podeInstalarExtensao/, 'sumiu a detecção de suporte a extensão');
   // Por SO, não por ponteiro: notebook com tela de toque instala extensão.
   assert.match(JS, /userAgentData|Android\|iPhone/, 'a detecção deixou de olhar o sistema');
+  // E só onde a Chrome Web Store instala: Chromium de computador. Rodado de
+  // verdade contra os navegadores que importam (auditoria de 2026-09-25).
+  const fn = JS.match(/function podeInstalarExtensao\(\)[\s\S]*?\n\}/)[0];
+  const pode = (navigator) => new Function('navigator', fn + '\nreturn podeInstalarExtensao();')(navigator);
+  const CH = (mobile, ...marcas) => ({ userAgentData: { mobile, brands: marcas.map((brand) => ({ brand, version: '153' })) } });
+  const UA = (userAgent) => ({ userAgent });
+  const casos = [
+    ['Chrome no computador', CH(false, 'Chromium', 'Google Chrome', 'Not.A/Brand'), true],
+    ['Edge no computador', CH(false, 'Chromium', 'Microsoft Edge'), true],
+    ['Chrome no Android', CH(true, 'Chromium', 'Google Chrome'), false],
+    ['Chrome antigo sem Client Hints', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0 Safari/537.36'), true],
+    ['Firefox no computador', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'), false],
+    ['Safari no Mac', UA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'), false],
+    ['Safari no iPad (se diz Mac)', UA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'), false],
+    ['Chrome no iPhone', UA('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0 Mobile/15E148 Safari/604.1'), false],
+  ];
+  for (const [nome, nav, esperado] of casos) assert.equal(pode(nav), esperado, `extensão oferecida errado: ${nome}`);
   assert.doesNotMatch(
     CSS.match(/@media \(pointer: coarse\)[\s\S]*?\n\}\n\}/m)?.[0] || '',
     /\.auth-opt-ext\s*\{[^}]*display:\s*none/,
