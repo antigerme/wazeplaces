@@ -515,6 +515,8 @@ test('não oferecemos ação impossível no aparelho', () => {
     ['Chrome no computador', CH(false, 'Chromium', 'Google Chrome', 'Not.A/Brand'), true],
     ['Edge no computador', CH(false, 'Chromium', 'Microsoft Edge'), true],
     ['Chrome no Android', CH(true, 'Chromium', 'Google Chrome'), false],
+    // O dia em que um navegador que NÃO é Chromium mandar Client Hints: a marca decide.
+    ['Client Hints sem Chromium', CH(false, 'Firefox'), false],
     ['Chrome antigo sem Client Hints', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0 Safari/537.36'), true],
     ['Firefox no computador', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'), false],
     ['Safari no Mac', UA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'), false],
