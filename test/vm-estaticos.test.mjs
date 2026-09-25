@@ -341,3 +341,39 @@ test('a VM NÃO serve fonte de build — e o .assetsignore não alcança ela', a
     }
   });
 });
+
+test('estáticos da VM: o ETag FRACO que a borda devolve também dá 304 (e a lista, e o *)', async () => {
+  // Auditoria de 2026-09-25: atrás do Cloudflare a borda comprime e rebaixa o
+  // ETag pra `W/"…"`; com a igualdade estrita a VM nunca respondia 304.
+  await comServidor(async () => {
+    const etag = (await fetch(URL_('/js/min/app.js'))).headers.get('etag');
+    assert.ok(etag && etag.startsWith('"'), 'a VM deixou de mandar ETag forte');
+    for (const pedida of ['W/' + etag, '"outro", W/' + etag, '*']) {
+      const r = await fetch(URL_('/js/min/app.js'), { headers: { 'If-None-Match': pedida } });
+      assert.equal(r.status, 304, `If-None-Match ${pedida} não deu 304`);
+    }
+    // Controle: o fraco de OUTRO conteúdo segue dando 200.
+    const r = await fetch(URL_('/js/min/app.js'), { headers: { 'If-None-Match': 'W/"naoexiste"' } });
+    assert.equal(r.status, 200);
+  });
+});
+
+test('a VM roteia a API pelo caminho NORMALIZADO, como o Worker (`/api/./sessao` é `sessao`)', async () => {
+  const { request } = await import('node:http');
+  const postCru = (caminho) => new Promise((ok, erro) => {
+    const r = request({ host: '127.0.0.1', port: PORTA, method: 'POST', path: caminho, headers: { 'Content-Type': 'application/json' } }, (res) => {
+      let corpo = ''; res.on('data', (c) => { corpo += c; }); res.on('end', () => ok({ status: res.statusCode, corpo }));
+    });
+    r.on('error', erro);
+    r.end('{}');
+  });
+  await comServidor(async () => {
+    const normal = await postCru('/api/sessao');
+    const comPonto = await postCru('/api/./sessao');
+    assert.equal(comPonto.status, normal.status, `o mesmo pedido teve duas respostas: ${normal.status} × ${comPonto.status}`);
+    assert.equal(comPonto.corpo, normal.corpo);
+    // Controle: rota que não existe continua não existindo.
+    const nada = await postCru('/api/nao-existe');
+    assert.notEqual(nada.status, normal.status);
+  });
+});

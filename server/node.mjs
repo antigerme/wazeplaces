@@ -329,7 +329,14 @@ async function serveStatic(req, res, urlPath) {
     // rebaixaria tudo por causa de um deploy que não mudou nada.
     const etag = '"' + createHash('sha256').update(buf).digest('base64url').slice(0, 22) + '"';
     headers.ETag = etag;
-    if (req.headers['if-none-match'] === etag) {
+    // Comparação FRACA (RFC 9110 §13.1.2), que é a do If-None-Match: atrás do
+    // Cloudflare — o destino da VM é ser a ORIGEM com ele na frente — a borda
+    // comprime e rebaixa o ETag forte pra `W/"…"`, e é o fraco que o navegador
+    // devolve. Com a igualdade estrita a VM nunca respondia 304 e cada
+    // carregamento rebaixava o app inteiro, que é o que este ETag existe pra
+    // evitar (auditoria de 2026-09-25). Pode vir uma LISTA, e `*` vale qualquer.
+    const pedidas = String(req.headers['if-none-match'] || '').split(',').map((x) => x.trim().replace(/^W\//, ''));
+    if (pedidas.includes(etag) || pedidas.includes('*')) {
       res.writeHead(304, headers);
       res.end();
       return;
@@ -366,14 +373,20 @@ const API_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-
 
 const server = createServer(async (req, res) => {
   const url = req.url || '/';
+  // O caminho NORMALIZADO, como o Worker o vê (`new URL(request.url).pathname`):
+  // `/api/./sessao` é a rota `sessao` lá e era a rota `./sessao` aqui — o mesmo
+  // pedido com duas respostas (gotcha #14; auditoria de 2026-09-25). Prefixado
+  // com a origem pra `//x` não virar HOST.
+  let caminho;
+  try { caminho = new URL('http://local' + url).pathname; } catch { caminho = url.split('?')[0]; }
   try {
-    if (url.startsWith('/api/')) {
+    if (caminho.startsWith('/api/')) {
       if (req.method !== 'POST') {
         res.writeHead(405, API_HEADERS);
         res.end(JSON.stringify({ success: false, error: 'Método não permitido' }));
         return;
       }
-      const route = url.slice(5).split('?')[0];
+      const route = caminho.slice(5);
       const raw = await readBody(req, res);
       if (raw === null) return; // body grande demais → 413 já respondido
       let data = {};
@@ -405,7 +418,7 @@ const server = createServer(async (req, res) => {
       res.end();
       return;
     }
-    if (url.startsWith('/api/')) {
+    if (caminho.startsWith('/api/')) {
       res.writeHead(500, API_HEADERS);
       res.end(JSON.stringify({ success: false, error: 'Erro interno' }));
     } else {
