@@ -844,6 +844,18 @@ function aplicarIdioma(valor) {
     if (AppState.currentPlace) showCurrentPlace();
     updateStats();
     updatePendingCount();
+    // O que o JS escreve com `t()` fora do `data-i18n`, e que o `applyI18n` não
+    // alcança. MEDIDO trocando pra inglês com as Preferências abertas — a tela
+    // onde a troca acontece: o aviso do Desfazer ficava em português, e o nome
+    // da pílula da presença também (auditoria de 2026-09-25). Junto, a linha do
+    // offline (também das Preferências) e o nome do botão de Filtros, que o
+    // `applyI18n` devolve ao padrão tirando o aviso da conquista nova.
+    if (AppState.authenticated) {
+        renderUndoGateUI();
+        atualizarLinhaDoOffline(0, 0);
+        atualizarSeloDeConquista();
+        window.Presenca?.renderPilula?.();
+    }
     if (typeof showToast === 'function') showToast(t('toast.langChanged'), 'success');
 }
 
