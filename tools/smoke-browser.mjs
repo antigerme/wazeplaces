@@ -1676,6 +1676,61 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── A página 2 não repete o que a fila já tem ────────────────────────────
+//
+// MEDIDO na fila real do Brasil (2026-09-25): o Waze pagina por PEDIDO, mas cada
+// página traz o LOCAL com todos os pedidos pendentes dele, e o local que fica na
+// divisa vinha nas duas páginas — 5 pedidos repetidos em 697. O `fetchNextPage`
+// de verdade roda duas vezes contra uma busca de duas páginas que repete os dois
+// pedidos de um local; a fila tem que terminar sem repetido e o "Restam" contando
+// cada pedido uma vez só.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  const pedido = (v, u, i) => ({ venueID: v, updateRequestID: u, purType: 'NEW_PLACE', updateTypeKey: 'NEW_PLACE',
+    name: `Local ${v}`, categories: ['RESTAURANT'], address: '', createdBy: 'wazer', creatorId: 7,
+    imageUrls: [], mapa: null, lat: -23.5, lon: -46.6, dateAdded: Date.UTC(2026, 8, 25, 12, 0, 0) - i * 60000 });
+  const PAGINA = {
+    1: [pedido('A', 'a1', 1), pedido('B', 'b1', 2), pedido('C', 'c1', 3), pedido('C', 'c2', 4), pedido('D', 'd1', 5)],
+    2: [pedido('C', 'c1', 3), pedido('C', 'c2', 4), pedido('E', 'e1', 6), pedido('F', 'f1', 7)],
+  };
+  const paginasServidas = [];
+  await ctx.route('**/api/buscar-places', (r) => {
+    let n = 1;
+    try { n = JSON.parse(r.request().postData() || '{}').page || 1; } catch { n = 1; }
+    paginasServidas.push(n);
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      success: true, places: PAGINA[n] || [], hasMore: n === 1, page: n, total: 0 }) });
+  });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const r = await page.evaluate(async () => {
+    API.setSession('token-de-teste');
+    AppState.authenticated = true;
+    AppState.preferences.comoFuncionaVisto = true;
+    AppState.profile = { userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
+    AppState.queue = []; AppState.currentPlace = null; AppState.serverTotal = 0;
+    AppState.nextPage = 1; AppState.hasMore = true; AppState.fetching = false;
+    await fetchNextPage();
+    const depoisDa1 = AppState.queue.length;
+    await fetchNextPage();
+    const chaves = AppState.queue.map((p) => p.venueID + '|' + p.updateRequestID);
+    return { depoisDa1, fila: chaves.length, distintos: new Set(chaves).size, restam: AppState.serverTotal,
+             diario: dfatoAnel.filter((e) => e && e.k === 'busca.repetidos').map((e) => e.n) };
+  });
+  checa(paginasServidas.includes(1) && paginasServidas.includes(2),
+    'controle: as duas páginas da busca tinham que ser pedidas', JSON.stringify(paginasServidas));
+  checa(r.depoisDa1 === 5, 'controle: a página 1 entra inteira', String(r.depoisDa1));
+  checa(r.fila === 7 && r.distintos === 7, 'a página 2 repetiu pedido na fila (o local da divisa entrou duas vezes)',
+    `${r.fila} cards, ${r.distintos} distintos`);
+  checa(r.restam === 7, 'o "Restam" contou o repetido duas vezes', String(r.restam));
+  checa(r.diario.length === 1 && r.diario[0] === 2, 'o diário não registrou os 2 repetidos da página 2', JSON.stringify(r.diario));
+  checa(erros.length === 0, 'página repetida: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 // ── O tile é DESENHADO no tamanho que o código pede? ─────────────────────
 //
 // A faixa vertical vazia que o owner viu no celular (gotcha #58): o preflight

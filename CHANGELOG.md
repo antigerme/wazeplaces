@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.25-01
+
+### Corrigido
+- **A fila não repete mais um pedido quando carrega a próxima página.** A fila grande vem do Waze em mais de uma página, e o local que fica na divisa entre duas páginas vinha nas duas com os mesmos pedidos. Esses pedidos apareciam de novo mais adiante na fila, e o "Restam" os contava duas vezes. Medido na fila do Brasil: 5 repetidos em 697.
+
 ## v2026.09.24-03
 
 ### Removido
