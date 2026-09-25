@@ -1988,7 +1988,7 @@ test('item de lista vazio aparece como placeholder, e o esmaecido não derruba o
 
   // UM renderizador só. Eram dois trechos idênticos copiados — é assim que duas
   // telas do mesmo conceito divergem sem ninguém notar.
-  assert.match(APP, /function itemDeLista\(v, cls, sinal, campo\)/,
+  assert.match(APP, /function itemDeLista\(v, cls, sinal, campo[,)]/,
     'o renderizador de item perdeu o campo — sem ele a tradução de serviço não tem como ser escopada');
   assert.equal((APP.match(/const item = \(v, cls, sinal\)/g) || []).length, 0,
     'voltou a existir renderizador de item duplicado');

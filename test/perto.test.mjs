@@ -62,7 +62,8 @@ test('pontoDoPlace lê o centro como [lat,lon] e cai no lat/lon NOMEADO', () => 
 // ── 2. A ORDENAÇÃO ─────────────────────────────────────────────────────────
 function montarSort(ordem, ref) {
   const est = { queue: [], filters: { sortOrder: ordem } };
-  const corpo = fatiar('sortQueue') + '\n' + fatiar('pontoDoPlace') + '\n' + fatiar('distanciaKm');
+  const corpo = fatiar('sortQueue') + '\n' + fatiar('pontoDoPlace') + '\n' + fatiar('distanciaKm')
+    + '\n' + fatiar('manterFocoNaFrente');
   const fn = new Function('AppState', 'referenciaDaOrdem', corpo + '\nreturn sortQueue;')(est, () => ref);
   return (fila) => { est.queue = fila.slice(); fn(); return est.queue.map((p) => p.id); };
 }

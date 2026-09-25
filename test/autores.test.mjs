@@ -631,6 +631,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
     showCurrentPlace: () => { throw new Error('trocou o card da tela'); }, startFetching: () => {}, showNoPlaces: () => {},
     showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
     enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
+    aoMudarAFilaPorBaixo: () => {},   // acerta o "Ver +N" e o fundo — não troca o card
   };
   const chaves = Object.keys(deps);
   const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));

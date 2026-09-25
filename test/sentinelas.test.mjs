@@ -146,6 +146,25 @@ test('sentinelas: algo por cima de um controle (gotcha #26, 3 reincidências)', 
   assert.deepEqual(montar()(normal), []);
 });
 
+test('sentinelas: botão DESABILITADO de propósito coberto pelo banner do Desfazer NÃO é alerta', () => {
+  // Na janela do Desfazer os três botões ficam travados, e o banner os cobre em
+  // boa parte dos aparelhos: toda captura feita ali acusava "o dedo não chega
+  // nele" num botão que não é pra receber o dedo (auditoria de 2026-09-25).
+  const c = sao();
+  c.geometria = [
+    { sel: '.card-btn-reject', x: 20, y: 700, w: 56, h: 56, noCentro: '#undoContainer', desab: true },
+    { sel: '.card-btn-read', x: 160, y: 700, w: 56, h: 56, noCentro: 'DIV.undo-banner', desab: true },
+  ];
+  assert.deepEqual(montar()(c), []);
+  // Controle: o MESMO botão, habilitado e coberto, segue sendo defeito.
+  const vivo = sao();
+  vivo.geometria = [{ sel: '.card-btn-read', x: 160, y: 700, w: 56, h: 56, noCentro: 'DIV.undo-banner' }];
+  assert.deepEqual(chaves(montar()(vivo)), ['toqueInterceptado']);
+  // E o campo sai do DOM, não de constante.
+  assert.match(APP, /\.\.\.\(e\.disabled \? \{ desab: true \} : \{\}\),/,
+    'o coletor parou de medir se o controle está desabilitado');
+});
+
 test('sentinelas: alvo de toque abaixo de 44px', () => {
   const c = sao();
   c.geometria = [{ sel: '.card-btn-skip', x: 0, y: 0, w: 40, h: 56, noCentro: 'ele mesmo' }];

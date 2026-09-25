@@ -301,3 +301,28 @@ test('diag-resumo v8: as chamadas do chat dizem a AÇÃO — e a conversa que o 
   assert.ok(!s.includes('183164343'), 'o id de quem conversa vazou no resumo');
   assert.ok(!s.includes(TOKEN), 'o token vazou');
 });
+
+test('diag-resumo: o `/` que difere SÓ pelo script do Cloudflare não vira "versão velha" nos relatórios antigos', () => {
+  // MEDIDO em produção em 2026-09-25: a borda injeta no HTML, a cada resposta,
+  // um script com token e hora próprios — mesmo tamanho, bytes diferentes. Até o
+  // v9 o app comparava com ele, e TODO relatório de produção dizia "o aparelho
+  // roda código diferente do servidor".
+  const d = relatorioV8();
+  d.cacheVsRede = {
+    'https://x.dev/': { aparelho: 'aaaa', servidor: 'abab', igual: false, bytesAparelho: 116709, bytesServidor: 116709, http: 200 },
+    'https://x.dev/js/min/app.js': { aparelho: 'eeee', servidor: 'eeee', igual: true, bytesAparelho: 70000, bytesServidor: 70000, http: 200 },
+  };
+  const s = rodar(d);
+  assert.match(s, /2 arquivos conferidos com o servidor · diferentes: 0/, 'o `/` do Cloudflare contou como diferença');
+  assert.match(s, /DIFERENTE: \/ \(aparelho 116709 bytes · servidor 116709 bytes\) — com o mesmo tamanho: é o script que o Cloudflare injeta/);
+  assert.doesNotMatch(s, /ATENÇÃO: o aparelho roda código diferente/, 'alarme falso de versão velha');
+  // Controle 1: tamanhos diferentes no `/` É diferença de verdade, mesmo no v8.
+  const c1 = relatorioV8();
+  c1.cacheVsRede = { 'https://x.dev/': { aparelho: 'aaaa', servidor: 'abab', igual: false, bytesAparelho: 116709, bytesServidor: 117000, http: 200 } };
+  assert.match(rodar(c1), /ATENÇÃO: o aparelho roda código diferente/, 'a exceção engoliu diferença real no `/`');
+  // Controle 2: do v9 em diante o app já desconta a borda — o `/` diferente é real.
+  const c2 = relatorioV8();
+  c2._versaoDoDiag = 9;
+  c2.cacheVsRede = { 'https://x.dev/': { aparelho: 'aaaa', servidor: 'abab', igual: false, bytesAparelho: 116709, bytesServidor: 116709, http: 200 } };
+  assert.match(rodar(c2), /ATENÇÃO: o aparelho roda código diferente/, 'no v9 o `/` diferente passou a ser ignorado');
+});

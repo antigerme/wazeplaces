@@ -201,3 +201,54 @@ test('aprovar e excluir foto passam pela MESMA retentativa do resto (o renomear 
   assert.match(fatiar('enviarAprovacao'), /await callWithRetry\(\(\) => API\.aprovarPedido\(/);
   assert.match(fatiar('enviarExclusao'), /await callWithRetry\(\(\) => API\.excluirFoto\(/);
 });
+
+// ── os IRMÃOS na fila (auditoria de 2026-09-25) ──────────────────────────────
+// Outro pedido do MESMO local, mais adiante na fila, foi montado com o local de
+// antes: mostrava a foto que acabou de sair e o nome velho.
+function montarIrmaos(resposta) {
+  const log = [];
+  const L = lightbox();
+  const A = { venueID: 'v1', updateRequestID: 'ur-A', name: 'Padaria Velha', imageUrls: [FOTO('f1'), FOTO('f2')], approvedImageIds: ['f1', 'f2'] };
+  const B = { venueID: 'v1', updateRequestID: 'ur-B', name: 'Padaria Velha', imageUrls: [FOTO('f1'), FOTO('f2')], approvedImageIds: ['f1', 'f2'] };
+  const C = { venueID: 'v2', updateRequestID: 'ur-C', name: 'Outro', imageUrls: [FOTO('f1')], approvedImageIds: ['f1'] };
+  const AppState = { queue: [A, B, C], currentPlace: A };
+  const deps = {
+    AppState, Lightbox: L, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
+    API: { excluirFoto: async () => resposta, renomearLocal: async () => resposta },
+    handleUnauthorized: () => {}, showToast: () => {}, msgDoServidor: () => '', t: (k) => k,
+    devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {}, contarConquista: () => {},
+    montarCardDeFundo: () => log.push('fundo'), cardDaFrente: () => null, document: { getElementById: () => null },
+  };
+  const chaves = Object.keys(deps);
+  const nomes = ['aplicarNosIrmaos', 'enviarExclusao', 'enviarRenomeacao', 'aplicarNomeNaTela'];
+  const app = new Function(...chaves, nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...chaves.map((k) => deps[k]));
+  return { app, A, B, C, log };
+}
+
+test('excluir foto confirmado: os OUTROS pedidos do mesmo local perdem a foto também (e o card de fundo é refeito)', async () => {
+  const { app, A, B, C, log } = montarIrmaos({ success: true });
+  A.imageUrls = [FOTO('f2')];                      // a do card já saiu (é o que o lightbox faz)
+  assert.equal(await app.enviarExclusao({ id: 'f1', place: A, idx: 0, url: FOTO('f1') }), true);
+  assert.deepEqual(B.imageUrls, [FOTO('f2')], 'o irmão seguiu mostrando a foto que saiu do mapa');
+  assert.deepEqual(B.approvedImageIds, ['f2']);
+  assert.deepEqual(C.imageUrls, [FOTO('f1')], 'mexeu no pedido de OUTRO local');
+  assert.ok(log.includes('fundo'), 'o card de fundo (o irmão) não foi refeito');
+  // Controle: na FALHA os irmãos ficam como estão — o mapa ainda tem a foto.
+  const f = montarIrmaos({ success: false, errorCategory: 'unknown' });
+  await f.app.enviarExclusao({ id: 'f1', place: f.A, idx: 0, url: FOTO('f1') });
+  assert.deepEqual(f.B.imageUrls, [FOTO('f1'), FOTO('f2')], 'a falha tirou a foto do irmão');
+});
+
+test('renomear confirmado: os OUTROS pedidos do mesmo local ganham o nome novo', async () => {
+  const { app, A, B, C } = montarIrmaos({ success: true });
+  A.name = 'Padaria Nova';
+  await app.enviarRenomeacao({ place: A, novo: 'Padaria Nova', antigo: 'Padaria Velha' });
+  assert.equal(B.name, 'Padaria Nova', 'o irmão seguiu com o nome velho — a pílula ofereceria corrigir de novo');
+  assert.equal(C.name, 'Outro', 'mexeu no pedido de OUTRO local');
+  // Controle: na falha, ninguém muda (e o do card volta).
+  const f = montarIrmaos({ success: false, errorCategory: 'unknown' });
+  f.A.name = 'Padaria Nova';
+  await f.app.enviarRenomeacao({ place: f.A, novo: 'Padaria Nova', antigo: 'Padaria Velha' });
+  assert.equal(f.B.name, 'Padaria Velha');
+  assert.equal(f.A.name, 'Padaria Velha');
+});

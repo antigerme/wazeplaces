@@ -234,3 +234,29 @@ test('o open() guarda o ponto do PEDIDO, não o do enquadramento', () => {
   assert.match(m, /this\._local = place\.mapa\.centro \? place\.mapa\.centro\.slice\(\) : null;/,
     '_local tem que sair de place.mapa.centro (e copiado, senão o arrasto mexeria nele)');
 });
+
+test('dar zoom pelos botões + e − NÃO conta como escolher um ponto — a projeção deixa resíduo de ponto flutuante', async () => {
+  // Auditoria de 2026-09-25: depois de um +, o centro voltava da projeção com
+  // 3,6e-15° de diferença, a igualdade estrita lia "mexeu", e o Street View
+  // trocava o PEDIDO pelo meio da caixa só por a pessoa ter dado zoom.
+  const vm = await import('node:vm');
+  const ctx = { window: {}, console };
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync(new URL('../js/mapa.js', import.meta.url), 'utf8'), ctx);
+  const src = fatiarMetodo('pontoDoStreetView') + '\n' + fatiarMetodo('zoom');
+  const doc = { getElementById: () => ({ clientWidth: 393, clientHeight: 700 }) };
+  const o = new Function('document', 'innerWidth', 'innerHeight', 'mapaGrade', 'API', 'MAPA_Z_NAV_MIN', 'MAPA_Z_NAV_MAX',
+    `const o = { ${src} desenhar() {} }; return o;`)(
+    doc, 393, 700, ctx.window.mapaGrade, { getRegion: () => 'row' }, ctx.window.MAPA_Z_NAV_MIN, ctx.window.MAPA_Z_NAV_MAX);
+  const inicio = [-23.55052, -46.633308];
+  Object.assign(o, { _local: LOCAL.slice(), centro: inicio.slice(), z: 16, _inicial: { centro: inicio.slice(), z: 16 } });
+  o.zoom(1);
+  // Controle: a conta DEIXA resíduo — senão este teste não mede a tolerância.
+  assert.ok(o.centro[0] !== inicio[0] || o.centro[1] !== inicio[1], 'o zoom não deixou resíduo: o teste não mede nada');
+  assert.deepEqual(o.pontoDoStreetView(), LOCAL, 'dar zoom no + trocou o pedido pelo meio da caixa');
+  o.zoom(-1);
+  assert.deepEqual(o.pontoDoStreetView(), LOCAL, 'dar zoom no − trocou o pedido pelo meio da caixa');
+  // Controle: zoom ANCORADO fora do centro (roda, pinça) move o centro — aí é escolha.
+  o.zoom(1, 20, 20);
+  assert.deepEqual(o.pontoDoStreetView(), o.centro, 'o zoom num ponto escolhido não virou o viewpoint');
+});

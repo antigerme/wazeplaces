@@ -2071,6 +2071,10 @@ async function enviarExclusao(alvo) {
             // anunciar o que a pessoa está vendo acontecer é ruído. O aviso
             // fica só pro caso em que nada muda na tela por causa dela.
             if (r.jaExcluida) showToast(t('toast.photoAlreadyGone'), 'info');
+            aplicarNosIrmaos(alvo.place, (q) => {
+                Lightbox.removerFoto(alvo.id, q);
+                if (AppState.currentPlace === q) showCurrentPlace();
+            });
             return true;
         }
         if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return false; }
@@ -2083,6 +2087,20 @@ async function enviarExclusao(alvo) {
         showToast(t('toast.photoDeleteFailed'), 'error');
         return false;
     }
+}
+
+// Os OUTROS pedidos do mesmo local na fila (irmãos) foram montados com o local
+// de ANTES: sem isto, o card seguinte do mesmo local mostrava a foto que acabou
+// de sair (com a lixeira oferecendo apagá-la de novo) e o nome velho (com a
+// pílula oferecendo corrigir o que já foi corrigido). Só depois de o Waze
+// CONFIRMAR — na janela do Desfazer ou na falha, o mapa ainda é o de antes
+// (auditoria de 2026-09-25).
+function aplicarNosIrmaos(place, aplicar) {
+    if (!place || place.venueID == null) return;
+    const irmaos = (AppState.queue || []).filter((q) => q && q !== place && q.venueID === place.venueID);
+    for (const q of irmaos) aplicar(q);
+    // O card de FUNDO da pilha foi desenhado com o local de antes.
+    if (irmaos.includes(AppState.queue[1])) montarCardDeFundo();
 }
 
 // Recoloca a foto onde estava — no desfazer e na falha do envio.
@@ -2483,7 +2501,11 @@ function aplicarNomeNaTela(place, nome) {
 async function enviarRenomeacao(alvo) {
     try {
         const r = await callWithRetry(() => API.renomearLocal(alvo.place.venueID, alvo.novo));
-        if (r && r.success) { contarConquista('nomes'); return; }   // sem toast: o nome na tela já diz
+        if (r && r.success) {   // sem toast: o nome na tela já diz
+            aplicarNosIrmaos(alvo.place, (q) => aplicarNomeNaTela(q, alvo.novo));
+            contarConquista('nomes');
+            return;
+        }
         if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return; }
         // Falhou: o nome na tela precisa VOLTAR, senão o app afirma uma gravação
         // que não houve — e o editor segue triando achando que corrigiu.
@@ -2775,6 +2797,9 @@ function assinaturaDeBusca() {
 // é o mesmo cuidado do `fetchNextPage`, e é ele que mantém o aquecimento
 // mirando no card que vem (o `showCurrentPlace` reagenda em cima do novo topo).
 function reordenarFilaNaTela() {
+    // A ordem nova é o gesto mais recente: ela encerra o foco no autor, senão a
+    // série dele seguiria na frente de uma ordem que a pessoa acabou de pedir.
+    limparFocoAutor();
     sortQueue();
     AppState.currentPlace = AppState.queue[0];
     removeCurrentCardEl();
@@ -3702,6 +3727,10 @@ function diagGeometria() {
                 // hit-test nele acusa o normal como defeito — ver a sentinela
                 // do toque.
                 noFundo: !!(e.closest && e.closest('.card-fundo')),
+                // DESABILITADO de propósito (a janela do Desfazer, o card sem
+                // foto): o toque não é pra chegar, e o banner do Desfazer por
+                // cima dele é o desenho — ver a sentinela do toque.
+                ...(e.disabled ? { desab: true } : {}),
                 // DENTRO de uma camada aberta, ou atrás dela? Quem está atrás é
                 // coberto por construção, e alertar nisso é ruído.
                 naCamada: camadas.some((c) => c.contains(e)),
@@ -3924,7 +3953,13 @@ function diagSentinelas(comp) {
                 // TODO diagnóstico com fila cheia trazia três alertas falsos,
                 // na seção que se lê primeiro. Mesma sentinela, mesma
                 // quantidade, causa nova — e a regra é a mesma do modal aberto.
-                && !g.noFundo) {
+                && !g.noFundo
+                // E o controle DESABILITADO: na janela do Desfazer os três
+                // botões ficam travados de propósito, e o banner do Desfazer os
+                // cobre em boa parte dos aparelhos — toda captura feita nessa
+                // janela acusava "o dedo não chega nele" num botão que não é pra
+                // receber o dedo (auditoria de 2026-09-25).
+                && !g.desab) {
                 diga('toqueInterceptado',
                     'algo está por cima de um controle: o dedo não chega nele',
                     { alvo: g.sel, recebe: g.noCentro });
@@ -4076,7 +4111,10 @@ function dlogCapturar(motivo) {
                 fetching: AppState.fetching,
                 ultimaBusca: AppState.ultimaBusca,
                 pendingAction: AppState.pendingAction ? AppState.pendingAction.type : null,
-                filtros: AppState.filters,
+                // CÓPIA, não a referência: o Aplicar dos Filtros muda o objeto NO
+                // LUGAR, e a captura de antes passava a mostrar os filtros de DEPOIS
+                // (auditoria de 2026-09-25).
+                filtros: diagSeguro(AppState.filters),
                 autorEmFoco: AppState.autorEmFoco,
                 atual: dlogPlace(AppState.currentPlace),
             },
@@ -4090,6 +4128,8 @@ function dlogCapturar(motivo) {
             // canvas tem tile de outra origem (fica "tainted") — falhar dizendo
             // por quê é melhor que a imagem sair branca sem explicação.
             canvas: [...document.querySelectorAll('canvas')].map((c) => {
+                // O QR do pareamento É o segredo desenhado (ver `domParaDiagnostico`).
+                if (c.id === 'pairQr') return { classe: c.className, omitido: 'QR do pareamento' };
                 try { return { classe: c.className, url: c.toDataURL('image/webp', 0.5).slice(0, 400000) }; }
                 catch (e) { return { classe: c.className, erro: 'origem cruzada (tainted)' }; }
             }),
@@ -4836,7 +4876,25 @@ function ligarFabDev() {
 //     e o `fluxoDiag`, as mensagens ignoradas e as quedas seguidas; o
 //     `presencaWme` ganha o que o perfil disse da visibilidade;
 //   · o `codigo` perde o corpo (menos do CSS): fica tamanho, hash e versão.
-const DIAG_VERSAO = 8;
+// 9 (v2026.09.25-05): o `cacheVsRede` compara SEM o script que a borda injeta no
+// HTML (`borda: true` quando o descontou; ver `diagSemInjecaoDaBorda`), e a
+// geometria leva a caixa de layout (`cw/ch/ow/oh`), que o arraste não gira nem
+// encolhe. Aditivo.
+const DIAG_VERSAO = 9;
+
+// O Cloudflare INJETA no HTML, a cada resposta, o script do Bot Fight Mode com
+// token e hora próprios (`window.__CF$cv$params={r:…,t:…,u:…,ut:…}`, antes do
+// `</body>`). MEDIDO em produção em 2026-09-25: duas respostas seguidas do `/`,
+// mesmo tamanho, 180 posições diferentes, TODAS dentro dele. Comparado com ele, o
+// `/` saía "DIFERENTE" em todo relatório de produção e o leitor concluía "versão
+// velha no cache" — alarme falso na seção que responde justamente isso. O script
+// não é nosso; a pergunta é se o NOSSO código é o mesmo. Casa só a forma
+// injetada (`<script>` sem atributo que começa pelo `__CF$cv$params`); o bootstrap
+// continua bloqueado pela CSP de qualquer jeito (gotcha #14).
+const DIAG_INJECAO_DA_BORDA = /<script>window\.__CF\$cv\$params=[\s\S]*?<\/script>/g;
+function diagSemInjecaoDaBorda(txt) {
+    return String(txt).replace(DIAG_INJECAO_DA_BORDA, '');
+}
 
 // O `codigo` do relatório, ENXUTO: o CORPO fica só no CSS, que é de onde o
 // `tools/diag-tela.mjs` tira o estilo exato do aparelho pra remontar a tela. Do
@@ -4846,12 +4904,15 @@ const DIAG_VERSAO = 8;
 // v2026.09.24-02: o JS e o HTML inteiros eram 580 KB de 1,9 MB, e ~166 KB dos
 // 382 KB do .zip — quase metade do que a pessoa manda. Roda DEPOIS do
 // `cacheVsRede`, que precisa do corpo pra comparar com a rede.
+//
+// O hash é do corpo SEM o que a BORDA injeta (`diagSemInjecaoDaBorda`): é a mesma
+// régua do `cacheVsRede`, e o `/` precisa dela pra não diferir sempre.
 async function diagCodigoEnxuto(codigo, hash) {
     for (const u of Object.keys(codigo)) {
         const c = codigo[u];
         if (!c || typeof c.corpo !== 'string') continue;
         c.bytes = c.corpo.length;
-        c.hash = await hash(c.corpo);
+        c.hash = await hash(diagSemInjecaoDaBorda(c.corpo));
         const v = /APP_VERSION\s*=\s*['"]?(\d{10})/.exec(c.corpo) || /waze-places-(\d{10})/.exec(c.corpo);
         if (v) c.versao = v[1];
         if (!/\.css(\?|$)/.test(u)) delete c.corpo;
@@ -4866,30 +4927,55 @@ async function diagCodigoEnxuto(codigo, hash) {
 // chegaria sem a mensagem na tela. Fica como FONTE ÚNICA da cópia — o relatório
 // e cada captura passam por aqui —, pra que o dia em que algo precisar sair seja
 // um lugar só.
+//
+// A ÚNICA coisa que sai é o SEGREDO do pareamento, se o modal estiver aberto:
+// ele vale uma sessão nova por 5 minutos e não depura nada (auditoria de
+// 2026-09-25). Mora no `data-raw` (o do QR) e no `data-curto` + texto (o
+// digitável, que aparece formatado).
 function domParaDiagnostico() {
-    return document.documentElement.outerHTML;
+    let html = document.documentElement.outerHTML;
+    try {
+        const el = document.getElementById('pairCode');
+        const formas = [];
+        if (el && el.dataset.raw) formas.push(el.dataset.raw);
+        if (el && el.dataset.curto) formas.push(el.dataset.curto, formatarCodigoPareamento(el.dataset.curto));
+        for (const forma of formas) html = html.split(forma).join('[código de pareamento]');
+    } catch (e) { /* sem o modal (ou numa página de teste): nada a tirar */ }
+    return html;
 }
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
 // (`currentPlace` é o mesmo objeto de `queue[0]`). Sem isto o `stringify` lança
 // e o arquivo sai vazio — falha silenciosa no instrumento de socorro.
+//
+// `[circular]` é só o que está no CAMINHO até aqui (os ancestrais), não tudo o
+// que já foi visto: o mesmo objeto em dois lugares da árvore não é ciclo, e marcá-lo
+// escondia a segunda ocorrência. E o fundo é 12: com 8 a coordenada de uma
+// entrada proposta (`queue[i].changes[j].delta.add[k].point.coordinates`, nível 9)
+// saía `[fundo]` — justamente o dado de um pedido de entrada (auditoria de
+// 2026-09-25).
+const DIAG_FUNDO = 12;
 function diagSeguro(v, prof = 0, vistos = new WeakSet()) {
     if (v === null || typeof v !== 'object') {
         return typeof v === 'function' ? '[função]' : v;
     }
     if (vistos.has(v)) return '[circular]';
-    if (prof > 8) return '[fundo]';
+    if (prof > DIAG_FUNDO) return '[fundo]';
     if (v instanceof Promise) return '[promise]';
     if (typeof Element !== 'undefined' && v instanceof Element) return '[elemento ' + v.tagName + ']';
     if (v instanceof Map) return { '[Map]': [...v.keys()].map(String) };
     if (v instanceof Set) return { '[Set]': [...v].map(String) };
     vistos.add(v);
-    if (Array.isArray(v)) return v.map((x) => diagSeguro(x, prof + 1, vistos));
-    const o = {};
-    for (const k of Object.keys(v)) {
-        try { o[k] = diagSeguro(v[k], prof + 1, vistos); } catch (e) { o[k] = '[erro: ' + e.message + ']'; }
+    try {
+        if (Array.isArray(v)) return v.map((x) => diagSeguro(x, prof + 1, vistos));
+        const o = {};
+        for (const k of Object.keys(v)) {
+            try { o[k] = diagSeguro(v[k], prof + 1, vistos); } catch (e) { o[k] = '[erro: ' + e.message + ']'; }
+        }
+        return o;
+    } finally {
+        vistos.delete(v);
     }
-    return o;
 }
 
 // Erros de JS acumulados desde a carga. Armado cedo, no `initApp`.
@@ -4917,6 +5003,11 @@ function diagCapturarErros() {
         performance.addEventListener('resourcetimingbufferfull', () => { diagRecursosCheio = true; });
     } catch (e) {}
     addEventListener('error', (e) => {
+        // O aviso de ResizeObserver não é erro do app (ver `RUIDO_RESIZE_OBSERVER`):
+        // aqui ele virava "erro de JS" no relatório e uma CAPTURA automática de
+        // ~150 KB, sem cota, empurrando pra fora do anel os momentos que importam
+        // (auditoria de 2026-09-25). O console segue contando (`console.warn`).
+        if (RUIDO_RESIZE_OBSERVER.test(e.message || '')) return;
         // Com CONTEXTO DE TELA: erro sem saber ONDE aconteceu manda procurar no
         // arquivo inteiro. É a diferença entre pista e ruído.
         diagErros.push({ t: new Date().toISOString(), tipo: 'error',
@@ -5177,10 +5268,14 @@ async function diagCorpo() {
             // "servidor" era o cache do próprio aparelho, e dava "igual" sempre.
             const r = await diagFetch(u + (u.indexOf('?') === -1 ? '?' : '&') + 'diag-rede=1', { cache: 'reload' });
             const remoto = await r.text();
-            const [ha, hb] = [await hash(local), await hash(remoto)];
+            // Sem o script da borda nos DOIS lados (ver `diagSemInjecaoDaBorda`);
+            // `borda` diz que ele estava lá e foi descontado.
+            const [la, lb] = [diagSemInjecaoDaBorda(local), diagSemInjecaoDaBorda(remoto)];
+            const [ha, hb] = [await hash(la), await hash(lb)];
             cacheVsRede[u] = { aparelho: ha, servidor: hb, igual: ha === hb,
                                bytesAparelho: local.length, bytesServidor: remoto.length,
                                http: r.status };
+            if (la.length !== local.length || lb.length !== remoto.length) cacheVsRede[u].borda = true;
         } catch (e) { cacheVsRede[u] = { erro: String((e && e.message) || e) }; }
     }
     await diagCodigoEnxuto(codigo, hash);
@@ -6018,6 +6113,7 @@ function sortQueue() {
             if (!db) return -1;
             return distanciaKm(ref, da) - distanciaKm(ref, db);
         });
+        manterFocoNaFrente();
         return;
     }
     const asc = AppState.filters.sortOrder === 'oldest';
@@ -6042,6 +6138,23 @@ function sortQueue() {
         if (db === null) return -1;
         return asc ? da - db : db - da;
     });
+    manterFocoNaFrente();
+}
+
+// O FOCO num autor (o "Ver +N") é uma ordem que a PESSOA pediu: a ordenação
+// reordena dentro dos dois grupos e nunca espalha a série dele. Sem isto, uma
+// página que chegasse durante o foco reordenava a fila no próximo card, a série
+// se espalhava e a barra do foco sumia depois de um pedido só (auditoria de
+// 2026-09-25). No LUGAR: quem segura a referência da fila segue vendo a mesma.
+function manterFocoNaFrente() {
+    const foco = AppState.autorEmFoco;
+    if (foco === null || foco === undefined) return;
+    const q = AppState.queue;
+    const dele = q.filter((x) => x && x.creatorId === foco);
+    if (!dele.length) return;
+    const resto = q.filter((x) => !(x && x.creatorId === foco));
+    q.length = 0;
+    q.push(...dele, ...resto);
 }
 
 // Pede a posição ao aparelho. APROXIMADA de propósito (`enableHighAccuracy:
@@ -6413,6 +6526,7 @@ function fetchNextPage() {
                     if (AppState.currentPlace) AppState.ordemPendente = true;
                     else sortQueue();
                     aplicarRecusaAutomatica();
+                    aoMudarAFilaPorBaixo();
                 }
                 semNadaSeguidas = (result.places || []).length > 0 ? 0 : semNadaSeguidas + 1;
 
@@ -7032,6 +7146,8 @@ function montarCardDeFundo() {
     if (imgF && semF) imgF.onerror = () => { imgF.classList.add('hidden'); semF.classList.remove('hidden'); };
 
     fundo.classList.add('card-fundo');
+    // Qual pedido ele anuncia — é por aqui que `aoMudarAFilaPorBaixo` sabe se mudou.
+    fundo.dataset.pedido = chaveDoPedido(proximo) || '';
     // As TRÊS, e cada uma cobre o que as outras não cobrem: `inert` tira do Tab
     // e da árvore de acessibilidade E bloqueia o ponteiro, mas é recente demais
     // pra ser a única linha de defesa; `aria-hidden` garante que nenhum leitor
@@ -7075,6 +7191,28 @@ function montarCardDeFundo() {
     desenharMapaComCaixa(fundo, proximo);
 }
 
+// A fila MUDOU por baixo do card na tela (uma página que chegou, a recusa
+// automática tirando pedidos): o que o card calcula a partir dela — o "Ver +N"
+// do mesmo autor e o card de FUNDO — foi desenhado com a fila de antes, e o card
+// que entrava não era o que a pilha anunciava (auditoria de 2026-09-25).
+// O de fundo só é refeito se o aquecimento deste card JÁ o montou — antes
+// disso, ele é montado na hora dele, lendo a fila de agora — e só se mudou.
+let aquecimentoDaFrenteFeito = false;
+function aoMudarAFilaPorBaixo() {
+    const card = cardDaFrente();
+    const place = AppState.currentPlace;
+    if (!card || !place) return;
+    const linha = card.querySelector('.card-creator-row');
+    const velho = linha && linha.querySelector('.selos-proc');
+    if (velho) velho.remove();
+    renderSelosDeProcedencia(card, place);
+    if (!aquecimentoDaFrenteFeito) return;
+    const fundo = document.querySelector('#cardStack .card-fundo');
+    const quer = chaveDoPedido(AppState.queue[1]);
+    const tem = (fundo && fundo.dataset.pedido) || null;
+    if (quer !== tem) montarCardDeFundo();
+}
+
 // Tempo máximo que o aquecimento espera a foto do card. Rede de segurança: foto
 // que trava não pode cancelar o aquecimento do próximo pedido, senão o recurso
 // desaparece exatamente na rede ruim, que é onde ele mais serve.
@@ -7100,9 +7238,11 @@ const AQUECIMENTO_ESPERA_MAX_MS = 2500;
 // na hora.
 function agendarAquecimento(card) {
     let disparado = false;
+    aquecimentoDaFrenteFeito = false;
     const disparar = () => {
         if (disparado) return;
         disparado = true;
+        aquecimentoDaFrenteFeito = true;
         prefetchNextImage();
         // A pilha vem DEPOIS do aquecimento, na mesma espera e por dois motivos:
         // a foto do card de fundo é exatamente a que o aquecimento acabou de
@@ -7424,10 +7564,18 @@ const MapaLightbox = {
     // Depois que ela arrasta, manda o centro DELA: aí o ponto é escolha, e é o
     // que faz o pedido de movimento funcionar de graça (quer ver a posição
     // proposta? arrasta até lá e abre de lá).
+    //
+    // "Mexeu" é o centro ter ANDADO, com tolerância: o zoom pelos botões + e −
+    // mantém o centro, mas a ida e volta pela projeção deixa resíduo de ponto
+    // flutuante (MEDIDO: 3,6e-15° depois de um +), e a igualdade estrita lia isso
+    // como "a pessoa escolheu o centro" — o Street View trocava o pedido pelo meio
+    // da caixa só por ela ter dado zoom (auditoria de 2026-09-25). 1e-9° é ~0,1 mm;
+    // o menor arrasto possível (1 px no zoom 19) anda ~2,7e-6°.
     pontoDoStreetView() {
+        const TOL = 1e-9;
         if (this._local && this._inicial && Array.isArray(this.centro)
-            && this.centro[0] === this._inicial.centro[0]
-            && this.centro[1] === this._inicial.centro[1]) return this._local;
+            && Math.abs(this.centro[0] - this._inicial.centro[0]) < TOL
+            && Math.abs(this.centro[1] - this._inicial.centro[1]) < TOL) return this._local;
         return this.centro;
     },
 
@@ -7748,13 +7896,16 @@ function itemDeListaAusente(v) {
 // exatamente como duas telas do mesmo conceito divergem sem ninguém notar.
 // Valor ausente leva `.valor-ausente` como qualquer placeholder do card — e o
 // smoke mede o contraste dele nos dois temas a cada PR.
-function itemDeLista(v, cls, sinal, campo) {
-    const txt = escapeHtml(valorDeLista(v, campo));
+function itemDeLista(v, cls, sinal, campo, centro) {
+    const txt = escapeHtml(valorDeLista(v, campo, centro));
     const corpo = itemDeListaAusente(v) ? `<span class="valor-ausente">${txt}</span>` : txt;
     return `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${corpo}</span>`;
 }
 
-function valorDeLista(v, campo) {
+// `centro` é o do local DESTE card ([lat, lon], `place.mapa.centro`). Era lido
+// do `AppState.currentPlace`, e o card de FUNDO da pilha media a entrada dele a
+// partir do local do card da FRENTE (auditoria de 2026-09-25).
+function valorDeLista(v, campo, centro) {
     // MESMO placeholder do resto do card (`valorDoDiff` já fazia isto). Os
     // parênteses não são enfeite: resolvem a ambiguidade de um valor que
     // poderia se chamar "vazio", e são TEXTO, então leitor de tela lê.
@@ -7773,9 +7924,7 @@ function valorDeLista(v, campo) {
         if (Array.isArray(p) && p.length >= 2) {
             const tipo = v.entry === false ? t('card.eep.exit') : t('card.eep.entry');
             const nome = String(v.name || '').trim();
-            const centro = AppState.currentPlace && AppState.currentPlace.mapa
-                && AppState.currentPlace.mapa.centro;
-            if (centro) {
+            if (Array.isArray(centro) && centro.length >= 2) {
                 const dLat = (p[1] - centro[0]) * 111320;
                 const dLon = (p[0] - centro[1]) * 111320 * Math.cos(centro[0] * Math.PI / 180);
                 const d = Math.sqrt(dLat * dLat + dLon * dLon);
@@ -8037,6 +8186,8 @@ function renderCardChanges(card, place) {
     }
     const changesBox = card.querySelector('.card-changes');
     const changesList = card.querySelector('.card-changes-list');
+    // A distância das entradas é até o local DESTE card (ver `valorDeLista`).
+    const centroDoLocal = place.mapa && place.mapa.centro;
     changesList.innerHTML = place.changes.map((c) => {
         const rotulo = `<span class="text-xs font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(rotuloDoCampo(c))}:</span>`;
 
@@ -8044,8 +8195,8 @@ function renderCardChanges(card, place) {
         // inteiras obrigava o editor a comparar de olho — no dado real
         // `services` troca 1 item entre 5 e `categories` ganha 1 entre 2.
         if (c.delta && ((c.delta.add || []).length || (c.delta.del || []).length)) {
-            const add = (c.delta.add || []).map((v) => itemDeLista(v, 'diff-add', '+', c.field)).join('');
-            const del = (c.delta.del || []).map((v) => itemDeLista(v, 'diff-del', '−', c.field)).join('');
+            const add = (c.delta.add || []).map((v) => itemDeLista(v, 'diff-add', '+', c.field, centroDoLocal)).join('');
+            const del = (c.delta.del || []).map((v) => itemDeLista(v, 'diff-del', '−', c.field, centroDoLocal)).join('');
             return `<div class="diff-row diff-row-lista">${rotulo}<span class="diff-delta">${add}${del}</span></div>`;
         }
 
@@ -10069,6 +10220,7 @@ async function aplicarRecusaAutomatica() {
     const fora = new Set(alvos);
     AppState.queue = AppState.queue.filter((x) => !fora.has(x));
     updatePendingCount();
+    aoMudarAFilaPorBaixo();
 
     // O aviso é só ACOMPANHAMENTO: conta enquanto acontece e some quando acaba.
     // Decisão do owner — "a ideia do toast é só informar". Não sobra banner
@@ -10097,6 +10249,8 @@ async function aplicarRecusaAutomatica() {
         // Acabou: o aviso sai. Desligar o automático de alguém continua onde
         // sempre esteve — o interruptor da lista, na aba Histórico.
         aviso.dispensar();
+        // Quem falhou voltou pra fila (ver `enviarLote`).
+        aoMudarAFilaPorBaixo();
     }
 }
 
