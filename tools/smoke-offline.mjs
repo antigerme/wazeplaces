@@ -601,6 +601,42 @@ diz('CONTROLE: foto carregada e sem aviso — a sentinela da foto cala',
   !sentFoto.certo.includes('fotoEscondidaComAviso'), JSON.stringify(sentFoto));
 diz('aviso por cima de foto CARREGADA (o defeito do relato, encenado) — a sentinela acusa',
   sentFoto.aviso && sentFoto.defeito.includes('fotoEscondidaComAviso'), JSON.stringify(sentFoto));
+// 6e) A REDE VOLTA e o card "sem foto" SE RECUPERA. O aviso promete "Ela chega
+// sozinha quando a rede voltar", e nada buscava a foto de novo: o card ficava
+// travado até a pessoa pular (auditoria de 2026-09-25). Os DOIS tempos da rede
+// são medidos, porque o `online` chega antes do sinal: redesenhar ali daria
+// "Sem Imagem" com ✕ e ✓ VIVOS — decidir foto não vista.
+const pedidosDaFoto11 = [];
+const contarFoto11 = (r) => { if (r.url().indexOf('thumb700_f11') !== -1) pedidosDaFoto11.push(r.url()); };
+page.on('request', contarFoto11);
+await montar([PLACE(11, 'NEW_PHOTO')]);
+await esperarNaPagina(page, () => !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-sem-foto'), 8000);
+const antesDeVoltar = await lerFotoDoCard();
+diz('PRÉ-CONDIÇÃO: sem rede, a foto não vem e o card avisa, com ✕ e ✓ travados',
+  antesDeVoltar.temAviso && antesDeVoltar.rejTravado && antesDeVoltar.lidoTravado, JSON.stringify(antesDeVoltar));
+// 1º tempo: o navegador diz "online", mas a foto ainda não passa (o avião segue na rota).
+const pedidosAntes = pedidosDaFoto11.length;
+await ctx.setOffline(false);
+await esperarNaPagina(page, () => navigator.onLine === true, 5000);
+await dormir(1500);
+const primeiroTempo = await lerFotoDoCard();
+diz('CONTROLE: a volta da rede FOI percebida — a foto foi pedida de novo', pedidosDaFoto11.length > pedidosAntes,
+  `${pedidosAntes} → ${pedidosDaFoto11.length}`);
+diz('rede FIRMANDO (online sem sinal): o card segue avisando, com ✕ e ✓ travados — nada de "Sem Imagem" com botão vivo',
+  primeiroTempo.temAviso && primeiroTempo.rejTravado && primeiroTempo.lidoTravado, JSON.stringify(primeiroTempo));
+// 2º tempo: o sinal firma e o navegador avisa de novo.
+aviao = false;
+await ctx.setOffline(true);
+await ctx.setOffline(false);
+await esperarNaPagina(page, () => { const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  const i = c && c.querySelector('.card-image');
+  return !!(c && !c.querySelector('.card-sem-foto') && i && i.naturalWidth > 0); }, 10000);
+const voltou = await lerFotoDoCard();
+diz('a rede VOLTOU: o card sai do aviso e mostra a foto, sem ninguém tocar em nada',
+  voltou.fotoVisivel && !voltou.temAviso, JSON.stringify(voltou));
+diz('e o ✕ e o ✓ destravam — agora há foto pra decidir', !voltou.rejTravado && !voltou.lidoTravado,
+  JSON.stringify(voltou));
+page.off('request', contarFoto11);
 aviao = false;
 await ctx.setOffline(false);
 
@@ -1386,7 +1422,7 @@ const rotaApi9b = async (r) => {
     return json({ success: true });
   }
   if (rota === 'perfil') {
-    return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, areas: [] } });
+    return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
   }
   // Presença, países e o resto ficam fora do que esta seção mede.
   return r.abort('failed');
@@ -1678,7 +1714,7 @@ await ctx9c.route('**/api/*', (r) => {
   const rota = r.request().url().split('/api/')[1];
   const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
   if (rota === 'buscar-places') return json({ success: true, places: PEDIDOS_9C, hasMore: false, page: 1, total: PEDIDOS_9C.length });
-  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, areas: [] } });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
   return r.abort('failed');   // presença, países, sessão: fora do que esta seção mede
 });
 const abrir9c = async (nome) => {
@@ -1911,15 +1947,26 @@ diz('a abertura guardada há MAIS de 24 h sai do aparelho; a de 23 h fica, com a
   !r4d.includes('velha') && r4d.includes('fresca') && !g4d.abertas.some((a) => a.id === 'velha') && s6d.txt === '2',
   JSON.stringify({ r4d, g4d, s6d }));
 
-// 5. Desligar o modo dev apaga o que ficou guardado (e avisa antes).
+// 5. Desligar o modo dev apaga o que ficou guardado — mas com captura NÃO
+// baixada o 1º toque só AVISA e devolve o interruptor (auditoria de 2026-09-25:
+// o aviso "baixe antes de desligar" saía no mesmo tique do apagamento, quando
+// já não havia o que baixar). O 2º toque, dentro de 15 s, desliga e apaga.
 const naoBaixadas = await p4d.evaluate(() => dlogNaoBaixados());
-await p4d.evaluate(() => { const cb = document.getElementById('prefDevModeActive');
-  cb.checked = false; cb.dispatchEvent(new Event('change')); });
+const desligar9c = () => p4d.evaluate(() => { const cb = document.getElementById('prefDevModeActive');
+  cb.checked = false; cb.dispatchEvent(new Event('change')); return cb.checked; });
+const marcadoDepoisDo1o = await desligar9c();
+await dormir(300);
+const r5a = await p4d.evaluate(async () => ({ memoria: diagAberturasAnteriores.length,
+  ativo: AppState.devMode.active, base: (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag') }));
+diz('com captura NÃO baixada, o 1º toque em desligar só AVISA: o interruptor volta e nada é apagado',
+  naoBaixadas === 2 && marcadoDepoisDo1o === true && r5a.ativo === true && r5a.memoria > 0 && r5a.base === true,
+  JSON.stringify({ naoBaixadas, marcadoDepoisDo1o, r5a }));
+await desligar9c();
 const apagouDev = await esperarNaPagina(p4d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
 const r5d = await p4d.evaluate(() => ({ memoria: diagAberturasAnteriores.length,
   fab: document.getElementById('devFab').classList.contains('hidden') }));
-diz('DESLIGAR o modo dev avisa das capturas não baixadas e apaga o guardado — do aparelho e da memória',
-  naoBaixadas === 2 && apagouDev.ok && r5d.memoria === 0 && r5d.fab === true, JSON.stringify({ naoBaixadas, apagouDev, r5d }));
+diz('o 2º toque DESLIGA o modo dev e apaga o guardado — do aparelho e da memória',
+  apagouDev.ok && r5d.memoria === 0 && r5d.fab === true, JSON.stringify({ apagouDev, r5d }));
 await p4d.evaluate(() => localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })));
 await p4d.close({ runBeforeUnload: true });
 

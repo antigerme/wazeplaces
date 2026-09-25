@@ -25,10 +25,26 @@ Primeira rodada da auditoria completa do app, feita antes do anúncio pros Globa
 - **Uma ação que dava "sessão expirada" por engano não se perde mais**: ela vai pra fila de envio e sai assim que a sessão se confirma.
 - **Trocar de região com ações ainda saindo** não as manda mais pro servidor errado.
 - **O "Disponível offline" prepara tudo ao abrir o app**, sem esperar a primeira ação, e não diz mais "Pronto" antes de preparar. Uma foto que o Waze tirou do ar não trava mais a preparação.
+- **Praticar com o "Disponível offline" ligado não troca mais a fila guardada pelos exemplos do treino**: antes, os exemplos podiam voltar como pedidos de verdade na próxima abertura sem rede.
 - **Sem rede, o app abre mesmo depois de uma atualização baixada pela metade**, e o atalho "Filtros" do ícone também abre sem rede.
 - **O `cookies.txt` do curl e das extensões do Firefox** (com as linhas `#HttpOnly_`) entra; antes o login dizia "cookies expirados".
 - **Só as linhas do Waze saem do seu aparelho** quando você entra pelo `cookies.txt`. Antes o arquivo inteiro (que traz os cookies de todos os sites do navegador) ia até o servidor, que só então separava os do Waze.
 - **Renomear um local pra um nome com "Duplicate" ou "Already"** não volta mais como "já tratado".
+- **"Marcar todos como lidos" marca só o que o aviso contou**, e não para mais no primeiro pedido que outro editor já resolveu: o Waze processava o lote até ele e deixava o resto sem ler, e o app mostrava erro sem ter feito nada. Agora vai em partes, a parte com problema vai um a um, e o Histórico conta o lote como conta o ✓.
+- **A recusa automática não pega mais o card que está na tela.** O interruptor diz "os próximos": o card aberto, de onde a pessoa o ligou, fica pra ela decidir.
+- **O sinal caindo no meio de uma busca não desiste mais da fila** quando há cards pra seguir, e a volta da rede não traz de volta o que você pulou.
+- **Card de foto sem a foto (sem sinal)**: nem o gesto nem as setas decidem mais; antes só os botões travavam.
+- **Fechar o app na janela do Desfazer e reabrir sem sinal** não traz mais de volta, como card, o pedido que acabou de sair.
+- **Conversa**: a mensagem que chega enquanto a conversa está abrindo não some mais; o "Lida" que não chegou ao Waze (sem sinal) é mandado de novo; e o tempo real não fica mais tentando reconectar a cada segundo quando a conexão cai logo depois de abrir.
+- **Filtros: trocar a região traz os países dela** (antes o seletor seguia com os da região anterior, e aplicar gravava uma combinação sem pedidos), e "Aplicar" com a lista ainda carregando não apaga mais o país nem o estado escolhidos.
+- **O perfil que não carregou na abertura (sinal ruim) é pedido de novo** na próxima resposta que chegar; antes os recursos de L6, a recusa automática e a lista de quem está no app só voltavam recarregando.
+- **Depois de "Sair", trocar de aba e voltar não entra de novo sozinho** pela extensão.
+- **Com a letra do sistema bem grande, o texto do card volta a rolar** quando não cabe. Arrastar em cima dele pulava o card em vez de rolar o texto; agora o arraste do card começa pela foto, como já era nas listas de mudanças e no comentário do reporte.
+- **O tipo "Atualização" aparece traduzido**, no card e no pedido que um colega manda pela conversa. Ele saía em inglês em todos os idiomas, e na folha do pedido recebido aparecia o código interno.
+- **"Falta 1", não "Faltam 1"**: a contagem do Modo Desenvolvedor, a da patente e a do Desfazer usam o singular quando falta um só.
+- **O card "A foto precisa de sinal" se recupera sozinho quando a rede volta**, como o aviso promete: a foto aparece e o ✕ e o ✓ destravam. Antes ele ficava travado até você pular.
+- **O resultado do "Rejeitar os N da fila" diz o que aconteceu de verdade**: com um pedido só, "1 rejeitado"; sem rede, os que ficaram esperando envio aparecem assim (antes diziam "Foram pro Waze"); e o título não afirma mais "resolvidos" quando algum falhou.
+- **Textos**: em francês o ↑ tem um nome só, "Passer" (era "Ignorer" no botão e no placar e "Passer" no treino); em espanhol e francês a recusa automática dizia "só as próximas" em vez de "automaticamente"; o Desfazer diz "Pedido rejeitado" (dizia "Place") nos 4 idiomas; o resumo do mês em francês não diz mais "bilan de octobre"; e, no treino, o ↑ explica a estrela quando o "Pular guarda o pedido" está ligado (dizia que pular não envia nada).
 - **O título da página e a descrição do link** (o que aparece ao compartilhar no Discord ou no WhatsApp) estão em inglês neutro, e o crédito da extensão na tela de entrada é traduzido.
 - **A Ajuda e a Privacidade dizem exatamente o que o app grava no Waze**: além de rejeitar, marcar como lido e dar estrela, enviar as mensagens da conversa; e, pra L6+AM ou staff, aprovar a foto nova, excluir foto do local e corrigir o nome.
 
@@ -36,6 +52,7 @@ Primeira rodada da auditoria completa do app, feita antes do anúncio pros Globa
 - **O portão de acesso (nível 2+ com área, ou staff) não tinha mais atalhos.** Dava pra criar sessão e agir mandando cookies direto pro servidor, sem passar pela conferência de nível. Agora a única porta é o login normal, e o perfil reconfere o portão a cada abertura: quem perdeu o nível ou a área no Waze perde a sessão.
 
 ### Mudado
+- **Modo Desenvolvedor: desligar com registros ainda não baixados pede um segundo toque.** O primeiro avisa quantos se perderiam; o segundo, nos 15 segundos seguintes, desliga e apaga.
 - **Na Ajuda, "Praticar", "Conectar outro aparelho" e "Sair" só aparecem depois de entrar.**
 
 ## v2026.09.25-02

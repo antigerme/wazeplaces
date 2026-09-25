@@ -75,7 +75,7 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
   const AppState = { currentPlace: { venueID: 'v1', updateRequestID: 'u1' }, stats: { rejected: 0 }, serverTotal: 5 };
   let soltar;
   const deps = {
-    AppState, acoesTravadas: () => false, Treino: { ativo: false },
+    AppState, acoesTravadas: () => false, direcaoTravada: () => false, Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
     get epocaDaSessao() { return estado.epoca; },
     API: { getRegion: () => 'row', rejectPlace: () => new Promise((ok) => { soltar = ok; }) },
@@ -290,4 +290,56 @@ test('país: vale a cada abertura, depois do perfil — e troca de verdade (fila
   for (const re of [/API\.setCountry\(pais\);/, /AppState\.filters\.stateId = '';/, /saveFilters\(\);/, /resetQueue\(\);/, /startFetching\(\);/]) {
     assert.match(ir, re);
   }
+});
+
+// ── os filtros (auditoria de 2026-09-25) ─────────────────────────────────────
+test('filtros: trocar a REGIÃO traz os países dela, e o "Aplicar" com lista carregando não apaga país nem estado', () => {
+  assert.match(APP_SEM, /\$\('filterRegion'\)\.addEventListener\('change', async \(e\) => \{[\s\S]{0,400}const r = await API\.listCountries\(regiao\);/,
+    'a troca de região no modal seguia com os países da região anterior');
+  const aplicar = fatiar('applyFiltersFromModal');
+  assert.match(aplicar, /if \(!\$\('filterState'\)\.dataset\.carregando\) AppState\.filters\.stateId = \$\('filterState'\)\.value;/);
+  assert.match(aplicar, /if \(!\$\('filterCountry'\)\.dataset\.carregando && \$\('filterCountry'\)\.value\) API\.setCountry\(\$\('filterCountry'\)\.value\);/);
+});
+
+test('filtros: a carga de estados VELHA não sobrescreve a nova (trocar de país no meio)', async () => {
+  const opcoes = [];
+  const select = { dataset: {}, set innerHTML(v) { opcoes.length = 0; }, appendChild: (o) => opcoes.push(o.value), value: '' };
+  const soltar = {};
+  const deps = {
+    document: { getElementById: () => select, createElement: () => ({}) },
+    AppState: { statesByCountry: {}, filters: { stateId: '' } },
+    API: { listStates: (pais) => new Promise((ok) => { soltar[pais] = ok; }) },
+    escapeHtml: (x) => x, t: (k) => k, ordenarPorNome: (l) => l,
+  };
+  const chaves = Object.keys(deps);
+  const load = new Function(...chaves, 'let cargaDeEstados = 0;\n' + fatiar('loadStatesIntoSelect') + '\nreturn loadStatesIntoSelect;')(...chaves.map((k) => deps[k]));
+  const velha = load(30);
+  assert.equal(select.dataset.carregando, '1', 'o seletor carregando não se marca como tal');
+  const nova = load(73);
+  soltar[73]({ success: true, states: [{ id: 'fr1', name: 'Île-de-France' }] });
+  await nova;
+  soltar[30]({ success: true, states: [{ id: 'br1', name: 'Bahia' }] });
+  await velha;
+  assert.deepEqual(opcoes, ['fr1'], 'a resposta do país ANTERIOR sobrescreveu os estados do país escolhido');
+  assert.equal(select.dataset.carregando, undefined);
+});
+
+test('"Sair" nesta página: voltar à aba não reloga sozinho pela extensão', () => {
+  assert.match(fatiar('handleLogout'), /saiuNestaPagina = true;/);
+  assert.match(APP_SEM, /if \(document\.visibilityState !== 'visible'\) return;\s*if \(saiuNestaPagina\) return;/,
+    'depois de "Sair", trocar de aba e voltar entrava de novo pela extensão');
+});
+
+test('perfil que FALHOU é pedido de novo na próxima prova de rede (no máximo 1×/min), e o que dependia dele reage', () => {
+  const r = fatiar('refazerPerfilSeFaltar');
+  assert.match(r, /if \(!AppState\.authenticated \|\| AppState\.profile\) return;/);
+  assert.match(r, /if \(Date\.now\(\) - perfilPedidoEm < PERFIL_REFAZER_MS\) return;/, 'sem teto, cada resposta pediria o perfil de novo');
+  // Pelo CORPO da prova de rede, não pela vizinhança: outra carona entrando
+  // depois da linha (a foto do card "sem foto") não pode reprovar código certo.
+  const prova = APP_SEM.slice(APP_SEM.indexOf('API.aoProvarRede = () => {'));
+  assert.match(prova.slice(0, prova.indexOf('\n};')), /^\s+refazerPerfilSeFaltar\(\);/m, 'a prova de rede não refaz o perfil que falhou');
+  const l = fatiar('loadProfileAndAuxData');
+  assert.match(l, /perfilPedidoEm = Date\.now\(\);/);
+  assert.match(l, /presencaWmeAoCarregarPerfil\(profileRes\.visivelNoWme\);\s*aplicarRecusaAutomatica\(\);/,
+    'a recusa automática (L6) não reage ao perfil que chegou depois da fila');
 });

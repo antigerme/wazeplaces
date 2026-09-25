@@ -66,6 +66,9 @@ const PRESENCA_FLUXO_SILENCIO_MS = 35_000;
 // esse fim é normal e religa em 1 s. Erro de verdade usa o recuo, com jitter —
 // reconectar em rajada é o que faz um WAF marcar o cliente.
 const PRESENCA_FLUXO_RELIGAR_MS = 1000;
+// Quanto uma conexão sem nenhum fim de lote precisa ter durado pra o fim dela
+// contar como NORMAL (ver `presencaFluxoAbrir`). Bem abaixo dos ~6 min medidos.
+const PRESENCA_FLUXO_VIVEU_MS = 60 * 1000;
 const PRESENCA_FLUXO_ESPERAS_MS = [2000, 5000, 15_000, 30_000, 60_000];
 
 // Mensagens que chegam juntas viram UM "lida" só.
@@ -482,7 +485,11 @@ async function presencaFluxoAbrir() {
             presencaVigiarSilencio(fluxo);
             for (const quadro of ler(dec.decode(value, { stream: true }))) presencaQuadro(fluxo, quadro);
         }
-        fimNormal = true;
+        // Normal é o fim de uma conexão que VIVEU: o Google fecha a cada ~6
+        // min, depois de lotes. Uma que termina sem lote nenhum e logo (proxy
+        // cortando, corpo vazio) religava a cada 1 s pra sempre, sem recuo.
+        fimNormal = !!fluxo.teveLote || Date.now() - fluxo.desde > PRESENCA_FLUXO_VIVEU_MS;
+        if (!fimNormal) Presenca.fluxoDiag.ultimoErro = 'fim sem lote';
     } catch (e) {
         if (Presenca.fluxo === fluxo && Presenca.fluxoDiag.ultimoErro !== 'silencio') {
             Presenca.fluxoDiag.ultimoErro = String((e && e.name) || e).slice(0, 40);
@@ -567,6 +574,7 @@ function presencaQuadro(fluxo, o) {
     if (o.startOfBatch) { fluxo.emLote = true; Presenca.fluxoDiag.loteMensagens = 0; return; }
     if (o.endOfBatch) {
         fluxo.emLote = false;
+        fluxo.teveLote = true;
         Presenca.fluxoTentativa = 0;
         // O fim do primeiro lote é a prova de que a conexão está VIVA (é aqui que
         // o recuo zera). Entra no diário a primeira da página e a volta depois
@@ -751,8 +759,11 @@ function presencaMensagemDoFluxo(m, doLote) {
     Presenca.fluxoDiag.mensagens += 1;
     chatConhecer(com);
     const msg = presencaMsgDoWaze(m, eu);
+    // Junta MESMO com a conversa carregando: a mensagem que chegava com o
+    // `abrir` no ar ficava de fora (a resposta dele podia ser anterior a ela) e
+    // sumia da conversa — e o "lida" saía por uma mensagem que ninguém viu.
     const h = Presenca.historico.get(com);
-    if (h && h.carregada) presencaJuntarMsgs(h, [msg]);
+    if (h) presencaJuntarMsgs(h, [msg]);
     presencaAtualizarPrevia(com, msg);
     const nova = !Presenca.vistas.has(msg.id);
     Presenca.vistas.add(msg.id);
@@ -841,10 +852,15 @@ async function presencaMarcarLida(id) {
     // Nada dela, ou nada depois do último "lida": não há o que marcar, e o
     // pedido seria à toa (voltar pra tela chama isto sempre).
     if (!ultimaDela || (Presenca.lidaEnviadaAte.get(id) || 0) >= ultimaDela) return;
-    Presenca.lidaEnviadaAte.set(id, ultimaDela);
+    // Conversa ainda carregando: o que chegou nela ainda não está na tela.
+    if (!h.carregada) return;
     const carona = chatCarona();
     const r = await API.chat({ acao: 'lida', com: id, ...carona });
     chatAoResponder(r, carona);
+    // Só DEPOIS da resposta: marcado antes, um "lida" que falhou (rede) ficava
+    // dado como enviado — o Waze seguia contando a mensagem como não lida, a
+    // pílula mostrava "1" com a conversa aberta e lida, e nada tentava de novo.
+    if (r && r.success) Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
 }
 
 // ── a conversa ──────────────────────────────────────────────────────────────
@@ -906,6 +922,10 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         if (ultimaDela) Presenca.lidaEnviadaAte.set(id, ultimaDela);
     }
     presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
+    // O que chegou pelo fluxo DURANTE o carregamento entrou no histórico (ver
+    // `presencaMensagemDoFluxo`) depois do "lida" que o `abrir` já fez: agora
+    // que está na tela, marca.
+    if (!antes && presencaOlhando(id)) presencaAgendarLida(id);
 }
 
 function presencaFecharConversa() {

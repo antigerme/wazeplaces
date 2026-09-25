@@ -40,18 +40,26 @@ import { pausaComJitter } from './waze-jitter.mjs';
 // conversas também (a prévia da última mensagem) e devolve o mesmo token.
 // Nenhuma cabe numa ferramenta que age com o token de outra pessoa.
 const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear', 'presenca-waze', 'presenca-app', 'chat']);
+// E a decisão é por LISTA DE LEITURA PERMITIDA, não pela lista acima: a lista
+// negra deixava passar `x/../marcar-lido`, `./validar-place` e `marcar-lido?x=1`
+// (a URL normaliza DEPOIS da recusa e chega na rota de escrita), e rota nova
+// que escrevesse passaria sem ninguém lembrar de pô-la aqui. A de cima fica pra
+// explicar a recusa; quem decide é esta.
+const LEITURA = new Set(['perfil', 'buscar-places', 'lista-paises', 'lista-estados']);
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 '
   + '(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 
 const [ARQ, ROTA, EXTRA] = process.argv.slice(2);
 if (!ARQ || !ROTA) {
   console.error('uso: node tools/diag-api.mjs <arquivo.json> <rota> [json-extra]');
-  console.error(`rotas de LEITURA: perfil, buscar-places, lista-paises, lista-estados, presenca`);
+  console.error(`rotas de LEITURA: ${[...LEITURA].join(', ')}`);
   console.error(`RECUSADAS por construção: ${[...ESCRITA].join(', ')}`);
   process.exit(2);
 }
-if (ESCRITA.has(ROTA)) {
-  console.error(`RECUSADO: "${ROTA}" escreve (ou desloga) na conta de quem gerou o diagnóstico.`);
+if (!/^[a-z-]+$/.test(ROTA) || !LEITURA.has(ROTA)) {
+  console.error(ESCRITA.has(ROTA)
+    ? `RECUSADO: "${ROTA}" escreve (ou desloga) na conta de quem gerou o diagnóstico.`
+    : `RECUSADO: "${ROTA}" não é uma das rotas de LEITURA (${[...LEITURA].join(', ')}).`);
   console.error('Esta ferramenta é só de leitura, e a recusa é por construção — não por lembrança.');
   process.exit(3);
 }
@@ -61,7 +69,10 @@ if (ESCRITA.has(ROTA)) {
 const { dados: d, origem: _origemDoDiag } = lerDiagnostico(ARQ);
 const token = (d.localStorage || {}).waze_session_token;
 if (!token) { console.error('o diagnóstico não traz waze_session_token'); process.exit(1); }
-const base = String((d.app && d.app.url) || '').replace(/\/+$/, '');
+// A ORIGEM da URL do app, não a URL inteira: com `?ref=…` ou um caminho, o
+// POST ia pra `/?ref=…/api/perfil`.
+let base = '';
+try { base = new URL(String((d.app && d.app.url) || '')).origin; } catch { base = ''; }
 if (!/^https:\/\//.test(base)) { console.error('URL do app ausente ou não-https no diagnóstico'); process.exit(1); }
 
 const corpo = { sessionToken: token, region: 'row', ...(EXTRA ? JSON.parse(EXTRA) : {}) };
@@ -87,7 +98,7 @@ console.log(`HTTP ${r.status}`);
 let j = null;
 try { j = JSON.parse(txt); } catch (e) { console.log(txt.slice(0, 400)); process.exit(r.ok ? 0 : 1); }
 
-// Resumo útil pras rotas grandes; o JSON inteiro sai com --cru.
+// Resumo útil pras rotas grandes (o resto sai cortado em 900 caracteres).
 if (Array.isArray(j.places)) {
   const dia = (ms) => (ms ? new Date(ms).toISOString().slice(0, 10) : '—');
   const datas = j.places.map((p) => p.dateAdded).filter(Boolean).sort((a, b) => a - b);

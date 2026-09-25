@@ -974,3 +974,26 @@ test('código: o cacheVsRede compara SÓ o que entrou no `codigo` — a fonte e 
   assert.ok(laco, 'sumiu o laço do cacheVsRede');
   assert.equal(laco[1], 'Object.keys(codigo)', 'o cacheVsRede voltou a comparar o que o coletor pula de propósito');
 });
+
+test('desligar o modo dev e "Sair" levam o CORPO das chamadas (texto de conversa), não só a resposta', () => {
+  // Auditoria de 2026-09-25: com o dev ligado o `corpoReq` leva o texto da
+  // conversa; ele sobrevivia ao desligar e ao "Sair", e ia no relatório de quem
+  // entrasse depois e ligasse o dev de novo.
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(APP, /delete c\.corpoResposta; delete c\._bytes; delete c\.corpoReq;/);
+  const sair = APP.slice(APP.indexOf('async function handleLogout'), APP.indexOf('function resetQueue'));
+  assert.match(sair, /API\.chamadas\.length = 0;/, 'o "Sair" deixou o anel de chamadas da sessão anterior');
+});
+
+test('desligar o modo dev com captura não baixada: o 1º toque AVISA e não apaga; o 2º desliga', () => {
+  // O toast dizia "baixe antes de desligar" no MESMO instante em que as
+  // capturas eram apagadas (auditoria de 2026-09-25).
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const i = APP.indexOf("$('prefDevModeActive').addEventListener('change'");
+  const h = APP.slice(i, APP.indexOf('renderUndoGateUI();', i));
+  const iAviso = h.indexOf("showToast(t('toast.devPerdeCaptura'");
+  const iVolta = h.indexOf('e.target.checked = true;');
+  const iApaga = h.indexOf('dlogApagar();');
+  assert.ok(iVolta > 0 && iAviso > iVolta, 'o primeiro toque não devolve o interruptor');
+  assert.ok(h.slice(iAviso, iApaga).includes('return;'), 'depois do aviso ele APAGA na mesma hora');
+});

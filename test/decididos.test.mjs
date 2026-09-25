@@ -403,7 +403,7 @@ test('o LOTE marca os pedidos em andamento — a recusa automática não passa p
 test('fechar SEM REDE com ação na janela do Desfazer enfileira de forma SÍNCRONA', () => {
   const d = fatiar('descarregarAcaoPendente');
   const iSemRede = d.indexOf('navigator.onLine === false && AppState.pendingAction.enfileirarSemRede');
-  const iExecuta = d.indexOf('AppState.pendingAction.execute()');
+  const iExecuta = d.indexOf('pa.execute();');
   assert.ok(iSemRede > 0 && iExecuta > iSemRede,
     'sem rede, a ação tem que ir pra fila ANTES de tentar a rede — a volta do laço pode não existir');
   const s = fatiar('scheduleAction');
@@ -460,4 +460,15 @@ test('o esvaziamento manda cada item pela região DELE, e tira da fila pela CHAV
   assert.match(e, /f\.findIndex\(\(x\) => x && x\.tipo === item\.tipo && x\.venueID === item\.venueID\s*&& x\.updateRequestID === item\.updateRequestID\)/,
     'tirar pela posição (`shift`) leva o item errado quando outra aba mexe na fila');
   assert.doesNotMatch(e, /f\.shift\(\)/);
+});
+
+test('fechar COM rede na janela do Desfazer: o pouso vai ANTES do envio (a página pode morrer antes da resposta)', () => {
+  // Reaberta sem rede, a fila guardada devolvia como card o pedido que tinha
+  // acabado de sair — e dava pra decidir de novo (auditoria 2026-09-25).
+  const d = fatiar('descarregarAcaoPendente');
+  const iPouso = d.indexOf("if (pa.type === 'read' || pa.type === 'reject') registrarPouso(pa.place);");
+  const iEnvio = d.indexOf('pa.execute();');
+  assert.ok(iPouso > 0 && iEnvio > iPouso, 'o pouso não é gravado antes do envio da descarga');
+  // O pouso sai por localStorage (síncrono): ele sobrevive à página morrendo.
+  assert.match(fatiar('registrarPouso'), /offlineLigado\(\)/);
 });

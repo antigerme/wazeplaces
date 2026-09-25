@@ -25,17 +25,19 @@ const constante = (nome) => Number(new RegExp(`^const ${nome} = ([^;]+);`, 'm').
 
 // Roda a varredura de VERDADE contra downloads de mentira. `baixar(u)` diz o que
 // cada URL devolve (true | false | 'definitivo'); conta as tentativas por URL.
-async function varrer(itens, baixar) {
+async function varrer(itens, baixar, { treino = false } = {}) {
   const tentativas = new Map();
   const diario = [];
+  let gravou = 0;
   const st = { varrendo: false, pedida: false, janela: null, resultado: null, gesto: Date.now(), epoca: 0 };
   const deps = {
     AppState: { authenticated: true, queue: [{ venueID: 'v' }] },
+    Treino: { ativo: treino },
     navigator: { onLine: true },
     offlineLigado: () => true,
     OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
     OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
-    offlineGravarFila: async () => {}, offlineItensDaFila: async () => itens.map((u) => ({ u, tile: /tile/.test(u) })),
+    offlineGravarFila: async () => { gravou++; }, offlineItensDaFila: async () => itens.map((u) => ({ u, tile: /tile/.test(u) })),
     offlineBaixar: async (u) => { tentativas.set(u, (tentativas.get(u) || 0) + 1); return baixar(u); },
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
     dfato: (k, o) => diario.push([k, o]),
@@ -48,7 +50,7 @@ async function varrer(itens, baixar) {
   const chaves = Object.keys(deps);
   const offlineVarrer = new Function(...chaves, '__st', corpo + '\nreturn offlineVarrer;')(...chaves.map((k) => deps[k]), st);
   await offlineVarrer();
-  return { st, tentativas, diario };
+  return { st, tentativas, diario, gravou };
 }
 
 test('uma foto QUEBRADA com o resto andando: poucas tentativas, e a preparação fica PRONTA', async () => {
@@ -89,4 +91,57 @@ test('offlineBaixar: tile 4xx é "definitivo", 5xx e rede caída são falha de R
   assert.equal(await baixarCom('rede')('https://www.waze.com/row-tiles/live/base/4', true), false);
   assert.equal(await baixarCom(200)('https://www.waze.com/row-tiles/live/base/5', true), true);
   assert.deepEqual(guardados, ['https://www.waze.com/row-tiles/live/base/5']);
+});
+
+// A fila do TREINO é de exemplos (parte sintética, com id que não existe):
+// gravada como a fila do offline, ela voltava como fila de VERDADE na próxima
+// abertura sem rede — e as ações iam pro Waze. Qualquer resposta durante o
+// treino (a lista da presença, o perfil) dispara a varredura pela prova de rede.
+test('treino: a varredura NÃO grava nem baixa a fila de exemplos', async () => {
+  const { st, tentativas, gravou } = await varrer(['tile-1', 'foto-1'], () => true, { treino: true });
+  assert.equal(gravou, 0, 'a fila do treino foi gravada como a fila do offline');
+  assert.equal(tentativas.size, 0);
+  assert.equal(st.varrendo, false);
+});
+
+function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false } = {}) {
+  const puts = [];
+  const real = [{ venueID: 'real-1' }, { venueID: 'real-2' }];
+  const exemplos = [{ venueID: 'exemplo', _treino: true }];
+  const AppState = { queue: real, filters: { countryId: 30 } };
+  const Treino = { ativo: treinoAgora };
+  const deps = {
+    AppState, Treino, offlineLigado: () => true, OFFLINE_STORE: 'fila',
+    offlineDB: async () => {
+      // O treino começa ENQUANTO a base abre: troca a fila, como o `Treino.entrar`.
+      if (treinoDuranteOAbrir) { Treino.ativo = true; AppState.queue = exemplos; }
+      return {
+        close() {},
+        transaction: () => {
+          const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); } }) };
+          return tx;
+        },
+      };
+    },
+    offlinePodarPousos: () => {}, dfato: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
+  return { gravar, puts };
+}
+
+test('offlineGravarFila: no treino não grava; e o treino que começa com a base ABRINDO não troca a fila gravada', async () => {
+  const a = gravarCom({ treinoAgora: true });
+  assert.equal(await a.gravar(), false);
+  assert.equal(a.puts.length, 0, 'gravou a fila de exemplos');
+
+  const b = gravarCom({ treinoDuranteOAbrir: true });
+  assert.equal(await b.gravar(), true);
+  assert.deepEqual(b.puts[0].places.map((p) => p.venueID), ['real-1', 'real-2'],
+    'a fila lida DEPOIS do await era a do treino');
+
+  // CONTROLE: sem treino, grava a fila de verdade.
+  const c = gravarCom();
+  assert.equal(await c.gravar(), true);
+  assert.equal(c.puts[0].places.length, 2);
 });

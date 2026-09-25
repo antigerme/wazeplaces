@@ -125,7 +125,7 @@ Editores nível 1, ou sem badge de Area Manager, recebem a mensagem **"Acesso re
 | **"Acesso restrito"** | Você precisa ser Staff do Waze ou Area Manager nível 2+. Verifique seu perfil no WME |
 | **"Cookies expirados ou inválidos"** | Faça logout do WME, faça login de novo, exporte os cookies novamente |
 | **"Token CSRF não encontrado"** | O arquivo `cookies.txt` está incompleto. Confirme que você fez login antes de exportar |
-| **"Não há places para mostrar"** | Não tem nada na fila daquela região/país. Tente outro país no menu de filtros |
+| **"Tudo limpo!" sem você ter tratado nada** | Não há pedido que você possa tratar no país/região do filtro. O app já abre no país onde o seu perfil do WME edita; se você edita em outro, troque em Filtros |
 | **O app não atualiza para a versão nova** | No navegador: `Ctrl+Shift+R`. No celular: geralmente atualiza sozinho; se não, feche e reabra o app |
 
 ---
@@ -170,15 +170,27 @@ wazeplaces/
 ├── index.html              # GERADO por `npm run html` — é ele que a raiz serve
 ├── manifest.json           # PWA manifest
 ├── service-worker.js       # Service worker (cache + auto-update)
-├── icons/                  # icon-192.svg, icon-512.svg
-├── css/styles.css
+├── icons/                  # icon-192.svg, icon-512.svg, splash/ e screenshots/
+├── css/
+│   ├── styles.css          # Estilos próprios (o FONTE)
+│   └── app.css             # GERADO por `npm run css`: Tailwind + styles.css, minificados
+├── fonts/                  # Inter auto-hospedada (+ licença OFL)
 ├── js/
 │   ├── app.js              # Lógica principal, AppState, UI
 │   ├── api.js              # Wrapper do fetch() para /api/*
+│   ├── i18n.js             # Dicionário pt/en/es/fr e t()
+│   ├── presenca.js         # Quem está no app e a conversa (pelo WME)
+│   ├── mapa.js             # Mini-mapa e mapa ampliado (tiles do Waze)
+│   ├── qr.js               # Gerador de QR do pareamento (sob demanda)
 │   ├── swipe.js            # Gestos drag/swipe
-│   └── (Tailwind pré-compilado, junto com o styles.css, em css/app.css)
+│   ├── version.js          # A versão (serial YYYYMMDDnn)
+│   ├── sw-register.js      # Registro e auto-update do service worker
+│   └── min/                # GERADO por `npm run js` — é o que o app carrega
 ├── server/
 │   ├── core.mjs            # Lógica compartilhada (proxy Waze, sessões, cripto, gate)
+│   ├── wme-grpc.mjs        # O fio gRPC-web da presença e do chat do WME
+│   ├── marca-app.mjs       # A marca de quem usa o app, na posição da presença
+│   ├── corpo.mjs           # Leitura do corpo da requisição na VM (UTF-8 inteiro)
 │   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)
 ├── worker/
 │   └── index.mjs           # Adaptador Cloudflare Workers (roteia /api/*, delega estáticos pro ASSETS)

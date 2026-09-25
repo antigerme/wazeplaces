@@ -2221,8 +2221,17 @@ for (const lg of LINGUAS) {
   await page.waitForTimeout(600);
   checa(await page.evaluate(() => !document.getElementById('treinoBanner').classList.contains('hidden')),
     `treino ${lg}: a faixa "nada é enviado" não apareceu`);
-  checa(await page.evaluate(() => AppState.serverTotal === 3 && AppState.stats.read === 0),
-    `treino ${lg}: o placar do treino não é separado do real`);
+  // O placar do treino é DELE (Treino.stats/restam): a TELA mostra o dele e o
+  // real fica intacto por baixo. Trocar o `AppState.stats` (como era) fazia a
+  // resposta de uma ação real, pousando no treino, gravar o número do treino.
+  const placar = await page.evaluate(() => ({
+    tela: { restam: document.getElementById('pendingCount').textContent.trim(), lidos: document.getElementById('readCount').textContent.trim() },
+    treino: { restam: Treino.restam, lidos: Treino.stats.read },
+    real: { restam: AppState.serverTotal, lidos: AppState.stats.read },
+  }));
+  checa(placar.tela.restam === '3' && placar.tela.lidos === '0' && placar.treino.restam === 3
+    && placar.real.restam === 99 && placar.real.lidos === 7,
+    `treino ${lg}: o placar do treino não é separado do real`, JSON.stringify(placar));
 
   await page.click('.card-btn-reject');       // botão
   await page.waitForTimeout(500);
@@ -3336,11 +3345,17 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     venueID: 'v-ren', updateRequestID: 'u-ren', name: 'Odontodente Consultório',
     categories: ['DOCTOR_CLINIC'], address: 'Rua das Flores, 250 - Salvador, Bahia',
     updateTypeKey: 'IMAGE', reqType: 'IMAGE', reqSubType: '', createdBy: 'wazer',
+    // Fiel ao dado real de um pedido de FOTO NOVA: o tipo, e o id do pedido na
+    // URL da foto proposta (aqui no fragmento do data URI, como no bloco do
+    // aprovar). O `podeAprovarAtual` exige os dois desde a auditoria de
+    // 2026-09-25 — sem eles o botão de aprovar não aparece, e o guard de toque
+    // logo abaixo (que EXIGE um botão de ação) reprova.
+    purType: 'NEW_PHOTO',
     // Card de FOTO num local que já existe no mapa — que é o caso real: pedido
     // de foto em local aprovado. O bloco do portão logo abaixo varia este campo
     // pros três estados, inclusive o ausente.
     localAprovado: true,
-    imageUrls: [FOTO_FACHADA], approvedImageIds: [], imageDates: {},
+    imageUrls: [FOTO_FACHADA + '#u-ren'], approvedImageIds: [], imageDates: {},
     dateAdded: 1786982736809, lat: -12.892, lon: -38.32,
     mapa: { centro: [-12.892, -38.32], proposto: null, movidoM: null, entradas: [] }, changes: [],
   };
@@ -3755,8 +3770,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // Precisa de NOME (so corrige nome existente), local APROVADO (o Waze recusa
     // escrita em nao-aprovado) e a foto NOVA no indice 0, que e a que da acao.
     const b = FIXTURES_PAISES.find((f) => f.name) || {};
-    return { ...b, name: b.name || 'Padaria do Ze', localAprovado: true,
-             imageUrl: foto, imageUrls: [foto, foto, foto],
+    // E fiel a um pedido de FOTO NOVA: o tipo, e o id do pedido na URL da foto
+    // proposta (no fragmento) — o `podeAprovarAtual` exige os dois desde a
+    // auditoria de 2026-09-25, e sem eles o CONTROLE abaixo nao ve o aprovar.
+    const ur = b.updateRequestID || 'ur-pl';
+    return { ...b, name: b.name || 'Padaria do Ze', localAprovado: true, purType: 'NEW_PHOTO', updateRequestID: ur,
+             imageUrl: foto, imageUrls: [foto + '#' + ur, foto + '#outra1', foto + '#outra2'],
              approvedImageIds: [], imageDates: {} };
   })();
 
@@ -6011,7 +6030,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const json = (b) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) });
     if (rota === 'perfil') {
       return json({ success: true, visivelNoWme,
-        profile: { id: 12444348, userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [], managedAreas: [] } });
+        // `editableCountryIDs` como o servidor de verdade manda (as contas do owner
+        // editam no Brasil): sem ele o app pergunta o perfil nos OUTROS servidores
+        // (ver `paisDoPerfil`), e este CONTROLE conta os pedidos de perfil.
+        profile: { id: 12444348, userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false,
+          editableCountryIDs: [30], areas: [], managedAreas: [] } });
     }
     if (rota === 'lista-paises') return json({ success: true, countries: [] });
     if (rota === 'validar-place' || rota === 'marcar-lido') {

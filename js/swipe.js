@@ -69,7 +69,11 @@ function handleDragStart(e) {
     // Controles interativos e áreas de scroll interno não iniciam drag —
     // sem a exceção das listas, o touch-action:none do card mataria o
     // scroll de "Mudanças propostas" e do reporte no mobile.
-    if (e.target.closest('button, a, input, select, textarea, .card-changes-list, .card-flag-comment-text')) return;
+    // `.card-content-rola` é a rede de segurança do card (fonte gigante, zoom
+    // de texto): com ela ligada o conteúdo ROLA, e sem estar aqui o arraste
+    // engolia a rolagem — e arrastar pra cima PULAVA o card no lugar de rolar
+    // o texto (auditoria de 2026-09-25; a regra do CLAUDE.md sobre área rolável).
+    if (e.target.closest('button, a, input, select, textarea, .card-changes-list, .card-flag-comment-text, .card-content-rola')) return;
 
     isDragging = true;
     capturouNesteGesto = false;
@@ -245,7 +249,10 @@ function handleDragEnd(e) {
         animateSwipeOut('up', () => {
             if (typeof onSwipeUp === 'function') onSwipeUp();
         });
-    } else if (commitX) {
+    } else if (commitX && !(window.direcaoTravada && window.direcaoTravada(deltaX > 0 ? 'right' : 'left'))) {
+        // (Sem a guarda, o card de foto SEM FOTO saía pro lado com ✕ e ✓
+        // travados: o gesto decidia o que o botão recusava. Travado, ele volta
+        // pro lugar como um arraste curto.)
         const dir = deltaX > 0 ? 'right' : 'left';
         animateSwipeOut(dir, () => {
             if (dir === 'right' && typeof onSwipeRight === 'function') onSwipeRight();
@@ -316,6 +323,8 @@ function updateSwipeIndicator(deltaX, opacity, upOpacity = 0) {
 function triggerSwipe(direction, callback) {
     if (animating) return; // ignora enquanto uma animação de saída está em curso
     if (window.acoesTravadas && window.acoesTravadas()) return;
+    // A seta ← → num card de foto sem foto (ver `direcaoTravada` no app.js).
+    if (window.direcaoTravada && window.direcaoTravada(direction)) return;
     // NUNCA `document.querySelector('.place-card')` aqui: desde a pilha existem
     // dois na tela, e o de fundo é só o próximo pedido espiando por baixo.
     // Pegando o errado, o botão ✕ e a seta do teclado mandariam SAIR o card de

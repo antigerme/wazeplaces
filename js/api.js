@@ -375,14 +375,14 @@ const API = {
         });
     },
 
-    async markAsReadBatch(items) {
+    async markAsReadBatch(items, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return { success: false, error: t('api.error.noSession') };
         }
         return this._post('marcar-lido', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             items
         });
     },
@@ -524,25 +524,27 @@ const API = {
         return this._post('chat', { sessionToken, region: this.getRegion(), ...campos });
     },
 
-    async listCountries() {
+    // `regiao` pra quem mostra a lista de OUTRA região antes de ela valer (a
+    // troca de região no modal de Filtros, antes do "Aplicar").
+    async listCountries(regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return { success: false, error: t('api.error.noSession') };
         }
         return this._post('lista-paises', {
             sessionToken,
-            region: this.getRegion()
+            region: regiao || this.getRegion()
         });
     },
 
-    async listStates(countryId) {
+    async listStates(countryId, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return { success: false, error: t('api.error.noSession') };
         }
         return this._post('lista-estados', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             countryId: parseInt(countryId, 10)
         });
     },

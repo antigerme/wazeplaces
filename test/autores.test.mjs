@@ -605,3 +605,95 @@ test('autores: nada compara por createdBy — nome é pra exibir, id é pra chav
   assert.ok(porId.length >= 3,
     `só ${porId.length} comparações por creatorId — o varredor parou de casar`);
 });
+
+test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e o card não troca debaixo do dedo', async () => {
+  // Ligar o automático olhando um card do autor fazia ESSE card sumir e ser
+  // rejeitado; e uma busca pousando nos 350 ms da saída de um card trocava o da
+  // frente, com o gesto em curso rejeitando o seguinte (auditoria 2026-09-25).
+  const semComentarios = fonte.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
+  let prof = 0, fim = -1;
+  for (let j = semComentarios.indexOf('{', semComentarios.indexOf(')', i)); j < semComentarios.length; j++) {
+    if (semComentarios[j] === '{') prof++;
+    else if (semComentarios[j] === '}') { prof--; if (prof === 0) { fim = j + 1; break; } }
+  }
+  const na = { venueID: 'a1', updateRequestID: 'a1', creatorId: 7 };
+  const outro = { venueID: 'a2', updateRequestID: 'a2', creatorId: 7 };
+  const alheio = { venueID: 'b1', updateRequestID: 'b1', creatorId: 9 };
+  const AppState = { queue: [na, outro, alheio], currentPlace: na };
+  const enviados = [];
+  const deps = {
+    AppState, podeRecusarAutomaticoAqui: () => true, Treino: { ativo: false }, autoLigado: (id) => id === 7,
+    updatePendingCount: () => {}, removeCurrentCardEl: () => { throw new Error('trocou o card da tela'); },
+    showCurrentPlace: () => { throw new Error('trocou o card da tela'); }, startFetching: () => {}, showNoPlaces: () => {},
+    showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
+    enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
+  };
+  const chaves = Object.keys(deps);
+  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  await fn();
+  assert.deepEqual(enviados, ['a2'], 'rejeitou o card que estava NA TELA');
+  assert.deepEqual(AppState.queue.map((x) => x.venueID), ['a1', 'b1']);
+  assert.equal(AppState.currentPlace, na);
+});
+
+// ── A folha do resultado do lote, EXECUTADA (auditoria de 2026-09-25) ────────
+// Três defeitos de texto: o título dizia "{n} pedidos, {n} resolvidos" mesmo
+// com falha; com um só saía "1 rejeitados"; e o que foi pra fila de SAÍDA (sem
+// rede) contava como "Foram pro Waze no seu nome" — sem ter ido.
+function lote({ respostas }) {
+  const APP_SEM = fonte.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const fatiarFn = (nome) => {
+    const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
+    assert.ok(m, nome + ' sumiu');
+    let par = 0, i = APP_SEM.indexOf('(', m.index);
+    for (let j = i; j < APP_SEM.length; j++) {
+      if (APP_SEM[j] === '(') par++;
+      else if (APP_SEM[j] === ')') { par--; if (par === 0) { i = j + 1; break; } }
+    }
+    let prof = 0;
+    for (let j = APP_SEM.indexOf('{', i); j < APP_SEM.length; j++) {
+      if (APP_SEM[j] === '{') prof++;
+      else if (APP_SEM[j] === '}') { prof--; if (prof === 0) return APP_SEM.slice(m.index, j + 1); }
+    }
+    throw new Error('não fechou');
+  };
+  const els = { autorTitle: { textContent: '' }, autorCorpo: { innerHTML: '' } };
+  const fila = respostas.slice();
+  const deps = {
+    AppState: { stats: { rejected: 0 }, serverTotal: 9, queue: [], inFlightActions: 0 },
+    epocaDaSessao: 0, callWithRetry: (fn) => fn(),
+    API: { rejectPlace: async () => fila.shift() },
+    registrarPouso() {}, recordHistory() {}, registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
+    enfileirarSaida: () => 'ok', handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
+    saveStats() {}, updatePendingCount() {}, openModal() {},
+    document: { getElementById: (id) => els[id] || null },
+    t: (k, v) => (v && v.n != null ? `${k}#${v.n}` : k), escapeHtml: (x) => x,
+  };
+  const chaves = Object.keys(deps);
+  const enviar = new Function(...chaves, fatiarFn('enviarLote') + '\n' + fatiarFn('mostrarResultadoDoLote')
+    + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));
+  const pl = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: 7 });
+  return { rodar: () => enviar(respostas.map((_, i) => pl(i))), els };
+}
+
+test('lote: com UM pedido, singular no título e na linha ("1 rejeitado", não "1 rejeitados")', async () => {
+  const m = lote({ respostas: [{ success: true }] });
+  await m.rodar();
+  assert.equal(m.els.autorTitle.textContent, 'autor.lote.tituloUm#1');
+  assert.match(m.els.autorCorpo.innerHTML, /autor\.lote\.rejeitadosUm#1/);
+  assert.match(m.els.autorCorpo.innerHTML, /autor\.lote\.rejeitados\.descUm/);
+});
+
+test('lote: sem rede, o que foi pra fila de SAÍDA não diz "foi pro Waze" — é a linha "esperando envio"', async () => {
+  const m = lote({ respostas: [{ success: true }, { success: false, errorCategory: 'transient' },
+    { success: false, errorCategory: 'transient' }] });
+  await m.rodar();
+  const h = m.els.autorCorpo.innerHTML;
+  assert.match(h, /autor\.lote\.rejeitadosUm#1/, 'o que saiu de verdade é UM');
+  assert.match(h, /autor\.lote\.fila#2/, 'os dois sem rede não viraram "esperando envio"');
+  assert.equal(m.els.autorTitle.textContent, 'autor.lote.titulo#3');
+  // O título não afirma "resolvidos": a chave antiga dizia isso até com falha.
+  const pt = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(pt, /'autor\.lote\.titulo': '[^']*resolv/);
+});

@@ -163,6 +163,10 @@ test('a sentinela de queda exige PADRÃO, não um caso isolado', () => {
     'um ciclo curto sozinho é troca de aparelho ou logout no WME — exigir dois é o que faz padrão');
   assert.match(antes, /c\.fim === 'caiu'/,
     'passou a contar o "saiu" deliberado como queda');
+  // E o ciclo-PISO (a sessão que já existia quando o diário começou) fica de
+  // fora, como já fica da estatística: contá-lo acusava todo testador logado
+  // no dia do deploy (auditoria de 2026-09-25).
+  assert.match(antes, /c\.inicioConhecido !== false/, 'a sentinela conta o ciclo-piso como queda cedo');
 });
 
 test('o arquivo diz de que versão do diagnóstico ele é', () => {

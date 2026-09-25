@@ -299,15 +299,32 @@ test('SEM REDE com a fila vazia: a tela é a de "sem sinal" (loadError), nunca o
   assert.ok(m.diario.some(([k]) => k === 'busca.semRede'), 'o diário não anotou a busca sem rede');
 });
 
-test('uma página que falha no meio da leitura guarda o que já veio e marca a falha', async () => {
+test('uma página que falha POR REDE no meio da leitura guarda o que já veio e ESPERA calada', async () => {
+  // Com card na fila, a queda no meio da busca é o "sem rede com card" do topo
+  // (o `onLine` só não virou ainda): antes ela desistia da fila com toast
+  // vermelho e `hasMore = false` (auditoria 2026-09-25).
   const waze = wazeVivo(12, { porPagina: 2 });
   waze.semRespostaNa = 2;
   const m = montar(waze);
   await m.app.fetchNextPage();                       // página 1: 2 novos (≤ 3), anda pra 2, que falha
   assert.deepEqual(waze.pedidas, [1, 2]);
   assert.equal(m.AppState.queue.length, 2, 'perdeu o que a página 1 trouxe');
+  assert.equal(m.AppState.loadError, false, 'desistiu da fila com card na tela');
+  assert.equal(m.AppState.hasMore, true, 'a próxima ação não buscaria de novo');
+  assert.deepEqual(m.toasts, [], 'toast vermelho por uma queda de sinal com card na tela');
+  // A próxima ação busca de novo — e, com a rede de volta, acha o resto.
+  waze.semRespostaNa = null;
+  await m.app.fetchNextPage();
+  assert.ok(m.AppState.queue.length > 2, 'a busca seguinte não trouxe o que faltava');
+});
+
+test('falha de rede com a fila VAZIA: aí sim marca a falha (a tela é a de erro)', async () => {
+  const waze = wazeVivo(12);
+  waze.semRespostaNa = 1;
+  const m = montar(waze);
+  await m.app.fetchNextPage();
   assert.equal(m.AppState.loadError, true);
-  assert.equal(m.AppState.hasMore, false);
+  assert.equal(m.AppState.hasMore, false, 'sem isto o laço do `startFetching` giraria');
 });
 
 // ── o diário e a varredura do offline ─────────────────────────────────────
@@ -357,4 +374,19 @@ test('`fetching` preso SEM promessa não vira laço: a busca sai de novo', async
   assert.deepEqual(waze.pedidas, [1], 'a busca não saiu com `fetching` preso');
   assert.ok(m.AppState.queue.length > 0);
   assert.equal(m.AppState.fetching, false);
+});
+
+test('a volta da rede e o "Tentar novamente" retomam SEM zerar a fila (os pulados não voltam)', () => {
+  // Era `resetQueue()` + `startFetching()`: os pedidos que a pessoa PULOU nesta
+  // sessão voltavam, e com card na tela o card era arrancado e a ação da janela
+  // do Desfazer saía antes da hora (auditoria 2026-09-25).
+  const r = fatiar('retomarBusca');
+  assert.match(r, /AppState\.loadError = false;\s*AppState\.hasMore = true;\s*startFetching\(\);/);
+  assert.doesNotMatch(r, /resetQueue/);
+  assert.match(APP_SEM, /if \(AppState\.authenticated && AppState\.loadError && !AppState\.fetching\) \{\s*retomarBusca\(\);\s*\}/,
+    'a volta da rede voltou a zerar a fila');
+  assert.match(APP_SEM, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(\) => \{\s*if \(await offlineTentarAbrirSemRede\(\)\) return;\s*retomarBusca\(\);/,
+    'o "Tentar novamente" voltou a zerar a fila (e a descartar a guardada do offline)');
+  assert.match(APP_SEM, /\$\('refreshBtn'\)\.addEventListener\('click', \(\) => \{\s*if \(AppState\.fetching\) return;\s*if \(navigator\.onLine === false\) \{/,
+    'o ↻ sem rede joga fora a fila (inclusive a guardada)');
 });

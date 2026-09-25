@@ -53,7 +53,7 @@ E atualizar este README com a nova versão (campo `version` no `package.json` ex
 
 Análise técnica completa do que mudaria se reescrevêssemos o app como Android nativo (Kotlin) ou cross-platform (Flutter, KMM). Cobre:
 
-- Por que o backend PHP existe hoje (CORS + segurança de cookies)
+- Por que o backend existe (CORS + segurança de cookies) — escrito quando ele ainda era PHP; hoje é JS (core + adaptadores), e o argumento vale igual
 - Por que sumiria num nativo de verdade (sem CORS, Android Keystore mais seguro)
 - 3 opções de fluxo de auth no nativo (WebView login é a recomendada)
 - Ganhos (UX, push, performance, segurança, infraestrutura, distribuição)
@@ -83,8 +83,9 @@ python3 docs/scripts/md2pdf.py docs/native-android-analysis.md docs/native-andro
 
 ## `cloudflare-migration.md` + `.pdf`
 
-Planejamento técnico de migração do stack atual (PHP + Apache) para Cloudflare
-Pages + Workers, mantendo fallback pra VM RedHat. Cobre:
+Planejamento técnico da migração do stack de então (PHP + Apache) para Cloudflare
+Workers, mantendo fallback pra VM RedHat. **FEITA na v3.0** — o documento
+fica como registro de por que cada peça é como é. Cobre:
 
 - Padrão **core compartilhado + adaptadores** (aprendido do projeto `botequei`):
   uma lógica só, cascas finas por plataforma — resolve o "dois backends dobram
@@ -131,6 +132,17 @@ Três coisas que ele registra e que mudam decisão:
   sustenta o nosso portão é o AM, não o rank.
 - `grpcVenueUpdateRequestIssuesApi: false` — o endpoint que sustenta a nossa
   fila ainda não migrou pra gRPC, mas a flag já existe.
-- `isStarred` e as buscas salvas existem no servidor e o app não os usa.
+- `isStarred` e as buscas salvas existem no servidor. A estrela o app já MARCA
+  (o "Pular guarda o pedido", rota `guardar-pedido`); filtrar por ela e as
+  buscas salvas ainda não.
 
 Não tem PDF: é referência de consulta, não documento pra compartilhar.
+
+---
+
+## `gotchas.md`
+
+A **história** de cada gotcha do CLAUDE.md, com a mesma numeração: sintoma,
+hipótese errada, a medição que a derrubou, o conserto e a armadilha do
+instrumento. O CLAUDE.md guarda só a regra curta, que é o que precisa estar
+sempre carregado; aqui mora o inteiro teor, pra ler quando o assunto aparece.
