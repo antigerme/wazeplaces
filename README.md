@@ -75,14 +75,14 @@ O app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 ### Usando o app
 
 1. Faça login (extensão de login automático ou upload/colar do `cookies.txt`).
-2. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"**, seu **avatar do Waze e nome** aparecem no topo, e os cards começam a carregar (Brasil é o padrão).
-3. Pra trocar o **país**, a **região** ou filtrar por **estado** / **área gerenciada**, clique no ícone de **filtros 📂** no topo. Os países/estados aparecem em listas com nomes (sem precisar saber ID).
+2. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"**, seu **avatar do Waze e nome** aparecem no topo, e os cards começam a carregar, já no país onde o seu perfil do WME edita.
+3. Pra trocar o **país**, a **região** ou filtrar por **estado** / **área gerenciada**, toque no ícone de **filtros** (o funil) no topo. Os países/estados aparecem em listas com nomes (sem precisar saber ID).
 4. Processe os pedidos arrastando os cards, usando os **botões do card**, ou as setas do teclado:
    - **← (esquerda):** Rejeitar (lixo)
    - **→ (direita):** Marcar como lido
-   - **↑ (cima):** Pular (não chama API, só passa pro próximo)
+   - **↑ (cima):** Pular (passa pro próximo sem decidir; com **“Pular guarda o pedido”** ligado nas Preferências, ele ganha a sua ⭐ no WME)
 5. Cometeu um erro? Tem uma **janela de 3 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
-6. O botão de **ajuda (?)** no topo abre um painel com atalhos, legenda, instruções e o botão **"Sair"**.
+6. O botão de **ajuda (ⓘ)** no topo abre um painel com atalhos, legenda, instruções e o botão **"Sair"**.
 
 **Coisas que aparecem no card:**
 - **Marca** do place + selo "✓ conhecida" (se está na lista oficial do Waze) ou "? não listada" (suspeita)

@@ -826,3 +826,32 @@ test('token que falhou por REDE não bloqueia o tempo real por 5 min: a rede vol
   await Promise.resolve();
   assert.equal(d.chamadas.presencaApp.length, n, 'recusa que não é rede passou a repetir sem teto');
 });
+
+test('mandar: com o ECO já de volta pelo tempo real, a resposta que falhou NÃO rebaixa pra "Não enviada"', async () => {
+  // A rede caiu DEPOIS de o Waze receber: o eco chegou pelo fluxo e a resposta
+  // do envio se perdeu. Rebaixar mentia, e o "Tentar de novo" repetiria o que
+  // já chegou (auditoria de 2026-09-25).
+  let soltar;
+  const c = novoCliente({ api: { chat: () => new Promise((ok) => { soltar = ok; }) } });
+  c.P.Presenca.aberta = CAF;
+  c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true });
+  c.P.presencaEnviar('oi', null);
+  const h = c.P.Presenca.historico.get(CAF);
+  const m = h.msgs[0];
+  // O eco: a mesma mensagem (mesmo id) entra pelo fluxo enquanto o envio espera.
+  c.P.presencaJuntarMsgs(h, [{ ...m, estado: undefined }]);
+  assert.equal(m.estado, 'enviada', 'CONTROLE: o eco não marcou a mensagem como enviada');
+  soltar({ success: false, errorCategory: 'transient' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(m.estado, 'enviada', 'a resposta perdida rebaixou pra "Não enviada" uma mensagem que o eco provou entregue');
+});
+
+test('diagnóstico do tempo real: o erro é da CONEXÃO — um "silencio" antigo não gruda nas quedas seguintes', async () => {
+  // O `catch` do fluxo não sobrescreve "silencio" (é o vigia abortando); sem
+  // zerar a cada conexão, toda queda posterior saía como "silencio" no relatório.
+  const c = novoCliente({ api: { fetch: async () => { throw new TypeError('Failed to fetch'); } } });
+  c.P.Presenca.chat = { token: 't', chave: 'k', base: 'https://instantmessaging-pa.googleapis.com/', expiraEm: Date.now() + 864e5 };
+  c.P.Presenca.fluxoDiag.ultimoErro = 'silencio';          // de uma conexão ANTERIOR
+  await c.P.presencaFluxoAbrir();
+  assert.equal(c.P.Presenca.fluxoDiag.ultimoErro, 'TypeError', `a queda nova saiu como "${c.P.Presenca.fluxoDiag.ultimoErro}"`);
+});

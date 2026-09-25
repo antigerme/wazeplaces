@@ -166,3 +166,12 @@ test('diag-api: decide por LISTA DE LEITURA — caminho torto até uma rota de e
   // A base é a ORIGEM da URL do app (com query ou caminho, o POST ia pro lugar errado).
   assert.match(API, /base = new URL\(String\(\(d\.app && d\.app\.url\) \|\| ''\)\)\.origin;/);
 });
+
+test('diag-tela: remonta TAMBÉM as capturas das aberturas anteriores (o defeito que atravessa fechar e reabrir)', () => {
+  // Auditoria de 2026-09-25: a persistência existe justamente pro defeito que
+  // só aparece fechando e reabrindo o app, e a ferramenta que remonta a tela lia
+  // só as capturas da abertura atual.
+  const TELA = readFileSync(join(ROOT, 'tools/diag-tela.mjs'), 'utf8');
+  assert.match(TELA, /d\.aberturasAnteriores/, 'o diag-tela voltou a ignorar as aberturas anteriores');
+  assert.match(TELA, /const momentos = \[\.\.\.anteriores, \.\.\.atuais\];/);
+});

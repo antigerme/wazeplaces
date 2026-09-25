@@ -180,3 +180,30 @@ test('offlinePodarTiles: apaga só o que não é da fila, e não cria o cache de
   assert.equal(await podar(new Set(), 0), 0);
   assert.equal(criou, false, 'a poda criou o cache do mapa pra quem nunca o teve');
 });
+
+// A cota estourada ABORTA a transação do IndexedDB sem sempre passar pelo
+// `onerror`: sem `onabort`, a promessa ficava pendurada e a varredura presa
+// (`offlineVarrendo`) pra sempre (auditoria de 2026-09-25).
+test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pendurar', async () => {
+  const AppState = { queue: [{ venueID: 'r1' }], filters: {} };
+  const deps = {
+    AppState, Treino: { ativo: false }, offlineLigado: () => true, OFFLINE_STORE: 'fila',
+    offlineDB: async () => ({ close() {}, transaction: () => {
+      const tx = { objectStore: () => ({ put: () => { setTimeout(() => tx.onabort && tx.onabort()); } }) };
+      return tx;
+    } }),
+    offlinePodarPousos: () => {}, dfato: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
+  const r = await Promise.race([gravar(), new Promise((ok) => setTimeout(() => ok('PENDUROU'), 500))]);
+  assert.equal(r, false, 'a gravação abortada pendurou (a varredura ficaria presa)');
+});
+
+test('offlineDB: abrir a base tem teto (o IndexedDB do WebKit às vezes não responde)', async () => {
+  const deps = { OFFLINE_DB: 'x', OFFLINE_STORE: 'fila', OFFLINE_DB_TETO_MS: 30,
+    indexedDB: { open: () => ({}) } };   // nunca chama onsuccess/onerror
+  const chaves = Object.keys(deps);
+  const abrir = new Function(...chaves, fatiar('offlineDB') + '\nreturn offlineDB;')(...chaves.map((k) => deps[k]));
+  await assert.rejects(Promise.race([abrir(), new Promise((_, n) => setTimeout(() => n(new Error('PENDUROU')), 500))]), /timeout/);
+});

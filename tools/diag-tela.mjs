@@ -49,10 +49,19 @@ mkdirSync(saida, { recursive: true });
 
 // Os dois formatos convivem: o primeiro diagnóstico guardava UM `dom`; o do FAB
 // guarda N `momentos`. Ler os dois evita que arquivo antigo vire inútil.
-const momentos = Array.isArray(d.momentos) && d.momentos.length
+const atuais = Array.isArray(d.momentos) && d.momentos.length
   ? d.momentos
   : (d.dom ? [{ t: d._gerado, motivo: 'arquivo v1', dom: d.dom,
                 imagens: [], canvas: [], modais: [], painel: '?' }] : []);
+// E as capturas das ABERTURAS ANTERIORES (o app fechado e reaberto com o modo
+// dev ligado): são justamente as do defeito que atravessa um fechar e reabrir,
+// e ficavam de fora da remontagem (auditoria de 2026-09-25). Vão primeiro, na
+// ordem em que aconteceram, com a abertura no rótulo.
+const anteriores = (Array.isArray(d.aberturasAnteriores) ? d.aberturasAnteriores : [])
+  .flatMap((a, ia) => (Array.isArray(a && a.momentos) ? a.momentos : [])
+    .filter((m) => m && m.dom)
+    .map((m) => ({ ...m, motivo: `[abertura ${(a && a.id) || ia + 1}] ` + (m.motivo || '') })));
+const momentos = [...anteriores, ...atuais];
 if (!momentos.length) {
   console.error('o arquivo não tem nem `momentos` nem `dom` — nada pra remontar');
   process.exit(1);

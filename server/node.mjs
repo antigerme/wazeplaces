@@ -25,7 +25,7 @@ if (!Number.isFinite(versaoAtual) || versaoAtual < MIN_NODE) {
 }
 
 import { createServer } from 'node:http';
-import { readFile, writeFile, unlink, stat, mkdir, utimes, readdir } from 'node:fs/promises';
+import { readFile, writeFile, unlink, stat, mkdir, utimes, readdir, rename } from 'node:fs/promises';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -82,9 +82,21 @@ const fsStore = {
       return null;
     }
   },
+  // ATÔMICO: grava num arquivo temporário e troca pelo nome certo. Um processo
+  // derrubado NO MEIO da escrita deixava a sessão truncada — que não decifra, é
+  // apagada (`descartar`) e desloga a pessoa (auditoria de 2026-09-25). O
+  // `rename` no mesmo diretório troca o arquivo inteiro de uma vez.
   async put(hash, blob) {
     await mkdir(SESSION_DIR, { recursive: true, mode: 0o700 });
-    await writeFile(join(SESSION_DIR, 'sess_' + hash), blob, { mode: 0o600 });
+    const final = join(SESSION_DIR, 'sess_' + hash);
+    const temp = join(SESSION_DIR, '.tmp_' + hash + '_' + process.pid + '_' + randomBytes(4).toString('hex'));
+    await writeFile(temp, blob, { mode: 0o600 });
+    try {
+      await rename(temp, final);
+    } catch (e) {
+      await unlink(temp).catch(() => {});
+      throw e;
+    }
   },
   async delete(hash) {
     await unlink(join(SESSION_DIR, 'sess_' + hash)).catch(() => {});
@@ -103,6 +115,14 @@ async function gcSessions() {
     const files = await readdir(SESSION_DIR);
     const now = Date.now();
     for (const name of files) {
+      // Temporário da gravação atômica que ficou pra trás (o processo caiu entre
+      // o `writeFile` e o `rename`): ninguém o lê, e sai com folga.
+      if (name.startsWith('.tmp_')) {
+        const t = join(SESSION_DIR, name);
+        const st = await stat(t).catch(() => null);
+        if (st && now - st.mtimeMs > RELER_GC_MS) await unlink(t).catch(() => {});
+        continue;
+      }
       if (!name.startsWith('sess_')) continue;
       const f = join(SESSION_DIR, name);
       try {

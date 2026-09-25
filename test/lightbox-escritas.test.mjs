@@ -143,6 +143,7 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false } }) {
     msgDoServidor: () => '', t: (k) => k, devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {},
     aplicarTravaDeAcao: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {},
     setTimeout: () => 0, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
+    callWithRetry: (fn) => fn(),
   };
   let placeResolvido = null;
   const nomes = ['enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual', 'enviarExclusao', 'pedirExclusaoDaFoto'];
@@ -191,4 +192,12 @@ test('aprovar e FECHAR dentro da janela: o card avança quando a resposta chega'
   assert.ok(!m2.log.includes('avancou'));
   assert.equal(m2.resolvido(), m2.A);
   assert.ok(AppState);
+});
+
+test('aprovar e excluir foto passam pela MESMA retentativa do resto (o renomear já passava)', () => {
+  // Uma oscilação de rede virava "não deu pra aprovar/excluir" na primeira
+  // falha (auditoria de 2026-09-25). Repetir é seguro nos dois: a aprovação que
+  // passou volta `already_processed` (que conta), e a exclusão relê o local.
+  assert.match(fatiar('enviarAprovacao'), /await callWithRetry\(\(\) => API\.aprovarPedido\(/);
+  assert.match(fatiar('enviarExclusao'), /await callWithRetry\(\(\) => API\.excluirFoto\(/);
 });

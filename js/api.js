@@ -584,6 +584,13 @@ const API = {
         return this._post('parear', { action: 'create', sessionToken, comCodigo });
     },
 
+    // O "Sair" cancela os códigos de pareamento que ESTE aparelho emitiu (ver o
+    // `cancel` no core). Melhor esforço: sem rede, o código vence em 5 min.
+    async cancelarPareamento(code) {
+        if (!code) return { success: true };
+        return this._post('parear', { action: 'cancel', code });
+    },
+
     async resgatarPareamento(code) {
         const result = await this._post('parear', { action: 'claim', code });
         // Sucesso = este aparelho passa a ter sessão própria (a do computador

@@ -456,6 +456,11 @@ async function presencaFluxoAbrir() {
     const fluxo = { ctl: new AbortController(), emLote: false, epoca: Presenca.epoca, desde: Date.now(), vivoEm: Date.now() };
     Presenca.fluxo = fluxo;
     Presenca.fluxoDiag.aberturas += 1;
+    // O erro é DESTA conexão. Sem zerar, um "silencio" antigo GRUDAVA: o `catch`
+    // abaixo não sobrescreve "silencio" (é o vigia abortando, não erro novo), e
+    // toda queda seguinte, de outro motivo, ficava registrada como "silencio"
+    // (auditoria de 2026-09-25). O histórico vai no diário (`presenca.fluxo`).
+    Presenca.fluxoDiag.ultimoErro = null;
     presencaVigiarSilencio(fluxo);
     let fimNormal = false;
     try {
@@ -1003,6 +1008,12 @@ async function presencaMandar(com, msg) {
         msg.estado = 'enviada';
         if (Number.isFinite(r.ts)) msg.ts = r.ts;
         Presenca.vistas.add(msg.id);
+    } else if (msg.estado === 'enviada') {
+        // O ECO já voltou pelo tempo real (`presencaJuntarMsgs`): o Waze RECEBEU
+        // a mensagem, e foi a resposta que se perdeu no caminho. Rebaixar pra
+        // "Não enviada" mentia, e o "Tentar de novo" mandaria de novo o que já
+        // chegou (auditoria de 2026-09-25).
+        if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
     } else {
         msg.estado = 'falhou';
         msg.motivo = r && r.errorCategory === 'transient' ? 'conexao' : 'erro';
@@ -1088,10 +1099,11 @@ function presencaResumoDoCard(card) {
 // espalhar o objeto recebido, que aceitaria qualquer chave que ele inventasse.
 //
 // A `imageUrl` é o campo perigoso: ela vira `src` de uma <img>, então só passa
-// URL https do domínio de imagem do Waze. Sem isto, quem manda escolheria pra
-// onde o aparelho de quem recebe faz requisição. A CSP já barraria a maior
-// parte disso; esta é a segunda camada.
-const PRESENCA_FOTO_OK = /^https:\/\/[a-z0-9-]+\.waze\.com\//i;
+// URL https do HOST das fotos do Waze — o único que o card monta
+// (`WAZE_IMAGE_BASE` no core). Aceitava qualquer `*.waze.com`, e aí quem manda
+// escolheria um GET em `www.waze.com` que o aparelho de quem recebe faria com
+// os cookies do WME dele (auditoria de 2026-09-25). A CSP é a outra camada.
+const PRESENCA_FOTO_OK = /^https:\/\/venue-image\.waze\.com\//i;
 function presencaCardSeguro(c) {
     if (!c || typeof c !== 'object') return null;
     const txt = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');

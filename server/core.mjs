@@ -929,6 +929,11 @@ export function makeSessions({ store, keyBytes }) {
 
     // Uso único: apaga ANTES de validar a expiração, pra um código não poder
     // ser tentado duas vezes nem virar oráculo de "existe mas venceu".
+    async cancelPairing(code) {
+      const limpo = normalizePairCode(code);
+      if (limpo.length !== PAIR_CODE_LEN && limpo.length !== PAIR_SECRET_LEN) return;
+      try { await store.delete('pair_' + await sha256hex('pair:' + limpo)); } catch (e) { /* vence sozinho em 5 min */ }
+    },
     async claimPairing(code) {
       const limpo = normalizePairCode(code);
       // Os dois tamanhos são válidos: 6 é o código digitado, 20 é o do QR.
@@ -1367,6 +1372,15 @@ async function handleParear(data, { sessions }) {
     const cookies = await resolveCookies(data, sessions); // 401 se não autenticado
     const { code, curto, expiresIn } = await sessions.createPairing(cookies, { comCodigo: !!(data && data.comCodigo) });
     return { status: 200, body: { success: true, code, curto, expiresIn } };
+  }
+
+  // CANCELAR um código emitido: o "Sair" do aparelho que o gerou o chama, senão
+  // o QR mostrado antes seguia valendo 5 min e entrava numa conta que acabou
+  // de sair (auditoria de 2026-09-25). Não pede sessão — ela já foi apagada — e
+  // não precisa: saber o código é a prova, e com ele dava pra usá-lo.
+  if (action === 'cancel') {
+    await sessions.cancelPairing(data && data.code);
+    return { status: 200, body: { success: true } };
   }
 
   if (action === 'claim') {
@@ -2074,14 +2088,22 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   return { places, blocked };
 }
 
+// Id de pedido ou de local: texto ou número curto. Objeto, lista ou texto de
+// quilobytes não é id — ia pro Waze como veio (auditoria de 2026-09-25).
+const idValido = (v) => (typeof v === 'string' && v.length > 0 && v.length <= 64) || (typeof v === 'number' && Number.isFinite(v));
+// O lote tem TETO: o cliente manda pedaços de 25, e a página do Waze é de 500.
+// Sem teto, um corpo de 5 MB virava um lote de dezenas de milhares no Waze.
+const MAX_ITENS_LOTE = 500;
+
 async function handleMarcarLido(data, { sessions, aoFundo }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
 
   const ids = [];
   if (Array.isArray(data.items)) {
+    if (data.items.length > MAX_ITENS_LOTE) apiError('Pedidos demais de uma vez', 400, 'srv.err.tooManyItems', { max: MAX_ITENS_LOTE });
     for (const item of data.items) {
-      if (item && item.venueID !== undefined && item.updateRequestID !== undefined) {
+      if (item && idValido(item.venueID) && idValido(item.updateRequestID)) {
         ids.push({ id: item.updateRequestID, venueId: item.venueID });
       }
     }

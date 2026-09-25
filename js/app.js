@@ -219,6 +219,11 @@ let epocaDaSessao = 0;
 // interruptor em `setupEventListeners`): até aqui, o segundo vale.
 let desligarDevConfirmadoAte = 0;
 
+// Os códigos de pareamento que ESTE aparelho emitiu nesta página: o "Sair" os
+// cancela no servidor, senão o QR mostrado antes seguia valendo 5 min e entrava
+// numa conta que acabou de sair (auditoria de 2026-09-25).
+const pareamentosEmitidos = new Set();
+
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
 });
@@ -301,6 +306,7 @@ function initApp() {
     // `savePreferences()` (que corretamente recusa gravar antes de ler).
     loadPreferences();
     loadStats();
+    puladosNoInicioDaFila = AppState.stats.skipped || 0;
     // Com o perfil em CACHE a cota já é conhecida aqui, então a linha de base se
     // decide na hora; sem ele, `guardarPerfilDoPortao` decide quando o perfil
     // chegar. Sem esta chamada existe uma janela — entre abrir e o /api/perfil
@@ -1042,6 +1048,7 @@ async function abrirPareamento() {
     // O segredo do QR NÃO é exibido: ele tem 20 símbolos e ninguém vai digitar
     // isso. Quem não tem câmera pede um código curto no botão, e aí sim.
     codeEl.dataset.raw = r.code;
+    pareamentosEmitidos.add(r.code);
     desenharQrPareamento(location.origin + '/#pair=' + r.code);
     document.getElementById('pairCopyLinkBtn').disabled = false;
 
@@ -1098,6 +1105,7 @@ async function revelarCodigoPareamento() {
         showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
         return;
     }
+    pareamentosEmitidos.add(r.code);
     btn.classList.add('hidden');
     document.getElementById('pairCodeReveal').classList.remove('hidden');
     codeEl.textContent = formatarCodigoPareamento(r.code);
@@ -2052,7 +2060,11 @@ function lixeiraOcupada(ligado) {
 async function enviarExclusao(alvo) {
     const epoca = epocaDaSessao;
     try {
-        const r = await API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon);
+        // Com a MESMA política de retentativa do resto (o renomear já a tinha):
+        // uma oscilação de rede virava "não deu pra excluir" na primeira falha
+        // (auditoria de 2026-09-25). Repetir é seguro: a exclusão relê o local,
+        // e a foto que já saiu volta como `jaExcluida`.
+        const r = await callWithRetry(() => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon));
         if (epoca !== epocaDaSessao) return false;   // saiu no meio: ver `epocaDaSessao`
         if (r && r.success) {
             // Sem toast de sucesso: a foto sumindo JÁ é a confirmação, e
@@ -2189,7 +2201,9 @@ function estadoAprovando(ligado) {
 async function enviarAprovacao(alvo) {
     const epoca = epocaDaSessao;
     try {
-        const r = await API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID);
+        // Retentativa como no excluir e no renomear; repetir é seguro — a 2ª
+        // de uma aprovação que passou volta `already_processed`, que conta.
+        const r = await callWithRetry(() => API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID));
         if (epoca !== epocaDaSessao) return false;   // saiu no meio: ver `epocaDaSessao`
         if (r && r.success) {
             // Sem toast de sucesso: o ✨ sumindo e o botão virando lixeira JÁ
@@ -5767,6 +5781,10 @@ async function handleLogout() {
     // serve pra exclusão no servidor, que vai depois, com retentativa.
     const tokenParaApagar = API.getSession();
     API.setSession(null);
+    // Os códigos de pareamento emitidos aqui param de valer (sem esperar rede:
+    // sem ela, eles vencem sozinhos em 5 min).
+    for (const code of pareamentosEmitidos) API.cancelarPareamento(code).catch(() => {});
+    pareamentosEmitidos.clear();
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
     AppState.filters = { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
@@ -5865,6 +5883,7 @@ function resetQueue() {
     // `Treino.encerrar`). Cobre sair, entrar, atualizar e trocar de filtro.
     if (Treino.ativo) Treino.encerrar();
     tratouNestaFila = false;
+    puladosNoInicioDaFila = AppState.stats.skipped || 0;
     // Descarrega ação no buffer de undo ANTES de zerar a fila: sem isso, a ação
     // pendente (nunca enviada ao Waze) era re-buscada e o "Desfazer" duplicava o
     // place + dobrava stats. Refresh/filtros honram o swipe (execute); logout e
@@ -8400,7 +8419,13 @@ function abrirPedidoRecebido(dados, deQuem) {
 
     const foto = $('pedidoFoto');
     if (dados.imageUrl) {
-        $('pedidoFotoImg').src = dados.imageUrl;
+        const img = $('pedidoFotoImg');
+        // Foto que não vem (o Waze a tirou do ar, sem sinal) SAI da folha, como a
+        // do card: o ícone de imagem quebrada no topo não informa nada
+        // (auditoria de 2026-09-25). Pendurado ANTES do `src`: o erro pode
+        // chegar no mesmo tique, com a foto já no cache como falha.
+        img.onerror = () => { foto.classList.add('hidden'); };
+        img.src = dados.imageUrl;
         foto.classList.remove('hidden');
     } else {
         $('pedidoFotoImg').removeAttribute('src');
@@ -8816,6 +8841,12 @@ function trocarTextoI18n(el, chave) {
 // Houve trabalho de verdade NESTA fila (zera no `resetQueue`)? É o critério da
 // festa do "Tudo limpo!" e da frase dele.
 let tratouNestaFila = false;
+// Quantos pedidos foram PULADOS nesta fila, pelo placar (o Desfazer do ↑ já o
+// desconta, e o treino tem placar próprio): a fila que termina com pulados não
+// está "limpa" — eles seguem pendentes, e só voltam ao "Verificar novamente".
+// Dizia "Tudo limpo!" e "confira o país e a região" pra quem tinha pulado tudo
+// (auditoria de 2026-09-25).
+let puladosNoInicioDaFila = 0;
 
 function showNoPlaces() {
     // O painel de fila vazia tem DOIS significados e a distinção é a flag —
@@ -8865,10 +8896,15 @@ function showNoPlaces() {
         // tratado alguma coisa na vida ganhava confete e a conquista "Tudo
         // limpo" só por abrir o app com a fila vazia.
         const tratou = tratouNestaFila;
+        const pulados = Math.max(0, (AppState.stats.skipped || 0) - puladosNoInicioDaFila);
         // E a frase: "Você processou todos os pedidos" é mentira pra quem não
         // processou nada — é o que via quem abria o app num país onde não edita.
+        // Com PULADOS, nem "tudo limpo" nem "confira o país": eles seguem
+        // pendentes e o botão logo abaixo os traz de volta.
+        trocarTextoI18n(noMore.querySelector('h3[data-i18n^="states.empty.title"]'),
+            pulados > 0 ? 'states.empty.titlePulados' : 'states.empty.title');
         trocarTextoI18n(noMore.querySelector('p[data-i18n^="states.empty.body"]'),
-            tratou ? 'states.empty.body' : 'states.empty.bodyNada');
+            pulados > 0 ? 'states.empty.bodyPulados' : tratou ? 'states.empty.body' : 'states.empty.bodyNada');
         noMore.classList.remove('celebrate');
         if (tratou) {
             // Reflow forçado: sem isso o browser junta remove+add num só estilo
@@ -10200,7 +10236,10 @@ function abrirFolhaDoAutor(place) {
 // O lote, com a MESMA janela de Desfazer de um card só — a trava dos botões, o
 // banner com a contagem, o `resetQueue`. A diferença é `aoSair: 'cancel'`.
 function rejeitarLoteDoAutor(place) {
-    if (acoesTravadas()) return;
+    // Na janela do Desfazer nada prossegue — mas a folha já FECHOU com o toque,
+    // e sair calado deixava a pessoa achando que rejeitou (auditoria de
+    // 2026-09-25). Diz o que fazer.
+    if (acoesTravadas()) { showToast(t('toast.esperaDesfazer'), 'info'); return; }
     if (Treino.ativo) { showToast(t('treino.semLote'), 'info'); return; }
     const places = pedidosDoAutorNaFila(place);
     if (places.length === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
@@ -10262,11 +10301,19 @@ async function enviarLote(places, opts = {}) {
                 if (aoLandar) {
                     AppState.stats.rejected++;
                     AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+                } else {
+                    // O lote da PESSOA conta pras conquistas como o ✕ do card; a
+                    // recusa automática (`aoLandar`) é o app agindo, e não conta.
+                    registrarAcaoConfirmada('reject', p);
                 }
             } else if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
                 conta.ja++;
                 registrarPouso(p);
                 if (aoLandar) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+                // No placar otimista ele JÁ contou; o Histórico conta igual, como
+                // no card único (`handleActionResult`) — senão o placar e o
+                // Histórico divergiam por lote (auditoria de 2026-09-25).
+                else recordHistory('reject', 1);
             } else if (r && r.errorCategory === 'unauthorized') {
                 // O resto do lote não pode evaporar (ver o 401 no
                 // `handleActionResult`): no placar otimista ele vai pra fila de
@@ -10899,7 +10946,11 @@ async function esvaziarFilaDeSaida() {
             if (saiu >= 0) f.splice(saiu, 1);
             salvarFilaDeSaida(f);
             updateInFlightIndicator();
-            enviados++;
+            // Só conta o que POUSOU (inclusive "já tratado"): a recusa de verdade
+            // já avisou com toast de erro, e entrava no "N enviados" de sucesso
+            // logo depois — o mesmo pedido dito falho e enviado (auditoria de
+            // 2026-09-25). Sai da fila do mesmo jeito: repetir não muda a recusa.
+            if (r && (r.success || r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) enviados++;
             if (f.length) await new Promise((ok) => setTimeout(ok, SAIDA_RITMO_MS));
         }
     } catch (e) {
@@ -11231,6 +11282,7 @@ API.aoProvarRede = () => {
     offlineTalvezVarrer();
     refazerPerfilSeFaltar();
     recuperarCardSemFoto();
+    presencaWmeRefazerDesligar();
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -11382,16 +11434,30 @@ function urlDaFoto(u) {
 // `localStorage` está fora: é SÍNCRONO e travaria a thread do swipe, que é o
 // valor central do app (medido no projeto: 16,5 ms por gravação com 10 mil
 // registros). Aqui são 357 KB de uma vez.
+// Abrir a base tem TETO: o IndexedDB do WebKit às vezes não responde, e a
+// reabertura sem rede esperava a fila guardada com o esqueleto na tela, sem fim
+// (auditoria de 2026-09-25). Estourado, é "sem base" — o app segue como sem
+// fila guardada.
+const OFFLINE_DB_TETO_MS = 5000;
 function offlineDB() {
     return new Promise((ok, erro) => {
         let req;
         try { req = indexedDB.open(OFFLINE_DB, 1); } catch (e) { return erro(e); }
+        let estourou = false;
+        const teto = setTimeout(() => { estourou = true; erro(new Error('timeout')); }, OFFLINE_DB_TETO_MS);
         req.onupgradeneeded = () => {
             const db = req.result;
             if (!db.objectStoreNames.contains(OFFLINE_STORE)) db.createObjectStore(OFFLINE_STORE);
         };
-        req.onsuccess = () => ok(req.result);
-        req.onerror = () => erro(req.error);
+        req.onsuccess = () => {
+            clearTimeout(teto);
+            // Abriu DEPOIS do teto: ninguém mais espera por ela — fecha, senão a
+            // conexão esquecida seguraria as próximas aberturas.
+            if (estourou) { try { req.result.close(); } catch (e) {} return; }
+            ok(req.result);
+        };
+        req.onerror = () => { clearTimeout(teto); erro(req.error); };
+        req.onblocked = () => { clearTimeout(teto); erro(new Error('blocked')); };
     });
 }
 
@@ -11422,6 +11488,10 @@ async function offlineGravarFila(desde) {
                 places: fila,
             }, 'fila');
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
+            // `onabort` também: a cota estourada ABORTA a transação sem sempre
+            // passar pelo `onerror`, e a promessa pendurada prendia a varredura
+            // (`offlineVarrendo`) pra sempre (auditoria de 2026-09-25).
+            tx.onabort = () => erro(tx.error || new Error('abort'));
         });
         db.close();
         // Só DEPOIS de a gravação fechar: se ela falhar, os pousos continuam
@@ -11447,6 +11517,10 @@ async function offlineGravarJanela(janela) {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
             tx.objectStore(OFFLINE_STORE).put({ janela, t: Date.now() }, 'janela');
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
+            // `onabort` também: a cota estourada ABORTA a transação sem sempre
+            // passar pelo `onerror`, e a promessa pendurada prendia a varredura
+            // (`offlineVarrendo`) pra sempre (auditoria de 2026-09-25).
+            tx.onabort = () => erro(tx.error || new Error('abort'));
         });
         db.close();
     } catch (e) {}
@@ -12332,6 +12406,11 @@ const presencaWme = {
     marcaPerdida: false,
     perfilVisivel: null,    // o que o `/Session` disse da visibilidade na última leitura
     perfilEm: 0,
+    // O `visivel: false` do GESTO de desligar que não saiu por falta de rede: é
+    // a MESMA chave do perfil do WME, e sem refazê-lo a pessoa que desligou o
+    // interruptor seguia visível lá (auditoria de 2026-09-25). A próxima prova
+    // de rede o manda de novo.
+    desligarPendente: false,
 };
 
 function presencaWmeDaAcao(placeDaAcao) {
@@ -12418,17 +12497,30 @@ function presencaWmeAoCarregarPerfil(visivel) {
 // requisição própria da fase 2, e só acontece no GESTO.
 function presencaWmeDesligar() {
     presencaWme.ligarNaProxima = false;
+    presencaWme.desligarPendente = false;
     const id = AppState.profile && AppState.profile.id;
     if (id === null || id === undefined || !API.getSession()) return;
     API.presencaWaze({ userId: String(id), visivel: false })
-        .then((r) => dfato('presencaWme.visivel', { desligou: true, via: 'interruptor', ok: !!(r && r.success),
-            ...(r && r.success ? {} : { categoria: (r && r.errorCategory) || 'sem resposta' }) }))
+        .then((r) => {
+            // Só REDE fica pendente; recusa de verdade não se repete sozinha.
+            if (!(r && r.success) && (!r || r.errorCategory === 'transient')
+                && AppState.preferences.presenca === false) presencaWme.desligarPendente = true;
+            dfato('presencaWme.visivel', { desligou: true, via: 'interruptor', ok: !!(r && r.success),
+                ...(r && r.success ? {} : { categoria: (r && r.errorCategory) || 'sem resposta' }) });
+        })
         .catch(() => {});
+}
+
+// A prova de rede refaz o desligar que não saiu (ver `desligarPendente`).
+function presencaWmeRefazerDesligar() {
+    if (!presencaWme.desligarPendente || AppState.preferences.presenca !== false) return;
+    presencaWmeDesligar();
 }
 
 // Religou à mão: a próxima ação liga a visibilidade de carona, sem esperar o
 // freio (quem acabou de pedir pra aparecer não espera 30 s pra aparecer).
 function presencaWmeReligar() {
+    presencaWme.desligarPendente = false;
     presencaWme.ligarNaProxima = true;
     presencaWme.ultimaEm = 0;
     dfato('presencaWme.visivel', { religou: true, via: 'interruptor' });
@@ -12436,6 +12528,7 @@ function presencaWmeReligar() {
 
 function presencaWmeZerar() {
     presencaWme.ligarNaProxima = false;
+    presencaWme.desligarPendente = false;
     presencaWme.ultimaEm = 0;
     presencaWme.enviadas = 0;
     presencaWme.falhas = 0;
