@@ -1786,7 +1786,7 @@ const Lightbox = {
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // O app tem DOIS níveis, e o par é deliberado:
-//   · ENTRAR é L3+AM (`isUserAllowed`, no core) — é o portão de verdade, no
+//   · ENTRAR é L2+AM (`isUserAllowed`, no core) — é o portão de verdade, no
 //     SERVIDOR, e é ele que impede que qualquer um com cookies do Waze use o app.
 //   · AGIR de forma destrutiva é L6+AM — este aqui, só do CLIENTE.
 //

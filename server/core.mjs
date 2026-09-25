@@ -3,7 +3,7 @@
 // Não depende de plataforma: usa só `fetch` e `crypto.subtle` (Web Crypto),
 // que existem tanto no Cloudflare Workers quanto no Node. Toda I/O de
 // plataforma (armazenamento de sessão, chave de criptografia) é injetada pelos
-// adaptadores (functions/api/[[route]].js no Cloudflare, server/node.mjs na VM).
+// adaptadores (worker/index.mjs no Cloudflare, server/node.mjs na VM).
 //
 // Porte fiel do antigo api/config.php + os 9 endpoints PHP. Diferenças
 // intencionais na migração:
@@ -697,7 +697,7 @@ function respostaDeErroGrpc(cat, r) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Gate de acesso (Staff OU rank>=2 & Area Manager)
+// Gate de acesso (Staff OU L2+ — rank cru >= MIN_RANK_WAZE — & Area Manager)
 // ─────────────────────────────────────────────────────────────────────────
 
 export function isUserAllowed(profile) {
