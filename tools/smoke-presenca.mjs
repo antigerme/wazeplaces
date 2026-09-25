@@ -223,8 +223,13 @@ async function editor(id, { lang = 'pt' } = {}) {
     }
     const f = fila(id);
     if (!f.itens.length) await Promise.race([new Promise((ok) => { f.acordar = ok; }), dormir(25_000)]);
-    // Entrega TUDO o que não foi confirmado, e sem as marcas de lote: ao vivo.
-    const quadros = f.itens.map((x) => ({ inboxMessage: { messageId: x.inbox, messageType: 'MESSAGE', message: Buffer.from(x.bytes).toString('base64') } }));
+    // Entrega TUDO o que não foi confirmado, AO VIVO — mas depois do lote que
+    // abre TODA conexão. MEDIDO em 2026-09-25 no app de produção: o Google manda
+    // `startOfBatch` e `endOfBatch` no 1º milissegundo, VAZIO quando não há nada
+    // na fila, e só então as mensagens ao vivo. Sem o lote o fake era uma
+    // conexão que "nunca abriu" — e o app (certo) a trata como queda, com recuo.
+    const quadros = [{ startOfBatch: {} }, { endOfBatch: {} },
+      ...f.itens.map((x) => ({ inboxMessage: { messageId: x.inbox, messageType: 'MESSAGE', message: Buffer.from(x.bytes).toString('base64') } }))];
     await route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' },
       body: '[' + quadros.map((q) => JSON.stringify(q)).join(',\n') + ']' }).catch(() => {});
   });

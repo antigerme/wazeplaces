@@ -337,7 +337,14 @@ test('manifest: texto neutro e lang igual ao LANG_FALLBACK', () => {
     }
   };
   colher(man, '');
-  const comAcento = textos.filter(([, v]) => /[ãõçáéíóúâêôàèùïüñ]/i.test(v));
+  // E o <title> e a descrição da página: são a PRÉVIA do link (Discord,
+  // WhatsApp, fórum) e nada os traduz — o `applyI18n` só roda depois. Estavam em
+  // português ("Waze Places - Validação"), o que ainda contradizia o "nunca aprova".
+  const html = read('index.src.html');
+  textos.push(['<title>', (/<title>([^<]*)<\/title>/.exec(html) || [])[1] || '']);
+  textos.push(['<meta description>', (/<meta name="description" content="([^"]*)"/.exec(html) || [])[1] || '']);
+  assert.ok(textos.every(([, v]) => v), 'o <title> ou a descrição sumiram — o guard ficaria cego');
+  const comAcento = textos.filter(([, v]) => /[ãõçáéíóúâêôàèùïüñ]/i.test(v) || /Valida[çc]/i.test(v));
   assert.equal(comAcento.length, 0,
     'texto acentuado no manifest (ele é servido igual pra todo mundo):\n' +
     comAcento.map(([c, v]) => `  ${c} → ${v}`).join('\n'));
@@ -421,4 +428,70 @@ test('pt: "app" é masculino — no dicionário e no texto visível do HTML', ()
   const noHtml = [...html.matchAll(new RegExp(APP_FEMININO.source, 'giu'))].map((m) => m[0].trim())
     .concat([...html.matchAll(new RegExp(APLICACAO.source, 'giu'))].map((m) => m[0]));
   assert.deepEqual(noHtml, [], '"app" no feminino no texto visível do index.src.html');
+});
+
+test('contagem regressiva com 1: forma SINGULAR, e o app a usa (era "Faltam 1…")', () => {
+  // Aparecia justamente no último toque antes do modo dev, e na patente e no
+  // gate do Desfazer (auditoria de 2026-09-25).
+  const app = read('js/app.js');
+  const dic = read('js/i18n.js');
+  for (const [k, uso] of [
+    ['toast.devCountdown', /t\(remaining === 1 \? 'toast\.devCountdownUm' : 'toast\.devCountdown'/],
+    ['conq.patente.faltam', /t\(prox\.min - tratados === 1 \? 'conq\.patente\.faltamUm' : 'conq\.patente\.faltam'/],
+    ['prefs.undo.gate.countdown', /t\(remaining === 1 \? 'prefs\.undo\.gate\.countdownUm' : 'prefs\.undo\.gate\.countdown'/],
+  ]) {
+    assert.equal((dic.match(new RegExp(`'${k.replace(/\./g, '\\.')}Um':`, 'g')) || []).length, 4, `${k}Um não existe nas 4 línguas`);
+    assert.match(app, uso, `${k}: o app não escolhe a forma singular com 1`);
+  }
+  // E o português de fato muda: "Falta 1", não "Faltam 1".
+  assert.match(dic, /'toast\.devCountdownUm': 'Falta \{n\} /);
+});
+
+test('todo tipo de pedido que o SERVIDOR manda tem rótulo nas 4 línguas (o UPDATE saía em inglês)', () => {
+  // `updateTypeKey = changes.length > 0 ? 'UPDATE' : 'UPDATE_DETAILS'` — e só o
+  // segundo estava no dicionário: o card de atualização caía no `humanizarEnum`
+  // ("Update", em inglês, pra todo mundo) e a folha do pedido recebido mostrava
+  // a chave crua (auditoria de 2026-09-25).
+  const core = read('server/core.mjs');
+  const dic = read('js/i18n.js');
+  const tipos = new Set([...core.matchAll(/updateTypeKey = (?:[^;]*?)'([A-Z_]+)'/g)].map((m) => m[1]));
+  for (const m of core.matchAll(/updateTypeKey = changes\.length > 0 \? '([A-Z_]+)' : '([A-Z_]+)'/g)) { tipos.add(m[1]); tipos.add(m[2]); }
+  assert.ok(tipos.has('UPDATE') && tipos.has('VENUE'), `o extrator não achou os tipos do core (${[...tipos]})`);
+  for (const tipo of tipos) {
+    const n = (dic.match(new RegExp(`'card\\.updateType\\.${tipo}':`, 'g')) || []).length;
+    assert.equal(n, 4, `card.updateType.${tipo} aparece ${n}× — tem que ser 4`);
+  }
+  assert.doesNotMatch(read('js/app.js'), /t\('card\.updateType\.' \+ /, 'rótulo de tipo por `t` direto: chave nova sai crua');
+});
+
+test('o ↑ tem UM nome por língua — botão, selo, Ajuda, "Como funciona" e a preferência', () => {
+  // O francês chamava o mesmo gesto de "Ignorer" no botão, no placar e na Ajuda,
+  // e de "Passer" no "Como funciona" e no treino (auditoria de 2026-09-25) — e
+  // "Ignorées" no placar lia como pedido DESCARTADO, o contrário do ↑ (fica pra
+  // depois). A regra de consistência do CLAUDE.md: um conceito, um nome.
+  for (const lang of LANGS) {
+    const d = DICT[lang];
+    const nome = d['card.btn.skip.aria'];
+    for (const k of ['help.action.skip', 'card.stamp.skip', 'modal.comoFunciona.skip.nome']) {
+      assert.equal(d[k], nome, `${lang}: ${k} = "${d[k]}", e o botão diz "${nome}"`);
+    }
+    for (const k of ['card.btn.skip.title', 'card.stamp.skipGuarda', 'prefs.pularGuarda.label']) {
+      assert.ok(d[k].startsWith(nome.slice(0, 4)), `${lang}: ${k} = "${d[k]}", e o botão diz "${nome}"`);
+    }
+  }
+  assert.doesNotMatch(Object.values(DICT.fr).join('\n'), /\bIgnor(er|ée|ées)\b/, 'fr: "Ignorer" voltou como nome do ↑');
+});
+
+test('o que o Desfazer desfaz é o PEDIDO, não o local (e o erro da ação idem)', () => {
+  for (const lang of LANGS) {
+    for (const k of ['undo.reject', 'undo.skip', 'action.verb.reject']) {
+      assert.doesNotMatch(DICT[lang][k], /\bplace\b|\blieu\b/i, `${lang}: ${k} = "${DICT[lang][k]}"`);
+    }
+  }
+});
+
+test('treino: com o "Pular guarda o pedido" ligado, o efeito do ↑ NÃO diz que "não envia nada"', () => {
+  const app = read('js/app.js');
+  assert.match(app, /'treino\.efeito\.' \+ \(tipo === 'skip' && AppState\.preferences\.pularGuarda === true \? 'skipGuarda' : tipo\)/);
+  for (const lang of LANGS) assert.match(DICT[lang]['treino.efeito.skipGuarda'], /⭐/, lang);
 });

@@ -742,3 +742,63 @@ test('diário: abrir a conversa e mandar — o desfecho, o tamanho e a categoria
   assert.deepEqual(anotados(c, 'chat.envio').at(-1), { ok: true, bytes: 'terceira'.length, comPedido: false, juntas: 2 });
   for (const s of ['mensagem_privada_unica', 'Padaria Estrela', CAF]) assert.ok(!JSON.stringify(c.chamadas.dfato).includes(s), `o diário levou ${s}`);
 });
+
+test('"Sair": resposta em voo que chega DEPOIS não recria o `waze_places_chat` (medido em produção)', () => {
+  // 2026-09-25: conversar, sair, e a chave estava de volta no aparelho — com a
+  // instalação, as conversas conhecidas e os ids a confirmar de quem saiu.
+  const c = novoCliente();
+  c.P.chatConhecer(['183164343']);
+  assert.ok(c.armazenado.has('waze_places_chat'), 'CONTROLE: com sessão, a conversa conhecida é guardada');
+  c.P.presencaEsquecer();
+  assert.ok(!c.armazenado.has('waze_places_chat'));
+  c.AppState.authenticated = false;             // o "Sair" já passou
+  c.P.chatConhecer(['12444348']);               // a resposta que estava em voo
+  c.P.chatGuardarAConfirmar('dc76ba10-b76e-11f1-ad63-37a65b87598a');
+  c.P.chatMarcarLidaAte('12444348', Date.now());
+  assert.ok(!c.armazenado.has('waze_places_chat'), 'a chave do chat voltou depois do "Sair"');
+});
+
+// ── auditoria de 2026-09-25 ────────────────────────────────────────────────
+test('abrir: mensagem que chega com o `abrir` NO AR entra na conversa (e o "lida" só sai com ela na tela)', async () => {
+  const c = novoCliente();
+  c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');
+  // A conversa começou a carregar e a resposta ainda não veio.
+  c.P.Presenca.historico.set(CAF, { msgs: [], carregada: false, carregando: true, maisAntigas: false });
+  const bytes = await bytesDeMensagem({ id: uuid(60), de: CAF, para: EU, texto: 'chegou no meio', ctx: APP, ts: 1790200000000 });
+  c.P.presencaQuadro(fluxoDe(c), inbox(bytes, 60));
+  assert.equal(c.P.Presenca.historico.get(CAF).msgs.length, 1, 'a mensagem que chegou no meio do carregamento sumiu da conversa');
+  // Com a conversa ainda carregando, o "lida" não sai.
+  await c.rodarTimers();
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'lida').length, 0, '"lida" de uma mensagem que ainda não estava na tela');
+});
+
+test('lida: só avança com a RESPOSTA — falhou, tenta de novo na próxima vez', async () => {
+  let responde = { success: false, errorCategory: 'transient' };
+  const c = novoCliente({ api: { chat: () => responde } });
+  c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');
+  c.P.Presenca.historico.set(CAF, { msgs: [{ id: uuid(70), ts: 1790200000000, meu: false, texto: 'oi' }], carregada: true });
+  await c.P.presencaMarcarLida(CAF);
+  assert.ok(!(c.P.Presenca.lidaEnviadaAte.get(CAF) > 0), 'o "lida" que FALHOU ficou dado como enviado');
+  responde = { success: true };
+  await c.P.presencaMarcarLida(CAF);
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'lida').length, 2, 'não tentou de novo depois da falha');
+  assert.equal(c.P.Presenca.lidaEnviadaAte.get(CAF), 1790200000000);
+});
+
+test('fluxo: fim SEM lote e logo não é "normal" — não religa a cada 1 s pra sempre', async () => {
+  const chat = { token: 'T', base: 'https://x/', chave: 'K', expiraEm: Date.now() + 86e6 };
+  const c = novoCliente({ api: { fetch: () => new Response('[]') } });   // corpo vazio, fecha na hora
+  c.P.Presenca.chat = chat;
+  await c.P.presencaFluxoAbrir();
+  const religa = c.timers.filter((x) => x.fn === c.P.presencaFluxoGarantir || /Garantir/.test(String(x.fn)));
+  assert.ok(c.timers.every((x) => x.ms !== 1000), 'religou em 1 s depois de uma conexão que não viveu');
+  assert.ok(anotados(c, 'presenca.fluxo').some((a) => a.ev === 'caiu' && a.erro === 'fim sem lote'), 'a queda sem lote não foi anotada');
+  // CONTROLE: com um fim de lote, o fim é normal (religa em 1 s).
+  const d = novoCliente({ api: { fetch: () => new Response('[{"endOfBatch":{}}]') } });
+  d.P.Presenca.chat = { ...chat };
+  await d.P.presencaFluxoAbrir();
+  assert.ok(d.timers.some((x) => x.ms === 1000), 'o fim normal deixou de religar rápido');
+  assert.ok(religa);
+});

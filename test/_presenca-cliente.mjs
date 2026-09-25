@@ -131,6 +131,8 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     crypto: webcrypto,
     atob, TextDecoder, Response,
     Date: DateFalso,
+    // Do api.js (carregado antes do presenca.js no app de verdade).
+    REGIOES_DO_WAZE: ['row', 'na', 'il'],
   };
   const nomes = [...new Set([...FONTE.matchAll(/^(?:async )?function (\w+)\(/gm), ...FONTE.matchAll(/^const (\w+)/gm)].map((m) => m[1]))];
   const globais = Object.keys(escopo);

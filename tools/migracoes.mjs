@@ -43,6 +43,25 @@ export const PRAZO_PADRAO_DIAS = 30;
 
 export const MIGRACOES = [
   {
+    id: 'regiao-world',
+    desde: '2026-09-25',
+    revisarEm: '2026-10-25',
+    familia: 'aparelho',
+    onde: 'server/core.mjs',
+    oque: 'A região `world` virando `na`: no `requireRegion` do core (pedido de '
+        + 'cliente antigo), no `getRegion` do api.js (a escolha guardada no '
+        + 'aparelho) e no cartão da conversa do presenca.js (mandado por versão '
+        + 'anterior). `world` era a 4ª opção do filtro e sempre apontou pro '
+        + 'servidor da América do Norte (`/Descartes/`); a opção `na` apontava pra '
+        + '`na-Descartes`, que NÃO EXISTE (medido: 404 em tudo). A v2026.09.25-03 '
+        + 'corrigiu o `na` e tirou o `world` do seletor.',
+    removerQuando: 'Todo aparelho de testador tiver aberto a versão nova (o '
+        + '`getRegion` regrava `na` na primeira leitura) e o cache do service '
+        + 'worker da versão anterior tiver saído de circulação. O cartão da '
+        + 'conversa é o único resíduo que dura mais: cartão antigo no histórico do '
+        + 'chat abre com a região `row` se a linha sair, o que só erra o link do WME.',
+  },
+  {
     id: 'historico-onde',
     desde: '2026-09-14',
     revisarEm: '2027-10-20',

@@ -54,11 +54,13 @@ test('só REDE entra na fila — recusa do Waze não', () => {
   const h = fatiar('handleActionResult');
   // O gancho é um bloco desde que a fila passou a recusar o pedido REPETIDO
   // (v2026.09.22-06): quem enfileira fica DENTRO do `if` da categoria.
-  assert.match(h, /if \(cat === 'transient'\) \{\s*const naFila = enfileirarSaida\(actionType, place\);/,
+  assert.match(h, /if \(cat === 'transient'\) \{\s*const naFila = enfileirarSaida\(actionType, place, regiao\);/,
     'o gancho da fila de saída saiu, ou deixou de exigir `transient`');
-  // As três categorias que NÃO podem entrar, e o motivo de cada uma:
+  // As categorias e o destino de cada uma:
   //  · already_processed/not_found → já é sucesso (outro editor chegou antes)
-  //  · unauthorized ............... → a sessão morreu; enfileirar adia o relogin
+  //  · unauthorized ............... → ENFILEIRA e confere a sessão NA HORA
+  //    (v2026.09.25-03): 401 muitas vezes é alarme falso, e o que a pessoa fez
+  //    não pode evaporar — mas o relogin não pode esperar a fila
   //  · unknown .................... → retentar pra sempre o que não se entende
   const iJa = h.indexOf("cat === 'already_processed'");
   const iAuth = h.indexOf("cat === 'unauthorized'");
@@ -71,7 +73,7 @@ test('só REDE entra na fila — recusa do Waze não', () => {
 
 test('o gancho vem ANTES da reversão — senão o placar já voltou', () => {
   const h = fatiar('handleActionResult');
-  const iFila = h.indexOf('enfileirarSaida(actionType, place)');
+  const iFila = h.indexOf('enfileirarSaida(actionType, place, regiao)');
   const iRevert = h.indexOf('AppState.stats[statKey] = Math.max(0');
   assert.ok(iFila > 0 && iRevert > 0, 'não achei as âncoras');
   assert.ok(iFila < iRevert,
@@ -100,10 +102,10 @@ test('o LOTE só enfileira no modo de placar OTIMISTA', () => {
   // nada — enfileirar ali faria a ação não contar em lugar NENHUM. E não há
   // nada a salvar: o ramo de erro já devolve o pedido pra `AppState.queue`.
   const l = fatiar('enviarLote');
-  assert.match(l, /errorCategory === 'transient' && !aoLandar && enfileirarSaida\('reject', p\)/,
+  assert.match(l, /errorCategory === 'transient' && !aoLandar && enfileirarSaida\('reject', p, opts\.regiao\)/,
     'o lote enfileira no modo `contarAoLandar`: a ação some do placar e do Histórico');
   // E o modo otimista PRECISA enfileirar, senão a promessa vale só pro swipe.
-  assert.ok(l.indexOf("enfileirarSaida('reject', p)") > 0,
+  assert.ok(l.indexOf("enfileirarSaida('reject', p, opts.regiao)") > 0,
     'o lote parou de enfileirar de vez — o rejeitar em lote volta a perder por rede');
 });
 
@@ -135,9 +137,10 @@ test('exceção no POUSO não leva o resto da fila junto', () => {
     'o pouso voltou a rodar SEM proteção: uma exceção nele encalha o resto da fila');
   assert.match(f, /catch \(e\) \{ dfato\('saida\.pouso\.erro'/,
     'a falha do pouso deixou de ser registrada: encalhe sem rastro é indepurável');
-  // E o `shift` tem que acontecer DEPOIS, senão a exceção some com o item.
+  // E o item tem que sair DEPOIS, senão a exceção some com ele. Sai pela
+  // CHAVE (`splice`), não pela posição: outra aba pode ter mexido na fila.
   const iTry = f.indexOf('try { registrarPousoDeSaida');
-  const iShift = f.indexOf('f.shift()', iTry);
+  const iShift = f.indexOf('f.splice(saiu, 1)', iTry);
   assert.ok(iShift > iTry, 'o item sai da fila antes do pouso');
 });
 
@@ -150,7 +153,7 @@ test('esvaziar para no que não adianta insistir, e mantém a fila', () => {
   // O `shift` só acontece DEPOIS de um pouso que não foi rede nem 401: item
   // que não saiu não pode sumir da fila.
   const iBreak = f.indexOf("'transient') break");
-  const iShift = f.indexOf('f.shift()');
+  const iShift = f.indexOf('f.splice(saiu, 1)');
   assert.ok(iBreak > 0 && iShift > iBreak,
     'o item é removido da fila antes de se saber que saiu');
 });
@@ -167,7 +170,7 @@ test('o esvaziamento RELÊ antes de gravar — senão perde o que chegou no meio
   const iPouso = f.indexOf('registrarPousoDeSaida(');
   assert.ok(iPouso > 0, 'não achei o pouso');
   const iRele = f.indexOf('f = carregarFilaDeSaida()', iPouso);
-  const iShift = f.indexOf('f.shift()', iPouso);
+  const iShift = f.indexOf('f.splice(saiu, 1)', iPouso);
   const iSalva = f.indexOf('salvarFilaDeSaida(f)', iPouso);
   assert.ok(iRele > 0, 'o esvaziamento parou de reler a fila antes de gravar');
   assert.ok(iShift > 0 && iSalva > 0, 'não achei o tirar/gravar depois do pouso');
@@ -453,4 +456,57 @@ test('o indicador é ÍCONE + número, e o ícone é que diz o estado', () => {
   // gotcha #22: é o js/min/ que o navegador carrega.
   assert.ok(/M12 7v5l3 2/.test(MIN),
     'js/min/app.js não tem o ícone novo — faltou `npm run js`');
+});
+
+// ── 401: a ação não evapora (auditoria de 2026-09-25) ─────────────────────
+// Um 401 numa ação — muitas vezes alarme falso (WAF, blip do KV) — fazia a ação
+// SUMIR: o card já tinha saído, o placar já tinha contado e o Waze nunca
+// recebia nada. Agora ela vai pra fila de saída, e a sessão é conferida na hora.
+function montarResultado() {
+  const guardado = new Map();
+  const chamadas = [];
+  const AppState = { stats: { read: 3, rejected: 5, skipped: 0 }, serverTotal: 10 };
+  const deps = {
+    AppState,
+    safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
+    SAIDA_KEY: 'waze_places_saida', SAIDA_MAX: 1000,
+    API: { getRegion: () => 'row' },
+    dlog: () => {}, dfato: () => {},
+    registrarPouso: () => chamadas.push('pouso'), recordHistory: () => chamadas.push('historico'),
+    registrarRejeicaoDeAutor: () => {}, avisarConsequencia: () => {}, registrarAcaoConfirmada: () => {},
+    showToast: (m, tipo) => chamadas.push('toast:' + tipo), msgDoServidor: (r, d) => d, t: (k) => k,
+    handleUnauthorized: () => chamadas.push('confere'),
+    updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {},
+    historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
+  };
+  const fontes = ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'handleActionResult'].map(fatiar).join('\n');
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, fontes + '\nreturn { handleActionResult, carregarFilaDeSaida };')(...nomes.map((n) => deps[n]));
+  return { app, AppState, chamadas };
+}
+
+test('401 numa ação: ela vai pra FILA DE SAÍDA (com a região do gesto) e a sessão é conferida na hora', () => {
+  const { app, AppState, chamadas } = montarResultado();
+  app.handleActionResult('reject', { venueID: 'v1', updateRequestID: 'u1', creatorId: 7 },
+    { success: false, errorCategory: 'unauthorized' }, 'na');
+  const f = app.carregarFilaDeSaida();
+  assert.equal(f.length, 1, 'a ação com 401 evaporou — não foi pra fila de saída');
+  assert.equal(f[0].regiao, 'na');
+  assert.equal(AppState.stats.rejected, 5, 'o placar voltou atrás de um trabalho que segue guardado');
+  assert.equal(AppState.serverTotal, 10);
+  assert.ok(chamadas.includes('confere'), 'a sessão não foi conferida');
+  assert.ok(!chamadas.some((c) => c.startsWith('toast:error')), 'toast de erro pra uma ação que está guardada');
+});
+
+test('401 com a fila de saída CHEIA: aí sim reverte o placar (como a recusa), e confere a sessão', () => {
+  const { app, AppState, chamadas } = montarResultado();
+  // Enche pelo caminho de verdade: 1000 ações que caíram por rede.
+  for (let i = 0; i < 1000; i++) {
+    app.handleActionResult('read', { venueID: 'x' + i, updateRequestID: 'y' + i }, { success: false, errorCategory: 'transient' }, 'row');
+  }
+  assert.equal(app.carregarFilaDeSaida().length, 1000, 'o teste não encheu a fila — não mediria o que diz');
+  app.handleActionResult('reject', { venueID: 'v1', updateRequestID: 'u1' }, { success: false, errorCategory: 'unauthorized' }, 'row');
+  assert.equal(AppState.stats.rejected, 4, 'fila cheia: o gesto que não coube tem que sair do placar');
+  assert.equal(AppState.serverTotal, 11);
+  assert.ok(chamadas.includes('confere'));
 });

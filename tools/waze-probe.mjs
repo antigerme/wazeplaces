@@ -15,7 +15,7 @@
 //   node tools/waze-probe.mjs <cookies.txt> --estados 30       → estados do país
 //   node tools/waze-probe.mjs <cookies.txt> --idioma           → o Waze honra Accept-Language?
 //   node tools/waze-probe.mjs <cookies.txt> --get '<path>'     → GET num path arbitrário
-//   ...qualquer um aceita  --regiao row|na|il|world  (padrão: row)
+//   ...qualquer um aceita  --regiao row|na|il  (padrão: row)
 //
 // RITMO — jitter aleatório entre TODAS as chamadas, de tools/waze-jitter.mjs
 // (fonte única, por instrução do owner: "vá devagar, sempre use jitter"). O
@@ -38,14 +38,15 @@ import { lerCsp, diretiva, hostLiberado } from './csp-img.mjs';
 // abaixo: escrever essa leitura aqui de novo era o que fazia o probe mentir.
 import { prepareAuth } from '../server/core.mjs';
 
+// A América do Norte é `/Descartes/`, SEM prefixo: `na-Descartes` dá 404 (medido
+// em 2026-09-25; ver `WAZE_REGIONS` no core).
 const BASES = {
   row: 'https://www.waze.com/row-Descartes/app',
-  na: 'https://www.waze.com/na-Descartes/app',
+  na: 'https://www.waze.com/Descartes/app',
   il: 'https://www.waze.com/il-Descartes/app',
-  world: 'https://www.waze.com/Descartes/app',
 };
 // Mesma tabela do wazeRefererEnv em server/core.mjs.
-const ENV = { row: 'row', na: 'usa', il: 'il', world: 'row' };
+const ENV = { row: 'row', na: 'usa', il: 'il' };
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
 
 // Paths que ALTERAM dado no Waze. Bloqueados, sem flag pra destravar.

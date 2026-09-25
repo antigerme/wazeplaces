@@ -34,8 +34,15 @@ test('diag-api: TODA rota não-leitura está na lista de recusa', () => {
   assert.ok(bloco, 'a lista de recusa sumiu');
   const recusadas = new Set([...bloco[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
 
-  const rotas = [...CORE.matchAll(/^\s*'([a-z-]+)':\s*handle/gm)].map((m) => m[1]);
-  assert.ok(rotas.length >= 8, `só ${rotas.length} rotas achadas no core — o padrão do ROUTES mudou`);
+  // Do bloco `ROUTES` inteiro, com e SEM aspas na chave: o padrão antigo só
+  // casava chave entre aspas e deixava de fora `sessao`, `parear`, `perfil` e
+  // `chat` (4 de 15) — rota nova de nome simples passaria calada.
+  const ini = CORE.indexOf('const ROUTES = {');
+  assert.ok(ini > 0, 'o bloco ROUTES sumiu do core');
+  const blocoRotas = CORE.slice(ini, CORE.indexOf('};', ini));
+  const rotas = [...blocoRotas.matchAll(/^\s*'?([a-z-]+)'?\s*:\s*handle/gm)].map((m) => m[1]);
+  assert.ok(rotas.length >= 14, `só ${rotas.length} rotas achadas no core — o padrão do ROUTES mudou`);
+  assert.ok(rotas.includes('sessao') && rotas.includes('chat'), 'o extrator voltou a perder as chaves sem aspas');
   for (const r of rotas) {
     if (LEITURA.has(r)) continue;
     assert.ok(recusadas.has(r),
@@ -44,7 +51,7 @@ test('diag-api: TODA rota não-leitura está na lista de recusa', () => {
 });
 
 test('diag-api: a recusa acontece ANTES de qualquer rede', () => {
-  const iRecusa = API.indexOf('if (ESCRITA.has(ROTA))');
+  const iRecusa = API.indexOf("if (!/^[a-z-]+$/.test(ROTA) || !LEITURA.has(ROTA))");
   const iFetch = API.indexOf('await fetch(');
   assert.ok(iRecusa > 0 && iFetch > iRecusa,
     'a checagem de escrita deixou de vir antes do fetch — a recusa viraria enfeite');
@@ -139,4 +146,23 @@ test('diag-tela: procura a FONTE também nos recursos — o coletor a deixa fora
   assert.ok(laco, 'sumiu o laço que casa a fonte pelo nome');
   const def = new RegExp(`const ${laco[1].replace(/[.()]/g, '\\$&')} = ([\\s\\S]*?);\\n`).exec(semCom);
   assert.ok(def && /d\.recursos/.test(def[1]), `a busca da fonte itera \`${laco[1]}\`, que não inclui os recursos da página`);
+});
+
+test('diag-api: decide por LISTA DE LEITURA — caminho torto até uma rota de escrita é recusado antes de ler o arquivo', () => {
+  // A lista negra deixava passar `x/../marcar-lido`, `./validar-place` e
+  // `marcar-lido?x=1`: a URL normaliza DEPOIS da recusa (auditoria 2026-09-25).
+  const ferramenta = join(ROOT, 'tools/diag-api.mjs');
+  for (const rota of ['x/../marcar-lido', './validar-place', 'marcar-lido?x=1', 'marcar-lido#x', 'MARCAR-LIDO', 'constructor']) {
+    let codigo = 0;
+    try { execFileSync(process.execPath, [ferramenta, '/nao/existe.zip', rota], { stdio: 'pipe' }); }
+    catch (e) { codigo = e.status; }
+    assert.equal(codigo, 3, `"${rota}" não foi recusada pela ferramenta (saiu ${codigo})`);
+  }
+  // CONTROLE: rota de leitura passa da recusa (e aí falha lendo o arquivo, com 1).
+  let codigo = 0;
+  try { execFileSync(process.execPath, [ferramenta, '/nao/existe.zip', 'perfil'], { stdio: 'pipe' }); }
+  catch (e) { codigo = e.status; }
+  assert.notEqual(codigo, 3, 'a rota de leitura foi recusada — a ferramenta ficou inútil');
+  // A base é a ORIGEM da URL do app (com query ou caminho, o POST ia pro lugar errado).
+  assert.match(API, /base = new URL\(String\(\(d\.app && d\.app\.url\) \|\| ''\)\)\.origin;/);
 });

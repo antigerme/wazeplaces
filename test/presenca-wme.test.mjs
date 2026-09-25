@@ -131,7 +131,8 @@ test('ação: a posição é montada DENTRO do executor (na hora do envio), e va
     const exec = corpo.slice(corpo.indexOf('scheduleAction('));
     assert.ok(exec.length > 50, `${handler}: não achei o executor`);
     assert.match(exec, /const presenca = presencaWmeDaAcao\(place\);/, `${handler}: a posição não é montada no envio`);
-    assert.match(exec, new RegExp(`API\\.${metodo}\\(place\\.venueID, place\\.updateRequestID, presenca\\)`),
+    // O 4º argumento é a REGIÃO do gesto (auditoria de 2026-09-25).
+    assert.match(exec, new RegExp(`API\\.${metodo}\\(place\\.venueID, place\\.updateRequestID, presenca, regiao\\)`),
       `${handler}: a posição não vai na ação`);
     const iResp = exec.indexOf('presencaWmeAoResponder(presenca, result)');
     const iAcao = exec.indexOf('handleActionResult(');
@@ -149,7 +150,10 @@ test('ação: fila de saída, lote e lote de lidos NUNCA levam posição', () =>
     const chamadas = corpo.match(/API\.(markAsRead|rejectPlace)\([^)]*\)/g) || [];
     assert.ok(chamadas.length > 0, `${nome}: não achei a chamada da ação (o guard ficaria cego)`);
     for (const c of chamadas) {
-      assert.equal(c.split(',').length, 2, `${nome}: a ação leva mais que os dois ids — ${c}`);
+      // Os dois ids, e depois só `null` no lugar da presença (o 4º é a REGIÃO
+      // do gesto, que viaja com a ação desde a auditoria de 2026-09-25).
+      const args = c.slice(c.indexOf('(') + 1, -1).split(',').map((a) => a.trim());
+      assert.ok(args.length === 2 || args[2] === 'null', `${nome}: a ação leva posição — ${c}`);
     }
     assert.doesNotMatch(corpo, /presencaWme/, `${nome}: mexe na presença`);
   }
@@ -360,7 +364,7 @@ test('api.js: a presença vai no corpo SÓ quando existe — sem ela o corpo é 
     const ini = API_JS.indexOf(`async ${metodo}(`);
     assert.ok(ini > 0, metodo);
     const corpo = API_JS.slice(ini, API_JS.indexOf('\n    },', ini));
-    assert.match(corpo, new RegExp(`async ${metodo}\\(venueID, updateRequestID, presenca\\)`));
+    assert.match(corpo, new RegExp(`async ${metodo}\\(venueID, updateRequestID, presenca, regiao\\)`));
     assert.match(corpo, /\.\.\.\(presenca \? \{ presenca \} : \{\}\)/, `${metodo}: a presença vai sempre (ou nunca)`);
   }
   const pw = API_JS.slice(API_JS.indexOf('async presencaWaze('), API_JS.indexOf('async presenca(peer'));

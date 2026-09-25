@@ -19,10 +19,14 @@ servidor aceita hoje.
 
 ## 1. Prefixo e regiões
 
-Tudo abaixo pende de `https://www.waze.com/<região>-Descartes/app/`, com a
-tabela de região que o `core.mjs` já usa (`row` → `row`, `na` → `usa`,
-`il` → `il`, `world` → `row`). O gRPC pende de
-`https://www.waze.com/<região>-Descartes/grpc/`.
+Tudo abaixo pende de `https://www.waze.com/<prefixo>Descartes/app/`, e o
+prefixo é `row-` (resto do mundo), `il-` (Israel) ou **NENHUM** (América do
+Norte). **`na-Descartes` não existe**: MEDIDO em 2026-09-25, `Session`,
+`info/config`, `LocationSearch/Countries` e `Issues/Search/List` dão 404 lá e 200
+em `/Descartes/` (8 países; a fila dos EUA com 512 pedidos). O `env` do Referer
+segue outra tabela (`row` → `row`, `na` → `usa`, `il` → `il`). O gRPC pende de
+`https://www.waze.com/<prefixo>Descartes/grpc/`, com o mesmo prefixo. O chat
+(`<região>-wmp`) é outro backend e TEM prefixo: `na-wmp` existe.
 
 ---
 
@@ -120,16 +124,16 @@ Outros limites publicados (`[vivo]`, confere com o `[HAR]`):
 | `readOnlyMode` | false | **o Waze pode entrar em só-leitura, e avisa aqui** |
 | `enforceEmailVerification` | true | |
 
-**`issuesTrackerPageSize: 500` pede uma reconferida num número deste repo.**
-O CLAUDE.md registra "mediana 497 pedidos" nos países de validação. 497 está
-três abaixo do teto de página que o servidor publica, e isso pode ser
-coincidência (o país tem 497 mesmo) ou pode ser a medição tendo visto uma
-página só. Os dois desfechos são possíveis com o que está medido hoje: o app
-pagina, e as filas maiores (França 583, máximo 655) passam dos 500 justamente
-por isso. **O que decide é o `hasMore` daquela chamada**, e ele não foi
-registrado por país. Antes de citar a mediana como propriedade das filas,
-remeça olhando `hasMore` — se vier `true` num país que devolveu ~500, a
-mediana é do instrumento e não do país.
+**`issuesTrackerPageSize: 500` é a página de verdade — CONFIRMADO em
+2026-09-25** `[vivo]`. Os 697 pedidos do Brasil (com os lidos e os 7 tipos)
+vieram em 503 + 199 cards, com `hasMore: true` na primeira. E a página é
+contada DEPOIS dos filtros, sobre a lista do MOMENTO (a mesma conta, no mesmo
+instante, deu 500 + 307 com "lidos também" e 500 + 54 com "só não lidos"),
+então a "próxima página" anda enquanto a pessoa tria. Daí o app reler sempre a
+partir da página 1 (CLAUDE.md, seção de endpoints). A "mediana 497" que o
+CLAUDE.md registra nos países de validação era de UMA página: foi medida sem
+olhar o `hasMore`, e as filas maiores (França 583, máximo 655) já passavam dos
+500 por isso.
 
 ### Feature flags que nos dizem respeito
 
@@ -270,6 +274,9 @@ em `/<região>-Descartes/grpc/`:
   Controles: sem chave → 403; token falso → 401. A chave aceita nosso Referer.
 - Um token por **instalação**; a mesma instalação recebe sempre o mesmo. Várias
   conexões da mesma pessoa recebem a mesma mensagem, e nenhuma derruba a outra.
+- **Toda conexão abre com um lote** `[vivo, 2026-09-25]`: `startOfBatch` e
+  `endOfBatch` no 1º milissegundo, VAZIO quando não há nada na fila (medido no
+  app de produção); o que chega depois vem AO VIVO, fora de lote.
 - Sinal de vida (`pong`) a cada 10 s; a conexão cai sozinha a cada **6,2 min**
   (5 vezes seguidas, 6,20–6,24), com dado 2–4 s antes: é tempo máximo, não
   inatividade. Daqui não dá para separar Google de saída de rede do ambiente.
@@ -293,22 +300,25 @@ cookie) e 7 **sem** mensagem (chat com cookie que não vale) são sessão morta;
 
 ## 5. As DUAS lacunas reais do app, medidas
 
-### 5.1 `isStarred` — o app MOSTRA e não deixa MARCAR
+### 5.1 `isStarred` — o app MOSTRA e, desde o "Pular guarda o pedido", MARCA
 
 O pedido já chega com a estrelinha: `mapIssues.venueUpdateRequests.objects[]`
 traz `isStarred` `[HAR]`, o `core.mjs` já o repassa (`isStarred: !!ur.isStarred`)
-e o card já o desenha (`.card-starred`). O que falta são as duas pontas:
+e o card já o desenha (`.card-starred`). **Marcar já existe** (rota
+`guardar-pedido`, opt-in nas Preferências: o ↑ dá a estrela; medido contra o
+Waze real — 200 com corpo vazio, o alvo em `isStarred: true` e o vizinho
+intocado). Falta só FILTRAR:
 
-- **marcar**: `POST v1/Issues/Star` com
+- **marcar** (feito): `POST v1/Issues/Star` com
   `{ value: <bool>, venueUpdateRequestIds: [{ id: <updateRequestID>, venueId: "<venueID>" }] }`
   `[bundle]` — payload idêntico ao do `Read`, com `value` no lugar.
 - **filtrar**: `userPropertiesFilter` aceita **exatamente dois** booleanos,
   `isRead` e `isStarred` `[bundle]`. O app manda só o primeiro.
 
 Isto é **estado compartilhado com o WME**: estrela posta aqui aparece lá, e
-vice-versa. Seria a primeira coisa do app que grava sem ser destrutiva — mas
-**é gravação**, então entra pela mesma régua das outras (portão, teste contra o
-payload do HAR, nunca exercitar `/Features` com os cookies do owner).
+vice-versa. É a única gravação do app sem portão de rank — a estrela é estado
+do EDITOR sobre o pedido, não do mapa —, e entrou pela régua das outras (teste
+contra o payload do HAR, `value` booleano estrito).
 
 ### 5.2 Buscas salvas — existem, são compartilháveis, e o app não as vê
 

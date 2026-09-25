@@ -1415,6 +1415,19 @@ test('DUPLICATE: o card recebe DE QUEM é duplicado, resolvido por releitura de 
   assert.equal(chamadas.filter((c) => /\/Features/.test(c.url)).length, 1, 'mais de uma leitura pro mesmo duplicado');
 });
 
+test('DUPLICATE: releitura que volta estranha (corpo `null`) não derruba a FILA', async () => {
+  // O nome do duplicado é enfeite do card. Um `atual.venues` de `null` lançava
+  // dentro do `Promise.all` e a exceção subia até o `buscar-places`: a fila
+  // INTEIRA voltava 500 por causa de uma leitura de apoio.
+  for (const bbox of [null, 'lixo que não é json', []]) {
+    const { r } = await buscarComStub({ flagType: 'DUPLICATE', flagSubjectType: 'VENUE', flagEntityID: DUP_ALVO },
+      { bbox: typeof bbox === 'string' ? bbox : bbox });
+    assert.equal(r.status, 200, `${JSON.stringify(bbox)}: ${JSON.stringify(r.body).slice(0, 120)}`);
+    assert.equal(r.body.places.length, 1);
+    assert.equal(r.body.places[0].duplicado, undefined, 'inventou um duplicado');
+  }
+});
+
 test('DUPLICATE que aponta o PRÓPRIO local não gasta leitura', async () => {
   // 1 dos 7 casos reais. Ou o pedido é lixo, ou o app do celular preencheu o
   // campo por não ter outro valor — em nenhuma das duas há nome pra mostrar,

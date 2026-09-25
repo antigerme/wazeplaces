@@ -56,14 +56,14 @@ function rodarSkip({ pularGuarda }) {
       currentPlace: { venueID: 'v1', updateRequestID: 'ur1', name: 'Bar do Zé' },
       queue: [], stats: { skipped: 0 }, preferences: { pularGuarda },
     },
-    acoesTravadas: () => false,
+    acoesTravadas: () => false, epocaDaSessao: 0,
     Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
     // O executor conta "Colecionador" no sucesso. O stub REGISTRA, pra que o
     // teste possa afirmar que contou — e não só que não quebrou.
     contarConquista: (k) => conquistas.push(k),
     scheduleAction: (tipo, place, executor) => { agendadas.push({ tipo, place, executor }); },
-    API: { guardarPedido: async (v, u, val) => { chamadas.push({ v, u, val }); return { success: true }; } },
+    API: { getRegion: () => 'row', guardarPedido: async (v, u, val) => { chamadas.push({ v, u, val }); return { success: true }; } },
     callWithRetry: (fn) => fn(),
     showToast: () => {}, t: (k) => k, msgDoServidor: (r, txt) => txt,
   };
@@ -104,13 +104,13 @@ test('a decisão é do MOMENTO DO GESTO, não do despacho', async () => {
   const prefs = { pularGuarda: true };
   const escopo = {
     AppState: { currentPlace: { venueID: 'v1', updateRequestID: 'ur1' }, queue: [], stats: { skipped: 0 }, preferences: prefs },
-    acoesTravadas: () => false, Treino: { ativo: false },
+    acoesTravadas: () => false, epocaDaSessao: 0, Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
     // O executor conta "Colecionador" no sucesso. O stub REGISTRA, pra que o
     // teste possa afirmar que contou — e não só que não quebrou.
     contarConquista: (k) => conquistas.push(k),
     scheduleAction: (tipo, place, executor) => { agendadas.push(executor); },
-    API: { guardarPedido: async () => { chamadas.push(1); return { success: true }; } },
+    API: { getRegion: () => 'row', guardarPedido: async () => { chamadas.push(1); return { success: true }; } },
     callWithRetry: (fn) => fn(), showToast: () => {}, t: (k) => k, msgDoServidor: (r, txt) => txt,
   };
   const nomes = Object.keys(escopo);
@@ -125,13 +125,13 @@ test('falhar ao guardar NÃO é silencioso', async () => {
   const avisos = [];
   const escopo = {
     AppState: { currentPlace: { venueID: 'v1', updateRequestID: 'ur1' }, queue: [], stats: { skipped: 0 }, preferences: { pularGuarda: true } },
-    acoesTravadas: () => false, Treino: { ativo: false },
+    acoesTravadas: () => false, epocaDaSessao: 0, Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
     // O executor conta "Colecionador" no sucesso. O stub REGISTRA, pra que o
     // teste possa afirmar que contou — e não só que não quebrou.
     contarConquista: (k) => conquistas.push(k),
     scheduleAction: (t_, p, ex) => { escopo._ex = ex; },
-    API: { guardarPedido: async () => ({ success: false, error: 'caiu' }) },
+    API: { getRegion: () => 'row', guardarPedido: async () => ({ success: false, error: 'caiu' }) },
     callWithRetry: (fn) => fn(),
     showToast: (msg, tipo) => avisos.push({ msg, tipo }),
     t: (k) => k, msgDoServidor: (r, txt) => txt,

@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Waze Places",
   "short_name": "Waze Places",
-  "description": "Review Waze Map Editor place requests by swiping. Rejects or marks as read — never approves.",
+  "description": "Triage Waze Map Editor place update requests by swiping: reject or mark as read.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

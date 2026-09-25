@@ -24,7 +24,7 @@ ocorrência** — errar uma vez e corrigir não vira parágrafo.
 
 ## 2. **Notificações removidas** (commit `419c9bc`): tinha sino com badge no header. Owner pediu remoção. Se aparecer demanda de "notificações" de novo, considere ressuscitar o endpoint de notificações (`/Feed/Notifications`) como handler no core.
 
-## 3. **`Issues/Search/List` retorna tudo de uma vez** — confirmado via HAR. Não tente implementar "paginação real" assumindo que cada page tem N items. Use `hasMore` como verdade e trate a queue como global.
+## 3. **`Issues/Search/List` retorna tudo de uma vez — até 500 pedidos; acima disso, em PÁGINAS que andam** (a regra original, escrita com um HAR de ~200, está logo abaixo, e a correção dela em seguida) — confirmado via HAR. Não tente implementar "paginação real" assumindo que cada page tem N items. Use `hasMore` como verdade e trate a queue como global.
 
 **A regra estava errada pela metade, e a metade errada custou um "Tudo limpo!" falso (2026-09-25).** O HAR de onde ela saiu tinha ~200 pedidos, uma página só. Com a fila do Brasil em 697 e depois 803, o Waze passou a entregar em páginas de 500, e duas medições na fila real, só lendo, mostraram o resto:
 
@@ -55,7 +55,7 @@ Juntando as duas: o app pedia a página 2 quando sobravam 3 cards, isto é, depo
 
 ## 11. **Service worker NÃO pode usar `caches.match('/index.html')` como fallback genérico** para requests não-HTML. Em produção atrás de Cloudflare/mod_pagespeed, se um JS falha por qualquer motivo, o fallback retornava HTML como resposta de `api.js` → o browser engasga e `const API = {...}` nunca executa → toast "API is not defined" no `app.js`. Desde v6: fetch nativo segue, sem fallback HTML pra assets. **Também ignorar requests cross-origin** (`url.origin !== self.location.origin → return`) — senão o SW intercepta o `cloudflareinsights.com/beacon.min.js` e dá `TypeError: Failed to convert value to 'Response'`.
 
-## 12. **Atrás de Cloudflare**: desabilitar **Rocket Loader**, **Auto Minify**, **Script Monitor** (Page Shield). Esses reescrevem HTML/JS. Documentado em detalhe no README seção "Atrás de Cloudflare".
+## 12. **Atrás de Cloudflare**: desabilitar **Rocket Loader**, **Auto Minify**, **Script Monitor** (Page Shield). Esses reescrevem HTML/JS. (A seção do README que isto citava não existe mais; a regra vale igual pra zona do Cloudflare na frente do app.)
 
 13. ~~**mod_pagespeed do Apache**~~ **(OBSOLETO na v3.0 — histórico)**: no deploy Apache/RHEL, `mod_pagespeed` reordenava/minificava scripts e quebrava a ordem `api.js → app.js`; o `.htaccess` desabilitava. Não se aplica ao Cloudflare/Node. Registrado só pra contexto.
 
@@ -130,12 +130,12 @@ Juntando as duas: o app pedia a página 2 quando sobravam 3 cards, isto é, depo
 
 ## 15. **Rank do editor é 0-indexed no Waze, +1 na UI** (regra de convenção sagrada deste projeto). O `/Session` do Waze retorna `rank: 0..5` mas humanos contam `1..6`:
     - **Toda exibição pro user** usa `rank + 1` (já implementado em `renderProfileHeader` como `'L' + (p.rank + 1)`)
-    - **Toda comparação interna** usa o valor cru do Waze (`MIN_RANK_WAZE = 2` no gate = "display L3+")
+    - **Toda comparação interna** usa o valor cru do Waze (`MIN_RANK_WAZE = 1` no gate = "display L2+"; era 2 = L3+ até 2026-09-09)
     - **Mensagens de erro/permissão** que citam nível devem mostrar `rank + 1` pra não confundir o user
     - Owner disse explicitamente: "um editor nível 1 nos dados do Waze aparece como nível 0, um editor nível 6 aparece como nível 5"
     - Adicionou novo cálculo de rank? Confira nos dois lados (display vs comparação). Confundir os dois é fonte garantida de bug com erro silencioso (todo mundo permitido / ninguém permitido)
 
-## 16. **Gate de acesso (`isUserAllowed` em `server/core.mjs`)**: o app só permite login pra editores **`isStaff` OU `(rank >= MIN_RANK_WAZE && isAreaManager)`**. Como o Waze usa rank 0-indexed e a UI mostra `rank + 1`, `MIN_RANK_WAZE = 2` significa "display L3+". Mudar o critério aqui afeta todo login. `handleTestarCookies` chama `/Session` como smoke test e nega a criação de sessão se não passar — frontend mostra modal `accessDeniedModal` com perfil do user e mensagem clara, sem persistir nada. Bloqueio acontece no backend; **não dá pra burlar editando JS**.
+## 16. **Gate de acesso (`isUserAllowed` em `server/core.mjs`)**: o app só permite login pra editores **`isStaff` OU `(rank >= MIN_RANK_WAZE && isAreaManager)`**. Como o Waze usa rank 0-indexed e a UI mostra `rank + 1`, `MIN_RANK_WAZE = 1` significa "display L2+" (era 2 = L3+ até 2026-09-09, decisão do owner — ver a seção do filtro de permissão no CLAUDE.md). Mudar o critério aqui afeta todo login. `handleTestarCookies` chama `/Session` como smoke test e nega a criação de sessão se não passar — frontend mostra modal `accessDeniedModal` com perfil do user e mensagem clara, sem persistir nada. Bloqueio acontece no backend; **não dá pra burlar editando JS**.
 
 ## 17. **Esquecer de bumpar `CACHE_NAME` do SW é o bug mais ranzinza do projeto**. Já aconteceu múltiplas vezes: PR adiciona feature em JS, deploy ok, mas users que já tinham o SW instalado **continuam vendo a versão velha por dias** porque SW é cache-first pra assets. Sintoma típico: "feature X parou de funcionar" relatado por um user, mas outros confirmam que funciona (cache deles é mais novo). **Cheque-list**: tocou em `index.html`, `js/*`, `css/*`, ou `icons/*`? → bump o serial em `js/version.js` (`APP_VERSION`) E no `service-worker.js` (`CACHE_NAME`) juntos no mesmo commit (a auditoria `test/version.test.mjs` trava a paridade). Se passou batido, basta um PR posterior fazendo só o bump pra liberar pra todos.
 
@@ -155,7 +155,7 @@ Juntando as duas: o app pedia a página 2 quando sobravam 3 cards, isto é, depo
 
 ## 21. **O filtro `isRead` do Waze é POR VENUE, não por PUR** (consertado 2026-07-24, HAR do "3o Batalhão PMDF"). `userPropertiesFilter: {isRead:false}` devolve o venue se **qualquer** PUR dele estiver não-lido — inclusive quando o único não-lido é um REQUEST (gated por dev mode, invisível no app). Sem filtrar `ur.isRead` na expansão (`buildPlacesFromSearch` em `server/core.mjs`), uma foto já lida re-virava card eternamente: user marcava de novo (Waze aceita, no-op), venue voltava na próxima busca → boomerang sem saída pelo app. **Regra**: a expansão pula `ur.isRead === true` quando `unreadOnly`; campo ausente entra (defensivo). Teste de regressão com a fixture do HAR real em `test/core.test.mjs`. Se um place "volta" de novo um dia: conferir se o venue tem PUR irmão não-lido de tipo não exibido (só tratável no WME) — o app não deve re-emitir os lidos.
 
-## 22. **`css/tailwind.css` é GERADO e commitado — nunca edite à mão** (v2026.07.24-02). O Tailwind deixou de compilar no browser: mexeu em classe no `index.html`/`js/*`? rode **`npm run css`** e commite o CSS junto. O CI regenera e falha no diff se esquecer. Some com o estilo em produção sem nenhum erro no console — é silencioso.
+## 22. **`css/tailwind.css` é GERADO e commitado — nunca edite à mão** (v2026.07.24-02; hoje o arquivo é `css/app.css`, tailwind + styles.css juntos, gerado por `npm run css`). O Tailwind deixou de compilar no browser: mexeu em classe no `index.html`/`js/*`? rode **`npm run css`** e commite o CSS junto. O CI regenera e falha no diff se esquecer. Some com o estilo em produção sem nenhum erro no console — é silencioso.
     **A ORDEM dos `<link>` importa, e desde v2026.08.05-04 é `tailwind.css` ANTES de `styles.css`** — o NOSSO CSS vence o empate de especificidade, que é o modelo normal de autoria. Era o contrário, herdado do bundle runtime que injetava o CSS no fim do `<head>`; ver gotcha #27 pro que isso custou. Travado em `test/layout.test.mjs`.
 
 ## 23. **Dark mode é 100% `dark:` no HTML/JS — não crie override global** (v2026.07.24-02). O bloco `.dark .bg-white { !important }` do styles.css MORREU. Ele obrigava toda exceção (inclusive `:hover`) a virar mais um override global. Componente novo → declare `dark:` ao lado do estilo claro. Se um `dark:` "não pega", é empate de especificidade: use `dark:hover:` explícito (foi o caso do `#helpBtn`, onde `dark:bg-*` vencia o `hover:bg-*`).
@@ -524,7 +524,7 @@ Regra: **ação que se auto-esconde precisa de outro caminho de volta** — ou n
 
 **O terceiro, que foi o que fez ele desistir de procurar:** a folha dizia *"Ninguém mais por aqui"* com os bloqueados listados logo abaixo. A frase contradiz a própria tela, e o olho para nela em vez de seguir até a seção que resolve.
 
-**O desfecho** foi remover o bloqueio inteiro, por decisão do owner: o app só admite editor L3+ Area Manager, e abuso se resolve no Waze. O saldo é o argumento — o recurso custou três defeitos em dois dias, num público que não precisava dele. Quando um recurso só gera defeito, considere que o conserto certo pode ser a remoção.
+**O desfecho** foi remover o bloqueio inteiro, por decisão do owner: o app só admite editor L3+ Area Manager (L2+ desde 2026-09-09), e abuso se resolve no Waze. O saldo é o argumento — o recurso custou três defeitos em dois dias, num público que não precisava dele. Quando um recurso só gera defeito, considere que o conserto certo pode ser a remoção.
 
 
 ---

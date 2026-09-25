@@ -42,8 +42,10 @@ test('"RESTAM" não pode dizer ZERO quando o app não sabe', () => {
   assert.match(c, /if \(AppState\.loadError\) \{\s*el\.textContent = '—';/,
     'o placar voltou a imprimir o serverTotal com a busca falhada — e aí ele diz 0 pra 426 pedidos');
   // ORDEM: o ramo tem que vir ANTES do `setCount`, senão nunca é alcançado.
+  // O `setCount` do placar REAL (o do treino vem antes, num ramo próprio que
+  // retorna — e o placar do treino não tem `loadError`).
   const iErro = c.indexOf('AppState.loadError');
-  const iSet = c.indexOf('setCount(el');
+  const iSet = c.indexOf('setCount(el, AppState.serverTotal');
   assert.ok(iErro > 0 && iSet > 0 && iErro < iSet,
     'o ramo de falha ficou DEPOIS do setCount: código morto, e a tela segue mentindo');
   // E o traço é o MESMO símbolo do deslogado, não um terceiro vocabulário.
@@ -164,4 +166,101 @@ test('o esqueleto nasce VISÍVEL no HTML — é por isso que alguém tem que esc
   assert.ok(!tag[1].split(/\s+/).includes('hidden'),
     'o esqueleto passou a nascer escondido — reveja quem o mostra na abertura');
   assert.ok(tag[1].split(/\s+/).includes('z-50'), 'o esqueleto deixou de ficar POR CIMA do card (z-50)');
+});
+
+// ── card de foto SEM FOTO: ✕ e ✓ não decidem por caminho nenhum ───────────
+// O botão já travava (`aplicarTravaDeAcao`), mas o GESTO e a SETA passavam
+// direto — dava pra rejeitar uma foto que ninguém viu (auditoria 2026-09-25).
+test('sem foto: a decisão trava no gesto, na seta e no handler — o ↑ segue', () => {
+  const corpo = fatiar('direcaoTravada');
+  const trava = (temAviso) => new Function('cardDaFrente', corpo + '\nreturn direcaoTravada;')(
+    () => ({ querySelector: (sel) => (sel === '.card-sem-foto' && temAviso ? {} : null) }));
+  assert.equal(trava(true)('left'), true);
+  assert.equal(trava(true)('right'), true);
+  assert.equal(trava(true)('up'), false, 'pular é o que o aviso manda fazer');
+  assert.equal(trava(false)('left'), false, 'CONTROLE: com a foto na tela, decide');
+  for (const [h, d] of [['handleReject', 'left'], ['handleMarkAsRead', 'right']]) {
+    assert.match(fatiar(h), new RegExp(`if \\(direcaoTravada\\('${d}'\\)\\) return;`), `${h} decide sem a foto`);
+  }
+  const swipe = readFileSync(new URL('../js/swipe.js', import.meta.url), 'utf8');
+  assert.match(swipe, /\} else if \(commitX && !\(window\.direcaoTravada && window\.direcaoTravada\(deltaX > 0 \? 'right' : 'left'\)\)\) \{/,
+    'o gesto decide o que o botão recusa');
+  assert.match(swipe, /if \(window\.direcaoTravada && window\.direcaoTravada\(direction\)\) return;/, 'a seta decide o que o botão recusa');
+});
+
+test('área que ROLA no card não vira arraste: a rede de segurança (.card-content-rola) está na exceção', () => {
+  // Com fonte grande o conteúdo do card rola; fora da exceção, o arraste
+  // engolia a rolagem e arrastar pra cima PULAVA o card (auditoria 2026-09-25).
+  const swipe = readFileSync(new URL('../js/swipe.js', import.meta.url), 'utf8');
+  const linha = swipe.split('\n').find((l) => /if \(e\.target\.closest\('button, a, input/.test(l));
+  assert.ok(linha, 'a lista de exceção do arraste sumiu');
+  for (const cls of ['.card-changes-list', '.card-flag-comment-text', '.card-content-rola']) {
+    assert.ok(linha.includes(cls), `${cls} rola e não está na exceção do arraste`);
+  }
+});
+
+// O aviso "A foto precisa de sinal" promete: "Ela chega sozinha quando a rede
+// voltar". Nada a buscava de novo, e o card ficava travado até a pessoa pular
+// (auditoria de 2026-09-25). A recuperação PROVA a foto antes de redesenhar:
+// redesenhar com a rede ainda firmando daria "Sem Imagem" com ✕ e ✓ vivos.
+function montarRecuperacao({ online = true, semFoto = true, transform = '' } = {}) {
+  const place = { venueID: 'v1', updateRequestID: 'ur1', purType: 'NEW_PHOTO', imageUrls: ['https://venue-image.waze.com/a', 'https://venue-image.waze.com/ur1'] };
+  const redesenhos = [];
+  const provas = [];
+  const card = { style: { transform }, querySelector: (sel) => (sel === '.card-sem-foto' && semFoto ? {} : null) };
+  class Image { set src(u) { this._src = u; provas.push(this); } get src() { return this._src; } }
+  const deps = {
+    navigator: { onLine: online }, AppState: { currentPlace: place },
+    cardDaFrente: () => card, fotosDoCard: new Function('return ' + fatiar('fotosDoCard'))(),
+    urlDaFoto: (u) => u + '?w=7', Image, dfato: () => {}, showCurrentPlace: () => redesenhos.push(1),
+  };
+  const chaves = Object.keys(deps);
+  const recuperar = new Function(...chaves, 'let provandoFotoDe = null;\n' + fatiar('recuperarCardSemFoto')
+    + '\nreturn recuperarCardSemFoto;')(...chaves.map((k) => deps[k]));
+  return { recuperar, redesenhos, provas, deps, card };
+}
+
+test('card "sem foto": a rede voltando e a foto carregando REDESENHAM o card', () => {
+  const m = montarRecuperacao();
+  m.recuperar();
+  assert.equal(m.provas.length, 1, 'ninguém buscou a foto de novo');
+  assert.equal(m.provas[0].src, 'https://venue-image.waze.com/ur1?w=7', 'provou a foto errada (tem que ser a EM DECISÃO, pela urlDaFoto)');
+  m.recuperar();
+  assert.equal(m.provas.length, 1, 'uma prova em voo: a segunda chamada não prova de novo');
+  m.provas[0].onload();
+  assert.equal(m.redesenhos.length, 1, 'a foto chegou e o card seguiu travado');
+});
+
+test('card "sem foto": a foto que ainda FALHA não redesenha (senão "Sem Imagem" com ✕ e ✓ vivos)', () => {
+  const m = montarRecuperacao();
+  m.recuperar();
+  m.provas[0].onerror();
+  assert.equal(m.redesenhos.length, 0);
+  m.recuperar();
+  assert.equal(m.provas.length, 2, 'depois da falha, a próxima prova de rede não tentou de novo');
+});
+
+test('card "sem foto": sem rede, sem o aviso, com o card trocado ou no meio do arraste, não mexe', () => {
+  const sem = montarRecuperacao({ online: false });
+  sem.recuperar();
+  assert.equal(sem.provas.length, 0);
+  const normal = montarRecuperacao({ semFoto: false });
+  normal.recuperar();
+  assert.equal(normal.provas.length, 0, 'provou foto de card que não estava sem foto');
+  const trocou = montarRecuperacao();
+  trocou.recuperar();
+  trocou.deps.AppState.currentPlace = { venueID: 'outro' };
+  trocou.provas[0].onload();
+  assert.equal(trocou.redesenhos.length, 0, 'redesenhou o card de OUTRO pedido');
+  const arrastando = montarRecuperacao({ transform: 'translate(40px, 0px) rotate(3deg)' });
+  arrastando.recuperar();
+  arrastando.provas[0].onload();
+  assert.equal(arrastando.redesenhos.length, 0, 'arrancou o card de debaixo do dedo');
+});
+
+test('a recuperação do card "sem foto" é chamada nos DOIS sinais de rede: `online` e a resposta que chega', () => {
+  const online = APP_SEM.slice(APP_SEM.indexOf("window.addEventListener('online', async"));
+  assert.match(online.slice(0, online.indexOf('\n});')), /^\s+recuperarCardSemFoto\(\);/m);
+  const prova = APP_SEM.slice(APP_SEM.indexOf('API.aoProvarRede = () => {'));
+  assert.match(prova.slice(0, prova.indexOf('\n};')), /^\s+recuperarCardSemFoto\(\);/m);
 });

@@ -141,7 +141,8 @@ test('a janela servida só avança quando a varredura TERMINA', () => {
   const i = corpo.indexOf('offlineJanelaServida = janela');
   assert.ok(i > 0, 'a janela precisa ser atribuída na varredura');
   const antes = corpo.slice(Math.max(0, i - 160), i);
-  assert.match(antes, /if \(!pend\.length\)/,
+  // Fila vazia E nada desistido por rede (ver `offlineVarrer`).
+  assert.match(antes, /if \(!pend\.length && !desistidosPorRede\.length\)/,
     'a atribuição tem que estar COLADA na condição de fila vazia');
 });
 
@@ -293,9 +294,15 @@ test('o estado parcial existe nas quatro línguas e não diz "Pronto"', () => {
   }
   const corpo = fatiar('atualizarLinhaDoOffline');
   const iPar = corpo.indexOf("offlineUltimoResultado === 'parcial'");
-  const iPronto = corpo.indexOf("prefs.offline.prontoA");
+  // O ÚLTIMO "pronto" — o de exclusão, que vale com rede. (O primeiro é o do
+  // "pronto sem rede", que só vale com a janela ATUAL completa.)
+  const iPronto = corpo.lastIndexOf("prefs.offline.prontoA");
   assert.ok(iPar > 0 && iPronto > iPar,
     'o ramo do parcial tem que vir ANTES do de pronto, senão ele nunca é alcançado');
+  // E o "ainda não preparado" também vem antes dele: cair no "Pronto" por
+  // exclusão, sem varredura nenhuma, era a linha mentindo (auditoria 2026-09-25).
+  const iPend = corpo.indexOf('prefs.offline.pendenteA');
+  assert.ok(iPend > 0 && iPend < iPronto, 'o "Pronto" voltou a ser o ramo de quem nunca preparou nada');
 });
 
 // ── O DEFEITO QUE QUEBROU O MAPA DE TODO MUNDO ────────────────────────────
@@ -652,7 +659,10 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     [/diz\('BAIXADO, o que estava guardado sai do aparelho/, 'o que foi entregue não fica'],
     [/diz\('o que foi BAIXADO não volta/, 'o que foi entregue não volta'],
     [/diz\('a abertura guardada há MAIS de 24 h sai do aparelho/, 'o prazo que a Ajuda promete'],
-    [/diz\('DESLIGAR o modo dev avisa das capturas não baixadas e apaga/, 'desligado é desligado'],
+    // Desde a auditoria de 2026-09-25 são DOIS toques com captura não baixada:
+    // o 1º só avisa (e o que existe fica), o 2º desliga e apaga.
+    [/diz\('com captura NÃO baixada, o 1º toque em desligar só AVISA/, 'o aviso vem ANTES de apagar, não junto'],
+    [/diz\('o 2º toque DESLIGA o modo dev e apaga o guardado/, 'desligado é desligado'],
     [/diz\('o SAIR apaga o que foi guardado/, 'sair é sair de tudo'],
   ]) assert.match(bloco9c, re, `a 9c perdeu uma medida — ${porque}`);
 
@@ -762,4 +772,29 @@ test('a varredura avisa o worker em TODO fim, e no meio dela', () => {
   const iAviso = esq.search(/^\s+offlineAnunciarTiles\(\);/m);
   assert.ok(iDel > 0, 'o esquecer deixou de apagar o cache de tiles');
   assert.ok(iAviso > iDel, 'esquecer não avisa o worker DEPOIS de apagar — a lista dele fica com os endereços');
+});
+
+// ── o service worker abre o app SEM REDE (auditoria de 2026-09-25) ─────────
+test('SW: tudo que a página carrega está nos CRÍTICOS, e eles são atômicos', () => {
+  const sw = readFileSync(new URL('../service-worker.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const bloco = /const CRITICOS = \[([\s\S]*?)\];/.exec(sw);
+  assert.ok(bloco, 'a lista CRITICOS sumiu do service worker');
+  const criticos = [...bloco[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const daPagina = [...html.matchAll(/<(?:script[^>]*\bsrc|link[^>]*rel="stylesheet"[^>]*\bhref)="((?!https?:|\/\/)[^"]+)"/g)]
+    .map((m) => '/' + m[1].replace(/^\.?\//, ''));
+  assert.ok(daPagina.length >= 9, `achei ${daPagina.length} recursos na página — o extrator quebrou`);
+  const faltam = daPagina.filter((u) => !criticos.includes(u));
+  assert.deepEqual(faltam, [], 'a página carrega isto e o worker não guarda na instalação: sem rede, o app abre quebrado');
+  assert.ok(criticos.includes('/'), 'a própria página saiu dos críticos');
+  assert.ok(!criticos.includes('/index.html'), '`/index.html` é um 307 no Cloudflare: guardado, vira resposta redirecionada que o Chrome recusa');
+  assert.match(sw, /cache\.addAll\(CRITICOS\)/,
+    'os críticos voltaram a ser tolerantes: instalação pela metade apaga o cache bom no activate');
+});
+
+test('SW: a navegação sem rede cai na página guardada mesmo com query (atalho do manifest)', () => {
+  const sw = readFileSync(new URL('../service-worker.js', import.meta.url), 'utf8');
+  assert.match(sw, /caches\.match\(event\.request, isHTML \? \{ ignoreSearch: true \} : undefined\)/);
+  assert.match(sw, /if \(isHTML\) return caches\.match\('\/'\)/);
+  assert.doesNotMatch(sw, /caches\.match\('\/index\.html'\)/);
 });

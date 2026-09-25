@@ -32,6 +32,7 @@ import { tmpdir } from 'node:os';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dispatch, makeSessions, base64ToBytes, SESSION_TTL } from './core.mjs';
+import { readBody } from './corpo.mjs';
 
 // Rede de segurança pra VM: um erro não capturado não pode derrubar o processo.
 process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
@@ -96,6 +97,7 @@ const sessions = makeSessions({ store: fsStore, keyBytes });
 // nunca mais volta deixa o blob no disco pra sempre → cresce sem limite. Varre
 // o SESSION_DIR periodicamente e remove arquivos com idade > SESSION_TTL.
 const GC_INTERVAL_MS = 60 * 60 * 1000; // 1h
+const RELER_GC_MS = 10 * 60 * 1000;     // o cache da releitura vale 15 s; 10 min é folga
 async function gcSessions() {
   try {
     const files = await readdir(SESSION_DIR);
@@ -115,6 +117,13 @@ async function gcSessions() {
         if (name.startsWith('sess_pair_')) {
           const corte = /^(\d+)\|/.exec(await readFile(f, 'utf8').catch(() => ''));
           if (!corte || Number(corte[1]) * 1000 < now) await unlink(f).catch(() => {});
+          continue;
+        }
+
+        // Cache da releitura do excluir-foto (`reler_…`): vale 15 s pelo
+        // carimbo, e o arquivo não tem por que ficar os 21 dias de uma sessão.
+        if (name.startsWith('sess_reler_')) {
+          if (now - st.mtimeMs > RELER_GC_MS) await unlink(f).catch(() => {});
           continue;
         }
 
@@ -328,30 +337,6 @@ async function serveIndexFallback(res) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
     res.end('Not found');
   }
-}
-
-const MAX_BODY_BYTES = 5_000_000;
-function readBody(req, res) {
-  return new Promise((resolve) => {
-    let data = '';
-    let tooLarge = false;
-    req.on('data', (c) => {
-      if (tooLarge) return;
-      data += c;
-      if (data.length > MAX_BODY_BYTES) {
-        tooLarge = true;
-        // Responde 413 limpo antes de cortar a conexão (em vez de só req.destroy()).
-        if (!res.headersSent) {
-          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-          res.end(JSON.stringify({ success: false, error: 'Corpo da requisição muito grande' }));
-        }
-        req.destroy();
-        resolve(null); // sinaliza pro chamador que a resposta já foi enviada
-      }
-    });
-    req.on('end', () => { if (!tooLarge) resolve(data); });
-    req.on('error', () => { if (!tooLarge) resolve(''); });
-  });
 }
 
 const server = createServer(async (req, res) => {

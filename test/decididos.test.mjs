@@ -85,6 +85,8 @@ function montar({ offline = true } = {}) {
     ondeAgora: () => '30',
     AppState: { queue: [], currentPlace: null },
     pedidosQueEntraramNaFila: new Set(),
+    // A região do Waze vai no item (ver `enfileirarSaida`).
+    API: { getRegion: () => 'row' },
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + `
@@ -359,7 +361,11 @@ test('TODO pouso passa pela fonte única — um caminho de fora deixaria o pedid
   assert.equal(conta('handleActionResult'), 2, 'o pouso do card saiu do handleActionResult');
   assert.equal(conta('registrarPousoDeSaida'), 1, 'o pouso da fila de saída não é registrado');
   assert.equal(conta('enviarLote'), 2, 'o pouso do lote não é registrado');
-  assert.equal(conta('enviarAprovacao'), 2, 'aprovar RESOLVE o pedido: o pouso tem que ser registrado');
+  // A aprovação pousa por UM lugar (`concluirAprovacao`), chamado nos dois
+  // desfechos que valem (sucesso e "outro editor aprovou antes").
+  assert.equal(conta('concluirAprovacao'), 1, 'aprovar RESOLVE o pedido: o pouso tem que ser registrado');
+  assert.equal((fatiar('enviarAprovacao').match(/concluirAprovacao\(alvo\);/g) || []).length, 2,
+    'um dos desfechos da aprovação deixou de pousar');
   assert.equal(conta('handleBatchMarkRead'), 1, 'o lote de lidos não registra o pouso');
   // E o pouso vem ANTES do que pode lançar (histórico, conquistas): se algo ali
   // quebrar, o pedido não pode voltar por causa disso.
@@ -397,13 +403,13 @@ test('o LOTE marca os pedidos em andamento — a recusa automática não passa p
 test('fechar SEM REDE com ação na janela do Desfazer enfileira de forma SÍNCRONA', () => {
   const d = fatiar('descarregarAcaoPendente');
   const iSemRede = d.indexOf('navigator.onLine === false && AppState.pendingAction.enfileirarSemRede');
-  const iExecuta = d.indexOf('AppState.pendingAction.execute()');
+  const iExecuta = d.indexOf('pa.execute();');
   assert.ok(iSemRede > 0 && iExecuta > iSemRede,
     'sem rede, a ação tem que ir pra fila ANTES de tentar a rede — a volta do laço pode não existir');
   const s = fatiar('scheduleAction');
   assert.match(s, /if \(executed \|\| n !== 1 \|\| \(type !== 'read' && type !== 'reject'\)\) return false;/,
     'só ✕ e ✓ de UM pedido vão pra fila ao fechar: o lote cancela e o Pular não escreve');
-  assert.match(s, /const r = enfileirarSaida\(type, places\[0\]\);\s*if \(!r\) return false;/,
+  assert.match(s, /const r = enfileirarSaida\(type, places\[0\], regiaoDoGesto\);\s*if \(!r\) return false;/,
     'fila cheia tem que cair no caminho de sempre, que avisa');
   assert.match(s, /if \(r === 'repetida'\) reverterPlacar\(true\);/,
     'o gesto repetido não pode contar duas vezes no placar');
@@ -434,4 +440,35 @@ test('o relatório leva a fila de saída em números e a versão subiu', () => {
   assert.ok(v >= 5, `a versão do diagnóstico não subiu com os campos novos (${v})`);
   assert.match(fatiar('diagOffline'), /o\.pousosGravados = offlineLerPousos\(\)\.length;/,
     'a seção offline parou de contar os pousos gravados');
+});
+
+test('enfileirarSaida: a REGIÃO do gesto vai no item — trocar de região depois não muda o servidor do envio', () => {
+  // Sem ela, o item saía pela região do filtro de AGORA: o pedido ia pro
+  // servidor errado, voltava "não encontrado" e contava como feito.
+  const { app } = montar();
+  app.enfileirarSaida('reject', { venueID: 'v1', updateRequestID: 'u1' }, 'na');
+  app.enfileirarSaida('read', { venueID: 'v2', updateRequestID: 'u2' });
+  const f = app.carregarFilaDeSaida();
+  assert.equal(f[0].regiao, 'na', 'a região do gesto não foi pro item');
+  assert.equal(f[1].regiao, 'row', 'sem região explícita, vale a de agora');
+});
+
+test('o esvaziamento manda cada item pela região DELE, e tira da fila pela CHAVE', () => {
+  const e = fatiar('esvaziarFilaDeSaida');
+  assert.match(e, /API\.markAsRead\(item\.venueID, item\.updateRequestID, null, item\.regiao\)/);
+  assert.match(e, /API\.rejectPlace\(item\.venueID, item\.updateRequestID, null, item\.regiao\)/);
+  assert.match(e, /f\.findIndex\(\(x\) => x && x\.tipo === item\.tipo && x\.venueID === item\.venueID\s*&& x\.updateRequestID === item\.updateRequestID\)/,
+    'tirar pela posição (`shift`) leva o item errado quando outra aba mexe na fila');
+  assert.doesNotMatch(e, /f\.shift\(\)/);
+});
+
+test('fechar COM rede na janela do Desfazer: o pouso vai ANTES do envio (a página pode morrer antes da resposta)', () => {
+  // Reaberta sem rede, a fila guardada devolvia como card o pedido que tinha
+  // acabado de sair — e dava pra decidir de novo (auditoria 2026-09-25).
+  const d = fatiar('descarregarAcaoPendente');
+  const iPouso = d.indexOf("if (pa.type === 'read' || pa.type === 'reject') registrarPouso(pa.place);");
+  const iEnvio = d.indexOf('pa.execute();');
+  assert.ok(iPouso > 0 && iEnvio > iPouso, 'o pouso não é gravado antes do envio da descarga');
+  // O pouso sai por localStorage (síncrono): ele sobrevive à página morrendo.
+  assert.match(fatiar('registrarPouso'), /offlineLigado\(\)/);
 });
