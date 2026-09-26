@@ -554,22 +554,82 @@ function dicionario() {
   return ctx.D;
 }
 
-test('a tela de entrada ANTES do JS (rede lenta) diz o mesmo que o dicionário pt — o requisito é L2+AM, não "nível 3+"', () => {
+// O texto de reserva do HTML é o que se lê ANTES de o JS chegar (rede lenta, JS
+// que falhou). Ele dizia outra coisa em 10 lugares fora da tela de entrada
+// (auditoria de 2026-09-26): "certos níveis" onde a regra é L2+AM, "Marcar
+// lidos" com o botão dizendo "Marcar como lidos", a Ajuda de antes das exceções
+// de L6. Aqui vale pra TODO elemento com `data-i18n`/`data-i18n-html` e todo
+// atributo `data-i18n-{ph,aria,title,alt}` do index.src.html.
+//
+// O JS troca a CHAVE de alguns elementos em tempo de execução, e isso NÃO é
+// exceção: o HTML traz a chave inicial com o texto dela, e a troca escreve a
+// chave nova junto com o texto (`trocarTextoI18n`, `atualizarSeloDePular`,
+// `ajustarEntradaAoIPhoneInstalado`). Conferido um a um: nenhum elemento tem, no
+// HTML, o texto de outra chave.
+//
+// As variáveis globais (`setI18nVars`) entram com o valor que a tela mostra em
+// pt; placeholder que o teste não conhece REPROVA, em vez de passar cru.
+function variaveisDaTela() {
+  const num = (nome) => {
+    const m = new RegExp(`^const ${nome} = (\\d+);`, 'm').exec(APP);
+    assert.ok(m, `CONTROLE: a constante ${nome} sumiu do app.js`);
+    return Number(m[1]);
+  };
+  return {
+    undoSeg: (num('UNDO_WINDOW_MS') / 1000).toLocaleString('pt-BR'),
+    nivelMinimo: String(num('NIVEL_MINIMO_EXIBIDO')),
+  };
+}
+function decodificarHtml(s) {
+  return s.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+}
+function comVariaveis(valor, vars, chave) {
+  return valor.replace(/\{(\w+)\}/g, (_, v) => {
+    assert.ok(v in vars, `${chave}: o teste não conhece o {${v}} — acrescente-o em variaveisDaTela()`);
+    return vars[v];
+  });
+}
+
+test('o texto de reserva do HTML (antes do JS) diz o mesmo que o dicionário pt — a tela de entrada e todo o resto', () => {
   const pt = dicionario().pt;
-  const nivel = Number((/const NIVEL_MINIMO_EXIBIDO = (\d+);/.exec(APP) || [])[1]);
-  assert.ok(nivel >= 1, 'CONTROLE: não achei o NIVEL_MINIMO_EXIBIDO');
-  const tela = HTML.slice(HTML.indexOf('<div id="authScreen"'), HTML.indexOf('<div id="pasteModal"'));
-  const texto = (h) => h.replace(/<[^>]+>/g, '').replace(/&#8220;|&#8221;/g, '"').replace(/\s+/g, ' ').trim();
-  const achados = [...tela.matchAll(/<([a-z0-9]+)\b[^>]*\bdata-i18n(?:-html)?="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/g)];
-  assert.ok(achados.length >= 10, `CONTROLE: só achei ${achados.length} textos na tela de entrada — o recorte quebrou`);
+  const vars = variaveisDaTela();
+  const html = HTML.replace(/<!--[\s\S]*?-->/g, '');
+  const texto = (h) => decodificarHtml(h.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+  const achados = [...html.matchAll(/<([a-z0-9]+)\b[^>]*\bdata-i18n(?:-html)?="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/g)];
+  // CONTROLE: o recorte leu TODOS os elementos marcados (e o requisito da
+  // tela de entrada — "nível 2+", não "3+" — segue dentro dele).
+  const marcados = (html.match(/\bdata-i18n(?:-html)?="/g) || []).length;
+  assert.ok(marcados >= 150, `CONTROLE: só ${marcados} elementos com data-i18n — o HTML mudou de forma`);
+  assert.equal(achados.length, marcados, 'CONTROLE: algum elemento com data-i18n ficou de fora do recorte');
+  const tela = html.slice(html.indexOf('<div id="authScreen"'), html.indexOf('<div id="pasteModal"'));
+  assert.ok((tela.match(/\bdata-i18n(?:-html)?="/g) || []).length >= 10, 'CONTROLE: a tela de entrada sumiu do recorte');
+  assert.ok(achados.some(([, , chave]) => chave === 'auth.requisito'), 'CONTROLE: o requisito da entrada saiu do recorte');
   const divergentes = [];
   for (const [, , chave, reserva] of achados) {
     const valor = pt[chave];
-    assert.ok(valor, `a chave ${chave} da tela de entrada sumiu do dicionário`);
-    const esperado = texto(valor.replace(/\{nivelMinimo\}/g, String(nivel)));
+    assert.ok(valor, `a chave ${chave} do HTML sumiu do dicionário`);
+    const esperado = texto(comVariaveis(valor, vars, chave));
     if (texto(reserva) !== esperado) divergentes.push(`${chave}: "${texto(reserva)}" ≠ "${esperado}"`);
   }
-  assert.deepEqual(divergentes, [], 'o texto de reserva da tela de entrada diz outra coisa até o JS chegar');
+  // Os atributos: placeholder, aria-label, title e alt.
+  const ATRIBUTO = { ph: 'placeholder', aria: 'aria-label', title: 'title', alt: 'alt' };
+  let atributos = 0;
+  for (const [tag] of html.matchAll(/<[a-z0-9]+\b[^>]*>/g)) {
+    for (const [suf, attr] of Object.entries(ATRIBUTO)) {
+      const k = new RegExp(`\\bdata-i18n-${suf}="([^"]+)"`).exec(tag);
+      if (!k) continue;
+      atributos++;
+      const v = new RegExp(`\\s${attr}="([^"]*)"`).exec(tag);
+      const valor = pt[k[1]];
+      assert.ok(valor, `a chave ${k[1]} do HTML sumiu do dicionário`);
+      const esperado = comVariaveis(valor, vars, k[1]);
+      const reserva = v ? decodificarHtml(v[1]) : null;
+      if (reserva !== esperado) divergentes.push(`${k[1]} (${attr}): ${JSON.stringify(reserva)} ≠ "${esperado}"`);
+    }
+  }
+  assert.ok(atributos >= 50, `CONTROLE: só ${atributos} atributos traduzíveis — o recorte quebrou`);
+  assert.deepEqual(divergentes, [], 'o texto de reserva do HTML diz outra coisa até o JS chegar');
 });
 
 test('a extensão só aparece com a CONFIRMAÇÃO do JS; o divisor some com ela fora do dedo', () => {
