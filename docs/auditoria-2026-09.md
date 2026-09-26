@@ -16,6 +16,47 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
+## 0. Estado agora (2026-09-26 16:40 UTC)
+
+- **PR #252 mergeado** (rodadas 4 e 5: lote 5 + os seis consertos da rodada 2).
+  Produção **v2026.09.26-01 verificada: 71 ✓ · 0 ✗** (`prod-2026092601.log`),
+  com as seções novas "dados com dono" e "extensão só onde instala" conferidas
+  com controle.
+- **Rodada 3 da auditoria feita** (cinco auditores sobre a main do #252: costura
+  entre os consertos paralelos, modo dev e diagnóstico, lightbox, textos e docs,
+  filtros e fila): **88 achados**. Os pedidos estão em
+  `scratchpad/rodada3-prompts.md`; os roteiros de reprodução, em
+  `/tmp/audit-r3-*/`.
+- **Lote 7 = os consertos da rodada 3**, feitos por cinco agentes, cada um no
+  seu worktree (branch local): `wp-fix3-textos`, `wp-fix3-fila`,
+  `wp-fix3-costura`, `wp-fix3-lightbox`, `wp-fix3-dev`. O limite da assinatura
+  os parou às ~13:00 e eles foram continuados às 16:24 (`SendMessage` com o id
+  de cada um). **Se a sessão caiu e eles se perderam**: os worktrees somem com
+  o contêiner; refaça a rodada 3 a partir da main (os auditores acham de novo o
+  que não estiver consertado).
+- **Junção** no worktree `/home/user/wp-lote7` (branch
+  `claude/peaceful-heisenberg-HaUuC`): cherry-pick dos cinco, regenerar os
+  gerados, versão nova (`date -u`), CHANGELOG, CLAUDE.md, `npm test`, os smokes
+  (Chromium e WebKit, um smoke de layout por vez: a porta 8123 é fixa),
+  sabotagem por amostragem, PR, CI, merge e `prod-auditoria.mjs`.
+- **CHANGELOG da v2026.09.26-01 tem quatro frases a corrigir** (achados T10–T13
+  da rodada 3): "diz que é passageiro" (a mensagem é `srv.err.wazeDown`),
+  "área de gerência" → "área de edição", "renomear foto" → "renomear o local",
+  e o item da porta ocupada fora do lugar. E o CLAUDE.md (T28): o motivo do
+  `AbortController` na varredura é só o iOS < 16.
+- **Decisões do owner**: página pronta, com mockups da tela real,
+  `scratchpad/mockups/decisoes-em-aberto.html` (vai no relatório final como
+  artefato). Hoje: contraste (10 lugares), cabeçalho do Histórico, Resumo
+  ("12 de 30" e dia da semana), resumo do mês fechado, português antes da
+  tradução, abrir foto/mapa pelo teclado, aviso de carregamento lento, "Fora do
+  app agora", recusa automática nas conquistas, travar o card na aprovação, o ✨
+  sobre a pílula (L7), o aviso do Desfazer sobre as miniaturas (L10), a dica de
+  zoom cortada (L18), o religar em 9 dias sem aviso (T3), a lista de
+  credenciais incompleta (T24), e republicar a extensão.
+- **Fato do Waze medido nesta rodada** (só leitura): a busca aceita
+  `orderBy: 'SORTING_UPDATE_TIME_ASC'`, mas a ordem é pela atualização do LOCAL,
+  não pelo `dateAdded` do pedido — nenhuma ordem do servidor dá a do app.
+
 ## 1. O pedido (o que "pronto" quer dizer)
 
 - Auditar, testar e verificar o app INTEIRO — todo recurso, endpoint, a conversa
@@ -35,8 +76,8 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 | o quê | onde |
 |---|---|
-| Código mergeado | `main` (PRs #248, #249, #250, #251) |
-| Lote 5 (ainda sem PR) | branch `claude/peaceful-heisenberg-HaUuC`, sobre a main do #251 — ver §4 |
+| Código mergeado | `main` (PRs #248 a #252) |
+| Lote 7 (em andamento) | cinco worktrees locais `/home/user/wp-fix3-*` — ver §0 |
 | Este arquivo | `docs/auditoria-2026-09.md` no mesmo branch |
 | Scripts de auditoria (produção, sabotagem, medições) | artefato privado https://claude.ai/artifact/5YRYw1MCA8zXAjbQEBd9Qf — ver §7 |
 | Cookies das duas contas de teste | mandados pelo owner NESTA sessão (`/root/.claude/uploads/<sessão>/`). Contêiner novo pode não tê-los: **peça de novo** (CLAUDE.md, seção 🔑) |
