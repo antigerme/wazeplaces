@@ -1506,9 +1506,26 @@ for (const status of [404, 403]) {
   checa(!(await escondido('lightboxDelete')), 'aprovar: a lixeira sumiu na foto já aprovada');
   await page.click('#lightboxPrev'); await page.waitForTimeout(250);
 
+  // A pílula do nome, medida pelo ATRIBUTO e pelo PIXEL como os outros botões
+  // (L9, auditoria de 2026-09-26): na janela ela parecia viva e o toque não
+  // fazia nada. CONTROLE antes da janela: viva e acesa.
+  const pilula = () => page.evaluate(() => {
+    const b = document.getElementById('lightboxNomeBtn');
+    const cs = getComputedStyle(b);
+    return { visivel: !document.getElementById('lightboxNome').classList.contains('hidden'),
+      disabled: b.disabled, opacity: parseFloat(cs.opacity), filtro: cs.filter };
+  });
+  const pil0 = await pilula();
+  checa(pil0.visivel && !pil0.disabled && pil0.opacity === 1,
+    'pílula do nome: CONTROLE — fora da janela ela não está viva e acesa (a medida estaria cega)', JSON.stringify(pil0));
+
   // A resposta visual é imediata; o ENVIO espera a janela fechar sozinha.
   enviados.length = 0;
   await page.click('#lightboxApprove'); await page.waitForTimeout(400);
+  const pil1 = await pilula();
+  checa(pil1.disabled, 'pílula do nome: continuou clicável durante o Desfazer — o toque nela não faz nada');
+  checa(pil1.opacity < 1 && /grayscale/.test(pil1.filtro),
+    `pílula do nome: está disabled mas PARECE viva na janela (opacity ${pil1.opacity}, filter ${pil1.filtro})`);
   checa(await page.evaluate(() => document.querySelectorAll('#undoContainer .undo-banner').length === 1),
     'aprovar: o banner de Desfazer não apareceu');
   checa(await escondido('lightboxApprove') && !(await escondido('lightboxDelete')),
@@ -1540,6 +1557,8 @@ for (const status of [404, 403]) {
   // Fecha sozinha → envia, e com `approve: true` (o backend só aprova com o
   // booleano estrito; mandar outra coisa vira uma REJEIÇÃO silenciosa).
   await page.waitForTimeout(3200);
+  const pil2 = await pilula();
+  checa(!pil2.disabled && pil2.opacity === 1, 'pílula do nome: não voltou a ser botão depois da janela', JSON.stringify(pil2));
   checa(enviados.length === 1, `aprovar: esperava 1 envio ao fim da janela, veio ${enviados.length}`);
   checa(enviados[0] && enviados[0].approve === true,
     `aprovar: mandou approve=${JSON.stringify((enviados[0] || {}).approve)}, e só o booleano true aprova`);
@@ -7122,7 +7141,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + escala do mapa medindo o que diz (card e ampliado, pela barra DESENHADA contra o movimento que o core mediu, e o rótulo cabendo no traço do z8 ao z4)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
-  + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true)`
+  + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true, e a pílula do nome travada e esmaecida na janela, com o CONTROLE viva antes e depois)`
   + `, + foto que NÃO carregou (sem aprovar nem lixeira, nem pelo clique no botão escondido, com o CONTROLE da foto que carrega)`
   + `, + sessão morta leva pra tela de entrar e oscilação de rede NÃO derruba`
   + `, + falha de busca NUNCA vira "Tudo limpo!" (401 com alarme falso, medido pela REDE)`

@@ -2904,9 +2904,10 @@ function abrirEdicaoNome() {
     // e o lápis sai porque prometer ação onde não há é o que faz botão morto
     // parecer vivo. Isto substitui a linha "Antes:" que eu tinha posto embaixo:
     // o owner viu o nome DUAS vezes na tela e preferiu, com razão, ficar só com
-    // a pílula — ela flutua sobre a foto e não custa altura de layout.
+    // a pílula — ela flutua sobre a foto e não custa altura de layout. O
+    // `disabled` vem da função da trava, que é o escritor ÚNICO dele (L9).
     const btn = document.getElementById('lightboxNomeBtn');
-    btn.disabled = true;
+    aplicarTravaDeAcao();
     btn.querySelector('.lb-nome-lapis')?.classList.add('hidden');
     document.getElementById('lightboxNomeEdit').classList.remove('hidden');
     const inp = document.getElementById('lightboxNomeInput');
@@ -2929,10 +2930,10 @@ function fecharEdicaoNome() {
     cx.classList.remove('editando');
     const btn = document.getElementById('lightboxNomeBtn');
     const ed = document.getElementById('lightboxNomeEdit');
-    if (btn) {
-        btn.disabled = false;
-        btn.querySelector('.lb-nome-lapis')?.classList.remove('hidden');
-    }
+    // Volta a ser botão — ou fica travada, se a janela do Desfazer corre: quem
+    // decide é a função da trava, não um `disabled = false` daqui (L9).
+    aplicarTravaDeAcao();
+    if (btn) btn.querySelector('.lb-nome-lapis')?.classList.remove('hidden');
     if (ed) ed.classList.add('hidden');
     document.getElementById('imageLightbox').classList.remove('editando-nome');
     // Recalcula em vez de restaurar o que foi guardado: a foto pode ter mudado
@@ -9763,6 +9764,15 @@ function aplicarTravaDeAcao() {
         const b = document.getElementById(id);
         if (b) b.disabled = travado;
     }
+    // A pílula do nome também: ela abre a edição, e na janela o
+    // `abrirEdicaoNome` saía calado — a pílula parecia viva e não fazia nada
+    // (auditoria de 2026-09-26, o gotcha #63 de novo). E ela tem um SEGUNDO
+    // motivo pra estar desabilitada, que é ser RÓTULO durante a edição; os dois
+    // moram aqui, num escritor só, senão um desfaz o outro (a mesma reincidência
+    // do #63 com o card sem foto). O esmaecido de travada vem do CSS, só fora da
+    // edição — editando ela é rótulo, e rótulo não se apaga.
+    const pilula = document.getElementById('lightboxNomeBtn');
+    if (pilula) pilula.disabled = travado || editandoNome();
 }
 
 // A rolagem do conteúdo é CONSEQUÊNCIA de estourar, não estado padrão — e a

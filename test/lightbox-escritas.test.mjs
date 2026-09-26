@@ -540,3 +540,38 @@ test('L4 o passo pra trás: editando, sai da edição e a foto fica; sem ediçã
   assert.match(setup, /dy > 80 && Math\.abs\(dy\) > Math\.abs\(dx\)\) \{\s*recuarNaFoto\(\);/,
     'o arraste pra BAIXO voltou a fechar direto');
 });
+
+// ── L9: a pílula do nome na trava (auditoria de 2026-09-26) ──────────────────
+// Na janela do Desfazer (aprovar, excluir, renomear) a pílula seguia com cara
+// de viva, e tocá-la não fazia nada (`abrirEdicaoNome` saía calado): o gotcha
+// #63 de novo. Ela ganhou o MESMO escritor dos outros botões — e esse escritor
+// é o único, porque a pílula também fica `disabled` como RÓTULO na edição.
+test('L9 a pílula do nome: travada na janela, rótulo na edição, viva fora dos dois — por UM escritor', () => {
+  const botao = () => ({ disabled: false, querySelector: () => null });
+  const el = { lightboxApprove: botao(), lightboxDelete: botao(), lightboxNomeBtn: botao() };
+  const rodar = (travado, editando) => new Function('document', 'acoesTravadas', 'cardDaFrente', 'editandoNome',
+    fatiar('aplicarTravaDeAcao') + '\naplicarTravaDeAcao();')(
+    { getElementById: (id) => el[id] || null }, () => travado, () => null, () => editando);
+  rodar(false, false);
+  assert.equal(el.lightboxNomeBtn.disabled, false, 'CONTROLE: sem janela e sem edição a pílula ficou morta');
+  rodar(true, false);
+  assert.equal(el.lightboxNomeBtn.disabled, true, 'na janela do Desfazer a pílula seguiu clicável');
+  assert.equal(el.lightboxApprove.disabled, true, 'CONTROLE: o aprovar não travou junto');
+  rodar(false, true);
+  assert.equal(el.lightboxNomeBtn.disabled, true, 'na edição a pílula deixou de ser rótulo');
+  rodar(false, false);
+  assert.equal(el.lightboxNomeBtn.disabled, false, 'a pílula não voltou a ser botão');
+  // O escritor é UM só: abrir e fechar a edição não escrevem o `disabled` da
+  // pílula por conta própria (um desfaria o outro — a reincidência do #63).
+  for (const nome of ['abrirEdicaoNome', 'fecharEdicaoNome']) {
+    const f = fatiar(nome);
+    assert.doesNotMatch(f, /btn\.disabled\s*=/, `${nome} voltou a escrever o disabled da pílula por fora da trava`);
+    assert.match(f, /aplicarTravaDeAcao\(\)/, `${nome} não passa pela função da trava`);
+  }
+  // E o visual: travada fora da edição se esmaece como os outros; na edição é
+  // rótulo e fica acesa.
+  const css = readFileSync(new URL('../css/styles.css', import.meta.url), 'utf8');
+  const regra = css.match(/^\.lb-nome:not\(\.editando\) \.lb-nome-btn:disabled \{([^}]*)\}/m);
+  assert.ok(regra && /opacity:\s*0\.4/.test(regra[1]) && /grayscale/.test(regra[1]),
+    'a pílula travada ficou com cara de viva (sem o esmaecido dos outros botões travados)');
+});

@@ -2012,6 +2012,16 @@ button:active {
    2026-09-26). */
 .lb-nome.editando .lb-nome-btn { margin-bottom: 0.4rem; max-width: 100%; }
 .lb-nome-btn:disabled { opacity: 1; }   /* rótulo, não botão apagado */
+/* FORA da edição, desabilitada é TRAVADA (a janela do Desfazer, a conferência
+   de um 401): o mesmo visual do `.lb-acao:disabled` e dos botões do card —
+   botão morto com cara de vivo lê como app quebrado (gotcha #63). Com o
+   `:not(.editando)` ela vale só pra trava; o rótulo da edição segue aceso.
+   Especificidade (0,4,0), acima do `:disabled` de cima. */
+.lb-nome:not(.editando) .lb-nome-btn:disabled {
+  opacity: 0.4;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
 .lb-nome-btn {
   display: flex;
   align-items: center;
