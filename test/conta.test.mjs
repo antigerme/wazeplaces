@@ -51,6 +51,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     dfato: (k) => log.push('dfato:' + k),
     updateInFlightIndicator: () => {}, historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
     esquecerAutores: () => log.push('autores'), atualizarSeloDeConquista: () => {},
+    esquecerFocoAutor: () => log.push('foco'),
     saveStats: () => log.push('saveStats'), updateStats: () => {},
     offlineEsquecer: () => log.push('offline'), dlogApagar: () => log.push('dlog'),
     showToast: (m) => log.push('toast:' + m), t: (k) => k,
@@ -100,7 +101,7 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   m.app.aoConhecerConta({ id: 'B' });
   const fila = m.app.carregarFilaDeSaida();
   assert.deepEqual(fila.map((x) => x.venueID), ['v2'], 'a decisão de A ficou pra sair no nome de B');
-  for (const o of ['autores', 'chat', 'offline', 'dlog', 'dfato:conta.trocou', 'toast:toast.outraConta']) {
+  for (const o of ['autores', 'foco', 'chat', 'offline', 'dlog', 'dfato:conta.trocou', 'toast:toast.outraConta']) {
     assert.ok(m.log.includes(o), `a troca de conta não levou: ${o}`);
   }
   assert.ok(m.log.includes('-waze_places_history') && m.log.includes('-waze_places_conquistas'));
@@ -113,7 +114,7 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   c.sessao.token = 'tok-A2';
   c.app.aoConhecerConta({ id: 'A' });
   assert.equal(c.app.carregarFilaDeSaida().length, 1, 'a mesma conta perdeu a fila de saída');
-  assert.ok(!c.log.includes('autores') && !c.log.includes('dfato:conta.trocou'));
+  assert.ok(!c.log.includes('autores') && !c.log.includes('foco') && !c.log.includes('dfato:conta.trocou'));
 });
 
 test('o esvaziamento que parou esperando a conta é chamado quando o perfil chega', () => {

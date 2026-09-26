@@ -6155,6 +6155,7 @@ async function handleLogout() {
     safeLS.remove(PERFIL_GATE_KEY);   // rank do último perfil: some com o resto
     safeLS.remove(CONTA_KEY);         // de quem eram os dados: não há mais dados
     esquecerAutores();  // contagem por autor: é dado de TERCEIRO, sai primeiro
+    esquecerFocoAutor();   // o autor em foco também (reordenava a fila da próxima conta)
     // Fecha o tempo real e apaga o que o chat guardou no aparelho (a
     // instalação, as conversas conhecidas, até onde cada um leu): é de quem
     // entrou, não preferência do aparelho.
@@ -8374,6 +8375,26 @@ function limparFocoAutor() {
     // A ordem NÃO volta atrás: reordenar de novo tiraria da frente o pedido que
     // o editor está olhando agora. Sair do foco é parar de destacar, não desfazer.
     renderFocoAutor();
+}
+
+// O foco é uma ordem que a PESSOA pediu, sobre um autor da fila DELA — dado de
+// terceiro. Sobrevivia ao "Sair": a próxima conta entrava com a fila reordenada
+// pelo autor que a anterior tinha focado, e com a barra "Primeiro os de…" na
+// tela sem nunca ter tocado em "Ver +N" (auditoria de 2026-09-26). Sai no
+// "Sair" e quando o perfil revela OUTRA conta (`esquecerOutraConta`); a queda
+// da sessão sozinha não mexe, porque ali a mesma pessoa volta e segue a série.
+function esquecerFocoAutor() {
+    AppState.autorEmFoco = null;
+    const bar = document.getElementById('focoAutorBar');
+    if (!bar) return;
+    bar.classList.add('hidden');
+    // O NOME do autor também: escondida, a barra seguia com "Primeiro os de
+    // fulano" no DOM, que o diagnóstico leva inteiro.
+    bar.removeAttribute('aria-label');
+    for (const id of ['focoAutorTexto', 'focoAutorContagem']) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '';
+    }
 }
 
 // A barra some sozinha quando a série acaba — sem isso ela ficaria mentindo
@@ -11611,6 +11632,9 @@ function esquecerOutraConta(id) {
     const desta = f.filter((it) => !it || !it.conta || String(it.conta) === id);
     if (desta.length !== f.length) { salvarFilaDeSaida(desta); updateInFlightIndicator(); }
     esquecerAutores();
+    // O foco da anterior sai ANTES da reordenação que o perfil agenda logo
+    // depois (`loadProfileAndAuxData`): a fila de quem entrou volta à ordem dela.
+    esquecerFocoAutor();
     window.Presenca?.esquecer?.();
     AppState.history = null;
     safeLS.remove(HISTORY_KEY);

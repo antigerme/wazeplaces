@@ -221,3 +221,34 @@ test('o "Sair" limpa a lista de recursos que o diagnóstico leva (foto de perfil
   assert.match(fatiar('handleLogout'), /try \{ performance\.clearResourceTimings\(\); \} catch \(e\) \{\}/,
     'a URL da foto de perfil (com o id de quem saiu) e as fotos dos pedidos seguem na lista de recursos');
 });
+
+// ── A4: o autor em foco é da fila de QUEM ESTAVA aqui ──────────────────────
+test('outra conta entrando: o autor que a anterior focou sai — a fila dela não vem reordenada por ele', () => {
+  const { registro, document } = domDeMentira({ focoAutorBar: { oculto: false }, focoAutorTexto: {}, focoAutorContagem: {} });
+  registro.focoAutorTexto.textContent = '🔎 Primeiro os de autor_1001';
+  registro.focoAutorBar.setAttribute('aria-label', '3 pedidos de autor_1001');
+  const AppState = { autorEmFoco: 1001, stats: {}, queue: [] };
+  const nada = () => {};
+  const deps = {
+    AppState, document, window: {}, dfato: nada, carregarFilaDeSaida: () => [], salvarFilaDeSaida: nada,
+    updateInFlightIndicator: nada, esquecerAutores: nada, safeLS: { remove: nada }, HISTORY_KEY: 'h', CONQUISTAS_KEY: 'c',
+    atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
+    showToast: nada, t: (k) => k,
+  };
+  const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente'],
+    deps, ['esquecerOutraConta', 'manterFocoNaFrente']);
+  // CONTROLE: com o foco da anterior, a fila de quem entrou vem com o autor dela na frente.
+  AppState.queue = [{ creatorId: 2002 }, { creatorId: 1001 }];
+  manterFocoNaFrente();
+  assert.equal(AppState.queue[0].creatorId, 1001, 'CONTROLE: o foco nem reordenava — o teste perdeu o sentido');
+  esquecerOutraConta('222');
+  assert.equal(AppState.autorEmFoco, null, 'o autor em foco da conta anterior sobreviveu à troca de conta');
+  assert.ok(registro.focoAutorBar.classList.contains('hidden'), 'a barra "Primeiro os de…" da conta anterior ficou na tela');
+  assert.equal(registro.focoAutorTexto.textContent, '', 'o nome do autor ficou na barra escondida (o diagnóstico leva o DOM)');
+  assert.equal(registro.focoAutorBar.getAttribute('aria-label'), null);
+  AppState.queue = [{ creatorId: 2002 }, { creatorId: 1001 }];
+  manterFocoNaFrente();
+  assert.equal(AppState.queue[0].creatorId, 2002, 'a fila de quem entrou ainda é reordenada pelo foco da anterior');
+  // E o "Sair" esquece junto com o resto do que é de terceiro.
+  assert.match(fatiar('handleLogout'), /^\s+esquecerFocoAutor\(\);/m, 'o autor em foco sobrevive ao "Sair"');
+});
