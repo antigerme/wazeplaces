@@ -1390,6 +1390,33 @@ const contarVertices = (geom) => {
   return n;
 };
 
+// A caixa [lonMin, latMin, lonMax, latMax] de uma geometria GeoJSON, em
+// QUALQUER profundidade — o mesmo desce do `contarVertices`. O `perfil` lia
+// `coordinates[0]` como se toda área fosse Polygon: num MultiPolygon cada
+// "vértice" era um anel, e a caixa saía `[null, null, null, null]` — que o
+// "Minha área" do app manda como filtro. E o mínimo sai em LAÇO, nunca com
+// `Math.min(...lista)`: o espalhamento passa cada vértice como ARGUMENTO, e um
+// anel grande estoura a pilha (medido: com 200 mil vértices o `perfil` caía em
+// 500 — auditoria de 2026-09-26). A recursão só desce no aninhamento (≤ 4
+// níveis no GeoJSON), não nos vértices. `null` sem vértice nenhum.
+const caixaDaGeometria = (geom) => {
+  let lonMin = Infinity, latMin = Infinity, lonMax = -Infinity, latMax = -Infinity;
+  const desce = (c) => {
+    if (!Array.isArray(c)) return;
+    if (typeof c[0] === 'number' && typeof c[1] === 'number') {
+      if (!Number.isFinite(c[0]) || !Number.isFinite(c[1])) return;
+      if (c[0] < lonMin) lonMin = c[0];
+      if (c[0] > lonMax) lonMax = c[0];
+      if (c[1] < latMin) latMin = c[1];
+      if (c[1] > latMax) latMax = c[1];
+      return;
+    }
+    for (const item of c) desce(item);
+  };
+  desce(geom && geom.coordinates);
+  return lonMin <= lonMax ? [lonMin, latMin, lonMax, latMax] : null;
+};
+
 // Mesmo desce-recursivo do buildPlacesFromSearch, mas no escopo do módulo pra
 // o formatGeometry poder usar (lá ele é local a uma função).
 const extractLonLatDeep = (coords) => {
@@ -2718,14 +2745,8 @@ async function handlePerfil(data, { sessions }) {
 
   const areas = [];
   for (const area of rd.areas || []) {
-    let bbox = null;
-    const coords = area?.geometry?.coordinates?.[0];
-    if (Array.isArray(coords) && coords.length) {
-      const lons = coords.map((c) => c[0]);
-      const lats = coords.map((c) => c[1]);
-      bbox = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
-    }
-    areas.push({ type: area.type ?? null, bbox });
+    // Polygon e MultiPolygon, de qualquer tamanho (ver `caixaDaGeometria`).
+    areas.push({ type: area?.type ?? null, bbox: caixaDaGeometria(area?.geometry) });
   }
   const managedAreas = [];
   for (const ma of rd.managedAreas || []) managedAreas.push({ id: ma.id ?? null, name: ma.name || '' });

@@ -723,3 +723,28 @@ test('presenca-waze: resposta gRPC cortada no meio (sem trailer, HTTP 200) é er
   assert.equal(inteira.r.body.success, true, JSON.stringify(inteira.r.body));
   assert.deepEqual(inteira.r.body.editores.map((e) => e.id), [1, 2, 3, 4]);
 });
+
+test('perfil: a caixa da área sai de Polygon E de MultiPolygon, e anel enorme não derruba o perfil', async () => {
+  // A caixa vira o filtro do "Minha área" no app. Lia `coordinates[0]` como se
+  // toda área fosse Polygon (MultiPolygon dava `[null, null, null, null]`), e o
+  // `Math.min(...lista)` estourava a pilha num anel grande (o perfil em 500).
+  const bboxDe = async (geometry) => {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(() => json({ id: 1, userName: 'x', rank: 5, isAreaManager: true, isStaff: false, areas: [{ type: 'drive', geometry }] }),
+      () => dispatch('perfil', { ...s.dados, region: 'row' }, s.ctx));
+    assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 120));
+    return r.body.profile.areas[0].bbox;
+  };
+  const anel = [[-47, -23], [-46, -23], [-46, -22], [-47, -22], [-47, -23]];
+  const outro = [[-40, -10], [-39, -10], [-39, -9], [-40, -10]];
+  // CONTROLE: o Polygon, que sempre funcionou.
+  assert.deepEqual(await bboxDe({ type: 'Polygon', coordinates: [anel] }), [-47, -23, -46, -22]);
+  // MultiPolygon: a caixa cobre as DUAS partes.
+  assert.deepEqual(await bboxDe({ type: 'MultiPolygon', coordinates: [[anel], [outro]] }), [-47, -23, -39, -9]);
+  // 200 mil vértices num anel só.
+  const grande = Array.from({ length: 200_000 }, (_, i) => [-47 + i * 1e-6, -23 + (i % 2) * 1e-3]);
+  assert.deepEqual(await bboxDe({ type: 'Polygon', coordinates: [grande] }), [-47, -23, -47 + 199_999 * 1e-6, -23 + 1e-3]);
+  // Sem coordenada: sem caixa (o app cai pra outra área), nunca caixa de NaN.
+  assert.equal(await bboxDe(null), null);
+  assert.equal(await bboxDe({ type: 'Polygon', coordinates: [] }), null);
+});
