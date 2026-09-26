@@ -476,3 +476,81 @@ test('K2: a queda limpa o cabeçalho de quem estava (o perfil que chegar o redes
   h.derrubarSessao('srv.err.cookiesExpired');
   assert.ok(h.chamou.includes('limparCabecalhoDoPerfil'), 'DEFEITO: o nome e a foto de A seguem no cabeçalho durante e depois da renovação');
 });
+
+// ═══ K3 · o "Sair" no meio da renovação não é desfeito ═══════════════════════
+
+test('K3: "Sair" com a extensão ainda respondendo — o token atrasado NÃO entra de novo', async () => {
+  const sessoes = [];
+  const window = janelaFalsa();
+  const AppState = { authenticated: false, queue: [], stats: { read: 0, rejected: 0, skipped: 0 }, pendingAction: null };
+  const deps = {
+    window, AppState, epocaDaSessao: 1, saiuNestaPagina: false, extPerguntando: false, extNegado: null,
+    extNegadoNestaPagina: false, filaAtravessouSessao: false, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000,
+    setTimeout: () => 1, clearTimeout: () => {}, pareamentosEmitidos: new Set(),
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    API: { setSession: (t) => sessoes.push(t), getSession: () => null, setRegion() {}, setCountry() {},
+      cancelarPareamento: () => Promise.resolve(), chamadas: [] },
+  };
+  const h = montar(['entrarPelaExtensao', 'handleLogout'], deps);
+  const p = h.entrarPelaExtensao({ silencioso: true, manterFila: true });   // a renovação da queda
+  await h.handleLogout();                                                    // a pessoa toca "Sair"
+  const antes = h.chamou.filter((c) => c === 'showMainScreen').length;
+  window.responder({ source: 'wazeplaces-ext', action: 'sessao', token: 'tokA2' });
+  assert.equal(await p, false, 'DEFEITO: a resposta atrasada da extensão contou como entrada');
+  assert.ok(!sessoes.includes('tokA2'), 'DEFEITO: a sessão voltou depois do "Sair"');
+  assert.equal(h.chamou.filter((c) => c === 'showMainScreen').length, antes, 'o app reabriu por cima da tela de entrada');
+});
+
+test('K3: CONTROLE — sem o "Sair" no meio, o mesmo token entra', async () => {
+  const q = montarExtensao();
+  const p = q.h.entrarPelaExtensao({ silencioso: true, manterFila: true });
+  q.window.responder({ source: 'wazeplaces-ext', action: 'sessao', token: 'tokA2' });
+  assert.equal(await p, true);
+  assert.equal(q.deps.token, 'tokA2');
+});
+
+test('K3: a renovação que falha DEPOIS do "Sair" não diz "sua sessão expirou" nem refaz a tela', async () => {
+  let soltar;
+  const toasts = [];
+  const deps = {
+    AppState: { authenticated: true, pendingAction: null }, epocaDaSessao: 0,
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    entrarPelaExtensao: () => new Promise((ok) => { soltar = ok; }), t: (k) => k, tirarNegadoDaExtensao: () => null,
+    showToast: (m) => toasts.push(m), setTimeout: (fn) => { fn(); return 1; },
+    MOTIVO_DA_QUEDA: constante('MOTIVO_DA_QUEDA'), UNAUTHORIZED_REDIRECT_MS: 0,
+  };
+  const h = montar(['derrubarSessao'], deps);
+  h.derrubarSessao('srv.err.cookiesExpired');
+  deps.epocaDaSessao++;                 // o "Sair" (o handleLogout sobe a época na 1ª linha)
+  soltar(false);
+  await tique();
+  assert.deepEqual(toasts, [], 'DEFEITO: aviso de sessão expirada depois do "Sair"');
+  assert.ok(!h.chamou.includes('fecharCamadasAbertas'), 'a queda refez a tela por cima da do "Sair"');
+  // CONTROLE: sem o "Sair", a falha avisa e leva à entrada.
+  const k = montar(['derrubarSessao'], { ...deps, epocaDaSessao: 0 });
+  k.derrubarSessao('srv.err.cookiesExpired');
+  soltar(false);
+  await tique();
+  assert.ok(toasts.includes('toast.sessionExpired.waze'));
+  assert.ok(k.chamou.includes('fecharCamadasAbertas'));
+});
+
+test('K3: "Sair" DEPOIS de a renovação falhar e ANTES de a tela de entrada vir — a queda não a refaz', async () => {
+  let soltar;
+  const adiados = [];
+  const deps = {
+    AppState: { authenticated: true, pendingAction: null }, epocaDaSessao: 0,
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    entrarPelaExtensao: () => new Promise((ok) => { soltar = ok; }), t: (k) => k, tirarNegadoDaExtensao: () => null,
+    setTimeout: (fn) => { adiados.push(fn); return 1; },
+    MOTIVO_DA_QUEDA: constante('MOTIVO_DA_QUEDA'), UNAUTHORIZED_REDIRECT_MS: 1200,
+  };
+  const h = montar(['derrubarSessao'], deps);
+  h.derrubarSessao('srv.err.cookiesExpired');
+  soltar(false);
+  await tique();
+  assert.equal(adiados.length, 1, 'CONTROLE: a tela de entrada não foi agendada — o teste não mediria nada');
+  deps.epocaDaSessao++;                 // o "Sair" nos 1,2 s de espera
+  adiados[0]();
+  assert.ok(!h.chamou.includes('fecharCamadasAbertas'), 'DEFEITO: a queda refez a tela de entrada por cima da do "Sair"');
+});

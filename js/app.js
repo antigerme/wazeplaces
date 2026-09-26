@@ -606,6 +606,13 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
     if (extPerguntando) return Promise.resolve(false);
     extPerguntando = true;
     extNegado = null;   // uma recusa de pergunta ANTERIOR não é desta
+    // A época de quando a pergunta SAIU. A resposta leva até 8 s, e o "Sair"
+    // pode acontecer nesse meio (o botão fica na Ajuda durante a renovação da
+    // queda): o token que chegava depois entrava de novo, e o "Sair" era
+    // desfeito — MEDIDO, token de volta e o app aberto (auditoria da costura,
+    // 2026-09-26, K3). O "Sair" sobe a época na primeira linha, então ela
+    // cobre também o `saiuNestaPagina`.
+    const epoca = epocaDaSessao;
 
     return new Promise((resolve) => {
         let terminou = false;
@@ -644,6 +651,7 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
                 return fim(false);
             }
             if (d.action !== 'sessao' || !d.token) return;
+            if (epoca !== epocaDaSessao) return fim(false);   // saiu no meio: ver acima
             API.setSession(String(d.token), 'extensao');
             aoEntrarNestaPagina();
             // O que a tela de entrada tinha aberto (o "Colar", com o chaveiro
@@ -6436,7 +6444,11 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // Nos dois casos a tela de entrada vem pelo `fecharCamadasAbertas`, que fecha
     // o que estava aberto por cima ANTES de ela (e do diálogo) aparecer.
     if (typeof depois === 'function') { fecharCamadasAbertas(depois); return; }
+    const epoca = epocaDaSessao;
     entrarPelaExtensao({ silencioso: true, manterFila: true }).then((renovou) => {
+        // O "Sair" no meio da renovação: a tela e o aviso já são os dele, e um
+        // "sua sessão expirou" depois dele diria o que não aconteceu (K3).
+        if (epoca !== epocaDaSessao) return;
         if (renovou) {
             showToast(t('toast.sessionRenewed'), 'info');
             rebuscarDepoisDeFalha();
@@ -6447,10 +6459,13 @@ function derrubarSessao(errorKey, { depois } = {}) {
         // e a pessoa vê o "Acesso restrito" em vez do aviso de queda.
         const negado = tirarNegadoDaExtensao();
         if (!negado) showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
-        setTimeout(() => fecharCamadasAbertas(() => {
-            if (negado) showAccessDenied(negado);
-            showAuthScreen();
-        }), UNAUTHORIZED_REDIRECT_MS);
+        setTimeout(() => {
+            if (epoca !== epocaDaSessao) return;
+            fecharCamadasAbertas(() => {
+                if (negado) showAccessDenied(negado);
+                showAuthScreen();
+            });
+        }, UNAUTHORIZED_REDIRECT_MS);
     });
 }
 

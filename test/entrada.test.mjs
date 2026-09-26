@@ -326,7 +326,7 @@ function montarExtensao(inicio = {}) {
   const negados = [];
   const deps = {
     window: win, document: { getElementById: () => null },
-    API: { setSession() {} }, AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000,
+    API: { setSession() {} }, AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
     extPerguntando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
     closeModal() {}, showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {},
     esvaziarFilaDeSaida() {}, mostrarEntrandoPelaExtensao() {}, setTimeout: () => 1, clearTimeout() {},
@@ -536,7 +536,8 @@ test('queda da sessão: os TRÊS caminhos passam pelo fechamento — e o diálog
   const queda = fatiar('derrubarSessao');
   assert.match(queda, /if \(typeof depois === 'function'\) \{ fecharCamadasAbertas\(depois\); return; \}/,
     'o portão fechado voltou a abrir o diálogo por cima das camadas');
-  assert.match(queda, /setTimeout\(\(\) => fecharCamadasAbertas\(\(\) => \{\s*if \(negado\) showAccessDenied\(negado\);\s*showAuthScreen\(\);\s*\}\), UNAUTHORIZED_REDIRECT_MS\);/,
+  // (A época conferida antes: o "Sair" no meio da renovação já fez a tela dele — test/costura-sessao, K3.)
+  assert.match(queda, /setTimeout\(\(\) => \{\s*if \(epoca !== epocaDaSessao\) return;\s*fecharCamadasAbertas\(\(\) => \{\s*if \(negado\) showAccessDenied\(negado\);\s*showAuthScreen\(\);\s*\}\);\s*\}, UNAUTHORIZED_REDIRECT_MS\);/,
     'a queda comum voltou a mostrar a entrada com as camadas abertas por cima');
   // O diálogo ANTES da tela de entrada (a ordem que o `Presenca.desligar` exige).
   assert.match(fatiar('loadProfileAndAuxData'), /depois: \(\) => \{ showAccessDenied\(profileRes\); showAuthScreen\(\); \}/);
