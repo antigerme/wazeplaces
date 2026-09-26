@@ -915,3 +915,50 @@ test('Ajuda: a extensão só onde ela instala, e o passo do CÓDIGO — o único
     }
   }
 });
+
+// ── A26: iPhone com o app instalado ─────────────────────────────────────────
+test('iPhone com o app INSTALADO: a instrução manda pro código digitado — a câmera abriria o Safari, fora do app', () => {
+  const rodar = (standalone) => {
+    const pre = elemento('pre'); pre.setAttribute('data-i18n', 'auth.needsComputer');
+    const passo = elemento('passo'); passo.setAttribute('data-i18n-html', 'help.howToUse.codigo');
+    const els = { '.auth-precondicao': pre, '.ajuda-passo-codigo': passo };
+    const { ajustarEntradaAoIPhoneInstalado } = montar(['ajustarEntradaAoIPhoneInstalado'],
+      { navigator: { standalone }, document: { querySelector: (s) => els[s] || null }, t: (k) => 'T:' + k },
+      ['ajustarEntradaAoIPhoneInstalado']);
+    ajustarEntradaAoIPhoneInstalado();
+    return { pre, passo };
+  };
+  const ios = rodar(true);
+  assert.equal(ios.pre.getAttribute('data-i18n'), 'auth.needsComputer.codigo', 'a tela de entrada segue mandando apontar a câmera');
+  assert.equal(ios.pre.textContent, 'T:auth.needsComputer.codigo');
+  assert.equal(ios.passo.getAttribute('data-i18n-html'), 'help.howToUse.codigoSemCamera', 'a Ajuda segue mandando apontar a câmera');
+  assert.equal(ios.passo.innerHTML, 'T:help.howToUse.codigoSemCamera');
+  // CONTROLE: fora do app instalado do iPhone, nada muda.
+  for (const fora of [undefined, false]) {
+    const c = rodar(fora);
+    assert.equal(c.pre.getAttribute('data-i18n'), 'auth.needsComputer');
+    assert.equal(c.passo.getAttribute('data-i18n-html'), 'help.howToUse.codigo');
+  }
+  assert.match(fatiar('initApp'), /^\s+ajustarEntradaAoIPhoneInstalado\(\);/m, 'ninguém chama o ajuste do iPhone instalado');
+  // As frases, nas 4 línguas: o caminho do CÓDIGO com os nomes da tela.
+  const D = dicionario();
+  for (const lang of Object.keys(D)) {
+    for (const chave of ['auth.needsComputer.codigo', 'help.howToUse.codigoSemCamera']) {
+      const frase = D[lang][chave];
+      assert.ok(frase, `${lang}: falta ${chave}`);
+      for (const nome of ['modal.help.title', 'pair.createBtn', 'pair.show.noCamera']) {
+        assert.ok(frase.includes(D[lang][nome]), `${lang}/${chave}: não usa o nome da tela "${D[lang][nome]}"`);
+      }
+    }
+    // O PORQUÊ (a câmera abriria o Safari) mora na Ajuda, onde há espaço, com o
+    // nome do botão de entrar. Na tela de entrada a frase não pode crescer: no
+    // iPhone SE ela empurrava o "Entrar com um código" pra fora da primeira tela
+    // (MEDIDO no WebKit: 534 → 625 px numa tela de 568). Até 10% além da de sempre.
+    const ajuda = D[lang]['help.howToUse.codigoSemCamera'];
+    assert.match(ajuda, /Safari/, `${lang}: a Ajuda não diz por que a câmera não serve no app instalado`);
+    assert.ok(ajuda.includes(D[lang]['auth.pairBtn']), `${lang}: a Ajuda não usa o nome "${D[lang]['auth.pairBtn']}"`);
+    const entrada = D[lang]['auth.needsComputer.codigo'], sempre = D[lang]['auth.needsComputer'];
+    assert.ok(entrada.length <= sempre.length * 1.1,
+      `${lang}: a pré-condição do iPhone instalado tem ${entrada.length} caracteres contra ${sempre.length} — empurra o botão principal pra fora da tela`);
+  }
+});

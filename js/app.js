@@ -386,6 +386,7 @@ function initApp() {
     // de o diagnóstico ser guardado — senão o diário guardado não a mostra.
     setupGuardaDoDiagnostico();
     marcarSuporteAExtensao();
+    ajustarEntradaAoIPhoneInstalado();
     setupInstalarApp();
     setupSincroniaEntreAbas();   // o app aberto em duas abas (ver a função)
 
@@ -14851,6 +14852,31 @@ function podeInstalarExtensao() {
 // "o JS nem rodou".
 function marcarSuporteAExtensao() {
     document.documentElement.classList.add(podeInstalarExtensao() ? 'com-extensao' : 'sem-extensao');
+}
+
+// ── iPhone com o app INSTALADO na tela de início ─────────────────────────────
+// No iOS, o app instalado tem armazenamento SEPARADO do Safari. Apontar a câmera
+// pro QR do pareamento abre o LINK no Safari: a sessão entra lá, e o app
+// instalado segue na tela de entrada. Isto é conhecimento da PLATAFORMA, não
+// medição — não há iPhone neste ambiente, e o WebKit do Playwright não simula
+// app instalado (auditoria de 2026-09-26). Por isso o ajuste é só de TEXTO: onde
+// a instrução mandava apontar a câmera, ela manda pro código digitado, que não
+// passa pelo Safari. `navigator.standalone` só existe no iOS (e é `true` só no
+// app instalado); o Android instalado divide o armazenamento com o Chrome.
+function ajustarEntradaAoIPhoneInstalado() {
+    if (navigator.standalone !== true) return;
+    const trocas = [
+        ['.auth-precondicao', 'data-i18n', 'auth.needsComputer.codigo'],
+        ['.ajuda-passo-codigo', 'data-i18n-html', 'help.howToUse.codigoSemCamera'],
+    ];
+    for (const [seletor, atributo, chave] of trocas) {
+        const el = document.querySelector(seletor);
+        if (!el) continue;
+        // A CHAVE troca (a troca de idioma relê dela); o texto sai do dicionário.
+        el.setAttribute(atributo, chave);
+        if (atributo === 'data-i18n') el.textContent = t(chave);
+        else el.innerHTML = t(chave);
+    }
 }
 
 // ── Convite de instalação do PWA ───────────────────────────────────────────
