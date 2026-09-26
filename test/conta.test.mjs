@@ -141,13 +141,16 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
       rejectPlace: async (v) => { enviados.push(v); return { success: true }; },
     },
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'), SAIDA_RITMO_MS: 0,
+    SAIDA_RECUO_401_MS: constante('SAIDA_RECUO_401_MS'),
     registrarPousoDeSaida: () => {}, handleUnauthorized: () => {}, updateInFlightIndicator: () => {},
     updateStats: () => {}, saveStats: () => log.push('saveStats'), dfato: (k) => log.push(k),
     showToast: () => {}, t: (k) => k, setTimeout: (f) => f(),
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false;
-    ${['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'esvaziarFilaDeSaida'].map(fatiar).join('\n')}
+    let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
+    ${['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe',
+       'recuarSaida', 'saidaEmRecuo', 'esvaziarFilaDeSaida'].map(fatiar).join('\n')}
     return { esvaziarFilaDeSaida, carregarFilaDeSaida, esperando: () => saidaEsperandoConta };`)(...chaves.map((k) => deps[k]));
   return { app, enviados, log, AppState, guardado };
 }
@@ -242,9 +245,9 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     offlineEsquecer: () => {}, dlogApagar: () => {}, window: { Presenca: { esquecer: () => {} } },
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carregarFilaDeSaida',
-    'salvarFilaDeSaida', 'definirPerfil', 'handleUnauthorized'];
+    'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let saidaEsperandoConta = false, verificandoSessao = false;
+  const app = new Function(...chaves, `let saidaEsperandoConta = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 };
     ${nomes.map(fatiar).join('\n')}
     return { handleUnauthorized };`)(...chaves.map((k) => deps[k]));
   return { app, log, AppState, guardado };

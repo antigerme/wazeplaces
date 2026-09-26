@@ -6066,6 +6066,11 @@ async function handleUnauthorized() {
             // abertura), completa o que a abertura não chegou a fazer.
             const primeiroPerfil = !AppState.profile;
             if (definirPerfil(r) && primeiroPerfil) completarPerfilChegado(r.profile, epocaDaSessao);
+            // A sonda RESPONDEU com o perfil: a sessão está viva AGORA. É isto
+            // que deixa a fila de saída distinguir sessão morta de escrita
+            // recusada (ver `sessaoVivaDepoisDe`). "Não deu pra saber" (rede,
+            // 5xx) não confirma nada.
+            if (r.success && r.profile) marcarSessaoViva();
             dfato('sessao.alarmeFalso', { sondaOk: !!(r && r.success) });
             dlogCapturarAuto('alarmeFalso');
             // "Continua válida" só quando a sonda RESPONDEU (é a prova de vida).
@@ -11862,6 +11867,67 @@ let saidaPedidaDeNovo = false;
 // sem perfil): a chegada do perfil o chama de novo (ver `aoConhecerConta`).
 let saidaEsperandoConta = false;
 
+// ── 401 NA FILA DE SAÍDA: sessão morta ou ESCRITA recusada? ──────────────
+//
+// Auditoria de 2026-09-26 (O1): um ✕ cuja escrita o Waze recusa com 401/403 de
+// forma PERSISTENTE (trava do local, WAF) — e o core põe QUALQUER 403 em
+// `unauthorized` —, com a sonda do perfil respondendo, girava sem teto:
+// alarme falso → esvaziar → a mesma escrita → 401 → confere → alarme falso…
+// MEDIDO: 45 escritas e 22 sondas em 30 s depois de UM ✕, com um toast a cada
+// ~1,3 s, até fechar o app. Duas travas, e uma não substitui a outra:
+//
+//  1. POR ITEM: o item guarda quando levou o 401 (`u401`). Se a sessão foi
+//     CONFIRMADA viva depois disso (uma sonda que RESPONDEU com o perfil, não só
+//     "não deu pra saber") e ele leva outro 401, não é a sessão — é a escrita
+//     DESTE pedido. Sai como a falha de verdade: placar desce, aviso. Repetir
+//     não muda nada.
+//  2. RECUO no ciclo: cada passada que PARA num 401 espera mais antes de a
+//     próxima começar (0, 15 s, 1 min, 5 min), e o primeiro pouso zera. Sem ele,
+//     a sonda que não confirma nada (5xx, rede ruim) manteria o laço girando —
+//     e todo pedido de uma fila grande faria a sua rodada de sonda. O recuo é da
+//     SESSÃO (a marca do token): entrar de novo esvazia na hora.
+//
+// Nada disso é relógio: quem chama o esvaziamento continua sendo só gatilho que
+// já existe (resposta que chega, `online`, abertura, perfil chegando).
+let sessaoVivaEm = { s: null, em: 0 };
+const SAIDA_RECUO_401_MS = [0, 15 * 1000, 60 * 1000, 5 * 60 * 1000];
+let saidaRecuo = { s: null, n: 0, ate: 0 };
+
+// A sonda do `handleUnauthorized` RESPONDEU com o perfil: a sessão de agora está
+// viva neste instante.
+function marcarSessaoViva() {
+    sessaoVivaEm = { s: marcaDaSessao(API.getSession()), em: Date.now() };
+}
+
+// Houve confirmação de sessão viva, NESTA sessão, depois de `t`?
+function sessaoVivaDepoisDe(t) {
+    return Number.isFinite(t) && sessaoVivaEm.s === marcaDaSessao(API.getSession()) && sessaoVivaEm.em > t;
+}
+
+function recuarSaida() {
+    const s = marcaDaSessao(API.getSession());
+    const n = saidaRecuo.s === s ? saidaRecuo.n + 1 : 1;
+    const espera = SAIDA_RECUO_401_MS[Math.min(n, SAIDA_RECUO_401_MS.length) - 1];
+    saidaRecuo = { s, n, ate: Date.now() + espera };
+    if (n > 1) dfato('saida.recuo', { n, s: Math.round(espera / 1000) });
+}
+
+function saidaEmRecuo() {
+    return saidaRecuo.s === marcaDaSessao(API.getSession()) && Date.now() < saidaRecuo.ate;
+}
+
+// Grava campos num item que JÁ está na fila de saída, achado pela chave (a fila
+// é relida: outra aba ou o gesto podem ter mexido nela).
+function marcarNaSaida(item, campos) {
+    const f = carregarFilaDeSaida();
+    const it = f.find((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
+        && x.updateRequestID === item.updateRequestID);
+    if (!it) return false;
+    Object.assign(it, campos);
+    salvarFilaDeSaida(f);
+    return true;
+}
+
 // ── DE QUEM É O QUE ESTÁ NO APARELHO ──────────────────────────────────────
 //
 // Depois de uma QUEDA de sessão (sem o "Sair"), outra pessoa pode entrar no
@@ -11973,7 +12039,7 @@ function salvarFilaDeSaida(f) {
 // o `registrarRejeicaoDeAutor` reescreve o nome a cada rejeição: sem ele, um
 // autor que já tinha nome na lista voltaria a aparecer como NÚMERO depois de
 // uma rejeição feita offline.
-function enfileirarSaida(tipo, place, regiao) {
+function enfileirarSaida(tipo, place, regiao, extra) {
     if (!place || place.venueID === undefined || place.updateRequestID === undefined) return false;
     const f = carregarFilaDeSaida();
     // O MESMO pedido duas vezes na fila é a mesma decisão mandada duas vezes —
@@ -12009,7 +12075,9 @@ function enfileirarSaida(tipo, place, regiao) {
              // E a REGIÃO do Waze (row/na/il/world), pelo mesmo motivo: enviado
              // depois de a pessoa trocar de região, o pedido iria pro servidor
              // errado, voltaria "não encontrado" e contaria como feito.
-             regiao: regiao || API.getRegion() });
+             regiao: regiao || API.getRegion(),
+             // O que quem enfileira já sabe do item (o 401 do gesto: `u401`).
+             ...(extra && typeof extra === 'object' ? extra : {}) });
     salvarFilaDeSaida(f);
     updateInFlightIndicator();
     // Só a ABERTURA da fila entra no diário, nunca cada item: `dfato` é anel de
@@ -12032,6 +12100,9 @@ async function esvaziarFilaDeSaida() {
     if (esvaziandoSaida) { saidaPedidaDeNovo = true; return; }
     if (!AppState.authenticated) return;
     if (navigator.onLine === false) return;
+    // A última passada PAROU num 401 há pouco: espera o recuo (ver
+    // `SAIDA_RECUO_401_MS`). O gatilho que chegar depois dele esvazia.
+    if (saidaEmRecuo()) return;
     let f = carregarFilaDeSaida();
     if (!f.length) return;
     esvaziandoSaida = true;
@@ -12073,7 +12144,7 @@ async function esvaziarFilaDeSaida() {
             const place = { venueID: item.venueID, updateRequestID: item.updateRequestID,
                             creatorId: item.creatorId, createdBy: item.nome || undefined,
                             duplicado: item.dup ? {} : undefined };
-            const r = item.tipo === 'read'
+            let r = item.tipo === 'read'
                 ? await API.markAsRead(item.venueID, item.updateRequestID, null, item.regiao)
                 : await API.rejectPlace(item.venueID, item.updateRequestID, null, item.regiao);
             // Saiu (ou entrou OUTRA pessoa) enquanto o item voava: nada daqui
@@ -12082,12 +12153,28 @@ async function esvaziarFilaDeSaida() {
             // Rede fora de novo: PARA e deixa o resto pra próxima. Insistir aqui
             // seria gastar requisição do free tier pra falhar em série.
             if (r && r.errorCategory === 'transient') break;
-            // Sessão morta: para e mantém a fila. Quem decide o relogin é o
-            // `handleActionResult`, e o que foi feito não pode evaporar por isso.
-            // Direto no `handleUnauthorized`, e não pelo `handleActionResult`: lá o
-            // 401 ENFILEIRA a ação, e este item já está na fila — viraria
-            // "repetida" e descontaria o placar de um trabalho que segue guardado.
-            if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); break; }
+            if (r && r.errorCategory === 'unauthorized') {
+                // O MESMO item já tinha levado 401 e a sessão foi CONFIRMADA viva
+                // depois disso: não é a sessão, é a escrita DESTE pedido que o
+                // Waze recusa. Sai como a falha de verdade (placar desce, aviso)
+                // pelo caminho de baixo — repetir era o laço sem teto (O1).
+                if (sessaoVivaDepoisDe(item.u401)) {
+                    dfato('saida.recusada', { tipo: item.tipo, motivo: 'unauthorized' });
+                    r = { success: false, errorCategory: 'unknown' };
+                } else {
+                    // Sessão talvez morta: para e mantém a fila. Quem decide o
+                    // relogin é o `handleUnauthorized`, e o que foi feito não pode
+                    // evaporar por isso. Direto nele, e não pelo `handleActionResult`:
+                    // lá o 401 ENFILEIRA a ação, e este item já está na fila —
+                    // viraria "repetida" e descontaria o placar de um trabalho que
+                    // segue guardado. O item guarda QUANDO levou o 401, e a
+                    // próxima passada espera o recuo.
+                    marcarNaSaida(item, { u401: Date.now() });
+                    recuarSaida();
+                    handleUnauthorized();
+                    break;
+                }
+            }
             // O placar JÁ foi contado quando a pessoa deslizou — este ramo não
             // pode somar de novo. Por isso o resultado entra por um caminho que
             // só registra histórico/conquistas e trata o "já tratado".
@@ -12121,7 +12208,11 @@ async function esvaziarFilaDeSaida() {
             // já avisou com toast de erro, e entrava no "N enviados" de sucesso
             // logo depois — o mesmo pedido dito falho e enviado (auditoria de
             // 2026-09-25). Sai da fila do mesmo jeito: repetir não muda a recusa.
-            if (r && (r.success || r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) enviados++;
+            if (r && (r.success || r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
+                enviados++;
+                // Um pouso prova que a escrita passa: o recuo do 401 acaba.
+                saidaRecuo = { s: null, n: 0, ate: 0 };
+            }
             if (f.length) await new Promise((ok) => setTimeout(ok, SAIDA_RITMO_MS));
         }
     } catch (e) {
@@ -13234,7 +13325,10 @@ function handleActionResult(actionType, place, result, regiao) {
     // sai quando a sessão se confirma viva ou depois de entrar de novo; ela para
     // e SEGURA o item enquanto a sessão estiver morta.
     if (cat === 'unauthorized') {
-        const naFila = enfileirarSaida(actionType, place, regiao);
+        // `u401`: QUANDO este pedido levou o 401. Se a sonda confirmar a sessão
+        // viva e ele levar outro, é a escrita dele que o Waze recusa, não a
+        // sessão (ver `sessaoVivaDepoisDe` no esvaziamento).
+        const naFila = enfileirarSaida(actionType, place, regiao, { u401: Date.now() });
         if (naFila === 'repetida' || !naFila) {
             const k = actionType === 'read' ? 'read' : 'rejected';
             AppState.stats[k] = Math.max(0, AppState.stats[k] - 1);
