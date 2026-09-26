@@ -927,13 +927,24 @@ export function makeSessions({ store, keyBytes }) {
       return { code: segredo, curto: comCodigo, expiresIn: PAIR_TTL };
     },
 
-    // Uso único: apaga ANTES de validar a expiração, pra um código não poder
-    // ser tentado duas vezes nem virar oráculo de "existe mas venceu".
+    // Lê antes de apagar, pelo mesmo motivo do `destroySession`: a rota não
+    // pede sessão (quem cancela é o "Sair", depois de a sessão já ter sido
+    // apagada), e no plano grátis do KV o apagamento é a cota curta — 1.000 por
+    // dia, contra 100.000 leituras. Sem a leitura, cada POST anônimo com um
+    // código qualquer de 6 ou 20 símbolos gastava um apagamento; em série, a
+    // cota do dia acabava, e com ela o "Sair" de verdade e o resgate de um
+    // código válido (os dois apagam). Auditoria de 2026-09-26.
     async cancelPairing(code) {
       const limpo = normalizePairCode(code);
       if (limpo.length !== PAIR_CODE_LEN && limpo.length !== PAIR_SECRET_LEN) return;
-      try { await store.delete('pair_' + await sha256hex('pair:' + limpo)); } catch (e) { /* vence sozinho em 5 min */ }
+      try {
+        const hash = 'pair_' + await sha256hex('pair:' + limpo);
+        if ((await store.get(hash)) == null) return;
+        await store.delete(hash);
+      } catch (e) { /* vence sozinho em 5 min */ }
     },
+    // Uso único: apaga ANTES de validar a expiração, pra um código não poder
+    // ser tentado duas vezes nem virar oráculo de "existe mas venceu".
     async claimPairing(code) {
       const limpo = normalizePairCode(code);
       // Os dois tamanhos são válidos: 6 é o código digitado, 20 é o do QR.

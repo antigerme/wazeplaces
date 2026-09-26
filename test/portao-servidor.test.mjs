@@ -318,3 +318,32 @@ test('excluir-foto: foto PENDENTE (a de um pedido) não sai pela lixeira — só
   const apr = await comWaze(responder, () => dispatch('excluir-foto', { ...s2.dados, region: 'row', venueID: 'v1', imageID: 'aprovada', lat: -23.5, lon: -46.6 }, s2.ctx));
   assert.ok(apr.chamadas.some((c) => c.init.method === 'POST'), 'a foto aprovada não foi excluída — o teste não distingue');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Auditoria de 2026-09-26 (lote 5). Mesma regra do topo: cada teste daqui foi
+//  visto REPROVANDO com o conserto desfeito.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('parear cancel: código que não existe não gasta o apagamento do KV (a cota curta)', async () => {
+  // Mesmo defeito que o `sessao destroy` já teve: a rota não pede sessão, e
+  // cada POST com um código qualquer gastava um apagamento do KV (1.000/dia no
+  // plano grátis). Com a cota no fim, o "Sair" e o resgate de verdade param.
+  const s = await sessaoDeTeste(COOKIES);
+  let apagamentos = 0;
+  const apagar = s.store.delete;
+  s.store.delete = async (k) => { apagamentos++; return apagar(k); };
+  // Os dois tamanhos válidos (6 e 20 símbolos do alfabeto), o digitado com
+  // hífen e lixo de toda forma.
+  for (const code of ['ABC234', 'ABCDEFGHJKLMNPQRSTUV', 'abc-234', 'x', null, { a: 1 }]) {
+    const r = await dispatch('parear', { action: 'cancel', code }, s.ctx);
+    assert.equal(r.body.success, true, 'o cancelar responde igual — quem saiu não precisa saber');
+  }
+  assert.equal(apagamentos, 0, 'apagou no KV por um código que não existe');
+  // CONTROLE: o código emitido de verdade é apagado, e o resgate depois falha.
+  const criado = await dispatch('parear', { action: 'create', ...s.dados }, s.ctx);
+  assert.equal(criado.status, 200);
+  await dispatch('parear', { action: 'cancel', code: criado.body.code }, s.ctx);
+  assert.equal(apagamentos, 1, 'o código emitido não foi apagado — o instrumento não enxerga o apagamento');
+  const resgate = await dispatch('parear', { action: 'claim', code: criado.body.code }, s.ctx);
+  assert.equal(resgate.body.errorKey, 'srv.err.pairCodeInvalid', 'o código cancelado ainda entrou');
+});
