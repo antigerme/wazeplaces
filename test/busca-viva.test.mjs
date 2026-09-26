@@ -105,8 +105,10 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     // O treino tem fila de EXEMPLOS: a busca não roda com ele ativo.
     Treino: { ativo: false },
     console: { error: () => {} },
+    // O LUGAR da busca (a fila guardada do offline diz de onde é — ver `filaDeOnde`).
+    lugarAgora: () => ({ regiao: 'row', pais: '30' }),
   };
-  const fontes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage']
+  const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage']
     .map(fatiar).join('\n');
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + '\nreturn { fetchNextPage };')(...nomes.map((n) => deps[n]));

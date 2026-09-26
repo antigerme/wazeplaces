@@ -6539,6 +6539,11 @@ function resetQueue() {
     AppState.serverBlocked = 0;
     AppState.blockedPartial = false;
     AppState.loadError = false;
+    // Fila nova, lugar novo (ver `filaDeOnde`): a busca que vem diz de onde é. E
+    // se o lugar mudou (região ou país), a fila guardada do offline é de outro
+    // lugar e sai — todo caminho que troca de lugar zera a fila por aqui.
+    filaDeOnde = null;
+    offlineEsquecerFilaDeOutroLugar();
     updatePendingCount();
 }
 
@@ -6943,6 +6948,8 @@ function fetchNextPage() {
                 // por isso sai no filtro (`semOsJaDecididos`). O que pousou
                 // antes, a lista já reflete.
                 const inicioDaBusca = Date.now();
+                // O LUGAR desta busca (ver `filaDeOnde`): o que ela trouxer é de lá.
+                const lugarDaBusca = lugarAgora();
                 const result = await API.fetchPlaces(pagina, filters);
                 if (epoch !== AppState.fetchEpoch) return; // reset durante o fetch → descarta
                 if (!result.success) {
@@ -7039,6 +7046,7 @@ function fetchNextPage() {
                 if (newPlaces.length > 0) {
                     AppState.queue.push(...newPlaces);
                     registrarEntradaNaFila(newPlaces);
+                    filaDeOnde = lugarDaBusca;
                     // Guardar o texto NAO custa requisicao: ele acabou de chegar.
                     // Sai calado quando o toggle esta desligado. O `desde` é o
                     // começo da BUSCA, não a hora de gravar: é dali que a lista é.
@@ -12748,6 +12756,25 @@ function offlineLigado() {
     return AppState.preferences.offlineDisponivel === true;
 }
 
+// ── A fila guardada é de UM LUGAR ─────────────────────────────────────────
+// A região (o servidor do Waze) e o país do filtro da BUSCA que a trouxe
+// (auditoria de 2026-09-26, O4). Ela não dizia de onde era: trocar de região,
+// ver a busca nova vir vazia e reabrir sem rede mostrava a fila da região
+// VELHA sob o filtro novo — e o ✕ saía pro servidor da região nova, voltava
+// "não encontrado" e contava como feito (medido no navegador, p10). Hoje a
+// fila leva o lugar, a reabertura recusa a de outro lugar, e trocar de lugar a
+// esquece. `filaDeOnde` é o lugar da fila EM MEMÓRIA: o da busca que a trouxe
+// (a região pode mudar antes de a fila ser zerada — o país do perfil troca a
+// região e ainda espera a lista de países), zerado a cada fila nova.
+let filaDeOnde = null;
+function lugarAgora() {
+    return { regiao: API.getRegion(), pais: String(API.getCountry()) };
+}
+function mesmoLugar(a, b) {
+    return !!a && !!b && typeof a.regiao === 'string' && a.regiao === b.regiao
+        && a.pais !== undefined && a.pais !== null && String(a.pais) === String(b.pais);
+}
+
 // FONTE ÚNICA da URL da foto. Card, lightbox e aquecimento passam TODOS por
 // aqui — se um deles usar a URL crua, ele pede um endereço que ninguém aqueceu
 // e a foto some offline, sem erro nenhum na tela. `test/offline.test.mjs`
@@ -12804,6 +12831,8 @@ async function offlineGravarFila(desde) {
     // gravaria a fila de exemplos no lugar da real.
     const fila = AppState.queue;
     const filtros = JSON.parse(JSON.stringify(AppState.filters || {}));
+    // O LUGAR da fila (ver `filaDeOnde`), lido AGORA pelo mesmo motivo.
+    const lugar = filaDeOnde || lugarAgora();
     try {
         const db = await offlineDB();
         await new Promise((ok, erro) => {
@@ -12812,6 +12841,8 @@ async function offlineGravarFila(desde) {
                 t: Date.now(),
                 desde: valeDesde,
                 filtros,
+                regiao: lugar.regiao,
+                pais: lugar.pais,
                 places: fila,
             }, 'fila');
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
@@ -12877,6 +12908,33 @@ async function offlineLerFila() {
         db.close();
         return v && Array.isArray(v.places) && v.places.length ? v : null;
     } catch (e) { return null; }
+}
+
+// Trocou de lugar (região ou país): a fila guardada é de OUTRO lugar e sai — a
+// busca do lugar novo regrava, se trouxer pedido. Lê e apaga na MESMA transação,
+// e só se o guardado NÃO for daqui: a busca do lugar novo pode ter gravado antes.
+// Com o offline desligado nem abre a base (abrir CRIA a base): quem não marca
+// não paga nada.
+async function offlineEsquecerFilaDeOutroLugar() {
+    if (!offlineLigado()) return;
+    let db = null;
+    try {
+        db = await offlineDB();
+        await new Promise((ok, erro) => {
+            const tx = db.transaction(OFFLINE_STORE, 'readwrite');
+            const st = tx.objectStore(OFFLINE_STORE);
+            const r = st.get('fila');
+            r.onsuccess = () => {
+                if (r.result && !mesmoLugar(r.result, lugarAgora())) {
+                    st.delete('fila');
+                    dfato('offline.outroLugar', { esqueceu: true });
+                }
+            };
+            tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
+            tx.onabort = () => erro(tx.error || new Error('abort'));
+        });
+    } catch (e) { /* sem base: nada a esquecer */ }
+    finally { try { if (db) db.close(); } catch (e) {} }
 }
 
 async function offlineEsquecer() {
@@ -13241,6 +13299,16 @@ async function offlineTentarAbrirSemRede() {
     if (!offlineLigado() || navigator.onLine !== false) return false;
     const guardada = await offlineLerFila();
     if (!guardada) return false;
+    // A fila de OUTRO lugar (a região ou o país do filtro mudou depois dela) não
+    // entra: seria a fila da região velha sob o filtro novo, e a decisão sairia
+    // pro servidor errado (ver `filaDeOnde`). Fila guardada sem o lugar (versão
+    // anterior) também não: não há como saber de onde ela é, e a próxima busca
+    // com rede a regrava. A tela é a de sempre sem rede, e a fila velha sai.
+    if (!mesmoLugar(guardada, lugarAgora())) {
+        dfato('offline.outroLugar', { regiao: guardada.regiao || null });
+        offlineEsquecerFilaDeOutroLugar();
+        return false;
+    }
     // A janela da última varredura COMPLETA, antes de qualquer card nascer: sem
     // ela o card pede a foto crua, que ninguém guardou. Só quando a memória não
     // tem uma — com o app vivo, a de memória é a mais nova.
@@ -13262,6 +13330,7 @@ async function offlineTentarAbrirSemRede() {
         return false;
     }
     AppState.queue = filtrada.places;
+    filaDeOnde = { regiao: guardada.regiao, pais: String(guardada.pais) };
     // A fila guardada começa uma fila: o que ela traz já ENTROU, e a busca,
     // quando a rede voltar, relê do topo sem repetir nada disso.
     pedidosQueEntraramNaFila.clear();
