@@ -111,7 +111,12 @@ o contêiner. A cópia de segurança do que já estava commitado em 2026-09-26 0
 (36 commits) está no artefato (§7), em `lote6-base.patch` (aplique primeiro,
 sobre o branch) e `lote6-consertos.patch` (um bloco `### fix-<área>` por
 agente; `git am` bloco a bloco, depois `npm run js && npm run css && npm run
-html`). O que faltava a partir daí, refaça a partir desta lista. O limite da
+html`). O que faltava a partir daí, refaça a partir desta lista.
+**Atualização 2026-09-26 ~07:30:** presença, servidor, Histórico e card
+TERMINARAM e já estão NESTE branch (51 commits sobre o lote 5, `npm test`
+1201/1201; os gerados ainda NÃO foram regenerados). Faltam entrar
+`fix-auth` e `fix-off`. Pendências de produto que os agentes levantaram estão
+no fim de §8. O limite da
 assinatura parou os seis no meio duas vezes (retomados por `SendMessage` às
 06:22).
 
@@ -275,6 +280,16 @@ estado de forma legível pro owner). Pra recuperar um arquivo: `Artifact` com
    corrigir; muitos agentes erram o instrumento — ver gotcha #28).
 4. Repetir o ciclo até uma volta sem achado novo; aí o relatório final ao owner
    e apagar a Routine.
+
+**Levantadas pelos agentes de conserto da rodada 2 (pro owner olhar):**
+- P12: "Ver mensagens anteriores" ganhou "carregando" e uma linha de erro (estilos que já existiam; capturas em `/tmp/fix-pres/p12-*.png`).
+- C6: o selo lateral só acende quando soltar ali decide (antes acendia num arraste pra baixo que não decidia nada).
+- C3 (resíduo): ✓ em B com a aprovação da foto de B ainda no ar e pousando depois de 350 ms decide B duas vezes ("já tratado" e o total cai 2). Travar B durante a aprovação é a alternativa.
+- C1: um segundo dedo em qualquer lugar da tela cancela o arraste (o lado seguro).
+- H1: o anel da conquista nova dura a abertura inteira da aba (o comentário prometia; sumia no 1º toque).
+- H16: o "Dia mais forte" do Resumo perdeu o dia da semana (com o mês por extenso não cabe; abreviado caberia).
+- lockRank vazio segue "(vazio)" (não achei a palavra do WME pro automático).
+- S12: o 413 da VM fecha em duas etapas (lê e descarta até 16 MB ou 5 s); a VM não tem mais "shell de SPA" (rota desconhecida dá 404, como o Cloudflare medido).
 
 **Rascunho do CHANGELOG do lote 5:**
 - Outra conta entrando no mesmo aparelho não herda mais os dados da anterior
