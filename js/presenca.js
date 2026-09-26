@@ -818,11 +818,16 @@ function presencaLerMensagem(u8) {
 // daqui de volta (`presencaLegendaDoTexto`).
 function presencaTextoParaWme(legenda, card) {
     if (!card) return legenda;
+    const link = typeof linkWmeDoPedido === 'function' ? linkWmeDoPedido(card, card.region || API.getRegion()) : '';
+    return (legenda ? legenda + '\n' : '') + presencaLinhaDoPedido(card) + (link ? '\n' + link : '');
+}
+
+// "📍 Padaria · Nova foto": o pedido numa linha de texto — a do WME e a do
+// anúncio pro leitor de tela.
+function presencaLinhaDoPedido(card) {
     const nome = (card.name || '').trim() || (card.address || '').trim() || t('card.noName');
     const tipo = presencaTipo(card.updateTypeKey);
-    const linha = '📍 ' + nome + (tipo ? ' · ' + tipo : '');
-    const link = typeof linkWmeDoPedido === 'function' ? linkWmeDoPedido(card, card.region || API.getRegion()) : '';
-    return (legenda ? legenda + '\n' : '') + linha + (link ? '\n' + link : '');
+    return '📍 ' + nome + (tipo ? ' · ' + tipo : '');
 }
 
 // A pergunta de uma mensagem com pedido: tudo ANTES da linha do 📍. A última
@@ -993,7 +998,11 @@ function presencaAnunciar(msg) {
     const el = document.getElementById('conversaAnuncio');
     if (!el) return;
     const nome = (document.getElementById('conversaTitle') || {}).textContent || '';
-    el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(msg.texto || '').slice(0, 280) });
+    // Com pedido, o que se ouve é o que a TELA mostra — a pergunta e o pedido
+    // —, não o texto que vai pro WME: ele leva o link LONGO do ↗, e o leitor
+    // de tela o soletrava inteiro (auditoria de 2026-09-26).
+    const texto = msg.card ? [msg.legenda, presencaLinhaDoPedido(msg.card)].filter(Boolean).join('\n') : msg.texto;
+    el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(texto || '').slice(0, 280) });
 }
 
 function presencaAgendarLida(id) {
@@ -1346,7 +1355,7 @@ function presencaRenderPilula() {
     selo.textContent = valor > 99 ? '99+' : String(valor);
     selo.classList.toggle('tem-msg', naoLidas > 0);
     const rotulo = naoLidas > 0
-        ? t(naoLidas === 1 ? 'presenca.pill.msg' : 'presenca.pill.msgPlural', { n: naoLidas })
+        ? presencaRotuloNaoLidas(naoLidas)
         : t(n === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n });
     btn.setAttribute('aria-label', rotulo);
     btn.setAttribute('title', rotulo);
@@ -1403,6 +1412,12 @@ function presencaBadge(n) {
     return n ? `<span class="presenca-badge">${n > 9 ? '9+' : n}</span>` : '';
 }
 
+// "3 mensagens novas" — as MESMAS palavras da pílula (mesmo conceito, mesmo
+// termo). Vazio sem nada novo.
+function presencaRotuloNaoLidas(n) {
+    return n ? t(n === 1 ? 'presenca.pill.msg' : 'presenca.pill.msgPlural', { n }) : '';
+}
+
 function presencaRenderLista() {
     const lista = document.getElementById('presencaLista');
     if (!lista) return;
@@ -1424,15 +1439,25 @@ function presencaRenderLista() {
     const gente = Presenca.online.map((p) => ({ p, d: presencaDistancia(p) }))
         .sort((a, b) => (a.d ? a.d.km : Infinity) - (b.d ? b.d.km : Infinity)
             || String(a.p.nome || '').localeCompare(String(b.p.nome || ''), i18nLocale()));
-    const linhasOnline = gente.map(({ p, d }) => `<li>
-            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(p.id)}">
+    // Cada linha leva o nome acessível MONTADO, com as partes separadas: tirado
+    // do conteúdo, o leitor de tela lia "cafanhaL4 a 3 km daqui3" — o nome
+    // colado no nível, e um "3" solto no fim, sem dizer que eram mensagens
+    // (auditoria de 2026-09-26). A tela não muda.
+    const linhasOnline = gente.map(({ p, d }) => {
+        const nome = p.nome || t('presenca.anon');
+        const nivel = 'L' + String((p.rank || 0) + 1);
+        const n = presencaNaoLidasDe(p.id);
+        const rotulo = [nome, nivel, d && d.texto, presencaRotuloNaoLidas(n)].filter(Boolean).join(', ');
+        return `<li>
+            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(p.id)}" aria-label="${escapeHtml(rotulo)}">
                 <span class="presenca-txt">
-                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(p.nome || t('presenca.anon'))}</span><span class="presenca-selos">L${escapeHtml(String((p.rank || 0) + 1))}</span></span>
+                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(nome)}</span><span class="presenca-selos">${escapeHtml(nivel)}</span></span>
                     ${d ? `<span class="presenca-l2">${escapeHtml(d.texto)}</span>` : ''}
                 </span>
-                ${presencaBadge(presencaNaoLidasDe(p.id))}
+                ${presencaBadge(n)}
             </button>
-        </li>`).join('');
+        </li>`;
+    }).join('');
 
     // Conversas com quem NÃO está no app agora (quem está já aparece acima,
     // com o selo das não lidas): as mais recentes, e toda que tiver não lida.
@@ -1443,11 +1468,14 @@ function presencaRenderLista() {
     const linhasConversa = mostrar.map((c) => {
         const n = presencaNaoLidasDe(c.id);
         const hora = presencaHoraCurta(c.ultima ? c.ultima.ts : c.atividade);
+        const nome = c.nome || t('presenca.anon');
+        const previa = presencaPrevia(c.ultima);
+        const rotulo = [nome, previa, hora, presencaRotuloNaoLidas(n)].filter(Boolean).join(', ');
         return `<li>
-            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(c.id)}">
+            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(c.id)}" aria-label="${escapeHtml(rotulo)}">
                 <span class="presenca-txt">
-                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(c.nome || t('presenca.anon'))}</span></span>
-                    <span class="presenca-l2${n ? ' forte' : ''}">${escapeHtml(presencaPrevia(c.ultima))}</span>
+                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(nome)}</span></span>
+                    <span class="presenca-l2${n ? ' forte' : ''}">${escapeHtml(previa)}</span>
                 </span>
                 <span class="presenca-dir">${hora ? `<span class="presenca-hora">${escapeHtml(hora)}</span>` : ''}${presencaBadge(n)}</span>
             </button>
@@ -1472,11 +1500,11 @@ const PRESENCA_GLIFO = {
     falhou: '<path d="M12 3.8L22 20H2z"/><path d="M12 9.5v4.2"/><path d="M12 16.6h.01"/>',
 };
 
-function presencaRecibo(estado) {
+function presencaRecibo(estado, id = '') {
     const glifo = PRESENCA_GLIFO[estado];
     if (!glifo) return '';
     const rotulo = t('presenca.recibo.' + (estado === 'falhou' ? 'naoEnviadaErro' : estado));
-    return `<span class="presenca-recibo ${estado}" role="img" aria-label="${escapeHtml(rotulo)}">`
+    return `<span${id ? ` id="${escapeHtml(id)}"` : ''} class="presenca-recibo ${estado}" role="img" aria-label="${escapeHtml(rotulo)}">`
         + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${estado === 'enviando' || estado === 'falhou' ? '2.2' : '2.5'}"`
         + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glifo}</svg></span>`;
 }
@@ -1512,7 +1540,9 @@ function presencaHtmlDasMsgs(id, h) {
         let html = '';
         const rotulo = presencaRotuloDoDia(m.ts);
         if (rotulo !== dia) { dia = rotulo; html += `<div class="conversa-dia"><span>${escapeHtml(rotulo)}</span></div>`; }
-        const recibo = m.meu ? presencaRecibo(estados[i]) : '';
+        // No cartão sem pergunta, é o recibo que DESCREVE o botão (ver
+        // `presencaHtmlDoPedido`): ele ganha o id que o `aria-describedby` cita.
+        const recibo = m.meu ? presencaRecibo(estados[i], m.card && !m.legenda ? presencaIdDaDescricao(i) : '') : '';
         html += m.card
             ? presencaHtmlDoPedido(m, i, recibo)
             : `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">${escapeHtml(m.texto)}${recibo}</div>`;
@@ -1540,13 +1570,26 @@ function presencaHtmlDoPedido(m, i, recibo) {
         + `<span class="cp-nome">${escapeHtml(nome)}</span>`
         + (meta ? `<span class="cp-meta">${escapeHtml(meta)}</span>` : '')
         + '</span></span>';
+    // A pergunta e o recibo moram DENTRO do botão, e botão não expõe o que tem
+    // dentro: o nome acessível é o `aria-label`, e o leitor de tela nunca
+    // ouvia a pergunta nem se a mensagem foi lida (auditoria de 2026-09-26).
+    // Elas viram a DESCRIÇÃO do botão (`aria-describedby`), sem mexer em nada
+    // na tela: com pergunta, a linha dela (que leva o recibo); sem, o recibo.
+    const desc = presencaIdDaDescricao(i);
     const legenda = m.legenda
-        ? `<span class="cp-legenda">${escapeHtml(m.legenda)}${recibo}</span>`
+        ? `<span id="${desc}" class="cp-legenda">${escapeHtml(m.legenda)}${recibo}</span>`
         : '';
+    const descrito = legenda || recibo.includes(`id="${desc}"`);
     return `<button type="button" class="conversa-pedido ${m.meu ? 'minha' : 'dela'}`
         + `${legenda ? ' com-legenda' : ''}" data-msg="${i}"`
-        + ` aria-label="${escapeHtml(t('presenca.pedido.abrir', { nome }))}">`
+        + ` aria-label="${escapeHtml(t('presenca.pedido.abrir', { nome }))}"`
+        + `${descrito ? ` aria-describedby="${desc}"` : ''}>`
         + topo + legenda + (legenda ? '' : recibo) + '</button>';
+}
+
+// O id da descrição do cartão `i` da conversa na tela (há uma por vez).
+function presencaIdDaDescricao(i) {
+    return 'conversa-pedido-' + i + '-desc';
 }
 
 function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {}) {

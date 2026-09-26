@@ -503,3 +503,88 @@ test('P10 a lista que volta de CARONA de outro país não entra como a do país 
   c.P.presencaAoCarona({ online: [{ id: '889', nome: 'outra-da-franca' }], conversas: [] }, c.relogio.agora, 73);
   assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['outra-da-franca'], 'CONTROLE: a carona do país de agora não entrou');
 });
+
+// ── P7, P8, P9: o que o leitor de tela ouve ─────────────────────────────────
+
+const CARD_P = {
+  venueID: '205522459.2055159053.3242788', updateRequestID: 'ur-1', name: 'Padaria Estrela do Norte', address: 'R. Aurora, 412',
+  categories: ['BAKERY'], updateTypeKey: 'IMAGE', imageUrl: 'https://venue-image.waze.com/thumbs/thumb700_A.png', lat: -23.556789, lon: -46.631234, region: 'row',
+};
+const desescapa = (s) => s.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+const rotulos = (html) => [...html.matchAll(/class="presenca-linha" data-pessoa="(\d+)" aria-label="([^"]*)"/g)].map((m) => [m[1], desescapa(m[2])]);
+
+test('P7 a mensagem com PEDIDO é anunciada pela pergunta e pelo pedido — nunca pelo link longo do WME', async () => {
+  const { bytesDeMensagem, b64 } = await import('./_presenca-cliente.mjs');
+  const inbox = (bytes, n) => ({ inboxMessage: { messageId: `a0000000-0000-1000-8000-${String(950 + n).padStart(12, '0')}`, messageType: 'X', message: b64(bytes) } });
+  const fluxo = (c) => ({ ctl: new AbortController(), emLote: false, epoca: c.P.Presenca.epoca, desde: 0, vivoEm: 0 });
+  const c = novoCliente();
+  c.P.Presenca.atualizadaEm = 1;
+  c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');
+  c.$('conversaTitle').textContent = 'cafanha';
+  c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true });
+  const texto = c.P.presencaTextoParaWme('Esse aqui tá certo?', CARD_P);
+  assert.match(texto, /https:\/\/www\.waze\.com\/editor/, 'CONTROLE: o texto que vai pro WME leva o link');
+  const bytes = await bytesDeMensagem({ id: 'a0000000-0000-1000-8000-000000000095', de: CAF, para: EU, texto,
+    ctx: { app: 'wazeplaces', legenda: 'Esse aqui tá certo?', card: JSON.stringify(CARD_P) }, ts: 1790200000000 });
+  c.P.presencaQuadro(fluxo(c), inbox(bytes, 1));
+  const anuncio = c.$('conversaAnuncio').textContent;
+  assert.doesNotMatch(anuncio, /https?:|waze\.com/, 'o leitor de tela soletra o link do WME');
+  assert.match(anuncio, /Esse aqui tá certo\?/, 'a pergunta não foi anunciada');
+  assert.match(anuncio, /Padaria Estrela do Norte · Nova foto/, 'o pedido não foi anunciado');
+  // CONTROLE: mensagem de texto é anunciada inteira, como sempre.
+  c.P.presencaQuadro(fluxo(c), inbox(await bytesDeMensagem({ id: 'a0000000-0000-1000-8000-000000000096', de: CAF, para: EU,
+    texto: 'viu a https://exemplo.invalido?', ctx: { app: 'wazeplaces' }, ts: 1790200001000 }), 2));
+  assert.match(c.$('conversaAnuncio').textContent, /viu a https:\/\/exemplo\.invalido\?/);
+});
+
+test('P8 cada linha da lista tem o nome acessível com as partes SEPARADAS — e o número diz que são mensagens', () => {
+  const c = novoCliente();
+  c.AppState.currentPlace = { mapa: { centro: [-23.55, -46.63] } };
+  c.P.presencaAplicarLista({ online: [{ id: CAF, nome: 'cafanha', rank: 3, lat: -23.53, lon: -46.64 }, { id: '555', nome: 'semnada', rank: 1, lat: -23.54, lon: -46.64 }],
+    conversas: [conversa(CAF, 'cafanha', 5, 3), conversa('999', 'fulano', 4, 2, { texto: 'oi', ts: 1790200000000 })] }, 1, 30);
+  c.$('presencaModal').classList.remove('hidden');
+  c.P.presencaRenderLista();
+  const r = Object.fromEntries(rotulos(c.$('presencaLista').innerHTML));
+  assert.ok(r[CAF] && r['999'] && r['555'], `faltou o nome acessível de alguma linha: ${JSON.stringify(r)}`);
+  assert.ok(r[CAF].startsWith('cafanha, L4, presenca.dist'), `nome, nível e distância colados: ${r[CAF]}`);
+  assert.ok(r[CAF].endsWith(', presenca.pill.msgPlural{"n":3}'), `o "3" não diz que são mensagens novas: ${r[CAF]}`);
+  assert.ok(r['999'].startsWith('fulano, oi, '), `nome e prévia colados: ${r['999']}`);
+  assert.ok(r['999'].endsWith(', presenca.pill.msgPlural{"n":2}'), r['999']);
+  // CONTROLE: sem não lida, nada de "0 mensagens".
+  assert.doesNotMatch(r['555'], /presenca\.pill/, `linha sem mensagem nova anunciou mensagem: ${r['555']}`);
+  // E o número É o mesmo termo da pílula (mesmo conceito, mesmas palavras).
+  c.P.presencaRenderPilula();
+  assert.match(c.$('presencaPill').getAttribute('aria-label'), /^presenca\.pill\.msgPlural/);
+});
+
+test('P9 o cartão do pedido: a pergunta e o recibo DESCREVEM o botão (`aria-describedby`), sem mudar a tela', () => {
+  const c = novoCliente();
+  const card = c.P.presencaCardSeguro(CARD_P);
+  const html = c.P.presencaHtmlDasMsgs(CAF, { msgs: [
+    { id: 'm1', ts: 1790200000000, meu: true, card, legenda: 'PERGUNTA: isso é fachada?', texto: 'x', estado: 'enviada' },
+    { id: 'm2', ts: 1790200001000, meu: true, card, legenda: '', texto: 'x', estado: 'enviada' },
+    { id: 'm3', ts: 1790200002000, meu: false, card, legenda: '', texto: 'x' },
+  ] });
+  const botoes = [...html.matchAll(/<button type="button" class="conversa-pedido[^>]*>/g)].map((m) => m[0]);
+  assert.equal(botoes.length, 3);
+  const descDe = (b) => (b.match(/aria-describedby="([^"]+)"/) || [])[1];
+  // Com pergunta: a linha da pergunta (que leva o recibo) é a descrição.
+  const d0 = descDe(botoes[0]);
+  assert.ok(d0, 'o botão com pergunta não tem descrição: o leitor de tela nunca ouve a pergunta');
+  const alvo0 = html.match(new RegExp(`<span id="${d0}" class="cp-legenda">([^]*?)</span></span>`));
+  // (as duas minhas vêm antes de uma dela: o recibo é "Lida" — quem respondeu depois leu)
+  assert.ok(alvo0 && /PERGUNTA: isso é fachada\?/.test(alvo0[1]) && /presenca-recibo lida/.test(alvo0[1]), 'a descrição não é a pergunta com o recibo');
+  // Sem pergunta: o recibo é a descrição.
+  const d1 = descDe(botoes[1]);
+  assert.ok(d1 && new RegExp(`<span id="${d1}" class="presenca-recibo lida" role="img"`).test(html), 'o recibo do cartão sem pergunta não descreve o botão');
+  // O que ELA mandou sem pergunta não tem recibo: nada a descrever, e nenhuma referência pendurada.
+  assert.equal(descDe(botoes[2]), undefined);
+  for (const b of botoes) {
+    const d = descDe(b);
+    if (d) assert.equal((html.match(new RegExp(`id="${d}"`, 'g')) || []).length, 1, `a descrição ${d} não existe (ou existe duas vezes)`);
+  }
+  // A tela não muda: o nome continua o do botão, e a pergunta continua DENTRO dele.
+  assert.match(botoes[0], /aria-label="presenca\.pedido\.abrir/);
+  assert.match(html, /cp-legenda">PERGUNTA: isso é fachada\?/);
+});
