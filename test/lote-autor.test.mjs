@@ -195,3 +195,62 @@ test('L11: com o lightbox aberto, a marca vem na APROVAÇÃO — o card sai depo
   m.app.avancarSeAprovado();
   assert.deepEqual(m.log, ['avanca:tratou=true']);
 });
+
+// ── F6: "Rejeitar os N" que ESVAZIA a fila ───────────────────────────────────
+// (a) A marca de "tratou nesta fila" vinha DEPOIS do `showNoPlaces`: logo depois
+// de rejeitar tudo, a tela dizia "Confira o país e a região", sem festa.
+// (b) O que o Waze recusava voltava pra `AppState.queue` ATRÁS do painel vazio,
+// e ninguém o desenhava — MEDIDO no navegador: fila com o pedido, "Restam 1",
+// e o "Tudo limpo!" na tela.
+function montarLoteDoAutor() {
+  const log = [];
+  const alvo = pedido(1, 555);
+  const AppState = { queue: [alvo, pedido(2, 555), pedido(3, 555)], currentPlace: alvo, stats: { rejected: 0 },
+    serverTotal: 3, hasMore: false };
+  let app = null;
+  const deps = {
+    AppState, acoesTravadas: () => false, avisoDaTrava: () => 'x', Treino: { ativo: false }, showToast: () => {}, t: (k) => k,
+    pedidosDoAutorNaFila: () => AppState.queue.slice(), updateStats: () => {}, saveStats: () => {}, updatePendingCount: () => {},
+    removeCurrentCardEl: () => {}, showCurrentPlace: () => log.push('card'), maybePrefetch: () => {}, startFetching: () => log.push('busca'),
+    showNoPlaces: () => log.push('vazio:tratou=' + app.tratou()),
+    API: { getRegion: () => 'row' }, scheduleAction: () => log.push('agendou'), enviarLote: () => {},
+  };
+  const chaves = Object.keys(deps);
+  app = new Function(...chaves, 'let tratouNestaFila = false;\n' + fatiar('rejeitarLoteDoAutor')
+    + '\nreturn { rejeitarLoteDoAutor, tratou: () => tratouNestaFila };')(...chaves.map((k) => deps[k]));
+  return { app, alvo, log };
+}
+
+test('F6: "Rejeitar os N" que esvazia a fila — o painel é o de quem TERMINOU, não o de "confira o país"', () => {
+  const m = montarLoteDoAutor();
+  m.app.rejeitarLoteDoAutor(m.alvo);
+  assert.ok(m.log.includes('vazio:tratou=true'),
+    `o painel vazio foi desenhado sem "tratou nesta fila" (${m.log.join(' ')}): diz "Confira o país e a região", sem festa`);
+});
+
+test('F6: o que o Waze recusa no lote VOLTA como card — não fica atrás do painel vazio', async () => {
+  // A fila esvaziou no gesto; o lote manda os três e o do meio é recusado.
+  const alvos = [pedido(1, 555), pedido(2, 555), pedido(3, 555)];
+  const m = montarLote({ resposta: (p) => (p.venueID === 'v2' ? RECUSA : { success: true }) });
+  m.AppState.serverTotal = 0;
+  await m.enviarLote(alvos, {});
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v2']);
+  assert.ok(m.log.includes('card'), 'o pedido recusado voltou pra fila e ficou atrás do "Tudo limpo!"');
+  assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.venueID, 'v2');
+});
+
+test('F6: vale pra RECUSA AUTOMÁTICA com a fila vazia (a busca trouxe só pedidos do autor marcado)', async () => {
+  const alvos = [pedido(1), pedido(2)];
+  const m = montarLote({ resposta: (p) => (p.venueID === 'v1' ? RECUSA : { success: true }) });
+  await m.enviarLote(alvos, { silencioso: true, contarAoLandar: true });
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v1']);
+  assert.ok(m.log.includes('card'), 'o pedido que a recusa automática não conseguiu rejeitar ficou atrás do painel');
+});
+
+test('F6: CONTROLE — com card na tela, o que falha vai pro fim da fila sem trocar o card', async () => {
+  const frente = pedido(9, 1);
+  const m = montarLote({ fila: [frente], naTela: frente, resposta: () => RECUSA });
+  await m.enviarLote([pedido(1)], { silencioso: true, contarAoLandar: true });
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v9', 'v1']);
+  assert.ok(!m.log.includes('card'), 'redesenhou o card que estava na tela');
+});

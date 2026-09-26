@@ -11391,11 +11391,14 @@ function rejeitarLoteDoAutor(place) {
     AppState.queue = (AppState.queue || []).filter((x) => !ids.has(x));
     AppState.currentPlace = null;
     updatePendingCount();
+    // ANTES dos `show*`: o lote que esvazia a fila desenha o painel vazio aqui
+    // mesmo, e sem a marca ele dizia "Confira o país e a região", sem festa,
+    // logo depois de a pessoa rejeitar tudo (auditoria da fila, 2026-09-26).
+    tratouNestaFila = true;
     if (AppState.queue.length > 0) { removeCurrentCardEl(); showCurrentPlace(); maybePrefetch(); }
     else if (AppState.hasMore) { removeCurrentCardEl(); startFetching(); }
     else { removeCurrentCardEl(); showNoPlaces(); }
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
-    tratouNestaFila = true;
     scheduleAction('reject', places, () => enviarLote(places, { regiao }), { aoSair: 'cancel' });
 }
 
@@ -11516,6 +11519,11 @@ async function enviarLote(places, opts = {}) {
         updateStats();
         saveStats();
         updatePendingCount();
+        // O que falhou voltou pra fila (`voltarPraFila`). Sem card na tela — o
+        // "Rejeitar os N" esvaziou a fila, ou a recusa automática levou tudo o
+        // que a busca trouxe —, ninguém o desenhava: ele ficava ATRÁS do painel
+        // vazio, com "Restam 1" e o "Tudo limpo!" na tela.
+        if (!AppState.currentPlace && AppState.queue.length && AppState.authenticated) showCurrentPlace();
     }
     if (!opts.silencioso) mostrarResultadoDoLote(conta);
 }
