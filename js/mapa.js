@@ -80,12 +80,18 @@ function mapaZoomQueCabe(pontos, larguraPx, alturaPx) {
 // em pixel de cada marcador. Função PURA — dá pra testar sem browser e sem rede,
 // que é como o resto do core deste projeto é testado.
 function mapaMontar(pontos, larguraPx, alturaPx, região) {
-  const validos = (pontos || []).filter((p) => Array.isArray(p)
-    && Number.isFinite(p[0]) && Number.isFinite(p[1])
-    // (0,0) é o Golfo da Guiné e, na prática, coordenada perdida. Um mapa do
-    // oceano é pior que nenhum: parece informação e não é.
-    && !(p[0] === 0 && p[1] === 0));
+  // Os válidos, cada um com o ÍNDICE que tinha na lista que entrou: é por ele
+  // que quem desenha casa marcador com pixel, e um ponto inválido no meio da
+  // lista não pode deslocar os de depois.
+  const validos = [];
+  (pontos || []).forEach((p, i) => {
+    if (Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1])
+      // (0,0) é o Golfo da Guiné e, na prática, coordenada perdida. Um mapa do
+      // oceano é pior que nenhum: parece informação e não é.
+      && !(p[0] === 0 && p[1] === 0)) validos.push({ ll: p, i });
+  });
   if (!validos.length) return null;
+  const lls = (vs) => vs.map((v) => v.ll);
 
   // Quando NEM o zoom mínimo dá conta, o enquadramento não é possível — e a
   // saída honesta não é forçá-lo. Antes, `mapaZoomQueCabe` devolvia o mínimo
@@ -94,18 +100,24 @@ function mapaMontar(pontos, larguraPx, alturaPx, região) {
   // justamente onde a evidência mais vale — na fila real há pedidos propondo
   // mover um local 82 QUILÔMETROS, e ver isso é decidir na hora.
   //
-  // Agora o mapa enquadra o PRIMEIRO ponto (a posição de hoje, que é sempre o
-  // primeiro na ordem que o card monta) e devolve `foraDoMapa` com os índices
-  // que não couberam. Quem desenha diz o resto em palavra — "82 km daqui" cabe
-  // numa linha e não cabe em nenhum zoom.
+  // O mapa enquadra o PRIMEIRO ponto (a posição de hoje, que é sempre o
+  // primeiro na ordem que o card monta) JUNTO de todo ponto que caiba com ele,
+  // na ordem da lista, e devolve `foraDoMapa` só com os que não couberam. Quem
+  // desenha diz esses em palavra — "82 km daqui" cabe numa linha e não cabe em
+  // nenhum zoom. Até a auditoria de 2026-09-26 um ponto longe derrubava TODOS
+  // os outros: uma entrada a 30 km tirava do mapa a posição proposta a 5 m, e
+  // o aviso ainda dizia "a posição proposta está a 5 m — fora deste mapa".
   let usados = validos;
-  let foraDoMapa = [];
-  if (validos.length > 1 && !mapaCabe(validos, larguraPx, alturaPx, MAPA_Z_MIN)) {
+  const foraDoMapa = [];
+  if (validos.length > 1 && !mapaCabe(lls(validos), larguraPx, alturaPx, MAPA_Z_MIN)) {
     usados = [validos[0]];
-    foraDoMapa = validos.map((_, i) => i).slice(1);
+    for (const v of validos.slice(1)) {
+      if (mapaCabe(lls([...usados, v]), larguraPx, alturaPx, MAPA_Z_MIN)) usados.push(v);
+      else foraDoMapa.push(v.i);
+    }
   }
-  const z = mapaZoomQueCabe(usados, larguraPx, alturaPx);
-  const proj = usados.map((p) => mapaProjetar(p[0], p[1], z));
+  const z = mapaZoomQueCabe(lls(usados), larguraPx, alturaPx);
+  const proj = usados.map((v) => mapaProjetar(v.ll[0], v.ll[1], z));
   const centro = {
     x: (Math.min(...proj.map((p) => p.x)) + Math.max(...proj.map((p) => p.x))) / 2,
     y: (Math.min(...proj.map((p) => p.y)) + Math.max(...proj.map((p) => p.y))) / 2,
@@ -190,13 +202,17 @@ function mapaMontar(pontos, larguraPx, alturaPx, região) {
     z,
     tiles,
     tamanho: MAPA_TILE,
-    // Cada ponto vira posição em pixel DENTRO da caixa, na mesma ordem que entrou.
+    // Cada ponto DESENHADO vira posição em pixel dentro da caixa, na ordem em
+    // que entrou; `idx[k]` diz qual ponto da lista que ENTROU é o `pixels[k]`.
+    // Sem ele, casar por posição (`pontos[k]`) erra assim que um ponto do
+    // meio fica de fora — o marcador da entrada sairia com a cor da proposta.
     pixels: proj.map((p) => ({ left: p.x - orig.x, top: p.y - orig.y })),
+    idx: usados.map((v) => v.i),
     // Índices (na lista que ENTROU) que não couberam em zoom nenhum. Vazio no
     // caso normal; quem desenha usa pra dizer em palavra o que o mapa não pode
     // mostrar, em vez de desenhar um marcador fora da tela.
     foraDoMapa,
-    metrosPorPixel: mapaMetrosPorPixel(validos[0][0], z),
+    metrosPorPixel: mapaMetrosPorPixel(validos[0].ll[0], z),
   };
 }
 

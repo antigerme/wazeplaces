@@ -7504,13 +7504,19 @@ function pontosDoMapa(place) {
     const m = place && place.mapa;
     if (!m) return [];
     const pontos = [];
+    // `fora` e `distM` são do aviso de "fora deste mapa" (ver `avisoForaDoMapa`):
+    // QUAL ponto ficou fora, na frase dele, e a que distância do local — a
+    // mesma que o core já mede pra cada tipo (o movimento, a entrada, o alvo do
+    // duplicado), todas a partir do local.
     if (m.centro) pontos.push({ ll: m.centro, cls: 'mapa-atual', rot: m.proposto ? 'card.map.antes' : 'card.map.aqui' });
-    if (m.proposto) pontos.push({ ll: m.proposto, cls: 'mapa-proposto', rot: 'card.map.depois' });
+    if (m.proposto) pontos.push({ ll: m.proposto, cls: 'mapa-proposto', rot: 'card.map.depois',
+        fora: 'card.map.foraDoMapa', distM: m.movidoM });
     for (const e of m.entradas || []) {
         pontos.push({
             ll: e.ll, nome: e.nome,
             cls: 'mapa-entrada mapa-e-' + e.estado,
             rot: 'card.map.entrada.' + e.estado,
+            fora: 'card.map.foraDoMapa.entrada', distM: e.distM,
         });
     }
     // O "onde" do duplicado. O nome responde DE QUEM; o marcador responde ONDE
@@ -7523,9 +7529,28 @@ function pontosDoMapa(place) {
             nome: place.duplicado.nome,
             cls: 'mapa-duplicado',
             rot: 'card.map.duplicado',
+            fora: 'card.map.foraDoMapa.duplicado', distM: place.duplicado.distM,
         });
     }
     return pontos;
+}
+
+// O que ficou FORA do mapa, dito em palavra: QUAL ponto e a que distância do
+// local. Até a auditoria de 2026-09-26 a frase era escolhida pelo `movidoM`,
+// não pelo ponto que saiu: com a posição proposta a 5 m e uma ENTRADA a 30 km,
+// o card dizia "a posição proposta está a 5 m — fora deste mapa".
+//
+// Fala do PRIMEIRO que ficou de fora, na ordem do `pontosDoMapa` (a proposta
+// antes das entradas, e elas antes do duplicado): é o que mais pesa na decisão,
+// e uma linha é o que cabe sobre o mapa. A distância é a que o core mediu pra
+// aquele ponto; sem ela, a do ponto até o primeiro desenhado.
+function avisoForaDoMapa(pontos, foraDoMapa, ancora) {
+    const p = foraDoMapa && foraDoMapa.length ? pontos[foraDoMapa[0]] : null;
+    if (!p || !p.fora) return t('card.map.foraDoMapa.semDist');
+    let d = Number.isFinite(p.distM) ? p.distM : NaN;
+    const base = pontos[ancora];
+    if (!Number.isFinite(d) && base && Array.isArray(base.ll) && Array.isArray(p.ll)) d = distanciaKm(base.ll, p.ll) * 1000;
+    return Number.isFinite(d) ? t(p.fora, { d: formatarMetros(d) }) : t('card.map.foraDoMapa.semDist');
 }
 
 function renderMapa(card, place, refazendo) {
@@ -7576,10 +7601,18 @@ function renderMapa(card, place, refazendo) {
         im.onerror = () => { registrarFalhaDeTile(box, t.url); im.remove(); };
         tiles.appendChild(im);
     }
+    // Qual ponto de `pontos` é cada pixel: o `mapaMontar` diz (`idx`), e
+    // desde que ele passou a manter os pontos que cabem mesmo quando algum
+    // fica de fora, casar por posição erraria a partir do primeiro que saiu.
+    // (O `|| …` é o casamento de antes, pro caso de um mapa.js velho no cache.)
+    const idx = r.idx || r.pixels.map((_, k) => k);
+    const pixelDe = (i) => { const k = idx.indexOf(i); return k >= 0 ? r.pixels[k] : null; };
     // Linha do movimento: sem ela, dois pontos próximos parecem dois locais
-    // diferentes em vez de um que andou.
-    if (m.proposto && m.centro && r.pixels.length >= 2) {
-        const [a, b] = r.pixels;
+    // diferentes em vez de um que andou. Só com as DUAS pontas desenhadas: com
+    // a proposta fora do mapa, uma linha até outro ponto contaria outra história.
+    // (Com os dois, o `pontosDoMapa` põe o local em 0 e a proposta em 1.)
+    const a = pixelDe(0), b = pixelDe(1);
+    if (m.proposto && m.centro && a && b) {
         const linha = document.createElement('div');
         linha.className = 'mapa-linha';
         const dx = b.left - a.left, dy = b.top - a.top;
@@ -7587,8 +7620,8 @@ function renderMapa(card, place, refazendo) {
             + `transform:rotate(${Math.atan2(dy, dx)}rad)`;
         marks.appendChild(linha);
     }
-    r.pixels.forEach((px, i) => {
-        const p = pontos[i];
+    r.pixels.forEach((px, k) => {
+        const p = pontos[idx[k]];
         const el = document.createElement('span');
         el.className = 'mapa-marca ' + p.cls;
         el.style.cssText = `left:${px.left}px;top:${px.top}px`;
@@ -7603,12 +7636,7 @@ function renderMapa(card, place, refazendo) {
     if (r.foraDoMapa && r.foraDoMapa.length) {
         const aviso = document.createElement('span');
         aviso.className = 'mapa-fora';
-        // Duas frases, não uma com buraco: quando o que ficou de fora é um
-        // PONTO DE ENTRADA (e não a geometria), não há distância medida pra
-        // pôr, e "está a muito longe" é agramatical em português.
-        aviso.textContent = m.movidoM
-            ? t('card.map.foraDoMapa', { d: formatarMetros(m.movidoM) })
-            : t('card.map.foraDoMapa.semDist');
+        aviso.textContent = avisoForaDoMapa(pontos, r.foraDoMapa, idx[0]);
         marks.appendChild(aviso);
     }
 
@@ -7631,9 +7659,9 @@ function renderMapa(card, place, refazendo) {
     const jaPos = new Set();
     // Só o que foi DESENHADO entra na legenda: prometer um marcador que não
     // está na tela faz o editor procurar o que não existe.
-    const fora = new Set(r.foraDoMapa || []);
+    const desenhados = new Set(idx);
     for (const [i, p] of pontos.entries()) {
-        if (fora.has(i)) continue;
+        if (!desenhados.has(i)) continue;
         if (jaPos.has(p.rot)) continue;
         jaPos.add(p.rot);
         const s = document.createElement('span');
