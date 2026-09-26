@@ -9556,17 +9556,22 @@ const PATENTES = [
 // Elas ficam no FIM de propósito: escondidas de quem não passa no portão, não
 // deixam buraco na grade. Cadeado que NUNCA abre é beco sem saída — a mesma
 // régua que tirou a extensão de Chrome da frente no celular.
+//
+// `evento` marca as que destravam pelo que ACABOU de acontecer (o desfazer, a
+// madrugada, o duplicado rejeitado...), e não por volume acumulado: essas nunca
+// são retroativas, então a primeira passada do aparelho (a silenciosa) as
+// anuncia — ver `checarConquistas`.
 const CONQUISTAS = [
     { id: 'primeiraFaxina', emoji: '🧹' },
     { id: 'centuriao',      emoji: '💯' },
     { id: 'maoFirme',       emoji: '🎯' },
-    { id: 'detetive',       emoji: '🕵️' },
-    { id: 'elefante',       emoji: '🐘' },
-    { id: 'tudoLimpo',      emoji: '🧼' },
+    { id: 'detetive',       emoji: '🕵️', evento: true },
+    { id: 'elefante',       emoji: '🐘', evento: true },
+    { id: 'tudoLimpo',      emoji: '🧼', evento: true },
     { id: 'colecionador',   emoji: '⭐' },
-    { id: 'coruja',         emoji: '🌙' },
-    { id: 'segundaChance',  emoji: '↩️' },
-    { id: 'primeiroResumo', emoji: '🎉' },
+    { id: 'coruja',         emoji: '🌙', evento: true },
+    { id: 'segundaChance',  emoji: '↩️', evento: true },
+    { id: 'primeiroResumo', emoji: '🎉', evento: true },
     { id: 'andarilho',      emoji: '🗺️' },
     { id: 'viajante',       emoji: '🌍' },
     { id: 'poliglota',      emoji: '🗣️' },
@@ -9813,11 +9818,19 @@ function checarConquistas(extra) {
     // seguidos não é festa, é enxurrada. Mesmo raciocínio do `initUndoGateSeen`
     // — e, como lá, isto NÃO é migração: todo aparelho novo também passa por
     // aqui (e não destrava nada).
+    //
+    // O silêncio é só pro RETROATIVO (volume que já estava nas costas). A de
+    // EVENTO acabou de acontecer: quando o primeiro evento do aparelho era um
+    // Desfazer, a "Segunda chance" ficava gravada sem ponto nem anel, e ninguém
+    // nunca sabia que ganhou (auditoria de 2026-09-25).
     const iP = patenteDe(tratados);
     if (!g.base) {
         g.base = true;
         g.patente = iP;
+        const doEvento = novas.filter((id) => CONQUISTAS.some((x) => x.id === id && x.evento));
+        for (const id of doEvento) if (!g.novas.includes(id)) g.novas.push(id);
         salvarConquistas();
+        if (doEvento.length) atualizarSeloDeConquista();
         return;
     }
 

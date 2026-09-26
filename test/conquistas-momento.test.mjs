@@ -243,3 +243,57 @@ test('H11: a fila de saída guarda o idioma do gesto, e o pouso entrega hora, di
   assert.deepEqual(chamadas.at(-1)[2], { t: item.t, dia: item.dia, lang: 'fr' },
     'o pouso não entrega o momento do gesto às conquistas');
 });
+
+// ── H12: a 1ª passada silenciosa só cala o RETROATIVO ───────────────────────
+// A primeira avaliação do aparelho é silenciosa (quem já tem 3.000 pedidos
+// destravaria oito de uma vez). Mas ela calava TUDO: quando o primeiro evento
+// era um Desfazer, a "Segunda chance" ficava gravada sem ponto nem anel.
+function fatiarConst(nome) {
+  const m = new RegExp('^const ' + nome + ' = \\[', 'm').exec(APP_SEM);
+  assert.ok(m, `const ${nome} sumiu do app.js`);
+  let prof = 0;
+  for (let j = APP_SEM.indexOf('[', m.index); j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '[') prof++;
+    else if (APP_SEM[j] === ']') { prof--; if (prof === 0) return APP_SEM.slice(m.index, j + 1) + ';'; }
+  }
+  throw new Error('não fechou ' + nome);
+}
+function montarChecagem({ g, tratados }) {
+  const selo = { n: 0 };
+  const deps = {
+    AppState: { authenticated: true }, Treino: { ativo: false },
+    carregarConquistas: () => g, salvarConquistas() {}, atualizarSeloDeConquista: () => { selo.n++; },
+    loadHistory: () => ({}),
+    getHistoryStats: () => ({ total: { read: tratados, rejected: 0 }, today: { read: 0, rejected: 0 } }),
+    geografiaDoHistorico: () => ({ paises: new Set(), estados: new Set() }),
+    maiorSequenciaDeDias: () => 0, conquistasComPortaoAqui: () => false, historyTodayKey: () => '2026-09-25',
+  };
+  const chaves = Object.keys(deps);
+  const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), fatiar('patenteDe'),
+    fatiar('avaliarConquistas'), fatiar('checarConquistas')].join('\n') + '\nreturn checarConquistas;';
+  const checarConquistas = new Function(...chaves, corpo)(...chaves.map((k) => deps[k]));
+  return { checarConquistas, selo };
+}
+const gNovo = () => ({ c: {}, seq: 0, patente: null, n: {}, langs: [], base: false, novas: [], patenteNova: false });
+
+test('H12: o primeiro evento do aparelho sendo um Desfazer ANUNCIA a "Segunda chance"', () => {
+  const g = gNovo();
+  const m = montarChecagem({ g, tratados: 3000 });
+  m.checarConquistas({ desfez: true });
+  assert.ok(g.c.segundaChance, 'a Segunda chance nem foi gravada');
+  assert.deepEqual(g.novas, ['segundaChance'],
+    'a de EVENTO ficou calada na passada silenciosa — gravada sem ponto nem anel, ninguém sabe que ganhou');
+  assert.equal(m.selo.n, 1, 'o ponto do botão de Filtros não acendeu');
+  // CONTROLE: o volume acumulado (3.000 pedidos) continua silencioso.
+  assert.ok(g.c.primeiraFaxina, 'a retroativa não foi gravada');
+  assert.ok(!g.novas.includes('primeiraFaxina'), 'a passada deixou de ser silenciosa pro retroativo — volta a enxurrada');
+  assert.equal(g.base, true);
+});
+
+test('H12: CONTROLE — a passada silenciosa sem evento não anuncia nada', () => {
+  const g = gNovo();
+  const m = montarChecagem({ g, tratados: 3000 });
+  m.checarConquistas();
+  assert.deepEqual(g.novas, [], 'a passada silenciosa anunciou volume acumulado');
+  assert.equal(m.selo.n, 0);
+});
