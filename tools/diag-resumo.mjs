@@ -68,7 +68,10 @@ else for (const c of nasCapturas) out(`nas capturas: ${hora(c.t)} ${c.motivo} (p
 secao('TELA NA HORA DO RELATÓRIO');
 const ta = r.telaAgora || {};
 out(`tela ${ta.tela} · painel ${ta.painel} · card montado: ${ta.cardMontado === undefined ? AUSENTE : ta.cardMontado} · modais ${j(ta.modais)} · lightbox ${ta.lightbox}`);
-out(`rede: ${r.rede === undefined ? AUSENTE : r.rede} · offline: ${r.offline === undefined ? AUSENTE : r.offline} · chamadas ${r.chamadas} (falhas ${r.falhas}) · erros de JS ${r.errosDeJs} · capturas ${r.momentos}`);
+// Desde o v10 o "já tratado" (outro editor chegou antes, que pro app é sucesso)
+// sai das falhas e vem à parte; antes dele, `falhas` somava os dois.
+const jaTratadas = typeof r.jaTratadas === 'number' ? ` · já tratadas ${r.jaTratadas}` : '';
+out(`rede: ${r.rede === undefined ? AUSENTE : r.rede} · offline: ${r.offline === undefined ? AUSENTE : r.offline} · chamadas ${r.chamadas} (falhas ${r.falhas}${jaTratadas}) · erros de JS ${r.errosDeJs} · capturas ${r.momentos}`);
 if ((ta.modais || []).length) {
   out('ATENÇÃO: relatório gerado com modal aberto — as sentinelas de TOQUE calam nessa hora; olhe as capturas.');
 }
@@ -191,6 +194,15 @@ for (const e of diario) {
   out(`${hora(t)}${delta}  ${k}  ${Object.keys(resto).length ? j(resto, 200) : ''}`);
 }
 
+// "Já tratado" chega com `ok: false`, mas é o pedido resolvido por outro editor
+// (pro app, sucesso): chamá-lo de FALHOU manda o leitor atrás de defeito que
+// não existe.
+function estadoDaChamada(c) {
+  if (c.ok) return 'ok';
+  if (c.errorCategory === 'already_processed' || c.errorCategory === 'not_found') return 'já tratado';
+  return 'FALHOU';
+}
+
 secao('CHAMADAS À API (sem corpo)');
 const chamadas = Array.isArray(d.chamadas) ? d.chamadas : [];
 if (!chamadas.length) out('(nenhuma)');
@@ -198,7 +210,7 @@ for (const c of chamadas.slice(-30)) {
   // A AÇÃO do chat (abrir, enviar, confirmar…) é o que distingue as chamadas
   // dele entre si; o resto do pedido fica no arquivo.
   const acao = c.rota === 'chat' && c.corpoReq && typeof c.corpoReq.acao === 'string' ? ` (${c.corpoReq.acao.slice(0, 12)})` : '';
-  out(`${hora(c.t)}  ${(String(c.rota) + acao).padEnd(16)} http ${c.http} · ${c.ok ? 'ok' : 'FALHOU'} · ${c.ms} ms${c.errorCategory ? ' · ' + c.errorCategory : ''}${c.errorKey ? ' · ' + c.errorKey : ''}`);
+  out(`${hora(c.t)}  ${(String(c.rota) + acao).padEnd(16)} http ${c.http} · ${estadoDaChamada(c)} · ${c.ms} ms${c.errorCategory ? ' · ' + c.errorCategory : ''}${c.errorKey ? ' · ' + c.errorKey : ''}`);
 }
 if (chamadas.length > 30) out(`(… e mais ${chamadas.length - 30} antes destas)`);
 
@@ -236,7 +248,7 @@ else {
     const er = Array.isArray(a.erros) ? a.erros : [];
     const ms = Array.isArray(a.momentos) ? a.momentos : [];
     out(`abertura ${a.id} · ${quando(a.inicio)} → ${quando(a.salvoEm)} (guardada por: ${a.salvoPor}) · v${a.versao ?? '?'}`);
-    out(`  diário ${di.length} · chamadas ${ch.length} (falhas ${ch.filter((c) => !c.ok).length}) · erros ${er.length} · capturas ${ms.length}`);
+    out(`  diário ${di.length} · chamadas ${ch.length} (falhas ${ch.filter((c) => estadoDaChamada(c) === 'FALHOU').length}) · erros ${er.length} · capturas ${ms.length}`);
     const t0a = di.length ? di[0].t : 0;
     for (const e of di) {
       const { t, k, ...resto } = e;
@@ -244,7 +256,7 @@ else {
       out(`  ${hora(t)}${delta}  ${k}  ${Object.keys(resto).length ? j(resto, 200) : ''}`);
     }
     for (const c of ch.filter((x) => !x.ok)) {
-      out(`  chamada FALHOU ${hora(c.t)} ${c.rota} http ${c.http}${c.errorCategory ? ' · ' + c.errorCategory : ''}${c.errorKey ? ' · ' + c.errorKey : ''}`);
+      out(`  chamada ${estadoDaChamada(c)} ${hora(c.t)} ${c.rota} http ${c.http}${c.errorCategory ? ' · ' + c.errorCategory : ''}${c.errorKey ? ' · ' + c.errorKey : ''}`);
     }
     for (const m of ms) linhasDaCaptura(m, '  ');
     for (const e of er) out(`  erro ${hora(e.t)} ${e.tipo || 'erro'} ${String(e.msg || '').slice(0, 200)}`);

@@ -326,3 +326,27 @@ test('diag-resumo: o `/` que difere SÓ pelo script do Cloudflare não vira "ver
   c2.cacheVsRede = { 'https://x.dev/': { aparelho: 'aaaa', servidor: 'abab', igual: false, bytesAparelho: 116709, bytesServidor: 116709, http: 200 } };
   assert.match(rodar(c2), /ATENÇÃO: o aparelho roda código diferente/, 'no v9 o `/` diferente passou a ser ignorado');
 });
+
+test('diag-resumo v10: o "já tratado" não é FALHOU — nem na lista, nem na conta, nem nas aberturas anteriores', () => {
+  const d = relatorioV4();
+  d._versaoDoDiag = 10;
+  d.resumo.falhas = 1;
+  d.resumo.jaTratadas = 1;
+  d.chamadas = [
+    { t: '2026-09-22T20:27:14.549Z', rota: 'validar-place', ms: 21, http: 200, ok: false,
+      errorCategory: 'already_processed', errorKey: 'srv.err.alreadyHandled' },
+    { t: '2026-09-22T20:27:15.549Z', rota: 'buscar-places', ms: 21, http: 0, ok: false, errorCategory: 'transient' },
+  ];
+  d.aberturasAnteriores = [{
+    id: 'ant-1', inicio: '2026-09-22T21:58:00.000Z', fim: '2026-09-22T21:59:30.000Z', guardadaPor: 'oculta', app: '2026092206',
+    diario: [], erros: [], momentos: [],
+    chamadas: [{ t: '2026-09-22T21:58:10.000Z', rota: 'marcar-lido', http: 500, ok: false, errorCategory: 'already_processed' }],
+  }];
+  const s = rodar(d);
+  assert.match(s, /validar-place\s+http 200 · já tratado · 21 ms · already_processed/,
+    'o "já tratado" (outro editor chegou antes) saiu como FALHOU na lista de chamadas');
+  assert.match(s, /buscar-places\s+http 0 · FALHOU · 21 ms · transient/, 'a falha de verdade deixou de ser FALHOU');
+  assert.match(s, /chamadas 2 \(falhas 1 · já tratadas 1\)/, 'a triagem não separa o "já tratado" das falhas');
+  assert.match(s, /diário 0 · chamadas 1 \(falhas 0\)/, 'a abertura anterior conta o "já tratado" como falha');
+  assert.match(s, /chamada já tratado 21:58:10\.000 marcar-lido http 500 · already_processed/);
+});

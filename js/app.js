@@ -4904,7 +4904,10 @@ function ligarFabDev() {
 // HTML (`borda: true` quando o descontou; ver `diagSemInjecaoDaBorda`), e a
 // geometria leva a caixa de layout (`cw/ch/ow/oh`), que o arraste não gira nem
 // encolhe. Aditivo.
-const DIAG_VERSAO = 9;
+// 10: `resumo.falhas` e `rotasQueFalharam` não contam mais o "já tratado"
+// (`already_processed`/`not_found`, que pro app é sucesso); ele vai em
+// `resumo.jaTratadas`. Relatório anterior ao v10 soma os dois em `falhas`.
+const DIAG_VERSAO = 10;
 
 // O Cloudflare INJETA no HTML, a cada resposta, o script do Bot Fight Mode com
 // token e hora próprios (`window.__CF$cv$params={r:…,t:…,u:…,ut:…}`, antes do
@@ -5191,6 +5194,18 @@ function diagFetch(url, opts = {}) {
     return fetch(url, { ...opts, signal: sinal });
 }
 
+// "Já tratado por outro editor" chega com `success: false`, mas pro app é o
+// pedido resolvido (ver `handleActionResult`): contar como falha punha um
+// "falhas 1" em todo relatório com um ✕ que outro editor tinha feito antes, e
+// quem lê procura um defeito que não existe (auditoria em produção de
+// 2026-09-26: a única "falha" das 10 chamadas era essa).
+function chamadaJaTratada(c) {
+    return !!c && !c.ok && (c.errorCategory === 'already_processed' || c.errorCategory === 'not_found');
+}
+function chamadaFalhou(c) {
+    return !!c && !c.ok && !chamadaJaTratada(c);
+}
+
 async function diagCorpo() {
     const meu = location.origin;
     // Só recurso da NOSSA origem: de terceiro a resposta é opaca e a leitura
@@ -5357,9 +5372,10 @@ async function diagCorpo() {
         resumo: {
             momentos: dlogMomentos.length,
             chamadas: (API.chamadas || []).length,
-            falhas: (API.chamadas || []).filter((c) => !c.ok).length,
+            falhas: (API.chamadas || []).filter(chamadaFalhou).length,
+            jaTratadas: (API.chamadas || []).filter(chamadaJaTratada).length,
             naoAutorizado: (API.chamadas || []).filter((c) => c.errorCategory === 'unauthorized').length,
-            rotasQueFalharam: [...new Set((API.chamadas || []).filter((c) => !c.ok).map((c) => c.rota))],
+            rotasQueFalharam: [...new Set((API.chamadas || []).filter(chamadaFalhou).map((c) => c.rota))],
             errosDeJs: diagErros.length,
             penduradas: dlogAnel.filter((l) => l.k === 'pendurada').map((l) => l.o),
             lentas: dlogAnel.filter((l) => l.k === 'lenta').length,
