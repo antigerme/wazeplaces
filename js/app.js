@@ -9051,7 +9051,17 @@ function acoesTravadas() {
     // mesma janela de Desfazer e escrevem no mesmo local — deixar os botões do
     // lightbox vivos durante ela era o defeito que o owner viu: "não estão
     // sendo desativados que nem é feito nos cards".
-    return !!(AppState.pendingAction || aprovacaoPendente || exclusaoPendente || renomeacaoPendente);
+    // E o LOTE de lidos no ar (`loteDeLidosEmVoo`): os pedidos dele seguem na
+    // fila até a resposta, e o ✕ no card da frente mandava uma SEGUNDA decisão
+    // pro mesmo pedido (auditoria da fila, 2026-09-26).
+    return !!(AppState.pendingAction || aprovacaoPendente || exclusaoPendente || renomeacaoPendente || loteDeLidosEmVoo);
+}
+
+// O que dizer a quem tocou com as ações travadas: a janela do Desfazer e o lote
+// no ar pedem a MESMA espera, mas "espere o Desfazer" com nenhum Desfazer na
+// tela manda a pessoa procurar um botão que não existe.
+function avisoDaTrava() {
+    return loteDeLidosEmVoo ? 'toast.esperaLote' : 'toast.esperaDesfazer';
 }
 
 // Card de FOTO cuja foto não veio sem rede (`marcarCardSemFoto`): ✕ e ✓ não
@@ -11135,8 +11145,13 @@ async function aplicarRecusaAutomatica() {
     // busca pousando durante os 350 ms da saída de um card trocava o da frente,
     // e o gesto em curso rejeitava o SEGUINTE, que ninguém tinha visto. Com o
     // da tela fora dos alvos, a recusa nunca troca o card debaixo do dedo.
+    // E o pedido EM ANDAMENTO também (`pedidosEmAndamento`): o lote de lidos
+    // deixa os pedidos dele na fila até a resposta, e o perfil que chega no
+    // meio dele (a prova de rede do próprio lote refaz o perfil que faltava)
+    // rodava a recusa sobre eles — lido E rejeitado, duas decisões.
     const alvos = (AppState.queue || []).filter(
-        (x) => x && x !== AppState.currentPlace && x.creatorId !== undefined && x.creatorId !== null && autoLigado(x.creatorId));
+        (x) => x && x !== AppState.currentPlace && x.creatorId !== undefined && x.creatorId !== null
+            && !pedidosEmAndamento.has(chaveDoPedido(x)) && autoLigado(x.creatorId));
     if (alvos.length === 0) return;
 
     recusaAutomaticaRodando = true;
@@ -11335,7 +11350,7 @@ function rejeitarLoteDoAutor(place) {
     // Na janela do Desfazer nada prossegue — mas a folha já FECHOU com o toque,
     // e sair calado deixava a pessoa achando que rejeitou (auditoria de
     // 2026-09-25). Diz o que fazer.
-    if (acoesTravadas()) { showToast(t('toast.esperaDesfazer'), 'info'); return; }
+    if (acoesTravadas()) { showToast(t(avisoDaTrava()), 'info'); return; }
     if (Treino.ativo) { showToast(t('treino.semLote'), 'info'); return; }
     const places = pedidosDoAutorNaFila(place);
     if (places.length === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
@@ -13893,6 +13908,9 @@ const Treino = {
         // real em modo treino — sem enviar nada — até a pessoa sair dele e
         // cair num "Tudo limpo!" falso.
         if (!AppState.authenticated) return;
+        // O lote de lidos no ar termina sobre a fila REAL: trocada pela de
+        // treino, os pedidos que ele marcou voltavam no `sair()` como card.
+        if (loteDeLidosEmVoo) { showToast(t('toast.esperaLote'), 'info'); return; }
         // Uma janela de Desfazer pendente é de um pedido REAL: despacha antes de
         // trocar a fila debaixo dela, senão ela executaria sobre outro estado.
         if (AppState.pendingAction) { AppState.pendingAction.execute(); AppState.pendingAction = null; }
@@ -14312,6 +14330,12 @@ function handleSkip() {
 // quando sobram poucos cards): sem isto, o confirmar marcava centenas de
 // pedidos que a pessoa nunca viu, sob um "Marcar os 3" na tela.
 let loteDeLidosContado = null;
+// O lote NO AR. Entra no `acoesTravadas()`: enquanto ele está no ar, ✕ ↑ ✓, o
+// gesto, o teclado, o "Rejeitar os N" do autor e um SEGUNDO lote esperam — os
+// pedidos dele seguem na fila até a resposta, e qualquer outra decisão sobre
+// eles seria a segunda (MEDIDO: 8 lidos + 1 rejeitado pra 8 pedidos; e o lote
+// repetido contava o placar em dobro).
+let loteDeLidosEmVoo = false;
 // Pedidos por requisição. O Waze processa o lote EM ORDEM e PARA no primeiro
 // pedido que outro editor já resolveu — MEDIDO em 2026-09-25 com a conta L2:
 // [real, inexistente, real] → HTTP 500, código 300, com o PRIMEIRO marcado e o
@@ -14324,6 +14348,9 @@ function openBatchReadConfirm() {
     // botão vivo mandaria um lote de ids inertes ao Waze — sem efeito, mas é
     // requisição que ninguém pediu, e o aviso mente sobre o que aconteceu.
     if (Treino.ativo) { showToast(t('treino.semLote'), 'info'); return; }
+    // Um lote por vez: os pedidos do primeiro ainda estão na fila e o diálogo
+    // contaria os MESMOS de novo.
+    if (loteDeLidosEmVoo) { showToast(t('toast.esperaLote'), 'info'); return; }
     loteDeLidosContado = AppState.queue.filter((p) => p.venueID && p.updateRequestID).map(chaveDoPedido);
     const n = loteDeLidosContado.length;
     if (n === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
@@ -14339,12 +14366,24 @@ async function handleBatchMarkRead() {
     loteDeLidosContado = null;
     const alvos = AppState.queue.filter((p) => p.venueID && p.updateRequestID && contados.has(chaveDoPedido(p)));
     if (alvos.length === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
-    // Descarrega qualquer undo pendente antes (consistência de estado).
+    // Descarrega qualquer undo pendente antes (consistência de estado) — o do
+    // card E os das ações de FOTO, que dividem o mesmo banner: o
+    // `removeUndoBanner` logo abaixo deixaria a janela delas correndo sem o
+    // botão de desfazer, e a aprovação é uma decisão sobre um pedido do lote.
     if (AppState.pendingAction) { AppState.pendingAction.execute(); AppState.pendingAction = null; }
+    if (aprovacaoPendente) aprovacaoPendente.enviar();
+    if (exclusaoPendente) exclusaoPendente.enviar();
+    if (renomeacaoPendente) renomeacaoPendente.enviar();
     removeUndoBanner();
     const epoca = epocaDaSessao;
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const itens = (ps) => ps.map((p) => ({ venueID: p.venueID, updateRequestID: p.updateRequestID }));
+    // No ar: trava as outras decisões e tira os pedidos das buscas que chegarem
+    // no meio (`semOsJaDecididos`) — o ↻ trazia de volta, como card, o que o
+    // lote já tinha marcado. Sai no `finally`, em QUALQUER desfecho.
+    loteDeLidosEmVoo = true;
+    marcarEmAndamento(alvos, true);
+    aplicarTravaDeAcao();
     AppState.inFlightActions++;
     updateInFlightIndicator();
     showToast(t(alvos.length === 1 ? 'toast.batchMarking' : 'toast.batchMarkingPlural', { n: alvos.length }), 'info');
@@ -14370,8 +14409,11 @@ async function handleBatchMarkRead() {
     } catch (e) {
         falhou = {};
     } finally {
+        loteDeLidosEmVoo = false;
+        marcarEmAndamento(alvos, false);
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
+        aplicarTravaDeAcao();
     }
     if (feitos.length) {
         // O que saiu conta como o ✓ de um card conta: placar, Histórico e
@@ -14382,9 +14424,17 @@ async function handleBatchMarkRead() {
         AppState.stats.read += feitos.length;
         recordHistory('read', feitos.length);
         registrarLoteConfirmado(feitos.length);
-        const fora = new Set(feitos);
-        AppState.queue = AppState.queue.filter((p) => !fora.has(p));
-        AppState.serverTotal = Math.max(0, AppState.serverTotal - feitos.length);
+        // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que
+        // de fato SAIU — nunca por quantos o lote marcou. É isso que amarra o
+        // desconto à fila do gesto: o ↻ e a troca de filtro no meio do lote
+        // refazem a fila (`fetchEpoch`), e a nova já vem sem estes pedidos (eles
+        // estavam em andamento), então nada sai dela e nada é descontado — antes
+        // o "Restam" da fila nova descia pelos pedidos da velha. E uma aprovação
+        // de foto que pousou no meio já tirou o pedido dela e descontou sozinha.
+        const fora = new Set(feitos.map(chaveDoPedido));
+        const antes = AppState.queue.length;
+        AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - (antes - AppState.queue.length));
         updateStats();
         saveStats();
         showToast(t(feitos.length === 1 ? 'toast.batchDone' : 'toast.batchDonePlural', { n: feitos.length }), 'success');

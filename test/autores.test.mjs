@@ -248,8 +248,11 @@ test('lote: o lote respeita a trava e o treino', () => {
   const bloco = semComentarios.slice(i, i + 400);
   // Respeita a janela — e DIZ (a folha já fechou com o toque; sair calado
   // deixava a pessoa achando que rejeitou).
-  assert.match(bloco, /if \(acoesTravadas\(\)\) \{ showToast\(t\('toast\.esperaDesfazer'\), 'info'\); return; \}/,
+  assert.match(bloco, /if \(acoesTravadas\(\)\) \{ showToast\(t\(avisoDaTrava\(\)\), 'info'\); return; \}/,
     'o lote tem que respeitar a janela em curso, e avisar');
+  // E o aviso diz QUAL espera: "espere o Desfazer" com o lote de lidos no ar
+  // manda procurar um botão que não existe (F1).
+  assert.match(semComentarios, /function avisoDaTrava\(\) \{\s*return loteDeLidosEmVoo \? 'toast\.esperaLote' : 'toast\.esperaDesfazer';\s*\}/);
   assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
 });
 
@@ -639,6 +642,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
     showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
     enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
     aoMudarAFilaPorBaixo: () => {},   // acerta o "Ver +N" e o fundo — não troca o card
+    pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
   };
   const chaves = Object.keys(deps);
   const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
@@ -646,6 +650,37 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
   assert.deepEqual(enviados, ['a2'], 'rejeitou o card que estava NA TELA');
   assert.deepEqual(AppState.queue.map((x) => x.venueID), ['a1', 'b1']);
   assert.equal(AppState.currentPlace, na);
+});
+
+test('auto (F1): pedido EM ANDAMENTO — o lote de lidos no ar — não é alvo da recusa automática', async () => {
+  // O lote de lidos deixa os pedidos dele NA FILA até a resposta; o perfil que
+  // chega no meio (a prova de rede do próprio lote refaz o perfil que faltava)
+  // rodava a recusa sobre eles: lido E rejeitado, duas decisões pro mesmo pedido.
+  const semComentarios = fonte.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
+  let prof = 0, fim = -1;
+  for (let j = semComentarios.indexOf('{', semComentarios.indexOf(')', i)); j < semComentarios.length; j++) {
+    if (semComentarios[j] === '{') prof++;
+    else if (semComentarios[j] === '}') { prof--; if (prof === 0) { fim = j + 1; break; } }
+  }
+  const frente = { venueID: 'f1', updateRequestID: 'f1', creatorId: 9 };
+  const noLote = { venueID: 'a1', updateRequestID: 'a1', creatorId: 7 };
+  const livre = { venueID: 'a2', updateRequestID: 'a2', creatorId: 7 };
+  const AppState = { queue: [frente, noLote, livre], currentPlace: frente };
+  const enviados = [];
+  const deps = {
+    AppState, podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, Treino: { ativo: false },
+    autoLigado: (id) => id === 7, updatePendingCount: () => {}, showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
+    enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
+    aoMudarAFilaPorBaixo: () => {},
+    pedidosEmAndamento: new Set(['a1|a1']), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    API: { getRegion: () => 'row' },
+  };
+  const chaves = Object.keys(deps);
+  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  await fn();
+  assert.deepEqual(enviados, ['a2'], 'a recusa rejeitou um pedido que o lote de lidos está marcando');
+  assert.deepEqual(AppState.queue.map((x) => x.venueID), ['f1', 'a1'], 'o pedido do lote saiu da fila antes da resposta dele');
 });
 
 // ── A folha do resultado do lote, EXECUTADA (auditoria de 2026-09-25) ────────

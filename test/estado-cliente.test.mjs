@@ -169,7 +169,7 @@ test('o modo "saindo" acaba quando a página VOLTA (visível ou bfcache)', () =>
 });
 
 // ── o treino ──────────────────────────────────────────────────────────────────
-function montarTreino(estado = {}) {
+function montarTreino(estado = {}, { loteNoAr = false } = {}) {
   const log = [];
   const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: true,
     queue: [], currentPlace: null, stats: { read: 7, rejected: 3, skipped: 1 }, serverTotal: 40,
@@ -181,7 +181,8 @@ function montarTreino(estado = {}) {
     updateStats: () => {}, updatePendingCount: () => {}, showCurrentPlace: () => log.push('card'),
     fecharCamadasDeFoto: () => {}, removeCurrentCardEl: () => {}, maybePrefetch: () => log.push('prefetch'),
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'),
-    t: (k) => k, showToast: () => {}, openModal: () => {},
+    t: (k) => k, showToast: (m) => log.push('toast:' + m), openModal: () => {},
+    loteDeLidosEmVoo: loteNoAr,
   };
   const i = APP_SEM.indexOf('const Treino = {');
   assert.ok(i >= 0, 'o objeto Treino sumiu');
@@ -208,6 +209,21 @@ test('treino: entrar com a busca EM VOO descarta a busca, não toca no `fetching
   Treino.sair();
   assert.equal(AppState.fetching, false, 'o `sair()` restaurou `fetching = true` sem promessa — a aba congelava');
   assert.ok(log.includes('busca'), 'a fila real vazia não voltou a buscar depois do treino');
+});
+
+test('treino (F1): com o lote de lidos NO AR ele não liga — e diz por quê', () => {
+  // O lote termina sobre a fila REAL; trocada pela de treino, o `sair()`
+  // devolvia como card os pedidos que o lote tinha marcado.
+  const { Treino, AppState, log } = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] }, { loteNoAr: true });
+  const fila = AppState.queue;
+  Treino.entrar();
+  assert.equal(Treino.ativo, false, 'o treino trocou a fila debaixo do lote no ar');
+  assert.equal(AppState.queue, fila);
+  assert.ok(log.includes('toast:toast.esperaLote'), 'recusou calado');
+  // CONTROLE: sem o lote no ar, entra.
+  const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] });
+  c.Treino.entrar();
+  assert.equal(c.Treino.ativo, true);
 });
 
 test('treino: deslogado ele NÃO liga (a tela de card nem existe)', () => {

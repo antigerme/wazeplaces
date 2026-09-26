@@ -441,6 +441,8 @@ async function rodarRecusa(alvos) {
     // do aparelho, do conserto do offline); aqui ela é.
     contaConfirmada: () => true,
     autoLigado: (id) => id !== 1, updatePendingCount() {}, aoMudarAFilaPorBaixo() {},
+    // Pedido EM ANDAMENTO (o lote de lidos no ar) não é alvo — ver o F1.
+    pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     t: (k, v) => k + ' ' + JSON.stringify(v),
     showToast: (msg) => { avisos.push(msg); return { texto: (m) => avisos.push(m), dispensar() {} }; },
     // O `enviarLote` anda EM ORDEM e conta o que ainda falta depois de cada um.
