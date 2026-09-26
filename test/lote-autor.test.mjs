@@ -1,0 +1,158 @@
+// O lote do autor ("Rejeitar os N") e a recusa automática — os dois passam
+// pelo `enviarLote` — e a aprovação de foto, auditados na fila em 2026-09-26.
+// Os testes RODAM as funções de verdade, fatiadas do app.js, com o Waze de
+// mentira. Cada um foi visto REPROVANDO com o conserto desfeito.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+// Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
+const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+function fatiar(nome) {
+  const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
+  assert.ok(m, `${nome} sumiu do app.js`);
+  let par = 0, i = APP_SEM.indexOf('(', m.index);
+  for (let j = i; j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '(') par++;
+    else if (APP_SEM[j] === ')') { par--; if (par === 0) { i = j + 1; break; } }
+  }
+  i = APP_SEM.indexOf('{', i);
+  let prof = 0, fim = APP_SEM.length;
+  for (let j = i; j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '{') prof++;
+    else if (APP_SEM[j] === '}') { prof--; if (prof === 0) { fim = j + 1; break; } }
+  }
+  const corpo = APP_SEM.slice(m.index, fim);
+  assert.ok(corpo.length > 60, `fatiar('${nome}') devolveu ${corpo.length} chars — o instrumento quebrou`);
+  return corpo;
+}
+const pedido = (i, autor = 777) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: autor, createdBy: 'autor' + autor });
+const chave = (p) => p.venueID + '|' + p.updateRequestID;
+const RECUSA = { success: false, errorCategory: 'unknown', httpCode: 500 };
+
+// O `enviarLote` de verdade. `resposta(p, n)` decide o que o Waze responde ao
+// n-ésimo envio, e `antes(p, n)` roda ANTES de ele responder — é por onde o
+// teste encena o ↻ no meio do laço.
+function montarLote({ fila = [], naTela = null, resposta = () => ({ success: true }), antes = () => {}, entraram = [] } = {}) {
+  const log = [];
+  const regioes = [];
+  const AppState = { stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: fila.length, queue: fila.slice(),
+    currentPlace: naTela, fetchEpoch: 0, hasMore: false, inFlightActions: 0, authenticated: true };
+  let n = 0;
+  const deps = {
+    AppState, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
+    API: { getRegion: () => 'row',
+      rejectPlace: async (v, u, presenca, regiao) => { const p = { venueID: v, updateRequestID: u }; regioes.push(regiao); n++; antes(p, n); return resposta(p, n); } },
+    registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
+    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, updatePendingCount: () => {},
+    mostrarResultadoDoLote: () => log.push('folha'), chaveDoPedido: chave,
+    pedidosQueEntraramNaFila: new Set([...fila, ...entraram].map(chave)),
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
+    Treino: { ativo: false },
+  };
+  const chaves = Object.keys(deps);
+  const enviarLote = new Function(...chaves, fatiar('enviarLote') + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));
+  return { enviarLote, AppState, log, regioes, deps };
+}
+
+// ── F4: o ↻ no MEIO da recusa automática ────────────────────────────────────
+// A recusa tira os alvos da fila e desconta o "Restam" a cada um que POUSA. Com
+// um ↻ (ou troca de filtro) no meio, a fila nova já vinha sem os que faltavam
+// (estavam em andamento), e cada pouso do laço antigo descontava dela: MEDIDO no
+// navegador, fila de 5 cards com "Restam 0".
+test('F4: ↻ no meio da recusa automática — os pousos do laço antigo não descontam o "Restam" da fila nova', async () => {
+  const alvos = [pedido(1), pedido(2), pedido(3), pedido(4)];
+  const m = montarLote({
+    antes: (p, n) => {
+      if (n !== 2) return;
+      // O ↻: fila nova (época nova), com 5 pedidos de outros autores.
+      m.AppState.fetchEpoch++;
+      m.AppState.queue = [pedido(10, 1), pedido(11, 1), pedido(12, 1), pedido(13, 1), pedido(14, 1)];
+      m.AppState.serverTotal = 5;
+    },
+    // Um dos que pousam depois do ↻ outro editor já tinha tratado: o "já
+    // tratado" também desce o "Restam" ao landar.
+    resposta: (p) => (p.venueID === 'v4' ? { success: false, errorCategory: 'already_processed' } : { success: true }),
+  });
+  m.AppState.serverTotal = 9;       // a fila de antes: 5 + os 4 alvos, que o pouso desconta um a um
+  await m.enviarLote(alvos, { silencioso: true, contarAoLandar: true });
+  assert.equal(m.AppState.serverTotal, 5,
+    `o laço antigo descontou da fila NOVA: "Restam" ${m.AppState.serverTotal} com ${m.AppState.queue.length} cards`);
+  assert.equal(m.AppState.stats.rejected, 3, 'o que foi rejeitado deixou de contar no placar');
+});
+
+test('F4: ↻ no meio — o que FALHA não entra na fila nova (de outro filtro); a busca o traz, se ele for dela', async () => {
+  const alvos = [pedido(1), pedido(2)];
+  const m = montarLote({
+    antes: (p, n) => { if (n === 1) { m.AppState.fetchEpoch++; m.AppState.queue = [pedido(10, 1)]; m.AppState.serverTotal = 1; } },
+    resposta: (p) => (p.venueID === 'v2' ? RECUSA : { success: true }),
+    entraram: alvos,                                // passaram pela fila antes de a recusa os tirar
+  });
+  await m.enviarLote(alvos, { silencioso: true, contarAoLandar: true });
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v10'], 'o pedido do laço antigo entrou na fila nova');
+  assert.equal(m.AppState.serverTotal, 1);
+  assert.ok(!m.deps.pedidosQueEntraramNaFila.has('v2|u2'), 'o que falhou "já passou pela fila": a busca nunca o traz');
+  assert.equal(m.AppState.hasMore, true);
+});
+
+test('F4: CONTROLE — sem ↻, cada pouso desconta e quem falha volta pra fila, como sempre', async () => {
+  const alvos = [pedido(1), pedido(2), pedido(3)];
+  const m = montarLote({ fila: [pedido(10, 1)], naTela: null, resposta: (p) => (p.venueID === 'v3' ? RECUSA : { success: true }) });
+  m.AppState.currentPlace = m.AppState.queue[0];
+  m.AppState.serverTotal = 4;
+  await m.enviarLote(alvos, { silencioso: true, contarAoLandar: true });
+  assert.equal(m.AppState.serverTotal, 2, 'os dois que pousaram não desceram o "Restam"');
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v10', 'v3'], 'o que falhou não voltou pra fila');
+});
+
+// ── F4 (a mesma raiz): a aprovação de foto que pousa depois do ↻ ─────────────
+function montarAprovacao({ epocaDoGesto = 0 } = {}) {
+  const log = [];
+  const place = pedido(1);
+  const AppState = { serverTotal: 5, fetchEpoch: 0, currentPlace: null, queue: [pedido(9)] };
+  const deps = {
+    AppState, registrarPouso: () => log.push('pouso'), updateStats: () => {},
+    Lightbox: { isOpen: () => false, place: null }, advanceQueue: () => log.push('avanca'),
+  };
+  const chaves = Object.keys(deps);
+  const concluir = new Function(...chaves, 'let placeResolvidoPorAprovacao = null; let tratouNestaFila = false;\n'
+    + fatiar('concluirAprovacao') + '\nreturn concluirAprovacao;')(...chaves.map((k) => deps[k]));
+  return { concluir: () => concluir({ id: 'u1', place, idx: 0, epocaFila: epocaDoGesto }), AppState, log };
+}
+
+test('F4: aprovação que pousa DEPOIS do ↻ não desconta o "Restam" da fila nova', () => {
+  const m = montarAprovacao({ epocaDoGesto: 0 });
+  m.AppState.fetchEpoch = 1;                      // o ↻ refez a fila durante a janela / o envio
+  m.concluir();
+  assert.equal(m.AppState.serverTotal, 5, 'a aprovação descontou da fila NOVA');
+  assert.ok(m.log.includes('pouso'), 'o pouso da aprovação deixou de ser registrado');
+});
+
+test('F4: CONTROLE — a aprovação na MESMA fila desconta o "Restam", como sempre', () => {
+  const m = montarAprovacao({ epocaDoGesto: 0 });
+  m.concluir();
+  assert.equal(m.AppState.serverTotal, 4);
+});
+
+test('F4: aprovar a foto leva a fila do GESTO no alvo (`epocaFila`)', async () => {
+  let alvoEnviado = null;
+  const place = pedido(1);
+  const AppState = { fetchEpoch: 7, preferences: { undoEnabled: false } };
+  const deps = {
+    AppState, Treino: { ativo: false }, canDisableUndo: () => true, estadoAprovando: () => {},
+    Lightbox: { place, idx: 0, podeAprovarAtual: () => true, marcarComoAprovada: () => {} },
+    enviarAprovacao: async (alvo) => { alvoEnviado = alvo; return true; },
+    aplicarTravaDeAcao: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {}, t: (k) => k,
+    registrarDesfazer: () => {}, UNDO_WINDOW_MS: 3000,
+  };
+  const chaves = Object.keys(deps);
+  const aprovar = new Function(...chaves, 'let aprovacaoPendente = null; let exclusaoPendente = null;\n'
+    + fatiar('aprovarFotoAtual') + '\nreturn aprovarFotoAtual;')(...chaves.map((k) => deps[k]));
+  aprovar();
+  await new Promise((ok) => setTimeout(ok, 0));
+  assert.ok(alvoEnviado, 'a aprovação não saiu (o instrumento não mede nada)');
+  assert.equal(alvoEnviado.epocaFila, 7, 'a aprovação não sabe de que fila é: descontaria o "Restam" da fila refeita');
+});

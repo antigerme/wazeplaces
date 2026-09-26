@@ -238,8 +238,12 @@ test('lote: "já tratado por outro editor" NÃO conta como falha', () => {
   const bloco = semComentarios.slice(i, semComentarios.indexOf('function mostrarResultadoDoLote'));
   assert.match(bloco, /already_processed[\s\S]{0,80}conta\.ja\+\+/,
     'o app já trata isso como objetivo cumprido no card único — chamar de falha aqui daria dois nomes à mesma coisa');
-  assert.match(bloco, /conta\.erro\+\+[\s\S]{0,420}AppState\.queue\.push\(p\)/,
+  assert.match(bloco, /conta\.erro\+\+[\s\S]{0,420}voltarPraFila\(p\);/,
     'o que NÃO saiu tem que voltar pra fila, senão o pedido some sem ter sido tratado');
+  // E "voltar pra fila" é pra fila do lote (F4): na fila refeita no meio do
+  // laço, quem o traz é a busca — test/lote-autor.test.mjs roda os dois casos.
+  assert.match(bloco, /const voltarPraFila = \(q\) => \{\s*if \(naFilaDoLote\(\)\) \{[^}]*AppState\.queue\.push\(q\);/,
+    'o que falha deixou de voltar pra fila do lote');
 });
 
 test('lote: o lote respeita a trava e o treino', () => {

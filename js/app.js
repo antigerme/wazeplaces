@@ -2609,7 +2609,10 @@ async function enviarAprovacao(alvo) {
 // seguinte contava o pedido de novo e dizia "já tratado por outro editor".
 function concluirAprovacao(alvo) {
     registrarPouso(alvo.place);
-    AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+    // Só na fila do GESTO: o ↻ e a troca de filtro durante a janela ou o envio
+    // refazem a fila (`fetchEpoch`), e descontar o "Restam" da fila nova deixava
+    // o número abaixo dela (auditoria da fila, 2026-09-26).
+    if (alvo.epocaFila === AppState.fetchEpoch) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
     updateStats();
     if (Lightbox.isOpen() && Lightbox.place === alvo.place) { placeResolvidoPorAprovacao = alvo.place; return; }
     if (AppState.currentPlace === alvo.place) advanceQueue();
@@ -2637,7 +2640,8 @@ function aprovarFotoAtual() {
     if (Treino.ativo) return;
     if (!Lightbox.podeAprovarAtual()) return;
     const place = Lightbox.place;
-    const alvo = { id: place.updateRequestID, place, idx: Lightbox.idx };
+    // `epocaFila`: a fila do gesto (ver `concluirAprovacao`).
+    const alvo = { id: place.updateRequestID, place, idx: Lightbox.idx, epocaFila: AppState.fetchEpoch };
     if (aprovacaoPendente) aprovacaoPendente.enviar();
     // Mesma razão do lado de lá: as duas escritas mexem no mesmo local, então
     // quem chega depois tem que ver o resultado de quem chegou antes.
@@ -11406,6 +11410,23 @@ async function enviarLote(places, opts = {}) {
     // `fila` = foi pra fila de SAÍDA (sem rede): nem "foi pro Waze" nem "falhou".
     const conta = { ok: 0, fila: 0, ja: 0, erro: 0 };
     const epoca = epocaDaSessao;
+    // A FILA em que o lote começou. O ↻ e a troca de filtro no meio do laço a
+    // refazem (`resetQueue`): a nova já vem sem os pedidos que faltam (estão em
+    // andamento), então nem o "Restam" dela desce pelos pousos daqui, nem o que
+    // falhar entra nela — era "Restam 0" com 5 cards na tela (auditoria da fila,
+    // 2026-09-26). O que falhou volta pela busca, se for da fila nova.
+    const epocaFila = AppState.fetchEpoch;
+    const naFilaDoLote = () => AppState.fetchEpoch === epocaFila;
+    const voltarPraFila = (q) => {
+        if (naFilaDoLote()) {
+            // Contando ao landar o número nunca desceu; no otimista, ele volta.
+            if (!aoLandar) AppState.serverTotal++;
+            AppState.queue.push(q);
+        } else {
+            pedidosQueEntraramNaFila.delete(chaveDoPedido(q));
+            AppState.hasMore = true;
+        }
+    };
     const aoLandar = !!opts.contarAoLandar;
     const progresso = () => {
         if (aoLandar) { updateStats(); saveStats(); updatePendingCount(); }
@@ -11429,7 +11450,7 @@ async function enviarLote(places, opts = {}) {
                 registrarRejeicaoDeAutor(p);
                 if (aoLandar) {
                     AppState.stats.rejected++;
-                    AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+                    if (naFilaDoLote()) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
                 } else {
                     // O lote da PESSOA conta pras conquistas como o ✕ do card; a
                     // recusa automática (`aoLandar`) é o app agindo, e não conta.
@@ -11438,7 +11459,7 @@ async function enviarLote(places, opts = {}) {
             } else if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
                 conta.ja++;
                 registrarPouso(p);
-                if (aoLandar) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+                if (aoLandar) { if (naFilaDoLote()) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1); }
                 // No placar otimista ele JÁ contou; o Histórico conta igual, como
                 // no card único (`handleActionResult`) — senão o placar e o
                 // Histórico divergiam por lote (auditoria de 2026-09-25).
@@ -11450,11 +11471,8 @@ async function enviarLote(places, opts = {}) {
                 for (const q of places.slice(places.indexOf(p))) {
                     marcarEmAndamento(q, false);
                     if (!aoLandar && enfileirarSaida('reject', q, opts.regiao)) continue;
-                    if (!aoLandar) {
-                        AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
-                        AppState.serverTotal++;
-                    }
-                    AppState.queue.push(q);
+                    if (!aoLandar) AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
+                    voltarPraFila(q);
                 }
                 handleUnauthorized();
                 return;
@@ -11477,12 +11495,9 @@ async function enviarLote(places, opts = {}) {
                 conta.erro++;
                 // O que não saiu volta pra fila. Com o placar otimista é preciso
                 // devolver o número junto; contando ao landar não há o que devolver,
-                // porque o número nunca foi somado.
-                if (!aoLandar) {
-                    AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
-                    AppState.serverTotal++;
-                }
-                AppState.queue.push(p);
+                // porque o número nunca foi somado (ver `voltarPraFila`).
+                if (!aoLandar) AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
+                voltarPraFila(p);
             }
             // Resolvido: pousou, está na fila de saída, ou voltou pra fila.
             marcarEmAndamento(p, false);
