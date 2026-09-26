@@ -25,14 +25,25 @@ const REPLAY = readFileSync(join(ROOT, 'tools/diag-replay.mjs'), 'utf8');
 const APP = readFileSync(join(ROOT, 'js/app.js'), 'utf8');
 const CORE = readFileSync(join(ROOT, 'server/core.mjs'), 'utf8');
 
-// Toda rota que ESCREVE (ou desloga) tem que estar na recusa. A lista sai do
-// ROUTES do core, então rota nova aparece aqui em vez de passar despercebida.
-const LEITURA = new Set(['perfil', 'buscar-places', 'lista-paises', 'lista-estados', 'testar-cookies']);
+// Cada rota do core, CLASSIFICADA pelo que ela faz na conta de quem gerou o
+// diagnóstico. A régua é "só lê" contra "escreve, DESLOGA, ou lê o que não é da
+// ferramenta" (conversa privada, credencial do tempo real). `perfil` parecia
+// leitura e APAGA a sessão quando o portão recusa — medido no teste logo abaixo,
+// com o core de verdade —, e estava na lista de leitura da ferramenta até a
+// auditoria de 2026-09-26. A lista sai do ROUTES do core, então rota nova sem
+// classificação reprova aqui em vez de passar despercebida.
+const SO_LE = new Set(['buscar-places', 'lista-paises', 'lista-estados']);
+const RECUSADAS = new Set(['sessao', 'parear', 'testar-cookies', 'perfil', 'marcar-lido', 'guardar-pedido',
+  'validar-place', 'excluir-foto', 'renomear-local', 'presenca-waze', 'presenca-app', 'chat']);
+const conjunto = (nome) => {
+  const bloco = API.match(new RegExp(`const ${nome} = new Set\\(\\[([^\\]]+)\\]\\)`));
+  assert.ok(bloco, `a lista ${nome} sumiu da ferramenta`);
+  return new Set([...bloco[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
+};
 
-test('diag-api: TODA rota não-leitura está na lista de recusa', () => {
-  const bloco = API.match(/const ESCRITA = new Set\(\[([^\]]+)\]\)/);
-  assert.ok(bloco, 'a lista de recusa sumiu');
-  const recusadas = new Set([...bloco[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
+test('diag-api: TODA rota que não só LÊ está na lista de recusa — e a de leitura é exatamente a das que só leem', () => {
+  const recusadas = conjunto('ESCRITA');
+  const leitura = conjunto('LEITURA');
 
   // Do bloco `ROUTES` inteiro, com e SEM aspas na chave: o padrão antigo só
   // casava chave entre aspas e deixava de fora `sessao`, `parear`, `perfil` e
@@ -44,9 +55,41 @@ test('diag-api: TODA rota não-leitura está na lista de recusa', () => {
   assert.ok(rotas.length >= 14, `só ${rotas.length} rotas achadas no core — o padrão do ROUTES mudou`);
   assert.ok(rotas.includes('sessao') && rotas.includes('chat'), 'o extrator voltou a perder as chaves sem aspas');
   for (const r of rotas) {
-    if (LEITURA.has(r)) continue;
-    assert.ok(recusadas.has(r),
-      `a rota "${r}" escreve/desloga e NÃO está recusada em diag-api.mjs — ela agiria na conta de terceiro`);
+    assert.ok(SO_LE.has(r) !== RECUSADAS.has(r),
+      `a rota "${r}" não está classificada (ou está nas duas listas) — decida se ela SÓ LÊ ou se escreve/desloga`);
+    if (RECUSADAS.has(r)) {
+      assert.ok(recusadas.has(r),
+        `a rota "${r}" escreve/desloga e NÃO está recusada em diag-api.mjs — ela agiria na conta de terceiro`);
+    }
+  }
+  assert.deepEqual([...leitura].sort(), [...SO_LE].sort(),
+    'a lista de LEITURA da ferramenta não é a das rotas que só leem — `perfil` desloga quando o portão recusa');
+});
+
+// A CLASSIFICAÇÃO do `perfil` medida, não afirmada: com o core de verdade e um
+// Waze de mentira, a conta que o portão recusa perde a sessão no servidor.
+// CONTROLE: a conta que passa no portão continua com ela — sem isto, "a sessão
+// sumiu" não distinguiria o portão de um store que apaga tudo.
+test('diag-api: `perfil` DESLOGA quando o portão recusa (por isso a ferramenta o recusa)', async () => {
+  const { sessaoDeTeste } = await import('./_sessao.mjs');
+  const { dispatch } = await import('../server/core.mjs');
+  const COOKIES = '.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tabc\n.waze.com\tTRUE\t/\tTRUE\t0\t_csrf_token\txyz\n';
+  const fetchOriginal = globalThis.fetch;
+  const perfilDoWaze = (rank, am) => async () => new Response(JSON.stringify({ id: 1, userName: 'x', rank, isAreaManager: am, isStaff: false }),
+    { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const recusado = await sessaoDeTeste(COOKIES);
+    globalThis.fetch = perfilDoWaze(0, false);
+    const r = await dispatch('perfil', { sessionToken: recusado.sessionToken, region: 'row' }, recusado.ctx);
+    assert.equal(r.status, 403, 'PRÉ-CONDIÇÃO: o portão não recusou a conta L1 sem AM');
+    assert.equal(recusado.store.mem.size, 0, 'o `perfil` recusado deixou a sessão — se ele parou de deslogar, releia a classificação');
+    const aceito = await sessaoDeTeste(COOKIES);
+    globalThis.fetch = perfilDoWaze(5, true);
+    const r2 = await dispatch('perfil', { sessionToken: aceito.sessionToken, region: 'row' }, aceito.ctx);
+    assert.equal(r2.status, 200);
+    assert.equal(aceito.store.mem.size, 1, 'CONTROLE: a conta que passa no portão perdeu a sessão — a medida acima não distingue nada');
+  } finally {
+    globalThis.fetch = fetchOriginal;
   }
 });
 
@@ -80,7 +123,7 @@ test('diag-api: recusa de verdade, rodando o script', () => {
     app: { url: 'https://exemplo.invalido/' },
     localStorage: { waze_session_token: 'nao-usado-porque-recusa-antes' },
   }));
-  for (const rota of ['marcar-lido', 'validar-place', 'excluir-foto', 'renomear-local', 'sessao']) {
+  for (const rota of ['marcar-lido', 'validar-place', 'excluir-foto', 'renomear-local', 'sessao', 'perfil']) {
     let saiu = 0;
     try {
       execFileSync(process.execPath, [join(ROOT, 'tools/diag-api.mjs'), arq, rota],
@@ -160,7 +203,7 @@ test('diag-api: decide por LISTA DE LEITURA — caminho torto até uma rota de e
   }
   // CONTROLE: rota de leitura passa da recusa (e aí falha lendo o arquivo, com 1).
   let codigo = 0;
-  try { execFileSync(process.execPath, [ferramenta, '/nao/existe.zip', 'perfil'], { stdio: 'pipe' }); }
+  try { execFileSync(process.execPath, [ferramenta, '/nao/existe.zip', 'buscar-places'], { stdio: 'pipe' }); }
   catch (e) { codigo = e.status; }
   assert.notEqual(codigo, 3, 'a rota de leitura foi recusada — a ferramenta ficou inútil');
   // A base é a ORIGEM da URL do app (com query ou caminho, o POST ia pro lugar errado).
@@ -174,4 +217,50 @@ test('diag-tela: remonta TAMBÉM as capturas das aberturas anteriores (o defeito
   const TELA = readFileSync(join(ROOT, 'tools/diag-tela.mjs'), 'utf8');
   assert.match(TELA, /d\.aberturasAnteriores/, 'o diag-tela voltou a ignorar as aberturas anteriores');
   assert.match(TELA, /const momentos = \[\.\.\.anteriores, \.\.\.atuais\];/);
+});
+
+// O CORPO que a ferramenta mandaria, lido da própria saída dela: ela imprime o
+// corpo (com o token mascarado) ANTES do jitter e da rede. O processo é morto
+// assim que a linha aparece — nada sai pra rede, e o teste não espera o jitter.
+async function corpoQueSairia(dados, rota, extra) {
+  const { spawn } = await import('node:child_process');
+  const dir = mkdtempSync(join(tmpdir(), 'diag-api-'));
+  const arq = join(dir, 'd.json');
+  writeFileSync(arq, JSON.stringify(dados));
+  const filho = spawn(process.execPath, [join(ROOT, 'tools/diag-api.mjs'), arq, rota, ...(extra ? [extra] : [])],
+    { stdio: ['ignore', 'pipe', 'pipe'] });
+  let saida = '';
+  try {
+    return await new Promise((ok, erro) => {
+      const teto = setTimeout(() => erro(new Error('a ferramenta não imprimiu o corpo: ' + saida.slice(0, 300))), 10000);
+      filho.stdout.on('data', (b) => {
+        saida += b;
+        const m = /^corpo: (.+)$/m.exec(saida);
+        if (m) { clearTimeout(teto); ok(JSON.parse(m[1])); }
+      });
+      filho.once('exit', () => { clearTimeout(teto); erro(new Error('a ferramenta saiu antes do corpo: ' + saida.slice(0, 300))); });
+    });
+  } finally {
+    filho.kill('SIGKILL');
+  }
+}
+
+test('diag-api: pergunta na REGIÃO e no PAÍS do relatório, não nos de fábrica', async () => {
+  // O corpo cravava `region: 'row'` e nenhum país: a fila de quem tria nos EUA
+  // (servidor `na`) ou na França era perguntada ao servidor do resto do mundo e
+  // no país padrão — a resposta "vazia" parecia o defeito que se investigava.
+  const base = { app: { url: 'https://exemplo.invalido/' } };
+  const deNa = await corpoQueSairia({ ...base, localStorage: { waze_session_token: 'tok-nao-impresso',
+    waze_region: 'na', waze_country: '235' } }, 'buscar-places');
+  assert.equal(deNa.region, 'na', 'a região do relatório não chegou ao corpo');
+  assert.equal(deNa.countryId, 235, 'o país do relatório não chegou ao corpo');
+  assert.equal(deNa.sessionToken, '<TOKEN>', 'o corpo impresso tem que mascarar o token');
+  // O `json-extra` continua mandando: é assim que se pergunta OUTRO país.
+  const outro = await corpoQueSairia({ ...base, localStorage: { waze_session_token: 'tok', waze_region: 'na', waze_country: '235' } },
+    'lista-estados', '{"countryId":73}');
+  assert.equal(outro.countryId, 73, 'o json-extra deixou de trocar o país');
+  // CONTROLE: relatório sem região nem país cai no padrão do app (ROW, sem país).
+  const semNada = await corpoQueSairia({ ...base, localStorage: { waze_session_token: 'tok' } }, 'buscar-places');
+  assert.equal(semNada.region, 'row');
+  assert.ok(!('countryId' in semNada), 'sem país no relatório, a ferramenta inventou um');
 });

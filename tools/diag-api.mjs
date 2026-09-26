@@ -1,6 +1,5 @@
 // Pergunta à API de PRODUÇÃO usando o token que já vem dentro do diagnóstico.
 //
-//   node tools/diag-api.mjs <arquivo.json> perfil
 //   node tools/diag-api.mjs <arquivo.json> buscar-places '{"page":2}'
 //   node tools/diag-api.mjs <arquivo.json> lista-estados '{"countryId":73}'
 //
@@ -17,7 +16,8 @@
 //  1. SÓ LEITURA, POR CONSTRUÇÃO. As rotas que ESCREVEM estão numa lista de
 //     recusa e o script sai com erro se alguém as pedir. `validar-place`,
 //     `marcar-lido`, `excluir-foto` e `renomear-local` alteram dado real NO NOME
-//     DELE; `sessao` com `action:destroy` DESLOGA ele. É a mesma defesa que o
+//     DELE; `sessao` com `action:destroy` DESLOGA ele, e `perfil` também, quando
+//     o portão recusa (ver a lista abaixo). É a mesma defesa que o
 //     `waze-probe.mjs` tem contra `/Features` e `/Issues/Read`.
 //  2. JITTER da fonte única (`waze-jitter.mjs`), como toda varredura deste repo.
 //  3. O TOKEN NUNCA É IMPRESSO nem passa por linha de comando — ele vai no CORPO
@@ -39,13 +39,20 @@ import { pausaComJitter } from './waze-jitter.mjs';
 // com gente de fora, e o token do fluxo de tempo real. `presenca-app` lê as
 // conversas também (a prévia da última mensagem) e devolve o mesmo token.
 // Nenhuma cabe numa ferramenta que age com o token de outra pessoa.
-const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear', 'presenca-waze', 'presenca-app', 'chat']);
+//
+// `perfil` parece leitura e NÃO é: ele reconfere o portão (L2+AM) e, quando o
+// Waze diz que a conta não passa mais, APAGA a sessão no servidor (MEDIDO na
+// auditoria de 2026-09-26, com o core de verdade: 403 e o store de 1 sessão pra
+// 0). Perguntar o perfil de quem mudou de nível deslogaria a pessoa pela mão de
+// quem lia o relato dela. E o relatório já traz o perfil (`appState.profile`).
+// `testar-cookies` cria sessão a partir de cookies crus — nada disso é leitura.
+const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear', 'presenca-waze', 'presenca-app', 'chat', 'perfil', 'testar-cookies']);
 // E a decisão é por LISTA DE LEITURA PERMITIDA, não pela lista acima: a lista
 // negra deixava passar `x/../marcar-lido`, `./validar-place` e `marcar-lido?x=1`
 // (a URL normaliza DEPOIS da recusa e chega na rota de escrita), e rota nova
 // que escrevesse passaria sem ninguém lembrar de pô-la aqui. A de cima fica pra
 // explicar a recusa; quem decide é esta.
-const LEITURA = new Set(['perfil', 'buscar-places', 'lista-paises', 'lista-estados']);
+const LEITURA = new Set(['buscar-places', 'lista-paises', 'lista-estados']);
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 '
   + '(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 
@@ -75,7 +82,19 @@ let base = '';
 try { base = new URL(String((d.app && d.app.url) || '')).origin; } catch { base = ''; }
 if (!/^https:\/\//.test(base)) { console.error('URL do app ausente ou não-https no diagnóstico'); process.exit(1); }
 
-const corpo = { sessionToken: token, region: 'row', ...(EXTRA ? JSON.parse(EXTRA) : {}) };
+// A REGIÃO e o PAÍS do relatório, e não os de fábrica: o corpo cravava
+// `region: 'row'` e nenhum país, então a fila de quem tria nos EUA (servidor
+// `na`) ou na França (73) era perguntada ao servidor do resto do mundo e no país
+// padrão do servidor — a resposta vinha "vazia" e parecia o defeito que se
+// investigava (auditoria de 2026-09-26). São as chaves que o `api.js` grava
+// (`waze_region`, `waze_country`); o `json-extra` continua podendo trocar os
+// dois, e o servidor valida a região (inclusive o `world` antigo, que vira `na`).
+const ls = d.localStorage || {};
+const regiaoDoRelatorio = typeof ls.waze_region === 'string' && /^[a-z]+$/.test(ls.waze_region) ? ls.waze_region : 'row';
+const paisDoRelatorio = parseInt(ls.waze_country, 10);
+const corpo = { sessionToken: token, region: regiaoDoRelatorio,
+  ...(Number.isInteger(paisDoRelatorio) && paisDoRelatorio > 0 ? { countryId: paisDoRelatorio } : {}),
+  ...(EXTRA ? JSON.parse(EXTRA) : {}) };
 const semSegredo = { ...corpo, sessionToken: '<TOKEN>' };
 console.log(`de:    ${ARQ.split('/').pop()}   (${_origemDoDiag})`);
 console.log(`POST ${base}/api/${ROTA}`);
