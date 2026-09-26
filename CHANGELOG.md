@@ -40,9 +40,9 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
 - **O código de pareamento colado entra inteiro**, mesmo com espaço, quebra de linha, outro traço ou o rótulo "Código:" junto. O link mostrado pra copiar à mão não some mais enquanto você o seleciona.
 - **iPhone com o app na tela de início**: a entrada e a Ajuda mandam pro código digitado. Apontar a câmera pro QR abre o Safari, fora do app.
 - **Os avisos de sessão dizem só o que o app sabe.** Sem resposta do servidor, o aviso é "não deu pra confirmar a sessão agora", e a sessão que caiu não é mais chamada de "vencida por inatividade".
-- **Se o Waze estiver fora do ar na hora de entrar**, a mensagem aparece no seu idioma e diz que é passageiro. Antes vinha em português.
+- **Se o Waze estiver fora do ar na hora de entrar**, a mensagem aparece no seu idioma. Antes vinha em português.
 - **Quem entra colando os cookies no formato de cabeçalho** (copiado do DevTools) não é mais desconectado em poucos dias.
-- **"Minha área" funciona pra quem tem área de gerência em várias partes ou com muitos detalhes.** Antes o filtro vinha vazio ou o perfil não carregava.
+- **"Minha área" funciona pra quem tem área de edição em várias partes ou com muitos detalhes.** Antes o filtro vinha vazio ou o perfil não carregava.
 - **Um nome por coisa**: "nível" em todo o "Acesso restrito", e "Instalar o aplicativo" nos dois lugares onde se instala o app.
 - **O "Entendi" do "Acesso restrito" tem cara de botão no tema escuro.**
 
@@ -53,7 +53,7 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
 - **Aprovar uma foto e seguir em frente não decide mais o pedido seguinte.** Se a aprovação chegava enquanto o card saía, o ✓, a seta ou o arraste caíam no pedido que entrava. O mesmo vale pro fim do "Marcar todos".
 - **Teclado**:
   - com a lista de "Mudanças propostas" ou o texto do reporte em foco, as setas rolam o texto;
-  - a tecla z também desfaz excluir, aprovar e renomear foto;
+  - a tecla z também desfaz a exclusão e a aprovação de uma foto e o nome novo do local;
   - o Tab chega ao botão Desfazer por cima da foto.
 - **Desfazer a exclusão de uma foto com o lightbox reaberto** devolve o ✨ à foto certa, e ela volta a poder ser aprovada.
 - **Mini-mapa**: um ponto muito longe não tira mais do mapa os que cabem, e o aviso diz qual ficou fora e a que distância. Girar o celular refaz o mapa no tamanho novo.
@@ -125,7 +125,7 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
   - a API pelo mesmo caminho (`/api/./sessao` é a rota `sessao` nos dois);
   - endereço desconhecido dá "não encontrado", e não a página do app;
   - os mesmos tipos de arquivo e o mesmo cache.
-  - porta ocupada derruba o processo com código de erro (saía com 0, que um supervisor lê como sucesso).
+- **Na VM, porta ocupada derruba o processo com código de erro.** Saía com 0, que um supervisor lê como sucesso.
 - **Sem mudança na tela**: correções de segurança e de cota no servidor. Toda rota que escreve confere o id, e uma resposta truncada do Waze não é lida pela metade.
 - **A extensão de Chrome ganhou o aviso de "acesso restrito"** e precisa ser publicada de novo pra ele valer. Até lá, o app novo com a extensão antiga se comporta como antes.
 - Comentários do código com o portão de entrada certo (L2+AM) e o adaptador do Cloudflare de hoje. `docs/auditoria-2026-09.md` guarda o estado da auditoria, pra ela continuar depois de uma parada.
