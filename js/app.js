@@ -7740,13 +7740,15 @@ const MapaLightbox = {
         if (!this.pontos.length) return;
 
         const el = document.getElementById('mapaLightbox');
-        // Abre no MESMO enquadramento do card: a pessoa clicou no que estava
-        // vendo, e o mapa saltar pra outro lugar quebraria a continuidade.
-        const r = mapaMontar(this.pontos.map((p) => p.ll), innerWidth, innerHeight, API.getRegion());
-        this.z = r ? r.z : 16;
-        const lls = this.pontos.map((p) => p.ll);
-        this.centro = [ (Math.min(...lls.map((l) => l[0])) + Math.max(...lls.map((l) => l[0]))) / 2,
-                        (Math.min(...lls.map((l) => l[1])) + Math.max(...lls.map((l) => l[1]))) / 2 ];
+        // Abre no MESMO enquadramento do card (a pessoa clicou no que estava
+        // vendo) — e, quando algum ponto não cabia no card, no zoom da
+        // navegação em que TODOS cabem. Ver `mapaEnquadrarAmpliado`: o zoom da
+        // conta do card com o centro no meio de tudo abria o pedido de 82 km
+        // no vazio entre os dois pontos, sem marcador na tela.
+        const enq = mapaEnquadrarAmpliado(this.pontos.map((p) => p.ll), innerWidth, innerHeight, API.getRegion());
+        if (!enq) return;   // nenhuma coordenada válida: o card nem desenha o mapa
+        this.z = enq.z;
+        this.centro = enq.centro.slice();
         // O ponto do PEDIDO, guardado à parte do enquadramento: o `centro` acima
         // é a média dos marcadores (local + entradas + posição proposta +
         // duplicado), que em 31% dos pedidos NÃO é o local.

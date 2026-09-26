@@ -113,6 +113,38 @@ test('C11 um ponto longe NÃO derruba os que cabem: ficam no mapa junto do prime
   assert.deepEqual(r4.foraDoMapa, []);
 });
 
+test('C4 mapa ampliado de um pedido que não cabe no card: abre com TODOS os pontos na tela', () => {
+  // MEDIDO: o pedido que move o local 82 km abria o ampliado em z17 com o
+  // centro no MEIO dos dois pontos — nenhum marcador na tela (um a 74.915 px,
+  // o outro a −73.883), e o "Voltar ao pedido" voltava ao mesmo vazio.
+  const W = 393, H = 852;
+  const longe = [AMBEV_ANTES[0] + 82000 / 111320, AMBEV_ANTES[1]];
+  const e = M.mapaEnquadrarAmpliado([AMBEV_ANTES, longe], W, H, 'row');
+  assert.ok(e.z >= M.MAPA_Z_NAV_MIN && e.z < M.MAPA_Z_MIN, `z ${e.z} fora da faixa em que só o ampliado chega`);
+  const g = M.mapaGrade(e.centro, e.z, W, H, 'row');
+  for (const ll of [AMBEV_ANTES, longe]) {
+    const p = g.projetar(ll);
+    assert.ok(p.left >= 0 && p.left <= W && p.top >= 0 && p.top <= H, `ponto fora da tela: ${JSON.stringify(p)}`);
+  }
+  // O MAIOR zoom que mostra os dois — um a mais e algum sai.
+  assert.ok(!M.mapaCabe([AMBEV_ANTES, longe], W, H, e.z + 1), `abriu mais aberto que o necessário (z${e.z})`);
+});
+
+test('C4 CONTROLE: pedido que cabe abre no MESMO enquadramento de antes (o do card, centro no meio)', () => {
+  const W = 393, H = 852;
+  const pts = [AMBEV_ANTES, AMBEV_DEPOIS];
+  const e = M.mapaEnquadrarAmpliado(pts, W, H, 'row');
+  assert.equal(e.z, M.mapaMontar(pts, W, H, 'row').z, 'o ampliado deixou de abrir no zoom do card');
+  assert.deepEqual(e.centro, [(AMBEV_ANTES[0] + AMBEV_DEPOIS[0]) / 2, (AMBEV_ANTES[1] + AMBEV_DEPOIS[1]) / 2]);
+  // E o que não cabe nem no zoom mais aberto da navegação fica como o card:
+  // ancorado no primeiro ponto (que o card mostra e diz o resto em palavra).
+  const outroContinente = [AMBEV_ANTES[0] + 40, AMBEV_ANTES[1] + 90];
+  const x = M.mapaEnquadrarAmpliado([AMBEV_ANTES, outroContinente], W, H, 'row');
+  assert.equal(x.z, M.mapaMontar([AMBEV_ANTES, outroContinente], W, H, 'row').z);
+  assert.deepEqual(x.centro, AMBEV_ANTES, 'sem zoom que caiba, o ampliado não abriu no local');
+  assert.equal(M.mapaEnquadrarAmpliado([[0, 0]], W, H, 'row'), null, 'sem coordenada válida não há enquadramento');
+});
+
 test('tiles: URL da camada certa, região respeitada, e poucos por card', () => {
   const r = M.mapaMontar([AMBEV_ANTES, AMBEV_DEPOIS], 412, 250, 'row');
   assert.ok(r.tiles.length >= 1 && r.tiles.length <= 4);

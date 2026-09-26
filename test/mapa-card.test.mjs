@@ -106,3 +106,14 @@ test('C11 CONTROLE: tudo cabendo, todos os marcadores, a linha, e nenhum aviso',
   assert.ok(d.linha);
   assert.equal(d.aviso, null, 'aviso de "fora do mapa" com tudo dentro');
 });
+
+test('C4 o mapa ampliado abre pelo enquadramento que MOSTRA os pontos', () => {
+  // O conteúdo da conta é testado em mapa.test.mjs; aqui, que o `open` a usa —
+  // e não volta ao zoom do card com o centro no meio de tudo.
+  const ini = APP_SEM.indexOf('const MapaLightbox = {');
+  const open = APP_SEM.slice(ini, APP_SEM.indexOf('\n    close(', ini));
+  assert.match(open, /const enq = mapaEnquadrarAmpliado\(this\.pontos\.map\(\(p\) => p\.ll\), innerWidth, innerHeight, API\.getRegion\(\)\);/,
+    'o mapa ampliado deixou de abrir pelo `mapaEnquadrarAmpliado`');
+  assert.match(open, /this\.z = enq\.z;\s*this\.centro = enq\.centro\.slice\(\);/, 'o open não usa o zoom E o centro do mesmo enquadramento');
+  assert.ok(!/mapaMontar\(/.test(open), 'o open voltou a tirar o zoom da conta do card, que enquadra só o primeiro ponto');
+});
