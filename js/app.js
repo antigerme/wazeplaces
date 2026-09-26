@@ -2470,6 +2470,45 @@ function lixeiraOcupada(ligado) {
     btn.classList.toggle('lixeira-ocupada', ligado);
 }
 
+// 401 numa escrita do lightbox — aprovar, excluir ou renomear (auditoria de
+// 2026-09-26). O 401 muitas vezes é ALARME FALSO (WAF, blip do KV: gotcha
+// #42), e a tela já mostra a escrita feita: a foto sumiu, o ✨ saiu, o nome é o
+// novo. O ramo `unauthorized` só chamava o `handleUnauthorized` e saía, sem
+// devolver nada — MEDIDO com a sonda do perfil respondendo viva: a foto seguia
+// fora, a proposta "aprovada" e o nome trocado, e nada tinha chegado ao Waze.
+//
+// A sessão é conferida pelo mesmo `handleUnauthorized` do resto do app e, se a
+// sonda a confirmar VIVA depois deste 401 (`sessaoVivaDepoisDe`, a prova que a
+// fila de saída já usa), a escrita sai de novo UMA vez — sem requisição à toa,
+// porque só sai com a sessão provada. Devolve a resposta dessa segunda ida, ou
+// `null` quando ela não houve (sessão não confirmada, ou conferência já em
+// curso por outro 401) ou quando levou OUTRO 401: com a sessão viva, é esta
+// escrita que o Waze recusa, não a sessão — o critério do `u401` da fila de
+// saída. Com `null`, quem chamou toma o caminho de toda falha: devolve a tela e
+// avisa. Queda de sessão de verdade muda a época, e quem chamou sai sem mexer
+// em nada, como já fazia.
+//
+// Enquanto confere, NADA prossegue (`acoesTravadas`, como na janela do
+// Desfazer): a segunda ida sai uns 2 s depois da primeira, e uma decisão nova
+// sobre o mesmo local nesse meio — rejeitar o card da foto que está sendo
+// aprovada, excluir outra foto do local — cruzaria com ela.
+let escritasConferindo = 0;
+
+async function refazerDepoisDo401(epoca, enviar) {
+    const levou = Date.now();
+    escritasConferindo++;
+    aplicarTravaDeAcao();
+    try {
+        await handleUnauthorized();
+        if (epoca !== epocaDaSessao || !sessaoVivaDepoisDe(levou)) return null;
+        const r = await callWithRetry(enviar);
+        return r && r.errorCategory === 'unauthorized' ? null : r;
+    } finally {
+        escritasConferindo = Math.max(0, escritasConferindo - 1);
+        aplicarTravaDeAcao();
+    }
+}
+
 // Manda pro Waze de verdade. Se falhar, a foto VOLTA — mesma gramática do
 // swipe, que reverte o placar quando o Waze recusa.
 // Devolve se a foto SAIU do mapa: quem espera a resposta (o caminho sem
@@ -2482,8 +2521,13 @@ async function enviarExclusao(alvo) {
         // uma oscilação de rede virava "não deu pra excluir" na primeira falha
         // (auditoria de 2026-09-25). Repetir é seguro: a exclusão relê o local,
         // e a foto que já saiu volta como `jaExcluida`.
-        const r = await callWithRetry(() => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon));
+        const enviar = () => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon);
+        let r = await callWithRetry(enviar);
         if (epoca !== epocaDaSessao) return false;   // saiu no meio: ver `epocaDaSessao`
+        if (r && r.errorCategory === 'unauthorized') {
+            r = await refazerDepoisDo401(epoca, enviar);
+            if (epoca !== epocaDaSessao) return false;
+        }
         if (r && r.success) {
             // Sem toast de sucesso: a foto sumindo JÁ é a confirmação, e
             // anunciar o que a pessoa está vendo acontecer é ruído. O aviso
@@ -2495,7 +2539,6 @@ async function enviarExclusao(alvo) {
             });
             return true;
         }
-        if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return false; }
         devolverFoto(alvo);
         showToast(msgDoServidor(r) || t('toast.photoDeleteFailed'), 'error');
         return false;
@@ -2649,8 +2692,13 @@ async function enviarAprovacao(alvo) {
     try {
         // Retentativa como no excluir e no renomear; repetir é seguro — a 2ª
         // de uma aprovação que passou volta `already_processed`, que conta.
-        const r = await callWithRetry(() => API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID));
+        const enviar = () => API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID);
+        let r = await callWithRetry(enviar);
         if (epoca !== epocaDaSessao) return false;   // saiu no meio: ver `epocaDaSessao`
+        if (r && r.errorCategory === 'unauthorized') {
+            r = await refazerDepoisDo401(epoca, enviar);
+            if (epoca !== epocaDaSessao) return false;
+        }
         if (r && r.success) {
             // Sem toast de sucesso: o ✨ sumindo e o botão virando lixeira JÁ
             // dizem que valeu — mesma razão do excluir.
@@ -2660,7 +2708,6 @@ async function enviarAprovacao(alvo) {
             contarConquista('fotos');
             return true;
         }
-        if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return false; }
         // `already_processed` conta como sucesso: outro editor aprovou antes, e
         // o objetivo de quem tocou foi cumprido (mesma lógica do resto do app).
         if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
@@ -2948,18 +2995,22 @@ function aplicarNomeNaTela(place, nome) {
 async function enviarRenomeacao(alvo) {
     const epoca = epocaDaSessao;
     try {
-        const r = await callWithRetry(() => API.renomearLocal(alvo.place.venueID, alvo.novo));
+        const enviar = () => API.renomearLocal(alvo.place.venueID, alvo.novo);
+        let r = await callWithRetry(enviar);
         // Saiu no meio: ver `epocaDaSessao`. A resposta que chegava depois do
         // "Sair" contava o "Corretor" e recriava `waze_places_conquistas` pra
         // quem entrasse depois (auditoria de 2026-09-25) — como já faziam a
         // aprovação e a exclusão de foto, aqui ao lado.
         if (epoca !== epocaDaSessao) return;
+        if (r && r.errorCategory === 'unauthorized') {
+            r = await refazerDepoisDo401(epoca, enviar);
+            if (epoca !== epocaDaSessao) return;
+        }
         if (r && r.success) {   // sem toast: o nome na tela já diz
             aplicarNosIrmaos(alvo.place, (q) => aplicarNomeNaTela(q, alvo.novo));
             contarConquista('nomes');
             return;
         }
-        if (r && r.errorCategory === 'unauthorized') { handleUnauthorized(); return; }
         // Falhou: o nome na tela precisa VOLTAR, senão o app afirma uma gravação
         // que não houve — e o editor segue triando achando que corrigiu.
         aplicarNomeNaTela(alvo.place, alvo.antigo);
@@ -9608,19 +9659,23 @@ function acoesTravadas() {
     // sendo desativados que nem é feito nos cards".
     // E o LOTE de lidos no ar (`loteDeLidosEmVoo`): os pedidos dele seguem na
     // fila até a resposta, e o ✕ no card da frente mandava uma SEGUNDA decisão
-    // pro mesmo pedido (auditoria da fila, 2026-09-26). E sem sessão nada decide
+    // pro mesmo pedido (auditoria da fila, 2026-09-26). Sem sessão nada decide
     // (K1/K9): durante a queda e a renovação o gesto sairia com a sessão errada.
+    // E a conferência de um 401 numa escrita do lightbox (`refazerDepoisDo401`):
+    // a escrita ainda pode sair de novo, e nada pode cruzar com ela (L1).
     return !!(!AppState.authenticated || AppState.pendingAction || aprovacaoPendente || exclusaoPendente
-        || renomeacaoPendente || loteDeLidosEmVoo);
+        || renomeacaoPendente || loteDeLidosEmVoo || escritasConferindo > 0);
 }
 
-// O que dizer a quem tocou com as ações travadas: a janela do Desfazer e o lote
-// no ar pedem a MESMA espera, mas "espere o Desfazer" com nenhum Desfazer na
-// tela manda a pessoa procurar um botão que não existe. Sem sessão, a espera é
-// a da sessão (a renovação pela extensão, ou entrar de novo).
+// O que dizer a quem tocou com as ações travadas: cada trava pede uma espera, e
+// "espere o Desfazer" com nenhum Desfazer na tela manda a pessoa procurar um
+// botão que não existe. Sem sessão, a espera é a da sessão (a renovação pela
+// extensão, ou entrar de novo).
 function avisoDaTrava() {
     if (!AppState.authenticated) return 'api.error.noSession';
-    return loteDeLidosEmVoo ? 'toast.esperaLote' : 'toast.esperaDesfazer';
+    if (loteDeLidosEmVoo) return 'toast.esperaLote';
+    if (escritasConferindo > 0) return 'toast.esperaSessao';
+    return 'toast.esperaDesfazer';
 }
 
 // Card de FOTO cuja foto não veio sem rede (`marcarCardSemFoto`): ✕ e ✓ não

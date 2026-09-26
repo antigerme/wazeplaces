@@ -258,7 +258,15 @@ test('lote: o lote respeita a trava e o treino', () => {
     'o lote tem que respeitar a janela em curso, e avisar');
   // E o aviso diz QUAL espera: "espere o Desfazer" com o lote de lidos no ar
   // manda procurar um botão que não existe (F1).
-  assert.match(semComentarios, /function avisoDaTrava\(\) \{\s*if \(!AppState\.authenticated\) return 'api\.error\.noSession';\s*return loteDeLidosEmVoo \? 'toast\.esperaLote' : 'toast\.esperaDesfazer';\s*\}/);
+  // Rodando a função de verdade: cada trava com a sua espera.
+  const iA = semComentarios.indexOf('function avisoDaTrava');
+  const corpoAviso = semComentarios.slice(iA, semComentarios.indexOf('\n}\n', iA) + 3);
+  const aviso = (auth, lote, conf) => new Function('AppState', 'loteDeLidosEmVoo', 'escritasConferindo',
+    corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf);
+  assert.equal(aviso(false, true, 1), 'api.error.noSession', 'sem sessão, a espera é a da sessão');
+  assert.equal(aviso(true, true, 0), 'toast.esperaLote');
+  assert.equal(aviso(true, false, 1), 'toast.esperaSessao', 'conferindo um 401, "espere o Desfazer" manda procurar um botão que não existe');
+  assert.equal(aviso(true, false, 0), 'toast.esperaDesfazer');
   assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
 });
 

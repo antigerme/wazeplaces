@@ -246,8 +246,12 @@ test('aprovar e excluir foto passam pela MESMA retentativa do resto (o renomear 
   // Uma oscilação de rede virava "não deu pra aprovar/excluir" na primeira
   // falha (auditoria de 2026-09-25). Repetir é seguro nos dois: a aprovação que
   // passou volta `already_processed` (que conta), e a exclusão relê o local.
-  assert.match(fatiar('enviarAprovacao'), /await callWithRetry\(\(\) => API\.aprovarPedido\(/);
-  assert.match(fatiar('enviarExclusao'), /await callWithRetry\(\(\) => API\.excluirFoto\(/);
+  // A ida sai por uma função (`enviar`), que o `refazerDepoisDo401` reusa
+  // pra segunda ida (L1) — pela MESMA retentativa.
+  assert.match(fatiar('enviarAprovacao'), /const enviar = \(\) => API\.aprovarPedido\([^\n]*\n\s+let r = await callWithRetry\(enviar\)/);
+  assert.match(fatiar('enviarExclusao'), /const enviar = \(\) => API\.excluirFoto\([^\n]*\n\s+let r = await callWithRetry\(enviar\)/);
+  assert.match(fatiar('refazerDepoisDo401'), /await callWithRetry\(enviar\)/,
+    'a segunda ida depois do 401 saiu da retentativa do resto');
 });
 
 // ── os IRMÃOS na fila (auditoria de 2026-09-25) ──────────────────────────────
@@ -299,6 +303,129 @@ test('renomear confirmado: os OUTROS pedidos do mesmo local ganham o nome novo',
   await f.app.enviarRenomeacao({ place: f.A, novo: 'Padaria Nova', antigo: 'Padaria Velha' });
   assert.equal(f.B.name, 'Padaria Velha');
   assert.equal(f.A.name, 'Padaria Velha');
+});
+
+// ── L1: 401 numa escrita do lightbox (auditoria de 2026-09-26) ─────────────
+// O ramo `unauthorized` das três escritas só chamava o `handleUnauthorized` e
+// saía: MEDIDO no navegador, com a sonda do perfil respondendo VIVA, a foto
+// seguia fora, a proposta "aprovada" e o nome trocado — e nada tinha chegado ao
+// Waze. As três escritas de verdade (e o `refazerDepoisDo401`), com o Waze e a
+// sonda de mentira: `respostas` é o que cada ida devolve, e `viva` diz se a
+// sonda confirmou a sessão depois do 401.
+const R401 = { success: false, errorCategory: 'unauthorized', error: 'HTTP 403', httpCode: 403 };
+function montarL1({ respostas, viva, caiNaSonda = false }) {
+  const log = [];
+  const L = lightbox();
+  const P = { venueID: 'v1', updateRequestID: 'ur-P', purType: 'NEW_PHOTO', name: 'Padaria Nova',
+    lat: -23, lon: -46, approvedImageIds: ['a1'], imageUrls: [FOTO('ur-P')] };
+  const irmao = { venueID: 'v1', updateRequestID: 'ur-Q', name: 'Padaria Velha', imageUrls: [FOTO('a1'), FOTO('ur-P')], approvedImageIds: ['a1'] };
+  abrir(L, P, [FOTO('ur-P')], 0);
+  const AppState = { queue: [P, irmao], currentPlace: P, serverTotal: 5 };
+  let idas = 0;
+  let app = null;
+  const proxima = async () => { idas++; return respostas[Math.min(idas, respostas.length) - 1]; };
+  const deps = {
+    AppState, Lightbox: L, callWithRetry: (fn) => fn(),
+    API: { excluirFoto: proxima, aprovarPedido: proxima, renomearLocal: proxima },
+    handleUnauthorized: async () => { log.push('confere'); if (caiNaSonda) app.setEpoca(1); },
+    sessaoVivaDepoisDe: () => viva,
+    aplicarTravaDeAcao: () => log.push('trava:' + app.conferindo()),
+    showToast: (m, tipo) => log.push(`toast:${tipo}:${m}`), msgDoServidor: (r) => (r && r.error) || '', t: (k) => k,
+    devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {}, contarConquista: () => {},
+    montarCardDeFundo: () => {}, cardDaFrente: () => null, document: { getElementById: () => null },
+    registrarPouso: () => log.push('pouso'), updateStats: () => {}, advanceQueue: () => log.push('avancou'),
+  };
+  const nomes = ['refazerDepoisDo401', 'enviarExclusao', 'enviarAprovacao', 'concluirAprovacao',
+    'enviarRenomeacao', 'aplicarNosIrmaos', 'aplicarNomeNaTela'];
+  const chaves = Object.keys(deps);
+  app = new Function(...chaves, 'epocaDaSessao', 'escritasConferindo', 'placeResolvidoPorAprovacao',
+    nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')},
+      setEpoca: (v) => { epocaDaSessao = v; }, conferindo: () => escritasConferindo };`)(
+    ...chaves.map((k) => deps[k]), 0, 0, null);
+  return { app, L, P, irmao, log, AppState, idas: () => idas };
+}
+const erros = (log) => log.filter((l) => l.startsWith('toast:error'));
+
+test('L1 excluir com 401 e a sessão NÃO confirmada: a foto VOLTA e o editor é avisado', async () => {
+  const m = montarL1({ respostas: [R401], viva: false });
+  assert.equal(await m.app.enviarExclusao({ id: 'a1', place: m.P, idx: 0, url: FOTO('a1') }), false);
+  assert.ok(m.log.includes('devolveu'), 'a foto seguiu fora da tela com a exclusão NÃO feita no Waze');
+  assert.deepEqual(erros(m.log), ['toast:error:toast.photoDeleteFailed'], 'a falha não foi avisada (ou saiu com a frase do 401)');
+  assert.equal(m.idas(), 1, 'sem a sessão confirmada, não pode haver segunda ida');
+  assert.deepEqual(m.log.filter((l) => l === 'confere'), ['confere'], 'a sessão não foi conferida');
+  // CONTROLE: um erro que não é 401 volta a tela SEM conferir a sessão.
+  const c = montarL1({ respostas: [{ success: false, errorCategory: 'unknown', error: 'HTTP 500' }], viva: true });
+  await c.app.enviarExclusao({ id: 'a1', place: c.P, idx: 0, url: FOTO('a1') });
+  assert.ok(c.log.includes('devolveu') && !c.log.includes('confere'));
+});
+
+test('L1 excluir com 401 e a sessão confirmada VIVA: sai de novo UMA vez, e o que o Waze confirmar vale', async () => {
+  const m = montarL1({ respostas: [R401, { success: true }], viva: true });
+  assert.equal(await m.app.enviarExclusao({ id: 'a1', place: m.P, idx: 0, url: FOTO('a1') }), true,
+    'a segunda ida deu certo e a exclusão foi dada como falha');
+  assert.equal(m.idas(), 2);
+  assert.ok(!m.log.includes('devolveu') && erros(m.log).length === 0, 'a foto voltou (ou houve aviso) com a exclusão FEITA');
+  assert.deepEqual(m.irmao.imageUrls, [FOTO('ur-P')], 'o irmão não perdeu a foto excluída');
+  // A trava vale DURANTE a conferência e sai no fim (aplicada nas duas pontas).
+  assert.deepEqual(m.log.filter((l) => l.startsWith('trava:')), ['trava:1', 'trava:0']);
+  assert.equal(m.app.conferindo(), 0);
+  // 401 DE NOVO com a sessão viva: é a escrita que o Waze recusa. Volta a
+  // tela, com a frase da exclusão (não a do 401 — a sessão está provada), e
+  // não confere a sessão de novo (seria o laço de 401 da fila de saída).
+  const d = montarL1({ respostas: [R401, R401], viva: true });
+  assert.equal(await d.app.enviarExclusao({ id: 'a1', place: d.P, idx: 0, url: FOTO('a1') }), false);
+  assert.ok(d.log.includes('devolveu'));
+  assert.deepEqual(erros(d.log), ['toast:error:toast.photoDeleteFailed']);
+  assert.equal(d.idas(), 2, 'mais de uma segunda ida');
+  assert.equal(d.log.filter((l) => l === 'confere').length, 1, 'a sessão foi conferida duas vezes');
+});
+
+test('L1 aprovar com 401: sem sessão confirmada o ✨ e o "Aprovar" VOLTAM; confirmada, sai de novo e conclui', async () => {
+  const m = montarL1({ respostas: [R401], viva: false });
+  const alvo = { id: 'ur-P', place: m.P, idx: 0 };
+  m.L.marcarComoAprovada(alvo);                    // o que o gesto fez (janela do Desfazer)
+  assert.equal(await m.app.enviarAprovacao(alvo), false);
+  assert.equal(m.L.newIdx, 0, 'a foto seguiu "aprovada" na tela com a aprovação NÃO feita no Waze');
+  assert.ok(!m.P.approvedImageIds.includes('ur-P'), 'a proposta seguiu na lista das aprovadas (a lixeira a apagaria)');
+  assert.deepEqual(erros(m.log), ['toast:error:toast.photoApproveFailed']);
+  assert.ok(!m.log.includes('pouso'), 'um pedido NÃO aprovado foi dado como resolvido');
+  // Com a sessão viva, a segunda ida resolve o pedido UMA vez.
+  const v = montarL1({ respostas: [R401, { success: true }], viva: true });
+  const alvoV = { id: 'ur-P', place: v.P, idx: 0 };
+  v.L.marcarComoAprovada(alvoV);
+  assert.equal(await v.app.enviarAprovacao(alvoV), true);
+  assert.deepEqual(v.log.filter((l) => l === 'pouso'), ['pouso']);
+  assert.equal(v.AppState.serverTotal, 4);
+  assert.equal(v.idas(), 2);
+});
+
+test('L1 renomear com 401: sem sessão confirmada o nome VOLTA; confirmada, o nome novo fica e vai aos irmãos', async () => {
+  const m = montarL1({ respostas: [R401], viva: false });
+  await m.app.enviarRenomeacao({ place: m.P, novo: 'Padaria Nova', antigo: 'Padaria Velha' });
+  assert.equal(m.P.name, 'Padaria Velha', 'o nome novo ficou na tela com a gravação NÃO feita no Waze');
+  assert.deepEqual(erros(m.log), ['toast:error:toast.renameFailed']);
+  const v = montarL1({ respostas: [R401, { success: true }], viva: true });
+  await v.app.enviarRenomeacao({ place: v.P, novo: 'Padaria Nova', antigo: 'Padaria Velha' });
+  assert.equal(v.P.name, 'Padaria Nova');
+  assert.equal(v.irmao.name, 'Padaria Nova', 'o irmão não recebeu o nome confirmado');
+  assert.equal(erros(v.log).length, 0);
+});
+
+test('L1 a sessão CAI na conferência: nada é revertido nem avisado depois (a época mudou)', async () => {
+  const m = montarL1({ respostas: [R401, { success: true }], viva: true, caiNaSonda: true });
+  assert.equal(await m.app.enviarExclusao({ id: 'a1', place: m.P, idx: 0, url: FOTO('a1') }), false);
+  assert.equal(m.idas(), 1, 'escreveu no Waze depois de a sessão cair');
+  assert.ok(!m.log.includes('devolveu') && erros(m.log).length === 0);
+  assert.equal(m.app.conferindo(), 0, 'a trava ficou presa depois da queda');
+});
+
+test('L1 a conferência do 401 TRAVA as ações, como a janela do Desfazer', () => {
+  const trava = new Function('AppState', 'aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente', 'escritasConferindo',
+    fatiar('acoesTravadas') + '\nreturn acoesTravadas;');
+  const AppState = { pendingAction: null };
+  assert.equal(trava(AppState, null, null, null, 0)(), false, 'CONTROLE: sem nada pendente, nada trava');
+  assert.equal(trava(AppState, null, null, null, 1)(), true,
+    'com a escrita esperando a conferência, dava pra decidir de novo sobre o mesmo local');
 });
 
 // ── C10: o lightbox não pode dividir a lista com o pedido ──────────────────
