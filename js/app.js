@@ -3108,6 +3108,10 @@ function showAuthScreen() {
     document.getElementById('filtersBtn').classList.add('hidden');
     document.getElementById('refreshBtn').classList.add('hidden');
     document.getElementById('userProfileBadge').classList.add('hidden');
+    // Escondido não é apagado: a foto, o nome e o nível de quem estava aqui
+    // seguiam no cabeçalho — e a próxima conta aparecia com a FOTO da anterior
+    // até a dela chegar (ver a função).
+    limparCabecalhoDoPerfil();
     const brandTitle = document.getElementById('brandTitle');
     if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
@@ -5962,11 +5966,15 @@ function liberarAvatar() {
     if (!avatarPendente || !telaPronta) return;
     const url = avatarPendente;
     avatarPendente = null;
+    // A foto é da sessão que a PEDIU. Entre o agendamento (até 2 s de ociosidade)
+    // e o disparo cabem um "Sair" e outra conta entrando — e aí o `authenticated`
+    // já é verdadeiro de novo, com a foto da conta anterior a caminho do <img>.
+    const epoca = epocaDaSessao;
     const carregar = () => {
         const el = document.getElementById('userAvatar');
         // `authenticated` de novo aqui: entre o agendamento e o disparo cabe um
         // logout, e aí a busca sairia já na tela de entrada.
-        if (!el || !AppState.authenticated) return;
+        if (!el || !AppState.authenticated || epoca !== epocaDaSessao) return;
         // `error` cobre TODOS os modos de falha desta imagem com um caminho só:
         // CSP bloqueando, host fora do ar, 404 e rede caída.
         el.onerror = () => {
@@ -5999,21 +6007,28 @@ function renderProfileHeader() {
     const p = AppState.profile;
     if (!p) return;
     const badge = document.getElementById('userProfileBadge');
-    const avatar = document.getElementById('userAvatar');
+    let avatar = document.getElementById('userAvatar');
     const nameEl = document.getElementById('userName');
     const rankEl = document.getElementById('userRank');
     // A falha degrada pro MESMO estado de "perfil sem foto" (o `else` abaixo),
     // que o app já tinha — em vez do ícone de quebrado do navegador.
     if (p.profileImageUrl && p.profileImageUrl !== avatarFalhou) {
-        avatar.style.display = '';
         // Já é esta a foto? Não mexe. Esta função roda de novo a cada troca de
         // idioma, e reatribuir o `src` faz o navegador re-decodificar à toa.
         if (avatar.getAttribute('src') !== p.profileImageUrl) {
+            // A foto que está no <img> é de OUTRA pessoa (a conta de antes, na
+            // mesma página). Sai já, e a caixa fica no cinza reservado até a
+            // nova CARREGAR — nunca a foto de uma conta sob o nome da outra.
+            avatar = avatarSemFoto(avatar);
             avatarPendente = p.profileImageUrl;
             liberarAvatar();
         }
+        avatar.style.display = '';
     } else {
         avatar.style.display = 'none';
+        // Escondida não basta: o `src` antigo seguiria no DOM (e no diagnóstico,
+        // que leva o DOM inteiro), com o id de quem estava aqui antes.
+        avatarSemFoto(avatar);
     }
     nameEl.textContent = p.userName || '';
     const tags = [];
@@ -6031,6 +6046,46 @@ function renderProfileHeader() {
     // sr-only (não 'hidden'): some visualmente mas fica na árvore de a11y como h1
     // — mantém a hierarquia de headings contínua (h1 → h2 fila → h3 card).
     if (brandTitle) brandTitle.classList.add('sr-only');
+}
+
+// O cabeçalho do perfil é de QUEM ESTAVA aqui. Ele era só ESCONDIDO na tela de
+// entrada: a foto, o nome, o nível e o título (com pontos e edições) ficavam no
+// DOM — que o diagnóstico leva inteiro —, e a próxima conta que entrasse na
+// mesma página aparecia com a FOTO da anterior durante toda a espera da
+// primeira busca, porque a dela só é pedida depois do primeiro card (auditoria
+// de 2026-09-26). Chamado pelo `showAuthScreen`, por onde passam o "Sair" e a
+// queda da sessão.
+//
+// A foto não sai com `removeAttribute('src')` só: um <img> que JÁ TEVE `src` e
+// o perdeu fica "quebrado", e o Chrome desenha o ícone de imagem quebrada no
+// círculo do cabeçalho — MEDIDO com a próxima conta entrando, exatamente o
+// ícone que o `onerror` do avatar existe pra evitar. O que nunca teve `src` é o
+// círculo cinza reservado da primeira entrada. Daí a troca pelo elemento NOVO
+// (e sem os ouvintes da foto que estava a caminho: um `onerror` velho marcaria
+// a foto da PRÓXIMA conta como falha).
+function avatarSemFoto(el) {
+    if (!el || !el.hasAttribute('src')) return el;
+    el.onerror = null;
+    el.onload = null;
+    // Tirado ANTES de clonar: o clone com `src` já começaria a baixar a foto.
+    el.removeAttribute('src');
+    const novo = el.cloneNode(false);
+    el.replaceWith(novo);
+    return novo;
+}
+
+function limparCabecalhoDoPerfil() {
+    const avatar = avatarSemFoto(document.getElementById('userAvatar'));
+    if (avatar) avatar.style.display = 'none';
+    for (const id of ['userName', 'userRank']) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '';
+    }
+    const badge = document.getElementById('userProfileBadge');
+    if (badge) {
+        badge.removeAttribute('title');
+        badge.classList.add('hidden');
+    }
 }
 
 // Sair = esquecer o user completamente. Apaga sessão, stats, filters,
@@ -6075,6 +6130,11 @@ async function handleLogout() {
     // O anel de chamadas é da sessão que saiu (rotas, ids de pedidos de
     // terceiros, o destino das mensagens): quem entrar depois começa do zero.
     try { API.chamadas.length = 0; } catch (e) {}
+    // A lista de recursos do navegador também, pelo mesmo motivo: o diagnóstico
+    // a leva inteira, e ela guardava a URL da foto de perfil (com o id de quem
+    // saiu) e as fotos dos pedidos de terceiros — MEDIDO depois do "Sair", as
+    // duas seguiam lá (auditoria de 2026-09-26).
+    try { performance.clearResourceTimings(); } catch (e) {}
     AppState.profile = null;
     presencaWmeZerar();              // o freio e os contadores eram de quem saiu
     AppState.authenticated = false;
