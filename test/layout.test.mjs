@@ -515,14 +515,25 @@ test('não oferecemos ação impossível no aparelho', () => {
   // verdade contra os navegadores que importam (auditoria de 2026-09-25).
   const fn = JS.match(/function podeInstalarExtensao\(\)[\s\S]*?\n\}/)[0];
   const pode = (navigator) => new Function('navigator', fn + '\nreturn podeInstalarExtensao();')(navigator);
-  const CH = (mobile, ...marcas) => ({ userAgentData: { mobile, brands: marcas.map((brand) => ({ brand, version: '153' })) } });
+  // `platform` é o que o Chrome manda de verdade (Windows, macOS, Linux, Chrome
+  // OS, Android) — o `mobile` sozinho não separa o tablet do computador.
+  const CH = (mobile, platform, ...marcas) =>
+    ({ userAgentData: { mobile, platform, brands: marcas.map((brand) => ({ brand, version: '153' })) } });
   const UA = (userAgent) => ({ userAgent });
   const casos = [
-    ['Chrome no computador', CH(false, 'Chromium', 'Google Chrome', 'Not.A/Brand'), true],
-    ['Edge no computador', CH(false, 'Chromium', 'Microsoft Edge'), true],
-    ['Chrome no Android', CH(true, 'Chromium', 'Google Chrome'), false],
+    ['Chrome no computador', CH(false, 'Windows', 'Chromium', 'Google Chrome', 'Not.A/Brand'), true],
+    ['Chrome no Mac', CH(false, 'macOS', 'Chromium', 'Google Chrome'), true],
+    ['Chrome no Linux', CH(false, 'Linux', 'Chromium', 'Google Chrome'), true],
+    ['Chrome no Chromebook', CH(false, 'Chrome OS', 'Chromium', 'Google Chrome'), true],
+    ['Edge no computador', CH(false, 'Windows', 'Chromium', 'Microsoft Edge'), true],
+    ['Chrome no Android', CH(true, 'Android', 'Chromium', 'Google Chrome'), false],
+    // O tablet Android se anuncia `mobile: false` (a UA de tablet não tem
+    // "Mobile") e não instala extensão: quem separa é o sistema (auditoria de
+    // 2026-09-26). O mesmo vale pro nome em qualquer caixa.
+    ['Chrome em tablet Android', CH(false, 'Android', 'Chromium', 'Google Chrome'), false],
+    ['Edge em tablet Android', CH(false, 'android', 'Chromium', 'Microsoft Edge'), false],
     // O dia em que um navegador que NÃO é Chromium mandar Client Hints: a marca decide.
-    ['Client Hints sem Chromium', CH(false, 'Firefox'), false],
+    ['Client Hints sem Chromium', CH(false, 'Windows', 'Firefox'), false],
     ['Chrome antigo sem Client Hints', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0 Safari/537.36'), true],
     ['Firefox no computador', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'), false],
     ['Safari no Mac', UA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'), false],

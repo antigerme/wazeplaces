@@ -15305,10 +15305,18 @@ function setupKeyboardInset() {
 // saída que a régua de "isto é acionável AQUI?" proíbe (auditoria de
 // 2026-09-25). Com Client Hints, a marca "Chromium" (todo navegador Chromium a
 // traz); sem eles (Firefox e Safari não têm), o `Chrome/` da UA sem ser celular.
+//
+// E `mobile: false` NÃO é "computador": o Chrome de TABLET Android se anuncia
+// assim (a UA de tablet não tem "Mobile"), com `platform: "Android"` — e não
+// instala extensão. Daí o sistema também ser conferido (auditoria de 2026-09-26).
+// Limite conhecido, LIDO na fonte do Chromium (content_utils.cc): a "versão para
+// computador" do Chrome no Android se anuncia `platform: "Linux"`, igual a um
+// Linux de mesa, e ali a extensão segue oferecida — é a camuflagem funcionando.
 function podeInstalarExtensao() {
     const dados = navigator.userAgentData;
     if (dados && typeof dados.mobile === 'boolean') {
-        return !dados.mobile && (dados.brands || []).some((b) => /Chromium/i.test((b && b.brand) || ''));
+        return !dados.mobile && !/Android|iOS/i.test(dados.platform || '')
+            && (dados.brands || []).some((b) => /Chromium/i.test((b && b.brand) || ''));
     }
     const ua = navigator.userAgent || '';
     return /Chrome\//.test(ua) && !/Android|iPhone|iPad|iPod|Mobile|CriOS|EdgiOS/i.test(ua);
