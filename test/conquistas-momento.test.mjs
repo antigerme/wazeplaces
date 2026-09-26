@@ -267,6 +267,7 @@ function montarChecagem({ g, tratados }) {
     getHistoryStats: () => ({ total: { read: tratados, rejected: 0 }, today: { read: 0, rejected: 0 } }),
     geografiaDoHistorico: () => ({ paises: new Set(), estados: new Set() }),
     maiorSequenciaDeDias: () => 0, conquistasComPortaoAqui: () => false, historyTodayKey: () => '2026-09-25',
+    agendarRedesenhoDoHistorico: () => { selo.redesenho = (selo.redesenho || 0) + 1; },
   };
   const chaves = Object.keys(deps);
   const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), fatiar('patenteDe'),
@@ -393,4 +394,18 @@ test('H21: CONTROLE — a janela que corre até o fim (a escrita sai) não é De
     m.reg.banner && m.reg.banner();       // o toque tardio no banner já não desfaz nada
     assert.equal(m.reg.desfazer, 0, `${acao}: contou Desfazer de uma escrita que saiu`);
   }
+});
+
+test('H1: conquista que destrava sem pouso de histórico (o pedido guardado) redesenha o painel aberto', () => {
+  const g = gNovo();
+  g.base = true;
+  g.n = { guardados: 10 };                 // o 10º pedido guardado: "Colecionador"
+  const m = montarChecagem({ g, tratados: 0 });
+  m.checarConquistas();
+  assert.ok(g.c.colecionador, 'CONTROLE: o Colecionador tinha que destravar');
+  assert.equal(m.selo.redesenho, 1, 'a célula não acende com o painel aberto — só fechando e reabrindo o modal');
+  // CONTROLE: sem nada destravando, nada a redesenhar por aqui.
+  const n = montarChecagem({ g: Object.assign(gNovo(), { base: true }), tratados: 0 });
+  n.checarConquistas();
+  assert.ok(!n.selo.redesenho, 'agendou redesenho sem nada ter mudado na vitrine');
 });

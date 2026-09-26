@@ -645,7 +645,7 @@ const LIMPEZA_AO_FECHAR = {
     // O padrão da lista de autores é a forma CURTA. Amarrar isto ao botão de
     // fechar deixaria os outros dois caminhos (Esc e scrim) vazando o estado
     // expandido pra próxima abertura — o gotcha dos modais deste projeto.
-    filtersModal() { autoresExpandido = false; escadaAberta = false; conquistaTocada = null; },
+    filtersModal() { autoresExpandido = false; escadaAberta = false; conquistaTocada = null; novasDestaAbertura = null; },
     pairShowModal() {
         pararTickerPareamento();
         // O código é credencial e já não vale nada aqui: não fica desenhado
@@ -880,6 +880,9 @@ function aplicarIdioma(valor) {
         atualizarLinhaDoOffline(0, 0);
         atualizarSeloDeConquista();
         window.Presenca?.renderPilula?.();
+        // O painel do Histórico também é texto do JS. Entrar na aba já o
+        // redesenha (`switchFilterTab`); isto cobre ele estar NA TELA na troca.
+        if (historicoNaTela()) renderHistory();
     }
     if (typeof showToast === 'function') showToast(t('toast.langChanged'), 'success');
 }
@@ -939,7 +942,15 @@ function switchFilterTab(tabId) {
     // Abrir a aba Histórico apaga o selo (decisão do owner). Fica AQUI e não no
     // handler do botão porque a aba também se alcança pelo teclado (setas, Home,
     // End) — amarrar ao clique deixaria o selo aceso pra quem navega assim.
-    if (tabId === 'filtersTabHistory') marcarConquistasVistas();
+    //
+    // E o painel é desenhado ao ENTRAR, não só quando o modal abre: trocar o
+    // idioma nas Preferências (o mesmo modal) deixava a aba no idioma antigo
+    // (auditoria de 2026-09-25). ANTES de marcar as novas como vistas — o
+    // desenho é que põe o anel nelas (ver `abrirModalNaAba`).
+    if (tabId === 'filtersTabHistory') {
+        renderHistory();
+        marcarConquistasVistas();
+    }
     const isFilters = tabId === 'filtersTabFilters';
     $('cancelFilters').classList.toggle('hidden', !isFilters);
     $('applyFilters').classList.toggle('hidden', !isFilters);
@@ -9484,6 +9495,9 @@ function recordHistory(type, delta, dia, onde) {
         h[k].onde[lugar] = Math.max(0, (h[k].onde[lugar] || 0) + delta);
     }
     salvarHistorico(h);
+    // Todo pouso passa por aqui (card, lote, fila de saída, recusa automática):
+    // com o painel do Histórico aberto, ele mostra o que acabou de pousar.
+    agendarRedesenhoDoHistorico();
 }
 // Dias de CALENDÁRIO entre chaves `YYYY-MM-DD`, sem passar por milissegundo
 // local: o dia de troca do horário de verão tem 23 ou 25 h, e contar "idade"
@@ -9824,6 +9838,9 @@ function checarConquistas(extra) {
     const novas = avaliarConquistas(ctx, g.c);
     const hoje = historyTodayKey();
     for (const id of novas) g.c[id] = hoje;
+    // Destravou com o painel aberto (o "Colecionador" do pedido guardado, o
+    // "Corretor" do renomear que responde): a célula acende sem fechar o modal.
+    if (novas.length) agendarRedesenhoDoHistorico();
 
     // LINHA DE BASE. Na primeira passada deste aparelho nada é anunciado: quem
     // já tem 3.000 pedidos nas costas destrava oito de uma vez, e oito banners
@@ -9912,10 +9929,18 @@ function atualizarSeloDeConquista() {
 }
 
 // Abrir a aba É ter visto. Some o selo e, na PRÓXIMA abertura, somem os anéis —
-// nesta a pessoa ainda precisa ver o que destravou, então não re-renderiza.
+// nesta a pessoa ainda precisa ver o que destravou, então não re-renderiza. E
+// o que ela viu como novo fica em `novasDestaAbertura`: o painel é redesenhado
+// com ela aberta (ação que pousa, troca de idioma, toque numa célula), e sem
+// isso o anel sumia no primeiro redesenho, antes de ser visto.
 function marcarConquistasVistas() {
     const g = AppState.conquistas;
     if (!g || (!g.novas.length && !g.patenteNova)) return;
+    const vistas = novasDestaAbertura || { ids: [], patente: false };
+    novasDestaAbertura = {
+        ids: [...new Set([...vistas.ids, ...g.novas])],
+        patente: vistas.patente || g.patenteNova,
+    };
     g.novas = [];
     g.patenteNova = false;
     salvarConquistas();
@@ -9923,10 +9948,34 @@ function marcarConquistasVistas() {
 }
 
 // ── a tela ─────────────────────────────────────────────────────────────────
-// Estado só de VISUALIZAÇÃO (escada aberta, conquista tocada): não persiste,
-// não sai no diagnóstico, morre quando o modal fecha.
+// Estado só de VISUALIZAÇÃO (escada aberta, conquista tocada, o que esta
+// abertura mostrou como novo): não persiste, não sai no diagnóstico, morre
+// quando o modal fecha.
 let escadaAberta = false;
 let conquistaTocada = null;
+let novasDestaAbertura = null;   // { ids, patente } — ver `marcarConquistasVistas`
+
+// O painel do Histórico está NA TELA — o modal aberto E a aba dele escolhida?
+function historicoNaTela() {
+    const modal = document.getElementById('filtersModal');
+    const painel = document.getElementById('filtersPanelHistory');
+    return !!modal && !!painel && !modal.classList.contains('hidden') && !painel.classList.contains('hidden');
+}
+
+// Redesenha o painel se ele estiver na tela, UMA vez por tarefa. A confirmação
+// de uma ação grava o histórico, o autor e as conquistas em sequência, e o
+// painel tem que mostrar os três — daí o fim da tarefa, e não cada gravação.
+// Antes a ação que pousava com o painel aberto só aparecia fechando e
+// reabrindo o modal (auditoria de 2026-09-25).
+let redesenhoDoHistoricoAgendado = false;
+function agendarRedesenhoDoHistorico() {
+    if (redesenhoDoHistoricoAgendado) return;
+    redesenhoDoHistoricoAgendado = true;
+    queueMicrotask(() => {
+        redesenhoDoHistoricoAgendado = false;
+        if (historicoNaTela()) renderHistory();
+    });
+}
 
 function htmlPatente() {
     const g = carregarConquistas();
@@ -9945,7 +9994,8 @@ function htmlPatente() {
             <span class="m" aria-hidden="true">${k < i ? '✓' : k === i ? '●' : ''}</span>
         </div>`).join('') : '';
 
-    return `<div class="conq-card${g.patenteNova ? ' nova' : ''}">
+    const patenteNova = g.patenteNova || !!(novasDestaAbertura && novasDestaAbertura.patente);
+    return `<div class="conq-card${patenteNova ? ' nova' : ''}">
         <div class="conq-topo">
             <span class="conq-emoji" aria-hidden="true">${atual.emoji}</span>
             <div class="conq-id">
@@ -9976,7 +10026,7 @@ function htmlConquistas() {
     const grade = lista.map((x, k) => {
         const on = !!g.c[x.id];
         const sel = conquistaTocada === x.id;
-        const nova = g.novas.includes(x.id);
+        const nova = g.novas.includes(x.id) || !!(novasDestaAbertura && novasDestaAbertura.ids.includes(x.id));
         return `<button type="button" class="conq-cel ${on ? 'on' : 'off'}${sel ? ' sel' : ''}${nova ? ' nova' : ''}"
             data-conq="${escapeHtml(x.id)}" aria-pressed="${sel}">
             <span class="e" aria-hidden="true">${x.emoji}</span>

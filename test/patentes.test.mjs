@@ -308,8 +308,11 @@ test('o selo é um PONTO, e ele fala pra leitor de tela', () => {
 
 test('abrir a aba Histórico apaga o selo — e é na TROCA DE ABA, não no clique', () => {
   const f = fatiar('switchFilterTab');
-  assert.match(f, /filtersTabHistory'\)\s*marcarConquistasVistas\(\)/,
-    'a limpeza saiu do switchFilterTab: pelo teclado (setas/Home/End) o selo ficaria aceso');
+  // Entrar na aba DESENHA o painel (a troca de idioma no mesmo modal o deixava
+  // velho — ver test/aba-historico.test.mjs) e só DEPOIS marca: o desenho é
+  // que põe o anel nas novas.
+  assert.match(f, /filtersTabHistory'\)\s*\{\s*renderHistory\(\);\s*marcarConquistasVistas\(\);/,
+    'a limpeza saiu do switchFilterTab (pelo teclado o selo ficaria aceso), ou passou a vir ANTES do desenho (o painel nasce sem anel)');
   const m = fatiar('marcarConquistasVistas');
   assert.match(m, /g\.novas = \[\]/, 'parou de limpar as conquistas novas');
   assert.match(m, /g\.patenteNova = false/, 'parou de limpar a patente nova');

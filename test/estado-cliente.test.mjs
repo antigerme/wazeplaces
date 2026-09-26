@@ -44,6 +44,7 @@ test('"Sair" e entrar de novo na MESMA página: a ação confirmada grava o hist
     localStorage: { getItem: (k) => (guardado.has(k) ? guardado.get(k) : null) },
     podarHistorico: () => false, salvarHistorico: (h) => guardado.set('waze_places_history', JSON.stringify(h)),
     historyTodayKey: () => '2026-09-25', ondeAgora: () => '30', contaAgora: () => null,
+    agendarRedesenhoDoHistorico: () => {},   // o painel aberto se redesenha (test/aba-historico)
   };
   const { recordHistory } = montar(['loadHistory', 'recordHistory'], deps, ['recordHistory']);
   // O "Sair" deixa o histórico como o `handleLogout` deixa:
