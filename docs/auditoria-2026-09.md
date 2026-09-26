@@ -95,6 +95,91 @@ re-dispare** com a mesma divisão e a lista "já corrigido/decidido" de cada ár
 (este arquivo + o CHANGELOG), pedindo só achados VERIFICADOS, com como
 reproduzir.
 
+## 4b. Rodada 2 — os achados e pra onde cada um foi (2026-09-26)
+
+Os seis auditores terminaram (sobre o lote 5, `wp-lote5` @ bb27dca). **Decisão:
+o lote 5 NÃO sobe sozinho** — o smoke de layout reprovou nele (bloco
+`fila-saida`, "ABERTURA": o esvaziamento espera a conta e o `montar()` do smoke
+injeta o perfil sem o caminho real; ver O2/O3) —, e sobe junto com os
+consertos desta rodada, num PR só. Os consertos estão sendo feitos por seis
+agentes, cada um num worktree próprio a partir de `lote6-trabalho`
+(= lote 5 + "Diagnóstico v10: o 'já tratado' não é falha"), com teste que
+reprova sem o conserto e sabotagem; depois eu junto (cherry-pick), regenero os
+gerados, rodo tudo e subo. Se a sessão cair antes: os branches locais
+`fix-serv`, `fix-hist`, `fix-pres`, `fix-auth`, `fix-off`, `fix-card` somem com
+o contêiner — refaça a partir desta lista.
+
+**Servidor** (`fix-serv`): S1 `parear cancel` apaga sem ler (cota do KV) · S2
+`testar-cookies` regrava a sessão do token do corpo com cookies de OUTRA conta,
+mesmo recusada · S3 cache da releitura recarimbado na escrita (exclusões em
+série apagam foto subida depois) + aprovar não invalida · S5 cookies em formato
+de cabeçalho nunca rotacionam · S6 releitura do duplicado sem teto (passa dos
+45 s do cliente) · S8 `idValido` só no lote · S9 erro de login passageiro sem
+chave (português cru) · S10 quadro gRPC truncado vira sucesso · S11 VM: MIME de
+.jpg/.txt, `extensao-chrome/`+`LICENSE` 404, rota desconhecida (medir o CF) ·
+S12 413 com RST · S13 bbox do perfil (MultiPolygon, pilha). **Sem mudança**: S4
+(`claim` não atômico: só comentário — quem tem o código já entra) e S7
+(cabeçalhos a mais na /api da VM, inofensivo).
+
+**Histórico** (`fix-hist`): o `openModal` rodar a limpeza dos modais que
+esconde (raiz de H15, P3, A1) · H1 painel não redesenha (idioma/pouso) · H2
+trocar idioma destrava Poliglota e recria conquistas depois do Sair · H3 duas
+abas apagam histórico/conquistas/autores · H4 foco no body · H5 Resumo sem
+perfil ("Editor L1") · H6 dia UTC nos autores · H7 "nos últimos 30 dias" falso
+· H8 esquecer autor deixa o "✕ N" no card · H9 "Fim da fila" com confete e
+"Tudo limpo" · C13 "Tudo limpo" dentro da janela do Desfazer · H11 conquistas
+do pouso na hora do pouso · H12 1ª passada engole conquista de evento · H13/C9
+renomear sem `epocaDaSessao` · H14 aviso da recusa automática com 2+ autores ·
+H15 foco ao fechar o Resumo · H16 plural e data da imagem do Resumo · H19
+acessibilidade da aba · H20 francês · H21 Desfazer do lightbox não conta.
+
+**Presença** (`fix-pres`): P1 selo de mensagem nova com a conversa aberta e
+lida · P2 tempo real parado depois de uma falha do token · P3 anexo/conversa
+vazando (parte da presença) · P4 erro do `abrir` some com mensagem nova · P5
+"lida" do `abrir` dado por enviado quando falhou · P6 conversa por cima da tela
+de entrada na queda · P7/P8/P9 leitor de tela · P10 lista da carona no país
+errado · P12 "Ver mensagens anteriores" sem sinal · P13 prazo cru no diário.
+
+**Entrada e Ajuda** (`fix-auth`): A1 login pela extensão com modal de entrada
+aberto · A3 avatar de quem saiu · A4 `autorEmFoco` sobrevive ao Sair · A5
+extensão com conta recusada (4 tentativas, sem motivo) · A6 link de pareamento
+vencido num aparelho logado · A8 camadas abertas por cima da entrada na queda ·
+A9 tela antes do JS ("nível 3+", extensão recomendada no celular) · A10 treino
+deslogado · A12 divisor solto sem a extensão · A13 texto de privacidade × cache
+da releitura · A15 "Entendi" invisível no escuro · A16 termos · A17
+`maxlength` cortando o código colado · A18 link manual some · A19 `?action=` sem
+sessão · A20 mensagens de sessão que afirmam o que o app não sabe · A21 sobras
+depois do Sair · A22 foco · A23 "By AG" · A24 `saiuNestaPagina` · A25 Ajuda no
+celular · A26 iPhone instalado + QR (hipótese de plataforma).
+
+**Offline e fila** (`fix-off`): O1 **ALTA** laço sem teto com 401/403
+persistente na escrita (~2,2 req/s) · O2 **ALTA** perfil pelo alarme falso pula
+o `aoConhecerConta` (a conta anterior age no nome de quem entrou) · O3 item sem
+conta sai no nome de qualquer conta · O4 fila guardada sem região · O5 descarga
+com "lie-fi" perde a decisão · O6 401 passageiro na reposição para a fila · O7
+tile guardado nunca revalida · O8 item transient na cabeça segura a fila · O9
+varredura sem teto de tempo · O10 base do diagnóstico sem teto · O11 geração da
+lista de tiles no worker · + o `montar()` do smoke de layout passar pelo
+caminho real. (Hipótese do auditor derrubada: `na-tiles` EXISTE — 200, PNG
+512×512.)
+
+**Card, mapa e lightbox** (`fix-card`): C1 **ALTA** pinça de zoom na foto
+comete a ação · C2 **ALTA** arrastar com o mouse pela foto/mapa (drag nativo)
+deixa o card colado no cursor e o clique seguinte comete · C3 ação cai num
+pedido que ninguém viu depois de aprovar foto · C4 mapa ampliado vazio com
+ponto a 82 km · C5 mini-mapa não refaz quando a caixa encolhe · C6 arraste pra
+baixo com desvio comete · C7 setas na lista do diff · C8 Desfazer de foto pelo
+teclado · C10 ✨ na foto errada depois de desfazer · C11 aviso "fora deste
+mapa" do ponto errado · C12 pílula estourando no modo de edição · diff do
+`lockRank` 0-indexado.
+
+**Pro owner (mudam tela ou produto — não implementar sem ele):** H10 resumo de
+mês fechado · H17 três contrastes abaixo do mínimo (etiqueta "nova", número de
+rejeitados, ✕ do Resumo) · H18 posição do cabeçalho LIDOS/REJEITADOS · H22
+recusa automática contando pra patente · H23 "Dias ativos N de 30" · P11 "Fora
+do app agora" pra quem está no app noutro país · A14 contraste do "Instalar na
+tela inicial"/"Tentar novamente" — além dos três de antes (§8).
+
 ## 5. Como validar (contêiner novo)
 
 ```bash
