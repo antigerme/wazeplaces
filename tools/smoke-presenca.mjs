@@ -132,7 +132,10 @@ function responderApi(eu, rota, c) {
         .sort((a, b) => b.ts - a.ts)   // como o Waze: da mais nova pra mais antiga
         .map((m) => ({ id: m.id, ts: m.ts, de: { tipo: 1, id: m.de }, para: { tipo: 1, id: m.para }, classe: 'texto', texto: m.texto, recibo: null, contexto: m.ctx }));
       if (!c.antesDe) marcarLida(eu, c.com);
-      return { success: true, mensagens: hist, maisAntigas: false, recibos: [], ...confirmados };
+      // Como o servidor: `lida` diz se a conversa ficou lida (só na primeira
+      // página). Sem ele, o app manda o "lida" à parte — o custo de "abrir a
+      // conversa: UM pedido" que este smoke mede deixaria de ser o do app.
+      return { success: true, mensagens: hist, maisAntigas: false, recibos: [], ...(c.antesDe ? {} : { lida: true }), ...confirmados };
     }
     if (c.acao === 'lida') { marcarLida(eu, c.com); return { success: true, recibos: [], ...confirmados }; }
     if (c.acao === 'enviar') {

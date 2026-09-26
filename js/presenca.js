@@ -1101,7 +1101,12 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     presencaAnotar('chat.abrir', { ok: true, mensagens: msgs.length, maisAntigas: h.maisAntigas, pagina: antes ? 'antiga' : 'primeira' });
     if (!antes) {
         const ultimaDela = Math.max(0, ...msgs.filter((m) => !m.meu).map((m) => m.ts));
-        if (ultimaDela) Presenca.lidaEnviadaAte.set(id, ultimaDela);
+        // Só com o "lida" CONFIRMADO pelo servidor (`lida: true`). Falhou no
+        // Waze, a resposta vinha igual à de "nada a marcar", o app dava a
+        // conversa como lida e nunca mais pedia com ela aberta (auditoria de
+        // 2026-09-26). Sem a marca aqui, o `presencaAgendarLida` logo abaixo
+        // manda o "lida" que faltou — um pedido, só quando o do `abrir` falhou.
+        if (ultimaDela && r.lida === true) Presenca.lidaEnviadaAte.set(id, ultimaDela);
     }
     presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
     // O que chegou pelo fluxo DURANTE o carregamento entrou no histórico (ver

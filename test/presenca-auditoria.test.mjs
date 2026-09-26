@@ -463,3 +463,22 @@ test('P4 sem mensagem nenhuma, o erro do histórico aparece UMA vez (sem o "Carr
   assert.equal((html.match(/presenca\.conversa\.erro/g) || []).length, 1);
   assert.doesNotMatch(html, /presenca\.conversa\.carregando|presenca\.conversa\.vazio/);
 });
+
+// ── P5: o "lida" do `abrir` que falhou no Waze ──────────────────────────────
+
+test('P5 o "lida" do `abrir` falhou no Waze: o app não o dá como feito, e o "lida" que faltou sai com a conversa na tela', async () => {
+  const hist = [daCaf(91, 1790200000000)];
+  const c = novoCliente({ api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: hist, maisAntigas: false, recibos: [], lida: false } : { success: true }) } });
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  assert.ok(!(c.P.Presenca.lidaEnviadaAte.get(CAF) > 0), 'o "lida" que falhou ficou dado como enviado');
+  await c.rodarTimers();
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'lida').length, 1, 'o "lida" que faltou não saiu com a conversa aberta');
+  // CONTROLE: com o "lida" confirmado, nenhum pedido a mais.
+  const d = novoCliente({ api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: hist, maisAntigas: false, recibos: [], lida: true } : { success: true }) } });
+  d.P.presencaAbrirConversa(CAF);
+  await tick();
+  await d.rodarTimers();
+  assert.equal(d.P.Presenca.lidaEnviadaAte.get(CAF), 1790200000000);
+  assert.equal(d.chamadas.chat.filter((x) => x.acao === 'lida').length, 0, 'CONTROLE: com o "lida" confirmado saiu um pedido à toa');
+});

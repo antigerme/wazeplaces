@@ -3280,11 +3280,22 @@ async function abrirConversa(data, { sessions, cookies, region, cabecalho, insta
   } catch {
     apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
   }
+  // O "lida" é acessório pro HISTÓRICO, não pro cliente: ele precisa saber se
+  // a conversa ficou lida no Waze. Com só `recibos: []`, "falhou" e "não havia
+  // o que marcar" eram a mesma resposta, o app dava como lida uma conversa que
+  // o Waze seguia contando, e nada tentava de novo com ela aberta (auditoria de
+  // 2026-09-26). `lida` só vai na primeira página (a antiga não marca nada), e
+  // a conversa que ainda não existe conta como lida: não havia o que marcar.
   let recibos = [];
-  if (lida && !categorizeGrpcError(lida)) {
-    try { recibos = lerMarcarLida(lida.dados).recibos; } catch { recibos = []; }
+  let lidaOk = false;
+  if (lida) {
+    if (lida.grpcStatus === 7 && lida.grpcMessage === 'NO_EXISTING_CONVERSATION') lidaOk = true;
+    else if (!categorizeGrpcError(lida)) {
+      lidaOk = true;
+      try { recibos = lerMarcarLida(lida.dados).recibos; } catch { recibos = []; }
+    }
   }
-  return { status: 200, body: { success: true, ...resultado, recibos } };
+  return { status: 200, body: { success: true, ...resultado, recibos, ...(lida ? { lida: lidaOk } : {}) } };
 }
 
 const ROUTES = {

@@ -397,6 +397,7 @@ test('chat abrir: o histórico e o "lida" numa ida, em paralelo', { timeout: 500
   assert.equal(resultado.body.mensagens[0].texto, 'WP-TESTE oi');
   assert.deepEqual(resultado.body.mensagens[0].contexto, { app: APP_CONTEXTO });
   assert.equal(resultado.body.recibos.length, 2, 'os recibos que o Waze gerou ao marcar como lida sumiram');
+  assert.equal(resultado.body.lida, true, 'o "lida" deu certo e a resposta não diz');
   // As duas chamadas falam da MESMA conversa.
   const comDe = (p, n) => new TextDecoder().decode(um(g.lerCampos(um(g.lerCampos(p.corpo), n)), 2));
   assert.equal(comDe(pedidos.find((p) => p.metodo === 'ListMessages'), 2), '183164343');
@@ -408,6 +409,7 @@ test('chat abrir: página ANTIGA não marca como lida; conversa nova (NO_EXISTIN
     () => dispatch('chat', { ...S.dados, acao: 'abrir', com: '183164343', antesDe: 1790182220160 }, S.ctx));
   assert.equal(antiga.resultado.status, 200);
   assert.deepEqual(antiga.pedidos.map((p) => p.metodo), ['ListMessages'], 'rolar pra trás marcou a conversa como lida');
+  assert.equal('lida' in antiga.resultado.body, false, 'a página antiga não marca nada: não pode dizer que marcou (nem que falhou)');
 
   const nova = await comWaze({
     ListMessages: () => respostaGrpc({}),
@@ -416,6 +418,7 @@ test('chat abrir: página ANTIGA não marca como lida; conversa nova (NO_EXISTIN
   assert.equal(nova.resultado.status, 200, JSON.stringify(nova.resultado.body));
   assert.deepEqual(nova.resultado.body.mensagens, []);
   assert.deepEqual(nova.resultado.body.recibos, []);
+  assert.equal(nova.resultado.body.lida, true, 'conversa que ainda não existe não tinha o que marcar: está lida');
 });
 
 test('chat abrir: o "lida" que falha não derruba o histórico; o histórico que falha, sim', async () => {
@@ -425,6 +428,10 @@ test('chat abrir: o "lida" que falha não derruba o histórico; o histórico que
   }, () => dispatch('chat', { ...S.dados, acao: 'abrir', com: '183164343' }, S.ctx));
   assert.equal(semLida.resultado.status, 200);
   assert.deepEqual(semLida.resultado.body.recibos, []);
+  // A falha do "lida" não derruba o histórico — mas o cliente PRECISA saber
+  // dela: com `recibos: []` e mais nada, ela era igual a "nada a marcar", e o
+  // app dava a conversa como lida (auditoria de 2026-09-26).
+  assert.equal(semLida.resultado.body.lida, false, 'o "lida" falhou e a resposta disse (ou calou) que deu certo');
 
   const morta = await comWaze({
     ListMessages: () => respostaGrpc({ status: 16, mensagem: '' }),
