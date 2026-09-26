@@ -1809,10 +1809,17 @@ button:active {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 0 4px rgba(0, 0, 0, 0.45);
 }
 
+/* O traço da escala é a borda de baixo, e a borda cobre a caixa INTEIRA —
+   conteúdo e padding. Com `content-box` o `width` que a conta calcula era só o
+   do conteúdo, e o `px-2` somava 16 px ao traço: o "50 m" do card media 67 m
+   (auditoria de 2026-09-26). Com `border-box` a caixa É o traço, e o alvo da
+   conta (`ESCALA_ALVO_*` no app.js) já inclui o padding, então o tamanho na
+   tela é o de antes. Um bloco só pras duas classes: a regra estava repetida
+   no `.card-map-scale`, e cópia é como a correção chega numa e não na outra. */
 .mapa-escala,
 .card-map-scale {
   border-bottom: 3px solid currentColor;
-  box-sizing: content-box;
+  box-sizing: border-box;
   text-align: center;
   overflow: visible;
   white-space: nowrap;
@@ -1820,11 +1827,6 @@ button:active {
 
 .card-map-scale {
   bottom: 3.25rem;
-  border-bottom: 3px solid currentColor;
-  box-sizing: content-box;
-  text-align: center;
-  overflow: visible;
-  white-space: nowrap;
 }
 
 .mapa-leg {

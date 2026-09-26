@@ -8575,6 +8575,24 @@ function avisoForaDoMapa(pontos, foraDoMapa, ancora) {
     return Number.isFinite(d) ? t(p.fora, { d: formatarMetros(d) }) : t('card.map.foraDoMapa.semDist');
 }
 
+// A barra de escala do card e a do mapa ampliado, pela MESMA conta
+// (`mapaEscala`, em js/mapa.js). O alvo é o comprimento do TRAÇO inteiro: com o
+// `border-box` do `.mapa-escala` a caixa É o traço, e os 16 px de padding que
+// antes sobravam por fora (e o faziam medir 36% a mais no card) passaram a
+// morar dentro dele. Os alvos são os de antes somados a esses 16 px, então a
+// barra na tela tem o mesmo tamanho de sempre — só passou a medir o que diz.
+const ESCALA_ALVO_CARD_PX = 80;
+const ESCALA_ALVO_AMPLIADO_PX = 112;
+
+function escreverEscala(el, metrosPorPixel, alvoPx) {
+    const e = window.mapaEscala ? mapaEscala(metrosPorPixel, alvoPx) : null;
+    if (!el || !e) return;
+    el.style.width = e.px + 'px';
+    el.textContent = e.metros >= 1000
+        ? t('card.map.km', { n: (e.metros / 1000).toLocaleString(i18nLocale()) })
+        : t('card.map.m', { n: e.metros });
+}
+
 function renderMapa(card, place, refazendo) {
     const box = card.querySelector('.card-map');
     if (!box || !place.mapa || (box.dataset.pronto === '1' && !refazendo)) return !!(box && place.mapa);
@@ -8664,15 +8682,7 @@ function renderMapa(card, place, refazendo) {
 
     // Escala: sem ela o mapa mente sobre distância, porque o zoom muda de card
     // pra card conforme o que precisa caber.
-    const alvo = 64;
-    const metros = alvo * r.metrosPorPixel;
-    const bonito = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000].reduce(
-        (a, b) => (Math.abs(b - metros) < Math.abs(a - metros) ? b : a));
-    const esc = box.querySelector('.card-map-scale');
-    esc.style.width = Math.round(bonito / r.metrosPorPixel) + 'px';
-    esc.textContent = bonito >= 1000
-        ? t('card.map.km', { n: (bonito / 1000).toLocaleString(i18nLocale()) })
-        : t('card.map.m', { n: bonito });
+    escreverEscala(box.querySelector('.card-map-scale'), r.metrosPorPixel, ESCALA_ALVO_CARD_PX);
 
     // Legenda: o marcador sozinho não diz qual é qual, e cor não pode ser o
     // único canal de informação (WCAG 1.4.1).
@@ -8895,15 +8905,7 @@ const MapaLightbox = {
             e.title = p.nome ? `${t(p.rot)} — ${p.nome}` : t(p.rot);
             marks.appendChild(e);
         });
-        const alvo = 96;
-        const metros = alvo * g.metrosPorPixel;
-        const bonito = [5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000]
-            .reduce((a, b) => (Math.abs(b - metros) < Math.abs(a - metros) ? b : a));
-        const esc = document.getElementById('mapaLbEscala');
-        esc.style.width = Math.round(bonito / g.metrosPorPixel) + 'px';
-        esc.textContent = bonito >= 1000
-            ? t('card.map.km', { n: (bonito / 1000).toLocaleString(i18nLocale()) })
-            : t('card.map.m', { n: bonito });
+        escreverEscala(document.getElementById('mapaLbEscala'), g.metrosPorPixel, ESCALA_ALVO_AMPLIADO_PX);
         const leg = document.getElementById('mapaLbLegenda');
         leg.textContent = '';
         const ja = new Set();

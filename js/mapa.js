@@ -48,8 +48,39 @@ function mapaProjetar(lat, lon, z) {
 
 // Metros por pixel na latitude dada — é o que transforma "cabe em 36 metros"
 // na pergunta que o zoom responde.
+//
+// 156543,03392 m/px é a resolução do equador no zoom 0 com tile de 256 px (a
+// circunferência da Terra ÷ 256). O tile do Waze tem 512 (`MAPA_TILE`), e é
+// com ele que o `mapaProjetar` põe tile E marcador: no mesmo zoom, cada pixel
+// cobre METADE do chão. A conta usava o 256 cru, e a barra de escala do card e
+// do mapa ampliado dizia o DOBRO da distância — lendo pela escala, o movimento
+// que o core mede em 39,8 m dava 79,6 m (auditoria de 2026-09-26). A
+// resolução sai do mesmo `MAPA_TILE` da projeção pra as duas não poderem
+// divergir de novo.
 function mapaMetrosPorPixel(lat, z) {
-  return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, z);
+  return 156543.03392 / (MAPA_TILE / 256) * Math.cos(lat * Math.PI / 180) / Math.pow(2, z);
+}
+
+// A barra de escala: o valor REDONDO (1, 2 ou 5 × 10ⁿ metros) mais perto de
+// `alvoPx` pixels, e quantos pixels ele ocupa. Fonte única do card e do mapa
+// ampliado, que tinham cada um a sua lista de valores — e a do ampliado parava
+// em 50 km: nos zooms 4 a 6 o traço de "50 km" encolhia pra 22–38 px, menor
+// que o próprio texto. A sequência 1-2-5 não tem teto, então nenhum zoom fica
+// sem valor que caiba.
+//
+// `px` é a medida do TRAÇO inteiro, e quem o desenha tem que desenhá-lo desse
+// tamanho (`box-sizing: border-box` no `.mapa-escala`): com `content-box` o
+// padding somava 16 px ao traço, e o "50 m" do card media 67 m.
+function mapaEscala(metrosPorPixel, alvoPx) {
+  if (!(metrosPorPixel > 0) || !(alvoPx > 0)) return null;
+  const alvo = alvoPx * metrosPorPixel;
+  const base = Math.pow(10, Math.floor(Math.log10(alvo)));
+  let metros = base;
+  // Empate fica com o MENOR (a ordem da lista), como a escolha de antes.
+  for (const k of [1, 2, 5, 10]) {
+    if (Math.abs(k * base - alvo) < Math.abs(metros - alvo)) metros = k * base;
+  }
+  return { metros, px: Math.round(metros / metrosPorPixel) };
 }
 
 // Estes pontos cabem na caixa neste zoom? A margem é a mesma que o encaixe
@@ -318,8 +349,9 @@ if (typeof window !== 'undefined') {
   window.MAPA_Z_NAV_MAX = MAPA_Z_NAV_MAX;
   window.MAPA_Z_NAV_MIN = MAPA_Z_NAV_MIN;
   window.mapaMetrosPorPixel = mapaMetrosPorPixel;
+  window.mapaEscala = mapaEscala;
 }
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { mapaMontar, mapaGrade, mapaEnquadrarAmpliado, mapaProjetar, mapaZoomQueCabe, mapaCabe, mapaMetrosPorPixel,
-  MAPA_Z_NAV_MAX, MAPA_Z_NAV_MIN, MAPA_TILE, MAPA_Z_MAX, MAPA_Z_MIN };
+  mapaEscala, MAPA_Z_NAV_MAX, MAPA_Z_NAV_MIN, MAPA_TILE, MAPA_Z_MAX, MAPA_Z_MIN };
 }

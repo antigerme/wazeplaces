@@ -47,12 +47,13 @@ function desenhar(mapa, { w = 359, h = 200, extra = {} } = {}) {
   const card = { querySelector: (s) => (s === '.card-map' ? box : null) };
   const deps = {
     document: { createElement: (tag) => new El(tag), createTextNode: (x) => ({ textContent: x }) },
-    window: { mapaMontar: M.mapaMontar }, mapaMontar: M.mapaMontar,
+    window: { mapaMontar: M.mapaMontar, mapaEscala: M.mapaEscala }, mapaMontar: M.mapaMontar,
+    mapaEscala: M.mapaEscala, ESCALA_ALVO_CARD_PX: 80,
     Image: class extends El { constructor() { super('img'); } },
     API: { getRegion: () => 'row' }, t, i18nLocale: () => 'pt-BR',
     vigiarCaixaDoMapa() {}, registrarFalhaDeTile() {},
   };
-  const nomes = ['pontosDoMapa', 'avisoForaDoMapa', 'formatarMetros', 'distanciaKm', 'renderMapa'];
+  const nomes = ['pontosDoMapa', 'avisoForaDoMapa', 'formatarMetros', 'distanciaKm', 'escreverEscala', 'renderMapa'];
   const renderMapa = new Function(...Object.keys(deps), nomes.map(fatiar).join('\n') + '\nreturn renderMapa;')(
     ...Object.values(deps));
   renderMapa(card, { mapa, ...extra }, true);

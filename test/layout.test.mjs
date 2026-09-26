@@ -2923,10 +2923,20 @@ test('contagem sai CRUA — e decimal e data seguem o locale', () => {
   // COLADA no que guarda, nunca por distância: `[^]{0,120}` alcançava outro
   // `toLocaleString` vizinho e passava com a distância já sabotada — gotcha #67,
   // e foi preciso sabotar pra descobrir que a asserção era decoração.
-  const emKm = [...app.matchAll(/\(bonito \/ 1000\)\.toLocaleString\(i18nLocale\(\)\)/g)].length;
-  assert.equal(emKm, 2,
-    `a distância em km perdeu o locale em ${2 - emKm} dos 2 lugares (card e mapa ampliado) — `
+  // A barra de escala do card e a do ampliado passaram a ser escritas por UMA
+  // função (`escreverEscala`, auditoria de 2026-09-26): o km no locale mora
+  // nela, e os DOIS lugares têm de passar por ela.
+  const iEsc = app.indexOf('function escreverEscala(');
+  assert.ok(iEsc > 0, 'sumiu o escreverEscala');
+  const rEsc = app.slice(iEsc + 1);
+  const corpoEsc = app.slice(iEsc, iEsc + 1 + rEsc.search(/\n(?:function |const |\/\/ ──)/));
+  assert.match(corpoEsc, /\(e\.metros \/ 1000\)\.toLocaleString\(i18nLocale\(\)\)/,
+    'a distância em km da barra de escala perdeu o locale — '
     + 'ali o separador é ARITMÉTICA: `1.2` lido por um brasileiro é mil e duzentos');
+  assert.match(app, /escreverEscala\(box\.querySelector\('\.card-map-scale'\)/,
+    'a escala do CARD deixou de passar pelo escreverEscala');
+  assert.match(app, /escreverEscala\(document\.getElementById\('mapaLbEscala'\)/,
+    'a escala do mapa AMPLIADO deixou de passar pelo escreverEscala');
   assert.match(app, /new Date\([^)]*\)\.toLocaleDateString\(i18nLocale\(\)/,
     'controle: sumiu a formatação de DATA, que deve continuar no locale');
 });

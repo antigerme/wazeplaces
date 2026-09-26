@@ -37,14 +37,66 @@ test('projeção: Mercator ancorada nos pontos que todo mundo conhece', () => {
 });
 
 test('escala: metros por pixel bate com o valor conhecido do Mercator', () => {
-  // No equador, z0, um tile de 512px cobre a circunferência da Terra.
-  const mpp = M.mapaMetrosPorPixel(0, 0);
-  assert.ok(Math.abs(mpp * 256 - 40075016.686 / 256 * 256 / 256 * 256) >= 0);
-  // Âncora dura: ~2,39 m/px em z16 no equador (156543.03392 / 2^16).
-  assert.ok(Math.abs(M.mapaMetrosPorPixel(0, 16) - 2.38865) < 0.001);
+  // No equador, z0, um tile de 512px cobre a circunferência da Terra (a do
+  // WGS84, 40.075.016,686 m) — e é de 512 que a projeção do app é feita.
+  const CIRC = 40075016.686;
+  assert.ok(Math.abs(M.mapaMetrosPorPixel(0, 0) - CIRC / M.MAPA_TILE) < 0.01,
+    `z0 no equador: ${M.mapaMetrosPorPixel(0, 0)} m/px, e um tile de ${M.MAPA_TILE}px cobre ${CIRC} m`);
+  // Âncora dura: ~1,194 m/px em z16 no equador (40.075.016,686 / 512 / 2^16).
+  // Esta linha ancorava 2,38865 — o valor da conta de tile de 256 px, que é o
+  // DOBRO — e a de cima era `>= 0`, sempre verdadeira: o teste aprovava a
+  // barra de escala que media o dobro (auditoria de 2026-09-26).
+  assert.ok(Math.abs(M.mapaMetrosPorPixel(0, 16) - 1.19433) < 0.001,
+    `z16 no equador: ${M.mapaMetrosPorPixel(0, 16)} m/px, esperado ~1,194`);
   // Longe do equador o pixel cobre MENOS chão — é isso que faz a barra de
   // escala precisar da latitude em vez de uma tabela fixa por zoom.
   assert.ok(M.mapaMetrosPorPixel(60, 16) < M.mapaMetrosPorPixel(0, 16));
+});
+
+// O oráculo INDEPENDENTE da conta: a distância no chão entre dois pontos
+// (haversine, sem nada do app) dividida pela distância em pixels que a PRÓPRIA
+// projeção do app põe entre eles. É a projeção que posiciona tile e marcador,
+// então a escala só não mente se bater com ela — em qualquer zoom e latitude.
+test('escala: m/px é o da PROJEÇÃO que desenha os marcadores (a barra não mede o dobro)', () => {
+  const R = 6378137;   // raio equatorial do WGS84, o do Mercator da web
+  const hav = (a, b) => {
+    const r = Math.PI / 180, dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  };
+  for (const lat of [0, -12.9, -23.55, 38.7, 51.5, 60]) {
+    for (const z of [4, 10, 13, 16, 17, 19]) {
+      const a = [lat, 10], b = [lat, 10.0005];   // ~55 m leste-oeste no equador
+      const px = M.mapaProjetar(b[0], b[1], z).x - M.mapaProjetar(a[0], a[1], z).x;
+      const pelaProjecao = hav(a, b) / px;
+      const daConta = M.mapaMetrosPorPixel(lat, z);
+      assert.ok(Math.abs(daConta / pelaProjecao - 1) < 0.001,
+        `lat ${lat} z${z}: a conta diz ${daConta.toFixed(4)} m/px e a projeção põe ${pelaProjecao.toFixed(4)} (${(daConta / pelaProjecao).toFixed(2)}×)`);
+    }
+  }
+});
+
+test('barra de escala: valor redondo, traço do tamanho do alvo, e medindo o que diz — em TODO zoom', () => {
+  for (const alvo of [80, 112]) {
+    for (const lat of [0, -23.55, 51.5, 64]) {
+      for (let z = M.MAPA_Z_NAV_MIN; z <= M.MAPA_Z_NAV_MAX; z++) {
+        const mpp = M.mapaMetrosPorPixel(lat, z);
+        const e = M.mapaEscala(mpp, alvo);
+        const onde = `alvo ${alvo}px, lat ${lat}, z${z} (${mpp.toFixed(2)} m/px)`;
+        assert.ok(e, `${onde}: sem escala`);
+        // 1, 2 ou 5 × 10^n: é o que se lê de relance.
+        const mant = e.metros / Math.pow(10, Math.floor(Math.log10(e.metros) + 1e-9));
+        assert.ok([1, 2, 5].some((k) => Math.abs(mant - k) < 1e-9), `${onde}: ${e.metros} m não é um valor redondo`);
+        // O traço fica perto do alvo — com a lista que parava em 50 km, nos
+        // zooms 4 a 6 ele encolhia pra 22–38 px, menor que o próprio texto.
+        assert.ok(e.px >= alvo * 0.5 && e.px <= alvo * 1.5, `${onde}: traço de ${e.px}px pra um alvo de ${alvo}`);
+        // E ele mede o que o rótulo diz (o arredondamento pro pixel inteiro é
+        // o único erro que sobra).
+        assert.ok(Math.abs(e.px * mpp - e.metros) <= mpp * 0.5 + 1e-9,
+          `${onde}: o traço de ${e.px}px mede ${(e.px * mpp).toFixed(1)} m e o rótulo diz ${e.metros} m`);
+      }
+    }
+  }
 });
 
 test('enquadramento: TODOS os marcadores caem dentro da caixa', () => {

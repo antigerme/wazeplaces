@@ -1206,6 +1206,94 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── A ESCALA mede o que diz (auditoria de 2026-09-26) ─────────────────────
+//
+// A barra de escala do card e a do ampliado diziam o DOBRO da distância: a
+// conta usava o tile de 256 px e a projeção usa o de 512. E o traço (a borda
+// de baixo) cobria também os 16 px de padding, que o `width` calculado não
+// contava. O teste de unidade ancorava o valor errado, então só a TELA diz a
+// verdade: a distância entre os dois marcadores de um pedido de MOVIMENTO,
+// lida pela barra DESENHADA (o `getBoundingClientRect` do traço, não o
+// `style.width` que o código pediu — gotcha #58), tem que dar o que o core
+// mediu. Sabotado: com a conta de 256 px dá 2,0×; com o `content-box`, 0,8×.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  // O pedido de movimento MAIS LONGO das fixtures: com poucos pixels entre os
+  // marcadores o arredondamento vira ruído (pré-condição conferida abaixo).
+  const alvo = FIXTURES_PAISES.filter((f) => f.mapa && f.mapa.proposto && f.mapa.movidoM > 1)
+    .sort((a, b) => b.mapa.movidoM - a.mapa.movidoM)[0];
+  checa(!!alvo, 'escala: nenhuma fixture de movimento — o bloco não mede nada');
+  if (alvo) {
+    await page.evaluate(async (pl) => {
+      setLang('pt'); applyI18n();
+      AppState.authenticated = true;
+      AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showLoading(false);
+      AppState.queue = [pl]; AppState.currentPlace = pl;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+      await new Promise((k) => setTimeout(k, 400));
+    }, alvo);
+    await assentar(page);
+    // Lê a distância PELA BARRA: pixels entre os centros dos dois marcadores ×
+    // (metros do rótulo ÷ largura desenhada do traço).
+    const lerPelaEscala = (sel) => page.evaluate(({ marcas, escala }) => {
+      const centro = (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+      const a = document.querySelector(marcas + ' .mapa-marca.mapa-atual');
+      const b = document.querySelector(marcas + ' .mapa-marca.mapa-proposto');
+      const esc = document.querySelector(escala);
+      if (!a || !b || !esc) return { falta: true };
+      const [ax, ay] = centro(a), [bx, by] = centro(b);
+      const txt = esc.textContent.trim();
+      const n = parseFloat(txt.replace(/\./g, '').replace(',', '.'));
+      const metros = /km/.test(txt) ? n * 1000 : n;
+      const traco = esc.getBoundingClientRect().width;
+      return { px: Math.hypot(bx - ax, by - ay), metros, traco, txt };
+    }, sel);
+    const conferir = (m, onde) => {
+      if (m.falta) { checa(false, `escala ${onde}: faltou marcador ou barra — nada a medir`); return; }
+      // PRÉ-CONDIÇÃO: marcadores perto demais fazem o erro de 1 px virar 10%.
+      checa(m.px >= 20, `escala ${onde}: marcadores a ${m.px.toFixed(0)}px — perto demais pra medir`);
+      checa(Number.isFinite(m.metros) && m.metros > 0 && m.traco > 0,
+        `escala ${onde}: rótulo "${m.txt}" ou traço de ${m.traco}px ilegível — a medida está cega`);
+      const lido = m.px * m.metros / m.traco;
+      const razao = lido / alvo.mapa.movidoM;
+      checa(Math.abs(razao - 1) <= 0.05,
+        `escala ${onde}: lendo pela barra o movimento dá ${lido.toFixed(1)} m e o core mediu ${alvo.mapa.movidoM.toFixed(1)} m (${razao.toFixed(2)}×)`,
+        `"${m.txt}" = ${m.traco.toFixed(1)}px · marcadores a ${m.px.toFixed(1)}px`);
+    };
+    conferir(await lerPelaEscala({ marcas: '#cardStack .place-card:not(.card-fundo) .card-map-marks',
+      escala: '#cardStack .place-card:not(.card-fundo) .card-map-scale' }), 'do card');
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-map');
+    await page.waitForTimeout(500);
+    conferir(await lerPelaEscala({ marcas: '#mapaLbMarks', escala: '#mapaLbEscala' }), 'do mapa ampliado');
+    // Nos zooms mais abertos o texto cabe no traço: a lista antiga parava em
+    // 50 km e, do z6 pra baixo, o "50 km" ficava num traço de 22–38 px.
+    for (const z of [8, 6, 5, 4]) {
+      const e = await page.evaluate((zz) => {
+        MapaLightbox.z = zz; MapaLightbox.desenhar();
+        const el = document.getElementById('mapaLbEscala');
+        const rg = document.createRange(); rg.selectNodeContents(el);
+        return { traco: el.getBoundingClientRect().width, tinta: rg.getBoundingClientRect().width, txt: el.textContent };
+      }, z);
+      checa(e.tinta > 0 && e.tinta <= e.traco,
+        `escala do mapa ampliado no z${z}: o rótulo "${e.txt}" (${e.tinta.toFixed(0)}px) não cabe no traço de ${e.traco.toFixed(0)}px`);
+    }
+    await page.evaluate(() => MapaLightbox.close());
+  }
+  checa(erros.length === 0, 'escala: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 // ── Lixeira do lightbox: portão, alvo e a camada da confirmação ──────────
 //
 // É o único caminho do app que ESCREVE no mapa em si, então a rede fica aqui e
@@ -6835,6 +6923,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + ${FORMATOS_FOTO.length} formatos de foto × ${APARELHOS_PAISES.length} aparelhos`
   + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403)`
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, Esc e ✕)`
+  + `, + escala do mapa medindo o que diz (card e ampliado, pela barra DESENHADA contra o movimento que o core mediu, e o rótulo cabendo no traço do z8 ao z4)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
   + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true)`
