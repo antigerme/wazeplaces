@@ -177,18 +177,61 @@ test('diagnóstico: currentPlace vai como ÍNDICE, não duplicado', () => {
   assert.match(REPLAY, /'\[circular\]'/, 'o replay parou de remendar os arquivos do formato antigo');
 });
 
-test('diag-tela: procura a FONTE também nos recursos — o coletor a deixa fora do `codigo`', () => {
-  // Desde v2026.09.10-04 o coletor pula a fonte (binário lido como texto não
-  // serve), e o `diag-tela` só procurava no `codigo`: toda tela remontada saiu
-  // com a fonte do sistema, sem aviso. MEDIDO no relatório real de 2026-09-24:
-  // `fontesEmbutidas: []` com o leitor de antes, a Inter com o de hoje.
-  assert.match(APP, /if \(\/\\\.\(woff2\?\|ttf\|/, 'o coletor voltou a guardar a fonte? então este guard mudou de sentido — releia');
-  const TELA = readFileSync(join(ROOT, 'tools/diag-tela.mjs'), 'utf8');
-  const semCom = TELA.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  const laco = semCom.match(/for \(const u of ([\w.()]+)\) \{\s*\n\s*const m = \/\\\/fonts\\\//);
-  assert.ok(laco, 'sumiu o laço que casa a fonte pelo nome');
-  const def = new RegExp(`const ${laco[1].replace(/[.()]/g, '\\$&')} = ([\\s\\S]*?);\\n`).exec(semCom);
-  assert.ok(def && /d\.recursos/.test(def[1]), `a busca da fonte itera \`${laco[1]}\`, que não inclui os recursos da página`);
+// ── diag-tela (auditoria de 2026-09-26) ─────────────────────────────────────
+const TELA = readFileSync(join(ROOT, 'tools/diag-tela.mjs'), 'utf8');
+const fatiarDaTela = (nome) => {
+  const ini = TELA.indexOf('\nfunction ' + nome + '(');
+  assert.ok(ini > 0, `${nome} sumiu do diag-tela`);
+  let prof = 0, fim = -1;
+  for (let k = TELA.indexOf('{', TELA.indexOf(')', ini)); k < TELA.length; k++) {
+    if (TELA[k] === '{') prof++;
+    else if (TELA[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  return new Function(TELA.slice(ini, fim) + `\nreturn ${nome};`)();
+};
+
+test('diag-tela: a fonte entra NA `@font-face` do app — a família, o peso e o unicode-range são os dele', () => {
+  // A ferramenta registrava a fonte como "Inter var" (100–900), um nome que o
+  // CSS do app (`Inter`, 300–700) nunca pede: a face ficava `unloaded`, a tela
+  // saía na fonte do sistema, e `fontesEmbutidas` afirmava o contrário. Aqui
+  // roda sobre o CSS DE VERDADE (o `css/app.css` que o app serve).
+  const embutirFontes = fatiarDaTela('embutirFontes');
+  const APP_CSS = readFileSync(join(ROOT, 'css/app.css'), 'utf8');
+  const lidas = [];
+  const { css, fontes } = embutirFontes(APP_CSS, (nome) => { lidas.push(nome); return 'QUFBQQ=='; });
+  const faces = css.match(/@font-face\{[^}]*\}/g) || [];
+  assert.ok(faces.length >= 2, `PRÉ-CONDIÇÃO: o CSS do app tem ${faces.length} @font-face — o teste precisa ser revisto`);
+  for (const f of faces) {
+    assert.match(f, /font-family:\s*'?"?Inter'?"?;/, 'a família mudou na remontagem: o app pede `Inter`');
+    assert.match(f, /font-weight:\s*300 700/, 'o peso mudou na remontagem: o app declara 300 700');
+    assert.match(f, /unicode-range:/, 'o unicode-range da regra do app sumiu');
+    assert.match(f, /src:\s*url\(data:font\/woff2;base64,QUFBQQ==\)/, 'a regra do app não recebeu a fonte embutida');
+  }
+  assert.ok(!/Inter var/.test(css), 'voltou a família inventada');
+  assert.deepEqual(fontes.map((x) => x.nome).sort(), [...new Set(lidas)].sort(), '`fontesEmbutidas` tem que ser o que ENTROU no CSS');
+  assert.ok(fontes.length >= 2);
+  // CONTROLE: fonte que não está no repositório fica como estava (e não entra na lista).
+  const semArquivo = embutirFontes(APP_CSS, () => null);
+  assert.equal(semArquivo.css, APP_CSS);
+  assert.deepEqual(semArquivo.fontes, []);
+  // E a ferramenta MEDE se a família carregou, na página remontada.
+  assert.match(TELA, /document\.fonts\.check\(/, 'o diag-tela deixou de medir se a fonte carregou');
+});
+
+test('diag-tela: relatório SEM captura é rotulado com a versão DELE e o painel que ele mediu', () => {
+  // Um v10 sem capturas saía como "arquivo v1 · painel=?".
+  const momentosDoRelatorio = fatiarDaTela('momentosDoRelatorio');
+  const v10 = { _versaoDoDiag: 10, _gerado: 'x', dom: '<html></html>', momentos: [],
+                resumo: { telaAgora: { painel: 'tudoLimpo', modais: ['filtersModal'] } } };
+  const [m] = momentosDoRelatorio(v10);
+  assert.match(m.motivo, /relatório v10/, 'o rótulo não diz a versão real do relatório');
+  assert.equal(m.painel, 'tudoLimpo', 'o painel não veio do `resumo.telaAgora`');
+  assert.deepEqual(m.modais, ['filtersModal']);
+  assert.ok(!/v1\b/.test(m.motivo), 'voltou o "arquivo v1"');
+  // CONTROLE: com capturas, são elas que se remontam, iguais.
+  const cap = [{ motivo: 'manual', dom: '<html></html>' }];
+  assert.equal(momentosDoRelatorio({ momentos: cap, dom: 'x' }), cap);
+  assert.deepEqual(momentosDoRelatorio({ momentos: [] }), []);
 });
 
 test('diag-api: decide por LISTA DE LEITURA — caminho torto até uma rota de escrita é recusado antes de ler o arquivo', () => {
