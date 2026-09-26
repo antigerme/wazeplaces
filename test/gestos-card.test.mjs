@@ -426,7 +426,8 @@ function constanteDoApp(nome) {
 const DEPS_DO_TECLADO = ['document', 'window', 'AppState', 'MapaLightbox', 'Lightbox', 'topOpenModal',
   'trapTabInModal', 'closeModal', 'desfazerAcaoPendente', 'acoesTravadas', 'agirNoPedidoDoGesto',
   'pedidoDoCard', 'handleReject', 'handleMarkAsRead', 'handleSkip', 'desfazerPeloTeclado'];
-function montarTeclado() {
+function montarTeclado() { return montarTecladoCom({}); }
+function montarTecladoCom(trocas) {
   const doc = { activeElement: null, getElementById: () => null };
   const saiu = [];
   const deps = {
@@ -437,6 +438,7 @@ function montarTeclado() {
     topOpenModal: () => null, trapTabInModal() {}, closeModal() {}, desfazerAcaoPendente() {},
     acoesTravadas: () => false, agirNoPedidoDoGesto() {}, pedidoDoCard: () => null,
     handleReject() {}, handleMarkAsRead() {}, handleSkip() {}, desfazerPeloTeclado: () => false,
+    ...trocas,
   };
   const fonte = [constanteDoApp('TECLAS_DE_CURSOR'), fatiarApp('focoEmCampoDeTexto'),
     constanteDoApp('AREAS_DO_CARD_QUE_ROLAM'), fatiarApp('focoEmAreaQueRola'), fatiarApp('handleKeyDown'),
@@ -472,4 +474,45 @@ test('C7 CONTROLE: fora das áreas que rolam as setas seguem decidindo', () => {
   k.deps.document.activeElement = null;
   k.tecla('ArrowLeft');
   assert.deepEqual(k.saiu, ['left', 'right', 'up', 'left'], 'o teclado deixou de decidir fora da lista');
+});
+
+// ── C8: a tecla z desfaz também as ações de FOTO ──────────────────────────
+test('C8 z desfaz no lightbox e no card — e nunca com o campo do nome focado', () => {
+  // MEDIDO: excluir uma foto e apertar z no lightbox → a exclusão SAIU 3 s
+  // depois; fechar com Esc e apertar z → idem.
+  let pediu = 0;
+  const m = montarTecladoCom({ desfazerPeloTeclado: () => { pediu++; return true; } });
+  m.deps.Lightbox.isOpen = () => true;
+  const e1 = m.tecla('z');
+  assert.equal(pediu, 1, 'z no lightbox não pediu o desfazer');
+  assert.equal(e1.parou, true, 'z no lightbox desfez sem cancelar a tecla');
+  // Renomeando: o z é uma LETRA do nome.
+  m.focar([], 'INPUT');
+  m.deps.document.activeElement.type = 'text';
+  m.tecla('z');
+  assert.equal(pediu, 1, 'z digitado no campo do nome desfez a ação (e sumiu da palavra)');
+  // No card (lightbox fechado), o mesmo caminho.
+  m.deps.document.activeElement = null;
+  m.deps.Lightbox.isOpen = () => false;
+  const e2 = m.tecla('Z');
+  assert.equal(pediu, 2, 'z no card não pediu o desfazer');
+  assert.equal(e2.parou, true);
+});
+
+test('C8 o desfazer do teclado aperta o MESMO botão do banner — e não inventa ação sem janela aberta', () => {
+  const corpo = fatiarApp('desfazerPeloTeclado');
+  const rodar = ({ pendingAction = null, pendente = null, botao = true } = {}) => {
+    const log = [];
+    const doc = { getElementById: (id) => (id === 'undoBtn' && botao ? { click: () => log.push('clicou') } : null) };
+    const f = new Function('AppState', 'desfazerAcaoPendente', 'exclusaoPendente', 'aprovacaoPendente', 'renomeacaoPendente', 'document',
+      corpo + '\nreturn desfazerPeloTeclado;')({ pendingAction }, () => log.push('card'),
+      pendente === 'exclusao' ? {} : null, pendente === 'aprovacao' ? {} : null, pendente === 'renomeacao' ? {} : null, doc);
+    return { devolveu: f(), log };
+  };
+  assert.deepEqual(rodar({ pendingAction: {} }), { devolveu: true, log: ['card'] }, 'o z do card deixou de desfazer o swipe');
+  for (const p of ['exclusao', 'aprovacao', 'renomeacao']) {
+    assert.deepEqual(rodar({ pendente: p }), { devolveu: true, log: ['clicou'] }, `z com a ${p} na janela não apertou o Desfazer`);
+  }
+  // Sem janela aberta nada acontece — e o botão de outro contexto não é apertado à toa.
+  assert.deepEqual(rodar({}), { devolveu: false, log: [] }, 'z sem janela aberta apertou alguma coisa');
 });

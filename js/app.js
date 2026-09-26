@@ -2949,7 +2949,17 @@ function handleKeyDown(e) {
         // a dica não muda de texto (decisão do owner: um texto só, não um
         // catatau por plataforma).
         else if (e.key === 'ArrowDown') { e.preventDefault(); Lightbox.close(); }
-        else if (e.key === 'Tab') trapTabInModal(e, document.getElementById('imageLightbox'));
+        // z desfaz a exclusão, a aprovação ou a renomeação que acabou de sair
+        // daqui — o banner delas mora FORA do lightbox, e a tecla não chegava a
+        // ele (auditoria de 2026-09-26). Nunca com o campo do nome focado: ali
+        // o z é uma LETRA do nome.
+        else if ((e.key === 'z' || e.key === 'Z') && !focoEmCampoDeTexto()) {
+            if (desfazerPeloTeclado()) e.preventDefault();
+        }
+        // O Desfazer entra na volta do Tab: ele aparece POR CIMA do lightbox
+        // (o `#notifyStack` é z-70), e o Tab preso na camada o deixava visível
+        // e inalcançável pra quem opera pelo teclado ou leitor de tela.
+        else if (e.key === 'Tab') trapTabInModal(e, document.getElementById('imageLightbox'), document.getElementById('undoContainer'));
         return;
     }
 
@@ -2975,10 +2985,11 @@ function handleKeyDown(e) {
     // e a trava daria `preventDefault` no ↑ e travaria a rolagem.
     if (focoEmAreaQueRola() && TECLAS_DE_CURSOR.includes(e.key)) return;
 
-    // Desfazer via teclado (power-user opera por teclas): z (ou Ctrl/Cmd+Z).
-    if ((e.key === 'z' || e.key === 'Z') && AppState.pendingAction) {
+    // Desfazer via teclado (power-user opera por teclas): z (ou Ctrl/Cmd+Z) —
+    // o do card E o das ações de foto, que seguem com a janela aberta depois
+    // de o lightbox fechar (ver `desfazerPeloTeclado`).
+    if ((e.key === 'z' || e.key === 'Z') && desfazerPeloTeclado()) {
         e.preventDefault();
-        desfazerAcaoPendente();
         return;
     }
 
@@ -3009,19 +3020,42 @@ function handleKeyDown(e) {
 
 // Confina o Tab dentro do modal aberto — sem isso, Tab saía do diálogo e Enter
 // podia disparar uma ação destrutiva no card invisível atrás (M3/HIG).
-function trapTabInModal(e, modal) {
+//
+// `emprestadas`: o que mora FORA da camada mas é desenhado POR CIMA dela e faz
+// parte da volta — hoje, o Desfazer das ações de foto, que fica no
+// `#notifyStack` (z-70) sobre o lightbox (z-65). Sem entrar na volta ele era
+// visível e inalcançável pelo Tab (auditoria de 2026-09-26).
+function trapTabInModal(e, modal, ...emprestadas) {
     if (!modal) return;
     const sel = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([type=hidden]):not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const list = Array.from(modal.querySelectorAll(sel)).filter(el => el.offsetParent !== null);
+    const zonas = [modal, ...emprestadas].filter(Boolean);
+    const porZona = zonas.map((z) => Array.from(z.querySelectorAll(sel)).filter(el => el.offsetParent !== null));
+    const list = porZona.flat();
     if (list.length === 0) return;
     const first = list[0];
     const last = list[list.length - 1];
     // Foco FORA da camada (a camada abriu sem puxá-lo, ou ele ficou no corpo):
     // o Tab seguinte ia pro próximo da página — o card de trás. Entra pela
     // ponta certa, em vez de só dar a volta quando já está dentro.
-    if (!modal.contains(document.activeElement)) {
+    if (!zonas.some((z) => z.contains(document.activeElement))) {
         e.preventDefault();
         (e.shiftKey ? last : first).focus();
+        return;
+    }
+    // Na DIVISA entre duas zonas o próximo é o da outra zona, e quem diz é a
+    // lista — o próximo do DOM pode ser qualquer coisa entre elas (o botão do
+    // modo dev, um banner do topo). No meio de uma zona o Tab segue do
+    // navegador, como sempre foi.
+    const i = list.indexOf(document.activeElement);
+    const pontas = porZona.filter((l) => l.length).map((l) => [l[0], l[l.length - 1]]);
+    if (i > 0 && e.shiftKey && pontas.some(([a]) => a === list[i])) {
+        e.preventDefault();
+        list[i - 1].focus();
+        return;
+    }
+    if (i >= 0 && i < list.length - 1 && !e.shiftKey && pontas.some(([, b]) => b === list[i])) {
+        e.preventDefault();
+        list[i + 1].focus();
         return;
     }
     if (e.shiftKey && document.activeElement === first) {
@@ -13686,6 +13720,25 @@ function desfazerAcaoPendente() {
     }
     removeUndoBanner();
     aplicarTravaDeAcao();
+}
+
+// A tecla z desfaz o que o banner do Desfazer oferece AGORA — a ação do card
+// ou a da foto (excluir, aprovar, renomear). Até a auditoria de 2026-09-26 ela
+// só olhava o `pendingAction` do card: a exclusão de uma foto não se desfazia
+// pelo teclado, nem dentro do lightbox nem depois de fechá-lo, com a janela
+// correndo e o banner na tela.
+//
+// A da foto vai pelo PRÓPRIO botão do banner, e não pelo `desfazer` de cada
+// pendência: o banner é a fonte única do que "Desfazer" faz ali (o que ele
+// registra, o que ele limpa), e dois caminhos pro mesmo conceito é como o
+// teclado e o dedo passam a discordar sem ninguém ver. Devolve se desfez.
+function desfazerPeloTeclado() {
+    if (AppState.pendingAction) { desfazerAcaoPendente(); return true; }
+    if (!(exclusaoPendente || aprovacaoPendente || renomeacaoPendente)) return false;
+    const btn = document.getElementById('undoBtn');
+    if (!btn) return false;
+    btn.click();
+    return true;
 }
 
 function removeUndoBanner() {
