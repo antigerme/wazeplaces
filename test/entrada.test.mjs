@@ -474,7 +474,7 @@ function montarCamadas({ abertos = [], lightbox = false, mapa = false, profundid
   const MapaLightbox = { aberto: mapa, fechou: null, isOpen() { return this.aberto; }, close(v) { this.aberto = false; this.fechou = !!v; } };
   const history = { pushState: () => ops.push('push'), go: (n) => ops.push('go(' + n + ')'), back: () => ops.push('back') };
   const deps = {
-    document, history, Lightbox, MapaLightbox, dfato() {}, lastFocusedBeforeModal: null,
+    document, history, Lightbox, MapaLightbox, dfato() {}, lastFocusedBeforeModal: null, devolverFoco() {},
     LIMPEZA_AO_FECHAR: new Proxy({}, { get: (t, id) => () => limpezas.push(id) }),
   };
   const app = montar(['fecharCamadasAbertas', 'closeModal', 'topOpenModal'], deps,
@@ -835,4 +835,61 @@ test('sonda que FALHOU por rede/5xx não afirma que a sessão "continua válida"
     assert.doesNotMatch(D[lang]['toast.sessionExpired.local'], /inatividade|inactivity|inactividad|inactivit/i,
       `${lang}: a queda afirma "inatividade", e o servidor não sabe disso`);
   }
+});
+
+// ── A22: o foco nunca cai no BODY, e o pareamento não abre no código fraco ───
+function botaoDeMentira(id, { naTela = true, emCamada = false } = {}) {
+  const b = { id, focado: 0, isConnected: true, disabled: false,
+    getClientRects: () => (naTela ? [{}] : []),
+    closest: (sel) => (emCamada && sel === '[role="dialog"]' ? {} : null),
+    focus() { this.focado++; } };
+  return b;
+}
+function montarFoco({ alvo, reserva = null }) {
+  const helpBtn = botaoDeMentira('helpBtn');
+  const modal = elemento('pairShowModal', { oculto: false });
+  const outros = Object.fromEntries(MODAIS.filter((id) => id !== 'pairShowModal').map((id) => [id, elemento(id)]));
+  const deps = {
+    document: { getElementById: (id) => (id === 'helpBtn' ? helpBtn : id === 'pairShowModal' ? modal : outros[id] || null), body: { style: {} } },
+    dfato() {}, CamadaVoltar: { consumir() {} }, LIMPEZA_AO_FECHAR: {}, Lightbox: { isOpen: () => false },
+    lastFocusedBeforeModal: alvo, ultimoFocoForaDasCamadas: reserva,
+  };
+  const { closeModal } = montar(['closeModal', 'devolverFoco', 'dentroDeCamada', 'focavelNaTela', 'topOpenModal'], deps,
+    ['closeModal'], constante('MODAL_IDS'));
+  return { closeModal, helpBtn };
+}
+
+test('fechar o modal aberto a partir da Ajuda (ou sair pelo teclado) devolve o foco a um alvo que EXISTE — nunca ao BODY', () => {
+  // Quem abriu o pareamento é um botão DENTRO da Ajuda, que o `openModal`
+  // escondeu: `focus()` nele não faz nada, e o foco caía no BODY.
+  const escondido = botaoDeMentira('pairCreateBtn', { naTela: false, emCamada: true });
+  const quemAbriuAAjuda = botaoDeMentira('helpBtn-da-reserva');
+  const c = montarFoco({ alvo: escondido, reserva: quemAbriuAAjuda });
+  c.closeModal('pairShowModal');
+  assert.equal(escondido.focado, 0, 'CONTROLE: o botão escondido recebeu o foco');
+  assert.equal(quemAbriuAAjuda.focado, 1, 'o foco não voltou pro último elemento fora das camadas (quem abriu a Ajuda)');
+  // Sem reserva nenhuma, o botão da Ajuda, que existe nas duas telas.
+  const d = montarFoco({ alvo: escondido });
+  d.closeModal('pairShowModal');
+  assert.equal(d.helpBtn.focado, 1, 'sem quem abriu, o foco não foi pro botão da Ajuda');
+  // CONTROLE: quem abriu, se está na tela, recebe o foco de volta, como sempre.
+  const visivel = botaoDeMentira('filtersBtn');
+  const e = montarFoco({ alvo: visivel, reserva: quemAbriuAAjuda });
+  e.closeModal('pairShowModal');
+  assert.equal(visivel.focado, 1);
+  assert.equal(e.helpBtn.focado, 0);
+  // A reserva é alimentada pelo foco que acontece FORA das camadas.
+  assert.match(fatiar('setupModalListeners'),
+    /document\.addEventListener\('focusin', \(e\) => \{\s*if \(!dentroDeCamada\(e\.target\)\) ultimoFocoForaDasCamadas = e\.target;/,
+    'ninguém guarda o último foco fora das camadas');
+});
+
+test('"Conectar outro aparelho" abre com o foco no "Fechar", não no botão que cria o código FRACO', () => {
+  const abrir = fatiar('abrirPareamento');
+  assert.match(abrir, /openModal\('pairShowModal'\);\s*document\.getElementById\('pairShowClose'\)\?\.focus\(\);/,
+    'o foco inicial do pareamento caiu no "Sem câmera? Mostrar um código" — um Enter cria a cópia fraca do segredo');
+  // CONTROLE: o primeiro botão do modal é mesmo o do código fraco (é por isso
+  // que o foco padrão do `openModal` cairia nele).
+  const bloco = HTML.slice(HTML.indexOf('<div id="pairShowModal"'), HTML.indexOf('<div id="pairEnterModal"'));
+  assert.equal((/<button id="([^"]+)"/.exec(bloco) || [])[1], 'pairShowCodeBtn');
 });

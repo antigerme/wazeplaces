@@ -867,10 +867,36 @@ function closeModal(id, { viaHistorico = false } = {}) {
     if (!viaHistorico) CamadaVoltar.consumir();
     try { LIMPEZA_AO_FECHAR[id]?.(); } catch (e) { /* limpeza nunca derruba o fechamento */ }
     if (!topOpenModal() && !Lightbox.isOpen()) document.body.style.overflow = '';
-    if (lastFocusedBeforeModal && document.body.contains(lastFocusedBeforeModal)) {
-        lastFocusedBeforeModal.focus();
-    }
+    const alvo = lastFocusedBeforeModal;
     lastFocusedBeforeModal = null;
+    devolverFoco(alvo);
+}
+
+// Pra onde o foco volta quando um modal fecha. Primeiro, quem o abriu — mas ele
+// pode ter sumido junto com OUTRO modal: a Ajuda abre o "Conectar outro
+// aparelho" e o "Sair", o `openModal` esconde a Ajuda, e o botão de dentro dela
+// fica escondido. `focus()` num elemento escondido não faz nada, e o foco caía
+// no BODY — quem navega pelo teclado recomeçava do topo da página (auditoria de
+// 2026-09-26, medido fechando o pareamento com Esc e saindo pelo teclado).
+// Aí vale o último foco que houve FORA das camadas (quem abriu a Ajuda) e, por
+// fim, o botão da Ajuda, que existe na tela de entrada e na dos cards.
+let ultimoFocoForaDasCamadas = null;
+
+function dentroDeCamada(el) {
+    return !!(el && el.closest && el.closest('[role="dialog"]'));
+}
+
+function focavelNaTela(el) {
+    return !!(el && el.isConnected && typeof el.focus === 'function' && !el.disabled
+        && el.getClientRects && el.getClientRects().length > 0);
+}
+
+function devolverFoco(alvo) {
+    const reserva = focavelNaTela(ultimoFocoForaDasCamadas) && !dentroDeCamada(ultimoFocoForaDasCamadas)
+        ? ultimoFocoForaDasCamadas : null;
+    for (const el of [alvo, reserva, document.getElementById('helpBtn')]) {
+        if (focavelNaTela(el)) { el.focus(); return; }
+    }
 }
 
 function topOpenModal() {
@@ -1259,6 +1285,11 @@ async function abrirPareamento() {
     // página. O contador não denuncia (fica em 1, com history.length 3): só
     // a navegação mostra.
     openModal('pairShowModal');
+    // O foco inicial NÃO é o primeiro botão: ele é o "Sem câmera? Mostrar um
+    // código", que CRIA o código FRACO (~30 bits) — um Enter a mais, e a cópia
+    // fraca passava a existir no servidor ao lado do QR (auditoria de
+    // 2026-09-26). O "Fechar" não cria nada e é a saída de quem só olhou.
+    document.getElementById('pairShowClose')?.focus();
     const codeEl = document.getElementById('pairCode');
     const expEl = document.getElementById('pairExpiry');
     codeEl.textContent = '······';
@@ -1397,6 +1428,10 @@ async function resgatarPareamento(code, { silencioso = false } = {}) {
 
 function setupModalListeners() {
     const $ = id => document.getElementById(id);
+    // O último foco FORA das camadas é a reserva do `devolverFoco`.
+    document.addEventListener('focusin', (e) => {
+        if (!dentroDeCamada(e.target)) ultimoFocoForaDasCamadas = e.target;
+    });
     $('closeFilters').addEventListener('click', () => closeModal('filtersModal'));
     $('cancelFilters').addEventListener('click', () => closeModal('filtersModal'));
     $('closeFiltersFooter').addEventListener('click', () => closeModal('filtersModal'));
