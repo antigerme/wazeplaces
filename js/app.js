@@ -11183,6 +11183,12 @@ async function aplicarRecusaAutomatica() {
 
     recusaAutomaticaRodando = true;
     const n = alvos.length;
+    // A REGIÃO em que estes pedidos estão, fixada agora (a da fila que os
+    // trouxe): trocar a região em Filtros com o laço no ar mandava o resto pro
+    // servidor errado, que responde "não encontrado" — e isso conta como "já
+    // tratado por outro editor", com o pedido pendente (auditoria da fila,
+    // 2026-09-26). É a mesma regra do gesto (ver `API.markAsRead`).
+    const regiao = API.getRegion();
     // Saem da fila ANTES de enviar: senão o editor veria como card o pedido que
     // o app já está rejeitando, e poderia agir nele — dois envios pro mesmo.
     const fora = new Set(alvos);
@@ -11220,6 +11226,7 @@ async function aplicarRecusaAutomatica() {
         await enviarLote(alvos, {
             silencioso: true,
             contarAoLandar: true,
+            regiao,
             aoProgredir: (faltam) => {
                 if (faltam > 0) aviso.texto(andando(faltam));
             },

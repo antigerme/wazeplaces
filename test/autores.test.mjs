@@ -647,6 +647,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
     enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
     aoMudarAFilaPorBaixo: () => {},   // acerta o "Ver +N" e o fundo — não troca o card
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    API: { getRegion: () => 'row' },   // a região dos pedidos vai junto com o lote (F7)
   };
   const chaves = Object.keys(deps);
   const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));

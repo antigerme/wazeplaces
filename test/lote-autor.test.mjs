@@ -254,3 +254,42 @@ test('F6: CONTROLE — com card na tela, o que falha vai pro fim da fila sem tro
   assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v9', 'v1']);
   assert.ok(!m.log.includes('card'), 'redesenhou o card que estava na tela');
 });
+
+// ── F7: a recusa automática leva a REGIÃO em que os pedidos estão ────────────
+// O `enviarLote` da recusa saía sem região, e o `rejectPlace` usava a do
+// MOMENTO do envio: trocar a região em Filtros com o laço no ar mandava o resto
+// pro servidor errado, que responde "não encontrado" — e o app conta isso como
+// "já tratado por outro editor". MEDIDO: 5 rejeitados de verdade, 1 mandado ao
+// servidor da América do Norte, contado como feito, e pendente no Waze.
+test('F7: trocar a região com a recusa automática no ar não manda o resto pro servidor errado', async () => {
+  let regiaoAgora = 'row';
+  const frente = pedido(9, 1);
+  const alvos = [pedido(1), pedido(2), pedido(3)];
+  const AppState = { queue: [frente, ...alvos], currentPlace: frente, stats: { rejected: 0 }, serverTotal: 4,
+    fetchEpoch: 0, hasMore: false, inFlightActions: 0, authenticated: true };
+  const regioes = [];
+  const deps = {
+    AppState, podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, Treino: { ativo: false },
+    autoLigado: (id) => id === 777, updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
+    showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
+    pedidosEmAndamento: new Set(), chaveDoPedido: chave, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
+    API: {
+      getRegion: () => regiaoAgora,
+      rejectPlace: async (v, u, presenca, regiao) => {
+        regioes.push(regiao || regiaoAgora);
+        regiaoAgora = 'na';                       // a pessoa trocou a região em Filtros e aplicou
+        return { success: true };
+      },
+    },
+    registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
+    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
+    pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + fatiar('enviarLote') + '\n'
+    + fatiar('aplicarRecusaAutomatica') + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  await recusar();
+  assert.deepEqual(regioes, ['row', 'row', 'row'],
+    `a recusa mandou pedidos do servidor ROW pra ${regioes.join(', ')}: "não encontrado" lá conta como feito, e o pedido fica pendente`);
+});
