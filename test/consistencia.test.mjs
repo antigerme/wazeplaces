@@ -119,6 +119,22 @@ test('um conceito, um nome: sem sinônimos concorrentes na mesma língua', () =>
   }
 });
 
+test('a condição do Andarilho manda ao filtro com o nome que o FILTRO dá ao estado', () => {
+  // Ela só conta o estado escolhido no filtro, e desde a auditoria de textos
+  // (2026-09-26) diz isso — "(escolhidos no filtro)". Aí o nome tem que ser o do
+  // campo: em francês "régions" mandava a pessoa pro campo "Région", que é o do
+  // SERVIDOR (ROW/NA/IL), e o do estado se chama "État".
+  const valores = (chave) => [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}':\\s*'([^']*)'`, 'g'))].map((m) => m[1]);
+  const como = valores('conq.andarilho.como'), estado = valores('filters.state.label'), regiao = valores('filters.region.label');
+  assert.equal(como.length, N_LINGUAS, 'CONTROLE: a condição do Andarilho não está nas línguas todas');
+  assert.equal(estado.length, N_LINGUAS, 'CONTROLE: o rótulo do estado no filtro não está nas línguas todas');
+  for (let i = 0; i < N_LINGUAS; i++) {
+    const c = como[i].toLowerCase();
+    assert.ok(c.includes(estado[i].toLowerCase()), `${LANGS_DO_DICT[i]}: a condição diz "${como[i]}" e o campo do filtro se chama "${estado[i]}"`);
+    assert.ok(!c.includes(regiao[i].toLowerCase()), `${LANGS_DO_DICT[i]}: a condição aponta pro campo "${regiao[i]}" (a região do servidor)`);
+  }
+});
+
 test('botão de confirmar ecoa o verbo do enunciado', () => {
   // "Marcar como lido os N pedidos?" com botão "Marcar lidos" faz o editor
   // parar pra conferir se é a mesma ação. É.
