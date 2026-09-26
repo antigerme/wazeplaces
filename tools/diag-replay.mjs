@@ -165,13 +165,22 @@ await page.evaluate(([places, filtros, perfil, devMode]) => {
 
 await page.waitForTimeout(500);
 
-const visao = await page.evaluate(() => ({
-  painel: document.querySelector('.place-card') ? 'card'
-    : (!document.getElementById('noMoreCards')?.classList.contains('hidden') ? 'tudoLimpo' : 'nada'),
-  titulo: document.querySelector('.card-name')?.textContent.trim() || null,
-  alertas: typeof diagSentinelas === 'function' ? diagSentinelas(diagComputado()) : null,
-}));
-console.log(`\npainel:  ${visao.painel}${visao.titulo ? ` · "${visao.titulo}"` : ''}`);
+const visao = await page.evaluate(() => {
+  const naTela = (id) => { const e = document.getElementById(id); return !!e && !e.classList.contains('hidden') && e.getBoundingClientRect().width > 0; };
+  return {
+    painel: document.querySelector('.place-card') ? 'card'
+      : (!document.getElementById('noMoreCards')?.classList.contains('hidden') ? 'tudoLimpo' : 'nada'),
+    titulo: document.querySelector('.card-name')?.textContent.trim() || null,
+    tema: document.documentElement.classList.contains('dark') ? 'escuro' : 'claro',
+    // O CABEÇALHO que ficou na tela — é a primeira coisa que difere quando a
+    // remontagem não entra "como o app entra".
+    cabecalho: { perfil: naTela('userProfileBadge') ? (document.getElementById('userName')?.textContent || '').trim() : null,
+                 filtros: naTela('filtersBtn'), atualizar: naTela('refreshBtn') },
+    alertas: typeof diagSentinelas === 'function' ? diagSentinelas(diagComputado()) : null,
+  };
+});
+console.log(`\npainel:  ${visao.painel}${visao.titulo ? ` · "${visao.titulo}"` : ''} · tema na tela ${visao.tema}`);
+console.log(`cabeçalho: perfil ${visao.cabecalho.perfil ? `"${visao.cabecalho.perfil}"` : '—'} · Filtros ${visao.cabecalho.filtros ? 'sim' : 'NÃO'} · Atualizar ${visao.cabecalho.atualizar ? 'sim' : 'NÃO'}`);
 if (visao.alertas) console.log(`alertas: ${visao.alertas.length ? JSON.stringify(visao.alertas) : 'nenhum'}`);
 if (erros.length) console.log(`ERROS DE JS: ${erros.join(' | ')}`);
 
