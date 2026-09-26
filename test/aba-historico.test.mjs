@@ -464,3 +464,29 @@ test('H14: CONTROLE — um autor só continua nomeado, no singular e no plural',
   const avisos = await rodarRecusa([pedidoDe(2, 2001, 'spammer_A'), pedidoDe(4, 2001, 'spammer_A')]);
   assert.deepEqual(avisos, ['auto.andandoPlural {"n":2,"autor":"spammer_A"}', 'auto.andando {"n":1,"autor":"spammer_A"}']);
 });
+
+// ── H7 e H20: o que a folha do autor e o selo de conquista DIZEM ─────────────
+const DICT = new Function('window', 'navigator', 'localStorage', 'document',
+  readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\nreturn I18N_DICT;')(
+  {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
+
+test('H7: a folha do autor não afirma um período que a contagem não tem', () => {
+  // A contagem ACUMULA desde que o autor entrou na lista; os 30 dias são o
+  // prazo pra ele SAIR sem rejeição nova. "Nos últimos 30 dias" mostrava 7
+  // com 2 dentro da janela.
+  for (const lang of Object.keys(DICT)) {
+    for (const k of ['autor.sheet.sub', 'autor.sheet.subUm']) {
+      const v = DICT[lang][k];
+      assert.ok(v, `${lang}: falta ${k}`);
+      assert.ok(!/\{dias\}|\d/.test(v), `${lang}: ${k} volta a afirmar um período: "${v}"`);
+    }
+  }
+});
+
+test('H20: o francês concorda com "distinction" (feminino) e diz a frase da folha em francês natural', () => {
+  const fr = DICT.fr;
+  const adjetivo = fr['conq.selo.aria'].split(' ')[0];            // "nouvelle distinction"
+  assert.equal(fr['conq.nova'], adjetivo,
+    `o selo da célula diz "${fr['conq.nova']}" e o do botão "${fr['conq.selo.aria']}" — o mesmo conceito com dois gêneros`);
+  assert.ok(!/seule d[’']elle/.test(fr['autor.sheet.subUm']), `"la seule d’elle" não é francês: ${fr['autor.sheet.subUm']}`);
+});

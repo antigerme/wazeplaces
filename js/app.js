@@ -10571,10 +10571,14 @@ function abrirFolhaDoAutor(place) {
         + `${escapeHtml(t('stats.autores.auto'))}</span><span class="block text-xs text-slate-500 dark:text-slate-400 leading-snug mt-0.5">`
         + `${escapeHtml(t('stats.autores.autoDesc'))}</span></span>`
         + `<input type="checkbox" id="autorAuto" class="ui-switch flex-shrink-0"${autoLigado(chave) ? ' checked' : ''}></label>`;
+    // A frase NÃO diz período: a contagem acumula desde que o autor entrou na
+    // lista, e os 30 dias são o prazo pra ele SAIR sem rejeição nova — dizia
+    // "nos últimos 30 dias" e mostrava 7 com 2 dentro da janela (auditoria de
+    // 2026-09-25).
     corpo.innerHTML =
         `<p class="text-[0.8125rem] text-slate-500 dark:text-slate-400 mb-4 leading-snug">`
         + `${escapeHtml(t(emLote ? 'autor.sheet.sub' : 'autor.sheet.subUm',
-                          { n: contagemDoAutor(place), fila: naFila.length, dias: AUTORES_MAX_DIAS }))}</p>`
+                          { n: contagemDoAutor(place), fila: naFila.length }))}</p>`
         + (emLote
             ? linha(ICONE_OLHO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
                     t('autor.sheet.ver', { n: naFila.length }), t('autor.sheet.ver.desc'), 'autorVer')
