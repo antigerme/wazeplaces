@@ -748,3 +748,141 @@ test('perfil: a caixa da área sai de Polygon E de MultiPolygon, e anel enorme n
   assert.equal(await bboxDe(null), null);
   assert.equal(await bboxDe({ type: 'Polygon', coordinates: [] }), null);
 });
+
+// ── o 413 da VM chega a quem mandou o corpo grande ──────────────────────────
+// O `readBody` respondia o 413 e chamava `req.destroy()` na linha seguinte:
+// com o corpo ainda chegando, fechar assim é RST, e o RST apaga no cliente a
+// resposta que ele ainda não leu. Medido (8 MB): de 11% a 46% dos pedidos
+// terminavam sem o 413 (auditoria de 2026-09-26). Ver a tabela no corpo.mjs.
+import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { request as pedidoHttp, Agent } from 'node:http';
+import { MAX_BODY_BYTES } from '../server/corpo.mjs';
+
+// O servidor em PROCESSO PRÓPRIO, com o `readBody` de verdade, na porta que o
+// sistema der (0 — não disputa porta com nenhum outro teste). Processo próprio
+// porque é assim que a VM roda, e é o que muda o resultado: com cliente e
+// servidor no MESMO processo, o fechamento que o Node faz sozinho depois de um
+// `Connection: close` passava (0 perdas em mais de 1.000) — em processos
+// separados ele perdia até 8,5%. Instrumento que não reproduz o defeito aprova conserto pela
+// metade (gotcha #28). Cada conexão fechada no servidor vira uma linha com os
+// bytes que ele leu dela.
+async function vmComReadBody(fn) {
+  const codigo = `
+    import { createServer } from 'node:http';
+    import { readBody } from ${JSON.stringify(pathToFileURL(new URL('../server/corpo.mjs', import.meta.url).pathname).href)};
+    const srv = createServer(async (req, res) => {
+      req.socket.once('close', () => console.log(JSON.stringify({ fechou: req.socket.bytesRead })));
+      const raw = await readBody(req, res);
+      if (raw === null) return;
+      res.writeHead(200);
+      res.end('ok');
+    });
+    srv.listen(0, '127.0.0.1', () => console.log(JSON.stringify({ porta: srv.address().port })));
+  `;
+  const p = spawn(process.execPath, ['--input-type=module', '-e', codigo], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const fechados = [];
+  let resto = '';
+  let avisarPorta;
+  const porta = new Promise((ok) => { avisarPorta = ok; });
+  p.stdout.setEncoding('utf8');
+  p.stdout.on('data', (d) => {
+    resto += d;
+    let n;
+    while ((n = resto.indexOf('\n')) >= 0) {
+      const linha = JSON.parse(resto.slice(0, n));
+      resto = resto.slice(n + 1);
+      if (linha.porta) avisarPorta(linha.porta);
+      if (linha.fechou !== undefined) fechados.push(linha.fechou);
+    }
+  });
+  try {
+    return await fn(await porta, fechados);
+  } finally {
+    p.kill();
+  }
+}
+// O corpo, alocado UMA vez por tamanho: encher 8 MB a cada pedido custava mais
+// que o pedido.
+const corpos = new Map();
+const corpoDe = (bytes) => corpos.get(bytes) || corpos.set(bytes, Buffer.alloc(bytes, 0x61)).get(bytes);
+// POST com um corpo de `bytes`, todo de uma vez (um upload rápido). Resolve com
+// a resposta, ou com o código do erro se ela não chegou.
+function postGrande(porta, bytes, agent) {
+  return new Promise((ok) => {
+    const r = pedidoHttp({ host: '127.0.0.1', port: porta, method: 'POST', path: '/api/sessao', agent,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': bytes } }, (res) => {
+      let corpo = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { corpo += c; });
+      res.on('end', () => ok({ status: res.statusCode, corpo, conexao: res.headers.connection }));
+      res.on('error', (e) => ok({ erro: e.code || e.message }));
+    });
+    r.on('error', (e) => ok({ erro: e.code || e.message }));
+    r.on('socket', (s) => s.on('error', () => {}));
+    r.end(corpoDe(bytes));
+  });
+}
+async function fetchGrande(porta, bytes) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${porta}/api/sessao`, { method: 'POST', body: corpoDe(bytes),
+      headers: { 'Content-Type': 'application/json' } });
+    return { status: r.status, corpo: await r.text() };
+  } catch (e) {
+    return { erro: e.cause?.code || e.message };
+  }
+}
+
+test('VM: o 413 do corpo grande CHEGA — não se perde no corte da conexão', { timeout: 120_000 }, async () => {
+  // Dois clientes keep-alive, como o navegador: o `fetch` (o que mais perdia
+  // com o fechamento pela metade) e o `node:http` com agente keep-alive.
+  const N = 100;
+  const agente = new Agent({ keepAlive: true });
+  try {
+    await vmComReadBody(async (porta) => {
+      for (const [nome, mandar] of [['fetch', () => fetchGrande(porta, MAX_BODY_BYTES + 3_000_000)],
+        ['node:http', () => postGrande(porta, MAX_BODY_BYTES + 3_000_000, agente)]]) {
+        const desfechos = {};
+        for (let i = 0; i < N; i++) {
+          const r = await mandar();
+          const chave = r.erro ? 'erro ' + r.erro : 'HTTP ' + r.status;
+          desfechos[chave] = (desfechos[chave] || 0) + 1;
+          if (!r.erro) assert.equal(JSON.parse(r.corpo).success, false, `${nome}: o 413 veio sem o corpo JSON`);
+        }
+        assert.deepEqual(desfechos, { 'HTTP 413': N }, `${nome}, ${N} corpos de 8 MB: ${JSON.stringify(desfechos)}`);
+      }
+    });
+  } finally {
+    agente.destroy();
+  }
+});
+
+test('VM: depois do 413 o servidor lê o resto do corpo até um TETO, e só então fecha', { timeout: 60_000 }, async () => {
+  // As duas metades do fechamento em duas etapas, conferidas no SERVIDOR (os
+  // bytes que ele leu da conexão antes de fechá-la), o que é determinístico
+  // onde a entrega do 413 é estatística:
+  //   · corpo um pouco acima do limite (8 MB): lido ATÉ O FIM antes de fechar
+  //     — fechar antes é o RST que apaga a resposta no cliente;
+  //   · corpo enorme (64 MB): o dreno tem teto, e a conexão fecha bem antes do
+  //     fim — o 413 existe pra PARAR de receber.
+  // E o 413 avisa `Connection: close`: sem ele, um cliente keep-alive (o
+  // navegador) contaria com a conexão pro pedido seguinte.
+  const agente = new Agent({ keepAlive: true });
+  try {
+    await vmComReadBody(async (porta, fechados) => {
+      for (const [total, leuTudo] of [[MAX_BODY_BYTES + 3_000_000, true], [64_000_000, false]]) {
+        const antes = fechados.length;
+        const r = await postGrande(porta, total, agente);
+        assert.equal(r.status, 413, JSON.stringify(r));
+        assert.equal(r.conexao, 'close', 'o 413 não avisa que a conexão fecha — um cliente keep-alive a reusaria');
+        for (let i = 0; i < 100 && fechados.length === antes; i++) await new Promise((ok) => setTimeout(ok, 50));
+        assert.equal(fechados.length, antes + 1, `${total} bytes: a conexão seguiu aberta depois do 413`);
+        const lidos = fechados[antes];
+        if (leuTudo) assert.ok(lidos >= total, `${total} bytes: o servidor fechou com ${lidos} lidos — o resto chegou num socket fechado (RST)`);
+        else assert.ok(lidos < total / 2, `${total} bytes: o servidor leu ${lidos} depois de recusar o corpo`);
+      }
+    });
+  } finally {
+    agente.destroy();
+  }
+});
