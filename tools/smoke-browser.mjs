@@ -2637,19 +2637,34 @@ for (const suporte of [true, false]) {
 // Indicador de ESTADO, então mora no fluxo (dentro do #placar) e não no
 // #bannerStack, que é `fixed` e serve a avisos que passam — permanente ali
 // cobriria o card (gotcha #26). Quatro coisas que quebram calado:
-//   1. o limiar errar pro lado da folga — aparecer com muito prazo vira ruído,
-//      e o número na tela nunca pode ser MAIOR do que o prazo real;
+//   1. o limiar errar pro lado da folga — aparecer com muito prazo vira ruído —,
+//      e o DIA na tela não ser o dia em que ela vence (a conta é de DATA: às
+//      20h com 20 h de prazo é "amanhã", e o `floor` de 24 h dizia "hoje");
 //   2. sobreviver ao logout ou ao prazo já vencido — a frase passaria a falar
 //      de uma sessão que não existe mais;
 //   3. estourar a caixa em francês, que é a língua mais larga (gotcha #25), no
 //      aparelho mais estreito;
 //   4. virar alvo de toque pequeno logo acima da área de swipe.
-const DIAS = (d) => Math.floor(Date.now() / 1000) + Math.round(d * 86400);
+//
+// O relógio da PÁGINA fica parado às 20h de hoje (`page.clock.setFixedTime`):
+// com a conta por data, "falta 1,4 dia" cai amanhã ou depois de amanhã conforme
+// a hora em que o smoke roda, e sem relógio fixo o bloco reprovaria só em
+// certas horas do dia (falha intermitente ensina a ignorar o CI). As 20h são o
+// caso do defeito, e os prazos saem daqui, nunca do relógio de agora.
+const AGORA_AVISO = (() => { const d = new Date(); d.setHours(20, 0, 0, 0); return d.getTime(); })();
+const DIAS = (d) => Math.floor(AGORA_AVISO / 1000) + Math.round(d * 86400);
+const DIA_AS = (n, h, m = 0) => {
+  const d = new Date(AGORA_AVISO);
+  d.setDate(d.getDate() + n);
+  d.setHours(h, m, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+};
 for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['Pixel 7', { width: 412, height: 915 }]]) {
   for (const lang of LINGUAS) {
     const ctx = await browser.newContext({ viewport, locale: lang === 'en' ? 'en-US' : lang, serviceWorkers: 'block' });
     await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
     const page = await ctx.newPage();
+    await page.clock.setFixedTime(AGORA_AVISO);
     const erros = [];
     page.on('pageerror', (e) => erros.push(e.message));
     await page.addInitScript((lg) => {
@@ -2675,7 +2690,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const estados = await page.evaluate((prazos) => {
       const el = () => document.getElementById('avisoSessao');
       const ver = () => !el().classList.contains('hidden');
-      const out = {};
+      const out = { _frases: { hoje: t('sessao.vence.hoje'), amanha: t('sessao.vence.amanha') } };
       for (const [rot, quando] of Object.entries(prazos)) {
         AppState.authenticated = rot !== 'deslogado';
         AppState.sessaoExpiraEm = quando;
@@ -2685,20 +2700,24 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       AppState.authenticated = true;
       return out;
     }, {
-      '10 dias': DIAS(10), '5 dias': DIAS(5.4), '1 dia': DIAS(1.4),
-      hoje: DIAS(0.3), vencido: DIAS(-0.5), deslogado: DIAS(2), 'sem prazo': null,
+      '10 dias': DIAS(10), '5º dia': DIA_AS(5, 12), '6º dia': DIA_AS(6, 1),
+      'depois de amanhã': DIAS(1.4), amanhã: DIAS(20 / 24), hoje: DIAS(3 / 24),
+      vencido: DIAS(-0.5), deslogado: DIAS(2), 'sem prazo': null,
     });
-    for (const rot of ['10 dias', 'vencido', 'deslogado', 'sem prazo']) {
+    for (const rot of ['10 dias', '6º dia', 'vencido', 'deslogado', 'sem prazo']) {
       checa(!estados[rot].visivel, `${onde}: apareceu com "${rot}"`, estados[rot].txt);
     }
-    for (const rot of ['5 dias', '1 dia', 'hoje']) {
+    for (const rot of ['5º dia', 'depois de amanhã', 'amanhã', 'hoje']) {
       checa(estados[rot].visivel, `${onde}: NÃO apareceu com "${rot}"`);
       checa(!/[{}]|undefined|NaN/.test(estados[rot].txt),
         `${onde}: placeholder cru na frase de "${rot}"`, estados[rot].txt);
     }
-    // Nunca prometer mais prazo do que existe: com 1,4 dia o certo é "1", não "2".
-    checa(/(^|\D)1(\D|$)/.test(estados['1 dia'].txt) && !/(^|\D)2(\D|$)/.test(estados['1 dia'].txt),
-      `${onde}: arredondou o prazo pra cima`, estados['1 dia'].txt);
+    // O dia na tela é o dia em que ela vence: 20 h de prazo às 20h é AMANHÃ (o
+    // defeito dizia "hoje"), 3 h é hoje, e 1,4 dia é depois de amanhã, de madrugada.
+    checa(estados.hoje.txt === estados._frases.hoje, `${onde}: 3 h de prazo às 20h não disse "hoje"`, estados.hoje.txt);
+    checa(estados['amanhã'].txt === estados._frases.amanha, `${onde}: 20 h de prazo às 20h não disse "amanhã"`, estados['amanhã'].txt);
+    checa(/(^|\D)2(\D|$)/.test(estados['depois de amanhã'].txt), `${onde}: 1,4 dia às 20h não disse "2 dias"`, estados['depois de amanhã'].txt);
+    checa(/(^|\D)5(\D|$)/.test(estados['5º dia'].txt), `${onde}: o quinto dia não disse "5 dias"`, estados['5º dia'].txt);
 
     // Cabe na caixa, não é alvo de toque, e não tapa nada.
     //

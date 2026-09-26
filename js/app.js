@@ -11582,6 +11582,12 @@ function diaDeHoje() {
     const d = new Date();
     return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000;
 }
+// O dia de CALENDÁRIO local de um instante (ms), no mesmo eixo do `diaDeHoje()`:
+// a diferença entre os dois é quantas datas separam o instante de hoje.
+function diaLocalDe(ms) {
+    const d = new Date(ms);
+    return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000;
+}
 
 function loadAutores() {
     if (AppState.autores) return AppState.autores;
@@ -14915,13 +14921,16 @@ function atualizarAvisoDeSessao() {
     // Já venceu: quem avisa é o 401, que leva pra tela de entrar. Repetir aqui
     // seria dizer "vence em -1 dia" atrás de uma tela que nem está mais visível.
     if (faltaMs <= 0) return esconder();
-    // `floor`, nunca `round`: com 4,9 dias o certo é dizer 4. Arredondar pra cima
-    // daria mais prazo do que existe, que é o único erro que custa caro aqui.
-    const dias = Math.floor(faltaMs / 86400000);
+    // Dia é DATA, nunca 24 h: quantas DATAS separam hoje do dia em que ela vence.
+    // Era `floor(falta / 24 h)`, e às 20h com 20 h de prazo dizia "vence hoje"
+    // pra uma sessão que vence amanhã às 16h (auditoria de 2026-09-26). Pela
+    // data, cada frase é verdade: "hoje" é hoje, "amanhã" é amanhã, e "em N dias"
+    // é o dia em que ela vence — às vezes cedo nesse dia, e a frase manda renovar.
+    const dias = diaLocalDe(prazo * 1000) - diaDeHoje();
     if (dias > AVISO_SESSAO_DIAS) return esconder();
-    el.textContent = dias === 0
-        ? t('sessao.vence.hoje')
-        : t(dias === 1 ? 'sessao.vence.dias' : 'sessao.vence.diasPlural', { n: dias });
+    el.textContent = dias <= 0 ? t('sessao.vence.hoje')
+        : dias === 1 ? t('sessao.vence.amanha')
+        : t('sessao.vence.diasPlural', { n: dias });
     el.classList.remove('hidden');
 }
 
