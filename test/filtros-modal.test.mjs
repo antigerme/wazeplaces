@@ -218,3 +218,48 @@ test('F11: a renovação que FALHA (negada, sem sinal) volta pro padrão e diz �
   assert.equal(m.app.posicao(), null);
   assert.equal(m.dicas.at(-1), 'negado');
 });
+
+// ── F12: os filtros DE FÁBRICA são UM só ────────────────────────────────────
+// O "Sair" repunha os filtros com um literal próprio, SEM `categories` e SEM
+// `sortOrder` — os do app recém-aberto têm os dois. Quem saía e entrava de novo
+// sem fechar o app ficava com filtros diferentes: trocar SÓ a ordem virava uma
+// busca (a assinatura mudava porque o "Aplicar" escreve `categories`), e os
+// pedidos PULADOS voltavam — MEDIDO no navegador, 1 busca e a fila de 4 de
+// volta a 6.
+function avaliarFiltros(expr) {
+  const TYPES_PADRAO = ['NEW_PLACE', 'NEW_PHOTO'];
+  const ORDEM_PADRAO = 'newest';
+  const m = /^function filtrosDeFabrica\(\) \{[\s\S]*?^\}/m.exec(APP_SEM);
+  const fabrica = m ? m[0] : 'function filtrosDeFabrica() { throw new Error("sem fábrica"); }';
+  return new Function('TYPES_PADRAO', 'ORDEM_PADRAO', fabrica + '\nreturn (' + expr + ');')(TYPES_PADRAO, ORDEM_PADRAO);
+}
+function filtrosDaAbertura() {
+  const m = /^const AppState = \{[\s\S]*?^\s+filters: ([^\n]+?),\n/m.exec(APP_SEM);
+  assert.ok(m, 'os filtros do AppState sumiram');
+  return avaliarFiltros(m[1]);
+}
+function filtrosDoSair() {
+  const m = /^\s+AppState\.filters = ([^;]+);/m.exec(fatiar('handleLogout'));
+  assert.ok(m, 'o "Sair" deixou de repor os filtros');
+  return avaliarFiltros(m[1]);
+}
+
+test('F12: o "Sair" repõe os MESMOS filtros do app recém-aberto', () => {
+  assert.deepEqual(filtrosDoSair(), filtrosDaAbertura(),
+    'os filtros depois do "Sair" não são os de fábrica: quem entra de novo sem fechar o app tem outros');
+});
+
+test('F12: depois do "Sair", trocar SÓ a ordem não vira busca (os pulados não voltam)', () => {
+  const deps = { API: { getRegion: () => 'row', getCountry: () => '30' } };
+  const AppState = { filters: filtrosDoSair() };
+  const assinatura = new Function('AppState', 'API', fatiar('assinaturaDeBusca') + '\nreturn assinaturaDeBusca;')(AppState, deps.API);
+  const antes = assinatura();
+  // O que o "Aplicar" escreve, com a tela mostrando os mesmos filtros — só a ordem mudou.
+  const aplicar = fatiar('applyFiltersFromModal');
+  const escritos = [...aplicar.matchAll(/AppState\.filters\.(\w+) = /g)].map((x) => x[1]);
+  assert.ok(escritos.includes('categories') && escritos.includes('sortOrder'), 'o instrumento não achou o que o "Aplicar" escreve');
+  const f = AppState.filters;
+  f.categories = Array.isArray(f.categories) ? f.categories : [];
+  f.sortOrder = 'oldest';
+  assert.equal(assinatura(), antes, 'trocar só a ordem mudou a assinatura: vira busca e os pulados voltam');
+});

@@ -221,6 +221,22 @@ const UNAUTHORIZED_REDIRECT_MS = 800;
 const VERIFICA_SESSAO_MS = 1200;
 const STATE_RECOVERY_MS = 200;
 
+// A ordem de fábrica. Declarada aqui, antes do `AppState`, porque os filtros de
+// fábrica a usam na criação dele (um `const` declarado depois estaria na zona
+// morta). O resto do "Perto de mim" mora na seção dele.
+const ORDEM_PADRAO = 'newest';
+
+// Os filtros DE FÁBRICA — fonte ÚNICA do app recém-aberto e do "Sair". O "Sair"
+// repunha um literal próprio, SEM `categories` e SEM `sortOrder`: quem saía e
+// entrava de novo sem fechar o app ficava com filtros diferentes, e trocar SÓ a
+// ordem virava uma busca (o "Aplicar" escreve `categories`, e a assinatura da
+// busca mudava) — os pedidos pulados voltavam (auditoria da fila, 2026-09-26).
+// Filtro novo entra AQUI.
+function filtrosDeFabrica() {
+    return { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false,
+             unreadOnly: true, categories: [], sortOrder: ORDEM_PADRAO };
+}
+
 const AppState = {
     authenticated: false,
     currentPlace: null,
@@ -244,7 +260,7 @@ const AppState = {
     // Uma página nova chegou enquanto havia card na tela: a ordem dela espera
     // o `advanceQueue`. Ver o comentário no `fetchNextPage`.
     ordemPendente: false,
-    filters: { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' },
+    filters: filtrosDeFabrica(),
     preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false },
     devMode: { unlocked: false, active: false },
     profile: null,
@@ -6573,7 +6589,7 @@ async function handleLogout() {
     pareamentosEmitidos.clear();
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
-    AppState.filters = { types: TYPES_PADRAO.slice(), residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true };
+    AppState.filters = filtrosDeFabrica();
     AppState.preferences = { undoEnabled: true, presenca: true };
     AppState.devMode = { unlocked: false, active: false };
     // O que o modo dev gravou sai junto — as capturas desta abertura (em
@@ -6763,7 +6779,7 @@ const ORDEM_ICONE = Object.freeze({
 });
 const rotuloDaOrdem = (ordem) =>
     (ORDEM_ICONE[ordem] ? ORDEM_ICONE[ordem] + ' ' : '') + t('filters.sort.' + ordem);
-const ORDEM_PADRAO = 'newest';
+// (`ORDEM_PADRAO` mora lá em cima, com os filtros de fábrica: `filtrosDeFabrica`.)
 
 function referenciaDaOrdem(ordem) {
     if (ordem === 'gps') return posicaoGps && posicaoGps.ll;
