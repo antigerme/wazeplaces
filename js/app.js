@@ -3623,7 +3623,22 @@ const MAX_REBUSCAS_AUTO = 2;
 let rebuscasAuto = 0;
 
 function rebuscarDepoisDeFalha() {
-    if (AppState.queue.length > 0 || AppState.fetching) return;
+    if (AppState.fetching) return;
+    if (AppState.queue.length > 0) {
+        // COM card na fila: foi a REPOSIÇÃO que levou o 401. A busca que falhou
+        // deixou `hasMore = false` e `loadError = true`, e com a sessão viva a
+        // fila parava de se repor: o `maybePrefetch` (que roda a cada card que
+        // sai) nunca mais buscava, e ao fim dos cards a pessoa via "Falha ao
+        // carregar" com a rede e a sessão boas (auditoria de 2026-09-26, O6).
+        // Repõe as duas, com o MESMO teto de sempre — o `maybePrefetch` busca
+        // agora se a fila já está no limite, ou quando chegar lá.
+        if (!AppState.loadError || rebuscasAuto >= MAX_REBUSCAS_AUTO) return;
+        rebuscasAuto++;
+        AppState.loadError = false;
+        AppState.hasMore = true;
+        maybePrefetch();
+        return;
+    }
     // Fila vazia SEM falha: não há o que repor, e o `startFetching` vai só
     // pintar o "Tudo limpo!" — que aí é verdade.
     if (!AppState.loadError) { startFetching(); return; }
