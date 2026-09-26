@@ -718,3 +718,32 @@ test('no tema escuro nenhum botão de diálogo tem o fundo do próprio diálogo 
   assert.equal(classes('closeAccessDenied'), classes('treinoFimOk'),
     'o "Entendi" do "Acesso restrito" não usa as classes do botão afirmativo dos outros diálogos');
 });
+
+// ── A17: o código COLADO ────────────────────────────────────────────────────
+test('código colado com espaço, quebra de linha ou rótulo entra inteiro, no formato que a tela mostra', () => {
+  const { colar, formatar } = montar(['formatarCodigoPareamento', 'extrairCodigoPareamento', 'colarCodigoPareamento'],
+    { window: {} }, ['colar: colarCodigoPareamento', 'formatar: formatarCodigoPareamento'],
+    [constante('PAIR_CODE_LEN'), constante('PAIR_CODE_GRUPO'), constante('PAIR_ALFABETO')].join('\n'));
+  // O que o campo mostra depois de colar `texto` num campo com `antes`: o nosso
+  // colar, e, se ele deixar passar, o do navegador seguido do `input` (que formata).
+  const colado = (texto, antes = '') => {
+    let impedido = false;
+    const campo = { value: antes, setSelectionRange() {} };
+    colar({ clipboardData: { getData: () => texto }, preventDefault: () => { impedido = true; }, target: campo });
+    return impedido ? campo.value : formatar(antes + texto);
+  };
+  const casos = [
+    ['ABC-123', 'ABC-123'], ['ABC123', 'ABC-123'], [' ABC-123', 'ABC-123'], ['ABC-123\n', 'ABC-123'],
+    ['ABC 123', 'ABC-123'], ['\tABC-123 ', 'ABC-123'], ['Código: ABC-123', 'ABC-123'],
+    // Com códigos do alfabeto de verdade (sem 0/O/1/I), e o traço que o app de mensagem troca.
+    ['Código: 6C4–97S', '6C4-97S'], ['Seu codigo: 6C497S', '6C4-97S'], ['Entrar HXKTPW', 'HXK-TPW'],
+    ['HXKTPW expira em 4:59', 'HXK-TPW'],
+  ];
+  const errados = casos.filter(([t, e]) => colado(t) !== e).map(([t, e]) => `${JSON.stringify(t)} → ${JSON.stringify(colado(t))} (esperado ${e})`);
+  assert.deepEqual(errados, [], 'o código colado não entrou como a tela o mostra');
+  // Colar o código num campo que já tinha algo: ele entra NO LUGAR.
+  assert.equal(colado('Código: 6C4-97S', 'XY'), '6C4-97S');
+  // E quem liga o colar é o campo do código.
+  assert.match(APP_SEM, /\$\('pairCodeInput'\)\?\.addEventListener\('paste', colarCodigoPareamento\);/,
+    'o colar do campo do código não passa mais pela extração');
+});

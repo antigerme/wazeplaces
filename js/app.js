@@ -86,6 +86,43 @@ function formatarCodigoPareamento(bruto) {
         ? limpo.slice(0, PAIR_CODE_GRUPO) + '-' + limpo.slice(PAIR_CODE_GRUPO)
         : limpo;
 }
+
+// O código que a pessoa COLOU vem do jeito que ela o copiou: com espaço em
+// volta, quebra de linha, ou de dentro de uma mensagem ("Código: 6C4-97S").
+// O formatador pega os seis PRIMEIROS alfanuméricos, e aí o rótulo virava o
+// código ("Código: ABC-123" → "CDI-GOA"); e o `maxlength` do campo cortava o
+// colado ANTES de qualquer formatação (" ABC-123" → "ABC-12") — auditoria de
+// 2026-09-26. Aqui se acha o código DENTRO do texto, por ordem de certeza:
+//   1) o formato que a tela MOSTRA (3 + traço + 3), solto no texto — qualquer
+//      traço, porque aplicativo de mensagem troca o hífen por outro;
+//   2) seis símbolos soltos do ALFABETO do código (o do servidor, sem 0/O/1/I):
+//      palavra como "codigo" ou "expira" tem O ou I, e não passa. Entre vários,
+//      o que tem algarismo (palavra não tem) e, empatando, o ÚLTIMO — o código
+//      costuma vir depois do rótulo.
+// Sem nenhum dos dois, `null`: o navegador cola, e o `input` formata o que
+// entrou (que é o caso de "ABC 123" e dos seis juntos).
+const PAIR_ALFABETO = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+function extrairCodigoPareamento(texto) {
+    const s = String(texto || '').toUpperCase();
+    const m = /(?:^|[^0-9A-Z])([0-9A-Z]{3})\s*[-‐‑‒–—−]\s*([0-9A-Z]{3})(?![0-9A-Z])/.exec(s);
+    if (m) return m[1] + m[2];
+    const validos = (s.match(/[0-9A-Z]+/g) || [])
+        .filter((p) => p.length === PAIR_CODE_LEN && [...p].every((c) => PAIR_ALFABETO.includes(c)));
+    const comAlgarismo = validos.filter((p) => /\d/.test(p));
+    return (comAlgarismo.length ? comAlgarismo : validos).pop() || null;
+}
+
+// O colar do campo do código: achou o código no texto, ele ENTRA no campo no
+// formato da tela, no lugar do que houvesse lá; senão, o colar segue normal.
+function colarCodigoPareamento(e) {
+    const dados = e.clipboardData || window.clipboardData;
+    const codigo = extrairCodigoPareamento(dados ? dados.getData('text') : '');
+    if (!codigo) return;
+    e.preventDefault();
+    const campo = e.target;
+    campo.value = formatarCodigoPareamento(codigo);
+    try { campo.setSelectionRange(campo.value.length, campo.value.length); } catch (err) { /* tipo sem seleção */ }
+}
 const PREFETCH_THRESHOLD = 3;
 
 // ── Aquecimento dos próximos cards ────────────────────────────────────────
@@ -1390,6 +1427,9 @@ function setupModalListeners() {
     $('pairCodeInput')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); resgatarPareamento(e.target.value); }
     });
+    // Colado de dentro de uma mensagem, com espaço ou quebra de linha: o código
+    // é achado no texto (ver `extrairCodigoPareamento`).
+    $('pairCodeInput')?.addEventListener('paste', colarCodigoPareamento);
     // O campo assume o MESMO formato da tela que mostra o código: digitou 3
     // caracteres, o hífen entra sozinho. Assim tanto faz o editor digitar o
     // separador ou não — o resultado na tela é o mesmo que ele está copiando.

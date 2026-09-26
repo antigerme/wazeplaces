@@ -64,11 +64,13 @@ test('código de pareamento: o placeholder mostra o mesmo formato que a tela', (
   for (const v of chaves) {
     assert.match(v, /^[A-Z0-9]{3}-[A-Z0-9]{3}$/, `placeholder "${v}" não segue o formato XXX-XXX mostrado na tela`);
   }
-  // maxlength = 6 caracteres + o separador. Apertar pra 6 trava quem colou da tela.
+  // SEM maxlength: ele corta o texto colado ANTES da formatação — " ABC-123"
+  // virava "ABC-12" e "Código: ABC-123" virava "CDI-GO" (auditoria de
+  // 2026-09-26). Quem corta em 6 é o `formatarCodigoPareamento`, DEPOIS de
+  // limpar; e o colar acha o código dentro do texto (test/entrada.test.mjs).
   const campo = HTML.split('\n').find((l) => l.includes('id="pairCodeInput"'));
   assert.ok(campo, 'sumiu o #pairCodeInput');
-  const max = (campo.match(/maxlength="(\d+)"/) || [])[1];
-  assert.equal(max, '7', 'maxlength precisa caber os 6 caracteres MAIS o separador que a tela mostra');
+  assert.doesNotMatch(campo, /maxlength=/, 'o maxlength voltou: ele corta o código colado antes de o formatador limpar');
 });
 
 test('um conceito, um nome: sem sinônimos concorrentes na mesma língua', () => {
