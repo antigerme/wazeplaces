@@ -490,3 +490,65 @@ test('H20: o francês concorda com "distinction" (feminino) e diz a frase da fol
     `o selo da célula diz "${fr['conq.nova']}" e o do botão "${fr['conq.selo.aria']}" — o mesmo conceito com dois gêneros`);
   assert.ok(!/seule d[’']elle/.test(fr['autor.sheet.subUm']), `"la seule d’elle" não é francês: ${fr['autor.sheet.subUm']}`);
 });
+
+// ── H19: o que o leitor de tela ouve na aba (sem mudar nada na tela) ─────────
+const I18N_T = new Function('window', 'navigator', 'localStorage', 'document',
+  readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\nreturn { t, setLang };')(
+  {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
+const celulas = (html) => [...html.matchAll(/<button type="button" class="conq-cel ([^"]*)"\s+data-conq="(\w+)" aria-pressed="(\w+)">([\s\S]*?)<\/button>/g)]
+  .map((m) => ({ classes: m[1].split(/\s+/), id: m[2], pressed: m[3], dentro: m[4] }));
+
+test('H19: a célula diz no NOME se a conquista é ganha ou trancada, e o aria-pressed é só a condição aberta', () => {
+  const g = { c: { primeiraFaxina: '2026-09-25' }, novas: [], patenteNova: false };
+  const deps = {
+    carregarConquistas: () => g, t: I18N_T.t, escapeHtml: (s) => String(s),
+    conquistasVisiveis: () => [{ id: 'primeiraFaxina', emoji: '🧹' }, { id: 'coruja', emoji: '🌙' }],
+  };
+  const { htmlConquistas } = montar(['htmlConquistas'], deps, ['htmlConquistas'],
+    'let conquistaTocada = "coruja", novasDestaAbertura = null;');
+  const cs = celulas(htmlConquistas());
+  assert.equal(cs.length, 2, 'o varredor não achou as células — o teste mediria nada');
+  for (const c of cs) {
+    const ganha = c.classes.includes('on');
+    const estado = I18N_T.t(ganha ? 'conq.estado.ganha' : 'conq.estado.trancada');
+    assert.match(c.dentro, new RegExp(`class="sr-only">, ${estado}<`),
+      `${c.id}: o nome acessível não diz que ela está ${estado} — ganha e trancada só se distinguem pela cor`);
+    assert.equal(c.pressed, String(c.classes.includes('sel')), `${c.id}: aria-pressed diferente da seleção na tela`);
+  }
+});
+
+test('H19: o degrau atual da escada é anunciado (aria-current), numa lista', () => {
+  const deps = {
+    carregarConquistas: () => ({ patenteNova: false }), getHistoryStats: () => ({ total: { read: 600, rejected: 50 } }),
+    patenteDe: () => 2, t: (k) => k, escapeHtml: (s) => String(s),
+    PATENTES: [{ id: 'aprendiz', emoji: '🧤', min: 0 }, { id: 'gari', emoji: '🧹', min: 100 },
+               { id: 'lixeiro', emoji: '🗑️', min: 500 }, { id: 'zelador', emoji: '🔑', min: 1500 }],
+  };
+  const { htmlPatente } = montar(['htmlPatente'], deps, ['htmlPatente'], 'let escadaAberta = true, novasDestaAbertura = null;');
+  const html = htmlPatente();
+  const degraus = [...html.matchAll(/<div role="listitem" class="conq-deg( aqui)?"( aria-current="step")?>/g)];
+  assert.equal(degraus.length, 4, 'os degraus deixaram de ser itens de lista');
+  assert.deepEqual(degraus.map((m) => !!m[2]), [false, false, true, false], 'o aria-current não está (só) no degrau atual');
+  assert.ok(degraus.every((m) => !!m[1] === !!m[2]), 'o aria-current discorda do degrau marcado na tela');
+  assert.match(html, /<div class="conq-escada" role="list">/);
+});
+
+test('H19: o interruptor e a lixeira de cada autor dizem DE QUEM são', () => {
+  const m = montarPainelComFoco({ autores: [autor('555', 3), autor('556', 2)] });
+  I18N_T.setLang('pt');
+  const r = montar(['chaveDoFoco', 'devolverFoco', 'renderAutores'], {
+    document: m.dom.document, listaDeAutores: () => m.estado.autores, AUTORES_VISIVEIS: 10, AUTORES_MAX_DIAS: 30,
+    AUTOR_LIMIAR_DESTAQUE: 6, ICONE_LIXO: '', podeRecusarAutomaticoAqui: () => true, autoLigado: () => false,
+    rejeitadoQuando: () => '', escapeHtml: (s) => String(s), t: I18N_T.t,
+    esquecerAutorDaLista() {}, alternarAutoDoAutor() {},
+  }, ['renderAutores'], 'let autoresExpandido = false;');
+  r.renderAutores();
+  for (const id of ['555', '556']) {
+    const nome = 'autor_' + id;
+    for (const classe of ['autor-auto', 'autor-esquecer']) {
+      const el = m.achar('autoresBody', (e) => e.classList.contains(classe) && e.getAttribute('data-autor') === id);
+      assert.ok(el && el.getAttribute('aria-label').includes(nome),
+        `${classe} de ${nome}: o rótulo "${el && el.getAttribute('aria-label')}" não diz de quem é`);
+    }
+  }
+});

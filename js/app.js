@@ -10020,8 +10020,11 @@ function htmlPatente() {
         Math.round(((tratados - atual.min) / (prox.min - atual.min)) * 100))) : 100;
     const nome = (r) => escapeHtml(t('conq.rank.' + r.id));
 
+    // O degrau atual leva `aria-current`: o "●" que o marca é aria-hidden, e sem
+    // isto quem usa leitor de tela ouvia seis degraus iguais (auditoria de
+    // 2026-09-25). Lista, pra o leitor anunciar o tamanho e a posição.
     const degraus = escadaAberta ? PATENTES.map((r, k) => `
-        <div class="conq-deg${k === i ? ' aqui' : ''}">
+        <div role="listitem" class="conq-deg${k === i ? ' aqui' : ''}"${k === i ? ' aria-current="step"' : ''}>
             <span class="e">${r.emoji}</span><span class="n">${nome(r)}</span>
             <span class="a tnum">${r.min}</span>
             <span class="m" aria-hidden="true">${k < i ? '✓' : k === i ? '●' : ''}</span>
@@ -10046,7 +10049,7 @@ function htmlPatente() {
             <button type="button" id="conqEscadaBtn" class="conq-link" aria-expanded="${escadaAberta}">${
                 escapeHtml(t(escadaAberta ? 'conq.patente.verMenos' : 'conq.patente.ver'))}</button>
         </div>
-        ${escadaAberta ? `<div class="conq-escada">${degraus}</div>` : ''}
+        ${escadaAberta ? `<div class="conq-escada" role="list">${degraus}</div>` : ''}
     </div>`;
 }
 
@@ -10060,10 +10063,17 @@ function htmlConquistas() {
         const on = !!g.c[x.id];
         const sel = conquistaTocada === x.id;
         const nova = g.novas.includes(x.id) || !!(novasDestaAbertura && novasDestaAbertura.ids.includes(x.id));
+        // O ESTADO vai no nome acessível: ganha e trancada se distinguem só pela
+        // COR (WCAG 1.4.1), e o leitor de tela ouvia "Coruja, botão" nas duas —
+        // o `aria-pressed` é outra coisa (a condição aberta na linha abaixo da
+        // grade). Texto invisível, sem mudança nenhuma na tela (auditoria de
+        // 2026-09-25).
+        const estado = t(on ? 'conq.estado.ganha' : 'conq.estado.trancada');
         return `<button type="button" class="conq-cel ${on ? 'on' : 'off'}${sel ? ' sel' : ''}${nova ? ' nova' : ''}"
             data-conq="${escapeHtml(x.id)}" aria-pressed="${sel}">
             <span class="e" aria-hidden="true">${x.emoji}</span>
             <span class="n">${escapeHtml(t('conq.' + x.id + '.nome'))}</span>` +
+            `<span class="sr-only">, ${escapeHtml(estado)}</span>` +
             (nova ? `<span class="conq-tag">${escapeHtml(t('conq.nova'))}</span>` : '') +
             `</button>`;
     }).join('');
@@ -11088,12 +11098,15 @@ function renderAutores() {
                   + `<input type="checkbox" class="ui-switch autor-auto"`
                   + ` data-autor="${escapeHtml(a.id)}"${autoLigado(a.id) ? ' checked' : ''}`
                   + ` title="${escapeHtml(t('stats.autores.auto'))}"`
-                  + ` aria-label="${escapeHtml(t('stats.autores.auto'))}"></label>`
+                  // O NOME no rótulo: com dez linhas, dez controles iguais
+                  // ("Rejeitar sozinho os próximos deste autor") não dizem de
+                  // quem — e o leitor de tela lê um de cada vez.
+                  + ` aria-label="${escapeHtml(t('stats.autores.auto.aria', { nome: a.nome }))}"></label>`
                 : '')
             + `<button type="button" class="autor-esquecer min-w-[44px] min-h-[44px] flex items-center justify-center`
             + ` text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 rounded-full flex-shrink-0"`
             + ` data-autor="${escapeHtml(a.id)}" title="${escapeHtml(t('stats.autores.esquecer'))}"`
-            + ` aria-label="${escapeHtml(t('stats.autores.esquecer'))}">${lixo}</button>`
+            + ` aria-label="${escapeHtml(t('stats.autores.esquecer.aria', { nome: a.nome }))}">${lixo}</button>`
             // `-mt-1.5` recolhe a folga que o min-h-[44px] da linha de cima já
             // deixou: sem isso a data flutua longe do nome que ela descreve.
             + `<span class="basis-full text-[0.6875rem] text-slate-500 dark:text-slate-400 leading-tight -mt-1.5 pb-1.5">`
