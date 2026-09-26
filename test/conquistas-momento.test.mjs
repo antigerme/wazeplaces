@@ -360,6 +360,8 @@ function montarLightboxComJanela() {
   const deps = {
     Treino: { ativo: false }, Lightbox, AppState: { authenticated: true, preferences: { undoEnabled: true }, currentPlace: null },
     canDisableUndo: () => false, podeRenomearAqui: () => true,
+    // A foto está na tela: aprovar e excluir exigem isso (L3, auditoria de 2026-09-26).
+    fotoDoLightboxNaTela: () => true,
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
     fecharEdicaoNome() {}, aplicarNomeNaTela() {}, devolverFoto() {}, showCurrentPlace() {},
     API: { prepararExclusao() {} },

@@ -1596,6 +1596,92 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── Foto que NÃO CARREGOU não se aprova nem se exclui (auditoria de 2026-09-26)
+//
+// A exceção que deixa o app aprovar FOTO existe porque a decisão está inteira
+// na tela — e pra aprovar é preciso ter VISTO a foto. MEDIDO: pelo carrossel,
+// a proposta com 404 abria no lightbox com o ícone de imagem quebrada, o ✨ e o
+// "Aprovar" ativo, e aprovar mandava `approve: true` de uma foto que ninguém
+// viu. O CONTROLE é a foto que carrega: nela a lixeira TEM que aparecer (sem
+// ele, "escondido" passaria também com o portão fechado ou o lightbox vazio).
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const enviados = [];
+  await ctx.route('**/api/validar-place', async (r) => {
+    enviados.push(JSON.parse(r.request().postData() || '{}'));
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
+  await ctx.route('**/api/excluir-foto', async (r) => {
+    const c = JSON.parse(r.request().postData() || '{}');
+    if (c.action !== 'preparar') enviados.push(c);
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
+  await ctx.route('https://venue-image.waze.com/**', (r) => r.fulfill({ status: 404, body: 'not found' }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const PLACE = {
+    venueID: 'v-quebrada', updateRequestID: 'pend-01', name: 'Foto que não veio',
+    categories: ['PARK'], address: 'Rua X, 1', updateTypeKey: 'IMAGE', purType: 'NEW_PHOTO',
+    createdBy: 'fulano', lat: -12.9, lon: -38.3, changes: [], mapa: null,
+    // A proposta é a foto QUEBRADA; a aprovada, uma que carrega.
+    imageUrls: ['https://venue-image.waze.com/thumbs/thumb700_pend-01.jpg', `${foto}#aprovada-02`],
+    approvedImageIds: ['aprovada-02'],
+  };
+  await page.evaluate(async (pl) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true;
+    API.setSession('token-smoke');
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.stats = { read: 0, rejected: 0, skipped: 0 }; AppState.serverTotal = 1;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+    AppState.queue = [JSON.parse(JSON.stringify(pl))];
+    AppState.currentPlace = AppState.queue[0];
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 350));
+  }, PLACE);
+  const estado = () => page.evaluate(() => {
+    const im = document.getElementById('lightboxImage');
+    const vis = (id) => !document.getElementById(id).classList.contains('hidden');
+    return { aberto: Lightbox.isOpen(), idx: Lightbox.idx, carregou: im.complete && im.naturalWidth > 0,
+      aprovar: vis('lightboxApprove'), lixeira: vis('lightboxDelete') };
+  });
+  // Pelo carrossel do card até a foto que carrega, e dela pro lightbox — o
+  // caminho do relato (a proposta quebrada nem abre pelo card).
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-image-next');
+  await page.waitForTimeout(250);
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+  await page.waitForTimeout(400);
+  const naBoa = await estado();
+  checa(naBoa.aberto && naBoa.idx === 1 && naBoa.carregou,
+    'foto quebrada: PRÉ-CONDIÇÃO — o lightbox não abriu na foto que carrega', JSON.stringify(naBoa));
+  checa(naBoa.lixeira, 'foto quebrada: CONTROLE — a lixeira não apareceu na foto que CARREGOU (a medida estaria cega)');
+  await page.click('#lightboxPrev');
+  await page.waitForTimeout(600);
+  const naQuebrada = await estado();
+  checa(naQuebrada.idx === 0 && !naQuebrada.carregou,
+    'foto quebrada: PRÉ-CONDIÇÃO — a proposta devia estar na tela SEM carregar', JSON.stringify(naQuebrada));
+  checa(!naQuebrada.aprovar, 'foto quebrada: o "Aprovar" apareceu numa foto que não carregou');
+  checa(!naQuebrada.lixeira, 'foto quebrada: a lixeira apareceu numa foto que não carregou');
+  // E por dentro: o clique no botão escondido (teclado, script) não aprova.
+  await page.evaluate(() => { document.getElementById('lightboxApprove').click(); });
+  await page.waitForTimeout(3600);
+  checa(enviados.length === 0, `foto quebrada: ${enviados.length} escrita(s) saíram de uma foto que ninguém viu`,
+    JSON.stringify(enviados));
+  // Voltando pra foto que carrega, a lixeira volta (a regra é reavaliada).
+  await page.click('#lightboxNext');
+  await page.waitForTimeout(400);
+  checa((await estado()).lixeira, 'foto quebrada: a lixeira não voltou na foto que carrega');
+  checa(erros.length === 0, 'foto quebrada: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 // ── Sessão morta leva pra tela de entrar; oscilação NÃO ──────────────────
 //
 // O incidente que originou esta passada: depois de um deploy que invalidou as
@@ -6927,6 +7013,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
   + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true)`
+  + `, + foto que NÃO carregou (sem aprovar nem lixeira, nem pelo clique no botão escondido, com o CONTROLE da foto que carrega)`
   + `, + sessão morta leva pra tela de entrar e oscilação de rede NÃO derruba`
   + `, + falha de busca NUNCA vira "Tudo limpo!" (401 com alarme falso, medido pela REDE)`
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`

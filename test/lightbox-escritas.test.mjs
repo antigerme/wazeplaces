@@ -176,7 +176,7 @@ test('L5 aprovação que FALHA depois de excluir uma foto ANTERIOR: o ✨ volta 
 });
 
 // ── o caminho SEM Desfazer: só aplica o que o Waze confirmou ────────────────
-function montarEscritas({ resposta, preferencias = { undoEnabled: false } }) {
+function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoNaTela = true }) {
   const log = [];
   const L = lightbox();
   const A = pedidoDeFoto('ur-A');
@@ -185,7 +185,9 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false } }) {
   const deps = {
     AppState, Lightbox: L, Treino: { ativo: false }, epocaDaSessao: 0,
     canDisableUndo: () => true, estadoAprovando: () => {}, lixeiraOcupada: () => {},
-    API: { aprovarPedido: async () => resposta, excluirFoto: async () => resposta, prepararExclusao: () => {} },
+    fotoDoLightboxNaTela: () => fotoNaTela,
+    API: { aprovarPedido: async () => { log.push('api:aprovar'); return resposta; },
+      excluirFoto: async () => { log.push('api:excluir'); return resposta; }, prepararExclusao: () => {} },
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, contarConquista: () => {},
     advanceQueue: () => log.push('avancou'), handleUnauthorized: () => {}, showToast: (m, tipo) => log.push('toast:' + tipo),
     msgDoServidor: () => '', t: (k) => k, devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {},
@@ -227,6 +229,53 @@ test('sem Desfazer: exclusão que FALHA não tira a foto da tela', async () => {
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual(L.urls, [FOTO('velha'), FOTO('ur-A')], 'a tela afirmou uma exclusão que o Waze recusou');
   assert.ok(log.includes('devolveu'));
+});
+
+// ── L3: a foto que NÃO CARREGOU não se aprova nem se exclui ──────────────────
+// (auditoria de 2026-09-26). MEDIDO: pelo carrossel, a proposta com 404 abria
+// no lightbox com o ícone de imagem quebrada, o ✨ e o "Aprovar" ativo, e
+// aprovar mandava `approve: true` de uma foto que ninguém viu. A tela é medida
+// no smoke; aqui, que as DUAS ações recusam por dentro (teclado ou script
+// clicando o botão escondido não furam a regra).
+test('L3 aprovar e excluir recusam a foto que não está na tela — sem nenhuma ida ao Waze', async () => {
+  for (const [nome, acao] of [['aprovar', 'aprovarFotoAtual'], ['excluir', 'pedirExclusaoDaFoto']]) {
+    const m = montarEscritas({ resposta: { success: true }, fotoNaTela: false });
+    m.L.place.approvedImageIds = ['velha'];
+    m.L.place.lat = -23; m.L.place.lon = -46;
+    if (nome === 'excluir') { m.L.idx = 0; m.L.idFotoAtual = () => 'velha'; }
+    m.app[acao]();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(!m.log.some((l) => l.startsWith('api:')), `${nome}: foi ao Waze com a foto QUEBRADA na tela`);
+    // CONTROLE: a mesma ação, com a foto na tela, vai.
+    const c = montarEscritas({ resposta: { success: true }, fotoNaTela: true });
+    c.L.place.approvedImageIds = ['velha'];
+    c.L.place.lat = -23; c.L.place.lon = -46;
+    if (nome === 'excluir') { c.L.idx = 0; c.L.idFotoAtual = () => 'velha'; }
+    c.app[acao]();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(c.log.some((l) => l.startsWith('api:')), `CONTROLE ${nome}: com a foto na tela a ação não saiu`);
+  }
+});
+
+test('L3 os botões de aprovar e excluir SOMEM com a foto fora da tela, e a imagem reavalia no load/error', () => {
+  const el = () => ({ hidden: false, classList: { toggle(c, v) { if (c === 'hidden') this.o.hidden = v; }, o: null } });
+  const del = el(), apr = el();
+  del.classList.o = del; apr.classList.o = apr;
+  const rodar = (naTela) => new Function('document', 'Treino', 'editandoNome', 'fotoDoLightboxNaTela', 'Lightbox',
+    fatiar('atualizarAcoesDeFoto') + '\nreturn atualizarAcoesDeFoto;')(
+    { getElementById: (id) => ({ lightboxDelete: del, lightboxApprove: apr })[id] || null },
+    { ativo: false }, () => false, () => naTela, { idFotoAtual: () => 'x', podeAprovarAtual: () => true })();
+  rodar(true);
+  assert.equal(del.hidden || apr.hidden, false, 'CONTROLE: com a foto na tela e o portão aberto, as ações aparecem');
+  rodar(false);
+  assert.equal(del.hidden && apr.hidden, true, 'as ações de foto ficaram na tela com a foto QUEBRADA');
+  // O `_render` avalia antes de a foto chegar; quem mostra os botões quando
+  // ela carrega (e confirma o sumiço quando falha) são os ouvintes da imagem.
+  const setup = fatiar('setupLightbox');
+  assert.match(setup, /img\.addEventListener\('load', atualizarAcoesDeFoto\)/, 'a foto que CARREGA não reavalia as ações');
+  assert.match(setup, /img\.addEventListener\('error', atualizarAcoesDeFoto\)/, 'a foto que FALHA não reavalia as ações');
+  // E o predicado é o do PIXEL: `complete` sozinho é verdadeiro pra imagem quebrada.
+  assert.match(fatiar('fotoDoLightboxNaTela'), /img\.complete && img\.naturalWidth > 0/);
 });
 
 test('aprovar e FECHAR dentro da janela: o card avança quando a resposta chega', async () => {

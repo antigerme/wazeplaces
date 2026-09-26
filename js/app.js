@@ -1797,7 +1797,15 @@ function atualizarAcoesDeFoto() {
     // Renomeando, mesma coisa: elas ficam no mesmo canto do confirmar/cancelar.
     // Trocar de foto DURANTE a renomeação continua valendo (é legítimo conferir
     // a grafia noutra fachada) — o que não pode é a ação destrutiva voltar.
-    const some = Treino.ativo || editandoNome();
+    //
+    // E com a foto que NÃO CARREGOU (ou ainda carregando), também somem: as
+    // duas são decisões sobre o PIXEL, e a regra de ouro que abriu a exceção da
+    // foto é que pra aprovar é preciso tê-la VISTO em tamanho de decisão.
+    // MEDIDO: pelo carrossel, a proposta com 404 abria no lightbox com o ícone
+    // de imagem quebrada, o ✨ e o "Aprovar" ativo — e aprovar mandava
+    // `approve: true` de uma foto que ninguém viu (auditoria de 2026-09-26). O
+    // `load`/`error` da imagem reavaliam isto (ver `setupLightbox`).
+    const some = Treino.ativo || editandoNome() || !fotoDoLightboxNaTela();
     const del = document.getElementById('lightboxDelete');
     if (del) del.classList.toggle('hidden', some || !Lightbox.idFotoAtual());
     // Mutuamente exclusivos: pendente se APROVA, aprovada se EXCLUI. Sem isso
@@ -1805,6 +1813,16 @@ function atualizarAcoesDeFoto() {
     // vale pra foto que está vendo.
     const apr = document.getElementById('lightboxApprove');
     if (apr) apr.classList.toggle('hidden', some || !Lightbox.podeAprovarAtual());
+}
+
+// A foto do lightbox está NA TELA: carregou e tem pixel. `complete` sozinho não
+// basta — ele é verdadeiro também pra imagem quebrada —, então vale o
+// `naturalWidth`. FONTE ÚNICA de quem mostra as ações de foto e de quem as
+// executa (`aprovarFotoAtual`, `pedirExclusaoDaFoto`): um clique por fora do
+// botão escondido (teclado, script) não pode furar a regra.
+function fotoDoLightboxNaTela() {
+    const img = document.getElementById('lightboxImage');
+    return !!(img && img.complete && img.naturalWidth > 0);
 }
 
 const Lightbox = {
@@ -2338,6 +2356,10 @@ function setupMapaLightbox() {
 function setupLightbox() {
     const lb = document.getElementById('imageLightbox');
     const img = document.getElementById('lightboxImage');
+    // As ações de foto só existem com a foto NA TELA (`fotoDoLightboxNaTela`):
+    // ela chega depois do `_render`, e a que falha não chega nunca.
+    img.addEventListener('load', atualizarAcoesDeFoto);
+    img.addEventListener('error', atualizarAcoesDeFoto);
     document.getElementById('lightboxClose').addEventListener('click', () => Lightbox.close());
     document.getElementById('lightboxPrev').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.prev(); });
     document.getElementById('lightboxNext').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.next(); });
@@ -2586,6 +2608,8 @@ function pedirExclusaoDaFoto() {
     // Sem sessão não se escreve: a janela desta exclusão correria com o token
     // de quem entrasse depois (ver `acoesTravadas`, K1).
     if (!AppState.authenticated) return;
+    // Foto que não carregou não se exclui (ver `atualizarAcoesDeFoto`).
+    if (!fotoDoLightboxNaTela()) return;
     const id = Lightbox.idFotoAtual();
     if (!id) return;
     const place = Lightbox.place;
@@ -2767,6 +2791,8 @@ function aprovarFotoAtual() {
     // que nada é enviado. Proteção não pode depender de a fixture ser pobre.
     if (Treino.ativo) return;
     if (!AppState.authenticated) return;   // sem sessão não se escreve (K1)
+    // Aprovar é decidir sobre o pixel: sem a foto na tela, não há o que aprovar.
+    if (!fotoDoLightboxNaTela()) return;
     if (!Lightbox.podeAprovarAtual()) return;
     const place = Lightbox.place;
     // `epocaFila`: a fila do gesto (ver `concluirAprovacao`).
