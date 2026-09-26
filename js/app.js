@@ -3104,7 +3104,11 @@ async function loadProfileAndAuxData() {
     // vê o MESMO diálogo de quem é recusado no login, com o perfil dela.
     if (profileRes.errorCategory === 'access_denied') {
         if (AppState.authenticated) {
-            derrubarSessao(profileRes.errorKey, { depois: () => { showAuthScreen(); showAccessDenied(profileRes); } });
+            // O diálogo ANTES da tela de entrada: o `showAuthScreen` fecha a
+            // conversa e a lista da presença (`Presenca.desligar`), e fechar um
+            // modal e abrir outro no mesmo quadro dessincroniza o voltar
+            // (gotcha #65). Aberto antes, o diálogo toma o lugar deles.
+            derrubarSessao(profileRes.errorKey, { depois: () => { showAccessDenied(profileRes); showAuthScreen(); } });
         }
         return;
     }
@@ -5664,7 +5668,10 @@ async function handleUnauthorized() {
         // A sonda achou o portão fechado (ver `handlePerfil`): não é alarme
         // falso nem sessão que expirou — é o mesmo desfecho do login negado.
         if (r && r.errorCategory === 'access_denied') {
-            derrubarSessao(r.errorKey, { depois: () => { showAuthScreen(); showAccessDenied(r); } });
+            // O diálogo ANTES da tela de entrada (ver o `loadProfileAndAuxData`:
+            // o `showAuthScreen` fecha a conversa, e fechar e abrir no mesmo
+            // quadro é o gotcha #65).
+            derrubarSessao(r.errorKey, { depois: () => { showAccessDenied(r); showAuthScreen(); } });
             return;
         }
         // Teste POSITIVO de vida, não ausência de marcador.

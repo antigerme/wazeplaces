@@ -257,3 +257,165 @@ test('P13 diário: o prazo do token vai no relógio do APARELHO — o mesmo que 
   assert.deepEqual(linha, { veio: true, expiraEmH: 24 }, 'o diário leu o prazo no relógio do servidor');
   assert.equal(linha.expiraEmH, c.P.presencaDiag().token.expiraEmH, 'o diário e o resumo discordam do mesmo token');
 });
+
+// ── P3: a conversa escondida por outra camada ───────────────────────────────
+//
+// O `openModal` de outra camada (a folha do pedido recebido, o "Sair" da Ajuda)
+// ESCONDE a conversa sem passar pela limpeza dela. O `openModal` de mentira
+// aqui faz exatamente isso, como o do app.js.
+
+const OUTRO = '777000';
+const PEDIDO_X = { venueID: 'vx', updateRequestID: 'urx', name: 'Pedido X', address: '', categories: [], updateTypeKey: 'IMAGE', imageUrl: null, lat: -23.5, lon: -46.6, region: 'row' };
+const PRESENCA_MODAIS = ['presencaModal', 'conversaModal', 'pedidoModal'];
+function comOpenModalDeVerdade(c) {
+  c.escopo.openModal = (id) => {
+    for (const m of PRESENCA_MODAIS) if (m !== id) c.$(m).classList.add('hidden');
+    c.$(id).classList.remove('hidden');
+  };
+}
+
+test('P3 o pedido preso na conversa com uma pessoa não aparece — nem sai — na conversa com OUTRA', async () => {
+  const c = novoCliente({ api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: [], maisAntigas: false, lida: true } : { success: true }) } });
+  c.win.cardParaConversa = () => ({ ...PEDIDO_X, name: 'Pedido Y' });   // o card na tela agora é outro
+  c.P.presencaMontar();
+  comOpenModalDeVerdade(c);
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  c.P.Presenca.anexo = PEDIDO_X;                     // o pedido X preso na conversa com a CAF
+  c.escopo.openModal('pedidoModal');                  // abre um pedido que a CAF mandou...
+  c.$('pedidoModal').classList.add('hidden');         // ...e fecha a folha
+  // CONTROLE: reabrir a MESMA conversa mantém o pedido que a pessoa prendeu.
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  assert.equal(c.P.Presenca.anexo && c.P.Presenca.anexo.name, 'Pedido X', 'CONTROLE: reabrir a mesma conversa soltou o pedido');
+  c.escopo.openModal('pedidoModal');
+  c.$('pedidoModal').classList.add('hidden');
+  c.P.presencaAbrirConversa(OUTRO);
+  await tick();
+  assert.equal(c.P.Presenca.anexo, null, 'o pedido preso na conversa com a CAF foi parar na conversa com outra pessoa');
+  assert.equal(c.$('conversaAnexo').classList.contains('hidden'), true, 'a tirinha mostra o pedido de outra conversa');
+  c.$('conversaInput').value = 'oi';
+  c.$('conversaForm').disparar('submit');
+  await tick();
+  const envio = c.chamadas.chat.find((x) => x.acao === 'enviar');
+  assert.equal(envio.para, OUTRO);
+  assert.equal(envio.contexto, undefined, 'o pedido de outra conversa saiu junto no envio');
+});
+
+test('P3 a conversa ESCONDIDA não é redesenhada — o que chega entra no histórico e aparece quando ela volta', async () => {
+  const { bytesDeMensagem, bytesDeRecibo, b64 } = await import('./_presenca-cliente.mjs');
+  const inbox = (bytes, n) => ({ inboxMessage: { messageId: `a0000000-0000-1000-8000-${String(900 + n).padStart(12, '0')}`, messageType: 'X', message: b64(bytes) } });
+  const fluxo = (c) => ({ ctl: new AbortController(), emLote: false, epoca: c.P.Presenca.epoca, desde: 0, vivoEm: 0 });
+  const c = novoCliente({ api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: [], maisAntigas: false, lida: true } : { success: true }) } });
+  c.P.presencaMontar();
+  comOpenModalDeVerdade(c);
+  c.P.Presenca.atualizadaEm = 1;
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  c.escopo.openModal('pedidoModal');                  // a folha do pedido esconde a conversa
+  c.$('conversaMsgs').innerHTML = '';                 // (o DOM de antes não é o que se mede aqui)
+  c.P.presencaQuadro(fluxo(c), inbox(await bytesDeMensagem({ id: 'a0000000-0000-1000-8000-000000000071', de: CAF, para: EU, texto: 'TEXTO_NOVO', ctx: { app: 'wazeplaces' }, ts: 1790200000000 }), 1));
+  c.P.presencaQuadro(fluxo(c), inbox(await bytesDeRecibo({ id: 'a0000000-0000-1000-8000-000000000072', de: CAF, para: EU, tipo: 'lida', ids: ['a0000000-0000-1000-8000-000000000071'], ts: 1790200001000 }), 2));
+  assert.equal(c.$('conversaMsgs').innerHTML, '', 'a conversa escondida foi redesenhada (a captura levaria o que não está na tela)');
+  assert.equal(c.P.Presenca.historico.get(CAF).msgs.length, 1, 'CONTROLE: a mensagem tem que entrar no histórico');
+  // Volta pra conversa: ela aparece.
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  assert.match(c.$('conversaMsgs').innerHTML, /TEXTO_NOVO/, 'a mensagem não apareceu quando a conversa voltou');
+});
+
+test('P3 desligar e "Sair" soltam a conversa e o pedido preso — a conta seguinte não herda a tirinha', async () => {
+  const c = novoCliente({ api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: [], maisAntigas: false, lida: true } : { success: true }) } });
+  c.win.cardParaConversa = () => PEDIDO_X;
+  c.P.presencaMontar();
+  comOpenModalDeVerdade(c);
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  c.P.presencaAnexarCard();
+  assert.equal(c.P.Presenca.anexo.name, 'Pedido X', 'CONTROLE: o pedido não prendeu');
+  c.escopo.openModal('pedidoModal');                  // esconde a conversa sem a limpeza dela
+  c.$('pedidoModal').classList.add('hidden');
+  c.$('conversaMsgs').innerHTML = '<div>TEXTO_DE_TERCEIRO</div>';
+  c.P.presencaEsquecer();                              // "Sair"
+  assert.equal(c.P.Presenca.aberta, null, 'a conversa atravessou o "Sair"');
+  assert.equal(c.P.Presenca.anexo, null, 'o pedido preso atravessou o "Sair"');
+  assert.equal(c.$('conversaMsgs').innerHTML, '', 'a conversa de quem saiu ficou no DOM');
+  c.AppState.profile = { id: 555000, userName: 'outra' };
+  c.win.cardParaConversa = () => null;
+  c.P.presencaAbrirConversa(OUTRO);
+  await tick();
+  assert.equal(c.$('conversaAnexo').classList.contains('hidden'), true, 'a conta seguinte herdou a tirinha da anterior');
+});
+
+// ── P6: a sessão acaba com a conversa aberta ────────────────────────────────
+
+test('P6 a sessão acaba com a conversa aberta: conversa, lista e folha do pedido FECHAM, e o texto de terceiro sai do DOM', async () => {
+  const c = novoCliente({ api: { chat: (x) => (x.acao === 'abrir'
+    ? { success: true, mensagens: [{ ...daCaf(1, 1790200000000), texto: 'TEXTO_DE_TERCEIRO' }], maisAntigas: false, lida: true } : { success: true }) } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  assert.match(c.$('conversaMsgs').innerHTML, /TEXTO_DE_TERCEIRO/, 'CONTROLE: a conversa tem que estar na tela');
+  // `showAuthScreen`: authenticated = false, profile = null, Presenca.desligar().
+  c.AppState.authenticated = false;
+  c.AppState.profile = null;
+  c.P.presencaDesligar();
+  assert.equal(c.$('conversaModal').classList.contains('hidden'), true, 'a conversa ficou por cima da tela de entrada');
+  assert.deepEqual(c.chamadas.closeModal, ['conversaModal'], 'fechou por fora do `closeModal` (o voltar e a limpeza)');
+  assert.doesNotMatch(c.$('conversaMsgs').innerHTML, /TEXTO_DE_TERCEIRO/);
+  assert.equal(c.P.Presenca.aberta, null);
+  // A lista e a folha do pedido também.
+  for (const id of ['presencaModal', 'pedidoModal']) {
+    const d = novoCliente();
+    d.$(id).classList.remove('hidden');
+    d.P.presencaDesligar();
+    assert.equal(d.$(id).classList.contains('hidden'), true, `${id} ficou por cima da tela de entrada`);
+    assert.deepEqual(d.chamadas.closeModal, [id]);
+  }
+  // CONTROLE: o que não está na tela não é "fechado" — cada fechamento gasta
+  // uma entrada do voltar, e a escondida não tem nenhuma.
+  const e = novoCliente();
+  e.P.presencaDesligar();
+  assert.deepEqual(e.chamadas.closeModal, [], 'fechou modal que não estava aberto');
+});
+
+test('P6 sem o id do perfil o envio não sai — e o que se digitou FICA no campo', async () => {
+  const c = novoCliente({ api: { chat: () => ({ success: true }) } });
+  c.P.presencaMontar();
+  c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');
+  c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true });
+  c.AppState.profile = null;                           // a sessão acabou de cair
+  c.$('conversaInput').value = 'minha resposta';
+  c.$('conversaForm').disparar('submit');
+  await tick();
+  assert.equal(c.$('conversaInput').value, 'minha resposta', 'o que se digitou sumiu calado');
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 0);
+  // CONTROLE: com o perfil, sai e o campo limpa.
+  c.AppState.profile = { id: 12444348, userName: 'antigerme' };
+  c.$('conversaForm').disparar('submit');
+  await tick();
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 1);
+  assert.equal(c.$('conversaInput').value, '');
+});
+
+test('P6 o rascunho: a queda da sessão o mantém (é a mesma pessoa voltando); o "Sair" o leva junto', () => {
+  const c = novoCliente();
+  c.$('conversaInput').value = 'rascunho';
+  c.P.presencaDesligar();
+  assert.equal(c.$('conversaInput').value, 'rascunho', 'a queda da sessão apagou o que se digitou');
+  c.P.presencaEsquecer();
+  assert.equal(c.$('conversaInput').value, '', 'o "Sair" deixou o rascunho pra conta seguinte');
+});
+
+test('P6 o diálogo do portão fechado abre ANTES da tela de entrada — fechar a conversa e abri-lo no mesmo quadro é o gotcha #65', async () => {
+  const { readFileSync } = await import('node:fs');
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const depois = [...APP.matchAll(/depois: \(\) => \{([^}]*)\}/g)].map((m) => m[1]);
+  assert.ok(depois.length >= 2, 'sumiram os desfechos do portão fechado (o guard ficaria cego)');
+  for (const corpo of depois) {
+    if (!/showAuthScreen\(\)/.test(corpo) || !/showAccessDenied\(/.test(corpo)) continue;
+    assert.ok(corpo.indexOf('showAccessDenied(') < corpo.indexOf('showAuthScreen()'),
+      `a tela de entrada fecha a conversa e o diálogo abre em seguida: ${corpo.trim()}`);
+  }
+});

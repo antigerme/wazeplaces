@@ -385,6 +385,9 @@ test('mandar: falha de rede vira "Não enviada, sem conexão" + "Tentar de novo"
   let resposta = { success: false, errorCategory: 'transient' };
   const c = novoCliente({ api: { chat: () => resposta } });
   c.P.Presenca.aberta = CAF;
+  // A conversa NA TELA: escondida por outra camada ela não é desenhada
+  // (auditoria de 2026-09-26), e é na tela que se manda mensagem.
+  c.$('conversaModal').classList.remove('hidden');
   c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true });
   c.P.presencaEnviar('oi', null);
   await new Promise((r) => setImmediate(r));
@@ -402,6 +405,7 @@ test('mandar: falha de rede vira "Não enviada, sem conexão" + "Tentar de novo"
   // Sessão morta segue pelo caminho do app.
   const d = novoCliente({ api: { chat: () => ({ success: false, errorCategory: 'unauthorized' }) } });
   d.P.Presenca.aberta = CAF;
+  d.$('conversaModal').classList.remove('hidden');
   d.P.presencaEnviar('oi', null);
   await new Promise((r) => setImmediate(r));
   assert.equal(d.chamadas.unauthorized, 1);
@@ -454,6 +458,7 @@ test('abrir: o estado de quem está no app vs quem saiu — e o campo nunca trav
   c.AppState.currentPlace = { mapa: { centro: [-23.55, -46.63] } };
   c.P.Presenca.online = [pessoa(CAF, 'cafanha', -23.40, -46.50, 4)];
   c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');   // a conversa só é desenhada na tela
   c.P.presencaRenderConversa();
   assert.match(c.$('conversaEstado').innerHTML, /presenca-ponto"[^>]*><\/span>presenca\.conversa\.naApp · L5 · presenca\.dist/);
   c.P.Presenca.online = [];

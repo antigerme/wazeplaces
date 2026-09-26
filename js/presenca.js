@@ -469,14 +469,37 @@ function presencaDesligar() {
     Presenca.pedindo = null;
     Presenca.chat = null;
     Presenca.fluxoTentativa = 0;
-    presencaRenderPilula();
-    presencaRenderLista();
+    // A conversa, a lista e a folha do pedido FECHAM junto. Desligar é o que o
+    // `showAuthScreen` chama quando a sessão acaba, e elas ficavam por cima da
+    // tela de entrada — com a conversa (texto de terceiro) à mostra e um campo
+    // que engolia o que se digitava (auditoria de 2026-09-26). Pelo
+    // `closeModal`, que consome a entrada do voltar e roda a limpeza de cada
+    // uma; só a que está NA TELA (fechar a escondida gastaria um voltar).
+    // Quem abre um diálogo logo depois (o portão fechado) o abre ANTES do
+    // `showAuthScreen`: fechar e abrir no mesmo quadro é o gotcha #65.
+    if (typeof closeModal === 'function') {
+        for (const id of ['conversaModal', 'presencaModal', 'pedidoModal']) {
+            const m = document.getElementById(id);
+            if (m && !m.classList.contains('hidden')) closeModal(id);
+        }
+    }
+    // A conversa aberta e o pedido preso nela são DESTA sessão, e o `aberta` e
+    // o `anexo` ficavam de pé quando outra camada tinha escondido a conversa
+    // sem a limpeza dela: atravessavam o "Sair", e o pedido de uma conta
+    // aparecia — e saía no envio — na conversa da conta seguinte (auditoria de
+    // 2026-09-26). A limpeza do fechamento faz o resto: tira do DOM a conversa
+    // e o anúncio (texto de terceiro) e redesenha a pílula e a lista.
+    presencaEsquecerAberta();
 }
 
 // Logout: "se pedir para sair, é realmente para sair".
 function presencaEsquecer() {
     presencaDesligar();
     Presenca.ultimaPosicao = null;
+    // O que ficou digitado e não saiu também: o campo não é apagado quando o
+    // envio não pode sair (ver o `submit`), e a conta seguinte o acharia lá.
+    const campo = document.getElementById('conversaInput');
+    if (campo) campo.value = '';
     safeLS.remove(CHAT_KEY);
 }
 
@@ -942,9 +965,17 @@ function presencaPedirNome() {
 // tela, a próxima mensagem dessa pessoa virava "lida" com a conversa fora da
 // vista (achado pelo smoke da presença).
 function presencaOlhando(id) {
+    return Presenca.aberta === id && document.visibilityState === 'visible' && presencaConversaNaTela();
+}
+
+// O modal da conversa está visível. É a régua de "olhando" (acima) e de quem
+// pode DESENHAR a conversa (`presencaRenderConversa`): escondida por outra
+// camada, ela era redesenhada a cada mensagem que chegava, e a captura do
+// diagnóstico (que leva o DOM inteiro) mostrava uma conversa que não estava na
+// tela (auditoria de 2026-09-26).
+function presencaConversaNaTela() {
     const modal = document.getElementById('conversaModal');
-    return Presenca.aberta === id && document.visibilityState === 'visible'
-        && !!modal && !modal.classList.contains('hidden');
+    return !!modal && !modal.classList.contains('hidden');
 }
 
 // Quem usa leitor de tela não ouvia a mensagem que chega com a conversa aberta.
@@ -1013,6 +1044,12 @@ function presencaZerarNaoLidas(id, ate) {
 function presencaAbrirConversa(id) {
     id = String(id);
     if (!PRESENCA_ID.test(id)) return;
+    // O pedido preso é da conversa em que foi preso. Escondida por outra camada
+    // (a folha do pedido recebido), a conversa não passa pela limpeza dela, e o
+    // anexo ficava: abrir a conversa com OUTRA pessoa mostrava o pedido na
+    // tirinha — e ele saía junto no envio, pra quem não era o destino
+    // (auditoria de 2026-09-26).
+    if (Presenca.aberta !== id) Presenca.anexo = null;
     Presenca.aberta = id;
     chatConhecer(id);
     // Abrir é ler: o servidor marca como lida no mesmo pedido do histórico.
@@ -1502,7 +1539,7 @@ function presencaHtmlDoPedido(m, i, recibo) {
 
 function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {}) {
     const id = Presenca.aberta;
-    if (!id) return;
+    if (!id || !presencaConversaNaTela()) return;
     const pessoa = Presenca.online.find((p) => p.id === id);
     const conversa = Presenca.conversas.find((c) => c.id === id);
     const nome = (pessoa && pessoa.nome) || (conversa && conversa.nome) || t('presenca.anon');
@@ -1595,6 +1632,10 @@ function presencaMontar() {
         const texto = (campo.value || '').trim().slice(0, 2000);
         // Com pedido preso, mandar SÓ o card é legítimo — perguntar é opcional.
         if ((!texto && !Presenca.anexo) || !Presenca.aberta) return;
+        // Sem o id do perfil o envio não sai (a sessão acabou de cair, ou o
+        // perfil ainda não chegou), e o campo era apagado assim mesmo: o que se
+        // digitou sumia calado (auditoria de 2026-09-26). Fica no campo.
+        if (!presencaEu()) return;
         const card = Presenca.anexo;
         campo.value = '';
         // Solta o anexo ANTES de mandar: redesenhar com a tirinha ainda presa
