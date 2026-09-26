@@ -352,7 +352,8 @@ test('a lista de tiles guardados é lida em TODA partida do worker, não só no 
   // da recriação vai pra rede — e o card pede todos os tiles de uma vez.
   assert.match(SW_SEM, /if \(tilesHidratados\)/,
     'sumiu a distinção entre lista pronta e lista ainda sendo lida');
-  assert.match(SW_SEM, /respondWith\(hidratacao\.then\(/,
+  // E espera a leitura MAIS NOVA, não a capturada no pedido (O11, 2026-09-26).
+  assert.match(SW_SEM, /respondWith\(esperarListaMaisNova\(\)\.then\(/,
     'na janela logo depois de acordar, o tile tem de ESPERAR a leitura da lista');
   assert.match(APP_SEM, /postMessage\(\{ type: 'TILES_GUARDADOS' \}\)/,
     'o app precisa avisar o SW depois de guardar');

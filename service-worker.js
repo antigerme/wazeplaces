@@ -55,6 +55,16 @@ function hidratarTiles() {
   })();
   return hidratacao;
 }
+// Espera a leitura MAIS NOVA da lista. Esperar só a promessa capturada no
+// pedido não basta (auditoria de 2026-09-26, O11): pedido durante a leitura N,
+// com a N+1 começando antes de a N terminar — a N sai cedo (geração velha) sem
+// tocar na lista, e o tile era decidido contra a lista VELHA (ou vazia, logo
+// depois de acordar) e ia à rede, que sem sinal não há. Relê `hidratacao` (a
+// mais nova) até a lista estar pronta; o teto de voltas é só cinto — por
+// construção a leitura mais nova sempre termina marcando a lista pronta.
+function esperarListaMaisNova(voltas = 0) {
+  return hidratacao.then(() => (tilesHidratados || voltas >= 5 ? undefined : esperarListaMaisNova(voltas + 1)));
+}
 // EM TODA PARTIDA do worker — não só no `activate`. Service worker é EFÊMERO:
 // o Chrome o encerra depois de ~30s ocioso e o recria no próximo evento, com
 // as variáveis globais ZERADAS. Até v2026.09.22-01 a lista só era lida no
@@ -217,7 +227,7 @@ self.addEventListener('fetch', event => {
         // guardado, o worker busca por conta própria — o que a CSP do script
         // dele permite (`connect-src` com o host do tile, cobrado em
         // `test/csp-vm.test.mjs`) e dá o mesmo que o navegador daria.
-        event.respondWith(hidratacao.then(() =>
+        event.respondWith(esperarListaMaisNova().then(() =>
           (tilesGuardados.has(url.href) ? doCache() : fetch(event.request))));
       }
     }
