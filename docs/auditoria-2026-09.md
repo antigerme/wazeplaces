@@ -112,6 +112,20 @@ o contêiner. A cópia de segurança do que já estava commitado em 2026-09-26 0
 sobre o branch) e `lote6-consertos.patch` (um bloco `### fix-<área>` por
 agente; `git am` bloco a bloco, depois `npm run js && npm run css && npm run
 html`). O que faltava a partir daí, refaça a partir desta lista.
+**Atualização 2026-09-26 ~12:10:** o lote 6 virou o **PR #252** (lote 5 + os
+seis consertos). O CI achou uma coisa só: o job do WebKit clicava no link de
+instalar a extensão, que agora (certo) só aparece no Chromium de computador —
+o smoke passou a medir os dois lados (oferecida no Chromium, ausente no
+WebKit). Aqui: `npm test` 1270/1270; os quatro smokes no Chromium e fluxo e
+presença no WebKit verdes. **Rodada 3 da auditoria rodando** sobre o código do
+PR, em `/home/user/wp-r3` (worktree só de leitura): cinco auditores (costura
+entre os consertos paralelos, modo dev e diagnóstico, lightbox, textos e docs,
+filtros e fila), com os pedidos em `scratchpad/rodada3-prompts.md`. As decisões
+que ficam pro owner já têm mockup (tela real com o estado injetado, antes e
+depois) numa página pronta pra publicar no relatório final:
+`scratchpad/mockups/decisoes-em-aberto.html` (gerada por
+`scratchpad/mockups/capturar.mjs`).
+
 **Atualização 2026-09-26 ~11:50:** os SEIS entraram neste branch, com a
 costura da junção (um `devolverFoco` duplicado por dois branches paralelos
 virou `devolverFocoAoPainel`, e `test/nomes-unicos.test.mjs` reprova nome de

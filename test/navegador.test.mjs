@@ -170,7 +170,7 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
   // smoke-browser: o gesto de segurar e arrastar o FAB, e a pinça/o puxão pra
   // baixo na foto do card (auditoria de 2026-09-26) — os dois são toque com
   // arraste (e, a pinça, com DOIS dedos), que só o CDP do Chromium sintetiza.
-  const ESPERADOS = { 'smoke-browser.mjs': 2 };
+  const ESPERADOS = { 'smoke-browser.mjs': 3 };
   const achados = {};
   for (const f of readdirSync(new URL('../tools/', import.meta.url)).filter((x) => x.endsWith('.mjs') && x !== 'navegador.mjs')) {
     const codigo = semComentario(ler(`tools/${f}`));

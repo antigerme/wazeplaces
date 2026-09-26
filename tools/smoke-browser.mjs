@@ -2162,21 +2162,34 @@ for (const status of [404, 403]) {
     return !!e && e.offsetParent !== null;
   }, id);
   checa(!(await visivel('extJaInstalei')), 'já instalei: nasceu visível (é ruído pra quem não foi à loja)');
-  await page.evaluate(() => {
-    const a = document.getElementById('extInstallLink');
-    a.removeAttribute('target');
-    a.addEventListener('click', (e) => e.preventDefault(), true);
-  });
-  await page.click('#extInstallLink');
-  await page.waitForTimeout(250);
-  checa(await visivel('extJaInstalei'), 'já instalei: não apareceu depois do clique em instalar');
-  checa(await page.evaluate(() => document.getElementById('extJaInstalei').getBoundingClientRect().height >= 44),
-    'já instalei: alvo de toque abaixo de 44px');
-  let recarregou = false;
-  page.on('framenavigated', (f) => { if (f === page.mainFrame()) recarregou = true; });
-  await page.click('#extJaInstalei');
-  await page.waitForTimeout(1000);
-  checa(recarregou, 'já instalei: não recarregou — sem reload a ponte da extensão não entra na aba');
+  // A extensão só é OFERECIDA onde instala: o Chromium de computador (v2026.09.26-01).
+  // O motor do Safari é o caso oposto, e se mede nos dois lados — foi o job do
+  // WebKit que achou este bloco clicando num card que, lá, corretamente não existe.
+  const oferecida = await page.evaluate(() => document.documentElement.classList.contains('com-extensao'));
+  const cardNaTela = await visivel('extInstallLink');
+  if (MOTOR === 'chromium') {
+    checa(oferecida && cardNaTela, 'extensão: NÃO oferecida no Chromium de computador, onde ela instala');
+  } else {
+    checa(!oferecida && !cardNaTela, `extensão: oferecida no ${MOTOR}, onde ela não instala`);
+  }
+  if (!pularForaDoChromium(MOTOR, 'extensão: o "Já instalei — entrar" depois de ir à loja',
+    'a extensão só existe no Chromium de computador; fora dele o card nem aparece (conferido acima)')) {
+    await page.evaluate(() => {
+      const a = document.getElementById('extInstallLink');
+      a.removeAttribute('target');
+      a.addEventListener('click', (e) => e.preventDefault(), true);
+    });
+    await page.click('#extInstallLink');
+    await page.waitForTimeout(250);
+    checa(await visivel('extJaInstalei'), 'já instalei: não apareceu depois do clique em instalar');
+    checa(await page.evaluate(() => document.getElementById('extJaInstalei').getBoundingClientRect().height >= 44),
+      'já instalei: alvo de toque abaixo de 44px');
+    let recarregou = false;
+    page.on('framenavigated', (f) => { if (f === page.mainFrame()) recarregou = true; });
+    await page.click('#extJaInstalei');
+    await page.waitForTimeout(1000);
+    checa(recarregou, 'já instalei: não recarregou — sem reload a ponte da extensão não entra na aba');
+  }
   await ctx.close();
 }
 
