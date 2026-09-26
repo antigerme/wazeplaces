@@ -492,6 +492,9 @@ function entrarPelaExtensao({ silencioso = false } = {}) {
             if (d.action === 'sem-sessao') return fim(false);   // instalada, mas sem login no WME
             if (d.action !== 'sessao' || !d.token) return;
             API.setSession(String(d.token), 'extensao');
+            // O que a tela de entrada tinha aberto (o "Colar", com o chaveiro
+            // colado) sai COM a limpeza — ver `MODAIS_DA_ENTRADA`.
+            fecharModaisDaEntrada();
             showMainScreen();
             // Fila NOVA, como no login por cookies: a que sobrou na memória é
             // da sessão que caiu (e o treino, se aberto, sai junto). Menos na
@@ -526,6 +529,24 @@ function mostrarEntrandoPelaExtensao(ligado) {
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
 const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal', 'pedidoModal', 'autorModal', 'resumoModal'];
+
+// Os modais que só existem na tela de ENTRADA. Quem entra pela extensão entra
+// "de fora" — em silêncio, sem tocar em nada desta tela (ao voltar à aba, por
+// exemplo) —, e o que estava aberto nela tem que sair pelo `closeModal`, que
+// roda a limpeza de cada um. Sem isto o "Como funciona" da primeira vez os
+// escondia por cima sem limpar, e o cookies.txt colado — o chaveiro do
+// navegador inteiro — ficava no campo escondido e sobrevivia ao "Sair": a
+// pessoa seguinte abria "Colar" e o encontrava (auditoria de 2026-09-26).
+const MODAIS_DA_ENTRADA = ['pasteModal', 'pairEnterModal', 'accessDeniedModal'];
+
+function fecharModaisDaEntrada() {
+    // Só os abertos: o `closeModal` anota no diário antes de conferir, e três
+    // "fechou" de modal que nem estava aberto contariam uma história falsa.
+    for (const id of MODAIS_DA_ENTRADA) {
+        const m = document.getElementById(id);
+        if (m && !m.classList.contains('hidden')) closeModal(id);
+    }
+}
 
 let lastFocusedBeforeModal = null;
 
