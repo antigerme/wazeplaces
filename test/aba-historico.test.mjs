@@ -426,3 +426,41 @@ test('H8: a lixeira da lista passa por esse caminho (e não pelo esquecer cru)',
   lixeira.disparar('click');
   assert.deepEqual(m.estado.esquecidos, ['1001'], 'a lixeira da lista esquece sem refazer o card');
 });
+
+// ── H14: o aviso da recusa automática não atribui a um autor o que é de outro ─
+// Com dois autores marcados na mesma leva, "Rejeitando 4 pedidos de
+// spammer_A…" — dois deles eram do spammer_B. O lote anda em ordem, então o
+// que falta é o fim da lista.
+async function rodarRecusa(alvos) {
+  const avisos = [];
+  const frente = { venueID: 'v0', creatorId: 1 };
+  const AppState = { queue: [frente, ...alvos], currentPlace: frente };
+  const deps = {
+    AppState, podeRecusarAutomaticoAqui: () => true, Treino: { ativo: false },
+    autoLigado: (id) => id !== 1, updatePendingCount() {}, aoMudarAFilaPorBaixo() {},
+    t: (k, v) => k + ' ' + JSON.stringify(v),
+    showToast: (msg) => { avisos.push(msg); return { texto: (m) => avisos.push(m), dispensar() {} }; },
+    // O `enviarLote` anda EM ORDEM e conta o que ainda falta depois de cada um.
+    enviarLote: async (lista, opts) => { for (let i = 1; i <= lista.length; i++) opts.aoProgredir(lista.length - i); },
+  };
+  const { aplicarRecusaAutomatica } = montar(['aplicarRecusaAutomatica'], deps, ['aplicarRecusaAutomatica'],
+    'let recusaAutomaticaRodando = false;');
+  await aplicarRecusaAutomatica();
+  return avisos;
+}
+const pedidoDe = (i, id, nome) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: id, createdBy: nome });
+
+test('H14: dois autores na recusa automática — o aviso não põe tudo na conta do primeiro', async () => {
+  const avisos = await rodarRecusa([pedidoDe(2, 2001, 'spammer_A'), pedidoDe(3, 2002, 'spammer_B'),
+    pedidoDe(4, 2001, 'spammer_A'), pedidoDe(5, 2002, 'spammer_B')]);
+  assert.ok(!avisos.some((m) => m.includes('spammer_A') && /"n":[2-4]/.test(m)),
+    `o aviso atribuiu ao spammer_A pedidos do spammer_B: ${avisos[0]}`);
+  assert.equal(avisos[0], 'auto.andandoAutores {"n":4,"a":2}', 'com dois autores na leva a frase tem que ser a genérica');
+  // Quando só falta o do spammer_B, a frase volta a nomear — e agora é verdade.
+  assert.equal(avisos.at(-1), 'auto.andando {"n":1,"autor":"spammer_B"}');
+});
+
+test('H14: CONTROLE — um autor só continua nomeado, no singular e no plural', async () => {
+  const avisos = await rodarRecusa([pedidoDe(2, 2001, 'spammer_A'), pedidoDe(4, 2001, 'spammer_A')]);
+  assert.deepEqual(avisos, ['auto.andandoPlural {"n":2,"autor":"spammer_A"}', 'auto.andando {"n":1,"autor":"spammer_A"}']);
+});

@@ -10438,7 +10438,6 @@ async function aplicarRecusaAutomatica() {
 
     recusaAutomaticaRodando = true;
     const n = alvos.length;
-    const autor = alvos[0].createdBy || String(alvos[0].creatorId);
     // Saem da fila ANTES de enviar: senão o editor veria como card o pedido que
     // o app já está rejeitando, e poderia agir nele — dois envios pro mesmo.
     const fora = new Set(alvos);
@@ -10458,7 +10457,19 @@ async function aplicarRecusaAutomatica() {
     // é esse o retorno em caso de erro. O aviso de fim que existia aqui dizia
     // "N rejeitados" com o N ORIGINAL, então mentia justamente quando algo
     // dava errado.
-    const andando = (q) => t(q === 1 ? 'auto.andando' : 'auto.andandoPlural', { n: q, autor });
+    //
+    // E diz de QUEM é o que ainda falta. Com dois autores marcados na mesma
+    // leva, o aviso nomeava só o primeiro e atribuía a ele os pedidos do outro
+    // (auditoria de 2026-09-25). O lote anda EM ORDEM (`enviarLote`), então o
+    // que falta é o fim da lista: com mais de um autor ali, a frase não nomeia
+    // ninguém; com um só, volta a nomear — e agora é verdade.
+    const andando = (q) => {
+        const falta = alvos.slice(alvos.length - q);
+        const autores = new Set(falta.map((x) => String(x.creatorId)));
+        if (autores.size > 1) return t('auto.andandoAutores', { n: q, a: autores.size });
+        const autor = falta[0].createdBy || String(falta[0].creatorId);
+        return t(q === 1 ? 'auto.andando' : 'auto.andandoPlural', { n: q, autor });
+    };
     const aviso = showToast(andando(n), 'hint', 600000);
     try {
         await enviarLote(alvos, {
