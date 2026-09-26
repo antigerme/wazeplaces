@@ -8523,8 +8523,8 @@ function renderCardChanges(card, place) {
                 + `<span class="diff-to" title="${tPara}">${ladoRealcado(realce, 'para', 'diff-mark diff-mark-add')}</span></div>`;
         }
         return `<div class="diff-row">${rotulo}`
-            + `<span class="diff-from">${escapeHtml(valorDoDiff(c.from))}</span>`
-            + `<span class="diff-to">${escapeHtml(valorDoDiff(c.to))}</span></div>`;
+            + `<span class="diff-from">${escapeHtml(valorDoDiffDoCampo(c.field, c.from))}</span>`
+            + `<span class="diff-to">${escapeHtml(valorDoDiffDoCampo(c.field, c.to))}</span></div>`;
     }).join('');
     changesBox.classList.remove('hidden');
 }
@@ -8988,6 +8988,19 @@ function valorDoDiff(v) {
         try { return JSON.stringify(v); } catch { return String(v); }
     }
     return String(v);
+}
+
+// O valor de uma linha do diff, pelo CAMPO — o `valorDoDiff` não sabe de qual
+// campo o valor é, e há campo cujo número cru não é o que o WME mostra.
+//
+// `lockRank` é 0-indexado como o rank (gotcha #15): o WME mostra rank + 1, e o
+// card dizia "Nível de trava: 0 → 4" onde o WME diz 1 → 5 (auditoria de
+// 2026-09-26). Só inteiro vira nível; o resto (inclusive o vazio) segue o
+// `valorDoDiff`, porque as tipagens do WME dão `lockRank` de local como número
+// sempre — o vazio é campo que o Waze não mandou, e "(vazio)" diz exatamente isso.
+function valorDoDiffDoCampo(campo, v) {
+    if (campo === 'lockRank' && Number.isInteger(v)) return String(v + 1);
+    return valorDoDiff(v);
 }
 
 // Rótulo do campo pela CHAVE (`name`, `phone`…). Campo não mapeado cai no `label`
