@@ -381,6 +381,11 @@ function initApp() {
         // Sem sessão o atalho do ícone não vale, mas a query dele sai da URL
         // AGORA: senão um F5 depois do login a executava (ver a função).
         tirarAcaoDaURL();
+        // Os controles da Ajuda que só existem com sessão somem JÁ, e não só
+        // quando a tela de entrada aparecer: enquanto a extensão é perguntada
+        // (até EXT_ESPERA_MS) a Ajuda já abre, e mostrava Praticar, Conectar
+        // outro aparelho, Sair e o "Como funciona" pra quem não entrou.
+        mostrarControlesDeSessao(false);
         // Sem sessão: antes de mostrar a tela de login, PERGUNTA à extensão.
         // Quem tem a extensão instalada e está logado no WME entra sem tocar em
         // nada; quem não tem cai na tela de sempre depois de EXT_ESPERA_MS.

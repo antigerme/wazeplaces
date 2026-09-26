@@ -449,7 +449,7 @@ test('atalho do ícone aberto sem sessão: a query sai da URL na hora — um F5 
   assert.deepEqual(trocas, ['/']);
   // Quem chama: o ramo SEM sessão do `initApp` (antes de perguntar à extensão)
   // e o `handleLaunchAction`, que lê pela mesma função.
-  assert.match(fatiar('initApp'), /\} else \{\s*tirarAcaoDaURL\(\);\s*entrarPelaExtensao\(\)/,
+  assert.match(fatiar('initApp'), /\} else \{\s*tirarAcaoDaURL\(\);/,
     'sem sessão, a query do atalho fica na URL e roda num F5 depois do login');
   assert.match(fatiar('handleLaunchAction'), /const action = tirarAcaoDaURL\(\);/);
 });
@@ -591,4 +591,23 @@ test('a extensão só aparece com a CONFIRMAÇÃO do JS; o divisor some com ela 
   // No dedo o divisor fica: lá ele separa o "Entrar com um código" (1º) do resto.
   const dedo = [...CSS_SEM.matchAll(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/g)].map((m) => m[1]).join('\n');
   assert.match(dedo, /\.auth-opt-div\s*\{\s*display:\s*block;?\s*\}/, 'no celular o divisor sumiu junto com a extensão');
+});
+
+// ── A10: o "Como funciona" sem sessão ───────────────────────────────────────
+test('sem sessão, a Ajuda não oferece "Ver de novo Como funciona" — o "Quero treinar antes" dele não fazia nada', () => {
+  assert.match(HTML, /<button id="reverComoFunciona" data-so-com-sessao /,
+    'o "Ver de novo Como funciona" aparece na tela de entrada');
+  // Os controles de sessão somem desde a ABERTURA sem sessão, não só quando a
+  // tela de entrada aparece (a Ajuda abre durante a pergunta à extensão).
+  const init = fatiar('initApp');
+  const semSessao = init.slice(init.indexOf('} else {'));
+  const iEsconde = semSessao.indexOf('mostrarControlesDeSessao(false);');
+  assert.ok(iEsconde > 0 && iEsconde < semSessao.indexOf('entrarPelaExtensao()'),
+    'enquanto a extensão é perguntada, a Ajuda mostra os controles de quem entrou');
+  // CONTROLE: o mecanismo esconde o que tem a marca (e o treino segue exigindo sessão).
+  const marcados = [elemento('a', { oculto: false }), elemento('b', { oculto: false })];
+  const { mostrarControlesDeSessao } = montar(['mostrarControlesDeSessao'],
+    { document: { querySelectorAll: (sel) => (sel === '[data-so-com-sessao]' ? marcados : []) } }, ['mostrarControlesDeSessao']);
+  mostrarControlesDeSessao(false);
+  assert.ok(marcados.every((el) => el.classList.contains('hidden')));
 });
