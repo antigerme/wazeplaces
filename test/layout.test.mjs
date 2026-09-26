@@ -2909,3 +2909,19 @@ test('contagem sai CRUA — e decimal e data seguem o locale', () => {
   assert.match(app, /new Date\([^)]*\)\.toLocaleDateString\(i18nLocale\(\)/,
     'controle: sumiu a formatação de DATA, que deve continuar no locale');
 });
+
+test('C12 a pílula do nome no lightbox tem TETO também em edição (o nome longo não estoura a tela)', () => {
+  // MEDIDO: no Fold em francês, com um nome de 58 caracteres, a pílula em
+  // edição passava da tela; com 66, até no Pixel 7 (de 12 a 478 px em 412).
+  // O botão mede o CONTEÚDO, então sem teto ele cresce com o nome antigo.
+  // Ancorado na FORMA da regra (início de linha), não num removedor de
+  // comentário (gotcha #67.1).
+  const css = read('css/styles.css');
+  const regra = css.match(/^\.lb-nome\.editando \.lb-nome-btn \{([^}]*)\}/m);
+  assert.ok(regra, 'sumiu a regra da pílula em edição');
+  assert.match(regra[1], /max-width:\s*100%/, 'a pílula do nome em edição perdeu o teto: o nome longo estoura a tela');
+  // E o texto dentro dela corta em reticências — é o que o teto aproveita.
+  const txt = css.match(/^\.lb-nome-txt \{([^}]*)\}/m);
+  assert.ok(txt && /text-overflow:\s*ellipsis/.test(txt[1]) && /overflow:\s*hidden/.test(txt[1]),
+    'o nome da pílula deixou de cortar em reticências');
+});

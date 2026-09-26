@@ -1968,7 +1968,13 @@ button:active {
    tela do owner. Aqui a pílula não precisa sumir, mas quem for esconder algo
    com `.hidden` neste arquivo precisa saber disso. */
 .lb-nome:not(.editando) .lb-nome-btn { max-width: calc(100% - 4.25rem); }
-.lb-nome.editando .lb-nome-btn { margin-bottom: 0.4rem; }
+/* Em edição a pílula também tem TETO — a largura da linha, já que o botão de
+   ação saiu. Sem ele o botão (que mede o conteúdo) crescia com o nome antigo e
+   estourava a tela: MEDIDO no Fold em francês com um nome de 58 caracteres, e
+   com 66 até no Pixel 7 (a pílula ia de 12 a 478 px numa tela de 412). Com o
+   teto o nome se corta em reticências, como no modo leitura (auditoria de
+   2026-09-26). */
+.lb-nome.editando .lb-nome-btn { margin-bottom: 0.4rem; max-width: 100%; }
 .lb-nome-btn:disabled { opacity: 1; }   /* rótulo, não botão apagado */
 .lb-nome-btn {
   display: flex;
