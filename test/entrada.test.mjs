@@ -679,3 +679,42 @@ test('botão com texto visível tem esse texto no nome acessível, nas 4 língua
   }
   assert.ok(conferidos >= 1, 'CONTROLE: nenhum botão com texto e aria-label achado — o recorte quebrou');
 });
+
+// ── A15: botão de diálogo com a MESMA cor do diálogo no escuro ──────────────
+test('no tema escuro nenhum botão de diálogo tem o fundo do próprio diálogo — o "Entendi" do "Acesso restrito" some', () => {
+  // Cada diálogo até o SEU fechamento (casando <div>/</div>): um recorte até o
+  // próximo diálogo levava junto o que vem depois dele no HTML, e acusava o
+  // "Verificar novamente" da tela do card como se fosse de um modal.
+  const blocos = [...HTML.matchAll(/<div id="[A-Za-z]+" role="dialog"/g)].map((m) => {
+    let prof = 0;
+    for (const t of HTML.slice(m.index).matchAll(/<div\b|<\/div>/g)) {
+      prof += t[0] === '</div>' ? -1 : 1;
+      if (prof === 0) return HTML.slice(m.index, m.index + t.index + t[0].length);
+    }
+    return HTML.slice(m.index);
+  });
+  assert.ok(blocos.length >= 10, `CONTROLE: só achei ${blocos.length} diálogos — o recorte quebrou`);
+  const problemas = [];
+  let botoes = 0;
+  for (const bloco of blocos) {
+    const id = /<div id="([A-Za-z]+)"/.exec(bloco)[1];
+    const caixa = /<div class="([^"]*\brounded-2xl\b[^"]*)"/.exec(bloco);
+    if (!caixa) continue;
+    const fundo = (caixa[1].split(/\s+/).find((c) => /^dark:bg-[a-z]+-\d+$/.test(c)) || '').replace('dark:', '');
+    if (!fundo) continue;
+    for (const b of bloco.matchAll(/<button\b[^>]*\bid="([^"]+)"[^>]*\bclass="([^"]*)"/g)) {
+      const cl = b[2].split(/\s+/);
+      const claro = cl.find((c) => /^bg-[a-z]+-\d+$/.test(c));
+      if (!claro) continue;
+      botoes++;
+      const escuro = (cl.find((c) => /^dark:bg-[a-z]+-\d+(\/\d+)?$/.test(c)) || '').replace('dark:', '') || claro;
+      if (escuro === fundo) problemas.push(`${id} › #${b[1]} (${escuro})`);
+    }
+  }
+  assert.ok(botoes >= 10, `CONTROLE: só achei ${botoes} botões com fundo nos diálogos`);
+  assert.deepEqual(problemas, [], 'botão sem forma no tema escuro: o fundo dele é o do diálogo');
+  // E o "Entendi" é o botão afirmativo dos outros diálogos de um botão só.
+  const classes = (id) => (new RegExp(`<button id="${id}"[^>]*class="([^"]*)"`).exec(HTML) || [])[1];
+  assert.equal(classes('closeAccessDenied'), classes('treinoFimOk'),
+    'o "Entendi" do "Acesso restrito" não usa as classes do botão afirmativo dos outros diálogos');
+});
