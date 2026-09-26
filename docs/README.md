@@ -146,3 +146,13 @@ A **história** de cada gotcha do CLAUDE.md, com a mesma numeração: sintoma,
 hipótese errada, a medição que a derrubou, o conserto e a armadilha do
 instrumento. O CLAUDE.md guarda só a regra curta, que é o que precisa estar
 sempre carregado; aqui mora o inteiro teor, pra ler quando o assunto aparece.
+
+---
+
+## `auditoria-2026-09.md`
+
+O arquivo de TRABALHO da auditoria completa pedida pelo owner em 2026-09-25: o
+que já foi feito e verificado em produção, o que falta, o que espera decisão
+dele e como retomar num contêiner novo (a retomada automática aponta pra cá).
+Quando a auditoria terminar, vira o registro final dela — ou sai, se o owner
+preferir.
