@@ -12570,6 +12570,12 @@ function esquecerOutraConta(id) {
     AppState.conquistas = null;
     atualizarSeloDeConquista();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+    // A BASE dos pulados desta fila (ver `puladosNestaFila`) é uma leitura do
+    // placar, e o placar acabou de zerar: com a base da conta anterior (5
+    // pulados, digamos), os pulados de quem entrou não contavam, e a fila que
+    // terminava com PULADO dizia "Tudo limpo!", com confete e a conquista — o
+    // H9 de volta pela troca de conta (auditoria da costura, 2026-09-26, K4).
+    puladosNoInicioDaFila = 0;
     saveStats();
     updateStats();
     offlineEsquecer();

@@ -554,3 +554,18 @@ test('K3: "Sair" DEPOIS de a renovação falhar e ANTES de a tela de entrada vir
   adiados[0]();
   assert.ok(!h.chamou.includes('fecharCamadasAbertas'), 'DEFEITO: a queda refez a tela de entrada por cima da do "Sair"');
 });
+
+// ═══ K4 · a troca de conta zera a base dos pulados junto com o placar ════════
+
+test('K4: B entra no aparelho de A (5 pulados) e pula 1 — a fila NÃO termina em "Tudo limpo!"', () => {
+  const AppState = { stats: { read: 30, rejected: 40, skipped: 5 }, queue: [], loadError: false, currentPlace: null,
+    pendingAction: null, inFlightActions: 0 };
+  const deps = { AppState, puladosNoInicioDaFila: 5, tratouNestaFila: true, filaAtravessouSessao: false,
+    safeLS: { remove() {} }, carregarFilaDeSaida: () => [], window: {},
+    document: { getElementById: () => ({ classList: { contains: () => false } }) } };
+  const h = montar(['esquecerOutraConta', 'puladosNestaFila', 'filaZeradaConfirmada'], deps);
+  h.esquecerOutraConta('222');                  // o perfil revela B
+  AppState.stats.skipped++;                     // B pula o último pedido da fila
+  assert.equal(h.puladosNestaFila(), 1, 'DEFEITO: o pulado de B não conta — a base ainda é a da conta anterior');
+  assert.equal(h.filaZeradaConfirmada(), false, 'a fila com um PULADO foi dada como limpa (conquista e confete)');
+});
