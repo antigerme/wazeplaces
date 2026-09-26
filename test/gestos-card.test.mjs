@@ -414,3 +414,62 @@ test('C3 os TRÊS caminhos passam pela conferência, e o card registra o pedido 
   }
   assert.ok(!/window\.triggerSwipe\('(left|right|up)', handle/.test(f), 'sobrou seta passando o handler cru ao triggerSwipe');
 });
+
+// ── C7: o teclado numa área do card que ROLA ──────────────────────────────
+// O `handleKeyDown` de verdade, fatiado, com o resto do app de mentira. As
+// constantes vêm do fonte também: uma cópia aqui passaria com a de lá mudada.
+function constanteDoApp(nome) {
+  const m = new RegExp('^const ' + nome + ' = [^;]+;', 'm').exec(semComentario(APP));
+  assert.ok(m, `a constante ${nome} sumiu do app.js`);
+  return m[0];
+}
+const DEPS_DO_TECLADO = ['document', 'window', 'AppState', 'MapaLightbox', 'Lightbox', 'topOpenModal',
+  'trapTabInModal', 'closeModal', 'desfazerAcaoPendente', 'acoesTravadas', 'agirNoPedidoDoGesto',
+  'pedidoDoCard', 'handleReject', 'handleMarkAsRead', 'handleSkip', 'desfazerPeloTeclado'];
+function montarTeclado() {
+  const doc = { activeElement: null, getElementById: () => null };
+  const saiu = [];
+  const deps = {
+    document: doc,
+    window: { triggerSwipe: (dir) => saiu.push(dir) },
+    AppState: { currentPlace: { updateRequestID: 'uA' }, pendingAction: null },
+    MapaLightbox: { isOpen: () => false }, Lightbox: { isOpen: () => false },
+    topOpenModal: () => null, trapTabInModal() {}, closeModal() {}, desfazerAcaoPendente() {},
+    acoesTravadas: () => false, agirNoPedidoDoGesto() {}, pedidoDoCard: () => null,
+    handleReject() {}, handleMarkAsRead() {}, handleSkip() {}, desfazerPeloTeclado: () => false,
+  };
+  const fonte = [constanteDoApp('TECLAS_DE_CURSOR'), fatiarApp('focoEmCampoDeTexto'),
+    constanteDoApp('AREAS_DO_CARD_QUE_ROLAM'), fatiarApp('focoEmAreaQueRola'), fatiarApp('handleKeyDown'),
+    'return handleKeyDown;'].join('\n');
+  const handle = new Function(...DEPS_DO_TECLADO, fonte)(...DEPS_DO_TECLADO.map((k) => deps[k]));
+  // Um elemento com foco: `closest` responde como o do navegador pra lista de classes dele.
+  const focar = (classes, tagName = 'DIV') => {
+    doc.activeElement = { tagName, classList: classes,
+      closest: (sel) => (sel.split(',').some((s) => classes.includes(s.trim().replace(/^\./, ''))) ? doc.activeElement : null) };
+  };
+  const tecla = (key) => { const e = { key, preventDefault() { this.parou = true; } }; handle(e); return e; };
+  return { deps, saiu, focar, tecla };
+}
+
+test('C7 foco na lista de mudanças ou no texto do reporte: as setas ROLAM e não decidem', () => {
+  // MEDIDO: com o foco na lista, ↓ rolava e ↑ PULAVA o card; ← → rejeitavam e marcavam lido.
+  for (const area of ['card-changes-list', 'card-flag-comment-text']) {
+    const k = montarTeclado();
+    k.focar([area]);
+    for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End']) {
+      const e = k.tecla(key);
+      assert.equal(e.parou, undefined, `${area}: ${key} teve o padrão cancelado — a lista não rola`);
+    }
+    assert.deepEqual(k.saiu, [], `${area}: tecla de cursor decidiu o pedido (${k.saiu.join(', ')})`);
+  }
+});
+
+test('C7 CONTROLE: fora das áreas que rolam as setas seguem decidindo', () => {
+  // Sem este controle, "a lista não decide" passaria com o teclado morto no card inteiro.
+  const k = montarTeclado();
+  k.focar(['card-btn-reject'], 'BUTTON');
+  for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp']) k.tecla(key);
+  k.deps.document.activeElement = null;
+  k.tecla('ArrowLeft');
+  assert.deepEqual(k.saiu, ['left', 'right', 'up', 'left'], 'o teclado deixou de decidir fora da lista');
+});

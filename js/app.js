@@ -2893,6 +2893,19 @@ function focoEmCampoDeTexto() {
         String(el.type || 'text').toLowerCase());
 }
 
+// As áreas do card que ROLAM pelo teclado: a lista de "Mudanças propostas" e o
+// texto do reporte têm `tabindex="0"` justamente pra isso (e são as mesmas que
+// o `handleDragStart` deixa de fora do arraste). Com o foco numa delas as
+// teclas de cursor são DELA, como num campo de texto. Antes o ↓ rolava a lista
+// e o ↑ PULAVA o card — auditoria de 2026-09-26, medido no francês com o diff
+// mais longo da fixture —, e ← → rejeitavam/marcavam lido quem só estava lendo.
+const AREAS_DO_CARD_QUE_ROLAM = '.card-changes-list, .card-flag-comment-text';
+
+function focoEmAreaQueRola() {
+    const el = document.activeElement;
+    return !!(el && el.closest && el.closest(AREAS_DO_CARD_QUE_ROLAM));
+}
+
 function handleKeyDown(e) {
     // Foco num campo de texto: as setas são do CURSOR, não do app.
     //
@@ -2954,6 +2967,13 @@ function handleKeyDown(e) {
     }
 
     if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+
+    // Foco numa área do card que rola: as teclas de cursor são DELA (ver
+    // `focoEmAreaQueRola`). Sem `preventDefault` — ↑ ↓ PageUp PageDown Home
+    // End rolam a lista pelo navegador —, e ← → ali não decidem nada. Antes da
+    // trava do Desfazer de propósito: ler a lista durante a janela é legítimo,
+    // e a trava daria `preventDefault` no ↑ e travaria a rolagem.
+    if (focoEmAreaQueRola() && TECLAS_DE_CURSOR.includes(e.key)) return;
 
     // Desfazer via teclado (power-user opera por teclas): z (ou Ctrl/Cmd+Z).
     if ((e.key === 'z' || e.key === 'Z') && AppState.pendingAction) {
