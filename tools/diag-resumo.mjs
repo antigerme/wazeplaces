@@ -79,7 +79,13 @@ if ((ta.modais || []).length) {
 secao('OFFLINE');
 const off = d.offline;
 if (off === undefined) out(AUSENTE);
-else {
+// DESLIGADO não é "ausente nesta versão": o app sai cedo da seção e não guarda
+// fila, janela nem tile de quem não ligou o recurso (é a regra "quem não marca
+// não paga nada"), então esses campos não EXISTEM — e o leitor atribuía à
+// versão do relatório o que era o interruptor (auditoria de 2026-09-26).
+else if (off.ligado === false) {
+  out(`desligado — nada guardado no aparelho (a fila, a janela e os tiles só existem com o "Disponível offline" ligado) · tiles guardados que falharam ${off.tilesGuardadosQueFalharam ?? '—'}`);
+} else {
   out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} / gravada ${off.janelaGuardada === undefined ? '—' : off.janelaGuardada}`);
   out(`fila guardada ${j(off.filaGuardada)} · tiles no cache ${j(off.tilesNoCache)} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam}`);
   if (off.ligado) out(`pousos gravados depois da fila guardada: ${off.pousosGravados === undefined ? AUSENTE : off.pousosGravados}`);

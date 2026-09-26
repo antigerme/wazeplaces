@@ -406,3 +406,19 @@ test('diag-resumo: a duração da sessão sai LEGÍVEL — mediana, menor–maio
   // E o v1, que nem trazia a conta.
   assert.match(rodar(relatorioV4()), /duração da sessão \(h\): \(ausente nesta versão\) · nascimento/);
 });
+
+test('diag-resumo: o offline DESLIGADO diz "desligado" — não "ausente nesta versão"', () => {
+  // Com o interruptor desligado o app sai cedo da seção (quem não marca não
+  // paga nada): fila, janela e tiles não existem. O leitor atribuía isso à
+  // VERSÃO do relatório — "fila guardada (ausente nesta versão)" num v10.
+  const d = relatorioV4();
+  d._versaoDoDiag = 10;
+  d.offline = { ligado: false, janelaServida: null, janelaAtual: 1492033, resultado: null, varrendo: false,
+                tilesGuardadosQueFalharam: 0 };
+  const s = rodar(d);
+  const secaoOff = (s.split('── OFFLINE ')[1] || '').split('\n── ')[0];
+  assert.match(secaoOff, /desligado — nada guardado no aparelho/, 'o offline desligado não foi dito');
+  assert.ok(!secaoOff.includes('ausente nesta versão'), 'o leitor atribuiu à versão o que é o interruptor desligado');
+  // CONTROLE: ligado, a seção segue mostrando o que o aparelho guardou.
+  assert.match(rodar(relatorioV4()), /fila guardada \{"n":236,"idadeMin":2\}/);
+});
