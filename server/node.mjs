@@ -173,7 +173,18 @@ const MIME = {
   '.ico': 'image/x-icon',
   // Fonte Inter auto-hospedada. MIME errado aqui = browser recusa a fonte.
   '.woff2': 'font/woff2',
+  // As capturas do prompt de instalação (`icons/screenshots/*.jpg`) e a
+  // licença da fonte saíam como `application/octet-stream` — e com `nosniff`,
+  // que proíbe o navegador de adivinhar. O Cloudflare manda estes (MEDIDO no
+  // `wrangler dev`, auditoria de 2026-09-26).
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.txt': 'text/plain; charset=utf-8',
 };
+// Sem extensão, só o `LICENSE` é servido. O Cloudflare o manda SEM
+// Content-Type, e o navegador o mostra como texto; aqui vai o tipo dito, que dá
+// na mesma tela — `octet-stream` com `nosniff` virava download.
+const MIME_SEM_EXTENSAO = { '/LICENSE': 'text/plain; charset=utf-8' };
 // no-cache pra código (SW controla versão); cache longo pra imagens/fontes
 const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest']);
 
@@ -233,7 +244,11 @@ const SECURITY_HEADERS = {
 // outra coisa (wrangler.jsonc, CLAUDE.md, README.md, package.json, _headers,
 // dotfiles, server/, docs/, worker/…) nunca é lida. Mais seguro que a blocklist
 // antiga, que servia com 200 os arquivos da raiz não listados.
-const ALLOWED_DIRS = ['/css/', '/js/', '/icons/', '/fonts/'];
+//
+// A extensão do Chrome e a licença do projeto são PUBLICADAS no Cloudflare (o
+// `test/vm-estaticos.test.mjs` as declara frontend: distribuição), e davam 404
+// aqui — o mesmo app com duas respostas (gotcha #14; auditoria de 2026-09-26).
+const ALLOWED_DIRS = ['/css/', '/js/', '/icons/', '/fonts/', '/extensao-chrome/'];
 const ALLOWED_ROOT_FILES = new Set([
   // `/index.html` é o GERADO (minificado, `npm run html`) — é ele que a raiz
   // serve, aqui e no Cloudflare. O FONTE comentado é o `/index.src.html` e NÃO
@@ -245,7 +260,12 @@ const ALLOWED_ROOT_FILES = new Set([
   '/service-worker.js',
   '/favicon.ico',
   '/favicon.svg',
+  '/LICENSE',
 ]);
+// O `.assetsignore` tira `README.md` em QUALQUER nível, e um mora dentro de um
+// diretório servido: o da extensão (doc de quem desenvolve; 404 no Cloudflare,
+// MEDIDO no `wrangler dev`).
+const NUNCA_SERVIDOS = [/\/README\.md$/];
 // Os FONTES comentados moram DENTRO de `/js/` e `/css/`, então a allowlist de
 // diretório acima os deixava passar: `/js/app.js` respondia 200 com 622 KB ao
 // lado dos 201 KB do `/js/min/app.js` que o app carrega, e `/css/styles.css`
@@ -268,6 +288,7 @@ const FONTE_DE_BUILD = [
 function isAllowedAsset(path) {
   if (ALLOWED_ROOT_FILES.has(path)) return true;
   if (!ALLOWED_DIRS.some((d) => path.startsWith(d))) return false;
+  if (NUNCA_SERVIDOS.some((re) => re.test(path))) return false;
   for (const [dir, servivel] of FONTE_DE_BUILD) {
     if (dir.test(path) && !servivel.test(path)) return false;
   }
@@ -286,10 +307,10 @@ async function serveStatic(req, res, urlPath) {
     return;
   }
 
-  const accept = req.headers['accept'] || '';
-  const isRoot = rel === '/' || rel === '';
-  // Navegação = raiz ou request que aceita HTML → serve o shell da SPA no miss.
-  const isNavigation = isRoot || accept.includes('text/html');
+  // A raiz é a do caminho NORMALIZADO: `//` e `/./` também são ela (no
+  // Cloudflare, `//` redireciona pra `/` e `/./` serve o índice — medido no
+  // `wrangler dev`). O smoke do pareamento abre `BASE + '/#pair='`, que é `//`.
+  const isRoot = rel === '' || normalize(rel) === '/';
   // A raiz resolve pro índice do diretório, como qualquer servidor estático.
   // NÃO há mais remapeamento: o `index.html` JÁ É o minificado (o fonte é o
   // `index.src.html`), então `/` e `/index.html` servem o mesmo arquivo sem
@@ -299,16 +320,22 @@ async function serveStatic(req, res, urlPath) {
 
   const safe = normalize(rel).replace(/^(\.\.[/\\])+/, '');
 
-  // Path traversal + allowlist: fora do frontend conhecido → 404 (ou SPA se navegação).
-  if (safe.includes('..') || !isAllowedAsset(safe)) {
-    return notFound(res, isNavigation);
-  }
+  // Path traversal + allowlist: fora do frontend conhecido → 404, SEMPRE.
+  // Aqui havia um "shell da SPA": pedido que aceitasse HTML e não casasse com
+  // arquivo nenhum recebia o index.html com 200. O Cloudflare NÃO faz isso —
+  // MEDIDO no `wrangler dev` (auditoria de 2026-09-26): `/qualquer-rota` dá
+  // 404 com e sem `Accept: text/html`, porque o `wrangler.jsonc` não liga o
+  // `not_found_handling`. O app não tem rota além da raiz (o pareamento é
+  // fragmento, `/#pair=`, e os atalhos do manifest são `/?action=`), então o
+  // shell só servia pra o mesmo endereço dar 200 num destino e 404 no outro — e
+  // pro service worker guardar uma página do app num caminho que não existe.
+  if (safe.includes('..') || !isAllowedAsset(safe)) return notFound(res);
 
   const file = join(ROOT, safe);
   try {
     const buf = await readFile(file);
     const ext = extname(file).toLowerCase();
-    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', ...SECURITY_HEADERS };
+    const headers = { 'Content-Type': MIME[ext] || MIME_SEM_EXTENSAO[safe] || 'application/octet-stream', ...SECURITY_HEADERS };
     // O corte é por CAMINHO onde o `_headers` corta por caminho, não só por
     // extensão. Os ícones são o caso que divergia: `.svg` não está no `noCache`,
     // então caíam no `immutable` de um ANO — mas o NOME deles é fixo
@@ -320,7 +347,12 @@ async function serveStatic(req, res, urlPath) {
     if (file.endsWith('service-worker.js')) headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
     else if (noCache.has(ext)) headers['Cache-Control'] = 'no-cache, must-revalidate';
     else if (safe.startsWith('/icons/')) headers['Cache-Control'] = 'public, max-age=86400';
-    else headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    else if (safe.startsWith('/fonts/')) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    // O que o `_headers` não cobre (a licença, a extensão) leva o PADRÃO do
+    // Cloudflare, MEDIDO no `wrangler dev`: `public, max-age=0, must-revalidate`.
+    // O `immutable` de um ano era o do `/fonts/*` caindo em tudo que sobrava: um
+    // ícone da extensão trocado ficaria um ano velho na VM.
+    else headers['Cache-Control'] = 'public, max-age=0, must-revalidate';
     // ETag + 304. `no-cache` manda REVALIDAR, não rebaixar: sem ETag o
     // navegador não tem o que perguntar e a revalidação vira download inteiro.
     // O Cloudflare já fazia isto sozinho (medido em produção); a VM não fazia,
@@ -345,25 +377,13 @@ async function serveStatic(req, res, urlPath) {
     res.end(buf);
   } catch {
     // Consta na allowlist mas não existe no disco.
-    return notFound(res, isNavigation);
+    return notFound(res);
   }
 }
 
-function notFound(res, isNavigation) {
-  if (isNavigation) return serveIndexFallback(res);
+function notFound(res) {
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
   res.end('Not found');
-}
-
-async function serveIndexFallback(res) {
-  try {
-    const buf = await readFile(join(ROOT, 'index.html'));
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
-    res.end(buf);
-  } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
-    res.end('Not found');
-  }
 }
 
 // Cabeçalhos de TODA resposta de /api: `no-store` (ver o Worker) e os de

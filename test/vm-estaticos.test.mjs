@@ -377,3 +377,93 @@ test('a VM roteia a API pelo caminho NORMALIZADO, como o Worker (`/api/./sessao`
     assert.notEqual(nada.status, normal.status);
   });
 });
+
+// ── O MESMO caminho, a MESMA resposta: a VM contra o Cloudflare MEDIDO ─────
+//
+// Auditoria de 2026-09-26. Três divergências, todas no sentido de a VM não ser
+// o app que o Cloudflare serve (gotcha #14):
+//   · `.jpg` e `.txt` saíam `application/octet-stream` — com `nosniff`, que
+//     proíbe o navegador de adivinhar;
+//   · a extensão e a licença, publicadas lá (ver a lista FRONTEND acima), davam
+//     404 aqui;
+//   · rota desconhecida com `Accept: text/html` recebia o index.html com 200 (um
+//     "shell de SPA" que o Cloudflare não tem).
+// A tabela é o que o `wrangler dev` 4.141.0 respondeu — o mesmo servidor de
+// assets da produção, com o `wrangler.jsonc` e o `.assetsignore` deste repo.
+// MEDIDO, não deduzido da configuração: a dedução dizia 404 pra rota
+// desconhecida e acertou, mas também diria o mesmo do `README.md` da extensão
+// (e foi a medição que mostrou que o `.assetsignore` o tira em qualquer nível).
+const NO_CLOUDFLARE = [
+  // [caminho, Accept, status, MIME (sem parâmetros) — null = não confere]
+  ['/extensao-chrome/manifest.json', '*/*', 200, 'application/json'],
+  ['/extensao-chrome/icon16.png', 'image/*', 200, 'image/png'],
+  // text/javascript lá, application/javascript aqui: pro navegador é o MESMO tipo.
+  ['/extensao-chrome/background.js', '*/*', 200, null],
+  ['/extensao-chrome/README.md', '*/*', 404, null],
+  // Lá sai SEM Content-Type, e o Chromium o mostra como texto (medido); aqui
+  // vai o tipo dito — conferido logo abaixo.
+  ['/LICENSE', '*/*', 200, null],
+  ['/icons/screenshots/card.jpg', 'image/*', 200, 'image/jpeg'],
+  ['/fonts/LICENSE-Inter.txt', '*/*', 200, 'text/plain'],
+  ['/qualquer-rota', 'text/html', 404, null],
+  ['/qualquer-rota', '*/*', 404, null],
+  ['/a/b/c', 'text/html,application/xhtml+xml', 404, null],
+  ['/', 'text/html', 200, 'text/html'],
+];
+
+test('estáticos: a VM responde como o Cloudflare MEDIDO — tipo, publicação e rota desconhecida', async () => {
+  await comServidor(async () => {
+    for (const [caminho, accept, status, mime] of NO_CLOUDFLARE) {
+      const r = await fetch(URL_(caminho), { headers: { Accept: accept } });
+      const tipo = r.headers.get('content-type') || '';
+      assert.equal(r.status, status, `${caminho} (Accept ${accept}): a VM dá ${r.status}, o Cloudflare dá ${status}`);
+      if (mime) assert.equal(tipo.split(';')[0].trim(), mime, `${caminho}: Content-Type ${tipo}, o Cloudflare manda ${mime}`);
+      assert.notEqual(tipo, 'application/octet-stream', `${caminho} saiu octet-stream (com nosniff, o navegador não adivinha)`);
+    }
+    // A licença aqui vai como texto (lá, sem tipo — que o navegador lê como texto).
+    const lic = await fetch(URL_('/LICENSE'));
+    assert.match(lic.headers.get('content-type') || '', /^text\/plain/, 'o LICENSE sairia como download');
+    // Rota desconhecida não devolve o app: nem o corpo do index.
+    const html = await (await fetch(URL_('/qualquer-rota'), { headers: { Accept: 'text/html' } })).text();
+    assert.ok(!html.includes('<html'), 'rota desconhecida devolveu uma página do app');
+  });
+});
+
+test('estáticos: o que o _headers não cobre leva o padrão do Cloudflare, não o immutable de um ano', async () => {
+  // MEDIDO no `wrangler dev`: sem regra no `_headers`, o Cloudflare manda
+  // `public, max-age=0, must-revalidate`. A VM mandava o `immutable` de um ano
+  // do `/fonts/*` pra tudo que sobrava — um ícone da extensão trocado ficaria
+  // um ano velho.
+  await comServidor(async () => {
+    for (const caminho of ['/LICENSE', '/extensao-chrome/icon16.png']) {
+      const r = await fetch(URL_(caminho));
+      assert.equal(r.status, 200, caminho);
+      assert.equal(r.headers.get('cache-control'), 'public, max-age=0, must-revalidate', caminho);
+    }
+    // CONTROLE: a fonte, que TEM regra, segue imutável por um ano.
+    const fonte = await fetch(URL_('/fonts/inter-latin-wght-normal.woff2'));
+    assert.equal(fonte.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  });
+});
+
+test('estáticos: a raiz é a do caminho NORMALIZADO — `//` abre o app (o Cloudflare redireciona pra `/`)', async () => {
+  // Sem o shell de SPA, o `//` (que o smoke do pareamento abre, `BASE + '/#pair='`)
+  // daria 404 aqui; no Cloudflare ele é 307 pra `/` (medido).
+  const { request } = await import('node:http');
+  const getCru = (caminho) => new Promise((ok, erro) => {
+    const r = request({ host: '127.0.0.1', port: PORTA, method: 'GET', path: caminho, headers: { Accept: 'text/html' } }, (res) => {
+      let corpo = ''; res.on('data', (c) => { corpo += c; }); res.on('end', () => ok({ status: res.statusCode, corpo }));
+    });
+    r.on('error', erro);
+    r.end();
+  });
+  await comServidor(async () => {
+    for (const caminho of ['//', '/./', '/%2e/']) {
+      const r = await getCru(caminho);
+      assert.equal(r.status, 200, `${caminho}: ${r.status}`);
+      assert.ok(r.corpo.includes('<html'), `${caminho} não serviu o app`);
+    }
+    // CONTROLE: o que não é a raiz segue 404.
+    assert.equal((await getCru('/index.html/')).status, 404);
+  });
+});
