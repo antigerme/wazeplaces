@@ -850,7 +850,11 @@ const SELETORES_IDIOMA = ['langSelect', 'langSelectHelp'];
 
 function aplicarIdioma(valor) {
     setLang(valor);
-    registrarIdiomaUsado(valor);
+    // O idioma NÃO entra na "Poliglota" aqui: ela é sobre TRABALHAR em dois
+    // idiomas, e quem registra é a ação confirmada (`registrarAcaoConfirmada`).
+    // Registrado aqui, abrir o seletor e voltar destravava a conquista — e,
+    // deslogado (o seletor da Ajuda), recriava `waze_places_conquistas` depois
+    // do "Sair", herdado pela próxima conta (auditoria de 2026-09-25).
     safeLS.set(LANG_KEY, valor);
     applyI18n();
     // Os dois seletores mostram a mesma escolha, tenha sido feita em qual for.
