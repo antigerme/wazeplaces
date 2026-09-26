@@ -578,6 +578,8 @@ function variaveisDaTela() {
   return {
     undoSeg: (num('UNDO_WINDOW_MS') / 1000).toLocaleString('pt-BR'),
     nivelMinimo: String(num('NIVEL_MINIMO_EXIBIDO')),
+    sessaoDias: String(num('SESSAO_DIAS_EXIBIDO')),
+    parearMin: String(num('PAREAR_MIN_EXIBIDO')),
   };
 }
 function decodificarHtml(s) {

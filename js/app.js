@@ -66,6 +66,20 @@ const NIVEL_MINIMO_EXIBIDO = 2;
 if (typeof setI18nVars === 'function') {
     setI18nVars({ nivelMinimo: () => NIVEL_MINIMO_EXIBIDO });
 }
+
+// Os prazos do SERVIDOR que a tela cita: a sessão vale 21 dias sem uso e o
+// código de pareamento, 5 minutos. A verdade mora no core (`SESSION_TTL` e
+// `PAIR_TTL`, em segundos) — o app é script clássico e não importa de lá —, e
+// `test/consistencia` reprova se os números daqui divergirem dos de lá. Eram
+// escritos à mão em cinco frases × quatro línguas (auditoria de 2026-09-26), e
+// quem mudasse o prazo no servidor deixaria a Ajuda prometendo o antigo.
+// Contagem inteira, então sai crua (regra do projeto); e as frases estão no
+// plural ("dias", "minutos"): o mesmo teste cobra que os dois passem de 1.
+const SESSAO_DIAS_EXIBIDO = 21;
+const PAREAR_MIN_EXIBIDO = 5;
+if (typeof setI18nVars === 'function') {
+    setI18nVars({ sessaoDias: () => SESSAO_DIAS_EXIBIDO, parearMin: () => PAREAR_MIN_EXIBIDO });
+}
 // Sem cap: a caixa de mudanças rola por dentro, cresce com o card e avisa que
 // rola (esmaecido de borda). Com `MAX_CHANGES_DISPLAY = 4` a 5ª mudança era
 // INALCANÇÁVEL — nem rolando — e a linha "+1 mais" gastava exatamente o espaço

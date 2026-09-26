@@ -619,6 +619,43 @@ test('nível mínimo anunciado na entrada == portão do servidor', () => {
   }
 });
 
+// Os prazos que a Ajuda, a entrada e o aviso do "Sair" citam (a sessão, em dias;
+// o código de pareamento, em minutos) são os do SERVIDOR. Eram escritos à mão em
+// cinco frases × quatro línguas (auditoria de textos, 2026-09-26): quem mudasse
+// o `SESSION_TTL` deixaria o app prometendo o prazo antigo.
+test('prazos citados na tela (dias da sessão, minutos do código) == os do servidor, e nunca escritos à mão', () => {
+  const valorDe = (src, nome) => {
+    const m = new RegExp(`const ${nome}\\s*=\\s*([^;]+);`).exec(src);
+    assert.ok(m, `sumiu a constante ${nome}`);
+    return Function(`"use strict"; return (${m[1]});`)();
+  };
+  const core = read('server/core.mjs');
+  const dias = valorDe(APP, 'SESSAO_DIAS_EXIBIDO'), min = valorDe(APP, 'PAREAR_MIN_EXIBIDO');
+  assert.equal(dias * 86400, valorDe(core, 'SESSION_TTL'), `a tela diz ${dias} dias e o servidor guarda a sessão por outro prazo`);
+  assert.equal(min * 60, valorDe(core, 'PAIR_TTL'), `a tela diz ${min} minutos e o código de pareamento vale outro prazo`);
+  // As frases estão no plural ("dias", "minutos"), e o projeto não tem ICU: com
+  // 1, sairia "1 dias". Se um prazo virar 1, é hora de chave singular.
+  assert.ok(dias > 1 && min > 1, 'um dos prazos virou 1 — as frases são plurais');
+  // Registrados como FUNÇÃO (reavaliada a cada t()), a partir das constantes.
+  assert.match(APP, /setI18nVars\(\{\s*sessaoDias: \(\) => SESSAO_DIAS_EXIBIDO, parearMin: \(\) => PAREAR_MIN_EXIBIDO \}\)/,
+    'os prazos não estão registrados em setI18nVars — o {sessaoDias}/{parearMin} vazaria cru pra tela');
+  // Nenhuma frase escreve o número à mão, e as que citam os prazos usam as variáveis.
+  const valores = (chave) => [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}':\\s*'((?:[^'\\\\\\n]|\\\\.)*)'`, 'g'))].map((m) => m[1]);
+  const USAM = {
+    sessaoDias: ['auth.securityNote', 'help.security.body', 'help.privacy.retention', 'toast.logoutServerFailed'],
+    parearMin: ['help.privacy.zeroKnowledge', 'help.privacy.retention'],
+  };
+  for (const [v, chaves] of Object.entries(USAM)) {
+    for (const chave of chaves) {
+      const vs = valores(chave);
+      assert.equal(vs.length, N_LINGUAS, `CONTROLE: ${chave} não está nas ${N_LINGUAS} línguas`);
+      for (const valor of vs) assert.ok(valor.includes(`{${v}}`), `${chave} não usa {${v}}: ${valor}`);
+    }
+  }
+  const aMao = [...I18N.matchAll(new RegExp(`\\b(${dias}\\s*(?:dias|days|días|jours)|${min}\\s*(?:minutos|minutes))\\b`, 'g'))].map((m) => m[1]);
+  assert.deepEqual(aMao, [], 'prazo do servidor escrito à mão no dicionário');
+});
+
 // As três miniaturas da prévia existem e são as PEQUENAS. Apontar pras capturas
 // originais funciona igual na tela e custa 432 KB em vez de 63 KB — na tela de
 // entrada, muitas vezes em dado móvel. É o tipo de regressão que ninguém vê.
