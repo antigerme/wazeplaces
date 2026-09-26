@@ -2541,20 +2541,24 @@ function pedirExclusaoDaFoto() {
         removeUndoBanner();
         enviarExclusao(alvo);
     };
-    const desfazer = () => {
-        if (saiu) return;
+    // Volta atrás sem enviar. É o Desfazer do editor e também o cancelamento
+    // que o APP faz quando a sessão acaba (ver `cancelarPendenciasDoLightbox`).
+    const cancelar = () => {
+        if (saiu) return false;
         saiu = true;
         clearTimeout(exclusaoPendente && exclusaoPendente.timer);
         if (exclusaoPendente && exclusaoPendente.id === alvo.id) exclusaoPendente = null;
         aplicarTravaDeAcao();
         removeUndoBanner();
         devolverFoto(alvo);
-        // É o MESMO Desfazer do card (o mesmo banner): zera a "Mão firme" e
-        // conta a "Segunda chance" como lá (auditoria de 2026-09-25).
-        registrarDesfazer();
+        return true;
     };
+    // É o MESMO Desfazer do card (o mesmo banner): zera a "Mão firme" e conta a
+    // "Segunda chance" como lá (auditoria de 2026-09-25). O cancelamento do app
+    // não conta: quem desfez não foi o editor.
+    const desfazer = () => { if (cancelar()) registrarDesfazer(); };
     const timer = setTimeout(enviar, UNDO_WINDOW_MS);
-    exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer };
+    exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.photoDeleted'), () => exclusaoPendente && exclusaoPendente.desfazer());
 }
@@ -2698,17 +2702,19 @@ function aprovarFotoAtual() {
         removeUndoBanner();
         enviarAprovacao(alvo);
     };
-    const desfazer = () => {
-        if (saiu) return;
+    const cancelar = () => {
+        if (saiu) return false;
         saiu = true;
         clearTimeout(aprovacaoPendente && aprovacaoPendente.timer);
         aprovacaoPendente = null;
         aplicarTravaDeAcao();
         removeUndoBanner();
         Lightbox.desmarcarAprovada(alvo);
-        registrarDesfazer();   // o mesmo Desfazer do card — ver a exclusão acima
+        return true;
     };
-    aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer };
+    // O mesmo Desfazer do card — ver a exclusão acima.
+    const desfazer = () => { if (cancelar()) registrarDesfazer(); };
+    aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer());
 }
@@ -2856,17 +2862,19 @@ function confirmarRenomear() {
         removeUndoBanner();
         enviarRenomeacao(alvo);
     };
-    const desfazer = () => {
-        if (saiu) return;
+    const cancelar = () => {
+        if (saiu) return false;
         saiu = true;
         clearTimeout(renomeacaoPendente && renomeacaoPendente.timer);
         renomeacaoPendente = null;
         aplicarTravaDeAcao();
         removeUndoBanner();
         aplicarNomeNaTela(place, antigo);
-        registrarDesfazer();   // o mesmo Desfazer do card — ver a exclusão de foto
+        return true;
     };
-    renomeacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer };
+    // O mesmo Desfazer do card — ver a exclusão de foto.
+    const desfazer = () => { if (cancelar()) registrarDesfazer(); };
+    renomeacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.renamed', { nome: novo }), () => renomeacaoPendente && renomeacaoPendente.desfazer());
 }
@@ -2908,6 +2916,21 @@ async function enviarRenomeacao(alvo) {
         if (epoca !== epocaDaSessao) return;
         aplicarNomeNaTela(alvo.place, alvo.antigo);
         showToast(t('toast.renameFailed'), 'error');
+    }
+}
+
+// A sessão ACABOU (queda ou "Sair") com uma escrita do lightbox na janela do
+// Desfazer: ela não sai, e o que ela antecipou na tela volta (a foto que sumiu,
+// o ✨ que saiu, o nome novo). O banner some junto com a sessão — sem isto a
+// janela corria invisível, `acoesTravadas()` seguia verdadeiro, e a escrita
+// saía quando ela vencia, com o token de quem tivesse entrado nesse meio (a
+// extensão renova sozinha): MEDIDO, "excluir-foto com token-renovado"
+// (auditoria da costura, 2026-09-26, K1). É o `cancel` do `pendingAction`,
+// pro lightbox — e não conta como Desfazer do editor.
+function cancelarPendenciasDoLightbox() {
+    for (const p of [renomeacaoPendente, aprovacaoPendente, exclusaoPendente]) {
+        if (!p || typeof p.cancelar !== 'function') continue;
+        try { p.cancelar(); } catch (e) { console.error('Falha ao cancelar escrita do lightbox:', e); }
     }
 }
 
@@ -6368,6 +6391,8 @@ function derrubarSessao(errorKey, { depois } = {}) {
         AppState.pendingAction = null;
         saveStats();
     }
+    // E as do lightbox, que têm janela própria (ver a função).
+    cancelarPendenciasDoLightbox();
     removeUndoBanner();
     API.setSession(null);
     AppState.profile = null;
@@ -6629,6 +6654,9 @@ async function handleLogout() {
         AppState.pendingAction.cancel();
         AppState.pendingAction = null;
     }
+    // As do lightbox também: a janela delas correria invisível e sairia com o
+    // token de quem entrasse depois (ver a função).
+    cancelarPendenciasDoLightbox();
     // O token sai do armazenamento AGORA e a limpeza local acontece inteira sem
     // esperar rede nenhuma — pedir pra sair tem que ser instantâneo. A cópia
     // serve pra exclusão no servidor, que vai depois, com retentativa.

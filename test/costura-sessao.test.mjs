@@ -236,3 +236,61 @@ test('K1: sem sessão o lote do autor não sai, e diz por quê (não "espere o D
   assert.deepEqual(agendou, [], 'o lote saiu sem sessão');
   assert.deepEqual(toasts, ['api.error.noSession']);
 });
+
+// ═══ K1 (L6) · as escritas do lightbox não sobrevivem à sessão ═══════════════
+
+function montarLightboxComJanelas() {
+  const timers = [];
+  const log = [];
+  const place = { venueID: 'v1', updateRequestID: 'u1', name: 'Nome Velho', lat: -23, lon: -46 };
+  const AppState = { authenticated: true, preferences: { undoEnabled: true }, currentPlace: null, pendingAction: null,
+    stats: { read: 0, rejected: 0, skipped: 0 } };
+  const deps = {
+    AppState, epocaDaSessao: 0, Treino: { ativo: false }, canDisableUndo: () => false, podeRenomearAqui: () => true,
+    Lightbox: { place, idx: 1, urls: ['a', 'b'], podeAprovarAtual: () => true, idFotoAtual: () => 'f1',
+      marcarComoAprovada: () => log.push('marcou'), desmarcarAprovada: () => log.push('desmarcou'), removerFoto: () => log.push('removeu') },
+    document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    aplicarNomeNaTela: (p, n) => log.push('nome:' + n), devolverFoto: () => log.push('devolveu'),
+    enviarExclusao: () => log.push('ENVIOU:excluir'), enviarAprovacao: () => log.push('ENVIOU:aprovar'),
+    enviarRenomeacao: () => log.push('ENVIOU:renomear'), registrarDesfazer: () => log.push('desfazer-do-editor'),
+    mostrarDesfazer: () => log.push('banner'),
+    setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
+    API: { getSession: () => 'tok-A', setSession() {}, getRegion: () => 'row', prepararExclusao() {},
+      setRegion() {}, setCountry() {}, cancelarPareamento: () => Promise.resolve(), chamadas: [] },
+    entrarPelaExtensao: () => new Promise(() => {}), console, pareamentosEmitidos: new Set(),
+  };
+  const h = montar(['acoesTravadas', 'pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear',
+    'cancelarPendenciasDoLightbox', 'derrubarSessao', 'handleLogout'], deps);
+  // As três janelas abertas, uma depois da outra (cada uma despacha a anterior,
+  // então cada uma é aberta num lightbox "limpo").
+  return { h, deps, timers, log, AppState };
+}
+
+for (const [nome, acabar] of [['a queda', (h) => h.derrubarSessao('srv.err.sessionExpired')], ['o "Sair"', (h) => h.handleLogout()]]) {
+  test(`K1 (L6): ${nome} com escrita do lightbox na janela CANCELA a escrita e desfaz o que ela antecipou`, async () => {
+    for (const abrir of ['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear']) {
+      const m = montarLightboxComJanelas();
+      m.h[abrir]();
+      assert.ok(m.log.includes('banner'), `${abrir}: a janela não abriu — o teste não mediria nada`);
+      acabar(m.h);
+      await tique();
+      assert.equal(m.deps.exclusaoPendente || m.deps.aprovacaoPendente || m.deps.renomeacaoPendente, null,
+        `${abrir}: a pendência sobreviveu a ${nome}`);
+      for (const t of m.timers) t();                 // a janela "vence" depois
+      assert.ok(!m.log.some((l) => l.startsWith('ENVIOU')), `DEFEITO (${abrir}): a escrita saiu depois de ${nome}: ${m.log.join(' ')}`);
+      assert.ok(m.log.some((l) => ['devolveu', 'desmarcou', 'nome:Nome Velho'].includes(l)),
+        `${abrir}: o que a escrita antecipou na tela não voltou`);
+      assert.ok(!m.log.includes('desfazer-do-editor'), `${abrir}: o cancelamento do app contou como Desfazer do editor`);
+    }
+  });
+}
+
+test('K1 (L6): CONTROLE — sem a sessão acabar, a janela vence e a escrita SAI', () => {
+  for (const abrir of ['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear']) {
+    const m = montarLightboxComJanelas();
+    m.h[abrir]();
+    for (const t of m.timers) t();
+    assert.ok(m.log.some((l) => l.startsWith('ENVIOU')), `${abrir}: a escrita não saiu nem com a janela vencida`);
+  }
+});
