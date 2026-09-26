@@ -13092,7 +13092,11 @@ function offlineBaixar(u, tile) {
     const epoca = offlineEpoca;
     return (async () => {
         try {
-            const resp = await fetch(u, { mode: 'cors' });
+            // `no-cache`: cópia CONFERIDA com o servidor (condicional — o de tile
+            // responde 304 quando nada mudou). E o service worker não a responde
+            // do cache guardado (ver lá): respondida por ele, a varredura nunca
+            // revalidava o tile, e o guardado ficava o da primeira vez pra sempre.
+            const resp = await fetch(u, { mode: 'cors', cache: 'no-cache' });
             // 4xx é DEFINITIVO (o tile não existe): repetir não muda nada, e era
             // o que fazia a varredura martelar a mesma URL centenas de vezes.
             // 5xx segue como falha de rede: o servidor pode voltar.

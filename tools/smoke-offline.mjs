@@ -312,6 +312,18 @@ for (let i = 0; guardado && i < 25; i++) {
 }
 diz('o tile guardado volta do CACHE, sem tocar a rede', doCache === 'CARREGOU' && rede === 0,
   `${doCache}, rede=${rede}`);
+// E a varredura da janela SEGUINTE vai à REDE pelos tiles já guardados: é a
+// revalidação de cada janela (o servidor de tile responde 304 quando nada
+// mudou). Respondida pelo worker a partir do próprio cache, ela nunca mais saía
+// e o guardado ficava o da primeira vez pra sempre (auditoria de 2026-09-26,
+// O7; na main de antes: ZERO pedidos na 2ª varredura).
+await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null; });
+rotaTile = 0;
+await page.evaluate(() => { offlineMarcarGesto(); return offlineVarrer(); });
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 25000);
+const revalidou = { rota: rotaTile, res: await page.evaluate(() => offlineUltimoResultado) };
+diz('a varredura da janela seguinte REVALIDA pela rede os tiles que já estavam guardados',
+  revalidou.rota > 0 && revalidou.res === 'pronto', JSON.stringify(revalidou));
 
 // E o MAPA CONTINUA DESENHANDO com o cache cheio. Esta é a outra metade do
 // defeito que foi à produção: lá o SW passou a interceptar o tile e a pagar com
