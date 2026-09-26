@@ -183,7 +183,115 @@ test('esvaziar: sem rede no perfil mas NA MESMA sessão, a conta guardada vale e
 test('o "Sair" apaga de quem eram os dados, e o perfil chegando confere a conta ANTES do que depende dele', () => {
   const sair = SEM.slice(SEM.indexOf('async function handleLogout'), SEM.indexOf('function resetQueue'));
   assert.match(sair, /safeLS\.remove\(CONTA_KEY\);/);
-  const carga = fatiar('loadProfileAndAuxData');
-  assert.match(carga, /AppState\.profile = profileRes\.profile;\s*aoConhecerConta\(profileRes\.profile\);/,
+  const def = fatiar('definirPerfil');
+  assert.match(def, /AppState\.profile = perfil;\s*aoConhecerConta\(perfil\);/,
     'a conta tem que ser conferida logo que o perfil chega, antes da recusa automática e da presença');
+  const carga = fatiar('loadProfileAndAuxData');
+  assert.match(carga, /if \(definirPerfil\(profileRes\)\) await completarPerfilChegado\(profileRes\.profile, epoca\);/,
+    'a carga da abertura deixou de passar pela fonte única do perfil');
+});
+
+// ── O PERFIL CHEGOU: fonte única (auditoria de 2026-09-26, O2) ───────────────
+// O alarme falso do 401 gravava o perfil da sonda direto no `AppState`, sem o
+// `aoConhecerConta`: quem entrava num aparelho cuja sessão anterior tinha caído,
+// com o 1º perfil levando um 401 passageiro, nunca tinha a troca de conta
+// detectada — e a recusa automática da conta ANTERIOR agia no nome dele.
+test('só a fonte única (`definirPerfil`) grava um perfil no AppState — nenhum caminho da rede escapa', () => {
+  const fora = [];
+  for (const arq of ['app.js', 'presenca.js', 'api.js', 'swipe.js', 'mapa.js', 'i18n.js']) {
+    let src;
+    try { src = readFileSync(new URL('../js/' + arq, import.meta.url), 'utf8'); } catch (e) { continue; }
+    const semCom = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    const def = arq === 'app.js' ? fatiar('definirPerfil') : '';
+    const resto = def ? semCom.replace(def, '') : semCom;
+    for (const m of resto.matchAll(/AppState\.profile\s*=(?!=)\s*([^;\n]+)/g)) {
+      if (m[1].trim() !== 'null') fora.push(`${arq}: ${m[0].trim()}`);
+    }
+  }
+  assert.deepEqual(fora, [], 'perfil gravado por fora da fonte única — a conta não é conferida:\n  ' + fora.join('\n  '));
+  // CONTRAPROVA: o varredor enxerga a gravação que EXISTE (a da própria fonte).
+  assert.match(fatiar('definirPerfil'), /AppState\.profile\s*=\s*perfil;/, 'o varredor parou de ver a gravação da fonte única');
+});
+
+function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes = null }) {
+  const guardado = new Map();
+  const log = [];
+  const safeLS = {
+    get: (k) => (guardado.has(k) ? guardado.get(k) : null),
+    set: (k, v) => guardado.set(k, String(v)),
+    remove: (k) => { log.push('-' + k); guardado.delete(k); },
+  };
+  const marca = new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')();
+  if (contaGuardada) safeLS.set('waze_places_conta', JSON.stringify({ id: contaGuardada.id, s: marca(contaGuardada.token) }));
+  const AppState = { authenticated: true, profile: perfilAntes, stats: { read: 3, rejected: 5, skipped: 0 }, history: {}, conquistas: {} };
+  const deps = {
+    safeLS, AppState, epocaDaSessao: 0,
+    API: { getSession: () => tokenAgora, getProfile: async () => sonda },
+    CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'),
+    HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
+    VERIFICA_SESSAO_MS: 0, setTimeout: (f) => f(),
+    dlog: () => {}, dfato: (k) => log.push('dfato:' + k), dlogCapturarAuto: () => {},
+    showToast: (m) => log.push('toast:' + m), t: (k) => k,
+    guardarReferencias: () => {}, guardarPerfilDoPortao: () => {}, guardarPrazoDaSessao: () => {},
+    renderProfileHeader: () => {}, presencaWmeAoCarregarPerfil: () => {},
+    completarPerfilChegado: () => log.push('completar'),
+    rebuscarDepoisDeFalha: () => {}, esvaziarFilaDeSaida: () => log.push('esvaziar'),
+    derrubarSessao: () => log.push('derrubar'), showAuthScreen: () => {}, showAccessDenied: () => {},
+    updateInFlightIndicator: () => {}, esquecerAutores: () => log.push('autores'),
+    atualizarSeloDeConquista: () => {}, saveStats: () => {}, updateStats: () => {},
+    offlineEsquecer: () => {}, dlogApagar: () => {}, window: { Presenca: { esquecer: () => {} } },
+  };
+  const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carregarFilaDeSaida',
+    'salvarFilaDeSaida', 'definirPerfil', 'handleUnauthorized'];
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, `let saidaEsperandoConta = false, verificandoSessao = false;
+    ${nomes.map(fatiar).join('\n')}
+    return { handleUnauthorized };`)(...chaves.map((k) => deps[k]));
+  return { app, log, AppState, guardado };
+}
+const PERFIL_B = { id: 222, userName: 'contaB', rank: 5, isAreaManager: true, isStaff: false };
+
+test('alarme falso com o perfil de OUTRA conta: a troca é detectada e o que era da anterior sai', async () => {
+  const m = alarmeFalso({ sonda: { success: true, profile: PERFIL_B }, contaGuardada: { id: '111', token: 'tok-A' } });
+  await m.app.handleUnauthorized();
+  assert.equal(m.AppState.profile && m.AppState.profile.id, 222, 'a sonda viva não gravou o perfil');
+  assert.ok(m.log.includes('dfato:conta.trocou'),
+    'a troca de conta NÃO foi detectada no alarme falso — a recusa automática da conta anterior age no nome de quem entrou');
+  assert.ok(m.log.includes('autores'), 'a lista de autores (com a recusa automática) da conta anterior ficou');
+  assert.equal(JSON.parse(m.guardado.get('waze_places_conta')).id, '222');
+  // Era o PRIMEIRO perfil da sessão: o que a abertura não fez (país, presença,
+  // recusa) é completado; e a fila de saída é chamada, como sempre.
+  assert.ok(m.log.includes('completar'), 'o primeiro perfil vindo do alarme falso não completou a chegada');
+  assert.ok(m.log.includes('esvaziar'));
+  assert.ok(!m.log.includes('derrubar'));
+});
+
+test('alarme falso com o perfil JÁ conhecido: confere a conta, sem refazer a chegada (país, presença)', async () => {
+  const m = alarmeFalso({ sonda: { success: true, profile: PERFIL_B }, contaGuardada: { id: '222', token: 'tok-B' },
+    perfilAntes: PERFIL_B });
+  await m.app.handleUnauthorized();
+  assert.ok(!m.log.includes('dfato:conta.trocou'), 'a MESMA conta foi tratada como troca');
+  assert.ok(!m.log.includes('completar'), 'refazer o país no meio da sessão trocaria a fila de quem está triando');
+});
+
+test('a recusa automática só age com a conta CONFIRMADA nesta sessão (`contaConfirmada`)', () => {
+  const r = fatiar('aplicarRecusaAutomatica');
+  const iPortao = r.indexOf('if (!podeRecusarAutomaticoAqui()) return;');
+  const iConta = r.indexOf('if (!contaConfirmada()) return;');
+  const iAlvos = r.indexOf('const alvos');
+  assert.ok(iPortao > 0 && iConta > iPortao && iConta < iAlvos, 'a recusa automática não confere de quem é a lista de autores');
+  const marca = new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')();
+  const confirma = (perfil, guardada, token) => {
+    const g = new Map();
+    if (guardada) g.set('waze_places_conta', JSON.stringify(guardada));
+    return new Function('AppState', 'safeLS', 'CONTA_KEY', 'API', fatiar('marcaDaSessao') + '\n' + fatiar('contaConfirmada')
+      + '\nreturn contaConfirmada();')({ profile: perfil }, { get: (k) => (g.has(k) ? g.get(k) : null) },
+      'waze_places_conta', { getSession: () => token });
+  };
+  assert.equal(confirma({ id: 222 }, { id: '222', s: marca('tok-B') }, 'tok-B'), true);
+  assert.equal(confirma({ id: 222 }, { id: '111', s: marca('tok-A') }, 'tok-B'), false,
+    'o perfil de B com a lista de A no aparelho passou como confirmado');
+  assert.equal(confirma({ id: 222 }, { id: '222', s: marca('tok-A') }, 'tok-B'), false,
+    'a conta vista em OUTRA sessão passou como confirmada nesta');
+  assert.equal(confirma(null, { id: '222', s: marca('tok-B') }, 'tok-B'), false, 'sem perfil vivo não há quem confirmar');
 });

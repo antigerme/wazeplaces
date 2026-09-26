@@ -5672,6 +5672,15 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     let enviosDeAcao = [];
     let atrasoDaAcaoMs = 0;   // usado só pra alargar a janela do teste de reenvio
     let abortLento = false;  // alarga a janela do bloco DOIS TEMPOS (ver lá)
+    // A conta do aparelho. Cada item da fila de saída leva a conta do GESTO, e o
+    // esvaziamento ESPERA enquanto a conta de agora for desconhecida. O bloco
+    // injetava o perfil direto no `AppState` e a rota respondia `{"success":true}`
+    // SEM perfil na reabertura: a conta nunca ficava conhecida e a ABERTURA
+    // reprovava medindo a FIXTURE (gotcha #52 — helper que arruma a tela é
+    // fixture). Agora o perfil passa pelo caminho REAL: `definirPerfil` no
+    // `montar` e a rota do perfil respondendo como o servidor responde.
+    const PERFIL_FS = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false,
+      editableCountryIDs: [30], areas: [], managedAreas: [] };
     await page.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png',
       body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') }));
     await page.route('**/api/**', async (r) => {
@@ -5687,6 +5696,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         enviosDeAcao.push(Date.now());
         if (atrasoDaAcaoMs) await new Promise((ok) => setTimeout(ok, atrasoDaAcaoMs));
       }
+      if (/\/api\/perfil$/.test(new URL(r.request().url()).pathname)) {
+        return r.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ success: true, profile: PERFIL_FS, visivelNoWme: true }) });
+      }
       r.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' });
     });
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
@@ -5694,10 +5707,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.reload({ waitUntil: 'domcontentloaded' });
     await dormir(400);
     const CARDS_FS = Object.entries(CARDS).map(([, p]) => p);
-    const montar = () => page.evaluate(({ f }) => {
+    const montar = () => page.evaluate(({ f, perfil }) => {
       if (typeof API !== 'undefined' && API.setSession) API.setSession('t', 'cookies');
       AppState.authenticated = true;
-      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      // Pela FONTE ÚNICA do perfil, que carimba a conta do aparelho (ver PERFIL_FS).
+      definirPerfil({ success: true, profile: perfil });
       // Desfazer DESLIGADO de verdade: a preferência sozinha não basta, o
       // canDisableUndo() também exige a cota (a pegadinha do doc).
       AppState.stats = { read: 500, rejected: 500, skipped: 0 };
@@ -5718,7 +5732,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // recusa o mesmo pedido duas vezes (é a segunda decisão do relato de reabrir
     // sem rede). A 7ª e a 8ª ação caíam em pedidos já decididos, e o bloco
     // acusava "o placar reverteu" medindo a fixture, não o app.
-    }, { f: Array.from({ length: 6 }, (_, i) => CARDS_FS.map((p, k) => ({ ...p,
+    }, { perfil: PERFIL_FS, f: Array.from({ length: 6 }, (_, i) => CARDS_FS.map((p, k) => ({ ...p,
       updateRequestID: String(p.updateRequestID) + '-c' + i + '-' + k }))).flat() });
     const estado = () => page.evaluate(() => ({
       rejeitados: AppState.stats.rejected,

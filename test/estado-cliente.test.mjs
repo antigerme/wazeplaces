@@ -285,8 +285,12 @@ test('país: staff e "Minha área" escolhem sozinhos', async () => {
 });
 
 test('país: vale a cada abertura, depois do perfil — e troca de verdade (fila nova)', () => {
+  // O país mora no que COMPLETA a chegada do perfil — a carga da abertura e o
+  // alarme falso que traz o 1º perfil passam por ele (auditoria de 2026-09-26).
   const l = fatiar('loadProfileAndAuxData');
-  assert.match(l, /const destino = await paisDoPerfil\(profileRes\.profile, epoca\);\s*if \(destino && epoca === epocaDaSessao\) await irProPaisDoPerfil\(destino\);/);
+  assert.match(l, /if \(definirPerfil\(profileRes\)\) await completarPerfilChegado\(profileRes\.profile, epoca\);/);
+  const c = fatiar('completarPerfilChegado');
+  assert.match(c, /const destino = await paisDoPerfil\(perfil, epoca\);\s*if \(destino && epoca === epocaDaSessao\) await irProPaisDoPerfil\(destino\);/);
   const ir = fatiar('irProPaisDoPerfil');
   for (const re of [/API\.setCountry\(pais\);/, /AppState\.filters\.stateId = '';/, /saveFilters\(\);/, /resetQueue\(\);/, /startFetching\(\);/]) {
     assert.match(ir, re);
@@ -341,7 +345,9 @@ test('perfil que FALHOU é pedido de novo na próxima prova de rede (no máximo 
   assert.match(prova.slice(0, prova.indexOf('\n};')), /^\s+refazerPerfilSeFaltar\(\);/m, 'a prova de rede não refaz o perfil que falhou');
   const l = fatiar('loadProfileAndAuxData');
   assert.match(l, /perfilPedidoEm = Date\.now\(\);/);
-  assert.match(l, /presencaWmeAoCarregarPerfil\(profileRes\.visivelNoWme\);\s*aplicarRecusaAutomatica\(\);/,
+  assert.match(l, /if \(definirPerfil\(profileRes\)\) await completarPerfilChegado\(/,
+    'a carga do perfil deixou de completar a chegada dele');
+  assert.match(fatiar('completarPerfilChegado'), /^async function completarPerfilChegado\(perfil, epoca\) \{\s*aplicarRecusaAutomatica\(\);/,
     'a recusa automática (L6) não reage ao perfil que chegou depois da fila');
 });
 

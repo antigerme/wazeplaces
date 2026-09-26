@@ -3461,40 +3461,64 @@ async function loadProfileAndAuxData() {
         handleUnauthorized();
         return;
     }
-    if (profileRes.success) {
-        AppState.profile = profileRes.profile;
-        // ANTES do que depende do perfil: se a conta é outra, o que era da
-        // anterior sai antes de a recusa automática e a presença rodarem.
-        aoConhecerConta(profileRes.profile);
-        guardarReferencias(profileRes);
-        guardarPerfilDoPortao(profileRes.profile);
-        guardarPrazoDaSessao(profileRes);
-        renderProfileHeader();
-        presencaWmeAoCarregarPerfil(profileRes.visivelNoWme);
-        // O que DEPENDIA do perfil e pode ter rodado antes dele: a recusa
-        // automática (é de L6+AM, e a fila costuma chegar primeiro) e a ordem
-        // por casa/trabalho (as referências vêm aqui). Sem isto, os dois só
-        // valiam na próxima busca.
-        aplicarRecusaAutomatica();
-        if (AppState.currentPlace) AppState.ordemPendente = true;
-        else sortQueue();
-    }
+    // Os países ANTES do resto: o país de quem entra e o subtítulo da lista da
+    // presença usam o nome deles (ver `completarPerfilChegado`).
     if (countriesRes.success) {
         AppState.countries = countriesRes.countries;
     }
+    if (definirPerfil(profileRes)) await completarPerfilChegado(profileRes.profile, epoca);
+}
+
+// ── O PERFIL CHEGOU: fonte única ──────────────────────────────────────────
+// O perfil chega por DOIS caminhos: a carga da abertura (acima) e a sonda do
+// 401 que se revela alarme falso (`handleUnauthorized`). O segundo gravava o
+// `AppState.profile` por conta própria, SEM o `aoConhecerConta` (auditoria de
+// 2026-09-26): quem entrava num aparelho cuja sessão anterior tinha caído sem o
+// "Sair", com o 1º perfil levando um 401 passageiro (o blip do KV), nunca tinha
+// a troca de conta detectada — e a recusa automática da conta ANTERIOR agia no
+// nome de quem entrou, sobre a fila dele. E com o perfil presente o
+// `refazerPerfilSeFaltar` não rodava mais: nada corrigia depois.
+//
+// Por isso é UMA função, e ela é a ÚNICA que grava um perfil no `AppState`
+// (`test/conta.test.mjs` reprova quem gravar por fora): a conta é conferida
+// ANTES de tudo que depende dela. Resposta sem perfil não apaga o que se sabia.
+function definirPerfil(res) {
+    const perfil = res && res.success ? res.profile : null;
+    if (!perfil || typeof perfil !== 'object') return false;
+    AppState.profile = perfil;
+    // ANTES do que depende do perfil: se a conta é outra, o que era da
+    // anterior sai antes de a recusa automática e a presença rodarem.
+    aoConhecerConta(perfil);
+    guardarReferencias(res);
+    guardarPerfilDoPortao(perfil);
+    guardarPrazoDaSessao(res);
+    renderProfileHeader();
+    presencaWmeAoCarregarPerfil(res.visivelNoWme);
+    return true;
+}
+
+// O que DEPENDIA do perfil e pode ter rodado antes dele. Roda na carga da
+// abertura e no alarme falso que traz o PRIMEIRO perfil da sessão: sem este
+// segundo caminho, quem teve o 1º perfil barrado por um 401 passageiro ficava
+// sem o país, sem a presença e sem a recusa automática até recarregar.
+async function completarPerfilChegado(perfil, epoca) {
+    // A recusa automática (é de L6+AM, e a fila costuma chegar primeiro) e a
+    // ordem por casa/trabalho (as referências vêm com o perfil). Sem isto, os
+    // dois só valiam na próxima busca.
+    aplicarRecusaAutomatica();
+    if (AppState.currentPlace) AppState.ordemPendente = true;
+    else sortQueue();
     // O país de quem entra: só depois do perfil, e só quando o atual é um onde
     // a pessoa NÃO edita (ver `paisDoPerfil`).
-    if (profileRes.success) {
-        const destino = await paisDoPerfil(profileRes.profile, epoca);
-        if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
-    }
+    const destino = await paisDoPerfil(perfil, epoca);
+    if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
     // A presença (fase 3) precisa do id do PERFIL — a lista exclui a própria
     // pessoa e o chat é dela. O `showMainScreen` chama a presença antes de o
     // perfil chegar, e ela desiste calada; sem esta linha, quem abria o app com
     // a sessão salva ficava sem lista e sem conversa até mexer nos filtros.
     // Depois dos países, porque o subtítulo da lista usa o nome do país.
     // (Achado na validação ao vivo: o smoke injetava o perfil ANTES e não via.)
-    if (profileRes.success) window.Presenca?.sincronizar?.();
+    if (epoca === epocaDaSessao) window.Presenca?.sincronizar?.();
 }
 
 // O perfil que falhou na abertura (rede, 5xx) não era pedido de novo: o L6
@@ -6036,12 +6060,12 @@ async function handleUnauthorized() {
         if (r && !morta) {
             // Alarme falso. O pedido que falhou já foi revertido por quem o
             // chamou; aqui só recompomos o que o 401 tinha interrompido.
-            if (r.success && r.profile) {
-                AppState.profile = r.profile;
-                guardarReferencias(r);
-                guardarPerfilDoPortao(r.profile);
-                renderProfileHeader();
-            }
+            // O perfil da sonda passa pela FONTE ÚNICA (`definirPerfil`), que
+            // confere a conta antes de tudo: era aqui que ele entrava sem o
+            // `aoConhecerConta`. Se era o PRIMEIRO da sessão (o 401 barrou o da
+            // abertura), completa o que a abertura não chegou a fazer.
+            const primeiroPerfil = !AppState.profile;
+            if (definirPerfil(r) && primeiroPerfil) completarPerfilChegado(r.profile, epocaDaSessao);
             dfato('sessao.alarmeFalso', { sondaOk: !!(r && r.success) });
             dlogCapturarAuto('alarmeFalso');
             // "Continua válida" só quando a sonda RESPONDEU (é a prova de vida).
@@ -10980,6 +11004,9 @@ let recusaAutomaticaRodando = false;
 // rejeita na hora, um a um, com o aviso contando quantos faltam.
 async function aplicarRecusaAutomatica() {
     if (!podeRecusarAutomaticoAqui()) return;
+    // A lista de autores é do APARELHO: só age com ela quem se confirmou dono
+    // dela nesta sessão (ver `contaConfirmada`).
+    if (!contaConfirmada()) return;
     if (Treino.ativo) return;               // no treino a fila é de exemplos
     if (recusaAutomaticaRodando) return;
     // O card NA TELA fica de fora: o interruptor diz "os PRÓXIMOS", e é ligado
@@ -11867,6 +11894,22 @@ function contaAgora() {
         if (c && c.id && c.s === marcaDaSessao(API.getSession())) return String(c.id);
     } catch (e) { /* ilegível: desconhecida */ }
     return null;
+}
+
+// Os dados do aparelho são DESTA conta, confirmado NESTA sessão: o perfil vivo
+// passou pelo `aoConhecerConta` (que tira o que era de outra conta) com o token
+// de agora. É a trava de quem age SOZINHO no nome da pessoa — a recusa
+// automática lê a lista de autores do aparelho, e com o perfil gravado por fora
+// da fonte única (o defeito do alarme falso, auditoria de 2026-09-26) ela agia
+// com a lista da conta ANTERIOR. Hoje só o `definirPerfil` grava o perfil; isto
+// é o cinto: se um caminho novo escapar dele, a recusa não roda.
+function contaConfirmada() {
+    const vivo = AppState.profile && AppState.profile.id;
+    if (vivo === undefined || vivo === null || vivo === '') return false;
+    try {
+        const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null');
+        return !!(c && String(c.id) === String(vivo) && c.s === marcaDaSessao(API.getSession()));
+    } catch (e) { return false; }
 }
 
 // O perfil chegou: agora se sabe de quem é a sessão.

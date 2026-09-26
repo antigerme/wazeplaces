@@ -355,8 +355,11 @@ test('toggle: o interruptor fala com a presença do WME nos dois sentidos', () =
 });
 
 test('perfil e sair: o perfil decide a visibilidade; o "Sair" zera o freio e os contadores', () => {
-  const perfil = semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData'));
-  assert.match(perfil, /presencaWmeAoCarregarPerfil\(profileRes\.visivelNoWme\)/);
+  // O perfil chega pela FONTE ÚNICA (`definirPerfil`), que a carga da abertura
+  // e o alarme falso do 401 usam (auditoria de 2026-09-26).
+  const perfil = semComentario(fatiarFuncao(APP, 'definirPerfil'));
+  assert.match(perfil, /presencaWmeAoCarregarPerfil\(res\.visivelNoWme\)/);
+  assert.match(semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData')), /definirPerfil\(profileRes\)/);
   const sair = semComentario(fatiarFuncao(APP, 'handleLogout'));
   assert.match(sair, /presencaWmeZerar\(\);/, 'o "Sair" deixa o freio de quem saiu pra quem entra');
 });
@@ -391,13 +394,19 @@ test('a presença sincroniza quando o PERFIL chega — o `showMainScreen` chama 
   // presença antes de o perfil existir, ela desiste calada (sem o id não há
   // lista nem chat), e ninguém chamava de novo. O smoke injetava o perfil antes
   // e não via (gotcha #52); hoje ele abre pelo `initApp` de verdade.
+  // A chegada do perfil mora em DUAS funções desde 2026-09-26 (a fonte única
+  // `definirPerfil` e o `completarPerfilChegado`, que o alarme falso também usa):
+  // os países entram antes de completar, e a presença sincroniza no fim dele.
   const corpo = semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData'));
-  const iPerfil = corpo.indexOf('AppState.profile = profileRes.profile;');
   const iPaises = corpo.indexOf('AppState.countries = countriesRes.countries;');
-  const iSinc = corpo.indexOf('window.Presenca?.sincronizar?.()');
-  assert.ok(iPerfil > 0, 'o perfil deixou de ser guardado aqui — o guard ficaria cego');
-  assert.ok(iSinc > iPerfil, 'a presença não sincroniza depois de o perfil chegar');
-  assert.ok(iSinc > iPaises, 'a presença sincroniza antes dos países — o subtítulo da lista sairia sem o país');
+  const iPerfil = corpo.indexOf('definirPerfil(profileRes)');
+  const iCompletar = corpo.indexOf('completarPerfilChegado(profileRes.profile, epoca)');
+  assert.ok(iPerfil > 0 && iCompletar > iPerfil, 'o perfil deixou de ser guardado aqui — o guard ficaria cego');
+  assert.ok(iPaises > 0 && iPaises < iCompletar, 'a presença sincroniza antes dos países — o subtítulo da lista sairia sem o país');
+  const completar = semComentario(fatiarFuncao(APP, 'completarPerfilChegado'));
+  const iPais = completar.indexOf('await paisDoPerfil(');
+  const iSinc = completar.indexOf('window.Presenca?.sincronizar?.()');
+  assert.ok(iSinc > iPais && iPais > 0, 'a presença não sincroniza depois de o perfil chegar');
 });
 
 // Desligar o "Ver quem está no app" SEM REDE: o `visivel: false` não saía, e é a

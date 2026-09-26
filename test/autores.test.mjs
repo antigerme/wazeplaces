@@ -633,7 +633,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
   const AppState = { queue: [na, outro, alheio], currentPlace: na };
   const enviados = [];
   const deps = {
-    AppState, podeRecusarAutomaticoAqui: () => true, Treino: { ativo: false }, autoLigado: (id) => id === 7,
+    AppState, podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, Treino: { ativo: false }, autoLigado: (id) => id === 7,
     updatePendingCount: () => {}, removeCurrentCardEl: () => { throw new Error('trocou o card da tela'); },
     showCurrentPlace: () => { throw new Error('trocou o card da tela'); }, startFetching: () => {}, showNoPlaces: () => {},
     showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
