@@ -405,3 +405,74 @@ test('K7: o LOTE manual com a sessão caindo no meio devolve só o placar otimis
   await envio;
   assert.equal(AppState.stats.rejected, 13 - 3, 'DEFEITO: o placar otimista dos 3 que não pousaram ficou');
 });
+
+// ═══ K2 · a renovação com OUTRA conta não mantém a fila nem o cabeçalho de A ══
+
+function janelaFalsa() {
+  const ouvintes = new Set();
+  const w = {
+    location: { origin: 'https://app' },
+    addEventListener: (t, fn) => { if (t === 'message') ouvintes.add(fn); },
+    removeEventListener: (t, fn) => ouvintes.delete(fn),
+    postMessage: () => {},
+    // O que a ponte da extensão responderia.
+    responder: (data) => { for (const fn of [...ouvintes]) fn({ source: w, origin: w.location.origin, data }); },
+  };
+  return w;
+}
+
+function montarExtensao(extra = {}) {
+  const window = janelaFalsa();
+  const deps = {
+    window, AppState: { authenticated: false, queue: [{ venueID: 'vA' }] }, epocaDaSessao: 1, saiuNestaPagina: false,
+    extPerguntando: false, extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false,
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout: () => 1, clearTimeout: () => {},
+    API: { setSession: (t) => { deps.token = t; }, getSession: () => deps.token || null }, token: null,
+    ...extra,
+  };
+  const h = montar(['entrarPelaExtensao'], deps);
+  return { h, deps, window };
+}
+
+test('K2: a renovação da QUEDA mantém a fila (marcada como de outra sessão); a volta à aba começa uma NOVA', async () => {
+  const q = montarExtensao();
+  const p = q.h.entrarPelaExtensao({ silencioso: true, manterFila: true });
+  q.window.responder({ source: 'wazeplaces-ext', action: 'sessao', token: 'tokB' });
+  assert.equal(await p, true);
+  assert.ok(!q.h.chamou.includes('resetQueue'), 'a renovação da queda jogou fora a fila de quem estava triando');
+  assert.equal(q.deps.filaAtravessouSessao, true, 'a fila que atravessou a sessão não ficou marcada');
+  // A volta à aba vem da TELA DE ENTRADA: silenciosa, mas com fila nova.
+  const v = montarExtensao();
+  const p2 = v.h.entrarPelaExtensao({ silencioso: true });
+  v.window.responder({ source: 'wazeplaces-ext', action: 'sessao', token: 'tokB' });
+  assert.equal(await p2, true);
+  assert.ok(v.h.chamou.includes('resetQueue'), 'DEFEITO: a volta à aba manteve a fila da sessão que caiu');
+});
+
+test('K2: só a queda pede pra manter a fila — a volta à aba e a abertura não', () => {
+  const chamadas = (APP_SEM.match(/entrarPelaExtensao\(\{[^}]*\}\)/g) || []);
+  const comManter = chamadas.filter((c) => /manterFila/.test(c));
+  assert.equal(comManter.length, 1, 'manter a fila é só da renovação da queda: ' + chamadas.join(' | '));
+  assert.match(fatiarDe(APP_SEM, 'derrubarSessao'), /entrarPelaExtensao\(\{ silencioso: true, manterFila: true \}\)/);
+});
+
+test('K2: OUTRA conta revelada pelo perfil — a fila que atravessou a sessão sai e a de quem entrou é buscada', () => {
+  for (const atravessou of [true, false]) {
+    const deps = { AppState: { stats: {} }, filaAtravessouSessao: atravessou, safeLS: { remove() {} },
+      carregarFilaDeSaida: () => [], window: {} };
+    const h = montar(['esquecerOutraConta'], deps);
+    h.esquecerOutraConta('222');
+    const refez = h.chamou.includes('resetQueue') && h.chamou.includes('startFetching');
+    if (atravessou) assert.ok(refez, 'DEFEITO: com a conta trocada, a fila da anterior seguiu na tela');
+    else assert.ok(!h.chamou.includes('resetQueue'), 'fila nascida nesta sessão refeita: uma busca a mais no free tier');
+  }
+});
+
+test('K2: a queda limpa o cabeçalho de quem estava (o perfil que chegar o redesenha)', () => {
+  const deps = { AppState: { authenticated: true, pendingAction: null }, epocaDaSessao: 0,
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    entrarPelaExtensao: () => new Promise(() => {}) };
+  const h = montar(['derrubarSessao'], deps);
+  h.derrubarSessao('srv.err.cookiesExpired');
+  assert.ok(h.chamou.includes('limparCabecalhoDoPerfil'), 'DEFEITO: o nome e a foto de A seguem no cabeçalho durante e depois da renovação');
+});

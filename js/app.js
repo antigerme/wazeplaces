@@ -591,8 +591,18 @@ let extPerguntando = false;
 // pergunta de novo nesta página ao voltar à aba.
 let extNegadoNestaPagina = false;
 let extNegado = null;   // a recusa que ainda não foi mostrada (quem mostra, consome)
+// A fila NA TELA atravessou uma troca de sessão (a renovação silenciosa a
+// manteve): ela é da sessão anterior, e se o perfil revelar OUTRA conta ela sai
+// (ver `esquecerOutraConta`). Todo `resetQueue` a zera.
+let filaAtravessouSessao = false;
 
-function entrarPelaExtensao({ silencioso = false } = {}) {
+// `silencioso`: sem o "Entrando pelo WME…" por cima da tela. `manterFila`: a fila
+// que está na tela continua — só a renovação da QUEDA (`derrubarSessao`), com a
+// pessoa no meio da triagem. Eram a mesma chave, e a volta à aba (que vem da
+// TELA DE ENTRADA, com a fila da sessão que caiu na memória) mantinha a fila
+// velha — com o perfil de quem entrou no WME, que pode ser OUTRA conta
+// (auditoria da costura, 2026-09-26, K2).
+function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
     if (extPerguntando) return Promise.resolve(false);
     extPerguntando = true;
     extNegado = null;   // uma recusa de pergunta ANTERIOR não é desta
@@ -642,9 +652,11 @@ function entrarPelaExtensao({ silencioso = false } = {}) {
             showMainScreen();
             // Fila NOVA, como no login por cookies: a que sobrou na memória é
             // da sessão que caiu (e o treino, se aberto, sai junto). Menos na
-            // renovação SILENCIOSA (`derrubarSessao`): ali a pessoa estava no
-            // meio da triagem e a fila tem que continuar na tela.
-            if (!silencioso) resetQueue();
+            // renovação da QUEDA (`manterFila`): ali a pessoa estava no meio da
+            // triagem e a fila tem que continuar na tela — até o perfil dizer
+            // de quem é a sessão nova (ver `filaAtravessouSessao`).
+            if (manterFila) filaAtravessouSessao = true;
+            else resetQueue();
             AppState._profilePromise = loadProfileAndAuxData();
             startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
@@ -6400,6 +6412,10 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // Sem sessão o card não decide (ver `acoesTravadas`): durante a renovação
     // pela extensão ele segue na tela, e os botões ficam com cara de travados.
     aplicarTravaDeAcao();
+    // O cabeçalho é de QUEM ESTAVA: o nome e a foto seguiam lá durante a
+    // renovação — e depois dela, se o perfil de quem entrou não chegasse
+    // (MEDIDO: "contaA" com a sessão de B). O perfil que chegar o redesenha.
+    limparCabecalhoDoPerfil();
     // O prazo era desta sessão, que acabou de morrer. Deixá-lo guardado faria a
     // próxima entrada nascer com a contagem da sessão ANTERIOR na tela, até a
     // primeira resposta do Waze corrigir.
@@ -6420,7 +6436,7 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // Nos dois casos a tela de entrada vem pelo `fecharCamadasAbertas`, que fecha
     // o que estava aberto por cima ANTES de ela (e do diálogo) aparecer.
     if (typeof depois === 'function') { fecharCamadasAbertas(depois); return; }
-    entrarPelaExtensao({ silencioso: true }).then((renovou) => {
+    entrarPelaExtensao({ silencioso: true, manterFila: true }).then((renovou) => {
         if (renovou) {
             showToast(t('toast.sessionRenewed'), 'info');
             rebuscarDepoisDeFalha();
@@ -6772,6 +6788,7 @@ function resetQueue() {
     // `Treino.encerrar`). Cobre sair, entrar, atualizar e trocar de filtro.
     if (Treino.ativo) Treino.encerrar();
     tratouNestaFila = false;
+    filaAtravessouSessao = false;   // fila nova: é desta sessão
     puladosNoInicioDaFila = AppState.stats.skipped || 0;
     // Descarrega ação no buffer de undo ANTES de zerar a fila: sem isso, a ação
     // pendente (nunca enviada ao Waze) era re-buscada e o "Desfazer" duplicava o
@@ -12477,6 +12494,8 @@ function aoConhecerConta(perfil) {
     let antes = null;
     try { antes = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { antes = null; }
     if (antes && antes.id && String(antes.id) !== id) esquecerOutraConta(id);
+    // A fila que atravessou a sessão é desta conta — ou já saiu com a outra.
+    filaAtravessouSessao = false;
     safeLS.set(CONTA_KEY, JSON.stringify({ id, s: marcaDaSessao(API.getSession()) }));
     if (saidaEsperandoConta) { saidaEsperandoConta = false; esvaziarFilaDeSaida(); }
 }
@@ -12540,6 +12559,14 @@ function esquecerOutraConta(id) {
     updateStats();
     offlineEsquecer();
     dlogApagar();
+    // A fila na tela, se atravessou a sessão (a renovação silenciosa a manteve),
+    // é da conta anterior — dos filtros e das permissões dela: sai, e a de quem
+    // entrou é buscada. Nos outros caminhos de entrada a fila já nasceu desta
+    // sessão, e refazer seria uma busca a mais no free tier.
+    if (filaAtravessouSessao) {
+        resetQueue();
+        startFetching();
+    }
     showToast(t('toast.outraConta'), 'info');
 }
 

@@ -62,7 +62,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida'];
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let saidaEsperandoConta = false;\n${nomes.map(fatiar).join('\n')}
+  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false;\n${nomes.map(fatiar).join('\n')}
     return { ${nomes.join(', ')}, esperando: () => saidaEsperandoConta, esperar: () => { saidaEsperandoConta = true; } };`)(
     ...chaves.map((k) => deps[k]));
   return { app, guardado, log, AppState, sessao, deps };
@@ -322,7 +322,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let saidaEsperandoConta = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 };
+  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 };
     ${nomes.map(fatiar).join('\n')}
     return { handleUnauthorized };`)(...chaves.map((k) => deps[k]));
   return { app, log, AppState, guardado };
