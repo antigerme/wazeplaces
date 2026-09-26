@@ -4799,6 +4799,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     for (const lang of LINGUAS) {
       const id = `conquistas ${nome}/${tema}/${lang}/L${rank + 1}`;
       const ctx = await browser.newContext({ viewport, locale: lang, serviceWorkers: 'block', colorScheme: tema });
+      // Abrir os Filtros pede a lista de países, que leva 401 com a sessão
+      // falsa — e toda resposta prova rede, o que faz a presença pedir o token
+      // do tempo real (`Presenca.aoProvarRede`, v2026.09.26-01). A sentinela do
+      // 401 da presença pegou os 20 contextos deste bloco na primeira rodada.
+      await presencaViva(ctx);
       const page = await ctx.newPage();
       const errosJS = [];
       page.on('pageerror', (e) => errosJS.push(String(e.message || e).split('\n')[0]));
