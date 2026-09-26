@@ -893,3 +893,25 @@ test('"Conectar outro aparelho" abre com o foco no "Fechar", não no botão que 
   const bloco = HTML.slice(HTML.indexOf('<div id="pairShowModal"'), HTML.indexOf('<div id="pairEnterModal"'));
   assert.equal((/<button id="([^"]+)"/.exec(bloco) || [])[1], 'pairShowCodeBtn');
 });
+
+// ── A25: a Ajuda no celular ─────────────────────────────────────────────────
+test('Ajuda: a extensão só onde ela instala, e o passo do CÓDIGO — o único caminho no celular — com os nomes da tela', () => {
+  const lista = HTML.slice(HTML.indexOf('data-i18n="help.howToUse.title"'), HTML.indexOf('data-i18n-html="help.howToUse.step5"'));
+  const passos = [...lista.matchAll(/<li\b([^>]*)>/g)].map((m) => m[1]);
+  const iExt = passos.findIndex((a) => a.includes('help.howToUse.step1'));
+  const iCodigo = passos.findIndex((a) => a.includes('help.howToUse.codigo'));
+  assert.ok(iCodigo >= 0, 'a Ajuda não cita o código/QR, o único caminho de entrar no celular');
+  assert.equal(iCodigo, iExt + 1, 'o passo do código tem que vir logo depois do da extensão (vira o 1º onde ela some)');
+  assert.match(passos[iExt], /\bclass="ajuda-passo-ext"/, 'o passo da extensão não segue a regra da tela de entrada');
+  assert.match(CSS_SEM, /(^|\n)\.ajuda-passo-ext\s*\{\s*display:\s*none;?\s*\}/, 'o passo da extensão aparece onde ela não instala');
+  assert.match(CSS_SEM, /\.com-extensao \.ajuda-passo-ext\s*\{\s*display:\s*list-item;?\s*\}/,
+    'onde a extensão instala, o passo dela sumiu (ou perdeu o número)');
+  // Um termo por conceito: o passo usa, em cada língua, os MESMOS nomes que a tela mostra.
+  const D = dicionario();
+  for (const lang of Object.keys(D)) {
+    const passo = D[lang]['help.howToUse.codigo'];
+    for (const chave of ['modal.help.title', 'pair.createBtn', 'pair.show.noCamera', 'auth.pairBtn']) {
+      assert.ok(passo.includes(D[lang][chave]), `${lang}: o passo do código não usa o nome da tela "${D[lang][chave]}" (${chave})`);
+    }
+  }
+});

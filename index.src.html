@@ -1634,7 +1634,12 @@
                 <div>
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.howToUse.title">Como usar:</h4>
                     <ol class="list-decimal list-inside space-y-1 text-sm">
-                        <li data-i18n-html="help.howToUse.step1"><strong>Mais fácil:</strong> instale a extensão <b>WazePlaces Rapid Access</b> (Chrome) e faça login direto do WME — sem copiar cookies.</li>
+                        <!-- A extensão só onde ela instala (a mesma regra da tela de
+                             entrada, `com-extensao`); e o código logo depois dela, que no
+                             celular é o ÚNICO caminho que funciona e a Ajuda não citava —
+                             lá ele vira o passo 1 (auditoria de 2026-09-26). -->
+                        <li class="ajuda-passo-ext" data-i18n-html="help.howToUse.step1"><strong>Mais fácil:</strong> instale a extensão <b>WazePlaces Rapid Access</b> (Chrome) e faça login direto do WME — sem copiar cookies.</li>
+                        <li class="ajuda-passo-codigo" data-i18n-html="help.howToUse.codigo"><strong>Pelo código:</strong> num aparelho onde você já entrou, toque em Ajuda › Conectar outro aparelho e aponte a câmera deste para o QR — sem câmera, toque lá em “Sem câmera? Mostrar um código” e digite-o aqui em “Entrar com um código”.</li>
                         <li data-i18n="help.howToUse.step2">Ou, manualmente: faça login no Waze Map Editor no navegador</li>
                         <li data-i18n="help.howToUse.step3">Exporte seus cookies usando uma extensão de navegador</li>
                         <li data-i18n-html="help.howToUse.step4">Faça upload ou cole o conteúdo do <code>cookies.txt</code></li>
