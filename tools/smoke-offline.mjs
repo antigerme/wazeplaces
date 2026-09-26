@@ -1260,6 +1260,23 @@ try {
       return { n: e.length, semCorpoLocal: e.filter((v) => v && v.erro === 'sem corpo local').length };
     })(),
   };
+  // O SEGUNDO relatório na mesma página (auditoria de 2026-09-26): as releituras
+  // `?diag-rede=1` do primeiro ficam na lista de recursos, e o segundo as levava
+  // como código — 23 arquivos em vez de 11, o dobro de requisições.
+  const [dl2] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30000 }),
+    page.evaluate(() => baixarDiagnostico()),
+  ]);
+  const arq2 = join(dirDiag, 'diag2.zip');
+  await dl2.saveAs(arq2);
+  const d2 = lerDiagnostico(arq2).dados;
+  relatorio.segundo = {
+    n: Object.keys(d2.codigo || {}).length, cvr: Object.keys(d2.cacheVsRede || {}).length,
+    comDiagRede: Object.keys(d2.codigo || {}).filter((u) => /diag-rede/.test(u)).length,
+    // CONTROLE: as releituras do primeiro ESTÃO na lista de recursos do segundo —
+    // sem elas, "o segundo não as levou" passaria sem o caso existir.
+    releiturasNosRecursos: (d2.recursos || []).filter((r) => /diag-rede/.test(r.url)).length,
+  };
 } catch (e) {
   relatorio = { erro: String((e && e.message) || e).slice(0, 200) };
 } finally {
@@ -1285,6 +1302,10 @@ diz('o CÓDIGO sai enxuto (tamanho, hash e versão; o corpo só do CSS) e o cach
   && relatorio.codigo.versoes.length === 1 && relatorio.codigo.versoes[0] === relatorio.app
   && relatorio.cvr?.n > 0 && relatorio.cvr.semCorpoLocal === 0,
   JSON.stringify({ app: relatorio.app, codigo: relatorio.codigo, cvr: relatorio.cvr }));
+diz('o 2º relatório na mesma página compara o MESMO código — sem as releituras do 1º',
+  relatorio.segundo?.releiturasNosRecursos > 0 && relatorio.segundo?.comDiagRede === 0
+  && relatorio.segundo?.n === relatorio.codigo?.n && relatorio.segundo?.cvr === relatorio.cvr?.n,
+  JSON.stringify({ primeiro: relatorio.codigo?.n, segundo: relatorio.segundo }));
 diz('no estado são, as duas sentinelas NOVAS ficam caladas no relatório',
   Array.isArray(relatorio.alertas) && !relatorio.alertas.includes('fotoEscondidaComAviso')
   && !relatorio.alertas.includes('tileGuardadoFalhou'), JSON.stringify(relatorio.alertas));

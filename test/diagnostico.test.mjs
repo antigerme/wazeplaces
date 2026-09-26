@@ -1197,3 +1197,25 @@ test('o resumo não conta o "já tratado" como falha (relatório v10)', () => {
   assert.match(corpo, /rotasQueFalharam: \[\.\.\.new Set\(\(API\.chamadas \|\| \[\]\)\.filter\(chamadaFalhou\)/,
     '`rotasQueFalharam` voltou a listar a rota do "já tratado"');
 });
+
+// ── D10 (auditoria de 2026-09-26): o 2º relatório na mesma página ───────────
+// O `cacheVsRede` relê cada arquivo com `?diag-rede=1`, e essas leituras ficam
+// na lista de recursos da página: o relatório SEGUINTE as pegava como código
+// (23 arquivos em vez de 11, o dobro de requisições, o CSS duas vezes).
+test('código: o `codigo` é só o código nosso — sem a leitura do relatório anterior, fonte, imagem ou /api', () => {
+  const diagUrlsDoCodigo = new Function(fatiarFn(APP, 'diagUrlsDoCodigo') + '\nreturn diagUrlsDoCodigo;')();
+  const meu = 'https://x.dev';
+  const daPagina = [meu + '/js/min/app.js', meu + '/css/app.css', meu + '/fonts/inter-latin-wght-normal.woff2',
+    meu + '/icons/icon-192.svg', meu + '/api/perfil', meu + '/manifest.json',
+    meu + '/?diag-rede=1', meu + '/css/app.css?diag-rede=1', meu + '/manifest.json?diag-rede=1',
+    meu + '/js/min/app.js&diag-rede=1', 'https://outro.dev/x.js', meu + '/css/app.css'];
+  assert.deepEqual(diagUrlsDoCodigo(daPagina, meu, meu + '/'),
+    [meu + '/', meu + '/service-worker.js', meu + '/js/min/app.js', meu + '/css/app.css', meu + '/icons/icon-192.svg', meu + '/manifest.json'],
+    'o `codigo` levou o que não é código — a leitura do relatório anterior, fonte ou /api');
+  // CONTROLE: sem nada do relatório anterior, a lista é a mesma de antes.
+  assert.deepEqual(diagUrlsDoCodigo(daPagina.filter((u) => !u.includes('diag-rede')), meu, meu + '/'),
+    diagUrlsDoCodigo(daPagina, meu, meu + '/'));
+  // E o relatório usa esta lista (e não outra montada à parte).
+  assert.match(fatiarFn(APP, 'diagCorpo'), /for \(const u of diagUrlsDoCodigo\(recursos\.map\(\(r\) => r\.url\), meu, location\.href\)\)/,
+    'o `codigo` deixou de sair do `diagUrlsDoCodigo`');
+});

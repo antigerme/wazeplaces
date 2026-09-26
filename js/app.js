@@ -5883,6 +5883,35 @@ function chamadaFalhou(c) {
     return !!c && !c.ok && !chamadaJaTratada(c);
 }
 
+// Os arquivos NOSSOS que entram no `codigo` do relatório — o que responde "qual
+// código este aparelho está rodando": o HTML, o SW, o CSS, os `js/min/*` e o
+// manifest.
+//
+// O `service-worker.js` NÃO aparece em `performance.getEntriesByType` — ele
+// não é recurso DESTA página, é o processo que a serve. Sem pedir por nome,
+// o arquivo traz o conteúdo dos caches e a URL do SW, mas não o script que
+// está no comando: dava pra concluir "está atualizado" pelo `version.js` com
+// um SW de três versões atrás decidindo o que servir.
+//
+// Nem tudo que vem da nossa origem é CÓDIGO, e três coisas entravam aqui sem
+// servir pra nada. **A fonte**: `.woff2` é binário lido com `r.text()`, então
+// chega corrompido (byte inválido vira U+FFFD) — e ainda que chegasse inteiro,
+// fonte não causa defeito que este arquivo investiga. MEDIDO no diagnóstico do
+// owner: 111 KB crus, **42 KB comprimidos, 8% do arquivo inteiro**. **A
+// `/api/*`**: o coletor faz GET e a API só aceita POST, então eram 6 entradas
+// de `405 Método não permitido` — um erro que o app nunca vê. **E a leitura do
+// relatório ANTERIOR** (`?diag-rede=1`, o lado "servidor" do `cacheVsRede`),
+// que fica na lista de recursos da página: o 2º relatório na mesma página
+// comparava 23 arquivos em vez de 11, dobrava as requisições e levava o CSS
+// duas vezes (auditoria de 2026-09-26).
+function diagUrlsDoCodigo(urlsDosRecursos, meu, aqui) {
+    return [...new Set([aqui, meu + '/service-worker.js',
+        ...urlsDosRecursos.filter((u) => typeof u === 'string' && u.startsWith(meu))])]
+        .filter((u) => !/\.(woff2?|ttf|otf|eot|png|jpe?g|gif|webp|avif|ico|mp4|webm)(\?|$)/i.test(u))
+        .filter((u) => !u.startsWith(meu + '/api/'))
+        .filter((u) => !/[?&]diag-rede=/.test(u));
+}
+
 async function diagCorpo() {
     const meu = location.origin;
     // Só recurso da NOSSA origem: de terceiro a resposta é opaca e a leitura
@@ -5933,26 +5962,7 @@ async function diagCorpo() {
                        bytes: r.transferSize,
                        doCache: r.transferSize === 0 && r.decodedBodySize > 0 }));
     const codigo = {};
-    // O `service-worker.js` NÃO aparece em `performance.getEntriesByType` — ele
-    // não é recurso DESTA página, é o processo que a serve. Sem pedir por nome,
-    // o arquivo traz o conteúdo dos caches e a URL do SW, mas não o script que
-    // está no comando: dava pra concluir "está atualizado" pelo `version.js` com
-    // um SW de três versões atrás decidindo o que servir.
-    const nossos = [...new Set([location.href, meu + '/service-worker.js',
-        ...recursos.map((r) => r.url).filter((u) => u.startsWith(meu))])];
-    for (const u of nossos) {
-        // Nem tudo que vem da nossa origem é CÓDIGO, e duas coisas entravam aqui
-        // sem servir pra nada. **A fonte**: `.woff2` é binário lido com
-        // `r.text()`, então chega corrompido (byte inválido vira U+FFFD) — e
-        // ainda que chegasse inteiro, fonte não causa defeito que este arquivo
-        // investiga. MEDIDO no diagnóstico do owner: 111 KB crus, **42 KB
-        // comprimidos, 8% do arquivo inteiro**. **E `/api/*`**: o coletor faz
-        // GET e a API só aceita POST, então eram 6 entradas de `405 Método não
-        // permitido` — um erro que o app nunca vê. O que fica é o que responde
-        // "qual código este aparelho está rodando": o HTML, o SW, o CSS, os
-        // `js/min/*` e o manifest.
-        if (/\.(woff2?|ttf|otf|eot|png|jpe?g|gif|webp|avif|ico|mp4|webm)(\?|$)/i.test(u)) continue;
-        if (u.startsWith(meu + '/api/')) continue;
+    for (const u of diagUrlsDoCodigo(recursos.map((r) => r.url), meu, location.href)) {
         codigo[u] = await texto(u);
     }
 
