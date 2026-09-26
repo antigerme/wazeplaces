@@ -9790,12 +9790,21 @@ function puladosNestaFila() {
 //     (`registrarAcaoConfirmada`, que pergunta de novo com `confirmando`).
 // `confirmando` = quem pergunta é a confirmação de uma ação, que ainda conta
 // como em voo até o executor terminar.
-function filaZeradaConfirmada({ confirmando = false } = {}) {
+// `place` = o pedido cuja confirmação pergunta: ele está "em andamento" até o
+// fim do envio, e não conta contra si mesmo.
+function filaZeradaConfirmada({ confirmando = false, place = null } = {}) {
     if (!tratouNestaFila || AppState.loadError || AppState.currentPlace) return false;
     if ((AppState.queue || []).length > 0) return false;
     if (AppState.pendingAction) return false;
     if (!confirmando && AppState.inFlightActions > 0) return false;
     if (puladosNestaFila() > 0) return false;
+    // Nada do que a pessoa decidiu pode ainda VOLTAR: o pedido cuja decisão o
+    // Waze recusa volta pra fila (`devolverPedidoRecusado`). Outro pedido no ar
+    // (a confirmação deste chegou primeiro) ou esperando na fila de saída pode
+    // ser esse — e a conquista saía antes de ele voltar.
+    const este = chaveDoPedido(place);
+    for (const k of pedidosEmAndamento) if (k !== este) return false;
+    if (carregarFilaDeSaida().some((it) => chaveDoPedido(it) !== este)) return false;
     const noMore = document.getElementById('noMoreCards');
     return !!noMore && !noMore.classList.contains('hidden');
 }
@@ -10426,7 +10435,7 @@ function registrarAcaoConfirmada(actionType, place, gesto) {
         madrugada: hora >= 0 && hora < 5,
         // O último pedido da fila CONFIRMADO: é aqui, e não no painel que
         // aparece com o gesto, que a fila fica limpa de verdade (C13).
-        filaZerada: filaZeradaConfirmada({ confirmando: true }),
+        filaZerada: filaZeradaConfirmada({ confirmando: true, place }),
     });
 }
 
@@ -12534,9 +12543,14 @@ function registrarPousoDeSaida(actionType, place, result, item) {
     // voltar deixaria "Rejeitados" inflado para sempre por algo que nunca saiu.
     const statKey = actionType === 'read' ? 'read' : 'rejected';
     AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
-    AppState.serverTotal++;
     updateStats();
     saveStats();
+    // E o pedido volta a ser card — pela BUSCA (ver `devolverPedidoRecusado`):
+    // o item da fila guarda só os ids, e pode ser de outra fila ou de antes de o
+    // app ser reaberto. O "Restam" sobe quando ele chegar; somar aqui, como era,
+    // o contava duas vezes na reabertura e deixava "Restam 1" sobre o "Tudo
+    // limpo!" na mesma página.
+    devolverPedidoRecusado(place);
     const verb = actionType === 'read' ? t('action.verb.read') : t('action.verb.reject');
     showToast(msgDoServidor(result, t('toast.actionError', { verb })), 'error');
 }
@@ -13671,7 +13685,39 @@ function recuperarCardSemFoto() {
     prova.src = urlDaFoto(u);
 }
 
-function handleActionResult(actionType, place, result, regiao) {
+// Um pedido cuja decisão o Waze RECUSOU de vez (`unknown`, ou a fila de saída
+// cheia) segue PENDENTE lá, e tem que voltar a ser card. Antes o placar voltava
+// e o pedido SUMIA: ele já tinha passado pela fila (`pedidosQueEntraramNaFila`),
+// então nenhuma busca o trazia, e o fim da fila dizia "Tudo limpo!", com a
+// conquista, sobre um pedido pendente (auditoria da fila, 2026-09-26).
+//
+// Na fila do GESTO (`epocaFila` igual à de agora) ele volta como o PRÓXIMO
+// card — nunca no lugar do que está na tela, que seria trocar o card debaixo do
+// dedo —, e o "Restam" sobe junto. Numa fila refeita desde o gesto (↻, filtro,
+// treino) ele nem entrou (estava em andamento), e sem o pedido inteiro na mão
+// (a fila de saída guarda só os ids) não há card pra montar: nos dois casos
+// quem o traz é a BUSCA, que diz o que o Waze tem agora e sob os filtros de
+// agora. Ele sai do "já passou pela fila", a fila volta a dizer "pode haver
+// mais", e o "Restam" sobe quando ele chegar — somar agora o contaria duas vezes.
+function devolverPedidoRecusado(place, epocaFila) {
+    const k = chaveDoPedido(place);
+    if (!k || AppState.queue.some((p) => chaveDoPedido(p) === k)) return;
+    if (epocaFila === AppState.fetchEpoch) {
+        AppState.queue.splice(AppState.currentPlace ? 1 : 0, 0, place);
+        AppState.serverTotal++;
+    } else {
+        pedidosQueEntraramNaFila.delete(k);
+        AppState.hasMore = true;
+    }
+    updatePendingCount();
+    // Com card na tela, o de FUNDO passa a anunciar o que voltou. Sem card (o
+    // "Tudo limpo!" do último gesto), o que voltou é o card — ou a busca o traz.
+    if (AppState.currentPlace) aoMudarAFilaPorBaixo();
+    else if (AppState.queue.length) showCurrentPlace();
+    else if (AppState.hasMore) startFetching();
+}
+
+function handleActionResult(actionType, place, result, regiao, epocaFila) {
     dlog('acao.fim', { tipo: actionType, ok: !!(result && result.success),
                        cat: (result && result.errorCategory) || null,
                        key: (result && result.errorKey) || null });
@@ -13729,9 +13775,11 @@ function handleActionResult(actionType, place, result, regiao) {
         if (naFila === 'repetida' || !naFila) {
             const k = actionType === 'read' ? 'read' : 'rejected';
             AppState.stats[k] = Math.max(0, AppState.stats[k] - 1);
-            if (!naFila) AppState.serverTotal++;
             updateStats();
             saveStats();
+            // Fila de saída cheia: a decisão não coube em lugar nenhum, e o
+            // pedido segue pendente no Waze — volta a ser card.
+            if (!naFila) devolverPedidoRecusado(place, epocaFila);
         }
         handleUnauthorized();
         return;
@@ -13766,9 +13814,10 @@ function handleActionResult(actionType, place, result, regiao) {
     if (jaNaSaida) tirarDaFilaDeSaida(actionType, place);
     const statKey = actionType === 'read' ? 'read' : 'rejected';
     AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
-    AppState.serverTotal++;
     updateStats();
     saveStats();
+    // O pedido segue pendente no Waze: volta a ser card, e o "Restam" com ele.
+    devolverPedidoRecusado(place, epocaFila);
     const verb = actionType === 'read' ? t('action.verb.read') : t('action.verb.reject');
     showToast(msgDoServidor(result, t('toast.actionError', { verb })), 'error');
 }
@@ -14259,12 +14308,13 @@ function handleMarkAsRead() {
     const epoca = epocaDaSessao;
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
+    const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     scheduleAction('read', place, async () => {
         const presenca = presencaWmeDaAcao(place, pais);
         const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao));
         if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
         presencaWmeAoResponder(presenca, result);
-        handleActionResult('read', place, result, regiao);
+        handleActionResult('read', place, result, regiao, epocaFila);
     });
 }
 
@@ -14284,12 +14334,13 @@ function handleReject() {
     const epoca = epocaDaSessao;
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
+    const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     scheduleAction('reject', place, async () => {
         const presenca = presencaWmeDaAcao(place, pais);
         const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao));
         if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
         presencaWmeAoResponder(presenca, result);
-        handleActionResult('reject', place, result, regiao);
+        handleActionResult('reject', place, result, regiao, epocaFila);
     });
 }
 
