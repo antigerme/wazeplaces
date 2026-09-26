@@ -264,3 +264,57 @@ test('diag-api: pergunta na REGIÃO e no PAÍS do relatório, não nos de fábri
   assert.equal(semNada.region, 'row');
   assert.ok(!('countryId' in semNada), 'sem país no relatório, a ferramenta inventou um');
 });
+
+// ── diag-replay: a tela que ele reconstrói é a do aparelho (auditoria de 2026-09-26) ──
+// Três coisas saíam diferentes do que a pessoa via: o tema (só o GUARDADO era
+// lido — quem segue o sistema escuro remontava claro, e o init ainda gravava
+// "light"), o cabeçalho (sem perfil, Filtros e Atualizar) e a sessão (logada
+// SEM token, o que fazia a sentinela `tokenNaoPersiste` acusar um defeito que o
+// aparelho não tinha). A tela inteira é medida no `tools/smoke-diag-tela.mjs`.
+const temaDoRelatorio = (() => {
+  const ini = REPLAY.indexOf('\nfunction temaDoRelatorio(d) {');
+  assert.ok(ini > 0, 'temaDoRelatorio sumiu do diag-replay');
+  let prof = 0, fim = -1;
+  for (let k = REPLAY.indexOf('{', ini); k < REPLAY.length; k++) {
+    if (REPLAY[k] === '{') prof++;
+    else if (REPLAY[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  return new Function(REPLAY.slice(ini, fim) + '\nreturn temaDoRelatorio;')();
+})();
+
+test('diag-replay: o TEMA é o da tela do aparelho — a escolha guardada, senão o que a tela mostrava, senão o sistema', () => {
+  // O caso do relato: nada guardado, sistema escuro, tela escura.
+  const doSistema = temaDoRelatorio({ localStorage: {}, ambiente: { escuro: true },
+    computado: { tema: { htmlClasse: 'dark tem-sessao', guardado: null } } });
+  assert.equal(doSistema.escuro, true, 'quem segue o sistema escuro remontou claro');
+  assert.equal(doSistema.guardado, null, 'o replay inventou uma escolha que a pessoa não fez (e o app pararia de seguir o sistema)');
+  // Relatório sem a camada computada (anterior ao v3): o sistema do aparelho decide.
+  assert.equal(temaDoRelatorio({ localStorage: {}, ambiente: { escuro: true } }).escuro, true);
+  // A escolha GUARDADA vence o sistema (quem escolheu claro num sistema escuro).
+  const escolhido = temaDoRelatorio({ localStorage: { waze_places_theme: 'light' }, ambiente: { escuro: true },
+    computado: { tema: { htmlClasse: '' } } });
+  assert.deepEqual([escolhido.escuro, escolhido.guardado, escolhido.sistema], [false, 'light', true]);
+  // `dark` é classe, não substring: `tema-dark-algo` não é o tema escuro.
+  assert.equal(temaDoRelatorio({ localStorage: {}, computado: { tema: { htmlClasse: 'nao-dark-x' } } }).escuro, false);
+  // CONTROLE: sistema claro e nada guardado → claro.
+  assert.equal(temaDoRelatorio({ localStorage: {}, ambiente: { escuro: false }, computado: { tema: { htmlClasse: 'tem-sessao' } } }).escuro, false);
+});
+
+test('diag-replay: grava tema SÓ se a pessoa escolheu, monta o cabeçalho e dá à sessão um token fictício — sem rede', () => {
+  // Comentário tirado por LINHA, e não com o `semComentarios` de cima: o glob
+  // `'**/api/**'` tem um `/*` que o removedor de bloco lê como comentário e
+  // come o código até o próximo `*/` (gotcha #67.1).
+  const codigo = REPLAY.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(codigo, /if \(temaGuardado\) localStorage\.setItem\('waze_places_theme', temaGuardado\);/,
+    'o replay voltou a gravar um tema que a pessoa não escolheu');
+  assert.doesNotMatch(codigo, /escuro \? 'dark' : 'light'\]\);/, 'o init voltou a receber "light" quando nada estava guardado');
+  assert.match(codigo, /showMainScreen\(\);\s*\n\s*renderProfileHeader\(\);/, 'o replay deixou de montar o cabeçalho (perfil, Filtros, Atualizar)');
+  assert.match(codigo, /localStorage\.setItem\('waze_session_token', '[^']+'\)/, 'sem token, a sentinela `tokenNaoPersiste` acusa um defeito do replay');
+  // O token é gravado DEPOIS da carga: no init, o app tentaria entrar com ele.
+  const iInit = codigo.indexOf('addInitScript');
+  const iFim = codigo.indexOf('});', iInit);
+  assert.ok(!codigo.slice(iInit, iFim).includes('waze_session_token'), 'o token fictício entrou ANTES da carga');
+  assert.match(codigo, /ctx\.route\('\*\*\/api\/\*\*', \(r\) => r\.abort\(/, 'com sessão fictícia, a API tem que estar cortada por construção');
+  // E a espera é pelo lado do Node (o poller do `waitForFunction` avalia string e a CSP o barra).
+  assert.doesNotMatch(codigo, /\.waitForFunction\(/, 'o replay voltou a usar waitForFunction');
+});
