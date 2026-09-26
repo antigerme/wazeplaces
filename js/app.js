@@ -665,6 +665,10 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // de quem é a sessão nova (ver `filaAtravessouSessao`).
             if (manterFila) filaAtravessouSessao = true;
             else resetQueue();
+            // A conta, quando a ponte a repassa (a versão da extensão que
+            // repassa o `conta` do `testar-cookies`): com OUTRA conta, a fila
+            // que atravessou a sessão sai JÁ, sem esperar o perfil (K2/K8).
+            conhecerContaDoLogin(d.conta);
             AppState._profilePromise = loadProfileAndAuxData();
             startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
@@ -1391,7 +1395,9 @@ async function abrirPareamento() {
     limparQrPareamento();
     document.getElementById('pairCopyLinkBtn').disabled = true;
 
-    const r = await API.criarPareamento();
+    // A conta vai junto: o aparelho que resgatar sabe de quem é a sessão NA
+    // HORA (ver `resgatarPareamento`, K8).
+    const r = await API.criarPareamento({ conta: contaAgora() });
     if (!r.success) {
         closeModal('pairShowModal');
         showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
@@ -1471,7 +1477,7 @@ async function revelarCodigoPareamento() {
     const codeEl = document.getElementById('pairCode');
     const expEl = document.getElementById('pairCodeExpiry');
     btn.disabled = true;
-    const r = await API.criarPareamento({ comCodigo: true });
+    const r = await API.criarPareamento({ comCodigo: true, conta: contaAgora() });
     if (!r.success) {
         btn.disabled = false;
         showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
@@ -1533,6 +1539,7 @@ async function resgatarPareamento(code, { silencioso = false } = {}) {
     showToast(t('toast.pairSuccess'), 'success');
     showMainScreen();
     resetQueue();   // fila NOVA, como no login por cookies
+    conhecerContaDoLogin(r.conta);   // a conta, na hora (ver `authenticateWithCookies`)
     AppState._profilePromise = loadProfileAndAuxData();
     startFetching();
     esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
@@ -3604,6 +3611,13 @@ async function authenticateWithCookies(cookies) {
             aoEntrarNestaPagina();
             showMainScreen();
             resetQueue();
+            // DE QUEM é a sessão, NA HORA — o portão já leu o perfil (ver o
+            // `testar-cookies`). Antes, a conta só se sabia com o `/perfil`: o
+            // que a pessoa fazia antes dele chegar (placar, Histórico, autores)
+            // era apagado junto com os dados da conta anterior quando a troca
+            // era detectada (auditoria da costura, 2026-09-26, K8). DEPOIS do
+            // `resetQueue`: a fila já é desta sessão, e a troca não a refaz.
+            conhecerContaDoLogin(result.conta);
             AppState._profilePromise = loadProfileAndAuxData();
             startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
@@ -12499,6 +12513,14 @@ function contaConfirmada() {
         const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null');
         return !!(c && String(c.id) === String(vivo) && c.s === marcaDaSessao(API.getSession()));
     } catch (e) { return false; }
+}
+
+// O login disse de quem é a sessão (o `testar-cookies`, o resgate do
+// pareamento, a ponte da extensão). Chega de fora — a ponte é `postMessage` —,
+// então só o formato do servidor passa; o perfil que chegar confere de novo.
+function conhecerContaDoLogin(conta) {
+    if (conta === undefined || conta === null || !/^\d{1,19}$/.test(String(conta))) return;
+    aoConhecerConta({ id: String(conta) });
 }
 
 // O perfil chegou: agora se sabe de quem é a sessão.

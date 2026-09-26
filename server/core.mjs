@@ -955,12 +955,17 @@ export function makeSessions({ store, keyBytes }) {
     // sessão válida — o carimbo do pareamento é a EXPIRAÇÃO (futuro), o da
     // sessão é o ÚLTIMO USO (sempre passado), então o mesmo teste dava
     // "vencido" pra tudo. Medido: 1 arquivo antes, 0 depois do boot.
-    async createPairing(cookiesContent, { comCodigo = false } = {}) {
+    // `conta`: de quem é a sessão copiada (o aparelho que gera o código sabe), pra
+    // o que resgata saber na hora do login (K8). Vai CIFRADA com a mesma chave
+    // dos cookies, num terceiro campo: `exp|cookies|conta`.
+    async createPairing(cookiesContent, { comCodigo = false, conta = null } = {}) {
       const segredo = randomPairCode(comCodigo ? PAIR_CODE_LEN : PAIR_SECRET_LEN);
       const hash = 'pair_' + await sha256hex('pair:' + segredo);
       const exp = Math.floor(Date.now() / 1000) + PAIR_TTL;
-      const blob = await encryptCookies(cookiesContent, await derivarChave(keyBytes, segredo));
-      await store.put(hash, exp + '|' + blob, PAIR_TTL);
+      const chave = await derivarChave(keyBytes, segredo);
+      const blob = await encryptCookies(cookiesContent, chave);
+      const contaBlob = conta ? '|' + await encryptCookies(String(conta), chave) : '';
+      await store.put(hash, exp + '|' + blob + contaBlob, PAIR_TTL);
       return { code: segredo, curto: comCodigo, expiresIn: PAIR_TTL };
     },
 
@@ -1002,11 +1007,17 @@ export function makeSessions({ store, keyBytes }) {
       const raw = await store.get(hash);
       if (!raw) return null;
       await store.delete(hash);
-      const sep = raw.indexOf('|');
-      if (sep < 0) return null;
-      const exp = parseInt(raw.slice(0, sep), 10);
+      // `exp|cookies` ou `exp|cookies|conta` (o terceiro, desde K8). O blob
+      // cifrado é base64 com `::`, sem `|`.
+      const partes = String(raw).split('|');
+      if (partes.length < 2) return null;
+      const exp = parseInt(partes[0], 10);
       if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
-      return decryptCookies(raw.slice(sep + 1), await derivarChave(keyBytes, limpo));
+      const chave = await derivarChave(keyBytes, limpo);
+      const cookies = await decryptCookies(partes[1], chave);
+      if (!cookies) return null;
+      const conta = partes[2] ? await decryptCookies(partes[2], chave) : null;
+      return { cookies, conta: conta && /^\d{1,19}$/.test(conta) ? conta : null };
     },
   };
 }
@@ -1456,7 +1467,11 @@ async function handleParear(data, { sessions }) {
 
   if (action === 'create') {
     const cookies = await resolveCookies(data, sessions); // 401 se não autenticado
-    const { code, curto, expiresIn } = await sessions.createPairing(cookies, { comCodigo: !!(data && data.comCodigo) });
+    // A conta que o aparelho logado diz ser a dele (K8). Não é prova de nada: só
+    // vale pros dados locais do aparelho que resgatar, e o perfil que chegar lá
+    // confere de novo. Fora do formato, não vai.
+    const conta = data && /^\d{1,19}$/.test(String(data.conta ?? '')) ? String(data.conta) : null;
+    const { code, curto, expiresIn } = await sessions.createPairing(cookies, { comCodigo: !!(data && data.comCodigo), conta });
     return { status: 200, body: { success: true, code, curto, expiresIn } };
   }
 
@@ -1470,12 +1485,12 @@ async function handleParear(data, { sessions }) {
   }
 
   if (action === 'claim') {
-    const cookies = await sessions.claimPairing(data && data.code);
+    const resgate = await sessions.claimPairing(data && data.code);
     // Mensagem ÚNICA pros casos "não existe", "já usado" e "expirou": diferenciar
     // transformaria o endpoint num oráculo pra quem estivesse chutando códigos.
-    if (!cookies) apiError('Código inválido ou expirado. Gere um novo no aparelho logado.', 400, 'srv.err.pairCodeInvalid');
-    const token = await sessions.createSession(cookies);
-    return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL } };
+    if (!resgate) apiError('Código inválido ou expirado. Gere um novo no aparelho logado.', 400, 'srv.err.pairCodeInvalid');
+    const token = await sessions.createSession(resgate.cookies);
+    return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL, conta: resgate.conta } };
   }
 
   apiError('Ação inválida', 400, 'srv.err.badAction');
@@ -1560,8 +1575,19 @@ async function handleTestarCookies(data, { sessions }) {
       expiresIn: SESSION_TTL,
       // Prazo do WAZE (fixo), não o do app (deslizante). Ver `prazoDaSessaoWaze`.
       sessaoExpiraEm: prazoDaSessaoWaze(result.setCookie),
+      // DE QUEM é a sessão — o portão acabou de ler o perfil. O app sabe a conta
+      // NA HORA do login, sem esperar o `/perfil`: o que a pessoa faz antes de
+      // ele chegar é dela, e não some junto com os dados da conta anterior
+      // quando a troca é detectada (auditoria da costura, 2026-09-26, K8).
+      conta: contaDoPerfil(profile),
     },
   };
+}
+
+// O id da conta como o app o guarda (texto de dígitos), ou `null`.
+function contaDoPerfil(profile) {
+  const id = profile && profile.id;
+  return id !== undefined && id !== null && /^\d{1,19}$/.test(String(id)) ? String(id) : null;
 }
 
 // Um pedido DUPLICATE diz DE QUEM o local é duplicado: o `flagEntityID` carrega

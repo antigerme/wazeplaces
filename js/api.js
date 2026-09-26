@@ -592,10 +592,11 @@ const API = {
     // `comCodigo` pede o registro CURTO (6 chars, digitável) em vez do longo do
     // QR. São registros diferentes no servidor, com forças diferentes — ver
     // `derivarChave` no core. O padrão é o forte, de propósito.
-    async criarPareamento({ comCodigo = false } = {}) {
+    // `conta`: de quem é a sessão, pro aparelho que resgatar saber na hora.
+    async criarPareamento({ comCodigo = false, conta = null } = {}) {
         const sessionToken = this.getSession();
         if (!sessionToken) return semSessao();
-        return this._post('parear', { action: 'create', sessionToken, comCodigo });
+        return this._post('parear', { action: 'create', sessionToken, comCodigo, ...(conta ? { conta } : {}) });
     },
 
     // O "Sair" cancela os códigos de pareamento que ESTE aparelho emitiu (ver o

@@ -685,3 +685,113 @@ test('K6: a fila é gravada com a conta e a sessão de quem a buscou', async () 
   assert.equal(puts[0].conta, '111', 'a fila guardada não diz de que conta é');
   assert.equal(puts[0].s, marcaDe('tok-A'), 'a fila guardada não diz de que sessão é');
 });
+
+// ═══ K8 · a conta é conhecida NA HORA do login ═══════════════════════════════
+
+const NETSCAPE = (d, n, v) => `${d}\tTRUE\t/\tTRUE\t9999999999\t${n}\t${v}`;
+const COOKIES = [NETSCAPE('.waze.com', '_csrf_token', 'csrf-abc'), NETSCAPE('.waze.com', '_web_session', 'sess-xyz')].join('\n');
+
+test('K8 (servidor): o `testar-cookies` devolve de QUEM é a sessão — o portão já leu o perfil', async () => {
+  const { dispatch, makeSessions } = await import('../server/core.mjs');
+  const { storeEmMemoria } = await import('./_sessao.mjs');
+  const sessions = makeSessions({ store: storeEmMemoria(), keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: 12444348, userName: 'contaA', rank: 5, isAreaManager: true }),
+    { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const r = await dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, { sessions });
+    assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 200));
+    assert.equal(r.body.conta, '12444348', 'DEFEITO: o login não diz de quem é a sessão — o app só saberia com o /perfil');
+  } finally { globalThis.fetch = original; }
+});
+
+test('K8 (servidor): o pareamento leva a conta, CIFRADA, e o resgate a devolve', async () => {
+  const { dispatch } = await import('../server/core.mjs');
+  const { sessaoDeTeste } = await import('./_sessao.mjs');
+  const s = await sessaoDeTeste(COOKIES);
+  const criado = await dispatch('parear', { action: 'create', ...s.dados, conta: '987654321012' }, s.ctx);
+  assert.equal(criado.status, 200);
+  const registro = [...s.store.mem].find(([k]) => k.startsWith('pair_'));
+  assert.ok(registro, 'CONTROLE: o registro do pareamento não foi gravado');
+  assert.ok(!registro[1].includes('987654321012'), 'a conta foi gravada em claro no store, ao lado do dado cifrado');
+  const resgate = await dispatch('parear', { action: 'claim', code: criado.body.code }, s.ctx);
+  assert.equal(resgate.body.success, true);
+  assert.equal(resgate.body.conta, '987654321012', 'DEFEITO: o aparelho que resgata não sabe de quem é a sessão');
+  // Sem conta (ou fora do formato), o resgate diz que não sabe — nunca inventa.
+  // E o que não é conta nem chega a ser gravado: o corpo vem do cliente, e o
+  // store não guarda texto arbitrário dele.
+  for (const conta of [undefined, 'x; drop', '12345678901234567890123']) {
+    const c = await dispatch('parear', { action: 'create', ...s.dados, ...(conta !== undefined ? { conta } : {}) }, s.ctx);
+    const reg = [...s.store.mem].find(([k]) => k.startsWith('pair_'));
+    assert.equal(reg[1].split('|').length, 2, `conta ${JSON.stringify(conta)} foi gravada no registro`);
+    const r = await dispatch('parear', { action: 'claim', code: c.body.code }, s.ctx);
+    assert.equal(r.body.success, true);
+    assert.equal(r.body.conta, null, `conta ${JSON.stringify(conta)} passou`);
+  }
+});
+
+function montarLoginDeB({ contaNoLogin }) {
+  const { safeLS, guardado } = lsFalso();
+  safeLS.set('waze_places_conta', JSON.stringify({ id: '111', s: marcaDe('tok-A') }));   // os dados de A
+  const log = [];
+  let token = null;
+  const AppState = { profile: null, authenticated: false, stats: { read: 7, rejected: 9, skipped: 0 }, history: null, queue: [] };
+  const deps = {
+    AppState, safeLS, epocaDaSessao: 0, authInFlight: false, filaAtravessouSessao: false, saidaEsperandoConta: false,
+    CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'), HISTORY_KEY: constante('HISTORY_KEY'),
+    CONQUISTAS_KEY: constante('CONQUISTAS_KEY'), t: (k) => k, window: {},
+    API: { getSession: () => token, testCookies: async () => { token = 'tok-B'; return { success: true, sessionToken: 'tok-B', ...(contaNoLogin ? { conta: '222' } : {}) }; } },
+    showMainScreen: () => { AppState.authenticated = true; },
+    esquecerAutores: () => log.push('autores-apagados'),
+    // O Histórico de verdade é um balde por dia; aqui basta o total.
+    recordHistory: (tipo, n) => { AppState.history = AppState.history || { _total: { rejected: 0 } }; AppState.history._total.rejected += n; },
+    registrarRejeicaoDeAutor: () => log.push('autor-de-B'),
+  };
+  const h = montar(['marcaDaSessao', 'contaAgora', 'conhecerContaDoLogin', 'aoConhecerConta', 'esquecerOutraConta',
+    'carimbarContaNaSaida', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'authenticateWithCookies'], deps);
+  return { h, AppState, log, guardado };
+}
+
+test('K8: B entra por cookies no aparelho de A — o que B faz ANTES do perfil chegar NÃO some com os dados de A', async () => {
+  const m = montarLoginDeB({ contaNoLogin: true });
+  await m.h.authenticateWithCookies(COOKIES);
+  assert.deepEqual(m.AppState.stats, { read: 0, rejected: 0, skipped: 0 }, 'o placar de A ficou pra B');
+  // B rejeita 2 antes de o perfil chegar (o gesto e a confirmação do Waze).
+  m.AppState.stats.rejected += 2;
+  m.AppState.history = { _total: { rejected: 2 } };
+  // O perfil de B chega.
+  m.h.aoConhecerConta({ id: 222 });
+  assert.equal(m.AppState.stats.rejected, 2, 'DEFEITO: as rejeições de B (que pousaram no Waze) foram apagadas como se fossem de A');
+  assert.equal(m.AppState.history && m.AppState.history._total.rejected, 2, 'o Histórico de B sumiu');
+  assert.equal(JSON.parse(m.guardado.get('waze_places_conta')).id, '222');
+});
+
+test('K8: CONTROLE — sem a conta no login (servidor antigo), é o perfil que revela a troca, como antes', async () => {
+  const m = montarLoginDeB({ contaNoLogin: false });
+  await m.h.authenticateWithCookies(COOKIES);
+  assert.equal(m.AppState.stats.rejected, 9, 'sem a conta, nada é apagado no login (não se sabe de quem é)');
+  m.h.aoConhecerConta({ id: 222 });
+  assert.equal(m.AppState.stats.rejected, 0, 'o perfil revelou outra conta e o placar de A ficou');
+});
+
+test('K8: o resgate do pareamento e a ponte da extensão também dizem a conta — e a ponte só no formato do servidor', async () => {
+  const conhecidas = [];
+  const conhecer = montar(['conhecerContaDoLogin'], { aoConhecerConta: (p) => conhecidas.push(p.id) });
+  for (const c of ['222', 222, null, undefined, 'x', '1'.repeat(20), { id: 1 }]) conhecer.conhecerContaDoLogin(c);
+  assert.deepEqual(conhecidas, ['222', '222'], 'passou conta fora do formato (a ponte é postMessage)');
+  // O resgate chama com a conta que o servidor devolveu.
+  const r = montar(['resgatarPareamento'], {
+    API: { resgatarPareamento: async () => ({ success: true, sessionToken: 'tok-B', conta: '222' }) },
+    document: { getElementById: () => null }, conhecerContaDoLogin: (c) => conhecidas.push('resgate:' + c),
+  });
+  assert.equal(await r.resgatarPareamento('ABC234'), true);
+  assert.ok(conhecidas.includes('resgate:222'), 'o resgate do pareamento ignora a conta devolvida');
+  // A ponte repassa a conta junto do token.
+  const q = montarExtensao({ conhecerContaDoLogin: (c) => conhecidas.push('ponte:' + c) });
+  const p = q.h.entrarPelaExtensao({ silencioso: true, manterFila: true });
+  q.window.responder({ source: 'wazeplaces-ext', action: 'sessao', token: 'tokB', conta: '222' });
+  assert.equal(await p, true);
+  assert.ok(conhecidas.includes('ponte:222'), 'a conta que a ponte repassa foi ignorada');
+  assert.match(ler('extensao-chrome/ponte.js'), /action: 'sessao', token: r\.sessionToken, conta: r\.conta/,
+    'a ponte da extensão não repassa a conta do `testar-cookies`');
+});

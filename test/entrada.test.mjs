@@ -330,6 +330,7 @@ function montarExtensao(inicio = {}) {
     extPerguntando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
     closeModal() {}, showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {},
     esvaziarFilaDeSaida() {}, mostrarEntrandoPelaExtensao() {}, setTimeout: () => 1, clearTimeout() {},
+    conhecerContaDoLogin() {},   // a conta que a ponte repassa (test/costura-sessao, K8)
     showAccessDenied: (r) => negados.push(r),
   };
   // Os dublês pedidos por quem chama ganham dos padrões (o `document` e o
