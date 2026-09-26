@@ -242,3 +242,18 @@ test('P2 o app liga a prova de rede à presença', async () => {
   const corpo = APP.slice(ini, APP.indexOf('\n};', ini)).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   assert.match(corpo, /window\.Presenca\?\.aoProvarRede\?\.\(\);/, 'a prova de rede não chega à presença: o token que falhou não é pedido de novo');
 });
+
+// ── P13: o diário do token usa o relógio daqui ──────────────────────────────
+
+test('P13 diário: o prazo do token vai no relógio do APARELHO — o mesmo que o resumo mostra', async () => {
+  // Aparelho um dia e uma hora ADIANTADO; o servidor manda a hora dele e um
+  // token de 24 h. Cru contra o relógio daqui, o diário dizia "vence em -1 h".
+  const SERVIDOR = 1790200000000;
+  const c = novoCliente({ agora: SERVIDOR + 864e5 + 36e5, api: { presencaApp: async () => ({ success: true, online: [], conversas: [], agora: SERVIDOR,
+    chat: { token: 't', chave: 'k', base: GOOGLE, expiraEm: SERVIDOR + 864e5 } }) } });
+  c.doc.visibilityState = 'hidden';   // não abre o fluxo neste teste
+  await c.P.presencaAtualizar({ token: true });
+  const linha = c.chamadas.dfato.find(([k]) => k === 'presenca.token')[1];
+  assert.deepEqual(linha, { veio: true, expiraEmH: 24 }, 'o diário leu o prazo no relógio do servidor');
+  assert.equal(linha.expiraEmH, c.P.presencaDiag().token.expiraEmH, 'o diário e o resumo discordam do mesmo token');
+});

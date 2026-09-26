@@ -362,8 +362,14 @@ async function presencaAtualizar({ token = false } = {}) {
                 presencaFluxoGarantir();
             }
             if (querToken) {
-                presencaAnotar('presenca.token', { veio: !!(r.chat && r.chat.token),
-                    expiraEmH: r.chat && Number.isFinite(r.chat.expiraEm) ? Math.round((r.chat.expiraEm - Date.now()) / 36e5) : null });
+                // O prazo JÁ levado pro relógio daqui (o `Presenca.chat` de
+                // cima): o cru é do relógio do SERVIDOR, e contra o do aparelho
+                // o diário dizia "vence em -1 h" com o token recém-chegado num
+                // aparelho um dia adiantado — o resumo, que usa o convertido,
+                // dizia 24 (auditoria de 2026-09-26).
+                const veio = !!(r.chat && r.chat.token);
+                presencaAnotar('presenca.token', { veio,
+                    expiraEmH: veio && Number.isFinite(Presenca.chat.expiraEm) ? Math.round((Presenca.chat.expiraEm - Date.now()) / 36e5) : null });
             }
         } catch (e) {
             /* presença é acessório: nunca tira ninguém da fila */
