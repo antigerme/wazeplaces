@@ -620,3 +620,68 @@ test('K5: CONTROLE — sem perfil e com o interruptor LIGADO de novo, nada fica 
   await tique();
   assert.deepEqual(m.enviados, [], 'desligou quem religou');
 });
+
+// ═══ K6 · a fila guardada do offline tem DONO ═══════════════════════════════
+
+const marcaDe = new Function(fatiarDe(APP_SEM, 'marcaDaSessao') + '\nreturn marcaDaSessao;')();
+
+function montarReabertura({ token, contaGuardada = null, perfil = null, fila }) {
+  const { safeLS } = lsFalso();
+  if (contaGuardada) safeLS.set('waze_places_conta', JSON.stringify(contaGuardada));
+  const AppState = { profile: perfil, authenticated: true, queue: [], hasMore: false, loadError: true, serverTotal: 0,
+    preferences: { offlineDisponivel: true } };
+  const deps = {
+    AppState, safeLS, navigator: { onLine: false }, CONTA_KEY: constante('CONTA_KEY'),
+    API: { getSession: () => token, getRegion: () => 'row', getCountry: () => 30 },
+    offlineLigado: () => true, offlineLerFila: async () => fila, offlineLerJanela: async () => null,
+    lugarAgora: () => ({ regiao: 'row', pais: '30' }), offlineJanelaServida: null, filaDeOnde: null,
+    semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
+    pedidosQueEntraramNaFila: new Set(),
+  };
+  return montar(['marcaDaSessao', 'contaAgora', 'mesmoLugar', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'], deps);
+}
+const FILA = (dono) => ({ t: Date.now(), desde: Date.now(), regiao: 'row', pais: '30', ...dono,
+  places: [{ venueID: 'vA1', updateRequestID: 'uA1' }] });
+
+test('K6: reaberta sem rede numa sessão de B (perfil a caminho), a fila guardada de A NÃO entra', async () => {
+  const h = montarReabertura({ token: 'tok-B', contaGuardada: { id: '111', s: marcaDe('tok-A') },
+    fila: FILA({ conta: '111', s: marcaDe('tok-A') }) });
+  assert.equal(await h.offlineTentarAbrirSemRede(), false, 'DEFEITO: a fila da conta anterior abriu na sessão de B');
+  assert.deepEqual(h.deps.AppState.queue, []);
+  assert.ok(h.chamou.includes('dfato'));
+});
+
+test('K6: CONTROLE — a MESMA sessão reaberta sem rede abre a fila dela (com ou sem a conta gravada)', async () => {
+  const comConta = montarReabertura({ token: 'tok-A', contaGuardada: { id: '111', s: marcaDe('tok-A') },
+    fila: FILA({ conta: '111', s: marcaDe('tok-A') }) });
+  assert.equal(await comConta.offlineTentarAbrirSemRede(), true, 'a fila da própria conta não abriu');
+  // Gravada antes de o perfil chegar: sem conta, mas da mesma sessão.
+  const semConta = montarReabertura({ token: 'tok-A', fila: FILA({ conta: null, s: marcaDe('tok-A') }) });
+  assert.equal(await semConta.offlineTentarAbrirSemRede(), true, 'a fila desta sessão, gravada sem conta, não abriu');
+  // A mesma conta numa sessão NOVA, já conhecida: abre.
+  const renovada = montarReabertura({ token: 'tok-A2', contaGuardada: { id: '111', s: marcaDe('tok-A2') },
+    fila: FILA({ conta: '111', s: marcaDe('tok-A') }) });
+  assert.equal(await renovada.offlineTentarAbrirSemRede(), true, 'a fila da mesma conta, em outra sessão, não abriu');
+});
+
+test('K6: fila guardada sem dono (versão anterior) não entra — não há como saber de quem é', async () => {
+  const h = montarReabertura({ token: 'tok-A', contaGuardada: { id: '111', s: marcaDe('tok-A') }, fila: FILA({}) });
+  assert.equal(await h.offlineTentarAbrirSemRede(), false);
+});
+
+test('K6: a fila é gravada com a conta e a sessão de quem a buscou', async () => {
+  const puts = [];
+  const deps = {
+    AppState: { queue: [{ venueID: 'v1' }], filters: {}, profile: { id: 111 } }, Treino: { ativo: false },
+    offlineLigado: () => true, OFFLINE_STORE: 'fila', filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
+    safeLS: { get: () => null }, CONTA_KEY: constante('CONTA_KEY'), API: { getSession: () => 'tok-A' },
+    offlineDB: async () => ({ close() {}, transaction: () => {
+      const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); } }) };
+      return tx;
+    } }),
+  };
+  const h = montar(['marcaDaSessao', 'contaAgora', 'offlineGravarFila'], deps);
+  assert.equal(await h.offlineGravarFila(), true);
+  assert.equal(puts[0].conta, '111', 'a fila guardada não diz de que conta é');
+  assert.equal(puts[0].s, marcaDe('tok-A'), 'a fila guardada não diz de que sessão é');
+});

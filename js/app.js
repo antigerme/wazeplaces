@@ -13400,6 +13400,10 @@ async function offlineGravarFila(desde) {
     const filtros = JSON.parse(JSON.stringify(AppState.filters || {}));
     // O LUGAR da fila (ver `filaDeOnde`), lido AGORA pelo mesmo motivo.
     const lugar = filaDeOnde || lugarAgora();
+    // E o DONO: a conta, e a sessão (gravada antes de o perfil chegar, a conta
+    // ainda é desconhecida). Ver `filaGuardadaDestaConta`.
+    const conta = contaAgora();
+    const sessao = marcaDaSessao(API.getSession());
     try {
         const db = await offlineDB();
         await new Promise((ok, erro) => {
@@ -13410,6 +13414,8 @@ async function offlineGravarFila(desde) {
                 filtros,
                 regiao: lugar.regiao,
                 pais: lugar.pais,
+                conta,
+                s: sessao,
                 places: fila,
             }, 'fila');
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
@@ -13904,6 +13910,17 @@ function offlineMarcarGesto() { offlineUltimoGesto = Date.now(); }
 // card (`marcarCardSemFoto`, pelo `onerror`), em vez de sair do baralho por
 // suposição. (Este comentário dizia que os de foto "saíam do baralho"; o
 // código nunca fez isso.)
+// A fila guardada é da conta de AGORA? Da MESMA sessão, é — o token é o mesmo,
+// então a conta também (inclusive a gravada antes de o perfil chegar, sem
+// conta). De outra sessão, só se a conta que a gravou for a conhecida agora.
+// Como a fila de saída (O3).
+function filaGuardadaDestaConta(g) {
+    if (!g) return false;
+    if (g.s && g.s === marcaDaSessao(API.getSession())) return true;
+    const agora = contaAgora();
+    return !!(g.conta && agora && String(g.conta) === agora);
+}
+
 async function offlineTentarAbrirSemRede() {
     if (!offlineLigado() || navigator.onLine !== false) return false;
     const guardada = await offlineLerFila();
@@ -13916,6 +13933,16 @@ async function offlineTentarAbrirSemRede() {
     if (!mesmoLugar(guardada, lugarAgora())) {
         dfato('offline.outroLugar', { regiao: guardada.regiao || null });
         offlineEsquecerFilaDeOutroLugar();
+        return false;
+    }
+    // E a fila de OUTRA conta também não: a sessão de A caiu, B entrou, o
+    // perfil e a busca de B não chegaram (sinal ruim), e a reabertura sem rede
+    // mostrava a fila de A a B — com as decisões de B saindo sobre ela
+    // (auditoria da costura, 2026-09-26, K6). Sem como saber de quem é (fila de
+    // versão anterior, ou a conta de agora desconhecida), também não entra: a
+    // próxima busca com rede a regrava.
+    if (!filaGuardadaDestaConta(guardada)) {
+        dfato('offline.outraConta', { temConta: !!guardada.conta });
         return false;
     }
     // A janela da última varredura COMPLETA, antes de qualquer card nascer: sem

@@ -128,6 +128,8 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFi
     offlinePodarPousos: () => {}, dfato: () => {},
     // O LUGAR da fila (ver `filaDeOnde`): a busca que a trouxe, ou o de agora.
     filaDeOnde: lugarDaFila, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
+    // E o DONO (test/costura-sessao, K6).
+    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -196,6 +198,7 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pen
     } }),
     offlinePodarPousos: () => {}, dfato: () => {},
     filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
+    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -237,14 +240,16 @@ function reabrir({ guardada, agora }) {
     semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
     pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
     updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => log.push('card'),
+    // O DONO da fila guardada (test/costura-sessao, K6): a mesma conta.
+    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let offlineJanelaServida = null, filaDeOnde = null;
-    ${fatiar('mesmoLugar')}\n${fatiar('offlineTentarAbrirSemRede')}
+    ${fatiar('mesmoLugar')}\n${fatiar('filaGuardadaDestaConta')}\n${fatiar('offlineTentarAbrirSemRede')}
     return { abrir: offlineTentarAbrirSemRede, onde: () => filaDeOnde };`)(...chaves.map((k) => deps[k]));
   return { app, AppState, log };
 }
-const GUARDADA = (lugar) => ({ t: Date.now(), desde: Date.now(), ...lugar, places: [{ venueID: 'v1', updateRequestID: 'u1' }] });
+const GUARDADA = (lugar) => ({ t: Date.now(), desde: Date.now(), conta: '111', ...lugar, places: [{ venueID: 'v1', updateRequestID: 'u1' }] });
 
 test('O4: a reabertura sem rede RECUSA a fila de OUTRO lugar (e a esquece) — e abre a do mesmo', async () => {
   const outra = reabrir({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'na', pais: '235' } });
