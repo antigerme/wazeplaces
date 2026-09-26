@@ -107,7 +107,13 @@ agentes, cada um num worktree próprio a partir de `lote6-trabalho`
 reprova sem o conserto e sabotagem; depois eu junto (cherry-pick), regenero os
 gerados, rodo tudo e subo. Se a sessão cair antes: os branches locais
 `fix-serv`, `fix-hist`, `fix-pres`, `fix-auth`, `fix-off`, `fix-card` somem com
-o contêiner — refaça a partir desta lista.
+o contêiner. A cópia de segurança do que já estava commitado em 2026-09-26 06:23
+(36 commits) está no artefato (§7), em `lote6-base.patch` (aplique primeiro,
+sobre o branch) e `lote6-consertos.patch` (um bloco `### fix-<área>` por
+agente; `git am` bloco a bloco, depois `npm run js && npm run css && npm run
+html`). O que faltava a partir daí, refaça a partir desta lista. O limite da
+assinatura parou os seis no meio duas vezes (retomados por `SendMessage` às
+06:22).
 
 **Servidor** (`fix-serv`): S1 `parear cancel` apaga sem ler (cota do KV) · S2
 `testar-cookies` regrava a sessão do token do corpo com cookies de OUTRA conta,
