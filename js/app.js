@@ -11683,6 +11683,7 @@ async function enviarLote(places, opts = {}) {
             AppState.hasMore = true;
         }
     };
+    const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const aoLandar = !!opts.contarAoLandar;
     const progresso = () => {
         if (aoLandar) { updateStats(); saveStats(); updatePendingCount(); }
@@ -11698,7 +11699,13 @@ async function enviarLote(places, opts = {}) {
     try {
         for (const p of places) {
             const r = await callWithRetry(() => API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao));
-            if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
+            // Saiu no meio (ver `epocaDaSessao`): nada grava — e, no placar
+            // OTIMISTA do lote manual, o que não pousou (este, se não pousou, e
+            // os que nem saíram) volta (K7). Contando ao pousar não há o que voltar.
+            if (epoca !== epocaDaSessao) {
+                if (!aoLandar) descontarGestoSemSessao('rejected', placar, places.length - places.indexOf(p) - (pousouNoWaze(r) ? 1 : 0));
+                return;
+            }
             if (r && r.success) {
                 conta.ok++;
                 registrarPouso(p);
@@ -14568,6 +14575,29 @@ function presencaWmeDiag() {
     };
 }
 
+// A decisão POUSOU no Waze (inclusive "já tratado por outro editor", que é o
+// objetivo cumprido — a regra de todo o app)?
+function pousouNoWaze(r) {
+    return !!(r && (r.success || r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'));
+}
+
+// A resposta de uma ação EM VOO chegou depois de a sessão acabar (a época
+// mudou): nada dela grava (ver `epocaDaSessao`) — mas o +1 que o GESTO já tinha
+// GRAVADO no placar ficava, por uma decisão que não pousou no Waze. MEDIDO na
+// reprodução do auditor: o ✕ levou 401 depois da queda, "Rejeitados 1" gravado,
+// a decisão fora da fila de saída, e o pedido de volta como card quando a mesma
+// conta entrou de novo (auditoria da costura, 2026-09-26, K7). É o que o
+// `cancel` da queda já faz com a ação que ainda estava na janela. O desconto é
+// no placar DO GESTO (o objeto), nunca no `AppState.stats` de agora: o "Sair" e
+// a troca de conta põem um NOVO, zerado, e o do gesto fica órfão — descontar
+// nele não tira nada de quem entrou.
+function descontarGestoSemSessao(chave, placar, n) {
+    if (!(n > 0) || !placar) return;
+    placar[chave] = Math.max(0, (placar[chave] || 0) - n);
+    updateStats();
+    saveStats();
+}
+
 function handleMarkAsRead() {
     if (!AppState.currentPlace) return;
     if (acoesTravadas()) return;   // janela do Desfazer correndo
@@ -14582,13 +14612,19 @@ function handleMarkAsRead() {
     saveStats();
     advanceQueue();
     const epoca = epocaDaSessao;
+    const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     scheduleAction('read', place, async () => {
         const presenca = presencaWmeDaAcao(place, pais);
         const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao), epoca);
-        if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
+        // Saiu no meio (ver `epocaDaSessao`): nada grava, e o placar do gesto
+        // volta se a decisão não pousou (K7).
+        if (epoca !== epocaDaSessao) {
+            if (!pousouNoWaze(result)) descontarGestoSemSessao('read', placar, 1);
+            return;
+        }
         presencaWmeAoResponder(presenca, result);
         handleActionResult('read', place, result, regiao, epocaFila);
     });
@@ -14608,13 +14644,19 @@ function handleReject() {
     saveStats();
     advanceQueue();
     const epoca = epocaDaSessao;
+    const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     scheduleAction('reject', place, async () => {
         const presenca = presencaWmeDaAcao(place, pais);
         const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao), epoca);
-        if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
+        // Saiu no meio (ver `epocaDaSessao`): nada grava, e o placar do gesto
+        // volta se a decisão não pousou (K7).
+        if (epoca !== epocaDaSessao) {
+            if (!pousouNoWaze(result)) descontarGestoSemSessao('rejected', placar, 1);
+            return;
+        }
         presencaWmeAoResponder(presenca, result);
         handleActionResult('reject', place, result, regiao, epocaFila);
     });

@@ -84,6 +84,9 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
     presencaWmeDaAcao: () => null, callWithRetry: (fn) => fn(),
     presencaWmeAoResponder: () => efeitos.push('presenca'),
     handleActionResult: () => efeitos.push('resultado'),
+    // O placar do gesto volta só pro que NÃO pousou (test/costura-sessao, K7):
+    // a resposta aqui é sucesso, então ele também não pode mexer.
+    pousouNoWaze: (r) => !!(r && r.success), descontarGestoSemSessao: () => efeitos.push('descontou'),
   };
   // `epocaDaSessao` é lido como variável solta: passa por um getter no escopo.
   const chaves = Object.keys(deps).filter((k) => k !== 'epocaDaSessao');
@@ -107,10 +110,12 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
 test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS do await', () => {
   const casos = {
     esvaziarFilaDeSaida: /: await API\.rejectPlace\([^)]*\);\s*if \(epoca !== epocaDaSessao\) \{ enviados = 0; break; \}/,
-    enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    // Com a época mudada nada grava — só o placar otimista do que não pousou
+    // volta (test/costura-sessao, K7).
+    enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) \{\s*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;\s*return;\s*\}/,
     loadProfileAndAuxData: /API\.listCountries\(\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
     // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao).
-    handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*if \(!pousouNoWaze\(result\)\) descontarGestoSemSessao\('read', placar, 1\);\s*return;\s*\}/,
     handleSkip: /API\.guardarPedido\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) return;/,
   };
   for (const [nome, re] of Object.entries(casos)) assert.match(fatiar(nome), re, `${nome} grava depois do "Sair"`);

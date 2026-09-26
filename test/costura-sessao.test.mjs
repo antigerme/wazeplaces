@@ -294,3 +294,114 @@ test('K1 (L6): CONTROLE — sem a sessão acabar, a janela vence e a escrita SAI
     assert.ok(m.log.some((l) => l.startsWith('ENVIOU')), `${abrir}: a escrita não saiu nem com a janela vencida`);
   }
 });
+
+// ═══ K7 · a ação em voo quando a sessão cai ═══════════════════════════════════
+
+function lsFalso() {
+  const guardado = new Map();
+  return { guardado, safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) } };
+}
+
+function montarVoo() {
+  const { safeLS, guardado } = lsFalso();
+  const pendentes = [];
+  const gravados = [];
+  const AppState = {
+    authenticated: true, profile: { id: 'A' }, currentPlace: null, queue: [],
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 10,
+    preferences: { undoEnabled: false }, pendingAction: null, inFlightActions: 0,
+  };
+  let token = 'tok-A';
+  const deps = {
+    AppState, safeLS, epocaDaSessao: 0, navigator: { onLine: true }, Treino: { ativo: false },
+    SAIDA_KEY: constante('SAIDA_KEY'), SAIDA_MAX: constante('SAIDA_MAX'), CONTA_KEY: constante('CONTA_KEY'),
+    TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1], UNDO_WINDOW_MS: 3000,
+    API: {
+      getRegion: () => 'row', getCountry: () => 30, getSession: () => token, setSession: (t) => { token = t; },
+      rejectPlace: () => new Promise((ok) => pendentes.push(ok)), markAsRead: () => new Promise((ok) => pendentes.push(ok)),
+    },
+    direcaoTravada: () => false, canDisableUndo: () => true, presencaWmeDaAcao: () => null,
+    advanceQueue: () => { AppState.queue.shift(); AppState.currentPlace = AppState.queue[0] || null; },
+    saveStats: () => gravados.push({ ...AppState.stats }), msgDoServidor: (r, f) => f, t: (k) => k,
+    historyTodayKey: () => '2026-09-26', ondeAgora: () => '30', getLang: () => 'pt',
+    pedidosEmAndamento: new Set(), descargaNaFila: new WeakSet(),
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    entrarPelaExtensao: () => new Promise(() => {}), console,
+  };
+  const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'pousouNoWaze', 'descontarGestoSemSessao',
+    'chaveDoPedido', 'marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida',
+    'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento', 'handleActionResult', 'scheduleAction',
+    'handleReject', 'handleMarkAsRead', 'derrubarSessao'], deps);
+  const P = { venueID: 'v1', updateRequestID: 'u1', creatorId: 9 };
+  AppState.queue = [P, { venueID: 'v2', updateRequestID: 'u2', creatorId: 9 }];
+  AppState.currentPlace = P;
+  return { h, deps, AppState, pendentes, gravados, guardado };
+}
+
+test('K7: o ✕/✓ em voo, a sessão cai e a resposta (401) chega depois — o +1 GRAVADO no placar volta', async () => {
+  for (const [gesto, chave] of [['handleReject', 'rejected'], ['handleMarkAsRead', 'read']]) {
+    const m = montarVoo();
+    m.h[gesto]();
+    await tique();
+    assert.equal(m.gravados.at(-1)[chave], 1, 'o gesto gravou o +1');
+    m.h.derrubarSessao('srv.err.cookiesExpired');
+    m.pendentes[0]({ success: false, errorCategory: 'unauthorized', httpCode: 401 });
+    await tique();
+    assert.equal(m.gravados.at(-1)[chave], 0, `DEFEITO (${gesto}): o +1 ficou gravado sem a decisão ter pousado no Waze`);
+    assert.equal(m.AppState.stats[chave], 0);
+    assert.equal(m.h.carregarFilaDeSaida().length, 0, 'a resposta de outra época entrou na fila de saída');
+  }
+});
+
+test('K7: CONTROLE — a mesma resposta ANTES da queda vai pra fila de saída e o placar fica', async () => {
+  const m = montarVoo();
+  m.h.handleReject();
+  await tique();
+  m.pendentes[0]({ success: false, errorCategory: 'unauthorized', httpCode: 401 });
+  await tique();
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  assert.equal(m.h.carregarFilaDeSaida().length, 1, 'o que a pessoa fez evaporou');
+  assert.equal(m.gravados.at(-1).rejected, 1);
+});
+
+test('K7: a decisão que POUSOU (sucesso ou "já tratado") depois da queda fica no placar', async () => {
+  for (const r of [{ success: true }, { success: false, errorCategory: 'already_processed' }]) {
+    const m = montarVoo();
+    m.h.handleMarkAsRead();
+    await tique();
+    m.h.derrubarSessao('srv.err.cookiesExpired');
+    m.pendentes[0](r);
+    await tique();
+    assert.equal(m.AppState.stats.read, 1, `${JSON.stringify(r)}: tirou do placar uma decisão que pousou`);
+  }
+});
+
+test('K7: placar TROCADO depois do gesto (outra conta, "Sair") não é descontado pela resposta atrasada', async () => {
+  const m = montarVoo();
+  m.h.handleReject();
+  await tique();
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  m.AppState.stats = { read: 0, rejected: 4, skipped: 0 };   // o placar de quem entrou
+  m.pendentes[0]({ success: false, errorCategory: 'unauthorized', httpCode: 401 });
+  await tique();
+  assert.equal(m.AppState.stats.rejected, 4, 'a resposta de A descontou o placar de quem entrou depois');
+});
+
+test('K7: o LOTE manual com a sessão caindo no meio devolve só o placar otimista do que não pousou', async () => {
+  const pendentes = [];
+  const AppState = { authenticated: true, stats: { read: 0, rejected: 13, skipped: 0 }, queue: [], serverTotal: 20, inFlightActions: 0 };
+  const deps = {
+    AppState, epocaDaSessao: 0, navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1],
+    API: { rejectPlace: () => new Promise((ok) => pendentes.push(ok)) },
+    saveStats: () => {}, recordHistory: () => {}, registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {},
+  };
+  const h = montar(['sessaoTrocou', 'callWithRetry', 'pousouNoWaze', 'descontarGestoSemSessao', 'enviarLote'], deps);
+  // O lote de 4 já contou +4 no placar otimista (13 = 9 de antes + 4 do lote).
+  const lote = [1, 2, 3, 4].map((i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i }));
+  const envio = h.enviarLote(lote, { regiao: 'row', silencioso: true });
+  await tique(); pendentes[0]({ success: true });           // 1º pousou
+  await tique(); deps.epocaDaSessao++;                        // a sessão cai com o 2º no ar
+  pendentes[1]({ success: false, errorCategory: 'unauthorized' });
+  await envio;
+  assert.equal(AppState.stats.rejected, 13 - 3, 'DEFEITO: o placar otimista dos 3 que não pousaram ficou');
+});
