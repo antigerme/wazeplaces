@@ -818,8 +818,11 @@ test('token que falhou por REDE não bloqueia o tempo real por 5 min: a rede vol
   // agora"; o `online` achava recente e desistia — e o chat ficava sem tempo
   // real até 5 min depois (auditoria de 2026-09-25).
   let fora = true;
+  // Sem rede, o `_post` volta `transient` COM `_motivo` — a marca de que a
+  // resposta nem chegou (ver o `catch` dele no api.js; `presenca-auditoria`
+  // confere a forma rodando o api.js de verdade).
   const c = novoCliente({ api: { presencaApp: async (campos) => (fora
-    ? { success: false, errorCategory: 'transient' }
+    ? { success: false, errorCategory: 'transient', _motivo: 'TypeError' }
     : { success: true, online: [], conversas: [], ...(campos.token ? { chat: { token: 't', chave: 'k', base: 'https://instantmessaging-pa.googleapis.com/', expiraEm: Date.now() + 864e5 } } : {}) }) } });
   await c.P.presencaAtualizar({ token: true });
   const antes = c.chamadas.presencaApp.length;

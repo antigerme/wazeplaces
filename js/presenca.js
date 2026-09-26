@@ -307,6 +307,11 @@ async function presencaSincronizar() {
     await presencaAtualizar();
 }
 
+// A falha que nem chegou a ter resposta (ver o `catch` do `_post` no api.js).
+function presencaSemResposta(r) {
+    return !r || typeof r._motivo === 'string';
+}
+
 async function presencaAtualizar({ token = false } = {}) {
     if (!presencaPodeConectar()) return;
     if (Presenca.pedindo) return Presenca.pedindo;
@@ -329,7 +334,14 @@ async function presencaAtualizar({ token = false } = {}) {
                 // aberto sem sinal, o app ficava 5 min sem o tempo real depois de
                 // a rede voltar (o `online` achava o pedido "recente" e desistia).
                 // Recusa de verdade segue contando (auditoria de 2026-09-25).
-                if (querToken && (!r || r.errorCategory === 'transient')) Presenca.tokenPedidoEm = 0;
+                //
+                // E "por rede" é SEM RESPOSTA: o `_post` só põe `_motivo` quando a
+                // resposta nem chegou (rede, DNS, tempo esgotado). O Waze falhando
+                // também volta `transient`, mas COM resposta — e ela prova rede:
+                // zerado aí, cada ação (`presencaAoProvarRede`) pediria o token de
+                // novo enquanto o Waze estivesse fora, uma requisição a mais por
+                // swipe no free tier (auditoria de 2026-09-26).
+                if (querToken && presencaSemResposta(r)) Presenca.tokenPedidoEm = 0;
                 presencaAnotarLista({ via: 'pedido', falhou: (r && r.errorCategory) || 'sem resposta' });
                 if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
                 return;
@@ -464,20 +476,46 @@ function presencaEsquecer() {
 
 // ── o tempo real (direto do navegador ao Google) ────────────────────────────
 
+// Não precisa de token novo: tem um, e ele vale por mais de uma hora (a folga).
 function presencaTokenValido() {
     const c = Presenca.chat;
     if (!c || !c.token || !c.base || !c.chave) return false;
     return !Number.isFinite(c.expiraEm) || c.expiraEm - Date.now() > PRESENCA_TOKEN_FOLGA_MS;
 }
 
+// O token ABRE o fluxo até vencer DE FATO. A folga de uma hora é só a hora de
+// pedir o próximo, e as duas coisas eram uma só: na última hora o app parava
+// de abrir o fluxo e esperava o token novo — e se a renovação não viesse (o
+// provedor falhou no Waze, a rede caiu), o tempo real ficava parado com um
+// token que ainda valia, e nada o religava (auditoria de 2026-09-26).
+function presencaTokenAbre() {
+    const c = Presenca.chat;
+    if (!c || !c.token || !c.base || !c.chave) return false;
+    return !Number.isFinite(c.expiraEm) || c.expiraEm > Date.now();
+}
+
 function presencaFluxoGarantir() {
-    if (!presencaPodeConectar() || Presenca.fluxo) return;
+    if (!presencaPodeConectar()) return;
     if (document.visibilityState === 'hidden' || navigator.onLine === false) return;
-    if (!presencaTokenValido()) {
-        if (Date.now() - Presenca.tokenPedidoEm > PRESENCA_TOKEN_REPETIR_MS) presencaAtualizar({ token: true });
-        return;
+    // A renovação vai À PARTE, com o teto de 5 min: falta token, ele está na
+    // última hora, ou o Google o recusou. Chega pelo `presencaAtualizar`, que
+    // abre o fluxo quando o token vem.
+    if (!presencaTokenValido() && Date.now() - Presenca.tokenPedidoEm > PRESENCA_TOKEN_REPETIR_MS) {
+        presencaAtualizar({ token: true });
     }
-    presencaFluxoAbrir();
+    if (!Presenca.fluxo && presencaTokenAbre()) presencaFluxoAbrir();
+}
+
+// Resposta NOSSA que chega prova rede (`API.aoProvarRede`, o gancho que a fila
+// de saída já usa). Sem token que abra o fluxo — o provedor voltou vazio, a
+// renovação caiu, o Google recusou —, nada mais o pedia de novo: o recuo do
+// fluxo desiste sem token e nenhum timer ficava de pé, então o tempo real
+// só voltava reabrindo o app (auditoria de 2026-09-26). Aqui ele é pedido de
+// novo, com o MESMO teto de 5 min — e nada além disso: com token, quem cuida
+// do fluxo é o recuo, senão cada ação viraria uma reconexão ao Google.
+function presencaAoProvarRede() {
+    if (presencaTokenAbre()) return;
+    presencaFluxoGarantir();
 }
 
 function presencaFluxoFechar() {
@@ -1646,6 +1684,7 @@ Object.assign(Presenca, {
     esquecerLista: presencaEsquecerLista,
     renderPilula: presencaRenderPilula,
     aoCarona: presencaAoCarona,
+    aoProvarRede: presencaAoProvarRede,
     conhecidos: chatConhecidos,
     diag: presencaDiag,
 });

@@ -11578,6 +11578,10 @@ API.aoProvarRede = () => {
     refazerPerfilSeFaltar();
     recuperarCardSemFoto();
     presencaWmeRefazerDesligar();
+    // O token do tempo real que faltou ou falhou: sem isto, nada mais o pedia
+    // de novo e o chat ficava sem tempo real até reabrir o app. Com o teto de
+    // 5 min da própria presença (ver `presencaAoProvarRede`).
+    window.Presenca?.aoProvarRede?.();
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
