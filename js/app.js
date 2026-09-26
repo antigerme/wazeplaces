@@ -350,6 +350,7 @@ function initApp() {
     setupGuardaDoDiagnostico();
     marcarSuporteAExtensao();
     setupInstalarApp();
+    setupSincroniaEntreAbas();   // o app aberto em duas abas (ver a função)
 
     // Link de pareamento (/#pair=SEGREDO): o editor apontou a câmera ou mandou o
     // link pra si mesmo — entra direto, sem digitar nada. Tratado ANTES da
@@ -9529,6 +9530,38 @@ function getHistoryStats() {
         if (ageDays >= 0 && ageDays < 30) { acc.month.read += r; acc.month.rejected += j; }
     }
     return acc;
+}
+
+// ── o app aberto em DUAS abas ────────────────────────────────────────────────
+// O histórico, as conquistas e os autores ficam em MEMÓRIA depois da primeira
+// leitura, e cada ação grava a estrutura INTEIRA. Com o app aberto em duas
+// abas, cada uma gravava a SUA cópia por cima da outra: MEDIDO, 5 pedidos
+// numa aba e 1 na outra deixavam o `_total` em 100/1 em vez de 105/1 — o
+// trabalho da primeira sumia, e as conquistas e a reincidência iam junto
+// (auditoria de 2026-09-25).
+//
+// O navegador avisa a OUTRA aba quando esta grava (evento `storage`, que não
+// dispara na aba que gravou): ela solta a cópia em memória, e a próxima
+// leitura pega o que está no aparelho. Não põe leitura nenhuma a mais no swipe
+// — que é o que a tabela de custo da gravação por swipe protege —: só relê
+// quem foi avisado, e só quando precisar.
+function aoGravarEmOutraAba(ev) {
+    // O mapa é montado AQUI, no evento: as chaves das conquistas e dos autores
+    // são declaradas mais abaixo neste arquivo.
+    const caches = { [HISTORY_KEY]: 'history', [CONQUISTAS_KEY]: 'conquistas', [AUTORES_KEY]: 'autores' };
+    const chave = ev ? ev.key : undefined;
+    // `key` nulo é a outra aba limpando o armazenamento inteiro.
+    if (chave !== null && !Object.prototype.hasOwnProperty.call(caches, chave)) return;
+    for (const [k, campo] of Object.entries(caches)) {
+        if (chave === null || chave === k) AppState[campo] = null;
+    }
+    // O ponto do botão de Filtros e o painel aberto mostram o que está no
+    // aparelho agora (a outra aba pode ter visto a conquista, ou pousado ações).
+    if (chave === null || chave === CONQUISTAS_KEY) atualizarSeloDeConquista();
+    agendarRedesenhoDoHistorico();
+}
+function setupSincroniaEntreAbas() {
+    window.addEventListener('storage', aoGravarEmOutraAba);
 }
 // ═══════════════════════════════════════════════════════════════════════════
 //  Patentes e Conquistas — celebra, nunca cobra

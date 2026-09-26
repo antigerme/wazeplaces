@@ -163,3 +163,108 @@ test('H1: o anel da conquista nova SOBREVIVE ao redesenho da mesma abertura, e s
   assert.deepEqual(aneis(m.htmlConquistas()), [], 'o anel sobreviveu ao fechamento do modal');
   assert.ok(!patenteComAnel(m.htmlPatente()), 'o anel da patente sobreviveu ao fechamento do modal');
 });
+
+// ── H3: o app aberto em DUAS abas ───────────────────────────────────────────
+// Cada aba guarda histórico, conquistas e autores em memória e grava a
+// estrutura INTEIRA a cada ação: a última a gravar apagava a outra (medido: 5
+// pedidos numa aba e 1 na outra davam `_total` 100/1 em vez de 105/1). O
+// navegador avisa a OUTRA aba (evento `storage`); aqui o aviso é entregue à
+// mão, na ordem em que o navegador o entregaria.
+function armazenamentoCompartilhado(inicial = {}) {
+  const dados = new Map(Object.entries(inicial).map(([k, v]) => [k, JSON.stringify(v)]));
+  const abas = [], pendentes = [];
+  return {
+    dados, abas,
+    para(aba) {
+      return {
+        getItem: (k) => (dados.has(k) ? dados.get(k) : null),
+        setItem: (k, v) => { dados.set(k, String(v)); for (const o of abas) if (o !== aba) pendentes.push([o, k]); },
+        removeItem: (k) => { dados.delete(k); for (const o of abas) if (o !== aba) pendentes.push([o, k]); },
+      };
+    },
+    // O que o navegador entrega à outra aba antes do próximo gesto dela.
+    entregar() { while (pendentes.length) { const [aba, key] = pendentes.shift(); aba.aoGravarEmOutraAba({ key }); } },
+    descartarAvisos() { pendentes.length = 0; },
+    ler: (k) => JSON.parse(dados.get(k)),
+  };
+}
+function abrirAba(comp) {
+  const aba = { selo: 0, redesenhos: 0 };
+  const AppState = { history: null, conquistas: null, autores: null, authenticated: true };
+  const deps = {
+    AppState, localStorage: comp.para(aba),
+    HISTORY_KEY: 'waze_places_history', CONQUISTAS_KEY: 'waze_places_conquistas', AUTORES_KEY: 'waze_places_autores',
+    AUTORES_MAX_DIAS: 30, AUTORES_MAX_REINCIDENTES: 500, AUTORES_MAX_VISTOS: 6000, diaDeHoje: () => 20000,
+    podarHistorico: () => false, historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
+    atualizarSeloDeConquista: () => { aba.selo++; }, agendarRedesenhoDoHistorico: () => { aba.redesenhos++; },
+  };
+  const nomes = ['salvarHistorico', 'loadHistory', 'recordHistory', 'carregarConquistas', 'salvarConquistas',
+    'loadAutores', 'salvarAutores', 'podarAutores', 'registrarRejeicaoDeAutor', 'aoGravarEmOutraAba'];
+  Object.assign(aba, montar(nomes, deps, nomes), { AppState });
+  comp.abas.push(aba);
+  return aba;
+}
+
+test('H3: o trabalho de uma aba NÃO some quando a outra grava — histórico', () => {
+  const comp = armazenamentoCompartilhado({ waze_places_history: { _total: { read: 100, rejected: 0 } } });
+  const A = abrirAba(comp), B = abrirAba(comp);
+  A.loadHistory(); B.loadHistory();                    // as duas já leram (a aba Histórico aberta, p.ex.)
+  for (let i = 0; i < 5; i++) A.recordHistory('read', 1);
+  comp.entregar();
+  B.recordHistory('reject', 1);
+  assert.deepEqual(comp.ler('waze_places_history')._total, { read: 105, rejected: 1 },
+    'a aba B gravou a cópia VELHA por cima: os 5 pedidos da aba A sumiram do Histórico');
+  assert.ok(B.redesenhos >= 1, 'o painel aberto da aba avisada não é redesenhado');
+});
+
+test('H3: CONTROLE — sem o aviso do navegador a perda acontece (o teste mede o que diz medir)', () => {
+  const comp = armazenamentoCompartilhado({ waze_places_history: { _total: { read: 100, rejected: 0 } } });
+  const A = abrirAba(comp), B = abrirAba(comp);
+  A.loadHistory(); B.loadHistory();
+  for (let i = 0; i < 5; i++) A.recordHistory('read', 1);
+  comp.descartarAvisos();
+  B.recordHistory('reject', 1);
+  assert.deepEqual(comp.ler('waze_places_history')._total, { read: 100, rejected: 1 });
+});
+
+test('H3: conquistas e autores também — e o ponto da aba avisada segue o aparelho', () => {
+  const comp = armazenamentoCompartilhado();
+  const A = abrirAba(comp), B = abrirAba(comp);
+  A.carregarConquistas(); B.carregarConquistas();
+  A.carregarConquistas().c.coruja = '2026-09-25';      // destravou na aba A
+  A.salvarConquistas();
+  comp.entregar();
+  assert.equal(B.selo, 1, 'o ponto da aba B não olhou o aparelho depois do aviso');
+  B.carregarConquistas().seq = 0;                      // um Desfazer na aba B
+  B.salvarConquistas();
+  assert.ok(comp.ler('waze_places_conquistas').c.coruja, 'a aba B apagou a conquista que a aba A destravou');
+
+  A.loadAutores(); B.loadAutores();
+  A.registrarRejeicaoDeAutor({ creatorId: 1, createdBy: 'autor_a' });
+  A.registrarRejeicaoDeAutor({ creatorId: 1, createdBy: 'autor_a' });
+  comp.entregar();
+  B.registrarRejeicaoDeAutor({ creatorId: 2, createdBy: 'autor_b' });
+  assert.ok(comp.ler('waze_places_autores').r['1'], 'a aba B apagou a reincidência que a aba A registrou');
+});
+
+test('H3: a outra aba limpando tudo solta as três cópias; chave alheia não mexe em nada', () => {
+  const comp = armazenamentoCompartilhado();
+  const A = abrirAba(comp);
+  A.loadHistory(); A.carregarConquistas(); A.loadAutores();
+  A.aoGravarEmOutraAba({ key: 'waze_places_stats' });
+  assert.ok(A.AppState.history && A.AppState.conquistas && A.AppState.autores, 'chave alheia soltou as cópias');
+  assert.equal(A.redesenhos, 0, 'chave alheia redesenhou o painel');
+  A.aoGravarEmOutraAba({ key: null });                 // localStorage.clear() na outra aba
+  assert.deepEqual([A.AppState.history, A.AppState.conquistas, A.AppState.autores], [null, null, null],
+    'a limpeza da outra aba não soltou as cópias em memória');
+});
+
+test('H3: o app escuta o aviso — o ouvinte é ligado na abertura', () => {
+  const ouvintes = [];
+  const aoGravarEmOutraAba = () => {};
+  const { setupSincroniaEntreAbas } = montar(['setupSincroniaEntreAbas'],
+    { window: { addEventListener: (tipo, fn) => ouvintes.push([tipo, fn]) }, aoGravarEmOutraAba }, ['setupSincroniaEntreAbas']);
+  setupSincroniaEntreAbas();
+  assert.deepEqual(ouvintes, [['storage', aoGravarEmOutraAba]], 'ninguém escuta o evento storage');
+  assert.match(fatiar('initApp'), /^\s+setupSincroniaEntreAbas\(\);/m, 'a abertura do app não liga a sincronia entre abas');
+});
