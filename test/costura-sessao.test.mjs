@@ -795,3 +795,52 @@ test('K8: o resgate do pareamento e a ponte da extensão também dizem a conta �
   assert.match(ler('extensao-chrome/ponte.js'), /action: 'sessao', token: r\.sessionToken, conta: r\.conta/,
     'a ponte da extensão não repassa a conta do `testar-cookies`');
 });
+
+// ═══ K10 · o texto digitado é da conversa, não do campo ═════════════════════
+
+const PRES_SEM = semComentario(ler('js/presenca.js'));
+
+function montarConversas() {
+  const campo = { value: '', focus() {} };
+  const Presenca = { aberta: null, anexo: null, conversas: [], vivas: new Map(), rascunhos: new Map(), rascunhoDe: null };
+  const deps = { Presenca, PRESENCA_ID: /^\d{1,19}$/, document: { getElementById: (id) => (id === 'conversaInput' ? campo : null) } };
+  const h = montar(['presencaAbrirConversa', 'presencaTrocarRascunho', 'presencaEsquecer'], deps, PRES_SEM);
+  const fechar = () => { Presenca.aberta = null; Presenca.anexo = null; };   // o que o `presencaEsquecerAberta` faz
+  return { h, campo, Presenca, fechar };
+}
+
+test('K10: o que foi digitado pra X não aparece — nem sai — na conversa com Y', () => {
+  const m = montarConversas();
+  m.h.presencaAbrirConversa('333');
+  m.campo.value = 'pergunta pra X, sem enviar';
+  m.fechar();
+  m.h.presencaAbrirConversa('444');
+  assert.equal(m.campo.value, '', 'DEFEITO: o texto digitado pra X está no campo da conversa com Y (e o Enviar o mandaria a Y)');
+  m.campo.value = 'oi, Y';
+  m.fechar();
+  // A MESMA conversa de volta (é o que a queda de sessão preserva): o texto dela volta.
+  m.h.presencaAbrirConversa('333');
+  assert.equal(m.campo.value, 'pergunta pra X, sem enviar', 'o rascunho de X se perdeu ao passar por Y');
+  m.h.presencaAbrirConversa('444');
+  assert.equal(m.campo.value, 'oi, Y');
+});
+
+test('K10: fechar e reabrir a MESMA conversa (a queda de sessão) mantém o texto no campo', () => {
+  const m = montarConversas();
+  m.h.presencaAbrirConversa('333');
+  m.campo.value = 'outra pra X';
+  m.fechar();                                   // a queda fecha a conversa
+  m.h.presencaAbrirConversa('333');             // a mesma conta entra de novo e abre X
+  assert.equal(m.campo.value, 'outra pra X');
+});
+
+test('K10: o "Sair" (e a troca de conta) leva os rascunhos junto', () => {
+  const m = montarConversas();
+  m.h.presencaAbrirConversa('333');
+  m.campo.value = 'rascunho de A pra X';
+  m.fechar();
+  m.h.presencaAbrirConversa('444');
+  m.h.presencaEsquecer();
+  m.h.presencaAbrirConversa('333');
+  assert.equal(m.campo.value, '', 'o rascunho da conta que saiu voltou pra quem entrou');
+});
