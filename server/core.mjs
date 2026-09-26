@@ -2181,8 +2181,13 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   return { places, blocked };
 }
 
-// Id de pedido ou de local: texto ou número curto. Objeto, lista ou texto de
-// quilobytes não é id — ia pro Waze como veio (auditoria de 2026-09-25).
+// Id de pedido, de local ou de foto: texto ou número curto. Objeto, lista ou
+// texto de quilobytes não é id — ia pro Waze como veio (auditoria de
+// 2026-09-25). Vale em TODO caminho que manda id pro Waze: nasceu só no lote
+// do marcar-lido, e o marcar-lido de um item, o validar-place, o
+// guardar-pedido, o renomear-local e o excluir-foto seguiam mandando um objeto
+// ou um texto de 200 KB como veio (auditoria de 2026-09-26). Id inválido
+// responde o MESMO 400 de id ausente, antes do Waze.
 const idValido = (v) => (typeof v === 'string' && v.length > 0 && v.length <= 64) || (typeof v === 'number' && Number.isFinite(v));
 // O lote tem TETO: o cliente manda pedaços de 25, e a página do Waze é de 500.
 // Sem teto, um corpo de 5 MB virava um lote de dezenas de milhares no Waze.
@@ -2200,7 +2205,7 @@ async function handleMarcarLido(data, { sessions, aoFundo }) {
         ids.push({ id: item.updateRequestID, venueId: item.venueID });
       }
     }
-  } else if (data.venueID !== undefined && data.updateRequestID !== undefined) {
+  } else if (idValido(data.venueID) && idValido(data.updateRequestID)) {
     ids.push({ id: data.updateRequestID, venueId: data.venueID });
   }
   if (ids.length === 0) apiError('Dados incompletos', 400, 'srv.err.incompleteData');
@@ -2246,7 +2251,7 @@ async function handleMarcarLido(data, { sessions, aoFundo }) {
 async function handleGuardarPedido(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  if (data.venueID === undefined || data.updateRequestID === undefined) {
+  if (!idValido(data.venueID) || !idValido(data.updateRequestID)) {
     apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
   }
   // Boolean ESTRITO e sem padrão, pelo mesmo motivo do `approve` (gotcha #59):
@@ -2284,7 +2289,7 @@ async function handleGuardarPedido(data, { sessions }) {
 async function handleValidarPlace(data, { sessions, aoFundo }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  if (data.venueID === undefined || data.updateRequestID === undefined) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  if (!idValido(data.venueID) || !idValido(data.updateRequestID)) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
 
   // `=== true` e não coerção: sem isso, qualquer valor truthy que escapasse
   // (uma string "false", por exemplo) viraria uma aprovação.
@@ -2458,7 +2463,7 @@ async function handleExcluirFoto(data, { sessions }) {
   const region = requireRegion(data);
   const venueID = data.venueID;
   const imageID = data.imageID;
-  if (!venueID || !imageID) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  if (!idValido(venueID) || !idValido(imageID)) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
   const lat = Number(data.lat);
   const lon = Number(data.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
@@ -2616,7 +2621,7 @@ async function handleRenomearLocal(data, { sessions }) {
   const region = requireRegion(data);
   const venueID = data.venueID;
   const nome = typeof data.nome === 'string' ? data.nome.trim() : '';
-  if (!venueID || !nome) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  if (!idValido(venueID) || !nome) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
   if (nome.length > NOME_MAX) apiError('Nome longo demais', 400, 'srv.err.nameTooLong');
 
   const { cookieHeader, csrf } = prepareAuth(cookies);

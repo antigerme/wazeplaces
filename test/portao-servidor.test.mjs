@@ -584,3 +584,39 @@ test('o teto do duplicado cabe no prazo do cliente: busca (teto do callWaze) + r
   assert.ok(soma < Number(tetoCliente[1]),
     `busca (${tetoBusca[1]} ms) + releitura (${DUPLICADO_ESPERA_MS} ms) = ${soma} ms não cabe nos ${tetoCliente[1]} ms do cliente`);
 });
+
+test('ids: objeto, lista ou texto enorme não vão ao Waze em NENHUMA rota de escrita — o mesmo 400 de id ausente', async () => {
+  // O `idValido` nascia só no LOTE do marcar-lido; o marcar-lido de um item,
+  // o validar-place, o guardar-pedido, o renomear-local e o excluir-foto
+  // mandavam um objeto ou um texto de 200 KB pro Waze como veio.
+  const s = await sessaoDeTeste(COOKIES);
+  // [rota, corpo com `id` no campo testado, a chave do 400 que a rota já dá pra id AUSENTE]
+  const casos = (id) => [
+    ['marcar-lido', { venueID: id, updateRequestID: 'u1' }, 'srv.err.incompleteData'],
+    ['marcar-lido', { venueID: 'v1', updateRequestID: id }, 'srv.err.incompleteData'],
+    ['validar-place', { venueID: id, updateRequestID: 'u1' }, 'srv.err.incompleteParams'],
+    ['validar-place', { venueID: 'v1', updateRequestID: id }, 'srv.err.incompleteParams'],
+    ['guardar-pedido', { venueID: id, updateRequestID: 'u1', value: true }, 'srv.err.incompleteParams'],
+    ['guardar-pedido', { venueID: 'v1', updateRequestID: id, value: true }, 'srv.err.incompleteParams'],
+    ['renomear-local', { venueID: id, nome: 'Padaria' }, 'srv.err.incompleteParams'],
+    ['excluir-foto', { venueID: id, imageID: 'i1', lat: -23.5, lon: -46.6 }, 'srv.err.incompleteParams'],
+    ['excluir-foto', { venueID: 'v1', imageID: id, lat: -23.5, lon: -46.6 }, 'srv.err.incompleteParams'],
+  ];
+  for (const lixo of [{ $objeto: [1, 2, 3] }, ['v1'], 'X'.repeat(200_000), '', true]) {
+    for (const [rota, corpo, chave] of casos(lixo)) {
+      const { r, chamadas } = await comWaze(naoPodiaIrAoWaze, () => dispatch(rota, { ...s.dados, region: 'row', ...corpo }, s.ctx));
+      const quem = `${rota} ${JSON.stringify(corpo).slice(0, 70)}`;
+      assert.equal(chamadas.length, 0, `${quem}: foi ao Waze`);
+      assert.equal(r.status, 400, quem);
+      assert.equal(r.body.errorKey, chave, quem);
+    }
+  }
+  // CONTROLE: id de verdade — texto (o formato medido) e número — vai ao Waze
+  // em todas elas; sem isto, uma rota que recusasse TUDO passaria acima.
+  for (const bom of ['206439966.2064334125.43319751', 43319751]) {
+    for (const [rota, corpo] of casos(bom)) {
+      const { chamadas } = await comWaze(() => json({}), () => dispatch(rota, { ...s.dados, region: 'row', ...corpo }, s.ctx));
+      assert.ok(chamadas.length > 0, `CONTROLE: ${rota} ${JSON.stringify(corpo).slice(0, 70)} não foi ao Waze`);
+    }
+  }
+});
