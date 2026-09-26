@@ -9071,6 +9071,30 @@ let tratouNestaFila = false;
 // Dizia "Tudo limpo!" e "confira o país e a região" pra quem tinha pulado tudo
 // (auditoria de 2026-09-25).
 let puladosNoInicioDaFila = 0;
+function puladosNestaFila() {
+    return Math.max(0, (AppState.stats.skipped || 0) - puladosNoInicioDaFila);
+}
+
+// A fila desta tela terminou LIMPA pelo trabalho do editor, e esse trabalho
+// está CONFIRMADO? É a condição da conquista "Tudo limpo", e ela é mais estreita
+// que a do confete por duas razões (auditoria de 2026-09-25):
+//   · com PULADO a fila não está limpa: eles seguem pendentes (a tela já dizia
+//     "Fim da fila", e mesmo assim soltava confete e dava a conquista — H9);
+//   · o ÚLTIMO swipe esvazia a fila e o painel aparece DENTRO da janela do
+//     Desfazer: dar a conquista ali deixava ela gravada depois de o Desfazer
+//     devolver o card (C13). Com a ação ainda no ar, quem confirma é a resposta
+//     (`registrarAcaoConfirmada`, que pergunta de novo com `confirmando`).
+// `confirmando` = quem pergunta é a confirmação de uma ação, que ainda conta
+// como em voo até o executor terminar.
+function filaZeradaConfirmada({ confirmando = false } = {}) {
+    if (!tratouNestaFila || AppState.loadError || AppState.currentPlace) return false;
+    if ((AppState.queue || []).length > 0) return false;
+    if (AppState.pendingAction) return false;
+    if (!confirmando && AppState.inFlightActions > 0) return false;
+    if (puladosNestaFila() > 0) return false;
+    const noMore = document.getElementById('noMoreCards');
+    return !!noMore && !noMore.classList.contains('hidden');
+}
 
 function showNoPlaces() {
     // O painel de fila vazia tem DOIS significados e a distinção é a flag —
@@ -9120,7 +9144,7 @@ function showNoPlaces() {
         // tratado alguma coisa na vida ganhava confete e a conquista "Tudo
         // limpo" só por abrir o app com a fila vazia.
         const tratou = tratouNestaFila;
-        const pulados = Math.max(0, (AppState.stats.skipped || 0) - puladosNoInicioDaFila);
+        const pulados = puladosNestaFila();
         // E a frase: "Você processou todos os pedidos" é mentira pra quem não
         // processou nada — é o que via quem abria o app num país onde não edita.
         // Com PULADOS, nem "tudo limpo" nem "confira o país": eles seguem
@@ -9130,14 +9154,20 @@ function showNoPlaces() {
         trocarTextoI18n(noMore.querySelector('p[data-i18n^="states.empty.body"]'),
             pulados > 0 ? 'states.empty.bodyPulados' : tratou ? 'states.empty.body' : 'states.empty.bodyNada');
         noMore.classList.remove('celebrate');
-        if (tratou) {
+        // Festa só com a fila LIMPA: com pulado a tela diz "Fim da fila" (eles
+        // seguem pendentes), e confete ali contradizia o próprio título.
+        if (tratou && pulados === 0) {
             // Reflow forçado: sem isso o browser junta remove+add num só estilo
             // computado e a animação não reinicia na segunda vez que a fila zera.
             void noMore.offsetWidth;
             noMore.classList.add('celebrate');
-            // "Tudo limpo" usa o MESMO critério do confete: abrir o app numa
-            // fila já vazia não é conquista.
-            checarConquistas({ filaZerada: true });
+            // A conquista, só com o trabalho CONFIRMADO (`filaZeradaConfirmada`).
+            // A pergunta vai pro fim da tarefa: o gesto que esvaziou a fila
+            // chega aqui pelo `advanceQueue` e só DEPOIS agenda a ação (e abre a
+            // janela do Desfazer) — perguntada agora, a ação ainda nem existe.
+            queueMicrotask(() => {
+                if (filaZeradaConfirmada()) checarConquistas({ filaZerada: true });
+            });
         }
     }
 }
@@ -9640,6 +9670,9 @@ function registrarAcaoConfirmada(actionType, place) {
         // "Depois da meia-noite" é a MADRUGADA (0h–4h59), não a noite: às 23h a
         // pessoa ainda está acordada no mesmo dia, e a graça da coruja é a virada.
         madrugada: hora >= 0 && hora < 5,
+        // O último pedido da fila CONFIRMADO: é aqui, e não no painel que
+        // aparece com o gesto, que a fila fica limpa de verdade (C13).
+        filaZerada: filaZeradaConfirmada({ confirmando: true }),
     });
 }
 

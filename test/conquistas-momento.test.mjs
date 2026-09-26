@@ -73,3 +73,101 @@ test('H2: CONTROLE — o idioma continua entrando pelo GESTO confirmado', () => 
     assert.match(fatiar(nome), /registrarIdiomaUsado\(/, `${nome} deixou de registrar o idioma do trabalho`);
   }
 });
+
+// ── H9 e C13: "Tudo limpo" só com a fila LIMPA e o trabalho CONFIRMADO ─────
+// O painel de fila vazia aparece no MESMO gesto que esvazia a fila, dentro da
+// janela do Desfazer (o `advanceQueue` vem antes do `scheduleAction`). A
+// conquista era dada ali: desfazer devolvia o card e ela ficava gravada (C13).
+// E com pulados a tela diz "Fim da fila", mas soltava confete e dava a
+// conquista do mesmo jeito (H9).
+function montarFimDaFila({ skipped = 0, base = 0, tratou = true } = {}) {
+  const conquistas = [];
+  const classes = new Set(['hidden']);
+  const noMore = {
+    classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+    querySelector: () => null, dataset: { bordaRolagem: '1' }, offsetWidth: 0,
+  };
+  const AppState = { loadError: false, hasMore: false, serverTotal: 0, stats: { skipped },
+    queue: [], currentPlace: null, pendingAction: null, inFlightActions: 0 };
+  const deps = {
+    AppState, document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
+    dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
+    atualizarConviteInstalar() {}, marcarBordaRolagem() {}, trocarTextoI18n() {},
+    checarConquistas: (x) => conquistas.push(x || {}),
+  };
+  const preludio = `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base};`;
+  const api = montar(['puladosNestaFila', 'filaZeradaConfirmada', 'showNoPlaces'], deps,
+    ['showNoPlaces', 'filaZeradaConfirmada'], preludio);
+  return { ...api, AppState, conquistas, festa: () => classes.has('celebrate'),
+           tudoLimpo: () => conquistas.some((c) => c.filaZerada === true) };
+}
+// O fim da tarefa: a pergunta da conquista vai pra lá (microtarefa).
+const fimDaTarefa = () => new Promise((ok) => setTimeout(ok, 0));
+
+test('C13: o ÚLTIMO swipe não dá "Tudo limpo" dentro da janela do Desfazer', async () => {
+  const m = montarFimDaFila();
+  m.showNoPlaces();                                  // o `advanceQueue` do gesto
+  m.AppState.pendingAction = { type: 'reject' };     // o `scheduleAction`, no mesmo tique
+  await fimDaTarefa();
+  assert.equal(m.tudoLimpo(), false,
+    'deu "Tudo limpo" com a ação ainda desfazível — o Desfazer devolve o card e a conquista fica gravada');
+  assert.equal(m.festa(), true, 'o confete (que é da TELA) deixou de sair no último swipe');
+  // Sem o Desfazer, a ação sai na hora e fica EM VOO: também não é confirmação.
+  const s = montarFimDaFila();
+  s.showNoPlaces();
+  s.AppState.inFlightActions = 1;
+  await fimDaTarefa();
+  assert.equal(s.tudoLimpo(), false, 'deu "Tudo limpo" antes de o Waze responder');
+});
+
+test('C13: quem dá "Tudo limpo" é a CONFIRMAÇÃO — e o Desfazer que devolve o card impede', () => {
+  const m = montarFimDaFila();
+  m.showNoPlaces();
+  // A janela fechou e o executor está no ar, respondendo: é a confirmação.
+  m.AppState.inFlightActions = 1;
+  assert.equal(m.filaZeradaConfirmada({ confirmando: true }), true,
+    'a confirmação do último pedido não dá "Tudo limpo" — a conquista ficaria inalcançável');
+  // CONTROLES: o Desfazer devolveu o card; ou outra ação ainda desfazível.
+  m.AppState.queue = [{ venueID: 'v1' }];
+  assert.equal(m.filaZeradaConfirmada({ confirmando: true }), false, 'fila com card não está limpa');
+  m.AppState.queue = [];
+  m.AppState.pendingAction = { type: 'read' };
+  assert.equal(m.filaZeradaConfirmada({ confirmando: true }), false, 'com ação na janela do Desfazer não há confirmação');
+});
+
+test('C13: quando a confirmação chegou ANTES do painel (fila que esperava a busca), o painel dá a conquista', async () => {
+  const m = montarFimDaFila();
+  m.showNoPlaces();                 // nada no ar: a ação já tinha sido confirmada
+  await fimDaTarefa();
+  assert.equal(m.tudoLimpo(), true, 'a fila zerada com tudo confirmado não deu "Tudo limpo"');
+});
+
+test('H9: fila que termina com PULADO não solta confete nem dá "Tudo limpo"', async () => {
+  const m = montarFimDaFila({ skipped: 12, base: 11 });
+  m.showNoPlaces();
+  await fimDaTarefa();
+  assert.equal(m.festa(), false, 'confete com pedido pulado pendente — a tela diz "Fim da fila"');
+  assert.equal(m.tudoLimpo(), false, '"Tudo limpo" com pedido pulado pendente');
+  m.AppState.inFlightActions = 1;
+  assert.equal(m.filaZeradaConfirmada({ confirmando: true }), false,
+    'a confirmação deu "Tudo limpo" com pedido pulado pendente');
+  // CONTROLE: sem pulado, as duas coisas.
+  const c = montarFimDaFila({ skipped: 11, base: 11 });
+  c.showNoPlaces();
+  await fimDaTarefa();
+  assert.ok(c.festa() && c.tudoLimpo(), 'sem pulado, o confete e a conquista tinham que sair');
+});
+
+test('C13: a confirmação de ação pergunta pela fila zerada (registrarAcaoConfirmada)', () => {
+  const ctxs = [];
+  const deps = {
+    Treino: { ativo: false }, carregarConquistas: () => ({ seq: 0 }), salvarConquistas() {},
+    registrarIdiomaUsado() {}, getLang: () => 'pt', contagemDoAutor: () => 0,
+    checarConquistas: (x) => ctxs.push(x || {}),
+    filaZeradaConfirmada: (o) => !!(o && o.confirmando),
+  };
+  const { registrarAcaoConfirmada } = montar(['registrarAcaoConfirmada'], deps, ['registrarAcaoConfirmada']);
+  registrarAcaoConfirmada('reject', { creatorId: 1 });
+  assert.equal(ctxs.at(-1).filaZerada, true,
+    'a confirmação não pergunta pela fila zerada (ou não avisa que está confirmando) — "Tudo limpo" nunca sai');
+});

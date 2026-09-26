@@ -369,11 +369,14 @@ test('fila que termina com PULADOS não diz "Tudo limpo!" nem "confira o país":
       document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
       dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
       atualizarConviteInstalar() {}, marcarBordaRolagem() {}, checarConquistas() {}, dlog() {},
+      // A conquista "Tudo limpo" é perguntada no fim da tarefa (ver
+      // test/conquistas-momento.test.mjs); aqui só interessa a frase.
+      filaZeradaConfirmada: () => false,
       trocarTextoI18n: (e, k) => { if (e) e.attrs['data-i18n'] = k; },
     };
     const chaves = Object.keys(deps);
     const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base};\n`
-      + fatiar('showNoPlaces') + '\nreturn showNoPlaces;')(...chaves.map((k) => deps[k]));
+      + fatiar('puladosNestaFila') + '\n' + fatiar('showNoPlaces') + '\nreturn showNoPlaces;')(...chaves.map((k) => deps[k]));
     fn();
     return [h3.attrs['data-i18n'], p.attrs['data-i18n']];
   };
