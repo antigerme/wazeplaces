@@ -2247,6 +2247,16 @@ async function handleValidarPlace(data, { sessions, aoFundo }) {
   };
   const carona = iniciarCarona(data, cookieHeader, region);
   const result = await callWaze(wazeFeaturesEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
+  // Aprovar muda a lista de fotos do LOCAL (a pendente vira aprovada), e a
+  // releitura que o excluir-foto guardou ao tocar numa lixeira ainda a via
+  // pendente. Dentro da janela dela, excluir a foto recém-aprovada dava "só foto
+  // aprovada pode ser excluída", e excluir OUTRA gravava de volta o
+  // `approved: false` velho — o Waze substitui a lista inteira (gotcha #57).
+  // Esquecida, a próxima exclusão relê do Waze. Com qualquer resultado: o que
+  // importa é o Waze PODER ter mudado a lista. E só no aprovar: rejeitar é o
+  // gesto de todo swipe, e uma leitura do KV a mais em cada um pesaria na cota;
+  // aprovar é raro — só foto, só L6+AM (auditoria de 2026-09-26).
+  if (aprovar) await esquecerReleitura(data, sessions);
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
   const extra = await esperarCarona(carona, aoFundo);
 
@@ -2336,7 +2346,7 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
       const corte = bruto.indexOf('|');
       const ts = parseInt(bruto.slice(0, corte), 10);
       if (Number.isFinite(ts) && Math.floor(Date.now() / 1000) - ts <= RELEITURA_TTL) {
-        return { venue: JSON.parse(bruto.slice(corte + 1)), doCache: true };
+        return { venue: JSON.parse(bruto.slice(corte + 1)), doCache: true, lidoEm: ts };
       }
     }
   } catch (e) { /* cache ilegível é cache ausente */ }
@@ -2357,10 +2367,26 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
   // Só o que a escrita precisa. Guardar o venue inteiro seria guardar geometria
   // e escrituração à toa.
   const enxuto = { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) };
+  // `lidoEm` viaja junto: é a IDADE da lista, e quem regrava o cache depois de
+  // excluir tem que manter esta hora, não a da escrita (ver a regravação logo
+  // depois da escrita, no `handleExcluirFoto`).
+  const lidoEm = Math.floor(Date.now() / 1000);
   try {
-    await sessions.store.put(chave, Math.floor(Date.now() / 1000) + '|' + JSON.stringify(enxuto), RELEITURA_TTL_STORE);
+    await sessions.store.put(chave, lidoEm + '|' + JSON.stringify(enxuto), RELEITURA_TTL_STORE);
   } catch (e) { /* sem cache o app só fica mais lento */ }
-  return { venue: enxuto, doCache: false };
+  return { venue: enxuto, doCache: false, lidoEm };
+}
+
+// Esquece a releitura guardada de um local: a próxima exclusão relê do Waze.
+// Lê antes de apagar, pelo mesmo motivo do `destroySession` (no KV o apagamento
+// é a cota curta), e o registro quase nunca existe — só no minuto depois de a
+// pessoa tocar numa lixeira daquele local.
+async function esquecerReleitura(data, sessions) {
+  try {
+    const chave = await chaveDaReleitura(data);
+    if ((await sessions.store.get(chave)) == null) return;
+    await sessions.store.delete(chave);
+  } catch (e) { /* sem apagar, o registro deixa de valer sozinho em RELEITURA_TTL */ }
 }
 
 async function handleExcluirFoto(data, { sessions }) {
@@ -2461,9 +2487,16 @@ async function handleExcluirFoto(data, { sessions }) {
   //    substitui a lista inteira). MEDIDO que o Waze não a ressuscita, mas
   //    depender disso é depender do eco que o próprio passo 4 diz não ser prova
   //    (auditoria de 2026-09-25).
+  //
+  //    Com o carimbo da LEITURA, nunca o da escrita: o que se regrava é a lista
+  //    lida lá atrás menos uma foto, e ela não fica mais nova por isso. Com a
+  //    hora da escrita, exclusões em série EMPURRAVAM o prazo e a lista
+  //    envelhecia além dos RELEITURA_TTL — MEDIDO: a leitura dos 0 s servia a
+  //    exclusão dos 20 s, e a foto que outro editor subiu aos 16 s era apagada
+  //    (auditoria de 2026-09-26).
   try {
     await sessions.store.put(await chaveDaReleitura(data),
-      Math.floor(Date.now() / 1000) + '|' + JSON.stringify({ id: venue.id, images: restantes }), RELEITURA_TTL_STORE);
+      rel.lidoEm + '|' + JSON.stringify({ id: venue.id, images: restantes }), RELEITURA_TTL_STORE);
   } catch (e) { /* sem cache, a próxima exclusão relê do Waze */ }
 
   // 4) Conferência pelo que o Waze DEVOLVEU — e o eco NÃO É PROVA, então isto

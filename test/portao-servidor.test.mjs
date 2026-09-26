@@ -391,3 +391,87 @@ test('testar-cookies: um sessionToken no corpo NÃO deixa o login regravar aquel
   assert.match(await s.sessions.loadSession(s.sessionToken), /sessao-A-rotacionada/,
     'CONTROLE: a ação não regravou o cookie rotacionado — o teste acima passaria por vácuo');
 });
+
+// O "Waze" de um local só, com a lista de fotos mudando no tempo — a leitura
+// por bbox devolve a lista ATUAL e a escrita a SUBSTITUI inteira (gotcha #57).
+function wazeDeUmLocal(V, fotos) {
+  const w = { fotos, leituras: 0, escritas: [] };
+  w.responder = (url, init) => {
+    if ((init.method || 'GET') === 'GET') { w.leituras++; return json({ venues: { objects: [{ id: V, images: w.fotos }] } }); }
+    const sub = JSON.parse(init.body).actions._subActions[0];
+    if (sub.name === 'UPDATE_PLACE_UPDATE') {   // aprovar: a pendente vira aprovada
+      const id = sub._subActions[0].attributes.id;
+      w.fotos = w.fotos.map((f) => (f.id === id ? { ...f, approved: true } : f));
+      return json({});
+    }
+    w.fotos = sub.attributes.images;
+    w.escritas.push(w.fotos);
+    return json({ status: 0, synced: true, venues: { [V]: { id: V, images: w.fotos } } });
+  };
+  return w;
+}
+
+test('excluir-foto: exclusões em série não empurram o prazo da releitura — a foto nova de outro editor fica', async () => {
+  // A regravação do cache depois de excluir usava a hora da ESCRITA: cada
+  // exclusão renovava o prazo de uma lista que não ficou mais nova, e a
+  // leitura dos 0 s servia a exclusão dos 20 s (o prazo é de 15).
+  const s = await sessaoDeTeste(COOKIES);
+  const w = wazeDeUmLocal('v1', [{ id: 'A', approved: true }, { id: 'B', approved: true }, { id: 'C', approved: true }]);
+  const excluir = (imageID, extra = {}) =>
+    dispatch('excluir-foto', { ...s.dados, region: 'row', venueID: 'v1', imageID, lat: -23.5, lon: -46.6, ...extra }, s.ctx);
+  const relogio = Date.now;
+  let agora = relogio();
+  Date.now = () => agora;
+  try {
+    await comWaze(w.responder, async () => {
+      await excluir('A', { action: 'preparar' });   //  0 s: toca na lixeira → LÊ
+      agora += 10_000; await excluir('A');          // 10 s: confirma, com a leitura dos 0 s (dentro dos 15)
+      agora += 6_000;                               // 16 s: OUTRO editor sobe a foto D
+      w.fotos = [...w.fotos, { id: 'D', approved: true }];
+      await excluir('B', { action: 'preparar' });   // 16 s: toca na lixeira de novo
+      agora += 4_000; await excluir('B');           // 20 s: confirma
+    });
+  } finally {
+    Date.now = relogio;
+  }
+  const ids = (l) => l.map((i) => i.id);
+  assert.ok(w.fotos.some((i) => i.id === 'D'),
+    `a foto que outro editor subiu aos 16 s foi APAGADA — escritas: ${JSON.stringify(w.escritas.map(ids))}`);
+  assert.equal(w.leituras, 2, 'a leitura dos 0 s serviu além do prazo (ou o cache parou de servir dentro dele)');
+  assert.deepEqual(w.escritas.map(ids), [['B', 'C'], ['C', 'D']]);
+});
+
+test('validar-place: aprovar a foto esquece a releitura guardada — a exclusão seguinte relê', async () => {
+  // Tocou na lixeira de uma foto (a releitura fica guardada), desistiu,
+  // aprovou a pendente e, segundos depois, foi excluir: a releitura ainda via a
+  // aprovada como PENDENTE.
+  for (const [alvo, esperado] of [
+    ['NOVA', [{ id: 'VELHA', approved: true }]],    // era "só foto aprovada pode ser excluída"
+    ['VELHA', [{ id: 'NOVA', approved: true }]],    // gravava de volta o `approved: false` velho
+  ]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const w = wazeDeUmLocal('v1', [{ id: 'VELHA', approved: true }, { id: 'NOVA', approved: false }]);
+    const base = { ...s.dados, region: 'row', venueID: 'v1', lat: -23.5, lon: -46.6 };
+    const { r } = await comWaze(w.responder, async () => {
+      await dispatch('excluir-foto', { ...base, imageID: 'VELHA', action: 'preparar' }, s.ctx);
+      const ap = await dispatch('validar-place', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'NOVA', approve: true }, s.ctx);
+      assert.equal(ap.body.action, 'approved', 'pré-condição: a aprovação passou');
+      return dispatch('excluir-foto', { ...base, imageID: alvo }, s.ctx);
+    });
+    assert.equal(r.body.success, true, `excluir ${alvo} depois de aprovar: ${r.body.errorKey || JSON.stringify(r.body)}`);
+    assert.deepEqual(w.escritas, [esperado], `excluir ${alvo}: gravou uma lista velha`);
+  }
+});
+
+test('validar-place: rejeitar NÃO toca na releitura guardada (é o gesto de todo swipe; a cota do KV é contada)', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  const lidas = [];
+  const ler = s.store.get;
+  s.store.get = async (k) => { lidas.push(k); return ler(k); };
+  const w = wazeDeUmLocal('v1', []);
+  await comWaze(w.responder, () => dispatch('validar-place', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'u1' }, s.ctx));
+  assert.equal(lidas.filter((k) => String(k).startsWith('reler_')).length, 0, 'rejeitar leu a releitura do KV');
+  // CONTROLE: aprovar lê (o instrumento enxerga a leitura).
+  await comWaze(w.responder, () => dispatch('validar-place', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'u1', approve: true }, s.ctx));
+  assert.equal(lidas.filter((k) => String(k).startsWith('reler_')).length, 1, 'CONTROLE: aprovar não consultou a releitura');
+});
