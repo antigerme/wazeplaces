@@ -524,3 +524,63 @@ test('cabeçalho que não dá pra converter sem perda segue aceito como veio (o 
     ['_csrf_token\tc', '_web_session\ts', 'x\t1'].map((f) => '.waze.com\tTRUE\t/\tTRUE\t0\t' + f).join('\n'));
   assert.equal(cabecalhoParaNetscape(COOKIES), COOKIES);
 });
+
+import { DUPLICADO_ESPERA_MS } from '../server/core.mjs';
+
+// Um pedido DUPLICATE: a busca faz uma releitura por bbox pra achar o NOME do
+// local apontado (ver `resolverDuplicados`).
+const DUP_ORIGEM = '205391388.2053651740.4527272';
+const DUP_ALVO = '205391388.2053651740.12920425';
+const BUSCA_COM_DUPLICADO = { users: { objects: [] }, venues: { objects: [{
+  id: DUP_ORIGEM, name: 'Estacionamento', permissions: -1, images: [],
+  geometry: { type: 'Point', coordinates: [-46.6, -23.5] },
+  venueUpdateRequests: [{ id: 'ur-dup', type: 'REQUEST', subType: 'FLAG', flagType: 'DUPLICATE',
+    flagSubjectType: 'VENUE', flagEntityID: DUP_ALVO, isRead: false }],
+}] }, mapIssues: { venueUpdateRequests: { hasMore: false } } };
+const RELEITURA_DO_ALVO = { venues: { objects: [{ id: DUP_ALVO, name: 'Natan Estacionamento',
+  geometry: { type: 'Point', coordinates: [-46.6, -23.49914] } }] } };
+
+test('buscar-places: a releitura do duplicado tem TETO próprio — presa, a busca sai sem o nome', { timeout: 60_000 }, async () => {
+  // Sem teto próprio, a leitura acessória herdava os 30 s do `callWaze`, e
+  // busca lenta + releitura presa passavam dos 45 s em que o cliente desiste.
+  const s = await sessaoDeTeste(COOKIES);
+  // A releitura fica PRESA até o teste soltar — ou até o `callWaze` abortar
+  // (sem obedecer ao aborto, o teste sem o conserto nunca terminaria).
+  const soltar = [];
+  const t0 = Date.now();
+  const { r, chamadas } = await comWaze((url, init) => {
+    if (/Issues\/Search\/List/.test(url)) return json(BUSCA_COM_DUPLICADO);
+    return new Promise((ok, erro) => {
+      soltar.push(() => ok(json(RELEITURA_DO_ALVO)));
+      init.signal?.addEventListener('abort', () => erro(new Error('abortado')));
+    });
+  }, () => dispatch('buscar-places', { ...s.dados, region: 'row' }, s.ctx));
+  const levou = Date.now() - t0;
+  // Retrato ANTES de soltar: a leitura solta ainda escreveria no objeto.
+  const duplicado = r.body.places?.[0]?.duplicado;
+  soltar.forEach((f) => f());           // senão o processo espera os 30 s dela
+  assert.ok(chamadas.some((c) => /\/Features/.test(c.url)), 'pré-condição: a busca tentou a releitura');
+  assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 120));
+  assert.equal(r.body.places.length, 1);
+  assert.equal(duplicado, undefined, 'inventou o nome de uma releitura que não voltou');
+  assert.ok(levou < DUPLICADO_ESPERA_MS + 2000,
+    `a busca esperou a releitura acessória por ${levou} ms (teto: ${DUPLICADO_ESPERA_MS} ms)`);
+
+  // CONTROLE: releitura que volta a tempo traz o nome — o teto não corta o caminho normal.
+  const s2 = await sessaoDeTeste(COOKIES);
+  const rapida = await comWaze((url) => json(/Issues\/Search\/List/.test(url) ? BUSCA_COM_DUPLICADO : RELEITURA_DO_ALVO),
+    () => dispatch('buscar-places', { ...s2.dados, region: 'row' }, s2.ctx));
+  assert.equal(rapida.r.body.places[0].duplicado?.nome, 'Natan Estacionamento', 'CONTROLE: o nome do duplicado não chegou');
+});
+
+test('o teto do duplicado cabe no prazo do cliente: busca (teto do callWaze) + releitura < 45 s do `_post`', () => {
+  // A justificativa do número, conferida nas FONTES: se alguém subir o teto do
+  // duplicado (ou encurtar o do cliente), a busca volta a se perder pelo enfeite.
+  const core = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8');
+  const tetoBusca = /async function callWaze\(url[\s\S]*?controller\.abort\(\), (\d+)\)/.exec(core);
+  const tetoCliente = /async _post\([\s\S]*?controller\.abort\(\), (\d+)\)/.exec(API_JS);
+  assert.ok(tetoBusca && tetoCliente, 'não achei os tetos nas fontes — o instrumento quebrou, não a regra');
+  const soma = Number(tetoBusca[1]) + DUPLICADO_ESPERA_MS;
+  assert.ok(soma < Number(tetoCliente[1]),
+    `busca (${tetoBusca[1]} ms) + releitura (${DUPLICADO_ESPERA_MS} ms) = ${soma} ms não cabe nos ${tetoCliente[1]} ms do cliente`);
+});

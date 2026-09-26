@@ -1550,6 +1550,21 @@ const DUPLICADO_BBOX_GRAUS = 0.004;
 // isso é zero ou um por página —, então o teto nunca é atingido em uso normal:
 // ele existe pra uma página anômala não virar rajada contra o Waze.
 const MAX_DUPLICADOS_POR_BUSCA = 4;
+// Teto PRÓPRIO da releitura do duplicado, contado depois de a busca voltar. O
+// nome do duplicado é enfeite do card, e a fila é o que o editor está
+// esperando; sem teto próprio, a leitura acessória herdava os 30 s do
+// `callWaze`, e busca lenta + releitura presa passavam dos 45 s em que o
+// CLIENTE desiste (`_post`, no api.js) — a fila inteira se perdia pelo enfeite
+// (auditoria de 2026-09-26; medido com um Waze de mentira: releitura de 40 s,
+// busca respondida em 30 s, sem o nome de qualquer jeito).
+//
+// Por que 3 s: é ~3× a leitura mais lenta medida no Waze (977 ms, o
+// `/Session`; a releitura por bbox do excluir-foto anda em ~700 ms), então num
+// dia normal o nome chega; e a pior soma — os 30 s da busca mais este teto —
+// cabe nos 45 s do cliente com folga, o que `test/portao-servidor.test.mjs`
+// confere nas duas fontes. Estourou, a busca sai sem o nome e o card cai na
+// forma isolada ("Duplicado"), a mesma de quando a releitura falha.
+export const DUPLICADO_ESPERA_MS = 3000;
 // Id de local do Waze: três inteiros separados por ponto, o do meio podendo ser
 // negativo (medido). Serve pra não sair fazendo leitura por causa de um
 // `flagEntityID` que na verdade é UUID de foto — o mesmo campo carrega as duas
@@ -1598,7 +1613,17 @@ async function resolverDuplicados(places, cookieHeader, csrf, region, ctx) {
   // leitura que volte estranha (corpo `null`, venue sem geometria) não pode
   // derrubar a FILA inteira com um 500 — era o que um `atual.venues` de `null`
   // fazia, porque a exceção subia pelo `Promise.all` até o `buscar-places`.
-  await Promise.all(alvos.map(({ p, centro }) => resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx).catch(() => {})));
+  // E com TETO (`DUPLICADO_ESPERA_MS`): o que não voltou até lá fica sem nome.
+  let timer;
+  const teto = new Promise((resolve) => { timer = setTimeout(resolve, DUPLICADO_ESPERA_MS); });
+  try {
+    await Promise.race([
+      Promise.all(alvos.map(({ p, centro }) => resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx).catch(() => {}))),
+      teto,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx) {
