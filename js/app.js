@@ -6008,7 +6008,11 @@ async function handleUnauthorized() {
             }
             dfato('sessao.alarmeFalso', { sondaOk: !!(r && r.success) });
             dlogCapturarAuto('alarmeFalso');
-            showToast(t('toast.sessionKeptAlive'), 'info');
+            // "Continua válida" só quando a sonda RESPONDEU (é a prova de vida).
+            // Sonda que falhou por rede ou 5xx não prova nada — a sessão segue
+            // aberta porque não dá pra saber, e o aviso diz isso (auditoria de
+            // 2026-09-26: "sua sessão continua válida" saía sem prova nenhuma).
+            showToast(t(r.success ? 'toast.sessionKeptAlive' : 'toast.sessionUnconfirmed'), 'info');
             rebuscarDepoisDeFalha();
             // A ação que levou o 401 foi pra fila de saída (ver o
             // `handleActionResult`): com a sessão confirmada viva, ela sai já.
@@ -6031,6 +6035,10 @@ async function handleUnauthorized() {
 
 // Chave do core → frase que o editor lê. Chave desconhecida cai na frase
 // genérica de sempre: mensagem vaga é ruim, mensagem errada é pior.
+// O `srv.err.sessionExpired` é "sessão expirada OU INVÁLIDA" no core: vale pra
+// inatividade, mas também pra chave do servidor trocada, sessão apagada e token
+// estranho — a frase dizia "venceu por inatividade" pra todos (auditoria de
+// 2026-09-26), e hoje diz só o que se sabe: a sessão não vale mais.
 const MOTIVO_DA_QUEDA = {
     'srv.err.cookiesExpired': 'toast.sessionExpired.waze',
     'srv.err.sessionExpired': 'toast.sessionExpired.local',

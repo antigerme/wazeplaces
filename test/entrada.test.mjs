@@ -800,3 +800,39 @@ test('link pra copiar à mão (área de transferência recusada): selecionar nã
     'o link de socorro voltou a ser um toast comum de 12 s');
   assert.ok(Number((/const TOAST_COPIAVEL_MS = (\d+);/.exec(APP) || [])[1]) >= 30000, 'o link pra copiar à mão fica menos de 30 s');
 });
+
+// ── A20: o aviso diz só o que a sonda PROVOU ────────────────────────────────
+async function sondar(resposta) {
+  const toasts = [], quedas = [];
+  const deps = {
+    dlog() {}, verificandoSessao: false, AppState: { authenticated: true }, VERIFICA_SESSAO_MS: 0,
+    API: { getProfile: async () => resposta }, derrubarSessao: (k) => quedas.push(k || null),
+    guardarReferencias() {}, guardarPerfilDoPortao() {}, renderProfileHeader() {}, dfato() {}, dlogCapturarAuto() {},
+    showToast: (m) => toasts.push(m), t: (k) => k, rebuscarDepoisDeFalha() {}, esvaziarFilaDeSaida() {},
+    showAccessDenied() {}, showAuthScreen() {},
+  };
+  const { handleUnauthorized } = montar(['handleUnauthorized'], deps, ['handleUnauthorized']);
+  await handleUnauthorized();
+  return { toasts, quedas };
+}
+
+test('sonda que FALHOU por rede/5xx não afirma que a sessão "continua válida"; a queda não afirma "inatividade"', async () => {
+  const falhou = await sondar({ success: false, errorCategory: 'transient', errorKey: 'srv.err.wazeDown', errorVars: { code: 503 } });
+  assert.deepEqual(falhou.toasts, ['toast.sessionUnconfirmed'],
+    'a sonda que não respondeu disse que a sessão "continua válida" — sem prova nenhuma');
+  assert.deepEqual(falhou.quedas, [], 'CONTROLE: falha de rede não pode derrubar a sessão (gotcha #42)');
+  // CONTROLE: a sonda que RESPONDEU é a prova de vida — aí a frase é verdadeira.
+  const viva = await sondar({ success: true, profile: { id: 1 } });
+  assert.deepEqual(viva.toasts, ['toast.sessionKeptAlive']);
+  const morta = await sondar({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' });
+  assert.deepEqual(morta.quedas, ['srv.err.sessionExpired']);
+  // As frases, nas 4 línguas.
+  const D = dicionario();
+  for (const lang of Object.keys(D)) {
+    assert.ok(D[lang]['toast.sessionUnconfirmed'], `${lang}: falta o aviso de sessão não confirmada`);
+    assert.doesNotMatch(D[lang]['toast.sessionUnconfirmed'], /válid|valid/i, `${lang}: o "não confirmada" afirma validade`);
+    // `srv.err.sessionExpired` é "expirada OU INVÁLIDA": chave trocada, sessão apagada, token estranho.
+    assert.doesNotMatch(D[lang]['toast.sessionExpired.local'], /inatividade|inactivity|inactividad|inactivit/i,
+      `${lang}: a queda afirma "inatividade", e o servidor não sabe disso`);
+  }
+});
