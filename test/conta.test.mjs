@@ -58,6 +58,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     window: { Presenca: { esquecer: () => log.push('chat') } },
     esvaziarFilaDeSaida: () => log.push('esvaziar'),
     esquecerFocoAutor: () => log.push('foco'),
+    presencaWmeZerar: () => {},   // a presença da conta anterior (test/costura-sessao, K5)
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida'];
@@ -318,6 +319,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     atualizarSeloDeConquista: () => {}, saveStats: () => {}, updateStats: () => {},
     offlineEsquecer: () => {}, dlogApagar: () => {}, window: { Presenca: { esquecer: () => {} } },
     esquecerFocoAutor: () => log.push('foco'),
+    presencaWmeZerar: () => {}, presencaWmeRefazerDesligar: () => {},   // test/costura-sessao, K5
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];

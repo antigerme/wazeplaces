@@ -227,7 +227,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     AppState, document, window: {}, dfato: nada, carregarFilaDeSaida: () => [], salvarFilaDeSaida: nada,
     updateInFlightIndicator: nada, esquecerAutores: nada, safeLS: { remove: nada }, HISTORY_KEY: 'h', CONQUISTAS_KEY: 'c',
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
-    showToast: nada, t: (k) => k, filaAtravessouSessao: false,
+    showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
   };
   const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente'],
     deps, ['esquecerOutraConta', 'manterFocoNaFrente']);

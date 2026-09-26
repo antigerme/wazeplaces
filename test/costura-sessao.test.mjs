@@ -569,3 +569,54 @@ test('K4: B entra no aparelho de A (5 pulados) e pula 1 — a fila NÃO termina 
   assert.equal(h.puladosNestaFila(), 1, 'DEFEITO: o pulado de B não conta — a base ainda é a da conta anterior');
   assert.equal(h.filaZeradaConfirmada(), false, 'a fila com um PULADO foi dada como limpa (conquista e confete)');
 });
+
+// ═══ K5 · desligar a presença sem o perfil ═══════════════════════════════════
+
+function montarPresencaWme(perfil = null) {
+  const enviados = [];
+  const AppState = { profile: perfil, preferences: { presenca: true }, stats: {} };
+  const presencaWme = { ligarNaProxima: true, desligarPendente: false, ultimaEm: 0, perfilVisivel: null, perfilEm: 0 };
+  const deps = {
+    AppState, presencaWme, dfato: () => {},
+    API: { getSession: () => 'tok-A', presencaWaze: async (c) => { enviados.push(c); return { success: true }; } },
+    filaAtravessouSessao: false, safeLS: { remove() {} }, carregarFilaDeSaida: () => [], window: {},
+  };
+  const h = montar(['presencaWmeDesligar', 'presencaWmeRefazerDesligar', 'presencaWmeAoCarregarPerfil',
+    'presencaWmeZerar', 'definirPerfil', 'esquecerOutraConta'], deps);
+  return { h, deps, enviados, AppState, presencaWme };
+}
+
+test('K5: desligar o "Ver quem está no app" SEM o perfil (aberto sem rede) — o "invisível" sai quando o perfil chega', async () => {
+  const m = montarPresencaWme(null);
+  m.AppState.preferences.presenca = false;     // o interruptor
+  m.h.presencaWmeDesligar();
+  assert.equal(m.presencaWme.desligarPendente, true, 'o desligar sem perfil não ficou pendente');
+  m.h.presencaWmeRefazerDesligar();             // a rede volta ANTES de o perfil ser gravado
+  assert.equal(m.presencaWme.desligarPendente, true, 'a prova de rede sem perfil apagou o pendente');
+  m.h.definirPerfil({ success: true, visivelNoWme: true, profile: { id: 111 } });
+  await tique();
+  assert.deepEqual(m.enviados, [{ userId: '111', visivel: false }],
+    'DEFEITO: o desligar feito antes do perfil nunca foi pro WME — a pessoa segue visível lá');
+  assert.equal(m.presencaWme.desligarPendente, false);
+});
+
+test('K5: o "invisível" pendente de A NÃO sai pra outra conta que entrar no aparelho', async () => {
+  const m = montarPresencaWme(null);
+  m.AppState.preferences.presenca = false;
+  m.h.presencaWmeDesligar();                    // A, sem perfil: pendente
+  m.h.esquecerOutraConta('222');                // o perfil revela B
+  m.AppState.profile = { id: 222 };
+  m.h.presencaWmeRefazerDesligar();
+  await tique();
+  assert.deepEqual(m.enviados, [], 'DEFEITO: o app desligou a visibilidade de B no WME sem o gesto dela');
+});
+
+test('K5: CONTROLE — sem perfil e com o interruptor LIGADO de novo, nada fica pendente nem sai', async () => {
+  const m = montarPresencaWme(null);
+  m.AppState.preferences.presenca = false;
+  m.h.presencaWmeDesligar();
+  m.AppState.preferences.presenca = true;       // religou antes de o perfil chegar
+  m.h.definirPerfil({ success: true, visivelNoWme: true, profile: { id: 111 } });
+  await tique();
+  assert.deepEqual(m.enviados, [], 'desligou quem religou');
+});

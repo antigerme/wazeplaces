@@ -3717,6 +3717,9 @@ function definirPerfil(res) {
     guardarPrazoDaSessao(res);
     renderProfileHeader();
     presencaWmeAoCarregarPerfil(res.visivelNoWme);
+    // O "invisível" que a pessoa pediu antes de o perfil chegar (ver
+    // `presencaWmeDesligar`): agora ele tem pra quem ir.
+    presencaWmeRefazerDesligar();
     return true;
 }
 
@@ -12576,6 +12579,10 @@ function esquecerOutraConta(id) {
     // terminava com PULADO dizia "Tudo limpo!", com confete e a conquista — o
     // H9 de volta pela troca de conta (auditoria da costura, 2026-09-26, K4).
     puladosNoInicioDaFila = 0;
+    // A presença no WME era da conta anterior: o freio, os contadores e — o que
+    // importa — o "invisível" que ela deixou PENDENTE, que sem isto sairia pra
+    // quem entrou, sem o gesto dela ("o app nunca desliga por conta própria").
+    presencaWmeZerar();
     saveStats();
     updateStats();
     offlineEsquecer();
@@ -14564,8 +14571,17 @@ function presencaWmeAoCarregarPerfil(visivel) {
 function presencaWmeDesligar() {
     presencaWme.ligarNaProxima = false;
     presencaWme.desligarPendente = false;
+    if (!API.getSession()) return;
     const id = AppState.profile && AppState.profile.id;
-    if (id === null || id === undefined || !API.getSession()) return;
+    // Sem o PERFIL (o app aberto sem rede com a fila guardada, ou o perfil que
+    // falhou na abertura) o `visivel: false` não tem pra quem ir — e era
+    // descartado: a volta da rede e a chegada do perfil não o mandavam nunca, e
+    // a pessoa seguia visível no WME (auditoria da costura, 2026-09-26, K5).
+    // Fica pendente, e o perfil chegando o manda (`definirPerfil`).
+    if (id === null || id === undefined) {
+        if (AppState.preferences.presenca === false) presencaWme.desligarPendente = true;
+        return;
+    }
     API.presencaWaze({ userId: String(id), visivel: false })
         .then((r) => {
             // Só REDE fica pendente; recusa de verdade não se repete sozinha.
