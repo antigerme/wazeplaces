@@ -108,6 +108,25 @@ export const MIGRACOES = [
         + 'hoje de manhã.',
   },
   {
+    id: 'saida-sem-marca',
+    desde: '2026-09-26',
+    revisarEm: '2026-10-26',
+    familia: 'aparelho',
+    onde: 'js/app.js',
+    oque: 'O `adotarSaidaSemMarca` no `initApp`. A partir desta versão cada item '
+        + 'da fila de saída leva a marca da SESSÃO do gesto (`s`), e o item SEM '
+        + 'conta de outra sessão tem dono desconhecido: não vai ao Waze (O3 da '
+        + 'auditoria de 2026-09-26 — o item nulo saía no nome de qualquer conta '
+        + 'que entrasse depois). Item gravado ANTES não tem a marca; o que ainda '
+        + 'espera envio na abertura com sessão foi feito nela, e é adotado.',
+    removerQuando: 'Todo aparelho de testador tiver aberto esta versão COM '
+        + 'sessão (a adoção grava a marca na primeira abertura) — ou entrado de '
+        + 'novo, quando o item sem marca sai como dono desconhecido. Sem a '
+        + 'adoção, o item de versão anterior de quem segue logado seria '
+        + 'descartado na primeira abertura: uma decisão feita offline perdida '
+        + 'justamente no deploy.',
+  },
+  {
     id: 'fila-guardada-desde',
     desde: '2026-09-22',
     revisarEm: '2026-10-22',

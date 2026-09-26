@@ -83,11 +83,12 @@ function montar({ offline = true } = {}) {
     updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-22',
     contaAgora: () => null,   // a conta do gesto (ver test/conta.test.mjs)
+    marcaDaSessao: () => 'marca',   // a sessão do gesto (idem)
     ondeAgora: () => '30',
     AppState: { queue: [], currentPlace: null },
     pedidosQueEntraramNaFila: new Set(),
     // A região do Waze vai no item (ver `enfileirarSaida`).
-    API: { getRegion: () => 'row' },
+    API: { getRegion: () => 'row', getSession: () => 'tok' },
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + `

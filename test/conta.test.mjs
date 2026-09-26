@@ -58,8 +58,8 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     window: { Presenca: { esquecer: () => log.push('chat') } },
     esvaziarFilaDeSaida: () => log.push('esvaziar'),
   };
-  const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta',
-    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida'];
+  const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
+    'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let saidaEsperandoConta = false;\n${nomes.map(fatiar).join('\n')}
     return { ${nomes.join(', ')}, esperando: () => saidaEsperandoConta, esperar: () => { saidaEsperandoConta = true; } };`)(
@@ -154,7 +154,9 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
     return { esvaziarFilaDeSaida, carregarFilaDeSaida, esperando: () => saidaEsperandoConta };`)(...chaves.map((k) => deps[k]));
   return { app, enviados, log, AppState, guardado };
 }
-const I = (v, conta, tipo = 'reject') => ({ tipo, venueID: v, updateRequestID: 'u' + v, conta, regiao: 'row' });
+const I = (v, conta, tipo = 'reject', marcaDoGesto) => ({ tipo, venueID: v, updateRequestID: 'u' + v, conta, regiao: 'row',
+  ...(marcaDoGesto !== undefined ? { s: marcaDoGesto } : {}) });
+const marcaDe = (token) => new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')()(token);
 
 test('esvaziar: item de OUTRA conta não vai ao Waze, e o placar do gesto desce', async () => {
   const d = drenar({ itens: [I('v1', 'A'), I('v2', 'B')], perfil: { id: 'B' } });
@@ -176,11 +178,77 @@ test('esvaziar: conta ainda DESCONHECIDA (sessão nova, perfil a caminho) espera
 test('esvaziar: sem rede no perfil mas NA MESMA sessão, a conta guardada vale e a fila sai', async () => {
   // O caso do "Disponível offline": aberto sem rede, o perfil não carrega.
   const token = 'tok-A';
-  const marca = new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')()(token);
-  const d = drenar({ itens: [I('v1', 'A'), I('v2', null)], perfil: null, token, guardada: { id: 'A', s: marca } });
+  const marca = marcaDe(token);
+  const d = drenar({ itens: [I('v1', 'A'), I('v2', null, 'reject', marca)], perfil: null, token, guardada: { id: 'A', s: marca } });
   await d.app.esvaziarFilaDeSaida();
   assert.deepEqual(d.enviados, ['v1', 'v2']);
-  // E o item SEM conta (feito antes de haver conta) sai como sempre saiu.
+  // E o item SEM conta feito NESTA sessão (antes de haver conta) sai: o token é o mesmo do gesto.
+});
+
+// ── O3: o item SEM conta tem dono pela SESSÃO (auditoria de 2026-09-26) ─────
+// Gesto antes de o perfil de uma sessão nova chegar: `conta: null`. Esse item
+// saía no nome de QUALQUER conta que entrasse depois — medido no navegador (p1):
+// o ✕ de A foi pro Waze com o token de B, antes de o perfil de B chegar.
+test('O3: item SEM conta de OUTRA sessão tem dono desconhecido — não vai ao Waze, e o placar desce', async () => {
+  const d = drenar({ itens: [I('vA', null, 'reject', marcaDe('tok-A'))], perfil: null, token: 'tok-B' });
+  await d.app.esvaziarFilaDeSaida();
+  assert.deepEqual(d.enviados, [], 'a decisão feita na sessão de A saiu com o token de B');
+  assert.equal(d.app.carregarFilaDeSaida().length, 0, 'o item de dono desconhecido ficou na fila');
+  assert.equal(d.AppState.stats.rejected, 0, 'o placar do gesto que não saiu ficou');
+  assert.ok(d.log.includes('saida.semDono'));
+  // O mesmo vale pro item gravado SEM a marca (versão anterior) que não foi adotado.
+  const e = drenar({ itens: [I('vL', null)], perfil: null, token: 'tok-B' });
+  await e.app.esvaziarFilaDeSaida();
+  assert.deepEqual(e.enviados, [], 'item sem conta e sem marca saiu no nome de quem está aí');
+});
+
+test('O3: cada item leva a marca da SESSÃO do gesto, e o perfil que chega carimba a conta SÓ nos desta sessão', () => {
+  const m = montar({ perfil: null, token: 'tok-A' });
+  m.app.enfileirarSaida('reject', P('v1', 'u1'));                 // A, antes do perfil
+  assert.equal(m.app.carregarFilaDeSaida()[0].s, marcaDe('tok-A'), 'o item não levou a marca da sessão');
+  m.sessao.token = 'tok-B';                                        // a sessão de A cai; B entra
+  m.app.enfileirarSaida('read', P('v2', 'u2'));                    // B, antes do perfil dele
+  m.AppState.profile = { id: 'B' };
+  m.app.aoConhecerConta({ id: 'B' });
+  const f = m.app.carregarFilaDeSaida();
+  const de = (v) => f.find((x) => x.venueID === v);
+  assert.equal(de('v2') && de('v2').conta, 'B', 'o gesto de B, feito antes do perfil, não ganhou a conta de B');
+  assert.ok(!de('v1') || !de('v1').conta, 'o item da sessão de A ganhou a conta de B — sairia no nome dele');
+});
+
+test('O3: a troca de conta leva o que é de dono desconhecido junto com o da conta anterior', () => {
+  const m = montar({ perfil: null, token: 'tok-A' });
+  m.app.aoConhecerConta({ id: 'A' });
+  m.AppState.profile = null;
+  m.app.enfileirarSaida('reject', P('v1', 'u1'));                  // A, sem perfil vivo: conta pela guardada
+  m.guardado.set('waze_places_saida', JSON.stringify([...m.app.carregarFilaDeSaida(),
+    { tipo: 'read', venueID: 'vX', updateRequestID: 'uX', conta: null, s: marcaDe('tok-OUTRA') }]));
+  m.sessao.token = 'tok-B';
+  m.AppState.profile = { id: 'B' };
+  m.app.aoConhecerConta({ id: 'B' });
+  assert.deepEqual(m.app.carregarFilaDeSaida().map((x) => x.venueID), [],
+    'a troca de conta deixou na fila o que não é de quem entrou');
+});
+
+test('O3 (MIGRACAO saida-sem-marca): o item de versão anterior é adotado pela sessão ABERTA, antes do esvaziamento', () => {
+  const m = montar({ perfil: null, token: 'tok-A' });
+  m.guardado.set('waze_places_saida', JSON.stringify([
+    { tipo: 'reject', venueID: 'v1', updateRequestID: 'u1', conta: null },           // versão anterior, sem conta
+    { tipo: 'reject', venueID: 'v2', updateRequestID: 'u2' },                        // anterior ao lote 5: sem nada
+    { tipo: 'read', venueID: 'v3', updateRequestID: 'u3', conta: 'A' },              // com conta: não precisa
+    { tipo: 'read', venueID: 'v4', updateRequestID: 'u4', conta: null, s: 'x' },     // já marcado: não mexe
+  ]));
+  m.app.adotarSaidaSemMarca();
+  const f = m.app.carregarFilaDeSaida();
+  assert.equal(f[0].s, marcaDe('tok-A'));
+  assert.equal(f[1].s, marcaDe('tok-A'));
+  assert.equal(f[2].s, undefined, 'item com conta ganhou marca à toa');
+  assert.equal(f[3].s, 'x', 'item já marcado foi remarcado — sairia no nome da sessão de agora');
+  const ini = fatiar('initApp');
+  const iAdota = ini.indexOf('adotarSaidaSemMarca();');
+  const iEsvazia = ini.indexOf('esvaziarFilaDeSaida();');
+  assert.ok(iAdota > 0 && iEsvazia > iAdota, 'a adoção tem de vir ANTES do esvaziamento da abertura');
+  assert.ok(iAdota > ini.indexOf('if (savedToken)'), 'a adoção só vale COM a sessão aberta');
 });
 
 test('o "Sair" apaga de quem eram os dados, e o perfil chegando confere a conta ANTES do que depende dele', () => {
@@ -244,7 +312,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     atualizarSeloDeConquista: () => {}, saveStats: () => {}, updateStats: () => {},
     offlineEsquecer: () => {}, dlogApagar: () => {}, window: { Presenca: { esquecer: () => {} } },
   };
-  const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carregarFilaDeSaida',
+  const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let saidaEsperandoConta = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 };

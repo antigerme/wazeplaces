@@ -466,6 +466,9 @@ function abrirComSessaoSalva() {
     // O token veio do armazenamento, não do login: sem isto o ciclo desta
     // sessão nasce sem início e a duração não existe (ver a função).
     marcarSessaoJaAtiva();
+    // O que a fila de saída guardou por versão anterior, sem a marca da
+    // sessão, é desta sessão aberta (ver a função). ANTES do esvaziamento.
+    adotarSaidaSemMarca();
     showMainScreen();
     // O que ficou esperando de uma sessão anterior aparece e sai agora.
     // É o segundo (e último) gatilho: o outro é o evento `online`. Nenhum
@@ -11982,6 +11985,10 @@ function contaConfirmada() {
 function aoConhecerConta(perfil) {
     const id = perfil && perfil.id !== undefined && perfil.id !== null && perfil.id !== '' ? String(perfil.id) : null;
     if (!id) return;
+    // ANTES de conferir a troca: o que foi feito NESTA sessão antes de o perfil
+    // chegar (conta nula) é desta conta, e sem o carimbo a troca o levaria junto
+    // com o da conta anterior.
+    carimbarContaNaSaida(id);
     let antes = null;
     try { antes = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { antes = null; }
     if (antes && antes.id && String(antes.id) !== id) esquecerOutraConta(id);
@@ -11989,17 +11996,49 @@ function aoConhecerConta(perfil) {
     if (saidaEsperandoConta) { saidaEsperandoConta = false; esvaziarFilaDeSaida(); }
 }
 
+// Os itens da fila de saída SEM conta (gesto feito antes de o perfil chegar)
+// cuja marca é a da sessão de agora são desta conta: o token é o mesmo. Carimba.
+// Os de OUTRA marca ficam sem conta — o dono é desconhecido, e o esvaziamento
+// não os manda (auditoria de 2026-09-26, O3).
+function carimbarContaNaSaida(id) {
+    const s = marcaDaSessao(API.getSession());
+    const f = carregarFilaDeSaida();
+    let mudou = false;
+    for (const it of f) {
+        if (it && !it.conta && it.s === s) { it.conta = id; mudou = true; }
+    }
+    if (mudou) salvarFilaDeSaida(f);
+}
+
+// MIGRACAO: saida-sem-marca
+// Item gravado antes de a fila de saída guardar a SESSÃO do gesto (até a
+// v2026.09.26-01) não diz de quem é quando vem sem conta. O que ainda espera
+// envio na abertura COM sessão foi feito nela: a fila sai a cada abertura com
+// sessão, e a entrada de outra pessoa (versão anterior) a esvaziava no nome de
+// quem entrou. Adota a marca da sessão aberta; sem sessão, fica sem marca — dono
+// desconhecido, e o esvaziamento não o manda.
+function adotarSaidaSemMarca() {
+    const s = marcaDaSessao(API.getSession());
+    const f = carregarFilaDeSaida();
+    let mudou = false;
+    for (const it of f) {
+        if (it && !it.conta && it.s === undefined) { it.s = s; mudou = true; }
+    }
+    if (mudou) salvarFilaDeSaida(f);
+}
+
 // O que o aparelho guardava da conta ANTERIOR e é DELA sai: o trabalho (placar,
 // Histórico, conquistas), os autores e a recusa automática, as conversas, a fila
 // guardada do offline, as capturas do modo dev e as decisões dela que esperavam
-// envio. Da fila de saída saem só os itens da outra conta: os sem conta são
-// desta sessão (feitos antes de o perfil chegar). Ficam as escolhas do aparelho
+// envio. Da fila de saída fica só o que é da conta que entrou: os feitos nesta
+// sessão antes de o perfil chegar já levaram o carimbo (`carimbarContaNaSaida`),
+// e o que segue sem conta é de dono desconhecido. Ficam as escolhas do aparelho
 // — idioma, tema, preferências e filtros — e a fila na tela, que já veio da
 // busca de quem entrou.
 function esquecerOutraConta(id) {
     dfato('conta.trocou');
     const f = carregarFilaDeSaida();
-    const desta = f.filter((it) => !it || !it.conta || String(it.conta) === id);
+    const desta = f.filter((it) => it && it.conta && String(it.conta) === id);
     if (desta.length !== f.length) { salvarFilaDeSaida(desta); updateInFlightIndicator(); }
     esquecerAutores();
     // O foco da anterior sai ANTES da reordenação que o perfil agenda logo
@@ -12072,6 +12111,11 @@ function enfileirarSaida(tipo, place, regiao, extra) {
              // E a CONTA do gesto (ver `contaAgora`): a fila não pode sair no
              // nome de outra pessoa que entre neste aparelho depois.
              conta: contaAgora(),
+             // E a SESSÃO do gesto (a marca do token): numa sessão nova, antes
+             // de o perfil chegar, a conta sai nula — e aí é a marca que diz de
+             // quem é o item. Sem ela, o item nulo saía no nome de QUALQUER
+             // conta que entrasse depois (auditoria de 2026-09-26, O3).
+             s: marcaDaSessao(API.getSession()),
              // E a REGIÃO do Waze (row/na/il/world), pelo mesmo motivo: enviado
              // depois de a pessoa trocar de região, o pedido iria pro servidor
              // errado, voltaria "não encontrado" e contaria como feito.
@@ -12112,6 +12156,22 @@ async function esvaziarFilaDeSaida() {
     // ainda não pôde atender.
     saidaPedidaDeNovo = false;
     let enviados = 0;
+    // Tira o item SEM ir ao Waze — de outra conta, ou de dono desconhecido: o
+    // placar que subiu no gesto desce (o mesmo da falha de verdade).
+    const tirarSemEnviar = (it, evento) => {
+        const g = carregarFilaDeSaida();
+        const i = g.findIndex((x) => x && x.tipo === it.tipo && x.venueID === it.venueID
+            && x.updateRequestID === it.updateRequestID);
+        if (i >= 0) g.splice(i, 1);
+        salvarFilaDeSaida(g);
+        const statKey = it.tipo === 'read' ? 'read' : 'rejected';
+        AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
+        updateStats();
+        saveStats();
+        updateInFlightIndicator();
+        dfato(evento, { tipo: it.tipo });
+        return g;
+    };
     try {
         while (f.length) {
             // Sair no meio do esvaziamento: PARA. Sem isto o item já em voo
@@ -12127,19 +12187,16 @@ async function esvaziarFilaDeSaida() {
                 const agora = contaAgora();
                 if (!agora) { saidaEsperandoConta = true; break; }
                 if (String(item.conta) !== agora) {
-                    f = carregarFilaDeSaida();
-                    const i = f.findIndex((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
-                        && x.updateRequestID === item.updateRequestID);
-                    if (i >= 0) f.splice(i, 1);
-                    salvarFilaDeSaida(f);
-                    const statKey = item.tipo === 'read' ? 'read' : 'rejected';
-                    AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
-                    updateStats();
-                    saveStats();
-                    updateInFlightIndicator();
-                    dfato('saida.outraConta', { tipo: item.tipo });
+                    f = tirarSemEnviar(item, 'saida.outraConta');
                     continue;
                 }
+            } else if (item && item.s !== marcaDaSessao(API.getSession())) {
+                // SEM conta e de OUTRA sessão (ou gravado sem a marca): o dono é
+                // desconhecido — pode ser a conta de antes da queda, e o token de
+                // agora é de quem entrou. Nunca vai ao Waze. Sem conta e DESTA
+                // sessão sai normalmente: o token é o mesmo do gesto.
+                f = tirarSemEnviar(item, 'saida.semDono');
+                continue;
             }
             const place = { venueID: item.venueID, updateRequestID: item.updateRequestID,
                             creatorId: item.creatorId, createdBy: item.nome || undefined,

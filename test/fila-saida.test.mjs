@@ -477,7 +477,7 @@ function montarResultado() {
     AppState,
     safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
     SAIDA_KEY: 'waze_places_saida', SAIDA_MAX: 1000,
-    API: { getRegion: () => 'row' },
+    API: { getRegion: () => 'row', getSession: () => 'tok' },
     dlog: () => {}, dfato: () => {},
     registrarPouso: () => chamadas.push('pouso'), recordHistory: () => chamadas.push('historico'),
     registrarRejeicaoDeAutor: () => {}, avisarConsequencia: () => {}, registrarAcaoConfirmada: () => {},
@@ -485,6 +485,7 @@ function montarResultado() {
     handleUnauthorized: () => chamadas.push('confere'),
     updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-25', ondeAgora: () => '30', contaAgora: () => null,
+    marcaDaSessao: () => 'marca',
   };
   const fontes = ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'handleActionResult'].map(fatiar).join('\n');
   const nomes = Object.keys(deps);
