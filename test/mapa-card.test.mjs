@@ -117,3 +117,57 @@ test('C4 o mapa ampliado abre pelo enquadramento que MOSTRA os pontos', () => {
   assert.match(open, /this\.z = enq\.z;\s*this\.centro = enq\.centro\.slice\(\);/, 'o open não usa o zoom E o centro do mesmo enquadramento');
   assert.ok(!/mapaMontar\(/.test(open), 'o open voltou a tirar o zoom da conta do card, que enquadra só o primeiro ponto');
 });
+
+// ── C5: a caixa que ENCOLHE também refaz o mapa ────────────────────────────
+function vigia() {
+  let aoMudar = null;
+  const quadros = [];
+  const refeitos = [];
+  const deps = {
+    ResizeObserver: class { constructor(fn) { aoMudar = fn; } observe() {} },
+    requestAnimationFrame: (fn) => { quadros.push(fn); return quadros.length; },
+    renderMapa: (card, place, refazendo) => {
+      refeitos.push(refazendo);
+      box.dataset.mapaW = String(box.clientWidth);   // como o renderMapa de verdade
+      box.dataset.mapaH = String(box.clientHeight);
+    },
+  };
+  const box = { clientWidth: 378, clientHeight: 305, dataset: { mapaW: '378', mapaH: '305' } };
+  new Function(...Object.keys(deps), fatiar('vigiarCaixaDoMapa') + '\nreturn vigiarCaixaDoMapa;')(
+    ...Object.values(deps))(box, {}, {});
+  const mudar = (w, h) => { box.clientWidth = w; box.clientHeight = h; aoMudar(); };
+  const quadro = () => { while (quadros.length) quadros.shift()(); };
+  return { box, mudar, quadro, refeitos, quadros };
+}
+
+test('C5 girar o aparelho (a caixa ENCOLHE) refaz o mini-mapa — e crescer segue refazendo', () => {
+  // MEDIDO: retrato 378×305 → deitado 267×212, e o Fold 246×135 — o marcador
+  // desenhado pra caixa maior ficava fora da caixa e não voltava.
+  const v = vigia();
+  v.mudar(267, 212);
+  assert.equal(v.refeitos.length, 0, 'o observer escreveu no MESMO quadro da notificação (gotcha #35)');
+  v.quadro();
+  assert.equal(v.refeitos.length, 1, 'a caixa encolheu e o mapa não foi refeito: marcador fora da caixa');
+  v.mudar(400, 320);
+  v.quadro();
+  assert.equal(v.refeitos.length, 2, 'CONTROLE: a caixa cresceu e o mapa não foi refeito');
+});
+
+test('C5 CONTROLE: sem mudança de tamanho não refaz (nada de laço), e caixa escondida não conta', () => {
+  const v = vigia();
+  v.mudar(378, 305);
+  v.quadro();
+  assert.equal(v.refeitos.length, 0, 'refez o mapa sem a caixa mudar — custo por quadro pra sempre');
+  // Duas notificações antes do quadro viram UM redesenho.
+  v.mudar(300, 250); v.mudar(290, 240);
+  assert.equal(v.quadros.length, 1, 'duas notificações agendaram dois redesenhos');
+  v.quadro();
+  assert.equal(v.refeitos.length, 1);
+  // Depois de refazer, o tamanho bate: a notificação seguinte não refaz de novo.
+  v.mudar(290, 240);
+  v.quadro();
+  assert.equal(v.refeitos.length, 1, 'refez de novo com o tamanho igual ao do desenho — é o laço');
+  v.mudar(0, 0);
+  v.quadro();
+  assert.equal(v.refeitos.length, 1, 'a caixa escondida (0×0) refez o mapa');
+});

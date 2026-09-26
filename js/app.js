@@ -7464,18 +7464,24 @@ function agendarAquecimento(card) {
 // As cores são as MESMAS do diff — verde entra, vermelho sai. O card já ensina
 // essa gramática na caixa de mudanças; inventar outra aqui obrigaria o editor a
 // aprender duas.
-// A caixa do mapa cresceu depois do enquadramento? Refaz.
+// A caixa do mapa mudou de tamanho depois do enquadramento? Refaz.
 //
 // Não é caso raro: o card é flex e assenta depois do primeiro render, então a
 // medida do momento do render quase sempre subestima. Girar o aparelho e mudar
 // a fonte do sistema fazem o mesmo.
 //
-// Duas regras que vêm do gotcha #35 e não são opcionais: o callback do
+// E vale nos DOIS sentidos. Crescer deixa faixa sem tile; ENCOLHER deixa
+// marcador FORA da caixa, porque o enquadramento foi feito pra caixa maior.
+// Até a auditoria de 2026-09-26 só o crescer refazia ("encolher não abre
+// buraco" — não abre, mas corta o que o mapa existe pra mostrar): MEDIDO
+// girando o celular de retrato (378×305) pra deitado (267×212) e abrindo no
+// Fold (246×135), o marcador saía da caixa, e só voltava girando de novo.
+//
+// A regra do gotcha #35 continua, e é o que impede o laço: o callback do
 // ResizeObserver só AGENDA (a escrita vai no quadro seguinte, fora do ciclo de
-// entrega), e só refaz quando a caixa CRESCEU além do que o enquadramento
-// cobre — encolher não abre buraco, e refazer à toa é custo por quadro pra
-// sempre. Sem essas duas, isto vira o "ResizeObserver loop completed with
-// undelivered notifications" na cara do editor.
+// entrega), e só refaz quando o tamanho é OUTRO que o do desenho — redesenhar
+// não muda a caixa (os tiles são `absolute` num contêiner `overflow-hidden`),
+// então depois de refazer o tamanho bate e o observer sossega.
 function vigiarCaixaDoMapa(box, card, place) {
     if (box._roMapa) return;
     let agendado = 0;
@@ -7485,7 +7491,7 @@ function vigiarCaixaDoMapa(box, card, place) {
             agendado = 0;
             const w = box.clientWidth, h = box.clientHeight;
             if (!w || !h) return;
-            if (w <= (+box.dataset.mapaW || 0) + 0.5 && h <= (+box.dataset.mapaH || 0) + 0.5) return;
+            if (Math.abs(w - (+box.dataset.mapaW || 0)) <= 0.5 && Math.abs(h - (+box.dataset.mapaH || 0)) <= 0.5) return;
             try { renderMapa(card, place, true); } catch (e) { /* mapa nunca derruba o card */ }
         });
     });
