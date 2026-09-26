@@ -3004,7 +3004,16 @@ function populateCategorySelect() {
     if (!sel) return;
     const current = (AppState.filters.categories && AppState.filters.categories[0]) || '';
     const opts = ['<option value="">' + escapeHtml(t('filters.category.all')) + '</option>'];
-    for (const c of AppState.seenCategories) {
+    // A categoria SALVA entra mesmo sem pedido dela na fila. As opções saem do
+    // que a fila já mostrou (`seenCategories`), e com o filtro ligado numa
+    // categoria sem nenhum pendente hoje a fila vem vazia: sem ela na lista, o
+    // seletor aparecia VAZIO e o próximo "Aplicar" (pra trocar só a ordem, por
+    // exemplo) gravava "Todas" por cima, calado (auditoria da fila, 2026-09-26).
+    const vistas = AppState.seenCategories || [];
+    const lista = current && !vistas.includes(current)
+        ? [...vistas, current].sort((a, b) => String(a).localeCompare(String(b), i18nLocale()))
+        : vistas;
+    for (const c of lista) {
         opts.push('<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>');
     }
     sel.innerHTML = opts.join('');
