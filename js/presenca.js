@@ -422,10 +422,17 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
 }
 
 // Chamado pelo app.js com o que voltou DE CARONA na ação (`presencaApp`).
-function presencaAoCarona(p, inicio) {
+// `pais` é o que a carona LEVOU: a lista que volta é a desse país. Com o
+// filtro trocado com a ação no ar, a lista do Brasil entrava como a da França
+// — e, com ela "fresca", o pedido do país novo nem saía (auditoria de
+// 2026-09-26). Lista de outro país fica de fora; a do país novo vem pelo
+// pedido que a troca de filtro já faz.
+function presencaAoCarona(p, inicio, pais) {
     try {
         if (!p || !presencaPodeConectar()) return;
-        presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, API.getCountry(), 'carona');
+        const atual = API.getCountry();
+        if (pais !== undefined && pais !== null && String(pais) !== String(atual)) return;
+        presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, atual, 'carona');
     } catch (e) { /* diagnóstico nunca derruba a ação */ }
 }
 

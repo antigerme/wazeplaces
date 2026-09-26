@@ -78,7 +78,7 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
     AppState, acoesTravadas: () => false, direcaoTravada: () => false, Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
     get epocaDaSessao() { return estado.epoca; },
-    API: { getRegion: () => 'row', rejectPlace: () => new Promise((ok) => { soltar = ok; }) },
+    API: { getRegion: () => 'row', getCountry: () => 30, rejectPlace: () => new Promise((ok) => { soltar = ok; }) },
     scheduleAction: (tipo, place, ex) => agendadas.push(ex),
     presencaWmeDaAcao: () => null, callWithRetry: (fn) => fn(),
     presencaWmeAoResponder: () => efeitos.push('presenca'),

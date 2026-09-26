@@ -12719,7 +12719,12 @@ const presencaWme = {
     desligarPendente: false,
 };
 
-function presencaWmeDaAcao(placeDaAcao) {
+// `paisDoGesto`: o país do filtro na hora do GESTO. A ação pode sair DEPOIS de
+// a pessoa trocar de país — a janela do Desfazer despachada pelo "Aplicar" dos
+// Filtros, ou a resposta ainda no ar —, e a posição (a marca leva o país) e a
+// lista que volta de carona são do país em que o card estava, não do de agora
+// (auditoria de 2026-09-26).
+function presencaWmeDaAcao(placeDaAcao, paisDoGesto) {
     try {
         if (Treino.ativo) return null;
         const ligada = typeof presencaLigada === 'function'
@@ -12736,7 +12741,8 @@ function presencaWmeDaAcao(placeDaAcao) {
         const agora = Date.now();
         if (agora - presencaWme.ultimaEm < PRESENCA_WME_FREIO_MS) return null;
         presencaWme.ultimaEm = agora;
-        const presenca = { userId: String(id), lat: centro[0], lon: centro[1], pais: API.getCountry() };
+        const pais = paisDoGesto !== undefined && paisDoGesto !== null ? paisDoGesto : API.getCountry();
+        const presenca = { userId: String(id), lat: centro[0], lon: centro[1], pais };
         if (presencaWme.ligarNaProxima) presenca.visivel = true;
         // Fase 3: a lista de quem usa o app volta de carona, e as conversas que
         // o aparelho já conhece vão junto pra ela incluir as que foram
@@ -12753,8 +12759,10 @@ function presencaWmeAoResponder(presenca, result) {
     try {
         // A lista de quem usa o app e as conversas (fase 3), de carona. O
         // instante é o de quando a carona SAIU: mensagem que chegou ao vivo
-        // depois disso a lista ainda não contou.
-        if (presenca && result && result.presencaApp) window.Presenca?.aoCarona?.(result.presencaApp, presencaWme.ultimaEm);
+        // depois disso a lista ainda não contou. E o país é o DELA: a lista é
+        // do país que a carona levou, e a presença a descarta se ele não for
+        // mais o do filtro.
+        if (presenca && result && result.presencaApp) window.Presenca?.aoCarona?.(result.presencaApp, presencaWme.ultimaEm, presenca.pais);
         const r = presenca && result && result.presenca;
         if (!r) return;
         if (r.ok) {
@@ -12878,8 +12886,9 @@ function handleMarkAsRead() {
     advanceQueue();
     const epoca = epocaDaSessao;
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
+    const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
     scheduleAction('read', place, async () => {
-        const presenca = presencaWmeDaAcao(place);
+        const presenca = presencaWmeDaAcao(place, pais);
         const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao));
         if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
         presencaWmeAoResponder(presenca, result);
@@ -12902,8 +12911,9 @@ function handleReject() {
     advanceQueue();
     const epoca = epocaDaSessao;
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
+    const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
     scheduleAction('reject', place, async () => {
-        const presenca = presencaWmeDaAcao(place);
+        const presenca = presencaWmeDaAcao(place, pais);
         const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao));
         if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
         presencaWmeAoResponder(presenca, result);

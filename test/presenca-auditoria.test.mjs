@@ -482,3 +482,24 @@ test('P5 o "lida" do `abrir` falhou no Waze: o app não o dá como feito, e o "l
   assert.equal(d.P.Presenca.lidaEnviadaAte.get(CAF), 1790200000000);
   assert.equal(d.chamadas.chat.filter((x) => x.acao === 'lida').length, 0, 'CONTROLE: com o "lida" confirmado saiu um pedido à toa');
 });
+
+// ── P10: a lista da carona é do país que a carona levou ─────────────────────
+
+test('P10 a lista que volta de CARONA de outro país não entra como a do país de agora', async () => {
+  let pais = 30;
+  const c = novoCliente({ api: { presencaApp: async (campos) => ({ success: true, online: campos.pais === 73 ? [{ id: '888', nome: 'da-franca' }] : [], conversas: [] }) } });
+  c.API.getCountry = () => pais;
+  c.P.Presenca.chat = { token: 't', base: 'https://x/', chave: 'k', expiraEm: c.relogio.agora + 864e5 };
+  c.doc.visibilityState = 'hidden';                   // não abre o fluxo neste teste
+  const saiu = c.relogio.agora;                       // a carona sai com o Brasil (30)...
+  pais = 73;                                          // ...e a pessoa aplica o filtro França
+  await c.P.presencaSincronizar();
+  await tick();
+  assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['da-franca'], 'CONTROLE: a lista da França tem que entrar');
+  // A resposta da carona (a lista do BRASIL) chega depois.
+  c.P.presencaAoCarona({ online: [{ id: '777', nome: 'do-brasil', lat: -23.5, lon: -46.6 }], conversas: [] }, saiu, 30);
+  assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['da-franca'], 'a lista do Brasil entrou como a da França');
+  // CONTROLE: a carona do MESMO país entra.
+  c.P.presencaAoCarona({ online: [{ id: '889', nome: 'outra-da-franca' }], conversas: [] }, c.relogio.agora, 73);
+  assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['outra-da-franca'], 'CONTROLE: a carona do país de agora não entrou');
+});
