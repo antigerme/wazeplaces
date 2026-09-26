@@ -60,6 +60,30 @@ function enableSwipeOnCard(card) {
 }
 
 function handleDragStart(e) {
+    // DOIS DEDOS NO CARD NÃO SÃO ARRASTE: é a pinça de quem quer ver a foto de
+    // perto (ou a mão apoiada). Até a auditoria de 2026-09-26 o segundo
+    // `touchstart` entrava aqui de novo, sem olhar se já havia arraste nem
+    // quantos dedos havia: o gesto passava a seguir o SEGUNDO dedo e, ao
+    // soltar, cometia por distância ou por flick. MEDIDO com toque de verdade
+    // (CDP) na foto do card: pinça abrindo → 1 lido; fechando → 1 rejeitado;
+    // os dois dedos no mesmo evento → 1 lido. Um pedido decidido por quem só
+    // queria dar zoom — e calado.
+    //
+    // A regra é a de todo reconhecedor de gesto: um arraste de UM dedo não
+    // sobrevive a um segundo dedo. Ele é CANCELADO — o card volta pro lugar e
+    // nada é decidido —, e o gesto novo também não começa. Contar `e.touches`
+    // (a tela inteira) e não só os dedos sobre o card é deliberado, e é o lado
+    // seguro: a pinça com um dedo na foto e o outro fora dela também é pinça.
+    //
+    // O cancelamento vale também quando só há UM dedo agora: aí o arraste "em
+    // curso" é ÓRFÃO — o card foi trocado no meio do gesto (a aprovação da
+    // foto pousando, o fim do lote), o `touchend` morreu no elemento que saiu
+    // do DOM e nunca chegou ao `document`. Sem isto o `isDragging` ficava preso
+    // até alguém tocar de novo.
+    if (e.type === 'touchstart') {
+        if (isDragging) handleDragCancel();
+        if (e.touches && e.touches.length > 1) return;
+    }
     if (animating) return; // não inicia drag durante a animação de saída
     // Janela do "Desfazer" correndo: o pedido ainda não foi pro Waze e dá pra
     // voltar atrás. Deixar arrastar despacharia o anterior sem aviso. Os botões
@@ -133,6 +157,10 @@ function handleDragMove(e) {
         currentX = e.clientX;
         currentY = e.clientY;
     } else {
+        // Um segundo dedo encostou com o arraste em curso — inclusive fora do
+        // card, onde o `touchstart` dele não passa pelo `handleDragStart`. É
+        // pinça, não decisão: cancela sem cometer nada (ver o `handleDragStart`).
+        if (e.touches && e.touches.length > 1) { handleDragCancel(); return; }
         // O MESMO dedo, não o `[0]`: com dois na tela, se o primeiro sair o
         // `touches[0]` passa a ser o outro e o card SALTA pra onde ele estiver.
         const t = toqueDoArraste(e.touches);
