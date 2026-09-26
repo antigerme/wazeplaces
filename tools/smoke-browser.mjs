@@ -3785,6 +3785,116 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Renomeando: o passo pra TRÁS só sai da edição (auditoria de 2026-09-26) ──
+//
+// Tocar no fundo (o reflexo de "baixar o teclado"), arrastar a foto pra baixo,
+// e Esc ou ↓ com o foco no ✓/✕ da edição FECHAVAM o lightbox: o nome digitado
+// e a foto que servia de prova iam embora juntos. Só o Esc do CAMPO tratava
+// isso. Mouse e teclado de verdade (valem nos dois motores). O CONTROLE são os
+// mesmos gestos SEM edição, que têm que fechar — sem ele, "a foto ficou aberta"
+// passaria também com o gesto que não chega a lugar nenhum.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  const posts = [];
+  await page.route('**/api/**', async (route) => {
+    const r = route.request();
+    if (r.method() === 'POST' && /renomear-local/.test(r.url())) posts.push(r.url());
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const FACHADA = 'data:image/svg+xml;base64,' + Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1600"><rect width="900" height="1600" fill="#93c5fd"/></svg>').toString('base64');
+  const PL = {
+    venueID: 'v-l4', updateRequestID: 'u-l4', name: 'Padaria Pão Quente', categories: ['BAKERY'], address: 'Rua X, 1',
+    updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO', createdBy: 'wazer', localAprovado: true,
+    imageUrls: [FACHADA + '#u-l4'], approvedImageIds: [], lat: -12.9, lon: -38.3, mapa: null, changes: [],
+  };
+  const abrir = async (editar) => {
+    // Fechar e reabrir no MESMO tique é o gotcha #65 no instrumento: o
+    // `history.back()` que o fechamento agenda come a entrada que a abertura
+    // empilha, e o fechamento seguinte sai da PÁGINA (medido: "Execution
+    // context was destroyed"). Fecha, espera, e só então abre.
+    await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
+    await page.waitForTimeout(150);
+    await page.evaluate((pl) => {
+      setLang('pt'); applyI18n();
+      API.setSession('tok-smoke');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showLoading(false);
+      const p = JSON.parse(JSON.stringify(pl));
+      AppState.queue = [p]; AppState.currentPlace = p;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+      Lightbox.open(p.imageUrls, 0, 0, p.name, false, p);
+    }, PL);
+    await assentar(page);
+    if (editar) {
+      await page.click('#lightboxNomeBtn');
+      await page.fill('#lightboxNomeInput', 'Padaria Pão Quentinho do Zé');
+    }
+    return page.evaluate(() => ({ aberto: Lightbox.isOpen(),
+      editando: document.getElementById('lightboxNome').classList.contains('editando') }));
+  };
+  const agora = () => page.evaluate(() => ({ aberto: Lightbox.isOpen(),
+    editando: document.getElementById('lightboxNome').classList.contains('editando') }));
+  // Um ponto do FUNDO (o próprio #imageLightbox) que recebe o dedo — onde a
+  // foto não cobre: a faixa de cima (o `padding-top` da edição) ou as tarjas.
+  const pontoDoFundo = () => page.evaluate(() => {
+    for (let y = 2; y < innerHeight; y += 6) for (let x = 4; x < innerWidth; x += 8) {
+      const q = document.elementFromPoint(x, y);
+      if (q && q.id === 'imageLightbox') return { x, y };
+    }
+    return null;
+  });
+  const PASSOS = [
+    ['toque no fundo', async () => { const p = await pontoDoFundo(); if (!p) return false; await page.mouse.click(p.x, p.y); return true; }],
+    ['arrastar a foto pra baixo', async () => {
+      const r = await page.evaluate(() => document.getElementById('lightboxImage').getBoundingClientRect().toJSON());
+      const x = r.left + r.width / 2, y = r.top + 40;
+      await page.mouse.move(x, y); await page.mouse.down();
+      await page.mouse.move(x, y + 160, { steps: 8 }); await page.mouse.up();
+      return true;
+    }],
+    ['Esc com o foco no ✓', async () => { await page.focus('#lightboxNomeOk'); await page.keyboard.press('Escape'); return true; }],
+    ['↓ com o foco no ✕', async () => { await page.focus('#lightboxNomeCancel'); await page.keyboard.press('ArrowDown'); return true; }],
+  ];
+  for (const [nome, passo] of PASSOS) {
+    const antes = await abrir(true);
+    checa(antes.aberto && antes.editando, `passo pra trás/${nome}: PRÉ-CONDIÇÃO — não entrou em edição`, JSON.stringify(antes));
+    const deu = await passo();
+    checa(deu, `passo pra trás/${nome}: não achei onde fazer o gesto`);
+    await page.waitForTimeout(250);
+    const d = await agora();
+    checa(d.aberto, `passo pra trás/${nome}: editando o nome, FECHOU a foto — o nome digitado e a prova foram embora`);
+    checa(!d.editando, `passo pra trás/${nome}: não saiu da edição`);
+  }
+  // CONTROLE: os mesmos gestos sem edição fecham a foto (menos Esc/↓ no ✓/✕,
+  // que só existem editando — no lugar deles vai o Esc/↓ com o foco no ✕ do
+  // lightbox).
+  for (const [nome, passo] of [
+    ['toque no fundo', PASSOS[0][1]], ['arrastar a foto pra baixo', PASSOS[1][1]],
+    ['Esc', async () => { await page.focus('#lightboxClose'); await page.keyboard.press('Escape'); return true; }],
+    ['↓', async () => { await page.focus('#lightboxClose'); await page.keyboard.press('ArrowDown'); return true; }],
+  ]) {
+    const antes = await abrir(false);
+    checa(antes.aberto && !antes.editando, `CONTROLE passo pra trás/${nome}: PRÉ-CONDIÇÃO`, JSON.stringify(antes));
+    await passo();
+    await page.waitForTimeout(250);
+    checa(!(await agora()).aberto, `CONTROLE passo pra trás/${nome}: sem edição o gesto não fechou a foto — a medida está cega`);
+  }
+  checa(posts.length === 0, `passo pra trás: ${posts.length} renomeação(ões) saíram de uma edição DESISTIDA`);
+  checa(erros.length === 0, 'passo pra trás: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 
 // ── A faixa do carrossel não pode roubar o toque do slide atrás ─────────────
 // Terceira reincidência do gotcha #26. A faixa `.card-image-nav` tem largura
@@ -7033,6 +7143,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`
   + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
+  + `, + renomeando: o passo pra trás (fundo, arraste pra baixo, Esc e ↓ fora do campo) só sai da edição, com o CONTROLE sem edição fechando a foto`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`

@@ -1574,14 +1574,14 @@ function setupModalListeners() {
     $('lightboxApprove')?.addEventListener('click', aprovarFotoAtual);
     $('lightboxNomeBtn')?.addEventListener('click', abrirEdicaoNome);
     $('lightboxNomeOk')?.addEventListener('click', confirmarRenomear);
-    $('lightboxNomeCancel')?.addEventListener('click', fecharEdicaoNome);
+    $('lightboxNomeCancel')?.addEventListener('click', sairDaEdicaoNome);
     $('lightboxNomeInput')?.addEventListener('input', atualizarBotaoSalvarNome);
     $('lightboxNomeInput')?.addEventListener('keydown', (ev) => {
         // Enter confirma, Esc cancela — e o Esc PARA aqui (`stopPropagation`),
         // senão ele fecha o lightbox inteiro e a pessoa perde a foto que estava
         // usando de prova só por desistir de um caractere.
         if (ev.key === 'Enter') { ev.preventDefault(); confirmarRenomear(); }
-        else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); fecharEdicaoNome(); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); sairDaEdicaoNome(); }
     });
 
     // Pareamento
@@ -2363,8 +2363,9 @@ function setupLightbox() {
     document.getElementById('lightboxClose').addEventListener('click', () => Lightbox.close());
     document.getElementById('lightboxPrev').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.prev(); });
     document.getElementById('lightboxNext').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.next(); });
+    // O fundo é um passo pra trás — editando o nome, só sai da edição.
     lb.addEventListener('click', (e) => {
-        if (e.target === lb) Lightbox.close();
+        if (e.target === lb) recuarNaFoto();
     });
 
     // ── Gestos (Pointer Events): pinch zoom, double-tap, pan, swipe ──
@@ -2435,6 +2436,7 @@ function setupLightbox() {
         if (pointers.size < 2) pinchStartDist = 0;
 
         // Sem zoom: swipe horizontal troca foto, vertical pra baixo fecha
+        // (editando o nome, sai só da edição — ver `recuarNaFoto`).
         if (dragging && pointers.size === 0 && Lightbox.scale === 1) {
             const dx = e.clientX - dragStartX;
             const dy = e.clientY - dragStartY;
@@ -2442,7 +2444,7 @@ function setupLightbox() {
                 if (dx < 0) Lightbox.next();
                 else Lightbox.prev();
             } else if (dy > 80 && Math.abs(dy) > Math.abs(dx)) {
-                Lightbox.close();
+                recuarNaFoto();
             }
         }
         if (pointers.size === 0) dragging = false;
@@ -2941,6 +2943,23 @@ function fecharEdicaoNome() {
 function editandoNome() {
     const cx = document.getElementById('lightboxNome');
     return !!(cx && cx.classList.contains('editando'));
+}
+
+// A pessoa SAI da edição do nome com a foto ainda aberta: o ✕, o Esc do campo
+// e os passos pra trás de `recuarNaFoto`. É desistir da edição, não da foto —
+// que segue na tela como a prova do nome.
+function sairDaEdicaoNome() {
+    fecharEdicaoNome();
+}
+
+// Um passo pra TRÁS na foto ampliada: o Esc e o ↓ (com o foco fora do campo),
+// o toque no fundo e o arraste da foto pra baixo. Editando o nome, o passo é
+// sair da EDIÇÃO — como o Esc do campo sempre fez —, e não fechar a foto: os
+// quatro fechavam, jogando fora o nome digitado e a foto que servia de prova
+// (auditoria de 2026-09-26, medido nos três aparelhos). Sem edição, fecha.
+function recuarNaFoto() {
+    if (editandoNome()) { sairDaEdicaoNome(); return; }
+    Lightbox.close();
 }
 
 function atualizarBotaoSalvarNome() {
@@ -3497,7 +3516,9 @@ function handleKeyDown(e) {
         return;
     }
     if (Lightbox.isOpen()) {
-        if (e.key === 'Escape') { e.preventDefault(); Lightbox.close(); }
+        // Esc e ↓ são um passo pra trás: editando o nome (com o foco no ✓ ou no
+        // ✕ da edição — no campo o Esc já é dele), saem só da edição.
+        if (e.key === 'Escape') { e.preventDefault(); recuarNaFoto(); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); Lightbox.prev(); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); Lightbox.next(); }
         // ↓ fecha, espelhando o arraste pra baixo do toque. Relato do owner:
@@ -3509,7 +3530,7 @@ function handleKeyDown(e) {
         // continua sendo o principal, que é a convenção de desktop — por isso
         // a dica não muda de texto (decisão do owner: um texto só, não um
         // catatau por plataforma).
-        else if (e.key === 'ArrowDown') { e.preventDefault(); Lightbox.close(); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); recuarNaFoto(); }
         // z desfaz a exclusão, a aprovação ou a renomeação que acabou de sair
         // daqui — o banner delas mora FORA do lightbox, e a tecla não chegava a
         // ele (auditoria de 2026-09-26). Nunca com o campo do nome focado: ali

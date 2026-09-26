@@ -2118,14 +2118,20 @@ test('a foto ampliada fecha pelos caminhos das DUAS plataformas', () => {
   assert.ok(iMapa >= 0, 'o mapa ampliado não trata teclado — Esc não fecharia ele');
   assert.ok(iMapa < iFoto, 'o bloco da foto vem antes do mapa: Esc fecharia a camada errada');
 
-  // Esc é a convenção de desktop e continua sendo o caminho principal.
-  assert.match(teclas, /e\.key === 'Escape'[\s\S]{0,60}Lightbox\.close\(\)/,
+  // Esc é a convenção de desktop e continua sendo o caminho principal. Os dois
+  // passam pelo `recuarNaFoto` (auditoria de 2026-09-26): editando o nome, o
+  // passo pra trás é sair da EDIÇÃO; sem edição, fechar a foto.
+  assert.match(teclas, /e\.key === 'Escape'\) \{ e\.preventDefault\(\); recuarNaFoto\(\); \}/,
     'Esc deixou de fechar a foto');
 
   // ↓ espelha o arraste pra baixo do toque. Relato do owner: aprendeu o gesto
   // no celular, sentou no laptop e a mão foi pro ↓.
-  assert.match(teclas, /e\.key === 'ArrowDown'[\s\S]{0,60}Lightbox\.close\(\)/,
+  assert.match(teclas, /e\.key === 'ArrowDown'\) \{ e\.preventDefault\(\); recuarNaFoto\(\); \}/,
     'a tecla ↓ parou de fechar a foto');
+  const recuar = APP.match(/function recuarNaFoto\(\) \{[\s\S]*?\n\}/);
+  assert.ok(recuar, 'sumiu o recuarNaFoto');
+  assert.match(recuar[0], /if \(editandoNome\(\)\) \{ sairDaEdicaoNome\(\); return; \}\n\s+Lightbox\.close\(\);/,
+    'o passo pra trás da foto deixou de ser: editando, sai da edição; senão, fecha');
 
   // Só BAIXO: o toque fecha com `dy > 80`, e só. Inventar ↑ criaria um gesto
   // que o celular não tem — o app ficaria ensinando duas coisas diferentes.

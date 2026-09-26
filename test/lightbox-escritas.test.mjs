@@ -517,3 +517,26 @@ test('C10 excluir, fechar, REABRIR e desfazer: a foto volta com o ✨ no lugar c
     assert.notEqual(L.urls, P.imageUrls, `${nome}: o lightbox voltou a dividir a lista com o pedido`);
   }
 });
+
+// ── L4: editando o nome, o passo pra trás só sai da EDIÇÃO ───────────────────
+// (auditoria de 2026-09-26). Tocar no fundo, arrastar a foto pra baixo, e Esc
+// ou ↓ com o foco no ✓/✕ da edição FECHAVAM o lightbox — o nome digitado e a
+// foto que servia de prova iam embora juntos. O Esc do CAMPO já só cancelava
+// a edição; os quatro caminhos passam a fazer o mesmo, pelo `recuarNaFoto`.
+test('L4 o passo pra trás: editando, sai da edição e a foto fica; sem edição, fecha', () => {
+  for (const editando of [true, false]) {
+    const log = [];
+    const recuar = new Function('editandoNome', 'sairDaEdicaoNome', 'Lightbox',
+      fatiar('recuarNaFoto') + '\nreturn recuarNaFoto;')(
+      () => editando, () => log.push('saiu-da-edicao'), { close: () => log.push('fechou') });
+    recuar();
+    assert.deepEqual(log, editando ? ['saiu-da-edicao'] : ['fechou'],
+      editando ? 'editando o nome, o passo pra trás FECHOU a foto (e jogou fora o nome digitado)'
+               : 'CONTROLE: sem edição, o passo pra trás não fechou a foto');
+  }
+  // Os caminhos que eram `Lightbox.close()` direto passam por ele.
+  const setup = fatiar('setupLightbox');
+  assert.match(setup, /if \(e\.target === lb\) recuarNaFoto\(\);/, 'o toque no FUNDO voltou a fechar direto');
+  assert.match(setup, /dy > 80 && Math\.abs\(dy\) > Math\.abs\(dx\)\) \{\s*recuarNaFoto\(\);/,
+    'o arraste pra BAIXO voltou a fechar direto');
+});
