@@ -406,3 +406,50 @@ test('login que DEU CERTO zera as marcas da página: depois de "Sair" e entrar d
   assert.match(fatiar('resgatarPareamento'), /closeModal\('pairEnterModal'\);\s*aoEntrarNestaPagina\(\);/,
     'entrar pelo código não zera as marcas da página');
 });
+
+// ── A6: link de pareamento VENCIDO num aparelho JÁ logado ───────────────────
+function montarCodigoDaURL({ token, resgate }) {
+  const log = [];
+  const deps = {
+    API: { getSession: () => token },
+    showAuthScreen: () => log.push('entrada'),
+    resgatarPareamento: async (codigo, opcoes) => { log.push('resgate:' + codigo + ':' + !!(opcoes && opcoes.silencioso)); return resgate; },
+    abrirComSessaoSalva: () => log.push('sessaoSalva'),
+  };
+  const { abrirPeloCodigoDaURL } = montar(['abrirPeloCodigoDaURL'], deps, ['abrirPeloCodigoDaURL']);
+  return { abrirPeloCodigoDaURL, log };
+}
+
+test('link de pareamento vencido num aparelho LOGADO: o aviso sai e a sessão salva segue — nada de "Bem-vindo!"', async () => {
+  const logado = montarCodigoDaURL({ token: 'SALVO', resgate: false });
+  await logado.abrirPeloCodigoDaURL('VENCIDO');
+  assert.deepEqual(logado.log, ['resgate:VENCIDO:true', 'sessaoSalva'],
+    'o aparelho logado caiu na tela de entrada com a sessão válida guardada');
+  // O código que VALE vence a sessão velha (é o pedido de agora): nada de abrir a antiga por cima.
+  const trocou = montarCodigoDaURL({ token: 'SALVO', resgate: true });
+  await trocou.abrirPeloCodigoDaURL('NOVO');
+  assert.deepEqual(trocou.log, ['resgate:NOVO:true']);
+  // CONTROLE: sem sessão salva, a tela de entrada aparece como sempre.
+  const deslogado = montarCodigoDaURL({ token: null, resgate: false });
+  await deslogado.abrirPeloCodigoDaURL('VENCIDO');
+  assert.deepEqual(deslogado.log, ['entrada', 'resgate:VENCIDO:true']);
+});
+
+// ── A19: o atalho do ícone aberto SEM sessão ────────────────────────────────
+test('atalho do ícone aberto sem sessão: a query sai da URL na hora — um F5 depois do login não o executa', () => {
+  const trocas = [];
+  const win = { location: { search: '?action=refresh', pathname: '/' },
+    history: { replaceState: (s, t, url) => trocas.push(url) } };
+  const { tirarAcaoDaURL } = montar(['tirarAcaoDaURL'], { window: win, URLSearchParams }, ['tirarAcaoDaURL']);
+  assert.equal(tirarAcaoDaURL(), 'refresh');
+  assert.deepEqual(trocas, ['/'], 'a query do atalho ficou na URL');
+  // CONTROLE: sem atalho, a URL não é mexida.
+  const quieta = { location: { search: '', pathname: '/' }, history: { replaceState: () => trocas.push('x') } };
+  assert.equal(montar(['tirarAcaoDaURL'], { window: quieta, URLSearchParams }, ['tirarAcaoDaURL']).tirarAcaoDaURL(), null);
+  assert.deepEqual(trocas, ['/']);
+  // Quem chama: o ramo SEM sessão do `initApp` (antes de perguntar à extensão)
+  // e o `handleLaunchAction`, que lê pela mesma função.
+  assert.match(fatiar('initApp'), /\} else \{\s*tirarAcaoDaURL\(\);\s*entrarPelaExtensao\(\)/,
+    'sem sessão, a query do atalho fica na URL e roda num F5 depois do login');
+  assert.match(fatiar('handleLaunchAction'), /const action = tirarAcaoDaURL\(\);/);
+});

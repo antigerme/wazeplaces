@@ -197,8 +197,12 @@ test('a abertura com sessão já ativa carimba um marco próprio', () => {
   // ruído e quebraria a própria regra de entrada (raro, nunca por gesto).
   assert.match(corpo, /e === 'token\+' \|\| e === 'jaAtiva'\) return;/,
     'o marco deixou de checar se já há início em aberto — duplica a cada abertura');
-  const carga = APP.slice(APP.indexOf('const savedToken = API.getSession();'));
-  assert.match(carga.slice(0, 400), /marcarSessaoJaAtiva\(\);/,
+  // A carga com token salvo é o `abrirComSessaoSalva` (o `initApp` a chama com
+  // token, e o link de pareamento vencido num aparelho logado também cai nela):
+  // o marco é a PRIMEIRA coisa que ela faz, antes de qualquer caminho de tela.
+  assert.match(fatiar('initApp'), /if \(API\.getSession\(\)\) \{\s*abrirComSessaoSalva\(\);/,
+    'a abertura com token salvo deixou de passar pelo abrirComSessaoSalva');
+  assert.match(fatiar('abrirComSessaoSalva'), /^function abrirComSessaoSalva\(\) \{\s*(\/\/[^\n]*\s*)*marcarSessaoJaAtiva\(\);/,
     'a carga com token salvo parou de carimbar o marco');
 });
 

@@ -371,47 +371,16 @@ function initApp() {
     })();
     if (codigoNaURL) {
         try { window.history.replaceState({}, '', window.location.pathname); } catch (e) {}
-        showAuthScreen();
-        resgatarPareamento(codigoNaURL, { silencioso: true });
+        abrirPeloCodigoDaURL(codigoNaURL);
         return;
     }
 
-    const savedToken = API.getSession();
-    if (savedToken) {
-        // O token veio do armazenamento, não do login: sem isto o ciclo desta
-        // sessão nasce sem início e a duração não existe (ver a função).
-        marcarSessaoJaAtiva();
-        showMainScreen();
-        // O que ficou esperando de uma sessão anterior aparece e sai agora.
-        // É o segundo (e último) gatilho: o outro é o evento `online`. Nenhum
-        // dos dois é polling — a regra do free tier proíbe.
-        //
-        // DEPOIS do `showMainScreen`, e isso é load-bearing: é ELE que põe
-        // `AppState.authenticated = true`, e o esvaziamento sai na primeira
-        // linha sem isso. Chamado antes, o gatilho da abertura não fazia nada —
-        // calado, e justamente pra quem ficou offline e fechou o app.
-        updateInFlightIndicator();
-        esvaziarFilaDeSaida();
-        AppState._profilePromise = loadProfileAndAuxData();
-        // Sem rede, a fila guardada entra no lugar da tela de falha — e aí NÃO
-        // se chama `startFetching`, que só gastaria uma requisição fadada a
-        // falhar. Com rede, segue o caminho de sempre e a varredura pega
-        // carona na resposta que chegar.
-        offlineTentarAbrirSemRede().then(async (abriu) => {
-            if (abriu) return;
-            // COM rede, a janela da última preparação completa vale também. Sem
-            // ela o app renascido (o Android encerra app em segundo plano)
-            // pedia a foto CRUA até a próxima varredura terminar — e se o sinal
-            // caísse antes disso, "a foto precisa de sinal" com a cópia `?w=`
-            // viva no cache. Só lê com o toggle ligado: quem não usa não paga.
-            if (offlineLigado() && offlineJanelaServida === null) {
-                const j = await offlineLerJanela();
-                if (offlineJanelaServida === null) offlineJanelaServida = j;
-            }
-            startFetching();
-        });
-        handleLaunchAction();
+    if (API.getSession()) {
+        abrirComSessaoSalva();
     } else {
+        // Sem sessão o atalho do ícone não vale, mas a query dele sai da URL
+        // AGORA: senão um F5 depois do login a executava (ver a função).
+        tirarAcaoDaURL();
         // Sem sessão: antes de mostrar a tela de login, PERGUNTA à extensão.
         // Quem tem a extensão instalada e está logado no WME entra sem tocar em
         // nada; quem não tem cai na tela de sempre depois de EXT_ESPERA_MS.
@@ -429,6 +398,61 @@ function initApp() {
             mostrarNegadoDaExtensao();   // o portão recusou: o motivo, não o silêncio
         });
     }
+}
+
+// O link de pareamento aberto neste aparelho. Num aparelho JÁ logado, o link
+// costuma estar VENCIDO (o QR de ontem, o link que ficou na conversa): o
+// resgate falhava e a pessoa caía no "Bem-vindo!" com a sessão válida guardada
+// no aparelho, sem saber que bastava recarregar (auditoria de 2026-09-26). Com
+// sessão salva, a tela de entrada não aparece antes da resposta; se o código
+// valer, ele vence a sessão velha (é o pedido explícito de agora); se não
+// valer, o aviso de sempre sai e a sessão salva segue o caminho normal.
+function abrirPeloCodigoDaURL(codigo) {
+    const sessaoSalva = !!API.getSession();
+    if (!sessaoSalva) showAuthScreen();
+    return resgatarPareamento(codigo, { silencioso: true }).then((entrou) => {
+        if (entrou || !sessaoSalva) return;
+        if (API.getSession()) abrirComSessaoSalva();
+        else showAuthScreen();
+    });
+}
+
+// A abertura com a sessão GUARDADA no aparelho: o caminho de sempre, e também o
+// de quem abriu um link de pareamento vencido num aparelho já logado.
+function abrirComSessaoSalva() {
+    // O token veio do armazenamento, não do login: sem isto o ciclo desta
+    // sessão nasce sem início e a duração não existe (ver a função).
+    marcarSessaoJaAtiva();
+    showMainScreen();
+    // O que ficou esperando de uma sessão anterior aparece e sai agora.
+    // É o segundo (e último) gatilho: o outro é o evento `online`. Nenhum
+    // dos dois é polling — a regra do free tier proíbe.
+    //
+    // DEPOIS do `showMainScreen`, e isso é load-bearing: é ELE que põe
+    // `AppState.authenticated = true`, e o esvaziamento sai na primeira
+    // linha sem isso. Chamado antes, o gatilho da abertura não fazia nada —
+    // calado, e justamente pra quem ficou offline e fechou o app.
+    updateInFlightIndicator();
+    esvaziarFilaDeSaida();
+    AppState._profilePromise = loadProfileAndAuxData();
+    // Sem rede, a fila guardada entra no lugar da tela de falha — e aí NÃO
+    // se chama `startFetching`, que só gastaria uma requisição fadada a
+    // falhar. Com rede, segue o caminho de sempre e a varredura pega
+    // carona na resposta que chegar.
+    offlineTentarAbrirSemRede().then(async (abriu) => {
+        if (abriu) return;
+        // COM rede, a janela da última preparação completa vale também. Sem
+        // ela o app renascido (o Android encerra app em segundo plano)
+        // pedia a foto CRUA até a próxima varredura terminar — e se o sinal
+        // caísse antes disso, "a foto precisa de sinal" com a cópia `?w=`
+        // viva no cache. Só lê com o toggle ligado: quem não usa não paga.
+        if (offlineLigado() && offlineJanelaServida === null) {
+            const j = await offlineLerJanela();
+            if (offlineJanelaServida === null) offlineJanelaServida = j;
+        }
+        startFetching();
+    });
+    handleLaunchAction();
 }
 
 // ── Handshake com a extensão WazePlaces Rapid Access (@daflash) ───────────
@@ -1082,14 +1106,8 @@ function setupFilterTabs() {
 // /?action=refresh. Só valem com sessão ativa — deslogado a tela de auth manda.
 // A query é limpa da URL depois (replaceState) pra um F5 não repetir a ação.
 function handleLaunchAction() {
-    let action = null;
-    try {
-        action = new URLSearchParams(window.location.search).get('action');
-    } catch (e) { return; }
+    const action = tirarAcaoDaURL();
     if (!action) return;
-    try {
-        window.history.replaceState({}, '', window.location.pathname);
-    } catch (e) {}
     if (action === 'filters') {
         openFiltersModal();
     } else if (action === 'refresh') {
@@ -1097,6 +1115,23 @@ function handleLaunchAction() {
         startFetching();
         showToast(t('toast.refreshing'), 'info');
     }
+}
+
+// Lê o atalho e o TIRA da URL na hora, com ou sem sessão. Sem sessão a query
+// ficava: a pessoa entrava, e um F5 bem depois (horas, no PWA que o Android
+// retoma) disparava o "Atualizando fila…" ou os Filtros que ninguém pediu
+// naquela hora (auditoria de 2026-09-26). Sem sessão o atalho não vale — a tela
+// de entrada manda —, então ele é só descartado.
+function tirarAcaoDaURL() {
+    let action = null;
+    try {
+        action = new URLSearchParams(window.location.search).get('action');
+    } catch (e) { return null; }
+    if (!action) return null;
+    try {
+        window.history.replaceState({}, '', window.location.pathname);
+    } catch (e) {}
+    return action;
 }
 
 // ── Pareamento computador → celular ────────────────────────────────────────

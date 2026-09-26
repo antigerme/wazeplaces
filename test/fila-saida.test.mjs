@@ -303,7 +303,12 @@ test('os DOIS gatilhos existem, e nenhum é polling', () => {
   const ouvinte = ouvintes.find((o) => /esvaziarFilaDeSaida\(\)/.test(o)) || '';
   assert.match(ouvinte, /esvaziarFilaDeSaida\(\)/,
     'o `online` deixou de esvaziar a fila de saída');
-  const init = fatiar('initApp');
+  // A abertura com sessão salva mora no `abrirComSessaoSalva` desde que o link
+  // de pareamento vencido num aparelho logado passou a cair nela também
+  // (2026-09-26); o `initApp` a chama quando há token.
+  assert.match(fatiar('initApp'), /if \(API\.getSession\(\)\) \{\s*abrirComSessaoSalva\(\);/,
+    'a abertura com token salvo deixou de passar pelo abrirComSessaoSalva');
+  const init = fatiar('abrirComSessaoSalva');
   const iEsvazia = init.indexOf('esvaziarFilaDeSaida()');
   const iMain = init.indexOf('showMainScreen()');
   assert.ok(iEsvazia > 0,
