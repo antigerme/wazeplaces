@@ -447,6 +447,20 @@ test('contagem regressiva com 1: forma SINGULAR, e o app a usa (era "Faltam 1…
   assert.match(dic, /'toast\.devCountdownUm': 'Falta \{n\} /);
 });
 
+test('nenhuma frase faz plural com parênteses ("pedido(s)") — plural é por chave, escolhida por === 1', () => {
+  // Auditoria de textos (2026-09-26): "1 pedido(s) da região não aparecem" e
+  // "Há 1 registro(s) não baixado(s)". O comportamento das duas é conferido em
+  // test/entrada.test.mjs; aqui, a classe inteira, no dicionário todo. Só o
+  // PLURAL: "Inapproprié(e)" é gênero, e é a string oficial do WME em francês.
+  const achados = [];
+  for (const lang of LANGS) {
+    for (const [k, v] of Object.entries(DICT[lang])) {
+      if (/\p{L}\((?:s|es)\)/u.test(v)) achados.push(`${lang}: ${k}`);
+    }
+  }
+  assert.deepEqual(achados, [], 'plural com parênteses no dicionário');
+});
+
 test('todo tipo de pedido que o SERVIDOR manda tem rótulo nas 4 línguas (o UPDATE saía em inglês)', () => {
   // `updateTypeKey = changes.length > 0 ? 'UPDATE' : 'UPDATE_DETAILS'` — e só o
   // segundo estava no dicionário: o card de atualização caía no `humanizarEnum`

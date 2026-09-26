@@ -1626,7 +1626,8 @@ function setupModalListeners() {
         if (!e.target.checked && dlogNaoBaixados() > 0 && Date.now() > desligarDevConfirmadoAte) {
             e.target.checked = true;
             desligarDevConfirmadoAte = Date.now() + 15000;
-            showToast(t('toast.devPerdeCaptura', { n: dlogNaoBaixados() }), 'error', 9000);
+            const naoBaixados = dlogNaoBaixados();
+            showToast(t(naoBaixados === 1 ? 'toast.devPerdeCapturaUm' : 'toast.devPerdeCaptura', { n: naoBaixados }), 'error', 9000);
             return;
         }
         desligarDevConfirmadoAte = 0;
@@ -14984,7 +14985,8 @@ function updatePendingTotalHint() {
     const total = AppState.serverTotal + blocked;
     const rotulo = AppState.blockedPartial ? total + '+' : String(total);
     hint.textContent = t('stats.pending.ofRegion', { total: rotulo });
-    hint.title = t('stats.pending.ofRegion.title', { blocked });
+    // Plural por CHAVE (sem ICU): "1 pedido(s)" era a forma de antes.
+    hint.title = t(blocked === 1 ? 'stats.pending.ofRegion.titleUm' : 'stats.pending.ofRegion.title', { blocked });
     hint.classList.remove('hidden');
 }
 

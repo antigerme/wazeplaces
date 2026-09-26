@@ -1135,3 +1135,38 @@ test('foco no autor: com UM pedido dele na fila, o leitor de tela ouve o singula
     assert.ok(um && um.includes('{autor}') && !um.includes('{n}'), `${lang}: o singular do foco no autor ${um ? 'repete o número' : 'não existe'}`);
   }
 });
+
+// ── T15 (textos, 2026-09-26): nada de "pedido(s)" ────────────────────────────
+// Duas frases escreviam o plural com parênteses ("1 pedido(s) da região não
+// aparecem", "Há 1 registro(s) não baixado(s)"). O projeto faz plural por CHAVE
+// (sem ICU), escolhida por `=== 1`. Roda o código DE VERDADE.
+test('plural por chave: o "de N na região" e o aviso de desligar o modo dev escolhem o singular com 1', () => {
+  const { registro, document } = domDeMentira({ pendingTotalHint: {} });
+  const AppState = { authenticated: true, serverTotal: 10, serverBlocked: 1, blockedPartial: false };
+  const { updatePendingTotalHint } = montar(['updatePendingTotalHint'],
+    { document, AppState, t: (k, v) => `${k}|${JSON.stringify(v)}` }, ['updatePendingTotalHint']);
+  updatePendingTotalHint();
+  assert.equal(registro.pendingTotalHint.title, 'stats.pending.ofRegion.titleUm|{"blocked":1}', 'um pedido bloqueado usou a forma plural');
+  AppState.serverBlocked = 3;
+  updatePendingTotalHint();
+  assert.equal(registro.pendingTotalHint.title, 'stats.pending.ofRegion.title|{"blocked":3}', 'CONTROLE: três usam o plural');
+
+  // O ouvinte do interruptor do modo dev, recortado do app.js: o 1º toque com
+  // captura não baixada AVISA (e para ali, sem apagar nada).
+  const ini = APP_SEM.indexOf("$('prefDevModeActive').addEventListener('change', (e) =>");
+  assert.ok(ini > 0, 'sumiu o ouvinte do interruptor do modo dev');
+  const arrow = APP_SEM.indexOf('(e) =>', ini);
+  const src = APP_SEM.slice(arrow, fechar(APP_SEM, arrow));
+  const aviso = (naoBaixados) => {
+    const toasts = [];
+    const ouvinte = new Function('AppState', 'dlogNaoBaixados', 'desligarDevConfirmadoAte', 'Date', 'showToast', 't', `return ${src};`)(
+      { devMode: { unlocked: true, active: true } }, () => naoBaixados, 0, { now: () => 1000 },
+      (m) => toasts.push(m), (k, v) => `${k}|${v.n}`);
+    const e = { target: { checked: false } };
+    ouvinte(e);
+    assert.equal(e.target.checked, true, 'CONTROLE: o 1º toque com captura não baixada devolve o interruptor');
+    return toasts;
+  };
+  assert.deepEqual(aviso(1), ['toast.devPerdeCapturaUm|1'], 'uma captura não baixada usou a forma plural');
+  assert.deepEqual(aviso(4), ['toast.devPerdeCaptura|4'], 'CONTROLE: quatro usam o plural');
+});

@@ -223,8 +223,11 @@ test('desligar o dev APAGA o que ele gravou', () => {
   assert.match(corpo, /delete c\.corpoResposta/, 'os corpos de resposta guardados sobreviveram');
   // O anel de METADADOS fica: não tem dado pessoal e é a espinha do diagnóstico.
   assert.ok(!/API\.chamadas = \[\]/.test(corpo), 'apagou os metadados junto — perdeu a sequência sem precisar');
-  // E o desligar avisa antes de levar captura não baixada embora.
-  assert.match(semCom, /dlogNaoBaixados\(\) > 0[\s\S]{0,200}?toast\.devPerdeCaptura/,
+  // E o desligar avisa antes de levar captura não baixada embora — DENTRO do
+  // bloco que confere a contagem (nenhum `}` no meio), não a N caracteres dele:
+  // o singular/plural por chave alongou a linha e a distância cravada reprovou
+  // código certo (gotcha #67).
+  assert.match(semCom, /dlogNaoBaixados\(\) > 0[^{]*\{[^}]*toast\.devPerdeCaptura/,
     'desligar pode perder captura não baixada sem avisar');
 });
 
@@ -1058,7 +1061,9 @@ test('desligar o modo dev com captura não baixada: o 1º toque AVISA e não apa
   const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   const i = APP.indexOf("$('prefDevModeActive').addEventListener('change'");
   const h = APP.slice(i, APP.indexOf('renderUndoGateUI();', i));
-  const iAviso = h.indexOf("showToast(t('toast.devPerdeCaptura'");
+  // A chamada do aviso, qualquer que seja a forma (singular/plural por chave).
+  const mAviso = /showToast\(t\([^;]*'toast\.devPerdeCaptura/.exec(h);
+  const iAviso = mAviso ? mAviso.index : -1;
   const iVolta = h.indexOf('e.target.checked = true;');
   const iApaga = h.indexOf('dlogApagar();');
   assert.ok(iVolta > 0 && iAviso > iVolta, 'o primeiro toque não devolve o interruptor');
