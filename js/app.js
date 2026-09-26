@@ -1551,27 +1551,7 @@ function setupModalListeners() {
     $('filterCountry').addEventListener('change', (e) => {
         loadStatesIntoSelect(parseInt(e.target.value, 10), $('filterRegion').value);
     });
-    // Trocar a REGIÃO traz os países DELA. Antes o seletor seguia com os da
-    // região anterior, e o "Aplicar" gravava, por exemplo, NA com o Brasil — uma
-    // fila vazia sem explicação. Os países editáveis do perfil são POR SERVIDOR
-    // (ver `paisDoPerfil`), então aqui vai a lista inteira da região nova — e a
-    // dica de "só os que você pode editar" sai junto, porque deixou de ser verdade.
-    $('filterRegion').addEventListener('change', async (e) => {
-        const regiao = e.target.value;
-        const sel = $('filterCountry');
-        $('filterCountryHint').classList.add('hidden');
-        sel.innerHTML = `<option value="">${escapeHtml(t('filters.carregando'))}</option>`;
-        sel.disabled = true;
-        sel.dataset.carregando = '1';
-        const r = await API.listCountries(regiao);
-        if ($('filterRegion').value !== regiao) return;   // trocou de novo no meio
-        delete sel.dataset.carregando;
-        sel.disabled = !!$('filterMyArea').checked;
-        const lista = r && r.success ? (r.countries || []) : [];
-        sel.innerHTML = ordenarPorNome(lista).map((c) =>
-            `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
-        await loadStatesIntoSelect(parseInt(sel.value, 10), regiao);
-    });
+    $('filterRegion').addEventListener('change', aoTrocarRegiaoNoModal);
     $('filterMyArea').addEventListener('change', (e) => {
         const checked = e.target.checked;
         $('filterCountry').disabled = checked;
@@ -2973,19 +2953,27 @@ async function loadStatesIntoSelect(countryId, regiao) {
 
     let states = AppState.statesByCountry[countryId];
     if (!states) {
-        // Enquanto carrega, "Todos" é só o que cabe no seletor — não a escolha
-        // da pessoa: o "Aplicar" nesse meio não pode gravar estado vazio por
-        // cima do que ela tinha (ver `applyFiltersFromModal`).
+        // Enquanto carrega, o seletor DIZ que carrega (como o de país), e o
+        // "Aplicar" nesse meio não grava nada por cima do estado da pessoa (ver
+        // `applyFiltersFromModal`). O "Todos" que ele mostrava não era escolha
+        // de ninguém.
+        select.innerHTML = '<option value="">' + escapeHtml(t('filters.carregando')) + '</option>';
         select.dataset.carregando = '1';
         const result = await API.listStates(countryId, regiao);
         if (minha !== cargaDeEstados) return;
-        delete select.dataset.carregando;
-        if (result.success) {
-            states = result.states || [];
-            AppState.statesByCountry[countryId] = states;
-        } else {
+        if (!(result && result.success)) {
+            // A lista não veio (sinal ruim): segue "carregando" pro "Aplicar" —
+            // que assim não apaga o estado salvo — e o seletor diz o que houve.
+            // A falha soltava o seletor em "Todos os estados", e o "Aplicar"
+            // gravava isso por cima do estado da pessoa, calado (auditoria da
+            // fila, 2026-09-26). Reabrir os Filtros tenta de novo.
+            select.innerHTML = '<option value="">' + escapeHtml(t('filters.state.naoCarregou')) + '</option>';
             return;
         }
+        delete select.dataset.carregando;
+        states = result.states || [];
+        AppState.statesByCountry[countryId] = states;
+        select.innerHTML = '<option value="">' + escapeHtml(t('filters.state.all')) + '</option>';
     }
 
     for (const s of ordenarPorNome(states)) {
@@ -2994,9 +2982,52 @@ async function loadStatesIntoSelect(countryId, regiao) {
         opt.textContent = s.name;
         select.appendChild(opt);
     }
-    if (AppState.filters.stateId) {
+    // O estado SALVO só vale no país em que foi salvo: o mesmo número existe em
+    // países diferentes (ver o histórico, que chaveia por `pais:estado`), e
+    // trocar de país no modal pré-selecionava um estado alheio — o 2 da Bahia
+    // abria a França na Bretanha, e o "Aplicar" o gravava.
+    if (AppState.filters.stateId && String(countryId) === String(API.getCountry())) {
         select.value = AppState.filters.stateId;
     }
+}
+
+// Trocar a REGIÃO traz os países DELA. Antes o seletor seguia com os da região
+// anterior, e o "Aplicar" gravava, por exemplo, NA com o Brasil — uma fila vazia
+// sem explicação. Os países editáveis do perfil são POR SERVIDOR (ver
+// `paisDoPerfil`), então aqui vai a lista inteira da região nova.
+//
+// E o "Aplicar" ESPERA a lista chegar: com ela carregando, o seletor de país
+// dizia "Carregando…" e o "Aplicar" gravava a região nova com o país da ANTIGA —
+// MEDIDO no navegador: `na/30` (o Brasil no servidor da América do Norte) e
+// "Tudo limpo!" (auditoria da fila, 2026-09-26). Se a lista não vier, a troca
+// não se completa: a região aplicada volta, com os países dela, e o app diz.
+async function aoTrocarRegiaoNoModal(e) {
+    const $ = (id) => document.getElementById(id);
+    const regiao = e.target.value;
+    const sel = $('filterCountry');
+    const aplicar = $('applyFilters');
+    // A lista da região nova é a INTEIRA: a dica de "só os que você pode editar"
+    // sai junto, porque deixou de ser verdade (T5).
+    $('filterCountryHint').classList.add('hidden');
+    if (aplicar) aplicar.disabled = true;
+    sel.innerHTML = `<option value="">${escapeHtml(t('filters.carregando'))}</option>`;
+    sel.disabled = true;
+    sel.dataset.carregando = '1';
+    const r = await API.listCountries(regiao);
+    if ($('filterRegion').value !== regiao) return;   // trocou de novo no meio
+    delete sel.dataset.carregando;
+    sel.disabled = !!$('filterMyArea').checked;
+    if (aplicar) aplicar.disabled = false;
+    if (!(r && r.success)) {
+        $('filterRegion').value = API.getRegion();
+        populateCountrySelect();
+        showToast(t('toast.regiaoNaoCarregou'), 'error');
+        await loadStatesIntoSelect(API.getCountry());
+        return;
+    }
+    sel.innerHTML = ordenarPorNome(r.countries || []).map((c) =>
+        `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+    await loadStatesIntoSelect(parseInt(sel.value, 10), regiao);
 }
 
 function populateManagedAreaSelect() {
@@ -3044,6 +3075,9 @@ async function openFiltersModal() {
     });
     $('filterResidential').value = AppState.filters.residential;
     $('filterRegion').value = API.getRegion();
+    // A troca de região que ficou no ar (ver `aoTrocarRegiaoNoModal`) desiste ao
+    // ver o seletor de volta na região aplicada — sem devolver o "Aplicar".
+    $('applyFilters').disabled = false;
 
     populateManagedAreaSelect();
     $('filterMyArea').checked = AppState.filters.myArea;

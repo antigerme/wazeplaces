@@ -315,7 +315,11 @@ test('país: vale a cada abertura, depois do perfil — e troca de verdade (fila
 
 // ── os filtros (auditoria de 2026-09-25) ─────────────────────────────────────
 test('filtros: trocar a REGIÃO traz os países dela, e o "Aplicar" com lista carregando não apaga país nem estado', () => {
-  assert.match(APP_SEM, /\$\('filterRegion'\)\.addEventListener\('change', async \(e\) => \{[\s\S]{0,400}const r = await API\.listCountries\(regiao\);/,
+  // O handler virou função com nome (F10a, auditoria da fila de 2026-09-26),
+  // que test/filtros-modal.test.mjs RODA — com a lista chegando e falhando.
+  assert.match(APP_SEM, /\$\('filterRegion'\)\.addEventListener\('change', aoTrocarRegiaoNoModal\);/,
+    'a troca de região no modal deixou de trazer os países dela');
+  assert.match(fatiar('aoTrocarRegiaoNoModal'), /const r = await API\.listCountries\(regiao\);/,
     'a troca de região no modal seguia com os países da região anterior');
   const aplicar = fatiar('applyFiltersFromModal');
   assert.match(aplicar, /if \(!\$\('filterState'\)\.dataset\.carregando\) AppState\.filters\.stateId = \$\('filterState'\)\.value;/);
