@@ -54,12 +54,75 @@ function toqueDoArraste(lista) {
     return null;
 }
 
+// Até onde o mouse pode andar entre apertar e soltar e isso ainda ser CLIQUE
+// (abrir a foto, ampliar o mapa) e não arraste. Na faixa usual do "click
+// slop" dos sistemas; o arraste que decide começa em 25% da largura.
+const CLIQUE_TOLERANCIA_PX = 8;
+
 function enableSwipeOnCard(card) {
     card.addEventListener('mousedown', handleDragStart);
     card.addEventListener('touchstart', handleDragStart, { passive: false });
+    // REDE DE SEGURANÇA do arraste com o MOUSE. Imagem é arrastável por
+    // padrão, e o arrastar NATIVO (`dragstart`) sequestra o mouse: o `mouseup`
+    // nunca chega, o `isDragging` fica verdadeiro e o card segue o cursor SEM
+    // botão nenhum apertado. MEDIDO no computador (auditoria de 2026-09-26),
+    // arrastando pela foto e pelo mapa: o card parava a 40px, e o clique
+    // SEGUINTE em qualquer lugar — Filtros, o placar — cometia a ação que
+    // aquela posição indicava (Filtros abriu E o pedido foi pulado). A
+    // correção de verdade é `draggable="false"` na foto e nos tiles; isto
+    // aqui é pro próximo elemento arrastável que alguém puser no card.
+    card.addEventListener('dragstart', impedirArrasteNativo);
+}
+
+// Com o NOSSO arraste em curso, o nativo não começa — assim os eventos do
+// mouse seguem chegando e o gesto termina como qualquer outro.
+function impedirArrasteNativo(e) {
+    if (isDragging) e.preventDefault();
+}
+
+// Soltar o mouse sobre o MESMO elemento em que ele foi apertado gera um
+// `click` — e no arraste isso é a regra, não a exceção, porque o card anda
+// junto com o cursor. Sem isto, arrastar pela foto abria o lightbox ao soltar,
+// e pelo mapa abria o mapa ampliado, por cima do card que acabava de sair (e
+// de um pedido que acabava de ser decidido). Engole SÓ o clique que vem colado
+// ao `mouseup` deste arraste: o navegador o despacha na mesma volta, e o
+// `setTimeout` desarma a armadilha logo depois, pra o clique seguinte — o de
+// verdade — passar.
+function engolirCliqueDoArraste() {
+    const engolir = (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        document.removeEventListener('click', engolir, true);
+    };
+    document.addEventListener('click', engolir, true);
+    setTimeout(() => document.removeEventListener('click', engolir, true), 0);
 }
 
 function handleDragStart(e) {
+    // DOIS DEDOS NO CARD NÃO SÃO ARRASTE: é a pinça de quem quer ver a foto de
+    // perto (ou a mão apoiada). Até a auditoria de 2026-09-26 o segundo
+    // `touchstart` entrava aqui de novo, sem olhar se já havia arraste nem
+    // quantos dedos havia: o gesto passava a seguir o SEGUNDO dedo e, ao
+    // soltar, cometia por distância ou por flick. MEDIDO com toque de verdade
+    // (CDP) na foto do card: pinça abrindo → 1 lido; fechando → 1 rejeitado;
+    // os dois dedos no mesmo evento → 1 lido. Um pedido decidido por quem só
+    // queria dar zoom — e calado.
+    //
+    // A regra é a de todo reconhecedor de gesto: um arraste de UM dedo não
+    // sobrevive a um segundo dedo. Ele é CANCELADO — o card volta pro lugar e
+    // nada é decidido —, e o gesto novo também não começa. Contar `e.touches`
+    // (a tela inteira) e não só os dedos sobre o card é deliberado, e é o lado
+    // seguro: a pinça com um dedo na foto e o outro fora dela também é pinça.
+    //
+    // O cancelamento vale também quando só há UM dedo agora: aí o arraste "em
+    // curso" é ÓRFÃO — o card foi trocado no meio do gesto (a aprovação da
+    // foto pousando, o fim do lote), o `touchend` morreu no elemento que saiu
+    // do DOM e nunca chegou ao `document`. Sem isto o `isDragging` ficava preso
+    // até alguém tocar de novo.
+    if (e.type === 'touchstart') {
+        if (isDragging) handleDragCancel();
+        if (e.touches && e.touches.length > 1) return;
+    }
     if (animating) return; // não inicia drag durante a animação de saída
     // Janela do "Desfazer" correndo: o pedido ainda não foi pro Waze e dá pra
     // voltar atrás. Deixar arrastar despacharia o anterior sem aviso. Os botões
@@ -130,9 +193,18 @@ function handleDragMove(e) {
     e.preventDefault();
 
     if (e.type === 'mousemove') {
+        // O botão já foi SOLTO e o `mouseup` não chegou (o arrastar nativo o
+        // engoliu, ou ele foi solto fora da janela): o cursor está andando
+        // SOLTO. Cancela sem decidir — decidir aqui seria cometer a ação no
+        // próximo clique, em qualquer lugar da tela (ver `enableSwipeOnCard`).
+        if (e.buttons === 0) { handleDragCancel(); return; }
         currentX = e.clientX;
         currentY = e.clientY;
     } else {
+        // Um segundo dedo encostou com o arraste em curso — inclusive fora do
+        // card, onde o `touchstart` dele não passa pelo `handleDragStart`. É
+        // pinça, não decisão: cancela sem cometer nada (ver o `handleDragStart`).
+        if (e.touches && e.touches.length > 1) { handleDragCancel(); return; }
         // O MESMO dedo, não o `[0]`: com dois na tela, se o primeiro sair o
         // `touches[0]` passa a ser o outro e o card SALTA pra onde ele estiver.
         const t = toqueDoArraste(e.touches);
@@ -181,7 +253,12 @@ function handleDragMove(e) {
     } else {
         const rotation = deltaX * 0.1;
         currentCard.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(${rotation}deg)`;
-        const opacity = Math.min(Math.abs(deltaX) / 100, 1);
+        // O selo do lado só acende quando SOLTAR ali decidiria — a mesma
+        // dominância horizontal que o `commitX` exige (ver o `handleDragEnd`).
+        // Puxando o card pra BAIXO com desvio de lado, o "Rejeitar" acendia
+        // inteiro e prometia uma ação que o soltar não faz mais: o que o app
+        // MOSTRA e o que ele ACEITA têm que ser a mesma coisa.
+        const opacity = Math.abs(deltaX) > Math.abs(deltaY) ? Math.min(Math.abs(deltaX) / 100, 1) : 0;
         updateSwipeIndicator(deltaX, opacity);
     }
 }
@@ -244,24 +321,36 @@ function handleDragEnd(e) {
         dragHandlers = null;
     }
 
+    // Arraste de MOUSE que andou não é clique — decida ou volte, o `click`
+    // colado a este `mouseup` não abre foto nem mapa (ver a função).
+    if (e && e.type === 'mouseup' && Math.hypot(deltaX, deltaY) > CLIQUE_TOLERANCIA_PX) engolirCliqueDoArraste();
+
     // Commit por distância OU por flick (velocidade alta com deslocamento mínimo)
     const commitUp = (Math.abs(deltaY) > thresholdY && deltaY < 0 && Math.abs(deltaY) > Math.abs(deltaX)) ||
         (vy < -FLICK_VELOCITY && deltaY < -FLICK_MIN_DISTANCE && Math.abs(deltaY) > Math.abs(deltaX));
-    const commitX = Math.abs(deltaX) > thresholdX ||
+    // A DISTÂNCIA também exige que o gesto seja horizontal — como o flick e o
+    // ↑ já exigiam. Sem isso, puxar o card pra BAIXO (gesto que o card não tem)
+    // com um desvio de lado maior que 25% da largura REJEITAVA ou marcava lido:
+    // MEDIDO com toque de verdade, (−105, +300) num celular de 393px → 1
+    // rejeitado (auditoria de 2026-09-26).
+    const commitX = (Math.abs(deltaX) > thresholdX && Math.abs(deltaX) > Math.abs(deltaY)) ||
         (Math.abs(vx) > FLICK_VELOCITY && Math.abs(deltaX) > FLICK_MIN_DISTANCE && Math.abs(deltaX) > Math.abs(deltaY));
 
+    // O CARD vai junto pro callback: é por ele que o app sabe QUAL pedido o
+    // gesto viu (ver `agirNoPedidoDoGesto` no app.js) — o `currentPlace` de
+    // 350 ms depois pode já ser outro.
     if (commitUp) {
-        animateSwipeOut('up', () => {
-            if (typeof onSwipeUp === 'function') onSwipeUp();
+        animateSwipeOut('up', (card) => {
+            if (typeof onSwipeUp === 'function') onSwipeUp(card);
         });
     } else if (commitX && !(window.direcaoTravada && window.direcaoTravada(deltaX > 0 ? 'right' : 'left'))) {
         // (Sem a guarda, o card de foto SEM FOTO saía pro lado com ✕ e ✓
         // travados: o gesto decidia o que o botão recusava. Travado, ele volta
         // pro lugar como um arraste curto.)
         const dir = deltaX > 0 ? 'right' : 'left';
-        animateSwipeOut(dir, () => {
-            if (dir === 'right' && typeof onSwipeRight === 'function') onSwipeRight();
-            if (dir === 'left' && typeof onSwipeLeft === 'function') onSwipeLeft();
+        animateSwipeOut(dir, (card) => {
+            if (dir === 'right' && typeof onSwipeRight === 'function') onSwipeRight(card);
+            if (dir === 'left' && typeof onSwipeLeft === 'function') onSwipeLeft(card);
         });
     } else {
         currentCard.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
@@ -300,10 +389,12 @@ function animateSwipeOut(direction, callback) {
         card.style.opacity = '0';
     }
 
+    // O callback recebe o card que SAIU — o do gesto —, não o que estiver na
+    // frente quando ele rodar: nesses 350 ms a fila pode andar por baixo.
     setTimeout(() => {
         animating = false;
         updateSwipeIndicator(0, 0);
-        if (callback) callback();
+        if (callback) callback(card);
     }, 350);
 }
 

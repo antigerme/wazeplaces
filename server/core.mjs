@@ -3,7 +3,7 @@
 // Não depende de plataforma: usa só `fetch` e `crypto.subtle` (Web Crypto),
 // que existem tanto no Cloudflare Workers quanto no Node. Toda I/O de
 // plataforma (armazenamento de sessão, chave de criptografia) é injetada pelos
-// adaptadores (functions/api/[[route]].js no Cloudflare, server/node.mjs na VM).
+// adaptadores (worker/index.mjs no Cloudflare, server/node.mjs na VM).
 //
 // Porte fiel do antigo api/config.php + os 9 endpoints PHP. Diferenças
 // intencionais na migração:
@@ -311,6 +311,41 @@ export function filterWazeCookies(cookiesContent) {
   return [...kept.values()].join('\n');
 }
 
+// O formato de CABEÇALHO (`a=b; c=d`, o que se copia do DevTools) vira linhas
+// Netscape na ENTRADA do login, com domínio `.waze.com` e path `/`. Aceitar os
+// dois formatos continua valendo; o que muda é o que fica GUARDADO, e a
+// diferença decide a vida da sessão: a regravação do cookie rotacionado
+// (gotcha #43, `aplicarCookiesRotacionados`) só sabe trocar valor em linha
+// Netscape. Guardada como cabeçalho, a sessão nunca acompanhava o
+// `_web_session` novo e azedava em dias, com o login do WME valendo (auditoria
+// de 2026-09-26). É o mesmo motivo de a extensão mandar Netscape
+// (`formatarNetscape`, em extensao-chrome/background.js).
+//
+// `.waze.com` porque é o domínio dos cookies do WME, e o `cookieValePraHost`
+// o deixa passar pro www. Só converte o que dá pra representar SEM PERDA: par
+// sem `=`, valor vazio, nome ou valor com espaço (o Netscape é lido por
+// `/\s+/`, e a linha com a última coluna vazia é descartada) e nome REPETIDO
+// (o navegador manda os dois de `.waze.com` e `www.waze.com`, e aqui viraria
+// um só) fazem o conteúdo seguir como veio — aceito, só sem a rotação, como
+// sempre foi. Conversão que perde cookie seria o login falhando pelo parser.
+export function cabecalhoParaNetscape(conteudo) {
+  const s = String(conteudo).trim();
+  if (s.includes('\t')) return s;
+  const pares = s.split('\n').map((l) => l.trim()).filter((l) => l && l[0] !== '#')
+    .join(';').split(';').map((p) => p.trim()).filter(Boolean);
+  const nomes = new Set();
+  const linhas = [];
+  for (const par of pares) {
+    const igual = par.indexOf('=');
+    const nome = par.slice(0, igual);
+    const valor = par.slice(igual + 1);
+    if (igual <= 0 || !valor || /\s/.test(nome) || /\s/.test(valor) || nomes.has(nome)) return s;
+    nomes.add(nome);
+    linhas.push(['.waze.com', 'TRUE', '/', 'TRUE', '0', nome, valor].join('\t'));
+  }
+  return linhas.length ? linhas.join('\n') : s;
+}
+
 // Constrói o valor do header `Cookie:` a partir do conteúdo salvo.
 // Aceita formato Netscape (cookies.txt, com tabs) ou header ("a=b; c=d").
 // `porHost` decide se o conjunto ainda é peneirado pelo host aqui dentro.
@@ -322,7 +357,9 @@ export function filterWazeCookies(cookiesContent) {
 // sintoma: `perfil` 200 e `buscar-places` 403, para sempre.
 export function cookieHeaderFrom(cookiesContent, porHost = true) {
   const s = String(cookiesContent).trim();
-  // Normaliza conteúdo que já é `a=b; c=d` (a extensão manda assim).
+  // Normaliza conteúdo que já é `a=b; c=d`: sessão gravada antes de o login
+  // passar a guardar Netscape, ou cabeçalho que não dá pra converter sem perda
+  // (ver `cabecalhoParaNetscape`). A extensão manda Netscape.
   const comoHeader = (txt) => String(txt)
     .split('\n')
     .map((l) => l.trim())
@@ -697,7 +734,7 @@ function respostaDeErroGrpc(cat, r) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Gate de acesso (Staff OU rank>=2 & Area Manager)
+// Gate de acesso (Staff OU L2+ — rank cru >= MIN_RANK_WAZE — & Area Manager)
 // ─────────────────────────────────────────────────────────────────────────
 
 export function isUserAllowed(profile) {
@@ -927,13 +964,35 @@ export function makeSessions({ store, keyBytes }) {
       return { code: segredo, curto: comCodigo, expiresIn: PAIR_TTL };
     },
 
-    // Uso único: apaga ANTES de validar a expiração, pra um código não poder
-    // ser tentado duas vezes nem virar oráculo de "existe mas venceu".
+    // Lê antes de apagar, pelo mesmo motivo do `destroySession`: a rota não
+    // pede sessão (quem cancela é o "Sair", depois de a sessão já ter sido
+    // apagada), e no plano grátis do KV o apagamento é a cota curta — 1.000 por
+    // dia, contra 100.000 leituras. Sem a leitura, cada POST anônimo com um
+    // código qualquer de 6 ou 20 símbolos gastava um apagamento; em série, a
+    // cota do dia acabava, e com ela o "Sair" de verdade e o resgate de um
+    // código válido (os dois apagam). Auditoria de 2026-09-26.
     async cancelPairing(code) {
       const limpo = normalizePairCode(code);
       if (limpo.length !== PAIR_CODE_LEN && limpo.length !== PAIR_SECRET_LEN) return;
-      try { await store.delete('pair_' + await sha256hex('pair:' + limpo)); } catch (e) { /* vence sozinho em 5 min */ }
+      try {
+        const hash = 'pair_' + await sha256hex('pair:' + limpo);
+        if ((await store.get(hash)) == null) return;
+        await store.delete(hash);
+      } catch (e) { /* vence sozinho em 5 min */ }
     },
+    // Uso único: apaga ANTES de validar a expiração, pra um código não poder
+    // ser tentado duas vezes nem virar oráculo de "existe mas venceu".
+    //
+    // O uso único NÃO é atômico, e isso é sabido: `get` e `delete` são dois
+    // passos, e o KV não tem "ler e apagar" numa operação só (nem consistência
+    // imediata entre regiões: um apagamento leva até ~60 s pra valer no mundo
+    // todo). MEDIDO na auditoria de 2026-09-26: dois resgates SIMULTÂNEOS do
+    // mesmo código rendem duas sessões — 20 de 20 com o store de arquivo, 10 de
+    // 10 na VM de verdade; em série, o segundo é recusado. Não é furo, e por
+    // isso não se paga uma trava: o código É a credencial, e quem o tem já pode
+    // entrar por ele. A corrida não deixa entrar ninguém que não tinha o
+    // segredo; só dá uma segunda sessão (da mesma conta, cifrada com o token
+    // dela) a quem já podia ter a primeira.
     async claimPairing(code) {
       const limpo = normalizePairCode(code);
       // Os dois tamanhos são válidos: 6 é o código digitado, 20 é o do QR.
@@ -1331,6 +1390,33 @@ const contarVertices = (geom) => {
   return n;
 };
 
+// A caixa [lonMin, latMin, lonMax, latMax] de uma geometria GeoJSON, em
+// QUALQUER profundidade — o mesmo desce do `contarVertices`. O `perfil` lia
+// `coordinates[0]` como se toda área fosse Polygon: num MultiPolygon cada
+// "vértice" era um anel, e a caixa saía `[null, null, null, null]` — que o
+// "Minha área" do app manda como filtro. E o mínimo sai em LAÇO, nunca com
+// `Math.min(...lista)`: o espalhamento passa cada vértice como ARGUMENTO, e um
+// anel grande estoura a pilha (medido: com 200 mil vértices o `perfil` caía em
+// 500 — auditoria de 2026-09-26). A recursão só desce no aninhamento (≤ 4
+// níveis no GeoJSON), não nos vértices. `null` sem vértice nenhum.
+const caixaDaGeometria = (geom) => {
+  let lonMin = Infinity, latMin = Infinity, lonMax = -Infinity, latMax = -Infinity;
+  const desce = (c) => {
+    if (!Array.isArray(c)) return;
+    if (typeof c[0] === 'number' && typeof c[1] === 'number') {
+      if (!Number.isFinite(c[0]) || !Number.isFinite(c[1])) return;
+      if (c[0] < lonMin) lonMin = c[0];
+      if (c[0] > lonMax) lonMax = c[0];
+      if (c[1] < latMin) latMin = c[1];
+      if (c[1] > latMax) latMax = c[1];
+      return;
+    }
+    for (const item of c) desce(item);
+  };
+  desce(geom && geom.coordinates);
+  return lonMin <= lonMax ? [lonMin, latMin, lonMax, latMax] : null;
+};
+
 // Mesmo desce-recursivo do buildPlacesFromSearch, mas no escopo do módulo pra
 // o formatGeometry poder usar (lá ele é local a uma função).
 const extractLonLatDeep = (coords) => {
@@ -1401,16 +1487,40 @@ async function handleTestarCookies(data, { sessions }) {
   // Filtra pro domínio do Waze logo na entrada: o cookies.txt do navegador traz
   // cookies de dezenas de sites — guardar/enviar só os do Waze evita vazar
   // credenciais de terceiros e o HTTP 400 por header gigante. Ver filterWazeCookies.
-  const cookies = filterWazeCookies(String(data.cookies).trim());
+  // E o formato de cabeçalho é guardado como Netscape, senão a sessão não
+  // acompanha a rotação do cookie (ver `cabecalhoParaNetscape`).
+  const cookies = cabecalhoParaNetscape(filterWazeCookies(String(data.cookies).trim()));
   if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado. Exporte os cookies logado no Waze Map Editor (formato Netscape).', 400, 'srv.err.cookieFormatExport');
   const csrf = extractCSRFToken(cookies);
   if (!csrf) apiError('Token CSRF não encontrado nos cookies. Certifique-se de estar logado no Waze Map Editor.', 400, 'srv.err.csrfMissingLogin');
 
-  const result = await callWaze(wazeSessionEndpoint(region), cookieHeaderFrom(cookies), csrf, null, region, { data, sessions, cookies });
+  // `ctx` NULO, a exceção deliberada à regra do `callWaze`: aqui a sessão
+  // ainda NÃO existe — ela nasce lá embaixo, depois do portão. Com o contexto
+  // de sempre, um `sessionToken` no corpo fazia o `guardarCookiesRotacionados`
+  // REGRAVAR aquela sessão com os cookies DESTE pedido, mesmo quando o portão
+  // os recusava: uma conta L1 sem área entrava por dentro de uma sessão já
+  // liberada (auditoria de 2026-09-26). Nenhum cliente manda token aqui — nem
+  // o app, nem a extensão —, então quem perde o atalho é só quem o forjava.
+  const result = await callWaze(wazeSessionEndpoint(region), cookieHeaderFrom(cookies), csrf, null, region, null);
   if (result.httpCode === 401 || result.httpCode === 403) {
     apiError('Cookies expirados ou inválidos. Faça login novamente no Waze Map Editor e exporte novos cookies.', 400, 'srv.err.cookiesExpiredRelogin');
   }
-  if (result.httpCode !== 200) apiError(`Erro ao validar cookies (HTTP ${result.httpCode})`);
+  // O resto é falha do WAZE, não dos cookies da pessoa, e sai categorizada como
+  // em toda rota: chave `srv.err.*` (o app traduz; a frase crua era a única
+  // `apiError` sem chave do core, e chegava em português em qualquer idioma),
+  // `errorCategory` e status 5xx — era 400, "o pedido está errado", pra um
+  // Waze fora do ar (auditoria de 2026-09-26). "Já tratado" e "não existe
+  // mais" são categorias de AÇÃO sobre um pedido e não significam nada no
+  // login: o que não é passageiro aqui é erro inesperado do Waze.
+  if (result.httpCode !== 200) {
+    const cat = categorizeWazeError(result.httpCode, result.response, result.error);
+    const c = cat.category === 'transient' ? cat
+      : { category: 'unknown', message: `Erro do Waze (HTTP ${result.httpCode})`, messageKey: 'srv.err.wazeUnknown', messageVars: { code: result.httpCode } };
+    return {
+      status: 500,
+      body: { success: false, error: c.message, errorKey: c.messageKey, errorVars: c.messageVars, errorCategory: c.category, httpCode: result.httpCode },
+    };
+  }
 
   let profile;
   try {
@@ -1482,6 +1592,21 @@ const DUPLICADO_BBOX_GRAUS = 0.004;
 // isso é zero ou um por página —, então o teto nunca é atingido em uso normal:
 // ele existe pra uma página anômala não virar rajada contra o Waze.
 const MAX_DUPLICADOS_POR_BUSCA = 4;
+// Teto PRÓPRIO da releitura do duplicado, contado depois de a busca voltar. O
+// nome do duplicado é enfeite do card, e a fila é o que o editor está
+// esperando; sem teto próprio, a leitura acessória herdava os 30 s do
+// `callWaze`, e busca lenta + releitura presa passavam dos 45 s em que o
+// CLIENTE desiste (`_post`, no api.js) — a fila inteira se perdia pelo enfeite
+// (auditoria de 2026-09-26; medido com um Waze de mentira: releitura de 40 s,
+// busca respondida em 30 s, sem o nome de qualquer jeito).
+//
+// Por que 3 s: é ~3× a leitura mais lenta medida no Waze (977 ms, o
+// `/Session`; a releitura por bbox do excluir-foto anda em ~700 ms), então num
+// dia normal o nome chega; e a pior soma — os 30 s da busca mais este teto —
+// cabe nos 45 s do cliente com folga, o que `test/portao-servidor.test.mjs`
+// confere nas duas fontes. Estourou, a busca sai sem o nome e o card cai na
+// forma isolada ("Duplicado"), a mesma de quando a releitura falha.
+export const DUPLICADO_ESPERA_MS = 3000;
 // Id de local do Waze: três inteiros separados por ponto, o do meio podendo ser
 // negativo (medido). Serve pra não sair fazendo leitura por causa de um
 // `flagEntityID` que na verdade é UUID de foto — o mesmo campo carrega as duas
@@ -1530,7 +1655,17 @@ async function resolverDuplicados(places, cookieHeader, csrf, region, ctx) {
   // leitura que volte estranha (corpo `null`, venue sem geometria) não pode
   // derrubar a FILA inteira com um 500 — era o que um `atual.venues` de `null`
   // fazia, porque a exceção subia pelo `Promise.all` até o `buscar-places`.
-  await Promise.all(alvos.map(({ p, centro }) => resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx).catch(() => {})));
+  // E com TETO (`DUPLICADO_ESPERA_MS`): o que não voltou até lá fica sem nome.
+  let timer;
+  const teto = new Promise((resolve) => { timer = setTimeout(resolve, DUPLICADO_ESPERA_MS); });
+  try {
+    await Promise.race([
+      Promise.all(alvos.map(({ p, centro }) => resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx).catch(() => {}))),
+      teto,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx) {
@@ -2088,8 +2223,13 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   return { places, blocked };
 }
 
-// Id de pedido ou de local: texto ou número curto. Objeto, lista ou texto de
-// quilobytes não é id — ia pro Waze como veio (auditoria de 2026-09-25).
+// Id de pedido, de local ou de foto: texto ou número curto. Objeto, lista ou
+// texto de quilobytes não é id — ia pro Waze como veio (auditoria de
+// 2026-09-25). Vale em TODO caminho que manda id pro Waze: nasceu só no lote
+// do marcar-lido, e o marcar-lido de um item, o validar-place, o
+// guardar-pedido, o renomear-local e o excluir-foto seguiam mandando um objeto
+// ou um texto de 200 KB como veio (auditoria de 2026-09-26). Id inválido
+// responde o MESMO 400 de id ausente, antes do Waze.
 const idValido = (v) => (typeof v === 'string' && v.length > 0 && v.length <= 64) || (typeof v === 'number' && Number.isFinite(v));
 // O lote tem TETO: o cliente manda pedaços de 25, e a página do Waze é de 500.
 // Sem teto, um corpo de 5 MB virava um lote de dezenas de milhares no Waze.
@@ -2107,7 +2247,7 @@ async function handleMarcarLido(data, { sessions, aoFundo }) {
         ids.push({ id: item.updateRequestID, venueId: item.venueID });
       }
     }
-  } else if (data.venueID !== undefined && data.updateRequestID !== undefined) {
+  } else if (idValido(data.venueID) && idValido(data.updateRequestID)) {
     ids.push({ id: data.updateRequestID, venueId: data.venueID });
   }
   if (ids.length === 0) apiError('Dados incompletos', 400, 'srv.err.incompleteData');
@@ -2153,7 +2293,7 @@ async function handleMarcarLido(data, { sessions, aoFundo }) {
 async function handleGuardarPedido(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  if (data.venueID === undefined || data.updateRequestID === undefined) {
+  if (!idValido(data.venueID) || !idValido(data.updateRequestID)) {
     apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
   }
   // Boolean ESTRITO e sem padrão, pelo mesmo motivo do `approve` (gotcha #59):
@@ -2191,7 +2331,7 @@ async function handleGuardarPedido(data, { sessions }) {
 async function handleValidarPlace(data, { sessions, aoFundo }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  if (data.venueID === undefined || data.updateRequestID === undefined) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  if (!idValido(data.venueID) || !idValido(data.updateRequestID)) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
 
   // `=== true` e não coerção: sem isso, qualquer valor truthy que escapasse
   // (uma string "false", por exemplo) viraria uma aprovação.
@@ -2218,6 +2358,16 @@ async function handleValidarPlace(data, { sessions, aoFundo }) {
   };
   const carona = iniciarCarona(data, cookieHeader, region);
   const result = await callWaze(wazeFeaturesEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
+  // Aprovar muda a lista de fotos do LOCAL (a pendente vira aprovada), e a
+  // releitura que o excluir-foto guardou ao tocar numa lixeira ainda a via
+  // pendente. Dentro da janela dela, excluir a foto recém-aprovada dava "só foto
+  // aprovada pode ser excluída", e excluir OUTRA gravava de volta o
+  // `approved: false` velho — o Waze substitui a lista inteira (gotcha #57).
+  // Esquecida, a próxima exclusão relê do Waze. Com qualquer resultado: o que
+  // importa é o Waze PODER ter mudado a lista. E só no aprovar: rejeitar é o
+  // gesto de todo swipe, e uma leitura do KV a mais em cada um pesaria na cota;
+  // aprovar é raro — só foto, só L6+AM (auditoria de 2026-09-26).
+  if (aprovar) await esquecerReleitura(data, sessions);
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
   const extra = await esperarCarona(carona, aoFundo);
 
@@ -2288,7 +2438,7 @@ const RELEITURA_TTL = 15;
 // `catch` logo abaixo engolia isso — no Worker o cache NUNCA era gravado, e
 // toda exclusão pagava a releitura de novo. Quem garante os 15 s é o carimbo
 // no valor, conferido na leitura; o KV só precisa jogar o registro fora depois.
-const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
+export const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
 // Relê o local no Waze e guarda o resultado por RELEITURA_TTL.
 //
 // O cache fica no SERVIDOR de propósito. A alternativa óbvia — o cliente ler,
@@ -2307,7 +2457,7 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
       const corte = bruto.indexOf('|');
       const ts = parseInt(bruto.slice(0, corte), 10);
       if (Number.isFinite(ts) && Math.floor(Date.now() / 1000) - ts <= RELEITURA_TTL) {
-        return { venue: JSON.parse(bruto.slice(corte + 1)), doCache: true };
+        return { venue: JSON.parse(bruto.slice(corte + 1)), doCache: true, lidoEm: ts };
       }
     }
   } catch (e) { /* cache ilegível é cache ausente */ }
@@ -2328,10 +2478,26 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
   // Só o que a escrita precisa. Guardar o venue inteiro seria guardar geometria
   // e escrituração à toa.
   const enxuto = { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) };
+  // `lidoEm` viaja junto: é a IDADE da lista, e quem regrava o cache depois de
+  // excluir tem que manter esta hora, não a da escrita (ver a regravação logo
+  // depois da escrita, no `handleExcluirFoto`).
+  const lidoEm = Math.floor(Date.now() / 1000);
   try {
-    await sessions.store.put(chave, Math.floor(Date.now() / 1000) + '|' + JSON.stringify(enxuto), RELEITURA_TTL_STORE);
+    await sessions.store.put(chave, lidoEm + '|' + JSON.stringify(enxuto), RELEITURA_TTL_STORE);
   } catch (e) { /* sem cache o app só fica mais lento */ }
-  return { venue: enxuto, doCache: false };
+  return { venue: enxuto, doCache: false, lidoEm };
+}
+
+// Esquece a releitura guardada de um local: a próxima exclusão relê do Waze.
+// Lê antes de apagar, pelo mesmo motivo do `destroySession` (no KV o apagamento
+// é a cota curta), e o registro quase nunca existe — só no minuto depois de a
+// pessoa tocar numa lixeira daquele local.
+async function esquecerReleitura(data, sessions) {
+  try {
+    const chave = await chaveDaReleitura(data);
+    if ((await sessions.store.get(chave)) == null) return;
+    await sessions.store.delete(chave);
+  } catch (e) { /* sem apagar, o registro deixa de valer sozinho em RELEITURA_TTL */ }
 }
 
 async function handleExcluirFoto(data, { sessions }) {
@@ -2339,7 +2505,7 @@ async function handleExcluirFoto(data, { sessions }) {
   const region = requireRegion(data);
   const venueID = data.venueID;
   const imageID = data.imageID;
-  if (!venueID || !imageID) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  if (!idValido(venueID) || !idValido(imageID)) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
   const lat = Number(data.lat);
   const lon = Number(data.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
@@ -2432,9 +2598,16 @@ async function handleExcluirFoto(data, { sessions }) {
   //    substitui a lista inteira). MEDIDO que o Waze não a ressuscita, mas
   //    depender disso é depender do eco que o próprio passo 4 diz não ser prova
   //    (auditoria de 2026-09-25).
+  //
+  //    Com o carimbo da LEITURA, nunca o da escrita: o que se regrava é a lista
+  //    lida lá atrás menos uma foto, e ela não fica mais nova por isso. Com a
+  //    hora da escrita, exclusões em série EMPURRAVAM o prazo e a lista
+  //    envelhecia além dos RELEITURA_TTL — MEDIDO: a leitura dos 0 s servia a
+  //    exclusão dos 20 s, e a foto que outro editor subiu aos 16 s era apagada
+  //    (auditoria de 2026-09-26).
   try {
     await sessions.store.put(await chaveDaReleitura(data),
-      Math.floor(Date.now() / 1000) + '|' + JSON.stringify({ id: venue.id, images: restantes }), RELEITURA_TTL_STORE);
+      rel.lidoEm + '|' + JSON.stringify({ id: venue.id, images: restantes }), RELEITURA_TTL_STORE);
   } catch (e) { /* sem cache, a próxima exclusão relê do Waze */ }
 
   // 4) Conferência pelo que o Waze DEVOLVEU — e o eco NÃO É PROVA, então isto
@@ -2490,7 +2663,7 @@ async function handleRenomearLocal(data, { sessions }) {
   const region = requireRegion(data);
   const venueID = data.venueID;
   const nome = typeof data.nome === 'string' ? data.nome.trim() : '';
-  if (!venueID || !nome) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  if (!idValido(venueID) || !nome) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
   if (nome.length > NOME_MAX) apiError('Nome longo demais', 400, 'srv.err.nameTooLong');
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
@@ -2572,14 +2745,8 @@ async function handlePerfil(data, { sessions }) {
 
   const areas = [];
   for (const area of rd.areas || []) {
-    let bbox = null;
-    const coords = area?.geometry?.coordinates?.[0];
-    if (Array.isArray(coords) && coords.length) {
-      const lons = coords.map((c) => c[0]);
-      const lats = coords.map((c) => c[1]);
-      bbox = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
-    }
-    areas.push({ type: area.type ?? null, bbox });
+    // Polygon e MultiPolygon, de qualquer tamanho (ver `caixaDaGeometria`).
+    areas.push({ type: area?.type ?? null, bbox: caixaDaGeometria(area?.geometry) });
   }
   const managedAreas = [];
   for (const ma of rd.managedAreas || []) managedAreas.push({ id: ma.id ?? null, name: ma.name || '' });
@@ -3280,11 +3447,22 @@ async function abrirConversa(data, { sessions, cookies, region, cabecalho, insta
   } catch {
     apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
   }
+  // O "lida" é acessório pro HISTÓRICO, não pro cliente: ele precisa saber se
+  // a conversa ficou lida no Waze. Com só `recibos: []`, "falhou" e "não havia
+  // o que marcar" eram a mesma resposta, o app dava como lida uma conversa que
+  // o Waze seguia contando, e nada tentava de novo com ela aberta (auditoria de
+  // 2026-09-26). `lida` só vai na primeira página (a antiga não marca nada), e
+  // a conversa que ainda não existe conta como lida: não havia o que marcar.
   let recibos = [];
-  if (lida && !categorizeGrpcError(lida)) {
-    try { recibos = lerMarcarLida(lida.dados).recibos; } catch { recibos = []; }
+  let lidaOk = false;
+  if (lida) {
+    if (lida.grpcStatus === 7 && lida.grpcMessage === 'NO_EXISTING_CONVERSATION') lidaOk = true;
+    else if (!categorizeGrpcError(lida)) {
+      lidaOk = true;
+      try { recibos = lerMarcarLida(lida.dados).recibos; } catch { recibos = []; }
+    }
   }
-  return { status: 200, body: { success: true, ...resultado, recibos } };
+  return { status: 200, body: { success: true, ...resultado, recibos, ...(lida ? { lida: lidaOk } : {}) } };
 }
 
 const ROUTES = {

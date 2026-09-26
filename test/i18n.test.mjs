@@ -542,3 +542,18 @@ test('inglês e francês usam o apóstrofo tipográfico (’) — só as strings
     assert.match(DICT.fr[k], /lue\b/, `fr: ${k} = "${DICT.fr[k]}"`);
   }
 });
+
+test('trocar de idioma redesenha o que o JS escreve fora do data-i18n (Preferências, pílula, botão de Filtros)', async () => {
+  // Auditoria de 2026-09-25, MEDIDO trocando pra inglês com as Preferências
+  // abertas (a tela onde a troca acontece): o aviso do Desfazer e o nome da
+  // pílula da presença ficavam em português até a próxima abertura.
+  const { readFileSync } = await import('node:fs');
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const i = APP.indexOf('function aplicarIdioma(');
+  const corpo = APP.slice(i, APP.indexOf('\n}\n', i));
+  for (const chamada of ['renderUndoGateUI();', 'atualizarLinhaDoOffline(0, 0);', 'atualizarSeloDeConquista();', 'window.Presenca?.renderPilula?.();']) {
+    assert.ok(corpo.includes(chamada), `trocar de idioma deixou de redesenhar: ${chamada}`);
+  }
+  // E só com sessão: deslogado (o seletor da Ajuda) não há Preferências nem pílula.
+  assert.match(corpo, /if \(AppState\.authenticated\) \{\s*renderUndoGateUI\(\);/);
+});

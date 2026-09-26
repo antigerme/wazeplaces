@@ -1,7 +1,7 @@
 // Os portões do app: quem passa, e quem tem o direito de decidir isso.
 //
 // O app tem DOIS níveis, e o par é deliberado:
-//   · ENTRAR é L3+AM — `isUserAllowed`, no SERVIDOR. É o portão de verdade, e
+//   · ENTRAR é L2+AM (L3+AM até 2026-09-09) — `isUserAllowed`, no SERVIDOR. É o portão de verdade, e
 //     `test/core.test.mjs` já cobre a matriz dele.
 //   · AGIR de forma destrutiva é L6+AM — `podeAgirComoL6Aqui`, só do CLIENTE.
 //     Este arquivo é o que faltava: até agora nada reprovava quem trocasse

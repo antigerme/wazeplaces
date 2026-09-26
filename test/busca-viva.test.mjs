@@ -105,8 +105,10 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     // O treino tem fila de EXEMPLOS: a busca não roda com ele ativo.
     Treino: { ativo: false },
     console: { error: () => {} },
+    // O LUGAR da busca (a fila guardada do offline diz de onde é — ver `filaDeOnde`).
+    lugarAgora: () => ({ regiao: 'row', pais: '30' }),
   };
-  const fontes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage']
+  const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage']
     .map(fatiar).join('\n');
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + '\nreturn { fetchNextPage };')(...nomes.map((n) => deps[n]));
@@ -404,4 +406,68 @@ test('a volta da rede e o "Tentar novamente": com a fila VAZIA é atualizar; com
     'o "Tentar novamente" voltou a zerar a fila (e a descartar a guardada do offline)');
   assert.match(APP_SEM, /\$\('refreshBtn'\)\.addEventListener\('click', \(\) => \{\s*if \(AppState\.fetching\) return;\s*if \(navigator\.onLine === false\) \{/,
     'o ↻ sem rede joga fora a fila (inclusive a guardada)');
+});
+
+// ── O6: 401 passageiro NUMA REPOSIÇÃO (auditoria de 2026-09-26) ─────────────
+// A reposição (busca com card na fila) leva UM 401 e a sonda diz "viva" (o
+// alarme falso): o `rebuscarDepoisDeFalha` saía na primeira linha porque havia
+// card, e a busca que falhou tinha deixado `hasMore = false` e `loadError =
+// true` — a fila parava de se repor com a sessão viva, e ao fim dos cards a
+// pessoa via "Falha ao carregar" (medido no navegador, p7: 2 buscas, 5 de 10).
+// Aqui a busca, o `maybePrefetch` e o `rebuscarDepoisDeFalha` são os do app, e
+// o "alarme falso" chama a recomposição como o `handleUnauthorized` chama.
+function montarAlarmeFalso(waze, { um401NaBusca }) {
+  const m = montar(waze);
+  let buscas = 0;
+  const buscarDeVerdade = waze.buscar;
+  const ctl = { rebuscar: null };
+  const deps = { ...m.deps,
+    API: { fetchPlaces: (page, f) => (++buscas === um401NaBusca
+      ? Promise.resolve({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionMissing' })
+      : buscarDeVerdade(page, f)) },
+    handleUnauthorized: () => setImmediate(() => ctl.rebuscar()),
+    MAX_REBUSCAS_AUTO: constante('MAX_REBUSCAS_AUTO'), startFetching: () => {}, showCurrentPlace: () => {},
+  };
+  const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
+    'fetchNextPage', 'maybePrefetch', 'rebuscarDepoisDeFalha'].map(fatiar).join('\n');
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, fontes + '\nreturn { fetchNextPage, maybePrefetch, rebuscarDepoisDeFalha };')(...nomes.map((n) => deps[n]));
+  ctl.rebuscar = app.rebuscarDepoisDeFalha;
+  return { app, AppState: m.AppState, buscas: () => buscas };
+}
+const aquietar = async () => { for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r)); };
+
+test('O6: 401 passageiro na REPOSIÇÃO com card na fila — o alarme falso repõe a busca e a fila segue', async () => {
+  const waze = wazeVivo(10);
+  const m = montarAlarmeFalso(waze, { um401NaBusca: 2 });
+  const { app, AppState } = m;
+  await app.fetchNextPage();
+  const vistos = [];
+  for (let passos = 0; passos < 50 && AppState.queue.length; passos++) {
+    vistos.push(chave(AppState.queue[0]));        // pula: o pedido segue pendente no Waze
+    AppState.queue.shift();
+    app.maybePrefetch();                           // o `advanceQueue` faz isto a cada card
+    await aquietar();
+  }
+  assert.equal(new Set(vistos).size, 10, `a fila parou de se repor depois do 401 — vistos ${vistos.length} de 10`);
+  assert.equal(AppState.loadError, false, 'sobrou a falha na tela com a sessão viva');
+});
+
+test('O6: o teto da recomposição vale também com card na fila — e 401 de AÇÃO (sem falha de busca) não mexe na busca', async () => {
+  const src = fatiar('rebuscarDepoisDeFalha');
+  const rodar = (estado, rebuscasAuto) => {
+    const AppState = { queue: [{}], fetching: false, hasMore: false, loadError: true, ...estado };
+    const chamadas = [];
+    const f = new Function('AppState', 'MAX_REBUSCAS_AUTO', 'maybePrefetch', 'startFetching', `let rebuscasAuto = ${rebuscasAuto};\n${src}
+      rebuscarDepoisDeFalha(); return rebuscasAuto;`);
+    const depois = f(AppState, constante('MAX_REBUSCAS_AUTO'), () => chamadas.push('prefetch'), () => chamadas.push('start'));
+    return { AppState, chamadas, depois };
+  };
+  const teto = rodar({}, constante('MAX_REBUSCAS_AUTO'));
+  assert.deepEqual(teto.chamadas, [], 'estourado o teto, a recomposição seguiu — é o laço falha → confere → rebusca');
+  assert.equal(teto.AppState.loadError, true);
+  const acao = rodar({ loadError: false, hasMore: false }, 0);
+  assert.deepEqual(acao.chamadas, [], 'o 401 de uma AÇÃO (nenhuma busca falhou) mexeu na busca');
+  const ok = rodar({}, 0);
+  assert.deepEqual([ok.AppState.hasMore, ok.AppState.loadError, ok.depois, ok.chamadas], [true, false, 1, ['prefetch']]);
 });

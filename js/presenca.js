@@ -307,6 +307,11 @@ async function presencaSincronizar() {
     await presencaAtualizar();
 }
 
+// A falha que nem chegou a ter resposta (ver o `catch` do `_post` no api.js).
+function presencaSemResposta(r) {
+    return !r || typeof r._motivo === 'string';
+}
+
 async function presencaAtualizar({ token = false } = {}) {
     if (!presencaPodeConectar()) return;
     if (Presenca.pedindo) return Presenca.pedindo;
@@ -329,7 +334,14 @@ async function presencaAtualizar({ token = false } = {}) {
                 // aberto sem sinal, o app ficava 5 min sem o tempo real depois de
                 // a rede voltar (o `online` achava o pedido "recente" e desistia).
                 // Recusa de verdade segue contando (auditoria de 2026-09-25).
-                if (querToken && (!r || r.errorCategory === 'transient')) Presenca.tokenPedidoEm = 0;
+                //
+                // E "por rede" é SEM RESPOSTA: o `_post` só põe `_motivo` quando a
+                // resposta nem chegou (rede, DNS, tempo esgotado). O Waze falhando
+                // também volta `transient`, mas COM resposta — e ela prova rede:
+                // zerado aí, cada ação (`presencaAoProvarRede`) pediria o token de
+                // novo enquanto o Waze estivesse fora, uma requisição a mais por
+                // swipe no free tier (auditoria de 2026-09-26).
+                if (querToken && presencaSemResposta(r)) Presenca.tokenPedidoEm = 0;
                 presencaAnotarLista({ via: 'pedido', falhou: (r && r.errorCategory) || 'sem resposta' });
                 if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
                 return;
@@ -350,8 +362,14 @@ async function presencaAtualizar({ token = false } = {}) {
                 presencaFluxoGarantir();
             }
             if (querToken) {
-                presencaAnotar('presenca.token', { veio: !!(r.chat && r.chat.token),
-                    expiraEmH: r.chat && Number.isFinite(r.chat.expiraEm) ? Math.round((r.chat.expiraEm - Date.now()) / 36e5) : null });
+                // O prazo JÁ levado pro relógio daqui (o `Presenca.chat` de
+                // cima): o cru é do relógio do SERVIDOR, e contra o do aparelho
+                // o diário dizia "vence em -1 h" com o token recém-chegado num
+                // aparelho um dia adiantado — o resumo, que usa o convertido,
+                // dizia 24 (auditoria de 2026-09-26).
+                const veio = !!(r.chat && r.chat.token);
+                presencaAnotar('presenca.token', { veio,
+                    expiraEmH: veio && Number.isFinite(Presenca.chat.expiraEm) ? Math.round((Presenca.chat.expiraEm - Date.now()) / 36e5) : null });
             }
         } catch (e) {
             /* presença é acessório: nunca tira ninguém da fila */
@@ -378,6 +396,19 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
         Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
         // O que chegou ao vivo ANTES de o pedido sair o servidor já contou.
         for (const [id, v] of Presenca.vivas) if (v.ultimaTs < inicio) Presenca.vivas.delete(id);
+        // A conversa que a pessoa está OLHANDO está lida, diga a lista o que
+        // disser. A lista pode ter sido lida no Waze ANTES do "lida" — pedida
+        // junto com o toque que abriu a conversa, ou na volta do segundo plano
+        // —, e ela sobrescrevia com "1" a conversa aberta e lida: a pílula
+        // dizia "1 mensagem nova" com a mensagem na tela (auditoria de
+        // 2026-09-26). O que chega com ela na tela já não vira não lida
+        // (`presencaMensagemDoFluxo`); aqui é a mesma regra pro que a lista diz.
+        const olhando = Presenca.aberta && presencaOlhando(Presenca.aberta) ? Presenca.aberta : null;
+        if (olhando) {
+            const c = Presenca.conversas.find((x) => x.id === olhando);
+            if (c) c.naoLidas = 0;
+            Presenca.vivas.delete(olhando);
+        }
         // Conversa que o servidor diz ser do app o aparelho passa a conhecer:
         // é isso que a mantém na lista quando a resposta vier pelo WME, sem a
         // marca. As mais recentes primeiro, pelo teto.
@@ -391,10 +422,17 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
 }
 
 // Chamado pelo app.js com o que voltou DE CARONA na ação (`presencaApp`).
-function presencaAoCarona(p, inicio) {
+// `pais` é o que a carona LEVOU: a lista que volta é a desse país. Com o
+// filtro trocado com a ação no ar, a lista do Brasil entrava como a da França
+// — e, com ela "fresca", o pedido do país novo nem saía (auditoria de
+// 2026-09-26). Lista de outro país fica de fora; a do país novo vem pelo
+// pedido que a troca de filtro já faz.
+function presencaAoCarona(p, inicio, pais) {
     try {
         if (!p || !presencaPodeConectar()) return;
-        presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, API.getCountry(), 'carona');
+        const atual = API.getCountry();
+        if (pais !== undefined && pais !== null && String(pais) !== String(atual)) return;
+        presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, atual, 'carona');
     } catch (e) { /* diagnóstico nunca derruba a ação */ }
 }
 
@@ -438,33 +476,82 @@ function presencaDesligar() {
     Presenca.pedindo = null;
     Presenca.chat = null;
     Presenca.fluxoTentativa = 0;
-    presencaRenderPilula();
-    presencaRenderLista();
+    // A conversa, a lista e a folha do pedido FECHAM junto. Desligar é o que o
+    // `showAuthScreen` chama quando a sessão acaba, e elas ficavam por cima da
+    // tela de entrada — com a conversa (texto de terceiro) à mostra e um campo
+    // que engolia o que se digitava (auditoria de 2026-09-26). Pelo
+    // `closeModal`, que consome a entrada do voltar e roda a limpeza de cada
+    // uma; só a que está NA TELA (fechar a escondida gastaria um voltar).
+    // Quem abre um diálogo logo depois (o portão fechado) o abre ANTES do
+    // `showAuthScreen`: fechar e abrir no mesmo quadro é o gotcha #65.
+    if (typeof closeModal === 'function') {
+        for (const id of ['conversaModal', 'presencaModal', 'pedidoModal']) {
+            const m = document.getElementById(id);
+            if (m && !m.classList.contains('hidden')) closeModal(id);
+        }
+    }
+    // A conversa aberta e o pedido preso nela são DESTA sessão, e o `aberta` e
+    // o `anexo` ficavam de pé quando outra camada tinha escondido a conversa
+    // sem a limpeza dela: atravessavam o "Sair", e o pedido de uma conta
+    // aparecia — e saía no envio — na conversa da conta seguinte (auditoria de
+    // 2026-09-26). A limpeza do fechamento faz o resto: tira do DOM a conversa
+    // e o anúncio (texto de terceiro) e redesenha a pílula e a lista.
+    presencaEsquecerAberta();
 }
 
 // Logout: "se pedir para sair, é realmente para sair".
 function presencaEsquecer() {
     presencaDesligar();
     Presenca.ultimaPosicao = null;
+    // O que ficou digitado e não saiu também: o campo não é apagado quando o
+    // envio não pode sair (ver o `submit`), e a conta seguinte o acharia lá.
+    const campo = document.getElementById('conversaInput');
+    if (campo) campo.value = '';
     safeLS.remove(CHAT_KEY);
 }
 
 // ── o tempo real (direto do navegador ao Google) ────────────────────────────
 
+// Não precisa de token novo: tem um, e ele vale por mais de uma hora (a folga).
 function presencaTokenValido() {
     const c = Presenca.chat;
     if (!c || !c.token || !c.base || !c.chave) return false;
     return !Number.isFinite(c.expiraEm) || c.expiraEm - Date.now() > PRESENCA_TOKEN_FOLGA_MS;
 }
 
+// O token ABRE o fluxo até vencer DE FATO. A folga de uma hora é só a hora de
+// pedir o próximo, e as duas coisas eram uma só: na última hora o app parava
+// de abrir o fluxo e esperava o token novo — e se a renovação não viesse (o
+// provedor falhou no Waze, a rede caiu), o tempo real ficava parado com um
+// token que ainda valia, e nada o religava (auditoria de 2026-09-26).
+function presencaTokenAbre() {
+    const c = Presenca.chat;
+    if (!c || !c.token || !c.base || !c.chave) return false;
+    return !Number.isFinite(c.expiraEm) || c.expiraEm > Date.now();
+}
+
 function presencaFluxoGarantir() {
-    if (!presencaPodeConectar() || Presenca.fluxo) return;
+    if (!presencaPodeConectar()) return;
     if (document.visibilityState === 'hidden' || navigator.onLine === false) return;
-    if (!presencaTokenValido()) {
-        if (Date.now() - Presenca.tokenPedidoEm > PRESENCA_TOKEN_REPETIR_MS) presencaAtualizar({ token: true });
-        return;
+    // A renovação vai À PARTE, com o teto de 5 min: falta token, ele está na
+    // última hora, ou o Google o recusou. Chega pelo `presencaAtualizar`, que
+    // abre o fluxo quando o token vem.
+    if (!presencaTokenValido() && Date.now() - Presenca.tokenPedidoEm > PRESENCA_TOKEN_REPETIR_MS) {
+        presencaAtualizar({ token: true });
     }
-    presencaFluxoAbrir();
+    if (!Presenca.fluxo && presencaTokenAbre()) presencaFluxoAbrir();
+}
+
+// Resposta NOSSA que chega prova rede (`API.aoProvarRede`, o gancho que a fila
+// de saída já usa). Sem token que abra o fluxo — o provedor voltou vazio, a
+// renovação caiu, o Google recusou —, nada mais o pedia de novo: o recuo do
+// fluxo desiste sem token e nenhum timer ficava de pé, então o tempo real
+// só voltava reabrindo o app (auditoria de 2026-09-26). Aqui ele é pedido de
+// novo, com o MESMO teto de 5 min — e nada além disso: com token, quem cuida
+// do fluxo é o recuo, senão cada ação viraria uma reconexão ao Google.
+function presencaAoProvarRede() {
+    if (presencaTokenAbre()) return;
+    presencaFluxoGarantir();
 }
 
 function presencaFluxoFechar() {
@@ -731,11 +818,16 @@ function presencaLerMensagem(u8) {
 // daqui de volta (`presencaLegendaDoTexto`).
 function presencaTextoParaWme(legenda, card) {
     if (!card) return legenda;
+    const link = typeof linkWmeDoPedido === 'function' ? linkWmeDoPedido(card, card.region || API.getRegion()) : '';
+    return (legenda ? legenda + '\n' : '') + presencaLinhaDoPedido(card) + (link ? '\n' + link : '');
+}
+
+// "📍 Padaria · Nova foto": o pedido numa linha de texto — a do WME e a do
+// anúncio pro leitor de tela.
+function presencaLinhaDoPedido(card) {
     const nome = (card.name || '').trim() || (card.address || '').trim() || t('card.noName');
     const tipo = presencaTipo(card.updateTypeKey);
-    const linha = '📍 ' + nome + (tipo ? ' · ' + tipo : '');
-    const link = typeof linkWmeDoPedido === 'function' ? linkWmeDoPedido(card, card.region || API.getRegion()) : '';
-    return (legenda ? legenda + '\n' : '') + linha + (link ? '\n' + link : '');
+    return '📍 ' + nome + (tipo ? ' · ' + tipo : '');
 }
 
 // A pergunta de uma mensagem com pedido: tudo ANTES da linha do 📍. A última
@@ -885,9 +977,17 @@ function presencaPedirNome() {
 // tela, a próxima mensagem dessa pessoa virava "lida" com a conversa fora da
 // vista (achado pelo smoke da presença).
 function presencaOlhando(id) {
+    return Presenca.aberta === id && document.visibilityState === 'visible' && presencaConversaNaTela();
+}
+
+// O modal da conversa está visível. É a régua de "olhando" (acima) e de quem
+// pode DESENHAR a conversa (`presencaRenderConversa`): escondida por outra
+// camada, ela era redesenhada a cada mensagem que chegava, e a captura do
+// diagnóstico (que leva o DOM inteiro) mostrava uma conversa que não estava na
+// tela (auditoria de 2026-09-26).
+function presencaConversaNaTela() {
     const modal = document.getElementById('conversaModal');
-    return Presenca.aberta === id && document.visibilityState === 'visible'
-        && !!modal && !modal.classList.contains('hidden');
+    return !!modal && !modal.classList.contains('hidden');
 }
 
 // Quem usa leitor de tela não ouvia a mensagem que chega com a conversa aberta.
@@ -898,7 +998,11 @@ function presencaAnunciar(msg) {
     const el = document.getElementById('conversaAnuncio');
     if (!el) return;
     const nome = (document.getElementById('conversaTitle') || {}).textContent || '';
-    el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(msg.texto || '').slice(0, 280) });
+    // Com pedido, o que se ouve é o que a TELA mostra — a pergunta e o pedido
+    // —, não o texto que vai pro WME: ele leva o link LONGO do ↗, e o leitor
+    // de tela o soletrava inteiro (auditoria de 2026-09-26).
+    const texto = msg.card ? [msg.legenda, presencaLinhaDoPedido(msg.card)].filter(Boolean).join('\n') : msg.texto;
+    el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(texto || '').slice(0, 280) });
 }
 
 function presencaAgendarLida(id) {
@@ -909,19 +1013,46 @@ function presencaAgendarLida(id) {
 async function presencaMarcarLida(id) {
     if (!presencaOlhando(id)) return;
     const h = Presenca.historico.get(id);
-    const ultimaDela = h ? Math.max(0, ...h.msgs.filter((m) => !m.meu).map((m) => m.ts)) : 0;
-    // Nada dela, ou nada depois do último "lida": não há o que marcar, e o
-    // pedido seria à toa (voltar pra tela chama isto sempre).
-    if (!ultimaDela || (Presenca.lidaEnviadaAte.get(id) || 0) >= ultimaDela) return;
     // Conversa ainda carregando: o que chegou nela ainda não está na tela.
-    if (!h.carregada) return;
+    if (!h || !h.carregada) return;
+    const ultimaDela = Math.max(0, ...h.msgs.filter((m) => !m.meu).map((m) => m.ts));
+    // Nada dela, ou nada depois do último "lida": não há o que marcar, e o
+    // pedido seria à toa (voltar pra tela chama isto sempre). Mas a contagem
+    // DAQUI pode estar velha — uma lista lida no Waze antes do último "lida",
+    // chegada com o app no segundo plano —, e com a conversa na tela ela é zero.
+    if (!ultimaDela || (Presenca.lidaEnviadaAte.get(id) || 0) >= ultimaDela) {
+        presencaZerarNaoLidas(id, Date.now());
+        return;
+    }
     const carona = chatCarona();
+    const epoca = Presenca.epoca;
+    const enviadoEm = Date.now();
     const r = await API.chat({ acao: 'lida', com: id, ...carona });
     chatAoResponder(r, carona);
+    if (epoca !== Presenca.epoca) return;   // desligou ou saiu no meio
     // Só DEPOIS da resposta: marcado antes, um "lida" que falhou (rede) ficava
     // dado como enviado — o Waze seguia contando a mensagem como não lida, a
     // pílula mostrava "1" com a conversa aberta e lida, e nada tentava de novo.
-    if (r && r.success) Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
+    if (r && r.success) {
+        Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
+        presencaZerarNaoLidas(id, enviadoEm);
+    }
+}
+
+// O Waze zerou a conversa: a contagem DAQUI também. Sem isto, o "1" que a lista
+// trouxe com o app no segundo plano (ou que chegou ao vivo com a tela apagada)
+// ficava na pílula com a conversa aberta e lida, até a próxima lista (auditoria
+// de 2026-09-26). O que chegou ao vivo DEPOIS de `ate` — com a conversa fechada
+// no meio do "lida" — continua contando.
+function presencaZerarNaoLidas(id, ate) {
+    const c = Presenca.conversas.find((x) => x.id === id);
+    const v = Presenca.vivas.get(id);
+    const tinha = !!(c && c.naoLidas) || !!v;
+    if (c) c.naoLidas = 0;
+    if (v && v.ultimaTs <= ate) Presenca.vivas.delete(id);
+    if (!tinha) return;
+    presencaRenderPilula();
+    presencaRenderLista();
 }
 
 // ── a conversa ──────────────────────────────────────────────────────────────
@@ -929,6 +1060,12 @@ async function presencaMarcarLida(id) {
 function presencaAbrirConversa(id) {
     id = String(id);
     if (!PRESENCA_ID.test(id)) return;
+    // O pedido preso é da conversa em que foi preso. Escondida por outra camada
+    // (a folha do pedido recebido), a conversa não passa pela limpeza dela, e o
+    // anexo ficava: abrir a conversa com OUTRA pessoa mostrava o pedido na
+    // tirinha — e ele saía junto no envio, pra quem não era o destino
+    // (auditoria de 2026-09-26).
+    if (Presenca.aberta !== id) Presenca.anexo = null;
     Presenca.aberta = id;
     chatConhecer(id);
     // Abrir é ler: o servidor marca como lida no mesmo pedido do histórico.
@@ -952,7 +1089,12 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     if (!h) { h = { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false }; Presenca.historico.set(id, h); }
     if (h.carregando) return;
     h.carregando = true;
-    h.erro = false;
+    // A página antiga tem estado PRÓPRIO (`antigas`): a falha dela não é a do
+    // histórico, que já está na tela (ver `presencaHtmlAnteriores`). E a
+    // primeira página recomeça as duas: reabrir a conversa não traz de volta o
+    // erro de uma página antiga que falhou da outra vez.
+    if (antes) h.antigas = 'carregando';
+    else { h.erro = false; h.antigas = null; }
     presencaRenderConversa();
     const epoca = Presenca.epoca;
     const carona = chatCarona();
@@ -961,7 +1103,8 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     if (epoca !== Presenca.epoca) return;
     chatAoResponder(r, carona);
     if (!r || !r.success) {
-        h.erro = true;
+        if (antes) h.antigas = 'erro';
+        else h.erro = true;
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
         if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
         presencaRenderConversa();
@@ -977,16 +1120,29 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     // resposta; numa página antiga, idem — a de cima da lista é sempre a última.
     h.maisAntigas = !!r.maisAntigas;
     h.carregada = true;
+    if (antes) h.antigas = null;
     presencaAnotar('chat.abrir', { ok: true, mensagens: msgs.length, maisAntigas: h.maisAntigas, pagina: antes ? 'antiga' : 'primeira' });
     if (!antes) {
         const ultimaDela = Math.max(0, ...msgs.filter((m) => !m.meu).map((m) => m.ts));
-        if (ultimaDela) Presenca.lidaEnviadaAte.set(id, ultimaDela);
+        // Só com o "lida" CONFIRMADO pelo servidor (`lida: true`). Falhou no
+        // Waze, a resposta vinha igual à de "nada a marcar", o app dava a
+        // conversa como lida e nunca mais pedia com ela aberta (auditoria de
+        // 2026-09-26). Sem a marca aqui, o `presencaAgendarLida` logo abaixo
+        // manda o "lida" que faltou — um pedido, só quando o do `abrir` falhou.
+        if (ultimaDela && r.lida === true) Presenca.lidaEnviadaAte.set(id, ultimaDela);
     }
     presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
     // O que chegou pelo fluxo DURANTE o carregamento entrou no histórico (ver
     // `presencaMensagemDoFluxo`) depois do "lida" que o `abrir` já fez: agora
     // que está na tela, marca.
     if (!antes && presencaOlhando(id)) presencaAgendarLida(id);
+}
+
+// A página ANTES da primeira mensagem na tela.
+function presencaCarregarAntigas(id) {
+    const h = Presenca.historico.get(id);
+    const antes = h && h.msgs.length ? h.msgs[0].ts : null;
+    if (antes) presencaCarregarConversa(id, { antes });
 }
 
 function presencaFecharConversa() {
@@ -1213,7 +1369,7 @@ function presencaRenderPilula() {
     selo.textContent = valor > 99 ? '99+' : String(valor);
     selo.classList.toggle('tem-msg', naoLidas > 0);
     const rotulo = naoLidas > 0
-        ? t(naoLidas === 1 ? 'presenca.pill.msg' : 'presenca.pill.msgPlural', { n: naoLidas })
+        ? presencaRotuloNaoLidas(naoLidas)
         : t(n === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n });
     btn.setAttribute('aria-label', rotulo);
     btn.setAttribute('title', rotulo);
@@ -1270,6 +1426,12 @@ function presencaBadge(n) {
     return n ? `<span class="presenca-badge">${n > 9 ? '9+' : n}</span>` : '';
 }
 
+// "3 mensagens novas" — as MESMAS palavras da pílula (mesmo conceito, mesmo
+// termo). Vazio sem nada novo.
+function presencaRotuloNaoLidas(n) {
+    return n ? t(n === 1 ? 'presenca.pill.msg' : 'presenca.pill.msgPlural', { n }) : '';
+}
+
 function presencaRenderLista() {
     const lista = document.getElementById('presencaLista');
     if (!lista) return;
@@ -1291,15 +1453,25 @@ function presencaRenderLista() {
     const gente = Presenca.online.map((p) => ({ p, d: presencaDistancia(p) }))
         .sort((a, b) => (a.d ? a.d.km : Infinity) - (b.d ? b.d.km : Infinity)
             || String(a.p.nome || '').localeCompare(String(b.p.nome || ''), i18nLocale()));
-    const linhasOnline = gente.map(({ p, d }) => `<li>
-            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(p.id)}">
+    // Cada linha leva o nome acessível MONTADO, com as partes separadas: tirado
+    // do conteúdo, o leitor de tela lia "cafanhaL4 a 3 km daqui3" — o nome
+    // colado no nível, e um "3" solto no fim, sem dizer que eram mensagens
+    // (auditoria de 2026-09-26). A tela não muda.
+    const linhasOnline = gente.map(({ p, d }) => {
+        const nome = p.nome || t('presenca.anon');
+        const nivel = 'L' + String((p.rank || 0) + 1);
+        const n = presencaNaoLidasDe(p.id);
+        const rotulo = [nome, nivel, d && d.texto, presencaRotuloNaoLidas(n)].filter(Boolean).join(', ');
+        return `<li>
+            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(p.id)}" aria-label="${escapeHtml(rotulo)}">
                 <span class="presenca-txt">
-                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(p.nome || t('presenca.anon'))}</span><span class="presenca-selos">L${escapeHtml(String((p.rank || 0) + 1))}</span></span>
+                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(nome)}</span><span class="presenca-selos">${escapeHtml(nivel)}</span></span>
                     ${d ? `<span class="presenca-l2">${escapeHtml(d.texto)}</span>` : ''}
                 </span>
-                ${presencaBadge(presencaNaoLidasDe(p.id))}
+                ${presencaBadge(n)}
             </button>
-        </li>`).join('');
+        </li>`;
+    }).join('');
 
     // Conversas com quem NÃO está no app agora (quem está já aparece acima,
     // com o selo das não lidas): as mais recentes, e toda que tiver não lida.
@@ -1310,11 +1482,14 @@ function presencaRenderLista() {
     const linhasConversa = mostrar.map((c) => {
         const n = presencaNaoLidasDe(c.id);
         const hora = presencaHoraCurta(c.ultima ? c.ultima.ts : c.atividade);
+        const nome = c.nome || t('presenca.anon');
+        const previa = presencaPrevia(c.ultima);
+        const rotulo = [nome, previa, hora, presencaRotuloNaoLidas(n)].filter(Boolean).join(', ');
         return `<li>
-            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(c.id)}">
+            <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(c.id)}" aria-label="${escapeHtml(rotulo)}">
                 <span class="presenca-txt">
-                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(c.nome || t('presenca.anon'))}</span></span>
-                    <span class="presenca-l2${n ? ' forte' : ''}">${escapeHtml(presencaPrevia(c.ultima))}</span>
+                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(nome)}</span></span>
+                    <span class="presenca-l2${n ? ' forte' : ''}">${escapeHtml(previa)}</span>
                 </span>
                 <span class="presenca-dir">${hora ? `<span class="presenca-hora">${escapeHtml(hora)}</span>` : ''}${presencaBadge(n)}</span>
             </button>
@@ -1339,11 +1514,11 @@ const PRESENCA_GLIFO = {
     falhou: '<path d="M12 3.8L22 20H2z"/><path d="M12 9.5v4.2"/><path d="M12 16.6h.01"/>',
 };
 
-function presencaRecibo(estado) {
+function presencaRecibo(estado, id = '') {
     const glifo = PRESENCA_GLIFO[estado];
     if (!glifo) return '';
     const rotulo = t('presenca.recibo.' + (estado === 'falhou' ? 'naoEnviadaErro' : estado));
-    return `<span class="presenca-recibo ${estado}" role="img" aria-label="${escapeHtml(rotulo)}">`
+    return `<span${id ? ` id="${escapeHtml(id)}"` : ''} class="presenca-recibo ${estado}" role="img" aria-label="${escapeHtml(rotulo)}">`
         + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${estado === 'enviando' || estado === 'falhou' ? '2.2' : '2.5'}"`
         + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glifo}</svg></span>`;
 }
@@ -1379,7 +1554,9 @@ function presencaHtmlDasMsgs(id, h) {
         let html = '';
         const rotulo = presencaRotuloDoDia(m.ts);
         if (rotulo !== dia) { dia = rotulo; html += `<div class="conversa-dia"><span>${escapeHtml(rotulo)}</span></div>`; }
-        const recibo = m.meu ? presencaRecibo(estados[i]) : '';
+        // No cartão sem pergunta, é o recibo que DESCREVE o botão (ver
+        // `presencaHtmlDoPedido`): ele ganha o id que o `aria-describedby` cita.
+        const recibo = m.meu ? presencaRecibo(estados[i], m.card && !m.legenda ? presencaIdDaDescricao(i) : '') : '';
         html += m.card
             ? presencaHtmlDoPedido(m, i, recibo)
             : `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">${escapeHtml(m.texto)}${recibo}</div>`;
@@ -1407,18 +1584,47 @@ function presencaHtmlDoPedido(m, i, recibo) {
         + `<span class="cp-nome">${escapeHtml(nome)}</span>`
         + (meta ? `<span class="cp-meta">${escapeHtml(meta)}</span>` : '')
         + '</span></span>';
+    // A pergunta e o recibo moram DENTRO do botão, e botão não expõe o que tem
+    // dentro: o nome acessível é o `aria-label`, e o leitor de tela nunca
+    // ouvia a pergunta nem se a mensagem foi lida (auditoria de 2026-09-26).
+    // Elas viram a DESCRIÇÃO do botão (`aria-describedby`), sem mexer em nada
+    // na tela: com pergunta, a linha dela (que leva o recibo); sem, o recibo.
+    const desc = presencaIdDaDescricao(i);
     const legenda = m.legenda
-        ? `<span class="cp-legenda">${escapeHtml(m.legenda)}${recibo}</span>`
+        ? `<span id="${desc}" class="cp-legenda">${escapeHtml(m.legenda)}${recibo}</span>`
         : '';
+    const descrito = legenda || recibo.includes(`id="${desc}"`);
     return `<button type="button" class="conversa-pedido ${m.meu ? 'minha' : 'dela'}`
         + `${legenda ? ' com-legenda' : ''}" data-msg="${i}"`
-        + ` aria-label="${escapeHtml(t('presenca.pedido.abrir', { nome }))}">`
+        + ` aria-label="${escapeHtml(t('presenca.pedido.abrir', { nome }))}"`
+        + `${descrito ? ` aria-describedby="${desc}"` : ''}>`
         + topo + legenda + (legenda ? '' : recibo) + '</button>';
+}
+
+// O id da descrição do cartão `i` da conversa na tela (há uma por vez).
+function presencaIdDaDescricao(i) {
+    return 'conversa-pedido-' + i + '-desc';
+}
+
+// "Ver mensagens anteriores" nos três momentos, com o que a conversa JÁ tem —
+// nenhum elemento novo. Antes a tela ficava igual antes, durante e depois de
+// uma falha, e o toque parecia não ter feito nada (auditoria de 2026-09-26):
+// carregando, o MESMO botão, desabilitado e com o rótulo trocado; falhou, a
+// MESMA linha de erro da conversa, com o "Tentar de novo" (que refaz a página
+// antiga, não a conversa: `data-antigas`).
+function presencaHtmlAnteriores(h) {
+    if (h.antigas === 'carregando') {
+        return `<button type="button" class="conversa-anteriores" disabled>${escapeHtml(t('presenca.conversa.anterioresCarregando'))}</button>`;
+    }
+    if (h.antigas === 'erro') {
+        return `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.anterioresErro'))} <button type="button" class="conversa-recarregar" data-antigas="1">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
+    }
+    return h.maisAntigas ? `<button type="button" class="conversa-anteriores">${escapeHtml(t('presenca.conversa.anteriores'))}</button>` : '';
 }
 
 function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {}) {
     const id = Presenca.aberta;
-    if (!id) return;
+    if (!id || !presencaConversaNaTela()) return;
     const pessoa = Presenca.online.find((p) => p.id === id);
     const conversa = Presenca.conversas.find((c) => c.id === id);
     const nome = (pessoa && pessoa.nome) || (conversa && conversa.nome) || t('presenca.anon');
@@ -1445,11 +1651,19 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
         const alturaAntes = corpo.scrollHeight;
         const topoAntes = corpo.scrollTop;
         let html = `<p class="conversa-aviso">${escapeHtml(t('presenca.conversa.aviso'))}</p>`;
-        if (h.maisAntigas) html += `<button type="button" class="conversa-anteriores">${escapeHtml(t('presenca.conversa.anteriores'))}</button>`;
+        html += presencaHtmlAnteriores(h);
+        // O histórico que não veio segue dizendo que não veio — e oferecendo o
+        // "Tentar de novo" — mesmo depois que uma mensagem chega ou sai. Antes
+        // o erro só existia com a conversa VAZIA: a primeira mensagem ao vivo
+        // o apagava, o histórico nunca mais era pedido e o "lida" nunca saía
+        // (ele espera o histórico, ver `presencaMarcarLida`) — auditoria de
+        // 2026-09-26. Refazer o `abrir` sozinho quando a mensagem chega foi
+        // descartado: mensagem chegando custa ZERO, e com o Waze falhando cada
+        // uma viraria um pedido. Quem pede de novo é a pessoa, no botão.
+        const semHistorico = h.erro && !h.carregada;
+        if (semHistorico) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.erro'))} <button type="button" class="conversa-recarregar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
         if (h.msgs.length) html += presencaHtmlDasMsgs(id, h);
-        else if (h.erro) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.erro'))} <button type="button" class="conversa-recarregar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
-        else if (!h.carregada) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.carregando'))}</p>`;
-        else html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.vazio'))}</p>`;
+        else if (!semHistorico) html += `<p class="conversa-vazio">${escapeHtml(t(h.carregada ? 'presenca.conversa.vazio' : 'presenca.conversa.carregando'))}</p>`;
         corpo.innerHTML = html;
         // Página antiga entrando em cima: a mensagem que estava na tela fica
         // onde estava. Mensagem nova: segue o fim só se a pessoa já estava lá
@@ -1511,6 +1725,10 @@ function presencaMontar() {
         const texto = (campo.value || '').trim().slice(0, 2000);
         // Com pedido preso, mandar SÓ o card é legítimo — perguntar é opcional.
         if ((!texto && !Presenca.anexo) || !Presenca.aberta) return;
+        // Sem o id do perfil o envio não sai (a sessão acabou de cair, ou o
+        // perfil ainda não chegou), e o campo era apagado assim mesmo: o que se
+        // digitou sumia calado (auditoria de 2026-09-26). Fica no campo.
+        if (!presencaEu()) return;
         const card = Presenca.anexo;
         campo.value = '';
         // Solta o anexo ANTES de mandar: redesenhar com a tirinha ainda presa
@@ -1532,13 +1750,11 @@ function presencaMontar() {
             const id = Presenca.aberta;
             if (!id) return;
             if (ev.target.closest('.conversa-reenviar')) return presencaTentarDeNovo();
-            if (ev.target.closest('.conversa-recarregar')) return presencaCarregarConversa(id);
-            if (ev.target.closest('.conversa-anteriores')) {
-                const h = Presenca.historico.get(id);
-                const antes = h && h.msgs.length ? h.msgs[0].ts : null;
-                if (antes) presencaCarregarConversa(id, { antes });
-                return;
+            const recarregar = ev.target.closest('.conversa-recarregar');
+            if (recarregar) {
+                return recarregar.dataset && recarregar.dataset.antigas ? presencaCarregarAntigas(id) : presencaCarregarConversa(id);
             }
+            if (ev.target.closest('.conversa-anteriores')) return presencaCarregarAntigas(id);
             const alvo = ev.target.closest('.conversa-pedido');
             if (!alvo) return;
             const h = Presenca.historico.get(id);
@@ -1606,6 +1822,7 @@ Object.assign(Presenca, {
     esquecerLista: presencaEsquecerLista,
     renderPilula: presencaRenderPilula,
     aoCarona: presencaAoCarona,
+    aoProvarRede: presencaAoProvarRede,
     conhecidos: chatConhecidos,
     diag: presencaDiag,
 });

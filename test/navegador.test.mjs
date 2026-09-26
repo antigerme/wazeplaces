@@ -167,7 +167,10 @@ test('os smokes que o CI roda no WebKit abrem pelo motor pedido', () => {
 test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () => {
   // Pulo calado é teste que morreu sem ninguém ver. Pulo novo tem que entrar
   // AQUI, de propósito — o número por arquivo é a lista.
-  const ESPERADOS = { 'smoke-browser.mjs': 1 };
+  // smoke-browser: o gesto de segurar e arrastar o FAB, e a pinça/o puxão pra
+  // baixo na foto do card (auditoria de 2026-09-26) — os dois são toque com
+  // arraste (e, a pinça, com DOIS dedos), que só o CDP do Chromium sintetiza.
+  const ESPERADOS = { 'smoke-browser.mjs': 3 };
   const achados = {};
   for (const f of readdirSync(new URL('../tools/', import.meta.url)).filter((x) => x.endsWith('.mjs') && x !== 'navegador.mjs')) {
     const codigo = semComentario(ler(`tools/${f}`));

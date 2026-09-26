@@ -252,3 +252,44 @@ test('renomear confirmado: os OUTROS pedidos do mesmo local ganham o nome novo',
   assert.equal(f.B.name, 'Padaria Velha');
   assert.equal(f.A.name, 'Padaria Velha');
 });
+
+// ── C10: o lightbox não pode dividir a lista com o pedido ──────────────────
+// O `open` de VERDADE, com o `recolocarFoto`/`removerFoto` de verdade e o
+// `devolverFoto` (o Desfazer da exclusão) de verdade.
+function lightboxQueAbre() {
+  const el = () => ({ classList: { add() {}, remove() {} }, focus() {} });
+  const doc = { getElementById: () => el(), body: { style: {} } };
+  const corpo = ['open', 'recolocarFoto', 'removerFoto', 'podeAprovarAtual'].map(metodo).join(',\n');
+  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirComoL6Aqui', `return {
+    place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, aberto: false, renders: 0,
+    isOpen() { return this.aberto; }, _render() { this.renders++; }, close() { this.aberto = false; },
+    ${corpo}
+  };`)(doc, { empilhar() {} }, () => {}, () => true);
+  const devolverFoto = new Function('Lightbox', 'AppState', 'showCurrentPlace', fatiar('devolverFoto') + '\nreturn devolverFoto;')(
+    L, { currentPlace: null }, () => {});
+  return { L, devolverFoto };
+}
+
+test('C10 excluir, fechar, REABRIR e desfazer: a foto volta com o ✨ no lugar certo e aprovável', () => {
+  // MEDIDO no navegador: depois do Desfazer o ✨ apontava a foto b (a errada),
+  // a tira seguia com 2 miniaturas e a foto do pedido não podia ser aprovada.
+  const a = FOTO('foto-a'), b = FOTO('foto-b'), c = FOTO('uNP-c');
+  for (const reabre of [true, false]) {
+    const { L, devolverFoto } = lightboxQueAbre();
+    const P = { venueID: 'vNP', updateRequestID: 'uNP', purType: 'NEW_PHOTO', approvedImageIds: ['foto-a', 'foto-b'], imageUrls: [a, b, c] };
+    L.open(P.imageUrls, 0, 2, 'x', false, P);     // do card: a MESMA lista do pedido
+    L.aberto = true;
+    L.removerFoto('foto-a', P);                    // excluída com a janela aberta
+    if (reabre) { L.aberto = false; L.open(P.imageUrls, 1, 1, 'x', false, P); L.aberto = true; }
+    const antes = L.renders;
+    devolverFoto({ id: 'foto-a', place: P, idx: 0, url: a });   // Desfazer
+    const nome = reabre ? 'reaberto' : 'CONTROLE sem reabrir';
+    assert.deepEqual(L.urls, [a, b, c], `${nome}: a foto não voltou pro carrossel`);
+    assert.equal(L.newIdx, 2, `${nome}: o ✨ ficou apontando a foto errada (${L.newIdx})`);
+    assert.ok(L.renders > antes, `${nome}: o lightbox não se redesenhou (a tira segue sem a foto)`);
+    L.idx = 2;
+    assert.equal(L.podeAprovarAtual(), true, `${nome}: a foto do pedido deixou de poder ser aprovada`);
+    assert.deepEqual(P.imageUrls, [a, b, c], `${nome}: o pedido não recebeu a foto de volta`);
+    assert.notEqual(L.urls, P.imageUrls, `${nome}: o lightbox voltou a dividir a lista com o pedido`);
+  }
+});

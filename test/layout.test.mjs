@@ -500,11 +500,36 @@ test('nenhum modal FECHA e outro ABRE no mesmo quadro', () => {
 
 test('não oferecemos ação impossível no aparelho', () => {
   const JS = read('js/app.js');
-  // Extensão da Chrome Web Store não instala em navegador de celular.
-  assert.match(CSS, /\.sem-extensao \.auth-opt-ext\s*\{[^}]*display:\s*none/, 'o card da extensão voltou a aparecer no celular');
+  // Extensão da Chrome Web Store não instala em navegador de celular. Desde
+  // 2026-09-26 a regra é POSITIVA: o card nasce escondido e só aparece com a
+  // confirmação do JS (`com-extensao`) — antes do JS chegar, o celular o
+  // mostrava como "RECOMENDADO". O comportamento é medido em test/entrada.
+  assert.match(CSS_SEM_COMENTARIO, /(^|\n)\.auth-opt-ext\s*\{\s*display:\s*none;?\s*\}/,
+    'o card da extensão voltou a nascer visível — aparece no celular antes do JS decidir');
+  assert.match(CSS_SEM_COMENTARIO, /\.com-extensao \.auth-opt-ext\s*\{\s*display:\s*block;?\s*\}/,
+    'o card da extensão não aparece nem onde ela instala');
   assert.match(JS, /function podeInstalarExtensao/, 'sumiu a detecção de suporte a extensão');
   // Por SO, não por ponteiro: notebook com tela de toque instala extensão.
   assert.match(JS, /userAgentData|Android\|iPhone/, 'a detecção deixou de olhar o sistema');
+  // E só onde a Chrome Web Store instala: Chromium de computador. Rodado de
+  // verdade contra os navegadores que importam (auditoria de 2026-09-25).
+  const fn = JS.match(/function podeInstalarExtensao\(\)[\s\S]*?\n\}/)[0];
+  const pode = (navigator) => new Function('navigator', fn + '\nreturn podeInstalarExtensao();')(navigator);
+  const CH = (mobile, ...marcas) => ({ userAgentData: { mobile, brands: marcas.map((brand) => ({ brand, version: '153' })) } });
+  const UA = (userAgent) => ({ userAgent });
+  const casos = [
+    ['Chrome no computador', CH(false, 'Chromium', 'Google Chrome', 'Not.A/Brand'), true],
+    ['Edge no computador', CH(false, 'Chromium', 'Microsoft Edge'), true],
+    ['Chrome no Android', CH(true, 'Chromium', 'Google Chrome'), false],
+    // O dia em que um navegador que NÃO é Chromium mandar Client Hints: a marca decide.
+    ['Client Hints sem Chromium', CH(false, 'Firefox'), false],
+    ['Chrome antigo sem Client Hints', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0 Safari/537.36'), true],
+    ['Firefox no computador', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'), false],
+    ['Safari no Mac', UA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'), false],
+    ['Safari no iPad (se diz Mac)', UA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'), false],
+    ['Chrome no iPhone', UA('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0 Mobile/15E148 Safari/604.1'), false],
+  ];
+  for (const [nome, nav, esperado] of casos) assert.equal(pode(nav), esperado, `extensão oferecida errado: ${nome}`);
   assert.doesNotMatch(
     CSS.match(/@media \(pointer: coarse\)[\s\S]*?\n\}\n\}/m)?.[0] || '',
     /\.auth-opt-ext\s*\{[^}]*display:\s*none/,
@@ -1570,6 +1595,9 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // que o Waze respondeu — e existe pra que uma falha de rede não re-trave a
     // cota do Desfazer. Sai no logout como todo o resto: é dado de quem entrou.
     PERFIL_GATE_KEY: 'safeLS.remove(PERFIL_GATE_KEY)',
+    // DE QUEM são os dados do aparelho (o id do Waze e a marca da sessão em que
+    // foi visto). Sem dados, não há de quem — e o id é de quem entrou.
+    CONTA_KEY: 'safeLS.remove(CONTA_KEY)',
     // Contagem de rejeições por autor. É dado sobre TERCEIRO — a pessoa que
     // mandou o pedido, não quem usa o app —, então sair no logout não é
     // arrumação: é o mínimo que o contrato do "Sair" já promete.
@@ -2273,7 +2301,11 @@ test('o pedido à extensão não atropela um login que aconteceu no meio', () =>
   // Apareceu no smoke como "card sem endereço / botões 0px", mudando de
   // aparelho a cada rodada porque atinge sempre o PRIMEIRO card medido — que é
   // o sintoma clássico de escrita atrasada, não de layout.
-  const bloco = app.match(/entrarPelaExtensao\(\)\.then\([\s\S]{0,700}?\}\);/);
+  // Só CÓDIGO, por linha (gotcha #67): o comentário DENTRO do bloco é o que
+  // cresce, e empurrava o fim dele pra fora da janela — reprovando código certo
+  // quando o bloco ganhou uma linha (a recusa da extensão, 2026-09-26).
+  const soCodigo = app.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const bloco = soCodigo.match(/entrarPelaExtensao\(\)\.then\([\s\S]{0,700}?\}\);/);
   assert.ok(bloco, 'sumiu o handshake do boot');
   assert.match(bloco[0], /API\.getSession\(\)\s*\|\|\s*AppState\.authenticated/,
     'a guarda contra login-no-meio sumiu — showAuthScreen volta a atropelar sessão nova');
@@ -2886,4 +2918,20 @@ test('contagem sai CRUA — e decimal e data seguem o locale', () => {
     + 'ali o separador é ARITMÉTICA: `1.2` lido por um brasileiro é mil e duzentos');
   assert.match(app, /new Date\([^)]*\)\.toLocaleDateString\(i18nLocale\(\)/,
     'controle: sumiu a formatação de DATA, que deve continuar no locale');
+});
+
+test('C12 a pílula do nome no lightbox tem TETO também em edição (o nome longo não estoura a tela)', () => {
+  // MEDIDO: no Fold em francês, com um nome de 58 caracteres, a pílula em
+  // edição passava da tela; com 66, até no Pixel 7 (de 12 a 478 px em 412).
+  // O botão mede o CONTEÚDO, então sem teto ele cresce com o nome antigo.
+  // Ancorado na FORMA da regra (início de linha), não num removedor de
+  // comentário (gotcha #67.1).
+  const css = read('css/styles.css');
+  const regra = css.match(/^\.lb-nome\.editando \.lb-nome-btn \{([^}]*)\}/m);
+  assert.ok(regra, 'sumiu a regra da pílula em edição');
+  assert.match(regra[1], /max-width:\s*100%/, 'a pílula do nome em edição perdeu o teto: o nome longo estoura a tela');
+  // E o texto dentro dela corta em reticências — é o que o teto aproveita.
+  const txt = css.match(/^\.lb-nome-txt \{([^}]*)\}/m);
+  assert.ok(txt && /text-overflow:\s*ellipsis/.test(txt[1]) && /overflow:\s*hidden/.test(txt[1]),
+    'o nome da pílula deixou de cortar em reticências');
 });

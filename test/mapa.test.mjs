@@ -87,6 +87,64 @@ test('o que não cabe em zoom nenhum é DITO, não empurrado pra fora da tela', 
   assert.ok(r.pixels[0].top >= 0 && r.pixels[0].top <= 250);
 });
 
+test('C11 um ponto longe NÃO derruba os que cabem: ficam no mapa junto do primeiro', () => {
+  // MEDIDO no card: posição proposta a 5 m e uma entrada a 30 km → o mapa
+  // mostrava SÓ o local (a proposta sumia) e a legenda só "antes".
+  const d = (m) => m / 111320;
+  const perto = [AMBEV_ANTES[0] + d(5), AMBEV_ANTES[1]];
+  const longe = [AMBEV_ANTES[0] + d(30000), AMBEV_ANTES[1]];
+  const r = M.mapaMontar([AMBEV_ANTES, perto, longe], 359, 200, 'row');
+  assert.deepEqual(r.idx, [0, 1], 'a proposta a 5 m saiu do mapa por causa da entrada a 30 km');
+  assert.deepEqual(r.foraDoMapa, [2], 'só a entrada longe fica de fora — e ela tem que ser NOMEADA');
+  for (const px of r.pixels) {
+    assert.ok(px.left >= 0 && px.left <= 359 && px.top >= 0 && px.top <= 200, `marcador fora da caixa: ${JSON.stringify(px)}`);
+  }
+  // A ORDEM decide quem fica: o longe no meio da lista não desloca os de depois.
+  const r2 = M.mapaMontar([AMBEV_ANTES, longe, perto], 359, 200, 'row');
+  assert.deepEqual(r2.idx, [0, 2], 'o ponto que cabe, depois do que não cabe, sumiu ou trocou de índice');
+  assert.deepEqual(r2.foraDoMapa, [1]);
+  // Os índices são da lista que ENTROU: um ponto inválido antes não os desloca.
+  const r3 = M.mapaMontar([[0, 0], AMBEV_ANTES, longe, perto], 359, 200, 'row');
+  assert.deepEqual(r3.idx, [1, 3], 'o índice dos desenhados deixou de ser o da lista que entrou');
+  assert.deepEqual(r3.foraDoMapa, [2], 'o índice de quem ficou fora deixou de ser o da lista que entrou');
+  // CONTROLE: tudo cabendo, todo mundo desenhado e ninguém de fora.
+  const r4 = M.mapaMontar([AMBEV_ANTES, perto, AMBEV_DEPOIS], 359, 200, 'row');
+  assert.deepEqual(r4.idx, [0, 1, 2]);
+  assert.deepEqual(r4.foraDoMapa, []);
+});
+
+test('C4 mapa ampliado de um pedido que não cabe no card: abre com TODOS os pontos na tela', () => {
+  // MEDIDO: o pedido que move o local 82 km abria o ampliado em z17 com o
+  // centro no MEIO dos dois pontos — nenhum marcador na tela (um a 74.915 px,
+  // o outro a −73.883), e o "Voltar ao pedido" voltava ao mesmo vazio.
+  const W = 393, H = 852;
+  const longe = [AMBEV_ANTES[0] + 82000 / 111320, AMBEV_ANTES[1]];
+  const e = M.mapaEnquadrarAmpliado([AMBEV_ANTES, longe], W, H, 'row');
+  assert.ok(e.z >= M.MAPA_Z_NAV_MIN && e.z < M.MAPA_Z_MIN, `z ${e.z} fora da faixa em que só o ampliado chega`);
+  const g = M.mapaGrade(e.centro, e.z, W, H, 'row');
+  for (const ll of [AMBEV_ANTES, longe]) {
+    const p = g.projetar(ll);
+    assert.ok(p.left >= 0 && p.left <= W && p.top >= 0 && p.top <= H, `ponto fora da tela: ${JSON.stringify(p)}`);
+  }
+  // O MAIOR zoom que mostra os dois — um a mais e algum sai.
+  assert.ok(!M.mapaCabe([AMBEV_ANTES, longe], W, H, e.z + 1), `abriu mais aberto que o necessário (z${e.z})`);
+});
+
+test('C4 CONTROLE: pedido que cabe abre no MESMO enquadramento de antes (o do card, centro no meio)', () => {
+  const W = 393, H = 852;
+  const pts = [AMBEV_ANTES, AMBEV_DEPOIS];
+  const e = M.mapaEnquadrarAmpliado(pts, W, H, 'row');
+  assert.equal(e.z, M.mapaMontar(pts, W, H, 'row').z, 'o ampliado deixou de abrir no zoom do card');
+  assert.deepEqual(e.centro, [(AMBEV_ANTES[0] + AMBEV_DEPOIS[0]) / 2, (AMBEV_ANTES[1] + AMBEV_DEPOIS[1]) / 2]);
+  // E o que não cabe nem no zoom mais aberto da navegação fica como o card:
+  // ancorado no primeiro ponto (que o card mostra e diz o resto em palavra).
+  const outroContinente = [AMBEV_ANTES[0] + 40, AMBEV_ANTES[1] + 90];
+  const x = M.mapaEnquadrarAmpliado([AMBEV_ANTES, outroContinente], W, H, 'row');
+  assert.equal(x.z, M.mapaMontar([AMBEV_ANTES, outroContinente], W, H, 'row').z);
+  assert.deepEqual(x.centro, AMBEV_ANTES, 'sem zoom que caiba, o ampliado não abriu no local');
+  assert.equal(M.mapaEnquadrarAmpliado([[0, 0]], W, H, 'row'), null, 'sem coordenada válida não há enquadramento');
+});
+
 test('tiles: URL da camada certa, região respeitada, e poucos por card', () => {
   const r = M.mapaMontar([AMBEV_ANTES, AMBEV_DEPOIS], 412, 250, 'row');
   assert.ok(r.tiles.length >= 1 && r.tiles.length <= 4);

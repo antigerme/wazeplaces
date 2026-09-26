@@ -318,3 +318,571 @@ test('excluir-foto: foto PENDENTE (a de um pedido) não sai pela lixeira — só
   const apr = await comWaze(responder, () => dispatch('excluir-foto', { ...s2.dados, region: 'row', venueID: 'v1', imageID: 'aprovada', lat: -23.5, lon: -46.6 }, s2.ctx));
   assert.ok(apr.chamadas.some((c) => c.init.method === 'POST'), 'a foto aprovada não foi excluída — o teste não distingue');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Auditoria de 2026-09-26 (lote 5). Mesma regra do topo: cada teste daqui foi
+//  visto REPROVANDO com o conserto desfeito.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('parear cancel: código que não existe não gasta o apagamento do KV (a cota curta)', async () => {
+  // Mesmo defeito que o `sessao destroy` já teve: a rota não pede sessão, e
+  // cada POST com um código qualquer gastava um apagamento do KV (1.000/dia no
+  // plano grátis). Com a cota no fim, o "Sair" e o resgate de verdade param.
+  const s = await sessaoDeTeste(COOKIES);
+  let apagamentos = 0;
+  const apagar = s.store.delete;
+  s.store.delete = async (k) => { apagamentos++; return apagar(k); };
+  // Os dois tamanhos válidos (6 e 20 símbolos do alfabeto), o digitado com
+  // hífen e lixo de toda forma.
+  for (const code of ['ABC234', 'ABCDEFGHJKLMNPQRSTUV', 'abc-234', 'x', null, { a: 1 }]) {
+    const r = await dispatch('parear', { action: 'cancel', code }, s.ctx);
+    assert.equal(r.body.success, true, 'o cancelar responde igual — quem saiu não precisa saber');
+  }
+  assert.equal(apagamentos, 0, 'apagou no KV por um código que não existe');
+  // CONTROLE: o código emitido de verdade é apagado, e o resgate depois falha.
+  const criado = await dispatch('parear', { action: 'create', ...s.dados }, s.ctx);
+  assert.equal(criado.status, 200);
+  await dispatch('parear', { action: 'cancel', code: criado.body.code }, s.ctx);
+  assert.equal(apagamentos, 1, 'o código emitido não foi apagado — o instrumento não enxerga o apagamento');
+  const resgate = await dispatch('parear', { action: 'claim', code: criado.body.code }, s.ctx);
+  assert.equal(resgate.body.errorKey, 'srv.err.pairCodeInvalid', 'o código cancelado ainda entrou');
+});
+
+// Sessão gravada há 2 h: passa da trava de 1 h do `refreshCookies`, então uma
+// regravação indevida ACONTECE (sem isto o teste passaria por causa da trava).
+function envelhecerSessoes(store, segundos = 7200) {
+  const antes = Math.floor(Date.now() / 1000) - segundos;
+  for (const [k, v] of store.mem) store.mem.set(k, antes + v.slice(v.indexOf('|')));
+}
+// Resposta do Waze com o cookie de sessão ROTACIONADO (gotcha #43).
+const comRotacao = (corpo, valor) => {
+  const h = new Headers({ 'content-type': 'application/json' });
+  h.append('set-cookie', `_web_session=${valor}; path=/; secure; HttpOnly`);
+  return new Response(JSON.stringify(corpo), { status: 200, headers: h });
+};
+
+test('testar-cookies: um sessionToken no corpo NÃO deixa o login regravar aquela sessão', async () => {
+  // O ataque: um token de sessão L6 liberada + o cookies.txt de uma conta L1
+  // sem área. O portão recusa a L1 — mas a regravação do cookie rotacionado
+  // trocava os cookies da sessão L6 pelos da L1, e o token passava a agir como
+  // ela, sem nunca ter passado pelo portão.
+  const COOKIES_A = [NETSCAPE('.waze.com', '_csrf_token', 'csrf-A'), NETSCAPE('.waze.com', '_web_session', 'sessao-da-conta-A')].join('\n');
+  const COOKIES_B = [NETSCAPE('.waze.com', '_csrf_token', 'csrf-B'), NETSCAPE('.waze.com', '_web_session', 'sessao-da-conta-B')].join('\n');
+  for (const [perfilB, esperado] of [
+    [{ userName: 'conta-b', rank: 0, isAreaManager: false, isStaff: false }, 403],   // o portão recusa
+    [{ userName: 'conta-b', rank: 1, isAreaManager: true, isStaff: false }, 200],    // o portão aceita: sessão NOVA
+  ]) {
+    const s = await sessaoDeTeste(COOKIES_A);
+    envelhecerSessoes(s.store);
+    const { r } = await comWaze(() => comRotacao(perfilB, 'sessao-B-rotacionada'),
+      () => dispatch('testar-cookies', { cookies: COOKIES_B, region: 'row', sessionToken: s.sessionToken }, s.ctx));
+    assert.equal(r.status, esperado, JSON.stringify(r.body).slice(0, 120));
+    const guardada = await s.sessions.loadSession(s.sessionToken);
+    assert.match(guardada, /sessao-da-conta-A/, `a sessão A perdeu os próprios cookies (portão ${esperado})`);
+    assert.doesNotMatch(guardada, /csrf-B|conta-B|B-rotacionada/, `a sessão A passou a guardar a conta B (portão ${esperado})`);
+    if (esperado === 200) assert.notEqual(r.body.sessionToken, s.sessionToken, 'o login devolveu a sessão A em vez de criar a dele');
+  }
+  // CONTROLE: a MESMA rotação numa AÇÃO com o token A regrava a sessão A — o
+  // instrumento enxerga a regravação, e a trava de 1 h não está escondendo nada.
+  const s = await sessaoDeTeste(COOKIES_A);
+  envelhecerSessoes(s.store);
+  await comWaze(() => comRotacao({}, 'sessao-A-rotacionada'),
+    () => dispatch('marcar-lido', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'u1' }, s.ctx));
+  assert.match(await s.sessions.loadSession(s.sessionToken), /sessao-A-rotacionada/,
+    'CONTROLE: a ação não regravou o cookie rotacionado — o teste acima passaria por vácuo');
+});
+
+// O "Waze" de um local só, com a lista de fotos mudando no tempo — a leitura
+// por bbox devolve a lista ATUAL e a escrita a SUBSTITUI inteira (gotcha #57).
+function wazeDeUmLocal(V, fotos) {
+  const w = { fotos, leituras: 0, escritas: [] };
+  w.responder = (url, init) => {
+    if ((init.method || 'GET') === 'GET') { w.leituras++; return json({ venues: { objects: [{ id: V, images: w.fotos }] } }); }
+    const sub = JSON.parse(init.body).actions._subActions[0];
+    if (sub.name === 'UPDATE_PLACE_UPDATE') {   // aprovar: a pendente vira aprovada
+      const id = sub._subActions[0].attributes.id;
+      w.fotos = w.fotos.map((f) => (f.id === id ? { ...f, approved: true } : f));
+      return json({});
+    }
+    w.fotos = sub.attributes.images;
+    w.escritas.push(w.fotos);
+    return json({ status: 0, synced: true, venues: { [V]: { id: V, images: w.fotos } } });
+  };
+  return w;
+}
+
+test('excluir-foto: exclusões em série não empurram o prazo da releitura — a foto nova de outro editor fica', async () => {
+  // A regravação do cache depois de excluir usava a hora da ESCRITA: cada
+  // exclusão renovava o prazo de uma lista que não ficou mais nova, e a
+  // leitura dos 0 s servia a exclusão dos 20 s (o prazo é de 15).
+  const s = await sessaoDeTeste(COOKIES);
+  const w = wazeDeUmLocal('v1', [{ id: 'A', approved: true }, { id: 'B', approved: true }, { id: 'C', approved: true }]);
+  const excluir = (imageID, extra = {}) =>
+    dispatch('excluir-foto', { ...s.dados, region: 'row', venueID: 'v1', imageID, lat: -23.5, lon: -46.6, ...extra }, s.ctx);
+  const relogio = Date.now;
+  let agora = relogio();
+  Date.now = () => agora;
+  try {
+    await comWaze(w.responder, async () => {
+      await excluir('A', { action: 'preparar' });   //  0 s: toca na lixeira → LÊ
+      agora += 10_000; await excluir('A');          // 10 s: confirma, com a leitura dos 0 s (dentro dos 15)
+      agora += 6_000;                               // 16 s: OUTRO editor sobe a foto D
+      w.fotos = [...w.fotos, { id: 'D', approved: true }];
+      await excluir('B', { action: 'preparar' });   // 16 s: toca na lixeira de novo
+      agora += 4_000; await excluir('B');           // 20 s: confirma
+    });
+  } finally {
+    Date.now = relogio;
+  }
+  const ids = (l) => l.map((i) => i.id);
+  assert.ok(w.fotos.some((i) => i.id === 'D'),
+    `a foto que outro editor subiu aos 16 s foi APAGADA — escritas: ${JSON.stringify(w.escritas.map(ids))}`);
+  assert.equal(w.leituras, 2, 'a leitura dos 0 s serviu além do prazo (ou o cache parou de servir dentro dele)');
+  assert.deepEqual(w.escritas.map(ids), [['B', 'C'], ['C', 'D']]);
+});
+
+test('validar-place: aprovar a foto esquece a releitura guardada — a exclusão seguinte relê', async () => {
+  // Tocou na lixeira de uma foto (a releitura fica guardada), desistiu,
+  // aprovou a pendente e, segundos depois, foi excluir: a releitura ainda via a
+  // aprovada como PENDENTE.
+  for (const [alvo, esperado] of [
+    ['NOVA', [{ id: 'VELHA', approved: true }]],    // era "só foto aprovada pode ser excluída"
+    ['VELHA', [{ id: 'NOVA', approved: true }]],    // gravava de volta o `approved: false` velho
+  ]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const w = wazeDeUmLocal('v1', [{ id: 'VELHA', approved: true }, { id: 'NOVA', approved: false }]);
+    const base = { ...s.dados, region: 'row', venueID: 'v1', lat: -23.5, lon: -46.6 };
+    const { r } = await comWaze(w.responder, async () => {
+      await dispatch('excluir-foto', { ...base, imageID: 'VELHA', action: 'preparar' }, s.ctx);
+      const ap = await dispatch('validar-place', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'NOVA', approve: true }, s.ctx);
+      assert.equal(ap.body.action, 'approved', 'pré-condição: a aprovação passou');
+      return dispatch('excluir-foto', { ...base, imageID: alvo }, s.ctx);
+    });
+    assert.equal(r.body.success, true, `excluir ${alvo} depois de aprovar: ${r.body.errorKey || JSON.stringify(r.body)}`);
+    assert.deepEqual(w.escritas, [esperado], `excluir ${alvo}: gravou uma lista velha`);
+  }
+});
+
+test('validar-place: rejeitar NÃO toca na releitura guardada (é o gesto de todo swipe; a cota do KV é contada)', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  const lidas = [];
+  const ler = s.store.get;
+  s.store.get = async (k) => { lidas.push(k); return ler(k); };
+  const w = wazeDeUmLocal('v1', []);
+  await comWaze(w.responder, () => dispatch('validar-place', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'u1' }, s.ctx));
+  assert.equal(lidas.filter((k) => String(k).startsWith('reler_')).length, 0, 'rejeitar leu a releitura do KV');
+  // CONTROLE: aprovar lê (o instrumento enxerga a leitura).
+  await comWaze(w.responder, () => dispatch('validar-place', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'u1', approve: true }, s.ctx));
+  assert.equal(lidas.filter((k) => String(k).startsWith('reler_')).length, 1, 'CONTROLE: aprovar não consultou a releitura');
+});
+
+import { cabecalhoParaNetscape } from '../server/core.mjs';
+
+test('login com cookies em formato de CABEÇALHO: a sessão acompanha a rotação do cookie (gotcha #43)', async () => {
+  // O `testar-cookies` aceita `a=b; c=d`, mas a regravação do cookie
+  // rotacionado só entende linha Netscape: guardada como cabeçalho, a sessão
+  // nunca acompanhava o `_web_session` novo e azedava em dias.
+  const s = await sessaoDeTeste(COOKIES);
+  const perfil = { userName: 'fulano', rank: 1, isAreaManager: true, isStaff: false };
+  const login = await comWaze(() => json(perfil),
+    () => dispatch('testar-cookies', { cookies: '_csrf_token=csrf-C; _web_session=ORIGINAL', region: 'row' }, s.ctx));
+  assert.equal(login.r.status, 200, JSON.stringify(login.r.body));
+  // O fio pro Waze não muda: o mesmo cabeçalho e o mesmo CSRF de antes.
+  assert.equal(login.chamadas[0].init.headers.Cookie, '_csrf_token=csrf-C; _web_session=ORIGINAL');
+  assert.equal(login.chamadas[0].init.headers['X-CSRF-Token'], 'csrf-C');
+  const token = login.r.body.sessionToken;
+  envelhecerSessoes(s.store);
+  const acao = await comWaze(() => comRotacao({}, 'ROTACIONADO'),
+    () => dispatch('marcar-lido', { sessionToken: token, region: 'row', venueID: 'v1', updateRequestID: 'u1' }, s.ctx));
+  assert.equal(acao.chamadas[0].init.headers.Cookie, '_csrf_token=csrf-C; _web_session=ORIGINAL',
+    'a sessão guardada mudou o cookie que vai pro Waze');
+  assert.match(await s.sessions.loadSession(token), /ROTACIONADO/,
+    'a sessão de quem entrou com o cabeçalho não acompanhou a rotação — azeda em dias');
+  // E a chamada seguinte já sai com o valor novo.
+  const depois = await comWaze(() => json({}),
+    () => dispatch('marcar-lido', { sessionToken: token, region: 'row', venueID: 'v1', updateRequestID: 'u2' }, s.ctx));
+  assert.equal(depois.chamadas[0].init.headers.Cookie, '_csrf_token=csrf-C; _web_session=ROTACIONADO');
+});
+
+test('cabeçalho que não dá pra converter sem perda segue aceito como veio (o login não falha pelo parser)', async () => {
+  for (const cab of [
+    '_csrf_token=c; _web_session=a; _web_session=b',   // nome repetido: o navegador manda os dois
+    '_csrf_token=c; _web_session=; x=1',               // valor vazio: a linha Netscape seria descartada
+    '_csrf_token=c; _web_session=a b',                 // espaço no valor: o Netscape é lido por /\s+/
+    '_csrf_token=c; solto',                            // par sem `=`
+  ]) {
+    assert.equal(cabecalhoParaNetscape(cab), cab, cab);
+    const s = await sessaoDeTeste(COOKIES);
+    const { r, chamadas } = await comWaze(() => json({ userName: 'fulano', rank: 1, isAreaManager: true, isStaff: false }),
+      () => dispatch('testar-cookies', { cookies: cab, region: 'row' }, s.ctx));
+    assert.equal(r.status, 200, `${cab}: ${JSON.stringify(r.body)}`);
+    assert.equal(chamadas[0].init.headers.Cookie, cab, 'o cabeçalho que vai pro Waze mudou');
+  }
+  // CONTROLE: o caso comum converte (sem isto as asserções acima passariam
+  // com um conversor que nunca converte), e o Netscape passa intocado.
+  assert.equal(cabecalhoParaNetscape('_csrf_token=c;_web_session=s\nx=1'),
+    ['_csrf_token\tc', '_web_session\ts', 'x\t1'].map((f) => '.waze.com\tTRUE\t/\tTRUE\t0\t' + f).join('\n'));
+  assert.equal(cabecalhoParaNetscape(COOKIES), COOKIES);
+});
+
+import { DUPLICADO_ESPERA_MS } from '../server/core.mjs';
+
+// Um pedido DUPLICATE: a busca faz uma releitura por bbox pra achar o NOME do
+// local apontado (ver `resolverDuplicados`).
+const DUP_ORIGEM = '205391388.2053651740.4527272';
+const DUP_ALVO = '205391388.2053651740.12920425';
+const BUSCA_COM_DUPLICADO = { users: { objects: [] }, venues: { objects: [{
+  id: DUP_ORIGEM, name: 'Estacionamento', permissions: -1, images: [],
+  geometry: { type: 'Point', coordinates: [-46.6, -23.5] },
+  venueUpdateRequests: [{ id: 'ur-dup', type: 'REQUEST', subType: 'FLAG', flagType: 'DUPLICATE',
+    flagSubjectType: 'VENUE', flagEntityID: DUP_ALVO, isRead: false }],
+}] }, mapIssues: { venueUpdateRequests: { hasMore: false } } };
+const RELEITURA_DO_ALVO = { venues: { objects: [{ id: DUP_ALVO, name: 'Natan Estacionamento',
+  geometry: { type: 'Point', coordinates: [-46.6, -23.49914] } }] } };
+
+test('buscar-places: a releitura do duplicado tem TETO próprio — presa, a busca sai sem o nome', { timeout: 60_000 }, async () => {
+  // Sem teto próprio, a leitura acessória herdava os 30 s do `callWaze`, e
+  // busca lenta + releitura presa passavam dos 45 s em que o cliente desiste.
+  const s = await sessaoDeTeste(COOKIES);
+  // A releitura fica PRESA até o teste soltar — ou até o `callWaze` abortar
+  // (sem obedecer ao aborto, o teste sem o conserto nunca terminaria).
+  const soltar = [];
+  const t0 = Date.now();
+  const { r, chamadas } = await comWaze((url, init) => {
+    if (/Issues\/Search\/List/.test(url)) return json(BUSCA_COM_DUPLICADO);
+    return new Promise((ok, erro) => {
+      soltar.push(() => ok(json(RELEITURA_DO_ALVO)));
+      init.signal?.addEventListener('abort', () => erro(new Error('abortado')));
+    });
+  }, () => dispatch('buscar-places', { ...s.dados, region: 'row' }, s.ctx));
+  const levou = Date.now() - t0;
+  // Retrato ANTES de soltar: a leitura solta ainda escreveria no objeto.
+  const duplicado = r.body.places?.[0]?.duplicado;
+  soltar.forEach((f) => f());           // senão o processo espera os 30 s dela
+  assert.ok(chamadas.some((c) => /\/Features/.test(c.url)), 'pré-condição: a busca tentou a releitura');
+  assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 120));
+  assert.equal(r.body.places.length, 1);
+  assert.equal(duplicado, undefined, 'inventou o nome de uma releitura que não voltou');
+  assert.ok(levou < DUPLICADO_ESPERA_MS + 2000,
+    `a busca esperou a releitura acessória por ${levou} ms (teto: ${DUPLICADO_ESPERA_MS} ms)`);
+
+  // CONTROLE: releitura que volta a tempo traz o nome — o teto não corta o caminho normal.
+  const s2 = await sessaoDeTeste(COOKIES);
+  const rapida = await comWaze((url) => json(/Issues\/Search\/List/.test(url) ? BUSCA_COM_DUPLICADO : RELEITURA_DO_ALVO),
+    () => dispatch('buscar-places', { ...s2.dados, region: 'row' }, s2.ctx));
+  assert.equal(rapida.r.body.places[0].duplicado?.nome, 'Natan Estacionamento', 'CONTROLE: o nome do duplicado não chegou');
+});
+
+test('o teto do duplicado cabe no prazo do cliente: busca (teto do callWaze) + releitura < 45 s do `_post`', () => {
+  // A justificativa do número, conferida nas FONTES: se alguém subir o teto do
+  // duplicado (ou encurtar o do cliente), a busca volta a se perder pelo enfeite.
+  const core = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8');
+  const tetoBusca = /async function callWaze\(url[\s\S]*?controller\.abort\(\), (\d+)\)/.exec(core);
+  const tetoCliente = /async _post\([\s\S]*?controller\.abort\(\), (\d+)\)/.exec(API_JS);
+  assert.ok(tetoBusca && tetoCliente, 'não achei os tetos nas fontes — o instrumento quebrou, não a regra');
+  const soma = Number(tetoBusca[1]) + DUPLICADO_ESPERA_MS;
+  assert.ok(soma < Number(tetoCliente[1]),
+    `busca (${tetoBusca[1]} ms) + releitura (${DUPLICADO_ESPERA_MS} ms) = ${soma} ms não cabe nos ${tetoCliente[1]} ms do cliente`);
+});
+
+test('ids: objeto, lista ou texto enorme não vão ao Waze em NENHUMA rota de escrita — o mesmo 400 de id ausente', async () => {
+  // O `idValido` nascia só no LOTE do marcar-lido; o marcar-lido de um item,
+  // o validar-place, o guardar-pedido, o renomear-local e o excluir-foto
+  // mandavam um objeto ou um texto de 200 KB pro Waze como veio.
+  const s = await sessaoDeTeste(COOKIES);
+  // [rota, corpo com `id` no campo testado, a chave do 400 que a rota já dá pra id AUSENTE]
+  const casos = (id) => [
+    ['marcar-lido', { venueID: id, updateRequestID: 'u1' }, 'srv.err.incompleteData'],
+    ['marcar-lido', { venueID: 'v1', updateRequestID: id }, 'srv.err.incompleteData'],
+    ['validar-place', { venueID: id, updateRequestID: 'u1' }, 'srv.err.incompleteParams'],
+    ['validar-place', { venueID: 'v1', updateRequestID: id }, 'srv.err.incompleteParams'],
+    ['guardar-pedido', { venueID: id, updateRequestID: 'u1', value: true }, 'srv.err.incompleteParams'],
+    ['guardar-pedido', { venueID: 'v1', updateRequestID: id, value: true }, 'srv.err.incompleteParams'],
+    ['renomear-local', { venueID: id, nome: 'Padaria' }, 'srv.err.incompleteParams'],
+    ['excluir-foto', { venueID: id, imageID: 'i1', lat: -23.5, lon: -46.6 }, 'srv.err.incompleteParams'],
+    ['excluir-foto', { venueID: 'v1', imageID: id, lat: -23.5, lon: -46.6 }, 'srv.err.incompleteParams'],
+  ];
+  for (const lixo of [{ $objeto: [1, 2, 3] }, ['v1'], 'X'.repeat(200_000), '', true]) {
+    for (const [rota, corpo, chave] of casos(lixo)) {
+      const { r, chamadas } = await comWaze(naoPodiaIrAoWaze, () => dispatch(rota, { ...s.dados, region: 'row', ...corpo }, s.ctx));
+      const quem = `${rota} ${JSON.stringify(corpo).slice(0, 70)}`;
+      assert.equal(chamadas.length, 0, `${quem}: foi ao Waze`);
+      assert.equal(r.status, 400, quem);
+      assert.equal(r.body.errorKey, chave, quem);
+    }
+  }
+  // CONTROLE: id de verdade — texto (o formato medido) e número — vai ao Waze
+  // em todas elas; sem isto, uma rota que recusasse TUDO passaria acima.
+  for (const bom of ['206439966.2064334125.43319751', 43319751]) {
+    for (const [rota, corpo] of casos(bom)) {
+      const { chamadas } = await comWaze(() => json({}), () => dispatch(rota, { ...s.dados, region: 'row', ...corpo }, s.ctx));
+      assert.ok(chamadas.length > 0, `CONTROLE: ${rota} ${JSON.stringify(corpo).slice(0, 70)} não foi ao Waze`);
+    }
+  }
+});
+
+import vm from 'node:vm';
+
+// O `msgDoServidor` do app.js de verdade, rodando sobre o i18n.js de verdade
+// num idioma: é o que a tela de entrar mostra (`authenticateWithCookies`).
+const I18N_JS = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+const APP_JS = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+function msgDoServidorEm(lang) {
+  const i = APP_JS.search(/^function msgDoServidor\(/m);
+  assert.ok(i >= 0, 'msgDoServidor sumiu do app.js');
+  let prof = 0, fim = -1;
+  for (let j = APP_JS.indexOf('{', i); j < APP_JS.length; j++) {
+    if (APP_JS[j] === '{') prof++;
+    else if (APP_JS[j] === '}') { prof--; if (prof === 0) { fim = j + 1; break; } }
+  }
+  const ctx = {
+    navigator: { language: lang, onLine: true },
+    document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: (k) => (k === 'waze_places_lang' ? lang : null), setItem() {}, removeItem() {} },
+    console, setTimeout, clearTimeout,
+  };
+  vm.createContext(ctx);
+  // `setLang` como o app faz na abertura: o i18n.js nasce em português.
+  vm.runInContext(I18N_JS + '\n' + APP_JS.slice(i, fim) + `\nsetLang(${JSON.stringify(lang)}); this.msg = msgDoServidor;`, ctx);
+  return ctx.msg;
+}
+
+test('login: Waze fora do ar é erro PASSAGEIRO e traduzido — não 400 com frase em português', async () => {
+  const emIngles = msgDoServidorEm('en');
+  for (const [nome, responder, chave] of [
+    ['HTTP 502', () => new Response('bad gateway', { status: 502 }), 'srv.err.wazeDown'],
+    ['HTTP 429', () => json({}, 429), 'srv.err.wazeDown'],
+    ['rede caiu', () => { throw new TypeError('fetch failed'); }, 'srv.err.connection'],
+  ]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(responder, () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+    assert.ok(r.status >= 500, `${nome}: HTTP ${r.status} — falha do Waze não é "pedido errado"`);
+    assert.equal(r.body.errorCategory, 'transient', nome);
+    assert.equal(r.body.errorKey, chave, nome);
+    assert.equal(r.body.sessionToken, undefined, `${nome}: criou sessão sem o Waze responder`);
+    const tela = emIngles(r.body, 'fallback');
+    assert.doesNotMatch(tela, /Erro|Servidor|conex/, `${nome}: em inglês, a tela de entrar mostrou português: "${tela}"`);
+    assert.notEqual(tela, 'fallback', `${nome}: a tela caiu no texto genérico`);
+  }
+  // Não passageiro: erro inesperado do Waze — nunca "place não existe mais" nem
+  // "já tratado", que são categorias de AÇÃO e não significam nada no login.
+  for (const status of [404, 409, 418]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(() => json({ erro: 'x' }, status), () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+    assert.equal(r.body.errorKey, 'srv.err.wazeUnknown', `HTTP ${status}: ${r.body.errorKey}`);
+    assert.equal(r.body.errorCategory, 'unknown', `HTTP ${status}`);
+    assert.deepEqual(r.body.errorVars, { code: status });
+  }
+  // CONTROLE: cookie que não vale continua sendo "cookies expirados" (400) — é
+  // o texto que a extensão lê pra não insistir, e o que a pessoa pode corrigir.
+  const s = await sessaoDeTeste(COOKIES);
+  const { r } = await comWaze(() => json({}, 403), () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+  assert.equal(r.status, 400);
+  assert.equal(r.body.errorKey, 'srv.err.cookiesExpiredRelogin');
+  assert.match(r.body.error, /expirad/, 'a extensão decide "não está logado no WME" por este texto');
+});
+
+test('core: toda apiError leva errorKey — frase crua do servidor chega em português em qualquer idioma', () => {
+  // A do login era a única sem chave, e o app a mostrava como veio. Linha de
+  // comentário não conta (gotcha #67), nem a definição da própria função.
+  const core = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8');
+  const chamadas = core.split('\n')
+    .filter((l) => !l.trim().startsWith('//'))
+    .filter((l) => /\bapiError\(/.test(l) && !/const apiError = /.test(l));
+  assert.ok(chamadas.length >= 20, `achei só ${chamadas.length} apiError — o varredor quebrou, não o core`);
+  const semChave = chamadas.filter((l) => !/'srv\.err\.[a-zA-Z]+'/.test(l)).map((l) => l.trim());
+  assert.deepEqual(semChave, [],
+    'apiError sem `srv.err.*` na mesma linha: o app mostra a frase portuguesa do servidor em qualquer idioma');
+});
+
+import * as grpc from '../server/wme-grpc.mjs';
+
+test('presenca-waze: resposta gRPC cortada no meio (sem trailer, HTTP 200) é erro passageiro, não lista pela metade', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  const editor = (id) => grpc.campo.msg(1, grpc.junta(grpc.campo.inteiro(1, id), grpc.campo.bool(3, true), grpc.campo.texto(4, 'ed' + id)));
+  const lista = grpc.junta(editor(1), editor(2), editor(3), editor(4));
+  // Cabeçalho do quadro com o tamanho DECLARADO, seguido dos bytes que vieram.
+  const quadro = (declarado, corpo) => {
+    const q = new Uint8Array(5 + corpo.length);
+    new DataView(q.buffer).setUint32(1, declarado);
+    q.set(corpo, 5);
+    return q;
+  };
+  const b64 = (u8) => btoa(String.fromCharCode(...u8));
+  const pedir = (texto) => comWaze(() => new Response(texto, { status: 200 }),
+    () => dispatch('presenca-waze', { ...s.dados, region: 'row', caixa: [-50, -30, -40, -20] }, s.ctx));
+  // O corte cai numa divisa de campo (2 dos 4 editores): o protobuf que sobra
+  // é VÁLIDO, então só o tamanho do quadro denuncia.
+  const metade = lista.subarray(0, lista.length / 2);
+  assert.doesNotThrow(() => grpc.lerCampos(metade), 'pré-condição: a metade tinha que ser protobuf válido');
+  const { r } = await pedir(b64(quadro(lista.length, metade)));
+  assert.equal(r.body.success, false, `a metade da lista virou a lista: ${JSON.stringify(r.body.editores)}`);
+  assert.equal(r.body.errorCategory, 'transient', 'cortar no meio é de rede');
+  // CONTROLE: a lista inteira, do mesmo jeito (sem trailer), é lida com os 4.
+  const inteira = await pedir(b64(quadro(lista.length, lista)));
+  assert.equal(inteira.r.body.success, true, JSON.stringify(inteira.r.body));
+  assert.deepEqual(inteira.r.body.editores.map((e) => e.id), [1, 2, 3, 4]);
+});
+
+test('perfil: a caixa da área sai de Polygon E de MultiPolygon, e anel enorme não derruba o perfil', async () => {
+  // A caixa vira o filtro do "Minha área" no app. Lia `coordinates[0]` como se
+  // toda área fosse Polygon (MultiPolygon dava `[null, null, null, null]`), e o
+  // `Math.min(...lista)` estourava a pilha num anel grande (o perfil em 500).
+  const bboxDe = async (geometry) => {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(() => json({ id: 1, userName: 'x', rank: 5, isAreaManager: true, isStaff: false, areas: [{ type: 'drive', geometry }] }),
+      () => dispatch('perfil', { ...s.dados, region: 'row' }, s.ctx));
+    assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 120));
+    return r.body.profile.areas[0].bbox;
+  };
+  const anel = [[-47, -23], [-46, -23], [-46, -22], [-47, -22], [-47, -23]];
+  const outro = [[-40, -10], [-39, -10], [-39, -9], [-40, -10]];
+  // CONTROLE: o Polygon, que sempre funcionou.
+  assert.deepEqual(await bboxDe({ type: 'Polygon', coordinates: [anel] }), [-47, -23, -46, -22]);
+  // MultiPolygon: a caixa cobre as DUAS partes.
+  assert.deepEqual(await bboxDe({ type: 'MultiPolygon', coordinates: [[anel], [outro]] }), [-47, -23, -39, -9]);
+  // 200 mil vértices num anel só.
+  const grande = Array.from({ length: 200_000 }, (_, i) => [-47 + i * 1e-6, -23 + (i % 2) * 1e-3]);
+  assert.deepEqual(await bboxDe({ type: 'Polygon', coordinates: [grande] }), [-47, -23, -47 + 199_999 * 1e-6, -23 + 1e-3]);
+  // Sem coordenada: sem caixa (o app cai pra outra área), nunca caixa de NaN.
+  assert.equal(await bboxDe(null), null);
+  assert.equal(await bboxDe({ type: 'Polygon', coordinates: [] }), null);
+});
+
+// ── o 413 da VM chega a quem mandou o corpo grande ──────────────────────────
+// O `readBody` respondia o 413 e chamava `req.destroy()` na linha seguinte:
+// com o corpo ainda chegando, fechar assim é RST, e o RST apaga no cliente a
+// resposta que ele ainda não leu. Medido (8 MB): de 11% a 46% dos pedidos
+// terminavam sem o 413 (auditoria de 2026-09-26). Ver a tabela no corpo.mjs.
+import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { request as pedidoHttp, Agent } from 'node:http';
+import { MAX_BODY_BYTES } from '../server/corpo.mjs';
+
+// O servidor em PROCESSO PRÓPRIO, com o `readBody` de verdade, na porta que o
+// sistema der (0 — não disputa porta com nenhum outro teste). Processo próprio
+// porque é assim que a VM roda, e é o que muda o resultado: com cliente e
+// servidor no MESMO processo, o fechamento que o Node faz sozinho depois de um
+// `Connection: close` passava (0 perdas em mais de 1.000) — em processos
+// separados ele perdia até 8,5%. Instrumento que não reproduz o defeito aprova conserto pela
+// metade (gotcha #28). Cada conexão fechada no servidor vira uma linha com os
+// bytes que ele leu dela.
+async function vmComReadBody(fn) {
+  const codigo = `
+    import { createServer } from 'node:http';
+    import { readBody } from ${JSON.stringify(pathToFileURL(new URL('../server/corpo.mjs', import.meta.url).pathname).href)};
+    const srv = createServer(async (req, res) => {
+      req.socket.once('close', () => console.log(JSON.stringify({ fechou: req.socket.bytesRead })));
+      const raw = await readBody(req, res);
+      if (raw === null) return;
+      res.writeHead(200);
+      res.end('ok');
+    });
+    srv.listen(0, '127.0.0.1', () => console.log(JSON.stringify({ porta: srv.address().port })));
+  `;
+  const p = spawn(process.execPath, ['--input-type=module', '-e', codigo], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const fechados = [];
+  let resto = '';
+  let avisarPorta;
+  const porta = new Promise((ok) => { avisarPorta = ok; });
+  p.stdout.setEncoding('utf8');
+  p.stdout.on('data', (d) => {
+    resto += d;
+    let n;
+    while ((n = resto.indexOf('\n')) >= 0) {
+      const linha = JSON.parse(resto.slice(0, n));
+      resto = resto.slice(n + 1);
+      if (linha.porta) avisarPorta(linha.porta);
+      if (linha.fechou !== undefined) fechados.push(linha.fechou);
+    }
+  });
+  try {
+    return await fn(await porta, fechados);
+  } finally {
+    p.kill();
+  }
+}
+// O corpo, alocado UMA vez por tamanho: encher 8 MB a cada pedido custava mais
+// que o pedido.
+const corpos = new Map();
+const corpoDe = (bytes) => corpos.get(bytes) || corpos.set(bytes, Buffer.alloc(bytes, 0x61)).get(bytes);
+// POST com um corpo de `bytes`, todo de uma vez (um upload rápido). Resolve com
+// a resposta, ou com o código do erro se ela não chegou.
+function postGrande(porta, bytes, agent) {
+  return new Promise((ok) => {
+    const r = pedidoHttp({ host: '127.0.0.1', port: porta, method: 'POST', path: '/api/sessao', agent,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': bytes } }, (res) => {
+      let corpo = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { corpo += c; });
+      res.on('end', () => ok({ status: res.statusCode, corpo, conexao: res.headers.connection }));
+      res.on('error', (e) => ok({ erro: e.code || e.message }));
+    });
+    r.on('error', (e) => ok({ erro: e.code || e.message }));
+    r.on('socket', (s) => s.on('error', () => {}));
+    r.end(corpoDe(bytes));
+  });
+}
+async function fetchGrande(porta, bytes) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${porta}/api/sessao`, { method: 'POST', body: corpoDe(bytes),
+      headers: { 'Content-Type': 'application/json' } });
+    return { status: r.status, corpo: await r.text() };
+  } catch (e) {
+    return { erro: e.cause?.code || e.message };
+  }
+}
+
+test('VM: o 413 do corpo grande CHEGA — não se perde no corte da conexão', { timeout: 120_000 }, async () => {
+  // Dois clientes keep-alive, como o navegador: o `fetch` (o que mais perdia
+  // com o fechamento pela metade) e o `node:http` com agente keep-alive.
+  const N = 100;
+  const agente = new Agent({ keepAlive: true });
+  try {
+    await vmComReadBody(async (porta) => {
+      for (const [nome, mandar] of [['fetch', () => fetchGrande(porta, MAX_BODY_BYTES + 3_000_000)],
+        ['node:http', () => postGrande(porta, MAX_BODY_BYTES + 3_000_000, agente)]]) {
+        const desfechos = {};
+        for (let i = 0; i < N; i++) {
+          const r = await mandar();
+          const chave = r.erro ? 'erro ' + r.erro : 'HTTP ' + r.status;
+          desfechos[chave] = (desfechos[chave] || 0) + 1;
+          if (!r.erro) assert.equal(JSON.parse(r.corpo).success, false, `${nome}: o 413 veio sem o corpo JSON`);
+        }
+        assert.deepEqual(desfechos, { 'HTTP 413': N }, `${nome}, ${N} corpos de 8 MB: ${JSON.stringify(desfechos)}`);
+      }
+    });
+  } finally {
+    agente.destroy();
+  }
+});
+
+test('VM: depois do 413 o servidor lê o resto do corpo até um TETO, e só então fecha', { timeout: 60_000 }, async () => {
+  // As duas metades do fechamento em duas etapas, conferidas no SERVIDOR (os
+  // bytes que ele leu da conexão antes de fechá-la), o que é determinístico
+  // onde a entrega do 413 é estatística:
+  //   · corpo um pouco acima do limite (8 MB): lido ATÉ O FIM antes de fechar
+  //     — fechar antes é o RST que apaga a resposta no cliente;
+  //   · corpo enorme (64 MB): o dreno tem teto, e a conexão fecha bem antes do
+  //     fim — o 413 existe pra PARAR de receber.
+  // E o 413 avisa `Connection: close`: sem ele, um cliente keep-alive (o
+  // navegador) contaria com a conexão pro pedido seguinte.
+  const agente = new Agent({ keepAlive: true });
+  try {
+    await vmComReadBody(async (porta, fechados) => {
+      for (const [total, leuTudo] of [[MAX_BODY_BYTES + 3_000_000, true], [64_000_000, false]]) {
+        const antes = fechados.length;
+        const r = await postGrande(porta, total, agente);
+        assert.equal(r.status, 413, JSON.stringify(r));
+        assert.equal(r.conexao, 'close', 'o 413 não avisa que a conexão fecha — um cliente keep-alive a reusaria');
+        for (let i = 0; i < 100 && fechados.length === antes; i++) await new Promise((ok) => setTimeout(ok, 50));
+        assert.equal(fechados.length, antes + 1, `${total} bytes: a conexão seguiu aberta depois do 413`);
+        const lidos = fechados[antes];
+        if (leuTudo) assert.ok(lidos >= total, `${total} bytes: o servidor fechou com ${lidos} lidos — o resto chegou num socket fechado (RST)`);
+        else assert.ok(lidos < total / 2, `${total} bytes: o servidor leu ${lidos} depois de recusar o corpo`);
+      }
+    });
+  } finally {
+    agente.destroy();
+  }
+});

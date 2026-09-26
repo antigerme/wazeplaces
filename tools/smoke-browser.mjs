@@ -2100,6 +2100,10 @@ for (const status of [404, 403]) {
     AppState.serverTotal = 5; AppState.hasMore = false;
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('appScreen').classList.remove('hidden');
+    // O login de mentira mostra os controles de sessão da Ajuda, como o
+    // `showMainScreen` faz: desde 2026-09-26 o "Ver de novo Como funciona" é
+    // um deles, e a abertura SEM sessão (como esta página nasce) os esconde.
+    mostrarControlesDeSessao(true);
     renderProfileHeader(); updateStats(); showLoading(false);
     document.getElementById('noMoreCards').classList.add('hidden');
     AppState.queue = [p, { ...p, venueID: 'v2', updateRequestID: 'u2' }];
@@ -2158,21 +2162,34 @@ for (const status of [404, 403]) {
     return !!e && e.offsetParent !== null;
   }, id);
   checa(!(await visivel('extJaInstalei')), 'já instalei: nasceu visível (é ruído pra quem não foi à loja)');
-  await page.evaluate(() => {
-    const a = document.getElementById('extInstallLink');
-    a.removeAttribute('target');
-    a.addEventListener('click', (e) => e.preventDefault(), true);
-  });
-  await page.click('#extInstallLink');
-  await page.waitForTimeout(250);
-  checa(await visivel('extJaInstalei'), 'já instalei: não apareceu depois do clique em instalar');
-  checa(await page.evaluate(() => document.getElementById('extJaInstalei').getBoundingClientRect().height >= 44),
-    'já instalei: alvo de toque abaixo de 44px');
-  let recarregou = false;
-  page.on('framenavigated', (f) => { if (f === page.mainFrame()) recarregou = true; });
-  await page.click('#extJaInstalei');
-  await page.waitForTimeout(1000);
-  checa(recarregou, 'já instalei: não recarregou — sem reload a ponte da extensão não entra na aba');
+  // A extensão só é OFERECIDA onde instala: o Chromium de computador (v2026.09.26-01).
+  // O motor do Safari é o caso oposto, e se mede nos dois lados — foi o job do
+  // WebKit que achou este bloco clicando num card que, lá, corretamente não existe.
+  const oferecida = await page.evaluate(() => document.documentElement.classList.contains('com-extensao'));
+  const cardNaTela = await visivel('extInstallLink');
+  if (MOTOR === 'chromium') {
+    checa(oferecida && cardNaTela, 'extensão: NÃO oferecida no Chromium de computador, onde ela instala');
+  } else {
+    checa(!oferecida && !cardNaTela, `extensão: oferecida no ${MOTOR}, onde ela não instala`);
+  }
+  if (!pularForaDoChromium(MOTOR, 'extensão: o "Já instalei — entrar" depois de ir à loja',
+    'a extensão só existe no Chromium de computador; fora dele o card nem aparece (conferido acima)')) {
+    await page.evaluate(() => {
+      const a = document.getElementById('extInstallLink');
+      a.removeAttribute('target');
+      a.addEventListener('click', (e) => e.preventDefault(), true);
+    });
+    await page.click('#extInstallLink');
+    await page.waitForTimeout(250);
+    checa(await visivel('extJaInstalei'), 'já instalei: não apareceu depois do clique em instalar');
+    checa(await page.evaluate(() => document.getElementById('extJaInstalei').getBoundingClientRect().height >= 44),
+      'já instalei: alvo de toque abaixo de 44px');
+    let recarregou = false;
+    page.on('framenavigated', (f) => { if (f === page.mainFrame()) recarregou = true; });
+    await page.click('#extJaInstalei');
+    await page.waitForTimeout(1000);
+    checa(recarregou, 'já instalei: não recarregou — sem reload a ponte da extensão não entra na aba');
+  }
   await ctx.close();
 }
 
@@ -4795,6 +4812,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     for (const lang of LINGUAS) {
       const id = `conquistas ${nome}/${tema}/${lang}/L${rank + 1}`;
       const ctx = await browser.newContext({ viewport, locale: lang, serviceWorkers: 'block', colorScheme: tema });
+      // Abrir os Filtros pede a lista de países, que leva 401 com a sessão
+      // falsa — e toda resposta prova rede, o que faz a presença pedir o token
+      // do tempo real (`Presenca.aoProvarRede`, v2026.09.26-01). A sentinela do
+      // 401 da presença pegou os 20 contextos deste bloco na primeira rodada.
+      await presencaViva(ctx);
       const page = await ctx.newPage();
       const errosJS = [];
       page.on('pageerror', (e) => errosJS.push(String(e.message || e).split('\n')[0]));
@@ -5668,6 +5690,15 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     let enviosDeAcao = [];
     let atrasoDaAcaoMs = 0;   // usado só pra alargar a janela do teste de reenvio
     let abortLento = false;  // alarga a janela do bloco DOIS TEMPOS (ver lá)
+    // A conta do aparelho. Cada item da fila de saída leva a conta do GESTO, e o
+    // esvaziamento ESPERA enquanto a conta de agora for desconhecida. O bloco
+    // injetava o perfil direto no `AppState` e a rota respondia `{"success":true}`
+    // SEM perfil na reabertura: a conta nunca ficava conhecida e a ABERTURA
+    // reprovava medindo a FIXTURE (gotcha #52 — helper que arruma a tela é
+    // fixture). Agora o perfil passa pelo caminho REAL: `definirPerfil` no
+    // `montar` e a rota do perfil respondendo como o servidor responde.
+    const PERFIL_FS = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false,
+      editableCountryIDs: [30], areas: [], managedAreas: [] };
     await page.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png',
       body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') }));
     await page.route('**/api/**', async (r) => {
@@ -5683,6 +5714,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         enviosDeAcao.push(Date.now());
         if (atrasoDaAcaoMs) await new Promise((ok) => setTimeout(ok, atrasoDaAcaoMs));
       }
+      if (/\/api\/perfil$/.test(new URL(r.request().url()).pathname)) {
+        return r.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ success: true, profile: PERFIL_FS, visivelNoWme: true }) });
+      }
       r.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' });
     });
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
@@ -5690,10 +5725,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.reload({ waitUntil: 'domcontentloaded' });
     await dormir(400);
     const CARDS_FS = Object.entries(CARDS).map(([, p]) => p);
-    const montar = () => page.evaluate(({ f }) => {
+    const montar = () => page.evaluate(({ f, perfil }) => {
       if (typeof API !== 'undefined' && API.setSession) API.setSession('t', 'cookies');
       AppState.authenticated = true;
-      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      // Pela FONTE ÚNICA do perfil, que carimba a conta do aparelho (ver PERFIL_FS).
+      definirPerfil({ success: true, profile: perfil });
       // Desfazer DESLIGADO de verdade: a preferência sozinha não basta, o
       // canDisableUndo() também exige a cota (a pegadinha do doc).
       AppState.stats = { read: 500, rejected: 500, skipped: 0 };
@@ -5714,7 +5750,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // recusa o mesmo pedido duas vezes (é a segunda decisão do relato de reabrir
     // sem rede). A 7ª e a 8ª ação caíam em pedidos já decididos, e o bloco
     // acusava "o placar reverteu" medindo a fixture, não o app.
-    }, { f: Array.from({ length: 6 }, (_, i) => CARDS_FS.map((p, k) => ({ ...p,
+    }, { perfil: PERFIL_FS, f: Array.from({ length: 6 }, (_, i) => CARDS_FS.map((p, k) => ({ ...p,
       updateRequestID: String(p.updateRequestID) + '-c' + i + '-' + k }))).flat() });
     const estado = () => page.evaluate(() => ({
       rejeitados: AppState.stats.rejected,
@@ -6135,6 +6171,469 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── GESTOS E TECLAS QUE NÃO DECIDEM (auditoria de 2026-09-26) ───────────────
+//
+// Um gesto, uma tecla ou uma resposta que chega DURANTE o gesto decidia um
+// pedido que ninguém decidiu — ou deixava de desfazer o que a pessoa pediu pra
+// desfazer. Os testes de unidade (gestos-card, lightbox-tab, lightbox-escritas)
+// rodam as peças; aqui é o NAVEGADOR: toque por CDP, mouse e teclado de
+// verdade, rede de mentira por rota e o log do que SAIU pelo fio.
+//
+//  C1 · a pinça na foto do card decidia (abrindo → lido; fechando → rejeitado).
+//  C6 · puxar pra BAIXO com desvio de lado rejeitava ou marcava lido.
+//  C2 · arrastar com o MOUSE pela foto ou pelo mapa começava o arrastar nativo
+//       de imagem: o card seguia o cursor sem botão, e o clique seguinte em
+//       qualquer lugar (Filtros) cometia a ação.
+//  C3 · a aprovação de uma foto pousando durante a saída do card fazia o ✓, a
+//       seta e o arraste agirem no pedido SEGUINTE.
+//  C7 · com o foco na lista de mudanças, o ↑ pulava e ← → decidiam.
+//  C8 · a exclusão de foto não se desfazia pelo teclado, e o Tab não chegava ao
+//       Desfazer, que aparece por cima do lightbox.
+//
+// Toda "não decidiu" tem o CONTROLE ao lado: o mesmo caminho, com o gesto que
+// decide, decidindo — senão um app com o gesto morto passaria verde.
+const GESTOS_L6 = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+const gestosFoto = (id) => `https://venue-image.waze.com/thumbs/thumb700_${id}.jpg`;
+const gestosPedidoDeFoto = (id, outras = []) => ({
+  venueID: 'v-' + id, updateRequestID: id, name: 'Padaria ' + id, localAprovado: true,
+  categories: ['BAKERY'], address: 'Rua XV de Novembro, 100 - Centro',
+  updateType: 'Nova Foto', updateTypeKey: 'IMAGE', reqType: 'IMAGE', reqSubType: '', purType: 'NEW_PHOTO',
+  createdBy: 'joaozinho', brand: null, changes: [],
+  imageUrls: [...outras.map(gestosFoto), gestosFoto(id)], approvedImageIds: outras.slice(),
+  dateAdded: 1785203731191, lat: -20.8, lon: -49.4,
+});
+// Pedido REAL (fixture de país) com id próprio — as fixtures vêm todas com 'fx'.
+const gestosDaFixture = (i, id, extra = {}) => ({ ...JSON.parse(JSON.stringify(FIXTURES_PAISES[i])),
+  venueID: 'v-' + id, updateRequestID: id, ...extra });
+
+// Uma página com a fila montada, a rede de mentira e o log do que SAIU. A
+// aprovação de foto fica PRESA até o teste soltar: é o que torna a corrida do
+// C3 determinística (ela pousa no meio da saída do card, não "mais ou menos").
+async function gestosPagina(opcoes, fila, { lang = 'pt' } = {}) {
+  const ctx = await browser.newContext({ serviceWorkers: 'block', locale: 'pt-BR', ...opcoes });
+  const saiu = [];
+  let soltar = () => {};
+  const aprovacaoPresa = new Promise((r) => { soltar = r; });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  await ctx.route('**/api/**', async (r) => {
+    const nome = r.request().url().split('/api/')[1].split('?')[0];
+    let corpo = {};
+    try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+    saiu.push({ nome, aprovar: corpo.approve === true, acao: corpo.action || null, pedido: corpo.updateRequestID || null });
+    if (nome === 'validar-place' && corpo.approve === true) await aprovacaoPresa;
+    // Cada rota com a FORMA que o app lê: `{ success: true }` cru em
+    // `lista-paises` faz o modal de Filtros iterar `undefined`.
+    const resp = { 'presenca-app': { success: true, online: [], conversas: [] },
+      'lista-paises': { success: true, countries: [] }, 'lista-estados': { success: true, states: [] } }[nome]
+      || { success: true };
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+  });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(300);
+  await page.evaluate(({ fila, perfil, lang: l }) => {
+    setLang(l);
+    API.setSession('token-do-smoke-de-gestos');
+    AppState.authenticated = true;
+    AppState.profile = perfil;
+    AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+    AppState.serverTotal = fila.length; AppState.hasMore = false;
+    AppState.preferences.undoEnabled = true;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('filtersBtn').classList.remove('hidden');
+    renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    AppState.queue = fila.slice(); AppState.currentPlace = null; showCurrentPlace();
+  }, { fila, perfil: GESTOS_L6, lang });
+  await assentar(page, 250);
+  const fechar = async () => { soltar(); await ctx.close(); };
+  return { ctx, page, saiu, soltar, erros, fechar };
+}
+// O que o app DECIDIU até agora: placar, a ação na janela do Desfazer e quem
+// está na frente.
+const gestosDecisao = (page) => page.evaluate(() => ({
+  lidos: AppState.stats.read, rejeitados: AppState.stats.rejected, pulados: AppState.stats.skipped,
+  janela: AppState.pendingAction ? AppState.pendingAction.type + ':' + AppState.pendingAction.place.updateRequestID : null,
+  frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+}));
+const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
+
+{
+  // ── C1 + C6: toque de verdade (CDP) na foto do card ──────────────────────
+  if (!pularForaDoChromium(MOTOR, 'gestos/toque: a pinça e o puxão pra baixo na foto do card',
+    'toque com DOIS dedos e arraste só se sintetizam pelo protocolo do Chromium (CDP)')) {
+    const passos = async (cdp, n, pontosDe, ms) => {
+      for (let i = 1; i <= n; i++) {
+        await dormir(ms);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pontosDe(i) });
+      }
+    };
+    const TOQUES = [
+      ['pinça abrindo, dedos em tempos diferentes', null, async (cdp, b) => {
+        const y = b.y + b.h / 2, x1 = b.x + b.w * 0.4, x2 = b.x + b.w * 0.6;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x1, y, id: 0 }] });
+        await dormir(30);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x1, y, id: 0 }, { x: x2, y, id: 1 }] });
+        await passos(cdp, 10, (i) => [{ x: x1 - i * 12, y, id: 0 }, { x: x2 + i * 12, y, id: 1 }], 16);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      }],
+      ['pinça fechando', null, async (cdp, b) => {
+        const y = b.y + b.h / 2, x1 = b.x + b.w * 0.15, x2 = b.x + b.w * 0.85;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x1, y, id: 0 }] });
+        await dormir(30);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x1, y, id: 0 }, { x: x2, y, id: 1 }] });
+        await passos(cdp, 10, (i) => [{ x: x1 + i * 11, y, id: 0 }, { x: x2 - i * 11, y, id: 1 }], 16);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      }],
+      ['pinça com os dois dedos no mesmo evento', null, async (cdp, b) => {
+        const y = b.y + b.h / 2, x1 = b.x + b.w * 0.4, x2 = b.x + b.w * 0.6;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x1, y, id: 0 }, { x: x2, y, id: 1 }] });
+        await passos(cdp, 10, (i) => [{ x: x1 - i * 12, y, id: 0 }, { x: x2 + i * 12, y, id: 1 }], 16);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      }],
+      ...[-105, 105].map((dx) => [`puxar pra BAIXO em diagonal (${dx}, +300)`, null, async (cdp, b) => {
+        const x = b.x + b.w / 2, y = b.y + 30;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 0 }] });
+        await passos(cdp, 20, (i) => [{ x: x + dx * i / 20, y: y + 300 * i / 20, id: 0 }], 30);
+        await dormir(150);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      }]),
+      // CONTROLES: os mesmos dedos, no gesto que DECIDE.
+      ['CONTROLE: um dedo, devagar, 60% pra esquerda', 'reject', async (cdp, b) => {
+        const x = b.x + b.w * 0.8, y = b.y + b.h / 2;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 0 }] });
+        await passos(cdp, 20, (i) => [{ x: x - b.w * 0.6 * i / 20, y, id: 0 }], 30);
+        await dormir(150);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      }],
+      ['CONTROLE: um dedo pra CIMA em diagonal (-105, -300)', 'skip', async (cdp, b) => {
+        const x = b.x + b.w / 2, y = b.y + b.h - 10;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 0 }] });
+        await passos(cdp, 20, (i) => [{ x: x - 105 * i / 20, y: y - 300 * i / 20, id: 0 }], 30);
+        await dormir(150);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      }],
+    ];
+    for (const [nome, espera, gesto] of TOQUES) {
+      const id = `gestos/toque: ${nome}`;
+      const g = await gestosPagina({ viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true },
+        ['tA', 'tB', 'tC'].map((x) => gestosPedidoDeFoto(x)));
+      const b = await g.page.evaluate(() => {
+        const r = cardDaFrente().querySelector('.card-photo').getBoundingClientRect();
+        return { x: r.x, y: r.y, w: r.width, h: r.height };
+      });
+      const cdp = await g.ctx.newCDPSession(g.page);
+      await gesto(cdp, b);
+      await g.page.waitForTimeout(800);
+      const d = await gestosDecisao(g.page);
+      if (espera) {
+        checa(d.janela === `${espera}:tA`, `${id}: o gesto que decide deixou de decidir — o teste mediria um app com o gesto morto`, JSON.stringify(d));
+      } else {
+        checa(gestosNada(d) && d.frente === 'tA', `${id}: o gesto DECIDIU o pedido`, JSON.stringify(d));
+        const tr = await g.page.evaluate(() => cardDaFrente().style.transform);
+        checa(/^(|translate\(0(px)?, 0(px)?\) rotate\(0deg\))$/.test(tr), `${id}: o card não voltou pro lugar`, tr);
+      }
+      checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+      await g.fechar();
+    }
+  }
+
+  // ── C2: arrastar com o MOUSE pela foto e pelo mapa ────────────────────────
+  const DESKTOP = { viewport: { width: 1280, height: 800 } };
+  const arrastarMouse = async (page, sel, dx, { passos = 10, ms = 30 } = {}) => {
+    const b = await page.locator(sel).first().boundingBox();
+    const x = b.x + b.width / 2, y = b.y + b.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (let i = 1; i <= passos; i++) { await page.mouse.move(x + dx * i / passos, y); await page.waitForTimeout(ms); }
+    await page.mouse.up();
+  };
+  const camadas = (page) => page.evaluate(() => ({ foto: Lightbox.isOpen(), mapa: MapaLightbox.isOpen(),
+    filtros: !document.getElementById('filtersModal').classList.contains('hidden') }));
+  const FOTOS = ['mA', 'mB', 'mC'].map((x) => gestosPedidoDeFoto(x));
+  const MAPA = [gestosDaFixture(19, 'mapa1'), gestosDaFixture(25, 'mapa2')].map((p) => ({ ...p, imageUrls: [] }));
+  {
+    const id = 'gestos/mouse: arrastar pela FOTO e soltar longe';
+    const g = await gestosPagina(DESKTOP, FOTOS);
+    await arrastarMouse(g.page, '#cardStack .place-card:not(.card-fundo) .card-image', -400);
+    await g.page.waitForTimeout(700);
+    const d = await gestosDecisao(g.page);
+    const c = await camadas(g.page);
+    checa(d.janela === 'reject:mA', `${id}: o arraste pela foto não decidiu — o card ficou preso ao cursor`, JSON.stringify(d));
+    checa(!c.foto, `${id}: soltar o arraste ABRIU a foto por cima do card que acabava de sair`);
+    // O relato: o clique SEGUINTE em Filtros cometia a ação da posição do card preso.
+    await g.page.locator('#filtersBtn').click();
+    await g.page.waitForTimeout(700);
+    const d2 = await gestosDecisao(g.page);
+    checa(d2.pulados === 0 && d2.rejeitados === 1, `${id}: o clique em Filtros decidiu mais um pedido`, JSON.stringify(d2));
+    checa((await camadas(g.page)).filtros, `${id}: CONTROLE — o clique em Filtros não abriu Filtros`);
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    const id = 'gestos/mouse: arrastar pelo MAPA e soltar longe';
+    const g = await gestosPagina(DESKTOP, MAPA);
+    const temTile = await g.page.evaluate(() => cardDaFrente().querySelectorAll('.card-map:not(.hidden) .mapa-tile').length);
+    checa(temTile > 0, `${id}: PRÉ-CONDIÇÃO — o mapa não está na frente com tiles, e o arraste mediria outra coisa`, String(temTile));
+    await arrastarMouse(g.page, '#cardStack .place-card:not(.card-fundo) .card-map', 400);
+    await g.page.waitForTimeout(700);
+    const d = await gestosDecisao(g.page);
+    checa(d.janela === 'read:mapa1', `${id}: o arraste pelo mapa não decidiu — o card ficou preso ao cursor`, JSON.stringify(d));
+    checa(!(await camadas(g.page)).mapa, `${id}: soltar o arraste ABRIU o mapa ampliado por cima do card que acabava de sair`);
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    const id = 'gestos/mouse: arraste CURTO e devagar pela foto';
+    const g = await gestosPagina(DESKTOP, FOTOS);
+    await arrastarMouse(g.page, '#cardStack .place-card:not(.card-fundo) .card-image', -60, { passos: 12, ms: 40 });
+    await g.page.waitForTimeout(700);
+    const d = await gestosDecisao(g.page);
+    checa(gestosNada(d), `${id}: o arraste curto decidiu`, JSON.stringify(d));
+    checa(!(await camadas(g.page)).foto, `${id}: o arraste (que ANDOU) abriu a foto como se fosse clique`);
+    // CONTROLE: o clique PARADO na foto abre o lightbox — a armadilha é só do arraste.
+    await g.page.locator('#cardStack .place-card:not(.card-fundo) .card-image').click();
+    await g.page.waitForTimeout(400);
+    checa((await camadas(g.page)).foto, `${id}: CONTROLE — o clique parado na foto deixou de abrir o lightbox`);
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
+  // ── C3: a aprovação pousando durante a saída do card ─────────────────────
+  const CORRIDA = [gestosPedidoDeFoto('uB', ['foto-a']), gestosPedidoDeFoto('uC'), gestosPedidoDeFoto('uD')];
+  const aprovarEFechar = async (page) => {
+    await page.locator('#cardStack .place-card:not(.card-fundo) .card-image').click();
+    await page.waitForTimeout(300);
+    const pode = await page.evaluate(() => Lightbox.podeAprovarAtual());
+    await page.locator('#lightboxApprove').click();
+    await page.waitForTimeout(150);
+    await page.locator('#lightboxClose').click();   // fechar despacha a aprovação — que fica PRESA
+    await page.waitForTimeout(100);
+    return pode;
+  };
+  const CORRIDAS = [
+    ['o ✓ em B', async (g) => { await g.page.locator('#cardStack .place-card:not(.card-fundo) .card-btn-read').click(); g.soltar(); }],
+    ['a seta → em B', async (g) => { await g.page.keyboard.press('ArrowRight'); g.soltar(); }],
+    ['o arraste de mouse segurando B', async (g) => {
+      const b = await g.page.locator('#cardStack .place-card:not(.card-fundo) .card-category-row').boundingBox();
+      const x = b.x + b.width / 2, y = b.y + b.height / 2;
+      await g.page.mouse.move(x, y); await g.page.mouse.down();
+      for (let i = 1; i <= 8; i++) { await g.page.mouse.move(x - 50 * i, y); await g.page.waitForTimeout(30); }
+      g.soltar();
+      await esperarNaPagina(g.page, () => AppState.currentPlace && AppState.currentPlace.updateRequestID === 'uC', 5000, 50);
+      await g.page.mouse.up();
+    }],
+    ['CONTROLE: sem gesto nenhum', async (g) => { g.soltar(); }],
+  ];
+  for (const [nome, gesto] of CORRIDAS) {
+    const id = `gestos/corrida: ${nome} com a aprovação pousando no meio`;
+    const g = await gestosPagina(DESKTOP, CORRIDA);
+    const pode = await aprovarEFechar(g.page);
+    checa(pode, `${id}: PRÉ-CONDIÇÃO — a foto do pedido não podia ser aprovada`);
+    await gesto(g);
+    await g.page.waitForTimeout(900);
+    const d = await gestosDecisao(g.page);
+    const escritas = g.saiu.filter((s) => s.nome === 'validar-place' || s.nome === 'marcar-lido')
+      .map((s) => s.nome + (s.aprovar ? '(aprovar)' : '') + ':' + s.pedido);
+    checa(escritas.join() === 'validar-place(aprovar):uB', `${id}: saiu escrita além da aprovação de B`, escritas.join(', '));
+    checa(gestosNada(d) && d.frente === 'uC',
+      `${id}: o gesto em B agiu no pedido que entrou na frente (ou a aprovação não avançou o card)`, JSON.stringify(d));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
+  // ── C7: as setas numa área do card que ROLA ─────────────────────────────
+  {
+    const id = 'gestos/teclado: setas na lista de mudanças';
+    // O diff mais longo das fixtures, em francês, numa tela baixa: a lista ROLA.
+    const g = await gestosPagina({ viewport: { width: 393, height: 700 } },
+      [gestosDaFixture(25, 'kL', { imageUrls: [foto] }), gestosPedidoDeFoto('kM')], { lang: 'fr' });
+    const rola = await g.page.evaluate(() => {
+      const l = cardDaFrente().querySelector('.card-changes-list');
+      l.focus();
+      return { rola: l.scrollHeight > l.clientHeight + 2, foco: document.activeElement === l };
+    });
+    checa(rola.rola && rola.foco, `${id}: PRÉ-CONDIÇÃO — a lista não rola ou não recebeu o foco`, JSON.stringify(rola));
+    // A rolagem pelo teclado é ANIMADA no WebKit: ler num prazo fixo mede o
+    // meio do caminho (deu 0 depois do ↓↓ e 48 depois do ↑). Espera ela PARAR.
+    const topo = () => g.page.evaluate(() => cardDaFrente().querySelector('.card-changes-list').scrollTop);
+    const parado = async () => {
+      let a = await topo();
+      for (let i = 0; i < 30; i++) {
+        await g.page.waitForTimeout(100);
+        const b = await topo();
+        if (b === a) return b;
+        a = b;
+      }
+      return a;
+    };
+    await g.page.keyboard.press('ArrowDown'); await g.page.keyboard.press('ArrowDown');
+    const desceu = await parado();
+    await g.page.keyboard.press('ArrowUp');
+    const subiu = await parado();
+    checa(desceu > 0 && subiu < desceu, `${id}: ↑ ↓ não rolaram a lista`, `desceu=${desceu} subiu=${subiu}`);
+    await g.page.keyboard.press('ArrowLeft'); await g.page.keyboard.press('ArrowRight');
+    await g.page.waitForTimeout(700);
+    const d = await gestosDecisao(g.page);
+    checa(gestosNada(d) && d.frente === 'kL', `${id}: seta com o foco na lista DECIDIU o pedido`, JSON.stringify(d));
+    // CONTROLE: com o foco fora da lista, a seta decide.
+    await g.page.evaluate(() => document.activeElement.blur());
+    await g.page.keyboard.press('ArrowRight');
+    await g.page.waitForTimeout(700);
+    const d2 = await gestosDecisao(g.page);
+    checa(d2.janela === 'read:kL', `${id}: CONTROLE — fora da lista a seta deixou de decidir`, JSON.stringify(d2));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
+  // ── C8: desfazer a exclusão de foto pelo TECLADO ─────────────────────────
+  const FOTO_EXCLUIR = [gestosPedidoDeFoto('uX', ['foto-a', 'foto-b']), gestosPedidoDeFoto('uY')];
+  const abrirNaFotoA = async (page) => {
+    await page.locator('#cardStack .place-card:not(.card-fundo) .card-image').click();
+    await page.waitForTimeout(300);
+    await page.evaluate(() => { Lightbox.idx = 0; Lightbox._render(); });
+    await page.waitForTimeout(150);
+  };
+  const fotosNoPedido = (page) => page.evaluate(() => AppState.currentPlace.imageUrls.length);
+  const exclusoesDeVerdade = (g) => g.saiu.filter((s) => s.nome === 'excluir-foto' && s.acao !== 'preparar').length;
+  const DESFAZERES = [
+    ['z no lightbox', async (g) => { await g.page.keyboard.press('z'); }],
+    ['Esc e depois z no card', async (g) => { await g.page.keyboard.press('Escape'); await g.page.keyboard.press('z'); }],
+    ['Tab até o Desfazer e Enter', async (g) => {
+      let achou = false;
+      for (let i = 0; i < 15 && !achou; i++) {
+        await g.page.keyboard.press('Tab');
+        achou = await g.page.evaluate(() => (document.activeElement || {}).id === 'undoBtn');
+      }
+      checa(achou, 'gestos/teclado: o Tab não chegou ao Desfazer, que está por cima do lightbox');
+      if (achou) await g.page.keyboard.press('Enter');
+    }],
+  ];
+  for (const [nome, desfazer] of DESFAZERES) {
+    const id = `gestos/teclado: excluir foto e desfazer — ${nome}`;
+    const g = await gestosPagina(DESKTOP, FOTO_EXCLUIR);
+    await abrirNaFotoA(g.page);
+    await g.page.locator('#lightboxDelete').click();
+    await g.page.waitForTimeout(200);
+    const excluida = await fotosNoPedido(g.page);
+    checa(excluida === 2, `${id}: PRÉ-CONDIÇÃO — a exclusão não tirou a foto da tela`, String(excluida));
+    await desfazer(g);
+    await g.page.waitForTimeout(3600);   // passa da janela: se não desfez, a exclusão SAIU
+    checa(await fotosNoPedido(g.page) === 3, `${id}: a foto não voltou`);
+    checa(exclusoesDeVerdade(g) === 0, `${id}: a exclusão SAIU pro Waze mesmo desfeita pelo teclado`);
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    // CONTROLE: sem desfazer, a exclusão sai — senão "zero exclusão" seria vácuo.
+    const id = 'gestos/teclado: CONTROLE — excluir sem desfazer';
+    const g = await gestosPagina(DESKTOP, FOTO_EXCLUIR);
+    await abrirNaFotoA(g.page);
+    await g.page.locator('#lightboxDelete').click();
+    await g.page.waitForTimeout(3600);
+    checa(exclusoesDeVerdade(g) === 1, `${id}: a exclusão não saiu nem com a janela vencida`, JSON.stringify(g.saiu));
+    await g.fechar();
+  }
+}
+
+// ── MAPA E PÍLULA: nada sai da caixa (auditoria de 2026-09-26) ─────────────
+//
+//  C5 · girar o aparelho (a caixa do mini-mapa ENCOLHE) deixava marcador fora
+//       dela — o observer só refazia quando a caixa crescia.
+//  C11 · um ponto longe derrubava do mini-mapa os que cabiam, e o aviso falava
+//       do ponto errado ("a posição proposta está a 5 m — fora deste mapa").
+//  C4 · o mapa ampliado de um pedido de 82 km abria no vazio entre os dois.
+//  C12 · no lightbox, a pílula do nome em edição estourava a tela com nome longo.
+{
+  const perto = (ll, m) => [ll[0] + m / 111320, ll[1]];
+  const marcasDentro = (page) => page.evaluate(() => {
+    const box = cardDaFrente().querySelector('.card-map');
+    const b = box.getBoundingClientRect();
+    const marcas = [...box.querySelectorAll('.card-map-marks .mapa-marca')].map((m) => m.getBoundingClientRect());
+    return { caixa: `${Math.round(b.width)}x${Math.round(b.height)}`, desenhadoPara: `${box.dataset.mapaW}x${box.dataset.mapaH}`,
+      n: marcas.length, fora: marcas.filter((m) => { const x = m.left + m.width / 2, y = m.top + m.height / 2;
+        return x < b.left + 2 || x > b.right - 2 || y < b.top + 2 || y > b.bottom - 2; }).length };
+  });
+  {
+    const id = 'mapa/C5: girar o aparelho';
+    const g = await gestosPagina({ viewport: { width: 412, height: 915 } },
+      [gestosDaFixture(0, 'gA', { imageUrls: [] }), gestosPedidoDeFoto('gB')]);
+    const antes = await marcasDentro(g.page);
+    for (const vp of [{ width: 915, height: 412 }, { width: 280, height: 653 }]) {
+      await g.page.setViewportSize(vp);
+      await doisQuadros(g.page); await doisQuadros(g.page);
+      await g.page.waitForTimeout(150);
+      const m = await marcasDentro(g.page);
+      checa(m.caixa !== antes.caixa, `${id}: PRÉ-CONDIÇÃO — a caixa do mapa não mudou de tamanho em ${vp.width}x${vp.height}`, JSON.stringify(m));
+      checa(m.n > 0 && m.fora === 0, `${id}: marcador FORA da caixa em ${vp.width}x${vp.height}`, JSON.stringify(m));
+      checa(m.desenhadoPara === m.caixa, `${id}: o mapa ficou desenhado pra outra caixa em ${vp.width}x${vp.height}`, JSON.stringify(m));
+    }
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  const f19 = FIXTURES_PAISES[19];
+  const centro = f19.mapa.centro;
+  {
+    const id = 'mapa/C11: proposta a 5 m e entrada a 30 km';
+    const g = await gestosPagina({ viewport: { width: 393, height: 852 } }, [gestosDaFixture(19, 'fA', { imageUrls: [],
+      mapa: { centro, proposto: perto(centro, 5), movidoM: 5, entradas: [{ ll: perto(centro, 30000), estado: 'nova', nome: 'Portão', distM: 30000 }] } })]);
+    const r = await g.page.evaluate(() => {
+      const box = cardDaFrente().querySelector('.card-map');
+      return { marcas: [...box.querySelectorAll('.card-map-marks .mapa-marca')].map((e) => e.className.replace('mapa-marca ', '')),
+        aviso: (box.querySelector('.mapa-fora') || {}).textContent || null };
+    });
+    checa(r.marcas.join() === 'mapa-atual,mapa-proposto', `${id}: a proposta a 5 m sumiu do mapa por causa da entrada longe`, JSON.stringify(r));
+    checa(/entrada/.test(r.aviso || '') && /30/.test(r.aviso || ''), `${id}: o aviso não fala da ENTRADA que ficou fora`, r.aviso);
+    await g.fechar();
+  }
+  {
+    const id = 'mapa/C4: mapa ampliado de um pedido de 82 km';
+    const g = await gestosPagina({ viewport: { width: 393, height: 852 } }, [gestosDaFixture(19, 'fL', { imageUrls: [],
+      mapa: { centro, proposto: perto(centro, 82000), movidoM: 82000, entradas: [] } })]);
+    await g.page.locator('#cardStack .place-card:not(.card-fundo) .card-map').click();
+    await g.page.waitForTimeout(600);
+    const naTela = () => g.page.evaluate(() => [...document.querySelectorAll('#mapaLbMarks .mapa-marca')].map((e) => {
+      const r = e.getBoundingClientRect();
+      return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
+    }));
+    const abriu = await naTela();
+    checa(abriu.length === 2 && abriu.every(Boolean), `${id}: o ampliado abriu sem os dois pontos na tela`, JSON.stringify(abriu));
+    await g.page.locator('#mapaLbCentrar').click();
+    await g.page.waitForTimeout(400);
+    const voltou = await naTela();
+    checa(voltou.length === 2 && voltou.every(Boolean), `${id}: o "Voltar ao pedido" voltou pro vazio`, JSON.stringify(voltou));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    const id = 'mapa/C12: pílula do nome em edição no Fold, em francês';
+    const longo = gestosPedidoDeFoto('uN', ['foto-a']);
+    longo.name = 'Aeroport Josep Tarradellas Barcelona - El Prat Terminal T1';
+    const g = await gestosPagina({ viewport: { width: 280, height: 653 }, hasTouch: true, isMobile: true }, [longo], { lang: 'fr' });
+    await g.page.evaluate(() => { const p = AppState.currentPlace; openLightbox(p.imageUrls, 0, -1, p.name, false, p); });
+    await g.page.waitForTimeout(400);
+    await g.page.evaluate(() => abrirEdicaoNome());
+    await g.page.waitForTimeout(300);
+    const m = await g.page.evaluate(() => {
+      const b = document.getElementById('lightboxNomeBtn').getBoundingClientRect();
+      const t = document.getElementById('lightboxNomeTxt');
+      // "Longo o bastante" é o texto INTEIRO não caber na tela — não "está
+      // cortado", que é justamente o que o conserto faz (sem ele a pílula cresce).
+      return { esq: Math.round(b.left), dir: Math.round(b.right), tela: innerWidth, largura: t.scrollWidth,
+        editando: document.getElementById('lightboxNome').classList.contains('editando') };
+    });
+    checa(m.editando && m.largura > m.tela - 24, `${id}: PRÉ-CONDIÇÃO — não entrou em edição ou o nome não é longo o bastante pra medir`, JSON.stringify(m));
+    checa(m.esq >= 0 && m.dir <= m.tela, `${id}: a pílula do nome estourou a tela`, JSON.stringify(m));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -6208,5 +6707,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
+  + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
+  + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, e a pílula do nome em edição no Fold)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

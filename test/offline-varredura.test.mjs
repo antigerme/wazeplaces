@@ -80,7 +80,7 @@ test('CONTROLE: com a REDE parada (nada anda), o resultado é PARCIAL, e as tent
 test('offlineBaixar: tile 4xx é "definitivo", 5xx e rede caída são falha de REDE (tenta de novo)', async () => {
   const guardados = [];
   const deps = {
-    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles',
+    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000,
     caches: { open: async () => ({ put: async (u) => guardados.push(u) }) },
     Image: class {},
   };
@@ -106,7 +106,7 @@ test('treino: a varredura NÃO grava nem baixa a fila de exemplos', async () => 
   assert.equal(st.varrendo, false);
 });
 
-function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false } = {}) {
+function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFila = null } = {}) {
   const puts = [];
   const real = [{ venueID: 'real-1' }, { venueID: 'real-2' }];
   const exemplos = [{ venueID: 'exemplo', _treino: true }];
@@ -126,6 +126,8 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false } = {}) {
       };
     },
     offlinePodarPousos: () => {}, dfato: () => {},
+    // O LUGAR da fila (ver `filaDeOnde`): a busca que a trouxe, ou o de agora.
+    filaDeOnde: lugarDaFila, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -193,6 +195,7 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pen
       return tx;
     } }),
     offlinePodarPousos: () => {}, dfato: () => {},
+    filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -206,4 +209,132 @@ test('offlineDB: abrir a base tem teto (o IndexedDB do WebKit às vezes não res
   const chaves = Object.keys(deps);
   const abrir = new Function(...chaves, fatiar('offlineDB') + '\nreturn offlineDB;')(...chaves.map((k) => deps[k]));
   await assert.rejects(Promise.race([abrir(), new Promise((_, n) => setTimeout(() => n(new Error('PENDUROU')), 500))]), /timeout/);
+});
+
+// ── O4: a fila guardada é de UM LUGAR (auditoria de 2026-09-26) ─────────────
+// Ela não dizia de que região nem de que país era: trocar de região, ver a
+// busca nova vir vazia e reabrir sem rede mostrava a fila da região VELHA sob o
+// filtro novo — e o ✕ saía pro servidor da região nova, voltava "não
+// encontrado" e contava como feito (medido no navegador, p10).
+test('O4: a fila guardada leva o LUGAR da busca que a trouxe (e o de agora, sem busca)', async () => {
+  const a = gravarCom({ lugarDaFila: { regiao: 'na', pais: '235' } });
+  assert.equal(await a.gravar(), true);
+  assert.equal(a.puts[0].regiao, 'na', 'a fila guardada não diz de que região é');
+  assert.equal(a.puts[0].pais, '235', 'a fila guardada não diz de que país é');
+  const b = gravarCom();
+  await b.gravar();
+  assert.deepEqual([b.puts[0].regiao, b.puts[0].pais], ['row', '30']);
+});
+
+function reabrir({ guardada, agora }) {
+  const log = [];
+  const AppState = { queue: [], hasMore: false, loadError: true, serverTotal: 0 };
+  const deps = {
+    AppState, navigator: { onLine: false }, offlineLigado: () => true,
+    offlineLerFila: async () => guardada, offlineLerJanela: async () => null,
+    lugarAgora: () => agora, dfato: (k) => log.push(k),
+    offlineEsquecerFilaDeOutroLugar: () => log.push('esqueceu'),
+    semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
+    pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
+    updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => log.push('card'),
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, `let offlineJanelaServida = null, filaDeOnde = null;
+    ${fatiar('mesmoLugar')}\n${fatiar('offlineTentarAbrirSemRede')}
+    return { abrir: offlineTentarAbrirSemRede, onde: () => filaDeOnde };`)(...chaves.map((k) => deps[k]));
+  return { app, AppState, log };
+}
+const GUARDADA = (lugar) => ({ t: Date.now(), desde: Date.now(), ...lugar, places: [{ venueID: 'v1', updateRequestID: 'u1' }] });
+
+test('O4: a reabertura sem rede RECUSA a fila de OUTRO lugar (e a esquece) — e abre a do mesmo', async () => {
+  const outra = reabrir({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'na', pais: '235' } });
+  assert.equal(await outra.app.abrir(), false, 'a fila da região velha abriu sob o filtro novo');
+  assert.deepEqual(outra.AppState.queue, [], 'a fila de outro lugar entrou na tela');
+  assert.ok(outra.log.includes('esqueceu') && outra.log.includes('offline.outroLugar'));
+  // O PAÍS também: mesma região, outro país.
+  const pais = reabrir({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'row', pais: '73' } });
+  assert.equal(await pais.app.abrir(), false, 'a fila de outro país abriu');
+  // Sem o lugar (versão anterior): não há como saber de onde é.
+  const velha = reabrir({ guardada: GUARDADA({}), agora: { regiao: 'row', pais: '30' } });
+  assert.equal(await velha.app.abrir(), false, 'a fila sem lugar abriu — pode ser de outra região');
+  // CONTROLE: a do mesmo lugar abre (senão "recusar tudo" passaria no teste).
+  const mesma = reabrir({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'row', pais: '30' } });
+  assert.equal(await mesma.app.abrir(), true, 'CONTROLE: a fila do mesmo lugar não abriu');
+  assert.deepEqual(mesma.AppState.queue.map((p) => p.venueID), ['v1']);
+  assert.deepEqual(mesma.app.onde(), { regiao: 'row', pais: '30' }, 'a fila reaberta não sabe de onde é');
+});
+
+test('O4: trocar de lugar ESQUECE a fila guardada de outro lugar — e só ela, e só com o offline ligado', async () => {
+  const rodar = ({ guardada, agora, ligado = true }) => {
+    const apagou = [];
+    let abriu = 0;
+    const deps = {
+      offlineLigado: () => ligado, lugarAgora: () => agora, dfato: () => {}, OFFLINE_STORE: 'fila',
+      offlineDB: async () => { abriu++; return { close() {}, transaction: () => {
+        const tx = { objectStore: () => ({
+          get: () => { const r = {}; setTimeout(() => { r.result = guardada; r.onsuccess(); setTimeout(() => tx.oncomplete()); }); return r; },
+          delete: (k) => apagou.push(k),
+        }) };
+        return tx;
+      } }; },
+    };
+    const chaves = Object.keys(deps);
+    const f = new Function(...chaves, `${fatiar('mesmoLugar')}\n${fatiar('offlineEsquecerFilaDeOutroLugar')}
+      return offlineEsquecerFilaDeOutroLugar;`)(...chaves.map((k) => deps[k]));
+    return f().then(() => ({ apagou, abriu }));
+  };
+  const trocou = await rodar({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'na', pais: '235' } });
+  assert.deepEqual(trocou.apagou, ['fila'], 'a fila da região velha ficou guardada');
+  const mesmo = await rodar({ guardada: GUARDADA({ regiao: 'na', pais: '235' }), agora: { regiao: 'na', pais: '235' } });
+  assert.deepEqual(mesmo.apagou, [], 'apagou a fila que a busca do lugar NOVO acabou de gravar');
+  const desligado = await rodar({ guardada: null, agora: { regiao: 'na', pais: '235' }, ligado: false });
+  assert.equal(desligado.abriu, 0, 'abriu (e CRIOU) a base de quem não ligou o offline');
+  // Todo caminho que troca de lugar zera a fila por `resetQueue`, e a busca
+  // anota de onde é o que trouxe.
+  const reset = fatiar('resetQueue');
+  assert.match(reset, /filaDeOnde = null;\s*offlineEsquecerFilaDeOutroLugar\(\);/,
+    'a fila nova não zerou o lugar nem esqueceu a guardada de outro lugar');
+  const busca = fatiar('fetchNextPage');
+  const iLugar = busca.indexOf('const lugarDaBusca = lugarAgora();');
+  assert.ok(iLugar > 0 && iLugar < busca.indexOf('await API.fetchPlaces('), 'o lugar da busca tem que ser o do PEDIDO');
+  assert.match(busca, /registrarEntradaNaFila\(newPlaces\);\s*filaDeOnde = lugarDaBusca;/,
+    'o que a busca traz não diz de que lugar é');
+});
+
+// ── O9: a varredura tem TETO de tempo (auditoria de 2026-09-26) ──────────────
+// Portal cativo, sinal indo e voltando: a requisição sai e nada volta. O
+// `fetch` do tile e a `<img>` da foto não tinham teto, então a varredura ficava
+// "varrendo" pra sempre e todo gatilho novo só marcava `offlinePedidaDeNovo`
+// (medido no navegador, p9: 60 s depois, ainda varrendo).
+test('O9: download PENDURADO estoura o teto — tile e foto — e conta como falha de rede (`teto`)', async () => {
+  let cancelouFoto = false;
+  class ImagemPendurada {
+    set src(v) { if (v === '') cancelouFoto = true; }
+  }
+  const deps = { offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30,
+    caches: { open: async () => ({ put: async () => {} }) }, Image: ImagemPendurada };
+  const chaves = Object.keys(deps);
+  // O `fetch` pendurado só termina se o pedido for ABORTADO — como na rede de verdade.
+  const pendurado = (u, opts) => new Promise((_, falha) => {
+    if (opts && opts.signal) opts.signal.addEventListener('abort', () => falha(new DOMException('abortado', 'AbortError')));
+  });
+  const baixar = new Function(...chaves, 'fetch', fatiar('offlineBaixar') + '\nreturn offlineBaixar;')(...chaves.map((k) => deps[k]), pendurado);
+  const comTeto = (p) => Promise.race([p, new Promise((ok) => setTimeout(() => ok('PENDUROU'), 800))]);
+  assert.equal(await comTeto(baixar('https://www.waze.com/row-tiles/live/base/1', true)), 'teto',
+    'o tile pendurado prendeu a varredura (sem teto)');
+  assert.equal(await comTeto(baixar('https://venue-image.waze.com/f.jpg', false)), 'teto',
+    'a foto pendurada prendeu a varredura (sem teto)');
+  assert.ok(cancelouFoto, 'desistir da foto não CANCELOU o download (o src segue pendurado)');
+});
+
+test('O9: uma RODADA de downloads pendurados para a varredura — "parcial", sem gastar o teto em cada item', async () => {
+  const itens = Array.from({ length: 20 }, (_, i) => 'tile-' + i);
+  const { st, tentativas } = await varrer(itens, () => 'teto');
+  assert.equal(st.resultado, 'parcial');
+  const total = [...tentativas.values()].reduce((a, b) => a + b, 0);
+  assert.ok(total <= 2, `a varredura seguiu com a rede pendurada: ${total} downloads (cada um gasta o teto inteiro)`);
+  // CONTROLE: falha de rede IMEDIATA (não pendurada) segue a regra de sempre —
+  // cada item tentado até o teto de tentativas, sem parar na primeira rodada.
+  const rede = await varrer(itens.slice(0, 4), () => false);
+  assert.ok([...rede.tentativas.values()].every((n) => n >= 2), 'a falha imediata passou a parar a varredura como a pendurada');
 });

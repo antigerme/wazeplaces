@@ -347,10 +347,14 @@
                 <!-- O portão é do SERVIDOR (isUserAllowed), e até agora só se
                      descobria depois de instalar a extensão, entrar no WME e voltar:
                      o pior momento possível pra saber que não dá. O número sai de
-                     `NIVEL_MINIMO_EXIBIDO` via setI18nVars, nunca escrito na frase. -->
-                <p class="auth-requisito text-xs text-slate-700 dark:text-slate-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-400/30 rounded-xl p-3 mb-4 leading-relaxed" data-i18n-html="auth.requisito">Quem pode entrar: editor nível 3+ que seja Area Manager, ou staff do Waze.</p>
+                     `NIVEL_MINIMO_EXIBIDO` via setI18nVars, nunca escrito na frase.
+                     O texto de RESERVA daqui (o que se vê antes de o JS chegar)
+                     dizia "nível 3+" meses depois de o portão baixar pra L2+AM: o
+                     test/entrada.test.mjs cobra que a reserva da tela de entrada
+                     seja o próprio dicionário pt, com esse número. -->
+                <p class="auth-requisito text-xs text-slate-700 dark:text-slate-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-400/30 rounded-xl p-3 mb-4 leading-relaxed" data-i18n-html="auth.requisito"><b>Quem pode entrar:</b> editor <b>nível 2+</b> que seja <b>Area Manager</b>, ou staff do Waze.</p>
 
-                <p class="auth-precondicao hidden text-sm text-slate-600 dark:text-slate-300 bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3 mb-4 leading-relaxed" data-i18n="auth.needsComputer">Primeira vez? A sessão começa num computador.</p>
+                <p class="auth-precondicao hidden text-sm text-slate-600 dark:text-slate-300 bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3 mb-4 leading-relaxed" data-i18n="auth.needsComputer">Primeira vez? A sessão começa num computador: entre lá, toque em Ajuda › Conectar outro aparelho e aponte a câmera daqui para o QR.</p>
 
                 <div class="auth-options">
                     <div class="auth-opt-ext bg-gradient-to-r from-purple-50 to-cyan-50 dark:from-purple-500/10 dark:to-cyan-500/10 border border-purple-200 dark:border-purple-500/30 rounded-2xl p-5">
@@ -394,14 +398,14 @@
                     <button id="uploadBtn" type="button" class="auth-opt-upload group w-full relative overflow-hidden bg-gradient-to-r from-cyan-700 to-blue-700 hover:from-cyan-600 hover:to-blue-600 text-white font-semibold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-cyan-500/25">
                         <span class="relative z-10 flex items-center justify-center space-x-2">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                            <span data-i18n="auth.uploadBtn">Fazer Upload do cookies.txt</span>
+                            <span data-i18n="auth.uploadBtn">Fazer upload do cookies.txt</span>
                         </span>
                     </button>
                     <input type="file" id="fileInput" accept=".txt" class="hidden auth-opt-hidden">
 
                     <button id="pasteBtn" type="button" class="auth-opt-paste w-full bg-slate-50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 flex items-center justify-center space-x-2 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700">
                         <svg class="w-5 h-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-                        <span data-i18n="auth.pasteBtn">Colar Conteúdo dos Cookies</span>
+                        <span data-i18n="auth.pasteBtn">Colar conteúdo dos cookies</span>
                     </button>
                     <!-- Terceiro caminho: quem está no celular, onde copiar cookies é
                          inviável. Loga uma vez no computador e traz a sessão por código. -->
@@ -442,7 +446,7 @@
                 </div>
             </div>
 
-            <button id="byAuthor" type="button" aria-label="Perfil do autor (@antigerme) no Waze Map Editor" data-i18n-aria="auth.byAuthor.aria" class="w-full min-h-[44px] text-slate-600 hover:text-cyan-700 font-medium text-sm transition-colors text-center pb-8 dark:text-slate-400">
+            <button id="byAuthor" type="button" aria-label="By AG — perfil do autor (@antigerme) no Waze Map Editor" data-i18n-aria="auth.byAuthor.aria" class="w-full min-h-[44px] text-slate-600 hover:text-cyan-700 font-medium text-sm transition-colors text-center pb-8 dark:text-slate-400">
                 By AG
             </button>
         </div>
@@ -557,8 +561,8 @@
                 </div>
                 <p id="accessDeniedMessage" class="text-sm text-slate-600 mb-3 dark:text-slate-300"></p>
                 <div id="accessDeniedProfile" class="hidden text-sm bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 dark:bg-slate-900 dark:border-slate-700"></div>
-                <p class="text-xs text-slate-500 mb-5 dark:text-slate-400" data-i18n="modal.accessDenied.help">Se você acredita que deveria ter acesso, peça para verificar suas permissões no Waze Map Editor (rank e status de Area Manager).</p>
-                <button id="closeAccessDenied" type="button" class="w-full min-h-[48px] bg-slate-800 hover:bg-slate-700 text-white font-semibold py-2.5 px-4 rounded-lg transition" data-i18n="modal.accessDenied.dismiss">Entendi</button>
+                <p class="text-xs text-slate-500 mb-5 dark:text-slate-400" data-i18n="modal.accessDenied.help">Se você acredita que deveria ter acesso, peça para verificar suas permissões no Waze Map Editor (nível e status de Area Manager).</p>
+                <button id="closeAccessDenied" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="modal.accessDenied.dismiss">Entendi</button>
             </div>
         </div>
 
@@ -878,7 +882,7 @@
                 <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.enter.body">No aparelho onde você já está logado, abra a Ajuda e toque em "Conectar outro aparelho". Digite aqui o código de 6 caracteres:</p>
 
                 <label for="pairCodeInput" class="sr-only" data-i18n="pair.enter.title">Entrar com um código</label>
-                <input id="pairCodeInput" type="text" inputmode="latin" autocapitalize="characters" autocomplete="one-time-code" maxlength="7" placeholder="ABC-123" data-i18n-ph="pair.enter.placeholder"
+                <input id="pairCodeInput" type="text" inputmode="latin" autocapitalize="characters" autocomplete="one-time-code" placeholder="ABC-123" data-i18n-ph="pair.enter.placeholder"
                        class="w-full min-h-[56px] text-center text-3xl font-black tracking-[0.2em] uppercase bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 mb-3 text-slate-800 dark:text-slate-100">
                 <p id="pairEnterError" class="hidden text-xs text-rose-600 dark:text-rose-400 mb-3" role="alert"></p>
 
@@ -1203,7 +1207,7 @@
                             <p class="text-sm text-slate-600 dark:text-slate-300 mb-3" data-i18n="install.invite">🚗💨 Bota o Waze Places na tela inicial: abre num toque e sobra mais tela pra foto.</p>
                             <button id="installInviteBtn" type="button" class="hidden w-full min-h-[48px] bg-cyan-600 hover:bg-cyan-700 text-white font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
-                                <span data-i18n="install.action">Instalar na tela inicial</span>
+                                <span data-i18n="install.action">Instalar o aplicativo</span>
                             </button>
                             <!-- iOS não tem beforeinstallprompt: no Safari a instalação é
                                  manual. Sem estas duas linhas, quem usa iPhone não tem
@@ -1243,7 +1247,11 @@
                     <div class="place-card absolute inset-0 bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden cursor-grab active:cursor-grabbing will-change-transform dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
                         <div class="card-body h-full flex flex-col relative z-10">
                             <div class="card-photo grow shrink-[30] basis-0 min-h-[9rem] max-h-[55%] bg-slate-100 relative overflow-hidden dark:bg-slate-800">
-                                <img class="card-image w-full h-full object-cover hidden" alt="">
+                                <!-- `draggable="false"`: sem ele, arrastar o card com o MOUSE pela foto
+                                     começava o arrastar NATIVO de imagem, que engole o `mouseup` — o card
+                                     seguia o cursor sem botão, e o clique seguinte em qualquer lugar
+                                     cometia a ação (auditoria de 2026-09-26; ver `enableSwipeOnCard`). -->
+                                <img class="card-image w-full h-full object-cover hidden" alt="" draggable="false">
                                 <div class="card-image-new-border hidden absolute inset-0 ring-4 ring-amber-400 ring-inset pointer-events-none z-20"></div>
                                 <div class="card-image-new-badge hidden absolute top-1 left-2 z-30 text-3xl leading-none select-none pointer-events-none" style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido" data-i18n-title="card.newPhoto.title">✨</div>
                                 <!-- Mini-mapa: mais um slide do MESMO carrossel da foto, então
@@ -1603,9 +1611,12 @@
                     </div>
                     <p class="text-[0.6875rem] text-slate-500 mt-2 dark:text-slate-400" data-i18n="help.howToProcess.note">Use os botões do card, mouse/dedo, setas do teclado, ou arraste o card.</p>
                     <!-- Reabre o aviso de primeira vez. Quem fechou sem ler não fica
-                         sem caminho de volta, e isso não custa espaço no card. -->
+                         sem caminho de volta, e isso não custa espaço no card.
+                         Só com sessão, como o "Praticar": o aviso fala dos botões do
+                         CARD, e sem sessão o "Quero treinar antes" dele não fazia nada
+                         (o treino exige sessão) — auditoria de 2026-09-26. -->
                     <button id="abrirTreino" data-so-com-sessao type="button" class="mt-3 min-h-[44px] w-full text-sm font-semibold text-amber-700 hover:text-amber-800 hover:underline dark:text-amber-300" data-i18n="treino.abrir">Praticar sem enviar nada (modo treino)</button>
-                    <button id="reverComoFunciona" type="button" class="mt-3 min-h-[44px] w-full text-sm font-semibold text-cyan-700 hover:text-cyan-800 hover:underline dark:text-cyan-300" data-i18n="help.howToProcess.rever">Ver de novo &#8220;Como funciona&#8221;</button>
+                    <button id="reverComoFunciona" data-so-com-sessao type="button" class="mt-3 min-h-[44px] w-full text-sm font-semibold text-cyan-700 hover:text-cyan-800 hover:underline dark:text-cyan-300" data-i18n="help.howToProcess.rever">Ver de novo &#8220;Como funciona&#8221;</button>
                 </div>
 
                 <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 dark:bg-slate-900 dark:border-slate-700">
@@ -1623,7 +1634,12 @@
                 <div>
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.howToUse.title">Como usar:</h4>
                     <ol class="list-decimal list-inside space-y-1 text-sm">
-                        <li data-i18n-html="help.howToUse.step1"><strong>Mais fácil:</strong> instale a extensão <b>WazePlaces Rapid Access</b> (Chrome) e faça login direto do WME — sem copiar cookies.</li>
+                        <!-- A extensão só onde ela instala (a mesma regra da tela de
+                             entrada, `com-extensao`); e o código logo depois dela, que no
+                             celular é o ÚNICO caminho que funciona e a Ajuda não citava —
+                             lá ele vira o passo 1 (auditoria de 2026-09-26). -->
+                        <li class="ajuda-passo-ext" data-i18n-html="help.howToUse.step1"><strong>Mais fácil:</strong> instale a extensão <b>WazePlaces Rapid Access</b> (Chrome) e faça login direto do WME — sem copiar cookies.</li>
+                        <li class="ajuda-passo-codigo" data-i18n-html="help.howToUse.codigo"><strong>Pelo código:</strong> num aparelho onde você já entrou, toque em Ajuda › Conectar outro aparelho e aponte a câmera deste para o QR — sem câmera, toque lá em “Sem câmera? Mostrar um código” e digite-o aqui em “Entrar com um código”.</li>
                         <li data-i18n="help.howToUse.step2">Ou, manualmente: faça login no Waze Map Editor no navegador</li>
                         <li data-i18n="help.howToUse.step3">Exporte seus cookies usando uma extensão de navegador</li>
                         <li data-i18n-html="help.howToUse.step4">Faça upload ou cole o conteúdo do <code>cookies.txt</code></li>
@@ -1671,7 +1687,7 @@
                 <div>
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.privacy.title">Privacidade e dados:</h4>
                     <ul class="list-disc list-inside space-y-1.5 text-sm">
-                        <li data-i18n="help.privacy.server">No servidor fica só uma coisa: os seus cookies do Waze, criptografados (AES-256-GCM). Nada além disso.</li>
+                        <li data-i18n="help.privacy.server">No servidor ficam os seus cookies do Waze, criptografados (AES-256-GCM). A única outra coisa é passageira: ao tocar na lixeira de uma foto, a lista das fotos daquele local (com quem enviou cada uma) fica lá por até 1 minuto, sem criptografia, pra a exclusão sair na hora.</li>
                         <li data-i18n-html="help.privacy.zeroKnowledge">E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera o app. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.</li>
                         <li data-i18n="help.privacy.notStored">Os pedidos NÃO são guardados: nome, foto, endereço e coordenada de place existem só na memória, enquanto o app está aberto. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, as capturas ficam até você baixar o diagnóstico, no máximo 24 h.</li>
                         <li data-i18n="help.privacy.retention">Prazo: 21 dias sem uso, ou até você tocar em “Sair” — o que vier primeiro. Código de pareamento dura 5 minutos e é de uso único.</li>
@@ -1698,7 +1714,7 @@
                          decide a hora. -->
                     <button id="installAppBtn" type="button" class="hidden w-full min-h-[48px] bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
-                        <span data-i18n="help.install.label">Instalar o aplicativo</span>
+                        <span data-i18n="install.action">Instalar o aplicativo</span>
                     </button>
                     <button id="logoutBtn" data-so-com-sessao type="button" class="w-full min-h-[48px] bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>

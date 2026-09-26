@@ -1167,3 +1167,28 @@ test('a cópia da página e as capturas saem SEM o segredo do pareamento (o do Q
   assert.match(fatiarFn(semCom, 'dlogCapturar'), /if \(c\.id === 'pairQr'\) return \{ classe: c\.className, omitido: 'QR do pareamento' \};/,
     'a captura voltou a levar o QR do pareamento');
 });
+
+test('o resumo não conta o "já tratado" como falha (relatório v10)', () => {
+  // Auditoria em produção de 2026-09-26: a única "falha" de 10 chamadas era um ✕
+  // que o Waze respondeu "já tratado" — pro app, o pedido resolvido.
+  const helpers = fatiarFn(semCom, 'chamadaJaTratada') + '\n' + fatiarFn(semCom, 'chamadaFalhou');
+  const { chamadaJaTratada, chamadaFalhou } = new Function(helpers + '\nreturn { chamadaJaTratada, chamadaFalhou };')();
+  const ja = { ok: false, errorCategory: 'already_processed' };
+  const naoAchou = { ok: false, errorCategory: 'not_found' };
+  const rede = { ok: false, errorCategory: 'transient' };
+  const semCategoria = { ok: false };
+  const ok = { ok: true };
+  assert.equal(chamadaFalhou(ja), false, '"já tratado" contado como falha');
+  assert.equal(chamadaFalhou(naoAchou), false, '"não encontrado" (outro editor resolveu) contado como falha');
+  assert.equal(chamadaFalhou(rede), true, 'a falha de rede deixou de contar');
+  assert.equal(chamadaFalhou(semCategoria), true, 'falha sem categoria deixou de contar');
+  assert.equal(chamadaFalhou(ok), false);
+  assert.equal(chamadaJaTratada(ja) && chamadaJaTratada(naoAchou), true);
+  assert.equal(chamadaJaTratada(rede) || chamadaJaTratada(ok), false);
+  const corpo = fatiarFn(semCom, 'diagCorpo');
+  assert.match(corpo, /falhas: \(API\.chamadas \|\| \[\]\)\.filter\(chamadaFalhou\)\.length,/,
+    'o `resumo.falhas` voltou a contar o "já tratado"');
+  assert.match(corpo, /jaTratadas: \(API\.chamadas \|\| \[\]\)\.filter\(chamadaJaTratada\)\.length,/);
+  assert.match(corpo, /rotasQueFalharam: \[\.\.\.new Set\(\(API\.chamadas \|\| \[\]\)\.filter\(chamadaFalhou\)/,
+    '`rotasQueFalharam` voltou a listar a rota do "já tratado"');
+});

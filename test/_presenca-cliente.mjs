@@ -139,7 +139,7 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
   const corpo = `${DO_APP}\n${FONTE}\nreturn { ${nomes.join(', ')} };`;
   const P = new Function(...globais, corpo)(...globais.map((g) => escopo[g]));
   // Todos os elementos que a presença consulta nascem ESCONDIDOS, como no HTML.
-  for (const id of ['presencaPill', 'presencaModal', 'conversaModal', 'conversaAnexo', 'conversaCardBtn', 'presencaIconMsg', 'conversaEstado']) $(id).classList.add('hidden');
+  for (const id of ['presencaPill', 'presencaModal', 'conversaModal', 'pedidoModal', 'conversaAnexo', 'conversaCardBtn', 'presencaIconMsg', 'conversaEstado']) $(id).classList.add('hidden');
   return {
     P, $, els, armazenado, chamadas, timers, relogio, AppState, API, doc, win, escopo,
     // Roda os timers pendentes (os que existem AGORA), em ordem de prazo.

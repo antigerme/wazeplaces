@@ -263,3 +263,65 @@ test('a <img> recebe object URL, e as TRÊS cópias da CSP liberam blob: em img-
     assert.match(img[1], /\bblob:/, `${arquivo}: img-src sem blob: — a imagem do Resumo chega quebrada`);
   }
 });
+
+// ── 6. O QUE A IMAGEM DIZ: plural, a data, o perfil que falta e o `alt` ─────
+// (auditoria de 2026-09-25). Os textos saem de `textosDoResumo`, pura, e
+// aqui passam pelo dicionário de VERDADE.
+const I18N = new Function('window', 'navigator', 'localStorage', 'document',
+  readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\nreturn { t, setLang };')(
+  {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
+const textosDoResumo = new Function('t', fatiarFuncao('textosDoResumo') + '\nreturn textosDoResumo;')(I18N.t);
+const LOCALE = { pt: 'pt-BR', en: 'en', es: 'es', fr: 'fr' };
+function textos(lang, d, perfil) {
+  I18N.setLang(lang);
+  try { return textosDoResumo(d, perfil, LOCALE[lang]); } finally { I18N.setLang('pt'); }
+}
+const mes = (over) => Object.assign({ ano: 2026, mesIdx: 8, diasNoMes: 30, total: 50, lidos: 30, rejeitados: 20,
+  diasAtivos: 1, forte: { dia: 21, n: 50 } }, over);
+const PERFIL = { userName: 'wazer_teste', rank: 5, isAreaManager: true, isStaff: false };
+
+test('Resumo: com 1, a imagem diz no SINGULAR — "1 rejeitado", "1 lido", "1 pedido do mapa" (H16)', () => {
+  const um = mes({ total: 2, rejeitados: 1, lidos: 1, forte: { dia: 21, n: 1 } });
+  const esperado = { pt: ['rejeitado', 'lido'], en: ['rejected', 'read'], es: ['rechazada', 'leída'], fr: ['rejetée', 'lue'] };
+  for (const [lang, [rej, lid]] of Object.entries(esperado)) {
+    const { tx } = textos(lang, um, PERFIL);
+    assert.deepEqual([tx.tiles[0][1], tx.tiles[1][1]], [rej, lid], `${lang}: "1 ${tx.tiles[0][1]}" / "1 ${tx.tiles[1][1]}"`);
+  }
+  const total1 = { pt: 'pedido do mapa', en: 'map request', es: 'solicitud del mapa', fr: 'demande de la carte' };
+  for (const [lang, v] of Object.entries(total1)) {
+    assert.equal(textos(lang, mes({ total: 1, lidos: 1, rejeitados: 0 }), PERFIL).tx.pedidos, v, `${lang}: total 1 com o plural`);
+  }
+  // CONTROLE: com mais de 1 (e com 0), o plural de sempre.
+  const { tx } = textos('pt', mes(), PERFIL);
+  assert.deepEqual([tx.pedidos, tx.tiles[0][1], tx.tiles[1][1]], ['pedidos do mapa', 'rejeitados', 'lidos']);
+  assert.equal(textos('pt', mes({ rejeitados: 0 }), PERFIL).tx.tiles[0][1], 'rejeitados', '0 é plural');
+});
+
+test('Resumo: o dia mais forte leva o MÊS, no formato do locale — nada de "21 Monday" (H16)', () => {
+  const nomes = { pt: 'setembro', en: 'September', es: 'septiembre', fr: 'septembre' };
+  for (const [lang, nomeDoMes] of Object.entries(nomes)) {
+    const v = textos(lang, mes(), PERFIL).tx.forteValor;
+    assert.ok(v.includes('21') && v.includes(nomeDoMes), `${lang}: "${v}" não traz o dia e o mês`);
+  }
+  assert.doesNotMatch(textos('en', mes(), PERFIL).tx.forteValor, /^\d+ \w+day$/, 'o inglês voltou a dizer "21 Monday"');
+});
+
+test('Resumo: SEM perfil a imagem não inventa nome nem nível (H5) — e com perfil é a de sempre', () => {
+  const sem = textos('pt', mes(), null).tx;
+  assert.equal(sem.limpou, '', `sem perfil a imagem dizia "${sem.limpou}" — o " limpou" sem ninguém`);
+  assert.equal(sem.editor, '', `sem perfil a imagem afirmava "${sem.editor}" — nível que a pessoa pode não ter`);
+  // CONTROLE: com perfil, o desenho não muda.
+  const com = textos('pt', mes(), PERFIL).tx;
+  assert.equal(com.limpou, 'wazer_teste limpou');
+  assert.equal(com.editor, 'Editor L6 · AM');
+});
+
+test('Resumo: o `alt` da imagem diz o que ela diz, COM os números (H19)', () => {
+  const { alt } = textos('pt', mes(), PERFIL);
+  assert.equal(alt, 'Resumo do mês — setembro 2026: wazer_teste limpou 50 pedidos do mapa. 20 rejeitados, 30 lidos.'
+    + ' Dia mais forte: 21 de setembro (50). Dias ativos: 1 de 30.');
+  const semPerfil = textos('pt', mes({ total: 1, lidos: 1, rejeitados: 0, forte: { dia: 21, n: 1 } }), null).alt;
+  assert.match(semPerfil, /: 1 pedido do mapa\. 0 rejeitados, 1 lido\./, `sem perfil e com 1: "${semPerfil}"`);
+  // E a folha usa esse alt, não o "Resumo do mês" genérico.
+  assert.match(fatiarFuncao('abrirResumoDoMes'), /img\.alt = r\.alt \|\|/, 'a imagem da folha voltou ao alt sem números');
+});

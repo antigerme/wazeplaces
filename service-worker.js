@@ -1,7 +1,7 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026092505';
+const CACHE_NAME = 'waze-places-2026092601';
 // Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
 // ver a nota no `activate`.
 const TILES_CACHE = 'waze-places-tiles';
@@ -54,6 +54,16 @@ function hidratarTiles() {
     tilesHidratados = true;
   })();
   return hidratacao;
+}
+// Espera a leitura MAIS NOVA da lista. Esperar só a promessa capturada no
+// pedido não basta (auditoria de 2026-09-26, O11): pedido durante a leitura N,
+// com a N+1 começando antes de a N terminar — a N sai cedo (geração velha) sem
+// tocar na lista, e o tile era decidido contra a lista VELHA (ou vazia, logo
+// depois de acordar) e ia à rede, que sem sinal não há. Relê `hidratacao` (a
+// mais nova) até a lista estar pronta; o teto de voltas é só cinto — por
+// construção a leitura mais nova sempre termina marcando a lista pronta.
+function esperarListaMaisNova(voltas = 0) {
+  return hidratacao.then(() => (tilesHidratados || voltas >= 5 ? undefined : esperarListaMaisNova(voltas + 1)));
 }
 // EM TODA PARTIDA do worker — não só no `activate`. Service worker é EFÊMERO:
 // o Chrome o encerra depois de ~30s ocioso e o recria no próximo evento, com
@@ -182,6 +192,20 @@ self.addEventListener('fetch', event => {
     // aqui (nunca respondemos por domínio externo qualquer, mesmo que algo
     // estranho entre no cache), e a lista mantém a interceptação ADITIVA.
     if (/-tiles\/live\/base\//.test(url.pathname)) {
+      // Só o MAPA sai do cache: a `<img>` do tile (destino `image`), que é quem o
+      // desenha. O `fetch` da própria VARREDURA (destino vazio) passa direto
+      // (auditoria de 2026-09-26, O7): respondido daqui, o tile guardado nunca
+      // mais ia à rede — a "revalidação barata com 304" de cada janela não
+      // acontecia, e o cache ficava com o tile da primeira varredura pra sempre.
+      // A marca é o DESTINO, e não o modo de cache do pedido: MEDIDO, com o
+      // cache HTTP desligado (DevTools, ou qualquer rota do Playwright) a
+      // própria `<img>` chega aqui com `cache: 'reload'` — tomado como marca, o
+      // mapa guardado sumiria justamente de quem testa. A `<img>` COM rede segue
+      // saindo do cache, e isso é decidido: o worker é ESTRITAMENTE ADITIVO (o
+      // que ele devolve não falha), no "lie-fi" o mapa aparece na hora em vez de
+      // pendurar, e quem mantém o guardado em dia é a varredura de cada janela,
+      // que agora revalida de verdade.
+      if (event.request.destination !== 'image') return;
       // `caches.match` com o nome, e não `open` + `match`: o `open` CRIARIA o
       // cache que o "Sair" ou o desligar acabou de apagar.
       const doCache = () => caches.match(event.request, { cacheName: TILES_CACHE })
@@ -203,7 +227,7 @@ self.addEventListener('fetch', event => {
         // guardado, o worker busca por conta própria — o que a CSP do script
         // dele permite (`connect-src` com o host do tile, cobrado em
         // `test/csp-vm.test.mjs`) e dá o mesmo que o navegador daria.
-        event.respondWith(hidratacao.then(() =>
+        event.respondWith(esperarListaMaisNova().then(() =>
           (tilesGuardados.has(url.href) ? doCache() : fetch(event.request))));
       }
     }

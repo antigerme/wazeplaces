@@ -62,6 +62,15 @@ test('ação: a posição é a do card NA TELA, [lat, lon] na ordem certa, com o
   assert.notEqual(p.lat, PROXIMO.mapa.centro[1]);
 });
 
+test('ação: o país é o do GESTO — a ação que sai depois da troca de filtro leva o país em que o card estava', () => {
+  // A janela do Desfazer despachada pelo "Aplicar" dos Filtros: o país do
+  // filtro já é o novo, e o card na tela ainda é da fila velha.
+  const e = escopoDaAcao();                                 // API.getCountry() → 30
+  assert.equal(montar('presencaWmeDaAcao', e)(CARD, 73).pais, 73, 'a carona foi com o país de AGORA, não o do gesto');
+  // Sem o país do gesto (nenhum chamador deixa de mandar), vale o do filtro.
+  assert.equal(montar('presencaWmeDaAcao', escopoDaAcao())(CARD).pais, 30);
+});
+
 test('ação: as conversas que o aparelho conhece vão JUNTO — e só quando existem', () => {
   // Fase 3: a lista de conversas volta de carona, e ela só inclui as que foram
   // respondidas pelo WME (sem a marca do app) se o aparelho disser quais conhece.
@@ -130,7 +139,10 @@ test('ação: a posição é montada DENTRO do executor (na hora do envio), e va
     const corpo = semComentario(fatiarFuncao(APP, handler));
     const exec = corpo.slice(corpo.indexOf('scheduleAction('));
     assert.ok(exec.length > 50, `${handler}: não achei o executor`);
-    assert.match(exec, /const presenca = presencaWmeDaAcao\(place\);/, `${handler}: a posição não é montada no envio`);
+    // Com o país do GESTO (auditoria de 2026-09-26): a ação pode sair depois
+    // de a pessoa trocar de país, e a marca e a lista de carona são do país em
+    // que o card estava.
+    assert.match(exec, /const presenca = presencaWmeDaAcao\(place, pais\);/, `${handler}: a posição não é montada no envio (com o país do gesto)`);
     // O 4º argumento é a REGIÃO do gesto (auditoria de 2026-09-25).
     assert.match(exec, new RegExp(`API\\.${metodo}\\(place\\.venueID, place\\.updateRequestID, presenca, regiao\\)`),
       `${handler}: a posição não vai na ação`);
@@ -141,6 +153,7 @@ test('ação: a posição é montada DENTRO do executor (na hora do envio), e va
     // do card de 3 s atrás, e iria pra fila de saída junto se a rede caísse.
     const gesto = corpo.slice(0, corpo.indexOf('scheduleAction('));
     assert.doesNotMatch(gesto, /presencaWme/, `${handler}: montou a posição no gesto`);
+    assert.match(gesto, /const pais = API\.getCountry\(\);/, `${handler}: o país não é o do GESTO`);
   }
 });
 
@@ -227,8 +240,10 @@ test('resposta: a lista do app que voltou de carona vai pra presença, com o ins
   };
   const f = montar('presencaWmeAoResponder', escopo);
   const lista = { online: [{ id: '1', nome: 'x' }], conversas: [] };
-  f({ userId: '1' }, { success: true, presenca: { ok: true, marca: true }, presencaApp: lista });
-  assert.deepEqual(chamadas, [[lista, 12345]]);
+  f({ userId: '1', pais: 30 }, { success: true, presenca: { ok: true, marca: true }, presencaApp: lista });
+  // O país vai JUNTO: a lista é do país que a carona levou, e a presença a
+  // descarta se o filtro já for outro (auditoria de 2026-09-26).
+  assert.deepEqual(chamadas, [[lista, 12345, 30]]);
   assert.equal(presencaWme.enviadas, 1, 'a escrita deixou de ser contada');
   // Sem carona na ação, uma lista na resposta não é desta ação: não pousa.
   f(null, { success: true, presencaApp: lista });
@@ -340,8 +355,11 @@ test('toggle: o interruptor fala com a presença do WME nos dois sentidos', () =
 });
 
 test('perfil e sair: o perfil decide a visibilidade; o "Sair" zera o freio e os contadores', () => {
-  const perfil = semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData'));
-  assert.match(perfil, /presencaWmeAoCarregarPerfil\(profileRes\.visivelNoWme\)/);
+  // O perfil chega pela FONTE ÚNICA (`definirPerfil`), que a carga da abertura
+  // e o alarme falso do 401 usam (auditoria de 2026-09-26).
+  const perfil = semComentario(fatiarFuncao(APP, 'definirPerfil'));
+  assert.match(perfil, /presencaWmeAoCarregarPerfil\(res\.visivelNoWme\)/);
+  assert.match(semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData')), /definirPerfil\(profileRes\)/);
   const sair = semComentario(fatiarFuncao(APP, 'handleLogout'));
   assert.match(sair, /presencaWmeZerar\(\);/, 'o "Sair" deixa o freio de quem saiu pra quem entra');
 });
@@ -376,13 +394,19 @@ test('a presença sincroniza quando o PERFIL chega — o `showMainScreen` chama 
   // presença antes de o perfil existir, ela desiste calada (sem o id não há
   // lista nem chat), e ninguém chamava de novo. O smoke injetava o perfil antes
   // e não via (gotcha #52); hoje ele abre pelo `initApp` de verdade.
+  // A chegada do perfil mora em DUAS funções desde 2026-09-26 (a fonte única
+  // `definirPerfil` e o `completarPerfilChegado`, que o alarme falso também usa):
+  // os países entram antes de completar, e a presença sincroniza no fim dele.
   const corpo = semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData'));
-  const iPerfil = corpo.indexOf('AppState.profile = profileRes.profile;');
   const iPaises = corpo.indexOf('AppState.countries = countriesRes.countries;');
-  const iSinc = corpo.indexOf('window.Presenca?.sincronizar?.()');
-  assert.ok(iPerfil > 0, 'o perfil deixou de ser guardado aqui — o guard ficaria cego');
-  assert.ok(iSinc > iPerfil, 'a presença não sincroniza depois de o perfil chegar');
-  assert.ok(iSinc > iPaises, 'a presença sincroniza antes dos países — o subtítulo da lista sairia sem o país');
+  const iPerfil = corpo.indexOf('definirPerfil(profileRes)');
+  const iCompletar = corpo.indexOf('completarPerfilChegado(profileRes.profile, epoca)');
+  assert.ok(iPerfil > 0 && iCompletar > iPerfil, 'o perfil deixou de ser guardado aqui — o guard ficaria cego');
+  assert.ok(iPaises > 0 && iPaises < iCompletar, 'a presença sincroniza antes dos países — o subtítulo da lista sairia sem o país');
+  const completar = semComentario(fatiarFuncao(APP, 'completarPerfilChegado'));
+  const iPais = completar.indexOf('await paisDoPerfil(');
+  const iSinc = completar.indexOf('window.Presenca?.sincronizar?.()');
+  assert.ok(iSinc > iPais && iPais > 0, 'a presença não sincroniza depois de o perfil chegar');
 });
 
 // Desligar o "Ver quem está no app" SEM REDE: o `visivel: false` não saía, e é a

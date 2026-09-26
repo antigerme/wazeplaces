@@ -28,14 +28,21 @@ function montar(agoraMs = Date.UTC(2026, 7, 24, 12)) {
     },
     safeLS: { remove: (k) => guardado.delete(k) },
     renderHistory: () => {},
-    Date: { now: () => agoraMs, UTC: Date.UTC },
+    // O relógio parado em `agoraMs`, pra `Date.now()` e pra `new Date()` (o
+    // dia do registro é o dia LOCAL — ver test/autores-dia-local.test.mjs).
+    Date: class extends Date {
+      constructor(...a) { if (a.length) super(...a); else super(agoraMs); }
+      static now() { return agoraMs; }
+    },
   };
   const nomes = Object.keys(escopo);
   const corpo = trecho + '\nreturn { registrarRejeicaoDeAutor, contagemDoAutor, listaDeAutores,'
     + ' esquecerAutor, esquecerAutores, loadAutores, podarAutores, AUTORES_KEY, AUTORES_VISIVEIS,'
     + ' AUTORES_MAX_REINCIDENTES, AUTORES_MAX_VISTOS, AUTORES_MAX_DIAS, AUTOR_LIMIAR_DESTAQUE };';
   const api = new Function(...nomes, corpo)(...nomes.map((n) => escopo[n]));
-  return { ...api, guardado, escopo, dia: Math.floor(agoraMs / 86400000) };
+  const local = new Date(agoraMs);
+  const dia = Date.UTC(local.getFullYear(), local.getMonth(), local.getDate()) / 86400000;
+  return { ...api, guardado, escopo, dia };
 }
 
 const place = (id, nome) => ({ creatorId: id, createdBy: nome });
@@ -626,7 +633,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
   const AppState = { queue: [na, outro, alheio], currentPlace: na };
   const enviados = [];
   const deps = {
-    AppState, podeRecusarAutomaticoAqui: () => true, Treino: { ativo: false }, autoLigado: (id) => id === 7,
+    AppState, podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, Treino: { ativo: false }, autoLigado: (id) => id === 7,
     updatePendingCount: () => {}, removeCurrentCardEl: () => { throw new Error('trocou o card da tela'); },
     showCurrentPlace: () => { throw new Error('trocou o card da tela'); }, startFetching: () => {}, showNoPlaces: () => {},
     showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,

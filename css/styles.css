@@ -326,8 +326,33 @@ body.dark {
 /* Navegador de celular não instala extensão da Chrome Web Store. A classe vem
    do `marcarSuporteAExtensao()` (app.js) e olha o SO, não o ponteiro: notebook
    com tela sensível ao toque é `pointer: coarse` e instala extensão numa boa —
-   esconder por ponteiro tiraria uma opção que ali funciona. */
-.sem-extensao .auth-opt-ext { display: none; }
+   esconder por ponteiro tiraria uma opção que ali funciona.
+
+   E o card só aparece com a CONFIRMAÇÃO do JS (`com-extensao`), nunca antes
+   dele. A regra era a negativa (`.sem-extensao` esconde), e antes de o app.js
+   chegar — rede lenta — o celular mostrava a extensão como "RECOMENDADO", o
+   beco sem saída que a regra existe pra tirar da frente (auditoria de
+   2026-09-26). O estado final da tela não muda; muda o palpite de antes. */
+.auth-opt-ext { display: none; }
+.com-extensao .auth-opt-ext { display: block; }
+
+/* A MESMA regra no "Como usar" da Ajuda: o passo da extensão só onde ela
+   instala. No celular a Ajuda a recomendava como "Mais fácil" — sem citar o
+   código, que é o único caminho que funciona lá (auditoria de 2026-09-26). Sem
+   ele o passo do código vira o 1º: item escondido não conta na numeração.
+   `list-item`, e não `block`, pra não perder o número. */
+.ajuda-passo-ext { display: none; }
+.com-extensao .ajuda-passo-ext { display: list-item; }
+
+/* O divisor "ou login manual" separa a extensão do resto. Sem ela, fora do
+   dedo, a lista COMEÇAVA por ele, sem nada antes (Firefox e Safari de
+   computador, onde a extensão some). No dedo ele fica: lá o "Entrar com um
+   código" vem antes dele (ver o `order` do `pointer: coarse` abaixo). */
+.auth-opt-div { display: none; }
+.com-extensao .auth-opt-div { display: block; }
+@media (pointer: coarse) {
+  .auth-opt-div { display: block; }
+}
 
 .auth-opt-ext    { order: 1; }
 .auth-opt-div    { order: 2; }
@@ -1968,7 +1993,13 @@ button:active {
    tela do owner. Aqui a pílula não precisa sumir, mas quem for esconder algo
    com `.hidden` neste arquivo precisa saber disso. */
 .lb-nome:not(.editando) .lb-nome-btn { max-width: calc(100% - 4.25rem); }
-.lb-nome.editando .lb-nome-btn { margin-bottom: 0.4rem; }
+/* Em edição a pílula também tem TETO — a largura da linha, já que o botão de
+   ação saiu. Sem ele o botão (que mede o conteúdo) crescia com o nome antigo e
+   estourava a tela: MEDIDO no Fold em francês com um nome de 58 caracteres, e
+   com 66 até no Pixel 7 (a pílula ia de 12 a 478 px numa tela de 412). Com o
+   teto o nome se corta em reticências, como no modo leitura (auditoria de
+   2026-09-26). */
+.lb-nome.editando .lb-nome-btn { margin-bottom: 0.4rem; max-width: 100%; }
 .lb-nome-btn:disabled { opacity: 1; }   /* rótulo, não botão apagado */
 .lb-nome-btn {
   display: flex;
