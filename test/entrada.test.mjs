@@ -633,3 +633,26 @@ test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de foto
     assert.match(frase, new RegExp(`\\b${minutos} minut`, 'i'), `${lang}: a Ajuda não diz o prazo da lista de fotos (${minutos} min)`);
   }
 });
+
+// ── A16: um termo por conceito ──────────────────────────────────────────────
+test('um termo por conceito: "nível" no diálogo de acesso restrito, e UM nome pra instalar o app (nas 4 línguas)', () => {
+  const D = dicionario();
+  // O mesmo diálogo dizia "nível" no subtítulo e "rank"/"rango" na ajuda. Cada
+  // língua usa a palavra do subtítulo também na ajuda.
+  const NIVEL = { pt: 'nível', en: 'level', es: 'nivel', fr: 'niveau' };
+  for (const lang of Object.keys(D)) {
+    const palavra = NIVEL[lang];
+    assert.ok(palavra, `CONTROLE: língua nova (${lang}) sem a palavra de "nível" neste teste`);
+    assert.ok(D[lang]['modal.accessDenied.subtitle'].toLowerCase().includes(palavra), `CONTROLE: ${lang} mudou o subtítulo`);
+    const ajuda = D[lang]['modal.accessDenied.help'];
+    assert.ok(ajuda.toLowerCase().includes(palavra), `${lang}: a ajuda do "Acesso restrito" não usa "${palavra}", como o subtítulo`);
+    assert.doesNotMatch(ajuda, /\brank\b|\brango\b/i, `${lang}: a ajuda do "Acesso restrito" voltou a dizer "rank"/"rango"`);
+  }
+  // Instalar: a Ajuda dizia "Instalar o aplicativo" e o convite "Instalar na
+  // tela inicial" pra MESMA ação. Agora é UMA chave, nos dois botões.
+  const usos = [...HTML.matchAll(/data-i18n="(install\.action|help\.install\.label)"/g)].map((m) => m[1]);
+  assert.deepEqual(usos, ['install.action', 'install.action'], 'os dois botões de instalar voltaram a ter nomes diferentes');
+  for (const lang of Object.keys(D)) {
+    assert.equal(D[lang]['help.install.label'], undefined, `${lang}: o segundo nome de "instalar" voltou ao dicionário`);
+  }
+});
