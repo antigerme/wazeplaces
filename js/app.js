@@ -10261,39 +10261,68 @@ function desenharResumo(ctx, d, tx, { qr = null, logo = null, hoje = null } = {}
     }
 }
 
-// Monta os textos (é aqui que o i18n entra), espera a fonte e o QR, e desenha.
-// Devolve null quando o mês está vazio — o botão nem aparece nesse caso, mas a
-// função se defende sozinha.
-async function gerarResumoDoMes() {
-    const agora = new Date();
-    const d = dadosDoResumo(loadHistory(), agora.getFullYear(), agora.getMonth());
-    if (d.total === 0) return null;
-    const loc = i18nLocale();
-    const p = AppState.profile || {};
-    const selos = ['L' + ((Number.isInteger(p.rank) ? p.rank : 0) + 1)];
+// Os TEXTOS da imagem, prontos no idioma de quem gera (é aqui que o i18n
+// entra), e o `alt` dela. Separado do desenho e da espera pela fonte e pelo QR
+// pra o teste conferir o que a imagem DIZ sem canvas nenhum.
+function textosDoResumo(d, perfil, loc) {
+    const p = perfil || {};
+    // SEM PERFIL (a abertura com sinal ruim, antes de o /Session responder) não
+    // há nome nem nível pra afirmar: a imagem saía " limpou" sem nome e "Editor
+    // L1" — um nível FALSO, que a entrada (L2+AM) nem admite. As duas linhas
+    // somem; com perfil, o desenho é o de sempre (auditoria de 2026-09-25).
+    const selos = [];
+    if (Number.isInteger(p.rank)) selos.push('L' + (p.rank + 1));
     if (p.isStaff) selos.push(t('profile.tag.staff'));
     else if (p.isAreaManager) selos.push(t('profile.tag.am'));
     const mesNome = new Date(d.ano, d.mesIdx, 1).toLocaleDateString(loc, { month: 'long' });
+    // O dia mais forte com o MÊS, no formato do locale: só com dia e dia da
+    // semana o inglês saía "21 Monday". Dia da semana e mês por extenso juntos
+    // não cabem no cartão (MEDIDO, Inter 700 30px com "· 1234": até 555px pra
+    // 403 úteis); dia e mês cabem nas quatro línguas, no pior mês (351px).
     const forteData = d.forte.dia
-        ? new Date(d.ano, d.mesIdx, d.forte.dia).toLocaleDateString(loc, { weekday: 'long', day: 'numeric' })
+        ? new Date(d.ano, d.mesIdx, d.forte.dia).toLocaleDateString(loc, { day: 'numeric', month: 'long' })
         : '—';
+    // Plural por CHAVE, e o 1 é o caso comum no começo do mês: saía "1
+    // rejeitados", "1 lidos" e "1 pedidos do mapa" (auditoria de 2026-09-25).
+    const pedidos = t(d.total === 1 ? 'resumo.img.pedidosUm' : 'resumo.img.pedidos');
+    const rejeitados = t(d.rejeitados === 1 ? 'resumo.img.rejeitadosUm' : 'resumo.img.rejeitados');
+    const lidos = t(d.lidos === 1 ? 'resumo.img.lidosUm' : 'resumo.img.lidos');
     const tx = {
         marca: 'WazePlaces',
         periodo: (mesNome + ' · ' + d.ano).toLocaleUpperCase(loc),
-        limpou: t('resumo.img.limpou', { nome: p.userName || '' }),
+        limpou: p.userName ? t('resumo.img.limpou', { nome: p.userName }) : '',
         total: String(d.total),
-        pedidos: t('resumo.img.pedidos'),
+        pedidos,
         tiles: [
-            [String(d.rejeitados), t('resumo.img.rejeitados'), '#fb7185'],
-            [String(d.lidos), t('resumo.img.lidos'), '#34d399'],
+            [String(d.rejeitados), rejeitados, '#fb7185'],
+            [String(d.lidos), lidos, '#34d399'],
         ],
         forteRotulo: t('resumo.img.diaForte'), forteValor: forteData, forteN: String(d.forte.n),
         ativosRotulo: t('resumo.img.diasAtivos'),
         ativosValor: t('resumo.img.diasDe', { n: d.diasAtivos, de: d.diasNoMes }),
         serieRotulo: t('resumo.img.diaADia', { mes: mesNome }),
-        editor: t('resumo.img.editor', { selos: selos.join(' · ') }),
+        editor: selos.length ? t('resumo.img.editor', { selos: selos.join(' · ') }) : '',
         tagline: t('resumo.img.tagline'),
     };
+    // O `alt` diz o que a imagem diz, COM os números: "Resumo do mês" era tudo
+    // o que o leitor de tela ouvia de uma imagem feita de números.
+    const alt = t('resumo.img.altDetalhe', {
+        alt: t('resumo.img.alt'), mes: mesNome, ano: d.ano,
+        frase: [tx.limpou, tx.total, tx.pedidos].filter(Boolean).join(' '),
+        rejeitados: d.rejeitados + ' ' + rejeitados, lidos: d.lidos + ' ' + lidos,
+        forteRotulo: tx.forteRotulo, forte: forteData, forteN: d.forte.n,
+        ativosRotulo: tx.ativosRotulo, ativos: tx.ativosValor,
+    });
+    return { tx, mesNome, alt };
+}
+
+// Espera a fonte e o QR, e desenha. Devolve null quando o mês está vazio — o
+// botão nem aparece nesse caso, mas a função se defende sozinha.
+async function gerarResumoDoMes() {
+    const agora = new Date();
+    const d = dadosDoResumo(loadHistory(), agora.getFullYear(), agora.getMonth());
+    if (d.total === 0) return null;
+    const { tx, mesNome, alt } = textosDoResumo(d, AppState.profile, i18nLocale());
     // A fonte precisa estar CARREGADA antes do fillText, senão o canvas desenha
     // com a fonte do sistema e o texto some do lugar. Falhar aqui não impede a
     // imagem — só a deixa na fonte do sistema.
@@ -10315,7 +10344,7 @@ async function gerarResumoDoMes() {
     canvas.width = RESUMO_LARGURA; canvas.height = RESUMO_ALTURA;
     const hoje = (agora.getFullYear() === d.ano && agora.getMonth() === d.mesIdx) ? agora.getDate() : null;
     desenharResumo(canvas.getContext('2d'), d, tx, { qr, logo, hoje });
-    return { canvas, mesNome, nomeArquivo: `wazeplaces-${d.ano}-${String(d.mesIdx + 1).padStart(2, '0')}.png` };
+    return { canvas, mesNome, alt, nomeArquivo: `wazeplaces-${d.ano}-${String(d.mesIdx + 1).padStart(2, '0')}.png` };
 }
 
 // O que está na folha agora: o blob e o nome. Limpo em LIMPEZA_AO_FECHAR —
@@ -10331,7 +10360,7 @@ async function abrirResumoDoMes() {
     const img = document.getElementById('resumoImg');
     if (img.src) { try { URL.revokeObjectURL(img.src); } catch (e) {} }
     img.src = URL.createObjectURL(blob);
-    img.alt = t('resumo.img.alt');
+    img.alt = r.alt || t('resumo.img.alt');   // com os números (ver `textosDoResumo`)
     document.getElementById('resumoTitle').textContent = t('resumo.modal.title', { mes: r.mesNome });
     // Compartilhar só onde o aparelho compartilha ARQUIVO (Android, iOS 15+).
     // No desktop o botão some e fica o Baixar — nunca um botão que não faz nada.
