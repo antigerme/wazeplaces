@@ -378,6 +378,19 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
         Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
         // O que chegou ao vivo ANTES de o pedido sair o servidor já contou.
         for (const [id, v] of Presenca.vivas) if (v.ultimaTs < inicio) Presenca.vivas.delete(id);
+        // A conversa que a pessoa está OLHANDO está lida, diga a lista o que
+        // disser. A lista pode ter sido lida no Waze ANTES do "lida" — pedida
+        // junto com o toque que abriu a conversa, ou na volta do segundo plano
+        // —, e ela sobrescrevia com "1" a conversa aberta e lida: a pílula
+        // dizia "1 mensagem nova" com a mensagem na tela (auditoria de
+        // 2026-09-26). O que chega com ela na tela já não vira não lida
+        // (`presencaMensagemDoFluxo`); aqui é a mesma regra pro que a lista diz.
+        const olhando = Presenca.aberta && presencaOlhando(Presenca.aberta) ? Presenca.aberta : null;
+        if (olhando) {
+            const c = Presenca.conversas.find((x) => x.id === olhando);
+            if (c) c.naoLidas = 0;
+            Presenca.vivas.delete(olhando);
+        }
         // Conversa que o servidor diz ser do app o aparelho passa a conhecer:
         // é isso que a mantém na lista quando a resposta vier pelo WME, sem a
         // marca. As mais recentes primeiro, pelo teto.
@@ -909,19 +922,46 @@ function presencaAgendarLida(id) {
 async function presencaMarcarLida(id) {
     if (!presencaOlhando(id)) return;
     const h = Presenca.historico.get(id);
-    const ultimaDela = h ? Math.max(0, ...h.msgs.filter((m) => !m.meu).map((m) => m.ts)) : 0;
-    // Nada dela, ou nada depois do último "lida": não há o que marcar, e o
-    // pedido seria à toa (voltar pra tela chama isto sempre).
-    if (!ultimaDela || (Presenca.lidaEnviadaAte.get(id) || 0) >= ultimaDela) return;
     // Conversa ainda carregando: o que chegou nela ainda não está na tela.
-    if (!h.carregada) return;
+    if (!h || !h.carregada) return;
+    const ultimaDela = Math.max(0, ...h.msgs.filter((m) => !m.meu).map((m) => m.ts));
+    // Nada dela, ou nada depois do último "lida": não há o que marcar, e o
+    // pedido seria à toa (voltar pra tela chama isto sempre). Mas a contagem
+    // DAQUI pode estar velha — uma lista lida no Waze antes do último "lida",
+    // chegada com o app no segundo plano —, e com a conversa na tela ela é zero.
+    if (!ultimaDela || (Presenca.lidaEnviadaAte.get(id) || 0) >= ultimaDela) {
+        presencaZerarNaoLidas(id, Date.now());
+        return;
+    }
     const carona = chatCarona();
+    const epoca = Presenca.epoca;
+    const enviadoEm = Date.now();
     const r = await API.chat({ acao: 'lida', com: id, ...carona });
     chatAoResponder(r, carona);
+    if (epoca !== Presenca.epoca) return;   // desligou ou saiu no meio
     // Só DEPOIS da resposta: marcado antes, um "lida" que falhou (rede) ficava
     // dado como enviado — o Waze seguia contando a mensagem como não lida, a
     // pílula mostrava "1" com a conversa aberta e lida, e nada tentava de novo.
-    if (r && r.success) Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
+    if (r && r.success) {
+        Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
+        presencaZerarNaoLidas(id, enviadoEm);
+    }
+}
+
+// O Waze zerou a conversa: a contagem DAQUI também. Sem isto, o "1" que a lista
+// trouxe com o app no segundo plano (ou que chegou ao vivo com a tela apagada)
+// ficava na pílula com a conversa aberta e lida, até a próxima lista (auditoria
+// de 2026-09-26). O que chegou ao vivo DEPOIS de `ate` — com a conversa fechada
+// no meio do "lida" — continua contando.
+function presencaZerarNaoLidas(id, ate) {
+    const c = Presenca.conversas.find((x) => x.id === id);
+    const v = Presenca.vivas.get(id);
+    const tinha = !!(c && c.naoLidas) || !!v;
+    if (c) c.naoLidas = 0;
+    if (v && v.ultimaTs <= ate) Presenca.vivas.delete(id);
+    if (!tinha) return;
+    presencaRenderPilula();
+    presencaRenderLista();
 }
 
 // ── a conversa ──────────────────────────────────────────────────────────────
