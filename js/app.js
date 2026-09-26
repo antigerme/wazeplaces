@@ -1360,10 +1360,17 @@ async function copiarLinkPareamento() {
         showToast(t('toast.pairLinkCopied'), 'success');
     } catch (e) {
         // clipboard exige contexto seguro e permissão; sem ele, mostra o link
-        // pro editor copiar na mão em vez de falhar em silêncio.
-        showToast(url, 'info', 12000);
+        // pro editor copiar na mão em vez de falhar em silêncio. COPIÁVEL: o
+        // toast não some enquanto ele seleciona, e fica o bastante pra isso.
+        showToast(url, 'info', TOAST_COPIAVEL_MS, null, { copiavel: true });
     }
 }
+
+// Quanto o link pra copiar à mão fica na tela: 12 s não davam pra achar o link,
+// selecionar e copiar. E enquanto houver texto dele selecionado, o relógio
+// confere de novo a cada `TOAST_COPIAVEL_RECHECA_MS` em vez de dispensá-lo.
+const TOAST_COPIAVEL_MS = 30000;
+const TOAST_COPIAVEL_RECHECA_MS = 1500;
 
 async function resgatarPareamento(code, { silencioso = false } = {}) {
     const err = document.getElementById('pairEnterError');
@@ -15356,7 +15363,12 @@ function toggleTheme() {
 // dispensa. Duração 4s (mínimo M3). aria-live está no container (index.html).
 // `onClick` opcional: quando presente, o toast vira um atalho (executa a ação
 // E dispensa). Sem ele, o comportamento de sempre — clicar só dispensa.
-function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
+// `copiavel`: o toast traz um texto pra COPIAR À MÃO (o link do pareamento
+// quando a área de transferência falha). Aí selecionar não pode dispensá-lo:
+// arrastar o mouse sobre o texto termina num clique, e o clique o tirava da
+// tela junto com a seleção; e o relógio espera enquanto houver texto dele
+// selecionado (auditoria de 2026-09-26). A aparência não muda.
+function showToast(message, type = 'info', durationMs = 4000, onClick = null, { copiavel = false } = {}) {
     // Conquista é BANNER (topo), não snackbar (rodapé) — distinção do M3, e aqui
     // com motivo medido: no rodapé ela tapava os três botões do card por 8s em 2
     // de 3 aparelhos (gotcha #26). Snackbar confirma o que você acabou de fazer;
@@ -15408,7 +15420,18 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
         toast.style.transform = `translateY(${type === 'achievement' ? '-20px' : '20px'})`;
         setTimeout(() => toast.remove(), 250);
     };
+    // Há texto DESTE toast selecionado agora? (Só o copiável pergunta.)
+    const selecionandoAqui = () => {
+        try {
+            const sel = window.getSelection && window.getSelection();
+            if (!sel || sel.isCollapsed) return false;
+            return toast.contains(sel.anchorNode) || !!(sel.containsNode && sel.containsNode(toast, true));
+        } catch (e) { return false; }
+    };
     toast.addEventListener('click', () => {
+        // Soltar o botão depois de arrastar pra selecionar é um CLIQUE: sem isto
+        // o toast sumia com a seleção junto, e o link não dava pra copiar.
+        if (copiavel && selecionandoAqui()) return;
         if (onClick) {
             try { onClick(); } catch (e) { console.error('onClick do toast falhou', e); }
         }
@@ -15421,7 +15444,16 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
         container.removeChild(container.firstElementChild);
     }
     container.appendChild(toast);
-    const relogio = setTimeout(dismiss, durationMs);
+    // O copiável não some com texto dele selecionado: o relógio espera mais um
+    // pouco e confere de novo (a pessoa está copiando).
+    let relogio;
+    const armar = (ms) => {
+        relogio = setTimeout(() => {
+            if (copiavel && selecionandoAqui()) { armar(TOAST_COPIAVEL_RECHECA_MS); return; }
+            dismiss();
+        }, ms);
+    };
+    armar(durationMs);
     // Punho pra quem precisa ACOMPANHAR algo: trocar o texto no lugar em vez de
     // empilhar um toast por passo. Call site que não precisa simplesmente ignora.
     return {

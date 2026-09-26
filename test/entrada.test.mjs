@@ -747,3 +747,56 @@ test('código colado com espaço, quebra de linha ou rótulo entra inteiro, no f
   assert.match(APP_SEM, /\$\('pairCodeInput'\)\?\.addEventListener\('paste', colarCodigoPareamento\);/,
     'o colar do campo do código não passa mais pela extração');
 });
+
+// ── A18: o link pra copiar À MÃO não some enquanto a pessoa o seleciona ─────
+function montarToast({ selecionado = false } = {}) {
+  const relogios = [];
+  let ouvinteClique = null;
+  const toast = {
+    style: {}, className: '', innerHTML: '', title: '', removido: false,
+    addEventListener: (tipo, fn) => { if (tipo === 'click') ouvinteClique = fn; },
+    contains: (no) => no === 'texto-do-toast',
+    querySelector: () => null,
+    remove() { this.removido = true; },
+  };
+  const container = { children: [], appendChild(el) { this.children.push(el); }, removeChild() {}, firstElementChild: null };
+  const selecao = { atual: selecionado };
+  const deps = {
+    document: { getElementById: () => container, createElement: () => toast },
+    window: { getSelection: () => (selecao.atual ? { isCollapsed: false, anchorNode: 'texto-do-toast', containsNode: () => true } : { isCollapsed: true }) },
+    setTimeout: (fn, ms) => { relogios.push({ fn, ms }); return relogios.length; },
+    clearTimeout() {}, dlog() {}, t: (k) => k, escapeHtml: (s) => s, console,
+    TOAST_COPIAVEL_RECHECA_MS: 1500,
+  };
+  const { showToast } = montar(['showToast'], deps, ['showToast']);
+  const sumiu = () => toast.style.opacity === '0';
+  return { showToast, clicar: () => ouvinteClique(), relogios, selecao, sumiu };
+}
+
+test('link pra copiar à mão (área de transferência recusada): selecionar não o dispensa, e o relógio espera', () => {
+  const c = montarToast({ selecionado: true });
+  c.showToast('https://app/#pair=SEGREDO', 'info', 30000, null, { copiavel: true });
+  c.clicar();   // soltar o botão depois de arrastar pra selecionar
+  assert.equal(c.sumiu(), false, 'o clique de terminar a seleção dispensou o toast (e a seleção sumiu com ele)');
+  c.relogios.shift().fn();   // venceu o prazo com o texto ainda selecionado
+  assert.equal(c.sumiu(), false, 'o prazo venceu no meio da cópia e o toast sumiu');
+  assert.equal(c.relogios.length, 1, 'o relógio não voltou a conferir');
+  c.selecao.atual = false;   // copiou e soltou a seleção
+  c.relogios.shift().fn();
+  assert.equal(c.sumiu(), true, 'sem seleção, o toast copiável nunca vai embora');
+  // Sem seleção, o clique segue dispensando (é o "clique dispensa" de sempre).
+  const d = montarToast();
+  d.showToast('https://app/#pair=SEGREDO', 'info', 30000, null, { copiavel: true });
+  d.clicar();
+  assert.equal(d.sumiu(), true);
+  // CONTROLE: o toast COMUM não muda — com texto selecionado, o clique dispensa.
+  const n = montarToast({ selecionado: true });
+  n.showToast('Qualquer aviso', 'info');
+  n.clicar();
+  assert.equal(n.sumiu(), true, 'o toast comum passou a segurar a tela');
+  // Quem usa: o socorro do "Copiar link", com o prazo longo.
+  const copiar = fatiar('copiarLinkPareamento');
+  assert.match(copiar, /showToast\(url, 'info', TOAST_COPIAVEL_MS, null, \{ copiavel: true \}\);/,
+    'o link de socorro voltou a ser um toast comum de 12 s');
+  assert.ok(Number((/const TOAST_COPIAVEL_MS = (\d+);/.exec(APP) || [])[1]) >= 30000, 'o link pra copiar à mão fica menos de 30 s');
+});
