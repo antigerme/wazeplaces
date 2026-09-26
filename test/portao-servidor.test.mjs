@@ -475,3 +475,52 @@ test('validar-place: rejeitar NÃO toca na releitura guardada (é o gesto de tod
   await comWaze(w.responder, () => dispatch('validar-place', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'u1', approve: true }, s.ctx));
   assert.equal(lidas.filter((k) => String(k).startsWith('reler_')).length, 1, 'CONTROLE: aprovar não consultou a releitura');
 });
+
+import { cabecalhoParaNetscape } from '../server/core.mjs';
+
+test('login com cookies em formato de CABEÇALHO: a sessão acompanha a rotação do cookie (gotcha #43)', async () => {
+  // O `testar-cookies` aceita `a=b; c=d`, mas a regravação do cookie
+  // rotacionado só entende linha Netscape: guardada como cabeçalho, a sessão
+  // nunca acompanhava o `_web_session` novo e azedava em dias.
+  const s = await sessaoDeTeste(COOKIES);
+  const perfil = { userName: 'fulano', rank: 1, isAreaManager: true, isStaff: false };
+  const login = await comWaze(() => json(perfil),
+    () => dispatch('testar-cookies', { cookies: '_csrf_token=csrf-C; _web_session=ORIGINAL', region: 'row' }, s.ctx));
+  assert.equal(login.r.status, 200, JSON.stringify(login.r.body));
+  // O fio pro Waze não muda: o mesmo cabeçalho e o mesmo CSRF de antes.
+  assert.equal(login.chamadas[0].init.headers.Cookie, '_csrf_token=csrf-C; _web_session=ORIGINAL');
+  assert.equal(login.chamadas[0].init.headers['X-CSRF-Token'], 'csrf-C');
+  const token = login.r.body.sessionToken;
+  envelhecerSessoes(s.store);
+  const acao = await comWaze(() => comRotacao({}, 'ROTACIONADO'),
+    () => dispatch('marcar-lido', { sessionToken: token, region: 'row', venueID: 'v1', updateRequestID: 'u1' }, s.ctx));
+  assert.equal(acao.chamadas[0].init.headers.Cookie, '_csrf_token=csrf-C; _web_session=ORIGINAL',
+    'a sessão guardada mudou o cookie que vai pro Waze');
+  assert.match(await s.sessions.loadSession(token), /ROTACIONADO/,
+    'a sessão de quem entrou com o cabeçalho não acompanhou a rotação — azeda em dias');
+  // E a chamada seguinte já sai com o valor novo.
+  const depois = await comWaze(() => json({}),
+    () => dispatch('marcar-lido', { sessionToken: token, region: 'row', venueID: 'v1', updateRequestID: 'u2' }, s.ctx));
+  assert.equal(depois.chamadas[0].init.headers.Cookie, '_csrf_token=csrf-C; _web_session=ROTACIONADO');
+});
+
+test('cabeçalho que não dá pra converter sem perda segue aceito como veio (o login não falha pelo parser)', async () => {
+  for (const cab of [
+    '_csrf_token=c; _web_session=a; _web_session=b',   // nome repetido: o navegador manda os dois
+    '_csrf_token=c; _web_session=; x=1',               // valor vazio: a linha Netscape seria descartada
+    '_csrf_token=c; _web_session=a b',                 // espaço no valor: o Netscape é lido por /\s+/
+    '_csrf_token=c; solto',                            // par sem `=`
+  ]) {
+    assert.equal(cabecalhoParaNetscape(cab), cab, cab);
+    const s = await sessaoDeTeste(COOKIES);
+    const { r, chamadas } = await comWaze(() => json({ userName: 'fulano', rank: 1, isAreaManager: true, isStaff: false }),
+      () => dispatch('testar-cookies', { cookies: cab, region: 'row' }, s.ctx));
+    assert.equal(r.status, 200, `${cab}: ${JSON.stringify(r.body)}`);
+    assert.equal(chamadas[0].init.headers.Cookie, cab, 'o cabeçalho que vai pro Waze mudou');
+  }
+  // CONTROLE: o caso comum converte (sem isto as asserções acima passariam
+  // com um conversor que nunca converte), e o Netscape passa intocado.
+  assert.equal(cabecalhoParaNetscape('_csrf_token=c;_web_session=s\nx=1'),
+    ['_csrf_token\tc', '_web_session\ts', 'x\t1'].map((f) => '.waze.com\tTRUE\t/\tTRUE\t0\t' + f).join('\n'));
+  assert.equal(cabecalhoParaNetscape(COOKIES), COOKIES);
+});

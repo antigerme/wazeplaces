@@ -311,6 +311,41 @@ export function filterWazeCookies(cookiesContent) {
   return [...kept.values()].join('\n');
 }
 
+// O formato de CABEÇALHO (`a=b; c=d`, o que se copia do DevTools) vira linhas
+// Netscape na ENTRADA do login, com domínio `.waze.com` e path `/`. Aceitar os
+// dois formatos continua valendo; o que muda é o que fica GUARDADO, e a
+// diferença decide a vida da sessão: a regravação do cookie rotacionado
+// (gotcha #43, `aplicarCookiesRotacionados`) só sabe trocar valor em linha
+// Netscape. Guardada como cabeçalho, a sessão nunca acompanhava o
+// `_web_session` novo e azedava em dias, com o login do WME valendo (auditoria
+// de 2026-09-26). É o mesmo motivo de a extensão mandar Netscape
+// (`formatarNetscape`, em extensao-chrome/background.js).
+//
+// `.waze.com` porque é o domínio dos cookies do WME, e o `cookieValePraHost`
+// o deixa passar pro www. Só converte o que dá pra representar SEM PERDA: par
+// sem `=`, valor vazio, nome ou valor com espaço (o Netscape é lido por
+// `/\s+/`, e a linha com a última coluna vazia é descartada) e nome REPETIDO
+// (o navegador manda os dois de `.waze.com` e `www.waze.com`, e aqui viraria
+// um só) fazem o conteúdo seguir como veio — aceito, só sem a rotação, como
+// sempre foi. Conversão que perde cookie seria o login falhando pelo parser.
+export function cabecalhoParaNetscape(conteudo) {
+  const s = String(conteudo).trim();
+  if (s.includes('\t')) return s;
+  const pares = s.split('\n').map((l) => l.trim()).filter((l) => l && l[0] !== '#')
+    .join(';').split(';').map((p) => p.trim()).filter(Boolean);
+  const nomes = new Set();
+  const linhas = [];
+  for (const par of pares) {
+    const igual = par.indexOf('=');
+    const nome = par.slice(0, igual);
+    const valor = par.slice(igual + 1);
+    if (igual <= 0 || !valor || /\s/.test(nome) || /\s/.test(valor) || nomes.has(nome)) return s;
+    nomes.add(nome);
+    linhas.push(['.waze.com', 'TRUE', '/', 'TRUE', '0', nome, valor].join('\t'));
+  }
+  return linhas.length ? linhas.join('\n') : s;
+}
+
 // Constrói o valor do header `Cookie:` a partir do conteúdo salvo.
 // Aceita formato Netscape (cookies.txt, com tabs) ou header ("a=b; c=d").
 // `porHost` decide se o conjunto ainda é peneirado pelo host aqui dentro.
@@ -322,7 +357,9 @@ export function filterWazeCookies(cookiesContent) {
 // sintoma: `perfil` 200 e `buscar-places` 403, para sempre.
 export function cookieHeaderFrom(cookiesContent, porHost = true) {
   const s = String(cookiesContent).trim();
-  // Normaliza conteúdo que já é `a=b; c=d` (a extensão manda assim).
+  // Normaliza conteúdo que já é `a=b; c=d`: sessão gravada antes de o login
+  // passar a guardar Netscape, ou cabeçalho que não dá pra converter sem perda
+  // (ver `cabecalhoParaNetscape`). A extensão manda Netscape.
   const comoHeader = (txt) => String(txt)
     .split('\n')
     .map((l) => l.trim())
@@ -1423,7 +1460,9 @@ async function handleTestarCookies(data, { sessions }) {
   // Filtra pro domínio do Waze logo na entrada: o cookies.txt do navegador traz
   // cookies de dezenas de sites — guardar/enviar só os do Waze evita vazar
   // credenciais de terceiros e o HTTP 400 por header gigante. Ver filterWazeCookies.
-  const cookies = filterWazeCookies(String(data.cookies).trim());
+  // E o formato de cabeçalho é guardado como Netscape, senão a sessão não
+  // acompanha a rotação do cookie (ver `cabecalhoParaNetscape`).
+  const cookies = cabecalhoParaNetscape(filterWazeCookies(String(data.cookies).trim()));
   if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado. Exporte os cookies logado no Waze Map Editor (formato Netscape).', 400, 'srv.err.cookieFormatExport');
   const csrf = extractCSRFToken(cookies);
   if (!csrf) apiError('Token CSRF não encontrado nos cookies. Certifique-se de estar logado no Waze Map Editor.', 400, 'srv.err.csrfMissingLogin');
