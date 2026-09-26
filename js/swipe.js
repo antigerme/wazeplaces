@@ -253,7 +253,12 @@ function handleDragMove(e) {
     } else {
         const rotation = deltaX * 0.1;
         currentCard.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(${rotation}deg)`;
-        const opacity = Math.min(Math.abs(deltaX) / 100, 1);
+        // O selo do lado só acende quando SOLTAR ali decidiria — a mesma
+        // dominância horizontal que o `commitX` exige (ver o `handleDragEnd`).
+        // Puxando o card pra BAIXO com desvio de lado, o "Rejeitar" acendia
+        // inteiro e prometia uma ação que o soltar não faz mais: o que o app
+        // MOSTRA e o que ele ACEITA têm que ser a mesma coisa.
+        const opacity = Math.abs(deltaX) > Math.abs(deltaY) ? Math.min(Math.abs(deltaX) / 100, 1) : 0;
         updateSwipeIndicator(deltaX, opacity);
     }
 }
@@ -323,7 +328,12 @@ function handleDragEnd(e) {
     // Commit por distância OU por flick (velocidade alta com deslocamento mínimo)
     const commitUp = (Math.abs(deltaY) > thresholdY && deltaY < 0 && Math.abs(deltaY) > Math.abs(deltaX)) ||
         (vy < -FLICK_VELOCITY && deltaY < -FLICK_MIN_DISTANCE && Math.abs(deltaY) > Math.abs(deltaX));
-    const commitX = Math.abs(deltaX) > thresholdX ||
+    // A DISTÂNCIA também exige que o gesto seja horizontal — como o flick e o
+    // ↑ já exigiam. Sem isso, puxar o card pra BAIXO (gesto que o card não tem)
+    // com um desvio de lado maior que 25% da largura REJEITAVA ou marcava lido:
+    // MEDIDO com toque de verdade, (−105, +300) num celular de 393px → 1
+    // rejeitado (auditoria de 2026-09-26).
+    const commitX = (Math.abs(deltaX) > thresholdX && Math.abs(deltaX) > Math.abs(deltaY)) ||
         (Math.abs(vx) > FLICK_VELOCITY && Math.abs(deltaX) > FLICK_MIN_DISTANCE && Math.abs(deltaX) > Math.abs(deltaY));
 
     if (commitUp) {

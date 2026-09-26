@@ -40,8 +40,11 @@ function montar({ largura = 400 } = {}) {
   vm.createContext(ctx);
   vm.runInContext(SWIPE + '\nthis.__estado = () => ({ isDragging, dragTouchId, animating });', ctx);
   const ouvintesDoCard = {};
+  // Os selos do gesto (`.swipe-left` …) guardam a opacidade que o arraste pôs.
+  const selos = {};
   const card = {
-    style: {}, classList: { add() {}, remove() {}, contains: () => false }, querySelector: () => null,
+    style: {}, classList: { add() {}, remove() {}, contains: () => false },
+    querySelector: (sel) => (selos[sel] ||= { style: {}, querySelector: () => null }),
     addEventListener: (t, fn) => { (ouvintesDoCard[t] ||= []).push(fn); },
   };
   ctx.enableSwipeOnCard(card);
@@ -53,7 +56,7 @@ function montar({ largura = 400 } = {}) {
   const noDoc = (type, extra) => { const e = ev(type, extra); for (const fn of [...(ouvintes[type] || [])]) fn(e); return e; };
   const passo = (ms = 16) => { relogio.agora += ms; };
   const esvaziar = () => { while (timers.length) timers.shift()(); };
-  return { ctx, card, decidiu, noCard, noDoc, toque, passo, esvaziar, estado: () => ctx.__estado(), ouvintes, ouvintesDoCard };
+  return { ctx, card, selos, decidiu, noCard, noDoc, toque, passo, esvaziar, estado: () => ctx.__estado(), ouvintes, ouvintesDoCard };
 }
 
 // Um dedo de (x0,y0) a (x1,y1) em `n` passos DEVAGAR — abaixo da velocidade
@@ -263,4 +266,46 @@ test('C2 mouse: o clique colado ao soltar de um ARRASTE não abre foto nem mapa 
   h.noCard('mousedown', { button: 0, buttons: 1, clientX: 300, clientY: 300 });
   h.noDoc('mouseup', { buttons: 0, clientX: 302, clientY: 301 });
   assert.equal(clicar(h), true, 'CONTROLE: o clique parado na foto deixou de abrir o lightbox');
+});
+
+// ── C6: puxar pra BAIXO não decide ────────────────────────────────────────
+test('C6 diagonal pra baixo: nem decide nem acende o selo do lado', () => {
+  // MEDIDO com toque de verdade num celular de 393px: (−105, +300) → 1
+  // rejeitado; (+105, +300) → 1 lido. Pra baixo o card não tem gesto.
+  for (const dx of [-105, 105]) {
+    const g = montar({ largura: 393 });
+    const a = g.toque(0, 200, 200);
+    g.noCard('touchstart', { touches: [a], changedTouches: [a] });
+    let t = a;
+    for (let i = 1; i <= 20; i++) {
+      g.passo(30);
+      t = g.toque(0, 200 + dx * i / 20, 200 + 300 * i / 20);
+      g.noDoc('touchmove', { touches: [t], changedTouches: [t] });
+    }
+    const lado = dx < 0 ? '.swipe-left' : '.swipe-right';
+    assert.equal(g.selos[lado].style.opacity, 0,
+      `(${dx}, +300): o selo do lado acendeu (${g.selos[lado].style.opacity}) prometendo uma ação que o soltar não faz`);
+    g.passo(150);
+    g.noDoc('touchend', { touches: [], changedTouches: [t] });
+    g.esvaziar();
+    assert.deepEqual(g.decidiu.map((d) => d[0]), [], `(${dx}, +300): puxar pra baixo decidiu o pedido`);
+  }
+});
+
+test('C6 CONTROLE: o gesto HORIZONTAL com desvio segue decidindo, e o ↑ na diagonal segue pulando', () => {
+  // Sem estes, "pra baixo não decide" passaria com o gesto lateral morto.
+  const casos = [[[-300, 40], 'left'], [[260, 180], 'right'], [[-105, -300], 'up']];
+  for (const [[dx, dy], esperado] of casos) {
+    const g = montar({ largura: 393 });
+    arrastarDevagar(g, 0, [200, 400], [200 + dx, 400 + dy]);
+    assert.deepEqual(g.decidiu.map((d) => d[0]), [esperado], `(${dx}, ${dy}) deixou de decidir "${esperado}"`);
+  }
+  // E o selo acende no arraste lateral — é o retorno do gesto.
+  const h = montar({ largura: 393 });
+  const a = h.toque(0, 300, 400);
+  h.noCard('touchstart', { touches: [a], changedTouches: [a] });
+  h.passo(30);
+  const b = h.toque(0, 150, 440);
+  h.noDoc('touchmove', { touches: [b], changedTouches: [b] });
+  assert.equal(h.selos['.swipe-left'].style.opacity, 1, 'CONTROLE: o selo do lado não acende nem no arraste lateral');
 });
