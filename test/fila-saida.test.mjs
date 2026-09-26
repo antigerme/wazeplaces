@@ -146,13 +146,15 @@ test('exceção no POUSO não leva o resto da fila junto', () => {
 
 test('esvaziar para no que não adianta insistir, e mantém a fila', () => {
   const f = fatiar('esvaziarFilaDeSaida');
-  assert.match(f, /errorCategory === 'transient'\) break/,
+  // REDE fora (sem resposta do Waze pro pedido) para a passada. O 5xx que o Waze
+  // devolve PRA ESTE pedido também para — mas manda o item pro fim (O8).
+  assert.match(f, /errorCategory === 'transient' && !\(Number\(r\.httpCode\) >= 500\)\) break/,
     'rede fora de novo deixou de interromper — vira falha em série gastando o free tier');
   assert.match(f, /errorCategory === 'unauthorized'\).*break/s,
     'sessão morta deixou de interromper o esvaziamento');
   // O `shift` só acontece DEPOIS de um pouso que não foi rede nem 401: item
   // que não saiu não pode sumir da fila.
-  const iBreak = f.indexOf("'transient') break");
+  const iBreak = f.indexOf(">= 500)) break");
   const iShift = f.indexOf('f.splice(saiu, 1)');
   assert.ok(iBreak > 0 && iShift > iBreak,
     'o item é removido da fila antes de se saber que saiu');
@@ -772,4 +774,84 @@ test('O5: a descarga que acha a decisão deste pedido JÁ na fila não envia de 
   await esperarRede();
   assert.deepEqual(a.medidas.envios.filter((e) => e.startsWith('rejeitar')), [], 'a segunda decisão do mesmo pedido saiu');
   assert.equal(a.AppState.stats.rejected, 0, 'o gesto repetido contou no placar');
+});
+
+// ── O8: 5xx num pedido SÓ não segura a fila (auditoria de 2026-09-26) ────────
+// O esvaziamento dava `break` no primeiro `transient`, e um pedido que o Waze
+// recusa SEMPRE com 5xx ficava na cabeça segurando os outros pra sempre (p8:
+// 6 provas de rede, 6 envios do MESMO pedido, os outros dois nunca saíram).
+function drenarO8(itens, resposta) {
+  const guardado = new Map([['waze_places_saida', JSON.stringify(itens)]]);
+  const relogio = { t: 1000 };
+  const medidas = { enviados: [], erros: 0, diario: [] };
+  const AppState = { authenticated: true, profile: { id: 1 }, stats: { read: 1, rejected: 2, skipped: 0 }, serverTotal: 5 };
+  const deps = {
+    AppState, navigator: { onLine: true }, epocaDaSessao: 0,
+    safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
+    // TETO do instrumento: um laço que volte (mover e seguir na mesma passada)
+    // não pode prender o processo do teste — passado o teto, a "rede" nunca
+    // responde, e as contagens reprovam em vez de pendurar.
+    API: { getSession: () => 'tok',
+      rejectPlace: async (v) => { if (medidas.enviados.length > 60) return new Promise(() => {});
+        relogio.t += 50; medidas.enviados.push(v); return resposta(v); },
+      markAsRead: async (v) => { if (medidas.enviados.length > 60) return new Promise(() => {});
+        relogio.t += 50; medidas.enviados.push(v); return resposta(v); } },
+    Date: { now: () => relogio.t }, setTimeout: (f) => f(),
+    SAIDA_KEY: 'waze_places_saida', CONTA_KEY: 'waze_places_conta', SAIDA_RITMO_MS: 0,
+    SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000], POUSO_NA_MEMORIA_MS: 600000,
+    SAIDA_TENTATIVAS_POR_ITEM: Number(/^const SAIDA_TENTATIVAS_POR_ITEM = (\d+);/m.exec(APP_SEM)[1]),
+    offlineLigado: () => false, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
+    updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {}, handleUnauthorized: () => {},
+    showToast: (m, tipo) => { if (tipo === 'error') medidas.erros++; }, t: (k) => k, msgDoServidor: (r, d) => d,
+    dfato: (k) => medidas.diario.push(k),
+  };
+  const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+    'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'registrarPouso', 'registrarPousoDeSaida',
+    'esvaziarFilaDeSaida'];
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, `
+    let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, ultimaEscritaOkEm = 0;
+    let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
+    const pedidosEmAndamento = new Set(), pousosDaPagina = new Map();
+    ${nomes.map(fatiarComAsync).join('\n')}
+    return { esvaziarFilaDeSaida, carregarFilaDeSaida };`)(...chaves.map((k) => deps[k]));
+  return { app, AppState, medidas };
+}
+const ITEM_O8 = (v, tipo = 'reject') => ({ tipo, venueID: v, updateRequestID: 'u' + v, conta: '1', regiao: 'row' });
+const QUINHENTOS = { success: false, errorCategory: 'transient', errorKey: 'srv.err.wazeDown', httpCode: 500 };
+
+test('O8: o pedido com 5xx vai pro FIM — os outros saem, e ele sai como falha depois de N com outra escrita pousada', async () => {
+  const d = drenarO8([ITEM_O8('vA'), ITEM_O8('vB'), ITEM_O8('vC', 'read')], (v) => (v === 'vA' ? QUINHENTOS : { success: true }));
+  for (let i = 0; i < 6; i++) await d.app.esvaziarFilaDeSaida();     // seis provas de rede
+  assert.ok(d.medidas.enviados.includes('vB') && d.medidas.enviados.includes('vC'),
+    `o pedido com 5xx segurou os outros: ${d.medidas.enviados.join(' ')}`);
+  assert.ok(d.medidas.enviados.filter((v) => v === 'vA').length <= 3, `o mesmo pedido saiu ${d.medidas.enviados.join(' ')}`);
+  assert.deepEqual(d.app.carregarFilaDeSaida(), [], 'o pedido que o Waze recusa sempre ficou na fila pra sempre');
+  assert.equal(d.AppState.stats.rejected, 1, 'o placar do pedido recusado não desceu');
+  assert.equal(d.AppState.serverTotal, 6, 'o pedido recusado segue pendente no Waze: o "Restam" tem de voltar');
+  assert.equal(d.medidas.erros, 1, 'a recusa de verdade não avisou (ou avisou mais de uma vez)');
+  assert.ok(d.medidas.diario.includes('saida.recusada'));
+});
+
+test('O8: 5xx pra TODOS (o Waze fora do ar) — nada é descartado, e cada gatilho gasta UMA requisição', async () => {
+  const d = drenarO8([ITEM_O8('vA'), ITEM_O8('vB'), ITEM_O8('vC', 'read')], () => QUINHENTOS);
+  // Doze gatilhos: cada pedido passa de N tentativas (é o caso que decide).
+  for (let i = 0; i < 12; i++) {
+    const antes = d.medidas.enviados.length;
+    await Promise.race([d.app.esvaziarFilaDeSaida(), new Promise((ok) => setTimeout(ok, 200))]);
+    if (d.medidas.enviados.length - antes > 1) break;              // rajada: nem espera o resto
+  }
+  assert.equal(d.medidas.enviados.length, 12, `rajada com o Waze fora: ${d.medidas.enviados.length} envios em 12 gatilhos`);
+  assert.equal(d.app.carregarFilaDeSaida().length, 3, 'descartou decisão SEM prova de que o Waze aceita escrita');
+  assert.deepEqual(d.AppState.stats, { read: 1, rejected: 2, skipped: 0 });
+  assert.equal(d.medidas.erros, 0);
+});
+
+test('O8: REDE fora (sem resposta do Waze) não conta tentativa nem mexe na ordem', async () => {
+  const d = drenarO8([ITEM_O8('vA'), ITEM_O8('vB')], () => ({ success: false, errorCategory: 'transient' }));
+  for (let i = 0; i < 4; i++) await d.app.esvaziarFilaDeSaida();
+  const f = d.app.carregarFilaDeSaida();
+  assert.deepEqual(f.map((x) => x.venueID), ['vA', 'vB'], 'a queda de rede mudou a ordem da fila');
+  assert.equal(f[0].tt, undefined, 'a queda de rede contou tentativa contra o pedido');
+  assert.deepEqual(d.medidas.enviados, ['vA', 'vA', 'vA', 'vA']);
 });

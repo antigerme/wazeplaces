@@ -11919,6 +11919,39 @@ let sessaoVivaEm = { s: null, em: 0 };
 const SAIDA_RECUO_401_MS = [0, 15 * 1000, 60 * 1000, 5 * 60 * 1000];
 let saidaRecuo = { s: null, n: 0, ate: 0 };
 
+// ── 5xx NUM PEDIDO SÓ: a cabeça da fila não segura as outras ─────────────
+//
+// Auditoria de 2026-09-26 (O8): o esvaziamento dava `break` no primeiro
+// `transient` — o certo pra REDE fora —, e um pedido que o Waze recusa SEMPRE
+// com erro de servidor (5xx pra aquele local) ficava na cabeça da fila e
+// segurava as outras decisões pra sempre (medido: 6 provas de rede, 6 envios do
+// mesmo pedido, as outras duas nunca saíram). Quando o Waze RESPONDEU com 5xx
+// PRA ESTE pedido (o `httpCode` que o core repassa; rede fora não tem), o item
+// vai pro FIM da fila, contando a tentativa (`tt`, desde `tf`), e a passada para
+// — uma requisição falhada por gatilho, nunca uma rajada. O destino final é o do
+// O1: depois de `SAIDA_TENTATIVAS_POR_ITEM` falhas, e só se OUTRA escrita pousou
+// depois de ele começar a falhar (prova de que o Waze aceita escrita — não é ele
+// fora do ar), ele sai como a falha de verdade (placar desce, aviso). Sem essa
+// prova, fica: o Waze pode estar fora pra todo mundo.
+const SAIDA_TENTATIVAS_POR_ITEM = 3;
+// Quando uma escrita POUSOU no Waze pela última vez nesta página (ver
+// `registrarPouso`, por onde todo pouso passa). Só em memória: reaberta a
+// página, a prova recomeça — o lado seguro.
+let ultimaEscritaOkEm = 0;
+
+// Manda o item pro FIM da fila de saída (relida, achado pela chave), com os
+// campos novos.
+function moverProFimDaSaida(item, campos) {
+    const f = carregarFilaDeSaida();
+    const i = f.findIndex((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
+        && x.updateRequestID === item.updateRequestID);
+    if (i < 0) return f;
+    const [it] = f.splice(i, 1);
+    f.push(Object.assign(it, campos));
+    salvarFilaDeSaida(f);
+    return f;
+}
+
 // A sonda do `handleUnauthorized` RESPONDEU com o perfil: a sessão de agora está
 // viva neste instante.
 function marcarSessaoViva() {
@@ -12252,7 +12285,21 @@ async function esvaziarFilaDeSaida() {
             if (epoca !== epocaDaSessao) { enviados = 0; break; }
             // Rede fora de novo: PARA e deixa o resto pra próxima. Insistir aqui
             // seria gastar requisição do free tier pra falhar em série.
-            if (r && r.errorCategory === 'transient') break;
+            if (r && r.errorCategory === 'transient' && !(Number(r.httpCode) >= 500)) break;
+            if (r && r.errorCategory === 'transient') {
+                // O Waze RESPONDEU com erro de servidor PRA ESTE pedido (ver
+                // `SAIDA_TENTATIVAS_POR_ITEM`): ele vai pro fim e a passada para;
+                // depois de N, com outra escrita pousada no meio, ele sai.
+                const tt = (Number(item.tt) || 0) + 1;
+                const tf = Number.isFinite(item.tf) ? item.tf : Date.now();
+                if (tt >= SAIDA_TENTATIVAS_POR_ITEM && ultimaEscritaOkEm > tf) {
+                    dfato('saida.recusada', { tipo: item.tipo, motivo: 'transient' });
+                    r = { success: false, errorCategory: 'unknown' };
+                } else {
+                    f = moverProFimDaSaida(item, { tt, tf });
+                    break;
+                }
+            }
             if (r && r.errorCategory === 'unauthorized') {
                 // O MESMO item já tinha levado 401 e a sessão foi CONFIRMADA viva
                 // depois disso: não é a sessão, é a escrita DESTE pedido que o
@@ -12451,6 +12498,8 @@ function offlineLerPousos() {
 // marca não paga nada."
 function registrarPouso(places) {
     const agora = Date.now();
+    // Uma escrita pousou: o Waze aceita escrita agora (ver `ultimaEscritaOkEm`).
+    ultimaEscritaOkEm = agora;
     const chaves = [];
     for (const p of (Array.isArray(places) ? places : [places])) {
         const k = chaveDoPedido(p);
