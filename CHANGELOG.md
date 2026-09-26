@@ -8,6 +8,23 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.26-01
+
+Quarta rodada da auditoria, com a verificação em produção da v2026.09.25-05 (60 ✓ · 0 ✗).
+
+### Corrigido
+- **Outra conta entrando no mesmo aparelho não herda mais os dados da anterior.** Depois de uma queda de sessão (sem passar pelo "Sair"), quem entrasse com outra conta ficava com o placar, o Histórico, as conquistas, a lista de autores, a recusa automática e as conversas de quem estava, e as ações que esperavam rede iam pro Waze no nome de quem entrou. Agora cada ação guardada leva a conta de quem a fez, e quando o app reconhece outra conta os dados da anterior saem do aparelho, com um aviso.
+- **Trocar de idioma traduz na hora** o aviso do Desfazer nas Preferências, a linha do "Disponível offline", o nome da pílula de quem está no app e o do botão de Filtros. Antes, o aviso do Desfazer e o nome da pílula ficavam em português até o app ser aberto de novo.
+- **A extensão de Chrome só é oferecida onde instala** (Chrome, Edge e afins, no computador). No Firefox, no Safari e no iPad (que se apresenta como Mac) ela era um caminho sem saída.
+- **Na VM, o navegador volta a receber "não mudou" (304) com o Cloudflare na frente**: a borda troca o ETag por um "fraco", e a VM só aceitava o original, então cada abertura baixava o app inteiro de novo.
+- **A VM responde a API pelo mesmo caminho que o Cloudflare** (`/api/./sessao` é a rota `sessao` nos dois).
+
+### Mudado
+- Comentários do código com o portão de entrada certo (L2+AM) e o adaptador do Cloudflare de hoje.
+- `docs/auditoria-2026-09.md` guarda o estado da auditoria, pra ela continuar depois de uma parada.
+
+---
+
 ## v2026.09.25-05
 
 Terceira rodada da auditoria, com a verificação em produção da v2026.09.25-04 (58 ✓ · 0 ✗).
