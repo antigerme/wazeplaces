@@ -156,3 +156,42 @@ test('F4: aprovar a foto leva a fila do GESTO no alvo (`epocaFila`)', async () =
   assert.ok(alvoEnviado, 'a aprovação não saiu (o instrumento não mede nada)');
   assert.equal(alvoEnviado.epocaFila, 7, 'a aprovação não sabe de que fila é: descontaria o "Restam" da fila refeita');
 });
+
+// ── L11: aprovar a foto do ÚLTIMO pedido ────────────────────────────────────
+// A aprovação resolve o pedido como o ✓ resolve, mas não marcava que a pessoa
+// tratou algo NESTA fila: aprovar o último terminava em "Tudo limpo!" com a
+// frase de quem não tratou nada ("Confira o país e a região em Filtros") e sem
+// confete — com o ✓ no mesmo pedido saía "Você processou todos…" com festa.
+function montarUltimaAprovacao({ lightboxAberto = false } = {}) {
+  const log = [];
+  const place = pedido(1);
+  const AppState = { serverTotal: 1, fetchEpoch: 0, currentPlace: place, queue: [place] };
+  let app = null;
+  const deps = {
+    AppState, registrarPouso: () => {}, updateStats: () => {},
+    Lightbox: { isOpen: () => lightboxAberto, place: lightboxAberto ? place : null },
+    // O `advanceQueue` esvazia a fila e chama o `showNoPlaces`, que decide a
+    // frase e a festa por `tratouNestaFila` — lido NESTE instante.
+    advanceQueue: () => log.push('avanca:tratou=' + app.tratou()),
+  };
+  const chaves = Object.keys(deps);
+  app = new Function(...chaves, 'let placeResolvidoPorAprovacao = null; let tratouNestaFila = false;\n'
+    + fatiar('concluirAprovacao') + '\n' + fatiar('avancarSeAprovado')
+    + '\nlet aprovacaoPendente = null;\nreturn { concluirAprovacao, avancarSeAprovado, tratou: () => tratouNestaFila };')(...chaves.map((k) => deps[k]));
+  return { app, alvo: { id: 'u1', place, idx: 0, epocaFila: 0 }, log };
+}
+
+test('L11: aprovar o ÚLTIMO pedido conta como tratar a fila — o "Tudo limpo!" é o de quem terminou', () => {
+  const m = montarUltimaAprovacao();
+  m.app.concluirAprovacao(m.alvo);
+  assert.deepEqual(m.log, ['avanca:tratou=true'],
+    'a fila esvaziou pela aprovação sem "tratou nesta fila": o painel diz "Confira o país e a região", sem festa');
+});
+
+test('L11: com o lightbox aberto, a marca vem na APROVAÇÃO — o card sai depois, ao fechar', () => {
+  const m = montarUltimaAprovacao({ lightboxAberto: true });
+  m.app.concluirAprovacao(m.alvo);
+  assert.equal(m.app.tratou(), true, 'a aprovação confirmada não marcou que a pessoa tratou algo nesta fila');
+  m.app.avancarSeAprovado();
+  assert.deepEqual(m.log, ['avanca:tratou=true']);
+});

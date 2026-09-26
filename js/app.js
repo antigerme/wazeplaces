@@ -2609,6 +2609,11 @@ async function enviarAprovacao(alvo) {
 // seguinte contava o pedido de novo e dizia "já tratado por outro editor".
 function concluirAprovacao(alvo) {
     registrarPouso(alvo.place);
+    // Aprovar RESOLVE o pedido, como o ✓: é tratar algo nesta fila. Antes dos
+    // `show*` (o `advanceQueue` aqui embaixo ou o do fechar do lightbox): sem a
+    // marca, aprovar o ÚLTIMO pedido terminava no "Tudo limpo!" de quem não
+    // tratou nada ("Confira o país e a região"), sem festa (auditoria de 2026-09-26).
+    tratouNestaFila = true;
     // Só na fila do GESTO: o ↻ e a troca de filtro durante a janela ou o envio
     // refazem a fila (`fetchEpoch`), e descontar o "Restam" da fila nova deixava
     // o número abaixo dela (auditoria da fila, 2026-09-26).
