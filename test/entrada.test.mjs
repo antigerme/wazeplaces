@@ -656,3 +656,26 @@ test('um termo por conceito: "nível" no diálogo de acesso restrito, e UM nome 
     assert.equal(D[lang]['help.install.label'], undefined, `${lang}: o segundo nome de "instalar" voltou ao dicionário`);
   }
 });
+
+// ── A23: o nome acessível CONTÉM o texto visível (WCAG 2.5.3) ────────────────
+test('botão com texto visível tem esse texto no nome acessível, nas 4 línguas ("By AG")', () => {
+  // Quem usa controle por voz fala o que VÊ ("clicar By AG"); com o aria-label
+  // sem o texto visível, o comando não acha o botão. Símbolo (‹ › + −) não é
+  // rótulo de texto, então só entra texto com letra.
+  const D = dicionario();
+  const semTags = (h) => h.replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  let conferidos = 0;
+  for (const m of HTML.matchAll(/<(button|a)\b([^>]*)>([\s\S]*?)<\/\1>/g)) {
+    const aria = /data-i18n-aria="([^"]+)"/.exec(m[2]);
+    const visivel = semTags(m[3]);
+    if (!aria || !/\p{L}/u.test(visivel)) continue;
+    const chaveTexto = (/data-i18n="([^"]+)"/.exec(m[2]) || /data-i18n="([^"]+)"/.exec(m[3]) || [])[1];
+    for (const lang of Object.keys(D)) {
+      const texto = chaveTexto ? semTags(D[lang][chaveTexto] || '') : visivel;
+      assert.ok(D[lang][aria[1]].toLowerCase().includes(texto.toLowerCase()),
+        `${lang}: "${aria[1]}" não contém o texto visível "${texto}"`);
+    }
+    conferidos++;
+  }
+  assert.ok(conferidos >= 1, 'CONTROLE: nenhum botão com texto e aria-label achado — o recorte quebrou');
+});
