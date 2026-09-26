@@ -149,7 +149,8 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
-    ${['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe',
+    const pedidosEmAndamento = new Set();
+    ${['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida', 'sessaoVivaDepoisDe',
        'recuarSaida', 'saidaEmRecuo', 'esvaziarFilaDeSaida'].map(fatiar).join('\n')}
     return { esvaziarFilaDeSaida, carregarFilaDeSaida, esperando: () => saidaEsperandoConta };`)(...chaves.map((k) => deps[k]));
   return { app, enviados, log, AppState, guardado };

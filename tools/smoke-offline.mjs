@@ -1399,8 +1399,12 @@ const decisoes9b = [];              // cada decisão que CHEGOU: { chave, rota, 
 const buscas9b = [];                // cada busca: { tPedido, tResposta, lista }
 let atrasoBusca9b = 0;
 let atrasoDecisao9b = () => 0;
+// "LIE-FI" (passo 9): o rádio diz `onLine`, e a decisão não passa — túnel,
+// portal cativo. Só as escritas: é o envio da descarga que morre.
+let lieFi9b = false;
 const rotaApi9b = async (r) => {
   const rota = r.request().url().split('/api/')[1];
+  if (lieFi9b && (rota === 'marcar-lido' || rota === 'validar-place')) return r.abort('timedout');
   if (aviao) return r.abort('internetdisconnected');
   let corpo = {};
   try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* corpo vazio */ }
@@ -1723,6 +1727,60 @@ diz('8: a rede de volta traz de volta os PULADOS sem sinal (a fila não termina 
 await p6.evaluate(() => { API.setSession(null); });
 await p6.close();
 await p5.close();
+
+// 9. LIE-FI AO FECHAR: o ✕ está na janela do Desfazer, o app é fechado com o
+//    rádio dizendo `onLine` e nada passando. A descarga gravava o POUSO antes do
+//    envio `keepalive`; o envio morria e a decisão SUMIA — a reabertura sem rede
+//    escondia o pedido (o pouso) e o placar ficava +1, sem nada na fila de saída
+//    (auditoria de 2026-09-26, O5; medido na main de antes: fila de saída vazia e
+//    o Waze sem a decisão). Agora ela entra na fila de saída ANTES do envio.
+for (const i of [121, 122, 123]) pendentes9b.set(chave9b(SO_MAPA(i)), SO_MAPA(i));
+aviao = false; await ctx.setOffline(false);
+const p7 = await abrirFria9b('preparo 9');
+await esperarNaPagina(p7, () => typeof API !== 'undefined', 20000, 100);
+await p7.evaluate(() => { API.setSession('tok-9b'); });
+await p7.reload({ waitUntil: 'domcontentloaded' });
+await esperarNaPagina(p7, () => typeof AppState !== 'undefined' && AppState.queue.length >= 3 && !!cardDaFrente(), 20000, 100);
+await p7.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+  offlineMarcarGesto(); offlineVarrer(); });
+await esperarNaPagina(p7, () => offlineUltimoResultado !== null, 60000, 250);
+const rejeitados9 = await p7.evaluate(() => AppState.stats.rejected);
+await p7.evaluate(() => { AppState.preferences.undoEnabled = true; });
+await p7.evaluate(() => cardDaFrente().querySelector('.card-btn-reject').click());
+await esperarNaPagina(p7, () => !!AppState.pendingAction, 5000, 50);
+const k9 = await p7.evaluate(() => { const p = AppState.pendingAction && AppState.pendingAction.place;
+  return p ? p.venueID + '|' + p.updateRequestID : null; });
+diz('9: PRÉ-CONDIÇÃO — o ✕ está na JANELA do Desfazer quando o app é fechado, e a preparação ficou pronta',
+  !!k9 && (await p7.evaluate(() => offlineUltimoResultado)) === 'pronto', JSON.stringify({ k9 }));
+lieFi9b = true;
+await p7.close({ runBeforeUnload: true });
+await dormir(500);
+lieFi9b = false;
+aviao = true; await ctx.setOffline(true);
+const p8 = await abrirFria9b('reaberta lie-fi');
+await esperarNaPagina(p8, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'offline.abriu'), 20000, 100);
+const r9 = await estadoDaFila9b(p8);
+const s9 = await saida9b(p8);
+const pousos9 = await p8.evaluate(() => { try {
+  return JSON.parse(localStorage.getItem('waze_places_offline_pousos') || '[]').map((e) => e[0]); } catch (e) { return []; } });
+diz('9: a decisão do envio que MORREU está na fila de saída (nada se perdeu)',
+  Array.isArray(s9) && s9.filter((x) => x.chave === k9).length === 1, JSON.stringify({ k9, s9 }));
+diz('9: e o pedido não volta como card — quem o esconde é a fila de saída, não um pouso sem resposta',
+  !r9.fila.includes(k9) && !pousos9.includes(k9), JSON.stringify({ k9, fila: r9.fila, pousos9 }));
+aviao = false; await ctx.setOffline(false);
+await p8.evaluate(() => window.dispatchEvent(new Event('online')));
+for (let j = 0; j < 6; j++) {
+  await esperarFimDaSaida(p8, 25000);
+  if (!(await saida9b(p8) || []).length) break;
+  await p8.evaluate(() => window.dispatchEvent(new Event('online')));
+  await dormir(400);
+}
+const final9 = await p8.evaluate(() => JSON.parse(localStorage.getItem('waze_places_stats') || '{}'));
+diz('9: a rede de volta manda a decisão UMA vez, e o placar a conta UMA vez',
+  decisoes9b.filter((d) => d.chave === k9).length === 1 && final9.rejected === rejeitados9 + 1,
+  JSON.stringify({ decisoes: decisoes9b.filter((d) => d.chave === k9), rejeitados9, final9 }));
+await p8.evaluate(() => { API.setSession(null); });
+await p8.close();
 await ctx.unroute('**/api/*', rotaApi9b);
 
 secao('9c. O DIAGNÓSTICO SOBREVIVE A FECHAR O APP — o número do botão e o relatório');

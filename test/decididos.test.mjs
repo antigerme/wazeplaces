@@ -381,9 +381,10 @@ test('o pedido fica "em andamento" do GESTO até o fim do envio — e sai por to
   assert.ok(iMarca > 0, 'o pedido na janela do Desfazer não é marcado');
   assert.ok(iMarca < s.indexOf('const timerId = setTimeout(') && iMarca < s.indexOf("undoEnabled === false && canDisableUndo()"),
     'a marca tem que vir ANTES da janela e do envio sem janela');
-  // Fim do envio, Desfazer, cancelar (logout/pagehide do lote) e enfileirar ao
-  // fechar sem rede. Um que falte deixa o pedido de fora da fila pra sempre.
-  assert.equal((s.match(/marcarEmAndamento\(places, false\);/g) || []).length, 4,
+  // Fim do envio, Desfazer, cancelar (logout/pagehide do lote), enfileirar ao
+  // fechar sem rede e a descarga que acha a decisão REPETIDA na fila (ela não
+  // envia nada). Um que falte deixa o pedido de fora da fila pra sempre.
+  assert.equal((s.match(/marcarEmAndamento\(places, false\);/g) || []).length, 5,
     'algum caminho de saída da janela deixou de desmarcar o pedido');
   const iFinally = s.indexOf('} finally {');
   assert.ok(iFinally > 0 && s.indexOf('marcarEmAndamento(places, false);', iFinally) > iFinally,
@@ -405,7 +406,7 @@ test('o LOTE marca os pedidos em andamento — a recusa automática não passa p
 test('fechar SEM REDE com ação na janela do Desfazer enfileira de forma SÍNCRONA', () => {
   const d = fatiar('descarregarAcaoPendente');
   const iSemRede = d.indexOf('navigator.onLine === false && AppState.pendingAction.enfileirarSemRede');
-  const iExecuta = d.indexOf('pa.execute();');
+  const iExecuta = d.indexOf('AppState.pendingAction.descarregar();');
   assert.ok(iSemRede > 0 && iExecuta > iSemRede,
     'sem rede, a ação tem que ir pra fila ANTES de tentar a rede — a volta do laço pode não existir');
   const s = fatiar('scheduleAction');
@@ -464,13 +465,23 @@ test('o esvaziamento manda cada item pela região DELE, e tira da fila pela CHAV
   assert.doesNotMatch(e, /f\.shift\(\)/);
 });
 
-test('fechar COM rede na janela do Desfazer: o pouso vai ANTES do envio (a página pode morrer antes da resposta)', () => {
-  // Reaberta sem rede, a fila guardada devolvia como card o pedido que tinha
-  // acabado de sair — e dava pra decidir de novo (auditoria 2026-09-25).
+test('fechar COM rede na janela do Desfazer: a decisão entra na FILA DE SAÍDA antes do envio, e o pouso só vem com a resposta', () => {
+  // O pouso ia antes do envio `keepalive` (auditoria de 2026-09-25): reaberta
+  // sem rede, a fila guardada não devolvia o pedido. Mas com o "lie-fi" (onLine
+  // verdadeiro, nada passa) o envio morria e a decisão SUMIA: o pouso gravado
+  // escondia o pedido e o placar ficava +1 (auditoria de 2026-09-26, O5). Hoje
+  // quem esconde o pedido na reabertura é a própria fila de saída.
   const d = fatiar('descarregarAcaoPendente');
-  const iPouso = d.indexOf("if (pa.type === 'read' || pa.type === 'reject') registrarPouso(pa.place);");
-  const iEnvio = d.indexOf('pa.execute();');
-  assert.ok(iPouso > 0 && iEnvio > iPouso, 'o pouso não é gravado antes do envio da descarga');
-  // O pouso sai por localStorage (síncrono): ele sobrevive à página morrendo.
+  assert.doesNotMatch(d, /registrarPouso\(/, 'o pouso voltou a ir antes da resposta — ele esconde uma decisão que talvez nunca saia');
+  assert.match(d, /else AppState\.pendingAction\.descarregar\(\);/, 'a descarga com rede deixou de passar pela fila de saída');
+  const s = fatiar('scheduleAction');
+  const i = s.indexOf('descarregar: () => {');
+  assert.ok(i > 0, 'sumiu o `descarregar`');
+  const corpo = s.slice(i, s.indexOf('AppState.pendingAction.execute();', i));
+  const iEnfileira = corpo.indexOf('const r = enfileirarSaida(type, places[0], regiaoDoGesto);');
+  assert.ok(iEnfileira > 0, 'a descarga não enfileira ANTES do envio');
+  assert.match(corpo, /if \(r\) descargaNaFila\.add\(places\[0\]\);/,
+    'sem a marca, a resposta que chega com a página viva não sabe que o item já está na fila — contaria duas vezes');
+  // E o pouso vem de onde sempre veio: a resposta.
   assert.match(fatiar('registrarPouso'), /offlineLigado\(\)/);
 });

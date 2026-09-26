@@ -487,7 +487,8 @@ function montarResultado() {
     historyTodayKey: () => '2026-09-25', ondeAgora: () => '30', contaAgora: () => null,
     marcaDaSessao: () => 'marca',
   };
-  const fontes = ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'handleActionResult'].map(fatiar).join('\n');
+  const fontes = 'const descargaNaFila = new WeakSet();\n' + ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida',
+    'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'handleActionResult'].map(fatiar).join('\n');
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + '\nreturn { handleActionResult, carregarFilaDeSaida };')(...nomes.map((n) => deps[n]));
   return { app, AppState, chamadas };
@@ -567,12 +568,13 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
     medidas, sonda, escrita, relogio, setImmediate,
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
-    'enfileirarSaida', 'marcarNaSaida', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo',
+    'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo',
     'registrarPousoDeSaida', 'esvaziarFilaDeSaida', 'handleActionResult', 'handleUnauthorized'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
+    const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet();
     // O _post: a resposta leva uma volta de rede (outra tarefa, com o relógio
     // andando), e toda resposta que CHEGA chama a prova de rede ANTES de voltar.
     const aoProvarRede = () => { if (!esvaziandoSaida) esvaziarFilaDeSaida(); };
@@ -643,4 +645,131 @@ test('O1: a confirmação de OUTRA sessão não vale — e um pouso zera o recuo
   assert.match(e, /enviados\+\+;\s*saidaRecuo = \{ s: null, n: 0, ate: 0 \};/,
     'o pouso deixou de zerar o recuo: depois de um 401 passageiro a fila esperaria à toa');
   assert.match(e, /if \(saidaEmRecuo\(\)\) return;/, 'o esvaziamento não respeita o recuo');
+});
+
+// ── O5: a DESCARGA com rede (ou "lie-fi") não perde a decisão ────────────────
+// Fechar o app na janela do Desfazer com `onLine === true` mas sem tráfego
+// (túnel, portal cativo): a descarga gravava o POUSO antes do envio `keepalive`,
+// o envio morria, e a decisão sumia — a reabertura sem rede ESCONDIA o pedido e
+// o placar ficava +1 (auditoria de 2026-09-26, medido no navegador: p6). Aqui o
+// aparelho roda de verdade — `handleReject`, `scheduleAction`, a descarga, o
+// `handleActionResult` e o esvaziamento fatiados do app.js —, com o armazenamento
+// sobrevivendo à "página" (cada `pagina()` é uma abertura nova, memória zerada).
+function aparelhoO5(guardado = new Map()) {
+  return function pagina({ resposta }) {
+    const medidas = { envios: [], pousos: 0, historico: 0, diario: [] };
+    const AppState = { authenticated: true, profile: { id: 1 }, currentPlace: null, queue: [], pendingAction: null,
+      inFlightActions: 0, serverTotal: 5, stats: JSON.parse(guardado.get('stats') || '{"read":0,"rejected":0,"skipped":0}'),
+      preferences: { undoEnabled: true } };
+    const deps = {
+      AppState, epocaDaSessao: 0, navigator: { onLine: true },
+      safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
+      SAIDA_KEY: 'waze_places_saida', SAIDA_MAX: 1000, SAIDA_RITMO_MS: 0, CONTA_KEY: 'waze_places_conta',
+      SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000], UNDO_WINDOW_MS: 3000,
+      // A janela do Desfazer NUNCA vence sozinha aqui: quem fecha é a descarga.
+      setTimeout: () => 0, clearTimeout: () => {},
+      dlog: () => {}, dlogPlace: () => null, dfato: (k) => medidas.diario.push(k), t: (k) => k, msgDoServidor: (r, d) => d,
+      showToast: () => {}, showUndoBanner: () => {}, removeUndoBanner: () => {}, aplicarTravaDeAcao: () => {},
+      updateInFlightIndicator: () => {}, updateStats: () => {}, updatePendingCount: () => {}, showCurrentPlace: () => {},
+      saveStats: () => guardado.set('stats', JSON.stringify(AppState.stats)),
+      canDisableUndo: () => false, registrarJanelaSemUndo: () => {}, zerarJanelasSemUndo: () => {},
+      acoesTravadas: () => false, direcaoTravada: () => false, Treino: { ativo: false }, advanceQueue: () => {},
+      presencaWmeDaAcao: () => null, presencaWmeAoResponder: () => {}, callWithRetry: (fn) => fn(),
+      registrarPouso: () => { medidas.pousos++; }, recordHistory: () => { medidas.historico++; },
+      registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {}, avisarConsequencia: () => {},
+      historyTodayKey: () => '2026-09-26', ondeAgora: () => '30', handleUnauthorized: () => {},
+      renomeacaoPendente: null, aprovacaoPendente: null, exclusaoPendente: null, console: { error: () => {} },
+      medidas, resposta, setImmediate,
+    };
+    const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+      'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
+      'saidaEmRecuo', 'registrarPousoDeSaida', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction',
+      'handleReject', 'descarregarAcaoPendente'];
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, `
+      let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, tratouNestaFila = false;
+      let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
+      const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet();
+      // O _post: toda resposta que CHEGA chama a prova de rede, ANTES de voltar.
+      const aoProvarRede = () => { if (!esvaziandoSaida) esvaziarFilaDeSaida(); };
+      const rede = async (quem, v) => {
+        medidas.envios.push(quem + ':' + v);
+        const r = resposta(v, medidas.envios.length);
+        if (r === 'pendura') return new Promise(() => {});           // a página morreu com o envio no ar
+        await new Promise((ok) => setImmediate(ok));
+        if (r === 'rede') return { success: false, errorCategory: 'transient' };
+        aoProvarRede();
+        return r === '702' ? { success: false, errorCategory: 'already_processed' } : { success: true };
+      };
+      const API = { getSession: () => 'tok', getRegion: () => 'row', setSaindo: () => {},
+        rejectPlace: (v) => rede('rejeitar', v), markAsRead: (v) => rede('ler', v) };
+      ${nomes.map(fatiarComAsync).join('\n')}
+      return { handleReject, descarregarAcaoPendente, esvaziarFilaDeSaida, carregarFilaDeSaida };`)(...chaves.map((k) => deps[k]));
+    return { app, AppState, medidas };
+  };
+}
+const esperarRede = async () => { for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r)); };
+const PEDIDO_O5 = () => ({ venueID: 'v1', updateRequestID: 'u1', creatorId: 7 });
+function tratarEFechar(pagina) {
+  pagina.AppState.currentPlace = PEDIDO_O5();
+  pagina.app.handleReject();                    // o ✕, na janela do Desfazer
+  pagina.app.descarregarAcaoPendente();        // e o app vai pro fundo / fecha
+}
+
+test('O5 lie-fi: a descarga põe a decisão na fila ANTES do envio — o envio morre e ela SAI na reabertura, contando UMA vez', async () => {
+  const aparelho = aparelhoO5();
+  const a = aparelho({ resposta: () => 'pendura' });
+  tratarEFechar(a);
+  await esperarRede();
+  assert.deepEqual(a.app.carregarFilaDeSaida().map((x) => x.venueID), ['v1'], 'a decisão sumiu com o envio que morreu');
+  assert.equal(a.medidas.pousos, 0, 'o pouso foi gravado sem resposta — a reabertura esconderia um pedido que não saiu');
+  assert.equal(a.AppState.stats.rejected, 1);
+  // Reaberto COM rede (memória zerada, armazenamento o mesmo): a fila sai.
+  const b = aparelho({ resposta: () => 'ok' });
+  await b.app.esvaziarFilaDeSaida();
+  assert.deepEqual(b.medidas.envios, ['rejeitar:v1']);
+  assert.equal(b.app.carregarFilaDeSaida().length, 0);
+  assert.equal(b.medidas.historico, 1);
+  assert.equal(b.AppState.stats.rejected, 1, 'o placar do gesto não pode contar de novo nem descer');
+});
+
+test('O5: o envio CHEGOU e a página morreu antes da resposta — o reenvio volta "já tratado" e conta UMA vez', async () => {
+  const aparelho = aparelhoO5();
+  tratarEFechar(aparelho({ resposta: () => 'pendura' }));
+  await esperarRede();
+  const b = aparelho({ resposta: () => '702' });
+  await b.app.esvaziarFilaDeSaida();
+  assert.equal(b.app.carregarFilaDeSaida().length, 0);
+  assert.equal(b.medidas.historico, 1, 'o "já tratado" do reenvio não contou (ou contou duas vezes)');
+  assert.equal(b.AppState.stats.rejected, 1);
+});
+
+test('O5: a resposta chega com a página VIVA — tira o item da fila, e a prova de rede dela não reenvia', async () => {
+  const aparelho = aparelhoO5();
+  // O 1º envio (a descarga) dá certo; qualquer outro seria o MESMO pedido de novo.
+  const a = aparelho({ resposta: (v, n) => (n === 1 ? 'ok' : '702') });
+  tratarEFechar(a);
+  await esperarRede();
+  assert.deepEqual(a.medidas.envios, ['rejeitar:v1'], 'o esvaziamento puxado pela resposta mandou o mesmo pedido de novo');
+  assert.equal(a.app.carregarFilaDeSaida().length, 0, 'a decisão que pousou ficou na fila de saída');
+  assert.equal(a.medidas.historico, 1, 'o pedido contou duas vezes no Histórico');
+  assert.equal(a.medidas.pousos, 1, 'o pouso não veio com a resposta');
+  // E a página viva com a resposta de REDE: o item fica, sem o gesto contar de novo.
+  const c = aparelhoO5()({ resposta: () => 'rede' });
+  tratarEFechar(c);
+  await esperarRede();
+  assert.equal(c.app.carregarFilaDeSaida().length, 1, 'a decisão sumiu com a resposta de rede');
+  assert.equal(c.AppState.stats.rejected, 1, 'o placar desceu como "repetido" — é o próprio item da descarga');
+  assert.ok(!c.medidas.diario.includes('saida.repetida'), 'o item da descarga foi tratado como gesto repetido');
+});
+
+test('O5: a descarga que acha a decisão deste pedido JÁ na fila não envia de novo, e o gesto sai do placar', async () => {
+  const guardado = new Map([['waze_places_saida', JSON.stringify([{ tipo: 'read', venueID: 'v1', updateRequestID: 'u1', conta: '1', regiao: 'row' }])]]);
+  const a = aparelhoO5(guardado)({ resposta: () => 'ok' });
+  a.AppState.currentPlace = PEDIDO_O5();
+  a.app.handleReject();
+  a.app.descarregarAcaoPendente();
+  await esperarRede();
+  assert.deepEqual(a.medidas.envios.filter((e) => e.startsWith('rejeitar')), [], 'a segunda decisão do mesmo pedido saiu');
+  assert.equal(a.AppState.stats.rejected, 0, 'o gesto repetido contou no placar');
 });

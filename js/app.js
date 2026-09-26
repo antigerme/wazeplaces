@@ -11927,6 +11927,19 @@ function saidaEmRecuo() {
     return saidaRecuo.s === marcaDaSessao(API.getSession()) && Date.now() < saidaRecuo.ate;
 }
 
+// Tira da fila de saída o item deste pedido, achado pela chave: é a resposta do
+// envio da DESCARGA que chegou com a página viva (ver `descargaNaFila`).
+function tirarDaFilaDeSaida(tipo, place) {
+    const f = carregarFilaDeSaida();
+    const i = f.findIndex((x) => x && x.tipo === tipo && x.venueID === place.venueID
+        && x.updateRequestID === place.updateRequestID);
+    if (i < 0) return false;
+    f.splice(i, 1);
+    salvarFilaDeSaida(f);
+    updateInFlightIndicator();
+    return true;
+}
+
 // Grava campos num item que JÁ está na fila de saída, achado pela chave (a fila
 // é relida: outra aba ou o gesto podem ter mexido nela).
 function marcarNaSaida(item, campos) {
@@ -12186,7 +12199,14 @@ async function esvaziarFilaDeSaida() {
             // pousaria depois do logout e o `recordHistory` recriaria o
             // histórico que o "Sair" acabou de apagar.
             if (!AppState.authenticated) break;
-            const item = f[0];
+            // O item cujo envio ainda está NO AR não sai de novo daqui: a descarga
+            // o põe na fila e o manda com `keepalive`, e ele fica "em andamento"
+            // até a resposta — que decide o destino dele (ver `descargaNaFila`).
+            // Sem isto a prova de rede da PRÓPRIA resposta mandava o item de novo
+            // e ele contava duas vezes. Pega o primeiro que não está no ar; só
+            // com os que estão, para (a resposta deles chama de novo).
+            const item = f.find((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x)));
+            if (!item) break;
             // A conta do GESTO contra a de agora (ver `contaAgora`). Desconhecida
             // agora (sessão nova, perfil a caminho): espera — o perfil chegando
             // chama de novo. De OUTRA conta: sai da fila sem ir ao Waze, e o
@@ -12375,6 +12395,13 @@ function chaveDoPedido(p) {
 // durante a janela traria o pedido de volta, e o Desfazer o devolveria DE NOVO
 // — o mesmo pedido duas vezes na fila.
 const pedidosEmAndamento = new Set();
+// Os pedidos cuja decisão a DESCARGA pôs na fila de saída antes de o envio sair
+// (ver `descarregar` no `scheduleAction`). O MESMO objeto do pedido que o
+// executor entrega ao `handleActionResult`: a resposta que chegar com a página
+// viva decide o destino do item — pousou, sai da fila; rede, fica lá sem contar
+// de novo. Só em memória: morta a página, o item segue na fila e o reenvio o
+// resolve.
+const descargaNaFila = new WeakSet();
 // Chave → quando a decisão pousou no Waze, NESTA página. É o que cobre a
 // corrida da busca com o esvaziamento. Todo mundo tem, com ou sem offline, e
 // não custa armazenamento: morre com a página.
@@ -13419,7 +13446,13 @@ function handleActionResult(actionType, place, result, regiao) {
                        cat: (result && result.errorCategory) || null,
                        key: (result && result.errorKey) || null });
     if (!result) return;
+    // A DESCARGA já pôs esta decisão na fila de saída antes de o envio sair (ver
+    // `descarregar` no `scheduleAction`): a resposta que chegou com a página viva
+    // decide o destino do item — pousou, ele sai da fila; rede ou sessão, ele
+    // fica lá sem o gesto contar de novo.
+    const jaNaSaida = descargaNaFila.delete(place);
     if (result.success) {
+        if (jaNaSaida) tirarDaFilaDeSaida(actionType, place);
         registrarPouso(place);
         recordHistory(actionType, 1);
         // Só REJEIÇÃO conta reincidência. Marcar como lido não é juízo
@@ -13434,6 +13467,7 @@ function handleActionResult(actionType, place, result, regiao) {
     const cat = result.errorCategory || 'unknown';
 
     if (cat === 'already_processed' || cat === 'not_found') {
+        if (jaNaSaida) tirarDaFilaDeSaida(actionType, place);
         registrarPouso(place);
         recordHistory(actionType, 1);
         // Conta como tratada pelos mesmos motivos que ela conta no placar: o
@@ -13450,6 +13484,13 @@ function handleActionResult(actionType, place, result, regiao) {
     // relogin pra ser tratado (e contado) de novo. Vai pra fila de saída, que
     // sai quando a sessão se confirma viva ou depois de entrar de novo; ela para
     // e SEGURA o item enquanto a sessão estiver morta.
+    if (cat === 'unauthorized' && jaNaSaida) {
+        // Já está na fila: só anota QUANDO levou o 401 e confere a sessão.
+        marcarNaSaida({ tipo: actionType, venueID: place.venueID, updateRequestID: place.updateRequestID },
+                      { u401: Date.now() });
+        handleUnauthorized();
+        return;
+    }
     if (cat === 'unauthorized') {
         // `u401`: QUANDO este pedido levou o 401. Se a sonda confirmar a sessão
         // viva e ele levar outro, é a escrita dele que o Waze recusa, não a
@@ -13472,6 +13513,8 @@ function handleActionResult(actionType, place, result, regiao) {
     // Sem toast por ação: 150 pedidos numa sombra de conectividade dariam 150
     // interrupções. Quem presta contas é o indicador ("N esperando envio"), que
     // some sozinho quando a fila esvazia.
+    // Já está na fila (a descarga): o placar fica, e ela sai quando a rede vier.
+    if (cat === 'transient' && jaNaSaida) return;
     if (cat === 'transient') {
         const naFila = enfileirarSaida(actionType, place, regiao);
         // A decisão deste pedido JÁ estava esperando: a primeira vale, e este
@@ -13488,6 +13531,9 @@ function handleActionResult(actionType, place, result, regiao) {
         if (naFila) return;
     }
 
+    // Recusa de verdade: se a descarga tinha posto a decisão na fila, ela sai —
+    // repetir não muda a recusa, e o placar desce aqui embaixo.
+    if (jaNaSaida) tirarDaFilaDeSaida(actionType, place);
     const statKey = actionType === 'read' ? 'read' : 'rejected';
     AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
     AppState.serverTotal++;
@@ -14317,6 +14363,36 @@ function scheduleAction(type, place, executor, opts = {}) {
         // O que fazer quando a página está morrendo. Ver o comentário da
         // assinatura: o lote CANCELA porque meio-lote enviado não tem sintoma.
         aoSair,
+        // Página indo pro fundo ou morrendo COM rede — ou com o "lie-fi" que diz
+        // `onLine` e não passa nada (túnel, portal cativo). O `keepalive` leva o
+        // envio com a página morta, mas se ele não chegasse a decisão sumia: o
+        // pouso já tinha sido gravado antes do envio (a reabertura sem rede
+        // escondia o pedido) e o placar ficava com o +1 (auditoria de
+        // 2026-09-26, O5). Agora a decisão entra na fila de saída de forma
+        // SÍNCRONA, ANTES do envio — at-least-once: se o envio chegou e a
+        // resposta morreu com a página, o reenvio volta "já tratado" e conta UMA
+        // vez; se a resposta chegar com a página viva, ela tira o item da fila
+        // (`descargaNaFila`, no `handleActionResult`). O pouso vem da resposta.
+        descarregar: () => {
+            if (executed) return;
+            if (n === 1 && (type === 'read' || type === 'reject')) {
+                const r = enfileirarSaida(type, places[0], regiaoDoGesto);
+                if (r === 'repetida') {
+                    // A decisão deste pedido JÁ esperava na fila: vale a primeira
+                    // (ver `enfileirarSemRede`), e este gesto não sai nem conta.
+                    executed = true;
+                    clearTimeout(timerId);
+                    AppState.pendingAction = null;
+                    marcarEmAndamento(places, false);
+                    reverterPlacar(true);
+                    removeUndoBanner();
+                    aplicarTravaDeAcao();
+                    return;
+                }
+                if (r) descargaNaFila.add(places[0]);
+            }
+            AppState.pendingAction.execute();
+        },
         // Página morrendo SEM REDE: a decisão vai direto pra fila de saída, na
         // hora e sem tentar a rede. O caminho normal chegaria lá do mesmo jeito
         // — tenta, falha por rede, enfileira —, mas por uma cadeia ASSÍNCRONA
@@ -14954,17 +15030,13 @@ function descarregarAcaoPendente() {
         // armazenamento quando o lote foi agendado, e sem isto ele sobreviveria
         // ao recarregamento contando pedidos que nunca saíram.
         if (AppState.pendingAction.aoSair === 'cancel') AppState.pendingAction.cancel(true);
-        else {
-            // O POUSO vai agora, antes do envio: a página pode morrer antes da
-            // resposta, e o pouso só era gravado NELA. Reaberta sem rede, a fila
-            // guardada devolvia como card o pedido que acabou de sair, e dava
-            // pra decidir de novo. O `keepalive` leva a ação com a página morta;
-            // se ela falhar, a próxima busca com rede traz o pedido de volta
-            // (o pouso só filtra a fila GUARDADA, ver `semOsJaDecididos`).
-            const pa = AppState.pendingAction;
-            if (pa.type === 'read' || pa.type === 'reject') registrarPouso(pa.place);
-            pa.execute();
-        }
+        // A decisão entra na fila de saída ANTES do envio (ver `descarregar`):
+        // a página pode morrer antes da resposta — e o envio com ela, no
+        // "lie-fi". Na fila, a reabertura sem rede já não a devolve como card
+        // (`semOsJaDecididos`), e ela sai quando houver rede. O POUSO não vai
+        // mais antes do envio: gravado sem a resposta, ele escondia o pedido de
+        // uma decisão que talvez nunca tenha saído.
+        else AppState.pendingAction.descarregar();
     } catch (e) {
         console.error('Falha ao descarregar a ação pendente:', e);
     }
