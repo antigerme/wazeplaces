@@ -83,6 +83,16 @@ async function autenticar(urlDaAba) {
       const r = await trocarPorToken(formatarNetscape(cookies));
       if (r && r.success && r.sessionToken) return r;
 
+      // O PORTÃO do app recusou esta conta (nível ou área — `isUserAllowed` no
+      // servidor). É resposta DEFINITIVA: tentar de novo não muda o nível de
+      // ninguém, e cada tentativa era uma ida ao /Session do Waze no nome da
+      // pessoa (medido: 4 tentativas em 4,7 s, e a ponte ainda dizia só "erro").
+      // O motivo e o perfil vão junto, pra o app mostrar o MESMO diálogo do
+      // login por arquivo (auditoria de 2026-09-26).
+      if (r && r.errorCategory === 'access_denied') {
+        return { success: false, negado: true, error: r.error, errorKey: r.errorKey, errorVars: r.errorVars, profile: r.profile };
+      }
+
       // 400 com cookie inválido/expirado é "não está logado no WME" — insistir
       // não muda nada e só atrasa a tela. Retry é pra falha de REDE.
       if (r && r.error && /expirad|inválid|invalid|csrf/i.test(String(r.error))) {

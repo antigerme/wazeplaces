@@ -426,6 +426,7 @@ function initApp() {
             // cada rodada porque atinge sempre o PRIMEIRO card medido.
             if (API.getSession() || AppState.authenticated) return;
             showAuthScreen();
+            mostrarNegadoDaExtensao();   // o portão recusou: o motivo, não o silêncio
         });
     }
 }
@@ -459,10 +460,20 @@ function initApp() {
 const EXT_PRESENTE_MS = 350;    // "tem extensão aí?" — só espera local
 const EXT_ESPERA_MS = 8000;     // depois do `aguarde`, o prazo da ida ao Waze
 let extPerguntando = false;
+// A extensão disse que o PORTÃO recusou esta conta (nível ou área — ver o
+// `autenticar` do background.js dela). Antes a recusa chegava como um
+// `sem-sessao` qualquer: quem não passa no portão e usa a extensão NUNCA via o
+// motivo, a extensão tentava 4 vezes (4 idas ao /Session do Waze no nome da
+// pessoa) e tudo se repetia a cada volta à aba (auditoria de 2026-09-26).
+// Agora o app mostra o MESMO "Acesso restrito" do login por arquivo, e não
+// pergunta de novo nesta página ao voltar à aba.
+let extNegadoNestaPagina = false;
+let extNegado = null;   // a recusa que ainda não foi mostrada (quem mostra, consome)
 
 function entrarPelaExtensao({ silencioso = false } = {}) {
     if (extPerguntando) return Promise.resolve(false);
     extPerguntando = true;
+    extNegado = null;   // uma recusa de pergunta ANTERIOR não é desta
 
     return new Promise((resolve) => {
         let terminou = false;
@@ -489,9 +500,20 @@ function entrarPelaExtensao({ silencioso = false } = {}) {
                 if (!silencioso) mostrarEntrandoPelaExtensao(true);
                 return;
             }
-            if (d.action === 'sem-sessao') return fim(false);   // instalada, mas sem login no WME
+            if (d.action === 'sem-sessao') {
+                // Instalada, mas sem sessão pra dar. Com o motivo `negado`, vem
+                // junto o que o servidor disse (perfil e motivo). Continua sendo
+                // `sem-sessao` de propósito: o app de ANTES não conhece o motivo
+                // e cai no login na hora, como sempre fez.
+                if (d.motivo === 'negado') {
+                    extNegadoNestaPagina = true;
+                    extNegado = negadoDaExtensao(d.negado);
+                }
+                return fim(false);
+            }
             if (d.action !== 'sessao' || !d.token) return;
             API.setSession(String(d.token), 'extensao');
+            aoEntrarNestaPagina();
             // O que a tela de entrada tinha aberto (o "Colar", com o chaveiro
             // colado) sai COM a limpeza — ver `MODAIS_DA_ENTRADA`.
             fecharModaisDaEntrada();
@@ -511,6 +533,59 @@ function entrarPelaExtensao({ silencioso = false } = {}) {
             window.postMessage({ source: 'wazeplaces', action: 'precisa-de-sessao' }, window.location.origin);
         } catch (e) { fim(false); }
     });
+}
+
+// A recusa que a extensão repassou, copiada CAMPO A CAMPO, com tipo e teto: ela
+// chega por `postMessage`, e nada do outro lado entra cru no diálogo. Sai no
+// MESMO formato da resposta do `testar-cookies`, que é o que o
+// `showAccessDenied` já sabe mostrar.
+function negadoDaExtensao(n) {
+    const o = n && typeof n === 'object' ? n : {};
+    const p = o.profile && typeof o.profile === 'object' ? o.profile : null;
+    const vars = {};
+    if (o.errorVars && typeof o.errorVars === 'object') {
+        for (const [k, v] of Object.entries(o.errorVars)) {
+            if (!/^[A-Za-z]{1,24}$/.test(k)) continue;
+            if (Number.isFinite(v)) vars[k] = v;
+            else if (typeof v === 'string') vars[k] = v.slice(0, 40);
+        }
+    }
+    return {
+        success: false,
+        errorCategory: 'access_denied',
+        errorKey: typeof o.errorKey === 'string' && /^srv\.err\.[A-Za-z]+$/.test(o.errorKey) ? o.errorKey : undefined,
+        errorVars: vars,
+        error: typeof o.error === 'string' ? o.error.slice(0, 300) : undefined,
+        profile: p && typeof p.userName === 'string' && p.userName ? {
+            userName: p.userName.slice(0, 64),
+            rank: Number.isInteger(p.rank) ? p.rank : null,
+            isAreaManager: p.isAreaManager === true,
+            isStaff: p.isStaff === true,
+        } : null,
+    };
+}
+
+// Quem mostra a recusa, consome: o diálogo sai UMA vez por pergunta.
+function tirarNegadoDaExtensao() {
+    const r = extNegado;
+    extNegado = null;
+    return r;
+}
+
+function mostrarNegadoDaExtensao() {
+    const r = tirarNegadoDaExtensao();
+    if (r) showAccessDenied(r);
+}
+
+// Todo login que DEU CERTO começa um ciclo novo NESTA página. As duas marcas de
+// "não pergunte de novo à extensão ao voltar à aba" — o "Sair" deliberado e a
+// recusa do portão — são do ciclo anterior. O `saiuNestaPagina` nunca voltava a
+// falso: quem saía e entrava de novo na mesma página, se a sessão caísse depois,
+// não era mais relogado pela extensão ao voltar à aba (auditoria de 2026-09-26).
+function aoEntrarNestaPagina() {
+    saiuNestaPagina = false;
+    extNegadoNestaPagina = false;
+    extNegado = null;
 }
 
 // Ao LIGAR esconde a tela de login e mostra o spinner. Ao desligar, esconde só
@@ -833,9 +908,13 @@ function setupAppListeners() {
             // era o que acontecia — sair, ir ao WME e voltar entrava de novo
             // sozinho. Recarregar a página (ou tocar em entrar) começa do zero.
             if (saiuNestaPagina) return;
+            // E quem o portão recusou pela extensão já viu o motivo: perguntar
+            // de novo a cada volta à aba era uma ida ao Waze e um diálogo a mais
+            // por troca de aba, com a mesma resposta.
+            if (extNegadoNestaPagina) return;
             if (AppState.authenticated || API.getSession()) return;
             if (document.getElementById('authScreen')?.classList.contains('hidden')) return;
-            entrarPelaExtensao({ silencioso: true });
+            entrarPelaExtensao({ silencioso: true }).then((entrou) => { if (!entrou) mostrarNegadoDaExtensao(); });
         });
     }
     $('themeBtn').addEventListener('click', toggleTheme);
@@ -1222,6 +1301,7 @@ async function resgatarPareamento(code, { silencioso = false } = {}) {
         return false;
     }
     closeModal('pairEnterModal');
+    aoEntrarNestaPagina();
     showToast(t('toast.pairSuccess'), 'success');
     showMainScreen();
     resetQueue();   // fila NOVA, como no login por cookies
@@ -3175,6 +3255,7 @@ async function authenticateWithCookies(cookies) {
         const result = await API.testCookies(cookies);
         if (result.success) {
             guardarPrazoDaSessao(result);
+            aoEntrarNestaPagina();
             showMainScreen();
             resetQueue();
             AppState._profilePromise = loadProfileAndAuxData();
@@ -5925,8 +6006,15 @@ function derrubarSessao(errorKey, { depois } = {}) {
             rebuscarDepoisDeFalha();
             return;
         }
-        showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
-        setTimeout(() => showAuthScreen(), UNAUTHORIZED_REDIRECT_MS);
+        // A extensão pode ter respondido que o PORTÃO recusou a conta (o nível
+        // ou a área mudou no Waze): aí o motivo é esse, não "a sessão venceu",
+        // e a pessoa vê o "Acesso restrito" em vez do aviso de queda.
+        const negado = tirarNegadoDaExtensao();
+        if (!negado) showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
+        setTimeout(() => {
+            showAuthScreen();
+            if (negado) showAccessDenied(negado);
+        }, UNAUTHORIZED_REDIRECT_MS);
     });
 }
 

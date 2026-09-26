@@ -54,7 +54,14 @@ A ponte responde com uma de duas:
 ```js
 { source: 'wazeplaces-ext', action: 'sessao',     token: '…' }   // deu certo
 { source: 'wazeplaces-ext', action: 'sem-sessao', motivo: '…' }  // sem login no WME, ou erro
+{ source: 'wazeplaces-ext', action: 'sem-sessao', motivo: 'negado',
+  negado: { errorKey, errorVars, error, profile } }               // o portão do app recusou a conta
 ```
+
+`negado` é quando o servidor respondeu `access_denied` (a conta não tem o nível ou a área que o
+app exige). É resposta definitiva: a extensão não tenta de novo, e o app mostra o diálogo "Acesso
+restrito" com o perfil — o mesmo do login por arquivo. Segue sendo `sem-sessao` de propósito: o
+app de antes não conhece o motivo e cai no login na hora, como sempre.
 
 Se ninguém responder em 2,5 s, o app mostra a tela de login normal.
 

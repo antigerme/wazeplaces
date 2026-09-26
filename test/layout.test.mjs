@@ -2295,7 +2295,11 @@ test('o pedido à extensão não atropela um login que aconteceu no meio', () =>
   // Apareceu no smoke como "card sem endereço / botões 0px", mudando de
   // aparelho a cada rodada porque atinge sempre o PRIMEIRO card medido — que é
   // o sintoma clássico de escrita atrasada, não de layout.
-  const bloco = app.match(/entrarPelaExtensao\(\)\.then\([\s\S]{0,700}?\}\);/);
+  // Só CÓDIGO, por linha (gotcha #67): o comentário DENTRO do bloco é o que
+  // cresce, e empurrava o fim dele pra fora da janela — reprovando código certo
+  // quando o bloco ganhou uma linha (a recusa da extensão, 2026-09-26).
+  const soCodigo = app.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const bloco = soCodigo.match(/entrarPelaExtensao\(\)\.then\([\s\S]{0,700}?\}\);/);
   assert.ok(bloco, 'sumiu o handshake do boot');
   assert.match(bloco[0], /API\.getSession\(\)\s*\|\|\s*AppState\.authenticated/,
     'a guarda contra login-no-meio sumiu — showAuthScreen volta a atropelar sessão nova');

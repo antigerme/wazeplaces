@@ -45,6 +45,13 @@ window.addEventListener('message', (ev) => {
       // dele — melhor dizer "não consegui" e ele cai no login na hora.
       if (chrome.runtime.lastError || !r) return responder({ action: 'sem-sessao' });
       if (r.success && r.sessionToken) return responder({ action: 'sessao', token: r.sessionToken });
+      // O portão do app recusou a conta: o motivo e o perfil vão junto, pra o
+      // app mostrar o diálogo "Acesso restrito". Continua sendo `sem-sessao` de
+      // propósito — o app de ANTES não conhece o `negado` e cai no login na hora.
+      if (r.negado) {
+        return responder({ action: 'sem-sessao', motivo: 'negado',
+          negado: { error: r.error, errorKey: r.errorKey, errorVars: r.errorVars, profile: r.profile } });
+      }
       responder({ action: 'sem-sessao', motivo: r.semLogin ? 'sem-login-wme' : 'erro' });
     });
   } catch (e) {
