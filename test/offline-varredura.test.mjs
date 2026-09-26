@@ -80,7 +80,7 @@ test('CONTROLE: com a REDE parada (nada anda), o resultado é PARCIAL, e as tent
 test('offlineBaixar: tile 4xx é "definitivo", 5xx e rede caída são falha de REDE (tenta de novo)', async () => {
   const guardados = [];
   const deps = {
-    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles',
+    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000,
     caches: { open: async () => ({ put: async (u) => guardados.push(u) }) },
     Image: class {},
   };
@@ -299,4 +299,42 @@ test('O4: trocar de lugar ESQUECE a fila guardada de outro lugar — e só ela, 
   assert.ok(iLugar > 0 && iLugar < busca.indexOf('await API.fetchPlaces('), 'o lugar da busca tem que ser o do PEDIDO');
   assert.match(busca, /registrarEntradaNaFila\(newPlaces\);\s*filaDeOnde = lugarDaBusca;/,
     'o que a busca traz não diz de que lugar é');
+});
+
+// ── O9: a varredura tem TETO de tempo (auditoria de 2026-09-26) ──────────────
+// Portal cativo, sinal indo e voltando: a requisição sai e nada volta. O
+// `fetch` do tile e a `<img>` da foto não tinham teto, então a varredura ficava
+// "varrendo" pra sempre e todo gatilho novo só marcava `offlinePedidaDeNovo`
+// (medido no navegador, p9: 60 s depois, ainda varrendo).
+test('O9: download PENDURADO estoura o teto — tile e foto — e conta como falha de rede (`teto`)', async () => {
+  let cancelouFoto = false;
+  class ImagemPendurada {
+    set src(v) { if (v === '') cancelouFoto = true; }
+  }
+  const deps = { offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30,
+    caches: { open: async () => ({ put: async () => {} }) }, Image: ImagemPendurada };
+  const chaves = Object.keys(deps);
+  // O `fetch` pendurado só termina se o pedido for ABORTADO — como na rede de verdade.
+  const pendurado = (u, opts) => new Promise((_, falha) => {
+    if (opts && opts.signal) opts.signal.addEventListener('abort', () => falha(new DOMException('abortado', 'AbortError')));
+  });
+  const baixar = new Function(...chaves, 'fetch', fatiar('offlineBaixar') + '\nreturn offlineBaixar;')(...chaves.map((k) => deps[k]), pendurado);
+  const comTeto = (p) => Promise.race([p, new Promise((ok) => setTimeout(() => ok('PENDUROU'), 800))]);
+  assert.equal(await comTeto(baixar('https://www.waze.com/row-tiles/live/base/1', true)), 'teto',
+    'o tile pendurado prendeu a varredura (sem teto)');
+  assert.equal(await comTeto(baixar('https://venue-image.waze.com/f.jpg', false)), 'teto',
+    'a foto pendurada prendeu a varredura (sem teto)');
+  assert.ok(cancelouFoto, 'desistir da foto não CANCELOU o download (o src segue pendurado)');
+});
+
+test('O9: uma RODADA de downloads pendurados para a varredura — "parcial", sem gastar o teto em cada item', async () => {
+  const itens = Array.from({ length: 20 }, (_, i) => 'tile-' + i);
+  const { st, tentativas } = await varrer(itens, () => 'teto');
+  assert.equal(st.resultado, 'parcial');
+  const total = [...tentativas.values()].reduce((a, b) => a + b, 0);
+  assert.ok(total <= 2, `a varredura seguiu com a rede pendurada: ${total} downloads (cada um gasta o teto inteiro)`);
+  // CONTROLE: falha de rede IMEDIATA (não pendurada) segue a regra de sempre —
+  // cada item tentado até o teto de tentativas, sem parar na primeira rodada.
+  const rede = await varrer(itens.slice(0, 4), () => false);
+  assert.ok([...rede.tentativas.values()].every((n) => n >= 2), 'a falha imediata passou a parar a varredura como a pendurada');
 });

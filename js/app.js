@@ -13125,6 +13125,14 @@ async function offlineItensDaFila(janela) {
     return itens;
 }
 
+// Teto de UM download da varredura (tile ou foto), da primeira byte à gravação.
+// Sem ele, a conexão que PENDURA — portal cativo, sinal indo e voltando: a
+// requisição sai e nada volta — deixava a varredura "varrendo" pra sempre, e
+// todo gatilho novo só marcava `offlinePedidaDeNovo` (auditoria de 2026-09-26,
+// O9). Estourado, o item conta como falha de REDE ('teto'). 30 s cobrem uma foto
+// de ~200 KB a ~55 kbps; tile tem 10–30 KB.
+const OFFLINE_ITEM_TETO_MS = 30 * 1000;
+
 function offlineBaixar(u, tile) {
     // Tile vai pro NOSSO cache (tem CORS, então a resposta é transparente e
     // custa 1,01× de orçamento). Foto vai pro cache do navegador via <img>, que
@@ -13133,19 +13141,38 @@ function offlineBaixar(u, tile) {
     if (!tile) {
         return new Promise((r) => {
             const i = new Image();
+            let feito = false;
+            let teto = 0;
+            const fim = (v) => {
+                if (feito) return;
+                feito = true;
+                clearTimeout(teto);
+                i.onload = i.onerror = null;
+                // Desistir é CANCELAR: trocar o `src` aborta o download pendurado.
+                if (v === 'teto') i.src = '';
+                r(v);
+            };
+            teto = setTimeout(() => fim('teto'), OFFLINE_ITEM_TETO_MS);
             i.fetchPriority = 'low'; i.decoding = 'async';
-            i.onload = () => r(true); i.onerror = () => r(false);
+            i.onload = () => fim(true); i.onerror = () => fim(false);
             i.src = u;
         });
     }
     const epoca = offlineEpoca;
     return (async () => {
+        // O teto vale até a GRAVAÇÃO no cache: o `put` lê o corpo, e um corpo que
+        // pendura depois do cabeçalho prendia a varredura do mesmo jeito. Abortar
+        // o pedido aborta o corpo junto. `AbortController`, e não o
+        // `AbortSignal.timeout`, pra valer também no iPhone antes do iOS 16.
+        const ctrl = new AbortController();
+        let estourou = false;
+        const teto = setTimeout(() => { estourou = true; ctrl.abort(); }, OFFLINE_ITEM_TETO_MS);
         try {
             // `no-cache`: cópia CONFERIDA com o servidor (condicional — o de tile
             // responde 304 quando nada mudou). E o service worker não a responde
             // do cache guardado (ver lá): respondida por ele, a varredura nunca
             // revalidava o tile, e o guardado ficava o da primeira vez pra sempre.
-            const resp = await fetch(u, { mode: 'cors', cache: 'no-cache' });
+            const resp = await fetch(u, { mode: 'cors', cache: 'no-cache', signal: ctrl.signal });
             // 4xx é DEFINITIVO (o tile não existe): repetir não muda nada, e era
             // o que fazia a varredura martelar a mesma URL centenas de vezes.
             // 5xx segue como falha de rede: o servidor pode voltar.
@@ -13157,7 +13184,8 @@ function offlineBaixar(u, tile) {
             const c = await caches.open(OFFLINE_TILES_CACHE);
             await c.put(u, resp);
             return true;
-        } catch (e) { return false; }
+        } catch (e) { return estourou ? 'teto' : false; }
+        finally { clearTimeout(teto); }
     })();
 }
 
@@ -13226,10 +13254,17 @@ async function offlineVarrer() {
         // quebrada gastar 1.000 tentativas e a linha ficar em "499 de 500".
         const desistidosPorRede = [];
         let definitivos = 0;
+        // Downloads que estouraram o teto em SEQUÊNCIA, sem nenhum sucesso no meio
+        // (ver `OFFLINE_ITEM_TETO_MS`). Uma rodada inteira deles — um por
+        // trabalhador — é a rede pendurada mesmo com `onLine` (portal cativo): a
+        // varredura para, "parcial", em vez de gastar o teto em cada item da fila
+        // (500 itens × 3 tentativas × 30 s era "varrendo" por mais de uma hora).
+        let penduradasSeguidas = 0;
         const trabalhar = async () => {
             while (pend.length) {
                 if (epoca !== offlineEpoca) return;   // esqueceram no meio
                 if (!offlineLigado() || navigator.onLine === false) return;
+                if (penduradasSeguidas >= OFFLINE_CONCORRENCIA) return;
                 const it = pend.shift();
                 const ok = await offlineBaixar(it.u, it.tile);
                 // DEPOIS do await também: é aqui que a corrida mora — o
@@ -13242,11 +13277,14 @@ async function offlineVarrer() {
                 // precisa do cache.
                 if (ok === true) {
                     sucessos++;
+                    penduradasSeguidas = 0;
                     if (it.tile && ++tilesNovos % OFFLINE_ANUNCIAR_A_CADA === 0) offlineAnunciarTiles();
                 } else if (ok === 'definitivo') {
                     definitivos++;
+                    penduradasSeguidas = 0;   // o servidor respondeu: a rede anda
                 } else {
                     falhas++;
+                    if (ok === 'teto') penduradasSeguidas++;
                     it.tentativas = (it.tentativas || 0) + 1;
                     if (it.tentativas === 1) it.sucessosAntes = sucessos;
                     if (it.tentativas >= OFFLINE_TENTATIVAS_POR_ITEM) {

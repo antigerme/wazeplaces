@@ -84,6 +84,6 @@ test('O7: a <img> do mapa sai do cache (inclusive com o cache HTTP desligado); o
   assert.equal(pedir('image', 'reload'), true, 'a <img> com o cache HTTP desligado deixou de sair do cache guardado');
   // E a varredura pede mesmo `no-cache` (a outra metade da marca).
   const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  assert.match(APP, /const resp = await fetch\(u, \{ mode: 'cors', cache: 'no-cache' \}\);/,
+  assert.match(APP, /const resp = await fetch\(u, \{ mode: 'cors', cache: 'no-cache'[^}]*\}\);/,
     'a varredura parou de pedir cópia conferida — o 304 barato de cada janela não acontece');
 });
