@@ -336,18 +336,21 @@ function handleDragEnd(e) {
     const commitX = (Math.abs(deltaX) > thresholdX && Math.abs(deltaX) > Math.abs(deltaY)) ||
         (Math.abs(vx) > FLICK_VELOCITY && Math.abs(deltaX) > FLICK_MIN_DISTANCE && Math.abs(deltaX) > Math.abs(deltaY));
 
+    // O CARD vai junto pro callback: é por ele que o app sabe QUAL pedido o
+    // gesto viu (ver `agirNoPedidoDoGesto` no app.js) — o `currentPlace` de
+    // 350 ms depois pode já ser outro.
     if (commitUp) {
-        animateSwipeOut('up', () => {
-            if (typeof onSwipeUp === 'function') onSwipeUp();
+        animateSwipeOut('up', (card) => {
+            if (typeof onSwipeUp === 'function') onSwipeUp(card);
         });
     } else if (commitX && !(window.direcaoTravada && window.direcaoTravada(deltaX > 0 ? 'right' : 'left'))) {
         // (Sem a guarda, o card de foto SEM FOTO saía pro lado com ✕ e ✓
         // travados: o gesto decidia o que o botão recusava. Travado, ele volta
         // pro lugar como um arraste curto.)
         const dir = deltaX > 0 ? 'right' : 'left';
-        animateSwipeOut(dir, () => {
-            if (dir === 'right' && typeof onSwipeRight === 'function') onSwipeRight();
-            if (dir === 'left' && typeof onSwipeLeft === 'function') onSwipeLeft();
+        animateSwipeOut(dir, (card) => {
+            if (dir === 'right' && typeof onSwipeRight === 'function') onSwipeRight(card);
+            if (dir === 'left' && typeof onSwipeLeft === 'function') onSwipeLeft(card);
         });
     } else {
         currentCard.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
@@ -386,10 +389,12 @@ function animateSwipeOut(direction, callback) {
         card.style.opacity = '0';
     }
 
+    // O callback recebe o card que SAIU — o do gesto —, não o que estiver na
+    // frente quando ele rodar: nesses 350 ms a fila pode andar por baixo.
     setTimeout(() => {
         animating = false;
         updateSwipeIndicator(0, 0);
-        if (callback) callback();
+        if (callback) callback(card);
     }, 350);
 }
 

@@ -309,3 +309,108 @@ test('C6 CONTROLE: o gesto HORIZONTAL com desvio segue decidindo, e o ↑ na dia
   h.noDoc('touchmove', { touches: [b], changedTouches: [b] });
   assert.equal(h.selos['.swipe-left'].style.opacity, 1, 'CONTROLE: o selo do lado não acende nem no arraste lateral');
 });
+
+// ── C3: a ação vale pro pedido que o GESTO viu ────────────────────────────
+// As peças do app.js que decidem, fatiadas do fonte e postas no MESMO contexto
+// do swipe.js — a composição é que é o teste: o card viaja do gesto até o
+// handler, e o handler confere o pedido dele contra o da frente.
+function fatiarApp(nome) {
+  const f = semComentario(APP);
+  const m = new RegExp('^function ' + nome + '\\(', 'm').exec(f);
+  assert.ok(m, `${nome} sumiu do app.js`);
+  let prof = 0;
+  for (let j = f.indexOf('{', f.indexOf(')', m.index)); j < f.length; j++) {
+    if (f[j] === '{') prof++;
+    else if (f[j] === '}' && --prof === 0) return f.slice(m.index, j + 1);
+  }
+  throw new Error('não fechou ' + nome);
+}
+function montarComApp() {
+  const g = montar({ largura: 393 });
+  const agiu = [];
+  g.ctx.AppState = { currentPlace: null };
+  for (const [h, tipo] of [['handleReject', 'reject'], ['handleMarkAsRead', 'read'], ['handleSkip', 'skip']]) {
+    g.ctx[h] = () => agiu.push([tipo, g.ctx.AppState.currentPlace]);
+  }
+  vm.runInContext(['const pedidoDoElemento = new WeakMap();',
+    ...['pedidoDoCard', 'agirNoPedidoDoGesto', 'onSwipeLeft', 'onSwipeRight', 'onSwipeUp'].map(fatiarApp),
+    'this.__registrar = (card, p) => pedidoDoElemento.set(card, p);'].join('\n'), g.ctx);
+  return { ...g, agiu };
+}
+
+test('C3 a fila anda durante a saída do card: a ação NÃO cai no pedido seguinte', () => {
+  // MEDIDO: aprovar a foto de B, fechar o lightbox e dar ✓/→/arraste em B com
+  // a resposta da aprovação pousando nos 350 ms da saída → a ação saiu pra C.
+  const A = { updateRequestID: 'uA' }, C = { updateRequestID: 'uC' };
+  for (const [dx, tipo] of [[-300, 'reject'], [300, 'read']]) {
+    const g = montarComApp();
+    g.ctx.AppState.currentPlace = A;
+    g.ctx.__registrar(g.card, A);
+    const a = g.toque(0, 200, 400);
+    g.noCard('touchstart', { touches: [a], changedTouches: [a] });
+    let t = a;
+    for (let i = 1; i <= 20; i++) {
+      g.passo(40);
+      t = g.toque(0, 200 + dx * i / 20, 400);
+      g.noDoc('touchmove', { touches: [t], changedTouches: [t] });
+    }
+    g.passo(200);
+    g.noDoc('touchend', { touches: [], changedTouches: [t] });
+    // A resposta da aprovação pousa AGORA: `advanceQueue` põe C na frente.
+    g.ctx.AppState.currentPlace = C;
+    g.esvaziar();
+    assert.deepEqual(g.agiu, [], `${tipo}: o gesto em A agiu em ${g.agiu.map((x) => x[1] && x[1].updateRequestID)}`);
+  }
+  // CONTROLE: sem a fila andar, o mesmo gesto age — e age em A.
+  const h = montarComApp();
+  h.ctx.AppState.currentPlace = A;
+  h.ctx.__registrar(h.card, A);
+  arrastarDevagar(h, 0, [300, 400], [0, 400]);
+  assert.deepEqual(h.agiu.map((x) => [x[0], x[1].updateRequestID]), [['reject', 'uA']],
+    'CONTROLE: o gesto no card da frente deixou de agir');
+});
+
+test('C3 botão e teclado: o triggerSwipe entrega o card que saiu, e o mesmo pedido redesenhado segue valendo', () => {
+  const A = { updateRequestID: 'uA' }, C = { updateRequestID: 'uC' };
+  const g = montarComApp();
+  g.ctx.window.cardDaFrente = () => g.card;
+  g.ctx.AppState.currentPlace = A;
+  g.ctx.__registrar(g.card, A);
+  // O caminho da seta: o callback do teclado, como está no handleKeyDown.
+  g.ctx.triggerSwipe('right', (card) => g.ctx.agirNoPedidoDoGesto(g.ctx.pedidoDoCard(card), g.ctx.handleMarkAsRead));
+  g.ctx.AppState.currentPlace = C;          // a fila andou durante os 350 ms
+  g.esvaziar();
+  assert.deepEqual(g.agiu, [], 'a seta em A agiu no pedido que entrou na frente');
+  // O mesmo pedido REDESENHADO (outro elemento, mesmo objeto) não é troca de
+  // pedido: a exclusão de uma foto dele redesenha o card e a ação segue.
+  const h = montarComApp();
+  h.ctx.window.cardDaFrente = () => h.card;
+  h.ctx.AppState.currentPlace = A;
+  h.ctx.__registrar(h.card, A);
+  h.ctx.triggerSwipe('left', (card) => h.ctx.agirNoPedidoDoGesto(h.ctx.pedidoDoCard(card), h.ctx.handleReject));
+  // Durante a saída o card de A é REDESENHADO: elemento novo, pedido igual.
+  const outro = { ...h.card };
+  h.ctx.__registrar(outro, A);
+  h.ctx.window.cardDaFrente = () => outro;
+  h.esvaziar();
+  assert.deepEqual(h.agiu.map((x) => x[0]), ['reject'], 'CONTROLE: a seta no card da frente deixou de agir');
+});
+
+test('C3 os TRÊS caminhos passam pela conferência, e o card registra o pedido dele', () => {
+  const f = semComentario(APP);
+  const render = fatiarApp('renderCurrentCard');
+  assert.match(render, /const card = montarCard\(place\);\s*pedidoDoElemento\.set\(card, place\);/,
+    'o card da frente não registra o pedido que mostra: a conferência não tem com o que comparar');
+  assert.match(render, /window\.triggerSwipe\(direction, \(\) => agirNoPedidoDoGesto\(place, handler\)\)/,
+    'os botões ✕ ↑ ✓ voltaram a agir no pedido da frente de 350 ms depois');
+  const teclas = fatiarApp('handleKeyDown');
+  for (const h of ['handleReject', 'handleMarkAsRead', 'handleSkip']) {
+    assert.match(teclas, new RegExp(`\\(card\\) => agirNoPedidoDoGesto\\(pedidoDoCard\\(card\\), ${h}\\)`),
+      `a seta de ${h} voltou a agir no pedido da frente de 350 ms depois`);
+  }
+  for (const [fn, h] of [['onSwipeLeft', 'handleReject'], ['onSwipeRight', 'handleMarkAsRead'], ['onSwipeUp', 'handleSkip']]) {
+    assert.match(fatiarApp(fn), new RegExp(`agirNoPedidoDoGesto\\(pedidoDoCard\\(card\\), ${h}\\)`),
+      `o arraste (${fn}) voltou a agir no pedido da frente de 350 ms depois`);
+  }
+  assert.ok(!/window\.triggerSwipe\('(left|right|up)', handle/.test(f), 'sobrou seta passando o handler cru ao triggerSwipe');
+});

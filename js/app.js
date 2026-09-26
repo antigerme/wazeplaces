@@ -2970,17 +2970,19 @@ function handleKeyDown(e) {
         return;
     }
 
+    // A ação vale pro pedido do card que SAIU, não pro da frente 350 ms depois
+    // (ver `agirNoPedidoDoGesto`).
     if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        if (window.triggerSwipe) window.triggerSwipe('left', handleReject);
+        if (window.triggerSwipe) window.triggerSwipe('left', (card) => agirNoPedidoDoGesto(pedidoDoCard(card), handleReject));
         else handleReject();
     } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        if (window.triggerSwipe) window.triggerSwipe('right', handleMarkAsRead);
+        if (window.triggerSwipe) window.triggerSwipe('right', (card) => agirNoPedidoDoGesto(pedidoDoCard(card), handleMarkAsRead));
         else handleMarkAsRead();
     } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        if (window.triggerSwipe) window.triggerSwipe('up', handleSkip);
+        if (window.triggerSwipe) window.triggerSwipe('up', (card) => agirNoPedidoDoGesto(pedidoDoCard(card), handleSkip));
         else handleSkip();
     }
 }
@@ -6753,6 +6755,39 @@ function cardDaFrente() {
     return document.querySelector('#cardStack .place-card:not(.card-fundo)');
 }
 
+// O PEDIDO QUE O GESTO VIU — e a ação só vale pra ele.
+//
+// ✕ ↑ ✓, a seta do teclado e o arraste decidem 350 ms DEPOIS do gesto (a
+// animação de saída), e os handlers leem `AppState.currentPlace` nessa hora.
+// Se a fila andou por baixo nesse meio — a aprovação de uma foto pousando, o
+// fim do "marcar todos" —, a ação caía num pedido que ninguém viu. MEDIDO
+// (auditoria de 2026-09-26): aprovar a foto de B no lightbox, fechar e dar ✓
+// em B com a resposta pousando durante a saída → `marcar-lido` saiu pra C, o
+// card seguinte; o mesmo pela seta →, e segurando B no arraste de mouse
+// enquanto a aprovação pousava → C REJEITADO.
+//
+// A regra é uma só e vale pros três caminhos: o card conhece o pedido que
+// mostra (registrado no `renderCurrentCard`), o gesto leva o card até o fim,
+// e se o pedido da frente já é outro a ação é DESCARTADA — o pedido do gesto
+// saiu da fila por outro caminho, e é esse caminho que já decidiu por ele.
+// Descartar não deixa buraco na tela: quem trocou o pedido já montou o card
+// novo (o `showCurrentPlace` tira o que estava saindo).
+//
+// Pedido de card é identidade de OBJETO, não de chave: um card redesenhado
+// com o MESMO pedido (a exclusão de uma foto dele, por exemplo) segue valendo.
+const pedidoDoElemento = new WeakMap();
+
+function pedidoDoCard(card) {
+    return (card && pedidoDoElemento.get(card)) || null;
+}
+
+function agirNoPedidoDoGesto(alvo, handler) {
+    // Sem pedido conhecido (card que não passou pelo render, chamada sem card)
+    // o comportamento é o de sempre: descartar aí seria perder o gesto calado.
+    if (alvo && AppState.currentPlace !== alvo) return;
+    handler();
+}
+
 // ── "Como funciona": uma vez, no primeiro card ────────────────────────────
 // Os três botões do card só têm `aria-label` e `title` — e `title` NÃO existe no
 // toque. No celular, quem nunca usou vê três círculos coloridos e adivinha. Não
@@ -6865,6 +6900,9 @@ function renderCurrentCard() {
     }
 
     const card = montarCard(place);
+    // O pedido que ESTE card mostra: é por ele que o gesto confere, na hora de
+    // agir, se a fila não andou por baixo (ver `agirNoPedidoDoGesto`).
+    pedidoDoElemento.set(card, place);
     renderFocoAutor();
 
     // Botões de ação explícitos — gesto é atalho, nunca o único caminho
@@ -6879,7 +6917,7 @@ function renderCurrentCard() {
     const fireAction = (direction, handler) => {
         if (actionFired) return;
         actionFired = true;
-        if (window.triggerSwipe) window.triggerSwipe(direction, handler);
+        if (window.triggerSwipe) window.triggerSwipe(direction, () => agirNoPedidoDoGesto(place, handler));
         else handler();
     };
     card.querySelector('.card-btn-reject').addEventListener('click', () => fireAction('left', handleReject));
@@ -14946,9 +14984,11 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null) {
     };
 }
 
-function onSwipeLeft() { handleReject(); }
-function onSwipeRight() { handleMarkAsRead(); }
-function onSwipeUp() { handleSkip(); }
+// O arraste entrega o CARD em que começou: a ação só vale se o pedido dele
+// ainda é o da frente (ver `agirNoPedidoDoGesto`).
+function onSwipeLeft(card) { agirNoPedidoDoGesto(pedidoDoCard(card), handleReject); }
+function onSwipeRight(card) { agirNoPedidoDoGesto(pedidoDoCard(card), handleMarkAsRead); }
+function onSwipeUp(card) { agirNoPedidoDoGesto(pedidoDoCard(card), handleSkip); }
 window.onSwipeLeft = onSwipeLeft;
 window.onSwipeRight = onSwipeRight;
 window.onSwipeUp = onSwipeUp;
