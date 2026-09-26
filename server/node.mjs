@@ -31,7 +31,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dispatch, makeSessions, base64ToBytes, SESSION_TTL } from './core.mjs';
+import { dispatch, makeSessions, base64ToBytes, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
 import { readBody } from './corpo.mjs';
 
 // Rede de segurança pra VM: um erro não capturado não pode derrubar o processo.
@@ -86,7 +86,7 @@ const fsStore = {
   // derrubado NO MEIO da escrita deixava a sessão truncada — que não decifra, é
   // apagada (`descartar`) e desloga a pessoa (auditoria de 2026-09-25). O
   // `rename` no mesmo diretório troca o arquivo inteiro de uma vez.
-  async put(hash, blob) {
+  async put(hash, blob, ttl) {
     await mkdir(SESSION_DIR, { recursive: true, mode: 0o700 });
     const final = join(SESSION_DIR, 'sess_' + hash);
     const temp = join(SESSION_DIR, '.tmp_' + hash + '_' + process.pid + '_' + randomBytes(4).toString('hex'));
@@ -97,11 +97,40 @@ const fsStore = {
       await unlink(temp).catch(() => {});
       throw e;
     }
+    if (Number(ttl) > 0 && Number(ttl) <= PRAZO_CURTO_MAX_S) apagarNoPrazo(final, Date.now() + Number(ttl) * 1000);
+    else prazosCurtos.delete(final);
   },
   async delete(hash) {
-    await unlink(join(SESSION_DIR, 'sess_' + hash)).catch(() => {});
+    const f = join(SESSION_DIR, 'sess_' + hash);
+    prazosCurtos.delete(f);
+    await unlink(f).catch(() => {});
   },
 };
+
+// ── O prazo CURTO que o core pede no `put` ──────────────────────────────────
+// O KV do Cloudflare cumpre sozinho o prazo de cada gravação; este adaptador
+// de arquivo não tem nada parecido. Pra sessão (21 dias) quem cumpre é a
+// varredura de hora em hora, logo abaixo. Pro que vale MINUTOS — a lista de
+// fotos que o excluir-foto relê (1 min) e o pareamento (5 min) — a hora da
+// varredura ERA o prazo: a Ajuda promete que a lista de fotos da lixeira fica
+// no servidor por até 1 minuto, e aqui ela ficava até ~70 (auditoria de
+// 2026-09-26). Daí um relógio por gravação.
+//
+// O relógio confere o prazo REGISTRADO ao disparar, e não o mtime do arquivo:
+// o `get` renova o mtime (é a janela deslizante da sessão), e uma gravação
+// mais nova na mesma chave empurra o prazo — o relógio da anterior não pode
+// apagá-la antes da hora.
+const PRAZO_CURTO_MAX_S = 60 * 60;
+const prazosCurtos = new Map(); // arquivo → instante (ms) a partir do qual ele sai
+function apagarNoPrazo(arquivo, ateMs) {
+  prazosCurtos.set(arquivo, ateMs);
+  setTimeout(() => {
+    const prazo = prazosCurtos.get(arquivo);
+    if (prazo === undefined || prazo > Date.now()) return;
+    prazosCurtos.delete(arquivo);
+    unlink(arquivo).catch(() => {});
+  }, Math.max(0, ateMs - Date.now()) + 50).unref();
+}
 const sessions = makeSessions({ store: fsStore, keyBytes });
 
 // ── GC de sessões órfãs ─────────────────────────────────────────────────────
@@ -109,7 +138,7 @@ const sessions = makeSessions({ store: fsStore, keyBytes });
 // nunca mais volta deixa o blob no disco pra sempre → cresce sem limite. Varre
 // o SESSION_DIR periodicamente e remove arquivos com idade > SESSION_TTL.
 const GC_INTERVAL_MS = 60 * 60 * 1000; // 1h
-const RELER_GC_MS = 10 * 60 * 1000;     // o cache da releitura vale 15 s; 10 min é folga
+const TEMP_GC_MS = 10 * 60 * 1000;      // temporário de gravação: nenhuma dura 10 min
 async function gcSessions() {
   try {
     const files = await readdir(SESSION_DIR);
@@ -120,7 +149,7 @@ async function gcSessions() {
       if (name.startsWith('.tmp_')) {
         const t = join(SESSION_DIR, name);
         const st = await stat(t).catch(() => null);
-        if (st && now - st.mtimeMs > RELER_GC_MS) await unlink(t).catch(() => {});
+        if (st && now - st.mtimeMs > TEMP_GC_MS) await unlink(t).catch(() => {});
         continue;
       }
       if (!name.startsWith('sess_')) continue;
@@ -134,16 +163,27 @@ async function gcSessions() {
         // EXPIRAÇÃO (futuro), na sessão é o ÚLTIMO USO (sempre passado), então
         // "carimbo < agora" dava vencido pra tudo. Medido antes do conserto: a
         // sessão sumia no primeiro boot.
+        //
+        // O que ainda não venceu ganha o relógio do prazo curto (ver
+        // `apagarNoPrazo`): o da gravação morreu com o processo anterior, e
+        // sem isto o que sobra de um reinício esperaria a próxima varredura.
         if (name.startsWith('sess_pair_')) {
           const corte = /^(\d+)\|/.exec(await readFile(f, 'utf8').catch(() => ''));
-          if (!corte || Number(corte[1]) * 1000 < now) await unlink(f).catch(() => {});
+          const ateMs = corte ? Number(corte[1]) * 1000 : 0;
+          if (ateMs < now || ateMs - now > PAIR_TTL * 1000) await unlink(f).catch(() => {});
+          else if (!prazosCurtos.has(f)) apagarNoPrazo(f, ateMs);
           continue;
         }
 
-        // Cache da releitura do excluir-foto (`reler_…`): vale 15 s pelo
-        // carimbo, e o arquivo não tem por que ficar os 21 dias de uma sessão.
+        // A lista de fotos que o excluir-foto relê (`reler_…`): o carimbo do
+        // valor é a hora da LEITURA no Waze, e ela sai RELEITURA_TTL_STORE
+        // depois dele — o mesmo minuto que o KV cumpre no Cloudflare e que a
+        // Ajuda promete. O carimbo, e não o mtime: o `get` renova o mtime.
         if (name.startsWith('sess_reler_')) {
-          if (now - st.mtimeMs > RELER_GC_MS) await unlink(f).catch(() => {});
+          const corte = /^(\d+)\|/.exec(await readFile(f, 'utf8').catch(() => ''));
+          const ateMs = corte ? (Number(corte[1]) + RELEITURA_TTL_STORE) * 1000 : 0;
+          if (ateMs <= now || ateMs - now > RELEITURA_TTL_STORE * 1000) await unlink(f).catch(() => {});
+          else if (!prazosCurtos.has(f)) apagarNoPrazo(f, ateMs);
           continue;
         }
 

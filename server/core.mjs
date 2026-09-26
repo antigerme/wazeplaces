@@ -2438,7 +2438,7 @@ const RELEITURA_TTL = 15;
 // `catch` logo abaixo engolia isso — no Worker o cache NUNCA era gravado, e
 // toda exclusão pagava a releitura de novo. Quem garante os 15 s é o carimbo
 // no valor, conferido na leitura; o KV só precisa jogar o registro fora depois.
-const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
+export const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
 // Relê o local no Waze e guarda o resultado por RELEITURA_TTL.
 //
 // O cache fica no SERVIDOR de propósito. A alternativa óbvia — o cliente ler,
