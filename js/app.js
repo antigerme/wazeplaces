@@ -14748,10 +14748,14 @@ function podeInstalarExtensao() {
     return /Chrome\//.test(ua) && !/Android|iPhone|iPad|iPod|Mobile|CriOS|EdgiOS/i.test(ua);
 }
 
+// As DUAS marcas, e a que a tela usa é a positiva: o card da extensão (e o
+// passo dela na Ajuda) só aparece com `com-extensao`. Antes de o JS chegar não
+// há nenhuma das duas, e aí a extensão fica escondida — era o celular mostrando
+// "RECOMENDADO" enquanto o app.js vinha por rede lenta. A negativa fica pro
+// diagnóstico (a classe do <html> vai nele): distingue "decidiu que não" de
+// "o JS nem rodou".
 function marcarSuporteAExtensao() {
-    if (!podeInstalarExtensao()) {
-        document.documentElement.classList.add('sem-extensao');
-    }
+    document.documentElement.classList.add(podeInstalarExtensao() ? 'com-extensao' : 'sem-extensao');
 }
 
 // ── Convite de instalação do PWA ───────────────────────────────────────────

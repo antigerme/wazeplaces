@@ -500,8 +500,14 @@ test('nenhum modal FECHA e outro ABRE no mesmo quadro', () => {
 
 test('não oferecemos ação impossível no aparelho', () => {
   const JS = read('js/app.js');
-  // Extensão da Chrome Web Store não instala em navegador de celular.
-  assert.match(CSS, /\.sem-extensao \.auth-opt-ext\s*\{[^}]*display:\s*none/, 'o card da extensão voltou a aparecer no celular');
+  // Extensão da Chrome Web Store não instala em navegador de celular. Desde
+  // 2026-09-26 a regra é POSITIVA: o card nasce escondido e só aparece com a
+  // confirmação do JS (`com-extensao`) — antes do JS chegar, o celular o
+  // mostrava como "RECOMENDADO". O comportamento é medido em test/entrada.
+  assert.match(CSS_SEM_COMENTARIO, /(^|\n)\.auth-opt-ext\s*\{\s*display:\s*none;?\s*\}/,
+    'o card da extensão voltou a nascer visível — aparece no celular antes do JS decidir');
+  assert.match(CSS_SEM_COMENTARIO, /\.com-extensao \.auth-opt-ext\s*\{\s*display:\s*block;?\s*\}/,
+    'o card da extensão não aparece nem onde ela instala');
   assert.match(JS, /function podeInstalarExtensao/, 'sumiu a detecção de suporte a extensão');
   // Por SO, não por ponteiro: notebook com tela de toque instala extensão.
   assert.match(JS, /userAgentData|Android\|iPhone/, 'a detecção deixou de olhar o sistema');

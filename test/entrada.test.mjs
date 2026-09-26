@@ -542,3 +542,53 @@ test('queda da sessão: os TRÊS caminhos passam pelo fechamento — e o diálog
   assert.match(fatiar('loadProfileAndAuxData'), /depois: \(\) => \{ showAccessDenied\(profileRes\); showAuthScreen\(\); \}/);
   assert.match(fatiar('handleUnauthorized'), /depois: \(\) => \{ showAccessDenied\(r\); showAuthScreen\(\); \}/);
 });
+
+// ── A9 + A12: a tela de entrada ANTES do JS, e o divisor sem a extensão ──────
+const HTML = ler('index.src.html');
+const CSS_SEM = ler('css/styles.css').replace(/\/\*[\s\S]*?\*\//g, '');
+function dicionario() {
+  const ctx = { navigator: { language: 'pt-BR' }, document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: () => null, setItem() {} }, console };
+  vm.createContext(ctx);
+  vm.runInContext(ler('js/i18n.js') + '\nthis.D = I18N_DICT;', ctx);
+  return ctx.D;
+}
+
+test('a tela de entrada ANTES do JS (rede lenta) diz o mesmo que o dicionário pt — o requisito é L2+AM, não "nível 3+"', () => {
+  const pt = dicionario().pt;
+  const nivel = Number((/const NIVEL_MINIMO_EXIBIDO = (\d+);/.exec(APP) || [])[1]);
+  assert.ok(nivel >= 1, 'CONTROLE: não achei o NIVEL_MINIMO_EXIBIDO');
+  const tela = HTML.slice(HTML.indexOf('<div id="authScreen"'), HTML.indexOf('<div id="pasteModal"'));
+  const texto = (h) => h.replace(/<[^>]+>/g, '').replace(/&#8220;|&#8221;/g, '"').replace(/\s+/g, ' ').trim();
+  const achados = [...tela.matchAll(/<([a-z0-9]+)\b[^>]*\bdata-i18n(?:-html)?="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/g)];
+  assert.ok(achados.length >= 10, `CONTROLE: só achei ${achados.length} textos na tela de entrada — o recorte quebrou`);
+  const divergentes = [];
+  for (const [, , chave, reserva] of achados) {
+    const valor = pt[chave];
+    assert.ok(valor, `a chave ${chave} da tela de entrada sumiu do dicionário`);
+    const esperado = texto(valor.replace(/\{nivelMinimo\}/g, String(nivel)));
+    if (texto(reserva) !== esperado) divergentes.push(`${chave}: "${texto(reserva)}" ≠ "${esperado}"`);
+  }
+  assert.deepEqual(divergentes, [], 'o texto de reserva da tela de entrada diz outra coisa até o JS chegar');
+});
+
+test('a extensão só aparece com a CONFIRMAÇÃO do JS; o divisor some com ela fora do dedo', () => {
+  const marcas = (pode) => {
+    const classes = new Set();
+    const { marcarSuporteAExtensao } = montar(['marcarSuporteAExtensao'],
+      { document: { documentElement: { classList: { add: (c) => classes.add(c) } } }, podeInstalarExtensao: () => pode },
+      ['marcarSuporteAExtensao']);
+    marcarSuporteAExtensao();
+    return [...classes];
+  };
+  assert.deepEqual(marcas(true), ['com-extensao'], 'onde a extensão instala, o JS não confirma');
+  assert.deepEqual(marcas(false), ['sem-extensao']);
+  // Sem a confirmação (antes do JS, ou onde ela não instala), card e divisor escondidos.
+  assert.match(CSS_SEM, /(^|\n)\.auth-opt-ext\s*\{\s*display:\s*none;?\s*\}/, 'o card da extensão nasce visível');
+  assert.match(CSS_SEM, /(^|\n)\.auth-opt-div\s*\{\s*display:\s*none;?\s*\}/,
+    'fora do dedo e sem a extensão, a lista começa pelo "ou login manual", sem nada antes');
+  assert.match(CSS_SEM, /\.com-extensao \.auth-opt-div\s*\{\s*display:\s*block;?\s*\}/, 'com a extensão, o divisor sumiu');
+  // No dedo o divisor fica: lá ele separa o "Entrar com um código" (1º) do resto.
+  const dedo = [...CSS_SEM.matchAll(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/g)].map((m) => m[1]).join('\n');
+  assert.match(dedo, /\.auth-opt-div\s*\{\s*display:\s*block;?\s*\}/, 'no celular o divisor sumiu junto com a extensão');
+});
