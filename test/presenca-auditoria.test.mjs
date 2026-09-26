@@ -588,3 +588,60 @@ test('P9 o cartão do pedido: a pergunta e o recibo DESCREVEM o botão (`aria-de
   assert.match(botoes[0], /aria-label="presenca\.pedido\.abrir/);
   assert.match(html, /cp-legenda">PERGUNTA: isso é fachada\?/);
 });
+
+// ── P12: "Ver mensagens anteriores" diz o que está acontecendo ──────────────
+
+const toque = (c, seletor, alvo = {}) => c.$('conversaMsgs').disparar('click', { target: { closest: (s) => (s === seletor ? alvo : null) } });
+
+test('P12 "Ver mensagens anteriores": carregando, o MESMO botão desabilitado e com o rótulo trocado; falhou, a linha de erro da conversa — e o "Tentar de novo" refaz a página ANTIGA', async () => {
+  let soltar;
+  const c = novoCliente({ api: { chat: (x) => (x.acao !== 'abrir' ? { success: true }
+    : x.antesDe ? new Promise((ok) => { soltar = ok; })
+    : { success: true, mensagens: [daCaf(1, 1790200000000)], maisAntigas: true, lida: true }) } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  assert.match(c.$('conversaMsgs').innerHTML, /<button type="button" class="conversa-anteriores">presenca\.conversa\.anteriores<\/button>/, 'CONTROLE: o botão tem que estar lá');
+  toque(c, '.conversa-anteriores');
+  await tick();
+  const durante = c.$('conversaMsgs').innerHTML;
+  assert.match(durante, /<button type="button" class="conversa-anteriores" disabled>presenca\.conversa\.anterioresCarregando<\/button>/,
+    'carregando, a tela ficou igual à de antes do toque');
+  toque(c, '.conversa-anteriores');                        // outro toque no meio: nada sai
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'abrir' && x.antesDe).length, 1, 'o toque no meio mandou outro pedido');
+  soltar({ success: false, errorCategory: 'transient' });
+  await tick(); await tick();
+  const depois = c.$('conversaMsgs').innerHTML;
+  assert.match(depois, /<p class="conversa-vazio">presenca\.conversa\.anterioresErro <button type="button" class="conversa-recarregar" data-antigas="1">presenca\.conversa\.tentar<\/button><\/p>/,
+    'a falha das mensagens anteriores não disse nada');
+  assert.match(depois, /oi\?/, 'o histórico que já estava na tela sumiu com a falha da página antiga');
+  // O "Tentar de novo" daqui é da página ANTIGA (antes da primeira na tela), não a conversa inteira.
+  toque(c, '.conversa-recarregar', { dataset: { antigas: '1' } });
+  await tick();
+  const pedidos = c.chamadas.chat.filter((x) => x.acao === 'abrir');
+  assert.equal(pedidos.at(-1).antesDe, 1790200000000, 'o "Tentar de novo" refez a conversa em vez da página antiga');
+  soltar({ success: true, mensagens: [daCaf(2, 1790100000000)], maisAntigas: false });
+  await tick(); await tick();
+  const fim = c.$('conversaMsgs').innerHTML;
+  assert.doesNotMatch(fim, /conversa-anteriores|anterioresErro|anterioresCarregando/, 'o erro (ou o botão) ficou depois de a página antiga chegar');
+  assert.equal(c.P.Presenca.historico.get(CAF).msgs.length, 2);
+});
+
+test('P12 reabrir a conversa não traz de volta o erro velho da página antiga', async () => {
+  let antigas = { success: false, errorCategory: 'transient' };
+  const c = novoCliente({ api: { chat: (x) => (x.acao !== 'abrir' ? { success: true }
+    : x.antesDe ? antigas : { success: true, mensagens: [daCaf(1, 1790200000000)], maisAntigas: true, lida: true }) } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  toque(c, '.conversa-anteriores');
+  await tick(); await tick();
+  assert.match(c.$('conversaMsgs').innerHTML, /anterioresErro/, 'CONTROLE: a falha tem que aparecer');
+  c.P.presencaEsquecerAberta();                            // fechou (a limpeza do modal)
+  c.$('conversaModal').classList.add('hidden');
+  c.P.presencaAbrirConversa(CAF);                          // e abriu de novo
+  await tick();
+  const html = c.$('conversaMsgs').innerHTML;
+  assert.doesNotMatch(html, /anterioresErro/, 'o erro da vez anterior voltou com a conversa');
+  assert.match(html, /<button type="button" class="conversa-anteriores">presenca\.conversa\.anteriores<\/button>/);
+});

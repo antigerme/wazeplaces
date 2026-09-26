@@ -1089,7 +1089,12 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     if (!h) { h = { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false }; Presenca.historico.set(id, h); }
     if (h.carregando) return;
     h.carregando = true;
-    h.erro = false;
+    // A página antiga tem estado PRÓPRIO (`antigas`): a falha dela não é a do
+    // histórico, que já está na tela (ver `presencaHtmlAnteriores`). E a
+    // primeira página recomeça as duas: reabrir a conversa não traz de volta o
+    // erro de uma página antiga que falhou da outra vez.
+    if (antes) h.antigas = 'carregando';
+    else { h.erro = false; h.antigas = null; }
     presencaRenderConversa();
     const epoca = Presenca.epoca;
     const carona = chatCarona();
@@ -1098,7 +1103,8 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     if (epoca !== Presenca.epoca) return;
     chatAoResponder(r, carona);
     if (!r || !r.success) {
-        h.erro = true;
+        if (antes) h.antigas = 'erro';
+        else h.erro = true;
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
         if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
         presencaRenderConversa();
@@ -1114,6 +1120,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     // resposta; numa página antiga, idem — a de cima da lista é sempre a última.
     h.maisAntigas = !!r.maisAntigas;
     h.carregada = true;
+    if (antes) h.antigas = null;
     presencaAnotar('chat.abrir', { ok: true, mensagens: msgs.length, maisAntigas: h.maisAntigas, pagina: antes ? 'antiga' : 'primeira' });
     if (!antes) {
         const ultimaDela = Math.max(0, ...msgs.filter((m) => !m.meu).map((m) => m.ts));
@@ -1129,6 +1136,13 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     // `presencaMensagemDoFluxo`) depois do "lida" que o `abrir` já fez: agora
     // que está na tela, marca.
     if (!antes && presencaOlhando(id)) presencaAgendarLida(id);
+}
+
+// A página ANTES da primeira mensagem na tela.
+function presencaCarregarAntigas(id) {
+    const h = Presenca.historico.get(id);
+    const antes = h && h.msgs.length ? h.msgs[0].ts : null;
+    if (antes) presencaCarregarConversa(id, { antes });
 }
 
 function presencaFecharConversa() {
@@ -1592,6 +1606,22 @@ function presencaIdDaDescricao(i) {
     return 'conversa-pedido-' + i + '-desc';
 }
 
+// "Ver mensagens anteriores" nos três momentos, com o que a conversa JÁ tem —
+// nenhum elemento novo. Antes a tela ficava igual antes, durante e depois de
+// uma falha, e o toque parecia não ter feito nada (auditoria de 2026-09-26):
+// carregando, o MESMO botão, desabilitado e com o rótulo trocado; falhou, a
+// MESMA linha de erro da conversa, com o "Tentar de novo" (que refaz a página
+// antiga, não a conversa: `data-antigas`).
+function presencaHtmlAnteriores(h) {
+    if (h.antigas === 'carregando') {
+        return `<button type="button" class="conversa-anteriores" disabled>${escapeHtml(t('presenca.conversa.anterioresCarregando'))}</button>`;
+    }
+    if (h.antigas === 'erro') {
+        return `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.anterioresErro'))} <button type="button" class="conversa-recarregar" data-antigas="1">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
+    }
+    return h.maisAntigas ? `<button type="button" class="conversa-anteriores">${escapeHtml(t('presenca.conversa.anteriores'))}</button>` : '';
+}
+
 function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {}) {
     const id = Presenca.aberta;
     if (!id || !presencaConversaNaTela()) return;
@@ -1621,7 +1651,7 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
         const alturaAntes = corpo.scrollHeight;
         const topoAntes = corpo.scrollTop;
         let html = `<p class="conversa-aviso">${escapeHtml(t('presenca.conversa.aviso'))}</p>`;
-        if (h.maisAntigas) html += `<button type="button" class="conversa-anteriores">${escapeHtml(t('presenca.conversa.anteriores'))}</button>`;
+        html += presencaHtmlAnteriores(h);
         // O histórico que não veio segue dizendo que não veio — e oferecendo o
         // "Tentar de novo" — mesmo depois que uma mensagem chega ou sai. Antes
         // o erro só existia com a conversa VAZIA: a primeira mensagem ao vivo
@@ -1720,13 +1750,11 @@ function presencaMontar() {
             const id = Presenca.aberta;
             if (!id) return;
             if (ev.target.closest('.conversa-reenviar')) return presencaTentarDeNovo();
-            if (ev.target.closest('.conversa-recarregar')) return presencaCarregarConversa(id);
-            if (ev.target.closest('.conversa-anteriores')) {
-                const h = Presenca.historico.get(id);
-                const antes = h && h.msgs.length ? h.msgs[0].ts : null;
-                if (antes) presencaCarregarConversa(id, { antes });
-                return;
+            const recarregar = ev.target.closest('.conversa-recarregar');
+            if (recarregar) {
+                return recarregar.dataset && recarregar.dataset.antigas ? presencaCarregarAntigas(id) : presencaCarregarConversa(id);
             }
+            if (ev.target.closest('.conversa-anteriores')) return presencaCarregarAntigas(id);
             const alvo = ev.target.closest('.conversa-pedido');
             if (!alvo) return;
             const h = Presenca.historico.get(id);
