@@ -611,3 +611,25 @@ test('sem sessão, a Ajuda não oferece "Ver de novo Como funciona" — o "Quero
   mostrarControlesDeSessao(false);
   assert.ok(marcados.every((el) => el.classList.contains('hidden')));
 });
+
+// ── A13: o que fica no SERVIDOR ─────────────────────────────────────────────
+test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de fotos do local por até 1 minuto', () => {
+  // A frase dizia "só uma coisa… nada além disso", e tocar na lixeira guarda,
+  // SEM cifra, a lista de fotos do local (ids, quem enviou cada uma, data,
+  // aprovada) pra a exclusão sair rápido — `relerLocal` no core. O prazo é o
+  // que o core manda pro armazenamento (o KV recusa menos de 60 s).
+  const CORE = ler('server/core.mjs');
+  const ttl = Number((/const RELEITURA_TTL = (\d+);/.exec(CORE) || [])[1]);
+  const piso = Number((/const RELEITURA_TTL_STORE = Math\.max\((\d+), RELEITURA_TTL\);/.exec(CORE) || [])[1]);
+  assert.ok(ttl > 0 && piso > 0, 'CONTROLE: não achei o prazo da releitura no core — o teste perdeu a âncora');
+  const minutos = Math.ceil(Math.max(piso, ttl) / 60);
+  assert.ok(/sessions\.store\.put\(chave, [^\n]*JSON\.stringify\(enxuto\), RELEITURA_TTL_STORE\)/.test(CORE),
+    'CONTROLE: a releitura mudou de forma no core — confira se a frase da Ajuda segue verdadeira');
+  const D = dicionario();
+  for (const lang of Object.keys(D)) {
+    const frase = D[lang]['help.privacy.server'];
+    assert.doesNotMatch(frase, /nada além disso|nothing else|nada más|rien d’autre/i,
+      `${lang}: a Ajuda ainda diz que no servidor não fica mais nada`);
+    assert.match(frase, new RegExp(`\\b${minutos} minut`, 'i'), `${lang}: a Ajuda não diz o prazo da lista de fotos (${minutos} min)`);
+  }
+});
