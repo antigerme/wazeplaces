@@ -945,6 +945,17 @@ export function makeSessions({ store, keyBytes }) {
     },
     // Uso único: apaga ANTES de validar a expiração, pra um código não poder
     // ser tentado duas vezes nem virar oráculo de "existe mas venceu".
+    //
+    // O uso único NÃO é atômico, e isso é sabido: `get` e `delete` são dois
+    // passos, e o KV não tem "ler e apagar" numa operação só (nem consistência
+    // imediata entre regiões: um apagamento leva até ~60 s pra valer no mundo
+    // todo). MEDIDO na auditoria de 2026-09-26: dois resgates SIMULTÂNEOS do
+    // mesmo código rendem duas sessões — 20 de 20 com o store de arquivo, 10 de
+    // 10 na VM de verdade; em série, o segundo é recusado. Não é furo, e por
+    // isso não se paga uma trava: o código É a credencial, e quem o tem já pode
+    // entrar por ele. A corrida não deixa entrar ninguém que não tinha o
+    // segredo; só dá uma segunda sessão (da mesma conta, cifrada com o token
+    // dela) a quem já podia ter a primeira.
     async claimPairing(code) {
       const limpo = normalizePairCode(code);
       // Os dois tamanhos são válidos: 6 é o código digitado, 20 é o do QR.
