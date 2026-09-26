@@ -1539,10 +1539,12 @@ function setupModalListeners() {
     // Trocar a REGIÃO traz os países DELA. Antes o seletor seguia com os da
     // região anterior, e o "Aplicar" gravava, por exemplo, NA com o Brasil — uma
     // fila vazia sem explicação. Os países editáveis do perfil são POR SERVIDOR
-    // (ver `paisDoPerfil`), então aqui vai a lista inteira da região nova.
+    // (ver `paisDoPerfil`), então aqui vai a lista inteira da região nova — e a
+    // dica de "só os que você pode editar" sai junto, porque deixou de ser verdade.
     $('filterRegion').addEventListener('change', async (e) => {
         const regiao = e.target.value;
         const sel = $('filterCountry');
+        $('filterCountryHint').classList.add('hidden');
         sel.innerHTML = `<option value="">${escapeHtml(t('filters.carregando'))}</option>`;
         sel.disabled = true;
         sel.dataset.carregando = '1';
@@ -2884,13 +2886,19 @@ function populateCountrySelect() {
     const editable = (AppState.profile && AppState.profile.editableCountryIDs) || [];
     let countries = AppState.countries;
 
+    // A dica ("só os países que você pode editar") diz o que ESTA lista é, e
+    // por isso é decidida a cada lista: só se ACENDIA, e seguia na tela com a
+    // lista inteira depois de uma troca de região ou de um perfil sem países
+    // editáveis aqui (auditoria de 2026-09-26).
+    let filtrou = false;
     if (editable.length > 0) {
         const filtered = countries.filter(c => editable.includes(c.id));
         if (filtered.length > 0) {
             countries = filtered;
-            hint.classList.remove('hidden');
+            filtrou = true;
         }
     }
+    hint.classList.toggle('hidden', !filtrou);
 
     select.innerHTML = ordenarPorNome(countries).map(c =>
         `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`

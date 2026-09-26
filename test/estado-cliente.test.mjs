@@ -306,6 +306,57 @@ test('filtros: trocar a REGIÃO traz os países dela, e o "Aplicar" com lista ca
   assert.match(aplicar, /if \(!\$\('filterCountry'\)\.dataset\.carregando && \$\('filterCountry'\)\.value\) API\.setCountry\(\$\('filterCountry'\)\.value\);/);
 });
 
+// A dica "Mostrando apenas países que você pode editar" só se ACENDIA: depois de
+// uma lista filtrada, ela seguia na tela com a lista INTEIRA — a da região nova
+// (o ouvinte da troca traz todos os países dela) ou a de um perfil sem países
+// editáveis ali (auditoria de textos, 2026-09-26). Roda a função e o ouvinte
+// DE VERDADE, recortados do app.js.
+test('filtros: a dica de "só os países que você pode editar" diz o que A LISTA é — some com a lista inteira e na troca de região', async () => {
+  const el = (extra = {}) => {
+    const cls = new Set(['hidden']);
+    return {
+      dataset: {}, innerHTML: '', value: '',
+      classList: {
+        add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c),
+        toggle: (c, f) => { const on = f === undefined ? !cls.has(c) : !!f; if (on) cls.add(c); else cls.delete(c); return on; },
+      },
+      ...extra,
+    };
+  };
+  const els = { filterCountry: el(), filterCountryHint: el(), filterRegion: el({ value: 'row' }), filterMyArea: el({ checked: false }) };
+  const AppState = { profile: { editableCountryIDs: [30] }, countries: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }] };
+  const { populateCountrySelect } = montar(['populateCountrySelect'], {
+    document: { getElementById: (id) => els[id] || null }, AppState, API: { getCountry: () => 30 },
+    ordenarPorNome: (l) => l, escapeHtml: (x) => String(x),
+  }, ['populateCountrySelect']);
+  const dica = () => !els.filterCountryHint.classList.contains('hidden');
+
+  populateCountrySelect();
+  assert.equal(dica(), true, 'CONTROLE: com a lista filtrada pelo perfil, a dica aparece');
+  assert.equal((els.filterCountry.innerHTML.match(/<option/g) || []).length, 1, 'CONTROLE: a lista filtrada tem só o país editável');
+  for (const editaveis of [[], [999]]) {
+    AppState.profile = { editableCountryIDs: editaveis };
+    populateCountrySelect();
+    assert.equal(dica(), false, `lista inteira (editáveis ${JSON.stringify(editaveis)}) e a dica dizendo "só os que você pode editar"`);
+  }
+
+  // O ouvinte da troca de região, recortado do app.js.
+  const ini = APP_SEM.indexOf("$('filterRegion').addEventListener('change', async (e) =>");
+  assert.ok(ini > 0, 'sumiu o ouvinte da troca de região');
+  const arrow = APP_SEM.indexOf('async (e) =>', ini);
+  const ouvinte = new Function('$', 'API', 'escapeHtml', 't', 'ordenarPorNome', 'loadStatesIntoSelect',
+    `return ${APP_SEM.slice(arrow, fechar(APP_SEM, arrow))};`)(
+    (id) => els[id], { listCountries: async () => ({ success: true, countries: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }] }) },
+    (x) => String(x), (k) => k, (l) => l, async () => {});
+  AppState.profile = { editableCountryIDs: [30] };
+  populateCountrySelect();
+  assert.equal(dica(), true, 'CONTROLE: a dica acesa antes da troca');
+  els.filterRegion.value = 'na';
+  await ouvinte({ target: { value: 'na' } });
+  assert.equal((els.filterCountry.innerHTML.match(/<option/g) || []).length, 2, 'CONTROLE: a troca trouxe a lista inteira da região');
+  assert.equal(dica(), false, 'trocou a região, veio a lista inteira dela, e a dica seguiu dizendo "só os que você pode editar"');
+});
+
 test('filtros: a carga de estados VELHA não sobrescreve a nova (trocar de país no meio)', async () => {
   const opcoes = [];
   const select = { dataset: {}, set innerHTML(v) { opcoes.length = 0; }, appendChild: (o) => opcoes.push(o.value), value: '' };
