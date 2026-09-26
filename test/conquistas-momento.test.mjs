@@ -171,3 +171,75 @@ test('C13: a confirmação de ação pergunta pela fila zerada (registrarAcaoCon
   assert.equal(ctxs.at(-1).filaZerada, true,
     'a confirmação não pergunta pela fila zerada (ou não avisa que está confirmando) — "Tudo limpo" nunca sai');
 });
+
+// ── H11: o pouso da fila de saída usa o MOMENTO do gesto ────────────────────
+// O pedido tratado sem rede pousa quando ela volta — horas depois, às vezes
+// noutro dia. O Histórico já usava o dia do gesto (`item.dia`); as conquistas
+// usavam o do POUSO: a "Coruja" pela hora da rede voltando, o "Centurião" pelo
+// balde de HOJE (o 100º de ontem não fechava o dia de ontem) e a "Poliglota"
+// pelo idioma de agora.
+function montarConfirmacao({ agora, historico = {}, langAgora = 'en' }) {
+  const idiomas = [], ctxs = [];
+  const DataFalsa = class extends Date {
+    constructor(...a) { if (a.length) super(...a); else super(agora); }
+    static now() { return agora; }
+  };
+  const deps = {
+    Treino: { ativo: false }, carregarConquistas: () => ({ seq: 0 }), salvarConquistas() {},
+    registrarIdiomaUsado: (l) => idiomas.push(l), getLang: () => langAgora, contagemDoAutor: () => 0,
+    checarConquistas: (x) => ctxs.push(x || {}), filaZeradaConfirmada: () => false,
+    loadHistory: () => historico, Date: DataFalsa,
+  };
+  const { registrarAcaoConfirmada } = montar(['registrarAcaoConfirmada'], deps, ['registrarAcaoConfirmada']);
+  return { registrarAcaoConfirmada, idiomas, ctxs };
+}
+
+test('H11: o pouso avalia Coruja, Centurião e Poliglota pelo GESTO, não pela hora em que a rede voltou', () => {
+  // Gesto às 02:30 de ontem, em francês; o pouso é hoje às 14:00, em inglês.
+  const gesto = new Date(2026, 8, 24, 2, 30).getTime();
+  const m = montarConfirmacao({ agora: new Date(2026, 8, 25, 14, 0).getTime(),
+    historico: { '2026-09-24': { read: 100, rejected: 0 }, '2026-09-25': { read: 3, rejected: 0 } } });
+  m.registrarAcaoConfirmada('read', {}, { t: gesto, dia: '2026-09-24', lang: 'fr' });
+  const ctx = m.ctxs.at(-1);
+  assert.equal(ctx.madrugada, true, 'a "Coruja" olhou a hora do POUSO (14h), não a do gesto (2h30)');
+  assert.equal(ctx.hoje, 100, `o "Centurião" contou o balde de ${ctx.hoje === undefined ? 'HOJE' : ctx.hoje}, não o do dia do gesto`);
+  assert.deepEqual(m.idiomas, ['fr'], 'a "Poliglota" registrou o idioma de AGORA, não o do gesto');
+});
+
+test('H11: CONTROLE — sem o gesto (todo pouso com rede) vale agora, como sempre', () => {
+  const m = montarConfirmacao({ agora: new Date(2026, 8, 25, 3, 0).getTime(),
+    historico: { '2026-09-24': { read: 100, rejected: 0 } } });
+  m.registrarAcaoConfirmada('read', {});
+  const ctx = m.ctxs.at(-1);
+  assert.equal(ctx.madrugada, true, 'sem gesto, a hora é a de agora (3h)');
+  assert.equal('hoje' in ctx, false, 'sem gesto, o balde é o de hoje (o checarConquistas decide)');
+  assert.deepEqual(m.idiomas, ['en']);
+  // Item da fila gravado ANTES de o idioma existir: não credita o de agora.
+  const v = montarConfirmacao({ agora: new Date(2026, 8, 25, 14, 0).getTime() });
+  v.registrarAcaoConfirmada('read', {}, { t: new Date(2026, 8, 25, 13, 0).getTime(), dia: '2026-09-25' });
+  assert.ok(!v.idiomas.includes('en'), 'item sem idioma creditou o idioma de agora à Poliglota');
+});
+
+test('H11: a fila de saída guarda o idioma do gesto, e o pouso entrega hora, dia e idioma', () => {
+  const salvos = [];
+  const deps = {
+    carregarFilaDeSaida: () => [], salvarFilaDeSaida: (f) => salvos.push(f), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    dfato() {}, SAIDA_MAX: 1000, historyTodayKey: () => '2026-09-24', ondeAgora: () => '30', contaAgora: () => null,
+    API: { getRegion: () => 'row' }, getLang: () => 'fr', updateInFlightIndicator() {},
+  };
+  const { enfileirarSaida } = montar(['enfileirarSaida'], deps, ['enfileirarSaida']);
+  enfileirarSaida('read', { venueID: 'v1', updateRequestID: 'u1' }, 'row');
+  const item = salvos.at(-1)[0];
+  assert.equal(item.lang, 'fr', 'a fila de saída não guarda o idioma do gesto');
+  assert.ok(Number.isFinite(item.t) && item.dia === '2026-09-24', 'a fila de saída perdeu a hora ou o dia do gesto');
+
+  const chamadas = [];
+  const depsPouso = {
+    registrarPouso() {}, recordHistory() {}, registrarRejeicaoDeAutor() {},
+    registrarAcaoConfirmada: (...a) => chamadas.push(a),
+  };
+  const { registrarPousoDeSaida } = montar(['registrarPousoDeSaida'], depsPouso, ['registrarPousoDeSaida']);
+  registrarPousoDeSaida('read', { venueID: 'v1' }, { success: true }, item);
+  assert.deepEqual(chamadas.at(-1)[2], { t: item.t, dia: item.dia, lang: 'fr' },
+    'o pouso não entrega o momento do gesto às conquistas');
+});

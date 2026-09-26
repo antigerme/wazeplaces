@@ -198,7 +198,9 @@ test('o pouso NÃO conta o placar de novo', () => {
     'o pouso voltou a somar no placar — trabalho contado duas vezes');
   assert.match(p, /recordHistory\(actionType, 1[,)]/,
     'o pouso parou de registrar o histórico: o placar diria uma coisa e o Histórico outra');
-  assert.match(p, /registrarAcaoConfirmada\(actionType, place\)/,
+  // `[,)]`: o pouso passa também o MOMENTO do gesto (ver
+  // test/conquistas-momento.test.mjs), e o guard é sobre a chamada existir.
+  assert.match(p, /registrarAcaoConfirmada\(actionType, place[,)]/,
     'o pouso parou de alimentar as conquistas do trabalho feito offline');
 });
 

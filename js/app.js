@@ -9652,16 +9652,26 @@ function salvarConquistas() {
 // é exatamente o que escondia o problema (a mesma assinatura do gotcha #63).
 // Nenhum teste enxergava porque nenhum deles CHAMA o código — os de unidade
 // fatiam a fonte e o smoke não exercitava o Desfazer até o fim.
-function registrarAcaoConfirmada(actionType, place) {
+//
+// `gesto` é o MOMENTO da ação quando ela não pousa na hora — a fila de saída
+// guarda a hora, o dia e o idioma do gesto (`enfileirarSaida`). Sem ele, vale
+// agora, que é o caso de todo pouso com rede.
+function registrarAcaoConfirmada(actionType, place, gesto) {
     if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
     const g = carregarConquistas();
     g.seq = (g.seq || 0) + 1;
     salvarConquistas();
     // O idioma entra no gesto, não na carga: "usou o app em 2 idiomas" é sobre
-    // TRABALHAR em dois, não sobre abrir o seletor e voltar.
-    registrarIdiomaUsado(typeof getLang === 'function' ? getLang() : '');
-    const hora = new Date().getHours();
+    // TRABALHAR em dois, não sobre abrir o seletor e voltar. Item da fila de
+    // saída sem o idioma (gravado antes dele existir) não registra nenhum: o de
+    // AGORA não é prova de que o trabalho foi feito nele.
+    registrarIdiomaUsado(gesto ? gesto.lang : (typeof getLang === 'function' ? getLang() : ''));
+    const hora = new Date(gesto && Number.isFinite(gesto.t) ? gesto.t : Date.now()).getHours();
+    // "Centurião" é o balde do DIA do gesto — o `recordHistory` do pouso já
+    // somou a ação nele. Sem `gesto.dia`, o `checarConquistas` usa o de hoje.
+    const balde = gesto && gesto.dia ? loadHistory()[gesto.dia] : null;
     checarConquistas({
+        ...(balde ? { hoje: (balde.read || 0) + (balde.rejected || 0) } : {}),
         duplicado: actionType === 'reject' && !!(place && place.duplicado),
         // `contagemDoAutor` já inclui ESTA rejeição (o registro veio antes), então
         // > 1 significa que havia rejeição anterior — é isso que faz reincidente.
@@ -11184,14 +11194,16 @@ function enfileirarSaida(tipo, place, regiao) {
              creatorId: place.creatorId != null ? place.creatorId : null,
              nome: place.createdBy ? String(place.createdBy) : null,
              dup: !!place.duplicado,
-             // `t` não é lido em runtime por ninguém: existe pro DIAGNÓSTICO,
-             // que despeja o localStorage inteiro — é o que responde "há quanto
-             // tempo isto está preso aqui" sem custar uma linha de diário.
+             // `t` responde "há quanto tempo isto está preso aqui" no
+             // DIAGNÓSTICO (que despeja o localStorage inteiro), e é a HORA do
+             // gesto pra "Coruja" no pouso (`registrarPousoDeSaida`).
              t: Date.now(),
              // Carimbados AQUI, no gesto: é o dia e a região em que o trabalho
              // foi feito. Lidos no pouso, seriam os do momento em que a rede
-             // voltou — que pode ser outro dia e outro filtro.
+             // voltou — que pode ser outro dia e outro filtro. O dia também é o
+             // balde do "Centurião", e o idioma o da "Poliglota".
              dia: historyTodayKey(), onde: ondeAgora(),
+             lang: typeof getLang === 'function' ? getLang() : '',
              // E a CONTA do gesto (ver `contaAgora`): a fila não pode sair no
              // nome de outra pessoa que entre neste aparelho depois.
              conta: contaAgora(),
@@ -11348,7 +11360,11 @@ function registrarPousoDeSaida(actionType, place, result, item) {
         registrarPouso(place);
         recordHistory(actionType, 1, item.dia, item.onde);
         if (actionType === 'reject' && result.success) registrarRejeicaoDeAutor(place);
-        registrarAcaoConfirmada(actionType, place);
+        // As conquistas também são do GESTO, pelo mesmo motivo do `dia`: o
+        // pedido tratado de madrugada e sem rede pousa de manhã, e a "Coruja"
+        // (a hora), o "Centurião" (o balde do dia) e a "Poliglota" (o idioma)
+        // eram avaliados na hora do POUSO (auditoria de 2026-09-25).
+        registrarAcaoConfirmada(actionType, place, { t: item.t, dia: item.dia, lang: item.lang });
         return;
     }
     // Não deu, e não é rede nem sessão: a ação falhou DE VERDADE, então o número
