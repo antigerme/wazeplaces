@@ -835,6 +835,7 @@ const LIMPEZA_AO_FECHAR = {
         const btnCodigo = document.getElementById('pairShowCodeBtn');
         if (btnCodigo) { btnCodigo.classList.remove('hidden'); btnCodigo.disabled = false; }
         limparQrPareamento();
+        pairQrVenceEm = 0;
         const copiar = document.getElementById('pairCopyLinkBtn');
         if (copiar) copiar.disabled = true;
     },
@@ -1212,6 +1213,13 @@ function tirarAcaoDaURL() {
 // traz a sessão pro telefone com um código de 6 caracteres, válido 5 minutos.
 const pairTickers = new Map();
 
+// Até quando o QR aberto VALE, no relógio do aparelho (ms; zero = nada a
+// copiar). O servidor conta os 5 min da criação, e a conta daqui parte da
+// chegada da resposta: erra pra MAIS tarde por uma ida à rede, e o resgate de um
+// link vencido nesse meio só leva "código inválido" (a validade mora no valor
+// guardado). Quem consulta é o "Copiar link": ele não entrega link vencido.
+let pairQrVenceEm = 0;
+
 // Desenha o QR do link de pareamento. É a única forma de conectar que não
 // precisa de instrução nenhuma: aponta a câmera e entra — sem memorizar caminho
 // de menu no outro aparelho, sem trocar de aparelho com um código na cabeça,
@@ -1298,6 +1306,7 @@ async function abrirPareamento() {
     const expEl = document.getElementById('pairExpiry');
     codeEl.textContent = '······';
     delete codeEl.dataset.raw;
+    pairQrVenceEm = 0;
     codeEl.classList.remove('opacity-40', 'line-through');
     expEl.textContent = '';
     // O código volta a ficar escondido a cada abertura: revelar é um pedido, e
@@ -1320,32 +1329,52 @@ async function abrirPareamento() {
     // isso. Quem não tem câmera pede um código curto no botão, e aí sim.
     codeEl.dataset.raw = r.code;
     pareamentosEmitidos.add(r.code);
+    pairQrVenceEm = Date.now() + r.expiresIn * 1000;
     desenharQrPareamento(location.origin + '/#pair=' + r.code);
     document.getElementById('pairCopyLinkBtn').disabled = false;
 
-    iniciarTickerPareamento(expEl, r.expiresIn, () => limparQrPareamento());
+    iniciarTickerPareamento(expEl, r.expiresIn, aoVencerQrPareamento);
+}
+
+// O QR venceu: o desenho sai (é credencial morta), o link sai do "Copiar link"
+// e o botão apaga. Antes só o desenho saía, e o botão seguia copiando um link
+// que já não entrava em lugar nenhum (auditoria de 2026-09-26). O texto de
+// vencido diz o caminho de um novo (`pair.expired`).
+function aoVencerQrPareamento() {
+    limparQrPareamento();
+    pairQrVenceEm = 0;
+    const code = document.getElementById('pairCode');
+    if (code) delete code.dataset.raw;
+    const copiar = document.getElementById('pairCopyLinkBtn');
+    if (copiar) copiar.disabled = true;
 }
 
 // Contagem regressiva: deixa claro que o segredo morre — e evita o editor ficar
 // tentando um código velho achando que o app quebrou. Vale pro QR e pro código
 // digitado, que são registros SEPARADOS e vencem cada um no seu tempo.
+//
+// Pelo RELÓGIO, não pela contagem de tiques: aba em segundo plano estrangula o
+// `setInterval` (um por minuto, ou menos), e contar tiques mostrava "Vale por
+// mais 3:40" ao voltar pra um código que já tinha vencido.
 function iniciarTickerPareamento(elemento, segundos, aoVencer) {
-    let restante = segundos;
+    const venceEm = Date.now() + segundos * 1000;
     const tick = () => {
+        const restante = Math.ceil((venceEm - Date.now()) / 1000);
         if (restante <= 0) {
             elemento.textContent = t('pair.expired');
             if (aoVencer) aoVencer();
             pararTickerPareamento(elemento);
-            return;
+            return false;
         }
         const m = Math.floor(restante / 60);
         const seg = String(restante % 60).padStart(2, '0');
         elemento.textContent = t('pair.expiresIn', { time: m + ':' + seg });
-        restante--;
+        return true;
     };
     pararTickerPareamento(elemento);
-    tick();
-    pairTickers.set(elemento, setInterval(tick, 1000));
+    // Já vencido na largada, nenhum intervalo nasce (senão o aoVencer rodaria
+    // a cada segundo, pra sempre).
+    if (tick()) pairTickers.set(elemento, setInterval(tick, 1000));
 }
 
 // Um ticker por elemento: o QR e o código correm juntos, e um `clearInterval`
@@ -1389,6 +1418,14 @@ async function revelarCodigoPareamento() {
 async function copiarLinkPareamento() {
     const raw = document.getElementById('pairCode').dataset.raw;
     if (!raw) return;
+    // Vencido pelo RELÓGIO, ainda que o tique do contador não tenha passado (aba
+    // que voltou do segundo plano): recusa e diz o caminho de um novo, em vez de
+    // entregar um link que já não entra.
+    if (Date.now() >= pairQrVenceEm) {
+        aoVencerQrPareamento();
+        showToast(t('pair.expired'), 'error');
+        return;
+    }
     const url = location.origin + '/#pair=' + raw;
     try {
         await navigator.clipboard.writeText(url);

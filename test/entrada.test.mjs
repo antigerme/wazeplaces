@@ -1026,3 +1026,89 @@ test('iPhone com o app INSTALADO: a instrução manda pro código digitado — a
       `${lang}: a pré-condição do iPhone instalado tem ${entrada.length} caracteres contra ${sempre.length} — empurra o botão principal pra fora da tela`);
   }
 });
+
+// ── T4 (textos, 2026-09-26): o QR do pareamento VENCIDO ──────────────────────
+// Ao vencer, só o desenho saía: o "Copiar link" seguia ativo e copiava um link
+// que já não entrava em lugar nenhum, e o aviso dizia "gere outro" sem dizer
+// onde. E o contador contava TIQUES: numa aba que volta do segundo plano (o
+// navegador estrangula o setInterval), ele mostrava "Vale por mais 3:40" pra um
+// código morto. Roda o código DE VERDADE, com relógio e intervalo de mentira.
+function pareamentoDeMentira() {
+  let agora = 1_000_000;
+  let proxId = 0, limpezasDoQr = 0;
+  const intervalos = new Map();
+  const copiados = [], toasts = [];
+  const { registro, document } = domDeMentira({
+    pairShowClose: { focus() {} }, pairCode: {}, pairExpiry: {}, pairCodeReveal: {},
+    pairShowCodeBtn: {}, pairCodeExpiry: {}, pairCopyLinkBtn: {},
+  });
+  const deps = {
+    document,
+    Date: { now: () => agora },
+    setInterval: (fn) => { const id = ++proxId; intervalos.set(id, fn); return id; },
+    clearInterval: (id) => { intervalos.delete(id); },
+    pairTickers: new Map(),
+    pairQrVenceEm: 0,
+    pareamentosEmitidos: new Set(),
+    openModal() {}, closeModal() {},
+    API: { criarPareamento: async () => ({ success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
+    showToast: (m, tipo) => toasts.push([m, tipo]),
+    msgDoServidor: (r, f) => f,
+    t: (k) => k,
+    limparQrPareamento: () => { limpezasDoQr++; },
+    desenharQrPareamento() {},
+    location: { origin: 'https://app.test' },
+    navigator: { clipboard: { writeText: async (u) => { copiados.push(u); } } },
+    TOAST_COPIAVEL_MS: 30000,
+  };
+  const api = montar(
+    ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento'],
+    deps, ['abrirPareamento', 'copiarLinkPareamento']);
+  return {
+    ...api, registro, copiados, toasts,
+    limpezasDoQr: () => limpezasDoQr,
+    andar: (ms) => { agora += ms; },
+    tique: () => { for (const fn of [...intervalos.values()]) fn(); },
+    intervalosVivos: () => intervalos.size,
+  };
+}
+
+test('QR vencido: o "Copiar link" apaga e não entrega link morto — nem na aba que volta do segundo plano', async () => {
+  // Pelo contador: passam os 5 minutos e o tique vem.
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  const btn = p.registro.pairCopyLinkBtn;
+  assert.equal(btn.disabled, false, 'CONTROLE: com o QR valendo, o "Copiar link" tem que estar ativo');
+  await p.copiarLinkPareamento();
+  assert.deepEqual(p.copiados, ['https://app.test/#pair=SEGREDODOQR'], 'CONTROLE: com o QR valendo, copiar entrega o link');
+  const limpezasAntes = p.limpezasDoQr();
+  p.andar(300_000);
+  p.tique();
+  assert.equal(p.registro.pairExpiry.textContent, 'pair.expired');
+  assert.equal(btn.disabled, true, 'o QR venceu e o "Copiar link" seguiu ativo');
+  assert.equal(p.limpezasDoQr(), limpezasAntes + 1, 'o QR vencido seguiu desenhado');
+  assert.equal(p.intervalosVivos(), 0, 'o contador seguiu rodando depois de vencer');
+  await p.copiarLinkPareamento();
+  assert.equal(p.copiados.length, 1, 'o "Copiar link" entregou um link vencido');
+
+  // Aba em segundo plano: o relógio passa e o tique NÃO vem.
+  const q = pareamentoDeMentira();
+  await q.abrirPareamento();
+  q.andar(301_000);
+  await q.copiarLinkPareamento();
+  assert.deepEqual(q.copiados, [], 'a aba voltou do segundo plano e o "Copiar link" entregou um link vencido');
+  assert.deepEqual(q.toasts, [['pair.expired', 'error']], 'a recusa não disse o caminho de um código novo');
+  assert.equal(q.registro.pairCopyLinkBtn.disabled, true, 'recusou e deixou o botão ativo');
+  q.tique();
+  assert.equal(q.registro.pairExpiry.textContent, 'pair.expired',
+    'o contador contou tiques em vez de ler o relógio ("Vale por mais…" pra um código morto)');
+
+  // O botão apagado tem cara de apagado (M3), e o aviso diz o caminho com o
+  // nome que a tela usa, nas 4 línguas.
+  assert.match(CSS_SEM, /#pairCopyLinkBtn:disabled\s*\{[^}]*opacity:\s*0?\.4/, 'o "Copiar link" apagado segue com cara de vivo');
+  const D = dicionario();
+  for (const lang of Object.keys(D)) {
+    assert.ok(D[lang]['pair.expired'].includes(D[lang]['pair.createBtn']),
+      `${lang}: o aviso de vencido não diz o caminho com o nome da tela "${D[lang]['pair.createBtn']}"`);
+  }
+});

@@ -689,6 +689,15 @@ body > main {
   cursor: not-allowed;
 }
 
+/* O "Copiar link" do pareamento apagado: o QR venceu (ou ainda está chegando).
+   Sem isto ele seguia com cara de vivo e não respondia — o "botão morto" que o
+   M3 pede pra mostrar. `#id:disabled` vence a utility de cor (gotcha #27). */
+#pairCopyLinkBtn:disabled {
+  opacity: 0.4;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+
 /* Snackbar (toast) — bottom-center, estilo M3, entra deslizando de baixo */
 .toast {
   width: 100%;
