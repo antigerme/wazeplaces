@@ -39,7 +39,9 @@ process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
 process.on('uncaughtException', (e) => console.error('uncaughtException', e));
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)); // raiz do repo
-const PORT = parseInt(process.env.PORT, 10) || 8080;
+// PORT=0 é "qualquer porta livre" (os testes pedem assim), e não "sem porta":
+// o `parseInt(…) || 8080` o trocava por 8080, e duas VMs de teste brigavam por ela.
+const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 8080;
 const HOST = process.env.HOST || '0.0.0.0';
 const SESSION_DIR = process.env.SESSION_DIR || join(tmpdir(), 'waze_places_sessions');
 const SESSION_KEY_FILE = process.env.SESSION_KEY_FILE || join(tmpdir(), 'waze_places.key');
@@ -488,7 +490,17 @@ const server = createServer(async (req, res) => {
   }
 });
 
+// Porta ocupada (ou sem permissão) é FATAL. Sem isto o erro caía no
+// `uncaughtException` lá de cima, que só registra, e o processo saía com
+// código 0: um supervisor que reinicia "se falhar" lia a queda como sucesso.
+server.on('error', (e) => {
+  console.error('Waze Places não subiu:', e && e.message);
+  process.exit(1);
+});
+
 server.listen(PORT, HOST, () => {
-  console.log(`Waze Places rodando em http://${HOST}:${PORT}`);
+  // A porta que o SISTEMA deu: com PORT=0 (os testes pedem uma livre), o
+  // valor configurado é 0, e é esta linha que diz onde o servidor está.
+  console.log(`Waze Places rodando em http://${HOST}:${server.address().port}`);
   console.log(`Sessões: ${SESSION_DIR}`);
 });

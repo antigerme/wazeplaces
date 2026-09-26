@@ -11,38 +11,27 @@
 // achado isso; só pedindo a página e olhando a resposta.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { subirVM } from './_vm.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
-import { setTimeout as dormir } from 'node:timers/promises';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-async function comServidor(porta, fn) {
-  const p = spawn(process.execPath, [join(RAIZ, 'server', 'node.mjs')], {
-    env: { ...process.env, PORT: String(porta), HOST: '127.0.0.1',
-      ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64') },
-    stdio: 'ignore',
-  });
-  try {
-    for (let i = 0; i < 80; i++) {
-      try { const r = await fetch(`http://127.0.0.1:${porta}/`); if (r.ok) break; } catch {}
-      await dormir(100);
-    }
-    await fn();
-  } finally { p.kill(); }
+async function comServidor(fn) {
+  const vm = await subirVM();
+  try { await fn(vm.porta); } finally { vm.parar(); }
 }
 
 test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
-  await comServidor(8471, async () => {
+  await comServidor(async (porta) => {
     // O HTML é o que mais importa (é onde o script roda), mas os estáticos
     // também levam: a política vale pra resposta, não pra "página".
     // `/js/min/app.js` e não `/js/app.js`: o fonte comentado deixou de ser
     // servido (é entrada de build, como o `index.src.html`), então pedi-lo aqui
     // media um 404 e a asserção reprovava por motivo alheio à CSP.
     for (const caminho of ['/', '/js/min/app.js', '/css/app.css']) {
-      const r = await fetch('http://127.0.0.1:8471' + caminho);
+      const r = await fetch(`http://127.0.0.1:${porta}` + caminho);
       assert.equal(r.status, 200, `${caminho} não respondeu 200`);
       const csp = r.headers.get('content-security-policy');
       assert.ok(csp, `${caminho}: a VM não mandou Content-Security-Policy — o app fica só com o <meta>`);
@@ -78,8 +67,8 @@ test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
 // O guard existe porque a dependência é invisível pelos dois lados: quem mexe
 // na CSP não pensa no worker, e quem mexe no worker não pensa na CSP.
 test('o script do service worker sai COM a CSP, e ela deixa o worker buscar tile', async () => {
-  await comServidor(8474, async () => {
-    const r = await fetch('http://127.0.0.1:8474/service-worker.js');
+  await comServidor(async (porta) => {
+    const r = await fetch(`http://127.0.0.1:${porta}/service-worker.js`);
     assert.equal(r.status, 200, 'o service-worker.js não respondeu 200');
     const csp = r.headers.get('content-security-policy');
     assert.ok(csp, 'o service-worker.js saiu SEM Content-Security-Policy — o <meta> não alcança o worker,'
@@ -111,8 +100,8 @@ test('os cabeçalhos de segurança da VM batem com os que o _headers promete', a
   assert.ok(Object.keys(prometidos).length >= 5,
     `só ${Object.keys(prometidos).length} cabeçalhos lidos do _headers — o parser quebrou`);
 
-  await comServidor(8472, async () => {
-    const r = await fetch('http://127.0.0.1:8472/');
+  await comServidor(async (porta) => {
+    const r = await fetch(`http://127.0.0.1:${porta}/`);
     const faltando = [];
     for (const nome of Object.keys(prometidos)) {
       if (!r.headers.get(nome)) faltando.push(nome);
@@ -138,8 +127,7 @@ test('os cabeçalhos de segurança da VM batem com os que o _headers promete', a
 // política própria. O modo de falha não é lentidão: é a resposta de um editor
 // (perfil, fila, sessão) sendo servida pra outro.
 test('toda resposta de /api sai com no-store, no Node e no Worker', async () => {
-  const porta = 8218;
-  await comServidor(porta, async () => {
+  await comServidor(async (porta) => {
     // Caminhos que respondem coisas diferentes: 401 sem sessão, 404 de rota
     // inexistente e 405 de método errado. Todos são resposta de API.
     const casos = [
@@ -209,10 +197,10 @@ test('o Cache-Control por caminho da VM bate com o do _headers', async () => {
   assert.deepEqual(semExemplo, [],
     `regra nova no _headers sem exemplo aqui: ${semExemplo.join(', ')} — acrescente e confira`);
 
-  await comServidor(8474, async () => {
+  await comServidor(async (porta) => {
     for (const [regra, caminho] of Object.entries(EXEMPLOS)) {
       if (!regras[regra]) continue;
-      const r = await fetch(`http://127.0.0.1:8474${caminho}`);
+      const r = await fetch(`http://127.0.0.1:${porta}${caminho}`);
       assert.equal(r.headers.get('cache-control'), regras[regra],
         `${caminho} diverge:\n  _headers (${regra}): ${regras[regra]}\n  VM:${' '.repeat(regra.length - 1)} ${r.headers.get('cache-control')}`);
     }

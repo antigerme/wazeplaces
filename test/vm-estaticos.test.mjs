@@ -18,15 +18,15 @@
 // não herda a cobertura do core (gotcha #61).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
+import { subirVM } from './_vm.mjs';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setTimeout as dormir } from 'node:timers/promises';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PORTA = 8473;
+let PORTA = 0; // a porta LIVRE que o `comServidor` pega (ver `test/_vm.mjs`)
 const URL_ = (p) => `http://127.0.0.1:${PORTA}${p}`;
 
 // Código = o que o SW trata como network-first. Se esta lista divergir da do
@@ -41,18 +41,9 @@ const URL_ = (p) => `http://127.0.0.1:${PORTA}${p}`;
 const CODIGO = ['/', '/index.html', '/js/min/app.js', '/js/min/i18n.js', '/css/app.css', '/manifest.json'];
 
 async function comServidor(fn) {
-  const p = spawn(process.execPath, [join(RAIZ, 'server', 'node.mjs')], {
-    env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1',
-      ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64') },
-    stdio: 'ignore',
-  });
-  try {
-    for (let i = 0; i < 80; i++) {
-      try { const r = await fetch(URL_('/')); if (r.ok) break; } catch { /* subindo */ }
-      await dormir(100);
-    }
-    await fn();
-  } finally { p.kill(); }
+  const vm = await subirVM();
+  PORTA = vm.porta;
+  try { await fn(); } finally { vm.parar(); }
 }
 
 test('estáticos da VM: no-cache no código, ETag em tudo, e 304 quando bate', async () => {
@@ -466,4 +457,44 @@ test('estáticos: a raiz é a do caminho NORMALIZADO — `//` abre o app (o Clou
     // CONTROLE: o que não é a raiz segue 404.
     assert.equal((await getCru('/index.html/')).status, 404);
   });
+});
+
+// Porta ocupada é FATAL, com código de erro. Sem o `server.on('error')` o
+// erro do `listen` caía no `uncaughtException` do adaptador, que só registra,
+// e o processo saía com código 0 — um supervisor que reinicia "se falhar"
+// leria a VM caída como sucesso (auditoria de 2026-09-26).
+test('VM: porta ocupada derruba o processo com código de ERRO, não com 0', async () => {
+  const { spawn } = await import('node:child_process');
+  const a = await subirVM();
+  try {
+    const b = spawn(process.execPath, [join(RAIZ, 'server', 'node.mjs')], {
+      env: { ...process.env, PORT: String(a.porta), HOST: '127.0.0.1',
+        ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64') },
+      stdio: 'ignore',
+    });
+    const codigo = await new Promise((resolve) => {
+      const prazo = setTimeout(() => { b.kill(); resolve('não saiu em 10 s'); }, 10000);
+      b.once('exit', (c) => { clearTimeout(prazo); resolve(c); });
+    });
+    assert.equal(codigo, 1, `a segunda VM na mesma porta saiu com ${codigo}`);
+    // CONTROLE: a primeira segue atendendo — o teste mediu a colisão, não uma VM quebrada.
+    assert.equal((await fetch(a.url('/'))).status, 200);
+  } finally { a.parar(); }
+});
+
+// PORT=0 é "qualquer porta livre" — é o que deixa as suítes rodarem ao mesmo
+// tempo. O `parseInt(…) || 8080` o trocava por 8080, e só com DUAS VMs no ar
+// isso aparece: numa só, a 8080 livre esconde o defeito.
+test('VM: PORT=0 é porta livre — duas VMs ao mesmo tempo sobem em portas diferentes', async () => {
+  const vms = await Promise.allSettled([subirVM(), subirVM()]);
+  try {
+    const falhas = vms.filter((v) => v.status === 'rejected').map((v) => v.reason.message);
+    assert.deepEqual(falhas, [], 'uma das VMs não subiu');
+    const [a, b] = vms.map((v) => v.value);
+    assert.notEqual(a.porta, b.porta);
+    assert.equal((await fetch(a.url('/'))).status, 200);
+    assert.equal((await fetch(b.url('/'))).status, 200);
+  } finally {
+    for (const v of vms) if (v.status === 'fulfilled') v.value.parar();
+  }
 });

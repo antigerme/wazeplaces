@@ -14,7 +14,7 @@
 // reconhecível pelo NOME (`sess_pair_`), que é o sinal que faltava.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { subirVM } from './_vm.mjs';
 import { mkdtemp, readdir, readFile, writeFile, utimes } from 'node:fs/promises';
 import { makeSessions } from '../server/core.mjs';
 import { tmpdir } from 'node:os';
@@ -26,25 +26,14 @@ const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const COOKIES = ['_web_session', '_csrf_token']
   .map((n) => `.waze.com\tTRUE\t/\tTRUE\t9999999999\t${n}\tvalor-de-teste`).join('\n');
 
-async function comServidor(dir, porta, fn) {
-  const p = spawn(process.execPath, [join(RAIZ, 'server', 'node.mjs')], {
-    env: {
-      ...process.env, PORT: String(porta), HOST: '127.0.0.1', SESSION_DIR: dir,
-      ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
-    },
-    stdio: 'ignore',
-  });
+async function comServidor(dir, fn) {
+  const vm = await subirVM({ SESSION_DIR: dir });
   try {
-    // Espera o boot em vez de dormir um número fixo: sleep curto demais mede o
-    // servidor que ainda não subiu, e longo demais é imposto no CI inteiro.
-    for (let i = 0; i < 60; i++) {
-      try { await fetch(`http://127.0.0.1:${porta}/`); break; } catch { await dormir(100); }
-    }
-    return await fn(async (nome, corpo) => (await fetch(`http://127.0.0.1:${porta}/api/${nome}`, {
+    return await fn(async (nome, corpo) => (await fetch(vm.url(`/api/${nome}`), {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo),
     })).json());
   } finally {
-    p.kill();
+    vm.parar();
   }
 }
 
@@ -71,7 +60,7 @@ test('varredura da VM: preserva sessão viva e apaga pareamento vencido', async 
   const umaHoraAtras = new Date(Date.now() - 3600 * 1000);
   await utimes(relerVelho, umaHoraAtras, umaHoraAtras);
 
-  const { arquivos } = await comServidor(dir, 8351, async (api) => {
+  const { arquivos } = await comServidor(dir, async (api) => {
     const par = await api('parear', { action: 'create', sessionToken: token });
     assert.ok(par.code, 'não deu pra criar o pareamento de teste');
     return { arquivos: await readdir(dir) };
@@ -87,7 +76,7 @@ test('varredura da VM: preserva sessão viva e apaga pareamento vencido', async 
   await writeFile(f, String(Math.floor(Date.now() / 1000) - 10) + v.slice(v.indexOf('|')));
 
   // Um segundo processo no MESMO diretório: a varredura roda no boot dele.
-  await comServidor(dir, 8352, async (api) => {
+  await comServidor(dir, async (api) => {
     // A varredura roda no boot SEM `await` (de propósito: não se atrasa o boot
     // por causa de faxina), então o servidor já atende enquanto ela trabalha.
     // Ler o diretório na hora é uma corrida — aqui ela nunca se perde, e no
@@ -131,7 +120,7 @@ test('VM: a sessão é gravada inteira (temporário + rename), e o temporário v
     keyBytes: new Uint8Array(32).fill(7),
   });
   const token = await sessoes.createSession(COOKIES);
-  await comServidor(dir, 8353, async (api) => {
+  await comServidor(dir, async (api) => {
     // O pareamento GRAVA pelo `put` do adaptador — é a escrita que se mede.
     const par = await api('parear', { action: 'create', sessionToken: token });
     assert.ok(par.code, 'não deu pra criar o pareamento de teste');
@@ -220,7 +209,7 @@ test('VM: a lista de fotos relida que sobra de um reinício sai no minuto dela, 
   // senão "sumiu" só quer dizer que a varredura apaga toda releitura.
   const nova = join(dir, 'sess_reler_' + 'd'.repeat(64));
   await writeFile(nova, agoraS + '|{"id":"2","images":[]}');
-  await comServidor(dir, 8354, async () => {
+  await comServidor(dir, async () => {
     const ate = Date.now() + 15000;
     let nomes = await readdir(dir);
     while (nomes.includes(quase.split('/').pop()) && Date.now() < ate) { await dormir(100); nomes = await readdir(dir); }
