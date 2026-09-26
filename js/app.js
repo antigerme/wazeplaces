@@ -11068,12 +11068,28 @@ function renderAutores() {
     // Delegação seria mais curta, mas o painel é re-renderizado inteiro a cada
     // esquecimento — o listener por linha morre junto com a linha.
     for (const b of el.querySelectorAll('.autor-esquecer')) {
-        b.addEventListener('click', () => esquecerAutor(b.dataset.autor));
+        b.addEventListener('click', () => esquecerAutorDaLista(b.dataset.autor));
     }
     for (const c of el.querySelectorAll('.autor-auto')) {
         c.addEventListener('change', () => alternarAutoDoAutor(c.dataset.autor));
     }
     devolverFoco(el, foco);
+}
+
+// Esquecer pela LISTA do Histórico. O card da frente (atrás do modal) e o de
+// fundo podem estar mostrando o `✕ N` desse autor, e sem refazer os dois o app
+// seguia afirmando a contagem que a pessoa acabou de apagar — e o selo abria a
+// folha dizendo "Você rejeitou 0 pedidos" (auditoria de 2026-09-25). A folha
+// do autor já refazia; aqui é o mesmo, só quando o autor está NA TELA:
+// refazer à toa devolveria o carrossel do card ao começo.
+function esquecerAutorDaLista(chave) {
+    esquecerAutor(chave);
+    const naTela = [AppState.currentPlace, (AppState.queue || [])[1]]
+        .some((p) => p && p.creatorId != null && String(p.creatorId) === String(chave));
+    if (naTela && AppState.currentPlace) {
+        removeCurrentCardEl();
+        showCurrentPlace();
+    }
 }
 
 // O painel do Histórico é redesenhado INTEIRO (innerHTML) a cada toque nele —

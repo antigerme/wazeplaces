@@ -287,8 +287,9 @@ function domDeMentira() {
       id: at.id || '', tag: m[1],
       getAttribute: (k) => (k in at ? at[k] : null),
       classList: { contains: (c) => classes.has(c) },
-      dataset: { autor: at['data-autor'] },
-      addEventListener() {}, scrollIntoView() {},
+      dataset: { autor: at['data-autor'] }, ouvintes: {},
+      addEventListener(tipo, fn) { (el.ouvintes[tipo] ||= []).push(fn); }, scrollIntoView() {},
+      disparar(tipo) { for (const fn of el.ouvintes[tipo] || []) fn({}); },
       focus() { ativo = el; },
     };
     return el;
@@ -322,7 +323,7 @@ function domDeMentira() {
 function montarPainelComFoco({ autores }) {
   const dom = domDeMentira();
   dom.raiz('historyBody'); dom.raiz('autoresBody');
-  const estado = { autores };
+  const estado = { autores, esquecidos: [] };
   const deps = {
     document: dom.document,
     getHistoryStats: () => ({ today: { read: 0, rejected: 0 }, week: { read: 0, rejected: 0 }, month: { read: 0, rejected: 0 }, total: { read: 4, rejected: 2 } }),
@@ -334,6 +335,7 @@ function montarPainelComFoco({ autores }) {
     listaDeAutores: () => estado.autores, AUTORES_VISIVEIS: 10, AUTORES_MAX_DIAS: 30, AUTOR_LIMIAR_DESTAQUE: 6,
     ICONE_LIXO: '', podeRecusarAutomaticoAqui: () => true, autoLigado: () => false, rejeitadoQuando: () => '',
     esquecerAutor() {}, alternarAutoDoAutor() {},
+    esquecerAutorDaLista: (id) => { estado.esquecidos.push(id); },
   };
   const api = montar(['chaveDoFoco', 'devolverFoco', 'renderAutores', 'renderHistory'], deps,
     ['renderAutores', 'renderHistory'], 'let autoresExpandido = false;');
@@ -385,4 +387,42 @@ test('H4: CONTROLE — redesenho com o foco FORA do painel não rouba o foco', (
   m.dom.focar(m.dom.fechar);                          // o foco no "Fechar" do rodapé
   m.renderHistory();                                  // uma ação pousou com o painel aberto
   assert.equal(m.dom.ativo(), m.dom.fechar, 'o redesenho roubou o foco de quem estava fora do painel');
+});
+
+// ── H8: esquecer pela LISTA refaz o card que mostra o `✕ N` ─────────────────
+// A folha do autor refazia o card; a lista do Histórico não: o "✕ 7" seguia
+// no card da frente depois de a contagem ser apagada, e tocar nele abria a
+// folha dizendo "Você rejeitou 0 pedidos".
+function montarEsquecer({ frente, fundo }) {
+  const feito = [];
+  const AppState = { currentPlace: frente, queue: [frente, fundo].filter(Boolean) };
+  const deps = {
+    AppState, esquecerAutor: (id) => feito.push('esqueceu:' + id),
+    removeCurrentCardEl: () => feito.push('tirou'), showCurrentPlace: () => feito.push('refez'),
+  };
+  const { esquecerAutorDaLista } = montar(['esquecerAutorDaLista'], deps, ['esquecerAutorDaLista']);
+  return { esquecerAutorDaLista, feito };
+}
+
+test('H8: esquecer pela lista do Histórico refaz o card da frente (e o de fundo) que mostra o autor', () => {
+  const frente = { creatorId: 1001 }, fundo = { creatorId: 2002 };
+  let m = montarEsquecer({ frente, fundo });
+  m.esquecerAutorDaLista('1001');
+  assert.deepEqual(m.feito, ['esqueceu:1001', 'tirou', 'refez'],
+    'o card da frente seguiu com o "✕ N" de um autor que acabou de ser esquecido');
+  m = montarEsquecer({ frente, fundo });
+  m.esquecerAutorDaLista('2002');
+  assert.deepEqual(m.feito, ['esqueceu:2002', 'tirou', 'refez'], 'o card de FUNDO seguiu com o selo do autor esquecido');
+  // CONTROLE: autor fora da tela não refaz nada (devolveria o carrossel ao começo).
+  m = montarEsquecer({ frente, fundo });
+  m.esquecerAutorDaLista('9999');
+  assert.deepEqual(m.feito, ['esqueceu:9999']);
+});
+
+test('H8: a lixeira da lista passa por esse caminho (e não pelo esquecer cru)', () => {
+  const m = montarPainelComFoco({ autores: [autor('1001', 7)] });
+  m.renderAutores();
+  const lixeira = m.achar('autoresBody', (e) => e.classList.contains('autor-esquecer') && e.getAttribute('data-autor') === '1001');
+  lixeira.disparar('click');
+  assert.deepEqual(m.estado.esquecidos, ['1001'], 'a lixeira da lista esquece sem refazer o card');
 });
