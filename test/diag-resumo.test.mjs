@@ -350,3 +350,59 @@ test('diag-resumo v10: o "já tratado" não é FALHOU — nem na lista, nem na c
   assert.match(s, /diário 0 · chamadas 1 \(falhas 0\)/, 'a abertura anterior conta o "já tratado" como falha');
   assert.match(s, /chamada já tratado 21:58:10\.000 marcar-lido http 500 · already_processed/);
 });
+
+// ── A duração da sessão (auditoria de 2026-09-26) ─────────────────────────
+// `resumo.sessaoDuracaoH` é um OBJETO desde que nasceu, e o leitor o
+// interpolava cru: "duração da sessão (h): [object Object]" em todo relatório
+// com um ciclo fechado, do v2 ao v10. A seção `sessao` aqui é a que o APP monta:
+// `diagSessao` fatiado do fonte e rodado sobre um diário de sessões — o formato
+// que o leitor recebe de verdade, e não um que eu imagino.
+function sessaoDoApp(diario, nascimento) {
+  const APP = readFileSync(join(ROOT, 'js/app.js'), 'utf8');
+  const ini = APP.indexOf('\nfunction diagSessao() {');
+  assert.ok(ini > 0, 'diagSessao sumiu do app.js');
+  let prof = 0, fim = -1;
+  for (let k = APP.indexOf('{', ini); k < APP.length; k++) {
+    if (APP[k] === '{') prof++;
+    else if (APP[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  const diagSessao = new Function('safeLS', 'NASCIMENTO_KEY', 'lerDiarioDeSessoes',
+    APP.slice(ini, fim) + '\nreturn diagSessao;')({ get: () => String(nascimento) }, 'n', () => diario);
+  return diagSessao();
+}
+
+test('diag-resumo: a duração da sessão sai LEGÍVEL — mediana, menor–maior, n e os pisos (nunca "[object Object]")', () => {
+  const H = 3600e3, agora = Date.now();
+  // Dois ciclos que CAÍRAM (20 h cada, início medido), e o de agora começado num
+  // `jaAtiva` (a sessão já existia quando o diário nasceu): um PISO, fora da conta.
+  const sessao = sessaoDoApp([
+    { t: agora - 60 * H, e: 'token+', via: 'cookies' }, { t: agora - 40 * H, e: 'caiu', motivo: 'srv.err.cookiesExpired' },
+    { t: agora - 30 * H, e: 'token+', via: 'extensao' }, { t: agora - 10 * H, e: 'caiu', motivo: 'srv.err.sessionExpired' },
+    { t: agora - 9 * H, e: 'jaAtiva' },
+  ], agora - 70 * H);
+  assert.deepEqual(sessao.duracaoH, { menor: 20, mediana: 20, maior: 20, n: 2 },
+    'PRÉ-CONDIÇÃO: o app mudou o formato da duração — o leitor e este teste precisam ser revistos');
+  const d = relatorioV4();
+  d._versaoDoDiag = 10;
+  d.resumo.sessaoDuracaoH = sessao.duracaoH;
+  d.sessao = sessao;
+  const s = rodar(d);
+  assert.ok(!s.includes('[object Object]'), 'algum objeto foi interpolado cru na triagem');
+  assert.match(s, /duração da sessão \(h\): mediana 20 · menor–maior 20–20 · n 2 · pisos 1 \(≥ 9, em curso\) · nascimento /,
+    'a duração da sessão não saiu legível (mediana, menor–maior, n e os pisos)');
+  // Sem ciclo fechado: a linha diz POR QUE não há número, em vez de um "—" mudo.
+  const semCiclo = relatorioV4();
+  semCiclo.resumo.sessaoDuracaoH = null;
+  semCiclo.sessao = sessaoDoApp([{ t: agora - H, e: 'token+', via: 'cookies' }], agora - 2 * H);
+  assert.match(rodar(semCiclo), /duração da sessão \(h\): — \(nenhum ciclo fechado com o início medido\) · pisos 0 · /);
+  // Relatório ANTIGO (v2: a conta já era objeto, os pisos ainda não existiam).
+  const v2 = relatorioV4();
+  v2._versaoDoDiag = 2;
+  v2.resumo.sessaoDuracaoH = { menor: 30, mediana: 30, maior: 30, n: 1 };
+  v2.sessao = { nascimento: null, idadeDoArmazenamentoH: null, ciclos: [{ durouH: 30, fim: 'caiu' }] };
+  const t2 = rodar(v2);
+  assert.ok(!t2.includes('[object Object]'), 'o relatório antigo voltou a imprimir o objeto cru');
+  assert.match(t2, /duração da sessão \(h\): mediana 30 · menor–maior 30–30 · n 1 · pisos \(ausente nesta versão\)/);
+  // E o v1, que nem trazia a conta.
+  assert.match(rodar(relatorioV4()), /duração da sessão \(h\): \(ausente nesta versão\) · nascimento/);
+});

@@ -179,8 +179,31 @@ else if (!sp) out('por ele mesmo: sem controlador (nada a perguntar)');
 else if (sp.semResposta) out('por ele mesmo: NÃO respondeu (worker de versão antiga, ou travado)');
 else out(`por ele mesmo: ${sp.versao} · vivo há ${Math.round((sp.idadeMs || 0) / 1000)}s · lista pronta ${sp.listaPronta} com ${sp.tilesNaLista} tiles · do cache ${sp.doCache} · cache sem entrada ${sp.cacheSemEntrada} · esperou leitura ${sp.esperouLeitura} · fora da lista ${sp.foraDaLista}`);
 
+// `sessaoDuracaoH` é um OBJETO desde que nasceu (`{menor, mediana, maior, n}`,
+// só dos ciclos com as duas pontas medidas), e esta linha o interpolava cru:
+// saía "[object Object]" em TODO relatório com ciclo fechado, do v2 ao v10 — a
+// resposta da pergunta que a seção existe pra responder ("dura 2 dias ou 7?")
+// virava lixo na triagem (auditoria de 2026-09-26). Os PISOS (ciclo que começou
+// num `jaAtiva`: a duração é "pelo menos") ficam FORA da conta de propósito, e
+// a linha diz quantos são e quanto cada um já durou — `pisos` entrou depois do
+// v2, então o relatório antigo diz que não o trazia.
+function duracaoDaSessao(dur, sessao) {
+  let conta;
+  if (dur && typeof dur === 'object') {
+    conta = `mediana ${dur.mediana ?? '?'} · menor–maior ${dur.menor ?? '?'}–${dur.maior ?? '?'} · n ${dur.n ?? '?'}`;
+  } else if (dur === undefined) conta = AUSENTE;
+  else if (dur === null) conta = '— (nenhum ciclo fechado com o início medido)';
+  else conta = String(dur);
+  if (!sessao) return conta;
+  if (!Number.isFinite(sessao.pisos)) return `${conta} · pisos ${AUSENTE}`;
+  const pisos = (Array.isArray(sessao.ciclos) ? sessao.ciclos : [])
+    .filter((c) => c && c.inicioConhecido === false && Number.isFinite(c.durouH))
+    .map((c) => `≥ ${c.durouH}${c.fim === 'em curso' ? ', em curso' : ''}`);
+  return `${conta} · pisos ${sessao.pisos}${pisos.length ? ` (${pisos.join('; ')})` : ''}`;
+}
+
 secao('SESSÃO E ARMAZENAMENTO');
-out(`duração da sessão (h): ${r.sessaoDuracaoH ?? '—'} · nascimento ${d.sessao?.nascimento ?? '—'} · idade do armazenamento (h) ${d.sessao?.idadeDoArmazenamentoH ?? '—'}`);
+out(`duração da sessão (h): ${duracaoDaSessao(r.sessaoDuracaoH, d.sessao)} · nascimento ${d.sessao?.nascimento ?? '—'} · idade do armazenamento (h) ${d.sessao?.idadeDoArmazenamentoH ?? '—'}`);
 out(`risco de apagamento: ${r.riscoDeApagamento ?? '—'}`);
 out(`recursos: ${j(d.recursosInfo)}`);
 

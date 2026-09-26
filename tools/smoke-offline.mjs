@@ -1966,6 +1966,16 @@ const s3d = await selo9c(p2d);
 diz('uma captura nova soma às guardadas: 3', s3d.txt === '3', JSON.stringify(s3d));
 let rel9c = null;
 const dir9c = mkdtempSync(join(tmpdir(), 'diag-9c-'));
+// Um ciclo de sessão FECHADO no diário (entrou há 50 h, caiu há 20 h): é ele que
+// faz o relatório levar a duração da sessão, que o leitor imprimia como
+// "[object Object]" (auditoria de 2026-09-26). O leitor roda sobre o arquivo DE
+// VERDADE logo abaixo — o teste de unidade monta a mesma seção pelo `diagSessao`.
+await p2d.evaluate(() => {
+  const H = 3600e3, agora = Date.now();
+  const anel = JSON.parse(localStorage.getItem('waze_places_sessoes') || '[]');
+  localStorage.setItem('waze_places_sessoes', JSON.stringify([{ t: agora - 50 * H, e: 'token+', via: 'cookies' },
+    { t: agora - 20 * H, e: 'caiu', motivo: 'srv.err.cookiesExpired' }, ...anel]));
+});
 try {
   const [dl] = await Promise.all([
     p2d.waitForEvent('download', { timeout: 30000 }),
@@ -1985,6 +1995,8 @@ try {
     triagemSecao: triagem.includes('ABERTURAS ANTERIORES') && triagem.includes('abertura ' + id1d),
     triagemAlerta: triagem.includes('[abertura anterior ' + id1d + ']'),
     vazouToken: triagem.includes('tok-9c'),
+    duracao: (triagem.match(/duração da sessão \(h\): [^·]*· [^·]*· [^·]*· [^·]*/) || [''])[0].trim(),
+    objetoCru: triagem.includes('[object Object]'),
   };
 } catch (e) {
   rel9c = { erro: String((e && e.message) || e).slice(0, 200) };
@@ -1998,6 +2010,9 @@ diz('o RELATÓRIO leva a abertura anterior inteira: as 2 capturas (com o DOM), o
 diz('o resumo e o leitor mostram o defeito capturado ANTES de fechar, dizendo de qual abertura — sem o token',
   rel9c?.alertaAnterior === true && rel9c?.triagemSecao === true && rel9c?.triagemAlerta === true && rel9c?.vazouToken === false,
   JSON.stringify(rel9c));
+diz('o leitor mostra a duração da sessão do relatório de verdade — números, nunca "[object Object]"',
+  rel9c?.objetoCru === false && /^duração da sessão \(h\): mediana 30 · menor–maior 30–30 · n 1 · pisos 0/.test(rel9c?.duracao || ''),
+  JSON.stringify({ duracao: rel9c?.duracao, objetoCru: rel9c?.objetoCru }));
 const apagou = await esperarNaPagina(p2d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
 const s4d = await selo9c(p2d);
 diz('BAIXADO, o que estava guardado sai do aparelho (e nesta abertura o número segue contando, como sempre)',
