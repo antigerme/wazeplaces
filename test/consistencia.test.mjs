@@ -64,6 +64,23 @@ test('código de pareamento: o placeholder mostra o mesmo formato que a tela', (
   for (const v of chaves) {
     assert.match(v, /^[A-Z0-9]{3}-[A-Z0-9]{3}$/, `placeholder "${v}" não segue o formato XXX-XXX mostrado na tela`);
   }
+  // E o EXEMPLO é um código que o servidor PODE emitir: só símbolos do
+  // alfabeto do pareamento (sem 0/O/1/I). "ABC-123" tinha o 1 — quem copiasse
+  // o exemplo pra entender o formato via um símbolo que nunca aparece num
+  // código de verdade (auditoria de 2026-09-26). O alfabeto do app é o do
+  // servidor, e isso também se confere aqui.
+  const alfabeto = (src, nome) => {
+    const m = new RegExp(`const ${nome} = '([^']+)';`).exec(src);
+    assert.ok(m, `CONTROLE: a constante ${nome} sumiu`);
+    return m[1];
+  };
+  const doApp = alfabeto(APP, 'PAIR_ALFABETO');
+  assert.equal(doApp, alfabeto(read('server/core.mjs'), 'PAIR_ALPHABET'),
+    'o alfabeto do código no app divergiu do que o servidor emite');
+  for (const v of chaves) {
+    const fora = [...v.replace('-', '')].filter((c) => !doApp.includes(c));
+    assert.deepEqual(fora, [], `placeholder "${v}" usa símbolo que nenhum código tem: ${fora.join(' ')}`);
+  }
   // SEM maxlength: ele corta o texto colado ANTES da formatação — " ABC-123"
   // virava "ABC-12" e "Código: ABC-123" virava "CDI-GO" (auditoria de
   // 2026-09-26). Quem corta em 6 é o `formatarCodigoPareamento`, DEPOIS de
