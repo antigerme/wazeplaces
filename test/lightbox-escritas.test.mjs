@@ -48,7 +48,7 @@ function metodo(nome) {
 
 // O Lightbox com os métodos de VERDADE e a tela de mentira.
 function lightbox(podeL6 = true) {
-  const corpo = ['podeAprovarAtual', 'marcarComoAprovada', 'desmarcarAprovada', 'removerFoto'].map(metodo).join(',\n');
+  const corpo = ['podeAprovarAtual', 'marcarComoAprovada', 'desmarcarAprovada', 'removerFoto', 'indiceDaFoto'].map(metodo).join(',\n');
   const L = new Function('podeAgirComoL6Aqui', `return {
     place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, aberto: true, renders: 0,
     isOpen() { return this.aberto; }, _render() { this.renders++; }, close() { this.aberto = false; },
@@ -125,6 +125,54 @@ test('excluir: a confirmação tira a foto certa pelo ID, mesmo com a pessoa em 
   L.removerFoto('f1', P);
   assert.deepEqual(L.urls, [FOTO('q1'), FOTO('q2')], 'a confirmação de P mexeu no carrossel de Q');
   assert.ok(!P.approvedImageIds.includes('f1'));
+});
+
+// ── L5: a aprovação que volta depois de uma EXCLUSÃO anterior à proposta ────
+// (auditoria de 2026-09-26). O ✨ era achado pelo índice que a foto tinha no
+// GESTO, e a exclusão de uma foto anterior desloca os índices. MEDIDO no
+// navegador: sem Desfazer, a aprovação que voltava deixava ✨ + "Aprovar" +
+// lixeira juntos na proposta e dava pra aprová-la DE NOVO ("Restam" caindo 2);
+// com Desfazer, a que falhava devolvia o ✨ à foto SEGUINTE.
+test('L5 aprovação confirmada depois de excluir uma foto ANTERIOR: o ✨ sai da PROPOSTA', () => {
+  const L = lightbox();
+  const P = { venueID: 'v1', updateRequestID: 'ur-P', purType: 'NEW_PHOTO', approvedImageIds: ['a1', 'a3'],
+    imageUrls: [FOTO('a1'), FOTO('ur-P'), FOTO('a3')] };
+  abrir(L, P, P.imageUrls, 1);
+  const alvo = { id: 'ur-P', place: P, idx: 1 };   // o índice do GESTO
+  L.idx = 0;
+  L.removerFoto('a1', P);                          // a exclusão anterior confirma primeiro
+  assert.equal(L.newIdx, 0, 'CONTROLE: a exclusão tinha que levar o ✨ junto pro índice 0');
+  L.marcarComoAprovada(alvo);                      // e a aprovação volta agora
+  assert.equal(L.newIdx, -1, 'o ✨ ficou na foto aprovada — com ele, o "Aprovar" (e uma 2ª aprovação)');
+  L.idx = 0;
+  assert.equal(L.podeAprovarAtual(), false, 'a proposta JÁ aprovada seguiu aprovável');
+  // CONTROLE: sem exclusão no meio, a mesma aprovação tira o ✨ (os dois
+  // caminhos, índice e id, concordam — é o caso que sempre passou).
+  const L2 = lightbox();
+  const Q = { ...P, approvedImageIds: ['a1', 'a3'], imageUrls: [FOTO('a1'), FOTO('ur-P'), FOTO('a3')] };
+  abrir(L2, Q, Q.imageUrls, 1);
+  L2.marcarComoAprovada({ id: 'ur-P', place: Q, idx: 1 });
+  assert.equal(L2.newIdx, -1);
+});
+
+test('L5 aprovação que FALHA depois de excluir uma foto ANTERIOR: o ✨ volta pra PROPOSTA, não pra seguinte', () => {
+  const L = lightbox();
+  const P = { venueID: 'v1', updateRequestID: 'ur-P', purType: 'NEW_PHOTO', approvedImageIds: ['a1', 'a3'],
+    imageUrls: [FOTO('a1'), FOTO('ur-P'), FOTO('a3')] };
+  abrir(L, P, P.imageUrls, 1);
+  const alvo = { id: 'ur-P', place: P, idx: 1 };
+  L.marcarComoAprovada(alvo);                      // com Desfazer: o ✨ sai no gesto
+  assert.equal(L.newIdx, -1);
+  L.idx = 0;
+  L.removerFoto('a1', P);                          // exclui a anterior (a lista vira [P, a3])
+  L.desmarcarAprovada(alvo);                       // e a aprovação falha
+  assert.equal(L.newIdx, 0, `o ✨ voltou pra foto ${L.newIdx} — a proposta é a 0 agora (a 1 é a a3, já no mapa)`);
+  L.idx = 0;
+  assert.equal(L.podeAprovarAtual(), true, 'a proposta deixou de poder ser aprovada de novo depois da falha');
+  // A foto que saiu da lista não recebe ✨ nenhum.
+  L.removerFoto('ur-P', P);
+  L.desmarcarAprovada(alvo);
+  assert.equal(L.newIdx, -1, 'o ✨ foi parar numa foto que não é a do pedido');
 });
 
 // ── o caminho SEM Desfazer: só aplica o que o Waze confirmou ────────────────

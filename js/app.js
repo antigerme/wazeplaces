@@ -2067,24 +2067,38 @@ const Lightbox = {
     // Depois de aprovada, a foto passa a estar no mapa: o ✨ some e ela entra
     // na lista de excluíveis — o botão vira lixeira sozinho.
     //
-    // As duas recebem o ALVO (o pedido, a foto e o índice dela), nunca leem o
-    // `this.place`: quem chama pode ser uma resposta que chegou DEPOIS de a
-    // pessoa fechar este lightbox e abrir o de outro pedido. Lendo o de agora,
-    // a falha tardia de uma aprovação punha o ✨ — e o botão de aprovar — na
-    // foto de OUTRO pedido, até de um local novo.
+    // As duas recebem o ALVO (o pedido e a foto), nunca leem o `this.place`:
+    // quem chama pode ser uma resposta que chegou DEPOIS de a pessoa fechar
+    // este lightbox e abrir o de outro pedido. Lendo o de agora, a falha tardia
+    // de uma aprovação punha o ✨ — e o botão de aprovar — na foto de OUTRO
+    // pedido, até de um local novo.
+    //
+    // E a foto é achada pelo ID na lista de AGORA, nunca pelo índice que ela
+    // tinha no gesto: excluir uma foto ANTERIOR à proposta, com a aprovação no
+    // ar, desloca os índices (`removerFoto`). Pelo índice, a aprovação que
+    // voltava deixava o ✨ e o "Aprovar" na proposta — e dava pra aprová-la DE
+    // NOVO, com o "Restam" caindo duas vezes —, e a que falhava devolvia o ✨ à
+    // foto SEGUINTE (auditoria de 2026-09-26).
     marcarComoAprovada(alvo) {
         const p = alvo.place;
         if (p && Array.isArray(p.approvedImageIds) && !p.approvedImageIds.includes(alvo.id)) p.approvedImageIds.push(alvo.id);
         if (this.place !== p) return;
-        if (this.newIdx === alvo.idx) this.newIdx = -1;
+        const i = this.indiceDaFoto(alvo.id);
+        if (i >= 0 && this.newIdx === i) this.newIdx = -1;
         if (this.isOpen()) this._render();
     },
     desmarcarAprovada(alvo) {
         const p = alvo.place;
         if (p && Array.isArray(p.approvedImageIds)) p.approvedImageIds = p.approvedImageIds.filter((x) => x !== alvo.id);
         if (this.place !== p) return;
-        this.newIdx = alvo.idx;
+        this.newIdx = this.indiceDaFoto(alvo.id);
         if (this.isOpen()) this._render();
+    },
+    // Onde está, na lista aberta AGORA, a foto deste id (-1 se ela saiu). A
+    // URL traz o id da foto, como no `idFotoAtual` e no `podeAprovarAtual`.
+    indiceDaFoto(id) {
+        if (id === undefined || id === null || id === '') return -1;
+        return this.urls.findIndex((u) => String(u || '').indexOf(String(id)) !== -1);
     },
     // Devolve o id da foto aberta SÓ se ela puder ser excluída — as duas
     // perguntas numa função só, de propósito: separadas, uma delas acaba
