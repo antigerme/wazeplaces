@@ -10886,7 +10886,19 @@ const AUTORES_VISIVEIS = 10;
 // da última, que o registro já guarda.
 const AUTOR_LIMIAR_DESTAQUE = 6;
 
-const diaDeHoje = () => Math.floor(Date.now() / 86400000);
+// O dia de HOJE no calendário de quem usa, contado em dias desde 1970 — é o
+// número que o registro guarda (`e[2]`) e o que a poda e o "rejeitado há N
+// dias" comparam. Era o dia UTC (`Date.now() / 86400000`): no Brasil, das 21h à
+// meia-noite já era "amanhã", então o rejeitado às 20h aparecia "há 1 dia" às
+// 21h30 do mesmo dia, e o das 22h30 seguia "hoje" no dia seguinte inteiro
+// (auditoria de 2026-09-25). A conta é de DATA, como no Histórico ("Dia é DATA,
+// nunca 24 h"): o dia local vira um número pela data em UTC, sem horário de
+// verão no meio. Registro gravado antes disto pode estar a um dia do certo — e
+// se corrige sozinho na próxima rejeição, ou sai com a poda de 30 dias.
+function diaDeHoje() {
+    const d = new Date();
+    return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000;
+}
 
 function loadAutores() {
     if (AppState.autores) return AppState.autores;
