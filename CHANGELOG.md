@@ -10,18 +10,128 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ## v2026.09.26-01
 
-Quarta rodada da auditoria, com a verificação em produção da v2026.09.25-05 (60 ✓ · 0 ✗).
+Quarta e quinta rodadas da auditoria. A quarta partiu da verificação em produção da v2026.09.25-05 (60 ✓ · 0 ✗). A quinta revisou a fundo seis áreas:
+- a entrada e a Ajuda;
+- o card e o lightbox;
+- o Histórico e as conquistas;
+- a fila de envio e o "Disponível offline";
+- a presença e a conversa;
+- o servidor.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
 
 ### Corrigido
-- **Outra conta entrando no mesmo aparelho não herda mais os dados da anterior.** Depois de uma queda de sessão (sem passar pelo "Sair"), quem entrasse com outra conta ficava com o placar, o Histórico, as conquistas, a lista de autores, a recusa automática e as conversas de quem estava, e as ações que esperavam rede iam pro Waze no nome de quem entrou. Agora cada ação guardada leva a conta de quem a fez, e quando o app reconhece outra conta os dados da anterior saem do aparelho, com um aviso.
+
+**Entrada, sessão e Ajuda**
+- **Outra conta entrando no mesmo aparelho não herda mais os dados da anterior.** Isso acontecia depois de uma queda de sessão, que não passa pelo "Sair". Quem entrava com outra conta ficava com:
+  - o placar, o Histórico e as conquistas de quem estava;
+  - a lista de autores, o autor em foco e a foto do perfil;
+  - a recusa automática e as conversas.
+
+  As ações que esperavam rede, inclusive as feitas antes de o perfil carregar, iam pro Waze no nome de quem entrou. Agora cada ação guardada leva a conta de quem a fez. Quando o app reconhece outra conta, os dados da anterior saem do aparelho, com um aviso.
+- **A extensão de Chrome só é oferecida onde instala**: Chrome, Edge e afins, no computador. No Firefox, no Safari e no iPad (que se apresenta como Mac) ela era um caminho sem saída. No celular, a Ajuda não a chama mais de "mais fácil" e ganhou o passo do código e do QR.
+- **Quem a entrada não aceita (nível ou área) e usa a extensão agora vê o motivo.** Aparece o mesmo "Acesso restrito" do login por arquivo, e a extensão não tenta mais 4 vezes seguidas. Isso precisa da extensão atualizada.
+- **Depois de "Sair" e entrar de novo sem fechar o app**, a extensão volta a reconectar sozinha quando a sessão cai.
+- **Abrir um QR ou link de pareamento vencido num aparelho já conectado não desconecta mais.** Aparece o aviso de sempre e o app segue na sua fila.
+- **O atalho do ícone aberto sem sessão não dispara mais sozinho depois do login.**
+- **Quando a sessão cai, o que estava aberto fecha**: os Filtros, a foto e o mapa ampliados e a conversa. O voltar do aparelho continua funcionando, e o que estava digitado na conversa não some sem ser enviado.
+- **Com rede lenta, a tela de entrada do celular não mostra mais a extensão como "recomendada"** nem o requisito antigo ("nível 3+"). No Firefox e no Safari do computador, a lista de entrada não começa mais por um "OU LOGIN MANUAL" solto.
+- **Sem sessão, a Ajuda não oferece mais "Ver de novo Como funciona".**
+- **O código de pareamento colado entra inteiro**, mesmo com espaço, quebra de linha, outro traço ou o rótulo "Código:" junto. O link mostrado pra copiar à mão não some mais enquanto você o seleciona.
+- **iPhone com o app na tela de início**: a entrada e a Ajuda mandam pro código digitado. Apontar a câmera pro QR abre o Safari, fora do app.
+- **Os avisos de sessão dizem só o que o app sabe.** Sem resposta do servidor, o aviso é "não deu pra confirmar a sessão agora", e a sessão que caiu não é mais chamada de "vencida por inatividade".
+- **Se o Waze estiver fora do ar na hora de entrar**, a mensagem aparece no seu idioma e diz que é passageiro. Antes vinha em português.
+- **Quem entra colando os cookies no formato de cabeçalho** (copiado do DevTools) não é mais desconectado em poucos dias.
+- **"Minha área" funciona pra quem tem área de gerência em várias partes ou com muitos detalhes.** Antes o filtro vinha vazio ou o perfil não carregava.
+- **Um nome por coisa**: "nível" em todo o "Acesso restrito", e "Instalar o aplicativo" nos dois lugares onde se instala o app.
+- **O "Entendi" do "Acesso restrito" tem cara de botão no tema escuro.**
+
+**Card, gestos e lightbox**
+- **Dar pinça na foto do card não decide mais o pedido.** Abrir ou fechar os dedos marcava como lido ou rejeitava. Agora o segundo dedo cancela o arraste e o card volta pro lugar.
+- **Puxar o card pra baixo não rejeita nem marca como lido**, mesmo com a mão desviando pro lado. O selo do lado só acende quando soltar ali decide.
+- **No computador, arrastar o card pela foto ou pelo mapa funciona.** Antes o card grudava no cursor, e o clique seguinte (em Filtros, por exemplo) pulava o pedido. Soltar o arraste também não abre mais a foto nem o mapa ampliado.
+- **Aprovar uma foto e seguir em frente não decide mais o pedido seguinte.** Se a aprovação chegava enquanto o card saía, o ✓, a seta ou o arraste caíam no pedido que entrava. O mesmo vale pro fim do "Marcar todos".
+- **Teclado**:
+  - com a lista de "Mudanças propostas" ou o texto do reporte em foco, as setas rolam o texto;
+  - a tecla z também desfaz excluir, aprovar e renomear foto;
+  - o Tab chega ao botão Desfazer por cima da foto.
+- **Desfazer a exclusão de uma foto com o lightbox reaberto** devolve o ✨ à foto certa, e ela volta a poder ser aprovada.
+- **Mini-mapa**: um ponto muito longe não tira mais do mapa os que cabem, e o aviso diz qual ficou fora e a que distância. Girar o celular refaz o mapa no tamanho novo.
+- **Mapa ampliado**: um pedido que move o local dezenas de km abre mostrando os dois pontos.
+- **Renomear com nome longo**: a pílula com o nome antigo não passa mais da borda da tela.
+- **"Nível de trava" nas mudanças aparece como no WME** (de 1 a 6).
+- **Excluir fotos em sequência no mesmo local não apaga mais a foto que outro editor acabou de subir.** E depois de aprovar uma foto dá pra excluí-la (ou excluir outra) na hora, sem erro.
+- **Pedido "Duplicado"**: quando o Waze demora pra dar o nome do local, a fila não espera mais por isso. O card aparece como "Duplicado", sem o nome.
+
+**Fila de envio e "Disponível offline"**
+- **Fechar o app com sinal ruim durante o "Desfazer" não perde mais a decisão**: ela fica guardada e sai quando a rede voltar.
+- **Uma decisão que o Waze recusa sempre não fica mais repetindo com avisos a cada segundo.** Com a sessão confirmada ativa, o app desiste dela e avisa uma vez.
+- **Um pedido que o Waze recusa com erro de servidor não segura mais os outros na fila de envio.**
+- **A recusa automática da conta anterior não age mais no nome da nova.**
+- **Uma falha passageira de sessão ao buscar mais pedidos não interrompe mais a reposição da fila.**
+- **"Disponível offline"**:
+  - trocar de região ou de país não faz mais a fila antiga reaparecer ao reabrir sem rede;
+  - o mapa guardado é atualizado a cada preparação, e não falha mais logo depois de o app acordar;
+  - a preparação não fica mais "preparando" pra sempre com a conexão pendurada.
+
+**Presença e conversa**
+- **A conversa aberta e lida não volta a contar na pílula.** A lista que chegava logo depois de abrir a conversa (ou na volta do segundo plano) devolvia "1 mensagem nova" com a mensagem já na tela, e o "lida" que dava certo não zerava o número.
+- **A conversa só é dada como lida quando o Waze confirma.** Se o "lida" falhou ao abrir, o app tenta de novo com a conversa aberta.
+- **O chat em tempo real não fica mais parado por um problema no token.** Quando o Waze não entregava o token, a renovação falhava ou o Google o recusava, as mensagens paravam de chegar ao vivo até reabrir o app. Agora o token que ainda vale segue em uso, e o app pede outro na próxima resposta do servidor, no máximo a cada 5 minutos.
+- **O pedido preso numa conversa não vai mais parar na conversa com outra pessoa**, nem aparece pra outra conta depois do "Sair".
+- **Se a conversa não carregou, o aviso e o "Tentar de novo" não somem** quando chega ou sai uma mensagem. "Ver mensagens anteriores" mostra que está carregando e, se falhar, diz que não deu e oferece "Tentar de novo".
+- **Trocar de país com uma ação no ar não mistura mais as listas** de quem está no app. A lista também não aparece mais pela metade quando a conexão com o Waze cai no meio.
+- **Leitor de tela**:
+  - a mensagem com pedido é anunciada pela pergunta e pelo pedido, não mais pelo link do WME soletrado;
+  - as linhas da lista separam nome, nível, distância e "N mensagens novas";
+  - o cartão do pedido na conversa lê a pergunta e o recibo.
+
+**Histórico, conquistas e Resumo do mês**
+- **A aba Histórico mostra na hora** o pedido que acabou de ser confirmado e o idioma trocado nas Preferências.
+- **Com o app aberto em duas abas, uma não apaga mais o trabalho da outra.**
+- **Tocar numa conquista, na escada, num interruptor ou numa lixeira não joga mais o foco pro começo da página.** Ao fechar o Resumo do mês, o foco volta pro botão de Filtros.
+- **Esquecer um autor pela lista tira na hora o "✕ N" do card.**
+- **Autores**: "rejeitado hoje / há N dias" segue o seu dia (no Brasil, virava às 21h). A folha do autor não afirma mais "nos últimos 30 dias".
+- **Recusa automática**: com dois autores na mesma leva, o aviso não põe tudo na conta de um só.
+- **Conquistas**:
+  - trocar de idioma não conta mais pra "Poliglota";
+  - "Tudo limpo" só vale com a fila limpa de verdade e confirmada, e o Desfazer não a deixa mais pra trás;
+  - o Desfazer do lightbox conta pra "Segunda chance";
+  - a primeira conquista do aparelho, quando é de evento, é anunciada;
+  - o trabalho feito sem rede conta pela hora e pelo dia em que foi feito.
+- **Resumo do mês**:
+  - "1 rejeitado", "1 lido" e "1 pedido do mapa" no singular;
+  - o dia mais forte vem com o mês;
+  - sem perfil carregado, a imagem não inventa nome nem nível;
+  - a imagem tem uma descrição com os números.
+- **Renomear**: a resposta que chega depois do "Sair" não grava mais nada.
+
+**Idioma e acessibilidade**
 - **Trocar de idioma traduz na hora** o aviso do Desfazer nas Preferências, a linha do "Disponível offline", o nome da pílula de quem está no app e o do botão de Filtros. Antes, o aviso do Desfazer e o nome da pílula ficavam em português até o app ser aberto de novo.
-- **A extensão de Chrome só é oferecida onde instala** (Chrome, Edge e afins, no computador). No Firefox, no Safari e no iPad (que se apresenta como Mac) ela era um caminho sem saída.
-- **Na VM, o navegador volta a receber "não mudou" (304) com o Cloudflare na frente**: a borda troca o ETag por um "fraco", e a VM só aceitava o original, então cada abertura baixava o app inteiro de novo.
-- **A VM responde a API pelo mesmo caminho que o Cloudflare** (`/api/./sessao` é a rota `sessao` nos dois).
+- **Leitor de tela no Histórico**: a conquista diz se está ganha ou trancada, o degrau atual é anunciado, e os controles dizem o nome do autor.
+- **Teclado**: fechar uma janela aberta pela Ajuda, ou sair dela pelo teclado, deixa o foco num botão na tela, e não no topo da página. "Conectar outro aparelho" abre com o foco em "Fechar".
+- **Comando de voz**: o botão "By AG" tem "By AG" no nome.
+- **Francês**: "nouvelle" no selo, e frase natural na folha do autor.
+
+### Privacidade
+- **Entrar pela extensão fecha a janela "Colar"** e apaga o cookies.txt que estava no campo.
+- **"Sair" apaga do aparelho o cabeçalho do perfil** e a lista de recursos carregados que o diagnóstico leva, com a foto de perfil e as fotos dos pedidos.
+- **A Ajuda diz o que fica no servidor além dos cookies**: ao tocar na lixeira de uma foto, a lista de fotos daquele local fica guardada por até 1 minuto. Isso vale também na VM, onde a lista ficava até a limpeza de hora em hora.
+- **Modo Desenvolvedor**: "Sair" e desligar o modo dev apagam o diagnóstico guardado mesmo com o armazenamento do navegador travado.
 
 ### Mudado
-- Comentários do código com o portão de entrada certo (L2+AM) e o adaptador do Cloudflare de hoje.
-- `docs/auditoria-2026-09.md` guarda o estado da auditoria, pra ela continuar depois de uma parada.
+- **Na VM, o navegador volta a receber "não mudou" (304) com o Cloudflare na frente.** A borda troca o ETag por um "fraco", a VM só aceitava o original, e por isso cada abertura baixava o app inteiro de novo.
+- **A VM responde igual ao Cloudflare**:
+  - a API pelo mesmo caminho (`/api/./sessao` é a rota `sessao` nos dois);
+  - endereço desconhecido dá "não encontrado", e não a página do app;
+  - os mesmos tipos de arquivo e o mesmo cache.
+  - porta ocupada derruba o processo com código de erro (saía com 0, que um supervisor lê como sucesso).
+- **Sem mudança na tela**: correções de segurança e de cota no servidor. Toda rota que escreve confere o id, e uma resposta truncada do Waze não é lida pela metade.
+- **A extensão de Chrome ganhou o aviso de "acesso restrito"** e precisa ser publicada de novo pra ele valer. Até lá, o app novo com a extensão antiga se comporta como antes.
+- Comentários do código com o portão de entrada certo (L2+AM) e o adaptador do Cloudflare de hoje. `docs/auditoria-2026-09.md` guarda o estado da auditoria, pra ela continuar depois de uma parada.
+
+### Ficou pra decisão
+- **Contraste de dois botões**: "Instalar o aplicativo", no "Tudo limpo!", e "Tentar novamente", na falha de carga, têm texto branco sobre ciano a 3,68:1, abaixo dos 4,5:1 do WCAG. Os botões equivalentes do app medem 5,36:1. Trocar a cor muda a tela, e mudança de tela passa por mockup antes.
 
 ---
 

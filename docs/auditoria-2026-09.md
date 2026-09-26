@@ -112,7 +112,18 @@ o contêiner. A cópia de segurança do que já estava commitado em 2026-09-26 0
 sobre o branch) e `lote6-consertos.patch` (um bloco `### fix-<área>` por
 agente; `git am` bloco a bloco, depois `npm run js && npm run css && npm run
 html`). O que faltava a partir daí, refaça a partir desta lista.
-**Atualização 2026-09-26 ~07:30:** presença, servidor, Histórico e card
+**Atualização 2026-09-26 ~11:50:** os SEIS entraram neste branch, com a
+costura da junção (um `devolverFoco` duplicado por dois branches paralelos
+virou `devolverFocoAoPainel`, e `test/nomes-unicos.test.mjs` reprova nome de
+topo repetido; harnesses com o que os vizinhos passaram a chamar). Entraram
+também dois consertos meus: a VM cumpre o prazo curto do `put` (a Ajuda promete
+1 min pra lista de fotos da lixeira; a VM deixava ~70) e os testes da VM sobem
+em porta livre (`test/_vm.mjs`), o que achou `PORT=0` virando 8080 e porta
+ocupada saindo com código 0. `npm test` 1270/1270; gerados regenerados; smokes
+de fluxo e presença verdes no código combinado. CHANGELOG e CLAUDE.md escritos.
+Próximo: smokes de layout e offline, depois o PR.
+
+**Atualização anterior, 2026-09-26 ~07:30:** presença, servidor, Histórico e card
 TERMINARAM e já estão NESTE branch (51 commits sobre o lote 5, `npm test`
 1201/1201; os gerados ainda NÃO foram regenerados). Faltam entrar
 `fix-auth` e `fix-off`. Pendências de produto que os agentes levantaram estão
@@ -290,6 +301,8 @@ estado de forma legível pro owner). Pra recuperar um arquivo: `Artifact` com
 - H16: o "Dia mais forte" do Resumo perdeu o dia da semana (com o mês por extenso não cabe; abreviado caberia).
 - lockRank vazio segue "(vazio)" (não achei a palavra do WME pro automático).
 - S12: o 413 da VM fecha em duas etapas (lê e descarta até 16 MB ou 5 s); a VM não tem mais "shell de SPA" (rota desconhecida dá 404, como o Cloudflare medido).
+- A14 (contraste): "Instalar o aplicativo" (no "Tudo limpo!") e "Tentar novamente" (falha de carga) têm branco sobre cyan-600, 3,68:1 — abaixo dos 4,5:1. Os equivalentes usam cyan-700 (5,36:1). Muda a tela: mockup.
+- A extensão precisa ser REPUBLICADA pro aviso de "Acesso restrito" (A5) valer.
 
 **Rascunho do CHANGELOG do lote 5:**
 - Outra conta entrando no mesmo aparelho não herda mais os dados da anterior
