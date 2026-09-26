@@ -48,7 +48,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #248 | 2026092502 | a busca relê a partir da página 1 (a "página 2" vinha vazia) | 46 ✓ · 3 ✗ (2 do instrumento, 1 real → rodada 1) |
 | #249 | 2026092503 | rodada 1: região NA (`/Descartes/`), país do perfil, portão sem porta lateral, estado do cliente (época da sessão, treino, 401 → fila de saída, região no gesto), lightbox, offline, presença, textos | 56 ✓ · 2 ✗ (1 do instrumento, 1 REGRESSÃO real: a volta da rede com a fila vazia → rodada 2) |
 | #250 | 2026092504 | rodada 2: a regressão, KV com 1 leitura por ação, `nosniff`, `?diag-rede`, FAB, zoom da foto, botão direito, Tab nos lightboxes, horário de verão, textos | **58 ✓ · 0 ✗** — e um achado novo no diagnóstico (abaixo) |
-| #251 | 2026092505 | rodada 3: o diagnóstico sem o script do Cloudflare, fim da fila com pulados, retentativa de foto, irmãos na fila, pilha/foco no autor, Street View no zoom, presença (país no meio, relógio, leitor de tela, lista fechada, ids com teto), cookies colados limpos em todo fechamento, IndexedDB com teto, segredo do pareamento fora do relatório | mergeado em 2026-09-25 23:38 UTC (CI verde nos dois jobs); produção serve a 2026092505; auditoria em produção rodando em 2026-09-26 01:25 |
+| #251 | 2026092505 | rodada 3: o diagnóstico sem o script do Cloudflare, fim da fila com pulados, retentativa de foto, irmãos na fila, pilha/foco no autor, Street View no zoom, presença (país no meio, relógio, leitor de tela, lista fechada, ids com teto), cookies colados limpos em todo fechamento, IndexedDB com teto, segredo do pareamento fora do relatório | mergeado em 2026-09-25 23:38 UTC (CI verde nos dois jobs); **60 ✓ · 0 ✗** em produção (2026-09-26 01:25), com o diagnóstico conferindo 13 arquivos com o servidor ("diferentes: 0") e o desvio do relógio medido (-8 ms) |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
@@ -78,10 +78,10 @@ tem a rodada 3: `git am lote5.patch`, depois `npm run js && npm run html`.
 5. **Trocar de idioma redesenha** o aviso do Desfazer, a linha do offline, a
    pílula e o botão de Filtros (MEDIDO: três textos ficavam em português).
 
-Validação feita: `npm test` 1071/1071 no commit 3; testes dos commits 4–5 e as
-sabotagens de todos. **Falta**: `npm test` inteiro de novo, `npm run js/css/html`,
-os 4 smokes, bump da versão (**2026092601** — dia novo), CHANGELOG (rascunho em
-§8), notas no CLAUDE.md, PR, CI, merge, produção.
+Validação feita: `npm test` **1072/1072** sobre a main nova, arquivos gerados sem
+diferença, versão **2026092601** (dia novo), CHANGELOG e notas no CLAUDE.md
+(commit "Versão 2026092601"). **Falta**: os 4 smokes (rodando em 2026-09-26
+~01:35), PR, CI, merge, produção.
 
 **Rodada 2 de auditoria**: 6 agentes só-leitura foram disparados em
 2026-09-25 ~23:25 sobre o lote 5, na cópia `/home/user/wp-lote5` (que por isso
@@ -176,9 +176,9 @@ estado de forma legível pro owner). Pra recuperar um arquivo: `Artifact` com
   leva 10–20 s). Texto novo na tela, pede mockup.
 
 **Técnicas, na ordem:**
-1. ~~Mergear o #251~~ (feito); auditoria em produção da 2026092505 (a versão
-   nova do roteiro confere também o "código confere com o servidor" e o desvio
-   do relógio da presença).
+1. ~~Mergear o #251 e auditar a produção da 2026092505~~ (60 ✓ · 0 ✗). Melhoria
+   pequena anotada pro próximo lote: o diagnóstico conta um "já tratado"
+   (`already_processed`, que pro app é sucesso) como "falha" nas chamadas.
 2. Validar e subir o lote 5 (§4 e §5).
 3. Tratar os achados da rodada 2 de auditoria (conferir cada um antes de
    corrigir; muitos agentes erram o instrumento — ver gotcha #28).
