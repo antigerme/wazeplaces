@@ -694,3 +694,32 @@ test('core: toda apiError leva errorKey — frase crua do servidor chega em port
   assert.deepEqual(semChave, [],
     'apiError sem `srv.err.*` na mesma linha: o app mostra a frase portuguesa do servidor em qualquer idioma');
 });
+
+import * as grpc from '../server/wme-grpc.mjs';
+
+test('presenca-waze: resposta gRPC cortada no meio (sem trailer, HTTP 200) é erro passageiro, não lista pela metade', async () => {
+  const s = await sessaoDeTeste(COOKIES);
+  const editor = (id) => grpc.campo.msg(1, grpc.junta(grpc.campo.inteiro(1, id), grpc.campo.bool(3, true), grpc.campo.texto(4, 'ed' + id)));
+  const lista = grpc.junta(editor(1), editor(2), editor(3), editor(4));
+  // Cabeçalho do quadro com o tamanho DECLARADO, seguido dos bytes que vieram.
+  const quadro = (declarado, corpo) => {
+    const q = new Uint8Array(5 + corpo.length);
+    new DataView(q.buffer).setUint32(1, declarado);
+    q.set(corpo, 5);
+    return q;
+  };
+  const b64 = (u8) => btoa(String.fromCharCode(...u8));
+  const pedir = (texto) => comWaze(() => new Response(texto, { status: 200 }),
+    () => dispatch('presenca-waze', { ...s.dados, region: 'row', caixa: [-50, -30, -40, -20] }, s.ctx));
+  // O corte cai numa divisa de campo (2 dos 4 editores): o protobuf que sobra
+  // é VÁLIDO, então só o tamanho do quadro denuncia.
+  const metade = lista.subarray(0, lista.length / 2);
+  assert.doesNotThrow(() => grpc.lerCampos(metade), 'pré-condição: a metade tinha que ser protobuf válido');
+  const { r } = await pedir(b64(quadro(lista.length, metade)));
+  assert.equal(r.body.success, false, `a metade da lista virou a lista: ${JSON.stringify(r.body.editores)}`);
+  assert.equal(r.body.errorCategory, 'transient', 'cortar no meio é de rede');
+  // CONTROLE: a lista inteira, do mesmo jeito (sem trailer), é lida com os 4.
+  const inteira = await pedir(b64(quadro(lista.length, lista)));
+  assert.equal(inteira.r.body.success, true, JSON.stringify(inteira.r.body));
+  assert.deepEqual(inteira.r.body.editores.map((e) => e.id), [1, 2, 3, 4]);
+});
