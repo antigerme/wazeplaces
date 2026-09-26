@@ -4704,16 +4704,32 @@ function diagCapturasAnterioresDoEditor() {
     return diagMomentosAnteriores().filter((m) => m && m.motivo === 'manual');
 }
 
+// Abrir a base tem TETO, como a do offline (`OFFLINE_DB_TETO_MS`): o IndexedDB
+// do WebKit às vezes não responde, e uma gravação com a abertura pendurada
+// prendia a fila `diagGuardando` — o apagar do "Sair" e do desligar do modo dev
+// entra na MESMA fila e nunca rodava (auditoria de 2026-09-26, O10).
+const DIAG_DB_TETO_MS = 5000;
+// Sobe a cada apagar: a gravação que acordar DEPOIS dele não grava nada (ver
+// `diagEsquecerGuardado`).
+let diagEpoca = 0;
 function diagDB() {
     return new Promise((ok, erro) => {
         let req;
         try { req = indexedDB.open(DIAG_DB, 1); } catch (e) { return erro(e); }
+        let estourou = false;
+        const teto = setTimeout(() => { estourou = true; erro(new Error('timeout')); }, DIAG_DB_TETO_MS);
         req.onupgradeneeded = () => {
             const db = req.result;
             if (!db.objectStoreNames.contains(DIAG_STORE)) db.createObjectStore(DIAG_STORE, { keyPath: 'id' });
         };
-        req.onsuccess = () => ok(req.result);
-        req.onerror = () => erro(req.error);
+        req.onsuccess = () => {
+            clearTimeout(teto);
+            // Abriu DEPOIS do teto: ninguém mais espera por ela — fecha, senão a
+            // conexão esquecida seguraria o apagar da base.
+            if (estourou) { try { req.result.close(); } catch (e) {} return; }
+            ok(req.result);
+        };
+        req.onerror = () => { clearTimeout(teto); erro(req.error); };
     });
 }
 
@@ -4798,12 +4814,17 @@ async function diagAplicarPoda(db, poda, novos) {
 let diagGuardando = Promise.resolve();
 function diagGuardarAbertura(motivo) {
     if (!dlogLigado()) return Promise.resolve(false);
+    // A época do PEDIDO, e não a do começo da gravação: um apagar pedido DEPOIS
+    // desta gravação a vence, mesmo que ela ainda nem tenha começado (a fila) ou
+    // esteja pendurada no meio (ver `diagEpoca`).
+    const epoca = diagEpoca;
     const esta = diagGuardando.then(async () => {
-        if (!dlogLigado()) return false;
+        if (!dlogLigado() || epoca !== diagEpoca) return false;
         let db = null;
         try {
             db = await diagDB();
             const guardadas = (await diagLerGuardado(db)).filter((a) => a.id !== DIAG_ABERTURA.id);
+            if (epoca !== diagEpoca) return false;
             const atual = diagRegistroDaAbertura(motivo);
             const poda = diagPodarAberturas([atual, ...guardadas], Date.now());
             await diagAplicarPoda(db, poda, new Set([atual.id]));
@@ -4844,7 +4865,11 @@ async function diagCarregarAberturas() {
 // termina antes (senão recriaria a base logo depois de apagada), e a que for
 // pedida depois acontece depois.
 function diagEsquecerGuardado() {
-    const esta = diagGuardando.then(() => new Promise((ok) => {
+    // A gravação em voo termina ANTES — mas com TETO: pendurada, ela prendia o
+    // apagar pra sempre (O10). Se ela acordar depois, a época a impede de gravar.
+    diagEpoca++;
+    const antes = Promise.race([diagGuardando, new Promise((ok) => setTimeout(ok, DIAG_DB_TETO_MS))]);
+    const esta = antes.then(() => new Promise((ok) => {
         try {
             const r = indexedDB.deleteDatabase(DIAG_DB);
             r.onsuccess = r.onerror = r.onblocked = () => ok(true);

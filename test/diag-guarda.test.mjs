@@ -187,8 +187,11 @@ test('as gravações andam em FILA, e o retrato é tirado depois do await', () =
   const iAwait = g.indexOf('await diagLerGuardado(db)');
   const iRetrato = g.indexOf('diagRegistroDaAbertura(motivo)');
   assert.ok(iAwait > 0 && iRetrato > iAwait, 'o retrato tem que ser tirado DEPOIS do await');
-  // E o apagar entra na MESMA fila.
-  assert.match(fatiar('diagEsquecerGuardado'), /const esta = diagGuardando\.then\([\s\S]*?deleteDatabase\(DIAG_DB\)[\s\S]*?diagGuardando = esta/,
+  // E o apagar entra na MESMA fila — esperando a gravação em voo com TETO (uma
+  // gravação pendurada o prendia pra sempre, O10), e com a época barrando a
+  // gravação que acordar depois dele.
+  assert.match(fatiar('diagEsquecerGuardado'),
+    /const antes = Promise\.race\(\[diagGuardando, [\s\S]*?const esta = antes\.then\([\s\S]*?deleteDatabase\(DIAG_DB\)[\s\S]*?diagGuardando = esta/,
     'o apagar saiu da fila — uma gravação em voo recriaria a base logo depois');
 });
 
@@ -247,4 +250,99 @@ test('a Ajuda diz a verdade sobre o que fica no aparelho, nos 4 idiomas', () => 
     const nucleo = indicador[i].split(' ').slice(-1)[0];   // "envio" / "send" / "envío" / "d’envoi"
     assert.ok(aparelho[i].includes(nucleo), `a Ajuda (${i}) não conta as ações esperando envio ("${nucleo}")`);
   }
+});
+
+// ── O10: a base do diagnóstico tem TETO (auditoria de 2026-09-26) ────────────
+// O IndexedDB do WebKit às vezes não responde. A gravação com a abertura
+// pendurada prendia a fila `diagGuardando`, e o apagar do "Sair" e do desligar
+// do modo dev — que entra na MESMA fila — nunca rodava (p11: 3 s depois, o
+// `deleteDatabase` nem tinha sido chamado).
+function baseDoDiag({ abrir }) {
+  let apagou = 0;
+  const gravados = [];
+  const indexedDB = {
+    open: () => abrir(gravados),
+    deleteDatabase: () => { apagou++; const r = {}; setTimeout(() => r.onsuccess && r.onsuccess(), 0); return r; },
+  };
+  const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30,
+    DIAG_ABERTURA: { id: 'esta' }, dlogLigado: () => true, dfato: () => {},
+    diagRegistroDaAbertura: () => ({ id: 'esta', salvoEm: Date.now(), inicio: Date.now(), momentos: [] }),
+    diagPodarAberturas: (l) => ({ manter: l, sair: [], cortadas: [] }) };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, `let diagGuardando = Promise.resolve(), diagEpoca = 0;
+    ${['diagDB', 'diagLerGuardado', 'diagAplicarPoda', 'diagGuardarAbertura', 'diagEsquecerGuardado'].map(fatiar).join('\n')}
+    return { diagGuardarAbertura, diagEsquecerGuardado };`)(...chaves.map((k) => deps[k]));
+  return { app, apagou: () => apagou, gravados };
+}
+const comTetoDe = (ms, p) => Promise.race([p.then(() => 'terminou'), new Promise((ok) => setTimeout(() => ok('PENDUROU'), ms))]);
+
+test('O10: a abertura PENDURADA da base não prende o apagar do "Sair"', async () => {
+  const b = baseDoDiag({ abrir: () => ({}) });               // nem success, nem error
+  b.app.diagGuardarAbertura('oculta');
+  assert.equal(await comTetoDe(1000, b.app.diagEsquecerGuardado()), 'terminou', 'o apagar esperou a gravação pendurada pra sempre');
+  assert.equal(b.apagou(), 1, 'a base do diagnóstico não foi apagada');
+});
+
+test('O10: a gravação que ACORDA depois do apagar não grava nada (a época)', async () => {
+  // A abertura responde, mas a leitura do que está guardado pendura; quando ela
+  // acordar, o apagar já passou — e a gravação não pode recriar a base.
+  let soltarLeitura = null;
+  const b = baseDoDiag({ abrir: (gravados) => {
+    const req = {};
+    const db = {
+      close() {},
+      transaction: () => {
+        const tx = {
+          objectStore: () => ({
+            getAll: () => { const r = {}; soltarLeitura = () => { r.result = []; r.onsuccess(); }; return r; },
+            delete: () => {}, put: (a) => { gravados.push(a.id); },
+          }),
+        };
+        setTimeout(() => tx.oncomplete && tx.oncomplete(), 5);
+        return tx;
+      },
+    };
+    setTimeout(() => { req.result = db; req.onsuccess(); }, 0);
+    return req;
+  } });
+  b.app.diagGuardarAbertura('oculta');
+  // A gravação COMEÇA (abre a base e pede a leitura) — e a leitura pendura.
+  for (let i = 0; i < 40 && !soltarLeitura; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(soltarLeitura, 'PRÉ-CONDIÇÃO: a gravação não chegou a pedir a leitura — não mediria a gravação EM VOO');
+  assert.equal(await comTetoDe(1000, b.app.diagEsquecerGuardado()), 'terminou', 'a leitura pendurada prendeu o apagar');
+  assert.equal(b.apagou(), 1);
+  soltarLeitura();                                            // a gravação acorda DEPOIS
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(b.gravados, [], 'a gravação que acordou depois do apagar recriou a base');
+  // E a gravação pedida ANTES do apagar mas ainda na FILA (nem começou) também
+  // não grava: a época é a do pedido.
+  soltarLeitura = null;
+  b.app.diagGuardarAbertura('oculta');
+  await b.app.diagEsquecerGuardado();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(soltarLeitura, null, 'a gravação que o apagar venceu ainda abriu a base e leu');
+  assert.deepEqual(b.gravados, []);
+});
+
+test('O10: uma gravação com a abertura PENDURADA não prende as seguintes (o teto da base)', async () => {
+  // A 1ª abertura nunca responde; a 2ª abre. Sem o teto, a 2ª gravação — que
+  // entra na fila atrás da 1ª — nunca rodava: o diário do "ir pro fundo" some.
+  let aberturas = 0;
+  const b = baseDoDiag({ abrir: (gravados) => {
+    if (++aberturas === 1) return {};
+    const req = {};
+    const db = { close() {}, transaction: () => {
+      const tx = { objectStore: () => ({
+        getAll: () => { const r = {}; setTimeout(() => { r.result = []; r.onsuccess(); }, 0); return r; },
+        delete: () => {}, put: (a) => gravados.push(a.id) }) };
+      setTimeout(() => tx.oncomplete && tx.oncomplete(), 5);
+      return tx;
+    } };
+    setTimeout(() => { req.result = db; req.onsuccess(); }, 0);
+    return req;
+  } });
+  b.app.diagGuardarAbertura('oculta');
+  const segunda = b.app.diagGuardarAbertura('saida');
+  assert.equal(await comTetoDe(1000, segunda), 'terminou', 'a gravação seguinte ficou presa atrás da abertura pendurada');
+  assert.deepEqual(b.gravados, ['esta'], 'a gravação seguinte não gravou');
 });
