@@ -6034,7 +6034,10 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // `depois` é pra quem já sabe o desfecho e não quer a extensão no meio: o
     // portão negado no perfil (a extensão entraria pelo MESMO portão e seria
     // recusada, com um toast de "sessão expirada" que não é o motivo).
-    if (typeof depois === 'function') { depois(); return; }
+    //
+    // Nos dois casos a tela de entrada vem pelo `fecharCamadasAbertas`, que fecha
+    // o que estava aberto por cima ANTES de ela (e do diálogo) aparecer.
+    if (typeof depois === 'function') { fecharCamadasAbertas(depois); return; }
     entrarPelaExtensao({ silencioso: true }).then((renovou) => {
         if (renovou) {
             showToast(t('toast.sessionRenewed'), 'info');
@@ -6046,11 +6049,50 @@ function derrubarSessao(errorKey, { depois } = {}) {
         // e a pessoa vê o "Acesso restrito" em vez do aviso de queda.
         const negado = tirarNegadoDaExtensao();
         if (!negado) showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
-        setTimeout(() => {
-            showAuthScreen();
+        setTimeout(() => fecharCamadasAbertas(() => {
             if (negado) showAccessDenied(negado);
-        }, UNAUTHORIZED_REDIRECT_MS);
+            showAuthScreen();
+        }), UNAUTHORIZED_REDIRECT_MS);
     });
+}
+
+// Fecha TUDO que está por cima — mapa ampliado, foto ampliada, modais —, com a
+// limpeza de cada um, e devolve as entradas do voltar do aparelho de UMA vez.
+//
+// A queda da sessão chega no meio do que a pessoa estava fazendo, e o que
+// estava aberto ficava por cima do "Bem-vindo!": os Filtros, a foto ampliada
+// (com os botões de aprovar e excluir de uma sessão que já não existe) e o mapa
+// ampliado (auditoria de 2026-09-26). O `abrirPorCima` é o que mostra a tela de
+// entrada — e, antes dela, o "Acesso restrito" quando a própria queda o abre (o
+// portão fechou): roda com tudo JÁ fechado, e o diálogo fica. Com tudo fechado,
+// o `Presenca.desligar` do `showAuthScreen` (que fecha a conversa e a lista pelo
+// `closeModal`) também não acha nada aberto e não mexe no histórico.
+//
+// Fechar camada por camada pelo caminho normal não serve, e é o gotcha #65:
+// cada fechamento AGENDA um `history.back()`, e o diálogo que abre em seguida
+// EMPILHA uma entrada que o back pendente come — sobra profundidade sem entrada
+// de verdade, e o próximo fechamento tira a pessoa do app. MEDIDO no Chromium e
+// no WebKit: `back()` + `pushState()` no mesmo tique termina na BASE; o destino
+// do `go()` é calculado na hora da chamada. Daí a ordem daqui: (1) fecha tudo
+// SEM mexer no histórico (`viaHistorico`); (2) o que abre por cima empilha a
+// entrada DELE; (3) só então as entradas das camadas fechadas saem, num `go`
+// só, contado a partir da entrada nova — que é onde o diálogo fica. Medido nos
+// dois motores: o diálogo fechado depois volta à base, dentro do app.
+function fecharCamadasAbertas(abrirPorCima) {
+    if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) MapaLightbox.close(true);
+    if (Lightbox.isOpen()) Lightbox.close({ viaHistorico: true });
+    // Só os abertos: o `closeModal` anota no diário antes de conferir.
+    for (const id of MODAL_IDS) {
+        const m = document.getElementById(id);
+        if (m && !m.classList.contains('hidden')) closeModal(id, { viaHistorico: true });
+    }
+    const sobrando = CamadaVoltar.profundidade;
+    CamadaVoltar.profundidade = 0;
+    if (typeof abrirPorCima === 'function') abrirPorCima();
+    if (sobrando > 0) {
+        CamadaVoltar.consumindo = true;
+        try { history.go(-sobrando); } catch (e) { CamadaVoltar.consumindo = false; }
+    }
 }
 
 // ── A foto de perfil espera o primeiro card ──────────────────────────────

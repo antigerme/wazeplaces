@@ -453,3 +453,92 @@ test('atalho do ícone aberto sem sessão: a query sai da URL na hora — um F5 
     'sem sessão, a query do atalho fica na URL e roda num F5 depois do login');
   assert.match(fatiar('handleLaunchAction'), /const action = tirarAcaoDaURL\(\);/);
 });
+
+// ── A8: a QUEDA da sessão fecha o que está por cima ─────────────────────────
+// O objeto literal inteiro (CamadaVoltar), casando chaves a partir da declaração.
+function objeto(nome) {
+  const i = APP_SEM.indexOf('const ' + nome + ' = {');
+  assert.ok(i >= 0, `${nome} sumiu do app.js`);
+  return APP_SEM.slice(i, fechar(APP_SEM, i)) + ';';
+}
+const MODAIS = new Function(constante('MODAL_IDS') + '\nreturn MODAL_IDS;')();
+
+function montarCamadas({ abertos = [], lightbox = false, mapa = false, profundidade = 0 } = {}) {
+  const ops = [];
+  const limpezas = [];
+  const specs = {};
+  for (const id of MODAIS) specs[id] = { oculto: !abertos.includes(id), querySelector: () => null };
+  const { registro, document } = domDeMentira(specs);
+  document.body = { style: {}, contains: () => true };
+  const Lightbox = { aberto: lightbox, fechou: null, isOpen() { return this.aberto; }, close(o) { this.aberto = false; this.fechou = o || {}; } };
+  const MapaLightbox = { aberto: mapa, fechou: null, isOpen() { return this.aberto; }, close(v) { this.aberto = false; this.fechou = !!v; } };
+  const history = { pushState: () => ops.push('push'), go: (n) => ops.push('go(' + n + ')'), back: () => ops.push('back') };
+  const deps = {
+    document, history, Lightbox, MapaLightbox, dfato() {}, lastFocusedBeforeModal: null,
+    LIMPEZA_AO_FECHAR: new Proxy({}, { get: (t, id) => () => limpezas.push(id) }),
+  };
+  const app = montar(['fecharCamadasAbertas', 'closeModal', 'topOpenModal'], deps,
+    ['fecharCamadasAbertas', 'closeModal', 'CamadaVoltar'], constante('MODAL_IDS') + '\n' + objeto('CamadaVoltar'));
+  app.CamadaVoltar.profundidade = profundidade;
+  // O diálogo que a própria queda abre: como o `openModal` faz sem modal aberto,
+  // empilha a entrada DELE e aparece.
+  const abrirNegado = () => { app.CamadaVoltar.empilhar(); registro.accessDeniedModal.classList.remove('hidden'); };
+  return { ...app, ops, limpezas, registro, Lightbox, MapaLightbox, abrirNegado };
+}
+
+test('queda da sessão: Filtros e foto ampliada fecham COM a limpeza, e o diálogo da queda empilha ANTES de o voltar ser devolvido', () => {
+  // Filtros abertos (1 entrada) e a foto ampliada por cima (mais 1).
+  const c = montarCamadas({ abertos: ['filtersModal'], lightbox: true, profundidade: 2 });
+  c.fecharCamadasAbertas(c.abrirNegado);
+  assert.ok(c.registro.filtersModal.classList.contains('hidden'), 'os Filtros ficaram abertos por cima da tela de entrada');
+  assert.ok(c.limpezas.includes('filtersModal'), 'os Filtros fecharam sem a limpeza deles');
+  assert.equal(c.Lightbox.isOpen(), false, 'a foto ampliada (com aprovar/excluir) ficou por cima da tela de entrada');
+  assert.equal(c.Lightbox.fechou && c.Lightbox.fechou.viaHistorico, true, 'a foto fechou mexendo no histórico sozinha');
+  assert.ok(!c.registro.accessDeniedModal.classList.contains('hidden'), 'o diálogo que a queda abre não ficou');
+  // O coração do gotcha #65: o `go` calcula o destino NA HORA da chamada, então
+  // a entrada do diálogo tem que existir ANTES dele — senão ele a come.
+  assert.deepEqual(c.ops, ['push', 'go(-2)'],
+    'a ordem do histórico está errada: fechar o diálogo depois tiraria a pessoa do app');
+  assert.equal(c.CamadaVoltar.profundidade, 1, 'a profundidade não é a do diálogo que ficou');
+  assert.equal(c.CamadaVoltar.consumindo, true, 'o popstate do `go` seria lido como o voltar da pessoa');
+});
+
+test('queda da sessão sem diálogo: tudo fecha e o voltar é devolvido de uma vez; nada aberto, nada mexe', () => {
+  const c = montarCamadas({ abertos: ['helpModal'], profundidade: 1 });
+  c.fecharCamadasAbertas(null);
+  assert.ok(c.registro.helpModal.classList.contains('hidden'));
+  assert.deepEqual(c.ops, ['go(-1)'], 'sobrou entrada morta no histórico (ou saiu um back por camada)');
+  assert.equal(c.CamadaVoltar.profundidade, 0);
+  // O mapa ampliado também.
+  const m = montarCamadas({ mapa: true, profundidade: 1 });
+  m.fecharCamadasAbertas(null);
+  assert.equal(m.MapaLightbox.isOpen(), false, 'o mapa ampliado ficou por cima da tela de entrada');
+  assert.equal(m.MapaLightbox.fechou, true, 'o mapa fechou mexendo no histórico sozinho');
+  assert.deepEqual(m.ops, ['go(-1)']);
+  // CONTROLE: nada aberto, nada no histórico.
+  const n = montarCamadas();
+  n.fecharCamadasAbertas(null);
+  assert.deepEqual(n.ops, []);
+  assert.equal(n.CamadaVoltar.consumindo, false);
+});
+
+test('queda da sessão com a CONVERSA aberta: o desligar da presença, que fecha pelo closeModal, não mexe mais no voltar', () => {
+  // O `showAuthScreen` chama o `Presenca.desligar`, que fecha a conversa e a
+  // lista pelo `closeModal` — e, com elas abertas, isso era um `back()` no
+  // mesmo tique do diálogo da queda (gotcha #65). Aqui elas já estão fechadas.
+  const c = montarCamadas({ abertos: ['conversaModal'], lightbox: true, profundidade: 2 });
+  c.fecharCamadasAbertas(() => { c.abrirNegado(); c.closeModal('conversaModal'); });
+  assert.ok(c.limpezas.includes('conversaModal'), 'a conversa fechou sem a limpeza dela');
+  assert.deepEqual(c.ops, ['push', 'go(-2)'], 'o fechamento da conversa no desligar voltou a mexer no histórico');
+});
+
+test('queda da sessão: os TRÊS caminhos passam pelo fechamento — e o diálogo vem ANTES da tela de entrada', () => {
+  const queda = fatiar('derrubarSessao');
+  assert.match(queda, /if \(typeof depois === 'function'\) \{ fecharCamadasAbertas\(depois\); return; \}/,
+    'o portão fechado voltou a abrir o diálogo por cima das camadas');
+  assert.match(queda, /setTimeout\(\(\) => fecharCamadasAbertas\(\(\) => \{\s*if \(negado\) showAccessDenied\(negado\);\s*showAuthScreen\(\);\s*\}\), UNAUTHORIZED_REDIRECT_MS\);/,
+    'a queda comum voltou a mostrar a entrada com as camadas abertas por cima');
+  // O diálogo ANTES da tela de entrada (a ordem que o `Presenca.desligar` exige).
+  assert.match(fatiar('loadProfileAndAuxData'), /depois: \(\) => \{ showAccessDenied\(profileRes\); showAuthScreen\(\); \}/);
+  assert.match(fatiar('handleUnauthorized'), /depois: \(\) => \{ showAccessDenied\(r\); showAuthScreen\(\); \}/);
+});
