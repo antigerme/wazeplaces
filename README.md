@@ -47,10 +47,10 @@ Você **não precisa instalar nada** — o app roda hospedado. Basta acessar:
 
 Aí é só fazer login com seus cookies do Waze (veja abaixo). A forma mais cômoda no desktop é a extensão de login automático:
 
-- **Login automático (recomendado, Chrome):** instale a extensão **WazePlaces Rapid Access** ([Chrome Web Store](https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn), feita por [@daflash](https://www.waze.com/pt-BR/user/editor/daflash) da comunidade WME). Estando logado no WME, clique nela e o app abre já autenticado — sem copiar cookies.
+- **Login automático (recomendado, Chrome):** instale a extensão **WazePlaces Rapid Access** ([Chrome Web Store](https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn), feita por [@daflash](https://www.waze.com/pt-BR/user/editor/daflash) da comunidade WME). Estando logado no WME, abra a aba dela no painel lateral do WME (o ícone do Waze Places) e clique em **ACESSAR**: o app abre já autenticado — sem copiar cookies.
 - **Login manual:** exporte seu `cookies.txt` do Waze (instruções abaixo) e faça upload / cole na tela inicial.
 
-> 📱 **No celular** (onde não há extensões): entre primeiro no computador e use **Conectar outro aparelho** (na Ajuda ⓘ): aparece um **QR** — aponte a câmera do celular e pronto. Sem câmera, peça o código de 6 caracteres e digite em **Entrar com um código**. O `cookies.txt` também funciona no celular, mas dá mais trabalho.
+> 📱 **No celular** (onde não há extensões): entre primeiro no computador e use **Conectar outro aparelho** (na Ajuda ⓘ): aparece um **QR** — aponte a câmera do celular e pronto. Sem câmera, peça o código de 6 caracteres e digite em **Entrar com um código**. **No iPhone com o app instalado na tela de início, use o código**: a câmera abre o link no Safari, e a sessão entraria lá, não no app. O `cookies.txt` também funciona no celular, mas dá mais trabalho.
 
 ### Como exportar seus cookies do Waze
 
@@ -276,7 +276,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST 'https://places.seudominio.com
 
 > **Fork / instância própria:** o `wrangler.jsonc` fixa `routes` com o Custom Domain `places.wazebrasil.com` (domínio da instância oficial). Em outra conta esse `wrangler deploy` falha — ajuste o `pattern` pro seu próprio domínio ou remova o bloco `routes` inteiro (aí o Worker fica no subdomínio `*.workers.dev`).
 
-Ganhos: sem servidor pra manter, escala automática, edge global, HTTPS automático. O `_headers` cuida da CSP e do cache. **Free tier:** 100k requests/dia, 100k leituras KV/dia, 1k escritas/dia (cada login = 1 escrita; cada ação = 1 leitura). Passou disso, Workers Paid custa US$5/mês.
+Ganhos: sem servidor pra manter, escala automática, edge global, HTTPS automático. O `_headers` cuida da CSP e do cache. **Free tier:** 100k requests/dia, 100k leituras KV/dia, 1k escritas/dia e 1k apagamentos/dia. Cada ação = 1 leitura. Escrevem no KV: o login (1 escrita), a regravação do cookie que o Waze rotaciona (no máximo 1 por hora por sessão ativa), a renovação da sessão (1 por dia de uso), a lixeira de foto (até 2 por exclusão: a lista do local e a regravação dela) e o pareamento (1 por código mostrado, mais a sessão nova do aparelho que entra). Apagam: o "Sair", o resgate e o cancelamento do código — e o core lê antes de apagar, porque essa é a cota curta. Passou disso, Workers Paid custa US$5/mês.
 
 #### Opção B — VM Red Hat / RHEL / Rocky / Alma (Node + Apache)
 
