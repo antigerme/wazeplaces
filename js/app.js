@@ -6718,7 +6718,8 @@ async function handleLogout() {
     // depois — o blob fica órfão (a chave é o hash do token, que já foi embora)
     // e expira sozinho em até 21 dias.
     if (tokenParaApagar) {
-        const saida = await callWithRetry(() => API.destroySession(tokenParaApagar));
+        // `null`: o token vai EXPLÍCITO, e a época já mudou (ver `callWithRetry`).
+        const saida = await callWithRetry(() => API.destroySession(tokenParaApagar), null);
         if (!saida || !saida.success) {
             showToast(t('toast.logoutServerFailed'), 'error', 9000);
         }
@@ -10266,7 +10267,23 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
-async function callWithRetry(fn) {
+// O envio pertence à SESSÃO do gesto, e cada tentativa lê o token de AGORA.
+// Entre uma tentativa e a próxima (1,5 s e 3,5 s) a sessão pode cair e outra
+// entrar — a extensão renova sozinha, com a conta que estiver no WME, que pode
+// ser OUTRA —, e a retentativa de uma decisão de A saía com o token de B
+// (auditoria da costura, 2026-09-26, K1). A época da sessão é conferida ANTES
+// de cada tentativa, inclusive a primeira: mudou, nada sai, e quem chamou
+// recebe `session_changed` (todo chamador já descarta a resposta de outra
+// época). Quem chama passa a época do GESTO; sem ela vale a da chamada, que
+// basta pras retentativas. `null` desliga a conferência: é o "Sair", que manda
+// o token velho EXPLÍCITO e precisa apagá-lo no servidor mesmo depois.
+function sessaoTrocou() {
+    return { success: false, errorCategory: 'session_changed' };
+}
+
+async function callWithRetry(fn, epoca = epocaDaSessao) {
+    const outraSessao = () => epoca !== null && epoca !== epocaDaSessao;
+    if (outraSessao()) return sessaoTrocou();
     let result = await fn();
     let attempt = 0;
     // SEM REDE não se retenta: as duas tentativas extras são 2 requisições e
@@ -10282,6 +10299,7 @@ async function callWithRetry(fn) {
            && !semRede() && attempt < TRANSIENT_RETRY_ATTEMPTS) {
         const delay = TRANSIENT_RETRY_DELAYS_MS[attempt] || 5000;
         await new Promise(r => setTimeout(r, delay));
+        if (outraSessao()) return sessaoTrocou();
         attempt++;
         result = await fn();
     }
@@ -14504,7 +14522,7 @@ function handleMarkAsRead() {
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     scheduleAction('read', place, async () => {
         const presenca = presencaWmeDaAcao(place, pais);
-        const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao));
+        const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao), epoca);
         if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
         presencaWmeAoResponder(presenca, result);
         handleActionResult('read', place, result, regiao, epocaFila);
@@ -14530,7 +14548,7 @@ function handleReject() {
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     scheduleAction('reject', place, async () => {
         const presenca = presencaWmeDaAcao(place, pais);
-        const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao));
+        const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao), epoca);
         if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
         presencaWmeAoResponder(presenca, result);
         handleActionResult('reject', place, result, regiao, epocaFila);
@@ -14562,7 +14580,7 @@ function handleSkip() {
     scheduleAction('skip', place, async () => {
         if (!guardar) return;
         if (!place || !place.venueID || !place.updateRequestID) return;
-        const r = await callWithRetry(() => API.guardarPedido(place.venueID, place.updateRequestID, true, regiao));
+        const r = await callWithRetry(() => API.guardarPedido(place.venueID, place.updateRequestID, true, regiao), epoca);
         if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
         // Falhar aqui não corrompe contador nenhum — o Pular não mexe em
         // `serverTotal` e o `skipped` já subiu —, então não há o que reverter.

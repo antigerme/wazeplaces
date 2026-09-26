@@ -109,8 +109,9 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     esvaziarFilaDeSaida: /: await API\.rejectPlace\([^)]*\);\s*if \(epoca !== epocaDaSessao\) \{ enviados = 0; break; \}/,
     enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) return;/,
     loadProfileAndAuxData: /API\.listCountries\(\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
-    handleMarkAsRead: /API\.markAsRead\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) return;/,
-    handleSkip: /API\.guardarPedido\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao).
+    handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    handleSkip: /API\.guardarPedido\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) return;/,
   };
   for (const [nome, re] of Object.entries(casos)) assert.match(fatiar(nome), re, `${nome} grava depois do "Sair"`);
 });
