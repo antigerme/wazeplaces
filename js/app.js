@@ -2546,8 +2546,14 @@ function aplicarNomeNaTela(place, nome) {
 }
 
 async function enviarRenomeacao(alvo) {
+    const epoca = epocaDaSessao;
     try {
         const r = await callWithRetry(() => API.renomearLocal(alvo.place.venueID, alvo.novo));
+        // Saiu no meio: ver `epocaDaSessao`. A resposta que chegava depois do
+        // "Sair" contava o "Corretor" e recriava `waze_places_conquistas` pra
+        // quem entrasse depois (auditoria de 2026-09-25) — como já faziam a
+        // aprovação e a exclusão de foto, aqui ao lado.
+        if (epoca !== epocaDaSessao) return;
         if (r && r.success) {   // sem toast: o nome na tela já diz
             aplicarNosIrmaos(alvo.place, (q) => aplicarNomeNaTela(q, alvo.novo));
             contarConquista('nomes');
@@ -2559,6 +2565,7 @@ async function enviarRenomeacao(alvo) {
         aplicarNomeNaTela(alvo.place, alvo.antigo);
         showToast(msgDoServidor(r) || t('toast.renameFailed'), 'error');
     } catch (e) {
+        if (epoca !== epocaDaSessao) return;
         aplicarNomeNaTela(alvo.place, alvo.antigo);
         showToast(t('toast.renameFailed'), 'error');
     }

@@ -297,3 +297,43 @@ test('H12: CONTROLE — a passada silenciosa sem evento não anuncia nada', () =
   assert.deepEqual(g.novas, [], 'a passada silenciosa anunciou volume acumulado');
   assert.equal(m.selo.n, 0);
 });
+
+// ── H13: a resposta do renomear que chega depois do "Sair" não grava nada ───
+// A aprovação e a exclusão de foto já conferiam a época da sessão; o renomear
+// não: a resposta em voo contava o "Corretor" e recriava
+// `waze_places_conquistas` depois do "Sair" (auditoria de 2026-09-25; o C9 do
+// auditor do card é o mesmo defeito).
+test('H13: renomear em voo durante o "Sair" não conta o "Corretor" nem mexe no nome', async () => {
+  const efeitos = [];
+  const estado = { epoca: 0 };
+  let soltar, derrubar;
+  const deps = {
+    callWithRetry: (fn) => fn(),
+    API: { renomearLocal: () => new Promise((ok, falha) => { soltar = ok; derrubar = falha; }) },
+    aplicarNosIrmaos: () => efeitos.push('irmaos'), aplicarNomeNaTela: () => efeitos.push('nome'),
+    contarConquista: (k) => efeitos.push('conquista:' + k),
+    handleUnauthorized: () => efeitos.push('401'), showToast: () => efeitos.push('toast'),
+    msgDoServidor: () => '', t: (k) => k,
+  };
+  // `epocaDaSessao` é variável solta no app: passa por um getter no escopo.
+  const chaves = Object.keys(deps);
+  const corpo = fatiar('enviarRenomeacao').replace(/epocaDaSessao/g, '__estado.epoca');
+  const enviar = new Function(...chaves, '__estado', corpo + '\nreturn enviarRenomeacao;')(...chaves.map((k) => deps[k]), estado);
+  const alvo = { place: { venueID: 'v1' }, novo: 'Nome Novo', antigo: 'Nome Velho' };
+  // Os três desfechos: sucesso, recusa e a chamada que LANÇA (o `catch`).
+  for (const desfecho of ['sucesso', 'recusa', 'lançou']) {
+    efeitos.length = 0;
+    const envio = enviar(alvo);
+    estado.epoca++;                       // o "Sair" enquanto o renomear voava
+    if (desfecho === 'lançou') derrubar(new Error('rede'));
+    else soltar(desfecho === 'sucesso' ? { success: true } : { success: false, errorCategory: 'unknown' });
+    await envio;
+    assert.deepEqual(efeitos, [], `a resposta (${desfecho}) de depois do "Sair" gravou: ${efeitos.join(', ')}`);
+  }
+  // CONTROLE: sem o "Sair" no meio, a mesma resposta pousa e conta.
+  efeitos.length = 0;
+  const envio = enviar(alvo);
+  soltar({ success: true });
+  await envio;
+  assert.deepEqual(efeitos, ['irmaos', 'conquista:nomes']);
+});
