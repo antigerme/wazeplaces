@@ -3590,10 +3590,17 @@ async function completarPerfilChegado(perfil, epoca) {
     aplicarRecusaAutomatica();
     if (AppState.currentPlace) AppState.ordemPendente = true;
     else sortQueue();
+    // "Minha área": a busca que esperava por este perfil é refeita (ver
+    // `fetchNextPage`) — pela caixa da área ou, num perfil sem caixa, com o
+    // filtro desligado e dito. ANTES do país: desligado, o "Minha área" deixa
+    // de segurar a escolha do país de quem entra.
+    const refazerFila = filaEsperaPerfil;
+    if (AppState.filters.myArea && !caixaDaMinhaArea(perfil)) desligarMinhaAreaSemCaixa();
     // O país de quem entra: só depois do perfil, e só quando o atual é um onde
     // a pessoa NÃO edita (ver `paisDoPerfil`).
     const destino = await paisDoPerfil(perfil, epoca);
     if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
+    else if (refazerFila && epoca === epocaDaSessao) { resetQueue(); startFetching(); }
     // A presença (fase 3) precisa do id do PERFIL — a lista exclui a própria
     // pessoa e o chat é dela. O `showMainScreen` chama a presença antes de o
     // perfil chegar, e ela desiste calada; sem esta linha, quem abria o app com
@@ -6651,6 +6658,7 @@ function resetQueue() {
     AppState.hasMore = true;
     // Fila nova: o que passou pela anterior pode voltar — é o "atualizar".
     pedidosQueEntraramNaFila.clear();
+    filaEsperaPerfil = false;
     bloqueadosPorPagina.clear();
     AppState.ultimaBusca = null;
     // Gesto explícito (atualizar, filtro, tentar de novo) recomeça a conta.
@@ -6970,6 +6978,30 @@ function trackSeenCategories(places) {
 // D13 por página (ver `fetchNextPage`): a busca relê as mesmas páginas.
 const bloqueadosPorPagina = new Map();
 
+// "MINHA ÁREA" busca pela CAIXA das áreas do perfil: a de gerência (drive)
+// primeiro, senão qualquer área com caixa. `null` = o perfil não tem caixa que
+// sirva — e aí o filtro não tem como valer.
+function caixaDaMinhaArea(perfil) {
+    const areas = perfil && Array.isArray(perfil.areas) ? perfil.areas : [];
+    const area = areas.find((a) => a && a.type === 'drive' && a.bbox) || areas.find((a) => a && a.bbox);
+    return area ? area.bbox : null;
+}
+
+// A busca recusou "Minha área" porque o perfil não tinha chegado (sinal ruim na
+// abertura): o perfil que chegar refaz a fila (`completarPerfilChegado`). Zera
+// no `resetQueue` — fila nova é outra busca.
+let filaEsperaPerfil = false;
+
+// "Minha área" num perfil SEM caixa: buscar o país com o filtro marcado é filtro
+// que mente (a pessoa acha que vê a área dela). Desliga, grava e DIZ — o mesmo
+// do "Perto de mim" negado: volta pro padrão e diz por quê.
+function desligarMinhaAreaSemCaixa() {
+    AppState.filters.myArea = false;
+    saveFilters();
+    dfato('minhaArea.semCaixa', {});
+    showToast(t('toast.minhaAreaSemCaixa'), 'info', 7000);
+}
+
 function fetchNextPage() {
     // Reentrância: se já há um fetch em voo, devolve a MESMA promise (não gira
     // busy-loop de microtasks — era o P0 que congelava a aba no startFetching).
@@ -7004,6 +7036,27 @@ function fetchNextPage() {
         return Promise.resolve();
     }
 
+    // "MINHA ÁREA" sem a caixa das áreas: a busca saía pelo PAÍS inteiro com o
+    // filtro marcado na tela — MEDIDO, `bbox: null, countryId: 30` com o perfil
+    // falhando na abertura, e o perfil que chegava depois não refazia nada
+    // (auditoria da fila, 2026-09-26). Sem o perfil a busca ESPERA por ele: a
+    // tela é a de falha (com "Tentar novamente"), o perfil que faltou é pedido
+    // de novo (no máximo 1×/min), e o que chegar refaz a fila. O `hasMore =
+    // false` encerra o laço do `startFetching` (gotcha #19). Com o perfil na mão
+    // e SEM caixa, o filtro desliga e diz por quê.
+    if (AppState.filters.myArea) {
+        if (!AppState.profile) {
+            filaEsperaPerfil = true;
+            if (AppState.queue.length === 0) AppState.loadError = true;
+            AppState.hasMore = false;
+            dfato('busca.esperaPerfil', {});
+            refazerPerfilSeFaltar();
+            updatePendingCount();
+            return Promise.resolve();
+        }
+        if (!caixaDaMinhaArea(AppState.profile)) desligarMinhaAreaSemCaixa();
+    }
+
     AppState.fetching = true;
     // Época capturada aqui: se resetQueue() rodar durante o await (refresh, troca
     // de filtro, logout), a época muda e descartamos o resultado obsoleto pra não
@@ -7017,12 +7070,12 @@ function fetchNextPage() {
     }
     if (AppState.filters.residential === 'true') filters.residential = true;
     if (AppState.filters.residential === 'false') filters.residential = false;
-    if (AppState.filters.myArea && AppState.profile && AppState.profile.areas) {
-        const areas = AppState.profile.areas;
+    if (AppState.filters.myArea) {
         // Prefere a área de gerência (drive); cai pra qualquer área com bbox
         // (managed areas não-drive) se não houver drive — amplia o "minha área".
-        const area = areas.find(a => a.type === 'drive' && a.bbox) || areas.find(a => a.bbox);
-        if (area) filters.bbox = area.bbox;
+        // Aqui ela EXISTE: sem perfil a busca nem sai, e sem caixa o filtro
+        // desligou logo acima.
+        filters.bbox = caixaDaMinhaArea(AppState.profile);
     } else {
         if (AppState.filters.stateId) filters.stateId = AppState.filters.stateId;
         if (AppState.filters.managedAreaId) filters.managedAreaId = AppState.filters.managedAreaId;
@@ -7269,9 +7322,12 @@ async function startFetching() {
     updatePendingCount();
 
     // "Minha área" precisa do perfil (áreas/bbox). Se ainda não chegou, espera —
-    // senão o 1º fetch cai no ramo país/estado e carrega places de fora da área.
-    if (AppState.filters.myArea && !(AppState.profile && AppState.profile.areas) && AppState._profilePromise) {
-        try { await AppState._profilePromise; } catch (e) {}
+    // a busca sem ele não sai (ver `fetchNextPage`). E o perfil que FALHOU é
+    // pedido de novo aqui, no máximo 1×/min: é o "Tentar novamente" de quem usa
+    // "Minha área", que sem isto só repetia a mesma recusa.
+    if (AppState.filters.myArea && !(AppState.profile && AppState.profile.areas)) {
+        refazerPerfilSeFaltar();
+        if (AppState._profilePromise) { try { await AppState._profilePromise; } catch (e) {} }
     }
 
     while (AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {
