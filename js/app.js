@@ -7465,6 +7465,10 @@ function renderMapa(card, place, refazendo) {
         im.src = t.url;
         im.alt = '';
         im.decoding = 'async';
+        // O tile é <img>, e <img> é arrastável: com o MOUSE, arrastar o card
+        // pelo mapa começava o arrastar nativo e o card ficava preso ao cursor
+        // (a mesma armadilha da foto — ver `enableSwipeOnCard` no swipe.js).
+        im.draggable = false;
         im.className = 'absolute mapa-tile';
         im.style.cssText = `left:${t.left}px;top:${t.top}px;width:${r.tamanho}px;height:${r.tamanho}px`;
         // Tile que não vem não pode deixar um alt quebrado no meio do mapa —

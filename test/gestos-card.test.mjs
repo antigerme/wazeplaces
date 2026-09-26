@@ -25,9 +25,13 @@ function montar({ largura = 400 } = {}) {
   };
   const decidiu = [];
   const relogio = { agora: 1000 };
+  // Timers ADIADOS até o `esvaziar()`: o clique que o navegador gera junto do
+  // `mouseup` chega ANTES de qualquer `setTimeout` — com timer imediato, a
+  // armadilha do clique se desarmaria antes de ele existir.
+  const timers = [];
   const ctx = {
     document: doc, window: { innerWidth: largura }, navigator: {},
-    setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {},
+    setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {},
     performance: { now: () => relogio.agora }, console,
     onSwipeLeft: (card) => decidiu.push(['left', card]),
     onSwipeRight: (card) => decidiu.push(['right', card]),
@@ -48,7 +52,8 @@ function montar({ largura = 400 } = {}) {
   const noCard = (type, extra) => { const e = ev(type, extra); for (const fn of ouvintesDoCard[type] || []) fn(e); return e; };
   const noDoc = (type, extra) => { const e = ev(type, extra); for (const fn of [...(ouvintes[type] || [])]) fn(e); return e; };
   const passo = (ms = 16) => { relogio.agora += ms; };
-  return { ctx, card, decidiu, noCard, noDoc, toque, passo, estado: () => ctx.__estado(), ouvintes };
+  const esvaziar = () => { while (timers.length) timers.shift()(); };
+  return { ctx, card, decidiu, noCard, noDoc, toque, passo, esvaziar, estado: () => ctx.__estado(), ouvintes, ouvintesDoCard };
 }
 
 // Um dedo de (x0,y0) a (x1,y1) em `n` passos DEVAGAR — abaixo da velocidade
@@ -64,6 +69,7 @@ function arrastarDevagar(g, id, [x0, y0], [x1, y1], n = 20) {
   }
   g.passo(200);
   g.noDoc('touchend', { touches: [], changedTouches: [t] });
+  g.esvaziar();
 }
 
 // ── C1: a PINÇA não decide ────────────────────────────────────────────────
@@ -139,6 +145,7 @@ test('C1 pinça: o segundo dedo cancela o arraste — abrindo, fechando e com os
   for (const [nome, fazer] of Object.entries(cenarios)) {
     const g = montar();
     fazer(g);
+    g.esvaziar();
     assert.deepEqual(g.decidiu.map((d) => d[0]), [], `${nome}: a pinça decidiu o pedido`);
     assert.equal(g.estado().isDragging, false, `${nome}: o arraste ficou preso depois da pinça`);
   }
@@ -166,4 +173,94 @@ test('C1 CONTROLE: um dedo só segue decidindo — e o arraste ÓRFÃO não trav
       `id ${idNovo}: o arraste órfão engoliu o gesto seguinte (ou o decidiu duas vezes)`);
     assert.equal(h.estado().isDragging, false, `id ${idNovo}: sobrou arraste preso`);
   }
+});
+
+// ── C2: o arrastar NATIVO de imagem não prende o card ao mouse ────────────
+const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+const semComentario = (s) => s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+// Um arraste de mouse de (x0,y0) a (x1,y1), com o botão principal apertado.
+function arrastarMouse(g, [x0, y0], [x1, y1], n = 10) {
+  g.noCard('mousedown', { button: 0, buttons: 1, clientX: x0, clientY: y0 });
+  for (let i = 1; i <= n; i++) {
+    g.passo(40);
+    g.noDoc('mousemove', { buttons: 1, clientX: x0 + (x1 - x0) * i / n, clientY: y0 + (y1 - y0) * i / n });
+  }
+  g.passo(200);
+}
+
+test('C2 mouse: a foto e os tiles do mapa não são arrastáveis', () => {
+  // A causa: <img> é arrastável por padrão, e o arrastar nativo engole o
+  // `mouseup`. MEDIDO no computador: o card parava a 40px e o clique seguinte
+  // em Filtros abria o modal E pulava o pedido.
+  const tpl = HTML.match(/<template id="cardTemplate">[\s\S]*?<\/template>/)[0];
+  const img = tpl.match(/<img\b[^>]*class="card-image[^"]*"[^>]*>/);
+  assert.ok(img, 'sumiu a <img class="card-image"> do template');
+  assert.match(img[0], /draggable="false"/, 'a foto do card voltou a ser arrastável: o mouse prende o card de novo');
+  const i = semComentario(APP).indexOf('function renderMapa(');
+  const corpo = semComentario(APP).slice(i, semComentario(APP).indexOf('\nfunction ', i + 10));
+  assert.match(corpo, /const im = new Image\(\);[\s\S]{0,200}im\.draggable = false;/,
+    'os tiles do mini-mapa voltaram a ser arrastáveis: arrastar o card pelo mapa prende o card ao mouse');
+});
+
+test('C2 mouse: com o NOSSO arraste em curso o nativo não começa — fora dele, sim', () => {
+  const g = montar();
+  const dragstart = () => { const e = { type: 'dragstart', preventDefault() { this.cancelado = true; } };
+    for (const fn of g.ouvintesDoCard.dragstart || []) fn(e); return e; };
+  assert.ok(g.ouvintesDoCard.dragstart && g.ouvintesDoCard.dragstart.length, 'o card não escuta `dragstart`');
+  // CONTROLE: sem arraste nosso, o nativo passa (link do ↗ arrastado pra outra aba).
+  assert.equal(dragstart().cancelado, undefined, 'o card passou a proibir TODO arrastar nativo, até o do link');
+  g.noCard('mousedown', { button: 0, buttons: 1, clientX: 200, clientY: 300 });
+  assert.equal(dragstart().cancelado, true, 'o arrastar nativo começou por cima do nosso: o mouse fica preso ao card');
+});
+
+test('C2 mouse: botão SOLTO sem `mouseup` cancela — o clique seguinte não decide nada', () => {
+  // O cenário do relato: arrastou pela foto, o nativo engoliu o `mouseup`, o
+  // cursor anda SOLTO e o clique em Filtros cometia a ação da posição.
+  const g = montar();
+  arrastarMouse(g, [300, 300], [200, 300]);
+  g.noDoc('mousemove', { buttons: 0, clientX: 180, clientY: 40 });   // o botão já não está apertado
+  assert.equal(g.estado().isDragging, false, 'o cursor andando sem botão seguiu arrastando o card');
+  g.noDoc('mousedown', { buttons: 1, clientX: 380, clientY: 20 });
+  g.noDoc('mouseup', { buttons: 0, clientX: 380, clientY: 20 });
+  g.esvaziar();
+  assert.deepEqual(g.decidiu.map((d) => d[0]), [], 'o clique fora do card cometeu a ação do arraste perdido');
+  // CONTROLE: o mesmo arraste com o botão apertado até o fim decide.
+  const h = montar();
+  arrastarMouse(h, [300, 300], [60, 300]);
+  h.noDoc('mouseup', { buttons: 0, clientX: 60, clientY: 300 });
+  h.esvaziar();
+  assert.deepEqual(h.decidiu.map((d) => d[0]), ['left'], 'CONTROLE: o arraste de mouse deixou de decidir');
+});
+
+test('C2 mouse: o clique colado ao soltar de um ARRASTE não abre foto nem mapa — o de um clique parado, sim', () => {
+  const clicar = (g) => {
+    let chegou = true;
+    const e = { type: 'click', stopPropagation() { chegou = false; }, preventDefault() {} };
+    for (const fn of [...(g.ouvintes.click || [])]) fn(e);
+    return chegou;
+  };
+  // Arrastou 60px e soltou (o card volta): o `click` que o navegador gera
+  // junto do `mouseup` não pode chegar à foto.
+  const g = montar();
+  arrastarMouse(g, [300, 300], [240, 300]);
+  g.noDoc('mouseup', { buttons: 0, clientX: 240, clientY: 300 });
+  assert.equal(clicar(g), false, 'o clique do fim do arraste chegou à foto: o lightbox abre por cima do card');
+  // E só ESSE: o clique seguinte, de verdade, passa.
+  g.esvaziar();
+  assert.equal(clicar(g), true, 'a armadilha não se desarmou: o próximo clique na foto não abre mais nada');
+  // Nem sempre VEM clique depois do `mouseup` (o elemento apertado saiu do DOM
+  // no meio — o card trocado). A armadilha tem que se desarmar sozinha, senão
+  // engole o próximo clique de verdade, em qualquer botão da tela.
+  const k = montar();
+  arrastarMouse(k, [300, 300], [240, 300]);
+  k.noDoc('mouseup', { buttons: 0, clientX: 240, clientY: 300 });
+  k.esvaziar();
+  assert.equal(clicar(k), true, 'sem clique colado, a armadilha ficou armada e engoliu o clique seguinte');
+  // CONTROLE: apertar e soltar parado é clique — tem que chegar.
+  const h = montar();
+  h.noCard('mousedown', { button: 0, buttons: 1, clientX: 300, clientY: 300 });
+  h.noDoc('mouseup', { buttons: 0, clientX: 302, clientY: 301 });
+  assert.equal(clicar(h), true, 'CONTROLE: o clique parado na foto deixou de abrir o lightbox');
 });
