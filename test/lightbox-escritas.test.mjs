@@ -133,7 +133,7 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false } }) {
   const L = lightbox();
   const A = pedidoDeFoto('ur-A');
   abrir(L, A, [FOTO('velha'), FOTO('ur-A')], 1);
-  const AppState = { preferences: preferencias, serverTotal: 5, currentPlace: A };
+  const AppState = { authenticated: true, preferences: preferencias, serverTotal: 5, currentPlace: A };
   const deps = {
     AppState, Lightbox: L, Treino: { ativo: false }, epocaDaSessao: 0,
     canDisableUndo: () => true, estadoAprovando: () => {}, lixeiraOcupada: () => {},

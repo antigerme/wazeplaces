@@ -358,7 +358,7 @@ function montarLightboxComJanela() {
     idFotoAtual: () => 'foto-1', removerFoto() {},
   };
   const deps = {
-    Treino: { ativo: false }, Lightbox, AppState: { preferences: { undoEnabled: true }, currentPlace: null },
+    Treino: { ativo: false }, Lightbox, AppState: { authenticated: true, preferences: { undoEnabled: true }, currentPlace: null },
     canDisableUndo: () => false, podeRenomearAqui: () => true,
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
     fecharEdicaoNome() {}, aplicarNomeNaTela() {}, devolverFoto() {}, showCurrentPlace() {},

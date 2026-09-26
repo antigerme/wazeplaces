@@ -2488,6 +2488,9 @@ function pedirExclusaoDaFoto() {
     // este guard, a lixeira apagaria uma foto do mapa enquanto a faixa promete
     // que nada é enviado. Proteção não pode depender de a fixture ser pobre.
     if (Treino.ativo) return;
+    // Sem sessão não se escreve: a janela desta exclusão correria com o token
+    // de quem entrasse depois (ver `acoesTravadas`, K1).
+    if (!AppState.authenticated) return;
     const id = Lightbox.idFotoAtual();
     if (!id) return;
     const place = Lightbox.place;
@@ -2660,6 +2663,7 @@ function aprovarFotoAtual() {
     // este guard, a lixeira apagaria uma foto do mapa enquanto a faixa promete
     // que nada é enviado. Proteção não pode depender de a fixture ser pobre.
     if (Treino.ativo) return;
+    if (!AppState.authenticated) return;   // sem sessão não se escreve (K1)
     if (!Lightbox.podeAprovarAtual()) return;
     const place = Lightbox.place;
     // `epocaFila`: a fila do gesto (ver `concluirAprovacao`).
@@ -2820,6 +2824,9 @@ function atualizarBotaoSalvarNome() {
 
 function confirmarRenomear() {
     if (Treino.ativo || !podeRenomearAqui()) return;
+    // O Enter do campo chega aqui direto, sem passar por botão travado: sem
+    // sessão (a queda no meio da edição), o nome não sai (K1).
+    if (!AppState.authenticated) return;
     const inp = document.getElementById('lightboxNomeInput');
     const novo = inp ? inp.value.trim() : '';
     const place = Lightbox.place;
@@ -3510,6 +3517,9 @@ function showMainScreen() {
     AppState.authenticated = true;   // o selo lê isto; o resto da função repete abaixo
     atualizarSeloDeConquista();
     AppState.authenticated = true;
+    // Com a sessão de volta (a renovação pela extensão, com o card na tela), o
+    // card destrava: sem sessão ele fica travado (ver `acoesTravadas`).
+    aplicarTravaDeAcao();
     updateDevBadge();
     // A sala só faz sentido logado: é o crachá do WME que abre a porta.
     window.Presenca?.sincronizar?.();
@@ -6362,6 +6372,9 @@ function derrubarSessao(errorKey, { depois } = {}) {
     API.setSession(null);
     AppState.profile = null;
     AppState.authenticated = false;
+    // Sem sessão o card não decide (ver `acoesTravadas`): durante a renovação
+    // pela extensão ele segue na tela, e os botões ficam com cara de travados.
+    aplicarTravaDeAcao();
     // O prazo era desta sessão, que acabou de morrer. Deixá-lo guardado faria a
     // próxima entrada nascer com a contagem da sessão ANTERIOR na tela, até a
     // primeira resposta do Waze corrigir.
@@ -7510,6 +7523,13 @@ function agirNoPedidoDoGesto(alvo, handler) {
     // Sem pedido conhecido (card que não passou pelo render, chamada sem card)
     // o comportamento é o de sempre: descartar aí seria perder o gesto calado.
     if (alvo && AppState.currentPlace !== alvo) return;
+    // A trava chegou DURANTE a saída do card (a sessão caiu nesses 350 ms): o
+    // handler recusa o gesto, e o card que a animação levou pra fora da tela
+    // VOLTA — senão o pedido seguia na frente da fila, invisível e sem botão.
+    if (acoesTravadas()) {
+        if (AppState.currentPlace) showCurrentPlace();
+        return;
+    }
     handler();
 }
 
@@ -9223,6 +9243,15 @@ function renderCardChanges(card, place) {
 //
 // Só vale com o "Desfazer" LIGADO. Desligado (Preferências, depois da cota), a
 // ação vai na hora e não há janela nenhuma — nem espera.
+//
+// E SEM SESSÃO nada decide. Entre a queda e a tela de entrada (1,2 s), e durante
+// a renovação pela extensão (até 8 s, com o card na tela), o ✕ era aceito: a
+// decisão ficava na janela e saía depois com o token que tivesse entrado —
+// inclusive o de OUTRA conta do WME —, e o Desfazer aparecia por cima da tela de
+// entrada (auditoria da costura, 2026-09-26, K1/K9). É a MESMA trava, numa
+// função só (gotcha #63): botão, gesto, tecla e os botões do lightbox, com a
+// cara de travado que o botão morto precisa ter. Quem muda o `authenticated`
+// reaplica a trava (`derrubarSessao` e `showMainScreen`).
 function acoesTravadas() {
     // Inclui as ações de FOTO (aprovar/excluir), não só o swipe. Elas abrem a
     // mesma janela de Desfazer e escrevem no mesmo local — deixar os botões do
@@ -9230,14 +9259,18 @@ function acoesTravadas() {
     // sendo desativados que nem é feito nos cards".
     // E o LOTE de lidos no ar (`loteDeLidosEmVoo`): os pedidos dele seguem na
     // fila até a resposta, e o ✕ no card da frente mandava uma SEGUNDA decisão
-    // pro mesmo pedido (auditoria da fila, 2026-09-26).
-    return !!(AppState.pendingAction || aprovacaoPendente || exclusaoPendente || renomeacaoPendente || loteDeLidosEmVoo);
+    // pro mesmo pedido (auditoria da fila, 2026-09-26). E sem sessão nada decide
+    // (K1/K9): durante a queda e a renovação o gesto sairia com a sessão errada.
+    return !!(!AppState.authenticated || AppState.pendingAction || aprovacaoPendente || exclusaoPendente
+        || renomeacaoPendente || loteDeLidosEmVoo);
 }
 
 // O que dizer a quem tocou com as ações travadas: a janela do Desfazer e o lote
 // no ar pedem a MESMA espera, mas "espere o Desfazer" com nenhum Desfazer na
-// tela manda a pessoa procurar um botão que não existe.
+// tela manda a pessoa procurar um botão que não existe. Sem sessão, a espera é
+// a da sessão (a renovação pela extensão, ou entrar de novo).
 function avisoDaTrava() {
+    if (!AppState.authenticated) return 'api.error.noSession';
     return loteDeLidosEmVoo ? 'toast.esperaLote' : 'toast.esperaDesfazer';
 }
 
@@ -11557,6 +11590,10 @@ function abrirFolhaDoAutor(place) {
 // O lote, com a MESMA janela de Desfazer de um card só — a trava dos botões, o
 // banner com a contagem, o `resetQueue`. A diferença é `aoSair: 'cancel'`.
 function rejeitarLoteDoAutor(place) {
+    // Sem sessão o lote não sai (a folha pode seguir aberta durante a renovação
+    // pela extensão), e a folha já fechou com o toque: diz por quê. ANTES da
+    // trava, que também é verdadeira sem sessão e diria "espere o Desfazer".
+    if (!AppState.authenticated) { showToast(t('api.error.noSession'), 'info'); return; }
     // Na janela do Desfazer nada prossegue — mas a folha já FECHOU com o toque,
     // e sair calado deixava a pessoa achando que rejeitou (auditoria de
     // 2026-09-25). Diz o que fazer.

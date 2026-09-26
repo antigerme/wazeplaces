@@ -150,3 +150,89 @@ test('K1: o ✕ de A em voo, a sessão cai e a extensão renova com B — a rete
   await tique(40);
   assert.ok(!envios.some((e) => e.token === 'tok-B'), 'DEFEITO: a decisão de A foi enviada com o token de B: ' + JSON.stringify(envios));
 });
+
+// ═══ K1/K9 · sem sessão, nada decide ═════════════════════════════════════════
+
+test('K1/K9: sem sessão (a queda, a renovação pela extensão) o ✕ ✓ ↑ não decide — e a queda TRAVA o card na tela', () => {
+  const agendou = [];
+  const AppState = { authenticated: true, profile: { id: 'A' }, currentPlace: { venueID: 'v1', updateRequestID: 'u1' },
+    queue: [], stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 3, pendingAction: null, preferences: {} };
+  const deps = {
+    AppState, epocaDaSessao: 0, Treino: { ativo: false }, direcaoTravada: () => false,
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    scheduleAction: (tipo) => agendou.push(tipo), API: { getRegion: () => 'row', getCountry: () => 30, setSession() {} },
+    entrarPelaExtensao: () => new Promise(() => {}),
+  };
+  const h = montar(['acoesTravadas', 'handleReject', 'handleMarkAsRead', 'handleSkip', 'derrubarSessao'], deps);
+  h.derrubarSessao('srv.err.cookiesExpired');
+  assert.equal(AppState.authenticated, false);
+  assert.ok(h.chamou.includes('aplicarTravaDeAcao'), 'a queda não reaplica a trava: os botões seguem com cara de vivos');
+  h.handleReject(); h.handleMarkAsRead(); h.handleSkip();
+  assert.deepEqual(agendou, [], 'DEFEITO: gesto aceito sem sessão — a decisão sairia com o token de quem entrasse');
+  assert.deepEqual(AppState.stats, { read: 0, rejected: 0, skipped: 0 }, 'o placar contou um gesto recusado');
+  // CONTROLE: com a sessão de volta, o mesmo gesto decide.
+  AppState.authenticated = true;
+  h.handleReject();
+  assert.deepEqual(agendou, ['reject']);
+});
+
+test('K1: a sessão voltando (showMainScreen) DESTRAVA o card', () => {
+  const AppState = { authenticated: false };
+  const deps = { AppState, document: { getElementById: () => ({ classList: { add() {}, remove() {} } }) } };
+  const h = montar(['showMainScreen'], deps);
+  h.showMainScreen();
+  assert.equal(AppState.authenticated, true);
+  const i = h.chamou.indexOf('aplicarTravaDeAcao');
+  assert.ok(i >= 0, 'a entrada não reaplica a trava: o card da renovação seguiria travado');
+});
+
+test('K9: a sessão cai DURANTE a saída do card (350 ms): o gesto não vale e o card que saiu VOLTA', () => {
+  const agiu = [];
+  const P = { venueID: 'v1', updateRequestID: 'u1' };
+  const AppState = { authenticated: false, currentPlace: P, pendingAction: null };
+  const deps = { AppState, aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null };
+  const h = montar(['acoesTravadas', 'agirNoPedidoDoGesto'], deps);
+  h.agirNoPedidoDoGesto(P, () => agiu.push('handler'));
+  assert.deepEqual(agiu, [], 'o gesto recusado chegou ao handler');
+  assert.ok(h.chamou.includes('showCurrentPlace'), 'DEFEITO: o card saiu da tela e não voltou — pedido na frente, invisível');
+  // CONTROLE: com sessão, o gesto age e ninguém redesenha.
+  const k = montar(['acoesTravadas', 'agirNoPedidoDoGesto'], { ...deps, AppState: { ...AppState, authenticated: true } });
+  k.agirNoPedidoDoGesto(P, () => agiu.push('handler'));
+  assert.deepEqual(agiu, ['handler']);
+  assert.ok(!k.chamou.includes('showCurrentPlace'));
+});
+
+test('K1: sem sessão, as escritas do lightbox (excluir, aprovar, renomear pelo Enter) não abrem janela', () => {
+  for (const autenticado of [false, true]) {
+    const banners = [];
+    const place = { venueID: 'v1', updateRequestID: 'u1', name: 'Nome Velho', lat: -23, lon: -46 };
+    const deps = {
+      AppState: { authenticated: autenticado, preferences: { undoEnabled: true }, currentPlace: null },
+      Treino: { ativo: false }, canDisableUndo: () => false, podeRenomearAqui: () => true,
+      Lightbox: { place, idx: 1, urls: ['a', 'b'], podeAprovarAtual: () => true, idFotoAtual: () => 'f1',
+        marcarComoAprovada() {}, removerFoto() {} },
+      document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
+      aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+      mostrarDesfazer: (msg) => banners.push(msg), setTimeout: () => 1, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
+    };
+    const h = montar(['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear'], deps);
+    h.pedirExclusaoDaFoto(); h.aprovarFotoAtual(); h.confirmarRenomear();
+    if (!autenticado) assert.deepEqual(banners, [], 'DEFEITO: escrita do lightbox aberta sem sessão: ' + banners.join(', '));
+    else assert.equal(banners.length, 3, 'CONTROLE: com sessão, as três abrem a janela do Desfazer');
+  }
+});
+
+test('K1: sem sessão o lote do autor não sai, e diz por quê (não "espere o Desfazer")', () => {
+  const agendou = [];
+  const toasts = [];
+  const deps = {
+    AppState: { authenticated: false, pendingAction: null, queue: [], stats: { rejected: 0 } },
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    Treino: { ativo: false }, t: (k) => k, showToast: (m) => toasts.push(m),
+    scheduleAction: () => agendou.push('lote'), pedidosDoAutorNaFila: () => [{ venueID: 'v1', updateRequestID: 'u1' }],
+  };
+  const h = montar(['acoesTravadas', 'rejeitarLoteDoAutor'], deps);
+  h.rejeitarLoteDoAutor({ creatorId: 9 });
+  assert.deepEqual(agendou, [], 'o lote saiu sem sessão');
+  assert.deepEqual(toasts, ['api.error.noSession']);
+});
