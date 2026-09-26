@@ -593,15 +593,36 @@ function openModal(id) {
     const m = document.getElementById(id);
     if (!m) return;
     const jaHaviaModal = !!topOpenModal();
-    // Modais não empilham: fecha qualquer outro aberto (ex.: Sair a partir da Ajuda)
+    // Modais não empilham: fecha qualquer outro aberto (ex.: Sair a partir da Ajuda).
+    //
+    // E o que sai da tela aqui FECHOU, pra todos os efeitos: a limpeza dele
+    // roda, como em qualquer outro caminho de fechamento. Só esconder deixava o
+    // estado do modal de baixo vazando — a escada aberta e a conquista tocada
+    // do Histórico voltavam na próxima abertura de Filtros depois do Resumo do
+    // mês, e a conversa escondida pelo pedido que chegou nela seguia "aberta"
+    // (auditoria de 2026-09-25).
+    //
+    // A limpeza é chamada DIRETO, nunca pelo `closeModal`: ele agenda um
+    // `history.back()` e o empilhar logo abaixo seria comido por ele — o voltar
+    // do aparelho passaria a tirar a pessoa do app (gotcha #65). Trocar de modal
+    // é a MESMA camada.
     MODAL_IDS.forEach(other => {
-        if (other !== id) document.getElementById(other)?.classList.add('hidden');
+        if (other === id) return;
+        const o = document.getElementById(other);
+        if (!o || o.classList.contains('hidden')) return;
+        o.classList.add('hidden');
+        try { LIMPEZA_AO_FECHAR[other]?.(); } catch (e) { /* limpeza nunca derruba a abertura */ }
     });
     // Empilha uma entrada só por CAMADA, não por modal: openModal fecha o modal
     // anterior antes de abrir o novo (eles não empilham), então trocar de modal
     // não pode empilhar histórico — senão um voltar fecharia nada.
     if (!jaHaviaModal) CamadaVoltar.empilhar();
-    lastFocusedBeforeModal = document.activeElement;
+    // O foco volta, no fechamento, pra quem abriu a CAMADA. Trocando de modal, o
+    // elemento focado agora é um botão DO MODAL QUE ACABOU DE SUMIR (o "Resumo
+    // do mês" dentro de Filtros): devolver o foco a ele não pega — está
+    // escondido — e o foco caía no `<body>`, perdido pra quem usa teclado ou
+    // leitor de tela. Quem abriu Filtros (o botão do cabeçalho) continua na tela.
+    if (!jaHaviaModal) lastFocusedBeforeModal = document.activeElement;
     m.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     const focusable = m.querySelector('textarea, input:not([type=hidden]):not(:disabled), select, button');
