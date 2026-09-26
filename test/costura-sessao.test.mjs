@@ -844,3 +844,32 @@ test('K10: o "Sair" (e a troca de conta) leva os rascunhos junto', () => {
   m.h.presencaAbrirConversa('333');
   assert.equal(m.campo.value, '', 'o rascunho da conta que saiu voltou pra quem entrou');
 });
+
+// ═══ K11 · os países da abertura não somem com o 401 passageiro do perfil ════
+
+test('K11: o 1º perfil barrado por um 401 passageiro — os países que chegaram BEM ficam, e o aviso sai com o nome', async () => {
+  const toasts = [];
+  let perfilN = 0;
+  let pais = 30;
+  const AppState = { profile: null, authenticated: true, countries: [], statesByCountry: {}, filters: { myArea: false, stateId: '', managedAreaId: '' },
+    currentPlace: null, queue: [] };
+  const deps = {
+    AppState, epocaDaSessao: 0, perfilPedidoEm: 0, verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 },
+    VERIFICA_SESSAO_MS: 0, setTimeout: (f) => { f(); return 1; }, REGIOES_DO_WAZE: ['row', 'na', 'il'],
+    API: {
+      getSession: () => 'tok-A', getRegion: () => 'row', getCountry: () => pais, setCountry: (p) => { pais = p; }, setRegion() {},
+      getProfile: async () => (perfilN++ === 0
+        ? { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionMissing' }   // o blip do KV
+        : { success: true, profile: { id: 111, userName: 'a', editableCountryIDs: [73] } }),      // edita na França
+      listCountries: async () => ({ success: true, countries: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }] }),
+    },
+    t: (k, v) => k + (v && v.pais ? '(' + v.pais + ')' : ''), showToast: (m) => toasts.push(m),
+    aoConhecerConta: () => {}, marcarSessaoViva: () => {},
+  };
+  const h = montar(['loadProfileAndAuxData', 'handleUnauthorized', 'definirPerfil', 'completarPerfilChegado',
+    'paisDoPerfil', 'irProPaisDoPerfil'], deps);
+  await h.loadProfileAndAuxData();
+  await tique(20);
+  assert.equal(AppState.countries.length, 2, 'DEFEITO: os países que chegaram na abertura foram jogados fora');
+  assert.ok(toasts.includes('toast.paisDoPerfil(France)'), 'o aviso do país saiu sem o nome: ' + toasts.join(' | '));
+});

@@ -3691,17 +3691,21 @@ async function loadProfileAndAuxData() {
         }
         return;
     }
+    // Os países ANTES do resto: o país de quem entra e o subtítulo da lista da
+    // presença usam o nome deles (ver `completarPerfilChegado`). E antes do 401
+    // logo abaixo: com o perfil barrado por um 401 passageiro (o blip do KV),
+    // os países que chegaram BEM eram jogados fora, e a chegada do perfil pelo
+    // alarme falso dizia o país sem o nome — e a lista da presença saía sem
+    // subtítulo (auditoria da costura, 2026-09-26, K11).
+    if (countriesRes.success) {
+        AppState.countries = countriesRes.countries;
+    }
     // Se qualquer um dos dois detectar sessão expirada/revogada no Waze (401/403),
     // deslogar e mandar pra tela de auth. Sem isso o user fica preso vendo
     // "Erro ao buscar X (HTTP 403)" sem entender por quê.
     if (profileRes.errorCategory === 'unauthorized' || countriesRes.errorCategory === 'unauthorized') {
         handleUnauthorized();
         return;
-    }
-    // Os países ANTES do resto: o país de quem entra e o subtítulo da lista da
-    // presença usam o nome deles (ver `completarPerfilChegado`).
-    if (countriesRes.success) {
-        AppState.countries = countriesRes.countries;
     }
     if (definirPerfil(profileRes)) await completarPerfilChegado(profileRes.profile, epoca);
 }
