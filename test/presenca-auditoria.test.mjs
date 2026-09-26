@@ -419,3 +419,47 @@ test('P6 o diálogo do portão fechado abre ANTES da tela de entrada — fechar 
       `a tela de entrada fecha a conversa e o diálogo abre em seguida: ${corpo.trim()}`);
   }
 });
+
+// ── P4: o histórico que não veio não some da tela ──────────────────────────
+
+test('P4 o `abrir` falhou: o erro e o "Tentar de novo" FICAM quando uma mensagem chega ou sai — e o botão traz o histórico (e o "lida" do `abrir`)', async () => {
+  const { bytesDeMensagem, b64 } = await import('./_presenca-cliente.mjs');
+  let abrir = { success: false, errorCategory: 'transient' };
+  const c = novoCliente({ api: { chat: (x) => (x.acao === 'abrir' ? abrir : { success: true, ts: 1790200000999 }) } });
+  c.P.presencaMontar();
+  c.P.Presenca.atualizadaEm = 1;
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  assert.match(c.$('conversaMsgs').innerHTML, /conversa-recarregar/, 'CONTROLE: a falha tem que mostrar o "Tentar de novo"');
+  // Chega uma mensagem dela, ao vivo, com a conversa aberta.
+  const bytes = await bytesDeMensagem({ id: 'a0000000-0000-1000-8000-000000000081', de: CAF, para: EU, texto: 'oi?', ctx: { app: 'wazeplaces' }, ts: 1790200000000 });
+  c.P.presencaQuadro({ ctl: new AbortController(), emLote: false, epoca: c.P.Presenca.epoca, desde: 0, vivoEm: 0 },
+    { inboxMessage: { messageId: 'a0000000-0000-1000-8000-000000000981', messageType: 'X', message: b64(bytes) } });
+  let html = c.$('conversaMsgs').innerHTML;
+  assert.match(html, /presenca\.conversa\.erro/, 'a mensagem que chegou apagou o aviso de que o histórico não veio');
+  assert.match(html, /conversa-recarregar/, 'a mensagem que chegou apagou o "Tentar de novo"');
+  assert.match(html, /oi\?/, 'CONTROLE: a mensagem que chegou tem que aparecer');
+  assert.ok(html.indexOf('conversa-recarregar') < html.indexOf('oi?'), 'o erro do histórico vem ANTES das mensagens (é o que falta em cima)');
+  // E a pessoa manda uma: o erro continua.
+  c.$('conversaInput').value = 'tá aí?';
+  c.$('conversaForm').disparar('submit');
+  await tick();
+  assert.match(c.$('conversaMsgs').innerHTML, /conversa-recarregar/, 'mandar mensagem apagou o "Tentar de novo"');
+  // O "Tentar de novo": agora o histórico vem, o erro sai, e a conversa é lida.
+  abrir = { success: true, mensagens: [daCaf(81, 1790200000000)], maisAntigas: false, lida: true };
+  c.$('conversaMsgs').disparar('click', { target: { closest: (s) => (s === '.conversa-recarregar' ? {} : null) } });
+  await tick();
+  html = c.$('conversaMsgs').innerHTML;
+  assert.doesNotMatch(html, /conversa-recarregar/, 'o histórico veio e o erro ficou');
+  assert.equal(c.P.Presenca.historico.get(CAF).carregada, true);
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'abrir').length, 2);
+});
+
+test('P4 sem mensagem nenhuma, o erro do histórico aparece UMA vez (sem o "Carregando" junto)', async () => {
+  const c = novoCliente({ api: { chat: () => ({ success: false, errorCategory: 'transient' }) } });
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  const html = c.$('conversaMsgs').innerHTML;
+  assert.equal((html.match(/presenca\.conversa\.erro/g) || []).length, 1);
+  assert.doesNotMatch(html, /presenca\.conversa\.carregando|presenca\.conversa\.vazio/);
+});

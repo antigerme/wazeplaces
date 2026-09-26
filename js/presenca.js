@@ -1567,10 +1567,18 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
         const topoAntes = corpo.scrollTop;
         let html = `<p class="conversa-aviso">${escapeHtml(t('presenca.conversa.aviso'))}</p>`;
         if (h.maisAntigas) html += `<button type="button" class="conversa-anteriores">${escapeHtml(t('presenca.conversa.anteriores'))}</button>`;
+        // O histórico que não veio segue dizendo que não veio — e oferecendo o
+        // "Tentar de novo" — mesmo depois que uma mensagem chega ou sai. Antes
+        // o erro só existia com a conversa VAZIA: a primeira mensagem ao vivo
+        // o apagava, o histórico nunca mais era pedido e o "lida" nunca saía
+        // (ele espera o histórico, ver `presencaMarcarLida`) — auditoria de
+        // 2026-09-26. Refazer o `abrir` sozinho quando a mensagem chega foi
+        // descartado: mensagem chegando custa ZERO, e com o Waze falhando cada
+        // uma viraria um pedido. Quem pede de novo é a pessoa, no botão.
+        const semHistorico = h.erro && !h.carregada;
+        if (semHistorico) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.erro'))} <button type="button" class="conversa-recarregar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
         if (h.msgs.length) html += presencaHtmlDasMsgs(id, h);
-        else if (h.erro) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.erro'))} <button type="button" class="conversa-recarregar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
-        else if (!h.carregada) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.carregando'))}</p>`;
-        else html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.vazio'))}</p>`;
+        else if (!semHistorico) html += `<p class="conversa-vazio">${escapeHtml(t(h.carregada ? 'presenca.conversa.vazio' : 'presenca.conversa.carregando'))}</p>`;
         corpo.innerHTML = html;
         // Página antiga entrando em cima: a mensagem que estava na tela fica
         // onde estava. Mensagem nova: segue o fim só se a pessoa já estava lá
