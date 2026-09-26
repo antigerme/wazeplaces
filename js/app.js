@@ -11660,7 +11660,7 @@ function renderAutores() {
     if (!el) return;
     const foco = chaveDoFoco(el);   // o innerHTML abaixo mata o elemento focado
     const todas = listaDeAutores();
-    if (todas.length === 0) { el.innerHTML = ''; devolverFoco(el, foco); return; }
+    if (todas.length === 0) { el.innerHTML = ''; devolverFocoAoPainel(el, foco); return; }
     // Só corta se SOBRA alguém: com 10 autores exatos nada é escondido e o botão
     // não existe. Botão dizendo "ver mais 0" — ou sumindo sem explicação — é pior
     // que não ter teto nenhum.
@@ -11741,7 +11741,7 @@ function renderAutores() {
     for (const c of el.querySelectorAll('.autor-auto')) {
         c.addEventListener('change', () => alternarAutoDoAutor(c.dataset.autor));
     }
-    devolverFoco(el, foco);
+    devolverFocoAoPainel(el, foco);
 }
 
 // Esquecer pela LISTA do Histórico. O card da frente (atrás do modal) e o de
@@ -11784,7 +11784,11 @@ function chaveDoFoco(raiz) {
     }
     return { outro: true };
 }
-function devolverFoco(raiz, chave) {
+// Nome PRÓPRIO, não "devolverFoco": o fechar de modal tem uma função com esse
+// nome, e duas declarações no mesmo escopo global não dão erro — a última
+// vence, calada (as duas nasceram em branches paralelos; ver
+// `test/nomes-unicos.test.mjs`).
+function devolverFocoAoPainel(raiz, chave) {
     if (!raiz || !chave) return;
     let alvo = null;
     if (chave.id) alvo = document.getElementById(chave.id);
@@ -11836,7 +11840,7 @@ function renderHistory() {
     }
     el.insertAdjacentHTML('beforeend', htmlConquistas());
     if (!el.dataset.conqLigado) { ligarConquistas(el); el.dataset.conqLigado = '1'; }
-    devolverFoco(el, foco);
+    devolverFocoAoPainel(el, foco);
 }
 
 // Na PRIMEIRA vez que cada ação é confirmada pelo Waze, diz o que ela fez lá —

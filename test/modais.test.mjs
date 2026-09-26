@@ -72,6 +72,15 @@ function montar() {
         const escondido = classes.has('hidden') || (dentroDe && els.get(dentroDe).classList.contains('hidden'));
         if (!escondido) doc.activeElement = el;
       },
+      // O que o `focavelNaTela` do fechar de modal consulta: escondido não tem
+      // caixa na tela, e o que mora dentro de um modal está numa CAMADA.
+      isConnected: true,
+      disabled: false,
+      getClientRects() {
+        const escondido = classes.has('hidden') || (dentroDe && els.get(dentroDe).classList.contains('hidden'));
+        return escondido ? [] : [{}];
+      },
+      closest: (sel) => (sel === '[role="dialog"]' ? (dentroDe ? els.get(dentroDe) : (id.endsWith('Modal') ? el : null)) : null),
       querySelector: () => els.get(id + '_fechar') || null,
     };
     els.set(id, el);
@@ -99,9 +108,10 @@ function montar() {
   const corpo = [
     // O estado de VISUALIZAÇÃO que a limpeza de Filtros zera (módulo, no app).
     'let autoresExpandido = false, escadaAberta = false, conquistaTocada = null, novasDestaAbertura = null;',
-    'let resumoAtual = null, lastFocusedBeforeModal = null;',
+    'let resumoAtual = null, lastFocusedBeforeModal = null, ultimoFocoForaDasCamadas = null;',
     fatiarConst('MODAL_IDS', '[', ']'),
     fatiar('openModal'), fatiar('closeModal'), fatiar('topOpenModal'),
+    fatiar('devolverFoco'), fatiar('focavelNaTela'), fatiar('dentroDeCamada'),
     fatiarConst('LIMPEZA_AO_FECHAR', '{', '}'),
     'return { openModal, closeModal,',
     '  mexerNoHistorico: () => { escadaAberta = true; conquistaTocada = "coruja"; autoresExpandido = true; },',

@@ -810,6 +810,10 @@ async function sondar(resposta) {
     guardarReferencias() {}, guardarPerfilDoPortao() {}, renderProfileHeader() {}, dfato() {}, dlogCapturarAuto() {},
     showToast: (m) => toasts.push(m), t: (k) => k, rebuscarDepoisDeFalha() {}, esvaziarFilaDeSaida() {},
     showAccessDenied() {}, showAuthScreen() {},
+    // O perfil que a sonda traz passa pela fonte única (conserto do offline):
+    // aqui só importa o que o AVISO diz.
+    definirPerfil: (r) => !!(r && r.success && r.profile), completarPerfilChegado() {}, marcarSessaoViva() {},
+    epocaDaSessao: 0,
   };
   const { handleUnauthorized } = montar(['handleUnauthorized'], deps, ['handleUnauthorized']);
   await handleUnauthorized();

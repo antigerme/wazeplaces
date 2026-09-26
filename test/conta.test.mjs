@@ -57,6 +57,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     showToast: (m) => log.push('toast:' + m), t: (k) => k,
     window: { Presenca: { esquecer: () => log.push('chat') } },
     esvaziarFilaDeSaida: () => log.push('esvaziar'),
+    esquecerFocoAutor: () => log.push('foco'),
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida'];
@@ -245,11 +246,15 @@ test('O3 (MIGRACAO saida-sem-marca): o item de versão anterior é adotado pela 
   assert.equal(f[1].s, marcaDe('tok-A'));
   assert.equal(f[2].s, undefined, 'item com conta ganhou marca à toa');
   assert.equal(f[3].s, 'x', 'item já marcado foi remarcado — sairia no nome da sessão de agora');
+  // A abertura COM sessão salva mora no `abrirComSessaoSalva`, que o
+  // `initApp` só chama com token (o link de pareamento vencido também cai nela).
   const ini = fatiar('initApp');
-  const iAdota = ini.indexOf('adotarSaidaSemMarca();');
-  const iEsvazia = ini.indexOf('esvaziarFilaDeSaida();');
+  assert.match(ini, /if \(API\.getSession\(\)\) \{\s*abrirComSessaoSalva\(\);/,
+    'a adoção só vale COM a sessão aberta: a abertura com token saiu do initApp');
+  const abre = fatiar('abrirComSessaoSalva');
+  const iAdota = abre.indexOf('adotarSaidaSemMarca();');
+  const iEsvazia = abre.indexOf('esvaziarFilaDeSaida();');
   assert.ok(iAdota > 0 && iEsvazia > iAdota, 'a adoção tem de vir ANTES do esvaziamento da abertura');
-  assert.ok(iAdota > ini.indexOf('if (savedToken)'), 'a adoção só vale COM a sessão aberta');
 });
 
 test('o "Sair" apaga de quem eram os dados, e o perfil chegando confere a conta ANTES do que depende dele', () => {
@@ -312,6 +317,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     updateInFlightIndicator: () => {}, esquecerAutores: () => log.push('autores'),
     atualizarSeloDeConquista: () => {}, saveStats: () => {}, updateStats: () => {},
     offlineEsquecer: () => {}, dlogApagar: () => {}, window: { Presenca: { esquecer: () => {} } },
+    esquecerFocoAutor: () => log.push('foco'),
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];

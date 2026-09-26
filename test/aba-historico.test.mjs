@@ -337,7 +337,7 @@ function montarPainelComFoco({ autores }) {
     esquecerAutor() {}, alternarAutoDoAutor() {},
     esquecerAutorDaLista: (id) => { estado.esquecidos.push(id); },
   };
-  const api = montar(['chaveDoFoco', 'devolverFoco', 'renderAutores', 'renderHistory'], deps,
+  const api = montar(['chaveDoFoco', 'devolverFocoAoPainel', 'renderAutores', 'renderHistory'], deps,
     ['renderAutores', 'renderHistory'], 'let autoresExpandido = false;');
   const achar = (raizId, pred) => dom.document.getElementById(raizId).filhos.find(pred);
   return { ...api, dom, estado, achar };
@@ -437,6 +437,9 @@ async function rodarRecusa(alvos) {
   const AppState = { queue: [frente, ...alvos], currentPlace: frente };
   const deps = {
     AppState, podeRecusarAutomaticoAqui: () => true, Treino: { ativo: false },
+    // A recusa automática só age com a conta desta sessão CONFIRMADA (a conta
+    // do aparelho, do conserto do offline); aqui ela é.
+    contaConfirmada: () => true,
     autoLigado: (id) => id !== 1, updatePendingCount() {}, aoMudarAFilaPorBaixo() {},
     t: (k, v) => k + ' ' + JSON.stringify(v),
     showToast: (msg) => { avisos.push(msg); return { texto: (m) => avisos.push(m), dispensar() {} }; },
@@ -536,7 +539,7 @@ test('H19: o degrau atual da escada é anunciado (aria-current), numa lista', ()
 test('H19: o interruptor e a lixeira de cada autor dizem DE QUEM são', () => {
   const m = montarPainelComFoco({ autores: [autor('555', 3), autor('556', 2)] });
   I18N_T.setLang('pt');
-  const r = montar(['chaveDoFoco', 'devolverFoco', 'renderAutores'], {
+  const r = montar(['chaveDoFoco', 'devolverFocoAoPainel', 'renderAutores'], {
     document: m.dom.document, listaDeAutores: () => m.estado.autores, AUTORES_VISIVEIS: 10, AUTORES_MAX_DIAS: 30,
     AUTOR_LIMIAR_DESTAQUE: 6, ICONE_LIXO: '', podeRecusarAutomaticoAqui: () => true, autoLigado: () => false,
     rejeitadoQuando: () => '', escapeHtml: (s) => String(s), t: I18N_T.t,

@@ -225,7 +225,9 @@ test('H11: a fila de saída guarda o idioma do gesto, e o pouso entrega hora, di
   const deps = {
     carregarFilaDeSaida: () => [], salvarFilaDeSaida: (f) => salvos.push(f), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     dfato() {}, SAIDA_MAX: 1000, historyTodayKey: () => '2026-09-24', ondeAgora: () => '30', contaAgora: () => null,
-    API: { getRegion: () => 'row' }, getLang: () => 'fr', updateInFlightIndicator() {},
+    API: { getRegion: () => 'row', getSession: () => 'tok' }, getLang: () => 'fr', updateInFlightIndicator() {},
+    // A marca da sessão do gesto (o dono do item sem conta, do conserto do offline).
+    marcaDaSessao: () => 'marca',
   };
   const { enfileirarSaida } = montar(['enfileirarSaida'], deps, ['enfileirarSaida']);
   enfileirarSaida('read', { venueID: 'v1', updateRequestID: 'u1' }, 'row');

@@ -703,7 +703,7 @@ function aparelhoO5(guardado = new Map()) {
         aoProvarRede();
         return r === '702' ? { success: false, errorCategory: 'already_processed' } : { success: true };
       };
-      const API = { getSession: () => 'tok', getRegion: () => 'row', setSaindo: () => {},
+      const API = { getSession: () => 'tok', getRegion: () => 'row', getCountry: () => 30, setSaindo: () => {},
         rejectPlace: (v) => rede('rejeitar', v), markAsRead: (v) => rede('ler', v) };
       ${nomes.map(fatiarComAsync).join('\n')}
       return { handleReject, descarregarAcaoPendente, esvaziarFilaDeSaida, carregarFilaDeSaida };`)(...chaves.map((k) => deps[k]));
