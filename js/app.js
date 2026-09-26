@@ -5837,7 +5837,9 @@ async function diagCorpo() {
     return {
         _leia_isto: 'Este arquivo contém o waze_session_token, que é CREDENCIAL VIVA da conta do Waze '
             + 'de quem gerou. Trate como senha. Pra anular: sair do app, o que destrói a sessão no '
-            + 'servidor. NÃO contém os cookies do Waze — eles são de outra origem e não ficam neste aparelho.',
+            + 'servidor; se o app avisar que a limpeza no servidor não completou, o token ainda vale até '
+            + 'ficar ' + SESSAO_DIAS_EXIBIDO + ' dias sem uso. '
+            + 'NÃO contém os cookies do Waze — eles são de outra origem e não ficam neste aparelho.',
         _versaoDoDiag: DIAG_VERSAO,
         _formato: DIAG_FORMATO,
         // RESUMO NO TOPO: o arquivo tem 1,7 MB e ninguém lê 1,7 MB procurando o

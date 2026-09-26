@@ -642,7 +642,7 @@ test('prazos citados na tela (dias da sessão, minutos do código) == os do serv
   // Nenhuma frase escreve o número à mão, e as que citam os prazos usam as variáveis.
   const valores = (chave) => [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}':\\s*'((?:[^'\\\\\\n]|\\\\.)*)'`, 'g'))].map((m) => m[1]);
   const USAM = {
-    sessaoDias: ['auth.securityNote', 'help.security.body', 'help.privacy.retention', 'toast.logoutServerFailed'],
+    sessaoDias: ['auth.securityNote', 'help.security.body', 'help.privacy.retention', 'toast.logoutServerFailed', 'diag.leiame'],
     parearMin: ['help.privacy.zeroKnowledge', 'help.privacy.retention'],
   };
   for (const [v, chaves] of Object.entries(USAM)) {
@@ -652,6 +652,11 @@ test('prazos citados na tela (dias da sessão, minutos do código) == os do serv
       for (const valor of vs) assert.ok(valor.includes(`{${v}}`), `${chave} não usa {${v}}: ${valor}`);
     }
   }
+  // O aviso que vai DENTRO do diagnostico.json (pt, fora do dicionário) usa a
+  // mesma constante — o LEIA-ME do .zip vem do dicionário, e os dois dizem o mesmo.
+  const leia = APP.slice(APP.indexOf('_leia_isto:'), APP.indexOf('_versaoDoDiag:'));
+  assert.ok(leia.length > 100, 'CONTROLE: o recorte do _leia_isto quebrou');
+  assert.match(leia, /\+ SESSAO_DIAS_EXIBIDO \+/, 'o aviso do diagnostico.json não diz o prazo, ou o escreve à mão');
   const aMao = [...I18N.matchAll(new RegExp(`\\b(${dias}\\s*(?:dias|days|días|jours)|${min}\\s*(?:minutos|minutes))\\b`, 'g'))].map((m) => m[1]);
   assert.deepEqual(aMao, [], 'prazo do servidor escrito à mão no dicionário');
 });
