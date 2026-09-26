@@ -1489,7 +1489,15 @@ const Lightbox = {
         // Waze, e ler o alvo de uma variável global é como se apaga a foto do
         // card errado quando a fila anda embaixo de um lightbox aberto.
         this.place = place || null;
-        this.urls = urls;
+        // CÓPIA, nunca a lista do pedido: o card passa `place.imageUrls`, e com
+        // o mesmo array nas duas mãos o `devolverFoto` (Desfazer de uma
+        // exclusão) recolocava a foto no pedido e o `recolocarFoto` a achava
+        // JÁ presente e saía sem acertar o ✨ nem redesenhar — com o lightbox
+        // reaberto dentro da janela, o selo apontava a foto errada e a foto do
+        // pedido deixava de poder ser aprovada (auditoria de 2026-09-26). Cada
+        // mão mexe na sua, e quem mexe nas duas (`removerFoto`, `devolverFoto`)
+        // já as trata separadas.
+        this.urls = urls.slice();
         this.idx = Math.max(0, Math.min(startIdx || 0, urls.length - 1));
         this.newIdx = (newImageIdx !== undefined && newImageIdx !== null) ? newImageIdx : -1;
         this.eDenuncia = !!eDenuncia;
