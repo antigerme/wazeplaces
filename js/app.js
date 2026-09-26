@@ -10993,8 +10993,9 @@ let autoresExpandido = false;
 function renderAutores() {
     const el = document.getElementById('autoresBody');
     if (!el) return;
+    const foco = chaveDoFoco(el);   // o innerHTML abaixo mata o elemento focado
     const todas = listaDeAutores();
-    if (todas.length === 0) { el.innerHTML = ''; return; }
+    if (todas.length === 0) { el.innerHTML = ''; devolverFoco(el, foco); return; }
     // Só corta se SOBRA alguém: com 10 autores exatos nada é escondido e o botão
     // não existe. Botão dizendo "ver mais 0" — ou sumindo sem explicação — é pior
     // que não ter teto nenhum.
@@ -11072,11 +11073,53 @@ function renderAutores() {
     for (const c of el.querySelectorAll('.autor-auto')) {
         c.addEventListener('change', () => alternarAutoDoAutor(c.dataset.autor));
     }
+    devolverFoco(el, foco);
+}
+
+// O painel do Histórico é redesenhado INTEIRO (innerHTML) a cada toque nele —
+// célula de conquista, "ver a escada", interruptor e lixeira de autor, "Ver
+// mais" —, e o elemento focado morre junto: o foco caía no `<body>`, e quem
+// navega por teclado ou leitor de tela voltava pro começo da página a cada
+// toque (auditoria de 2026-09-25). Estas duas carregam o foco até o elemento
+// EQUIVALENTE do desenho novo, pela identidade que sobrevive ao innerHTML: o
+// id, o `data-conq` da célula, ou o `data-autor` com a classe do controle.
+// Foco FORA do painel não é tocado: redesenho por ação que pousa não rouba o
+// foco de ninguém.
+function chaveDoFoco(raiz) {
+    const a = document.activeElement;
+    if (!raiz || !a || a === document.body || !raiz.contains(a)) return null;
+    if (a.id) return { id: a.id };
+    const conq = a.getAttribute('data-conq');
+    if (conq) return { conq };
+    const autor = a.getAttribute('data-autor');
+    if (autor) {
+        const classe = a.classList.contains('autor-auto') ? 'autor-auto' : 'autor-esquecer';
+        // A POSIÇÃO também: se o autor saiu (a lixeira), o foco vai pra linha
+        // que tomou o lugar dele — como numa lista que se apaga item a item.
+        return { autor, classe, i: [...raiz.querySelectorAll('.' + classe)].indexOf(a) };
+    }
+    return { outro: true };
+}
+function devolverFoco(raiz, chave) {
+    if (!raiz || !chave) return;
+    let alvo = null;
+    if (chave.id) alvo = document.getElementById(chave.id);
+    else if (chave.conq) alvo = [...raiz.querySelectorAll('[data-conq]')].find((e) => e.getAttribute('data-conq') === chave.conq);
+    else if (chave.autor) {
+        const irmaos = [...raiz.querySelectorAll('.' + chave.classe)];
+        alvo = irmaos.find((e) => e.getAttribute('data-autor') === chave.autor)
+            || irmaos[Math.min(chave.i, irmaos.length - 1)] || null;
+    }
+    // Sumiu sem equivalente (o último autor esquecido): a aba do painel, que é
+    // o "título" dele — nunca o `<body>`.
+    if (!alvo || !raiz.contains(alvo)) alvo = document.getElementById('filtersTabHistory');
+    if (alvo) alvo.focus({ preventScroll: true });
 }
 
 function renderHistory() {
     const el = document.getElementById('historyBody');
     if (!el) return;
+    const foco = chaveDoFoco(el);   // o innerHTML abaixo mata o elemento focado
     const s = getHistoryStats();
     renderAutores();
     const vazio = s.total.read + s.total.rejected === 0;
@@ -11109,6 +11152,7 @@ function renderHistory() {
     }
     el.insertAdjacentHTML('beforeend', htmlConquistas());
     if (!el.dataset.conqLigado) { ligarConquistas(el); el.dataset.conqLigado = '1'; }
+    devolverFoco(el, foco);
 }
 
 // Na PRIMEIRA vez que cada ação é confirmada pelo Waze, diz o que ela fez lá —

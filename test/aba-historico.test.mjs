@@ -268,3 +268,121 @@ test('H3: o app escuta o aviso — o ouvinte é ligado na abertura', () => {
   assert.deepEqual(ouvintes, [['storage', aoGravarEmOutraAba]], 'ninguém escuta o evento storage');
   assert.match(fatiar('initApp'), /^\s+setupSincroniaEntreAbas\(\);/m, 'a abertura do app não liga a sincronia entre abas');
 });
+
+// ── H4: o foco sobrevive ao redesenho do painel ──────────────────────────────
+// O painel é reescrito inteiro a cada toque (célula, escada, interruptor,
+// lixeira, "Ver mais"), e o elemento focado morria junto: o foco caía no
+// `<body>`. Um DOM de mentira que transforma o innerHTML em elementos, e onde
+// o foco no elemento que sai do DOM cai no body, como no navegador.
+function domDeMentira() {
+  let ativo = null;
+  const raizes = new Map();
+  const doc = { body: { id: '' } };
+  Object.defineProperty(doc, 'activeElement', { get: () => ativo || doc.body });
+  const tags = (html) => [...String(html).matchAll(/<(\w+)((?:\s+[\w-]+(?:="[^"]*")?)*)\s*\/?>/g)].map((m) => {
+    const at = {};
+    for (const a of m[2].matchAll(/([\w-]+)(?:="([^"]*)")?/g)) at[a[1]] = a[2] ?? '';
+    const classes = new Set((at.class || '').split(/\s+/).filter(Boolean));
+    const el = {
+      id: at.id || '', tag: m[1],
+      getAttribute: (k) => (k in at ? at[k] : null),
+      classList: { contains: (c) => classes.has(c) },
+      dataset: { autor: at['data-autor'] },
+      addEventListener() {}, scrollIntoView() {},
+      focus() { ativo = el; },
+    };
+    return el;
+  });
+  function raiz(id) {
+    const r = { id, filhos: [], dataset: {}, focus() { ativo = r; }, scrollIntoView() {} };
+    Object.defineProperty(r, 'innerHTML', {
+      set(html) { if (r.filhos.includes(ativo)) ativo = null; r.filhos = tags(html); },
+      get() { return ''; },
+    });
+    r.insertAdjacentHTML = (_, html) => { r.filhos.push(...tags(html)); };
+    r.appendChild = (el) => { r.filhos.push(el); };
+    r.contains = (el) => r.filhos.includes(el);
+    r.querySelectorAll = (sel) => r.filhos.filter((e) => (sel.startsWith('.') ? e.classList.contains(sel.slice(1))
+      : sel.startsWith('[') ? e.getAttribute(sel.slice(1, -1)) !== null : false));
+    raizes.set(id, r);
+    return r;
+  }
+  const aba = { id: 'filtersTabHistory', focus() { ativo = aba; } };
+  const fechar = { id: 'closeFiltersFooter', focus() { ativo = fechar; } };
+  doc.getElementById = (id) => {
+    if (raizes.has(id)) return raizes.get(id);
+    if (id === aba.id) return aba;
+    if (id === fechar.id) return fechar;
+    for (const r of raizes.values()) { const e = r.filhos.find((x) => x.id === id); if (e) return e; }
+    return null;
+  };
+  return { document: doc, raiz, aba, fechar, focar: (el) => el.focus(), ativo: () => doc.activeElement };
+}
+
+function montarPainelComFoco({ autores }) {
+  const dom = domDeMentira();
+  dom.raiz('historyBody'); dom.raiz('autoresBody');
+  const estado = { autores };
+  const deps = {
+    document: dom.document,
+    getHistoryStats: () => ({ today: { read: 0, rejected: 0 }, week: { read: 0, rejected: 0 }, month: { read: 0, rejected: 0 }, total: { read: 4, rejected: 2 } }),
+    htmlPatente: () => '<div class="conq-card"><button type="button" id="conqEscadaBtn" class="conq-link"></button></div>',
+    htmlConquistas: () => '<button type="button" class="conq-cel on" data-conq="primeiraFaxina"></button>'
+      + '<button type="button" class="conq-cel off" data-conq="coruja"></button>',
+    dadosDoResumo: () => ({ total: 0 }), loadHistory: () => ({}), i18nLocale: () => 'pt-BR', ligarConquistas() {},
+    escapeHtml: (s) => String(s), t: (k) => k,
+    listaDeAutores: () => estado.autores, AUTORES_VISIVEIS: 10, AUTORES_MAX_DIAS: 30, AUTOR_LIMIAR_DESTAQUE: 6,
+    ICONE_LIXO: '', podeRecusarAutomaticoAqui: () => true, autoLigado: () => false, rejeitadoQuando: () => '',
+    esquecerAutor() {}, alternarAutoDoAutor() {},
+  };
+  const api = montar(['chaveDoFoco', 'devolverFoco', 'renderAutores', 'renderHistory'], deps,
+    ['renderAutores', 'renderHistory'], 'let autoresExpandido = false;');
+  const achar = (raizId, pred) => dom.document.getElementById(raizId).filhos.find(pred);
+  return { ...api, dom, estado, achar };
+}
+const autor = (id, n) => ({ id, n, nome: 'autor_' + id, dia: 0 });
+
+test('H4: tocar uma célula de conquista pelo teclado: o foco fica NA célula (a nova), não no <body>', () => {
+  const m = montarPainelComFoco({ autores: [] });
+  m.renderHistory();
+  m.dom.focar(m.achar('historyBody', (e) => e.getAttribute('data-conq') === 'coruja'));
+  m.renderHistory();                                  // o toque redesenha o painel inteiro
+  const a = m.dom.ativo();
+  assert.equal(a.getAttribute && a.getAttribute('data-conq'), 'coruja',
+    `o foco foi para ${a.id || a.tag || 'o <body>'} — quem navega por teclado volta pro começo da página`);
+  assert.ok(m.dom.document.getElementById('historyBody').contains(a), 'o foco ficou num elemento que saiu do DOM');
+  // "ver a escada" (id)
+  m.dom.focar(m.dom.document.getElementById('conqEscadaBtn'));
+  m.renderHistory();
+  assert.equal(m.dom.ativo().id, 'conqEscadaBtn', '"ver a escada" perdeu o foco no redesenho');
+});
+
+test('H4: interruptor e lixeira de autor: o foco volta pro MESMO autor — e, se ele saiu, pro vizinho', () => {
+  const m = montarPainelComFoco({ autores: [autor('555', 3), autor('556', 2)] });
+  m.renderAutores();
+  const auto = m.achar('autoresBody', (e) => e.classList.contains('autor-auto') && e.getAttribute('data-autor') === '555');
+  m.dom.focar(auto);
+  m.renderAutores();                                  // o interruptor trocou
+  const a = m.dom.ativo();
+  assert.ok(a !== auto && a.classList && a.classList.contains('autor-auto') && a.getAttribute('data-autor') === '555',
+    'o interruptor do autor perdeu o foco no redesenho');
+  // A lixeira do 555: ele sai da lista, e o foco vai pra lixeira que tomou o lugar.
+  m.dom.focar(m.achar('autoresBody', (e) => e.classList.contains('autor-esquecer') && e.getAttribute('data-autor') === '555'));
+  m.estado.autores = [autor('556', 2)];
+  m.renderAutores();
+  const v = m.dom.ativo();
+  assert.ok(v.classList && v.classList.contains('autor-esquecer') && v.getAttribute('data-autor') === '556',
+    'esquecido o autor, o foco não foi pra lixeira vizinha');
+  // O último autor esquecido: a lista some inteira — o foco vai pra aba do painel.
+  m.estado.autores = [];
+  m.renderAutores();
+  assert.equal(m.dom.ativo(), m.dom.aba, 'com a lista vazia o foco caiu no <body> em vez da aba do painel');
+});
+
+test('H4: CONTROLE — redesenho com o foco FORA do painel não rouba o foco', () => {
+  const m = montarPainelComFoco({ autores: [autor('555', 3)] });
+  m.renderHistory();
+  m.dom.focar(m.dom.fechar);                          // o foco no "Fechar" do rodapé
+  m.renderHistory();                                  // uma ação pousou com o painel aberto
+  assert.equal(m.dom.ativo(), m.dom.fechar, 'o redesenho roubou o foco de quem estava fora do painel');
+});
