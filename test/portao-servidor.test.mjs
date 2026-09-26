@@ -347,3 +347,47 @@ test('parear cancel: código que não existe não gasta o apagamento do KV (a co
   const resgate = await dispatch('parear', { action: 'claim', code: criado.body.code }, s.ctx);
   assert.equal(resgate.body.errorKey, 'srv.err.pairCodeInvalid', 'o código cancelado ainda entrou');
 });
+
+// Sessão gravada há 2 h: passa da trava de 1 h do `refreshCookies`, então uma
+// regravação indevida ACONTECE (sem isto o teste passaria por causa da trava).
+function envelhecerSessoes(store, segundos = 7200) {
+  const antes = Math.floor(Date.now() / 1000) - segundos;
+  for (const [k, v] of store.mem) store.mem.set(k, antes + v.slice(v.indexOf('|')));
+}
+// Resposta do Waze com o cookie de sessão ROTACIONADO (gotcha #43).
+const comRotacao = (corpo, valor) => {
+  const h = new Headers({ 'content-type': 'application/json' });
+  h.append('set-cookie', `_web_session=${valor}; path=/; secure; HttpOnly`);
+  return new Response(JSON.stringify(corpo), { status: 200, headers: h });
+};
+
+test('testar-cookies: um sessionToken no corpo NÃO deixa o login regravar aquela sessão', async () => {
+  // O ataque: um token de sessão L6 liberada + o cookies.txt de uma conta L1
+  // sem área. O portão recusa a L1 — mas a regravação do cookie rotacionado
+  // trocava os cookies da sessão L6 pelos da L1, e o token passava a agir como
+  // ela, sem nunca ter passado pelo portão.
+  const COOKIES_A = [NETSCAPE('.waze.com', '_csrf_token', 'csrf-A'), NETSCAPE('.waze.com', '_web_session', 'sessao-da-conta-A')].join('\n');
+  const COOKIES_B = [NETSCAPE('.waze.com', '_csrf_token', 'csrf-B'), NETSCAPE('.waze.com', '_web_session', 'sessao-da-conta-B')].join('\n');
+  for (const [perfilB, esperado] of [
+    [{ userName: 'conta-b', rank: 0, isAreaManager: false, isStaff: false }, 403],   // o portão recusa
+    [{ userName: 'conta-b', rank: 1, isAreaManager: true, isStaff: false }, 200],    // o portão aceita: sessão NOVA
+  ]) {
+    const s = await sessaoDeTeste(COOKIES_A);
+    envelhecerSessoes(s.store);
+    const { r } = await comWaze(() => comRotacao(perfilB, 'sessao-B-rotacionada'),
+      () => dispatch('testar-cookies', { cookies: COOKIES_B, region: 'row', sessionToken: s.sessionToken }, s.ctx));
+    assert.equal(r.status, esperado, JSON.stringify(r.body).slice(0, 120));
+    const guardada = await s.sessions.loadSession(s.sessionToken);
+    assert.match(guardada, /sessao-da-conta-A/, `a sessão A perdeu os próprios cookies (portão ${esperado})`);
+    assert.doesNotMatch(guardada, /csrf-B|conta-B|B-rotacionada/, `a sessão A passou a guardar a conta B (portão ${esperado})`);
+    if (esperado === 200) assert.notEqual(r.body.sessionToken, s.sessionToken, 'o login devolveu a sessão A em vez de criar a dele');
+  }
+  // CONTROLE: a MESMA rotação numa AÇÃO com o token A regrava a sessão A — o
+  // instrumento enxerga a regravação, e a trava de 1 h não está escondendo nada.
+  const s = await sessaoDeTeste(COOKIES_A);
+  envelhecerSessoes(s.store);
+  await comWaze(() => comRotacao({}, 'sessao-A-rotacionada'),
+    () => dispatch('marcar-lido', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'u1' }, s.ctx));
+  assert.match(await s.sessions.loadSession(s.sessionToken), /sessao-A-rotacionada/,
+    'CONTROLE: a ação não regravou o cookie rotacionado — o teste acima passaria por vácuo');
+});

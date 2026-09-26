@@ -1428,7 +1428,14 @@ async function handleTestarCookies(data, { sessions }) {
   const csrf = extractCSRFToken(cookies);
   if (!csrf) apiError('Token CSRF não encontrado nos cookies. Certifique-se de estar logado no Waze Map Editor.', 400, 'srv.err.csrfMissingLogin');
 
-  const result = await callWaze(wazeSessionEndpoint(region), cookieHeaderFrom(cookies), csrf, null, region, { data, sessions, cookies });
+  // `ctx` NULO, a exceção deliberada à regra do `callWaze`: aqui a sessão
+  // ainda NÃO existe — ela nasce lá embaixo, depois do portão. Com o contexto
+  // de sempre, um `sessionToken` no corpo fazia o `guardarCookiesRotacionados`
+  // REGRAVAR aquela sessão com os cookies DESTE pedido, mesmo quando o portão
+  // os recusava: uma conta L1 sem área entrava por dentro de uma sessão já
+  // liberada (auditoria de 2026-09-26). Nenhum cliente manda token aqui — nem
+  // o app, nem a extensão —, então quem perde o atalho é só quem o forjava.
+  const result = await callWaze(wazeSessionEndpoint(region), cookieHeaderFrom(cookies), csrf, null, region, null);
   if (result.httpCode === 401 || result.httpCode === 403) {
     apiError('Cookies expirados ou inválidos. Faça login novamente no Waze Map Editor e exporte novos cookies.', 400, 'srv.err.cookiesExpiredRelogin');
   }
