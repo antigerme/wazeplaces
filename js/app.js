@@ -2227,6 +2227,9 @@ function pedirExclusaoDaFoto() {
         aplicarTravaDeAcao();
         removeUndoBanner();
         devolverFoto(alvo);
+        // É o MESMO Desfazer do card (o mesmo banner): zera a "Mão firme" e
+        // conta a "Segunda chance" como lá (auditoria de 2026-09-25).
+        registrarDesfazer();
     };
     const timer = setTimeout(enviar, UNDO_WINDOW_MS);
     exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer };
@@ -2371,6 +2374,7 @@ function aprovarFotoAtual() {
         aplicarTravaDeAcao();
         removeUndoBanner();
         Lightbox.desmarcarAprovada(alvo);
+        registrarDesfazer();   // o mesmo Desfazer do card — ver a exclusão acima
     };
     aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer };
     aplicarTravaDeAcao();
@@ -2525,6 +2529,7 @@ function confirmarRenomear() {
         aplicarTravaDeAcao();
         removeUndoBanner();
         aplicarNomeNaTela(place, antigo);
+        registrarDesfazer();   // o mesmo Desfazer do card — ver a exclusão de foto
     };
     renomeacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer };
     aplicarTravaDeAcao();

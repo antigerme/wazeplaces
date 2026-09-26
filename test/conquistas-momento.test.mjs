@@ -337,3 +337,60 @@ test('H13: renomear em voo durante o "Sair" não conta o "Corretor" nem mexe no 
   await envio;
   assert.deepEqual(efeitos, ['irmaos', 'conquista:nomes']);
 });
+
+// ── H21: o Desfazer do lightbox é o mesmo Desfazer ──────────────────────────
+// Renomear, aprovar e excluir foto usam o MESMO banner do Desfazer do card,
+// mas não passavam pelo `registrarDesfazer`: não contavam pra "Segunda
+// chance" nem zeravam a "Mão firme" (auditoria de 2026-09-25).
+function montarLightboxComJanela() {
+  const reg = { desfazer: 0, banner: null };
+  const timers = [];
+  const place = { venueID: 'v1', updateRequestID: 'ur-1', name: 'Nome Velho', lat: -23, lon: -46 };
+  const Lightbox = {
+    place, idx: 1, urls: ['a', 'b'],
+    podeAprovarAtual: () => true, marcarComoAprovada() {}, desmarcarAprovada() {},
+    idFotoAtual: () => 'foto-1', removerFoto() {},
+  };
+  const deps = {
+    Treino: { ativo: false }, Lightbox, AppState: { preferences: { undoEnabled: true }, currentPlace: null },
+    canDisableUndo: () => false, podeRenomearAqui: () => true,
+    document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
+    fecharEdicaoNome() {}, aplicarNomeNaTela() {}, devolverFoto() {}, showCurrentPlace() {},
+    API: { prepararExclusao() {} },
+    enviarAprovacao: () => Promise.resolve(true), enviarExclusao: () => Promise.resolve(true), enviarRenomeacao() {},
+    aplicarTravaDeAcao() {}, removeUndoBanner() {}, t: (k) => k,
+    mostrarDesfazer: (msg, aoDesfazer) => { reg.banner = aoDesfazer; },
+    registrarDesfazer: () => { reg.desfazer++; },
+    setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
+  };
+  const nomes = ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear'];
+  const chaves = Object.keys(deps);
+  // As pendentes são `let` de MÓDULO no app: aqui, um objeto no escopo.
+  const corpo = nomes.map(fatiar).join('\n')
+    .replace(/aprovacaoPendente/g, '__pend.a').replace(/exclusaoPendente/g, '__pend.e')
+    .replace(/renomeacaoPendente/g, '__pend.r');
+  const app = new Function(...chaves, '__pend', corpo + `\nreturn { ${nomes.join(', ')} };`)(
+    ...chaves.map((k) => deps[k]), { a: null, e: null, r: null });
+  return { app, reg, timers };
+}
+
+test('H21: desfazer pelo banner do lightbox (aprovar, excluir foto, renomear) conta como Desfazer', () => {
+  for (const acao of ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear']) {
+    const m = montarLightboxComJanela();
+    m.app[acao]();
+    assert.ok(m.reg.banner, `${acao}: o banner do Desfazer não apareceu — o teste não mediria nada`);
+    m.reg.banner();                       // o toque no "Desfazer"
+    assert.equal(m.reg.desfazer, 1,
+      `${acao}: o Desfazer do lightbox não conta — nem "Segunda chance", nem zera a "Mão firme"`);
+  }
+});
+
+test('H21: CONTROLE — a janela que corre até o fim (a escrita sai) não é Desfazer', () => {
+  for (const acao of ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear']) {
+    const m = montarLightboxComJanela();
+    m.app[acao]();
+    m.timers.at(-1)();                    // a janela fechou sozinha: o envio saiu
+    m.reg.banner && m.reg.banner();       // o toque tardio no banner já não desfaz nada
+    assert.equal(m.reg.desfazer, 0, `${acao}: contou Desfazer de uma escrita que saiu`);
+  }
+});
