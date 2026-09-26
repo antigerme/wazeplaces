@@ -440,7 +440,8 @@ function initApp() {
         mostrarControlesDeSessao(false);
         // Sem sessão: antes de mostrar a tela de login, PERGUNTA à extensão.
         // Quem tem a extensão instalada e está logado no WME entra sem tocar em
-        // nada; quem não tem cai na tela de sempre depois de EXT_ESPERA_MS.
+        // nada; quem não tem cai na tela de sempre depois de EXT_PRESENTE_MS (sem o
+        // `aguarde` da ponte; com ele, a espera vai até EXT_ESPERA_MS).
         entrarPelaExtensao().then((entrou) => {
             if (entrou) return;
             // Escrita ATRASADA não pode atropelar estado novo. Entre o pedido e
