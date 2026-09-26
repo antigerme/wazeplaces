@@ -8803,7 +8803,9 @@ function renderFocoAutor() {
     document.getElementById('focoAutorTexto').textContent = t('card.focoAutor', { autor: nome });
     document.getElementById('focoAutorContagem').textContent =
         t('card.focoAutor.contagem', { n: restam, total: AppState.queue.length });
-    bar.setAttribute('aria-label', t('card.focoAutor.aria', { n: restam, autor: nome }));
+    // Com UM pedido dele na fila, a forma plural dizia "os 1 pedidos": o
+    // singular é chave própria, escolhida por `=== 1` (sem ICU no projeto).
+    bar.setAttribute('aria-label', t(restam === 1 ? 'card.focoAutor.ariaUm' : 'card.focoAutor.aria', { n: restam, autor: nome }));
     bar.classList.remove('hidden');
 }
 

@@ -1112,3 +1112,26 @@ test('QR vencido: o "Copiar link" apaga e não entrega link morto — nem na aba
       `${lang}: o aviso de vencido não diz o caminho com o nome da tela "${D[lang]['pair.createBtn']}"`);
   }
 });
+
+// ── T14 (textos, 2026-09-26): o foco no autor com UM pedido dele ─────────────
+// O nome acessível da barra dizia "Mostrando primeiro os 1 pedidos de fulano" —
+// o plural com n = 1, que é justamente o caso do fim de toda série.
+test('foco no autor: com UM pedido dele na fila, o leitor de tela ouve o singular, não "os 1 pedidos"', () => {
+  const { registro, document } = domDeMentira({ focoAutorBar: {}, focoAutorTexto: {}, focoAutorContagem: {} });
+  const AppState = { autorEmFoco: 7, queue: [{ creatorId: 7, createdBy: 'ana' }, { creatorId: 9 }] };
+  const { renderFocoAutor } = montar(['renderFocoAutor'],
+    { document, AppState, t: (k, v) => `${k}|${v ? v.n : ''}|${v ? v.autor : ''}` }, ['renderFocoAutor']);
+  renderFocoAutor();
+  assert.equal(registro.focoAutorBar.getAttribute('aria-label'), 'card.focoAutor.ariaUm|1|ana',
+    'com um só pedido do autor, o nome acessível usou a forma plural');
+  // CONTROLE: com mais de um, a forma plural de sempre.
+  AppState.queue = [{ creatorId: 7, createdBy: 'ana' }, { creatorId: 7, createdBy: 'ana' }, { creatorId: 7 }];
+  renderFocoAutor();
+  assert.equal(registro.focoAutorBar.getAttribute('aria-label'), 'card.focoAutor.aria|3|ana');
+  // E a frase do singular diz o autor e não diz número, nas 4 línguas.
+  const D = dicionario();
+  for (const lang of Object.keys(D)) {
+    const um = D[lang]['card.focoAutor.ariaUm'];
+    assert.ok(um && um.includes('{autor}') && !um.includes('{n}'), `${lang}: o singular do foco no autor ${um ? 'repete o número' : 'não existe'}`);
+  }
+});
