@@ -135,6 +135,49 @@ test('a condição do Andarilho manda ao filtro com o nome que o FILTRO dá ao e
   }
 });
 
+test('um conceito, um nome — os termos da auditoria de textos (2026-09-26)', () => {
+  // Por PALAVRA inteira e por língua (o teste de cima casa substring): "fila"
+  // é o termo do pt e sinônimo proibido no es; "rapport" é o reporte no fr, mas
+  // "Sans rapport" (motivo UNRELATED) é outra coisa.
+  const valoresDe = (lang) => {
+    const m = I18N.match(new RegExp(`\\n  ${lang}: \\{([\\s\\S]*?)\\n  \\},?\\n`));
+    assert.ok(m, `CONTROLE: não achei o bloco ${lang} do dicionário`);
+    // Sem os placeholders: `{fila}` é NOME de variável, não palavra da tela (e
+    // casava o /fila/ do espanhol no `autor.sheet.sub`).
+    return Object.fromEntries([...m[1].matchAll(/'([^'\n]+)':\s*'((?:[^'\\\n]|\\.)*)'/g)]
+      .map((x) => [x[1], x[2].replace(/\{\w+\}/g, '')]));
+  };
+  const D = Object.fromEntries(LANGS_DO_DICT.map((l) => [l, valoresDe(l)]));
+  assert.ok(Object.keys(D.pt).length > 500, 'CONTROLE: o recorte do dicionário quebrou');
+  const PARES = [
+    ['es', /\bemparejamiento\b/i, /\bvinculaci[oó]n\b/i, 'o código de pareamento'],
+    ['fr', /\bappairage\b/i, /\bassociation\b/i, 'o código de pareamento'],
+    ['es', /\bcola\b/i, /\bfila\b/i, 'a fila de pedidos'],
+    ['fr', /\bsignalement\b/i, /\bce rapport\b/i, 'o reporte'],
+  ];
+  for (const [lang, termo, sinonimo, conceito] of PARES) {
+    const vals = Object.entries(D[lang]);
+    assert.ok(vals.some(([, v]) => termo.test(v)), `CONTROLE: ${lang} não usa mais ${termo} — o par ficou velho`);
+    const fora = vals.filter(([, v]) => sinonimo.test(v)).map(([k]) => k);
+    assert.deepEqual(fora, [], `${lang}: ${conceito} tem dois nomes — ${sinonimo} em ${fora.join(', ')}`);
+  }
+  // "PUR" é sigla de quem mexe no código; na tela o conceito é pedido, request,
+  // solicitud, demande. O contador do Desfazer era a única frase a usá-la.
+  for (const lang of LANGS_DO_DICT) {
+    const fora = Object.entries(D[lang]).filter(([, v]) => /\bPURs?\b/.test(v)).map(([k]) => k);
+    assert.deepEqual(fora, [], `${lang}: a tela diz "PUR" em ${fora.join(', ')}`);
+  }
+  // O mesmo conceito em duas telas, com o mesmo nome: a conquista "Tudo limpo" e
+  // o "Tudo limpo!" da fila vazia; o "Entendi" do "Como funciona" e o do
+  // "Acesso restrito".
+  const semExclamacao = (s) => s.replace(/[!¡]/g, '').trim();
+  for (const lang of LANGS_DO_DICT) {
+    assert.equal(D[lang]['conq.tudoLimpo.nome'], semExclamacao(D[lang]['states.empty.title']),
+      `${lang}: a conquista "Tudo limpo" e a tela de fila vazia têm nomes diferentes`);
+    assert.equal(D[lang]['modal.accessDenied.dismiss'], D[lang]['common.gotIt'], `${lang}: o "Entendi" tem dois nomes`);
+  }
+});
+
 test('botão de confirmar ecoa o verbo do enunciado', () => {
   // "Marcar como lido os N pedidos?" com botão "Marcar lidos" faz o editor
   // parar pra conferir se é a mesma ação. É.
