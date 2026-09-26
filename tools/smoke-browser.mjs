@@ -2100,6 +2100,10 @@ for (const status of [404, 403]) {
     AppState.serverTotal = 5; AppState.hasMore = false;
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('appScreen').classList.remove('hidden');
+    // O login de mentira mostra os controles de sessão da Ajuda, como o
+    // `showMainScreen` faz: desde 2026-09-26 o "Ver de novo Como funciona" é
+    // um deles, e a abertura SEM sessão (como esta página nasce) os esconde.
+    mostrarControlesDeSessao(true);
     renderProfileHeader(); updateStats(); showLoading(false);
     document.getElementById('noMoreCards').classList.add('hidden');
     AppState.queue = [p, { ...p, venueID: 'v2', updateRequestID: 'u2' }];
