@@ -1478,7 +1478,22 @@ async function handleTestarCookies(data, { sessions }) {
   if (result.httpCode === 401 || result.httpCode === 403) {
     apiError('Cookies expirados ou inválidos. Faça login novamente no Waze Map Editor e exporte novos cookies.', 400, 'srv.err.cookiesExpiredRelogin');
   }
-  if (result.httpCode !== 200) apiError(`Erro ao validar cookies (HTTP ${result.httpCode})`);
+  // O resto é falha do WAZE, não dos cookies da pessoa, e sai categorizada como
+  // em toda rota: chave `srv.err.*` (o app traduz; a frase crua era a única
+  // `apiError` sem chave do core, e chegava em português em qualquer idioma),
+  // `errorCategory` e status 5xx — era 400, "o pedido está errado", pra um
+  // Waze fora do ar (auditoria de 2026-09-26). "Já tratado" e "não existe
+  // mais" são categorias de AÇÃO sobre um pedido e não significam nada no
+  // login: o que não é passageiro aqui é erro inesperado do Waze.
+  if (result.httpCode !== 200) {
+    const cat = categorizeWazeError(result.httpCode, result.response, result.error);
+    const c = cat.category === 'transient' ? cat
+      : { category: 'unknown', message: `Erro do Waze (HTTP ${result.httpCode})`, messageKey: 'srv.err.wazeUnknown', messageVars: { code: result.httpCode } };
+    return {
+      status: 500,
+      body: { success: false, error: c.message, errorKey: c.messageKey, errorVars: c.messageVars, errorCategory: c.category, httpCode: result.httpCode },
+    };
+  }
 
   let profile;
   try {

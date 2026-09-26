@@ -620,3 +620,77 @@ test('ids: objeto, lista ou texto enorme não vão ao Waze em NENHUMA rota de es
     }
   }
 });
+
+import vm from 'node:vm';
+
+// O `msgDoServidor` do app.js de verdade, rodando sobre o i18n.js de verdade
+// num idioma: é o que a tela de entrar mostra (`authenticateWithCookies`).
+const I18N_JS = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+const APP_JS = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+function msgDoServidorEm(lang) {
+  const i = APP_JS.search(/^function msgDoServidor\(/m);
+  assert.ok(i >= 0, 'msgDoServidor sumiu do app.js');
+  let prof = 0, fim = -1;
+  for (let j = APP_JS.indexOf('{', i); j < APP_JS.length; j++) {
+    if (APP_JS[j] === '{') prof++;
+    else if (APP_JS[j] === '}') { prof--; if (prof === 0) { fim = j + 1; break; } }
+  }
+  const ctx = {
+    navigator: { language: lang, onLine: true },
+    document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: (k) => (k === 'waze_places_lang' ? lang : null), setItem() {}, removeItem() {} },
+    console, setTimeout, clearTimeout,
+  };
+  vm.createContext(ctx);
+  // `setLang` como o app faz na abertura: o i18n.js nasce em português.
+  vm.runInContext(I18N_JS + '\n' + APP_JS.slice(i, fim) + `\nsetLang(${JSON.stringify(lang)}); this.msg = msgDoServidor;`, ctx);
+  return ctx.msg;
+}
+
+test('login: Waze fora do ar é erro PASSAGEIRO e traduzido — não 400 com frase em português', async () => {
+  const emIngles = msgDoServidorEm('en');
+  for (const [nome, responder, chave] of [
+    ['HTTP 502', () => new Response('bad gateway', { status: 502 }), 'srv.err.wazeDown'],
+    ['HTTP 429', () => json({}, 429), 'srv.err.wazeDown'],
+    ['rede caiu', () => { throw new TypeError('fetch failed'); }, 'srv.err.connection'],
+  ]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(responder, () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+    assert.ok(r.status >= 500, `${nome}: HTTP ${r.status} — falha do Waze não é "pedido errado"`);
+    assert.equal(r.body.errorCategory, 'transient', nome);
+    assert.equal(r.body.errorKey, chave, nome);
+    assert.equal(r.body.sessionToken, undefined, `${nome}: criou sessão sem o Waze responder`);
+    const tela = emIngles(r.body, 'fallback');
+    assert.doesNotMatch(tela, /Erro|Servidor|conex/, `${nome}: em inglês, a tela de entrar mostrou português: "${tela}"`);
+    assert.notEqual(tela, 'fallback', `${nome}: a tela caiu no texto genérico`);
+  }
+  // Não passageiro: erro inesperado do Waze — nunca "place não existe mais" nem
+  // "já tratado", que são categorias de AÇÃO e não significam nada no login.
+  for (const status of [404, 409, 418]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(() => json({ erro: 'x' }, status), () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+    assert.equal(r.body.errorKey, 'srv.err.wazeUnknown', `HTTP ${status}: ${r.body.errorKey}`);
+    assert.equal(r.body.errorCategory, 'unknown', `HTTP ${status}`);
+    assert.deepEqual(r.body.errorVars, { code: status });
+  }
+  // CONTROLE: cookie que não vale continua sendo "cookies expirados" (400) — é
+  // o texto que a extensão lê pra não insistir, e o que a pessoa pode corrigir.
+  const s = await sessaoDeTeste(COOKIES);
+  const { r } = await comWaze(() => json({}, 403), () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+  assert.equal(r.status, 400);
+  assert.equal(r.body.errorKey, 'srv.err.cookiesExpiredRelogin');
+  assert.match(r.body.error, /expirad/, 'a extensão decide "não está logado no WME" por este texto');
+});
+
+test('core: toda apiError leva errorKey — frase crua do servidor chega em português em qualquer idioma', () => {
+  // A do login era a única sem chave, e o app a mostrava como veio. Linha de
+  // comentário não conta (gotcha #67), nem a definição da própria função.
+  const core = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8');
+  const chamadas = core.split('\n')
+    .filter((l) => !l.trim().startsWith('//'))
+    .filter((l) => /\bapiError\(/.test(l) && !/const apiError = /.test(l));
+  assert.ok(chamadas.length >= 20, `achei só ${chamadas.length} apiError — o varredor quebrou, não o core`);
+  const semChave = chamadas.filter((l) => !/'srv\.err\.[a-zA-Z]+'/.test(l)).map((l) => l.trim());
+  assert.deepEqual(semChave, [],
+    'apiError sem `srv.err.*` na mesma linha: o app mostra a frase portuguesa do servidor em qualquer idioma');
+});
