@@ -6983,7 +6983,11 @@ async function aoTrocarOrdenacao() {
         atualizarDicaDeOrdem(sel.value === 'casa' || sel.value === 'trabalho' ? 'perfil' : null);
         return;
     }
-    if (posicaoGps) { atualizarDicaDeOrdem('ok'); return; }
+    // A posição é pedida A CADA escolha, nunca reaproveitada: a de horas atrás
+    // ordenava a fila de quem já tinha mudado de cidade — MEDIDO, a escolha em
+    // São Paulo ordenada pelo Rio (auditoria da fila, 2026-09-26). Não liga o
+    // GPS à toa: o `maximumAge` da consulta devolve a recente que o navegador
+    // guardou. E segue só no GESTO — é este `change`.
     atualizarDicaDeOrdem('pedindo');
     const pos = await pedirPosicao();
     // A pessoa pode ter mudado o select enquanto o prompt estava aberto.

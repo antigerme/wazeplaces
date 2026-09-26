@@ -179,3 +179,42 @@ test('F10b: trocar de PAÍS no modal não pré-seleciona o estado salvo de outro
   assert.equal(c.sel.value, '2');
   assert.equal(c.sel.dataset.carregando, undefined);
 });
+
+// ── F11: "📍 Perto de mim" renova a posição a cada ESCOLHA ───────────────────
+// A posição pedida uma vez valia a sessão inteira: quem escolhia "Perto de
+// mim" no Rio e, horas depois, de novo em São Paulo, via a fila ordenada pelo
+// Rio — MEDIDO no navegador, com o aparelho já dizendo São Paulo. Pedir de
+// novo não custa GPS à toa: o `maximumAge` da consulta devolve a posição
+// recente guardada pelo próprio navegador. Continua só no GESTO (a escolha).
+function montarGps({ posicaoVelha, nova }) {
+  const sel = { value: 'gps' };
+  const dicas = [];
+  let pedidas = 0;
+  const deps = {
+    document: { getElementById: (id) => (id === 'filterSort' ? sel : null) },
+    pedirPosicao: async () => { pedidas++; return nova; },
+    atualizarDicaDeOrdem: (e) => dicas.push(e), dfato: () => {}, ORDEM_PADRAO: 'newest',
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, `let posicaoGps = ${JSON.stringify(posicaoVelha)};\n` + fatiar('aoTrocarOrdenacao')
+    + '\nreturn { aoTrocarOrdenacao, posicao: () => posicaoGps };')(...chaves.map((k) => deps[k]));
+  return { app, sel, dicas, pedidas: () => pedidas };
+}
+
+test('F11: escolher "Perto de mim" de novo PEDE a posição de novo — a de horas atrás não vale', async () => {
+  const rio = { ll: [-22.9, -43.2], precisaoM: 50 };
+  const sp = { ll: [-23.55, -46.63], precisaoM: 50 };
+  const m = montarGps({ posicaoVelha: rio, nova: sp });
+  await m.app.aoTrocarOrdenacao();
+  assert.equal(m.pedidas(), 1, 'escolher "Perto de mim" de novo não perguntou a posição: a fila segue ordenada pelo Rio');
+  assert.deepEqual(m.app.posicao().ll, sp.ll);
+  assert.deepEqual(m.dicas, ['pedindo', 'ok']);
+});
+
+test('F11: a renovação que FALHA (negada, sem sinal) volta pro padrão e diz — não fica com a posição velha', async () => {
+  const m = montarGps({ posicaoVelha: { ll: [-22.9, -43.2], precisaoM: 50 }, nova: null });
+  await m.app.aoTrocarOrdenacao();
+  assert.equal(m.sel.value, 'newest', '"Perto de mim" segue escolhido sem uma posição de agora');
+  assert.equal(m.app.posicao(), null);
+  assert.equal(m.dicas.at(-1), 'negado');
+});
