@@ -2018,16 +2018,27 @@ await p2d.evaluate(() => {
     { t: agora - 20 * H, e: 'caiu', motivo: 'srv.err.cookiesExpired' }, ...anel]));
 });
 // O que acontece ENQUANTO o arquivo é montado (auditoria de 2026-09-26, D11):
-// uma anotação no diário e uma captura NO MEIO do empacotamento — o construtor
-// do `CompressionStream` é chamado pelo `zipar`, depois do retrato. O carimbo do
-// "baixado" era o do FIM do download, e as duas sumiam: fora do arquivo E fora
-// da cópia guardada. Com o carimbo do retrato, elas voltam na abertura 3.
+// uma anotação no diário e um TOQUE no botão NO MEIO do empacotamento — o
+// construtor do `CompressionStream` é chamado pelo `zipar`, depois do retrato. O
+// toque vai pelos ouvintes do PRÓPRIO botão (ponteiro que desce e sobe nele),
+// como o dedo: o toque do DevTools não cabe dentro do zip. O carimbo do
+// "baixado" era o do FIM do download, e as duas coisas sumiam: fora do arquivo
+// E fora da cópia guardada. Com o carimbo do retrato, voltam na abertura 3.
 await p2d.evaluate(() => {
   const Orig = window.CompressionStream;
   window.__compressaoOriginal = Orig;
   let uma = false;
   window.CompressionStream = class extends Orig {
-    constructor(f) { if (!uma) { uma = true; dfato('smoke.duranteOZip'); dlogCapturar('manual'); } super(f); }
+    constructor(f) {
+      if (!uma) {
+        uma = true;
+        dfato('smoke.duranteOZip');
+        const b = document.getElementById('devFabBtn');
+        b.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 97, bubbles: true }));
+        b.dispatchEvent(new PointerEvent('pointerup', { pointerId: 97, bubbles: true }));
+      }
+      super(f);
+    }
   };
 });
 try {
