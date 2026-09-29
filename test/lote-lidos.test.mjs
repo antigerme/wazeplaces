@@ -70,7 +70,7 @@ function montar(fila, { resolvidos = [], segurar = false, pendentes = {}, falhar
   };
   const chaves = Object.keys(deps);
   const corpo = ['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'marcarEmAndamento'].map(fatiar).join('\n');
-  app = new Function(...chaves, 'let loteDeLidosContado = null; let tratouNestaFila = false; let loteDeLidosEmVoo = false;\n' + corpo
+  app = new Function(...chaves, 'let loteDeLidosContado = null; let tratouNestaFila = false; let loteDeLidosEmVoo = false; let escritasConferindo = 0;\n' + corpo
     + '\nreturn { openBatchReadConfirm, handleBatchMarkRead, acoesTravadas };')(...chaves.map((k) => deps[k]));
   return { app, AppState, lidos, chamadas, toasts, historico, log, emAndamento, soltar: () => soltar() };
 }

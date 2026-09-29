@@ -216,8 +216,8 @@ test('a presença não usa WebRTC desde a fase 3 — e o smoke dela exercita o t
   assert.match(codigo, /const GOOGLE = 'https:\/\/instantmessaging-pa\.googleapis\.com\/';/,
     'o smoke deixou de rotear o host de verdade do tempo real — a CSP não seria exercitada');
   assert.match(codigo, /await ctx\.route\(GOOGLE \+ '\*\*'/, 'o tempo real não é mais roteado no smoke');
-  assert.match(codigo, /spawn\(process\.execPath, \[join\(ROOT, 'server', 'node\.mjs'\)\]/,
-    'o smoke tem que servir o app pelo servidor de verdade — é ele que manda a CSP');
+  assert.match(codigo, /await subirServidorLocal\(\{/,
+    'o smoke tem que servir o app pelo servidor de verdade (tools/servidor-local.mjs) — é ele que manda a CSP');
 });
 
 test('a main roda o CI toda semana, fora da hora cheia', () => {

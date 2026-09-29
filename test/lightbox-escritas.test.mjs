@@ -471,8 +471,8 @@ test('L1 a sessão CAI na conferência: nada é revertido nem avisado depois (a 
 
 test('L1 a conferência do 401 TRAVA as ações, como a janela do Desfazer', () => {
   const trava = new Function('AppState', 'aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente', 'escritasConferindo',
-    fatiar('acoesTravadas') + '\nreturn acoesTravadas;');
-  const AppState = { pendingAction: null };
+    'loteDeLidosEmVoo', fatiar('acoesTravadas') + '\nreturn acoesTravadas;');
+  const AppState = { pendingAction: null, authenticated: true };
   assert.equal(trava(AppState, null, null, null, 0)(), false, 'CONTROLE: sem nada pendente, nada trava');
   assert.equal(trava(AppState, null, null, null, 1)(), true,
     'com a escrita esperando a conferência, dava pra decidir de novo sobre o mesmo local');
@@ -679,7 +679,7 @@ function montarAprovacao({ semJanela = false, resposta = { success: true } } = {
   const L = lightbox();
   const A = pedidoDeFoto('ur-A');
   abrir(L, A, [FOTO('velha'), FOTO('ur-A')], 1);
-  const AppState = { preferences: { undoEnabled: !semJanela }, serverTotal: 5, currentPlace: A };
+  const AppState = { authenticated: true, preferences: { undoEnabled: !semJanela }, serverTotal: 5, currentPlace: A };
   const timers = [];
   let responder = null;
   const emAndamento = new Set();

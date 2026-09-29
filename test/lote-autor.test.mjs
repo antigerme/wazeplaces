@@ -147,6 +147,8 @@ test('F4: aprovar a foto leva a fila do GESTO no alvo (`epocaFila`)', async () =
     enviarAprovacao: async (alvo) => { alvoEnviado = alvo; return true; },
     aplicarTravaDeAcao: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {}, t: (k) => k,
     registrarDesfazer: () => {}, UNDO_WINDOW_MS: 3000,
+    // Do lightbox (L3, o foco, o "em andamento" da aprovação).
+    fotoDoLightboxNaTela: () => true, marcarEmAndamento: () => {}, manterFocoNoLightbox: () => {},
   };
   const chaves = Object.keys(deps);
   const aprovar = new Function(...chaves, 'let aprovacaoPendente = null; let exclusaoPendente = null;\n'
