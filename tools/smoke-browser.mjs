@@ -4376,6 +4376,43 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       `FAB/${nomeAp}: depois de apagar não voltou ao canto automático`,
       `${Math.round(zerou.x)} ≠ ${vp.width - antes.w - 12}`);
 
+    // ── DOIS dedos no botão, soltos antes de "pegar" ────────────────────
+    // O segundo `pointerdown` sobrescrevia o relógio do primeiro sem cancelá-lo,
+    // e o relógio órfão "pegava" o botão SEM dedo nenhum: ele ficava em
+    // `fab-pego` pra sempre — crescido, parado, por cima do "Aplicar" dos
+    // Filtros, e nem desligar e religar o modo dev o soltava (auditoria de
+    // 2026-09-26, D7). O controle é o de cima: segurar UM dedo ainda pega.
+    const p7 = await page.evaluate(() => {
+      const b = document.getElementById('devFab').getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p7.x, y: p7.y, id: 1 }] });
+    await page.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart',
+      touchPoints: [{ x: p7.x, y: p7.y, id: 1 }, { x: p7.x + 6, y: p7.y + 6, id: 2 }] });
+    await page.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p7.x + 6, y: p7.y + 6, id: 2 }] });
+    await page.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(500);
+    const doisDedos = await page.evaluate(() => document.getElementById('devFab').classList.contains('fab-pego'));
+    checa(!doisDedos, `FAB/${nomeAp}: dois dedos soltos antes de pegar deixaram o botão "pego" sem dedo nenhum`);
+    // E o "pego" que sobrar sem dedo (qualquer caminho) não trava o botão: o
+    // canto é reavaliado, e apagar o modo dev o solta.
+    const preso = await page.evaluate(() => {
+      const f = document.getElementById('devFab');
+      f.classList.add('fab-pego');
+      posicionarFabDev();
+      const reposicionou = !f.classList.contains('fab-pego');
+      f.classList.add('fab-pego');
+      dlogApagar();
+      const soltou = !f.classList.contains('fab-pego');
+      AppState.devMode.active = true; atualizarFabDev();
+      return { reposicionou, soltou };
+    });
+    checa(preso.reposicionou && preso.soltou,
+      `FAB/${nomeAp}: "pego" sem dedo travou o botão (a reavaliação ou o apagar não o soltam)`, JSON.stringify(preso));
+
     // ── o SELO conta só o que VOCÊ registrou ────────────────────────────
     // Pedido do owner depois de ver o selo ir a 2, 4 e 5 em três toques: ele
     // somava as capturas AUTOMÁTICAS (o arraste do card além do limiar, com

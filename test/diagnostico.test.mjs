@@ -467,7 +467,9 @@ test('segurar PEGA o botão, com aviso, e arrastar não vira toque', () => {
     // botão pra sempre (auditoria de 2026-09-25; executado em test/fab-dev).
     assert.doesNotMatch(pegar, /devFabFixado = true/, 'pegar voltou a fixar: toque devagar prende o botão');
     const pos = semCom.slice(semCom.indexOf('function posicionarFabDev('));
-    assert.match(pos.slice(0, 400), /if \(fab\.classList\.contains\('fab-pego'\)\) return;/,
+    // Com DEDO no botão: o "pego" sem dedo (o relógio órfão de dois dedos, D7 da
+    // auditoria de 2026-09-26) é solto aqui, e isso roda em test/fab-dev.
+    assert.match(pos.slice(0, 500), /if \(fab\.classList\.contains\('fab-pego'\)\) \{\s*if \(devFabDedo !== null\) return;/,
         'o app voltou a poder mover o botão que está na mão');
     // e o CSS do aviso existe de verdade no arquivo COMPILADO — classe que só
     // existe no JS é indistinguível de classe certa se olhar só o JS

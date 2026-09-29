@@ -4940,6 +4940,10 @@ function dlogApagar() {
     // ruim e quer o automático de novo.
     devFabFixado = false;
     try { sessionStorage.removeItem('__devFabPos'); } catch (e) {}
+    // E o "pego" que tenha sobrado (D7): desligar o modo dev é a saída que a
+    // pessoa tem, e ele sobrevivia a ela.
+    devFabDedo = null;
+    document.getElementById('devFab')?.classList.remove('fab-pego');
     atualizarFabDev();
 }
 
@@ -5332,6 +5336,9 @@ const DEV_FAB_LEITURA = '.nao-cobrir';
 const DEV_FAB_EVITAR = DEV_FAB_ACIONAVEL + ', ' + DEV_FAB_LEITURA;
 
 let devFabFixado = false;   // o editor arrastou → o app não escolhe mais
+// O ponteiro que está no botão agora (null = nenhum dedo). Módulo, e não só do
+// gesto, porque o `posicionarFabDev` precisa saber se o "pego" tem dedo (D7).
+let devFabDedo = null;
 
 function devFabCoords(canto, w, h) {
     const cab = document.querySelector('header');
@@ -5381,8 +5388,14 @@ function devFabVitimas(canto, w, h, fab) {
 function posicionarFabDev() {
     const fab = document.getElementById('devFab');
     if (!fab || devFabFixado || fab.classList.contains('hidden')) return;
-    // Pego (segurado, sem ter andado ainda): não se mexe debaixo do dedo.
-    if (fab.classList.contains('fab-pego')) return;
+    // Pego (segurado, sem ter andado ainda): não se mexe debaixo do dedo. Mas só
+    // com um DEDO de verdade no botão: o "pego" que sobrou sem dedo (o relógio
+    // órfão de dois dedos) travava o botão ali pra sempre — crescido, parado,
+    // por cima do "Aplicar" dos Filtros (auditoria de 2026-09-26, D7). Sai aqui.
+    if (fab.classList.contains('fab-pego')) {
+        if (devFabDedo !== null) return;
+        fab.classList.remove('fab-pego');
+    }
     const r = fab.getBoundingClientRect();
     const w = r.width || 44, h = r.height || 44;
     // O FAB inteiro sai do hit-test durante a medição — contêiner E botão —
@@ -5469,7 +5482,7 @@ function ligarFabDev() {
     // `dedo`: o ponteiro que PEGOU. Sem ele, qualquer outro dedo na tela movia o
     // FAB e o soltar de qualquer um encerrava o gesto — a mesma armadilha do
     // `dragTouchId` do swipe (auditoria de 2026-09-25).
-    let pego = false, arrastou = false, dx = 0, dy = 0, quadro = 0, alvo = null, relogio = null, dedo = null;
+    let pego = false, arrastou = false, dx = 0, dy = 0, quadro = 0, alvo = null, relogio = null;
     const desenhar = () => {
         quadro = 0;
         if (!alvo) return;
@@ -5499,8 +5512,12 @@ function ligarFabDev() {
         // O gesto é DESTE ponteiro: `mover` e `fim` só atendem a ele. (Travar um
         // segundo `pointerdown` foi descartado: um `pointerup` perdido — soltar
         // fora da janela — deixaria o botão surdo pra sempre.)
+        // UM relógio por gesto: o segundo dedo sobrescrevia o relógio do
+        // primeiro SEM cancelá-lo, e o órfão "pegava" o botão depois que os dois
+        // dedos já tinham saído (auditoria de 2026-09-26, D7).
+        if (relogio) { clearTimeout(relogio); relogio = null; }
         const meu = e.pointerId;
-        dedo = meu;
+        devFabDedo = meu;
         arrastou = false;
         const r = fab.getBoundingClientRect();
         dx = e.clientX - r.left; dy = e.clientY - r.top;
@@ -5526,7 +5543,7 @@ function ligarFabDev() {
         // posição a partir de coordenadas velhas.
         const fim = (ev) => {
             if (ev && ev.pointerId !== meu) return;
-            if (dedo === meu) dedo = null;
+            if (devFabDedo === meu) devFabDedo = null;
             removeEventListener('pointermove', mover);
             removeEventListener('pointerup', fim);
             removeEventListener('pointercancel', fim);
@@ -5551,7 +5568,7 @@ function ligarFabDev() {
     // sempre chega quando o dedo saiu do botão.
     const soltar = (ev) => {
         if (arrastou) return;   // arrastar não é tocar
-        if (ev && dedo !== null && ev.pointerId !== dedo) return;
+        if (ev && devFabDedo !== null && ev.pointerId !== devFabDedo) return;
         capturar();
     };
     btn.addEventListener('pointerup', soltar);
