@@ -1148,6 +1148,9 @@ const antesDoDeploy = await page.evaluate(async (isca) => {
 diz('antes do deploy: há tile guardado E a isca de versão anterior no lugar',
   antesDoDeploy.tiles > 0 && antesDoDeploy.nomes.includes(ISCA), JSON.stringify(antesDoDeploy));
 
+// Marca o DOCUMENTO de antes do deploy: a troca de controller o RECARREGA, e a
+// seção seguinte só pode começar no documento NOVO (ver abaixo).
+await page.evaluate(() => { window.__docDeAntesDoDeploy = true; });
 await page.evaluate(async () => {
   const reg = await navigator.serviceWorker.register('/service-worker.js?deploy=2');
   const pular = (w) => {
@@ -1187,8 +1190,15 @@ diz('e o cache do MAPA sobreviveu INTEIRO ao deploy',
 // que promete). Espere ela assentar e devolva o estado que a seção seguinte
 // precisa — sem isto o `offlineVarrer()` de lá roda com fila vazia e a
 // asserção "o cache ficou vazio" passa por vácuo.
+//
+// E a espera é pelo documento NOVO, não por "há um documento carregado": a
+// faxina (que o laço acima vê) roda no `activate`, e a recarga vem DEPOIS dela.
+// Esperando só o `load`, o 8b às vezes começava no documento VELHO e a recarga
+// caía no meio dele — MEDIDO numa rodada: "dlogCapturar is not defined", o
+// `evaluate` rodando na página nova ainda sem o app (auditoria de 2026-09-26).
 await page.waitForLoadState('load').catch(() => {});
-await esperarNaPagina(page, () => typeof offlineVarrer === 'function', 20000);
+await esperarNaPagina(page, () => !window.__docDeAntesDoDeploy && document.readyState === 'complete'
+  && typeof offlineVarrer === 'function', 20000);
 await page.evaluate(() => { AppState.preferences.offlineDisponivel = true; }).catch(() => {});
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
 
