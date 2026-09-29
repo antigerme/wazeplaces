@@ -1825,6 +1825,46 @@ function fotoDoLightboxNaTela() {
     return !!(img && img.complete && img.naturalWidth > 0);
 }
 
+// Pra onde o foco volta quando a foto ou o mapa AMPLIADOS fecham (Esc, ✕, ↓,
+// arrastar, voltar). Caía no <body>, e quem usa teclado ou leitor de tela
+// recomeçava do topo da página — o Filtros, de controle, devolvia ao botão que
+// o abriu (auditoria de 2026-09-26). A régua é a do `devolverFoco` dos modais:
+// quem ABRIU, se ainda está na tela; senão o mesmo lugar no card da FRENTE (a
+// fila pode ter andado: aprovar e fechar avança o card); senão a reserva dos
+// modais. Com um modal aberto por cima, o foco é dele e fica onde está.
+function devolverFocoDaAmpliacao(quem, noCard) {
+    if (topOpenModal()) return;
+    const card = cardDaFrente();
+    const candidatos = [quem, ...(card ? noCard.map((s) => card.querySelector(s)) : [])];
+    for (const el of candidatos) {
+        if (!el || el === document.body || dentroDeCamada(el) || !focavelNaTela(el)) continue;
+        try { el.focus({ preventScroll: true }); } catch (e) { continue; }
+        if (document.activeElement === el) return;
+    }
+    devolverFoco(null);
+}
+
+// O foco não pode CAIR no <body> com a foto ampliada aberta: ela é
+// `aria-modal`, e o Tab recomeçaria do topo da página, atrás da camada.
+// Quando o controle com o foco some ou trava — a edição do nome fechando, o
+// "Aprovar" virando lixeira travada na janela —, o foco vai pra pílula do nome
+// e, travada ou ausente, pro ✕ do lightbox, que é onde ele nasce ao abrir.
+// Quem já está num controle vivo da camada (ou no Desfazer, que entra na volta
+// do Tab dela) não é mexido.
+function manterFocoNoLightbox() {
+    if (!Lightbox.isOpen()) return;
+    const lb = document.getElementById('imageLightbox');
+    const atual = document.activeElement;
+    if (atual && atual !== document.body && focavelNaTela(atual)
+        && (lb.contains(atual) || (atual.closest && atual.closest('#undoContainer')))) return;
+    for (const id of ['lightboxNomeBtn', 'lightboxClose']) {
+        const el = document.getElementById(id);
+        if (!focavelNaTela(el)) continue;
+        try { el.focus({ preventScroll: true }); } catch (e) { continue; }
+        if (document.activeElement === el) return;
+    }
+}
+
 const Lightbox = {
     urls: [],
     idx: 0,
@@ -1857,6 +1897,9 @@ const Lightbox = {
         this.newIdx = (newImageIdx !== undefined && newImageIdx !== null) ? newImageIdx : -1;
         this.eDenuncia = !!eDenuncia;
         this.placeName = placeName || '';
+        // Quem abriu (a foto do card, que tem `tabindex="-1"` pra isso): é pra
+        // ela que o foco volta no fechamento (ver `devolverFocoDaAmpliacao`).
+        this._quemAbriu = document.activeElement;
         CamadaVoltar.empilhar();
         document.getElementById('imageLightbox').classList.remove('hidden');
         document.body.style.overflow = 'hidden';
@@ -1884,6 +1927,10 @@ const Lightbox = {
         if (!topOpenModal()) document.body.style.overflow = '';
         document.getElementById('lightboxImage').removeAttribute('src');
         this.resetZoom();
+        // DEPOIS do avanço: se o card andou, o foco vai pro card NOVO.
+        const quem = this._quemAbriu;
+        this._quemAbriu = null;
+        devolverFocoDaAmpliacao(quem, ['.card-image', '.card-map']);
     },
     prev() {
         if (this.urls.length < 2) return;
@@ -1993,8 +2040,14 @@ const Lightbox = {
         if (ms) count.title = new Date(ms).toLocaleString(i18nLocale());
         else count.removeAttribute('title');
         badge.textContent = this.eDenuncia ? '🚩' : '✨';
-        badge.setAttribute('data-i18n-title', this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
-        badge.title = t(this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title');
+        const chaveSelo = this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title';
+        badge.setAttribute('data-i18n-title', chaveSelo);
+        badge.title = t(chaveSelo);
+        // O NOME que o leitor de tela ouve: sem ele o selo chegava como o emoji
+        // ("brilhos", "bandeira") colado no texto da pílula ao lado (auditoria de
+        // 2026-09-26). `role="img"` está no HTML; o nome é o mesmo do `title`.
+        badge.setAttribute('data-i18n-aria', chaveSelo);
+        badge.setAttribute('aria-label', t(chaveSelo));
         badge.classList.toggle('hidden', this.idx !== this.newIdx);
         // No treino as duas ações de foto NÃO existem: elas escrevem no mapa e
         // não têm ensaio possível. Some em vez de desabilitar — botão morto com
@@ -2046,12 +2099,19 @@ const Lightbox = {
             const atual = i === this.idx;
             b.classList.toggle('atual', atual);
             b.setAttribute('aria-current', atual ? 'true' : 'false');
-            b.setAttribute('aria-label', t('lightbox.strip.item', { i: i + 1, n: this.urls.length }));
             // O selo vai junto: sem ele a tira mostra N fotos iguais e esconde
-            // qual delas É o pedido — que é a única coisa que importa aqui.
+            // qual delas É o pedido — que é a única coisa que importa aqui. E
+            // vai no NOME também: o selo desenhado é `aria-hidden`, e quem usa
+            // leitor de tela ouvia "Ver foto 2 de 3" nas três sem saber qual era
+            // a proposta (auditoria de 2026-09-26). O termo é o do selo grande.
+            const comSelo = i === this.newIdx && this.newIdx >= 0;
+            b.setAttribute('aria-label', comSelo
+                ? t('lightbox.strip.itemSelo', { i: i + 1, n: this.urls.length,
+                    selo: t(this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title') })
+                : t('lightbox.strip.item', { i: i + 1, n: this.urls.length }));
             const velho = b.querySelector('.lb-mini-selo');
             if (velho) velho.remove();
-            if (i === this.newIdx && this.newIdx >= 0) {
+            if (comSelo) {
                 const selo = document.createElement('span');
                 selo.className = 'lb-mini-selo';
                 selo.setAttribute('aria-hidden', 'true');
@@ -2643,6 +2703,8 @@ function pedirExclusaoDaFoto() {
             Lightbox.removerFoto(alvo.id, place);
             if (AppState.currentPlace === place) showCurrentPlace();
         });
+        // A lixeira com o foco virou spinner (`disabled`): o foco fica na camada.
+        manterFocoNoLightbox();
         return;
     }
 
@@ -2682,6 +2744,8 @@ function pedirExclusaoDaFoto() {
     exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.photoDeleted'), () => exclusaoPendente && exclusaoPendente.desfazer());
+    // A lixeira com o foco travou (ou sumiu com a foto): o foco fica na camada.
+    manterFocoNoLightbox();
 }
 
 // ── Aprovar a foto pendente ───────────────────────────────────────────────
@@ -2814,6 +2878,8 @@ function aprovarFotoAtual() {
             estadoAprovando(false);
             if (valeu) Lightbox.marcarComoAprovada(alvo);
         });
+        // O "Aprovar" com o foco virou spinner (`disabled`): o foco fica na camada.
+        manterFocoNoLightbox();
         return;
     }
 
@@ -2844,6 +2910,8 @@ function aprovarFotoAtual() {
     aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer());
+    // O "Aprovar" com o foco virou lixeira travada: o foco fica na camada.
+    manterFocoNoLightbox();
 }
 
 // ── Renomear o local, do lightbox ──────────────────────────────────────────
@@ -2948,9 +3016,11 @@ function editandoNome() {
 
 // A pessoa SAI da edição do nome com a foto ainda aberta: o ✕, o Esc do campo
 // e os passos pra trás de `recuarNaFoto`. É desistir da edição, não da foto —
-// que segue na tela como a prova do nome.
+// que segue na tela como a prova do nome. O campo e o ✓/✕ somem, e o foco
+// (que estava num deles) volta pra pílula do nome em vez de cair no <body>.
 function sairDaEdicaoNome() {
     fecharEdicaoNome();
+    manterFocoNoLightbox();
 }
 
 // Um passo pra TRÁS na foto ampliada: o Esc e o ↓ (com o foco fora do campo),
@@ -2982,7 +3052,7 @@ function confirmarRenomear() {
     const novo = inp ? inp.value.trim() : '';
     const place = Lightbox.place;
     const antigo = String(place.name || '').trim();
-    if (!novo || novo === antigo) { fecharEdicaoNome(); return; }
+    if (!novo || novo === antigo) { sairDaEdicaoNome(); return; }
 
     // As três escritas mexem no mesmo local: quem chega depois tem que ver o
     // resultado de quem chegou antes.
@@ -2995,7 +3065,9 @@ function confirmarRenomear() {
 
     const alvo = { place, antigo, novo };
     const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
-    if (semJanela) { enviarRenomeacao(alvo); return; }
+    // O ✓ que tinha o foco sumiu com a edição: o foco fica na camada (a pílula,
+    // ou o ✕ se ela travou na janela do Desfazer).
+    if (semJanela) { enviarRenomeacao(alvo); manterFocoNoLightbox(); return; }
 
     let saiu = false;
     const enviar = () => {
@@ -3022,6 +3094,7 @@ function confirmarRenomear() {
     renomeacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.renamed', { nome: novo }), () => renomeacaoPendente && renomeacaoPendente.desfazer());
+    manterFocoNoLightbox();
 }
 
 // O nome vive em três lugares e os três têm que andar juntos, senão o card diz
@@ -8901,6 +8974,8 @@ const MapaLightbox = {
         this._inicial = { centro: this.centro.slice(), z: this.z };
         this._tiles.clear();
         document.getElementById('mapaLbTiles').textContent = '';
+        // Quem abriu (o mapa do card, que é focável): o foco volta pra ele.
+        this._quemAbriu = document.activeElement;
         CamadaVoltar.empilhar();
         el.classList.remove('hidden');
         document.body.style.overflow = 'hidden';
@@ -8918,6 +8993,11 @@ const MapaLightbox = {
         // sem isso sobra entrada morta e o próximo voltar não faz nada, a
         // pessoa aperta de novo e sai do app (a mesma regra do lightbox).
         if (!viaHistorico) CamadaVoltar.consumir();
+        // O foco não cai no <body>: volta pro mapa do card (ver
+        // `devolverFocoDaAmpliacao`).
+        const quem = this._quemAbriu;
+        this._quemAbriu = null;
+        devolverFocoDaAmpliacao(quem, ['.card-map', '.card-image']);
     },
 
     // Redesenha a grade. Tiles já baixados são REAPROVEITADOS (mapa por chave
@@ -15687,6 +15767,9 @@ function desfazerPeloTeclado() {
 function removeUndoBanner() {
     const container = document.getElementById('undoContainer');
     if (container) container.innerHTML = '';
+    // O "Desfazer" entra na volta do Tab da foto ampliada: se o foco estava
+    // nele, sumir com o banner o jogaria no <body>, fora da camada `aria-modal`.
+    manterFocoNoLightbox();
 }
 
 // UM indicador para os dois estados, e não dois: eles disputam o mesmo canto e

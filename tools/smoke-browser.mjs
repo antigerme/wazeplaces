@@ -3914,6 +3914,181 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── O FOCO não cai no <body> nas camadas de ampliar (auditoria de 2026-09-26) ─
+//
+// Fechar a foto ou o mapa (Esc, ✕, ↓) e sair da edição do nome com a foto
+// aberta jogavam o foco no <body>: quem usa teclado ou leitor de tela
+// recomeçava do topo da página (e, com a foto aberta, fora da camada
+// `aria-modal`). O CONTROLE é o Filtros, que sempre devolveu o foco ao botão
+// que o abriu: sem ele, "o foco não está no <body>" passaria também com a
+// medida lendo o elemento errado. E o ✨ e a miniatura da proposta passaram a
+// ter NOME pro leitor de tela (antes: o emoji, e "Ver foto 2 de 3" em todas).
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  // Cada rota com a FORMA que o app espera: abrir o Filtros (o controle) pede
+  // países, e uma resposta genérica ali vira erro de JS na página.
+  await page.route('**/api/**', (route) => {
+    const nome = route.request().url().split('/api/')[1].split('?')[0];
+    const corpo = nome === 'lista-paises' ? { success: true, countries: [] }
+      : nome === 'lista-estados' ? { success: true, states: [] }
+        : nome === 'perfil' ? { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false } }
+          : { success: true, places: [], hasMore: false, total: 0 };
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(corpo) });
+  });
+  await presencaViva(page);   // registrada DEPOIS: a última rota que casa é a que responde
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const FOTO_PL = {
+    venueID: 'v-foco', updateRequestID: 'pend-01', name: 'Padaria Pão Quente', categories: ['BAKERY'],
+    address: 'Rua X, 1', updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO', createdBy: 'wazer',
+    localAprovado: true, lat: -12.9, lon: -38.3, mapa: null, changes: [],
+    imageUrls: [`${foto}#pend-01`, `${foto}#aprovada-02`], approvedImageIds: ['aprovada-02'],
+  };
+  const MAPA_PL = { ...FOTO_PL, venueID: 'v-foco-mapa', updateRequestID: 'u-mapa', updateTypeKey: 'UPDATE',
+    reqType: 'REQUEST', purType: 'DETAILS_UPDATE', imageUrls: [], approvedImageIds: [],
+    mapa: { centro: [-12.9, -38.3], proposto: null, movidoM: null, entradas: [] } };
+  const montar = async (pl, { semDesfazer = false } = {}) => {
+    await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); if (MapaLightbox.isOpen()) MapaLightbox.close(); });
+    await page.waitForTimeout(150);   // fechar e abrir no mesmo tique é o gotcha #65
+    await page.evaluate(({ p0, semDesfazer: sem }) => {
+      setLang('pt'); applyI18n();
+      API.setSession('tok-smoke');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.preferences.undoGateSeen = true;
+      // Sem Desfazer a ação sai na hora: o `canDisableUndo()` exige a cota, e o
+      // modo dev a dispensa (a mesma montagem do bloco da fila de saída).
+      AppState.preferences.undoEnabled = !sem;
+      AppState.devMode = { unlocked: sem, active: sem };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('noMoreCards').classList.add('hidden');
+      document.getElementById('filtersBtn').classList.remove('hidden');
+      showLoading(false);
+      const p = JSON.parse(JSON.stringify(p0));
+      AppState.queue = [p]; AppState.currentPlace = p;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+    }, { p0: pl, semDesfazer });
+    await assentar(page);
+  };
+  // Onde está o foco, e se ele está NO LUGAR CERTO: o id, a classe do card, e
+  // se o elemento está na tela (um foco num elemento escondido é foco perdido).
+  const foco = () => page.evaluate(() => {
+    const a = document.activeElement;
+    const card = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+    return { id: a && a.id, body: a === document.body, visivel: !!(a && a.getClientRects().length),
+      fotoDoCard: !!(card && a === card.querySelector('.card-image')),
+      mapaDoCard: !!(card && a === card.querySelector('.card-map')),
+      naFoto: !!(a && a.closest && a.closest('#imageLightbox')) };
+  });
+  // CONTROLE: o Filtros, pelo teclado, devolve o foco ao botão que o abriu.
+  await montar(FOTO_PL);
+  await page.focus('#filtersBtn'); await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+  await page.keyboard.press('Escape'); await page.waitForTimeout(250);
+  const f0 = await foco();
+  checa(f0.id === 'filtersBtn', 'foco: CONTROLE — o Filtros não devolveu o foco ao botão (a medida estaria cega)', JSON.stringify(f0));
+
+  // A foto: aberta pelo toque na foto do card, fechada por Esc, ↓ e ✕.
+  for (const [nome, fechar] of [
+    ['Esc', () => page.keyboard.press('Escape')],
+    ['↓', () => page.keyboard.press('ArrowDown')],
+    ['✕', () => page.click('#lightboxClose')],
+  ]) {
+    await montar(FOTO_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await page.waitForTimeout(350);
+    checa(await page.evaluate(() => Lightbox.isOpen()), `foco/foto ${nome}: PRÉ-CONDIÇÃO — a foto não abriu`);
+    await fechar(); await page.waitForTimeout(300);
+    const f = await foco();
+    checa(!f.body && f.visivel && f.fotoDoCard,
+      `foco/foto: fechar pelo ${nome} não devolveu o foco à foto do card`, JSON.stringify(f));
+  }
+  // O mapa: aberto pelo toque no mapa do card, fechado por Esc e ✕.
+  for (const [nome, fechar] of [['Esc', () => page.keyboard.press('Escape')], ['✕', () => page.click('#mapaLbClose')]]) {
+    await montar(MAPA_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-map');
+    await page.waitForTimeout(400);
+    checa(await page.evaluate(() => MapaLightbox.isOpen()), `foco/mapa ${nome}: PRÉ-CONDIÇÃO — o mapa não abriu`);
+    await fechar(); await page.waitForTimeout(300);
+    const f = await foco();
+    checa(!f.body && f.visivel && f.mapaDoCard,
+      `foco/mapa: fechar pelo ${nome} não devolveu o foco ao mapa do card`, JSON.stringify(f));
+  }
+  // Sair da edição do nome, pelo teclado: o foco volta pra PÍLULA.
+  for (const [nome, sair] of [
+    ['Esc no campo', () => page.keyboard.press('Escape')],
+    ['✕ da edição (Enter)', async () => { await page.focus('#lightboxNomeCancel'); await page.keyboard.press('Enter'); }],
+  ]) {
+    await montar(FOTO_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await page.waitForTimeout(350);
+    await page.focus('#lightboxNomeBtn'); await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+    const e0 = await foco();
+    checa(e0.id === 'lightboxNomeInput', `foco/edição ${nome}: PRÉ-CONDIÇÃO — a edição não abriu com o foco no campo`, JSON.stringify(e0));
+    await sair(); await page.waitForTimeout(200);
+    const f = await foco();
+    checa(f.id === 'lightboxNomeBtn', `foco/edição: sair pelo ${nome} não devolveu o foco à pílula do nome`, JSON.stringify(f));
+  }
+  // Aprovar e salvar o nome pelo teclado: o botão com o foco some ou trava, e o
+  // foco fica NA camada (a pílula trava na janela: vai pro ✕).
+  for (const [nome, agir, semDesfazer] of [
+    ['aprovar', async () => { await page.focus('#lightboxApprove'); await page.keyboard.press('Enter'); }, false],
+    // SEM Desfazer não há banner (é ele que, sumindo, também devolve o foco): o
+    // "Aprovar" vira spinner `disabled`, e é a ação que mantém o foco na camada.
+    ['aprovar sem Desfazer', async () => { await page.focus('#lightboxApprove'); await page.keyboard.press('Enter'); }, true],
+    ['salvar o nome', async () => {
+      await page.focus('#lightboxNomeBtn'); await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+      await page.keyboard.type(' do Zé'); await page.keyboard.press('Enter');
+    }, false],
+  ]) {
+    await montar(FOTO_PL, { semDesfazer });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await page.waitForTimeout(350);
+    await agir(); await page.waitForTimeout(250);
+    const f = await foco();
+    checa(!f.body && f.visivel && f.naFoto, `foco/${nome}: o foco saiu da foto aberta`, JSON.stringify(f));
+    // desfaz, pra nada sair pela rede e o bloco seguinte começar limpo
+    await page.evaluate(() => { const u = document.getElementById('undoBtn'); if (u) u.click(); });
+    await page.waitForTimeout(150);
+  }
+  // O ✨ e a miniatura da proposta com NOME pro leitor de tela.
+  await montar(FOTO_PL);
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+  await page.waitForTimeout(350);
+  const nomes = await page.evaluate(() => {
+    const b = document.getElementById('lightboxNewBadge');
+    const minis = [...document.querySelectorAll('#lightboxStrip .lb-mini')].map((m) => m.getAttribute('aria-label'));
+    return { visivel: !b.classList.contains('hidden'), role: b.getAttribute('role'), nome: b.getAttribute('aria-label'),
+      titulo: b.title, minis, newIdx: Lightbox.newIdx };
+  });
+  checa(nomes.visivel && nomes.role === 'img' && !!nomes.nome && nomes.nome === nomes.titulo,
+    'foco: o ✨ chega ao leitor de tela sem nome (só o emoji)', JSON.stringify(nomes));
+  checa(nomes.minis.length === 2 && nomes.minis[nomes.newIdx].includes(nomes.nome)
+    && nomes.minis.filter((m) => m.includes(nomes.nome)).length === 1,
+    'foco: a miniatura da proposta não diz que é a proposta (ou todas dizem)', JSON.stringify(nomes.minis));
+  // Na DENÚNCIA o selo é 🚩 e o nome muda junto — o do HTML é o do ✨.
+  await montar({ ...FOTO_PL, venueID: 'v-foco-flag', updateRequestID: 'u-flag', updateTypeKey: 'FLAG',
+    reqType: 'REQUEST', reqSubType: 'FLAG', purType: 'FLAGGED_PHOTO', flagSubjectType: 'IMAGE',
+    flagEntityID: 'denunciada-01', imageUrls: [`${foto}#denunciada-01`, `${foto}#aprovada-02`],
+    approvedImageIds: ['denunciada-01', 'aprovada-02'] });
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+  await page.waitForTimeout(350);
+  const flag = await page.evaluate(() => {
+    const b = document.getElementById('lightboxNewBadge');
+    return { txt: b.textContent, nome: b.getAttribute('aria-label'), titulo: b.title,
+      mini: document.querySelector('#lightboxStrip .lb-mini').getAttribute('aria-label') };
+  });
+  checa(flag.txt === '🚩' && flag.nome === flag.titulo && flag.nome !== nomes.nome && flag.mini.includes(flag.nome),
+    'foco: na denúncia o 🚩 segue com o NOME do ✨ (ou a miniatura não diz qual é a denunciada)', JSON.stringify(flag));
+  checa(erros.length === 0, 'foco: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 
 // ── A faixa do carrossel não pode roubar o toque do slide atrás ─────────────
 // Terceira reincidência do gotcha #26. A faixa `.card-image-nav` tem largura
@@ -7163,6 +7338,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + renomeando: o passo pra trás (fundo, arraste pra baixo, Esc e ↓ fora do campo) só sai da edição, com o CONTROLE sem edição fechando a foto`
+  + `, + o foco nas camadas de ampliar (fechar a foto e o mapa por Esc/↓/✕ devolve à foto/mapa do card, sair da edição devolve à pílula, aprovar e salvar mantêm na camada, com e sem Desfazer, e o ✨/🚩 e a miniatura com NOME, com o CONTROLE do Filtros)`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`

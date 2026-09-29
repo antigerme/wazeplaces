@@ -185,7 +185,7 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
   const deps = {
     AppState, Lightbox: L, Treino: { ativo: false }, epocaDaSessao: 0,
     canDisableUndo: () => true, estadoAprovando: () => {}, lixeiraOcupada: () => {},
-    fotoDoLightboxNaTela: () => fotoNaTela,
+    fotoDoLightboxNaTela: () => fotoNaTela, manterFocoNoLightbox: () => log.push('foco'),
     API: { aprovarPedido: async () => { log.push('api:aprovar'); return resposta; },
       excluirFoto: async () => { log.push('api:excluir'); return resposta; }, prepararExclusao: () => {} },
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, contarConquista: () => {},
@@ -574,4 +574,94 @@ test('L9 a pílula do nome: travada na janela, rótulo na edição, viva fora do
   const regra = css.match(/^\.lb-nome:not\(\.editando\) \.lb-nome-btn:disabled \{([^}]*)\}/m);
   assert.ok(regra && /opacity:\s*0\.4/.test(regra[1]) && /grayscale/.test(regra[1]),
     'a pílula travada ficou com cara de viva (sem o esmaecido dos outros botões travados)');
+});
+
+// ── L12: o foco não cai no <body> (auditoria de 2026-09-26) ──────────────────
+// Fechar a foto ou o mapa ampliados (Esc, ✕, ↓) e sair da edição do nome com a
+// foto aberta jogavam o foco no <body>; o Filtros (controle) devolvia ao botão
+// que o abriu. Os dois helpers de verdade, com elementos de mentira.
+function elFoco(nome, { conectado = true, visivel = true, disabled = false, dentro = null } = {}) {
+  return { nome, isConnected: conectado, disabled, getClientRects: () => (visivel ? [1] : []),
+    focus() { if (this.conectado !== false && visivel && !disabled) doc.activeElement = this; },
+    closest: (sel) => (sel === '[role="dialog"]' ? dentro : null), conectado };
+}
+const doc = { activeElement: null, body: { nome: 'BODY' } };
+function helpers({ modal = null, card = null, lbAberto = true, lb = null } = {}) {
+  const log = [];
+  const deps = {
+    document: Object.assign(doc, { getElementById: (id) => (lb && lb[id]) || null }),
+    topOpenModal: () => modal, cardDaFrente: () => card, devolverFoco: () => log.push('reserva'),
+    Lightbox: { isOpen: () => lbAberto },
+  };
+  const nomes = ['focavelNaTela', 'dentroDeCamada', 'devolverFocoDaAmpliacao', 'manterFocoNoLightbox'];
+  const f = new Function(...Object.keys(deps), nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(
+    ...Object.values(deps));
+  return { ...f, log };
+}
+
+test('L12 fechar a foto/o mapa devolve o foco a quem ABRIU, ou ao card da frente, ou à reserva', () => {
+  doc.activeElement = doc.body;
+  const quem = elFoco('foto do card');
+  const h = helpers();
+  h.devolverFocoDaAmpliacao(quem, ['.card-image']);
+  assert.equal(doc.activeElement && doc.activeElement.nome, 'foto do card', 'o foco não voltou pra quem abriu a foto');
+  // Quem abriu SAIU da tela (aprovar e fechar avança o card): vai pro card novo.
+  doc.activeElement = doc.body;
+  const novo = elFoco('foto do card NOVO');
+  const h2 = helpers({ card: { querySelector: (s) => (s === '.card-image' ? novo : null) } });
+  h2.devolverFocoDaAmpliacao(elFoco('velha', { conectado: false }), ['.card-image']);
+  assert.equal(doc.activeElement.nome, 'foto do card NOVO', 'com o card trocado, o foco caiu fora dele');
+  // Nada focável: a reserva dos modais (`devolverFoco`), nunca o <body> calado.
+  doc.activeElement = doc.body;
+  const h3 = helpers({ card: { querySelector: () => null } });
+  h3.devolverFocoDaAmpliacao(null, ['.card-image']);
+  assert.deepEqual(h3.log, ['reserva'], 'sem ninguém pra receber, não passou pela reserva');
+  // Um modal por cima é dono do foco: nada se mexe.
+  doc.activeElement = doc.body;
+  const h4 = helpers({ modal: {} });
+  h4.devolverFocoDaAmpliacao(elFoco('foto do card'), ['.card-image']);
+  assert.equal(doc.activeElement, doc.body, 'com um modal aberto por cima, o foco foi parar atrás dele');
+});
+
+test('L12 com a foto aberta, o foco que se perde volta pra pílula do nome — ou pro ✕, com ela travada', () => {
+  const lbEl = { contains: (x) => x && x.dentroDoLb === true };
+  const pilula = Object.assign(elFoco('pílula'), { dentroDoLb: true });
+  const fechar = Object.assign(elFoco('✕'), { dentroDoLb: true });
+  doc.activeElement = doc.body;
+  helpers({ lb: { imageLightbox: lbEl, lightboxNomeBtn: pilula, lightboxClose: fechar } }).manterFocoNoLightbox();
+  assert.equal(doc.activeElement.nome, 'pílula', 'o foco perdido ficou no <body> com a foto aberta');
+  doc.activeElement = doc.body;
+  const travada = Object.assign(elFoco('pílula', { disabled: true }), { dentroDoLb: true });
+  helpers({ lb: { imageLightbox: lbEl, lightboxNomeBtn: travada, lightboxClose: fechar } }).manterFocoNoLightbox();
+  assert.equal(doc.activeElement.nome, '✕', 'com a pílula travada o foco não foi pro ✕');
+  // CONTROLE: quem já está num controle VIVO da camada não é mexido.
+  const outro = Object.assign(elFoco('‹'), { dentroDoLb: true });
+  doc.activeElement = outro;
+  helpers({ lb: { imageLightbox: lbEl, lightboxNomeBtn: pilula, lightboxClose: fechar } }).manterFocoNoLightbox();
+  assert.equal(doc.activeElement.nome, '‹', 'tirou o foco de um controle vivo da camada');
+  // E com a foto fechada, nada.
+  doc.activeElement = doc.body;
+  helpers({ lbAberto: false, lb: { imageLightbox: lbEl, lightboxNomeBtn: pilula, lightboxClose: fechar } }).manterFocoNoLightbox();
+  assert.equal(doc.activeElement, doc.body);
+});
+
+test('L12 os caminhos: fechar a foto e o mapa devolvem o foco, e sair da edição o mantém na camada', () => {
+  const metodo = (obj, nome) => {
+    const ini = APP_SEM.indexOf(`const ${obj} = {`);
+    const m = new RegExp('^    ' + nome + '\\(', 'm').exec(APP_SEM.slice(ini));
+    assert.ok(m, `${obj}.${nome} sumiu`);
+    const i = ini + m.index;
+    return APP_SEM.slice(i, fechar(APP_SEM, APP_SEM.indexOf(')', i)));
+  };
+  assert.match(metodo('Lightbox', 'open'), /this\._quemAbriu = document\.activeElement;/);
+  assert.match(metodo('Lightbox', 'close'), /devolverFocoDaAmpliacao\(quem, \['\.card-image', '\.card-map'\]\)/,
+    'fechar a foto deixou de devolver o foco a quem abriu');
+  assert.match(metodo('MapaLightbox', 'open'), /this\._quemAbriu = document\.activeElement;/);
+  assert.match(metodo('MapaLightbox', 'close'), /devolverFocoDaAmpliacao\(quem, \['\.card-map', '\.card-image'\]\)/,
+    'fechar o mapa deixou de devolver o foco a quem abriu');
+  assert.match(fatiar('sairDaEdicaoNome'), /fecharEdicaoNome\(\);\s*manterFocoNoLightbox\(\);/,
+    'sair da edição deixou de manter o foco na camada');
+  // A foto do card pode RECEBER o foco de volta sem entrar no Tab.
+  const html = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  assert.match(html, /<img class="card-image [^>]*tabindex="-1"/, 'a foto do card deixou de poder receber o foco de volta');
 });
