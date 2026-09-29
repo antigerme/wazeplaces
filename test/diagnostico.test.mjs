@@ -1040,7 +1040,7 @@ test('código: o enxugamento roda DEPOIS do cacheVsRede, que precisa do corpo pr
   const chamadas = corpo.match(/^\s+await diagCodigoEnxuto\(codigo, hash\);$/gm) || [];
   assert.equal(chamadas.length, 1, 'o relatório tem que enxugar o `codigo` exatamente uma vez');
   const iEnxuto = corpo.search(/^\s+await diagCodigoEnxuto\(codigo, hash\);$/m);
-  const iComparar = corpo.indexOf('cacheVsRede[u] = { aparelho: ha, servidor: hb');
+  const iComparar = corpo.indexOf('const comparados = await Promise.all(urlsComparadas.map(comparar));');
   assert.ok(iComparar > 0 && iEnxuto > iComparar, 'enxugar ANTES de comparar deixa todo arquivo "sem corpo local"');
 });
 
@@ -1048,9 +1048,8 @@ test('código: o cacheVsRede compara SÓ o que entrou no `codigo` — a fonte e 
   const corpo = fatiarFn(APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), 'diagCorpo');
   const i = corpo.indexOf('const cacheVsRede = {};');
   assert.ok(i > 0, 'sumiu o cacheVsRede');
-  const laco = /for \(const u of ([^)]+\)?)\) \{/.exec(corpo.slice(i));
-  assert.ok(laco, 'sumiu o laço do cacheVsRede');
-  assert.equal(laco[1], 'Object.keys(codigo)', 'o cacheVsRede voltou a comparar o que o coletor pula de propósito');
+  assert.match(corpo.slice(i), /const urlsComparadas = Object\.keys\(codigo\);/,
+    'o cacheVsRede voltou a comparar o que o coletor pula de propósito');
 });
 
 test('desligar o modo dev e "Sair" levam o CORPO das chamadas (texto de conversa), não só a resposta', () => {
@@ -1259,7 +1258,7 @@ test('código: o `codigo` é só o código nosso — sem a leitura do relatório
   assert.deepEqual(diagUrlsDoCodigo(daPagina.filter((u) => !u.includes('diag-rede')), meu, meu + '/'),
     diagUrlsDoCodigo(daPagina, meu, meu + '/'));
   // E o relatório usa esta lista (e não outra montada à parte).
-  assert.match(fatiarFn(APP, 'diagCorpo'), /for \(const u of diagUrlsDoCodigo\(recursos\.map\(\(r\) => r\.url\), meu, location\.href\)\)/,
+  assert.match(fatiarFn(APP, 'diagCorpo'), /const urlsDoCodigo = diagUrlsDoCodigo\(recursos\.map\(\(r\) => r\.url\), meu, location\.href\);/,
     'o `codigo` deixou de sair do `diagUrlsDoCodigo`');
 });
 
@@ -1378,4 +1377,54 @@ test('toqueInterceptado: o aviso passageiro (#notifyStack) por cima não acusa �
   const alertas = (g) => sentinelas({ geometria: [g] }).filter((a) => a.chave === 'toqueInterceptado');
   assert.equal(alertas(botao({ sobAviso: true })).length, 0, 'o toast por cima dos botões voltou a acusar "toqueInterceptado"');
   assert.equal(alertas(botao({})).length, 1, 'CONTROLE: um elemento de verdade por cima do ✕ deixou de acusar');
+});
+
+// ── D15 (auditoria de 2026-09-26): o relatório com a rede PENDURADA ──────────
+// As leituras eram em SÉRIE, cada uma com o seu teto de 4 s: com a rede
+// pendurada o arquivo levava ~48 s (12 leituras), com o botão em "Gerando…" sem
+// sinal. Agora andam em PARALELO, dentro de um ORÇAMENTO do relatório, e o que
+// não chegou sai marcado. O tempo de verdade é medido no smoke do offline (8c).
+test('D15: cada leitura do relatório respeita o ORÇAMENTO — esgotado, nem sai; e o que não chegou é "sem resposta"', async () => {
+  const pedidos = [], tetos = [];
+  let agora = 1_000_000;
+  const mk = () => new Function('fetch', 'AbortSignal', 'AbortController', 'setTimeout', 'Date', 'DIAG_FETCH_TETO_MS',
+    fatiarFn(semCom, 'diagFetch') + '\n' + fatiarFn(semCom, 'diagFalhaDaLeitura') + '\nreturn { diagFetch, diagFalhaDaLeitura };')(
+    async (url) => { pedidos.push(url); return { ok: true }; },
+    { timeout: (ms) => { tetos.push(ms); return {}; } }, class {}, () => 0, { now: () => agora }, 4000);
+  const { diagFetch, diagFalhaDaLeitura } = mk();
+  await diagFetch('/a', {}, agora + 10000);
+  assert.deepEqual(tetos, [4000], 'com orçamento de sobra, o teto é o da leitura');
+  await diagFetch('/b', {}, agora + 1500);
+  assert.deepEqual(tetos, [4000, 1500], 'o teto não encolheu pro que resta do orçamento');
+  let erro = null;
+  try { await diagFetch('/c', {}, agora - 1); } catch (e) { erro = e; }
+  assert.ok(erro && erro.name === 'TimeoutError', 'com o orçamento esgotado a leitura não falhou como "sem resposta"');
+  assert.deepEqual(pedidos, ['/a', '/b'], 'com o orçamento esgotado a leitura ainda saiu pra rede');
+  // Sem orçamento (quem chama sem prazo), o teto de sempre.
+  await diagFetch('/d');
+  assert.equal(tetos.at(-1), 4000);
+  // O que não chegou (teto, orçamento, aborto) é "sem resposta" — não "o arquivo falhou".
+  assert.deepEqual(diagFalhaDaLeitura(erro), { erro: 'sem resposta', semResposta: true });
+  assert.deepEqual(diagFalhaDaLeitura(Object.assign(new Error('x'), { name: 'AbortError' })), { erro: 'sem resposta', semResposta: true });
+  assert.deepEqual(diagFalhaDaLeitura(new TypeError('Failed to fetch')), { erro: 'Failed to fetch' },
+    'CONTROLE: a falha de rede comum virou "sem resposta"');
+});
+
+test('D15: as leituras do relatório andam em PARALELO, com o prazo do relatório', () => {
+  const corpo = fatiarFn(APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), 'diagCorpo');
+  assert.match(corpo, /const prazo = inicioDaColeta \+ DIAG_ORCAMENTO_MS;/, 'o relatório não tem orçamento');
+  assert.match(corpo, /const lidos = await Promise\.all\(urlsDoCodigo\.map\(\(u\) => texto\(u\)\)\);/,
+    'as leituras do código voltaram a ser em SÉRIE (48 s com a rede pendurada)');
+  assert.match(corpo, /const comparados = await Promise\.all\(urlsComparadas\.map\(comparar\)\);/,
+    'as releituras do servidor voltaram a ser em SÉRIE');
+  assert.match(corpo, /diagFetch\(url, \{ cache: 'force-cache' \}, prazo\)/, 'a leitura do aparelho saiu do orçamento');
+  // O relógio do servidor sai JUNTO das releituras: a promessa nasce antes delas.
+  const iRelogio = corpo.indexOf('const relogioPromessa = (async () => {');
+  const iCompara = corpo.indexOf('const comparados = await Promise.all(');
+  assert.ok(iRelogio > 0 && iRelogio < iCompara, 'o relógio do servidor voltou a esperar as releituras');
+  assert.match(corpo, /semResposta: \[\.\.\.Object\.entries\(codigo\)/, 'o relatório não diz o que ficou sem resposta');
+  // A `coleta` é seção nova: quem lê um relatório sem ela precisa saber que é
+  // IDADE, não defeito.
+  const v = Number((APP.match(/const DIAG_VERSAO = (\d+);/) || [])[1]);
+  assert.ok(v >= 11, `a versão do diagnóstico não subiu com a coleta (${v})`);
 });

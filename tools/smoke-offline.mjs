@@ -1390,6 +1390,48 @@ diz('com o dev ligado o teto sobe e nada se perde',
   recComDev.n > 300 && recComDev.encheu === false, JSON.stringify(recComDev));
 await ctxR.close();
 
+secao('8c. O DIAGNÓSTICO COM A REDE PENDURADA sai no orçamento — e diz o que não chegou');
+// Auditoria de 2026-09-26 (D15): as leituras do relatório eram em SÉRIE, cada
+// uma com o seu teto de 4 s. Com a rede pendurada (portal cativo, sinal indo e
+// voltando), o arquivo levava ~48 s pra sair, com o botão em "Gerando…" sem
+// sinal nenhum. Contexto próprio, sem worker; a rede de mesma origem (fora a
+// API) é PENDURADA depois de a página abrir — nunca responde.
+const ctxL = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: true });
+const pgL = await ctxL.newPage();
+pgL.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+await pgL.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+await esperarNaPagina(pgL, () => typeof baixarDiagnostico === 'function', 20000, 100);
+const dirL = mkdtempSync(join(tmpdir(), 'diag-8c-'));
+const medirRelatorio = async (nome) => {
+  const t0 = Date.now();
+  const [dl] = await Promise.all([pgL.waitForEvent('download', { timeout: 90000 }), pgL.evaluate(() => baixarDiagnostico())]);
+  const arq = join(dirL, nome + '.zip');
+  await dl.saveAs(arq);
+  const { dados } = lerDiagnostico(arq);
+  return { s: Math.round((Date.now() - t0) / 100) / 10, coleta: dados.coleta,
+           semResposta: Object.values(dados.codigo || {}).filter((v) => v && v.semResposta).length };
+};
+let relL = null, relPendurado = null, pendurados = 0;
+try {
+  // CONTROLE: com a rede boa, nada fica sem resposta (senão "diz o que não
+  // chegou" passaria marcando tudo, sempre).
+  relL = await medirRelatorio('rede-boa');
+  await ctxL.route((u) => u.origin === new URL(BASE).origin && !u.pathname.startsWith('/api/'), () => { pendurados++; });
+  relPendurado = await medirRelatorio('pendurada');
+} catch (e) {
+  relPendurado = { erro: String((e && e.message) || e).slice(0, 200) };
+} finally {
+  rmSync(dirL, { recursive: true, force: true });
+}
+diz('CONTROLE: com a rede boa, o relatório não marca nada sem resposta',
+  relL?.coleta && relL.coleta.semResposta.length === 0 && relL.semResposta === 0, JSON.stringify(relL));
+diz('com a rede PENDURADA o arquivo sai dentro do orçamento (eram ~48 s)',
+  relPendurado?.s <= 15 && pendurados >= 10, JSON.stringify({ s: relPendurado?.s, pendurados }));
+diz('e diz, no arquivo, o que não chegou',
+  relPendurado?.coleta?.semResposta?.length >= 10 && relPendurado.semResposta >= 10
+  && relPendurado.coleta.orcamentoMs > 0, JSON.stringify(relPendurado?.coleta).slice(0, 300));
+await ctxL.close();
+
 secao('9. ESQUECER PARA a varredura em voo (privacidade)');
 // Enche, e ESQUECE no meio: o download já a caminho não pode pousar depois.
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;

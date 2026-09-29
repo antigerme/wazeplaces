@@ -51,9 +51,12 @@ test('diagnóstico: o "servidor" do cacheVsRede e o relógio pedem com `diag-red
   const semCom = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   const i = semCom.indexOf('async function diagCorpo(');
   const corpo = semCom.slice(i, semCom.indexOf('\nasync function ', i + 10));
-  assert.match(corpo, /diagFetch\(u \+ \(u\.indexOf\('\?'\) === -1 \? '\?' : '&'\) \+ 'diag-rede=1', \{ cache: 'reload' \}\)/,
-    'o lado do servidor do cacheVsRede voltou a passar pelo service worker');
+  assert.match(corpo, /diagFetch\(u \+ \(u\.indexOf\('\?'\) === -1 \? '\?' : '&'\) \+ 'diag-rede=1', \{ cache: 'reload' \}, prazo\)/,
+    'o lado do servidor do cacheVsRede voltou a passar pelo service worker (ou saiu do orçamento)');
   assert.match(corpo, /diagFetch\(meu \+ '\/manifest\.json\?diag-rede=1'/, 'o relógio do servidor pode vir do cache');
   assert.doesNotMatch(corpo, /await fetch\(/, 'leitura do diagnóstico sem teto: rede pendurada trava o "Baixar"');
-  assert.match(semCom, /function diagFetch\(url, opts = \{\}\) \{[\s\S]{0,200}AbortSignal\.timeout\(DIAG_FETCH_TETO_MS\)/);
+  // O teto de cada leitura é o menor entre o dela e o que resta do ORÇAMENTO do
+  // relatório (D15, auditoria de 2026-09-26); roda em test/diagnostico.
+  assert.match(semCom, /function diagFetch\(url, opts = \{\}, prazo = Infinity\) \{\s*const resta = Math\.min\(DIAG_FETCH_TETO_MS, prazo - Date\.now\(\)\);/);
+  assert.match(semCom, /AbortSignal\.timeout\(resta\)/);
 });

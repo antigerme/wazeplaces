@@ -51,7 +51,7 @@ const hora = (t) => {
 const secao = (titulo) => { out(); out('── ' + titulo + ' ' + '─'.repeat(Math.max(3, 60 - titulo.length))); };
 // O MESMO painel diz coisas diferentes (auditoria de 2026-09-26): "tudoLimpo" era
 // também o "Fim da fila" (pulados pendentes) e o "nada tratado nesta fila", e a
-// falha podia ser "sem conexão". A `variante` entrou no relatório v10.
+// falha podia ser "sem conexão". A `variante` entrou no relatório v11.
 const VARIANTES = { limpo: 'tudo limpo de verdade', fimDaFila: 'fim da fila: há pulados pendentes',
   nadaNestaFila: 'nada tratado nesta fila', semConexao: 'sem conexão', falha: 'falha ao carregar' };
 const painelComVariante = (x) => `${x.painel}${x.variante ? ` (${VARIANTES[x.variante] || x.variante})` : ''}`;
@@ -180,6 +180,13 @@ secao('CÓDIGO NO APARELHO');
       + (soBorda(u, v) ? ' — com o mesmo tamanho: é o script que o Cloudflare injeta a cada resposta, que o relatório anterior ao v9 não descontava' : ''));
   }
   if (reais.length) out('ATENÇÃO: o aparelho roda código diferente do servidor — versão velha no cache, ou misturada.');
+  // A COLETA (relatório v11+): o que NÃO respondeu no orçamento do relatório —
+  // rede pendurada dita no arquivo, e não deduzida de um "sem conferir".
+  const co = d.coleta;
+  if (co && Array.isArray(co.semResposta)) {
+    out(`coleta: ${co.ms} ms (orçamento ${co.orcamentoMs} ms) · sem resposta: ${co.semResposta.length}`);
+    if (co.semResposta.length) out(`ATENÇÃO: ${co.semResposta.length} leitura(s) sem resposta no orçamento — rede pendurada na hora do relatório: ${co.semResposta.map(nome).slice(0, 8).join(', ')}${co.semResposta.length > 8 ? '…' : ''}`);
+  }
 }
 
 secao('SERVICE WORKER');

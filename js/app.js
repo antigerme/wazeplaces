@@ -5702,7 +5702,13 @@ function ligarFabDev() {
 // 10: `resumo.falhas` e `rotasQueFalharam` não contam mais o "já tratado"
 // (`already_processed`/`not_found`, que pro app é sucesso); ele vai em
 // `resumo.jaTratadas`. Relatório anterior ao v10 soma os dois em `falhas`.
-const DIAG_VERSAO = 10;
+// 11 (auditoria de 2026-09-26): a `coleta` (quanto o relatório levou, o
+// orçamento e o que ficou `semResposta`); a `variante` do painel na captura e
+// no resumo, e `pulados`/`tratou` no `tela.vazia`; o `sobAviso` na geometria (o
+// aviso passageiro por cima de um botão não é toque interceptado); o toast
+// SENSÍVEL no diário sem o texto; e a hora (`quando`) no alerta do tile
+// guardado que falhou. Aditivo.
+const DIAG_VERSAO = 11;
 
 // O Cloudflare INJETA no HTML, a cada resposta, o script do Bot Fight Mode com
 // token e hora próprios (`window.__CF$cv$params={r:…,t:…,u:…,ut:…}`, antes do
@@ -5997,16 +6003,37 @@ function diagServiceWorker() {
     });
 }
 
-// Toda leitura do diagnóstico tem TETO: a coleta faz umas duas dezenas de
-// pedidos em SÉRIE, e rede pendurada (portal cativo, sinal indo e voltando)
-// deixava o "Baixar diagnóstico" sem resposta nenhuma — justamente na hora em
-// que ele é pedido (auditoria de 2026-09-25). O sinal vale pro corpo também.
+// Toda leitura do diagnóstico tem TETO: rede pendurada (portal cativo, sinal
+// indo e voltando) deixava o "Baixar diagnóstico" sem resposta nenhuma —
+// justamente na hora em que ele é pedido (auditoria de 2026-09-25). O sinal vale
+// pro corpo também.
+//
+// E o relatório inteiro tem um ORÇAMENTO: as leituras eram em SÉRIE, cada uma
+// com o seu teto, e com a rede pendurada o arquivo levava ~48 s pra sair (12
+// leituras × 4 s), com o botão em "Gerando…" sem sinal nenhum (auditoria de
+// 2026-09-26, D15). Agora as leituras andam em PARALELO e nenhuma passa do
+// `prazo` do relatório; o que não chegou até ali sai marcado `semResposta`.
 const DIAG_FETCH_TETO_MS = 4000;
-function diagFetch(url, opts = {}) {
+const DIAG_ORCAMENTO_MS = 10000;
+function diagFetch(url, opts = {}, prazo = Infinity) {
+    const resta = Math.min(DIAG_FETCH_TETO_MS, prazo - Date.now());
+    if (!(resta > 0)) {
+        const e = new Error('sem resposta no orçamento do diagnóstico');
+        e.name = 'TimeoutError';
+        return Promise.reject(e);
+    }
     let sinal;
-    try { sinal = AbortSignal.timeout(DIAG_FETCH_TETO_MS); }
-    catch (e) { const c = new AbortController(); setTimeout(() => c.abort(), DIAG_FETCH_TETO_MS); sinal = c.signal; }
+    try { sinal = AbortSignal.timeout(resta); }
+    catch (e) { const c = new AbortController(); setTimeout(() => c.abort(), resta); sinal = c.signal; }
     return fetch(url, { ...opts, signal: sinal });
+}
+// A leitura que NÃO CHEGOU (teto ou orçamento), distinta da que falhou: é ela
+// que diz "a rede estava pendurada", e não "o arquivo não existe".
+function diagFalhaDaLeitura(e) {
+    const nome = e && e.name;
+    return nome === 'TimeoutError' || nome === 'AbortError'
+        ? { erro: 'sem resposta', semResposta: true }
+        : { erro: String((e && e.message) || e) };
 }
 
 // "Já tratado por outro editor" chega com `success: false`, mas pro app é o
@@ -6052,16 +6079,19 @@ function diagUrlsDoCodigo(urlsDosRecursos, meu, aqui) {
 
 async function diagCorpo() {
     const meu = location.origin;
+    // O ORÇAMENTO do relatório inteiro (ver `DIAG_ORCAMENTO_MS`).
+    const inicioDaColeta = Date.now();
+    const prazo = inicioDaColeta + DIAG_ORCAMENTO_MS;
     // Só recurso da NOSSA origem: de terceiro a resposta é opaca e a leitura
     // ainda gastaria rede. `cache: 'force-cache'` pra pegar o que o aparelho
     // REALMENTE tem — que é a pergunta quando se suspeita de PWA com código
     // velho; buscar da rede mediria o servidor, não o aparelho.
     const texto = async (url) => {
         try {
-            const r = await diagFetch(url, { cache: 'force-cache' });
+            const r = await diagFetch(url, { cache: 'force-cache' }, prazo);
             return { http: r.status, tipo: r.headers.get('content-type'),
                      etag: r.headers.get('etag'), corpo: await r.text() };
-        } catch (e) { return { erro: String((e && e.message) || e) }; }
+        } catch (e) { return diagFalhaDaLeitura(e); }
     };
 
     const ls = {}, ss = {};
@@ -6099,10 +6129,11 @@ async function diagCorpo() {
         .map((r) => ({ url: r.name, tipo: r.initiatorType, ms: Math.round(r.duration),
                        bytes: r.transferSize,
                        doCache: r.transferSize === 0 && r.decodedBodySize > 0 }));
+    // EM PARALELO (ver `DIAG_ORCAMENTO_MS`), e na ordem da lista.
     const codigo = {};
-    for (const u of diagUrlsDoCodigo(recursos.map((r) => r.url), meu, location.href)) {
-        codigo[u] = await texto(u);
-    }
+    const urlsDoCodigo = diagUrlsDoCodigo(recursos.map((r) => r.url), meu, location.href);
+    const lidos = await Promise.all(urlsDoCodigo.map((u) => texto(u)));
+    urlsDoCodigo.forEach((u, i) => { codigo[u] = lidos[i]; });
 
     // ── O que o aparelho tem × o que o servidor tem AGORA ──────────────────
     // Responde de vez a pergunta que sozinha custou horas: "o PWA está rodando
@@ -6123,25 +6154,42 @@ async function diagCorpo() {
     // linhas no relatório real de 2026-09-24, que o leitor contava como arquivo
     // que não deu pra conferir. Assim, "sem corpo local" só sai quando a
     // leitura do arquivo NO APARELHO falhou, que é o caso que importa.
+    // O RELÓGIO do servidor sai JUNTO com as releituras (em paralelo): é mais
+    // uma leitura de rede, e em série ele somava o teto dele ao fim de tudo.
+    const relogioPromessa = (async () => {
+        const relogio = { aparelho: new Date().toISOString(), servidor: null, desvioSeg: null };
+        try {
+            const r = await diagFetch(meu + '/manifest.json?diag-rede=1', { cache: 'no-store', method: 'HEAD' }, prazo);
+            const d = r.headers.get('date');
+            if (d) {
+                relogio.servidor = new Date(d).toISOString();
+                relogio.desvioSeg = Math.round((Date.now() - new Date(d).getTime()) / 1000);
+            }
+        } catch (e) { Object.assign(relogio, diagFalhaDaLeitura(e)); }
+        return relogio;
+    })();
     const cacheVsRede = {};
-    for (const u of Object.keys(codigo)) {
+    const comparar = async (u) => {
         const local = codigo[u] && codigo[u].corpo;
-        if (typeof local !== 'string') { cacheVsRede[u] = { erro: 'sem corpo local' }; continue; }
+        if (typeof local !== 'string') return { erro: 'sem corpo local' };
         try {
             // `diag-rede` passa POR FORA do service worker (ver lá): sem isso o
             // "servidor" era o cache do próprio aparelho, e dava "igual" sempre.
-            const r = await diagFetch(u + (u.indexOf('?') === -1 ? '?' : '&') + 'diag-rede=1', { cache: 'reload' });
+            const r = await diagFetch(u + (u.indexOf('?') === -1 ? '?' : '&') + 'diag-rede=1', { cache: 'reload' }, prazo);
             const remoto = await r.text();
             // Sem o script da borda nos DOIS lados (ver `diagSemInjecaoDaBorda`);
             // `borda` diz que ele estava lá e foi descontado.
             const [la, lb] = [diagSemInjecaoDaBorda(local), diagSemInjecaoDaBorda(remoto)];
             const [ha, hb] = [await hash(la), await hash(lb)];
-            cacheVsRede[u] = { aparelho: ha, servidor: hb, igual: ha === hb,
-                               bytesAparelho: local.length, bytesServidor: remoto.length,
-                               http: r.status };
-            if (la.length !== local.length || lb.length !== remoto.length) cacheVsRede[u].borda = true;
-        } catch (e) { cacheVsRede[u] = { erro: String((e && e.message) || e) }; }
-    }
+            const c = { aparelho: ha, servidor: hb, igual: ha === hb,
+                        bytesAparelho: local.length, bytesServidor: remoto.length, http: r.status };
+            if (la.length !== local.length || lb.length !== remoto.length) c.borda = true;
+            return c;
+        } catch (e) { return diagFalhaDaLeitura(e); }
+    };
+    const urlsComparadas = Object.keys(codigo);
+    const comparados = await Promise.all(urlsComparadas.map(comparar));
+    urlsComparadas.forEach((u, i) => { cacheVsRede[u] = comparados[i]; });
     await diagCodigoEnxuto(codigo, hash);
 
     // ── O armazenamento local funciona mesmo? ──────────────────────────────
@@ -6166,15 +6214,7 @@ async function diagCorpo() {
     // ── Relógio do aparelho × do servidor ──────────────────────────────────
     // Data errada no celular faz o aviso de sessão vencendo mentir e toda
     // comparação de prazo sair torta — e o sintoma nunca aponta pro relógio.
-    const relogio = { aparelho: new Date().toISOString(), servidor: null, desvioSeg: null };
-    try {
-        const r = await diagFetch(meu + '/manifest.json?diag-rede=1', { cache: 'no-store', method: 'HEAD' });
-        const d = r.headers.get('date');
-        if (d) {
-            relogio.servidor = new Date(d).toISOString();
-            relogio.desvioSeg = Math.round((Date.now() - new Date(d).getTime()) / 1000);
-        }
-    } catch (e) { relogio.erro = String((e && e.message) || e); }
+    const relogio = await relogioPromessa;
 
     const idb = {};
     try { for (const d of await indexedDB.databases()) idb[d.name] = d.version; }
@@ -6339,6 +6379,14 @@ async function diagCorpo() {
         cacheVsRede,
         armazenamento,
         relogio,
+        // A COLETA em si: quanto levou, o orçamento, e o que NÃO chegou nele —
+        // "a rede estava pendurada" dito no arquivo, não deduzido (D15).
+        coleta: {
+            ms: Date.now() - inicioDaColeta, orcamentoMs: DIAG_ORCAMENTO_MS,
+            semResposta: [...Object.entries(codigo).filter(([, v]) => v && v.semResposta).map(([u]) => u),
+                          ...Object.entries(cacheVsRede).filter(([, v]) => v && v.semResposta).map(([u]) => u + ' (servidor)'),
+                          ...(relogio.semResposta ? ['relógio do servidor'] : [])],
+        },
     };
     // Fora do JSON (não enumerável): o que o `baixarDiagnostico` marca como
     // entregue — o instante do retrato e as capturas que foram no arquivo.

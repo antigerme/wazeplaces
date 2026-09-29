@@ -425,15 +425,15 @@ test('diag-resumo: o offline DESLIGADO diz "desligado" — não "ausente nesta v
 
 test('diag-resumo: o painel vem com a VARIANTE — "Fim da fila" não é "tudo limpo"', () => {
   // O `painel` dizia "tudoLimpo" também no "Fim da fila" (pulados pendentes) e
-  // no "nada tratado nesta fila". A variante entrou no relatório v10.
+  // no "nada tratado nesta fila". A variante entrou no relatório v11.
   const d = relatorioV4();
-  d._versaoDoDiag = 10;
+  d._versaoDoDiag = 11;
   d.resumo.telaAgora = { ...d.resumo.telaAgora, painel: 'tudoLimpo', variante: 'fimDaFila' };
   d.momentos[0] = { ...d.momentos[0], painel: 'tudoLimpo', variante: 'nadaNestaFila' };
   const s = rodar(d);
   assert.match(s, /tela app · painel tudoLimpo \(fim da fila: há pulados pendentes\) · card montado/);
   assert.match(s, /manual · tela app · painel tudoLimpo \(nada tratado nesta fila\) · card montado/);
-  // CONTROLE: relatório sem a variante (anterior ao v10) sai como sempre.
+  // CONTROLE: relatório sem a variante (anterior ao v11) sai como sempre.
   assert.match(rodar(relatorioV4()), /tela app · painel carregando · card montado: true/);
 });
 
@@ -450,4 +450,23 @@ test('diag-resumo: o link de PAREAMENTO nunca sai — nem de um relatório antig
   assert.match(s, /\?pair=<PAREAMENTO>&x=1/, 'o link antigo (query) não foi trocado');
   // CONTROLE: o resto da linha do diário continua lá.
   assert.match(s, /toast\s+\{"tipo":"info","txt":"https:\/\/app\.x\/#pair=<PAREAMENTO>"\}/);
+});
+
+test('diag-resumo: a COLETA diz o que ficou sem resposta — a rede pendurada DITA, não deduzida', () => {
+  // D15 (auditoria de 2026-09-26): o relatório passou a ter um orçamento, e o
+  // que não chegou dentro dele sai em `coleta.semResposta`. Sem esta linha a
+  // triagem mostrava só "sem conferir: N", que também é o 404 e o erro comum.
+  const d = relatorioV4();
+  d.coleta = { ms: 10012, orcamentoMs: 10000, semResposta: ['http://127.0.0.1:8080/js/min/app.js', '/css/app.css', '/'] };
+  const s = rodar(d);
+  assert.match(s, /coleta: 10012 ms \(orçamento 10000 ms\) · sem resposta: 3/, 'a coleta não aparece na triagem');
+  assert.match(s, /ATENÇÃO: 3 leitura\(s\) sem resposta no orçamento — rede pendurada na hora do relatório: \/js\/min\/app\.js, \/css\/app\.css, \//,
+    'o que não chegou não é nomeado (e sem a origem, como o resto da seção)');
+  // CONTROLE: coleta limpa não acusa nada; relatório antigo (sem `coleta`) não ganha a linha.
+  const boa = relatorioV4();
+  boa.coleta = { ms: 812, orcamentoMs: 10000, semResposta: [] };
+  const sb = rodar(boa);
+  assert.match(sb, /coleta: 812 ms \(orçamento 10000 ms\) · sem resposta: 0/);
+  assert.doesNotMatch(sb, /leitura\(s\) sem resposta/, 'a coleta limpa acusou rede pendurada');
+  assert.doesNotMatch(rodar(relatorioV4()), /coleta:/, 'relatório sem coleta ganhou uma linha inventada');
 });
