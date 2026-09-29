@@ -1190,6 +1190,21 @@ for (const status of [404, 403]) {
   checa(vpDe(svVolta) === `${sv.local[0]},${sv.local[1]}`,
     'Street View: recentrar não devolveu o link ao ponto do pedido', `${vpDe(svVolta)} vs ${sv.local}`);
 
+  // As QUATRO setas andam (L13, auditoria de 2026-09-26): o ↓ fechava o mapa,
+  // copiado da foto, e pelo teclado não se chegava ao sul do pedido. O ↑ é o
+  // CONTROLE de que a medida de "andou" enxerga.
+  const lat0 = await page.evaluate(() => MapaLightbox.centro[0]);
+  await page.keyboard.press('ArrowUp'); await page.waitForTimeout(150);
+  const latN = await page.evaluate(() => MapaLightbox.centro[0]);
+  checa(latN > lat0, 'mapa ampliado: CONTROLE — o ↑ não andou pro norte (a medida estaria cega)');
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.waitForTimeout(150);
+  const s1 = await page.evaluate(() => ({ aberto: MapaLightbox.isOpen(), lat: MapaLightbox.centro[0] }));
+  checa(s1.aberto && s1.lat < latN, 'mapa ampliado: o ↓ não andou pro sul (fechou o mapa ou não saiu do lugar)', JSON.stringify(s1));
+  // Volta ao pedido (e reabre, se o ↓ fechou: o resto do bloco mede o mapa aberto).
+  await page.evaluate(() => { if (MapaLightbox.isOpen()) MapaLightbox.recentrar(); });
+  if (!s1.aberto) { await page.click('.card-map'); await page.waitForTimeout(400); }
+  await page.waitForTimeout(300);
+
   // Fecha por Esc (desktop) e por ✕ (toque). O voltar do aparelho é coberto
   // pelo guard de código — aqui não há histórico de navegação real.
   await page.keyboard.press('Escape');
@@ -7312,7 +7327,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + ${FIXTURES_PAISES.length} pedidos REAIS de ${new Set(FIXTURES_PAISES.map((f) => f._pais)).size} países × ${APARELHOS_PAISES.length} aparelhos × ${LINGUAS.length} idiomas`
   + `, + ${FORMATOS_FOTO.length} formatos de foto × ${APARELHOS_PAISES.length} aparelhos`
   + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403)`
-  + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, Esc e ✕)`
+  + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, as quatro setas andando, Esc e ✕)`
   + `, + escala do mapa medindo o que diz (card e ampliado, pela barra DESENHADA contra o movimento que o core mediu, e o rótulo cabendo no traço do z8 ao z4)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`

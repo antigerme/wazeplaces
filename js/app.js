@@ -3575,15 +3575,21 @@ function handleKeyDown(e) {
     // de CAMADA (fechar, navegar) e o campo do nome já trata o Esc dele.
     if (focoEmCampoDeTexto() && TECLAS_DE_CURSOR.includes(e.key)) return;
 
-    // O mapa ampliado é a camada MAIS alta quando aberto: Esc e ↓ fecham ele
+    // O mapa ampliado é a camada MAIS alta quando aberto: o Esc fecha ele
     // antes de qualquer outra coisa, como o lightbox de foto faz.
+    //
+    // No mapa as QUATRO setas andam. O ↓ fechava, copiado da foto (onde ele
+    // espelha o arraste pra baixo que fecha) — e no mapa o arraste pra baixo
+    // ANDA, então pelo teclado não se chegava ao sul do pedido (auditoria de
+    // 2026-09-26). Fechar é o Esc, e o ✕.
     if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) {
-        if (e.key === 'Escape' || e.key === 'ArrowDown') { e.preventDefault(); MapaLightbox.close(); }
+        if (e.key === 'Escape') { e.preventDefault(); MapaLightbox.close(); }
         else if (e.key === '+' || e.key === '=') { e.preventDefault(); MapaLightbox.zoom(1); }
         else if (e.key === '-' || e.key === '_') { e.preventDefault(); MapaLightbox.zoom(-1); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); MapaLightbox.arrastar(80, 0); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); MapaLightbox.arrastar(-80, 0); }
         else if (e.key === 'ArrowUp') { e.preventDefault(); MapaLightbox.arrastar(0, 80); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); MapaLightbox.arrastar(0, -80); }
         // As camadas são `aria-modal`: o Tab não pode sair delas pro card de
         // trás (Shift+Tab caía no ✓ — ação escondida atrás da foto).
         else if (e.key === 'Tab') trapTabInModal(e, document.getElementById('mapaLightbox'));
