@@ -2335,6 +2335,17 @@ function deltaDaRoda(e) {
     return dy;
 }
 
+// O DUPLO TOQUE da foto e do mapa ampliados: dois toques em até 300 ms e a
+// até 40 px um do outro (a régua que a foto sempre usou). E o que separa um
+// TOQUE de um ARRASTE no mapa: o dedo real treme 1 a 3 px (o "touch slop" do
+// Android é 8 dp), e o mapa tratava QUALQUER movimento como arraste — com 1 px
+// de tremor o duplo toque não aproximava, enquanto a foto aproximava com 3
+// (auditoria de 2026-09-26). 10 px fica acima do tremor e abaixo do que já é
+// arrastar de propósito.
+const DUPLO_TOQUE_MS = 300;
+const DUPLO_TOQUE_RAIO_PX = 40;
+const TOQUE_FOLGA_PX = 10;
+
 // Gestos do mapa ampliado. Ponteiros unificados (mouse e dedo pelo mesmo
 // caminho) porque o mapa é o mesmo nos dois; o que muda é só quantos pontos
 // tocam a tela.
@@ -2359,7 +2370,7 @@ function setupMapaLightbox() {
     // cada um trava a mão. Mesma lição do gotcha #35 — o handler decide, o
     // quadro seguinte escreve.
     const ativos = new Map();
-    let acumX = 0, acumY = 0, quadro = 0, arrastou = false, ultimo = null, distPinch = 0;
+    let acumX = 0, acumY = 0, quadro = 0, arrastou = false, ultimo = null, distPinch = 0, inicio = null;
     const aplicar = () => {
         quadro = 0;
         const dx = acumX, dy = acumY;
@@ -2388,7 +2399,9 @@ function setupMapaLightbox() {
         if (!ultimo) return;
         const dx = e.clientX - ultimo.x, dy = e.clientY - ultimo.y;
         if (!dx && !dy) return;
-        arrastou = true;
+        // O mapa acompanha o dedo desde o primeiro pixel, mas só é ARRASTE (e
+        // não um toque que tremeu) passada a folga — ver `TOQUE_FOLGA_PX`.
+        if (inicio && Math.hypot(e.clientX - inicio.x, e.clientY - inicio.y) > TOQUE_FOLGA_PX) arrastou = true;
         ultimo = { x: e.clientX, y: e.clientY };
         acumX += dx; acumY += dy;
         agendar();
@@ -2412,7 +2425,7 @@ function setupMapaLightbox() {
         ativos.set(e.pointerId, { x: e.clientX, y: e.clientY });
         arrastou = false;
         if (ativos.size === 2) distPinch = doisDedos().d;
-        else ultimo = { x: e.clientX, y: e.clientY };
+        else { ultimo = { x: e.clientX, y: e.clientY }; inicio = ultimo; }
         addEventListener('pointermove', mover);
         addEventListener('pointerup', soltar);
         addEventListener('pointercancel', soltar);
@@ -2438,13 +2451,20 @@ function setupMapaLightbox() {
         rodaAcum = 0;
         MapaLightbox.zoom(passo, e.clientX, e.clientY);
     }, { passive: false });
-    // Duplo toque aproxima, como em qualquer mapa.
-    let ultimoToque = 0;
+    // Duplo toque aproxima, como em qualquer mapa — com a MESMA régua da foto
+    // (tempo E distância entre os toques), e zerando depois, como a foto: um
+    // terceiro toque não aproxima de novo.
+    let ultimoToque = 0, ultimoToqueX = 0, ultimoToqueY = 0;
     lb.addEventListener('click', (e) => {
         if (e.target.closest('button') || arrastou) return;
         const agora = Date.now();
-        if (agora - ultimoToque < 300) MapaLightbox.zoom(1, e.clientX, e.clientY);
-        ultimoToque = agora;
+        if (agora - ultimoToque < DUPLO_TOQUE_MS
+            && Math.hypot(e.clientX - ultimoToqueX, e.clientY - ultimoToqueY) < DUPLO_TOQUE_RAIO_PX) {
+            ultimoToque = 0;
+            MapaLightbox.zoom(1, e.clientX, e.clientY);
+            return;
+        }
+        ultimoToque = agora; ultimoToqueX = e.clientX; ultimoToqueY = e.clientY;
     });
     // Girar o aparelho muda a caixa: sem redesenhar, sobra faixa sem tile.
     addEventListener('resize', () => { if (MapaLightbox.isOpen()) MapaLightbox.desenhar(); });
@@ -2489,9 +2509,9 @@ function setupLightbox() {
             return;
         }
 
-        // Double-tap → alterna zoom no ponto tocado
+        // Double-tap → alterna zoom no ponto tocado (a régua é a do mapa também)
         const now = performance.now();
-        if (now - lastTapTime < 300 && Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < 40) {
+        if (now - lastTapTime < DUPLO_TOQUE_MS && Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < DUPLO_TOQUE_RAIO_PX) {
             lastTapTime = 0;
             if (Lightbox.scale > 1) Lightbox.resetZoom();
             else Lightbox.zoomTo(2.5, e.clientX, e.clientY);

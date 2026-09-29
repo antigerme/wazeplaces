@@ -4167,6 +4167,32 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await rodar(6, 40, 0);
   const z4 = await z();
   checa(z4 === z3, `roda/mapa: rolagem só HORIZONTAL mexeu no zoom (z ${z3} → ${z4})`);
+  // O DUPLO TOQUE com o tremor de um dedo (L15): qualquer movimento virava
+  // arraste, e com 1 px o mapa não aproximava (a foto aproxima com 3). Mouse
+  // de verdade, que gera o mesmo pointer + click do toque. O CONTROLE é o
+  // arraste de 40 px, que não pode contar como toque.
+  const tocar = async (x, y, mexe) => {
+    await page.mouse.move(x, y); await page.mouse.down();
+    if (mexe) await page.mouse.move(x + mexe, y + mexe, { steps: 2 });
+    await page.mouse.up();
+  };
+  // Volta ao pedido: a roda acima levou o zoom ao 19, o MÁXIMO, e ali nenhum
+  // toque aproxima (a medida estaria cega — foi o que a 1ª versão mediu).
+  await page.evaluate(() => MapaLightbox.recentrar());
+  await pausa();
+  const zt0 = await z();
+  checa(zt0 < await page.evaluate(() => MAPA_Z_NAV_MAX), `duplo toque/mapa: PRÉ-CONDIÇÃO — o zoom ${zt0} já é o máximo`);
+  await tocar(640, 400, 2); await tocar(640, 400, 2);
+  await page.waitForTimeout(250);
+  const zt1 = await z();
+  checa(zt1 === zt0 + 1, `duplo toque/mapa: com 2 px de tremor não aproximou (z ${zt0} → ${zt1})`);
+  await pausa();
+  // O 2º toque cai onde o arraste TERMINOU: a régua da distância entre os
+  // toques não pode ser o que segura o controle — é a folga do arraste.
+  await tocar(640, 400, 40); await tocar(680, 440, 0);
+  await page.waitForTimeout(250);
+  const zt2 = await z();
+  checa(zt2 === zt1, `duplo toque/mapa: CONTROLE — um ARRASTE seguido de um toque aproximou (z ${zt1} → ${zt2})`);
   await page.evaluate(() => MapaLightbox.close());
   await page.waitForTimeout(250);
   // A FOTO.
@@ -7440,7 +7466,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + renomeando: o passo pra trás (fundo, arraste pra baixo, Esc e ↓ fora do campo) só sai da edição, com o CONTROLE sem edição fechando a foto`
-  + `, + a roda do mouse e o trackpad (no mapa um nível por DENTE acumulado, na foto proporcional ao delta, e a rolagem horizontal fora do zoom, com o CONTROLE do dente)`
+  + `, + a roda do mouse e o trackpad (no mapa um nível por DENTE acumulado, na foto proporcional ao delta, e a rolagem horizontal fora do zoom, com o CONTROLE do dente) e o duplo toque do mapa com tremor (com o CONTROLE do arraste)`
   + `, + o foco nas camadas de ampliar (fechar a foto e o mapa por Esc/↓/✕ devolve à foto/mapa do card, sair da edição devolve à pílula, aprovar e salvar mantêm na camada, com e sem Desfazer, e o ✨/🚩 e a miniatura com NOME, com o CONTROLE do Filtros)`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
