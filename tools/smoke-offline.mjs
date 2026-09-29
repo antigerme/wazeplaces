@@ -1932,13 +1932,31 @@ const irProFundo9c = async (pg) => {
   await pg.evaluate(() => (typeof diagGuardando !== 'undefined' ? diagGuardando : null));
   await pg.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
 };
-// Espera o registro DESTA abertura ter `n` capturas guardadas.
-const guardouNesta9c = (pg, n) => esperarNaPagina(pg, async () => { try {
+// Espera o registro DESTA abertura ter `n` capturas guardadas. A CONTA volta
+// pro Node e a comparação é feita aqui: a função vai pra página SERIALIZADA,
+// sem o fechamento, e com o `n` dentro dela ele era `undefined` lá — o `try`
+// engolia o ReferenceError, e a espera virava um sono de 10 s que nunca
+// confirmava nada (MEDIDO na auditoria de 2026-09-26: o registro estava no
+// aparelho, com a captura, e a espera dizia que não). Não abre a base que não
+// existe (`open` sem versão a CRIARIA vazia, sem a tabela, e a gravação do app
+// que viesse depois não teria onde escrever), e devolve o que VIU.
+const capturasNesta9c = (pg) => pg.evaluate(async () => { try {
+  if (!(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag')) return 0;
   const db = await new Promise((ok, err) => { const r = indexedDB.open('waze_places_diag'); r.onsuccess = () => ok(r.result); r.onerror = err; });
   const todas = await new Promise((ok) => { const r = db.transaction('aberturas').objectStore('aberturas').getAll(); r.onsuccess = () => ok(r.result); });
   db.close();
-  return todas.some((a) => a.id === DIAG_ABERTURA.id && (a.momentos || []).length === n);
-} catch (e) { return false; } }, 10000, 100);
+  const esta = todas.find((a) => a.id === DIAG_ABERTURA.id);
+  return esta ? (esta.momentos || []).length : 0;
+} catch (e) { return -1; } }).catch(() => -1);
+const guardouNesta9c = async (pg, n, tetoMs = 10000) => {
+  const t0 = Date.now();
+  for (;;) {
+    const viu = await capturasNesta9c(pg);
+    if (viu === n) return { ok: true, ms: Date.now() - t0, viu };
+    if (Date.now() - t0 > tetoMs) return { ok: false, ms: Date.now() - t0, viu };
+    await dormir(100);
+  }
+};
 
 // 0. Sessão, e o modo dev DESLIGADO: fechar o app não pode criar nada.
 const prep9c = await abrir9c('preparo');
