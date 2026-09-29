@@ -6532,6 +6532,13 @@ function fecharCamadasAbertas(abrirPorCima) {
     const sobrando = CamadaVoltar.profundidade;
     CamadaVoltar.profundidade = 0;
     if (typeof abrirPorCima === 'function') abrirPorCima();
+    // Cada camada fechada devolveu o foco a quem a abriu (o botão de Filtros, o
+    // mapa do card) — e a tela de entrada acabou de esconder isso tudo. O foco
+    // caía no <body>, e quem usa teclado ou leitor de tela recomeçava do topo
+    // (medido: Filtros e mapa ampliado abertos na queda; auditoria da costura,
+    // 2026-09-26, K13). O diálogo que a queda abre (o portão) fica com o dele.
+    const ativo = document.activeElement;
+    if (!ativo || ativo === document.body || !focavelNaTela(ativo)) devolverFoco(null);
     if (sobrando > 0) {
         CamadaVoltar.consumindo = true;
         try { history.go(-sobrando); } catch (e) { CamadaVoltar.consumindo = false; }

@@ -927,3 +927,43 @@ test('K12: CONTROLE — sem a sessão acabar, vai pro país do perfil, pedindo a
   assert.deepEqual(m.toasts, ['toast.paisDoPerfil']);
   assert.equal(m.deps.AppState.countries[0].name, 'United States');
 });
+
+// ═══ K13 · o foco depois da queda com uma camada aberta ══════════════════════
+
+function elementoFocavel(nome, doc, { visivel = true } = {}) {
+  const el = { nome, visivel, isConnected: true, disabled: false,
+    focus() { doc.activeElement = el; }, getClientRects: () => (el.visivel ? [1] : []), closest: () => null };
+  return el;
+}
+
+function montarQuedaComCamada() {
+  const doc = { body: { nome: 'BODY' }, activeElement: null, getElementById: (id) => doc.els[id] || null, els: {} };
+  doc.activeElement = doc.body;
+  doc.els.helpBtn = elementoFocavel('helpBtn', doc);
+  doc.els.filtersBtn = elementoFocavel('filtersBtn', doc);
+  doc.els.filtersModal = { classList: { contains: (c) => c === 'hidden' ? !doc.filtrosAbertos : false } };
+  doc.filtrosAbertos = true;
+  doc.els.accessDeniedOk = elementoFocavel('accessDeniedOk', doc);
+  const deps = {
+    document: doc, MODAL_IDS: ['filtersModal'], MapaLightbox: { isOpen: () => false }, Lightbox: { isOpen: () => false },
+    CamadaVoltar: { profundidade: 1, consumindo: false }, history: { go() {} }, ultimoFocoForaDasCamadas: doc.els.filtersBtn,
+    // O fechamento devolve o foco a quem abriu (o `closeModal` de verdade faz isso).
+    closeModal: () => { doc.filtrosAbertos = false; doc.els.filtersBtn.focus(); },
+  };
+  const h = montar(['fecharCamadasAbertas', 'devolverFoco', 'focavelNaTela', 'dentroDeCamada'], deps);
+  return { h, doc };
+}
+
+test('K13: a queda com Filtros aberto — o foco não cai no <body> quando a tela de entrada esconde quem abriu', () => {
+  const m = montarQuedaComCamada();
+  // A tela de entrada esconde o botão de Filtros (e o card, e o cabeçalho).
+  m.h.fecharCamadasAbertas(() => { m.doc.els.filtersBtn.visivel = false; });
+  assert.equal(m.doc.activeElement && m.doc.activeElement.nome, 'helpBtn',
+    'DEFEITO: o foco ficou em ' + (m.doc.activeElement && m.doc.activeElement.nome) + ' (escondido) — quem usa teclado recomeça do topo');
+});
+
+test('K13: CONTROLE — o diálogo que a queda abre (o portão) fica com o foco dele', () => {
+  const m = montarQuedaComCamada();
+  m.h.fecharCamadasAbertas(() => { m.doc.els.filtersBtn.visivel = false; m.doc.els.accessDeniedOk.focus(); });
+  assert.equal(m.doc.activeElement.nome, 'accessDeniedOk', 'a queda tirou o foco do diálogo do portão');
+});
