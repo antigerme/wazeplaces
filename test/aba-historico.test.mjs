@@ -197,6 +197,9 @@ function abrirAba(comp) {
     AUTORES_MAX_DIAS: 30, AUTORES_MAX_REINCIDENTES: 500, AUTORES_MAX_VISTOS: 6000, diaDeHoje: () => 20000,
     podarHistorico: () => false, historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
     atualizarSeloDeConquista: () => { aba.selo++; }, agendarRedesenhoDoHistorico: () => { aba.redesenhos++; },
+    // O modo dev e a sessão da outra aba têm tratamento PRÓPRIO (ver
+    // test/diag-guarda, D2); aqui só se conta que ele foi chamado.
+    DEVMODE_KEY: 'waze_places_devmode', aoMudarModoDevEmOutraAba: () => { aba.modoDev = (aba.modoDev || 0) + 1; },
   };
   const nomes = ['salvarHistorico', 'loadHistory', 'recordHistory', 'carregarConquistas', 'salvarConquistas',
     'loadAutores', 'salvarAutores', 'podarAutores', 'registrarRejeicaoDeAutor', 'aoGravarEmOutraAba'];

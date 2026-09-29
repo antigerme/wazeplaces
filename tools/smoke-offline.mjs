@@ -2281,6 +2281,119 @@ diz('o diário anota que houve o aviso SENSÍVEL, sem o texto; e a triagem tamb�
   rel9d?.aviso === true && rel9d?.naTriagem === false, JSON.stringify(rel9d));
 await ctx9d.close();
 
+secao('9e. DUAS ABAS: desligar o modo dev, ou dar "Sair", numa chega à outra');
+// Auditoria de 2026-09-26 (D2). A outra aba seguia com o FAB e com o modo dev
+// na memória, e a captura seguinte RECRIAVA a base com o DOM da tela. E a poda
+// de 24 h só rodava com o modo dev ligado — a sobra ficava indefinidamente.
+// Duas páginas do MESMO contexto (o mesmo aparelho): o aviso do navegador
+// (evento `storage`) é o de verdade.
+const ctx9e = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
+  hasTouch: true, isMobile: true, serviceWorkers: 'block' });
+await ctx9e.route('**/*-tiles/live/base/**', servirTile);
+await ctx9e.route('**/api/*', (r) => {
+  const rota = r.request().url().split('/api/')[1];
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(161), SO_MAPA(162)], hasMore: false, page: 1, total: 2 });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+  return r.abort('failed');
+});
+const abrir9e = async (nome) => {
+  const pg = await ctx9e.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
+  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
+  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  return pg;
+};
+const devLigado9e = (pg, ligado) => pg.evaluate((l) => localStorage.setItem('waze_places_devmode',
+  JSON.stringify({ unlocked: true, active: l })), ligado);
+const temBase9e = (pg) => pg.evaluate(async () => (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'));
+const prep9e = await abrir9e('preparo');
+await esperarNaPagina(prep9e, () => typeof API !== 'undefined', 20000, 100);
+await prep9e.evaluate(() => {
+  API.setSession('tok-9e');
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+});
+await devLigado9e(prep9e, true);
+await prep9e.close({ runBeforeUnload: true });
+
+// 1. A aba A DESLIGA o modo dev (o interruptor de verdade); a aba B tinha uma captura.
+const a9e = await abrir9e('A'), b9e = await abrir9e('B');
+await pronta9c(a9e); await pronta9c(b9e);
+const cdpB9e = await ctx9e.newCDPSession(b9e);
+const tocouB = await tocar9c(b9e, cdpB9e);
+const guardouB = await guardouNesta9c(b9e, 1);
+diz('PRÉ-CONDIÇÃO: a captura da aba B foi pro aparelho', tocouB && guardouB.ok, JSON.stringify({ tocouB, guardouB }));
+await a9e.evaluate(() => { const cb = document.getElementById('prefDevModeActive'); cb.checked = false; cb.dispatchEvent(new Event('change')); });
+const chegouB = await esperarNaPagina(b9e, () => AppState.devMode.active === false
+  && document.getElementById('devFab').classList.contains('hidden') && dlogMomentos.length === 0, 5000, 100);
+diz('desligado na aba A, a aba B desliga junto: o botão some e as capturas saem da memória', chegouB.ok,
+  JSON.stringify(await b9e.evaluate(() => ({ dev: AppState.devMode.active, momentos: dlogMomentos.length }))));
+await irProFundo9c(b9e);
+await b9e.close({ runBeforeUnload: true });
+const semBase1 = await esperarNaPagina(a9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 5000, 100);
+diz('a aba B, indo pro fundo e fechando, não recria a base que a aba A apagou', semBase1.ok);
+
+// 2. A CORRIDA: o armazenamento já diz "desligado" e o aviso ainda não chegou a
+// esta aba (a memória diz ligado). Encenada escrevendo NA PRÓPRIA aba — o evento
+// `storage` não dispara em quem escreve. A captura não pode ir pro aparelho.
+await devLigado9e(a9e, true);
+await a9e.close({ runBeforeUnload: true });
+const c9e = await abrir9e('C');
+await pronta9c(c9e);
+await devLigado9e(c9e, false);                         // storage desligado, memória ligada
+const cdpC9e = await ctx9e.newCDPSession(c9e);
+const tocouC = await tocar9c(c9e, cdpC9e);
+await c9e.evaluate(() => (typeof diagGuardando !== 'undefined' ? diagGuardando : null));
+// A base pode EXISTIR (a leitura do guardado a abre, vazia, na abertura com o
+// modo dev ligado): o que não pode é um registro com a captura.
+const gC = await guardado9c(c9e);
+diz('com o modo dev desligado no ARMAZENAMENTO (o aviso ainda não chegou), a captura não vai pro aparelho',
+  tocouC && (await c9e.evaluate(() => AppState.devMode.active)) === true
+  && !(gC.abertas || []).some((x) => x.capturas > 0), JSON.stringify({ tocouC, gC }));
+
+// 3. O "Sair" na aba D chega à aba E: ela tinha uma captura guardada.
+await devLigado9e(c9e, true);
+await c9e.close({ runBeforeUnload: true });
+const d9e = await abrir9e('D'), e9e = await abrir9e('E');
+await pronta9c(d9e); await pronta9c(e9e);
+const cdpE9e = await ctx9e.newCDPSession(e9e);
+const tocouE = await tocar9c(e9e, cdpE9e);
+const guardouE = await guardouNesta9c(e9e, 1);
+diz('PRÉ-CONDIÇÃO: a captura da aba E foi pro aparelho', tocouE && guardouE.ok, JSON.stringify({ tocouE, guardouE }));
+await d9e.evaluate(() => { handleLogout(); });
+const chegouE = await esperarNaPagina(e9e, () => AppState.devMode.active === false
+  && document.getElementById('devFab').classList.contains('hidden') && dlogMomentos.length === 0, 5000, 100);
+diz('o "Sair" na aba D chega à aba E: o modo dev desliga, o botão some e as capturas saem', chegouE.ok);
+await irProFundo9c(e9e);
+await e9e.close({ runBeforeUnload: true });
+const semBase3 = await esperarNaPagina(d9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 5000, 100);
+diz('e nada volta pro aparelho quando a aba E fecha', semBase3.ok);
+await d9e.close();
+
+// 4. A SOBRA com o modo dev desligado sai na próxima abertura (a poda de 24 h só
+// roda com ele ligado). Planta uma abertura FRESCA, com o modo dev desligado.
+const f9e = await abrir9e('F');
+await esperarNaPagina(f9e, () => typeof API !== 'undefined', 20000, 100);
+await f9e.evaluate(() => new Promise((ok) => {
+  API.setSession('tok-9e');
+  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
+  const req = indexedDB.open('waze_places_diag', 1);
+  req.onupgradeneeded = () => req.result.createObjectStore('aberturas', { keyPath: 'id' });
+  req.onsuccess = () => { const db = req.result; const tx = db.transaction('aberturas', 'readwrite');
+    tx.objectStore('aberturas').put({ id: 'sobra', inicio: Date.now() - 3600e3, salvoEm: Date.now() - 1800e3, salvoPor: 'oculta',
+      momentos: [{ t: new Date().toISOString(), motivo: 'manual', dom: '<html>dado de terceiro</html>' }], diario: [], chamadas: [], erros: [] });
+    tx.oncomplete = () => { db.close(); ok(); }; };
+}));
+diz('PRÉ-CONDIÇÃO: a sobra está no aparelho', await temBase9e(f9e));
+await f9e.close({ runBeforeUnload: true });
+const g9e = await abrir9e('G');
+const faxina = await esperarNaPagina(g9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
+diz('com o modo dev DESLIGADO, a sobra sai do aparelho na abertura', faxina.ok
+  && (await g9e.evaluate(() => dfatoAnel.some((e) => e.k === 'diag.sobraApagada'))), JSON.stringify(faxina));
+await g9e.close();
+await ctx9e.close();
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));

@@ -410,6 +410,8 @@ function initApp() {
     // O que as aberturas anteriores deixaram guardado (só com o modo dev
     // ligado — sem ele a função sai na primeira linha e nem abre a base).
     diagCarregarAberturas();
+    // E, com ele DESLIGADO, o que tenha sobrado no aparelho sai (sem criar a base).
+    diagFaxinaSemModoDev();
     // Tema: segue o sistema até o user escolher manualmente (M3/HIG).
     applyTheme(getPreferredTheme());
     const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
@@ -5124,7 +5126,11 @@ function diagGuardarAbertura(motivo) {
     // esteja pendurada no meio (ver `diagEpoca`).
     const epoca = diagEpoca;
     const esta = diagGuardando.then(async () => {
-        if (!dlogLigado() || epoca !== diagEpoca) return false;
+        // O modo dev pela FONTE, além da memória: desligado (ou o "Sair") numa
+        // OUTRA aba, esta ainda o tem ligado até o aviso do navegador chegar — e
+        // gravava de novo a base que a outra acabou de apagar (auditoria de
+        // 2026-09-26, D2). Aqui, na vez da gravação, antes de abrir a base.
+        if (!dlogLigado() || epoca !== diagEpoca || modoDevDesligadoNoArmazenamento()) return false;
         let db = null;
         try {
             db = await diagDB();
@@ -5163,6 +5169,35 @@ async function diagCarregarAberturas() {
     } finally {
         try { if (db) db.close(); } catch (e) {}
     }
+}
+
+// O que SOBROU no aparelho com o modo dev DESLIGADO. A poda de 24 h mora no
+// `diagCarregarAberturas`, que só roda com o modo dev ligado — então o que
+// ficasse pra trás (a base recriada por outra aba, antes do conserto do D2; um
+// apagar que não chegou a rodar) ficava indefinidamente, contra "desligar
+// apaga", "Sair é limpar de tudo" e a Ajuda ("no máximo 24 h") — auditoria de
+// 2026-09-26. Com o modo dev desligado não existe registro legítimo: apaga
+// inteiro, não só o vencido.
+//
+// SEM CRIAR a base: `indexedDB.databases()` lista as que existem sem abrir
+// nenhuma (o `open` criaria uma vazia, em todo aparelho de quem nunca ligou o
+// modo dev), e o `deleteDatabase` de uma base inexistente também não cria nada
+// — por isso ele é o caminho onde não há `databases()` (Firefox antigo).
+function diagFaxinaSemModoDev() {
+    if (dlogLigado()) return Promise.resolve(false);
+    try {
+        if (typeof indexedDB === 'undefined') return Promise.resolve(false);
+        const sabe = typeof indexedDB.databases === 'function';
+        const existe = sabe
+            ? indexedDB.databases().then((l) => (l || []).some((b) => b && b.name === DIAG_DB))
+            : Promise.resolve(true);
+        return existe.then((sim) => {
+            if (!sim || dlogLigado()) return false;
+            // Só anota quando SABE que havia sobra (sem `databases()` o apagar é às cegas).
+            if (sabe) dfato('diag.sobraApagada');
+            return diagEsquecerGuardado().then(() => sabe);
+        }).catch(() => false);
+    } catch (e) { return Promise.resolve(false); }
 }
 
 // Apaga TUDO o que foi guardado: no download (já foi entregue), no desligar do
@@ -10669,6 +10704,9 @@ function aoGravarEmOutraAba(ev) {
     // são declaradas mais abaixo neste arquivo.
     const caches = { [HISTORY_KEY]: 'history', [CONQUISTAS_KEY]: 'conquistas', [AUTORES_KEY]: 'autores' };
     const chave = ev ? ev.key : undefined;
+    // O MODO DEV mudou noutra aba — desligado ali, ou o "Sair" de lá (que o
+    // desliga) —, ou o token saiu, ou o armazenamento foi limpo inteiro.
+    if (chave === null || chave === DEVMODE_KEY || chave === 'waze_session_token') aoMudarModoDevEmOutraAba();
     // `key` nulo é a outra aba limpando o armazenamento inteiro.
     if (chave !== null && !Object.prototype.hasOwnProperty.call(caches, chave)) return;
     for (const [k, campo] of Object.entries(caches)) {
@@ -10679,6 +10717,32 @@ function aoGravarEmOutraAba(ev) {
     if (chave === null || chave === CONQUISTAS_KEY) atualizarSeloDeConquista();
     agendarRedesenhoDoHistorico();
 }
+// Desligar o modo dev, ou dar "Sair", numa aba NÃO chegava à outra: ela seguia
+// com o FAB e com o modo dev na memória, e a captura seguinte RECRIAVA a base
+// `waze_places_diag` com o DOM da tela (dado de terceiro) — contra "desligar
+// apaga" e "Sair é limpar de tudo" (auditoria de 2026-09-26, D2). Aqui a aba
+// relê o modo dev do armazenamento e, se ele desligou, apaga o que o modo dev
+// gravou, como a aba que desligou apagou.
+//
+// O token saindo SOZINHO (a sessão caiu na outra aba, com o modo dev ligado)
+// NÃO apaga nada: a queda é exatamente o que o diagnóstico existe pra mostrar,
+// e a própria aba que caiu o preserva (`derrubarSessao` não chama o
+// `dlogApagar`). O "Sair" desliga o modo dev no armazenamento, e é por aí que
+// ele chega aqui.
+function aoMudarModoDevEmOutraAba() {
+    const agora = devModeDoArmazenamento();
+    if (!agora) return;
+    const estava = !!(AppState.devMode && AppState.devMode.active);
+    AppState.devMode = agora;
+    updateDevBadge();
+    renderDevModeSection();
+    diagAjustarRecursos();
+    if (estava && !agora.active) {
+        dlogApagar();          // (o `atualizarFabDev` vem junto)
+        enforceDevGatedFilters();
+    } else atualizarFabDev();
+}
+
 function setupSincroniaEntreAbas() {
     window.addEventListener('storage', aoGravarEmOutraAba);
 }
@@ -15871,6 +15935,22 @@ function saveDevMode() {
     try {
         localStorage.setItem(DEVMODE_KEY, JSON.stringify(AppState.devMode));
     } catch (e) {}
+}
+
+// O modo dev como está no ARMAZENAMENTO, que as abas dividem. `null` quando não
+// dá pra ler (armazenamento bloqueado): aí ninguém decide nada por ele.
+function devModeDoArmazenamento() {
+    try {
+        const p = JSON.parse(localStorage.getItem(DEVMODE_KEY) || 'null');
+        const unlocked = !!(p && p.unlocked);
+        return { unlocked, active: unlocked && !!(p && p.active) };
+    } catch (e) { return null; }
+}
+// O armazenamento DIZ que está desligado (desligado noutra aba, ou o "Sair" de
+// outra aba). Só a leitura que deu certo decide — ilegível não desliga nada.
+function modoDevDesligadoNoArmazenamento() {
+    const m = devModeDoArmazenamento();
+    return !!m && !m.active;
 }
 
 function loadDevMode() {
