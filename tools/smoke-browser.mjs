@@ -972,7 +972,12 @@ for (const [nomeF, fw, fh] of FORMATOS_FOTO) {
 // continuam, sem erro de JS.
 for (const status of [404, 403]) {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
-  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status }));
+  const pedidosDeTile = new Map();
+  await ctx.route('**/*-tiles/**', (r) => {
+    const u = r.request().url();
+    pedidosDeTile.set(u, (pedidosDeTile.get(u) || 0) + 1);
+    return r.fulfill({ status });
+  });
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
@@ -1016,6 +1021,25 @@ for (const status of [404, 403]) {
   checa(!!m.escala, `${rot}: a barra de escala sumiu`);
   checa(m.tilesOrfaos === 0, `${rot}: ${m.tilesOrfaos} <img> quebrada ficou no DOM`);
   checa(!m.toast, `${rot}: erro na cara do editor por causa de um tile`, m.toast);
+  // O mapa AMPLIADO com os tiles caindo, arrastado devagar (um quadro por
+  // passo): o tile que falhou não pode ser pedido de novo a cada quadro — era
+  // 432 pedidos num arraste de 40 px, o mesmo tile até 30× (auditoria de
+  // 2026-09-26). E a <img> quebrada sai do DOM.
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-map');
+  await page.waitForTimeout(600);
+  // Conta por URL o que o ARRASTE pediu de novo (o mini-mapa do card e o
+  // ampliado pedem o mesmo tile uma vez cada, e isso é legítimo).
+  const antesDoArraste = new Map(pedidosDeTile);
+  checa(antesDoArraste.size >= 4, `${rot}: PRÉ-CONDIÇÃO — a medida não viu os pedidos de tile do ampliado (${antesDoArraste.size})`);
+  await page.mouse.move(200, 450); await page.mouse.down();
+  await page.mouse.move(240, 450, { steps: 30 }); await page.mouse.up();
+  await page.waitForTimeout(500);
+  let deNovo = 0, pior = 0;
+  for (const [u, n] of antesDoArraste) { const d = pedidosDeTile.get(u) - n; deNovo += d; pior = Math.max(pior, d); }
+  checa(deNovo === 0, `${rot}: o arraste de 40 px pediu de novo ${deNovo}× tiles que já tinham falhado (o mesmo até ${pior}×)`);
+  checa(await page.evaluate(() => document.querySelectorAll('#mapaLbTiles img').length) === 0,
+    `${rot}: <img> quebrada ficou no DOM do mapa ampliado`);
+  await page.evaluate(() => MapaLightbox.close());
   checa(erros.length === 0, `${rot}: erro de JS na página`, erros[0]);
   await ctx.close();
 }
@@ -7439,7 +7463,7 @@ if (falhas) {
 console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card`
   + `, + ${FIXTURES_PAISES.length} pedidos REAIS de ${new Set(FIXTURES_PAISES.map((f) => f._pais)).size} países × ${APARELHOS_PAISES.length} aparelhos × ${LINGUAS.length} idiomas`
   + `, + ${FORMATOS_FOTO.length} formatos de foto × ${APARELHOS_PAISES.length} aparelhos`
-  + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403)`
+  + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403, no card e no ampliado arrastado, sem pedir de novo o tile que falhou)`
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, as quatro setas andando, Esc e ✕)`
   + `, + escala do mapa medindo o que diz (card e ampliado, pela barra DESENHADA contra o movimento que o core mediu, e o rótulo cabendo no traço do z8 ao z4)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`

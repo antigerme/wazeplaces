@@ -818,7 +818,9 @@ test('o mapa CONTA o tile que falhou antes de tirá-lo da tela', () => {
     'o mapa deixou de dizer quantos tiles pediu');
   assert.match(mapa, /im\.onerror = \(\) => \{ registrarFalhaDeTile\(box, t\.url\); im\.remove\(\); \};/,
     'o tile que falha voltou a sumir SEM ser contado');
-  assert.match(semCom, /im\.onerror = \(\) => \{ registrarFalhaDeTile\(null, t\.url\); im\.remove\(\);/,
+  // (o do ampliado ganhou mais linhas — lembra o tile que falhou, L17 —, e a
+  // ordem que importa segue: registra ANTES de tirar da tela)
+  assert.match(semCom, /im\.onerror = \(\) => \{\s*registrarFalhaDeTile\(null, t\.url\);\s*im\.remove\(\);/,
     'o mapa ampliado voltou a apagar o tile sem registrar');
   assert.match(fatiarFn(semCom, 'diagGeometria'), /tiles: \{ pedidos: \+e\.dataset\.tilesPedidos, falharam:/,
     'a geometria parou de levar a contagem de tiles do mapa');

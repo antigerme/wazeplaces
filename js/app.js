@@ -9017,7 +9017,7 @@ function linkStreetView(centro) {
 }
 
 const MapaLightbox = {
-    centro: null, z: 16, pontos: [], _tiles: new Map(), _inicial: null, _local: null,
+    centro: null, z: 16, pontos: [], _tiles: new Map(), _falhos: new Set(), _inicial: null, _local: null,
     isOpen() { return !document.getElementById('mapaLightbox').classList.contains('hidden'); },
 
     open(place) {
@@ -9041,6 +9041,7 @@ const MapaLightbox = {
         this._local = place.mapa.centro ? place.mapa.centro.slice() : null;
         this._inicial = { centro: this.centro.slice(), z: this.z };
         this._tiles.clear();
+        this._falhos.clear();   // cada abertura tenta de novo o que falhou antes
         document.getElementById('mapaLbTiles').textContent = '';
         // Quem abriu (o mapa do card, que é focável): o foco volta pra ele.
         this._quemAbriu = document.activeElement;
@@ -9124,11 +9125,23 @@ const MapaLightbox = {
             vivos.add(t.chave);
             let im = this._tiles.get(t.chave);
             if (!im) {
+                // Tile que JÁ FALHOU nesta abertura não é pedido de novo. O
+                // `onerror` tira a <img> quebrada do DOM (gotcha #55) e apagava a
+                // chave, e o `desenhar()` seguinte — um por QUADRO de arraste — a
+                // recriava: MEDIDO com os tiles dando 404, 432 pedidos num arraste
+                // de 40 px, o mesmo tile até 30× (com tiles bons: 0). Reabrir o
+                // mapa tenta de novo.
+                if (this._falhos.has(t.chave)) continue;
                 im = new Image();
                 im.src = t.url; im.alt = ''; im.decoding = 'async';
                 im.className = 'absolute mapa-tile';
                 im.style.width = im.style.height = g.tamanho + 'px';
-                im.onerror = () => { registrarFalhaDeTile(null, t.url); im.remove(); this._tiles.delete(t.chave); };
+                im.onerror = () => {
+                    registrarFalhaDeTile(null, t.url);
+                    im.remove();
+                    this._tiles.delete(t.chave);
+                    this._falhos.add(t.chave);
+                };
                 this._tiles.set(t.chave, im);
                 caixa.appendChild(im);
             }
