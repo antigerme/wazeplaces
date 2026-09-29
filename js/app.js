@@ -2874,6 +2874,10 @@ async function enviarAprovacao(alvo) {
         Lightbox.desmarcarAprovada(alvo);
         showToast(t('toast.photoApproveFailed'), 'error');
         return false;
+    } finally {
+        // O envio acabou: pousou (o `registrarPouso` passa a segurar o pedido
+        // fora da fila) ou falhou (ele volta a ser um pedido como outro).
+        marcarEmAndamento(alvo.place, false);
     }
 }
 
@@ -2929,6 +2933,13 @@ function aprovarFotoAtual() {
     // Mesma razão do lado de lá: as duas escritas mexem no mesmo local, então
     // quem chega depois tem que ver o resultado de quem chegou antes.
     if (exclusaoPendente) exclusaoPendente.enviar();
+    // Aprovar DECIDE o pedido: do gesto ao fim do envio ele está "em andamento",
+    // como no ✕ e no ✓ (`scheduleAction`), e uma busca nesse meio não o traz de
+    // volta (`semOsJaDecididos`). Sem isto, um ↻ na janela do Desfazer punha o
+    // pedido aprovado de volta como card na fila nova, e depois a aprovação saía
+    // e o card virava "já tratado" (achado da auditoria da fila, 2026-09-26).
+    // Solta no Desfazer e no fim do envio (`enviarAprovacao`), dê certo ou não.
+    marcarEmAndamento(place, true);
 
     const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
     if (semJanela) {
@@ -2965,6 +2976,10 @@ function aprovarFotoAtual() {
         aplicarTravaDeAcao();
         removeUndoBanner();
         Lightbox.desmarcarAprovada(alvo);
+        // Volta a ser só um pedido da fila — no Desfazer E no cancelamento da
+        // queda/"Sair" (L6 passa por aqui): a marca de "em andamento" não pode
+        // sobrar, senão a busca nunca mais o traz.
+        marcarEmAndamento(place, false);
         return true;
     };
     // O mesmo Desfazer do card — ver a exclusão acima.

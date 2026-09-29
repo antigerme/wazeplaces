@@ -185,7 +185,7 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
   const deps = {
     AppState, Lightbox: L, Treino: { ativo: false }, epocaDaSessao: 0,
     canDisableUndo: () => true, estadoAprovando: () => {}, lixeiraOcupada: () => {},
-    fotoDoLightboxNaTela: () => fotoNaTela, manterFocoNoLightbox: () => log.push('foco'),
+    fotoDoLightboxNaTela: () => fotoNaTela, manterFocoNoLightbox: () => log.push('foco'), marcarEmAndamento: () => {},
     API: { aprovarPedido: async () => { log.push('api:aprovar'); return resposta; },
       excluirFoto: async () => { log.push('api:excluir'); return resposta; }, prepararExclusao: () => {} },
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, contarConquista: () => {},
@@ -383,6 +383,7 @@ function montarL1({ respostas, viva, caiNaSonda = false }) {
     devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {}, contarConquista: () => {},
     montarCardDeFundo: () => {}, cardDaFrente: () => null, document: { getElementById: () => null },
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, advanceQueue: () => log.push('avancou'),
+    marcarEmAndamento: () => {},
   };
   const nomes = ['refazerDepoisDo401', 'enviarExclusao', 'enviarAprovacao', 'concluirAprovacao',
     'enviarRenomeacao', 'aplicarNosIrmaos', 'aplicarNomeNaTela'];
@@ -664,4 +665,81 @@ test('L12 os caminhos: fechar a foto e o mapa devolvem o foco, e sair da ediçã
   // A foto do card pode RECEBER o foco de volta sem entrar no Tab.
   const html = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
   assert.match(html, /<img class="card-image [^>]*tabindex="-1"/, 'a foto do card deixou de poder receber o foco de volta');
+});
+
+// ── A APROVAÇÃO de foto é um pedido "em andamento" (achado da auditoria da
+// fila, 2026-09-26). O ✕/✓ marcam o pedido do gesto ao fim do envio
+// (`pedidosEmAndamento`, que o `semOsJaDecididos` consulta); a aprovação não
+// marcava: um ↻ na janela do Desfazer trazia o pedido aprovado de volta como
+// card na fila nova, e depois a aprovação saía e o card virava "já tratado".
+// As funções de VERDADE (`aprovarFotoAtual`, `enviarAprovacao`,
+// `marcarEmAndamento`, `chaveDoPedido`), com o relógio e o Waze de mentira.
+function montarAprovacao({ semJanela = false, resposta = { success: true } } = {}) {
+  const log = [];
+  const L = lightbox();
+  const A = pedidoDeFoto('ur-A');
+  abrir(L, A, [FOTO('velha'), FOTO('ur-A')], 1);
+  const AppState = { preferences: { undoEnabled: !semJanela }, serverTotal: 5, currentPlace: A };
+  const timers = [];
+  let responder = null;
+  const emAndamento = new Set();
+  const deps = {
+    AppState, Lightbox: L, Treino: { ativo: false }, epocaDaSessao: 0, pedidosEmAndamento: emAndamento,
+    canDisableUndo: () => true, estadoAprovando: () => {}, fotoDoLightboxNaTela: () => true, manterFocoNoLightbox: () => {},
+    API: { aprovarPedido: () => new Promise((ok) => { responder = () => ok(resposta); }) },
+    registrarPouso: () => log.push('pouso'), updateStats: () => {}, contarConquista: () => {}, advanceQueue: () => {},
+    handleUnauthorized: () => {}, showToast: () => {}, msgDoServidor: () => '', t: (k) => k,
+    aplicarTravaDeAcao: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {}, registrarDesfazer: () => {},
+    setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
+    callWithRetry: (fn) => fn(), sessaoVivaDepoisDe: () => false, escritasConferindo: 0,
+    // A busca de verdade (`semOsJaDecididos`), sem fila de saída nem pouso: o
+    // que a tira da fila nova é só o "em andamento".
+    carregarFilaDeSaida: () => [], pousosDaPagina: new Map(), offlineLigado: () => false, offlineLerPousos: () => [],
+  };
+  const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'semOsJaDecididos', 'enviarAprovacao', 'concluirAprovacao',
+    'aprovarFotoAtual', 'refazerDepoisDo401'];
+  const chaves = Object.keys(deps);
+  const corpo = nomes.map(fatiar).join('\n')
+    .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
+    .replace(/aprovacaoPendente/g, '__pend.a').replace(/exclusaoPendente/g, '__pend.e');
+  const pend = { a: null, e: null };
+  const app = new Function(...chaves, '__res', '__pend', corpo + `\nreturn { ${nomes.join(', ')} };`)(
+    ...chaves.map((k) => deps[k]), { v: null }, pend);
+  const chave = `${A.venueID}|${A.updateRequestID}`;
+  // O ↻: a fila nova traz o MESMO pedido num objeto novo, como o Waze devolve.
+  const busca = () => app.semOsJaDecididos([{ ...A }], 0).places.length;
+  return { app, A, log, pend, timers, emAndamento, chave, busca, responder: () => responder && responder() };
+}
+const umTique = () => new Promise((r) => setTimeout(r, 0));
+
+test('aprovação em andamento: marcada do GESTO ao fim do envio — o ↻ na janela não traz o pedido de volta', async () => {
+  const m = montarAprovacao();
+  assert.equal(m.busca(), 1, 'CONTROLE: antes do gesto a busca traz o pedido');
+  m.app.aprovarFotoAtual();
+  assert.ok(m.emAndamento.has(m.chave), 'na janela do Desfazer a aprovação não marcou o pedido: um ↻ o traria de volta');
+  assert.equal(m.busca(), 0, 'na janela do Desfazer, a busca (o ↻) trouxe o pedido aprovado de volta');
+  m.timers[0]();                                    // a janela fecha sozinha: a aprovação sai
+  assert.ok(m.emAndamento.has(m.chave), 'com a aprovação NO AR o pedido deixou de estar em andamento');
+  m.responder(); await umTique(); await umTique();
+  assert.ok(!m.emAndamento.has(m.chave), 'depois do pouso o pedido ficou "em andamento" pra sempre');
+  assert.deepEqual(m.log, ['pouso']);
+});
+
+test('aprovação em andamento: o Desfazer e a FALHA soltam a marca (o pedido volta a ser só um pedido da fila)', async () => {
+  const d = montarAprovacao();
+  d.app.aprovarFotoAtual();
+  d.pend.a.desfazer();
+  assert.ok(!d.emAndamento.has(d.chave), 'o Desfazer deixou o pedido marcado: nenhuma busca o traria mais');
+  assert.equal(d.busca(), 1, 'desfeita a aprovação, a busca não traz mais o pedido');
+  const f = montarAprovacao({ resposta: { success: false, errorCategory: 'unknown' } });
+  f.app.aprovarFotoAtual();
+  f.timers[0]();
+  f.responder(); await umTique(); await umTique();
+  assert.ok(!f.emAndamento.has(f.chave), 'a aprovação que FALHOU deixou o pedido marcado');
+  // SEM Desfazer: marcado durante o voo, solto no fim.
+  const s = montarAprovacao({ semJanela: true });
+  s.app.aprovarFotoAtual();
+  assert.ok(s.emAndamento.has(s.chave), 'sem Desfazer, a aprovação no ar não marcou o pedido');
+  s.responder(); await umTique(); await umTique();
+  assert.ok(!s.emAndamento.has(s.chave));
 });
