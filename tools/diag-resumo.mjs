@@ -16,7 +16,7 @@
 //    `localStorage`, `sessionStorage` e `cookiesDestaOrigem` não são lidos pra
 //    saída; e, como defesa a mais, TODA a saída passa por uma troca do token
 //    por `<TOKEN>` antes de ser impressa — se ele vazar pra dentro de alguma
-//    mensagem de erro, não sai daqui.
+//    mensagem de erro, não sai daqui. O link de pareamento (`#pair=…`), idem.
 //  · DADO DE TERCEIRO EM MASSA: `appState` (a fila inteira), `dom`, `codigo` e
 //    o corpo das chamadas (`corpoReq`) ficam de fora. O diário do modo dev pode
 //    citar um nome de local, como sempre citou — ele é assim por desenho.
@@ -49,6 +49,12 @@ const hora = (t) => {
   return Number.isNaN(dt.getTime()) ? String(t) : dt.toISOString().slice(11, 23);
 };
 const secao = (titulo) => { out(); out('── ' + titulo + ' ' + '─'.repeat(Math.max(3, 60 - titulo.length))); };
+// O MESMO painel diz coisas diferentes (auditoria de 2026-09-26): "tudoLimpo" era
+// também o "Fim da fila" (pulados pendentes) e o "nada tratado nesta fila", e a
+// falha podia ser "sem conexão". A `variante` entrou no relatório v11.
+const VARIANTES = { limpo: 'tudo limpo de verdade', fimDaFila: 'fim da fila: há pulados pendentes',
+  nadaNestaFila: 'nada tratado nesta fila', semConexao: 'sem conexão', falha: 'falha ao carregar' };
+const painelComVariante = (x) => `${x.painel}${x.variante ? ` (${VARIANTES[x.variante] || x.variante})` : ''}`;
 
 const r = d.resumo || {};
 out(`arquivo: ${origem}, ${Math.round(bytes / 1024)} KB · relatório v${d._versaoDoDiag ?? '?'} · app ${d.app?.rotulo ?? d.app?.versao ?? '?'} · gerado ${d._gerado ?? '?'}`);
@@ -67,7 +73,7 @@ else for (const c of nasCapturas) out(`nas capturas: ${hora(c.t)} ${c.motivo} (p
 
 secao('TELA NA HORA DO RELATÓRIO');
 const ta = r.telaAgora || {};
-out(`tela ${ta.tela} · painel ${ta.painel} · card montado: ${ta.cardMontado === undefined ? AUSENTE : ta.cardMontado} · modais ${j(ta.modais)} · lightbox ${ta.lightbox}`);
+out(`tela ${ta.tela} · painel ${painelComVariante(ta)} · card montado: ${ta.cardMontado === undefined ? AUSENTE : ta.cardMontado} · modais ${j(ta.modais)} · lightbox ${ta.lightbox}`);
 // Desde o v10 o "já tratado" (outro editor chegou antes, que pro app é sucesso)
 // sai das falhas e vem à parte; antes dele, `falhas` somava os dois.
 const jaTratadas = typeof r.jaTratadas === 'number' ? ` · já tratadas ${r.jaTratadas}` : '';
@@ -79,7 +85,13 @@ if ((ta.modais || []).length) {
 secao('OFFLINE');
 const off = d.offline;
 if (off === undefined) out(AUSENTE);
-else {
+// DESLIGADO não é "ausente nesta versão": o app sai cedo da seção e não guarda
+// fila, janela nem tile de quem não ligou o recurso (é a regra "quem não marca
+// não paga nada"), então esses campos não EXISTEM — e o leitor atribuía à
+// versão do relatório o que era o interruptor (auditoria de 2026-09-26).
+else if (off.ligado === false) {
+  out(`desligado — nada guardado no aparelho (a fila, a janela e os tiles só existem com o "Disponível offline" ligado) · tiles guardados que falharam ${off.tilesGuardadosQueFalharam ?? '—'}`);
+} else {
   out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} / gravada ${off.janelaGuardada === undefined ? '—' : off.janelaGuardada}`);
   out(`fila guardada ${j(off.filaGuardada)} · tiles no cache ${j(off.tilesNoCache)} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam}`);
   if (off.ligado) out(`pousos gravados depois da fila guardada: ${off.pousosGravados === undefined ? AUSENTE : off.pousosGravados}`);
@@ -168,6 +180,13 @@ secao('CÓDIGO NO APARELHO');
       + (soBorda(u, v) ? ' — com o mesmo tamanho: é o script que o Cloudflare injeta a cada resposta, que o relatório anterior ao v9 não descontava' : ''));
   }
   if (reais.length) out('ATENÇÃO: o aparelho roda código diferente do servidor — versão velha no cache, ou misturada.');
+  // A COLETA (relatório v11+): o que NÃO respondeu no orçamento do relatório —
+  // rede pendurada dita no arquivo, e não deduzida de um "sem conferir".
+  const co = d.coleta;
+  if (co && Array.isArray(co.semResposta)) {
+    out(`coleta: ${co.ms} ms (orçamento ${co.orcamentoMs} ms) · sem resposta: ${co.semResposta.length}`);
+    if (co.semResposta.length) out(`ATENÇÃO: ${co.semResposta.length} leitura(s) sem resposta no orçamento — rede pendurada na hora do relatório: ${co.semResposta.map(nome).slice(0, 8).join(', ')}${co.semResposta.length > 8 ? '…' : ''}`);
+  }
 }
 
 secao('SERVICE WORKER');
@@ -179,8 +198,31 @@ else if (!sp) out('por ele mesmo: sem controlador (nada a perguntar)');
 else if (sp.semResposta) out('por ele mesmo: NÃO respondeu (worker de versão antiga, ou travado)');
 else out(`por ele mesmo: ${sp.versao} · vivo há ${Math.round((sp.idadeMs || 0) / 1000)}s · lista pronta ${sp.listaPronta} com ${sp.tilesNaLista} tiles · do cache ${sp.doCache} · cache sem entrada ${sp.cacheSemEntrada} · esperou leitura ${sp.esperouLeitura} · fora da lista ${sp.foraDaLista}`);
 
+// `sessaoDuracaoH` é um OBJETO desde que nasceu (`{menor, mediana, maior, n}`,
+// só dos ciclos com as duas pontas medidas), e esta linha o interpolava cru:
+// saía "[object Object]" em TODO relatório com ciclo fechado, do v2 ao v10 — a
+// resposta da pergunta que a seção existe pra responder ("dura 2 dias ou 7?")
+// virava lixo na triagem (auditoria de 2026-09-26). Os PISOS (ciclo que começou
+// num `jaAtiva`: a duração é "pelo menos") ficam FORA da conta de propósito, e
+// a linha diz quantos são e quanto cada um já durou — `pisos` entrou depois do
+// v2, então o relatório antigo diz que não o trazia.
+function duracaoDaSessao(dur, sessao) {
+  let conta;
+  if (dur && typeof dur === 'object') {
+    conta = `mediana ${dur.mediana ?? '?'} · menor–maior ${dur.menor ?? '?'}–${dur.maior ?? '?'} · n ${dur.n ?? '?'}`;
+  } else if (dur === undefined) conta = AUSENTE;
+  else if (dur === null) conta = '— (nenhum ciclo fechado com o início medido)';
+  else conta = String(dur);
+  if (!sessao) return conta;
+  if (!Number.isFinite(sessao.pisos)) return `${conta} · pisos ${AUSENTE}`;
+  const pisos = (Array.isArray(sessao.ciclos) ? sessao.ciclos : [])
+    .filter((c) => c && c.inicioConhecido === false && Number.isFinite(c.durouH))
+    .map((c) => `≥ ${c.durouH}${c.fim === 'em curso' ? ', em curso' : ''}`);
+  return `${conta} · pisos ${sessao.pisos}${pisos.length ? ` (${pisos.join('; ')})` : ''}`;
+}
+
 secao('SESSÃO E ARMAZENAMENTO');
-out(`duração da sessão (h): ${r.sessaoDuracaoH ?? '—'} · nascimento ${d.sessao?.nascimento ?? '—'} · idade do armazenamento (h) ${d.sessao?.idadeDoArmazenamentoH ?? '—'}`);
+out(`duração da sessão (h): ${duracaoDaSessao(r.sessaoDuracaoH, d.sessao)} · nascimento ${d.sessao?.nascimento ?? '—'} · idade do armazenamento (h) ${d.sessao?.idadeDoArmazenamentoH ?? '—'}`);
 out(`risco de apagamento: ${r.riscoDeApagamento ?? '—'}`);
 out(`recursos: ${j(d.recursosInfo)}`);
 
@@ -219,7 +261,7 @@ if (chamadas.length > 30) out(`(… e mais ${chamadas.length - 30} antes destas)
 function linhasDaCaptura(m, recuo = '') {
   const quebradas = Array.isArray(m.imagens) ? m.imagens.filter((i) => i.quebrada).length : '—';
   const alertasM = Array.isArray(m.alertas) ? (m.alertas.length ? m.alertas.map((a) => a.chave).join(', ') : 'nenhum') : AUSENTE;
-  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${m.painel} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}`);
+  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${painelComVariante(m)} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}`);
   out(`${recuo}    rede ${m.rede === undefined ? AUSENTE : j(m.rede)} · offline ${m.offline === undefined ? AUSENTE : j(m.offline)}`);
   out(`${recuo}    fila ${m.estado?.fila} · restam ${m.estado?.serverTotal} · hasMore ${m.estado?.hasMore} · loadError ${m.estado?.loadError} · imagens quebradas ${quebradas} · alertas: ${alertasM}`);
 }
@@ -273,4 +315,9 @@ let texto = linhas.join('\n');
 const token = d.localStorage && typeof d.localStorage.waze_session_token === 'string'
   ? d.localStorage.waze_session_token : '';
 if (token.length >= 8) texto = texto.split(token).join('<TOKEN>');
+// E o SEGREDO DO PAREAMENTO: o link `/#pair=<segredo>` vale uma sessão nova por
+// 5 min. Relatório anterior à auditoria de 2026-09-26 o trazia no diário (o toast
+// copiável de quando a área de transferência falha, D1), e a triagem o
+// imprimia. Pela FORMA do link, que é o que se repete em qualquer versão.
+texto = texto.replace(/([#?&]pair=)[^\s"'&<>\\]+/g, '$1<PAREAMENTO>');
 console.log(texto);

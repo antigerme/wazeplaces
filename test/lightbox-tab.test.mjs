@@ -91,3 +91,32 @@ test('o Desfazer que aparece por cima do lightbox entra na volta do Tab — nas 
   c.tab(false);
   assert.equal(c.doc.activeElement.nome, 'fechar');
 });
+
+// ── L13: no mapa ampliado as QUATRO setas andam (auditoria de 2026-09-26) ────
+// O ↓ fechava o mapa (copiado da foto, onde espelha o arraste pra baixo que
+// fecha); no mapa o arraste pra baixo ANDA, e pelo teclado não se chegava ao
+// sul do pedido. O `handleKeyDown` de verdade, com as camadas de mentira.
+function teclado({ mapaAberto, fotoAberta }) {
+  const log = [];
+  const MapaLightbox = { isOpen: () => mapaAberto, close: () => log.push('mapa:fechou'),
+    zoom: (d) => log.push('mapa:zoom' + d), arrastar: (dx, dy) => log.push(`mapa:anda ${dx},${dy}`) };
+  const Lightbox = { isOpen: () => fotoAberta, prev: () => log.push('foto:prev'), next: () => log.push('foto:next') };
+  const deps = { MapaLightbox, Lightbox, focoEmCampoDeTexto: () => false, TECLAS_DE_CURSOR: [],
+    trapTabInModal: () => {}, recuarNaFoto: () => log.push('foto:recuou'), desfazerPeloTeclado: () => false,
+    document: { getElementById: () => null } };
+  const h = new Function(...Object.keys(deps), fatiar('handleKeyDown') + '\nreturn handleKeyDown;')(...Object.values(deps));
+  return { apertar: (key) => { h({ key, preventDefault() {} }); }, log };
+}
+
+test('L13 mapa ampliado: ← → ↑ ↓ andam (o ↓ pro SUL) e só o Esc fecha', () => {
+  const m = teclado({ mapaAberto: true, fotoAberta: false });
+  for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) m.apertar(k);
+  assert.deepEqual(m.log, ['mapa:anda 80,0', 'mapa:anda -80,0', 'mapa:anda 0,80', 'mapa:anda 0,-80'],
+    'as setas não andam as quatro direções no mapa (o ↓ fechava)');
+  m.apertar('Escape');
+  assert.equal(m.log.at(-1), 'mapa:fechou', 'o Esc deixou de fechar o mapa');
+  // CONTROLE: na FOTO o ↓ segue sendo o passo pra trás (espelha o arraste).
+  const f = teclado({ mapaAberto: false, fotoAberta: true });
+  f.apertar('ArrowDown');
+  assert.deepEqual(f.log, ['foto:recuou'], 'CONTROLE: na foto o ↓ deixou de ser o passo pra trás');
+});

@@ -20,11 +20,28 @@
 // `tools/diag-api.mjs`, que é outra ferramenta e tem outras regras.
 import { readFileSync } from 'node:fs';
 import { lerDiagnostico } from './diag-ler.mjs';
-import { spawn } from 'node:child_process';
+import { subirServidorLocal } from './servidor-local.mjs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+// O TEMA que a pessoa via, e de onde ele vem. Só o GUARDADO era lido — e quem
+// segue o sistema (o padrão: nada guardado até tocar no botão) num celular
+// escuro remontava CLARO, com o init abaixo ainda gravando "light" por cima
+// (auditoria de 2026-09-26). A ordem: a escolha guardada; senão o que a TELA
+// mostrava (`computado.tema.htmlClasse`, relatório v3+); senão o sistema do
+// aparelho (`ambiente.escuro`). `sistema` é o esquema do APARELHO, que vai pro
+// contexto do navegador: sem escolha guardada, o app o segue sozinho.
+function temaDoRelatorio(d) {
+  const guardado = /^"?(dark|light)"?$/.exec(String(((d && d.localStorage) || {}).waze_places_theme || ''));
+  const classe = d && d.computado && d.computado.tema && d.computado.tema.htmlClasse;
+  const sistema = d && d.ambiente && typeof d.ambiente.escuro === 'boolean' ? d.ambiente.escuro : null;
+  if (guardado) return { escuro: guardado[1] === 'dark', guardado: guardado[1], sistema, origem: 'escolhido' };
+  if (typeof classe === 'string') return { escuro: /(^|\s)dark(\s|$)/.test(classe), guardado: null, sistema, origem: 'o da tela' };
+  return { escuro: sistema === true, guardado: null, sistema, origem: sistema === null ? 'padrão' : 'o do sistema' };
+}
+
 const args = process.argv.slice(2);
 const ARQ = args.find((a) => !a.startsWith('--'));
 const opt = (nome, padrao) => {
@@ -54,41 +71,42 @@ const recorte = fila.slice(idx, idx + LIMITE);
 const [W, H] = String((d.ambiente && d.ambiente.tela && d.ambiente.tela.janela) || '390x844')
   .split('x').map((n) => parseInt(n, 10) || 0);
 const dpr = (d.ambiente && d.ambiente.tela && d.ambiente.tela.dpr) || 2;
-const escuro = /"?dark"?/.test(String((d.localStorage || {}).waze_places_theme || ''));
+const tema = temaDoRelatorio(d);
+const escuro = tema.escuro;
 const lang = (d.app && d.app.idioma) || 'pt';
 const PORTA = parseInt(opt('porta', '8123'), 10);
 
 console.log(`de:      ${ARQ.split('/').pop()}   (${_origemDoDiag})`);
 console.log(`app:     ${(d.app && d.app.rotulo) || '?'}   formato ${d._formato || '?'}`);
-console.log(`tela:    ${W}x${H} @${dpr}x · tema ${escuro ? 'escuro' : 'claro'} · idioma ${lang}`);
+console.log(`tela:    ${W}x${H} @${dpr}x · tema ${escuro ? 'escuro' : 'claro'} (${tema.origem}) · idioma ${lang}`);
 console.log(`fila:    ${fila.length} pedido(s), injetando ${recorte.length} a partir do índice ${idx}`);
 console.log(`filtros: ${JSON.stringify(st.filters || {})}`);
 
 const { carregarPlaywright, abrirChromium } = await import('./navegador.mjs');
+const { esperarOuExplodir } = await import('./esperar-saida.mjs');
 const pw = await carregarPlaywright();
 
-const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
-  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1' },
-  stdio: ['ignore', 'ignore', 'inherit'],
-});
+// Sobe por `tools/servidor-local.mjs`: a porta tem que estar LIVRE (a padrão é
+// a mesma do smoke de layout, e com ele rodando a tela reconstruída seria a do
+// servidor dele), e pronto é o próprio processo dizer que a ocupou.
+const { servidor } = await subirServidorLocal({ porta: PORTA, variavel: '--porta' });
 const parar = () => { try { servidor.kill(); } catch (e) {} };
-process.on('exit', parar);
 process.on('SIGINT', () => { parar(); process.exit(130); });
-
-// Espera o servidor ATENDER, não um relógio: `sleep` fixo é palpite e falha na
-// máquina lenta justamente quando se está com pressa.
-for (let i = 0; i < 60; i++) {
-  try { await fetch(`http://127.0.0.1:${PORTA}/`); break; } catch (e) {
-    await new Promise((r) => setTimeout(r, 250));
-  }
-}
 
 const browser = await abrirChromium(pw, { headless: !args.includes('--abrir') });
 const ctx = await browser.newContext({
   viewport: { width: W, height: H }, deviceScaleFactor: dpr,
   locale: lang, hasTouch: true, isMobile: true, serviceWorkers: 'block',
-  colorScheme: escuro ? 'dark' : 'light',
+  // O esquema do APARELHO quando o relatório o traz; sem escolha guardada é
+  // ele que o app segue — e aí `escuro` já veio dele (ou da tela).
+  colorScheme: (tema.guardado && tema.sistema !== null ? tema.sistema : escuro) ? 'dark' : 'light',
 });
+// NADA sai pra rede, POR CONSTRUÇÃO: o estado vem do arquivo, e a sessão aqui
+// é fictícia (ver abaixo). Antes isto valia só porque não havia token; com o
+// token fictício, uma ação no replay iria à API local e voltaria 401, e o 401
+// derrubaria a "sessão" da tela que se quer olhar. Abortada, a chamada é rede
+// fora — o app segue na tela.
+await ctx.route('**/api/**', (r) => r.abort('internetdisconnected'));
 const page = await ctx.newPage();
 const erros = [];
 page.on('pageerror', (e) => erros.push(e.message));
@@ -96,29 +114,41 @@ page.on('pageerror', (e) => erros.push(e.message));
 // As preferências e o idioma entram ANTES da carga: o "Como funciona" da
 // primeira execução cobre o card inteiro no Fold, e aí toda medição mede o
 // modal. Custou uma rodada de mockups descobrir isso.
-await page.addInitScript(([prefs, l, tema]) => {
+await page.addInitScript(([prefs, l, temaGuardado]) => {
   try {
     localStorage.setItem('waze_places_preferences', prefs);
     localStorage.setItem('waze_places_lang', l);
-    localStorage.setItem('waze_places_theme', tema);
+    // Só a escolha que a pessoa FEZ: sem ela, gravar "light" aqui fazia o app
+    // parar de seguir o sistema — e o celular escuro remontava claro.
+    if (temaGuardado) localStorage.setItem('waze_places_theme', temaGuardado);
   } catch (e) {}
-}, [JSON.stringify({ ...(st.preferences || {}), comoFuncionaVisto: true }), lang, escuro ? 'dark' : 'light']);
+}, [JSON.stringify({ ...(st.preferences || {}), comoFuncionaVisto: true }), lang, tema.guardado]);
 
 await page.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'load' });
-await page.waitForFunction(() => typeof AppState !== 'undefined', null, { timeout: 30000 });
+// Pelo lado do Node, não `waitForFunction`: o poller padrão dele avalia string
+// DENTRO da página, e a CSP do app (sem `unsafe-eval`) o barra — o EvalError
+// intermitente que custou rodadas de CI (ver `tools/esperar-saida.mjs`).
+await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'o app carregar', 30000);
 
 await page.evaluate(([places, filtros, perfil, devMode]) => {
   for (const id of ['authScreen', 'loadingCard', 'comoFuncionaModal']) {
     document.getElementById(id)?.classList.add('hidden');
   }
-  document.getElementById('appScreen')?.classList.remove('hidden');
-  AppState.authenticated = true;
+  // A sessão é FICTÍCIA, e está no armazenamento como estaria no aparelho: sem
+  // token, a sentinela `tokenNaoPersiste` acusava um defeito que o aparelho não
+  // tinha (a tela logada sem token é artefato do replay). Gravado DEPOIS da
+  // carga, pra o app não tentar entrar com ele.
+  try { localStorage.setItem('waze_session_token', 'replay-sessao-ficticia'); } catch (e) {}
   AppState.profile = perfil || AppState.profile;
   if (filtros) AppState.filters = { ...AppState.filters, ...filtros };
+  if (devMode) AppState.devMode = devMode;
+  // O CABEÇALHO como o app o monta ao entrar — perfil, Filtros e Atualizar
+  // (sem isto a remontagem saía com o cabeçalho de quem não entrou).
+  showMainScreen();
+  renderProfileHeader();
   AppState.queue = places;
   AppState.serverTotal = places.length;
   AppState.hasMore = false;
-  if (devMode) AppState.devMode = devMode;
   showCurrentPlace();
   updatePendingCount();
   if (typeof atualizarFabDev === 'function') atualizarFabDev();
@@ -126,13 +156,22 @@ await page.evaluate(([places, filtros, perfil, devMode]) => {
 
 await page.waitForTimeout(500);
 
-const visao = await page.evaluate(() => ({
-  painel: document.querySelector('.place-card') ? 'card'
-    : (!document.getElementById('noMoreCards')?.classList.contains('hidden') ? 'tudoLimpo' : 'nada'),
-  titulo: document.querySelector('.card-name')?.textContent.trim() || null,
-  alertas: typeof diagSentinelas === 'function' ? diagSentinelas(diagComputado()) : null,
-}));
-console.log(`\npainel:  ${visao.painel}${visao.titulo ? ` · "${visao.titulo}"` : ''}`);
+const visao = await page.evaluate(() => {
+  const naTela = (id) => { const e = document.getElementById(id); return !!e && !e.classList.contains('hidden') && e.getBoundingClientRect().width > 0; };
+  return {
+    painel: document.querySelector('.place-card') ? 'card'
+      : (!document.getElementById('noMoreCards')?.classList.contains('hidden') ? 'tudoLimpo' : 'nada'),
+    titulo: document.querySelector('.card-name')?.textContent.trim() || null,
+    tema: document.documentElement.classList.contains('dark') ? 'escuro' : 'claro',
+    // O CABEÇALHO que ficou na tela — é a primeira coisa que difere quando a
+    // remontagem não entra "como o app entra".
+    cabecalho: { perfil: naTela('userProfileBadge') ? (document.getElementById('userName')?.textContent || '').trim() : null,
+                 filtros: naTela('filtersBtn'), atualizar: naTela('refreshBtn') },
+    alertas: typeof diagSentinelas === 'function' ? diagSentinelas(diagComputado()) : null,
+  };
+});
+console.log(`\npainel:  ${visao.painel}${visao.titulo ? ` · "${visao.titulo}"` : ''} · tema na tela ${visao.tema}`);
+console.log(`cabeçalho: perfil ${visao.cabecalho.perfil ? `"${visao.cabecalho.perfil}"` : '—'} · Filtros ${visao.cabecalho.filtros ? 'sim' : 'NÃO'} · Atualizar ${visao.cabecalho.atualizar ? 'sim' : 'NÃO'}`);
 if (visao.alertas) console.log(`alertas: ${visao.alertas.length ? JSON.stringify(visao.alertas) : 'nenhum'}`);
 if (erros.length) console.log(`ERROS DE JS: ${erros.join(' | ')}`);
 

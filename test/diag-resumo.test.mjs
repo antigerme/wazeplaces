@@ -350,3 +350,123 @@ test('diag-resumo v10: o "já tratado" não é FALHOU — nem na lista, nem na c
   assert.match(s, /diário 0 · chamadas 1 \(falhas 0\)/, 'a abertura anterior conta o "já tratado" como falha');
   assert.match(s, /chamada já tratado 21:58:10\.000 marcar-lido http 500 · already_processed/);
 });
+
+// ── A duração da sessão (auditoria de 2026-09-26) ─────────────────────────
+// `resumo.sessaoDuracaoH` é um OBJETO desde que nasceu, e o leitor o
+// interpolava cru: "duração da sessão (h): [object Object]" em todo relatório
+// com um ciclo fechado, do v2 ao v10. A seção `sessao` aqui é a que o APP monta:
+// `diagSessao` fatiado do fonte e rodado sobre um diário de sessões — o formato
+// que o leitor recebe de verdade, e não um que eu imagino.
+function sessaoDoApp(diario, nascimento) {
+  const APP = readFileSync(join(ROOT, 'js/app.js'), 'utf8');
+  const ini = APP.indexOf('\nfunction diagSessao() {');
+  assert.ok(ini > 0, 'diagSessao sumiu do app.js');
+  let prof = 0, fim = -1;
+  for (let k = APP.indexOf('{', ini); k < APP.length; k++) {
+    if (APP[k] === '{') prof++;
+    else if (APP[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  const diagSessao = new Function('safeLS', 'NASCIMENTO_KEY', 'lerDiarioDeSessoes',
+    APP.slice(ini, fim) + '\nreturn diagSessao;')({ get: () => String(nascimento) }, 'n', () => diario);
+  return diagSessao();
+}
+
+test('diag-resumo: a duração da sessão sai LEGÍVEL — mediana, menor–maior, n e os pisos (nunca "[object Object]")', () => {
+  const H = 3600e3, agora = Date.now();
+  // Dois ciclos que CAÍRAM (20 h cada, início medido), e o de agora começado num
+  // `jaAtiva` (a sessão já existia quando o diário nasceu): um PISO, fora da conta.
+  const sessao = sessaoDoApp([
+    { t: agora - 60 * H, e: 'token+', via: 'cookies' }, { t: agora - 40 * H, e: 'caiu', motivo: 'srv.err.cookiesExpired' },
+    { t: agora - 30 * H, e: 'token+', via: 'extensao' }, { t: agora - 10 * H, e: 'caiu', motivo: 'srv.err.sessionExpired' },
+    { t: agora - 9 * H, e: 'jaAtiva' },
+  ], agora - 70 * H);
+  assert.deepEqual(sessao.duracaoH, { menor: 20, mediana: 20, maior: 20, n: 2 },
+    'PRÉ-CONDIÇÃO: o app mudou o formato da duração — o leitor e este teste precisam ser revistos');
+  const d = relatorioV4();
+  d._versaoDoDiag = 10;
+  d.resumo.sessaoDuracaoH = sessao.duracaoH;
+  d.sessao = sessao;
+  const s = rodar(d);
+  assert.ok(!s.includes('[object Object]'), 'algum objeto foi interpolado cru na triagem');
+  assert.match(s, /duração da sessão \(h\): mediana 20 · menor–maior 20–20 · n 2 · pisos 1 \(≥ 9, em curso\) · nascimento /,
+    'a duração da sessão não saiu legível (mediana, menor–maior, n e os pisos)');
+  // Sem ciclo fechado: a linha diz POR QUE não há número, em vez de um "—" mudo.
+  const semCiclo = relatorioV4();
+  semCiclo.resumo.sessaoDuracaoH = null;
+  semCiclo.sessao = sessaoDoApp([{ t: agora - H, e: 'token+', via: 'cookies' }], agora - 2 * H);
+  assert.match(rodar(semCiclo), /duração da sessão \(h\): — \(nenhum ciclo fechado com o início medido\) · pisos 0 · /);
+  // Relatório ANTIGO (v2: a conta já era objeto, os pisos ainda não existiam).
+  const v2 = relatorioV4();
+  v2._versaoDoDiag = 2;
+  v2.resumo.sessaoDuracaoH = { menor: 30, mediana: 30, maior: 30, n: 1 };
+  v2.sessao = { nascimento: null, idadeDoArmazenamentoH: null, ciclos: [{ durouH: 30, fim: 'caiu' }] };
+  const t2 = rodar(v2);
+  assert.ok(!t2.includes('[object Object]'), 'o relatório antigo voltou a imprimir o objeto cru');
+  assert.match(t2, /duração da sessão \(h\): mediana 30 · menor–maior 30–30 · n 1 · pisos \(ausente nesta versão\)/);
+  // E o v1, que nem trazia a conta.
+  assert.match(rodar(relatorioV4()), /duração da sessão \(h\): \(ausente nesta versão\) · nascimento/);
+});
+
+test('diag-resumo: o offline DESLIGADO diz "desligado" — não "ausente nesta versão"', () => {
+  // Com o interruptor desligado o app sai cedo da seção (quem não marca não
+  // paga nada): fila, janela e tiles não existem. O leitor atribuía isso à
+  // VERSÃO do relatório — "fila guardada (ausente nesta versão)" num v10.
+  const d = relatorioV4();
+  d._versaoDoDiag = 10;
+  d.offline = { ligado: false, janelaServida: null, janelaAtual: 1492033, resultado: null, varrendo: false,
+                tilesGuardadosQueFalharam: 0 };
+  const s = rodar(d);
+  const secaoOff = (s.split('── OFFLINE ')[1] || '').split('\n── ')[0];
+  assert.match(secaoOff, /desligado — nada guardado no aparelho/, 'o offline desligado não foi dito');
+  assert.ok(!secaoOff.includes('ausente nesta versão'), 'o leitor atribuiu à versão o que é o interruptor desligado');
+  // CONTROLE: ligado, a seção segue mostrando o que o aparelho guardou.
+  assert.match(rodar(relatorioV4()), /fila guardada \{"n":236,"idadeMin":2\}/);
+});
+
+test('diag-resumo: o painel vem com a VARIANTE — "Fim da fila" não é "tudo limpo"', () => {
+  // O `painel` dizia "tudoLimpo" também no "Fim da fila" (pulados pendentes) e
+  // no "nada tratado nesta fila". A variante entrou no relatório v11.
+  const d = relatorioV4();
+  d._versaoDoDiag = 11;
+  d.resumo.telaAgora = { ...d.resumo.telaAgora, painel: 'tudoLimpo', variante: 'fimDaFila' };
+  d.momentos[0] = { ...d.momentos[0], painel: 'tudoLimpo', variante: 'nadaNestaFila' };
+  const s = rodar(d);
+  assert.match(s, /tela app · painel tudoLimpo \(fim da fila: há pulados pendentes\) · card montado/);
+  assert.match(s, /manual · tela app · painel tudoLimpo \(nada tratado nesta fila\) · card montado/);
+  // CONTROLE: relatório sem a variante (anterior ao v11) sai como sempre.
+  assert.match(rodar(relatorioV4()), /tela app · painel carregando · card montado: true/);
+});
+
+test('diag-resumo: o link de PAREAMENTO nunca sai — nem de um relatório antigo que o trazia no diário', () => {
+  // Até a auditoria de 2026-09-26 (D1), o toast copiável do pareamento (quando a
+  // área de transferência falha) ia inteiro pro diário, e a triagem o imprimia.
+  const SEGREDO = 'CANARIOPAREAMENTO20X';
+  const d = relatorioV4();
+  d.diario.push({ t: 1790108834600, k: 'toast', tipo: 'info', txt: 'https://app.x/#pair=' + SEGREDO });
+  d.erros.push({ t: '2026-09-22T20:27:31.000Z', tipo: 'erro', msg: 'abriu /?pair=' + SEGREDO + '&x=1' });
+  const s = rodar(d);
+  assert.ok(!s.includes(SEGREDO), 'o segredo do pareamento saiu na triagem');
+  assert.match(s, /#pair=<PAREAMENTO>/, 'o link do diário não foi trocado pelo marcador');
+  assert.match(s, /\?pair=<PAREAMENTO>&x=1/, 'o link antigo (query) não foi trocado');
+  // CONTROLE: o resto da linha do diário continua lá.
+  assert.match(s, /toast\s+\{"tipo":"info","txt":"https:\/\/app\.x\/#pair=<PAREAMENTO>"\}/);
+});
+
+test('diag-resumo: a COLETA diz o que ficou sem resposta — a rede pendurada DITA, não deduzida', () => {
+  // D15 (auditoria de 2026-09-26): o relatório passou a ter um orçamento, e o
+  // que não chegou dentro dele sai em `coleta.semResposta`. Sem esta linha a
+  // triagem mostrava só "sem conferir: N", que também é o 404 e o erro comum.
+  const d = relatorioV4();
+  d.coleta = { ms: 10012, orcamentoMs: 10000, semResposta: ['http://127.0.0.1:8080/js/min/app.js', '/css/app.css', '/'] };
+  const s = rodar(d);
+  assert.match(s, /coleta: 10012 ms \(orçamento 10000 ms\) · sem resposta: 3/, 'a coleta não aparece na triagem');
+  assert.match(s, /ATENÇÃO: 3 leitura\(s\) sem resposta no orçamento — rede pendurada na hora do relatório: \/js\/min\/app\.js, \/css\/app\.css, \//,
+    'o que não chegou não é nomeado (e sem a origem, como o resto da seção)');
+  // CONTROLE: coleta limpa não acusa nada; relatório antigo (sem `coleta`) não ganha a linha.
+  const boa = relatorioV4();
+  boa.coleta = { ms: 812, orcamentoMs: 10000, semResposta: [] };
+  const sb = rodar(boa);
+  assert.match(sb, /coleta: 812 ms \(orçamento 10000 ms\) · sem resposta: 0/);
+  assert.doesNotMatch(sb, /leitura\(s\) sem resposta/, 'a coleta limpa acusou rede pendurada');
+  assert.doesNotMatch(rodar(relatorioV4()), /coleta:/, 'relatório sem coleta ganhou uma linha inventada');
+});

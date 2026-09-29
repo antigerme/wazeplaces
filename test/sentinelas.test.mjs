@@ -293,7 +293,9 @@ test('diagnóstico: as duas sentinelas novas leem o que o COLETOR mede de verdad
     'o coletor parou de medir se a foto CARREGOU (complete E naturalWidth)');
   assert.match(corpo, /const frente = cardDaFrente\(\);/,
     'a medição tem que ser do card da FRENTE — o de fundo é clone, sem ouvinte');
-  assert.match(corpo, /fora\.tilesGuardadosQueFalharam = diagTilesGuardadosQueFalharam\.slice\(-5\)/,
+  // Só as falhas desde a leitura anterior (auditoria de 2026-09-26, D9): o anel
+  // inteiro repetia a mesma falha em toda captura. Roda em test/diagnostico.
+  assert.match(corpo, /fora\.tilesGuardadosQueFalharam = diagTilesParaAlerta\(\)/,
     'o coletor parou de levar o anel de tiles guardados que falharam');
 });
 

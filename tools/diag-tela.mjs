@@ -18,8 +18,8 @@
 //     tracejada com a marca de QUEBRADA quando o aparelho disse que ela estava;
 //   · pixel de canvas não vive no DOM — usa o `dataURL` do momento quando ele
 //     existe, e diz "origem cruzada" quando o navegador se recusou a dá-lo;
-//   · a fonte Inter é binária e o diagnóstico a lê como texto, então a
-//     renderização usa a fonte do sistema: o texto pode medir um pouco diferente.
+//   · a fonte vem do REPOSITÓRIO (o diagnóstico não a traz): quando ela não
+//     carrega na remontagem, o rodapé diz, e o texto pode medir diferente.
 //
 // A página é montada SEM JAVASCRIPT e SEM REDE de propósito: o DOM capturado já
 // é o resultado; re-executar scripts mudaria o instante que se quer olhar.
@@ -49,10 +49,21 @@ mkdirSync(saida, { recursive: true });
 
 // Os dois formatos convivem: o primeiro diagnóstico guardava UM `dom`; o do FAB
 // guarda N `momentos`. Ler os dois evita que arquivo antigo vire inútil.
-const atuais = Array.isArray(d.momentos) && d.momentos.length
-  ? d.momentos
-  : (d.dom ? [{ t: d._gerado, motivo: 'arquivo v1', dom: d.dom,
-                imagens: [], canvas: [], modais: [], painel: '?' }] : []);
+//
+// Relatório SEM captura (a pessoa baixou sem tocar no botão) remonta o `dom` da
+// hora de baixar — e o rótulo dizia "arquivo v1 · painel=?" num v10, como se o
+// relatório fosse do primeiro formato e ninguém soubesse o que estava na tela
+// (auditoria de 2026-09-26). A versão é a DELE, e o painel e os modais são os
+// que o próprio relatório mediu (`resumo.telaAgora`).
+function momentosDoRelatorio(d) {
+  if (Array.isArray(d.momentos) && d.momentos.length) return d.momentos;
+  if (!d.dom) return [];
+  const ta = (d.resumo && d.resumo.telaAgora) || {};
+  return [{ t: d._gerado, motivo: `relatório v${d._versaoDoDiag ?? '?'}, sem captura (a tela na hora de baixar)`,
+            dom: d.dom, imagens: [], canvas: [], modais: Array.isArray(ta.modais) ? ta.modais : [],
+            painel: ta.painel || '?' }];
+}
+const atuais = momentosDoRelatorio(d);
 // E as capturas das ABERTURAS ANTERIORES (o app fechado e reaberto com o modo
 // dev ligado): são justamente as do defeito que atravessa um fechar e reabrir,
 // e ficavam de fora da remontagem (auditoria de 2026-09-25). Vão primeiro, na
@@ -68,10 +79,10 @@ if (!momentos.length) {
 }
 
 const codigo = d.codigo || {};
-const css = Object.entries(codigo)
+const cssDoAparelho = Object.entries(codigo)
   .filter(([u, v]) => /\.css($|\?)/.test(u) && v && typeof v.corpo === 'string')
   .map(([, v]) => v.corpo).join('\n');
-if (!css) console.warn('aviso: nenhum CSS no arquivo — a tela sai sem estilo');
+if (!cssDoAparelho) console.warn('aviso: nenhum CSS no arquivo — a tela sai sem estilo');
 
 // A FONTE vem do repositório, não do diagnóstico. O diagnóstico lê todo recurso
 // como TEXTO (é o que serve pro HTML/JS/CSS), e um `.woff2` lido assim chega
@@ -79,26 +90,31 @@ if (!css) console.warn('aviso: nenhum CSS no arquivo — a tela sai sem estilo')
 // o que arruína qualquer comparação com a tela de verdade. A fonte é ARQUIVO DO
 // PROJETO: casar pelo nome e embutir em base64 devolve a métrica exata.
 //
+// E ela entra NO LUGAR do `url(…)` da PRÓPRIA `@font-face` do app, que vem no
+// CSS do aparelho: a família, o peso e o `unicode-range` são os que o app
+// declara. Até a auditoria de 2026-09-26 a ferramenta registrava a fonte com um
+// nome INVENTADO ("Inter var", 100–900), que o CSS do app (`Inter`, 300–700)
+// nunca pede — a face embutida ficava `unloaded`, a remontagem saía na fonte do
+// sistema, e `fontesEmbutidas` afirmava o contrário. Registrar pela regra do app
+// é o que faz a família nunca mais divergir: se o app trocar o nome, a
+// remontagem segue.
+//
 // Só casa por NOME DE ARQUIVO dentro de `fonts/` deste repositório: nada é
 // buscado na rede, e diagnóstico de outro app simplesmente não encontra par.
-//
-// Procura nos RECURSOS da página, e não só no `codigo`: desde v2026.09.10-04 o
-// coletor deixa a fonte FORA do `codigo` (binário lido como texto não serve), e
-// esta busca olhava só lá — toda tela remontada desde então saiu com a fonte do
-// sistema, sem aviso. A correção valeu no coletor e não no leitor.
-const fontes = [];
-const urlsDaPagina = [...new Set([...Object.keys(codigo),
-  ...(Array.isArray(d.recursos) ? d.recursos.map((r) => r && r.url).filter((u) => typeof u === 'string') : [])])];
-for (const u of urlsDaPagina) {
-  const m = /\/fonts\/([\w.-]+\.woff2?)$/.exec(u);
-  if (!m) continue;
-  const local = new URL('../fonts/' + m[1], import.meta.url);
-  if (!existsSync(local)) continue;
-  const b64 = readFileSync(local).toString('base64');
-  fontes.push({ nome: m[1], url: u, b64Bytes: b64.length,
-                css: `@font-face{font-family:"Inter var";font-style:normal;font-weight:100 900;`
-                   + `font-display:swap;src:url(data:font/woff2;base64,${b64}) format("woff2");}` });
+function embutirFontes(css, lerFonte) {
+  const fontes = [];
+  const novo = String(css).replace(/url\(\s*(['"]?)([^'")]*\/fonts\/([\w.-]+\.woff2?))\1\s*\)/g, (tudo, _aspas, url, nome) => {
+    const b64 = lerFonte(nome);
+    if (!b64) return tudo;
+    if (!fontes.some((f) => f.nome === nome)) fontes.push({ nome, url, b64Bytes: b64.length });
+    return `url(data:font/woff2;base64,${b64})`;
+  });
+  return { css: novo, fontes };
 }
+const { css, fontes } = embutirFontes(cssDoAparelho, (nome) => {
+  const local = new URL('../fonts/' + nome, import.meta.url);
+  return existsSync(local) ? readFileSync(local).toString('base64') : null;
+});
 
 const janela = (d.ambiente && d.ambiente.tela && d.ambiente.tela.janela) || '390x844';
 const [W, H] = janela.split('x').map((n) => parseInt(n, 10) || 0);
@@ -143,9 +159,8 @@ function preparar(m) {
     animation-fill-mode: forwards !important; animation-iteration-count: 1 !important;
     transition-duration: 0s !important; transition-delay: 0s !important;
   }`;
-  const fonteCss = fontes.map((f) => f.css).join('\n');
   html = html.replace(/<\/head>/i,
-    `<style>${fonteCss}</style><style>${css}</style><style>${semAnimacao}</style><style>${marca}</style></head>`);
+    `<style>${css}</style><style>${semAnimacao}</style><style>${marca}</style></head>`);
   for (const src of quebradas) {
     html = html.split(src).join(src + '" data-diag-quebrada="1');
   }
@@ -210,6 +225,17 @@ for (let i = 0; i < momentos.length; i++) {
   }
   writeFileSync(tmp, pronto);
   await page.goto('file://' + tmp, { waitUntil: 'load' });
+  // A FONTE CARREGOU? Medido na página, e não deduzido da lista acima: o
+  // `evaluate` roda mesmo com o JavaScript da página desligado. É a família que
+  // o CSS do app pede pro corpo (`Inter`), e esperar as fontes antes do print
+  // tira a corrida entre a troca de fonte (`font-display: swap`) e a imagem.
+  const fonte = await page.evaluate(async () => {
+    try {
+      await document.fonts.ready;
+      const familia = getComputedStyle(document.body).fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, '');
+      return { familia, carregou: document.fonts.check(`16px "${familia}"`) };
+    } catch (e) { return { erro: String(e && e.message).slice(0, 80) }; }
+  });
 
   const nome = `momento-${String(i + 1).padStart(2, '0')}.png`;
   await page.screenshot({ path: join(saida, nome), fullPage: false });
@@ -219,6 +245,7 @@ for (let i = 0; i < momentos.length; i++) {
     modais: (m.modais || []).join(',') || '—',
     toasts: (m.toastsNaTela || []).length,
     imagensQuebradas: (m.imagens || []).filter((x) => x.quebrada).length,
+    fonte: fonte && fonte.familia ? `${fonte.familia}${fonte.carregou ? '' : ' (NÃO carregou)'}` : '?',
   });
 }
 await browser.close();
@@ -233,15 +260,20 @@ const resumo = {
   versaoDaApp: (d.app && d.app.rotulo) || null,
   alertas,
   janela, dpr, tema: (d.ambiente && d.ambiente.escuro) ? 'escuro' : 'claro',
-  cssBytes: css.length,
+  cssBytes: cssDoAparelho.length,
+  // Embutidas NA `@font-face` do app — e se a família CARREGOU em cada
+  // momento está em `momentos[].fonte`, medido na página remontada.
   fontesEmbutidas: fontes.map((f) => f.nome),
   momentos: linhas,
   // O que a remontagem NÃO consegue — dito aqui pra ninguém ler a imagem como
-  // se fosse foto.
+  // se fosse foto. A da fonte só entra quando ela NÃO carregou: ela estava
+  // sempre aqui, inclusive quando o rodapé devia dizer o contrário.
   ressalvas: [
     'imagem de outra origem não carrega: moldura tracejada (rosa = o aparelho disse que estava quebrada)',
     'canvas sem dataURL fica com moldura âmbar — o navegador recusou por origem cruzada',
-    'fonte do sistema no lugar da Inter: o texto pode medir um pouco diferente',
+    ...(linhas.some((l) => / \(NÃO carregou\)$|^\?$/.test(l.fonte))
+      ? ['a fonte do app NÃO carregou em algum momento (ver `momentos[].fonte`): ali o texto sai na fonte do sistema e pode medir diferente']
+      : []),
     'sem JavaScript e sem rede de propósito — o DOM capturado já é o resultado',
   ],
 };
@@ -258,5 +290,5 @@ if (alertas.length) {
 console.log(`${linhas.length} momento(s) remontado(s) em ${saida}   (lido de ${_origemDoDiag})`);
 for (const l of linhas) {
   console.log(`  ${l.arquivo}  ${l.motivo}  painel=${l.painel}  modais=${l.modais}`
-    + `  toasts=${l.toasts}  imgsQuebradas=${l.imagensQuebradas}`);
+    + `  toasts=${l.toasts}  imgsQuebradas=${l.imagensQuebradas}  fonte=${l.fonte}`);
 }

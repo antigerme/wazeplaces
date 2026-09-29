@@ -25,7 +25,7 @@
 // Regra que vale pra todo caso aqui: medir FATO, não intenção. Guard de fonte
 // não enxerga CSP, não enxerga cache e não enxerga service worker.
 
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -34,6 +34,7 @@ import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina } from './esperar-saida.mjs';
 import { lerDiagnostico } from './diag-ler.mjs';
 import { carregarPlaywright, abrirChromium } from './navegador.mjs';
+import { subirServidorLocal } from './servidor-local.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.PORTA_OFFLINE || 8192);
@@ -49,54 +50,13 @@ const pw = await carregarPlaywright();
 // Chave FIXA: a seção da sala precisa assinar crachás iguais aos do servidor.
 // Só de teste, e por isso é constante e óbvia.
 const CHAVE_TESTE = Buffer.alloc(32, 7).toString('base64');
-// A porta tem que estar LIVRE antes de eu subir. Checar depois é uma corrida
-// que eu perco: o processo esquecido responde na hora, a sonda de saúde passa,
-// e só então o meu `spawn` morre com EADDRINUSE — tarde demais, com o teste já
-// medindo o servidor errado (foi assim que a seção da sala reprovou por vácuo,
-// com TODO crachá voltando "inválido" porque a chave era de outro processo).
-try {
-  const r = await fetch(BASE + '/', { signal: AbortSignal.timeout(1500) });
-  if (r.ok) {
-    console.error(`\n✗ a porta ${PORTA} já está ocupada por outro processo.`);
-    console.error('  O teste mediria o servidor ERRADO — com outra chave, todo crachá seria recusado.');
-    console.error('  Confira com: ps -eo pid,args | grep "[s]erver/node.mjs"');
-    console.error(`  Ou rode noutra porta: PORTA_OFFLINE=8193 npm run test:offline`);
-    process.exit(1);
-  }
-} catch (e) { /* ninguém atendeu: a porta está livre, que é o que eu quero */ }
-
-const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
-  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1', ENCRYPTION_KEY: CHAVE_TESTE },
-  stdio: ['ignore', 'ignore', 'inherit'],
-});
-process.on('exit', () => servidor.kill());
-
-// O servidor que responde tem que ser O QUE EU SUBI.
-//
-// Sem esta checagem, um processo esquecido na mesma porta sequestra o teste em
-// silêncio: o `spawn` morre com EADDRINUSE, a sonda de saúde passa (porque o
-// processo VELHO responde), e o smoke mede um servidor com OUTRA chave. Foi o
-// que aconteceu aqui — todo crachá voltava "inválido" e as invariantes da sala
-// passavam por vácuo, porque ninguém conseguia entrar.
-//
-// É a mesma família dos outros erros de instrumento deste arquivo: o teste
-// respondia sobre uma coisa diferente da que eu pensava estar medindo.
-let morreuCedo = null;
-servidor.on('exit', (code) => { morreuCedo = code; });
-let vivo = false;
-for (let i = 0; i < 60; i++) {
-  if (morreuCedo !== null) break;
-  try { const r = await fetch(BASE + '/'); if (r.ok) { vivo = true; break; } } catch (e) { /* subindo */ }
-  await dormir(250);
-}
-if (morreuCedo !== null) {
-  console.error(`\n✗ o servidor do teste morreu ao subir (código ${morreuCedo}).`);
-  console.error(`  Quase sempre é a porta ${PORTA} ocupada por um processo esquecido.`);
-  console.error('  Confira com: ps -eo pid,args | grep "[s]erver/node.mjs"');
-  console.error('  Ou rode noutra porta: PORTA_OFFLINE=8193 npm run test:offline');
-  process.exit(1);
-}
-if (!vivo) { console.error(`\n✗ o servidor não respondeu em ${BASE} depois de 15s.`); process.exit(1); }
+// O servidor sobe por `tools/servidor-local.mjs` (fonte única): a porta tem
+// que estar LIVRE antes, e pronto é o próprio processo dizer que a ocupou. Um
+// processo esquecido na mesma porta sequestrava o teste em silêncio — o `spawn`
+// morria com EADDRINUSE, a sonda de saúde passava com o VELHO, e o smoke media
+// um servidor com outra chave (foi assim que a seção da sala, na época,
+// reprovou por vácuo).
+const { servidor } = await subirServidorLocal({ porta: PORTA, variavel: 'PORTA_OFFLINE', env: { ENCRYPTION_KEY: CHAVE_TESTE } });
 
 // ── os casos ───────────────────────────────────────────────────────────────
 const PX = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
@@ -1148,6 +1108,9 @@ const antesDoDeploy = await page.evaluate(async (isca) => {
 diz('antes do deploy: há tile guardado E a isca de versão anterior no lugar',
   antesDoDeploy.tiles > 0 && antesDoDeploy.nomes.includes(ISCA), JSON.stringify(antesDoDeploy));
 
+// Marca o DOCUMENTO de antes do deploy: a troca de controller o RECARREGA, e a
+// seção seguinte só pode começar no documento NOVO (ver abaixo).
+await page.evaluate(() => { window.__docDeAntesDoDeploy = true; });
 await page.evaluate(async () => {
   const reg = await navigator.serviceWorker.register('/service-worker.js?deploy=2');
   const pular = (w) => {
@@ -1187,8 +1150,15 @@ diz('e o cache do MAPA sobreviveu INTEIRO ao deploy',
 // que promete). Espere ela assentar e devolva o estado que a seção seguinte
 // precisa — sem isto o `offlineVarrer()` de lá roda com fila vazia e a
 // asserção "o cache ficou vazio" passa por vácuo.
+//
+// E a espera é pelo documento NOVO, não por "há um documento carregado": a
+// faxina (que o laço acima vê) roda no `activate`, e a recarga vem DEPOIS dela.
+// Esperando só o `load`, o 8b às vezes começava no documento VELHO e a recarga
+// caía no meio dele — MEDIDO numa rodada: "dlogCapturar is not defined", o
+// `evaluate` rodando na página nova ainda sem o app (auditoria de 2026-09-26).
 await page.waitForLoadState('load').catch(() => {});
-await esperarNaPagina(page, () => typeof offlineVarrer === 'function', 20000);
+await esperarNaPagina(page, () => !window.__docDeAntesDoDeploy && document.readyState === 'complete'
+  && typeof offlineVarrer === 'function', 20000);
 await page.evaluate(() => { AppState.preferences.offlineDisponivel = true; }).catch(() => {});
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
 
@@ -1260,6 +1230,23 @@ try {
       return { n: e.length, semCorpoLocal: e.filter((v) => v && v.erro === 'sem corpo local').length };
     })(),
   };
+  // O SEGUNDO relatório na mesma página (auditoria de 2026-09-26): as releituras
+  // `?diag-rede=1` do primeiro ficam na lista de recursos, e o segundo as levava
+  // como código — 23 arquivos em vez de 11, o dobro de requisições.
+  const [dl2] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30000 }),
+    page.evaluate(() => baixarDiagnostico()),
+  ]);
+  const arq2 = join(dirDiag, 'diag2.zip');
+  await dl2.saveAs(arq2);
+  const d2 = lerDiagnostico(arq2).dados;
+  relatorio.segundo = {
+    n: Object.keys(d2.codigo || {}).length, cvr: Object.keys(d2.cacheVsRede || {}).length,
+    comDiagRede: Object.keys(d2.codigo || {}).filter((u) => /diag-rede/.test(u)).length,
+    // CONTROLE: as releituras do primeiro ESTÃO na lista de recursos do segundo —
+    // sem elas, "o segundo não as levou" passaria sem o caso existir.
+    releiturasNosRecursos: (d2.recursos || []).filter((r) => /diag-rede/.test(r.url)).length,
+  };
 } catch (e) {
   relatorio = { erro: String((e && e.message) || e).slice(0, 200) };
 } finally {
@@ -1285,6 +1272,10 @@ diz('o CÓDIGO sai enxuto (tamanho, hash e versão; o corpo só do CSS) e o cach
   && relatorio.codigo.versoes.length === 1 && relatorio.codigo.versoes[0] === relatorio.app
   && relatorio.cvr?.n > 0 && relatorio.cvr.semCorpoLocal === 0,
   JSON.stringify({ app: relatorio.app, codigo: relatorio.codigo, cvr: relatorio.cvr }));
+diz('o 2º relatório na mesma página compara o MESMO código — sem as releituras do 1º',
+  relatorio.segundo?.releiturasNosRecursos > 0 && relatorio.segundo?.comDiagRede === 0
+  && relatorio.segundo?.n === relatorio.codigo?.n && relatorio.segundo?.cvr === relatorio.cvr?.n,
+  JSON.stringify({ primeiro: relatorio.codigo?.n, segundo: relatorio.segundo }));
 diz('no estado são, as duas sentinelas NOVAS ficam caladas no relatório',
   Array.isArray(relatorio.alertas) && !relatorio.alertas.includes('fotoEscondidaComAviso')
   && !relatorio.alertas.includes('tileGuardadoFalhou'), JSON.stringify(relatorio.alertas));
@@ -1304,6 +1295,13 @@ const sentMapa = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 150));   // folga pro não guardado, se ele entrasse (errado)
   const r = { semAlerta, anel: diagTilesGuardadosQueFalharam.map((x) => (x.url === guardado ? 'guardado' : x.url)),
               comAlerta: diagSentinelas(diagComputado()).map((a) => a.chave) };
+  // A CAPTURA acusa uma vez, com a hora; a seguinte, sem falha nova, cala
+  // (auditoria de 2026-09-26: o anel acumulado repetia a falha em toda captura).
+  const c1 = dlogCapturar('manual');
+  const c2 = dlogCapturar('manual');
+  const a1 = (c1.alertas || []).find((a) => a.chave === 'tileGuardadoFalhou');
+  r.captura1 = a1 ? { n: a1.n, quando: a1.quando } : null;
+  r.captura2 = (c2.alertas || []).some((a) => a.chave === 'tileGuardadoFalhou');
   diagTilesGuardadosQueFalharam = [];
   return r;
 });
@@ -1312,6 +1310,9 @@ diz('CONTROLE: sem falha registrada, a sentinela do mapa cala',
 diz('o tile GUARDADO que falha entra no anel — e o que não está guardado, não',
   sentMapa.anel.length === 1 && sentMapa.anel[0] === 'guardado', JSON.stringify(sentMapa));
 diz('e a sentinela do mapa acusa', sentMapa.comAlerta.includes('tileGuardadoFalhou'), JSON.stringify(sentMapa));
+diz('a captura acusa a falha UMA vez, com a hora — e a seguinte, sem falha nova, cala',
+  sentMapa.captura1?.n === 1 && Array.isArray(sentMapa.captura1?.quando) && !Number.isNaN(Date.parse(sentMapa.captura1.quando[0]))
+  && sentMapa.captura2 === false, JSON.stringify({ c1: sentMapa.captura1, c2: sentMapa.captura2 }));
 // A LISTA DE RECURSOS: o navegador guarda 250 e descarta o resto. Página nova
 // em cada medida (o teto vale por documento), sem worker nem rota, e 300
 // requisições de mesma origem. O CONTROLE é a de baixo: sem ele, "passou de
@@ -1348,6 +1349,48 @@ diz('CONTROLE: sem o dev, a lista para no teto do navegador — e o relatório S
 diz('com o dev ligado o teto sobe e nada se perde',
   recComDev.n > 300 && recComDev.encheu === false, JSON.stringify(recComDev));
 await ctxR.close();
+
+secao('8c. O DIAGNÓSTICO COM A REDE PENDURADA sai no orçamento — e diz o que não chegou');
+// Auditoria de 2026-09-26 (D15): as leituras do relatório eram em SÉRIE, cada
+// uma com o seu teto de 4 s. Com a rede pendurada (portal cativo, sinal indo e
+// voltando), o arquivo levava ~48 s pra sair, com o botão em "Gerando…" sem
+// sinal nenhum. Contexto próprio, sem worker; a rede de mesma origem (fora a
+// API) é PENDURADA depois de a página abrir — nunca responde.
+const ctxL = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: true });
+const pgL = await ctxL.newPage();
+pgL.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+await pgL.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+await esperarNaPagina(pgL, () => typeof baixarDiagnostico === 'function', 20000, 100);
+const dirL = mkdtempSync(join(tmpdir(), 'diag-8c-'));
+const medirRelatorio = async (nome) => {
+  const t0 = Date.now();
+  const [dl] = await Promise.all([pgL.waitForEvent('download', { timeout: 90000 }), pgL.evaluate(() => baixarDiagnostico())]);
+  const arq = join(dirL, nome + '.zip');
+  await dl.saveAs(arq);
+  const { dados } = lerDiagnostico(arq);
+  return { s: Math.round((Date.now() - t0) / 100) / 10, coleta: dados.coleta,
+           semResposta: Object.values(dados.codigo || {}).filter((v) => v && v.semResposta).length };
+};
+let relL = null, relPendurado = null, pendurados = 0;
+try {
+  // CONTROLE: com a rede boa, nada fica sem resposta (senão "diz o que não
+  // chegou" passaria marcando tudo, sempre).
+  relL = await medirRelatorio('rede-boa');
+  await ctxL.route((u) => u.origin === new URL(BASE).origin && !u.pathname.startsWith('/api/'), () => { pendurados++; });
+  relPendurado = await medirRelatorio('pendurada');
+} catch (e) {
+  relPendurado = { erro: String((e && e.message) || e).slice(0, 200) };
+} finally {
+  rmSync(dirL, { recursive: true, force: true });
+}
+diz('CONTROLE: com a rede boa, o relatório não marca nada sem resposta',
+  relL?.coleta && relL.coleta.semResposta.length === 0 && relL.semResposta === 0, JSON.stringify(relL));
+diz('com a rede PENDURADA o arquivo sai dentro do orçamento (eram ~48 s)',
+  relPendurado?.s <= 15 && pendurados >= 10, JSON.stringify({ s: relPendurado?.s, pendurados }));
+diz('e diz, no arquivo, o que não chegou',
+  relPendurado?.coleta?.semResposta?.length >= 10 && relPendurado.semResposta >= 10
+  && relPendurado.coleta.orcamentoMs > 0, JSON.stringify(relPendurado?.coleta).slice(0, 300));
+await ctxL.close();
 
 secao('9. ESQUECER PARA a varredura em voo (privacidade)');
 // Enche, e ESQUECE no meio: o download já a caminho não pode pousar depois.
@@ -1891,13 +1934,31 @@ const irProFundo9c = async (pg) => {
   await pg.evaluate(() => (typeof diagGuardando !== 'undefined' ? diagGuardando : null));
   await pg.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
 };
-// Espera o registro DESTA abertura ter `n` capturas guardadas.
-const guardouNesta9c = (pg, n) => esperarNaPagina(pg, async () => { try {
+// Espera o registro DESTA abertura ter `n` capturas guardadas. A CONTA volta
+// pro Node e a comparação é feita aqui: a função vai pra página SERIALIZADA,
+// sem o fechamento, e com o `n` dentro dela ele era `undefined` lá — o `try`
+// engolia o ReferenceError, e a espera virava um sono de 10 s que nunca
+// confirmava nada (MEDIDO na auditoria de 2026-09-26: o registro estava no
+// aparelho, com a captura, e a espera dizia que não). Não abre a base que não
+// existe (`open` sem versão a CRIARIA vazia, sem a tabela, e a gravação do app
+// que viesse depois não teria onde escrever), e devolve o que VIU.
+const capturasNesta9c = (pg) => pg.evaluate(async () => { try {
+  if (!(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag')) return 0;
   const db = await new Promise((ok, err) => { const r = indexedDB.open('waze_places_diag'); r.onsuccess = () => ok(r.result); r.onerror = err; });
   const todas = await new Promise((ok) => { const r = db.transaction('aberturas').objectStore('aberturas').getAll(); r.onsuccess = () => ok(r.result); });
   db.close();
-  return todas.some((a) => a.id === DIAG_ABERTURA.id && (a.momentos || []).length === n);
-} catch (e) { return false; } }, 10000, 100);
+  const esta = todas.find((a) => a.id === DIAG_ABERTURA.id);
+  return esta ? (esta.momentos || []).length : 0;
+} catch (e) { return -1; } }).catch(() => -1);
+const guardouNesta9c = async (pg, n, tetoMs = 10000) => {
+  const t0 = Date.now();
+  for (;;) {
+    const viu = await capturasNesta9c(pg);
+    if (viu === n) return { ok: true, ms: Date.now() - t0, viu };
+    if (Date.now() - t0 > tetoMs) return { ok: false, ms: Date.now() - t0, viu };
+    await dormir(100);
+  }
+};
 
 // 0. Sessão, e o modo dev DESLIGADO: fechar o app não pode criar nada.
 const prep9c = await abrir9c('preparo');
@@ -1966,11 +2027,46 @@ const s3d = await selo9c(p2d);
 diz('uma captura nova soma às guardadas: 3', s3d.txt === '3', JSON.stringify(s3d));
 let rel9c = null;
 const dir9c = mkdtempSync(join(tmpdir(), 'diag-9c-'));
+// Um ciclo de sessão FECHADO no diário (entrou há 50 h, caiu há 20 h): é ele que
+// faz o relatório levar a duração da sessão, que o leitor imprimia como
+// "[object Object]" (auditoria de 2026-09-26). O leitor roda sobre o arquivo DE
+// VERDADE logo abaixo — o teste de unidade monta a mesma seção pelo `diagSessao`.
+await p2d.evaluate(() => {
+  const H = 3600e3, agora = Date.now();
+  const anel = JSON.parse(localStorage.getItem('waze_places_sessoes') || '[]');
+  localStorage.setItem('waze_places_sessoes', JSON.stringify([{ t: agora - 50 * H, e: 'token+', via: 'cookies' },
+    { t: agora - 20 * H, e: 'caiu', motivo: 'srv.err.cookiesExpired' }, ...anel]));
+});
+// O que acontece ENQUANTO o arquivo é montado (auditoria de 2026-09-26, D11):
+// uma anotação no diário e um TOQUE no botão NO MEIO do empacotamento — o
+// construtor do `CompressionStream` é chamado pelo `zipar`, depois do retrato. O
+// toque vai pelos ouvintes do PRÓPRIO botão (ponteiro que desce e sobe nele),
+// como o dedo: o toque do DevTools não cabe dentro do zip. O carimbo do
+// "baixado" era o do FIM do download, e as duas coisas sumiam: fora do arquivo
+// E fora da cópia guardada. Com o carimbo do retrato, voltam na abertura 3.
+await p2d.evaluate(() => {
+  const Orig = window.CompressionStream;
+  window.__compressaoOriginal = Orig;
+  let uma = false;
+  window.CompressionStream = class extends Orig {
+    constructor(f) {
+      if (!uma) {
+        uma = true;
+        dfato('smoke.duranteOZip');
+        const b = document.getElementById('devFabBtn');
+        b.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 97, bubbles: true }));
+        b.dispatchEvent(new PointerEvent('pointerup', { pointerId: 97, bubbles: true }));
+      }
+      super(f);
+    }
+  };
+});
 try {
   const [dl] = await Promise.all([
     p2d.waitForEvent('download', { timeout: 30000 }),
     p2d.evaluate(() => baixarDiagnostico()),
   ]);
+  await p2d.evaluate(() => { window.CompressionStream = window.__compressaoOriginal; });
   const arq = join(dir9c, 'diag.zip');
   await dl.saveAs(arq);
   const { dados: d } = lerDiagnostico(arq);
@@ -1985,6 +2081,11 @@ try {
     triagemSecao: triagem.includes('ABERTURAS ANTERIORES') && triagem.includes('abertura ' + id1d),
     triagemAlerta: triagem.includes('[abertura anterior ' + id1d + ']'),
     vazouToken: triagem.includes('tok-9c'),
+    duracao: (triagem.match(/duração da sessão \(h\): [^·]*· [^·]*· [^·]*· [^·]*/) || [''])[0].trim(),
+    objetoCru: triagem.includes('[object Object]'),
+    // O que chegou DURANTE o zip não está no arquivo (ele é o retrato de antes).
+    desta: (d.momentos || []).length,
+    duranteNoArquivo: (d.diario || []).some((e) => e.k === 'smoke.duranteOZip'),
   };
 } catch (e) {
   rel9c = { erro: String((e && e.message) || e).slice(0, 200) };
@@ -1998,16 +2099,23 @@ diz('o RELATÓRIO leva a abertura anterior inteira: as 2 capturas (com o DOM), o
 diz('o resumo e o leitor mostram o defeito capturado ANTES de fechar, dizendo de qual abertura — sem o token',
   rel9c?.alertaAnterior === true && rel9c?.triagemSecao === true && rel9c?.triagemAlerta === true && rel9c?.vazouToken === false,
   JSON.stringify(rel9c));
+diz('o leitor mostra a duração da sessão do relatório de verdade — números, nunca "[object Object]"',
+  rel9c?.objetoCru === false && /^duração da sessão \(h\): mediana 30 · menor–maior 30–30 · n 1 · pisos 0/.test(rel9c?.duracao || ''),
+  JSON.stringify({ duracao: rel9c?.duracao, objetoCru: rel9c?.objetoCru }));
+diz('PRÉ-CONDIÇÃO: a captura e a anotação feitas DURANTE o zip não estão no arquivo (ele é o retrato de antes)',
+  rel9c?.desta === 1 && rel9c?.duranteNoArquivo === false, JSON.stringify({ desta: rel9c?.desta, durante: rel9c?.duranteNoArquivo }));
 const apagou = await esperarNaPagina(p2d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
 const s4d = await selo9c(p2d);
+// 4 = as 2 guardadas + a desta abertura + a do meio do zip: o número conta o
+// que a pessoa registrou, baixado ou não.
 diz('BAIXADO, o que estava guardado sai do aparelho (e nesta abertura o número segue contando, como sempre)',
-  apagou.ok && s4d.txt === '3', JSON.stringify({ apagou, s4d }));
+  apagou.ok && s4d.txt === '4', JSON.stringify({ apagou, s4d }));
 // Segue usando depois do download: uma captura NOVA, e o app vai pro fundo.
 // É o caso que separa "guardar o que não foi entregue" de "guardar tudo": com
 // o anel desta abertura tendo uma baixada e uma nova, só a nova pode voltar.
 const tBaixado = await p2d.evaluate(() => diagBaixadoEm);
 const tocouPos = await tocar9c(p2d, cdp2d);
-await guardouNesta9c(p2d, 1);
+await guardouNesta9c(p2d, 2);
 await irProFundo9c(p2d);
 await p2d.close({ runBeforeUnload: true });
 
@@ -2017,11 +2125,14 @@ await pronta9c(p3d);
 await carregou9c(p3d);
 const r3d = await p3d.evaluate((tb) => ({ capturas: diagMomentosAnteriores().length,
   manuais: diagCapturasAnterioresDoEditor().length,
-  diarioAntes: diagAberturasAnteriores.flatMap((a) => a.diario || []).filter((e) => e.t <= tb).length }), tBaixado);
+  diarioAntes: diagAberturasAnteriores.flatMap((a) => a.diario || []).filter((e) => e.t <= tb).length,
+  durante: diagAberturasAnteriores.flatMap((a) => a.diario || []).some((e) => e.k === 'smoke.duranteOZip') }), tBaixado);
 const s5d = await selo9c(p3d);
-diz('o que foi BAIXADO não volta: reaberta, só a captura feita DEPOIS do download volta — e o diário de antes dele também não',
-  tocouPos && r3d.capturas === 1 && r3d.manuais === 1 && r3d.diarioAntes === 0 && s5d.txt === '1',
+diz('o que foi BAIXADO não volta: reaberta, só volta o que NÃO foi no arquivo — a captura do meio do zip e a de depois do download — e o diário de antes do retrato também não',
+  tocouPos && r3d.capturas === 2 && r3d.manuais === 2 && r3d.diarioAntes === 0 && s5d.txt === '2',
   JSON.stringify({ tocouPos, r3d, s5d }));
+diz('o que o diário anotou DURANTE o zip volta na abertura seguinte (não foi no arquivo, e não pode sumir)',
+  r3d.durante === true, JSON.stringify(r3d));
 
 // 4. O prazo de 24 h: uma abertura guardada de 25 h atrás sai; a de 23 h fica.
 await p3d.evaluate(() => new Promise((ok) => {
@@ -2043,9 +2154,10 @@ await carregou9c(p4d);
 const r4d = await p4d.evaluate(() => diagAberturasAnteriores.map((a) => a.id));
 const g4d = await guardado9c(p4d);
 const s6d = await selo9c(p4d);
-// O número: a captura pós-download da abertura 2 + a da "fresca" = 2.
+// O número: as duas que a abertura 2 guardou depois do retrato (a do meio do zip
+// e a pós-download) + a da "fresca" = 3.
 diz('a abertura guardada há MAIS de 24 h sai do aparelho; a de 23 h fica, com a captura contando no número',
-  !r4d.includes('velha') && r4d.includes('fresca') && !g4d.abertas.some((a) => a.id === 'velha') && s6d.txt === '2',
+  !r4d.includes('velha') && r4d.includes('fresca') && !g4d.abertas.some((a) => a.id === 'velha') && s6d.txt === '3',
   JSON.stringify({ r4d, g4d, s6d }));
 
 // 5. Desligar o modo dev apaga o que ficou guardado — mas com captura NÃO
@@ -2060,7 +2172,7 @@ await dormir(300);
 const r5a = await p4d.evaluate(async () => ({ memoria: diagAberturasAnteriores.length,
   ativo: AppState.devMode.active, base: (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag') }));
 diz('com captura NÃO baixada, o 1º toque em desligar só AVISA: o interruptor volta e nada é apagado',
-  naoBaixadas === 2 && marcadoDepoisDo1o === true && r5a.ativo === true && r5a.memoria > 0 && r5a.base === true,
+  naoBaixadas === 3 && marcadoDepoisDo1o === true && r5a.ativo === true && r5a.memoria > 0 && r5a.base === true,
   JSON.stringify({ naoBaixadas, marcadoDepoisDo1o, r5a }));
 await desligar9c();
 const apagouDev = await esperarNaPagina(p4d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
@@ -2094,6 +2206,195 @@ diz('o SAIR apaga o que foi guardado (e a captura que ia pro próximo relatório
   g5d.abertas.some((a) => a.manuais === 1) && apagouSair.ok, JSON.stringify({ g5d, apagouSair }));
 await p5d.close();
 await ctx9c.close();
+
+secao('9d. O SEGREDO DO PAREAMENTO NÃO VAI PRO DIAGNÓSTICO — nem pro aparelho');
+// Auditoria de 2026-09-26 (D1). Quando a área de transferência recusa, o link
+// `/#pair=<segredo>` vira um toast copiável — e ele ia inteiro pro diário, pra
+// lista de toasts da captura e (fechado o modal, o que APAGA o `data-raw`) pro
+// `dom`: pro relatório E pra cópia guardada no aparelho. O segredo vale uma
+// sessão nova por 5 minutos. O canário é procurado no arquivo INTEIRO e na base.
+const SEGREDO_9D = 'CANARIOPAREAMENTO9DX';
+const ctx9d = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
+  hasTouch: true, isMobile: true, serviceWorkers: 'block', acceptDownloads: true });
+await ctx9d.route('**/*-tiles/live/base/**', servirTile);
+await ctx9d.route('**/api/*', (r) => {
+  const rota = r.request().url().split('/api/')[1];
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(151), SO_MAPA(152)], hasMore: false, page: 1, total: 2 });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+  if (rota === 'parear') return json({ success: true, code: SEGREDO_9D, expiresIn: 300 });
+  return r.abort('failed');
+});
+await ctx9d.addInitScript(() => { try { if (!localStorage.getItem('__9d')) {
+  localStorage.setItem('__9d', '1');
+  localStorage.setItem('waze_session_token', 'tok-9d');
+  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+} } catch (e) {} });
+const p9d = await ctx9d.newPage();
+p9d.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+p9d.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text())) violacoes.push({ secao: secaoAtual, txt: m.text() }); });
+await p9d.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+await pronta9c(p9d);
+await p9d.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true,
+  value: { writeText: () => Promise.reject(new DOMException('negado', 'NotAllowedError')) } }); });
+await p9d.evaluate(() => abrirPareamento());
+await esperarNaPagina(p9d, () => !document.getElementById('pairCopyLinkBtn').disabled, 10000, 100);
+await p9d.evaluate(() => document.getElementById('pairCopyLinkBtn').click());
+await esperarNaPagina(p9d, () => [...document.querySelectorAll('#toastContainer > *')].some((e) => /#pair=/.test(e.textContent)), 5000, 100);
+await p9d.evaluate(() => document.getElementById('pairShowClose').click());   // a limpeza apaga o `data-raw`
+await dormir(300);
+const pre9d = await p9d.evaluate((s) => ({
+  toast: [...document.querySelectorAll('#toastContainer > *')].some((e) => e.textContent.includes(s)),
+  dataRaw: !!document.getElementById('pairCode').dataset.raw }), SEGREDO_9D);
+diz('PRÉ-CONDIÇÃO: o link com o segredo segue na tela (o toast copiável), e fechar o modal já apagou o `data-raw`',
+  pre9d.toast && !pre9d.dataRaw, JSON.stringify(pre9d));
+const cdp9d = await ctx9d.newCDPSession(p9d);
+const tocou9d = await tocar9c(p9d, cdp9d);
+await guardouNesta9c(p9d, 1);
+const base9d = await p9d.evaluate((s) => new Promise((ok) => {
+  const req = indexedDB.open('waze_places_diag');
+  req.onerror = () => ok({ erro: 'abrir' });
+  req.onsuccess = () => { const db = req.result;
+    const r = db.transaction('aberturas').objectStore('aberturas').getAll();
+    r.onsuccess = () => { db.close(); const t = JSON.stringify(r.result);
+      ok({ tem: t.includes(s), capturas: r.result.reduce((n, a) => n + (a.momentos || []).length, 0) }); }; };
+}), SEGREDO_9D);
+diz('a captura com o link na tela vai pro aparelho SEM o segredo', tocou9d && base9d.capturas >= 1 && base9d.tem === false,
+  JSON.stringify({ tocou9d, base9d }));
+let rel9d = null;
+const dir9d = mkdtempSync(join(tmpdir(), 'diag-9d-'));
+try {
+  const [dl] = await Promise.all([p9d.waitForEvent('download', { timeout: 30000 }), p9d.evaluate(() => baixarDiagnostico())]);
+  const arq = join(dir9d, 'diag.zip');
+  await dl.saveAs(arq);
+  const cru = JSON.stringify(lerDiagnostico(arq).dados);
+  const triagem = execFileSync(process.execPath, [join(ROOT, 'tools/diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 20000 });
+  rel9d = { noArquivo: cru.includes(SEGREDO_9D), marcado: cru.includes('#pair=[código de pareamento]'),
+            naTriagem: triagem.includes(SEGREDO_9D), aviso: /"sensivel":true/.test(cru) };
+} catch (e) {
+  rel9d = { erro: String((e && e.message) || e).slice(0, 200) };
+} finally {
+  rmSync(dir9d, { recursive: true, force: true });
+}
+diz('nenhuma seção do relatório traz o segredo — e o lugar dele sai marcado (o toast estava lá)',
+  rel9d?.noArquivo === false && rel9d?.marcado === true, JSON.stringify(rel9d));
+diz('o diário anota que houve o aviso SENSÍVEL, sem o texto; e a triagem também não imprime o segredo',
+  rel9d?.aviso === true && rel9d?.naTriagem === false, JSON.stringify(rel9d));
+await ctx9d.close();
+
+secao('9e. DUAS ABAS: desligar o modo dev, ou dar "Sair", numa chega à outra');
+// Auditoria de 2026-09-26 (D2). A outra aba seguia com o FAB e com o modo dev
+// na memória, e a captura seguinte RECRIAVA a base com o DOM da tela. E a poda
+// de 24 h só rodava com o modo dev ligado — a sobra ficava indefinidamente.
+// Duas páginas do MESMO contexto (o mesmo aparelho): o aviso do navegador
+// (evento `storage`) é o de verdade.
+const ctx9e = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
+  hasTouch: true, isMobile: true, serviceWorkers: 'block' });
+await ctx9e.route('**/*-tiles/live/base/**', servirTile);
+await ctx9e.route('**/api/*', (r) => {
+  const rota = r.request().url().split('/api/')[1];
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(161), SO_MAPA(162)], hasMore: false, page: 1, total: 2 });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+  return r.abort('failed');
+});
+const abrir9e = async (nome) => {
+  const pg = await ctx9e.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
+  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
+  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  return pg;
+};
+const devLigado9e = (pg, ligado) => pg.evaluate((l) => localStorage.setItem('waze_places_devmode',
+  JSON.stringify({ unlocked: true, active: l })), ligado);
+const temBase9e = (pg) => pg.evaluate(async () => (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'));
+const prep9e = await abrir9e('preparo');
+await esperarNaPagina(prep9e, () => typeof API !== 'undefined', 20000, 100);
+await prep9e.evaluate(() => {
+  API.setSession('tok-9e');
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+});
+await devLigado9e(prep9e, true);
+await prep9e.close({ runBeforeUnload: true });
+
+// 1. A aba A DESLIGA o modo dev (o interruptor de verdade); a aba B tinha uma captura.
+const a9e = await abrir9e('A'), b9e = await abrir9e('B');
+await pronta9c(a9e); await pronta9c(b9e);
+const cdpB9e = await ctx9e.newCDPSession(b9e);
+const tocouB = await tocar9c(b9e, cdpB9e);
+const guardouB = await guardouNesta9c(b9e, 1);
+diz('PRÉ-CONDIÇÃO: a captura da aba B foi pro aparelho', tocouB && guardouB.ok, JSON.stringify({ tocouB, guardouB }));
+await a9e.evaluate(() => { const cb = document.getElementById('prefDevModeActive'); cb.checked = false; cb.dispatchEvent(new Event('change')); });
+const chegouB = await esperarNaPagina(b9e, () => AppState.devMode.active === false
+  && document.getElementById('devFab').classList.contains('hidden') && dlogMomentos.length === 0, 5000, 100);
+diz('desligado na aba A, a aba B desliga junto: o botão some e as capturas saem da memória', chegouB.ok,
+  JSON.stringify(await b9e.evaluate(() => ({ dev: AppState.devMode.active, momentos: dlogMomentos.length }))));
+await irProFundo9c(b9e);
+await b9e.close({ runBeforeUnload: true });
+const semBase1 = await esperarNaPagina(a9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 5000, 100);
+diz('a aba B, indo pro fundo e fechando, não recria a base que a aba A apagou', semBase1.ok);
+
+// 2. A CORRIDA: o armazenamento já diz "desligado" e o aviso ainda não chegou a
+// esta aba (a memória diz ligado). Encenada escrevendo NA PRÓPRIA aba — o evento
+// `storage` não dispara em quem escreve. A captura não pode ir pro aparelho.
+await devLigado9e(a9e, true);
+await a9e.close({ runBeforeUnload: true });
+const c9e = await abrir9e('C');
+await pronta9c(c9e);
+await devLigado9e(c9e, false);                         // storage desligado, memória ligada
+const cdpC9e = await ctx9e.newCDPSession(c9e);
+const tocouC = await tocar9c(c9e, cdpC9e);
+await c9e.evaluate(() => (typeof diagGuardando !== 'undefined' ? diagGuardando : null));
+// A base pode EXISTIR (a leitura do guardado a abre, vazia, na abertura com o
+// modo dev ligado): o que não pode é um registro com a captura.
+const gC = await guardado9c(c9e);
+diz('com o modo dev desligado no ARMAZENAMENTO (o aviso ainda não chegou), a captura não vai pro aparelho',
+  tocouC && (await c9e.evaluate(() => AppState.devMode.active)) === true
+  && !(gC.abertas || []).some((x) => x.capturas > 0), JSON.stringify({ tocouC, gC }));
+
+// 3. O "Sair" na aba D chega à aba E: ela tinha uma captura guardada.
+await devLigado9e(c9e, true);
+await c9e.close({ runBeforeUnload: true });
+const d9e = await abrir9e('D'), e9e = await abrir9e('E');
+await pronta9c(d9e); await pronta9c(e9e);
+const cdpE9e = await ctx9e.newCDPSession(e9e);
+const tocouE = await tocar9c(e9e, cdpE9e);
+const guardouE = await guardouNesta9c(e9e, 1);
+diz('PRÉ-CONDIÇÃO: a captura da aba E foi pro aparelho', tocouE && guardouE.ok, JSON.stringify({ tocouE, guardouE }));
+await d9e.evaluate(() => { handleLogout(); });
+const chegouE = await esperarNaPagina(e9e, () => AppState.devMode.active === false
+  && document.getElementById('devFab').classList.contains('hidden') && dlogMomentos.length === 0, 5000, 100);
+diz('o "Sair" na aba D chega à aba E: o modo dev desliga, o botão some e as capturas saem', chegouE.ok);
+await irProFundo9c(e9e);
+await e9e.close({ runBeforeUnload: true });
+const semBase3 = await esperarNaPagina(d9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 5000, 100);
+diz('e nada volta pro aparelho quando a aba E fecha', semBase3.ok);
+await d9e.close();
+
+// 4. A SOBRA com o modo dev desligado sai na próxima abertura (a poda de 24 h só
+// roda com ele ligado). Planta uma abertura FRESCA, com o modo dev desligado.
+const f9e = await abrir9e('F');
+await esperarNaPagina(f9e, () => typeof API !== 'undefined', 20000, 100);
+await f9e.evaluate(() => new Promise((ok) => {
+  API.setSession('tok-9e');
+  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
+  const req = indexedDB.open('waze_places_diag', 1);
+  req.onupgradeneeded = () => req.result.createObjectStore('aberturas', { keyPath: 'id' });
+  req.onsuccess = () => { const db = req.result; const tx = db.transaction('aberturas', 'readwrite');
+    tx.objectStore('aberturas').put({ id: 'sobra', inicio: Date.now() - 3600e3, salvoEm: Date.now() - 1800e3, salvoPor: 'oculta',
+      momentos: [{ t: new Date().toISOString(), motivo: 'manual', dom: '<html>dado de terceiro</html>' }], diario: [], chamadas: [], erros: [] });
+    tx.oncomplete = () => { db.close(); ok(); }; };
+}));
+diz('PRÉ-CONDIÇÃO: a sobra está no aparelho', await temBase9e(f9e));
+await f9e.close({ runBeforeUnload: true });
+const g9e = await abrir9e('G');
+const faxina = await esperarNaPagina(g9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
+diz('com o modo dev DESLIGADO, a sobra sai do aparelho na abertura', faxina.ok
+  && (await g9e.evaluate(() => dfatoAnel.some((e) => e.k === 'diag.sobraApagada'))), JSON.stringify(faxina));
+await g9e.close();
+await ctx9e.close();
 
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));

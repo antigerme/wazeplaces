@@ -25,14 +25,25 @@ const REPLAY = readFileSync(join(ROOT, 'tools/diag-replay.mjs'), 'utf8');
 const APP = readFileSync(join(ROOT, 'js/app.js'), 'utf8');
 const CORE = readFileSync(join(ROOT, 'server/core.mjs'), 'utf8');
 
-// Toda rota que ESCREVE (ou desloga) tem que estar na recusa. A lista sai do
-// ROUTES do core, então rota nova aparece aqui em vez de passar despercebida.
-const LEITURA = new Set(['perfil', 'buscar-places', 'lista-paises', 'lista-estados', 'testar-cookies']);
+// Cada rota do core, CLASSIFICADA pelo que ela faz na conta de quem gerou o
+// diagnóstico. A régua é "só lê" contra "escreve, DESLOGA, ou lê o que não é da
+// ferramenta" (conversa privada, credencial do tempo real). `perfil` parecia
+// leitura e APAGA a sessão quando o portão recusa — medido no teste logo abaixo,
+// com o core de verdade —, e estava na lista de leitura da ferramenta até a
+// auditoria de 2026-09-26. A lista sai do ROUTES do core, então rota nova sem
+// classificação reprova aqui em vez de passar despercebida.
+const SO_LE = new Set(['buscar-places', 'lista-paises', 'lista-estados']);
+const RECUSADAS = new Set(['sessao', 'parear', 'testar-cookies', 'perfil', 'marcar-lido', 'guardar-pedido',
+  'validar-place', 'excluir-foto', 'renomear-local', 'presenca-waze', 'presenca-app', 'chat']);
+const conjunto = (nome) => {
+  const bloco = API.match(new RegExp(`const ${nome} = new Set\\(\\[([^\\]]+)\\]\\)`));
+  assert.ok(bloco, `a lista ${nome} sumiu da ferramenta`);
+  return new Set([...bloco[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
+};
 
-test('diag-api: TODA rota não-leitura está na lista de recusa', () => {
-  const bloco = API.match(/const ESCRITA = new Set\(\[([^\]]+)\]\)/);
-  assert.ok(bloco, 'a lista de recusa sumiu');
-  const recusadas = new Set([...bloco[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
+test('diag-api: TODA rota que não só LÊ está na lista de recusa — e a de leitura é exatamente a das que só leem', () => {
+  const recusadas = conjunto('ESCRITA');
+  const leitura = conjunto('LEITURA');
 
   // Do bloco `ROUTES` inteiro, com e SEM aspas na chave: o padrão antigo só
   // casava chave entre aspas e deixava de fora `sessao`, `parear`, `perfil` e
@@ -44,9 +55,41 @@ test('diag-api: TODA rota não-leitura está na lista de recusa', () => {
   assert.ok(rotas.length >= 14, `só ${rotas.length} rotas achadas no core — o padrão do ROUTES mudou`);
   assert.ok(rotas.includes('sessao') && rotas.includes('chat'), 'o extrator voltou a perder as chaves sem aspas');
   for (const r of rotas) {
-    if (LEITURA.has(r)) continue;
-    assert.ok(recusadas.has(r),
-      `a rota "${r}" escreve/desloga e NÃO está recusada em diag-api.mjs — ela agiria na conta de terceiro`);
+    assert.ok(SO_LE.has(r) !== RECUSADAS.has(r),
+      `a rota "${r}" não está classificada (ou está nas duas listas) — decida se ela SÓ LÊ ou se escreve/desloga`);
+    if (RECUSADAS.has(r)) {
+      assert.ok(recusadas.has(r),
+        `a rota "${r}" escreve/desloga e NÃO está recusada em diag-api.mjs — ela agiria na conta de terceiro`);
+    }
+  }
+  assert.deepEqual([...leitura].sort(), [...SO_LE].sort(),
+    'a lista de LEITURA da ferramenta não é a das rotas que só leem — `perfil` desloga quando o portão recusa');
+});
+
+// A CLASSIFICAÇÃO do `perfil` medida, não afirmada: com o core de verdade e um
+// Waze de mentira, a conta que o portão recusa perde a sessão no servidor.
+// CONTROLE: a conta que passa no portão continua com ela — sem isto, "a sessão
+// sumiu" não distinguiria o portão de um store que apaga tudo.
+test('diag-api: `perfil` DESLOGA quando o portão recusa (por isso a ferramenta o recusa)', async () => {
+  const { sessaoDeTeste } = await import('./_sessao.mjs');
+  const { dispatch } = await import('../server/core.mjs');
+  const COOKIES = '.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tabc\n.waze.com\tTRUE\t/\tTRUE\t0\t_csrf_token\txyz\n';
+  const fetchOriginal = globalThis.fetch;
+  const perfilDoWaze = (rank, am) => async () => new Response(JSON.stringify({ id: 1, userName: 'x', rank, isAreaManager: am, isStaff: false }),
+    { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const recusado = await sessaoDeTeste(COOKIES);
+    globalThis.fetch = perfilDoWaze(0, false);
+    const r = await dispatch('perfil', { sessionToken: recusado.sessionToken, region: 'row' }, recusado.ctx);
+    assert.equal(r.status, 403, 'PRÉ-CONDIÇÃO: o portão não recusou a conta L1 sem AM');
+    assert.equal(recusado.store.mem.size, 0, 'o `perfil` recusado deixou a sessão — se ele parou de deslogar, releia a classificação');
+    const aceito = await sessaoDeTeste(COOKIES);
+    globalThis.fetch = perfilDoWaze(5, true);
+    const r2 = await dispatch('perfil', { sessionToken: aceito.sessionToken, region: 'row' }, aceito.ctx);
+    assert.equal(r2.status, 200);
+    assert.equal(aceito.store.mem.size, 1, 'CONTROLE: a conta que passa no portão perdeu a sessão — a medida acima não distingue nada');
+  } finally {
+    globalThis.fetch = fetchOriginal;
   }
 });
 
@@ -80,7 +123,7 @@ test('diag-api: recusa de verdade, rodando o script', () => {
     app: { url: 'https://exemplo.invalido/' },
     localStorage: { waze_session_token: 'nao-usado-porque-recusa-antes' },
   }));
-  for (const rota of ['marcar-lido', 'validar-place', 'excluir-foto', 'renomear-local', 'sessao']) {
+  for (const rota of ['marcar-lido', 'validar-place', 'excluir-foto', 'renomear-local', 'sessao', 'perfil']) {
     let saiu = 0;
     try {
       execFileSync(process.execPath, [join(ROOT, 'tools/diag-api.mjs'), arq, rota],
@@ -134,18 +177,61 @@ test('diagnóstico: currentPlace vai como ÍNDICE, não duplicado', () => {
   assert.match(REPLAY, /'\[circular\]'/, 'o replay parou de remendar os arquivos do formato antigo');
 });
 
-test('diag-tela: procura a FONTE também nos recursos — o coletor a deixa fora do `codigo`', () => {
-  // Desde v2026.09.10-04 o coletor pula a fonte (binário lido como texto não
-  // serve), e o `diag-tela` só procurava no `codigo`: toda tela remontada saiu
-  // com a fonte do sistema, sem aviso. MEDIDO no relatório real de 2026-09-24:
-  // `fontesEmbutidas: []` com o leitor de antes, a Inter com o de hoje.
-  assert.match(APP, /if \(\/\\\.\(woff2\?\|ttf\|/, 'o coletor voltou a guardar a fonte? então este guard mudou de sentido — releia');
-  const TELA = readFileSync(join(ROOT, 'tools/diag-tela.mjs'), 'utf8');
-  const semCom = TELA.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  const laco = semCom.match(/for \(const u of ([\w.()]+)\) \{\s*\n\s*const m = \/\\\/fonts\\\//);
-  assert.ok(laco, 'sumiu o laço que casa a fonte pelo nome');
-  const def = new RegExp(`const ${laco[1].replace(/[.()]/g, '\\$&')} = ([\\s\\S]*?);\\n`).exec(semCom);
-  assert.ok(def && /d\.recursos/.test(def[1]), `a busca da fonte itera \`${laco[1]}\`, que não inclui os recursos da página`);
+// ── diag-tela (auditoria de 2026-09-26) ─────────────────────────────────────
+const TELA = readFileSync(join(ROOT, 'tools/diag-tela.mjs'), 'utf8');
+const fatiarDaTela = (nome) => {
+  const ini = TELA.indexOf('\nfunction ' + nome + '(');
+  assert.ok(ini > 0, `${nome} sumiu do diag-tela`);
+  let prof = 0, fim = -1;
+  for (let k = TELA.indexOf('{', TELA.indexOf(')', ini)); k < TELA.length; k++) {
+    if (TELA[k] === '{') prof++;
+    else if (TELA[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  return new Function(TELA.slice(ini, fim) + `\nreturn ${nome};`)();
+};
+
+test('diag-tela: a fonte entra NA `@font-face` do app — a família, o peso e o unicode-range são os dele', () => {
+  // A ferramenta registrava a fonte como "Inter var" (100–900), um nome que o
+  // CSS do app (`Inter`, 300–700) nunca pede: a face ficava `unloaded`, a tela
+  // saía na fonte do sistema, e `fontesEmbutidas` afirmava o contrário. Aqui
+  // roda sobre o CSS DE VERDADE (o `css/app.css` que o app serve).
+  const embutirFontes = fatiarDaTela('embutirFontes');
+  const APP_CSS = readFileSync(join(ROOT, 'css/app.css'), 'utf8');
+  const lidas = [];
+  const { css, fontes } = embutirFontes(APP_CSS, (nome) => { lidas.push(nome); return 'QUFBQQ=='; });
+  const faces = css.match(/@font-face\{[^}]*\}/g) || [];
+  assert.ok(faces.length >= 2, `PRÉ-CONDIÇÃO: o CSS do app tem ${faces.length} @font-face — o teste precisa ser revisto`);
+  for (const f of faces) {
+    assert.match(f, /font-family:\s*'?"?Inter'?"?;/, 'a família mudou na remontagem: o app pede `Inter`');
+    assert.match(f, /font-weight:\s*300 700/, 'o peso mudou na remontagem: o app declara 300 700');
+    assert.match(f, /unicode-range:/, 'o unicode-range da regra do app sumiu');
+    assert.match(f, /src:\s*url\(data:font\/woff2;base64,QUFBQQ==\)/, 'a regra do app não recebeu a fonte embutida');
+  }
+  assert.ok(!/Inter var/.test(css), 'voltou a família inventada');
+  assert.deepEqual(fontes.map((x) => x.nome).sort(), [...new Set(lidas)].sort(), '`fontesEmbutidas` tem que ser o que ENTROU no CSS');
+  assert.ok(fontes.length >= 2);
+  // CONTROLE: fonte que não está no repositório fica como estava (e não entra na lista).
+  const semArquivo = embutirFontes(APP_CSS, () => null);
+  assert.equal(semArquivo.css, APP_CSS);
+  assert.deepEqual(semArquivo.fontes, []);
+  // E a ferramenta MEDE se a família carregou, na página remontada.
+  assert.match(TELA, /document\.fonts\.check\(/, 'o diag-tela deixou de medir se a fonte carregou');
+});
+
+test('diag-tela: relatório SEM captura é rotulado com a versão DELE e o painel que ele mediu', () => {
+  // Um v10 sem capturas saía como "arquivo v1 · painel=?".
+  const momentosDoRelatorio = fatiarDaTela('momentosDoRelatorio');
+  const v10 = { _versaoDoDiag: 10, _gerado: 'x', dom: '<html></html>', momentos: [],
+                resumo: { telaAgora: { painel: 'tudoLimpo', modais: ['filtersModal'] } } };
+  const [m] = momentosDoRelatorio(v10);
+  assert.match(m.motivo, /relatório v10/, 'o rótulo não diz a versão real do relatório');
+  assert.equal(m.painel, 'tudoLimpo', 'o painel não veio do `resumo.telaAgora`');
+  assert.deepEqual(m.modais, ['filtersModal']);
+  assert.ok(!/v1\b/.test(m.motivo), 'voltou o "arquivo v1"');
+  // CONTROLE: com capturas, são elas que se remontam, iguais.
+  const cap = [{ motivo: 'manual', dom: '<html></html>' }];
+  assert.equal(momentosDoRelatorio({ momentos: cap, dom: 'x' }), cap);
+  assert.deepEqual(momentosDoRelatorio({ momentos: [] }), []);
 });
 
 test('diag-api: decide por LISTA DE LEITURA — caminho torto até uma rota de escrita é recusado antes de ler o arquivo', () => {
@@ -160,7 +246,7 @@ test('diag-api: decide por LISTA DE LEITURA — caminho torto até uma rota de e
   }
   // CONTROLE: rota de leitura passa da recusa (e aí falha lendo o arquivo, com 1).
   let codigo = 0;
-  try { execFileSync(process.execPath, [ferramenta, '/nao/existe.zip', 'perfil'], { stdio: 'pipe' }); }
+  try { execFileSync(process.execPath, [ferramenta, '/nao/existe.zip', 'buscar-places'], { stdio: 'pipe' }); }
   catch (e) { codigo = e.status; }
   assert.notEqual(codigo, 3, 'a rota de leitura foi recusada — a ferramenta ficou inútil');
   // A base é a ORIGEM da URL do app (com query ou caminho, o POST ia pro lugar errado).
@@ -174,4 +260,104 @@ test('diag-tela: remonta TAMBÉM as capturas das aberturas anteriores (o defeito
   const TELA = readFileSync(join(ROOT, 'tools/diag-tela.mjs'), 'utf8');
   assert.match(TELA, /d\.aberturasAnteriores/, 'o diag-tela voltou a ignorar as aberturas anteriores');
   assert.match(TELA, /const momentos = \[\.\.\.anteriores, \.\.\.atuais\];/);
+});
+
+// O CORPO que a ferramenta mandaria, lido da própria saída dela: ela imprime o
+// corpo (com o token mascarado) ANTES do jitter e da rede. O processo é morto
+// assim que a linha aparece — nada sai pra rede, e o teste não espera o jitter.
+async function corpoQueSairia(dados, rota, extra) {
+  const { spawn } = await import('node:child_process');
+  const dir = mkdtempSync(join(tmpdir(), 'diag-api-'));
+  const arq = join(dir, 'd.json');
+  writeFileSync(arq, JSON.stringify(dados));
+  const filho = spawn(process.execPath, [join(ROOT, 'tools/diag-api.mjs'), arq, rota, ...(extra ? [extra] : [])],
+    { stdio: ['ignore', 'pipe', 'pipe'] });
+  let saida = '';
+  try {
+    return await new Promise((ok, erro) => {
+      const teto = setTimeout(() => erro(new Error('a ferramenta não imprimiu o corpo: ' + saida.slice(0, 300))), 10000);
+      filho.stdout.on('data', (b) => {
+        saida += b;
+        const m = /^corpo: (.+)$/m.exec(saida);
+        if (m) { clearTimeout(teto); ok(JSON.parse(m[1])); }
+      });
+      filho.once('exit', () => { clearTimeout(teto); erro(new Error('a ferramenta saiu antes do corpo: ' + saida.slice(0, 300))); });
+    });
+  } finally {
+    filho.kill('SIGKILL');
+  }
+}
+
+test('diag-api: pergunta na REGIÃO e no PAÍS do relatório, não nos de fábrica', async () => {
+  // O corpo cravava `region: 'row'` e nenhum país: a fila de quem tria nos EUA
+  // (servidor `na`) ou na França era perguntada ao servidor do resto do mundo e
+  // no país padrão — a resposta "vazia" parecia o defeito que se investigava.
+  const base = { app: { url: 'https://exemplo.invalido/' } };
+  const deNa = await corpoQueSairia({ ...base, localStorage: { waze_session_token: 'tok-nao-impresso',
+    waze_region: 'na', waze_country: '235' } }, 'buscar-places');
+  assert.equal(deNa.region, 'na', 'a região do relatório não chegou ao corpo');
+  assert.equal(deNa.countryId, 235, 'o país do relatório não chegou ao corpo');
+  assert.equal(deNa.sessionToken, '<TOKEN>', 'o corpo impresso tem que mascarar o token');
+  // O `json-extra` continua mandando: é assim que se pergunta OUTRO país.
+  const outro = await corpoQueSairia({ ...base, localStorage: { waze_session_token: 'tok', waze_region: 'na', waze_country: '235' } },
+    'lista-estados', '{"countryId":73}');
+  assert.equal(outro.countryId, 73, 'o json-extra deixou de trocar o país');
+  // CONTROLE: relatório sem região nem país cai no padrão do app (ROW, sem país).
+  const semNada = await corpoQueSairia({ ...base, localStorage: { waze_session_token: 'tok' } }, 'buscar-places');
+  assert.equal(semNada.region, 'row');
+  assert.ok(!('countryId' in semNada), 'sem país no relatório, a ferramenta inventou um');
+});
+
+// ── diag-replay: a tela que ele reconstrói é a do aparelho (auditoria de 2026-09-26) ──
+// Três coisas saíam diferentes do que a pessoa via: o tema (só o GUARDADO era
+// lido — quem segue o sistema escuro remontava claro, e o init ainda gravava
+// "light"), o cabeçalho (sem perfil, Filtros e Atualizar) e a sessão (logada
+// SEM token, o que fazia a sentinela `tokenNaoPersiste` acusar um defeito que o
+// aparelho não tinha). A tela inteira é medida no `tools/smoke-diag-tela.mjs`.
+const temaDoRelatorio = (() => {
+  const ini = REPLAY.indexOf('\nfunction temaDoRelatorio(d) {');
+  assert.ok(ini > 0, 'temaDoRelatorio sumiu do diag-replay');
+  let prof = 0, fim = -1;
+  for (let k = REPLAY.indexOf('{', ini); k < REPLAY.length; k++) {
+    if (REPLAY[k] === '{') prof++;
+    else if (REPLAY[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  return new Function(REPLAY.slice(ini, fim) + '\nreturn temaDoRelatorio;')();
+})();
+
+test('diag-replay: o TEMA é o da tela do aparelho — a escolha guardada, senão o que a tela mostrava, senão o sistema', () => {
+  // O caso do relato: nada guardado, sistema escuro, tela escura.
+  const doSistema = temaDoRelatorio({ localStorage: {}, ambiente: { escuro: true },
+    computado: { tema: { htmlClasse: 'dark tem-sessao', guardado: null } } });
+  assert.equal(doSistema.escuro, true, 'quem segue o sistema escuro remontou claro');
+  assert.equal(doSistema.guardado, null, 'o replay inventou uma escolha que a pessoa não fez (e o app pararia de seguir o sistema)');
+  // Relatório sem a camada computada (anterior ao v3): o sistema do aparelho decide.
+  assert.equal(temaDoRelatorio({ localStorage: {}, ambiente: { escuro: true } }).escuro, true);
+  // A escolha GUARDADA vence o sistema (quem escolheu claro num sistema escuro).
+  const escolhido = temaDoRelatorio({ localStorage: { waze_places_theme: 'light' }, ambiente: { escuro: true },
+    computado: { tema: { htmlClasse: '' } } });
+  assert.deepEqual([escolhido.escuro, escolhido.guardado, escolhido.sistema], [false, 'light', true]);
+  // `dark` é classe, não substring: `tema-dark-algo` não é o tema escuro.
+  assert.equal(temaDoRelatorio({ localStorage: {}, computado: { tema: { htmlClasse: 'nao-dark-x' } } }).escuro, false);
+  // CONTROLE: sistema claro e nada guardado → claro.
+  assert.equal(temaDoRelatorio({ localStorage: {}, ambiente: { escuro: false }, computado: { tema: { htmlClasse: 'tem-sessao' } } }).escuro, false);
+});
+
+test('diag-replay: grava tema SÓ se a pessoa escolheu, monta o cabeçalho e dá à sessão um token fictício — sem rede', () => {
+  // Comentário tirado por LINHA, e não com o `semComentarios` de cima: o glob
+  // `'**/api/**'` tem um `/*` que o removedor de bloco lê como comentário e
+  // come o código até o próximo `*/` (gotcha #67.1).
+  const codigo = REPLAY.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(codigo, /if \(temaGuardado\) localStorage\.setItem\('waze_places_theme', temaGuardado\);/,
+    'o replay voltou a gravar um tema que a pessoa não escolheu');
+  assert.doesNotMatch(codigo, /escuro \? 'dark' : 'light'\]\);/, 'o init voltou a receber "light" quando nada estava guardado');
+  assert.match(codigo, /showMainScreen\(\);\s*\n\s*renderProfileHeader\(\);/, 'o replay deixou de montar o cabeçalho (perfil, Filtros, Atualizar)');
+  assert.match(codigo, /localStorage\.setItem\('waze_session_token', '[^']+'\)/, 'sem token, a sentinela `tokenNaoPersiste` acusa um defeito do replay');
+  // O token é gravado DEPOIS da carga: no init, o app tentaria entrar com ele.
+  const iInit = codigo.indexOf('addInitScript');
+  const iFim = codigo.indexOf('});', iInit);
+  assert.ok(!codigo.slice(iInit, iFim).includes('waze_session_token'), 'o token fictício entrou ANTES da carga');
+  assert.match(codigo, /ctx\.route\('\*\*\/api\/\*\*', \(r\) => r\.abort\(/, 'com sessão fictícia, a API tem que estar cortada por construção');
+  // E a espera é pelo lado do Node (o poller do `waitForFunction` avalia string e a CSP o barra).
+  assert.doesNotMatch(codigo, /\.waitForFunction\(/, 'o replay voltou a usar waitForFunction');
 });

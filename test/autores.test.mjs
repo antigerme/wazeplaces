@@ -238,18 +238,35 @@ test('lote: "já tratado por outro editor" NÃO conta como falha', () => {
   const bloco = semComentarios.slice(i, semComentarios.indexOf('function mostrarResultadoDoLote'));
   assert.match(bloco, /already_processed[\s\S]{0,80}conta\.ja\+\+/,
     'o app já trata isso como objetivo cumprido no card único — chamar de falha aqui daria dois nomes à mesma coisa');
-  assert.match(bloco, /conta\.erro\+\+[\s\S]{0,420}AppState\.queue\.push\(p\)/,
+  assert.match(bloco, /conta\.erro\+\+[\s\S]{0,420}voltarPraFila\(p\);/,
     'o que NÃO saiu tem que voltar pra fila, senão o pedido some sem ter sido tratado');
+  // E "voltar pra fila" é pra fila do lote (F4): na fila refeita no meio do
+  // laço, quem o traz é a busca — test/lote-autor.test.mjs roda os dois casos.
+  assert.match(bloco, /const voltarPraFila = \(q\) => \{\s*if \(naFilaDoLote\(\)\) \{[^}]*AppState\.queue\.push\(q\);/,
+    'o que falha deixou de voltar pra fila do lote');
 });
 
 test('lote: o lote respeita a trava e o treino', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function rejeitarLoteDoAutor');
-  const bloco = semComentarios.slice(i, i + 400);
+  // A função INTEIRA (até a próxima declaração): por distância, a linha da
+  // sessão que entrou antes da trava (K1) empurrava o resto pra fora (#67).
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\nfunction ', i + 10));
   // Respeita a janela — e DIZ (a folha já fechou com o toque; sair calado
   // deixava a pessoa achando que rejeitou).
-  assert.match(bloco, /if \(acoesTravadas\(\)\) \{ showToast\(t\('toast\.esperaDesfazer'\), 'info'\); return; \}/,
+  assert.match(bloco, /if \(acoesTravadas\(\)\) \{ showToast\(t\(avisoDaTrava\(\)\), 'info'\); return; \}/,
     'o lote tem que respeitar a janela em curso, e avisar');
+  // E o aviso diz QUAL espera: "espere o Desfazer" com o lote de lidos no ar
+  // manda procurar um botão que não existe (F1).
+  // Rodando a função de verdade: cada trava com a sua espera.
+  const iA = semComentarios.indexOf('function avisoDaTrava');
+  const corpoAviso = semComentarios.slice(iA, semComentarios.indexOf('\n}\n', iA) + 3);
+  const aviso = (auth, lote, conf) => new Function('AppState', 'loteDeLidosEmVoo', 'escritasConferindo',
+    corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf);
+  assert.equal(aviso(false, true, 1), 'api.error.noSession', 'sem sessão, a espera é a da sessão');
+  assert.equal(aviso(true, true, 0), 'toast.esperaLote');
+  assert.equal(aviso(true, false, 1), 'toast.esperaSessao', 'conferindo um 401, "espere o Desfazer" manda procurar um botão que não existe');
+  assert.equal(aviso(true, false, 0), 'toast.esperaDesfazer');
   assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
 });
 
@@ -639,6 +656,8 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
     showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
     enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
     aoMudarAFilaPorBaixo: () => {},   // acerta o "Ver +N" e o fundo — não troca o card
+    pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    API: { getRegion: () => 'row' },   // a região dos pedidos vai junto com o lote (F7)
   };
   const chaves = Object.keys(deps);
   const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
@@ -646,6 +665,37 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
   assert.deepEqual(enviados, ['a2'], 'rejeitou o card que estava NA TELA');
   assert.deepEqual(AppState.queue.map((x) => x.venueID), ['a1', 'b1']);
   assert.equal(AppState.currentPlace, na);
+});
+
+test('auto (F1): pedido EM ANDAMENTO — o lote de lidos no ar — não é alvo da recusa automática', async () => {
+  // O lote de lidos deixa os pedidos dele NA FILA até a resposta; o perfil que
+  // chega no meio (a prova de rede do próprio lote refaz o perfil que faltava)
+  // rodava a recusa sobre eles: lido E rejeitado, duas decisões pro mesmo pedido.
+  const semComentarios = fonte.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
+  let prof = 0, fim = -1;
+  for (let j = semComentarios.indexOf('{', semComentarios.indexOf(')', i)); j < semComentarios.length; j++) {
+    if (semComentarios[j] === '{') prof++;
+    else if (semComentarios[j] === '}') { prof--; if (prof === 0) { fim = j + 1; break; } }
+  }
+  const frente = { venueID: 'f1', updateRequestID: 'f1', creatorId: 9 };
+  const noLote = { venueID: 'a1', updateRequestID: 'a1', creatorId: 7 };
+  const livre = { venueID: 'a2', updateRequestID: 'a2', creatorId: 7 };
+  const AppState = { queue: [frente, noLote, livre], currentPlace: frente };
+  const enviados = [];
+  const deps = {
+    AppState, podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, Treino: { ativo: false },
+    autoLigado: (id) => id === 7, updatePendingCount: () => {}, showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
+    enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
+    aoMudarAFilaPorBaixo: () => {},
+    pedidosEmAndamento: new Set(['a1|a1']), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    API: { getRegion: () => 'row' },
+  };
+  const chaves = Object.keys(deps);
+  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  await fn();
+  assert.deepEqual(enviados, ['a2'], 'a recusa rejeitou um pedido que o lote de lidos está marcando');
+  assert.deepEqual(AppState.queue.map((x) => x.venueID), ['f1', 'a1'], 'o pedido do lote saiu da fila antes da resposta dele');
 });
 
 // ── A folha do resultado do lote, EXECUTADA (auditoria de 2026-09-25) ────────

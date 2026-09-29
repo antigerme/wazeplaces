@@ -84,6 +84,9 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
     presencaWmeDaAcao: () => null, callWithRetry: (fn) => fn(),
     presencaWmeAoResponder: () => efeitos.push('presenca'),
     handleActionResult: () => efeitos.push('resultado'),
+    // O placar do gesto volta só pro que NÃO pousou (test/costura-sessao, K7):
+    // a resposta aqui é sucesso, então ele também não pode mexer.
+    pousouNoWaze: (r) => !!(r && r.success), descontarGestoSemSessao: () => efeitos.push('descontou'),
   };
   // `epocaDaSessao` é lido como variável solta: passa por um getter no escopo.
   const chaves = Object.keys(deps).filter((k) => k !== 'epocaDaSessao');
@@ -107,10 +110,13 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
 test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS do await', () => {
   const casos = {
     esvaziarFilaDeSaida: /: await API\.rejectPlace\([^)]*\);\s*if \(epoca !== epocaDaSessao\) \{ enviados = 0; break; \}/,
-    enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    // Com a época mudada nada grava — só o placar otimista do que não pousou
+    // volta (test/costura-sessao, K7).
+    enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) \{\s*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;\s*return;\s*\}/,
     loadProfileAndAuxData: /API\.listCountries\(\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
-    handleMarkAsRead: /API\.markAsRead\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) return;/,
-    handleSkip: /API\.guardarPedido\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao).
+    handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*if \(!pousouNoWaze\(result\)\) descontarGestoSemSessao\('read', placar, 1\);\s*return;\s*\}/,
+    handleSkip: /API\.guardarPedido\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) return;/,
   };
   for (const [nome, re] of Object.entries(casos)) assert.match(fatiar(nome), re, `${nome} grava depois do "Sair"`);
 });
@@ -169,7 +175,7 @@ test('o modo "saindo" acaba quando a página VOLTA (visível ou bfcache)', () =>
 });
 
 // ── o treino ──────────────────────────────────────────────────────────────────
-function montarTreino(estado = {}) {
+function montarTreino(estado = {}, { loteNoAr = false } = {}) {
   const log = [];
   const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: true,
     queue: [], currentPlace: null, stats: { read: 7, rejected: 3, skipped: 1 }, serverTotal: 40,
@@ -181,7 +187,8 @@ function montarTreino(estado = {}) {
     updateStats: () => {}, updatePendingCount: () => {}, showCurrentPlace: () => log.push('card'),
     fecharCamadasDeFoto: () => {}, removeCurrentCardEl: () => {}, maybePrefetch: () => log.push('prefetch'),
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'),
-    t: (k) => k, showToast: () => {}, openModal: () => {},
+    t: (k) => k, showToast: (m) => log.push('toast:' + m), openModal: () => {},
+    loteDeLidosEmVoo: loteNoAr,
   };
   const i = APP_SEM.indexOf('const Treino = {');
   assert.ok(i >= 0, 'o objeto Treino sumiu');
@@ -208,6 +215,21 @@ test('treino: entrar com a busca EM VOO descarta a busca, não toca no `fetching
   Treino.sair();
   assert.equal(AppState.fetching, false, 'o `sair()` restaurou `fetching = true` sem promessa — a aba congelava');
   assert.ok(log.includes('busca'), 'a fila real vazia não voltou a buscar depois do treino');
+});
+
+test('treino (F1): com o lote de lidos NO AR ele não liga — e diz por quê', () => {
+  // O lote termina sobre a fila REAL; trocada pela de treino, o `sair()`
+  // devolvia como card os pedidos que o lote tinha marcado.
+  const { Treino, AppState, log } = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] }, { loteNoAr: true });
+  const fila = AppState.queue;
+  Treino.entrar();
+  assert.equal(Treino.ativo, false, 'o treino trocou a fila debaixo do lote no ar');
+  assert.equal(AppState.queue, fila);
+  assert.ok(log.includes('toast:toast.esperaLote'), 'recusou calado');
+  // CONTROLE: sem o lote no ar, entra.
+  const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] });
+  c.Treino.entrar();
+  assert.equal(c.Treino.ativo, true);
 });
 
 test('treino: deslogado ele NÃO liga (a tela de card nem existe)', () => {
@@ -299,11 +321,69 @@ test('país: vale a cada abertura, depois do perfil — e troca de verdade (fila
 
 // ── os filtros (auditoria de 2026-09-25) ─────────────────────────────────────
 test('filtros: trocar a REGIÃO traz os países dela, e o "Aplicar" com lista carregando não apaga país nem estado', () => {
-  assert.match(APP_SEM, /\$\('filterRegion'\)\.addEventListener\('change', async \(e\) => \{[\s\S]{0,400}const r = await API\.listCountries\(regiao\);/,
+  // O handler virou função com nome (F10a, auditoria da fila de 2026-09-26),
+  // que test/filtros-modal.test.mjs RODA — com a lista chegando e falhando.
+  assert.match(APP_SEM, /\$\('filterRegion'\)\.addEventListener\('change', aoTrocarRegiaoNoModal\);/,
+    'a troca de região no modal deixou de trazer os países dela');
+  assert.match(fatiar('aoTrocarRegiaoNoModal'), /const r = await API\.listCountries\(regiao\);/,
     'a troca de região no modal seguia com os países da região anterior');
   const aplicar = fatiar('applyFiltersFromModal');
   assert.match(aplicar, /if \(!\$\('filterState'\)\.dataset\.carregando\) AppState\.filters\.stateId = \$\('filterState'\)\.value;/);
   assert.match(aplicar, /if \(!\$\('filterCountry'\)\.dataset\.carregando && \$\('filterCountry'\)\.value\) API\.setCountry\(\$\('filterCountry'\)\.value\);/);
+});
+
+// A dica "Mostrando apenas países que você pode editar" só se ACENDIA: depois de
+// uma lista filtrada, ela seguia na tela com a lista INTEIRA — a da região nova
+// (o ouvinte da troca traz todos os países dela) ou a de um perfil sem países
+// editáveis ali (auditoria de textos, 2026-09-26). Roda a função e o ouvinte
+// DE VERDADE, recortados do app.js.
+test('filtros: a dica de "só os países que você pode editar" diz o que A LISTA é — some com a lista inteira e na troca de região', async () => {
+  const el = (extra = {}) => {
+    const cls = new Set(['hidden']);
+    return {
+      dataset: {}, innerHTML: '', value: '',
+      classList: {
+        add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c),
+        toggle: (c, f) => { const on = f === undefined ? !cls.has(c) : !!f; if (on) cls.add(c); else cls.delete(c); return on; },
+      },
+      ...extra,
+    };
+  };
+  const els = { filterCountry: el(), filterCountryHint: el(), filterRegion: el({ value: 'row' }), filterMyArea: el({ checked: false }) };
+  const AppState = { profile: { editableCountryIDs: [30] }, countries: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }] };
+  const { populateCountrySelect } = montar(['populateCountrySelect'], {
+    document: { getElementById: (id) => els[id] || null }, AppState, API: { getCountry: () => 30 },
+    ordenarPorNome: (l) => l, escapeHtml: (x) => String(x),
+  }, ['populateCountrySelect']);
+  const dica = () => !els.filterCountryHint.classList.contains('hidden');
+
+  populateCountrySelect();
+  assert.equal(dica(), true, 'CONTROLE: com a lista filtrada pelo perfil, a dica aparece');
+  assert.equal((els.filterCountry.innerHTML.match(/<option/g) || []).length, 1, 'CONTROLE: a lista filtrada tem só o país editável');
+  for (const editaveis of [[], [999]]) {
+    AppState.profile = { editableCountryIDs: editaveis };
+    populateCountrySelect();
+    assert.equal(dica(), false, `lista inteira (editáveis ${JSON.stringify(editaveis)}) e a dica dizendo "só os que você pode editar"`);
+  }
+
+  // O ouvinte da troca de região: a função com nome do F10a, recortada do app.js
+  // e rodada com a lista da região nova chegando.
+  assert.match(APP_SEM, /\$\('filterRegion'\)\.addEventListener\('change', aoTrocarRegiaoNoModal\);/, 'sumiu o ouvinte da troca de região');
+  const { aoTrocarRegiaoNoModal } = montar(['aoTrocarRegiaoNoModal'], {
+    document: { getElementById: (id) => els[id] || null }, AppState,
+    API: { getRegion: () => 'row', getCountry: () => 30,
+      listCountries: async () => ({ success: true, countries: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }] }) },
+    escapeHtml: (x) => String(x), t: (k) => k, ordenarPorNome: (l) => l, loadStatesIntoSelect: async () => {},
+    populateCountrySelect, showToast: () => {},
+  }, ['aoTrocarRegiaoNoModal']);
+  const ouvinte = aoTrocarRegiaoNoModal;
+  AppState.profile = { editableCountryIDs: [30] };
+  populateCountrySelect();
+  assert.equal(dica(), true, 'CONTROLE: a dica acesa antes da troca');
+  els.filterRegion.value = 'na';
+  await ouvinte({ target: { value: 'na' } });
+  assert.equal((els.filterCountry.innerHTML.match(/<option/g) || []).length, 2, 'CONTROLE: a troca trouxe a lista inteira da região');
+  assert.equal(dica(), false, 'trocou a região, veio a lista inteira dela, e a dica seguiu dizendo "só os que você pode editar"');
 });
 
 test('filtros: a carga de estados VELHA não sobrescreve a nova (trocar de país no meio)', async () => {

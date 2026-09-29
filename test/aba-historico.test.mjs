@@ -197,6 +197,9 @@ function abrirAba(comp) {
     AUTORES_MAX_DIAS: 30, AUTORES_MAX_REINCIDENTES: 500, AUTORES_MAX_VISTOS: 6000, diaDeHoje: () => 20000,
     podarHistorico: () => false, historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
     atualizarSeloDeConquista: () => { aba.selo++; }, agendarRedesenhoDoHistorico: () => { aba.redesenhos++; },
+    // O modo dev e a sessão da outra aba têm tratamento PRÓPRIO (ver
+    // test/diag-guarda, D2); aqui só se conta que ele foi chamado.
+    DEVMODE_KEY: 'waze_places_devmode', aoMudarModoDevEmOutraAba: () => { aba.modoDev = (aba.modoDev || 0) + 1; },
   };
   const nomes = ['salvarHistorico', 'loadHistory', 'recordHistory', 'carregarConquistas', 'salvarConquistas',
     'loadAutores', 'salvarAutores', 'podarAutores', 'registrarRejeicaoDeAutor', 'aoGravarEmOutraAba'];
@@ -441,6 +444,10 @@ async function rodarRecusa(alvos) {
     // do aparelho, do conserto do offline); aqui ela é.
     contaConfirmada: () => true,
     autoLigado: (id) => id !== 1, updatePendingCount() {}, aoMudarAFilaPorBaixo() {},
+    // Pedido EM ANDAMENTO (o lote de lidos no ar) não é alvo — ver o F1.
+    pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    // A região dos pedidos vai junto com o lote (F7).
+    API: { getRegion: () => 'row' },
     t: (k, v) => k + ' ' + JSON.stringify(v),
     showToast: (msg) => { avisos.push(msg); return { texto: (m) => avisos.push(m), dispensar() {} }; },
     // O `enviarLote` anda EM ORDEM e conta o que ainda falta depois de cada um.

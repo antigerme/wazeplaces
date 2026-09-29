@@ -49,9 +49,11 @@ O app manda, na própria janela:
 window.postMessage({ source: 'wazeplaces', action: 'precisa-de-sessao' }, location.origin);
 ```
 
-A ponte responde com uma de duas:
+A ponte responde `aguarde` NA HORA (é mensagem local, sem rede) e, depois da ida ao Waze, uma
+de três:
 
 ```js
+{ source: 'wazeplaces-ext', action: 'aguarde' }                  // já: "estou aqui, trabalhando"
 { source: 'wazeplaces-ext', action: 'sessao',     token: '…' }   // deu certo
 { source: 'wazeplaces-ext', action: 'sem-sessao', motivo: '…' }  // sem login no WME, ou erro
 { source: 'wazeplaces-ext', action: 'sem-sessao', motivo: 'negado',
@@ -63,7 +65,10 @@ app exige). É resposta definitiva: a extensão não tenta de novo, e o app most
 restrito" com o perfil — o mesmo do login por arquivo. Segue sendo `sem-sessao` de propósito: o
 app de antes não conhece o motivo e cai no login na hora, como sempre.
 
-Se ninguém responder em 2,5 s, o app mostra a tela de login normal.
+Sem resposta nenhuma em 350 ms (`EXT_PRESENTE_MS`, no `js/app.js`), o app mostra a tela de login
+normal — é o `aguarde` que separa quem tem a extensão de quem não tem, e quem não tem não paga
+espera. Depois do `aguarde`, o app espera a ida ao Waze por até 8 s (`EXT_ESPERA_MS`), mostrando
+"Entrando pelo WME…".
 
 **Sobre segurança:** aceitar um token por `postMessage` **não abre superfície nova** — qualquer
 script na página já pode escrever `localStorage.waze_session_token` direto. Mesmo assim os dois
@@ -117,10 +122,11 @@ Dois buracos, os dois medidos antes de escrever qualquer linha.
 
 ### 1. Instalar com a aba aberta não fazia nada
 
-O app pergunta à ponte **uma vez**, no carregamento, com 350ms de janela — e o Chrome **não
-injeta content script numa aba que já estava aberta**. Quem instalava olhando pra tela de entrada
-ficava ali pra sempre. (O app ganhou um "Já instalei — entrar" pra esse caso; isto aqui torna o
-botão desnecessário.)
+O app pergunta à ponte no carregamento (com 350 ms de janela), ao voltar à aba com a tela de
+entrada aberta e quando a sessão cai (`derrubarSessao`) — e o Chrome **não injeta content script
+numa aba que já estava aberta**, então nenhuma dessas perguntas tem quem responda. Quem instalava
+olhando pra tela de entrada ficava ali pra sempre. (O app ganhou um "Já instalei — entrar" pra
+esse caso; isto aqui torna o botão desnecessário.)
 
 `chrome.runtime.onInstalled` agora recarrega as abas do Places. **Sem permissão nova** — e isso
 foi medido, não suposto:

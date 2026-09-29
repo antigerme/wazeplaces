@@ -515,14 +515,25 @@ test('não oferecemos ação impossível no aparelho', () => {
   // verdade contra os navegadores que importam (auditoria de 2026-09-25).
   const fn = JS.match(/function podeInstalarExtensao\(\)[\s\S]*?\n\}/)[0];
   const pode = (navigator) => new Function('navigator', fn + '\nreturn podeInstalarExtensao();')(navigator);
-  const CH = (mobile, ...marcas) => ({ userAgentData: { mobile, brands: marcas.map((brand) => ({ brand, version: '153' })) } });
+  // `platform` é o que o Chrome manda de verdade (Windows, macOS, Linux, Chrome
+  // OS, Android) — o `mobile` sozinho não separa o tablet do computador.
+  const CH = (mobile, platform, ...marcas) =>
+    ({ userAgentData: { mobile, platform, brands: marcas.map((brand) => ({ brand, version: '153' })) } });
   const UA = (userAgent) => ({ userAgent });
   const casos = [
-    ['Chrome no computador', CH(false, 'Chromium', 'Google Chrome', 'Not.A/Brand'), true],
-    ['Edge no computador', CH(false, 'Chromium', 'Microsoft Edge'), true],
-    ['Chrome no Android', CH(true, 'Chromium', 'Google Chrome'), false],
+    ['Chrome no computador', CH(false, 'Windows', 'Chromium', 'Google Chrome', 'Not.A/Brand'), true],
+    ['Chrome no Mac', CH(false, 'macOS', 'Chromium', 'Google Chrome'), true],
+    ['Chrome no Linux', CH(false, 'Linux', 'Chromium', 'Google Chrome'), true],
+    ['Chrome no Chromebook', CH(false, 'Chrome OS', 'Chromium', 'Google Chrome'), true],
+    ['Edge no computador', CH(false, 'Windows', 'Chromium', 'Microsoft Edge'), true],
+    ['Chrome no Android', CH(true, 'Android', 'Chromium', 'Google Chrome'), false],
+    // O tablet Android se anuncia `mobile: false` (a UA de tablet não tem
+    // "Mobile") e não instala extensão: quem separa é o sistema (auditoria de
+    // 2026-09-26). O mesmo vale pro nome em qualquer caixa.
+    ['Chrome em tablet Android', CH(false, 'Android', 'Chromium', 'Google Chrome'), false],
+    ['Edge em tablet Android', CH(false, 'android', 'Chromium', 'Microsoft Edge'), false],
     // O dia em que um navegador que NÃO é Chromium mandar Client Hints: a marca decide.
-    ['Client Hints sem Chromium', CH(false, 'Firefox'), false],
+    ['Client Hints sem Chromium', CH(false, 'Windows', 'Firefox'), false],
     ['Chrome antigo sem Client Hints', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0 Safari/537.36'), true],
     ['Firefox no computador', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'), false],
     ['Safari no Mac', UA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'), false],
@@ -2107,14 +2118,20 @@ test('a foto ampliada fecha pelos caminhos das DUAS plataformas', () => {
   assert.ok(iMapa >= 0, 'o mapa ampliado não trata teclado — Esc não fecharia ele');
   assert.ok(iMapa < iFoto, 'o bloco da foto vem antes do mapa: Esc fecharia a camada errada');
 
-  // Esc é a convenção de desktop e continua sendo o caminho principal.
-  assert.match(teclas, /e\.key === 'Escape'[\s\S]{0,60}Lightbox\.close\(\)/,
+  // Esc é a convenção de desktop e continua sendo o caminho principal. Os dois
+  // passam pelo `recuarNaFoto` (auditoria de 2026-09-26): editando o nome, o
+  // passo pra trás é sair da EDIÇÃO; sem edição, fechar a foto.
+  assert.match(teclas, /e\.key === 'Escape'\) \{ e\.preventDefault\(\); recuarNaFoto\(\); \}/,
     'Esc deixou de fechar a foto');
 
   // ↓ espelha o arraste pra baixo do toque. Relato do owner: aprendeu o gesto
   // no celular, sentou no laptop e a mão foi pro ↓.
-  assert.match(teclas, /e\.key === 'ArrowDown'[\s\S]{0,60}Lightbox\.close\(\)/,
+  assert.match(teclas, /e\.key === 'ArrowDown'\) \{ e\.preventDefault\(\); recuarNaFoto\(\); \}/,
     'a tecla ↓ parou de fechar a foto');
+  const recuar = APP.match(/function recuarNaFoto\(\) \{[\s\S]*?\n\}/);
+  assert.ok(recuar, 'sumiu o recuarNaFoto');
+  assert.match(recuar[0], /if \(editandoNome\(\)\) \{ sairDaEdicaoNome\(\); return; \}\n\s+Lightbox\.close\(\);/,
+    'o passo pra trás da foto deixou de ser: editando, sai da edição; senão, fecha');
 
   // Só BAIXO: o toque fecha com `dy > 80`, e só. Inventar ↑ criaria um gesto
   // que o celular não tem — o app ficaria ensinando duas coisas diferentes.
@@ -2912,10 +2929,20 @@ test('contagem sai CRUA — e decimal e data seguem o locale', () => {
   // COLADA no que guarda, nunca por distância: `[^]{0,120}` alcançava outro
   // `toLocaleString` vizinho e passava com a distância já sabotada — gotcha #67,
   // e foi preciso sabotar pra descobrir que a asserção era decoração.
-  const emKm = [...app.matchAll(/\(bonito \/ 1000\)\.toLocaleString\(i18nLocale\(\)\)/g)].length;
-  assert.equal(emKm, 2,
-    `a distância em km perdeu o locale em ${2 - emKm} dos 2 lugares (card e mapa ampliado) — `
+  // A barra de escala do card e a do ampliado passaram a ser escritas por UMA
+  // função (`escreverEscala`, auditoria de 2026-09-26): o km no locale mora
+  // nela, e os DOIS lugares têm de passar por ela.
+  const iEsc = app.indexOf('function escreverEscala(');
+  assert.ok(iEsc > 0, 'sumiu o escreverEscala');
+  const rEsc = app.slice(iEsc + 1);
+  const corpoEsc = app.slice(iEsc, iEsc + 1 + rEsc.search(/\n(?:function |const |\/\/ ──)/));
+  assert.match(corpoEsc, /\(e\.metros \/ 1000\)\.toLocaleString\(i18nLocale\(\)\)/,
+    'a distância em km da barra de escala perdeu o locale — '
     + 'ali o separador é ARITMÉTICA: `1.2` lido por um brasileiro é mil e duzentos');
+  assert.match(app, /escreverEscala\(box\.querySelector\('\.card-map-scale'\)/,
+    'a escala do CARD deixou de passar pelo escreverEscala');
+  assert.match(app, /escreverEscala\(document\.getElementById\('mapaLbEscala'\)/,
+    'a escala do mapa AMPLIADO deixou de passar pelo escreverEscala');
   assert.match(app, /new Date\([^)]*\)\.toLocaleDateString\(i18nLocale\(\)/,
     'controle: sumiu a formatação de DATA, que deve continuar no locale');
 });

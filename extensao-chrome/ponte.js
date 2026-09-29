@@ -44,7 +44,9 @@ window.addEventListener('message', (ev) => {
       // respondeu. Silenciar sem responder deixaria o app esperando até o prazo
       // dele — melhor dizer "não consegui" e ele cai no login na hora.
       if (chrome.runtime.lastError || !r) return responder({ action: 'sem-sessao' });
-      if (r.success && r.sessionToken) return responder({ action: 'sessao', token: r.sessionToken });
+      // A conta vai junto (o `testar-cookies` a devolve): o app sabe de quem é a
+      // sessão na hora, e troca a fila de quem estava se for OUTRA conta.
+      if (r.success && r.sessionToken) return responder({ action: 'sessao', token: r.sessionToken, conta: r.conta });
       // O portão do app recusou a conta: o motivo e o perfil vão junto, pra o
       // app mostrar o diálogo "Acesso restrito". Continua sendo `sem-sessao` de
       // propósito — o app de ANTES não conhece o `negado` e cai no login na hora.

@@ -94,6 +94,9 @@ function montarFimDaFila({ skipped = 0, base = 0, tratou = true } = {}) {
     dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
     atualizarConviteInstalar() {}, marcarBordaRolagem() {}, trocarTextoI18n() {},
     checarConquistas: (x) => conquistas.push(x || {}),
+    // Nada mais em jogo que possa voltar pra fila (F3): nem em andamento, nem na fila de saída.
+    pedidosEmAndamento: new Set(), carregarFilaDeSaida: () => [],
+    chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
   };
   const preludio = `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base};`;
   const api = montar(['puladosNestaFila', 'filaZeradaConfirmada', 'showNoPlaces'], deps,
@@ -355,10 +358,12 @@ function montarLightboxComJanela() {
     idFotoAtual: () => 'foto-1', removerFoto() {},
   };
   const deps = {
-    Treino: { ativo: false }, Lightbox, AppState: { preferences: { undoEnabled: true }, currentPlace: null },
+    Treino: { ativo: false }, Lightbox, AppState: { authenticated: true, preferences: { undoEnabled: true }, currentPlace: null },
     canDisableUndo: () => false, podeRenomearAqui: () => true,
+    // A foto está na tela: aprovar e excluir exigem isso (L3, auditoria de 2026-09-26).
+    fotoDoLightboxNaTela: () => true, manterFocoNoLightbox() {}, marcarEmAndamento() {},
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
-    fecharEdicaoNome() {}, aplicarNomeNaTela() {}, devolverFoto() {}, showCurrentPlace() {},
+    fecharEdicaoNome() {}, sairDaEdicaoNome() {}, aplicarNomeNaTela() {}, devolverFoto() {}, showCurrentPlace() {},
     API: { prepararExclusao() {} },
     enviarAprovacao: () => Promise.resolve(true), enviarExclusao: () => Promise.resolve(true), enviarRenomeacao() {},
     aplicarTravaDeAcao() {}, removeUndoBanner() {}, t: (k) => k,

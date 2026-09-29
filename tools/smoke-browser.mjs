@@ -19,7 +19,7 @@
 // o import nu. Sem nenhum deles o script FALHA — nunca passa calado, porque
 // teste que se auto-pula vira teste que ninguém percebe que morreu.
 
-import { spawn } from 'node:child_process';
+import { subirServidorLocal } from './servidor-local.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -305,25 +305,12 @@ const checa = (ok, msg, detalhe) => {
   if (!ok) { falhas++; console.log(`  ✗ ${msg}${detalhe ? ' — ' + detalhe : ''}`); }
 };
 
-const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
-  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1' },
-  stdio: ['ignore', 'ignore', 'inherit'],
-});
-process.on('exit', () => servidor.kill());
-
-async function esperarServidor() {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const r = await fetch(BASE);
-      if (r.ok) return;
-    } catch { /* ainda subindo */ }
-    await dormir(250);
-  }
-  throw new Error(`servidor não subiu em ${BASE}`);
-}
+// O servidor sobe por `tools/servidor-local.mjs`: porta LIVRE antes, e pronto
+// é o próprio processo dizer que a ocupou (senão o smoke mediria o servidor de
+// outro processo na mesma porta).
+const { servidor } = await subirServidorLocal({ porta: PORTA, variavel: 'SMOKE_PORT' });
 
 const pw = await carregarPlaywright();
-await esperarServidor();
 const MOTOR = motorPedido();
 const browser = await abrirNavegador(pw, { args: ARGS_SEM_ESTRANGULAR });
 
@@ -985,7 +972,12 @@ for (const [nomeF, fw, fh] of FORMATOS_FOTO) {
 // continuam, sem erro de JS.
 for (const status of [404, 403]) {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
-  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status }));
+  const pedidosDeTile = new Map();
+  await ctx.route('**/*-tiles/**', (r) => {
+    const u = r.request().url();
+    pedidosDeTile.set(u, (pedidosDeTile.get(u) || 0) + 1);
+    return r.fulfill({ status });
+  });
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
@@ -1029,6 +1021,25 @@ for (const status of [404, 403]) {
   checa(!!m.escala, `${rot}: a barra de escala sumiu`);
   checa(m.tilesOrfaos === 0, `${rot}: ${m.tilesOrfaos} <img> quebrada ficou no DOM`);
   checa(!m.toast, `${rot}: erro na cara do editor por causa de um tile`, m.toast);
+  // O mapa AMPLIADO com os tiles caindo, arrastado devagar (um quadro por
+  // passo): o tile que falhou não pode ser pedido de novo a cada quadro — era
+  // 432 pedidos num arraste de 40 px, o mesmo tile até 30× (auditoria de
+  // 2026-09-26). E a <img> quebrada sai do DOM.
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-map');
+  await page.waitForTimeout(600);
+  // Conta por URL o que o ARRASTE pediu de novo (o mini-mapa do card e o
+  // ampliado pedem o mesmo tile uma vez cada, e isso é legítimo).
+  const antesDoArraste = new Map(pedidosDeTile);
+  checa(antesDoArraste.size >= 4, `${rot}: PRÉ-CONDIÇÃO — a medida não viu os pedidos de tile do ampliado (${antesDoArraste.size})`);
+  await page.mouse.move(200, 450); await page.mouse.down();
+  await page.mouse.move(240, 450, { steps: 30 }); await page.mouse.up();
+  await page.waitForTimeout(500);
+  let deNovo = 0, pior = 0;
+  for (const [u, n] of antesDoArraste) { const d = pedidosDeTile.get(u) - n; deNovo += d; pior = Math.max(pior, d); }
+  checa(deNovo === 0, `${rot}: o arraste de 40 px pediu de novo ${deNovo}× tiles que já tinham falhado (o mesmo até ${pior}×)`);
+  checa(await page.evaluate(() => document.querySelectorAll('#mapaLbTiles img').length) === 0,
+    `${rot}: <img> quebrada ficou no DOM do mapa ampliado`);
+  await page.evaluate(() => MapaLightbox.close());
   checa(erros.length === 0, `${rot}: erro de JS na página`, erros[0]);
   await ctx.close();
 }
@@ -1203,6 +1214,21 @@ for (const status of [404, 403]) {
   checa(vpDe(svVolta) === `${sv.local[0]},${sv.local[1]}`,
     'Street View: recentrar não devolveu o link ao ponto do pedido', `${vpDe(svVolta)} vs ${sv.local}`);
 
+  // As QUATRO setas andam (L13, auditoria de 2026-09-26): o ↓ fechava o mapa,
+  // copiado da foto, e pelo teclado não se chegava ao sul do pedido. O ↑ é o
+  // CONTROLE de que a medida de "andou" enxerga.
+  const lat0 = await page.evaluate(() => MapaLightbox.centro[0]);
+  await page.keyboard.press('ArrowUp'); await page.waitForTimeout(150);
+  const latN = await page.evaluate(() => MapaLightbox.centro[0]);
+  checa(latN > lat0, 'mapa ampliado: CONTROLE — o ↑ não andou pro norte (a medida estaria cega)');
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.waitForTimeout(150);
+  const s1 = await page.evaluate(() => ({ aberto: MapaLightbox.isOpen(), lat: MapaLightbox.centro[0] }));
+  checa(s1.aberto && s1.lat < latN, 'mapa ampliado: o ↓ não andou pro sul (fechou o mapa ou não saiu do lugar)', JSON.stringify(s1));
+  // Volta ao pedido (e reabre, se o ↓ fechou: o resto do bloco mede o mapa aberto).
+  await page.evaluate(() => { if (MapaLightbox.isOpen()) MapaLightbox.recentrar(); });
+  if (!s1.aberto) { await page.click('.card-map'); await page.waitForTimeout(400); }
+  await page.waitForTimeout(300);
+
   // Fecha por Esc (desktop) e por ✕ (toque). O voltar do aparelho é coberto
   // pelo guard de código — aqui não há histórico de navegação real.
   await page.keyboard.press('Escape');
@@ -1216,6 +1242,94 @@ for (const status of [404, 403]) {
   checa(await page.evaluate(() => document.getElementById('mapaLightbox').classList.contains('hidden')),
     'mapa ampliado: o ✕ não fechou');
   checa(erros.length === 0, 'mapa ampliado: erro de JS', erros[0]);
+  await ctx.close();
+}
+
+// ── A ESCALA mede o que diz (auditoria de 2026-09-26) ─────────────────────
+//
+// A barra de escala do card e a do ampliado diziam o DOBRO da distância: a
+// conta usava o tile de 256 px e a projeção usa o de 512. E o traço (a borda
+// de baixo) cobria também os 16 px de padding, que o `width` calculado não
+// contava. O teste de unidade ancorava o valor errado, então só a TELA diz a
+// verdade: a distância entre os dois marcadores de um pedido de MOVIMENTO,
+// lida pela barra DESENHADA (o `getBoundingClientRect` do traço, não o
+// `style.width` que o código pediu — gotcha #58), tem que dar o que o core
+// mediu. Sabotado: com a conta de 256 px dá 2,0×; com o `content-box`, 0,8×.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  // O pedido de movimento MAIS LONGO das fixtures: com poucos pixels entre os
+  // marcadores o arredondamento vira ruído (pré-condição conferida abaixo).
+  const alvo = FIXTURES_PAISES.filter((f) => f.mapa && f.mapa.proposto && f.mapa.movidoM > 1)
+    .sort((a, b) => b.mapa.movidoM - a.mapa.movidoM)[0];
+  checa(!!alvo, 'escala: nenhuma fixture de movimento — o bloco não mede nada');
+  if (alvo) {
+    await page.evaluate(async (pl) => {
+      setLang('pt'); applyI18n();
+      AppState.authenticated = true;
+      AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showLoading(false);
+      AppState.queue = [pl]; AppState.currentPlace = pl;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+      await new Promise((k) => setTimeout(k, 400));
+    }, alvo);
+    await assentar(page);
+    // Lê a distância PELA BARRA: pixels entre os centros dos dois marcadores ×
+    // (metros do rótulo ÷ largura desenhada do traço).
+    const lerPelaEscala = (sel) => page.evaluate(({ marcas, escala }) => {
+      const centro = (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+      const a = document.querySelector(marcas + ' .mapa-marca.mapa-atual');
+      const b = document.querySelector(marcas + ' .mapa-marca.mapa-proposto');
+      const esc = document.querySelector(escala);
+      if (!a || !b || !esc) return { falta: true };
+      const [ax, ay] = centro(a), [bx, by] = centro(b);
+      const txt = esc.textContent.trim();
+      const n = parseFloat(txt.replace(/\./g, '').replace(',', '.'));
+      const metros = /km/.test(txt) ? n * 1000 : n;
+      const traco = esc.getBoundingClientRect().width;
+      return { px: Math.hypot(bx - ax, by - ay), metros, traco, txt };
+    }, sel);
+    const conferir = (m, onde) => {
+      if (m.falta) { checa(false, `escala ${onde}: faltou marcador ou barra — nada a medir`); return; }
+      // PRÉ-CONDIÇÃO: marcadores perto demais fazem o erro de 1 px virar 10%.
+      checa(m.px >= 20, `escala ${onde}: marcadores a ${m.px.toFixed(0)}px — perto demais pra medir`);
+      checa(Number.isFinite(m.metros) && m.metros > 0 && m.traco > 0,
+        `escala ${onde}: rótulo "${m.txt}" ou traço de ${m.traco}px ilegível — a medida está cega`);
+      const lido = m.px * m.metros / m.traco;
+      const razao = lido / alvo.mapa.movidoM;
+      checa(Math.abs(razao - 1) <= 0.05,
+        `escala ${onde}: lendo pela barra o movimento dá ${lido.toFixed(1)} m e o core mediu ${alvo.mapa.movidoM.toFixed(1)} m (${razao.toFixed(2)}×)`,
+        `"${m.txt}" = ${m.traco.toFixed(1)}px · marcadores a ${m.px.toFixed(1)}px`);
+    };
+    conferir(await lerPelaEscala({ marcas: '#cardStack .place-card:not(.card-fundo) .card-map-marks',
+      escala: '#cardStack .place-card:not(.card-fundo) .card-map-scale' }), 'do card');
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-map');
+    await page.waitForTimeout(500);
+    conferir(await lerPelaEscala({ marcas: '#mapaLbMarks', escala: '#mapaLbEscala' }), 'do mapa ampliado');
+    // Nos zooms mais abertos o texto cabe no traço: a lista antiga parava em
+    // 50 km e, do z6 pra baixo, o "50 km" ficava num traço de 22–38 px.
+    for (const z of [8, 6, 5, 4]) {
+      const e = await page.evaluate((zz) => {
+        MapaLightbox.z = zz; MapaLightbox.desenhar();
+        const el = document.getElementById('mapaLbEscala');
+        const rg = document.createRange(); rg.selectNodeContents(el);
+        return { traco: el.getBoundingClientRect().width, tinta: rg.getBoundingClientRect().width, txt: el.textContent };
+      }, z);
+      checa(e.tinta > 0 && e.tinta <= e.traco,
+        `escala do mapa ampliado no z${z}: o rótulo "${e.txt}" (${e.tinta.toFixed(0)}px) não cabe no traço de ${e.traco.toFixed(0)}px`);
+    }
+    await page.evaluate(() => MapaLightbox.close());
+  }
+  checa(erros.length === 0, 'escala: erro de JS', erros[0]);
   await ctx.close();
 }
 
@@ -1431,9 +1545,26 @@ for (const status of [404, 403]) {
   checa(!(await escondido('lightboxDelete')), 'aprovar: a lixeira sumiu na foto já aprovada');
   await page.click('#lightboxPrev'); await page.waitForTimeout(250);
 
+  // A pílula do nome, medida pelo ATRIBUTO e pelo PIXEL como os outros botões
+  // (L9, auditoria de 2026-09-26): na janela ela parecia viva e o toque não
+  // fazia nada. CONTROLE antes da janela: viva e acesa.
+  const pilula = () => page.evaluate(() => {
+    const b = document.getElementById('lightboxNomeBtn');
+    const cs = getComputedStyle(b);
+    return { visivel: !document.getElementById('lightboxNome').classList.contains('hidden'),
+      disabled: b.disabled, opacity: parseFloat(cs.opacity), filtro: cs.filter };
+  });
+  const pil0 = await pilula();
+  checa(pil0.visivel && !pil0.disabled && pil0.opacity === 1,
+    'pílula do nome: CONTROLE — fora da janela ela não está viva e acesa (a medida estaria cega)', JSON.stringify(pil0));
+
   // A resposta visual é imediata; o ENVIO espera a janela fechar sozinha.
   enviados.length = 0;
   await page.click('#lightboxApprove'); await page.waitForTimeout(400);
+  const pil1 = await pilula();
+  checa(pil1.disabled, 'pílula do nome: continuou clicável durante o Desfazer — o toque nela não faz nada');
+  checa(pil1.opacity < 1 && /grayscale/.test(pil1.filtro),
+    `pílula do nome: está disabled mas PARECE viva na janela (opacity ${pil1.opacity}, filter ${pil1.filtro})`);
   checa(await page.evaluate(() => document.querySelectorAll('#undoContainer .undo-banner').length === 1),
     'aprovar: o banner de Desfazer não apareceu');
   checa(await escondido('lightboxApprove') && !(await escondido('lightboxDelete')),
@@ -1465,6 +1596,8 @@ for (const status of [404, 403]) {
   // Fecha sozinha → envia, e com `approve: true` (o backend só aprova com o
   // booleano estrito; mandar outra coisa vira uma REJEIÇÃO silenciosa).
   await page.waitForTimeout(3200);
+  const pil2 = await pilula();
+  checa(!pil2.disabled && pil2.opacity === 1, 'pílula do nome: não voltou a ser botão depois da janela', JSON.stringify(pil2));
   checa(enviados.length === 1, `aprovar: esperava 1 envio ao fim da janela, veio ${enviados.length}`);
   checa(enviados[0] && enviados[0].approve === true,
     `aprovar: mandou approve=${JSON.stringify((enviados[0] || {}).approve)}, e só o booleano true aprova`);
@@ -1518,6 +1651,92 @@ for (const status of [404, 403]) {
       `aprovar: ${nome} ${deveVer ? 'não vê o aprovar e devia' : 'enxerga o aprovar e não devia'}`);
   }
   checa(erros.length === 0, 'aprovar: erro de JS', erros[0]);
+  await ctx.close();
+}
+
+// ── Foto que NÃO CARREGOU não se aprova nem se exclui (auditoria de 2026-09-26)
+//
+// A exceção que deixa o app aprovar FOTO existe porque a decisão está inteira
+// na tela — e pra aprovar é preciso ter VISTO a foto. MEDIDO: pelo carrossel,
+// a proposta com 404 abria no lightbox com o ícone de imagem quebrada, o ✨ e o
+// "Aprovar" ativo, e aprovar mandava `approve: true` de uma foto que ninguém
+// viu. O CONTROLE é a foto que carrega: nela a lixeira TEM que aparecer (sem
+// ele, "escondido" passaria também com o portão fechado ou o lightbox vazio).
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const enviados = [];
+  await ctx.route('**/api/validar-place', async (r) => {
+    enviados.push(JSON.parse(r.request().postData() || '{}'));
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
+  await ctx.route('**/api/excluir-foto', async (r) => {
+    const c = JSON.parse(r.request().postData() || '{}');
+    if (c.action !== 'preparar') enviados.push(c);
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
+  await ctx.route('https://venue-image.waze.com/**', (r) => r.fulfill({ status: 404, body: 'not found' }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const PLACE = {
+    venueID: 'v-quebrada', updateRequestID: 'pend-01', name: 'Foto que não veio',
+    categories: ['PARK'], address: 'Rua X, 1', updateTypeKey: 'IMAGE', purType: 'NEW_PHOTO',
+    createdBy: 'fulano', lat: -12.9, lon: -38.3, changes: [], mapa: null,
+    // A proposta é a foto QUEBRADA; a aprovada, uma que carrega.
+    imageUrls: ['https://venue-image.waze.com/thumbs/thumb700_pend-01.jpg', `${foto}#aprovada-02`],
+    approvedImageIds: ['aprovada-02'],
+  };
+  await page.evaluate(async (pl) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true;
+    API.setSession('token-smoke');
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.stats = { read: 0, rejected: 0, skipped: 0 }; AppState.serverTotal = 1;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+    AppState.queue = [JSON.parse(JSON.stringify(pl))];
+    AppState.currentPlace = AppState.queue[0];
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 350));
+  }, PLACE);
+  const estado = () => page.evaluate(() => {
+    const im = document.getElementById('lightboxImage');
+    const vis = (id) => !document.getElementById(id).classList.contains('hidden');
+    return { aberto: Lightbox.isOpen(), idx: Lightbox.idx, carregou: im.complete && im.naturalWidth > 0,
+      aprovar: vis('lightboxApprove'), lixeira: vis('lightboxDelete') };
+  });
+  // Pelo carrossel do card até a foto que carrega, e dela pro lightbox — o
+  // caminho do relato (a proposta quebrada nem abre pelo card).
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-image-next');
+  await page.waitForTimeout(250);
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+  await page.waitForTimeout(400);
+  const naBoa = await estado();
+  checa(naBoa.aberto && naBoa.idx === 1 && naBoa.carregou,
+    'foto quebrada: PRÉ-CONDIÇÃO — o lightbox não abriu na foto que carrega', JSON.stringify(naBoa));
+  checa(naBoa.lixeira, 'foto quebrada: CONTROLE — a lixeira não apareceu na foto que CARREGOU (a medida estaria cega)');
+  await page.click('#lightboxPrev');
+  await page.waitForTimeout(600);
+  const naQuebrada = await estado();
+  checa(naQuebrada.idx === 0 && !naQuebrada.carregou,
+    'foto quebrada: PRÉ-CONDIÇÃO — a proposta devia estar na tela SEM carregar', JSON.stringify(naQuebrada));
+  checa(!naQuebrada.aprovar, 'foto quebrada: o "Aprovar" apareceu numa foto que não carregou');
+  checa(!naQuebrada.lixeira, 'foto quebrada: a lixeira apareceu numa foto que não carregou');
+  // E por dentro: o clique no botão escondido (teclado, script) não aprova.
+  await page.evaluate(() => { document.getElementById('lightboxApprove').click(); });
+  await page.waitForTimeout(3600);
+  checa(enviados.length === 0, `foto quebrada: ${enviados.length} escrita(s) saíram de uma foto que ninguém viu`,
+    JSON.stringify(enviados));
+  // Voltando pra foto que carrega, a lixeira volta (a regra é reavaliada).
+  await page.click('#lightboxNext');
+  await page.waitForTimeout(400);
+  checa((await estado()).lixeira, 'foto quebrada: a lixeira não voltou na foto que carrega');
+  checa(erros.length === 0, 'foto quebrada: erro de JS', erros[0]);
   await ctx.close();
 }
 
@@ -2637,19 +2856,34 @@ for (const suporte of [true, false]) {
 // Indicador de ESTADO, então mora no fluxo (dentro do #placar) e não no
 // #bannerStack, que é `fixed` e serve a avisos que passam — permanente ali
 // cobriria o card (gotcha #26). Quatro coisas que quebram calado:
-//   1. o limiar errar pro lado da folga — aparecer com muito prazo vira ruído,
-//      e o número na tela nunca pode ser MAIOR do que o prazo real;
+//   1. o limiar errar pro lado da folga — aparecer com muito prazo vira ruído —,
+//      e o DIA na tela não ser o dia em que ela vence (a conta é de DATA: às
+//      20h com 20 h de prazo é "amanhã", e o `floor` de 24 h dizia "hoje");
 //   2. sobreviver ao logout ou ao prazo já vencido — a frase passaria a falar
 //      de uma sessão que não existe mais;
 //   3. estourar a caixa em francês, que é a língua mais larga (gotcha #25), no
 //      aparelho mais estreito;
 //   4. virar alvo de toque pequeno logo acima da área de swipe.
-const DIAS = (d) => Math.floor(Date.now() / 1000) + Math.round(d * 86400);
+//
+// O relógio da PÁGINA fica parado às 20h de hoje (`page.clock.setFixedTime`):
+// com a conta por data, "falta 1,4 dia" cai amanhã ou depois de amanhã conforme
+// a hora em que o smoke roda, e sem relógio fixo o bloco reprovaria só em
+// certas horas do dia (falha intermitente ensina a ignorar o CI). As 20h são o
+// caso do defeito, e os prazos saem daqui, nunca do relógio de agora.
+const AGORA_AVISO = (() => { const d = new Date(); d.setHours(20, 0, 0, 0); return d.getTime(); })();
+const DIAS = (d) => Math.floor(AGORA_AVISO / 1000) + Math.round(d * 86400);
+const DIA_AS = (n, h, m = 0) => {
+  const d = new Date(AGORA_AVISO);
+  d.setDate(d.getDate() + n);
+  d.setHours(h, m, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+};
 for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['Pixel 7', { width: 412, height: 915 }]]) {
   for (const lang of LINGUAS) {
     const ctx = await browser.newContext({ viewport, locale: lang === 'en' ? 'en-US' : lang, serviceWorkers: 'block' });
     await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
     const page = await ctx.newPage();
+    await page.clock.setFixedTime(AGORA_AVISO);
     const erros = [];
     page.on('pageerror', (e) => erros.push(e.message));
     await page.addInitScript((lg) => {
@@ -2675,7 +2909,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const estados = await page.evaluate((prazos) => {
       const el = () => document.getElementById('avisoSessao');
       const ver = () => !el().classList.contains('hidden');
-      const out = {};
+      const out = { _frases: { hoje: t('sessao.vence.hoje'), amanha: t('sessao.vence.amanha') } };
       for (const [rot, quando] of Object.entries(prazos)) {
         AppState.authenticated = rot !== 'deslogado';
         AppState.sessaoExpiraEm = quando;
@@ -2685,20 +2919,24 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       AppState.authenticated = true;
       return out;
     }, {
-      '10 dias': DIAS(10), '5 dias': DIAS(5.4), '1 dia': DIAS(1.4),
-      hoje: DIAS(0.3), vencido: DIAS(-0.5), deslogado: DIAS(2), 'sem prazo': null,
+      '10 dias': DIAS(10), '5º dia': DIA_AS(5, 12), '6º dia': DIA_AS(6, 1),
+      'depois de amanhã': DIAS(1.4), amanhã: DIAS(20 / 24), hoje: DIAS(3 / 24),
+      vencido: DIAS(-0.5), deslogado: DIAS(2), 'sem prazo': null,
     });
-    for (const rot of ['10 dias', 'vencido', 'deslogado', 'sem prazo']) {
+    for (const rot of ['10 dias', '6º dia', 'vencido', 'deslogado', 'sem prazo']) {
       checa(!estados[rot].visivel, `${onde}: apareceu com "${rot}"`, estados[rot].txt);
     }
-    for (const rot of ['5 dias', '1 dia', 'hoje']) {
+    for (const rot of ['5º dia', 'depois de amanhã', 'amanhã', 'hoje']) {
       checa(estados[rot].visivel, `${onde}: NÃO apareceu com "${rot}"`);
       checa(!/[{}]|undefined|NaN/.test(estados[rot].txt),
         `${onde}: placeholder cru na frase de "${rot}"`, estados[rot].txt);
     }
-    // Nunca prometer mais prazo do que existe: com 1,4 dia o certo é "1", não "2".
-    checa(/(^|\D)1(\D|$)/.test(estados['1 dia'].txt) && !/(^|\D)2(\D|$)/.test(estados['1 dia'].txt),
-      `${onde}: arredondou o prazo pra cima`, estados['1 dia'].txt);
+    // O dia na tela é o dia em que ela vence: 20 h de prazo às 20h é AMANHÃ (o
+    // defeito dizia "hoje"), 3 h é hoje, e 1,4 dia é depois de amanhã, de madrugada.
+    checa(estados.hoje.txt === estados._frases.hoje, `${onde}: 3 h de prazo às 20h não disse "hoje"`, estados.hoje.txt);
+    checa(estados['amanhã'].txt === estados._frases.amanha, `${onde}: 20 h de prazo às 20h não disse "amanhã"`, estados['amanhã'].txt);
+    checa(/(^|\D)2(\D|$)/.test(estados['depois de amanhã'].txt), `${onde}: 1,4 dia às 20h não disse "2 dias"`, estados['depois de amanhã'].txt);
+    checa(/(^|\D)5(\D|$)/.test(estados['5º dia'].txt), `${onde}: o quinto dia não disse "5 dias"`, estados['5º dia'].txt);
 
     // Cabe na caixa, não é alvo de toque, e não tapa nada.
     //
@@ -3358,6 +3596,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     + '<rect x="60" y="700" width="780" height="150" rx="10" fill="#0f766e"/>'
     + '<text x="450" y="790" font-family="DejaVu Sans" font-size="56" fill="#fff" text-anchor="middle">ODONTODENTE SORRISO</text>'
     + '</svg>').toString('base64');
+  // A mesma fachada EM PÉ (9:16): é a proporção que encosta no campo — a de
+  // 3:4 fica presa pela largura no Pixel sem teclado e mediria o caso fácil.
+  const FOTO_EM_PE = 'data:image/svg+xml;base64,' + Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920">'
+    + '<rect width="1080" height="1920" fill="#93c5fd"/>'
+    + '<rect x="60" y="1120" width="960" height="240" rx="10" fill="#0f766e"/>'
+    + '</svg>').toString('base64');
   const PLACE_REN = {
     venueID: 'v-ren', updateRequestID: 'u-ren', name: 'Odontodente Consultório',
     categories: ['DOCTOR_CLINIC'], address: 'Rua das Flores, 250 - Salvador, Bahia',
@@ -3574,6 +3819,48 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     }
     await page.evaluate(() => document.documentElement.style.setProperty('--kb-inset', '0px'));
 
+    // ── COM A TIRA (2+ fotos) a foto também para antes do CAMPO ─────────────
+    // A tira entra no layout e a pílula sobe a altura dela; a foto não subia
+    // junto e corria 18px por baixo do campo nos três aparelhos (auditoria de
+    // 2026-09-26). O laço de cima mede com UMA foto, onde não há tira.
+    const reabrirRen = async (pl) => {
+      await page.evaluate(() => { try { fecharEdicaoNome(); } catch {} Lightbox.close(); });
+      await page.waitForTimeout(200);   // fechar e abrir no mesmo tique dessincroniza o voltar (gotcha #65)
+      await page.evaluate(new Function('a', '(' + montarRen.toString() + ')(a[0],a[1],a[2],a[3])'), [pl, 5, true, false]);
+      await assentar(page);
+      await page.locator('#lightboxNomeBtn').click();
+      await assentar(page);
+    };
+    await reabrirRen({ ...JSON.parse(JSON.stringify(PLACE_REN)),
+      imageUrls: [FOTO_EM_PE + '#u-ren', FOTO_EM_PE + '#aprovada-02'], approvedImageIds: ['aprovada-02'] });
+    for (const pct of [0, 0.45]) {
+      const kb = Math.round(viewport.height * pct);
+      const m = await page.evaluate((px) => {
+        document.documentElement.style.setProperty('--kb-inset', px + 'px');
+        const r = (el) => el.getBoundingClientRect();
+        const lb = document.getElementById('imageLightbox');
+        const inp = r(document.getElementById('lightboxNomeInput'));
+        const foto = document.getElementById('lightboxImage');
+        // A foto RENDERIZADA (object-contain), não a caixa da <img> — ver acima.
+        const el = r(foto);
+        const escala = Math.min(el.width / foto.naturalWidth, el.height / foto.naturalHeight);
+        const base = el.top + (el.height + foto.naturalHeight * escala) / 2;
+        return {
+          tira: lb.classList.contains('com-tira') && !document.getElementById('lightboxStrip').classList.contains('hidden'),
+          editando: lb.classList.contains('editando-nome'), carregou: foto.complete && foto.naturalWidth > 0,
+          sobCampo: Math.round(Math.max(0, base - inp.top)), folga: Math.round(inp.top - base),
+          _dbg: `foto até ${Math.round(base)} · campo ${Math.round(inp.top)}..${Math.round(inp.bottom)} · livre ${innerHeight - px}`,
+        };
+      }, kb);
+      checa(m.tira && m.editando && m.carregou, `${onde}: PRÉ-CONDIÇÃO — sem a tira, sem a edição ou sem a foto (teclado ${kb}px)`, JSON.stringify(m));
+      checa(m.sobCampo === 0, `${onde}: com 2 fotos (tira) e teclado ${kb}px, a foto corre ${m.sobCampo}px por baixo do campo`, m._dbg);
+      // CONTROLE: a foto em pé tem que CHEGAR perto do campo (hoje para a 38px
+      // dele, como com uma foto só). Longe dele, a medida não mediria nada.
+      checa(m.folga <= 60, `${onde}: CONTROLE — a foto em pé parou a ${m.folga}px do campo: a medida está cega`, m._dbg);
+    }
+    await page.evaluate(() => document.documentElement.style.setProperty('--kb-inset', '0px'));
+    await reabrirRen(JSON.parse(JSON.stringify(PLACE_REN)));   // o resto do bloco é com uma foto
+
     // ── ENVIO: medido pela REDE, não pelo DOM ───────────────────────────────
     await page.locator('#lightboxNomeInput').fill('Odontodente Sorriso');
     posts.length = 0;
@@ -3603,6 +3890,404 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
     await ctx.close();
   }
+}
+
+// ── Renomeando: o passo pra TRÁS só sai da edição (auditoria de 2026-09-26) ──
+//
+// Tocar no fundo (o reflexo de "baixar o teclado"), arrastar a foto pra baixo,
+// e Esc ou ↓ com o foco no ✓/✕ da edição FECHAVAM o lightbox: o nome digitado
+// e a foto que servia de prova iam embora juntos. Só o Esc do CAMPO tratava
+// isso. Mouse e teclado de verdade (valem nos dois motores). O CONTROLE são os
+// mesmos gestos SEM edição, que têm que fechar — sem ele, "a foto ficou aberta"
+// passaria também com o gesto que não chega a lugar nenhum.
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  const posts = [];
+  await page.route('**/api/**', async (route) => {
+    const r = route.request();
+    if (r.method() === 'POST' && /renomear-local/.test(r.url())) posts.push(r.url());
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const FACHADA = 'data:image/svg+xml;base64,' + Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1600"><rect width="900" height="1600" fill="#93c5fd"/></svg>').toString('base64');
+  const PL = {
+    venueID: 'v-l4', updateRequestID: 'u-l4', name: 'Padaria Pão Quente', categories: ['BAKERY'], address: 'Rua X, 1',
+    updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO', createdBy: 'wazer', localAprovado: true,
+    imageUrls: [FACHADA + '#u-l4'], approvedImageIds: [], lat: -12.9, lon: -38.3, mapa: null, changes: [],
+  };
+  const abrir = async (editar) => {
+    // Fechar e reabrir no MESMO tique é o gotcha #65 no instrumento: o
+    // `history.back()` que o fechamento agenda come a entrada que a abertura
+    // empilha, e o fechamento seguinte sai da PÁGINA (medido: "Execution
+    // context was destroyed"). Fecha, espera, e só então abre.
+    await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
+    await page.waitForTimeout(150);
+    await page.evaluate((pl) => {
+      setLang('pt'); applyI18n();
+      API.setSession('tok-smoke');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showLoading(false);
+      const p = JSON.parse(JSON.stringify(pl));
+      AppState.queue = [p]; AppState.currentPlace = p;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+      Lightbox.open(p.imageUrls, 0, 0, p.name, false, p);
+    }, PL);
+    await assentar(page);
+    if (editar) {
+      await page.click('#lightboxNomeBtn');
+      await page.fill('#lightboxNomeInput', 'Padaria Pão Quentinho do Zé');
+    }
+    return page.evaluate(() => ({ aberto: Lightbox.isOpen(),
+      editando: document.getElementById('lightboxNome').classList.contains('editando') }));
+  };
+  const agora = () => page.evaluate(() => ({ aberto: Lightbox.isOpen(),
+    editando: document.getElementById('lightboxNome').classList.contains('editando') }));
+  // Um ponto do FUNDO (o próprio #imageLightbox) que recebe o dedo — onde a
+  // foto não cobre: a faixa de cima (o `padding-top` da edição) ou as tarjas.
+  const pontoDoFundo = () => page.evaluate(() => {
+    for (let y = 2; y < innerHeight; y += 6) for (let x = 4; x < innerWidth; x += 8) {
+      const q = document.elementFromPoint(x, y);
+      if (q && q.id === 'imageLightbox') return { x, y };
+    }
+    return null;
+  });
+  const PASSOS = [
+    ['toque no fundo', async () => { const p = await pontoDoFundo(); if (!p) return false; await page.mouse.click(p.x, p.y); return true; }],
+    ['arrastar a foto pra baixo', async () => {
+      const r = await page.evaluate(() => document.getElementById('lightboxImage').getBoundingClientRect().toJSON());
+      const x = r.left + r.width / 2, y = r.top + 40;
+      await page.mouse.move(x, y); await page.mouse.down();
+      await page.mouse.move(x, y + 160, { steps: 8 }); await page.mouse.up();
+      return true;
+    }],
+    ['Esc com o foco no ✓', async () => { await page.focus('#lightboxNomeOk'); await page.keyboard.press('Escape'); return true; }],
+    ['↓ com o foco no ✕', async () => { await page.focus('#lightboxNomeCancel'); await page.keyboard.press('ArrowDown'); return true; }],
+  ];
+  for (const [nome, passo] of PASSOS) {
+    const antes = await abrir(true);
+    checa(antes.aberto && antes.editando, `passo pra trás/${nome}: PRÉ-CONDIÇÃO — não entrou em edição`, JSON.stringify(antes));
+    const deu = await passo();
+    checa(deu, `passo pra trás/${nome}: não achei onde fazer o gesto`);
+    await page.waitForTimeout(250);
+    const d = await agora();
+    checa(d.aberto, `passo pra trás/${nome}: editando o nome, FECHOU a foto — o nome digitado e a prova foram embora`);
+    checa(!d.editando, `passo pra trás/${nome}: não saiu da edição`);
+  }
+  // CONTROLE: os mesmos gestos sem edição fecham a foto (menos Esc/↓ no ✓/✕,
+  // que só existem editando — no lugar deles vai o Esc/↓ com o foco no ✕ do
+  // lightbox).
+  for (const [nome, passo] of [
+    ['toque no fundo', PASSOS[0][1]], ['arrastar a foto pra baixo', PASSOS[1][1]],
+    ['Esc', async () => { await page.focus('#lightboxClose'); await page.keyboard.press('Escape'); return true; }],
+    ['↓', async () => { await page.focus('#lightboxClose'); await page.keyboard.press('ArrowDown'); return true; }],
+  ]) {
+    const antes = await abrir(false);
+    checa(antes.aberto && !antes.editando, `CONTROLE passo pra trás/${nome}: PRÉ-CONDIÇÃO`, JSON.stringify(antes));
+    await passo();
+    await page.waitForTimeout(250);
+    checa(!(await agora()).aberto, `CONTROLE passo pra trás/${nome}: sem edição o gesto não fechou a foto — a medida está cega`);
+  }
+  checa(posts.length === 0, `passo pra trás: ${posts.length} renomeação(ões) saíram de uma edição DESISTIDA`);
+  checa(erros.length === 0, 'passo pra trás: erro de JS', erros[0]);
+  await ctx.close();
+}
+
+// ── O FOCO não cai no <body> nas camadas de ampliar (auditoria de 2026-09-26) ─
+//
+// Fechar a foto ou o mapa (Esc, ✕, ↓) e sair da edição do nome com a foto
+// aberta jogavam o foco no <body>: quem usa teclado ou leitor de tela
+// recomeçava do topo da página (e, com a foto aberta, fora da camada
+// `aria-modal`). O CONTROLE é o Filtros, que sempre devolveu o foco ao botão
+// que o abriu: sem ele, "o foco não está no <body>" passaria também com a
+// medida lendo o elemento errado. E o ✨ e a miniatura da proposta passaram a
+// ter NOME pro leitor de tela (antes: o emoji, e "Ver foto 2 de 3" em todas).
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  // Cada rota com a FORMA que o app espera: abrir o Filtros (o controle) pede
+  // países, e uma resposta genérica ali vira erro de JS na página.
+  await page.route('**/api/**', (route) => {
+    const nome = route.request().url().split('/api/')[1].split('?')[0];
+    const corpo = nome === 'lista-paises' ? { success: true, countries: [] }
+      : nome === 'lista-estados' ? { success: true, states: [] }
+        : nome === 'perfil' ? { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false } }
+          : { success: true, places: [], hasMore: false, total: 0 };
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(corpo) });
+  });
+  await presencaViva(page);   // registrada DEPOIS: a última rota que casa é a que responde
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const FOTO_PL = {
+    venueID: 'v-foco', updateRequestID: 'pend-01', name: 'Padaria Pão Quente', categories: ['BAKERY'],
+    address: 'Rua X, 1', updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO', createdBy: 'wazer',
+    localAprovado: true, lat: -12.9, lon: -38.3, mapa: null, changes: [],
+    imageUrls: [`${foto}#pend-01`, `${foto}#aprovada-02`], approvedImageIds: ['aprovada-02'],
+  };
+  const MAPA_PL = { ...FOTO_PL, venueID: 'v-foco-mapa', updateRequestID: 'u-mapa', updateTypeKey: 'UPDATE',
+    reqType: 'REQUEST', purType: 'DETAILS_UPDATE', imageUrls: [], approvedImageIds: [],
+    mapa: { centro: [-12.9, -38.3], proposto: null, movidoM: null, entradas: [] } };
+  const montar = async (pl, { semDesfazer = false } = {}) => {
+    await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); if (MapaLightbox.isOpen()) MapaLightbox.close(); });
+    await page.waitForTimeout(150);   // fechar e abrir no mesmo tique é o gotcha #65
+    await page.evaluate(({ p0, semDesfazer: sem }) => {
+      setLang('pt'); applyI18n();
+      API.setSession('tok-smoke');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.preferences.undoGateSeen = true;
+      // Sem Desfazer a ação sai na hora: o `canDisableUndo()` exige a cota, e o
+      // modo dev a dispensa (a mesma montagem do bloco da fila de saída).
+      AppState.preferences.undoEnabled = !sem;
+      AppState.devMode = { unlocked: sem, active: sem };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('noMoreCards').classList.add('hidden');
+      document.getElementById('filtersBtn').classList.remove('hidden');
+      showLoading(false);
+      const p = JSON.parse(JSON.stringify(p0));
+      AppState.queue = [p]; AppState.currentPlace = p;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+    }, { p0: pl, semDesfazer });
+    await assentar(page);
+  };
+  // Onde está o foco, e se ele está NO LUGAR CERTO: o id, a classe do card, e
+  // se o elemento está na tela (um foco num elemento escondido é foco perdido).
+  const foco = () => page.evaluate(() => {
+    const a = document.activeElement;
+    const card = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+    return { id: a && a.id, body: a === document.body, visivel: !!(a && a.getClientRects().length),
+      fotoDoCard: !!(card && a === card.querySelector('.card-image')),
+      mapaDoCard: !!(card && a === card.querySelector('.card-map')),
+      naFoto: !!(a && a.closest && a.closest('#imageLightbox')) };
+  });
+  // CONTROLE: o Filtros, pelo teclado, devolve o foco ao botão que o abriu.
+  await montar(FOTO_PL);
+  await page.focus('#filtersBtn'); await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+  await page.keyboard.press('Escape'); await page.waitForTimeout(250);
+  const f0 = await foco();
+  checa(f0.id === 'filtersBtn', 'foco: CONTROLE — o Filtros não devolveu o foco ao botão (a medida estaria cega)', JSON.stringify(f0));
+
+  // A foto: aberta pelo toque na foto do card, fechada por Esc, ↓ e ✕.
+  for (const [nome, fechar] of [
+    ['Esc', () => page.keyboard.press('Escape')],
+    ['↓', () => page.keyboard.press('ArrowDown')],
+    ['✕', () => page.click('#lightboxClose')],
+  ]) {
+    await montar(FOTO_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await page.waitForTimeout(350);
+    checa(await page.evaluate(() => Lightbox.isOpen()), `foco/foto ${nome}: PRÉ-CONDIÇÃO — a foto não abriu`);
+    await fechar(); await page.waitForTimeout(300);
+    const f = await foco();
+    checa(!f.body && f.visivel && f.fotoDoCard,
+      `foco/foto: fechar pelo ${nome} não devolveu o foco à foto do card`, JSON.stringify(f));
+  }
+  // O mapa: aberto pelo toque no mapa do card, fechado por Esc e ✕.
+  for (const [nome, fechar] of [['Esc', () => page.keyboard.press('Escape')], ['✕', () => page.click('#mapaLbClose')]]) {
+    await montar(MAPA_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-map');
+    await page.waitForTimeout(400);
+    checa(await page.evaluate(() => MapaLightbox.isOpen()), `foco/mapa ${nome}: PRÉ-CONDIÇÃO — o mapa não abriu`);
+    await fechar(); await page.waitForTimeout(300);
+    const f = await foco();
+    checa(!f.body && f.visivel && f.mapaDoCard,
+      `foco/mapa: fechar pelo ${nome} não devolveu o foco ao mapa do card`, JSON.stringify(f));
+  }
+  // Sair da edição do nome, pelo teclado: o foco volta pra PÍLULA.
+  for (const [nome, sair] of [
+    ['Esc no campo', () => page.keyboard.press('Escape')],
+    ['✕ da edição (Enter)', async () => { await page.focus('#lightboxNomeCancel'); await page.keyboard.press('Enter'); }],
+  ]) {
+    await montar(FOTO_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await page.waitForTimeout(350);
+    await page.focus('#lightboxNomeBtn'); await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+    const e0 = await foco();
+    checa(e0.id === 'lightboxNomeInput', `foco/edição ${nome}: PRÉ-CONDIÇÃO — a edição não abriu com o foco no campo`, JSON.stringify(e0));
+    await sair(); await page.waitForTimeout(200);
+    const f = await foco();
+    checa(f.id === 'lightboxNomeBtn', `foco/edição: sair pelo ${nome} não devolveu o foco à pílula do nome`, JSON.stringify(f));
+  }
+  // Aprovar e salvar o nome pelo teclado: o botão com o foco some ou trava, e o
+  // foco fica NA camada (a pílula trava na janela: vai pro ✕).
+  for (const [nome, agir, semDesfazer] of [
+    ['aprovar', async () => { await page.focus('#lightboxApprove'); await page.keyboard.press('Enter'); }, false],
+    // SEM Desfazer não há banner (é ele que, sumindo, também devolve o foco): o
+    // "Aprovar" vira spinner `disabled`, e é a ação que mantém o foco na camada.
+    ['aprovar sem Desfazer', async () => { await page.focus('#lightboxApprove'); await page.keyboard.press('Enter'); }, true],
+    ['salvar o nome', async () => {
+      await page.focus('#lightboxNomeBtn'); await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+      await page.keyboard.type(' do Zé'); await page.keyboard.press('Enter');
+    }, false],
+  ]) {
+    await montar(FOTO_PL, { semDesfazer });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await page.waitForTimeout(350);
+    await agir(); await page.waitForTimeout(250);
+    const f = await foco();
+    checa(!f.body && f.visivel && f.naFoto, `foco/${nome}: o foco saiu da foto aberta`, JSON.stringify(f));
+    // desfaz, pra nada sair pela rede e o bloco seguinte começar limpo
+    await page.evaluate(() => { const u = document.getElementById('undoBtn'); if (u) u.click(); });
+    await page.waitForTimeout(150);
+  }
+  // O ✨ e a miniatura da proposta com NOME pro leitor de tela.
+  await montar(FOTO_PL);
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+  await page.waitForTimeout(350);
+  const nomes = await page.evaluate(() => {
+    const b = document.getElementById('lightboxNewBadge');
+    const minis = [...document.querySelectorAll('#lightboxStrip .lb-mini')].map((m) => m.getAttribute('aria-label'));
+    return { visivel: !b.classList.contains('hidden'), role: b.getAttribute('role'), nome: b.getAttribute('aria-label'),
+      titulo: b.title, minis, newIdx: Lightbox.newIdx };
+  });
+  checa(nomes.visivel && nomes.role === 'img' && !!nomes.nome && nomes.nome === nomes.titulo,
+    'foco: o ✨ chega ao leitor de tela sem nome (só o emoji)', JSON.stringify(nomes));
+  checa(nomes.minis.length === 2 && nomes.minis[nomes.newIdx].includes(nomes.nome)
+    && nomes.minis.filter((m) => m.includes(nomes.nome)).length === 1,
+    'foco: a miniatura da proposta não diz que é a proposta (ou todas dizem)', JSON.stringify(nomes.minis));
+  // Na DENÚNCIA o selo é 🚩 e o nome muda junto — o do HTML é o do ✨.
+  await montar({ ...FOTO_PL, venueID: 'v-foco-flag', updateRequestID: 'u-flag', updateTypeKey: 'FLAG',
+    reqType: 'REQUEST', reqSubType: 'FLAG', purType: 'FLAGGED_PHOTO', flagSubjectType: 'IMAGE',
+    flagEntityID: 'denunciada-01', imageUrls: [`${foto}#denunciada-01`, `${foto}#aprovada-02`],
+    approvedImageIds: ['denunciada-01', 'aprovada-02'] });
+  await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+  await page.waitForTimeout(350);
+  const flag = await page.evaluate(() => {
+    const b = document.getElementById('lightboxNewBadge');
+    return { txt: b.textContent, nome: b.getAttribute('aria-label'), titulo: b.title,
+      mini: document.querySelector('#lightboxStrip .lb-mini').getAttribute('aria-label') };
+  });
+  checa(flag.txt === '🚩' && flag.nome === flag.titulo && flag.nome !== nomes.nome && flag.mini.includes(flag.nome),
+    'foco: na denúncia o 🚩 segue com o NOME do ✨ (ou a miniatura não diz qual é a denunciada)', JSON.stringify(flag));
+  checa(erros.length === 0, 'foco: erro de JS', erros[0]);
+  await ctx.close();
+}
+
+// ── A RODA do mouse e o trackpad (auditoria de 2026-09-26) ─────────────────
+//
+// No mapa ampliado cada EVENTO de roda era um nível: 20 eventos de trackpad de
+// deltaY −4 (menos que UM dente de mouse, 100) subiam do 17 ao 19. E a rolagem
+// só HORIZONTAL caía no "afastar", no mapa (6 rolagens: do 17 ao 11) e na foto.
+// O CONTROLE é o dente de mouse, que tem que continuar dando um nível (mapa) e
+// 1,2× (foto): sem ele, "o zoom não mudou" passaria também com a roda que não
+// chega ao elemento.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.route('**/api/**', (route) => route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ success: true, places: [], hasMore: false, total: 0 }) }));
+  await presencaViva(page);
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const PL = {
+    venueID: 'v-roda', updateRequestID: 'pend-01', name: 'Padaria', categories: ['BAKERY'], address: 'Rua X, 1',
+    updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO', createdBy: 'wazer', lat: -12.9, lon: -38.3,
+    changes: [], imageUrls: [`${foto}#pend-01`], approvedImageIds: [],
+    mapa: { centro: [-12.9, -38.3], proposto: null, movidoM: null, entradas: [] },
+  };
+  await page.evaluate((p0) => {
+    setLang('pt'); applyI18n();
+    API.setSession('tok-smoke');
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false);
+    const p = JSON.parse(JSON.stringify(p0));
+    AppState.queue = [p]; AppState.currentPlace = p;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+  }, PL);
+  await assentar(page);
+  const rodar = async (n, dx, dy) => { for (let i = 0; i < n; i++) await page.mouse.wheel(dx, dy); await page.waitForTimeout(80); };
+  const pausa = () => page.waitForTimeout(350);   // gesto NOVO (o acumulado do mapa recomeça em 250 ms)
+  // O MAPA.
+  await page.evaluate(() => MapaLightbox.open(AppState.currentPlace));
+  await page.waitForTimeout(400);
+  await page.mouse.move(640, 400);
+  const z = () => page.evaluate(() => MapaLightbox.z);
+  const z0 = await z();
+  await rodar(1, 0, -100);
+  const z1 = await z();
+  checa(z1 === z0 + 1, `roda/mapa: CONTROLE — um dente de mouse não aproximou um nível (z ${z0} → ${z1}): a roda não chega`);
+  await pausa();
+  await rodar(20, 0, -4);
+  const z2 = await z();
+  checa(z2 === z1, `roda/mapa: 20 eventos de trackpad (−80, menos que um dente) mudaram o zoom (z ${z1} → ${z2})`);
+  await pausa();
+  await rodar(25, 0, -4);
+  const z3 = await z();
+  checa(z3 === z2 + 1, `roda/mapa: o trackpad somando um dente (−100) não deu UM nível (z ${z2} → ${z3})`);
+  await pausa();
+  await rodar(6, 40, 0);
+  const z4 = await z();
+  checa(z4 === z3, `roda/mapa: rolagem só HORIZONTAL mexeu no zoom (z ${z3} → ${z4})`);
+  // O DUPLO TOQUE com o tremor de um dedo (L15): qualquer movimento virava
+  // arraste, e com 1 px o mapa não aproximava (a foto aproxima com 3). Mouse
+  // de verdade, que gera o mesmo pointer + click do toque. O CONTROLE é o
+  // arraste de 40 px, que não pode contar como toque.
+  const tocar = async (x, y, mexe) => {
+    await page.mouse.move(x, y); await page.mouse.down();
+    if (mexe) await page.mouse.move(x + mexe, y + mexe, { steps: 2 });
+    await page.mouse.up();
+  };
+  // Volta ao pedido: a roda acima levou o zoom ao 19, o MÁXIMO, e ali nenhum
+  // toque aproxima (a medida estaria cega — foi o que a 1ª versão mediu).
+  await page.evaluate(() => MapaLightbox.recentrar());
+  await pausa();
+  const zt0 = await z();
+  checa(zt0 < await page.evaluate(() => MAPA_Z_NAV_MAX), `duplo toque/mapa: PRÉ-CONDIÇÃO — o zoom ${zt0} já é o máximo`);
+  await tocar(640, 400, 2); await tocar(640, 400, 2);
+  await page.waitForTimeout(250);
+  const zt1 = await z();
+  checa(zt1 === zt0 + 1, `duplo toque/mapa: com 2 px de tremor não aproximou (z ${zt0} → ${zt1})`);
+  await pausa();
+  // O 2º toque cai onde o arraste TERMINOU: a régua da distância entre os
+  // toques não pode ser o que segura o controle — é a folga do arraste.
+  await tocar(640, 400, 40); await tocar(680, 440, 0);
+  await page.waitForTimeout(250);
+  const zt2 = await z();
+  checa(zt2 === zt1, `duplo toque/mapa: CONTROLE — um ARRASTE seguido de um toque aproximou (z ${zt1} → ${zt2})`);
+  await page.evaluate(() => MapaLightbox.close());
+  await page.waitForTimeout(250);
+  // A FOTO.
+  await page.evaluate(() => { const p = AppState.currentPlace; Lightbox.open(p.imageUrls, 0, 0, p.name, false, p); });
+  await page.waitForTimeout(400);
+  await page.mouse.move(640, 400);
+  const escala = () => page.evaluate(() => Lightbox.scale);
+  await rodar(1, 0, -100);
+  const e1 = await escala();
+  checa(Math.abs(e1 - 1.2) < 0.01, `roda/foto: CONTROLE — um dente de mouse não deu o 1,2× (escala ${e1})`);
+  // A horizontal medida COM zoom: em 1× o "afastar" batia no piso e não se via.
+  await rodar(6, 40, 0);
+  const e0 = await escala();
+  checa(Math.abs(e0 - e1) < 1e-9, `roda/foto: rolagem só HORIZONTAL mexeu no zoom (escala ${e1.toFixed(2)} → ${e0.toFixed(2)})`);
+  await pausa();
+  await rodar(20, 0, -4);
+  const e2 = await escala();
+  // proporcional: −80 é 0,8 dente → 1,2 × 1,2^0,8 ≈ 1,39 (por evento dava 4, o teto)
+  checa(e2 > e1 && e2 < 1.5, `roda/foto: 20 eventos de trackpad (−80) foram de ${e1.toFixed(2)} a ${e2.toFixed(2)} — por evento, não pelo delta`);
+  await page.evaluate(() => Lightbox.close());
+  checa(erros.length === 0, 'roda: erro de JS', erros[0]);
+  await ctx.close();
 }
 
 
@@ -3982,6 +4667,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const APARELHOS_FAB = [['iPhone SE', { width: 375, height: 667 }],
                          ['Pixel 7', { width: 412, height: 915 }],
                          ['Galaxy Fold', { width: 280, height: 653 }]];
+  // Em que aparelhos o toast de fato cobriu um botão do card (sem isso, "o
+  // toast não virou alerta" passaria sem o caso ter existido).
+  const toastCobriuBotao = [];
   for (const [nomeAp, vp] of APARELHOS_FAB) {
     const ctx = await browser.newContext({ viewport: vp, locale: 'pt-BR',
       hasTouch: true, isMobile: true, serviceWorkers: 'block' });
@@ -4078,6 +4766,124 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(r.alcancavel, `FAB/${nomeAp}: em "${nome}" o próprio FAB não recebe o toque`);
       checa(r.visivel, `FAB/${nomeAp}: em "${nome}" o alvo ficou menor que 44px`);
     }
+
+    // ── PAINÉIS SEM MODAL: a falha de carga e o convite de instalar ─────
+    //
+    // O observador do canto vigiava modal, lightbox e as duas telas — e os
+    // painéis da fila vazia aparecem sem mexer em nenhum deles. O FAB ficava
+    // onde estava: na borda do "Tentar novamente" (Fold) e do "Agora não" do
+    // convite (iPhone SE), auditoria de 2026-09-26 (D8). O canto em que ele
+    // estava antes depende do card, então o caso é MONTADO em todo aparelho:
+    // com o painel escondido, o FAB (automático, não fixado) é posto em cima de
+    // onde o botão nasce — só a reavaliação o tira de lá.
+    //
+    // A régua é a do próprio `posicionarFabDev`, medida por fora: ele fica no
+    // canto de MENOS vítimas, e não em cima de um botão do painel quando existe
+    // canto que não cubra nenhum. MEDIDO no Fold com o convite: NENHUM canto é
+    // livre (em cima o placar, embaixo os dois botões do convite, no meio o
+    // "Verificar novamente") — e aí o melhor é o placar, não um botão.
+    const vitimasPorCanto = () => page.evaluate((sel) => {
+      const fab = document.getElementById('devFab'), btn = document.getElementById('devFabBtn');
+      const f = btn.getBoundingClientRect(), w = f.width || 44, h = f.height || 44;
+      const conta = (x, y) => {
+        const v = new Set();
+        for (const fx of [0.02, 0.5, 0.98]) for (const fy of [0.02, 0.5, 0.98]) {
+          const sob = document.elementFromPoint(x + w * fx, y + h * fy);
+          const a = sob && sob.closest(sel);
+          if (a && !fab.contains(a)) v.add(a.id || a.className.split(' ')[0]);
+        }
+        return [...v];
+      };
+      const pe = fab.style.pointerEvents, peB = btn.style.pointerEvents;
+      fab.style.pointerEvents = 'none'; btn.style.pointerEvents = 'none';
+      const cantos = {};
+      for (const c of DEV_FAB_CANTOS) { const { x, y } = devFabCoords(c, w, h); cantos[c] = conta(x, y); }
+      const agora = conta(f.left, f.top);
+      fab.style.pointerEvents = pe; btn.style.pointerEvents = peB;
+      return { agora, cantos };
+    }, ALVO_PROIBIDO);
+    await page.evaluate(() => {
+      const e = new Event('beforeinstallprompt', { cancelable: true });
+      e.prompt = () => {}; e.userChoice = Promise.resolve({ outcome: 'dismissed' });
+      window.dispatchEvent(e);
+    });
+    for (const [nomeP, chave, botoes] of [['falha de carga', 'falha', ['retryLoadBtn']],
+      ['fila vazia com o convite', 'convite', ['reloadBtn', 'installInviteBtn', 'installDismissBtn']]]) {
+      const alvo = await page.evaluate((k) => {
+        AppState.queue = []; AppState.currentPlace = null; AppState.loadError = k === 'falha';
+        showNoPlaces();
+        const b = document.getElementById(k === 'falha' ? 'retryLoadBtn' : 'installDismissBtn');
+        const r = b && b.getBoundingClientRect();
+        return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+      }, chave);
+      checa(!!alvo, `FAB/${nomeAp}: PRÉ-CONDIÇÃO — o botão do painel "${nomeP}" não apareceu`);
+      if (!alvo) continue;
+      await page.evaluate(() => ['loadErrorState', 'noMoreCards', 'installInvite']
+        .forEach((id) => document.getElementById(id).classList.add('hidden')));
+      await doisQuadros(page);
+      await page.evaluate(({ x, y }) => {
+        const f = document.getElementById('devFab'); const r = f.getBoundingClientRect();
+        f.style.left = (x - r.width / 2) + 'px'; f.style.top = (y - r.height / 2) + 'px';
+        f.style.right = 'auto'; f.style.bottom = 'auto';
+      }, alvo);
+      await page.evaluate(() => showNoPlaces());   // o painel volta pelo caminho do app
+      await assentar(page, 200);
+      await doisQuadros(page);
+      const v = await vitimasPorCanto();
+      const noBotao = v.agora.filter((id) => botoes.includes(id));
+      const haCantoSemBotao = Object.values(v.cantos).some((l) => !l.some((id) => botoes.includes(id)));
+      const minimo = Math.min(...Object.values(v.cantos).map((l) => l.length));
+      checa(!(haCantoSemBotao && noBotao.length), `FAB/${nomeAp}: no painel "${nomeP}" o botão ficou por cima de ${noBotao.join(', ')} — o canto não foi reavaliado`,
+        JSON.stringify(v));
+      checa(v.agora.length <= minimo, `FAB/${nomeAp}: no painel "${nomeP}" o botão não está no canto de menos vítimas`, JSON.stringify(v));
+    }
+    await page.evaluate((fila) => {
+      AppState.loadError = false;
+      ['loadErrorState', 'noMoreCards', 'installInvite'].forEach((id) => document.getElementById(id).classList.add('hidden'));
+      AppState.queue = JSON.parse(JSON.stringify(fila));
+      AppState.currentPlace = AppState.queue[0];
+      AppState.serverTotal = fila.length;
+      showCurrentPlace();
+    }, FIXTURES_PAISES.slice(0, 3));
+    await assentar(page, 300);
+    await doisQuadros(page);
+
+    // ── O TOAST por cima dos botões não é "toqueInterceptado" ───────────
+    //
+    // A sentinela acusava ✕ ↑ ✓ sempre que um toast comum (z-70, rodapé)
+    // estava sobre eles — o lugar dele nas telas baixas, e ele some em
+    // segundos. Toda captura até 4 s depois de um toast trazia três alertas
+    // falsos (auditoria de 2026-09-26, D3). CONTROLE: um elemento DE VERDADE
+    // por cima do ✕ continua acusando.
+    const toastR = await page.evaluate(() => new Promise((ok) => {
+      showToast('Já tratado por outro editor 👍', 'info', 8000);
+      setTimeout(() => {
+        const card = cardDaFrente();
+        let cobre = 0;
+        for (const s of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
+          const r = card.querySelector(s).getBoundingClientRect();
+          const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          if (el && el.closest('#notifyStack')) cobre++;
+        }
+        const m = dlogCapturar('manual');
+        document.querySelectorAll('#toastContainer > *').forEach((t) => t.remove());
+        ok({ cobre, alertas: (m.alertas || []).filter((a) => a.chave === 'toqueInterceptado').map((a) => a.alvo) });
+      }, 600);
+    }));
+    if (toastR.cobre) toastCobriuBotao.push(nomeAp);
+    checa(toastR.alertas.length === 0,
+      `FAB/${nomeAp}: o toast por cima dos botões virou "toqueInterceptado" — é o lugar dele, e ele some`, JSON.stringify(toastR));
+    const tampaR = await page.evaluate(() => {
+      const b = cardDaFrente().querySelector('.card-btn-reject').getBoundingClientRect();
+      const d = document.createElement('div');
+      d.style.cssText = `position:fixed;left:${b.left}px;top:${b.top}px;width:${b.width}px;height:${b.height}px;z-index:90`;
+      document.body.appendChild(d);
+      const m = dlogCapturar('manual');
+      d.remove();
+      return (m.alertas || []).filter((a) => a.chave === 'toqueInterceptado').map((a) => a.alvo);
+    });
+    checa(tampaR.includes('.card-btn-reject'),
+      `FAB/${nomeAp}: CONTROLE — um elemento de verdade por cima do ✕ deixou de acusar`, JSON.stringify(tampaR));
 
     // ── o gesto DO OWNER: pressiona, SEGURA, e só então arrasta ─────────
     //
@@ -4236,6 +5042,43 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       `FAB/${nomeAp}: depois de apagar não voltou ao canto automático`,
       `${Math.round(zerou.x)} ≠ ${vp.width - antes.w - 12}`);
 
+    // ── DOIS dedos no botão, soltos antes de "pegar" ────────────────────
+    // O segundo `pointerdown` sobrescrevia o relógio do primeiro sem cancelá-lo,
+    // e o relógio órfão "pegava" o botão SEM dedo nenhum: ele ficava em
+    // `fab-pego` pra sempre — crescido, parado, por cima do "Aplicar" dos
+    // Filtros, e nem desligar e religar o modo dev o soltava (auditoria de
+    // 2026-09-26, D7). O controle é o de cima: segurar UM dedo ainda pega.
+    const p7 = await page.evaluate(() => {
+      const b = document.getElementById('devFab').getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p7.x, y: p7.y, id: 1 }] });
+    await page.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart',
+      touchPoints: [{ x: p7.x, y: p7.y, id: 1 }, { x: p7.x + 6, y: p7.y + 6, id: 2 }] });
+    await page.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p7.x + 6, y: p7.y + 6, id: 2 }] });
+    await page.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(500);
+    const doisDedos = await page.evaluate(() => document.getElementById('devFab').classList.contains('fab-pego'));
+    checa(!doisDedos, `FAB/${nomeAp}: dois dedos soltos antes de pegar deixaram o botão "pego" sem dedo nenhum`);
+    // E o "pego" que sobrar sem dedo (qualquer caminho) não trava o botão: o
+    // canto é reavaliado, e apagar o modo dev o solta.
+    const preso = await page.evaluate(() => {
+      const f = document.getElementById('devFab');
+      f.classList.add('fab-pego');
+      posicionarFabDev();
+      const reposicionou = !f.classList.contains('fab-pego');
+      f.classList.add('fab-pego');
+      dlogApagar();
+      const soltou = !f.classList.contains('fab-pego');
+      AppState.devMode.active = true; atualizarFabDev();
+      return { reposicionou, soltou };
+    });
+    checa(preso.reposicionou && preso.soltou,
+      `FAB/${nomeAp}: "pego" sem dedo travou o botão (a reavaliação ou o apagar não o soltam)`, JSON.stringify(preso));
+
     // ── o SELO conta só o que VOCÊ registrou ────────────────────────────
     // Pedido do owner depois de ver o selo ir a 2, 4 e 5 em três toques: ele
     // somava as capturas AUTOMÁTICAS (o arraste do card além do limiar, com
@@ -4321,6 +5164,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(errosF.length === 0, `FAB/${nomeAp}: erro de JS`, errosF[0]);
     await ctx.close();
   }
+  // CONTROLE do toast (D3): em algum aparelho ele TEM que ter coberto um botão
+  // do card — senão "o toast por cima não acusa" passaria sem o caso existir.
+  checa(toastCobriuBotao.length > 0,
+    'FAB: CONTROLE — em nenhum aparelho o toast cobriu um botão do card; a medida do D3 não mede nada');
 }
 
 // ── O teclado virtual não pode achatar os modais sem teclado ──────────────
@@ -6607,6 +7454,44 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.page.waitForTimeout(400);
     const voltou = await naTela();
     checa(voltou.length === 2 && voltou.every(Boolean), `${id}: o "Voltar ao pedido" voltou pro vazio`, JSON.stringify(voltou));
+    // CONTROLE do L16 (abaixo): com os dois pontos na tela, nenhum aviso de
+    // "fora do mapa" e a legenda com os dois.
+    const ctl = await g.page.evaluate(() => ({ aviso: !!document.querySelector('#mapaLbMarks .mapa-fora'),
+      legenda: document.querySelectorAll('#mapaLbLegenda .mapa-leg').length }));
+    checa(!ctl.aviso && ctl.legenda === 2, `${id}: com os dois pontos na tela, apareceu aviso ou a legenda perdeu um`, JSON.stringify(ctl));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    // L16: um movimento de 2.510 km não cabe nem no z4 (o mais aberto). O card
+    // avisava ("a posição proposta está a 2.510 km — fora deste mapa"); o
+    // ampliado abria calado, com "Depois" na legenda de um marcador fora da tela.
+    const id = 'mapa/L16: mapa ampliado de um movimento de 2.510 km';
+    const longe = [centro[0], centro[1] + 24.6];
+    const g = await gestosPagina({ viewport: { width: 393, height: 852 } }, [gestosDaFixture(19, 'fZ', { imageUrls: [],
+      mapa: { centro, proposto: longe, movidoM: 2510000, entradas: [] } })]);
+    const card = await g.page.evaluate(() => (cardDaFrente().querySelector('.mapa-fora') || {}).textContent || null);
+    checa(!!card, `${id}: PRÉ-CONDIÇÃO — o card não avisou (o ponto devia não caber)`);
+    await g.page.locator('#cardStack .place-card:not(.card-fundo) .card-map').click();
+    await g.page.waitForTimeout(600);
+    const r = await g.page.evaluate(() => {
+      const av = document.querySelector('#mapaLbMarks .mapa-fora');
+      const ra = av && av.getBoundingClientRect();
+      const marcas = [...document.querySelectorAll('#mapaLbMarks .mapa-marca')].map((e) => {
+        const b = e.getBoundingClientRect();
+        return { cls: e.className.replace('mapa-marca ', ''), naTela: b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight };
+      });
+      // O aviso NÃO pode virar alvo: arrastar o mapa por cima dele tem que andar.
+      const noAviso = ra ? document.elementFromPoint(ra.left + ra.width / 2, ra.top + ra.height / 2) : null;
+      return { aviso: av ? av.textContent : null, marcas,
+        legenda: [...document.querySelectorAll('#mapaLbLegenda .mapa-leg')].map((e) => e.textContent.trim()),
+        avisoRoubaODedo: !!(noAviso && noAviso.closest && noAviso.closest('.mapa-fora')) };
+    });
+    const fora = r.marcas.filter((m) => !m.naTela).map((m) => m.cls);
+    checa(fora.length === 1, `${id}: PRÉ-CONDIÇÃO — esperava UM marcador fora da tela`, JSON.stringify(r.marcas));
+    checa(r.aviso === card, `${id}: o ampliado não disse o que ficou fora (ou disse outra coisa que o card)`, `${r.aviso} vs ${card}`);
+    checa(r.legenda.length === 1, `${id}: a legenda prometeu o marcador que está fora da tela`, JSON.stringify(r.legenda));
+    checa(!r.avisoRoubaODedo, `${id}: o aviso recebe o dedo — arrastar o mapa por cima dele não anda`);
     checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
     await g.fechar();
   }
@@ -6665,11 +7550,13 @@ if (falhas) {
 console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.length} idiomas × ${Object.keys(CARDS).length} tipos de card`
   + `, + ${FIXTURES_PAISES.length} pedidos REAIS de ${new Set(FIXTURES_PAISES.map((f) => f._pais)).size} países × ${APARELHOS_PAISES.length} aparelhos × ${LINGUAS.length} idiomas`
   + `, + ${FORMATOS_FOTO.length} formatos de foto × ${APARELHOS_PAISES.length} aparelhos`
-  + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403)`
-  + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, Esc e ✕)`
+  + `, + legibilidade do mapa × ${LINGUAS.length} idiomas, + queda dos tiles (404/403, no card e no ampliado arrastado, sem pedir de novo o tile que falhou)`
+  + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, as quatro setas andando, Esc e ✕)`
+  + `, + escala do mapa medindo o que diz (card e ampliado, pela barra DESENHADA contra o movimento que o core mediu, e o rótulo cabendo no traço do z8 ao z4)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
-  + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true)`
+  + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true, e a pílula do nome travada e esmaecida na janela, com o CONTROLE viva antes e depois)`
+  + `, + foto que NÃO carregou (sem aprovar nem lixeira, nem pelo clique no botão escondido, com o CONTROLE da foto que carrega)`
   + `, + sessão morta leva pra tela de entrar e oscilação de rede NÃO derruba`
   + `, + falha de busca NUNCA vira "Tudo limpo!" (401 com alarme falso, medido pela REDE)`
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
@@ -6680,7 +7567,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
   + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`
-  + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (7 prazos, contraste composto, não vira alvo de toque e some no "Sair")`
+  + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (9 prazos contados pela DATA com o relógio parado às 20h — "amanhã" com 20 h de prazo —, contraste composto, não vira alvo de toque e some no "Sair")`
   + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
@@ -6689,13 +7576,16 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`
   + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
+  + `, + renomeando: o passo pra trás (fundo, arraste pra baixo, Esc e ↓ fora do campo) só sai da edição, com o CONTROLE sem edição fechando a foto`
+  + `, + a roda do mouse e o trackpad (no mapa um nível por DENTE acumulado, na foto proporcional ao delta, e a rolagem horizontal fora do zoom, com o CONTROLE do dente) e o duplo toque do mapa com tremor (com o CONTROLE do arraste)`
+  + `, + o foco nas camadas de ampliar (fechar a foto e o mapa por Esc/↓/✕ devolve à foto/mapa do card, sair da edição devolve à pílula, aprovar e salvar mantêm na camada, com e sem Desfazer, e o ✨/🚩 e a miniatura com NOME, com o CONTROLE do Filtros)`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`
   + `, + Perto de mim em 2 aparelhos × 2 idiomas (as 3 opções, ordem ponta a ponta, GPS concedido E negado pelo browser, e o perfil sem endereço)`
-  + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
+  + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, a foto em pé com a tira de miniaturas parando antes do campo, e envio medido pela REDE com Desfazer impedindo)`
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
@@ -6708,6 +7598,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
-  + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, e a pílula do nome em edição no Fold)`
+  + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

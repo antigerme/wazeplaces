@@ -441,7 +441,7 @@
                 <div class="mt-8 p-4 bg-blue-50/50 border border-blue-100 rounded-2xl flex items-start space-x-3 dark:bg-blue-600/15 dark:border-blue-600/40">
                     <svg class="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                     <p class="text-xs text-blue-800/80 leading-relaxed dark:text-blue-300" data-i18n="auth.securityNote">
-                        Os cookies são trocados por um token de sessão criptografado no servidor (validade de 21 dias) e nunca trafegam novamente após o login.
+                        Os cookies ficam criptografados no servidor, trocados por um token de sessão (21 dias sem uso), e nunca trafegam de novo após o login.
                     </p>
                 </div>
             </div>
@@ -458,7 +458,7 @@
              abrir Filtros durante a busca mostrava um diálogo pela metade. -->
         <div id="pasteModal" role="dialog" aria-modal="true" aria-labelledby="pasteModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
-                <h3 id="pasteModalTitle" class="text-xl font-bold text-slate-800 mb-4 dark:text-slate-100" data-i18n="modal.paste.title">Cole o Conteúdo dos Cookies</h3>
+                <h3 id="pasteModalTitle" class="text-xl font-bold text-slate-800 mb-4 dark:text-slate-100" data-i18n="modal.paste.title">Cole o conteúdo dos cookies</h3>
                 <textarea id="cookiesTextarea" aria-label="Conteúdo do arquivo cookies.txt" data-i18n-aria="modal.paste.textarea.aria" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" class="w-full h-48 p-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt…" data-i18n-ph="modal.paste.textarea.ph"></textarea>
                 <div class="flex space-x-3 mt-4">
                     <button id="cancelPaste" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">
@@ -525,7 +525,7 @@
                      VAZIA, porque a animação do swipe já tinha tirado o card da tela.
                      Tela em branco lê como app quebrado. -->
                 <p id="treinoFimEfeito" class="hidden text-sm text-slate-700 bg-slate-100 border border-slate-200 rounded-xl p-3 mb-4 leading-relaxed text-left dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200"></p>
-                <p class="text-sm text-slate-600 mb-6 leading-relaxed dark:text-slate-300" data-i18n="treino.fim.body">Nada disso foi enviado ao Waze. Agora vale de verdade — e o Desfazer te dá alguns segundos em cada ação.</p>
+                <p class="text-sm text-slate-600 mb-6 leading-relaxed dark:text-slate-300" data-i18n="treino.fim.body">Nada disso foi enviado ao Waze. Agora vale de verdade — e o Desfazer te dá 3s em cada ação.</p>
                 <button id="treinoFimOk" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="treino.fim.cta">Ir para a fila</button>
             </div>
         </div>
@@ -556,7 +556,7 @@
                     </div>
                     <div>
                         <h3 id="accessDeniedTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.accessDenied.title">Acesso restrito</h3>
-                        <p class="text-xs text-slate-500 mt-0.5 dark:text-slate-400" data-i18n="modal.accessDenied.subtitle">Exclusivo para certos níveis de editor</p>
+                        <p class="text-xs text-slate-500 mt-0.5 dark:text-slate-400" data-i18n="modal.accessDenied.subtitle">Exclusivo para editor nível 2+ que seja Area Manager, ou staff do Waze</p>
                     </div>
                 </div>
                 <p id="accessDeniedMessage" class="text-sm text-slate-600 mb-3 dark:text-slate-300"></p>
@@ -634,8 +634,8 @@
                         <div>
                             <label for="filterSort" class="text-sm font-semibold text-slate-700 block mb-2 dark:text-slate-200" data-i18n="filters.sort.label">Ordenar por</label>
                             <select id="filterSort" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700">
-                                <option value="newest" data-i18n="filters.sort.newest">Mais recentes primeiro</option>
-                                <option value="oldest" data-i18n="filters.sort.oldest">Mais antigos primeiro</option>
+                                <option value="newest" data-i18n="filters.sort.newest">Mais recentes</option>
+                                <option value="oldest" data-i18n="filters.sort.oldest">Mais antigos</option>
                                 <!-- As ordens por DISTÂNCIA (casa/trabalho/GPS) entram por JS em
                                      `popularOrdenacoes()`: casa e trabalho só existem se o perfil
                                      do WME tiver o endereço, e o GPS só se o aparelho tiver a API.
@@ -820,7 +820,7 @@
                 <!-- Rodapé contextual: gap-3 (e não space-x) pra botão escondido não deixar vão -->
                 <div class="flex gap-3 px-6 py-4 border-t border-slate-100 flex-shrink-0 dark:border-slate-700">
                     <button id="cancelFilters" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">Cancelar</button>
-                    <button id="applyFilters" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.apply">Aplicar</button>
+                    <button id="applyFilters" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition disabled:opacity-60" data-i18n="common.apply">Aplicar</button>
                     <button id="closeFiltersFooter" type="button" class="hidden flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.close">Fechar</button>
                 </div>
             </div>
@@ -879,10 +879,10 @@
         <div id="pairEnterModal" role="dialog" aria-modal="true" aria-labelledby="pairEnterTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain">
                 <h3 id="pairEnterTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.enter.title">Entrar com um código</h3>
-                <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.enter.body">No aparelho onde você já está logado, abra a Ajuda e toque em "Conectar outro aparelho". Digite aqui o código de 6 caracteres:</p>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.enter.body">Digite o código que apareceu no outro aparelho:</p>
 
                 <label for="pairCodeInput" class="sr-only" data-i18n="pair.enter.title">Entrar com um código</label>
-                <input id="pairCodeInput" type="text" inputmode="latin" autocapitalize="characters" autocomplete="one-time-code" placeholder="ABC-123" data-i18n-ph="pair.enter.placeholder"
+                <input id="pairCodeInput" type="text" inputmode="latin" autocapitalize="characters" autocomplete="one-time-code" placeholder="ABC-234" data-i18n-ph="pair.enter.placeholder"
                        class="w-full min-h-[56px] text-center text-3xl font-black tracking-[0.2em] uppercase bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 mb-3 text-slate-800 dark:text-slate-100">
                 <p id="pairEnterError" class="hidden text-xs text-rose-600 dark:text-rose-400 mb-3" role="alert"></p>
 
@@ -899,7 +899,7 @@
                 <p id="batchReadMessage" class="text-sm text-slate-500 mb-6 dark:text-slate-400">Marcar como lido os pedidos da fila?</p>
                 <div class="flex space-x-3">
                     <button id="cancelBatchRead" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">Cancelar</button>
-                    <button id="confirmBatchRead" type="button" class="flex-1 min-h-[48px] bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="modal.batchRead.confirm">Marcar lidos</button>
+                    <button id="confirmBatchRead" type="button" class="flex-1 min-h-[48px] bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="modal.batchRead.confirm">Marcar como lidos</button>
                 </div>
             </div>
         </div>
@@ -1250,8 +1250,11 @@
                                 <!-- `draggable="false"`: sem ele, arrastar o card com o MOUSE pela foto
                                      começava o arrastar NATIVO de imagem, que engole o `mouseup` — o card
                                      seguia o cursor sem botão, e o clique seguinte em qualquer lugar
-                                     cometia a ação (auditoria de 2026-09-26; ver `enableSwipeOnCard`). -->
-                                <img class="card-image w-full h-full object-cover hidden" alt="" draggable="false">
+                                     cometia a ação (auditoria de 2026-09-26; ver `enableSwipeOnCard`).
+                                     `tabindex="-1"`: fora do Tab, mas a foto pode RECEBER o foco de volta
+                                     quando a foto ampliada fecha — ela é quem a abriu, e sem isso o foco
+                                     caía no <body> (ver `devolverFocoDaAmpliacao`). -->
+                                <img class="card-image w-full h-full object-cover hidden" alt="" draggable="false" tabindex="-1">
                                 <div class="card-image-new-border hidden absolute inset-0 ring-4 ring-amber-400 ring-inset pointer-events-none z-20"></div>
                                 <div class="card-image-new-badge hidden absolute top-1 left-2 z-30 text-3xl leading-none select-none pointer-events-none" style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido" data-i18n-title="card.newPhoto.title">✨</div>
                                 <!-- Mini-mapa: mais um slide do MESMO carrossel da foto, então
@@ -1492,11 +1495,11 @@
         <button id="lightboxPrev" type="button" aria-label="Foto anterior" data-i18n-aria="card.image.prev.aria" class="hidden absolute left-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">‹</button>
         <button id="lightboxNext" type="button" aria-label="Próxima foto" data-i18n-aria="card.image.next.aria" class="hidden absolute right-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">›</button>
         <span id="lightboxCount" class="hidden absolute z-10 text-white bg-black/40 text-sm font-medium px-3 py-1.5 rounded-full tnum" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem"></span>
-        <span id="lightboxNewBadge" class="hidden absolute left-1/2 -translate-x-1/2 z-10 text-3xl leading-none pointer-events-none" style="top: calc(0.75rem + env(safe-area-inset-top)); filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido" data-i18n-title="card.newPhoto.title">✨</span>
+        <span id="lightboxNewBadge" class="hidden absolute left-1/2 -translate-x-1/2 z-10 text-3xl leading-none pointer-events-none" style="top: calc(0.75rem + env(safe-area-inset-top)); filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido" data-i18n-title="card.newPhoto.title" role="img" aria-label="Foto nova proposta neste pedido" data-i18n-aria="card.newPhoto.title">✨</span>
         <!-- A dica reserva o canto direito (`right-20`): o botão de ação mora
              lá, e centralizada de ponta a ponta ela ficava CORTADA por ele em
              tela estreita — já era assim com a lixeira sozinha. -->
-        <p id="lightboxZoomHint" class="lb-baixo absolute left-4 right-20 z-10 text-white/70 text-xs text-center bg-black/40 px-3 py-1.5 rounded-full pointer-events-none truncate"  data-i18n="lightbox.zoomHint">Toque duplo pra dar zoom · arraste pro lado pra trocar de foto</p>
+        <p id="lightboxZoomHint" class="lb-baixo absolute left-4 right-20 z-10 text-white/70 text-xs text-center bg-black/40 px-3 py-1.5 rounded-full pointer-events-none truncate"  data-i18n="lightbox.zoomHint">Toque duplo amplia · arraste pro lado pra trocar · pra baixo pra fechar</p>
         <!-- UM slot de ação, no canto de BAIXO, do lado oposto ao ✕ do topo.
              Os dois botões abaixo são mutuamente exclusivos e ocupam o MESMO
              lugar: foto pendente se aprova, foto já no mapa se exclui.
@@ -1641,7 +1644,7 @@
                         <li class="ajuda-passo-ext" data-i18n-html="help.howToUse.step1"><strong>Mais fácil:</strong> instale a extensão <b>WazePlaces Rapid Access</b> (Chrome) e faça login direto do WME — sem copiar cookies.</li>
                         <li class="ajuda-passo-codigo" data-i18n-html="help.howToUse.codigo"><strong>Pelo código:</strong> num aparelho onde você já entrou, toque em Ajuda › Conectar outro aparelho e aponte a câmera deste para o QR — sem câmera, toque lá em “Sem câmera? Mostrar um código” e digite-o aqui em “Entrar com um código”.</li>
                         <li data-i18n="help.howToUse.step2">Ou, manualmente: faça login no Waze Map Editor no navegador</li>
-                        <li data-i18n="help.howToUse.step3">Exporte seus cookies usando uma extensão de navegador</li>
+                        <li data-i18n="help.howToUse.step3">No computador, exporte seus cookies com uma extensão de navegador</li>
                         <li data-i18n-html="help.howToUse.step4">Faça upload ou cole o conteúdo do <code>cookies.txt</code></li>
                         <li data-i18n-html="help.howToUse.step5">Processe os cards (botões, arraste ou setas do teclado; <code>z</code> desfaz)</li>
                         <!-- A opção de desligar a espera do Desfazer existia sem estar
@@ -1668,7 +1671,7 @@
 
                 <div>
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.important.title">Importante:</h4>
-                    <p class="text-sm" data-i18n-html="help.important.body">Este app <strong>nunca aprova</strong> dados de local — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs dark:bg-cyan-600/20">↗</span> no card. A única exceção é <strong>foto nova</strong>: ampliada, ela pode ser aprovada ou excluída ali mesmo (L6+AM ou staff).</p>
+                    <p class="text-sm" data-i18n-html="help.important.body">Este app <strong>nunca aprova</strong> dados de local — só rejeita ou marca como lido. Para aprovar, abra no WME pelo botão <span class="inline-block bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded text-xs dark:bg-cyan-600/20">↗</span> no card. As exceções ficam na foto ampliada, só para L6+AM ou staff: <strong>aprovar a foto nova</strong> do pedido, <strong>excluir uma foto</strong> que já está no local e <strong>corrigir o nome</strong> do local.</p>
                 </div>
 
                 <div>
@@ -1688,18 +1691,18 @@
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.privacy.title">Privacidade e dados:</h4>
                     <ul class="list-disc list-inside space-y-1.5 text-sm">
                         <li data-i18n="help.privacy.server">No servidor ficam os seus cookies do Waze, criptografados (AES-256-GCM). A única outra coisa é passageira: ao tocar na lixeira de uma foto, a lista das fotos daquele local (com quem enviou cada uma) fica lá por até 1 minuto, sem criptografia, pra a exclusão sair na hora.</li>
-                        <li data-i18n-html="help.privacy.zeroKnowledge">E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera o app. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.</li>
-                        <li data-i18n="help.privacy.notStored">Os pedidos NÃO são guardados: nome, foto, endereço e coordenada de place existem só na memória, enquanto o app está aberto. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, as capturas ficam até você baixar o diagnóstico, no máximo 24 h.</li>
+                        <li data-i18n-html="help.privacy.zeroKnowledge">E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera o app, com o que fica guardado. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.</li>
+                        <li data-i18n="help.privacy.notStored">Os pedidos NÃO são guardados pelo app: nome, endereço e coordenada de place existem só na memória, enquanto o app está aberto. As fotos e o mapa passam pelo cache do próprio navegador, como as imagens de qualquer site: vencem em até 1 hora e saem quando você limpa os dados de navegação. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, as capturas ficam até você baixar o diagnóstico, no máximo 24 h.</li>
                         <li data-i18n="help.privacy.retention">Prazo: 21 dias sem uso, ou até você tocar em “Sair” — o que vier primeiro. Código de pareamento dura 5 minutos e é de uso único.</li>
-                        <li data-i18n="help.privacy.device">Neste aparelho ficam placar, histórico, conquistas, filtros, preferências, as ações esperando envio, os autores que você rejeitou (id e nome, pra contar a reincidência), um diário de quando a sessão começou e caiu e, das conversas, quais são do app e até onde cada pessoa leu. Tudo isso é apagado no “Sair”; ficam só o idioma e o tema.</li>
-                        <li data-i18n="help.privacy.credentials">Seus cookies são credenciais: permitem que o app aja no Waze em seu nome. Ele rejeita, marca como lido, dá ⭐ no pedido, corrige o nome do local e — só em foto nova — aprova ou exclui a foto.</li>
+                        <li data-i18n="help.privacy.device">Neste aparelho ficam o id da sua conta do Waze (pra saber de quem são estes dados), o seu nível no Waze e quando a sua sessão de lá vence, placar, histórico, conquistas, filtros, preferências, as ações esperando envio, os autores que você rejeitou (id e nome, pra contar a reincidência), um diário de quando a sessão começou e caiu e, das conversas, quais são do app e até onde cada pessoa leu. Tudo isso é apagado no “Sair”; ficam só o idioma e o tema.</li>
+                        <li data-i18n="help.privacy.credentials">Seus cookies são credenciais: permitem que o app aja no Waze em seu nome. Ele rejeita, marca como lido, dá ⭐ no pedido e envia as mensagens que você escreve na conversa; e, só para L6+AM ou staff, aprova a foto nova do pedido, exclui fotos do local e corrige o nome do local.</li>
                         <li data-i18n="help.privacy.infra">Roda na Cloudflare (hospedagem e medição de acesso sem cookies). Sem anúncios e sem rastreadores.</li>
                         <li data-i18n-html="help.privacy.contact">Dúvidas, acesso aos seus dados ou pedido de exclusão: fale com <a href="https://www.waze.com/user/editor/antigerme" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">@antigerme</a>.</li>
                     </ul>
                 </div>
 
                 <div>
-                    <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.extensions.title">Extensões recomendadas:</h4>
+                    <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.extensions.title">Extensões recomendadas (no computador):</h4>
                     <ul class="list-disc list-inside space-y-1 text-sm">
                         <li data-i18n-html="help.extensions.chrome"><strong>Chrome/Edge:</strong> "Get cookies.txt LOCALLY"</li>
                         <li data-i18n-html="help.extensions.firefox"><strong>Firefox:</strong> "cookies.txt"</li>

@@ -58,11 +58,12 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     window: { Presenca: { esquecer: () => log.push('chat') } },
     esvaziarFilaDeSaida: () => log.push('esvaziar'),
     esquecerFocoAutor: () => log.push('foco'),
+    presencaWmeZerar: () => {},   // a presença da conta anterior (test/costura-sessao, K5)
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida'];
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let saidaEsperandoConta = false;\n${nomes.map(fatiar).join('\n')}
+  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false;\n${nomes.map(fatiar).join('\n')}
     return { ${nomes.join(', ')}, esperando: () => saidaEsperandoConta, esperar: () => { saidaEsperandoConta = true; } };`)(
     ...chaves.map((k) => deps[k]));
   return { app, guardado, log, AppState, sessao, deps };
@@ -148,7 +149,7 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
     showToast: () => {}, t: (k) => k, setTimeout: (f) => f(),
   };
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false;
+  const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
     const pedidosEmAndamento = new Set();
     ${['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida', 'sessaoVivaDepoisDe',
@@ -318,11 +319,12 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     atualizarSeloDeConquista: () => {}, saveStats: () => {}, updateStats: () => {},
     offlineEsquecer: () => {}, dlogApagar: () => {}, window: { Presenca: { esquecer: () => {} } },
     esquecerFocoAutor: () => log.push('foco'),
+    presencaWmeZerar: () => {}, presencaWmeRefazerDesligar: () => {},   // test/costura-sessao, K5
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let saidaEsperandoConta = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 };
+  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 };
     ${nomes.map(fatiar).join('\n')}
     return { handleUnauthorized };`)(...chaves.map((k) => deps[k]));
   return { app, log, AppState, guardado };

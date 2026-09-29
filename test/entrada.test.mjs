@@ -227,7 +227,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     AppState, document, window: {}, dfato: nada, carregarFilaDeSaida: () => [], salvarFilaDeSaida: nada,
     updateInFlightIndicator: nada, esquecerAutores: nada, safeLS: { remove: nada }, HISTORY_KEY: 'h', CONQUISTAS_KEY: 'c',
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
-    showToast: nada, t: (k) => k,
+    showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
   };
   const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente'],
     deps, ['esquecerOutraConta', 'manterFocoNaFrente']);
@@ -326,10 +326,11 @@ function montarExtensao(inicio = {}) {
   const negados = [];
   const deps = {
     window: win, document: { getElementById: () => null },
-    API: { setSession() {} }, AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000,
+    API: { setSession() {} }, AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
     extPerguntando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
     closeModal() {}, showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {},
     esvaziarFilaDeSaida() {}, mostrarEntrandoPelaExtensao() {}, setTimeout: () => 1, clearTimeout() {},
+    conhecerContaDoLogin() {},   // a conta que a ponte repassa (test/costura-sessao, K8)
     showAccessDenied: (r) => negados.push(r),
   };
   // Os dublês pedidos por quem chama ganham dos padrões (o `document` e o
@@ -536,7 +537,8 @@ test('queda da sessão: os TRÊS caminhos passam pelo fechamento — e o diálog
   const queda = fatiar('derrubarSessao');
   assert.match(queda, /if \(typeof depois === 'function'\) \{ fecharCamadasAbertas\(depois\); return; \}/,
     'o portão fechado voltou a abrir o diálogo por cima das camadas');
-  assert.match(queda, /setTimeout\(\(\) => fecharCamadasAbertas\(\(\) => \{\s*if \(negado\) showAccessDenied\(negado\);\s*showAuthScreen\(\);\s*\}\), UNAUTHORIZED_REDIRECT_MS\);/,
+  // (A época conferida antes: o "Sair" no meio da renovação já fez a tela dele — test/costura-sessao, K3.)
+  assert.match(queda, /setTimeout\(\(\) => \{\s*if \(epoca !== epocaDaSessao\) return;\s*fecharCamadasAbertas\(\(\) => \{\s*if \(negado\) showAccessDenied\(negado\);\s*showAuthScreen\(\);\s*\}\);\s*\}, UNAUTHORIZED_REDIRECT_MS\);/,
     'a queda comum voltou a mostrar a entrada com as camadas abertas por cima');
   // O diálogo ANTES da tela de entrada (a ordem que o `Presenca.desligar` exige).
   assert.match(fatiar('loadProfileAndAuxData'), /depois: \(\) => \{ showAccessDenied\(profileRes\); showAuthScreen\(\); \}/);
@@ -554,22 +556,84 @@ function dicionario() {
   return ctx.D;
 }
 
-test('a tela de entrada ANTES do JS (rede lenta) diz o mesmo que o dicionário pt — o requisito é L2+AM, não "nível 3+"', () => {
+// O texto de reserva do HTML é o que se lê ANTES de o JS chegar (rede lenta, JS
+// que falhou). Ele dizia outra coisa em 10 lugares fora da tela de entrada
+// (auditoria de 2026-09-26): "certos níveis" onde a regra é L2+AM, "Marcar
+// lidos" com o botão dizendo "Marcar como lidos", a Ajuda de antes das exceções
+// de L6. Aqui vale pra TODO elemento com `data-i18n`/`data-i18n-html` e todo
+// atributo `data-i18n-{ph,aria,title,alt}` do index.src.html.
+//
+// O JS troca a CHAVE de alguns elementos em tempo de execução, e isso NÃO é
+// exceção: o HTML traz a chave inicial com o texto dela, e a troca escreve a
+// chave nova junto com o texto (`trocarTextoI18n`, `atualizarSeloDePular`,
+// `ajustarEntradaAoIPhoneInstalado`). Conferido um a um: nenhum elemento tem, no
+// HTML, o texto de outra chave.
+//
+// As variáveis globais (`setI18nVars`) entram com o valor que a tela mostra em
+// pt; placeholder que o teste não conhece REPROVA, em vez de passar cru.
+function variaveisDaTela() {
+  const num = (nome) => {
+    const m = new RegExp(`^const ${nome} = (\\d+);`, 'm').exec(APP);
+    assert.ok(m, `CONTROLE: a constante ${nome} sumiu do app.js`);
+    return Number(m[1]);
+  };
+  return {
+    undoSeg: (num('UNDO_WINDOW_MS') / 1000).toLocaleString('pt-BR'),
+    nivelMinimo: String(num('NIVEL_MINIMO_EXIBIDO')),
+    sessaoDias: String(num('SESSAO_DIAS_EXIBIDO')),
+    parearMin: String(num('PAREAR_MIN_EXIBIDO')),
+  };
+}
+function decodificarHtml(s) {
+  return s.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+}
+function comVariaveis(valor, vars, chave) {
+  return valor.replace(/\{(\w+)\}/g, (_, v) => {
+    assert.ok(v in vars, `${chave}: o teste não conhece o {${v}} — acrescente-o em variaveisDaTela()`);
+    return vars[v];
+  });
+}
+
+test('o texto de reserva do HTML (antes do JS) diz o mesmo que o dicionário pt — a tela de entrada e todo o resto', () => {
   const pt = dicionario().pt;
-  const nivel = Number((/const NIVEL_MINIMO_EXIBIDO = (\d+);/.exec(APP) || [])[1]);
-  assert.ok(nivel >= 1, 'CONTROLE: não achei o NIVEL_MINIMO_EXIBIDO');
-  const tela = HTML.slice(HTML.indexOf('<div id="authScreen"'), HTML.indexOf('<div id="pasteModal"'));
-  const texto = (h) => h.replace(/<[^>]+>/g, '').replace(/&#8220;|&#8221;/g, '"').replace(/\s+/g, ' ').trim();
-  const achados = [...tela.matchAll(/<([a-z0-9]+)\b[^>]*\bdata-i18n(?:-html)?="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/g)];
-  assert.ok(achados.length >= 10, `CONTROLE: só achei ${achados.length} textos na tela de entrada — o recorte quebrou`);
+  const vars = variaveisDaTela();
+  const html = HTML.replace(/<!--[\s\S]*?-->/g, '');
+  const texto = (h) => decodificarHtml(h.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+  const achados = [...html.matchAll(/<([a-z0-9]+)\b[^>]*\bdata-i18n(?:-html)?="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/g)];
+  // CONTROLE: o recorte leu TODOS os elementos marcados (e o requisito da
+  // tela de entrada — "nível 2+", não "3+" — segue dentro dele).
+  const marcados = (html.match(/\bdata-i18n(?:-html)?="/g) || []).length;
+  assert.ok(marcados >= 150, `CONTROLE: só ${marcados} elementos com data-i18n — o HTML mudou de forma`);
+  assert.equal(achados.length, marcados, 'CONTROLE: algum elemento com data-i18n ficou de fora do recorte');
+  const tela = html.slice(html.indexOf('<div id="authScreen"'), html.indexOf('<div id="pasteModal"'));
+  assert.ok((tela.match(/\bdata-i18n(?:-html)?="/g) || []).length >= 10, 'CONTROLE: a tela de entrada sumiu do recorte');
+  assert.ok(achados.some(([, , chave]) => chave === 'auth.requisito'), 'CONTROLE: o requisito da entrada saiu do recorte');
   const divergentes = [];
   for (const [, , chave, reserva] of achados) {
     const valor = pt[chave];
-    assert.ok(valor, `a chave ${chave} da tela de entrada sumiu do dicionário`);
-    const esperado = texto(valor.replace(/\{nivelMinimo\}/g, String(nivel)));
+    assert.ok(valor, `a chave ${chave} do HTML sumiu do dicionário`);
+    const esperado = texto(comVariaveis(valor, vars, chave));
     if (texto(reserva) !== esperado) divergentes.push(`${chave}: "${texto(reserva)}" ≠ "${esperado}"`);
   }
-  assert.deepEqual(divergentes, [], 'o texto de reserva da tela de entrada diz outra coisa até o JS chegar');
+  // Os atributos: placeholder, aria-label, title e alt.
+  const ATRIBUTO = { ph: 'placeholder', aria: 'aria-label', title: 'title', alt: 'alt' };
+  let atributos = 0;
+  for (const [tag] of html.matchAll(/<[a-z0-9]+\b[^>]*>/g)) {
+    for (const [suf, attr] of Object.entries(ATRIBUTO)) {
+      const k = new RegExp(`\\bdata-i18n-${suf}="([^"]+)"`).exec(tag);
+      if (!k) continue;
+      atributos++;
+      const v = new RegExp(`\\s${attr}="([^"]*)"`).exec(tag);
+      const valor = pt[k[1]];
+      assert.ok(valor, `a chave ${k[1]} do HTML sumiu do dicionário`);
+      const esperado = comVariaveis(valor, vars, k[1]);
+      const reserva = v ? decodificarHtml(v[1]) : null;
+      if (reserva !== esperado) divergentes.push(`${k[1]} (${attr}): ${JSON.stringify(reserva)} ≠ "${esperado}"`);
+    }
+  }
+  assert.ok(atributos >= 50, `CONTROLE: só ${atributos} atributos traduzíveis — o recorte quebrou`);
+  assert.deepEqual(divergentes, [], 'o texto de reserva do HTML diz outra coisa até o JS chegar');
 });
 
 test('a extensão só aparece com a CONFIRMAÇÃO do JS; o divisor some com ela fora do dedo', () => {
@@ -796,7 +860,9 @@ test('link pra copiar à mão (área de transferência recusada): selecionar nã
   assert.equal(n.sumiu(), true, 'o toast comum passou a segurar a tela');
   // Quem usa: o socorro do "Copiar link", com o prazo longo.
   const copiar = fatiar('copiarLinkPareamento');
-  assert.match(copiar, /showToast\(url, 'info', TOAST_COPIAVEL_MS, null, \{ copiavel: true \}\);/,
+  // E SENSÍVEL: o link é o segredo do pareamento, e fica fora do diário do
+  // diagnóstico (auditoria de 2026-09-26, D1).
+  assert.match(copiar, /showToast\(url, 'info', TOAST_COPIAVEL_MS, null, \{ copiavel: true, sensivel: true \}\);/,
     'o link de socorro voltou a ser um toast comum de 12 s');
   assert.ok(Number((/const TOAST_COPIAVEL_MS = (\d+);/.exec(APP) || [])[1]) >= 30000, 'o link pra copiar à mão fica menos de 30 s');
 });
@@ -965,4 +1031,149 @@ test('iPhone com o app INSTALADO: a instrução manda pro código digitado — a
     assert.ok(entrada.length <= sempre.length * 1.1,
       `${lang}: a pré-condição do iPhone instalado tem ${entrada.length} caracteres contra ${sempre.length} — empurra o botão principal pra fora da tela`);
   }
+});
+
+// ── T4 (textos, 2026-09-26): o QR do pareamento VENCIDO ──────────────────────
+// Ao vencer, só o desenho saía: o "Copiar link" seguia ativo e copiava um link
+// que já não entrava em lugar nenhum, e o aviso dizia "gere outro" sem dizer
+// onde. E o contador contava TIQUES: numa aba que volta do segundo plano (o
+// navegador estrangula o setInterval), ele mostrava "Vale por mais 3:40" pra um
+// código morto. Roda o código DE VERDADE, com relógio e intervalo de mentira.
+function pareamentoDeMentira() {
+  let agora = 1_000_000;
+  let proxId = 0, limpezasDoQr = 0;
+  const intervalos = new Map();
+  const copiados = [], toasts = [];
+  const { registro, document } = domDeMentira({
+    pairShowClose: { focus() {} }, pairCode: {}, pairExpiry: {}, pairCodeReveal: {},
+    pairShowCodeBtn: {}, pairCodeExpiry: {}, pairCopyLinkBtn: {},
+  });
+  const deps = {
+    document,
+    Date: { now: () => agora },
+    setInterval: (fn) => { const id = ++proxId; intervalos.set(id, fn); return id; },
+    clearInterval: (id) => { intervalos.delete(id); },
+    pairTickers: new Map(),
+    pairQrVenceEm: 0,
+    pareamentosEmitidos: new Set(),
+    openModal() {}, closeModal() {},
+    API: { criarPareamento: async () => ({ success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
+    showToast: (m, tipo) => toasts.push([m, tipo]),
+    msgDoServidor: (r, f) => f,
+    t: (k) => k,
+    limparQrPareamento: () => { limpezasDoQr++; },
+    desenharQrPareamento() {},
+    location: { origin: 'https://app.test' },
+    navigator: { clipboard: { writeText: async (u) => { copiados.push(u); } } },
+    TOAST_COPIAVEL_MS: 30000,
+    contaAgora: () => null,   // o pareamento leva a conta de quem o cria (K8)
+  };
+  const api = montar(
+    ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento'],
+    deps, ['abrirPareamento', 'copiarLinkPareamento']);
+  return {
+    ...api, registro, copiados, toasts,
+    limpezasDoQr: () => limpezasDoQr,
+    andar: (ms) => { agora += ms; },
+    tique: () => { for (const fn of [...intervalos.values()]) fn(); },
+    intervalosVivos: () => intervalos.size,
+  };
+}
+
+test('QR vencido: o "Copiar link" apaga e não entrega link morto — nem na aba que volta do segundo plano', async () => {
+  // Pelo contador: passam os 5 minutos e o tique vem.
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  const btn = p.registro.pairCopyLinkBtn;
+  assert.equal(btn.disabled, false, 'CONTROLE: com o QR valendo, o "Copiar link" tem que estar ativo');
+  await p.copiarLinkPareamento();
+  assert.deepEqual(p.copiados, ['https://app.test/#pair=SEGREDODOQR'], 'CONTROLE: com o QR valendo, copiar entrega o link');
+  const limpezasAntes = p.limpezasDoQr();
+  p.andar(300_000);
+  p.tique();
+  assert.equal(p.registro.pairExpiry.textContent, 'pair.expired');
+  assert.equal(btn.disabled, true, 'o QR venceu e o "Copiar link" seguiu ativo');
+  assert.equal(p.limpezasDoQr(), limpezasAntes + 1, 'o QR vencido seguiu desenhado');
+  assert.equal(p.intervalosVivos(), 0, 'o contador seguiu rodando depois de vencer');
+  await p.copiarLinkPareamento();
+  assert.equal(p.copiados.length, 1, 'o "Copiar link" entregou um link vencido');
+
+  // Aba em segundo plano: o relógio passa e o tique NÃO vem.
+  const q = pareamentoDeMentira();
+  await q.abrirPareamento();
+  q.andar(301_000);
+  await q.copiarLinkPareamento();
+  assert.deepEqual(q.copiados, [], 'a aba voltou do segundo plano e o "Copiar link" entregou um link vencido');
+  assert.deepEqual(q.toasts, [['pair.expired', 'error']], 'a recusa não disse o caminho de um código novo');
+  assert.equal(q.registro.pairCopyLinkBtn.disabled, true, 'recusou e deixou o botão ativo');
+  q.tique();
+  assert.equal(q.registro.pairExpiry.textContent, 'pair.expired',
+    'o contador contou tiques em vez de ler o relógio ("Vale por mais…" pra um código morto)');
+
+  // O botão apagado tem cara de apagado (M3), e o aviso diz o caminho com o
+  // nome que a tela usa, nas 4 línguas.
+  assert.match(CSS_SEM, /#pairCopyLinkBtn:disabled\s*\{[^}]*opacity:\s*0?\.4/, 'o "Copiar link" apagado segue com cara de vivo');
+  const D = dicionario();
+  for (const lang of Object.keys(D)) {
+    assert.ok(D[lang]['pair.expired'].includes(D[lang]['pair.createBtn']),
+      `${lang}: o aviso de vencido não diz o caminho com o nome da tela "${D[lang]['pair.createBtn']}"`);
+  }
+});
+
+// ── T14 (textos, 2026-09-26): o foco no autor com UM pedido dele ─────────────
+// O nome acessível da barra dizia "Mostrando primeiro os 1 pedidos de fulano" —
+// o plural com n = 1, que é justamente o caso do fim de toda série.
+test('foco no autor: com UM pedido dele na fila, o leitor de tela ouve o singular, não "os 1 pedidos"', () => {
+  const { registro, document } = domDeMentira({ focoAutorBar: {}, focoAutorTexto: {}, focoAutorContagem: {} });
+  const AppState = { autorEmFoco: 7, queue: [{ creatorId: 7, createdBy: 'ana' }, { creatorId: 9 }] };
+  const { renderFocoAutor } = montar(['renderFocoAutor'],
+    { document, AppState, t: (k, v) => `${k}|${v ? v.n : ''}|${v ? v.autor : ''}` }, ['renderFocoAutor']);
+  renderFocoAutor();
+  assert.equal(registro.focoAutorBar.getAttribute('aria-label'), 'card.focoAutor.ariaUm|1|ana',
+    'com um só pedido do autor, o nome acessível usou a forma plural');
+  // CONTROLE: com mais de um, a forma plural de sempre.
+  AppState.queue = [{ creatorId: 7, createdBy: 'ana' }, { creatorId: 7, createdBy: 'ana' }, { creatorId: 7 }];
+  renderFocoAutor();
+  assert.equal(registro.focoAutorBar.getAttribute('aria-label'), 'card.focoAutor.aria|3|ana');
+  // E a frase do singular diz o autor e não diz número, nas 4 línguas.
+  const D = dicionario();
+  for (const lang of Object.keys(D)) {
+    const um = D[lang]['card.focoAutor.ariaUm'];
+    assert.ok(um && um.includes('{autor}') && !um.includes('{n}'), `${lang}: o singular do foco no autor ${um ? 'repete o número' : 'não existe'}`);
+  }
+});
+
+// ── T15 (textos, 2026-09-26): nada de "pedido(s)" ────────────────────────────
+// Duas frases escreviam o plural com parênteses ("1 pedido(s) da região não
+// aparecem", "Há 1 registro(s) não baixado(s)"). O projeto faz plural por CHAVE
+// (sem ICU), escolhida por `=== 1`. Roda o código DE VERDADE.
+test('plural por chave: o "de N na região" e o aviso de desligar o modo dev escolhem o singular com 1', () => {
+  const { registro, document } = domDeMentira({ pendingTotalHint: {} });
+  const AppState = { authenticated: true, serverTotal: 10, serverBlocked: 1, blockedPartial: false };
+  const { updatePendingTotalHint } = montar(['updatePendingTotalHint'],
+    { document, AppState, t: (k, v) => `${k}|${JSON.stringify(v)}` }, ['updatePendingTotalHint']);
+  updatePendingTotalHint();
+  assert.equal(registro.pendingTotalHint.title, 'stats.pending.ofRegion.titleUm|{"blocked":1}', 'um pedido bloqueado usou a forma plural');
+  AppState.serverBlocked = 3;
+  updatePendingTotalHint();
+  assert.equal(registro.pendingTotalHint.title, 'stats.pending.ofRegion.title|{"blocked":3}', 'CONTROLE: três usam o plural');
+
+  // O ouvinte do interruptor do modo dev, recortado do app.js: o 1º toque com
+  // captura não baixada AVISA (e para ali, sem apagar nada).
+  const ini = APP_SEM.indexOf("$('prefDevModeActive').addEventListener('change', (e) =>");
+  assert.ok(ini > 0, 'sumiu o ouvinte do interruptor do modo dev');
+  const arrow = APP_SEM.indexOf('(e) =>', ini);
+  const src = APP_SEM.slice(arrow, fechar(APP_SEM, arrow));
+  const aviso = (naoBaixados) => {
+    const toasts = [];
+    const ouvinte = new Function('AppState', 'dlogNaoBaixados', 'desligarDevConfirmadoAte', 'Date', 'showToast', 't', `return ${src};`)(
+      { devMode: { unlocked: true, active: true } }, () => naoBaixados, 0, { now: () => 1000 },
+      (m) => toasts.push(m), (k, v) => `${k}|${v.n}`);
+    const e = { target: { checked: false } };
+    ouvinte(e);
+    assert.equal(e.target.checked, true, 'CONTROLE: o 1º toque com captura não baixada devolve o interruptor');
+    return toasts;
+  };
+  assert.deepEqual(aviso(1), ['toast.devPerdeCapturaUm|1'], 'uma captura não baixada usou a forma plural');
+  assert.deepEqual(aviso(4), ['toast.devPerdeCaptura|4'], 'CONTROLE: quatro usam o plural');
 });

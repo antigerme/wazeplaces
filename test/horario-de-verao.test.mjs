@@ -45,3 +45,38 @@ test('a idade dos baldes do Histórico é em dias de calendário, a qualquer hor
   const stats = fatiar('getHistoryStats');
   assert.match(stats, /const ageDays = diasEntreChaves\(k, tk\);/, 'a idade voltou a sair de milissegundo local');
 });
+
+// O aviso de sessão vencendo contava dias em blocos de 24 h (`floor`): às 20h
+// com 20 h de prazo ele dizia "vence HOJE" pra uma sessão que vence amanhã à
+// tarde (auditoria de textos, 2026-09-26). Pela data, cada frase é verdade. O
+// relógio é o de Paris, na véspera do fim do horário de verão (o 25/10 tem 25 h).
+test('aviso de sessão: conta DATAS — às 20h com 20 h de prazo é "amanhã", não "hoje"', () => {
+  const AGORA = new Date(2026, 9, 24, 20, 0, 0).getTime();
+  class DataFixa extends Date {
+    constructor(...a) { super(...(a.length ? a : [AGORA])); }
+    static now() { return AGORA; }
+  }
+  const classes = new Set(['hidden']);
+  const el = { textContent: '', classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } };
+  const AppState = { authenticated: true, sessaoExpiraEm: null };
+  const atualizar = new Function('Date', 'document', 'AppState', 'AVISO_SESSAO_DIAS', 't',
+    [fatiar('diaDeHoje'), fatiar('diaLocalDe'), fatiar('atualizarAvisoDeSessao')].join('\n') + '\nreturn atualizarAvisoDeSessao;')(
+    DataFixa, { getElementById: (id) => (id === 'avisoSessao' ? el : null) }, AppState, 5,
+    (k, v) => (v ? `${k}:${v.n}` : k));
+  const aviso = (prazoMs) => {
+    AppState.sessaoExpiraEm = Math.floor(prazoMs / 1000);
+    atualizar();
+    return classes.has('hidden') ? null : el.textContent;
+  };
+  const H = 3600000;
+  const local = (dia, h, m = 0) => new Date(2026, 9, dia, h, m).getTime();
+  assert.equal(aviso(AGORA + 3 * H), 'sessao.vence.hoje', 'CONTROLE: às 23h de hoje é "hoje"');
+  assert.equal(aviso(AGORA + 20 * H), 'sessao.vence.amanha', 'às 20h com 20 h de prazo (vence amanhã à tarde) dizia "hoje"');
+  assert.equal(aviso(local(25, 0)), 'sessao.vence.amanha', 'meia-noite em ponto já é amanhã');
+  assert.equal(aviso(AGORA + 33.6 * H), 'sessao.vence.diasPlural:2', '1,4 dia de prazo vence DEPOIS de amanhã, de madrugada');
+  assert.equal(aviso(local(29, 12)), 'sessao.vence.diasPlural:5', 'o quinto dia ainda avisa');
+  assert.equal(aviso(local(30, 0, 30)), null, 'o sexto dia está fora da janela de 5 — mesmo com 5 dias e 5 h de prazo');
+  assert.equal(aviso(AGORA - H), null, 'vencido não avisa (quem avisa é o 401)');
+  AppState.authenticated = false;
+  assert.equal(aviso(AGORA + 3 * H), null, 'deslogado não avisa');
+});

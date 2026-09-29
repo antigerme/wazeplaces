@@ -24,7 +24,6 @@
 //
 //   npm run test:presenca
 
-import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -36,6 +35,7 @@ import * as g from '../server/wme-grpc.mjs';
 import { filtrarOnlineDaApp, filtrarConversasDaApp } from '../server/core.mjs';
 import { marcarPosicao } from '../server/marca-app.mjs';
 import { carregarPlaywright, abrirNavegador, motorPedido, resumoDosPulos, ruidoDoMotor } from './navegador.mjs';
+import { subirServidorLocal } from './servidor-local.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8134);
@@ -169,13 +169,10 @@ function responderApi(eu, rota, c) {
 
 // ── o servidor do app (os estáticos e a CSP de verdade) ─────────────────────
 const dir = await mkdtemp(join(tmpdir(), 'wp-presenca-'));
-const srv = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
-  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1', SESSION_DIR: dir, ENCRYPTION_KEY: CHAVE },
-  stdio: 'ignore',
-});
-for (let i = 0; i < 100; i++) {
-  try { await fetch(`http://127.0.0.1:${PORTA}/`); break; } catch { await dormir(100); }
-}
+// Sobe por `tools/servidor-local.mjs`: porta LIVRE antes, e pronto é o próprio
+// processo dizer que a ocupou (senão o smoke mediria o servidor de outro).
+const { servidor: srv } = await subirServidorLocal({ porta: PORTA, variavel: 'SMOKE_PORT', stderr: 'ignore',
+  env: { SESSION_DIR: dir, ENCRYPTION_KEY: CHAVE } });
 
 const pw = await carregarPlaywright();
 const MOTOR = motorPedido();

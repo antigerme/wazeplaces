@@ -329,6 +329,9 @@ function montarComApp() {
   const g = montar({ largura: 393 });
   const agiu = [];
   g.ctx.AppState = { currentPlace: null };
+  // A trava (sem sessão, janela do Desfazer) é testada em test/costura-sessao.
+  g.ctx.acoesTravadas = () => false;
+  g.ctx.showCurrentPlace = () => {};
   for (const [h, tipo] of [['handleReject', 'reject'], ['handleMarkAsRead', 'read'], ['handleSkip', 'skip']]) {
     g.ctx[h] = () => agiu.push([tipo, g.ctx.AppState.currentPlace]);
   }

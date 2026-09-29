@@ -108,6 +108,11 @@ const Presenca = {
     historico: new Map(),   // pessoa -> { msgs, maisAntigas, carregada, erro, carregando }
     aberta: null,           // id da pessoa da conversa aberta
     anexo: null,
+    // O texto digitado e não mandado é DA CONVERSA, como o anexo: `rascunhoDe`
+    // é a pessoa dona do que está no campo, e as outras conversas guardam o
+    // delas aqui (só em memória). Ver `presencaTrocarRascunho`.
+    rascunhos: new Map(),
+    rascunhoDe: null,
     ultimaPosicao: null,    // [lat, lon] do último card na tela — o "daqui"
     lidaEnviadaAte: new Map(),
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
@@ -504,9 +509,12 @@ function presencaEsquecer() {
     presencaDesligar();
     Presenca.ultimaPosicao = null;
     // O que ficou digitado e não saiu também: o campo não é apagado quando o
-    // envio não pode sair (ver o `submit`), e a conta seguinte o acharia lá.
+    // envio não pode sair (ver o `submit`), e a conta seguinte o acharia lá. E
+    // os rascunhos das outras conversas, pelo mesmo motivo.
     const campo = document.getElementById('conversaInput');
     if (campo) campo.value = '';
+    Presenca.rascunhos.clear();
+    Presenca.rascunhoDe = null;
     safeLS.remove(CHAT_KEY);
 }
 
@@ -1067,6 +1075,8 @@ function presencaAbrirConversa(id) {
     // (auditoria de 2026-09-26).
     if (Presenca.aberta !== id) Presenca.anexo = null;
     Presenca.aberta = id;
+    // E o TEXTO no campo também é da conversa (ver a função).
+    presencaTrocarRascunho(id);
     chatConhecer(id);
     // Abrir é ler: o servidor marca como lida no mesmo pedido do histórico.
     const c = Presenca.conversas.find((x) => x.id === id);
@@ -1147,6 +1157,25 @@ function presencaCarregarAntigas(id) {
 
 function presencaFecharConversa() {
     closeModal('conversaModal');   // a limpeza do modal solta o `aberta`
+}
+
+// O texto no campo é da conversa `rascunhoDe`. Ele ATRAVESSAVA pra conversa com
+// outra pessoa: digitado pra X, sem mandar, fechar e abrir a de Y o mostrava
+// no campo de Y — e o "Enviar" o mandava pra Y (reproduzido também depois de
+// uma queda de sessão, que preserva o que foi digitado). Trocar de conversa
+// guarda o texto de uma e põe o da outra (vazio, se ela não tiver). Com a
+// MESMA conversa, nada muda: é o que a queda preserva, pro mesmo destinatário
+// (auditoria da costura, 2026-09-26, K10).
+function presencaTrocarRascunho(id) {
+    const campo = document.getElementById('conversaInput');
+    if (!campo) return;
+    if (Presenca.rascunhoDe) {
+        if (String(campo.value || '').trim()) Presenca.rascunhos.set(Presenca.rascunhoDe, campo.value);
+        else Presenca.rascunhos.delete(Presenca.rascunhoDe);
+    }
+    campo.value = Presenca.rascunhos.get(id) || '';
+    Presenca.rascunhos.delete(id);
+    Presenca.rascunhoDe = id;
 }
 
 // Chamado por LIMPEZA_AO_FECHAR['conversaModal'] — ou seja, por QUALQUER

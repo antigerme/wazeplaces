@@ -8,6 +8,106 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.09.29-01
+
+Sexta rodada da auditoria. Cinco áreas foram revisadas de novo depois da v2026.09.26-01:
+- a costura entre os consertos paralelos da rodada anterior (sessão e conta);
+- o modo dev e o diagnóstico;
+- a foto e o mapa ampliados;
+- os textos, a Ajuda e os manuais;
+- os filtros e a fila.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**Sessão e conta**
+- **Se a sessão cair no meio da triagem, nada do que você decidiu sai com a sessão de outra conta.** O card fica travado até a sessão voltar. O que estava na janela do Desfazer (inclusive excluir ou aprovar foto e renomear o local) é cancelado e volta na tela.
+- **Uma decisão que não chegou ao Waze porque a sessão caiu não conta mais no placar.**
+- **Entrar com outra conta no mesmo aparelho troca a fila e o cabeçalho na hora**, sem o aviso contraditório "sua fila continua aqui". O que você faz logo depois de entrar não some mais quando o perfil chega.
+- **"Sair" enquanto a extensão renova a sessão não é mais desfeito.**
+- **A fila de envio não manda mais o mesmo pedido duas vezes** enquanto a sessão é conferida.
+- **A fila guardada do "Disponível offline" só reabre para a conta que a guardou.**
+- **Depois de trocar de conta, a fila que termina com pedidos pulados não diz mais "Tudo limpo!".**
+- **Desligar "Ver quem está no app" sem rede passa a valer**: o desligar vai pro WME quando o perfil chegar.
+- **O texto digitado numa conversa não aparece mais na conversa com outra pessoa.**
+- **Depois de uma queda de sessão com os Filtros ou o mapa ampliado abertos, o foco do teclado não se perde.**
+
+**Fila e filtros**
+- **"Marcar todos" em andamento trava o card**: ✕ ↑ ✓, gesto, teclado e "Rejeitar os N" esperam o lote terminar, e o aviso diz o que se espera. Atualizar no meio não traz de volta o que o lote já marcou.
+- **Pedido cuja decisão o Waze recusa volta como o próximo card**, em vez de sumir da fila.
+- **"Mais antigos" e "Perto de…" ordenam a fila inteira**, também acima de 500 pedidos. Com fila grande, abrir nessas ordens demora um pouco mais, porque o app lê todas as páginas antes do primeiro card. No total da triagem as leituras são as mesmas.
+- **Aprovar a foto do último pedido termina no "Tudo limpo!" com festa.** "Rejeitar os N" que esvazia a fila também mostra o painel de quem terminou.
+- **A recusa automática manda cada pedido pro servidor em que ele está**, mesmo se você trocar de região no meio.
+- **"Minha área"**: sem o perfil, a fila espera por ele em vez de mostrar o país inteiro. Num perfil sem área de edição, o filtro desliga e o app explica por quê.
+- **Filtros**:
+  - a categoria salva segue selecionada;
+  - o "Aplicar" espera os países da região nova;
+  - a lista de estados que não carrega não apaga o estado salvo;
+  - trocar de país não pré-seleciona estado de outro país;
+  - a dica "só os países que você pode editar" some quando a lista é a inteira.
+- **"Perto de mim" pega a posição do momento** a cada escolha.
+- **Sair e entrar sem fechar o app mantém os filtros completos.**
+- **O "Restam" fica certo** depois de atualizar no meio da recusa automática, do "Marcar todos" ou de uma aprovação.
+
+**Foto e mapa ampliados**
+- **A barra de escala do mapa mostrava o dobro da distância.** Agora mede o que diz, e nos zooms mais abertos passa de 50 km.
+- **Aprovar, excluir e renomear pelo lightbox não somem mais num falso "sessão expirada".** O app confere a sessão e tenta de novo uma vez; se não der, desfaz na tela e avisa.
+- **"Aprovar" e a lixeira só aparecem com a foto carregada.**
+- **Aprovar uma foto e atualizar a fila não traz mais o pedido de volta.**
+- **Renomeando, tocar fora, arrastar a foto pra baixo, Esc ou ↓ só saem da edição**: o nome digitado não se perde e a foto não fecha. Com 2 ou mais fotos, a foto não passa mais por baixo do campo do nome.
+- **O ✨ volta pra foto certa quando uma aprovação é desfeita**, e a pílula do nome fica travada, e parece travada, durante o Desfazer.
+- **Mapa ampliado**:
+  - ↓ anda pro sul, e o Esc fecha;
+  - a roda do mouse e o trackpad dão zoom na medida, e a rolagem lateral não mexe no zoom;
+  - o duplo toque aproxima mesmo com o dedo tremendo;
+  - o ponto fora de alcance é avisado, como no card;
+  - o tile que falha não é pedido de novo sem parar.
+- **Fechar a foto ou o mapa devolve o foco ao card**, e o ✨ e a miniatura da proposta têm nome pro leitor de tela.
+
+**Textos e Ajuda**
+- **A Ajuda diz que exportar cookies e as extensões recomendadas são "no computador".** Tablets Android não oferecem mais a extensão como forma de entrar.
+- **QR de pareamento vencido desativa o "Copiar link"**, e o aviso diz como gerar outro. O contador não mostra mais tempo sobrando quando você volta pra aba. O exemplo do código virou "ABC-234": o código nunca tem o 1.
+- **"Sua sessão vence amanhã" quando é amanhã** (antes dizia "hoje"). O aviso conta os dias pelo calendário.
+- **O aviso de envio não põe mais a culpa na rede**: nem sempre foi ela.
+- **Conquistas**: o Andarilho conta os estados escolhidos no filtro, e o Primeiro resumo vale compartilhar ou baixar.
+- **Foco no autor com um pedido só usa o singular**, e sumiu o "pedido(s)".
+- **Termos unificados** em espanhol e francês, e "pedidos" no lugar de "PURs" nos 4 idiomas.
+- **O texto que aparece antes de o app carregar diz o mesmo que o app carregado.**
+
+**Modo Desenvolvedor**
+- **O relatório sai em cerca de 10 s mesmo com a rede pendurada**, e diz o que não chegou.
+- **O botão do modo dev não fica mais preso depois de um toque com dois dedos**, e sai de cima dos botões do "Tudo limpo!", da falha de carga e do convite de instalar.
+- **Menos alarme falso**: o aviso por cima dos botões não conta mais como toque interceptado, e o tile que falhou acusa uma vez, com a hora. A captura diz qual frase a tela mostrava.
+- **Ferramentas de leitura do relatório**:
+  - a duração da sessão aparece legível;
+  - o offline desligado é dito;
+  - a tela reconstruída sai com a fonte, o tema e o cabeçalho do aparelho;
+  - o diag-api não chama mais o perfil.
+
+### Privacidade
+- **Modo Desenvolvedor: o link do "Conectar outro aparelho" nunca mais vai pro relatório** nem fica guardado no aparelho.
+- **Modo Desenvolvedor: desligá-lo, ou sair, numa aba vale pras outras abertas.** O que sobrar é apagado ao abrir o app com o modo dev desligado.
+- **A Ajuda é mais exata sobre o que fica onde**:
+  - o que o aparelho guarda (o id da conta, o nível e o prazo da sessão);
+  - que as fotos e o mapa passam pelo cache do próprio navegador;
+  - que ninguém abre os cookies com o que fica guardado no servidor.
+
+  Os prazos citados (21 dias, 5 minutos) vêm do próprio servidor.
+
+### Mudado
+- **O login e o pareamento já dizem de quem é a conta**, e a extensão repassa isso. Vale depois de a extensão ser publicada de novo.
+- **As ferramentas de teste sobem o app por um caminho só**, que não mede o servidor de outro processo na mesma porta.
+- Quatro frases do CHANGELOG da v2026.09.26-01 foram corrigidas pra dizer o que o código faz.
+
+### Ficou pra decisão
+- **Telas do lightbox**: o ✨ por cima do autor e da data na pílula, o aviso do Desfazer por cima das miniaturas e a dica de zoom cortada. Os mockups estão prontos.
+- **O aviso "fora deste mapa" no mapa ampliado** fica no meio da tela, como no card, e cobre o marcador do local ao abrir.
+- **No card do iPhone SE com diff**, onde o mapa é baixo, a escala encavala no aviso "fora deste mapa".
+- **Textos**: dizer na Ajuda que "Ver quem está no app" volta a ligar sozinho depois de 9 dias, e completar a lista do que o app faz no Waze em seu nome.
+
+---
+
 ## v2026.09.26-01
 
 Quarta e quinta rodadas da auditoria. A quarta partiu da verificação em produção da v2026.09.25-05 (60 ✓ · 0 ✗). A quinta revisou a fundo seis áreas:
@@ -40,9 +140,9 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
 - **O código de pareamento colado entra inteiro**, mesmo com espaço, quebra de linha, outro traço ou o rótulo "Código:" junto. O link mostrado pra copiar à mão não some mais enquanto você o seleciona.
 - **iPhone com o app na tela de início**: a entrada e a Ajuda mandam pro código digitado. Apontar a câmera pro QR abre o Safari, fora do app.
 - **Os avisos de sessão dizem só o que o app sabe.** Sem resposta do servidor, o aviso é "não deu pra confirmar a sessão agora", e a sessão que caiu não é mais chamada de "vencida por inatividade".
-- **Se o Waze estiver fora do ar na hora de entrar**, a mensagem aparece no seu idioma e diz que é passageiro. Antes vinha em português.
+- **Se o Waze estiver fora do ar na hora de entrar**, a mensagem aparece no seu idioma. Antes vinha em português.
 - **Quem entra colando os cookies no formato de cabeçalho** (copiado do DevTools) não é mais desconectado em poucos dias.
-- **"Minha área" funciona pra quem tem área de gerência em várias partes ou com muitos detalhes.** Antes o filtro vinha vazio ou o perfil não carregava.
+- **"Minha área" funciona pra quem tem área de edição em várias partes ou com muitos detalhes.** Antes o filtro vinha vazio ou o perfil não carregava.
 - **Um nome por coisa**: "nível" em todo o "Acesso restrito", e "Instalar o aplicativo" nos dois lugares onde se instala o app.
 - **O "Entendi" do "Acesso restrito" tem cara de botão no tema escuro.**
 
@@ -53,7 +153,7 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
 - **Aprovar uma foto e seguir em frente não decide mais o pedido seguinte.** Se a aprovação chegava enquanto o card saía, o ✓, a seta ou o arraste caíam no pedido que entrava. O mesmo vale pro fim do "Marcar todos".
 - **Teclado**:
   - com a lista de "Mudanças propostas" ou o texto do reporte em foco, as setas rolam o texto;
-  - a tecla z também desfaz excluir, aprovar e renomear foto;
+  - a tecla z também desfaz a exclusão e a aprovação de uma foto e o nome novo do local;
   - o Tab chega ao botão Desfazer por cima da foto.
 - **Desfazer a exclusão de uma foto com o lightbox reaberto** devolve o ✨ à foto certa, e ela volta a poder ser aprovada.
 - **Mini-mapa**: um ponto muito longe não tira mais do mapa os que cabem, e o aviso diz qual ficou fora e a que distância. Girar o celular refaz o mapa no tamanho novo.
@@ -125,7 +225,7 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
   - a API pelo mesmo caminho (`/api/./sessao` é a rota `sessao` nos dois);
   - endereço desconhecido dá "não encontrado", e não a página do app;
   - os mesmos tipos de arquivo e o mesmo cache.
-  - porta ocupada derruba o processo com código de erro (saía com 0, que um supervisor lê como sucesso).
+- **Na VM, porta ocupada derruba o processo com código de erro.** Saía com 0, que um supervisor lê como sucesso.
 - **Sem mudança na tela**: correções de segurança e de cota no servidor. Toda rota que escreve confere o id, e uma resposta truncada do Waze não é lida pela metade.
 - **A extensão de Chrome ganhou o aviso de "acesso restrito"** e precisa ser publicada de novo pra ele valer. Até lá, o app novo com a extensão antiga se comporta como antes.
 - Comentários do código com o portão de entrada certo (L2+AM) e o adaptador do Cloudflare de hoje. `docs/auditoria-2026-09.md` guarda o estado da auditoria, pra ela continuar depois de uma parada.

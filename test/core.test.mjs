@@ -1291,9 +1291,10 @@ test('pareamento: o registro padrão é o forte, o curto só sob demanda', async
   assert.equal(sobDemanda.code.length, 6, 'o digitável só quando pedido');
   assert.equal(sobDemanda.curto, true);
 
-  // Os dois resgatam — o curto continua servindo a quem não tem câmera.
-  assert.equal(await sessions.claimPairing(padrao.code), 'cookies-x');
-  assert.equal(await sessions.claimPairing(sobDemanda.code), 'cookies-x');
+  // Os dois resgatam — o curto continua servindo a quem não tem câmera. (O
+  // resgate devolve também a conta, quando o código a levou: test/costura-sessao, K8.)
+  assert.deepEqual(await sessions.claimPairing(padrao.code), { cookies: 'cookies-x', conta: null });
+  assert.deepEqual(await sessions.claimPairing(sobDemanda.code), { cookies: 'cookies-x', conta: null });
 });
 
 // Sessão que não abre é APAGADA, não deixada vencendo.

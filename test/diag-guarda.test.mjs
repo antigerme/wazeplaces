@@ -197,10 +197,11 @@ test('as gravações andam em FILA, e o retrato é tirado depois do await', () =
 
 test('o que foi guardado SAI ao baixar, ao desligar o modo dev e no Sair', () => {
   const baixar = fatiar('baixarDiagnostico');
-  const iMarca = baixar.indexOf('dlogMarcarBaixados();');
+  const iMarca = baixar.indexOf('dlogMarcarBaixados(corpo.entregue.momentos);');
   const iApaga = baixar.indexOf('diagEsquecerGuardado();');
   assert.ok(iMarca > 0 && iApaga > iMarca, 'baixar tem que apagar o guardado — já foi entregue');
-  assert.match(baixar, /diagBaixadoEm = Date\.now\(\);/, 'sem o carimbo, o que já foi entregue volta a ser guardado');
+  assert.match(baixar, /diagBaixadoEm = corpo\.entregue\.em;/,
+    'sem o carimbo do RETRATO, o que já foi entregue volta a ser guardado — ou o que não foi se perde');
   const apagar = fatiar('dlogApagar');
   assert.match(apagar, /diagAberturasAnteriores = \[\];/, 'desligar o dev deixou as guardadas na memória');
   assert.match(apagar, /diagEsquecerGuardado\(\);/, 'desligar o dev deixou as guardadas no aparelho');
@@ -209,8 +210,72 @@ test('o que foi guardado SAI ao baixar, ao desligar o modo dev e no Sair', () =>
 
 test('o número do botão e o aviso do desligar contam as guardadas; baixar as marca', () => {
   const marca = fatiar('dlogMarcarBaixados');
-  assert.match(marca, /for \(const m of diagMomentosAnteriores\(\)\) dlogJaBaixados\.add\(m\);/,
-    'baixar não marca as guardadas — o aviso do desligar diria "não baixadas" do que já foi entregue');
+  assert.match(marca, /: \[\.\.\.dlogMomentos, \.\.\.diagMomentosAnteriores\(\)\];/,
+    'sem a lista do retrato, marcar tem que levar as guardadas também');
+  assert.match(fatiar('diagCorpo'), /momentos: \[\.\.\.momentosNoArquivo, \.\.\.diagMomentosAnteriores\(\)\]/,
+    'o relatório não entrega as guardadas — o aviso do desligar diria "não baixadas" do que já foi entregue');
+});
+
+// ── D11 (auditoria de 2026-09-26): o que chega ENQUANTO o arquivo é montado ──
+// O carimbo do "baixado" era posto no FIM do download, depois de serializar e
+// empacotar: o que entrava no anel nesse intervalo não ia no arquivo e saía da
+// cópia guardada (o registro guarda só o que veio DEPOIS do carimbo), e a
+// captura feita ali era marcada como baixada sem ter ido. Aqui o
+// `baixarDiagnostico` de verdade roda com o empacotador fazendo exatamente isso:
+// uma anotação no diário e uma captura NO MEIO do zip.
+test('D11: o carimbo do "baixado" é o do RETRATO — o que chega durante o zip fica pra cópia guardada', async () => {
+  const R = 1_800_000_000_000;
+  const ctx = {
+    dfatoAnel: [{ t: R - 5, k: 'antes' }], dlogAnel: [],
+    dlogMomentos: [], dlogJaBaixados: new WeakSet(), diagBaixadoEm: 0,
+    diagAberturasAnteriores: [], API: { chamadas: [] }, diagErros: [],
+  };
+  const noArquivo = { t: 'm1', motivo: 'manual' };
+  ctx.dlogMomentos.push(noArquivo);
+  let agora = R;
+  const apagados = [];
+  const deps = {
+    document: { getElementById: () => null, createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
+    URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
+    Blob: class { constructor(p) { this.p = p; } },
+    setTimeout: () => 0, t: (k) => k, APP_VERSION: '2026092601', CompressionStream: function () {},
+    showToast: (msg, tipo) => { if (tipo === 'error') throw new Error('o download falhou: ' + msg); },
+    atualizarFabDev: () => {}, diagEsquecerGuardado: () => apagados.push(agora),
+    Date: class extends Date { static now() { return agora; } },
+    // O relatório: o retrato é tirado AGORA (R), com a captura que existe.
+    diagCorpo: async () => {
+      const corpo = { resumo: {} };
+      Object.defineProperty(corpo, 'entregue', { value: { em: agora, momentos: [...ctx.dlogMomentos] } });
+      return corpo;
+    },
+    // O empacotamento leva tempo — e o app segue vivo: uma anotação e uma captura.
+    zipar: async () => {
+      agora = R + 400;
+      ctx.dfatoAnel.push({ t: agora, k: 'durante.zip' });
+      ctx.dlogMomentos.push({ t: 'm2', motivo: 'manual' });
+      agora = R + 900;
+      return new Uint8Array(4);
+    },
+  };
+  const nomes = [...Object.keys(ctx), ...Object.keys(deps)];
+  const app = new Function(...nomes, `
+    ${fatiar('diagMomentosAnteriores')}
+    ${fatiar('dlogMarcarBaixados')}
+    ${fatiar('diagChamadaSemCorpo')}
+    ${fatiar('diagRegistroDaAbertura')}
+    ${fatiar('baixarDiagnostico')}
+    const DIAG_ABERTURA = { id: 'esta', inicio: 1 };
+    return { baixar: baixarDiagnostico, registro: diagRegistroDaAbertura, baixadoEm: () => diagBaixadoEm };
+  `)(...nomes.map((n) => (n in ctx ? ctx[n] : deps[n])));
+  await app.baixar();
+  assert.equal(apagados.length, 1, 'PRÉ-CONDIÇÃO: o download não chegou ao fim');
+  assert.equal(app.baixadoEm(), R, 'o carimbo do baixado foi posto no FIM do download, não no retrato');
+  assert.ok(ctx.dlogJaBaixados.has(noArquivo), 'a captura que FOI no arquivo não ficou marcada');
+  const guardado = app.registro('oculta');
+  assert.deepEqual(guardado.diario.map((e) => e.k), ['durante.zip'],
+    'o que o diário anotou durante o zip sumiu da cópia guardada (e não foi no arquivo)');
+  assert.deepEqual(guardado.momentos.map((m) => m.t), ['m2'],
+    'a captura feita durante o zip foi marcada como baixada sem ter ido no arquivo');
 });
 
 test('o relatório leva as aberturas anteriores, e o resumo acusa o que elas capturaram', () => {
@@ -265,7 +330,7 @@ function baseDoDiag({ abrir }) {
     deleteDatabase: () => { apagou++; const r = {}; setTimeout(() => r.onsuccess && r.onsuccess(), 0); return r; },
   };
   const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30,
-    DIAG_ABERTURA: { id: 'esta' }, dlogLigado: () => true, dfato: () => {},
+    DIAG_ABERTURA: { id: 'esta' }, dlogLigado: () => true, dfato: () => {}, modoDevDesligadoNoArmazenamento: () => false,
     diagRegistroDaAbertura: () => ({ id: 'esta', salvoEm: Date.now(), inicio: Date.now(), momentos: [] }),
     diagPodarAberturas: (l) => ({ manter: l, sair: [], cortadas: [] }) };
   const chaves = Object.keys(deps);
@@ -345,4 +410,122 @@ test('O10: uma gravação com a abertura PENDURADA não prende as seguintes (o t
   const segunda = b.app.diagGuardarAbertura('saida');
   assert.equal(await comTetoDe(1000, segunda), 'terminou', 'a gravação seguinte ficou presa atrás da abertura pendurada');
   assert.deepEqual(b.gravados, ['esta'], 'a gravação seguinte não gravou');
+});
+
+// ── D2 (auditoria de 2026-09-26): DUAS ABAS, e o que sobra sem o modo dev ─────
+// Desligar o modo dev ou dar "Sair" numa aba não chegava à outra: ela seguia com
+// o FAB e o modo dev na memória, e a captura seguinte RECRIAVA a base com o DOM
+// da tela. E a poda de 24 h só rodava com o modo dev ligado. O percurso com duas
+// páginas de verdade está na seção 9e do `tools/smoke-offline.mjs`.
+function abaComModoDev({ guardado, memoria = { unlocked: true, active: true } }) {
+  const apagou = [], fab = [];
+  const AppState = { devMode: { ...memoria } };
+  const localStorage = { getItem: (k) => (k === 'waze_places_devmode' ? guardado() : null) };
+  const deps = { AppState, localStorage, DEVMODE_KEY: 'waze_places_devmode',
+    HISTORY_KEY: 'h', CONQUISTAS_KEY: 'c', AUTORES_KEY: 'a',
+    dlogApagar: () => apagou.push(1), atualizarFabDev: () => fab.push(1), updateDevBadge() {}, renderDevModeSection() {},
+    diagAjustarRecursos() {}, enforceDevGatedFilters() {}, atualizarSeloDeConquista() {}, agendarRedesenhoDoHistorico() {} };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, ['devModeDoArmazenamento', 'modoDevDesligadoNoArmazenamento',
+    'aoMudarModoDevEmOutraAba', 'aoGravarEmOutraAba'].map(fatiar).join('\n')
+    + '\nreturn { aoGravarEmOutraAba, desligado: modoDevDesligadoNoArmazenamento };')(...chaves.map((k) => deps[k]));
+  return { app, AppState, apagou, fab };
+}
+
+test('D2: o modo dev desligado (ou o "Sair") noutra aba chega a esta — ela apaga o que o modo dev gravou', () => {
+  let guardado = JSON.stringify({ unlocked: true, active: true });
+  const aba = abaComModoDev({ guardado: () => guardado });
+  guardado = JSON.stringify({ unlocked: true, active: false });     // desligado na OUTRA aba
+  aba.app.aoGravarEmOutraAba({ key: 'waze_places_devmode' });
+  assert.equal(aba.AppState.devMode.active, false, 'esta aba seguiu com o modo dev ligado na memória');
+  assert.equal(aba.apagou.length, 1, 'esta aba não apagou o que o modo dev gravou (o DOM das capturas, a base)');
+  // O "Sair" da outra aba: ele desliga o modo dev e tira o token — o aviso do
+  // token (que chega primeiro) já lê o armazenamento como ele ficou.
+  guardado = JSON.stringify({ unlocked: true, active: true });
+  const sair = abaComModoDev({ guardado: () => guardado });
+  guardado = JSON.stringify({ unlocked: false, active: false });
+  sair.app.aoGravarEmOutraAba({ key: 'waze_session_token' });
+  assert.equal(sair.apagou.length, 1, 'o "Sair" da outra aba não chegou a esta');
+  // A outra aba LIMPANDO o armazenamento inteiro.
+  guardado = JSON.stringify({ unlocked: true, active: true });
+  const limpou = abaComModoDev({ guardado: () => guardado });
+  guardado = null;
+  limpou.app.aoGravarEmOutraAba({ key: null });
+  assert.equal(limpou.apagou.length, 1, 'a limpeza da outra aba não desligou o modo dev desta');
+});
+
+test('D2: a QUEDA da sessão noutra aba (o modo dev segue ligado) NÃO apaga a evidência', () => {
+  // A queda é o que o diagnóstico existe pra mostrar — e a própria aba que caiu
+  // o preserva (`derrubarSessao` não chama o `dlogApagar`).
+  const guardado = JSON.stringify({ unlocked: true, active: true });
+  const aba = abaComModoDev({ guardado: () => guardado });
+  aba.app.aoGravarEmOutraAba({ key: 'waze_session_token' });
+  assert.equal(aba.apagou.length, 0, 'a queda da sessão noutra aba apagou o diagnóstico desta');
+  assert.equal(aba.AppState.devMode.active, true);
+  // Chave alheia não mexe no modo dev; armazenamento ilegível não decide nada.
+  aba.app.aoGravarEmOutraAba({ key: 'waze_places_stats' });
+  assert.equal(aba.fab.length, 1, 'só o aviso do token devia ter reavaliado o botão');
+  const ilegivel = abaComModoDev({ guardado: () => { throw new Error('bloqueado'); } });
+  ilegivel.app.aoGravarEmOutraAba({ key: 'waze_places_devmode' });
+  assert.equal(ilegivel.apagou.length, 0, 'armazenamento ilegível desligou o modo dev');
+  assert.equal(ilegivel.app.desligado(), false, 'ilegível não pode contar como "desligado no armazenamento"');
+});
+
+test('D2: a gravação confere o modo dev no ARMAZENAMENTO — desligado lá, não abre a base', async () => {
+  // O armazenamento diz "desligado" (a outra aba desligou, e o aviso ainda não
+  // chegou a esta: a memória diz ligado).
+  const montar = (desligadoLa) => {
+    const conta = { aberturas: 0 };
+    const deps = { indexedDB: { open: () => { conta.aberturas++; return {}; }, deleteDatabase: () => ({}) },
+      DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30, DIAG_ABERTURA: { id: 'esta' },
+      dlogLigado: () => true, dfato: () => {}, modoDevDesligadoNoArmazenamento: () => desligadoLa,
+      diagRegistroDaAbertura: () => ({ id: 'esta', salvoEm: 1, inicio: 1, momentos: [] }),
+      diagPodarAberturas: (l) => ({ manter: l, sair: [], cortadas: [] }) };
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, `let diagGuardando = Promise.resolve(), diagEpoca = 0;
+      ${['diagDB', 'diagLerGuardado', 'diagAplicarPoda', 'diagGuardarAbertura'].map(fatiar).join('\n')}
+      return { diagGuardarAbertura };`)(...chaves.map((k) => deps[k]));
+    return { app, conta };
+  };
+  const la = montar(true);
+  assert.equal(await la.app.diagGuardarAbertura('captura'), false, 'gravou com o modo dev desligado no armazenamento');
+  assert.equal(la.conta.aberturas, 0, 'abriu (e criaria) a base com o modo dev desligado no armazenamento');
+  // CONTROLE: ligado lá também, a gravação vai à base (a abertura pendura aqui
+  // de propósito — o que se mede é ela ter sido PEDIDA).
+  const ok = montar(false);
+  ok.app.diagGuardarAbertura('captura');
+  for (let i = 0; i < 20 && !ok.conta.aberturas; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(ok.conta.aberturas, 1, 'CONTROLE: com o modo dev ligado a gravação não foi à base — a medida acima não distingue nada');
+});
+
+test('D2: com o modo dev DESLIGADO, a sobra no aparelho sai na abertura — sem criar a base', async () => {
+  const montar = ({ ligado = false, bases = [], semDatabases = false }) => {
+    const esquecido = [], fatos = [];
+    const indexedDB = semDatabases ? {} : { databases: async () => bases.map((name) => ({ name })) };
+    const deps = { indexedDB, DIAG_DB: 'waze_places_diag', dlogLigado: () => ligado,
+      dfato: (k) => fatos.push(k), diagEsquecerGuardado: async () => { esquecido.push(1); return true; } };
+    const chaves = Object.keys(deps);
+    const f = new Function(...chaves, fatiar('diagFaxinaSemModoDev') + '\nreturn diagFaxinaSemModoDev;')(...chaves.map((k) => deps[k]));
+    return { f, esquecido, fatos };
+  };
+  const sobra = montar({ bases: ['waze_places_diag', 'waze_places_offline'] });
+  assert.equal(await sobra.f(), true);
+  assert.equal(sobra.esquecido.length, 1, 'a sobra do diagnóstico ficou no aparelho com o modo dev desligado');
+  assert.deepEqual(sobra.fatos, ['diag.sobraApagada']);
+  const nada = montar({ bases: ['waze_places_offline'] });
+  await nada.f();
+  assert.equal(nada.esquecido.length, 0, 'sem a base, a faxina não tem o que fazer (e não pode criar nada)');
+  const ligado = montar({ ligado: true, bases: ['waze_places_diag'] });
+  await ligado.f();
+  assert.equal(ligado.esquecido.length, 0, 'com o modo dev LIGADO a faxina apagou o guardado — quem cuida ali é a poda de 24 h');
+  const cego = montar({ semDatabases: true });
+  await cego.f();
+  assert.equal(cego.esquecido.length, 1, 'sem `databases()` o apagar (que não cria nada) tem que acontecer às cegas');
+  assert.deepEqual(cego.fatos, [], 'às cegas não se sabe se havia sobra — o diário não pode afirmar');
+  // E a faxina NUNCA abre a base: nem `open` no corpo dela.
+  assert.doesNotMatch(fatiar('diagFaxinaSemModoDev'), /indexedDB\.open\(/, 'a faxina abre a base (e a criaria vazia)');
+  // A abertura do app chama a faxina depois de ler o modo dev.
+  const init = fatiar('initApp');
+  const iDev = init.indexOf('loadDevMode();'), iFax = init.indexOf('diagFaxinaSemModoDev();');
+  assert.ok(iDev > 0 && iFax > iDev, 'a faxina tem que rodar DEPOIS de o modo dev ser lido');
 });

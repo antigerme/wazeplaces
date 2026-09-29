@@ -44,15 +44,15 @@ function montar({ guardado = null, largura = 390, altura = 844 } = {}) {
     dlogCapturar: (motivo) => { capturas.push(motivo); return {}; }, atualizarFabDev() {}, posicionarFabDev() {},
   };
   const chaves = Object.keys(deps);
-  const api = new Function(...chaves, 'let devFabFixado = false;\n' + fatiar('ligarFabDev')
-    + '\nligarFabDev();\nreturn { fixado: () => devFabFixado };')(...chaves.map((k) => deps[k]));
+  const api = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null;\n' + fatiar('ligarFabDev')
+    + '\nligarFabDev();\nreturn { fixado: () => devFabFixado, dedo: () => devFabDedo };')(...chaves.map((k) => deps[k]));
   const disparar = (alvo, t, ev) => { for (const fn of [...(alvo[t] || [])]) fn({ preventDefault() {}, cancelable: true, ...ev }); };
   const ponteiro = (t, id, x, y, sobreOBotao = false) => {
     if (sobreOBotao) disparar(ouvintesBtn, t, { pointerId: id, clientX: x, clientY: y });
     if (t !== 'pointerdown') disparar(ouvintesJanela, t, { pointerId: id, clientX: x, clientY: y });
   };
   const passarOTempo = () => { const r = relogios; relogios = []; for (const fn of r) if (fn) fn(); };
-  return { api, fab, ponteiro, passarOTempo, capturas, sessao, clique: (detail) => disparar(ouvintesBtn, 'click', { detail }) };
+  return { api, fab, classes, ponteiro, passarOTempo, capturas, sessao, clique: (detail) => disparar(ouvintesBtn, 'click', { detail }) };
 }
 
 test('FAB: toque DEVAGAR (segura e solta sem andar) é toque — captura e NÃO fixa o botão', () => {
@@ -99,4 +99,32 @@ test('FAB: posição gravada fora da tela (outra orientação) volta DENTRO dela
   const lixo = montar({ guardado: 'abc|def' });
   assert.equal(lixo.fab.style.left, undefined, 'posição ilegível foi aplicada');
   assert.equal(lixo.api.fixado(), false);
+});
+
+// D7 (auditoria de 2026-09-26): DOIS dedos no botão, soltos antes de "pegar". O
+// segundo `pointerdown` sobrescrevia o relógio do primeiro sem cancelá-lo; os
+// dois dedos saíam, e o relógio ÓRFÃO "pegava" o botão sem dedo nenhum — ele
+// ficava em `fab-pego` pra sempre (e o `posicionarFabDev` parava de movê-lo).
+test('FAB: dois dedos soltos antes de pegar não deixam o botão "pego" sem dedo', () => {
+  const m = montar();
+  m.ponteiro('pointerdown', 1, 310, 710, true);
+  m.ponteiro('pointerdown', 2, 316, 716, true);   // o segundo dedo, antes do tempo de pegar
+  m.ponteiro('pointerup', 1, 310, 710, true);     // solta o primeiro…
+  m.ponteiro('pointerup', 2, 316, 716, true);     // …e o segundo
+  m.passarOTempo();                                // o relógio que sobrou, se sobrou, dispara aqui
+  assert.ok(!m.classes.has('fab-pego'), 'o relógio órfão pegou o botão sem dedo nenhum');
+  assert.equal(m.api.dedo(), null, 'soltos os dois, ainda há um dedo registrado no botão');
+  // CONTROLE: UM dedo segurado além do tempo ainda pega.
+  m.ponteiro('pointerdown', 3, 310, 710, true);
+  m.passarOTempo();
+  assert.ok(m.classes.has('fab-pego'), 'CONTROLE: segurar um dedo deixou de pegar');
+  m.ponteiro('pointerup', 3, 310, 710, true);
+  assert.ok(!m.classes.has('fab-pego'), 'soltar não soltou o botão');
+});
+
+test('FAB: o "pego" que sobrar SEM dedo não trava o botão — a reavaliação o solta, e o apagar também', () => {
+  const pos = fatiar('posicionarFabDev');
+  assert.match(pos, /if \(fab\.classList\.contains\('fab-pego'\)\) \{\s*if \(devFabDedo !== null\) return;\s*fab\.classList\.remove\('fab-pego'\);\s*\}/,
+    'o posicionarFabDev voltou a respeitar o "pego" sem olhar se há dedo');
+  assert.match(fatiar('dlogApagar'), /classList\.remove\('fab-pego'\)/, 'desligar o modo dev não solta o botão pego');
 });
