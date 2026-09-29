@@ -360,14 +360,17 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
     assert.equal(dica(), false, `lista inteira (editáveis ${JSON.stringify(editaveis)}) e a dica dizendo "só os que você pode editar"`);
   }
 
-  // O ouvinte da troca de região, recortado do app.js.
-  const ini = APP_SEM.indexOf("$('filterRegion').addEventListener('change', async (e) =>");
-  assert.ok(ini > 0, 'sumiu o ouvinte da troca de região');
-  const arrow = APP_SEM.indexOf('async (e) =>', ini);
-  const ouvinte = new Function('$', 'API', 'escapeHtml', 't', 'ordenarPorNome', 'loadStatesIntoSelect',
-    `return ${APP_SEM.slice(arrow, fechar(APP_SEM, arrow))};`)(
-    (id) => els[id], { listCountries: async () => ({ success: true, countries: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }] }) },
-    (x) => String(x), (k) => k, (l) => l, async () => {});
+  // O ouvinte da troca de região: a função com nome do F10a, recortada do app.js
+  // e rodada com a lista da região nova chegando.
+  assert.match(APP_SEM, /\$\('filterRegion'\)\.addEventListener\('change', aoTrocarRegiaoNoModal\);/, 'sumiu o ouvinte da troca de região');
+  const { aoTrocarRegiaoNoModal } = montar(['aoTrocarRegiaoNoModal'], {
+    document: { getElementById: (id) => els[id] || null }, AppState,
+    API: { getRegion: () => 'row', getCountry: () => 30,
+      listCountries: async () => ({ success: true, countries: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }] }) },
+    escapeHtml: (x) => String(x), t: (k) => k, ordenarPorNome: (l) => l, loadStatesIntoSelect: async () => {},
+    populateCountrySelect, showToast: () => {},
+  }, ['aoTrocarRegiaoNoModal']);
+  const ouvinte = aoTrocarRegiaoNoModal;
   AppState.profile = { editableCountryIDs: [30] };
   populateCountrySelect();
   assert.equal(dica(), true, 'CONTROLE: a dica acesa antes da troca');

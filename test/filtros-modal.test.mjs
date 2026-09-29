@@ -91,6 +91,8 @@ function montarRegiao({ resposta }) {
   const el = {
     filterRegion: { value: 'row' }, filterCountry: seletor(), applyFilters: { disabled: false },
     filterMyArea: { checked: false }, filterState: seletor(),
+    // A dica "só os que você pode editar" some na troca (T5, test/estado-cliente).
+    filterCountryHint: { classList: { add() {}, remove() {}, toggle() {}, contains: () => true } },
   };
   const log = [];
   let soltar = null;
