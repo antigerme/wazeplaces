@@ -2314,6 +2314,27 @@ function podeExcluirFotoAqui() {
     return podeAgirComoL6Aqui();
 }
 
+// A RODA do mouse e o trackpad, como ZOOM da foto e do mapa ampliados.
+//
+// Os dois tratavam cada EVENTO como um passo: o trackpad manda dezenas de
+// eventos pequenos por gesto, e MEDIDO no mapa, 20 eventos de deltaY −4 (menos
+// que UM dente de mouse, que é 100) subiam o zoom de 17 pra 19; na foto, cada
+// um multiplicava por 1,2. E a rolagem só HORIZONTAL (deltaY 0) caía no ramo do
+// "afastar": 6 rolagens pro lado levavam o mapa do 17 ao 11 (auditoria de
+// 2026-09-26). Aqui o delta vira PIXELS (a roda em modo linha ou página
+// multiplica) e só a vertical conta — a horizontal, pura ou a que domina, não
+// é zoom (0). Quem usa decide a escala: o mapa ACUMULA até um dente por nível,
+// a foto aplica proporcional (um dente dá o 1,2× de antes).
+const RODA_DENTE_PX = 100;
+
+function deltaDaRoda(e) {
+    const escala = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? (window.innerHeight || 800) : 1;
+    const dy = (Number(e.deltaY) || 0) * escala;
+    const dx = (Number(e.deltaX) || 0) * escala;
+    if (!dy || Math.abs(dx) > Math.abs(dy)) return 0;
+    return dy;
+}
+
 // Gestos do mapa ampliado. Ponteiros unificados (mouse e dedo pelo mesmo
 // caminho) porque o mapa é o mesmo nos dois; o que muda é só quantos pontos
 // tocam a tela.
@@ -2396,10 +2417,26 @@ function setupMapaLightbox() {
         addEventListener('pointerup', soltar);
         addEventListener('pointercancel', soltar);
     });
-    // Roda do mouse: o desktop não tem pinch.
+    // Roda do mouse: o desktop não tem pinch. Um nível por DENTE acumulado
+    // (ver `deltaDaRoda`): o trackpad chega lá somando os eventos pequenos. O
+    // acumulado recomeça com o gesto (pausa de 250 ms) e com a troca de sentido,
+    // e depois de cada nível — um evento grande de roda acelerada dá UM nível,
+    // como sempre deu. O `preventDefault` vale pra toda roda, a horizontal
+    // inclusive: sem ele o trackpad do Mac rola a página de trás ou volta uma
+    // página no histórico.
+    let rodaAcum = 0, rodaEm = 0;
     lb.addEventListener('wheel', (e) => {
         e.preventDefault();
-        MapaLightbox.zoom(e.deltaY < 0 ? 1 : -1, e.clientX, e.clientY);
+        const dy = deltaDaRoda(e);
+        if (!dy) return;
+        const agora = performance.now();
+        if (agora - rodaEm > 250 || Math.sign(dy) !== Math.sign(rodaAcum)) rodaAcum = 0;
+        rodaEm = agora;
+        rodaAcum += dy;
+        if (Math.abs(rodaAcum) < RODA_DENTE_PX) return;
+        const passo = rodaAcum < 0 ? 1 : -1;
+        rodaAcum = 0;
+        MapaLightbox.zoom(passo, e.clientX, e.clientY);
     }, { passive: false });
     // Duplo toque aproxima, como em qualquer mapa.
     let ultimoToque = 0;
@@ -2512,12 +2549,17 @@ function setupLightbox() {
     img.addEventListener('pointerup', endPointer);
     img.addEventListener('pointercancel', endPointer);
 
-    // Desktop: scroll do mouse dá zoom no cursor
+    // Desktop: scroll do mouse dá zoom no cursor — PROPORCIONAL ao delta (ver
+    // `deltaDaRoda`): um dente de mouse dá o 1,2× de sempre, e o trackpad, que
+    // manda dezenas de eventos pequenos, um zoom contínuo em vez de 1,2× por
+    // evento. Rolagem só horizontal não é zoom (afastava). O teto de 3 dentes
+    // por evento segura a roda em modo PÁGINA, que chega com centenas.
     lb.addEventListener('wheel', (e) => {
         if (!Lightbox.isOpen()) return;
         e.preventDefault();
-        const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
-        Lightbox.zoomTo(Lightbox.scale * factor, e.clientX, e.clientY);
+        const dy = Math.max(-3 * RODA_DENTE_PX, Math.min(3 * RODA_DENTE_PX, deltaDaRoda(e)));
+        if (!dy) return;
+        Lightbox.zoomTo(Lightbox.scale * Math.pow(1.2, -dy / RODA_DENTE_PX), e.clientX, e.clientY);
     }, { passive: false });
 }
 

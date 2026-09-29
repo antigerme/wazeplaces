@@ -51,3 +51,33 @@ test('zoom: voltar a 1× recentra a foto', () => {
   lb.zoomTo(1, 50, 50);
   assert.deepEqual([lb.scale, lb.tx, lb.ty], [1, 0, 0]);
 });
+
+// ── L14: a roda em PIXELS, só a vertical (auditoria de 2026-09-26) ───────────
+// No mapa cada EVENTO de roda era um nível de zoom (20 eventos de trackpad de
+// −4 subiam 2 níveis) e, no mapa e na foto, a rolagem só horizontal (deltaY 0)
+// caía no "afastar". `deltaDaRoda` de verdade.
+function fatiarFuncao(nome) {
+  const m = new RegExp('^function ' + nome + '\\(', 'm').exec(APP);
+  assert.ok(m, `${nome} sumiu`);
+  let prof = 0;
+  for (let j = APP.indexOf('{', APP.indexOf(')', m.index)); j < APP.length; j++) {
+    if (APP[j] === '{') prof++;
+    else if (APP[j] === '}' && --prof === 0) return APP.slice(m.index, j + 1);
+  }
+  throw new Error('não fechou');
+}
+test('L14 a roda: horizontal não é zoom, e o delta vira PIXELS (linha e página multiplicam)', () => {
+  const delta = new Function('window', 'RODA_DENTE_PX', fatiarFuncao('deltaDaRoda') + '\nreturn deltaDaRoda;')(
+    { innerHeight: 800 }, 100);
+  assert.equal(delta({ deltaX: 40, deltaY: 0, deltaMode: 0 }), 0, 'rolagem só HORIZONTAL virou zoom (afastava)');
+  assert.equal(delta({ deltaX: 30, deltaY: -4, deltaMode: 0 }), 0, 'a horizontal que DOMINA virou zoom');
+  assert.equal(delta({ deltaX: 0, deltaY: -4, deltaMode: 0 }), -4, 'CONTROLE: o trackpad vertical sumiu');
+  assert.equal(delta({ deltaX: 0, deltaY: 100, deltaMode: 0 }), 100);
+  assert.equal(delta({ deltaX: 0, deltaY: 3, deltaMode: 1 }), 120, 'a roda em modo LINHA (3 linhas por dente) não virou pixels');
+  assert.equal(delta({ deltaX: 0, deltaY: 1, deltaMode: 2 }), 800, 'a roda em modo PÁGINA não virou pixels');
+  // O mapa ACUMULA até um dente por nível; a foto é proporcional ao delta.
+  const setup = fatiarFuncao('setupMapaLightbox');
+  assert.match(setup, /if \(Math\.abs\(rodaAcum\) < RODA_DENTE_PX\) return;/, 'o mapa voltou a dar um nível por EVENTO de roda');
+  const foto = fatiarFuncao('setupLightbox');
+  assert.match(foto, /Math\.pow\(1\.2, -dy \/ RODA_DENTE_PX\)/, 'a foto voltou a dar 1,2× por EVENTO de roda');
+});

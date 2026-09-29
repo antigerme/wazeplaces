@@ -4104,6 +4104,93 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── A RODA do mouse e o trackpad (auditoria de 2026-09-26) ─────────────────
+//
+// No mapa ampliado cada EVENTO de roda era um nível: 20 eventos de trackpad de
+// deltaY −4 (menos que UM dente de mouse, 100) subiam do 17 ao 19. E a rolagem
+// só HORIZONTAL caía no "afastar", no mapa (6 rolagens: do 17 ao 11) e na foto.
+// O CONTROLE é o dente de mouse, que tem que continuar dando um nível (mapa) e
+// 1,2× (foto): sem ele, "o zoom não mudou" passaria também com a roda que não
+// chega ao elemento.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.route('**/api/**', (route) => route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ success: true, places: [], hasMore: false, total: 0 }) }));
+  await presencaViva(page);
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const PL = {
+    venueID: 'v-roda', updateRequestID: 'pend-01', name: 'Padaria', categories: ['BAKERY'], address: 'Rua X, 1',
+    updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO', createdBy: 'wazer', lat: -12.9, lon: -38.3,
+    changes: [], imageUrls: [`${foto}#pend-01`], approvedImageIds: [],
+    mapa: { centro: [-12.9, -38.3], proposto: null, movidoM: null, entradas: [] },
+  };
+  await page.evaluate((p0) => {
+    setLang('pt'); applyI18n();
+    API.setSession('tok-smoke');
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false);
+    const p = JSON.parse(JSON.stringify(p0));
+    AppState.queue = [p]; AppState.currentPlace = p;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+  }, PL);
+  await assentar(page);
+  const rodar = async (n, dx, dy) => { for (let i = 0; i < n; i++) await page.mouse.wheel(dx, dy); await page.waitForTimeout(80); };
+  const pausa = () => page.waitForTimeout(350);   // gesto NOVO (o acumulado do mapa recomeça em 250 ms)
+  // O MAPA.
+  await page.evaluate(() => MapaLightbox.open(AppState.currentPlace));
+  await page.waitForTimeout(400);
+  await page.mouse.move(640, 400);
+  const z = () => page.evaluate(() => MapaLightbox.z);
+  const z0 = await z();
+  await rodar(1, 0, -100);
+  const z1 = await z();
+  checa(z1 === z0 + 1, `roda/mapa: CONTROLE — um dente de mouse não aproximou um nível (z ${z0} → ${z1}): a roda não chega`);
+  await pausa();
+  await rodar(20, 0, -4);
+  const z2 = await z();
+  checa(z2 === z1, `roda/mapa: 20 eventos de trackpad (−80, menos que um dente) mudaram o zoom (z ${z1} → ${z2})`);
+  await pausa();
+  await rodar(25, 0, -4);
+  const z3 = await z();
+  checa(z3 === z2 + 1, `roda/mapa: o trackpad somando um dente (−100) não deu UM nível (z ${z2} → ${z3})`);
+  await pausa();
+  await rodar(6, 40, 0);
+  const z4 = await z();
+  checa(z4 === z3, `roda/mapa: rolagem só HORIZONTAL mexeu no zoom (z ${z3} → ${z4})`);
+  await page.evaluate(() => MapaLightbox.close());
+  await page.waitForTimeout(250);
+  // A FOTO.
+  await page.evaluate(() => { const p = AppState.currentPlace; Lightbox.open(p.imageUrls, 0, 0, p.name, false, p); });
+  await page.waitForTimeout(400);
+  await page.mouse.move(640, 400);
+  const escala = () => page.evaluate(() => Lightbox.scale);
+  await rodar(1, 0, -100);
+  const e1 = await escala();
+  checa(Math.abs(e1 - 1.2) < 0.01, `roda/foto: CONTROLE — um dente de mouse não deu o 1,2× (escala ${e1})`);
+  // A horizontal medida COM zoom: em 1× o "afastar" batia no piso e não se via.
+  await rodar(6, 40, 0);
+  const e0 = await escala();
+  checa(Math.abs(e0 - e1) < 1e-9, `roda/foto: rolagem só HORIZONTAL mexeu no zoom (escala ${e1.toFixed(2)} → ${e0.toFixed(2)})`);
+  await pausa();
+  await rodar(20, 0, -4);
+  const e2 = await escala();
+  // proporcional: −80 é 0,8 dente → 1,2 × 1,2^0,8 ≈ 1,39 (por evento dava 4, o teto)
+  checa(e2 > e1 && e2 < 1.5, `roda/foto: 20 eventos de trackpad (−80) foram de ${e1.toFixed(2)} a ${e2.toFixed(2)} — por evento, não pelo delta`);
+  await page.evaluate(() => Lightbox.close());
+  checa(erros.length === 0, 'roda: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 
 // ── A faixa do carrossel não pode roubar o toque do slide atrás ─────────────
 // Terceira reincidência do gotcha #26. A faixa `.card-image-nav` tem largura
@@ -7353,6 +7440,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + renomeando: o passo pra trás (fundo, arraste pra baixo, Esc e ↓ fora do campo) só sai da edição, com o CONTROLE sem edição fechando a foto`
+  + `, + a roda do mouse e o trackpad (no mapa um nível por DENTE acumulado, na foto proporcional ao delta, e a rolagem horizontal fora do zoom, com o CONTROLE do dente)`
   + `, + o foco nas camadas de ampliar (fechar a foto e o mapa por Esc/↓/✕ devolve à foto/mapa do card, sair da edição devolve à pílula, aprovar e salvar mantêm na camada, com e sem Desfazer, e o ✨/🚩 e a miniatura com NOME, com o CONTROLE do Filtros)`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
