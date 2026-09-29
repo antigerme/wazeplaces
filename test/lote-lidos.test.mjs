@@ -32,7 +32,7 @@ function montar(fila, { resolvidos = [], segurar = false, pendentes = {}, falhar
   const toasts = [];
   const historico = [];
   const log = [];
-  const AppState = { queue: fila.slice(), currentPlace: fila[0], stats: { read: 0 }, serverTotal: fila.length, hasMore: false,
+  const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0], stats: { read: 0 }, serverTotal: fila.length, hasMore: false,
     pendingAction: null, inFlightActions: 0, fetchEpoch: 0 };
   const processar = (itens) => {
     if (falhar) return { success: false, errorCategory: 'unknown', httpCode: 406 };

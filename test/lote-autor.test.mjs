@@ -140,7 +140,7 @@ test('F4: CONTROLE — a aprovação na MESMA fila desconta o "Restam", como sem
 test('F4: aprovar a foto leva a fila do GESTO no alvo (`epocaFila`)', async () => {
   let alvoEnviado = null;
   const place = pedido(1);
-  const AppState = { fetchEpoch: 7, preferences: { undoEnabled: false } };
+  const AppState = { fetchEpoch: 7, preferences: { undoEnabled: false }, authenticated: true };
   const deps = {
     AppState, Treino: { ativo: false }, canDisableUndo: () => true, estadoAprovando: () => {},
     Lightbox: { place, idx: 0, podeAprovarAtual: () => true, marcarComoAprovada: () => {} },
@@ -205,7 +205,7 @@ test('L11: com o lightbox aberto, a marca vem na APROVAÇÃO — o card sai depo
 function montarLoteDoAutor() {
   const log = [];
   const alvo = pedido(1, 555);
-  const AppState = { queue: [alvo, pedido(2, 555), pedido(3, 555)], currentPlace: alvo, stats: { rejected: 0 },
+  const AppState = { authenticated: true, queue: [alvo, pedido(2, 555), pedido(3, 555)], currentPlace: alvo, stats: { rejected: 0 },
     serverTotal: 3, hasMore: false };
   let app = null;
   const deps = {

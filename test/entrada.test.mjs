@@ -1064,6 +1064,7 @@ function pareamentoDeMentira() {
     location: { origin: 'https://app.test' },
     navigator: { clipboard: { writeText: async (u) => { copiados.push(u); } } },
     TOAST_COPIAVEL_MS: 30000,
+    contaAgora: () => null,   // o pareamento leva a conta de quem o cria (K8)
   };
   const api = montar(
     ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento'],

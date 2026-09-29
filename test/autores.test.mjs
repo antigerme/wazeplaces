@@ -249,14 +249,16 @@ test('lote: "já tratado por outro editor" NÃO conta como falha', () => {
 test('lote: o lote respeita a trava e o treino', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function rejeitarLoteDoAutor');
-  const bloco = semComentarios.slice(i, i + 400);
+  // A função INTEIRA (até a próxima declaração): por distância, a linha da
+  // sessão que entrou antes da trava (K1) empurrava o resto pra fora (#67).
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\nfunction ', i + 10));
   // Respeita a janela — e DIZ (a folha já fechou com o toque; sair calado
   // deixava a pessoa achando que rejeitou).
   assert.match(bloco, /if \(acoesTravadas\(\)\) \{ showToast\(t\(avisoDaTrava\(\)\), 'info'\); return; \}/,
     'o lote tem que respeitar a janela em curso, e avisar');
   // E o aviso diz QUAL espera: "espere o Desfazer" com o lote de lidos no ar
   // manda procurar um botão que não existe (F1).
-  assert.match(semComentarios, /function avisoDaTrava\(\) \{\s*return loteDeLidosEmVoo \? 'toast\.esperaLote' : 'toast\.esperaDesfazer';\s*\}/);
+  assert.match(semComentarios, /function avisoDaTrava\(\) \{\s*if \(!AppState\.authenticated\) return 'api\.error\.noSession';\s*return loteDeLidosEmVoo \? 'toast\.esperaLote' : 'toast\.esperaDesfazer';\s*\}/);
   assert.match(bloco, /if \(Treino\.ativo\)/, 'no treino a fila é de exemplos — o lote mandaria ids inertes ao Waze');
 });
 

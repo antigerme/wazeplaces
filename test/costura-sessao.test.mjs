@@ -62,6 +62,10 @@ function buracoNegro(nome, chamou) {
 // e as variáveis de módulo — `epocaDaSessao`, `saiuNestaPagina`… —, que leem e
 // escrevem direto no objeto). O resto é buraco negro, anotado em `chamou`.
 function montar(nomes, deps, fonte = APP_SEM) {
+  // Estado dos vizinhos que a trava lê (o lote de lidos da fila, a conferência
+  // de 401 do lightbox): o buraco negro devolveria uma função, que é VERDADEIRA,
+  // e travaria tudo. Quem quer medir um deles o passa nos `deps`.
+  for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0 })) if (!(k in deps)) deps[k] = v;
   const chamou = [];
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
