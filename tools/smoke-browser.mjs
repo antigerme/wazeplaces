@@ -19,7 +19,7 @@
 // o import nu. Sem nenhum deles o script FALHA — nunca passa calado, porque
 // teste que se auto-pula vira teste que ninguém percebe que morreu.
 
-import { spawn } from 'node:child_process';
+import { subirServidorLocal } from './servidor-local.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -305,25 +305,12 @@ const checa = (ok, msg, detalhe) => {
   if (!ok) { falhas++; console.log(`  ✗ ${msg}${detalhe ? ' — ' + detalhe : ''}`); }
 };
 
-const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
-  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1' },
-  stdio: ['ignore', 'ignore', 'inherit'],
-});
-process.on('exit', () => servidor.kill());
-
-async function esperarServidor() {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const r = await fetch(BASE);
-      if (r.ok) return;
-    } catch { /* ainda subindo */ }
-    await dormir(250);
-  }
-  throw new Error(`servidor não subiu em ${BASE}`);
-}
+// O servidor sobe por `tools/servidor-local.mjs`: porta LIVRE antes, e pronto
+// é o próprio processo dizer que a ocupou (senão o smoke mediria o servidor de
+// outro processo na mesma porta).
+const { servidor } = await subirServidorLocal({ porta: PORTA, variavel: 'SMOKE_PORT' });
 
 const pw = await carregarPlaywright();
-await esperarServidor();
 const MOTOR = motorPedido();
 const browser = await abrirNavegador(pw, { args: ARGS_SEM_ESTRANGULAR });
 

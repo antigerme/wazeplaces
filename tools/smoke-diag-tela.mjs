@@ -25,12 +25,12 @@
 import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 import { lerDiagnostico } from './diag-ler.mjs';
 import { esperarOuExplodir } from './esperar-saida.mjs';
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { subirServidorLocal } from './servidor-local.mjs';
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { setTimeout as dormir } from 'node:timers/promises';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const COOKIES = process.argv[2] || null;
@@ -45,25 +45,11 @@ const checa = (ok, oq, detalhe = '') => {
   else console.log(`  ✓ ${oq}`);
 };
 
-// A porta tem que estar LIVRE antes de subir: um servidor esquecido nela
-// responderia no lugar do meu, e o smoke mediria o app ERRADO.
-try {
-  const r = await fetch(BASE + '/', { signal: AbortSignal.timeout(1500) });
-  if (r.ok) {
-    console.error(`\n✗ a porta ${PORT} já está ocupada. Rode noutra: SMOKE_DIAG_PORT=8341 npm run test:diag-tela`);
-    process.exit(1);
-  }
-} catch (e) { /* livre */ }
-const srv = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], { cwd: ROOT,
-  env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1',
-         ...(COOKIES ? {} : { ENCRYPTION_KEY: Buffer.alloc(32, 5).toString('base64') }) },
-  stdio: 'ignore' });
-process.on('exit', () => { try { srv.kill(); } catch (e) {} });
-let vivo = false;
-for (let i = 0; i < 60 && !vivo; i++) {
-  try { vivo = (await fetch(BASE + '/')).ok; } catch (e) { await dormir(250); }
-}
-if (!vivo) { console.error(`\n✗ o servidor não respondeu em ${BASE}`); process.exit(1); }
+// O servidor sobe por `tools/servidor-local.mjs`: a porta tem que estar LIVRE
+// antes, e pronto é o próprio processo dizer que a ocupou — senão um servidor
+// esquecido responderia no lugar do meu, e o smoke mediria o app ERRADO.
+const { servidor: srv } = await subirServidorLocal({ porta: PORT, variavel: 'SMOKE_DIAG_PORT', stderr: 'ignore',
+  env: COOKIES ? {} : { ENCRYPTION_KEY: Buffer.alloc(32, 5).toString('base64') } });
 
 const browser = await abrirChromium(await carregarPlaywright());
 

@@ -25,7 +25,7 @@
 // Regra que vale pra todo caso aqui: medir FATO, não intenção. Guard de fonte
 // não enxerga CSP, não enxerga cache e não enxerga service worker.
 
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -34,6 +34,7 @@ import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina } from './esperar-saida.mjs';
 import { lerDiagnostico } from './diag-ler.mjs';
 import { carregarPlaywright, abrirChromium } from './navegador.mjs';
+import { subirServidorLocal } from './servidor-local.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.PORTA_OFFLINE || 8192);
@@ -49,54 +50,13 @@ const pw = await carregarPlaywright();
 // Chave FIXA: a seção da sala precisa assinar crachás iguais aos do servidor.
 // Só de teste, e por isso é constante e óbvia.
 const CHAVE_TESTE = Buffer.alloc(32, 7).toString('base64');
-// A porta tem que estar LIVRE antes de eu subir. Checar depois é uma corrida
-// que eu perco: o processo esquecido responde na hora, a sonda de saúde passa,
-// e só então o meu `spawn` morre com EADDRINUSE — tarde demais, com o teste já
-// medindo o servidor errado (foi assim que a seção da sala reprovou por vácuo,
-// com TODO crachá voltando "inválido" porque a chave era de outro processo).
-try {
-  const r = await fetch(BASE + '/', { signal: AbortSignal.timeout(1500) });
-  if (r.ok) {
-    console.error(`\n✗ a porta ${PORTA} já está ocupada por outro processo.`);
-    console.error('  O teste mediria o servidor ERRADO — com outra chave, todo crachá seria recusado.');
-    console.error('  Confira com: ps -eo pid,args | grep "[s]erver/node.mjs"');
-    console.error(`  Ou rode noutra porta: PORTA_OFFLINE=8193 npm run test:offline`);
-    process.exit(1);
-  }
-} catch (e) { /* ninguém atendeu: a porta está livre, que é o que eu quero */ }
-
-const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
-  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1', ENCRYPTION_KEY: CHAVE_TESTE },
-  stdio: ['ignore', 'ignore', 'inherit'],
-});
-process.on('exit', () => servidor.kill());
-
-// O servidor que responde tem que ser O QUE EU SUBI.
-//
-// Sem esta checagem, um processo esquecido na mesma porta sequestra o teste em
-// silêncio: o `spawn` morre com EADDRINUSE, a sonda de saúde passa (porque o
-// processo VELHO responde), e o smoke mede um servidor com OUTRA chave. Foi o
-// que aconteceu aqui — todo crachá voltava "inválido" e as invariantes da sala
-// passavam por vácuo, porque ninguém conseguia entrar.
-//
-// É a mesma família dos outros erros de instrumento deste arquivo: o teste
-// respondia sobre uma coisa diferente da que eu pensava estar medindo.
-let morreuCedo = null;
-servidor.on('exit', (code) => { morreuCedo = code; });
-let vivo = false;
-for (let i = 0; i < 60; i++) {
-  if (morreuCedo !== null) break;
-  try { const r = await fetch(BASE + '/'); if (r.ok) { vivo = true; break; } } catch (e) { /* subindo */ }
-  await dormir(250);
-}
-if (morreuCedo !== null) {
-  console.error(`\n✗ o servidor do teste morreu ao subir (código ${morreuCedo}).`);
-  console.error(`  Quase sempre é a porta ${PORTA} ocupada por um processo esquecido.`);
-  console.error('  Confira com: ps -eo pid,args | grep "[s]erver/node.mjs"');
-  console.error('  Ou rode noutra porta: PORTA_OFFLINE=8193 npm run test:offline');
-  process.exit(1);
-}
-if (!vivo) { console.error(`\n✗ o servidor não respondeu em ${BASE} depois de 15s.`); process.exit(1); }
+// O servidor sobe por `tools/servidor-local.mjs` (fonte única): a porta tem
+// que estar LIVRE antes, e pronto é o próprio processo dizer que a ocupou. Um
+// processo esquecido na mesma porta sequestrava o teste em silêncio — o `spawn`
+// morria com EADDRINUSE, a sonda de saúde passava com o VELHO, e o smoke media
+// um servidor com outra chave (foi assim que a seção da sala, na época,
+// reprovou por vácuo).
+const { servidor } = await subirServidorLocal({ porta: PORTA, variavel: 'PORTA_OFFLINE', env: { ENCRYPTION_KEY: CHAVE_TESTE } });
 
 // ── os casos ───────────────────────────────────────────────────────────────
 const PX = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');

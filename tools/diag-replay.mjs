@@ -20,7 +20,7 @@
 // `tools/diag-api.mjs`, que é outra ferramenta e tem outras regras.
 import { readFileSync } from 'node:fs';
 import { lerDiagnostico } from './diag-ler.mjs';
-import { spawn } from 'node:child_process';
+import { subirServidorLocal } from './servidor-local.mjs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -86,21 +86,12 @@ const { carregarPlaywright, abrirChromium } = await import('./navegador.mjs');
 const { esperarOuExplodir } = await import('./esperar-saida.mjs');
 const pw = await carregarPlaywright();
 
-const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
-  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1' },
-  stdio: ['ignore', 'ignore', 'inherit'],
-});
+// Sobe por `tools/servidor-local.mjs`: a porta tem que estar LIVRE (a padrão é
+// a mesma do smoke de layout, e com ele rodando a tela reconstruída seria a do
+// servidor dele), e pronto é o próprio processo dizer que a ocupou.
+const { servidor } = await subirServidorLocal({ porta: PORTA, variavel: '--porta' });
 const parar = () => { try { servidor.kill(); } catch (e) {} };
-process.on('exit', parar);
 process.on('SIGINT', () => { parar(); process.exit(130); });
-
-// Espera o servidor ATENDER, não um relógio: `sleep` fixo é palpite e falha na
-// máquina lenta justamente quando se está com pressa.
-for (let i = 0; i < 60; i++) {
-  try { await fetch(`http://127.0.0.1:${PORTA}/`); break; } catch (e) {
-    await new Promise((r) => setTimeout(r, 250));
-  }
-}
 
 const browser = await abrirChromium(pw, { headless: !args.includes('--abrir') });
 const ctx = await browser.newContext({
