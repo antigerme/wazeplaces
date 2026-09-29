@@ -4001,6 +4001,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const APARELHOS_FAB = [['iPhone SE', { width: 375, height: 667 }],
                          ['Pixel 7', { width: 412, height: 915 }],
                          ['Galaxy Fold', { width: 280, height: 653 }]];
+  // Em que aparelhos o toast de fato cobriu um botão do card (sem isso, "o
+  // toast não virou alerta" passaria sem o caso ter existido).
+  const toastCobriuBotao = [];
   for (const [nomeAp, vp] of APARELHOS_FAB) {
     const ctx = await browser.newContext({ viewport: vp, locale: 'pt-BR',
       hasTouch: true, isMobile: true, serviceWorkers: 'block' });
@@ -4178,6 +4181,43 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     }, FIXTURES_PAISES.slice(0, 3));
     await assentar(page, 300);
     await doisQuadros(page);
+
+    // ── O TOAST por cima dos botões não é "toqueInterceptado" ───────────
+    //
+    // A sentinela acusava ✕ ↑ ✓ sempre que um toast comum (z-70, rodapé)
+    // estava sobre eles — o lugar dele nas telas baixas, e ele some em
+    // segundos. Toda captura até 4 s depois de um toast trazia três alertas
+    // falsos (auditoria de 2026-09-26, D3). CONTROLE: um elemento DE VERDADE
+    // por cima do ✕ continua acusando.
+    const toastR = await page.evaluate(() => new Promise((ok) => {
+      showToast('Já tratado por outro editor 👍', 'info', 8000);
+      setTimeout(() => {
+        const card = cardDaFrente();
+        let cobre = 0;
+        for (const s of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
+          const r = card.querySelector(s).getBoundingClientRect();
+          const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          if (el && el.closest('#notifyStack')) cobre++;
+        }
+        const m = dlogCapturar('manual');
+        document.querySelectorAll('#toastContainer > *').forEach((t) => t.remove());
+        ok({ cobre, alertas: (m.alertas || []).filter((a) => a.chave === 'toqueInterceptado').map((a) => a.alvo) });
+      }, 600);
+    }));
+    if (toastR.cobre) toastCobriuBotao.push(nomeAp);
+    checa(toastR.alertas.length === 0,
+      `FAB/${nomeAp}: o toast por cima dos botões virou "toqueInterceptado" — é o lugar dele, e ele some`, JSON.stringify(toastR));
+    const tampaR = await page.evaluate(() => {
+      const b = cardDaFrente().querySelector('.card-btn-reject').getBoundingClientRect();
+      const d = document.createElement('div');
+      d.style.cssText = `position:fixed;left:${b.left}px;top:${b.top}px;width:${b.width}px;height:${b.height}px;z-index:90`;
+      document.body.appendChild(d);
+      const m = dlogCapturar('manual');
+      d.remove();
+      return (m.alertas || []).filter((a) => a.chave === 'toqueInterceptado').map((a) => a.alvo);
+    });
+    checa(tampaR.includes('.card-btn-reject'),
+      `FAB/${nomeAp}: CONTROLE — um elemento de verdade por cima do ✕ deixou de acusar`, JSON.stringify(tampaR));
 
     // ── o gesto DO OWNER: pressiona, SEGURA, e só então arrasta ─────────
     //
@@ -4421,6 +4461,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(errosF.length === 0, `FAB/${nomeAp}: erro de JS`, errosF[0]);
     await ctx.close();
   }
+  // CONTROLE do toast (D3): em algum aparelho ele TEM que ter coberto um botão
+  // do card — senão "o toast por cima não acusa" passaria sem o caso existir.
+  checa(toastCobriuBotao.length > 0,
+    'FAB: CONTROLE — em nenhum aparelho o toast cobriu um botão do card; a medida do D3 não mede nada');
 }
 
 // ── O teclado virtual não pode achatar os modais sem teclado ──────────────

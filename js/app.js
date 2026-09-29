@@ -4409,6 +4409,9 @@ function diagGeometria() {
                 // retângulos existem e só o hit-test diz quem intercepta —, e
                 // ele já reincidiu três vezes neste projeto.
                 noCentro: diagQuemEstaNoCentro(e, r),
+                // Quem recebe é o AVISO passageiro (o toast e o Desfazer, no
+                // `#notifyStack`)? Ver a sentinela do toque.
+                ...(diagCentroEmAvisoPassageiro(e, r) ? { sobAviso: true } : {}),
                 // O ENQUADRAMENTO do mapa: pra que tamanho ele foi desenhado.
                 // Sem isto, frente e fundo saem idênticos no relatório mesmo
                 // quando um deles está desenhado pra outra caixa.
@@ -4444,6 +4447,17 @@ function diagGeometria() {
         }
     }
     return fora;
+}
+
+// O toast (snackbar do M3) e o Desfazer moram no `#notifyStack`, no rodapé, em
+// z-70: nas telas baixas eles passam por cima dos botões do card — é o lugar
+// deles, e somem sozinhos em segundos. Toda captura até 4 s depois de um toast
+// acusava "toqueInterceptado" nos três botões (auditoria de 2026-09-26, D3).
+function diagCentroEmAvisoPassageiro(el, r) {
+    try {
+        const alvo = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+        return !!(alvo && alvo !== el && !el.contains(alvo) && alvo.closest && alvo.closest('#notifyStack'));
+    } catch (e) { return false; }
 }
 
 function diagQuemEstaNoCentro(el, r) {
@@ -4664,7 +4678,13 @@ function diagSentinelas(comp) {
                 // cobre em boa parte dos aparelhos — toda captura feita nessa
                 // janela acusava "o dedo não chega nele" num botão que não é pra
                 // receber o dedo (auditoria de 2026-09-25).
-                && !g.desab) {
+                && !g.desab
+                // E o AVISO PASSAGEIRO por cima (o toast e o Desfazer, no
+                // `#notifyStack`): é o lugar deles nas telas baixas, e somem em
+                // segundos — cada captura logo depois de um toast trazia três
+                // alertas falsos (auditoria de 2026-09-26). Elemento de VERDADE
+                // por cima continua acusando.
+                && !g.sobAviso) {
                 diga('toqueInterceptado',
                     'algo está por cima de um controle: o dedo não chega nele',
                     { alvo: g.sel, recebe: g.noCentro });

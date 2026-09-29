@@ -1343,3 +1343,37 @@ test('a captura diz QUAL frase o painel mostra (fim da fila, nada nesta fila, li
   assert.match(bloco('noMoreCards'), /<p[^>]*data-i18n="states\.empty\.body"/, 'sumiu o corpo do painel de fila vazia');
   assert.match(bloco('loadErrorState'), /<h3[^>]*data-i18n="states\.error\.title"/, 'sumiu o título do painel de falha');
 });
+
+// ── D3 (auditoria de 2026-09-26): o TOAST por cima dos botões não é defeito ──
+// A sentinela `toqueInterceptado` acusava ✕ ↑ ✓ sempre que um toast comum (o
+// snackbar, z-70, no `#notifyStack`) estava sobre eles — o lugar dele nas telas
+// baixas, e ele some sozinho. Toda captura até 4 s depois de um toast trazia três
+// alertas falsos. Aqui a geometria (quem recebe o dedo) e a sentinela rodam de
+// verdade, fatiadas.
+test('toqueInterceptado: o aviso passageiro (#notifyStack) por cima não acusa — um elemento de verdade, sim', () => {
+  // A geometria marca `sobAviso` quando quem recebe o dedo no centro está no stack.
+  const naPilha = { closest: (s) => (s === '#notifyStack' ? {} : null) };
+  const outro = { closest: () => null };
+  const alvoBotao = { contains: () => false };
+  const noCentro = (quem) => new Function('document', fatiarFn(semCom, 'diagCentroEmAvisoPassageiro')
+    + '\nreturn diagCentroEmAvisoPassageiro;')({ elementFromPoint: () => quem });
+  const r = { left: 0, top: 0, width: 48, height: 48 };
+  assert.equal(noCentro(naPilha)(alvoBotao, r), true, 'o toast no centro do botão não foi reconhecido como aviso passageiro');
+  assert.equal(noCentro(outro)(alvoBotao, r), false, 'CONTROLE: um elemento qualquer por cima virou "aviso passageiro"');
+  assert.equal(noCentro(alvoBotao)(alvoBotao, r), false, 'o próprio botão no centro virou "aviso passageiro"');
+  // A geometria leva a marca, e a sentinela a respeita.
+  assert.match(fatiarFn(semCom, 'diagGeometria'), /\.\.\.\(diagCentroEmAvisoPassageiro\(e, r\) \? \{ sobAviso: true \} : \{\}\),/,
+    'a geometria deixou de dizer que quem recebe o dedo é o aviso passageiro');
+  const sentinelas = new Function(`
+    const AppState = { authenticated: false };
+    const safeLS = { get: () => 'x' };
+    const diagSessao = () => ({ ciclos: [] });
+    const diagArmazenamentoDuravel = () => ({});
+    const diagAlvoPequeno = () => false, diagMapaForaDaCaixa = () => false;
+    ${fatiarFn(semCom, 'diagSentinelas')}
+    return diagSentinelas;`)();
+  const botao = (extra) => ({ sel: '.card-btn-reject', noCentro: 'DIV.toast', camadaAberta: false, naCamada: false, noFundo: false, ...extra });
+  const alertas = (g) => sentinelas({ geometria: [g] }).filter((a) => a.chave === 'toqueInterceptado');
+  assert.equal(alertas(botao({ sobAviso: true })).length, 0, 'o toast por cima dos botões voltou a acusar "toqueInterceptado"');
+  assert.equal(alertas(botao({})).length, 1, 'CONTROLE: um elemento de verdade por cima do ✕ deixou de acusar');
+});
