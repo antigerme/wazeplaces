@@ -6383,6 +6383,9 @@ async function handleUnauthorized() {
             rebuscarDepoisDeFalha();
             // A ação que levou o 401 foi pra fila de saída (ver o
             // `handleActionResult`): com a sessão confirmada viva, ela sai já.
+            // A conferência ACABOU aqui (o `finally` só confirma): o
+            // esvaziamento espera enquanto ela corre (ver lá, K14).
+            verificandoSessao = false;
             esvaziarFilaDeSaida();
             return;
         }
@@ -12726,6 +12729,14 @@ async function esvaziarFilaDeSaida() {
     if (esvaziandoSaida) { saidaPedidaDeNovo = true; return; }
     if (!AppState.authenticated) return;
     if (navigator.onLine === false) return;
+    // A sessão está sendo CONFERIDA (um 401 acabou de chegar, ver
+    // `handleUnauthorized`): espera o veredito. Cada resposta 401 também é
+    // prova de rede, e cada prova chamava o esvaziamento — que mandava o 1º
+    // item DE NOVO, milissegundos depois (o 1º degrau do recuo é 0). MEDIDO com
+    // a sessão morta na abertura: o mesmo pedido 2× em 19 ms (auditoria da
+    // costura, 2026-09-26, K14). Viva, quem confere chama o esvaziamento
+    // (o alarme falso); morta, a fila espera o próximo login.
+    if (verificandoSessao) return;
     // A última passada PAROU num 401 há pouco: espera o recuo (ver
     // `SAIDA_RECUO_401_MS`). O gatilho que chegar depois dele esvazia.
     if (saidaEmRecuo()) return;

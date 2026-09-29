@@ -713,7 +713,7 @@ function aparelhoO5(guardado = new Map()) {
       'handleReject', 'descarregarAcaoPendente'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `
-      let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, tratouNestaFila = false;
+      let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, tratouNestaFila = false, verificandoSessao = false;
       let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
       const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet();
       // O _post: toda resposta que CHEGA chama a prova de rede, ANTES de voltar.
@@ -839,7 +839,7 @@ function drenarO8(itens, resposta) {
     'registrarPousoDeSaida', 'esvaziarFilaDeSaida'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
-    let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, ultimaEscritaOkEm = 0;
+    let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, ultimaEscritaOkEm = 0, verificandoSessao = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
     const pedidosEmAndamento = new Set(), pousosDaPagina = new Map();
     ${nomes.map(fatiarComAsync).join('\n')}

@@ -149,7 +149,7 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
     showToast: () => {}, t: (k) => k, setTimeout: (f) => f(),
   };
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false;
+  const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
     const pedidosEmAndamento = new Set();
     ${['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida', 'sessaoVivaDepoisDe',

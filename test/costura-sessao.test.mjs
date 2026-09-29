@@ -967,3 +967,61 @@ test('K13: CONTROLE — o diálogo que a queda abre (o portão) fica com o foco 
   m.h.fecharCamadasAbertas(() => { m.doc.els.filtersBtn.visivel = false; m.doc.els.accessDeniedOk.focus(); });
   assert.equal(m.doc.activeElement.nome, 'accessDeniedOk', 'a queda tirou o foco do diálogo do portão');
 });
+
+// ═══ K14 · com a sessão sendo conferida, a fila de saída espera ══════════════
+
+function montarSaidaMorta() {
+  const { safeLS } = lsFalso();
+  const itens = ['v1', 'v2'].map((v) => ({ tipo: 'reject', venueID: v, updateRequestID: 'u' + v, conta: '111', s: marcaDe('tok-A'), regiao: 'row' }));
+  safeLS.set('waze_places_saida', JSON.stringify(itens));
+  const envios = [];
+  let sonda;
+  const deps = {
+    AppState: { authenticated: true, profile: { id: 111 }, stats: { read: 0, rejected: 2, skipped: 0 } }, safeLS,
+    navigator: { onLine: true }, epocaDaSessao: 0, esvaziandoSaida: false, saidaPedidaDeNovo: false, saidaEsperandoConta: false,
+    verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 }, saidaRecuo: { s: null, n: 0, ate: 0 }, ultimaEscritaOkEm: 0,
+    pedidosEmAndamento: new Set(), CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'),
+    SAIDA_RECUO_401_MS: constante('SAIDA_RECUO_401_MS'), SAIDA_TENTATIVAS_POR_ITEM: constante('SAIDA_TENTATIVAS_POR_ITEM'),
+    SAIDA_RITMO_MS: 0, VERIFICA_SESSAO_MS: 0, setTimeout: (f) => { f(); return 1; },
+    registrarPousoDeSaida: () => {}, rebuscarDepoisDeFalha: () => {}, derrubarSessao: () => { deps.AppState.authenticated = false; },
+    t: (k) => k,
+    API: {
+      getSession: () => 'tok-A',
+      // Como o `_post`: a resposta que CHEGA é prova de rede, e a prova chama o
+      // esvaziamento ANTES de a resposta voltar pra quem pediu.
+      rejectPlace: async (v) => {
+        envios.push(v);
+        await tique(1);
+        h.esvaziarFilaDeSaida();
+        return deps.proxima ? deps.proxima(v) : { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired', httpCode: 401 };
+      },
+      getProfile: () => new Promise((ok) => { sonda = ok; }),
+    },
+  };
+  const h = montar(['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+    'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'esvaziarFilaDeSaida',
+    'handleUnauthorized'], deps);
+  return { h, deps, envios, responderSonda: (r) => sonda(r) };
+}
+
+test('K14: sessão MORTA com a fila de saída cheia — o 1º item sai UMA vez, não duas em milissegundos', async () => {
+  const m = montarSaidaMorta();
+  await m.h.esvaziarFilaDeSaida();
+  await tique(10);
+  assert.deepEqual(m.envios, ['v1'], 'DEFEITO: com a sessão sendo conferida, o mesmo pedido saiu de novo: ' + m.envios.join(','));
+  m.responderSonda({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired' });   // morta
+  await tique(10);
+  assert.deepEqual(m.envios, ['v1'], 'depois do veredito de sessão morta, a fila ainda mandou pedido');
+  assert.equal(m.h.carregarFilaDeSaida().length, 2, 'a fila de quem perdeu a sessão tem de ficar (sai no próximo login)');
+});
+
+test('K14: CONTROLE — a conferência diz VIVA (alarme falso): a fila sai na hora, sem esperar outro gatilho', async () => {
+  const m = montarSaidaMorta();
+  await m.h.esvaziarFilaDeSaida();
+  await tique(10);
+  m.deps.proxima = () => ({ success: true });                 // a partir daqui o Waze aceita
+  m.responderSonda({ success: true, profile: { id: 111 } });  // viva
+  await tique(30);
+  assert.equal(m.h.carregarFilaDeSaida().length, 0, 'o alarme falso não esvaziou a fila — ela ficaria esperando o próximo gatilho');
+  assert.deepEqual(m.envios, ['v1', 'v1', 'v2']);
+});
