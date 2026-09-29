@@ -1997,11 +1997,25 @@ await p2d.evaluate(() => {
   localStorage.setItem('waze_places_sessoes', JSON.stringify([{ t: agora - 50 * H, e: 'token+', via: 'cookies' },
     { t: agora - 20 * H, e: 'caiu', motivo: 'srv.err.cookiesExpired' }, ...anel]));
 });
+// O que acontece ENQUANTO o arquivo é montado (auditoria de 2026-09-26, D11):
+// uma anotação no diário e uma captura NO MEIO do empacotamento — o construtor
+// do `CompressionStream` é chamado pelo `zipar`, depois do retrato. O carimbo do
+// "baixado" era o do FIM do download, e as duas sumiam: fora do arquivo E fora
+// da cópia guardada. Com o carimbo do retrato, elas voltam na abertura 3.
+await p2d.evaluate(() => {
+  const Orig = window.CompressionStream;
+  window.__compressaoOriginal = Orig;
+  let uma = false;
+  window.CompressionStream = class extends Orig {
+    constructor(f) { if (!uma) { uma = true; dfato('smoke.duranteOZip'); dlogCapturar('manual'); } super(f); }
+  };
+});
 try {
   const [dl] = await Promise.all([
     p2d.waitForEvent('download', { timeout: 30000 }),
     p2d.evaluate(() => baixarDiagnostico()),
   ]);
+  await p2d.evaluate(() => { window.CompressionStream = window.__compressaoOriginal; });
   const arq = join(dir9c, 'diag.zip');
   await dl.saveAs(arq);
   const { dados: d } = lerDiagnostico(arq);
@@ -2018,6 +2032,9 @@ try {
     vazouToken: triagem.includes('tok-9c'),
     duracao: (triagem.match(/duração da sessão \(h\): [^·]*· [^·]*· [^·]*· [^·]*/) || [''])[0].trim(),
     objetoCru: triagem.includes('[object Object]'),
+    // O que chegou DURANTE o zip não está no arquivo (ele é o retrato de antes).
+    desta: (d.momentos || []).length,
+    duranteNoArquivo: (d.diario || []).some((e) => e.k === 'smoke.duranteOZip'),
   };
 } catch (e) {
   rel9c = { erro: String((e && e.message) || e).slice(0, 200) };
@@ -2034,16 +2051,20 @@ diz('o resumo e o leitor mostram o defeito capturado ANTES de fechar, dizendo de
 diz('o leitor mostra a duração da sessão do relatório de verdade — números, nunca "[object Object]"',
   rel9c?.objetoCru === false && /^duração da sessão \(h\): mediana 30 · menor–maior 30–30 · n 1 · pisos 0/.test(rel9c?.duracao || ''),
   JSON.stringify({ duracao: rel9c?.duracao, objetoCru: rel9c?.objetoCru }));
+diz('PRÉ-CONDIÇÃO: a captura e a anotação feitas DURANTE o zip não estão no arquivo (ele é o retrato de antes)',
+  rel9c?.desta === 1 && rel9c?.duranteNoArquivo === false, JSON.stringify({ desta: rel9c?.desta, durante: rel9c?.duranteNoArquivo }));
 const apagou = await esperarNaPagina(p2d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
 const s4d = await selo9c(p2d);
+// 4 = as 2 guardadas + a desta abertura + a do meio do zip: o número conta o
+// que a pessoa registrou, baixado ou não.
 diz('BAIXADO, o que estava guardado sai do aparelho (e nesta abertura o número segue contando, como sempre)',
-  apagou.ok && s4d.txt === '3', JSON.stringify({ apagou, s4d }));
+  apagou.ok && s4d.txt === '4', JSON.stringify({ apagou, s4d }));
 // Segue usando depois do download: uma captura NOVA, e o app vai pro fundo.
 // É o caso que separa "guardar o que não foi entregue" de "guardar tudo": com
 // o anel desta abertura tendo uma baixada e uma nova, só a nova pode voltar.
 const tBaixado = await p2d.evaluate(() => diagBaixadoEm);
 const tocouPos = await tocar9c(p2d, cdp2d);
-await guardouNesta9c(p2d, 1);
+await guardouNesta9c(p2d, 2);
 await irProFundo9c(p2d);
 await p2d.close({ runBeforeUnload: true });
 
@@ -2053,11 +2074,14 @@ await pronta9c(p3d);
 await carregou9c(p3d);
 const r3d = await p3d.evaluate((tb) => ({ capturas: diagMomentosAnteriores().length,
   manuais: diagCapturasAnterioresDoEditor().length,
-  diarioAntes: diagAberturasAnteriores.flatMap((a) => a.diario || []).filter((e) => e.t <= tb).length }), tBaixado);
+  diarioAntes: diagAberturasAnteriores.flatMap((a) => a.diario || []).filter((e) => e.t <= tb).length,
+  durante: diagAberturasAnteriores.flatMap((a) => a.diario || []).some((e) => e.k === 'smoke.duranteOZip') }), tBaixado);
 const s5d = await selo9c(p3d);
-diz('o que foi BAIXADO não volta: reaberta, só a captura feita DEPOIS do download volta — e o diário de antes dele também não',
-  tocouPos && r3d.capturas === 1 && r3d.manuais === 1 && r3d.diarioAntes === 0 && s5d.txt === '1',
+diz('o que foi BAIXADO não volta: reaberta, só volta o que NÃO foi no arquivo — a captura do meio do zip e a de depois do download — e o diário de antes do retrato também não',
+  tocouPos && r3d.capturas === 2 && r3d.manuais === 2 && r3d.diarioAntes === 0 && s5d.txt === '2',
   JSON.stringify({ tocouPos, r3d, s5d }));
+diz('o que o diário anotou DURANTE o zip volta na abertura seguinte (não foi no arquivo, e não pode sumir)',
+  r3d.durante === true, JSON.stringify(r3d));
 
 // 4. O prazo de 24 h: uma abertura guardada de 25 h atrás sai; a de 23 h fica.
 await p3d.evaluate(() => new Promise((ok) => {
@@ -2079,9 +2103,10 @@ await carregou9c(p4d);
 const r4d = await p4d.evaluate(() => diagAberturasAnteriores.map((a) => a.id));
 const g4d = await guardado9c(p4d);
 const s6d = await selo9c(p4d);
-// O número: a captura pós-download da abertura 2 + a da "fresca" = 2.
+// O número: as duas que a abertura 2 guardou depois do retrato (a do meio do zip
+// e a pós-download) + a da "fresca" = 3.
 diz('a abertura guardada há MAIS de 24 h sai do aparelho; a de 23 h fica, com a captura contando no número',
-  !r4d.includes('velha') && r4d.includes('fresca') && !g4d.abertas.some((a) => a.id === 'velha') && s6d.txt === '2',
+  !r4d.includes('velha') && r4d.includes('fresca') && !g4d.abertas.some((a) => a.id === 'velha') && s6d.txt === '3',
   JSON.stringify({ r4d, g4d, s6d }));
 
 // 5. Desligar o modo dev apaga o que ficou guardado — mas com captura NÃO
@@ -2096,7 +2121,7 @@ await dormir(300);
 const r5a = await p4d.evaluate(async () => ({ memoria: diagAberturasAnteriores.length,
   ativo: AppState.devMode.active, base: (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag') }));
 diz('com captura NÃO baixada, o 1º toque em desligar só AVISA: o interruptor volta e nada é apagado',
-  naoBaixadas === 2 && marcadoDepoisDo1o === true && r5a.ativo === true && r5a.memoria > 0 && r5a.base === true,
+  naoBaixadas === 3 && marcadoDepoisDo1o === true && r5a.ativo === true && r5a.memoria > 0 && r5a.base === true,
   JSON.stringify({ naoBaixadas, marcadoDepoisDo1o, r5a }));
 await desligar9c();
 const apagouDev = await esperarNaPagina(p4d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);

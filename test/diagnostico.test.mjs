@@ -304,7 +304,7 @@ test('o selo do FAB e o aviso do desligar contam SÓ o que a pessoa registrou', 
     'o aviso do desligar esqueceu as capturas guardadas de aberturas anteriores — desligar as apaga');
   assert.match(nao, /dlogJaBaixados\.has\(m\)/, 'o aviso deixou de saber quais já foram baixadas');
   // Baixado é MARCADO no momento; a contagem antiga mentia quando o anel girava.
-  assert.match(fatia('baixarDiagnostico'), /dlogMarcarBaixados\(\);/,
+  assert.match(fatia('baixarDiagnostico'), /dlogMarcarBaixados\(corpo\.entregue\.momentos\);/,
     'baixar o relatório parou de marcar o que foi baixado — o aviso do desligar mentiria');
   assert.doesNotMatch(semCom, /\bdlogBaixados\b/,
     'voltou o contador de baixados — com o anel cheio ele dizia "0 não baixados" com captura nova');

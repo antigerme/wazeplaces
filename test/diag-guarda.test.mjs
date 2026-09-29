@@ -197,10 +197,11 @@ test('as gravações andam em FILA, e o retrato é tirado depois do await', () =
 
 test('o que foi guardado SAI ao baixar, ao desligar o modo dev e no Sair', () => {
   const baixar = fatiar('baixarDiagnostico');
-  const iMarca = baixar.indexOf('dlogMarcarBaixados();');
+  const iMarca = baixar.indexOf('dlogMarcarBaixados(corpo.entregue.momentos);');
   const iApaga = baixar.indexOf('diagEsquecerGuardado();');
   assert.ok(iMarca > 0 && iApaga > iMarca, 'baixar tem que apagar o guardado — já foi entregue');
-  assert.match(baixar, /diagBaixadoEm = Date\.now\(\);/, 'sem o carimbo, o que já foi entregue volta a ser guardado');
+  assert.match(baixar, /diagBaixadoEm = corpo\.entregue\.em;/,
+    'sem o carimbo do RETRATO, o que já foi entregue volta a ser guardado — ou o que não foi se perde');
   const apagar = fatiar('dlogApagar');
   assert.match(apagar, /diagAberturasAnteriores = \[\];/, 'desligar o dev deixou as guardadas na memória');
   assert.match(apagar, /diagEsquecerGuardado\(\);/, 'desligar o dev deixou as guardadas no aparelho');
@@ -209,8 +210,72 @@ test('o que foi guardado SAI ao baixar, ao desligar o modo dev e no Sair', () =>
 
 test('o número do botão e o aviso do desligar contam as guardadas; baixar as marca', () => {
   const marca = fatiar('dlogMarcarBaixados');
-  assert.match(marca, /for \(const m of diagMomentosAnteriores\(\)\) dlogJaBaixados\.add\(m\);/,
-    'baixar não marca as guardadas — o aviso do desligar diria "não baixadas" do que já foi entregue');
+  assert.match(marca, /: \[\.\.\.dlogMomentos, \.\.\.diagMomentosAnteriores\(\)\];/,
+    'sem a lista do retrato, marcar tem que levar as guardadas também');
+  assert.match(fatiar('diagCorpo'), /momentos: \[\.\.\.momentosNoArquivo, \.\.\.diagMomentosAnteriores\(\)\]/,
+    'o relatório não entrega as guardadas — o aviso do desligar diria "não baixadas" do que já foi entregue');
+});
+
+// ── D11 (auditoria de 2026-09-26): o que chega ENQUANTO o arquivo é montado ──
+// O carimbo do "baixado" era posto no FIM do download, depois de serializar e
+// empacotar: o que entrava no anel nesse intervalo não ia no arquivo e saía da
+// cópia guardada (o registro guarda só o que veio DEPOIS do carimbo), e a
+// captura feita ali era marcada como baixada sem ter ido. Aqui o
+// `baixarDiagnostico` de verdade roda com o empacotador fazendo exatamente isso:
+// uma anotação no diário e uma captura NO MEIO do zip.
+test('D11: o carimbo do "baixado" é o do RETRATO — o que chega durante o zip fica pra cópia guardada', async () => {
+  const R = 1_800_000_000_000;
+  const ctx = {
+    dfatoAnel: [{ t: R - 5, k: 'antes' }], dlogAnel: [],
+    dlogMomentos: [], dlogJaBaixados: new WeakSet(), diagBaixadoEm: 0,
+    diagAberturasAnteriores: [], API: { chamadas: [] }, diagErros: [],
+  };
+  const noArquivo = { t: 'm1', motivo: 'manual' };
+  ctx.dlogMomentos.push(noArquivo);
+  let agora = R;
+  const apagados = [];
+  const deps = {
+    document: { getElementById: () => null, createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
+    URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
+    Blob: class { constructor(p) { this.p = p; } },
+    setTimeout: () => 0, t: (k) => k, APP_VERSION: '2026092601', CompressionStream: function () {},
+    showToast: (msg, tipo) => { if (tipo === 'error') throw new Error('o download falhou: ' + msg); },
+    atualizarFabDev: () => {}, diagEsquecerGuardado: () => apagados.push(agora),
+    Date: class extends Date { static now() { return agora; } },
+    // O relatório: o retrato é tirado AGORA (R), com a captura que existe.
+    diagCorpo: async () => {
+      const corpo = { resumo: {} };
+      Object.defineProperty(corpo, 'entregue', { value: { em: agora, momentos: [...ctx.dlogMomentos] } });
+      return corpo;
+    },
+    // O empacotamento leva tempo — e o app segue vivo: uma anotação e uma captura.
+    zipar: async () => {
+      agora = R + 400;
+      ctx.dfatoAnel.push({ t: agora, k: 'durante.zip' });
+      ctx.dlogMomentos.push({ t: 'm2', motivo: 'manual' });
+      agora = R + 900;
+      return new Uint8Array(4);
+    },
+  };
+  const nomes = [...Object.keys(ctx), ...Object.keys(deps)];
+  const app = new Function(...nomes, `
+    ${fatiar('diagMomentosAnteriores')}
+    ${fatiar('dlogMarcarBaixados')}
+    ${fatiar('diagChamadaSemCorpo')}
+    ${fatiar('diagRegistroDaAbertura')}
+    ${fatiar('baixarDiagnostico')}
+    const DIAG_ABERTURA = { id: 'esta', inicio: 1 };
+    return { baixar: baixarDiagnostico, registro: diagRegistroDaAbertura, baixadoEm: () => diagBaixadoEm };
+  `)(...nomes.map((n) => (n in ctx ? ctx[n] : deps[n])));
+  await app.baixar();
+  assert.equal(apagados.length, 1, 'PRÉ-CONDIÇÃO: o download não chegou ao fim');
+  assert.equal(app.baixadoEm(), R, 'o carimbo do baixado foi posto no FIM do download, não no retrato');
+  assert.ok(ctx.dlogJaBaixados.has(noArquivo), 'a captura que FOI no arquivo não ficou marcada');
+  const guardado = app.registro('oculta');
+  assert.deepEqual(guardado.diario.map((e) => e.k), ['durante.zip'],
+    'o que o diário anotou durante o zip sumiu da cópia guardada (e não foi no arquivo)');
+  assert.deepEqual(guardado.momentos.map((m) => m.t), ['m2'],
+    'a captura feita durante o zip foi marcada como baixada sem ter ido no arquivo');
 });
 
 test('o relatório leva as aberturas anteriores, e o resumo acusa o que elas capturaram', () => {

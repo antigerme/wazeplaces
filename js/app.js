@@ -4905,9 +4905,15 @@ const dlogJaBaixados = new WeakSet();
 // As guardadas de aberturas ANTERIORES entram nas duas contas (ver
 // `diagAberturasAnteriores`): o número do botão é "o que vai no próximo
 // relatório", e é isso que precisa sobreviver a fechar o app.
-function dlogMarcarBaixados() {
-    for (const m of dlogMomentos) dlogJaBaixados.add(m);
-    for (const m of diagMomentosAnteriores()) dlogJaBaixados.add(m);
+//
+// `entregues` é a lista do RETRATO do relatório (ver `diagCorpo`): marca só o
+// que FOI no arquivo. Marcar o anel de depois do download levava junto a
+// captura feita enquanto o arquivo era montado e empacotado — ela não ia no
+// arquivo, e sumia do número do botão e da cópia guardada (auditoria de
+// 2026-09-26). Sem a lista, marca tudo o que existe agora.
+function dlogMarcarBaixados(entregues) {
+    const lista = Array.isArray(entregues) ? entregues : [...dlogMomentos, ...diagMomentosAnteriores()];
+    for (const m of lista) dlogJaBaixados.add(m);
 }
 function dlogNaoBaixados() {
     return [...dlogCapturasDoEditor(), ...diagCapturasAnterioresDoEditor()]
@@ -6048,7 +6054,17 @@ async function diagCorpo() {
     // onde ele acabou de aparecer.
     const computado = diagComputado();
     const alertas = diagSentinelas(computado);
-    return {
+    // O RETRATO: o instante em que o diário, as capturas, as chamadas e os erros
+    // entram no arquivo. Tudo daqui pra frente é síncrono até a leitura do
+    // offline, e é ESTE instante — não o fim do download — que separa o que foi
+    // entregue do que fica guardado pra depois. Com o carimbo no fim, o que
+    // entrava no anel enquanto o arquivo era serializado e empacotado não ia no
+    // arquivo e saía da cópia guardada (auditoria de 2026-09-26).
+    const retratoEm = Date.now();
+    const momentosNoArquivo = [...dlogMomentos];
+    const chamadasNoArquivo = (typeof API !== 'undefined' && API.chamadas) ? [...API.chamadas] : [];
+    const errosNoArquivo = [...diagErros];
+    const corpo = {
         _leia_isto: 'Este arquivo contém o waze_session_token, que é CREDENCIAL VIVA da conta do Waze '
             + 'de quem gerou. Trate como senha. Pra anular: sair do app, o que destrói a sessão no '
             + 'servidor; se o app avisar que a limpeza no servidor não completou, o token ainda vale até '
@@ -6123,7 +6139,7 @@ async function diagCorpo() {
         // duplicata — e o `diario` deixa de nascer vazio, que era o buraco que
         // custou a investigação dos modais achatados.
         diario: [...dfatoAnel, ...dlogAnel].sort((a, b) => a.t - b.t),
-        momentos: dlogMomentos,
+        momentos: momentosNoArquivo,
         // O que as aberturas ANTERIORES deixaram guardado no aparelho (só com o
         // modo dev ligado nelas): diário, chamadas sem corpo, erros e as
         // capturas não baixadas, cada abertura com o seu id, início e versão.
@@ -6158,13 +6174,15 @@ async function diagCorpo() {
         serviceWorker: sw,
         offline: await diagOffline(),
         caches: cachesDoAparelho,
-        chamadas: (typeof API !== 'undefined' && API.chamadas) || [],
+        // CÓPIA no retrato, como o diário: a chamada que chegar depois dele fica
+        // pra cópia guardada (ver `retratoEm`), em vez de ir nos dois lugares.
+        chamadas: chamadasNoArquivo,
         recursos,
         // Se a lista de recursos bateu no teto do navegador, o que veio DEPOIS
         // não está nela — e sem este aviso a ausência lê como "não aconteceu".
         recursosInfo: { n: recursos.length, encheu: diagRecursosCheio,
                         teto: dlogLigado() ? DIAG_RECURSOS_TETO : 'padrão do navegador (250)' },
-        erros: diagErros,
+        erros: errosNoArquivo,
         // `currentPlace` É `queue[0]` — o MESMO objeto —, então o `diagSeguro`
         // marcava um dos dois como `[circular]`, e quem perdia era sempre o card
         // que a pessoa estava VENDO. Já custou um remendo do meu lado ao ler um
@@ -6189,6 +6207,12 @@ async function diagCorpo() {
         armazenamento,
         relogio,
     };
+    // Fora do JSON (não enumerável): o que o `baixarDiagnostico` marca como
+    // entregue — o instante do retrato e as capturas que foram no arquivo.
+    Object.defineProperty(corpo, 'entregue', {
+        value: { em: retratoEm, momentos: [...momentosNoArquivo, ...diagMomentosAnteriores()] },
+    });
+    return corpo;
 }
 
 // ── Empacotar o diagnóstico ───────────────────────────────────────────────
@@ -6311,11 +6335,11 @@ async function baixarDiagnostico() {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 30000);
-        dlogMarcarBaixados();
+        dlogMarcarBaixados(corpo.entregue.momentos);
         // Entregue: o que estava guardado no aparelho sai (ver
         // `diagAberturasAnteriores`), e desta abertura só volta a ser guardado
-        // o que acontecer daqui pra frente.
-        diagBaixadoEm = Date.now();
+        // o que veio DEPOIS DO RETRATO — não do fim do download (ver `retratoEm`).
+        diagBaixadoEm = corpo.entregue.em;
         diagEsquecerGuardado();
         atualizarFabDev();
         showToast(t('toast.diagPronto'), 'success');
