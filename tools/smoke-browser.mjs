@@ -3596,6 +3596,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     + '<rect x="60" y="700" width="780" height="150" rx="10" fill="#0f766e"/>'
     + '<text x="450" y="790" font-family="DejaVu Sans" font-size="56" fill="#fff" text-anchor="middle">ODONTODENTE SORRISO</text>'
     + '</svg>').toString('base64');
+  // A mesma fachada EM PÉ (9:16): é a proporção que encosta no campo — a de
+  // 3:4 fica presa pela largura no Pixel sem teclado e mediria o caso fácil.
+  const FOTO_EM_PE = 'data:image/svg+xml;base64,' + Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920">'
+    + '<rect width="1080" height="1920" fill="#93c5fd"/>'
+    + '<rect x="60" y="1120" width="960" height="240" rx="10" fill="#0f766e"/>'
+    + '</svg>').toString('base64');
   const PLACE_REN = {
     venueID: 'v-ren', updateRequestID: 'u-ren', name: 'Odontodente Consultório',
     categories: ['DOCTOR_CLINIC'], address: 'Rua das Flores, 250 - Salvador, Bahia',
@@ -3811,6 +3818,48 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(m.estouroH <= 0, `${onde}: estouro horizontal com teclado ${kb}px`, `${m.estouroH}px`);
     }
     await page.evaluate(() => document.documentElement.style.setProperty('--kb-inset', '0px'));
+
+    // ── COM A TIRA (2+ fotos) a foto também para antes do CAMPO ─────────────
+    // A tira entra no layout e a pílula sobe a altura dela; a foto não subia
+    // junto e corria 18px por baixo do campo nos três aparelhos (auditoria de
+    // 2026-09-26). O laço de cima mede com UMA foto, onde não há tira.
+    const reabrirRen = async (pl) => {
+      await page.evaluate(() => { try { fecharEdicaoNome(); } catch {} Lightbox.close(); });
+      await page.waitForTimeout(200);   // fechar e abrir no mesmo tique dessincroniza o voltar (gotcha #65)
+      await page.evaluate(new Function('a', '(' + montarRen.toString() + ')(a[0],a[1],a[2],a[3])'), [pl, 5, true, false]);
+      await assentar(page);
+      await page.locator('#lightboxNomeBtn').click();
+      await assentar(page);
+    };
+    await reabrirRen({ ...JSON.parse(JSON.stringify(PLACE_REN)),
+      imageUrls: [FOTO_EM_PE + '#u-ren', FOTO_EM_PE + '#aprovada-02'], approvedImageIds: ['aprovada-02'] });
+    for (const pct of [0, 0.45]) {
+      const kb = Math.round(viewport.height * pct);
+      const m = await page.evaluate((px) => {
+        document.documentElement.style.setProperty('--kb-inset', px + 'px');
+        const r = (el) => el.getBoundingClientRect();
+        const lb = document.getElementById('imageLightbox');
+        const inp = r(document.getElementById('lightboxNomeInput'));
+        const foto = document.getElementById('lightboxImage');
+        // A foto RENDERIZADA (object-contain), não a caixa da <img> — ver acima.
+        const el = r(foto);
+        const escala = Math.min(el.width / foto.naturalWidth, el.height / foto.naturalHeight);
+        const base = el.top + (el.height + foto.naturalHeight * escala) / 2;
+        return {
+          tira: lb.classList.contains('com-tira') && !document.getElementById('lightboxStrip').classList.contains('hidden'),
+          editando: lb.classList.contains('editando-nome'), carregou: foto.complete && foto.naturalWidth > 0,
+          sobCampo: Math.round(Math.max(0, base - inp.top)), folga: Math.round(inp.top - base),
+          _dbg: `foto até ${Math.round(base)} · campo ${Math.round(inp.top)}..${Math.round(inp.bottom)} · livre ${innerHeight - px}`,
+        };
+      }, kb);
+      checa(m.tira && m.editando && m.carregou, `${onde}: PRÉ-CONDIÇÃO — sem a tira, sem a edição ou sem a foto (teclado ${kb}px)`, JSON.stringify(m));
+      checa(m.sobCampo === 0, `${onde}: com 2 fotos (tira) e teclado ${kb}px, a foto corre ${m.sobCampo}px por baixo do campo`, m._dbg);
+      // CONTROLE: a foto em pé tem que CHEGAR perto do campo (hoje para a 38px
+      // dele, como com uma foto só). Longe dele, a medida não mediria nada.
+      checa(m.folga <= 60, `${onde}: CONTROLE — a foto em pé parou a ${m.folga}px do campo: a medida está cega`, m._dbg);
+    }
+    await page.evaluate(() => document.documentElement.style.setProperty('--kb-inset', '0px'));
+    await reabrirRen(JSON.parse(JSON.stringify(PLACE_REN)));   // o resto do bloco é com uma foto
 
     // ── ENVIO: medido pela REDE, não pelo DOM ───────────────────────────────
     await page.locator('#lightboxNomeInput').fill('Odontodente Sorriso');
@@ -7536,7 +7585,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`
   + `, + Perto de mim em 2 aparelhos × 2 idiomas (as 3 opções, ordem ponta a ponta, GPS concedido E negado pelo browser, e o perfil sem endereço)`
-  + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, e envio medido pela REDE com Desfazer impedindo)`
+  + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, a foto em pé com a tira de miniaturas parando antes do campo, e envio medido pela REDE com Desfazer impedindo)`
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`

@@ -2091,6 +2091,14 @@ button:active {
 #imageLightbox.editando-nome #lightboxImage {
   max-height: max(4rem, calc(100dvh - var(--kb-inset, 0px) - 9.5rem - env(safe-area-inset-bottom)));
 }
+/* Com 2+ fotos a TIRA entra no layout e a pílula sobe a altura dela
+   (`#imageLightbox.com-tira .lb-nome`), então a foto também tem que parar essa
+   altura antes. Sem isto ela corria 18px por baixo do CAMPO nos três aparelhos
+   medidos (com teclado; e sem teclado no SE e no Fold com foto em pé), onde a
+   mesma foto sozinha, sem tira, para antes dele (auditoria de 2026-09-26). */
+#imageLightbox.com-tira.editando-nome #lightboxImage {
+  max-height: max(4rem, calc(100dvh - var(--kb-inset, 0px) - 9.5rem - var(--lb-tira) - env(safe-area-inset-bottom)));
+}
 
 /* ── Comentário do reporte: ROLA dentro da própria caixa ───────────────────
    A caixa é uma JANELA de N linhas inteiras, e o resto rola DENTRO dela. Não
