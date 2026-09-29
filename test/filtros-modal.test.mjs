@@ -252,7 +252,8 @@ test('F12: o "Sair" repõe os MESMOS filtros do app recém-aberto', () => {
 test('F12: depois do "Sair", trocar SÓ a ordem não vira busca (os pulados não voltam)', () => {
   const deps = { API: { getRegion: () => 'row', getCountry: () => '30' } };
   const AppState = { filters: filtrosDoSair() };
-  const assinatura = new Function('AppState', 'API', fatiar('assinaturaDeBusca') + '\nreturn assinaturaDeBusca;')(AppState, deps.API);
+  const assinatura = new Function('AppState', 'API', fatiar('ordemDoWaze') + '\n' + fatiar('assinaturaDeBusca')
+    + '\nreturn assinaturaDeBusca;')(AppState, deps.API);
   const antes = assinatura();
   // O que o "Aplicar" escreve, com a tela mostrando os mesmos filtros — só a ordem mudou.
   const aplicar = fatiar('applyFiltersFromModal');
@@ -260,6 +261,9 @@ test('F12: depois do "Sair", trocar SÓ a ordem não vira busca (os pulados não
   assert.ok(escritos.includes('categories') && escritos.includes('sortOrder'), 'o instrumento não achou o que o "Aplicar" escreve');
   const f = AppState.filters;
   f.categories = Array.isArray(f.categories) ? f.categories : [];
-  f.sortOrder = 'oldest';
+  // Uma ordem que não muda o que se pede ao Waze ("Perto de casa"): "Mais
+  // antigos" muda (pede ASC — ver a F8, em test/ordem-paginada.test.mjs) e
+  // refaz a fila de propósito.
+  f.sortOrder = 'casa';
   assert.equal(assinatura(), antes, 'trocar só a ordem mudou a assinatura: vira busca e os pulados voltam');
 });

@@ -88,10 +88,11 @@ function montar({ fila = [], naTela = true, pendentesNoWaze = [], painel = false
     bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(fila.map(chave)), pousosDaPagina: new Map(),
     pedidosEmAndamento: new Set(), console: { error: () => {} }, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     document: { getElementById: (id) => (id === 'noMoreCards' ? { classList: { contains: (c) => painelClasses.has(c) } } : null) },
+    ORDEM_PADRAO: 'newest', refazerPerfilSeFaltar: () => {},
   };
   const nomes = ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'tirarDaFilaDeSaida',
     'marcarNaSaida', 'handleActionResult', 'registrarPousoDeSaida', 'semOsJaDecididos', 'registrarEntradaNaFila',
-    'semOsQueJaPassaramPelaFila', 'fetchNextPage', 'puladosNestaFila', 'filaZeradaConfirmada'];
+    'semOsQueJaPassaramPelaFila', 'fetchNextPage', 'puladosNestaFila', 'filaZeradaConfirmada', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
   // O conserto mora numa função nova: no código de antes ela não existe, e o
   // teste tem de reprovar pelo COMPORTAMENTO, não por não achar a função.
   if (achar('devolverPedidoRecusado')) nomes.push('devolverPedidoRecusado');

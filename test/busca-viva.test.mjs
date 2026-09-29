@@ -85,7 +85,8 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
   const AppState = {
     authenticated: true, hasMore: true, fetching: false, fetchEpoch: 0, queue: [], currentPlace: null,
     serverTotal: 0, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null,
-    filters: { unreadOnly, types: TYPES_ALL.slice(), residential: '', myArea: false, stateId: '', managedAreaId: '', categories: [] },
+    filters: { unreadOnly, types: TYPES_ALL.slice(), residential: '', myArea: false, stateId: '', managedAreaId: '', categories: [],
+      sortOrder: 'newest' },
     profile: null,
   };
   const contadores = [];
@@ -107,8 +108,12 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     console: { error: () => {} },
     // O LUGAR da busca (a fila guardada do offline diz de onde é — ver `filaDeOnde`).
     lugarAgora: () => ({ regiao: 'row', pais: '30' }),
+    // A ordem da fila (F8): com a padrão, a busca é a de sempre — e a
+    // ordem-paginada.test.mjs mede as outras.
+    ORDEM_PADRAO: 'newest',
   };
-  const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage']
+  const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
+    'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'fetchNextPage']
     .map(fatiar).join('\n');
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + '\nreturn { fetchNextPage };')(...nomes.map((n) => deps[n]));
@@ -429,7 +434,7 @@ function montarAlarmeFalso(waze, { um401NaBusca }) {
     MAX_REBUSCAS_AUTO: constante('MAX_REBUSCAS_AUTO'), startFetching: () => {}, showCurrentPlace: () => {},
   };
   const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
-    'fetchNextPage', 'maybePrefetch', 'rebuscarDepoisDeFalha'].map(fatiar).join('\n');
+    'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'maybePrefetch', 'rebuscarDepoisDeFalha'].map(fatiar).join('\n');
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + '\nreturn { fetchNextPage, maybePrefetch, rebuscarDepoisDeFalha };')(...nomes.map((n) => deps[n]));
   ctl.rebuscar = app.rebuscarDepoisDeFalha;

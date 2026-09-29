@@ -1694,6 +1694,15 @@ async function resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx
   };
 }
 
+// A ordem que o cliente pode pedir ao Waze, por LISTA BRANCA (é valor que vai no
+// corpo de uma requisição ao Waze em nome da pessoa). MEDIDO em 2026-09-26, só
+// leitura, conta do owner (Brasil, não lidos): o `SORTING_UPDATE_TIME_ASC` é
+// aceito (HTTP 200) e a página 1 muda — 464 pedidos, o mais novo às 09:20,
+// contra 502 e 12:21 no DESC. O critério é a hora de atualização do LOCAL, não
+// a data do pedido (a página 1 do DESC trouxe também o pedido mais antigo de
+// todos, de um local atualizado há pouco): a ordem fina segue sendo do cliente.
+const ORDENS_DA_BUSCA = new Set(['SORTING_UPDATE_TIME_DESC', 'SORTING_UPDATE_TIME_ASC']);
+
 async function handleBuscarPlaces(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
@@ -1708,6 +1717,7 @@ async function handleBuscarPlaces(data, { sessions }) {
   const filterCategories = Array.isArray(data.categories) && data.categories.length > 0 ? data.categories : null;
   const residential = data.residential !== undefined ? !!data.residential : null;
   const unreadOnly = data.unreadOnly !== undefined ? !!data.unreadOnly : true;
+  const orderBy = ORDENS_DA_BUSCA.has(data.orderBy) ? data.orderBy : 'SORTING_UPDATE_TIME_DESC';
 
   const payload = {
     fromCreationTime: null,
@@ -1737,7 +1747,7 @@ async function handleBuscarPlaces(data, { sessions }) {
       // continuaria aqui de qualquer jeito — e um filtro que não filtra tudo
       // sozinho é o tipo de meia-verdade que faz o contador mentir.
       types: null,
-      orderBy: 'SORTING_UPDATE_TIME_DESC',
+      orderBy,
     },
   };
 

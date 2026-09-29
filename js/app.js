@@ -226,6 +226,27 @@ const STATE_RECOVERY_MS = 200;
 // morta). O resto do "Perto de mim" mora na seção dele.
 const ORDEM_PADRAO = 'newest';
 
+// A ordem que se pede ao WAZE. Ele só ordena pela hora de atualização do LOCAL
+// (MEDIDO em 2026-09-26, só leitura, conta do owner: o `SORTING_UPDATE_TIME_ASC`
+// é aceito, HTTP 200, e muda a página 1 — mas o critério não é a data do pedido,
+// então a ordem fina segue sendo do aparelho). "⏳ Mais antigos" pede do mais
+// antigo pro mais novo, e a página 1 já vem perto do certo; as outras vão como
+// sempre.
+function ordemDoWaze() {
+    return AppState.filters.sortOrder === 'oldest' ? 'SORTING_UPDATE_TIME_ASC' : 'SORTING_UPDATE_TIME_DESC';
+}
+
+// Uma ordem que NÃO é a do Waze ("Mais antigos", "Perto de…") só vale sobre a
+// fila INTEIRA. Até 500 pedidos ela vem numa página; acima disso a busca parava
+// na primeira que bastasse, e a ordem valia só pra ela — MEDIDO na fila do owner
+// (554 não lidos): o mais antigo, e o mais perto de casa, só apareciam no card
+// 499 (auditoria da fila, 2026-09-26). Com ela, a busca lê as páginas seguintes
+// ANTES de ordenar: uma requisição a mais por página, só pra quem escolheu a
+// ordem e tem mais de 500 pedidos.
+function ordemPrecisaDaFilaInteira() {
+    return AppState.filters.sortOrder !== ORDEM_PADRAO;
+}
+
 // Os filtros DE FÁBRICA — fonte ÚNICA do app recém-aberto e do "Sair". O "Sair"
 // repunha um literal próprio, SEM `categories` e SEM `sortOrder`: quem saía e
 // entrava de novo sem fechar o app ficava com filtros diferentes, e trocar SÓ a
@@ -3223,7 +3244,11 @@ function applyFiltersFromModal() {
 function assinaturaDeBusca() {
     const { sortOrder, ...doServidor } = AppState.filters;
     const chaves = Object.keys(doServidor).sort();
-    return JSON.stringify([chaves.map((k) => [k, doServidor[k]]), API.getRegion(), API.getCountry()]);
+    // A ordem entra só pelo que ela muda NO PEDIDO ao Waze (`ordemDoWaze`):
+    // "Mais recentes" ↔ "Mais antigos" refaz a fila, com o outro `orderBy`; a
+    // de distância pede o mesmo que o padrão e só reordena (e traz o resto: ver
+    // `reordenarFilaNaTela`).
+    return JSON.stringify([chaves.map((k) => [k, doServidor[k]]), API.getRegion(), API.getCountry(), ordemDoWaze()]);
 }
 
 // Reordena e mostra o novo topo. O card na tela TROCA, e isso é o certo: a
@@ -3240,6 +3265,19 @@ function reordenarFilaNaTela() {
     removeCurrentCardEl();
     showCurrentPlace();
     updatePendingCount();
+    // A ordem escolhida só vale sobre a fila inteira: com páginas ainda no
+    // Waze, elas vêm AGORA — a próxima busca só sairia com 3 cards na fila.
+    if (ordemPrecisaDaFilaInteira()) buscarORestoDaFila();
+}
+
+// Traz as páginas que faltam (ver `ordemPrecisaDaFilaInteira`). O que chega
+// entra na ordem a partir do PRÓXIMO card (`ordemPendente`): trocar o da tela
+// seria trocar o card debaixo do dedo. É o `maybePrefetch` sem o limiar.
+function buscarORestoDaFila() {
+    if (Treino.ativo || !AppState.hasMore || AppState.fetching) return;
+    fetchNextPage().then(() => {
+        if (!AppState.currentPlace && AppState.queue.length > 0) showCurrentPlace();
+    });
 }
 
 // Teclas que pertencem ao CURSOR quando o foco está num campo de texto.
@@ -6818,8 +6856,12 @@ function pontoDoPlace(p) {
     return null;
 }
 
-// Ordena a fila por data do pedido conforme AppState.filters.sortOrder. Client-side:
-// o Waze devolve tudo de uma vez, então ordenar localmente é confiável (B6).
+// Ordena a fila conforme AppState.filters.sortOrder, no aparelho — sobre a fila
+// que ESTÁ nele. Até 500 pedidos o Waze a devolve numa página só; acima disso
+// ela vem em páginas, e uma ordem que não é a do Waze só vale depois de a busca
+// trazer todas (ver `ordemPrecisaDaFilaInteira`). Este comentário dizia que "o
+// Waze devolve tudo de uma vez" — e com 554 pedidos o mais antigo aparecia no
+// card 499 (auditoria da fila, 2026-09-26).
 function sortQueue() {
     const ref = referenciaDaOrdem(AppState.filters.sortOrder);
     if (ref) {
@@ -7137,6 +7179,9 @@ function fetchNextPage() {
     if (Array.isArray(AppState.filters.categories) && AppState.filters.categories.length > 0) {
         filters.categories = AppState.filters.categories; // backend filtra server-side (core.mjs já aceita)
     }
+    // Só quando não é a de sempre: o corpo da busca padrão segue igual.
+    const orderBy = ordemDoWaze();
+    if (orderBy !== 'SORTING_UPDATE_TIME_DESC') filters.orderBy = orderBy;
 
     // A BUSCA RELÊ A PARTIR DA PÁGINA 1 — sempre, e nunca "a próxima página".
     // MEDIDO em 2026-09-25, na fila real do Brasil e só lendo: o Waze conta a
@@ -7303,7 +7348,10 @@ function fetchNextPage() {
                 semNadaSeguidas = (result.places || []).length > 0 ? 0 : semNadaSeguidas + 1;
 
                 if (!result.hasMore) break;
-                if (busca.novos > 0 && AppState.queue.length > PREFETCH_THRESHOLD) break;
+                // Com uma ordem que não é a do Waze, a busca segue pelas páginas
+                // até o fim (ou o teto): ordenar só a primeira era a ordem valendo
+                // pra 500 de 554 (ver `ordemPrecisaDaFilaInteira`).
+                if (busca.novos > 0 && AppState.queue.length > PREFETCH_THRESHOLD && !ordemPrecisaDaFilaInteira()) break;
                 if (semNadaSeguidas >= MAX_EMPTY_PAGES || busca.paginas >= MAX_PAGINAS_POR_BUSCA) {
                     // Desistimos com o Waze ainda dizendo hasMore → o que contamos
                     // até aqui (inclusive `blocked`) é um PISO, não o total. Sem

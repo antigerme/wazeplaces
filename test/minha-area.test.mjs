@@ -71,11 +71,12 @@ function montar({ profile = null } = {}) {
     startFetching: () => log.push('busca'),
     // O `resetQueue` é o de VERDADE: é ele que diz que a fila nova não espera mais o perfil.
     removeUndoBanner: () => {}, offlineEsquecerFilaDeOutroLugar: () => {},
+    ORDEM_PADRAO: 'newest',
   };
   AppState.stats = { read: 0, rejected: 0, skipped: 0 };
   AppState.pendingAction = null;
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
-    'completarPerfilChegado', 'resetQueue'];
+    'completarPerfilChegado', 'resetQueue', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
   for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa']) if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
