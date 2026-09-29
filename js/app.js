@@ -3816,10 +3816,19 @@ async function paisDoPerfil(perfil, epoca) {
 }
 
 async function irProPaisDoPerfil({ regiao, pais }) {
+    const epoca = epocaDaSessao;
     if (regiao !== API.getRegion()) {
+        // A lista da região NOVA é pedida ANTES de a região valer (o
+        // `listCountries` aceita a região), e nada muda se a sessão acabou
+        // durante a espera: o "Sair" repõe região e país, e a região daqui
+        // gravada antes do `await` deixava o par trocado (a região de quem
+        // entrou com o país que o "Sair" repôs) — e o país de quem saiu voltava
+        // ao aparelho, com o aviso na tela de entrada (auditoria da costura,
+        // 2026-09-26, K12).
+        const r = await API.listCountries(regiao);
+        if (epoca !== epocaDaSessao) return;
         API.setRegion(regiao);
         AppState.statesByCountry = {};
-        const r = await API.listCountries();
         AppState.countries = r && r.success ? r.countries : [];
     }
     API.setCountry(pais);

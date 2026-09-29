@@ -873,3 +873,57 @@ test('K11: o 1º perfil barrado por um 401 passageiro — os países que chegara
   assert.equal(AppState.countries.length, 2, 'DEFEITO: os países que chegaram na abertura foram jogados fora');
   assert.ok(toasts.includes('toast.paisDoPerfil(France)'), 'o aviso do país saiu sem o nome: ' + toasts.join(' | '));
 });
+
+// ═══ K12 · a ida pro país do perfil confere a sessão depois do await ═════════
+
+function montarIrProPais() {
+  const guardado = { regiao: 'row', pais: '30' };
+  const toasts = [];
+  let soltar;
+  const AppState = { authenticated: true, statesByCountry: {}, countries: [], filters: { stateId: '9', managedAreaId: '' } };
+  const deps = {
+    AppState, epocaDaSessao: 0, t: (k) => k, showToast: (m) => toasts.push(m),
+    API: {
+      getRegion: () => guardado.regiao, setRegion: (r) => { guardado.regiao = r; },
+      getCountry: () => Number(guardado.pais), setCountry: (p) => { guardado.pais = String(p); },
+      // Como o `API.listCountries` de verdade: sem a região, vale a GRAVADA.
+      listCountries: (regiao) => new Promise((ok) => {
+        const de = regiao || guardado.regiao;
+        soltar = () => ok({ success: true, countries: de === 'na' ? [{ id: 235, name: 'United States' }] : [{ id: 30, name: 'Brazil' }] });
+      }),
+    },
+  };
+  const h = montar(['irProPaisDoPerfil'], deps);
+  return { h, deps, guardado, toasts, soltar: () => soltar() };
+}
+
+test('K12: "Sair" durante a espera da lista de países — o país de quem saiu não volta, nem o aviso', async () => {
+  const m = montarIrProPais();
+  const p = m.h.irProPaisDoPerfil({ regiao: 'na', pais: 235 });   // A edita nos EUA
+  m.deps.epocaDaSessao++;                                          // o "Sair" (repõe região e país)
+  m.deps.API.setRegion('row'); m.deps.API.setCountry(30);
+  m.soltar();
+  await p;
+  assert.deepEqual(m.guardado, { regiao: 'row', pais: '30' }, 'DEFEITO: o país de quem saiu foi regravado depois do "Sair"');
+  assert.deepEqual(m.toasts, [], 'o aviso do país saiu na tela de entrada');
+  assert.ok(!m.h.chamou.includes('resetQueue'), 'a fila foi refeita depois do "Sair"');
+});
+
+test('K12: a QUEDA durante a espera não deixa o par trocado (a região nova com o país velho)', async () => {
+  const m = montarIrProPais();
+  const p = m.h.irProPaisDoPerfil({ regiao: 'na', pais: 235 });
+  m.deps.epocaDaSessao++;                                          // a queda: região e país ficam como estão
+  m.soltar();
+  await p;
+  assert.deepEqual(m.guardado, { regiao: 'row', pais: '30' }, 'DEFEITO: região e país ficaram de lugares diferentes');
+});
+
+test('K12: CONTROLE — sem a sessão acabar, vai pro país do perfil, pedindo a lista DA REGIÃO NOVA', async () => {
+  const m = montarIrProPais();
+  const p = m.h.irProPaisDoPerfil({ regiao: 'na', pais: 235 });
+  m.soltar();
+  await p;
+  assert.deepEqual(m.guardado, { regiao: 'na', pais: '235' });
+  assert.deepEqual(m.toasts, ['toast.paisDoPerfil']);
+  assert.equal(m.deps.AppState.countries[0].name, 'United States');
+});
