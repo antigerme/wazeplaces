@@ -9017,7 +9017,7 @@ function linkStreetView(centro) {
 }
 
 const MapaLightbox = {
-    centro: null, z: 16, pontos: [], _tiles: new Map(), _falhos: new Set(), _inicial: null, _local: null,
+    centro: null, z: 16, pontos: [], _tiles: new Map(), _falhos: new Set(), _fora: [], _inicial: null, _local: null,
     isOpen() { return !document.getElementById('mapaLightbox').classList.contains('hidden'); },
 
     open(place) {
@@ -9035,6 +9035,10 @@ const MapaLightbox = {
         if (!enq) return;   // nenhuma coordenada válida: o card nem desenha o mapa
         this.z = enq.z;
         this.centro = enq.centro.slice();
+        // Os pontos que não cabem em zoom NENHUM da navegação (ex.: um movimento
+        // de 2.500 km): o `desenharMarcas` os diz em palavra enquanto não estão
+        // na tela, como o card faz.
+        this._fora = (enq.foraDoMapa || []).slice();
         // O ponto do PEDIDO, guardado à parte do enquadramento: o `centro` acima
         // é a média dos marcadores (local + entradas + posição proposta +
         // duplicado), que em 31% dos pedidos NÃO é o local.
@@ -9180,10 +9184,29 @@ const MapaLightbox = {
             marks.appendChild(e);
         });
         escreverEscala(document.getElementById('mapaLbEscala'), g.metrosPorPixel, ESCALA_ALVO_AMPLIADO_PX);
+        // O que está NA TELA agora (o centro do marcador dentro da caixa). A
+        // legenda, como a do card, fala só do que se vê — prometer um marcador
+        // que não está na tela faz o editor procurar o que não existe. E o ponto
+        // que não cabe em zoom nenhum (`_fora`), enquanto não está na tela, é
+        // dito em palavra pelo MESMO aviso do card: o ampliado de um movimento
+        // de 2.500 km mostrava só o local, calado, com "depois" na legenda
+        // (auditoria de 2026-09-26). Arrastando até ele, o aviso sai e a legenda
+        // o ganha.
+        const caixa = document.getElementById('mapaLightbox');
+        const w = caixa.clientWidth || innerWidth, h = caixa.clientHeight || innerHeight;
+        const naTela = (i) => px[i].left >= 0 && px[i].left <= w && px[i].top >= 0 && px[i].top <= h;
+        const foraAgora = (this._fora || []).filter((i) => this.pontos[i] && !naTela(i));
+        if (foraAgora.length) {
+            const aviso = document.createElement('span');
+            aviso.className = 'mapa-fora';
+            aviso.textContent = avisoForaDoMapa(this.pontos, foraAgora, 0);
+            marks.appendChild(aviso);
+        }
         const leg = document.getElementById('mapaLbLegenda');
         leg.textContent = '';
         const ja = new Set();
-        for (const p of this.pontos) {
+        for (const [i, p] of this.pontos.entries()) {
+            if (!naTela(i)) continue;
             if (ja.has(p.rot)) continue;
             ja.add(p.rot);
             const sp = document.createElement('span');

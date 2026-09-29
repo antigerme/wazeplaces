@@ -6,6 +6,8 @@
 // js/mapa.js e só o DOM de mentira.
 //  - L17: o tile que FALHA não é pedido de novo a cada quadro do arraste
 //    (medido: 432 pedidos num arraste de 40 px, o mesmo tile até 30×).
+//  - L16: o ponto que não cabe em zoom nenhum é DITO (o aviso do card) e a
+//    legenda fala só do que está na tela.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -62,7 +64,7 @@ function mapa({ w = 412, h = 915 } = {}) {
   };
   const helpers = ['escreverEscala', 'avisoForaDoMapa', 'formatarMetros', 'distanciaKm'].map(fatiar).join('\n');
   const obj = new Function(...Object.keys(deps), helpers + `\nreturn {
-    centro: null, z: 16, pontos: [], _tiles: new Map(), _falhos: new Set(),
+    centro: null, z: 16, pontos: [], _tiles: new Map(), _falhos: new Set(), _fora: [],
     atualizarStreetView() {},
     ${metodo('desenhar')},
     ${metodo('desenharMarcas')}
@@ -83,4 +85,40 @@ test('L17 o tile que FALHOU não é pedido de novo a cada quadro do arraste', ()
   assert.equal(els.mapaLbTiles.children.length, 0);
   // E reabrir tenta de novo: o `open` esquece o que falhou.
   assert.match(metodo('open'), /this\._falhos\.clear\(\);/, 'reabrir o mapa não tenta de novo os tiles que falharam');
+});
+
+// Um movimento de 2.510 km leste-oeste (o caso medido): não cabe nem no z4.
+const LOCAL = [-23.55, -46.63], LONGE = [-23.55, -22.0];
+const pontos = () => [
+  { ll: LOCAL, cls: 'mapa-atual', rot: 'card.map.antes' },
+  { ll: LONGE, cls: 'mapa-proposto', rot: 'card.map.depois', fora: 'card.map.foraDoMapa', distM: 2510000 },
+];
+const legenda = (els) => els.mapaLbLegenda.children.map((s) => s.children[1].textContent);
+const aviso = (els) => (els.mapaLbMarks.children.find((e) => e.className === 'mapa-fora') || {}).textContent || null;
+
+test('L16 o ponto que não cabe em zoom nenhum: o ampliado AVISA, e a legenda não o promete', () => {
+  const { obj, els } = mapa();
+  const enq = M.mapaEnquadrarAmpliado(pontos().map((p) => p.ll), 412, 915, 'row');
+  assert.deepEqual(enq.foraDoMapa, [1], 'PRÉ-CONDIÇÃO: o ponto longe tinha que não caber');
+  Object.assign(obj, { centro: enq.centro, z: enq.z, pontos: pontos(), _fora: enq.foraDoMapa });
+  obj.desenhar();
+  assert.match(aviso(els) || '', /^card\.map\.foraDoMapa\{/, `o ampliado não disse que a proposta ficou fora: ${aviso(els)}`);
+  assert.match(aviso(els) || '', /2[.,\u00a0 ]?510/, 'o aviso não traz a distância');
+  assert.deepEqual(legenda(els), ['card.map.antes'], 'a legenda prometeu o marcador que está a 2.500 km, fora da tela');
+  // Arrastando até o ponto longe, ele entra na tela: o aviso sai e a legenda o ganha.
+  obj.centro = LONGE.slice();
+  obj.desenhar();
+  assert.equal(aviso(els), null, 'o aviso ficou com o ponto NA TELA');
+  assert.deepEqual(legenda(els), ['card.map.depois']);
+});
+
+test('L16 CONTROLE: o pedido que cabe não ganha aviso, e a legenda tem os dois', () => {
+  const { obj, els } = mapa();
+  const perto = [LOCAL, [LOCAL[0] + 0.0004, LOCAL[1]]];
+  const ps = pontos(); ps[1].ll = perto[1];
+  const enq = M.mapaEnquadrarAmpliado(perto, 412, 915, 'row');
+  Object.assign(obj, { centro: enq.centro, z: enq.z, pontos: ps, _fora: enq.foraDoMapa });
+  obj.desenhar();
+  assert.equal(aviso(els), null);
+  assert.deepEqual(legenda(els), ['card.map.antes', 'card.map.depois']);
 });

@@ -7405,6 +7405,44 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.page.waitForTimeout(400);
     const voltou = await naTela();
     checa(voltou.length === 2 && voltou.every(Boolean), `${id}: o "Voltar ao pedido" voltou pro vazio`, JSON.stringify(voltou));
+    // CONTROLE do L16 (abaixo): com os dois pontos na tela, nenhum aviso de
+    // "fora do mapa" e a legenda com os dois.
+    const ctl = await g.page.evaluate(() => ({ aviso: !!document.querySelector('#mapaLbMarks .mapa-fora'),
+      legenda: document.querySelectorAll('#mapaLbLegenda .mapa-leg').length }));
+    checa(!ctl.aviso && ctl.legenda === 2, `${id}: com os dois pontos na tela, apareceu aviso ou a legenda perdeu um`, JSON.stringify(ctl));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    // L16: um movimento de 2.510 km não cabe nem no z4 (o mais aberto). O card
+    // avisava ("a posição proposta está a 2.510 km — fora deste mapa"); o
+    // ampliado abria calado, com "Depois" na legenda de um marcador fora da tela.
+    const id = 'mapa/L16: mapa ampliado de um movimento de 2.510 km';
+    const longe = [centro[0], centro[1] + 24.6];
+    const g = await gestosPagina({ viewport: { width: 393, height: 852 } }, [gestosDaFixture(19, 'fZ', { imageUrls: [],
+      mapa: { centro, proposto: longe, movidoM: 2510000, entradas: [] } })]);
+    const card = await g.page.evaluate(() => (cardDaFrente().querySelector('.mapa-fora') || {}).textContent || null);
+    checa(!!card, `${id}: PRÉ-CONDIÇÃO — o card não avisou (o ponto devia não caber)`);
+    await g.page.locator('#cardStack .place-card:not(.card-fundo) .card-map').click();
+    await g.page.waitForTimeout(600);
+    const r = await g.page.evaluate(() => {
+      const av = document.querySelector('#mapaLbMarks .mapa-fora');
+      const ra = av && av.getBoundingClientRect();
+      const marcas = [...document.querySelectorAll('#mapaLbMarks .mapa-marca')].map((e) => {
+        const b = e.getBoundingClientRect();
+        return { cls: e.className.replace('mapa-marca ', ''), naTela: b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight };
+      });
+      // O aviso NÃO pode virar alvo: arrastar o mapa por cima dele tem que andar.
+      const noAviso = ra ? document.elementFromPoint(ra.left + ra.width / 2, ra.top + ra.height / 2) : null;
+      return { aviso: av ? av.textContent : null, marcas,
+        legenda: [...document.querySelectorAll('#mapaLbLegenda .mapa-leg')].map((e) => e.textContent.trim()),
+        avisoRoubaODedo: !!(noAviso && noAviso.closest && noAviso.closest('.mapa-fora')) };
+    });
+    const fora = r.marcas.filter((m) => !m.naTela).map((m) => m.cls);
+    checa(fora.length === 1, `${id}: PRÉ-CONDIÇÃO — esperava UM marcador fora da tela`, JSON.stringify(r.marcas));
+    checa(r.aviso === card, `${id}: o ampliado não disse o que ficou fora (ou disse outra coisa que o card)`, `${r.aviso} vs ${card}`);
+    checa(r.legenda.length === 1, `${id}: a legenda prometeu o marcador que está fora da tela`, JSON.stringify(r.legenda));
+    checa(!r.avisoRoubaODedo, `${id}: o aviso recebe o dedo — arrastar o mapa por cima dele não anda`);
     checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
     await g.fechar();
   }
@@ -7511,6 +7549,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
-  + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, e a pílula do nome em edição no Fold)`
+  + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

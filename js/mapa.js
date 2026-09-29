@@ -322,7 +322,10 @@ function mapaGrade(centroLL, z, larguraPx, alturaPx, região) {
 // TODOS os pontos cabem. É a regra do card no alcance do ampliado — o que cabe
 // num zoom que o mapa tem é MOSTRADO, não empurrado pra fora da tela. Só se nem
 // o zoom mais aberto der conta fica o enquadramento do card (o primeiro ponto
-// e os que cabem com ele), que é o que o card já mostrava e dizia em palavra.
+// e os que cabem com ele), que é o que o card já mostrava e dizia em palavra —
+// e aí `foraDoMapa` diz quais ficaram de fora, pra quem desenha dizer também
+// (até a auditoria de 2026-09-26 o ampliado não avisava nada, e a legenda
+// prometia o marcador que estava a 2.500 km, fora da tela).
 function mapaEnquadrarAmpliado(pontos, larguraPx, alturaPx, região) {
   const r = mapaMontar(pontos, larguraPx, alturaPx, região);
   if (!r) return null;
@@ -331,12 +334,12 @@ function mapaEnquadrarAmpliado(pontos, larguraPx, alturaPx, região) {
     (Math.min(...lls.map((l) => l[1])) + Math.max(...lls.map((l) => l[1]))) / 2,
   ];
   const desenhados = r.idx.map((i) => pontos[i]);
-  if (!r.foraDoMapa.length) return { z: r.z, centro: meio(desenhados) };
+  if (!r.foraDoMapa.length) return { z: r.z, centro: meio(desenhados), foraDoMapa: [] };
   const todos = [...desenhados, ...r.foraDoMapa.map((i) => pontos[i])];
   for (let z = MAPA_Z_MIN - 1; z >= MAPA_Z_NAV_MIN; z--) {
-    if (mapaCabe(todos, larguraPx, alturaPx, z)) return { z, centro: meio(todos) };
+    if (mapaCabe(todos, larguraPx, alturaPx, z)) return { z, centro: meio(todos), foraDoMapa: [] };
   }
-  return { z: r.z, centro: meio(desenhados) };
+  return { z: r.z, centro: meio(desenhados), foraDoMapa: r.foraDoMapa.slice() };
 }
 
 if (typeof window !== 'undefined') {

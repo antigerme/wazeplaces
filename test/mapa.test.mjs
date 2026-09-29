@@ -197,6 +197,22 @@ test('C4 CONTROLE: pedido que cabe abre no MESMO enquadramento de antes (o do ca
   assert.equal(M.mapaEnquadrarAmpliado([[0, 0]], W, H, 'row'), null, 'sem coordenada válida não há enquadramento');
 });
 
+test('L16 o enquadramento do ampliado diz QUAIS pontos ficaram fora (só quando nem o z4 dá conta)', () => {
+  // O ampliado não avisava nada e a legenda prometia o marcador que estava a
+  // 2.500 km, fora da tela (auditoria de 2026-09-26). Quem desenha precisa
+  // saber quais ficaram de fora — e só esses: o que cabe num zoom da
+  // navegação é MOSTRADO, e aviso ali seria ruído.
+  const W = 393, H = 852;
+  const outroContinente = [AMBEV_ANTES[0] + 40, AMBEV_ANTES[1] + 90];
+  const x = M.mapaEnquadrarAmpliado([AMBEV_ANTES, AMBEV_DEPOIS, outroContinente], W, H, 'row');
+  assert.deepEqual(x.foraDoMapa, [2], 'o ponto de outro continente não saiu como "fora do mapa"');
+  // CONTROLES: o que cabe no card, e o que só cabe num zoom da navegação.
+  assert.deepEqual(M.mapaEnquadrarAmpliado([AMBEV_ANTES, AMBEV_DEPOIS], W, H, 'row').foraDoMapa, []);
+  const longe = [AMBEV_ANTES[0] + 82000 / 111320, AMBEV_ANTES[1]];
+  assert.deepEqual(M.mapaEnquadrarAmpliado([AMBEV_ANTES, longe], W, H, 'row').foraDoMapa, [],
+    '82 km cabem num zoom da navegação: não é "fora do mapa"');
+});
+
 test('tiles: URL da camada certa, região respeitada, e poucos por card', () => {
   const r = M.mapaMontar([AMBEV_ANTES, AMBEV_DEPOIS], 412, 250, 'row');
   assert.ok(r.tiles.length >= 1 && r.tiles.length <= 4);
