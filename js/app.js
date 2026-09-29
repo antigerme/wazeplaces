@@ -6478,12 +6478,17 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // o que estava aberto por cima ANTES de ela (e do diálogo) aparecer.
     if (typeof depois === 'function') { fecharCamadasAbertas(depois); return; }
     const epoca = epocaDaSessao;
+    const filaDaQueda = AppState.fetchEpoch;   // a fila na tela, que a renovação mantém
     entrarPelaExtensao({ silencioso: true, manterFila: true }).then((renovou) => {
         // O "Sair" no meio da renovação: a tela e o aviso já são os dele, e um
         // "sua sessão expirou" depois dele diria o que não aconteceu (K3).
         if (epoca !== epocaDaSessao) return;
         if (renovou) {
-            showToast(t('toast.sessionRenewed'), 'info');
+            // "Sua fila continua aqui" só se ela continua. A ponte que repassa a
+            // conta revela OUTRA conta dentro da renovação, e a fila já saiu ali
+            // (`esquecerOutraConta`): os dois avisos juntos se contradiziam, e o
+            // da troca é o que vale (auditoria da costura, 2026-09-26, K2).
+            if (AppState.fetchEpoch === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
             rebuscarDepoisDeFalha();
             return;
         }
@@ -12601,7 +12606,7 @@ function adotarSaidaSemMarca() {
 // sessão antes de o perfil chegar já levaram o carimbo (`carimbarContaNaSaida`),
 // e o que segue sem conta é de dono desconhecido. Ficam as escolhas do aparelho
 // — idioma, tema, preferências e filtros — e a fila na tela, que já veio da
-// busca de quem entrou.
+// busca de quem entrou (menos a que a renovação da queda manteve: ver o fim).
 function esquecerOutraConta(id) {
     dfato('conta.trocou');
     const f = carregarFilaDeSaida();

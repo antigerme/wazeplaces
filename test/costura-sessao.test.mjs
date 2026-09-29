@@ -477,6 +477,46 @@ test('K2: a queda limpa o cabeçalho de quem estava (o perfil que chegar o redes
   assert.ok(h.chamou.includes('limparCabecalhoDoPerfil'), 'DEFEITO: o nome e a foto de A seguem no cabeçalho durante e depois da renovação');
 });
 
+// A ponte que repassa a conta (K8) revela a troca DENTRO da renovação: a fila já
+// é trocada ali, e o "sua fila continua aqui" saía junto com o "outra conta
+// entrou" — os dois avisos que o auditor viu juntos, agora pelo caminho novo.
+test('K2: a ponte diz OUTRA conta na renovação da queda — o "sua fila continua aqui" não sai junto com o da troca', async () => {
+  for (const [conta, trocou] of [['222', true], ['111', false]]) {
+    const { safeLS } = lsFalso();
+    const CONTA_KEY = constante('CONTA_KEY');
+    const window = janelaFalsa();
+    const toasts = [];
+    let token = 'tokA';
+    const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, queue: [{ venueID: 'vA' }],
+      stats: { read: 0, rejected: 0, skipped: 0 } };
+    const deps = {
+      window, AppState, safeLS, CONTA_KEY, epocaDaSessao: 0, saiuNestaPagina: false,
+      extPerguntando: false, extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false,
+      puladosNoInicioDaFila: 0, saidaEsperandoConta: false,
+      EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout: () => 1, clearTimeout: () => {},
+      API: { setSession: (t) => { token = t; }, getSession: () => token },
+      aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+      showToast: (m) => toasts.push(m), t: (k) => k, carregarFilaDeSaida: () => [],
+      // O contrato do `resetQueue` que importa aqui: a fila na tela passa a ser OUTRA.
+      resetQueue: () => { AppState.fetchEpoch++; },
+    };
+    const h = montar(['derrubarSessao', 'entrarPelaExtensao', 'conhecerContaDoLogin', 'aoConhecerConta',
+      'esquecerOutraConta', 'marcaDaSessao'], deps);
+    safeLS.set(CONTA_KEY, JSON.stringify({ id: '111', s: marcaDe('tokA') }));   // A estava triando
+    h.derrubarSessao('srv.err.cookiesExpired');
+    window.responder({ source: 'wazeplaces-ext', action: 'sessao', token: 'tokB', conta });
+    await tique();
+    assert.equal(token, 'tokB', 'pré-condição: a renovação não entrou');
+    if (trocou) {
+      assert.ok(toasts.includes('toast.outraConta'), 'pré-condição: a troca de conta não foi detectada na renovação');
+      assert.ok(!toasts.includes('toast.sessionRenewed'),
+        'DEFEITO: "sua fila continua aqui" junto com "outra conta entrou" — a fila já tinha sido trocada: ' + toasts.join(' | '));
+    } else {
+      assert.deepEqual(toasts, ['toast.sessionRenewed'], 'CONTROLE: com a MESMA conta, a fila continua e o aviso é esse');
+    }
+  }
+});
+
 // ═══ K3 · o "Sair" no meio da renovação não é desfeito ═══════════════════════
 
 test('K3: "Sair" com a extensão ainda respondendo — o token atrasado NÃO entra de novo', async () => {
