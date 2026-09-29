@@ -860,7 +860,9 @@ test('link pra copiar à mão (área de transferência recusada): selecionar nã
   assert.equal(n.sumiu(), true, 'o toast comum passou a segurar a tela');
   // Quem usa: o socorro do "Copiar link", com o prazo longo.
   const copiar = fatiar('copiarLinkPareamento');
-  assert.match(copiar, /showToast\(url, 'info', TOAST_COPIAVEL_MS, null, \{ copiavel: true \}\);/,
+  // E SENSÍVEL: o link é o segredo do pareamento, e fica fora do diário do
+  // diagnóstico (auditoria de 2026-09-26, D1).
+  assert.match(copiar, /showToast\(url, 'info', TOAST_COPIAVEL_MS, null, \{ copiavel: true, sensivel: true \}\);/,
     'o link de socorro voltou a ser um toast comum de 12 s');
   assert.ok(Number((/const TOAST_COPIAVEL_MS = (\d+);/.exec(APP) || [])[1]) >= 30000, 'o link pra copiar à mão fica menos de 30 s');
 });

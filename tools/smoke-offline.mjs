@@ -2205,6 +2205,82 @@ diz('o SAIR apaga o que foi guardado (e a captura que ia pro próximo relatório
 await p5d.close();
 await ctx9c.close();
 
+secao('9d. O SEGREDO DO PAREAMENTO NÃO VAI PRO DIAGNÓSTICO — nem pro aparelho');
+// Auditoria de 2026-09-26 (D1). Quando a área de transferência recusa, o link
+// `/#pair=<segredo>` vira um toast copiável — e ele ia inteiro pro diário, pra
+// lista de toasts da captura e (fechado o modal, o que APAGA o `data-raw`) pro
+// `dom`: pro relatório E pra cópia guardada no aparelho. O segredo vale uma
+// sessão nova por 5 minutos. O canário é procurado no arquivo INTEIRO e na base.
+const SEGREDO_9D = 'CANARIOPAREAMENTO9DX';
+const ctx9d = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
+  hasTouch: true, isMobile: true, serviceWorkers: 'block', acceptDownloads: true });
+await ctx9d.route('**/*-tiles/live/base/**', servirTile);
+await ctx9d.route('**/api/*', (r) => {
+  const rota = r.request().url().split('/api/')[1];
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(151), SO_MAPA(152)], hasMore: false, page: 1, total: 2 });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+  if (rota === 'parear') return json({ success: true, code: SEGREDO_9D, expiresIn: 300 });
+  return r.abort('failed');
+});
+await ctx9d.addInitScript(() => { try { if (!localStorage.getItem('__9d')) {
+  localStorage.setItem('__9d', '1');
+  localStorage.setItem('waze_session_token', 'tok-9d');
+  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+} } catch (e) {} });
+const p9d = await ctx9d.newPage();
+p9d.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+p9d.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text())) violacoes.push({ secao: secaoAtual, txt: m.text() }); });
+await p9d.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+await pronta9c(p9d);
+await p9d.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true,
+  value: { writeText: () => Promise.reject(new DOMException('negado', 'NotAllowedError')) } }); });
+await p9d.evaluate(() => abrirPareamento());
+await esperarNaPagina(p9d, () => !document.getElementById('pairCopyLinkBtn').disabled, 10000, 100);
+await p9d.evaluate(() => document.getElementById('pairCopyLinkBtn').click());
+await esperarNaPagina(p9d, () => [...document.querySelectorAll('#toastContainer > *')].some((e) => /#pair=/.test(e.textContent)), 5000, 100);
+await p9d.evaluate(() => document.getElementById('pairShowClose').click());   // a limpeza apaga o `data-raw`
+await dormir(300);
+const pre9d = await p9d.evaluate((s) => ({
+  toast: [...document.querySelectorAll('#toastContainer > *')].some((e) => e.textContent.includes(s)),
+  dataRaw: !!document.getElementById('pairCode').dataset.raw }), SEGREDO_9D);
+diz('PRÉ-CONDIÇÃO: o link com o segredo segue na tela (o toast copiável), e fechar o modal já apagou o `data-raw`',
+  pre9d.toast && !pre9d.dataRaw, JSON.stringify(pre9d));
+const cdp9d = await ctx9d.newCDPSession(p9d);
+const tocou9d = await tocar9c(p9d, cdp9d);
+await guardouNesta9c(p9d, 1);
+const base9d = await p9d.evaluate((s) => new Promise((ok) => {
+  const req = indexedDB.open('waze_places_diag');
+  req.onerror = () => ok({ erro: 'abrir' });
+  req.onsuccess = () => { const db = req.result;
+    const r = db.transaction('aberturas').objectStore('aberturas').getAll();
+    r.onsuccess = () => { db.close(); const t = JSON.stringify(r.result);
+      ok({ tem: t.includes(s), capturas: r.result.reduce((n, a) => n + (a.momentos || []).length, 0) }); }; };
+}), SEGREDO_9D);
+diz('a captura com o link na tela vai pro aparelho SEM o segredo', tocou9d && base9d.capturas >= 1 && base9d.tem === false,
+  JSON.stringify({ tocou9d, base9d }));
+let rel9d = null;
+const dir9d = mkdtempSync(join(tmpdir(), 'diag-9d-'));
+try {
+  const [dl] = await Promise.all([p9d.waitForEvent('download', { timeout: 30000 }), p9d.evaluate(() => baixarDiagnostico())]);
+  const arq = join(dir9d, 'diag.zip');
+  await dl.saveAs(arq);
+  const cru = JSON.stringify(lerDiagnostico(arq).dados);
+  const triagem = execFileSync(process.execPath, [join(ROOT, 'tools/diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 20000 });
+  rel9d = { noArquivo: cru.includes(SEGREDO_9D), marcado: cru.includes('#pair=[código de pareamento]'),
+            naTriagem: triagem.includes(SEGREDO_9D), aviso: /"sensivel":true/.test(cru) };
+} catch (e) {
+  rel9d = { erro: String((e && e.message) || e).slice(0, 200) };
+} finally {
+  rmSync(dir9d, { recursive: true, force: true });
+}
+diz('nenhuma seção do relatório traz o segredo — e o lugar dele sai marcado (o toast estava lá)',
+  rel9d?.noArquivo === false && rel9d?.marcado === true, JSON.stringify(rel9d));
+diz('o diário anota que houve o aviso SENSÍVEL, sem o texto; e a triagem também não imprime o segredo',
+  rel9d?.aviso === true && rel9d?.naTriagem === false, JSON.stringify(rel9d));
+await ctx9d.close();
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));

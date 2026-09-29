@@ -436,3 +436,18 @@ test('diag-resumo: o painel vem com a VARIANTE — "Fim da fila" não é "tudo l
   // CONTROLE: relatório sem a variante (anterior ao v10) sai como sempre.
   assert.match(rodar(relatorioV4()), /tela app · painel carregando · card montado: true/);
 });
+
+test('diag-resumo: o link de PAREAMENTO nunca sai — nem de um relatório antigo que o trazia no diário', () => {
+  // Até a auditoria de 2026-09-26 (D1), o toast copiável do pareamento (quando a
+  // área de transferência falha) ia inteiro pro diário, e a triagem o imprimia.
+  const SEGREDO = 'CANARIOPAREAMENTO20X';
+  const d = relatorioV4();
+  d.diario.push({ t: 1790108834600, k: 'toast', tipo: 'info', txt: 'https://app.x/#pair=' + SEGREDO });
+  d.erros.push({ t: '2026-09-22T20:27:31.000Z', tipo: 'erro', msg: 'abriu /?pair=' + SEGREDO + '&x=1' });
+  const s = rodar(d);
+  assert.ok(!s.includes(SEGREDO), 'o segredo do pareamento saiu na triagem');
+  assert.match(s, /#pair=<PAREAMENTO>/, 'o link do diário não foi trocado pelo marcador');
+  assert.match(s, /\?pair=<PAREAMENTO>&x=1/, 'o link antigo (query) não foi trocado');
+  // CONTROLE: o resto da linha do diário continua lá.
+  assert.match(s, /toast\s+\{"tipo":"info","txt":"https:\/\/app\.x\/#pair=<PAREAMENTO>"\}/);
+});

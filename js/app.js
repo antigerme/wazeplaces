@@ -1519,7 +1519,9 @@ async function copiarLinkPareamento() {
         // clipboard exige contexto seguro e permissão; sem ele, mostra o link
         // pro editor copiar na mão em vez de falhar em silêncio. COPIÁVEL: o
         // toast não some enquanto ele seleciona, e fica o bastante pra isso.
-        showToast(url, 'info', TOAST_COPIAVEL_MS, null, { copiavel: true });
+        // SENSÍVEL: o link É o segredo do pareamento (vale uma sessão nova por
+        // 5 min) — fora do diário, que vai pro diagnóstico e pra cópia guardada.
+        showToast(url, 'info', TOAST_COPIAVEL_MS, null, { copiavel: true, sensivel: true });
     }
 }
 
@@ -4808,8 +4810,10 @@ function dlogCapturar(motivo) {
             ...diagNoInstante(),
             // Os toasts NA TELA agora. O anel do diário guarda os que já
             // sumiram; este campo diz quais estavam visíveis no instante.
+            // Pelo MESMO filtro do `dom`: o toast copiável do pareamento traz o
+            // link com o segredo (D1).
             toastsNaTela: [...document.querySelectorAll('#toastContainer > *, #bannerContainer > *')]
-                .map((e) => (e.textContent || '').trim().slice(0, 120)),
+                .map((e) => diagSemSegredoDePareamento((e.textContent || '').trim()).slice(0, 120)),
             estado: {
                 fila: (AppState.queue || []).length,
                 serverTotal: AppState.serverTotal,
@@ -5669,20 +5673,40 @@ async function diagCodigoEnxuto(codigo, hash) {
 // e cada captura passam por aqui —, pra que o dia em que algo precisar sair seja
 // um lugar só.
 //
-// A ÚNICA coisa que sai é o SEGREDO do pareamento, se o modal estiver aberto:
-// ele vale uma sessão nova por 5 minutos e não depura nada (auditoria de
-// 2026-09-25). Mora no `data-raw` (o do QR) e no `data-curto` + texto (o
-// digitável, que aparece formatado).
+// A ÚNICA coisa que sai é o SEGREDO do pareamento: ele vale uma sessão nova por
+// 5 minutos e não depura nada (auditoria de 2026-09-25) — ver
+// `diagSemSegredoDePareamento`.
 function domParaDiagnostico() {
-    let html = document.documentElement.outerHTML;
+    return diagSemSegredoDePareamento(document.documentElement.outerHTML);
+}
+
+// Tira do texto TODO segredo de pareamento que ESTE aparelho emitiu nesta página
+// (`pareamentosEmitidos`: o do QR e o digitável, este também na forma que a tela
+// mostra). Era pelo `data-raw` do modal, e isso só valia com o modal ABERTO: o
+// link `/#pair=<segredo>` que vira o toast copiável (quando a área de
+// transferência falha) segue na tela depois de o modal fechar — e fechar APAGA o
+// `data-raw` —, então a captura seguinte levava o segredo no `dom` e na lista de
+// toasts, pro relatório e pra cópia guardada (auditoria de 2026-09-26, D1). O
+// `data-raw`/`data-curto` ficam como defesa a mais.
+function diagSemSegredoDePareamento(texto) {
+    let saida = String(texto);
     try {
+        const formas = new Set();
+        const junta = (c) => {
+            if (!c) return;
+            formas.add(String(c));
+            const fmt = formatarCodigoPareamento(c);
+            if (fmt && fmt !== String(c) && fmt.length > 4) formas.add(fmt);
+        };
+        for (const c of pareamentosEmitidos) junta(c);
         const el = document.getElementById('pairCode');
-        const formas = [];
-        if (el && el.dataset.raw) formas.push(el.dataset.raw);
-        if (el && el.dataset.curto) formas.push(el.dataset.curto, formatarCodigoPareamento(el.dataset.curto));
-        for (const forma of formas) html = html.split(forma).join('[código de pareamento]');
+        if (el) { junta(el.dataset.raw); junta(el.dataset.curto); }
+        // As mais LONGAS primeiro: o curto (6) não pode comer o pedaço de um maior.
+        for (const forma of [...formas].sort((a, b) => b.length - a.length)) {
+            saida = saida.split(forma).join('[código de pareamento]');
+        }
     } catch (e) { /* sem o modal (ou numa página de teste): nada a tirar */ }
-    return html;
+    return saida;
 }
 
 // JSON de coisa viva: `AppState` tem Promise, função e referência circular
@@ -16659,7 +16683,8 @@ function toggleTheme() {
 // arrastar o mouse sobre o texto termina num clique, e o clique o tirava da
 // tela junto com a seleção; e o relógio espera enquanto houver texto dele
 // selecionado (auditoria de 2026-09-26). A aparência não muda.
-function showToast(message, type = 'info', durationMs = 4000, onClick = null, { copiavel = false } = {}) {
+// `sensivel`: o texto é credencial e fica FORA do diário (ver abaixo).
+function showToast(message, type = 'info', durationMs = 4000, onClick = null, { copiavel = false, sensivel = false } = {}) {
     // Conquista é BANNER (topo), não snackbar (rodapé) — distinção do M3, e aqui
     // com motivo medido: no rodapé ela tapava os três botões do card por 8s em 2
     // de 3 aparelhos (gotcha #26). Snackbar confirma o que você acabou de fazer;
@@ -16672,7 +16697,12 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null, { 
     // reconstrói "o que estava na tela". O toast dura 4s — sem registrar, ele
     // some antes de qualquer captura, que foi exatamente o que aconteceu no
     // diagnóstico do owner (tela com erro, zero toast no DOM).
-    dlog('toast', { tipo: type, txt: String(message).replace(/<[^>]+>/g, '').slice(0, 140) });
+    // `sensivel`: o texto é CREDENCIAL (o link do pareamento, quando a área de
+    // transferência falha) — o diário anota que houve o aviso, nunca o texto.
+    // O diário vai pro relatório e pra cópia guardada no aparelho (auditoria de
+    // 2026-09-26, D1).
+    dlog('toast', sensivel ? { tipo: type, sensivel: true }
+                           : { tipo: type, txt: String(message).replace(/<[^>]+>/g, '').slice(0, 140) });
     const ehBanner = type === 'achievement' || type === 'hint';
     const container = document.getElementById(ehBanner ? 'bannerContainer' : 'toastContainer');
     const toast = document.createElement('div');

@@ -1154,23 +1154,58 @@ test('modo dev: a resposta do pareamento vai SEM o segredo, e o sessionToken de 
 });
 
 test('a cópia da página e as capturas saem SEM o segredo do pareamento (o do QR e o digitável)', () => {
-  const ini = APP.indexOf('function domParaDiagnostico');
-  const fim = APP.indexOf('\n}\n', ini) + 3;
   const fmt = fatiarFn(APP, 'formatarCodigoPareamento');
+  const montar = (doc, emitidos = []) => new Function('document', 'pareamentosEmitidos', `const PAIR_CODE_LEN = 6, PAIR_CODE_GRUPO = 3;
+    ${fmt}\n${fatiarFn(APP, 'diagSemSegredoDePareamento')}\n${fatiarFn(APP, 'domParaDiagnostico')}
+    return { dom: domParaDiagnostico, filtro: diagSemSegredoDePareamento };`)(doc, new Set(emitidos));
   const pagina = '<html><body><div id="pairCode" data-raw="SEGREDO20SIMBOLOSXYZ" data-curto="K7Q9ZX">K7Q-9ZX</div><p>resto</p></body></html>';
-  const doc = { documentElement: { outerHTML: pagina },
-                getElementById: (id) => (id === 'pairCode' ? { dataset: { raw: 'SEGREDO20SIMBOLOSXYZ', curto: 'K7Q9ZX' } } : null) };
-  const f = new Function('document', `const PAIR_CODE_LEN = 6, PAIR_CODE_GRUPO = 3;\n${fmt}\n${APP.slice(ini, fim)}\nreturn domParaDiagnostico;`)(doc);
-  const saida = f();
-  for (const s of ['SEGREDO20SIMBOLOSXYZ', 'K7Q9ZX', 'K7Q-9ZX']) assert.ok(!saida.includes(s), `o segredo foi pra cópia da página: ${s}`);
+  const comModal = { documentElement: { outerHTML: pagina },
+                     getElementById: (id) => (id === 'pairCode' ? { dataset: { raw: 'SEGREDO20SIMBOLOSXYZ', curto: 'K7Q9ZX' } } : null) };
+  const saida = montar(comModal).dom();
+  for (const x of ['SEGREDO20SIMBOLOSXYZ', 'K7Q9ZX', 'K7Q-9ZX']) assert.ok(!saida.includes(x), `o segredo foi pra cópia da página: ${x}`);
   assert.match(saida, /<p>resto<\/p>/, 'o resto da página tem que ficar');
-  // Controle: sem pareamento aberto, a página sai idêntica.
+  // D1 (auditoria de 2026-09-26): com o modal FECHADO o `data-raw` some — e o
+  // link do toast copiável (quando a área de transferência falha) segue na
+  // tela. O filtro é pelo que o aparelho EMITIU, não pelo que o modal mostra.
+  const toast = '<div id="toastContainer"><div class="toast"><span>https://app.x/#pair=SEGREDO20SIMBOLOSXYZ</span></div></div>';
+  const fechado = { documentElement: { outerHTML: '<html><body><div id="pairCode" data-i18n="x">······</div>' + toast + ' e o curto K7Q-9ZX</body></html>' },
+                    getElementById: (id) => (id === 'pairCode' ? { dataset: {} } : null) };
+  const semModal = montar(fechado, ['SEGREDO20SIMBOLOSXYZ', 'K7Q9ZX']);
+  const dom = semModal.dom();
+  for (const x of ['SEGREDO20SIMBOLOSXYZ', 'K7Q9ZX', 'K7Q-9ZX']) assert.ok(!dom.includes(x), `com o modal fechado, o segredo foi pra cópia da página: ${x}`);
+  assert.match(dom, /#pair=\[código de pareamento\]/);
+  assert.equal(semModal.filtro('https://app.x/#pair=SEGREDO20SIMBOLOSXYZ'), 'https://app.x/#pair=[código de pareamento]',
+    'o texto do toast (a lista de toasts da captura) não passa pelo filtro');
+  // Controle: sem pareamento nenhum, a página sai idêntica.
   const semPar = { documentElement: { outerHTML: '<html>x K7Q9ZX</html>' }, getElementById: () => ({ dataset: {} }) };
-  const g = new Function('document', `const PAIR_CODE_LEN = 6, PAIR_CODE_GRUPO = 3;\n${fmt}\n${APP.slice(ini, fim)}\nreturn domParaDiagnostico;`)(semPar);
-  assert.equal(g(), '<html>x K7Q9ZX</html>');
-  // E a captura não desenha o QR do pareamento.
-  assert.match(fatiarFn(semCom, 'dlogCapturar'), /if \(c\.id === 'pairQr'\) return \{ classe: c\.className, omitido: 'QR do pareamento' \};/,
+  assert.equal(montar(semPar).dom(), '<html>x K7Q9ZX</html>');
+  // A captura: a lista de toasts passa pelo MESMO filtro, e o QR não é desenhado.
+  const cap = fatiarFn(semCom, 'dlogCapturar');
+  assert.match(cap, /\.map\(\(e\) => diagSemSegredoDePareamento\(\(e\.textContent \|\| ''\)\.trim\(\)\)\.slice\(0, 120\)\)/,
+    'a lista de toasts da captura deixou de passar pelo filtro do segredo');
+  assert.match(cap, /if \(c\.id === 'pairQr'\) return \{ classe: c\.className, omitido: 'QR do pareamento' \};/,
     'a captura voltou a levar o QR do pareamento');
+});
+
+// D1: o toast copiável do pareamento não vai pro DIÁRIO. O `showToast` de
+// verdade (fatiado), num DOM mínimo: o diário anota o aviso e NUNCA o texto.
+test('o toast SENSÍVEL (o link do pareamento) entra no diário sem o texto — e o copiável do pareamento é sensível', () => {
+  const diario = [];
+  const el = () => ({ style: {}, className: '', innerHTML: '', title: '', children: [],
+    addEventListener() {}, querySelector: () => null, contains: () => false, remove() {} });
+  const container = { children: [], appendChild(x) { this.children.push(x); }, removeChild() {}, get firstElementChild() { return null; } };
+  const showToast = new Function('dlog', 'document', 'escapeHtml', 't', 'setTimeout', 'clearTimeout', 'window', 'TOAST_COPIAVEL_RECHECA_MS',
+    fatiarFn(APP, 'showToast') + '\nreturn showToast;')(
+    (k, d) => diario.push({ k, ...d }), { getElementById: () => container, createElement: el },
+    (x) => String(x), (k) => k, () => 1, () => {}, {}, 1500);
+  showToast('https://app.x/#pair=SEGREDO20SIMBOLOSXYZ', 'info', 30000, null, { copiavel: true, sensivel: true });
+  showToast('Já tratado por outro editor', 'info');
+  assert.equal(diario.length, 2, 'PRÉ-CONDIÇÃO: o funil do diário não anotou os dois avisos');
+  assert.ok(!JSON.stringify(diario[0]).includes('SEGREDO20SIMBOLOSXYZ'), 'o link do pareamento foi pro diário');
+  assert.equal(diario[0].sensivel, true, 'o diário tem que dizer que houve um aviso sensível');
+  assert.equal(diario[1].txt, 'Já tratado por outro editor', 'CONTROLE: o toast comum deixou de ir pro diário com o texto');
+  assert.match(fatiarFn(APP, 'copiarLinkPareamento'), /showToast\(url, 'info', TOAST_COPIAVEL_MS, null, \{ copiavel: true, sensivel: true \}\);/,
+    'o toast do link do pareamento deixou de ser sensível');
 });
 
 test('o resumo não conta o "já tratado" como falha (relatório v10)', () => {

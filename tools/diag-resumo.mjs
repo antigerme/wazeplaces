@@ -16,7 +16,7 @@
 //    `localStorage`, `sessionStorage` e `cookiesDestaOrigem` não são lidos pra
 //    saída; e, como defesa a mais, TODA a saída passa por uma troca do token
 //    por `<TOKEN>` antes de ser impressa — se ele vazar pra dentro de alguma
-//    mensagem de erro, não sai daqui.
+//    mensagem de erro, não sai daqui. O link de pareamento (`#pair=…`), idem.
 //  · DADO DE TERCEIRO EM MASSA: `appState` (a fila inteira), `dom`, `codigo` e
 //    o corpo das chamadas (`corpoReq`) ficam de fora. O diário do modo dev pode
 //    citar um nome de local, como sempre citou — ele é assim por desenho.
@@ -308,4 +308,9 @@ let texto = linhas.join('\n');
 const token = d.localStorage && typeof d.localStorage.waze_session_token === 'string'
   ? d.localStorage.waze_session_token : '';
 if (token.length >= 8) texto = texto.split(token).join('<TOKEN>');
+// E o SEGREDO DO PAREAMENTO: o link `/#pair=<segredo>` vale uma sessão nova por
+// 5 min. Relatório anterior à auditoria de 2026-09-26 o trazia no diário (o toast
+// copiável de quando a área de transferência falha, D1), e a triagem o
+// imprimia. Pela FORMA do link, que é o que se repete em qualquer versão.
+texto = texto.replace(/([#?&]pair=)[^\s"'&<>\\]+/g, '$1<PAREAMENTO>');
 console.log(texto);
