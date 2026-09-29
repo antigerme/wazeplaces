@@ -1265,3 +1265,40 @@ test('tileGuardadoFalhou: acusa só o que falhou desde a captura anterior, e diz
   assert.match(fatiarFn(semCom, 'diagCorpo'), /const alertas = diagSentinelas\(computado\);\s*diagTilesLidosAte = Date\.now\(\);/,
     'o relatório deixou de marcar o que leu — a captura seguinte repetiria a falha que ele já acusou');
 });
+
+// ── D12 (auditoria de 2026-09-26): QUAL frase o painel está mostrando ────────
+// O `painel` dizia "tudoLimpo" também no "Fim da fila" (pulados pendentes) e no
+// "nada tratado nesta fila", e o diário da tela vazia não levava os pulados. A
+// variante sai da CHAVE que o `showNoPlaces` põe no texto — a mesma, com os
+// mesmos seletores, pra as duas não divergirem.
+test('a captura diz QUAL frase o painel mostra (fim da fila, nada nesta fila, limpo, sem conexão)', () => {
+  const variante = fatiarFn(semCom, 'dlogVarianteDoPainel');
+  const noPlaces = fatiarFn(semCom, 'showNoPlaces');
+  for (const sel of ['h3[data-i18n^="states.empty.title"]', 'p[data-i18n^="states.empty.body"]']) {
+    assert.ok(variante.includes(sel) && noPlaces.includes(sel), `o seletor ${sel} não é o mesmo nos dois lados`);
+  }
+  const el = (chave) => ({ getAttribute: (a) => (a === 'data-i18n' ? chave : null) });
+  const doc = (titulo, corpo, erro) => ({
+    getElementById: (id) => (id === 'noMoreCards'
+      ? { querySelector: (s) => (s.startsWith('h3') ? el(titulo) : el(corpo)) } : null),
+    querySelector: (s) => (s === '#loadErrorState h3' ? el(erro) : null),
+  });
+  const rodar = (d, painel) => new Function('document', variante + '\nreturn dlogVarianteDoPainel;')(d)(painel);
+  assert.equal(rodar(doc('states.empty.titlePulados', 'states.empty.bodyPulados'), 'tudoLimpo'), 'fimDaFila');
+  assert.equal(rodar(doc('states.empty.title', 'states.empty.bodyNada'), 'tudoLimpo'), 'nadaNestaFila');
+  assert.equal(rodar(doc('states.empty.title', 'states.empty.body'), 'tudoLimpo'), 'limpo');
+  assert.equal(rodar(doc(null, null, 'states.error.titleOffline'), 'falhaAoCarregar'), 'semConexao');
+  assert.equal(rodar(doc(null, null, 'states.error.title'), 'falhaAoCarregar'), 'falha');
+  // A captura leva a variante junto do painel, e o diário da tela vazia leva os
+  // PULADOS e se houve trabalho nesta fila (os dois decidem a frase).
+  assert.match(fatiarFn(semCom, 'dlogTelaAtual'), /\{ variante: dlogVarianteDoPainel\(painel\) \}/,
+    'a captura deixou de dizer qual frase o painel mostra');
+  assert.match(noPlaces, /dfato\('tela\.vazia', \{[^}]*pulados: puladosNestaFila\(\),\s*tratou: tratouNestaFila \}\);/,
+    'o diário da tela vazia deixou de levar os pulados');
+  // E o HTML tem os elementos que as duas funções leem.
+  const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  const bloco = (id) => { const i = HTML.indexOf(`id="${id}"`); return HTML.slice(i, HTML.indexOf('</section>', i) > 0 ? i + 3000 : i + 3000); };
+  assert.match(bloco('noMoreCards'), /<h3[^>]*data-i18n="states\.empty\.title"/, 'sumiu o título do painel de fila vazia');
+  assert.match(bloco('noMoreCards'), /<p[^>]*data-i18n="states\.empty\.body"/, 'sumiu o corpo do painel de fila vazia');
+  assert.match(bloco('loadErrorState'), /<h3[^>]*data-i18n="states\.error\.title"/, 'sumiu o título do painel de falha');
+});

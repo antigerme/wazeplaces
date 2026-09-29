@@ -4148,12 +4148,19 @@ function dlogTelaAtual() {
         return r.width > 0 && r.height > 0;
     };
     const modais = (typeof MODAL_IDS !== 'undefined' ? MODAL_IDS : []).filter(visivel);
+    const painel = visivel('loadErrorState') ? 'falhaAoCarregar'
+                 : visivel('noMoreCards') ? 'tudoLimpo'
+                 : visivel('loadingCard') ? 'carregando'
+                 : cardDaFrente() ? 'card' : 'nada';
     return {
         tela: visivel('authScreen') ? 'entrar' : (visivel('appScreen') ? 'app' : '?'),
-        painel: visivel('loadErrorState') ? 'falhaAoCarregar'
-              : visivel('noMoreCards') ? 'tudoLimpo'
-              : visivel('loadingCard') ? 'carregando'
-              : cardDaFrente() ? 'card' : 'nada',
+        painel,
+        // O MESMO painel diz coisas diferentes, e o `painel` sozinho chamava
+        // tudo de "tudoLimpo" — inclusive o "Fim da fila" (pulados pendentes) e
+        // o "nada nesta fila" de quem não tratou nada (auditoria de 2026-09-26);
+        // e a falha, "sem conexão" ou "falha ao carregar". A variante sai da
+        // CHAVE do texto na tela (`trocarTextoI18n`), que não depende do idioma.
+        ...(painel === 'tudoLimpo' || painel === 'falhaAoCarregar' ? { variante: dlogVarianteDoPainel(painel) } : {}),
         // O `painel` diz só a camada de CIMA. No relato de 2026-09-22 ele
         // disse "carregando" com um card montado por baixo, e a captura não
         // tinha como contar o resto — este campo conta.
@@ -4168,6 +4175,23 @@ function dlogTelaAtual() {
         // consultado aqui exista no HTML.
         lightbox: visivel('imageLightbox') ? 'foto' : (visivel('mapaLightbox') ? 'mapa' : false),
     };
+}
+
+// Qual das frases o painel de fila vazia (ou de falha) está mostrando, pela
+// chave que o `showNoPlaces` pôs no texto.
+function dlogVarianteDoPainel(painel) {
+    try {
+        if (painel === 'falhaAoCarregar') {
+            const h = document.querySelector('#loadErrorState h3');
+            return h && h.getAttribute('data-i18n') === 'states.error.titleOffline' ? 'semConexao' : 'falha';
+        }
+        const nm = document.getElementById('noMoreCards');
+        const h = nm && nm.querySelector('h3[data-i18n^="states.empty.title"]');
+        const p = nm && nm.querySelector('p[data-i18n^="states.empty.body"]');
+        if (h && h.getAttribute('data-i18n') === 'states.empty.titlePulados') return 'fimDaFila';
+        if (p && p.getAttribute('data-i18n') === 'states.empty.bodyNada') return 'nadaNestaFila';
+        return 'limpo';
+    } catch (e) { return null; }
 }
 
 // ── REDE e OFFLINE no instante da captura ─────────────────────────────────
@@ -10173,8 +10197,12 @@ function filaZeradaConfirmada({ confirmando = false, place = null } = {}) {
 function showNoPlaces() {
     // O painel de fila vazia tem DOIS significados e a distinção é a flag —
     // foi ela que faltou e fez o app dizer "Tudo limpo!" sobre 217 pedidos.
+    // Com os PULADOS e se houve trabalho NESTA fila: são eles que decidem se a
+    // tela diz "Tudo limpo!", "Fim da fila" ou "nada nesta fila" — e o diário
+    // chamava as três da mesma coisa (auditoria de 2026-09-26).
     dfato('tela.vazia', { loadError: AppState.loadError, hasMore: AppState.hasMore,
-                          serverTotal: AppState.serverTotal });
+                          serverTotal: AppState.serverTotal, pulados: puladosNestaFila(),
+                          tratou: tratouNestaFila });
     if (AppState.loadError) dlogCapturarAuto('falhaAoCarregar');
     marcarTelaPronta();   // fila vazia ou erro: não vem card, mas a tela está pronta
     AppState.currentPlace = null;

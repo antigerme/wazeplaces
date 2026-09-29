@@ -49,6 +49,12 @@ const hora = (t) => {
   return Number.isNaN(dt.getTime()) ? String(t) : dt.toISOString().slice(11, 23);
 };
 const secao = (titulo) => { out(); out('── ' + titulo + ' ' + '─'.repeat(Math.max(3, 60 - titulo.length))); };
+// O MESMO painel diz coisas diferentes (auditoria de 2026-09-26): "tudoLimpo" era
+// também o "Fim da fila" (pulados pendentes) e o "nada tratado nesta fila", e a
+// falha podia ser "sem conexão". A `variante` entrou no relatório v10.
+const VARIANTES = { limpo: 'tudo limpo de verdade', fimDaFila: 'fim da fila: há pulados pendentes',
+  nadaNestaFila: 'nada tratado nesta fila', semConexao: 'sem conexão', falha: 'falha ao carregar' };
+const painelComVariante = (x) => `${x.painel}${x.variante ? ` (${VARIANTES[x.variante] || x.variante})` : ''}`;
 
 const r = d.resumo || {};
 out(`arquivo: ${origem}, ${Math.round(bytes / 1024)} KB · relatório v${d._versaoDoDiag ?? '?'} · app ${d.app?.rotulo ?? d.app?.versao ?? '?'} · gerado ${d._gerado ?? '?'}`);
@@ -67,7 +73,7 @@ else for (const c of nasCapturas) out(`nas capturas: ${hora(c.t)} ${c.motivo} (p
 
 secao('TELA NA HORA DO RELATÓRIO');
 const ta = r.telaAgora || {};
-out(`tela ${ta.tela} · painel ${ta.painel} · card montado: ${ta.cardMontado === undefined ? AUSENTE : ta.cardMontado} · modais ${j(ta.modais)} · lightbox ${ta.lightbox}`);
+out(`tela ${ta.tela} · painel ${painelComVariante(ta)} · card montado: ${ta.cardMontado === undefined ? AUSENTE : ta.cardMontado} · modais ${j(ta.modais)} · lightbox ${ta.lightbox}`);
 // Desde o v10 o "já tratado" (outro editor chegou antes, que pro app é sucesso)
 // sai das falhas e vem à parte; antes dele, `falhas` somava os dois.
 const jaTratadas = typeof r.jaTratadas === 'number' ? ` · já tratadas ${r.jaTratadas}` : '';
@@ -248,7 +254,7 @@ if (chamadas.length > 30) out(`(… e mais ${chamadas.length - 30} antes destas)
 function linhasDaCaptura(m, recuo = '') {
   const quebradas = Array.isArray(m.imagens) ? m.imagens.filter((i) => i.quebrada).length : '—';
   const alertasM = Array.isArray(m.alertas) ? (m.alertas.length ? m.alertas.map((a) => a.chave).join(', ') : 'nenhum') : AUSENTE;
-  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${m.painel} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}`);
+  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${painelComVariante(m)} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}`);
   out(`${recuo}    rede ${m.rede === undefined ? AUSENTE : j(m.rede)} · offline ${m.offline === undefined ? AUSENTE : j(m.offline)}`);
   out(`${recuo}    fila ${m.estado?.fila} · restam ${m.estado?.serverTotal} · hasMore ${m.estado?.hasMore} · loadError ${m.estado?.loadError} · imagens quebradas ${quebradas} · alertas: ${alertasM}`);
 }

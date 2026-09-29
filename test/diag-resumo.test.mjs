@@ -422,3 +422,17 @@ test('diag-resumo: o offline DESLIGADO diz "desligado" — não "ausente nesta v
   // CONTROLE: ligado, a seção segue mostrando o que o aparelho guardou.
   assert.match(rodar(relatorioV4()), /fila guardada \{"n":236,"idadeMin":2\}/);
 });
+
+test('diag-resumo: o painel vem com a VARIANTE — "Fim da fila" não é "tudo limpo"', () => {
+  // O `painel` dizia "tudoLimpo" também no "Fim da fila" (pulados pendentes) e
+  // no "nada tratado nesta fila". A variante entrou no relatório v10.
+  const d = relatorioV4();
+  d._versaoDoDiag = 10;
+  d.resumo.telaAgora = { ...d.resumo.telaAgora, painel: 'tudoLimpo', variante: 'fimDaFila' };
+  d.momentos[0] = { ...d.momentos[0], painel: 'tudoLimpo', variante: 'nadaNestaFila' };
+  const s = rodar(d);
+  assert.match(s, /tela app · painel tudoLimpo \(fim da fila: há pulados pendentes\) · card montado/);
+  assert.match(s, /manual · tela app · painel tudoLimpo \(nada tratado nesta fila\) · card montado/);
+  // CONTROLE: relatório sem a variante (anterior ao v10) sai como sempre.
+  assert.match(rodar(relatorioV4()), /tela app · painel carregando · card montado: true/);
+});
