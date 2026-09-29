@@ -874,7 +874,7 @@ test('cada captura leva o `computado` e os ALERTAS daquele instante', () => {
   assert.ok(iTela > 0 && iInst > iTela, 'a captura deixou de rodar as sentinelas no instante');
   assert.ok(iDom > iInst, 'as sentinelas têm que rodar ANTES de copiar o `dom` (é o mesmo instante)');
   const inst = fatiarFn(semCom, 'diagNoInstante');
-  assert.match(inst, /const computado = diagComputado\(\);\s+return \{ computado, alertas: diagSentinelas\(computado\) \};/,
+  assert.match(inst, /const computado = diagComputado\(\);\s+const alertas = diagSentinelas\(computado\);[\s\S]*?return \{ computado, alertas \};/,
     'as sentinelas da captura têm que ler o MESMO `computado` que vai junto');
   // Sentinela quebrada não pode derrubar a captura: vira alerta, como no relatório.
   assert.match(inst, /catch \(e\) \{\s+return \{ alertas: \[\{ chave: '_erro'/,
@@ -1218,4 +1218,50 @@ test('código: o `codigo` é só o código nosso — sem a leitura do relatório
   // E o relatório usa esta lista (e não outra montada à parte).
   assert.match(fatiarFn(APP, 'diagCorpo'), /for \(const u of diagUrlsDoCodigo\(recursos\.map\(\(r\) => r\.url\), meu, location\.href\)\)/,
     'o `codigo` deixou de sair do `diagUrlsDoCodigo`');
+});
+
+// ── D9 (auditoria de 2026-09-26): o tile guardado que falhou, UMA vez ───────
+// A sentinela lia o anel ACUMULADO da página, sem janela e sem hora: depois de
+// uma falha, toda captura e todo relatório a repetiam — inclusive num card sem
+// mapa, minutos depois. Aqui o caminho de verdade (`diagNoInstante`, com a
+// leitura e a marcação) roda sobre o anel, com a sentinela real.
+test('tileGuardadoFalhou: acusa só o que falhou desde a captura anterior, e diz a HORA', () => {
+  const ini = semCom.indexOf('let diagTilesLidosAte = 0;');
+  assert.ok(ini > 0, 'sumiu o marcador de leitura do anel dos tiles');
+  const app = new Function('agora', `
+    let diagTilesGuardadosQueFalharam = [];
+    ${semCom.slice(ini, semCom.indexOf('\n}\n', semCom.indexOf('function diagTilesParaAlerta')) + 3)}
+    const Date = class extends globalThis.Date { static now() { return agora.v; } };
+    const diagComputado = () => ({ tilesGuardadosQueFalharam: diagTilesParaAlerta() });
+    const AppState = { authenticated: false };
+    const safeLS = { get: () => 'x' };
+    const diagSessao = () => ({ ciclos: [] });
+    const diagArmazenamentoDuravel = () => ({});
+    ${fatiarFn(semCom, 'diagSentinelas')}
+    ${fatiarFn(semCom, 'diagNoInstante')}
+    return {
+      falha: (t, url) => diagTilesGuardadosQueFalharam.push({ t, url }),
+      capturar: () => diagNoInstante().alertas.find((a) => a.chave === 'tileGuardadoFalhou') || null,
+    };
+  `);
+  const agora = { v: 1_800_000_000_000 };
+  const a = app(agora);
+  assert.equal(a.capturar(), null, 'CONTROLE: sem falha nenhuma, a sentinela cala');
+  agora.v += 1000;
+  a.falha(agora.v, 'https://www.waze.com/row-tiles/live/base/17/1/1/tile.png');
+  agora.v += 300;
+  const primeira = a.capturar();
+  assert.ok(primeira && primeira.n === 1, 'a captura logo depois da falha não acusou');
+  assert.deepEqual(primeira.quando, [new Date(agora.v - 300).toISOString()], 'o alerta não diz QUANDO o tile falhou');
+  agora.v += 2500;
+  assert.equal(a.capturar(), null, 'a MESMA falha voltou a acusar na captura seguinte — o anel acumulado sem janela');
+  // Uma falha NOVA volta a acusar — e só ela.
+  agora.v += 1000;
+  a.falha(agora.v, 'https://www.waze.com/row-tiles/live/base/17/2/2/tile.png');
+  agora.v += 10;
+  const nova = a.capturar();
+  assert.ok(nova && nova.n === 1 && /17\/2\/2/.test(nova.exemplos[0]), 'a falha nova não acusou, ou veio junto da velha');
+  // E o relatório também LÊ: ele marca, como a captura.
+  assert.match(fatiarFn(semCom, 'diagCorpo'), /const alertas = diagSentinelas\(computado\);\s*diagTilesLidosAte = Date\.now\(\);/,
+    'o relatório deixou de marcar o que leu — a captura seguinte repetiria a falha que ele já acusou');
 });

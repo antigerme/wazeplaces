@@ -1335,6 +1335,13 @@ const sentMapa = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 150));   // folga pro não guardado, se ele entrasse (errado)
   const r = { semAlerta, anel: diagTilesGuardadosQueFalharam.map((x) => (x.url === guardado ? 'guardado' : x.url)),
               comAlerta: diagSentinelas(diagComputado()).map((a) => a.chave) };
+  // A CAPTURA acusa uma vez, com a hora; a seguinte, sem falha nova, cala
+  // (auditoria de 2026-09-26: o anel acumulado repetia a falha em toda captura).
+  const c1 = dlogCapturar('manual');
+  const c2 = dlogCapturar('manual');
+  const a1 = (c1.alertas || []).find((a) => a.chave === 'tileGuardadoFalhou');
+  r.captura1 = a1 ? { n: a1.n, quando: a1.quando } : null;
+  r.captura2 = (c2.alertas || []).some((a) => a.chave === 'tileGuardadoFalhou');
   diagTilesGuardadosQueFalharam = [];
   return r;
 });
@@ -1343,6 +1350,9 @@ diz('CONTROLE: sem falha registrada, a sentinela do mapa cala',
 diz('o tile GUARDADO que falha entra no anel — e o que não está guardado, não',
   sentMapa.anel.length === 1 && sentMapa.anel[0] === 'guardado', JSON.stringify(sentMapa));
 diz('e a sentinela do mapa acusa', sentMapa.comAlerta.includes('tileGuardadoFalhou'), JSON.stringify(sentMapa));
+diz('a captura acusa a falha UMA vez, com a hora — e a seguinte, sem falha nova, cala',
+  sentMapa.captura1?.n === 1 && Array.isArray(sentMapa.captura1?.quando) && !Number.isNaN(Date.parse(sentMapa.captura1.quando[0]))
+  && sentMapa.captura2 === false, JSON.stringify({ c1: sentMapa.captura1, c2: sentMapa.captura2 }));
 // A LISTA DE RECURSOS: o navegador guarda 250 e descarta o resto. Página nova
 // em cada medida (o teto vale por documento), sem worker nem rota, e 300
 // requisições de mesma origem. O CONTROLE é a de baixo: sem ele, "passou de

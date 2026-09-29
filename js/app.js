@@ -4265,7 +4265,8 @@ function diagComputado() {
             carregada: !!(foto && foto.complete && foto.naturalWidth > 0),
             src: foto ? String(foto.currentSrc || foto.src || '').slice(0, 160) : null,
         } : null;
-        fora.tilesGuardadosQueFalharam = diagTilesGuardadosQueFalharam.slice(-5);
+        // Só as falhas desde a leitura ANTERIOR (ver `diagTilesLidosAte`).
+        fora.tilesGuardadosQueFalharam = diagTilesParaAlerta();
         // O esqueleto de "carregando" e o card da frente, cada um por si: o
         // `painel` do `dlogTelaAtual` diz só o de CIMA ("carregando"), e foi
         // assim que o relato de 2026-09-22 chegou sem dizer que havia um card
@@ -4695,11 +4696,14 @@ function diagSentinelas(comp) {
         // é o defeito do mapa do relato de 2026-09-22 (o worker acordava sem
         // saber dos tiles), que o arquivo dele não tinha como mostrar: o app
         // tira da tela o tile que falha, e a prova ia junto.
+        // Só as falhas desde a captura (ou o relatório) ANTERIOR, e com a HORA:
+        // sem ela, a falha de minutos atrás lia como se estivesse na tela agora.
         const tf = comp.tilesGuardadosQueFalharam || [];
         if (tf.length) {
             diga('tileGuardadoFalhou',
                 'pedaço de mapa GUARDADO no aparelho falhou na tela — o service worker não o serviu',
-                { n: tf.length, exemplos: tf.slice(-3).map((x) => x.url) });
+                { n: tf.length, exemplos: tf.slice(-3).map((x) => x.url),
+                  quando: tf.slice(-3).map((x) => new Date(x.t).toISOString()) });
         }
         // 9. O esqueleto de "carregando" POR CIMA de um card montado.
         //
@@ -4758,7 +4762,10 @@ function diagSentinelas(comp) {
 function diagNoInstante() {
     try {
         const computado = diagComputado();
-        return { computado, alertas: diagSentinelas(computado) };
+        const alertas = diagSentinelas(computado);
+        // O que esta captura leu não volta a acusar na próxima (ver `diagTilesLidosAte`).
+        diagTilesLidosAte = Date.now();
+        return { computado, alertas };
     } catch (e) {
         return { alertas: [{ chave: '_erro', msg: String((e && e.message) || e).slice(0, 160) }] };
     }
@@ -6054,6 +6061,7 @@ async function diagCorpo() {
     // onde ele acabou de aparecer.
     const computado = diagComputado();
     const alertas = diagSentinelas(computado);
+    diagTilesLidosAte = Date.now();   // o relatório também LÊ (ver `diagTilesLidosAte`)
     // O RETRATO: o instante em que o diário, as capturas, as chamadas e os erros
     // entram no arquivo. Tudo daqui pra frente é síncrono até a leitura do
     // offline, e é ESTE instante — não o fim do download — que separa o que foi
@@ -13387,6 +13395,15 @@ let offlineUltimoAnuncio = 0;
 //     ligou o offline não ganha um cache vazio por um tile falhar na rede.
 const DIAG_TILES_FALHOS_TETO = 20;
 let diagTilesGuardadosQueFalharam = [];
+// Até onde o anel acima já foi LIDO por uma captura ou por um relatório. A
+// sentinela acusa só o que veio DEPOIS: lendo o anel inteiro, UMA falha saía em
+// toda captura e em todo relatório da página, inclusive num card sem mapa
+// minutos depois — e alerta que se repete é alerta que se aprende a ignorar
+// (auditoria de 2026-09-26). O total segue na seção `offline` do relatório.
+let diagTilesLidosAte = 0;
+function diagTilesParaAlerta() {
+    return diagTilesGuardadosQueFalharam.filter((x) => x.t > diagTilesLidosAte).slice(-5);
+}
 function registrarFalhaDeTile(box, url) {
     try {
         if (box && box.dataset) {
