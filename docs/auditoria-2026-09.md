@@ -16,46 +16,26 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-09-26 16:40 UTC)
+## 0. Estado agora (2026-09-29 ~17:30 UTC)
 
-- **PR #252 mergeado** (rodadas 4 e 5: lote 5 + os seis consertos da rodada 2).
-  Produção **v2026.09.26-01 verificada: 71 ✓ · 0 ✗** (`prod-2026092601.log`),
-  com as seções novas "dados com dono" e "extensão só onde instala" conferidas
-  com controle.
-- **Rodada 3 da auditoria feita** (cinco auditores sobre a main do #252: costura
-  entre os consertos paralelos, modo dev e diagnóstico, lightbox, textos e docs,
-  filtros e fila): **88 achados**. Os pedidos estão em
-  `scratchpad/rodada3-prompts.md`; os roteiros de reprodução, em
-  `/tmp/audit-r3-*/`.
-- **Lote 7 = os consertos da rodada 3**, feitos por cinco agentes, cada um no
-  seu worktree (branch local): `wp-fix3-textos`, `wp-fix3-fila`,
-  `wp-fix3-costura`, `wp-fix3-lightbox`, `wp-fix3-dev`. O limite da assinatura
-  os parou às ~13:00 e eles foram continuados às 16:24 (`SendMessage` com o id
-  de cada um). **Se a sessão caiu e eles se perderam**: os worktrees somem com
-  o contêiner; refaça a rodada 3 a partir da main (os auditores acham de novo o
-  que não estiver consertado).
-- **Junção** no worktree `/home/user/wp-lote7` (branch
-  `claude/peaceful-heisenberg-HaUuC`): cherry-pick dos cinco, regenerar os
-  gerados, versão nova (`date -u`), CHANGELOG, CLAUDE.md, `npm test`, os smokes
-  (Chromium e WebKit, um smoke de layout por vez: a porta 8123 é fixa),
-  sabotagem por amostragem, PR, CI, merge e `prod-auditoria.mjs`.
-- **CHANGELOG da v2026.09.26-01 tem quatro frases a corrigir** (achados T10–T13
-  da rodada 3): "diz que é passageiro" (a mensagem é `srv.err.wazeDown`),
-  "área de gerência" → "área de edição", "renomear foto" → "renomear o local",
-  e o item da porta ocupada fora do lugar. E o CLAUDE.md (T28): o motivo do
-  `AbortController` na varredura é só o iOS < 16.
-- **Decisões do owner**: página pronta, com mockups da tela real,
-  `scratchpad/mockups/decisoes-em-aberto.html` (vai no relatório final como
-  artefato). Hoje: contraste (10 lugares), cabeçalho do Histórico, Resumo
-  ("12 de 30" e dia da semana), resumo do mês fechado, português antes da
-  tradução, abrir foto/mapa pelo teclado, aviso de carregamento lento, "Fora do
-  app agora", recusa automática nas conquistas, travar o card na aprovação, o ✨
-  sobre a pílula (L7), o aviso do Desfazer sobre as miniaturas (L10), a dica de
-  zoom cortada (L18), o religar em 9 dias sem aviso (T3), a lista de
-  credenciais incompleta (T24), e republicar a extensão.
-- **Fato do Waze medido nesta rodada** (só leitura): a busca aceita
-  `orderBy: 'SORTING_UPDATE_TIME_ASC'`, mas a ordem é pela atualização do LOCAL,
-  não pelo `dateAdded` do pedido — nenhuma ordem do servidor dá a do app.
+- **PR #252 mergeado** e produção **v2026.09.26-01 verificada: 71 ✓ · 0 ✗**.
+- **Rodada 3 da auditoria feita** (88 achados) e **lote 7 = os consertos dela, JUNTOS** no branch
+  `claude/peaceful-heisenberg-HaUuC` (worktree `/home/user/wp-lote7`): textos, fila, costura, lightbox e
+  diagnóstico, mais os conflitos resolvidos na junção (a trava das ações soma sessão, lote de lidos e
+  conferência do 401; o ouvinte da região; `enviarLote`) e um conserto meu de instrumento
+  (`tools/servidor-local.mjs`). Versão **2026092901**, CHANGELOG e CLAUDE.md escritos. `npm test` 1436/1436.
+  Falta: gerados, smokes (Chromium e WebKit), PR, CI, merge e `prod-auditoria.mjs`.
+- O limite SEMANAL da assinatura parou tudo de 2026-09-26 ~16:35 a 2026-09-29 15:00 UTC; os worktrees
+  sobreviveram e os agentes foram continuados por `SendMessage`.
+- **Cookies novos** das duas contas (2026-09-29): `a0ed4151-antigerme_cookies.txt` (L6+AM) e
+  `74c7e5b6-cafanha_cookies.txt` (L2+AM), conferidos pelo `waze-probe`; o `prod-auditoria.mjs` já aponta pra eles.
+- **Decisões do owner**: página pronta (`scratchpad/mockups/decisoes-em-aberto.html`), a publicar no
+  relatório final. Entraram na rodada 3: o ✨ sobre a pílula (L7), o aviso do Desfazer sobre as
+  miniaturas (L10), a dica de zoom cortada (L18), o religar em 9 dias sem aviso (T3) e a lista de
+  credenciais (T24). Novos do lote 7 (sem mockup ainda): o aviso "fora do mapa" no meio do mapa ampliado
+  (L16) e a escala encavalando no aviso no card do SE com diff.
+- **Próxima volta**: rodada 4 (seis auditores, pedidos em `scratchpad/rodada4-prompts.md`) sobre a main
+  depois do merge do lote 7.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
