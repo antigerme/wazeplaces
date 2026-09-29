@@ -18,9 +18,13 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ## 0. Estado agora (2026-09-29 ~20:30 UTC)
 
-- **PR #253 (lote 7) mergeado** às 20:22 UTC, com CI verde nos dois jobs (check e webkit). Produção já
-  serve **v2026.09.29-01** (`js/min/version.js` e `CACHE_NAME` conferidos); a `prod-auditoria.mjs` roda
-  com as duas contas (log em `scratchpad/prod-l7.log`).
+- **PR #253 (lote 7) mergeado** às 20:22 UTC, com CI verde nos dois jobs (check e webkit). Produção
+  **v2026.09.29-01 verificada: 71 ✓ · 0 ✗** com as duas contas, mais as verificações novas do lote 7 no
+  `prod-auditoria.mjs` (todas ✓): a conta na resposta do login, o "Aprovar" só com a foto carregada (a
+  foto do Waze atrasada de propósito), o link do pareamento fora do relatório (gerado com o QR na tela),
+  desligar o modo dev numa aba desliga na outra e a escala do mapa ampliado contra a distância real
+  (69 m × 69 m). Não medível hoje: "Mais antigos" acima de 500 (a fila do Brasil com lidos tem 373).
+  A seção 4 (portões do lightbox) passou a esperar a foto carregar antes de medir.
 - **Rodada 4 da auditoria em andamento**: seis auditores (R4-1 a R4-6, pedidos em
   `scratchpad/rodada4-prompts.md`, base em `scratchpad/r4-base.txt`) sobre o worktree `/home/user/wp-r4`,
   que é o código da main (c6d9f91). Tinham parado no limite da sessão (volta às 20:00 UTC) e foram
@@ -68,7 +72,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #250 | 2026092504 | rodada 2: a regressão, KV com 1 leitura por ação, `nosniff`, `?diag-rede`, FAB, zoom da foto, botão direito, Tab nos lightboxes, horário de verão, textos | **58 ✓ · 0 ✗** — e um achado novo no diagnóstico (abaixo) |
 | #251 | 2026092505 | rodada 3: o diagnóstico sem o script do Cloudflare, fim da fila com pulados, retentativa de foto, irmãos na fila, pilha/foco no autor, Street View no zoom, presença (país no meio, relógio, leitor de tela, lista fechada, ids com teto), cookies colados limpos em todo fechamento, IndexedDB com teto, segredo do pareamento fora do relatório | mergeado em 2026-09-25 23:38 UTC (CI verde nos dois jobs); **60 ✓ · 0 ✗** em produção (2026-09-26 01:25), com o diagnóstico conferindo 13 arquivos com o servidor ("diferentes: 0") e o desvio do relógio medido (-8 ms) |
 | #252 | 2026092601 | rodada 2 (seis auditores): lote 5 + lote 6 — histórico, entrada e sessão, card, servidor, offline, presença | **71 ✓ · 0 ✗** em produção |
-| #253 | 2026092901 | rodada 3 (cinco auditores, 88 achados): sessão e conta, fila e filtros, foto e mapa ampliados, textos, modo dev; a trava das ações soma as três esperas; `tools/servidor-local.mjs` | mergeado em 2026-09-29 20:22 UTC (CI verde nos dois jobs); produção: ver §0 |
+| #253 | 2026092901 | rodada 3 (cinco auditores, 88 achados): sessão e conta, fila e filtros, foto e mapa ampliados, textos, modo dev; a trava das ações soma as três esperas; `tools/servidor-local.mjs` | mergeado em 2026-09-29 20:22 UTC (CI verde nos dois jobs); **71 ✓ · 0 ✗** em produção + 7 verificações novas do lote 7 |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
