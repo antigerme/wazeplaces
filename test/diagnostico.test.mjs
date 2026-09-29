@@ -520,6 +520,12 @@ test('todo id de camada vigiada pelo FAB existe no index.html', () => {
         assert.ok(HTML.includes(`id="${id}"`), `#${id} é vigiado mas não existe no index.html`);
     }
     assert.ok(lista.includes('...MODAL_IDS'), 'os modais saíram da lista de camadas vigiadas');
+    // D8 (auditoria de 2026-09-26): os PAINÉIS da fila vazia aparecem sem mexer em
+    // modal, lightbox ou tela — sem vigiá-los, o FAB ficava na borda do "Tentar
+    // novamente" e do "Agora não" do convite de instalar.
+    for (const id of ['loadErrorState', 'noMoreCards', 'installInvite']) {
+        assert.ok(ids.includes(id), `o painel #${id} não é vigiado: o FAB não reavalia o canto quando ele aparece`);
+    }
 });
 
 test('desligar o modo dev apaga também a posição fixada do FAB', () => {

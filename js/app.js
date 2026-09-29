@@ -5565,7 +5565,12 @@ function ligarFabDev() {
     // aconteceu: escrevi `lightbox` e o elemento se chama `imageLightbox`, então
     // o lightbox de foto simplesmente não era vigiado. `test/diagnostico.test.mjs`
     // cobra que todo id desta lista exista no index.html.
-    const DEV_FAB_CAMADAS = [...MODAL_IDS, 'imageLightbox', 'mapaLightbox', 'appScreen', 'authScreen'];
+    // E os PAINÉIS da fila vazia: a falha de carga e o "Tudo limpo!" (com o
+    // convite de instalar dentro) aparecem SEM mexer em modal, lightbox ou tela
+    // — o FAB ficava onde estava, na borda do "Tentar novamente", do "Instalar"
+    // e do "Agora não" (auditoria de 2026-09-26, D8).
+    const DEV_FAB_CAMADAS = [...MODAL_IDS, 'imageLightbox', 'mapaLightbox', 'appScreen', 'authScreen',
+                             'loadErrorState', 'noMoreCards', 'installInvite'];
     const camadas = DEV_FAB_CAMADAS.map((id) => document.getElementById(id)).filter(Boolean);
     let pendente = 0;
     const reavaliar = () => {

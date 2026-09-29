@@ -4098,6 +4098,87 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(r.visivel, `FAB/${nomeAp}: em "${nome}" o alvo ficou menor que 44px`);
     }
 
+    // ── PAINÉIS SEM MODAL: a falha de carga e o convite de instalar ─────
+    //
+    // O observador do canto vigiava modal, lightbox e as duas telas — e os
+    // painéis da fila vazia aparecem sem mexer em nenhum deles. O FAB ficava
+    // onde estava: na borda do "Tentar novamente" (Fold) e do "Agora não" do
+    // convite (iPhone SE), auditoria de 2026-09-26 (D8). O canto em que ele
+    // estava antes depende do card, então o caso é MONTADO em todo aparelho:
+    // com o painel escondido, o FAB (automático, não fixado) é posto em cima de
+    // onde o botão nasce — só a reavaliação o tira de lá.
+    //
+    // A régua é a do próprio `posicionarFabDev`, medida por fora: ele fica no
+    // canto de MENOS vítimas, e não em cima de um botão do painel quando existe
+    // canto que não cubra nenhum. MEDIDO no Fold com o convite: NENHUM canto é
+    // livre (em cima o placar, embaixo os dois botões do convite, no meio o
+    // "Verificar novamente") — e aí o melhor é o placar, não um botão.
+    const vitimasPorCanto = () => page.evaluate((sel) => {
+      const fab = document.getElementById('devFab'), btn = document.getElementById('devFabBtn');
+      const f = btn.getBoundingClientRect(), w = f.width || 44, h = f.height || 44;
+      const conta = (x, y) => {
+        const v = new Set();
+        for (const fx of [0.02, 0.5, 0.98]) for (const fy of [0.02, 0.5, 0.98]) {
+          const sob = document.elementFromPoint(x + w * fx, y + h * fy);
+          const a = sob && sob.closest(sel);
+          if (a && !fab.contains(a)) v.add(a.id || a.className.split(' ')[0]);
+        }
+        return [...v];
+      };
+      const pe = fab.style.pointerEvents, peB = btn.style.pointerEvents;
+      fab.style.pointerEvents = 'none'; btn.style.pointerEvents = 'none';
+      const cantos = {};
+      for (const c of DEV_FAB_CANTOS) { const { x, y } = devFabCoords(c, w, h); cantos[c] = conta(x, y); }
+      const agora = conta(f.left, f.top);
+      fab.style.pointerEvents = pe; btn.style.pointerEvents = peB;
+      return { agora, cantos };
+    }, ALVO_PROIBIDO);
+    await page.evaluate(() => {
+      const e = new Event('beforeinstallprompt', { cancelable: true });
+      e.prompt = () => {}; e.userChoice = Promise.resolve({ outcome: 'dismissed' });
+      window.dispatchEvent(e);
+    });
+    for (const [nomeP, chave, botoes] of [['falha de carga', 'falha', ['retryLoadBtn']],
+      ['fila vazia com o convite', 'convite', ['reloadBtn', 'installInviteBtn', 'installDismissBtn']]]) {
+      const alvo = await page.evaluate((k) => {
+        AppState.queue = []; AppState.currentPlace = null; AppState.loadError = k === 'falha';
+        showNoPlaces();
+        const b = document.getElementById(k === 'falha' ? 'retryLoadBtn' : 'installDismissBtn');
+        const r = b && b.getBoundingClientRect();
+        return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+      }, chave);
+      checa(!!alvo, `FAB/${nomeAp}: PRÉ-CONDIÇÃO — o botão do painel "${nomeP}" não apareceu`);
+      if (!alvo) continue;
+      await page.evaluate(() => ['loadErrorState', 'noMoreCards', 'installInvite']
+        .forEach((id) => document.getElementById(id).classList.add('hidden')));
+      await doisQuadros(page);
+      await page.evaluate(({ x, y }) => {
+        const f = document.getElementById('devFab'); const r = f.getBoundingClientRect();
+        f.style.left = (x - r.width / 2) + 'px'; f.style.top = (y - r.height / 2) + 'px';
+        f.style.right = 'auto'; f.style.bottom = 'auto';
+      }, alvo);
+      await page.evaluate(() => showNoPlaces());   // o painel volta pelo caminho do app
+      await assentar(page, 200);
+      await doisQuadros(page);
+      const v = await vitimasPorCanto();
+      const noBotao = v.agora.filter((id) => botoes.includes(id));
+      const haCantoSemBotao = Object.values(v.cantos).some((l) => !l.some((id) => botoes.includes(id)));
+      const minimo = Math.min(...Object.values(v.cantos).map((l) => l.length));
+      checa(!(haCantoSemBotao && noBotao.length), `FAB/${nomeAp}: no painel "${nomeP}" o botão ficou por cima de ${noBotao.join(', ')} — o canto não foi reavaliado`,
+        JSON.stringify(v));
+      checa(v.agora.length <= minimo, `FAB/${nomeAp}: no painel "${nomeP}" o botão não está no canto de menos vítimas`, JSON.stringify(v));
+    }
+    await page.evaluate((fila) => {
+      AppState.loadError = false;
+      ['loadErrorState', 'noMoreCards', 'installInvite'].forEach((id) => document.getElementById(id).classList.add('hidden'));
+      AppState.queue = JSON.parse(JSON.stringify(fila));
+      AppState.currentPlace = AppState.queue[0];
+      AppState.serverTotal = fila.length;
+      showCurrentPlace();
+    }, FIXTURES_PAISES.slice(0, 3));
+    await assentar(page, 300);
+    await doisQuadros(page);
+
     // ── o gesto DO OWNER: pressiona, SEGURA, e só então arrasta ─────────
     //
     // O teste antigo pressionava e já movia — e por isso deu verde num FAB que
