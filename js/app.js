@@ -581,6 +581,13 @@ function abrirComSessaoSalva() {
 // nenhum e cai no login em EXT_PRESENTE_MS — tempo que ninguém percebe.
 const EXT_PRESENTE_MS = 350;    // "tem extensão aí?" — só espera local
 const EXT_ESPERA_MS = 8000;     // depois do `aguarde`, o prazo da ida ao Waze
+// A renovação da QUEDA mantém a fila, e o aviso "sua fila continua aqui" espera
+// o perfil dizer de quem é a sessão nova (a extensão publicada hoje não diz):
+// com OUTRA conta a fila é trocada, e o aviso seria desmentido pelo da troca
+// (ver `derrubarSessao`). O teto é só pra o aviso não depender de uma resposta
+// que pode não vir: passado ele, a fila continuou mesmo, e o perfil que chegar
+// depois ainda a troca, com o aviso dele.
+const AVISO_RENOVADA_ESPERA_PERFIL_MS = 4000;
 let extPerguntando = false;
 // A extensão disse que o PORTÃO recusou esta conta (nível ou área — ver o
 // `autenticar` do background.js dela). Antes a recusa chegava como um
@@ -6479,17 +6486,23 @@ function derrubarSessao(errorKey, { depois } = {}) {
     if (typeof depois === 'function') { fecharCamadasAbertas(depois); return; }
     const epoca = epocaDaSessao;
     const filaDaQueda = AppState.fetchEpoch;   // a fila na tela, que a renovação mantém
-    entrarPelaExtensao({ silencioso: true, manterFila: true }).then((renovou) => {
+    entrarPelaExtensao({ silencioso: true, manterFila: true }).then(async (renovou) => {
         // O "Sair" no meio da renovação: a tela e o aviso já são os dele, e um
         // "sua sessão expirou" depois dele diria o que não aconteceu (K3).
         if (epoca !== epocaDaSessao) return;
         if (renovou) {
-            // "Sua fila continua aqui" só se ela continua. A ponte que repassa a
-            // conta revela OUTRA conta dentro da renovação, e a fila já saiu ali
-            // (`esquecerOutraConta`): os dois avisos juntos se contradiziam, e o
-            // da troca é o que vale (auditoria da costura, 2026-09-26, K2).
-            if (AppState.fetchEpoch === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
             rebuscarDepoisDeFalha();
+            // "Sua fila continua aqui" só se ela continua. Com OUTRA conta — dita
+            // pela ponte que repassa a conta, ou pelo perfil que a renovação
+            // pediu —, a fila sai (`esquecerOutraConta`), e os dois avisos
+            // juntos se contradiziam: o da troca é o que vale (auditoria da
+            // costura, 2026-09-26, K2). Por isso o perfil é esperado, com teto.
+            await Promise.race([
+                Promise.resolve(AppState._profilePromise).catch(() => {}),
+                new Promise((ok) => setTimeout(ok, AVISO_RENOVADA_ESPERA_PERFIL_MS)),
+            ]);
+            if (epoca !== epocaDaSessao) return;
+            if (AppState.fetchEpoch === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
             return;
         }
         // A extensão pode ter respondido que o PORTÃO recusou a conta (o nível
