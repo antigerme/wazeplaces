@@ -1066,9 +1066,12 @@ function setupAppListeners() {
         showToast(t('toast.refreshing'), 'info');
     });
     $('retryLoadBtn')?.addEventListener('click', async () => {
-        // Sem rede e com o "Disponível offline": a fila guardada, que antes só
-        // voltava fechando e reabrindo o app.
-        if (await offlineTentarAbrirSemRede()) return;
+        // Sem rede — ou com a última busca tendo falhado por rede ou pelo
+        // servidor (o "lie-fi", a origem fora do ar), com o `onLine` dizendo que
+        // há rede — e com o "Disponível offline": a fila guardada, que antes só
+        // voltava fechando e reabrindo o app (e, com o `onLine` verdadeiro, nem
+        // assim: auditoria de 2026-09-29, O1).
+        if (await offlineTentarAbrirSemRede(ultimaBuscaFalhouPorRede)) return;
         retomarBusca();
     });
     $('diagBtn')?.addEventListener('click', baixarDiagnostico);
@@ -8438,6 +8441,12 @@ function caixaDaMinhaArea(perfil) {
 // no `resetQueue` — fila nova é outra busca.
 let filaEsperaPerfil = false;
 
+// A última busca FALHOU POR REDE ou pelo SERVIDOR (`transient`: nada respondeu,
+// o teto de 45 s estourou, ou a origem devolveu 5xx). É o que deixa a fila
+// guardada do offline entrar com `onLine` dizendo que há rede (ver
+// `startFetching` e o "Tentar novamente"). Zera a cada busca que começa.
+let ultimaBuscaFalhouPorRede = false;
+
 // "Minha área" num perfil SEM caixa: buscar o país com o filtro marcado é filtro
 // que mente (a pessoa acha que vê a área dela). Desliga, grava e DIZ — o mesmo
 // do "Perto de mim" negado: volta pro padrão e diz por quê.
@@ -8580,6 +8589,7 @@ function fetchNextPage() {
                     dfato('busca.falhou', { key: result.errorKey || null,
                                             cat: result.errorCategory || null });
                     dlogCapturarAuto('buscaFalhou');
+                    ultimaBuscaFalhouPorRede = result.errorCategory === 'transient';
                     if (result.errorCategory === 'unauthorized') {
                         AppState.hasMore = false;
                         // `loadError` TAMBÉM aqui, e a falta dele foi o defeito que o
@@ -8638,6 +8648,7 @@ function fetchNextPage() {
                 }
 
                 dlogVoltou('buscar');
+                ultimaBuscaFalhouPorRede = false;
                 busca.paginas++;
                 dlog('busca.ok', { n: (result.places || []).length, hasMore: !!result.hasMore,
                                    page: pagina, total: result.total });
@@ -8767,6 +8778,9 @@ async function startFetching() {
     // `fetchNextPage` recusa no treino — seria o laço do gotcha #19.
     if (Treino.ativo) return;
     AppState.loadError = false;
+    ultimaBuscaFalhouPorRede = false;
+    // A fila desta busca: um `resetQueue` no meio (↻, filtro) é outra fila.
+    const epoca = AppState.fetchEpoch;
     showLoading(true);
     document.getElementById('noMoreCards').classList.add('hidden');
     document.getElementById('loadErrorState')?.classList.add('hidden');
@@ -8786,6 +8800,23 @@ async function startFetching() {
         await fetchNextPage();
     }
 
+    // A busca falhou por REDE ou pelo SERVIDOR com a fila NOVA vazia (a
+    // abertura, o ↻, o filtro trocado) — "lie-fi", em que o `onLine` diz que há
+    // rede e nada passa (a API pendura até o teto de 45 s), ou a origem fora do
+    // ar respondendo 5xx. É pra isso que o "Disponível offline" existe: a fila
+    // guardada entra, se for desta conta, deste lugar e deste filtro. Ela só
+    // entrava com `onLine === false`, e a espera terminava em "Falha ao
+    // carregar" com a fila preparada no aparelho (auditoria de 2026-09-29, O1).
+    // Só na fila NOVA: numa fila que a pessoa já trabalhou, os que ela pulou
+    // voltariam sozinhos — ali é o "Tentar novamente" que a traz, como sem rede.
+    if (!AppState.queue.length && ultimaBuscaFalhouPorRede && pedidosQueEntraramNaFila.size === 0
+        && epoca === AppState.fetchEpoch) {
+        await abrirGuardadaDepoisDaFalha(epoca);
+        // Abriu — por esta chamada ou por outra que esperava a MESMA busca: o
+        // card já está na tela, e a busca seguinte sai com o próximo gesto.
+        if (AppState.queue.length > 0) return;
+    }
+
     showLoading(false);
 
     if (AppState.queue.length > 0) {
@@ -8794,6 +8825,18 @@ async function startFetching() {
     } else {
         showNoPlaces();
     }
+}
+
+// Uma tentativa por vez: dois `startFetching` esperando a MESMA busca (a
+// promessa dela é compartilhada) abririam a fila guardada duas vezes.
+let abrindoGuardadaDepoisDaFalha = null;
+function abrirGuardadaDepoisDaFalha(epoca) {
+    if (!abrindoGuardadaDepoisDaFalha) {
+        abrindoGuardadaDepoisDaFalha = offlineTentarAbrirSemRede(true, epoca)
+            .catch(() => false)
+            .finally(() => { abrindoGuardadaDepoisDaFalha = null; });
+    }
+    return abrindoGuardadaDepoisDaFalha;
 }
 
 function maybePrefetch() {
@@ -13841,6 +13884,7 @@ let saidaPedidaDeNovo = false;
 // sem perfil): a chegada do perfil o chama de novo (ver `aoConhecerConta`).
 let saidaEsperandoConta = false;
 
+
 // ── 401 NA FILA DE SAÍDA: sessão morta ou ESCRITA recusada? ──────────────
 //
 // Auditoria de 2026-09-26 (O1): um ✕ cuja escrita o Waze recusa com 401/403 de
@@ -15535,8 +15579,13 @@ function filaGuardadaDestaConta(g) {
     return !!(g.conta && agora && String(g.conta) === agora);
 }
 
-async function offlineTentarAbrirSemRede() {
-    if (!offlineLigado() || navigator.onLine !== false) return false;
+// `aposFalha`: a BUSCA acabou de falhar por rede ou pelo servidor (ver
+// `ultimaBuscaFalhouPorRede`) — aí a fila guardada entra mesmo com `onLine`
+// verdadeiro, que no "lie-fi" mente. `epoca`: a da fila da busca que falhou; se
+// ela mudou enquanto a base era lida (↻, filtro trocado), a fila é outra e a
+// guardada não entra nela.
+async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
+    if (!offlineLigado() || (navigator.onLine !== false && !aposFalha)) return false;
     const guardada = await offlineLerFila();
     if (!guardada) return false;
     // A fila de OUTRO lugar (a região, o país ou o FILTRO mudou depois dela) não
@@ -15583,6 +15632,10 @@ async function offlineTentarAbrirSemRede() {
                                  idade: Math.round((Date.now() - guardada.t) / 60000) });
         return false;
     }
+    // Depois de uma busca que falhou: a fila mudou enquanto a base era lida
+    // (↻, filtro trocado), ou outra busca já pôs pedido nela — a guardada não
+    // entra por cima.
+    if (aposFalha && ((epoca !== null && epoca !== AppState.fetchEpoch) || AppState.queue.length)) return false;
     AppState.queue = filtrada.places;
     filaDeOnde = { regiao: guardada.regiao, pais: String(guardada.pais), busca: guardada.busca };
     // A fila guardada começa uma fila: o que ela traz já ENTROU, e a busca,
@@ -15600,8 +15653,11 @@ async function offlineTentarAbrirSemRede() {
     updatePendingCount();
     sortQueue();
     showCurrentPlace();
+    // `aposFalha`: abriu com o aparelho dizendo que há rede — a busca é que
+    // falhou (o "lie-fi", a origem fora do ar).
     dfato('offline.abriu', { n: AppState.queue.length, excluidos: filtrada.excluidos,
-                             idade: Math.round((Date.now() - guardada.t) / 60000) });
+                             idade: Math.round((Date.now() - guardada.t) / 60000),
+                             ...(navigator.onLine !== false ? { aposFalha: true } : {}) });
     return true;
 }
 

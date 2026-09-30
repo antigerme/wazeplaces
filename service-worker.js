@@ -30,6 +30,16 @@ const swIniciadoEm = Date.now();
 let swHidratadoEm = null;
 const swConta = { doCache: 0, cacheSemEntrada: 0, esperouLeitura: 0, foraDaLista: 0 };
 
+// As páginas que ABRIRAM DA CÓPIA GUARDADA porque a origem respondeu 5xx à
+// navegação (o `clientId` delas): o código delas também sai da cópia guardada
+// quando a origem responde 5xx (ver o `fetch`). Em memória, e com teto: a página
+// é aberta e carrega o que precisa em segundos, na mesma vida do worker.
+const paginasDoCache = new Set();
+function lembrarPaginaDoCache(id) {
+  paginasDoCache.add(id);
+  if (paginasDoCache.size > 20) paginasDoCache.delete(paginasDoCache.values().next().value);
+}
+
 // Só a leitura MAIS NOVA vale: a partida do worker e o aviso da varredura podem
 // pedir duas seguidas, e elas terminavam fora de ordem — a velha, com MENOS
 // tiles, sobrescrevia a nova, e o tile recém-guardado sumia do mapa sem rede
@@ -273,25 +283,45 @@ self.addEventListener('fetch', event => {
     // ISTO DEPENDE DE DUAS COISAS, e `test/vm-estaticos.test.mjs` cobra as duas:
     // o servidor mandar `no-cache` nesses tipos, e mandar ETag. Sem ETag não há
     // o que revalidar e a revalidação vira download inteiro — era o caso da VM.
+    // A cópia GUARDADA deste pedido (ou `undefined`).
+    const daCopiaGuardada = () => caches.match(event.request, isHTML ? { ignoreSearch: true } : undefined).then(cached => {
+      if (cached) return cached;
+      // Fallback HTML só pra navegação. NUNCA devolver HTML pra request de JS/CSS
+      // (browser engasga ao tentar parsear HTML como script — ver gotcha #11).
+      // `ignoreSearch` acima e `/` aqui: o atalho do manifest abre
+      // `/?action=filters`, que nunca foi guardado com essa query — e o
+      // `/index.html` de antes era uma resposta redirecionada, recusada.
+      if (isHTML) return caches.match('/');
+      return undefined;
+    });
+    const navegacao = event.request.mode === 'navigate';
     event.respondWith(
       fetch(event.request)
         .then(response => {
+          // A ORIGEM FORA DO AR: a resposta CHEGA, com 5xx — a VM caída atrás
+          // do Cloudflare é "502 Bad Gateway" —, e o `.catch` abaixo só pega a
+          // rede que não responde. A navegação com 5xx conta como falha e cai
+          // na página guardada (auditoria de 2026-09-29, O1: o app instalado,
+          // com tudo no cache e a fila guardada, abria a página de erro da borda).
+          // E o CÓDIGO dessa página também, só dela: MEDIDO com a navegação
+          // sozinha, a página guardada abria e os scripts vinham 502 — o app não
+          // subia. A página que veio da REDE segue sem o desvio, que é o que o
+          // anti-skew protege (gotcha #18: HTML novo com JS velho). Sem cópia
+          // guardada, a resposta da borda vai como veio.
+          if (response && response.status >= 500 && (navegacao || paginasDoCache.has(event.clientId))) {
+            return daCopiaGuardada().then((guardada) => {
+              if (!guardada) return response;
+              if (navegacao && event.resultingClientId) lembrarPaginaDoCache(event.resultingClientId);
+              return guardada;
+            });
+          }
           if (response && response.status === 200 && response.type === 'basic') {
             const responseClone = response.clone();
             caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseClone));
           }
           return response;
         })
-        .catch(() => caches.match(event.request, isHTML ? { ignoreSearch: true } : undefined).then(cached => {
-          if (cached) return cached;
-          // Fallback HTML só pra navegação. NUNCA devolver HTML pra request de JS/CSS
-          // (browser engasga ao tentar parsear HTML como script — ver gotcha #11).
-          // `ignoreSearch` acima e `/` aqui: o atalho do manifest abre
-          // `/?action=filters`, que nunca foi guardado com essa query — e o
-          // `/index.html` de antes era uma resposta redirecionada, recusada.
-          if (isHTML) return caches.match('/').then((raiz) => raiz || Response.error());
-          return Response.error();
-        }))
+        .catch(() => daCopiaGuardada().then((guardada) => guardada || Response.error()))
     );
     return;
   }
