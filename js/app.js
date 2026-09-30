@@ -5208,6 +5208,8 @@ function dlogApagar() {
     diagAberturasAnteriores = [];
     diagBaixadoEm = 0;
     diagEsquecerGuardado();
+    // E o retrato que o fechar deixou no localStorage (`diagRetratoAoSair`).
+    diagEsquecerRetratos();
     for (const h of dlogPendencias.values()) clearTimeout(h);
     dlogPendencias.clear();
     // O corpo ENVIADO também: com o modo dev ligado ele leva o texto da conversa
@@ -5456,17 +5458,35 @@ function diagGuardarAbertura(motivo) {
 }
 
 // Na abertura, com o modo dev ligado: traz o que as aberturas anteriores
-// deixaram, já podado (o que venceu sai do aparelho aqui mesmo).
+// deixaram, já podado (o que venceu sai do aparelho aqui mesmo). Os RETRATOS
+// que o fechar deixou no localStorage (ver `diagRetratoAoSair`) entram antes da
+// poda, juntos ao que a base tinha da mesma abertura, e saem do localStorage.
 async function diagCarregarAberturas() {
     if (!dlogLigado()) return;
+    // A época de AGORA: desligado o modo dev (ou o "Sair") enquanto a base
+    // abre, nada do que foi lido volta pro aparelho.
+    const epoca = diagEpoca;
+    const retratos = diagLerRetratos();
     let db = null;
     try {
         db = await diagDB();
         const guardadas = (await diagLerGuardado(db)).filter((a) => a.id !== DIAG_ABERTURA.id);
+        const juntadas = new Set();
+        for (const { r } of retratos) {
+            if (!r || r.id === DIAG_ABERTURA.id) continue;
+            const i = guardadas.findIndex((a) => a.id === r.id);
+            const junto = diagJuntarRetrato(i >= 0 ? guardadas[i] : null, r);
+            if (i >= 0 && junto === guardadas[i]) continue;
+            if (i >= 0) guardadas[i] = junto; else guardadas.push(junto);
+            juntadas.add(junto.id);
+        }
         const poda = diagPodarAberturas(guardadas, Date.now());
-        if (poda.sair.length || poda.cortadas.length) await diagAplicarPoda(db, poda, new Set());
+        if (epoca !== diagEpoca || !dlogLigado()) return;
+        if (poda.sair.length || poda.cortadas.length || juntadas.size) await diagAplicarPoda(db, poda, juntadas);
+        diagEsquecerRetratos(retratos);
         diagAberturasAnteriores = poda.manter;
-        dfato('diag.aberturas', { n: poda.manter.length, capturas: diagMomentosAnteriores().length });
+        dfato('diag.aberturas', { n: poda.manter.length, capturas: diagMomentosAnteriores().length,
+                                  ...(retratos.length ? { retratos: juntadas.size } : {}) });
         atualizarFabDev();
     } catch (e) {
         dfato('diag.carregarFalhou', { erro: String((e && e.name) || e).slice(0, 60) });
@@ -5489,6 +5509,8 @@ async function diagCarregarAberturas() {
 // — por isso ele é o caminho onde não há `databases()` (Firefox antigo).
 function diagFaxinaSemModoDev() {
     if (dlogLigado()) return Promise.resolve(false);
+    // O retrato do fechar também (síncrono, e sem custo quando não há chave).
+    diagEsquecerRetratos();
     try {
         if (typeof indexedDB === 'undefined') return Promise.resolve(false);
         const sabe = typeof indexedDB.databases === 'function';
@@ -5523,11 +5545,147 @@ function diagEsquecerGuardado() {
     return esta;
 }
 
+// ── A abertura que FECHA sem ir pro fundo ─────────────────────────────────
+//
+// A gravação na base é ASSÍNCRONA, e recarregar a página ou fechar a aba a
+// ABORTA: o `visibilitychange` e o `pagehide` saem, a gravação começa, e a
+// página morre antes de ela terminar. MEDIDO (auditoria de 2026-09-29, D2):
+// recarregar perdeu a abertura em 5 de 5 e fechar em 2 de 5; ir pro fundo (o
+// celular trocando de app) gravou sempre, porque ali a página segue viva. O
+// caso é o do computador, e o do "recarregue e veja se volta" — justamente
+// quando o que se quer ler é o diário de ANTES.
+//
+// Aqui, no `pagehide`, um RETRATO COMPACTO vai pro localStorage de forma
+// SÍNCRONA, que é a escrita que o navegador termina com a página indo embora.
+// Leva o diário, as chamadas (sem corpo) e os erros do que ainda não foi
+// entregue — as capturas NÃO: ~150 KB cada, elas vão pra base na hora em que
+// são feitas, com a página viva. Tem TETO: passando dele, sai o mais VELHO do
+// diário primeiro (o que interessa é o fim, logo antes de fechar), e o retrato
+// diz quanto cortou. A abertura seguinte, com o modo dev ligado, o junta ao que
+// a base tinha da mesma abertura e apaga a chave (`diagCarregarAberturas`).
+//
+// Uma chave POR ABERTURA (o id no nome): numa chave só, duas abas fechando
+// juntas escreveriam uma por cima da outra, e ler-e-regravar no `pagehide` é o
+// pior lugar pra uma corrida.
+//
+// Só com o modo dev LIGADO: desligado, sai na primeira linha e nada é escrito.
+// Sai no "Sair" e ao desligar o modo dev (`dlogApagar`) e na abertura com ele
+// desligado (`diagFaxinaSemModoDev`); entregue, vale o prazo da base (24 h).
+const DIAG_RETRATO_KEY = 'waze_places_diag_retrato';
+// Em caracteres. É uma escrita SÍNCRONA no `pagehide` e divide o localStorage
+// com o resto do app (histórico, fila de saída…). MEDIDO (2026-09-30): 12 ações
+// de uso real dão um retrato de 6 K; com os anéis CHEIOS (as 920 entradas dos
+// dois diários, 60 chamadas e 50 erros: 119 K) o corte leva as 498 mais velhas
+// do diário e grava 64 K em 2,6 ms — 12,7 ms com a CPU 6× mais lenta. Com o
+// modo dev desligado, nada: sai na primeira linha.
+const DIAG_RETRATO_TETO = 64 * 1024;
+
+// O retrato pronto pra gravar: o registro da abertura SEM as capturas, cortado
+// ao teto. `null` quando não há nada a guardar, ou quando nem cortado cabe.
+function diagRetratoCompacto(reg, teto) {
+    const { momentos, ...resto } = reg || {};
+    const r = { ...resto, retrato: true };
+    const listas = ['diario', 'chamadas', 'erros'];
+    for (const nome of listas) r[nome] = Array.isArray(r[nome]) ? r[nome] : [];
+    if (!listas.some((nome) => r[nome].length)) return null;
+    let texto = JSON.stringify(r);
+    if (texto.length <= teto) return texto;
+    // Corta do mais VELHO (as listas estão em ordem de tempo), e o diário
+    // primeiro: é ele que cresce; chamadas e erros têm anel curto. A folga de
+    // 200 é o campo `cortados`, que entra depois da conta.
+    let sobra = texto.length - (teto - 200);
+    const cortados = {};
+    for (const nome of listas) {
+        const l = r[nome];
+        let i = 0;
+        while (sobra > 0 && i < l.length) { sobra -= JSON.stringify(l[i]).length + 1; i++; }
+        if (i) { r[nome] = l.slice(i); cortados[nome] = i; }
+        if (sobra <= 0) break;
+    }
+    // Cortado até esvaziar, não sobra o que guardar.
+    if (!listas.some((nome) => r[nome].length)) return null;
+    r.cortados = cortados;
+    texto = JSON.stringify(r);
+    return texto.length <= teto ? texto : null;
+}
+
+// No `pagehide`, SÍNCRONO (ver acima). Nunca lança: a página está indo embora.
+function diagRetratoAoSair() {
+    if (!dlogLigado()) return false;
+    try {
+        // O modo dev pela FONTE, como na gravação da base: desligado noutra
+        // aba (o aviso ainda não chegou aqui), nada vai pro aparelho.
+        if (modoDevDesligadoNoArmazenamento()) return false;
+        const texto = diagRetratoCompacto(diagRegistroDaAbertura('saida'), DIAG_RETRATO_TETO);
+        if (!texto) return false;
+        localStorage.setItem(DIAG_RETRATO_KEY + ':' + DIAG_ABERTURA.id, texto);
+        return true;
+    } catch (e) { return false; }   // cota cheia, armazenamento bloqueado: fica a gravação da base
+}
+
+// Os retratos no aparelho, com a chave e o TEXTO lidos: quem os apaga depois
+// confere o texto, e a chave reescrita depois da leitura não se perde.
+function diagLerRetratos() {
+    const achados = [];
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k || !k.startsWith(DIAG_RETRATO_KEY + ':')) continue;
+            const texto = localStorage.getItem(k);
+            let r = null;
+            try { r = JSON.parse(texto); } catch (e) { /* ilegível: sai sem entrar */ }
+            const valido = !!r && typeof r.id === 'string' && Number.isFinite(r.salvoEm);
+            achados.push({ k, texto, r: valido ? r : null });
+        }
+    } catch (e) { /* armazenamento bloqueado: não há retrato */ }
+    return achados;
+}
+
+// Apaga os retratos LIDOS (só se o texto é o mesmo da leitura) ou, sem lista,
+// todos. As chaves são juntadas antes: apagar no meio da volta muda os índices.
+function diagEsquecerRetratos(lidos) {
+    try {
+        if (Array.isArray(lidos)) {
+            for (const { k, texto } of lidos) if (localStorage.getItem(k) === texto) localStorage.removeItem(k);
+            return;
+        }
+        const chaves = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith(DIAG_RETRATO_KEY + ':')) chaves.push(k);
+        }
+        for (const k of chaves) localStorage.removeItem(k);
+    } catch (e) { /* armazenamento bloqueado */ }
+}
+
+// Junta o retrato ao registro que a base tinha da MESMA abertura (a última
+// captura ou ida pro fundo). Só a base tem as capturas; o retrato é o mais
+// NOVO. Das listas fica, da base, o que é ANTERIOR ao começo do retrato (o que
+// o teto cortou), e o retrato dali em diante. Base mais nova que o retrato (a
+// gravação do `pagehide` chegou a terminar) já tem tudo: fica como está.
+function diagJuntarRetrato(guardado, retrato) {
+    if (!guardado) return { ...retrato, momentos: [] };
+    if (!(retrato.salvoEm > guardado.salvoEm)) return guardado;
+    const quando = (x) => (typeof x.t === 'number' ? x.t : Date.parse(x.t));
+    const juntar = (velha, nova) => {
+        const v = Array.isArray(velha) ? velha : [];
+        if (!Array.isArray(nova) || !nova.length) return v;
+        const desde = Math.min(...nova.map(quando));
+        return [...v.filter((x) => quando(x) < desde), ...nova];
+    };
+    return { ...guardado, ...retrato,
+             momentos: Array.isArray(guardado.momentos) ? guardado.momentos : [],
+             diario: juntar(guardado.diario, retrato.diario),
+             chamadas: juntar(guardado.chamadas, retrato.chamadas),
+             erros: juntar(guardado.erros, retrato.erros) };
+}
+
 function setupGuardaDoDiagnostico() {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') diagGuardarAbertura('oculta');
     });
-    window.addEventListener('pagehide', () => { diagGuardarAbertura('saida'); });
+    // O retrato SÍNCRONO primeiro: é o que chega ao fim quando a página morre.
+    window.addEventListener('pagehide', () => { diagRetratoAoSair(); diagGuardarAbertura('saida'); });
 }
 
 // ── O FAB ─────────────────────────────────────────────────────────────────

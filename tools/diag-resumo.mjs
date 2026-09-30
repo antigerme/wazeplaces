@@ -289,8 +289,18 @@ else {
     const ch = Array.isArray(a.chamadas) ? a.chamadas : [];
     const er = Array.isArray(a.erros) ? a.erros : [];
     const ms = Array.isArray(a.momentos) ? a.momentos : [];
-    out(`abertura ${a.id} · ${quando(a.inicio)} → ${quando(a.salvoEm)} (guardada por: ${a.salvoPor}) · v${a.versao ?? '?'}`);
+    // `retrato`: veio do retrato SÍNCRONO do fechar (v2026.09.30), não da base —
+    // a gravação da base não chegou ao fim. Se o teto do retrato cortou, o que
+    // falta no começo NÃO quer dizer "não aconteceu": a contagem diz quanto.
+    out(`abertura ${a.id} · ${quando(a.inicio)} → ${quando(a.salvoEm)} (guardada por: ${a.salvoPor}${a.retrato ? ', retrato do fechar' : ''}) · v${a.versao ?? '?'}`);
     out(`  diário ${di.length} · chamadas ${ch.length} (falhas ${ch.filter((c) => estadoDaChamada(c) === 'FALHOU').length}) · erros ${er.length} · capturas ${ms.length}`);
+    const NOMES_DO_CORTE = { diario: 'diário', chamadas: 'chamadas', erros: 'erros' };
+    const cortes = Object.entries(a.cortados && typeof a.cortados === 'object' ? a.cortados : {})
+      .filter(([lista, n]) => NOMES_DO_CORTE[lista] && Number(n) > 0);
+    if (cortes.length) {
+      out(`  o retrato cortou pelo TETO os mais antigos: ${cortes.map(([lista, n]) => `${NOMES_DO_CORTE[lista]} ${Number(n)}`).join(' · ')}`
+        + ' — faltam no começo, não "não aconteceram"');
+    }
     const t0a = di.length ? di[0].t : 0;
     for (const e of di) {
       const { t, k, ...resto } = e;

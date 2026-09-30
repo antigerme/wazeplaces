@@ -2396,6 +2396,114 @@ diz('com o modo dev DESLIGADO, a sobra sai do aparelho na abertura', faxina.ok
 await g9e.close();
 await ctx9e.close();
 
+secao('9f. FECHAR SEM IR PRO FUNDO — recarregar e fechar a aba não perdem a abertura');
+// Auditoria de 2026-09-29 (D2). A gravação na base é ASSÍNCRONA, e recarregar
+// a página ou fechar a aba a aborta: MEDIDO antes do conserto, recarregar
+// perdeu a abertura em 5 de 5 e fechar em 2 de 5. A 9c não via porque vai pro
+// FUNDO antes de fechar (o celular), e aí a página segue viva até gravar. Aqui
+// ninguém vai pro fundo: a página é recarregada ou fechada direto, como no
+// computador, e o que tem que chegar é o RETRATO síncrono do `pagehide`.
+//
+// "Nada foi escrito" se lê numa página da MESMA origem que NÃO roda o app (o
+// manifesto): a abertura do app com o modo dev desligado apaga a sobra, e aí
+// "não escreveu" e "escreveu e a faxina apagou" ficariam iguais. O CONTROLE de
+// que essa página enxerga o retrato é olhar por ela depois de um fechar COM o
+// modo dev (passo 2), antes de o app reabrir e consumi-lo.
+const ctx9f = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
+await ctx9f.route('**/*-tiles/live/base/**', servirTile);
+await ctx9f.route('**/api/*', (r) => {
+  const rota = r.request().url().split('/api/')[1];
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(171), SO_MAPA(172)], hasMore: false, page: 1, total: 2 });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+  return r.abort('failed');
+});
+const abrir9f = async (nome) => {
+  const pg = await ctx9f.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
+  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
+  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  return pg;
+};
+// O aparelho visto de FORA do app: os retratos no localStorage e se a base existe.
+const olhar9f = async () => {
+  const pg = await ctx9f.newPage();
+  await pg.goto(BASE + '/manifest.json', { waitUntil: 'load' });
+  const r = await pg.evaluate(async () => ({
+    retratos: Object.keys(localStorage).filter((k) => k.startsWith('waze_places_diag_retrato')),
+    base: (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'),
+    app: typeof AppState !== 'undefined' }));
+  await pg.close();
+  return r;
+};
+// A abertura `id` veio de volta, com a marca no diário?
+const voltou9f = (pg, id, marca) => pg.evaluate(([i, m]) => {
+  const a = diagAberturasAnteriores.find((x) => x.id === i);
+  return { tem: !!a, marca: !!a && (a.diario || []).some((e) => e.k === m), salvoPor: a ? a.salvoPor : null,
+           retratosNoAparelho: Object.keys(localStorage).filter((k) => k.startsWith('waze_places_diag_retrato')).length };
+}, [id, marca]);
+const prep9f = await abrir9f('preparo');
+await esperarNaPagina(prep9f, () => typeof API !== 'undefined', 20000, 100);
+await prep9f.evaluate(() => {
+  API.setSession('tok-9f');
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
+});
+await prep9f.close({ runBeforeUnload: true });
+
+// 1. RECARREGAR, direto.
+const a9f = await abrir9f('recarregar');
+await pronta9c(a9f);
+await carregou9c(a9f);
+const idA9f = await a9f.evaluate(() => { dfato('smoke.9f.antesDeRecarregar'); return DIAG_ABERTURA.id; });
+await a9f.reload({ waitUntil: 'domcontentloaded' });
+await pronta9c(a9f);
+await carregou9c(a9f);
+const rA9f = await voltou9f(a9f, idA9f, 'smoke.9f.antesDeRecarregar');
+const gA9f = await guardado9c(a9f);
+diz('RECARREGAR (sem ir pro fundo antes) não perde a abertura: ela volta com o diário até o fim, e foi pra base',
+  rA9f.tem && rA9f.marca && gA9f.abertas.some((a) => a.id === idA9f), JSON.stringify({ rA9f, gA9f }));
+diz('e o retrato saiu do localStorage ao ir pra base', rA9f.retratosNoAparelho === 0, JSON.stringify(rA9f));
+
+// 2. FECHAR a aba, direto — e olhar o aparelho ANTES de o app reabrir.
+const idB9f = await a9f.evaluate(() => { dfato('smoke.9f.antesDeFechar'); return DIAG_ABERTURA.id; });
+await a9f.close({ runBeforeUnload: true });
+const vB9f = await olhar9f();
+diz('CONTROLE: fechada a aba COM o modo dev, o aparelho visto de fora tem o retrato DESTA abertura (o instrumento enxerga)',
+  vB9f.app === false && vB9f.retratos.length === 1 && vB9f.retratos[0].endsWith(':' + idB9f), JSON.stringify(vB9f));
+const c9f = await abrir9f('reaberta');
+await pronta9c(c9f);
+await carregou9c(c9f);
+const rB9f = await voltou9f(c9f, idB9f, 'smoke.9f.antesDeFechar');
+diz('FECHAR a aba (sem ir pro fundo antes) não perde a abertura: reaberta, ela volta com o diário até o fim',
+  rB9f.tem && rB9f.marca && rB9f.retratosNoAparelho === 0, JSON.stringify(rB9f));
+
+// 3. O "Sair" apaga o retrato que estiver no aparelho.
+await c9f.evaluate(() => localStorage.setItem('waze_places_diag_retrato:plantado', JSON.stringify({ id: 'plantado', salvoEm: Date.now(), diario: [{ t: 1, k: 'x' }] })));
+await c9f.evaluate(() => { handleLogout(); });
+const sairou9f = await esperarNaPagina(c9f, () => !Object.keys(localStorage).some((k) => k.startsWith('waze_places_diag_retrato')), 5000, 100);
+diz('o SAIR apaga o retrato do fechar', sairou9f.ok, JSON.stringify(sairou9f));
+await c9f.close({ runBeforeUnload: true });
+
+// 4. Modo dev DESLIGADO: fechar direto não escreve NADA no aparelho.
+const prep9f2 = await abrir9f('preparo 2');
+await esperarNaPagina(prep9f2, () => typeof API !== 'undefined', 20000, 100);
+await prep9f2.evaluate(() => {
+  API.setSession('tok-9f');
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
+});
+await prep9f2.close({ runBeforeUnload: true });
+const d9f = await abrir9f('modo dev desligado');
+await pronta9c(d9f);
+await d9f.evaluate(() => dfato('smoke.9f.semDev'));
+await d9f.close({ runBeforeUnload: true });
+const vD9f = await olhar9f();
+diz('com o modo dev DESLIGADO, fechar direto não escreve nada no aparelho — nem retrato, nem base',
+  vD9f.app === false && vD9f.retratos.length === 0 && vD9f.base === false, JSON.stringify(vD9f));
+await ctx9f.close();
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));

@@ -500,24 +500,28 @@ test('D2: a gravação confere o modo dev no ARMAZENAMENTO — desligado lá, n�
 
 test('D2: com o modo dev DESLIGADO, a sobra no aparelho sai na abertura — sem criar a base', async () => {
   const montar = ({ ligado = false, bases = [], semDatabases = false }) => {
-    const esquecido = [], fatos = [];
+    const esquecido = [], fatos = [], retratos = [];
     const indexedDB = semDatabases ? {} : { databases: async () => bases.map((name) => ({ name })) };
     const deps = { indexedDB, DIAG_DB: 'waze_places_diag', dlogLigado: () => ligado,
-      dfato: (k) => fatos.push(k), diagEsquecerGuardado: async () => { esquecido.push(1); return true; } };
+      dfato: (k) => fatos.push(k), diagEsquecerGuardado: async () => { esquecido.push(1); return true; },
+      diagEsquecerRetratos: (lidos) => retratos.push(lidos) };
     const chaves = Object.keys(deps);
     const f = new Function(...chaves, fatiar('diagFaxinaSemModoDev') + '\nreturn diagFaxinaSemModoDev;')(...chaves.map((k) => deps[k]));
-    return { f, esquecido, fatos };
+    return { f, esquecido, fatos, retratos };
   };
   const sobra = montar({ bases: ['waze_places_diag', 'waze_places_offline'] });
   assert.equal(await sobra.f(), true);
   assert.equal(sobra.esquecido.length, 1, 'a sobra do diagnóstico ficou no aparelho com o modo dev desligado');
   assert.deepEqual(sobra.fatos, ['diag.sobraApagada']);
+  // O retrato do fechar (no localStorage) sai também — TODOS, sem lista.
+  assert.deepEqual(sobra.retratos, [undefined], 'o retrato do fechar ficou no aparelho com o modo dev desligado');
   const nada = montar({ bases: ['waze_places_offline'] });
   await nada.f();
   assert.equal(nada.esquecido.length, 0, 'sem a base, a faxina não tem o que fazer (e não pode criar nada)');
   const ligado = montar({ ligado: true, bases: ['waze_places_diag'] });
   await ligado.f();
   assert.equal(ligado.esquecido.length, 0, 'com o modo dev LIGADO a faxina apagou o guardado — quem cuida ali é a poda de 24 h');
+  assert.deepEqual(ligado.retratos, [], 'com o modo dev LIGADO a faxina apagou o retrato do fechar — ele é da abertura seguinte');
   const cego = montar({ semDatabases: true });
   await cego.f();
   assert.equal(cego.esquecido.length, 1, 'sem `databases()` o apagar (que não cria nada) tem que acontecer às cegas');
@@ -528,4 +532,223 @@ test('D2: com o modo dev DESLIGADO, a sobra no aparelho sai na abertura — sem 
   const init = fatiar('initApp');
   const iDev = init.indexOf('loadDevMode();'), iFax = init.indexOf('diagFaxinaSemModoDev();');
   assert.ok(iDev > 0 && iFax > iDev, 'a faxina tem que rodar DEPOIS de o modo dev ser lido');
+});
+
+// ── D2 (auditoria de 2026-09-29): FECHAR sem ir pro fundo ────────────────────
+// Recarregar a página ou fechar a aba ABORTA a gravação na base (assíncrona):
+// medido, recarregar perdeu a abertura em 5 de 5, fechar em 2 de 5. No
+// `pagehide` vai um RETRATO compacto pro localStorage, de forma SÍNCRONA, e a
+// abertura seguinte o junta à base e o apaga. O percurso inteiro (recarregar e
+// fechar de verdade, com o controle do modo dev desligado) está na seção 9f do
+// `tools/smoke-offline.mjs`.
+function armazenamento(inicial = {}) {
+  const m = new Map(Object.entries(inicial));
+  const escritas = [];
+  return {
+    m, escritas,
+    get length() { return m.size; },
+    key(i) { return [...m.keys()][i] ?? null; },
+    getItem(k) { return m.has(k) ? m.get(k) : null; },
+    setItem(k, v) { escritas.push(k); m.set(k, String(v)); },
+    removeItem(k) { m.delete(k); },
+  };
+}
+const DIAG_RETRATO_KEY = constante('DIAG_RETRATO_KEY');
+const DIAG_RETRATO_TETO = constante('DIAG_RETRATO_TETO');
+const compacto = new Function(fatiar('diagRetratoCompacto') + '\nreturn diagRetratoCompacto;')();
+const juntarRetrato = new Function(fatiar('diagJuntarRetrato') + '\nreturn diagJuntarRetrato;')();
+
+test('D2: o retrato do fechar vai SEM as capturas, e sem nada a guardar não escreve', () => {
+  const reg = { id: 'a', inicio: 1, salvoEm: 5, salvoPor: 'saida', versao: 'v',
+    diario: [{ t: 1, k: 'x' }], chamadas: [{ t: new Date(2).toISOString(), rota: 'perfil', http: 200 }], erros: [],
+    momentos: [{ t: 'm', motivo: 'manual', dom: 'x'.repeat(150000) }] };
+  const txt = compacto(reg, DIAG_RETRATO_TETO);
+  const r = JSON.parse(txt);
+  assert.ok(!('momentos' in r) && !txt.includes('xxxx'), 'o retrato levou as capturas (~150 KB cada) pro localStorage');
+  assert.equal(r.retrato, true, 'o retrato não se identifica — o leitor não o separa da gravação da base');
+  assert.deepEqual([r.id, r.salvoEm, r.salvoPor, r.diario, r.chamadas, r.erros],
+    [reg.id, reg.salvoEm, reg.salvoPor, reg.diario, reg.chamadas, reg.erros]);
+  assert.ok(!('cortados' in r), 'cabendo no teto, nada foi cortado');
+  assert.equal(compacto({ ...reg, diario: [], chamadas: [], erros: [] }, DIAG_RETRATO_TETO), null,
+    'sem diário, chamada nem erro, o retrato não tem o que guardar');
+});
+
+test('D2: o retrato tem TETO e corta do mais VELHO — o fim do diário, as chamadas e os erros ficam', () => {
+  const diario = Array.from({ length: 3000 }, (_, i) => ({ t: 1000 + i, k: 'dlog.acao', n: i, d: 'y'.repeat(60) }));
+  const chamadas = Array.from({ length: 60 }, (_, i) => ({ t: new Date(5000 + i).toISOString(), rota: 'buscar-places', http: 200, n: i }));
+  const erros = Array.from({ length: 50 }, (_, i) => ({ t: new Date(6000 + i).toISOString(), tipo: 'error', msg: 'e' + i }));
+  const txt = compacto({ id: 'a', inicio: 1, salvoEm: 9, salvoPor: 'saida', diario, chamadas, erros }, DIAG_RETRATO_TETO);
+  assert.ok(txt && txt.length <= DIAG_RETRATO_TETO, `o retrato passou do teto: ${txt && txt.length}`);
+  const r = JSON.parse(txt);
+  assert.ok(r.diario[0].n > 0, 'PRÉ-CONDIÇÃO: o teto não cortou nada — o caso não mede o corte');
+  assert.equal(r.diario[r.diario.length - 1].n, 2999, 'o corte levou o FIM do diário — o que aconteceu logo antes de fechar');
+  assert.equal(r.cortados.diario, r.diario[0].n, 'o retrato não diz quanto do diário cortou');
+  assert.equal(r.chamadas.length, 60, 'as chamadas (anel curto) foram cortadas antes do diário');
+  assert.equal(r.erros.length, 50, 'os erros (anel curto) foram cortados antes do diário');
+  // Nem cortado cabe (entrada maior que o teto): não escreve um retrato vazio, nem estoura.
+  assert.equal(compacto({ id: 'a', salvoEm: 9, diario: [{ t: 1, k: 'x', d: 'z'.repeat(DIAG_RETRATO_TETO + 10) }] }, DIAG_RETRATO_TETO), null);
+});
+
+test('D2: o retrato só é escrito com o modo dev LIGADO (na memória E no armazenamento), na chave DESTA abertura', () => {
+  const montar = ({ ligado = true, desligadoLa = false, cheio = false } = {}) => {
+    const ls = armazenamento({ waze_places_stats: '{}' });
+    if (cheio) ls.setItem = () => { throw new DOMException('cheio', 'QuotaExceededError'); };
+    const deps = { dlogLigado: () => ligado, modoDevDesligadoNoArmazenamento: () => desligadoLa, localStorage: ls,
+      diagRetratoCompacto: compacto, DIAG_RETRATO_KEY, DIAG_RETRATO_TETO, DIAG_ABERTURA: { id: 'esta-abertura' },
+      diagRegistroDaAbertura: (motivo) => ({ id: 'esta-abertura', salvoEm: 7, salvoPor: motivo, diario: [{ t: 1, k: 'x' }],
+                                              chamadas: [], erros: [], momentos: [] }) };
+    const chaves = Object.keys(deps);
+    const f = new Function(...chaves, fatiar('diagRetratoAoSair') + '\nreturn diagRetratoAoSair;')(...chaves.map((k) => deps[k]));
+    return { f, ls };
+  };
+  const ok = montar();
+  assert.equal(ok.f(), true);
+  assert.deepEqual(ok.ls.escritas, [DIAG_RETRATO_KEY + ':esta-abertura'], 'o retrato não foi pra chave desta abertura');
+  assert.equal(JSON.parse(ok.ls.getItem(DIAG_RETRATO_KEY + ':esta-abertura')).salvoPor, 'saida');
+  const semDev = montar({ ligado: false });
+  assert.equal(semDev.f(), false);
+  assert.deepEqual(semDev.ls.escritas, [], 'com o modo dev DESLIGADO o fechar escreveu no aparelho');
+  const la = montar({ desligadoLa: true });
+  assert.equal(la.f(), false);
+  assert.deepEqual(la.ls.escritas, [], 'desligado noutra aba (o aviso ainda não chegou), o fechar escreveu no aparelho');
+  assert.equal(montar({ cheio: true }).f(), false, 'a cota cheia derrubou o `pagehide`');
+  // Desligado, nem o retrato é montado: a PRIMEIRA linha sai.
+  assert.match(fatiar('diagRetratoAoSair'), /^function diagRetratoAoSair\(\) \{\s*if \(!dlogLigado\(\)\) return false;/,
+    'o retrato tem que sair na PRIMEIRA linha sem o modo dev — é o custo de quem não o liga');
+});
+
+test('D2: o `pagehide` grava o retrato SÍNCRONO antes de pedir a gravação da base', () => {
+  assert.match(fatiar('setupGuardaDoDiagnostico'),
+    /addEventListener\('pagehide', \(\) => \{\s*diagRetratoAoSair\(\);\s*diagGuardarAbertura\('saida'\);\s*\}\)/,
+    'o fechar voltou a depender só da gravação assíncrona, que o navegador aborta');
+});
+
+test('D2: a abertura seguinte JUNTA o retrato ao que a base tinha da mesma abertura', () => {
+  const t = (s) => new Date(s).toISOString();
+  const base = { id: 'x', inicio: 1, salvoEm: 100, salvoPor: 'captura', momentos: [{ t: 'cap', motivo: 'manual' }],
+    diario: [{ t: 10, k: 'velho' }, { t: 60, k: 'meio' }], chamadas: [{ t: t(20), rota: 'perfil' }], erros: [{ t: t(30), msg: 'e1' }] };
+  const retrato = { id: 'x', inicio: 1, salvoEm: 200, salvoPor: 'saida', retrato: true, cortados: { diario: 1 },
+    diario: [{ t: 60, k: 'meio' }, { t: 150, k: 'fim' }], chamadas: [{ t: t(20), rota: 'perfil' }, { t: t(160), rota: 'buscar-places' }], erros: [] };
+  const j = juntarRetrato(base, retrato);
+  assert.deepEqual(j.momentos, base.momentos, 'as capturas da base (as únicas que existem) sumiram na junção');
+  assert.deepEqual(j.diario.map((e) => e.k), ['velho', 'meio', 'fim'],
+    'o diário juntado repete ou perde entrada: fica da base só o que é ANTERIOR ao retrato');
+  assert.deepEqual(j.chamadas.map((c) => c.rota), ['perfil', 'buscar-places'], 'as chamadas (hora em ISO) não juntaram');
+  assert.deepEqual(j.erros, base.erros, 'o retrato sem erros apagou os erros da base');
+  assert.equal(j.salvoPor, 'saida');
+  assert.equal(j.retrato, true);
+  // A base MAIS NOVA (a gravação do `pagehide` chegou a terminar) já tem tudo.
+  const novaNaBase = { ...base, salvoEm: 300 };
+  assert.equal(juntarRetrato(novaNaBase, retrato), novaNaBase, 'a base mais nova foi trocada pelo retrato (cortado)');
+  // Sem nada na base: o retrato vira o registro, sem capturas.
+  const so = juntarRetrato(null, retrato);
+  assert.deepEqual(so.momentos, []);
+  assert.deepEqual(so.diario, retrato.diario);
+});
+
+// Uma base em memória, com o jeito do IndexedDB (respostas no tique seguinte).
+function baseNaMemoria(registros = [], { segurarAbertura = null } = {}) {
+  const loja = new Map(registros.map((r) => [r.id, r]));
+  const indexedDB = {
+    open: () => {
+      const req = {};
+      const responder = () => {
+        req.result = {
+          objectStoreNames: { contains: () => true }, close() {},
+          transaction: () => {
+            const tx = {};
+            tx.objectStore = () => ({
+              getAll: () => { const r = {}; setTimeout(() => { r.result = [...loja.values()]; r.onsuccess(); }, 0); return r; },
+              put: (a) => { loja.set(a.id, a); },
+              delete: (id) => { loja.delete(id); },
+            });
+            setTimeout(() => tx.oncomplete && tx.oncomplete(), 1);
+            return tx;
+          },
+        };
+        req.onsuccess();
+      };
+      if (segurarAbertura) segurarAbertura(() => responder()); else setTimeout(responder, 0);
+      return req;
+    },
+    deleteDatabase: () => ({}),
+  };
+  return { indexedDB, loja };
+}
+function carregador({ ls, base, ligado = () => true }) {
+  const deps = { localStorage: ls, indexedDB: base.indexedDB, dlogLigado: ligado, dfato: () => {}, atualizarFabDev: () => {},
+    DIAG_ABERTURA: { id: 'agora' }, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 200,
+    DIAG_RETRATO_KEY, ...DIAG };
+  const chaves = Object.keys(deps);
+  return new Function(...chaves, `let diagAberturasAnteriores = [], diagEpoca = 0;
+    ${['diagDB', 'diagLerGuardado', 'diagAplicarPoda', 'diagPodarAberturas', 'diagMomentosAnteriores',
+       'diagLerRetratos', 'diagEsquecerRetratos', 'diagJuntarRetrato', 'diagCarregarAberturas'].map(fatiar).join('\n')}
+    return { carregar: diagCarregarAberturas, anteriores: () => diagAberturasAnteriores, apagar: () => { diagEpoca++; } };`)(
+    ...chaves.map((k) => deps[k]));
+}
+
+test('D2: a abertura com o modo dev leva o retrato pra base e APAGA a chave — só a que leu, e o lixo', async () => {
+  const agora = Date.now(), H = 3600e3;
+  const k = (id) => DIAG_RETRATO_KEY + ':' + id;
+  const base = baseNaMemoria([{ id: 'antiga', inicio: agora - 2 * H, salvoEm: agora - H, salvoPor: 'captura',
+    momentos: [{ t: 'cap', motivo: 'manual' }], diario: [{ t: agora - 1.5 * H, k: 'antes' }], chamadas: [], erros: [] }]);
+  const ls = armazenamento({
+    [k('antiga')]: JSON.stringify({ id: 'antiga', inicio: agora - 2 * H, salvoEm: agora - H / 2, salvoPor: 'saida', retrato: true,
+                                    diario: [{ t: agora - H / 2 - 10, k: 'fim' }], chamadas: [], erros: [] }),
+    [k('fechou')]: JSON.stringify({ id: 'fechou', inicio: agora - H / 4, salvoEm: agora - 60e3, salvoPor: 'saida', retrato: true,
+                                    diario: [{ t: agora - 70e3, k: 'so-no-retrato' }], chamadas: [], erros: [] }),
+    [k('vencida')]: JSON.stringify({ id: 'vencida', inicio: agora - 30 * H, salvoEm: agora - 25 * H, salvoPor: 'saida',
+                                     diario: [{ t: agora - 25 * H, k: 'velha' }], chamadas: [], erros: [] }),
+    [k('lixo')]: '{nao é json',
+    waze_places_stats: '{"read":1}',
+  });
+  const app = carregador({ ls, base });
+  await app.carregar();
+  const antiga = base.loja.get('antiga');
+  assert.deepEqual(antiga.diario.map((e) => e.k), ['antes', 'fim'], 'o retrato não foi juntado ao que a base tinha');
+  assert.equal(antiga.momentos.length, 1, 'a captura que a base tinha sumiu na junção');
+  assert.deepEqual(base.loja.get('fechou').diario.map((e) => e.k), ['so-no-retrato'],
+    'a abertura que só existia no retrato (a gravação da base foi abortada) não foi pra base');
+  assert.ok(!base.loja.has('vencida'), 'o retrato de mais de 24 h entrou na base — o prazo é o mesmo');
+  assert.deepEqual([...ls.m.keys()], ['waze_places_stats'], 'sobrou retrato no localStorage, ou a leitura apagou chave alheia');
+  assert.deepEqual(app.anteriores().map((a) => a.id).sort(), ['antiga', 'fechou'], 'o relatório desta abertura não traz os retratos');
+});
+
+test('D2: desligado o modo dev enquanto a base abria, nada do retrato volta pro aparelho', async () => {
+  const agora = Date.now();
+  let soltar = null;
+  const base = baseNaMemoria([], { segurarAbertura: (fn) => { soltar = fn; } });
+  const chave = DIAG_RETRATO_KEY + ':x';
+  const ls = armazenamento({ [chave]: JSON.stringify({ id: 'x', salvoEm: agora - 1000, inicio: agora - 5000, diario: [{ t: agora - 2000, k: 'a' }] }) });
+  const app = carregador({ ls, base });
+  const pronto = app.carregar();
+  for (let i = 0; i < 40 && !soltar; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(soltar, 'PRÉ-CONDIÇÃO: a abertura da base não foi pedida');
+  app.apagar();              // o `dlogApagar` sobe a época (e apaga as chaves: ver o layout.test)
+  soltar();
+  await pronto;
+  assert.equal(base.loja.size, 0, 'o retrato foi pra base DEPOIS de o modo dev desligar');
+  // CONTROLE: sem desligar no meio, o mesmo retrato vai pra base.
+  const base2 = baseNaMemoria([]);
+  const ls2 = armazenamento({ [chave]: ls.getItem(chave) });
+  await carregador({ ls: ls2, base: base2 }).carregar();
+  assert.equal(base2.loja.size, 1, 'CONTROLE: o retrato não foi pra base nem sem desligar — a medida acima não distingue nada');
+});
+
+test('D2: apagar os retratos leva TODOS os da chave e nenhum outro; o da leitura, só se não mudou', () => {
+  const montar = (ls) => new Function('localStorage', 'DIAG_RETRATO_KEY',
+    fatiar('diagLerRetratos') + '\n' + fatiar('diagEsquecerRetratos') + '\nreturn { ler: diagLerRetratos, esquecer: diagEsquecerRetratos };')(ls, DIAG_RETRATO_KEY);
+  const ls = armazenamento({ [DIAG_RETRATO_KEY + ':a']: '{"id":"a","salvoEm":1}', [DIAG_RETRATO_KEY + ':b']: 'x',
+                             waze_places_diag_outra: 'fica', waze_places_stats: 'fica' });
+  const f = montar(ls);
+  const lidos = f.ler();
+  assert.equal(lidos.length, 2);
+  assert.equal(lidos.find((l) => l.k.endsWith(':b')).r, null, 'o retrato ilegível foi lido como válido');
+  ls.m.set(DIAG_RETRATO_KEY + ':a', '{"id":"a","salvoEm":2}');     // reescrito DEPOIS da leitura
+  f.esquecer(lidos);
+  assert.deepEqual([...ls.m.keys()].sort(), ['waze_places_diag_outra', DIAG_RETRATO_KEY + ':a', 'waze_places_stats'],
+    'apagou o retrato reescrito depois da leitura (ou deixou o lido)');
+  f.esquecer();
+  assert.deepEqual([...ls.m.keys()].sort(), ['waze_places_diag_outra', 'waze_places_stats'],
+    'sem lista, sobrou retrato — ou saiu chave que não é retrato');
 });

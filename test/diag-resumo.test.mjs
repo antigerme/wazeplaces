@@ -187,6 +187,29 @@ test('diag-resumo: relatório de antes das aberturas guardadas diz que elas não
   assert.match(rodar(relatorioV4()), /── ABERTURAS ANTERIORES \(guardadas no aparelho\) ─+\n\(ausente nesta versão\)/);
 });
 
+test('diag-resumo: a abertura que veio do RETRATO do fechar se identifica, e o corte pelo teto é dito (D2, 2026-09-29)', () => {
+  // Recarregar ou fechar a aba abortava a gravação da base; o retrato síncrono
+  // do `pagehide` a salva, com teto. Cortado, o começo do diário falta — e a
+  // triagem tem que dizer que falta, senão a ausência lê como "não aconteceu".
+  const d = relatorioV4();
+  d._versaoDoDiag = 11;
+  d.aberturasAnteriores = [{
+    id: 'ret-1', inicio: Date.parse('2026-09-29T21:00:00.000Z'), salvoEm: Date.parse('2026-09-29T21:30:00.000Z'),
+    salvoPor: 'saida', retrato: true, cortados: { diario: 340, chamadas: 2, lixo: 9 }, versao: '2026093001',
+    diario: [{ t: 1790715000000, k: 'busca.ok', n: 12 }], chamadas: [], erros: [], momentos: [] }, {
+    id: 'base-2', inicio: Date.parse('2026-09-29T22:00:00.000Z'), salvoEm: Date.parse('2026-09-29T22:10:00.000Z'),
+    salvoPor: 'oculta', versao: '2026093001', diario: [], chamadas: [], erros: [], momentos: [] }];
+  const s = rodar(d);
+  assert.match(s, /abertura ret-1 · .* \(guardada por: saida, retrato do fechar\) · v2026093001/,
+    'a abertura que veio do retrato do fechar não se identifica');
+  assert.match(s, /o retrato cortou pelo TETO os mais antigos: diário 340 · chamadas 2 — faltam no começo/,
+    'o corte pelo teto não é dito — o começo que falta leria como "não aconteceu"');
+  assert.ok(!/lixo/.test(s), 'o leitor imprimiu uma lista que não existe no retrato');
+  // CONTROLE: a abertura da base não ganha a marca nem o aviso.
+  assert.match(s, /abertura base-2 · .* \(guardada por: oculta\) · v2026093001\n  diário 0 · chamadas 0 \(falhas 0\) · erros 0 · capturas 0\n/,
+    'CONTROLE: a abertura gravada na base ganhou a marca do retrato ou o aviso do corte');
+});
+
 test('diag-resumo: a presença do app (fase 3) sai em CONTAGENS, com os avisos — nunca nome, texto ou token', () => {
   const d = relatorioV4();
   d._versaoDoDiag = 7;

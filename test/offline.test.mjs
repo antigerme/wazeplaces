@@ -667,6 +667,24 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     [/diz\('o SAIR apaga o que foi guardado/, 'sair é sair de tudo'],
   ]) assert.match(bloco9c, re, `a 9c perdeu uma medida — ${porque}`);
 
+  // FECHAR SEM IR PRO FUNDO (auditoria de 2026-09-29, D2). A 9c vai pro fundo
+  // antes de fechar, e aí a gravação da base sempre chega: recarregar perdia a
+  // abertura em 5 de 5 e nada reprovava. A 9f recarrega e fecha DIRETO.
+  exigir(/secao\('9f\. FECHAR SEM IR PRO FUNDO/,
+    'sumiu a seção do fechar direto — é onde o retrato síncrono do `pagehide` é o que salva a abertura');
+  const i9f = CODIGO.indexOf("secao('9f.");
+  const bloco9f = CODIGO.slice(i9f, CODIGO.indexOf("secao('10.", i9f));
+  assert.doesNotMatch(bloco9f, /irProFundo9c\(/,
+    'a 9f foi pro fundo antes de fechar — aí a gravação da base chega sozinha e o retrato não é medido');
+  assert.match(bloco9f, /await a9f\.reload\(/, 'a 9f tem que RECARREGAR a página de verdade');
+  for (const [re, porque] of [
+    [/diz\('RECARREGAR \(sem ir pro fundo antes\) não perde a abertura/, 'o defeito medido (5 de 5)'],
+    [/diz\('CONTROLE: fechada a aba COM o modo dev, o aparelho visto de fora tem o retrato/, 'sem ele, "não escreveu nada" passa por vácuo'],
+    [/diz\('FECHAR a aba \(sem ir pro fundo antes\) não perde a abertura/, 'o outro caminho medido (2 de 5)'],
+    [/diz\('o SAIR apaga o retrato do fechar/, 'sair é sair de tudo'],
+    [/diz\('com o modo dev DESLIGADO, fechar direto não escreve nada no aparelho/, 'quem não liga o modo dev não paga nada'],
+  ]) assert.match(bloco9f, re, `a 9f perdeu uma medida — ${porque}`);
+
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],
     'falta o script `test:offline` no package.json');
