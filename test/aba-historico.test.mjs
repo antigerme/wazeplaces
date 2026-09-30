@@ -111,6 +111,7 @@ test('H1: trocar de idioma com o painel NA TELA o redesenha', () => {
   const deps = {
     setLang: () => {}, safeLS: { set: () => {} }, LANG_KEY: 'waze_places_lang', applyI18n: () => {},
     SELETORES_IDIOMA: [], document: { getElementById: () => null }, popularOrdenacoes: () => {},
+    atualizarDicaDeOrdem: () => {}, estadoDaDicaDeOrdem: null,
     AppState: { profile: null, currentPlace: null, authenticated: true },
     renderProfileHeader: () => {}, showCurrentPlace: () => {}, updateStats: () => {}, updatePendingCount: () => {},
     renderUndoGateUI: () => {}, atualizarLinhaDoOffline: () => {}, atualizarSeloDeConquista: () => {},

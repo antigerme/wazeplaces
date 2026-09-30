@@ -104,8 +104,9 @@ test('casa e trabalho ficam FORA do profile e FORA do AppState', () => {
   // No cliente: a variável é de MÓDULO, nunca uma chave do AppState.
   assert.match(APP, /^let referenciasDoPerfil = null;/m, 'referenciasDoPerfil deixou de ser variável de módulo');
   assert.match(APP, /^let posicaoGps = null;/m, 'posicaoGps deixou de ser variável de módulo');
+  assert.match(APP, /^let posicaoDoModal = null;/m, 'posicaoDoModal deixou de ser variável de módulo');
   const estado = APP.slice(APP.indexOf('const AppState = {'), APP.indexOf('const AppState = {') + 3000);
-  for (const proibido of ['referenciasDoPerfil', 'posicaoGps', 'homeLocation', 'workLocation']) {
+  for (const proibido of ['referenciasDoPerfil', 'posicaoGps', 'posicaoDoModal', 'homeLocation', 'workLocation']) {
     assert.ok(!estado.includes(proibido),
       `"${proibido}" entrou no AppState — e o AppState inteiro vai no diagnóstico`);
   }
@@ -116,6 +117,7 @@ test('sair apaga casa, trabalho e a posição', () => {
   const trecho = logout.slice(0, 600);
   assert.match(trecho, /referenciasDoPerfil = null/, 'o logout não apaga casa/trabalho');
   assert.match(trecho, /posicaoGps = null/, 'o logout não apaga a posição');
+  assert.match(trecho, /posicaoDoModal = null/, 'o logout não apaga a posição pedida nos Filtros');
 });
 
 // ── 4. GPS: só no gesto, e nunca de ontem ──────────────────────────────────
@@ -147,11 +149,18 @@ test('a permissão só é pedida no GESTO, e nunca na abertura', () => {
 
 test('permissão negada volta pro padrão em vez de mentir sobre a ordem', () => {
   const f = fatiar('aoTrocarOrdenacao');
-  const ramo = f.slice(f.indexOf('if (!pos)'));
-  assert.match(ramo, /posicaoGps = null/);
+  const i = f.indexOf('if (!r || !r.ll)');
+  assert.ok(i > 0, 'sumiu o ramo da posição que não veio');
+  const ramo = f.slice(i, f.indexOf('posicaoDoModal = r;', i));
   assert.match(ramo, /sel\.value = ORDEM_PADRAO/,
     'ficaria "Perto de mim" selecionado sem posição — filtro que não faz o que diz');
-  assert.match(ramo, /atualizarDicaDeOrdem\('negado'\)/, 'a pessoa não saberia por que nada mudou');
+  // A dica diz o MOTIVO: negado manda liberar; sem posição, conferir a
+  // localização do aparelho (F4, test/filtros-aplicar roda os três códigos).
+  assert.match(ramo, /atualizarDicaDeOrdem\(motivo === 'negado' \? 'negado' : 'semPosicao'\)/,
+    'a pessoa não saberia por que nada mudou');
+  // E a posição da ordem JÁ aplicada não é apagada aqui: só o "Aplicar" a
+  // troca (F5) — apagada, o "Cancelar" deixava "Perto de mim" sem referência.
+  assert.doesNotMatch(ramo, /posicaoGps\s*=/, 'o pedido que falhou no modal mexe na posição da ordem já aplicada');
 });
 
 // ── 5. A OFERTA: nada que não dê pra cumprir ───────────────────────────────
@@ -178,9 +187,10 @@ test('abrir o modal POPULA as ordens — função solta não serve de nada', () 
 });
 
 test('ordem inválida cai no padrão em vez de deixar a fila calada', () => {
-  const fn = new Function('referenciaDaOrdem', 'ORDENS_POR_DISTANCIA', 'ORDEM_PADRAO',
+  // Com o perfil já conhecido (a ordem salva sem ele é o F2, em test/filtros-aplicar).
+  const fn = new Function('referenciaDaOrdem', 'ORDENS_POR_DISTANCIA', 'ORDEM_PADRAO', 'ordemSalvaEsperaOPerfil',
     fatiar('ordemValida') + '\nreturn ordemValida;')(
-    (o) => (o === 'casa' ? [1, 2] : null), ['casa', 'trabalho', 'gps'], 'newest');
+    (o) => (o === 'casa' ? [1, 2] : null), ['casa', 'trabalho', 'gps'], 'newest', () => false);
   assert.equal(fn('oldest'), 'oldest');
   assert.equal(fn('casa'), 'casa');
   assert.equal(fn('trabalho'), 'newest', 'sem trabalho no perfil, deveria cair no padrão');

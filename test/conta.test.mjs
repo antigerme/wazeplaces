@@ -320,6 +320,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     offlineEsquecer: () => {}, dlogApagar: () => {}, window: { Presenca: { esquecer: () => {} } },
     esquecerFocoAutor: () => log.push('foco'),
     presencaWmeZerar: () => {}, presencaWmeRefazerDesligar: () => {},   // test/costura-sessao, K5
+    redesenharFiltrosComOPerfil: () => {},   // test/filtros-perfil (F2)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];

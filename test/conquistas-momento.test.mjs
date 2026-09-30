@@ -46,6 +46,7 @@ function depsDoIdioma(extra = {}) {
     setLang: () => {}, registrarIdiomaUsado: (l) => idiomas.push(l),
     safeLS: { set: () => {} }, LANG_KEY: 'waze_places_lang', applyI18n: () => {},
     SELETORES_IDIOMA: [], document: { getElementById: () => null }, popularOrdenacoes: () => {},
+    atualizarDicaDeOrdem: () => {}, estadoDaDicaDeOrdem: null,
     AppState: { profile: null, currentPlace: null, authenticated: false },
     renderProfileHeader: () => {}, showCurrentPlace: () => {}, updateStats: () => {}, updatePendingCount: () => {},
     renderUndoGateUI: () => {}, atualizarLinhaDoOffline: () => {}, atualizarSeloDeConquista: () => {},

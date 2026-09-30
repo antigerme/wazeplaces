@@ -1176,6 +1176,12 @@ function aplicarIdioma(valor) {
     // O `applyI18n` acima reescreveu o texto das opções de data (elas têm
     // `data-i18n`), levando o ícone junto — redecora.
     popularOrdenacoes();
+    // A dica sob o "Ordenar por" é texto do JS com valor interpolado: o
+    // `applyI18n` não a alcança, e ela ficava em português na aba Filtros depois
+    // de trocar o idioma nas Preferências do MESMO modal (auditoria de
+    // 2026-09-29, F6). As opções de texto dos seletores ("Todas as categorias",
+    // "Todos os estados", "Nenhuma", "Carregando…") levam `data-i18n` e já foram.
+    atualizarDicaDeOrdem(estadoDaDicaDeOrdem);
     if (AppState.profile) renderProfileHeader(AppState.profile);
     if (AppState.currentPlace) showCurrentPlace();
     updateStats();
@@ -1652,6 +1658,7 @@ function setupModalListeners() {
     setupLanguageSwitcher();
     $('focoAutorBar').addEventListener('click', limparFocoAutor);
     $('filterCountry').addEventListener('change', (e) => {
+        aoMudarPaisNaTela();
         loadStatesIntoSelect(parseInt(e.target.value, 10), $('filterRegion').value);
     });
     $('filterRegion').addEventListener('change', aoTrocarRegiaoNoModal);
@@ -3310,6 +3317,8 @@ function populateCountrySelect() {
         // Só ajusta o select visualmente; a persistência do país acontece no
         // Aplicar (antes, abrir o modal já trocava o país mesmo cancelando).
         select.value = countries[0].id;
+        // O país mostrado não é o aplicado: a área dele também não vale (F7).
+        aoMudarPaisNaTela();
     }
 }
 
@@ -3341,7 +3350,9 @@ let cargaDeEstados = 0;
 async function loadStatesIntoSelect(countryId, regiao) {
     const select = document.getElementById('filterState');
     const minha = ++cargaDeEstados;
-    select.innerHTML = '<option value="">' + escapeHtml(t('filters.state.all')) + '</option>';
+    // As opções de TEXTO levam o `data-i18n`, como a do HTML: é por ele que a
+    // troca de idioma com o modal aberto alcança o "Todos os estados" (F6).
+    select.innerHTML = '<option value="" data-i18n="filters.state.all">' + escapeHtml(t('filters.state.all')) + '</option>';
     delete select.dataset.carregando;
     if (!countryId) return;
 
@@ -3351,7 +3362,7 @@ async function loadStatesIntoSelect(countryId, regiao) {
         // "Aplicar" nesse meio não grava nada por cima do estado da pessoa (ver
         // `applyFiltersFromModal`). O "Todos" que ele mostrava não era escolha
         // de ninguém.
-        select.innerHTML = '<option value="">' + escapeHtml(t('filters.carregando')) + '</option>';
+        select.innerHTML = '<option value="" data-i18n="filters.carregando">' + escapeHtml(t('filters.carregando')) + '</option>';
         select.dataset.carregando = '1';
         const result = await API.listStates(countryId, regiao);
         if (minha !== cargaDeEstados) return;
@@ -3361,13 +3372,13 @@ async function loadStatesIntoSelect(countryId, regiao) {
             // A falha soltava o seletor em "Todos os estados", e o "Aplicar"
             // gravava isso por cima do estado da pessoa, calado (auditoria da
             // fila, 2026-09-26). Reabrir os Filtros tenta de novo.
-            select.innerHTML = '<option value="">' + escapeHtml(t('filters.state.naoCarregou')) + '</option>';
+            select.innerHTML = '<option value="" data-i18n="filters.state.naoCarregou">' + escapeHtml(t('filters.state.naoCarregou')) + '</option>';
             return;
         }
         delete select.dataset.carregando;
         states = result.states || [];
         AppState.statesByCountry[countryId] = states;
-        select.innerHTML = '<option value="">' + escapeHtml(t('filters.state.all')) + '</option>';
+        select.innerHTML = '<option value="" data-i18n="filters.state.all">' + escapeHtml(t('filters.state.all')) + '</option>';
     }
 
     for (const s of ordenarPorNome(states)) {
@@ -3399,19 +3410,20 @@ async function aoTrocarRegiaoNoModal(e) {
     const $ = (id) => document.getElementById(id);
     const regiao = e.target.value;
     const sel = $('filterCountry');
-    const aplicar = $('applyFilters');
     // A lista da região nova é a INTEIRA: a dica de "só os que você pode editar"
     // sai junto, porque deixou de ser verdade (T5).
     $('filterCountryHint').classList.add('hidden');
-    if (aplicar) aplicar.disabled = true;
-    sel.innerHTML = `<option value="">${escapeHtml(t('filters.carregando'))}</option>`;
+    esperaDosFiltros.regiao = true;
+    aplicarEsperaDosFiltros();
+    sel.innerHTML = `<option value="" data-i18n="filters.carregando">${escapeHtml(t('filters.carregando'))}</option>`;
     sel.disabled = true;
     sel.dataset.carregando = '1';
     const r = await API.listCountries(regiao);
     if ($('filterRegion').value !== regiao) return;   // trocou de novo no meio
     delete sel.dataset.carregando;
     sel.disabled = !!$('filterMyArea').checked;
-    if (aplicar) aplicar.disabled = false;
+    esperaDosFiltros.regiao = false;
+    aplicarEsperaDosFiltros();
     if (!(r && r.success)) {
         $('filterRegion').value = API.getRegion();
         populateCountrySelect();
@@ -3421,15 +3433,67 @@ async function aoTrocarRegiaoNoModal(e) {
     }
     sel.innerHTML = ordenarPorNome(r.countries || []).map((c) =>
         `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+    // Outra região é outro país: a área gerenciada que o seletor mostrava era
+    // do país de antes (ver `aoMudarPaisNaTela`).
+    aoMudarPaisNaTela();
     await loadStatesIntoSelect(parseInt(sel.value, 10), regiao);
 }
 
-function populateManagedAreaSelect() {
+// ── O "Aplicar" dos Filtros ESPERA o que o modal ainda está buscando ────────
+// São duas esperas: os países da região nova (`aoTrocarRegiaoNoModal`) e a
+// posição do "📍 Perto de mim" (`aoTrocarOrdenacao`). Com o GPS ainda
+// respondendo, o "Aplicar" gravava "Mais recentes" sem aviso — a opção sem
+// posição cai no padrão — ou, com uma posição de antes, ordenava por ELA, e
+// não pela de agora (auditoria de 2026-09-29, F1). O `disabled` do botão tem
+// UM escritor só: com dois, o primeiro que terminasse devolveria o botão com o
+// outro ainda no ar (gotcha #63). A abertura dos Filtros zera as duas.
+const esperaDosFiltros = { regiao: false, gps: false };
+function aplicarEsperaDosFiltros() {
+    const b = document.getElementById('applyFilters');
+    if (b) b.disabled = esperaDosFiltros.regiao || esperaDosFiltros.gps;
+}
+
+// O PAÍS mudou no seletor (o gesto da pessoa, a troca de região, ou a lista
+// que não tem o país aplicado): a ÁREA GERENCIADA que ele mostrava era do país
+// de antes, e o "Aplicar" a mandava junto com o país novo — MEDIDO: busca com
+// `countryId 73` e `managedAreaId 9001`, a área de São Paulo na França (auditoria
+// de 2026-09-29, F7). Volta pra "Nenhuma", como o `irProPaisDoPerfil` já fazia,
+// e a pessoa escolhe outra se quiser. O que se vê é o que o "Aplicar" grava — e
+// ele confere de novo (ver `applyFiltersFromModal`).
+function aoMudarPaisNaTela() {
+    const area = document.getElementById('filterManagedArea');
+    if (area) area.value = '';
+}
+
+// As áreas gerenciadas vêm do PERFIL. Sem ele ainda — o atalho do PWA
+// (`/?action=filters`) abre os Filtros ANTES dele, a rede lenta, o perfil que
+// falhou —, a lista era só "Nenhuma", o seletor aparecia VAZIO com uma área
+// salva, e o "Aplicar" gravava "nenhuma" por cima dela: a fila do país inteiro
+// no lugar da área (auditoria de 2026-09-29, F2). Como a categoria salva
+// (`populateCategorySelect`), a área SALVA entra como opção. O nome dela vem
+// com o perfil: até lá ela diz "Carregando…", e o perfil que chega com os
+// Filtros abertos a redesenha (`redesenharFiltrosComOPerfil`).
+//
+// `manterEscolha`: redesenhar mantém o que o seletor mostra AGORA — a pessoa
+// pode já ter escolhido "Nenhuma" enquanto o perfil não vinha.
+//
+// As duas opções de texto levam o `data-i18n`, como a do HTML: sem ele, trocar
+// o idioma nas Preferências deixava "Nenhuma" em português na aba Filtros do
+// mesmo modal (F6), porque o `applyI18n` só alcança quem tem a chave.
+function populateManagedAreaSelect({ manterEscolha = false } = {}) {
     const select = document.getElementById('filterManagedArea');
+    const escolha = manterEscolha ? select.value : AppState.filters.managedAreaId;
     const areas = (AppState.profile && AppState.profile.managedAreas) || [];
-    select.innerHTML = '<option value="">' + escapeHtml(t('filters.managedArea.none')) + '</option>' +
-        areas.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('');
-    if (AppState.filters.managedAreaId) select.value = AppState.filters.managedAreaId;
+    const salva = AppState.filters.managedAreaId;
+    const salvaSemNome = !AppState.profile && !!salva;
+    select.innerHTML = '<option value="" data-i18n="filters.managedArea.none">' + escapeHtml(t('filters.managedArea.none')) + '</option>'
+        + (salvaSemNome ? `<option value="${escapeHtml(salva)}" data-i18n="filters.carregando">${escapeHtml(t('filters.carregando'))}</option>` : '')
+        + areas.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('');
+    select.value = escolha || '';
+    // A área que o perfil NÃO tem mais (tirada no WME) mostra "Nenhuma", que é
+    // o que o "Aplicar" grava: com o `value` de uma opção que não existe, o
+    // seletor aparecia VAZIO.
+    if (select.selectedIndex < 0) select.value = '';
 }
 
 // Preenche o select de categoria a partir das categorias vistas (B5).
@@ -3437,7 +3501,9 @@ function populateCategorySelect() {
     const sel = document.getElementById('filterCategory');
     if (!sel) return;
     const current = (AppState.filters.categories && AppState.filters.categories[0]) || '';
-    const opts = ['<option value="">' + escapeHtml(t('filters.category.all')) + '</option>'];
+    // Com o `data-i18n`, como a do HTML: é por ele que a troca de idioma com o
+    // modal aberto alcança o "Todas as categorias" (F6).
+    const opts = ['<option value="" data-i18n="filters.category.all">' + escapeHtml(t('filters.category.all')) + '</option>'];
     // A categoria SALVA entra mesmo sem pedido dela na fila. As opções saem do
     // que a fila já mostrou (`seenCategories`), e com o filtro ligado numa
     // categoria sem nenhum pendente hoje a fila vem vazia: sem ela na lista, o
@@ -3469,9 +3535,13 @@ async function openFiltersModal() {
     });
     $('filterResidential').value = AppState.filters.residential;
     $('filterRegion').value = API.getRegion();
-    // A troca de região que ficou no ar (ver `aoTrocarRegiaoNoModal`) desiste ao
-    // ver o seletor de volta na região aplicada — sem devolver o "Aplicar".
-    $('applyFilters').disabled = false;
+    // As esperas do "Aplicar" recomeçam aqui (ver `aplicarEsperaDosFiltros`):
+    // a troca de região que ficou no ar desiste ao ver o seletor de volta na
+    // região aplicada, e o pedido de posição que ficou no ar é abandonado —
+    // nenhum dos dois devolveria o botão sozinho.
+    esperaDosFiltros.regiao = false;
+    esquecerPosicaoDoModal();
+    aplicarEsperaDosFiltros();
 
     populateManagedAreaSelect();
     $('filterMyArea').checked = AppState.filters.myArea;
@@ -3507,31 +3577,58 @@ async function openFiltersModal() {
 // só as AGENDA — e porque um erro aqui não pode impedir o modal de abrir.
 async function popularPaisEstado() {
     const select = document.getElementById('filterCountry');
+    const estado = document.getElementById('filterState');
+    // A lista pedida aqui é a da região APLICADA.
+    const regiao = API.getRegion();
     // Enquanto não chega, o seletor diz o que está havendo em vez de ficar
     // vazio: seletor vazio parece defeito, e o editor toca de novo.
     const carregando = AppState.countries.length === 0;
     if (carregando && select) {
-        select.innerHTML = `<option value="">${escapeHtml(t('filters.carregando'))}</option>`;
+        select.innerHTML = `<option value="" data-i18n="filters.carregando">${escapeHtml(t('filters.carregando'))}</option>`;
         select.disabled = true;
         select.dataset.carregando = '1';
     }
+    // O ESTADO espera junto: ele só se preenche depois dos países, e até lá
+    // mostrava o "Todos os estados" da abertura anterior — que o "Aplicar"
+    // gravava por cima do estado salvo, calado (auditoria de 2026-09-29, F3).
+    // Carregando, o "Aplicar" não mexe nele (ver `applyFiltersFromModal`).
+    if (carregando && estado) {
+        estado.innerHTML = `<option value="" data-i18n="filters.carregando">${escapeHtml(t('filters.carregando'))}</option>`;
+        estado.dataset.carregando = '1';
+    }
+    let doSeletor = true;
     try {
         if (AppState.countries.length === 0) {
             const r = await API.listCountries();
-            if (r.success) AppState.countries = r.countries;
+            // A lista é da região PEDIDA: aplicada outra enquanto ela vinha,
+            // ela não vale como a lista da região de agora...
+            if (r.success && API.getRegion() === regiao) AppState.countries = r.countries;
         }
+        // ...e só vai pro seletor se ele ainda estiver na região pedida.
+        // Trocada a região NO MODAL, quem é dono do seletor é a lista da nova
+        // (`aoTrocarRegiaoNoModal`); a da aplicada, chegando DEPOIS, o
+        // sobrescrevia — MEDIDO: o seletor em ROW com os países da NA, e o
+        // "Aplicar" gravando `row/235` (auditoria de 2026-09-29, V3).
+        const seletorDeRegiao = document.getElementById('filterRegion');
+        doSeletor = !seletorDeRegiao || seletorDeRegiao.value === regiao;
+        if (!doSeletor) return;
         if (select) delete select.dataset.carregando;
         populateCountrySelect();
         await loadStatesIntoSelect(API.getCountry());
     } finally {
         // O `myArea` marcado desabilita os três de propósito (regra de cima);
         // fora isso, devolve o seletor ao editor mesmo se a rede falhou.
-        if (select) select.disabled = !!AppState.filters.myArea;
+        if (select && doSeletor) select.disabled = !!AppState.filters.myArea;
     }
 }
 
 function applyFiltersFromModal() {
     const $ = id => document.getElementById(id);
+
+    // O botão ESPERA o que o modal ainda está buscando (ver
+    // `aplicarEsperaDosFiltros`); isto é o cinto pra quem chegar aqui sem
+    // passar por ele.
+    if (esperaDosFiltros.regiao || esperaDosFiltros.gps) return;
 
     // Valida ANTES de mutar qualquer estado: 0 tipos = sem filtro = todos os tipos
     // (inclusive REQUEST gated). Bloqueia o Aplicar com aviso.
@@ -3557,10 +3654,25 @@ function applyFiltersFromModal() {
     // volta ao default em vez de virar "todos os tipos".
     if (AppState.filters.types.length === 0) AppState.filters.types = TYPES_PADRAO.slice();
     AppState.filters.residential = $('filterResidential').value;
+    // O LUGAR que vai valer, lido ANTES de gravar qualquer coisa: a região do
+    // seletor e o país dele (o país ainda carregando não é escolha).
+    const paisNaTela = !$('filterCountry').dataset.carregando && $('filterCountry').value;
+    const lugarMudou = $('filterRegion').value !== API.getRegion()
+        || (!!paisNaTela && String(paisNaTela) !== String(API.getCountry()));
     // Seletor ainda CARREGANDO não é escolha: gravar o "Todos"/vazio dele
     // apagava o estado da pessoa (e o país voltava pro padrão do servidor).
     if (!$('filterState').dataset.carregando) AppState.filters.stateId = $('filterState').value;
+    // ...mas o estado guardado é do lugar de ANTES: trocado o país (ou a
+    // região) com os estados do novo sem carregar, a busca saía com o país
+    // novo e o estado do velho — MEDIDO: `countryId 73` com `stateId 2`, a
+    // Bahia na França (auditoria de 2026-09-29, V10).
+    else if (lugarMudou) AppState.filters.stateId = '';
+    // A área gerenciada também é do lugar: a que o seletor ainda mostra do país
+    // de antes não vai junto pro novo (F7, ver `aoMudarPaisNaTela`). Uma que a
+    // pessoa escolheu DEPOIS de trocar o país, vai.
+    const areaAplicada = AppState.filters.managedAreaId;
     AppState.filters.managedAreaId = $('filterManagedArea').value;
+    if (lugarMudou && AppState.filters.managedAreaId === areaAplicada) AppState.filters.managedAreaId = '';
     AppState.filters.myArea = $('filterMyArea').checked;
     if (!$('filterCountry').dataset.carregando && $('filterCountry').value) API.setCountry($('filterCountry').value);
     // Troca de região invalida o cache de países/estados (eram da região anterior).
@@ -3572,7 +3684,12 @@ function applyFiltersFromModal() {
     API.setRegion(newRegion);
     const catVal = $('filterCategory') ? $('filterCategory').value : '';
     AppState.filters.categories = catVal ? [catVal] : [];
-    AppState.filters.sortOrder = ordemValida($('filterSort') && $('filterSort').value);
+    // A posição que o "📍 Perto de mim" pediu NESTE modal passa a valer AGORA, e
+    // só agora (F5, ver `posicaoDoModal`). Sem pedido novo no modal, fica a da
+    // ordem já aplicada.
+    const ordemNaTela = $('filterSort') && $('filterSort').value;
+    if (ordemNaTela === 'gps' && posicaoDoModal) posicaoGps = posicaoDoModal;
+    AppState.filters.sortOrder = ordemValida(ordemNaTela);
     saveFilters();
     closeModal('filtersModal');
     // A sala É a fila: mudou país ou estado, a companhia é outra.
@@ -4046,6 +4163,9 @@ function definirPerfil(res) {
     // O "invisível" que a pessoa pediu antes de o perfil chegar (ver
     // `presencaWmeDesligar`): agora ele tem pra quem ir.
     presencaWmeRefazerDesligar();
+    // Os Filtros abertos ANTES dele (o atalho do PWA, a rede lenta) mostravam
+    // a área e a ordem sem o que só o perfil sabe (F2).
+    redesenharFiltrosComOPerfil();
     return true;
 }
 
@@ -7496,6 +7616,7 @@ async function handleLogout() {
     // Casa, trabalho e posição são dado de LOCALIZAÇÃO do editor: sair é sair.
     referenciasDoPerfil = null;
     posicaoGps = null;
+    posicaoDoModal = null;
     telaPronta = false;
     saveStats();
     saveFilters();
@@ -7599,6 +7720,24 @@ function showLoading(visible) {
 // escopo de módulo, e some no logout junto com o resto.
 let referenciasDoPerfil = null;   // { casa: [lat, lon]|null, trabalho: [lat, lon]|null }
 let posicaoGps = null;            // { ll: [lat, lon], precisaoM } — NUNCA persistida
+// A posição pedida NO MODAL de Filtros. Só vira a da fila (`posicaoGps`) no
+// "Aplicar" (ver `applyFiltersFromModal`): o "Cancelar" depois de um pedido que
+// falhou APAGAVA a posição da ordem já aplicada, e a fila seguia dizendo "Perto
+// de mim" ordenada por data — e lendo todas as páginas à toa (auditoria de
+// 2026-09-29, F5). Também NUNCA persistida, e sai no "Sair" com a outra.
+let posicaoDoModal = null;
+// Cada pedido de posição tem um número: a resposta de um pedido que a pessoa
+// abandonou (trocou de ordem, fechou ou reabriu os Filtros) não escreve nada.
+let pedidoDePosicao = 0;
+
+// Abandona o pedido de posição que estiver no ar e esquece a do modal. A
+// abertura dos Filtros passa por aqui: a posição de uma abertura não vale na
+// outra, e o "Aplicar" deixa de esperar por ela.
+function esquecerPosicaoDoModal() {
+    pedidoDePosicao++;
+    posicaoDoModal = null;
+    esperaDosFiltros.gps = false;
+}
 
 // As ordens que medem distância em vez de data.
 const ORDENS_POR_DISTANCIA = ['casa', 'trabalho', 'gps'];
@@ -7753,22 +7892,44 @@ function guardarReferencias(res) {
 }
 
 const GPS_TIMEOUT_MS = 10000;
+// Devolve a posição (`{ ll, precisaoM }`) ou o MOTIVO de ela não ter vindo
+// (`{ falha }`). Os três erros da API juntavam-se num "não deu" só, com a dica
+// do NEGADO ("libere nas configurações e reabra o app") — e dois deles
+// acontecem com a permissão CONCEDIDA: posição indisponível e tempo esgotado
+// (a localização do aparelho desligada, sem sinal de GPS). Mandar liberar o que
+// já está liberado deixava a pessoa sem saída (auditoria de 2026-09-29, F4).
+// MEDIDO no Chromium: sem permissão, o código 1 na hora; permissão concedida e
+// nenhuma posição, o código 3 aos 10 s.
 function pedirPosicao() {
     return new Promise((resolve) => {
-        if (!navigator.geolocation) { resolve(null); return; }
+        if (!navigator.geolocation) { resolve({ falha: 'semApi' }); return; }
         navigator.geolocation.getCurrentPosition(
             (pos) => resolve({ ll: [pos.coords.latitude, pos.coords.longitude],
                                precisaoM: Math.round(pos.coords.accuracy || 0) }),
-            // Negar, expirar e "indisponível" caem no MESMO lugar de propósito:
-            // pro editor os três são "não deu", e a saída é a mesma.
-            () => resolve(null),
+            (err) => resolve({ falha: motivoDaFalhaDoGps(err) }),
             { enableHighAccuracy: false, timeout: GPS_TIMEOUT_MS, maximumAge: 300000 }
         );
     });
 }
 
+// O código do `GeolocationPositionError` em palavra: 1 = PERMISSION_DENIED,
+// 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT. Só o 1 é permissão.
+function motivoDaFalhaDoGps(err) {
+    const codigo = err && err.code;
+    if (codigo === 1) return 'negado';
+    if (codigo === 3) return 'tempo';
+    return 'indisponivel';
+}
+
+// O estado que a dica mostra agora. A troca de idioma a redesenha por ele
+// (ver `aplicarIdioma`): a dica é texto do JS, com valor interpolado, e o
+// `applyI18n` não a alcança — ficava em português na aba Filtros depois de
+// trocar o idioma nas Preferências do mesmo modal (auditoria de 2026-09-29, F6).
+let estadoDaDicaDeOrdem = null;
+
 // A linha sob o select: de onde sai a referência, e o que houve com a permissão.
 function atualizarDicaDeOrdem(estado) {
+    estadoDaDicaDeOrdem = estado || null;
     const el = document.getElementById('filterSortHint');
     if (!el) return;
     const cores = {
@@ -7776,11 +7937,15 @@ function atualizarDicaDeOrdem(estado) {
         ok: 'text-emerald-700 dark:text-emerald-400',
         alerta: 'text-amber-700 dark:text-amber-300',
     };
+    // A precisão é a da posição que a ordem vai USAR: a pedida neste modal,
+    // senão a da ordem já aplicada.
+    const posicao = posicaoDoModal || posicaoGps;
     const mapa = {
         perfil: ['filters.sort.hint.perfil', 'neutro', {}],
         pedindo: ['filters.sort.hint.pedindo', 'neutro', {}],
-        ok: ['filters.sort.hint.ok', 'ok', { m: (posicaoGps && posicaoGps.precisaoM) || 0 }],
+        ok: ['filters.sort.hint.ok', 'ok', { m: (posicao && posicao.precisaoM) || 0 }],
         negado: ['filters.sort.hint.negado', 'alerta', { padrao: t('filters.sort.' + ORDEM_PADRAO) }],
+        semPosicao: ['filters.sort.hint.semPosicao', 'alerta', { padrao: t('filters.sort.' + ORDEM_PADRAO) }],
     };
     const item = mapa[estado];
     el.classList.toggle('hidden', !item);
@@ -7800,15 +7965,29 @@ function atualizarDicaDeOrdem(estado) {
 function ordemValida(v) {
     if (v === 'oldest' || v === 'newest') return v;
     if (ORDENS_POR_DISTANCIA.includes(v) && referenciaDaOrdem(v)) return v;
+    if (ordemSalvaEsperaOPerfil(v)) return v;
     return ORDEM_PADRAO;
+}
+
+// Sem o perfil ainda — o atalho do PWA (`/?action=filters`) abre os Filtros
+// ANTES dele, a rede lenta, o perfil que falhou —, não há como saber se casa e
+// trabalho existem: a ordem SALVA fica valendo, em vez de virar "Mais
+// recentes" no primeiro "Aplicar" (auditoria de 2026-09-29, F2). É o que a
+// abertura do app já faz: a carga dos filtros guarda a ordem salva, e o perfil
+// que chega a confere (`completarPerfilChegado`; nos Filtros abertos,
+// `redesenharFiltrosComOPerfil`). Só a SALVA: oferecer "Perto do trabalho" a
+// quem salvou "Perto de casa" seria oferecer o que talvez não exista.
+function ordemSalvaEsperaOPerfil(ordem) {
+    return !AppState.profile && (ordem === 'casa' || ordem === 'trabalho')
+        && AppState.filters.sortOrder === ordem;
 }
 
 function popularOrdenacoes() {
     const sel = document.getElementById('filterSort');
     if (!sel) return;
     const disponivel = {
-        casa: !!(referenciasDoPerfil && referenciasDoPerfil.casa),
-        trabalho: !!(referenciasDoPerfil && referenciasDoPerfil.trabalho),
+        casa: !!(referenciasDoPerfil && referenciasDoPerfil.casa) || ordemSalvaEsperaOPerfil('casa'),
+        trabalho: !!(referenciasDoPerfil && referenciasDoPerfil.trabalho) || ordemSalvaEsperaOPerfil('trabalho'),
         gps: !!(typeof navigator !== 'undefined' && navigator.geolocation),
     };
     for (const ordem of ORDENS_POR_DISTANCIA) {
@@ -7839,7 +8018,12 @@ function popularOrdenacoes() {
 async function aoTrocarOrdenacao() {
     const sel = document.getElementById('filterSort');
     if (!sel) return;
+    // Toda troca abandona o pedido de posição que estivesse no ar: a resposta
+    // dele chegaria depois e escreveria sobre uma escolha que já é outra.
+    const meu = ++pedidoDePosicao;
     if (sel.value !== 'gps') {
+        esperaDosFiltros.gps = false;
+        aplicarEsperaDosFiltros();
         atualizarDicaDeOrdem(sel.value === 'casa' || sel.value === 'trabalho' ? 'perfil' : null);
         return;
     }
@@ -7848,20 +8032,55 @@ async function aoTrocarOrdenacao() {
     // São Paulo ordenada pelo Rio (auditoria da fila, 2026-09-26). Não liga o
     // GPS à toa: o `maximumAge` da consulta devolve a recente que o navegador
     // guardou. E segue só no GESTO — é este `change`.
+    //
+    // E o "Aplicar" ESPERA por ela, como espera os países de uma região nova
+    // (ver `aplicarEsperaDosFiltros`): tocado com o GPS ainda respondendo, ele
+    // gravava "Mais recentes" sem aviso, ou ordenava pela posição de ANTES
+    // (auditoria de 2026-09-29, F1). Volta quando ela chega ou falha.
+    posicaoDoModal = null;
+    esperaDosFiltros.gps = true;
+    aplicarEsperaDosFiltros();
     atualizarDicaDeOrdem('pedindo');
-    const pos = await pedirPosicao();
+    const r = await pedirPosicao();
+    // Abandonado no meio (outra ordem, os Filtros fechados ou reabertos): quem
+    // abandonou já cuidou do "Aplicar", e a resposta não escreve nada.
+    if (meu !== pedidoDePosicao) return;
+    esperaDosFiltros.gps = false;
+    aplicarEsperaDosFiltros();
     // A pessoa pode ter mudado o select enquanto o prompt estava aberto.
     if (sel.value !== 'gps') return;
-    if (!pos) {
-        posicaoGps = null;
+    if (!r || !r.ll) {
+        // Nem a posição da ordem JÁ aplicada é apagada aqui: ela só muda no
+        // "Aplicar" (F5). O que a pessoa vê é a ordem voltando pro padrão, e o
+        // porquê — que depende do motivo (F4).
         sel.value = ORDEM_PADRAO;
-        atualizarDicaDeOrdem('negado');
-        dfato('gps.negado');
+        const motivo = (r && r.falha) || 'indisponivel';
+        atualizarDicaDeOrdem(motivo === 'negado' ? 'negado' : 'semPosicao');
+        if (motivo === 'negado') dfato('gps.negado');
+        else dfato('gps.semPosicao', { motivo });
         return;
     }
-    posicaoGps = pos;
+    posicaoDoModal = r;
     atualizarDicaDeOrdem('ok');
-    dfato('gps.ok', { precisaoM: pos.precisaoM });
+    dfato('gps.ok', { precisaoM: r.precisaoM });
+}
+
+// O PERFIL chegou com os Filtros ABERTOS: o atalho do PWA (`/?action=filters`)
+// os abre antes dele, e a rede lenta e o perfil refeito depois de uma falha
+// também. As duas coisas que só ele sabe são redesenhadas — as áreas
+// gerenciadas (com o nome) e se casa/trabalho existem —, e o que cada seletor
+// mostra FICA: a pessoa pode ter mexido enquanto ele não vinha. Só muda o que
+// deixou de existir: a casa que o perfil não tem vira "Mais recentes", como
+// numa abertura com ele (auditoria de 2026-09-29, F2). Chamada pelo
+// `definirPerfil`, a porta única do perfil.
+function redesenharFiltrosComOPerfil() {
+    const modal = document.getElementById('filtersModal');
+    if (!modal || modal.classList.contains('hidden')) return;
+    populateManagedAreaSelect({ manterEscolha: true });
+    const sel = document.getElementById('filterSort');
+    const antes = sel && sel.value;
+    popularOrdenacoes();
+    if (sel && sel.value !== antes) atualizarDicaDeOrdem(null);
 }
 
 // Acumula as categorias vistas nos places carregados — fonte do filtro de categoria (B5).

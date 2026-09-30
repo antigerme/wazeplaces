@@ -106,9 +106,12 @@ function montarRegiao({ resposta }) {
     ordenarPorNome: (l) => l, i18nLocale: () => 'pt-BR',
   };
   const chaves = Object.keys(deps);
-  const nomes = ['aoTrocarRegiaoNoModal', 'populateCountrySelect', 'loadStatesIntoSelect'];
-  const app = new Function(...chaves, 'let cargaDeEstados = 0;\n' + nomes.map(fatiar).join('\n')
-    + '\nreturn { aoTrocarRegiaoNoModal };')(...chaves.map((k) => deps[k]));
+  // O botão tem UM escritor (`aplicarEsperaDosFiltros`, test/filtros-aplicar),
+  // e a área volta a "Nenhuma" com o país novo (`aoMudarPaisNaTela`).
+  const nomes = ['aoTrocarRegiaoNoModal', 'populateCountrySelect', 'loadStatesIntoSelect',
+    'aplicarEsperaDosFiltros', 'aoMudarPaisNaTela'];
+  const app = new Function(...chaves, 'let cargaDeEstados = 0;\nconst esperaDosFiltros = { regiao: false, gps: false };\n'
+    + nomes.map(fatiar).join('\n') + '\nreturn { aoTrocarRegiaoNoModal };')(...chaves.map((k) => deps[k]));
   return { app, el, log, soltar: (r) => soltar(r) };
 }
 const umTique = () => new Promise((ok) => setTimeout(ok, 0));
@@ -141,8 +144,11 @@ test('F10a: a lista da região nova NÃO carrega — a troca não se completa: v
 
 test('F10a: reabrir os Filtros com a troca de região no ar devolve o "Aplicar"', () => {
   // Reabrir põe o seletor de região de volta na aplicada; a troca que estava no
-  // ar vê isso e desiste (sem reabilitar nada) — quem devolve o botão é a abertura.
-  assert.match(fatiar('openFiltersModal'), /^\s+\$\('applyFilters'\)\.disabled = false;/m,
+  // ar vê isso e desiste (sem reabilitar nada) — quem devolve o botão é a
+  // abertura, zerando as esperas e passando pelo escritor único do `disabled`
+  // (o GPS também espera: F1, em test/filtros-aplicar, que roda a abertura).
+  assert.match(fatiar('openFiltersModal'),
+    /^\s+esperaDosFiltros\.regiao = false;\s*\n\s*esquecerPosicaoDoModal\(\);\s*\n\s*aplicarEsperaDosFiltros\(\);/m,
     'a troca de região abandonada deixava o "Aplicar" morto na abertura seguinte');
 });
 
@@ -196,10 +202,14 @@ function montarGps({ posicaoVelha, nova }) {
     document: { getElementById: (id) => (id === 'filterSort' ? sel : null) },
     pedirPosicao: async () => { pedidas++; return nova; },
     atualizarDicaDeOrdem: (e) => dicas.push(e), dfato: () => {}, ORDEM_PADRAO: 'newest',
+    esperaDosFiltros: { regiao: false, gps: false }, aplicarEsperaDosFiltros: () => {},
   };
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let posicaoGps = ${JSON.stringify(posicaoVelha)};\n` + fatiar('aoTrocarOrdenacao')
-    + '\nreturn { aoTrocarOrdenacao, posicao: () => posicaoGps };')(...chaves.map((k) => deps[k]));
+  // A posição pedida mora NO MODAL (`posicaoDoModal`) até o "Aplicar" (F5, em
+  // test/filtros-aplicar): a da fila (`posicaoGps`) não muda aqui.
+  const app = new Function(...chaves, `let posicaoGps = ${JSON.stringify(posicaoVelha)};\nlet posicaoDoModal = null, pedidoDePosicao = 0;\n`
+    + fatiar('aoTrocarOrdenacao')
+    + '\nreturn { aoTrocarOrdenacao, posicao: () => posicaoGps, posicaoDoModal: () => posicaoDoModal };')(...chaves.map((k) => deps[k]));
   return { app, sel, dicas, pedidas: () => pedidas };
 }
 
@@ -209,16 +219,21 @@ test('F11: escolher "Perto de mim" de novo PEDE a posição de novo — a de hor
   const m = montarGps({ posicaoVelha: rio, nova: sp });
   await m.app.aoTrocarOrdenacao();
   assert.equal(m.pedidas(), 1, 'escolher "Perto de mim" de novo não perguntou a posição: a fila segue ordenada pelo Rio');
-  assert.deepEqual(m.app.posicao().ll, sp.ll);
+  // A pedida AGORA é a que o "Aplicar" vai levar (test/filtros-aplicar, F1 e F5).
+  assert.deepEqual(m.app.posicaoDoModal().ll, sp.ll);
   assert.deepEqual(m.dicas, ['pedindo', 'ok']);
 });
 
 test('F11: a renovação que FALHA (negada, sem sinal) volta pro padrão e diz — não fica com a posição velha', async () => {
-  const m = montarGps({ posicaoVelha: { ll: [-22.9, -43.2], precisaoM: 50 }, nova: null });
-  await m.app.aoTrocarOrdenacao();
-  assert.equal(m.sel.value, 'newest', '"Perto de mim" segue escolhido sem uma posição de agora');
-  assert.equal(m.app.posicao(), null);
-  assert.equal(m.dicas.at(-1), 'negado');
+  for (const [falha, dica] of [['negado', 'negado'], ['tempo', 'semPosicao'], ['indisponivel', 'semPosicao']]) {
+    const m = montarGps({ posicaoVelha: { ll: [-22.9, -43.2], precisaoM: 50 }, nova: { falha } });
+    await m.app.aoTrocarOrdenacao();
+    assert.equal(m.sel.value, 'newest', `${falha}: "Perto de mim" segue escolhido sem uma posição de agora`);
+    assert.equal(m.app.posicaoDoModal(), null, `${falha}: a posição do modal não é a de agora`);
+    // Voltando pro padrão, o "Aplicar" não usa posição nenhuma; a da ordem JÁ
+    // aplicada só muda num "Aplicar" (F5, test/filtros-aplicar).
+    assert.equal(m.dicas.at(-1), dica, `${falha}: a dica não diz o motivo certo (F4)`);
+  }
 });
 
 // ── F12: os filtros DE FÁBRICA são UM só ────────────────────────────────────
