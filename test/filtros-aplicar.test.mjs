@@ -149,6 +149,9 @@ const FUNCOES = [
   'applyFiltersFromModal', 'assinaturaDeBusca', 'ordemDoWaze', 'esquecerPosicaoDoModal', 'pedirPosicao',
   'motivoDaFalhaDoGps', 'atualizarDicaDeOrdem', 'ordemValida', 'ordemSalvaEsperaOPerfil', 'popularOrdenacoes',
   'aoTrocarOrdenacao', 'redesenharFiltrosComOPerfil', 'referenciaDaOrdem',
+  // O caminho do perfil (achados 10 e 11).
+  'loadProfileAndAuxData', 'definirPerfil', 'completarPerfilChegado', 'paisDoPerfil', 'irProPaisDoPerfil',
+  'redesenharLugarNosFiltros',
 ];
 function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, referencias = null, posicaoGps = null,
   paises = [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }], estados = {}, geo = null } = {}) {
@@ -165,8 +168,8 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     filterSortHint: elemento({ classes: ['hidden'] }),
   };
   const tipos = [{ value: 'NEW_PLACE' }, { value: 'NEW_PHOTO' }];
-  const log = { salvos: [], fechou: 0, toasts: [], dfato: [], buscas: 0, listCountries: [], listStates: [] };
-  const listas = { paises: null, estados: null };   // respostas SEGURAS (promessas que o teste solta)
+  const log = { salvos: [], fechou: 0, toasts: [], dfato: [], buscas: 0, listCountries: [], listStates: [], getProfile: [] };
+  const listas = { paises: null, estados: null, perfil: null };   // respostas SEGURAS (promessas que o teste solta)
   const estado = { regiao, pais };
   const API = {
     getRegion: () => estado.regiao, setRegion: (r) => { estado.regiao = r; },
@@ -175,6 +178,11 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
       log.listCountries.push(r || estado.regiao);
       if (listas.paises) return listas.paises(r || estado.regiao);
       return Promise.resolve({ success: true, countries: paises });
+    },
+    getProfile: (r) => {
+      log.getProfile.push(r || estado.regiao);
+      if (listas.perfil) return listas.perfil(r || estado.regiao);
+      return Promise.resolve({ success: true, profile: perfil || { id: 1, editableCountryIDs: [], managedAreas: [] } });
     },
     listStates: (c) => {
       log.listStates.push(c);
@@ -199,6 +207,8 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     esperaDosFiltros: { regiao: false, gps: false },
     posicaoGps, posicaoDoModal: null, pedidoDePosicao: 0, referenciasDoPerfil: referencias,
     estadoDaDicaDeOrdem: null, cargaDeEstados: 0,
+    epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, lugarDoPedidoDoPerfil: null,
+    REGIOES_DO_WAZE: ['row', 'na', 'il'],
     ORDEM_PADRAO: constante('ORDEM_PADRAO'), ORDENS_POR_DISTANCIA: constante('ORDENS_POR_DISTANCIA'),
     GPS_TIMEOUT_MS: 10, TYPES_PADRAO: ['NEW_PLACE'],
     t: (k, v) => k + (v && v.padrao ? `(${v.padrao})` : ''), escapeHtml: (x) => String(x),
@@ -787,4 +797,164 @@ test('F6: a troca de idioma redesenha a dica da ordem no idioma novo, no estado 
   app.atualizarDicaDeOrdem(null);
   app.aplicarIdioma('fr');
   assert.ok(hint.classList.contains('hidden'), 'a troca de idioma acendeu uma dica que não estava na tela');
+});
+
+// ═══ Achado 10 · o país do perfil não desfaz o lugar que a pessoa aplicou ═══
+// Pelo atalho do PWA, os Filtros abrem com o perfil e os países da abertura
+// ainda no ar. A pessoa aplica a NA e os EUA; quando a carga chega, o perfil é
+// o do servidor da ROW (editáveis `[30]`) — e a levava pro Brasil DENTRO da
+// NA: `na/30`, uma fila que não existe. MEDIDO no navegador antes do conserto
+// (scratchpad/l8-filtros/irmao-v3.mjs), com o controle de a carga chegar antes.
+const BR_FR = [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }];
+async function cargaSegura(p) {
+  const soltar = {};
+  p.listas.perfil = () => new Promise((ok) => { soltar.perfil = ok; });
+  p.listas.paises = () => new Promise((ok) => { soltar.paises = ok; });
+  const carga = p.app.loadProfileAndAuxData();
+  await tique();
+  return { carga, soltar };
+}
+// O que o "Aplicar" faz com o lugar (a região e o país gravados, o cache de
+// países zerado), com o modal fechado.
+function aplicarLugar(p, regiao, pais) {
+  p.estado.regiao = regiao; p.estado.pais = pais;
+  p.AppState.countries = []; p.AppState.statesByCountry = {};
+  p.els.filtersModal.classList.add('hidden');
+}
+
+test('achado 10: a carga da abertura chegando DEPOIS de a pessoa aplicar outra região não a tira de lá', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  const { carga, soltar } = await cargaSegura(p);
+  aplicarLugar(p, 'na', 235);
+  soltar.paises({ success: true, countries: BR_FR });
+  soltar.perfil({ success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
+  await carga;
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235],
+    `o perfil da ROW levou a pessoa pra ${p.estado.regiao}/${p.estado.pais} — o Brasil no servidor da NA`);
+  assert.deepEqual(p.AppState.countries, [], 'a lista de países da ROW virou a lista da NA');
+  assert.ok(!p.log.dfato.some((d) => d.startsWith('pais.doPerfil')), 'o país do perfil foi aplicado por cima da escolha');
+});
+
+test('achado 10: CONTROLE — sem troca no meio, o perfil ainda leva quem edita na França pra França', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  const { carga, soltar } = await cargaSegura(p);
+  soltar.paises({ success: true, countries: BR_FR });
+  soltar.perfil({ success: true, profile: { id: 1, editableCountryIDs: [73], managedAreas: [] } });
+  await carga;
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73]);
+  assert.deepEqual(p.AppState.countries, BR_FR, 'a lista da região que não mudou não entrou no cache');
+});
+
+test('achado 10: a pessoa aplica outro lugar enquanto o app pergunta aos OUTROS servidores — a escolha dela vale', async () => {
+  // Lista vazia aqui = edita noutro servidor: o `paisDoPerfil` pergunta a NA.
+  const p = pagina({ regiao: 'row', pais: 30 });
+  const soltar = {};
+  p.listas.perfil = (r) => (r === 'row'
+    ? Promise.resolve({ success: true, profile: { id: 1, editableCountryIDs: [], managedAreas: [] } })
+    : new Promise((ok) => { soltar[r] = ok; }));
+  p.listas.paises = () => Promise.resolve({ success: true, countries: BR_FR });
+  const carga = p.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.ok(soltar.na, 'o instrumento não segurou a pergunta à NA');
+  aplicarLugar(p, 'row', 73);
+  soltar.na({ success: true, profile: { id: 1, editableCountryIDs: [235] } });
+  await tique(5);
+  if (soltar.il) soltar.il({ success: true, profile: { id: 1, editableCountryIDs: [] } });
+  await carga;
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73], 'a resposta da NA desfez o país que a pessoa aplicou');
+});
+
+test('achado 10: a pessoa aplica outro lugar enquanto a lista da região do perfil vem — nada se grava por cima', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  let soltar;
+  p.listas.paises = (r) => new Promise((ok) => { soltar = () => ok({ success: true, countries: r === 'na' ? [{ id: 235, name: 'United States' }] : BR_FR }); });
+  const ida = p.app.irProPaisDoPerfil({ regiao: 'na', pais: 235 });
+  await tique();
+  aplicarLugar(p, 'row', 73);
+  soltar();
+  await ida;
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73], 'a ida pro país do perfil gravou por cima da escolha feita durante a espera');
+});
+
+// ═══ Achado 11 · os Filtros abertos acompanham o lugar que mudou por baixo ═══
+test('achado 11: com os Filtros abertos, o país do perfil que muda por baixo muda NA TELA — e o "Aplicar" não o desfaz', async () => {
+  // Quem edita na França abre no Brasil, com os Filtros abertos (o atalho) — e
+  // com uma área gerenciada do Brasil aplicada.
+  const perfil = { id: 1, editableCountryIDs: [], managedAreas: [{ id: 9001, name: 'Área SP' }] };
+  const p = pagina({ regiao: 'row', pais: 30, perfil, filtros: { managedAreaId: '9001' }, estados: { 73: [{ id: 5, name: 'Bretagne' }] } });
+  await p.abrir();
+  assert.deepEqual([p.els.filterCountry.value, p.els.filterManagedArea.value], ['30', '9001'], 'CONTROLE: os Filtros abriram no Brasil, com a área');
+  await p.app.irProPaisDoPerfil({ regiao: 'row', pais: 73 });
+  await tique();
+  assert.equal(p.els.filterCountry.value, '73', `o país aplicado virou a França e o seletor segue mostrando "${p.els.filterCountry.mostrado}"`);
+  assert.equal(p.els.filterManagedArea.value, '', 'o país virou a França e a área de São Paulo seguiu na tela');
+  // Só desmarcar um tipo e aplicar: o lugar é o de agora, sem a área de antes.
+  p.app.applyFiltersFromModal();
+  assert.equal(p.estado.pais, 73, 'o "Aplicar" pôs o Brasil de volta, calado');
+  assert.equal(p.log.salvos.at(-1).managedAreaId, '', 'o "Aplicar" pôs a área do Brasil de volta, na França');
+});
+
+test('achado 11: se a pessoa escolheu OUTRO país no modal, a escolha dela vale', async () => {
+  const p = pagina({ regiao: 'row', pais: 30, paises: [...BR_FR, { id: 181, name: 'Portugal' }] });
+  await p.abrir();
+  p.els.filterCountry.value = '181';   // a pessoa escolheu Portugal
+  await p.app.irProPaisDoPerfil({ regiao: 'row', pais: 73 });
+  await tique();
+  assert.equal(p.els.filterCountry.value, '181', 'o redesenho desfez o país que a pessoa escolheu');
+  p.app.applyFiltersFromModal();
+  assert.equal(p.estado.pais, 181);
+});
+
+test('achado 11: com os países ainda chegando, quem os põe no seletor já escolhe o país de agora', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  let soltar;
+  p.listas.paises = () => new Promise((ok) => { soltar = ok; });
+  const abrindo = p.abrir();
+  await tique();
+  assert.equal(p.els.filterCountry.dataset.carregando, '1', 'CONTROLE: os países ainda vêm');
+  p.listas.paises = null;
+  await p.app.irProPaisDoPerfil({ regiao: 'row', pais: 73 });
+  soltar({ success: true, countries: BR_FR });
+  await abrindo;
+  assert.equal(p.els.filterCountry.value, '73', 'a lista chegou e o seletor mostrou o país de antes');
+  assert.equal(p.log.listCountries.length, 1, 'o redesenho pediu os países de novo com a lista já no ar');
+});
+
+test('achado 11: com os Filtros FECHADOS, nada se redesenha (nem se pede de novo)', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  await p.abrir();
+  p.els.filtersModal.classList.add('hidden');   // fechou sem aplicar
+  p.AppState.countries = [];                     // e o cache foi embora (outra região aplicada e desfeita)
+  const pedidos = p.log.listCountries.length;
+  await p.app.irProPaisDoPerfil({ regiao: 'row', pais: 73 });
+  await tique();
+  assert.equal(p.log.listCountries.length, pedidos, 'redesenhou os Filtros fechados — e pediu os países à toa');
+  assert.equal(p.els.filterCountry.value, '30', 'mexeu no seletor dos Filtros fechados');
+  assert.equal(p.estado.pais, 73, 'CONTROLE: o país do perfil foi aplicado');
+});
+
+// ═══ Achado 12 · voltar pra região aplicada devolve o lugar aplicado ════════
+test('achado 12: trocar a região no modal e VOLTAR pra aplicada devolve o país, o estado e a área aplicados', async () => {
+  const LISTAS = { na: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }], row: BR_FR };
+  const perfil = { id: 1, editableCountryIDs: [], managedAreas: [{ id: 9001, name: 'Área Chicago' }] };
+  const p = pagina({ regiao: 'na', pais: 235, perfil, filtros: { stateId: '7', managedAreaId: '9001' },
+    estados: { 235: [{ id: 7, name: 'Illinois' }], 30: [{ id: 1, name: 'Acre' }] } });
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: LISTAS[r] });
+  await p.abrir();
+  assert.deepEqual([p.els.filterCountry.value, p.els.filterState.value, p.els.filterManagedArea.value], ['235', '7', '9001'],
+    'CONTROLE: os Filtros abriram no lugar aplicado');
+  for (const r of ['row', 'na']) {
+    p.els.filterRegion.value = r;
+    await p.app.aoTrocarRegiaoNoModal({ target: p.els.filterRegion });
+  }
+  assert.equal(p.els.filterCountry.value, '235', `voltou pra NA e o seletor escolheu "${p.els.filterCountry.mostrado}" em vez dos EUA`);
+  assert.equal(p.els.filterState.value, '7', 'voltou pra NA e o estado aplicado não voltou');
+  assert.equal(p.els.filterManagedArea.value, '9001', 'voltou pra NA e a área aplicada não voltou');
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais, p.log.salvos.at(-1).stateId, p.log.salvos.at(-1).managedAreaId],
+    ['na', 235, '7', '9001'], 'o "Aplicar" mudou o lugar que a pessoa só foi e voltou');
+  // CONTROLE: na região que NÃO é a aplicada, vale o 1º da lista e a área sai (F7).
+  p.els.filterRegion.value = 'row';
+  await p.app.aoTrocarRegiaoNoModal({ target: p.els.filterRegion });
+  assert.deepEqual([p.els.filterCountry.value, p.els.filterManagedArea.value], ['30', '']);
 });

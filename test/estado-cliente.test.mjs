@@ -272,6 +272,9 @@ function montarPais({ pais = 30, regiao = 'row', perfis = {}, myArea = false } =
     AppState: { filters: { myArea } },
     REGIOES_DO_WAZE: ['row', 'na', 'il'],
     epocaDaSessao: 0,
+    // Sem pedido registrado, nada mudou desde ele (o achado 10 tem o seu
+    // teste em test/filtros-aplicar.test.mjs).
+    lugarDoPedidoDoPerfil: null,
     API: {
       getCountry: () => pais, getRegion: () => regiao,
       getProfile: async (r) => { pedidos.push(r); return perfis[r] || { success: true, profile: { editableCountryIDs: [] } }; },

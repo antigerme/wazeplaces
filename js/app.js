@@ -3433,9 +3433,24 @@ async function aoTrocarRegiaoNoModal(e) {
     }
     sel.innerHTML = ordenarPorNome(r.countries || []).map((c) =>
         `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
-    // Outra região é outro país: a área gerenciada que o seletor mostrava era
-    // do país de antes (ver `aoMudarPaisNaTela`).
-    aoMudarPaisNaTela();
+    // De volta à região APLICADA (trocou e voltou), o lugar aplicado volta
+    // inteiro: o país — o estado vem com ele, que o `loadStatesIntoSelect` repõe
+    // no país aplicado — e a área. Voltava o 1º da lista: aplicado `na/235`, ida
+    // à ROW e volta, e o "Aplicar" gravava `na/40`, o Canadá (auditoria de
+    // 2026-09-29, achado 12).
+    const aplicado = String(API.getCountry());
+    if (regiao === API.getRegion() && (r.countries || []).some((c) => String(c.id) === aplicado)) {
+        sel.value = aplicado;
+        const area = $('filterManagedArea');
+        if (area) {
+            area.value = AppState.filters.managedAreaId || '';
+            if (area.selectedIndex < 0) area.value = '';
+        }
+    } else {
+        // Outra região é outro país: a área gerenciada que o seletor mostrava
+        // era do país de antes (ver `aoMudarPaisNaTela`).
+        aoMudarPaisNaTela();
+    }
     await loadStatesIntoSelect(parseInt(sel.value, 10), regiao);
 }
 
@@ -4094,6 +4109,9 @@ function showAccessDenied(result) {
 async function loadProfileAndAuxData() {
     const epoca = epocaDaSessao;
     perfilPedidoEm = Date.now();
+    // O lugar em que o perfil e os países são PEDIDOS (ver `lugarDoPedidoDoPerfil`).
+    const regiaoPedida = API.getRegion();
+    lugarDoPedidoDoPerfil = { regiao: regiaoPedida, pais: API.getCountry() };
     const [profileRes, countriesRes] = await Promise.all([
         API.getProfile(),
         API.listCountries()
@@ -4122,7 +4140,12 @@ async function loadProfileAndAuxData() {
     // os países que chegaram BEM eram jogados fora, e a chegada do perfil pelo
     // alarme falso dizia o país sem o nome — e a lista da presença saía sem
     // subtítulo (auditoria da costura, 2026-09-26, K11).
-    if (countriesRes.success) {
+    //
+    // E só se a região ainda for a do pedido: pelo atalho do PWA, a pessoa
+    // aplicava outra região nos Filtros antes de a lista chegar, e a da ROW
+    // virava a lista de países da NA — o próximo "Aplicar" podia gravar o
+    // Brasil na NA (auditoria de 2026-09-29, achado 10; é o V3 na abertura).
+    if (countriesRes.success && API.getRegion() === regiaoPedida) {
         AppState.countries = countriesRes.countries;
     }
     // Se qualquer um dos dois detectar sessão expirada/revogada no Waze (401/403),
@@ -4205,6 +4228,15 @@ async function completarPerfilChegado(perfil, epoca) {
 // não subia (ela precisa do id), até recarregar. Refaz na próxima PROVA de rede
 // (`API.aoProvarRede`) — nunca por relógio — e no máximo uma vez por minuto.
 let perfilPedidoEm = 0;
+// O LUGAR (região e país) de quando o perfil foi PEDIDO pela última vez — na
+// carga da abertura ou na que refaz o perfil que faltou. Os países editáveis do
+// perfil são do servidor DAQUELE pedido (`editableCountryIDs` é POR servidor), e
+// levar a pessoa pro país dela só vale sobre o lugar que existia quando ele foi
+// pedido. Pelo atalho do PWA (`/?action=filters`), a pessoa aplicava outra
+// região (NA, os EUA) antes de o perfil chegar, e o perfil da ROW a levava pro
+// Brasil DENTRO da NA: `na/30`, uma fila que não existe (auditoria de
+// 2026-09-29, achado 10). Ver `paisDoPerfil`.
+let lugarDoPedidoDoPerfil = null;
 const PERFIL_REFAZER_MS = 60 * 1000;
 function refazerPerfilSeFaltar() {
     if (!AppState.authenticated || AppState.profile) return;
@@ -4227,8 +4259,19 @@ function refazerPerfilSeFaltar() {
 // perfil lá (uma chamada por servidor, só neste caso — nunca pra quem já está
 // no lugar certo). Staff edita em toda parte e escolhe sozinho; "Minha área"
 // busca pela caixa das áreas, não pelo país.
+//
+// E só decide sobre o lugar do PEDIDO (`lugarDoPedidoDoPerfil`): mudou a região
+// ou o país desde que o perfil foi pedido — a pessoa aplicou outro lugar nos
+// Filtros enquanto ele vinha —, a escolha DELA vale, e a lista de editáveis
+// (que é de outro servidor, se a região mudou) nem é lida. É o que mantém
+// região e país coerentes: o país sai sempre da lista do servidor da região em
+// que ele vai valer (achado 10).
 async function paisDoPerfil(perfil, epoca) {
-    if (!perfil || perfil.isStaff || AppState.filters.myArea) return null;
+    const lugarMudou = () => {
+        const pedido = lugarDoPedidoDoPerfil;
+        return !!pedido && (API.getRegion() !== pedido.regiao || String(API.getCountry()) !== String(pedido.pais));
+    };
+    if (!perfil || perfil.isStaff || AppState.filters.myArea || lugarMudou()) return null;
     const editaveis = (l) => (Array.isArray(l) ? l : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
     const aqui = editaveis(perfil.editableCountryIDs);
     if (aqui.length) {
@@ -4236,7 +4279,7 @@ async function paisDoPerfil(perfil, epoca) {
     }
     for (const regiao of REGIOES_DO_WAZE.filter((r) => r !== API.getRegion())) {
         const r = await API.getProfile(regiao);
-        if (epoca !== epocaDaSessao) return null;
+        if (epoca !== epocaDaSessao || lugarMudou()) return null;
         const la = r && r.success && r.profile ? editaveis(r.profile.editableCountryIDs) : [];
         if (la.length) return { regiao, pais: la[0] };
     }
@@ -4245,6 +4288,9 @@ async function paisDoPerfil(perfil, epoca) {
 
 async function irProPaisDoPerfil({ regiao, pais }) {
     const epoca = epocaDaSessao;
+    // O lugar de ANTES: pra saber se a pessoa aplicou outro durante a espera
+    // abaixo, e se os Filtros abertos mostram este (ver `redesenharLugarNosFiltros`).
+    const antes = { regiao: API.getRegion(), pais: API.getCountry() };
     if (regiao !== API.getRegion()) {
         // A lista da região NOVA é pedida ANTES de a região valer (o
         // `listCountries` aceita a região), e nada muda se a sessão acabou
@@ -4255,6 +4301,9 @@ async function irProPaisDoPerfil({ regiao, pais }) {
         // 2026-09-26, K12).
         const r = await API.listCountries(regiao);
         if (epoca !== epocaDaSessao) return;
+        // Nem se a pessoa aplicou outro lugar nos Filtros enquanto a lista vinha:
+        // a escolha dela vale (achado 10).
+        if (API.getRegion() !== antes.regiao || String(API.getCountry()) !== String(antes.pais)) return;
         API.setRegion(regiao);
         AppState.statesByCountry = {};
         AppState.countries = r && r.success ? r.countries : [];
@@ -4267,9 +4316,34 @@ async function irProPaisDoPerfil({ regiao, pais }) {
     dfato('pais.doPerfil', { pais, regiao });
     const nome = ((AppState.countries || []).find((c) => Number(c.id) === Number(pais)) || {}).name;
     showToast(t(nome ? 'toast.paisDoPerfil' : 'toast.paisDoPerfilSemNome', { pais: nome || '' }), 'info', 7000);
+    // Os Filtros ABERTOS mostravam o país de antes, e o "Aplicar" o devolvia.
+    redesenharLugarNosFiltros(antes);
     window.Presenca?.sincronizar?.();
     resetQueue();
     startFetching();
+}
+
+// O lugar APLICADO mudou por baixo dos Filtros abertos (o país do perfil chegou
+// depois de eles abrirem — pelo atalho do PWA é sempre assim): o seletor seguia
+// mostrando o país de antes, e o "Aplicar", tocado só pra desmarcar um tipo,
+// punha o de antes de volta — MEDIDO: buscas `row/30 → row/73 → row/30`
+// (auditoria de 2026-09-29, achado 11). A tela acompanha, a menos que a pessoa
+// tenha escolhido OUTRO lugar no modal: aí a escolha dela vale, e o "Aplicar" a
+// grava. "Não mexeu" é o modal ainda mostrar o lugar de antes (`antes`) — quem
+// trocou e voltou pro mesmo também não escolheu nada. Com os países ainda
+// chegando, o seletor diz "Carregando…" (que não é o país de antes) e nada se
+// redesenha: quem os puser no seletor já escolhe o país aplicado de agora.
+function redesenharLugarNosFiltros(antes) {
+    const modal = document.getElementById('filtersModal');
+    if (!modal || modal.classList.contains('hidden')) return;
+    const regiaoSel = document.getElementById('filterRegion');
+    const paisSel = document.getElementById('filterCountry');
+    if (!regiaoSel || !paisSel) return;
+    if (regiaoSel.value !== antes.regiao || String(paisSel.value) !== String(antes.pais)) return;
+    regiaoSel.value = API.getRegion();
+    // Estado e área eram do país de antes (o `irProPaisDoPerfil` os zerou).
+    aoMudarPaisNaTela();
+    popularPaisEstado();
 }
 
 // UM 401 não é prova de que a sessão morreu — e tratar como se fosse era o

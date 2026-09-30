@@ -5781,6 +5781,160 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Filtros: o LUGAR (região e país) que muda por baixo ──────────────────
+// Os achados 10, 11 e 12 da auditoria de 2026-09-29, pelo caminho de VERDADE:
+// o atalho do PWA (`/?action=filters`) abre os Filtros ANTES do perfil, e a
+// carga da abertura da ROW (o perfil e os países) fica SEGURA na rota até o
+// teste soltar. O fim de cada carga se espera pela promessa dela
+// (`AppState._profilePromise`), nunca por prazo.
+//   10. A pessoa aplica NA/EUA com a carga no ar; o perfil da ROW chegava
+//       depois e a levava pro Brasil DENTRO da NA (`na/30`).
+//   11. O perfil que chega troca o país aplicado com os Filtros abertos; o
+//       seletor seguia no de antes, e o "Aplicar" o devolvia.
+//   12. Trocar a região no modal e voltar pra aplicada escolhia o 1º país da
+//       lista (`na/40`, o Canadá) em vez do aplicado.
+// CONTROLES: sem ninguém mexer, o perfil AINDA leva quem edita na França pra
+// França (o instrumento enxerga a decisão automática), a escolha de OUTRO país
+// no modal vale, e a região que não é a aplicada abre no 1º da lista.
+{
+  const onde = 'filtros/lugar';
+  const LISTAS = {
+    row: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }, { id: 181, name: 'Portugal' }],
+    na: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }],
+  };
+  const montar = async ({ editaveis, segurar = false, guardado = {} }) => {
+    const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+    await ctx.addInitScript((guardado) => {
+      try {
+        if (sessionStorage.getItem('__lugar')) return;
+        sessionStorage.setItem('__lugar', '1');
+        localStorage.setItem('waze_session_token', 'tok-smoke-lugar');
+        for (const [k, v] of Object.entries(guardado)) localStorage.setItem(k, v);
+      } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+    }, guardado);
+    const seguros = [];
+    await ctx.route('**/api/**', async (route) => {
+      const nome = route.request().url().split('/api/')[1].split(/[?#]/)[0];
+      let corpo = {};
+      try { corpo = JSON.parse(route.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      const regiao = corpo.region || 'row';
+      let b = { success: true };
+      if (nome === 'perfil') {
+        b = { success: true, visivelNoWme: true, profile: { id: 12444348, userName: 'wazer', rank: 5, isAreaManager: true,
+          isStaff: false, areas: [], managedAreas: [], editableCountryIDs: regiao === 'row' ? editaveis : [] } };
+      } else if (nome === 'lista-paises') b = { success: true, countries: LISTAS[regiao] || [] };
+      else if (nome === 'lista-estados') b = { success: true, states: [] };
+      else if (nome === 'buscar-places') b = { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 };
+      else if (nome === 'presenca-app') b = { success: true, online: [], conversas: [] };
+      if (segurar && regiao === 'row' && (nome === 'perfil' || nome === 'lista-paises')) {
+        await new Promise((solta) => seguros.push({ nome, solta }));
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    const soltar = (nome) => {
+      for (const s of seguros.filter((x) => !nome || x.nome === nome)) { seguros.splice(seguros.indexOf(s), 1); s.solta(); }
+    };
+    return { ctx, page, erros, soltar };
+  };
+  const pelosFiltros = async (m) => {
+    await m.page.goto(BASE + '?action=filters', { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(m.page, () => typeof AppState !== 'undefined'
+      && !document.getElementById('filtersModal').classList.contains('hidden'), 'os Filtros pelo atalho');
+  };
+  const fimDaCarga = (m) => m.page.evaluate(async () => { await AppState._profilePromise; return API.getRegion() + '/' + API.getCountry(); });
+
+  // 10. A carga da abertura chegando DEPOIS de a pessoa aplicar NA/EUA.
+  {
+    const m = await montar({ editaveis: [30], segurar: true });
+    await pelosFiltros(m);
+    await m.page.evaluate(() => { const s = document.getElementById('filterRegion'); s.value = 'na'; s.dispatchEvent(new Event('change')); });
+    await esperarOuExplodir(m.page, () => !!document.querySelector('#filterCountry option[value="235"]')
+      && !document.getElementById('applyFilters').disabled, 'os países da NA');
+    await m.page.evaluate(() => {
+      const s = document.getElementById('filterCountry');
+      s.value = '235'; s.dispatchEvent(new Event('change'));
+      document.getElementById('applyFilters').click();
+    });
+    await esperarOuExplodir(m.page, () => API.getRegion() === 'na' && API.getCountry() === 235, 'o "Aplicar" da NA/EUA');
+    m.soltar();
+    const lugar = await fimDaCarga(m);
+    const cache = await m.page.evaluate(() => AppState.countries.map((c) => c.id));
+    checa(lugar === 'na/235', `${onde}: a carga da abertura chegou depois do "Aplicar" e tirou a pessoa da NA/EUA (achado 10)`, lugar);
+    checa(!cache.includes(30), `${onde}: a lista de países da ROW virou a da NA (achado 10)`, cache.join(','));
+    checa(m.erros.length === 0, `${onde} (10): erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+  {
+    const m = await montar({ editaveis: [73] });
+    await m.page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(m.page, () => typeof AppState !== 'undefined' && !!AppState._profilePromise, 'a carga do perfil');
+    const lugar = await fimDaCarga(m);
+    checa(lugar === 'row/73', `${onde}: CONTROLE — sem ninguém mexer, o perfil não levou quem edita na França pra França`, lugar);
+    await m.ctx.close();
+  }
+
+  // 11. O perfil troca o país com os Filtros ABERTOS — e, no CONTROLE, a pessoa
+  //     já tinha escolhido Portugal no modal.
+  for (const escolheu of [null, '181']) {
+    const m = await montar({ editaveis: [73], segurar: true });
+    await pelosFiltros(m);
+    m.soltar('lista-paises');   // os países chegam antes do perfil: o seletor mostra o Brasil
+    await esperarOuExplodir(m.page, () => document.getElementById('filterCountry').value === '30'
+      && !document.getElementById('filterCountry').dataset.carregando, 'o Brasil no seletor');
+    if (escolheu) {
+      await m.page.evaluate((v) => { const s = document.getElementById('filterCountry'); s.value = v; s.dispatchEvent(new Event('change')); }, escolheu);
+    }
+    m.soltar('perfil');
+    await fimDaCarga(m);
+    const r = await m.page.evaluate(() => {
+      const naTela = document.getElementById('filterCountry').value;
+      document.querySelector('.filter-type[value="DELETE_PHOTO"]').checked = false;
+      document.getElementById('applyFilters').click();
+      return { naTela, depois: String(API.getCountry()) };
+    });
+    const esperado = escolheu || '73';
+    checa(r.naTela === esperado, escolheu
+      ? `${onde}: o país que a pessoa escolheu no modal foi atropelado pelo do perfil (achado 11)`
+      : `${onde}: o perfil trocou o país pra França com os Filtros abertos e o seletor seguiu no Brasil (achado 11)`, r.naTela);
+    checa(r.depois === esperado, `${onde}: o "Aplicar" gravou ${r.depois}, e a tela dizia ${r.naTela} (achado 11)`);
+    checa(m.erros.length === 0, `${onde} (11): erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+
+  // 12. Aplicado NA/EUA: ida à ROW e volta no modal.
+  {
+    const m = await montar({ editaveis: [], guardado: { waze_region: 'na', waze_country: '235' } });
+    await m.page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(m.page, () => typeof AppState !== 'undefined' && !!AppState._profilePromise, 'a carga do perfil');
+    await fimDaCarga(m);
+    await m.page.evaluate(() => { openFiltersModal(); switchFilterTab('filtersTabFilters'); });
+    await esperarOuExplodir(m.page, () => document.getElementById('filterCountry').value === '235', 'os EUA no seletor');
+    // A função da espera vai SERIALIZADA pra página: o id que ela procura vai
+    // antes, por argumento do `evaluate` (uma variável do Node dentro dela
+    // chegaria `undefined` — gotcha #28).
+    const naRegiao = async (r, id) => {
+      await m.page.evaluate(({ r, id }) => {
+        window.__paisEsperado = String(id);
+        const s = document.getElementById('filterRegion'); s.value = r; s.dispatchEvent(new Event('change'));
+      }, { r, id });
+      await esperarOuExplodir(m.page, () => !!document.querySelector(`#filterCountry option[value="${window.__paisEsperado}"]`)
+        && !document.getElementById('applyFilters').disabled, `os países da ${r}`);
+      return m.page.evaluate(() => document.getElementById('filterCountry').value);
+    };
+    const naRow = await naRegiao('row', 30);
+    const deVolta = await naRegiao('na', 235);
+    checa(naRow === '30', `${onde}: CONTROLE — a região que não é a aplicada não abriu no 1º da lista`, naRow);
+    checa(deVolta === '235', `${onde}: voltou pra região aplicada e o seletor escolheu ${deVolta} em vez dos EUA (achado 12)`, deVolta);
+    const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
+    checa(gravado === 'na/235', `${onde}: foi à ROW e voltou, e o "Aplicar" gravou ${gravado} (achado 12)`, gravado);
+    checa(m.erros.length === 0, `${onde} (12): erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+}
+
 // ── Patentes e Conquistas: os três defeitos que só a TELA mostra ─────────
 // A medição de layout deste app já dava tudo verde nos três, e todos os três
 // chegaram a existir na rodada de mockup:
