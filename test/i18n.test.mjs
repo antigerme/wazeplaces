@@ -120,6 +120,40 @@ test('i18n: toda chave usada no index.html (data-i18n*) existe no dicionário', 
 // é justamente quem não tem outro caminho. Nada quebra: a chave existe, a
 // paridade passa, o texto só fica com as tags à mostra. Quem tem markup usa
 // `data-i18n-html` (innerHTML, valores do próprio dicionário — nunca da rede).
+// A MARCAÇÃO das chaves com HTML: a mesma na reserva do index.src.html (o que
+// se vê antes do JS) e nas 4 línguas. O teste da reserva (test/entrada.test.mjs)
+// compara só o TEXTO, e o chip do ↗ no "Importante:" da Ajuda nasceu com a
+// variante escura (`dark:bg-cyan-600/20`) no HTML e sem ela no dicionário: com
+// o JS, um chip claro no tema escuro (auditoria de 2026-09-29, A12 — a única
+// diferença entre as reservas). Tag ou classe a menos numa língua é o mesmo
+// defeito, só que pra quem usa o app nela.
+test('i18n: a marcação (tags e classes) de cada chave com HTML é a mesma na reserva do HTML e nas 4 línguas', () => {
+  const tags = (s) => (String(s).match(/<[^>]+>/g) || []).map((t) => t.replace(/\s+/g, ' ')).join('');
+  const html = read('index.src.html').replace(/<!--[\s\S]*?-->/g, '');
+  const achados = [...html.matchAll(/<([a-z0-9]+)\b[^>]*\bdata-i18n-html="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/g)];
+  const marcados = (html.match(/\bdata-i18n-html="/g) || []).length;
+  assert.ok(marcados >= 20, `CONTROLE: só ${marcados} reservas com data-i18n-html — o HTML mudou de forma`);
+  assert.equal(achados.length, marcados, 'CONTROLE: alguma reserva com data-i18n-html ficou de fora do recorte');
+  const divergentes = [];
+  for (const [, , chave, reserva] of achados) {
+    const pt = DICT.pt[chave];
+    if (typeof pt !== 'string') continue;   // chave sem dicionário: é o teste de cima
+    if (tags(reserva) !== tags(pt)) divergentes.push(`reserva × pt · ${chave}\n  html: ${tags(reserva)}\n  pt:   ${tags(pt)}`);
+  }
+  let comHtml = 0;
+  for (const chave of Object.keys(DICT[LANG_REF])) {
+    if (!/<[a-z][^>]*>/i.test(DICT[LANG_REF][chave])) continue;
+    comHtml++;
+    for (const lang of LANGS) {
+      if (tags(DICT[lang][chave]) !== tags(DICT[LANG_REF][chave])) {
+        divergentes.push(`${LANG_REF} × ${lang} · ${chave}\n  ${LANG_REF}: ${tags(DICT[LANG_REF][chave])}\n  ${lang}: ${tags(DICT[lang][chave])}`);
+      }
+    }
+  }
+  assert.ok(comHtml >= 20, `CONTROLE: só ${comHtml} chaves com HTML no dicionário — o recorte quebrou`);
+  assert.deepEqual(divergentes, [], 'a marcação muda entre a reserva do HTML e o dicionário, ou entre as línguas');
+});
+
 test('i18n: chave ligada por textContent (data-i18n) não pode ter markup no valor', () => {
   const html = read('index.src.html');
   const textuais = new Set();
