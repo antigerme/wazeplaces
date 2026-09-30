@@ -430,7 +430,9 @@ test('auto: nada acontece sem o portão, nem no treino, nem duas vezes ao mesmo 
   const bloco = semComentarios.slice(i, i + 400);
   assert.match(bloco, /if \(!podeRecusarAutomaticoAqui\(\)\) return;/, 'o portão saiu da recusa automática');
   assert.match(bloco, /if \(Treino\.ativo\) return;/, 'no treino a fila é de exemplos');
-  assert.match(bloco, /if \(recusaAutomaticaRodando\) return;/,
+  // A segunda passagem SAI (anotando o pedido pra rodar de novo no fim — V4,
+  // medido em test/lote-autor.test.mjs), nunca corre junto da primeira.
+  assert.match(bloco, /if \(recusaAutomaticaRodando\) \{ recusaAutomaticaPedidaDeNovo = true; return; \}/,
     'a fila pode crescer durante o laço: duas passagens mandariam o mesmo pedido duas vezes');
 });
 
@@ -660,7 +662,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
     API: { getRegion: () => 'row' },   // a região dos pedidos vai junto com o lote (F7)
   };
   const chaves = Object.keys(deps);
-  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
   await fn();
   assert.deepEqual(enviados, ['a2'], 'rejeitou o card que estava NA TELA');
   assert.deepEqual(AppState.queue.map((x) => x.venueID), ['a1', 'b1']);
@@ -692,7 +694,7 @@ test('auto (F1): pedido EM ANDAMENTO — o lote de lidos no ar — não é alvo 
     API: { getRegion: () => 'row' },
   };
   const chaves = Object.keys(deps);
-  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
   await fn();
   assert.deepEqual(enviados, ['a2'], 'a recusa rejeitou um pedido que o lote de lidos está marcando');
   assert.deepEqual(AppState.queue.map((x) => x.venueID), ['f1', 'a1'], 'o pedido do lote saiu da fila antes da resposta dele');

@@ -12538,6 +12538,14 @@ function alternarAutoDoAutor(chave) {
 // Uma execução por vez: a fila pode crescer de novo enquanto o laço corre, e
 // duas passagens simultâneas mandariam o mesmo pedido duas vezes.
 let recusaAutomaticaRodando = false;
+// Mas o pedido que chega COM ela rodando não pode evaporar na trava: é a página
+// que acabou de pousar com mais pedidos do autor. "Mais antigos" e "Perto de…"
+// leem todas as páginas numa rajada, e a 2ª chegava com a recusa da 1ª no ar —
+// os pedidos dela ficavam como card (MEDIDO: 5 rejeitados de 8; auditoria de
+// 2026-09-29, V4). Anota e roda de novo no fim, como a fila de saída
+// (`saidaPedidaDeNovo`): não vira laço, porque a passada seguinte só existe se
+// alguém pedir DURANTE esta.
+let recusaAutomaticaPedidaDeNovo = false;
 
 // Chamado depois de a fila crescer. Tira os pedidos dos autores marcados e
 // rejeita na hora, um a um, com o aviso contando quantos faltam.
@@ -12547,7 +12555,7 @@ async function aplicarRecusaAutomatica() {
     // dela nesta sessão (ver `contaConfirmada`).
     if (!contaConfirmada()) return;
     if (Treino.ativo) return;               // no treino a fila é de exemplos
-    if (recusaAutomaticaRodando) return;
+    if (recusaAutomaticaRodando) { recusaAutomaticaPedidaDeNovo = true; return; }
     // O card NA TELA fica de fora: o interruptor diz "os PRÓXIMOS", e é ligado
     // justamente olhando um card do autor — que sumia e era rejeitado. Pior: a
     // busca pousando durante os 350 ms da saída de um card trocava o da frente,
@@ -12563,6 +12571,9 @@ async function aplicarRecusaAutomatica() {
     if (alvos.length === 0) return;
 
     recusaAutomaticaRodando = true;
+    // Zera ao ENTRAR, não ao sair: o que interessa é o pedido que chegar DAQUI
+    // pra frente (ver `recusaAutomaticaPedidaDeNovo`).
+    recusaAutomaticaPedidaDeNovo = false;
     const n = alvos.length;
     // A REGIÃO em que estes pedidos estão, fixada agora (a da fila que os
     // trouxe): trocar a região em Filtros com o laço no ar mandava o resto pro
@@ -12619,6 +12630,12 @@ async function aplicarRecusaAutomatica() {
         aviso.dispensar();
         // Quem falhou voltou pra fila (ver `enviarLote`).
         aoMudarAFilaPorBaixo();
+    }
+    // A página que pousou com esta rodando é atendida AGORA (as guardas do
+    // topo seguem valendo, e sem alvo nenhum ela sai na primeira linha).
+    if (recusaAutomaticaPedidaDeNovo) {
+        recusaAutomaticaPedidaDeNovo = false;
+        return aplicarRecusaAutomatica();
     }
 }
 

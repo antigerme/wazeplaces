@@ -289,7 +289,7 @@ test('F7: trocar a região com a recusa automática no ar não manda o resto pro
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {},
   };
   const chaves = Object.keys(deps);
-  const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + fatiar('enviarLote') + '\n'
+  const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n' + fatiar('enviarLote') + '\n'
     + fatiar('aplicarRecusaAutomatica') + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
   await recusar();
   assert.deepEqual(regioes, ['row', 'row', 'row'],
@@ -299,6 +299,62 @@ test('F7: trocar a região com a recusa automática no ar não manda o resto pro
 // ═══ Auditoria de 2026-09-29: a DECISÃO do lote não some nem é contada sem ir ══
 // Cada teste foi visto REPROVANDO com o conserto desfeito (sabotagem registrada
 // no relatório da rodada).
+
+// ── V4: a recusa automática que chega com ela rodando não evapora ─────────────
+// "Mais antigos" e "Perto de…" leem todas as páginas numa rajada: a 2ª página
+// chegava com a recusa da 1ª no ar, e os pedidos dela ficavam como card
+// (medido no navegador: 5 rejeitados de 8, u101-u103 na fila; s5, t18).
+function montarRecusa() {
+  const frente = pedido(9, 1);
+  const AppState = { queue: [frente, pedido(1), pedido(2)], currentPlace: frente, stats: { rejected: 0 }, serverTotal: 3,
+    fetchEpoch: 0, hasMore: false, inFlightActions: 0, authenticated: true };
+  const enviados = [];
+  const portoes = [];
+  const deps = {
+    AppState, podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, Treino: { ativo: false },
+    autoLigado: (id) => id === 777, updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
+    showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
+    pedidosEmAndamento: new Set(), chaveDoPedido: chave, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
+    API: { getRegion: () => 'row',
+      rejectPlace: (v) => new Promise((ok) => { enviados.push(v); portoes.push(() => ok({ success: true })); }) },
+    registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
+    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
+    pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, devolverPedidoRecusado: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n'
+    + fatiar('enviarLote') + '\n' + fatiar('aplicarRecusaAutomatica') + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  // Solta TODAS as respostas até não sobrar nenhuma no ar (as da 2ª passada inclusive).
+  const soltarTudo = async () => {
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 0));
+      while (portoes.length) portoes.shift()();
+    }
+  };
+  return { recusar, AppState, enviados, soltarTudo };
+}
+
+test('V4: a página que chega com a recusa no ar é atendida quando ela termina — nada do autor fica como card', async () => {
+  const m = montarRecusa();
+  const primeira = m.recusar();                      // a 1ª página: v1 e v2 do autor marcado
+  await new Promise((r) => setTimeout(r, 0));
+  m.AppState.queue.push(pedido(3), pedido(4));       // a 2ª página pousa com a recusa no ar…
+  m.recusar();                                       // …e chama a recusa de novo (o `fetchNextPage` faz isto)
+  await m.soltarTudo();
+  await primeira;
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v9'],
+    `o que chegou com a recusa no ar ficou como card: ${m.AppState.queue.map((p) => p.venueID).join(',')}`);
+  assert.deepEqual(m.enviados.sort(), ['v1', 'v2', 'v3', 'v4']);
+});
+
+test('V4: CONTROLE — sem nada chegando no meio, a recusa roda UMA vez (não vira laço)', async () => {
+  const m = montarRecusa();
+  const p = m.recusar();
+  await m.soltarTudo();
+  await p;
+  assert.deepEqual(m.enviados.sort(), ['v1', 'v2'], 'a recusa rodou de novo sem ninguém pedir');
+});
 
 // ── L21: "Rejeitar os N" rejeita só os N que a folha contou ────────────────────
 // A folha contava ao ABRIR e o toque recontava: a busca que pousava com ela

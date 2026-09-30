@@ -455,7 +455,7 @@ async function rodarRecusa(alvos) {
     enviarLote: async (lista, opts) => { for (let i = 1; i <= lista.length; i++) opts.aoProgredir(lista.length - i); },
   };
   const { aplicarRecusaAutomatica } = montar(['aplicarRecusaAutomatica'], deps, ['aplicarRecusaAutomatica'],
-    'let recusaAutomaticaRodando = false;');
+    'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;');
   await aplicarRecusaAutomatica();
   return avisos;
 }
