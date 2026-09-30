@@ -7322,8 +7322,15 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // — e a reversão é GRAVADA: o gesto já tinha gravado o +1, e quem fecha o app
     // depois da queda (o caso comum) ficava com um pedido a mais no placar pra
     // sempre (auditoria de 2026-09-25). O logout não precisa: ele zera o placar.
+    //
+    // E o pedido VOLTA pra fila (`cancel(true)`, o mesmo do Desfazer): ele segue
+    // pendente no Waze, e a renovação pela extensão mantém a fila na tela. Sem
+    // isto ele não ia pro Waze nem voltava como card — já tinha passado pela
+    // fila, e nenhuma busca o trazia (auditoria de 2026-09-29, V1). Se entrar
+    // OUTRA conta, a fila inteira sai com ela (`esquecerOutraConta`); na tela de
+    // entrada, o próximo login começa uma fila nova.
     if (AppState.pendingAction) {
-        AppState.pendingAction.cancel();
+        AppState.pendingAction.cancel(true);
         AppState.pendingAction = null;
         saveStats();
     }
@@ -12880,20 +12887,73 @@ async function enviarLote(places, opts = {}) {
     // só no `scheduleAction` porque a recusa automática chega sem passar por
     // ele — ela tira os pedidos da fila e manda direto.
     marcarEmAndamento(places, true);
+    // O lote da PESSOA vai INTEIRO pra fila de saída antes do primeiro envio
+    // (O2, ver `anotarAntesDoEnvio`): o placar já contou os N no gesto, e fechar
+    // o app no meio do laço deixava os que não saíram em lugar nenhum — de volta
+    // como card na reabertura, contados de novo. Anotados, a reabertura não os
+    // devolve e o esvaziamento os manda. Cada resposta tira o seu. Na recusa
+    // automática não: lá o placar anda com o envio, e o que não saiu volta pela
+    // busca, de graça.
+    const anotados = new Set();
+    // A decisão destes JÁ esperava na fila de saída: vale a primeira (ver
+    // `enfileirarSaida`), e o do lote não sai nem conta — a mesma regra da
+    // descarga.
+    const repetidos = new Set();
+    let esperavamAntes = 0;
+    // Uma leitura e uma gravação pro lote inteiro (ver a `lista` do
+    // `enfileirarSaida`).
+    if (!aoLandar) {
+        const lista = carregarFilaDeSaida();
+        esperavamAntes = lista.length;
+        for (const p of places) {
+            const r = enfileirarSaida('reject', p, opts.regiao, undefined, true, lista);
+            if (r === true) anotados.add(p);
+            else if (r === 'repetida') repetidos.add(p);
+        }
+        if (anotados.size) {
+            salvarFilaDeSaida(lista);
+            updateInFlightIndicator();
+        }
+        if (repetidos.size) {
+            marcarEmAndamento([...repetidos], false);
+            placar.rejected = Math.max(0, (placar.rejected || 0) - repetidos.size);
+            updateStats();
+            saveStats();
+        }
+    }
+    // A fila de saída ABRIU por este lote: a transição vai pro diário uma vez
+    // (a anotação antes do envio é calada, ver `enfileirarSaida`).
+    let abriuAnotado = false;
+    const ficouNaSaida = () => {
+        if (abriuAnotado || esperavamAntes > 0) return;
+        abriuAnotado = true;
+        dfato('saida.abriu', { tipo: 'reject' });
+    };
     AppState.inFlightActions++;
     updateInFlightIndicator();
     try {
         for (const p of places) {
+            if (repetidos.has(p)) continue;
             const r = await callWithRetry(() => API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao));
             // Saiu no meio (ver `epocaDaSessao`): nada grava — e, no placar
             // OTIMISTA do lote manual, o que não pousou (este, se não pousou, e
-            // os que nem saíram) volta (K7). Contando ao pousar não há o que voltar.
+            // os que nem saíram) volta (K7). Contando ao pousar não há o que
+            // voltar. A anotação deles na fila de saída SAI: ela não pode sair
+            // depois com a sessão de agora. E, na renovação da queda, que mantém
+            // a fila na tela, eles VOLTAM como card (V1): seguem pendentes no
+            // Waze, já passaram pela fila, e nenhuma busca os trazia. Numa fila
+            // refeita (o "Sair", outra conta) nada volta.
             if (epoca !== epocaDaSessao) {
-                if (!aoLandar) descontarGestoSemSessao('rejected', placar, places.length - places.indexOf(p) - (pousouNoWaze(r) ? 1 : 0));
+                const i = places.indexOf(p);
+                const naoPousaram = places.slice(i + (pousouNoWaze(r) ? 1 : 0)).filter((q) => !repetidos.has(q));
+                for (const q of places.slice(i)) if (anotados.delete(q)) tirarDaFilaDeSaida('reject', q);
+                if (!aoLandar) descontarGestoSemSessao('rejected', placar, naoPousaram.length);
+                if (naFilaDoLote()) for (const q of naoPousaram) voltarPraFila(q);
                 return;
             }
             if (r && r.success) {
                 conta.ok++;
+                if (anotados.delete(p)) tirarDaFilaDeSaida('reject', p);
                 registrarPouso(p);
                 recordHistory('reject', 1);
                 registrarRejeicaoDeAutor(p);
@@ -12907,6 +12967,7 @@ async function enviarLote(places, opts = {}) {
                 }
             } else if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
                 conta.ja++;
+                if (anotados.delete(p)) tirarDaFilaDeSaida('reject', p);
                 registrarPouso(p);
                 if (aoLandar) { if (naFilaDoLote()) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1); }
                 // No placar otimista ele JÁ contou; o Histórico conta igual, como
@@ -12916,16 +12977,19 @@ async function enviarLote(places, opts = {}) {
             } else if (r && r.errorCategory === 'unauthorized') {
                 // O resto do lote não pode evaporar (ver o 401 no
                 // `handleActionResult`): no placar otimista ele vai pra fila de
-                // saída; contando ao pousar, volta pra fila de pedidos.
+                // saída — onde a anotação de antes do envio já o pôs, e fica;
+                // contando ao pousar, volta pra fila de pedidos.
                 for (const q of places.slice(places.indexOf(p))) {
+                    if (repetidos.has(q)) continue;
                     marcarEmAndamento(q, false);
-                    if (!aoLandar && enfileirarSaida('reject', q, opts.regiao)) continue;
+                    if (!aoLandar && (anotados.has(q) || enfileirarSaida('reject', q, opts.regiao))) continue;
                     if (!aoLandar) AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
                     voltarPraFila(q);
                 }
+                ficouNaSaida();
                 handleUnauthorized();
                 return;
-            } else if (r && r.errorCategory === 'transient' && !aoLandar && enfileirarSaida('reject', p, opts.regiao)) {
+            } else if (r && r.errorCategory === 'transient' && !aoLandar && (anotados.has(p) || enfileirarSaida('reject', p, opts.regiao))) {
                 // Rede, não recusa: o lote também entra na fila de saída, senão
                 // a promessa ("nada do que você fez se perde") valeria só pro
                 // swipe e não pro botão de rejeitar em lote. O placar otimista
@@ -12940,8 +13004,11 @@ async function enviarLote(places, opts = {}) {
                 // a ser um card. O contrato daquele modo ("o número na tela é
                 // sempre o que de fato foi enviado") continua valendo.
                 conta.fila++;
+                ficouNaSaida();
             } else {
                 conta.erro++;
+                // Recusa de verdade: a anotação sai — repetir não muda a recusa.
+                if (anotados.delete(p)) tirarDaFilaDeSaida('reject', p);
                 // O que não saiu volta pra fila. Com o placar otimista é preciso
                 // devolver o número junto; contando ao landar não há o que devolver,
                 // porque o número nunca foi somado (ver `voltarPraFila`).
@@ -13799,9 +13866,19 @@ function salvarFilaDeSaida(f) {
 // o `registrarRejeicaoDeAutor` reescreve o nome a cada rejeição: sem ele, um
 // autor que já tinha nome na lista voltaria a aparecer como NÚMERO depois de
 // uma rejeição feita offline.
-function enfileirarSaida(tipo, place, regiao, extra) {
+//
+// `calado`: a anotação ANTES do envio (`anotarAntesDoEnvio`, e o lote) não é a
+// fila abrindo — é toda ação, e o diário não aceita nada por swipe. Ali a
+// abertura é anotada quando a decisão FICA na fila (a resposta foi rede ou
+// sessão).
+//
+// `lista`: a fila JÁ lida por quem chama, que a grava UMA vez no fim. É o lote:
+// um `enfileirarSaida` por pedido lê e grava a fila inteira a cada um, e o
+// `setItem` é SÍNCRONO — MEDIDO, o "Rejeitar os 200" travava a tela 79 ms (390
+// ms com a CPU 6× mais lenta, 1,8 s com 500 esperando envio).
+function enfileirarSaida(tipo, place, regiao, extra, calado, lista) {
     if (!place || place.venueID === undefined || place.updateRequestID === undefined) return false;
-    const f = carregarFilaDeSaida();
+    const f = lista || carregarFilaDeSaida();
     // O MESMO pedido duas vezes na fila é a mesma decisão mandada duas vezes —
     // e, se o tipo mudou, duas decisões diferentes executadas no Waze (ler não
     // resolve o pedido, então um "rejeitar" depois dele vale). Com o filtro de
@@ -13843,6 +13920,7 @@ function enfileirarSaida(tipo, place, regiao, extra) {
              regiao: regiao || API.getRegion(),
              // O que quem enfileira já sabe do item (o 401 do gesto: `u401`).
              ...(extra && typeof extra === 'object' ? extra : {}) });
+    if (lista) return true;
     salvarFilaDeSaida(f);
     updateInFlightIndicator();
     // Só a ABERTURA da fila entra no diário, nunca cada item: `dfato` é anel de
@@ -13850,7 +13928,7 @@ function enfileirarSaida(tipo, place, regiao, extra) {
     // conectividade despejariam todo o resto do diário, que é justamente o que
     // se quer ler junto. O evento é ficar sem rede; quantos couberam sai no
     // `saida.saiu`, e a fila inteira já está no localStorage do diagnóstico.
-    if (f.length === 1) dfato('saida.abriu', { tipo });
+    if (f.length === 1 && !calado) dfato('saida.abriu', { tipo });
     return true;
 }
 
@@ -14129,6 +14207,39 @@ const pedidosEmAndamento = new Set();
 // de novo. Só em memória: morta a página, o item segue na fila e o reenvio o
 // resolve.
 const descargaNaFila = new WeakSet();
+// A decisão ANOTADA na fila de saída antes de sair (O2, ver
+// `anotarAntesDoEnvio`). A resposta a trata como a da descarga (`jaNaSaida`); a
+// diferença é só o diário: esta foi anotada calada, e a abertura da fila é dita
+// quando ela FICA lá.
+const anotadoAntesDoEnvio = new WeakSet();
+
+// WRITE-AHEAD do ✕ e do ✓ (O2, auditoria de 2026-09-29): a decisão entra na
+// fila de saída ANTES do envio, e a resposta decide o destino dela — pousou ou
+// foi recusada de vez, sai; rede ou sessão, fica, sem o gesto contar de novo. É
+// o contrato que a descarga já tinha (`descargaNaFila`), agora pra toda decisão
+// que sai: a EM VOO não estava em lugar nenhum do aparelho, e fechar o app com a
+// resposta no ar deixava o +1 no placar e o pedido de volta como card na
+// reabertura — dava pra decidir de novo, e um ✕ depois do ✓ vale no Waze. MEDIDO
+// (f5-em-voo): `{decididoDeVolta: true, placar: 1, saida: [], pousos: []}`.
+// Anotada, a reabertura não o devolve (`semOsJaDecididos`) e o esvaziamento o
+// manda — at-least-once: se o envio tinha chegado, volta "já tratado" e conta
+// UMA vez. Enquanto voa ele está em andamento (`pedidosEmAndamento`), e o
+// esvaziamento não o manda de novo. Fila cheia: segue sem anotar (o caminho de
+// antes, que avisa na falha). A descarga já anotou: nada a fazer.
+function anotarAntesDoEnvio(tipo, place, regiao) {
+    if (descargaNaFila.has(place)) return true;
+    const r = enfileirarSaida(tipo, place, regiao, undefined, true);
+    if (r === true) anotadoAntesDoEnvio.add(place);
+    return r;
+}
+
+// A decisão anotada antes do envio FICOU na fila (rede ou sessão): se é a única
+// lá, a fila acabou de abrir — é a transição que o diário registra (ver
+// `enfileirarSaida`).
+function anotarSeAbriuASaida(tipo) {
+    if (carregarFilaDeSaida().length === 1) dfato('saida.abriu', { tipo });
+}
+
 // Chave → quando a decisão pousou no Waze, NESTA página. É o que cobre a
 // corrida da busca com o esvaziamento. Todo mundo tem, com ou sem offline, e
 // não custa armazenamento: morre com a página.
@@ -15297,10 +15408,12 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
                        key: (result && result.errorKey) || null });
     if (!result) return;
     // A DESCARGA já pôs esta decisão na fila de saída antes de o envio sair (ver
-    // `descarregar` no `scheduleAction`): a resposta que chegou com a página viva
-    // decide o destino do item — pousou, ele sai da fila; rede ou sessão, ele
-    // fica lá sem o gesto contar de novo.
-    const jaNaSaida = descargaNaFila.delete(place);
+    // `descarregar` no `scheduleAction`) — e, desde o O2, toda decisão que sai
+    // (`anotarAntesDoEnvio`): a resposta que chegou com a página viva decide o
+    // destino do item — pousou, ele sai da fila; rede ou sessão, ele fica lá sem
+    // o gesto contar de novo.
+    const anotado = anotadoAntesDoEnvio.delete(place);
+    const jaNaSaida = descargaNaFila.delete(place) || anotado;
     if (result.success) {
         if (jaNaSaida) tirarDaFilaDeSaida(actionType, place);
         registrarPouso(place);
@@ -15338,6 +15451,7 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
         // Já está na fila: só anota QUANDO levou o 401 e confere a sessão.
         marcarNaSaida({ tipo: actionType, venueID: place.venueID, updateRequestID: place.updateRequestID },
                       { u401: Date.now() });
+        if (anotado) anotarSeAbriuASaida(actionType);
         handleUnauthorized();
         return;
     }
@@ -15365,8 +15479,12 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
     // Sem toast por ação: 150 pedidos numa sombra de conectividade dariam 150
     // interrupções. Quem presta contas é o indicador ("N esperando envio"), que
     // some sozinho quando a fila esvazia.
-    // Já está na fila (a descarga): o placar fica, e ela sai quando a rede vier.
-    if (cat === 'transient' && jaNaSaida) return;
+    // Já está na fila (a descarga, ou a anotação de antes do envio): o placar
+    // fica, e ela sai quando a rede vier.
+    if (cat === 'transient' && jaNaSaida) {
+        if (anotado) anotarSeAbriuASaida(actionType);
+        return;
+    }
     if (cat === 'transient') {
         const naFila = enfileirarSaida(actionType, place, regiao);
         // A decisão deste pedido JÁ estava esperando: a primeira vale, e este
@@ -15924,6 +16042,23 @@ function descontarGestoSemSessao(chave, placar, n) {
     saveStats();
 }
 
+// O ✕/✓ EM VOO cuja resposta chegou depois de a sessão acabar (a época mudou).
+// Nada dela grava (ver `epocaDaSessao`), e a anotação dela na fila de saída
+// (O2, `anotarAntesDoEnvio`) sai: ela não pode sair depois com a sessão de
+// agora, que pode ser de outra pessoa. Se ela não pousou, o +1 do placar do
+// gesto volta (K7) — e, na renovação da queda, que mantém a fila na tela, o
+// pedido VOLTA como o próximo card (V1, auditoria de 2026-09-29): ele segue
+// pendente no Waze e já passou pela fila, então nenhuma busca o trazia, e a
+// fila terminava em "Tudo limpo!" com ele pendente. Numa fila refeita (o
+// "Sair", outra conta) nada volta — a fila é de outra sessão.
+function decisaoDepoisDaQueda(tipo, place, result, placar, epocaFila) {
+    const anotado = anotadoAntesDoEnvio.delete(place);
+    if (descargaNaFila.delete(place) || anotado) tirarDaFilaDeSaida(tipo, place);
+    if (pousouNoWaze(result)) return;
+    descontarGestoSemSessao(tipo === 'read' ? 'read' : 'rejected', placar, 1);
+    if (epocaFila === AppState.fetchEpoch) devolverPedidoRecusado(place, epocaFila);
+}
+
 function handleMarkAsRead() {
     if (!AppState.currentPlace) return;
     if (acoesTravadas()) return;   // janela do Desfazer correndo
@@ -15943,12 +16078,22 @@ function handleMarkAsRead() {
     const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     scheduleAction('read', place, async () => {
+        // Anotada na fila de saída ANTES de sair (O2, ver `anotarAntesDoEnvio`).
+        // A decisão deste pedido já esperava lá: vale a primeira, e este gesto
+        // não sai nem conta (a mesma regra da descarga).
+        if (anotarAntesDoEnvio('read', place, regiao) === 'repetida') {
+            placar.read = Math.max(0, (placar.read || 0) - 1);
+            updateStats();
+            saveStats();
+            return;
+        }
         const presenca = presencaWmeDaAcao(place, pais);
         const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao), epoca);
-        // Saiu no meio (ver `epocaDaSessao`): nada grava, e o placar do gesto
-        // volta se a decisão não pousou (K7).
+        // Saiu no meio (ver `epocaDaSessao`): nada grava; o placar do gesto
+        // volta se a decisão não pousou (K7), e o pedido volta pra fila que
+        // atravessou a queda (V1).
         if (epoca !== epocaDaSessao) {
-            if (!pousouNoWaze(result)) descontarGestoSemSessao('read', placar, 1);
+            decisaoDepoisDaQueda('read', place, result, placar, epocaFila);
             return;
         }
         presencaWmeAoResponder(presenca, result);
@@ -15975,12 +16120,22 @@ function handleReject() {
     const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     scheduleAction('reject', place, async () => {
+        // Anotada na fila de saída ANTES de sair (O2, ver `anotarAntesDoEnvio`).
+        // A decisão deste pedido já esperava lá: vale a primeira, e este gesto
+        // não sai nem conta (a mesma regra da descarga).
+        if (anotarAntesDoEnvio('reject', place, regiao) === 'repetida') {
+            placar.rejected = Math.max(0, (placar.rejected || 0) - 1);
+            updateStats();
+            saveStats();
+            return;
+        }
         const presenca = presencaWmeDaAcao(place, pais);
         const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao), epoca);
-        // Saiu no meio (ver `epocaDaSessao`): nada grava, e o placar do gesto
-        // volta se a decisão não pousou (K7).
+        // Saiu no meio (ver `epocaDaSessao`): nada grava; o placar do gesto
+        // volta se a decisão não pousou (K7), e o pedido volta pra fila que
+        // atravessou a queda (V1).
         if (epoca !== epocaDaSessao) {
-            if (!pousouNoWaze(result)) descontarGestoSemSessao('rejected', placar, 1);
+            decisaoDepoisDaQueda('reject', place, result, placar, epocaFila);
             return;
         }
         presencaWmeAoResponder(presenca, result);

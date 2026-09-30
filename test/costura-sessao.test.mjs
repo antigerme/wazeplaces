@@ -306,14 +306,16 @@ function lsFalso() {
   return { guardado, safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) } };
 }
 
-function montarVoo() {
+// `janela`: com a janela do Desfazer (a ação fica pendente até vencer); sem
+// ela, o gesto sai na hora e fica EM VOO até o teste soltar a resposta.
+function montarVoo({ janela = false } = {}) {
   const { safeLS, guardado } = lsFalso();
   const pendentes = [];
   const gravados = [];
   const AppState = {
     authenticated: true, profile: { id: 'A' }, currentPlace: null, queue: [],
-    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 10,
-    preferences: { undoEnabled: false }, pendingAction: null, inFlightActions: 0,
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 10, fetchEpoch: 0,
+    preferences: { undoEnabled: janela }, pendingAction: null, inFlightActions: 0,
   };
   let token = 'tok-A';
   const deps = {
@@ -324,22 +326,25 @@ function montarVoo() {
       getRegion: () => 'row', getCountry: () => 30, getSession: () => token, setSession: (t) => { token = t; },
       rejectPlace: () => new Promise((ok) => pendentes.push(ok)), markAsRead: () => new Promise((ok) => pendentes.push(ok)),
     },
-    direcaoTravada: () => false, canDisableUndo: () => true, presencaWmeDaAcao: () => null,
+    direcaoTravada: () => false, canDisableUndo: () => !janela, presencaWmeDaAcao: () => null,
     advanceQueue: () => { AppState.queue.shift(); AppState.currentPlace = AppState.queue[0] || null; },
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
     saveStats: () => gravados.push({ ...AppState.stats }), msgDoServidor: (r, f) => f, t: (k) => k,
     historyTodayKey: () => '2026-09-26', ondeAgora: () => '30', getLang: () => 'pt',
-    pedidosEmAndamento: new Set(), descargaNaFila: new WeakSet(),
+    pedidosEmAndamento: new Set(), descargaNaFila: new WeakSet(), anotadoAntesDoEnvio: new WeakSet(),
+    pedidosQueEntraramNaFila: new Set(),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     entrarPelaExtensao: () => new Promise(() => {}), console,
   };
   const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'pousouNoWaze', 'descontarGestoSemSessao',
     'chaveDoPedido', 'marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida',
     'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento', 'handleActionResult', 'scheduleAction',
+    'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'decisaoDepoisDaQueda', 'devolverPedidoRecusado',
     'handleReject', 'handleMarkAsRead', 'derrubarSessao'], deps);
   const P = { venueID: 'v1', updateRequestID: 'u1', creatorId: 9 };
   AppState.queue = [P, { venueID: 'v2', updateRequestID: 'u2', creatorId: 9 }];
   AppState.currentPlace = P;
-  return { h, deps, AppState, pendentes, gravados, guardado };
+  return { h, deps, AppState, pendentes, gravados, guardado, P };
 }
 
 test('K7: o ✕/✓ em voo, a sessão cai e a resposta (401) chega depois — o +1 GRAVADO no placar volta', async () => {
@@ -408,6 +413,140 @@ test('K7: o LOTE manual com a sessão caindo no meio devolve só o placar otimis
   pendentes[1]({ success: false, errorCategory: 'unauthorized' });
   await envio;
   assert.equal(AppState.stats.rejected, 13 - 3, 'DEFEITO: o placar otimista dos 3 que não pousaram ficou');
+});
+
+// ═══ V1 · a decisão que não saiu VOLTA como card na renovação da queda ════════
+// A queda com a renovação pela extensão MANTÉM a fila na tela (`manterFila`). O
+// que estava na janela do Desfazer era cancelado sem voltar pra ela, e a
+// decisão EM VOO (✕/✓ e o "Rejeitar os N") que levava o 401 depois da queda só
+// descontava o placar: o pedido não ia pro Waze nem voltava como card — já
+// tinha passado pela fila, nenhuma busca o trazia, e a fila terminava em "Tudo
+// limpo!" com ele pendente (auditoria de 2026-09-29, V1/O5/C1; medido no
+// navegador com a renovação de verdade: s1, s3, s3b, s14, t3b, t3d).
+
+test('V1: ✕ na janela do Desfazer e a sessão cai — o pedido VOLTA pra fila, com o placar e o "Restam" de antes', async () => {
+  const m = montarVoo({ janela: true });
+  m.h.handleReject();
+  assert.ok(m.AppState.pendingAction, 'PRÉ-CONDIÇÃO: o ✕ está na janela do Desfazer');
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v2'], 'PRÉ-CONDIÇÃO: o gesto tirou o pedido da fila');
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v1', 'v2'],
+    'o pedido da janela sumiu: nem foi pro Waze, nem voltou pra fila que a renovação mantém');
+  assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.venueID, 'v1', 'o pedido voltou mas não está na tela');
+  assert.equal(m.AppState.serverTotal, 10, 'o "Restam" não voltou junto');
+  assert.equal(m.gravados.at(-1).rejected, 0, 'o placar revertido não foi gravado');
+  assert.equal(m.pendentes.length, 0, 'a decisão cancelada saiu pro Waze');
+});
+
+test('V1: ✕/✓ EM VOO, a sessão cai e a resposta (401) chega depois — o pedido volta como o PRÓXIMO card', async () => {
+  for (const gesto of ['handleReject', 'handleMarkAsRead']) {
+    const m = montarVoo();
+    m.h[gesto]();
+    await tique();
+    assert.equal(m.pendentes.length, 1, 'PRÉ-CONDIÇÃO: a decisão está no ar');
+    m.h.derrubarSessao('srv.err.cookiesExpired');
+    m.pendentes[0]({ success: false, errorCategory: 'unauthorized', httpCode: 401 });
+    await tique();
+    assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v2', 'v1'],
+      `${gesto}: o pedido que não pousou sumiu da fila que a renovação mantém`);
+    assert.equal(m.AppState.currentPlace.venueID, 'v2', `${gesto}: trocou o card da tela`);
+    assert.equal(m.AppState.serverTotal, 10, `${gesto}: o "Restam" não acompanha o pedido que voltou`);
+    assert.equal(m.h.carregarFilaDeSaida().length, 0, `${gesto}: a anotação da decisão ficou pra sair com a sessão de agora`);
+  }
+});
+
+test('V1: CONTROLE — com a fila REFEITA desde o gesto (o "Sair", outra conta), nada volta', async () => {
+  const m = montarVoo();
+  m.h.handleReject();
+  await tique();
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  m.AppState.fetchEpoch++;                                   // o `resetQueue` do "Sair" / da troca de conta
+  m.AppState.queue = [{ venueID: 'v7', updateRequestID: 'u7' }];
+  m.AppState.currentPlace = m.AppState.queue[0];
+  m.pendentes[0]({ success: false, errorCategory: 'unauthorized', httpCode: 401 });
+  await tique();
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v7'], 'o pedido da sessão anterior entrou na fila de outra');
+  assert.equal(m.AppState.stats.rejected, 0, 'o placar do gesto que não pousou ficou');
+  assert.equal(m.h.carregarFilaDeSaida().length, 0);
+});
+
+test('V1: a decisão EM VOO que POUSOU depois da queda não volta (e a anotação dela sai da fila de saída)', async () => {
+  const m = montarVoo();
+  m.h.handleReject();
+  await tique();
+  assert.equal(m.h.carregarFilaDeSaida().length, 1, 'PRÉ-CONDIÇÃO: a decisão foi anotada antes de sair (O2)');
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  m.pendentes[0]({ success: true });
+  await tique();
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v2'], 'o pedido que pousou voltou como card');
+  assert.equal(m.AppState.stats.rejected, 1);
+  assert.equal(m.h.carregarFilaDeSaida().length, 0, 'a anotação da decisão que pousou ficou pra sair de novo');
+});
+
+function montarLoteDaQueda() {
+  const pendentes = [];
+  const naSaida = [];
+  const log = [];
+  const AppState = { authenticated: true, stats: { read: 0, rejected: 4, skipped: 0 }, serverTotal: 1, fetchEpoch: 0,
+    queue: [{ venueID: 'v9', updateRequestID: 'u9' }], hasMore: false, inFlightActions: 0 };
+  AppState.currentPlace = AppState.queue[0];
+  const ch = (p) => p.venueID + '|' + p.updateRequestID;
+  const deps = {
+    AppState, epocaDaSessao: 0, navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1],
+    API: { rejectPlace: () => new Promise((ok) => pendentes.push(ok)) },
+    saveStats: () => {}, recordHistory: () => {}, registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {},
+    registrarAcaoConfirmada: () => {}, pedidosEmAndamento: new Set(), pedidosQueEntraramNaFila: new Set(),
+    enfileirarSaida: (tipo, p) => { naSaida.push(ch(p)); return true; },
+    tirarDaFilaDeSaida: (tipo, p) => { const i = naSaida.indexOf(ch(p)); if (i >= 0) naSaida.splice(i, 1); },
+    carregarFilaDeSaida: () => naSaida.slice(),
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
+    startFetching: () => log.push('busca'), mostrarResultadoDoLote: () => log.push('folha'),
+  };
+  const h = montar(['sessaoTrocou', 'callWithRetry', 'pousouNoWaze', 'descontarGestoSemSessao', 'chaveDoPedido',
+    'marcarEmAndamento', 'devolverPedidoRecusado', 'enviarLote'], deps);
+  // O "Rejeitar os 4": o gesto já tirou os 4 da fila e os contou no placar.
+  const lote = [1, 2, 3, 4].map((i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i }));
+  return { h, deps, AppState, pendentes, naSaida, log, lote };
+}
+
+test('V1: o "Rejeitar os N" EM VOO com a sessão caindo — os que não pousaram voltam pra fila da queda, em ordem', async () => {
+  const m = montarLoteDaQueda();
+  const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
+  await tique(); m.pendentes[0]({ success: true });           // o 1º pousou
+  await tique(); m.deps.epocaDaSessao++;                      // a sessão cai com o 2º no ar
+  m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
+  await envio;
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v9', 'v2', 'v3', 'v4'],
+    'os três que não pousaram sumiram da fila que a renovação mantém');
+  assert.equal(m.AppState.serverTotal, 4, 'o "Restam" não acompanha os que voltaram');
+  assert.equal(m.AppState.stats.rejected, 1, 'o placar otimista dos que não pousaram ficou');
+  assert.deepEqual(m.naSaida, [], 'a anotação dos que não saíram ficou pra sair com a sessão de agora');
+  assert.ok(!m.log.includes('folha'), 'a folha do resultado abriu depois da queda');
+});
+
+test('V1: CONTROLE — o lote em voo com a fila REFEITA (o "Sair"): nada volta, e nenhuma busca sai', async () => {
+  const m = montarLoteDaQueda();
+  const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
+  await tique(); m.pendentes[0]({ success: true });
+  await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++;
+  m.AppState.queue = []; m.AppState.currentPlace = null; m.AppState.serverTotal = 0;
+  m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
+  await envio;
+  assert.deepEqual(m.AppState.queue, [], 'o lote da sessão anterior entrou na fila de outra');
+  assert.ok(!m.log.includes('busca'), 'o lote da sessão anterior mandou buscar na fila de outra');
+  assert.equal(m.AppState.stats.rejected, 1);
+});
+
+test('V1: CONTROLE — o que o Waze RECUSOU antes da queda também não entra (nem busca) na fila de outra sessão', async () => {
+  const m = montarLoteDaQueda();
+  const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
+  await tique(); m.pendentes[0]({ success: false, errorCategory: 'unknown' });   // o 1º: recusa de verdade
+  await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++;               // o "Sair" com o 2º no ar
+  m.AppState.queue = []; m.AppState.currentPlace = null; m.AppState.serverTotal = 0;
+  m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
+  await envio;
+  assert.deepEqual(m.AppState.queue, [], 'o recusado da sessão anterior entrou na fila de outra');
+  assert.ok(!m.log.includes('busca'), 'o recusado da sessão anterior mandou buscar na fila de outra');
 });
 
 // ═══ K2 · a renovação com OUTRA conta não mantém a fila nem o cabeçalho de A ══

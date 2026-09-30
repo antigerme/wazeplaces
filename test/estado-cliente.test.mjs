@@ -85,8 +85,12 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
     presencaWmeAoResponder: () => efeitos.push('presenca'),
     handleActionResult: () => efeitos.push('resultado'),
     // O placar do gesto volta só pro que NÃO pousou (test/costura-sessao, K7):
-    // a resposta aqui é sucesso, então ele também não pode mexer.
+    // a resposta aqui é sucesso, então ele também não pode mexer. Quem trata a
+    // resposta atrasada é o `decisaoDepoisDaQueda` (medido lá, com o de verdade):
+    // aqui ele só diz que foi chamado — e com o quê.
     pousouNoWaze: (r) => !!(r && r.success), descontarGestoSemSessao: () => efeitos.push('descontou'),
+    anotarAntesDoEnvio: () => true,
+    decisaoDepoisDaQueda: (tipo, place, r) => efeitos.push('depoisDaQueda:' + (r && r.success ? 'pousou' : 'nao')),
   };
   // `epocaDaSessao` é lido como variável solta: passa por um getter no escopo.
   const chaves = Object.keys(deps).filter((k) => k !== 'epocaDaSessao');
@@ -97,7 +101,9 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
   estado.epoca++;                       // o "Sair" enquanto a ação voava
   soltar({ success: true });
   await envio;
-  assert.deepEqual(efeitos, [], 'a resposta de depois do "Sair" gravou histórico/autor/fila de saída');
+  assert.deepEqual(efeitos, ['depoisDaQueda:pousou'],
+    'a resposta de depois do "Sair" gravou histórico/autor/fila de saída (ou não foi tratada como de outra sessão)');
+  efeitos.length = 0;
   // CONTROLE: sem o "Sair" no meio, a mesma resposta pousa.
   AppState.currentPlace = { venueID: 'v2', updateRequestID: 'u2' };
   fn();
@@ -111,11 +117,14 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
   const casos = {
     esvaziarFilaDeSaida: /: await API\.rejectPlace\([^)]*\);\s*if \(epoca !== epocaDaSessao\) \{ enviados = 0; break; \}/,
     // Com a época mudada nada grava — só o placar otimista do que não pousou
-    // volta (test/costura-sessao, K7).
-    enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) \{\s*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;\s*return;\s*\}/,
+    // volta (test/costura-sessao, K7), a anotação dele sai da fila de saída e,
+    // na fila que atravessou a queda, ele volta como card (V1). O bloco não
+    // tem chave NENHUMA dentro: nada de ramo que grave.
+    enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) \{[^{}]*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;[^{}]*return;\s*\}/,
     loadProfileAndAuxData: /API\.listCountries\(\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
-    // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao).
-    handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*if \(!pousouNoWaze\(result\)\) descontarGestoSemSessao\('read', placar, 1\);\s*return;\s*\}/,
+    // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao),
+    // e a resposta de outra sessão vai inteira pro `decisaoDepoisDaQueda`.
+    handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*decisaoDepoisDaQueda\('read', place, result, placar, epocaFila\);\s*return;\s*\}/,
     handleSkip: /API\.guardarPedido\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) return;/,
   };
   for (const [nome, re] of Object.entries(casos)) assert.match(fatiar(nome), re, `${nome} grava depois do "Sair"`);
@@ -439,9 +448,11 @@ test('perfil que FALHOU é pedido de novo na próxima prova de rede (no máximo 
 test('a queda da sessão com ação na janela do Desfazer GRAVA o placar revertido', () => {
   // O gesto grava o +1 na hora; o `cancel()` sem argumento reverte só em
   // memória. Quem fecha o app depois da queda ficava com um pedido a mais no
-  // placar pra sempre (auditoria de 2026-09-25).
+  // placar pra sempre (auditoria de 2026-09-25). Desde o V1 (2026-09-29) é o
+  // `cancel(true)`, que também devolve o pedido à fila (medido em
+  // test/costura-sessao.test.mjs); o `saveStats` logo depois segue valendo.
   const d = fatiar('derrubarSessao');
-  const i = d.indexOf('AppState.pendingAction.cancel();');
+  const i = d.indexOf('AppState.pendingAction.cancel(true);');
   assert.ok(i > 0, 'a queda deixou de cancelar a ação pendente');
   const bloco = d.slice(i, d.indexOf('}', i));
   assert.match(bloco, /saveStats\(\);/, 'o placar revertido não é gravado na queda da sessão');

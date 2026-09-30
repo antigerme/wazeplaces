@@ -320,6 +320,57 @@ test('F7: trocar a região com a recusa automática no ar não manda o resto pro
 // Cada teste foi visto REPROVANDO com o conserto desfeito (sabotagem registrada
 // no relatório da rodada).
 
+// ── O2: o "Rejeitar os N" vai INTEIRO pra fila de saída antes do 1º envio ──────
+// O placar conta os N no gesto; fechar o app no meio do laço deixava os que não
+// saíram em lugar nenhum — de volta como card na reabertura e contados de novo
+// (medido no navegador, f5b: placar 5 com 3 enviados e v4/v5 de volta).
+test('O2: o lote da pessoa é anotado INTEIRO na fila de saída antes do 1º envio — e cada resposta tira o seu', async () => {
+  const alvos = [pedido(1), pedido(2), pedido(3)];
+  let noMeio = null;
+  let gravouAntes = null;
+  const m = montarLote({ resposta: (p, n) => {
+    if (n === 1) gravouAntes = m.gravacoes();
+    if (n === 2) noMeio = m.naSaida.map((x) => x.venueID);
+    return { success: true };
+  } });
+  await m.enviarLote(alvos, {});
+  assert.deepEqual(noMeio, ['v2', 'v3'],
+    'com o 2º no ar, o que ainda não pousou não está na fila de saída: morta a página, some com o placar já contado');
+  // UMA gravação pro lote inteiro: o `setItem` é síncrono, e gravar a fila a
+  // cada pedido travava a tela (MEDIDO: 79 ms no "Rejeitar os 200").
+  assert.equal(gravouAntes, 1, `a anotação do lote gravou a fila de saída ${gravouAntes}× antes do 1º envio (uma por pedido)`);
+  assert.deepEqual(m.naSaida, [], 'o que pousou ficou anotado pra sair de novo');
+  assert.ok(!m.log.includes('diario:saida.abriu'), 'a anotação de antes do envio virou "a fila abriu" no diário');
+});
+
+test('O2: sem rede, os do lote FICAM na fila de saída (a abertura vai pro diário uma vez) e contam como "esperando envio"', async () => {
+  const alvos = [pedido(1), pedido(2)];
+  const m = montarLote({ resposta: () => ({ success: false, errorCategory: 'transient' }) });
+  m.AppState.stats.rejected = 2;
+  await m.enviarLote(alvos, {});
+  assert.deepEqual(m.naSaida.map((x) => x.venueID), ['v1', 'v2']);
+  assert.equal(m.AppState.stats.rejected, 2, 'o placar do trabalho que segue guardado desceu');
+  assert.equal(m.log.filter((l) => l === 'diario:saida.abriu').length, 1);
+});
+
+test('O2: CONTROLE — a recusa automática NÃO anota antes (lá o placar anda com o envio)', async () => {
+  const alvos = [pedido(1), pedido(2)];
+  let noMeio = null;
+  const m = montarLote({ resposta: (p, n) => { if (n === 2) noMeio = m.naSaida.length; return { success: true }; } });
+  await m.enviarLote(alvos, { silencioso: true, contarAoLandar: true });
+  assert.equal(noMeio, 0, 'a recusa automática anotou na fila de saída: o pouso de lá não soma o placar, e a ação não contaria');
+});
+
+test('O2: o pedido do lote cuja decisão JÁ esperava na fila de saída não sai nem conta (vale a primeira)', async () => {
+  const alvos = [pedido(1), pedido(2)];
+  const m = montarLote({ saida: [{ tipo: 'read', venueID: 'v2', updateRequestID: 'u2' }] });
+  m.AppState.stats.rejected = 2;                    // o gesto contou os dois
+  await m.enviarLote(alvos, {});
+  assert.deepEqual(m.regioes.length, 1, 'a segunda decisão do mesmo pedido saiu pro Waze');
+  assert.equal(m.AppState.stats.rejected, 1, 'o pedido repetido contou no placar');
+  assert.deepEqual(m.naSaida.map((x) => x.tipo), ['read'], 'a primeira decisão saiu da fila');
+});
+
 // ── C5: o que o Waze recusa no lote volta como o PRÓXIMO card ─────────────────
 // Ia pro FIM da fila, e a pilha seguia anunciando outro pedido — o ✕ de um card
 // só já devolve como o próximo (`devolverPedidoRecusado`); medido no navegador:
