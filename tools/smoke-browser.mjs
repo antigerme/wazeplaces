@@ -5535,6 +5535,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         AppState.authenticated = true;
         AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false, areas: [], managedAreas: [] };
         AppState.countries = [{ id: 30, name: 'Brazil' }];
+        // A fila inteira já está aqui: o "Aplicar" de uma ordem por distância
+        // só reordena (sem ir buscar o resto das páginas, que este bloco não tem).
+        AppState.hasMore = false;
         // Caminho REAL: é assim que a resposta do /api/perfil chega.
         guardarReferencias({ referencias: r });
         AppState.queue = fila.map((f) => ({ venueID: f.id, updateRequestID: f.id, mapa: { centro: f.ll }, dateAdded: 1 }));
@@ -5591,10 +5594,14 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         sel.value = 'gps';
         await aoTrocarOrdenacao();
         const dica = document.getElementById('filterSortHint');
-        return { valor: sel.value, dica: (dica.textContent || '').trim() };
+        return { valor: sel.value, dica: (dica.textContent || '').trim(),
+                 negado: t('filters.sort.hint.negado', { padrao: t('filters.sort.newest') }) };
       });
       checa(neg.valor === 'newest', `${id}: negado deixou "Perto de mim" selecionado sem posição`, neg.valor);
       checa(neg.dica.length > 20 && !/[{}]/.test(neg.dica), `${id}: negado não explicou`, neg.dica);
+      // O código 1 de VERDADE, do navegador: é a dica que manda liberar a
+      // permissão — a de "sem posição" é pros códigos 2 e 3 (F4, 2026-09-29).
+      checa(neg.dica === neg.negado, `${id}: o negado de verdade (código 1) não disse que é a permissão`, neg.dica);
 
       // 5. GPS CONCEDIDO: fica em 'gps', ordena e a dica confirma.
       //    Numa página RECARREGADA, e o motivo é do WebKit: lá o negado do passo 4
@@ -5609,18 +5616,121 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       await page.waitForTimeout(600);
       await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
       await abrir({ casa: [REF.lat, REF.lon], trabalho: [REF.lat + 0.02, REF.lon + 0.02] });
+      // Pelo "Aplicar" de VERDADE (auditoria de 2026-09-29): o botão ESPERA a
+      // posição (F1) — lido logo depois do pedido sair, antes de ela chegar —, e
+      // a posição pedida no modal só vira a da fila no "Aplicar" (F5).
       const ok = await page.evaluate(async () => {
-        const sel = document.getElementById('filterSort');
+        const sel = document.getElementById('filterSort'), aplicar = document.getElementById('applyFilters');
         sel.value = 'gps';
-        await aoTrocarOrdenacao();
+        const pedido = aoTrocarOrdenacao();
+        const esperando = aplicar.disabled;
+        await pedido;
         const dica = document.getElementById('filterSortHint');
-        AppState.filters.sortOrder = 'gps'; sortQueue();
-        return { valor: sel.value, dica: (dica.textContent || '').trim(),
-                 ordem: AppState.queue.map((p) => p.venueID).join(',') };
+        const r = { valor: sel.value, dica: (dica.textContent || '').trim(), esperando, depois: aplicar.disabled,
+                    daFilaAntesDoAplicar: !!posicaoGps };
+        applyFiltersFromModal();
+        return { ...r, aplicada: AppState.filters.sortOrder, ordem: AppState.queue.map((p) => p.venueID).join(',') };
       });
       checa(ok.valor === 'gps', `${id}: com permissão concedida a ordem não ficou em GPS`, ok.valor);
+      checa(ok.esperando === true, `${id}: o "Aplicar" seguiu vivo com o GPS respondendo — tocado ali, grava "Mais recentes" (F1)`);
+      checa(ok.depois === false, `${id}: a posição chegou e o "Aplicar" ficou morto`);
+      checa(ok.daFilaAntesDoAplicar === false, `${id}: a posição pedida no modal virou a da fila antes do "Aplicar" (F5)`);
+      checa(ok.aplicada === 'gps', `${id}: o "Aplicar" não gravou "Perto de mim"`, ok.aplicada);
       checa(ok.ordem === 'vizinho,rio,recife', `${id}: GPS não ordenou por distância`, ok.ordem);
       checa(!/[{}]/.test(ok.dica) && ok.dica.length > 10, `${id}: dica do GPS concedido`, ok.dica);
+
+      // 5b. A frase de "sem posição" (F4: permissão concedida, posição que não
+      //     vem) nos 4 idiomas, NA MESMA dica: cabe na largura, não rola de
+      //     lado, não é a do negado e não vaza placeholder. O caminho de verdade
+      //     que a acende (o código 3 do Chromium) está logo depois deste laço.
+      const semPos = await page.evaluate(({ linguas, volta }) => {
+        const out = [];
+        openFiltersModal(); switchFilterTab('filtersTabFilters');
+        for (const l of linguas) {
+          aplicarIdioma(l);
+          document.querySelectorAll('#toastContainer > *').forEach((el) => el.remove());
+          atualizarDicaDeOrdem('semPosicao');
+          const d = document.getElementById('filterSortHint');
+          d.scrollIntoView({ block: 'center' });
+          const r = d.getBoundingClientRect();
+          out.push({ l, txt: (d.textContent || '').trim(), visivel: !d.classList.contains('hidden') && r.height > 0,
+                     cabe: r.left >= 0 && r.right <= innerWidth, rolaDeLado: d.scrollWidth > d.clientWidth + 1,
+                     negado: t('filters.sort.hint.negado', { padrao: t('filters.sort.newest') }) });
+        }
+        aplicarIdioma(volta);
+        document.querySelectorAll('#toastContainer > *').forEach((el) => el.remove());
+        closeModal('filtersModal');
+        return out;
+      }, { linguas: LINGUAS, volta: lang });
+      for (const s of semPos) {
+        checa(s.visivel && s.cabe && !s.rolaDeLado, `${id}: a dica de "sem posição" em ${s.l} não cabe na tela`, JSON.stringify(s));
+        checa(s.txt !== s.negado && s.txt.length > 30, `${id}: a dica de "sem posição" em ${s.l} é a do negado`, s.txt);
+        checa(!/[{}]/.test(s.txt), `${id}: placeholder cru vazou na dica de "sem posição" (${s.l})`, s.txt);
+      }
+
+      // 5c. Trocar o IDIOMA nas Preferências com os Filtros abertos (F6): as
+      //     opções de texto dos seletores e a dica da ordem mudam JUNTO, sem
+      //     fechar e reabrir. Cada opção é lida contra a chave dela no idioma
+      //     novo, e o CONTROLE é o texto ter MUDADO (senão "igual ao dicionário"
+      //     passaria também sem troca nenhuma).
+      const outro = lang === 'pt' ? 'fr' : 'pt';
+      const troca = await page.evaluate(async (para) => {
+        openFiltersModal(); switchFilterTab('filtersTabFilters');
+        const sel = document.getElementById('filterSort');
+        sel.value = 'casa';
+        await aoTrocarOrdenacao();
+        const ler = () => {
+          const opcoes = ['filterCategory', 'filterState', 'filterManagedArea'].map((idSel) => {
+            const o = document.querySelector(`#${idSel} option[value=""]`);
+            return { idSel, txt: o && o.textContent, chave: o && o.getAttribute('data-i18n') };
+          });
+          return { opcoes, dica: (document.getElementById('filterSortHint').textContent || '').trim() };
+        };
+        const antes = ler();
+        switchFilterTab('filtersTabPrefs');
+        const ls = document.getElementById('langSelect');
+        ls.value = para;
+        ls.dispatchEvent(new Event('change'));
+        switchFilterTab('filtersTabFilters');
+        const depois = ler();
+        const esperado = { opcoes: depois.opcoes.map((o) => o.chave && t(o.chave)), dica: t('filters.sort.hint.perfil') };
+        document.querySelectorAll('#toastContainer > *').forEach((el) => el.remove());
+        closeModal('filtersModal');
+        return { antes, depois, esperado };
+      }, outro);
+      troca.depois.opcoes.forEach((o, i) => {
+        checa(!!o.chave, `${id}: a 1ª opção de #${o.idSel} não tem data-i18n — a troca de idioma não a alcança (F6)`, o.txt);
+        checa(o.txt === troca.esperado.opcoes[i] && o.txt !== troca.antes.opcoes[i].txt,
+          `${id}: trocou pra ${outro} com os Filtros abertos e #${o.idSel} seguiu em ${lang} (F6)`, `${troca.antes.opcoes[i].txt} → ${o.txt}`);
+      });
+      checa(troca.depois.dica === troca.esperado.dica && troca.depois.dica !== troca.antes.dica,
+        `${id}: trocou pra ${outro} com os Filtros abertos e a dica da ordem seguiu em ${lang} (F6)`, troca.depois.dica);
+      await page.evaluate((lg) => { aplicarIdioma(lg); document.querySelectorAll('#toastContainer > *').forEach((el) => el.remove()); }, lang);
+
+      // 5d. Os Filtros abertos ANTES do perfil (o atalho do PWA os abre sempre
+      //     assim; F2): a ordem e a área SALVAS ficam na tela — a área dizendo
+      //     que carrega —, e o perfil que chega pela porta de verdade
+      //     (`definirPerfil`) os redesenha, com o nome da área.
+      const semPerfil = await page.evaluate((refs) => {
+        AppState.profile = null;
+        guardarReferencias(null);
+        AppState.filters.sortOrder = 'casa';
+        AppState.filters.managedAreaId = '9001';
+        openFiltersModal(); switchFilterTab('filtersTabFilters');
+        const area = document.getElementById('filterManagedArea'), sel = document.getElementById('filterSort');
+        const ler = () => ({ ordem: sel.value, area: area.value, areaTxt: area.selectedOptions[0] && area.selectedOptions[0].textContent });
+        const antes = { ...ler(), carregando: t('filters.carregando') };
+        definirPerfil({ success: true, referencias: refs, profile: { id: 1, userName: 'wazer', rank: 5, isAreaManager: true,
+          isStaff: false, areas: [], managedAreas: [{ id: 9001, name: 'Área SP' }] } });
+        const depois = ler();
+        closeModal('filtersModal');
+        return { antes, depois };
+      }, { casa: [REF.lat, REF.lon], trabalho: null });
+      checa(semPerfil.antes.ordem === 'casa', `${id}: sem o perfil, "Perto de casa" salvo sumiu do seletor (F2)`, JSON.stringify(semPerfil.antes));
+      checa(semPerfil.antes.area === '9001' && semPerfil.antes.areaTxt === semPerfil.antes.carregando,
+        `${id}: sem o perfil, a área salva não aparece dizendo que carrega (F2)`, JSON.stringify(semPerfil.antes));
+      checa(semPerfil.depois.ordem === 'casa' && semPerfil.depois.area === '9001' && semPerfil.depois.areaTxt === 'Área SP',
+        `${id}: o perfil chegou com os Filtros abertos e eles não se redesenharam (F2)`, JSON.stringify(semPerfil.depois));
 
       // 6. SEM casa/trabalho no perfil: as duas opções somem (não viram beco).
       const semRefs = await abrir({ casa: null, trabalho: null });
@@ -5632,6 +5742,42 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(errosG.length === 0, `${id}: erro de JS`, errosG[0]);
       await ctx.close();
     }
+  }
+
+  // 7. A permissão CONCEDIDA e a posição que NÃO vem (F4): o caminho de verdade
+  //    da auditoria — antes, a dica mandava liberar a permissão que já estava
+  //    liberada. MEDIDO no Chromium: sem posição nenhuma, o código 3 (tempo
+  //    esgotado) aos 10 s; o `GPS_TIMEOUT_MS` do app é o mesmo, então o passo
+  //    leva esses 10 s. Uma vez só, num aparelho.
+  if (!pularForaDoChromium(MOTOR, 'perto de mim: a permissão concedida e a posição que não vem (o código 3 de verdade)',
+    'o WebKit do Playwright entrega uma posição de mentira com a permissão concedida (MEDIDO: em 15 ms, sem erro); o "sem posição" de verdade só o Chromium dá, aos 10 s')) {
+    const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
+    await ctx.grantPermissions(['geolocation'], { origin: BASE.replace(/\/$/, '') });
+    const page = await ctx.newPage();
+    const errosG = [];
+    page.on('pageerror', (e) => errosG.push(String(e)));
+    await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+    await page.goto(BASE, { waitUntil: 'load' });
+    await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
+    const r = await page.evaluate(async () => {
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false, areas: [], managedAreas: [] };
+      AppState.countries = [{ id: 30, name: 'Brazil' }];
+      guardarReferencias({ referencias: { casa: null, trabalho: null } });
+      openFiltersModal(); switchFilterTab('filtersTabFilters');
+      const sel = document.getElementById('filterSort');
+      sel.value = 'gps';
+      await aoTrocarOrdenacao();
+      const dica = document.getElementById('filterSortHint');
+      return { valor: sel.value, dica: (dica.textContent || '').trim(), aplicarVivo: !document.getElementById('applyFilters').disabled,
+               semPosicao: t('filters.sort.hint.semPosicao', { padrao: t('filters.sort.newest') }) };
+    });
+    checa(r.valor === 'newest', `${onde}: sem posição, "Perto de mim" ficou escolhido`, r.valor);
+    checa(r.dica === r.semPosicao, `${onde}: com a permissão CONCEDIDA e sem posição, a dica não disse "sem posição" (F4)`, r.dica);
+    checa(r.aplicarVivo, `${onde}: a posição que não veio deixou o "Aplicar" morto`);
+    checa(errosG.length === 0, `${onde} (sem posição): erro de JS`, errosG[0]);
+    await ctx.close();
   }
 }
 
@@ -7584,7 +7730,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`
-  + `, + Perto de mim em 2 aparelhos × 2 idiomas (as 3 opções, ordem ponta a ponta, GPS concedido E negado pelo browser, e o perfil sem endereço)`
+  + `, + Perto de mim em 2 aparelhos × 2 idiomas (as 3 opções, ordem ponta a ponta, GPS concedido E negado pelo browser — o negado com a dica da PERMISSÃO —, o "Aplicar" esperando a posição e levando a do modal só ao aplicar, a dica de "sem posição" cabendo em 4 idiomas, a troca de idioma com os Filtros abertos alcançando seletores e dica, os Filtros abertos antes do perfil guardando ordem e área e se redesenhando quando ele chega, e o perfil sem endereço; no Chromium, a permissão concedida SEM posição de verdade)`
   + `, + renomear pelo lightbox em 3 aparelhos (portão L6+AM com treino barrado, 3 alturas de teclado sem cobrir campo nem a placa da fachada, a foto em pé com a tira de miniaturas parando antes do campo, e envio medido pela REDE com Desfazer impedindo)`
   + `, + teto da lista de autores (10 exatos NÃO geram botão, o rótulo traz quantos faltam, altura constante de 11 a 100, e o Esc devolve à lista curta)`
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
