@@ -26,6 +26,7 @@
 // não enxerga CSP, não enxerga cache e não enxerga service worker.
 
 import { execFileSync } from 'node:child_process';
+import http from 'node:http';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -1074,6 +1075,17 @@ diz('o mapa guardado numa preparação INTERROMPIDA aparece sem rede, inteiro',
 const anel7d = await page.evaluate(() => diagTilesGuardadosQueFalharam.length);
 diz('e a sentinela do mapa não tem o que acusar', anel7d === anel7dAntes, `${anel7dAntes} → ${anel7d}`);
 aviao = false; await ctx.setOffline(false);
+// A volta do sinal RETOMA a preparação parcial (R4-O3, auditoria de
+// 2026-09-29): o `online` dispara a varredura, e ela, pronta, PODA o cache do
+// mapa aos tiles da fila — o certo. A seção seguinte compara o cache antes e
+// depois do deploy, então a retomada tem que acabar ANTES da primeira medida
+// (medido sem esta espera: a poda caía no meio do deploy, "antes=5 depois=1").
+// Com o app de antes do O3 nada é retomado, e a espera sai na hora.
+// Pelo PRÓPRIO gatilho, e não pelo tempo do `online`: ele chega quando chega,
+// e uma retomada que começasse depois desta espera cairia de novo no deploy.
+await esperarNaPagina(page, () => navigator.onLine === true, 5000);
+await page.evaluate(() => { offlineMarcarGesto(); offlineTalvezVarrer(); });
+await esperarNaPagina(page, () => !offlineVarrendo, 30000, 100);
 
 secao('8. O DEPLOY NÃO APAGA O MAPA PROVISIONADO');
 // O `activate` apaga TODO cache ≠ CACHE_NAME. Sem a isenção do TILES_CACHE,
@@ -1157,8 +1169,37 @@ diz('e o cache do MAPA sobreviveu INTEIRO ao deploy',
 // caía no meio dele — MEDIDO numa rodada: "dlogCapturar is not defined", o
 // `evaluate` rodando na página nova ainda sem o app (auditoria de 2026-09-26).
 await page.waitForLoadState('load').catch(() => {});
-await esperarNaPagina(page, () => !window.__docDeAntesDoDeploy && document.readyState === 'complete'
+// E o documento tem de ser o ÚLTIMO do deploy. A página recarrega DUAS vezes:
+// pro worker `?deploy=2` e, ~1,6 s depois, de volta pro `/service-worker.js`
+// canônico, que o `js/sw-register.js` do documento novo registra no `load`
+// (MEDIDO por outro agente do lote L8: 3 de 3 no worktree, 2 de 2 na main).
+// Esperando só o PRIMEIRO documento novo, a 8b às vezes começava num que
+// recarregava no meio dela — e o relatório saía de página recém-carregada, sem
+// a captura nem a queda da rede (reprovou "e leva o que aconteceu" numa rodada).
+// O worker canônico no comando só vale depois da segunda recarga; e ele vale um
+// instante ANTES dela também (a troca de controller chama a recarga, e o
+// documento de antes segue de pé até o novo chegar) — por isso o documento é
+// MARCADO e conferido de novo depois de assentar.
+const velha8 = await esperarNaPagina(page, () => !window.__docDeAntesDoDeploy && document.readyState === 'complete'
   && typeof offlineVarrer === 'function', 20000);
+const swDaEsperaVelha = await page.evaluate(() => navigator.serviceWorker.controller
+  && navigator.serviceWorker.controller.scriptURL).catch(() => null);
+console.log(`  · a espera ANTIGA (só "o documento novo") voltou em ${velha8.ms} ms, com o worker `
+  + `${String(swDaEsperaVelha).replace(/^https?:\/\/[^/]+/, '')} no comando`);
+let docDa8b = null;
+const prazo8 = Date.now() + 40000;   // rede contra travar: a recarga leva ~1,6 s
+while (!docDa8b && Date.now() < prazo8) {
+  const canonico = await esperarNaPagina(page, () => !window.__docDeAntesDoDeploy && document.readyState === 'complete'
+    && typeof offlineVarrer === 'function' && !!navigator.serviceWorker.controller
+    && /\/service-worker\.js$/.test(navigator.serviceWorker.controller.scriptURL), Math.max(0, prazo8 - Date.now()));
+  if (!canonico.ok) break;
+  const marca = await page.evaluate(() => (window.__docDa8b = window.__docDa8b || String(Math.random()))).catch(() => null);
+  await dormir(800);
+  const firme = await page.evaluate((m) => window.__docDa8b === m, marca).catch(() => false);
+  if (marca && firme) docDa8b = marca;
+}
+diz('PRÉ-CONDIÇÃO: a 8b começa no documento FINAL do deploy (o worker canônico no comando, sem recarga pendente)',
+  !!docDa8b);
 await page.evaluate(() => { AppState.preferences.offlineDisponivel = true; }).catch(() => {});
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
 
@@ -1276,6 +1317,9 @@ diz('o 2º relatório na mesma página compara o MESMO código — sem as releit
   relatorio.segundo?.releiturasNosRecursos > 0 && relatorio.segundo?.comDiagRede === 0
   && relatorio.segundo?.n === relatorio.codigo?.n && relatorio.segundo?.cvr === relatorio.cvr?.n,
   JSON.stringify({ primeiro: relatorio.codigo?.n, segundo: relatorio.segundo }));
+const docNoFim8b = await page.evaluate(() => window.__docDa8b).catch(() => null);
+diz('e a 8b rodou inteira no MESMO documento — nenhuma recarga no meio (o relatório é da página que viu a queda)',
+  !!docDa8b && docNoFim8b === docDa8b, `${docDa8b} → ${docNoFim8b}`);
 diz('no estado são, as duas sentinelas NOVAS ficam caladas no relatório',
   Array.isArray(relatorio.alertas) && !relatorio.alertas.includes('fotoEscondidaComAviso')
   && !relatorio.alertas.includes('tileGuardadoFalhou'), JSON.stringify(relatorio.alertas));
@@ -2504,6 +2548,213 @@ diz('com o modo dev DESLIGADO, fechar direto não escreve nada no aparelho — n
   vD9f.app === false && vD9f.retratos.length === 0 && vD9f.base === false, JSON.stringify(vD9f));
 await ctx9f.close();
 
+secao('9h. A ORIGEM FORA DO AR E A REDE QUE NÃO ANDA: a fila guardada entra com o `onLine` verdadeiro');
+// Auditoria de 2026-09-29 (O1). O "Disponível offline" só cobria o modo avião,
+// e duas falhas deixavam a fila preparada no aparelho sem uso:
+//  · o APP só a abria com `onLine === false`. No "lie-fi" (o rádio diz que há
+//    rede e nada passa) a busca esperava o teto de 45 s e a tela virava "Falha
+//    ao carregar". Aqui o lie-fi é a forma RÁPIDA da mesma falha: a API aborta
+//    sem resposta com o `onLine` verdadeiro — o `_post` trata igual ao teto
+//    estourado (`transient`). O teto de 45 s mediu-se à parte (cenário h2).
+//  · o SERVICE WORKER só caía no cache em erro de REDE: a VM fora do ar atrás
+//    do Cloudflare responde "502 Bad Gateway", a resposta CHEGA e era devolvida.
+//    Um proxy na frente do servidor faz o papel da borda. E a navegação sozinha
+//    não bastava: com ela, a página guardada abria e os scripts vinham 502.
+// CONTROLES: (1) a mesma falha com o offline DESLIGADO é a tela de falha — o
+// instrumento enxerga a tela quando não há o que abrir; (2) com a borda em 502,
+// o `?diag-rede` (que o worker não intercepta) volta 502 — a origem está MESMO
+// fora, e o app que abriu veio do cache.
+let borda9h = 'normal';
+const proxy9h = http.createServer((req, res) => {
+  if (borda9h === '502') {
+    res.writeHead(502, { 'content-type': 'text/html' });
+    return res.end('<html><body><h1>502 Bad Gateway</h1><p>borda: origem fora do ar</p></body></html>');
+  }
+  const up = http.request({ host: '127.0.0.1', port: PORTA, path: req.url, method: req.method, headers: req.headers }, (r) => {
+    res.writeHead(r.statusCode, r.headers); r.pipe(res);
+  });
+  up.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+  req.pipe(up);
+});
+await new Promise((ok) => proxy9h.listen(0, '127.0.0.1', ok));
+const BASE9H = `http://127.0.0.1:${proxy9h.address().port}`;
+const ctx9h = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
+await ctx9h.route('**/*-tiles/live/base/**', servirTile);
+// A API desta seção: 'ok' traz 3; 'rede' aborta sem resposta (com o `onLine`
+// verdadeiro); '502' é a página de erro da borda (o corpo não é JSON).
+let api9h = 'ok';
+const PED_9H = [171, 172, 173].map((i) => SO_MAPA(i));
+await ctx9h.route('**/api/*', (r) => {
+  if (api9h === 'rede') return r.abort('connectionreset');
+  if (api9h === '502') return r.fulfill({ status: 502, contentType: 'text/html', body: '<h1>502 Bad Gateway</h1>' });
+  const rota = r.request().url().split('/api/')[1];
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (rota === 'buscar-places') return json({ success: true, places: PED_9H, hasMore: false, page: 1, total: 3 });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+  return r.abort('failed');
+});
+const abrir9h = async (nome) => {
+  const pg = await ctx9h.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
+  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
+  await pg.goto(BASE9H + '/', { waitUntil: 'domcontentloaded' });
+  return pg;
+};
+// O que a tela mostra: o card, a tela de falha, ou nada ainda.
+const tela9h = (pg) => pg.evaluate(() => {
+  const erro = document.getElementById('loadErrorState');
+  return { app: typeof AppState !== 'undefined', onLine: navigator.onLine,
+    fila: typeof AppState !== 'undefined' ? AppState.queue.map((p) => p.venueID) : null,
+    card: typeof cardDaFrente === 'function' && !!cardDaFrente(),
+    falha: !!erro && !erro.classList.contains('hidden'),
+    abriu: typeof dfatoAnel !== 'undefined' ? (dfatoAnel.find((e) => e.k === 'offline.abriu') || null) : null };
+});
+const decidiu9h = (pg) => esperarNaPagina(pg, () => typeof AppState !== 'undefined'
+  && (!!cardDaFrente() || !document.getElementById('loadErrorState').classList.contains('hidden')), 20000, 200);
+const ESPERADA_9H = JSON.stringify(PED_9H.map((p) => p.venueID));
+
+// Preparo: com a origem de pé, o worker assume, a busca traz 3 e o offline os guarda.
+const prep9h = await abrir9h('preparo');
+await esperarNaPagina(prep9h, () => !!(navigator.serviceWorker && navigator.serviceWorker.controller), 20000, 100);
+await prep9h.evaluate(() => {
+  API.setSession('tok-9h');
+  localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9h') }));
+  AppState.preferences.offlineDisponivel = true; AppState.preferences.comoFuncionaVisto = true; savePreferences();
+});
+await prep9h.reload({ waitUntil: 'domcontentloaded' });
+const guardou9h = await esperarNaPagina(prep9h, async () => typeof offlineLerFila === 'function'
+  && ((await offlineLerFila()) || {}).places?.length === 3, 20000, 200);
+diz('PRÉ-CONDIÇÃO: com a origem de pé, o worker assumiu e a fila da busca foi guardada (3)', guardou9h.ok, JSON.stringify(guardou9h));
+await prep9h.close({ runBeforeUnload: true });
+
+// 1. A REDE QUE NÃO ANDA: a API não responde, e o aparelho diz que há rede.
+api9h = 'rede';
+const p1_9h = await abrir9h('lie-fi');
+await decidiu9h(p1_9h);
+const t1_9h = await tela9h(p1_9h);
+diz('a API sem resposta com o `onLine` verdadeiro: a fila guardada entra — nada de "Falha ao carregar"',
+  t1_9h.onLine === true && t1_9h.card && !t1_9h.falha && JSON.stringify(t1_9h.fila) === ESPERADA_9H
+  && !!t1_9h.abriu && t1_9h.abriu.aposFalha === true, JSON.stringify(t1_9h));
+// CONTROLE (1): o mesmo, com o offline DESLIGADO (a preferência gravada; a fila
+// guardada fica na base, mas não é dele) — a tela de falha.
+await p1_9h.evaluate(() => {
+  const p = JSON.parse(localStorage.getItem('waze_places_preferences') || '{}');
+  p.offlineDisponivel = false;
+  localStorage.setItem('waze_places_preferences', JSON.stringify(p));
+});
+await p1_9h.close({ runBeforeUnload: true });
+const c1_9h = await abrir9h('controle, offline desligado');
+await decidiu9h(c1_9h);
+const tc_9h = await tela9h(c1_9h);
+diz('CONTROLE: a mesma falha com o offline DESLIGADO é a tela de falha (o instrumento enxerga a tela)',
+  tc_9h.falha && !tc_9h.card && tc_9h.fila && tc_9h.fila.length === 0, JSON.stringify(tc_9h));
+await c1_9h.evaluate(() => {
+  const p = JSON.parse(localStorage.getItem('waze_places_preferences') || '{}');
+  p.offlineDisponivel = true;
+  localStorage.setItem('waze_places_preferences', JSON.stringify(p));
+});
+await c1_9h.close({ runBeforeUnload: true });
+
+// 2. A ORIGEM FORA DO AR: 502 em TUDO (a página, os scripts, a API).
+borda9h = '502'; api9h = '502';
+const p2_9h = await abrir9h('borda 502');
+await decidiu9h(p2_9h);
+const t2_9h = await tela9h(p2_9h);
+diz('a ORIGEM fora do ar (502 em tudo): o app instalado abre da cópia guardada, e a fila guardada entra',
+  t2_9h.app && t2_9h.card && !t2_9h.falha && JSON.stringify(t2_9h.fila) === ESPERADA_9H, JSON.stringify(t2_9h));
+const diag9h = await p2_9h.evaluate(async () => { try { return (await fetch('/?diag-rede=1')).status; } catch (e) { return 'erro'; } });
+diz('CONTROLE: com a borda em 502, o que não passa pelo worker volta 502 — a origem está mesmo fora', diag9h === 502, `status ${diag9h}`);
+await p2_9h.close();
+borda9h = 'normal'; api9h = 'ok';
+await ctx9h.close();
+await new Promise((ok) => proxy9h.close(ok));
+
+secao('9i. DUAS ABAS E A REDE VOLTANDO: cada decisão da fila de saída sai UMA vez');
+// Auditoria de 2026-09-29 (O6). A trava do esvaziamento era da ABA, e a fila de
+// saída é do APARELHO: com o app em duas abas, a rede voltando manda o `online`
+// às duas, e as duas esvaziavam a MESMA fila — cada decisão saía duas vezes pro
+// Waze e o pouso contava nas duas (medido: 3 decisões, 5 rejeitados no
+// Histórico). Hoje a trava do navegador (`navigator.locks`) deixa uma aba
+// esvaziar; sem ela (navegador antigo) cada item é REIVINDICADO antes do envio.
+// Duas páginas do MESMO contexto: o armazenamento e a trava são os do aparelho.
+// CONTROLE: a mesma fila com UMA aba — cada decisão sai e conta uma vez.
+const cenario9i = async (nome, abas, semTravas) => {
+  const ctx9i = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  if (semTravas) await ctx9i.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'locks', { get: () => undefined, configurable: true }); });
+  let aviao9i = false;
+  const decisoes = [];
+  await ctx9i.route('**/api/*', async (r) => {
+    if (aviao9i) return r.abort('internetdisconnected');
+    const rota = r.request().url().split('/api/')[1];
+    let corpo = {};
+    try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* corpo vazio */ }
+    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+    if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(190)], hasMore: false, page: 1, total: 1 });
+    if (rota === 'validar-place' || rota === 'marcar-lido') {
+      const k = corpo.venueID + '|' + corpo.updateRequestID;
+      const repetida = decisoes.includes(k);
+      decisoes.push(k);
+      await dormir(repetida ? 900 : 150);
+      // A 2ª decisão do mesmo pedido é o Waze dizendo "já tratado" (702).
+      return json(repetida ? { success: false, errorCategory: 'already_processed' } : { success: true });
+    }
+    if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+    return r.abort('failed');
+  });
+  const pags = [];
+  for (let i = 0; i < abas; i++) {
+    const pg = await ctx9i.newPage();
+    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome} ${i}]`, txt: String(e.message) }));
+    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+    pags.push(pg);
+  }
+  await esperarNaPagina(pags[0], () => typeof API !== 'undefined', 20000, 100);
+  await pags[0].evaluate(() => {
+    API.setSession('tok-9i');
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9i') }));
+    AppState.preferences.comoFuncionaVisto = true; savePreferences();
+    localStorage.removeItem('waze_places_history'); localStorage.removeItem('waze_places_saida');
+  });
+  for (const pg of pags) await pg.reload({ waitUntil: 'domcontentloaded' });
+  for (const pg of pags) await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente(), 20000, 100);
+  const travas = await pags[0].evaluate(() => !!(navigator.locks && navigator.locks.request));
+  // Sem rede: três ✕ vão pra fila de saída (gravados como a fila de saída grava).
+  aviao9i = true; await ctx9i.setOffline(true);
+  await pags[0].evaluate(() => {
+    for (const i of [1, 2, 3]) enfileirarSaida('reject', { venueID: 'w' + i, updateRequestID: 'x' + i, creatorId: 777, createdBy: 'autor' });
+  });
+  const naFila = await pags[0].evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
+  // A rede volta: o navegador avisa TODAS as abas.
+  aviao9i = false; await ctx9i.setOffline(false);
+  for (const pg of pags) await esperarFimDaSaida(pg, 20000);
+  await dormir(1500);   // a decisão repetida, se houver, pousa em 900 ms
+  const porPedido = {};
+  for (const k of decisoes) porPedido[k] = (porPedido[k] || 0) + 1;
+  const hist = await pags[0].evaluate(() => ({
+    rejeitados: (JSON.parse(localStorage.getItem('waze_places_history') || '{}')._total || {}).rejected || 0,
+    fila: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length }));
+  await ctx9i.close();
+  return { travas, naFila, porPedido, hist };
+};
+const duas9i = await cenario9i('com a trava', 2, false);
+diz('PRÉ-CONDIÇÃO: o navegador tem a trava entre abas, e 3 decisões esperam na fila de saída',
+  duas9i.travas === true && duas9i.naFila === 3, JSON.stringify(duas9i));
+diz('duas abas e a rede voltando: cada decisão saiu UMA vez pro Waze',
+  Object.keys(duas9i.porPedido).length === 3 && Object.values(duas9i.porPedido).every((n) => n === 1), JSON.stringify(duas9i.porPedido));
+diz('e o Histórico contou 3 rejeitados (não em dobro), com a fila vazia',
+  duas9i.hist.rejeitados === 3 && duas9i.hist.fila === 0, JSON.stringify(duas9i.hist));
+const reserva9i = await cenario9i('sem a trava', 2, true);
+diz('PRÉ-CONDIÇÃO: sem `navigator.locks` (a reserva) de fato — 3 decisões esperando',
+  reserva9i.travas === false && reserva9i.naFila === 3, JSON.stringify(reserva9i));
+diz('sem a trava do navegador, cada item REIVINDICADO sai uma vez e conta uma vez',
+  Object.keys(reserva9i.porPedido).length === 3 && Object.values(reserva9i.porPedido).every((n) => n === 1)
+  && reserva9i.hist.rejeitados === 3 && reserva9i.hist.fila === 0, JSON.stringify(reserva9i));
+const uma9i = await cenario9i('controle', 1, false);
+diz('CONTROLE: uma aba só — cada decisão sai e conta uma vez (o instrumento conta certo)',
+  Object.keys(uma9i.porPedido).length === 3 && Object.values(uma9i.porPedido).every((n) => n === 1)
+  && uma9i.hist.rejeitados === 3, JSON.stringify(uma9i));
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));
@@ -2514,10 +2765,10 @@ if (falhas) {
   console.log(`\n✗ smoke do offline: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log('\n✓ smoke do offline: 17 seções (16 com o service worker LIGADO) — o MAPINHA DO CARD e o'
+console.log('\n✓ smoke do offline: 20 seções (17 com o service worker LIGADO) — o MAPINHA DO CARD e o'
   + ' MAPA AMPLIADO desenhando tile (com contraprova que vai a zero), mapa intacto com o'
   + ' toggle desligado e com o cache cheio, fila em IndexedDB, sufixo da foto como contrato'
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle)');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), e DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela)');
