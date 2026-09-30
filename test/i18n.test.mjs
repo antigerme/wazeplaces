@@ -293,6 +293,23 @@ test('i18n: dicionário não acumula srv.err.* órfã', () => {
     `${orfas.length} chaves srv.err.* não são mais emitidas por ninguém:\n` + orfas.join('\n'));
 });
 
+// Aviso (toast) que ninguém mostra é frase que DESCREVE o app — e envelhece
+// junto com ele sem ninguém ver. `toast.devCapturado` dizia "segure o botão pra
+// baixar" desde que segurar o FAB passou a MOVÊ-LO (auditoria de 2026-09-29,
+// T5): lida por quem traduz ou mantém, ensinava o gesto errado. Os toasts são
+// pedidos pela chave LITERAL (`t('toast.x')`), então aqui a régua é exata.
+test('i18n: toda chave toast.* do dicionário é mostrada pelo app — aviso morto sai', () => {
+  const codigo = ['js/app.js', 'js/api.js', 'js/presenca.js', 'js/swipe.js', 'js/sw-register.js', 'index.src.html']
+    .map(read).join('\n');
+  const usada = (k) => codigo.includes(`'${k}'`) || codigo.includes(`"${k}"`) || codigo.includes('`' + k + '`');
+  const toasts = Object.keys(DICT[LANG_REF]).filter((k) => k.startsWith('toast.'));
+  // CONTROLE: o varredor enxerga um toast de verdade e não inventa um que não existe.
+  assert.ok(toasts.length >= 50 && usada('toast.logoutServerFailed'), 'CONTROLE: o varredor não achou os toasts do app');
+  assert.ok(!usada('toast.naoExisteNenhum'), 'CONTROLE: o varredor achou uma chave que não existe');
+  const mortas = toasts.filter((k) => !usada(k));
+  assert.deepEqual(mortas, [], 'aviso no dicionário que o app nunca mostra (tire dos 4 idiomas):\n' + mortas.join('\n'));
+});
+
 // O `||` que fazia o português do servidor GANHAR da tradução. Era o buraco de
 // i18n mais fundo do app: 8 pontos onde `result.error || t('...')` mostrava a
 // frase do backend e só usava o dicionário se o servidor não dissesse nada.

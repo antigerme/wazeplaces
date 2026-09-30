@@ -317,6 +317,30 @@ test('a Ajuda diz a verdade sobre o que fica no aparelho, nos 4 idiomas', () => 
   }
 });
 
+test('o que o botão do modo dev registra tem UM nome por língua, e o arquivo baixado o nome do botão (T5)', () => {
+  // Em português a tela diz "registrar a tela" e "N registros não baixados", e
+  // a Ajuda dizia "as capturas" pra mesma coisa; em inglês o aviso mandava
+  // baixar o "report" — que o botão, a Ajuda e o aviso de pronto chamam de
+  // "diagnostics" (e "Report", no card, é o reporte de um pedido). Auditoria
+  // de 2026-09-29. O nome vem da TELA: o do aviso do desligar e o do botão.
+  const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const valores = (chave) => [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}': '([^']*)'`, 'g'))].map((m) => m[1]);
+  const aviso = valores('toast.devPerdeCaptura');     // "Há {n} registros não baixados: baixe o diagnóstico…"
+  const ajuda = valores('help.privacy.notStored');
+  const botao = valores('filters.diag.btn');          // "Baixar diagnóstico"
+  assert.equal(aviso.length, 4);
+  assert.equal(ajuda.length, 4);
+  assert.equal(botao.length, 4);
+  for (let i = 0; i < 4; i++) {
+    const nome = (/\{n\} (\S+)/.exec(aviso[i]) || [])[1];
+    assert.ok(nome, `PRÉ-CONDIÇÃO: o aviso (${i}) mudou de forma — não achei o nome depois de {n}`);
+    assert.ok(ajuda[i].includes(nome), `a Ajuda (${i}) chama de outro nome o que a tela chama de "${nome}"`);
+    const arquivo = botao[i].split(/\s+/).pop().toLowerCase();
+    assert.ok(aviso[i].toLowerCase().includes(arquivo), `o aviso (${i}) manda baixar outra coisa que não o "${arquivo}" do botão`);
+    assert.ok(ajuda[i].toLowerCase().includes(arquivo), `a Ajuda (${i}) chama de outro nome o "${arquivo}" do botão`);
+  }
+});
+
 // ── O10: a base do diagnóstico tem TETO (auditoria de 2026-09-26) ────────────
 // O IndexedDB do WebKit às vezes não responde. A gravação com a abertura
 // pendurada prendia a fila `diagGuardando`, e o apagar do "Sair" e do desligar
