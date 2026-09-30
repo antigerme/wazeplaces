@@ -105,6 +105,9 @@ function montarTreino({ undoEnabled = true, cotaPassada = true } = {}) {
     showToast: () => {}, t: (k) => 'T:' + k,
     loteDeLidosEmVoo: false,
     canDisableUndo: () => cotaPassada,
+    // Entrar no treino despacha as escritas do lightbox que estavam na janela
+    // do Desfazer (lote 8 do lightbox, L25): aqui não há nenhuma.
+    enviarPendenciasDoLightbox: () => {},
   };
   const corpo = [
     'let lastFocusedBeforeModal = null, ultimoFocoForaDasCamadas = null;',
@@ -200,7 +203,8 @@ function montarFolha({ undoEnabled = true, cotaPassada = true } = {}) {
   };
   const chaves = Object.keys(deps);
   const { abrirFolhaDoAutor } = new Function(...chaves,
-    [fatiar('pedidosDoAutorNaFila'), fatiar('semJanelaDeDesfazer'), fatiar('abrirFolhaDoAutor'),
+    // `chaveDoPedido`: a folha guarda as chaves que CONTOU (lote 8 da fila, L21).
+    [fatiar('pedidosDoAutorNaFila'), fatiar('chaveDoPedido'), fatiar('semJanelaDeDesfazer'), fatiar('abrirFolhaDoAutor'),
      'return { abrirFolhaDoAutor };'].join('\n'))(...chaves.map((k) => deps[k]));
   abrirFolhaDoAutor(fila[0]);
   return els.get('autorCorpo').innerHTML;
