@@ -944,6 +944,23 @@ const LIMPEZA_AO_FECHAR = {
     // Fechada, a lista não fica no DOM: a captura do diagnóstico (que leva o
     // DOM inteiro) mostra o que estava NA TELA, não uma lista velha escondida.
     presencaModal() { window.Presenca?.esquecerLista?.(); },
+    // A folha do pedido que CHEGOU pela conversa: o nome do local, de quem
+    // veio, o endereço, a foto e o link são de TERCEIRO, e ficavam no DOM depois
+    // de fechar — e depois do "Sair", que passa por aqui (o `Presenca.desligar`
+    // fecha a folha pelo `closeModal`, e abrir outro modal a esconde com esta
+    // limpeza). A próxima abertura preenche tudo de novo (`abrirPedidoRecebido`).
+    pedidoModal() {
+        for (const id of ['pedidoNome', 'pedidoDe', 'pedidoTipo', 'pedidoCat', 'pedidoEnd']) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '';
+        }
+        for (const id of ['pedidoTipoRow', 'pedidoCatRow', 'pedidoEndRow', 'pedidoFoto']) {
+            document.getElementById(id)?.classList.add('hidden');
+        }
+        const img = document.getElementById('pedidoFotoImg');
+        if (img) { img.onerror = null; img.removeAttribute('src'); }
+        document.getElementById('pedidoWme')?.removeAttribute('href');
+    },
     pairEnterModal() {
         const campo = document.getElementById('pairCodeInput');
         if (campo) campo.value = '';

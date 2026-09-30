@@ -1200,10 +1200,16 @@ function presencaEsquecerAberta() {
     // Fechada, a conversa não fica desenhada: o próximo abrir redesenha do
     // zero, e a captura do diagnóstico (que leva o DOM inteiro) mostra o que
     // estava NA TELA, não a última conversa aberta escondida num modal.
-    const corpo = document.getElementById('conversaMsgs');
-    if (corpo) corpo.innerHTML = '';
+    presencaDesenhar(document.getElementById('conversaMsgs'), '');
     const anuncio = document.getElementById('conversaAnuncio');
     if (anuncio) anuncio.textContent = '';
+    // O TOPO também: o nome de quem conversou e onde a pessoa está (nível e
+    // distância) ficavam no DOM depois de fechar — e depois do "Sair", que passa
+    // por aqui (auditoria de 2026-09-29).
+    const titulo = document.getElementById('conversaTitle');
+    if (titulo) titulo.textContent = '';
+    const estado = document.getElementById('conversaEstado');
+    if (estado) { presencaDesenhar(estado, ''); estado.classList.add('hidden'); }
     presencaRenderPilula();
     presencaRenderLista();
 }
@@ -1306,6 +1312,7 @@ function presencaRenderAnexo() {
     if (!tira || !botao) return;
     const a = Presenca.anexo;
     tira.classList.toggle('hidden', !a);
+    const img = document.getElementById('conversaAnexoFoto');
     if (a) {
         const nome = (a.name || '').trim() || (a.address || '').trim() || t('card.noName');
         document.getElementById('conversaAnexoNome').textContent = nome;
@@ -1313,10 +1320,17 @@ function presencaRenderAnexo() {
         // Quem some é a CAIXA, não o <img>: escondendo só a imagem sobravam
         // 40px de vão vazio com o `gap` do lado, que lê como foto que não
         // carregou.
-        const img = document.getElementById('conversaAnexoFoto');
         const caixa = img.parentElement;
         if (a.imageUrl) { img.src = a.imageUrl; caixa.classList.remove('hidden'); }
         else { img.removeAttribute('src'); caixa.classList.add('hidden'); }
+    } else {
+        // Solto — mandado, tirado, ou a conversa fechou: a tirinha escondida
+        // guardava o nome e a foto do pedido (dado de TERCEIRO), e a captura do
+        // diagnóstico os levava depois do "Sair" (auditoria de 2026-09-29).
+        document.getElementById('conversaAnexoNome').textContent = '';
+        document.getElementById('conversaAnexoMeta').textContent = '';
+        img.removeAttribute('src');
+        img.parentElement.classList.add('hidden');
     }
     // Ação impossível sai da frente em vez de virar botão morto.
     const temPedido = !!(window.cardParaConversa && window.cardParaConversa());

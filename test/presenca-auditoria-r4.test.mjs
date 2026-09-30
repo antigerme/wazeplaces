@@ -114,3 +114,116 @@ test('foto de cartão que NÃO carregou não volta pro redesenho (era pedida de 
   await tick();
   assert.ok(c.$('conversaMsgs').innerHTML.includes(`src="${FOTO_RUIM}"`), 'reabrir a conversa não tentou de novo a foto');
 });
+
+// ── P1: o que a conversa e a folha do pedido deixavam no DOM ────────────────
+
+// No navegador, `img.src` É o atributo: `removeAttribute('src')` o esvazia. O
+// elemento de mentira guarda os dois separados — sem ligar um ao outro, a
+// asserção "a foto saiu" passaria com a foto lá (é o gotcha #28 no instrumento).
+function comSrcDeVerdade(el) {
+  Object.defineProperty(el, 'src', { configurable: true, get() { return this.getAttribute('src') || ''; }, set(v) { this.setAttribute('src', v); } });
+  return el;
+}
+
+const CARD_PRESO = { venueID: '9.9.9', updateRequestID: 'u9', name: 'Oficina Segredo do Terceiro', address: 'Rua Privada, 77',
+  categories: ['CAR_SERVICES'], updateTypeKey: 'IMAGE', imageUrl: 'https://venue-image.waze.com/thumbs/thumb700_do_terceiro', lat: -23.5, lon: -46.6, region: 'row' };
+
+test('P1 fechar a conversa leva o TOPO (quem e onde) e a TIRINHA do pedido preso — não só as mensagens', () => {
+  const c = novoCliente();
+  comSrcDeVerdade(c.$('conversaAnexoFoto'));
+  c.win.cardParaConversa = () => CARD_PRESO;
+  c.AppState.currentPlace = { mapa: { centro: [-23.55, -46.63] } };
+  c.P.Presenca.online = [pessoa(CAF, 'cafanha', -23.5, -46.6, 3)];
+  c.P.presencaAbrirConversa(CAF);
+  c.P.presencaAnexarCard();
+  const antes = { titulo: c.$('conversaTitle').textContent, estado: c.$('conversaEstado').innerHTML,
+    anexo: c.$('conversaAnexoNome').textContent, foto: c.$('conversaAnexoFoto').src };
+  assert.equal(antes.titulo, 'cafanha', 'CONTROLE: o topo tem que estar preenchido');
+  assert.match(antes.estado, /presenca\.conversa\.naApp · L4/, 'CONTROLE: o estado tem que estar preenchido');
+  assert.equal(antes.anexo, 'Oficina Segredo do Terceiro', 'CONTROLE: a tirinha tem que estar preenchida');
+  assert.equal(antes.foto, CARD_PRESO.imageUrl);
+  c.P.presencaEsquecerAberta();                                 // a limpeza do modal (✕, Esc, scrim, voltar)
+  assert.equal(c.$('conversaTitle').textContent, '', 'o nome de quem conversou ficou no DOM');
+  assert.equal(c.$('conversaEstado').innerHTML, '', 'o estado (nível e distância da pessoa) ficou no DOM');
+  assert.equal(c.$('conversaEstado').classList.contains('hidden'), true);
+  assert.equal(c.$('conversaAnexoNome').textContent, '', 'o nome do pedido preso ficou na tirinha escondida');
+  assert.equal(c.$('conversaAnexoMeta').textContent, '');
+  assert.equal(c.$('conversaAnexoFoto').src, '', 'a foto do pedido preso ficou na tirinha escondida');
+  // E reabrir desenha tudo de novo (a memória do último desenho não pula o topo).
+  c.P.presencaAbrirConversa(CAF);
+  assert.equal(c.$('conversaTitle').textContent, 'cafanha');
+  assert.match(c.$('conversaEstado').innerHTML, /presenca\.conversa\.naApp/, 'reabrir a conversa deixou o topo vazio');
+});
+
+test('P1 mandar o pedido solta a tirinha E a esvazia; o "Sair" passa pela mesma limpeza', async () => {
+  const c = novoCliente({ api: { chat: () => ({ success: true }) } });
+  comSrcDeVerdade(c.$('conversaAnexoFoto'));
+  c.win.cardParaConversa = () => CARD_PRESO;
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  c.P.presencaAnexarCard();
+  c.$('conversaInput').value = 'é fachada?';
+  c.$('conversaForm').disparar('submit');
+  await tick();
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 1, 'CONTROLE: o pedido tem que ter saído');
+  assert.equal(c.$('conversaAnexoNome').textContent, '', 'a tirinha solta guardou o nome do pedido');
+  assert.equal(c.$('conversaAnexoFoto').src, '', 'a tirinha solta guardou a foto do pedido');
+  // O "Sair" (presencaEsquecer → desligar → esquecerAberta), com a conversa aberta.
+  c.P.presencaAnexarCard();
+  c.P.presencaEsquecer();
+  for (const id of ['conversaTitle', 'conversaAnexoNome', 'conversaAnexoMeta']) assert.equal(c.$(id).textContent, '', `${id} ficou no DOM depois do "Sair"`);
+  assert.equal(c.$('conversaEstado').innerHTML, '');
+  assert.equal(c.$('conversaAnexoFoto').src, '');
+});
+
+// A folha do pedido recebido é do app.js: a abertura (`abrirPedidoRecebido`) e a
+// limpeza (`LIMPEZA_AO_FECHAR.pedidoModal`) rodam DE VERDADE, fatiadas, num
+// documento de mentira que anota TUDO o que a abertura escreve — o que ela
+// escreve, a limpeza tem que apagar (e um campo novo na folha entra sozinho).
+test('P1 a folha do pedido recebido: tudo o que a abertura escreve, o fechamento apaga', async () => {
+  const { readFileSync } = await import('node:fs');
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const els = new Map();
+  const escritos = new Set();
+  const el = (id) => {
+    if (els.has(id)) return els.get(id);
+    const attrs = {};
+    const cls = new Set(['hidden']);
+    let texto = '';
+    const e = {
+      id, onerror: null,
+      get textContent() { return texto; }, set textContent(v) { texto = String(v); if (texto) escritos.add(id); },
+      get src() { return attrs.src || ''; }, set src(v) { attrs.src = String(v); escritos.add(id); },
+      get href() { return attrs.href || ''; }, set href(v) { attrs.href = String(v); escritos.add(id); },
+      setAttribute(k, v) { attrs[k] = String(v); }, getAttribute(k) { return k in attrs ? attrs[k] : null; }, removeAttribute(k) { delete attrs[k]; },
+      classList: { add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c), toggle: (c, f) => (f ? cls.add(c) : cls.delete(c)) },
+    };
+    els.set(id, e);
+    return e;
+  };
+  const document = { getElementById: el };
+  const fatiar = (nome) => {
+    const ini = APP.indexOf('function ' + nome + '(');
+    assert.ok(ini >= 0, `sumiu ${nome}`);
+    const fim = APP.slice(ini + 1).search(/\n(?:function |async function |const |let )/);
+    return APP.slice(ini, ini + 1 + fim);
+  };
+  const abrir = new Function('document', 'identidadeDoPlace', 't', 'rotuloDeEnum', 'linkWmeDoPedido', 'API', 'openModal',
+    fatiar('abrirPedidoRecebido') + '\nreturn abrirPedidoRecebido;')(
+    document, (d) => ({ titulo: d.name, tituloEhEndereco: false }), (k, v) => (v ? `${k}${JSON.stringify(v)}` : k), (p, k) => k,
+    () => 'https://www.waze.com/editor?env=row&venues=9.9.9', { getRegion: () => 'row' }, () => {});
+  const ini = APP.indexOf('const LIMPEZA_AO_FECHAR = {');
+  const LIMPEZA = new Function('document', 'window', 'URL', APP.slice(ini, APP.indexOf('\n};', ini) + 3) + '\nreturn LIMPEZA_AO_FECHAR;')(document, {}, URL);
+  abrir(CARD_PRESO, 'cafanha');
+  assert.ok(['pedidoNome', 'pedidoDe', 'pedidoEnd', 'pedidoFotoImg', 'pedidoWme'].every((id) => escritos.has(id)),
+    `CONTROLE: a abertura tem que escrever o nome, de quem, o endereço, a foto e o link (escreveu ${[...escritos]})`);
+  assert.equal(typeof LIMPEZA.pedidoModal, 'function', 'a folha do pedido recebido não tem limpeza ao fechar');
+  LIMPEZA.pedidoModal();
+  for (const id of escritos) {
+    const e = els.get(id);
+    assert.equal(e.textContent, '', `${id}: o texto de terceiro ficou na folha fechada`);
+    assert.equal(e.getAttribute('src'), null, `${id}: a foto de terceiro ficou na folha fechada`);
+    assert.equal(e.getAttribute('href'), null, `${id}: o link do pedido ficou na folha fechada`);
+  }
+  assert.equal(els.get('pedidoFoto').classList.contains('hidden'), true, 'a caixa da foto ficou aberta, vazia');
+});
