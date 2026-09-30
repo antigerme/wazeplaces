@@ -12735,9 +12735,14 @@ function abrirFolhaDoAutor(place) {
             closeModal('autorModal');
             focarAutor(place.creatorId);
         });
+        // Só os que a folha CONTOU e mostrou no botão (L21): a busca que pousa
+        // com ela aberta traz mais pedidos do autor, e o toque rejeitava esses
+        // também — "Rejeitar os 2", e saíam 4. É a régua do "Marcar todos"
+        // (`loteDeLidosContado`): o que o app mostra é o que ele aceita.
+        const contados = naFila.map(chaveDoPedido);
         document.getElementById('autorRejeitar').addEventListener('click', () => {
             closeModal('autorModal');
-            rejeitarLoteDoAutor(place);
+            rejeitarLoteDoAutor(place, contados);
         });
     }
     const auto = document.getElementById('autorAuto');
@@ -12761,7 +12766,11 @@ function abrirFolhaDoAutor(place) {
 
 // O lote, com a MESMA janela de Desfazer de um card só — a trava dos botões, o
 // banner com a contagem, o `resetQueue`. A diferença é `aoSair: 'cancel'`.
-function rejeitarLoteDoAutor(place) {
+//
+// `contados`: as chaves que a folha contou ao abrir. O lote é a INTERSEÇÃO
+// delas com a fila de agora — nunca mais que o número que o botão mostrou, e
+// sem os que saíram da fila nesse meio.
+function rejeitarLoteDoAutor(place, contados) {
     // Sem sessão o lote não sai (a folha pode seguir aberta durante a renovação
     // pela extensão), e a folha já fechou com o toque: diz por quê. ANTES da
     // trava, que também é verdadeira sem sessão e diria "espere o Desfazer".
@@ -12771,7 +12780,8 @@ function rejeitarLoteDoAutor(place) {
     // 2026-09-25). Diz o que fazer.
     if (acoesTravadas()) { showToast(t(avisoDaTrava()), 'info'); return; }
     if (Treino.ativo) { showToast(t('treino.semLote'), 'info'); return; }
-    const places = pedidosDoAutorNaFila(place);
+    const naFolha = Array.isArray(contados) ? new Set(contados) : null;
+    const places = pedidosDoAutorNaFila(place).filter((p) => !naFolha || naFolha.has(chaveDoPedido(p)));
     if (places.length === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
     const n = places.length;
     // Otimista, como o card único: o placar anda agora e volta no Desfazer.

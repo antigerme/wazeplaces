@@ -295,3 +295,58 @@ test('F7: trocar a região com a recusa automática no ar não manda o resto pro
   assert.deepEqual(regioes, ['row', 'row', 'row'],
     `a recusa mandou pedidos do servidor ROW pra ${regioes.join(', ')}: "não encontrado" lá conta como feito, e o pedido fica pendente`);
 });
+
+// ═══ Auditoria de 2026-09-29: a DECISÃO do lote não some nem é contada sem ir ══
+// Cada teste foi visto REPROVANDO com o conserto desfeito (sabotagem registrada
+// no relatório da rodada).
+
+// ── L21: "Rejeitar os N" rejeita só os N que a folha contou ────────────────────
+// A folha contava ao ABRIR e o toque recontava: a busca que pousava com ela
+// aberta trazia mais pedidos do autor, e saíam junto ("Rejeitar os 2", saíram
+// 4 — medido no navegador, e5/t10). A régua é a do "Marcar todos".
+function montarFolhaDoAutor() {
+  const agendadas = [];
+  const X1 = pedido(1);
+  const AppState = { authenticated: true, queue: [X1, pedido(5, 1), pedido(2)], currentPlace: X1, stats: { rejected: 0 },
+    serverTotal: 3, hasMore: false };
+  const deps = {
+    AppState, acoesTravadas: () => false, avisoDaTrava: () => 'x', Treino: { ativo: false }, showToast: () => {}, t: (k) => k,
+    chaveDoPedido: chave, updateStats: () => {}, saveStats: () => {}, updatePendingCount: () => {},
+    removeCurrentCardEl: () => {}, showCurrentPlace: () => {}, maybePrefetch: () => {}, startFetching: () => {}, showNoPlaces: () => {},
+    API: { getRegion: () => 'row' }, scheduleAction: (tipo, places) => agendadas.push(places.map((p) => p.venueID)), enviarLote: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, 'let tratouNestaFila = false;\n' + fatiar('pedidosDoAutorNaFila') + '\n'
+    + fatiar('rejeitarLoteDoAutor') + '\nreturn { rejeitarLoteDoAutor, pedidosDoAutorNaFila };')(...chaves.map((k) => deps[k]));
+  return { app, AppState, agendadas, X1 };
+}
+
+test('L21: a busca pousa com a folha aberta e traz mais do autor — o toque rejeita SÓ os que a folha contou', async () => {
+  const m = montarFolhaDoAutor();
+  const contados = m.app.pedidosDoAutorNaFila(m.X1).map(chave);          // a folha abre: "Rejeitar os 2"
+  assert.equal(contados.length, 2);
+  m.AppState.queue.push(pedido(3), pedido(4));                          // a página chega com a folha aberta
+  m.app.rejeitarLoteDoAutor(m.X1, contados);
+  assert.deepEqual(m.agendadas, [['v1', 'v2']], 'saíram pedidos que a folha não contou — o botão dizia 2');
+  assert.equal(m.AppState.stats.rejected, 2);
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v5', 'v3', 'v4'], 'os que chegaram depois sumiram da fila');
+});
+
+test('L21: o contado que saiu da fila no meio não volta a sair; CONTROLE: sem a lista, é a fila inteira (o instrumento distingue)', async () => {
+  const m = montarFolhaDoAutor();
+  const contados = m.app.pedidosDoAutorNaFila(m.X1).map(chave);
+  m.AppState.queue = m.AppState.queue.filter((p) => p.venueID !== 'v2');   // outra decisão levou o v2
+  m.app.rejeitarLoteDoAutor(m.X1, contados);
+  assert.deepEqual(m.agendadas, [['v1']]);
+  const c = montarFolhaDoAutor();
+  c.AppState.queue.push(pedido(3));
+  c.app.rejeitarLoteDoAutor(c.X1);
+  assert.deepEqual(c.agendadas, [['v1', 'v2', 'v3']]);
+});
+
+test('L21: a folha entrega ao toque as chaves que ela contou ao ABRIR', () => {
+  const f = fatiar('abrirFolhaDoAutor');
+  assert.match(f, /const naFila = pedidosDoAutorNaFila\(place\);/);
+  assert.match(f, /const contados = naFila\.map\(chaveDoPedido\);\s*document\.getElementById\('autorRejeitar'\)\.addEventListener\('click', \(\) => \{\s*closeModal\('autorModal'\);\s*rejeitarLoteDoAutor\(place, contados\);/,
+    'o toque voltou a recontar a fila: o que chegou com a folha aberta sai junto');
+});
