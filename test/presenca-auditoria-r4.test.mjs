@@ -521,3 +521,151 @@ test('P11 o diagnóstico leva se o token ainda ABRE o tempo real — "válido" (
   c.P.Presenca.chat = { token: 'SEGREDO-T', base: 'https://x/', chave: 'SEGREDO-K', expiraEm: T0 + 36e5 };
   assert.ok(!JSON.stringify(c.P.presencaDiag()).includes('SEGREDO'));
 });
+
+// ── "Olhando é lida": fechar logo depois de a mensagem chegar ────────────────
+
+test('"Olhando é lida": fechar a conversa antes de o "lida" sair (1,2 s) ADIANTA o mesmo pedido — sem "lida" pendente, nada sai', async () => {
+  const T = 1790200000000;
+  const lidas = (c) => c.chamadas.chat.filter((x) => x.acao === 'lida');
+  async function aberta() {
+    const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: [], maisAntigas: false, lida: true } : { success: true }) } });
+    c.P.presencaMontar();
+    c.P.presencaAbrirConversa(CAF);
+    await tick();                                                // o histórico chegou: a conversa está NA TELA
+    return c;
+  }
+  const chega = async (c, n) => c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(n), de: CAF, para: EU, texto: 'viu?', ctx: APP, ts: T + n }), n));
+  const c = await aberta();
+  await chega(c, 81);
+  assert.equal(lidas(c).length, 0, 'CONTROLE: o "lida" espera a rajada, não sai na hora');
+  // Fecha antes de 1,2 s — ✕, Esc, fundo e voltar passam todos pela limpeza do modal.
+  c.$('conversaModal').classList.add('hidden');
+  c.P.presencaEsquecerAberta();
+  await tick();
+  assert.equal(lidas(c).length, 1, 'fechar antes de 1,2 s deixou a mensagem VISTA como não lida no Waze');
+  assert.equal(lidas(c)[0].com, CAF);
+  await c.rodarTimers();
+  assert.equal(lidas(c).length, 1, 'o "lida" adiantado saiu de novo quando o prazo da rajada venceu');
+  // CONTROLE: sem mensagem nova (nada pendente), fechar não pede nada.
+  const d = await aberta();
+  d.$('conversaModal').classList.add('hidden');
+  d.P.presencaEsquecerAberta();
+  await tick();
+  assert.equal(lidas(d).length, 0, 'fechar sem "lida" pendente mandou um pedido a mais');
+  // CONTROLE: sem fechar, o prazo da rajada manda o mesmo pedido (o caminho de sempre).
+  const e = await aberta();
+  await chega(e, 82);
+  await e.rodarTimers();
+  assert.equal(lidas(e).length, 1, 'o "lida" da rajada, com a conversa aberta, parou de sair');
+  // O prazo venceu e o "lida" está NO AR quando a conversa fecha: não sai outro.
+  let soltar;
+  const f = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: [], maisAntigas: false, lida: true }
+    : x.acao === 'lida' ? new Promise((ok) => { soltar = ok; }) : { success: true }) } });
+  f.P.presencaMontar();
+  f.P.presencaAbrirConversa(CAF);
+  await tick();
+  await chega(f, 84);
+  await f.rodarTimers();                                         // o "lida" da rajada saiu e está no ar
+  f.$('conversaModal').classList.add('hidden');
+  f.P.presencaEsquecerAberta();
+  await tick();
+  assert.equal(lidas(f).length, 1, 'fechar com o "lida" da rajada no ar mandou um segundo');
+  soltar({ success: true });
+  await tick();
+});
+
+test('"Olhando é lida": no "Sair", na troca de conta e na queda da sessão, o "lida" pendente é DESCARTADO', async () => {
+  const T = 1790200000000;
+  const lidas = (c) => c.chamadas.chat.filter((x) => x.acao === 'lida');
+  async function comPendente() {
+    const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: [], maisAntigas: false, lida: true } : { success: true }) } });
+    c.P.presencaMontar();
+    c.P.presencaAbrirConversa(CAF);
+    await tick();
+    c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(83), de: CAF, para: EU, texto: 'viu?', ctx: APP, ts: T }), 83));
+    assert.equal(c.P.Presenca.lidaPendente, CAF, 'CONTROLE: tem que haver um "lida" pendente');
+    return c;
+  }
+  // "Sair", na ordem do `handleLogout`: a sessão, o perfil e o `authenticated`
+  // saem ANTES do `presencaEsquecer`.
+  const sair = await comPendente();
+  sair.API.getSession = () => null;
+  sair.AppState.profile = null;
+  sair.AppState.authenticated = false;
+  sair.P.presencaEsquecer();
+  await tick();
+  await sair.rodarTimers();
+  assert.equal(lidas(sair).length, 0, 'o "Sair" mandou o "lida" da conversa que fechou — sessão que sai não grava nada depois');
+  assert.equal(sair.P.Presenca.lidaPendente, null, 'o "Sair" deixou o "lida" (de quem é a conversa, dado de terceiro) DEVENDO na memória — sair é limpar de tudo');
+  // A troca de conta (`esquecerOutraConta` → `presencaEsquecer`), no pior caso:
+  // com uma sessão e um perfil de pé neste instante.
+  const troca = await comPendente();
+  troca.P.presencaEsquecer();
+  await tick();
+  await troca.rodarTimers();
+  assert.equal(lidas(troca).length, 0, 'a troca de conta mandou o "lida" da conta anterior');
+  assert.equal(troca.P.Presenca.lidaPendente, null);
+  // A queda pra tela de entrada (`showAuthScreen` → desligar).
+  const queda = await comPendente();
+  queda.AppState.authenticated = false;
+  queda.AppState.profile = null;
+  queda.P.presencaDesligar();
+  await tick();
+  await queda.rodarTimers();
+  assert.equal(lidas(queda).length, 0, 'a queda da sessão mandou o "lida" pendente');
+});
+
+test('"Olhando é lida": sem saber de quem é a sessão (a renovação silenciosa), o "lida" ESPERA o perfil — a mesma conta o paga, outra o descarta', async () => {
+  const T = 1790200000000;
+  const lidas = (c) => c.chamadas.chat.filter((x) => x.acao === 'lida');
+  async function comPendente(n) {
+    const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: [], maisAntigas: false, lida: true } : { success: true }) } });
+    c.P.presencaMontar();
+    c.P.presencaAbrirConversa(CAF);
+    await tick();
+    c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(n), de: CAF, para: EU, texto: 'viu?', ctx: APP, ts: T }), n));
+    assert.equal(c.P.Presenca.lidaPendente, CAF, 'CONTROLE: tem que haver um "lida" pendente');
+    // A queda apaga o perfil; a extensão devolve a sessão, e o perfil ainda não voltou.
+    c.AppState.profile = null;
+    return c;
+  }
+  const volta = async (c, id = Number(EU)) => { c.AppState.profile = { id, userName: 'x' }; await c.P.presencaSincronizar(); await tick(); };
+  // (a) A conversa FECHA na espera: nada sai no nome de ninguém...
+  const fecha = await comPendente(85);
+  fecha.$('conversaModal').classList.add('hidden');
+  fecha.P.presencaEsquecerAberta();
+  await tick();
+  assert.equal(lidas(fecha).length, 0, 'o "lida" saiu sem saber de quem é a sessão');
+  // ...e o perfil chega. O relógio velho da rajada, se vencesse agora (o
+  // `completarPerfilChegado` espera o país antes de chamar a presença), gastaria
+  // o "lida" devido com a conversa já fechada — e ele se perderia.
+  fecha.AppState.profile = { id: Number(EU), userName: 'antigerme' };
+  await fecha.rodarTimers();
+  await volta(fecha);
+  assert.equal(lidas(fecha).length, 1, 'o perfil voltou (a mesma conta) e o "lida" que ficou devendo não saiu — a mensagem vista segue não lida no Waze');
+  assert.equal(lidas(fecha)[0].com, CAF);
+  await volta(fecha);
+  assert.equal(lidas(fecha).length, 1, 'o "lida" devido saiu DUAS vezes');
+  // (b) A conversa segue ABERTA e a rajada vence na espera: o mesmo — espera e paga.
+  const aberta = await comPendente(86);
+  await aberta.rodarTimers();
+  assert.equal(lidas(aberta).length, 0, 'a rajada venceu sem perfil e o "lida" saiu no nome de quem ainda não se sabe');
+  await volta(aberta);
+  assert.equal(lidas(aberta).length, 1, 'com a conversa aberta, o "lida" devido não saiu quando o perfil voltou');
+  // (c) OUTRA conta: o `esquecerOutraConta` desliga (e descarta) antes de o perfil novo valer.
+  const outra = await comPendente(87);
+  outra.$('conversaModal').classList.add('hidden');
+  outra.P.presencaEsquecerAberta();
+  outra.P.presencaEsquecer();
+  await volta(outra, 183164343);
+  await outra.rodarTimers();
+  assert.equal(lidas(outra).length, 0, 'o "lida" de uma conta saiu pela sessão de OUTRA');
+  // CONTROLE: com o perfil conhecido, o sincronizar não adianta a rajada em curso.
+  const rajada = await comPendente(88);
+  rajada.AppState.profile = { id: Number(EU), userName: 'antigerme' };
+  await rajada.P.presencaSincronizar();
+  await tick();
+  assert.equal(lidas(rajada).length, 0, 'o sincronizar adiantou o "lida" da rajada com a conversa aberta — um pedido por mensagem, em vez de um por rajada');
+  await rajada.rodarTimers();
+  assert.equal(lidas(rajada).length, 1, 'CONTROLE: a rajada tem que mandar o "lida" no prazo');
+});

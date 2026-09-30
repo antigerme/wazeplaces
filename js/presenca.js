@@ -131,6 +131,7 @@ const Presenca = {
     // ampliado (`_falhos`): abrir a conversa de novo tenta de novo.
     fotosFalhas: new Set(),
     lidaEnviadaAte: new Map(),
+    lidaPendente: null,     // de quem é o "lida" que espera a rajada ou o perfil (ver `presencaPagarLida`)
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
     timers: { fluxo: null, silencio: null, lida: null, nome: null },
 };
@@ -341,6 +342,9 @@ async function presencaSincronizar() {
         return;
     }
     if (!presencaPodeConectar()) return presencaDesligar();
+    // O "lida" que ficou DEVENDO na espera do perfil (ver `presencaPagarLida`).
+    // Com o relógio correndo ele é a rajada, e a rajada não se adianta.
+    if (Presenca.lidaPendente && !Presenca.timers.lida) presencaPagarLida({ fechando: Presenca.aberta !== Presenca.lidaPendente });
     // Mesmo país e lista fresca: nada a pedir. Sem esta guarda, cada filtro
     // aplicado (tipo, ordem, categoria) custaria um pedido sem mudar a lista.
     const fresca = Date.now() - presencaUltimaTentativa() < PRESENCA_VOLTA_MIN_MS;
@@ -556,7 +560,11 @@ function presencaDesligar() {
     Presenca.epoca += 1;
     presencaFluxoFechar();
     clearTimeout(Presenca.timers.fluxo);
+    // O "lida" pendente é DESCARTADO, não pago: desligar é o "Sair", a troca de
+    // conta ou a queda da sessão — e o fechamento da conversa logo abaixo não
+    // pode mandá-lo (ver `presencaPagarLida`).
     clearTimeout(Presenca.timers.lida);
+    Presenca.lidaPendente = null;
     clearTimeout(Presenca.timers.nome);
     Presenca.online = [];
     Presenca.conversas = [];
@@ -1115,13 +1123,47 @@ function presencaAnunciar(msg) {
     el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(texto || '').slice(0, 280) });
 }
 
+// O "lida" que espera a rajada: `lidaPendente` diz de QUEM (a conversa que
+// estava na tela) e `timers.lida` é o relógio dele. Pendente SEM relógio é o
+// "lida" DEVENDO: ele venceu, ou a conversa fechou, sem saber de quem é a
+// sessão (ver `presencaPagarLida`).
 function presencaAgendarLida(id) {
     clearTimeout(Presenca.timers.lida);
-    Presenca.timers.lida = setTimeout(() => presencaMarcarLida(id), PRESENCA_LIDA_ATRASO_MS);
+    Presenca.lidaPendente = id;
+    Presenca.timers.lida = setTimeout(() => presencaPagarLida(), PRESENCA_LIDA_ATRASO_MS);
 }
 
-async function presencaMarcarLida(id) {
-    if (!presencaOlhando(id)) return;
+// Manda o "lida" pendente — o MESMO pedido, pela rajada que venceu, pelo
+// fechamento da conversa (`fechando`) ou pelo perfil que voltou.
+//
+// "Olhando é lida": fechar a conversa antes de a rajada vencer (1,2 s) deixava
+// no Waze como não lida uma mensagem que a pessoa viu, e a lista seguinte a
+// devolvia como "1 mensagem nova" (auditoria de 2026-09-29). Os quatro caminhos
+// de fechar (✕, Esc, fundo e voltar) e esconder a conversa sob outro modal
+// passam pela limpeza do modal, que PAGA o pendente na hora. Sem pendente, nada
+// sai — e o `presencaMarcarLida` ainda não pede quando não há o que marcar.
+//
+// Sem saber de quem é a sessão (a renovação silenciosa, antes do perfil), ele
+// ESPERA, como a fila de saída: o perfil que chegar o paga
+// (`presencaSincronizar`). E o "Sair", a troca de conta e a queda pra tela de
+// entrada o DESCARTAM (`presencaDesligar`), como o "Sair" descarta o swipe que
+// esperava o Desfazer: sessão que sai não grava nada depois. Outra conta nunca
+// o paga: o `definirPerfil` roda o `esquecerOutraConta` (que desliga) no mesmo
+// passo em que o perfil novo entra — antes de qualquer um poder pagar.
+function presencaPagarLida({ fechando = false } = {}) {
+    const id = Presenca.lidaPendente;
+    if (!id) return;
+    clearTimeout(Presenca.timers.lida);
+    Presenca.timers.lida = null;
+    if (!presencaEu()) return;   // devendo: espera o perfil
+    Presenca.lidaPendente = null;
+    presencaMarcarLida(id, { fechando });
+}
+
+// `fechando`: o pago no fechamento — a conversa já saiu (ou está saindo) da
+// tela, e era nela que a pessoa estava olhando (ver `presencaPagarLida`).
+async function presencaMarcarLida(id, { fechando = false } = {}) {
+    if (!fechando && !presencaOlhando(id)) return;
     const h = Presenca.historico.get(id);
     // Conversa ainda carregando: o que chegou nela ainda não está na tela.
     if (!h || !h.carregada) return;
@@ -1288,6 +1330,9 @@ function presencaTrocarRascunho(id) {
 // Chamado por LIMPEZA_AO_FECHAR['conversaModal'] — ou seja, por QUALQUER
 // caminho de fechamento (✕, Esc, scrim, voltar do aparelho).
 function presencaEsquecerAberta() {
+    // O "lida" pendente é da conversa que sai da tela: sai agora (ver
+    // `presencaPagarLida`).
+    presencaPagarLida({ fechando: true });
     Presenca.aberta = null;
     Presenca.nomeDaAberta = null;
     // O anexo é da conversa, não do aparelho: fechar sem mandar descarta. Vai

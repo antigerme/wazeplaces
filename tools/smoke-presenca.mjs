@@ -71,6 +71,10 @@ const falharEnvio = new Map();
 // Quem tem uma página de mensagens ANTERIORES a pedir, que demora (a seção do
 // foco: o "Ver mensagens anteriores" carregando com o foco nele).
 const anterioresDe = new Set();
+// O perfil que DEMORA (a renovação da sessão em que ele volta depois do token)
+// e a hora em que cada perfil respondeu (a seção do "lida" que espera o perfil).
+const atrasoPerfil = new Map();   // id -> ms
+const perfilRespondido = new Map();   // id -> Date.now() da última resposta
 const ABORTAR = Symbol('abortar');
 const token = (id) => `token-do-smoke-${id}`;
 
@@ -121,7 +125,7 @@ const reg = (id) => { if (!registro.has(id)) registro.set(id, { api: [], fluxo: 
 
 function responderApi(eu, rota, c) {
   const r = reg(eu);
-  r.api.push({ rota, c });
+  r.api.push({ rota, c, em: Date.now() });
   if (Array.isArray(c.confirmar) && c.confirmar.length) r.confirmados.push(...c.confirmar);
   const confirmados = Array.isArray(c.confirmar) && c.confirmar.length && c.instalacao ? { confirmados: c.confirmar.length } : {};
   if (Array.isArray(c.confirmar)) { const f = fila(eu); f.itens = f.itens.filter((x) => !c.confirmar.includes(x.inbox)); }
@@ -168,9 +172,11 @@ function responderApi(eu, rota, c) {
   // que arruma a tela faz o que o app esquece).
   if (rota === 'perfil') {
     const p = PESSOAS[eu];
-    return { success: true, visivelNoWme: true, referencias: { casa: null, trabalho: null },
+    const corpo = { success: true, visivelNoWme: true, referencias: { casa: null, trabalho: null },
       profile: { id: Number(eu), userName: p.nome, rank: p.rank, isStaff: false, isAreaManager: true, isEditor: true,
         editableCountryIDs: [BRASIL], areas: [], managedAreas: [] } };
+    const responder = () => { perfilRespondido.set(eu, Date.now()); return corpo; };
+    return atrasoPerfil.get(eu) ? dormir(atrasoPerfil.get(eu)).then(responder) : responder();
   }
   if (rota === 'lista-paises') return { success: true, countries: [{ id: BRASIL, name: 'Brazil', abbr: 'BR' }] };
   if (rota === 'lista-estados') return { success: true, states: [] };
@@ -460,9 +466,11 @@ try {
     else anota(`o cartão da bia está errado: ${JSON.stringify(cartao)}`);
     await bia.page.tap('#conversaMsgs .conversa-pedido.dela');
     if (await esperar(bia, () => !document.getElementById('pedidoModal').classList.contains('hidden') && document.getElementById('pedidoNome').textContent.includes('Padaria'), 'o pedido recebido não abriu')) ok('tocar no cartão abre o pedido, só leitura');
-    // O pedido esconde a conversa (o `openModal` não empilha) sem passar pela
-    // limpeza dela. Mensagem que chega AGORA não foi lida: a conversa está
-    // fora da vista. Este smoke achou o "Lida" mentindo aqui.
+    // O pedido esconde a conversa (o `openModal` não empilha). Mensagem que
+    // chega AGORA não foi lida: a conversa está fora da vista. Este smoke achou
+    // o "Lida" mentindo aqui. A conta começa depois de assentar o "lida" da
+    // mensagem que ela VIU (o cartão): esconder a conversa o adianta.
+    await dormir(500);
     const lidasAntes = apiDe(bia, 'chat', 'lida').length;
     await ana.page.fill('#conversaInput', 'e aí, viu o pedido?');
     await ana.page.tap('#conversaEnviar');
@@ -489,6 +497,7 @@ try {
   // rede fora, em que a resposta nem chega.
   console.log('\n7. falha de envio');
   const frase = () => ana.page.evaluate(() => (document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent?.trim() || '');
+  const enviosAntes = apiDe(ana, 'chat', 'enviar').length;
   falharEnvio.set(ana.id, 'waze');
   await ana.page.fill('#conversaInput', 'e o Instituto do Rim?');
   await ana.page.tap('#conversaEnviar');
@@ -510,9 +519,14 @@ try {
     falharEnvio.delete(ana.id);
     await ana.page.tap('#conversaMsgs .conversa-reenviar');
     if (await esperar(ana, () => !document.querySelector('#conversaMsgs .conversa-falhou'), 'o "Tentar de novo" não mandou')) {
-      const ids = apiDe(ana, 'chat', 'enviar').slice(-3).map((x) => x.c.id);
+      // A linha de falha some quando a tentativa COMEÇA ("enviando"), antes de o
+      // pedido chegar à rota de mentira: espere o REGISTRO da 3ª tentativa e leia
+      // só as desta mensagem. Com `slice(-3)` na hora, a corrida trazia o envio
+      // de uma mensagem ANTERIOR e acusava "o id mudou" com o app certo.
+      for (let i = 0; i < 50 && apiDe(ana, 'chat', 'enviar').length < enviosAntes + 3; i++) await dormir(100);
+      const ids = apiDe(ana, 'chat', 'enviar').slice(enviosAntes).map((x) => x.c.id);
       if (ids.length === 3 && ids.every((i) => i === ids[0])) ok('as três tentativas vão com o MESMO id');
-      else anota(`as tentativas mudaram o id: ${ids.join(' → ')}`);
+      else anota(`as tentativas mudaram o id (ou não foram três): ${ids.join(' → ')}`);
     }
   }
 
@@ -556,17 +570,16 @@ try {
     } else anota(`a renovação silenciosa mexeu na conversa: ${JSON.stringify(depois)}`);
     // O tempo real fechou na espera do perfil e REABRE com ele: a mensagem da bia chega na conversa aberta.
     await bia.page.evaluate(() => { if (document.getElementById('conversaModal').classList.contains('hidden')) presencaAbrirConversa('12444348'); });
-    const lidasAntes = apiDe(ana, 'chat', 'lida').length;
     await bia.page.fill('#conversaInput', 'chegou depois da renovação?');
     await bia.page.tap('#conversaEnviar');
     if (await esperar(ana, () => [...document.querySelectorAll('#conversaMsgs .conversa-bolha.dela')].some((b) => b.textContent.includes('chegou depois da renovação?')),
       'a mensagem de depois da renovação não chegou na conversa aberta')) {
       ok(`o tempo real reabriu com o perfil (${reg(ana.id).fluxo.length - fluxosAntes} conexão nova ao Google) e a mensagem chega na conversa aberta`);
     }
-    // O "lida" dela sai 1,2 s depois (junta a rajada): fechar a conversa antes
-    // o deixaria sem sair, e a mensagem ficaria não lida no Waze — o controle
-    // da pílula vazia, na seção 9, mediria isso em vez do que ele mede.
-    for (let i = 0; i < 50 && apiDe(ana, 'chat', 'lida').length === lidasAntes; i++) await dormir(100);
+    // A conversa fecha logo abaixo, antes de o "lida" dela sair (ele junta a
+    // rajada por 1,2 s): quem o manda é o FECHAMENTO ("olhando é lida", seção
+    // 9c). Sem isso a mensagem ficaria não lida no Waze, e o controle da pílula
+    // vazia da seção 9 reprovaria — foi assim que o defeito apareceu.
   }
   // CONTROLE: os Filtros abertos na mesma queda ficam — sempre ficaram. Se
   // fechassem, a medição de cima não distinguiria nada.
@@ -723,6 +736,111 @@ try {
     }
   }
   anterioresDe.delete(ana.id);
+
+  // ── 9c. "OLHANDO É LIDA", pelos quatro caminhos de fechar a conversa ────────
+  // A mensagem que chega com a conversa na tela é lida — o "lida" só espera
+  // 1,2 s pra juntar a rajada. Fechar antes dele sair deixava a mensagem NÃO
+  // LIDA no Waze (auditoria de 2026-09-29). O fechamento ADIANTA o mesmo pedido.
+  // A conversa fecha NO MESMO instante em que a mensagem aparece (um observador
+  // dentro da página), pelo caminho de verdade de cada um — o clique no ✕, a
+  // tecla Esc, o clique no fundo e o voltar do aparelho —: fechando pelo lado
+  // de cá, um runner lento deixaria o prazo vencer antes, e o "lida" do prazo
+  // passaria pelo do fechamento.
+  console.log('\n9c. fechar a conversa logo depois de uma mensagem chegar a deixa LIDA');
+  const CAMINHOS = [['✕', 'x'], ['Esc', 'esc'], ['fundo (fora da folha)', 'fundo'], ['voltar do aparelho', 'voltar']];
+  for (const [nome, caminho] of CAMINHOS) {
+    await ana.page.evaluate(() => { if (document.getElementById('conversaModal').classList.contains('hidden')) presencaAbrirConversa('183164343'); });
+    if (!await esperar(ana, () => !document.getElementById('conversaModal').classList.contains('hidden')
+      && !!(Presenca.historico.get('183164343') || {}).carregada, `a conversa não abriu antes do caminho "${nome}"`)) continue;
+    await dormir(1500);   // o que estivesse pendente já saiu
+    const antes = apiDe(ana, 'chat', 'lida').length;
+    const texto = `vista e fechada pelo ${nome}`;
+    const fechou = ana.page.evaluate(({ texto, caminho }) => new Promise((ok) => {
+      const corpo = document.getElementById('conversaMsgs');
+      const obs = new MutationObserver(() => {
+        if (![...corpo.querySelectorAll('.conversa-bolha.dela')].some((b) => b.textContent.includes(texto))) return;
+        obs.disconnect();
+        const pendente = Presenca.lidaPendente;
+        const m = document.getElementById('conversaModal');
+        if (caminho === 'x') document.getElementById('conversaClose').click();
+        else if (caminho === 'esc') document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        else if (caminho === 'fundo') m.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        else history.back();
+        // O voltar fecha no `popstate`, que chega depois; os outros três fecham
+        // na hora e CONSOMEM a entrada do voltar com um `history.back()`, que
+        // também chega depois. Espera os dois (com teto) antes de devolver: a
+        // próxima volta reabre a conversa, e reabrir com o voltar ainda no ar é
+        // o gotcha #65 — no WebKit, a volta seguinte saiu do app em 2 de 2
+        // rodadas (ninguém reabre uma conversa milissegundos depois de fechá-la).
+        const t0 = performance.now();
+        const assentou = () => m.classList.contains('hidden') && !CamadaVoltar.consumindo;
+        const conferir = () => (assentou() || performance.now() - t0 > 1000
+          ? ok({ pendente, fechou: m.classList.contains('hidden') }) : setTimeout(conferir, 20));
+        conferir();
+      });
+      obs.observe(corpo, { childList: true, subtree: true });
+    }), { texto, caminho });
+    await biaManda(texto);
+    const r = await Promise.race([fechou, dormir(15000).then(() => null)]);
+    if (!r) { anota(`${nome}: a mensagem não chegou na conversa aberta`); continue; }
+    if (r.pendente !== '183164343' || !r.fechou) { anota(`${nome}: controle — a conversa não fechou com o "lida" ainda esperando a rajada: ${JSON.stringify(r)}`); continue; }
+    for (let i = 0; i < 30 && apiDe(ana, 'chat', 'lida').length === antes; i++) await dormir(100);
+    const lida = mensagens.find((x) => x.texto === texto);
+    if (apiDe(ana, 'chat', 'lida').length === antes + 1 && lida && lida.lida) ok(`fechar pelo ${nome} com o "lida" ainda esperando: a mensagem fica LIDA no Waze (um pedido)`);
+    else anota(`fechar pelo ${nome} logo depois da mensagem a deixou NÃO LIDA no Waze (lidas: ${apiDe(ana, 'chat', 'lida').length - antes})`);
+  }
+  // CONTROLE: fechar SEM mensagem nova não pede nada.
+  await ana.page.evaluate(() => { if (document.getElementById('conversaModal').classList.contains('hidden')) presencaAbrirConversa('183164343'); });
+  await esperar(ana, () => !!(Presenca.historico.get('183164343') || {}).carregada, 'a conversa não reabriu pro controle');
+  await dormir(1500);
+  const antesDoControle = apiDe(ana, 'chat', 'lida').length;
+  await ana.page.evaluate(() => closeModal('conversaModal'));
+  await dormir(800);
+  if (apiDe(ana, 'chat', 'lida').length === antesDoControle) ok('controle: fechar sem mensagem nova não manda "lida" nenhum');
+  else anota('fechar sem nada pendente mandou "lida" à toa');
+
+  // ── 9d. A SESSÃO CAI logo depois de a mensagem chegar ───────────────────────
+  // A extensão devolve a sessão (0,6 s) e o perfil volta DEPOIS (1,5 s aqui): no
+  // meio, não se sabe de quem é a sessão, e o "lida" não sai no nome de
+  // ninguém. Ele ESPERA o perfil e sai com ele — com a conversa aberta (a rajada
+  // de 1,2 s vence dentro da espera) e fechada pelo ✕ na espera. O caminho de
+  // verdade: `derrubarSessao` → extensão → `showMainScreen` → o perfil →
+  // `completarPerfilChegado` → a presença.
+  console.log('\n9d. a sessão cai logo depois de uma mensagem chegar: o "lida" espera o perfil');
+  atrasoPerfil.set(ana.id, 1500);
+  for (const [nome, fechar] of [['com a conversa aberta', false], ['fechando a conversa na espera', true]]) {
+    await ana.page.evaluate(() => { if (document.getElementById('conversaModal').classList.contains('hidden')) presencaAbrirConversa('183164343'); });
+    if (!await esperar(ana, () => !document.getElementById('conversaModal').classList.contains('hidden')
+      && !!(Presenca.historico.get('183164343') || {}).carregada, `a conversa não abriu (${nome})`)) continue;
+    await dormir(1500);   // o que estivesse pendente já saiu
+    const antes = apiDe(ana, 'chat', 'lida').length;
+    const texto = `vista na queda, ${nome}`;
+    const caiu = ana.page.evaluate(({ texto, fechar }) => new Promise((ok) => {
+      const corpo = document.getElementById('conversaMsgs');
+      const obs = new MutationObserver(() => {
+        if (![...corpo.querySelectorAll('.conversa-bolha.dela')].some((b) => b.textContent.includes(texto))) return;
+        obs.disconnect();
+        const pendente = Presenca.lidaPendente;
+        derrubarSessao('srv.err.sessionExpired');
+        if (fechar) document.getElementById('conversaClose').click();
+        ok({ pendente, fechada: document.getElementById('conversaModal').classList.contains('hidden') });
+      });
+      obs.observe(corpo, { childList: true, subtree: true });
+    }), { texto, fechar });
+    await biaManda(texto);
+    const r = await Promise.race([caiu, dormir(15000).then(() => null)]);
+    if (!r) { anota(`${nome}: a mensagem não chegou na conversa aberta`); continue; }
+    if (r.pendente !== '183164343' || r.fechada !== fechar) { anota(`${nome}: controle — a sessão não caiu com o "lida" ainda esperando a rajada: ${JSON.stringify(r)}`); continue; }
+    if (!await esperar(ana, () => AppState.authenticated && !!AppState.profile, `${nome}: a renovação não trouxe o perfil`)) continue;
+    const perfilEm = perfilRespondido.get(ana.id);
+    for (let i = 0; i < 30 && apiDe(ana, 'chat', 'lida').length === antes; i++) await dormir(100);
+    const novas = apiDe(ana, 'chat', 'lida').slice(antes);
+    const lida = mensagens.find((x) => x.texto === texto);
+    if (novas.length === 1 && novas[0].em >= perfilEm && lida && lida.lida) ok(`${nome}: o "lida" esperou o perfil e saiu com ele — a mensagem vista fica LIDA (um pedido)`);
+    else if (novas.some((x) => x.em < perfilEm)) anota(`${nome}: o "lida" saiu ANTES de se saber de quem é a sessão (${novas.map((x) => x.em - perfilEm).join(', ')} ms do perfil)`);
+    else anota(`${nome}: a sessão caiu e voltou, e a mensagem vista ficou NÃO LIDA no Waze (lidas: ${novas.length})`);
+  }
+  atrasoPerfil.delete(ana.id);
 
   // ── 10. SAIR apaga o chat do aparelho e fecha o tempo real ──────────────────
   console.log('\n10. sair');
