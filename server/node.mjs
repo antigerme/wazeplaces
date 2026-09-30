@@ -360,27 +360,39 @@ function isAllowedAsset(path) {
   return true;
 }
 
-async function serveStatic(req, res, urlPath) {
+// O que o Cloudflare faz com o NOME do índice — o `html_handling` padrão
+// ("auto-trailing-slash") sobre o `index.html` da raiz —, MEDIDO no `wrangler
+// dev`: `/index.html` e `/index` levam 307 pra `/`, e `/index/` pra `/index`
+// (que leva pra `/` no passo seguinte), com a query junto. Vale pro caminho
+// já decodificado e normalizado (`/./index.html` e `/%69ndex.html` também).
+// A VM servia o `/index.html` com 200 e dava 404 nos outros dois (auditoria de
+// 2026-09-29): o mesmo endereço com duas respostas (gotcha #14).
+const APELIDOS_DO_INDICE = new Map([['/index.html', '/'], ['/index', '/'], ['/index/', '/index']]);
+
+// Resolve o caminho pedido: `{ safe, file }` (o arquivo a servir),
+// `{ redirecionar }` (um apelido do índice) ou `null` (nada aqui). Fonte única
+// do GET e da decisão 405 × 404 dos outros métodos.
+function resolverEstatico(urlPath) {
   let rel;
   try {
     rel = decodeURIComponent(urlPath.split('?')[0]);
   } catch {
-    // URI malformada (ex.: GET '/%') — decodeURIComponent lança URIError.
-    // Responde 400 sem derrubar o processo.
-    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
-    res.end('Bad request');
-    return;
+    // URI malformada (ex.: '/%') — o `decodeURIComponent` lança. É 404, como no
+    // Cloudflare (MEDIDO no `wrangler dev`); aqui era 400.
+    return null;
   }
 
   // A raiz é a do caminho NORMALIZADO: `//` e `/./` também são ela (no
   // Cloudflare, `//` redireciona pra `/` e `/./` serve o índice — medido no
   // `wrangler dev`). O smoke do pareamento abre `BASE + '/#pair='`, que é `//`.
-  const isRoot = rel === '' || normalize(rel) === '/';
+  const normal = normalize(rel);
+  const isRoot = rel === '' || normal === '/';
+  if (!isRoot && APELIDOS_DO_INDICE.has(normal)) return { redirecionar: APELIDOS_DO_INDICE.get(normal) };
   // A raiz resolve pro índice do diretório, como qualquer servidor estático.
   // NÃO há mais remapeamento: o `index.html` JÁ É o minificado (o fonte é o
-  // `index.src.html`), então `/` e `/index.html` servem o mesmo arquivo sem
-  // ninguém desviar rota. Era o remap que o Cloudflare ignorava — ver a nota no
-  // `tools/gerar-html.mjs`.
+  // `index.src.html`), então a raiz serve o arquivo que o Cloudflare serve em
+  // `/` sem ninguém desviar rota. Era o remap que o Cloudflare ignorava — ver a
+  // nota no `tools/gerar-html.mjs`.
   if (isRoot) rel = '/index.html';
 
   const safe = normalize(rel).replace(/^(\.\.[/\\])+/, '');
@@ -394,9 +406,30 @@ async function serveStatic(req, res, urlPath) {
   // fragmento, `/#pair=`, e os atalhos do manifest são `/?action=`), então o
   // shell só servia pra o mesmo endereço dar 200 num destino e 404 no outro — e
   // pro service worker guardar uma página do app num caminho que não existe.
-  if (safe.includes('..') || !isAllowedAsset(safe)) return notFound(res);
+  if (safe.includes('..') || !isAllowedAsset(safe)) return null;
+  return { safe, file: join(ROOT, safe) };
+}
 
-  const file = join(ROOT, safe);
+// Há um asset publicado (ou um apelido do índice) neste caminho? É o que
+// decide, fora do GET/HEAD, entre 405 e 404 — como o Cloudflare.
+async function haAssetEm(urlPath) {
+  const alvo = resolverEstatico(urlPath);
+  if (!alvo) return false;
+  if (alvo.redirecionar) return true;
+  try { return (await stat(alvo.file)).isFile(); } catch { return false; }
+}
+
+async function serveStatic(req, res, urlPath) {
+  const alvo = resolverEstatico(urlPath);
+  if (!alvo) return notFound(res);
+  if (alvo.redirecionar) {
+    let busca = '';
+    try { busca = new URL('http://local' + urlPath).search; } catch { /* sem query */ }
+    res.writeHead(307, { Location: alvo.redirecionar + busca, ...SECURITY_HEADERS });
+    res.end();
+    return;
+  }
+  const { safe, file } = alvo;
   try {
     const buf = await readFile(file);
     const ext = extname(file).toLowerCase();
@@ -489,7 +522,13 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // Fora do GET/HEAD, como o Cloudflare (MEDIDO no `wrangler dev`): 405 só
+    // onde há o que servir — um arquivo publicado, ou um apelido do índice —, e
+    // 404 no resto, como no GET. Aqui era 405 pra tudo, e `POST /api` (sem a
+    // barra) ou `POST /API/sessao` davam 405 aqui e 404 lá (auditoria de
+    // 2026-09-29).
     if (req.method !== 'GET' && req.method !== 'HEAD') {
+      if (!(await haAssetEm(url))) return notFound(res);
       res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
       res.end('Method not allowed');
       return;
