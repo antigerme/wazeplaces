@@ -23,14 +23,20 @@ import { fileURLToPath } from 'node:url';
 
 export const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// `variavel`: o nome da variável de ambiente que troca a porta, pra mensagem
-// de erro dizer o caminho. `stderr`: 'inherit' (padrão) ou 'ignore'.
+// `variavel`: o que troca a porta, pra mensagem de erro dizer o caminho — o
+// nome de uma variável de ambiente (`SMOKE_PORT`) ou uma FLAG da linha de
+// comando (`--porta`, a do diag-replay). `stderr`: 'inherit' (padrão) ou 'ignore'.
 export async function subirServidorLocal({ porta, env = {}, variavel = 'SMOKE_PORT', tetoMs = 15000, stderr = 'inherit' } = {}) {
   const base = `http://127.0.0.1:${porta}`;
+  // O caminho no formato que quem LÊ aceita: variável é `NOME=valor`, flag é
+  // `--nome valor`. Com `=` pra todos, o diag-replay sugeria `--porta=<outra
+  // porta>`, que o parser dele não lê — a porta sugerida era ignorada e ele
+  // tentava a mesma de novo (auditoria de 2026-09-29, V8).
+  const comoTrocar = variavel.startsWith('--') ? `${variavel} <outra porta>` : `${variavel}=<outra porta>`;
   const sair = (msg) => {
     console.error(`\n✗ ${msg}`);
     console.error('  Confira com: ps -eo pid,args | grep "[s]erver/node.mjs"');
-    console.error(`  Ou rode noutra porta: ${variavel}=<outra porta>`);
+    console.error(`  Ou rode noutra porta: ${comoTrocar}`);
     process.exit(1);
   };
   let ocupada = false;
