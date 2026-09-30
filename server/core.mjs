@@ -3595,6 +3595,17 @@ async function abrirConversa(data, { sessions, cookies, region, cabecalho, insta
   return { status: 200, body: { success: true, ...resultado, recibos, ...(lida ? { lida: lidaOk } : {}) } };
 }
 
+// O teto do corpo de uma requisição à API, e a resposta de quem passa dele — os
+// MESMOS nos dois adaptadores, e por isso aqui, no módulo que os dois importam:
+// a VM aplica no `readBody` (`server/corpo.mjs`), o Worker no `lerCorpo` dele.
+// O Worker lia tudo com `request.json()`, e o mesmo corpo de 5,5 MB dava 200
+// lá e 413 na VM (auditoria de 2026-09-29). O maior corpo legítimo do app é o
+// cookies.txt que o aparelho já filtrou, na casa dos KB.
+export const MAX_BODY_BYTES = 5_000_000;
+export const RESPOSTA_CORPO_GRANDE = Object.freeze({
+  success: false, error: 'Corpo da requisição muito grande', errorKey: 'srv.err.bodyTooLarge',
+});
+
 const ROUTES = {
   sessao: handleSessao,
   parear: handleParear,

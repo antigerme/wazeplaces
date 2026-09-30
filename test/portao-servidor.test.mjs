@@ -996,3 +996,96 @@ test('VM: depois do 413 o servidor lê o resto do corpo até um TETO, e só ent�
     agente.destroy();
   }
 });
+
+// ── o 413 é o MESMO nos dois adaptadores ─────────────────────────────────────
+// O Worker lia o corpo inteiro com `request.json()`: o mesmo POST de 5,5 MB
+// (e o de 20) dava 200 lá e 413 na VM — o app deixando de ser o mesmo nos dois
+// destinos (gotcha #14; auditoria de 2026-09-29, MEDIDO no `wrangler dev`). O
+// teto e a resposta moram no core, e os dois adaptadores os importam.
+import { RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
+
+function envDoWorker() {
+  const kv = new Map();
+  const ops = { n: 0 };
+  return {
+    ops,
+    env: {
+      ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      SESSIONS: {
+        get: async (k) => { ops.n++; return kv.get(k) ?? null; },
+        put: async (k, v) => { ops.n++; kv.set(k, v); },
+        delete: async (k) => { ops.n++; kv.delete(k); },
+      },
+      ASSETS: { fetch: () => new Response('asset') },
+    },
+  };
+}
+
+test('Worker: corpo acima do teto é 413 com o MESMO JSON da VM — pelo content-length e pelo corpo em pedaços', async () => {
+  const { default: worker } = await import('../worker/index.mjs');
+  const url = 'https://app.exemplo/api/sessao';
+  const conferir = async (res, rotulo) => {
+    assert.equal(res.status, 413, `${rotulo}: HTTP ${res.status}`);
+    assert.deepEqual(await res.json(), { ...RESPOSTA_CORPO_GRANDE }, `${rotulo}: o corpo do 413 não é o da VM`);
+    assert.equal(res.headers.get('cache-control'), 'no-store', rotulo);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff', rotulo);
+  };
+
+  // (a) Corpo JSON VÁLIDO acima do teto, com o `content-length` que o navegador manda.
+  const grande = JSON.stringify({ action: 'destroy', sessionToken: 'x', lixo: 'a'.repeat(MAX_BODY_BYTES) });
+  const a = envDoWorker();
+  await conferir(await worker.fetch(new Request(url, {
+    method: 'POST', body: grande, headers: { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(grande)) },
+  }), a.env, {}), 'content-length');
+  assert.equal(a.ops.n, 0, 'o corpo grande chegou ao handler (o KV foi consultado)');
+  // E o declarado decide SEM ler: nem um pedaço do corpo é pedido.
+  let puxadosComTamanho = 0;
+  const naoLeia = new ReadableStream({ pull(c) { puxadosComTamanho++; c.enqueue(new Uint8Array(1000)); } }, { highWaterMark: 0 });
+  await conferir(await worker.fetch(new Request(url, {
+    method: 'POST', body: naoLeia, duplex: 'half', headers: { 'Content-Length': String(MAX_BODY_BYTES + 1) },
+  }), envDoWorker().env, {}), 'content-length, sem ler');
+  assert.equal(puxadosComTamanho, 0, `com o tamanho declarado acima do teto, o Worker leu ${puxadosComTamanho} pedaços do corpo`);
+
+  // (b) Corpo em pedaços, SEM `content-length`: conta o que chega e para no teto,
+  // sem ler o resto (o que ainda não veio nem é pedido).
+  const PEDACO = 1_000_000;
+  const TOTAL = 20;
+  let puxados = 0;
+  const fluxo = new ReadableStream({
+    pull(c) {
+      if (puxados >= TOTAL) { c.close(); return; }
+      puxados++;
+      c.enqueue(new Uint8Array(PEDACO).fill(0x61));
+    },
+  }, { highWaterMark: 0 });
+  const b = envDoWorker();
+  await conferir(await worker.fetch(new Request(url, { method: 'POST', body: fluxo, duplex: 'half' }), b.env, {}), 'em pedaços');
+  assert.equal(b.ops.n, 0, 'o corpo em pedaços chegou ao handler');
+  assert.ok(puxados < TOTAL, `o Worker leu os ${TOTAL} MB inteiros antes de recusar (${puxados} pedaços)`);
+
+  // CONTROLE: logo abaixo do teto o pedido passa, e o handler roda.
+  const cabe = JSON.stringify({ action: 'destroy', sessionToken: 'x', lixo: 'a'.repeat(MAX_BODY_BYTES - 200) });
+  assert.ok(Buffer.byteLength(cabe) <= MAX_BODY_BYTES, 'CONTROLE: o corpo "que cabe" não cabe');
+  const c = envDoWorker();
+  const ok = await worker.fetch(new Request(url, { method: 'POST', body: cabe, headers: { 'Content-Type': 'application/json' } }), c.env, {});
+  assert.equal(ok.status, 200, `CONTROLE: o corpo abaixo do teto não passou (HTTP ${ok.status})`);
+  assert.ok(c.ops.n > 0, 'CONTROLE: o handler não rodou');
+  // E o BOM do começo segue sendo tirado, como o `request.json()` tirava.
+  const d = envDoWorker();
+  const comBom = await worker.fetch(new Request(url, { method: 'POST',
+    body: new Uint8Array([0xef, 0xbb, 0xbf, ...Buffer.from(JSON.stringify({ action: 'destroy', sessionToken: 'x' }))]) }), d.env, {});
+  assert.equal((await comBom.json()).success, true, 'o corpo com BOM deixou de ser lido');
+});
+
+test('VM: o 413 do readBody é o MESMO JSON do Worker (o do core)', async () => {
+  const req = new EventEmitter();
+  req.destroy = () => {};
+  req.socket = { destroy() {}, end() {} };
+  const res = { headersSent: false, status: null, corpo: null,
+    writeHead(s) { this.status = s; this.headersSent = true; }, end(c) { this.corpo = c; } };
+  const lido = readBody(req, res);
+  req.emit('data', Buffer.alloc(MAX_BODY_BYTES + 1, 0x61));
+  assert.equal(await lido, null);
+  assert.equal(res.status, 413);
+  assert.deepEqual(JSON.parse(res.corpo), { ...RESPOSTA_CORPO_GRANDE });
+});

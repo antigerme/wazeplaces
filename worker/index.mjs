@@ -14,7 +14,36 @@
 //
 // Toda a lógica vive em server/core.mjs (compartilhada com a VM Node).
 
-import { dispatch, makeSessions, base64ToBytes, SESSION_TTL } from '../server/core.mjs';
+import { dispatch, makeSessions, base64ToBytes, SESSION_TTL, MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
+
+// O corpo, lido com TETO — o mesmo da VM (`readBody`), e com a mesma resposta.
+// Era `request.json()`, que lê o que vier: o corpo de 5,5 MB (e o de 20) dava
+// 200 aqui e 413 na VM, o mesmo pedido com duas respostas (gotcha #14;
+// auditoria de 2026-09-29). O `content-length` declarado decide sem ler nada;
+// sem ele (corpo em pedaços), conta o que chega e para no teto. `null` = passou.
+// O `TextDecoder` tira o BOM do começo, como o `request.json()` tirava.
+async function lerCorpo(request) {
+  const declarado = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declarado) && declarado > MAX_BODY_BYTES) return null;
+  if (!request.body) return '';
+  const leitor = request.body.getReader();
+  const pedacos = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await leitor.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      try { await leitor.cancel(); } catch { /* já basta parar de ler */ }
+      return null;
+    }
+    pedacos.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let i = 0;
+  for (const p of pedacos) { bytes.set(p, i); i += p.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
 
 // `no-store` em TODA resposta de /api. Hoje nada é cacheado ali — é POST, e
 // POST não entra em cache por padrão —, mas "por padrão" é a palavra que
@@ -45,9 +74,12 @@ export default {
 
       try {
         const route = url.pathname.slice(5); // remove "/api/"
+        const texto = await lerCorpo(request);
+        if (texto === null) return json(RESPOSTA_CORPO_GRANDE, 413);
+        // O mesmo parse da VM (`server/node.mjs`): corpo que não é JSON vira {}.
         let data = {};
         try {
-          data = await request.json();
+          data = JSON.parse(texto) || {};
         } catch {
           data = {};
         }

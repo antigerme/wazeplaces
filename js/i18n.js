@@ -645,6 +645,7 @@ const I18N_DICT = {
     'srv.err.sessionMissing': 'Sessão não informada',
     'srv.err.endpointNotFound': 'Endereço não encontrado no servidor',
     'srv.err.internal': 'Erro interno do servidor',
+    'srv.err.bodyTooLarge': 'O pedido é grande demais pro servidor',
     'srv.err.badProfile': 'Perfil inválido',
     'srv.err.accessDenied': 'Acesso restrito a editores Area Manager de nível {minLevel}+ ou Staff.',
     // ── Presença e conversa entre editores ──────────────────────────────────
@@ -1267,6 +1268,7 @@ const I18N_DICT = {
     'srv.err.sessionMissing': 'No session provided',
     'srv.err.endpointNotFound': 'Address not found on the server',
     'srv.err.internal': 'Internal server error',
+    'srv.err.bodyTooLarge': 'The request is too large for the server',
     'srv.err.badProfile': 'Invalid profile',
     'srv.err.accessDenied': 'Restricted to Area Manager editors at level {minLevel}+ or Staff.',
     // ── Presence and editor-to-editor chat ──────────────────────────────────
@@ -1890,6 +1892,7 @@ const I18N_DICT = {
     'srv.err.sessionMissing': 'No se indicó la sesión',
     'srv.err.endpointNotFound': 'Dirección no encontrada en el servidor',
     'srv.err.internal': 'Error interno del servidor',
+    'srv.err.bodyTooLarge': 'La solicitud es demasiado grande para el servidor',
     'srv.err.badProfile': 'Perfil inválido',
     'srv.err.accessDenied': 'Acceso restringido a editores Area Manager de nivel {minLevel}+ o Staff.',
     // ── Presencia y conversación entre editores ─────────────────────────────
@@ -2512,6 +2515,7 @@ const I18N_DICT = {
     'srv.err.sessionMissing': 'Aucune session indiquée',
     'srv.err.endpointNotFound': 'Adresse introuvable sur le serveur',
     'srv.err.internal': 'Erreur interne du serveur',
+    'srv.err.bodyTooLarge': 'La requête est trop volumineuse pour le serveur',
     'srv.err.badProfile': 'Profil invalide',
     'srv.err.accessDenied': 'Accès réservé aux éditeurs Area Manager de niveau {minLevel}+ ou Staff.',
     // ── Présence et conversation entre éditeurs ─────────────────────────────

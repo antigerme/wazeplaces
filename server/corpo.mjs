@@ -1,9 +1,12 @@
-// Corpo da requisição no adaptador da VM (`server/node.mjs`). O Worker não
-// precisa disto: lá o corpo chega inteiro pelo `request.json()`.
+// Corpo da requisição no adaptador da VM (`server/node.mjs`). O Worker tem o
+// dele (`lerCorpo`, em `worker/index.mjs`), com o MESMO teto e a MESMA resposta,
+// que moram no core — o Worker não importa este módulo, que fala a língua dos
+// streams do Node.
 //
 // Mora num módulo PRÓPRIO pra poder ser testado sem subir o servidor — o
 // `node.mjs` abre a porta ao ser importado.
-export const MAX_BODY_BYTES = 5_000_000;
+import { MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from './core.mjs';
+export { MAX_BODY_BYTES };
 // Depois do 413, o fechamento é em DUAS etapas (o "lingering close" do RFC 9112
 // §9.6): o FIN sai junto com a resposta, e o servidor segue LENDO — e jogando
 // fora — o resto do corpo antes de fechar de vez. Fechar com corpo ainda
@@ -52,7 +55,7 @@ export function readBody(req, res) {
           // de vez é do `fecharDeVez`, quando o corpo termina ou um teto chega.
           if (req.socket) req.socket.destroySoon = function () { this.end(); };
           res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', Connection: 'close' });
-          res.end(JSON.stringify({ success: false, error: 'Corpo da requisição muito grande' }));
+          res.end(JSON.stringify(RESPOSTA_CORPO_GRANDE));
           prazo = setTimeout(fecharDeVez, DRENO_MAX_MS);
           prazo.unref();   // o prazo sozinho não segura o processo aberto
           req.once('end', fecharDeVez);   // corpo inteiro lido: fecha sem RST
