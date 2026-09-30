@@ -16,7 +16,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-09-30 ~11:00 UTC)
+## 0. Estado agora (2026-09-30 ~20:50 UTC)
 
 - **PR #253 (lote 7) mergeado** às 20:22 UTC, com CI verde nos dois jobs (check e webkit). Produção
   **v2026.09.29-01 verificada: 71 ✓ · 0 ✗** com as duas contas, mais as verificações novas do lote 7 no
@@ -29,7 +29,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
   terminando). **Lote 8 em andamento**: nove agentes de conserto em worktrees `/home/user/wp-fix4-*`
   (servidor, presença, filtros, fila, contas, dev, textos, offline, lightbox); ids e escopo de cada um em
   `scratchpad/r4-agentes.txt`. Pararam no limite de 2026-09-29 ~21:25 UTC antes de qualquer commit e foram
-  continuados por `SendMessage` em 2026-09-30 04:35; pararam de novo ~05:00 (limite até 9:30), com trabalho parcial nos worktrees, e foram continuados às 10:59. Cada um entrega `scratchpad/relatorio-l8-<área>.md`. Um décimo agente (card: C4, C7, C10, C11, C14, C16) entrou depois do relatório do R4-4.
+  continuados por `SendMessage` em 2026-09-30 04:35; pararam de novo ~05:00 (limite até 9:30), com trabalho parcial nos worktrees, e foram continuados às 10:59. Cada um entrega `scratchpad/relatorio-l8-<área>.md`. Um décimo agente (card: C4, C7, C10, C11, C14, C16) entrou depois do relatório do R4-4. **O do servidor terminou** (10 commits, 1459/1459, 38 sabotagens) e já está no branch por cherry-pick. Os outros nove pararam de novo no limite (~11:30, volta às 15:50) e foram continuados às 20:47.
   Vão pro owner com mockup: L28, L31 (lightbox), D3 (relatório sem sessão) e a parte do O1 no service
   worker (teto de tempo × gotcha #18).
 - O branch `claude/peaceful-heisenberg-HaUuC` foi recriado a partir da main (o GitHub o apaga no merge);
