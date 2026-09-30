@@ -1179,6 +1179,9 @@ function setupAppListeners() {
     });
 
     window.addEventListener('keydown', handleKeyDown);
+    // Quem pegou o mouse ou o dedo deixou de operar pelo teclado: o foco
+    // prometido ao teclado (`focoDoTeclado`, C10) não vale mais.
+    window.addEventListener('pointerdown', () => { focoDoTeclado = null; }, true);
 }
 
 // Seletor de idioma. São DOIS controles: um em Filtros → Preferências (onde se
@@ -4219,9 +4222,11 @@ function handleKeyDown(e) {
 
     if (!AppState.currentPlace) return;
     // As setas também respeitam a trava — senão o teclado seria um atalho pra
-    // furar a janela do Desfazer que o dedo respeita.
+    // furar a janela do Desfazer que o dedo respeita. E respondem com o porquê
+    // quando a trava não tem banner na tela (ver `avisarTravaAoTocar`).
     if (acoesTravadas() && ['ArrowLeft', 'ArrowRight', 'ArrowUp'].includes(e.key)) {
         e.preventDefault();
+        avisarTravaAoTocar();
         return;
     }
 
@@ -9236,15 +9241,37 @@ function renderCurrentCard() {
     // volta a disparar no dia em que alguém mexe na camada. Aqui não há o que
     // desfazer: o botão do fundo nunca chega a ser ligado.
     let actionFired = false;
-    const fireAction = (direction, handler) => {
+    const fireAction = (direction, handler, ev) => {
         if (actionFired) return;
         actionFired = true;
+        // Enter/Espaço no botão FOCADO: o foco vai ao botão equivalente do card
+        // que ficar na tela (ver `pedirFocoDoTeclado`).
+        pedirFocoDoTeclado(ev && ev.currentTarget, !!ev && ev.detail === 0, direction);
         if (window.triggerSwipe) window.triggerSwipe(direction, () => agirNoPedidoDoGesto(place, handler));
         else handler();
     };
-    card.querySelector('.card-btn-reject').addEventListener('click', () => fireAction('left', handleReject));
-    card.querySelector('.card-btn-skip').addEventListener('click', () => fireAction('up', handleSkip));
-    card.querySelector('.card-btn-read').addEventListener('click', () => fireAction('right', handleMarkAsRead));
+    card.querySelector('.card-btn-reject').addEventListener('click', (ev) => fireAction('left', handleReject, ev));
+    card.querySelector('.card-btn-skip').addEventListener('click', (ev) => fireAction('up', handleSkip, ev));
+    card.querySelector('.card-btn-read').addEventListener('click', (ev) => fireAction('right', handleMarkAsRead, ev));
+    // O toque no ✕ ↑ ✓ TRAVADO responde com o porquê (ver `avisarTravaAoTocar`).
+    // Botão `disabled` não recebe `click` — o navegador o suprime —, mas o
+    // `pointerdown`/`pointerup` chegam, e sobem até a barra: MEDIDO no Chromium
+    // 153 e no WebKit 26, com mouse e com toque. É por eles, e não trocando o
+    // `disabled` por `aria-disabled`, porque o `disabled` é o que tira do Tab e
+    // faz o leitor de tela anunciar o travado (gotcha #63). O par na MESMA
+    // barra é o "clique": o fim de um arraste que só termina ali não conta.
+    const barraDeAcoes = card.querySelector('.card-actions');
+    let tocouTravado = null;
+    const botaoTravado = (ev) => {
+        const b = ev.target && ev.target.closest && ev.target.closest('.card-btn-reject, .card-btn-skip, .card-btn-read');
+        return b && b.disabled ? b : null;
+    };
+    barraDeAcoes.addEventListener('pointerdown', (ev) => { tocouTravado = botaoTravado(ev); });
+    barraDeAcoes.addEventListener('pointerup', (ev) => {
+        const b = botaoTravado(ev);
+        if (b && b === tocouTravado) avisarTravaAoTocar();
+        tocouTravado = null;
+    });
 
     // Ampliar o mapa é interação, então segue a MESMA regra dos três botões
     // acima: mora no card da frente, nunca no `montarCard`. Antes ficava
@@ -9320,6 +9347,11 @@ function renderCurrentCard() {
         dfato('tela.primeiroCard', { fila: AppState.queue.length });
     }
     agendarAquecimento(card);
+    // O card que chega DEPOIS do gesto do teclado (a próxima página, quando a
+    // fila acabou) também recebe o foco prometido. Depois da tarefa, e não
+    // aqui: o `scheduleAction` do mesmo gesto trava o card logo em seguida, e o
+    // foco num botão que vira `disabled` se perde (ver `aplicarFocoDoTeclado`).
+    if (focoDoTeclado) queueMicrotask(aplicarFocoDoTeclado);
 }
 
 // Monta UM card a partir de UM pedido e devolve o elemento — sem pendurar na
@@ -10943,6 +10975,44 @@ function avisoDaTrava() {
     return 'toast.esperaDesfazer';
 }
 
+// Tocar no card TRAVADO por um motivo SEM banner na tela — o "Marcar todos" no
+// ar depois que o toast dele some (4 s), a conferência de um 401, a renovação
+// silenciosa da sessão — não respondia NADA: os botões estão `disabled`, o
+// arraste não começa e as setas voltam caladas. Botão morto sem motivo à vista
+// lê como app quebrado (auditoria do card, 2026-09-29, C14). Os três caminhos
+// (o toque no ✕ ↑ ✓, o arraste e as setas) passam por aqui e respondem com o
+// aviso que JÁ existe, o mesmo do "Rejeitar os N" (`avisoDaTrava`). Na janela
+// do Desfazer, não: o banner com a contagem está na tela e já diz o que é e por
+// quanto tempo. E no máximo um a cada `AVISO_DA_TRAVA_INTERVALO_MS`, que é
+// também quanto ele DURA: quem insiste no ✕ travado nunca vê dois avisos iguais
+// empilhados (com os 4 s de sempre, o segundo chegava com o primeiro na tela).
+// Devolve se avisou.
+//
+// O aviso SAI quando a trava acaba (`dispensarAvisoDaTrava`, chamada pela
+// `aplicarTravaDeAcao`): "espere o lote terminar" com o lote terminado é o app
+// mentindo. E, MEDIDO, no rodapé do Galaxy Fold e do iPhone SE ele cobre os
+// três botões do card (o hit-test no centro de ✕ ↑ ✓ dá o toast): enquanto
+// cobre, o botão que voltou a valer está morto (gotcha #26).
+const AVISO_DA_TRAVA_INTERVALO_MS = 3000;
+let avisoDaTravaEm = 0;
+let avisoDaTravaNaTela = null;   // o toast do aviso, pra sair quando a trava acabar
+function avisarTravaAoTocar() {
+    if (!acoesTravadas()) return false;
+    const chave = avisoDaTrava();
+    if (chave === 'toast.esperaDesfazer') return false;
+    const agora = Date.now();
+    if (agora - avisoDaTravaEm < AVISO_DA_TRAVA_INTERVALO_MS) return false;
+    avisoDaTravaEm = agora;
+    avisoDaTravaNaTela = showToast(t(chave), 'info', AVISO_DA_TRAVA_INTERVALO_MS);
+    return true;
+}
+
+function dispensarAvisoDaTrava() {
+    if (!avisoDaTravaNaTela) return;
+    try { avisoDaTravaNaTela.dispensar(); } catch (e) { /* o toast já saiu */ }
+    avisoDaTravaNaTela = null;
+}
+
 // Card de FOTO cuja foto não veio sem rede (`marcarCardSemFoto`): ✕ e ✓ não
 // decidem. O botão a `aplicarTravaDeAcao` já desabilita, mas o GESTO e a SETA
 // do teclado passavam direto — dava pra rejeitar uma foto que ninguém viu (o
@@ -10998,6 +11068,56 @@ function aplicarTravaDeAcao() {
     // O ✓ da edição também (o Enter vai pelo `confirmarRenomear`, que confere a
     // trava): quem escreve o `disabled` dele é o `atualizarBotaoSalvarNome`.
     if (editandoNome()) atualizarBotaoSalvarNome();
+    // A trava mudou: acabou, o aviso dela sai de cima dos botões (C14); e o
+    // foco prometido ao teclado pode pousar agora (C10).
+    if (!travado) dispensarAvisoDaTrava();
+    aplicarFocoDoTeclado();
+}
+
+// O FOCO de quem opera pelo TECLADO (auditoria do card, 2026-09-29, C10).
+// Enter no ✕ ↑ ✓ focado tira o botão da tela — o card sai e o próximo nasce —
+// e o foco caía no <body>: o Tab seguinte ia parar na seta do carrossel do card
+// novo. Enter no "Desfazer" (o banner some) mandava o Tab pro botão de tema, no
+// alto da página. MEDIDO nos dois motores. O foco vai ao botão EQUIVALENTE do
+// card que ficou na tela: o do próximo pedido, ou o do pedido que o Desfazer
+// devolveu.
+//
+// Só quando o gesto veio do TECLADO: o botão acionado ESTAVA focado e a
+// ativação foi por tecla (`detail` 0 no clique, que é também o do leitor de
+// tela) — um `.click()` programático não conta, e o mouse e o dedo têm
+// `detail` 1. Quem usa o dedo não pode ter o foco pulando pela tela, e qualquer
+// `pointerdown` desliga o pedido (`setupAppListeners`).
+//
+// O foco ESPERA o botão destravar: na janela do Desfazer o card novo nasce
+// `disabled`, botão desabilitado não recebe foco e o focado que vira `disabled`
+// o perde (MEDIDO no Chromium e no WebKit). Quem aplica é a
+// `aplicarTravaDeAcao`, que roda sempre que a trava muda, e o card que nasce
+// (`renderCurrentCard`, depois da tarefa: a trava da ação vem logo em seguida,
+// no mesmo gesto). Se nesse meio a pessoa pôs o foco em outro lugar — Tab,
+// clique, uma camada aberta —, o pedido cai: o lugar que ela escolheu ganha.
+const BOTAO_DA_ACAO = { left: '.card-btn-reject', up: '.card-btn-skip', right: '.card-btn-read',
+    reject: '.card-btn-reject', skip: '.card-btn-skip', read: '.card-btn-read' };
+let focoDoTeclado = null;   // o seletor do botão que recebe o foco, ou null
+
+function pedirFocoDoTeclado(botao, peloTeclado, acao) {
+    if (!peloTeclado || !botao || document.activeElement !== botao) return;
+    focoDoTeclado = BOTAO_DA_ACAO[acao] || null;
+}
+
+function aplicarFocoDoTeclado() {
+    if (!focoDoTeclado || acoesTravadas()) return;
+    const ativo = document.activeElement;
+    const camada = !!(topOpenModal()
+        || (typeof Lightbox !== 'undefined' && Lightbox.isOpen())
+        || (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()));
+    if ((ativo && ativo !== document.body) || camada) { focoDoTeclado = null; return; }
+    const card = cardDaFrente();
+    if (!card) return;
+    // Card de foto sem a foto: ✕ e ✓ seguem travados, e o ↑ é o vivo.
+    const alvo = [card.querySelector(focoDoTeclado), card.querySelector('.card-btn-skip')].find(focavelNaTela);
+    if (!alvo) return;
+    focoDoTeclado = null;
+    alvo.focus({ preventScroll: true });
 }
 
 // A rolagem do conteúdo é CONSEQUÊNCIA de estourar, não estado padrão — e a
@@ -17502,8 +17622,13 @@ function showUndoBanner(message) {
 // já era falso), o que escondia o problema: só o caminho canônico e acessível,
 // os três botões, é que ficava morto — inclusive pra quem usa leitor de tela,
 // porque `disabled` também tira da ordem do Tab.
-function desfazerAcaoPendente() {
+//
+// `ev` é o clique no botão (a tecla z chama sem evento, e É teclado): com o
+// foco no "Desfazer", o banner sumir o jogaria no <body> — ele vai ao botão da
+// ação desfeita, no card que voltou (ver `pedirFocoDoTeclado`, C10).
+function desfazerAcaoPendente(ev) {
     if (AppState.pendingAction) {
+        pedirFocoDoTeclado(document.getElementById('undoBtn'), !ev || ev.detail === 0, AppState.pendingAction.type);
         AppState.pendingAction.undo();
         AppState.pendingAction = null;
         registrarDesfazer();
@@ -18995,8 +19120,10 @@ window.onSwipeRight = onSwipeRight;
 window.onSwipeUp = onSwipeUp;
 window.showToast = showToast;
 
-// Usado pelo swipe.js: o arraste não pode furar a janela do Desfazer.
+// Usado pelo swipe.js: o arraste não pode furar a janela do Desfazer — e quem
+// tenta arrastar o card travado fica sabendo por quê (`avisarTravaAoTocar`).
 window.acoesTravadas = acoesTravadas;
+window.avisarTravaAoTocar = avisarTravaAoTocar;
 window.direcaoTravada = direcaoTravada;
 window.cardDaFrente = cardDaFrente;
 

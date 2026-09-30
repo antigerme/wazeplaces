@@ -500,7 +500,7 @@ function constanteDoApp(nome) {
 }
 const DEPS_DO_TECLADO = ['document', 'window', 'AppState', 'MapaLightbox', 'Lightbox', 'topOpenModal',
   'trapTabInModal', 'closeModal', 'desfazerAcaoPendente', 'acoesTravadas', 'agirNoPedidoDoGesto',
-  'pedidoDoCard', 'handleReject', 'handleMarkAsRead', 'handleSkip', 'desfazerPeloTeclado'];
+  'pedidoDoCard', 'handleReject', 'handleMarkAsRead', 'handleSkip', 'desfazerPeloTeclado', 'avisarTravaAoTocar'];
 function montarTeclado() { return montarTecladoCom({}); }
 function montarTecladoCom(trocas) {
   const doc = { activeElement: null, getElementById: () => null };
@@ -513,6 +513,7 @@ function montarTecladoCom(trocas) {
     topOpenModal: () => null, trapTabInModal() {}, closeModal() {}, desfazerAcaoPendente() {},
     acoesTravadas: () => false, agirNoPedidoDoGesto() {}, pedidoDoCard: () => null,
     handleReject() {}, handleMarkAsRead() {}, handleSkip() {}, desfazerPeloTeclado: () => false,
+    avisarTravaAoTocar() {},
     ...trocas,
   };
   const fonte = [constanteDoApp('TECLAS_DE_CURSOR'), fatiarApp('focoEmCampoDeTexto'),
@@ -590,4 +591,103 @@ test('C8 o desfazer do teclado aperta o MESMO botão do banner — e não invent
   }
   // Sem janela aberta nada acontece — e o botão de outro contexto não é apertado à toa.
   assert.deepEqual(rodar({}), { devolveu: false, log: [] }, 'z sem janela aberta apertou alguma coisa');
+});
+
+// ── r4 C14: o card TRAVADO responde com o porquê (auditoria do card, 2026-09-29)
+// Com a trava SEM banner na tela — o "Marcar todos" no ar depois que o toast
+// dele some, a conferência de um 401, a sessão renovando — o ✕ ↑ ✓ estão
+// `disabled`, o arraste não começa e as setas voltam: MEDIDO, tocar no ✕
+// travado não respondia nada. Os três caminhos passam pelo
+// `avisarTravaAoTocar` do app.js (que cala na janela do Desfazer e tem
+// intervalo próprio: test/card-foco-trava). Aqui: as setas, o arraste e o
+// `triggerSwipe`; o toque no botão `disabled` (pointerdown/up na barra) se
+// mede no navegador, no bloco "O CARD" do `tools/smoke-browser.mjs`.
+test('r4 C14 as setas com o card travado não decidem — e pedem o aviso do porquê', () => {
+  let avisos = 0;
+  const k = montarTecladoCom({ acoesTravadas: () => true, avisarTravaAoTocar: () => { avisos++; } });
+  for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp']) {
+    const e = k.tecla(key);
+    assert.equal(e.parou, true, `${key} travado deixou o navegador rolar a página`);
+  }
+  assert.deepEqual(k.saiu, [], 'a seta decidiu com o card travado');
+  assert.equal(avisos, 3, 'DEFEITO: a seta no card travado voltou calada (o intervalo entre avisos é do app.js)');
+  // CONTROLE: destravado, a seta decide e ninguém pede aviso.
+  let avisosLivre = 0;
+  const livre = montarTecladoCom({ avisarTravaAoTocar: () => { avisosLivre++; } });
+  livre.tecla('ArrowLeft');
+  assert.deepEqual(livre.saiu, ['left']);
+  assert.equal(avisosLivre, 0);
+  // E tecla que não é de decidir não pede nada, travada ou não.
+  k.tecla('ArrowDown'); k.tecla('Tab');
+  assert.equal(avisos, 3, 'tecla que não decide pediu o aviso da trava');
+});
+
+test('r4 C14 ARRASTAR o card travado pede o aviso; tocar parado, tocar num botão e rolar a lista não', () => {
+  const montarTravado = () => {
+    const g = montar({ largura: 393 });
+    const pedidos = [];
+    g.ctx.window.acoesTravadas = () => true;
+    g.ctx.window.avisarTravaAoTocar = () => pedidos.push(1);
+    return { g, pedidos };
+  };
+  // O dedo andando como num arraste: o card não sai (nada decidido, nenhum
+  // arraste começado) e o aviso é pedido UMA vez por gesto.
+  for (const [dx, dy] of [[-200, 0], [200, 10], [0, -200]]) {
+    const { g, pedidos } = montarTravado();
+    arrastarDevagar(g, 0, [200, 400], [200 + dx, 400 + dy]);
+    assert.deepEqual(g.decidiu, [], `(${dx}, ${dy}) decidiu com o card travado`);
+    assert.equal(g.estado().isDragging, false, `(${dx}, ${dy}) começou um arraste com o card travado`);
+    assert.equal(pedidos.length, 1, `(${dx}, ${dy}) DEFEITO: arrastar o card travado não pediu o aviso (ou pediu ${pedidos.length}×)`);
+  }
+  // Com o MOUSE, igual.
+  const mo = montarTravado();
+  arrastarMouse(mo.g, [300, 400], [60, 400]);
+  mo.g.noDoc('mouseup', { button: 0, buttons: 0, clientX: 60, clientY: 400 });
+  mo.g.esvaziar();
+  assert.deepEqual(mo.g.decidiu, []);
+  assert.equal(mo.pedidos.length, 1, 'arrastar com o mouse o card travado não pediu o aviso');
+  // Toque PARADO (ampliar a foto com o lote no ar é legítimo): nada de "espere".
+  const parado = montarTravado();
+  const a = parado.g.toque(0, 200, 400);
+  parado.g.noCard('touchstart', { touches: [a], changedTouches: [a] });
+  parado.g.passo(80);
+  const a2 = parado.g.toque(0, 203, 402);
+  parado.g.noDoc('touchmove', { touches: [a2], changedTouches: [a2] });
+  parado.g.noDoc('touchend', { touches: [], changedTouches: [a2] });
+  assert.equal(parado.pedidos.length, 0, 'um toque parado no card travado respondeu "espere"');
+  // Começando num BOTÃO (o toque do botão travado é outro caminho) ou numa
+  // área que ROLA: o dedo andando ali não é tentativa de decidir.
+  for (const cls of ['button', '.card-changes-list']) {
+    const t = montarTravado();
+    const alvo = { closest: (sel) => (sel.split(',').map((x) => x.trim()).includes(cls) ? {} : null) };
+    const b = t.g.toque(0, 200, 400);
+    t.g.noCard('touchstart', { touches: [b], changedTouches: [b], target: alvo });
+    for (let i = 1; i <= 10; i++) {
+      t.g.passo(40);
+      const b2 = t.g.toque(0, 200, 400 - i * 20);
+      t.g.noDoc('touchmove', { touches: [b2], changedTouches: [b2], target: alvo });
+    }
+    t.g.noDoc('touchend', { touches: [], changedTouches: [t.g.toque(0, 200, 200)], target: alvo });
+    assert.equal(t.pedidos.length, 0, `arrastar a partir de ${cls} pediu o aviso da trava`);
+  }
+  // CONTROLE: destravado, o mesmo arraste decide e não pede aviso.
+  const livre = montar({ largura: 393 });
+  let pediuLivre = 0;
+  livre.ctx.window.acoesTravadas = () => false;
+  livre.ctx.window.avisarTravaAoTocar = () => { pediuLivre++; };
+  arrastarDevagar(livre, 0, [200, 400], [0, 400]);
+  assert.deepEqual(livre.decidiu.map((d) => d[0]), ['left'], 'CONTROLE: o arraste destravado deixou de decidir');
+  assert.equal(pediuLivre, 0);
+});
+
+test('r4 C14 o botão e a seta que chegam travados ao triggerSwipe também pedem o aviso', () => {
+  const g = montar({ largura: 393 });
+  let pediu = 0, agiu = 0;
+  g.ctx.window.acoesTravadas = () => true;
+  g.ctx.window.avisarTravaAoTocar = () => { pediu++; };
+  g.ctx.window.cardDaFrente = () => g.card;
+  g.ctx.triggerSwipe('left', () => { agiu++; });
+  g.esvaziar();
+  assert.equal(agiu, 0, 'o triggerSwipe agiu com o card travado');
+  assert.equal(pediu, 1, 'o triggerSwipe travado voltou calado');
 });
