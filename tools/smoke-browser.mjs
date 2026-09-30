@@ -3449,8 +3449,13 @@ for (const sistema of ['dark', 'light']) {
   await abrir();
   await page.click('#pairShowCodeBtn');
   await esperarOuExplodir(page, () => /\d:\d\d/.test(document.getElementById('pairCodeExpiry').textContent), 'o código curto');
-  await esperarOuExplodir(page, () => document.getElementById('pairShowBody').offsetParent === null, 'o QR vencer', 8000);
+  // O sinal de que o QR venceu é o "Copiar link" apagando (anterior a este
+  // conserto), nunca o que se está medindo: esperar a instrução sumir faria o
+  // defeito PENDURAR a espera em vez de reprovar (visto sabotando).
+  const qrVenceu = await esperarNaPagina(page, () => document.getElementById('pairCopyLinkBtn').disabled === true, 8000);
+  checa(qrVenceu.ok, 'pareamento · CONTROLE: o QR de 2 s não venceu (o "Copiar link" não apagou)');
   const meio = await tela();
+  checa(!meio.camera && !meio.semCamera, 'pareamento: QR vencido com o código curto na tela, e a instrução da câmera voltou', JSON.stringify(meio));
   checa(meio.qr === '' && /\d:\d\d/.test(meio.curto) && meio.digite && !meio.riscado,
     'pareamento: QR vencido com o código curto valendo — o "Código expirado" ficou em cima dele, ou a instrução dele sumiu antes da hora',
     JSON.stringify(meio));
