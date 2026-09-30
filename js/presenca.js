@@ -85,6 +85,10 @@ const Presenca = {
     conversas: [],          // [{ id, nome, naoLidas, atividade, ultima }] — as do app
     pais: null,             // o país da lista na tela
     atualizadaEm: 0,        // quando a última lista SAIU (o pedido), não quando chegou
+    // Quando o último pedido da lista SAIU, tenha dado certo ou não — é por ele
+    // que os gatilhos baratos (voltar do fundo, aplicar filtro) contam o teto de
+    // um por minuto (ver `presencaUltimaTentativa`).
+    tentadaEm: 0,
     contagem: null,         // o PORQUÊ da lista, do servidor (ver `contarOnlineDaApp` no core)
     diagUltimaLista: null,  // a última lista anotada no diário (só a MUDANÇA entra)
     diagMsgs: {},           // por tipo de linha: { em, juntas } (ver `presencaAnotarMsg`)
@@ -107,6 +111,10 @@ const Presenca = {
     vistas: new Set(),      // ids de mensagem já contados (o fluxo reentrega)
     historico: new Map(),   // pessoa -> { msgs, maisAntigas, carregada, erro, carregando }
     aberta: null,           // id da pessoa da conversa aberta
+    // O nome dela, guardado ao abrir: a conversa NOVA (ainda sem mensagem) só
+    // tem o nome na lista de quem está no app, e a lista seguinte sem a pessoa
+    // trocava o título por "Editor" (auditoria de 2026-09-29).
+    nomeDaAberta: null,
     anexo: null,
     // O texto digitado e não mandado é DA CONVERSA, como o anexo: `rascunhoDe`
     // é a pessoa dona do que está no campo, e as outras conversas guardam o
@@ -335,9 +343,19 @@ async function presencaSincronizar() {
     if (!presencaPodeConectar()) return presencaDesligar();
     // Mesmo país e lista fresca: nada a pedir. Sem esta guarda, cada filtro
     // aplicado (tipo, ordem, categoria) custaria um pedido sem mudar a lista.
-    const fresca = Date.now() - Presenca.atualizadaEm < PRESENCA_VOLTA_MIN_MS;
+    const fresca = Date.now() - presencaUltimaTentativa() < PRESENCA_VOLTA_MIN_MS;
     if (Presenca.pais === API.getCountry() && fresca) { presencaFluxoGarantir(); return; }
     await presencaAtualizar();
+}
+
+// O teto de UM pedido por minuto dos gatilhos baratos (voltar do segundo plano,
+// aplicar filtro) conta da última TENTATIVA, não da última lista boa: com a
+// lista falhando COM resposta (o Waze fora), a lista boa não andava, e cada
+// volta do fundo pedia de novo (MEDIDO: 4 voltas em 40 s, 4 pedidos; auditoria
+// de 2026-09-29). O pedido que nem teve resposta não conta (ver o
+// `presencaAtualizar`): ele não chegou ao servidor, e a rede voltando o refaz.
+function presencaUltimaTentativa() {
+    return Math.max(Presenca.atualizadaEm, Presenca.tentadaEm);
 }
 
 // A falha que nem chegou a ter resposta (ver o `catch` do `_post` no api.js).
@@ -355,6 +373,8 @@ async function presencaAtualizar({ token = false } = {}) {
     const carona = chatCarona();
     const campos = { pais, userId: presencaEu(), conhecidos: chatConhecidos(), ...carona };
     if (querToken) { campos.instalacao = chatInstalacao(); campos.token = true; Presenca.tokenPedidoEm = inicio; }
+    const tentadaAntes = Presenca.tentadaEm;
+    Presenca.tentadaEm = inicio;
     let refazer = false;
     Presenca.pedindo = (async () => {
         try {
@@ -363,6 +383,9 @@ async function presencaAtualizar({ token = false } = {}) {
             chatAoResponder(r, carona);
             if (r && Number.isFinite(r.agora)) Presenca.desvio = r.agora - Date.now();
             if (!r || !r.success) {
+                // O que nem teve resposta não chegou ao servidor: não conta no
+                // teto dos gatilhos baratos (ver `presencaUltimaTentativa`).
+                if (presencaSemResposta(r)) Presenca.tentadaEm = tentadaAntes;
                 // Pedido de token que falhou por REDE não conta no teto de 5 min:
                 // aberto sem sinal, o app ficava 5 min sem o tempo real depois de
                 // a rede voltar (o `online` achava o pedido "recente" e desistia).
@@ -424,11 +447,38 @@ async function presencaAtualizar({ token = false } = {}) {
 // ações. `null` numa parte é "não veio", NUNCA "ninguém": manter a anterior é
 // melhor que a pílula sumir por uma falha passageira.
 function presencaAplicarLista(r, inicio, pais, via = 'carona') {
+    // A lista que SAIU antes da última que entrou é mais velha que ela: a
+    // carona de uma ação antiga, pousando depois do pedido novo, devolvia a não
+    // lida que a pessoa já tinha lido (auditoria de 2026-09-29).
+    if (inicio < Presenca.atualizadaEm) return;
+    // Trocou de país e a lista do WME não veio (`online: null`): a que está na
+    // tela é de OUTRO país, e ficava com o nome do novo no subtítulo — e
+    // contava como fresca, então nada a pedia de novo (auditoria de
+    // 2026-09-29). Com o país trocado, a parte que não veio é "ninguém que se
+    // saiba", e a lista não conta como atualizada. As conversas não têm país.
+    const trocouDePais = Presenca.pais !== null && String(Presenca.pais) !== String(pais);
+    let incompleta = false;
     if (Array.isArray(r.online)) Presenca.online = r.online.filter((p) => p && PRESENCA_ID.test(String(p.id)));
+    else if (trocouDePais) { Presenca.online = []; incompleta = true; }
     if (Array.isArray(r.conversas)) {
         Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
-        // O que chegou ao vivo ANTES de o pedido sair o servidor já contou.
-        for (const [id, v] of Presenca.vivas) if (v.ultimaTs < inicio) Presenca.vivas.delete(id);
+        // O que chegou ao vivo ANTES de o pedido sair o servidor já contou. E o
+        // que chegou DEPOIS pode ter entrado na conta também: a lista é lida no
+        // Waze depois de o pedido sair, e a mensagem gravada nesse meio vem
+        // nela. A `atividade` da conversa (a hora, no servidor, da última
+        // mensagem) diz até onde ela foi: o que o fluxo trouxe com hora até ali,
+        // a lista já contou. Sem isto, UMA mensagem virava "2 mensagens novas"
+        // (auditoria de 2026-09-29).
+        for (const [id, v] of Presenca.vivas) {
+            if (v.ultimaTs < inicio) { Presenca.vivas.delete(id); continue; }
+            const c = Presenca.conversas.find((x) => x.id === id);
+            if (!c || !Number.isFinite(c.atividade) || !Array.isArray(v.servs)) continue;
+            const depois = v.servs.filter((s) => !(s <= c.atividade));
+            if (depois.length === v.servs.length) continue;
+            v.n = Math.max(0, v.n - (v.servs.length - depois.length));
+            v.servs = depois;
+            if (!v.n) Presenca.vivas.delete(id);
+        }
         // A conversa que a pessoa está OLHANDO está lida, diga a lista o que
         // disser. A lista pode ter sido lida no Waze ANTES do "lida" — pedida
         // junto com o toque que abriu a conversa, ou na volta do segundo plano
@@ -449,7 +499,7 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
     }
     if (r.contagem && typeof r.contagem === 'object') Presenca.contagem = r.contagem;
     Presenca.pais = pais;
-    Presenca.atualizadaEm = Math.max(Presenca.atualizadaEm, inicio);
+    if (!incompleta) Presenca.atualizadaEm = Math.max(Presenca.atualizadaEm, inicio);
     presencaRenderTudo();
     presencaAnotarLista({ via });
 }
@@ -507,6 +557,7 @@ function presencaDesligar() {
     Presenca.fotosFalhas.clear();
     Presenca.pais = null;
     Presenca.atualizadaEm = 0;
+    Presenca.tentadaEm = 0;
     Presenca.pedindo = null;
     Presenca.chat = null;
     Presenca.fluxoTentativa = 0;
@@ -897,7 +948,8 @@ function presencaMsgDoWaze(m, eu) {
     }
     return {
         id: String(m.id || ''),
-        ts: Number.isFinite(m.ts) ? m.ts : Date.now(),
+        // Sem a hora do Waze, a de agora — no relógio de LÁ, como as outras.
+        ts: Number.isFinite(m.ts) ? m.ts : Date.now() + Presenca.desvio,
         meu,
         texto: String(m.texto || '').slice(0, 4000),
         card,
@@ -918,7 +970,7 @@ function presencaMensagemDoFluxo(m, doLote) {
         Presenca.fluxoDiag.recibos += 1;
         // Ler a conversa marca TUDO até ali: o recibo vale pra toda mensagem
         // minha mandada antes dele.
-        chatMarcarLidaAte(de, Number.isFinite(m.ts) ? m.ts : Date.now());
+        chatMarcarLidaAte(de, Number.isFinite(m.ts) ? m.ts : Date.now() + Presenca.desvio);
         if (Presenca.aberta === de) presencaRenderConversa();
         return;
     }
@@ -957,12 +1009,15 @@ function presencaMensagemDoFluxo(m, doLote) {
         // cada lista: a do lote vem com a hora do Google, convertida pelo
         // `desvio`; a ao vivo vale pela hora em que CHEGOU, que é exatamente o
         // que a lista seguinte precisa saber ("chegou antes de eu pedir?").
+        // E a hora do SERVIDOR de cada uma vai junto (`servs`): é ela que a
+        // `atividade` da lista seguinte mede (ver `presencaAplicarLista`).
         else {
             const chegou = doLote ? msg.ts - Presenca.desvio : Date.now();
             if (!doLote || chegou > Presenca.atualizadaEm) {
-                const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0 };
+                const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0, servs: [] };
                 v.n += 1;
                 v.ultimaTs = Math.max(v.ultimaTs, chegou);
+                if (Array.isArray(v.servs)) v.servs.push(msg.ts);
                 Presenca.vivas.set(com, v);
             }
         }
@@ -1106,8 +1161,11 @@ function presencaAbrirConversa(id) {
     // anexo ficava: abrir a conversa com OUTRA pessoa mostrava o pedido na
     // tirinha — e ele saía junto no envio, pra quem não era o destino
     // (auditoria de 2026-09-26).
-    if (Presenca.aberta !== id) Presenca.anexo = null;
+    if (Presenca.aberta !== id) { Presenca.anexo = null; Presenca.nomeDaAberta = null; }
     Presenca.aberta = id;
+    // O nome de quem se abriu, de onde ele estiver agora (ver `nomeDaAberta`).
+    const quem = Presenca.online.find((p) => p.id === id) || Presenca.conversas.find((x) => x.id === id);
+    if (quem && quem.nome) Presenca.nomeDaAberta = quem.nome;
     // Abrir é a hora de tentar de novo a foto que não tinha carregado.
     Presenca.fotosFalhas.clear();
     // E o TEXTO no campo também é da conversa (ver a função).
@@ -1217,6 +1275,7 @@ function presencaTrocarRascunho(id) {
 // caminho de fechamento (✕, Esc, scrim, voltar do aparelho).
 function presencaEsquecerAberta() {
     Presenca.aberta = null;
+    Presenca.nomeDaAberta = null;
     // O anexo é da conversa, não do aparelho: fechar sem mandar descarta. Vai
     // AQUI e não no ✕, pelos mesmos quatro caminhos de fechamento.
     Presenca.anexo = null;
@@ -1249,8 +1308,13 @@ function presencaEnviar(legenda, card) {
     if (!id || !eu) return;
     const h = Presenca.historico.get(id) || { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false };
     Presenca.historico.set(id, h);
+    // A hora é a do SERVIDOR (o relógio daqui mais o `desvio`), até a resposta
+    // trazer a de verdade: as das mensagens dela e a `atividade` da conversa são
+    // de lá. Com a hora crua de um aparelho 2 min adiantado, a minha mensagem
+    // ficava "mais nova" que a resposta dela, e a prévia da lista não mudava
+    // mais (auditoria de 2026-09-29).
     const msg = {
-        id: presencaUuid(), ts: Date.now(), meu: true,
+        id: presencaUuid(), ts: Date.now() + Presenca.desvio, meu: true,
         texto: presencaTextoParaWme(legenda, card), card: card || null, legenda: card ? legenda : null,
         estado: 'enviando', motivo: null,
     };
@@ -1294,7 +1358,11 @@ async function presencaMandar(com, msg) {
         if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
     } else {
         msg.estado = 'falhou';
-        msg.motivo = r && r.errorCategory === 'transient' ? 'conexao' : 'erro';
+        // "Sem conexão" só quando a resposta NEM CHEGOU (o `_post` põe
+        // `_motivo`). O Waze fora também volta `transient`, mas COM resposta: a
+        // rede está boa, e dizer "sem conexão" mandava a pessoa procurar sinal
+        // (auditoria de 2026-09-29). Aí é o "Não enviada." sem motivo.
+        msg.motivo = presencaSemResposta(r) ? 'conexao' : 'erro';
         if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
     }
     presencaRenderConversa();
@@ -1777,7 +1845,11 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
     if (!id || !presencaConversaNaTela()) return;
     const pessoa = Presenca.online.find((p) => p.id === id);
     const conversa = Presenca.conversas.find((c) => c.id === id);
-    const nome = (pessoa && pessoa.nome) || (conversa && conversa.nome) || t('presenca.anon');
+    // O nome de agora, se a lista o traz; senão o que se sabia ao abrir (ou que
+    // uma lista trouxe depois): a pessoa que sai do app não vira "Editor".
+    const sabido = (pessoa && pessoa.nome) || (conversa && conversa.nome) || '';
+    if (sabido) Presenca.nomeDaAberta = sabido;
+    const nome = sabido || Presenca.nomeDaAberta || t('presenca.anon');
     const titulo = document.getElementById('conversaTitle');
     if (titulo && titulo.textContent !== nome) titulo.textContent = nome;
 
@@ -1836,7 +1908,8 @@ function presencaAoVoltar() {
     // chegou nada no prazo do silêncio, descarta e religa já.
     const f = Presenca.fluxo;
     if (f && Date.now() - (f.vivoEm || f.desde) > PRESENCA_FLUXO_SILENCIO_MS) presencaFluxoFechar();
-    if (Date.now() - Presenca.atualizadaEm >= PRESENCA_VOLTA_MIN_MS) presencaAtualizar();
+    // Da última TENTATIVA: com a lista falhando, a lista boa não anda.
+    if (Date.now() - presencaUltimaTentativa() >= PRESENCA_VOLTA_MIN_MS) presencaAtualizar();
     clearTimeout(Presenca.timers.fluxo);
     presencaFluxoGarantir();
     // Voltar pra tela com a conversa aberta É ler o que chegou nesse meio-tempo.
@@ -1914,7 +1987,7 @@ function presencaMontar() {
             // A folha diz "de quem" porque o pedido aberto ali não é da fila de
             // ninguém: é o que alguém mostrou.
             const conv = Presenca.conversas.find((c) => c.id === id) || Presenca.online.find((p) => p.id === id);
-            const de = m.meu ? (AppState.profile && AppState.profile.userName) : (conv && conv.nome);
+            const de = m.meu ? (AppState.profile && AppState.profile.userName) : ((conv && conv.nome) || Presenca.nomeDaAberta);
             window.abrirPedidoRecebido?.(m.card, de);
         });
         // Foto de terceiro que não carrega (apagada no Waze, rede caída) não
@@ -1949,7 +2022,12 @@ function presencaDiag() {
         conversas: Presenca.conversas.length,
         naoLidas: presencaNaoLidasTotal(),
         atualizadaHaS: Presenca.atualizadaEm ? Math.round((agora - Presenca.atualizadaEm) / 1000) : null,
-        token: Presenca.chat ? { valido: presencaTokenValido(), expiraEmH: Number.isFinite(Presenca.chat.expiraEm) ? Math.round((Presenca.chat.expiraEm - agora) / 36e5) : null } : null,
+        // `valido` é "não precisa renovar" (conta a folga de 1 h); `abre` é
+        // "ainda abre o tempo real" (vence DE FATO). Só com o primeiro, o resumo
+        // dizia "o token venceu" com ele valendo mais meia hora (auditoria de
+        // 2026-09-29).
+        token: Presenca.chat ? { valido: presencaTokenValido(), abre: presencaTokenAbre(),
+            expiraEmH: Number.isFinite(Presenca.chat.expiraEm) ? Math.round((Presenca.chat.expiraEm - agora) / 36e5) : null } : null,
         fluxo: {
             aberto: !!Presenca.fluxo,
             haS: Presenca.fluxo ? Math.round((agora - Presenca.fluxo.desde) / 1000) : null,

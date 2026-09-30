@@ -298,3 +298,206 @@ test('P2 sem o perfil, o "Tentar de novo" não sai — sairia pela sessão NOVA,
   assert.equal(envios.length, 2);
   assert.equal(envios[1].id, envios[0].id);
 });
+
+// ── P5: o teto de um pedido por minuto conta a TENTATIVA ────────────────────
+
+test('P5 voltar do segundo plano e aplicar filtro: no máximo UM pedido por minuto — também com a lista FALHANDO', async () => {
+  const T0 = 1790200000000;
+  async function voltas(resposta) {
+    const c = novoCliente({ agora: T0, api: { presencaApp: () => resposta } });
+    c.P.Presenca.atualizadaEm = T0 - 5 * 60000;                 // a última lista boa é de 5 min atrás
+    c.P.Presenca.pais = 30;
+    c.P.Presenca.chat = { token: 't', base: 'https://x/', chave: 'k', expiraEm: T0 + 10 * 36e5 };
+    c.P.Presenca.fluxo = { ctl: new AbortController(), desde: T0, vivoEm: T0 };
+    for (let i = 0; i < 4; i++) {                                // 4 voltas do fundo em 40 s
+      c.P.presencaAoVoltar();
+      await tick();
+      c.relogio.agora += 10000;
+      c.P.Presenca.fluxo.vivoEm = c.relogio.agora;
+    }
+    await c.P.presencaSincronizar();                             // e um filtro aplicado, no mesmo país
+    await tick();
+    return c.chamadas.presencaApp.length;
+  }
+  assert.equal(await voltas({ success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' }), 1,
+    'com o Waze fora (a lista falhando COM resposta), cada volta do fundo pediu a lista de novo');
+  // CONTROLE: com a lista boa, o mesmo um.
+  assert.equal(await voltas({ success: true, online: [], conversas: [], agora: T0 }), 1);
+  // E o que NEM TEVE resposta (a rede) não conta: a volta seguinte pede de novo — ele não chegou ao servidor.
+  assert.equal(await voltas({ success: false, errorCategory: 'transient', _motivo: 'TypeError' }), 5,
+    'a falha SEM resposta (sem rede) segurou os pedidos seguintes por um minuto');
+});
+
+// ── P6: a mesma mensagem não conta duas vezes; lista velha não pousa ─────────
+
+test('P6 a mensagem que chega com a lista NO AR, e que a lista já contou, não vira "2 mensagens novas"', async () => {
+  const T0 = 1790200000000;
+  async function cenario(servidorContou) {
+    let responder;
+    const c = novoCliente({ agora: T0, api: { presencaApp: () => new Promise((r) => { responder = r; }) } });
+    c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', T0 - 10000, 0)] }, T0 - 70000, 30);
+    const pedido = c.P.presencaAtualizar();                      // a lista sai AGORA
+    c.relogio.agora += 300;                                      // 300 ms depois chega a mensagem, ao vivo
+    const bytes = await bytesDeMensagem({ id: uuid(50), de: CAF, para: EU, texto: 'oi', ctx: APP, ts: T0 + 100 });
+    c.P.presencaQuadro(fluxoDe(c), inbox(bytes, 50));
+    const antes = c.P.presencaNaoLidasTotal();
+    c.relogio.agora += 400;                                      // a lista volta: lida no Waze depois de a mensagem ser gravada
+    responder({ success: true, online: [], agora: c.relogio.agora,
+      conversas: [conversa(CAF, 'cafanha', servidorContou ? T0 + 100 : T0 - 10000, servidorContou ? 1 : 0)] });
+    await pedido;
+    return { antes, depois: c.P.presencaNaoLidasTotal(), selo: c.$('presencaCount').textContent };
+  }
+  const contou = await cenario(true);
+  assert.equal(contou.antes, 1, 'CONTROLE: a mensagem ao vivo tem que contar');
+  assert.equal(contou.depois, 1, 'a mensagem que a lista já contava contou DUAS vezes ("2 mensagens novas" pra uma)');
+  assert.equal(contou.selo, '1');
+  // CONTROLE: a lista lida no Waze ANTES de a mensagem ser gravada não a conta — a ao vivo fica.
+  assert.equal((await cenario(false)).depois, 1, 'a mensagem que a lista NÃO contava sumiu');
+});
+
+test('P6 a lista que SAIU antes da última que entrou não pousa por cima dela (a carona velha chegando depois)', () => {
+  function cenario(ordem) {
+    const c = novoCliente();
+    const nova = () => c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', 900, 0)] }, 2000, 30, 'pedido');
+    const velha = () => c.P.presencaAoCarona({ online: [], conversas: [conversa(CAF, 'cafanha', 900, 1)] }, 1000, 30);
+    if (ordem === 'fora') { nova(); velha(); } else { velha(); nova(); }
+    return { naoLidas: c.P.presencaNaoLidasTotal(), pilula: !c.$('presencaPill').classList.contains('hidden'), em: c.P.Presenca.atualizadaEm };
+  }
+  const fora = cenario('fora');
+  assert.equal(fora.naoLidas, 0, 'a carona VELHA, pousando depois da lista nova, devolveu a não lida já lida');
+  assert.equal(fora.pilula, false);
+  assert.equal(fora.em, 2000);
+  // CONTROLE: na ordem, a mais nova é a que fica — o mesmo zero.
+  assert.equal(cenario('certa').naoLidas, 0);
+});
+
+// ── P7: trocar de país com a lista do WME falhando ──────────────────────────
+
+test('P7 trocar de país com a lista do WME FALHANDO: a do país velho não fica com o nome do novo, nem conta como atualizada', async () => {
+  const T0 = 1790200000000;
+  async function cenario(online) {
+    let pais = 30;
+    const c = novoCliente({ agora: T0, api: { presencaApp: () => ({ success: true, online, conversas: [], contagem: { online: { falhou: 'transient' } }, agora: T0 }) } });
+    c.API.getCountry = () => pais;
+    c.P.presencaAplicarLista({ online: [pessoa(CAF, 'cafanha_no_brasil', -23.5, -46.6)], conversas: [] }, T0 - 120000, 30, 'pedido');
+    pais = 73;                                                   // a pessoa aplicou a França nos Filtros
+    await c.P.presencaSincronizar();
+    c.$('presencaModal').classList.remove('hidden');
+    c.P.presencaRenderLista();
+    return { pais: c.P.Presenca.pais, online: c.P.Presenca.online.map((p) => p.nome), sub: c.$('presencaSub').textContent,
+      pilula: !c.$('presencaPill').classList.contains('hidden'), em: c.P.Presenca.atualizadaEm };
+  }
+  const falhou = await cenario(null);
+  assert.deepEqual(falhou.online, [], 'a lista do Brasil ficou na tela com o subtítulo da França');
+  assert.equal(falhou.sub, 'presenca.sheet.sub{"pais":"France"}');
+  assert.equal(falhou.pilula, false, 'a pílula seguiu contando quem está no Brasil');
+  assert.equal(falhou.em, T0 - 120000, 'a lista da França que não veio contou como atualizada');
+  // CONTROLE: a lista da França veio (vazia) — atualizada, e o mesmo vazio.
+  const veio = await cenario([]);
+  assert.deepEqual(veio.online, []);
+  assert.equal(veio.em, T0, 'CONTROLE: a lista que veio tem que contar como atualizada');
+});
+
+// ── P8: a hora da minha mensagem é a do servidor ────────────────────────────
+
+test('P8 aparelho 2 min ADIANTADO: a resposta dela, 30 s depois da minha, atualiza a prévia da lista', async () => {
+  const SERVIDOR = 1790200000000;
+  async function cenario(adiantadoMs) {
+    const c = novoCliente({ agora: SERVIDOR + adiantadoMs, api: { chat: (x) => ({ success: true, id: x.id, ts: SERVIDOR }) } });
+    c.P.Presenca.desvio = -adiantadoMs;                          // medido na última lista
+    c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', SERVIDOR - 600000, 0, { deMim: false, ts: SERVIDOR - 600000, texto: 'antiga', card: null })] }, c.relogio.agora - 1000, 30);
+    c.P.Presenca.aberta = CAF;
+    c.$('conversaModal').classList.remove('hidden');
+    c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true, maisAntigas: false });
+    c.P.presencaEnviar('oi', null);
+    const minha = c.P.Presenca.historico.get(CAF).msgs[0].ts;
+    await tick();
+    c.$('conversaModal').classList.add('hidden');
+    c.P.presencaEsquecerAberta();
+    c.relogio.agora += 30000;
+    const bytes = await bytesDeMensagem({ id: uuid(60), de: CAF, para: EU, texto: 'respondi', ctx: APP, ts: SERVIDOR + 30000 });
+    c.P.presencaQuadro(fluxoDe(c), inbox(bytes, 60));
+    const conv = c.P.Presenca.conversas.find((x) => x.id === CAF);
+    return { minha, previa: conv.ultima.texto, deMim: conv.ultima.deMim };
+  }
+  const adiantado = await cenario(120000);
+  assert.equal(adiantado.minha, SERVIDOR, 'a minha mensagem nasceu com a hora do APARELHO, não a do servidor');
+  assert.equal(adiantado.previa, 'respondi', 'a resposta dela não atualizou a prévia (a minha ficou "mais nova" por 2 min)');
+  assert.equal(adiantado.deMim, false);
+  // CONTROLE: relógio certo, o mesmo desfecho.
+  assert.equal((await cenario(0)).previa, 'respondi');
+});
+
+// ── P9: o nome da conversa aberta ───────────────────────────────────────────
+
+test('P9 conversa NOVA aberta pela lista: a pessoa sair do app não troca o título por "Editor" — nem o "de quem" do pedido', async () => {
+  const card = JSON.stringify({ venueID: '1.2.3', name: 'Padaria', categories: ['BAKERY'], updateTypeKey: 'IMAGE', region: 'row' });
+  const c = novoCliente({ api: { chat: () => ({ success: true, mensagens: [daCaf(8, 1790200000000, { contexto: { ...APP, card } })], maisAntigas: false, lida: true }) } });
+  c.P.presencaMontar();
+  c.P.presencaAplicarLista({ online: [pessoa(CAF, 'cafanha', -23.5, -46.6, 3)], conversas: [] }, 1000, 30);
+  c.P.presencaAbrirConversa(CAF);                                // abre pela linha da lista
+  await tick();
+  assert.equal(c.$('conversaTitle').textContent, 'cafanha', 'CONTROLE: o título tem que nascer com o nome');
+  // A lista seguinte (a carona de uma ação, a volta do fundo): ela parou de triar.
+  c.P.presencaAplicarLista({ online: [], conversas: [] }, 2000, 30);
+  assert.equal(c.$('conversaTitle').textContent, 'cafanha', 'a conversa aberta virou "Editor" quando a pessoa saiu do app');
+  // E o pedido que ela mandou abre dizendo de quem é.
+  c.$('conversaMsgs').disparar('click', { target: { closest: (s) => (s === '.conversa-pedido' ? { dataset: { msg: '0' } } : null) } });
+  assert.equal(c.chamadas.pedidoAberto && c.chamadas.pedidoAberto[1], 'cafanha', 'a folha do pedido perdeu o "de quem"');
+  // Fechar esquece o nome: a próxima conversa não herda.
+  c.P.presencaEsquecerAberta();
+  assert.equal(c.P.Presenca.nomeDaAberta, null);
+});
+
+// ── P10: "sem conexão" só quando a rede falhou ──────────────────────────────
+
+test('P10 o Waze fora (gRPC 14) com a rede boa: "Não enviada." — "sem conexão" só quando a resposta nem chegou', async () => {
+  // O SERVIDOR de verdade: o Waze responde gRPC 14 (UNAVAILABLE) no envio.
+  const { webcrypto } = await import('node:crypto');
+  if (!globalThis.crypto) globalThis.crypto = webcrypto;
+  const { dispatch } = await import('../server/core.mjs');
+  const { sessaoDeTeste } = await import('./_sessao.mjs');
+  const S = await sessaoDeTeste(['.waze.com\tTRUE\t/\tTRUE\t0\t_csrf_token\tcsrf', '.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tsess'].join('\n'));
+  const quadro = (flag, corpo) => { const q = new Uint8Array(5 + corpo.length); q[0] = flag; new DataView(q.buffer).setUint32(1, corpo.length); q.set(corpo, 5); return q; };
+  const trailer = new TextEncoder().encode('grpc-status:14\r\ngrpc-message:unavailable\r\n');
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => new Response(btoa(String.fromCharCode(...quadro(0x80, trailer))), { status: 200, headers: { 'content-type': 'application/grpc-web-text+proto' } });
+  let r;
+  try {
+    r = await dispatch('chat', { ...S.dados, region: 'row', acao: 'enviar', para: CAF, id: uuid(70), texto: 'oi' }, S.ctx);
+  } finally { globalThis.fetch = orig; }
+  assert.equal(r.body.errorCategory, 'transient', 'CONTROLE: o Waze fora tem que chegar como transiente');
+  assert.ok(!('_motivo' in r.body), 'CONTROLE: a resposta do servidor não traz `_motivo` (só o `_post` põe, quando nada chega)');
+  // O CLIENTE: que frase cada falha vira.
+  async function frase(resposta) {
+    const c = novoCliente({ api: { chat: () => resposta } });
+    c.P.Presenca.aberta = CAF;
+    c.$('conversaModal').classList.remove('hidden');
+    c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true, maisAntigas: false });
+    c.P.presencaEnviar('oi', null);
+    await tick();
+    return (c.$('conversaMsgs').innerHTML.match(/<p class="conversa-falhou">([^<]*)/) || [])[1];
+  }
+  assert.equal(await frase({ ...r.body }), 'presenca.recibo.naoEnviadaErro ', 'o Waze fora, com a rede boa, virou "Não enviada, sem conexão."');
+  // CONTROLE: sem rede (sem resposta) é "sem conexão"; a recusa é o sem motivo.
+  assert.equal(await frase({ success: false, errorCategory: 'transient', _motivo: 'TypeError' }), 'presenca.recibo.naoEnviada ');
+  assert.equal(await frase({ success: false, errorCategory: 'unknown' }), 'presenca.recibo.naoEnviadaErro ');
+});
+
+// ── P11: o diagnóstico diz se o token AINDA ABRE o tempo real ───────────────
+
+test('P11 o diagnóstico leva se o token ainda ABRE o tempo real — "válido" (sem precisar renovar) não é a mesma pergunta', () => {
+  const T0 = 1790200000000;
+  const diag = (minutos) => {
+    const c = novoCliente({ agora: T0 });
+    c.P.Presenca.chat = { token: 't', base: 'https://x/', chave: 'k', expiraEm: T0 + minutos * 60000 };
+    return c.P.presencaDiag().token;
+  };
+  assert.deepEqual(diag(30), { valido: false, abre: true, expiraEmH: 1 }, 'na última hora o token ainda abre o tempo real, e o diagnóstico tem que dizer');
+  assert.deepEqual(diag(-10), { valido: false, abre: false, expiraEmH: -0 });
+  assert.deepEqual(diag(300), { valido: true, abre: true, expiraEmH: 5 });
+  // E ele não leva o token nem a chave (credencial que não ajuda a depurar).
+  const c = novoCliente({ agora: T0 });
+  c.P.Presenca.chat = { token: 'SEGREDO-T', base: 'https://x/', chave: 'SEGREDO-K', expiraEm: T0 + 36e5 };
+  assert.ok(!JSON.stringify(c.P.presencaDiag()).includes('SEGREDO'));
+});

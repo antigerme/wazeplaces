@@ -382,7 +382,10 @@ test('mandar: com pedido, o contexto leva o cartão e a pergunta CURTA (a marca 
 });
 
 test('mandar: falha de rede vira "Não enviada, sem conexão" + "Tentar de novo", que repete com o MESMO id', async () => {
-  let resposta = { success: false, errorCategory: 'transient' };
+  // "De rede" é SEM RESPOSTA: o `_motivo` que o `_post` põe quando a resposta
+  // nem chegou. O Waze fora (transiente COM resposta) é outro caso — ver o P10
+  // do `presenca-auditoria-r4.test.mjs`.
+  let resposta = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
   const c = novoCliente({ api: { chat: () => resposta } });
   c.P.Presenca.aberta = CAF;
   // A conversa NA TELA: escondida por outra camada ela não é desenhada
@@ -617,6 +620,10 @@ test('diário: a LISTA entra quando muda ou falha — a carona repetida não vir
   await c.P.presencaAtualizar();
   assert.deepEqual(anotados(c, 'presenca.lista').slice(2), [{ via: 'pedido', falhou: 'transient' }]);
   // E a lista que volta depois da falha é linha de novo, mesmo igual à de antes.
+  // O pedido sai DEPOIS das caronas acima (que usaram o relógio de verdade):
+  // lista que saiu antes da última que entrou é velha e não entra (auditoria
+  // de 2026-09-29) — com o relógio parado do cliente, este pedido "sairia" antes.
+  c.relogio.agora = Date.now() + 1000;
   resposta = { success: true, online: [], conversas: [], contagem: { ...CONTAGEM, online: { noWme: 47, comMarca: 2, noPais: 0 } } };
   await c.P.presencaAtualizar();
   assert.equal(anotados(c, 'presenca.lista').length, 4, 'a lista que voltou depois da falha não entrou');

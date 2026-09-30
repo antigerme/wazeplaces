@@ -136,8 +136,9 @@ else if (!pa) out('sem a presença carregada');
 else if (pa.erro) out('erro ao medir: ' + pa.erro);
 else {
   const f = pa.fluxo || {};
+  const tk = pa.token;
   out(`ligada ${pa.ligada} · no app ${pa.online} · conversas ${pa.conversas} · não lidas ${pa.naoLidas} · lista de há ${pa.atualizadaHaS ?? '—'} s · conversa aberta ${pa.conversaAberta}`);
-  out(`token ${pa.token ? `válido ${pa.token.valido} (vence em ${pa.token.expiraEmH ?? '?'} h)` : 'nenhum'} · tempo real aberto ${f.aberto}${f.aberto ? ` há ${f.haS} s` : ''} · aberturas ${f.aberturas} · quadros ${f.quadros} · mensagens ${f.mensagens} · recibos ${f.recibos} · recuo ${f.tentativa}${f.ultimoErro ? ` · último erro: ${f.ultimoErro}` : ''}`);
+  out(`token ${tk ? `válido ${tk.valido}${tk.abre !== undefined ? ` · abre o tempo real ${tk.abre}` : ''} (vence em ${tk.expiraEmH ?? '?'} h)` : 'nenhum'} · tempo real aberto ${f.aberto}${f.aberto ? ` há ${f.haS} s` : ''} · aberturas ${f.aberturas} · quadros ${f.quadros} · mensagens ${f.mensagens} · recibos ${f.recibos} · recuo ${f.tentativa}${f.ultimoErro ? ` · último erro: ${f.ultimoErro}` : ''}`);
   out(`conhecidas no aparelho ${pa.conhecidos} · a confirmar ${pa.aConfirmar}${f.ignoradas !== undefined ? ` · mensagens só do WME (ignoradas de propósito) ${f.ignoradas}` : ''}${f.quedasSeguidas ? ` · quedas seguidas do tempo real ${f.quedasSeguidas}` : ''}`);
   // O PORQUÊ da lista, contado no servidor (relatório v8): separa "ninguém usa
   // o app agora" de "está no app, mas noutro país" e de "a marca se perdeu".
@@ -149,7 +150,20 @@ else {
     if (o) out(o.falhou ? `lista do WME: FALHOU (${o.falhou})` : `no WME agora: ${o.noWme} visíveis · com a marca do app: ${o.comMarca} · no país do filtro: ${o.noPais}`);
     if (c) out(c.falhou ? `conversas do Waze: FALHOU (${c.falhou})` : `conversas no Waze: ${c.noWaze} · com a marca do app: ${c.marcadas} · entram na lista (marca ou já conhecida): ${c.daApp}`);
   }
-  if (pa.ligada && pa.token && !pa.token.valido) out('ATENÇÃO: o token do tempo real venceu — mensagem nova só aparece no próximo pedido.');
+  // `valido` diz "não precisa renovar": conta a folga de 1 h da renovação, e
+  // falso nela NÃO é vencido — o aviso dizia "venceu" com o token abrindo o
+  // tempo real por mais meia hora (auditoria de 2026-09-29). Quem diz se venceu
+  // é o `abre`; no relatório que não o traz, só as horas NEGATIVAS provam.
+  if (pa.ligada && tk) {
+    const venceu = tk.abre !== undefined ? tk.abre === false
+      : !tk.valido && Number.isFinite(tk.expiraEmH) && tk.expiraEmH < 0;
+    if (venceu) out('ATENÇÃO: o token do tempo real venceu — mensagem nova só aparece no próximo pedido.');
+    else if (!tk.valido) {
+      out(tk.abre === undefined
+        ? 'nota: o token do tempo real está na última hora, ou venceu há menos de meia hora — este relatório não diz se ele ainda abre o tempo real.'
+        : 'nota: o token do tempo real está na última hora — ainda abre o tempo real, e a renovação sai no próximo pedido da lista.');
+    }
+  }
   if (pa.aConfirmar >= 90) out('ATENÇÃO: a fila de confirmação está quase no teto — a confirmação de carona pode não estar voltando.');
 }
 

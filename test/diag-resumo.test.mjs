@@ -230,6 +230,36 @@ test('diag-resumo: a presença do app (fase 3) sai em CONTAGENS, com os avisos �
   assert.match(antigo, /── PRESENÇA NO APP \(lista e conversa\) ─+\n\(ausente nesta versão\)/);
 });
 
+// O token na ÚLTIMA HORA não venceu: `valido` é "não precisa renovar" (conta a
+// folga de 1 h), e o aviso dizia "venceu" com o token abrindo o tempo real por
+// mais meia hora. Quem diz se venceu é o `abre` (auditoria de 2026-09-29, R4-1
+// P11); no relatório que não o traz, só as horas NEGATIVAS provam.
+test('diag-resumo: "o token venceu" só quando ele NÃO abre mais o tempo real — a última hora é nota, não alerta', () => {
+  const com = (token, versao = 11) => {
+    const d = relatorioV4();
+    d._versaoDoDiag = versao;
+    d.resumo.presencaApp = { ligada: true, online: 0, conversas: 0, naoLidas: 0, atualizadaHaS: 30, conversaAberta: false, token,
+      fluxo: { aberto: true, haS: 60, tentativa: 0, aberturas: 1, quadros: 2, mensagens: 0, recibos: 0 }, conhecidos: 0, aConfirmar: 0 };
+    return rodar(d);
+  };
+  const VENCEU = /ATENÇÃO: o token do tempo real venceu/;
+  const ultima = com({ valido: false, abre: true, expiraEmH: 1 });          // vence em 30 min
+  assert.doesNotMatch(ultima, VENCEU, 'o token que ainda abre o tempo real foi dado como vencido');
+  assert.match(ultima, /token válido false · abre o tempo real true \(vence em 1 h\)/);
+  assert.match(ultima, /nota: o token do tempo real está na última hora — ainda abre o tempo real/);
+  // CONTROLE: vencido de fato é alerta.
+  assert.match(com({ valido: false, abre: false, expiraEmH: 0 }), VENCEU, 'o token vencido deixou de ser alerta');
+  // Válido: nada.
+  const bom = com({ valido: true, abre: true, expiraEmH: 5 });
+  assert.doesNotMatch(bom, VENCEU);
+  assert.doesNotMatch(bom, /nota: o token/);
+  // Relatório de ANTES do `abre`: horas negativas provam; na última hora, não dá pra saber — nota, e o motivo.
+  assert.match(com({ valido: false, expiraEmH: -1 }, 7), VENCEU);
+  const antigo = com({ valido: false, expiraEmH: 1 }, 7);
+  assert.doesNotMatch(antigo, VENCEU, 'o relatório antigo na última hora foi dado como vencido');
+  assert.match(antigo, /este relatório não diz se ele ainda abre o tempo real/);
+});
+
 // ── v8 (v2026.09.24-02): o relatório pra entender os relatos da fase 3 ──────
 // Com o modo dev, o anel de chamadas passou a guardar a conversa (o texto que
 // sai e a resposta do chat). O LEITOR segue imprimindo só a triagem: quem
