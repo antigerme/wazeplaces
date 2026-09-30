@@ -702,7 +702,10 @@ test('auto (F1): pedido EM ANDAMENTO — o lote de lidos no ar — não é alvo 
 // Três defeitos de texto: o título dizia "{n} pedidos, {n} resolvidos" mesmo
 // com falha; com um só saía "1 rejeitados"; e o que foi pra fila de SAÍDA (sem
 // rede) contava como "Foram pro Waze no seu nome" — sem ter ido.
-function lote({ respostas }) {
+// `camada`: o que está aberto por cima quando o lote termina ('filtros', 'foto',
+// 'mapa' ou nada) — ver o L27 logo abaixo.
+const RECUSA_LOTE = { success: false, errorCategory: 'unknown', httpCode: 406 };
+function lote({ respostas, camada = null }) {
   const APP_SEM = fonte.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   const fatiarFn = (nome) => {
     const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
@@ -722,6 +725,8 @@ function lote({ respostas }) {
   const els = { autorTitle: { textContent: '' }, autorCorpo: { innerHTML: '' } };
   const historico = [];
   const confirmadas = { n: 0 };
+  const toasts = [];
+  const modais = [];
   const fila = respostas.slice();
   const deps = {
     AppState: { stats: { rejected: 0 }, serverTotal: 9, queue: [], inFlightActions: 0 },
@@ -730,7 +735,12 @@ function lote({ respostas }) {
     registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
     registrarAcaoConfirmada: () => { confirmadas.n++; },
     enfileirarSaida: () => 'ok', handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
-    saveStats() {}, updatePendingCount() {}, openModal() {},
+    saveStats() {}, updatePendingCount() {}, openModal: (id) => modais.push(id),
+    carregarFilaDeSaida: () => [], tirarDaFilaDeSaida() {}, dfato() {}, devolverPedidoRecusado() {},
+    aoMudarAFilaPorBaixo() {}, pousouNoWaze: () => false, descontarGestoSemSessao() {},
+    topOpenModal: () => (camada === 'filtros' ? { id: 'filtersModal' } : null),
+    Lightbox: { isOpen: () => camada === 'foto' }, MapaLightbox: { isOpen: () => camada === 'mapa' },
+    showToast: (msg, tipo) => toasts.push([msg, tipo]),
     document: { getElementById: (id) => els[id] || null },
     t: (k, v) => (v && v.n != null ? `${k}#${v.n}` : k), escapeHtml: (x) => x,
   };
@@ -738,7 +748,7 @@ function lote({ respostas }) {
   const enviar = new Function(...chaves, fatiarFn('enviarLote') + '\n' + fatiarFn('mostrarResultadoDoLote')
     + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));
   const pl = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: 7 });
-  return { rodar: () => enviar(respostas.map((_, i) => pl(i))), els, historico, confirmadas };
+  return { rodar: () => enviar(respostas.map((_, i) => pl(i))), els, historico, confirmadas, toasts, modais };
 }
 
 test('lote: com UM pedido, singular no título e na linha ("1 rejeitado", não "1 rejeitados")', async () => {
@@ -770,4 +780,31 @@ test('lote: "já tratado" entra no Histórico como no card único, e o que saiu 
   await m.rodar();
   assert.deepEqual(m.historico, [['reject', 1], ['reject', 1]], 'o "já tratado" do lote não entrou no Histórico');
   assert.equal(m.confirmadas.n, 1, 'o rejeitado do lote não contou pras conquistas');
+});
+
+// ── L27: o resultado do lote NÃO abre por cima de outra camada ───────────────
+// A folha do resultado abria incondicional: com a foto ampliada aberta ela ia
+// pra TRÁS dela (o foco preso dentro da folha invisível), e com os Filtros
+// abertos ela os substituía, jogando fora a mudança não aplicada (auditoria de
+// 2026-09-29, e6/e23). Com outra camada, o resultado vira AVISO com as mesmas
+// frases da folha — e a folha (que pode ser a de outro autor) nem é tocada.
+test('L27: com Filtros, a foto ou o mapa ampliados abertos, o resultado do lote é um AVISO — a camada fica', async () => {
+  for (const camada of ['filtros', 'foto', 'mapa']) {
+    const m = lote({ respostas: [{ success: true }, { success: true }, RECUSA_LOTE], camada });
+    await m.rodar();
+    assert.deepEqual(m.modais, [], `${camada}: a folha do resultado abriu por cima da camada aberta`);
+    assert.equal(m.els.autorTitle.textContent, '', `${camada}: a folha (que pode ser a de outro autor) foi reescrita`);
+    assert.equal(m.toasts.length, 1, `${camada}: o resultado sumiu calado`);
+    assert.equal(m.toasts[0][0], 'autor.lote.rejeitados#2 · autor.lote.falharamUm#1',
+      `${camada}: o aviso não diz o mesmo que a folha diria`);
+    assert.equal(m.toasts[0][1], 'error', 'com falha, o aviso não é de sucesso');
+  }
+});
+
+test('L27: CONTROLE — sem camada aberta, a folha do resultado abre como sempre', async () => {
+  const m = lote({ respostas: [{ success: true }, { success: true }] });
+  await m.rodar();
+  assert.deepEqual(m.modais, ['autorModal']);
+  assert.equal(m.toasts.length, 0);
+  assert.equal(m.els.autorTitle.textContent, 'autor.lote.titulo#2');
 });

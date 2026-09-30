@@ -12935,6 +12935,29 @@ function mostrarResultadoDoLote(conta) {
     const total = conta.ok + fila + conta.ja + conta.erro;
     // Plural por CHAVE (sem ICU): "1 rejeitados" era o que saía com um só.
     const um = (n) => (n === 1 ? 'Um' : '');
+    const linhas = [];
+    if (conta.ok) linhas.push(['✓', 'bg-emerald-100 text-emerald-800 dark:bg-emerald-400/20 dark:text-emerald-300',
+        t('autor.lote.rejeitados' + um(conta.ok), { n: conta.ok }), t('autor.lote.rejeitados.desc' + um(conta.ok))]);
+    if (fila) linhas.push(['⏳', 'bg-amber-100 text-amber-800 dark:bg-amber-400/20 dark:text-amber-200',
+        t('autor.lote.fila' + um(fila), { n: fila }), t('autor.lote.fila.desc' + um(fila))]);
+    if (conta.ja) linhas.push(['👍', 'bg-sky-100 text-sky-800 dark:bg-sky-400/20 dark:text-sky-200',
+        t('autor.lote.jaTratados' + um(conta.ja), { n: conta.ja }), t('autor.lote.jaTratados.desc' + um(conta.ja))]);
+    if (conta.erro) linhas.push(['!', 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300',
+        t('autor.lote.falharam' + um(conta.erro), { n: conta.erro }), t('autor.lote.falharam.desc' + um(conta.erro))]);
+    if (!linhas.length) return;
+    // Com OUTRA camada aberta — a foto ou o mapa ampliados, Filtros, outra
+    // folha —, o resultado sai como AVISO, com as mesmas frases da folha, e a
+    // camada fica. A folha abria por cima de qualquer uma: atrás da foto
+    // ampliada, com o foco preso nela invisível, ou no lugar dos Filtros,
+    // jogando fora a mudança ainda não aplicada (auditoria de 2026-09-29, L27).
+    // Nada da folha é escrito antes: a aberta pode ser a de outro autor.
+    const outraCamada = !!topOpenModal()
+        || (typeof Lightbox !== 'undefined' && Lightbox.isOpen())
+        || (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen());
+    if (outraCamada) {
+        showToast(linhas.map((l) => l[2]).join(' · '), conta.erro ? 'error' : fila ? 'info' : 'success');
+        return;
+    }
     titulo.textContent = t('autor.lote.titulo' + um(total), { n: total });
     const linha = (emoji, cor, t1, t2) =>
         `<div class="flex items-start gap-3 py-2.5 border-b border-slate-100 dark:border-slate-700 last:border-0">`
@@ -12943,16 +12966,7 @@ function mostrarResultadoDoLote(conta) {
         + `<span class="flex-1 min-w-0"><span class="block text-[0.9375rem] font-semibold text-slate-800 dark:text-slate-100 leading-tight">`
         + `${escapeHtml(t1)}</span><span class="block text-xs text-slate-500 dark:text-slate-400 leading-snug mt-0.5">`
         + `${escapeHtml(t2)}</span></span></div>`;
-    let html = '';
-    if (conta.ok) html += linha('✓', 'bg-emerald-100 text-emerald-800 dark:bg-emerald-400/20 dark:text-emerald-300',
-        t('autor.lote.rejeitados' + um(conta.ok), { n: conta.ok }), t('autor.lote.rejeitados.desc' + um(conta.ok)));
-    if (fila) html += linha('⏳', 'bg-amber-100 text-amber-800 dark:bg-amber-400/20 dark:text-amber-200',
-        t('autor.lote.fila' + um(fila), { n: fila }), t('autor.lote.fila.desc' + um(fila)));
-    if (conta.ja) html += linha('👍', 'bg-sky-100 text-sky-800 dark:bg-sky-400/20 dark:text-sky-200',
-        t('autor.lote.jaTratados' + um(conta.ja), { n: conta.ja }), t('autor.lote.jaTratados.desc' + um(conta.ja)));
-    if (conta.erro) html += linha('!', 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300',
-        t('autor.lote.falharam' + um(conta.erro), { n: conta.erro }), t('autor.lote.falharam.desc' + um(conta.erro)));
-    corpo.innerHTML = html;
+    corpo.innerHTML = linhas.map((l) => linha(...l)).join('');
     openModal('autorModal');
 }
 
