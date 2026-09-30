@@ -372,6 +372,34 @@ checa(/alertas: nenhum/.test(replay) && !/tokenNaoPersiste/.test(replay),
   'o replay não inventa o alerta `tokenNaoPersiste`', (replay.match(/alertas: .*/) || [''])[0]);
 checa(existsSync(zip + '-replay.png'), 'o replay salvou a tela');
 
+// O PLACAR do aparelho (auditoria de 2026-09-29, T3): a remontagem mostrava
+// 0 · 0 · 0 e, no "Restam", o tamanho do recorte injetado. Aqui o MESMO
+// relatório com um placar CONHECIDO, e o CONTROLE sem os campos (a forma dos
+// relatórios antigos): se a linha não mudar entre os dois, ela não vem da tela.
+// Fila de 6 pedidos, acima do limiar da busca adiantada: com "há mais" e fila
+// curta o app pediria a página seguinte, e o replay corta a rede.
+const FILA_T3 = JSON.parse(readFileSync(join(ROOT, 'tools', 'fixtures-paises.json'), 'utf8')).slice(0, 6)
+  .map((p, i) => ({ ...p, venueID: 't3.' + i, updateRequestID: 't3u' + i }));
+const replayDoPlacar = async (placar, nome) => {
+  const { stats, serverTotal, hasMore, ...resto } = d.appState || {};
+  const arq = join(SAIDA, nome + '.json');
+  writeFileSync(arq, JSON.stringify({ ...d, momentos: [], aberturasAnteriores: [],
+    appState: { ...resto, queue: FILA_T3, currentPlaceIdx: 0, loadError: false, ...placar } }));
+  const porta = await new Promise((ok) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
+  let saida = '';
+  try {
+    saida = execFileSync(process.execPath, ['tools/diag-replay.mjs', arq, '--tela', '--porta', String(porta)],
+      { cwd: ROOT, encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) { saida = String(e.stdout || '') + '\nFALHOU: ' + String(e.message).slice(0, 200); }
+  return ((saida.match(/^placar: .*$/m) || [saida.slice(-200)])[0]).trim();
+};
+const placarCheio = await replayDoPlacar({ stats: { read: 801, rejected: 905, skipped: 18 }, serverTotal: 311, hasMore: true }, 'placar-cheio');
+checa(/lidos 801 · rejeitados 905 · pulados 18 · restam 311\+$/.test(placarCheio),
+  'o replay remonta o PLACAR do aparelho: Lidos, Rejeitados, Pulados e o "Restam" com o "+"', placarCheio);
+const placarAusente = await replayDoPlacar({}, 'placar-ausente');
+checa(/lidos 0 · rejeitados 0 · pulados 0 · restam 6$/.test(placarAusente),
+  'CONTROLE: relatório sem placar remonta como antes (zerado, o "Restam" do recorte) — a linha vem da tela', placarAusente);
+
 // ── o caminho de ABORTO ───────────────────────────────────────────────────
 console.log('\n── recusa de entregar imagem errada ──');
 const quebrado = join(SAIDA, 'quebrado.json');

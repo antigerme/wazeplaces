@@ -361,3 +361,39 @@ test('diag-replay: grava tema SÓ se a pessoa escolheu, monta o cabeçalho e dá
   // E a espera é pelo lado do Node (o poller do `waitForFunction` avalia string e a CSP o barra).
   assert.doesNotMatch(codigo, /\.waitForFunction\(/, 'o replay voltou a usar waitForFunction');
 });
+
+// ── diag-replay: o PLACAR é o do aparelho (auditoria de 2026-09-29, T3) ──────
+// A remontagem mostrava 0 · 0 · 0 e o tamanho do recorte injetado onde o
+// aparelho tinha 801 · 905 · 18 · 20+ — e o "Restam" é o número que um relato de
+// "a fila acabou" discute. A tela inteira é medida no `tools/smoke-diag-tela.mjs`.
+const placarDoRelatorio = (() => {
+  const ini = REPLAY.indexOf('\nfunction placarDoRelatorio(st, naFila) {');
+  assert.ok(ini > 0, 'placarDoRelatorio sumiu do diag-replay');
+  let prof = 0, fim = -1;
+  for (let k = REPLAY.indexOf('{', ini); k < REPLAY.length; k++) {
+    if (REPLAY[k] === '{') prof++;
+    else if (REPLAY[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  return new Function(REPLAY.slice(ini, fim) + '\nreturn placarDoRelatorio;')();
+})();
+
+test('diag-replay: o placar vem do relatório — Lidos, Rejeitados, Pulados e o "Restam" com o "+"', () => {
+  const cheio = placarDoRelatorio({ stats: { read: 801, rejected: 905, skipped: 18 }, serverTotal: 311, hasMore: true }, 20);
+  assert.deepEqual(cheio, { stats: { read: 801, rejected: 905, skipped: 18 }, serverTotal: 311, hasMore: true },
+    'o placar do aparelho não chegou à remontagem');
+  // Relatório sem os campos (antigo, ou montado à mão): como era — zerado, e o
+  // "Restam" do tamanho da fila injetada, sem "+".
+  assert.deepEqual(placarDoRelatorio({}, 20), { stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 20, hasMore: false });
+  assert.deepEqual(placarDoRelatorio(null, 3), { stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 3, hasMore: false });
+  // "Restam 0" do aparelho é 0, não o tamanho do recorte; lixo não vira número.
+  assert.equal(placarDoRelatorio({ serverTotal: 0 }, 20).serverTotal, 0);
+  assert.deepEqual(placarDoRelatorio({ stats: { read: '12', rejected: -3, skipped: 'x' }, hasMore: 'sim' }, 1),
+    { stats: { read: 12, rejected: 0, skipped: 0 }, serverTotal: 1, hasMore: false });
+  // E ele é o que entra na página: nada de recontar pelo recorte.
+  const codigo = REPLAY.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(codigo, /placarDoRelatorio\(st, recorte\.length\)\]\);/, 'o placar do relatório não é passado pra página');
+  assert.match(codigo, /AppState\.stats = placar\.stats;\s*\n\s*AppState\.serverTotal = placar\.serverTotal;\s*\n\s*AppState\.hasMore = placar\.hasMore;/,
+    'a página não recebe o placar do relatório');
+  assert.doesNotMatch(codigo, /AppState\.serverTotal = places\.length;/, 'o "Restam" voltou a ser o tamanho do recorte');
+  assert.match(codigo, /updateStats\(true\);/, 'o placar não é redesenhado depois de restaurado');
+});
