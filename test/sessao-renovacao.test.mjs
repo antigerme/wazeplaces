@@ -106,12 +106,18 @@ async function cenario({ modelo, idadeS }) {
   };
 }
 
-async function ate(cond, rotulo) {
-  for (let i = 0; i < 2000; i++) {
+// Espera por TEMPO de verdade (`performance.now`, que o relógio falso do cenário não
+// troca) e não por número de voltas: com a suíte inteira rodando em paralelo, a
+// cifragem do Web Crypto (que roda fora do laço de eventos) chegava a levar mais que
+// 2000 voltas de `setImmediate`, e o CONTROLE reprovava sem defeito nenhum (1 vez em 2
+// rodadas da suíte; 0 em 18 rodando o arquivo sozinho, 6 em paralelo).
+async function ate(cond, rotulo, tetoMs = 10000) {
+  const fim = performance.now() + tetoMs;
+  while (performance.now() < fim) {
     if (cond()) return;
     await new Promise((r) => setImmediate(r));
   }
-  assert.fail(`CONTROLE: não chegou a "${rotulo}" — o teste não mediu o que diz`);
+  assert.fail(`CONTROLE: não chegou a "${rotulo}" em ${tetoMs / 1000} s — o teste não mediu o que diz`);
 }
 
 test('a requisição que RENOVA o prazo grava o cookie rotacionado, e a seguinte já manda o valor novo (Worker e VM)', async () => {
