@@ -146,6 +146,30 @@ export function base64ToBytes(b64) {
   return a;
 }
 
+// O Secret (`ENCRYPTION_KEY`) é a entrada do HKDF que cifra as sessões (ver
+// `derivarChave`), e o HKDF aceita QUALQUER tamanho: uma chave de 3 bytes
+// ("YWJj") ou de 16 funcionava calada nos dois adaptadores (auditoria de
+// 2026-09-29). O mínimo é 32 — o que o README manda gerar (`openssl rand
+// -base64 32`) —, e NÃO "exatamente 32": uma chave maior só é mais forte, e a
+// de produção não pode derrubar o app por ser longa.
+export const CHAVE_MIN_BYTES = 32;
+
+// Decodifica o Secret e diz o que há de errado com ele, pros dois adaptadores
+// recusarem do mesmo jeito: a VM no boot (código 1), o Worker com o 500 de
+// "Backend não configurado". `problema` é `null` quando está tudo certo.
+export function chaveDoSecret(b64) {
+  let keyBytes;
+  try {
+    keyBytes = base64ToBytes(String(b64 ?? '').trim());
+  } catch {
+    return { keyBytes: null, problema: 'ENCRYPTION_KEY não é base64 válido' };
+  }
+  if (keyBytes.length < CHAVE_MIN_BYTES) {
+    return { keyBytes: null, problema: `ENCRYPTION_KEY com ${keyBytes.length} bytes; o mínimo é ${CHAVE_MIN_BYTES} (gere com: openssl rand -base64 32)` };
+  }
+  return { keyBytes, problema: null };
+}
+
 async function sha256hex(str) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -818,6 +842,12 @@ export function normalizePairCode(code) {
 }
 
 export function makeSessions({ store, keyBytes }) {
+  // Os adaptadores recusam a chave curta antes de chegar aqui (a VM no boot, o
+  // Worker com o "Backend não configurado", ver `chaveDoSecret`); isto é a
+  // mesma régua pra quem montar um adaptador novo sem ela.
+  if (!keyBytes || !(keyBytes.length >= CHAVE_MIN_BYTES)) {
+    throw new Error(`makeSessions: a chave tem ${keyBytes ? keyBytes.length : 0} bytes, o mínimo é ${CHAVE_MIN_BYTES}`);
+  }
   // O carimbo MAIS NOVO que esta instância conhece de cada sessão: o que o
   // `loadSession` acabou de LER, ou o da gravação que ela mesma fez. O Waze
   // rotaciona o cookie em TODA resposta, então o `refreshCookies` roda a cada

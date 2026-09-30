@@ -219,7 +219,7 @@ Variáveis de ambiente (todas opcionais):
 |---|---|---|
 | `PORT` | `8080` | Porta de escuta |
 | `HOST` | `0.0.0.0` | Host bind (`127.0.0.1` restringe ao localhost) |
-| `ENCRYPTION_KEY` | auto-gera | Chave AES base64 (32 bytes). Sem ela, gera uma em `SESSION_KEY_FILE` |
+| `ENCRYPTION_KEY` | auto-gera | Chave base64 com no mínimo 32 bytes (`openssl rand -base64 32`); com menos, ou malformada, a VM não sobe e diz por quê. Sem ela, gera uma em `SESSION_KEY_FILE` |
 | `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
 | `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
 
@@ -271,7 +271,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST 'https://places.seudominio.com
 | Resposta | O que significa |
 |---|---|
 | **401** | Deu certo. A API respondeu "sessão inválida" (o pedido não levou sessão), o que só acontece com o KV `SESSIONS` e o `ENCRYPTION_KEY` no lugar |
-| **500** | Falta o KV `SESSIONS` ou o Secret `ENCRYPTION_KEY` (a resposta diz "Backend não configurado"), ou a chave está malformada |
+| **500** | Falta o KV `SESSIONS` ou o Secret `ENCRYPTION_KEY`, ou a chave está malformada ou tem menos de 32 bytes (a resposta diz "Backend não configurado" e o motivo) |
 | outra coisa | O domínio ainda não aponta pra este Worker, ou o deploy não saiu |
 
 > **Fork / instância própria:** o `wrangler.jsonc` fixa `routes` com o Custom Domain `places.wazebrasil.com` (domínio da instância oficial). Em outra conta esse `wrangler deploy` falha — ajuste o `pattern` pro seu próprio domínio ou remova o bloco `routes` inteiro (aí o Worker fica no subdomínio `*.workers.dev`).

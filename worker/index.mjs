@@ -6,7 +6,7 @@
 // Bindings necessários (em wrangler.jsonc / dashboard):
 //   - ASSETS   → assets estáticos (configurado em wrangler.jsonc: assets.binding)
 //   - SESSIONS → namespace KV pras sessões
-//   - ENCRYPTION_KEY → Secret (base64, 32 bytes): openssl rand -base64 32
+//   - ENCRYPTION_KEY → Secret (base64, no mínimo 32 bytes): openssl rand -base64 32
 //
 // A sala de presença (Durable Object `SalaDO`, o WebSocket do `/sala` e o
 // TURN) saiu na fase 4: desde a fase 3 a lista e a conversa são as do WME. A
@@ -14,7 +14,7 @@
 //
 // Toda a lógica vive em server/core.mjs (compartilhada com a VM Node).
 
-import { dispatch, makeSessions, base64ToBytes, SESSION_TTL, MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
+import { dispatch, makeSessions, chaveDoSecret, SESSION_TTL, MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
 
 // O corpo, lido com TETO — o mesmo da VM (`readBody`), e com a mesma resposta.
 // Era `request.json()`, que lê o que vier: o corpo de 5,5 MB (e o de 20) dava
@@ -71,6 +71,15 @@ export default {
       if (!env.ENCRYPTION_KEY || !env.SESSIONS) {
         return json({ success: false, error: 'Backend não configurado (falta KV SESSIONS ou Secret ENCRYPTION_KEY)' }, 500);
       }
+      // A chave que não serve (base64 quebrado, ou menos de 32 bytes) é o mesmo
+      // "não configurado", com o motivo — a mesma régua da VM, que recusa no
+      // boot (`chaveDoSecret`, no core). Curta, ela funcionava calada: 3 bytes
+      // cifravam sessões (auditoria de 2026-09-29). Quebrada, o `atob` lançava
+      // e a resposta era o "Erro interno" genérico.
+      const { keyBytes, problema: problemaDaChave } = chaveDoSecret(env.ENCRYPTION_KEY);
+      if (problemaDaChave) {
+        return json({ success: false, error: `Backend não configurado (${problemaDaChave})` }, 500);
+      }
 
       try {
         const route = url.pathname.slice(5); // remove "/api/"
@@ -84,9 +93,8 @@ export default {
           data = {};
         }
 
-        // base64ToBytes lança se o Secret ENCRYPTION_KEY estiver malformado.
-        // Sem este try/catch, o Worker devolveria a página HTML 1101 em vez de JSON.
-        const keyBytes = base64ToBytes(env.ENCRYPTION_KEY);
+        // O try/catch em volta segue valendo pro resto: sem ele, uma exceção
+        // aqui devolveria a página HTML 1101 do Cloudflare em vez de JSON.
         const store = {
           get: (h) => env.SESSIONS.get('sess_' + h),
           put: (h, blob, ttl) => env.SESSIONS.put('sess_' + h, blob, { expirationTtl: ttl || SESSION_TTL }),

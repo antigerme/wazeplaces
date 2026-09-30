@@ -31,7 +31,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dispatch, makeSessions, base64ToBytes, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
+import { dispatch, makeSessions, chaveDoSecret, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
 import { readBody } from './corpo.mjs';
 
 // Rede de segurança pra VM: um erro não capturado não pode derrubar o processo.
@@ -48,23 +48,46 @@ const SESSION_KEY_FILE = process.env.SESSION_KEY_FILE || join(tmpdir(), 'waze_pl
 
 // ── Chave de criptografia ────────────────────────────────────────────────
 // Prioridade: env ENCRYPTION_KEY > arquivo > auto-gera (conveniência dev/VM).
-function loadOrCreateKey() {
-  if (process.env.ENCRYPTION_KEY) return base64ToBytes(process.env.ENCRYPTION_KEY.trim());
-  if (existsSync(SESSION_KEY_FILE)) return base64ToBytes(readFileSync(SESSION_KEY_FILE, 'utf8').trim());
+// Devolve o TEXTO (base64) e de onde ele veio; quem decodifica e confere é o
+// `chaveDoSecret` do core, o mesmo do Worker.
+function textoDaChave() {
+  if (process.env.ENCRYPTION_KEY) return { b64: process.env.ENCRYPTION_KEY, origem: 'da variável ENCRYPTION_KEY' };
+  if (existsSync(SESSION_KEY_FILE)) return { b64: readFileSync(SESSION_KEY_FILE, 'utf8'), origem: 'do arquivo ' + SESSION_KEY_FILE };
   const key = randomBytes(32);
   try {
     // 'wx' = criação exclusiva: se outro processo gravou a chave nesse meio-tempo,
     // lança EEXIST em vez de sobrescrever (evita race não-atômica no boot).
     writeFileSync(SESSION_KEY_FILE, key.toString('base64'), { flag: 'wx', mode: 0o600 });
-    return new Uint8Array(key);
+    return { b64: key.toString('base64'), origem: 'do arquivo ' + SESSION_KEY_FILE + ' (gerada agora)' };
   } catch (e) {
     if (e && e.code === 'EEXIST') {
-      return base64ToBytes(readFileSync(SESSION_KEY_FILE, 'utf8').trim());
+      return { b64: readFileSync(SESSION_KEY_FILE, 'utf8'), origem: 'do arquivo ' + SESSION_KEY_FILE };
     }
     throw e;
   }
 }
-const keyBytes = loadOrCreateKey();
+// Chave que não serve é FATAL, com código de erro: curta demais, ou base64
+// quebrado. Curta, a VM subia calada (3 bytes funcionavam); quebrada, o erro do
+// `atob` caía no `uncaughtException` lá de cima, que só registra, e o processo
+// saía com código 0 — um supervisor que reinicia "se falhar" lia a queda como
+// sucesso (a mesma armadilha da porta ocupada, lá embaixo). Auditoria de
+// 2026-09-29. A mensagem diz de onde a chave veio, e nunca o valor dela.
+function chaveOuFim() {
+  let texto;
+  try {
+    texto = textoDaChave();
+  } catch (e) {
+    console.error('Waze Places não subiu: não deu pra ler nem criar a chave em ' + SESSION_KEY_FILE + ' (' + (e && e.code || 'erro') + ').');
+    process.exit(1);
+  }
+  const { keyBytes: chave, problema } = chaveDoSecret(texto.b64);
+  if (problema) {
+    console.error('Waze Places não subiu: ' + problema + ' — lida ' + texto.origem + '.');
+    process.exit(1);
+  }
+  return chave;
+}
+const keyBytes = chaveOuFim();
 
 // ── Store de sessão em filesystem (TTL por mtime, touch a cada uso) ────────
 const fsStore = {
