@@ -15344,7 +15344,18 @@ const presencaWme = {
     // interruptor seguia visível lá (auditoria de 2026-09-25). A próxima prova
     // de rede o manda de novo.
     desligarPendente: false,
+    // Quando o desligar saiu por último, pro teto da repetição (ver
+    // `presencaWmeRefazerDesligar`). Zero = a repetição sai na próxima prova.
+    desligarEm: 0,
 };
+
+// Refazer o desligar que o WAZE recusou por estar fora (a resposta veio, com
+// 5xx ou gRPC 14): no máximo uma vez por minuto. Sem o teto, CADA resposta da
+// nossa API — uma por swipe — refazia o `visivel: false` enquanto o Waze
+// estivesse fora (MEDIDO: 6 ✕ → 6 pedidos a mais; auditoria de 2026-09-29). O
+// que não chegou a ter resposta (a rede) não conta: a próxima prova de rede o
+// refaz na hora, como o pedido do token do tempo real.
+const PRESENCA_WME_DESLIGAR_REPETIR_MS = 60 * 1000;
 
 // `paisDoGesto`: o país do filtro na hora do GESTO. A ação pode sair DEPOIS de
 // a pessoa trocar de país — a janela do Desfazer despachada pelo "Aplicar" dos
@@ -15354,6 +15365,11 @@ const presencaWme = {
 function presencaWmeDaAcao(placeDaAcao, paisDoGesto) {
     try {
         if (Treino.ativo) return null;
+        // A DESCARGA (a página indo pro fundo ou fechando com a ação na janela do
+        // Desfazer) não leva posição: ninguém está olhando o card, e a regra é
+        // a da fila de saída e do lote (auditoria de 2026-09-29). É ela quem
+        // liga o `saindo` antes de despachar (`descarregarAcaoPendente`).
+        if (API.saindo) return null;
         const ligada = typeof presencaLigada === 'function'
             ? presencaLigada() : AppState.preferences.presenca !== false;
         if (!ligada || !AppState.authenticated) return null;
@@ -15450,20 +15466,29 @@ function presencaWmeDesligar() {
         if (AppState.preferences.presenca === false) presencaWme.desligarPendente = true;
         return;
     }
+    presencaWme.desligarEm = Date.now();
     API.presencaWaze({ userId: String(id), visivel: false })
         .then((r) => {
-            // Só REDE fica pendente; recusa de verdade não se repete sozinha.
+            // Só o TRANSIENTE fica pendente; recusa de verdade não se repete
+            // sozinha. E o que nem teve resposta (a rede; o `_post` põe
+            // `_motivo`) sai na próxima prova de rede, sem o teto de um minuto:
+            // é a resposta que chega que prova a rede (ver o teto, acima).
             if (!(r && r.success) && (!r || r.errorCategory === 'transient')
-                && AppState.preferences.presenca === false) presencaWme.desligarPendente = true;
+                && AppState.preferences.presenca === false) {
+                presencaWme.desligarPendente = true;
+                if (!r || typeof r._motivo === 'string') presencaWme.desligarEm = 0;
+            }
             dfato('presencaWme.visivel', { desligou: true, via: 'interruptor', ok: !!(r && r.success),
                 ...(r && r.success ? {} : { categoria: (r && r.errorCategory) || 'sem resposta' }) });
         })
         .catch(() => {});
 }
 
-// A prova de rede refaz o desligar que não saiu (ver `desligarPendente`).
+// A prova de rede refaz o desligar que não saiu (ver `desligarPendente`), com o
+// teto de um minuto pro Waze que responde fora (`PRESENCA_WME_DESLIGAR_REPETIR_MS`).
 function presencaWmeRefazerDesligar() {
     if (!presencaWme.desligarPendente || AppState.preferences.presenca !== false) return;
+    if (Date.now() - presencaWme.desligarEm < PRESENCA_WME_DESLIGAR_REPETIR_MS) return;
     presencaWmeDesligar();
 }
 
@@ -15479,6 +15504,7 @@ function presencaWmeReligar() {
 function presencaWmeZerar() {
     presencaWme.ligarNaProxima = false;
     presencaWme.desligarPendente = false;
+    presencaWme.desligarEm = 0;
     presencaWme.ultimaEm = 0;
     presencaWme.enviadas = 0;
     presencaWme.falhas = 0;

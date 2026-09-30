@@ -414,11 +414,14 @@ test('a presença sincroniza quando o PERFIL chega — o `showMainScreen` chama 
 // 2026-09-25). A próxima prova de rede o refaz; recusa de verdade não repete.
 test('desligar sem rede fica pendente, e a próxima prova de rede refaz o "invisível" no WME', async () => {
   const pedidos = [];
-  let resposta = { success: false, errorCategory: 'transient' };
-  const presencaWme = { ligarNaProxima: true, desligarPendente: false };
+  // "Sem rede" é SEM RESPOSTA: é o `_motivo` que o `_post` põe quando a
+  // resposta nem chegou (o transiente COM resposta é o Waze fora — ver o teste
+  // do teto, abaixo).
+  let resposta = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
+  const presencaWme = { ligarNaProxima: true, desligarPendente: false, desligarEm: 0 };
   const escopo = {
     AppState: { preferences: { presenca: false }, profile: { id: 12444348 } },
-    presencaWme, dfato: () => {},
+    presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000,
     API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
   };
   const desligar = montar('presencaWmeDesligar', escopo);
@@ -442,4 +445,68 @@ test('desligar sem rede fica pendente, e a próxima prova de rede refaz o "invis
   escopo.AppState.preferences.presenca = true;
   refazer();
   assert.equal(pedidos.length, 3, 'refez um desligar de quem já religou');
+});
+
+// Desligar com o WAZE fora, COM resposta (5xx, gRPC 14 = transiente): cada
+// resposta da nossa API — uma por swipe — refazia o `visivel: false` (MEDIDO:
+// 6 ✕ → 6 pedidos a mais; auditoria de 2026-09-29, R4-1 P4). Fica pendente,
+// mas a repetição tem teto de um minuto; sem resposta (a rede), sai na próxima
+// prova de rede, como o pedido do token do tempo real.
+test('desligar com o Waze fora (COM resposta): pendente, mas refeito no máximo uma vez por minuto — sem resposta, na próxima prova', async () => {
+  const pedidos = [];
+  let agora = 1790200000000;
+  let resposta = { success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' };
+  const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0 };
+  const escopo = {
+    AppState: { preferences: { presenca: false }, profile: { id: 12444348 } },
+    presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, Date: { now: () => agora },
+    API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
+  };
+  const desligar = montar('presencaWmeDesligar', escopo);
+  const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
+  const vez = async () => { refazer(); await new Promise((r) => setTimeout(r, 0)); };
+  desligar();                                                   // o gesto
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(presencaWme.desligarPendente, true, 'o Waze fora (transiente) não deixou o desligar pendente');
+  // Seis ações seguidas, cada resposta uma prova de rede.
+  for (let i = 0; i < 6; i++) { agora += 700; await vez(); }
+  assert.equal(pedidos.length, 1, `cada resposta da API refez o desligar com o Waze fora (${pedidos.length - 1} a mais)`);
+  // Passado um minuto, sai UMA vez.
+  agora += 60000;
+  await vez();
+  await vez();
+  assert.equal(pedidos.length, 2, 'passado o minuto, o desligar pendente não saiu (ou saiu em rajada)');
+  // CONTROLE: SEM resposta (a rede) sai na PRÓXIMA prova, sem esperar o minuto.
+  resposta = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
+  agora += 60000;
+  await vez();
+  assert.equal(pedidos.length, 3);
+  resposta = { success: true };
+  agora += 1000;
+  await vez();
+  assert.equal(pedidos.length, 4, 'o desligar que falhou por REDE esperou o teto do Waze fora');
+  assert.equal(presencaWme.desligarPendente, false);
+  // E o GESTO sai sempre, com teto nenhum.
+  desligar();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(pedidos.length, 5, 'o gesto de desligar esperou o teto');
+});
+
+// A DESCARGA (a página indo pro fundo com a ação na janela do Desfazer) não leva
+// posição: a regra escrita é "nunca pela fila de saída, lote, recusa automática
+// ou descarga", e ela levava (auditoria de 2026-09-29, R4-1 P12).
+test('ação: a DESCARGA não leva posição — e fora dela a posição vai', () => {
+  const saindo = escopoDaAcao();
+  saindo.API.saindo = true;
+  assert.equal(montar('presencaWmeDaAcao', saindo)(CARD, 30), null, 'a descarga levou a posição de carona');
+  assert.equal(saindo.presencaWme.ultimaEm, 0, 'a descarga gastou o freio sem mandar nada');
+  // CONTROLE: a mesma ação, com a página na tela, leva.
+  const naTela = escopoDaAcao();
+  naTela.API.saindo = false;
+  assert.ok(montar('presencaWmeDaAcao', naTela)(CARD, 30), 'fora da descarga a posição não foi');
+  // E quem liga o `saindo` é a descarga, ANTES de despachar a ação pendente.
+  const desc = semComentario(fatiarFuncao(APP, 'descarregarAcaoPendente'));
+  const iDespacho = desc.indexOf('AppState.pendingAction.descarregar()');
+  assert.ok(iDespacho > 0, 'a descarga não despacha mais pela `descarregar` (o guard ficaria cego)');
+  assert.ok(desc.lastIndexOf('API.setSaindo(true)', iDespacho) > 0, 'a descarga despacha a ação sem ligar o `saindo` antes');
 });
