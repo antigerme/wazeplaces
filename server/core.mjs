@@ -793,19 +793,51 @@ export function normalizePairCode(code) {
 }
 
 export function makeSessions({ store, keyBytes }) {
-  // O carimbo que o `loadSession` acabou de LER, por sessão. O Waze rotaciona o
-  // cookie em TODA resposta, então o `refreshCookies` roda a cada chamada — e
-  // cada uma custava uma 2ª LEITURA do KV (cota: 100 mil por dia no plano
-  // grátis) só pra descobrir que ainda não era hora de regravar, cujo teto é
-  // 1/h. Com o carimbo lembrado, a leitura só acontece quando pode gravar
+  // O carimbo MAIS NOVO que esta instância conhece de cada sessão: o que o
+  // `loadSession` acabou de LER, ou o da gravação que ela mesma fez. O Waze
+  // rotaciona o cookie em TODA resposta, então o `refreshCookies` roda a cada
+  // chamada — e cada uma custava uma 2ª LEITURA do KV (cota: 100 mil por dia no
+  // plano grátis) só pra descobrir que ainda não era hora de regravar, cujo teto
+  // é 1/h. Com o carimbo lembrado, a leitura só acontece quando pode gravar
   // (auditoria de 2026-09-25). Carimbo só CRESCE, então um lembrado recente
   // prova que o de verdade também é: pular é seguro; um lembrado velho só faz
   // ler, como antes. No Worker isto vive uma requisição (o `makeSessions` é por
-  // requisição); na VM, o processo inteiro — daí o teto.
+  // requisição); na VM, o processo inteiro — daí o teto de entradas.
+  //
+  // Só CRESCE também no mapa, e na VM é isso que segura o teto de escrita sob
+  // concorrência: a gravação RESERVA o carimbo novo antes do primeiro `await`
+  // (`reservar`), e a requisição da mesma sessão que chega junto lê a reserva e
+  // não grava. Sem o "só cresce", o `loadSession` dessa outra requisição
+  // trocaria a reserva pelo carimbo VELHO que ainda está no arquivo, e as duas
+  // gravariam. No Worker cada requisição tem o seu mapa, e quem segura o teto é
+  // a RELEITURA antes de gravar: a 2ª requisição da abertura relê e acha o
+  // carimbo que a 1ª acabou de gravar. O KV não tem "compare e grave", então
+  // duas respostas do Waze chegando na MESMA janela de releitura (dezenas de
+  // ms) ainda gravam as duas — as 3 chamadas da abertura têm latências de
+  // centenas de ms entre si.
   const carimboLido = new Map();
+  const TETO_DE_SESSOES_LEMBRADAS = 5000;
   const lembrarCarimbo = (hash, carimbo) => {
-    if (carimboLido.size >= 5000) carimboLido.clear();
+    const atual = carimboLido.get(hash);
+    if (atual != null && atual >= carimbo) return;
+    if (atual == null && carimboLido.size >= TETO_DE_SESSOES_LEMBRADAS) carimboLido.clear();
     carimboLido.set(hash, carimbo);
+  };
+  // Marca a sessão como gravada AGORA, ANTES de gravar, e devolve o desfazer
+  // (pra quando a gravação não acontece). O desfazer só volta atrás se a marca
+  // ainda for a dele.
+  const reservar = (hash, agora) => {
+    const antes = carimboLido.get(hash);
+    lembrarCarimbo(hash, agora);
+    return () => {
+      if (carimboLido.get(hash) !== agora) return;
+      if (antes == null) carimboLido.delete(hash);
+      else carimboLido.set(hash, antes);
+    };
+  };
+  const carimboDoValor = (raw) => {
+    const sep = String(raw).indexOf('|');
+    return { sep, carimbo: sep > 0 ? parseInt(String(raw).slice(0, sep), 10) : NaN };
   };
   return {
     // Exposto pra quem precisa de cache curto próprio (a releitura do local
@@ -821,23 +853,21 @@ export function makeSessions({ store, keyBytes }) {
       await store.put(hash, Math.floor(Date.now() / 1000) + '|' + blob, SESSION_TTL);
       return token;
     },
-    // Renova o prazo A CADA USO — janela deslizante, não prazo fixo.
+    // Lê e abre a sessão, e NÃO grava nada. O prazo é renovado pela própria
+    // requisição: pela regravação do cookie rotacionado (`refreshCookies`), que
+    // renova de carona, ou, sem ela, no FIM da requisição (`renovarPrazo`, que o
+    // `dispatch` chama). Ver o `renovarPrazo` pra janela deslizante em si.
     //
-    // O adaptador de arquivo da VM sempre fez isso (mtime + touch). O KV do
-    // Cloudflare NÃO: `expirationTtl` conta do `put`, e o `get` não estende
-    // nada. Resultado medido com o core de verdade e um KV simulado: editor
-    // usando o app TODO DIA era deslogado no dia 21, com ZERO escritas no KV
-    // no período. A validade contava do login, não do último uso — e o
-    // CLAUDE.md descrevia os dois adaptadores como se fossem equivalentes.
-    //
-    // O carimbo vai no VALOR, no mesmo formato que `createPairing` já usa
-    // (`ts|blob`), porque o KV não sabe dizer quanto falta do TTL. `|` é seguro
-    // como separador: base64 não o produz.
-    //
-    // Só reescreve depois de SESSION_REFRESH_AFTER, e isso não é economia à
-    // toa: o KV limita 1 escrita por segundo por chave, e renovar a cada
-    // chamada (são 3 só ao abrir o app) esbarraria nesse teto — trocaria um
-    // logout por outro.
+    // A renovação morava AQUI, e era o defeito (auditoria de 2026-09-29): ela
+    // regravava o blob VELHO com carimbo novo ANTES de a requisição chamar o
+    // Waze, e a trava de 1 h do `refreshCookies` lê esse carimbo — então o
+    // cookie rotacionado que chegava em seguida era jogado fora, na requisição
+    // da renovação e em toda a hora seguinte. MEDIDO com relógio simulado: quem
+    // usa o app menos de 1 h por abertura e volta 24 h depois NUNCA salvava a
+    // rotação (o `_web_session` do login em todas as chamadas, 6 dias seguidos;
+    // abrindo a cada 2 dias, 14 dias), e o cookie do login é o que azeda
+    // (gotcha #43). De quebra, cada uma das 3 chamadas da abertura renovava por
+    // conta própria: 3 escritas no KV, duas no mesmo segundo.
     async loadSession(token) {
       if (!token) return null;
       const hash = await sha256hex(token);
@@ -862,30 +892,68 @@ export function makeSessions({ store, keyBytes }) {
       // é ROTACIONAR o `ENCRYPTION_KEY`: aí todo blob antigo morre de uma vez.
       const descartar = async () => { try { await store.delete(hash); } catch (e) { /* nunca derruba a resposta */ } };
 
-      const sep = raw.indexOf('|');
-      const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
+      const { sep, carimbo } = carimboDoValor(raw);
       if (!Number.isFinite(carimbo)) { await descartar(); return null; }
       const blob = raw.slice(sep + 1);
 
       const cookies = await decryptCookies(blob, await derivarChave(keyBytes, token));
       if (!cookies) { await descartar(); return null; }
 
-      const agora = Math.floor(Date.now() / 1000);
-      let carimboAtual = carimbo;
-      if (agora - carimbo >= SESSION_REFRESH_AFTER) {
-        // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
-        // a sessão segue valendo com o prazo antigo. Deixar isto lançar
-        // transformaria uma falha de renovação em 401 — exatamente o defeito
-        // que esta função existe pra corrigir.
-        try {
-          await store.put(hash, agora + '|' + blob, SESSION_TTL);
-          carimboAtual = agora;
-        } catch (e) {
-          // silêncio proposital: nada aqui deve derrubar a sessão
-        }
-      }
-      lembrarCarimbo(hash, carimboAtual);
+      lembrarCarimbo(hash, carimbo);
       return cookies;
+    },
+    // Renova o prazo da sessão se ele venceu, no FIM da requisição — janela
+    // DESLIZANTE, não prazo fixo. Quem chama é o `dispatch`, depois do handler.
+    //
+    // O adaptador de arquivo da VM sempre fez isso (mtime + touch). O KV do
+    // Cloudflare NÃO: `expirationTtl` conta do `put`, e o `get` não estende
+    // nada. Resultado medido com o core de verdade e um KV simulado: editor
+    // usando o app TODO DIA era deslogado no dia 21, com ZERO escritas no KV
+    // no período (gotcha #41). O carimbo vai no VALOR (`ts|blob`, o formato do
+    // `createPairing`), porque o KV não sabe dizer quanto falta do TTL; `|` é
+    // seguro como separador, base64 não o produz.
+    //
+    // Só reescreve depois de SESSION_REFRESH_AFTER, e isso não é economia à
+    // toa: o KV limita 1 escrita por segundo por chave, e renovar a cada chamada
+    // esbarraria nesse teto — trocaria um logout por outro.
+    //
+    // No FIM, e não no `loadSession`, porque a gravação do cookie rotacionado
+    // (`refreshCookies`) já renova o prazo: com o Waze mandando cookie novo, é
+    // ELA que grava, uma vez, e aqui não sobra nada a fazer (o carimbo lembrado
+    // já é o de agora). O blob velho só é regravado quando a requisição não
+    // trouxe cookie novo — e o que se regrava é o da RELEITURA, não o que o
+    // `loadSession` leu: outra requisição da mesma sessão pode ter acabado de
+    // gravar a rotação, e regravar o valor antigo por cima a desfaria.
+    //
+    // Só age se ESTA instância leu a sessão (o carimbo lembrado): token que não
+    // foi aberto aqui, ou sessão apagada (`destroySession` esquece o carimbo),
+    // não custa nem a leitura. E nunca lança, nem grava sessão que sumiu.
+    async renovarPrazo(token) {
+      if (typeof token !== 'string' || !token) return false;
+      let desfazer = null;
+      try {
+        const hash = await sha256hex(token);
+        const agora = Math.floor(Date.now() / 1000);
+        const lembrado = carimboLido.get(hash);
+        if (lembrado == null || agora - lembrado < SESSION_REFRESH_AFTER) return false;
+        desfazer = reservar(hash, agora);
+        const raw = await store.get(hash);
+        const { sep, carimbo } = raw ? carimboDoValor(raw) : { sep: -1, carimbo: NaN };
+        if (!raw || !Number.isFinite(carimbo)) { desfazer(); return false; }
+        if (agora - carimbo < SESSION_REFRESH_AFTER) {
+          desfazer();
+          lembrarCarimbo(hash, carimbo);
+          return false;
+        }
+        await store.put(hash, agora + '|' + raw.slice(sep + 1), SESSION_TTL);
+        return true;
+      } catch {
+        // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
+        // a sessão segue valendo com o prazo antigo, e a próxima requisição
+        // tenta de novo.
+        if (desfazer) desfazer();
+        return false;
+      }
     },
     // Lê antes de apagar: a rota não exige nada além de um token qualquer, e no
     // plano grátis do KV o apagamento é a cota curta (1.000 por dia, contra
@@ -910,29 +978,33 @@ export function makeSessions({ store, keyBytes }) {
     // KV aceita 1 escrita/s por chave. Sem o teto, um editor em ritmo trocaria
     // o logout por estouro de limite de escrita — outro logout, com outro nome.
     // Uma hora é folgado pra qualquer janela de tolerância plausível e mantém a
-    // escrita em no máximo 1/h por sessão ativa.
+    // escrita em no máximo 1/h por sessão ativa. A gravação leva o carimbo de
+    // agora e o TTL cheio, então ela RENOVA o prazo também — é o que deixa o
+    // `renovarPrazo` sem nada a fazer nesta requisição.
     //
     // Nunca lança: falha em renovar não pode derrubar a requisição do editor.
     async refreshCookies(token, conteudoNovo) {
       if (!token || !conteudoNovo) return false;
+      let desfazer = null;
       try {
         const hash = await sha256hex(token);
         const agora = Math.floor(Date.now() / 1000);
         const lembrado = carimboLido.get(hash);
         if (lembrado != null && agora - lembrado < SESSION_COOKIE_REFRESH) return false;
+        desfazer = reservar(hash, agora);
         const raw = await store.get(hash);
-        if (!raw) return false;
-        const sep = raw.indexOf('|');
-        const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
+        if (!raw) { desfazer(); return false; }
+        const { carimbo } = carimboDoValor(raw);
         if (Number.isFinite(carimbo) && agora - carimbo < SESSION_COOKIE_REFRESH) {
+          desfazer();
           lembrarCarimbo(hash, carimbo);
           return false;
         }
         const blob = await encryptCookies(conteudoNovo, await derivarChave(keyBytes, token));
         await store.put(hash, agora + '|' + blob, SESSION_TTL);
-        lembrarCarimbo(hash, agora);
         return true;
       } catch {
+        if (desfazer) desfazer();
         return false;
       }
     },
@@ -3535,5 +3607,20 @@ export async function dispatch(name, data, ctx) {
   } catch (e) {
     if (e instanceof ApiError) return { status: e.status, body: e.body };
     return { status: 500, body: { success: false, error: 'Erro interno', errorKey: 'srv.err.internal' } };
+  } finally {
+    await renovarPrazoNoFim(data, ctx);
   }
+}
+
+// A janela deslizante da sessão anda no FIM da requisição, depois de o handler
+// ter tido a chance de gravar o cookie rotacionado — que renova o prazo junto
+// (ver `renovarPrazo` no `makeSessions`). Aqui, e não em cada handler, pelo
+// motivo do `callWaze`: rota nova nasceria sem, e a sessão de quem só usasse
+// ela venceria em 21 dias sem ninguém ver. Espera de verdade (sem promessa
+// solta): no Worker, o que fica pendurado depois da resposta é cortado.
+async function renovarPrazoNoFim(data, ctx) {
+  const token = data && data.sessionToken;
+  const sessions = ctx && ctx.sessions;
+  if (typeof token !== 'string' || !token || !sessions || typeof sessions.renovarPrazo !== 'function') return;
+  try { await sessions.renovarPrazo(token); } catch { /* renovar é melhor-esforço: a resposta sai igual */ }
 }
