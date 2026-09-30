@@ -1075,6 +1075,7 @@ test('K8: o resgate do pareamento e a ponte da extensão também dizem a conta �
   const r = montar(['resgatarPareamento'], {
     API: { resgatarPareamento: async () => ({ success: true, sessionToken: 'tok-B', conta: '222' }) },
     document: { getElementById: () => null }, conhecerContaDoLogin: (c) => conhecidas.push('resgate:' + c),
+    resgateEmVoo: false,   // a trava do duplo envio (test/contas-abas, A7): nenhum resgate no ar
   });
   assert.equal(await r.resgatarPareamento('ABC234'), true);
   assert.ok(conhecidas.includes('resgate:222'), 'o resgate do pareamento ignora a conta devolvida');

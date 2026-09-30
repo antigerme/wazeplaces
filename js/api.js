@@ -67,6 +67,17 @@ const API = {
         return this.sessionToken;
     },
 
+    // O "Sair" foi numa OUTRA aba: o token já saiu do armazenamento, e o
+    // diário de sessões com ele. Esta aba só solta a cópia da MEMÓRIA — sem
+    // isso, o ✕ seguinte dela saía com o token de quem saiu (auditoria de
+    // 2026-09-29, R4-5 A1). Pelo `setSession`, o diário ganharia um "token-"
+    // por cima do "Sair" que acabou de apagá-lo.
+    soltarSessao() { this.sessionToken = null; },
+
+    // Há sessão na MEMÓRIA desta aba? O `getSession` vai ao armazenamento
+    // quando a memória está vazia; aqui a pergunta é só sobre a memória.
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+
     setRegion(region) {
         this.region = REGIOES_DO_WAZE.includes(region) ? region : 'row';
         safeLS.set('waze_region', this.region);

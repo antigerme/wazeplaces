@@ -269,6 +269,17 @@ function filtrosDeFabrica() {
              unreadOnly: true, categories: [], sortOrder: ORDEM_PADRAO };
 }
 
+// As preferências DE FÁBRICA, pelo mesmo motivo dos filtros logo acima: o app
+// recém-aberto, o "Sair" e a releitura do que outra aba gravou partem daqui. O
+// "Sair" repunha um literal próprio, SEM `semUndoSeguidas` e SEM `pularGuarda`
+// (auditoria de 2026-09-29, R4-5): inofensivo só porque as leituras de hoje
+// tratam `undefined` como o padrão — a próxima preferência que não tratasse
+// nasceria diferente depois de sair e entrar de novo. Preferência nova entra
+// AQUI (e a leitura dela, em `lerPreferenciasGuardadas`).
+function preferenciasDeFabrica() {
+    return { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false };
+}
+
 const AppState = {
     authenticated: false,
     currentPlace: null,
@@ -293,7 +304,7 @@ const AppState = {
     // o `advanceQueue`. Ver o comentário no `fetchNextPage`.
     ordemPendente: false,
     filters: filtrosDeFabrica(),
-    preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false },
+    preferences: preferenciasDeFabrica(),
     devMode: { unlocked: false, active: false },
     profile: null,
     countries: [],
@@ -1048,8 +1059,12 @@ function setupAppListeners() {
     const $ = id => document.getElementById(id);
 
     // openModal fecha o helpModal automaticamente (modais não empilham)
-    $('logoutBtn').addEventListener('click', () => openModal('logoutModal'));
-    $('confirmLogout').addEventListener('click', handleLogout);
+    $('logoutBtn').addEventListener('click', () => {
+        desenharAvisoDoSair();   // quantas decisões o "Sair" descarta, se houver
+        openModal('logoutModal');
+    });
+    // Sem o evento: o `handleLogout` lê o 1º argumento como opções.
+    $('confirmLogout').addEventListener('click', () => handleLogout());
     $('cancelLogout').addEventListener('click', () => closeModal('logoutModal'));
 
     $('reloadBtn').addEventListener('click', () => {
@@ -1570,28 +1585,45 @@ async function copiarLinkPareamento() {
 const TOAST_COPIAVEL_MS = 30000;
 const TOAST_COPIAVEL_RECHECA_MS = 1500;
 
+// O resgate NO AR. O Enter e o "Entrar" do campo mandavam o resgate duas vezes
+// (Enter duplo, Enter + toque): MEDIDO, dois resgates, duas cargas de perfil e
+// de fila, e um token jogado fora (auditoria de 2026-09-29, R4-5 A7). É o
+// `authInFlight` do login por cookies, pro código.
+let resgateEmVoo = false;
+
 async function resgatarPareamento(code, { silencioso = false } = {}) {
-    const err = document.getElementById('pairEnterError');
-    const r = await API.resgatarPareamento(code);
-    if (!r.success) {
-        if (silencioso) {
-            showToast(msgDoServidor(r, t('toast.pairInvalid')), 'error');
-        } else if (err) {
-            err.textContent = msgDoServidor(r, t('toast.pairInvalid'));
-            err.classList.remove('hidden');
+    if (resgateEmVoo) return false;
+    // Pelo diálogo, só com o diálogo NA TELA. Contra a VM de verdade o resgate
+    // volta em milissegundos, e o 2º Enter chegava DEPOIS dele, com o diálogo já
+    // fechado: mandava o código usado de novo, e o "código inválido" ia parar no
+    // diálogo escondido (a trava acima não o pega: o 1º já tinha terminado).
+    if (!silencioso && document.getElementById('pairEnterModal')?.classList.contains('hidden')) return false;
+    resgateEmVoo = true;
+    try {
+        const err = document.getElementById('pairEnterError');
+        const r = await API.resgatarPareamento(code);
+        if (!r.success) {
+            if (silencioso) {
+                showToast(msgDoServidor(r, t('toast.pairInvalid')), 'error');
+            } else if (err) {
+                err.textContent = msgDoServidor(r, t('toast.pairInvalid'));
+                err.classList.remove('hidden');
+            }
+            return false;
         }
-        return false;
+        closeModal('pairEnterModal');
+        aoEntrarNestaPagina();
+        showToast(t('toast.pairSuccess'), 'success');
+        showMainScreen();
+        resetQueue();   // fila NOVA, como no login por cookies
+        conhecerContaDoLogin(r.conta);   // a conta, na hora (ver `authenticateWithCookies`)
+        AppState._profilePromise = loadProfileAndAuxData();
+        startFetching();
+        esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
+        return true;
+    } finally {
+        resgateEmVoo = false;
     }
-    closeModal('pairEnterModal');
-    aoEntrarNestaPagina();
-    showToast(t('toast.pairSuccess'), 'success');
-    showMainScreen();
-    resetQueue();   // fila NOVA, como no login por cookies
-    conhecerContaDoLogin(r.conta);   // a conta, na hora (ver `authenticateWithCookies`)
-    AppState._profilePromise = loadProfileAndAuxData();
-    startFetching();
-    esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
-    return true;
 }
 
 function setupModalListeners() {
@@ -7579,6 +7611,12 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // renovação — e depois dela, se o perfil de quem entrou não chegasse
     // (MEDIDO: "contaA" com a sessão de B). O perfil que chegar o redesenha.
     limparCabecalhoDoPerfil();
+    // Casa, trabalho e a posição do GPS são da sessão que caiu, pelo mesmo
+    // motivo: quem entrasse depois, no mesmo aparelho, teria a fila ordenada
+    // pela casa de quem estava (auditoria de 2026-09-29, R4-5 A4). A mesma
+    // pessoa voltando tem casa e trabalho de volta com o perfil.
+    referenciasDoPerfil = null;
+    posicaoGps = null;
     // O prazo era desta sessão, que acabou de morrer. Deixá-lo guardado faria a
     // próxima entrada nascer com a contagem da sessão ANTERIOR na tela, até a
     // primeira resposta do Waze corrigir.
@@ -7847,10 +7885,40 @@ function limparCabecalhoDoPerfil() {
 // "Sair" deliberado nesta página (ver o `visibilitychange` da extensão).
 let saiuNestaPagina = false;
 
-async function handleLogout() {
+// Quantas decisões o "Sair" descarta: a fila de saída sai com ele (ver abaixo),
+// e o que estava nela NÃO chega ao Waze. O diálogo falava dos dados do app e
+// não disto — duas decisões esperando a rede sumiam sem aviso nenhum
+// (auditoria de 2026-09-29, R4-5 A11). Desenhado ao abrir o diálogo e sempre
+// que a fila muda com ele aberto (`updateInFlightIndicator`): a rede que volta
+// com o diálogo na tela esvazia a fila, e a frase não pode seguir dizendo que
+// algo vai se perder.
+function desenharAvisoDoSair() {
+    const el = document.getElementById('logoutSaidaAviso');
+    if (!el) return;
+    const n = carregarFilaDeSaida().length;
+    el.textContent = n ? t(n === 1 ? 'modal.logout.saida' : 'modal.logout.saidaPlural', { n }) : '';
+    el.classList.toggle('hidden', !n);
+}
+
+// `porOutraAba`: o "Sair" foi dado numa OUTRA aba deste aparelho (ver
+// `aoSairEmOutraAba`). Aquela já apagou o aparelho e o servidor; esta SOLTA o
+// que tem na memória e na tela, e não grava nada no aparelho nem apaga o que é
+// dele. Gravar daqui voltaria como aviso pra ela; e apagar podia levar o que
+// uma entrada NOVA, feita lá depois do "Sair", já gravou — a aba em segundo
+// plano recebe os avisos com atraso (auditoria de 2026-09-29, R4-5 A1). Por
+// isso as linhas que mexem no APARELHO levam o `porOutraAba`, e o resto vale
+// igual: é a mesma lista, e o que for esquecido numa aba fica esquecido nas
+// duas. A exceção é a de sempre do modo dev: o que ele guardou sai em todas as
+// abas quando ele desliga (`dlogApagar`, ver `aoMudarModoDevEmOutraAba`) — e o
+// "Sair" o desliga.
+async function handleLogout({ porOutraAba = false } = {}) {
     epocaDaSessao++;   // antes de tudo: nenhuma resposta em voo grava daqui pra frente
     saiuNestaPagina = true;
-    closeModal('logoutModal');
+    // Aqui o diálogo do "Sair" é o que está aberto. Na outra aba pode ser
+    // qualquer coisa (a foto ampliada, os Filtros, a conversa, o QR do
+    // pareamento): tudo fecha, com a limpeza de cada um (ver a função).
+    if (porOutraAba) fecharCamadasAbertas();
+    else closeModal('logoutModal');
     // Cancela ação pendente ANTES de destruir a sessão: logout = esquecer tudo,
     // então descartamos (não enviamos) o swipe em buffer e evitamos o executor
     // rodando com sessão nula (que mostrava "erro ao marcar" na tela de login).
@@ -7866,17 +7934,26 @@ async function handleLogout() {
     loteDeLidosEmVoo = false;
     // O token sai do armazenamento AGORA e a limpeza local acontece inteira sem
     // esperar rede nenhuma — pedir pra sair tem que ser instantâneo. A cópia
-    // serve pra exclusão no servidor, que vai depois, com retentativa.
-    const tokenParaApagar = API.getSession();
-    API.setSession(null);
+    // serve pra exclusão no servidor, que vai depois, com retentativa. Na outra
+    // aba o token já saiu do armazenamento (e o servidor é da que saiu): só a
+    // cópia da memória solta — pelo `setSession`, o diário de sessões ganharia
+    // um "token-" por cima do "Sair" que acabou de apagá-lo.
+    const tokenParaApagar = porOutraAba ? null : API.getSession();
+    if (porOutraAba) API.soltarSessao();
+    else API.setSession(null);
     // Os códigos de pareamento emitidos aqui param de valer (sem esperar rede:
-    // sem ela, eles vencem sozinhos em 5 min).
+    // sem ela, eles vencem sozinhos em 5 min). Cada aba cancela os que ELA
+    // emitiu: o QR que a outra mostrava entraria, por 5 min, numa conta que
+    // acabou de sair.
     for (const code of pareamentosEmitidos) API.cancelarPareamento(code).catch(() => {});
     pareamentosEmitidos.clear();
+    // As preferências ANTES do `resetQueue`: com o offline ligado, ele abre a
+    // base do offline pra conferir de onde é a fila guardada — e, com a base
+    // já apagada pelo "Sair", a abriria de novo, vazia.
+    AppState.preferences = preferenciasDeFabrica();
     resetQueue();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
     AppState.filters = filtrosDeFabrica();
-    AppState.preferences = { undoEnabled: true, presenca: true };
     AppState.devMode = { unlocked: false, active: false };
     // O que o modo dev gravou sai junto — as capturas desta abertura (em
     // memória) e as das anteriores (guardadas no aparelho). Elas levam o DOM,
@@ -7902,43 +7979,56 @@ async function handleLogout() {
     // página) lançar no `recordHistory` — histórico, reincidência, conquistas e
     // o toast "já tratado" sumiam calados, e o lote parava no primeiro sucesso.
     AppState.history = null;
-    safeLS.remove(HISTORY_KEY); // logout = esquecer tudo (inclui histórico)
-    safeLS.remove(CONQUISTAS_KEY);   // patente, conquistas e contadores somem junto
     AppState.conquistas = null;
     atualizarSeloDeConquista();      // o selo é estado de quem entrou: sai junto
-    // "Sair limpa tudo" não tem exceção que ninguém decidiu: este marcador (o
-    // "Agora não" do convite de instalar) ficava pra trás só por descuido.
-    safeLS.remove(CHAVE_INSTALL_DISPENSADO);
-    safeLS.remove(PERFIL_GATE_KEY);   // rank do último perfil: some com o resto
-    safeLS.remove(CONTA_KEY);         // de quem eram os dados: não há mais dados
-    esquecerAutores();  // contagem por autor: é dado de TERCEIRO, sai primeiro
+    if (!porOutraAba) {
+        safeLS.remove(HISTORY_KEY); // logout = esquecer tudo (inclui histórico)
+        safeLS.remove(CONQUISTAS_KEY);   // patente, conquistas e contadores somem junto
+        // "Sair limpa tudo" não tem exceção que ninguém decidiu: este marcador (o
+        // "Agora não" do convite de instalar) ficava pra trás só por descuido.
+        safeLS.remove(CHAVE_INSTALL_DISPENSADO);
+        safeLS.remove(PERFIL_GATE_KEY);   // rank do último perfil: some com o resto
+        safeLS.remove(CONTA_KEY);         // de quem eram os dados: não há mais dados
+    }
+    // Contagem por autor: é dado de TERCEIRO, sai primeiro (na outra aba, a
+    // cópia da memória; o aparelho a que saiu já limpou).
+    if (porOutraAba) AppState.autores = null;
+    else esquecerAutores();
     esquecerFocoAutor();   // o autor em foco também (reordenava a fila da próxima conta)
     // Fecha o tempo real e apaga o que o chat guardou no aparelho (a
     // instalação, as conversas conhecidas, até onde cada um leu): é de quem
-    // entrou, não preferência do aparelho.
-    window.Presenca?.esquecer?.();
-    esquecerPrazoDaSessao(); // prazo da sessão do Waze: some com o resto
-    // O diário de sessões e o carimbo de nascimento são do APARELHO, mas saem
-    // aqui assim mesmo: o contrato do "Sair" é "limpar de tudo", sem exceção
-    // que ninguém decidiu — foi por descuido assim que o marcador do convite de
-    // instalar ficou pra trás. E não cega a investigação: quem deu Sair SABE
-    // que deu, e o caso investigado é o de quem NÃO saiu e perdeu a sessão.
-    registrarEventoDeSessao('saiu');   // fica no anel até a linha seguinte apagá-lo
-    safeLS.remove(SESSOES_KEY);
-    safeLS.remove(NASCIMENTO_KEY);
-    // A fila de saída guarda venueID, updateRequestID e o creatorId de QUEM
-    // MANDOU o pedido — dado de terceiro. Sai com o resto, e o efeito assumido
-    // é que sair com a fila cheia descarta o que ainda não foi enviado: é
-    // exatamente o que "sair é sair de tudo" promete.
-    safeLS.remove(SAIDA_KEY);
+    // entrou, não preferência do aparelho. Na outra aba, só a memória: a
+    // conexão com o Google fecha e o que ficou digitado sai.
+    if (porOutraAba) window.Presenca?.esquecer?.({ soMemoria: true });
+    else window.Presenca?.esquecer?.();
+    // Prazo da sessão do Waze: some com o resto.
+    if (porOutraAba) AppState.sessaoExpiraEm = null;
+    else esquecerPrazoDaSessao();
+    if (!porOutraAba) {
+        // O diário de sessões e o carimbo de nascimento são do APARELHO, mas saem
+        // aqui assim mesmo: o contrato do "Sair" é "limpar de tudo", sem exceção
+        // que ninguém decidiu — foi por descuido assim que o marcador do convite de
+        // instalar ficou pra trás. E não cega a investigação: quem deu Sair SABE
+        // que deu, e o caso investigado é o de quem NÃO saiu e perdeu a sessão.
+        registrarEventoDeSessao('saiu');   // fica no anel até a linha seguinte apagá-lo
+        safeLS.remove(SESSOES_KEY);
+        safeLS.remove(NASCIMENTO_KEY);
+        // A fila de saída guarda venueID, updateRequestID e o creatorId de QUEM
+        // MANDOU o pedido — dado de terceiro. Sai com o resto, e o efeito assumido
+        // é que sair com a fila cheia descarta o que ainda não foi enviado: é
+        // exatamente o que "sair é sair de tudo" promete (e o diálogo diz quantos).
+        safeLS.remove(SAIDA_KEY);
+    }
     // O que foi decidido nesta página (ids de pedidos de terceiros, em memória).
     // Quem entrar depois começa do zero: a fila dele vem da busca dele.
     pousosDaPagina.clear();
     pedidosEmAndamento.clear();
     // A fila guardada tem nome de quem enviou e foto de terceiro. "Sair e sair
     // de tudo" nao abre excecao que ninguem decidiu. Leva junto os pousos
-    // gravados (`OFFLINE_POUSOS_KEY`).
-    offlineEsquecer();
+    // gravados (`OFFLINE_POUSOS_KEY`). Na outra aba, a varredura em voo PARA
+    // (senão ela gravaria de novo na base que a outra acabou de apagar).
+    if (porOutraAba) offlineEsquecer({ soMemoria: true });
+    else offlineEsquecer();
     avatarPendente = null;   // a próxima entrada volta a esperar o primeiro card
     avatarFalhou = null;     // outro editor pode ter foto onde este não tinha
     // Casa, trabalho e posição são dado de LOCALIZAÇÃO do editor: sair é sair.
@@ -7946,19 +8036,21 @@ async function handleLogout() {
     posicaoGps = null;
     posicaoDoModal = null;
     telaPronta = false;
-    saveStats();
-    saveFilters();
-    savePreferences();
-    saveDevMode();
-    API.setRegion('row');
-    API.setCountry(30);
+    if (!porOutraAba) {
+        saveStats();
+        saveFilters();
+        savePreferences();
+        saveDevMode();
+        API.setRegion('row');
+        API.setCountry(30);
+    }
     removeUndoBanner();
     updateInFlightIndicator();
     updateStats();
     updateDevBadge();
     removeCurrentCardEl();
     showAuthScreen();
-    showToast(t('toast.loggedOut'), 'info');
+    showToast(t(porOutraAba ? 'toast.saiuNoutraAba' : 'toast.loggedOut'), 'info');
 
     // A exclusão no servidor é METADE da promessa do "Sair", e falhava calada
     // com a rede fora: o `_post` devolve erro em vez de lançar, então ninguém
@@ -11922,6 +12014,9 @@ function aoGravarEmOutraAba(ev) {
     // O MODO DEV mudou noutra aba — desligado ali, ou o "Sair" de lá (que o
     // desliga) —, ou o token saiu, ou o armazenamento foi limpo inteiro.
     if (chave === null || chave === DEVMODE_KEY || chave === 'waze_session_token') aoMudarModoDevEmOutraAba();
+    // O "Sair" de lá, e o placar e as preferências, que esta aba guarda na
+    // MEMÓRIA (ver a função).
+    sincronizarComOutraAba(chave);
     // `key` nulo é a outra aba limpando o armazenamento inteiro.
     if (chave !== null && !Object.prototype.hasOwnProperty.call(caches, chave)) return;
     for (const [k, campo] of Object.entries(caches)) {
@@ -11956,6 +12051,103 @@ function aoMudarModoDevEmOutraAba() {
         dlogApagar();          // (o `atualizarFabDev` vem junto)
         enforceDevGatedFilters();
     } else atualizarFabDev();
+}
+
+// O "Sair", o placar e as preferências, vindos da OUTRA aba (auditoria de
+// 2026-09-29, R4-5 A1 e A2). As três coisas esta aba guarda na MEMÓRIA e grava
+// INTEIRAS a cada gesto — e a outra muda no aparelho:
+//   · o "Sair" de lá não chegava aqui: esta seguia logada, com o perfil e a
+//     fila (dado de terceiro) na tela, e o ✕ seguinte regravava a fila de
+//     saída, o placar e o diário — e ia pro Waze com o token de quem saiu;
+//   · o placar: 3 ✕ numa aba e 1 na outra deixavam "Rejeitados 1" gravado;
+//   · as preferências: um ✕ nesta regravava as de antes, desfazendo o que a
+//     pessoa acabou de escolher lá — o "Pular guarda o pedido", e o "Ver quem
+//     está no app" desligado, que voltava a mostrá-la no mapa do WME.
+// Nada aqui GRAVA: o aviso do navegador só chega à OUTRA aba, e uma aba que
+// respondesse a ele gravando mandaria outro de volta.
+function sincronizarComOutraAba(chave) {
+    const tudo = chave === null;   // a outra aba limpou o armazenamento inteiro
+    if ((tudo || chave === 'waze_session_token' || chave === CONTA_KEY) && aoSairEmOutraAba()) return;
+    if (tudo || chave === STATS_KEY) relerPlacarDeOutraAba();
+    if (tudo || chave === PREFERENCES_KEY) relerPreferenciasDeOutraAba();
+}
+
+// O "Sair" foi numa OUTRA aba? O que o separa da QUEDA da sessão lá é a CONTA:
+// a queda tira o token e deixa a conta (a mesma pessoa volta, e os dados são
+// dela); o "Sair" tira os dois. Os avisos chegam um por chave, na ordem em que
+// a outra gravou — o do token antes do da conta —, e a decisão lê o aparelho
+// como ele está: sem conta guardada, decide o aviso do token; com ela, o da
+// conta, que chega logo depois.
+function aoSairEmOutraAba() {
+    if (safeLS.get('waze_session_token') || safeLS.get(CONTA_KEY)) return false;
+    // Esta aba não tem o que encerrar: nenhuma sessão na memória, o app fora da
+    // tela e nenhuma pergunta à extensão no ar — que traria uma sessão NOVA por
+    // cima do "Sair" de lá.
+    const appNaTela = !document.getElementById('appScreen')?.classList.contains('hidden');
+    if (!API.temSessaoNaMemoria() && !AppState.authenticated && !appNaTela && !extPerguntando) return false;
+    handleLogout({ porOutraAba: true });
+    return true;
+}
+
+// O placar que a outra aba gravou, relido NO MESMO objeto: o desconto de uma
+// decisão em voo é feito no placar DO GESTO, achado pela identidade (ver
+// `descontarGestoSemSessao`) — trocar o objeto o deixaria órfão.
+function relerPlacarDeOutraAba() {
+    const guardado = placarGuardado();
+    if (!guardado) return;
+    const placar = AppState.stats;
+    // Os pulados DESTA fila (`puladosNestaFila`) não contam os da outra aba: a
+    // base anda junto com o que ela pulou (ou devolveu com o Desfazer).
+    puladosNoInicioDaFila += guardado.skipped - (placar.skipped || 0);
+    Object.assign(placar, guardado);
+    desenharPlacar(true);
+}
+
+// As preferências que a outra aba gravou: as de fábrica e, por cima, as do
+// aparelho — pela MESMA leitura da abertura. Só se relê depois da primeira
+// leitura desta aba (antes dela, a abertura vai ler o aparelho de qualquer
+// jeito).
+function relerPreferenciasDeOutraAba() {
+    if (!preferenciasCarregadas) return;
+    const antes = AppState.preferences;
+    AppState.preferences = preferenciasDeFabrica();
+    lerPreferenciasGuardadas();
+    const agora = AppState.preferences;
+    // O que MOSTRA a preferência nesta aba: as chaves da aba Preferências, o
+    // selo do ↑ e a linha do offline.
+    desenharChavesDePreferencia();
+    atualizarSeloDePular();
+    atualizarLinhaDoOffline(0, 0);
+    // "Ver quem está no app" desligado lá: aqui a conexão fecha e a pílula some,
+    // sem pedido nenhum (o `visivel: false` a outra já mandou). Religado lá: a
+    // próxima ação daqui liga a visibilidade de carona, como a próxima de lá —
+    // a pessoa pode seguir triando nesta.
+    if ((antes.presenca !== false) !== (agora.presenca !== false)) {
+        if (agora.presenca === false) {
+            presencaWme.ligarNaProxima = false;
+            presencaWme.desligarPendente = false;
+            window.Presenca?.desligar?.();
+        } else presencaWme.ligarNaProxima = true;
+        window.Presenca?.renderPilula?.();
+    }
+    // O offline desligado lá: a varredura daqui PARA, senão ela gravaria de novo
+    // na base que a outra acabou de apagar.
+    if (antes.offlineDisponivel === true && agora.offlineDisponivel !== true) offlineEsquecer({ soMemoria: true });
+}
+
+// As chaves da aba Preferências desenham a memória — e só desenham (quem as
+// liga e desliga é o gesto, nos ouvintes de `setupModalListeners`). A do
+// Desfazer, travada pela cota, fica como o `renderUndoGateUI` a deixou.
+function desenharChavesDePreferencia() {
+    const p = AppState.preferences;
+    const marcar = (id, ligada) => {
+        const el = document.getElementById(id);
+        if (el && !el.disabled) el.checked = ligada;
+    };
+    marcar('prefUndoEnabled', p.undoEnabled !== false);
+    marcar('prefPularGuarda', p.pularGuarda === true);
+    marcar('prefPresenca', p.presenca !== false);
+    marcar('prefOfflineDisponivel', p.offlineDisponivel === true);
 }
 
 function setupSincroniaEntreAbas() {
@@ -14196,8 +14388,9 @@ function adotarSaidaSemMarca() {
 // envio. Da fila de saída fica só o que é da conta que entrou: os feitos nesta
 // sessão antes de o perfil chegar já levaram o carimbo (`carimbarContaNaSaida`),
 // e o que segue sem conta é de dono desconhecido. Ficam as escolhas do aparelho
-// — idioma, tema, preferências e filtros — e a fila na tela, que já veio da
-// busca de quem entrou (menos a que a renovação da queda manteve: ver o fim).
+// — idioma, tema, filtros e as preferências, menos o que só valia pra conta
+// anterior (ver abaixo) — e a fila na tela, que já veio da busca de quem entrou
+// (menos a que a renovação da queda manteve: ver o fim).
 function esquecerOutraConta(id) {
     dfato('conta.trocou');
     const f = carregarFilaDeSaida();
@@ -14224,6 +14417,12 @@ function esquecerOutraConta(id) {
     // importa — o "invisível" que ela deixou PENDENTE, que sem isto sairia pra
     // quem entrou, sem o gesto dela ("o app nunca desliga por conta própria").
     presencaWmeZerar();
+    esquecerEscolhasDaContaAnterior();
+    // Casa, trabalho e a posição do GPS também eram dela: a fila de quem entrou
+    // saía ordenada pela casa da anterior (R4-5 A4). As de quem entrou chegam
+    // com o perfil dele.
+    referenciasDoPerfil = null;
+    posicaoGps = null;
     saveStats();
     updateStats();
     offlineEsquecer();
@@ -14237,6 +14436,24 @@ function esquecerOutraConta(id) {
         startFetching();
     }
     showToast(t('toast.outraConta'), 'info');
+}
+
+// O que a conta ANTERIOR escolheu sob as regras DELA, e o que só ela viu
+// (auditoria de 2026-09-29, R4-5 A3). Desligar o Desfazer foi permitido pela
+// cota dela: quem entra tem a própria, e sem isto um L2 recém-chegado já agia
+// sem a janela, sem ter cruzado cota nenhuma nem visto o aviso de que ela abre.
+// As marcas de "já viu" (o aviso da cota, a dica, o "Como funciona", o aviso
+// de consequência do primeiro ✕ e ✓) e a contagem que a dica usa são do que ELA
+// viu e fez: quem entra não viu nada disso. O nível guardado também era o
+// dela: sai, e a cota espera o perfil de quem entrou, que o regrava. Tema e
+// idioma ficam — como as outras escolhas do aparelho.
+function esquecerEscolhasDaContaAnterior() {
+    const prefs = AppState.preferences;
+    prefs.undoEnabled = true;
+    for (const marca of ['undoGateSeen', 'dicaDesfazerVista', 'comoFuncionaVisto', 'consequenciaVista']) delete prefs[marca];
+    prefs.semUndoSeguidas = 0;
+    savePreferences();
+    safeLS.remove(PERFIL_GATE_KEY);
 }
 
 function carregarFilaDeSaida() {
@@ -15253,13 +15470,17 @@ async function offlineEsquecerFilaDeOutroLugar() {
     finally { try { if (db) db.close(); } catch (e) {} }
 }
 
-async function offlineEsquecer() {
+// `soMemoria`: o "Sair" (ou o desligar do offline) foi em OUTRA aba, que já
+// apagou a base, o cache e os pousos. Esta só para a varredura em voo — que
+// gravaria de novo no que a outra acabou de apagar — e solta a memória.
+async function offlineEsquecer({ soMemoria = false } = {}) {
     offlineEpoca++;                 // invalida qualquer varredura em voo
     offlineJanelaServida = null;
     offlineUltimoResultado = null;
     // As URLs de tile dizem ONDE ficam pedidos de terceiros: vão junto com o
     // resto do que o offline guardou.
     diagTilesGuardadosQueFalharam = [];
+    if (soMemoria) return;
     // Os pousos só existem pra filtrar a fila guardada, que sai na linha de
     // baixo: sem ela não há o que filtrar, e são ids de pedidos de terceiros.
     safeLS.remove(OFFLINE_POUSOS_KEY);
@@ -17148,6 +17369,8 @@ function removeUndoBanner() {
 // "esperando" é o que ficou pra depois. Enviando ganha, porque é o estado que
 // está mudando.
 function updateInFlightIndicator() {
+    // O diálogo do "Sair", aberto, conta a MESMA fila (ver a função).
+    if (!document.getElementById('logoutModal')?.classList.contains('hidden')) desenharAvisoDoSair();
     let el = document.getElementById('inFlightIndicator');
     const esperando = AppState.authenticated ? carregarFilaDeSaida().length : 0;
     if (AppState.inFlightActions <= 0 && esperando <= 0) {
@@ -17284,6 +17507,14 @@ function updateStats(semAnimar = false) {
     // lote, undo revertendo) — é o único ponto que pega todos sem espalhar
     // chamadas por seis handlers.
     checkUndoGateUnlock();
+    desenharPlacar(semAnimar);
+}
+
+// Só DESENHA o placar e o "Restam". O aviso de que o Desfazer ficou opcional
+// (`checkUndoGateUnlock`, logo acima) é de quem FEZ o gesto: o placar que
+// chega de OUTRA aba só se desenha (`relerPlacarDeOutraAba`) — a aba do gesto
+// já comemorou, e a marca de "visto" chega pelas preferências.
+function desenharPlacar(semAnimar = false) {
     // No treino a TELA mostra o placar dele; o real segue intocado por baixo.
     const st = Treino.ativo ? Treino.stats : AppState.stats;
     setCount(document.getElementById('readCount'), st.read, '', semAnimar);
@@ -17443,18 +17674,25 @@ function saveStats() {
 }
 
 function loadStats() {
+    const guardado = placarGuardado();
+    if (guardado) AppState.stats = guardado;
+    updateStats();
+}
+
+// O placar como está no APARELHO; `null` quando não há o que ler (nada
+// guardado, ou ilegível). A abertura e o aviso de OUTRA aba leem por aqui.
+function placarGuardado() {
     try {
         const raw = localStorage.getItem(STATS_KEY);
-        if (raw) {
-            const parsed = JSON.parse(raw);
-            AppState.stats = {
-                read: parsed.read || 0,
-                rejected: parsed.rejected || 0,
-                skipped: parsed.skipped || 0
-            };
-        }
-    } catch (e) {}
-    updateStats();
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        return {
+            read: parsed.read || 0,
+            rejected: parsed.rejected || 0,
+            skipped: parsed.skipped || 0
+        };
+    } catch (e) { return null; }
 }
 
 function saveFilters() {
@@ -17519,6 +17757,16 @@ function savePreferences() {
 }
 
 function loadPreferences() {
+    lerPreferenciasGuardadas();
+    preferenciasCarregadas = true;
+    if (aplicarAnistiaDaPresenca()) savePreferences();
+}
+
+// O que está no APARELHO, por cima do que já está no `AppState.preferences`.
+// Fonte ÚNICA da leitura: a abertura e o aviso de que OUTRA aba gravou
+// (`relerPreferenciasDeOutraAba`, que parte das de fábrica) passam por aqui —
+// preferência nova se lê num lugar só.
+function lerPreferenciasGuardadas() {
     try {
         const raw = localStorage.getItem(PREFERENCES_KEY);
         if (raw) {
@@ -17556,8 +17804,6 @@ function loadPreferences() {
             // próximo `savePreferences` já grava sem ele.
         }
     } catch (e) {}
-    preferenciasCarregadas = true;
-    if (aplicarAnistiaDaPresenca()) savePreferences();
 }
 
 // Devolve true quando MUDOU alguma coisa (pra quem chama saber se grava).

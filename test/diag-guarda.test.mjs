@@ -448,7 +448,8 @@ function abaComModoDev({ guardado, memoria = { unlocked: true, active: true } })
   const deps = { AppState, localStorage, DEVMODE_KEY: 'waze_places_devmode',
     HISTORY_KEY: 'h', CONQUISTAS_KEY: 'c', AUTORES_KEY: 'a',
     dlogApagar: () => apagou.push(1), atualizarFabDev: () => fab.push(1), updateDevBadge() {}, renderDevModeSection() {},
-    diagAjustarRecursos() {}, enforceDevGatedFilters() {}, atualizarSeloDeConquista() {}, agendarRedesenhoDoHistorico() {} };
+    diagAjustarRecursos() {}, enforceDevGatedFilters() {}, atualizarSeloDeConquista() {}, agendarRedesenhoDoHistorico() {},
+    sincronizarComOutraAba() {} };   // o "Sair", o placar e as preferências da outra aba: test/contas-abas
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, ['devModeDoArmazenamento', 'modoDevDesligadoNoArmazenamento',
     'aoMudarModoDevEmOutraAba', 'aoGravarEmOutraAba'].map(fatiar).join('\n')

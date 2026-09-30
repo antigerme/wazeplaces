@@ -33,7 +33,9 @@ function fatiarFuncao(nome) {
 
 // ── 1. O PADRÃO ────────────────────────────────────────────────────────────
 test('a preferência nasce DESLIGADA, e só liga quem disse que quer', () => {
-  const padrao = APP.match(/preferences: \{[^}]*\}/);
+  // O padrão é o de FÁBRICA, fonte única do app recém-aberto e do "Sair"
+  // (test/contas-abas): o `AppState` e o `handleLogout` o chamam.
+  const padrao = APP.match(/function preferenciasDeFabrica\(\) \{\s*return \{[^}]*\}/);
   assert.ok(padrao, 'o objeto de preferências padrão sumiu');
   assert.match(padrao[0], /pularGuarda:\s*false/,
     'a preferência deixou de nascer desligada — o Pular passaria a escrever sem ninguém pedir');

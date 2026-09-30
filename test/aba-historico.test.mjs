@@ -201,6 +201,9 @@ function abrirAba(comp) {
     // O modo dev e a sessão da outra aba têm tratamento PRÓPRIO (ver
     // test/diag-guarda, D2); aqui só se conta que ele foi chamado.
     DEVMODE_KEY: 'waze_places_devmode', aoMudarModoDevEmOutraAba: () => { aba.modoDev = (aba.modoDev || 0) + 1; },
+    // O "Sair", o placar e as preferências da outra aba também têm tratamento
+    // PRÓPRIO (test/contas-abas); aqui só se anota a chave que chegou.
+    sincronizarComOutraAba: (chave) => { (aba.sincronizou = aba.sincronizou || []).push(chave); },
   };
   const nomes = ['salvarHistorico', 'loadHistory', 'recordHistory', 'carregarConquistas', 'salvarConquistas',
     'loadAutores', 'salvarAutores', 'podarAutores', 'registrarRejeicaoDeAutor', 'aoGravarEmOutraAba'];
@@ -255,7 +258,7 @@ test('H3: a outra aba limpando tudo solta as três cópias; chave alheia não me
   const comp = armazenamentoCompartilhado();
   const A = abrirAba(comp);
   A.loadHistory(); A.carregarConquistas(); A.loadAutores();
-  A.aoGravarEmOutraAba({ key: 'waze_places_stats' });
+  A.aoGravarEmOutraAba({ key: 'waze_places_lang' });
   assert.ok(A.AppState.history && A.AppState.conquistas && A.AppState.autores, 'chave alheia soltou as cópias');
   assert.equal(A.redesenhos, 0, 'chave alheia redesenhou o painel');
   A.aoGravarEmOutraAba({ key: null });                 // localStorage.clear() na outra aba

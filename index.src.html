@@ -534,6 +534,10 @@
             <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.logout.title">Sair?</h3>
                 <p class="text-sm text-slate-500 mb-3 dark:text-slate-400" data-i18n-html="modal.logout.body">Sua sessão será encerrada e <strong>os dados do app neste aparelho</strong> (placar, histórico, conquistas, filtros e preferências) serão apagados — ficam só o idioma e o tema. Esta ação não pode ser desfeita.</p>
+                <!-- As decisões que ainda esperam envio (a fila de saída) saem com o
+                     "Sair" e NÃO chegam ao Waze: com a fila cheia, esta frase diz
+                     quantas (`desenharAvisoDoSair`). Sem fila, vazia e escondida. -->
+                <p id="logoutSaidaAviso" class="hidden text-sm text-slate-500 mb-3 dark:text-slate-400"></p>
                 <!-- Sair do app NÃO invalida os cookies no Waze. Quem sai preocupado
                      com privacidade pode concluir que cortou o acesso — não cortou.
                      Dizer isso aqui é o único momento em que a informação chega a

@@ -228,6 +228,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     updateInFlightIndicator: nada, esquecerAutores: nada, safeLS: { remove: nada }, HISTORY_KEY: 'h', CONQUISTAS_KEY: 'c',
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
+    esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
   };
   const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente'],
     deps, ['esquecerOutraConta', 'manterFocoNaFrente']);

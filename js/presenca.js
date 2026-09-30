@@ -594,8 +594,10 @@ function presencaDesligar() {
     presencaEsquecerAberta();
 }
 
-// Logout: "se pedir para sair, é realmente para sair".
-function presencaEsquecer() {
+// Logout: "se pedir para sair, é realmente para sair". `soMemoria`: o "Sair"
+// foi numa OUTRA aba, que já apagou a chave do chat — esta fecha o tempo real e
+// solta a memória, sem mexer no aparelho (ver o `handleLogout`).
+function presencaEsquecer({ soMemoria = false } = {}) {
     presencaDesligar();
     Presenca.ultimaPosicao = null;
     // O que ficou digitado e não saiu também: o campo não é apagado quando o
@@ -605,7 +607,7 @@ function presencaEsquecer() {
     if (campo) campo.value = '';
     Presenca.rascunhos.clear();
     Presenca.rascunhoDe = null;
-    safeLS.remove(CHAT_KEY);
+    if (!soMemoria) safeLS.remove(CHAT_KEY);
 }
 
 // ── o tempo real (direto do navegador ao Google) ────────────────────────────
