@@ -136,10 +136,11 @@ function montarAprovacao({ epocaDoGesto = 0 } = {}) {
   const deps = {
     AppState, registrarPouso: () => log.push('pouso'), updateStats: () => {},
     Lightbox: { isOpen: () => false, place: null }, advanceQueue: () => log.push('avanca'),
+    updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
   };
   const chaves = Object.keys(deps);
   const concluir = new Function(...chaves, 'let placeResolvidoPorAprovacao = null; let tratouNestaFila = false;\n'
-    + fatiar('concluirAprovacao') + '\nreturn concluirAprovacao;')(...chaves.map((k) => deps[k]));
+    + fatiar('concluirAprovacao') + '\n' + fatiar('tirarAprovadoDaFila') + '\nreturn concluirAprovacao;')(...chaves.map((k) => deps[k]));
   return { concluir: () => concluir({ id: 'u1', place, idx: 0, epocaFila: epocaDoGesto }), AppState, log };
 }
 
@@ -164,6 +165,8 @@ test('F4: aprovar a foto leva a fila do GESTO no alvo (`epocaFila`)', async () =
   const deps = {
     AppState, Treino: { ativo: false }, canDisableUndo: () => true, estadoAprovando: () => {},
     Lightbox: { place, idx: 0, podeAprovarAtual: () => true, marcarComoAprovada: () => {} },
+    // Nada de foto no ar (L24), e a região do gesto (L26).
+    aprovandoAgora: false, excluindoAgora: false, API: { getRegion: () => 'row' },
     enviarAprovacao: async (alvo) => { alvoEnviado = alvo; return true; },
     aplicarTravaDeAcao: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {}, t: (k) => k,
     registrarDesfazer: () => {}, UNDO_WINDOW_MS: 3000,
@@ -195,10 +198,11 @@ function montarUltimaAprovacao({ lightboxAberto = false } = {}) {
     // O `advanceQueue` esvazia a fila e chama o `showNoPlaces`, que decide a
     // frase e a festa por `tratouNestaFila` — lido NESTE instante.
     advanceQueue: () => log.push('avanca:tratou=' + app.tratou()),
+    updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
   };
   const chaves = Object.keys(deps);
   app = new Function(...chaves, 'let placeResolvidoPorAprovacao = null; let tratouNestaFila = false;\n'
-    + fatiar('concluirAprovacao') + '\n' + fatiar('avancarSeAprovado')
+    + fatiar('concluirAprovacao') + '\n' + fatiar('avancarSeAprovado') + '\n' + fatiar('tirarAprovadoDaFila')
     + '\nlet aprovacaoPendente = null;\nreturn { concluirAprovacao, avancarSeAprovado, tratou: () => tratouNestaFila };')(...chaves.map((k) => deps[k]));
   return { app, alvo: { id: 'u1', place, idx: 0, epocaFila: 0 }, log };
 }

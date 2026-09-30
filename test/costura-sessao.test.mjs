@@ -65,7 +65,10 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // Estado dos vizinhos que a trava lê (o lote de lidos da fila, a conferência
   // de 401 do lightbox): o buraco negro devolveria uma função, que é VERDADEIRA,
   // e travaria tudo. Quem quer medir um deles o passa nos `deps`.
-  for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0 })) if (!(k in deps)) deps[k] = v;
+  // E as escritas do lightbox no ar (a de foto sem janela, L24, e a renomeação
+  // por local, L23), pelo mesmo motivo.
+  for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
+    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set() })) if (!(k in deps)) deps[k] = v;
   const chamou = [];
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
@@ -209,18 +212,25 @@ test('K9: a sessão cai DURANTE a saída do card (350 ms): o gesto não vale e o
 test('K1: sem sessão, as escritas do lightbox (excluir, aprovar, renomear pelo Enter) não abrem janela', () => {
   for (const autenticado of [false, true]) {
     const banners = [];
-    const place = { venueID: 'v1', updateRequestID: 'u1', name: 'Nome Velho', lat: -23, lon: -46 };
-    const deps = {
-      AppState: { authenticated: autenticado, preferences: { undoEnabled: true }, currentPlace: null },
-      Treino: { ativo: false }, canDisableUndo: () => false, podeRenomearAqui: () => true,
-      Lightbox: { place, idx: 1, urls: ['a', 'b'], podeAprovarAtual: () => true, idFotoAtual: () => 'f1',
-        marcarComoAprovada() {}, removerFoto() {} },
-      document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
-      aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
-      mostrarDesfazer: (msg) => banners.push(msg), setTimeout: () => 1, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
-    };
-    const h = montar(['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear'], deps);
-    h.pedirExclusaoDaFoto(); h.aprovarFotoAtual(); h.confirmarRenomear();
+    // Cada escrita num lightbox "limpo": com a janela de uma aberta, a trava
+    // (`acoesTravadas`) segura a seguinte — o `confirmarRenomear` a consulta
+    // desde o L23, como o botão travado da pílula já fazia na tela.
+    for (const abrir of ['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear']) {
+      const place = { venueID: 'v1', updateRequestID: 'u1', name: 'Nome Velho', lat: -23, lon: -46 };
+      const deps = {
+        AppState: { authenticated: autenticado, preferences: { undoEnabled: true }, currentPlace: null },
+        Treino: { ativo: false }, canDisableUndo: () => false, podeRenomearAqui: () => true,
+        Lightbox: { place, idx: 1, urls: ['a', 'b'], podeAprovarAtual: () => true, idFotoAtual: () => 'f1',
+          marcarComoAprovada() {}, removerFoto() {} },
+        document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
+        aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+        mostrarDesfazer: (msg) => banners.push(msg), setTimeout: () => 1, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
+      };
+      // A trava e a renomeação no ar são as de verdade (o `confirmarRenomear` as
+      // consulta, L23): o buraco negro devolveria "travado" pra tudo.
+      const h = montar(['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear', 'acoesTravadas', 'renomeacaoNoAr'], deps);
+      h[abrir]();
+    }
     if (!autenticado) assert.deepEqual(banners, [], 'DEFEITO: escrita do lightbox aberta sem sessão: ' + banners.join(', '));
     else assert.equal(banners.length, 3, 'CONTROLE: com sessão, as três abrem a janela do Desfazer');
   }
@@ -265,7 +275,7 @@ function montarLightboxComJanelas() {
     entrarPelaExtensao: () => new Promise(() => {}), console, pareamentosEmitidos: new Set(),
   };
   const h = montar(['acoesTravadas', 'pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear',
-    'cancelarPendenciasDoLightbox', 'derrubarSessao', 'handleLogout'], deps);
+    'cancelarPendenciasDoLightbox', 'derrubarSessao', 'handleLogout', 'renomeacaoNoAr'], deps);
   // As três janelas abertas, uma depois da outra (cada uma despacha a anterior,
   // então cada uma é aberta num lightbox "limpo").
   return { h, deps, timers, log, AppState };

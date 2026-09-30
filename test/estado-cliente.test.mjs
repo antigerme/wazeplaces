@@ -198,6 +198,8 @@ function montarTreino(estado = {}, { loteNoAr = false } = {}) {
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'),
     t: (k) => k, showToast: (m) => log.push('toast:' + m), openModal: () => {},
     loteDeLidosEmVoo: loteNoAr,
+    // As escritas do lightbox na janela do Desfazer saem ao entrar (L25).
+    enviarPendenciasDoLightbox: () => log.push('lightbox:enviou'),
   };
   const i = APP_SEM.indexOf('const Treino = {');
   assert.ok(i >= 0, 'o objeto Treino sumiu');

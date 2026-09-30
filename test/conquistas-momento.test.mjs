@@ -314,6 +314,9 @@ test('H13: renomear em voo durante o "Sair" não conta o "Corretor" nem mexe no 
   const efeitos = [];
   const estado = { epoca: 0 };
   let soltar, derrubar;
+  // O "Sair" esvazia a fila: o pedido já não está na tela de ninguém (ver
+  // `escritaDoLightboxSemSessao`, V2 — a volta da tela é só pra quem ficou).
+  const AppState = { queue: [] };
   const deps = {
     callWithRetry: (fn) => fn(),
     API: { renomearLocal: () => new Promise((ok, falha) => { soltar = ok; derrubar = falha; }) },
@@ -321,12 +324,17 @@ test('H13: renomear em voo durante o "Sair" não conta o "Corretor" nem mexe no 
     contarConquista: (k) => efeitos.push('conquista:' + k),
     handleUnauthorized: () => efeitos.push('401'), showToast: () => efeitos.push('toast'),
     msgDoServidor: () => '', t: (k) => k,
+    // A renomeação no ar trava a pílula (L23); a tela é a de mentira.
+    renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, AppState, Lightbox: { isOpen: () => false, place: null },
   };
   // `epocaDaSessao` é variável solta no app: passa por um getter no escopo.
   const chaves = Object.keys(deps);
-  const corpo = fatiar('enviarRenomeacao').replace(/epocaDaSessao/g, '__estado.epoca');
+  const corpo = ['enviarRenomeacao', 'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao'].map(fatiar).join('\n')
+    .replace(/epocaDaSessao/g, '__estado.epoca');
   const enviar = new Function(...chaves, '__estado', corpo + '\nreturn enviarRenomeacao;')(...chaves.map((k) => deps[k]), estado);
-  const alvo = { place: { venueID: 'v1' }, novo: 'Nome Novo', antigo: 'Nome Velho' };
+  // O nome NA TELA é o desta escrita quando ela sai (o `confirmarRenomear` o
+  // pôs lá): é o que deixa a ida sair (ver `nomeDestaEscrita`).
+  const alvo = { place: { venueID: 'v1', name: 'Nome Novo' }, novo: 'Nome Novo', antigo: 'Nome Velho' };
   // Os três desfechos: sucesso, recusa e a chamada que LANÇA (o `catch`).
   for (const desfecho of ['sucesso', 'recusa', 'lançou']) {
     efeitos.length = 0;
@@ -365,9 +373,12 @@ function montarLightboxComJanela() {
     fotoDoLightboxNaTela: () => true, manterFocoNoLightbox() {}, marcarEmAndamento() {},
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
     fecharEdicaoNome() {}, sairDaEdicaoNome() {}, aplicarNomeNaTela() {}, devolverFoto() {}, showCurrentPlace() {},
-    API: { prepararExclusao() {} },
+    API: { prepararExclusao() {}, getRegion: () => 'row' },
     enviarAprovacao: () => Promise.resolve(true), enviarExclusao: () => Promise.resolve(true), enviarRenomeacao() {},
     aplicarTravaDeAcao() {}, removeUndoBanner() {}, t: (k) => k,
+    // Nada no ar e nada travado: cada caso abre a SUA janela (L23, L24).
+    aprovandoAgora: false, excluindoAgora: false, acoesTravadas: () => false, renomeacaoNoAr: () => false,
+    avisoDaTrava: () => 'toast.esperaDesfazer', showToast() {},
     mostrarDesfazer: (msg, aoDesfazer) => { reg.banner = aoDesfazer; },
     registrarDesfazer: () => { reg.desfazer++; },
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
