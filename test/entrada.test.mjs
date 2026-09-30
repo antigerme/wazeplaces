@@ -61,8 +61,11 @@ function elemento(id, { oculto = true, registro = null, ...resto } = {}) {
   const attrs = {};
   const el = {
     id, style: {}, textContent: '', dataset: {}, onerror: null, onload: null,
+    // `add`/`remove` com VÁRIAS classes, como no DOM: com uma só, o
+    // `add('opacity-40', 'line-through')` perdia a segunda calado.
     classList: {
-      add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c),
+      add: (...cs) => cs.forEach((c) => classes.add(c)), remove: (...cs) => cs.forEach((c) => classes.delete(c)),
+      contains: (c) => classes.has(c),
       toggle: (c, f) => { const on = f === undefined ? !classes.has(c) : !!f; if (on) classes.add(c); else classes.delete(c); return on; },
     },
     setAttribute(k, v) { attrs[k] = String(v); },
@@ -1052,7 +1055,7 @@ test('iPhone com o app INSTALADO: a instrução manda pro código digitado — a
 // onde. E o contador contava TIQUES: numa aba que volta do segundo plano (o
 // navegador estrangula o setInterval), ele mostrava "Vale por mais 3:40" pra um
 // código morto. Roda o código DE VERDADE, com relógio e intervalo de mentira.
-function pareamentoDeMentira() {
+function pareamentoDeMentira({ curtoSeg = 300 } = {}) {
   let agora = 1_000_000;
   let proxId = 0, limpezasDoQr = 0;
   const intervalos = new Map();
@@ -1060,6 +1063,8 @@ function pareamentoDeMentira() {
   const { registro, document } = domDeMentira({
     pairShowClose: { focus() {} }, pairCode: {}, pairExpiry: {}, pairCodeReveal: {},
     pairShowCodeBtn: {}, pairCodeExpiry: {}, pairCopyLinkBtn: {},
+    // As instruções (a da câmera e a do código curto) nascem VISÍVEIS no HTML.
+    pairShowBody: { oculto: false }, pairOrType: { oculto: false },
   });
   const deps = {
     document,
@@ -1070,7 +1075,10 @@ function pareamentoDeMentira() {
     pairQrVenceEm: 0,
     pareamentosEmitidos: new Set(),
     openModal() {}, closeModal() {},
-    API: { criarPareamento: async () => ({ success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
+    // O QR (20 símbolos) e, pedido pelo "Sem câmera?", o código curto.
+    API: { criarPareamento: async (op) => (op && op.comCodigo
+      ? { success: true, code: 'ABC234', curto: true, expiresIn: curtoSeg }
+      : { success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
     showToast: (m, tipo) => toasts.push([m, tipo]),
     msgDoServidor: (r, f) => f,
     t: (k) => k,
@@ -1080,10 +1088,16 @@ function pareamentoDeMentira() {
     navigator: { clipboard: { writeText: async (u) => { copiados.push(u); } } },
     TOAST_COPIAVEL_MS: 30000,
     contaAgora: () => null,   // o pareamento leva a conta de quem o cria (K8)
+    PAIR_CODE_LEN: 6, PAIR_CODE_GRUPO: 3,
   };
+  // A limpeza do modal (o fechar por qualquer caminho) roda no MESMO escopo.
+  const iLimpeza = APP_SEM.indexOf('const LIMPEZA_AO_FECHAR = {');
+  assert.ok(iLimpeza >= 0, 'CONTROLE: o LIMPEZA_AO_FECHAR sumiu do app.js');
   const api = montar(
-    ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento'],
-    deps, ['abrirPareamento', 'copiarLinkPareamento']);
+    ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento',
+     'revelarCodigoPareamento', 'formatarCodigoPareamento', 'codigoCurtoValendo', 'mostrarInstrucoesDoPareamento'],
+    deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR'],
+    APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';');
   return {
     ...api, registro, copiados, toasts,
     limpezasDoQr: () => limpezasDoQr,
@@ -1131,6 +1145,63 @@ test('QR vencido: o "Copiar link" apaga e não entrega link morto — nem na aba
     assert.ok(D[lang]['pair.expired'].includes(D[lang]['pair.createBtn']),
       `${lang}: o aviso de vencido não diz o caminho com o nome da tela "${D[lang]['pair.createBtn']}"`);
   }
+});
+
+// ── A15 (textos, 2026-09-29): o que a tela do QR VENCIDO ainda oferecia ──────
+// Vencido o QR, a tela seguia com "Aponte a câmera… para o código abaixo" (sobre
+// um QR apagado) e com o "Sem câmera? Mostrar um código" — que criava um código
+// NOVO, válido por 5 min, embaixo de "Código expirado — feche e toque de novo"
+// (medido no navegador, t21 da auditoria). E o código curto já pedido vence no
+// prazo DELE: a instrução "Digite este código" sai quando ELE vence.
+test('A15: QR vencido esconde a instrução da câmera e o "Sem câmera?"; o código curto vence no prazo dele', async () => {
+  const oculto = (el) => el.classList.contains('hidden');
+  // Sem código curto: vence o QR, as duas saem, e o aviso de vencido fica.
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  const r = p.registro;
+  assert.equal(oculto(r.pairShowBody), false, 'CONTROLE: com o QR valendo, a instrução da câmera aparece');
+  assert.equal(oculto(r.pairShowCodeBtn), false, 'CONTROLE: com o QR valendo, o "Sem câmera?" aparece');
+  p.andar(300_000); p.tique();
+  assert.equal(r.pairExpiry.textContent, 'pair.expired');
+  assert.equal(oculto(r.pairShowBody), true, 'o QR venceu e a tela segue mandando apontar a câmera pra ele');
+  assert.equal(oculto(r.pairShowCodeBtn), true,
+    'o QR venceu e o "Sem câmera?" segue criando um código novo embaixo do "Código expirado"');
+
+  // Com o código curto pedido ANTES do fim do QR: ele nasceu depois, e vale mais.
+  const q = pareamentoDeMentira();
+  await q.abrirPareamento();
+  q.andar(200_000);
+  await q.revelarCodigoPareamento();
+  const s = q.registro;
+  assert.equal(oculto(s.pairCodeReveal), false, 'CONTROLE: o código curto não apareceu');
+  q.andar(100_000); q.tique();   // vence o QR; o curto tem mais 200 s
+  assert.equal(oculto(s.pairShowBody), true, 'a instrução da câmera sobreviveu ao QR');
+  assert.equal(s.pairExpiry.textContent, '', 'o "Código expirado" do QR ficou em cima de um código que ainda vale');
+  assert.equal(oculto(s.pairOrType), false, 'o código curto ainda vale e a instrução dele sumiu antes da hora');
+  assert.match(s.pairCodeExpiry.textContent, /^pair\.expiresIn/, 'o contador do código curto parou junto com o do QR');
+  q.andar(200_000); q.tique();   // vence o curto
+  assert.equal(s.pairCodeExpiry.textContent, 'pair.expired', 'o código curto venceu sem dizer');
+  assert.ok(s.pairCode.classList.contains('line-through'), 'o código curto vencido segue com cara de válido');
+  assert.equal(oculto(s.pairOrType), true, 'a tela segue mandando digitar um código morto');
+
+  // Reabrir devolve as instruções (o modal é reaproveitado)…
+  await q.abrirPareamento();
+  assert.equal(oculto(s.pairShowBody), false, 'reabrir não devolveu a instrução da câmera');
+  assert.equal(oculto(s.pairOrType), false, 'reabrir não devolveu a instrução do código curto');
+  // …e fechar por QUALQUER caminho também (a limpeza do modal).
+  q.andar(300_000); q.tique();
+  q.LIMPEZA_AO_FECHAR.pairShowModal();
+  assert.equal(oculto(s.pairShowBody), false, 'fechar não devolveu a instrução da câmera pra próxima abertura');
+
+  // O curto pedido no último instante do QR chega com o QR já vencido: o aviso
+  // de vencido do QR não fica em cima do código que acabou de nascer.
+  const u = pareamentoDeMentira();
+  await u.abrirPareamento();
+  u.andar(300_000); u.tique();
+  assert.equal(u.registro.pairExpiry.textContent, 'pair.expired', 'CONTROLE: o QR não venceu');
+  await u.revelarCodigoPareamento();
+  assert.equal(u.registro.pairExpiry.textContent, '', 'o "Código expirado" do QR ficou em cima do código que acabou de nascer');
+  assert.equal(oculto(u.registro.pairOrType), false);
 });
 
 // ── T14 (textos, 2026-09-26): o foco no autor com UM pedido dele ─────────────

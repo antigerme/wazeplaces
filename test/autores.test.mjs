@@ -283,9 +283,10 @@ test('selo vermelho é SEMPRE tocável, e a folha é que se adapta ao tamanho da
   // cards dos 6 países), então a condição extra matava o caso COMUM.
   //
   // O raciocínio que a produziu continua certo — com um só na fila, "Ver o 1" e
-  // "Rejeitar o 1" são o card que já está na tela, e a segunda é PIOR que o ✕
-  // (o lote não tem a janela de Desfazer). O erro foi cortar o botão em vez de
-  // cortar as duas linhas. Este teste trava as DUAS metades do conserto.
+  // "Rejeitar o 1" são o card que já está na tela, e a segunda repete o ✕ num
+  // segundo lugar (o lote tem a mesma janela de Desfazer do card; a frase antiga
+  // dizia que não tinha). O erro foi cortar o botão em vez de cortar as duas
+  // linhas. Este teste trava as DUAS metades do conserto.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
 
   const iSelo = semComentarios.indexOf('function renderSelosDeProcedencia');
@@ -306,7 +307,7 @@ test('selo vermelho é SEMPRE tocável, e a folha é que se adapta ao tamanho da
   // por distância: guard por distância erra nos dois sentidos (gotcha #67).
   assert.match(folha,
     /\(emLote\s*\?\s*linha\(ICONE_OLHO[\s\S]{0,400}?autor\.sheet\.rejeitar[\s\S]{0,140}?:\s*''\)/,
-    'ver/rejeitar precisam morrer juntos quando há um só na fila — a de rejeitar é PIOR que o ✕ (sem Desfazer)');
+    'ver/rejeitar precisam morrer juntos quando há um só na fila — a de rejeitar repete o ✕ que está logo abaixo');
   assert.match(folha,
     /\(emLote\s*\?\s*`<p class="mt-4[\s\S]{0,400}?autor\.sheet\.aviso[\s\S]{0,60}?:\s*''\)/,
     'o aviso descreve a rejeição em lote: sem ela na tela ele passa a descrever o interruptor errado');

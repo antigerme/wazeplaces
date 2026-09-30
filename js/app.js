@@ -941,6 +941,8 @@ const LIMPEZA_AO_FECHAR = {
         document.getElementById('pairCodeReveal')?.classList.add('hidden');
         const btnCodigo = document.getElementById('pairShowCodeBtn');
         if (btnCodigo) { btnCodigo.classList.remove('hidden'); btnCodigo.disabled = false; }
+        // As instruções que o vencimento escondeu voltam pra próxima abertura.
+        mostrarInstrucoesDoPareamento();
         limparQrPareamento();
         pairQrVenceEm = 0;
         const copiar = document.getElementById('pairCopyLinkBtn');
@@ -986,6 +988,12 @@ const LIMPEZA_AO_FECHAR = {
         const campo = document.getElementById('cookiesTextarea');
         if (campo) campo.value = '';
     },
+    // O fim do treino fecha pelos mesmos quatro caminhos, e só o "Ir para a
+    // fila" saía do treino: por Esc, pelo fundo ou pelo voltar do aparelho
+    // ficavam o card de TREINO já tratado na tela, "Restam 0" e os botões
+    // mortos, com a fila real guardada por baixo (auditoria de 2026-09-29, A5).
+    // Sair mora aqui pra valer nos quatro; o botão só fecha o modal.
+    treinoFimModal() { Treino.sair(); },
 };
 
 function closeModal(id, { viaHistorico = false } = {}) {
@@ -1108,7 +1116,9 @@ function setupAppListeners() {
     $('comoFuncionaTreinar')?.addEventListener('click', () => { closeModal('comoFuncionaModal'); Treino.entrar(); });
     $('abrirTreino')?.addEventListener('click', () => { closeModal('helpModal'); Treino.entrar(); });
     $('treinoSairBtn')?.addEventListener('click', () => Treino.sair());
-    $('treinoFimOk')?.addEventListener('click', () => { closeModal('treinoFimModal'); Treino.sair(); });
+    // Só fecha: quem sai do treino é a limpeza do modal (`LIMPEZA_AO_FECHAR`),
+    // que vale também pro Esc, o fundo e o voltar.
+    $('treinoFimOk')?.addEventListener('click', () => closeModal('treinoFimModal'));
 
     // "Instalei… e agora?" — o beco sem saída medido: o app pergunta à extensão
     // UMA vez, no carregamento, com 350ms de janela, e o `ponte.js` não é
@@ -1453,6 +1463,7 @@ async function abrirPareamento() {
     document.getElementById('pairShowCodeBtn').classList.remove('hidden');
     document.getElementById('pairShowCodeBtn').disabled = false;
     document.getElementById('pairCodeExpiry').textContent = '';
+    mostrarInstrucoesDoPareamento();
     limparQrPareamento();
     document.getElementById('pairCopyLinkBtn').disabled = true;
 
@@ -1486,6 +1497,34 @@ function aoVencerQrPareamento() {
     if (code) delete code.dataset.raw;
     const copiar = document.getElementById('pairCopyLinkBtn');
     if (copiar) copiar.disabled = true;
+    // A instrução da câmera aponta pra um QR que acabou de sair, e o "Sem
+    // câmera? Mostrar um código" criava um código NOVO, válido, embaixo da frase
+    // que manda fechar e pedir outro (auditoria de 2026-09-29, A15). Os dois
+    // saem: o caminho de um código novo é o que o aviso de vencido diz.
+    document.getElementById('pairShowBody')?.classList.add('hidden');
+    document.getElementById('pairShowCodeBtn')?.classList.add('hidden');
+    // O código curto já pedido vale até o prazo DELE (nasceu depois do QR):
+    // enquanto ele vale, o "Código expirado" do QR ficaria em cima de um código
+    // que ainda entra. Quem fala é a contagem dele, que vence do mesmo jeito.
+    if (codigoCurtoValendo()) {
+        const exp = document.getElementById('pairExpiry');
+        if (exp) exp.textContent = '';
+    }
+}
+
+// O código curto está na tela e ainda vale? Revelado e não riscado — o risco é
+// o que o vencimento dele põe (`revelarCodigoPareamento`).
+function codigoCurtoValendo() {
+    const revelado = document.getElementById('pairCodeReveal');
+    const code = document.getElementById('pairCode');
+    return !!(revelado && !revelado.classList.contains('hidden')
+        && code && code.dataset.curto && !code.classList.contains('line-through'));
+}
+
+// O que o vencimento (do QR e do código curto) esconde, de volta a cada
+// abertura: o modal é reaproveitado.
+function mostrarInstrucoesDoPareamento() {
+    for (const id of ['pairShowBody', 'pairOrType']) document.getElementById(id)?.classList.remove('hidden');
 }
 
 // Contagem regressiva: deixa claro que o segredo morre — e evita o editor ficar
@@ -1551,7 +1590,16 @@ async function revelarCodigoPareamento() {
     // O CRU é o que vale pro resgate — o separador é só apresentação.
     codeEl.dataset.curto = r.code;
     codeEl.classList.remove('opacity-40', 'line-through');
-    iniciarTickerPareamento(expEl, r.expiresIn, () => codeEl.classList.add('opacity-40', 'line-through'));
+    // Pedido no último instante do QR, a resposta chega com ele já vencido: o
+    // "Código expirado" dele não fica em cima deste, que acabou de nascer.
+    const expQr = document.getElementById('pairExpiry');
+    if (expQr && expQr.textContent === t('pair.expired')) expQr.textContent = '';
+    iniciarTickerPareamento(expEl, r.expiresIn, () => {
+        codeEl.classList.add('opacity-40', 'line-through');
+        // "Digite este código" sobre um código morto é a mesma instrução falsa
+        // da câmera sobre o QR vencido (A15): sai junto.
+        document.getElementById('pairOrType')?.classList.add('hidden');
+    });
 }
 
 async function copiarLinkPareamento() {
@@ -5036,6 +5084,14 @@ function diagComputado() {
         fora.tema = {
             htmlClasse: document.documentElement.className,
             guardado: safeLS.get(THEME_KEY),
+            // A cor da barra do sistema: a meta `theme-color` que VALE, que é a
+            // primeira cuja media casa (não a primeira do documento). É o que
+            // a sentinela `temaContraditorio` compara com o tema do app.
+            barra: (() => {
+                const m = [...document.querySelectorAll('meta[name="theme-color"]')]
+                    .find((x) => !x.media || matchMedia(x.media).matches);
+                return m ? m.getAttribute('content') : null;
+            })(),
         };
 
         fora.camadasAbertas = diagCamadasAbertas().map((e) => e.id || e.className.slice(0, 40));
@@ -5350,19 +5406,40 @@ function diagSentinelas(comp) {
                 'há inset de teclado sem campo de texto focado — os modais achatam',
                 { kbInset: kb, foco: (comp.foco && comp.foco.tag) || 'nada' });
         }
-        // 2. `applyTheme` não remove `tema-claro`, então trocar pra escuro deixa
-        //    as duas classes. Só alerta quando isso TEM consequência: a única
-        //    regra que lê `.tema-claro` vive dentro de
-        //    `@media (prefers-color-scheme: dark)`, então num sistema CLARO a
-        //    contradição é inerte. Sem esse escopo a sentinela dispararia em
-        //    todo diagnóstico de quem trocou de tema — e sentinela que dispara
-        //    sempre é a que se aprende a ignorar, que é como esta seção morre.
+        // 2. O TEMA do app contra o que o NAVEGADOR pinta em volta dele: o fundo
+        //    sob o app e a barra do sistema. O `applyTheme` (e o script do tema,
+        //    na carga) põe `dark` OU `tema-claro` e todas as metas `theme-color`
+        //    na cor do tema. Duas contradições QUEBRAM a tela:
+        //    · sistema escuro, app claro SEM `tema-claro`: a regra
+        //      `html:not(.tema-claro)` do styles.css, que vive dentro de
+        //      `@media (prefers-color-scheme: dark)`, pinta o fundo escuro por
+        //      baixo do app claro (num sistema claro ela nem se aplica — daí o
+        //      escopo, senão a sentinela dispararia à toa);
+        //    · a barra do sistema (a meta que VALE) escura com o app claro, ou o
+        //      contrário.
+        //    Era o que o botão do tema deixava até recarregar (auditoria de
+        //    2026-09-29, A8, medido). A versão anterior alertava `tema-claro` +
+        //    `dark` juntos, e esse estado é INERTE (o `dark` do body cobre o
+        //    fundo): alertava o que não quebra e calava o que quebra.
         const cl = (comp.tema && comp.tema.htmlClasse) || '';
+        const classes = cl.split(/\s+/);
+        const appEscuro = classes.includes('dark');
         const sistemaEscuro = !!(comp.media && comp.media['(prefers-color-scheme: dark)']);
-        if (sistemaEscuro && cl.includes('tema-claro') && /\bdark\b/.test(cl)) {
+        const barra = (comp.tema && comp.tema.barra) || null;
+        const hex = /^#([0-9a-f]{6})$/i.exec(String(barra || '').trim());
+        // Relatório antigo (sem a barra) ou cor noutro formato: não julga.
+        const barraEscura = hex
+            ? (parseInt(hex[1].slice(0, 2), 16) * 299 + parseInt(hex[1].slice(2, 4), 16) * 587
+               + parseInt(hex[1].slice(4, 6), 16) * 114) / 1000 < 128
+            : null;
+        const fundoErrado = sistemaEscuro && !appEscuro && !classes.includes('tema-claro');
+        const barraErrada = barraEscura !== null && barraEscura !== appEscuro;
+        if (fundoErrado || barraErrada) {
             diga('temaContraditorio',
-                '<html> tem `tema-claro` e `dark` juntos num sistema escuro — o fundo '
-                + 'sob o app não acompanha', { classe: cl });
+                [fundoErrado ? 'app claro sem `tema-claro` num sistema escuro — o fundo sob o app fica escuro' : '',
+                 barraErrada ? `a barra do sistema (${barra}) não acompanha o tema do app` : '']
+                    .filter(Boolean).join('; '),
+                { classe: cl, barra });
         }
         // 4. O armazenamento não está guardando NADA — e o app parece boa.
         //    Invariante dura: depois de entrar, o token ESTÁ no localStorage.
@@ -12326,7 +12403,11 @@ function registrarAcaoConfirmada(actionType, place, gesto) {
     const balde = gesto && gesto.dia ? loadHistory()[gesto.dia] : null;
     checarConquistas({
         ...(balde ? { hoje: (balde.read || 0) + (balde.rejected || 0) } : {}),
-        duplicado: actionType === 'reject' && !!(place && place.duplicado),
+        // "Rejeitar um duplicado" é pelo MOTIVO do reporte, o mesmo que faz o
+        // card dizer "Duplicado". O `place.duplicado` é outra coisa — o alvo que
+        // o servidor conseguiu RESOLVER, e ele nem sempre consegue: o card dizia
+        // "Duplicado" e a conquista não contava (auditoria de 2026-09-29, H1).
+        duplicado: actionType === 'reject' && !!place && place.flagType === 'DUPLICATE',
         // `contagemDoAutor` já inclui ESTA rejeição (o registro veio antes), então
         // > 1 significa que havia rejeição anterior — é isso que faz reincidente.
         reincidente: actionType === 'reject' && !!place && place.creatorId != null
@@ -13194,9 +13275,10 @@ function pedidosDoAutorNaFila(place) {
 // frente, rejeitar todos de uma vez (destrutivo, sem Desfazer depois de enviado).
 //
 // Com UM SÓ — o caso de ~3 em cada 4 cards — essas duas linhas seriam o card que
-// já está na tela, com os três botões logo abaixo, e a de rejeitar seria ESTRITAMENTE
-// PIOR que o ✕: o lote não tem a janela de Desfazer que o card único tem. Então
-// elas somem, e o que fica é o que o card NÃO consegue mostrar:
+// já está na tela, com os três botões logo abaixo: a de rejeitar faria o MESMO
+// que o ✕ (o lote tem a mesma janela de Desfazer do card, ver
+// `rejeitarLoteDoAutor`), só que num segundo lugar. Então elas somem, e o que
+// fica é o que o card NÃO consegue mostrar:
 //   · o que "✕ N" quer dizer — o `title` do selo não existe no toque, e este é o
 //     único jeito de descobrir num celular o que aquele número conta;
 //   · a recusa automática deste autor, que hoje só se alcança por Filtros →
@@ -13210,6 +13292,11 @@ function abrirFolhaDoAutor(place) {
     if (!corpo || !titulo) return;
     const naFila = pedidosDoAutorNaFila(place);
     const emLote = naFila.length > 1;
+    // O lote passa pela janela do Desfazer como o card (`scheduleAction`): com
+    // ela, "começa ao tocar" e "tocar já escreve no Waze" eram falsos — o
+    // banner abria e nada saía (auditoria de 2026-09-29, A10). As frases seguem
+    // o estado de verdade, pela mesma pergunta que decide o envio.
+    const semJanela = semJanelaDeDesfazer();
     const chave = String(place.creatorId);
     const nome = place.createdBy || chave;
     titulo.textContent = nome;
@@ -13244,7 +13331,8 @@ function abrirFolhaDoAutor(place) {
             ? linha(ICONE_OLHO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
                     t('autor.sheet.ver', { n: naFila.length }), t('autor.sheet.ver.desc'), 'autorVer')
               + linha(ICONE_X, 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300',
-                      t('autor.sheet.rejeitar', { n: naFila.length }), t('autor.sheet.rejeitar.desc'), 'autorRejeitar')
+                      t('autor.sheet.rejeitar', { n: naFila.length }),
+                      t(semJanela ? 'autor.sheet.rejeitar.descSemDesfazer' : 'autor.sheet.rejeitar.desc'), 'autorRejeitar')
             : '')
         // Mesmo portão da lista do Histórico: mostrar o interruptor desabilitado
         // anunciaria um recurso que a pessoa não pode usar, e o app não faz isso.
@@ -13256,7 +13344,8 @@ function abrirFolhaDoAutor(place) {
         // descreveria o interruptor errado — e o interruptor tem a própria frase.
         + (emLote
             ? `<p class="mt-4 text-xs leading-relaxed text-rose-800 dark:text-rose-200 bg-rose-50 dark:bg-rose-500/10`
-              + ` border border-rose-100 dark:border-rose-500/30 rounded-xl px-3 py-2.5">${t('autor.sheet.aviso')}</p>`
+              + ` border border-rose-100 dark:border-rose-500/30 rounded-xl px-3 py-2.5">`
+              + `${t(semJanela ? 'autor.sheet.avisoSemDesfazer' : 'autor.sheet.aviso')}</p>`
             : '');
     if (emLote) {
         document.getElementById('autorVer').addEventListener('click', () => {
@@ -14505,7 +14594,8 @@ function enfileirarSaida(tipo, place, regiao, extra, calado, lista) {
     f.push({ tipo, venueID: place.venueID, updateRequestID: place.updateRequestID,
              creatorId: place.creatorId != null ? place.creatorId : null,
              nome: place.createdBy ? String(place.createdBy) : null,
-             dup: !!place.duplicado,
+             // O motivo do reporte, como a conquista lê (`registrarAcaoConfirmada`).
+             dup: place.flagType === 'DUPLICATE',
              // `t` responde "há quanto tempo isto está preso aqui" no
              // DIAGNÓSTICO (que despeja o localStorage inteiro), e é a HORA do
              // gesto pra "Coruja" no pouso (`registrarPousoDeSaida`).
@@ -14634,7 +14724,7 @@ async function esvaziarFilaDeSaida() {
             if (trava.reserva && !(await reivindicarNaSaida(item))) break;
             const place = { venueID: item.venueID, updateRequestID: item.updateRequestID,
                             creatorId: item.creatorId, createdBy: item.nome || undefined,
-                            duplicado: item.dup ? {} : undefined };
+                            flagType: item.dup ? 'DUPLICATE' : undefined };
             let r = item.tipo === 'read'
                 ? await API.markAsRead(item.venueID, item.updateRequestID, null, item.regiao)
                 : await API.rejectPlace(item.venueID, item.updateRequestID, null, item.regiao);
@@ -16482,6 +16572,11 @@ const Treino = {
             efeito.textContent = t(efeitoChave);
             efeito.classList.remove('hidden');
         }
+        // "O Desfazer te dá 3s em cada ação" só é verdade com a janela: com o
+        // Desfazer desligado, a primeira ação de verdade saía na hora, logo
+        // depois da promessa (auditoria de 2026-09-29, A6).
+        trocarTextoI18n(document.getElementById('treinoFimCorpo'),
+            semJanelaDeDesfazer() ? 'treino.fim.bodySemDesfazer' : 'treino.fim.body');
         openModal('treinoFimModal');
     },
 };
@@ -18582,6 +18677,16 @@ function canDisableUndo() {
     return getUndoTreatedCount() >= getUndoUnlockThreshold();
 }
 
+// A ação sai NA HORA, sem a janela do Desfazer? É a MESMA condição do
+// `scheduleAction`: a preferência desligada só vale com a cota do gate. Quem
+// PROMETE (ou não) a janela pergunta aqui — o fim do treino e a folha do autor
+// diziam "o Desfazer te dá 3s" e "tocar já escreve no Waze" sem olhar, e cada
+// frase mentia num dos dois estados (auditoria de 2026-09-29, A6 e A10).
+// `test/textos-desfazer.test.mjs` cobra que as duas condições sejam a mesma.
+function semJanelaDeDesfazer() {
+    return AppState.preferences.undoEnabled === false && canDisableUndo();
+}
+
 function renderPularGuardaPref() {
     const cb = document.getElementById('prefPularGuarda');
     if (cb) cb.checked = AppState.preferences.pularGuarda === true;
@@ -18652,17 +18757,27 @@ function getPreferredTheme() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+// A raiz fica IGUAL à que o script do tema (index.src.html) deixa na carga: o
+// botão e a recarga não podem pintar coisas diferentes. Até a auditoria de
+// 2026-09-29 (A8), com o sistema escuro, trocar pro claro pelo botão deixava a
+// barra do sistema e o fundo escuros até recarregar — o claro não ganhava o
+// `tema-claro`, e só a PRIMEIRA meta mudava.
 function applyTheme(theme) {
     const isDark = theme === 'dark';
     document.documentElement.classList.toggle('dark', isDark);
+    // O par do `dark`: é o `tema-claro` que desliga a regra do styles.css que
+    // pinta o fundo escuro por media query num sistema escuro.
+    document.documentElement.classList.toggle('tema-claro', !isDark);
     document.body.classList.toggle('dark', isDark);
     document.getElementById('themeIconLight').classList.toggle('hidden', isDark);
     document.getElementById('themeIconDark').classList.toggle('hidden', !isDark);
     const themeBtn = document.getElementById('themeBtn');
     if (themeBtn) themeBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
-    // Status bar (Android/PWA) acompanha a surface do header, não a cor da marca
-    const themeColor = document.querySelector('meta[name="theme-color"]');
-    if (themeColor) themeColor.setAttribute('content', isDark ? '#0f172a' : '#f8fafc');
+    // Status bar (Android/PWA) acompanha a surface do header, não a cor da marca.
+    // TODAS as metas: seguindo o sistema elas são duas, uma por esquema, e o
+    // navegador usa a que casa com o SISTEMA — que não é a primeira.
+    document.querySelectorAll('meta[name="theme-color"]')
+        .forEach((m) => m.setAttribute('content', isDark ? '#0f172a' : '#f8fafc'));
 }
 
 function toggleTheme() {

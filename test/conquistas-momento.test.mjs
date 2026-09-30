@@ -428,3 +428,40 @@ test('H1: conquista que destrava sem pouso de histórico (o pedido guardado) red
   n.checarConquistas();
   assert.ok(!n.selo.redesenho, 'agendou redesenho sem nada ter mudado na vitrine');
 });
+
+// ── "Detetive": rejeitar um duplicado (auditoria de 2026-09-29, H1) ──────────
+// O card diz "Duplicado" pelo MOTIVO do reporte (`flagType`); a conquista
+// olhava o `place.duplicado` — o alvo que o SERVIDOR conseguiu resolver, e ele
+// nem sempre consegue (medido no navegador: "Motivo: Duplicado" na tela, ✕
+// confirmado, e a conquista não contou). E o pouso da fila de saída reconstruía
+// o mesmo `duplicado` a partir do item.
+test('Detetive: rejeitar um duplicado conta pelo MOTIVO do reporte, com ou sem o alvo resolvido — também pela fila de saída', () => {
+  const m = montarConfirmacao({ agora: new Date(2026, 8, 29, 14, 0).getTime() });
+  const conta = (acao, place) => { m.registrarAcaoConfirmada(acao, place); return m.ctxs.at(-1).duplicado; };
+  assert.equal(conta('reject', { flagType: 'DUPLICATE' }), true,
+    'o card dizia "Duplicado" e a conquista não contou — o alvo não tinha sido resolvido');
+  // CONTROLE: com o alvo resolvido conta, como sempre; outro motivo e o ✓ não.
+  assert.equal(conta('reject', { flagType: 'DUPLICATE', duplicado: { id: '1.2.3', nome: 'Original' } }), true);
+  assert.equal(conta('reject', { flagType: 'CLOSED' }), false, 'contou um reporte que não é de duplicado');
+  assert.equal(conta('read', { flagType: 'DUPLICATE' }), false, 'contou MARCAR COMO LIDO um duplicado');
+
+  // A fila de saída: o item guarda o motivo, e o pouso o devolve à conquista.
+  const salvos = [];
+  const deps = {
+    carregarFilaDeSaida: () => [], salvarFilaDeSaida: (f) => salvos.push(f), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    dfato() {}, SAIDA_MAX: 1000, historyTodayKey: () => '2026-09-29', ondeAgora: () => '30', contaAgora: () => null,
+    API: { getRegion: () => 'row', getSession: () => 'tok' }, getLang: () => 'pt', updateInFlightIndicator() {},
+    marcaDaSessao: () => 'marca',
+  };
+  const { enfileirarSaida } = montar(['enfileirarSaida'], deps, ['enfileirarSaida']);
+  enfileirarSaida('reject', { venueID: 'v1', updateRequestID: 'u1', flagType: 'DUPLICATE' }, 'row');
+  const item = salvos.at(-1)[0];
+  assert.equal(item.dup, true, 'a fila de saída não guardou que era um duplicado (sem o alvo resolvido)');
+  // O pedido que o esvaziamento remonta a partir do item, lido do CÓDIGO.
+  const lit = /const place = (\{ venueID: item\.venueID[\s\S]*?\});/.exec(fatiar('esvaziarFilaDeSaida'));
+  assert.ok(lit, 'CONTROLE: o esvaziamento não remonta mais o pedido a partir do item — o guard ficaria cego');
+  const remontado = new Function('item', 'return ' + lit[1])(item);
+  assert.equal(conta('reject', remontado), true, 'o duplicado rejeitado sem rede não contou pro "Detetive" no pouso');
+  const outro = new Function('item', 'return ' + lit[1])({ ...item, dup: false });
+  assert.equal(conta('reject', outro), false, 'CONTROLE: o item que não é duplicado contou');
+});

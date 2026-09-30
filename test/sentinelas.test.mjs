@@ -80,29 +80,56 @@ test('sentinelas: foco DESCONHECIDO cai no lado que alerta, não no que cala', (
   assert.deepEqual(chaves(montar()(semFoco)), ['kbInsetSemFoco']);
 });
 
-test('sentinelas: `tema-claro` + `dark` só alerta onde tem consequência', () => {
+// A régua mudou na auditoria de 2026-09-29 (A8), com a tela MEDIDA: a versão
+// anterior alertava `tema-claro` + `dark` juntos, que é INERTE (o `dark` do body
+// cobre o fundo), e calava o estado que o botão do tema deixava de verdade — o
+// app claro sem `tema-claro` num sistema escuro, com o fundo e a barra escuros.
+test('sentinelas: o tema — alerta o fundo e a barra que QUEBRAM, e cala o que é inerte', () => {
   const escuro = () => {
     const c = sao();
     c.media = { '(prefers-color-scheme: dark)': true };
     return c;
   };
-  // Sistema ESCURO: a regra `html:not(.tema-claro)` que pinta o fundo vive
-  // dentro do `@media (prefers-color-scheme: dark)`, então aqui a contradição
-  // pesa — e alerta.
-  const c = escuro();
-  c.tema.htmlClasse = 'tema-claro sem-extensao dark';  // a classe REAL do diag dele
-  assert.deepEqual(chaves(montar()(c)), ['temaContraditorio']);
+  // O estado MEDIDO: sistema escuro, tocou pro claro — nem `dark` nem
+  // `tema-claro`, e a barra (a meta que vale) seguiu escura.
+  const quebrado = escuro();
+  quebrado.tema = { htmlClasse: 'com-extensao', guardado: 'light', barra: '#0f172a' };
+  const r = montar()(quebrado);
+  assert.deepEqual(chaves(r), ['temaContraditorio']);
+  assert.match(r[0].msg, /fundo/, 'o alerta não diz que o fundo sob o app ficou escuro');
+  assert.match(r[0].msg, /barra/, 'o alerta não diz que a barra não acompanhou');
+  assert.equal(r[0].barra, '#0f172a');
 
-  // Sistema CLARO: a media query nem se aplica. Alertar aqui seria disparar em
-  // todo diagnóstico de quem trocou de tema — o ruído que mata a seção.
+  // Cada metade sozinha também quebra a tela.
+  const soFundo = escuro();
+  soFundo.tema = { htmlClasse: 'com-extensao', barra: '#f8fafc' };
+  assert.deepEqual(chaves(montar()(soFundo)), ['temaContraditorio'], 'o fundo escuro sob o app claro passou calado');
+  const soBarra = sao();
+  soBarra.tema = { htmlClasse: 'dark', barra: '#f8fafc' };
+  assert.deepEqual(chaves(montar()(soBarra)), ['temaContraditorio'], 'a barra clara sob o app escuro passou calada');
+
+  // INERTE: `tema-claro` + `dark` num sistema escuro (a classe REAL de um diag).
+  const inerte = escuro();
+  inerte.tema = { htmlClasse: 'tema-claro sem-extensao dark', barra: '#0f172a' };
+  assert.deepEqual(montar()(inerte), [], 'alertou o estado inerte — ruído que ensina a ignorar a seção');
+
+  // Sistema CLARO: a regra do fundo nem se aplica, então classe nenhuma é inerte.
   const claro = sao();
-  claro.tema.htmlClasse = 'tema-claro sem-extensao dark';
+  claro.tema = { htmlClasse: 'com-extensao', barra: '#f8fafc' };
   assert.deepEqual(montar()(claro), []);
 
-  // E `dark` tem que ser palavra inteira, nunca substring.
+  // `dark` é palavra inteira, nunca substring; e o relatório de antes (sem a
+  // barra) não tem o que julgar nela.
   const outro = escuro();
-  outro.tema.htmlClasse = 'tema-claro modo-darkroom';
+  outro.tema = { htmlClasse: 'tema-claro modo-darkroom' };
   assert.deepEqual(montar()(outro), []);
+
+  // CONTROLE: os dois temas coerentes, no sistema escuro.
+  const escuroOk = escuro();
+  escuroOk.tema = { htmlClasse: 'dark', barra: '#0f172a' };
+  const claroOk = escuro();
+  claroOk.tema = { htmlClasse: 'tema-claro', barra: '#f8fafc' };
+  assert.deepEqual([...montar()(escuroOk), ...montar()(claroOk)], []);
 });
 
 test('sentinelas: modal aberto sobre os botões do card NÃO é alerta', () => {
