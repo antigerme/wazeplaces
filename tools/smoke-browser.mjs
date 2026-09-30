@@ -7920,6 +7920,224 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   }
 }
 
+// ── DUAS ABAS: o "Sair", o placar e as preferências (auditoria de 2026-09-29) ─
+//
+// O app aberto em duas abas do MESMO navegador, que dividem o armazenamento.
+// Cada aba guarda na memória a sessão, o placar e as preferências, e grava
+// tudo INTEIRO a cada gesto; o "Sair" numa não chegava à outra, e a ação comum
+// de uma desfazia o placar e as escolhas da outra (R4-5 A1 e A2, R4-2 O7). O
+// teste de unidade (`test/contas-abas.test.mjs`) entrega o aviso do navegador
+// À MÃO; aqui ele é o de verdade, entre duas páginas, pelos caminhos da tela.
+//
+// CONTROLE: o mesmo percurso com o ouvinte do aviso TIRADO de uma das abas tem
+// de reprovar como o app de antes reprovava — prova de que as medidas enxergam
+// o defeito, e não passam por acaso de ordem de evento.
+{
+  const PERFIL_ABAS = { id: 4242, userName: 'editor_abas', rank: 5, isAreaManager: true, isStaff: false,
+    editableCountryIDs: [30], areas: [], managedAreas: [] };
+  // Pedidos DISTINTOS (gotcha 3.5): a fila real nunca tem dois cards do mesmo pedido.
+  const FILA_ABAS = Array.from({ length: 3 }, (_, i) => Object.values(CARDS).map((p, k) => ({ ...p,
+    venueID: `va${i}-${k}`, updateRequestID: `ua${i}-${k}` }))).flat();
+  const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const abrirAbas = async () => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const rede = [];
+    await ctx.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }));
+    await ctx.route('**/api/**', async (r) => {
+      const rota = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { corpo = {}; }
+      rede.push({ rota, token: corpo.sessionToken || null });
+      const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+      if (rota === 'perfil') return json({ success: true, profile: PERFIL_ABAS, visivelNoWme: true });
+      if (rota === 'buscar-places') return json({ success: true, places: FILA_ABAS, hasMore: false, page: 1,
+        total: FILA_ABAS.length, totalAll: FILA_ABAS.length, blocked: 0 });
+      if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR' }] });
+      if (rota === 'lista-estados') return json({ success: true, states: [] });
+      if (rota === 'presenca-app') return json({ success: true, online: [], conversas: [] });
+      return json({ success: true });
+    });
+    const erros = [];
+    const abrir = async () => {
+      const p = await ctx.newPage();
+      p.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 120)));
+      await p.goto(BASE, { waitUntil: 'domcontentloaded' });
+      return p;
+    };
+    // A sessão salva e um placar com a cota do Desfazer cumprida (L6: 10): as
+    // ações saem sem a janela, e o percurso não espera 3 s por ✕.
+    const A = await abrir();
+    await A.evaluate(() => {
+      localStorage.setItem('waze_session_token', 'tok-abas');
+      localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: 20, skipped: 0 }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: false, presenca: true,
+        undoGateSeen: true, dicaDesfazerVista: true, comoFuncionaVisto: true, consequenciaVista: { reject: true, read: true } }));
+    });
+    await A.reload({ waitUntil: 'domcontentloaded' });
+    const B = await abrir();
+    const pronta = () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace
+      && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await esperarOuExplodir(A, pronta, 'a aba A abrir com a sessão e a fila');
+    await esperarOuExplodir(B, pronta, 'a aba B abrir com a sessão e a fila');
+    return { ctx, A, B, rede, erros };
+  };
+  // Um ✕ pelo botão do card da frente, esperando o card TROCAR e o envio voltar.
+  const rejeitarNa = (page) => page.evaluate(async () => {
+    const atual = () => AppState.currentPlace && AppState.currentPlace.updateRequestID;
+    const antes = atual();
+    document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click();
+    const lim = performance.now() + 10000;
+    while ((atual() === antes || AppState.inFlightActions > 0 || AppState.pendingAction) && performance.now() < lim) {
+      await new Promise((ok) => setTimeout(ok, 16));
+    }
+  });
+  const rejeitadosGravados = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_stats') || '{}').rejected);
+  // Um interruptor da aba Preferências, pelo clique (é o `change` que grava).
+  const tocarPreferencia = (page, id) => page.evaluate(async (idDoInterruptor) => {
+    document.getElementById('filtersBtn').click();
+    await new Promise((ok) => setTimeout(ok, 150));
+    document.getElementById('filtersTabPrefs').click();
+    document.getElementById(idDoInterruptor).click();
+    document.getElementById('closeFilters').click();
+    await new Promise((ok) => setTimeout(ok, 150));
+  }, id);
+  const sairPelaAjuda = (page) => page.evaluate(async () => {
+    document.getElementById('helpBtn').click();
+    await new Promise((ok) => setTimeout(ok, 150));
+    document.getElementById('logoutBtn').click();
+    await new Promise((ok) => setTimeout(ok, 150));
+    document.getElementById('confirmLogout').click();
+  });
+  const naEntrada = () => !document.getElementById('authScreen').classList.contains('hidden')
+    && document.getElementById('appScreen').classList.contains('hidden');
+  const aparelho = (page) => page.evaluate(() => JSON.stringify(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)])));
+
+  // ── 1. com o aviso de verdade entre as duas ─────────────────────────────
+  const m = await abrirAbas();
+  // O placar: 3 ✕ na A e 1 na B. A B tem de VER os três antes do dela.
+  for (let i = 0; i < 3; i++) await rejeitarNa(m.A);
+  const bViu = await esperarNaPagina(m.B, () => AppState.stats.rejected === 23, 5000);
+  checa(bViu.ok, 'duas abas: a aba B não viu no placar os 3 ✕ da aba A');
+  await rejeitarNa(m.B);
+  const aViu = await esperarNaPagina(m.A, () => AppState.stats.rejected === 24, 5000);
+  const gravado = await rejeitadosGravados(m.A);
+  const telas = await Promise.all([m.A, m.B].map((p) => p.evaluate(() => document.getElementById('rejectedCount').textContent.trim())));
+  checa(gravado === 24, 'duas abas: o placar gravado perdeu os ✕ da outra aba (3 na A e 1 na B)', `gravado ${gravado}`);
+  checa(aViu.ok && telas[0] === '24' && telas[1] === '24', 'duas abas: o placar NA TELA não diz os 4 ✕ nas duas', JSON.stringify(telas));
+  // CONTROLE do percurso: o Histórico (que já relia) contou os quatro.
+  const hist = await m.A.evaluate(() => (JSON.parse(localStorage.getItem('waze_places_history') || '{}')._total || {}).rejected);
+  checa(hist === 4, 'duas abas: CONTROLE — o Histórico não contou os 4 ✕ (o percurso não fez o que diz)', String(hist));
+
+  // As preferências: a pessoa liga "Pular guarda o pedido" e desliga "Ver quem
+  // está no app" na A; a B grava as preferências dela (o interruptor do
+  // Desfazer, duas vezes) — e as escolhas da A têm de sobreviver.
+  await tocarPreferencia(m.A, 'prefPularGuarda');
+  await tocarPreferencia(m.A, 'prefPresenca');
+  const bRelu = await esperarNaPagina(m.B, () => AppState.preferences.pularGuarda === true
+    && AppState.preferences.presenca === false, 5000);
+  checa(bRelu.ok, 'duas abas: a aba B não releu as preferências escolhidas na A');
+  const selo = await m.B.evaluate(() => (cardDaFrente()?.querySelector('.swipe-stamp-up span')?.textContent || '').trim());
+  checa(selo.includes('⭐'), 'duas abas: o selo do ↑ da aba B não diz que guarda (o que ela FAZ e o que DIZ divergem)', selo);
+  // Um ESPIÃO de escrita na B, pro "Sair" lá embaixo: gravar o MESMO valor que
+  // a A acabou de gravar (o placar e as preferências de fábrica) não muda o
+  // aparelho, e a foto dele antes e depois não veria — sabotado com a B
+  // regravando o de fábrica, só o espião reprovou. O CONTROLE dele é aqui: a B
+  // grava as preferências pelo interruptor, e ele tem de ver.
+  await m.B.evaluate(() => {
+    window.__escritasDaB = [];
+    for (const nome of ['setItem', 'removeItem', 'clear']) {
+      const original = Storage.prototype[nome];
+      Storage.prototype[nome] = function (...args) {
+        if (this === localStorage) window.__escritasDaB.push(nome + ':' + (args[0] === undefined ? '' : args[0]));
+        return original.apply(this, args);
+      };
+    }
+  });
+  await tocarPreferencia(m.B, 'prefUndoEnabled');
+  await tocarPreferencia(m.B, 'prefUndoEnabled');
+  const espiouB = await m.B.evaluate(() => window.__escritasDaB.slice());
+  checa(espiouB.includes('setItem:waze_places_preferences'),
+    'duas abas: CONTROLE — o espião de escrita da aba B não viu a B gravar as preferências (ele estaria cego no "Sair")', JSON.stringify(espiouB));
+  const prefs = await m.A.evaluate(() => JSON.parse(localStorage.getItem('waze_places_preferences') || '{}'));
+  checa(prefs.pularGuarda === true, 'duas abas: uma escrita da aba B desfez o "Pular guarda o pedido" ligado na A');
+  checa(prefs.presenca === false, 'duas abas: uma escrita da aba B religou o "Ver quem está no app" (a pessoa volta ao mapa do WME)');
+  const antesDoPular = m.rede.length;
+  await m.B.evaluate(async () => {
+    const antes = AppState.currentPlace && AppState.currentPlace.updateRequestID;
+    document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-skip').click();
+    const lim = performance.now() + 10000;
+    while ((AppState.currentPlace && AppState.currentPlace.updateRequestID) === antes && performance.now() < lim) {
+      await new Promise((ok) => setTimeout(ok, 16));
+    }
+  });
+  const estrela = await esperarNaPagina(m.B, () => AppState.inFlightActions === 0, 5000);
+  checa(estrela.ok && m.rede.slice(antesDoPular).some((x) => x.rota === 'guardar-pedido'),
+    'duas abas: o ↑ da aba B não guardou o pedido — ela seguiu com a preferência de antes');
+
+  // CONTROLE da QUEDA: a sessão cai na A (sem "Sair"). O token sai, a conta
+  // fica — e a B segue na fila, com os dados (a mesma pessoa volta).
+  await m.A.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
+  await esperarNaPagina(m.A, () => !localStorage.getItem('waze_session_token'), 3000);
+  await dormir(600);
+  const bDepoisDaQueda = await m.B.evaluate(() => ({ auth: AppState.authenticated,
+    card: !!document.querySelector('#cardStack .place-card:not(.card-fundo)') }));
+  checa(bDepoisDaQueda.auth && bDepoisDaQueda.card, 'duas abas: a QUEDA da sessão na aba A encerrou a B como se fosse o "Sair"',
+    JSON.stringify(bDepoisDaQueda));
+  // A entra de novo, e a B fica com algo aberto por cima (os Filtros).
+  await m.A.evaluate(() => localStorage.setItem('waze_session_token', 'tok-abas-2'));
+  await m.A.reload({ waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(m.A, () => AppState.authenticated && !!AppState.profile, 'a aba A entrar de novo');
+  await m.B.evaluate(() => document.getElementById('filtersBtn').click());
+  await esperarOuExplodir(m.B, () => !document.getElementById('filtersModal').classList.contains('hidden'), 'os Filtros abrirem na aba B');
+
+  // O "Sair" na A, pela Ajuda (o espião da B começa vazio: ver acima).
+  await m.B.evaluate(() => { window.__escritasDaB.length = 0; });
+  await sairPelaAjuda(m.A);
+  await esperarOuExplodir(m.A, naEntrada, 'a aba A voltar à entrada');
+  const noSair = await aparelho(m.A);
+  const redeNoSair = m.rede.length;
+  const bSaiu = await esperarNaPagina(m.B, naEntrada, 5000);
+  checa(bSaiu.ok, 'duas abas: o "Sair" na aba A não chegou à B — ela seguiu logada, com a fila na tela');
+  const b = await m.B.evaluate(() => ({
+    auth: AppState.authenticated, perfil: !!AppState.profile, memoria: API.temSessaoNaMemoria(),
+    card: !!document.querySelector('#cardStack .place-card'),
+    filtros: !document.getElementById('filtersModal').classList.contains('hidden'),
+    aviso: [...document.querySelectorAll('#toastContainer > *')].map((e) => e.textContent).join(' | '),
+  }));
+  checa(!b.auth && !b.perfil && !b.memoria && !b.card, 'duas abas: a aba B ficou com a sessão, o perfil ou o card de quem saiu', JSON.stringify(b));
+  checa(!b.filtros, 'duas abas: os Filtros ficaram abertos por cima da entrada na aba B');
+  checa(/outra aba/.test(b.aviso), 'duas abas: a aba B foi pra entrada sem dizer por quê', b.aviso.slice(0, 120));
+  await dormir(500);
+  const depois = await aparelho(m.A);
+  checa(depois === noSair, 'duas abas: a aba B GRAVOU no aparelho depois do "Sair" da A', `${noSair.slice(0, 160)} → ${depois.slice(0, 160)}`);
+  const escritasDaB = await m.B.evaluate(() => window.__escritasDaB);
+  checa(Array.isArray(escritasDaB) && escritasDaB.length === 0,
+    'duas abas: a aba B mexeu no aparelho ao receber o "Sair" da A (ela só solta a memória)', JSON.stringify(escritasDaB));
+  checa(!m.rede.slice(redeNoSair).some((x) => /validar-place|marcar-lido|guardar-pedido/.test(x.rota)),
+    'duas abas: uma decisão saiu pro Waze depois do "Sair"');
+  checa(m.erros.length === 0, 'duas abas: erro de JS', m.erros[0]);
+  await m.ctx.close();
+
+  // ── 2. CONTROLE: o mesmo percurso, com a aba B SURDA ao aviso ────────────
+  // É o app de antes, em miniatura: sem o ouvinte, a B grava por cima e o
+  // "Sair" não chega. Se isto passar, as medidas de cima não enxergam nada.
+  const c = await abrirAbas();
+  await c.B.evaluate(() => window.removeEventListener('storage', aoGravarEmOutraAba));
+  for (let i = 0; i < 2; i++) await rejeitarNa(c.A);
+  await dormir(300);
+  await rejeitarNa(c.B);
+  await dormir(300);
+  const controle = await rejeitadosGravados(c.A);
+  checa(controle === 21, 'duas abas: CONTROLE — sem o ouvinte, a aba B devia gravar por cima (21); o instrumento não vê a perda',
+    String(controle));
+  await sairPelaAjuda(c.A);
+  await esperarOuExplodir(c.A, naEntrada, 'a aba A do controle voltar à entrada');
+  await dormir(800);
+  const surda = await c.B.evaluate(() => AppState.authenticated);
+  checa(surda === true, 'duas abas: CONTROLE — sem o ouvinte, o "Sair" não devia chegar à B; o instrumento não vê o defeito');
+  await c.ctx.close();
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -8001,5 +8219,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
+  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
