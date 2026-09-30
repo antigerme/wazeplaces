@@ -16,22 +16,29 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-09-30 ~20:50 UTC)
+## 0. Estado agora (2026-09-30 ~22:10 UTC)
 
-- **PR #253 (lote 7) mergeado** às 20:22 UTC, com CI verde nos dois jobs (check e webkit). Produção
+- **PR #253 (lote 7) mergeado** às 20:22 UTC de 09-29, com CI verde nos dois jobs (check e webkit). Produção
   **v2026.09.29-01 verificada: 71 ✓ · 0 ✗** com as duas contas, mais as verificações novas do lote 7 no
-  `prod-auditoria.mjs` (todas ✓): a conta na resposta do login, o "Aprovar" só com a foto carregada (a
-  foto do Waze atrasada de propósito), o link do pareamento fora do relatório (gerado com o QR na tela),
-  desligar o modo dev numa aba desliga na outra e a escala do mapa ampliado contra a distância real
-  (69 m × 69 m). Não medível hoje: "Mais antigos" acima de 500 (a fila do Brasil com lidos tem 373).
-  A seção 4 (portões do lightbox) passou a esperar a foto carregar antes de medir.
-- **Rodada 4 feita** (oito auditores; relatórios em `scratchpad/r4-relatorios/`, o do card R4-4 ainda
-  terminando). **Lote 8 em andamento**: nove agentes de conserto em worktrees `/home/user/wp-fix4-*`
-  (servidor, presença, filtros, fila, contas, dev, textos, offline, lightbox); ids e escopo de cada um em
-  `scratchpad/r4-agentes.txt`. Pararam no limite de 2026-09-29 ~21:25 UTC antes de qualquer commit e foram
-  continuados por `SendMessage` em 2026-09-30 04:35; pararam de novo ~05:00 (limite até 9:30), com trabalho parcial nos worktrees, e foram continuados às 10:59. Cada um entrega `scratchpad/relatorio-l8-<área>.md`. Um décimo agente (card: C4, C7, C10, C11, C14, C16) entrou depois do relatório do R4-4. **O do servidor terminou** (10 commits, 1459/1459, 38 sabotagens) e já está no branch por cherry-pick. Os outros nove pararam de novo no limite (~11:30, volta às 15:50) e foram continuados às 20:47.
-  Vão pro owner com mockup: L28, L31 (lightbox), D3 (relatório sem sessão) e a parte do O1 no service
-  worker (teto de tempo × gotcha #18).
+  `prod-auditoria.mjs` (todas ✓). Não medível hoje: "Mais antigos" acima de 500 (a fila do Brasil com
+  lidos tem 373).
+- **Rodada 4 feita** (oito auditores; relatórios em `scratchpad/r4-relatorios/`). **Lote 8 quase todo
+  juntado** no branch (`/home/user/wp-lote7`), por cherry-pick, com `npm test` 1639/1639: servidor, dev,
+  presença, filtros (com os achados 10–12), fila, lightbox, offline e contas. Faltam: **textos** e **card**
+  (terminando), mais três extras em andamento: a **fila** travando o ✕ do card com a aprovação da foto no
+  ar (achado novo do lightbox), as **contas** com a queda que apagava o token novo da outra aba e o
+  `pularGuarda` zerado na troca de conta (decidido: o que escreve no Waze no nome de alguém não se herda), e
+  os **textos** com "borrar" no espanhol da Ajuda. Ids e escopo em `scratchpad/r4-agentes.txt`; cada um
+  entrega `scratchpad/relatorio-l8-<área>.md` (linhas de CHANGELOG e notas do CLAUDE.md).
+- **Conflitos resolvidos ao juntar**: harnesses de teste com dependências novas dos dois lados (união), e o
+  smoke do offline, em que a 9f do modo dev e a 9h do offline declaravam as mesmas `const` (`ctx9f`,
+  `abrir9f`, `prep9f`): as da 9h/9i viraram `*9h`/`*9i`. Instabilidades de teste sob carga: o K14
+  (`costura-sessao`) esperava 30 ms de relógio e passou a esperar a fila vazia (commit `ab93730`, com
+  sabotagem); o `servidor-local` saiu uma vez com 13 sob carga 22 no agente do offline, e **não reproduziu**
+  aqui (100 sondas e 30 subidas concorrentes, todas certas) — fica anotado, sem conserto especulativo.
+- Vão pro owner com mockup: L28 (agora também o banner do Desfazer sobre o Street View no mapa ampliado),
+  L31, D3 e a parte do O1 no service worker (teto de tempo × gotcha #18); e, de produto, os 45 s até a fila
+  guardada entrar na abertura em lie-fi.
 - O branch `claude/peaceful-heisenberg-HaUuC` foi recriado a partir da main (o GitHub o apaga no merge);
   o worktree de trabalho segue sendo `/home/user/wp-lote7`.
 - **Cookies** (2026-09-30, os válidos): `14319cf2-antigerme_cookies.txt` (L6+AM) e `6ae86b82-cafanha_cookies.txt` (L2+AM), conferidos pelo `waze-probe` e com sessões diferentes (comparadas sem imprimir valor); o `prod-auditoria.mjs` já aponta pra eles. Os arquivos anteriores não servem mais (um da "cafanha" trazia a sessão da antigerme, e o cafanha de 09-29 expirou).
