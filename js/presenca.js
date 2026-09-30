@@ -311,7 +311,27 @@ function chatAoResponder(r, carona) {
 
 // ── a lista ─────────────────────────────────────────────────────────────────
 
+// Só falta o PERFIL, com a sessão de pé: é a renovação silenciosa pela extensão
+// (a queda apaga o perfil, e o `showMainScreen` chama a presença antes de ele
+// voltar) — ou a abertura, antes de o primeiro perfil chegar.
+function presencaEsperandoPerfil() {
+    return !!(AppState.authenticated && presencaLigada() && API.getSession() && API.getCountry() && !presencaEu());
+}
+
 async function presencaSincronizar() {
+    // Esperando o perfil, ESPERA — com a tela como está. Desligar aqui fechava a
+    // conversa aberta, a lista e a folha do pedido, e o pedido preso se perdia,
+    // com a MESMA conta voltando segundos depois (auditoria de 2026-09-29). O
+    // perfil que chegar chama isto de novo (`completarPerfilChegado`); OUTRA
+    // conta limpa tudo pelo `esquecerOutraConta`, e o "Sair" pelo
+    // `presencaEsquecer`. Só o tempo real fecha: o que chegasse por ele sem
+    // saber de quem é a sessão não teria como entrar (ver `presencaQuadro`), e
+    // reaberto com o perfil ele reentrega o que ficou sem confirmar.
+    if (presencaEsperandoPerfil()) {
+        clearTimeout(Presenca.timers.fluxo);
+        presencaFluxoFechar();
+        return;
+    }
     if (!presencaPodeConectar()) return presencaDesligar();
     // Mesmo país e lista fresca: nada a pedir. Sem esta guarda, cada filtro
     // aplicado (tipo, ordem, categoria) custaria um pedido sem mudar a lista.
@@ -737,6 +757,10 @@ function presencaQuadro(fluxo, o) {
     }
     const im = o.inboxMessage;
     if (!im) return;
+    // Sem saber de quem é a sessão (o perfil que a renovação ainda não trouxe),
+    // a mensagem não tem como entrar — e CONFIRMADA ela não voltaria mais. Fica
+    // sem confirmar: o fluxo a reentrega quando reabrir, com o perfil.
+    if (!presencaEu()) return;
     // TUDO que chega é confirmado — inclusive a mensagem de quem só usa o WME,
     // que o app não mostra. Confirmar não marca nada como lido (isso é outro
     // método) e não mexe na fila do WME da pessoa: a fila é da INSTALAÇÃO.
@@ -1280,7 +1304,10 @@ async function presencaMandar(com, msg) {
 function presencaTentarDeNovo() {
     const id = Presenca.aberta;
     const h = id && Presenca.historico.get(id);
-    if (!h) return;
+    // Sem o id do perfil (a sessão renovando), não sai — como o "Enviar" com o
+    // campo cheio: sairia pela sessão NOVA, que pode ser de outra conta. A
+    // mensagem segue "Não enviada", com o botão, até o perfil chegar.
+    if (!h || !presencaEu()) return;
     for (const m of h.msgs.filter((x) => x.meu && x.estado === 'falhou')) presencaMandar(id, m);
 }
 

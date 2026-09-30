@@ -227,3 +227,74 @@ test('P1 a folha do pedido recebido: tudo o que a abertura escreve, o fechamento
   }
   assert.equal(els.get('pedidoFoto').classList.contains('hidden'), true, 'a caixa da foto ficou aberta, vazia');
 });
+
+// ── P2: a renovação silenciosa da sessão não fecha a conversa ───────────────
+
+test('P2 a renovação silenciosa (só falta o PERFIL): a conversa, o pedido preso e o texto FICAM — e o tempo real fecha até ele voltar', async () => {
+  const c = novoCliente();
+  c.win.cardParaConversa = () => CARD_PRESO;
+  c.P.Presenca.online = [pessoa(CAF, 'cafanha', -23.5, -46.6, 3)];
+  c.P.presencaAbrirConversa(CAF);
+  c.P.presencaAnexarCard();
+  c.$('conversaInput').value = 'meio escrito';
+  // O tempo real aberto, com um token que ainda vale e a lista de agora.
+  const agora = c.relogio.agora;
+  c.P.Presenca.chat = { token: 't', base: 'https://instantmessaging-pa.googleapis.com/', chave: 'k', expiraEm: agora + 10 * 36e5 };
+  c.P.Presenca.pais = 30;
+  c.P.Presenca.atualizadaEm = agora;
+  const velho = fluxoDe(c);
+  c.P.Presenca.fluxo = velho;
+  // A queda apaga o perfil; a extensão devolve a sessão, e o `showMainScreen`
+  // chama a presença ANTES de o perfil voltar.
+  c.AppState.profile = null;
+  await c.P.presencaSincronizar();
+  assert.deepEqual(c.chamadas.closeModal, [], 'a renovação silenciosa FECHOU a conversa (e a lista, e a folha do pedido)');
+  assert.equal(c.$('conversaModal').classList.contains('hidden'), false);
+  assert.equal(c.P.Presenca.aberta, CAF);
+  assert.equal(c.P.Presenca.anexo, CARD_PRESO, 'o pedido preso se perdeu na renovação');
+  assert.equal(c.$('conversaInput').value, 'meio escrito');
+  assert.equal(velho.ctl.signal.aborted, true, 'o tempo real seguiu aberto sem saber de quem é a sessão');
+  assert.equal(c.P.Presenca.fluxo, null);
+  // Um quadro que ainda chegasse nesse meio não entra NEM é confirmado — senão
+  // não voltaria mais: o fluxo o reentrega reaberto, com o perfil.
+  c.P.presencaQuadro(velho, inbox(await bytesDeMensagem({ id: uuid(40), de: CAF, para: EU, texto: 'no meio', ctx: APP, ts: agora }), 40));
+  assert.deepEqual(c.P.chatAConfirmar(), [], 'a mensagem que chegou sem perfil foi CONFIRMADA — e não voltaria mais');
+  // O perfil volta (a mesma conta): o tempo real reabre sozinho.
+  c.AppState.profile = { id: Number(EU), userName: 'antigerme' };
+  const antes = c.chamadas.fetch.length;
+  await c.P.presencaSincronizar();
+  assert.equal(c.chamadas.fetch.length, antes + 1, 'o tempo real não reabriu quando o perfil voltou');
+  assert.equal(c.chamadas.presencaApp.length, 0, 'a lista de agora foi pedida de novo à toa');
+  // CONTROLE: a queda que vai pra TELA DE ENTRADA (sem sessão) fecha tudo.
+  const d = novoCliente();
+  d.P.presencaAbrirConversa(CAF);
+  d.AppState.authenticated = false;
+  d.AppState.profile = null;
+  await d.P.presencaSincronizar();
+  assert.deepEqual(d.chamadas.closeModal, ['conversaModal'], 'a queda de verdade não fechou a conversa');
+  assert.equal(d.P.Presenca.aberta, null);
+});
+
+test('P2 sem o perfil, o "Tentar de novo" não sai — sairia pela sessão NOVA, que pode ser de outra conta', async () => {
+  let resposta = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
+  const c = novoCliente({ api: { chat: () => resposta } });
+  c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');
+  c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true });
+  c.P.presencaEnviar('oi', null);
+  await tick();
+  assert.equal(c.P.Presenca.historico.get(CAF).msgs[0].estado, 'falhou', 'CONTROLE: a mensagem tem que ter falhado');
+  resposta = { success: true };
+  c.AppState.profile = null;                            // a sessão renovando
+  c.P.presencaTentarDeNovo();
+  await tick();
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 1, 'o "Tentar de novo" saiu sem saber de quem é a sessão');
+  assert.equal(c.P.Presenca.historico.get(CAF).msgs[0].estado, 'falhou');
+  // CONTROLE: com o perfil de volta, sai — com o MESMO id.
+  c.AppState.profile = { id: Number(EU), userName: 'antigerme' };
+  c.P.presencaTentarDeNovo();
+  await tick();
+  const envios = c.chamadas.chat.filter((x) => x.acao === 'enviar');
+  assert.equal(envios.length, 2);
+  assert.equal(envios[1].id, envios[0].id);
+});
