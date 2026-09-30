@@ -289,7 +289,7 @@ else {
     const ch = Array.isArray(a.chamadas) ? a.chamadas : [];
     const er = Array.isArray(a.erros) ? a.erros : [];
     const ms = Array.isArray(a.momentos) ? a.momentos : [];
-    // `retrato`: veio do retrato SÍNCRONO do fechar (v2026.09.30), não da base —
+    // `retrato`: veio do retrato SÍNCRONO do fechar (auditoria de 2026-09-29, D2), não da base —
     // a gravação da base não chegou ao fim. Se o teto do retrato cortou, o que
     // falta no começo NÃO quer dizer "não aconteceu": a contagem diz quanto.
     out(`abertura ${a.id} · ${quando(a.inicio)} → ${quando(a.salvoEm)} (guardada por: ${a.salvoPor}${a.retrato ? ', retrato do fechar' : ''}) · v${a.versao ?? '?'}`);
