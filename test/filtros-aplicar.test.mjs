@@ -900,6 +900,24 @@ test('achado 10: pelo ALARME FALSO (o 1º perfil barrado por um 401 passageiro),
   assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], 'o perfil do alarme falso desfez a escolha feita no meio');
 });
 
+test('achado 10: o registro do pedido é UM por vez — o teto do pedido é menor que o intervalo de refazer o perfil', () => {
+  // O `lugarDoPedidoDoPerfil` é o do ÚLTIMO pedido de perfil. Ele só serve se
+  // duas cargas nunca se sobrepõem: se a 1ª ainda pudesse responder depois de
+  // a 2ª registrar o lugar dela, a 1ª decidiria sobre um lugar que não era o do
+  // seu pedido (e o `na/30` voltaria). Hoje não se sobrepõem por construção: o
+  // pedido morre aos 45 s (`_post`), e o `refazerPerfilSeFaltar` só pede de novo
+  // 60 s depois — e só sem perfil. Subir um ou baixar o outro reabre o buraco.
+  const api = ler('js/api.js');
+  const post = api.slice(api.indexOf('async _post('), api.indexOf('async _post(') + 1500);
+  const teto = /setTimeout\(\(\) => controller\.abort\(\), (\d+)\)/.exec(post);
+  assert.ok(teto, 'o teto do pedido sumiu do `_post` — o instrumento não o achou');
+  const refazer = constante('PERFIL_REFAZER_MS');
+  assert.ok(Number(teto[1]) < refazer,
+    `o pedido pode durar ${teto[1]} ms e o perfil é refeito com ${refazer} ms: duas cargas se sobrepõem`);
+  assert.match(fatiar('refazerPerfilSeFaltar'), /if \(!AppState\.authenticated \|\| AppState\.profile\) return;/,
+    'o perfil passou a ser refeito com um perfil já em mãos');
+});
+
 // ═══ Achado 11 · os Filtros abertos acompanham o lugar que mudou por baixo ═══
 test('achado 11: com os Filtros abertos, o país do perfil que muda por baixo muda NA TELA — e o "Aplicar" não o desfaz', async () => {
   // Quem edita na França abre no Brasil, com os Filtros abertos (o atalho) — e
