@@ -347,7 +347,9 @@ test('P5 voltar do segundo plano e aplicar filtro: no máximo UM pedido por minu
 
 test('P6 a mensagem que chega com a lista NO AR, e que a lista já contou, não vira "2 mensagens novas"', async () => {
   const T0 = 1790200000000;
-  async function cenario(servidorContou) {
+  // `pela`: por onde a lista diz que chegou até a mensagem — a `atividade` da
+  // conversa ou a hora da ÚLTIMA mensagem dela (as duas no relógio do Waze).
+  async function cenario(servidorContou, pela = 'atividade') {
     let responder;
     const c = novoCliente({ agora: T0, api: { presencaApp: () => new Promise((r) => { responder = r; }) } });
     c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', T0 - 10000, 0)] }, T0 - 70000, 30);
@@ -357,8 +359,9 @@ test('P6 a mensagem que chega com a lista NO AR, e que a lista já contou, não 
     c.P.presencaQuadro(fluxoDe(c), inbox(bytes, 50));
     const antes = c.P.presencaNaoLidasTotal();
     c.relogio.agora += 400;                                      // a lista volta: lida no Waze depois de a mensagem ser gravada
+    const ultima = pela === 'ultima' && servidorContou ? { deMim: false, ts: T0 + 100, texto: 'oi', card: null } : null;
     responder({ success: true, online: [], agora: c.relogio.agora,
-      conversas: [conversa(CAF, 'cafanha', servidorContou ? T0 + 100 : T0 - 10000, servidorContou ? 1 : 0)] });
+      conversas: [conversa(CAF, 'cafanha', servidorContou && pela === 'atividade' ? T0 + 100 : T0 - 10000, servidorContou ? 1 : 0, ultima)] });
     await pedido;
     return { antes, depois: c.P.presencaNaoLidasTotal(), selo: c.$('presencaCount').textContent };
   }
@@ -366,6 +369,8 @@ test('P6 a mensagem que chega com a lista NO AR, e que a lista já contou, não 
   assert.equal(contou.antes, 1, 'CONTROLE: a mensagem ao vivo tem que contar');
   assert.equal(contou.depois, 1, 'a mensagem que a lista já contava contou DUAS vezes ("2 mensagens novas" pra uma)');
   assert.equal(contou.selo, '1');
+  // A lista diz pela hora da última mensagem (a `atividade`, mais velha): a mesma conta.
+  assert.equal((await cenario(true, 'ultima')).depois, 1, 'a lista cuja ÚLTIMA mensagem é a que chegou contou duas vezes');
   // CONTROLE: a lista lida no Waze ANTES de a mensagem ser gravada não a conta — a ao vivo fica.
   assert.equal((await cenario(false)).depois, 1, 'a mensagem que a lista NÃO contava sumiu');
 });

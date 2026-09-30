@@ -470,15 +470,20 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
         // O que chegou ao vivo ANTES de o pedido sair o servidor já contou. E o
         // que chegou DEPOIS pode ter entrado na conta também: a lista é lida no
         // Waze depois de o pedido sair, e a mensagem gravada nesse meio vem
-        // nela. A `atividade` da conversa (a hora, no servidor, da última
-        // mensagem) diz até onde ela foi: o que o fluxo trouxe com hora até ali,
-        // a lista já contou. Sem isto, UMA mensagem virava "2 mensagens novas"
-        // (auditoria de 2026-09-29).
+        // nela. Até onde a lista foi dizem a `atividade` da conversa e a hora
+        // da ÚLTIMA mensagem dela — as duas no relógio do Waze, que carimba a
+        // mensagem ao guardá-la (MEDIDO na gravação do WME: o pedido saiu com
+        // 1790182219825 e voltou guardado com 1790182220160), o mesmo relógio
+        // da hora que o fluxo traz. O que chegou com hora até ali, a lista já
+        // contou. Sem isto, UMA mensagem virava "2 mensagens novas" (auditoria
+        // de 2026-09-29).
         for (const [id, v] of Presenca.vivas) {
             if (v.ultimaTs < inicio) { Presenca.vivas.delete(id); continue; }
             const c = Presenca.conversas.find((x) => x.id === id);
-            if (!c || !Number.isFinite(c.atividade) || !Array.isArray(v.servs)) continue;
-            const depois = v.servs.filter((s) => !(s <= c.atividade));
+            const ate = c ? Math.max(Number.isFinite(c.atividade) ? c.atividade : 0,
+                c.ultima && Number.isFinite(c.ultima.ts) ? c.ultima.ts : 0) : 0;
+            if (!ate || !Array.isArray(v.servs)) continue;
+            const depois = v.servs.filter((s) => !(s <= ate));
             if (depois.length === v.servs.length) continue;
             v.n = Math.max(0, v.n - (v.servs.length - depois.length));
             v.servs = depois;
