@@ -27,7 +27,8 @@ import { lerDiagnostico } from './diag-ler.mjs';
 import { esperarOuExplodir } from './esperar-saida.mjs';
 import { execFileSync } from 'node:child_process';
 import { subirServidorLocal } from './servidor-local.mjs';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -35,9 +36,15 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const COOKIES = process.argv[2] || null;
 const PORT = Number(process.env.SMOKE_DIAG_PORT || 8241), BASE = `http://127.0.0.1:${PORT}`;
-const SAIDA = '/tmp/smoke-diag-tela';
-rmSync(SAIDA, { recursive: true, force: true });
-mkdirSync(SAIDA, { recursive: true });
+// Um diretório POR RODADA: com o caminho fixo de antes, duas rodadas ao mesmo
+// tempo (agentes em paralelo) apagavam os arquivos uma da outra no meio, e a
+// falha parecia do app. `SMOKE_DIAG_SAIDA` escolhe um caminho, se quiser.
+const SAIDA = process.env.SMOKE_DIAG_SAIDA || mkdtempSync(join(tmpdir(), 'smoke-diag-tela-'));
+if (process.env.SMOKE_DIAG_SAIDA) {
+  rmSync(SAIDA, { recursive: true, force: true });
+  mkdirSync(SAIDA, { recursive: true });
+}
+console.log(`arquivos desta rodada: ${SAIDA}`);
 
 let falhas = 0;
 const checa = (ok, oq, detalhe = '') => {
