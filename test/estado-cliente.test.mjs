@@ -125,7 +125,9 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao),
     // e a resposta de outra sessão vai inteira pro `decisaoDepoisDaQueda`.
     handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*decisaoDepoisDaQueda\('read', place, result, placar, epocaFila\);\s*return;\s*\}/,
-    handleSkip: /API\.guardarPedido\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    // As DUAS esperas do guardar: a ida e a conferência do 401 (C7 da
+    // auditoria do card, 2026-09-29) — as duas conferem a época depois.
+    handleSkip: /const enviar = \(\) => API\.guardarPedido\([^)]*\);\s*let r = await callWithRetry\(enviar, epoca\);\s*if \(epoca !== epocaDaSessao\) return;[\s\S]*?r = await refazerDepoisDo401\(epoca, enviar\);\s*if \(epoca !== epocaDaSessao\) return;/,
   };
   for (const [nome, re] of Object.entries(casos)) assert.match(fatiar(nome), re, `${nome} grava depois do "Sair"`);
 });

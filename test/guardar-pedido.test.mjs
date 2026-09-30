@@ -145,6 +145,94 @@ test('falhar ao guardar NÃO é silencioso', async () => {
   assert.equal(avisos[0].tipo, 'error');
 });
 
+// ── 2b. O 401 NO GUARDAR (auditoria do card, 2026-09-29, C7) ────────────────
+// Um 401 NÃO é prova de sessão morta (gotcha #42). O ✕ com o mesmo 401 confere
+// a sessão e manda de novo pela fila de saída; o ↑ com "Pular guarda o pedido"
+// dizia "Sessão expirada" sem conferir nada (MEDIDO: só `guardar-pedido` na
+// rede, nenhum `perfil`). Aqui rodam o `handleSkip`, o `refazerDepoisDo401` e o
+// `msgDoServidor` DE VERDADE, fatiados; a rede e a sonda da sessão são de
+// mentira. `async` no fatiador: o `indexOf('function …')` de cima cortaria o
+// `async`, e o `await` viraria erro de sintaxe.
+function fatiarBloco(nome) {
+  const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP);
+  assert.ok(m, `a função ${nome} sumiu do app.js`);
+  let prof = 0;
+  for (let j = APP.indexOf('{', APP.indexOf(')', m.index)); j < APP.length; j++) {
+    if (APP[j] === '{') prof++;
+    else if (APP[j] === '}' && --prof === 0) return APP.slice(m.index, j + 1);
+  }
+  throw new Error('não fechou: ' + nome);
+}
+const U401 = { success: false, error: 'Sessão expirada ou inválida', errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' };
+async function pularCom401(respostas, { sonda = 'viva' } = {}) {
+  const avisos = [], conquistas = [], executores = [];
+  let chamadas = 0, conferiu = 0;
+  const ctl = {};
+  const deps = {
+    AppState: { currentPlace: { venueID: 'v1', updateRequestID: 'ur1' }, queue: [], stats: { skipped: 0 },
+      preferences: { pularGuarda: true } },
+    acoesTravadas: () => false, Treino: { ativo: false },
+    updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {}, aplicarTravaDeAcao: () => {},
+    contarConquista: (k) => conquistas.push(k),
+    scheduleAction: (tipo, place, ex) => executores.push(ex),
+    API: { getRegion: () => 'row', guardarPedido: async () => { chamadas++; return respostas.shift() || { success: true }; } },
+    callWithRetry: (fn) => fn(),
+    // A sonda do `handleUnauthorized`: viva (confirma), morta (a sessão cai e
+    // a época muda) ou sem resposta (não confirma nada).
+    handleUnauthorized: async () => {
+      conferiu++;
+      if (sonda === 'viva') ctl.viva();
+      else if (sonda === 'morta') ctl.caiu();
+    },
+    showToast: (msg, tipo) => avisos.push({ msg, tipo }), t: (k) => k,
+  };
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, [
+    'let epocaDaSessao = 0, escritasConferindo = 0, vivaEm = 0;',
+    'const sessaoVivaDepoisDe = (t) => vivaEm > t;',
+    fatiarBloco('msgDoServidor'), fatiarBloco('refazerDepoisDo401'), fatiarBloco('handleSkip'),
+    'return { handleSkip, viva: () => { vivaEm = Date.now() + 1; }, caiu: () => { epocaDaSessao++; } };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  ctl.viva = app.viva; ctl.caiu = app.caiu;
+  app.handleSkip();
+  await executores[0]();
+  return { chamadas, avisos, conquistas, conferiu };
+}
+
+test('C7 401 no guardar: CONFERE a sessão e, viva, guarda de novo — o mesmo desfecho do ✕', async () => {
+  const r = await pularCom401([U401, { success: true }]);
+  assert.equal(r.conferiu, 1, 'DEFEITO: o 401 do guardar não conferiu a sessão (o ✕ confere)');
+  assert.equal(r.chamadas, 2, 'com a sessão confirmada viva, a estrela não saiu de novo');
+  assert.deepEqual(r.avisos, [], `guardou na segunda e ainda assim avisou: ${JSON.stringify(r.avisos)}`);
+  assert.deepEqual(r.conquistas, ['guardados'], 'a estrela que saiu na segunda não contou pro Colecionador');
+});
+
+test('C7 401 que se repete com a sessão viva: "não deu pra guardar" — nunca "Sessão expirada" sem conferir', async () => {
+  // Com a sessão PROVADA viva, o segundo 401 é recusa desta escrita, não da
+  // sessão (o critério do `u401` da fila de saída, que o ✕ segue): o aviso é o
+  // do guardar, não o de uma sessão que acabou de se provar viva.
+  const r = await pularCom401([U401, U401]);
+  assert.equal(r.conferiu, 1);
+  assert.equal(r.chamadas, 2);
+  assert.deepEqual(r.avisos, [{ msg: 'toast.guardarFalhou', tipo: 'error' }],
+    `o aviso do 401 repetido não é o do guardar: ${JSON.stringify(r.avisos)}`);
+  // Sessão que CAI na conferência: a época muda e quem avisa é a queda — a
+  // estrela não soma um segundo aviso nem sai de novo.
+  const q = await pularCom401([U401], { sonda: 'morta' });
+  assert.equal(q.chamadas, 1, 'a estrela saiu de novo depois de a sessão cair');
+  assert.deepEqual(q.avisos, [], 'a queda da sessão ganhou um aviso a mais do guardar');
+  // Sonda sem resposta (rede): nada confirmado, então nada sai de novo — e a
+  // falha não é calada.
+  const s = await pularCom401([U401], { sonda: 'nada' });
+  assert.equal(s.chamadas, 1);
+  assert.deepEqual(s.avisos, [{ msg: 'toast.guardarFalhou', tipo: 'error' }]);
+  // CONTROLE: sem 401 ninguém confere nada — a conferência não vira pedágio.
+  const c = await pularCom401([{ success: true }]);
+  assert.equal(c.conferiu, 0, 'CONTROLE: o guardar que deu certo conferiu a sessão');
+  assert.equal(c.chamadas, 1);
+  assert.deepEqual(c.conquistas, ['guardados']);
+});
+
 // ── 3. O QUE O APP FAZ É O QUE ELE DIZ ─────────────────────────────────────
 test('o selo do ↑ muda com a preferência — e volta quando ela desliga', () => {
   const feito = [];

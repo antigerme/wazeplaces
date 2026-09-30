@@ -17016,8 +17016,20 @@ function handleSkip() {
     scheduleAction('skip', place, async () => {
         if (!guardar) return;
         if (!place || !place.venueID || !place.updateRequestID) return;
-        const r = await callWithRetry(() => API.guardarPedido(place.venueID, place.updateRequestID, true, regiao), epoca);
+        const enviar = () => API.guardarPedido(place.venueID, place.updateRequestID, true, regiao);
+        let r = await callWithRetry(enviar, epoca);
         if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
+        // Um 401 NÃO é prova de sessão morta (gotcha #42), e aqui ele virava
+        // "Sessão expirada" sem conferir nada — o ✕ com o mesmo 401 confere a
+        // sessão e manda de novo (auditoria do card, 2026-09-29, C7). A estrela
+        // não tem fila de saída, então passa pela conferência das escritas que
+        // moram fora dela (`refazerDepoisDo401`): com a sessão confirmada viva,
+        // ela sai de novo UMA vez; se a sessão caiu, a época muda e quem avisa
+        // é a queda.
+        if (r && r.errorCategory === 'unauthorized') {
+            r = await refazerDepoisDo401(epoca, enviar);
+            if (epoca !== epocaDaSessao) return;
+        }
         // Falhar aqui não corrompe contador nenhum — o Pular não mexe em
         // `serverTotal` e o `skipped` já subiu —, então não há o que reverter.
         // O que não pode é falhar CALADO: o app prometeu guardar.
