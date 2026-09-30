@@ -628,6 +628,98 @@ test('A4: a troca de conta e a QUEDA da sessão soltam casa, trabalho e a posiç
   assert.deepEqual(montar(['referenciaDaOrdem'], base()).referenciaDaOrdem('casa'), [-10, -40]);
 });
 
+// ═══ a QUEDA numa aba não apaga do aparelho a sessão NOVA da outra ═══════════
+
+// UMA aba: `naMemoria` é o token que ELA carrega; o aparelho é o que a outra
+// deixou. O api.js roda INTEIRO numa VM sobre o mesmo armazenamento (espionado),
+// e o diário de sessões é o de verdade — alimentado também pelo gancho do
+// `setSession`, como no app.
+const SESSAO_KEY = constante('SESSAO_KEY');
+const SESSOES_KEY = constante('SESSOES_KEY');
+function montarQueda({ naMemoria, guardado }) {
+  const dados = new Map(Object.entries(guardado).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]));
+  const escritas = [];
+  const localStorage = {
+    getItem: (k) => (dados.has(k) ? dados.get(k) : null),
+    setItem: (k, v) => { escritas.push('grava:' + k); dados.set(k, String(v)); },
+    removeItem: (k) => { escritas.push('apaga:' + k); dados.delete(k); },
+  };
+  const ctx = { navigator: { language: 'pt', onLine: true }, document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage, console, setTimeout, clearTimeout, window: {} };
+  vm.createContext(ctx);
+  vm.runInContext(I18N + '\n' + ler('js/api.js') + '\nthis.API = API; this.safeLS = safeLS;', ctx);
+  ctx.API.sessionToken = naMemoria;   // a cópia da MEMÓRIA desta aba (o `setSession` gravaria no aparelho)
+  const anel = [], log = [];
+  const AppState = { authenticated: true, profile: { id: 4242 }, sessaoExpiraEm: 1780000000, pendingAction: null };
+  const deps = {
+    safeLS: ctx.safeLS, API: ctx.API, AppState, epocaDaSessao: 0, referenciasDoPerfil: null, posicaoGps: null,
+    SESSAO_KEY, SESSOES_KEY, SESSOES_TETO: constante('SESSOES_TETO'), NASCIMENTO_KEY: constante('NASCIMENTO_KEY'),
+    dfato: (k, d) => anel.push({ k, ...d }),
+    entrarPelaExtensao: () => { log.push('extensao'); return new Promise(() => {}); },
+  };
+  const h = montar(['sessaoDestaAbaEhAGuardada', 'derrubarSessao', 'registrarEventoDeSessao', 'lerDiarioDeSessoes',
+    'esquecerPrazoDaSessao', 'diagSessao'], deps);
+  ctx.window.__sessaoEvento = (e, d) => h.registrarEventoDeSessao(e, d);
+  return { h, dados, escritas, anel, log, AppState, API: ctx.API, diario: () => JSON.parse(dados.get(SESSOES_KEY) || '[]') };
+}
+// O diário que a OUTRA aba deixou: entrou há dois dias, viu a sessão cair há
+// dez minutos e entrou de novo pela extensão.
+const AGORA = Date.now(), HORA = 3600e3, MIN = 60e3;
+const DIARIO_DA_OUTRA = [
+  { t: AGORA - 48 * HORA, e: 'token+', via: 'cookies' },
+  { t: AGORA - 10 * MIN, e: 'caiu', motivo: 'srv.err.sessionExpired', prazo: 1780000000, faltavamH: 100 },
+  { t: AGORA - 10 * MIN, e: 'token-' },
+  { t: AGORA - 10 * MIN + 1800, e: 'token+', via: 'extensao' },
+];
+
+test('queda só desta aba: com o token NOVO da outra no aparelho, a queda daqui não o apaga — nem anota outra queda', () => {
+  const m = montarQueda({ naMemoria: 'tok-velho', guardado: {
+    waze_session_token: 'tok-novo-da-outra', [SESSAO_KEY]: '1790000000', [SESSOES_KEY]: DIARIO_DA_OUTRA } });
+  m.h.derrubarSessao('srv.err.sessionExpired');
+  assert.equal(m.dados.get('waze_session_token'), 'tok-novo-da-outra',
+    'DEFEITO: a queda desta aba (token VELHO na memória) apagou do aparelho o token NOVO da outra — que cai na entrada ao recarregar');
+  assert.deepEqual(m.diario(), DIARIO_DA_OUTRA, 'o diário de sessões (do aparelho) ganhou uma queda que a outra aba já tinha anotado');
+  assert.equal(m.dados.get(SESSAO_KEY), '1790000000', 'o prazo da sessão da outra aba saiu do aparelho');
+  assert.deepEqual(m.escritas, [], 'a queda só desta aba mexeu no aparelho: ' + m.escritas.join(' '));
+  // O ciclo da sessão da outra segue EM CURSO. Com a segunda queda anotada, ele
+  // fechava em minutos — uma sessão curta que não existiu, que é o que a
+  // sentinela `sessaoCaiCedo` conta.
+  assert.equal(m.h.diagSessao().ciclos.at(-1).fim, 'em curso', 'o diário deu por encerrada a sessão viva da outra aba');
+  // A memória e a tela DESTA aba, sim: tudo o que a queda solta.
+  assert.equal(m.API.temSessaoNaMemoria(), false, 'o token velho seguiu na memória desta aba');
+  assert.equal(m.AppState.authenticated, false);
+  assert.equal(m.AppState.sessaoExpiraEm, null, 'a contagem do prazo da sessão que caiu seguiu na tela');
+  assert.deepEqual(m.log, ['extensao'], 'a renovação pela extensão não foi tentada');
+  assert.deepEqual(m.anel.at(-1), { k: 'sessao.caiu', motivo: 'srv.err.sessionExpired', soNestaAba: true },
+    'o anel desta aba não diz que a queda foi só dela');
+});
+
+test('queda só desta aba: a outra já derrubou (e ainda não entrou de novo) — e com a memória vazia a pergunta não lê o aparelho', () => {
+  const jaCaiu = DIARIO_DA_OUTRA.slice(0, 3);
+  let m = montarQueda({ naMemoria: 'tok-velho', guardado: { [SESSOES_KEY]: jaCaiu } });
+  m.h.derrubarSessao('srv.err.sessionExpired');
+  assert.deepEqual(m.diario(), jaCaiu, 'a MESMA queda entrou duas vezes no diário (uma por aba)');
+  assert.deepEqual(m.escritas, []);
+  assert.equal(m.API.temSessaoNaMemoria(), false);
+  // Sem token na memória, a sessão guardada não é desta aba — pelo `getSession`,
+  // a pergunta iria buscar o do aparelho e responderia "é".
+  m = montarQueda({ naMemoria: null, guardado: { waze_session_token: 'tok-da-outra' } });
+  m.h.derrubarSessao('srv.err.sessionExpired');
+  assert.equal(m.dados.get('waze_session_token'), 'tok-da-outra', 'a aba sem sessão apagou a sessão guardada da outra');
+});
+
+test('queda só desta aba: CONTROLE — a sessão desta aba é a guardada, e a queda apaga o aparelho como sempre', () => {
+  const m = montarQueda({ naMemoria: 'tok-A', guardado: {
+    waze_session_token: 'tok-A', [SESSAO_KEY]: '1790000000', [SESSOES_KEY]: [DIARIO_DA_OUTRA[0]] } });
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  assert.equal(m.dados.has('waze_session_token'), false, 'CONTROLE: o token morto ficou no aparelho (o espião não vê a queda)');
+  assert.deepEqual(m.diario().map((l) => l.e), ['token+', 'caiu', 'token-'], 'CONTROLE: a queda não chegou ao diário');
+  assert.equal(m.diario()[1].prazo, 1780000000, 'o prazo que morreu não chegou ao registro');
+  assert.equal(m.dados.has(SESSAO_KEY), false, 'o prazo da sessão que morreu ficou no aparelho');
+  assert.equal(m.h.diagSessao().ciclos.at(-1).fim, 'caiu');
+  assert.equal(m.anel.at(-1).soNestaAba, undefined);
+});
+
 // ═══ A7 · o código de pareamento não é resgatado duas vezes ══════════════════
 
 function montarResgate({ dialogoNaTela = true } = {}) {

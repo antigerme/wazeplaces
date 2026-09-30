@@ -7655,8 +7655,27 @@ const MOTIVO_DA_QUEDA = {
     'srv.err.sessionExpired': 'toast.sessionExpired.local',
 };
 
+// A sessão desta aba ainda é a GUARDADA no aparelho? Com o app aberto em duas
+// abas, as duas carregam a mesma sessão na memória. Quando ela cai, a primeira
+// que percebe a derruba — tira o token do aparelho e anota a queda no diário de
+// sessões — e pode entrar de novo (a extensão renova), guardando um token NOVO.
+// A outra só descobre no gesto seguinte, com o token VELHO na memória: a queda
+// dela é só dela. Tirar o token do aparelho ali apagava o NOVO da primeira, que
+// seguia viva com ele na memória e caía na tela de entrada ao recarregar; e o
+// diário ganhava uma segunda queda, que fechava o ciclo da sessão nova — viva —
+// como se ela tivesse durado minutos (auditoria de 2026-09-29, R4-5). Lê a
+// memória direto: o `getSession`, com ela vazia, iria buscar o do aparelho.
+function sessaoDestaAbaEhAGuardada() {
+    const naMemoria = API.sessionToken;
+    return !!naMemoria && safeLS.get('waze_session_token') === naMemoria;
+}
+
 function derrubarSessao(errorKey, { depois } = {}) {
     epocaDaSessao++;   // o que estava em voo pertencia à sessão que morreu
+    // O que é do APARELHO — o token guardado, o diário de sessões e o prazo —
+    // só sai se a sessão que caiu é a guardada nele. Senão ele é o da sessão
+    // da outra aba, viva, e aqui cai só a cópia da memória (ver a função).
+    const doAparelho = sessaoDestaAbaEhAGuardada();
     // A queda é a decisão mais cara do app e era a ÚNICA que não chegava ao
     // anel sem portão: havia `dlog('sessao.confere')`, que o dev mode desligado
     // engole, e `dfato` só no ALARME FALSO — ou seja o caso em que ela NÃO cai.
@@ -7667,8 +7686,10 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // — com razão, senão a próxima entrada nasce com a contagem da sessão morta
     // na tela. Ele sai da TELA e fica no REGISTRO.
     const prazoQueMorreu = AppState.sessaoExpiraEm || Number(safeLS.get(SESSAO_KEY)) || null;
-    dfato('sessao.caiu', { motivo: errorKey || null });
-    registrarEventoDeSessao('caiu', {
+    // O anel da memória é DESTA aba e anota as duas; o diário de sessões é do
+    // aparelho, e a queda só desta aba ele já anotou quando ela aconteceu lá.
+    dfato('sessao.caiu', { motivo: errorKey || null, ...(doAparelho ? {} : { soNestaAba: true }) });
+    if (doAparelho) registrarEventoDeSessao('caiu', {
         motivo: errorKey || null,
         prazo: prazoQueMorreu || null,
         // Faltava muito, ou já tinha vencido? É o que separa "caiu antes da
@@ -7700,7 +7721,11 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // E as do lightbox, que têm janela própria (ver a função).
     cancelarPendenciasDoLightbox();
     removeUndoBanner();
-    API.setSession(null);
+    // O token só sai do aparelho se é o desta aba. Senão só a memória solta —
+    // pelo `setSession`, o de lá (o da outra aba) sairia, e o diário ganharia
+    // um "token-" de uma sessão que ele já tinha dado por encerrada.
+    if (doAparelho) API.setSession(null);
+    else API.soltarSessao();
     AppState.profile = null;
     AppState.authenticated = false;
     // Sem sessão o card não decide (ver `acoesTravadas`): durante a renovação
@@ -7718,8 +7743,9 @@ function derrubarSessao(errorKey, { depois } = {}) {
     posicaoGps = null;
     // O prazo era desta sessão, que acabou de morrer. Deixá-lo guardado faria a
     // próxima entrada nascer com a contagem da sessão ANTERIOR na tela, até a
-    // primeira resposta do Waze corrigir.
-    esquecerPrazoDaSessao();
+    // primeira resposta do Waze corrigir. O guardado no aparelho, na queda só
+    // desta aba, é o da sessão da outra: fica.
+    esquecerPrazoDaSessao({ soMemoria: !doAparelho });
 
     // Antes de mandar pra tela de login, PERGUNTA à extensão — em silêncio.
     //
@@ -17891,9 +17917,11 @@ function guardarPrazoDaSessao(body) {
     atualizarAvisoDeSessao();
 }
 
-function esquecerPrazoDaSessao() {
+// `soMemoria`: a queda só desta aba (ver `derrubarSessao`) — o guardado no
+// aparelho é o prazo da sessão da outra aba, viva.
+function esquecerPrazoDaSessao({ soMemoria = false } = {}) {
     AppState.sessaoExpiraEm = null;
-    safeLS.remove(SESSAO_KEY);
+    if (!soMemoria) safeLS.remove(SESSAO_KEY);
     atualizarAvisoDeSessao();
 }
 

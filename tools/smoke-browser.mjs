@@ -8480,6 +8480,10 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const abrirAbas = async () => {
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
     const rede = [];
+    // Sessões que MORRERAM no servidor: respondem o 401 carimbado do core. A
+    // presença fica de fora — a sentinela deste arquivo reprova 401 de sessão
+    // nela, e ela não é o que se mede aqui.
+    const mortos = new Set();
     await ctx.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }));
     await ctx.route('**/api/**', async (r) => {
       const rota = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
@@ -8487,6 +8491,10 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { corpo = {}; }
       rede.push({ rota, token: corpo.sessionToken || null });
       const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+      if (mortos.has(corpo.sessionToken) && !/^(presenca-app|chat)$/.test(rota)) {
+        return r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ success: false,
+          error: 'Sessão expirada ou inválida', errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' }) });
+      }
       if (rota === 'perfil') return json({ success: true, profile: PERFIL_ABAS, visivelNoWme: true });
       if (rota === 'buscar-places') return json({ success: true, places: FILA_ABAS, hasMore: false, page: 1,
         total: FILA_ABAS.length, totalAll: FILA_ABAS.length, blocked: 0 });
@@ -8517,7 +8525,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
     await esperarOuExplodir(A, pronta, 'a aba A abrir com a sessão e a fila');
     await esperarOuExplodir(B, pronta, 'a aba B abrir com a sessão e a fila');
-    return { ctx, A, B, rede, erros };
+    return { ctx, A, B, rede, erros, mortos };
   };
   // Um ✕ pelo botão do card da frente, esperando o card TROCAR e o envio voltar.
   const rejeitarNa = (page) => page.evaluate(async () => {
@@ -8674,6 +8682,59 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const surda = await c.B.evaluate(() => AppState.authenticated);
   checa(surda === true, 'duas abas: CONTROLE — sem o ouvinte, o "Sair" não devia chegar à B; o instrumento não vê o defeito');
   await c.ctx.close();
+
+  // ── 3. a QUEDA numa aba, com o token VELHO, não apaga o NOVO da outra ────
+  // A sessão morre no servidor. A aba A percebe primeiro, derruba e ENTRA DE
+  // NOVO pela extensão — a ponte, aqui de mentira, responde com um token novo
+  // pelo mesmo `postMessage` da de verdade. A aba B, com o token velho na
+  // memória, só descobre no ✕ seguinte: o 401 confirmado pela sonda derruba a
+  // sessão DELA, e o aparelho tem de seguir com o token novo da A — que,
+  // recarregada, entra com ele. Antes, a queda da B o apagava, e anotava no
+  // diário de sessões uma segunda queda da mesma sessão.
+  const quedaDaB = async ({ aRenova }) => {
+    const q = await abrirAbas();
+    q.mortos.add('tok-abas');
+    if (aRenova) {
+      await q.A.evaluate(() => window.addEventListener('message', (ev) => {
+        const d = ev.data;
+        if (d && d.source === 'wazeplaces' && d.action === 'precisa-de-sessao') {
+          window.postMessage({ source: 'wazeplaces-ext', action: 'sessao', token: 'tok-abas-novo' }, location.origin);
+        }
+      }));
+      await q.A.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
+      await esperarOuExplodir(q.A, () => AppState.authenticated && localStorage.getItem('waze_session_token') === 'tok-abas-novo',
+        'a aba A entrar de novo pela extensão');
+    }
+    await q.B.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+    const caiu = await esperarNaPagina(q.B, () => !AppState.authenticated && !API.temSessaoNaMemoria(), 8000);
+    const noAparelho = await q.A.evaluate(() => ({
+      token: localStorage.getItem('waze_session_token'),
+      quedas: JSON.parse(localStorage.getItem('waze_places_sessoes') || '[]').filter((l) => l.e === 'caiu').length,
+    }));
+    return { q, caiu, ...noAparelho };
+  };
+  const r3 = await quedaDaB({ aRenova: true });
+  checa(r3.caiu.ok, 'duas abas: a aba B, com o token VELHO, não caiu no 401 confirmado (o percurso não mediu a queda)');
+  checa(r3.token === 'tok-abas-novo', 'duas abas: a queda da aba B (token VELHO na memória) apagou do aparelho o token NOVO da aba A',
+    String(r3.token));
+  checa(r3.quedas === 1, 'duas abas: o diário de sessões não tem a queda UMA vez só (a da aba que a viu primeiro)', String(r3.quedas));
+  // A A recarregada entra com a sessão guardada — antes, caía na tela de entrada.
+  const redeAntesDaRecarga = r3.q.rede.length;
+  await r3.q.A.reload({ waitUntil: 'domcontentloaded' });
+  const aVoltou = await esperarNaPagina(r3.q.A, () => AppState.authenticated && !!AppState.profile, 8000);
+  const tokensDaA = [...new Set(r3.q.rede.slice(redeAntesDaRecarga).map((x) => x.token).filter(Boolean))];
+  checa(aVoltou.ok && tokensDaA.length === 1 && tokensDaA[0] === 'tok-abas-novo',
+    'duas abas: a aba A recarregada não entrou com a sessão NOVA guardada', JSON.stringify(tokensDaA));
+  checa(r3.q.erros.length === 0, 'duas abas: erro de JS na queda da aba B', r3.q.erros[0]);
+  await r3.q.ctx.close();
+  // CONTROLE: a sessão da B É a guardada (a A não renovou) — e a queda a tira
+  // do aparelho como sempre. Sem isto, "o token ficou" passaria com uma queda
+  // que nunca mexeu no aparelho.
+  const c3 = await quedaDaB({ aRenova: false });
+  checa(c3.caiu.ok && c3.token === null && c3.quedas === 1,
+    'duas abas: CONTROLE — a queda da sessão GUARDADA (o mesmo token na memória e no aparelho) não a tirou do aparelho',
+    JSON.stringify({ caiu: c3.caiu.ok, token: c3.token, quedas: c3.quedas }));
+  await c3.q.ctx.close();
 }
 
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
@@ -8760,6 +8821,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
-  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes)`
+  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

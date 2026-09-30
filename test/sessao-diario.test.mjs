@@ -122,9 +122,11 @@ test('a QUEDA chega ao anel sem portão e ao diário', () => {
   // Ancorado na CHAMADA (início de linha), nunca na menção: o comentário logo
   // acima cita `esquecerPrazoDaSessao()` para explicar por que o prazo é lido
   // antes — e um `indexOf` do nome solto casa com o comentário e reprova código
-  // certo. Gotcha #14, acontecido na primeira escrita deste teste.
+  // certo. Gotcha #14, acontecido na primeira escrita deste teste. A chamada
+  // leva argumento desde que a queda SÓ DESTA aba não mexe no prazo guardado
+  // (test/contas-abas).
   const posLe = corpo.search(/^ {4}const prazoQueMorreu = /m);
-  const posEsquece = corpo.search(/^ {4}esquecerPrazoDaSessao\(\);/m);
+  const posEsquece = corpo.search(/^ {4}esquecerPrazoDaSessao\(/m);
   assert.ok(posLe !== -1 && posEsquece !== -1, 'sumiu a leitura do prazo ou o esquecimento');
   assert.ok(posLe < posEsquece, 'o prazo passou a ser lido depois de apagado — o registro vira null');
 });
