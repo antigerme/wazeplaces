@@ -578,7 +578,7 @@ test('cabeçalho que não dá pra converter sem perda segue aceito como veio (o 
   assert.equal(cabecalhoParaNetscape(COOKIES), COOKIES);
 });
 
-import { DUPLICADO_ESPERA_MS } from '../server/core.mjs';
+import { DUPLICADO_ESPERA_MS, WAZE_ESPERA_MS, RELEITURA_ESPERA_MS } from '../server/core.mjs';
 
 // Um pedido DUPLICATE: a busca faz uma releitura por bbox pra achar o NOME do
 // local apontado (ver `resolverDuplicados`).
@@ -626,16 +626,73 @@ test('buscar-places: a releitura do duplicado tem TETO próprio — presa, a bus
   assert.equal(rapida.r.body.places[0].duplicado?.nome, 'Natan Estacionamento', 'CONTROLE: o nome do duplicado não chegou');
 });
 
+// O cliente desiste do pedido INTEIRO aos 45 s (`_post`, no api.js), e rota que
+// faz duas chamadas ao Waze em SÉRIE só cabe nisso se a soma dos tetos couber.
+// Os tetos vêm do core IMPORTADOS; o do `callWaze` é conferido também na fonte,
+// porque um número à parte dentro dele faria a constante mentir.
+const tetoDoCliente = () => {
+  const m = /async _post\([\s\S]*?controller\.abort\(\), (\d+)\)/.exec(API_JS);
+  assert.ok(m, 'não achei o teto do cliente no api.js — o instrumento quebrou, não a regra');
+  return Number(m[1]);
+};
+
 test('o teto do duplicado cabe no prazo do cliente: busca (teto do callWaze) + releitura < 45 s do `_post`', () => {
-  // A justificativa do número, conferida nas FONTES: se alguém subir o teto do
-  // duplicado (ou encurtar o do cliente), a busca volta a se perder pelo enfeite.
+  // A justificativa do número: se alguém subir o teto do duplicado (ou encurtar
+  // o do cliente), a busca volta a se perder pelo enfeite.
   const core = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8');
-  const tetoBusca = /async function callWaze\(url[\s\S]*?controller\.abort\(\), (\d+)\)/.exec(core);
-  const tetoCliente = /async _post\([\s\S]*?controller\.abort\(\), (\d+)\)/.exec(API_JS);
-  assert.ok(tetoBusca && tetoCliente, 'não achei os tetos nas fontes — o instrumento quebrou, não a regra');
-  const soma = Number(tetoBusca[1]) + DUPLICADO_ESPERA_MS;
-  assert.ok(soma < Number(tetoCliente[1]),
-    `busca (${tetoBusca[1]} ms) + releitura (${DUPLICADO_ESPERA_MS} ms) = ${soma} ms não cabe nos ${tetoCliente[1]} ms do cliente`);
+  assert.match(core, /async function callWaze\([^)]*\{ tetoMs = WAZE_ESPERA_MS \} = \{\}\)/,
+    'o callWaze não espera o WAZE_ESPERA_MS por padrão — a conta abaixo não vale');
+  assert.match(core, /controller\.abort\(\), tetoMs\)/, 'o timer do callWaze não usa o teto da chamada');
+  const soma = WAZE_ESPERA_MS + DUPLICADO_ESPERA_MS;
+  assert.ok(soma < tetoDoCliente(),
+    `busca (${WAZE_ESPERA_MS} ms) + releitura (${DUPLICADO_ESPERA_MS} ms) = ${soma} ms não cabe nos ${tetoDoCliente()} ms do cliente`);
+});
+
+test('o teto da releitura do excluir-foto cabe no prazo do cliente: releitura + escrita, EM SÉRIE, < 45 s do `_post`', () => {
+  // Sem a lista guardada, a exclusão relê e depois escreve. Com os dois no teto
+  // cheio eram 60 s, e o cliente desistia aos 45 com a escrita já no ar: a
+  // retentativa voltava "já excluída" e a pessoa lia "outro editor já tinha
+  // excluído" sobre a exclusão DELA (auditoria de 2026-09-29). 3 s de folga pro
+  // que não é o Waze (KV, cifra, a rede do celular até o servidor).
+  const soma = RELEITURA_ESPERA_MS + WAZE_ESPERA_MS;
+  assert.ok(soma + 3000 <= tetoDoCliente(),
+    `releitura (${RELEITURA_ESPERA_MS} ms) + escrita (${WAZE_ESPERA_MS} ms) = ${soma} ms, sem folga nos ${tetoDoCliente()} ms do cliente`);
+  assert.ok(RELEITURA_ESPERA_MS >= 3000, 'o teto da releitura ficou curto pra uma leitura de ~700 ms num dia ruim');
+});
+
+test('excluir-foto: releitura presa responde no teto DELA, sem escrever — e o erro é de rede, pro cliente tentar de novo', async () => {
+  // Os prazos do core andam 20× mais rápido aqui (só os de 1 s pra cima): 10 s
+  // viram 500 ms e 30 s viram 1,5 s, e a pergunta é QUAL dos dois segurou a rota.
+  const ESCALA = 20;
+  const setTimeoutReal = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...a) => setTimeoutReal(fn, ms >= 1000 ? ms / ESCALA : ms, ...a);
+  try {
+    const corpo = { region: 'row', venueID: 'v1', imageID: 'i1', lat: -23.5, lon: -46.6 };
+    // CONTROLE: com o Waze respondendo, a exclusão sai — o teto não corta o caminho normal.
+    const s0 = await sessaoDeTeste(COOKIES);
+    const normal = await comWaze((url, init) => (init.method === 'POST'
+      ? json({ venues: { v1: { images: [{ id: 'i2' }] } } })
+      : json({ venues: { objects: [{ id: 'v1', images: [{ id: 'i1', approved: true }, { id: 'i2', approved: true }] }] } })),
+    () => dispatch('excluir-foto', { ...s0.dados, ...corpo }, s0.ctx));
+    assert.equal(normal.r.body.success, true, `CONTROLE: ${JSON.stringify(normal.r.body)}`);
+
+    // A releitura fica PRESA até o `callWaze` abortar.
+    const s = await sessaoDeTeste(COOKIES);
+    const t0 = Date.now();
+    const { r, chamadas } = await comWaze((url, init) => new Promise((ok, erro) => {
+      init.signal?.addEventListener('abort', () => erro(new DOMException('This operation was aborted', 'AbortError')));
+    }), () => dispatch('excluir-foto', { ...s.dados, ...corpo }, s.ctx));
+    const levou = Date.now() - t0;
+    assert.equal(chamadas.length, 1, 'CONTROLE: a rota não fez a releitura (ou fez mais de uma chamada)');
+    assert.ok(chamadas.every((c) => (c.init.method || 'GET') === 'GET'), 'escreveu no Waze sem ter lido o local');
+    assert.equal(r.body.success, false);
+    assert.equal(r.body.errorCategory, 'transient', `a releitura que não voltou não é erro de rede: ${JSON.stringify(r.body)}`);
+    const dela = RELEITURA_ESPERA_MS / ESCALA, cheio = WAZE_ESPERA_MS / ESCALA;
+    assert.ok(levou < (dela + cheio) / 2,
+      `a releitura presa segurou a rota ${levou} ms — era o teto dela (${dela} ms escalados), não o cheio (${cheio})`);
+  } finally {
+    globalThis.setTimeout = setTimeoutReal;
+  }
 });
 
 test('ids: objeto, lista ou texto enorme não vão ao Waze em NENHUMA rota de escrita — o mesmo 400 de id ausente', async () => {

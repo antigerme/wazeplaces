@@ -404,12 +404,20 @@ export function cookieHeaderFrom(cookiesContent, porHost = true) {
 // Chamada ao Waze via fetch (substitui makeCurlRequest/cURL)
 // ─────────────────────────────────────────────────────────────────────────
 
+// Quanto uma chamada ao Waze espera, no máximo, contando a leitura do corpo. O
+// cliente desiste do pedido INTEIRO aos 45 s (`_post`, no api.js), então rota
+// que faz duas chamadas em SÉRIE não cabe com as duas no teto cheio: a leitura
+// que vem antes de uma escrita ganha teto próprio (`RELEITURA_ESPERA_MS`), e a
+// soma é conferida em `test/portao-servidor.test.mjs`.
+export const WAZE_ESPERA_MS = 30000;
+
 // `ctx` (opcional) = { data, sessions, cookies } — o que permite regravar a
 // sessão com os cookies que o Waze rotacionou. Fica AQUI, e não em cada
 // handler, porque o modo de falha deste repo é "o próximo handler nasce sem":
 // são 7 pontos de chamada hoje e o esquecimento seria silencioso — a sessão
 // só azedaria semanas depois, longe de quem escreveu o código.
-async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = null) {
+// `tetoMs`: a espera desta chamada, quando ela não pode usar o teto cheio.
+async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = null, { tetoMs = WAZE_ESPERA_MS } = {}) {
   const env = wazeRefererEnv(region);
   const headers = {
     Accept: '*/*',
@@ -438,7 +446,7 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = nu
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), tetoMs);
     let res, response;
     try {
       res = await fetch(url, { ...init, signal: controller.signal });
@@ -485,7 +493,7 @@ async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat
   if (chat) headers['X-User-Agent'] = 'grpc-web-javascript/0.1';
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), WAZE_ESPERA_MS);
     let res, texto;
     try {
       res = await fetch(url, { method: 'POST', headers, body: quadroGrpcWebTexto(corpo), signal: controller.signal });
@@ -2547,6 +2555,19 @@ const RELEITURA_TTL = 15;
 // toda exclusão pagava a releitura de novo. Quem garante os 15 s é o carimbo
 // no valor, conferido na leitura; o KV só precisa jogar o registro fora depois.
 export const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
+// Teto PRÓPRIO da releitura, o orçamento da rota. Sem a lista guardada (o
+// `preparar` falhou, ou a pessoa ficou mais de 15 s no diálogo), a exclusão faz
+// releitura e escrita EM SÉRIE, e cada uma herdava os 30 s do `callWaze`: 60 s,
+// contra os 45 s em que o cliente desiste do pedido. O `callWithRetry` refazia,
+// a escrita da 1ª tentativa já tinha saído, e a 2ª voltava `jaExcluida` — a
+// pessoa lia "outro editor já tinha excluído" sobre a exclusão DELA (MEDIDO
+// com um Waze de mentira de 29 s por chamada: 58,1 s; auditoria de 2026-09-29).
+// A escrita segue com o teto cheio: cortá-la cedo é abortar uma gravação que o
+// Waze pode estar fazendo. Quem encolhe é a leitura, e 10 s é ~14× os ~700 ms
+// medidos dela; releitura que não volta até lá é erro de rede, e o cliente
+// tenta de novo — sem escrita no meio, então sem o "já excluída" falso. A soma
+// com o teto da escrita é conferida contra os 45 s em `test/portao-servidor`.
+export const RELEITURA_ESPERA_MS = 10000;
 // Relê o local no Waze e guarda o resultado por RELEITURA_TTL.
 //
 // O cache fica no SERVIDOR de propósito. A alternativa óbvia — o cliente ler,
@@ -2576,7 +2597,8 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
     bbox: [lon - d, lat - d, lon + d, lat + d].join(','),
     v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
   });
-  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions });
+  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions },
+    { tetoMs: RELEITURA_ESPERA_MS });
   if (lida.httpCode !== 200) return { erro: categorizeWazeError(lida.httpCode, lida.response, lida.error), httpCode: lida.httpCode };
   let atual;
   try { atual = JSON.parse(lida.response); } catch { return { erroParse: true }; }
