@@ -86,6 +86,17 @@ function montar(nomes, deps, fonte = APP_SEM) {
 }
 
 const tique = (ms = 5) => new Promise((r) => setTimeout(r, ms));
+// Espera por CONDIÇÃO, com teto de tempo real. Um prazo fixo (`tique(30)`) mede a
+// velocidade da máquina, não o resultado: a rede de mentira destes testes também
+// anda por timer de verdade, e com a suíte inteira disputando a CPU o prazo do
+// teste pode vencer antes do timer dela (o K14 reprovou uma vez assim).
+async function ateQue(cond, rotulo, tetoMs = 5000) {
+  const fim = performance.now() + tetoMs;
+  while (!cond()) {
+    if (performance.now() > fim) assert.fail(`${rotulo}: não aconteceu em ${tetoMs / 1000} s`);
+    await tique(2);
+  }
+}
 
 // ═══ K1 · a decisão de A não sai com o token de B ═════════════════════════════
 
@@ -1305,7 +1316,8 @@ test('K14: CONTROLE — a conferência diz VIVA (alarme falso): a fila sai na ho
   await tique(10);
   m.deps.proxima = () => ({ success: true });                 // a partir daqui o Waze aceita
   m.responderSonda({ success: true, profile: { id: 111 } });  // viva
-  await tique(30);
-  assert.equal(m.h.carregarFilaDeSaida().length, 0, 'o alarme falso não esvaziou a fila — ela ficaria esperando o próximo gatilho');
+  await ateQue(() => m.h.carregarFilaDeSaida().length === 0,
+    'a fila vazia depois do alarme falso (sem isso, ela ficaria esperando o próximo gatilho)');
+  await tique(20);   // o que saísse A MAIS teria tempo de sair
   assert.deepEqual(m.envios, ['v1', 'v1', 'v2']);
 });
