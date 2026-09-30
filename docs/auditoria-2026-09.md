@@ -34,8 +34,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
   worker (teto de tempo × gotcha #18).
 - O branch `claude/peaceful-heisenberg-HaUuC` foi recriado a partir da main (o GitHub o apaga no merge);
   o worktree de trabalho segue sendo `/home/user/wp-lote7`.
-- **Cookies** das duas contas (2026-09-29): `a0ed4151-antigerme_cookies.txt` (L6+AM) e
-  `74c7e5b6-cafanha_cookies.txt` (L2+AM); o `prod-auditoria.mjs` já aponta pra eles.
+- **Cookies** (2026-09-30): `34f04ab7-antigerme_cookies.txt` é a antigerme (L6+AM), válida pelo `waze-probe`. O `8e095567-cafanha_cookies.txt` traz a MESMA sessão da antigerme (comparado sem imprimir valor), e o cafanha anterior (`74c7e5b6`) expirou (403, code 101): **falta um cookies.txt da cafanha exportado com ela logada** — pedido ao owner. O `prod-auditoria.mjs` aponta pros arquivos novos; a parte de duas contas (L2, presença, troca de conta) só roda com a cafanha certa.
 - **Decisões do owner**: página pronta (`scratchpad/mockups/decisoes-em-aberto.html`), a publicar no
   relatório final — inclui L7, L10, L18, T3, T24, L16 e a escala encavalando no aviso.
 - **Próxima volta**: juntar os achados da rodada 4, corrigir (lote 8), PR, CI, merge, produção — e
