@@ -16,29 +16,27 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-09-30 ~22:10 UTC)
+## 0. Estado agora (2026-09-30 ~22:15 UTC)
 
-- **PR #253 (lote 7) mergeado** às 20:22 UTC de 09-29, com CI verde nos dois jobs (check e webkit). Produção
-  **v2026.09.29-01 verificada: 71 ✓ · 0 ✗** com as duas contas, mais as verificações novas do lote 7 no
-  `prod-auditoria.mjs` (todas ✓). Não medível hoje: "Mais antigos" acima de 500 (a fila do Brasil com
-  lidos tem 373).
-- **Rodada 4 feita** (oito auditores; relatórios em `scratchpad/r4-relatorios/`). **Lote 8 quase todo
-  juntado** no branch (`/home/user/wp-lote7`), por cherry-pick, com `npm test` 1639/1639: servidor, dev,
-  presença, filtros (com os achados 10–12), fila, lightbox, offline e contas. Faltam: **textos** e **card**
-  (terminando), mais três extras em andamento: a **fila** travando o ✕ do card com a aprovação da foto no
-  ar (achado novo do lightbox), as **contas** com a queda que apagava o token novo da outra aba e o
-  `pularGuarda` zerado na troca de conta (decidido: o que escreve no Waze no nome de alguém não se herda), e
-  os **textos** com "borrar" no espanhol da Ajuda. Ids e escopo em `scratchpad/r4-agentes.txt`; cada um
-  entrega `scratchpad/relatorio-l8-<área>.md` (linhas de CHANGELOG e notas do CLAUDE.md).
-- **Conflitos resolvidos ao juntar**: harnesses de teste com dependências novas dos dois lados (união), e o
-  smoke do offline, em que a 9f do modo dev e a 9h do offline declaravam as mesmas `const` (`ctx9f`,
-  `abrir9f`, `prep9f`): as da 9h/9i viraram `*9h`/`*9i`. Instabilidades de teste sob carga: o K14
-  (`costura-sessao`) esperava 30 ms de relógio e passou a esperar a fila vazia (commit `ab93730`, com
-  sabotagem); o `servidor-local` saiu uma vez com 13 sob carga 22 no agente do offline, e **não reproduziu**
-  aqui (100 sondas e 30 subidas concorrentes, todas certas) — fica anotado, sem conserto especulativo.
-- Vão pro owner com mockup: L28 (agora também o banner do Desfazer sobre o Street View no mapa ampliado),
-  L31, D3 e a parte do O1 no service worker (teto de tempo × gotcha #18); e, de produto, os 45 s até a fila
-  guardada entrar na abertura em lie-fi.
+- **Lote 8 praticamente todo juntado** no branch (`/home/user/wp-lote7`), com `npm test` 1694/1694: servidor,
+  dev, presença (com o "olhando é lida" ao fechar), filtros (com os achados 10–12), fila (com o A1: a
+  aprovação no ar trava o card), lightbox, offline, textos, card e contas (com o token novo da outra aba e o
+  `pularGuarda` zerado). **Faltam**: o item 3 das contas (outra conta entrando noutra aba tira a aba da conta
+  anterior — achado meu, na leitura do `sincronizarComOutraAba`) e os relatórios finais do card e da fila.
+- **O contêiner reiniciou duas vezes** (~21:44 e ~22:02 UTC), matando agentes e smokes; os arquivos ficaram.
+  Os agentes foram retomados por `SendMessage`. Daqui em diante: smokes num worktree FIXO
+  (`/home/user/wp-smoke`, num commit), um por vez, e só com os agentes quietos.
+- **Conflitos da junção**: todos de harness de teste (cada lote escreveu o seu sem as funções dos outros) e um
+  de código real na `aplicarTravaDeAcao` (lightbox L23/L24 × card C10/C14), resolvido pela união. Cada ajuste
+  de harness teve a sabotagem conferida.
+- **Smokes no branch juntado**: offline 192 ✓ (com a 9f do dev e as 9h/9i do offline convivendo), presença 51 ✓,
+  fluxo verde no `019bda6`. O de layout foi morto pelos reinícios; a bateria inteira (Chromium e WebKit) roda
+  no commit final.
+- **Pronto pro PR**: rascunho do CHANGELOG (`scratchpad/changelog-l8.md`, com a correção da frase dos prazos
+  da v2026.09.29-01), as notas do CLAUDE.md já no branch, a seção 11 do `prod-auditoria.mjs` (o lote 8 no ar)
+  e os escopos da rodada 5 (`scratchpad/r5-escopos.md`, `r5-base.txt`).
+- Vão pro owner com mockup: L28 (e o banner do Desfazer sobre o Street View), L31, D3, O1 (a trava de versão no
+  worker e os 45 s do lie-fi, com recomendação) e C8/C9/C12/C13/C15.
 - O branch `claude/peaceful-heisenberg-HaUuC` foi recriado a partir da main (o GitHub o apaga no merge);
   o worktree de trabalho segue sendo `/home/user/wp-lote7`.
 - **Cookies** (2026-09-30, os válidos): `14319cf2-antigerme_cookies.txt` (L6+AM) e `6ae86b82-cafanha_cookies.txt` (L2+AM), conferidos pelo `waze-probe` e com sessões diferentes (comparadas sem imprimir valor); o `prod-auditoria.mjs` já aponta pra eles. Os arquivos anteriores não servem mais (um da "cafanha" trazia a sessão da antigerme, e o cafanha de 09-29 expirou).
