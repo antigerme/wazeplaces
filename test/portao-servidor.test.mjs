@@ -270,6 +270,30 @@ test('a lista de fotos da lixeira some até o prazo da Ajuda depois da ÚLTIMA g
   }
 });
 
+// Um corpo que começa com BOM: o Worker o lê (o `TextDecoder` tira o BOM, como
+// o `request.json()` tirava), e a VM, pelo `Buffer#toString`, o deixava — o
+// `JSON.parse` falhava e o mesmo POST dava 200 lá e 400 aqui (o comparador VM ×
+// Worker da auditoria de 2026-09-29).
+test('VM: corpo com BOM no começo é lido, como no Worker', async () => {
+  const texto = JSON.stringify({ action: 'destroy', sessionToken: 'x' });
+  const req = new EventEmitter();
+  req.destroy = () => {};
+  const res = { headersSent: false, writeHead() {}, end() {} };
+  const lido = readBody(req, res);
+  req.emit('data', Buffer.from([0xef, 0xbb, 0xbf]));
+  req.emit('data', Buffer.from(texto));
+  req.emit('end');
+  const corpo = await lido;
+  assert.deepEqual(JSON.parse(corpo), { action: 'destroy', sessionToken: 'x' }, `a VM não leu o corpo com BOM: ${JSON.stringify(corpo)}`);
+  // CONTROLE: o Worker de verdade lê o mesmo corpo.
+  const { default: worker } = await import('../worker/index.mjs');
+  const env = { ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+    SESSIONS: { get: async () => null, put: async () => {}, delete: async () => {} }, ASSETS: { fetch: () => new Response('') } };
+  const r = await worker.fetch(new Request('https://app.exemplo/api/sessao', { method: 'POST',
+    body: new Uint8Array([0xef, 0xbb, 0xbf, ...Buffer.from(texto)]) }), env, {});
+  assert.equal(r.status, 200, 'CONTROLE: o Worker não leu o corpo com BOM');
+});
+
 test('VM: acento cortado na divisa entre dois pedaços do corpo chega inteiro', async () => {
   const texto = JSON.stringify({ nome: 'São João 🌽' });
   const bytes = Buffer.from(texto, 'utf8');

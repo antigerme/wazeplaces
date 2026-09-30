@@ -26,7 +26,12 @@ const DRENO_MAX_MS = 5000;
 // pedaço sozinho, e um caractere de vários bytes (acento, emoji) cortado na
 // divisa entre dois pedaços virava `\uFFFD` — na VM, renomear "São João" ou
 // mandar mensagem com acento podia gravar o texto corrompido. O Worker não tem
-// o problema (lê o corpo inteiro com `request.json()`).
+// o problema (lê o corpo inteiro antes de decodificar).
+//
+// Pelo `TextDecoder`, como o Worker, e não pelo `Buffer#toString`: o decoder
+// tira o BOM do começo, o `toString` o deixava — e aí o `JSON.parse` falhava,
+// o corpo virava {} e o mesmo POST dava 200 no Worker e 400 aqui (o
+// comparador VM × Worker da auditoria de 2026-09-29).
 export function readBody(req, res) {
   return new Promise((resolve) => {
     const pedacos = [];
@@ -65,7 +70,7 @@ export function readBody(req, res) {
         resolve(null); // sinaliza pro chamador que a resposta já foi enviada
       }
     });
-    req.on('end', () => { if (!tooLarge) resolve(Buffer.concat(pedacos).toString('utf8')); });
+    req.on('end', () => { if (!tooLarge) resolve(new TextDecoder().decode(Buffer.concat(pedacos))); });
     req.on('error', () => { if (!tooLarge) resolve(''); });
   });
 }
