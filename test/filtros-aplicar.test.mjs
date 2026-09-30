@@ -876,6 +876,30 @@ test('achado 10: a pessoa aplica outro lugar enquanto a lista da região do perf
   assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73], 'a ida pro país do perfil gravou por cima da escolha feita durante a espera');
 });
 
+test('achado 10: pelo ALARME FALSO (o 1º perfil barrado por um 401 passageiro), a escolha feita no meio também vale', async () => {
+  // O `handleUnauthorized` completa o 1º perfil com a sonda: o lugar que vale é
+  // o registrado pela carga que levou o 401 (a costura K11 cobre o caso SEM
+  // troca no meio, que ainda leva quem edita na França pra França).
+  const p = pagina({ regiao: 'row', pais: 30 });
+  let n = 0;
+  p.listas.perfil = () => Promise.resolve(n++ === 0
+    ? { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionMissing' }
+    : { success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
+  p.listas.paises = () => Promise.resolve({ success: true, countries: BR_FR });
+  Object.assign(p.deps, { VERIFICA_SESSAO_MS: 0, verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 } });
+  p.AppState.authenticated = true;
+  let sonda;
+  p.deps.setTimeout = (f) => { sonda = f; return 1; };   // a sonda espera o teste
+  const app = montar([...FUNCOES, 'handleUnauthorized'], p.deps);
+  await app.loadProfileAndAuxData();                      // o perfil levou o 401: a sonda fica armada
+  assert.ok(sonda, 'o instrumento não armou a sonda do alarme falso');
+  aplicarLugar(p, 'na', 235);                             // a pessoa aplica NA/EUA no meio
+  sonda();
+  await tique(10);
+  assert.ok(p.AppState.profile, 'CONTROLE: a sonda trouxe o perfil');
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], 'o perfil do alarme falso desfez a escolha feita no meio');
+});
+
 // ═══ Achado 11 · os Filtros abertos acompanham o lugar que mudou por baixo ═══
 test('achado 11: com os Filtros abertos, o país do perfil que muda por baixo muda NA TELA — e o "Aplicar" não o desfaz', async () => {
   // Quem edita na França abre no Brasil, com os Filtros abertos (o atalho) — e
