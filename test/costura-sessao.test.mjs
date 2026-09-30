@@ -874,7 +874,10 @@ const PRES_SEM = semComentario(ler('js/presenca.js'));
 
 function montarConversas() {
   const campo = { value: '', focus() {} };
-  const Presenca = { aberta: null, anexo: null, conversas: [], vivas: new Map(), rascunhos: new Map(), rascunhoDe: null };
+  // O estado que o `presencaAbrirConversa` lê, com a forma do de verdade (as
+  // fotos que falharam nesta conversa e o nome guardado de quem se abriu).
+  const Presenca = { aberta: null, anexo: null, conversas: [], online: [], vivas: new Map(), rascunhos: new Map(), rascunhoDe: null,
+    fotosFalhas: new Set(), nomeDaAberta: null };
   const deps = { Presenca, PRESENCA_ID: /^\d{1,19}$/, document: { getElementById: (id) => (id === 'conversaInput' ? campo : null) } };
   const h = montar(['presencaAbrirConversa', 'presencaTrocarRascunho', 'presencaEsquecer'], deps, PRES_SEM);
   const fechar = () => { Presenca.aberta = null; Presenca.anexo = null; };   // o que o `presencaEsquecerAberta` faz

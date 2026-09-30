@@ -114,6 +114,14 @@ const Presenca = {
     rascunhos: new Map(),
     rascunhoDe: null,
     ultimaPosicao: null,    // [lat, lon] do último card na tela — o "daqui"
+    // As fotos de cartão que NÃO carregaram nesta conversa (ver o `error` no
+    // `presencaMontar`). A conversa é redesenhada a cada mensagem, e cada
+    // redesenho recriava a <img> — pedindo de novo a foto que o CDN recusa:
+    // MEDIDO sem rota nenhuma, 1 → 6 pedidos em 5 redesenhos (a resposta do CDN
+    // pra foto que sumiu é 403 com `max-age=0`, e erro não fica no cache de
+    // imagem do navegador; a foto boa fica em 1). Como os tiles do mapa
+    // ampliado (`_falhos`): abrir a conversa de novo tenta de novo.
+    fotosFalhas: new Set(),
     lidaEnviadaAte: new Map(),
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
     timers: { fluxo: null, silencio: null, lida: null, nome: null },
@@ -476,6 +484,7 @@ function presencaDesligar() {
     Presenca.vistas.clear();
     Presenca.historico.clear();
     Presenca.lidaEnviadaAte.clear();
+    Presenca.fotosFalhas.clear();
     Presenca.pais = null;
     Presenca.atualizadaEm = 0;
     Presenca.pedindo = null;
@@ -1075,6 +1084,8 @@ function presencaAbrirConversa(id) {
     // (auditoria de 2026-09-26).
     if (Presenca.aberta !== id) Presenca.anexo = null;
     Presenca.aberta = id;
+    // Abrir é a hora de tentar de novo a foto que não tinha carregado.
+    Presenca.fotosFalhas.clear();
     // E o TEXTO no campo também é da conversa (ver a função).
     presencaTrocarRascunho(id);
     chatConhecer(id);
@@ -1199,8 +1210,7 @@ function presencaEsquecerAberta() {
 
 // Idem para a lista.
 function presencaEsquecerLista() {
-    const lista = document.getElementById('presencaLista');
-    if (lista) lista.innerHTML = '';
+    presencaDesenhar(document.getElementById('presencaLista'), '');
 }
 
 function presencaEnviar(legenda, card) {
@@ -1368,6 +1378,64 @@ function presencaCardSeguro(c) {
 
 // ── interface ───────────────────────────────────────────────────────────────
 
+// ── redesenhar só o que MUDOU, com o foco onde estava ──────────────────────
+//
+// A lista e a conversa são redesenhadas por `innerHTML` a cada mensagem que
+// chega e a cada resposta, e o `innerHTML` DESTRÓI o elemento focado: o foco
+// caía no <body>, e quem usa teclado ou leitor de tela voltava pro topo da
+// página no meio da conversa (auditoria de 2026-09-29, medido no Chromium e no
+// WebKit). E o topo da conversa (`#conversaEstado`, região viva) era reescrito
+// com a MESMA frase duas vezes por mensagem — e região viva reescrita pode ser
+// lida de novo. Duas regras, na mesma função:
+//   · o que não mudou não é redesenhado;
+//   · o que mudou devolve o foco ao MESMO controle (a mesma pessoa, a mesma
+//     mensagem), como o `devolverFocoAoPainel` do Histórico. Sem equivalente,
+//     o ✕ da folha — nunca o <body>, e nunca o campo de texto, que abriria o
+//     teclado do celular por cima da conversa.
+const PRESENCA_DESENHADO = new WeakMap();
+// Os controles que o `innerHTML` recria: a linha de uma pessoa, o cartão de um
+// pedido e os três botões de texto da conversa.
+const PRESENCA_FOCAVEIS = ['presenca-linha', 'conversa-pedido', 'conversa-reenviar', 'conversa-recarregar', 'conversa-anteriores'];
+
+// QUEM o controle representa: a pessoa da linha, a mensagem do cartão, ou a
+// página antiga do "Tentar de novo". Os outros botões são únicos na conversa.
+function presencaQuemE(el) {
+    return el.getAttribute('data-pessoa') || el.getAttribute('data-id') || el.getAttribute('data-antigas') || '';
+}
+
+function presencaChaveDoFoco(raiz) {
+    const a = document.activeElement;
+    if (!raiz || !a || a === raiz || !a.classList || !raiz.contains(a)) return null;
+    const classe = PRESENCA_FOCAVEIS.find((c) => a.classList.contains(c));
+    if (!classe) return null;
+    return { classe, quem: presencaQuemE(a), i: [...raiz.querySelectorAll('.' + classe)].indexOf(a) };
+}
+
+function presencaDevolverFoco(raiz, chave, reserva) {
+    const irmaos = [...raiz.querySelectorAll('.' + chave.classe)];
+    let alvo = irmaos.find((e) => presencaQuemE(e) === chave.quem) || null;
+    // Na lista, quem saiu cede o lugar à linha da mesma posição — como numa
+    // lista que se apaga item a item.
+    if (!alvo && chave.classe === 'presenca-linha') alvo = irmaos[Math.min(chave.i, irmaos.length - 1)] || null;
+    if (!alvo) alvo = document.getElementById(reserva);
+    if (alvo && typeof alvo.focus === 'function') alvo.focus({ preventScroll: true });
+}
+
+// Troca o conteúdo de `el` SÓ se ele mudou, e devolve se trocou. Com `reserva`
+// (o id do ✕ da folha), o foco que estava dentro volta ao mesmo controle.
+// Quem esvazia uma destas regiões passa por aqui também: escrever por fora
+// deixaria a memória do último desenho mentindo, e o redesenho seguinte, igual
+// ao último, seria pulado com a região vazia.
+function presencaDesenhar(el, html, reserva) {
+    if (!el) return false;
+    if (PRESENCA_DESENHADO.get(el) === html) return false;
+    const foco = reserva ? presencaChaveDoFoco(el) : null;
+    el.innerHTML = html;
+    PRESENCA_DESENHADO.set(el, html);
+    if (foco) presencaDevolverFoco(el, foco, reserva);
+    return true;
+}
+
 function presencaRenderTudo() {
     presencaRenderPilula();
     const folha = document.getElementById('presencaModal');
@@ -1471,7 +1539,7 @@ function presencaRenderLista() {
     // fica vazia; abrir redesenha (o toque na pílula chama isto DEPOIS do
     // `openModal`).
     const folha = document.getElementById('presencaModal');
-    if (!folha || folha.classList.contains('hidden')) { lista.innerHTML = ''; return; }
+    if (!folha || folha.classList.contains('hidden')) { presencaDesenhar(lista, ''); return; }
     const sub = document.getElementById('presencaSub');
     if (sub) {
         const pais = presencaNomeDoPais(Presenca.pais || API.getCountry());
@@ -1525,9 +1593,11 @@ function presencaRenderLista() {
         </li>`;
     }).join('');
 
-    lista.innerHTML = `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.agora'))}</li>`
+    // A resposta da lista pedida ao abrir a folha costuma chegar IGUAL à que já
+    // está na tela: redesenhá-la tirava o foco da linha em que a pessoa estava.
+    presencaDesenhar(lista, `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.agora'))}</li>`
         + (linhasOnline || `<li class="presenca-vazio">${escapeHtml(t('presenca.sheet.vazio'))}</li>`)
-        + (linhasConversa ? `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.conversas'))}</li>` + linhasConversa : '');
+        + (linhasConversa ? `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.conversas'))}</li>` + linhasConversa : ''), 'presencaClose');
 }
 
 // ── DESENHO DO RECIBO ───────────────────────────────────────────────────────
@@ -1606,7 +1676,9 @@ function presencaHtmlDoPedido(m, i, recibo) {
     const card = m.card;
     const nome = (card.name || '').trim() || (card.address || '').trim() || t('card.noName');
     const meta = presencaResumoDoCard(card);
-    const foto = card.imageUrl
+    // A foto que já não carregou nesta conversa não volta pro desenho (ver
+    // `Presenca.fotosFalhas`).
+    const foto = card.imageUrl && !Presenca.fotosFalhas.has(card.imageUrl)
         ? `<span class="cp-foto"><img src="${escapeHtml(card.imageUrl)}" alt="" width="62" height="62"></span>`
         : '';
     const topo = `<span class="cp-topo">${foto}<span class="cp-txt">`
@@ -1623,8 +1695,11 @@ function presencaHtmlDoPedido(m, i, recibo) {
         ? `<span id="${desc}" class="cp-legenda">${escapeHtml(m.legenda)}${recibo}</span>`
         : '';
     const descrito = legenda || recibo.includes(`id="${desc}"`);
+    // `data-id` é QUAL mensagem: o `data-msg` é a posição, que anda quando a
+    // página antiga entra em cima — e é pelo id que o foco volta ao mesmo
+    // cartão depois do redesenho (ver `presencaDesenhar`).
     return `<button type="button" class="conversa-pedido ${m.meu ? 'minha' : 'dela'}`
-        + `${legenda ? ' com-legenda' : ''}" data-msg="${i}"`
+        + `${legenda ? ' com-legenda' : ''}" data-msg="${i}" data-id="${escapeHtml(m.id)}"`
         + ` aria-label="${escapeHtml(t('presenca.pedido.abrir', { nome }))}"`
         + `${descrito ? ` aria-describedby="${desc}"` : ''}>`
         + topo + legenda + (legenda ? '' : recibo) + '</button>';
@@ -1641,9 +1716,14 @@ function presencaIdDaDescricao(i) {
 // carregando, o MESMO botão, desabilitado e com o rótulo trocado; falhou, a
 // MESMA linha de erro da conversa, com o "Tentar de novo" (que refaz a página
 // antiga, não a conversa: `data-antigas`).
+//
+// "Desabilitado" é `aria-disabled`, e não `disabled`: botão `disabled` não
+// segura o foco, e quem apertou Enter nele caía no <body> (auditoria de
+// 2026-09-29). O toque no meio não manda nada: o `presencaCarregarConversa`
+// ignora com a página no ar.
 function presencaHtmlAnteriores(h) {
     if (h.antigas === 'carregando') {
-        return `<button type="button" class="conversa-anteriores" disabled>${escapeHtml(t('presenca.conversa.anterioresCarregando'))}</button>`;
+        return `<button type="button" class="conversa-anteriores" aria-disabled="true">${escapeHtml(t('presenca.conversa.anterioresCarregando'))}</button>`;
     }
     if (h.antigas === 'erro') {
         return `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.anterioresErro'))} <button type="button" class="conversa-recarregar" data-antigas="1">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
@@ -1658,10 +1738,11 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
     const conversa = Presenca.conversas.find((c) => c.id === id);
     const nome = (pessoa && pessoa.nome) || (conversa && conversa.nome) || t('presenca.anon');
     const titulo = document.getElementById('conversaTitle');
-    if (titulo) titulo.textContent = nome;
+    if (titulo && titulo.textContent !== nome) titulo.textContent = nome;
 
     // Onde a pessoa está. "Fora do app" não é aviso de problema: a mensagem
     // fica guardada e ela lê quando voltar — por isso o campo nunca trava.
+    // É região viva: só é reescrita quando a frase MUDA (ver `presencaDesenhar`).
     const estado = document.getElementById('conversaEstado');
     if (estado) {
         let frase;
@@ -1669,7 +1750,7 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
             const d = presencaDistancia(pessoa);
             frase = [t('presenca.conversa.naApp'), 'L' + ((pessoa.rank || 0) + 1), d && d.texto].filter(Boolean).join(' · ');
         } else frase = t('presenca.conversa.fora');
-        estado.innerHTML = `<span class="presenca-estado"><span class="presenca-ponto${pessoa ? '' : ' fora'}" aria-hidden="true"></span>${escapeHtml(frase)}</span>`;
+        presencaDesenhar(estado, `<span class="presenca-estado"><span class="presenca-ponto${pessoa ? '' : ' fora'}" aria-hidden="true"></span>${escapeHtml(frase)}</span>`);
         estado.classList.remove('hidden');
     }
 
@@ -1693,7 +1774,7 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
         if (semHistorico) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.erro'))} <button type="button" class="conversa-recarregar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
         if (h.msgs.length) html += presencaHtmlDasMsgs(id, h);
         else if (!semHistorico) html += `<p class="conversa-vazio">${escapeHtml(t(h.carregada ? 'presenca.conversa.vazio' : 'presenca.conversa.carregando'))}</p>`;
-        corpo.innerHTML = html;
+        presencaDesenhar(corpo, html, 'conversaClose');
         // Página antiga entrando em cima: a mensagem que estava na tela fica
         // onde estava. Mensagem nova: segue o fim só se a pessoa já estava lá
         // — quem rolou pra ler o começo não é arrancado de volta.
@@ -1797,10 +1878,15 @@ function presencaMontar() {
         });
         // Foto de terceiro que não carrega (apagada no Waze, rede caída) não
         // pode virar ícone quebrado no meio da conversa. `error` NÃO borbulha:
-        // só se pega na fase de CAPTURA.
+        // só se pega na fase de CAPTURA. E ela é lembrada: sem isso o próximo
+        // redesenho a pedia de novo (ver `Presenca.fotosFalhas`). O `src` do
+        // ATRIBUTO, que é o `imageUrl` do cartão — a propriedade vem resolvida.
         msgs.addEventListener('error', (ev) => {
             const img = ev.target;
-            if (img && img.tagName === 'IMG') img.closest('.cp-foto')?.remove();
+            if (!img || img.tagName !== 'IMG') return;
+            const url = img.getAttribute('src');
+            if (url) Presenca.fotosFalhas.add(url);
+            img.closest('.cp-foto')?.remove();
         }, true);
     }
     const anexoFoto = document.getElementById('conversaAnexoFoto');
