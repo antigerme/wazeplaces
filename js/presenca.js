@@ -346,6 +346,11 @@ async function presencaSincronizar() {
     const fresca = Date.now() - presencaUltimaTentativa() < PRESENCA_VOLTA_MIN_MS;
     if (Presenca.pais === API.getCountry() && fresca) { presencaFluxoGarantir(); return; }
     await presencaAtualizar();
+    // E o tempo real, também aqui: a lista só abre o fluxo quando traz token
+    // NOVO, e o fechado na espera do perfil (acima), com o token ainda valendo,
+    // ficava fechado até o app voltar do segundo plano. Sem pedir token: a
+    // lista acabou de pedir o que faltava.
+    presencaFluxoGarantir({ pedirToken: false });
 }
 
 // O teto de UM pedido por minuto dos gatilhos baratos (voltar do segundo plano,
@@ -618,13 +623,15 @@ function presencaTokenAbre() {
     return !Number.isFinite(c.expiraEm) || c.expiraEm > Date.now();
 }
 
-function presencaFluxoGarantir() {
+// `pedirToken: false` é pra quem ACABOU de pedir a lista: ela já levou o pedido
+// do token que faltava (ver o `querToken` do `presencaAtualizar`).
+function presencaFluxoGarantir({ pedirToken = true } = {}) {
     if (!presencaPodeConectar()) return;
     if (document.visibilityState === 'hidden' || navigator.onLine === false) return;
     // A renovação vai À PARTE, com o teto de 5 min: falta token, ele está na
     // última hora, ou o Google o recusou. Chega pelo `presencaAtualizar`, que
     // abre o fluxo quando o token vem.
-    if (!presencaTokenValido() && Date.now() - Presenca.tokenPedidoEm > PRESENCA_TOKEN_REPETIR_MS) {
+    if (pedirToken && !presencaTokenValido() && Date.now() - Presenca.tokenPedidoEm > PRESENCA_TOKEN_REPETIR_MS) {
         presencaAtualizar({ token: true });
     }
     if (!Presenca.fluxo && presencaTokenAbre()) presencaFluxoAbrir();

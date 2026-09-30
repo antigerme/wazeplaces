@@ -265,6 +265,21 @@ test('P2 a renovação silenciosa (só falta o PERFIL): a conversa, o pedido pre
   await c.P.presencaSincronizar();
   assert.equal(c.chamadas.fetch.length, antes + 1, 'o tempo real não reabriu quando o perfil voltou');
   assert.equal(c.chamadas.presencaApp.length, 0, 'a lista de agora foi pedida de novo à toa');
+  // A MESMA volta com a lista VELHA (mais de um minuto): a lista é pedida, e o
+  // tempo real reabre também — a lista só o abre quando traz token novo, e o
+  // token ainda vale.
+  const e = novoCliente({ agora, api: { presencaApp: () => ({ success: true, online: [], conversas: [], agora }) } });
+  e.P.Presenca.chat = { token: 't', base: 'https://instantmessaging-pa.googleapis.com/', chave: 'k', expiraEm: agora + 10 * 36e5 };
+  e.P.Presenca.pais = 30;
+  e.P.Presenca.atualizadaEm = agora - 5 * 60000;
+  e.P.Presenca.fluxo = fluxoDe(e);
+  e.AppState.profile = null;
+  await e.P.presencaSincronizar();
+  assert.equal(e.P.Presenca.fluxo, null, 'CONTROLE: a espera tem que ter fechado o tempo real');
+  e.AppState.profile = { id: Number(EU), userName: 'antigerme' };
+  await e.P.presencaSincronizar();
+  assert.equal(e.chamadas.presencaApp.length, 1, 'CONTROLE: a lista velha tem que ser pedida');
+  assert.equal(e.chamadas.fetch.length, 1, 'com a lista velha, o tempo real fechado na espera não reabriu (o token ainda vale e a lista não o abre)');
   // CONTROLE: a queda que vai pra TELA DE ENTRADA (sem sessão) fecha tudo.
   const d = novoCliente();
   d.P.presencaAbrirConversa(CAF);
