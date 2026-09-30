@@ -592,6 +592,26 @@ test('espanhol: pedido é "solicitud" (feminino), e o placar concorda com ela', 
   assert.match(es['resumo.img.lidos'], /leídas/);
 });
 
+// O termo de APAGAR FOTO no espanhol é o do botão da lixeira ("Borrar foto") e do
+// filtro do tipo de pedido — e o app todo segue ("Foto borrada", "No se pudo
+// borrar la foto", os erros do servidor). Duas frases da Ajuda diziam "eliminar"
+// (auditoria de 2026-09-29, achado do lote do lightbox): o mesmo conceito com
+// dois nomes, e o editor se pergunta se são duas ações. `Eliminar lugar` e
+// `Solicitud de eliminación` são OUTRO conceito (o pedido de apagar o LOCAL, com
+// a string do WME) e ficam.
+test('espanhol: apagar FOTO é "borrar" em todo o app — o mesmo verbo do botão da lixeira', () => {
+  const es = DICT.es;
+  assert.match(es['lightbox.delete.aria'], /^Borrar\b/, 'CONTROLE: o botão da lixeira mudou de verbo — atualize o teste junto');
+  assert.match(es['filters.types.DELETE_PHOTO'], /^Borrar\b/);
+  const ELIMINAR_FOTO = /\belimin\w*\s+(?:(?:una|la|las|los|el)\s+)?fotos?\b/i;
+  // CONTROLE: o padrão enxerga as frases de antes.
+  for (const antes of ['Solo se puede eliminar una foto que ya está en el mapa.', 'aprueba la foto nueva, elimina fotos del lugar']) {
+    assert.ok(ELIMINAR_FOTO.test(antes), `CONTROLE: o padrão não reconhece "${antes}"`);
+  }
+  const fora = Object.entries(es).filter(([, v]) => ELIMINAR_FOTO.test(String(v).replace(/<[^>]+>/g, ''))).map(([k]) => k);
+  assert.deepEqual(fora, [], 'frase em espanhol chamando de "eliminar" o apagar FOTO — a lixeira diz "Borrar"');
+});
+
 test('inglês e francês usam o apóstrofo tipográfico (’) — só as strings OFICIAIS do WME ficam como vieram', () => {
   // Auditoria de 2026-09-25: 9 textos em inglês e 8 em francês tinham o
   // apóstrofo reto no meio de centenas com o tipográfico. Os `card.attr.*` são

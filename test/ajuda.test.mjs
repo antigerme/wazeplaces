@@ -131,3 +131,20 @@ test('ajuda: a legenda da ⭐ fala do PEDIDO, pelo nome da preferência que a p�
     assert.ok(legenda.toLowerCase().includes(termo), `${lang}: a legenda da ⭐ não usa o termo do card ("${termo}")`);
   }
 });
+
+// O que o app faz com os cookies, na Privacidade da Ajuda: uma ENUMERAÇÃO —
+// vírgula, vírgula… e a conjunção só antes do último. O francês tinha dois "et"
+// seguidos ("marque comme lue et donne une ⭐ à la demande et envoie…";
+// auditoria de 2026-09-29, achado do lote do lightbox).
+test('ajuda: a lista do que o app faz com os cookies tem UMA conjunção, em cada língua', () => {
+  const CONJUNCAO = { pt: 'e', en: 'and', es: 'y', fr: 'et' };
+  for (const lang of Object.keys(DICT)) {
+    const conj = CONJUNCAO[lang];
+    assert.ok(conj, `${lang}: idioma novo — diga aqui a conjunção da enumeração`);
+    const frase = DICT[lang]['help.privacy.credentials'];
+    const lista = frase.slice(frase.indexOf('. ') + 2, frase.indexOf(';'));
+    assert.ok(lista.length > 40 && lista.includes('⭐'), `CONTROLE ${lang}: o recorte da lista falhou: "${lista}"`);
+    const n = lista.split(` ${conj} `).length - 1;
+    assert.equal(n, 1, `${lang}: "${lista}" tem ${n} "${conj}" — numa enumeração, a conjunção vem só antes do último item`);
+  }
+});
