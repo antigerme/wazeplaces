@@ -3698,6 +3698,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           const rb = barra ? barra.getBoundingClientRect() : null;
           return {
             motivo: val ? val.textContent : '',
+            // O teto de duas linhas (C16, auditoria do card de 2026-09-29): a
+            // rede de segurança desligada é o que mantém o arraste pra cima
+            // pulando, e as linhas se medem pela CAIXA, não pelo texto.
+            rede: c.querySelector('.card-content').classList.contains('card-content-rola'),
+            linhas: val ? Math.round(val.getBoundingClientRect().height / parseFloat(getComputedStyle(val).lineHeight)) : 0,
+            titulo: val ? val.title : '',
             legenda: [...c.querySelectorAll('.card-map-legend .mapa-leg')].map((x) => x.textContent.trim()),
             marcaDup: !!c.querySelector('.card-map-marks .mapa-duplicado'),
             // Alvo do gesto: a barra tem que estar INTEIRA na tela.
@@ -3724,8 +3730,34 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         if (temNome) checa(m.motivo.includes(DUP_CASOS[nome].duplicado.nome), `${onde}: o motivo não nomeia o alvo`, m.motivo);
         else checa(!/[«“"]/.test(m.motivo), `${onde}: forma completa sem nome pra pôr`, m.motivo);
         checa(!/\{alvo\}/.test(m.motivo), `${onde}: {alvo} vazou cru pra tela`, m.motivo);
+        // C16: "Duplicado de «nome longo»" ligava a rede no Fold, e o arraste
+        // pra cima passava a rolar em vez de pular.
+        checa(!m.rede, `${onde}: o motivo ligou a rede de segurança do card (o arraste pra cima deixa de pular)`);
+        checa(m.linhas <= 2, `${onde}: o motivo passou de duas linhas`, `${m.linhas} linhas`);
+        if (temNome) checa(m.titulo.includes(DUP_CASOS[nome].duplicado.nome), `${onde}: o nome cortado pelo teto não está inteiro no title`, m.titulo);
         margens[`${aparelho}/${lang}/${nome}`] = m.foraDaDobraCru;
       }
+    }
+    // CONTROLE do C16: sem o teto, o nome longo LIGA a rede no Fold — é o
+    // defeito que o teto conserta. Se não ligar, o instrumento não enxerga a
+    // rede, e o "rede desligada" acima não prova nada.
+    if (aparelho === 'Galaxy Fold') {
+      await page.evaluate(({ pl }) => {
+        const s = document.createElement('style');
+        s.id = 'sem-teto-do-motivo';
+        s.textContent = '.card-flag-reason-value{display:block!important;-webkit-line-clamp:unset!important;overflow:visible!important}';
+        document.head.appendChild(s);
+        setLang('pt');
+        AppState.queue = [pl]; AppState.currentPlace = pl;
+        showCurrentPlace();
+      }, { pl: DUP_CASOS.nomeLongo });
+      await assentar(page);
+      const semTeto = await page.evaluate(() => {
+        const r = document.querySelector('.place-card .card-content').classList.contains('card-content-rola');
+        document.getElementById('sem-teto-do-motivo').remove();
+        return r;
+      });
+      checa(semTeto, 'duplicado Galaxy Fold: CONTROLE — sem o teto, o nome longo não ligou a rede (o instrumento não a enxerga)');
     }
     await ctx.close();
   }
@@ -8360,7 +8392,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + pareamento com o QR VENCIDO (sem a instrução da câmera nem o "Sem câmera?", com o CONTROLE do QR valendo; o código curto pedido antes valendo até o prazo DELE, sem o "Código expirado" em cima, e a instrução dele saindo quando ele vence)`
   + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
-  + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`
+  + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra nem ligar a rede de segurança — teto de duas linhas com o nome inteiro no title, e o CONTROLE sem teto ligando a rede no Fold)`
   + `, + realce do miolo em 2 aparelhos × 2 temas (sobrevive ao line-clamp, contraste no pixel composto, cala no óbvio e guarda o valor inteiro no title)`
   + `, + renomeando: ação de foto some (e VOLTA) e as setas são do cursor, com controle dos dois lados`
   + `, + renomeando: o passo pra trás (fundo, arraste pra baixo, Esc e ↓ fora do campo) só sai da edição, com o CONTROLE sem edição fechando a foto`

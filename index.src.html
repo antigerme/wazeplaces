@@ -1355,10 +1355,15 @@
                                      própria — a caixa existe pra segurar o texto livre, e com o
                                      comentário vazio ela virava ~40px de moldura (borda + padding +
                                      cabeçalho) pra exibir uma linha. Segue em rosa: perdeu a caixa,
-                                     não o destaque. -->
+                                     não o destaque.
+                                     O valor tem teto de DUAS linhas (`line-clamp-2`, como categoria e
+                                     endereço), com a frase inteira no `title`: "Duplicado de «nome
+                                     longo»" crescia sem teto, a linha é `flex-shrink-0`, e no Fold ela
+                                     ligava a rede de segurança do card — o arraste pra cima rolava em
+                                     vez de pular (auditoria do card, 2026-09-29, C16). -->
                                 <p class="card-flag-reason hidden flex items-baseline gap-2 min-w-0 flex-shrink-0">
                                     <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.flagReason">Motivo:</span>
-                                    <span class="card-flag-reason-value text-sm font-semibold text-rose-700 break-words min-w-0 flex-1 dark:text-rose-300"></span>
+                                    <span class="card-flag-reason-value text-sm font-semibold text-rose-700 line-clamp-2 break-words min-w-0 flex-1 dark:text-rose-300"></span>
                                 </p>
 
                                 <!-- A caixa NÃO reivindica a sobra (`flex-1 min-h-0`, que era o que

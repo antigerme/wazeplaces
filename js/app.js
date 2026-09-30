@@ -9438,7 +9438,11 @@ function montarCard(place) {
         if (place.duplicado && Number.isFinite(place.duplicado.distM)) {
             motivo += ' · ' + formatarMetros(place.duplicado.distM);
         }
-        card.querySelector('.card-flag-reason-value').textContent = motivo;
+        const valorDoMotivo = card.querySelector('.card-flag-reason-value');
+        valorDoMotivo.textContent = motivo;
+        // O valor tem teto de duas linhas (C16, ver o index.src.html): o que o
+        // corte esconder de um nome longo fica inteiro no `title`.
+        valorDoMotivo.title = motivo;
         card.querySelector('.card-flag-reason').classList.remove('hidden');
     }
     // A caixa aparece só quando HÁ texto livre — ela existe pra segurá-lo. Antes
