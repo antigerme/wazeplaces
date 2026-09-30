@@ -9091,7 +9091,18 @@ function agirNoPedidoDoGesto(alvo, handler) {
     // A trava chegou DURANTE a saída do card (a sessão caiu nesses 350 ms): o
     // handler recusa o gesto, e o card que a animação levou pra fora da tela
     // VOLTA — senão o pedido seguia na frente da fila, invisível e sem botão.
-    if (acoesTravadas()) {
+    //
+    // A MESMA volta vale pro ✕ e o ✓ num card de foto cuja foto em decisão
+    // falhou sem rede nesses 350 ms (`direcaoTravada`): o `onerror` põe o aviso
+    // no card que está SAINDO, o `handleReject`/`handleMarkAsRead` recusam, e o
+    // card ficava fora da tela (x=-709, opacidade 0) como pedido atual, com só
+    // o card de fundo — inerte — na tela e o ↑ inalcançável (auditoria do card,
+    // 2026-09-29, C4). Remontado, ele volta com o aviso da foto que precisa de
+    // sinal (o `onerror` de novo) e o ↑ vivo. A direção sai do HANDLER, e não
+    // de um parâmetro, pra nenhum caminho novo de gesto esquecer de passá-la; o
+    // ↑ nunca trava por foto (pular é o que o aviso manda fazer).
+    const direcao = handler === handleReject ? 'left' : handler === handleMarkAsRead ? 'right' : null;
+    if (acoesTravadas() || (direcao && direcaoTravada(direcao))) {
         if (AppState.currentPlace) showCurrentPlace();
         return;
     }

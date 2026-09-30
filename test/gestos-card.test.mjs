@@ -329,8 +329,10 @@ function montarComApp() {
   const g = montar({ largura: 393 });
   const agiu = [];
   g.ctx.AppState = { currentPlace: null };
-  // A trava (sem sessão, janela do Desfazer) é testada em test/costura-sessao.
+  // A trava (sem sessão, janela do Desfazer) é testada em test/costura-sessao;
+  // a do card de foto sem a foto (`direcaoTravada`), no r4 C4 logo abaixo.
   g.ctx.acoesTravadas = () => false;
+  g.ctx.direcaoTravada = () => false;
   g.ctx.showCurrentPlace = () => {};
   for (const [h, tipo] of [['handleReject', 'reject'], ['handleMarkAsRead', 'read'], ['handleSkip', 'skip']]) {
     g.ctx[h] = () => agiu.push([tipo, g.ctx.AppState.currentPlace]);
@@ -416,6 +418,76 @@ test('C3 os TRÊS caminhos passam pela conferência, e o card registra o pedido 
       `o arraste (${fn}) voltou a agir no pedido da frente de 350 ms depois`);
   }
   assert.ok(!/window\.triggerSwipe\('(left|right|up)', handle/.test(f), 'sobrou seta passando o handler cru ao triggerSwipe');
+});
+
+// ── r4 C4: a foto em decisão falha DURANTE a saída pelo ✕ (auditoria do card, 2026-09-29)
+// MEDIDO no navegador: foto de "Nova foto" falhando sem rede 200 ms depois do
+// ✕ — no meio dos 350 ms da saída. O `onerror` marca o card que está SAINDO, o
+// handler recusa pela `direcaoTravada`, e o card ficava FORA da tela (x=-709,
+// opacidade 0) como pedido atual, com só o card de fundo (inerte) visível e o ↑
+// inalcançável. A prova no navegador de verdade mora no bloco "O CARD" do
+// `tools/smoke-browser.mjs`; aqui roda a composição swipe.js + app.js.
+test('r4 C4 a foto em decisão falha sem rede nos 350 ms da saída: ✕ e ✓ não valem, e o card VOLTA', () => {
+  const A = { updateRequestID: 'uA' };
+  // O arraste SEM esvaziar os timers: a foto tem de falhar depois de o dedo
+  // soltar e antes de a saída terminar.
+  const arrastar = (g, [x0, y0], [x1, y1]) => {
+    let t = g.toque(0, x0, y0);
+    g.noCard('touchstart', { touches: [t], changedTouches: [t] });
+    for (let i = 1; i <= 20; i++) {
+      g.passo(40);
+      t = g.toque(0, x0 + (x1 - x0) * i / 20, y0 + (y1 - y0) * i / 20);
+      g.noDoc('touchmove', { touches: [t], changedTouches: [t] });
+    }
+    g.passo(200);
+    g.noDoc('touchend', { touches: [], changedTouches: [t] });
+  };
+  const caminhos = {
+    // Botão e seta: o `triggerSwipe` com o callback que o `renderCurrentCard`
+    // e o `handleKeyDown` passam.
+    'botão/seta ✕': (g) => g.ctx.triggerSwipe('left', (card) => g.ctx.agirNoPedidoDoGesto(g.ctx.pedidoDoCard(card), g.ctx.handleReject)),
+    'botão/seta ✓': (g) => g.ctx.triggerSwipe('right', (card) => g.ctx.agirNoPedidoDoGesto(g.ctx.pedidoDoCard(card), g.ctx.handleMarkAsRead)),
+    'arraste ✕': (g) => arrastar(g, [300, 400], [0, 400]),
+    'arraste ✓': (g) => arrastar(g, [60, 400], [390, 400]),
+  };
+  const montarCaso = (semFotoNoMeio) => {
+    const g = montarComApp();
+    const voltou = [];
+    g.ctx.showCurrentPlace = () => voltou.push(g.ctx.AppState.currentPlace);
+    g.ctx.window.cardDaFrente = () => g.card;
+    g.ctx.AppState.currentPlace = A;
+    g.ctx.__registrar(g.card, A);
+    const estado = { semFoto: false };
+    // A `direcaoTravada` do app: ✕ e ✓ travados num card de foto sem a foto.
+    g.ctx.direcaoTravada = (d) => estado.semFoto && (d === 'left' || d === 'right');
+    return { g, voltou, falhar: () => { estado.semFoto = semFotoNoMeio; } };
+  };
+  for (const [nome, fazer] of Object.entries(caminhos)) {
+    const { g, voltou, falhar } = montarCaso(true);
+    fazer(g);
+    falhar();                 // o `onerror` da foto em decisão chega no meio da saída
+    g.esvaziar();
+    assert.deepEqual(g.agiu, [], `${nome}: decidiu uma foto que ninguém viu`);
+    assert.deepEqual(voltou, [A],
+      `${nome}: DEFEITO — o card saiu da tela e não voltou (o pedido fica na frente, invisível, com o ↑ inalcançável)`);
+  }
+  // O ↑ segue valendo num card sem a foto: pular é o que o aviso manda fazer.
+  const p = montarCaso(true);
+  p.g.ctx.triggerSwipe('up', (card) => p.g.ctx.agirNoPedidoDoGesto(p.g.ctx.pedidoDoCard(card), p.g.ctx.handleSkip));
+  p.falhar();
+  p.g.esvaziar();
+  assert.deepEqual(p.g.agiu.map((x) => x[0]), ['skip'], 'o ↑ deixou de pular um card de foto sem a foto');
+  assert.deepEqual(p.voltou, [], 'o ↑ remontou o card em vez de pular');
+  // CONTROLE: com a foto chegando, o MESMO ✕ e o mesmo arraste agem — e
+  // ninguém remonta. Sem isto, "não agiu" passaria com o gesto morto.
+  for (const nome of ['botão/seta ✕', 'arraste ✕']) {
+    const c = montarCaso(false);
+    caminhos[nome](c.g);
+    c.falhar();
+    c.g.esvaziar();
+    assert.deepEqual(c.g.agiu.map((x) => [x[0], x[1].updateRequestID]), [['reject', 'uA']], `CONTROLE ${nome}: o ✕ deixou de agir`);
+    assert.deepEqual(c.voltou, [], `CONTROLE ${nome}: remontou o card com a foto boa`);
+  }
 });
 
 // ── C7: o teclado numa área do card que ROLA ──────────────────────────────
