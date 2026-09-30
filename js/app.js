@@ -2007,6 +2007,17 @@ const Lightbox = {
         }
         this._applyTransform();
     },
+    // Um passo de zoom pelo TECLADO (+ e −), no CENTRO da camada — sem cursor, é
+    // pra onde a pessoa está olhando. O passo é o de um dente da roda (1,2×,
+    // ver o `wheel` do `setupLightbox`): cada ampliação com a sua régua, e a do
+    // mapa dá um nível por tecla como dá por dente (L33).
+    zoomPeloTeclado(sentido) {
+        const lb = document.getElementById('imageLightbox');
+        const r = lb ? lb.getBoundingClientRect() : null;
+        const cx = r ? r.left + r.width / 2 : undefined;
+        const cy = r ? r.top + r.height / 2 : undefined;
+        this.zoomTo(this.scale * Math.pow(1.2, sentido > 0 ? 1 : -1), cx, cy);
+    },
     panBy(dx, dy) {
         if (this.scale <= 1) return;
         this.tx += dx;
@@ -2420,6 +2431,30 @@ function setupMapaLightbox() {
     // quadro seguinte escreve.
     const ativos = new Map();
     let acumX = 0, acumY = 0, quadro = 0, arrastou = false, ultimo = null, distPinch = 0, inicio = null;
+    // O gesto teve DOIS dedos (a pinça, ou um toque de dois dedos) ou começou
+    // com outro botão do mouse que não o principal: não é toque.
+    let multitoque = false, botaoPrincipal = true;
+    // Duplo toque aproxima, como em qualquer mapa — com a MESMA régua da foto
+    // (tempo E distância entre os toques), e zerando depois, como a foto: um
+    // terceiro toque não aproxima de novo.
+    //
+    // Decidido no SOLTAR do ponteiro, e não no `click`: o `pointerdown` do mapa
+    // chama `preventDefault()` (sem ele o mouse arrasta a <img> do tile como
+    // imagem), e no WebKit — o Safari, e TODO navegador do iPhone — o toque que
+    // teve o `pointerdown` impedido NÃO gera `click`. MEDIDO no WebKit do
+    // Playwright com toque de verdade: 2 toques no mapa → 0 `click`, zoom 17 →
+    // 17; no Chromium, 2 e 18 (auditoria de 2026-09-29, L20). O `click` só
+    // funcionava no Android. A foto já decide o duplo toque pelos ponteiros.
+    let ultimoToque = 0, ultimoToqueX = 0, ultimoToqueY = 0;
+    const tocou = (x, y) => {
+        const agora = Date.now();
+        if (agora - ultimoToque < DUPLO_TOQUE_MS && Math.hypot(x - ultimoToqueX, y - ultimoToqueY) < DUPLO_TOQUE_RAIO_PX) {
+            ultimoToque = 0;
+            MapaLightbox.zoom(1, x, y);
+            return;
+        }
+        ultimoToque = agora; ultimoToqueX = x; ultimoToqueY = y;
+    };
     const aplicar = () => {
         quadro = 0;
         const dx = acumX, dy = acumY;
@@ -2456,6 +2491,7 @@ function setupMapaLightbox() {
         agendar();
     };
     const soltar = (e) => {
+        if (!ativos.has(e.pointerId)) return;
         ativos.delete(e.pointerId);
         if (ativos.size === 0) {
             ultimo = null;
@@ -2463,17 +2499,25 @@ function setupMapaLightbox() {
             removeEventListener('pointerup', soltar);
             removeEventListener('pointercancel', soltar);
             if (quadro) { cancelAnimationFrame(quadro); aplicar(); }
+            // Um dedo que desceu e subiu sem arrastar é um TOQUE (ver `tocou`).
+            // O `pointercancel` é o navegador tomando o gesto: não é toque.
+            if (e.type !== 'pointercancel' && !arrastou && !multitoque && botaoPrincipal) tocou(e.clientX, e.clientY);
         } else {
             const p0 = [...ativos.values()][0];
             ultimo = { x: p0.x, y: p0.y };
         }
     };
     lb.addEventListener('pointerdown', (e) => {
-        if (e.target.closest('button')) return;   // botão é botão
+        // Botão é botão, e LINK é link: o Street View é um <a>, e o
+        // `preventDefault` daqui embaixo, no WebKit, mata o `click` dele — no
+        // iPhone o toque nele não abria nada (0 de 2, com o ↗ do card abrindo
+        // 2 de 2; L20). O `touch-none` da camada já segura o gesto nativo.
+        if (e.target.closest('button, a')) return;
         e.preventDefault();
         ativos.set(e.pointerId, { x: e.clientX, y: e.clientY });
         arrastou = false;
-        if (ativos.size === 2) distPinch = doisDedos().d;
+        if (ativos.size === 1) { multitoque = false; botaoPrincipal = !(e.button > 0); }
+        if (ativos.size === 2) { distPinch = doisDedos().d; multitoque = true; }
         else { ultimo = { x: e.clientX, y: e.clientY }; inicio = ultimo; }
         addEventListener('pointermove', mover);
         addEventListener('pointerup', soltar);
@@ -2500,21 +2544,6 @@ function setupMapaLightbox() {
         rodaAcum = 0;
         MapaLightbox.zoom(passo, e.clientX, e.clientY);
     }, { passive: false });
-    // Duplo toque aproxima, como em qualquer mapa — com a MESMA régua da foto
-    // (tempo E distância entre os toques), e zerando depois, como a foto: um
-    // terceiro toque não aproxima de novo.
-    let ultimoToque = 0, ultimoToqueX = 0, ultimoToqueY = 0;
-    lb.addEventListener('click', (e) => {
-        if (e.target.closest('button') || arrastou) return;
-        const agora = Date.now();
-        if (agora - ultimoToque < DUPLO_TOQUE_MS
-            && Math.hypot(e.clientX - ultimoToqueX, e.clientY - ultimoToqueY) < DUPLO_TOQUE_RAIO_PX) {
-            ultimoToque = 0;
-            MapaLightbox.zoom(1, e.clientX, e.clientY);
-            return;
-        }
-        ultimoToque = agora; ultimoToqueX = e.clientX; ultimoToqueY = e.clientY;
-    });
     // Girar o aparelho muda a caixa: sem redesenhar, sobra faixa sem tile.
     addEventListener('resize', () => { if (MapaLightbox.isOpen()) MapaLightbox.desenhar(); });
 }
@@ -4015,9 +4044,18 @@ function handleKeyDown(e) {
         else if (e.key === 'ArrowRight') { e.preventDefault(); MapaLightbox.arrastar(-80, 0); }
         else if (e.key === 'ArrowUp') { e.preventDefault(); MapaLightbox.arrastar(0, 80); }
         else if (e.key === 'ArrowDown') { e.preventDefault(); MapaLightbox.arrastar(0, -80); }
+        // z desfaz a escrita da FOTO cuja janela ainda corre (excluir, aprovar,
+        // renomear e fechar a foto pra ver o mapa é o caminho natural): o banner
+        // aparece por cima do mapa também, e aqui a tecla não chegava a ele — na
+        // foto chegava (auditoria de 2026-09-29, L29). O mesmo caminho da foto.
+        else if ((e.key === 'z' || e.key === 'Z') && !focoEmCampoDeTexto()) {
+            if (desfazerPeloTeclado()) e.preventDefault();
+        }
         // As camadas são `aria-modal`: o Tab não pode sair delas pro card de
-        // trás (Shift+Tab caía no ✓ — ação escondida atrás da foto).
-        else if (e.key === 'Tab') trapTabInModal(e, document.getElementById('mapaLightbox'));
+        // trás (Shift+Tab caía no ✓ — ação escondida atrás da foto). E o
+        // Desfazer, desenhado por cima desta camada, entra na volta — como na
+        // foto (L29): preso no mapa, o Tab nunca chegava nele.
+        else if (e.key === 'Tab') trapTabInModal(e, document.getElementById('mapaLightbox'), document.getElementById('undoContainer'));
         return;
     }
     if (Lightbox.isOpen()) {
@@ -4036,6 +4074,11 @@ function handleKeyDown(e) {
         // a dica não muda de texto (decisão do owner: um texto só, não um
         // catatau por plataforma).
         else if (e.key === 'ArrowDown') { e.preventDefault(); recuarNaFoto(); }
+        // + e − dão zoom, como no mapa ampliado: aqui eles não faziam nada
+        // (auditoria de 2026-09-29, L33). Nunca com o campo do nome focado —
+        // ali "+" e "-" são LETRAS do nome ("Posto 24-horas").
+        else if ((e.key === '+' || e.key === '=') && !focoEmCampoDeTexto()) { e.preventDefault(); Lightbox.zoomPeloTeclado(1); }
+        else if ((e.key === '-' || e.key === '_') && !focoEmCampoDeTexto()) { e.preventDefault(); Lightbox.zoomPeloTeclado(-1); }
         // z desfaz a exclusão, a aprovação ou a renomeação que acabou de sair
         // daqui — o banner delas mora FORA do lightbox, e a tecla não chegava a
         // ele (auditoria de 2026-09-26). Nunca com o campo do nome focado: ali
@@ -16867,10 +16910,16 @@ function desfazerPeloTeclado() {
 
 function removeUndoBanner() {
     const container = document.getElementById('undoContainer');
+    const tinhaOFoco = !!(container && container.contains(document.activeElement));
     if (container) container.innerHTML = '';
     // O "Desfazer" entra na volta do Tab da foto ampliada: se o foco estava
     // nele, sumir com o banner o jogaria no <body>, fora da camada `aria-modal`.
     manterFocoNoLightbox();
+    // E na do mapa ampliado (L29): ali o foco volta pro ✕, onde ele nasce.
+    if (tinhaOFoco && typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) {
+        const a = document.activeElement;
+        if (!a || a === document.body) document.getElementById('mapaLbClose')?.focus({ preventScroll: true });
+    }
 }
 
 // UM indicador para os dois estados, e não dois: eles disputam o mesmo canto e

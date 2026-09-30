@@ -1245,6 +1245,107 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── Mapa ampliado no TOQUE: o Street View ABRE e o duplo toque APROXIMA ────
+//
+// Nos DOIS motores, com toque de verdade (`page.touchscreen`). O bloco de cima
+// mede o Street View pelo `href` e pelo hit-test, e o duplo toque pelo mouse —
+// e os dois passavam no WebKit com o recurso morto no iPhone: o `pointerdown`
+// do mapa chamava `preventDefault()`, e no WebKit isso mata o `click` do toque.
+// MEDIDO: o Street View não abria (0 de 2) e o duplo toque não aproximava
+// (17 → 17); no Chromium, os dois funcionavam (auditoria de 2026-09-29, L20).
+// CONTROLES: o ↗ do card (outro link externo) abre com o MESMO toque — prova
+// de que a medida enxerga a aba —, e um toque SÓ não aproxima.
+{
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block',
+    hasTouch: true, isMobile: true });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  // A aba que o toque abre não sai pra rede: o que se mede é ela NASCER.
+  await ctx.route(/^https:\/\/www\.google\.com\//, (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>sv</title>' }));
+  await ctx.route(/^https:\/\/www\.waze\.com\/editor/, (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>wme</title>' }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  const alvo = FIXTURES_PAISES.find((f) => f.mapa && f.mapa.centro && !(f.imageUrls || []).length);
+  await page.evaluate(async (pl) => {
+    setLang('pt'); applyI18n();
+    AppState.authenticated = true;
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false);
+    AppState.queue = [pl]; AppState.currentPlace = pl;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+    await new Promise((k) => setTimeout(k, 400));
+  }, alvo);
+  // O centro de um elemento, e QUEM recebe o dedo ali (gotcha #26).
+  const centro = (sel) => page.evaluate((s) => {
+    const e = document.querySelector(s);
+    if (!e) return null;
+    const r = e.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const q = document.elementFromPoint(x, y);
+    return { x, y, recebe: !!(q && (q === e || e.contains(q))) };
+  }, sel);
+  // Toca e espera a ABA que nasce do toque (ou nada, em 3 s).
+  const tocarEAbrir = async (sel) => {
+    const c = await centro(sel);
+    if (!c || !c.recebe) return { semAlvo: true };
+    const aba = page.waitForEvent('popup', { timeout: 3000 }).catch(() => null);
+    await page.touchscreen.tap(c.x, c.y);
+    const p = await aba;
+    if (!p) return { abriu: false };
+    await p.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+    const url = p.url();
+    await p.close().catch(() => {});
+    return { abriu: true, url };
+  };
+  const rot = `mapa ampliado no toque (${MOTOR})`;
+  // CONTROLE do instrumento: o ↗ do card abre a aba com o mesmo toque.
+  const ctrl = await tocarEAbrir('.place-card:not(.card-fundo) .card-wme-link');
+  checa(!ctrl.semAlvo, `${rot}: CONTROLE — o ↗ do card não está sob o dedo (a medida da aba não teria com o que comparar)`);
+  checa(ctrl.abriu && /^https:\/\/www\.waze\.com\/editor/.test(ctrl.url || ''),
+    `${rot}: CONTROLE — o toque no ↗ do card não abriu a aba (a medida estaria cega)`, JSON.stringify(ctrl));
+  // Abre o mapa ampliado pelo toque no mapa do card.
+  const cm = await centro('.place-card:not(.card-fundo) .card-map');
+  if (cm) await page.touchscreen.tap(cm.x, cm.y);
+  await page.waitForTimeout(600);
+  checa(await page.evaluate(() => MapaLightbox.isOpen()), `${rot}: o toque no mapa do card não abriu o mapa ampliado`);
+  // Um ponto do MAPA mesmo — não um controle —, perto do meio.
+  const ponto = await page.evaluate(() => {
+    const lb = document.getElementById('mapaLightbox').getBoundingClientRect();
+    const x = lb.left + lb.width / 2, y = lb.top + lb.height * 0.45;
+    const q = document.elementFromPoint(x, y);
+    return { x, y, doMapa: !!(q && q.closest('#mapaLightbox') && !q.closest('button, a')) };
+  });
+  checa(ponto.doMapa, `${rot}: PRÉ-CONDIÇÃO — o ponto do toque não é do mapa (é um controle, ou está fora da camada)`);
+  // CONTROLE: um toque SÓ não aproxima.
+  const z0 = await page.evaluate(() => MapaLightbox.z);
+  await page.touchscreen.tap(ponto.x, ponto.y);
+  await page.waitForTimeout(450);                   // passa da janela do duplo toque (300 ms)
+  const z1 = await page.evaluate(() => MapaLightbox.z);
+  checa(z1 === z0, `${rot}: CONTROLE — um toque SÓ mudou o zoom (${z0} → ${z1}): a medida do duplo toque estaria mentindo`);
+  // O duplo toque aproxima UM nível (no Chromium o `click` também chega, e
+  // não pode aproximar dobrado).
+  await page.touchscreen.tap(ponto.x, ponto.y);
+  await page.waitForTimeout(90);
+  await page.touchscreen.tap(ponto.x + 2, ponto.y + 1);
+  await page.waitForTimeout(400);
+  const z2 = await page.evaluate(() => MapaLightbox.z);
+  checa(z2 === z1 + 1, `${rot}: o duplo toque no mapa foi de ${z1} pra ${z2} — tem que aproximar UM nível (no iPhone não aproximava)`);
+  // O Street View ABRE a aba (no iPhone, 0 de 2).
+  const sv = await tocarEAbrir('#mapaLbStreetView');
+  checa(!sv.semAlvo, `${rot}: o Street View não está sob o dedo`);
+  checa(sv.abriu && /^https:\/\/www\.google\.com\/maps\//.test(sv.url || ''),
+    `${rot}: o toque no Street View não abriu a aba do panorama`, JSON.stringify(sv));
+  checa(await page.evaluate(() => MapaLightbox.isOpen()), `${rot}: o toque no Street View fechou o mapa ampliado`);
+  checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
+  await ctx.close();
+}
+
 // ── A ESCALA mede o que diz (auditoria de 2026-09-26) ─────────────────────
 //
 // A barra de escala do card e a do ampliado diziam o DOBRO da distância: a
@@ -7890,6 +7991,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + FAB do modo dev com TOQUE de verdade em 3 celulares (nasce livre em 5 camadas medidas por hit-test; o gesto do owner — segura, o botão avisa que pegou, acompanha o dedo em zigue-zague sem se descolar, e toque devagar segue sendo toque)`
   + `, + teclado virtual com visualViewport FALSO (viewport mentindo 388px sem foco não achata modal, campo focado ainda cede altura, e o inset sai no blur)`
   + `, + Street View no lightbox do mapa (alvo 44px por hit-test, zero pontos roubados de escala/legenda/✕/zoom, viewpoint em [lat,lon], e o link ACOMPANHANDO arrastar e recentrar)`
+  + `, + o mapa ampliado no TOQUE de verdade, no ${MOTOR} (o Street View ABRE a aba e o duplo toque aproxima UM nível — no iPhone nenhum dos dois funcionava —, com o CONTROLE do ↗ do card abrindo e de um toque só não aproximando)`
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente, e o mapa do fundo DESENHADO pro mesmo tamanho do da frente — a promessa que o relato do iPhone mostrou quebrada)`
   + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar o app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), resposta que CHEGA drenando a fila SEM nenhum evento online novo (o relato do iPhone, com controle de que ela não drenou antes), app MORTO no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`

@@ -106,14 +106,17 @@ function mapaComGestos() {
   }).join('\n');
   new Function(...Object.keys(deps), src + '\n' + fatiarFuncao('setupMapaLightbox') + '\nsetupMapaLightbox();')(...Object.values(deps));
   const alvo = { closest: () => null };
-  const toque = (x, y, tremor = 0) => {
+  // `semClick`: o WebKit (Safari, e todo navegador do iPhone) NÃO manda o
+  // `click` de um toque cujo `pointerdown` teve `preventDefault` (L20); o
+  // Chromium manda. O mapa não pode depender dele.
+  const toque = (x, y, tremor = 0, { semClick = false } = {}) => {
     lb.h.pointerdown({ target: alvo, pointerId: 1, clientX: x, clientY: y, preventDefault() {} });
     if (tremor) win.pointermove({ pointerId: 1, clientX: x + tremor, clientY: y + tremor });
-    win.pointerup({ pointerId: 1, clientX: x + tremor, clientY: y + tremor });
-    lb.h.click({ target: alvo, clientX: x + tremor, clientY: y + tremor });
+    win.pointerup({ type: 'pointerup', pointerId: 1, clientX: x + tremor, clientY: y + tremor });
+    if (!semClick && lb.h.click) lb.h.click({ target: alvo, clientX: x + tremor, clientY: y + tremor });
     T += 120;
   };
-  return { toque, log, esperar: (ms) => { T += ms; } };
+  return { toque, log, lb, win, esperar: (ms) => { T += ms; } };
 }
 
 test('L15 duplo toque no mapa: aproxima com o tremor de um dedo; arraste e toques longe não', () => {
@@ -138,4 +141,88 @@ test('L15 duplo toque no mapa: aproxima com o tremor de um dedo; arraste e toque
   const d = mapaComGestos();
   d.toque(200, 450); d.esperar(400); d.toque(200, 450);
   assert.deepEqual(d.log, [], 'dois toques a 520 ms um do outro aproximaram');
+});
+
+// ── L20: no iPhone o toque NÃO gera `click` (auditoria de 2026-09-29) ───────
+// O `pointerdown` do mapa ampliado chama `preventDefault()` (sem ele o mouse
+// arrasta a <img> do tile como imagem), e no WebKit — o Safari, e todo
+// navegador do iPhone — isso mata o `click` do toque. MEDIDO com toque de
+// verdade no WebKit do Playwright: 2 toques no mapa → 0 `click`, zoom 17 → 17;
+// e o Street View, um <a>, não abria (0 de 2, com o ↗ do card abrindo 2 de 2).
+// No Chromium, os dois funcionavam. A tela é medida no smoke de layout, nos
+// dois motores; aqui, o gesto — o `setupMapaLightbox` de verdade.
+test('L20 duplo toque no mapa SEM `click` (o WebKit): aproxima — o toque é decidido ao soltar', () => {
+  for (const tremor of [0, 1, 3]) {
+    const m = mapaComGestos();
+    m.toque(200, 450, tremor, { semClick: true }); m.toque(200, 450, tremor, { semClick: true });
+    assert.deepEqual(m.log, ['zoom1'], `sem o \`click\` (o iPhone), o duplo toque com ${tremor} px de tremor não aproximou`);
+  }
+  // CONTROLE: um toque só não aproxima — a medida não conta o soltar como zoom.
+  const u = mapaComGestos();
+  u.toque(200, 450, 0, { semClick: true });
+  assert.deepEqual(u.log, [], 'um toque SÓ aproximou');
+  // Com o `click` também (o Chromium), aproxima UMA vez, não duas.
+  const c = mapaComGestos();
+  c.toque(200, 450); c.toque(200, 450);
+  assert.deepEqual(c.log, ['zoom1'], 'com o `click` e o soltar juntos, o duplo toque aproximou dobrado');
+});
+
+test('L20 a pinça, o toque de dois dedos e o toque que o navegador CANCELA não são toque', () => {
+  const m = mapaComGestos();
+  const alvo = { closest: () => null };
+  const baixa = (id, x, y) => m.lb.h.pointerdown({ target: alvo, pointerId: id, clientX: x, clientY: y, preventDefault() {} });
+  // Dois dedos que descem e sobem sem andar, duas vezes seguidas.
+  for (let i = 0; i < 2; i++) {
+    baixa(1, 180, 450); baixa(2, 240, 450);
+    m.win.pointerup({ type: 'pointerup', pointerId: 2, clientX: 240, clientY: 450 });
+    m.win.pointerup({ type: 'pointerup', pointerId: 1, clientX: 180, clientY: 450 });
+  }
+  assert.deepEqual(m.log, [], 'dois toques de DOIS dedos aproximaram como um duplo toque');
+  // O `pointercancel` (o navegador tomou o gesto) não é toque.
+  const k = mapaComGestos();
+  for (let i = 0; i < 2; i++) {
+    k.lb.h.pointerdown({ target: alvo, pointerId: 3, clientX: 200, clientY: 450, preventDefault() {} });
+    k.win.pointercancel({ type: 'pointercancel', pointerId: 3, clientX: 200, clientY: 450 });
+  }
+  assert.deepEqual(k.log, [], 'dois gestos CANCELADOS pelo navegador aproximaram');
+  // CONTROLE: depois da pinça, o duplo toque de um dedo segue valendo.
+  m.toque(200, 450, 0, { semClick: true }); m.toque(200, 450, 0, { semClick: true });
+  assert.deepEqual(m.log, ['zoom1'], 'CONTROLE: depois dos dois dedos, o duplo toque de um dedo deixou de aproximar');
+});
+
+test('L20 o toque no LINK do Street View passa sem o `preventDefault` do mapa — no iPhone ele abre', () => {
+  const m = mapaComGestos();
+  let impediu = 0;
+  // `closest` de verdade pro seletor que o app usar: casa se a lista tem `a`.
+  const link = { closest: (sel) => (String(sel).split(',').map((s) => s.trim()).includes('a') ? link : null) };
+  m.lb.h.pointerdown({ target: link, pointerId: 7, clientX: 380, clientY: 800, preventDefault() { impediu++; } });
+  assert.equal(impediu, 0, 'o pointerdown no Street View chamou preventDefault: no WebKit o toque no link não abre nada');
+  // CONTROLE: no mapa mesmo ele impede (é o que segura o arraste da imagem do tile).
+  const alvo = { closest: () => null };
+  m.lb.h.pointerdown({ target: alvo, pointerId: 8, clientX: 200, clientY: 400, preventDefault() { impediu++; } });
+  assert.equal(impediu, 1, 'CONTROLE: o toque no MAPA deixou de ter o preventDefault');
+});
+
+// ── L33: o passo do TECLADO na foto é o de um dente da roda, no centro ──────
+test('L33 + e − na foto: 1,2× por tecla, no CENTRO da camada, e o − não passa de 1×', () => {
+  const lb = lightbox();
+  const ini = APP.indexOf('    zoomPeloTeclado(sentido) {');
+  assert.ok(ini > 0, 'Lightbox.zoomPeloTeclado sumiu');
+  let prof = 0, fim = -1;
+  for (let j = APP.indexOf('{', ini); j < APP.length; j++) {
+    if (APP[j] === '{') prof++;
+    else if (APP[j] === '}' && --prof === 0) { fim = j + 1; break; }
+  }
+  // A camada (o `#imageLightbox`) centrada em (200, 400): o mesmo centro da foto do `lightbox()`.
+  const camada = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 800 }) };
+  lb.zoomPeloTeclado = new Function('document', 'return function ' + APP.slice(ini, fim).trim())(
+    { getElementById: (id) => (id === 'imageLightbox' ? camada : null) });
+  lb.zoomTo(2, 260, 430);                          // já ampliada e deslocada: o centro tem que ficar parado
+  const u = lb.naFoto({ x: 200, y: 400 });
+  lb.zoomPeloTeclado(1);
+  assert.ok(Math.abs(lb.scale - 2.4) < 1e-9, `o + deu ${lb.scale / 2}× (um dente da roda é 1,2×)`);
+  const p = lb.naTela(u);
+  assert.ok(Math.abs(p.x - 200) < 1e-6 && Math.abs(p.y - 400) < 1e-6, 'o + tirou do lugar o que estava no centro da tela');
+  for (let i = 0; i < 10; i++) lb.zoomPeloTeclado(-1);
+  assert.deepEqual([lb.scale, lb.tx, lb.ty], [1, 0, 0], 'o − passou de 1× ou não recentrou a foto');
 });
