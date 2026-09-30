@@ -3009,8 +3009,16 @@ async function handleListaPaises(data, { sessions }) {
 async function handleListaEstados(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  const countryId = data.countryId ? parseInt(data.countryId, 10) : 0;
-  if (countryId <= 0) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
+  // O país é um inteiro: o número que o app manda (`parseInt` no `api.js`), ou
+  // um texto só de dígitos. O `parseInt` daqui lia '1e400' como 1 e '30abc'
+  // como 30, e o que não é número virava NaN — e `NaN <= 0` é FALSO: 'abc',
+  // `true`, `[]`, `{}` e 'NaN' passavam e iam ao Waze com countryId=0, voltando
+  // 200 com a lista vazia (auditoria de 2026-09-29). `!(> 0)` pega o NaN; o
+  // mesmo 400 do país ausente, antes do Waze.
+  const bruto = data.countryId;
+  const countryId = typeof bruto === 'number' ? bruto
+    : typeof bruto === 'string' && /^\s*\d+\s*$/.test(bruto) ? Number(bruto) : NaN;
+  if (!(Number.isSafeInteger(countryId) && countryId > 0)) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
   const result = await callWaze(wazeStatesEndpoint(region, countryId), cookieHeader, csrf, null, region, { data, sessions, cookies });

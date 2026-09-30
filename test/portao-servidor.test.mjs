@@ -699,6 +699,29 @@ test('excluir-foto: releitura presa responde no teto DELA, sem escrever — e o 
   }
 });
 
+// `NaN <= 0` é falso: o countryId que não é número passava pela guarda e ia ao
+// Waze como 0, voltando 200 com a lista vazia (auditoria de 2026-09-29).
+test('lista-estados: countryId que não é número positivo é o 400 de país ausente, antes do Waze', async () => {
+  // '1e400' e '30abc' o `parseInt` lia como 1 e 30; 1.5 não é país.
+  for (const v of ['abc', true, [], {}, 'NaN', 0, -5, '', null, undefined, '0x1e', '1e400', '30abc', 1.5, [30], Infinity]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r, chamadas } = await comWaze(naoPodiaIrAoWaze,
+      () => dispatch('lista-estados', { ...s.dados, region: 'row', countryId: v }, s.ctx));
+    assert.equal(r.status, 400, `countryId ${JSON.stringify(v)}: HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 80)}`);
+    assert.equal(r.body.errorKey, 'srv.err.countryRequired', `countryId ${JSON.stringify(v)}`);
+    assert.equal(chamadas.length, 0, `countryId ${JSON.stringify(v)} foi ao Waze`);
+  }
+  // CONTROLE: o país de verdade (número ou texto de dígitos) vai, e com ele.
+  for (const v of [30, '30']) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r, chamadas } = await comWaze(() => json({ states: [{ id: 1, name: 'SP', countryId: 30 }] }),
+      () => dispatch('lista-estados', { ...s.dados, region: 'row', countryId: v }, s.ctx));
+    assert.equal(r.status, 200, `CONTROLE (${JSON.stringify(v)}): ${JSON.stringify(r.body)}`);
+    assert.match(chamadas[0].url, /[?&]countryId=30$/, `CONTROLE (${JSON.stringify(v)}): ${chamadas[0].url}`);
+    assert.deepEqual(r.body.states.map((e) => e.name), ['SP']);
+  }
+});
+
 test('ids: objeto, lista ou texto enorme não vão ao Waze em NENHUMA rota de escrita — o mesmo 400 de id ausente', async () => {
   // O `idValido` nascia só no LOTE do marcar-lido; o marcar-lido de um item,
   // o validar-place, o guardar-pedido, o renomear-local e o excluir-foto
