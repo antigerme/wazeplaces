@@ -14726,6 +14726,8 @@ function esquecerOutraConta(id) {
     // importa — o "invisível" que ela deixou PENDENTE, que sem isto sairia pra
     // quem entrou, sem o gesto dela ("o app nunca desliga por conta própria").
     presencaWmeZerar();
+    // As escolhas que valiam pelas regras DELA, as marcas do que só ela viu, e o
+    // que ESCREVE no Waze no nome de alguém — que não se herda (ver a função).
     esquecerEscolhasDaContaAnterior();
     // Casa, trabalho e a posição do GPS também eram dela: a fila de quem entrou
     // saía ordenada pela casa da anterior (R4-5 A4). As de quem entrou chegam
@@ -14754,15 +14756,28 @@ function esquecerOutraConta(id) {
 // As marcas de "já viu" (o aviso da cota, a dica, o "Como funciona", o aviso
 // de consequência do primeiro ✕ e ✓) e a contagem que a dica usa são do que ELA
 // viu e fez: quem entra não viu nada disso. O nível guardado também era o
-// dela: sai, e a cota espera o perfil de quem entrou, que o regrava. Tema e
-// idioma ficam — como as outras escolhas do aparelho.
+// dela: sai, e a cota espera o perfil de quem entrou, que o regrava.
+//
+// E o critério pras escolhas que sobram é um só: o que ESCREVE no Waze no nome
+// de alguém não se herda. "Pular guarda o pedido" sai: ligado, o ↑ grava a
+// estrela do editor no pedido — no nome de quem está logado —, e a preferência
+// é opt-in ESTRITO (quem nunca abriu as Preferências não guarda nada); quem
+// entra não fez essa escolha. Ficam as que não escrevem no Waze em nome de
+// ninguém: "Ver quem está no app" desligado, herdado, erra pro lado da
+// privacidade, e o offline é recurso do aparelho. Tema e idioma também ficam,
+// como as outras escolhas do aparelho.
 function esquecerEscolhasDaContaAnterior() {
     const prefs = AppState.preferences;
     prefs.undoEnabled = true;
+    prefs.pularGuarda = false;
     for (const marca of ['undoGateSeen', 'dicaDesfazerVista', 'comoFuncionaVisto', 'consequenciaVista']) delete prefs[marca];
     prefs.semUndoSeguidas = 0;
     savePreferences();
     safeLS.remove(PERFIL_GATE_KEY);
+    // O que MOSTRA as escolhas: o selo do ↑ do card na tela ("Pular ⭐" diria que
+    // o ↑ guarda) e as chaves da aba Preferências, se ela estiver aberta.
+    atualizarSeloDePular();
+    desenharChavesDePreferencia();
 }
 
 function carregarFilaDeSaida() {

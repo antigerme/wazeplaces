@@ -562,8 +562,8 @@ function montarGate({ prefs, perfilGate = { rank: 5, isStaff: false }, stats = {
   return { h, ap, toasts, deps };
 }
 // O aparelho da conta A (L6 que desligou o Desfazer e já viu tudo), cuja sessão CAIU.
-const PREFS_DE_A = { undoEnabled: false, presenca: false, pularGuarda: true, undoGateSeen: true, dicaDesfazerVista: true,
-  comoFuncionaVisto: true, consequenciaVista: { reject: true, read: true }, semUndoSeguidas: 19 };
+const PREFS_DE_A = { undoEnabled: false, presenca: false, pularGuarda: true, offlineDisponivel: true, undoGateSeen: true,
+  dicaDesfazerVista: true, comoFuncionaVisto: true, consequenciaVista: { reject: true, read: true }, semUndoSeguidas: 19 };
 
 test('A3: B entra no aparelho de A — o Desfazer volta, as marcas de "já viu" saem, e a cota de B é comemorada', () => {
   const m = montarGate({ prefs: PREFS_DE_A });
@@ -574,8 +574,9 @@ test('A3: B entra no aparelho de A — o Desfazer volta, as marcas de "já viu" 
     assert.equal(p[marca], undefined, `B herdou a marca "${marca}" (ele não viu nada disso)`);
   }
   assert.equal(p.semUndoSeguidas, 0, 'a dica "você nunca desfaz" sairia pra B pela contagem de A');
-  // As escolhas do aparelho ficam.
-  assert.deepEqual([p.presenca, p.pularGuarda], [false, true]);
+  // As escolhas que não escrevem no Waze em nome de ninguém ficam: a presença
+  // desligada (erra pro lado da privacidade) e o offline (recurso do aparelho).
+  assert.deepEqual([p.presenca, p.offlineDisponivel], [false, true], 'a troca de conta levou escolhas do aparelho');
   assert.equal(m.ap.dados.has(constante('PERFIL_GATE_KEY')), false, 'o nível de A seguiu valendo pra cota de B');
   assert.equal(m.ap.ler(PREFERENCES_KEY).undoEnabled, true, 'a troca não foi gravada');
   // O perfil de B (L2) chega: a linha de base é decidida pra ELE, e cruzar a
@@ -604,6 +605,51 @@ test('A3: a troca de conta passa pelo esquecer das escolhas (e a mesma conta vol
   assert.match(troca, /^\s+esquecerEscolhasDaContaAnterior\(\);/m, 'a troca de conta não esquece as escolhas de A');
   // Quem chama a troca é SÓ a conta diferente (conferido em test/conta).
   assert.match(fatiarDe(APP_SEM, 'aoConhecerConta'), /if \(antes && antes\.id && String\(antes\.id\) !== id\) esquecerOutraConta\(id\);/);
+});
+
+// O ↑ de verdade (`handleSkip`) depois da troca de conta, com o card na tela e a
+// aba Preferências aberta: o executor é rodado à mão (a janela do Desfazer vence).
+function montarPularDepoisDaTroca() {
+  const ap = aparelho({ [PREFERENCES_KEY]: PREFS_DE_A });
+  const estrelas = [], executores = [];
+  const selo = { attrs: { 'data-i18n': 'card.stamp.skipGuarda' }, setAttribute(k, v) { this.attrs[k] = v; } };
+  const card = { querySelector: (sel) => (sel === '.swipe-stamp-up span[data-i18n]' ? selo : null) };
+  const chaves = Object.fromEntries(['prefUndoEnabled', 'prefPularGuarda', 'prefPresenca', 'prefOfflineDisponivel']
+    .map((id) => [id, { checked: id === 'prefPularGuarda' || id === 'prefOfflineDisponivel', disabled: false }]));
+  const deps = {
+    safeLS: ap.safeLS, localStorage: ap.localStorage, PREFERENCES_KEY, PERFIL_GATE_KEY: constante('PERFIL_GATE_KEY'),
+    preferenciasCarregadas: true, epocaDaSessao: 0, Treino: { ativo: false }, acoesTravadas: () => false,
+    AppState: { preferences: { ...PREFS_DE_A }, currentPlace: { venueID: 'v1', updateRequestID: 'u1' }, queue: [], stats: { skipped: 0 } },
+    scheduleAction: (tipo, place, executor) => executores.push(executor),
+    API: { getRegion: () => 'row', guardarPedido: async (...a) => { estrelas.push(a); return { success: true }; } },
+    callWithRetry: (fn) => fn(), cardDaFrente: () => card, applyI18n: () => {},
+    document: { getElementById: (id) => chaves[id] || null },
+  };
+  const h = montar(['esquecerEscolhasDaContaAnterior', 'savePreferences', 'handleSkip', 'atualizarSeloDePular',
+    'desenharChavesDePreferencia'], deps);
+  return { h, ap, estrelas, executores, selo, chaves, deps };
+}
+
+test('A3: quem entra NÃO herda o "Pular guarda o pedido" — o ↑ dele não grava a estrela no Waze, no nome dele', async () => {
+  const m = montarPularDepoisDaTroca();
+  m.h.esquecerEscolhasDaContaAnterior();
+  assert.equal(m.deps.AppState.preferences.pularGuarda, false, 'a escolha de A de guardar no ↑ ficou pra B');
+  assert.equal(m.ap.ler(PREFERENCES_KEY).pularGuarda, false, 'a troca não foi gravada');
+  // O que MOSTRA a escolha diz a mesma coisa: o selo do ↑ e a chave da aba Preferências.
+  assert.equal(m.selo.attrs['data-i18n'], 'card.stamp.skip', 'o selo do ↑ seguiu dizendo "Pular ⭐"');
+  assert.equal(m.chaves.prefPularGuarda.checked, false, 'a chave da aba Preferências seguiu ligada');
+  assert.equal(m.chaves.prefUndoEnabled.checked, true, 'a chave do Desfazer seguiu desligada (a escolha de A)');
+  assert.equal(m.chaves.prefOfflineDisponivel.checked, true, 'a chave do offline foi desligada (ele é recurso do aparelho, e fica)');
+  m.h.handleSkip();
+  await m.executores[0]();
+  assert.deepEqual(m.estrelas, [], 'DEFEITO: o ↑ de B gravou a estrela no Waze, no nome dele, por uma escolha de A');
+});
+
+test('A3: CONTROLE — sem esquecer as escolhas de A, o ↑ de B grava a estrela (o harness enxerga a escrita)', async () => {
+  const m = montarPularDepoisDaTroca();
+  m.h.handleSkip();
+  await m.executores[0]();
+  assert.deepEqual(m.estrelas, [['v1', 'u1', true, 'row']]);
 });
 
 // ═══ A4 · a casa da conta anterior não ordena a fila de quem entra ═══════════
