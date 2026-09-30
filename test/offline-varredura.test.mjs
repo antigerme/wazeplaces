@@ -266,7 +266,9 @@ test('O4: a reabertura sem rede RECUSA a fila de OUTRO lugar (e a esquece) — e
   const mesma = reabrir({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'row', pais: '30' } });
   assert.equal(await mesma.app.abrir(), true, 'CONTROLE: a fila do mesmo lugar não abriu');
   assert.deepEqual(mesma.AppState.queue.map((p) => p.venueID), ['v1']);
-  assert.deepEqual(mesma.app.onde(), { regiao: 'row', pais: '30' }, 'a fila reaberta não sabe de onde é');
+  // O lugar da fila reaberta leva também a assinatura da busca (R4-O8) — aqui
+  // ausente dos dois lados, que é o que o instrumento deste teste simula.
+  assert.deepEqual(mesma.app.onde(), { regiao: 'row', pais: '30', busca: undefined }, 'a fila reaberta não sabe de onde é');
 });
 
 test('O4: trocar de lugar ESQUECE a fila guardada de outro lugar — e só ela, e só com o offline ligado', async () => {
@@ -462,4 +464,164 @@ test('R4-O9: CONTROLE — com rede a fila é gravada (pela varredura também), e
   // E o interruptor da tela é ESTA função (não uma cópia dela).
   assert.match(APP_SEM, /\$\('prefOfflineDisponivel'\)\?\.addEventListener\('change', \(e\) => offlineAoMudarInterruptor\(e\.target\.checked\)\);/,
     'o interruptor da tela não passa mais pela função testada');
+});
+
+// ── R4-O8: a fila guardada é da BUSCA — o filtro também (auditoria de 2026-09-29)
+// O O4 fechou região e país; os FILTROS eram gravados junto da fila e nunca
+// lidos. Trocar de estado (ou de tipos, categoria, "Minha área", residencial,
+// "lidos também"), ver a busca nova vir vazia e reabrir sem rede mostrava a fila
+// do filtro VELHO sob o novo (medido no navegador, f1: estado 5 e só "Nova foto"
+// abriam os 3 pedidos do Brasil inteiro). Aqui o aparelho roda de VERDADE: os
+// filtros passam pelo armazenamento (`saveFilters`/`loadFilters`), a assinatura
+// é a real, e a base é uma de mentira que sobrevive às "páginas".
+const EXPR = (nome) => new RegExp(`^const ${nome} = ([^;]+);`, 'm').exec(APP_SEM)[1];
+const TYPES_ALL_R = new Function('return ' + EXPR('TYPES_ALL'))();
+const TYPES_PADRAO_R = new Function('TYPES_ALL', 'return ' + EXPR('TYPES_PADRAO'))(TYPES_ALL_R);
+function aparelhoO8() {
+  const ls = new Map();
+  const base = new Map();
+  const offlineDB = async () => ({
+    close() {},
+    transaction: () => {
+      const tx = {};
+      const fim = () => setTimeout(() => tx.oncomplete && tx.oncomplete());
+      tx.objectStore = () => ({
+        put: (v, k) => { base.set(k, JSON.parse(JSON.stringify(v))); fim(); },
+        get: (k) => { const r = {}; setTimeout(() => { r.result = base.get(k); if (r.onsuccess) r.onsuccess(); fim(); }); return r; },
+        delete: (k) => { base.delete(k); },
+      });
+      return tx;
+    },
+  });
+  // Uma "página": memória nova, o armazenamento e a base de sempre.
+  return function pagina({ onLine = false } = {}) {
+    const log = [];
+    const AppState = { queue: [], hasMore: false, loadError: true, serverTotal: 0, filters: null };
+    const deps = {
+      AppState, navigator: { onLine }, Treino: { ativo: false }, offlineLigado: () => true,
+      localStorage: { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) },
+      FILTERS_KEY: 'waze_places_filters', TYPES_ALL: TYPES_ALL_R, TYPES_PADRAO: TYPES_PADRAO_R, ORDEM_PADRAO: 'newest',
+      API: { getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok' },
+      offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerJanela: async () => null,
+      contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, dfato: (k, o) => log.push([k, o || {}]),
+      semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
+      pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
+      updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => log.push(['card', {}]),
+    };
+    const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
+      'saveFilters', 'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'offlineEsquecerFilaDeOutroLugar',
+      'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'];
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null;
+      ${nomes.map(fatiar).join('\n')}
+      AppState.filters = filtrosDeFabrica();
+      loadFilters();
+      return { saveFilters, lugarAgora, offlineGravarFila, offlineEsquecerFilaDeOutroLugar, offlineTentarAbrirSemRede,
+        buscou: (places) => { AppState.queue = places; filaDeOnde = lugarAgora(); } };`)(...chaves.map((k) => deps[k]));
+    return { app, AppState, log, base };
+  };
+}
+const PEDIDOS_O8 = () => [1, 2, 3].map((i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i }));
+// A busca com rede traz a fila e a grava; a pessoa muda o filtro (e o grava);
+// o app é fechado e reaberto SEM rede.
+async function guardarMudarReabrir(mudar) {
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.app.buscou(PEDIDOS_O8());
+  assert.equal(await a.app.offlineGravarFila(Date.now()), true, 'PRÉ-CONDIÇÃO: a fila não foi gravada');
+  mudar(a.AppState.filters);
+  a.app.saveFilters();
+  const b = pagina({ onLine: false });
+  const abriu = await b.app.offlineTentarAbrirSemRede();
+  return { abriu, b, pagina };
+}
+
+test('R4-O8: reaberta sem rede sob OUTRO FILTRO, a fila guardada do filtro anterior não entra — cada filtro da busca', async () => {
+  const mudancas = {
+    estado: (f) => { f.stateId = '5'; },
+    tipos: (f) => { f.types = ['NEW_PHOTO']; },
+    categoria: (f) => { f.categories = ['PARK']; },
+    'minha área': (f) => { f.myArea = true; },
+    residencial: (f) => { f.residential = 'true'; },
+    'lidos também': (f) => { f.unreadOnly = false; },
+    'área gerenciada': (f) => { f.managedAreaId = '77'; },
+  };
+  for (const [nome, mudar] of Object.entries(mudancas)) {
+    const r = await guardarMudarReabrir(mudar);
+    assert.equal(r.abriu, false, `trocado o filtro (${nome}), a fila guardada do filtro anterior ABRIU`);
+    assert.deepEqual(r.b.AppState.queue, [], `a fila do outro filtro (${nome}) entrou na tela`);
+    const ev = r.b.log.find(([k]) => k === 'offline.outroLugar');
+    assert.ok(ev && ev[1].filtro === true, `o diário não diz que foi o FILTRO (${nome}): ${JSON.stringify(r.b.log)}`);
+  }
+});
+
+test('R4-O8: CONTROLE — trocar só a ORDEM (ou nada) mantém a fila guardada: ela abre depois de fechar e reabrir', async () => {
+  for (const [nome, mudar] of Object.entries({
+    nada: () => {},
+    'mais antigos': (f) => { f.sortOrder = 'oldest'; },
+    'perto de casa': (f) => { f.sortOrder = 'casa'; },
+  })) {
+    const r = await guardarMudarReabrir(mudar);
+    assert.equal(r.abriu, true, `trocada só a ordem (${nome}), a fila guardada não abriu — a assinatura não sobrevive ao armazenamento`);
+    assert.deepEqual(r.b.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3']);
+  }
+});
+
+test('R4-O8: a assinatura sobrevive a fechar e reabrir mesmo com os tipos gravados FORA da ordem canônica', async () => {
+  // O `loadFilters` normaliza os tipos pela ordem de `TYPES_ALL` (`sanearTiposSalvos`):
+  // a MESMA escolha, lida do armazenamento, volta noutra ordem.
+  const r = await guardarMudarReabrir((f) => { f.types = ['NEW_PHOTO', 'NEW_PLACE']; });
+  assert.equal(r.abriu, false, 'PRÉ-CONDIÇÃO: trocar os tipos não recusou');
+  // Agora a fila é gravada JÁ com os tipos fora de ordem — a escolha não muda.
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.AppState.filters.types = ['NEW_PHOTO', 'NEW_PLACE'];
+  a.app.saveFilters();
+  a.app.buscou(PEDIDOS_O8());
+  await a.app.offlineGravarFila(Date.now());
+  const b = pagina({ onLine: false });
+  assert.deepEqual(b.AppState.filters.types, ['NEW_PLACE', 'NEW_PHOTO'], 'PRÉ-CONDIÇÃO: a leitura não normalizou a ordem');
+  assert.equal(await b.app.offlineTentarAbrirSemRede(), true, 'a MESMA escolha de tipos, relida noutra ordem, recusou a fila');
+});
+
+test('R4-O8: fila guardada SEM a assinatura (versão anterior) não entra — não há como saber de que filtro é', async () => {
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.app.buscou(PEDIDOS_O8());
+  await a.app.offlineGravarFila(Date.now());
+  const velha = a.base.get('fila');
+  delete velha.busca;
+  a.base.set('fila', velha);
+  const b = pagina({ onLine: false });
+  assert.equal(await b.app.offlineTentarAbrirSemRede(), false, 'a fila sem assinatura abriu — pode ser de outro filtro');
+});
+
+test('R4-O8: a fila nova (`resetQueue`) ESQUECE a guardada de outro filtro — e não a de outra ORDEM', async () => {
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.app.buscou(PEDIDOS_O8());
+  await a.app.offlineGravarFila(Date.now());
+  a.AppState.filters.sortOrder = 'oldest';
+  await a.app.offlineEsquecerFilaDeOutroLugar();
+  assert.ok(a.base.has('fila'), 'trocar só a ordem esqueceu a fila guardada');
+  a.AppState.filters.stateId = '5';
+  await a.app.offlineEsquecerFilaDeOutroLugar();
+  assert.equal(a.base.has('fila'), false, 'trocar o estado não esqueceu a fila guardada do estado anterior');
+  // E o caminho da fila nova passa mesmo por aqui (o O4 já cobrava a região e o país).
+  assert.match(fatiar('resetQueue'), /filaDeOnde = null;\s*offlineEsquecerFilaDeOutroLugar\(\);/);
+});
+
+test('R4-O8: a fila REABERTA e regravada (a varredura grava de novo) segue sendo da mesma busca', async () => {
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.app.buscou(PEDIDOS_O8());
+  await a.app.offlineGravarFila(Date.now());
+  const b = pagina({ onLine: false });
+  assert.equal(await b.app.offlineTentarAbrirSemRede(), true, 'PRÉ-CONDIÇÃO: a fila guardada não abriu');
+  // A varredura grava a fila viva no começo dela (sem `desde`): o lugar é o da
+  // fila reaberta (`filaDeOnde`), que tem de levar a assinatura junto.
+  assert.equal(await b.app.offlineGravarFila(), true);
+  const c = pagina({ onLine: false });
+  assert.equal(await c.app.offlineTentarAbrirSemRede(), true,
+    'a fila reaberta, regravada, perdeu a assinatura da busca — a próxima reabertura a recusou');
 });

@@ -3934,14 +3934,23 @@ function applyFiltersFromModal() {
 // enquanto uma lista de inclusão silenciaria a re-busca no dia em que alguém
 // esquecesse de somar o campo dele. As chaves são ordenadas porque a ordem de
 // inserção do objeto não é contrato.
-function assinaturaDeBusca() {
+// `semOrdem`: só O QUE se pede, sem a ordem em que vem. É a que diz de que busca
+// é a fila guardada do offline (ver `lugarAgora`) — trocar só a ordem não faz
+// dela a fila de outra busca.
+function assinaturaDeBusca(semOrdem) {
     const { sortOrder, ...doServidor } = AppState.filters;
     const chaves = Object.keys(doServidor).sort();
+    // Lista é CONJUNTO (os tipos, as categorias) e vai ordenada, e o país vai
+    // como texto: a mesma escolha LIDA do armazenamento volta na ordem do
+    // `sanearTiposSalvos`, e a assinatura da fila guardada tem que sobreviver a
+    // fechar e reabrir o app.
+    const valor = (v) => (Array.isArray(v) ? v.map(String).sort() : v);
+    const doPedido = [chaves.map((k) => [k, valor(doServidor[k])]), API.getRegion(), String(API.getCountry())];
     // A ordem entra só pelo que ela muda NO PEDIDO ao Waze (`ordemDoWaze`):
     // "Mais recentes" ↔ "Mais antigos" refaz a fila, com o outro `orderBy`; a
     // de distância pede o mesmo que o padrão e só reordena (e traz o resto: ver
     // `reordenarFilaNaTela`).
-    return JSON.stringify([chaves.map((k) => [k, doServidor[k]]), API.getRegion(), API.getCountry(), ordemDoWaze()]);
+    return JSON.stringify(semOrdem ? doPedido : [...doPedido, ordemDoWaze()]);
 }
 
 // Reordena e mostra o novo topo. O card na tela TROCA, e isso é o certo: a
@@ -14890,13 +14899,23 @@ function offlineLigado() {
 // esquece. `filaDeOnde` é o lugar da fila EM MEMÓRIA: o da busca que a trouxe
 // (a região pode mudar antes de a fila ser zerada — o país do perfil troca a
 // região e ainda espera a lista de países), zerado a cada fila nova.
+//
+// E o "lugar" é também o FILTRO da busca (`busca`: a `assinaturaDeBusca` sem a
+// ordem — estado, tipos, categoria, "Minha área", residencial, "lidos também").
+// Os filtros eram gravados junto da fila e nunca lidos: trocar de estado, ver a
+// busca nova vir vazia e reabrir sem rede mostrava a fila do filtro VELHO sob o
+// novo (auditoria de 2026-09-29, O8, medido no navegador: estado 5 e só "Nova
+// foto" abriam a fila do Brasil inteiro). Trocar só a ORDEM não muda a busca.
 let filaDeOnde = null;
 function lugarAgora() {
-    return { regiao: API.getRegion(), pais: String(API.getCountry()) };
+    return { regiao: API.getRegion(), pais: String(API.getCountry()), busca: assinaturaDeBusca(true) };
 }
+// A fila guardada SEM a assinatura (versão anterior) não é deste lugar: não há
+// como saber de que filtro ela é, e a próxima busca com rede a regrava.
 function mesmoLugar(a, b) {
     return !!a && !!b && typeof a.regiao === 'string' && a.regiao === b.regiao
-        && a.pais !== undefined && a.pais !== null && String(a.pais) === String(b.pais);
+        && a.pais !== undefined && a.pais !== null && String(a.pais) === String(b.pais)
+        && a.busca === b.busca;
 }
 
 // FONTE ÚNICA da URL da foto. Card, lightbox e aquecimento passam TODOS por
@@ -14971,6 +14990,9 @@ async function offlineGravarFila(desde) {
                 filtros,
                 regiao: lugar.regiao,
                 pais: lugar.pais,
+                // A assinatura da busca, sem a ordem: é ela que a reabertura
+                // compara (`mesmoLugar`). Os `filtros` acima vão pro diagnóstico.
+                busca: lugar.busca,
                 conta,
                 s: sessao,
                 places: fila,
@@ -15040,11 +15062,11 @@ async function offlineLerFila() {
     } catch (e) { return null; }
 }
 
-// Trocou de lugar (região ou país): a fila guardada é de OUTRO lugar e sai — a
-// busca do lugar novo regrava, se trouxer pedido. Lê e apaga na MESMA transação,
-// e só se o guardado NÃO for daqui: a busca do lugar novo pode ter gravado antes.
-// Com o offline desligado nem abre a base (abrir CRIA a base): quem não marca
-// não paga nada.
+// Trocou de lugar (região, país ou filtro — ver `lugarAgora`): a fila guardada é
+// de OUTRO lugar e sai — a busca do lugar novo regrava, se trouxer pedido. Lê e
+// apaga na MESMA transação, e só se o guardado NÃO for daqui: a busca do lugar
+// novo pode ter gravado antes. Com o offline desligado nem abre a base (abrir
+// CRIA a base): quem não marca não paga nada.
 async function offlineEsquecerFilaDeOutroLugar() {
     if (!offlineLigado()) return;
     let db = null;
@@ -15055,9 +15077,12 @@ async function offlineEsquecerFilaDeOutroLugar() {
             const st = tx.objectStore(OFFLINE_STORE);
             const r = st.get('fila');
             r.onsuccess = () => {
-                if (r.result && !mesmoLugar(r.result, lugarAgora())) {
+                const agora = lugarAgora();
+                if (r.result && !mesmoLugar(r.result, agora)) {
                     st.delete('fila');
-                    dfato('offline.outroLugar', { esqueceu: true });
+                    // `filtro`: o lugar é o mesmo e só o filtro mudou.
+                    const soOFiltro = r.result.regiao === agora.regiao && String(r.result.pais) === agora.pais;
+                    dfato('offline.outroLugar', { esqueceu: true, ...(soOFiltro ? { filtro: true } : {}) });
                 }
             };
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
@@ -15514,13 +15539,17 @@ async function offlineTentarAbrirSemRede() {
     if (!offlineLigado() || navigator.onLine !== false) return false;
     const guardada = await offlineLerFila();
     if (!guardada) return false;
-    // A fila de OUTRO lugar (a região ou o país do filtro mudou depois dela) não
+    // A fila de OUTRO lugar (a região, o país ou o FILTRO mudou depois dela) não
     // entra: seria a fila da região velha sob o filtro novo, e a decisão sairia
-    // pro servidor errado (ver `filaDeOnde`). Fila guardada sem o lugar (versão
-    // anterior) também não: não há como saber de onde ela é, e a próxima busca
-    // com rede a regrava. A tela é a de sempre sem rede, e a fila velha sai.
-    if (!mesmoLugar(guardada, lugarAgora())) {
-        dfato('offline.outroLugar', { regiao: guardada.regiao || null });
+    // pro servidor errado (ver `filaDeOnde`) — ou a fila do Brasil inteiro sob
+    // "só Nova foto" (O8). Fila guardada sem o lugar (versão anterior) também
+    // não: não há como saber de onde ela é, e a próxima busca com rede a
+    // regrava. A tela é a de sempre sem rede, e a fila velha sai.
+    const agora = lugarAgora();
+    if (!mesmoLugar(guardada, agora)) {
+        // `filtro`: o lugar é o mesmo e só o filtro mudou.
+        const soOFiltro = guardada.regiao === agora.regiao && String(guardada.pais) === agora.pais;
+        dfato('offline.outroLugar', { regiao: guardada.regiao || null, ...(soOFiltro ? { filtro: true } : {}) });
         offlineEsquecerFilaDeOutroLugar();
         return false;
     }
@@ -15555,7 +15584,7 @@ async function offlineTentarAbrirSemRede() {
         return false;
     }
     AppState.queue = filtrada.places;
-    filaDeOnde = { regiao: guardada.regiao, pais: String(guardada.pais) };
+    filaDeOnde = { regiao: guardada.regiao, pais: String(guardada.pais), busca: guardada.busca };
     // A fila guardada começa uma fila: o que ela traz já ENTROU, e a busca,
     // quando a rede voltar, relê do topo sem repetir nada disso.
     pedidosQueEntraramNaFila.clear();
