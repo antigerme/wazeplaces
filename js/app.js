@@ -7334,6 +7334,9 @@ function derrubarSessao(errorKey, { depois } = {}) {
         AppState.pendingAction = null;
         saveStats();
     }
+    // O lote de lidos que estava no ar era da sessão que morreu: ele não trava
+    // a sessão que vem (ver `loteDeLidosEmVoo`).
+    loteDeLidosEmVoo = false;
     // E as do lightbox, que têm janela própria (ver a função).
     cancelarPendenciasDoLightbox();
     removeUndoBanner();
@@ -7629,6 +7632,9 @@ async function handleLogout() {
     // As do lightbox também: a janela delas correria invisível e sairia com o
     // token de quem entrasse depois (ver a função).
     cancelarPendenciasDoLightbox();
+    // O "Marcar todos" que ficou no ar é de quem saiu: ele não trava quem
+    // entrar (ver `loteDeLidosEmVoo`).
+    loteDeLidosEmVoo = false;
     // O token sai do armazenamento AGORA e a limpeza local acontece inteira sem
     // esperar rede nenhuma — pedir pra sair tem que ser instantâneo. A cópia
     // serve pra exclusão no servidor, que vai depois, com retentativa.
@@ -16210,7 +16216,13 @@ function openBatchReadConfirm() {
     // Um lote por vez: os pedidos do primeiro ainda estão na fila e o diálogo
     // contaria os MESMOS de novo.
     if (loteDeLidosEmVoo) { showToast(t('toast.esperaLote'), 'info'); return; }
-    loteDeLidosContado = AppState.queue.filter((p) => p.venueID && p.updateRequestID).map(chaveDoPedido);
+    // O pedido EM ANDAMENTO fica de fora (`pedidosEmAndamento`): a aprovação de
+    // foto no ar deixa o card na fila até a resposta, e o lote o levava junto —
+    // uma SEGUNDA decisão sobre o mesmo pedido, contada no placar (MEDIDO: o
+    // diálogo dizia 3 com 2 pedidos a decidir; auditoria de 2026-09-29, V7). É a
+    // mesma régua da recusa automática.
+    loteDeLidosContado = AppState.queue.filter((p) => p.venueID && p.updateRequestID
+        && !pedidosEmAndamento.has(chaveDoPedido(p))).map(chaveDoPedido);
     const n = loteDeLidosContado.length;
     if (n === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
     const msgEl = document.getElementById('batchReadMessage');
@@ -16223,7 +16235,9 @@ async function handleBatchMarkRead() {
     // Só o que o diálogo CONTOU e segue na fila (ver `loteDeLidosContado`).
     const contados = new Set(loteDeLidosContado || []);
     loteDeLidosContado = null;
-    const alvos = AppState.queue.filter((p) => p.venueID && p.updateRequestID && contados.has(chaveDoPedido(p)));
+    // E o que entrou em andamento com o diálogo aberto também fica de fora (V7).
+    const alvos = AppState.queue.filter((p) => p.venueID && p.updateRequestID && contados.has(chaveDoPedido(p))
+        && !pedidosEmAndamento.has(chaveDoPedido(p)));
     if (alvos.length === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
     // Descarrega qualquer undo pendente antes (consistência de estado) — o do
     // card E os das ações de FOTO, que dividem o mesmo banner: o
@@ -16235,6 +16249,7 @@ async function handleBatchMarkRead() {
     if (renomeacaoPendente) renomeacaoPendente.enviar();
     removeUndoBanner();
     const epoca = epocaDaSessao;
+    const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver o fim (V9)
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const itens = (ps) => ps.map((p) => ({ venueID: p.venueID, updateRequestID: p.updateRequestID }));
     // No ar: trava as outras decisões e tira os pedidos das buscas que chegarem
@@ -16253,14 +16268,18 @@ async function handleBatchMarkRead() {
             const pedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
             const r = await callWithRetry(() => API.markAsReadBatch(itens(pedaco), regiao));
             if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
-            if (r && r.success) { feitos.push(...pedaco); continue; }
+            // O pouso é registrado A CADA PEDAÇO, não no fim do laço: fechar o
+            // app no meio de um lote de 60 deixava os 25 que o Waze já marcou sem
+            // pouso, e a reabertura sem rede os devolvia como card — dava pra
+            // decidi-los de novo (MEDIDO: 25 de volta; auditoria de 2026-09-29, O4).
+            if (r && r.success) { feitos.push(...pedaco); registrarPouso(pedaco); continue; }
             if (r && r.errorCategory === 'unauthorized') { falhou = r; handleUnauthorized(); break; }
             if (!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'))) { falhou = r || {}; break; }
             // Um do pedaço já estava resolvido e o Waze parou nele: um a um.
             for (const p of pedaco) {
                 const r1 = await callWithRetry(() => API.markAsRead(p.venueID, p.updateRequestID, null, regiao));
                 if (epoca !== epocaDaSessao) return;
-                if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) feitos.push(p);
+                if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) { feitos.push(p); registrarPouso(p); }
                 else if (r1 && r1.errorCategory === 'unauthorized') { falhou = r1; handleUnauthorized(); break; }
                 else { falhou = r1 || {}; break; }
             }
@@ -16268,7 +16287,10 @@ async function handleBatchMarkRead() {
     } catch (e) {
         falhou = {};
     } finally {
-        loteDeLidosEmVoo = false;
+        // Só o lote DESTA sessão solta a trava: a queda e o "Sair" já a soltaram
+        // (ver `loteDeLidosEmVoo`), e um lote velho que voltar depois não pode
+        // soltar o que um lote da sessão nova travou.
+        if (epoca === epocaDaSessao) loteDeLidosEmVoo = false;
         marcarEmAndamento(alvos, false);
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
@@ -16277,9 +16299,9 @@ async function handleBatchMarkRead() {
     if (feitos.length) {
         // O que saiu conta como o ✓ de um card conta: placar, Histórico e
         // conquistas. Antes o lote subia só o placar, e o Histórico, o Resumo do
-        // mês e a patente discordavam dele.
+        // mês e a patente discordavam dele. (O pouso já foi registrado a cada
+        // pedaço, lá no laço.)
         tratouNestaFila = true;
-        registrarPouso(feitos);
         AppState.stats.read += feitos.length;
         recordHistory('read', feitos.length);
         registrarLoteConfirmado(feitos.length);
@@ -16299,12 +16321,22 @@ async function handleBatchMarkRead() {
         showToast(t(feitos.length === 1 ? 'toast.batchDone' : 'toast.batchDonePlural', { n: feitos.length }), 'success');
     }
     if (falhou && falhou.errorCategory !== 'unauthorized') showToast(msgDoServidor(falhou, t('toast.batchError')), 'error');
+    // O que o lote NÃO marcou segue pendente no Waze. Na mesma fila ele nunca
+    // saiu dela (o lote trava as outras decisões). Numa fila REFEITA no meio (↻,
+    // filtro) ele não entrou — estava em andamento —, e ninguém o trazia: a fila
+    // terminava em "Tudo limpo! … Confira o país" com os pedidos pendentes
+    // (auditoria de 2026-09-29, V9). Volta pela busca (`devolverPedidoRecusado`),
+    // que sai na hora se a tela ficou sem card.
+    const marcados = new Set(feitos);
+    const naoMarcados = epocaFila !== AppState.fetchEpoch ? alvos.filter((p) => !marcados.has(p)) : [];
     // A fila na tela: o card da frente pode ter saído no lote.
     if (AppState.currentPlace && !AppState.queue.includes(AppState.currentPlace)) {
         AppState.currentPlace = null;
         removeCurrentCardEl();
     }
-    if (!AppState.currentPlace) {
+    // A devolução já desenha o card ou busca quando a tela está vazia.
+    if (naoMarcados.length) devolverPedidoRecusado(naoMarcados, epocaFila);
+    else if (!AppState.currentPlace) {
         if (AppState.queue.length) showCurrentPlace();
         else if (AppState.hasMore) startFetching();
         else showNoPlaces();

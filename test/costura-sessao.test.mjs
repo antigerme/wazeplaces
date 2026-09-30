@@ -549,6 +549,66 @@ test('V1: CONTROLE — o que o Waze RECUSOU antes da queda também não entra (n
   assert.ok(!m.log.includes('busca'), 'o recusado da sessão anterior mandou buscar na fila de outra');
 });
 
+// ═══ V6 · o "Marcar todos" de uma sessão que acabou não trava a próxima ═══════
+// A trava do lote no ar (`loteDeLidosEmVoo`) não tinha época: com o lote
+// pendurado (sinal ruim), sair e entrar de novo — ou a queda com a renovação —
+// fazia a sessão NOVA nascer travada ("espere o lote terminar") até a resposta
+// velha voltar, até 45 s (auditoria de 2026-09-29, medido no navegador: s7).
+function montarLoteNaTrocaDeSessao() {
+  const portoes = [];
+  const { safeLS } = lsFalso();
+  const P1 = { venueID: 'v1', updateRequestID: 'u1' };
+  const AppState = { authenticated: true, profile: { id: 'A' }, queue: [P1, { venueID: 'v2', updateRequestID: 'u2' }],
+    currentPlace: P1, stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 2, fetchEpoch: 0,
+    pendingAction: null, inFlightActions: 0, preferences: {} };
+  let token = 'tok-A';
+  const deps = {
+    AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false },
+    LOTE_LIDOS_PEDACO: constante('LOTE_LIDOS_PEDACO'), pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
+    API: { getRegion: () => 'row', getSession: () => token, setSession: (t) => { token = t; }, setRegion() {}, setCountry() {},
+      markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), destroySession: async () => ({ success: true }) },
+    callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
+  };
+  const h = montar(['acoesTravadas', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead', 'marcarEmAndamento',
+    'chaveDoPedido', 'derrubarSessao', 'handleLogout'], deps);
+  const marcarTodos = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
+  return { h, deps, AppState, portoes, marcarTodos };
+}
+
+test('V6: "Marcar todos" pendurado e a sessão cai — a sessão que VOLTA não nasce travada pelo lote dela', async () => {
+  const m = montarLoteNaTrocaDeSessao();
+  const velho = m.marcarTodos();
+  await tique();
+  assert.equal(m.h.avisoDaTrava(), 'toast.esperaLote', 'PRÉ-CONDIÇÃO: o lote está no ar e trava o card');
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  m.AppState.authenticated = true;                  // a renovação pela extensão
+  assert.equal(m.h.acoesTravadas(), false, 'a sessão nova nasceu travada pelo lote da que caiu (até 45 s)');
+  // Um lote NOVO, e o velho voltando no meio dele: o velho não solta a trava do
+  // novo. (O novo leva só o que NÃO está em andamento — os do lote velho seguem
+  // no ar; é a régua do V7 —, então um pedido que chegou depois.)
+  m.AppState.queue.push({ venueID: 'v3', updateRequestID: 'u3' });
+  const novo = m.marcarTodos();
+  await tique();
+  assert.equal(m.portoes.length, 2, 'PRÉ-CONDIÇÃO: o lote novo saiu');
+  m.portoes[0]({ success: true });
+  await velho;
+  assert.equal(m.h.acoesTravadas(), true, 'o lote da sessão que caiu soltou a trava do lote da sessão nova');
+  m.portoes[1]({ success: true });
+  await novo;
+  assert.equal(m.h.acoesTravadas(), false, 'o lote novo terminou e a trava ficou');
+});
+
+test('V6: o "Sair" com o lote no ar — quem entra não herda a trava', async () => {
+  const m = montarLoteNaTrocaDeSessao();
+  m.marcarTodos();
+  await tique();
+  assert.equal(m.h.avisoDaTrava(), 'toast.esperaLote', 'PRÉ-CONDIÇÃO: o lote está no ar');
+  await m.h.handleLogout();
+  m.AppState.authenticated = true;                  // entrou de novo, sem recarregar a página
+  assert.equal(m.h.acoesTravadas(), false, 'a sessão de quem entrou nasceu travada pelo lote de quem saiu');
+});
+
 // ═══ K2 · a renovação com OUTRA conta não mantém a fila nem o cabeçalho de A ══
 
 function janelaFalsa() {
