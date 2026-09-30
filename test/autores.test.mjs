@@ -268,7 +268,7 @@ test('lote: o lote respeita a trava e o treino', () => {
   const iA = semComentarios.indexOf('function avisoDaTrava');
   const corpoAviso = semComentarios.slice(iA, semComentarios.indexOf('\n}\n', iA) + 3);
   const aviso = (auth, lote, conf) => new Function('AppState', 'loteDeLidosEmVoo', 'escritasConferindo',
-    corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf);
+    'aprovacaoDaTelaNoAr', corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf, () => false);
   assert.equal(aviso(false, true, 1), 'api.error.noSession', 'sem sessão, a espera é a da sessão');
   assert.equal(aviso(true, true, 0), 'toast.esperaLote');
   assert.equal(aviso(true, false, 1), 'toast.esperaSessao', 'conferindo um 401, "espere o Desfazer" manda procurar um botão que não existe');

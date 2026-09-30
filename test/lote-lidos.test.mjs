@@ -78,12 +78,13 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
     aoMudarAFilaPorBaixo: () => {}, pedidosQueEntraramNaFila: entraram,
     // O texto do diálogo ("Marcar os N"): é o que a pessoa lê antes de confirmar.
     document: { getElementById: (id) => (id === 'batchReadMessage' ? mensagem : null) },
-    pedidosEmAndamento: emAndamento,
+    pedidosEmAndamento: emAndamento, aprovacoesNoAr: new Set(),
     aplicarTravaDeAcao: () => log.push('trava:' + app.acoesTravadas()),
     aprovacaoPendente: pendente('aprovacao'), exclusaoPendente: pendente('exclusao'), renomeacaoPendente: pendente('renomeacao'),
   };
   const chaves = Object.keys(deps);
-  const corpo = ['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'marcarEmAndamento', 'devolverPedidoRecusado']
+  const corpo = ['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'marcarEmAndamento',
+    'devolverPedidoRecusado']
     .map(fatiar).join('\n');
   app = new Function(...chaves, 'let loteDeLidosContado = null; let tratouNestaFila = false; let loteDeLidosEmVoo = false; let escritasConferindo = 0;\n' + corpo
     + '\nreturn { openBatchReadConfirm, handleBatchMarkRead, acoesTravadas };')(...chaves.map((k) => deps[k]));

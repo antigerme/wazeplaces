@@ -203,6 +203,8 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     callWithRetry: (fn) => fn(),
     // A volta do pedido numa fila refeita (V9) é medida em test/lote-autor.test.mjs.
     voltarDaAprovacaoRecusada: () => {},
+    // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
+    aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
   };
   let placeResolvido = null;
   const nomes = ['enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual', 'enviarExclusao', 'pedirExclusaoDaFoto',
@@ -412,6 +414,7 @@ function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, que
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, advanceQueue: () => log.push('avancou'),
     marcarEmAndamento: () => {}, voltarDaAprovacaoRecusada: () => {},
     renomeacoesNoAr: new Set(), updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
+    aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
   };
   const nomes = ['refazerDepoisDo401', 'enviarExclusao', 'enviarAprovacao', 'concluirAprovacao',
     'enviarRenomeacao', 'aplicarNosIrmaos', 'aplicarNomeNaTela', 'nomeDestaEscrita', 'devolverNome',
@@ -590,10 +593,11 @@ test('V5 401 com a conferência de OUTRA chamada em curso: espera o desfecho del
 
 test('L1 a conferência do 401 TRAVA as ações, como a janela do Desfazer', () => {
   const trava = new Function('AppState', 'aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente', 'escritasConferindo',
-    'loteDeLidosEmVoo', fatiar('acoesTravadas') + '\nreturn acoesTravadas;');
+    'loteDeLidosEmVoo', 'aprovacaoDaTelaNoAr', fatiar('acoesTravadas') + '\nreturn acoesTravadas;');
   const AppState = { pendingAction: null, authenticated: true };
-  assert.equal(trava(AppState, null, null, null, 0)(), false, 'CONTROLE: sem nada pendente, nada trava');
-  assert.equal(trava(AppState, null, null, null, 1)(), true,
+  const parado = () => false;   // nenhuma aprovação no ar (medido em test/lote-autor.test.mjs, A1)
+  assert.equal(trava(AppState, null, null, null, 0, false, parado)(), false, 'CONTROLE: sem nada pendente, nada trava');
+  assert.equal(trava(AppState, null, null, null, 1, false, parado)(), true,
     'com a escrita esperando a conferência, dava pra decidir de novo sobre o mesmo local');
 });
 
@@ -819,6 +823,8 @@ function montarAprovacao({ semJanela = false, resposta = { success: true } } = {
     // que a tira da fila nova é só o "em andamento".
     carregarFilaDeSaida: () => [], pousosDaPagina: new Map(), offlineLigado: () => false, offlineLerPousos: () => [],
     voltarDaAprovacaoRecusada: () => {},
+    // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
+    aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'semOsJaDecididos', 'enviarAprovacao', 'concluirAprovacao',
     'aprovarFotoAtual', 'refazerDepoisDo401', 'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao'];
@@ -1216,4 +1222,130 @@ test('L32 a foto ampliada diz o local como o card: nome, senão endereço — po
   const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
   assert.doesNotMatch(I18N, /lightbox\.img\.altGeneric|'lightbox\.img\.alt'/, 'a chave velha (com "place" no português e no espanhol) voltou');
   assert.match(I18N, /'srv\.err\.photoNotApproved': 'Solo se puede borrar una foto/, 'o espanhol voltou a dizer "eliminar" onde o resto diz "borrar"');
+
+// ── A1: a APROVAÇÃO no ar trava o card do MESMO pedido (achado do lightbox,
+// 2026-09-29; também na main c6d9f91). Com a aprovação saindo, o card do pedido
+// seguia na frente com ✕ e ✓ vivos: sem o Desfazer, a rejeição saía JUNTO com a
+// aprovação (duas decisões do mesmo pedido no Waze); com ele, ao fim da janela do
+// ✕, com o placar contando um rejeitado de um pedido aprovado. As funções de
+// VERDADE — a aprovação, a trava, o aviso, o ✕ e o ✓ e a entrada do gesto —, com
+// o Waze de mentira e a época da sessão mutável (a queda).
+function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } } = {}) {
+  const log = [];
+  const L = lightbox();
+  const A = pedidoDeFoto('ur-A');
+  const B = { venueID: 'v-B', updateRequestID: 'ur-B' };
+  abrir(L, A, [FOTO('velha'), FOTO('ur-A')], 1);
+  const AppState = { authenticated: true, preferences: { undoEnabled: !semJanela }, serverTotal: 5, currentPlace: A,
+    pendingAction: null, stats: { read: 0, rejected: 0, skipped: 0 }, fetchEpoch: 0 };
+  const timers = [];
+  const respostas = [];
+  let app = null;
+  const deps = {
+    AppState, Lightbox: L, Treino: { ativo: false }, pedidosEmAndamento: new Set(), aprovacoesNoAr: new Set(),
+    canDisableUndo: () => true, estadoAprovando: () => {}, fotoDoLightboxNaTela: () => true, manterFocoNoLightbox: () => {},
+    API: { aprovarPedido: () => new Promise((ok) => { respostas.push(() => ok(resposta)); }),
+      getRegion: () => 'row', getCountry: () => 30 },
+    registrarPouso: () => log.push('pouso'), updateStats: () => {}, saveStats: () => {}, contarConquista: () => {},
+    advanceQueue: () => log.push('avancou'), handleUnauthorized: () => {}, showToast: () => {}, msgDoServidor: () => '', t: (k) => k,
+    // A trava reaplicada: anota o que a trava diz NA HORA (o card destrava no fim?).
+    aplicarTravaDeAcao: () => log.push('trava:' + app.acoesTravadas()),
+    removeUndoBanner: () => {}, mostrarDesfazer: () => {}, registrarDesfazer: () => {},
+    setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
+    callWithRetry: (fn) => fn(), sessaoVivaDepoisDe: () => false, escritasConferindo: 0, loteDeLidosEmVoo: false,
+    voltarDaAprovacaoRecusada: () => {}, direcaoTravada: () => false,
+    scheduleAction: (tipo) => log.push('agendou:' + tipo), showCurrentPlace: () => log.push('card-de-volta'),
+  };
+  const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
+    'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
+    'agirNoPedidoDoGesto'];
+  const chaves = Object.keys(deps);
+  const corpo = nomes.map(fatiar).join('\n')
+    .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
+    .replace(/aprovacaoPendente/g, '__pend.a').replace(/exclusaoPendente/g, '__pend.e')
+    .replace(/renomeacaoPendente/g, '__pend.r').replace(/epocaDaSessao/g, '__ep.v');
+  const pend = { a: null, e: null, r: null };
+  const ep = { v: 0 };
+  app = new Function(...chaves, '__res', '__pend', '__ep', 'let tratouNestaFila = false;\n' + corpo
+    + `\nreturn { ${nomes.join(', ')} };`)(...chaves.map((k) => deps[k]), { v: null }, pend, ep);
+  const responder = async () => { respostas.shift()(); await umTique(); await umTique(); };
+  return { app, A, B, AppState, log, pend, ep, timers, deps, responder, respostas };
+}
+
+test('A1: sem o Desfazer, com a aprovação NO AR o card do MESMO pedido trava — ✕, ✓ e o gesto não decidem, e o aviso diz qual espera', async () => {
+  const m = montarAprovacaoNoCard();
+  assert.equal(m.app.acoesTravadas(), false, 'CONTROLE: antes de aprovar, o card decide');
+  m.app.aprovarFotoAtual();
+  assert.equal(m.respostas.length, 1, 'PRÉ-CONDIÇÃO: a aprovação saiu e espera a resposta');
+  assert.equal(m.app.acoesTravadas(), true, 'com a aprovação no ar, o card do mesmo pedido seguia decidível');
+  assert.equal(m.log.at(-1), 'trava:true', 'o card não foi TRAVADO na tela quando a aprovação saiu (botão vivo com cara de vivo)');
+  assert.equal(m.app.avisoDaTrava(), 'toast.esperaAprovacao', 'o aviso manda esperar outra coisa');
+  m.app.handleReject();
+  m.app.handleMarkAsRead();
+  let decidiu = false;
+  m.app.agirNoPedidoDoGesto(m.A, () => { decidiu = true; });
+  assert.ok(!m.log.some((l) => l.startsWith('agendou')), `uma segunda decisão do mesmo pedido saiu com a aprovação no ar: ${m.log}`);
+  assert.equal(decidiu, false, 'o gesto decidiu o pedido com a aprovação no ar');
+  assert.equal(m.AppState.stats.rejected + m.AppState.stats.read, 0, 'o placar contou uma decisão que não pode sair');
+  // A resposta chega: o card destrava — travar tem volta.
+  await m.responder();
+  assert.equal(m.app.acoesTravadas(), false, 'a aprovação respondeu e o card ficou travado');
+  assert.equal(m.log.at(-1), 'trava:false', 'a trava não foi reaplicada no fim: os botões ficavam mortos');
+});
+
+test('A1: com o Desfazer, a janela trava (e diz "Desfazer"); a aprovação no ar trava depois dela (e diz "aprovação"); a FALHA também solta', async () => {
+  const m = montarAprovacaoNoCard({ semJanela: false, resposta: { success: false, errorCategory: 'unknown' } });
+  m.app.aprovarFotoAtual();
+  assert.ok(m.pend.a, 'PRÉ-CONDIÇÃO: a janela do Desfazer da aprovação está aberta');
+  assert.equal(m.app.acoesTravadas(), true);
+  assert.equal(m.app.avisoDaTrava(), 'toast.esperaDesfazer', 'na janela o banner está na tela: a espera é a dele');
+  m.timers[0]();                                    // a janela vence: a aprovação sai
+  assert.equal(m.pend.a, null);
+  assert.equal(m.app.acoesTravadas(), true, 'a janela venceu e o card do pedido destravou com a aprovação no ar');
+  assert.equal(m.app.avisoDaTrava(), 'toast.esperaAprovacao');
+  m.app.handleReject();
+  assert.ok(!m.log.some((l) => l.startsWith('agendou')), 'o ✕ agendou a rejeição do pedido que está sendo aprovado');
+  await m.responder();                               // o Waze recusa a aprovação
+  assert.equal(m.app.acoesTravadas(), false, 'a aprovação FALHOU e o card ficou travado');
+  m.app.handleReject();
+  assert.deepEqual(m.log.filter((l) => l.startsWith('agendou')), ['agendou:reject'], 'CONTROLE: solta, o ✕ decide');
+});
+
+test('A1: CONTROLE — a aprovação no ar de OUTRO pedido não trava o card que está na tela', async () => {
+  const m = montarAprovacaoNoCard();
+  m.app.aprovarFotoAtual();
+  assert.equal(m.app.acoesTravadas(), true, 'PRÉ-CONDIÇÃO: o card do pedido aprovado está travado');
+  m.AppState.currentPlace = m.B;                    // o card da frente é de outro pedido
+  assert.equal(m.app.acoesTravadas(), false, 'a aprovação de um pedido travou o card de OUTRO — a trava não é pelo pedido');
+  m.app.handleReject();
+  assert.deepEqual(m.log.filter((l) => l.startsWith('agendou')), ['agendou:reject']);
+  await m.responder();
+});
+
+test('A1: a aprovação no ar é da SESSÃO — a queda a solta, e a resposta velha não solta a da sessão nova', async () => {
+  const m = montarAprovacaoNoCard();
+  m.app.aprovarFotoAtual();
+  assert.equal(m.app.acoesTravadas(), true, 'PRÉ-CONDIÇÃO: travado com a aprovação no ar');
+  // A queda (o `derrubarSessao`: a época sobe e as aprovações no ar saem) e a
+  // renovação: a sessão que volta não nasce travada pela resposta da que caiu.
+  m.ep.v++;
+  m.deps.aprovacoesNoAr.clear();
+  assert.equal(m.app.acoesTravadas(), false, 'a sessão que volta nasceu travada pela aprovação da que caiu');
+  // Na sessão nova a pessoa aprova de novo; a resposta VELHA chega depois.
+  m.app.aprovarFotoAtual();
+  assert.equal(m.respostas.length, 2, 'PRÉ-CONDIÇÃO: a aprovação da sessão nova saiu');
+  await m.responder();                               // a da sessão que caiu
+  assert.equal(m.app.acoesTravadas(), true, 'a resposta da sessão que caiu soltou a trava da aprovação da sessão nova');
+  await m.responder();
+  assert.equal(m.app.acoesTravadas(), false);
+});
+
+test('A1: a queda e o "Sair" soltam as aprovações no ar (a mesma regra do lote de lidos, V6)', () => {
+  const SEM = APP_SEM;
+  for (const nome of ['derrubarSessao', 'handleLogout']) {
+    const f = fatiar(nome);
+    assert.match(f, /loteDeLidosEmVoo = false;\s*aprovacoesNoAr\.clear\(\);/,
+      `${nome} não solta as aprovações no ar: a sessão seguinte nasce travada pela resposta da anterior`);
+  }
+  assert.ok(SEM.includes('const aprovacoesNoAr = new Set();'));
 });

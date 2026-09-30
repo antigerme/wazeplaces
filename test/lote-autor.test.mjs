@@ -432,6 +432,7 @@ function montarAprovacaoRecusada({ resposta = RECUSA } = {}) {
     updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => log.push('fundo'),
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
     startFetching: () => log.push('busca'),
+    aprovacoesNoAr: new Set(), aplicarTravaDeAcao: () => {},
   };
   const chaves = Object.keys(deps);
   const enviar = new Function(...chaves, fatiar('enviarAprovacao') + '\n' + fatiar('voltarDaAprovacaoRecusada') + '\n'

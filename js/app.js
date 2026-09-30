@@ -2998,6 +2998,11 @@ function pedirExclusaoDaFoto() {
 // posição têm campo pra corrigir. Foto não tem: ou serve ou não serve, e a
 // decisão está inteira na tela. Decisão do owner, a pedido de um global champ.
 let aprovacaoPendente = null;
+// As aprovações que SAÍRAM e esperam a resposta, pela chave do pedido (ver
+// `aprovacaoDaTelaNoAr`). São da SESSÃO que as mandou, como o lote de lidos
+// (V6): a queda e o "Sair" as soltam, e a resposta velha não trava a sessão que
+// vem.
+const aprovacoesNoAr = new Set();
 
 // O card fica na tela depois de aprovar (decisão do owner) e só avança quando o
 // lightbox fechar. Sem isto, o pedido ficaria resolvido no Waze e pendurado na
@@ -3020,6 +3025,10 @@ function estadoAprovando(ligado) {
 // por quem não a aprovou (L30).
 async function enviarAprovacao(alvo) {
     const epoca = epocaDaSessao;
+    // No ar: o card do pedido trava até a resposta (ver `aprovacaoDaTelaNoAr`).
+    const chave = chaveDoPedido(alvo.place);
+    aprovacoesNoAr.add(chave);
+    aplicarTravaDeAcao();
     try {
         // Retentativa como no excluir e no renomear; repetir é seguro — a 2ª
         // de uma aprovação que passou volta `already_processed`, que conta.
@@ -3073,6 +3082,11 @@ async function enviarAprovacao(alvo) {
         // O envio acabou: pousou (o `registrarPouso` passa a segurar o pedido
         // fora da fila) ou falhou (ele volta a ser um pedido como outro).
         marcarEmAndamento(alvo.place, false);
+        // E o card destrava — travar tem volta (gotcha #63). Só a aprovação
+        // DESTA sessão solta: a queda e o "Sair" já soltaram as dela, e uma
+        // resposta velha não solta a de uma sessão nova.
+        if (epoca === epocaDaSessao) aprovacoesNoAr.delete(chave);
+        aplicarTravaDeAcao();
     }
 }
 
@@ -7673,8 +7687,10 @@ function derrubarSessao(errorKey, { depois } = {}) {
         saveStats();
     }
     // O lote de lidos que estava no ar era da sessão que morreu: ele não trava
-    // a sessão que vem (ver `loteDeLidosEmVoo`).
+    // a sessão que vem (ver `loteDeLidosEmVoo`). Nem a aprovação no ar (ver
+    // `aprovacoesNoAr`).
     loteDeLidosEmVoo = false;
+    aprovacoesNoAr.clear();
     // E as do lightbox, que têm janela própria (ver a função).
     cancelarPendenciasDoLightbox();
     removeUndoBanner();
@@ -8007,8 +8023,9 @@ async function handleLogout({ porOutraAba = false } = {}) {
     // token de quem entrasse depois (ver a função).
     cancelarPendenciasDoLightbox();
     // O "Marcar todos" que ficou no ar é de quem saiu: ele não trava quem
-    // entrar (ver `loteDeLidosEmVoo`).
+    // entrar (ver `loteDeLidosEmVoo`). Nem a aprovação no ar.
     loteDeLidosEmVoo = false;
+    aprovacoesNoAr.clear();
     // O token sai do armazenamento AGORA e a limpeza local acontece inteira sem
     // esperar rede nenhuma — pedir pra sair tem que ser instantâneo. A cópia
     // serve pra exclusão no servidor, que vai depois, com retentativa. Na outra
@@ -10855,8 +10872,25 @@ function acoesTravadas() {
     // (K1/K9): durante a queda e a renovação o gesto sairia com a sessão errada.
     // E a conferência de um 401 numa escrita do lightbox (`refazerDepoisDo401`):
     // a escrita ainda pode sair de novo, e nada pode cruzar com ela (L1).
+    // E a APROVAÇÃO no ar do pedido que está na tela (`aprovacaoDaTelaNoAr`).
     return !!(!AppState.authenticated || AppState.pendingAction || aprovacaoPendente || exclusaoPendente
-        || renomeacaoPendente || loteDeLidosEmVoo || escritasConferindo > 0);
+        || renomeacaoPendente || loteDeLidosEmVoo || escritasConferindo > 0 || aprovacaoDaTelaNoAr());
+}
+
+// A aprovação da foto do pedido NA TELA saiu e espera a resposta. O card fica
+// na fila até ela voltar (ele só sai quando ela vale), e com ela no ar o ✕ e o
+// ✓ do card seguiam vivos: sem o Desfazer, uma rejeição saía JUNTO com a
+// aprovação — duas decisões do mesmo pedido no Waze —; com ele, ao fim da
+// janela do ✕, e o placar contava um rejeitado de um pedido que a pessoa aprovou
+// (achado do lightbox, 2026-09-29; também na main c6d9f91). Botão, gesto e tecla
+// passam todos por `acoesTravadas`, então os três travam.
+//
+// É um conjunto PRÓPRIO, e não o `pedidosEmAndamento`: lá também moram os
+// pedidos do "Marcar todos" de uma sessão que caiu, e travar por ele devolvia a
+// trava que o V6 tirou da sessão que volta (medido no teste do V6).
+function aprovacaoDaTelaNoAr() {
+    const p = AppState.currentPlace;
+    return !!(p && aprovacoesNoAr.has(chaveDoPedido(p)));
 }
 
 // O que dizer a quem tocou com as ações travadas: cada trava pede uma espera, e
@@ -10867,6 +10901,7 @@ function avisoDaTrava() {
     if (!AppState.authenticated) return 'api.error.noSession';
     if (loteDeLidosEmVoo) return 'toast.esperaLote';
     if (escritasConferindo > 0) return 'toast.esperaSessao';
+    if (aprovacaoDaTelaNoAr()) return 'toast.esperaAprovacao';
     return 'toast.esperaDesfazer';
 }
 

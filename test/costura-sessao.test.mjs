@@ -69,6 +69,11 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // por local, L23), pelo mesmo motivo.
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
     aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set() })) if (!(k in deps)) deps[k] = v;
+  // A trava também lê a APROVAÇÃO no ar do pedido da tela (`aprovacaoDaTelaNoAr`):
+  // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
+  // negro devolveria uma função — verdadeira — e travaria tudo).
+  if (nomes.includes('acoesTravadas') && !nomes.includes('aprovacaoDaTelaNoAr')) nomes = [...nomes, 'aprovacaoDaTelaNoAr'];
+  if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesNoAr' in deps)) deps.aprovacoesNoAr = new Set();
   const chamou = [];
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
