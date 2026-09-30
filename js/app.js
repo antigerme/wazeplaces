@@ -13236,9 +13236,10 @@ async function aplicarRecusaAutomatica() {
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // Abre pelo selo `✕ N`. NÃO há tela de confirmação depois: o número vai no
-// próprio botão e o aviso diz que começa ao tocar — que é exatamente o que uma
-// segunda pergunta carregaria. Confirmação que só repete o número treina todo
-// mundo a tocar sem ler.
+// próprio botão e o aviso diz o que o toque faz (com o Desfazer, os segundos da
+// janela dele; sem, que já envia) — que é exatamente o que uma segunda pergunta
+// carregaria. Confirmação que só repete o número treina todo mundo a tocar sem
+// ler.
 //
 // O lote vai UM A UM, e isso não é preguiça: o lote atômico do WME falha
 // INTEIRO quando outro editor já tratou um dos itens (o mesmo caso que o app

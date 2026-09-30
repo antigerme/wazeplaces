@@ -2523,6 +2523,11 @@ for (const status of [404, 403]) {
 //   2. sem sessionToken, o `API.rejectPlace` sai antes do fetch;
 //   3. sem exercitar os TRÊS caminhos (botão, tecla, gesto), sobra porta.
 // Com o guard removido de propósito, ele acusa `POST validar-place`.
+//
+// E o FIM do treino fecha por quatro caminhos, um por idioma: por Esc, pelo
+// fundo ou pelo voltar do aparelho o treino ficava PRESO — o card de treino já
+// tratado na tela, "Restam 0" e os botões mortos (auditoria de 2026-09-29, A5).
+const FECHAR_FIM_DO_TREINO = { pt: 'botão', en: 'Esc', es: 'voltar', fr: 'fundo' };
 for (const lg of LINGUAS) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
     locale: lg === 'en' ? 'en-US' : lg, serviceWorkers: 'block' });
@@ -2606,15 +2611,26 @@ for (const lg of LINGUAS) {
       .every(([x, y]) => { const el = document.elementFromPoint(x, y); return el === btn || btn.contains(el); });
   }), `treino ${lg}: o botão de sair do treino ficou coberto por aviso`);
 
-  await page.click('#treinoFimOk');
+  const caminho = FECHAR_FIM_DO_TREINO[lg] || 'botão';
+  if (caminho === 'Esc') await page.keyboard.press('Escape');
+  else if (caminho === 'voltar') await page.goBack().catch(() => {});
+  else if (caminho === 'fundo') await page.mouse.click(4, 4);   // o scrim, fora do cartão centrado
+  else await page.click('#treinoFimOk');
   await page.waitForTimeout(700);
   const dep = await page.evaluate(() => ({
+    modalFechado: document.getElementById('treinoFimModal').classList.contains('hidden'),
+    treinoAtivo: Treino.ativo,
     banner: document.getElementById('treinoBanner').classList.contains('hidden'),
     fila: AppState.queue.length, atual: (AppState.currentPlace || {}).venueID,
+    cardNaTela: cardDaFrente() && cardDaFrente().querySelector('.card-name')?.textContent.trim(),
+    restam: document.getElementById('pendingCount').textContent.trim(),
     total: AppState.serverTotal, read: AppState.stats.read,
   }));
-  checa(dep.banner && dep.fila === 1 && dep.atual === 'real1' && dep.total === 99 && dep.read === 7,
-    `treino ${lg}: a fila real não voltou intacta`, JSON.stringify(dep));
+  // PRÉ-CONDIÇÃO: o caminho FECHOU o modal — senão "o treino ficou ativo" mediria o clique que errou.
+  checa(dep.modalFechado, `treino ${lg}: o fim do treino não fechou pelo ${caminho}`, JSON.stringify(dep));
+  checa(!dep.treinoAtivo && dep.banner && dep.fila === 1 && dep.atual === 'real1' && dep.cardNaTela === 'Local Real'
+    && dep.total === 99 && dep.read === 7,
+  `treino ${lg}: fechado pelo ${caminho}, a fila real não voltou intacta (treino preso?)`, JSON.stringify(dep));
   await ctx.close();
 }
 
@@ -3298,6 +3314,151 @@ for (const tema of ['dark', 'light']) {
   checa(violacoes.length === 0, `CSP · ${tema}: violação de CSP na carga`, violacoes[0]);
   checa(classes.includes(tema === 'dark' ? 'dark' : 'tema-claro'),
     `CSP · ${tema}: o script de tema não marcou a raiz ANTES do paint — hash defasado?`, JSON.stringify(classes));
+  await ctx.close();
+}
+
+// ── O tema trocado pelo BOTÃO pinta o que a RECARGA pinta ───────────────
+// Auditoria de 2026-09-29 (A8), medido: com o sistema escuro, tocar pro claro
+// deixava a barra do sistema (a meta `theme-color` que VALE) e o fundo sob o
+// app ESCUROS até recarregar — o botão não punha o `tema-claro` e só mudava a
+// PRIMEIRA meta. O test/tema.test.mjs compara classes e metas; aqui é a TELA:
+// o fundo computado do <html> e do <body> e a meta que casa com a media do
+// sistema, depois de cada toque e depois da recarga, nos dois sistemas. E a
+// sentinela do diagnóstico: calada com o tema certo, e ALERTANDO no estado que
+// o botão deixava (recriado à mão, o CONTROLE de que ela enxerga).
+let temaMedidas = 0;
+for (const sistema of ['dark', 'light']) {
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', colorScheme: sistema });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+  await page.goto(BASE, { waitUntil: 'load' });
+  await page.waitForTimeout(400);
+  const medir = () => page.evaluate(() => {
+    const vale = [...document.querySelectorAll('meta[name="theme-color"]')]
+      .find((m) => !m.media || matchMedia(m.media).matches);
+    let alerta;
+    try { alerta = diagSentinelas(diagComputado()).some((a) => a.chave === 'temaContraditorio'); } catch (e) { alerta = 'erro: ' + e.message; }
+    return {
+      escuro: document.documentElement.classList.contains('dark'),
+      fundoHtml: getComputedStyle(document.documentElement).backgroundColor,
+      fundoBody: getComputedStyle(document.body).backgroundColor,
+      barra: vale ? vale.getAttribute('content') : null,
+      alerta,
+    };
+  });
+  for (const passo of ['1º toque', '2º toque']) {
+    const antes = await medir();
+    await page.click('#themeBtn');
+    await page.waitForTimeout(250);
+    const toque = await medir();
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForTimeout(400);
+    const recarga = await medir();
+    temaMedidas++;
+    const onde = `tema · sistema ${sistema}, ${passo}`;
+    checa(toque.escuro !== antes.escuro, `${onde}: o botão não trocou o tema (CONTROLE)`, JSON.stringify({ antes, toque }));
+    checa(JSON.stringify(toque) === JSON.stringify(recarga),
+      `${onde}: o botão pinta diferente da recarga — barra ou fundo só acertam recarregando`,
+      `toque ${JSON.stringify(toque)} · recarga ${JSON.stringify(recarga)}`);
+    checa(toque.barra === (toque.escuro ? '#0f172a' : '#f8fafc'), `${onde}: a barra do sistema não acompanha o tema`, JSON.stringify(toque));
+    checa(toque.alerta === false, `${onde}: a sentinela do tema alertou (ou não rodou) com o tema certo`, JSON.stringify(toque));
+  }
+  if (sistema === 'dark') {
+    // O estado que o botão deixava: app claro SEM `tema-claro`, barra escura.
+    const quebrado = await page.evaluate(() => {
+      document.documentElement.classList.remove('dark', 'tema-claro');
+      document.body.classList.remove('dark');
+      document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', '#0f172a'));
+      return {
+        fundoHtml: getComputedStyle(document.documentElement).backgroundColor,
+        alerta: diagSentinelas(diagComputado()).some((a) => a.chave === 'temaContraditorio'),
+      };
+    });
+    checa(quebrado.fundoHtml === 'rgb(15, 23, 42)',
+      'tema · CONTROLE: sem `tema-claro` num sistema escuro o fundo tinha que ficar escuro — a medida não enxerga o defeito',
+      JSON.stringify(quebrado));
+    checa(quebrado.alerta === true, 'tema · a sentinela do diagnóstico NÃO viu o app claro sobre o fundo escuro', JSON.stringify(quebrado));
+  }
+  checa(erros.length === 0, `tema · sistema ${sistema}: erro de JS`, erros[0]);
+  await ctx.close();
+}
+
+// ── Conectar outro aparelho: o QR VENCIDO não oferece o que não vale ─────
+// Auditoria de 2026-09-29 (A15), medido: vencido o QR, a tela seguia com
+// "Aponte a câmera…" sobre um QR apagado e com o "Sem câmera? Mostrar um
+// código" — que criava um código NOVO, válido, embaixo de "Código expirado —
+// feche e toque de novo". Aqui o QR vence em 2 s e se mede o que está VISÍVEL
+// (não a classe); e o código curto pedido ANTES vence no prazo DELE, com a
+// instrução dele saindo só então. Esperas pelo ESTADO, lidas do Node.
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(e.message));
+  let prazoDoCurto = 300;
+  await page.route('**/api/**', async (r) => {
+    const nome = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
+    let c = {};
+    try { c = JSON.parse(r.request().postData() || '{}'); } catch (e) { c = {}; }
+    let body = { success: true };
+    if (nome === 'parear' && c.action === 'create') {
+      body = c.comCodigo ? { success: true, code: 'ABC234', curto: true, expiresIn: prazoDoCurto }
+        : { success: true, code: 'ABCDEFGHJKLMNPQRSTUV', curto: false, expiresIn: 2 };
+    } else if (nome === 'presenca-app') body = { success: true, online: [], conversas: [] };
+    else if (nome === 'buscar-places') body = { success: true, places: [], hasMore: false, page: 1, total: 0 };
+    else if (nome === 'perfil') body = { success: true, profile: { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false, areas: [] } };
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(page, () => typeof AppState !== 'undefined' && typeof showMainScreen === 'function', 'o app');
+  await page.evaluate(() => {
+    API.setSession('token-de-teste');
+    AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    showMainScreen(); showLoading(false);
+  });
+  const tela = () => page.evaluate(() => {
+    const vis = (id) => { const e = document.getElementById(id); return !!e && e.offsetParent !== null && getComputedStyle(e).display !== 'none'; };
+    return {
+      camera: vis('pairShowBody'), semCamera: vis('pairShowCodeBtn'), digite: vis('pairOrType'),
+      qr: document.getElementById('pairExpiry').textContent, curto: document.getElementById('pairCodeExpiry').textContent,
+      riscado: document.getElementById('pairCode').classList.contains('line-through'),
+      expirado: t('pair.expired'),
+    };
+  });
+  const abrir = async () => {
+    await page.click('#helpBtn');
+    await esperarOuExplodir(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 'a Ajuda');
+    await page.click('#pairCreateBtn');
+    await esperarOuExplodir(page, () => /\d:\d\d/.test(document.getElementById('pairExpiry').textContent), 'o QR com a contagem');
+  };
+  // 1) Sem o código curto.
+  await abrir();
+  const valendo = await tela();
+  checa(valendo.camera && valendo.semCamera, 'pareamento · CONTROLE: com o QR valendo, a instrução da câmera e o "Sem câmera?" aparecem', JSON.stringify(valendo));
+  const venceu = await esperarNaPagina(page, () => document.getElementById('pairExpiry').textContent === t('pair.expired'), 8000);
+  checa(venceu.ok, 'pareamento: o QR de 2 s não venceu na tela');
+  const vencido = await tela();
+  checa(!vencido.camera, 'pareamento: QR vencido, e a tela segue mandando apontar a câmera pra ele', JSON.stringify(vencido));
+  checa(!vencido.semCamera, 'pareamento: QR vencido, e o "Sem câmera?" segue criando um código novo sob o "Código expirado"', JSON.stringify(vencido));
+  await page.click('#pairShowClose');
+  // 2) Com o código curto pedido ANTES: nasce depois do QR, então vence depois.
+  prazoDoCurto = 4;
+  await abrir();
+  await page.click('#pairShowCodeBtn');
+  await esperarOuExplodir(page, () => /\d:\d\d/.test(document.getElementById('pairCodeExpiry').textContent), 'o código curto');
+  await esperarOuExplodir(page, () => document.getElementById('pairShowBody').offsetParent === null, 'o QR vencer', 8000);
+  const meio = await tela();
+  checa(meio.qr === '' && /\d:\d\d/.test(meio.curto) && meio.digite && !meio.riscado,
+    'pareamento: QR vencido com o código curto valendo — o "Código expirado" ficou em cima dele, ou a instrução dele sumiu antes da hora',
+    JSON.stringify(meio));
+  const curtoVenceu = await esperarNaPagina(page, () => document.getElementById('pairCodeExpiry').textContent === t('pair.expired'), 8000);
+  checa(curtoVenceu.ok, 'pareamento: o código curto de 4 s não venceu na tela');
+  const fim = await tela();
+  checa(fim.riscado && !fim.digite, 'pareamento: código curto vencido, e a tela segue mandando digitá-lo', JSON.stringify(fim));
+  checa(erros.length === 0, 'pareamento: erro de JS', erros[0]);
   await ctx.close();
 }
 
@@ -8181,7 +8342,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + tile desenhado no tamanho pedido (card e ampliado, com stub DIFERENTE por x/y)`
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair do app, e o "Já instalei" que recarrega)`
-  + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida)`
+  + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida), e o fim do treino fechado pelos 4 caminhos (botão, Esc, voltar e fundo) devolvendo a fila real`
   + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
@@ -8190,6 +8351,8 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
+  + `, + tema trocado pelo BOTÃO pintando o mesmo que a RECARGA (${temaMedidas} medidas: fundo do html e do body e a barra que vale, nos 2 sistemas, ida e volta; sentinela do diagnóstico calada no tema certo e ALERTANDO no estado quebrado recriado, com o CONTROLE de que ele pinta escuro)`
+  + `, + pareamento com o QR VENCIDO (sem a instrução da câmera nem o "Sem câmera?", com o CONTROLE do QR valendo; o código curto pedido antes valendo até o prazo DELE, sem o "Código expirado" em cima, e a instrução dele saindo quando ele vence)`
   + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
   + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra)`
