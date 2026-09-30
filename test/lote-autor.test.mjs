@@ -35,27 +35,47 @@ const RECUSA = { success: false, errorCategory: 'unknown', httpCode: 500 };
 // O `enviarLote` de verdade. `resposta(p, n)` decide o que o Waze responde ao
 // n-ésimo envio, e `antes(p, n)` roda ANTES de ele responder — é por onde o
 // teste encena o ↻ no meio do laço.
-function montarLote({ fila = [], naTela = null, resposta = () => ({ success: true }), antes = () => {}, entraram = [] } = {}) {
+// A fila de SAÍDA é de mentira, mas com a regra de verdade (o mesmo pedido
+// duas vezes é "repetida"), e a devolução é a do app (`devolverPedidoRecusado`).
+function montarLote({ fila = [], naTela = null, resposta = () => ({ success: true }), antes = () => {}, entraram = [], saida = [] } = {}) {
   const log = [];
   const regioes = [];
   const AppState = { stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: fila.length, queue: fila.slice(),
     currentPlace: naTela, fetchEpoch: 0, hasMore: false, inFlightActions: 0, authenticated: true };
   let n = 0;
+  const naSaida = saida.slice();
+  let gravacoes = 0;
   const deps = {
     AppState, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
     API: { getRegion: () => 'row',
       rejectPlace: async (v, u, presenca, regiao) => { const p = { venueID: v, updateRequestID: u }; regioes.push(regiao); n++; antes(p, n); return resposta(p, n); } },
     registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
-    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    marcarEmAndamento: () => {}, handleUnauthorized: () => {},
+    // Com a `lista` de quem chama (o lote), só põe nela: quem grava é quem chama.
+    enfileirarSaida: (tipo, p, regiao, extra, calado, lista) => {
+      const f = lista || naSaida;
+      if (f.some((x) => chave(x) === chave(p))) return 'repetida';
+      f.push({ tipo, venueID: p.venueID, updateRequestID: p.updateRequestID });
+      if (!lista) gravacoes++;
+      return true;
+    },
+    salvarFilaDeSaida: (f) => { gravacoes++; naSaida.splice(0, naSaida.length, ...f); },
+    tirarDaFilaDeSaida: (tipo, p) => { const i = naSaida.findIndex((x) => chave(x) === chave(p)); if (i >= 0) naSaida.splice(i, 1); },
+    carregarFilaDeSaida: () => naSaida.slice(), dfato: (k) => log.push('diario:' + k),
+    pousouNoWaze: (r) => !!(r && (r.success || r.errorCategory === 'already_processed')),
+    descontarGestoSemSessao: (k, placar, q) => { placar[k] = Math.max(0, placar[k] - q); },
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, updatePendingCount: () => {},
     mostrarResultadoDoLote: () => log.push('folha'), chaveDoPedido: chave,
     pedidosQueEntraramNaFila: new Set([...fila, ...entraram].map(chave)),
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
+    startFetching: () => log.push('busca'),
+    aoMudarAFilaPorBaixo: () => log.push('fundo:' + (AppState.queue[1] ? AppState.queue[1].venueID : '-')),
     Treino: { ativo: false },
   };
   const chaves = Object.keys(deps);
-  const enviarLote = new Function(...chaves, fatiar('enviarLote') + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));
-  return { enviarLote, AppState, log, regioes, deps };
+  const enviarLote = new Function(...chaves, fatiar('enviarLote') + '\n' + fatiar('devolverPedidoRecusado')
+    + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));
+  return { enviarLote, AppState, log, regioes, deps, naSaida, gravacoes: () => gravacoes };
 }
 
 // ── F4: o ↻ no MEIO da recusa automática ────────────────────────────────────
@@ -299,6 +319,95 @@ test('F7: trocar a região com a recusa automática no ar não manda o resto pro
 // ═══ Auditoria de 2026-09-29: a DECISÃO do lote não some nem é contada sem ir ══
 // Cada teste foi visto REPROVANDO com o conserto desfeito (sabotagem registrada
 // no relatório da rodada).
+
+// ── C5: o que o Waze recusa no lote volta como o PRÓXIMO card ─────────────────
+// Ia pro FIM da fila, e a pilha seguia anunciando outro pedido — o ✕ de um card
+// só já devolve como o próximo (`devolverPedidoRecusado`); medido no navegador:
+// fila [Y1, Y2, X1] com o fundo em Y2 (t2-lote).
+test('C5: no "Rejeitar os N", o recusado volta como o PRÓXIMO card, em ordem, e a pilha passa a anunciá-lo', async () => {
+  const frente = pedido(9, 1);
+  const m = montarLote({ fila: [frente, pedido(8, 1)], naTela: frente,
+    resposta: (p) => (p.venueID === 'v1' || p.venueID === 'v3' ? RECUSA : { success: true }) });
+  await m.enviarLote([pedido(1), pedido(2), pedido(3)], {});
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v9', 'v1', 'v3', 'v8'],
+    'o que o Waze recusou foi pro fim da fila (ou voltou fora de ordem), e não como o próximo card');
+  assert.equal(m.AppState.currentPlace.venueID, 'v9', 'trocou o card que estava na tela');
+  assert.equal(m.AppState.serverTotal, 4, 'o "Restam" não acompanha os que voltaram');
+  assert.ok(m.log.includes('fundo:v1'), `a pilha não foi refeita com o que voltou (${m.log.join(' ')})`);
+});
+
+// ── V9: ↻ com o "Rejeitar os N" no ar e o Waze recusando ──────────────────────
+// A fila nova veio sem eles (estavam em andamento), e o que falhava só marcava
+// "pode haver mais", sem buscar: "Tudo limpo!" com os pedidos pendentes
+// (medido no navegador, s13).
+test('V9: ↻ no meio do lote e o Waze recusa — com a tela vazia, a busca SAI na hora pra trazê-los', async () => {
+  const alvos = [pedido(1), pedido(2)];
+  const m = montarLote({ entraram: alvos,
+    antes: (p, n) => { if (n === 1) { m.AppState.fetchEpoch++; m.AppState.queue = []; m.AppState.currentPlace = null; m.AppState.serverTotal = 0; } },
+    resposta: () => RECUSA });
+  await m.enviarLote(alvos, {});
+  assert.deepEqual(m.AppState.queue, [], 'o pedido do lote entrou na fila nova (de outro filtro)');
+  assert.equal(m.AppState.hasMore, true);
+  assert.ok(m.log.includes('busca'), 'com a tela vazia ninguém busca: "Tudo limpo!" com os pedidos pendentes');
+  assert.ok(!m.deps.pedidosQueEntraramNaFila.has('v1|u1'), 'o recusado "já passou pela fila": a busca nunca o traz');
+});
+
+test('V9: CONTROLE — ↻ no meio com card na fila nova: o card segue, e a busca fica pra quando a fila acabar', async () => {
+  const alvos = [pedido(1)];
+  const nova = pedido(5, 1);
+  const m = montarLote({ entraram: alvos,
+    antes: () => { m.AppState.fetchEpoch++; m.AppState.queue = [nova]; m.AppState.currentPlace = nova; m.AppState.serverTotal = 1; },
+    resposta: () => RECUSA });
+  await m.enviarLote(alvos, {});
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v5']);
+  assert.ok(!m.log.includes('busca'), 'buscou com card na tela');
+  assert.equal(m.AppState.hasMore, true);
+});
+
+// ── V9: a aprovação que o Waze recusa depois de um ↻ ───────────────────────────
+function montarAprovacaoRecusada({ resposta = RECUSA } = {}) {
+  const log = [];
+  const P = pedido(1, 5);
+  const AppState = { fetchEpoch: 0, queue: [P, pedido(2, 5)], currentPlace: P, hasMore: false, serverTotal: 2 };
+  const deps = {
+    AppState, epocaDaSessao: 0, callWithRetry: (fn) => fn(), API: { aprovarPedido: async () => resposta },
+    Lightbox: { desmarcarAprovada: () => log.push('desmarcou') }, showToast: () => log.push('toast'), msgDoServidor: () => '',
+    t: (k) => k, marcarEmAndamento: () => {}, concluirAprovacao: () => log.push('concluiu'), contarConquista: () => {},
+    refazerDepoisDo401: async () => null, chaveDoPedido: chave, pedidosQueEntraramNaFila: new Set([chave(P)]),
+    updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => log.push('fundo'),
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
+    startFetching: () => log.push('busca'),
+  };
+  const chaves = Object.keys(deps);
+  const enviar = new Function(...chaves, fatiar('enviarAprovacao') + '\n' + fatiar('voltarDaAprovacaoRecusada') + '\n'
+    + fatiar('devolverPedidoRecusado') + '\nreturn enviarAprovacao;')(...chaves.map((k) => deps[k]));
+  return { enviar: () => enviar({ id: P.updateRequestID, place: P, idx: 0, epocaFila: 0 }), AppState, log, deps, P };
+}
+
+test('V9: aprovação recusada depois de um ↻ (a fila nova veio sem o pedido) — a busca o traz de volta', async () => {
+  const m = montarAprovacaoRecusada();
+  m.AppState.fetchEpoch++;                           // o ↻ com a aprovação no ar
+  m.AppState.queue = [];
+  m.AppState.currentPlace = null;
+  assert.equal(await m.enviar(), false);
+  assert.equal(m.AppState.hasMore, true, 'a fila diz que acabou: o pedido pendente nunca mais volta');
+  assert.ok(!m.deps.pedidosQueEntraramNaFila.has(chave(m.P)), 'o pedido "já passou pela fila": nenhuma busca o traz');
+  assert.ok(m.log.includes('busca'), 'com a tela vazia ninguém busca: "Tudo limpo!" com ele pendente');
+});
+
+test('V9: CONTROLE — na MESMA fila a aprovação recusada não mexe na fila (o card nunca saiu dela), nem devolve o que outro gesto tirou', async () => {
+  const m = montarAprovacaoRecusada();
+  assert.equal(await m.enviar(), false);
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v1', 'v2']);
+  assert.equal(m.AppState.hasMore, false);
+  assert.ok(!m.log.includes('busca'));
+  // Outro gesto (o ✕ do card) decidiu o pedido com a aprovação no ar: devolvê-lo seria uma 2ª decisão.
+  const x = montarAprovacaoRecusada();
+  x.AppState.queue = [pedido(2, 5)];
+  x.AppState.currentPlace = x.AppState.queue[0];
+  await x.enviar();
+  assert.deepEqual(x.AppState.queue.map((p) => p.venueID), ['v2'], 'o pedido que outro gesto decidiu voltou como card');
+});
 
 // ── V4: a recusa automática que chega com ela rodando não evapora ─────────────
 // "Mais antigos" e "Perto de…" leem todas as páginas numa rajada: a 2ª página

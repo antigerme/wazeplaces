@@ -2902,11 +2902,13 @@ async function enviarAprovacao(alvo) {
             return true;
         }
         Lightbox.desmarcarAprovada(alvo);
+        voltarDaAprovacaoRecusada(alvo);
         showToast(msgDoServidor(r) || t('toast.photoApproveFailed'), 'error');
         return false;
     } catch (e) {
         if (epoca !== epocaDaSessao) return false;
         Lightbox.desmarcarAprovada(alvo);
+        voltarDaAprovacaoRecusada(alvo);
         showToast(t('toast.photoApproveFailed'), 'error');
         return false;
     } finally {
@@ -2935,6 +2937,16 @@ function concluirAprovacao(alvo) {
     updateStats();
     if (Lightbox.isOpen() && Lightbox.place === alvo.place) { placeResolvidoPorAprovacao = alvo.place; return; }
     if (AppState.currentPlace === alvo.place) advanceQueue();
+}
+
+// A aprovação que o Waze RECUSOU deixa o pedido pendente lá. Na fila do gesto o
+// card nunca saiu dela: a aprovação só o tira quando vale (`concluirAprovacao`).
+// Numa fila REFEITA com ela no ar (↻, filtro), ele não entrou — estava em
+// andamento — e ninguém o trazia de volta (auditoria de 2026-09-29, V9): volta
+// pela busca (`devolverPedidoRecusado`). Na MESMA fila, se ele não está mais
+// nela, outro gesto o decidiu, e devolvê-lo abriria uma segunda decisão.
+function voltarDaAprovacaoRecusada(alvo) {
+    if (alvo.epocaFila !== AppState.fetchEpoch) devolverPedidoRecusado(alvo.place, alvo.epocaFila);
 }
 
 // Avança o card cujo pedido foi aprovado — chamado ao fechar o lightbox.
@@ -12844,15 +12856,18 @@ async function enviarLote(places, opts = {}) {
     // 2026-09-26). O que falhou volta pela busca, se for da fila nova.
     const epocaFila = AppState.fetchEpoch;
     const naFilaDoLote = () => AppState.fetchEpoch === epocaFila;
+    // Os que voltam pra fila de pedidos. Na recusa automática (contando ao
+    // landar) o "Restam" nunca desceu por eles: voltam pro fim da fila do lote,
+    // sem somar. O lote da PESSOA volta como o ✕ de um card volta
+    // (`devolverPedidoRecusado`): como o PRÓXIMO card na fila do gesto, com o
+    // "Restam" subindo junto — ia pro FIM, e a pilha seguia anunciando outro
+    // pedido (auditoria de 2026-09-29, C5) —, ou pela busca numa fila refeita, que
+    // agora busca na hora se a tela ficou sem card (ficava "Tudo limpo!" com os
+    // pedidos pendentes, V9). Juntos, no fim, na ordem do lote.
+    const devolver = [];
     const voltarPraFila = (q) => {
-        if (naFilaDoLote()) {
-            // Contando ao landar o número nunca desceu; no otimista, ele volta.
-            if (!aoLandar) AppState.serverTotal++;
-            AppState.queue.push(q);
-        } else {
-            pedidosQueEntraramNaFila.delete(chaveDoPedido(q));
-            AppState.hasMore = true;
-        }
+        if (aoLandar && naFilaDoLote()) { AppState.queue.push(q); return; }
+        devolver.push(q);
     };
     const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const aoLandar = !!opts.contarAoLandar;
@@ -12944,12 +12959,20 @@ async function enviarLote(places, opts = {}) {
         updateInFlightIndicator();
         updateStats();
         saveStats();
+        // Os que voltam (ver `voltarPraFila`) entram DEPOIS de o "em andamento"
+        // sair: a busca que a devolução dispara numa fila refeita não pode
+        // filtrá-los. Com a sessão trocada no meio, só na fila que atravessou a
+        // queda — nunca uma busca na fila de outra sessão.
+        if (devolver.length && (epoca === epocaDaSessao || naFilaDoLote())) devolverPedidoRecusado(devolver, epocaFila);
         updatePendingCount();
         // O que falhou voltou pra fila (`voltarPraFila`). Sem card na tela — o
         // "Rejeitar os N" esvaziou a fila, ou a recusa automática levou tudo o
         // que a busca trouxe —, ninguém o desenhava: ele ficava ATRÁS do painel
         // vazio, com "Restam 1" e o "Tudo limpo!" na tela.
         if (!AppState.currentPlace && AppState.queue.length && AppState.authenticated) showCurrentPlace();
+        // E a pilha: o card de fundo e o "Ver +N" do da frente passam a dizer o
+        // que a fila tem agora (C5).
+        aoMudarAFilaPorBaixo();
     }
     if (!opts.silencioso) mostrarResultadoDoLote(conta);
 }
@@ -15239,14 +15262,25 @@ function recuperarCardSemFoto() {
 // quem o traz é a BUSCA, que diz o que o Waze tem agora e sob os filtros de
 // agora. Ele sai do "já passou pela fila", a fila volta a dizer "pode haver
 // mais", e o "Restam" sobe quando ele chegar — somar agora o contaria duas vezes.
+//
+// Aceita um pedido ou uma LISTA (o "Rejeitar os N" que volta junto): um por um,
+// cada `splice` na posição 1 inverteria a ordem dos que voltam — sem erro
+// visível, só a fila discordando do WME na hora de conferir.
 function devolverPedidoRecusado(place, epocaFila) {
-    const k = chaveDoPedido(place);
-    if (!k || AppState.queue.some((p) => chaveDoPedido(p) === k)) return;
+    const naFila = new Set(AppState.queue.map(chaveDoPedido));
+    const voltam = [];
+    for (const p of (Array.isArray(place) ? place : [place])) {
+        const k = chaveDoPedido(p);
+        if (!k || naFila.has(k)) continue;
+        naFila.add(k);
+        voltam.push(p);
+    }
+    if (!voltam.length) return;
     if (epocaFila === AppState.fetchEpoch) {
-        AppState.queue.splice(AppState.currentPlace ? 1 : 0, 0, place);
-        AppState.serverTotal++;
+        AppState.queue.splice(AppState.currentPlace ? 1 : 0, 0, ...voltam);
+        AppState.serverTotal += voltam.length;
     } else {
-        pedidosQueEntraramNaFila.delete(k);
+        for (const p of voltam) pedidosQueEntraramNaFila.delete(chaveDoPedido(p));
         AppState.hasMore = true;
     }
     updatePendingCount();

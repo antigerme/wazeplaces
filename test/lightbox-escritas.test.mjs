@@ -194,6 +194,8 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     aplicarTravaDeAcao: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {},
     setTimeout: () => 0, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
     callWithRetry: (fn) => fn(),
+    // A volta do pedido numa fila refeita (V9) é medida em test/lote-autor.test.mjs.
+    voltarDaAprovacaoRecusada: () => {},
   };
   let placeResolvido = null;
   const nomes = ['enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual', 'enviarExclusao', 'pedirExclusaoDaFoto'];
@@ -383,7 +385,7 @@ function montarL1({ respostas, viva, caiNaSonda = false }) {
     devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {}, contarConquista: () => {},
     montarCardDeFundo: () => {}, cardDaFrente: () => null, document: { getElementById: () => null },
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, advanceQueue: () => log.push('avancou'),
-    marcarEmAndamento: () => {},
+    marcarEmAndamento: () => {}, voltarDaAprovacaoRecusada: () => {},
   };
   const nomes = ['refazerDepoisDo401', 'enviarExclusao', 'enviarAprovacao', 'concluirAprovacao',
     'enviarRenomeacao', 'aplicarNosIrmaos', 'aplicarNomeNaTela'];
@@ -695,6 +697,7 @@ function montarAprovacao({ semJanela = false, resposta = { success: true } } = {
     // A busca de verdade (`semOsJaDecididos`), sem fila de saída nem pouso: o
     // que a tira da fila nova é só o "em andamento".
     carregarFilaDeSaida: () => [], pousosDaPagina: new Map(), offlineLigado: () => false, offlineLerPousos: () => [],
+    voltarDaAprovacaoRecusada: () => {},
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'semOsJaDecididos', 'enviarAprovacao', 'concluirAprovacao',
     'aprovarFotoAtual', 'refazerDepoisDo401'];
