@@ -1497,7 +1497,12 @@ const pendentes9b = new Map(DEC_9B.map((p) => [chave9b(p), p]));
 const decisoes9b = [];              // cada decisão que CHEGOU: { chave, rota, t }
 const buscas9b = [];                // cada busca: { tPedido, tResposta, lista }
 let atrasoBusca9b = 0;
+// A espera de cada decisão antes de pousar: um número (ms) ou uma função que
+// devolve a promessa da espera (ver o passo 6).
 let atrasoDecisao9b = () => 0;
+// Quantas buscas CHEGARAM (na chegada, não na resposta), e quem espera a próxima.
+let buscasChegadas9b = 0;
+const aoChegarBusca9b = [];
 // "LIE-FI" (passo 9): o rádio diz `onLine`, e a decisão não passa — túnel,
 // portal cativo. Só as escritas: é o envio da descarga que morre.
 let lieFi9b = false;
@@ -1511,6 +1516,8 @@ const rotaApi9b = async (r) => {
   if (rota === 'buscar-places') {
     const b = { tPedido: Date.now(), lista: [...pendentes9b.keys()] };
     const places = [...pendentes9b.values()];
+    buscasChegadas9b++;
+    for (const ok of aoChegarBusca9b.splice(0)) ok();
     if (atrasoBusca9b) await dormir(atrasoBusca9b);
     b.tResposta = Date.now();
     buscas9b.push(b);
@@ -1519,7 +1526,8 @@ const rotaApi9b = async (r) => {
   if (rota === 'marcar-lido' || rota === 'validar-place') {
     const chave = corpo.venueID + '|' + corpo.updateRequestID;
     const espera = atrasoDecisao9b(chave);
-    if (espera) await dormir(espera);
+    if (typeof espera === 'function') await espera();
+    else if (espera) await dormir(espera);
     decisoes9b.push({ chave, rota, t: Date.now() });
     pendentes9b.delete(chave);
     return json({ success: true });
@@ -1580,6 +1588,13 @@ const decidir9b = async (pg, botao, esperarSaida) => {
 // 1. COM rede, depois da foto: o ✕ pousa no Waze e a foto não sabe disso.
 const k101 = await decidir9b(page, '.card-btn-reject', false);
 for (let j = 0; j < 50 && !decisoes9b.some((d) => d.chave === k101); j++) await dormir(100);
+// E espera o FIM da ação NA PÁGINA: o "Waze" desta seção anota a decisão ANTES
+// de responder, então ela aparecer aqui não diz que a página já recebeu a
+// resposta e gravou o pouso. MEDIDO com a máquina carregada: a leitura chegou
+// antes do pouso em 3 de 12 rodadas (na base e no ramo), e numa delas o
+// `about:blank` logo abaixo matou a resposta — o pouso nunca foi gravado, o ✕
+// voltou como card na reabertura e a seção reprovou 7 vezes em cascata.
+await esperarNaPagina(page, () => AppState.inFlightActions === 0, 10000, 50);
 const pousos9b = await page.evaluate(() => { try {
   return JSON.parse(localStorage.getItem('waze_places_offline_pousos') || '[]').map((e) => e[0]); } catch (e) { return []; } });
 diz('COM rede, o ✕ pousou no Waze e ficou gravado como pouso DEPOIS da fila guardada',
@@ -1722,7 +1737,18 @@ await prep.close();
 const k106 = chave9b(SO_MAPA(106));
 const k107 = chave9b(SO_MAPA(107));
 atrasoBusca9b = 1500;
-atrasoDecisao9b = (k) => (k === k106 ? 100 : 4000);
+// A 1ª decisão pousa 100 ms depois de a busca CHEGAR — nunca antes. Na abertura
+// o esvaziamento e a busca saem juntos, e quem chega primeiro no servidor é
+// questão de milissegundos: com a espera fixa de 100 ms, a margem (o pouso menos
+// a chegada da busca) foi de 57 a 127 ms em 11 de 12 rodadas e de -30 ms numa
+// (na BASE, com a máquina carregada; -8 ms numa rodada do smoke inteiro) — a
+// decisão pousava antes de a lista ser tirada e a pré-condição reprovava. O
+// "Waze" segura a resposta até a busca chegar, que é o cenário que a
+// pré-condição exige; com teto, e sem a busca a pré-condição reprova.
+const buscasAntes6 = buscasChegadas9b;
+const depoisDaBusca6 = () => (buscasChegadas9b > buscasAntes6 ? Promise.resolve()
+  : Promise.race([new Promise((ok) => aoChegarBusca9b.push(ok)), dormir(10000)])).then(() => dormir(100));
+atrasoDecisao9b = (k) => (k === k106 ? depoisDaBusca6 : 4000);
 aviao = false; await ctx.setOffline(false);
 const p3 = await abrirFria9b('reaberta com rede');
 await esperarNaPagina(p3, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'tela.primeiroCard'), 20000, 100);
