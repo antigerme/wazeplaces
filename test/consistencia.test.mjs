@@ -661,6 +661,33 @@ test('prazos citados na tela (dias da sessão, minutos do código) == os do serv
   assert.deepEqual(aMao, [], 'prazo do servidor escrito à mão no dicionário');
 });
 
+// O terceiro prazo do servidor que a Ajuda cita: a lista de fotos da lixeira
+// (`help.privacy.server`). A frase dizia "fica lá por até 1 minuto" contado do
+// toque, escrito à mão nas 4 línguas, e a lista ficava 74 s depois dele: ela é
+// regravada DEPOIS de cada exclusão, e o prazo conta da última gravação
+// (auditoria de 2026-09-29). Hoje o número vem do core, pela variável.
+test('prazo da lista de fotos da lixeira citado na Ajuda == o do servidor, pela variável e no singular', () => {
+  const core = read('server/core.mjs');
+  const ttl = Number((/const RELEITURA_TTL = (\d+);/.exec(core) || [])[1]);
+  const piso = Number((/const RELEITURA_TTL_STORE = Math\.max\((\d+), RELEITURA_TTL\);/.exec(core) || [])[1]);
+  assert.ok(ttl > 0 && piso > 0, 'CONTROLE: não achei o prazo da lista de fotos no core');
+  const doServidor = Math.max(piso, ttl);
+  const m = /^const LISTA_FOTOS_MIN_EXIBIDO = (\d+);/m.exec(APP);
+  assert.ok(m, 'sumiu a constante LISTA_FOTOS_MIN_EXIBIDO do app.js');
+  const min = Number(m[1]);
+  assert.equal(min * 60, doServidor, `a Ajuda diz ${min} minuto(s) e a lista de fotos fica ${doServidor} s no servidor`);
+  // A frase está no SINGULAR ("minuto", "minute"): com 2, sairia "2 minuto".
+  assert.equal(min, 1, 'o prazo da lista passou de 1 minuto — a frase é singular, é hora de chave plural');
+  assert.match(APP, /setI18nVars\(\{\s*listaFotosMin: \(\) => LISTA_FOTOS_MIN_EXIBIDO \}\)/,
+    'o prazo da lista não está registrado em setI18nVars — o {listaFotosMin} vazaria cru pra tela');
+  const vs = [...I18N.matchAll(/'help\.privacy\.server':\s*'((?:[^'\\\n]|\\.)*)'/g)].map((x) => x[1]);
+  assert.equal(vs.length, N_LINGUAS, `CONTROLE: help.privacy.server não está nas ${N_LINGUAS} línguas`);
+  for (const v of vs) {
+    assert.ok(v.includes('{listaFotosMin}'), `help.privacy.server não usa {listaFotosMin}: ${v}`);
+    assert.doesNotMatch(v, /\b\d+\s*(?:minutos?|minutes?)\b/, `help.privacy.server escreve o prazo à mão: ${v}`);
+  }
+});
+
 // As três miniaturas da prévia existem e são as PEQUENAS. Apontar pras capturas
 // originais funciona igual na tela e custa 432 KB em vez de 63 KB — na tela de
 // entrada, muitas vezes em dado móvel. É o tipo de regressão que ninguém vê.

@@ -80,6 +80,17 @@ const PAREAR_MIN_EXIBIDO = 5;
 if (typeof setI18nVars === 'function') {
     setI18nVars({ sessaoDias: () => SESSAO_DIAS_EXIBIDO, parearMin: () => PAREAR_MIN_EXIBIDO });
 }
+// O outro prazo do servidor que a Ajuda cita: a lista de fotos da lixeira sai
+// do servidor 1 minuto depois da ÚLTIMA gravação dela (`RELEITURA_TTL_STORE`,
+// no core). E há duas: a do toque na lixeira e a de DEPOIS de cada exclusão —
+// esta existe pra a exclusão seguinte usar a lista já sem a foto (gotcha #57) —,
+// então a frase conta a partir da última exclusão, não do toque (dizia "do
+// toque", e a lista ficava 74 s depois dele; auditoria de 2026-09-29). A frase
+// está no SINGULAR ("minuto"): `test/consistencia` cobra que o valor siga 1.
+const LISTA_FOTOS_MIN_EXIBIDO = 1;
+if (typeof setI18nVars === 'function') {
+    setI18nVars({ listaFotosMin: () => LISTA_FOTOS_MIN_EXIBIDO });
+}
 // Sem cap: a caixa de mudanças rola por dentro, cresce com o card e avisa que
 // rola (esmaecido de borda). Com `MAX_CHANGES_DISPLAY = 4` a 5ª mudança era
 // INALCANÇÁVEL — nem rolando — e a linha "+1 mais" gastava exatamente o espaço

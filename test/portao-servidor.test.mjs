@@ -213,6 +213,59 @@ test('releitura do excluir-foto: o prazo gravado no store respeita o mínimo do 
   assert.ok(doCache.every((p) => p >= 60), `prazo abaixo do mínimo do KV: ${doCache}`);
 });
 
+// A Ajuda (`help.privacy.server`) promete que a lista de fotos da lixeira sai do
+// servidor até N minuto depois da ÚLTIMA vez que a pessoa toca na lixeira ou
+// exclui uma foto. Medido como o KV mede: o registro some `ttl` segundos depois
+// da ÚLTIMA gravação dele. A frase contava do toque, e a lista ficava 74 s
+// (auditoria de 2026-09-29): ela é regravada depois da exclusão — de propósito,
+// pra a exclusão seguinte não mandar de volta a foto que saiu (gotcha #57).
+test('a lista de fotos da lixeira some até o prazo da Ajuda depois da ÚLTIMA gravação — do toque, ou da exclusão', async () => {
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const prometido = 60 * Number((/^const LISTA_FOTOS_MIN_EXIBIDO = (\d+);/m.exec(APP) || [])[1]);
+  assert.ok(prometido > 0, 'CONTROLE: não achei o prazo que a Ajuda cita');
+  let agora = 1_790_000_000;
+  const relogio = Date.now;
+  Date.now = () => agora * 1000;
+  try {
+    const cenario = async ({ excluir }) => {
+      const s = await sessaoDeTeste(COOKIES);
+      const some = [];   // o instante em que o KV apagaria o registro, a cada gravação
+      const gravar = s.store.put;
+      s.store.put = async (k, v, ttl) => { if (String(k).startsWith('reler_')) some.push(agora + ttl); return gravar(k, v, ttl); };
+      const venue = { id: 'v1', images: [{ id: 'i1', approved: true }, { id: 'i2', approved: true }] };
+      const corpo = { ...s.dados, region: 'row', venueID: 'v1', lat: -23.5, lon: -46.6 };
+      const toque = agora;
+      let fimDaExclusao = null;
+      await comWaze((url, init) => {
+        if (init.method !== 'POST') return json({ venues: { objects: [venue] } });
+        agora += 5;   // o Waze leva 5 s pra gravar
+        return json({ venues: { v1: { images: [{ id: 'i2' }] } } });
+      }, async () => {
+        await dispatch('excluir-foto', { ...corpo, imageID: 'preparar', action: 'preparar' }, s.ctx);
+        if (!excluir) return;
+        agora += 14;   // leu o diálogo e confirmou (a lista guardada ainda vale)
+        const r = await dispatch('excluir-foto', { ...corpo, imageID: 'i1' }, s.ctx);
+        assert.equal(r.body.success, true, JSON.stringify(r.body));
+        fimDaExclusao = agora;
+      });
+      assert.ok(some.length > 0, 'CONTROLE: a lista não foi gravada — o teste não mediu nada');
+      return { toque, fimDaExclusao, sumiu: some.at(-1) };
+    };
+    const desistiu = await cenario({ excluir: false });
+    assert.ok(desistiu.sumiu - desistiu.toque <= prometido,
+      `tocou e desistiu: a lista ficou ${desistiu.sumiu - desistiu.toque} s depois do toque (a Ajuda diz ${prometido} s)`);
+    const excluiu = await cenario({ excluir: true });
+    assert.ok(excluiu.sumiu - excluiu.fimDaExclusao <= prometido,
+      `excluiu: a lista ficou ${excluiu.sumiu - excluiu.fimDaExclusao} s depois da exclusão (a Ajuda diz ${prometido} s)`);
+    // CONTROLE: contado do TOQUE, o prazo passa — é por isso que a frase conta
+    // da última exclusão. Se isto falhar, a regravação mudou, e a frase também deve.
+    assert.ok(excluiu.sumiu - excluiu.toque > prometido,
+      `CONTROLE: a lista sumiu ${excluiu.sumiu - excluiu.toque} s depois do toque — a regravação depois da exclusão sumiu?`);
+  } finally {
+    Date.now = relogio;
+  }
+});
+
 test('VM: acento cortado na divisa entre dois pedaços do corpo chega inteiro', async () => {
   const texto = JSON.stringify({ nome: 'São João 🌽' });
   const bytes = Buffer.from(texto, 'utf8');

@@ -582,6 +582,7 @@ function variaveisDaTela() {
     nivelMinimo: String(num('NIVEL_MINIMO_EXIBIDO')),
     sessaoDias: String(num('SESSAO_DIAS_EXIBIDO')),
     parearMin: String(num('PAREAR_MIN_EXIBIDO')),
+    listaFotosMin: String(num('LISTA_FOTOS_MIN_EXIBIDO')),
   };
 }
 function decodificarHtml(s) {
@@ -677,24 +678,35 @@ test('sem sessão, a Ajuda não oferece "Ver de novo Como funciona" — o "Quero
 });
 
 // ── A13: o que fica no SERVIDOR ─────────────────────────────────────────────
-test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de fotos do local por até 1 minuto', () => {
+test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de fotos do local, até 1 minuto depois da última exclusão', () => {
   // A frase dizia "só uma coisa… nada além disso", e tocar na lixeira guarda,
   // SEM cifra, a lista de fotos do local (ids, quem enviou cada uma, data,
   // aprovada) pra a exclusão sair rápido — `relerLocal` no core. O prazo é o
-  // que o core manda pro armazenamento (o KV recusa menos de 60 s).
+  // que o core manda pro armazenamento (o KV recusa menos de 60 s), e ele
+  // conta de CADA gravação: a do toque e a de depois de cada exclusão (a lista
+  // regravada sem a foto, gotcha #57). A frase dizia "fica lá por até 1 minuto"
+  // depois do toque, e a lista ficava 74 s (auditoria de 2026-09-29). O número
+  // vem de `{listaFotosMin}`; a paridade com o core é do `test/consistencia`.
   const CORE = ler('server/core.mjs');
-  const ttl = Number((/const RELEITURA_TTL = (\d+);/.exec(CORE) || [])[1]);
-  const piso = Number((/const RELEITURA_TTL_STORE = Math\.max\((\d+), RELEITURA_TTL\);/.exec(CORE) || [])[1]);
-  assert.ok(ttl > 0 && piso > 0, 'CONTROLE: não achei o prazo da releitura no core — o teste perdeu a âncora');
-  const minutos = Math.ceil(Math.max(piso, ttl) / 60);
   assert.ok(/sessions\.store\.put\(chave, [^\n]*JSON\.stringify\(enxuto\), RELEITURA_TTL_STORE\)/.test(CORE),
     'CONTROLE: a releitura mudou de forma no core — confira se a frase da Ajuda segue verdadeira');
+  assert.ok(/sessions\.store\.put\(await chaveDaReleitura\(data\),[\s\S]{0,160}?RELEITURA_TTL_STORE\)/.test(CORE),
+    'CONTROLE: a regravação da lista depois da exclusão mudou de forma — a frase conta dela ("depois da última exclusão")');
+  // O "depois da última vez que você toca na lixeira ou exclui uma foto", em
+  // cada língua: o prazo conta da ÚLTIMA gravação, e a última pode ser a da exclusão.
+  const DEPOIS_DA_ULTIMA = {
+    pt: /\{listaFotosMin\} minuto depois da última vez que você toca na lixeira ou exclui uma foto/,
+    en: /\{listaFotosMin\} minute after the last time you tap the trash can or delete a photo/,
+    es: /\{listaFotosMin\} minuto después de la última vez que tocas la papelera o borras una foto/,
+    fr: /\{listaFotosMin\} minute après la dernière fois que vous touchez la corbeille ou supprimez une photo/,
+  };
   const D = dicionario();
   for (const lang of Object.keys(D)) {
     const frase = D[lang]['help.privacy.server'];
     assert.doesNotMatch(frase, /nada além disso|nothing else|nada más|rien d’autre/i,
       `${lang}: a Ajuda ainda diz que no servidor não fica mais nada`);
-    assert.match(frase, new RegExp(`\\b${minutos} minut`, 'i'), `${lang}: a Ajuda não diz o prazo da lista de fotos (${minutos} min)`);
+    assert.ok(DEPOIS_DA_ULTIMA[lang], `CONTROLE: língua nova (${lang}) sem a frase esperada neste teste`);
+    assert.match(frase, DEPOIS_DA_ULTIMA[lang], `${lang}: a Ajuda não diz que o prazo conta da ÚLTIMA exclusão: ${frase}`);
   }
 });
 
