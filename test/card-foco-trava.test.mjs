@@ -60,6 +60,9 @@ function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela 
     showToast: (msg, tipo, ms) => { const n = avisos.push({ msg, tipo }); duracoes.push(ms); return { dispensar: () => dispensados.push(n - 1) }; },
     t: (k) => k,
     Date: { now: () => relogio.agora },
+    // A aprovação da foto no ar do pedido da tela também trava (lote 8 da fila,
+    // A1): aqui não há nenhuma.
+    aprovacaoDaTelaNoAr: () => false,
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [

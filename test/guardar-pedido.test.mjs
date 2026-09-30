@@ -189,6 +189,9 @@ async function pularCom401(respostas, { sonda = 'viva' } = {}) {
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [
     'let epocaDaSessao = 0, escritasConferindo = 0, vivaEm = 0;',
+    // A conferência em curso de OUTRA chamada, que o `refazerDepoisDo401` espera
+    // (lote 8 do lightbox, V5): aqui nenhuma.
+    'let verificandoSessao = false, conferenciaDaSessao = null;',
     'const sessaoVivaDepoisDe = (t) => vivaEm > t;',
     fatiarBloco('msgDoServidor'), fatiarBloco('refazerDepoisDo401'), fatiarBloco('handleSkip'),
     'return { handleSkip, viva: () => { vivaEm = Date.now() + 1; }, caiu: () => { epocaDaSessao++; } };',

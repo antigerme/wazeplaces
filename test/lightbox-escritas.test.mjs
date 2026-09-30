@@ -890,11 +890,15 @@ test('L24 a escrita de foto SEM janela no ar segura o botão, mesmo quando a tra
   const botao = () => ({ disabled: false, classList: classes(), querySelector: () => null });
   const el = { lightboxApprove: botao(), lightboxDelete: botao(), lightboxNomeBtn: botao(),
     lightboxApproveSpinner: botao(), lightboxApproveIcon: botao() };
+  // `aplicarFocoDoTeclado`/`dispensarAvisoDaTrava`: o que a trava faz ao mudar
+  // no card (lote 8 do card, C10 e C14); aqui não são o assunto.
   const app = new Function('document', 'acoesTravadas', 'cardDaFrente', 'editandoNome', 'renomeacaoNoAr', 'Lightbox',
-    'atualizarBotaoSalvarNome', 'let aprovandoAgora = false, excluindoAgora = false;\n'
+    'atualizarBotaoSalvarNome', 'aplicarFocoDoTeclado', 'dispensarAvisoDaTrava',
+    'let aprovandoAgora = false, excluindoAgora = false;\n'
     + ['estadoAprovando', 'lixeiraOcupada', 'aplicarTravaDeAcao'].map(fatiar).join('\n')
     + '\nreturn { estadoAprovando, lixeiraOcupada, aplicarTravaDeAcao };')(
-    { getElementById: (id) => el[id] || null }, () => false, () => null, () => false, () => false, { place: null }, () => {});
+    { getElementById: (id) => el[id] || null }, () => false, () => null, () => false, () => false, { place: null }, () => {},
+    () => {}, () => {});
   app.estadoAprovando(true);
   assert.equal(el.lightboxApprove.disabled, true, 'CONTROLE: com a aprovação no ar o "Aprovar" não travou');
   app.aplicarTravaDeAcao();                         // abrir/fechar a edição do nome, fechar o lightbox
