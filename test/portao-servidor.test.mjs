@@ -186,12 +186,16 @@ test('corpo `null` do Waze: resposta inválida, não "Erro interno"', async () =
     const { r } = await comWaze(() => json('null'), () => dispatch(rota, { ...s.dados, region: 'row', countryId: 30 }, s.ctx));
     assert.equal(r.status, 500, rota);
     assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `${rota}: ${r.body.errorKey}`);
+    // O mesmo "erro inesperado do Waze" do login, com a categoria (o app lia a
+    // falta dela como `unknown`; agora vem dita).
+    assert.equal(r.body.errorCategory, 'unknown', `${rota}: ${r.body.errorCategory}`);
   }
   // A releitura do excluir-foto: `null` virava TypeError dentro do `relerLocal`.
   const s = await sessaoDeTeste(COOKIES);
   const { r, chamadas } = await comWaze(() => json('null'),
     () => dispatch('excluir-foto', { ...s.dados, region: 'row', venueID: 'v1', imageID: 'i1', lat: -23.5, lon: -46.6 }, s.ctx));
   assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `excluir-foto: ${r.body.errorKey}`);
+  assert.equal(r.body.errorCategory, 'unknown', `excluir-foto: ${r.body.errorCategory}`);
   assert.ok(chamadas.every((c) => (c.init.method || 'GET') === 'GET'), 'escreveu no Waze sem ter lido o local');
 });
 
@@ -790,6 +794,48 @@ test('login: Waze fora do ar é erro PASSAGEIRO e traduzido — não 400 com fra
   assert.equal(r.status, 400);
   assert.equal(r.body.errorKey, 'srv.err.cookiesExpiredRelogin');
   assert.match(r.body.error, /expirad/, 'a extensão decide "não está logado no WME" por este texto');
+});
+
+// O Waze respondendo 200 com algo que NÃO é o perfil — a página HTML de um
+// desafio, `null`, um objeto sem o nome. O login dava 400 ("o pedido está
+// errado") sem `errorCategory`, e as outras rotas, 500 (auditoria de
+// 2026-09-29). É falha do Waze, não dos cookies da pessoa, e a tela de entrar
+// e a extensão têm que ler assim.
+test('login: Waze 200 com corpo que não é o perfil é 500 `unknown` — a tela diz "resposta inesperada", nunca "cookies inválidos"', async () => {
+  // A extensão (`extensao-chrome/background.js`) decide "não está logado no WME"
+  // casando o TEXTO do erro. Até ela ser republicada decidindo pela categoria,
+  // a frase crua não pode casar — senão ela desiste dizendo que a pessoa não
+  // está logada, quando quem falhou foi o Waze.
+  const EXT = readFileSync(new URL('../extensao-chrome/background.js', import.meta.url), 'utf8');
+  const semLoginDaExtensao = /expirad|inválid|invalid|csrf/i;
+  assert.ok(EXT.includes('/expirad|inválid|invalid|csrf/i.test('),
+    'CONTROLE: a extensão mudou o jeito de decidir "sem login" — reveja a frase crua e este teste');
+  const telas = Object.fromEntries(['pt', 'en', 'es', 'fr'].map((l) => [l, msgDoServidorEm(l)]));
+  for (const [nome, corpo] of [['página HTML', '<!doctype html><html><body>Unusual traffic</body></html>'],
+    ['null', 'null'], ['objeto sem userName', '{}'], ['lista', '[]']]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(() => new Response(corpo, { status: 200, headers: { 'content-type': 'text/html' } }),
+      () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+    assert.equal(r.status, 500, `${nome}: HTTP ${r.status} — falha do Waze não é "pedido errado"`);
+    assert.equal(r.body.errorCategory, 'unknown', `${nome}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', nome);
+    assert.equal(r.body.sessionToken, undefined, `${nome}: criou sessão sem perfil`);
+    // A tela de entrar (`authenticateWithCookies` → `msgDoServidor`), nas 4 línguas.
+    for (const [lang, tela] of Object.entries(telas)) {
+      const vista = tela(r.body, 'FALLBACK');
+      assert.notEqual(vista, 'FALLBACK', `${nome}, ${lang}: a tela caiu no texto genérico ("cookies inválidos")`);
+      assert.doesNotMatch(vista, /cookie/i, `${nome}, ${lang}: a tela culpou os cookies: "${vista}"`);
+      assert.match(vista, /Waze/, `${nome}, ${lang}: a tela não diz que foi o Waze: "${vista}"`);
+    }
+    assert.doesNotMatch(r.body.error, semLoginDaExtensao, `${nome}: a extensão leria "${r.body.error}" como falta de login`);
+  }
+  // CONTROLE: o perfil de verdade passa, e cookie que não vale segue "sem login".
+  const s = await sessaoDeTeste(COOKIES);
+  const ok = await comWaze(() => json({ id: 1, userName: 'x', rank: 5, isAreaManager: true, isStaff: false }),
+    () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+  assert.equal(ok.r.body.success, true, `CONTROLE: o perfil de verdade não entrou: ${JSON.stringify(ok.r.body)}`);
+  const recusado = await comWaze(() => json({}, 403), () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+  assert.match(recusado.r.body.error, semLoginDaExtensao, 'CONTROLE: o cookie recusado deixou de ser "sem login" pra extensão');
 });
 
 test('core: toda apiError leva errorKey — frase crua do servidor chega em português em qualquer idioma', () => {

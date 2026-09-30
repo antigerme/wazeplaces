@@ -645,8 +645,25 @@ export function aplicarCookiesRotacionados(conteudoAtual, setCookie) {
 function objetoDoWaze(texto) {
   let v = null;
   try { v = JSON.parse(texto); } catch { /* cai no erro abaixo */ }
-  if (!v || typeof v !== 'object') apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  if (!v || typeof v !== 'object') respostaInesperadaDoWaze();
   return v;
+}
+
+// O Waze respondeu 200 com algo que não dá pra usar (página HTML, `null`, um
+// objeto sem o que a rota precisa). É erro inesperado DO WAZE, e sai igual em
+// toda rota: 500, `unknown`. O login dava 400 ("o pedido está errado") e sem
+// `errorCategory` (auditoria de 2026-09-29).
+//
+// A frase crua é a do dicionário pt: ela só aparece pra quem não tem a chave
+// — e pra extensão do Chrome, que decide "não está logado no WME" casando o
+// TEXTO com /expirad|inválid|invalid|csrf/. "Resposta inválida da API" casava,
+// e a extensão desistia dizendo que a pessoa não estava logada quando o Waze é
+// que tinha falhado. O certo é a extensão decidir pela `errorCategory` (ela
+// precisa ser republicada); até lá, a frase não a engana.
+function respostaInesperadaDoWaze() {
+  throw new ApiError({
+    success: false, error: 'Resposta inesperada do Waze', errorKey: 'srv.err.badWazeResponse', errorCategory: 'unknown',
+  }, 500);
 }
 
 export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
@@ -1617,13 +1634,10 @@ async function handleTestarCookies(data, { sessions }) {
     };
   }
 
-  let profile;
-  try {
-    profile = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 400, 'srv.err.badWazeResponse');
-  }
-  if (!profile || typeof profile !== 'object' || !profile.userName) apiError('Resposta inválida da API do Waze', 400, 'srv.err.badWazeResponse');
+  // 200 com corpo que não é o perfil (HTML de um desafio, `null`, sem nome):
+  // falha do Waze, como qualquer outra — nunca "cookies inválidos".
+  const profile = objetoDoWaze(result.response);
+  if (!profile.userName) respostaInesperadaDoWaze();
 
   const check = isUserAllowed(profile);
   if (!check.allowed) {
@@ -2678,7 +2692,7 @@ async function handleExcluirFoto(data, { sessions }) {
       body: { success: false, error: rel.erro.message, errorKey: rel.erro.messageKey, errorVars: rel.erro.messageVars, errorCategory: rel.erro.category, httpCode: rel.httpCode },
     };
   }
-  if (rel.erroParse) apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  if (rel.erroParse) respostaInesperadaDoWaze();
   if (rel.semLocal) apiError('Local não encontrado', 404, 'srv.err.venueGone');
   const venue = rel.venue;
 
@@ -3406,7 +3420,7 @@ async function handlePresencaWaze(data, { sessions }) {
     if (escrita) body.eu = escrita.dados ? lerEditorOnline(escrita.dados) : null;
     if (lista) body.editores = lerListaOnline(lista.dados);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+    respostaInesperadaDoWaze();
   }
   return { status: 200, body };
 }
@@ -3536,7 +3550,7 @@ async function handleChat(data, { sessions }) {
   try {
     resultado = ler(r.dados);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+    respostaInesperadaDoWaze();
   }
   return comConfirmados({ status: 200, body: { success: true, ...resultado } }, confirmacao);
 }
@@ -3575,7 +3589,7 @@ async function abrirConversa(data, { sessions, cookies, region, cabecalho, insta
   try {
     resultado = lerMensagens(hist.dados);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+    respostaInesperadaDoWaze();
   }
   // O "lida" é acessório pro HISTÓRICO, não pro cliente: ele precisa saber se
   // a conversa ficou lida no Waze. Com só `recibos: []`, "falhou" e "não havia
