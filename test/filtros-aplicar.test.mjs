@@ -382,6 +382,29 @@ test('F1: reabrir os Filtros devolve o "Aplicar" e abandona o pedido que ficou n
     'a abertura dos Filtros deixou de zerar as esperas do "Aplicar"');
 });
 
+test('F1: ninguém mais escreve o `disabled` do "Aplicar" — só o escritor único', () => {
+  // Gotcha #63: dois escritores no mesmo atributo, e o primeiro que termina
+  // devolve o botão com o outro ainda no ar. Rastreia a VARIÁVEL (o `const
+  // aplicar = $('applyFilters')` de antes escapava de um guard por instrução).
+  // Só as funções que CITAM o botão: a declaração mais próxima antes de cada citação.
+  const decls = [...APP_SEM.matchAll(/^(?:async )?function (\w+)\(/gm)];
+  const nomes = new Set();
+  for (const c of APP_SEM.matchAll(/['"]applyFilters['"]/g)) {
+    const antes = decls.filter((d) => d.index < c.index).at(-1);
+    if (antes) nomes.add(antes[1]);
+  }
+  assert.ok(nomes.has('aplicarEsperaDosFiltros'), 'o instrumento não achou nem o escritor único');
+  const escritores = [];
+  for (const nome of nomes) {
+    const corpo = fatiar(nome);
+    const vars = [...corpo.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*(?:\$|document\.getElementById)\(\s*['"]applyFilters['"]\s*\)/g)].map((m) => m[1]);
+    const alvos = ["(?:\\$|document\\.getElementById)\\(\\s*['\"]applyFilters['\"]\\s*\\)", ...vars];
+    if (alvos.some((a) => new RegExp(`${a}\\.disabled\\s*=(?!=)`).test(corpo))) escritores.push(nome);
+  }
+  assert.deepEqual(escritores, ['aplicarEsperaDosFiltros'],
+    `o "disabled" do "Aplicar" tem outro escritor: ${escritores.join(', ')} — a espera entra em \`esperaDosFiltros\``);
+});
+
 // ═══ F4 · negado não é "sem posição" ═══════════════════════════════════════
 test('F4: o código do erro decide o motivo — só o 1 é permissão', async () => {
   const p = pagina();
