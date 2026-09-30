@@ -1222,6 +1222,7 @@ test('L32 a foto ampliada diz o local como o card: nome, senão endereço — po
   const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
   assert.doesNotMatch(I18N, /lightbox\.img\.altGeneric|'lightbox\.img\.alt'/, 'a chave velha (com "place" no português e no espanhol) voltou');
   assert.match(I18N, /'srv\.err\.photoNotApproved': 'Solo se puede borrar una foto/, 'o espanhol voltou a dizer "eliminar" onde o resto diz "borrar"');
+});
 
 // ── A1: a APROVAÇÃO no ar trava o card do MESMO pedido (achado do lightbox,
 // 2026-09-29; também na main c6d9f91). Com a aprovação saindo, o card do pedido
@@ -1255,6 +1256,9 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
     callWithRetry: (fn) => fn(), sessaoVivaDepoisDe: () => false, escritasConferindo: 0, loteDeLidosEmVoo: false,
     voltarDaAprovacaoRecusada: () => {}, direcaoTravada: () => false,
     scheduleAction: (tipo) => log.push('agendou:' + tipo), showCurrentPlace: () => log.push('card-de-volta'),
+    // A escrita que não chegou ao Waze porque a sessão acabou volta na tela (lote 8
+    // do lightbox, V2): aqui só se anota — o que se mede é a trava do card.
+    escritaDoLightboxSemSessao: () => log.push('sem-sessao'),
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
@@ -1266,7 +1270,10 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
     .replace(/renomeacaoPendente/g, '__pend.r').replace(/epocaDaSessao/g, '__ep.v');
   const pend = { a: null, e: null, r: null };
   const ep = { v: 0 };
-  app = new Function(...chaves, '__res', '__pend', '__ep', 'let tratouNestaFila = false;\n' + corpo
+  // `aprovandoAgora`/`excluindoAgora`: o escritor único do `disabled` dos botões de
+  // foto (lote 8 do lightbox, L24) — estado de módulo, como no app.
+  app = new Function(...chaves, '__res', '__pend', '__ep',
+    'let tratouNestaFila = false, aprovandoAgora = false, excluindoAgora = false;\n' + corpo
     + `\nreturn { ${nomes.join(', ')} };`)(...chaves.map((k) => deps[k]), { v: null }, pend, ep);
   const responder = async () => { respostas.shift()(); await umTique(); await umTique(); };
   return { app, A, B, AppState, log, pend, ep, timers, deps, responder, respostas };
