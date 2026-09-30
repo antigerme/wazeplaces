@@ -13884,6 +13884,98 @@ let saidaPedidaDeNovo = false;
 // sem perfil): a chegada do perfil o chama de novo (ver `aoConhecerConta`).
 let saidaEsperandoConta = false;
 
+// ── DUAS ABAS: uma esvazia de cada vez ────────────────────────────────────
+// A trava `esvaziandoSaida` é da ABA, e a fila de saída é do APARELHO (o
+// localStorage é um só pras abas). Com o app aberto em duas, a rede voltando
+// manda o `online` às duas, e as duas esvaziavam a MESMA fila: cada decisão
+// saía duas vezes pro Waze, e o pouso contava nas duas — MEDIDO, 3 decisões e 5
+// rejeitados no Histórico (auditoria de 2026-09-29, O6).
+//
+// A trava ENTRE ABAS é a do navegador (`navigator.locks`): quem não a consegue
+// NA HORA (`ifAvailable`) não esvazia, e espera a outra aba soltar pra tentar
+// uma vez — o gatilho não evapora (a mesma regra do `saidaPedidaDeNovo`). A
+// espera é o próprio navegador avisando que a trava soltou: não há relógio.
+// O nome da trava é o da FILA que ela protege (não é chave de armazenamento:
+// trava do navegador não grava nada).
+const SAIDA_TRAVA = SAIDA_KEY;
+// Sem `navigator.locks` (Safari antes do iOS 15.4, navegador antigo), a reserva
+// é REIVINDICAR o item antes do envio: a marca da aba vai no item, e a outra aba
+// que vê uma marca que não é a dela não esvazia. A marca vale por um tempo — a
+// aba que a deixou pode ter morrido no meio do envio —, e o envio tem teto de
+// 45 s (o do `_post`): 60 s cobrem com folga.
+const SAIDA_REIVINDICACAO_MS = 60 * 1000;
+// O localStorage não tem "grave só se ninguém gravou": duas abas podem marcar o
+// MESMO item no mesmo instante, e vale a última gravação. Por isso quem marca
+// espera um instante e relê — se a marca não é mais a dela, a outra ganhou.
+const SAIDA_REIVINDICACAO_ASSENTA_MS = 60;
+// A marca desta ABA (desta página): nasce com ela e morre com ela.
+const ABA_DESTA_PAGINA = Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 8);
+let saidaEsperandoOutraAba = false;
+
+// A trava ENTRE ABAS do esvaziamento: `null` quando outra aba está esvaziando;
+// senão `{ reserva, soltar }` — `reserva` quando o navegador não tem a trava, e
+// aí vale a reivindicação item a item.
+function travaDaSaida() {
+    let locks = null;
+    try { locks = navigator.locks && typeof navigator.locks.request === 'function' ? navigator.locks : null; } catch (e) {}
+    if (!locks) return Promise.resolve({ reserva: true, soltar() {} });
+    return new Promise((pronto) => {
+        let decidiu = false;
+        locks.request(SAIDA_TRAVA, { ifAvailable: true }, (lock) => {
+            decidiu = true;
+            if (!lock) { pronto(null); return undefined; }
+            // A trava fica presa enquanto esta promessa não resolve: quem a
+            // solta é o fim do esvaziamento (`soltar`). Página que morre solta
+            // sozinha — é do navegador.
+            return new Promise((soltar) => pronto({ reserva: false, soltar }));
+        }).catch(() => { if (!decidiu) pronto({ reserva: true, soltar() {} }); });
+    });
+}
+
+// Outra aba está esvaziando: espera ela SOLTAR a trava e tenta uma vez. Uma
+// espera por aba; pega e solta na hora — é só pra saber QUANDO a outra
+// terminou, e quem esvazia é a chamada de sempre, que tenta a trava de novo.
+function esperarOutraAbaEsvaziar() {
+    let locks = null;
+    try { locks = navigator.locks; } catch (e) {}
+    if (!locks || saidaEsperandoOutraAba) return;
+    saidaEsperandoOutraAba = true;
+    dfato('saida.outraAba');
+    locks.request(SAIDA_TRAVA, () => undefined).then(
+        () => { saidaEsperandoOutraAba = false; esvaziarFilaDeSaida(); },
+        () => { saidaEsperandoOutraAba = false; });
+}
+
+// A reserva (sem `navigator.locks`). Marca de OUTRA aba, recente: ela está
+// esvaziando.
+function reivindicadoPorOutraAba(x) {
+    return !!(x && x.rv && x.rv !== ABA_DESTA_PAGINA && Date.now() - (Number(x.rvEm) || 0) < SAIDA_REIVINDICACAO_MS);
+}
+
+// Marca o item com esta aba e confere, depois de um instante, que a marca ficou
+// (ver `SAIDA_REIVINDICACAO_ASSENTA_MS`).
+async function reivindicarNaSaida(item) {
+    const achar = (f) => f.find((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
+        && x.updateRequestID === item.updateRequestID);
+    const f = carregarFilaDeSaida();
+    const it = achar(f);
+    if (!it || f.some(reivindicadoPorOutraAba)) return false;
+    it.rv = ABA_DESTA_PAGINA;
+    it.rvEm = Date.now();
+    salvarFilaDeSaida(f);
+    await new Promise((ok) => setTimeout(ok, SAIDA_REIVINDICACAO_ASSENTA_MS));
+    const confere = achar(carregarFilaDeSaida());
+    return !!confere && confere.rv === ABA_DESTA_PAGINA;
+}
+
+// O fim do esvaziamento na reserva: o que esta aba marcou e não saiu (a rede
+// caiu, o 5xx mandou pro fim) fica livre pra qualquer aba na hora.
+function soltarReivindicacoes() {
+    const f = carregarFilaDeSaida();
+    let mudou = false;
+    for (const x of f) if (x && x.rv === ABA_DESTA_PAGINA) { delete x.rv; delete x.rvEm; mudou = true; }
+    if (mudou) salvarFilaDeSaida(f);
+}
 
 // ── 401 NA FILA DE SAÍDA: sessão morta ou ESCRITA recusada? ──────────────
 //
@@ -14258,11 +14350,17 @@ async function esvaziarFilaDeSaida() {
     let f = carregarFilaDeSaida();
     if (!f.length) return;
     esvaziandoSaida = true;
+    // ENTRE ABAS: uma esvazia de cada vez (ver `travaDaSaida`). Com a outra aba
+    // esvaziando, esta espera ela soltar e tenta uma vez.
+    const trava = await travaDaSaida();
+    if (!trava) { esvaziandoSaida = false; esperarOutraAbaEsvaziar(); return; }
     const epoca = epocaDaSessao;
     // Zera ao ENTRAR, não ao sair: o que interessa é o gatilho que chegar DAQUI
     // pra frente. Zerar no fim apagaria justamente o pedido que esta passada
     // ainda não pôde atender.
     saidaPedidaDeNovo = false;
+    // Relida com a trava na mão: a outra aba pode ter esvaziado nesse meio.
+    f = carregarFilaDeSaida();
     let enviados = 0;
     // Tira o item SEM ir ao Waze — de outra conta, ou de dono desconhecido: o
     // placar que subiu no gesto desce (o mesmo da falha de verdade).
@@ -14313,6 +14411,10 @@ async function esvaziarFilaDeSaida() {
                 f = tirarSemEnviar(item, 'saida.semDono');
                 continue;
             }
+            // Na RESERVA (sem a trava do navegador), o item é REIVINDICADO antes
+            // do envio. Não deu — outra aba tem item marcado há pouco (ela está
+            // esvaziando), ou marcou este no mesmo instante e ganhou —: esta sai.
+            if (trava.reserva && !(await reivindicarNaSaida(item))) break;
             const place = { venueID: item.venueID, updateRequestID: item.updateRequestID,
                             creatorId: item.creatorId, createdBy: item.nome || undefined,
                             duplicado: item.dup ? {} : undefined };
@@ -14370,6 +14472,18 @@ async function esvaziarFilaDeSaida() {
             // resto encalhado em silêncio (só um `dfato`). O item já saiu do
             // Waze — o que falhou foi a CONTABILIDADE dele, e contabilidade de
             // um item não é motivo pra não mandar os outros sete.
+            //
+            // Mas só se o item AINDA ESTÁ na fila: a outra aba (a reserva sem a
+            // trava do navegador), a resposta de uma descarga ou o "Sair" dado
+            // noutra aba podem tê-lo levado enquanto ele voava — e aí o pouso é
+            // de quem o levou. Contar aqui também punha o mesmo trabalho duas
+            // vezes no Histórico (auditoria de 2026-09-29, O6). Nem pouso, nem
+            // "enviado".
+            if (!carregarFilaDeSaida().some((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
+                && x.updateRequestID === item.updateRequestID)) {
+                dfato('saida.saiuPorOutro', { tipo: item.tipo });
+                r = null;
+            }
             try { registrarPousoDeSaida(item.tipo, place, r, item); }
             catch (e) { dfato('saida.pouso.erro', { tipo: item.tipo }); }
             // RELÊ antes de gravar, e o motivo é PERDA DE DADO na feature que
@@ -14405,6 +14519,9 @@ async function esvaziarFilaDeSaida() {
         dfato('saida.erro', { restam: f.length });
     } finally {
         esvaziandoSaida = false;
+        // A trava entre abas solta aqui (ou, na reserva, as marcas desta aba).
+        if (trava.reserva) soltarReivindicacoes();
+        else trava.soltar();
     }
     if (enviados) {
         dfato('saida.saiu', { enviados, restam: f.length });

@@ -147,6 +147,8 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
     registrarPousoDeSaida: () => {}, handleUnauthorized: () => {}, updateInFlightIndicator: () => {},
     updateStats: () => {}, saveStats: () => log.push('saveStats'), dfato: (k) => log.push(k),
     showToast: () => {}, t: (k) => k, setTimeout: (f) => f(),
+    // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
+    travaDaSaida: async () => ({ reserva: false, soltar() {} }),
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;

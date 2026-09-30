@@ -597,6 +597,8 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
     showAuthScreen: () => {}, showAccessDenied: () => {}, completarPerfilChegado: () => {},
     definirPerfil: (r) => !!(r && r.success && r.profile),
     medidas, sonda, escrita, relogio, setImmediate,
+    // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
+    travaDaSaida: async () => ({ reserva: false, soltar() {} }),
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo',
@@ -717,6 +719,8 @@ function aparelhoO5(guardado = new Map()) {
       historyTodayKey: () => '2026-09-26', ondeAgora: () => '30', handleUnauthorized: () => {},
       renomeacaoPendente: null, aprovacaoPendente: null, exclusaoPendente: null, console: { error: () => {} },
       medidas, resposta, setImmediate,
+      // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
+      travaDaSaida: async () => ({ reserva: false, soltar() {} }),
     };
     const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
       'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
@@ -944,6 +948,8 @@ function drenarO8(itens, resposta) {
     updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {}, handleUnauthorized: () => {},
     showToast: (m, tipo) => { if (tipo === 'error') medidas.erros++; }, t: (k) => k, msgDoServidor: (r, d) => d,
     dfato: (k) => medidas.diario.push(k),
+    // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
+    travaDaSaida: async () => ({ reserva: false, soltar() {} }),
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
     'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'registrarPouso', 'devolverPedidoRecusado',
@@ -998,4 +1004,191 @@ test('O8: REDE fora (sem resposta do Waze) não conta tentativa nem mexe na orde
   assert.deepEqual(f.map((x) => x.venueID), ['vA', 'vB'], 'a queda de rede mudou a ordem da fila');
   assert.equal(f[0].tt, undefined, 'a queda de rede contou tentativa contra o pedido');
   assert.deepEqual(d.medidas.enviados, ['vA', 'vA', 'vA', 'vA']);
+});
+
+// ── R4-O6: DUAS ABAS esvaziando a MESMA fila (auditoria de 2026-09-29) ────────
+// A trava `esvaziandoSaida` é da ABA, e a fila de saída é do APARELHO (o
+// localStorage é um só). Com o app aberto em duas abas, a rede voltando manda o
+// `online` às duas, e as duas esvaziavam a mesma fila: cada decisão saía duas
+// vezes pro Waze, e o pouso contava nas duas (medido no navegador, f4: 3
+// decisões e 5 rejeitados no Histórico). Aqui duas "abas" rodam o esvaziamento
+// DE VERDADE sobre o mesmo armazenamento, com uma trava do navegador de mentira
+// (a semântica do Web Locks: `ifAvailable`, e a fila de espera passando a vez).
+function locksDoAparelho() {
+  const t = { ocupado: false, fila: [] };
+  return {
+    async request(nome, opcoes, cb) {
+      if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+      if (t.ocupado) {
+        if (opcoes && opcoes.ifAvailable) return cb(null);
+        await new Promise((ok) => t.fila.push(ok));   // quem solta passa a vez direto
+      } else t.ocupado = true;
+      try { return await cb({ name: nome }); } finally {
+        const prox = t.fila.shift();
+        if (prox) prox(); else t.ocupado = false;
+      }
+    },
+  };
+}
+const ITEM_O6 = (v) => ({ tipo: 'reject', venueID: v, updateRequestID: 'u' + v, conta: '1', regiao: 'row', t: 1 });
+function aparelhoO6({ itens, comTravas = true, rede }) {
+  const guardado = new Map([['waze_places_saida', JSON.stringify(itens)]]);
+  const aparelho = { guardado, enviados: [], historico: [], locks: comTravas ? locksDoAparelho() : undefined };
+  aparelho.aba = (nome) => {
+    const diario = [];
+    const AppState = { authenticated: true, profile: { id: 1 }, stats: { read: 0, rejected: itens.length, skipped: 0 } };
+    const deps = {
+      AppState, navigator: { onLine: true, locks: aparelho.locks }, epocaDaSessao: 0,
+      safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
+      API: { getSession: () => 'tok',
+        rejectPlace: async (v) => { aparelho.enviados.push(v); return rede(v, aparelho, nome); },
+        markAsRead: async (v) => { aparelho.enviados.push(v); return rede(v, aparelho, nome); } },
+      SAIDA_KEY: 'waze_places_saida', CONTA_KEY: 'waze_places_conta', SAIDA_RITMO_MS: 5,
+      SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000], SAIDA_TENTATIVAS_POR_ITEM: 3,
+      SAIDA_TRAVA: 'waze_places_saida', SAIDA_REIVINDICACAO_MS: 60000, SAIDA_REIVINDICACAO_ASSENTA_MS: 10,
+      ABA_DESTA_PAGINA: 'aba-' + nome,
+      // O pouso: o que ele conta no Histórico é do APARELHO (as abas dividem).
+      registrarPousoDeSaida: (tipo, place, r) => {
+        if (r && (r.success || r.errorCategory === 'already_processed')) aparelho.historico.push(place.venueID);
+      },
+      updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {}, handleUnauthorized: () => {},
+      showToast: () => {}, t: (k) => k, dfato: (k) => diario.push(k),
+      // A espera de ASSENTAR a reivindicação (10 ms) passa pelo gancho do teste:
+      // é ali que outra aba "grava por cima" no mesmo instante.
+      setTimeout: (fn, ms) => { if (ms === 10 && aparelho.aoAssentar) aparelho.aoAssentar(nome); return setTimeout(fn, ms); },
+    };
+    const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+      'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'travaDaSaida', 'esperarOutraAbaEsvaziar',
+      'reivindicadoPorOutraAba', 'reivindicarNaSaida', 'soltarReivindicacoes', 'esvaziarFilaDeSaida'];
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, `
+      let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, ultimaEscritaOkEm = 0,
+        verificandoSessao = false, saidaEsperandoOutraAba = false;
+      let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
+      const pedidosEmAndamento = new Set();
+      ${nomes.map(fatiarComAsync).join('\n')}
+      return { esvaziarFilaDeSaida, carregarFilaDeSaida };`)(...chaves.map((k) => deps[k]));
+    return { app, diario };
+  };
+  aparelho.fila = () => JSON.parse(guardado.get('waze_places_saida') || '[]');
+  return aparelho;
+}
+// O Waze: a 1ª decisão de um pedido pousa; a repetida é "já tratado".
+const WAZE_O6 = async (v, aparelho) => {
+  await new Promise((ok) => setTimeout(ok, 15));
+  return aparelho.enviados.filter((x) => x === v).length > 1 ? { success: false, errorCategory: 'already_processed' } : { success: true };
+};
+const assentarO6 = async (aparelho) => {
+  for (let i = 0; i < 200 && aparelho.fila().length; i++) await new Promise((ok) => setTimeout(ok, 10));
+  await new Promise((ok) => setTimeout(ok, 150));   // o que ainda voava pousa
+};
+const porPedido = (lista) => lista.reduce((m, v) => ({ ...m, [v]: (m[v] || 0) + 1 }), {});
+
+test('R4-O6: duas abas e a rede voltando — cada decisão sai UMA vez, e o Histórico conta UMA (a trava do navegador)', async () => {
+  const ap = aparelhoO6({ itens: ['v1', 'v2', 'v3'].map(ITEM_O6), rede: WAZE_O6 });
+  const a = ap.aba('A'), b = ap.aba('B');
+  // O `online` chega às DUAS abas no mesmo instante.
+  await Promise.all([a.app.esvaziarFilaDeSaida(), b.app.esvaziarFilaDeSaida()]);
+  await assentarO6(ap);
+  assert.deepEqual(porPedido(ap.enviados), { v1: 1, v2: 1, v3: 1 }, `decisão mandada duas vezes pro Waze: ${ap.enviados.join(' ')}`);
+  assert.deepEqual(porPedido(ap.historico), { v1: 1, v2: 1, v3: 1 }, `o pouso contou nas duas abas: ${ap.historico.join(' ')}`);
+  assert.deepEqual(ap.fila(), []);
+  // A aba que não pegou a trava ESPEROU a outra (o gatilho não evaporou).
+  assert.ok(a.diario.includes('saida.outraAba') || b.diario.includes('saida.outraAba'), 'nenhuma aba esperou a outra: as duas esvaziaram');
+});
+
+test('R4-O6: sem `navigator.locks` (a reserva) — cada item é REIVINDICADO antes do envio, e sai uma vez', async () => {
+  const ap = aparelhoO6({ itens: ['v1', 'v2', 'v3', 'v4'].map(ITEM_O6), comTravas: false, rede: WAZE_O6 });
+  const a = ap.aba('A'), b = ap.aba('B');
+  await Promise.all([a.app.esvaziarFilaDeSaida(), b.app.esvaziarFilaDeSaida()]);
+  // E a outra aba volta a tentar NO MEIO do esvaziamento (a prova de rede dela):
+  // vê a marca da que está esvaziando e sai.
+  await new Promise((ok) => setTimeout(ok, 30));
+  await b.app.esvaziarFilaDeSaida();
+  await assentarO6(ap);
+  for (const x of [a, b]) await x.app.esvaziarFilaDeSaida();   // o que sobrou, se sobrou
+  await assentarO6(ap);
+  assert.deepEqual(porPedido(ap.enviados), { v1: 1, v2: 1, v3: 1, v4: 1 }, `sem a trava, decisão mandada duas vezes: ${ap.enviados.join(' ')}`);
+  assert.deepEqual(porPedido(ap.historico), { v1: 1, v2: 1, v3: 1, v4: 1 });
+  assert.deepEqual(ap.fila(), []);
+});
+
+test('R4-O6: CONTROLE — uma aba só: cada decisão sai e conta uma vez (o instrumento conta certo)', async () => {
+  const ap = aparelhoO6({ itens: ['v1', 'v2', 'v3'].map(ITEM_O6), rede: WAZE_O6 });
+  await ap.aba('A').app.esvaziarFilaDeSaida();
+  await assentarO6(ap);
+  assert.deepEqual(porPedido(ap.enviados), { v1: 1, v2: 1, v3: 1 });
+  assert.deepEqual(porPedido(ap.historico), { v1: 1, v2: 1, v3: 1 });
+});
+
+test('R4-O6: o item que OUTRA aba levou enquanto ele voava não conta o pouso de novo', async () => {
+  let tirarNoVoo = true;
+  const ap = aparelhoO6({ itens: ['v1', 'v2'].map(ITEM_O6), rede: async (v, aparelho) => {
+    // Enquanto este envio voa, a outra aba pousa a MESMA decisão e a tira da fila.
+    if (tirarNoVoo && v === 'v1') {
+      aparelho.guardado.set('waze_places_saida', JSON.stringify(aparelho.fila().filter((x) => x.venueID !== 'v1')));
+      aparelho.historico.push('v1');
+    }
+    return { success: false, errorCategory: 'already_processed' };
+  } });
+  await ap.aba('A').app.esvaziarFilaDeSaida();
+  await assentarO6(ap);
+  assert.deepEqual(porPedido(ap.historico), { v1: 1, v2: 1 }, `o pouso do item que a outra aba levou contou de novo: ${ap.historico.join(' ')}`);
+  assert.deepEqual(ap.fila(), []);
+  // CONTROLE: sem a outra aba no meio, o mesmo "já tratado" conta (uma vez).
+  tirarNoVoo = false;
+  const ctl = aparelhoO6({ itens: ['v1'].map(ITEM_O6), rede: async () => ({ success: false, errorCategory: 'already_processed' }) });
+  await ctl.aba('A').app.esvaziarFilaDeSaida();
+  await assentarO6(ctl);
+  assert.deepEqual(ctl.historico, ['v1']);
+});
+
+test('R4-O6: a aba que esperou a outra tenta UMA vez quando ela solta — o que a rede ruim deixou, sai', async () => {
+  // A aba A esvazia com a rede ainda ruim (o 2º item falha por REDE e ela para);
+  // a B chegou no meio (o `online` dela), esperou, e tenta quando A solta — já
+  // com a rede boa. Sem a espera, o gatilho da B evaporava e o item ficava
+  // preso até a próxima abertura do app.
+  let redeRuim = true;
+  const ap = aparelhoO6({ itens: ['v1', 'v2'].map(ITEM_O6), rede: async (v, aparelho, aba) => {
+    await new Promise((ok) => setTimeout(ok, 15));
+    if (redeRuim && aba === 'A' && v === 'v2') { redeRuim = false; return { success: false, errorCategory: 'transient' }; }
+    return { success: true };
+  } });
+  const a = ap.aba('A'), b = ap.aba('B');
+  const pa = a.app.esvaziarFilaDeSaida();
+  await new Promise((ok) => setTimeout(ok, 5));
+  await b.app.esvaziarFilaDeSaida();               // A está com a trava: B espera
+  await pa;
+  await assentarO6(ap);
+  assert.deepEqual(ap.fila(), [], 'o gatilho da aba que esperou evaporou: o item ficou preso com a rede boa');
+  assert.deepEqual(porPedido(ap.historico), { v1: 1, v2: 1 });
+});
+
+test('R4-O6: a RESERVA, passo a passo — marca de outra aba recente segura; velha (a aba morreu) não; e a última marca vale', async () => {
+  const semRede = async () => ({ success: true });
+  // (a) Um item marcado AGORA por outra aba: ela está esvaziando — esta não manda nada.
+  const recente = aparelhoO6({ itens: [{ ...ITEM_O6('v1'), rv: 'aba-X', rvEm: Date.now() }, ITEM_O6('v2')], comTravas: false, rede: semRede });
+  await recente.aba('A').app.esvaziarFilaDeSaida();
+  assert.deepEqual(recente.enviados, [], `a marca recente de outra aba foi ignorada: ${recente.enviados.join(' ')}`);
+  assert.equal(recente.fila().length, 2);
+  // (b) CONTROLE: a marca é de 61 s atrás — a aba que a deixou morreu no meio do envio: esta assume.
+  const velha = aparelhoO6({ itens: [{ ...ITEM_O6('v1'), rv: 'aba-X', rvEm: Date.now() - 61000 }], comTravas: false, rede: semRede });
+  await velha.aba('A').app.esvaziarFilaDeSaida();
+  await assentarO6(velha);
+  assert.deepEqual(velha.enviados, ['v1'], 'a marca de uma aba que morreu segurou o item pra sempre');
+  // (c) As duas marcam no MESMO instante (o localStorage não tem "grave se
+  // ninguém gravou"): a outra grava por cima enquanto esta assenta, e vale a
+  // última — esta sai sem mandar.
+  const corrida = aparelhoO6({ itens: [ITEM_O6('v1')], comTravas: false, rede: semRede });
+  corrida.aoAssentar = () => {
+    const f = corrida.fila();
+    f[0].rv = 'aba-X'; f[0].rvEm = Date.now();
+    corrida.guardado.set('waze_places_saida', JSON.stringify(f));
+  };
+  await corrida.aba('A').app.esvaziarFilaDeSaida();
+  assert.deepEqual(corrida.enviados, [], 'a outra aba marcou por cima e esta mandou assim mesmo: a mesma decisão sairia duas vezes');
+  // E a marca que esta aba deixou num item que NÃO saiu fica livre no fim.
+  const solta = aparelhoO6({ itens: [ITEM_O6('v1')], comTravas: false, rede: async () => ({ success: false, errorCategory: 'transient' }) });
+  await solta.aba('A').app.esvaziarFilaDeSaida();
+  assert.equal(solta.fila()[0].rv, undefined, 'a marca da aba ficou no item que a rede não levou: a outra aba esperaria 60 s à toa');
 });

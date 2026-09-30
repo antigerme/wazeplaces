@@ -1280,6 +1280,8 @@ function montarSaidaMorta() {
     SAIDA_RITMO_MS: 0, VERIFICA_SESSAO_MS: 0, setTimeout: (f) => { f(); return 1; },
     registrarPousoDeSaida: () => {}, rebuscarDepoisDeFalha: () => {}, derrubarSessao: () => { deps.AppState.authenticated = false; },
     t: (k) => k,
+    // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
+    travaDaSaida: async () => ({ reserva: false, soltar() {} }),
     API: {
       getSession: () => 'tok-A',
       // Como o `_post`: a resposta que CHEGA é prova de rede, e a prova chama o
