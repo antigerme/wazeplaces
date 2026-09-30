@@ -1739,7 +1739,8 @@ function setupModalListeners() {
     });
     setupFilterTabs();
     setupLanguageSwitcher();
-    $('focoAutorBar').addEventListener('click', limparFocoAutor);
+    // O toque faz o que a barra diz: volta à ordem normal (ver `voltarAOrdemNormal`).
+    $('focoAutorBar').addEventListener('click', voltarAOrdemNormal);
     $('filterCountry').addEventListener('change', (e) => {
         aoMudarPaisNaTela();
         loadStatesIntoSelect(parseInt(e.target.value, 10), $('filterRegion').value);
@@ -10593,9 +10594,31 @@ function focarAutor(id) {
 function limparFocoAutor() {
     if (AppState.autorEmFoco === null || AppState.autorEmFoco === undefined) return;
     AppState.autorEmFoco = null;
-    // A ordem NÃO volta atrás: reordenar de novo tiraria da frente o pedido que
-    // o editor está olhando agora. Sair do foco é parar de destacar, não desfazer.
+    // Aqui a ordem não mexe: QUEM REORDENA é quem chama. A ordem nova escolhida
+    // no filtro (`reordenarFilaNaTela`) reordena a fila inteira; o toque na
+    // barra (`voltarAOrdemNormal`) reordena o RESTO e deixa o card da tela na
+    // frente.
     renderFocoAutor();
+}
+
+// A barra do foco promete "Tocar para voltar à ordem normal" (é o nome dela
+// pro leitor de tela, nas quatro línguas), e o toque só escondia a barra: a
+// série do autor seguia na frente, fora da ordem que o filtro diz — MEDIDO,
+// X1,X2,X3,Y1,Y2 depois do toque, com a ordem normal X1,Y1,X2,Y2,X3 (auditoria
+// do card, 2026-09-29, C11). Agora o toque cumpre o texto: sai do foco e
+// devolve o RESTO da fila à ordem normal (`sortQueue`). O card NA TELA fica na
+// frente: trocá-lo seria trocar o pedido debaixo do dedo de quem só pediu a
+// ordem de volta. O card de fundo e o "Ver +N" acompanham a fila nova
+// (`aoMudarAFilaPorBaixo`).
+function voltarAOrdemNormal() {
+    if (AppState.autorEmFoco === null || AppState.autorEmFoco === undefined) return;
+    limparFocoAutor();
+    const fila = AppState.queue;
+    const naTela = AppState.currentPlace && fila[0] === AppState.currentPlace ? fila.shift() : null;
+    sortQueue();
+    if (naTela) fila.unshift(naTela);
+    updatePendingCount();
+    aoMudarAFilaPorBaixo();
 }
 
 // O foco é uma ordem que a PESSOA pediu, sobre um autor da fila DELA — dado de
