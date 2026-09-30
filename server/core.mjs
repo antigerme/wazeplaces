@@ -3676,6 +3676,27 @@ const ROUTES = {
   'lista-estados': handleListaEstados,
 };
 
+// O corpo que a conversão pra texto ou número não consegue ler. `JSON.parse` dá
+// objeto com `toString`/`valueOf` PRÓPRIOS a quem mandar a chave no JSON
+// (`{"toString":1}`), e aí `String(v)`, `parseInt(v)` e `Number(v)` LANÇAM —
+// quase todo campo de quase toda rota passa por um deles, e o pedido virava o
+// 500 genérico de "erro interno" em vez de 400 (53 achados no fuzz da
+// auditoria de 2026-09-29). Conferido UMA vez aqui, no corpo inteiro, em vez
+// de campo a campo em cada handler: rota nova nasce coberta. `JSON.parse` não
+// produz outro jeito de a conversão lançar (nem `Symbol.toPrimitive`, nem
+// getter). O teto de profundidade é do próprio exame (sem ele, um corpo de
+// 10 mil níveis estouraria a pilha); nenhum corpo do app passa de 3 níveis.
+const PROFUNDIDADE_MAX_DO_CORPO = 8;
+function corpoLegivel(v, profundidade = 0) {
+  if (v === null || typeof v !== 'object') return true;
+  if (profundidade > PROFUNDIDADE_MAX_DO_CORPO) return false;
+  if (Object.hasOwn(v, 'toString') || Object.hasOwn(v, 'valueOf')) return false;
+  for (const k of Object.keys(v)) {
+    if (!corpoLegivel(v[k], profundidade + 1)) return false;
+  }
+  return true;
+}
+
 /**
  * Executa um endpoint, pelo nome exato da rota.
  * ctx = { sessions }. Sempre resolve — nunca lança (ApiError vira resposta;
@@ -3687,6 +3708,7 @@ export async function dispatch(name, data, ctx) {
   const nome = String(name || '');
   const handler = Object.hasOwn(ROUTES, nome) ? ROUTES[nome] : null;
   if (!handler) return { status: 404, body: { success: false, error: 'Endpoint não encontrado', errorKey: 'srv.err.endpointNotFound' } };
+  if (!corpoLegivel(data)) return { status: 400, body: { success: false, error: 'Pedido inválido', errorKey: 'srv.err.badRequest' } };
   try {
     return await handler(data || {}, ctx);
   } catch (e) {
