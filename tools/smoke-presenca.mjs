@@ -65,7 +65,13 @@ const KM = Math.round(kmEntre(PESSOAS['12444348'].pos, PESSOAS['183164343'].pos)
 const naApp = new Set();          // quem está com o app aberto (e aparece na lista)
 const mensagens = [];             // { id, ts, de, para, texto, ctx, lida }
 const filas = new Map();          // id -> { itens: [{ inbox, bytes }], acordar }
-const falharEnvioDe = new Set();
+// O envio que falha: 'waze' é o Waze fora (gRPC 14) com a rede boa — o
+// servidor RESPONDE, com 500; 'rede' é a resposta que nem chega.
+const falharEnvio = new Map();
+// Quem tem uma página de mensagens ANTERIORES a pedir, que demora (a seção do
+// foco: o "Ver mensagens anteriores" carregando com o foco nele).
+const anterioresDe = new Set();
+const ABORTAR = Symbol('abortar');
 const token = (id) => `token-do-smoke-${id}`;
 
 function fila(id) {
@@ -128,6 +134,10 @@ function responderApi(eu, rota, c) {
   }
   if (rota === 'chat') {
     if (c.acao === 'abrir') {
+      if (c.antesDe && anterioresDe.has(eu)) {
+        anterioresDe.delete(eu);
+        return dormir(900).then(() => ({ success: true, mensagens: [], maisAntigas: false, recibos: [], ...confirmados }));
+      }
       const hist = mensagens.filter((m) => (m.de === eu && m.para === c.com) || (m.de === c.com && m.para === eu))
         .sort((a, b) => b.ts - a.ts)   // como o Waze: da mais nova pra mais antiga
         .map((m) => ({ id: m.id, ts: m.ts, de: { tipo: 1, id: m.de }, para: { tipo: 1, id: m.para }, classe: 'texto', texto: m.texto, recibo: null, contexto: m.ctx }));
@@ -135,11 +145,15 @@ function responderApi(eu, rota, c) {
       // Como o servidor: `lida` diz se a conversa ficou lida (só na primeira
       // página). Sem ele, o app manda o "lida" à parte — o custo de "abrir a
       // conversa: UM pedido" que este smoke mede deixaria de ser o do app.
-      return { success: true, mensagens: hist, maisAntigas: false, recibos: [], ...(c.antesDe ? {} : { lida: true }), ...confirmados };
+      return { success: true, mensagens: hist, maisAntigas: !c.antesDe && anterioresDe.has(eu), recibos: [], ...(c.antesDe ? {} : { lida: true }), ...confirmados };
     }
     if (c.acao === 'lida') { marcarLida(eu, c.com); return { success: true, recibos: [], ...confirmados }; }
     if (c.acao === 'enviar') {
-      if (falharEnvioDe.has(eu)) return { success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' };
+      const falha = falharEnvio.get(eu);
+      if (falha === 'rede') return ABORTAR;
+      // Como o core com o gRPC 14 do Waze: 500, transiente — e SEM `_motivo`,
+      // que só o `_post` do app põe, quando a resposta nem chega.
+      if (falha === 'waze') return { __status: 500, success: false, error: 'Erro de conexão com o Waze', errorKey: 'srv.err.connection', errorCategory: 'transient', httpCode: 200, grpcStatus: 14 };
       // A marca do app quem põe é o SERVIDOR (como no core).
       const m = { id: c.id, ts: Date.now(), de: eu, para: c.para, texto: c.texto, ctx: { ...(c.contexto || {}), app: 'wazeplaces' } };
       if (!mensagens.some((x) => x.id === m.id)) mensagens.push(m);
@@ -238,8 +252,10 @@ async function editor(id, { lang = 'pt' } = {}) {
     const rota = new URL(req.url()).pathname.split('/').pop();
     let c = {};
     try { c = JSON.parse(req.postData() || '{}'); } catch { /* vazio */ }
-    const corpo = responderApi(id, rota, c);
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(corpo) }).catch(() => {});
+    const corpo = await responderApi(id, rota, c);
+    if (corpo === ABORTAR) return route.abort('internetdisconnected').catch(() => {});
+    const { __status, ...resto } = corpo;
+    await route.fulfill({ status: __status || 200, contentType: 'application/json', body: JSON.stringify(resto) }).catch(() => {});
   });
   const page = await ctx.newPage();
   const pedidos = [];
@@ -419,6 +435,12 @@ try {
   await ana.page.fill('#conversaInput', 'isso é fachada ou é a sala?');
   await ana.page.tap('#conversaEnviar');
   await esperar(ana, () => document.querySelectorAll('#conversaMsgs .conversa-pedido').length === 1, 'o cartão não ficou na conversa da ana');
+  // Mandado, o pedido sai da tirinha escondida também (o relatório do modo dev
+  // leva o DOM inteiro; auditoria de 2026-09-29, P1). O controle é a tirinha
+  // cheia, logo acima.
+  const tirinha = await ana.page.evaluate(() => ({ nome: document.getElementById('conversaAnexoNome').textContent, foto: document.getElementById('conversaAnexoFoto').getAttribute('src') }));
+  if (!tirinha.nome && !tirinha.foto) ok('mandado o pedido, a tirinha solta não guarda o nome nem a foto dele');
+  else anota(`a tirinha solta guardou o pedido: ${JSON.stringify(tirinha)}`);
   const envio2 = apiDe(ana, 'chat', 'enviar')[1];
   const recebido = envio2 && envio2.c.contexto ? (() => { const c = JSON.parse(envio2.c.contexto.card); return { foto: c.imageUrl, nome: c.name, tipo: c.updateTypeKey }; })() : null;
   const [pergunta, linha, link] = envio2 ? envio2.c.texto.split('\n') : [];
@@ -450,28 +472,116 @@ try {
       else anota('a bia marcou como lida com a conversa escondida pelo pedido');
     }
     await bia.page.evaluate(() => closeModal('pedidoModal'));
+    // Fechada, a folha não guarda o pedido de terceiro (P1). O controle é ela
+    // aberta com a Padaria, logo acima.
+    const folha = await bia.page.evaluate(() => ({
+      nome: document.getElementById('pedidoNome').textContent, de: document.getElementById('pedidoDe').textContent,
+      end: document.getElementById('pedidoEnd').textContent, foto: document.getElementById('pedidoFotoImg').getAttribute('src'),
+      link: document.getElementById('pedidoWme').getAttribute('href'),
+    }));
+    if (!folha.nome && !folha.de && !folha.end && !folha.foto && !folha.link) ok('fechada, a folha do pedido não guarda nome, de quem, endereço, foto nem link');
+    else anota(`a folha do pedido fechada guardou o pedido de terceiro: ${JSON.stringify(folha)}`);
   }
 
   // ── 7. A FALHA que sobra: a do envio, com "Tentar de novo" no MESMO id ──────
+  // Duas falhas, duas frases (auditoria de 2026-09-29, P10): o Waze fora com a
+  // rede boa — a resposta CHEGA, e "sem conexão" mandaria procurar sinal — e a
+  // rede fora, em que a resposta nem chega.
   console.log('\n7. falha de envio');
-  falharEnvioDe.add(ana.id);
+  const frase = () => ana.page.evaluate(() => (document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent?.trim() || '');
+  falharEnvio.set(ana.id, 'waze');
   await ana.page.fill('#conversaInput', 'e o Instituto do Rim?');
   await ana.page.tap('#conversaEnviar');
   if (await esperar(ana, () => !!document.querySelector('#conversaMsgs .conversa-reenviar'), 'a falha não mostrou "Tentar de novo"')) {
-    const frase = await ana.page.evaluate(() => document.querySelector('#conversaMsgs .conversa-falhou').textContent.trim());
-    if (/^Não enviada, sem conexão\. Tentar de novo$/.test(frase)) ok(`a falha diz o motivo e o que fazer: "${frase}"`);
-    else anota(`frase da falha errada: ${frase}`);
+    const doWaze = await frase();
+    if (/^Não enviada\. Tentar de novo$/.test(doWaze)) ok(`o Waze fora, com a rede boa: "${doWaze}" — sem mandar procurar sinal`);
+    else anota(`frase da falha do Waze errada: ${doWaze}`);
     const botao = await alcancavel(ana, '#conversaMsgs .conversa-reenviar');
     if (botao.noCentro && botao.altura >= 44) ok(`"Tentar de novo" recebe o dedo (${botao.altura}px de alvo)`);
     else anota(`"Tentar de novo" não é alcançável: ${JSON.stringify(botao)}`);
-    falharEnvioDe.delete(ana.id);
+    // A rede cai: a nova tentativa nem chega ao servidor.
+    falharEnvio.set(ana.id, 'rede');
+    await ana.page.tap('#conversaMsgs .conversa-reenviar');
+    if (await esperar(ana, () => /sem conexão/.test((document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent || ''), 'sem rede, a falha não disse "sem conexão"')) {
+      const daRede = await frase();
+      if (/^Não enviada, sem conexão\. Tentar de novo$/.test(daRede)) ok(`sem rede: "${daRede}"`);
+      else anota(`frase da falha de rede errada: ${daRede}`);
+    }
+    falharEnvio.delete(ana.id);
     await ana.page.tap('#conversaMsgs .conversa-reenviar');
     if (await esperar(ana, () => !document.querySelector('#conversaMsgs .conversa-falhou'), 'o "Tentar de novo" não mandou')) {
-      const [a, b] = apiDe(ana, 'chat', 'enviar').slice(-2);
-      if (a && b && a.c.id === b.c.id) ok('a repetição vai com o MESMO id');
-      else anota(`a repetição mudou o id: ${a && a.c.id} → ${b && b.c.id}`);
+      const ids = apiDe(ana, 'chat', 'enviar').slice(-3).map((x) => x.c.id);
+      if (ids.length === 3 && ids.every((i) => i === ids[0])) ok('as três tentativas vão com o MESMO id');
+      else anota(`as tentativas mudaram o id: ${ids.join(' → ')}`);
     }
   }
+
+  // ── 7b. A RENOVAÇÃO SILENCIOSA da sessão não fecha a conversa ────────────
+  // A sessão cai e a extensão a devolve em segundos, com a MESMA conta. O
+  // perfil some na queda e volta depois da sessão — e, sem ele, a presença
+  // desligava: fechava a conversa e perdia o pedido preso (auditoria de
+  // 2026-09-29, P2). A extensão é de mentira; o resto é o caminho de verdade
+  // (derrubarSessao → entrarPelaExtensao → showMainScreen → o perfil).
+  console.log('\n7b. a sessão cai e a extensão a renova (a mesma conta)');
+  await ana.page.evaluate(() => {
+    window.addEventListener('message', (ev) => {
+      if (ev.data && ev.data.source === 'wazeplaces' && ev.data.action === 'precisa-de-sessao') {
+        window.postMessage({ source: 'wazeplaces-ext', action: 'aguarde' }, location.origin);
+        setTimeout(() => window.postMessage({ source: 'wazeplaces-ext', action: 'sessao', token: 'token-renovado-antigerme' }, location.origin), 600);
+      }
+    });
+  });
+  const pronta = await ana.page.evaluate(() => {
+    document.getElementById('conversaCardBtn').click();
+    document.getElementById('conversaInput').value = 'meio escrito';
+    return { conversa: !document.getElementById('conversaModal').classList.contains('hidden'), aberta: Presenca.aberta, anexo: !!Presenca.anexo };
+  });
+  if (!(pronta.conversa && pronta.aberta === '183164343' && pronta.anexo)) anota(`controle: a conversa não estava pronta pra queda: ${JSON.stringify(pronta)}`);
+  const fluxosAntes = reg(ana.id).fluxo.length;
+  // A queda de verdade chega longe do último pedido da lista: com a lista de
+  // mais de um minuto, o perfil que volta PEDE a lista — e a lista só abre o
+  // tempo real quando traz token novo. É o caminho que a espera tem que cobrir
+  // (o token ainda vale), e aqui ele é forçado em vez de esperado.
+  await ana.page.evaluate(() => { Presenca.atualizadaEm -= 5 * 60000; Presenca.tentadaEm = 0; });
+  await ana.page.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
+  if (await esperar(ana, () => AppState.authenticated && !!AppState.profile && API.getSession() === 'token-renovado-antigerme', 'a extensão não renovou a sessão')) {
+    await dormir(800);
+    const depois = await ana.page.evaluate(() => ({
+      conversa: !document.getElementById('conversaModal').classList.contains('hidden'), aberta: Presenca.aberta,
+      tirinha: document.getElementById('conversaAnexoNome').textContent, campo: document.getElementById('conversaInput').value,
+      telaEntrada: !document.getElementById('authScreen').classList.contains('hidden'),
+    }));
+    if (depois.conversa && depois.aberta === '183164343' && depois.tirinha.includes('Padaria') && depois.campo === 'meio escrito' && !depois.telaEntrada) {
+      ok('renovada em silêncio, a conversa segue aberta, com o pedido preso e o texto no campo');
+    } else anota(`a renovação silenciosa mexeu na conversa: ${JSON.stringify(depois)}`);
+    // O tempo real fechou na espera do perfil e REABRE com ele: a mensagem da bia chega na conversa aberta.
+    await bia.page.evaluate(() => { if (document.getElementById('conversaModal').classList.contains('hidden')) presencaAbrirConversa('12444348'); });
+    const lidasAntes = apiDe(ana, 'chat', 'lida').length;
+    await bia.page.fill('#conversaInput', 'chegou depois da renovação?');
+    await bia.page.tap('#conversaEnviar');
+    if (await esperar(ana, () => [...document.querySelectorAll('#conversaMsgs .conversa-bolha.dela')].some((b) => b.textContent.includes('chegou depois da renovação?')),
+      'a mensagem de depois da renovação não chegou na conversa aberta')) {
+      ok(`o tempo real reabriu com o perfil (${reg(ana.id).fluxo.length - fluxosAntes} conexão nova ao Google) e a mensagem chega na conversa aberta`);
+    }
+    // O "lida" dela sai 1,2 s depois (junta a rajada): fechar a conversa antes
+    // o deixaria sem sair, e a mensagem ficaria não lida no Waze — o controle
+    // da pílula vazia, na seção 9, mediria isso em vez do que ele mede.
+    for (let i = 0; i < 50 && apiDe(ana, 'chat', 'lida').length === lidasAntes; i++) await dormir(100);
+  }
+  // CONTROLE: os Filtros abertos na mesma queda ficam — sempre ficaram. Se
+  // fechassem, a medição de cima não distinguiria nada.
+  // `openFiltersModal` SOZINHO: ele esconde a conversa (com a limpeza dela).
+  // Fechar uma e abrir o outro no mesmo quadro é o gotcha #65 — o voltar
+  // pendente come a entrada nova, e o próximo fechamento sai do app (foi o que
+  // a primeira versão desta seção fez).
+  await ana.page.evaluate(() => { document.getElementById('conversaInput').value = ''; openFiltersModal(); });
+  await ana.page.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
+  if (await esperar(ana, () => AppState.authenticated && !!AppState.profile, 'a segunda renovação não voltou')) {
+    await dormir(800);
+    if (await ana.page.evaluate(() => !document.getElementById('filtersModal').classList.contains('hidden'))) ok('controle: os Filtros abertos na mesma queda seguem abertos');
+    else anota('controle: os Filtros fecharam na renovação');
+  }
+  await ana.page.evaluate(() => closeModal('filtersModal'));
 
   // ── 8. QUEM SÓ USA O WME: o app não mostra — mas confirma ───────────────────
   console.log('\n8. mensagem de quem só usa o WME');
@@ -523,13 +633,124 @@ try {
     ok('mensagem de quem SAIU acende a pílula com o balão, mesmo sem ninguém no app');
   }
 
+  // ── 9b. O FOCO no redesenho — teclado e leitor de tela ──────────────────────
+  // A lista e a conversa são redesenhadas por `innerHTML` a cada mensagem e a
+  // cada resposta, e o foco caía no <body> (auditoria de 2026-09-29, P3,
+  // medido no Chromium e no WebKit). O foco vai por `focus()` e não por Tab: o
+  // que se mede é o REDESENHO, e o Tab do WebKit não passa por botão sem ajuste
+  // do sistema.
+  console.log('\n9b. o foco fica onde estava quando a lista e a conversa se redesenham');
+  const ativo = () => ana.page.evaluate(() => {
+    const a = document.activeElement;
+    return { tag: a ? a.tagName : null, id: (a && a.id) || '', classe: a ? String(a.className) : '',
+      pessoa: a && a.getAttribute ? a.getAttribute('data-pessoa') : null, msg: a && a.getAttribute ? a.getAttribute('data-id') : null,
+      desabilitado: a && a.getAttribute ? a.getAttribute('aria-disabled') : null };
+  });
+  const biaManda = async (texto) => {
+    await bia.page.evaluate(() => { if (document.getElementById('conversaModal').classList.contains('hidden')) presencaAbrirConversa('12444348'); });
+    await bia.page.fill('#conversaInput', texto);
+    await bia.page.tap('#conversaEnviar');
+  };
+  const LINHA = '#presencaLista .presenca-linha[data-pessoa="183164343"]';
+  await ana.page.evaluate(() => { for (const id of ['conversaModal', 'pedidoModal']) closeModal(id); });
+  await ana.page.tap('#presencaPill');
+  if (await esperar(ana, (sel) => !!document.querySelector(sel), 'a linha da bia não está na lista da ana', 15000, LINHA)) {
+    // CONTROLE do instrumento: um `innerHTML` cru, como o de antes, TIRA o foco — e a medição vê.
+    await ana.page.focus(LINHA);
+    const cru = await ana.page.evaluate(() => { const l = document.getElementById('presencaLista'); l.innerHTML = l.innerHTML; return document.activeElement.tagName; });
+    if (cru === 'BODY') ok('controle: um redesenho cru põe o foco no <body> — a medição enxerga a perda');
+    else anota(`controle: o redesenho cru não tirou o foco (${cru}) — a medição não distinguiria nada`);
+    await ana.page.evaluate(() => presencaRenderLista());   // o desenho de verdade de volta
+    await ana.page.focus(LINHA);
+    await dormir(1500);
+    const parado = await ativo();
+    if (parado.pessoa !== '183164343') anota(`controle: sem nada chegar, o foco saiu da linha: ${JSON.stringify(parado)}`);
+    const antes9b = await ana.page.evaluate(() => presencaNaoLidasDe('183164343'));
+    await biaManda('uma pergunta com a lista aberta');
+    if (await esperar(ana, (n) => presencaNaoLidasDe('183164343') === n + 1, 'a mensagem não chegou na lista da ana', 15000, antes9b)) {
+      await dormir(300);
+      const f = await ativo();
+      if (f.pessoa === '183164343' && /presenca-linha/.test(f.classe)) ok('chegou mensagem com a lista aberta: o foco segue na MESMA linha');
+      else anota(`chegou mensagem e o foco saiu da linha: ${JSON.stringify(f)}`);
+    }
+  }
+  // A conversa: o foco num cartão de pedido, e duas mensagens chegando.
+  await ana.page.tap(LINHA);
+  if (await esperar(ana, () => !!document.querySelector('#conversaMsgs .conversa-pedido'), 'a conversa não abriu com o cartão do pedido')) {
+    await ana.page.focus('#conversaMsgs .conversa-pedido');
+    const cartao = (await ativo()).msg;
+    // O topo (`#conversaEstado`) é região viva: mudança nele é anunciada.
+    await ana.page.evaluate(() => {
+      window.__mutacoesDoTopo = 0;
+      new MutationObserver((l) => { window.__mutacoesDoTopo += l.length; })
+        .observe(document.getElementById('conversaEstado'), { childList: true, subtree: true, characterData: true });
+    });
+    for (const texto of ['primeira com o cartão focado', 'segunda com o cartão focado']) {
+      await biaManda(texto);
+      await esperar(ana, (t) => [...document.querySelectorAll('#conversaMsgs .conversa-bolha')].some((b) => b.textContent.includes(t)), `"${texto}" não chegou`, 15000, texto);
+    }
+    await dormir(300);
+    const f = await ativo();
+    if (cartao && f.msg === cartao) ok('chegaram mensagens com o foco num cartão: o foco segue no MESMO cartão');
+    else anota(`chegaram mensagens e o foco saiu do cartão: ${JSON.stringify({ antes: cartao, depois: f })}`);
+    const topo = await ana.page.evaluate(() => window.__mutacoesDoTopo);
+    if (topo === 0) ok('a frase do topo (região viva) não é reescrita a cada mensagem — ela não mudou');
+    else anota(`a região viva do topo foi reescrita ${topo} vez(es) com a mesma frase`);
+    // CONTROLE (o do relatório): o foco no campo de texto sobrevive, como sempre.
+    await ana.page.focus('#conversaInput');
+    await biaManda('com o foco no campo');
+    await esperar(ana, () => [...document.querySelectorAll('#conversaMsgs .conversa-bolha')].some((b) => b.textContent.includes('com o foco no campo')), 'a mensagem não chegou');
+    if ((await ativo()).id === 'conversaInput') ok('controle: o foco no campo segue no campo');
+    else anota('controle: o foco saiu do campo de texto');
+  }
+  // "Ver mensagens anteriores" pelo teclado: carregando, o foco FICA no botão;
+  // chegada a última página, o botão some e o foco vai pro ✕ — nunca o <body>.
+  anterioresDe.add(ana.id);
+  // Reabrir a MESMA conversa recarrega o histórico (sem fechar e abrir no mesmo
+  // quadro, que é o gotcha #65 no instrumento).
+  await ana.page.evaluate(() => presencaAbrirConversa('183164343'));
+  if (await esperar(ana, () => !!document.querySelector('#conversaMsgs .conversa-anteriores'), 'o "Ver mensagens anteriores" não apareceu')) {
+    await ana.page.focus('#conversaMsgs .conversa-anteriores');
+    await ana.page.keyboard.press('Enter');
+    await dormir(150);
+    const carregando = await ativo();
+    if (/conversa-anteriores/.test(carregando.classe) && carregando.desabilitado === 'true') ok('carregando, o foco segue no "Ver mensagens anteriores" (indisponível, não `disabled`)');
+    else anota(`carregando, o foco saiu do botão: ${JSON.stringify(carregando)}`);
+    if (await esperar(ana, () => !document.querySelector('#conversaMsgs .conversa-anteriores'), 'a página anterior não chegou')) {
+      const f = await ativo();
+      if (f.id === 'conversaClose') ok('chegada a última página, o botão some e o foco vai pro ✕ da conversa — não pro <body>');
+      else anota(`chegada a última página, o foco foi pra ${JSON.stringify(f)}`);
+    }
+  }
+  anterioresDe.delete(ana.id);
+
   // ── 10. SAIR apaga o chat do aparelho e fecha o tempo real ──────────────────
   console.log('\n10. sair');
+  // Com a conversa aberta e o pedido que ela mandou aberto na folha: o "Sair"
+  // leva o chat do aparelho, fecha o tempo real — e nada de terceiro fica no
+  // DOM, que o relatório do modo dev leva inteiro (auditoria de 2026-09-29, P1).
+  await ana.page.evaluate(() => { if (document.getElementById('conversaModal').classList.contains('hidden')) presencaAbrirConversa('183164343'); });
+  await esperar(ana, () => !!document.querySelector('#conversaMsgs .conversa-pedido'), 'a conversa não reabriu antes do "Sair"');
+  await ana.page.tap('#conversaMsgs .conversa-pedido');
+  const folhaAberta = await esperar(ana, () => !document.getElementById('pedidoModal').classList.contains('hidden') && document.getElementById('pedidoNome').textContent.includes('Padaria'),
+    'controle: a folha do pedido não abriu antes do "Sair"');
   const tinha = await ana.page.evaluate(() => !!localStorage.getItem('waze_places_chat'));
   await ana.page.evaluate(() => handleLogout());
   const fim = await ana.page.evaluate(() => ({ chave: localStorage.getItem('waze_places_chat'), fluxo: !!Presenca.fluxo, online: Presenca.online.length }));
   if (tinha && fim.chave === null && !fim.fluxo) ok('o "Sair" apaga o chat do aparelho e fecha o tempo real');
   else anota(`o "Sair" deixou coisa pra trás: ${JSON.stringify({ tinha, ...fim })}`);
+  const sobras = await ana.page.evaluate(() => {
+    const txt = (id) => document.getElementById(id).textContent.trim();
+    const attr = (id, a) => document.getElementById(id).getAttribute(a);
+    const html = document.documentElement.outerHTML;
+    return Object.fromEntries(Object.entries({
+      titulo: txt('conversaTitle'), estado: txt('conversaEstado'), tirinha: txt('conversaAnexoNome'), tirinhaFoto: attr('conversaAnexoFoto', 'src'),
+      pedido: txt('pedidoNome'), de: txt('pedidoDe'), endereco: txt('pedidoEnd'), pedidoFoto: attr('pedidoFotoImg', 'src'), link: attr('pedidoWme', 'href'),
+      nomeNoDom: html.includes('cafanha') ? 'cafanha' : '',
+    }).filter(([, v]) => v));
+  });
+  if (folhaAberta && !Object.keys(sobras).length) ok('depois do "Sair", nada da conversa nem do pedido fica no DOM (quem, onde, a folha, a tirinha)');
+  else anota(`o "Sair" deixou no DOM: ${JSON.stringify(sobras)}`);
 } finally {
   await browser.close();
   srv.kill('SIGKILL');
