@@ -7987,6 +7987,346 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   }
 }
 
+// ── O CARD: a saída que volta, o foco do teclado, a barra do foco e a trava ──
+// ── que responde (auditoria do card, 2026-09-29) ───────────────────────────
+//
+//  C4  · a foto em decisão falhando sem rede durante os 350 ms da saída pelo ✕
+//        deixava o card FORA da tela (x=-709, opacidade 0) como pedido atual,
+//        com o ↑ inalcançável. Tem de VOLTAR, com o aviso da foto.
+//  C10 · Enter no ✕ ↑ ✓ focado e no "Desfazer" largava o foco no <body>. Ele
+//        vai ao botão equivalente do card novo (ou do devolvido) — e só pelo
+//        teclado: o clique do mouse não move foco nenhum.
+//  C11 · a barra do foco no autor diz "Tocar para voltar à ordem normal", e o
+//        toque só a escondia. Tem de devolver a ordem sem trocar o card da tela.
+//  C14 · o card travado sem banner (o "Marcar todos" no ar) não respondia ao
+//        toque no ✕ (botão `disabled`), à seta nem ao arraste. Os três dizem
+//        por quê, no máximo uma vez a cada 3 s, e o aviso sai quando a trava
+//        acaba (no Fold ele cobre os botões).
+//
+// Roda nos DOIS motores (o foco e o ponteiro num botão `disabled` são coisa do
+// motor). Cada item tem o CONTROLE ao lado: o mesmo caminho no caso que deve
+// dar o contrário — senão um app com o gesto morto passaria verde.
+{
+  const CARD_L6 = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+  const cardPedido = (id, extra = {}) => ({ ...JSON.parse(JSON.stringify(FIXTURES_PAISES[0])),
+    venueID: 'v-' + id, updateRequestID: id, ...extra });
+  // Uma página com a fila montada e a rede de mentira. `resposta(nome)` pode
+  // devolver o corpo de uma rota (ou uma promessa dele); `foto` troca a rota
+  // das fotos do Waze.
+  async function cardPagina(fila, { viewport = { width: 393, height: 852 }, hasTouch = false, undo = true,
+    resposta = null, foto = null } = {}) {
+    const ctx = await browser.newContext({ viewport, hasTouch, serviceWorkers: 'block', locale: 'pt-BR' });
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, foto
+      || ((r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA })));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      const feito = resposta ? await resposta(nome) : null;
+      const resp = feito || { 'presenca-app': { success: true, online: [], conversas: [] },
+        'lista-paises': { success: true, countries: [] }, 'lista-estados': { success: true, states: [] } }[nome]
+        || { success: true };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(300);
+    await page.evaluate(({ fila, perfil, undo }) => {
+      setLang('pt');
+      API.setSession('token-do-smoke-do-card');
+      AppState.authenticated = true;
+      AppState.profile = perfil;
+      AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+      AppState.serverTotal = fila.length; AppState.hasMore = false;
+      AppState.preferences.undoEnabled = undo;
+      // Sem o Desfazer só depois da cota: o modo dev a libera (`canDisableUndo`).
+      if (!undo) AppState.devMode = { unlocked: true, active: true };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('filtersBtn').classList.remove('hidden');
+      renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      AppState.queue = fila.slice(); AppState.currentPlace = null; showCurrentPlace();
+    }, { fila, perfil: CARD_L6, undo });
+    await assentar(page, 250);
+    return { ctx, page, erros, fechar: () => ctx.close() };
+  }
+  // Onde está o foco: o botão do card (e se é o da FRENTE), o Desfazer, ou o <body>.
+  const focoAgora = (page) => page.evaluate(() => {
+    const a = document.activeElement;
+    const f = cardDaFrente();
+    const cls = ['card-btn-reject', 'card-btn-skip', 'card-btn-read'].find((c) => a && a.classList && a.classList.contains(c));
+    return { onde: !a || a === document.body ? 'body' : (cls || (a.id ? '#' + a.id : a.tagName)),
+      naFrente: !!(a && f && f.contains(a)), frente: AppState.currentPlace && AppState.currentPlace.updateRequestID };
+  });
+  // A janela do Desfazer e o envio terminaram (é quando o foco prometido pousa).
+  const acaoTerminou = () => !AppState.pendingAction && AppState.inFlightActions === 0 && !isSwipeAnimating();
+
+  // ── C10: o foco de quem opera pelo teclado ──────────────────────────────
+  for (const [nome, sel, cls, undo] of [
+    ['✕, com a janela do Desfazer', '.card-btn-reject', 'card-btn-reject', true],
+    ['↑, com a janela do Desfazer', '.card-btn-skip', 'card-btn-skip', true],
+    ['✓, sem a janela', '.card-btn-read', 'card-btn-read', false],
+  ]) {
+    const id = `card/teclado ${MOTOR}: Enter no ${nome}`;
+    const g = await cardPagina([cardPedido('kA'), cardPedido('kB'), cardPedido('kC')], { undo });
+    await g.page.focus('#cardStack .place-card:not(.card-fundo) ' + sel);
+    await g.page.keyboard.press('Enter');
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const f = await focoAgora(g.page);
+    checa(f.frente === 'kB', `${id}: PRÉ-CONDIÇÃO — o Enter no botão focado não agiu`, JSON.stringify(f));
+    checa(f.onde === cls && f.naFrente, `${id}: o foco não foi ao botão equivalente do card novo (caiu no <body>)`, JSON.stringify(f));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    // O Desfazer pelo teclado: o ✕ sai pelo MOUSE (sem pedido de foco nenhum),
+    // e o Enter no "Desfazer" focado leva o foco ao ✕ do card devolvido.
+    const id = `card/teclado ${MOTOR}: Enter no Desfazer`;
+    const g = await cardPagina([cardPedido('kA'), cardPedido('kB')]);
+    await g.page.click('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await esperarOuExplodir(g.page, () => !!document.getElementById('undoBtn'), 'o banner do Desfazer');
+    await g.page.focus('#undoBtn');
+    await g.page.keyboard.press('Enter');
+    await esperarNaPagina(g.page, acaoTerminou, 5000);
+    await doisQuadros(g.page);
+    const f = await focoAgora(g.page);
+    checa(f.frente === 'kA', `${id}: PRÉ-CONDIÇÃO — o Desfazer não devolveu o pedido`, JSON.stringify(f));
+    checa(f.onde === 'card-btn-reject' && f.naFrente, `${id}: o foco caiu no <body> em vez do ✕ do card devolvido`, JSON.stringify(f));
+    await g.fechar();
+  }
+  {
+    // CONTROLE: pelo MOUSE nada move o foco — nem o ✕, nem o Desfazer. É o que
+    // separa "o foco vai ao card" de "o foco pula pela tela de quem usa o dedo".
+    const id = `card/teclado ${MOTOR}: CONTROLE — o mouse não move o foco`;
+    const g = await cardPagina([cardPedido('kA'), cardPedido('kB'), cardPedido('kC')]);
+    await g.page.click('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await esperarOuExplodir(g.page, () => !!document.getElementById('undoBtn'), 'o banner do Desfazer');
+    await g.page.click('#undoBtn');
+    await esperarNaPagina(g.page, acaoTerminou, 5000);
+    await doisQuadros(g.page);
+    const d = await focoAgora(g.page);
+    checa(d.frente === 'kA', `${id}: PRÉ-CONDIÇÃO — o Desfazer pelo mouse não devolveu o pedido`, JSON.stringify(d));
+    checa(!(d.onde.startsWith('card-btn') && d.naFrente), `${id}: o Desfazer pelo mouse pôs o foco no card`, JSON.stringify(d));
+    await g.page.click('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const f = await focoAgora(g.page);
+    checa(f.frente === 'kB', `${id}: PRÉ-CONDIÇÃO — o ✕ pelo mouse não agiu`, JSON.stringify(f));
+    checa(!(f.onde.startsWith('card-btn') && f.naFrente), `${id}: o clique do mouse pôs o foco no card novo`, JSON.stringify(f));
+    await g.fechar();
+  }
+
+  // ── C4: a foto em decisão falha no meio da saída pelo ✕ ─────────────────
+  for (const falha of [true, false]) {
+    const id = `card/foto ${MOTOR}: ${falha ? '' : 'CONTROLE — '}a foto em decisão ${falha ? 'FALHA' : 'chega'} durante a saída pelo ✕`;
+    let soltar = null, pedidosDaFoto = 0;
+    // A 1ª ida da foto do pedido em decisão fica PRESA até o teste soltar: é o
+    // que põe a falha no MEIO dos 350 ms da saída, e não "mais ou menos".
+    const foto = async (r) => {
+      if (!r.request().url().includes('thumb700_fA')) {
+        return r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }).catch(() => {});
+      }
+      pedidosDaFoto++;
+      if (pedidosDaFoto === 1) await new Promise((ok) => { soltar = ok; });
+      if (falha) return r.abort('internetdisconnected').catch(() => {});
+      return r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }).catch(() => {});
+    };
+    const g = await cardPagina([gestosPedidoDeFoto('fA'), gestosPedidoDeFoto('fB')], { foto });
+    await esperarOuExplodir(g.page, () => true, 'a página');
+    // Sem rede pro app: o aviso da foto só nasce com `onLine === false` (a
+    // simulação do modo avião do Playwright muda de motor pra motor; aqui só o
+    // sinal que o app lê, e a falha vem da rota).
+    await g.page.evaluate(() => Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false }));
+    await g.page.click('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await g.page.waitForTimeout(120);
+    const saindo = await g.page.evaluate(() => isSwipeAnimating());
+    checa(saindo && !!soltar, `${id}: PRÉ-CONDIÇÃO — a foto não ficou presa até o meio da saída`, `saindo=${saindo} presa=${!!soltar}`);
+    if (soltar) soltar();
+    await esperarNaPagina(g.page, () => !isSwipeAnimating() && !!cardDaFrente(), 3000);
+    await g.page.waitForTimeout(400);   // a 2ª ida da foto (remontado) falha também
+    const m = await g.page.evaluate(() => {
+      const c = cardDaFrente();
+      const r = c.getBoundingClientRect();
+      const skip = c.querySelector('.card-btn-skip').getBoundingClientRect();
+      const e = document.elementFromPoint(skip.x + skip.width / 2, skip.y + skip.height / 2);
+      return { frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+        janela: AppState.pendingAction ? AppState.pendingAction.type : null, rejeitados: AppState.stats.rejected,
+        x: Math.round(r.x), largura: innerWidth, opacidade: getComputedStyle(c).opacity,
+        semFoto: !!c.querySelector('.card-sem-foto'), rejeitarTravado: c.querySelector('.card-btn-reject').disabled,
+        pularAlcancavel: !!(e && e.closest('.card-btn-skip') && c.contains(e)) };
+    });
+    if (falha) {
+      checa(m.frente === 'fA' && m.rejeitados === 0 && !m.janela, `${id}: rejeitou uma foto que ninguém viu`, JSON.stringify(m));
+      checa(m.x >= 0 && m.x < m.largura && m.opacidade === '1',
+        `${id}: DEFEITO — o card ficou FORA da tela (o pedido na frente, invisível)`, JSON.stringify(m));
+      checa(m.semFoto && m.rejeitarTravado, `${id}: o card voltou sem o aviso da foto que precisa de sinal`, JSON.stringify(m));
+      checa(m.pularAlcancavel, `${id}: o ↑ não está ao alcance do dedo`, JSON.stringify(m));
+    } else {
+      checa(m.frente === 'fB' && m.janela === 'reject' && m.rejeitados === 1,
+        `${id}: com a foto chegando, o ✕ deixou de agir`, JSON.stringify(m));
+    }
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
+  // ── C11: o toque na barra do foco volta à ordem normal ─────────────────
+  {
+    const id = `card/foco no autor ${MOTOR}: tocar na barra volta à ordem normal`;
+    const P = (x, autor, data) => cardPedido(x, { creatorId: autor, createdBy: 'autor' + autor, dateAdded: data });
+    const g = await cardPagina([P('X1', 7, 5000), P('Y1', 8, 4000), P('X2', 7, 3000), P('Y2', 8, 2000), P('X3', 7, 1000)]);
+    await g.page.click('#cardStack .place-card:not(.card-fundo) .selo-lote');
+    await assentar(g.page);
+    const fila = () => g.page.evaluate(() => AppState.queue.map((p) => p.updateRequestID).join(','));
+    const focada = await fila();
+    checa(focada === 'X1,X2,X3,Y1,Y2', `${id}: PRÉ-CONDIÇÃO — o "Ver +N" não pôs a série do autor na frente`, focada);
+    // O card da tela ganha uma marca: se o toque o TROCAR, a marca some.
+    await g.page.evaluate(() => { cardDaFrente().dataset.marcaDoSmoke = '1'; });
+    await g.page.click('#focoAutorBar');
+    await assentar(g.page);
+    const d = await g.page.evaluate(() => ({
+      barra: !document.getElementById('focoAutorBar').classList.contains('hidden'),
+      mesmoCard: cardDaFrente() && cardDaFrente().dataset.marcaDoSmoke === '1',
+      frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+      fundo: (document.querySelector('#cardStack .card-fundo') || { dataset: {} }).dataset.pedido || null,
+      quer: chaveDoPedido(AppState.queue[1]),
+    }));
+    checa(await fila() === 'X1,Y1,X2,Y2,X3', `${id}: DEFEITO — o toque só escondeu a barra; a série do autor seguiu na frente`, await fila());
+    checa(!d.barra, `${id}: a barra seguiu na tela`, JSON.stringify(d));
+    checa(d.frente === 'X1' && d.mesmoCard, `${id}: o toque TROCOU o card da tela`, JSON.stringify(d));
+    checa(d.fundo === d.quer, `${id}: o card de fundo segue anunciando o pedido da série`, JSON.stringify(d));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
+  // ── C14: o card travado pelo lote diz por quê ─────────────────────────
+  {
+    const id = `card/trava ${MOTOR}: o card travado pelo "Marcar todos" responde`;
+    // O lote fica PRESO até o teste soltar; soltando, ele FALHA (o Waze fora):
+    // os pedidos seguem na fila e o card destrava com eles.
+    let soltarLote = null, falharLote = false, primeira = true;
+    const resposta = async (nome) => {
+      if (nome !== 'marcar-lido') return null;
+      if (primeira) { primeira = false; await new Promise((ok) => { soltarLote = ok; }); }
+      return falharLote ? { success: false, error: 'x', errorCategory: 'unknown' } : { success: true };
+    };
+    const g = await cardPagina(Array.from({ length: 6 }, (_, i) => cardPedido('t' + i)),
+      { viewport: { width: 280, height: 653 }, hasTouch: true, resposta });
+    // Os toasts somem em 4 s: um observador conta cada um que ENTRA.
+    await g.page.evaluate(() => {
+      window.__toastsDoSmoke = [];
+      new MutationObserver((ms) => {
+        for (const m of ms) for (const n of m.addedNodes) {
+          if (n.classList && n.classList.contains('toast')) window.__toastsDoSmoke.push(n.textContent.trim());
+        }
+      }).observe(document.getElementById('toastContainer'), { childList: true });
+    });
+    const texto = await g.page.evaluate(() => t('toast.esperaLote'));
+    const avisos = () => g.page.evaluate((x) => window.__toastsDoSmoke.filter((s) => s === x).length, texto);
+    const centro = (sel) => g.page.evaluate((s) => {
+      const r = cardDaFrente().querySelector(s).getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, sel);
+    await g.page.evaluate(() => { openBatchReadConfirm(); handleBatchMarkRead(); });
+    await esperarOuExplodir(g.page, () => acoesTravadas() && !!cardDaFrente()
+      && cardDaFrente().querySelector('.card-btn-reject').disabled, 'o lote travar o card');
+    // O "Marcando 6 como lidos…" do próprio lote cobre os botões no Fold nos
+    // 4 s dele: tocar ali é tocar no toast (medido — o 1º toque do teste caía
+    // nele). O caso do relato é DEPOIS que ele sai.
+    await esperarOuExplodir(g.page, () => !document.querySelector('#toastContainer .toast'), 'o toast do lote sair', 8000);
+    // 1) o TOQUE no ✕ travado: botão `disabled` não recebe `click`, e a
+    //    barra ouve o pointerdown/up.
+    const x = await centro('.card-btn-reject');
+    const alvo = await g.page.evaluate(({ x, y }) => {
+      const e = document.elementFromPoint(x, y);
+      return !!(e && e.closest('.card-btn-reject') && e.closest('.card-btn-reject').disabled);
+    }, x);
+    checa(alvo, `${id}: PRÉ-CONDIÇÃO — o dedo não chega ao ✕ travado (algo o cobre)`);
+    await g.page.touchscreen.tap(x.x, x.y);
+    await g.page.waitForTimeout(300);
+    checa(await avisos() === 1, `${id}: DEFEITO — o toque no ✕ travado não respondeu`, `${await avisos()} avisos`);
+    // 2) a seta dentro do intervalo NÃO empilha outro aviso; passado ele, responde.
+    await g.page.keyboard.press('ArrowLeft');
+    await g.page.waitForTimeout(200);
+    checa(await avisos() === 1, `${id}: a seta em menos de 3 s empilhou outro aviso`, `${await avisos()} avisos`);
+    await g.page.waitForTimeout(3000);
+    await g.page.keyboard.press('ArrowLeft');
+    await g.page.waitForTimeout(200);
+    checa(await avisos() === 2, `${id}: a seta no card travado voltou calada`, `${await avisos()} avisos`);
+    // 3) o ARRASTE (mouse, pelo nome do local — nem botão, nem foto).
+    await g.page.waitForTimeout(3000);
+    const n = await centro('.card-name');
+    await g.page.mouse.move(n.x, n.y);
+    await g.page.mouse.down();
+    await g.page.mouse.move(n.x - 120, n.y, { steps: 8 });
+    await g.page.mouse.up();
+    await g.page.waitForTimeout(200);
+    checa(await avisos() === 3, `${id}: arrastar o card travado voltou calado`, `${await avisos()} avisos`);
+    const nada = await g.page.evaluate(() => ({ rejeitados: AppState.stats.rejected, janela: !!AppState.pendingAction,
+      transform: cardDaFrente().style.transform || '' }));
+    checa(nada.rejeitados === 0 && !nada.janela && !/translate\(-/.test(nada.transform),
+      `${id}: o card travado decidiu (ou saiu do lugar)`, JSON.stringify(nada));
+    // 4) o aviso SAI quando a trava acaba: "espere o lote terminar" com o lote
+    //    terminado é o app mentindo — e no Fold ele cobre ✕ ↑ ✓.
+    await g.page.waitForTimeout(3000);
+    await g.page.keyboard.press('ArrowLeft');
+    await g.page.waitForTimeout(300);
+    const naTela = () => g.page.evaluate((x) => [...document.querySelectorAll('#toastContainer .toast')]
+      .filter((e) => e.textContent.trim() === x && e.style.opacity !== '0').length, texto);
+    const cobre = await g.page.evaluate(() => {
+      const r = cardDaFrente().querySelector('.card-btn-reject').getBoundingClientRect();
+      const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !!(e && e.closest('.toast'));
+    });
+    const avisosNaTela = await naTela();
+    checa(cobre && avisosNaTela === 1,
+      `${id}: PRÉ-CONDIÇÃO — o aviso não está na tela (UM só) cobrindo o ✕ no Fold (o "sai quando acaba" não mediria nada)`,
+      `cobre=${cobre} na tela=${avisosNaTela}`);
+    falharLote = true;
+    if (soltarLote) soltarLote();
+    await esperarNaPagina(g.page, () => !acoesTravadas(), 8000);
+    await g.page.waitForTimeout(400);   // a saída do toast (0,25 s)
+    const depois = await g.page.evaluate(() => ({ travado: acoesTravadas(), card: !!cardDaFrente() }));
+    checa(!depois.travado && depois.card, `${id}: PRÉ-CONDIÇÃO — o lote falhando não destravou o card`, JSON.stringify(depois));
+    checa(await naTela() === 0, `${id}: a trava acabou e o aviso "espere…" seguiu na tela (e cobrindo o ✕ no Fold)`);
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    // CONTROLE: na janela do Desfazer o banner com a contagem já explica — o
+    // toque no ✕ travado NÃO ganha aviso nenhum.
+    const id = `card/trava ${MOTOR}: CONTROLE — a janela do Desfazer não ganha aviso`;
+    const g = await cardPagina([cardPedido('w1'), cardPedido('w2')], { viewport: { width: 280, height: 653 }, hasTouch: true });
+    await g.page.evaluate(() => {
+      window.__toastsDoSmoke = [];
+      new MutationObserver((ms) => {
+        for (const m of ms) for (const n of m.addedNodes) {
+          if (n.classList && n.classList.contains('toast')) window.__toastsDoSmoke.push(n.textContent.trim());
+        }
+      }).observe(document.getElementById('toastContainer'), { childList: true });
+    });
+    await g.page.click('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await esperarOuExplodir(g.page, () => !!AppState.pendingAction && cardDaFrente().querySelector('.card-btn-reject').disabled,
+      'a janela do Desfazer travar o card novo');
+    const r = await g.page.evaluate(() => {
+      const b = cardDaFrente().querySelector('.card-btn-reject').getBoundingClientRect();
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    });
+    await g.page.touchscreen.tap(r.x, r.y);
+    await g.page.keyboard.press('ArrowLeft');
+    await g.page.waitForTimeout(300);
+    const esperas = await g.page.evaluate(() => {
+      const chaves = ['toast.esperaDesfazer', 'toast.esperaLote', 'toast.esperaSessao', 'api.error.noSession'].map((k) => t(k));
+      return window.__toastsDoSmoke.filter((s) => chaves.includes(s));
+    });
+    checa(esperas.length === 0, `${id}: a janela do Desfazer ganhou um aviso por cima do banner`, JSON.stringify(esperas));
+    await g.fechar();
+  }
+}
+
 // ── MAPA E PÍLULA: nada sai da caixa (auditoria de 2026-09-26) ─────────────
 //
 //  C5 · girar o aparelho (a caixa do mini-mapa ENCOLHE) deixava marcador fora
@@ -8418,6 +8758,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
+  + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
