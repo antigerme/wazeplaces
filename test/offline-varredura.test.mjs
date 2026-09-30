@@ -379,7 +379,7 @@ function gatilhosDaVarredura(janela) {
 }
 const assentar = async () => { for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r)); };
 
-test('O3: preparação PARCIAL na MESMA janela é retomada pelo próximo gatilho — a promessa da linha', async () => {
+test('R4-O3: preparação PARCIAL na MESMA janela é retomada pelo próximo gatilho — a promessa da linha', async () => {
   const janela = 1492263;
   const g = gatilhosDaVarredura(janela);
   // A reposição na mesma janela, com o sinal caindo no meio: "parcial".
@@ -395,7 +395,7 @@ test('O3: preparação PARCIAL na MESMA janela é retomada pelo próximo gatilho
   assert.equal(g.st.resultado, 'pronto', 'a retomada não terminou a preparação');
 });
 
-test('O3: CONTROLE — pronta na mesma janela não varre de novo; e com a varredura NO AR, o fim dela decide', async () => {
+test('R4-O3: CONTROLE — pronta na mesma janela não varre de novo; e com a varredura NO AR, o fim dela decide', async () => {
   const janela = 1492263;
   const pronta = gatilhosDaVarredura(janela);
   pronta.f.offlineTalvezVarrer();
@@ -409,4 +409,57 @@ test('O3: CONTROLE — pronta na mesma janela não varre de novo; e com a varred
   const virou = gatilhosDaVarredura(janela);
   virou.st.janela = janela - 1;
   assert.equal(virou.f.offlinePrecisaVarrer(), true, 'a janela virada deixou de pedir a varredura');
+});
+
+// ── O9: ligar o "Disponível offline" JÁ SEM REDE grava a fila (auditoria de 2026-09-29)
+// A linha dizia "3 pedidos guardados. O mapa e as fotos chegam quando houver
+// rede." e NADA tinha sido gravado: a varredura sai antes do `offlineGravarFila`
+// quando `onLine === false` — e guardar o texto não precisa de rede. Fechado e
+// reaberto sem rede, a tela era a de "sem conexão" (medido no navegador, f7).
+// O interruptor roda de VERDADE, com a varredura de verdade atrás dele.
+function interruptor(onLine) {
+  const gravacoes = [];
+  const log = [];
+  const AppState = { authenticated: true, queue: [{ venueID: 'v1' }, { venueID: 'v2' }, { venueID: 'v3' }], preferences: {} };
+  const st = { varrendo: false, pedida: false, janela: null, resultado: 'parcial', gesto: 0, epoca: 0 };
+  const deps = {
+    AppState, Treino: { ativo: false }, navigator: { onLine },
+    offlineLigado: () => AppState.preferences.offlineDisponivel === true,
+    savePreferences: () => log.push('salvou'), offlineEsquecer: () => log.push('esqueceu'),
+    atualizarLinhaDoOffline: () => log.push('linha'),
+    OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
+    OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
+    offlineGravarFila: async () => { gravacoes.push(AppState.queue.length); return true; },
+    offlineItensDaFila: async () => [], offlineBaixar: async () => true,
+    offlineAnunciarTiles: () => {}, offlineGravarJanela: () => {}, offlinePodarTiles: async () => 0,
+    dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
+  };
+  const corpo = ['offlineMarcarGesto', 'offlineVarrer', 'offlineAoMudarInterruptor'].map(fatiar).join('\n')
+    .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
+    .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
+    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineEpoca/g, '__st.epoca');
+  const chaves = Object.keys(deps);
+  const f = new Function(...chaves, '__st', corpo + '\nreturn offlineAoMudarInterruptor;')(...chaves.map((k) => deps[k]), st);
+  return { ligar: (v) => f(v), gravacoes, log, st, AppState };
+}
+
+test('R4-O9: ligar o "Disponível offline" JÁ SEM REDE grava a fila na hora — guardar o texto não precisa de rede', async () => {
+  const i = interruptor(false);
+  i.ligar(true);
+  await assentar();
+  assert.equal(i.AppState.preferences.offlineDisponivel, true);
+  assert.deepEqual(i.gravacoes, [3], 'ligado sem rede, a fila NÃO foi gravada — a linha diria "3 pedidos guardados" sem nada guardado');
+  assert.equal(i.st.resultado, null, 'o resultado da varredura anterior não foi zerado ao religar');
+});
+
+test('R4-O9: CONTROLE — com rede a fila é gravada (pela varredura também), e desligar esquece', async () => {
+  const i = interruptor(true);
+  i.ligar(true);
+  await assentar();
+  assert.ok(i.gravacoes.length >= 1 && i.gravacoes.every((n) => n === 3), `com rede a fila não foi gravada: ${JSON.stringify(i.gravacoes)}`);
+  i.ligar(false);
+  assert.ok(i.log.includes('esqueceu'), 'desligar não esqueceu o que foi guardado');
+  // E o interruptor da tela é ESTA função (não uma cópia dela).
+  assert.match(APP_SEM, /\$\('prefOfflineDisponivel'\)\?\.addEventListener\('change', \(e\) => offlineAoMudarInterruptor\(e\.target\.checked\)\);/,
+    'o interruptor da tela não passa mais pela função testada');
 });

@@ -1679,20 +1679,7 @@ function setupModalListeners() {
         AppState.preferences.undoEnabled = canDisableUndo() ? e.target.checked : true;
         savePreferences();
     });
-    $('prefOfflineDisponivel')?.addEventListener('change', (e) => {
-        AppState.preferences.offlineDisponivel = e.target.checked;
-        savePreferences();
-        // Zera ANTES dos dois ramos: alternar o toggle apaga o resultado da
-        // varredura anterior, senão religar mostraria o "parcial" de antes.
-        offlineUltimoResultado = null;
-        if (e.target.checked) {
-            offlineMarcarGesto();       // marcar JÁ é o gesto: não dorme
-            offlineVarrer();            // enche agora, com o custo na tela
-        } else {
-            offlineEsquecer();          // desligou: some o que foi guardado
-        }
-        atualizarLinhaDoOffline(0, 0);
-    });
+    $('prefOfflineDisponivel')?.addEventListener('change', (e) => offlineAoMudarInterruptor(e.target.checked));
     $('prefPularGuarda').addEventListener('change', (e) => {
         AppState.preferences.pularGuarda = e.target.checked;
         savePreferences();
@@ -15481,6 +15468,30 @@ function offlineTalvezVarrer() {
 }
 
 function offlineMarcarGesto() { offlineUltimoGesto = Date.now(); }
+
+// O interruptor "Disponível offline" (aba Preferências). Aplica NA HORA, como
+// toda preferência.
+function offlineAoMudarInterruptor(ligado) {
+    AppState.preferences.offlineDisponivel = ligado;
+    savePreferences();
+    // Zera ANTES dos dois ramos: alternar o toggle apaga o resultado da
+    // varredura anterior, senão religar mostraria o "parcial" de antes.
+    offlineUltimoResultado = null;
+    if (ligado) {
+        offlineMarcarGesto();       // marcar JÁ é o gesto: não dorme
+        // A FILA vai pro aparelho agora, com ou sem sinal: guardar o texto não
+        // precisa de rede — ele já está aqui. Ligado JÁ sem rede, a varredura
+        // sai antes de gravar (ela só baixa com rede), e a linha dizia "3
+        // pedidos guardados" com NADA guardado: fechado e reaberto sem rede, a
+        // tela era a de "sem conexão" (auditoria de 2026-09-29, O9). Com rede a
+        // varredura grava de novo no começo dela — a mesma fila, e é barato.
+        offlineGravarFila();
+        offlineVarrer();            // enche agora, com o custo na tela
+    } else {
+        offlineEsquecer();          // desligou: some o que foi guardado
+    }
+    atualizarLinhaDoOffline(0, 0);
+}
 
 // Abre o app sem rede: em vez da tela de falha, a fila que ficou guardada.
 // Todos os pedidos entram — inclusive os de FOTO, cuja foto a varredura
