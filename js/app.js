@@ -15464,6 +15464,14 @@ function atualizarLinhaDoOffline(feitos, total) {
 function offlinePrecisaVarrer() {
     if (!offlineLigado()) return false;
     if (offlineJanelaServida === null) return true;          // nunca encheu
+    // A preparação que ficou PELA METADE na MESMA janela também volta — é a da
+    // REPOSIÇÃO (os pedidos novos que a busca trouxe), e o sinal caindo no meio
+    // dela é o caso comum de quem sai de casa. Só a janela virando (20 min) a
+    // retomava: a linha dizia "Continua sozinho quando houver rede", a rede
+    // voltava e nada acontecia, e o que chegou ficava sem foto e sem mapa no
+    // próximo buraco de sinal (auditoria de 2026-09-29, O3). Com a varredura no
+    // ar, quem decide é o fim dela — o próximo gatilho depois dele retoma.
+    if (offlineUltimoResultado === 'parcial' && !offlineVarrendo) return true;
     return Math.floor(Date.now() / OFFLINE_CICLO_MS) !== offlineJanelaServida;
 }
 

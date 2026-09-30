@@ -343,3 +343,70 @@ test('O9: uma RODADA de downloads pendurados para a varredura — "parcial", sem
   const rede = await varrer(itens.slice(0, 4), () => false);
   assert.ok([...rede.tentativas.values()].every((n) => n >= 2), 'a falha imediata passou a parar a varredura como a pendurada');
 });
+
+// ── O3: a preparação PARCIAL na MESMA janela é retomada (auditoria de 2026-09-29)
+// A varredura da REPOSIÇÃO (os pedidos novos que a busca trouxe) roda na mesma
+// janela de 20 min da última preparação completa. O sinal caindo no meio dela
+// deixava "parcial" — e a linha dizendo "Continua sozinho quando houver rede" —,
+// mas todo gatilho passa pelo `offlineTalvezVarrer`, que só varria com a janela
+// VIRADA: a rede voltava e nada acontecia até ela virar (medido no navegador:
+// zero tiles pedidos depois da volta do sinal, contra 30 com a janela anterior).
+// Aqui as três funções rodam de VERDADE, sobre o mesmo estado.
+function gatilhosDaVarredura(janela) {
+  const AGORA = janela * 1200000 + 1000;
+  const tentativas = new Map();
+  const rede = { ok: false };
+  const st = { varrendo: false, pedida: false, janela, resultado: 'pronto', gesto: AGORA, epoca: 0 };
+  const deps = {
+    AppState: { authenticated: true, queue: [{ venueID: 'v' }] }, Treino: { ativo: false },
+    navigator: { onLine: true }, offlineLigado: () => true, Date: { now: () => AGORA },
+    OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
+    OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
+    offlineGravarFila: async () => {}, offlineItensDaFila: async () => ['tile-1', 'tile-2'].map((u) => ({ u, tile: true })),
+    offlineBaixar: async (u) => { tentativas.set(u, (tentativas.get(u) || 0) + 1); return rede.ok; },
+    offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
+    offlinePodarTiles: async () => 0, dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
+  };
+  const corpo = ['offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'].map(fatiar).join('\n')
+    .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
+    .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
+    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineEpoca/g, '__st.epoca');
+  const chaves = Object.keys(deps);
+  const f = new Function(...chaves, '__st', corpo + '\nreturn { offlinePrecisaVarrer, offlineTalvezVarrer, offlineVarrer };')(
+    ...chaves.map((k) => deps[k]), st);
+  const total = () => [...tentativas.values()].reduce((a, b) => a + b, 0);
+  return { f, st, rede, total };
+}
+const assentar = async () => { for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r)); };
+
+test('O3: preparação PARCIAL na MESMA janela é retomada pelo próximo gatilho — a promessa da linha', async () => {
+  const janela = 1492263;
+  const g = gatilhosDaVarredura(janela);
+  // A reposição na mesma janela, com o sinal caindo no meio: "parcial".
+  await g.f.offlineVarrer();
+  assert.equal(g.st.resultado, 'parcial', 'PRÉ-CONDIÇÃO: a varredura sem rede não ficou parcial');
+  assert.equal(g.st.janela, janela, 'PRÉ-CONDIÇÃO: a janela servida mudou (o cenário é o da MESMA janela)');
+  // O sinal volta; um gatilho qualquer (a prova de rede, o `online`, as Preferências).
+  g.rede.ok = true;
+  const antes = g.total();
+  g.f.offlineTalvezVarrer();
+  await assentar();
+  assert.ok(g.total() > antes, 'com a rede de volta, a preparação parcial NÃO foi retomada — só a janela virando a retomava');
+  assert.equal(g.st.resultado, 'pronto', 'a retomada não terminou a preparação');
+});
+
+test('O3: CONTROLE — pronta na mesma janela não varre de novo; e com a varredura NO AR, o fim dela decide', async () => {
+  const janela = 1492263;
+  const pronta = gatilhosDaVarredura(janela);
+  pronta.f.offlineTalvezVarrer();
+  await assentar();
+  assert.equal(pronta.total(), 0, 'a preparação PRONTA foi varrida de novo na mesma janela (gasto à toa)');
+  const noAr = gatilhosDaVarredura(janela);
+  noAr.st.resultado = 'parcial';
+  noAr.st.varrendo = true;
+  assert.equal(noAr.f.offlinePrecisaVarrer(), false, 'com a varredura no ar, o parcial de ANTES pediu outra');
+  // E a janela virada segue valendo como sempre (o outro caminho da mesma função).
+  const virou = gatilhosDaVarredura(janela);
+  virou.st.janela = janela - 1;
+  assert.equal(virou.f.offlinePrecisaVarrer(), true, 'a janela virada deixou de pedir a varredura');
+});
