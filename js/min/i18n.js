@@ -9,8 +9,9 @@ arquivo deixa de valer. Se o app avisar que a limpeza no servidor não
 completou, o token ainda vale até ficar {sessaoDias} dias sem uso.
 
 Leva também o que o app mostrou e recebeu: os pedidos da fila, nomes de
-editores e, se você usou o chat, as conversas. Mande só para quem vai
-investigar o problema.
+editores e, se você usou o chat, as conversas. Com o Modo Desenvolvedor
+ligado, leva ainda a posição de casa e a do trabalho, se o seu perfil no WME
+as tiver. Mande só para quem vai investigar o problema.
 
 NÃO contém os cookies do Waze — eles são de outra origem e não ficam neste
 aparelho.
@@ -25,8 +26,9 @@ token in this file stops working. If the app warns that the server cleanup did
 not complete, the token stays valid until it goes {sessaoDias} days unused.
 
 It also carries what the app showed and received: the requests in the queue,
-editor names and, if you used the chat, the conversations. Send it only to
-whoever is investigating the problem.
+editor names and, if you used the chat, the conversations. With Developer
+Mode on, it carries the home and work positions too, if your WME profile
+has them. Send it only to whoever is investigating the problem.
 
 It does NOT contain the Waze cookies — those belong to another origin and are
 not stored on this device.
@@ -42,8 +44,10 @@ del archivo deja de valer. Si la app avisa que la limpieza en el servidor no se
 completó, el token sigue valiendo hasta que pasen {sessaoDias} días sin uso.
 
 También lleva lo que la app mostró y recibió: las solicitudes de la cola,
-nombres de editores y, si usaste el chat, las conversaciones. Envíalo solo a
-quien vaya a investigar el problema.
+nombres de editores y, si usaste el chat, las conversaciones. Con el Modo
+Desarrollador activado, lleva además la posición de casa y la del trabajo, si
+tu perfil en WME las tiene. Envíalo solo a quien vaya a investigar el
+problema.
 
 NO contiene las cookies de Waze — son de otro origen y no quedan en este
 dispositivo.
@@ -61,7 +65,9 @@ sans utilisation.
 
 Il contient aussi ce que l’app a affiché et reçu : les demandes de la file,
 des noms d’éditeurs et, si vous avez utilisé le chat, les conversations.
-Ne l’envoyez qu’à la personne qui enquête sur le problème.
+Avec le mode développeur activé, il contient en plus la position de la maison
+et celle du travail, si votre profil WME les indique. Ne l’envoyez qu’à la
+personne qui enquête sur le problème.
 
 Il ne contient PAS les cookies de Waze — ils relèvent d’une autre origine et ne
 restent pas sur cet appareil.
