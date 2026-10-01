@@ -315,16 +315,21 @@ test('i18n: toda errorKey do backend existe no dicionário', () => {
     'errorKey emitida pelo backend sem tradução (cai em português calado):\n' + faltando.join('\n'));
 });
 
-// E o caminho inverso: chave srv.err.* no dicionário que o core não emite mais
-// é peso morto que finge cobertura. Não reprova (pode ser emitida por um
-// adaptador), mas avisa em quantidade — é sinal de que o core mudou e o
-// dicionário ficou para trás.
+// E o caminho inverso: chave srv.err.* no dicionário que o servidor não emite é
+// frase que o app nunca mostra. Este teste TOLERAVA duas órfãs ("pode ser
+// emitida por um adaptador" — os adaptadores estão na conta), e eram justamente
+// as duas mortas da auditoria de 2026-10-01 (R56-7): `srv.err.photoDeleteRank`
+// dizia que só L6+AM exclui foto, um portão que o servidor de propósito não tem.
+// Zero, e pela citação EXATA (entre aspas, fora de comentário): `includes` cru
+// contava `srv.err.cookieFormat` como emissão de `srv.err.cookieFormatNoWaze`.
 test('i18n: dicionário não acumula srv.err.* órfã', () => {
-  const core = read('server/core.mjs') + read('worker/index.mjs') + read('server/node.mjs');
+  const servidor = ['server/core.mjs', 'worker/index.mjs', 'server/node.mjs'].map(read).join('\n')
+    .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const emitida = (k) => servidor.includes(`'${k}'`) || servidor.includes(`"${k}"`);
   const noDict = Object.keys(DICT[LANG_REF]).filter((k) => k.startsWith('srv.err.'));
-  const orfas = noDict.filter((k) => !core.includes(k));
-  assert.ok(orfas.length <= 2,
-    `${orfas.length} chaves srv.err.* não são mais emitidas por ninguém:\n` + orfas.join('\n'));
+  assert.ok(noDict.length >= 20 && emitida('srv.err.incompleteParams'), 'CONTROLE: o varredor não achou as srv.err.* do servidor');
+  const orfas = noDict.filter((k) => !emitida(k));
+  assert.deepEqual(orfas, [], 'chave srv.err.* que o servidor não emite (tire dos 4 idiomas):\n' + orfas.join('\n'));
 });
 
 // Aviso (toast) que ninguém mostra é frase que DESCREVE o app — e envelhece
@@ -342,6 +347,41 @@ test('i18n: toda chave toast.* do dicionário é mostrada pelo app — aviso mor
   assert.ok(!usada('toast.naoExisteNenhum'), 'CONTROLE: o varredor achou uma chave que não existe');
   const mortas = toasts.filter((k) => !usada(k));
   assert.deepEqual(mortas, [], 'aviso no dicionário que o app nunca mostra (tire dos 4 idiomas):\n' + mortas.join('\n'));
+});
+
+// E TODA chave do dicionário, não só os toasts (auditoria de 2026-10-01, R56-7 e
+// R5-5-9). Chave que nenhum código cita é frase que DESCREVE o app sem nunca ser
+// mostrada, e envelhece junto com ele: `srv.err.photoDeleteRank` afirmava um
+// portão de nível 6 na lixeira que o servidor não tem, `presenca.anexo.titulo`
+// era o título de uma tirinha que nunca o teve, e a varredura achou mais oito,
+// de telas que trocaram de chave (`lightbox.prev.aria` → `card.image.prev.aria`,
+// a Ajuda passando a usar o nome do botão). A régua: a chave é citada
+// LITERALMENTE (entre aspas, no JS, no servidor ou num `data-i18n*`), ou é de
+// uma família montada em tempo de execução cujo PREFIXO o código cita
+// (`rotuloDeEnum('card.flagType.', …)`, `'conq.' + id + '.nome'`), ou é a forma
+// de plural (`…Um`/`…Plural`) de uma chave citada. MEDIDO: de 761 chaves, 204
+// não têm citação literal, as famílias e os plurais cobrem 193, e as 11 que
+// sobravam eram todas mortas — nenhum falso positivo.
+test('i18n: toda chave do dicionário é usada pelo app — chave morta sai', () => {
+  // Fora de comentário: o comentário que cita uma chave não a mostra na tela.
+  const semComentario = (txt, html) => (html ? txt.replace(/<!--[\s\S]*?-->/g, '') : txt)
+    .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const codigo = ['js/app.js', 'js/api.js', 'js/presenca.js', 'js/swipe.js', 'js/sw-register.js', 'js/mapa.js', 'js/qr.js',
+    'server/core.mjs', 'worker/index.mjs', 'server/node.mjs'].map((a) => semComentario(read(a), false))
+    .concat(semComentario(read('index.src.html'), true)).join('\n');
+  const citada = (k) => codigo.includes(`'${k}'`) || codigo.includes(`"${k}"`) || codigo.includes('`' + k + '`');
+  const familias = [...new Set([...codigo.matchAll(/['"`]([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_]+)*\.)['"`]/g)].map((m) => m[1]))];
+  const usada = (k) => citada(k) || familias.some((f) => k.startsWith(f))
+    || (/(Um|Plural)$/.test(k) && citada(k.replace(/(Um|Plural)$/, '')));
+  // CONTROLE: o varredor enxerga a chave citada, a de família e a de plural, e
+  // não inventa uma que não existe.
+  assert.ok(citada('toast.logoutServerFailed') && citada('pair.show.noCamera'), 'CONTROLE: o varredor não achou chaves citadas (no JS e no HTML)');
+  assert.ok(!citada('card.flagType.CLOSED') && usada('card.flagType.CLOSED'), 'CONTROLE: o varredor não reconhece a família card.flagType.');
+  assert.ok(!citada('autor.lote.rejeitadosUm') && usada('autor.lote.rejeitadosUm'), 'CONTROLE: o varredor não reconhece o plural …Um');
+  assert.ok(!usada('presenca.chaveQueNaoExiste'), 'CONTROLE: o varredor achou uma chave que não existe');
+  const mortas = Object.keys(DICT[LANG_REF]).filter((k) => !usada(k));
+  assert.deepEqual(mortas, [], 'chave no dicionário que o app nunca mostra — tire dos 4 idiomas (montada em tempo de execução? '
+    + 'cite o prefixo da família como string, \'familia.\' + valor):\n' + mortas.join('\n'));
 });
 
 // O `||` que fazia o português do servidor GANHAR da tradução. Era o buraco de
@@ -537,7 +577,7 @@ test('o ↑ tem UM nome por língua — botão, selo, Ajuda, "Como funciona" e a
   for (const lang of LANGS) {
     const d = DICT[lang];
     const nome = d['card.btn.skip.aria'];
-    for (const k of ['help.action.skip', 'card.stamp.skip', 'modal.comoFunciona.skip.nome']) {
+    for (const k of ['card.stamp.skip', 'modal.comoFunciona.skip.nome']) {
       assert.equal(d[k], nome, `${lang}: ${k} = "${d[k]}", e o botão diz "${nome}"`);
     }
     for (const k of ['card.btn.skip.title', 'card.stamp.skipGuarda', 'prefs.pularGuarda.label']) {
@@ -545,6 +585,13 @@ test('o ↑ tem UM nome por língua — botão, selo, Ajuda, "Como funciona" e a
     }
   }
   assert.doesNotMatch(Object.values(DICT.fr).join('\n'), /\bIgnor(er|ée|ées)\b/, 'fr: "Ignorer" voltou como nome do ↑');
+  // A Ajuda ("Como processar") mostra a MESMA chave do botão: o nome dela não
+  // tem como divergir. A chave própria que este teste conferia, `help.action.skip`,
+  // nunca chegava à tela — era chave morta (auditoria de 2026-10-01).
+  const html = read('index.src.html');
+  const ajuda = html.slice(html.indexOf('data-i18n="help.howToProcess.title"'), html.indexOf('data-i18n="help.howToProcess.note"'));
+  assert.ok(ajuda.length > 200, 'CONTROLE: o "Como processar" da Ajuda sumiu do HTML');
+  assert.match(ajuda, /data-i18n="card\.btn\.skip\.aria"/, 'a Ajuda deixou de usar o nome do botão pro ↑');
 });
 
 test('o que o Desfazer desfaz é o PEDIDO, não o local (e o erro da ação idem)', () => {
