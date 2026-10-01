@@ -116,7 +116,10 @@ const page = await ctx.newPage();
 // lugar do percurso" é adivinhação — e foi o que me custou uma rodada de CI
 // atrás de um `EvalError` que o app não podia produzir (ele não tem `eval`).
 let secaoAtual = 'abertura';
-const secao = (nome) => { secaoAtual = nome; console.log(`\n\u2500\u2500 ${nome} \u2500\u2500`); };
+// A contagem do resumo do fim sai daqui: escrita à mão, ela ficou em 20/21 com
+// 26 seções no arquivo, e ninguém percebe número de resumo que não confere.
+let secoesRodadas = 0;
+const secao = (nome) => { secaoAtual = nome; secoesRodadas++; console.log(`\n\u2500\u2500 ${nome} \u2500\u2500`); };
 const errosJs = [];
 const violacoes = [];
 page.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
@@ -2944,7 +2947,7 @@ if (falhas) {
   console.log(`\n✗ smoke do offline: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log('\n✓ smoke do offline: 21 seções (18 com o service worker LIGADO) — o MAPINHA DO CARD e o'
+console.log(`\n✓ smoke do offline: ${secoesRodadas} seções — o MAPINHA DO CARD e o`
   + ' MAPA AMPLIADO desenhando tile (com contraprova que vai a zero), mapa intacto com o'
   + ' toggle desligado e com o cache cheio, fila em IndexedDB, sufixo da foto como contrato'
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
