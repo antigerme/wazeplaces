@@ -325,6 +325,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     presencaWmeZerar: () => {}, presencaWmeRefazerDesligar: () => {},   // test/costura-sessao, K5
     redesenharFiltrosComOPerfil: () => {},   // test/filtros-perfil (F2)
     esquecerEscolhasDaContaAnterior: () => {},   // (test/contas-abas, A3)
+    contaSegueNoAparelho: () => true,   // uma aba só (a de outra conta: test/contas-abas)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];

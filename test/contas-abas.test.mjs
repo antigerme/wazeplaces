@@ -103,13 +103,13 @@ const PREFERENCES_KEY = constante('PREFERENCES_KEY');
 
 // ═══ A1 · o "Sair" numa aba chega às outras ═══════════════════════════════════
 
-function montarDecisao({ guardado = {}, naMemoria = true, autenticado = true, appNaTela = true, perguntando = false } = {}) {
+function montarDecisao({ guardado = {}, naMemoria = true, autenticado = true, appNaTela = true, perguntando = false, perfil = 111 } = {}) {
   const ap = aparelho(guardado);
   const log = [];
   const deps = {
     safeLS: ap.safeLS, localStorage: ap.localStorage, CONTA_KEY, STATS_KEY, PREFERENCES_KEY,
-    API: { temSessaoNaMemoria: () => naMemoria },
-    AppState: { authenticated: autenticado },
+    API: { temSessaoNaMemoria: () => naMemoria, sessionToken: naMemoria ? 'tok-desta' : null },
+    AppState: { authenticated: autenticado, profile: perfil ? { id: perfil } : null },
     document: { getElementById: (id) => (id === 'appScreen'
       ? { classList: { contains: (c) => (c === 'hidden' ? !appNaTela : false) } } : null) },
     extPerguntando: perguntando,
@@ -117,7 +117,8 @@ function montarDecisao({ guardado = {}, naMemoria = true, autenticado = true, ap
     relerPlacarDeOutraAba: () => log.push('placar'),
     relerPreferenciasDeOutraAba: () => log.push('preferencias'),
   };
-  const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba'], deps);
+  const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba', 'contaSegueNoAparelho',
+    'sessaoDestaAbaEhAGuardada'], deps);
   return { h, log, ap };
 }
 const SAIU = ['sair', { porOutraAba: true }];
@@ -180,8 +181,8 @@ test('A1/A2: o aviso do placar e o das preferências releem cada um o seu — e 
 
 // O `handleLogout` DE VERDADE, nos dois modos. Tudo que ele pode gravar passa
 // pelo armazenamento espionado ou por uma função anotada.
-function montarSair({ porOutraAba }) {
-  const ap = aparelho({ [TOKEN]: 'tok-A', [CONTA_KEY]: '{"id":"111"}', [STATS_KEY]: '{"rejected":3}' });
+function montarSair({ tokenNoAparelho = 'tok-A' } = {}) {
+  const ap = aparelho({ [TOKEN]: tokenNoAparelho, [CONTA_KEY]: '{"id":"111"}', [STATS_KEY]: '{"rejected":3}' });
   const log = [];
   const statsAntes = { read: 1, rejected: 3, skipped: 0 };
   const AppState = {
@@ -211,6 +212,7 @@ function montarSair({ porOutraAba }) {
     referenciasDoPerfil: { casa: [-23.5, -46.6], trabalho: null }, posicaoGps: { ll: [-23.5, -46.6] },
     avatarPendente: 'foto', avatarFalhou: null, telaPronta: true,
     fecharCamadasAbertas: () => log.push('camadas'), closeModal: (id) => log.push('fechou:' + id),
+    dlogApagar: (o) => log.push(['dlog', o || null]),
     resetQueue: () => log.push('fila:' + JSON.stringify(AppState.preferences)),
     filtrosDeFabrica: () => ({ fabrica: true }),
     offlineEsquecer: (o) => log.push(['offline', o || null]),
@@ -223,12 +225,12 @@ function montarSair({ porOutraAba }) {
     saveDevMode: () => ap.safeLS.set('waze_places_devmode', '{}'),
     callWithRetry: (fn) => fn(), t: (k) => k, showToast: (m) => log.push('toast:' + m),
   };
-  const h = montar(['handleLogout', 'preferenciasDeFabrica'], deps);
+  const h = montar(['handleLogout', 'preferenciasDeFabrica', 'sessaoDestaAbaEhAGuardada'], deps);
   return { h, ap, log, AppState, API, deps, statsAntes };
 }
 
 test('A1: na OUTRA aba o "Sair" solta a memória e a tela, e não grava nem apaga NADA no aparelho', async () => {
-  const m = montarSair({ porOutraAba: true });
+  const m = montarSair();
   await m.h.handleLogout({ porOutraAba: true });
   assert.deepEqual(m.ap.escritas, [],
     'DEFEITO: a aba que só soube do "Sair" mexeu no aparelho: ' + m.ap.escritas.join(' '));
@@ -253,25 +255,29 @@ test('A1: na OUTRA aba o "Sair" solta a memória e a tela, e não grava nem apag
   assert.ok(m.log.includes('camadas') && !m.log.includes('fechou:logoutModal'));
   assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'presenca'), ['presenca', { soMemoria: true }]);
   assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'offline'), ['offline', { soMemoria: true }]);
+  // O que o modo dev guardou no aparelho, a aba que saiu apagou: aqui, só a memória.
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'dlog'), ['dlog', { soMemoria: true }],
+    'a outra aba apagou (de novo) a base do diagnóstico no aparelho');
   assert.ok(!m.log.includes('autores') && !m.log.includes('prazo'), 'a outra aba apagou (de novo) chaves do aparelho');
   // As preferências voltam ao de fábrica ANTES do `resetQueue` (com o offline
   // ligado, ele abriria a base apagada de novo).
   assert.ok(m.log.includes('fila:' + JSON.stringify(m.h.preferenciasDeFabrica())));
   assert.ok(m.log.includes('cancelou:ABC234'), 'o QR que esta aba mostrava seguiu entrando na conta que saiu');
   assert.ok(m.log.includes('toast:toast.saiuNoutraAba'));
-  for (const tela of ['showAuthScreen', 'removeCurrentCardEl', 'dlogApagar', 'esquecerFocoAutor', 'presencaWmeZerar']) {
+  for (const tela of ['showAuthScreen', 'removeCurrentCardEl', 'esquecerFocoAutor', 'presencaWmeZerar']) {
     assert.ok(m.h.chamou.includes(tela), `a outra aba não passou por ${tela}`);
   }
 });
 
 test('A1: CONTROLE — o "Sair" desta aba grava e apaga o aparelho (o espião enxerga escrita)', async () => {
-  const m = montarSair({ porOutraAba: false });
+  const m = montarSair();
   await m.h.handleLogout();
   for (const esperado of ['apaga:' + TOKEN, 'apaga:' + CONTA_KEY, 'grava:' + STATS_KEY, 'grava:' + PREFERENCES_KEY, 'apaga:waze_places_saida']) {
     assert.ok(m.ap.escritas.includes(esperado), `CONTROLE: o "Sair" não fez ${esperado} — o espião está cego`);
   }
   assert.ok(m.log.includes('destroy:tok-A') && m.log.includes('diario:saiu') && m.log.includes('fechou:logoutModal'));
   assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'presenca'), ['presenca', null]);
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'dlog'), ['dlog', null], 'o "Sair" daqui deixou o diagnóstico no aparelho');
   assert.ok(m.log.includes('toast:toast.loggedOut'));
 });
 
@@ -382,27 +388,29 @@ function armazenamentoCompartilhado(inicial = {}) {
   };
 }
 
-function abrirAba(comp, { preferencias = { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false } } = {}) {
+function abrirAba(comp, { preferencias = { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false },
+  perfilId = 111, token = 'tok' } = {}) {
   const aba = { escreveuNoAviso: [], desenhou: 0, noAviso: false };
   const localStorage = comp.para(aba);
   const safeLS = { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) };
   const AppState = { authenticated: true, stats: { read: 0, rejected: 0, skipped: 0 }, preferences: { ...preferencias },
-    history: null, conquistas: null, autores: null };
+    history: null, conquistas: null, autores: null, profile: perfilId ? { id: perfilId } : null };
   const deps = {
     AppState, localStorage, safeLS, STATS_KEY, PREFERENCES_KEY, CONTA_KEY, DEVMODE_KEY: 'waze_places_devmode',
     HISTORY_KEY: 'waze_places_history', CONQUISTAS_KEY: 'waze_places_conquistas', AUTORES_KEY: 'waze_places_autores',
     preferenciasCarregadas: true, puladosNoInicioDaFila: 0,
     // Os dois com sessão: o token e a conta no aparelho (nenhum "Sair" aqui).
-    API: { temSessaoNaMemoria: () => true }, extPerguntando: false,
+    API: { temSessaoNaMemoria: () => true, sessionToken: token }, extPerguntando: false,
     aoMudarModoDevEmOutraAba: () => {}, atualizarSeloDeConquista: () => {}, agendarRedesenhoDoHistorico: () => {},
     desenharPlacar: () => { aba.desenhou++; }, updateStats: () => {},
     desenharChavesDePreferencia: () => {}, atualizarSeloDePular: () => {}, atualizarLinhaDoOffline: () => {},
     presencaWme: { ligarNaProxima: false, desligarPendente: true },
     window: { Presenca: { desligar: () => { aba.presencaDesligada = (aba.presencaDesligada || 0) + 1; }, renderPilula: () => {} } },
     offlineEsquecer: (o) => { aba.offlineSoltou = o; },
-    handleLogout: () => { aba.saiu = true; },
+    handleLogout: (o) => { aba.saiu = o || true; },
   };
-  const nomes = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'relerPlacarDeOutraAba', 'placarGuardado',
+  const nomes = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'relerPlacarDeOutraAba', 'placarGuardado',
     'relerPreferenciasDeOutraAba', 'lerPreferenciasGuardadas', 'preferenciasDeFabrica', 'saveStats', 'savePreferences',
     'descontarGestoSemSessao', 'puladosNestaFila', 'presencaLigada'];
   const fonte = APP_SEM + '\n' + fatiarDe(PRESENCA_SEM, 'presencaLigada');
@@ -410,7 +418,7 @@ function abrirAba(comp, { preferencias = { undoEnabled: true, semUndoSeguidas: 0
   comp.abas.push(aba);
   return aba;
 }
-const sessaoNoAparelho = { [TOKEN]: 'tok', [CONTA_KEY]: { id: '1', s: 'x' } };
+const sessaoNoAparelho = { [TOKEN]: 'tok', [CONTA_KEY]: { id: '111', s: 'x' } };
 // Um ✕ confirmado, como o `handleReject` faz: +1 no placar e grava INTEIRO.
 const rejeitar = (aba) => { aba.AppState.stats.rejected++; aba.saveStats(); };
 
@@ -764,6 +772,139 @@ test('queda só desta aba: CONTROLE — a sessão desta aba é a guardada, e a q
   assert.equal(m.dados.has(SESSAO_KEY), false, 'o prazo da sessão que morreu ficou no aparelho');
   assert.equal(m.h.diagSessao().ciclos.at(-1).fim, 'caiu');
   assert.equal(m.anel.at(-1).soNestaAba, undefined);
+});
+
+// ═══ OUTRA CONTA entra noutra aba: a aba da conta anterior sai ════════════════
+
+test('outra conta: OUTRA conta entra noutra aba — esta SAI, e decide no aviso da CONTA (que chega depois do do token)', () => {
+  const comp = armazenamentoCompartilhado(sessaoNoAparelho);
+  const A = abrirAba(comp), B = abrirAba(comp);
+  // Na aba A a sessão caiu e alguém entrou com OUTRA conta — o token primeiro...
+  A.deps.safeLS.set(TOKEN, 'tok-222');
+  comp.entregar();
+  assert.equal(B.saiu, undefined, 'a aba B saiu no aviso do TOKEN, com o aparelho ainda dizendo a conta dela');
+  // ...os dados da conta anterior saem (o placar zerado, entre outros)...
+  A.deps.safeLS.set(STATS_KEY, JSON.stringify({ read: 0, rejected: 0, skipped: 0 }));
+  comp.entregar();
+  // ...e a conta nova, por último (ver `aoConhecerConta`).
+  A.deps.safeLS.set(CONTA_KEY, JSON.stringify({ id: '222', s: 'm-222' }));
+  comp.entregar();
+  assert.deepEqual(B.saiu, { porOutraAba: true, outraConta: true },
+    'DEFEITO: a aba B seguiu com a conta anterior num aparelho que é da nova — o placar e o Histórico dela iriam pra outra conta');
+  assert.deepEqual(B.escreveuNoAviso, [], 'a aba B gravou no aparelho ao receber o aviso');
+});
+
+test('outra conta: CONTROLES — a MESMA conta entrando de novo noutra aba, e a aba que ainda não sabe a sua conta, NÃO saem', () => {
+  const comp = armazenamentoCompartilhado(sessaoNoAparelho);
+  const A = abrirAba(comp), B = abrirAba(comp), C = abrirAba(comp, { perfilId: null });
+  A.deps.safeLS.remove(TOKEN);                                          // a queda na A...
+  A.deps.safeLS.set(TOKEN, 'tok-111b');                                 // ...a renovação...
+  A.deps.safeLS.set(CONTA_KEY, JSON.stringify({ id: '111', s: 'm-111b' }));   // ...e a MESMA conta
+  comp.entregar();
+  assert.equal(B.saiu, undefined, 'a MESMA conta renovando noutra aba derrubou esta');
+  // A conta de C não se sabe ainda (sem perfil na memória): quem decide é o perfil, quando chegar.
+  A.deps.safeLS.set(CONTA_KEY, JSON.stringify({ id: '222', s: 'm-222' }));
+  comp.entregar();
+  assert.equal(C.saiu, undefined, 'a aba sem perfil saiu sem saber de quem era');
+  // CONTROLE do instrumento: com a conta de outra pessoa, a mesma B sai.
+  assert.deepEqual(B.saiu, { porOutraAba: true, outraConta: true });
+});
+
+// O perfil que CHEGA numa aba cuja sessão não é a do aparelho (o caso de C acima).
+function montarPerfilQueChega({ tokenDesta, tokenNoAparelho = 'tok-222', dono = '222' }) {
+  const ap = aparelho({ [TOKEN]: tokenNoAparelho, [CONTA_KEY]: { id: dono, s: 'm' } });
+  const log = [];
+  const AppState = { authenticated: true, profile: null };
+  const deps = {
+    safeLS: ap.safeLS, CONTA_KEY, AppState, API: { sessionToken: tokenDesta },
+    handleLogout: (o) => { log.push(['sair', o]); AppState.authenticated = false; },
+    aoConhecerConta: () => log.push('tomou o aparelho'), guardarPerfilDoPortao: () => log.push('portão'),
+    guardarPrazoDaSessao: () => log.push('prazo'), guardarReferencias: () => log.push('casa'),
+  };
+  const h = montar(['definirPerfil', 'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada'], deps);
+  return { h, ap, log, AppState };
+}
+
+test('outra conta: o perfil que chega DEPOIS numa aba que não é a do aparelho a tira — sem tomar o aparelho de volta', () => {
+  const m = montarPerfilQueChega({ tokenDesta: 'tok-111' });
+  assert.equal(m.h.definirPerfil({ success: true, profile: { id: 111 } }), false);
+  assert.deepEqual(m.log, [['sair', { porOutraAba: true, outraConta: true }]],
+    'DEFEITO: a aba tomou o aparelho da outra conta (apagando os dados dela) e gravou o portão e o prazo de outra pessoa');
+  assert.equal(m.AppState.profile, null, 'o perfil de quem saiu ficou na memória');
+  assert.deepEqual(m.ap.escritas, []);
+  // CONTROLE: a sessão desta aba É a do aparelho — o caminho de sempre, que toma o aparelho da conta anterior.
+  const c = montarPerfilQueChega({ tokenDesta: 'tok-222' });
+  assert.equal(c.h.definirPerfil({ success: true, profile: { id: 111 } }), true);
+  assert.deepEqual(c.log, ['tomou o aparelho', 'casa', 'portão', 'prazo']);
+  assert.deepEqual(c.AppState.profile, { id: 111 });
+});
+
+test('outra conta: a sonda do 401 que traz o perfil de quem saiu não diz "sua sessão continua válida" nem busca de novo', async () => {
+  for (const dono of ['222', '111']) {
+    const ap = aparelho({ [TOKEN]: 'tok-222', [CONTA_KEY]: { id: dono, s: 'm' } });
+    const log = [];
+    const AppState = { authenticated: true, profile: { id: 111 } };
+    const deps = {
+      safeLS: ap.safeLS, CONTA_KEY, AppState, verificandoSessao: false, VERIFICA_SESSAO_MS: 0,
+      API: { sessionToken: 'tok-111', getProfile: async () => ({ success: true, profile: { id: 111 } }) },
+      handleLogout: () => { log.push('saiu'); AppState.authenticated = false; },
+      aoConhecerConta: () => {}, showToast: (msg) => log.push(msg), t: (k) => k,
+      rebuscarDepoisDeFalha: () => log.push('buscou'), esvaziarFilaDeSaida: () => log.push('esvaziou'),
+    };
+    const h = montar(['handleUnauthorized', 'definirPerfil', 'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada'], deps);
+    await h.handleUnauthorized();
+    if (dono === '222') {
+      assert.deepEqual(log, ['saiu'], 'a aba que saiu disse que a sessão continua válida, ou buscou de novo: ' + log.join(' '));
+    } else {
+      // CONTROLE: a mesma conta no aparelho — o alarme falso de sempre.
+      assert.deepEqual(log, ['toast.sessionKeptAlive', 'buscou', 'esvaziou']);
+    }
+  }
+});
+
+test('outra conta: a aba sai SEM tocar no aparelho, apaga a PRÓPRIA sessão no servidor e diz por quê', async () => {
+  const m = montarSair({ tokenNoAparelho: 'tok-da-outra' });
+  await m.h.handleLogout({ porOutraAba: true, outraConta: true });
+  assert.deepEqual(m.ap.escritas, [], 'a aba mexeu no aparelho, que agora é da outra conta: ' + m.ap.escritas.join(' '));
+  assert.ok(m.log.includes('destroy:tok-A'),
+    'DEFEITO: a sessão desta aba (que não é a do aparelho) ficou no servidor — órfã até vencer');
+  assert.ok(!m.log.includes('destroy:tok-da-outra'), 'a aba apagou no servidor a sessão da outra conta');
+  assert.equal(m.API.sessionToken, null);
+  assert.ok(m.log.includes('toast:toast.outraContaNoutraAba'), 'a aba saiu sem dizer que outra conta entrou');
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'dlog'), ['dlog', { soMemoria: true }]);
+  assert.equal(m.deps.saiuNestaPagina, true, 'voltar à aba relogaria pela extensão, tomando o aparelho de volta');
+  // CONTROLE: o "Sair" noutra aba não apaga nada no servidor — a que saiu já apagou a sessão (a mesma).
+  const s = montarSair({ tokenNoAparelho: 'tok-da-outra' });
+  await s.h.handleLogout({ porOutraAba: true });
+  assert.ok(!s.log.some((x) => typeof x === 'string' && x.startsWith('destroy:')));
+  // E a sessão GUARDADA nunca é apagada daqui, nem num estado sem sentido (o mesmo token nos dois).
+  const g = montarSair();
+  await g.h.handleLogout({ porOutraAba: true, outraConta: true });
+  assert.ok(!g.log.some((x) => typeof x === 'string' && x.startsWith('destroy:')), 'a aba apagou no servidor a sessão guardada no aparelho');
+});
+
+test('o modo dev na OUTRA aba: só a memória sai — a base do aparelho fica, e a gravação em voo desta aba não grava mais', () => {
+  for (const soMemoria of [true, false]) {
+    const log = [];
+    const deps = {
+      dlogAnel: [{ k: 'x' }], dlogMomentos: [{ dom: '<html>' }], diagAberturasAnteriores: [{}], diagBaixadoEm: 5, diagEpoca: 3,
+      dlogPendencias: new Map([['m', 1]]), diagEsquecerGuardado: () => log.push('apagou a base'),
+      API: { chamadas: [] }, sessionStorage: { removeItem() {} }, document: { getElementById: () => null }, atualizarFabDev() {},
+    };
+    const h = montar(['dlogApagar'], deps);
+    h.dlogApagar(soMemoria ? { soMemoria } : undefined);
+    assert.deepEqual([deps.dlogAnel, deps.dlogMomentos, deps.diagAberturasAnteriores], [[], [], []], 'a memória do modo dev ficou');
+    if (soMemoria) {
+      assert.deepEqual(log, [], 'a outra aba apagou a base do diagnóstico no aparelho (que pode ser de outra conta)');
+      assert.equal(deps.diagEpoca, 4, 'uma gravação desta aba ainda em voo gravaria na base depois de ela sair');
+    } else assert.deepEqual(log, ['apagou a base'], 'CONTROLE: o desligar de sempre parou de apagar a base');
+  }
+});
+
+test('outra conta: o aviso próprio, nas 4 línguas', () => {
+  const valores = [...I18N.matchAll(/'toast\.outraContaNoutraAba': '([^']+)'/g)].map((m) => m[1]);
+  assert.equal(valores.length, 4, 'o aviso da troca de conta noutra aba não está nas 4 línguas');
+  assert.match(fatiarDe(APP_SEM, 'handleLogout'), /outraConta \? 'toast\.outraContaNoutraAba'/);
 });
 
 // ═══ A7 · o código de pareamento não é resgatado duas vezes ══════════════════

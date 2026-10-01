@@ -8561,6 +8561,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
 {
   const PERFIL_ABAS = { id: 4242, userName: 'editor_abas', rank: 5, isAreaManager: true, isStaff: false,
     editableCountryIDs: [30], areas: [], managedAreas: [] };
+  // OUTRA conta, que entra pela aba A na seção 4 (o login por cookies de
+  // mentira responde com ela quando o cookie diz `conta-5151`).
+  const PERFIL_OUTRA = { ...PERFIL_ABAS, id: 5151, userName: 'outra_conta' };
   // Pedidos DISTINTOS (gotcha 3.5): a fila real nunca tem dois cards do mesmo pedido.
   const FILA_ABAS = Array.from({ length: 3 }, (_, i) => Object.values(CARDS).map((p, k) => ({ ...p,
     venueID: `va${i}-${k}`, updateRequestID: `ua${i}-${k}` }))).flat();
@@ -8572,18 +8575,25 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     // presença fica de fora — a sentinela deste arquivo reprova 401 de sessão
     // nela, e ela não é o que se mede aqui.
     const mortos = new Set();
+    let logins = 0;
     await ctx.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }));
     await ctx.route('**/api/**', async (r) => {
       const rota = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
       let corpo = {};
       try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { corpo = {}; }
-      rede.push({ rota, token: corpo.sessionToken || null });
+      rede.push({ rota, token: corpo.sessionToken || null, acao: corpo.action || null });
       const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
       if (mortos.has(corpo.sessionToken) && !/^(presenca-app|chat)$/.test(rota)) {
         return r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ success: false,
           error: 'Sessão expirada ou inválida', errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' }) });
       }
-      if (rota === 'perfil') return json({ success: true, profile: PERFIL_ABAS, visivelNoWme: true });
+      // O login por cookies: uma sessão NOVA a cada entrada, da conta que o cookie diz.
+      if (rota === 'testar-cookies') {
+        const outra = String(corpo.cookies || '').includes('conta-5151');
+        return json({ success: true, sessionToken: outra ? 'tok-outra' : `tok-abas-${++logins}`, conta: outra ? '5151' : '4242' });
+      }
+      if (rota === 'perfil') return json({ success: true, profile: corpo.sessionToken === 'tok-outra' ? PERFIL_OUTRA : PERFIL_ABAS,
+        visivelNoWme: true });
       if (rota === 'buscar-places') return json({ success: true, places: FILA_ABAS, hasMore: false, page: 1,
         total: FILA_ABAS.length, totalAll: FILA_ABAS.length, blocked: 0 });
       if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR' }] });
@@ -8793,7 +8803,12 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       await esperarOuExplodir(q.A, () => AppState.authenticated && localStorage.getItem('waze_session_token') === 'tok-abas-novo',
         'a aba A entrar de novo pela extensão');
     }
-    await q.B.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+    // A B tem de estar na fila, com o token velho, na hora do ✕: a renovação da
+    // MESMA conta na A não a tira (é o controle da seção 4 visto daqui).
+    const naFila = await q.B.evaluate(() => AppState.authenticated
+      && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject'));
+    checa(naFila, `duas abas: a aba B não estava na fila na hora do ✕${aRenova ? ' — a renovação da MESMA conta na aba A a tirou' : ''}`);
+    await q.B.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject')?.click());
     const caiu = await esperarNaPagina(q.B, () => !AppState.authenticated && !API.temSessaoNaMemoria(), 8000);
     const noAparelho = await q.A.evaluate(() => ({
       token: localStorage.getItem('waze_session_token'),
@@ -8823,6 +8838,72 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'duas abas: CONTROLE — a queda da sessão GUARDADA (o mesmo token na memória e no aparelho) não a tirou do aparelho',
     JSON.stringify({ caiu: c3.caiu.ok, token: c3.token, quedas: c3.quedas }));
   await c3.q.ctx.close();
+
+  // ── 4. OUTRA CONTA entra noutra aba ─────────────────────────────────────
+  // Os dados do aparelho têm UM dono. A sessão da aba A cai e, na entrada dela,
+  // alguém entra com OUTRA conta: a A tira do aparelho os dados da anterior, e
+  // ele passa a ser da nova. A aba B, logada com a conta anterior (o perfil na
+  // memória), seguia: o placar e o Histórico que ela grava iam pra conta nova,
+  // e cada decisão dela na fila de saída era tirada pela A como "de outra
+  // conta", sem ir ao Waze. Agora ela SAI — sem mexer no aparelho, destruindo
+  // no servidor a sessão dela (que não é a do aparelho) e dizendo por quê.
+  // CONTROLE: a MESMA conta entrando de novo na A não derruba a B.
+  const o = await abrirAbas();
+  const cookiesDa = (conta) => `.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tconta-${conta}`;
+  const entrarNaA = async (conta) => {
+    await o.A.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
+    await esperarOuExplodir(o.A, naEntrada, 'a aba A voltar à entrada depois da queda');
+    await o.A.evaluate((c) => authenticateWithCookies(c), cookiesDa(conta));
+    await esperarOuExplodir(o.A, () => AppState.authenticated && !!AppState.profile
+      && String(AppState.profile.id) === String(JSON.parse(localStorage.getItem('waze_places_conta') || '{}').id),
+      `a aba A entrar com a conta ${conta}`);
+  };
+  await entrarNaA(4242);
+  await dormir(600);
+  const bFica = await o.B.evaluate(() => ({ auth: AppState.authenticated, memoria: API.temSessaoNaMemoria(),
+    card: !!document.querySelector('#cardStack .place-card:not(.card-fundo)') }));
+  checa(bFica.auth && bFica.memoria && bFica.card, 'duas abas: CONTROLE — a MESMA conta entrando de novo na aba A derrubou a B',
+    JSON.stringify(bFica));
+  // Sem a B na fila (o controle reprovou), o resto não tem o que medir.
+  if (bFica.auth && bFica.card) {
+    // O espião de escrita na B (ver a seção 1), com o CONTROLE dele: o ✕ grava o placar.
+    await o.B.evaluate(() => {
+      window.__escritasDaB = [];
+      for (const nome of ['setItem', 'removeItem', 'clear']) {
+        const original = Storage.prototype[nome];
+        Storage.prototype[nome] = function (...args) {
+          if (this === localStorage) window.__escritasDaB.push(nome + ':' + (args[0] === undefined ? '' : args[0]));
+          return original.apply(this, args);
+        };
+      }
+    });
+    await rejeitarNa(o.B);
+    const espiou4 = await o.B.evaluate(() => window.__escritasDaB.slice());
+    checa(espiou4.includes('setItem:waze_places_stats'),
+      'duas abas: CONTROLE — o espião da aba B não viu o ✕ dela gravar o placar (ele estaria cego na troca de conta)', JSON.stringify(espiou4));
+    await o.B.evaluate(() => { window.__escritasDaB.length = 0; });
+    const redeNaTroca = o.rede.length;
+    await entrarNaA(5151);
+    const bSaiu4 = await esperarNaPagina(o.B, naEntrada, 5000);
+    checa(bSaiu4.ok, 'duas abas: OUTRA conta entrou na aba A e a B seguiu logada com a anterior — o placar e o Histórico dela iriam pra conta nova');
+    const b4 = await o.B.evaluate(() => ({ memoria: API.temSessaoNaMemoria(), perfil: !!AppState.profile,
+      card: !!document.querySelector('#cardStack .place-card'),
+      aviso: [...document.querySelectorAll('#toastContainer > *')].map((e) => e.textContent).join(' | ') }));
+    checa(!b4.memoria && !b4.perfil && !b4.card, 'duas abas: a aba B ficou com a sessão, o perfil ou o card da conta anterior', JSON.stringify(b4));
+    checa(/outra conta/i.test(b4.aviso), 'duas abas: a aba B saiu sem dizer que outra conta entrou', b4.aviso.slice(0, 160));
+    const destruiu = o.rede.slice(redeNaTroca).filter((x) => x.rota === 'sessao' && x.acao === 'destroy');
+    checa(destruiu.length === 1 && destruiu[0].token === 'tok-abas',
+      'duas abas: a sessão da aba B (que não é a do aparelho) não foi destruída no servidor — ficaria órfã até vencer', JSON.stringify(destruiu));
+    await dormir(500);
+    const escritas4 = await o.B.evaluate(() => window.__escritasDaB.slice());
+    checa(escritas4.length === 0, 'duas abas: a aba B mexeu no aparelho, que agora é da outra conta', JSON.stringify(escritas4));
+    const dono = await o.A.evaluate(() => ({ conta: (JSON.parse(localStorage.getItem('waze_places_conta') || 'null') || {}).id,
+      token: localStorage.getItem('waze_session_token'), auth: AppState.authenticated }));
+    checa(String(dono.conta) === '5151' && dono.token === 'tok-outra' && dono.auth,
+      'duas abas: o aparelho e a aba A não ficaram com a conta nova', JSON.stringify(dono));
+  }
+  checa(o.erros.length === 0, 'duas abas: erro de JS na troca de conta', o.erros[0]);
+  await o.ctx.close();
 }
 
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────

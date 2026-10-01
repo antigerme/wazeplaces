@@ -4504,6 +4504,15 @@ async function loadProfileAndAuxData() {
 function definirPerfil(res) {
     const perfil = res && res.success ? res.profile : null;
     if (!perfil || typeof perfil !== 'object') return false;
+    // O perfil de uma aba cuja sessão NÃO é a do aparelho, de uma conta que não é
+    // a dona dele: outra conta entrou noutra aba enquanto esta ainda não sabia a
+    // sua (ver `aoEntrarOutraContaEmOutraAba`). Esta sai; pelo caminho de
+    // sempre, ela tomaria o aparelho de volta — apagando o que é da outra — e a
+    // outra aba é que sairia.
+    if (!contaSegueNoAparelho(perfil.id)) {
+        handleLogout({ porOutraAba: true, outraConta: true });
+        return false;
+    }
     AppState.profile = perfil;
     // ANTES do que depende do perfil: se a conta é outra, o que era da
     // anterior sai antes de a recusa automática e a presença rodarem.
@@ -5775,16 +5784,25 @@ function dlogCapturarAuto(motivo) {
 // endereço de terceiros) e os corpos de resposta guardados no anel da API.
 // Fica o anel de METADADOS das chamadas: ele não tem dado pessoal e é a espinha
 // de qualquer diagnóstico posterior.
-function dlogApagar() {
+//
+// `soMemoria`: a OUTRA aba já apagou o que estava no aparelho — ou ele agora é
+// de outra conta (ver `handleLogout`). A base fica; a época sobe do mesmo jeito,
+// e uma gravação desta aba ainda em voo não grava mais nela.
+function dlogApagar({ soMemoria = false } = {}) {
     dlogAnel = [];
     dlogMomentos = [];
     // E o que ficou GUARDADO de aberturas anteriores, no aparelho e na memória:
     // desligado é desligado, e ali há o DOM das capturas, com dado de terceiro.
     diagAberturasAnteriores = [];
     diagBaixadoEm = 0;
-    diagEsquecerGuardado();
-    // E o retrato que o fechar deixou no localStorage (`diagRetratoAoSair`).
-    diagEsquecerRetratos();
+    // Na saída por OUTRA aba (`soMemoria`) o aparelho não é desta aba: só a
+    // memória sai. Senão saem a base e o retrato que o fechar deixou no
+    // localStorage (`diagRetratoAoSair`), que também são do aparelho.
+    if (soMemoria) diagEpoca++;
+    else {
+        diagEsquecerGuardado();
+        diagEsquecerRetratos();
+    }
     for (const h of dlogPendencias.values()) clearTimeout(h);
     dlogPendencias.clear();
     // O corpo ENVIADO também: com o modo dev ligado ele leva o texto da conversa
@@ -7606,6 +7624,10 @@ async function handleUnauthorized() {
             // abertura), completa o que a abertura não chegou a fazer.
             const primeiroPerfil = !AppState.profile;
             if (definirPerfil(r) && primeiroPerfil) completarPerfilChegado(r.profile, epocaDaSessao);
+            // O perfil revelou que OUTRA conta tomou o aparelho noutra aba, e
+            // esta saiu (ver `definirPerfil`): "sua sessão continua válida" e a
+            // busca de novo seriam o contrário do que acabou de acontecer.
+            if (!AppState.authenticated) return;
             // A sonda RESPONDEU com o perfil: a sessão está viva AGORA. É isto
             // que deixa a fila de saída distinguir sessão morta de escrita
             // recusada (ver `sessaoVivaDepoisDe`). "Não deu pra saber" (rede,
@@ -8033,10 +8055,15 @@ function desenharAvisoDoSair() {
 // plano recebe os avisos com atraso (auditoria de 2026-09-29, R4-5 A1). Por
 // isso as linhas que mexem no APARELHO levam o `porOutraAba`, e o resto vale
 // igual: é a mesma lista, e o que for esquecido numa aba fica esquecido nas
-// duas. A exceção é a de sempre do modo dev: o que ele guardou sai em todas as
-// abas quando ele desliga (`dlogApagar`, ver `aoMudarModoDevEmOutraAba`) — e o
-// "Sair" o desliga.
-async function handleLogout({ porOutraAba = false } = {}) {
+// duas. O modo dev também: o que ele guardou no aparelho, a aba que saiu apagou
+// (o "Sair" o desliga), e aqui sai só o da memória.
+//
+// `outraConta`: não foi "Sair", foi OUTRA conta que entrou noutra aba (ver
+// `aoEntrarOutraContaEmOutraAba`). O aparelho agora é dela, e esta aba sai do
+// mesmo jeito — sem tocar nele —, com uma diferença: a sessão desta no
+// SERVIDOR é outra, que ninguém mais vai apagar. Ela sai daqui, pelo token da
+// memória, senão o registro fica órfão até vencer.
+async function handleLogout({ porOutraAba = false, outraConta = false } = {}) {
     epocaDaSessao++;   // antes de tudo: nenhuma resposta em voo grava daqui pra frente
     saiuNestaPagina = true;
     // Aqui o diálogo do "Sair" é o que está aberto. Na outra aba pode ser
@@ -8063,8 +8090,11 @@ async function handleLogout({ porOutraAba = false } = {}) {
     // serve pra exclusão no servidor, que vai depois, com retentativa. Na outra
     // aba o token já saiu do armazenamento (e o servidor é da que saiu): só a
     // cópia da memória solta — pelo `setSession`, o diário de sessões ganharia
-    // um "token-" por cima do "Sair" que acabou de apagá-lo.
-    const tokenParaApagar = porOutraAba ? null : API.getSession();
+    // um "token-" por cima do "Sair" que acabou de apagá-lo. Na saída por outra
+    // conta, a sessão desta aba é apagada no servidor — nunca a guardada, que é
+    // a da outra.
+    const tokenParaApagar = !porOutraAba ? API.getSession()
+        : outraConta && !sessaoDestaAbaEhAGuardada() ? API.sessionToken : null;
     if (porOutraAba) API.soltarSessao();
     else API.setSession(null);
     // Os códigos de pareamento emitidos aqui param de valer (sem esperar rede:
@@ -8085,8 +8115,11 @@ async function handleLogout({ porOutraAba = false } = {}) {
     // memória) e as das anteriores (guardadas no aparelho). Elas levam o DOM,
     // com nome e endereço dos pedidos na tela: "sair é sair de tudo". Antes
     // disto as da memória ficavam até a página fechar, e iriam no relatório de
-    // quem entrasse depois e ligasse o modo dev.
-    dlogApagar();
+    // quem entrasse depois e ligasse o modo dev. Na outra aba, as da memória: as
+    // do aparelho, a aba que saiu já apagou — e, se foi OUTRA conta que entrou,
+    // o aparelho agora é dela.
+    if (porOutraAba) dlogApagar({ soMemoria: true });
+    else dlogApagar();
     // O anel de chamadas é da sessão que saiu (rotas, ids de pedidos de
     // terceiros, o destino das mensagens): quem entrar depois começa do zero.
     try { API.chamadas.length = 0; } catch (e) {}
@@ -8176,7 +8209,7 @@ async function handleLogout({ porOutraAba = false } = {}) {
     updateDevBadge();
     removeCurrentCardEl();
     showAuthScreen();
-    showToast(t(porOutraAba ? 'toast.saiuNoutraAba' : 'toast.loggedOut'), 'info');
+    showToast(t(outraConta ? 'toast.outraContaNoutraAba' : porOutraAba ? 'toast.saiuNoutraAba' : 'toast.loggedOut'), 'info');
 
     // A exclusão no servidor é METADE da promessa do "Sair", e falhava calada
     // com a rede fora: o `_post` devolve erro em vez de lançar, então ninguém
@@ -12403,9 +12436,41 @@ function aoMudarModoDevEmOutraAba() {
 // respondesse a ele gravando mandaria outro de volta.
 function sincronizarComOutraAba(chave) {
     const tudo = chave === null;   // a outra aba limpou o armazenamento inteiro
-    if ((tudo || chave === 'waze_session_token' || chave === CONTA_KEY) && aoSairEmOutraAba()) return;
+    if ((tudo || chave === 'waze_session_token' || chave === CONTA_KEY)
+        && (aoSairEmOutraAba() || aoEntrarOutraContaEmOutraAba())) return;
     if (tudo || chave === STATS_KEY) relerPlacarDeOutraAba();
     if (tudo || chave === PREFERENCES_KEY) relerPreferenciasDeOutraAba();
+}
+
+// A conta desta aba (`id`) segue dona do aparelho? Os dados dele têm UM dono
+// (`CONTA_KEY`, ver `aoConhecerConta`), e ele muda quando alguém entra com
+// outra conta: a aba em que ela entrou tira o que era da anterior, e a sessão
+// guardada passa a ser a dela. NÃO segue quando o dono guardado é outro E a
+// sessão guardada não é a desta aba — senão é a troca de sempre, nesta aba
+// mesmo (quem entrou aqui toma o aparelho da conta anterior). Conta ainda não
+// sabida (sem perfil) segue: quem decide é o perfil, quando chegar.
+function contaSegueNoAparelho(id) {
+    if (id === undefined || id === null || id === '') return true;
+    if (!safeLS.get('waze_session_token') || sessaoDestaAbaEhAGuardada()) return true;
+    let dono = null;
+    try { dono = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { dono = null; }
+    return !(dono && dono.id && String(dono.id) !== String(id));
+}
+
+// Esta aba SAI quando outra conta toma o aparelho noutra aba. Seguindo, o placar
+// e o Histórico que ela grava iam pra conta nova, e cada decisão dela que
+// ficasse na fila de saída era tirada pela outra aba como "de outra conta", sem
+// ir ao Waze — MEDIDO: o ✕ contado no placar e no Histórico da conta nova, e o
+// que falhou por rede saindo da fila sem envio nenhum (auditoria de 2026-09-29).
+// A decisão lê o aparelho como ele está, como a do "Sair": a outra grava o
+// token ANTES da conta, e no aviso do token o `CONTA_KEY` ainda pode dizer a
+// conta anterior — esta aba segue até o aviso da conta. Sem perfil na memória
+// a conta desta aba não se sabe ainda; quando ele chega, o `definirPerfil`
+// confere o mesmo.
+function aoEntrarOutraContaEmOutraAba() {
+    if (contaSegueNoAparelho(AppState.profile && AppState.profile.id)) return false;
+    handleLogout({ porOutraAba: true, outraConta: true });
+    return true;
 }
 
 // O "Sair" foi numa OUTRA aba? O que o separa da QUEDA da sessão lá é a CONTA:

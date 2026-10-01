@@ -205,7 +205,8 @@ test('o que foi guardado SAI ao baixar, ao desligar o modo dev e no Sair', () =>
   const apagar = fatiar('dlogApagar');
   assert.match(apagar, /diagAberturasAnteriores = \[\];/, 'desligar o dev deixou as guardadas na memória');
   assert.match(apagar, /diagEsquecerGuardado\(\);/, 'desligar o dev deixou as guardadas no aparelho');
-  assert.match(fatiar('handleLogout'), /^\s+dlogApagar\(\);/m, 'o Sair deixou o diagnóstico (DOM com dado de terceiro) no aparelho');
+  // (O `else`: na OUTRA aba o "Sair" apaga só a memória — test/contas-abas.)
+  assert.match(fatiar('handleLogout'), /^\s+(?:else )?dlogApagar\(\);/m, 'o Sair deixou o diagnóstico (DOM com dado de terceiro) no aparelho');
 });
 
 test('o número do botão e o aviso do desligar contam as guardadas; baixar as marca', () => {
