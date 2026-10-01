@@ -78,7 +78,7 @@ function montar({ profile = null } = {}) {
   AppState.pendingAction = null;
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
     'completarPerfilChegado', 'resetQueue', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
-  for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa']) if (achar(opcional)) nomes.push(opcional);
+  for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil']) if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0;\n'

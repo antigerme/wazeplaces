@@ -4784,11 +4784,14 @@ async function completarPerfilChegado(perfil, epoca) {
     // de segurar a escolha do país de quem entra.
     const refazerFila = filaEsperaPerfil;
     if (AppState.filters.myArea && !caixaDaMinhaArea(perfil)) desligarMinhaAreaSemCaixa();
+    // A área gerenciada salva que este perfil não tem sai do filtro, e a fila que
+    // saiu com ela é refeita (ver a função).
+    const refazerPelaArea = esquecerAreaForaDoPerfil(perfil);
     // O país de quem entra: só depois do perfil, e só quando o atual é um onde
     // a pessoa NÃO edita (ver `paisDoPerfil`).
     const destino = await paisDoPerfil(perfil, epoca);
     if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
-    else if (refazerFila && epoca === epocaDaSessao) { resetQueue(); startFetching(); }
+    else if ((refazerFila || refazerPelaArea) && epoca === epocaDaSessao) { resetQueue(); startFetching(); }
     // A presença (fase 3) precisa do id do PERFIL — a lista exclui a própria
     // pessoa e o chat é dela. O `showMainScreen` chama a presença antes de o
     // perfil chegar, e ela desiste calada; sem esta linha, quem abria o app com
@@ -9026,6 +9029,23 @@ let ultimaBuscaFalhouPorRede = false;
 // (`API.aoProvarRede`) ou com a busca que der certo — e NÃO a cada busca que
 // começa, como a de cima: a busca no ar não prova rede nenhuma.
 let buscaSemResposta = false;
+
+// A ÁREA GERENCIADA salva que o PERFIL não tem — a da conta anterior (a área
+// vem do perfil, é de uma conta), ou a tirada no WME — seguia indo em toda
+// busca, enquanto os Filtros mostravam "Nenhuma" pra ela
+// (`populateManagedAreaSelect`): o que o app mostrava e o que ele usava
+// divergiam, até a pessoa abrir os Filtros e tocar "Aplicar" (auditoria de
+// 2026-10-01, R5-1 F4 e R56-2). Sai do filtro e é gravado. Devolve se a fila
+// tinha saído com ela — com "Minha área" a busca vai pela caixa, não por ela.
+// Perfil sem a lista (não se sabe) não decide nada.
+function esquecerAreaForaDoPerfil(perfil) {
+    const salva = AppState.filters.managedAreaId;
+    if (!salva || !perfil || !Array.isArray(perfil.managedAreas)) return false;
+    if (perfil.managedAreas.some((a) => a && String(a.id) === String(salva))) return false;
+    AppState.filters.managedAreaId = '';
+    saveFilters();
+    return !AppState.filters.myArea;
+}
 
 // "Minha área" num perfil SEM caixa: buscar o país com o filtro marcado é filtro
 // que mente (a pessoa acha que vê a área dela). Desliga, grava e DIZ — o mesmo
@@ -15318,6 +15338,13 @@ function esquecerOutraConta(id) {
     // As escolhas que valiam pelas regras DELA, as marcas do que só ela viu, e o
     // que ESCREVE no Waze no nome de alguém — que não se herda (ver a função).
     esquecerEscolhasDaContaAnterior();
+    // E a ÁREA GERENCIADA do filtro, que vem do perfil dela: a busca de quem
+    // entrou saía filtrada pela área de outra pessoa, com os Filtros dizendo
+    // "Nenhuma" (auditoria de 2026-10-01, R5-1 F4). O perfil de quem entrou
+    // confere de novo (`esquecerAreaForaDoPerfil`). Com "Minha área" a busca vai
+    // pela caixa do perfil, não por ela.
+    const areaNaBusca = !!(AppState.filters && AppState.filters.managedAreaId) && !AppState.filters.myArea;
+    if (AppState.filters && AppState.filters.managedAreaId) { AppState.filters.managedAreaId = ''; saveFilters(); }
     // Casa, trabalho e a posição do GPS também eram dela: a fila de quem entrou
     // saía ordenada pela casa da anterior (R4-5 A4). As de quem entrou chegam
     // com o perfil dele.
@@ -15330,8 +15357,11 @@ function esquecerOutraConta(id) {
     // A fila na tela, se atravessou a sessão (a renovação silenciosa a manteve),
     // é da conta anterior — dos filtros e das permissões dela: sai, e a de quem
     // entrou é buscada. Nos outros caminhos de entrada a fila já nasceu desta
-    // sessão, e refazer seria uma busca a mais no free tier.
-    if (filaAtravessouSessao) {
+    // sessão, e refazer seria uma busca a mais no free tier — menos quando ela
+    // saiu (ou está saindo) filtrada pela área da anterior: a abertura com a
+    // sessão salva busca antes de o perfil dizer de quem ela é. No login, a conta
+    // chega antes da primeira busca, e não há fila pra refazer.
+    if (filaAtravessouSessao || (areaNaBusca && (AppState.fetching || AppState.queue.length))) {
         resetQueue();
         startFetching();
     }

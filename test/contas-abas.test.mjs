@@ -1357,3 +1357,55 @@ test('F7: o diálogo do "Sair" não conta como perdida a decisão que está NO A
   m.h.desenharAvisoDoSair();
   assert.equal(m.el.textContent, 'modal.logout.saidaPlural:{"n":3}');
 });
+
+test('F4: a área gerenciada salva que o perfil não tem sai do filtro — e a fila que saiu com ela é refeita', async () => {
+  const montarArea = ({ area = '9001', myArea = false } = {}) => {
+    const log = [];
+    const deps = {
+      AppState: { filters: { managedAreaId: area, myArea }, currentPlace: null, profile: null },
+      saveFilters: () => log.push('grava'), resetQueue: () => log.push('fila nova'), startFetching: () => log.push('busca'),
+      epocaDaSessao: 0, filaEsperaPerfil: false, paisDoPerfil: async () => null, caixaDaMinhaArea: () => [1, 2, 3, 4],
+      aplicarRecusaAutomatica: () => {}, sortQueue: () => {}, window: {},
+    };
+    const h = montar(['completarPerfilChegado', 'esquecerAreaForaDoPerfil'], deps);
+    return { h, deps, log };
+  };
+  let m = montarArea();
+  await m.h.completarPerfilChegado({ id: 2, managedAreas: [] }, 0);
+  assert.equal(m.deps.AppState.filters.managedAreaId, '', 'DEFEITO: a área que o perfil não tem seguiu no filtro (os Filtros dizem "Nenhuma")');
+  assert.deepEqual(m.log, ['grava', 'fila nova', 'busca'], 'a fila que saiu filtrada pela área não foi refeita');
+  // CONTROLES: o perfil TEM a área — nada muda; perfil sem a lista — não decide; com "Minha área" — sai, sem refazer.
+  m = montarArea();
+  await m.h.completarPerfilChegado({ id: 2, managedAreas: [{ id: '9001', name: 'Área SP' }] }, 0);
+  assert.deepEqual([m.deps.AppState.filters.managedAreaId, m.log], ['9001', []]);
+  m = montarArea();
+  await m.h.completarPerfilChegado({ id: 2 }, 0);
+  assert.deepEqual([m.deps.AppState.filters.managedAreaId, m.log], ['9001', []]);
+  m = montarArea({ myArea: true });
+  await m.h.completarPerfilChegado({ id: 2, managedAreas: [] }, 0);
+  assert.deepEqual([m.deps.AppState.filters.managedAreaId, m.log], ['', ['grava']]);
+});
+
+test('F4: a troca de conta tira do filtro a área gerenciada da conta anterior — e refaz a fila que saiu com ela', () => {
+  const trocar = ({ queue = [], fetching = false, myArea = false } = {}) => {
+    const log = [];
+    const deps = {
+      AppState: { stats: {}, preferences: {}, filters: { managedAreaId: '9001', stateId: '25', myArea }, pendingAction: null, queue, fetching },
+      safeLS: aparelho().safeLS, filaAtravessouSessao: false, saveFilters: () => log.push('grava'),
+      resetQueue: () => log.push('fila nova'), startFetching: () => log.push('busca'),
+    };
+    const h = montar(['esquecerOutraConta'], deps);
+    h.esquecerOutraConta('222');
+    return { deps, log };
+  };
+  // A abertura com a sessão salva: a busca saiu (ou está saindo) antes de o perfil dizer de quem é.
+  for (const fila of [{ queue: [{ venueID: 'v1' }] }, { fetching: true }]) {
+    const m = trocar(fila);
+    assert.equal(m.deps.AppState.filters.managedAreaId, '', 'DEFEITO: a busca de quem entrou sairia filtrada pela área da conta anterior');
+    assert.equal(m.deps.AppState.filters.stateId, '25', 'o estado é escolha do aparelho, e fica');
+    assert.deepEqual(m.log, ['grava', 'fila nova', 'busca'], 'a fila que saiu filtrada pela área da conta anterior ficou na tela');
+  }
+  // CONTROLES: no login a conta chega antes da 1ª busca (nada a refazer); com "Minha área" a busca não usou a área.
+  assert.deepEqual(trocar().log, ['grava']);
+  assert.deepEqual(trocar({ queue: [{ venueID: 'v1' }], myArea: true }).log, ['grava']);
+});
