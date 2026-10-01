@@ -44,6 +44,8 @@ function ambiente() {
   const amb = {
     segurar: null,
     rotaciona: () => true,
+    // A resposta que FALHA (um 503 do Waze): sem corpo útil e sem cookie novo.
+    falha: () => false,
     recebidos,
     idPorTipo,
     get agora() { return agora; },
@@ -58,6 +60,7 @@ function ambiente() {
     recebidos.push({ tipo, valor: m && m[1], em: agora });
     idPorTipo.set(tipo, id);
     if (amb.segurar) await amb.segurar(tipo);
+    if (amb.falha(tipo)) return new Response('<html>503</html>', { status: 503, headers: { 'content-type': 'text/html' } });
     const corpo = tipo === 'perfil' ? PERFIL : tipo === 'paises' ? { countries: [] } : tipo === 'busca' ? { venues: { objects: [] } } : {};
     const headers = { 'content-type': 'application/json' };
     if (amb.rotaciona(tipo)) headers['set-cookie'] = `_web_session=ROT${id}; path=/; Max-Age=2000000`;
@@ -284,12 +287,18 @@ test('sem cookie novo, o prazo é renovado com o blob RELIDO — e a rotação q
     const r = await dispatch('lista-paises', { sessionToken: s0.token, region: 'row' }, s0.ctx());
     assert.equal(r.status, 200);
     assert.equal(s0.store.cont.put, 1, `sem rotação, a renovação gravou ${s0.store.cont.put} vezes`);
-    assert.equal(carimboGuardado(s0.store), s0.amb.agora, 'sem rotação, o prazo não foi renovado');
+    // O carimbo da renovação é `agora - SESSION_COOKIE_REFRESH`: o prazo anda
+    // (o TTL vem do `put`) e a janela da rotação fica aberta (S-1, 2026-09-30).
+    assert.equal(carimboGuardado(s0.store), s0.amb.agora - SESSION_COOKIE_REFRESH, 'sem rotação, o prazo não foi renovado (ou fechou a janela da rotação)');
     assert.equal(await s0.guardado(), 'LOGIN');
     // E a requisição seguinte no mesmo dia não grava de novo.
     s0.amb.agora += 5 * MIN;
     await dispatch('lista-paises', { sessionToken: s0.token, region: 'row' }, s0.ctx());
     assert.equal(s0.store.cont.put, 1, 'a renovação se repetiu no mesmo dia');
+    // Nem 22 h depois (a próxima renovação vence 23 h depois desta, não antes).
+    s0.amb.agora += 22 * HORA;
+    await dispatch('lista-paises', { sessionToken: s0.token, region: 'row' }, s0.ctx());
+    assert.equal(s0.store.cont.put, 1, 'a renovação se repetiu antes de vencer o dia');
   } finally { s0.amb.restaurar(); }
 
   // A corrida: A (países, sem cookie novo) abriu a sessão com o prazo vencido;
@@ -312,6 +321,84 @@ test('sem cookie novo, o prazo é renovado com o blob RELIDO — e a rotação q
     assert.equal(await s.guardado(), rotacaoDeB, 'a renovação de A desfez a rotação que B tinha gravado');
     assert.equal(s.store.cont.put, 1, `A e B gravaram ${s.store.cont.put} vezes — B já tinha renovado o prazo`);
   } finally { s.amb.restaurar(); }
+});
+
+// S-1 da auditoria de 2026-09-30: a 1ª resposta do dia SEM cookie novo (um 503
+// do Waze, rápido, chegando antes das outras) faz a requisição renovar o prazo
+// com o blob guardado. A renovação gravava o carimbo de AGORA, e a trava de 1 h
+// do `refreshCookies` lê esse carimbo: a rotação que as outras chamadas da
+// abertura traziam era jogada fora — e, pra quem usa menos de 1 h por dia, a do
+// dia inteiro (no relato: `ROT27` guardado no dia 3, contra `ROT42` sem a falha).
+test('a renovação SEM cookie novo não fecha a janela da rotação: a resposta seguinte com cookie novo ainda grava (Worker e VM)', async () => {
+  // As falhas dos DOIS modelos juntas, numa reprovação só: o primeiro `assert`
+  // pararia o laço no Worker e esconderia se a VM também falha.
+  const falhas = [];
+  const confere = (ok, msg) => { if (!ok) falhas.push(msg); };
+  for (const modelo of ['Worker', 'VM']) {
+    // `comFalha: false` é o CONTROLE: o caso normal, em que a 1ª resposta já traz cookie novo.
+    for (const comFalha of [false, true]) {
+      const rotulo = `${modelo}, ${comFalha ? 'o perfil responde 503 primeiro' : 'CONTROLE sem falha'}`;
+      const s = await cenario({ modelo, idadeS: 25 * HORA });
+      try {
+        s.amb.falha = (tipo) => comFalha && tipo === 'perfil';
+        const portas = new Map();
+        s.amb.segurar = (tipo) => new Promise((ok) => portas.set(tipo, ok));
+        const corpo = { sessionToken: s.token, region: 'row' };
+        const pedidos = {
+          perfil: dispatch('perfil', corpo, s.ctx()),
+          paises: dispatch('lista-paises', corpo, s.ctx()),
+          busca: dispatch('buscar-places', corpo, s.ctx()),
+        };
+        await ate(() => portas.size === 3, 'as 3 chamadas no Waze');
+        // O perfil volta PRIMEIRO, e só depois as outras duas.
+        for (const tipo of ['perfil', 'paises', 'busca']) { portas.get(tipo)(); await pedidos[tipo]; }
+        assert.equal((await pedidos.perfil).status, comFalha ? 500 : 200, `CONTROLE (${rotulo}): o perfil não respondeu como o cenário pede`);
+        const esperado = 'ROT' + s.amb.idPorTipo.get(comFalha ? 'paises' : 'perfil');
+        const guardado = await s.guardado();
+        confere(guardado === esperado, `${rotulo}: ficou guardado ${guardado} (esperado ${esperado}) — a rotação da abertura foi jogada fora`);
+        // Com a falha são DUAS gravações (a renovação e, logo depois, a rotação);
+        // sem ela, uma só — a rotação renova o prazo de carona.
+        confere(s.store.cont.put === (comFalha ? 2 : 1), `${rotulo}: a abertura gravou ${s.store.cont.put} vez(es)`);
+        // E o resto do dia não grava de novo: 10 swipes em 20 min, cada resposta com cookie novo.
+        const naAbertura = s.store.cont.put;
+        s.amb.segurar = null;
+        for (let i = 0; i < 10; i++) {
+          s.amb.agora += 2 * MIN;
+          await dispatch('marcar-lido', { ...corpo, venueID: '1.2.3', updateRequestID: '9' }, s.ctx());
+        }
+        confere(s.store.cont.put === naAbertura, `${rotulo}: os swipes do mesmo dia gravaram ${s.store.cont.put - naAbertura} vez(es)`);
+      } finally { s.amb.restaurar(); }
+    }
+  }
+  assert.deepEqual(falhas, [], 'a rotação da abertura se perdeu:\n' + falhas.join('\n'));
+});
+
+// O mesmo buraco, pela rota que lê a sessão SEM falar com o Waze (o `parear
+// create`, o código que o aparelho mostra pro outro): ela renova o prazo — e
+// com o carimbo de agora, a busca que vinha logo depois, com cookie novo, não o
+// gravava por 1 h.
+test('a rota que não chama o Waze (parear) renova o prazo sem fechar a janela: a requisição seguinte grava a rotação (Worker e VM)', async () => {
+  const falhas = [];
+  for (const modelo of ['Worker', 'VM']) {
+    // CONTROLE: sessão fresca (2 h) — o parear não renova nada, e a busca grava a rotação.
+    for (const idadeS of [2 * HORA, 25 * HORA]) {
+      const rotulo = `${modelo}, carimbo de ${idadeS / HORA} h`;
+      const s = await cenario({ modelo, idadeS });
+      try {
+        const corpo = { sessionToken: s.token, region: 'row' };
+        const p = await dispatch('parear', { ...corpo, action: 'create' }, s.ctx());
+        assert.equal(p.status, 200, `CONTROLE (${rotulo}): o parear não criou o código: ${JSON.stringify(p.body)}`);
+        assert.equal(s.amb.recebidos.length, 0, `CONTROLE (${rotulo}): o parear falou com o Waze`);
+        const renovou = idadeS > SESSION_REFRESH_AFTER;
+        assert.equal(carimboGuardado(s.store) > s.amb.agora - idadeS, renovou, `${rotulo}: o parear ${renovou ? 'não renovou' : 'renovou'} o prazo`);
+        s.amb.agora += 5 * MIN;
+        await dispatch('buscar-places', corpo, s.ctx());
+        const guardado = await s.guardado();
+        if (guardado !== 'ROT' + s.amb.idPorTipo.get('busca')) falhas.push(`${rotulo}: a busca logo depois do parear não gravou a rotação (ficou ${guardado})`);
+      } finally { s.amb.restaurar(); }
+    }
+  }
+  assert.deepEqual(falhas, [], 'a rotação depois do parear se perdeu:\n' + falhas.join('\n'));
 });
 
 test('o formato gravado segue `carimbo|blob` (o da versão anterior), e o valor sem carimbo segue descartado', async () => {

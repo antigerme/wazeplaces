@@ -983,6 +983,18 @@ export function makeSessions({ store, keyBytes }) {
     // Só age se ESTA instância leu a sessão (o carimbo lembrado): token que não
     // foi aberto aqui, ou sessão apagada (`destroySession` esquece o carimbo),
     // não custa nem a leitura. E nunca lança, nem grava sessão que sumiu.
+    //
+    // O carimbo que ela grava é `agora - SESSION_COOKIE_REFRESH`, e não `agora`:
+    // a renovação do blob velho estende o prazo (o TTL vem do `put`, e na VM do
+    // mtime) SEM fechar a janela da rotação. Com `agora`, a trava de 1 h do
+    // `refreshCookies` lia esse carimbo e jogava fora o cookie novo que chegasse
+    // logo depois — a 1ª resposta do dia sem cookie novo (um 503 do Waze, rápido,
+    // antes das outras chamadas da abertura; ou uma rota que nem chama o Waze,
+    // como o `parear`) custava a rotação do dia inteiro a quem usa menos de 1 h
+    // por dia (auditoria de 2026-09-30, S-1). A RESERVA em memória leva o mesmo
+    // carimbo: na VM o mapa é do processo, e a reserva com `agora` fecharia a
+    // janela do mesmo jeito. O preço: a próxima renovação vence 1 h mais cedo
+    // (23 h depois), e o dia da falha grava duas vezes — a renovação e a rotação.
     async renovarPrazo(token) {
       if (typeof token !== 'string' || !token) return false;
       let desfazer = null;
@@ -991,7 +1003,8 @@ export function makeSessions({ store, keyBytes }) {
         const agora = Math.floor(Date.now() / 1000);
         const lembrado = carimboLido.get(hash);
         if (lembrado == null || agora - lembrado < SESSION_REFRESH_AFTER) return false;
-        desfazer = reservar(hash, agora);
+        const carimboNovo = agora - SESSION_COOKIE_REFRESH;
+        desfazer = reservar(hash, carimboNovo);
         const raw = await store.get(hash);
         const { sep, carimbo } = raw ? carimboDoValor(raw) : { sep: -1, carimbo: NaN };
         if (!raw || !Number.isFinite(carimbo)) { desfazer(); return false; }
@@ -1000,7 +1013,7 @@ export function makeSessions({ store, keyBytes }) {
           lembrarCarimbo(hash, carimbo);
           return false;
         }
-        await store.put(hash, agora + '|' + raw.slice(sep + 1), SESSION_TTL);
+        await store.put(hash, carimboNovo + '|' + raw.slice(sep + 1), SESSION_TTL);
         return true;
       } catch {
         // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
