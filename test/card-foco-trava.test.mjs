@@ -287,3 +287,81 @@ test('C10 os pontos de entrada: os três botões, o Desfazer, a trava que muda, 
   assert.match(fatiar('setupAppListeners'), /window\.addEventListener\('pointerdown', \(\) => \{ focoDoTeclado = null; \}, true\);/,
     'pegar o mouse ou o dedo não desliga o foco prometido ao teclado');
 });
+
+// ── A família do C10: o foco que o app tira debaixo do teclado ───────────────
+// O par "Ver +N" ⇄ barra "Primeiro os de…", MEDIDO nos dois motores depois do
+// C10: Enter no "Ver +N" (o `focarAutor` remonta o card e leva o botão focado)
+// e Enter na barra (ela se esconde com o foco nela) largavam o foco no <body>.
+// Na tela, nos dois motores: bloco "O CARD" do `tools/smoke-browser.mjs`.
+function montarAutor() {
+  const estado = { card: null };
+  const deps = { document: doc, cardDaFrente: () => estado.card };
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, [
+    fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'), 'let focoDoTeclado = null;',
+    fatiar('veioDoTeclado'), fatiar('focarDepoisDoFocoNoAutor'),
+    'return { veioDoTeclado, focarDepoisDoFocoNoAutor, pendente: () => focoDoTeclado };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  return { app, estado };
+}
+// Um card com o "Ver +N" (ou sem ele) e os três botões.
+function cardDoAutor({ selo = true, travado = false } = {}) {
+  const bs = {
+    '.selo-lote': selo ? botao('Ver +N') : null,
+    '.card-btn-reject': botao('✕', { disabled: travado }), '.card-btn-skip': botao('↑', { disabled: travado }),
+    '.card-btn-read': botao('✓', { disabled: travado }),
+  };
+  return { bs, querySelector: (sel) => bs[sel] || null };
+}
+
+test('família do C10: só o TECLADO conta — Enter no botão FOCADO, nunca o mouse nem o .click() de script', () => {
+  const m = montarAutor();
+  const b = botao('barra');
+  doc.activeElement = b;
+  assert.equal(m.app.veioDoTeclado({ detail: 0, currentTarget: b }), true, 'Enter no botão focado não conta como teclado');
+  assert.equal(m.app.veioDoTeclado({ detail: 1, currentTarget: b }), false, 'o clique do mouse/dedo contou como teclado');
+  doc.activeElement = doc.body;
+  assert.equal(m.app.veioDoTeclado({ detail: 0, currentTarget: b }), false, 'um .click() de script (botão sem foco) contou como teclado');
+  assert.equal(m.app.veioDoTeclado(undefined), false);
+});
+
+test('família do C10: Enter no "Ver +N" leva o foco à barra; Enter na barra, ao "Ver +N" do card da tela', () => {
+  const m = montarAutor();
+  const barra = botao('Primeiro os de…');
+  doc.getElementById = (id) => (id === 'focoAutorBar' ? barra : null);
+  try {
+    doc.activeElement = doc.body;
+    m.app.focarDepoisDoFocoNoAutor(true);
+    assert.equal(doc.activeElement, barra, 'entrou no foco pelo "Ver +N" e o foco não foi pra barra');
+    // Saiu pela barra: o "Ver +N" do card da tela é o equivalente dela no card.
+    m.estado.card = cardDoAutor();
+    doc.activeElement = doc.body;
+    m.app.focarDepoisDoFocoNoAutor(false);
+    assert.equal(doc.activeElement, m.estado.card.bs['.selo-lote'], 'saiu pela barra e o foco não voltou ao "Ver +N"');
+    // A série acabou neste card (sem "Ver +N"): o primeiro botão vivo, o ✕.
+    m.estado.card = cardDoAutor({ selo: false });
+    doc.activeElement = doc.body;
+    m.app.focarDepoisDoFocoNoAutor(false);
+    assert.equal(doc.activeElement, m.estado.card.bs['.card-btn-reject'], 'sem o "Ver +N" o foco não foi ao ✕');
+    // Card travado (a janela do Desfazer): nada focável agora — o ✕ fica
+    // PROMETIDO ao teclado e pousa quando destravar.
+    m.estado.card = cardDoAutor({ selo: false, travado: true });
+    doc.activeElement = doc.body;
+    m.app.focarDepoisDoFocoNoAutor(false);
+    assert.equal(doc.activeElement, doc.body, 'o foco foi pra um botão travado');
+    assert.equal(m.app.pendente(), '.card-btn-reject', 'com o card travado, o foco não ficou prometido ao ✕');
+  } finally { doc.getElementById = () => null; }
+});
+
+test('família do C10: a barra e o "Ver +N" passam pelo foco SÓ pelo teclado, e decidem ANTES de sumir', () => {
+  const voltar = fatiar('voltarAOrdemNormal');
+  const iTeclado = voltar.indexOf('const peloTeclado = veioDoTeclado(ev);');
+  const iLimpa = voltar.indexOf('limparFocoAutor();');
+  assert.ok(iTeclado > 0 && iLimpa > iTeclado,
+    'a barra decide se veio do teclado DEPOIS de se esconder (o foco já não é dela)');
+  assert.match(voltar, /aoMudarAFilaPorBaixo\(\);\s*if \(peloTeclado\) focarDepoisDoFocoNoAutor\(false\);\s*\}$/,
+    'Enter na barra voltou a largar o foco no <body>');
+  const selos = fatiar('renderSelosDeProcedencia');
+  assert.match(selos, /const peloTeclado = veioDoTeclado\(ev\);\s*focarAutor\(s\.acao\);\s*if \(peloTeclado\) focarDepoisDoFocoNoAutor\(true\);/,
+    'Enter no "Ver +N" voltou a largar o foco no <body>');
+});

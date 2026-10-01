@@ -8198,6 +8198,29 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     checa(!d.barra, `${id}: a barra seguiu na tela`, JSON.stringify(d));
     checa(d.frente === 'X1' && d.mesmoCard, `${id}: o toque TROCOU o card da tela`, JSON.stringify(d));
     checa(d.fundo === d.quer, `${id}: o card de fundo segue anunciando o pedido da série`, JSON.stringify(d));
+    // CONTROLE do foco: pelo MOUSE a barra não move o foco pro "Ver +N".
+    const pelMouse = await g.page.evaluate(() => { const a = document.activeElement; return !!(a && a.classList && a.classList.contains('selo-lote')); });
+    checa(!pelMouse, `${id}: CONTROLE — o clique do mouse na barra pôs o foco no "Ver +N"`);
+    // Pelo TECLADO (a família do C10): Enter no "Ver +N" e Enter na barra
+    // largavam o foco no <body> — o card é remontado, a barra se esconde.
+    const idT = `card/foco no autor ${MOTOR}: pelo teclado o foco não cai no <body>`;
+    await g.page.focus('#cardStack .place-card:not(.card-fundo) .selo-lote');
+    await g.page.keyboard.press('Enter');
+    await assentar(g.page);
+    const naBarra = await g.page.evaluate(() => ({ foco: (document.activeElement || {}).id || null,
+      fila: AppState.queue.map((p) => p.updateRequestID).join(',') }));
+    checa(naBarra.fila === 'X1,X2,X3,Y1,Y2', `${idT}: PRÉ-CONDIÇÃO — o Enter no "Ver +N" não pôs a série na frente`, JSON.stringify(naBarra));
+    checa(naBarra.foco === 'focoAutorBar', `${idT}: Enter no "Ver +N" largou o foco (devia ir à barra, o caminho de volta)`, JSON.stringify(naBarra));
+    await g.page.focus('#focoAutorBar');
+    await g.page.keyboard.press('Enter');
+    await assentar(g.page);
+    const noSelo = await g.page.evaluate(() => {
+      const a = document.activeElement;
+      return { selo: !!(a && a.classList && a.classList.contains('selo-lote') && cardDaFrente() && cardDaFrente().contains(a)),
+        fila: AppState.queue.map((p) => p.updateRequestID).join(',') };
+    });
+    checa(noSelo.fila === 'X1,Y1,X2,Y2,X3', `${idT}: PRÉ-CONDIÇÃO — o Enter na barra não voltou à ordem normal`, JSON.stringify(noSelo));
+    checa(noSelo.selo, `${idT}: Enter na barra largou o foco (devia ir ao "Ver +N" do card da tela)`, JSON.stringify(noSelo));
     checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
     await g.fechar();
   }

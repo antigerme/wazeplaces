@@ -130,11 +130,14 @@ test('quem muda a fila por baixo chama o acerto, e o card de fundo diz qual pedi
 function voltarPelaBarra(queue, { autorEmFoco }) {
   const log = [];
   const AppState = { queue, autorEmFoco, currentPlace: queue[0], filters: { sortOrder: 'newest' } };
+  // O foco do teclado depois da barra (`veioDoTeclado`/`focarDepoisDoFocoNoAutor`)
+  // tem teste próprio em test/card-foco-trava; aqui o toque é do dedo.
   const fn = new Function('AppState', 'referenciaDaOrdem', 'pontoDoPlace', 'distanciaKm', 'renderFocoAutor',
-    'updatePendingCount', 'aoMudarAFilaPorBaixo',
+    'updatePendingCount', 'aoMudarAFilaPorBaixo', 'veioDoTeclado', 'focarDepoisDoFocoNoAutor',
     [fatiar('sortQueue'), fatiar('manterFocoNaFrente'), fatiar('limparFocoAutor'), fatiar('voltarAOrdemNormal'),
       'return voltarAOrdemNormal;'].join('\n'))(
-    AppState, () => null, () => null, () => 0, () => log.push('barra'), () => log.push('conta'), () => log.push('porBaixo'));
+    AppState, () => null, () => null, () => 0, () => log.push('barra'), () => log.push('conta'), () => log.push('porBaixo'),
+    () => false, () => log.push('foco'));
   fn();
   return { ids: AppState.queue.map((p) => p.id), AppState, log };
 }

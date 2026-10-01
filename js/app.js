@@ -10672,8 +10672,12 @@ function limparFocoAutor() {
 // frente: trocá-lo seria trocar o pedido debaixo do dedo de quem só pediu a
 // ordem de volta. O card de fundo e o "Ver +N" acompanham a fila nova
 // (`aoMudarAFilaPorBaixo`).
-function voltarAOrdemNormal() {
+//
+// `ev` é o clique na barra: pelo teclado, o foco não fica pra trás com ela
+// (ver `focarDepoisDoFocoNoAutor`).
+function voltarAOrdemNormal(ev) {
     if (AppState.autorEmFoco === null || AppState.autorEmFoco === undefined) return;
+    const peloTeclado = veioDoTeclado(ev);
     limparFocoAutor();
     const fila = AppState.queue;
     const naTela = AppState.currentPlace && fila[0] === AppState.currentPlace ? fila.shift() : null;
@@ -10681,6 +10685,35 @@ function voltarAOrdemNormal() {
     if (naTela) fila.unshift(naTela);
     updatePendingCount();
     aoMudarAFilaPorBaixo();
+    if (peloTeclado) focarDepoisDoFocoNoAutor(false);
+}
+
+// O FOCO do teclado no par "Ver +N" ⇄ barra do foco — a família do C10
+// (auditoria do card, 2026-09-29). Os dois somem com o foco neles: o "Ver +N"
+// porque o `focarAutor` remonta o card, a barra porque ela se esconde. MEDIDO
+// nos dois motores: Enter em qualquer um largava o foco no <body>. Pelo teclado
+// (`veioDoTeclado`), o foco vai ao controle do CAMINHO DE VOLTA: de quem entrou
+// no foco (o "Ver +N") pra barra — que ainda anuncia o modo novo ao leitor de
+// tela —, e de quem saiu (a barra) pro "Ver +N" do card da tela, o equivalente
+// dela no card; sem ele (a série acabou neste card), pro primeiro botão vivo do
+// card, ✕ ↑ ✓. Com o card travado, o ✕ fica prometido ao teclado e pousa quando
+// destravar (`aplicarFocoDoTeclado`). Quem usa o dedo não tem o foco movido.
+function veioDoTeclado(ev) {
+    return !!(ev && ev.detail === 0 && ev.currentTarget && document.activeElement === ev.currentTarget);
+}
+
+function focarDepoisDoFocoNoAutor(entrou) {
+    if (entrou) {
+        const barra = document.getElementById('focoAutorBar');
+        if (focavelNaTela(barra)) barra.focus({ preventScroll: true });
+        return;
+    }
+    const card = cardDaFrente();
+    if (!card) return;
+    const alvo = ['.selo-lote', '.card-btn-reject', '.card-btn-skip', '.card-btn-read']
+        .map((s) => card.querySelector(s)).find(focavelNaTela);
+    if (alvo) alvo.focus({ preventScroll: true });
+    else focoDoTeclado = BOTAO_DA_ACAO.left;
 }
 
 // O foco é uma ordem que a PESSOA pediu, sobre um autor da fila DELA — dado de
@@ -10808,7 +10841,14 @@ function renderSelosDeProcedencia(card, place) {
         if (s.acao != null) {
             el.type = 'button';
             el.classList.add('selo-acionavel');
-            el.addEventListener('click', (ev) => { ev.stopPropagation(); focarAutor(s.acao); });
+            // Pelo teclado, o foco vai pra barra do foco: o `focarAutor` remonta
+            // o card e leva este botão junto (ver `focarDepoisDoFocoNoAutor`).
+            el.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                const peloTeclado = veioDoTeclado(ev);
+                focarAutor(s.acao);
+                if (peloTeclado) focarDepoisDoFocoNoAutor(true);
+            });
         } else if (s.folha) {
             el.type = 'button';
             el.classList.add('selo-acionavel');
