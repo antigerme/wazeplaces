@@ -254,8 +254,17 @@ function ordemDoWaze() {
 // 499 (auditoria da fila, 2026-09-26). Com ela, a busca lê as páginas seguintes
 // ANTES de ordenar: uma requisição a mais por página, só pra quem escolheu a
 // ordem e tem mais de 500 pedidos.
+//
+// Pela ordem que VALE (`ordemValida`), não pela salva: "Perto de casa" salva com
+// um perfil sem casa (tirada no WME, ou outra conta no aparelho), ou o GPS sem
+// posição, ordenam por DATA — os Filtros mostram "Mais recentes" — e mesmo assim
+// toda busca lia TODAS as páginas antes do primeiro card, uma requisição a mais
+// por página no free tier (MEDIDO, n1-casa: páginas [1,2] na abertura e no ↻,
+// contra [1] com "Mais recentes"; R56-3). Antes do perfil, a ordem salva segue
+// valendo (`ordemSalvaEsperaOPerfil`): pode ser que a casa exista.
 function ordemPrecisaDaFilaInteira() {
-    return AppState.filters.sortOrder !== ORDEM_PADRAO;
+    const v = AppState.filters.sortOrder;
+    return v !== ORDEM_PADRAO && ordemValida(v) !== ORDEM_PADRAO;
 }
 
 // Os filtros DE FÁBRICA — fonte ÚNICA do app recém-aberto e do "Sair". O "Sair"
@@ -18323,12 +18332,22 @@ function setCount(el, valor, sufixo = '', semAnimar = false) {
     const alvo = Number(valor);
     const mudou = !Number.isFinite(anterior) || anterior !== alvo;
 
+    // Toda escrita direta CANCELA a contagem que estiver correndo: ela terminava
+    // escrevendo o alvo VELHO por cima do novo, e a tela ficava errada até a
+    // próxima mudança — MEDIDO (s16): uma página chega (+30, contagem de 400 ms),
+    // um ✕ confirmado 300 ms depois → "Restam" 33 na tela com 32 de verdade
+    // (R5-2-10). O ramo `semAnimar` já cancelava; estes dois, não.
+    const pararContagem = () => {
+        if (el._countRaf) { cancelAnimationFrame(el._countRaf); el._countRaf = null; }
+    };
     if (!Number.isFinite(alvo) || prefersReducedMotion()) {
+        pararContagem();
         el.textContent = esc(valor);
         return;
     }
     // Sem valor anterior legível ('—', '…'): escreve direto, mas ainda pula.
     if (!Number.isFinite(anterior) || Math.abs(alvo - anterior) < 2) {
+        pararContagem();
         el.textContent = esc(alvo);
         if (mudou) popCount(el);
         return;
