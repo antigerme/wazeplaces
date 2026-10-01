@@ -1167,3 +1167,72 @@ test('R56-6: a troca de região que começa com os estados da abertura chegando 
   assert.equal(p.els.filterCountry.dataset.carregando, '1');
   assert.equal(p.els.applyFilters.disabled, true, 'CONTROLE: o "Aplicar" segue esperando a lista da troca');
 });
+
+// ═══ Achado 11, com a REGIÃO trocada pelo perfil e a lista da abertura no ar ═
+// Quem só edita na NA abre os Filtros pelo atalho, antes do perfil. O perfil
+// chega e leva a pessoa pra NA/EUA com a lista de países da ABERTURA (a da ROW)
+// ainda vindo: o redesenho não mexia na tela "carregando", e a lista da ROW,
+// chegando depois, punha os países da NA debaixo do seletor de região em `row`
+// — MEDIDO no navegador: o "Aplicar" gravava `row/235`, os EUA no servidor da
+// ROW, uma fila vazia (achado do lote 9, ao consertar o R56-6).
+test('achado 11, região: com a lista da ABERTURA no ar, o perfil que leva pra OUTRA região leva a tela junto', async () => {
+  const NA = [{ id: 40, name: 'Canada' }, { id: 235, name: 'United States' }];
+  for (const [nome, listaAntes] of [['a lista da abertura chega DEPOIS do perfil', false], ['CONTROLE: a lista da abertura chega ANTES', true]]) {
+    const p = pagina({ regiao: 'row', pais: 30 });
+    let soltarRow;
+    p.listas.paises = (r) => (r === 'row' ? new Promise((ok) => { soltarRow = ok; }) : Promise.resolve({ success: true, countries: NA }));
+    const abrindo = p.abrir();   // pelo atalho, antes do perfil: a lista da ROW vem
+    await tique();
+    assert.equal(p.els.filterCountry.dataset.carregando, '1', `${nome}: CONTROLE — a lista da abertura está no ar`);
+    if (listaAntes) { soltarRow({ success: true, countries: BR_FR }); await tique(); }
+    await p.app.irProPaisDoPerfil({ regiao: 'na', pais: 235 });   // quem só edita na NA
+    await tique();
+    if (!listaAntes) soltarRow({ success: true, countries: BR_FR });
+    await abrindo;
+    const tela = `${p.els.filterRegion.value}/${p.els.filterCountry.value} com os países ${p.els.filterCountry.opcoes.map((o) => o.value)}`;
+    assert.equal(p.els.filterRegion.value, 'na', `${nome}: o perfil levou pra NA/EUA e a tela ficou em ${tela}`);
+    assert.deepEqual(p.els.filterCountry.opcoes.map((o) => o.value), ['40', '235'], `${nome}: a tela ficou em ${tela}`);
+    assert.equal(p.els.filterCountry.value, '235', `${nome}: a tela ficou em ${tela}`);
+    assert.deepEqual(p.AppState.countries.map((c) => c.id), [40, 235], `${nome}: a lista da ROW virou a lista de países da NA`);
+    assert.equal(p.log.listCountries.length, 2, `${nome}: o redesenho pediu a lista de novo (${p.log.listCountries})`);
+    assert.equal(p.els.applyFilters.disabled, false);
+    p.app.applyFiltersFromModal();
+    assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], `${nome}: o "Aplicar" gravou ${p.estado.regiao}/${p.estado.pais}`);
+  }
+});
+
+test('achado 11, região: com uma troca da PESSOA no ar, o perfil não toma o seletor dela — e o "Aplicar" não morre', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  await p.abrir();
+  const segurados = segurarPaises(p);
+  const trocas = trocarRegioes(p, ['na', 'row']);   // a pessoa foi à NA e voltou: a troca da ROW está no ar
+  await tique();
+  const indo = p.app.irProPaisDoPerfil({ regiao: 'na', pais: 235 });
+  await tique();
+  assert.deepEqual(segurados.map((x) => x.r), ['na', 'row', 'na'], 'o instrumento não segurou as listas');
+  segurados[2].ok({ success: true, countries: LISTAS_R56.na });   // a lista que o perfil pediu
+  await indo;
+  for (const i of [0, 1]) { segurados[i].ok({ success: true, countries: LISTAS_R56[segurados[i].r] }); await tique(); }
+  await Promise.all(trocas);
+  assert.equal(p.els.applyFilters.disabled, false,
+    'o "Aplicar" ficou morto: o redesenho tomou o seletor da troca que a pessoa deixou no ar, e ela nunca soltou a espera');
+  assert.equal(p.els.filterRegion.value, 'row', 'o redesenho passou por cima da troca de região que a pessoa fez');
+  // O que se vê é o que o "Aplicar" grava: a região do seletor e a lista dela.
+  assert.deepEqual(p.els.filterCountry.opcoes.map((o) => o.value), ['30', '73']);
+  const naTela = [p.els.filterRegion.value, Number(p.els.filterCountry.value)];
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], naTela, `o "Aplicar" gravou ${p.estado.regiao}/${p.estado.pais} e a tela dizia ${naTela.join('/')}`);
+});
+
+test('achado 11, região: se a pessoa escolheu OUTRO país no modal, a escolha dela vale também quando o perfil troca a região', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: LISTAS_R56[r] });
+  await p.abrir();
+  await escolherPais(p, 73);   // a pessoa escolheu a França
+  await p.app.irProPaisDoPerfil({ regiao: 'na', pais: 235 });
+  await tique();
+  assert.deepEqual([p.els.filterRegion.value, p.els.filterCountry.value], ['row', '73'],
+    `o perfil levou pra NA e passou por cima da França que a pessoa escolheu: ${p.els.filterRegion.value}/${p.els.filterCountry.value}`);
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73]);
+});

@@ -6156,17 +6156,22 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //   R56-6. Trocar a região NA → ROW → NA: a lista da ida à NA que chegava
 //       DEPOIS punha o 1º da lista (o Canadá) por cima dos EUA que a pessoa
 //       tinha escolhido (auditoria da rodada 5).
+//   11, com a REGIÃO. Quem só edita na NA abre pelo atalho; o perfil a leva pra
+//       NA/EUA com a lista de países da ABERTURA ainda no ar, e a lista da ROW,
+//       chegando depois, ficava debaixo do seletor em `row` com os países da
+//       NA: o "Aplicar" gravava `row/235`, uma fila vazia (lote 9).
 // CONTROLES: sem ninguém mexer, o perfil AINDA leva quem edita na França pra
 // França (o instrumento enxerga a decisão automática), a escolha de OUTRO país
-// no modal vale, a região que não é a aplicada abre no 1º da lista, e com uma
-// ida só à NA a escolha da pessoa fica.
+// no modal vale, a região que não é a aplicada abre no 1º da lista, com uma
+// ida só à NA a escolha da pessoa fica, e com a lista da abertura chegando
+// ANTES do perfil a tela acompanha.
 {
   const onde = 'filtros/lugar';
   const LISTAS = {
     row: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }, { id: 181, name: 'Portugal' }],
     na: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }],
   };
-  const montar = async ({ editaveis, segurar = false, guardado = {} }) => {
+  const montar = async ({ editaveis, editaveisLa = {}, segurar = false, guardado = {} }) => {
     const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
     await ctx.addInitScript((guardado) => {
       try {
@@ -6187,7 +6192,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       let b = { success: true };
       if (nome === 'perfil') {
         b = { success: true, visivelNoWme: true, profile: { id: 12444348, userName: 'wazer', rank: 5, isAreaManager: true,
-          isStaff: false, areas: [], managedAreas: [], editableCountryIDs: regiao === 'row' ? editaveis : [] } };
+          isStaff: false, areas: [], managedAreas: [], editableCountryIDs: regiao === 'row' ? editaveis : (editaveisLa[regiao] || []) } };
       } else if (nome === 'lista-paises') b = { success: true, countries: LISTAS[regiao] || [] };
       else if (nome === 'lista-estados') b = { success: true, states: [] };
       else if (nome === 'buscar-places') b = { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 };
@@ -6205,7 +6210,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const soltar = (nome) => {
       for (const s of seguros.filter((x) => !nome || x.nome === nome)) { seguros.splice(seguros.indexOf(s), 1); s.solta(); }
     };
-    return { ctx, page, erros, soltar, trocas };
+    // Só o PRIMEIRO seguro daquele nome (na ordem em que a rota os recebeu).
+    const soltarUm = (nome) => {
+      const s = seguros.find((x) => x.nome === nome);
+      if (s) { seguros.splice(seguros.indexOf(s), 1); s.solta(); }
+    };
+    const segurosDe = (nome) => seguros.filter((x) => x.nome === nome).length;
+    return { ctx, page, erros, soltar, soltarUm, segurosDe, trocas };
   };
   const pelosFiltros = async (m) => {
     await m.page.goto(BASE + '?action=filters', { waitUntil: 'domcontentloaded' });
@@ -6357,6 +6368,52 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
     checa(gravado === 'na/235', `${onde} (R56-6, ${caso}): o "Aplicar" gravou ${gravado}`, gravado);
     checa(m.erros.length === 0, `${onde} (R56-6): erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+
+  // 11, com a REGIÃO. Quem só edita na NA (o perfil da ROW sem país, o da NA com
+  //     os EUA) abre pelo atalho, com o perfil e as DUAS listas de países da ROW
+  //     seguras: a da carga do início (que o perfil espera, `Promise.all`) e a da
+  //     abertura dos Filtros, nessa ordem — o `initApp` dispara a carga antes de
+  //     tratar o atalho. Solta-se a 1ª e o perfil; a da abertura fica no ar até
+  //     o perfil levar a pessoa pra NA/EUA. No CONTROLE ela chega antes.
+  for (const listaAntes of [false, true]) {
+    const caso = listaAntes ? 'CONTROLE: a lista da abertura chega ANTES do perfil' : 'a lista da abertura chega DEPOIS do perfil';
+    const m = await montar({ editaveis: [], editaveisLa: { na: [235] }, segurar: true });
+    await pelosFiltros(m);
+    for (let i = 0; i < 100 && m.segurosDe('lista-paises') < 2; i++) await m.page.waitForTimeout(20);
+    checa(m.segurosDe('lista-paises') === 2, `${onde} (11, região, ${caso}): CONTROLE — o instrumento não segurou as duas listas da ROW`,
+      String(m.segurosDe('lista-paises')));
+    const carregando = await m.page.evaluate(() => document.getElementById('filterCountry').dataset.carregando === '1');
+    checa(carregando, `${onde} (11, região, ${caso}): CONTROLE — a lista da abertura não estava no ar`);
+    if (listaAntes) m.soltar('lista-paises'); else m.soltarUm('lista-paises');
+    m.soltar('perfil');
+    // O perfil leva pra NA/EUA. Se a lista segura fosse a da carga do início, o
+    // perfil nem andaria e isto estoura — o instrumento não mede o caso fácil.
+    const lugar = await fimDaCarga(m);
+    checa(lugar === 'na/235', `${onde} (11, região, ${caso}): CONTROLE — o perfil não levou quem só edita na NA pra NA/EUA`, lugar);
+    if (!listaAntes) {
+      // A lista da abertura chega agora. O pouso se espera pelo registro dela no
+      // anel de chamadas do app, contado a partir de agora (gotcha #62).
+      const base = await m.page.evaluate(() => API.chamadas.filter((c) => c.rota === 'lista-paises').length);
+      m.soltar('lista-paises');
+      await m.page.evaluate((n) => { window.__listaDaAbertura = n; }, base + 1);
+      await esperarOuExplodir(m.page, () => API.chamadas.filter((c) => c.rota === 'lista-paises').length >= window.__listaDaAbertura,
+        'a lista da abertura pousar');
+    }
+    const tela = await m.page.evaluate(() => ({
+      regiao: document.getElementById('filterRegion').value,
+      pais: document.getElementById('filterCountry').value,
+      opcoes: [...document.getElementById('filterCountry').options].map((o) => o.value).join(','),
+      aplicarMorto: document.getElementById('applyFilters').disabled,
+    }));
+    const naTela = `${tela.regiao}/${tela.pais} com os países ${tela.opcoes}`;
+    checa(tela.regiao === 'na' && tela.pais === '235', `${onde} (11, região, ${caso}): o perfil levou pra NA/EUA e a tela ficou em ${naTela}`);
+    checa(!tela.opcoes.split(',').includes('30'), `${onde} (11, região, ${caso}): a lista da ROW ficou na tela da NA`, tela.opcoes);
+    checa(!tela.aplicarMorto, `${onde} (11, região, ${caso}): o "Aplicar" ficou morto`);
+    const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
+    checa(gravado === 'na/235', `${onde} (11, região, ${caso}): o "Aplicar" gravou ${gravado} (a fila de quem só edita na NA)`, gravado);
+    checa(m.erros.length === 0, `${onde} (11, região): erro de JS`, m.erros[0]);
     await m.ctx.close();
   }
 }

@@ -4726,16 +4726,27 @@ async function irProPaisDoPerfil({ regiao, pais }) {
 // (auditoria de 2026-09-29, achado 11). A tela acompanha, a menos que a pessoa
 // tenha escolhido OUTRO lugar no modal: aí a escolha dela vale, e o "Aplicar" a
 // grava. "Não mexeu" é o modal ainda mostrar o lugar de antes (`antes`) — quem
-// trocou e voltou pro mesmo também não escolheu nada. Com os países ainda
-// chegando, o seletor diz "Carregando…" (que não é o país de antes) e nada se
-// redesenha: quem os puser no seletor já escolhe o país aplicado de agora.
+// trocou e voltou pro mesmo também não escolheu nada.
+//
+// Com os países da ABERTURA ainda chegando, o seletor diz "Carregando…" e
+// ninguém escolheu país. Na MESMA região nada se redesenha: quem os puser no
+// seletor já escolhe o país aplicado de agora. Com a REGIÃO trocada, não: a
+// lista que vem é da região de antes, e a abertura a punha debaixo do seletor
+// de região de antes com o país da nova — MEDIDO no navegador: quem só edita
+// na NA, pelo atalho, ficava com `row` e os países da NA, e o "Aplicar" gravava
+// `row/235`, os EUA no servidor da ROW (uma fila vazia). Aí a tela acompanha
+// já: a carga nova toma o seletor (`cargaDePaises`) e a da região de antes,
+// chegando depois, não escreve mais. A troca de região que a PESSOA deixou no
+// ar (`esperaDosFiltros.regiao`) é dona do seletor e fica com ele.
 function redesenharLugarNosFiltros(antes) {
     const modal = document.getElementById('filtersModal');
     if (!modal || modal.classList.contains('hidden')) return;
     const regiaoSel = document.getElementById('filterRegion');
     const paisSel = document.getElementById('filterCountry');
     if (!regiaoSel || !paisSel) return;
-    if (regiaoSel.value !== antes.regiao || String(paisSel.value) !== String(antes.pais)) return;
+    if (regiaoSel.value !== antes.regiao) return;
+    const abrindo = !!paisSel.dataset.carregando && !esperaDosFiltros.regiao;
+    if (String(paisSel.value) !== String(antes.pais) && !(abrindo && API.getRegion() !== antes.regiao)) return;
     regiaoSel.value = API.getRegion();
     // Estado e área eram do país de antes (o `irProPaisDoPerfil` os zerou).
     aoMudarPaisNaTela();
