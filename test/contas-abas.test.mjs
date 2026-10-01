@@ -712,7 +712,7 @@ test('A3: CONTROLE — sem esquecer as escolhas de A, o ↑ de B grava a estrela
 
 // ═══ A4 · a casa da conta anterior não ordena a fila de quem entra ═══════════
 
-test('A4: a troca de conta e a QUEDA da sessão soltam casa, trabalho e a posição do GPS', () => {
+test('A4/R56-1: a troca de conta solta casa, trabalho e o GPS; a QUEDA solta casa e trabalho e MANTÉM o GPS (o aparelho segue "Perto de mim")', () => {
   const casa = () => ({ casa: [-10, -40], trabalho: [-11, -41] });
   const base = () => ({
     referenciasDoPerfil: casa(), posicaoGps: { ll: [-10, -40] }, safeLS: aparelho().safeLS,
@@ -726,8 +726,12 @@ test('A4: a troca de conta e a QUEDA da sessão soltam casa, trabalho e a posiç
   assert.equal(troca.referenciaDaOrdem('casa'), null);
   const queda = montar(['derrubarSessao', 'referenciaDaOrdem'], base());
   queda.derrubarSessao('srv.err.sessionExpired', { depois: () => {} });
-  assert.deepEqual([queda.deps.referenciasDoPerfil, queda.deps.posicaoGps], [null, null],
-    'DEFEITO: a casa de quem estava ficou pra quem entrar depois da queda');
+  assert.equal(queda.deps.referenciasDoPerfil, null, 'DEFEITO: a casa de quem estava ficou pra quem entrar depois da queda');
+  // A posição é do APARELHO, e o perfil que volta na renovação não a traz:
+  // tirada na queda, a fila "Perto de mim" passava pra ordem por data sem aviso.
+  assert.deepEqual(queda.referenciaDaOrdem('gps'), [-10, -40],
+    'DEFEITO (R56-1): a queda tirou a posição do GPS — a renovação da mesma conta perde o "Perto de mim"');
+  assert.equal(queda.referenciaDaOrdem('casa'), null);
   // CONTROLE: a referência existia (o teste mede alguma coisa).
   assert.deepEqual(montar(['referenciaDaOrdem'], base()).referenciaDaOrdem('casa'), [-10, -40]);
 });

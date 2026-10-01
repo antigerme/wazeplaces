@@ -8044,12 +8044,18 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // renovação — e depois dela, se o perfil de quem entrou não chegasse
     // (MEDIDO: "contaA" com a sessão de B). O perfil que chegar o redesenha.
     limparCabecalhoDoPerfil();
-    // Casa, trabalho e a posição do GPS são da sessão que caiu, pelo mesmo
-    // motivo: quem entrasse depois, no mesmo aparelho, teria a fila ordenada
-    // pela casa de quem estava (auditoria de 2026-09-29, R4-5 A4). A mesma
-    // pessoa voltando tem casa e trabalho de volta com o perfil.
+    // Casa e trabalho são da CONTA da sessão que caiu, pelo mesmo motivo: quem
+    // entrasse depois, no mesmo aparelho, teria a fila ordenada pela casa de quem
+    // estava (auditoria de 2026-09-29, R4-5 A4). A mesma pessoa voltando os tem
+    // de volta com o perfil.
+    //
+    // A posição do GPS NÃO sai aqui: ela é do APARELHO, não da conta, e o perfil
+    // que volta não a traz. Tirada na queda, a renovação pela extensão (a MESMA
+    // conta, que segue triando) deixava o "📍 Perto de mim" sem referência, e o
+    // card seguinte saía pela ordem de data, sem aviso, sob o "sua fila continua
+    // aqui" (auditoria de 2026-10-01, R56-1). Ela sai quando o perfil revela
+    // OUTRA conta (`esquecerOutraConta`) e no "Sair".
     referenciasDoPerfil = null;
-    posicaoGps = null;
     // O prazo era desta sessão, que acabou de morrer. Deixá-lo guardado faria a
     // próxima entrada nascer com a contagem da sessão ANTERIOR na tela, até a
     // primeira resposta do Waze corrigir. O guardado no aparelho, na queda só
