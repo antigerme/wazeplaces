@@ -1696,7 +1696,16 @@ for (const status of [404, 403]) {
     'aprovar: o card saiu da fila antes de o lightbox fechar');
   // Fecha sozinha → envia, e com `approve: true` (o backend só aprova com o
   // booleano estrito; mandar outra coisa vira uma REJEIÇÃO silenciosa).
-  await page.waitForTimeout(3200);
+  //
+  // A pílula (e o card) seguem travados enquanto a aprovação está NO AR, e é a
+  // RESPOSTA que solta (A1: o ✕ do card mandava uma segunda decisão do pedido
+  // que estava sendo aprovado). Espera o FIM — a aprovação respondida
+  // (`placeResolvidoPorAprovacao`, com o lightbox aberto) —, nunca um prazo: os
+  // 3,2 s fixos mediam a velocidade da máquina e reprovaram sob carga, com o
+  // código certo. A marca existe também no app de antes, então o bloco mede os
+  // dois lados.
+  const respondida = await esperarNaPagina(page, () => placeResolvidoPorAprovacao !== null, 10000, 50);
+  checa(respondida.ok, 'aprovar: a aprovação não foi enviada e respondida ao fim da janela (a espera estourou)');
   const pil2 = await pilula();
   checa(!pil2.disabled && pil2.opacity === 1, 'pílula do nome: não voltou a ser botão depois da janela', JSON.stringify(pil2));
   checa(enviados.length === 1, `aprovar: esperava 1 envio ao fim da janela, veio ${enviados.length}`);
@@ -7863,7 +7872,10 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     return pode;
   };
   const CORRIDAS = [
-    ['o ✓ em B', async (g) => { await g.page.locator('#cardStack .place-card:not(.card-fundo) .card-btn-read').click(); g.soltar(); }],
+    // `force`: com a aprovação de B no ar, o ✓ de B está TRAVADO (A1), e o
+    // clique normal esperaria 30 s ele destravar. O toque de verdade num botão
+    // travado não faz nada — que é o que se mede; no app de antes, ele decide B.
+    ['o ✓ em B', async (g) => { await g.page.locator('#cardStack .place-card:not(.card-fundo) .card-btn-read').click({ force: true }); g.soltar(); }],
     ['a seta → em B', async (g) => { await g.page.keyboard.press('ArrowRight'); g.soltar(); }],
     ['o arraste de mouse segurando B', async (g) => {
       const b = await g.page.locator('#cardStack .place-card:not(.card-fundo) .card-category-row').boundingBox();
@@ -7881,6 +7893,14 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     const g = await gestosPagina(DESKTOP, CORRIDA);
     const pode = await aprovarEFechar(g.page);
     checa(pode, `${id}: PRÉ-CONDIÇÃO — a foto do pedido não podia ser aprovada`);
+    // A1: com a aprovação de B no AR, o card de B está travado — o ✓ mandaria
+    // uma segunda decisão do pedido que está sendo aprovado — e o aviso diz qual
+    // espera. (Depois de soltar, o card avança pro C e volta a decidir: é o
+    // `d.frente === 'uC'` e o `gestosNada` lá embaixo.)
+    const trava = await g.page.evaluate(() => ({ lido: cardDaFrente().querySelector('.card-btn-read').disabled,
+      rejeitar: cardDaFrente().querySelector('.card-btn-reject').disabled, aviso: avisoDaTrava() }));
+    checa(trava.lido && trava.rejeitar && trava.aviso === 'toast.esperaAprovacao',
+      `${id}: com a aprovação de B no ar, o card de B seguia decidível (ou o aviso manda esperar outra coisa)`, JSON.stringify(trava));
     await gesto(g);
     await g.page.waitForTimeout(900);
     const d = await gestosDecisao(g.page);
