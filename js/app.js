@@ -3190,6 +3190,9 @@ async function enviarAprovacao(alvo) {
         // O envio acabou: pousou (o `registrarPouso` passa a segurar o pedido
         // fora da fila) ou falhou (ele volta a ser um pedido como outro).
         marcarEmAndamento(alvo.place, false);
+        // A aprovação que FALHOU devolve o pedido à série do autor: o "Ver +N" do
+        // card da frente volta a contá-lo (R5-2-02).
+        refazerSelosSeOutroNaTela(alvo.place);
         // E o card destrava — travar tem volta (gotcha #63). Só a aprovação
         // DESTA sessão solta: a queda e o "Sair" já soltaram as dela, e uma
         // resposta velha não solta a de uma sessão nova.
@@ -3236,6 +3239,14 @@ function tirarAprovadoDaFila(place) {
     updatePendingCount();
     // O card de FUNDO pode ser justamente o que saiu.
     if (AppState.currentPlace) aoMudarAFilaPorBaixo();
+}
+
+// O pedido entrou ou saiu de "em andamento" com OUTRO card na tela: o "Ver +N"
+// dele conta pela mesma régua da folha (`pedidosDoAutorNaFila`, sem o em
+// andamento), e o selo foi desenhado antes. Com o próprio pedido na tela não há
+// selo de outro a refazer (e o card dele está travado pela aprovação, A1).
+function refazerSelosSeOutroNaTela(place) {
+    if (AppState.currentPlace && AppState.currentPlace !== place) aoMudarAFilaPorBaixo();
 }
 
 // A aprovação que o Waze RECUSOU deixa o pedido pendente lá. Na fila do gesto o
@@ -3290,6 +3301,10 @@ function aprovarFotoAtual() {
     // e o card virava "já tratado" (achado da auditoria da fila, 2026-09-26).
     // Solta no Desfazer e no fim do envio (`enviarAprovacao`), dê certo ou não.
     marcarEmAndamento(place, true);
+    // E o "Ver +N" do card da frente deixa de contá-lo (R5-2-02): o card na tela
+    // pode ser OUTRO — o Desfazer de um ✕ devolveu A pra frente com a foto de B
+    // aberta (L22) —, e o selo dele seguia contando B, que a folha já não conta.
+    refazerSelosSeOutroNaTela(place);
 
     const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
     if (semJanela) {
@@ -3330,6 +3345,7 @@ function aprovarFotoAtual() {
         // queda/"Sair" (L6 passa por aqui): a marca de "em andamento" não pode
         // sobrar, senão a busca nunca mais o traz.
         marcarEmAndamento(place, false);
+        refazerSelosSeOutroNaTela(place);
         return true;
     };
     // O mesmo Desfazer do card — ver a exclusão acima.
@@ -11039,11 +11055,11 @@ function renderSelosDeProcedencia(card, place) {
         if (rot) selos.push({ cls: 'selo-src', txt: rot,
                               title: dica.startsWith('card.source.') ? t('card.source.title') : dica });
     }
-    // Por `creatorId`, igual ao `pedidosDoAutorNaFila` logo abaixo: eram dois
-    // sistemas de identidade na mesma linha, e um card podia mostrar `Ver +2`
-    // ao lado de um `✕ 6` que não virava botão.
-    const mesmos = (AppState.queue || [])
-        .filter((x) => x !== place && x.creatorId != null && x.creatorId === place.creatorId).length;
+    // PELO `pedidosDoAutorNaFila`: eram dois sistemas de identidade na mesma
+    // linha, e um card podia mostrar `Ver +2` ao lado de um `✕ 6` que não virava
+    // botão. E é a mesma régua da folha e do lote — sem o pedido em andamento
+    // (R5-2-02): o "Ver +N" não conta o que o "Rejeitar os N" não leva.
+    const mesmos = pedidosDoAutorNaFila(place).filter((x) => x !== place).length;
     if (mesmos > 0) {
         selos.push({ cls: 'selo-lote', txt: t('card.sameAuthor', { n: mesmos }),
                      title: t('card.sameAuthor.acao'), acao: place.creatorId });
@@ -13813,10 +13829,16 @@ const ICONE_RAIO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewB
     + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>';
 
 // Os pedidos DESTE autor que estão na fila carregada agora.
+// Sem o pedido EM ANDAMENTO (`pedidosEmAndamento`): a aprovação de foto no ar
+// deixa o pedido na fila até a resposta, e a folha o contava e o "Rejeitar os N"
+// o levava — duas decisões opostas no mesmo pedido: MEDIDO, a foto que a pessoa
+// APROVOU saía rejeitada no Waze, com "Restam 0" e um card na tela (auditoria de
+// 2026-10-01, R5-2-02). É a régua do "Marcar todos" (V7) e da recusa automática,
+// e vale pra contagem da folha, pro lote e pro "Ver +N", que contam por aqui.
 function pedidosDoAutorNaFila(place) {
     const id = place && place.creatorId;
     if (id === null || id === undefined || id === '') return [];
-    return (AppState.queue || []).filter((x) => x && x.creatorId === id);
+    return (AppState.queue || []).filter((x) => x && x.creatorId === id && !pedidosEmAndamento.has(chaveDoPedido(x)));
 }
 
 // A folha se adapta ao TAMANHO da fila, e é essa adaptação que justifica o selo

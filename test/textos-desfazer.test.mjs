@@ -200,6 +200,8 @@ function montarFolha({ undoEnabled = true, cotaPassada = true } = {}) {
     contagemDoAutor: () => 6, podeRecusarAutomaticoAqui: () => false, autoLigado: () => false,
     openModal: () => {}, closeModal: () => {}, focarAutor: () => {}, rejeitarLoteDoAutor: () => {},
     alternarAutoDoAutor: () => {}, esquecerAutor: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => {},
+    // A série do autor deixa de fora o pedido EM ANDAMENTO (R5-2-02): aqui, nenhum.
+    pedidosEmAndamento: new Set(),
   };
   const chaves = Object.keys(deps);
   const { abrirFolhaDoAutor } = new Function(...chaves,

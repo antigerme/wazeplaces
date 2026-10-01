@@ -202,7 +202,7 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
     callWithRetry: (fn) => fn(),
     // A volta do pedido numa fila refeita (V9) é medida em test/lote-autor.test.mjs.
-    voltarDaAprovacaoRecusada: () => {},
+    voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
     // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
     aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     // O foco que fica no card trocado debaixo dele (R5-3-07) é medido à parte,
@@ -421,7 +421,7 @@ function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, que
     devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {}, contarConquista: (k) => log.push('conquista:' + k),
     montarCardDeFundo: () => {}, cardDaFrente: () => null, document: { getElementById: () => null },
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, advanceQueue: () => log.push('avancou'),
-    marcarEmAndamento: () => {}, voltarDaAprovacaoRecusada: () => {},
+    marcarEmAndamento: () => {}, voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
     renomeacoesNoAr: new Set(), updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
     aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
@@ -836,7 +836,7 @@ function montarAprovacao({ semJanela = false, resposta = { success: true } } = {
     // A busca de verdade (`semOsJaDecididos`), sem fila de saída nem pouso: o
     // que a tira da fila nova é só o "em andamento".
     carregarFilaDeSaida: () => [], pousosDaPagina: new Map(), offlineLigado: () => false, offlineLerPousos: () => [],
-    voltarDaAprovacaoRecusada: () => {},
+    voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
     // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
     aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
@@ -1275,7 +1275,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
     removeUndoBanner: () => {}, mostrarDesfazer: () => {}, registrarDesfazer: () => {},
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
     callWithRetry: (fn) => fn(), sessaoVivaDepoisDe: () => false, escritasConferindo: 0, loteDeLidosEmVoo: false,
-    voltarDaAprovacaoRecusada: () => {}, direcaoTravada: () => false,
+    voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {}, direcaoTravada: () => false,
     scheduleAction: (tipo) => log.push('agendou:' + tipo), showCurrentPlace: () => log.push('card-de-volta'),
     // A escrita que não chegou ao Waze porque a sessão acabou volta na tela (lote 8
     // do lightbox, V2): aqui só se anota — o que se mede é a trava do card.

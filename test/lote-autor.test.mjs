@@ -172,6 +172,7 @@ test('F4: aprovar a foto leva a fila do GESTO no alvo (`epocaFila`)', async () =
     registrarDesfazer: () => {}, UNDO_WINDOW_MS: 3000,
     // Do lightbox (L3, o foco, o "em andamento" da aprovação).
     fotoDoLightboxNaTela: () => true, marcarEmAndamento: () => {}, manterFocoNoLightbox: () => {},
+    refazerSelosSeOutroNaTela: () => {},   // o "Ver +N" do card da frente (R5-2-02)
   };
   const chaves = Object.keys(deps);
   const aprovar = new Function(...chaves, 'let aprovacaoPendente = null; let exclusaoPendente = null;\n'
@@ -434,7 +435,7 @@ function montarAprovacaoRecusada({ resposta = RECUSA } = {}) {
     updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => log.push('fundo'),
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
     startFetching: () => log.push('busca'),
-    aprovacoesNoAr: new Set(), aplicarTravaDeAcao: () => {},
+    aprovacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, refazerSelosSeOutroNaTela: () => {},
   };
   const chaves = Object.keys(deps);
   const enviar = new Function(...chaves, fatiar('enviarAprovacao') + '\n' + fatiar('voltarDaAprovacaoRecusada') + '\n'
@@ -527,12 +528,14 @@ test('V4: CONTROLE — sem nada chegando no meio, a recusa roda UMA vez (não vi
 // A folha contava ao ABRIR e o toque recontava: a busca que pousava com ela
 // aberta trazia mais pedidos do autor, e saíam junto ("Rejeitar os 2", saíram
 // 4 — medido no navegador, e5/t10). A régua é a do "Marcar todos".
-function montarFolhaDoAutor() {
+function montarFolhaDoAutor({ emAndamento = [] } = {}) {
   const agendadas = [];
   const X1 = pedido(1);
   const AppState = { authenticated: true, queue: [X1, pedido(5, 1), pedido(2)], currentPlace: X1, stats: { rejected: 0 },
     serverTotal: 3, hasMore: false };
   const deps = {
+    // O pedido EM ANDAMENTO (a aprovação de foto no ar) fica fora da série (R5-2-02).
+    pedidosEmAndamento: new Set(emAndamento),
     AppState, acoesTravadas: () => false, avisoDaTrava: () => 'x', Treino: { ativo: false }, showToast: () => {}, t: (k) => k,
     chaveDoPedido: chave, updateStats: () => {}, saveStats: () => {}, updatePendingCount: () => {},
     removeCurrentCardEl: () => {}, showCurrentPlace: () => {}, maybePrefetch: () => {}, startFetching: () => {}, showNoPlaces: () => {},
@@ -572,4 +575,56 @@ test('L21: a folha entrega ao toque as chaves que ela contou ao ABRIR', () => {
   assert.match(f, /const naFila = pedidosDoAutorNaFila\(place\);/);
   assert.match(f, /const contados = naFila\.map\(chaveDoPedido\);\s*document\.getElementById\('autorRejeitar'\)\.addEventListener\('click', \(\) => \{\s*closeModal\('autorModal'\);\s*rejeitarLoteDoAutor\(place, contados\);/,
     'o toque voltou a recontar a fila: o que chegou com a folha aberta sai junto');
+});
+
+// ── R5-2-02: "Rejeitar os N" leva junto o pedido com a aprovação de foto NO AR ──
+// O A1 trava o card DA TELA; o pedido aprovado que está na fila sem estar na
+// frente (o Desfazer de um ✕ devolveu A pra frente com a foto de B aberta) era
+// contado pela folha e rejeitado pelo lote — MEDIDO no navegador (s06): a foto que
+// a pessoa APROVOU saía rejeitada no Waze, com "Restam 0" e um card na tela.
+test('R5-2-02: o pedido com a aprovação NO AR fica fora da folha e do lote — e do "Ver +N"', async () => {
+  const m = montarFolhaDoAutor({ emAndamento: ['v2|u2'] });
+  const contados = m.app.pedidosDoAutorNaFila(m.X1).map(chave);
+  assert.deepEqual(contados, ['v1|u1'], 'a folha contou o pedido cuja aprovação está no ar ("Rejeitar os 2")');
+  m.app.rejeitarLoteDoAutor(m.X1, contados);
+  assert.deepEqual(m.agendadas, [['v1']], 'o lote levou o pedido que está sendo aprovado — duas decisões opostas');
+  // A folha aberta ANTES de a aprovação sair contou os dois; o toque leva só o que segue decidível.
+  const d = montarFolhaDoAutor();
+  const antes = d.app.pedidosDoAutorNaFila(d.X1).map(chave);
+  assert.deepEqual(antes, ['v1|u1', 'v2|u2'], 'PRÉ-CONDIÇÃO: sem nada em andamento, a folha conta os dois');
+  const m2 = montarFolhaDoAutor({ emAndamento: ['v2|u2'] });
+  m2.app.rejeitarLoteDoAutor(m2.X1, antes);
+  assert.deepEqual(m2.agendadas, [['v1']], 'a aprovação saiu com a folha aberta, e o toque rejeitou o pedido aprovado');
+  // CONTROLE: sem nada em andamento, o lote leva os dois (o instrumento distingue).
+  d.app.rejeitarLoteDoAutor(d.X1, antes);
+  assert.deepEqual(d.agendadas, [['v1', 'v2']]);
+});
+
+test('R5-2-02: o "Ver +N" conta pela MESMA régua da folha (o `pedidosDoAutorNaFila`)', () => {
+  const sem = APP_SEM.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = sem.indexOf('function renderSelosDeProcedencia(');
+  const corpo = sem.slice(i, sem.indexOf('\nfunction ', i + 10));
+  assert.match(corpo, /const mesmos = pedidosDoAutorNaFila\(place\)\.filter\(\(x\) => x !== place\)\.length;/,
+    'o "Ver +N" voltou a contar por conta própria: mostra um número que a folha e o lote não seguem');
+});
+
+test('R5-2-02: o selo do card da frente é refeito quando OUTRO pedido entra ou sai de "em andamento"', () => {
+  const log = [];
+  const A = pedido(1), B = pedido(2);
+  const AppState = { currentPlace: A };
+  const refazer = new Function('AppState', 'aoMudarAFilaPorBaixo', fatiar('refazerSelosSeOutroNaTela') + '\nreturn refazerSelosSeOutroNaTela;')(
+    AppState, () => log.push('selos'));
+  refazer(B);
+  assert.deepEqual(log, ['selos'], 'a aprovação de B mudou o que o "Ver +N" de A conta, e o selo não foi refeito');
+  refazer(A);
+  assert.deepEqual(log, ['selos'], 'CONTROLE: com o próprio pedido na tela (travado pela aprovação) não há selo de outro a refazer');
+  // Os TRÊS momentos em que o pedido entra ou sai de "em andamento": o gesto, o
+  // Desfazer e o fim do envio. Colado na marca, nunca por presença (gotcha #67).
+  const ap = fatiar('aprovarFotoAtual');
+  assert.match(ap, /marcarEmAndamento\(place, true\);\s*refazerSelosSeOutroNaTela\(place\);/,
+    'o gesto da aprovação deixou de refazer o selo do card da frente');
+  assert.match(ap, /marcarEmAndamento\(place, false\);\s*refazerSelosSeOutroNaTela\(place\);/,
+    'o Desfazer da aprovação deixou de refazer o selo do card da frente');
+  assert.match(fatiar('enviarAprovacao'), /marcarEmAndamento\(alvo\.place, false\);\s*refazerSelosSeOutroNaTela\(alvo\.place\);/,
+    'o fim do envio da aprovação deixou de refazer o selo do card da frente');
 });
