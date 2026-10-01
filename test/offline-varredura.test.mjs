@@ -25,21 +25,31 @@ const constante = (nome) => Number(new RegExp(`^const ${nome} = ([^;]+);`, 'm').
 
 // Roda a varredura de VERDADE contra downloads de mentira. `baixar(u)` diz o que
 // cada URL devolve (true | false | 'definitivo'); conta as tentativas por URL.
-async function varrer(itens, baixar, { treino = false } = {}) {
+// A SONDA da rede (`offlineSondarRede`) segue o MESMO modelo de rede (`baixar`
+// da URL sondada), mas é contada à parte: não é tentativa de item. `st` deixa
+// rodar uma SEGUNDA varredura sobre o mesmo estado (a retomada), e `agora` fixa
+// o relógio (a janela).
+async function varrer(itens, baixar, { treino = false, concorrencia = 1, st: estado = null, agora = null } = {}) {
   const tentativas = new Map();
+  const sondas = [];
   const diario = [];
   let gravou = 0;
   const podas = [];
-  const st = { varrendo: false, pedida: false, janela: null, resultado: null, gesto: Date.now(), epoca: 0 };
+  const relogio = agora === null ? Date : { now: () => agora };
+  const st = estado || { varrendo: false, pedida: false, janela: null, resultado: null, gesto: relogio.now(), epoca: 0,
+    feitos: { janela: null, epoca: -1, us: new Set() } };
+  st.gesto = relogio.now();
   const deps = {
     AppState: { authenticated: true, queue: [{ venueID: 'v' }] },
     Treino: { ativo: treino },
     navigator: { onLine: true },
+    Date: relogio,
     offlineLigado: () => true,
-    OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
+    OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: concorrencia,
     OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
     offlineGravarFila: async () => { gravou++; }, offlineItensDaFila: async () => itens.map((u) => ({ u, tile: /tile/.test(u) })),
     offlineBaixar: async (u) => { tentativas.set(u, (tentativas.get(u) || 0) + 1); return baixar(u); },
+    offlineSondarRede: async (u) => { sondas.push(u); const r = await baixar(u); return r === true || r === 'definitivo'; },
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
     offlinePodarTiles: async (manter) => { podas.push([...manter].sort()); return 0; },
     dfato: (k, o) => diario.push([k, o]),
@@ -48,11 +58,12 @@ async function varrer(itens, baixar, { treino = false } = {}) {
   const corpo = fatiar('offlineVarrer')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
-    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineEpoca/g, '__st.epoca');
+    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
+    .replace(/offlineEpoca/g, '__st.epoca');
   const chaves = Object.keys(deps);
   const offlineVarrer = new Function(...chaves, '__st', corpo + '\nreturn offlineVarrer;')(...chaves.map((k) => deps[k]), st);
   await offlineVarrer();
-  return { st, tentativas, diario, gravou, podas };
+  return { st, tentativas, sondas, diario, gravou, podas };
 }
 
 test('uma foto QUEBRADA com o resto andando: poucas tentativas, e a preparação fica PRONTA', async () => {
@@ -75,6 +86,63 @@ test('CONTROLE: com a REDE parada (nada anda), o resultado é PARCIAL, e as tent
   assert.equal(st.resultado, 'parcial', 'sem rede nenhuma a preparação se disse pronta');
   assert.equal(st.janela, null);
   for (const [u, n] of tentativas) assert.ok(n <= 3, `${u} tentado ${n} vezes`);
+});
+
+// ── R5-4-1: a foto quebrada que é a ÚLTIMA (auditoria de 2026-09-30) ─────────
+// O item só virava "defeito do item" se OUTRO terminasse com sucesso entre a 1ª e
+// a 3ª tentativa dele — o que nunca acontece com a foto do ÚLTIMO pedido da fila,
+// nem com um 404 mais lento que o resto. Ela "desistia pela rede", a preparação
+// ficava "parcial" PRA SEMPRE (a janela não virava, o card pedia a foto crua) e
+// cada prova de rede refazia a lista INTEIRA (medido no navegador, t2: 39 tiles
+// por prova numa fila de 30 pedidos). O teste de cima põe a foto no COMEÇO, com
+// um trabalhador só: o caso que nunca falha.
+const tiques = (n) => new Promise((ok) => { const um = () => (n-- > 0 ? setImmediate(um) : ok()); um(); });
+
+test('R5-4-1: a foto quebrada no FIM da fila (3 trabalhadores): a SONDA diz que a rede anda, e a preparação fica PRONTA', async () => {
+  const itens = [...Array.from({ length: 30 }, (_, i) => 'tile-' + i), 'foto-quebrada'];
+  // Os tiles chegam rápido e a foto demora a falhar: quando ela falha pela 1ª
+  // vez o resto já terminou, e nada mais anda até ela esgotar.
+  const r = await varrer(itens, async (u) => { await tiques(u === 'foto-quebrada' ? 8 : 1); return u !== 'foto-quebrada'; },
+    { concorrencia: constante('OFFLINE_CONCORRENCIA') });
+  assert.equal(r.tentativas.get('foto-quebrada'), 3, 'PRÉ-CONDIÇÃO: a foto quebrada não esgotou as tentativas');
+  assert.ok([...r.tentativas].every(([u, n]) => u === 'foto-quebrada' || n === 1), 'PRÉ-CONDIÇÃO: um tile falhou');
+  assert.equal(r.st.resultado, 'pronto', 'a foto quebrada que é a ÚLTIMA deixou a preparação "parcial" — pra sempre');
+  assert.notEqual(r.st.janela, null, 'a janela não virou: o card seguiria pedindo a foto crua');
+  assert.equal(r.sondas.length, 1, `a rede não foi conferida UMA vez antes de ser culpada (${r.sondas.length})`);
+  assert.ok(/^tile-/.test(r.sondas[0]), 'a sonda não pediu um tile desta fila');
+});
+
+test('R5-4-1: CONTROLE — com a REDE parada a sonda diz que não: PARCIAL, e numa sonda só pros itens que esgotam juntos', async () => {
+  const itens = Array.from({ length: 6 }, (_, i) => 'tile-' + i);
+  const r = await varrer(itens, async () => { await tiques(1); return false; }, { concorrencia: constante('OFFLINE_CONCORRENCIA') });
+  assert.equal(r.st.resultado, 'parcial', 'com a rede parada a sonda inocentou os itens e a preparação se disse pronta');
+  assert.equal(r.st.janela, null);
+  assert.equal(r.sondas.length, 1, `numa rede parada, cada item esgotado esperou a sua sonda (${r.sondas.length})`);
+});
+
+test('R5-4-1: a RETOMADA do "parcial" baixa só o que FALTOU — e a janela nova (ou o esquecer) renova tudo', async () => {
+  const JANELA = 1492385;
+  const AGORA = JANELA * 1200000 + 1000;
+  const itens = Array.from({ length: 10 }, (_, i) => 'tile-' + i);
+  // A rede CAI no meio: do tile-6 em diante nada passa — a sonda também não.
+  let caiu = false;
+  const a = await varrer(itens, async (u) => { if (u === 'tile-6') caiu = true; return !caiu; }, { agora: AGORA });
+  assert.equal(a.st.resultado, 'parcial', 'PRÉ-CONDIÇÃO: com a rede caindo no meio a preparação não ficou parcial');
+  // A rede volta, e a retomada (a próxima prova de rede) é na MESMA janela.
+  const b = await varrer(itens, async () => true, { st: a.st, agora: AGORA + 60000 });
+  assert.equal(b.st.resultado, 'pronto', 'a retomada não terminou a preparação');
+  assert.equal(b.st.janela, JANELA);
+  assert.deepEqual([...b.tentativas.keys()].sort(), ['tile-6', 'tile-7', 'tile-8', 'tile-9'],
+    'a retomada baixou de novo o que já estava pronto — a lista INTEIRA a cada prova de rede');
+  assert.deepEqual(b.podas.at(-1), itens.slice().sort(), 'a poda do "pronto" deixou de manter os tiles da fila INTEIRA');
+  // CONTROLE: a janela NOVA (20 min) renova tudo — a foto vence, e "só o que
+  // faltou" não pode virar "nada".
+  const c = await varrer(itens, async () => true, { st: b.st, agora: AGORA + 1200000 });
+  assert.equal(c.tentativas.size, 10, 'a janela nova não renovou a lista inteira');
+  // E esquecer (outra época) também: o cache que o "pronto" descrevia foi apagado.
+  c.st.epoca++;
+  const d = await varrer(itens, async () => true, { st: c.st, agora: AGORA + 1200000 + 1000 });
+  assert.equal(d.tentativas.size, 10, 'depois de esquecer, a varredura achou que o cache apagado ainda estava pronto');
 });
 
 test('offlineBaixar: tile 4xx é "definitivo", 5xx e rede caída são falha de REDE (tenta de novo)', async () => {
@@ -358,7 +426,8 @@ function gatilhosDaVarredura(janela) {
   const AGORA = janela * 1200000 + 1000;
   const tentativas = new Map();
   const rede = { ok: false };
-  const st = { varrendo: false, pedida: false, janela, resultado: 'pronto', gesto: AGORA, epoca: 0 };
+  const st = { varrendo: false, pedida: false, janela, resultado: 'pronto', gesto: AGORA, epoca: 0,
+    feitos: { janela: null, epoca: -1, us: new Set() } };
   const deps = {
     AppState: { authenticated: true, queue: [{ venueID: 'v' }] }, Treino: { ativo: false },
     navigator: { onLine: true }, offlineLigado: () => true, Date: { now: () => AGORA },
@@ -366,13 +435,15 @@ function gatilhosDaVarredura(janela) {
     OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
     offlineGravarFila: async () => {}, offlineItensDaFila: async () => ['tile-1', 'tile-2'].map((u) => ({ u, tile: true })),
     offlineBaixar: async (u) => { tentativas.set(u, (tentativas.get(u) || 0) + 1); return rede.ok; },
+    offlineSondarRede: async () => rede.ok,
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
     offlinePodarTiles: async () => 0, dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
   };
   const corpo = ['offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'].map(fatiar).join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
-    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineEpoca/g, '__st.epoca');
+    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
+    .replace(/offlineEpoca/g, '__st.epoca');
   const chaves = Object.keys(deps);
   const f = new Function(...chaves, '__st', corpo + '\nreturn { offlinePrecisaVarrer, offlineTalvezVarrer, offlineVarrer };')(
     ...chaves.map((k) => deps[k]), st);
@@ -423,7 +494,8 @@ function interruptor(onLine) {
   const gravacoes = [];
   const log = [];
   const AppState = { authenticated: true, queue: [{ venueID: 'v1' }, { venueID: 'v2' }, { venueID: 'v3' }], preferences: {} };
-  const st = { varrendo: false, pedida: false, janela: null, resultado: 'parcial', gesto: 0, epoca: 0 };
+  const st = { varrendo: false, pedida: false, janela: null, resultado: 'parcial', gesto: 0, epoca: 0,
+    feitos: { janela: null, epoca: -1, us: new Set() } };
   const deps = {
     AppState, Treino: { ativo: false }, navigator: { onLine },
     offlineLigado: () => AppState.preferences.offlineDisponivel === true,
@@ -432,14 +504,15 @@ function interruptor(onLine) {
     OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
     OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
     offlineGravarFila: async () => { gravacoes.push(AppState.queue.length); return true; },
-    offlineItensDaFila: async () => [], offlineBaixar: async () => true,
+    offlineItensDaFila: async () => [], offlineBaixar: async () => true, offlineSondarRede: async () => true,
     offlineAnunciarTiles: () => {}, offlineGravarJanela: () => {}, offlinePodarTiles: async () => 0,
     dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
   };
   const corpo = ['offlineMarcarGesto', 'offlineVarrer', 'offlineAoMudarInterruptor'].map(fatiar).join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
-    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineEpoca/g, '__st.epoca');
+    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
+    .replace(/offlineEpoca/g, '__st.epoca');
   const chaves = Object.keys(deps);
   const f = new Function(...chaves, '__st', corpo + '\nreturn offlineAoMudarInterruptor;')(...chaves.map((k) => deps[k]), st);
   return { ligar: (v) => f(v), gravacoes, log, st, AppState };

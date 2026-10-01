@@ -15800,6 +15800,13 @@ let offlineUltimoResultado = null;
 // É a mesma regra que a fila de saída já tinha escrita: "sair no meio também
 // PARA o laço".
 let offlineEpoca = 0;
+// O que já ficou PRONTO nesta janela (as URLs que baixaram, e as que se
+// mostraram defeito do item): a retomada da preparação "parcial" baixa só o que
+// FALTOU. Ela refazia a lista INTEIRA, e cada prova de rede pedia de novo todos
+// os tiles (39 por prova numa fila de 30 pedidos, auditoria de 2026-09-30,
+// R5-4-1). Vale pra janela E a época em que foi enchida: janela nova renova
+// tudo (a foto vence), e esquecer apaga o cache que ela descreve.
+let offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() };
 
 function offlineLigado() {
     return AppState.preferences.offlineDisponivel === true;
@@ -16015,6 +16022,9 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
     offlineEpoca++;                 // invalida qualquer varredura em voo
     offlineJanelaServida = null;
     offlineUltimoResultado = null;
+    // O que estava pronto descreve o cache que sai logo abaixo (e são endereços
+    // de pedidos de terceiros): vai junto.
+    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() };
     // As URLs de tile dizem ONDE ficam pedidos de terceiros: vão junto com o
     // resto do que o offline guardou.
     diagTilesGuardadosQueFalharam = [];
@@ -16173,6 +16183,22 @@ function offlineBaixar(u, tile) {
     })();
 }
 
+// A rede ANDA? Um pedido de um tile DESTA fila, conferido com o servidor
+// (`no-cache`: o de tile responde 304 quando nada mudou, é barato). Qualquer
+// resposta é rede de pé — até um erro do servidor, que respondeu; falha de rede
+// ou o teto, não. Não grava nada: é só a pergunta (ver `offlineVarrer`).
+const OFFLINE_SONDA_TETO_MS = 10 * 1000;
+async function offlineSondarRede(u) {
+    const ctrl = new AbortController();
+    const teto = setTimeout(() => ctrl.abort(), OFFLINE_SONDA_TETO_MS);
+    try {
+        const r = await fetch(u, { mode: 'cors', cache: 'no-cache', signal: ctrl.signal });
+        if (r.body) r.body.cancel().catch(() => {});
+        return true;
+    } catch (e) { return false; }
+    finally { clearTimeout(teto); }
+}
+
 // PODA o cache do mapa ao que a fila guardada usa. Sem ela o cache só crescia:
 // cada fila nova somava os tiles dela aos de todas as anteriores, pra sempre
 // (auditoria de 2026-09-25). Renovar não era problema — MEDIDO: o servidor de
@@ -16224,13 +16250,48 @@ async function offlineVarrer() {
     let tilesNovos = 0;
     try {
         await offlineGravarFila();
-        const pend = await offlineItensDaFila(janela);
-        const total = pend.length;
-        // Os tiles DESTA fila, antes de o laço consumir a lista: é o que a poda
-        // do fim mantém.
-        const tilesDaFila = new Set(pend.filter((it) => it.tile).map((it) => it.u));
+        const todos = await offlineItensDaFila(janela);
+        const total = todos.length;
+        // Os tiles DESTA fila, da lista inteira: é o que a poda do fim mantém.
+        const tilesDaFila = new Set(todos.filter((it) => it.tile).map((it) => it.u));
+        // Baixa só o que FALTA nesta janela (ver `offlineFeitosNaJanela`): a
+        // retomada do "parcial" e a reposição não repetem o que já ficou pronto.
+        if (offlineFeitosNaJanela.janela !== janela || offlineFeitosNaJanela.epoca !== epoca) {
+            offlineFeitosNaJanela = { janela, epoca, us: new Set() };
+        }
+        const feitos = offlineFeitosNaJanela.us;
+        const pend = todos.filter((it) => !feitos.has(it.u));
+        const jaFeitos = total - pend.length;
         let falhas = 0;
         let sucessos = 0;
+        // A SONDA: o item esgotou as tentativas SEM que nada mais andasse nesse
+        // meio — a rede parou, ou ele é o ÚLTIMO da fila (a foto do último
+        // pedido, um 404 mais lento que o resto), sem ninguém atrás dele pra
+        // provar que a rede anda. Era esse o caso que deixava a preparação
+        // "parcial" PRA SEMPRE: a janela nunca virava (o card pedia a foto crua,
+        // que ninguém guardou) e cada prova de rede refazia a varredura inteira
+        // (auditoria de 2026-09-30, R5-4-1). Antes de culpar a rede, pergunta a
+        // ela com UM pedido barato. A resposta NEGATIVA vale até o próximo
+        // sucesso (a rede não volta sem que algo ande) — sem isso, numa rede
+        // parada cada item esgotado esperaria a sua; a positiva não passa pro
+        // item seguinte (a rede pode ter caído depois dela). Dois itens
+        // esgotando juntos esperam a MESMA sonda.
+        let sondas = 0;
+        let sondaNegativaEm = -1;
+        let sondaNoAr = null;
+        const redeAnda = () => {
+            if (sondaNegativaEm === sucessos) return Promise.resolve(false);
+            if (sondaNoAr) return sondaNoAr;
+            const u = [...tilesDaFila].find((x) => feitos.has(x)) || tilesDaFila.values().next().value;
+            if (!u) return Promise.resolve(false);
+            sondas++;
+            sondaNoAr = offlineSondarRede(u).then((anda) => {
+                sondaNoAr = null;
+                if (!anda) sondaNegativaEm = sucessos;
+                return anda;
+            });
+            return sondaNoAr;
+        };
         // O que desistiu por REDE (a varredura toda parada) e o que desistiu por
         // ser o ITEM (foto que o Waze tirou do ar, tile 4xx): o primeiro deixa a
         // preparação "parcial" pra próxima rede; o segundo não tem conserto e
@@ -16261,10 +16322,12 @@ async function offlineVarrer() {
                 // precisa do cache.
                 if (ok === true) {
                     sucessos++;
+                    feitos.add(it.u);
                     penduradasSeguidas = 0;
                     if (it.tile && ++tilesNovos % OFFLINE_ANUNCIAR_A_CADA === 0) offlineAnunciarTiles();
                 } else if (ok === 'definitivo') {
                     definitivos++;
+                    feitos.add(it.u);
                     penduradasSeguidas = 0;   // o servidor respondeu: a rede anda
                 } else {
                     falhas++;
@@ -16273,9 +16336,12 @@ async function offlineVarrer() {
                     if (it.tentativas === 1) it.sucessosAntes = sucessos;
                     if (it.tentativas >= OFFLINE_TENTATIVAS_POR_ITEM) {
                         // Esgotou. Se o RESTO andou nesse meio, a rede está de
-                        // pé e o defeito é o item; se nada andou, é a rede.
-                        if (sucessos > it.sucessosAntes) definitivos++;
-                        else desistidosPorRede.push(it);
+                        // pé e o defeito é o item; se nada andou, a SONDA diz
+                        // se é a rede (ver `redeAnda`).
+                        if (sucessos > it.sucessosAntes || await redeAnda()) {
+                            definitivos++;
+                            feitos.add(it.u);
+                        } else desistidosPorRede.push(it);
                     } else {
                         if (falhas > total * 2) return;   // teto: rede morta, para
                         // volta pro FIM: buraco de sinal não pode perder o item
@@ -16297,7 +16363,8 @@ async function offlineVarrer() {
             // seguida entra na fila do IndexedDB DEPOIS dele e apaga tudo.
             offlineGravarJanela(janela);
             offlineUltimoResultado = 'pronto';
-            dfato('offline.pronto', { n: AppState.queue.length, itens: total, ...(definitivos ? { definitivos } : {}) });
+            dfato('offline.pronto', { n: AppState.queue.length, itens: total, ...(definitivos ? { definitivos } : {}),
+                                      ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}) });
             // Só no "pronto": a lista inteira é a da fila guardada. Sem aguardar —
             // a poda não muda o resultado, e o aviso ao worker sai quando ela acaba.
             offlinePodarTiles(tilesDaFila, epoca).then((n) => {
@@ -16305,7 +16372,8 @@ async function offlineVarrer() {
             });
         } else {
             offlineUltimoResultado = 'parcial';
-            dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos });
+            dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos,
+                                       ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}) });
         }
     } catch (e) {
         offlineUltimoResultado = 'parcial';

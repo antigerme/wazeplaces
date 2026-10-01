@@ -277,8 +277,12 @@ diz('o tile guardado volta do CACHE, sem tocar a rede', doCache === 'CARREGOU' &
 // revalidação de cada janela (o servidor de tile responde 304 quando nada
 // mudou). Respondida pelo worker a partir do próprio cache, ela nunca mais saía
 // e o guardado ficava o da primeira vez pra sempre (auditoria de 2026-09-26,
-// O7; na main de antes: ZERO pedidos na 2ª varredura).
-await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null; });
+// O7; na main de antes: ZERO pedidos na 2ª varredura). A janela seguinte de
+// verdade também zera o que ficou pronto na janela (`offlineFeitosNaJanela`,
+// R5-4-1): sem isso, na MESMA janela a varredura só baixaria o que falta — nada
+// — e não mediria a revalidação.
+await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+  if (typeof offlineFeitosNaJanela !== 'undefined') offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }; });
 rotaTile = 0;
 await page.evaluate(() => { offlineMarcarGesto(); return offlineVarrer(); });
 await esperarNaPagina(page, () => offlineUltimoResultado !== null, 25000);
