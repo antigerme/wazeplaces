@@ -51,17 +51,19 @@ test('R5-5-1 V3: o "lida" do `abrir` não cobre a mensagem guardada com ele NO A
 });
 
 test('R5-5-1 V3: o corte é a SAÍDA do pedido no relógio do Waze (pelo `desvio`)', async () => {
-  // Aparelho 2 min ATRASADO: o relógio do Waze está 120 s na frente. M foi
-  // guardada 300 ms depois de o pedido sair — no relógio do Waze.
+  // Aparelho 2 min ADIANTADO: o relógio do Waze está 120 s atrás. M foi
+  // guardada 300 ms depois de o pedido sair — no relógio do Waze, ou seja
+  // ANTES da hora do aparelho: cortada pelo relógio daqui, ela contaria como
+  // coberta.
   const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir'
-    ? { success: true, mensagens: [doWaze(2, T + 120000 + 300, CAF, 'M')], maisAntigas: false, lida: true }
+    ? { success: true, mensagens: [doWaze(2, T - 120000 + 300, CAF, 'M')], maisAntigas: false, lida: true }
     : { success: true }) } });
-  c.P.Presenca.desvio = 120000;
+  c.P.Presenca.desvio = -120000;
   c.P.presencaAbrirConversa(CAF);
   await tick();
   await c.rodarTimers();
   await tick();
-  assert.equal(lidas(c).length, 1, 'com o aparelho atrasado, o corte no relógio DAQUI deixou a mensagem da corrida coberta');
+  assert.equal(lidas(c).length, 1, 'com o aparelho adiantado, o corte no relógio DAQUI deixou a mensagem da corrida coberta');
 });
 
 test('R5-5-1 V2: o recibo que CITA a minha mensagem pelo id a marca como lida, mesmo com hora anterior à dela', async () => {
