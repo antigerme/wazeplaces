@@ -3399,13 +3399,14 @@ for (const sistema of ['dark', 'light']) {
 // código" — que criava um código NOVO, válido, embaixo de "Código expirado —
 // feche e toque de novo". Aqui o QR vence em 2 s e se mede o que está VISÍVEL
 // (não a classe); e o código curto pedido ANTES vence no prazo DELE, com a
-// instrução dele saindo só então. Esperas pelo ESTADO, lidas do Node.
+// instrução dele saindo só então. Esperas pelo ESTADO, lidas do Node. E o FOCO
+// do teclado nos dois botões que saem de cena (R56-5, seção 3).
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', locale: 'pt-BR' });
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
-  let prazoDoCurto = 300;
+  let prazoDoCurto = 300, prazoDoQr = 2;
   await page.route('**/api/**', async (r) => {
     const nome = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
     let c = {};
@@ -3413,7 +3414,7 @@ for (const sistema of ['dark', 'light']) {
     let body = { success: true };
     if (nome === 'parear' && c.action === 'create') {
       body = c.comCodigo ? { success: true, code: 'ABC234', curto: true, expiresIn: prazoDoCurto }
-        : { success: true, code: 'ABCDEFGHJKLMNPQRSTUV', curto: false, expiresIn: 2 };
+        : { success: true, code: 'ABCDEFGHJKLMNPQRSTUV', curto: false, expiresIn: prazoDoQr };
     } else if (nome === 'presenca-app') body = { success: true, online: [], conversas: [] };
     else if (nome === 'buscar-places') body = { success: true, places: [], hasMore: false, page: 1, total: 0 };
     else if (nome === 'perfil') body = { success: true, profile: { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false, areas: [] } };
@@ -3472,6 +3473,38 @@ for (const sistema of ['dark', 'light']) {
   checa(curtoVenceu.ok, 'pareamento: o código curto de 4 s não venceu na tela');
   const fim = await tela();
   checa(fim.riscado && !fim.digite, 'pareamento: código curto vencido, e a tela segue mandando digitá-lo', JSON.stringify(fim));
+  // 3) O FOCO do teclado (auditoria de 2026-10-01, R56-5). O QR vencendo com o
+  // foco no "Copiar link" (que apaga) ou no "Sem câmera?" (que some) largava o
+  // foco no <body>: o leitor de tela perdia a posição. O foco vai ao "Fechar",
+  // o passo que o aviso de vencido manda dar. A PRÉ-CONDIÇÃO é o foco no botão
+  // antes (sem ela, o "Fechar", foco da abertura, passaria por ele), e o
+  // CONTROLE prova que neste motor o botão focado que apaga perde o foco pro
+  // <body> — sem isso a medida não enxergaria o defeito.
+  const foco = () => page.evaluate(() => { const a = document.activeElement; return a ? (a.id || a.tagName) : ''; });
+  await page.click('#pairShowClose');
+  prazoDoCurto = 300;
+  prazoDoQr = 60;
+  await abrir();
+  await page.keyboard.press('Shift+Tab');
+  checa(await foco() === 'pairCopyLinkBtn', 'pareamento · PRÉ-CONDIÇÃO do controle: o Shift+Tab não pôs o foco no "Copiar link"', await foco());
+  await page.evaluate(() => { document.getElementById('pairCopyLinkBtn').disabled = true; });
+  await doisQuadros(page);
+  const semConserto = await foco();
+  checa(semConserto === 'BODY', 'pareamento · CONTROLE: neste motor o botão focado que apaga não perde o foco — a medida não enxerga o defeito', semConserto);
+  await page.click('#pairShowClose');
+  prazoDoQr = 2;
+  for (const [id, voltas] of [['pairCopyLinkBtn', 1], ['pairShowCodeBtn', 2]]) {
+    await abrir();
+    for (let i = 0; i < voltas; i++) await page.keyboard.press('Shift+Tab');
+    const antes = await foco();
+    checa(antes === id, `pareamento · PRÉ-CONDIÇÃO: o Shift+Tab não pôs o foco no ${id}`, antes);
+    const apagou = await esperarNaPagina(page, () => document.getElementById('pairCopyLinkBtn').disabled === true, 8000);
+    checa(apagou.ok, 'pareamento · CONTROLE: o QR de 2 s não venceu (o "Copiar link" não apagou)');
+    await doisQuadros(page);
+    const depois = await foco();
+    checa(depois === 'pairShowClose', `pareamento: o QR venceu com o foco do teclado no ${id}, e o foco foi pro ${depois}`);
+    await page.click('#pairShowClose');
+  }
   checa(erros.length === 0, 'pareamento: erro de JS', erros[0]);
   await ctx.close();
 }
@@ -9025,7 +9058,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
   + `, + tema trocado pelo BOTÃO pintando o mesmo que a RECARGA (${temaMedidas} medidas: fundo do html e do body e a barra que vale, nos 2 sistemas, ida e volta; sentinela do diagnóstico calada no tema certo e ALERTANDO no estado quebrado recriado, com o CONTROLE de que ele pinta escuro)`
-  + `, + pareamento com o QR VENCIDO (sem a instrução da câmera nem o "Sem câmera?", com o CONTROLE do QR valendo; o código curto pedido antes valendo até o prazo DELE, sem o "Código expirado" em cima, e a instrução dele saindo quando ele vence)`
+  + `, + pareamento com o QR VENCIDO (sem a instrução da câmera nem o "Sem câmera?", com o CONTROLE do QR valendo; o código curto pedido antes valendo até o prazo DELE, sem o "Código expirado" em cima, e a instrução dele saindo quando ele vence; e o foco do TECLADO nos botões que saem de cena indo ao "Fechar" quando o QR vence, com o CONTROLE do motor largando o foco no <body>)`
   + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
   + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra nem ligar a rede de segurança — teto de duas linhas com o nome inteiro no title, e o CONTROLE sem teto ligando a rede no Fold)`

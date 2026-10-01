@@ -1494,6 +1494,8 @@ async function abrirPareamento() {
 // que já não entrava em lugar nenhum (auditoria de 2026-09-26). O texto de
 // vencido diz o caminho de um novo (`pair.expired`).
 function aoVencerQrPareamento() {
+    // Lido ANTES de mexer: o botão focado que vira `disabled` perde o foco.
+    const focado = document.activeElement;
     limparQrPareamento();
     pairQrVenceEm = 0;
     const code = document.getElementById('pairCode');
@@ -1505,7 +1507,8 @@ function aoVencerQrPareamento() {
     // que manda fechar e pedir outro (auditoria de 2026-09-29, A15). Os dois
     // saem: o caminho de um código novo é o que o aviso de vencido diz.
     document.getElementById('pairShowBody')?.classList.add('hidden');
-    document.getElementById('pairShowCodeBtn')?.classList.add('hidden');
+    const semCamera = document.getElementById('pairShowCodeBtn');
+    semCamera?.classList.add('hidden');
     // O código curto já pedido vale até o prazo DELE (nasceu depois do QR):
     // enquanto ele vale, o "Código expirado" do QR ficaria em cima de um código
     // que ainda entra. Quem fala é a contagem dele, que vence do mesmo jeito.
@@ -1513,6 +1516,23 @@ function aoVencerQrPareamento() {
         const exp = document.getElementById('pairExpiry');
         if (exp) exp.textContent = '';
     }
+    // Com o foco no "Copiar link" (que apagou) ou no "Sem câmera?" (que sumiu),
+    // o foco caía no <body> e o leitor de tela perdia a posição (auditoria de
+    // 2026-10-01, R56-5). Vai ao "Fechar", que é o passo que o aviso de vencido
+    // manda dar.
+    if (focado && (focado === copiar || focado === semCamera)) devolverFocoNoPareamento(focado, ['pairShowClose']);
+}
+
+// O controle do pareamento que SAI de cena com o foco do teclado nele —
+// escondido, ou `disabled` — largava o foco no <body> (a regra do C10: o foco
+// vai a um alvo que existe). Vai ao primeiro alvo vivo da lista, e só se o foco
+// ainda está perdido: quem o levou a outro lugar nesse meio (um Tab durante o
+// pedido do código) escolheu o lugar dele.
+function devolverFocoNoPareamento(saiu, alvos) {
+    const ativo = document.activeElement;
+    if (ativo && ativo !== document.body && ativo !== saiu) return;
+    const alvo = alvos.map((id) => document.getElementById(id)).find(focavelNaTela);
+    if (alvo) alvo.focus();
 }
 
 // O código curto está na tela e ainda vale? Revelado e não riscado — o risco é
