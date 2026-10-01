@@ -16,27 +16,23 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-01 ~13:00 UTC)
+## 0. Estado agora (2026-10-01 ~13:45 UTC)
 
-- **PR #254 (lote 8) mergeado** às 12:32 UTC de 10-01 (`48d2aea`), com CI verde nos dois jobs; produção
-  servindo a **v2026.10.01-01** às 12:33. `npm test` 1710/1710; smokes no commit final: layout, fluxo
-  (Chromium e WebKit), offline (192 ✓), presença (58 ✓, e no WebKit), diagnóstico da tela (42 ✓).
-- **Produção verificada com as duas contas** (`prod-auditoria.mjs`, agora com a seção 11 do lote 8): 1ª rodada
-  84 ✓ · 4 ✗, três do INSTRUMENTO (as preferências de fábrica ganharam `semUndoSeguidas` e `pularGuarda`; o
-  tema comparava a lista de metas em vez da cor que vale) e um do "olhando é lida" (11g) que NÃO reproduziu em
-  três cenários isolados medidos em produção: a conversa aberta e fechada na hora (o `lida` sai em 4–6 ms e o
-  "Lida" chega em ~1 s), uma segunda sessão da mesma conta entrando e saindo, e "Sair" + entrar na mesma
-  página (o tempo real reabre em 254 ms). O 11g ganhou diagnóstico (o que a L6 manda pro `/api/chat` e o
-  estado do tempo real da L2), e a 2ª rodada inteira está rodando.
-- **Rodada 5 pronta pra lançar** (seis auditores sobre a main nova, `/home/user/wp-r5`): pedidos em
-  `scratchpad/r5-prompt-{1..6}.txt`; pendências que o lote 8 deixou em `scratchpad/r5-pendencias.md`.
-- **O lote 8 todo**: dez agentes (servidor, presença, filtros, fila, contas, dev, textos, offline, lightbox,
-  card), com três itens achados na junção ou depois (outra conta noutra aba; o "Marcar todos" cortado pela
-  queda; o foco do teclado na barra do autor e no card de foto que perde a foto). Os reinícios do contêiner
-  (2×) e o limite da sessão (~22:25 → 11:13 UTC) pararam os agentes, retomados por `SendMessage`.
+- **Lote 8 em produção** (PR #254, `48d2aea`, v2026.10.01-01): verificação com as duas contas 87 ✓ · 1 ✗; o ✗
+  é a corrida do "Lida" (achado novo, medido pelo R5-5).
+- **Rodada 5 feita** (seis auditores sobre a main nova; relatórios em `scratchpad/r5-relatorios/r5-{1..6}.md`):
+  os consertos do lote 8 conferem quase todos; ~45 achados novos, a maioria baixos e de COSTURA entre lotes
+  (as duas abas × a fila de saída; o "Sair" por outra aba × o lightbox e a presença; a aprovação no ar × o
+  treino, a queda e o "Rejeitar os N"). Desduplicados em `scratchpad/l9-plano.md`.
+- **Lote 9 em andamento**: nove agentes (contas, fila, lightbox, offline, dev, filtros, textos, servidor,
+  presença), retomados por `SendMessage` (ids em `scratchpad/r5-agentes.txt`), worktrees
+  `/home/user/wp-fix5-<área>` (da main `48d2aea`), regras `scratchpad/l9-base.txt`, relatórios
+  `scratchpad/relatorio-l9-<área>.md`. O limite da sessão parou todos às ~13:30 e eles voltaram às 13:35.
+- **Junção**: no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, da main), pelo
+  `scratchpad/juntar.sh fix5-<área>`; smokes num worktree fixo (`/home/user/wp-smoke`), um por vez.
 - Vão pro owner com mockup (página `scratchpad/mockups/decisoes-em-aberto.html`): L28 (e o banner do
   Desfazer sobre o Street View), L31, D3, O1 (a trava de versão no worker e os 45 s do lie-fi), C8/C9/C12/C13/
-  C15, e os dois novos do lote 8: a distância do duplicado cortada (C16) e os avisos do rodapé sobre ✕ ↑ ✓.
+  C15, a distância do duplicado cortada (C16) e os avisos do rodapé sobre ✕ ↑ ✓.
 - O branch `claude/peaceful-heisenberg-HaUuC` foi recriado a partir da main (o GitHub o apaga no merge);
   o worktree de trabalho segue sendo `/home/user/wp-lote7`.
 - **Cookies** (2026-09-30, os válidos): `14319cf2-antigerme_cookies.txt` (L6+AM) e `6ae86b82-cafanha_cookies.txt` (L2+AM), conferidos pelo `waze-probe` e com sessões diferentes (comparadas sem imprimir valor); o `prod-auditoria.mjs` já aponta pra eles. Os arquivos anteriores não servem mais (um da "cafanha" trazia a sessão da antigerme, e o cafanha de 09-29 expirou).
