@@ -82,7 +82,10 @@ function montar({ aquecido = true, fundoPedido = 'v|u2' } = {}) {
     renderFocoAutor: () => {},
   };
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let aquecimentoDaFrenteFeito = ${aquecido};\n${fatiar('aoMudarAFilaPorBaixo')}\nreturn aoMudarAFilaPorBaixo;`)(
+  // `seloComFoco`/`devolverFocoAoSelo`: o foco no selo refeito (R5-2-06), medido em
+  // test/card-foco-trava; aqui o documento não tem foco nenhum.
+  const app = new Function(...chaves, `let aquecimentoDaFrenteFeito = ${aquecido};\n${fatiar('seloComFoco')}\n${fatiar('devolverFocoAoSelo')}\n`
+    + `${fatiar('aoMudarAFilaPorBaixo')}\nreturn aoMudarAFilaPorBaixo;`)(
     ...chaves.map((k) => deps[k]));
   return { app, log, AppState };
 }
@@ -197,7 +200,8 @@ function montarBarra() {
     t: (k, v) => (k === 'card.focoAutor.contagem' ? `${v.n} de ${v.total}` : k + (v && v.n != null ? '#' + v.n : '')),
   };
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, 'let aquecimentoDaFrenteFeito = false;\n' + fatiar('aoMudarAFilaPorBaixo') + '\n'
+  const app = new Function(...chaves, 'let aquecimentoDaFrenteFeito = false;\n' + fatiar('seloComFoco') + '\n'
+    + fatiar('devolverFocoAoSelo') + '\n' + fatiar('aoMudarAFilaPorBaixo') + '\n'
     + fatiar('renderFocoAutor') + '\nreturn { aoMudarAFilaPorBaixo, renderFocoAutor };')(...chaves.map((k) => deps[k]));
   return { app, AppState, els, p };
 }

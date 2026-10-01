@@ -691,14 +691,15 @@ test('L4 o passo pra trás: editando, sai da edição e a foto fica; sem ediçã
 test('L9 a pílula do nome: travada na janela, rótulo na edição, viva fora dos dois — por UM escritor', () => {
   const botao = () => ({ disabled: false, querySelector: () => null });
   const el = { lightboxApprove: botao(), lightboxDelete: botao(), lightboxNomeBtn: botao() };
-  // `aplicarFocoDoTeclado`/`dispensarAvisoDaTrava`: a trava mudando é também a
-  // hora do foco prometido ao teclado pousar e do aviso da trava sair
+  // `aplicarFocoDoTeclado`/`dispensarAvisoDaTrava`/`guardarFocoDaTrava`: a trava
+  // mudando é também a hora do foco prometido ao teclado pousar (e de guardar o
+  // que ela tira do botão, R5-2-05) e do aviso da trava sair
   // (test/card-foco-trava); aqui eles não são o assunto.
   const rodar = (travado, editando) => new Function('document', 'acoesTravadas', 'cardDaFrente', 'editandoNome',
     'aprovandoAgora', 'excluindoAgora', 'renomeacaoNoAr', 'Lightbox', 'atualizarBotaoSalvarNome',
-    'aplicarFocoDoTeclado', 'dispensarAvisoDaTrava', fatiar('aplicarTravaDeAcao') + '\naplicarTravaDeAcao();')(
+    'aplicarFocoDoTeclado', 'dispensarAvisoDaTrava', 'guardarFocoDaTrava', fatiar('aplicarTravaDeAcao') + '\naplicarTravaDeAcao();')(
     { getElementById: (id) => el[id] || null }, () => travado, () => null, () => editando,
-    false, false, () => false, { place: null }, () => {}, () => {}, () => {});
+    false, false, () => false, { place: null }, () => {}, () => {}, () => {}, () => {});
   rodar(false, false);
   assert.equal(el.lightboxNomeBtn.disabled, false, 'CONTROLE: sem janela e sem edição a pílula ficou morta');
   rodar(true, false);

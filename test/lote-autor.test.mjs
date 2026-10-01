@@ -573,8 +573,10 @@ test('L21: o contado que saiu da fila no meio não volta a sair; CONTROLE: sem a
 test('L21: a folha entrega ao toque as chaves que ela contou ao ABRIR', () => {
   const f = fatiar('abrirFolhaDoAutor');
   assert.match(f, /const naFila = pedidosDoAutorNaFila\(place\);/);
-  assert.match(f, /const contados = naFila\.map\(chaveDoPedido\);\s*document\.getElementById\('autorRejeitar'\)\.addEventListener\('click', \(\) => \{\s*closeModal\('autorModal'\);\s*rejeitarLoteDoAutor\(place, contados\);/,
+  assert.match(f, /const contados = naFila\.map\(chaveDoPedido\);\s*document\.getElementById\('autorRejeitar'\)\.addEventListener\('click', \(ev\) => rejeitarPelaFolha\(ev, place, contados\)\);/,
     'o toque voltou a recontar a fila: o que chegou com a folha aberta sai junto');
+  assert.match(fatiar('rejeitarPelaFolha'), /rejeitarLoteDoAutor\(place, contados\);\s*\}$/,
+    'o "Rejeitar os N" da folha deixou de entregar ao lote as chaves que ela contou');
 });
 
 // ── R5-2-02: "Rejeitar os N" leva junto o pedido com a aprovação de foto NO AR ──

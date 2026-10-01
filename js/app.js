@@ -10024,12 +10024,34 @@ function montarCardDeFundo() {
 // O de fundo só é refeito se o aquecimento deste card JÁ o montou — antes
 // disso, ele é montado na hora dele, lendo a fila de agora — e só se mudou.
 let aquecimentoDaFrenteFeito = false;
+
+// Os selos são refeitos a cada página que chega, recusa automática, devolução
+// ou fim de lote, e o foco que estava no "Ver +N" ou no "✕ N" caía no <body>
+// (R5-2-06, MEDIDO nos dois motores; o CONTROLE, sem a fila mudar, mantém o
+// foco no selo). Vai ao selo EQUIVALENTE refeito; se ele não existe mais (os
+// outros pedidos do autor saíram da fila), o ✕ do card fica prometido, como no
+// C10 — e pousa quando o card destravar.
+function seloComFoco(box) {
+    const ativo = document.activeElement;
+    if (!box || !ativo || !box.contains(ativo)) return null;
+    return ['selo-lote', 'selo-reinc'].find((c) => ativo.classList.contains(c)) || null;
+}
+
+function devolverFocoAoSelo(card, cls) {
+    const novo = card.querySelector('.selos-proc .' + cls);
+    if (focavelNaTela(novo)) { novo.focus({ preventScroll: true }); return; }
+    focoDoTeclado = BOTAO_DA_ACAO.left;
+    aplicarFocoDoTeclado();
+}
+
 function aoMudarAFilaPorBaixo() {
     const card = cardDaFrente();
     const place = AppState.currentPlace;
     if (!card || !place) return;
     const linha = card.querySelector('.card-creator-row');
     const velho = linha && linha.querySelector('.selos-proc');
+    // O selo FOCADO sai junto com os velhos (R5-2-06): ver `devolverFocoAoSelo`.
+    const seloFocado = seloComFoco(velho);
     if (velho) velho.remove();
     renderSelosDeProcedencia(card, place);
     // E a barra "Primeiro os de X · N de M": com o foco no autor, a página que
@@ -10037,6 +10059,7 @@ function aoMudarAFilaPorBaixo() {
     // dizendo "2 de 4" (e o `aria-label`, "os 2 pedidos") até o próximo card
     // (R5-2-08). Os dois na tela contando a mesma fila de jeitos diferentes.
     renderFocoAutor();
+    if (seloFocado) devolverFocoAoSelo(card, seloFocado);
     if (!aquecimentoDaFrenteFeito) return;
     const fundo = document.querySelector('#cardStack .card-fundo');
     const quer = chaveDoPedido(AppState.queue[1]);
@@ -11424,6 +11447,9 @@ function aplicarTravaDeAcao() {
     // de antes: aviso na tela e ✕ vivo. Duas escritas no mesmo atributo, sem
     // uma saber da outra, é o gotcha #63; a trava mora AQUI, numa função só.
     const semFoto = !!(card && card.querySelector('.card-sem-foto'));
+    // Antes de escrever o `disabled`: o botão focado que vira `disabled` perde
+    // o foco (R5-2-05).
+    if (travado) guardarFocoDaTrava(card);
     for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
         const b = card && card.querySelector(cls);
         if (b) b.disabled = travado || (semFoto && cls !== '.card-btn-skip');
@@ -11486,6 +11512,23 @@ let focoDoTeclado = null;   // o seletor do botão que recebe o foco, ou null
 function pedirFocoDoTeclado(botao, peloTeclado, acao) {
     if (!peloTeclado || !botao || document.activeElement !== botao) return;
     focoDoTeclado = BOTAO_DA_ACAO[acao] || null;
+}
+
+// A trava que LIGA com o foco num ✕ ↑ ✓ do card da frente (R5-2-05): o botão
+// vira `disabled`, perde o foco, e ninguém o devolvia — o foco ficava no <body>
+// depois de a trava acabar. MEDIDO nos dois motores com o "Pular guarda": o C10
+// pousa o foco no ↑ do card novo quando a janela do Desfazer acaba, o
+// `guardar-pedido` leva 401, e a conferência trava os três botões. Vale pra
+// toda trava que liga com o foco já ali (a queda da sessão, a escrita do
+// lightbox conferindo um 401). O foco fica PROMETIDO ao mesmo botão e pousa
+// pelo `aplicarFocoDoTeclado` quando a trava acabar, com as regras dele: quem
+// pôs o foco em outro lugar, ou pegou o mouse ou o dedo, ganha. Não é foco
+// pulando pela tela: ele volta pra onde estava.
+function guardarFocoDaTrava(card) {
+    const ativo = document.activeElement;
+    if (!card || !ativo || ativo === document.body) return;
+    const sel = ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].find((s) => card.querySelector(s) === ativo);
+    if (sel) focoDoTeclado = sel;
 }
 
 function aplicarFocoDoTeclado() {
@@ -13884,6 +13927,19 @@ function pedidosDoAutorNaFila(place) {
     return (AppState.queue || []).filter((x) => x && x.creatorId === id && !pedidosEmAndamento.has(chaveDoPedido(x)));
 }
 
+// O "Rejeitar os N" da folha. Pelo TECLADO (R5-2-06), fechar a folha devolve o
+// foco ao "✕ N", que sai com o card que o lote tira da tela, e o resultado do
+// lote, ao fechar, largava o foco no <body> (MEDIDO; o CONTROLE, abrir a folha e
+// fechar com Esc, devolve ao "✕ N"). O ✕ do card que fica é prometido (C10) e
+// pousa quando o card destravar — antes de o resultado abrir, que então o
+// devolve a ele. Decidido ANTES de fechar: fechar move o foco.
+function rejeitarPelaFolha(ev, place, contados) {
+    const peloTeclado = veioDoTeclado(ev);
+    closeModal('autorModal');
+    if (peloTeclado) focoDoTeclado = BOTAO_DA_ACAO.left;
+    rejeitarLoteDoAutor(place, contados);
+}
+
 // A folha se adapta ao TAMANHO da fila, e é essa adaptação que justifica o selo
 // vermelho ser sempre tocável.
 //
@@ -13973,10 +14029,7 @@ function abrirFolhaDoAutor(place) {
         // também — "Rejeitar os 2", e saíam 4. É a régua do "Marcar todos"
         // (`loteDeLidosContado`): o que o app mostra é o que ele aceita.
         const contados = naFila.map(chaveDoPedido);
-        document.getElementById('autorRejeitar').addEventListener('click', () => {
-            closeModal('autorModal');
-            rejeitarLoteDoAutor(place, contados);
-        });
+        document.getElementById('autorRejeitar').addEventListener('click', (ev) => rejeitarPelaFolha(ev, place, contados));
     }
     const auto = document.getElementById('autorAuto');
     // Relê o estado depois de alternar em vez de confiar no `.checked`: se o
