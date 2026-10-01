@@ -1061,7 +1061,7 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
   const intervalos = new Map();
   const copiados = [], toasts = [];
   const { registro, document } = domDeMentira({
-    pairCode: {}, pairExpiry: {}, pairCodeReveal: {}, pairShowCodeBtn: {}, pairCodeExpiry: {},
+    pairCode: {}, pairExpiry: {}, pairCodeReveal: {}, pairShowCodeBtn: {}, pairCodeExpiry: {}, pairAnuncio: {},
     // As instruções (a da câmera e a do código curto) e os dois botões de baixo
     // nascem VISÍVEIS no HTML.
     pairShowBody: { oculto: false }, pairOrType: { oculto: false },
@@ -1119,7 +1119,7 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
   const api = montar(
     ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento',
      'revelarCodigoPareamento', 'formatarCodigoPareamento', 'codigoCurtoValendo', 'mostrarInstrucoesDoPareamento',
-     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado'],
+     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado', 'anunciarNoPareamento'],
     deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR'],
     APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';');
   return {
@@ -1169,6 +1169,37 @@ test('QR vencido: o "Copiar link" apaga e não entrega link morto — nem na aba
     assert.ok(D[lang]['pair.expired'].includes(D[lang]['pair.createBtn']),
       `${lang}: o aviso de vencido não diz o caminho com o nome da tela "${D[lang]['pair.createBtn']}"`);
   }
+});
+
+// ── O vencimento é DITO ao leitor de tela, uma vez (lote 9) ─────────────────
+// O foco inicial é o "Fechar", e o "Código expirado" ia só pro texto da
+// contagem, que não é região viva (falaria a cada segundo): quem usa leitor de
+// tela não sabia que o QR tinha morrido. Ele vai pra uma região viva À PARTE.
+test('o "Código expirado" vai pra região viva à parte do modal — e a contagem segue sem região viva', async () => {
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  const anuncio = p.registro.pairAnuncio;
+  p.andar(60_000); p.tique();
+  assert.equal(anuncio.textContent, '', 'CONTROLE: com o QR valendo, nada é anunciado (a contagem não fala)');
+  p.andar(240_000); p.tique();
+  assert.equal(p.registro.pairExpiry.textContent, 'pair.expired', 'CONTROLE: o QR não venceu no harness');
+  assert.equal(anuncio.textContent, 'pair.expired', 'o QR venceu e o leitor de tela não ouviu o "Código expirado"');
+  // Reaberto, o anúncio da vez passada não fica no modal reaproveitado.
+  await p.abrirPareamento();
+  assert.equal(anuncio.textContent, '', 'o modal reaberto ficou com o anúncio do QR que venceu da outra vez');
+
+  // A região existe no HTML, DENTRO do modal do QR (com aria-modal, o que fica
+  // fora pode não ser lido), e a contagem não é região viva.
+  const html = ler('index.src.html');
+  const iModal = html.indexOf('id="pairShowModal"');
+  const iFim = html.indexOf('id="pairEnterModal"');
+  assert.ok(iModal >= 0 && iFim > iModal, 'CONTROLE: os dois modais do pareamento sumiram do HTML');
+  const modal = html.slice(iModal, iFim);
+  assert.match(modal, /<p id="pairAnuncio" class="sr-only" role="status" aria-live="polite"><\/p>/,
+    'a região viva do vencimento não está dentro do modal do QR');
+  const contagem = modal.match(/<p id="pairExpiry"[^>]*>/);
+  assert.ok(contagem, 'CONTROLE: a contagem do QR sumiu do modal');
+  assert.doesNotMatch(contagem[0], /aria-live|role="status"/, 'a contagem virou região viva: o leitor falaria a cada segundo');
 });
 
 // ── A15 (textos, 2026-09-29): o que a tela do QR VENCIDO ainda oferecia ──────

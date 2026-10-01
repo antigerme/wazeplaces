@@ -1459,6 +1459,7 @@ async function abrirPareamento() {
     pairQrVenceEm = 0;
     codeEl.classList.remove('opacity-40', 'line-through');
     expEl.textContent = '';
+    anunciarNoPareamento('');
     // O código volta a ficar escondido a cada abertura: revelar é um pedido, e
     // pedido não se herda da vez passada — cada revelação cria um registro
     // fraco novo no servidor.
@@ -1550,6 +1551,15 @@ function mostrarInstrucoesDoPareamento() {
     for (const id of ['pairShowBody', 'pairOrType']) document.getElementById(id)?.classList.remove('hidden');
 }
 
+// O vencimento (do QR ou do código curto) é dito ao leitor de tela UMA vez, na
+// região viva à parte do modal (`#pairAnuncio`): a contagem muda a cada segundo,
+// e região viva nela falaria o tempo todo. O foco inicial é o "Fechar", então
+// sem isto o "Código expirado" só era lido por quem fosse procurar.
+function anunciarNoPareamento(texto) {
+    const el = document.getElementById('pairAnuncio');
+    if (el) el.textContent = texto;
+}
+
 // Contagem regressiva: deixa claro que o segredo morre — e evita o editor ficar
 // tentando um código velho achando que o app quebrou. Vale pro QR e pro código
 // digitado, que são registros SEPARADOS e vencem cada um no seu tempo.
@@ -1563,6 +1573,7 @@ function iniciarTickerPareamento(elemento, segundos, aoVencer) {
         const restante = Math.ceil((venceEm - Date.now()) / 1000);
         if (restante <= 0) {
             elemento.textContent = t('pair.expired');
+            anunciarNoPareamento(t('pair.expired'));
             if (aoVencer) aoVencer();
             pararTickerPareamento(elemento);
             return false;
