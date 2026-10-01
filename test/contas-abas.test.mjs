@@ -281,6 +281,55 @@ test('A1: CONTROLE — o "Sair" desta aba grava e apaga o aparelho (o espião en
   assert.ok(m.log.includes('toast:toast.loggedOut'));
 });
 
+// O fechamento das camadas DE VERDADE no que ele dispara: a foto ampliada fecha
+// pelo `avancarSeAprovado` (que MANDA a aprovação pendente) e a conversa pela
+// limpeza que paga o "lida" esperando a rajada (`presencaPagarLida`).
+function montarSairComCamadas() {
+  const m = montarSair();
+  const saiu = [];
+  Object.assign(m.deps, {
+    renomeacaoPendente: null, exclusaoPendente: null, placeResolvidoPorAprovacao: null,
+    aprovacaoPendente: { enviar: () => saiu.push('aprovação:' + m.API.sessionToken), cancelar: () => { m.deps.aprovacaoPendente = null; } },
+    Presenca: { lidaPendente: '777', timers: {} }, PRESENCA_ID: /^\d{1,19}$/,
+    presencaMarcarLida: (id) => saiu.push('lida:' + id + ':' + m.API.sessionToken),
+  });
+  m.deps.window.Presenca.esquecer = (o) => { m.log.push(['presenca', o || null]); m.deps.Presenca.lidaPendente = null; };
+  const fonte = APP_SEM + '\n' + ['presencaPagarLida', 'presencaEu'].map((n) => fatiarDe(PRESENCA_SEM, n)).join('\n');
+  const h = montar(['handleLogout', 'preferenciasDeFabrica', 'sessaoDestaAbaEhAGuardada', 'cancelarPendenciasDoLightbox',
+    'avancarSeAprovado', 'presencaPagarLida', 'presencaEu'], m.deps, fonte);
+  m.deps.fecharCamadasAbertas = () => { m.log.push('camadas'); h.avancarSeAprovado(); h.presencaPagarLida({ fechando: true }); };
+  return { ...m, h, saiu };
+}
+
+test('F2: na OUTRA aba as camadas fecham DEPOIS do que estava pendente — a aprovação na janela e o "lida" não saem com a sessão de quem saiu', async () => {
+  for (const outraConta of [false, true]) {
+    const m = montarSairComCamadas();
+    await m.h.handleLogout({ porOutraAba: true, outraConta });
+    assert.ok(m.log.includes('camadas'), 'as camadas não fecharam');
+    assert.deepEqual(m.saiu, [],
+      `DEFEITO${outraConta ? ' (outra conta)' : ''}: o fechamento das camadas mandou o que estava pendente, com a sessão de quem saiu: ${m.saiu.join(' ')}`);
+    assert.equal(m.deps.aprovacaoPendente, null, 'a aprovação na janela não foi cancelada');
+    assert.equal(m.deps.Presenca.lidaPendente, null, 'o "lida" pendente ficou pra quem entrar');
+  }
+  // CONTROLE: o fechamento com a aprovação pendente e o perfil de pé (a ordem de antes) manda os dois.
+  const c = montarSairComCamadas();
+  c.deps.fecharCamadasAbertas();
+  assert.deepEqual(c.saiu, ['aprovação:tok-A', 'lida:777:tok-A'], 'CONTROLE: o harness não enxerga o que o fechamento manda');
+});
+
+test('R5-5-X: a tela de entrada não guarda o anúncio do último card (nome de local de terceiro) — nem no "Sair"', () => {
+  const els = {};
+  const el = (id) => (els[id] ||= { id, textContent: '', classList: { add() {}, remove() {}, toggle() {} } });
+  els.cardLiveRegion = { textContent: 'Novo pedido: Padaria Estrela, Local novo' };
+  const deps = { document: { documentElement: { classList: { remove() {} } }, getElementById: el, querySelectorAll: () => [] },
+    AppState: { authenticated: true, profile: { id: 1 } }, window: {} };
+  const h = montar(['showAuthScreen'], deps);
+  h.showAuthScreen();
+  assert.equal(els.cardLiveRegion.textContent, '', 'DEFEITO: o nome do local do último card seguiu na região viva da tela de entrada');
+  // O "Sair" passa por ela, nas duas abas.
+  assert.match(fatiarDe(APP_SEM, 'handleLogout'), /^\s+showAuthScreen\(\);/m);
+});
+
 test('A1: o api.js solta a sessão da MEMÓRIA sem tocar no aparelho — e o ✕ seguinte não sai com o token de quem saiu', async () => {
   const dados = new Map(), escritas = [], diario = [], rede = [];
   const ctx = {
@@ -1234,6 +1283,20 @@ test('F1: o fim do esvaziamento sem a trava solta as marcas desta aba — menos 
   const f = JSON.parse(guardado.get('waze_places_saida'));
   assert.equal(f[0].rv, 'aba-A', 'a marca do que está no ar saiu — a outra aba o mandaria de novo');
   assert.equal(f[1].rv, undefined, 'CONTROLE: a marca do que esperava ficou presa');
+});
+
+test('F3: o desconto de uma decisão que não pousou, num placar ÓRFÃO (o "Sair", outra conta), não desenha nem grava', () => {
+  const log = [];
+  const deps = { AppState: { stats: { read: 0, rejected: 0, skipped: 0 } }, updateStats: () => log.push('desenha'), saveStats: () => log.push('grava') };
+  const h = montar(['descontarGestoSemSessao'], deps);
+  const orfao = { read: 0, rejected: 3, skipped: 0 };
+  h.descontarGestoSemSessao('rejected', orfao, 1);
+  assert.equal(orfao.rejected, 2);
+  assert.deepEqual(log, [], 'DEFEITO: o desconto no placar órfão gravou o placar de agora (na outra aba, depois do "Sair")');
+  // CONTROLE: o placar do gesto é o de agora (a queda com renovação) — desconta, desenha e grava.
+  deps.AppState.stats.rejected = 3;
+  h.descontarGestoSemSessao('rejected', deps.AppState.stats, 1);
+  assert.deepEqual([deps.AppState.stats.rejected, log], [2, ['desenha', 'grava']]);
 });
 
 test('F6: a fila de saída que muda noutra aba redesenha o "esperando envio" daqui', () => {

@@ -4542,6 +4542,12 @@ function showAuthScreen() {
     // seguiam no cabeçalho — e a próxima conta aparecia com a FOTO da anterior
     // até a dela chegar (ver a função).
     limparCabecalhoDoPerfil();
+    // E o anúncio do último card ao leitor de tela: "Novo pedido: <nome do
+    // local>, <tipo>" ficava na região viva depois do "Sair" — dado de terceiro
+    // no DOM da tela de entrada, que nenhum código limpava (auditoria de
+    // 2026-10-01, R5-5-X).
+    const anuncio = document.getElementById('cardLiveRegion');
+    if (anuncio) anuncio.textContent = '';
     const brandTitle = document.getElementById('brandTitle');
     if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
@@ -8355,9 +8361,9 @@ async function handleLogout({ porOutraAba = false, outraConta = false } = {}) {
     saiuNestaPagina = true;
     // Aqui o diálogo do "Sair" é o que está aberto. Na outra aba pode ser
     // qualquer coisa (a foto ampliada, os Filtros, a conversa, o QR do
-    // pareamento): tudo fecha, com a limpeza de cada um (ver a função).
-    if (porOutraAba) fecharCamadasAbertas();
-    else closeModal('logoutModal');
+    // pareamento): tudo fecha, com a limpeza de cada um — mais abaixo, depois de
+    // o que estava pendente ser cancelado (ver lá).
+    if (!porOutraAba) closeModal('logoutModal');
     // Cancela ação pendente ANTES de destruir a sessão: logout = esquecer tudo,
     // então descartamos (não enviamos) o swipe em buffer e evitamos o executor
     // rodando com sessão nula (que mostrava "erro ao marcar" na tela de login).
@@ -8384,6 +8390,23 @@ async function handleLogout({ porOutraAba = false, outraConta = false } = {}) {
         : outraConta && !sessaoDestaAbaEhAGuardada() ? API.sessionToken : null;
     if (porOutraAba) API.soltarSessao();
     else API.setSession(null);
+    // Na OUTRA aba as camadas abertas fecham SÓ AGORA, como na queda (o
+    // `derrubarSessao`): com o que estava pendente cancelado e a sessão, o
+    // perfil e o `authenticated` soltos. O fechamento de cada uma roda a limpeza
+    // dela, e com eles ainda de pé a da foto ampliada MANDAVA a aprovação que
+    // estava na janela do Desfazer, e a da conversa pagava o "lida" que esperava
+    // a rajada — os dois com a sessão de quem saiu, e a resposta da aprovação
+    // gravava as conquistas no aparelho depois do "Sair", ou no da conta que
+    // entrou (auditoria de 2026-10-01: R5-1 F2, R5-3-01, R5-5-6). Sem o perfil,
+    // o "lida" fica devendo, e o `Presenca.esquecer` lá embaixo o descarta. A
+    // presença não é desligada ANTES: o desligar fecha a conversa pelo caminho
+    // que mexe no voltar, e o fechamento daqui devolve as entradas de uma vez
+    // (gotcha #65).
+    if (porOutraAba) {
+        AppState.profile = null;
+        AppState.authenticated = false;
+        fecharCamadasAbertas();
+    }
     // Os códigos de pareamento emitidos aqui param de valer (sem esperar rede:
     // sem ela, eles vencem sozinhos em 5 min). Cada aba cancela os que ELA
     // emitiu: o QR que a outra mostrava entraria, por 5 min, numa conta que
@@ -17746,6 +17769,12 @@ function pousouNoWaze(r) {
 function descontarGestoSemSessao(chave, placar, n) {
     if (!(n > 0) || !placar) return;
     placar[chave] = Math.max(0, (placar[chave] || 0) - n);
+    // O placar do gesto ÓRFÃO (o "Sair", outra conta) não é mais o desta aba nem
+    // o do aparelho: o desconto fica no objeto que ficou pra trás, e não há o que
+    // desenhar nem gravar. Gravar daqui regravava o placar de AGORA — e, na aba
+    // que só soube do "Sair" pela outra, era uma escrita no aparelho depois dele,
+    // contra o "não grava nada" (auditoria de 2026-10-01, R5-1 F3).
+    if (placar !== AppState.stats) return;
     updateStats();
     saveStats();
 }
