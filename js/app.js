@@ -16395,7 +16395,14 @@ function atualizarLinhaDoOffline(feitos, total) {
     const semRede = navigator.onLine === false;
     // Preparado AGORA: a última varredura completa é da janela atual.
     const preparado = offlineJanelaServida !== null && !offlinePrecisaVarrer();
-    if (semRede && preparado && AppState.queue.length) {
+    // SEM rede, quem decide é o que a última preparação COMPLETA guardou, e não
+    // a janela de agora: o mapa não vence, e a foto vale 60 min do download —
+    // baixada na janela J, até o fim da J+2. Pela janela de agora, 20 min depois
+    // de tudo pronto a linha já dizia "o mapa e as fotos chegam quando houver
+    // rede" com os dois no aparelho (auditoria de 2026-09-30, R5-4-6).
+    const completa = offlineJanelaServida !== null && offlineUltimoResultado !== 'parcial';
+    const fotosValem = completa && Math.floor(Date.now() / OFFLINE_CICLO_MS) - offlineJanelaServida <= 2;
+    if (semRede && fotosValem && AppState.queue.length) {
         // Sem sinal e com tudo no aparelho: dizer que "o mapa e as fotos chegam
         // quando houver rede" era mentir sobre o que já está guardado.
         const n = AppState.queue.length;
@@ -16406,10 +16413,11 @@ function atualizarLinhaDoOffline(feitos, total) {
     }
     if (semRede) {
         const n = AppState.queue.length;
+        // Depois disso o MAPA segue no aparelho, e só a foto pode precisar de sinal.
         el.innerHTML = n
             ? `<span class="text-amber-800 dark:text-amber-300 font-semibold">${escapeHtml(
                 t(n === 1 ? 'prefs.offline.esperaA' : 'prefs.offline.esperaAPlural', { n }))}</span> `
-              + escapeHtml(t('prefs.offline.esperaB'))
+              + escapeHtml(t(completa ? 'prefs.offline.mapaGuardadoB' : 'prefs.offline.esperaB'))
             : `<span class="text-amber-800 dark:text-amber-300 font-semibold">${escapeHtml(
                 t('prefs.offline.vazioA'))}</span> ` + escapeHtml(t('prefs.offline.vazioB'));
         return;

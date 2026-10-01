@@ -931,3 +931,51 @@ test('R5-4-4: no lie-fi, a foto que não veio TRAVA ✕ e ✓ e diz que precisa 
   // E o modo avião continua travando (o caminho de sempre).
   assert.equal(cardDeFotoQueFalhou({ onLine: false, semResposta: false }).marcou, true, 'o modo avião deixou de travar');
 });
+
+// ── R5-4-6: a linha das Preferências SEM SINAL (auditoria de 2026-09-30) ─────
+// 20 min depois da última preparação completa, sem sinal, a linha dizia "3
+// pedidos guardados. O mapa e as fotos chegam quando houver rede." — com o mapa
+// no aparelho (o tile não vence) e as fotos valendo (60 min do download). Quem
+// decidia era a janela de AGORA (medido no navegador, t10). Aqui roda a
+// `atualizarLinhaDoOffline` de verdade, com a `offlinePrecisaVarrer` de verdade.
+function linhaSemSinal({ onLine = false, servida, resultado = null, agora, fila = 3 }) {
+  const el = { textContent: '', innerHTML: '' };
+  const deps = {
+    document: { getElementById: () => el }, navigator: { onLine },
+    AppState: { queue: Array.from({ length: fila }, (_, i) => ({ venueID: 'v' + i })) },
+    offlineLigado: () => true, escapeHtml: (s) => s, t: (k) => k,
+    OFFLINE_CICLO_MS: 1200000, Date: { now: () => agora * 1200000 + 1000 },
+  };
+  const nomes = Object.keys(deps);
+  const f = new Function(...nomes, `let offlineJanelaServida = ${servida}, offlineUltimoResultado = ${JSON.stringify(resultado)},
+      offlineVarrendo = false;
+    ${fatiar('offlinePrecisaVarrer')}\n${fatiar('atualizarLinhaDoOffline')}\nreturn atualizarLinhaDoOffline;`)(...nomes.map((n) => deps[n]));
+  f(0, 0);
+  return el.innerHTML || el.textContent;
+}
+
+test('R5-4-6: sem sinal, a preparação COMPLETA vale enquanto a foto vale — e depois o mapa segue no aparelho', () => {
+  const J = 1492385;
+  assert.match(linhaSemSinal({ servida: J, agora: J }), /prefs\.offline\.prontoSemRedeB/,
+    'PRÉ-CONDIÇÃO: na mesma janela a linha não disse que segue com o guardado');
+  // 20 e 40 min depois: a foto baixada na janela J vale até o fim da J+2.
+  for (const d of [1, 2]) {
+    const l = linhaSemSinal({ servida: J, agora: J + d });
+    assert.match(l, /prefs\.offline\.prontoSemRedeB/,
+      `${d * 20} min depois da preparação completa, sem sinal, a linha diz que o mapa e as fotos ainda vão chegar: ${l}`);
+  }
+  // Uma hora depois: o mapa segue no aparelho; só a foto pode ter vencido.
+  const depois = linhaSemSinal({ servida: J, agora: J + 3 });
+  assert.match(depois, /prefs\.offline\.mapaGuardadoB/, `uma hora depois, a linha não diz que o mapa está no aparelho: ${depois}`);
+  assert.doesNotMatch(depois, /prefs\.offline\.esperaB/);
+});
+
+test('R5-4-6: CONTROLE — sem preparação completa (nunca encheu, ou PARCIAL) a linha segue dizendo que o mapa e as fotos chegam', () => {
+  const J = 1492385;
+  assert.match(linhaSemSinal({ servida: null, agora: J }), /prefs\.offline\.esperaB/, 'sem preparação nenhuma a linha mudou');
+  assert.match(linhaSemSinal({ servida: J, resultado: 'parcial', agora: J }), /prefs\.offline\.esperaB/,
+    'a preparação PARCIAL passou a dizer que tudo está no aparelho');
+  // E COM rede nada muda: a janela virada é "ainda não preparado" até a varredura passar.
+  assert.match(linhaSemSinal({ onLine: true, servida: J, agora: J + 1 }), /prefs\.offline\.pendenteA/);
+  assert.match(linhaSemSinal({ onLine: true, servida: J, agora: J }), /prefs\.offline\.prontoB/);
+});
