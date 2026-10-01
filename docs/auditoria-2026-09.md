@@ -16,30 +16,27 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-01 ~13:45 UTC)
+## 0. Estado agora (2026-10-01 ~23:00 UTC)
 
 - **Lote 8 em produção** (PR #254, `48d2aea`, v2026.10.01-01): verificação com as duas contas 87 ✓ · 1 ✗; o ✗
-  é a corrida do "Lida" (achado novo, medido pelo R5-5).
-- **Rodada 5 feita** (seis auditores sobre a main nova; relatórios em `scratchpad/r5-relatorios/r5-{1..6}.md`):
-  os consertos do lote 8 conferem quase todos; ~45 achados novos, a maioria baixos e de COSTURA entre lotes
-  (as duas abas × a fila de saída; o "Sair" por outra aba × o lightbox e a presença; a aprovação no ar × o
-  treino, a queda e o "Rejeitar os N"). Desduplicados em `scratchpad/l9-plano.md`.
-- **Lote 9 em andamento**: nove agentes (contas, fila, lightbox, offline, dev, filtros, textos, servidor,
-  presença), retomados por `SendMessage` (ids em `scratchpad/r5-agentes.txt`), worktrees
-  `/home/user/wp-fix5-<área>` (da main `48d2aea`), regras `scratchpad/l9-base.txt`, relatórios
-  `scratchpad/relatorio-l9-<área>.md`. O limite da sessão parou todos às ~13:30 e eles voltaram às 13:35.
-- **Junção**: no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, da main), pelo
-  `scratchpad/juntar.sh fix5-<área>`; smokes num worktree fixo (`/home/user/wp-smoke`), um por vez.
-- Vão pro owner com mockup (página `scratchpad/mockups/decisoes-em-aberto.html`): L28 (e o banner do
-  Desfazer sobre o Street View), L31, D3, O1 (a trava de versão no worker e os 45 s do lie-fi), C8/C9/C12/C13/
-  C15, a distância do duplicado cortada (C16) e os avisos do rodapé sobre ✕ ↑ ✓.
-- O branch `claude/peaceful-heisenberg-HaUuC` foi recriado a partir da main (o GitHub o apaga no merge);
-  o worktree de trabalho segue sendo `/home/user/wp-lote7`.
-- **Cookies** (2026-09-30, os válidos): `14319cf2-antigerme_cookies.txt` (L6+AM) e `6ae86b82-cafanha_cookies.txt` (L2+AM), conferidos pelo `waze-probe` e com sessões diferentes (comparadas sem imprimir valor); o `prod-auditoria.mjs` já aponta pra eles. Os arquivos anteriores não servem mais (um da "cafanha" trazia a sessão da antigerme, e o cafanha de 09-29 expirou).
-- **Decisões do owner**: página pronta (`scratchpad/mockups/decisoes-em-aberto.html`), a publicar no
-  relatório final — inclui L7, L10, L18, T3, T24, L16 e a escala encavalando no aviso.
-- **Próxima volta**: juntar os achados da rodada 4, corrigir (lote 8), PR, CI, merge, produção — e
-  repetir até uma rodada limpa.
+  era a corrida do "Lida", consertada no lote 9 (presença, R5-5-1).
+- **Rodada 5 feita** (seis auditores; relatórios em `scratchpad/r5-relatorios/r5-{1..6}.md`), desduplicada em
+  `scratchpad/l9-plano.md`.
+- **Lote 9 na junção** (`/home/user/wp-lote7`, branch `claude/peaceful-heisenberg-HaUuC`): juntados servidor,
+  dev, filtros, textos, offline, presença, lightbox e fila; `npm test` 1787/1787. Faltam: contas (o commit
+  01fa2a2 está no branch `fix5-contas`, o resto em andamento) e dois follow-ups (offline: o "Pronto" sem
+  sinal só pra fila preparada; lightbox: Alt/⌘+← no card rejeitava o pedido). O limite da sessão parou os
+  agentes às ~14:40 e eles foram retomados às 22:42 por `SendMessage`.
+- **Notas e CHANGELOG do lote 9**: rascunhos em `scratchpad/claude-l9-notas.md` (já aplicadas no CLAUDE.md
+  até o lightbox) e `scratchpad/changelog-l9.md`; corpo do PR em `scratchpad/pr9-body.md`.
+- **Decisões novas pro owner** (lote 9): `scratchpad/r5-pendencias.md`, seção "Lote 9".
+- **Rodada 6 pronta pra sair**: sete auditores (o 7º cobre Histórico, conquistas, Resumo, Ajuda, treino e
+  Preferências); base `scratchpad/r6-base.txt`, escopos `scratchpad/r6-escopos.md`, prompts por
+  `scratchpad/gerar-r6.py <hash-da-main> <versão>`.
+- **Cookies** (2026-10-01, os válidos): `0ca15e91-antigerme_cookies.txt` (L6+AM) e
+  `0ba08797-cafanha_cookies.txt` (L2+AM); o `prod-auditoria.mjs` e o `prod-lida.mjs` já apontam pra eles.
+- **Próxima volta**: juntar contas e os follow-ups, smokes, versão (rode `date -u` — o serial segue a data do
+  commit HEAD), PR, CI, merge, produção — e a rodada 6.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
