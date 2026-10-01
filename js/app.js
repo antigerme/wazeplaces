@@ -8807,6 +8807,13 @@ let filaEsperaPerfil = false;
 // guardada do offline entrar com `onLine` dizendo que há rede (ver
 // `startFetching` e o "Tentar novamente"). Zera a cada busca que começa.
 let ultimaBuscaFalhouPorRede = false;
+// A última busca ficou SEM RESPOSTA nenhuma (a rede fora, o teto de 45 s — não o
+// erro do servidor, que respondeu) e nada respondeu DEPOIS: o "lie-fi", em que o
+// `onLine` diz que há rede e ela não anda. Pra foto que não abre, é o mesmo que
+// sem rede (`marcarCardSemFoto`). Zera com a primeira resposta que chegar
+// (`API.aoProvarRede`) ou com a busca que der certo — e NÃO a cada busca que
+// começa, como a de cima: a busca no ar não prova rede nenhuma.
+let buscaSemResposta = false;
 
 // "Minha área" num perfil SEM caixa: buscar o país com o filtro marcado é filtro
 // que mente (a pessoa acha que vê a área dela). Desliga, grava e DIZ — o mesmo
@@ -8951,6 +8958,9 @@ function fetchNextPage() {
                                             cat: result.errorCategory || null });
                     dlogCapturarAuto('buscaFalhou');
                     ultimaBuscaFalhouPorRede = result.errorCategory === 'transient';
+                    // Sem resposta NENHUMA: o código HTTP é a prova de que alguém
+                    // respondeu (ver `buscaSemResposta`).
+                    buscaSemResposta = result.errorCategory === 'transient' && !(Number(result.httpCode) > 0);
                     if (result.errorCategory === 'unauthorized') {
                         AppState.hasMore = false;
                         // `loadError` TAMBÉM aqui, e a falta dele foi o defeito que o
@@ -9010,6 +9020,7 @@ function fetchNextPage() {
 
                 dlogVoltou('buscar');
                 ultimaBuscaFalhouPorRede = false;
+                buscaSemResposta = false;
                 busca.paginas++;
                 dlog('busca.ok', { n: (result.places || []).length, hasMore: !!result.hasMore,
                                    page: pagina, total: result.total });
@@ -15642,6 +15653,10 @@ function retomarBusca() {
 // justamente quando ela falha. Quem está no ar já vai processar a fila inteira,
 // então não há nada a anotar.
 API.aoProvarRede = () => {
+    // Uma resposta CHEGOU: a rede anda, e a foto que falhar daqui em diante não
+    // é "falta de sinal" (ver `buscaSemResposta`). ANTES da saída abaixo: no
+    // meio do esvaziamento também é prova.
+    buscaSemResposta = false;
     // SAI CEDO durante o esvaziamento, e agora por DOIS motivos. O primeiro já
     // estava escrito abaixo (retentar na hora contraria a política de rede). O
     // segundo é novo: varrer o offline no meio do esvaziamento é competir por
@@ -16590,7 +16605,13 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
 function marcarCardSemFoto(card, place) {
     if (!card || !place) return false;
     const tipoDeFoto = place.purType === 'NEW_PHOTO' || place.purType === 'FLAGGED_PHOTO';
-    if (!tipoDeFoto || navigator.onLine !== false) return false;
+    // "Sem rede" é também o LIE-FI: o `onLine` diz que há rede, a busca ficou
+    // sem resposta e nada respondeu depois (`buscaSemResposta`) — a fila guardada
+    // que abriu assim tinha o card de foto com "Sem Imagem" e ✕/✓ VIVOS, ou seja
+    // decidir a foto sem vê-la, enquanto no modo avião o mesmo card travava
+    // (auditoria de 2026-09-30, R5-4-4). A primeira resposta que chegar devolve
+    // a foto (`recuperarCardSemFoto`).
+    if (!tipoDeFoto || (navigator.onLine !== false && !buscaSemResposta)) return false;
     const caixa = card.querySelector('.card-photo');
     if (!caixa || caixa.querySelector('.card-sem-foto')) return false;
     for (const f of Array.from(caixa.children)) f.classList.add('hidden');
@@ -16626,8 +16647,9 @@ function marcarCardSemFoto(card, place) {
 // o card ficava travado até a pessoa pular (auditoria de 2026-09-25). Antes de
 // redesenhar, a foto é PROVADA numa <img> solta: redesenhar com a rede ainda
 // firmando (o `online` chega antes do sinal) daria "Sem Imagem" com ✕ e ✓
-// VIVOS — `marcarCardSemFoto` só trava sem rede —, ou seja decidir foto não
-// vista. Com a prova, o redesenho já acha a foto no cache HTTP.
+// VIVOS — `marcarCardSemFoto` só trava sem rede (ou no lie-fi, até a primeira
+// resposta chegar) —, ou seja decidir foto não vista. Com a prova, o redesenho
+// já acha a foto no cache HTTP.
 let provandoFotoDe = null;
 function recuperarCardSemFoto() {
     if (navigator.onLine === false) return;

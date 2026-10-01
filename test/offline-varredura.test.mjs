@@ -781,12 +781,12 @@ function aparelhoO1() {
       'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, ultimaBuscaFalhouPorRede = false,
-        abrindoGuardadaDepoisDaFalha = null, rebuscasAuto = 0, filaEsperaPerfil = false;
+        abrindoGuardadaDepoisDaFalha = null, rebuscasAuto = 0, filaEsperaPerfil = false, buscaSemResposta = false;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
       loadFilters();
       return { startFetching, abrirGuardadaDepoisDaFalha, offlineTentarAbrirSemRede,
-        falhouPorRede: () => ultimaBuscaFalhouPorRede };`)(...chaves.map((k) => deps[k]));
+        falhouPorRede: () => ultimaBuscaFalhouPorRede, semResposta: () => buscaSemResposta };`)(...chaves.map((k) => deps[k]));
     return { app, AppState, log, deps, base };
   };
 }
@@ -865,4 +865,69 @@ test('R4-O1: a fila que MUDA enquanto a base é lida (↻, filtro) não recebe a
   const [x, y] = await Promise.all([d.app.abrirGuardadaDepoisDaFalha(0), d.app.abrirGuardadaDepoisDaFalha(0)]);
   assert.ok(x === true && y === true);
   assert.equal(eventos(d, 'card').length, 1, 'a fila guardada foi aberta duas vezes');
+});
+
+// ── R5-4-4: o card de foto no LIE-FI (auditoria de 2026-09-30) ───────────────
+// A fila guardada aberta pelo lie-fi (o O1: `onLine` VERDADEIRO e a busca sem
+// resposta) mostrava o card de foto cuja foto não veio com "Sem Imagem" e ✕/✓
+// VIVOS — decidir a foto sem vê-la —, enquanto no modo avião o mesmo card dizia
+// "a foto precisa de sinal" e travava (medido no navegador, t9).
+const FALHA_502 = { success: false, error: 'origem', errorCategory: 'transient', httpCode: 502 };
+
+test('R5-4-4: a busca SEM resposta anota o lie-fi; a que teve resposta (502 da origem) não; e a busca que dá certo o apaga', async () => {
+  const pagina = await prepararO1();
+  const b = pagina({ onLine: true, api: () => FALHA_REDE });
+  await b.app.startFetching();
+  assert.equal(b.app.semResposta(), true, 'a busca sem resposta nenhuma não ficou anotada (o lie-fi)');
+  // A origem que RESPONDEU com erro não é falta de rede: a foto vem de outro servidor.
+  const c = pagina({ onLine: true, api: () => FALHA_502 });
+  await c.app.startFetching();
+  assert.equal(c.app.falhouPorRede(), true, 'PRÉ-CONDIÇÃO: o 502 não contou como falha da busca');
+  assert.equal(c.app.semResposta(), false, 'a origem que RESPONDEU 502 virou "sem rede" pra foto');
+  // A busca que dá certo apaga a marca.
+  let falhar = true;
+  const d = pagina({ onLine: true, api: () => (falhar ? FALHA_REDE : TRES()) });
+  await d.app.startFetching();
+  assert.equal(d.app.semResposta(), true, 'PRÉ-CONDIÇÃO: a falha sem resposta não foi anotada');
+  falhar = false;
+  d.AppState.queue = [];
+  d.AppState.hasMore = true;
+  await d.app.startFetching();
+  assert.equal(d.app.semResposta(), false, 'a busca que deu certo não apagou a marca do lie-fi');
+});
+
+test('R5-4-4: a primeira resposta que CHEGA apaga o lie-fi — antes da saída do esvaziamento', () => {
+  const prova = APP_SEM.slice(APP_SEM.indexOf('API.aoProvarRede = () => {'));
+  assert.match(prova, /^API\.aoProvarRede = \(\) => \{\s*buscaSemResposta = false;\s*if \(esvaziandoSaida\) return;/,
+    'a resposta que chega não apaga a marca do lie-fi (ou só depois da saída do esvaziamento)');
+});
+
+// A `marcarCardSemFoto` de VERDADE, com o card de mentira.
+function cardDeFotoQueFalhou({ onLine, semResposta }) {
+  const botao = () => ({ disabled: false, classList: { add() {} }, matches: () => false });
+  const bs = { '.card-btn-reject': botao(), '.card-btn-read': botao(), '.card-btn-skip': botao() };
+  const caixa = { children: [{ classList: { add() {} } }], querySelector: () => null, appendChild(el) { caixa.aviso = el; } };
+  const card = { querySelector: (sel) => (sel === '.card-photo' ? caixa : bs[sel] || null), contains: () => false };
+  const deps = {
+    document: { activeElement: null, createElement: () => ({ className: '', innerHTML: '' }) },
+    navigator: { onLine }, escapeHtml: (s) => s, t: (k) => k, focavelNaTela: () => false,
+  };
+  const nomes = Object.keys(deps);
+  const marcar = new Function(...nomes, `let buscaSemResposta = ${semResposta};
+    ${fatiar('marcarCardSemFoto')}\nreturn marcarCardSemFoto;`)(...nomes.map((n) => deps[n]));
+  const marcou = marcar(card, { purType: 'NEW_PHOTO' });
+  return { marcou, aviso: !!caixa.aviso, rejeitar: bs['.card-btn-reject'].disabled, lido: bs['.card-btn-read'].disabled,
+    pular: bs['.card-btn-skip'].disabled };
+}
+
+test('R5-4-4: no lie-fi, a foto que não veio TRAVA ✕ e ✓ e diz que precisa de sinal — como no modo avião', () => {
+  const lie = cardDeFotoQueFalhou({ onLine: true, semResposta: true });
+  assert.deepEqual(lie, { marcou: true, aviso: true, rejeitar: true, lido: true, pular: false },
+    'no lie-fi, o card de foto sem a foto ficou com ✕/✓ VIVOS ("Sem Imagem"): decidir a foto sem vê-la');
+  // CONTROLE: com a rede respondendo, a foto que falhou é foto quebrada — "Sem Imagem" e ✕/✓ vivos.
+  assert.deepEqual(cardDeFotoQueFalhou({ onLine: true, semResposta: false }),
+    { marcou: false, aviso: false, rejeitar: false, lido: false, pular: false },
+    'CONTROLE: com rede, a foto quebrada passou a travar o card');
+  // E o modo avião continua travando (o caminho de sempre).
+  assert.equal(cardDeFotoQueFalhou({ onLine: false, semResposta: false }).marcou, true, 'o modo avião deixou de travar');
 });
