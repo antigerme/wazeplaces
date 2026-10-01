@@ -1983,6 +1983,35 @@ function devolverFocoDaAmpliacao(quem, noCard) {
     devolverFoco(null);
 }
 
+// O foco PERDIDO: no <body>, ou num elemento que saiu da página.
+function focoPerdido() {
+    const a = document.activeElement;
+    return !a || a === document.body || !a.isConnected;
+}
+
+// Nenhuma camada por cima do card (modal, foto ou mapa ampliados).
+function semCamadaAberta() {
+    return !topOpenModal() && !(typeof Lightbox !== 'undefined' && Lightbox.isOpen())
+        && !(typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen());
+}
+
+// Uma escrita do lightbox que POUSA (ou volta) com a foto já fechada TROCA ou
+// REDESENHA o card da frente — e o foco que estava nele caía no <body>: o
+// fechar da foto o devolve à foto do card (L12), a aprovação pousa e o card
+// anda (`tirarAprovadoDaFila`), a exclusão sem Desfazer pousa ou o Desfazer
+// pela tecla z devolve a foto e o card é redesenhado (`showCurrentPlace`).
+// MEDIDO nos três, no Chromium e no WebKit (auditoria de 2026-09-30, R5-3-07,
+// a família do C10). O foco vai ao equivalente no card que ficou: a foto ou o
+// mapa dele. Só quando o foco ESTAVA no card — quem o pôs ali foi o app, ao
+// fechar a ampliação; o foco que a pessoa levou a outro lugar fica onde está.
+function mantendoFocoNoCard(redesenhar) {
+    const card = cardDaFrente();
+    const a = document.activeElement;
+    const estavaNoCard = !!(card && a && a !== document.body && card.contains(a));
+    redesenhar();
+    if (estavaNoCard && focoPerdido() && semCamadaAberta()) devolverFocoDaAmpliacao(null, ['.card-image', '.card-map']);
+}
+
 // O foco não pode CAIR no <body> com a foto ampliada aberta: ela é
 // `aria-modal`, e o Tab recomeçaria do topo da página, atrás da camada.
 // Quando o controle com o foco some ou trava — a edição do nome fechando, o
@@ -2855,6 +2884,27 @@ async function refazerDepoisDo401(epoca, enviar) {
     }
 }
 
+// As idas de UMA escrita do lightbox, contadas: quantas terminaram SEM resposta
+// (`transient` — a rede que caiu na volta, o prazo que estourou, o Waze lento
+// que o servidor largou) e por isso podem ter POUSADO. A retentativa do
+// `callWithRetry` vai de novo, e a 2ª volta "já feito": o Waze não diz por
+// quem, só o aparelho sabe que houve uma ida dele antes. Sem esta conta, a
+// exclusão dizia "Outro editor já tinha excluído 👍" e a aprovação "Já tratado
+// por outro editor 👍" — atribuindo a escrita da PRÓPRIA pessoa a outro, e na
+// aprovação ainda tirando a foto das aprovadas (sem a lixeira, com ela no mapa)
+// e não contando o "Curador". MEDIDO: 2 idas, a 1ª com a resposta perdida, nos
+// dois (auditoria de 2026-09-30, R5-3-04/R56-4). "Já feito" depois de uma ida
+// sem resposta é desta pessoa.
+function contarIdasSemResposta(ir) {
+    const enviar = async () => {
+        const r = await ir();
+        if (r && !r.success && r.errorCategory === 'transient') enviar.semResposta++;
+        return r;
+    };
+    enviar.semResposta = 0;
+    return enviar;
+}
+
 // Manda pro Waze de verdade. Se falhar, a foto VOLTA — mesma gramática do
 // swipe, que reverte o placar quando o Waze recusa.
 // Devolve se a foto SAIU do mapa: quem espera a resposta (o caminho sem
@@ -2866,8 +2916,9 @@ async function enviarExclusao(alvo) {
         // Com a MESMA política de retentativa do resto (o renomear já a tinha):
         // uma oscilação de rede virava "não deu pra excluir" na primeira falha
         // (auditoria de 2026-09-25). Repetir é seguro: a exclusão relê o local,
-        // e a foto que já saiu volta como `jaExcluida`.
-        const enviar = () => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon, alvo.regiao);
+        // e a foto que já saiu volta como `jaExcluida` — de quem, diz a conta
+        // das idas (`contarIdasSemResposta`).
+        const enviar = contarIdasSemResposta(() => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon, alvo.regiao));
         let r = await callWithRetry(enviar);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
             r = await refazerDepoisDo401(epoca, enviar);
@@ -2881,11 +2932,13 @@ async function enviarExclusao(alvo) {
         if (r && r.success) {
             // Sem toast de sucesso: a foto sumindo JÁ é a confirmação, e
             // anunciar o que a pessoa está vendo acontecer é ruído. O aviso
-            // fica só pro caso em que nada muda na tela por causa dela.
-            if (r.jaExcluida) showToast(t('toast.photoAlreadyGone'), 'info');
+            // fica só pro caso em que nada muda na tela por causa dela — e só
+            // se a foto saiu por OUTRO: "já excluída" depois de uma ida sem
+            // resposta é a exclusão desta pessoa (R5-3-04).
+            if (r.jaExcluida && !enviar.semResposta) showToast(t('toast.photoAlreadyGone'), 'info');
             aplicarNosIrmaos(alvo.place, (q) => {
                 Lightbox.removerFoto(alvo.id, q);
-                if (AppState.currentPlace === q) showCurrentPlace();
+                if (AppState.currentPlace === q) mantendoFocoNoCard(showCurrentPlace);
             });
             return true;
         }
@@ -2926,7 +2979,9 @@ function devolverFoto(alvo) {
         p.imageUrl = p.imageUrls[0] || null;
     }
     if (Lightbox.place === p) Lightbox.recolocarFoto(alvo.url, alvo.idx);
-    if (AppState.currentPlace === p) showCurrentPlace();
+    // O card é redesenhado debaixo do foco — o Desfazer pela tecla z, com a foto
+    // já fechada, e a falha que chega depois (R5-3-07).
+    if (AppState.currentPlace === p) mantendoFocoNoCard(showCurrentPlace);
 }
 
 function pedirExclusaoDaFoto() {
@@ -2974,7 +3029,8 @@ function pedirExclusaoDaFoto() {
             lixeiraOcupada(false);
             if (!saiuDoMapa) return;
             Lightbox.removerFoto(alvo.id, place);
-            if (AppState.currentPlace === place) showCurrentPlace();
+            // Com a foto já fechada, o card é redesenhado debaixo do foco (R5-3-07).
+            if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace);
         });
         // A lixeira com o foco virou spinner (`disabled`): o foco fica na camada.
         manterFocoNoLightbox();
@@ -3065,8 +3121,9 @@ async function enviarAprovacao(alvo) {
     aplicarTravaDeAcao();
     try {
         // Retentativa como no excluir e no renomear; repetir é seguro — a 2ª
-        // de uma aprovação que passou volta `already_processed`, que conta.
-        const enviar = () => API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID, alvo.regiao);
+        // de uma aprovação que passou volta `already_processed`, e é DESTA
+        // pessoa quando houve uma ida sem resposta antes (`contarIdasSemResposta`).
+        const enviar = contarIdasSemResposta(() => API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID, alvo.regiao));
         let r = await callWithRetry(enviar);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
             r = await refazerDepoisDo401(epoca, enviar);
@@ -3077,12 +3134,18 @@ async function enviarAprovacao(alvo) {
             if (!pousouNoWaze(r)) escritaDoLightboxSemSessao(alvo.place, () => Lightbox.desmarcarAprovada(alvo), 'toast.photoApproveFailed');
             return false;
         }
-        if (r && r.success) {
+        const jaFeito = !!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'));
+        // "Já feito" depois de uma ida SEM resposta é a aprovação DESTA pessoa
+        // que pousou e cuja resposta se perdeu (R5-3-04): vale como o sucesso —
+        // a foto aprovada, com a lixeira, e o "Curador" — e sem o aviso de
+        // "outro editor".
+        if ((r && r.success) || (jaFeito && enviar.semResposta)) {
             // Sem toast de sucesso: o ✨ sumindo e o botão virando lixeira JÁ
             // dizem que valeu — mesma razão do excluir.
             concluirAprovacao(alvo);
             // "Curador" conta CURADORIA SUA. O `already_processed` logo abaixo
-            // é outro editor que aprovou antes — conta pro placar, não pra esta.
+            // (sem ida perdida antes) é outro editor que tratou antes — conta
+            // pro placar, não pra esta.
             contarConquista('fotos');
             return true;
         }
@@ -3093,7 +3156,7 @@ async function enviarAprovacao(alvo) {
         // e aí ela nem está no mapa — a lixeira que aparecia no lugar do
         // "Aprovar" ofereceria apagar o que não existe. Ela deixa de ser a
         // proposta (o pedido acabou) e fica sem ação nenhuma.
-        if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
+        if (jaFeito) {
             Lightbox.esquecerProposta(alvo);
             concluirAprovacao(alvo);
             showToast(t('toast.alreadyProcessed'), 'info');
@@ -3154,7 +3217,8 @@ function concluirAprovacao(alvo) {
 // ("já tratado") e o "Restam" terminava em 0 com C na tela (auditoria de
 // 2026-09-29, L22). O "Restam" já foi descontado no `concluirAprovacao`.
 function tirarAprovadoDaFila(place) {
-    if (AppState.currentPlace === place) { advanceQueue(); return; }
+    // A fila anda debaixo do foco, quando a foto já fechou (R5-3-07).
+    if (AppState.currentPlace === place) { mantendoFocoNoCard(advanceQueue); return; }
     const i = AppState.queue.indexOf(place);
     if (i < 0) return;   // a fila já andou, ou foi refeita (↻, filtro): ele nem está nela
     AppState.queue.splice(i, 1);
@@ -3618,7 +3682,16 @@ function mostrarDesfazer(mensagem, aoDesfazer) {
         <span class="undo-progress" style="animation-duration: ${UNDO_WINDOW_MS}ms" aria-hidden="true"></span>
     `;
     container.appendChild(banner);
-    document.getElementById('undoBtn').addEventListener('click', () => aoDesfazer());
+    document.getElementById('undoBtn').addEventListener('click', (ev) => {
+        // Enter no "Desfazer" com a foto já fechada: o banner some com o foco
+        // nele, e o foco caía no <body> — o do card ganhou o par dele no C10, e
+        // este não (auditoria de 2026-09-30, R5-3-07). Pelo teclado (o mesmo
+        // critério do card), ele vai à foto do card, de onde a escrita saiu. Com
+        // a foto ou o mapa abertos, quem segura o foco é a camada.
+        const peloTeclado = veioDoTeclado(ev);
+        aoDesfazer();
+        if (peloTeclado && focoPerdido() && semCamadaAberta()) devolverFocoDaAmpliacao(null, ['.card-image', '.card-map']);
+    });
 }
 
 function populateCountrySelect() {

@@ -136,7 +136,7 @@ function montarAprovacao({ epocaDoGesto = 0 } = {}) {
   const deps = {
     AppState, registrarPouso: () => log.push('pouso'), updateStats: () => {},
     Lightbox: { isOpen: () => false, place: null }, advanceQueue: () => log.push('avanca'),
-    updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
+    updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {}, mantendoFocoNoCard: (redesenhar) => redesenhar(),
   };
   const chaves = Object.keys(deps);
   const concluir = new Function(...chaves, 'let placeResolvidoPorAprovacao = null; let tratouNestaFila = false;\n'
@@ -199,6 +199,8 @@ function montarUltimaAprovacao({ lightboxAberto = false } = {}) {
     // frase e a festa por `tratouNestaFila` — lido NESTE instante.
     advanceQueue: () => log.push('avanca:tratou=' + app.tratou()),
     updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
+    // O foco que fica no card trocado (R5-3-07) é medido em test/lightbox-foco-card.test.mjs.
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
   };
   const chaves = Object.keys(deps);
   app = new Function(...chaves, 'let placeResolvidoPorAprovacao = null; let tratouNestaFila = false;\n'

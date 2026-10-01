@@ -178,7 +178,7 @@ test('L5 aprovação que FALHA depois de excluir uma foto ANTERIOR: o ✨ volta 
 // ── o caminho SEM Desfazer: só aplica o que o Waze confirmou ────────────────
 // `noAr`: o estado de uma escrita de foto sem janela no ar (L24). `regiao`: a
 // região de AGORA, que o teste troca entre o gesto e o envio (L26).
-function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoNaTela = true, noAr = {}, regiao = { v: 'row' } }) {
+function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoNaTela = true, noAr = {}, regiao = { v: 'row' }, extra = {} }) {
   const log = [];
   const timers = [];
   const L = lightbox();
@@ -205,10 +205,15 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     voltarDaAprovacaoRecusada: () => {},
     // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
     aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    // O foco que fica no card trocado debaixo dele (R5-3-07) é medido à parte,
+    // em test/lightbox-foco-card.test.mjs: aqui só redesenha.
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
+    // `extra`: troca qualquer dependência acima (R5-3-07).
+    ...extra,
   };
   let placeResolvido = null;
   const nomes = ['enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual', 'enviarExclusao', 'pedirExclusaoDaFoto',
-    'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao'];
+    'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao', 'contarIdasSemResposta'];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -310,8 +315,10 @@ test('aprovar e excluir foto passam pela MESMA retentativa do resto (o renomear 
   // passou volta `already_processed` (que conta), e a exclusão relê o local.
   // A ida sai por uma função (`enviar`), que o `refazerDepoisDo401` reusa
   // pra segunda ida (L1) — pela MESMA retentativa.
-  assert.match(fatiar('enviarAprovacao'), /const enviar = \(\) => API\.aprovarPedido\([^\n]*\n\s+let r = await callWithRetry\(enviar\)/);
-  assert.match(fatiar('enviarExclusao'), /const enviar = \(\) => API\.excluirFoto\([^\n]*\n\s+let r = await callWithRetry\(enviar\)/);
+  // As idas são CONTADAS (`contarIdasSemResposta`): o "já feito" depois de uma
+  // ida sem resposta é desta pessoa (R5-3-04, medido no fim deste arquivo).
+  assert.match(fatiar('enviarAprovacao'), /const enviar = contarIdasSemResposta\(\(\) => API\.aprovarPedido\([^\n]*\n\s+let r = await callWithRetry\(enviar\)/);
+  assert.match(fatiar('enviarExclusao'), /const enviar = contarIdasSemResposta\(\(\) => API\.excluirFoto\([^\n]*\n\s+let r = await callWithRetry\(enviar\)/);
   assert.match(fatiar('refazerDepoisDo401'), /await callWithRetry\(enviar\)/,
     'a segunda ida depois do 401 saiu da retentativa do resto');
 });
@@ -334,10 +341,11 @@ function montarIrmaos(resposta) {
     montarCardDeFundo: () => log.push('fundo'), cardDaFrente: () => null, document: { getElementById: () => null },
     // A renomeação no ar trava a pílula do local (L23).
     renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {},
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
   };
   const chaves = Object.keys(deps);
   const nomes = ['aplicarNosIrmaos', 'enviarExclusao', 'enviarRenomeacao', 'aplicarNomeNaTela',
-    'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao'];
+    'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao', 'contarIdasSemResposta'];
   const app = new Function(...chaves, nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...chaves.map((k) => deps[k]));
   return { app, A, B, C, log };
 }
@@ -383,7 +391,7 @@ const R401 = { success: false, errorCategory: 'unauthorized', error: 'HTTP 403',
 // na conferência (a fila vai embora e a foto fecha). `quedaNaIda`: a sessão cai
 // por OUTRA chamada com a primeira ida no ar. `viva` pode ser uma função (ver o
 // V5, em que a prova de vida só chega quando a conferência de OUTRO 401 acaba).
-function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, quedaNaIda = false }) {
+function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, quedaNaIda = false, retentativa = null, extra = {} }) {
   const log = [];
   const L = lightbox();
   const P = { venueID: 'v1', updateRequestID: 'ur-P', purType: 'NEW_PHOTO', name: 'Padaria Nova',
@@ -399,7 +407,8 @@ function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, que
     return respostas[Math.min(idas, respostas.length) - 1];
   };
   const deps = {
-    AppState, Lightbox: L, callWithRetry: (fn) => fn(),
+    // `retentativa`: o `callWithRetry` de VERDADE (R5-3-04); sem ela, uma ida só.
+    AppState, Lightbox: L, callWithRetry: retentativa || ((fn) => fn()),
     API: { excluirFoto: proxima, aprovarPedido: proxima, renomearLocal: proxima },
     handleUnauthorized: async () => {
       log.push('confere');
@@ -409,16 +418,18 @@ function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, que
     sessaoVivaDepoisDe: () => (typeof viva === 'function' ? viva() : viva),
     aplicarTravaDeAcao: () => log.push('trava:' + app.conferindo()),
     showToast: (m, tipo) => log.push(`toast:${tipo}:${m}`), msgDoServidor: (r) => (r && r.error) || '', t: (k) => k,
-    devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {}, contarConquista: () => {},
+    devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {}, contarConquista: (k) => log.push('conquista:' + k),
     montarCardDeFundo: () => {}, cardDaFrente: () => null, document: { getElementById: () => null },
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, advanceQueue: () => log.push('avancou'),
     marcarEmAndamento: () => {}, voltarDaAprovacaoRecusada: () => {},
     renomeacoesNoAr: new Set(), updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
     aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
+    ...extra,
   };
   const nomes = ['refazerDepoisDo401', 'enviarExclusao', 'enviarAprovacao', 'concluirAprovacao',
     'enviarRenomeacao', 'aplicarNosIrmaos', 'aplicarNomeNaTela', 'nomeDestaEscrita', 'devolverNome',
-    'escritaDoLightboxSemSessao', 'tirarAprovadoDaFila', 'pousouNoWaze'];
+    'escritaDoLightboxSemSessao', 'tirarAprovadoDaFila', 'pousouNoWaze', 'contarIdasSemResposta'];
   const chaves = Object.keys(deps);
   app = new Function(...chaves, 'epocaDaSessao', 'escritasConferindo', 'placeResolvidoPorAprovacao',
     'verificandoSessao', 'conferenciaDaSessao',
@@ -613,8 +624,8 @@ function lightboxQueAbre() {
     isOpen() { return this.aberto; }, _render() { this.renders++; }, close() { this.aberto = false; },
     ${corpo}
   };`)(doc, { empilhar() {} }, () => {}, () => true);
-  const devolverFoto = new Function('Lightbox', 'AppState', 'showCurrentPlace', fatiar('devolverFoto') + '\nreturn devolverFoto;')(
-    L, { currentPlace: null }, () => {});
+  const devolverFoto = new Function('Lightbox', 'AppState', 'showCurrentPlace', 'mantendoFocoNoCard',
+    fatiar('devolverFoto') + '\nreturn devolverFoto;')(L, { currentPlace: null }, () => {}, (redesenhar) => redesenhar());
   return { L, devolverFoto };
 }
 
@@ -828,9 +839,11 @@ function montarAprovacao({ semJanela = false, resposta = { success: true } } = {
     voltarDaAprovacaoRecusada: () => {},
     // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
     aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'semOsJaDecididos', 'enviarAprovacao', 'concluirAprovacao',
-    'aprovarFotoAtual', 'refazerDepoisDo401', 'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao'];
+    'aprovarFotoAtual', 'refazerDepoisDo401', 'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao',
+    'contarIdasSemResposta'];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -948,7 +961,8 @@ test('L22 aprovar B com A de volta na frente (o Desfazer): B sai da fila, A fica
   let resolvido = null;
   const deps = { AppState, Lightbox: L, registrarPouso: () => log.push('pouso'), updateStats: () => {},
     advanceQueue: () => log.push('avancou'), updatePendingCount: () => log.push('restam'),
-    aoMudarAFilaPorBaixo: () => log.push('fundo'), aprovacaoPendente: null };
+    aoMudarAFilaPorBaixo: () => log.push('fundo'), aprovacaoPendente: null,
+    mantendoFocoNoCard: (redesenhar) => redesenhar() };
   const chaves = Object.keys(deps);
   const corpo = ['concluirAprovacao', 'avancarSeAprovado', 'tirarAprovadoDaFila'].map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ').replace(/const alvo = placeResolvidoPorAprovacao/, 'const alvo = __res.v')
@@ -966,11 +980,11 @@ test('L22 aprovar B com A de volta na frente (o Desfazer): B sai da fila, A fica
   assert.ok(!log.includes('avancou'), 'a fila andou: A saiu da frente sem ninguém decidir A');
   assert.ok(log.includes('restam') && log.includes('fundo'), 'o "Restam" e o card de fundo (que anunciava B) não se refizeram');
   // CONTROLE: quando o aprovado É o da frente, a fila anda, como sempre.
-  const f = new Function('AppState', 'advanceQueue', 'updatePendingCount', 'aoMudarAFilaPorBaixo',
+  const f = new Function('AppState', 'advanceQueue', 'updatePendingCount', 'aoMudarAFilaPorBaixo', 'mantendoFocoNoCard',
     fatiar('tirarAprovadoDaFila') + '\nreturn tirarAprovadoDaFila;');
   const Q = { queue: [A, C], currentPlace: A };
   const lg = [];
-  f(Q, () => lg.push('avancou'), () => {}, () => {})(A);
+  f(Q, () => lg.push('avancou'), () => {}, () => {}, (redesenhar) => redesenhar())(A);
   assert.deepEqual(lg, ['avancou']);
   // E fora da fila (↻ e filtro refazem a fila; o pedido nem está nela): nada.
   const R = { queue: [C], currentPlace: C };
@@ -1266,10 +1280,11 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
     // A escrita que não chegou ao Waze porque a sessão acabou volta na tela (lote 8
     // do lightbox, V2): aqui só se anota — o que se mede é a trava do card.
     escritaDoLightboxSemSessao: () => log.push('sem-sessao'),
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
-    'agirNoPedidoDoGesto'];
+    'agirNoPedidoDoGesto', 'contarIdasSemResposta'];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -1362,4 +1377,107 @@ test('A1: a queda e o "Sair" soltam as aprovações no ar (a mesma regra do lote
       `${nome} não solta as aprovações no ar: a sessão seguinte nasce travada pela resposta da anterior`);
   }
   assert.ok(SEM.includes('const aprovacoesNoAr = new Set();'));
+});
+
+// ── R5-3-04 (R56-4): a retentativa que volta "já feito" é a escrita DESTA pessoa
+// (auditoria de 2026-09-30). A 1ª ida POUSA e a resposta se perde — a rede que
+// caiu na volta, o servidor que largou o Waze lento (`transient`) —; o
+// `callWithRetry` vai de novo, e a 2ª volta "já feito". O Waze não diz por quem:
+// só o aparelho sabe que houve uma ida dele antes. MEDIDO no navegador, 2 idas,
+// a 1ª com `route.abort('connectionreset')`: a exclusão dizia "Outro editor já
+// tinha excluído 👍"; a aprovação dizia "Já tratado por outro editor 👍", tirava
+// a foto das aprovadas (sem a lixeira, com ela no mapa) e não contava o
+// "Curador". O `callWithRetry` de VERDADE (sem as esperas), com as escritas de
+// verdade.
+const TRANSIENT = { success: false, errorCategory: 'transient', error: 'Failed to fetch' };
+function retentativaDeVerdade() {
+  const tentativas = Number(/^const TRANSIENT_RETRY_ATTEMPTS = (\d+);$/m.exec(APP_SEM)[1]);
+  return new Function('epocaDaSessao', 'sessaoTrocou', 'navigator', 'TRANSIENT_RETRY_ATTEMPTS',
+    'TRANSIENT_RETRY_DELAYS_MS', 'setTimeout', fatiar('callWithRetry') + '\nreturn callWithRetry;')(
+    0, () => ({ success: false, errorCategory: 'unauthorized' }), { onLine: true }, tentativas, [], (fn) => fn());
+}
+const avisos = (log) => log.filter((l) => l.startsWith('toast:'));
+
+test('R5-3-04 aprovar: "já tratado" depois de uma ida SEM resposta é a aprovação desta pessoa — aprovada, com o "Curador", sem aviso', async () => {
+  for (const respostas of [[TRANSIENT, { success: false, errorCategory: 'already_processed' }],
+    [TRANSIENT, { success: false, errorCategory: 'not_found' }],
+    [TRANSIENT, TRANSIENT, { success: false, errorCategory: 'already_processed' }]]) {
+    const m = montarL1({ respostas, viva: true, retentativa: retentativaDeVerdade() });
+    const alvo = { id: 'ur-P', place: m.P, idx: 0 };
+    m.L.marcarComoAprovada(alvo);                  // o que o gesto fez
+    const rot = respostas.map((r) => r.errorCategory).join(' → ');
+    assert.equal(await m.app.enviarAprovacao(alvo), true, `${rot}: a aprovação desta pessoa foi dada como não feita`);
+    assert.equal(m.idas(), respostas.length, `PRÉ-CONDIÇÃO (${rot}): a retentativa de verdade não foi de novo`);
+    assert.deepEqual(avisos(m.log), [], `${rot}: a aprovação DESTA pessoa foi atribuída a outro editor`);
+    assert.ok(m.P.approvedImageIds.includes('ur-P'), `${rot}: a foto saiu das aprovadas (sem a lixeira) — e ela está no mapa`);
+    assert.deepEqual(m.log.filter((l) => l.startsWith('conquista:')), ['conquista:fotos'], `${rot}: o "Curador" não contou`);
+    assert.deepEqual(m.log.filter((l) => l === 'pouso'), ['pouso']);
+  }
+  // CONTROLE: "já tratado" na 1ª ida (a resposta chegou) é OUTRO editor — o L30.
+  const o = montarL1({ respostas: [{ success: false, errorCategory: 'already_processed' }], viva: true, retentativa: retentativaDeVerdade() });
+  const alvoO = { id: 'ur-P', place: o.P, idx: 0 };
+  o.L.marcarComoAprovada(alvoO);
+  assert.equal(await o.app.enviarAprovacao(alvoO), false);
+  assert.deepEqual(avisos(o.log), ['toast:info:toast.alreadyProcessed'], 'CONTROLE: o "outro editor" de verdade deixou de ser avisado');
+  assert.ok(!o.P.approvedImageIds.includes('ur-P'), 'CONTROLE: a foto que OUTRO tratou virou "aprovada"');
+  assert.ok(!o.log.includes('conquista:fotos'), 'CONTROLE: o "Curador" contou a curadoria de outro editor');
+  // CONTROLE: o 401 é uma resposta — a escrita NÃO saiu; o "já tratado" da 2ª
+  // ida (a sessão conferida viva) é de outro editor.
+  const u = montarL1({ respostas: [R401, { success: false, errorCategory: 'already_processed' }], viva: true, retentativa: retentativaDeVerdade() });
+  const alvoU = { id: 'ur-P', place: u.P, idx: 0 };
+  u.L.marcarComoAprovada(alvoU);
+  await u.app.enviarAprovacao(alvoU);
+  assert.deepEqual(avisos(u.log), ['toast:info:toast.alreadyProcessed'], 'CONTROLE: o 401 contou como ida sem resposta');
+});
+
+test('R5-3-04 excluir: "já excluída" depois de uma ida SEM resposta é a exclusão desta pessoa — sem "outro editor"', async () => {
+  for (const respostas of [[TRANSIENT, { success: true, jaExcluida: true }],
+    [TRANSIENT, TRANSIENT, { success: true, jaExcluida: true }]]) {
+    const m = montarL1({ respostas, viva: true, retentativa: retentativaDeVerdade() });
+    const rot = respostas.length + ' idas';
+    assert.equal(await m.app.enviarExclusao({ id: 'a1', place: m.P, idx: 0, url: FOTO('a1') }), true);
+    assert.equal(m.idas(), respostas.length, `PRÉ-CONDIÇÃO (${rot}): a retentativa de verdade não foi de novo`);
+    assert.deepEqual(avisos(m.log), [], `${rot}: a exclusão DESTA pessoa foi atribuída a outro editor`);
+    assert.deepEqual(m.irmao.imageUrls, [FOTO('ur-P')], `${rot}: a foto excluída ficou nos irmãos`);
+  }
+  // CONTROLE: "já excluída" na 1ª ida (a resposta chegou) é OUTRO editor.
+  const o = montarL1({ respostas: [{ success: true, jaExcluida: true }], viva: true, retentativa: retentativaDeVerdade() });
+  assert.equal(await o.app.enviarExclusao({ id: 'a1', place: o.P, idx: 0, url: FOTO('a1') }), true);
+  assert.deepEqual(avisos(o.log), ['toast:info:toast.photoAlreadyGone'], 'CONTROLE: o "outro editor" de verdade deixou de ser avisado');
+  // CONTROLE: a ida sem resposta que NÃO pousou e não volta (três sem resposta):
+  // a foto volta e a falha é avisada, como sempre.
+  const f = montarL1({ respostas: [TRANSIENT, TRANSIENT, TRANSIENT], viva: true, retentativa: retentativaDeVerdade() });
+  assert.equal(await f.app.enviarExclusao({ id: 'a1', place: f.P, idx: 0, url: FOTO('a1') }), false);
+  assert.ok(f.log.includes('devolveu'), 'CONTROLE: a foto da exclusão que não pousou não voltou');
+  assert.equal(erros(f.log).length, 1, 'CONTROLE: a falha da exclusão deixou de ser avisada');
+});
+
+// ── R5-3-07: a exclusão que pousa com a foto JÁ fechada redesenha o card pelo
+// foco do card (`mantendoFocoNoCard`, medido em test/lightbox-foco-card) ──────
+// MEDIDO (auditoria de 2026-09-30): excluir sem o Desfazer e fechar com a
+// escrita no ar — o `.then` redesenhava o card e o foco, na foto do card desde o
+// fechar (L12), caía no <body>. E o irmão do mesmo local que virou o card da
+// frente (o pedido decidido no meio) é redesenhado igual.
+test('R5-3-07 excluir sem o Desfazer: o card redesenhado quando a exclusão pousa passa pelo foco do card — o dele e o do irmão', async () => {
+  const ordem = [];
+  const extra = { mantendoFocoNoCard: (redesenhar) => { ordem.push('guarda'); redesenhar(); },
+    showCurrentPlace: () => ordem.push('redesenhou'), aplicarNosIrmaos: () => {} };
+  const m = montarEscritas({ resposta: { success: true }, extra });
+  m.L.place.approvedImageIds = ['velha'];
+  m.L.place.lat = -23; m.L.place.lon = -46;
+  m.L.idx = 0;
+  m.L.idFotoAtual = () => 'velha';
+  m.app.pedirExclusaoDaFoto();
+  m.L.aberto = false;                               // fechou com a escrita no ar
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.ok(m.log.includes('api:excluir:row'), 'PRÉ-CONDIÇÃO: a exclusão não saiu');
+  assert.deepEqual(ordem, ['guarda', 'redesenhou'], 'a exclusão pousada redesenha o card por fora do foco do card (caminho 2)');
+  // O irmão do mesmo local na frente: redesenhado pelo mesmo caminho.
+  ordem.length = 0;
+  const i = montarL1({ respostas: [{ success: true }], viva: true,
+    extra: { mantendoFocoNoCard: extra.mantendoFocoNoCard, showCurrentPlace: extra.showCurrentPlace } });
+  i.AppState.currentPlace = i.irmao;
+  assert.equal(await i.app.enviarExclusao({ id: 'a1', place: i.P, idx: 0, url: FOTO('a1') }), true);
+  assert.deepEqual(ordem, ['guarda', 'redesenhou'], 'o irmão da frente é redesenhado por fora do foco do card');
 });
