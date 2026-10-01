@@ -7207,6 +7207,13 @@ async function diagCorpo() {
             // `diag-rede` passa POR FORA do service worker (ver lá): sem isso o
             // "servidor" era o cache do próprio aparelho, e dava "igual" sempre.
             const r = await diagFetch(u + (u.indexOf('?') === -1 ? '?' : '&') + 'diag-rede=1', { cache: 'reload' }, prazo);
+            // Resposta que não é OK não é "o servidor": com a origem fora do ar,
+            // quem responde é a BORDA, com a página de erro dela (502, ~50 bytes),
+            // e comparar com ela acusava "código diferente do servidor" em TODO
+            // arquivo — justo no caso em que o app instalado abre da cópia
+            // guardada (auditoria de 2026-10-01, R5-4-3). Fica "sem conferir",
+            // com o status; o corpo de erro nem é lido.
+            if (!r.ok) return { erro: 'http ' + r.status, http: r.status };
             const remoto = await r.text();
             // Sem o script da borda nos DOIS lados (ver `diagSemInjecaoDaBorda`);
             // `borda` diz que ele estava lá e foi descontado.

@@ -380,6 +380,44 @@ test('diag-resumo: o `/` que difere SÓ pelo script do Cloudflare não vira "ver
   assert.match(rodar(c2), /ATENÇÃO: o aparelho roda código diferente/, 'no v9 o `/` diferente passou a ser ignorado');
 });
 
+test('diag-resumo: com a ORIGEM FORA DO AR (a borda responde 502) nada é "diferente" — é "sem conferir", com o status (R5-4-3)', () => {
+  // Auditoria de 2026-10-01: com a origem fora, a releitura do "servidor" é a
+  // página de erro da BORDA (502, 50 bytes), e a triagem acusava "código
+  // diferente do servidor" nos 11 arquivos.
+  const ARQUIVOS = ['/', '/service-worker.js', '/css/app.css', '/manifest.json', '/js/min/version.js', '/js/min/i18n.js',
+    '/js/min/api.js', '/js/min/mapa.js', '/js/min/app.js', '/js/min/presenca.js', '/js/min/swipe.js'];
+  const com = (v) => Object.fromEntries(ARQUIVOS.map((u) => ['https://x.dev' + u, v]));
+  const confere = (s, rotulo) => {
+    assert.match(s, /11 arquivos conferidos com o servidor · diferentes: 0 · sem conferir: 11/, `${rotulo}: a página de erro da borda contou como diferença`);
+    assert.match(s, /sem conferir: o servidor respondeu 502 em 11 arquivos — a origem fora do ar/, `${rotulo}: a triagem não diz o status`);
+    assert.doesNotMatch(s, /DIFERENTE: /, `${rotulo}: arquivo listado como diferente`);
+    assert.doesNotMatch(s, /ATENÇÃO: o aparelho roda código diferente/, `${rotulo}: alarme falso de versão velha`);
+  };
+  // O formato do relatório da versão em produção: `igual: false`, com o `http` da borda.
+  const velho = relatorioV8();
+  velho._versaoDoDiag = 11;
+  velho.cacheVsRede = com({ aparelho: 'aaaa', servidor: 'bbbb', igual: false, bytesAparelho: 18157, bytesServidor: 50, http: 502 });
+  confere(rodar(velho), 'relatório de antes');
+  // O de hoje: o app já marca `erro` com o status.
+  const novo = relatorioV8();
+  novo._versaoDoDiag = 11;
+  novo.cacheVsRede = com({ erro: 'http 502', http: 502 });
+  confere(rodar(novo), 'relatório de hoje');
+  // Um 404 também é "sem conferir", sem a nota da origem fora.
+  const quatro = relatorioV8();
+  quatro.cacheVsRede = { 'https://x.dev/js/min/app.js': { erro: 'http 404', http: 404 } };
+  const q = rodar(quatro);
+  assert.match(q, /sem conferir: o servidor respondeu 404 em 1 arquivo: não há com o que comparar/);
+  assert.doesNotMatch(q, /404 .*origem fora/);
+  // CONTROLE: com o servidor de pé, o arquivo diferente segue acusado.
+  const c = relatorioV8();
+  c.cacheVsRede = { 'https://x.dev/js/min/app.js': { aparelho: 'eeee', servidor: 'ffff', igual: false, bytesAparelho: 70000, bytesServidor: 70100, http: 200 } };
+  const t = rodar(c);
+  assert.match(t, /1 arquivos conferidos com o servidor · diferentes: 1/);
+  assert.match(t, /ATENÇÃO: o aparelho roda código diferente/, 'CONTROLE: a diferença de verdade deixou de ser acusada');
+  assert.doesNotMatch(t, /sem conferir/);
+});
+
 test('diag-resumo v10: o "já tratado" não é FALHOU — nem na lista, nem na conta, nem nas aberturas anteriores', () => {
   const d = relatorioV4();
   d._versaoDoDiag = 10;

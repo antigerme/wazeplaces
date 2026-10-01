@@ -1055,6 +1055,42 @@ test('código: o cacheVsRede compara SÓ o que entrou no `codigo` — a fonte e 
     'o cacheVsRede voltou a comparar o que o coletor pula de propósito');
 });
 
+// ── A ORIGEM FORA DO AR (auditoria de 2026-10-01, R5-4-3) ─────────────────────
+// Com a origem fora, quem responde à releitura `?diag-rede` é a BORDA, com a
+// página de erro dela (502, ~50 bytes). O `comparar` fazia o hash dela como se
+// fosse o arquivo do servidor e todo arquivo saía "diferente": a triagem dizia
+// "o aparelho roda código diferente do servidor" justo no caso em que o app
+// instalado abre da cópia guardada. Aqui roda o `comparar` DE VERDADE (fatiado
+// do `diagCorpo`), com uma rede de mentira.
+test('código: a resposta que não é OK (a página de erro da borda, um 404) fica "sem conferir", com o status — não "diferente"', async () => {
+  const semCom = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const ini = semCom.indexOf('const comparar = async (u) => {');
+  assert.ok(ini > 0, 'sumiu o `comparar` do cacheVsRede');
+  let prof = 0, fim = -1;
+  for (let k = semCom.indexOf('{', semCom.indexOf('=>', ini)); k < semCom.length; k++) {
+    if (semCom[k] === '{') prof++;
+    else if (semCom[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  const fonte = semCom.slice(semCom.indexOf('async (u)', ini), fim);
+  const U = 'https://x.dev/js/min/version.js';
+  const LOCAL = 'const APP_VERSION="2026100101";';
+  let lidos = 0;
+  const resposta = (status, corpo) => ({ ok: status >= 200 && status < 300, status, text: async () => { lidos++; return corpo; } });
+  const comparar = (r) => new Function('codigo', 'diagFetch', 'diagSemInjecaoDaBorda', 'diagFalhaDaLeitura', 'hash', 'prazo',
+    `return ${fonte};`)({ [U]: { corpo: LOCAL } }, async () => r, (t) => t, (e) => ({ erro: String(e && e.message) }),
+    async (t) => 'h' + t.length + ':' + t, Infinity);
+  const borda = await comparar(resposta(502, '<html><body><h1>502 Bad Gateway</h1></body></html>'))(U);
+  assert.deepEqual(borda, { erro: 'http 502', http: 502 }, 'a página de erro da borda foi comparada como se fosse o arquivo do servidor');
+  assert.equal(lidos, 0, 'o corpo da página de erro foi lido (e comparado) à toa');
+  assert.deepEqual(await comparar(resposta(404, 'Not Found'))(U), { erro: 'http 404', http: 404 });
+  // CONTROLES: com o servidor de pé, o mesmo arquivo é igual e outro é diferente.
+  const igual = await comparar(resposta(200, LOCAL))(U);
+  assert.equal(igual.igual, true, 'CONTROLE: o arquivo igual deixou de ser igual');
+  assert.equal(igual.http, 200);
+  const outro = await comparar(resposta(200, 'const APP_VERSION="2026093001";'))(U);
+  assert.equal(outro.igual, false, 'CONTROLE: o arquivo diferente deixou de ser diferente');
+});
+
 test('desligar o modo dev e "Sair" levam o CORPO das chamadas (texto de conversa), não só a resposta', () => {
   // Auditoria de 2026-09-25: com o dev ligado o `corpoReq` leva o texto da
   // conversa; ele sobrevivia ao desligar e ao "Sair", e ia no relatório de quem
